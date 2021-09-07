@@ -118,12 +118,6 @@ void validateGraph(
     const std::shared_ptr<Graph>& graph,
     onnx_torch::OperatorExportTypes operator_export_type) {
   validateBlock(graph->block(), operator_export_type);
-  // this is run on an onnx graph which doesn't have side effects.
-  // ignore side effects in dead code elimination.
-  EliminateDeadCode(
-      graph->block(),
-      true,
-      DCESideEffectPolicy::ALLOW_DELETING_NODES_WITH_SIDE_EFFECTS);
 }
 
 std::string GetFileRootPath(const std::string& rootPath) {
@@ -683,7 +677,7 @@ void GraphEncoder::AddInitializersIntoGraphProto(
   }
 }
 
-unsigned long long int EncoderBase::GetGraphProtoSize(
+unsigned long long int GraphEncoder::GetGraphProtoSize(
     onnx::GraphProto* graph_proto,
     const std::shared_ptr<Graph>& graph,
     const std::map<std::string, at::Tensor>& initializers) {

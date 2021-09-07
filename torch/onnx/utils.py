@@ -753,6 +753,7 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
             if custom_opsets is None:
                 custom_opsets = {}
 
+            torch._C._jit_pass_dce_allow_deleting_nodes_with_side_effects(graph)
             val_attr_to_name = {}  # type: ignore[var-annotated]
             node_attr_to_name = {}  # type: ignore[var-annotated]
             if export_modules_as_functions is not None:

@@ -614,6 +614,61 @@ class TestUtilityFuns(TestCase):
         # verify that the model state is preserved
         assert model.training == old_state
 
+    def test_local_function(self):
+        class N(torch.nn.Module):
+            def __init__(self, prob):
+                super().__init__()
+                self.dropout = torch.nn.Dropout(prob)
+
+            def forward(self, x):
+                return self.dropout(x)
+
+        class M(torch.nn.Module):
+            def __init__(self, num_layers):
+                super().__init__()
+                self.num_layers = num_layers
+                self.lns = torch.nn.ModuleList([torch.nn.LayerNorm(3, eps = i) for i in range(num_layers)])
+                self.celu1 = torch.nn.CELU(1.0)
+                self.celu2 = torch.nn.CELU(2.0)
+                self.dropout = N(0.5)
+
+            def forward(self, x: torch.Tensor, y: torch.Tensor, z: torch.Tensor) -> torch.Tensor:
+                res1 = self.celu1(x)
+                res2 = self.celu2(y)
+                for ln in self.lns:
+                    z = ln(z)
+                return res1 + res2, self.dropout(z)
+
+        x = torch.randn(2, 3)
+        y = torch.randn(2, 3)
+        z = torch.randn(2, 3)
+
+        f = io.BytesIO()
+        torch.onnx.export(M(3), (x, y, z), f, opset_version=self.opset_version,
+                          export_modules_as_functions=[torch.nn.CELU, torch.nn.Dropout, torch.nn.LayerNorm])
+
+        onnx_model = onnx.load(io.BytesIO(f.getvalue()))
+
+        # Check function definition
+        funcs = onnx_model.functions
+        assert funcs[0].name == "CELU"
+        assert funcs[0].domain == "torch.nn.modules.activation"
+        assert len(funcs[0].attribute) == 1
+        assert funcs[1].name == "LayerNorm"
+        assert funcs[1].domain == "torch.nn.modules.normalization"
+        assert len(funcs[1].attribute) == 1
+
+        # Check local function nodes
+        nodes = onnx_model.graph.node
+        celu_ns = [n for n in nodes if n.op_type == 'CELU']
+        ln_ns = [n for n in nodes if n.op_type == 'LayerNorm']
+        assert len(celu_ns) == 2
+        assert celu_ns[0].domain == 'torch.nn.modules.activation'
+        assert len(celu_ns[0].attribute) == 1
+        assert len(ln_ns) == 3
+        assert ln_ns[0].domain == 'torch.nn.modules.normalization'
+        assert len(ln_ns[0].attribute) == 1
+
     def test_diagnose_export_mode(self):
         class MyModule(torch.nn.Module):
             def forward(self, x):
