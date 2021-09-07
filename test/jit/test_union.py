@@ -760,13 +760,13 @@ class TestUnion(JitTestCase):
 
         self._assert_raises(template, "Union[List[torch.Tensor], int]",
                             lhs["list_literal_of_str"],
-                            "List type annotation `List\[Tensor\]` did "
+                            "List type annotation `List[Tensor]` did "
                             "not match the types of the given list "
                             "elements")
 
         self._assert_raises(template, "Union[List[torch.Tensor], int]",
                             lhs["list_literal_of_mixed"],
-                            "List type annotation `List\[Tensor\]` did "
+                            "List type annotation `List[Tensor]` did "
                             "not match the types of the given list "
                             "elements")
 
@@ -777,7 +777,7 @@ class TestUnion(JitTestCase):
         self._assert_raises(template,
                             "Union[List[torch.Tensor], int]",
                             lhs["list_comprehension_of_str"],
-                            "List type annotation `List\[Tensor\]` did "
+                            "List type annotation `List[Tensor]` did "
                             "not match the types of the given list "
                             "elements")
 
@@ -819,8 +819,8 @@ class TestUnion(JitTestCase):
                "{x : torch.add(y, 1) for x, y in \
                     zip([\"foo\", \"bar\"], [torch.arange(3), 2])}",
 
-                "dict_keyword" :
-                "dict(foo=torch.arange(3), baz=torch.arange(5))"}
+               "dict_keyword" :
+               "dict(foo=torch.arange(3), baz=torch.arange(5))"}
 
         """
         Union[Dict[str, torch.Tensor], Dict[str, int]]
@@ -846,13 +846,13 @@ class TestUnion(JitTestCase):
 
         # TODO: String frontend does not support tuple unpacking
         # https://github.com/pytorch/pytorch/issues/64096
-        #self._assert_passes(template, "Union[Dict[str, torch.Tensor], Dict[str, int]]",
+        # self._assert_passes(template, "Union[Dict[str, torch.Tensor], Dict[str, int]]",
         #              lhs["dict_comprehension_of_str_tensor"])
 
-        #self._assert_passes(template, "Union[Dict[str, torch.Tensor], Dict[str, int]]",
+        # self._assert_passes(template, "Union[Dict[str, torch.Tensor], Dict[str, int]]",
         #              lhs["dict_comprehension_of_str_int"])
 
-        #self._assert_raises(template, "Union[Dict[str, torch.Tensor], Dict[str, int]]",
+        # self._assert_raises(template, "Union[Dict[str, torch.Tensor], Dict[str, int]]",
         #              lhs["dict_comprehension_of_mixed"],
         #              "foobar")
 
@@ -876,7 +876,7 @@ class TestUnion(JitTestCase):
                             "an inner Dict type")
 
         # See above--string frontend does not support tuple unpacking
-        #self._assert_raises(template, "Union[int, torch.Tensor]",
+        # self._assert_raises(template, "Union[int, torch.Tensor]",
         #              lhs["dict_comprehension_of_tensor"],
         #              "foobar")
 
@@ -894,28 +894,28 @@ class TestUnion(JitTestCase):
         self._assert_raises(template,
                             "Union[Dict[str, torch.Tensor], int]",
                             lhs["dict_literal_of_str_int"],
-                            "Type hint for dict was Dict\[str, Tensor\]"
+                            "Type hint for dict was Dict[str, Tensor]"
                             ", but the value at index 0 has type int, "
                             "which is not a valid subtype of Tensor")
 
         self._assert_raises(template,
                             "Union[Dict[str, torch.Tensor], int]",
                             lhs["dict_literal_of_mixed"],
-                            "Type hint for dict was Dict\[str, Tensor\]"
+                            "Type hint for dict was Dict[str, Tensor]"
                             ", but the value at index 1 has type int, "
                             "which is not a valid subtype of Tensor")
 
         # See above--string frontend does not support tuple unpacking
-        #self._assert_passes(template,
+        # self._assert_passes(template,
         #                    "Union[Dict[str, torch.Tensor], int]",
         #                    lhs["dict_comprehension_of_str_tensor"])
 
-        #self._assert_raises(template,
+        # self._assert_raises(template,
         #                    "Union[Dict[str, torch.Tensor], int]",
         #                    lhs["dict_comprehension_of_str_int"],
         #                    "foobar")
 
-        #self._assert_raises(template,
+        # self._assert_raises(template,
         #                    "Union[Dict[str, torch.Tensor], int]",
         #                    lhs["dict_comprehension_of_mixed"],
         #                    "foobar")

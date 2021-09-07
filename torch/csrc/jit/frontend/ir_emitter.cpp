@@ -1362,8 +1362,7 @@ struct to_ir {
           list_value->setType(type_hint);
         } else {
           throw ErrorReport(lc) << "Expected an annotation of type "
-                                << "List, but got "
-                                << type_hint->repr_str();
+                                << "List, but got " << type_hint->repr_str();
         }
       }
     }
@@ -1389,7 +1388,9 @@ struct to_ir {
       }
 
       const auto elem_type_hint =
-          type_hint && type_hint->kind() == ListType::Kind ? type_hint->cast<ListType>()->getElementType() : nullptr;
+          type_hint && type_hint->kind() == ListType::Kind
+          ? type_hint->cast<ListType>()->getElementType()
+          : nullptr;
 
       c10::optional<TypePtr> unified_elem_type = unifyTypes(
           list_value->type()->expect<ListType>()->getElementType(),
@@ -1401,18 +1402,23 @@ struct to_ir {
         TORCH_WARN(
             "List consists of heterogeneous types, which means",
             " that it has been typed as containing ",
-            (*unified_elem_type)->repr_str(), ". To use any of the "
+            (*unified_elem_type)->repr_str(),
+            ". To use any of the "
             "values in this List, it will be necessary to add an "
             "`assert isinstance` statement before first use to trigger "
             "type refinement. The first non-matching element was typed",
-            " as ", out->type()->repr_str(), ", while the elements "
+            " as ",
+            out->type()->repr_str(),
+            ", while the elements "
             " before it were ",
             type_hint->expect<ListType>()->getElementType()->repr_str(),
             "\n",
             lc.range().str());
       }
 
-      if (all_candidates.empty() && type_hint && !(*unified_elem_type)->isSubtypeOf(type_hint->expect<ListType>()->getElementType())) {
+      if (all_candidates.empty() && type_hint &&
+          !(*unified_elem_type)
+               ->isSubtypeOf(type_hint->expect<ListType>()->getElementType())) {
         throw ErrorReport(lc)
             << "List type annotation `" << type_hint->repr_str()
             << "` did not match the types of the given list elements,"
@@ -1421,29 +1427,33 @@ struct to_ir {
 
       if (!all_candidates.empty()) {
         TypePtr greatest_elem_type = nullptr;
-        std::for_each(all_candidates.begin(), all_candidates.end(),
-                      [&](TypePtr candidate) {
-                        auto candidate_elem_type = candidate->expect<ListType>()->getElementType();
-                        if ((*unified_elem_type)->isSubtypeOf(candidate_elem_type)) {
-                          if (!greatest_elem_type) {
-                            greatest_elem_type = candidate_elem_type;
-                          } else {
-                            greatest_elem_type = *(unifyTypes(greatest_elem_type, candidate_elem_type));
-                          }
-                        }
-        });
+        std::for_each(
+            all_candidates.begin(),
+            all_candidates.end(),
+            [&](TypePtr candidate) {
+              auto candidate_elem_type =
+                  candidate->expect<ListType>()->getElementType();
+              if ((*unified_elem_type)->isSubtypeOf(candidate_elem_type)) {
+                if (!greatest_elem_type) {
+                  greatest_elem_type = candidate_elem_type;
+                } else {
+                  greatest_elem_type =
+                      *(unifyTypes(greatest_elem_type, candidate_elem_type));
+                }
+              }
+            });
         if (!greatest_elem_type) {
-            std::stringstream vector_repr;
-            for (size_t i = 0; i < all_candidates.size(); ++i) {
-              if (i > 0 && all_candidates.size() > 2) {
-                vector_repr << ", ";
-              }
-              if (i != 0 && i == all_candidates.size() - 1) {
-                vector_repr << " or ";
-              }
-              vector_repr << all_candidates[i]->repr_str();
+          std::stringstream vector_repr;
+          for (size_t i = 0; i < all_candidates.size(); ++i) {
+            if (i > 0 && all_candidates.size() > 2) {
+              vector_repr << ", ";
             }
-            throw ErrorReport(lc)
+            if (i != 0 && i == all_candidates.size() - 1) {
+              vector_repr << " or ";
+            }
+            vector_repr << all_candidates[i]->repr_str();
+          }
+          throw ErrorReport(lc)
               << "Union type annotation `" << type_hint->repr_str()
               << "` can hold " << vector_repr.str() << ", but none of "
               << "those types match the types of the given list "
@@ -1479,7 +1489,7 @@ struct to_ir {
     dict_value->setType(DictType::create(StringType::get(), TensorType::get()));
 
     TypePtr annotated_union_type =
-    type_hint && type_hint->kind() == UnionType::Kind ? type_hint : nullptr;
+        type_hint && type_hint->kind() == UnionType::Kind ? type_hint : nullptr;
 
     std::vector<TypePtr> all_candidates = {};
 
@@ -1508,14 +1518,12 @@ struct to_ir {
         type_hint = optional_type_hint->getElementType();
       }
 
-
       if (all_candidates.empty()) {
         if (type_hint->kind() == DictType::Kind) {
           dict_value->setType(type_hint);
         } else {
           throw ErrorReport(dc) << "Expected an annotation of type "
-                                << "Dict, but got "
-                                << type_hint->repr_str();
+                                << "Dict, but got " << type_hint->repr_str();
         }
       }
     }
@@ -1546,7 +1554,7 @@ struct to_ir {
         // Values can be heterogenous, so we only need to check that the
         // key types are all the same
         if (first_generated_key_type != k->type()) {
-           throw ErrorReport(dc)
+          throw ErrorReport(dc)
               << "Dicts may only contain homogeneous keys. Expected "
               << "dict comprehension to generate type "
               << first_generated_key_type->repr_str() << ", but got "
@@ -1591,8 +1599,9 @@ struct to_ir {
       }
 
       const TypePtr value_type_hint =
-          type_hint && type_hint->kind() == DictType::Kind ?
-          type_hint->expect<DictType>()->getValueType() : nullptr;
+          type_hint && type_hint->kind() == DictType::Kind
+          ? type_hint->expect<DictType>()->getValueType()
+          : nullptr;
 
       c10::optional<TypePtr> unified_value_type = unifyTypes(
           first_generated_value_type,
@@ -1604,11 +1613,14 @@ struct to_ir {
         TORCH_WARN(
             "Dict values consist of heterogeneous types, which means",
             " that they have been typed as being ",
-            (*unified_value_type)->repr_str(), ". To use any of the "
+            (*unified_value_type)->repr_str(),
+            ". To use any of the "
             "values in this dict, it will be necessary to add an "
             "`assert isinstance` statement before first use to trigger "
             "type refinement. The first non-matching element was typed",
-            " as ", v->type()->repr_str(), ", while the elements "
+            " as ",
+            v->type()->repr_str(),
+            ", while the elements "
             " before it were ",
             first_generated_value_type->repr_str(),
             "\n",
@@ -1624,10 +1636,15 @@ struct to_ir {
         TypePtr candidate = nullptr;
 
         for (const auto& current_candidate : all_candidates) {
-          auto current_key_type = current_candidate->expect<DictType>()->getKeyType();
-          auto current_value_type = current_candidate->expect<DictType>()->getValueType();
-          if (known_key_type->isSubtypeOf(current_key_type) && known_value_type->isSubtypeOf(current_value_type)) {
-            if (!candidate || (candidate_key_type->isSubtypeOf(current_key_type) && candidate_value_type->isSubtypeOf(current_value_type))) {
+          auto current_key_type =
+              current_candidate->expect<DictType>()->getKeyType();
+          auto current_value_type =
+              current_candidate->expect<DictType>()->getValueType();
+          if (known_key_type->isSubtypeOf(current_key_type) &&
+              known_value_type->isSubtypeOf(current_value_type)) {
+            if (!candidate ||
+                (candidate_key_type->isSubtypeOf(current_key_type) &&
+                 candidate_value_type->isSubtypeOf(current_value_type))) {
               candidate_key_type = current_key_type;
               candidate_value_type = current_value_type;
               candidate = current_candidate;
@@ -1636,22 +1653,21 @@ struct to_ir {
         }
 
         if (!candidate) {
-            std::stringstream vector_repr;
-            for (size_t i = 0; i < all_candidates.size(); ++i) {
-              if (i > 0 && all_candidates.size() > 2) {
-                vector_repr << ", ";
-              }
-              if (i != 0 && i == all_candidates.size() - 1) {
-                vector_repr << " or ";
-              }
-              vector_repr << all_candidates[i]->repr_str();
+          std::stringstream vector_repr;
+          for (size_t i = 0; i < all_candidates.size(); ++i) {
+            if (i > 0 && all_candidates.size() > 2) {
+              vector_repr << ", ";
             }
-            throw ErrorReport(dc)
+            if (i != 0 && i == all_candidates.size() - 1) {
+              vector_repr << " or ";
+            }
+            vector_repr << all_candidates[i]->repr_str();
+          }
+          throw ErrorReport(dc)
               << "Union type annotation `" << type_hint->repr_str()
               << "` can hold " << vector_repr.str() << ", but none of "
               << "those list types can hold the types of the given dict"
-              << " elements, which were unified to "
-              << candidate->repr_str();
+              << " elements, which were unified to " << candidate->repr_str();
         } else {
           type_hint = candidate;
         }
@@ -1673,8 +1689,8 @@ struct to_ir {
     popFrame();
 
     if (annotated_union_type) {
-      Node* n = graph->insertNode(
-          graph->create(prim::unchecked_cast, {dict_value}));
+      Node* n =
+          graph->insertNode(graph->create(prim::unchecked_cast, {dict_value}));
       n->output()->setType(std::move(annotated_union_type));
       dict_value = n->output();
     }
@@ -4017,7 +4033,6 @@ struct to_ir {
         type_hint = optional_type_hint->getElementType();
       }
 
-
       // If we had any annotation OTHER THAN a Union that can hold more
       // than one type of List
       if (all_candidates.empty()) {
@@ -4026,8 +4041,7 @@ struct to_ir {
           inferred_elem_type = list_type_hint->getElementType();
         } else {
           throw ErrorReport(ll) << "Expected an annotation of type "
-                                << "List, but got "
-                                << type_hint->repr_str();
+                                << "List, but got " << type_hint->repr_str();
         }
       }
     }
@@ -4041,7 +4055,9 @@ struct to_ir {
       // `unifyTypeList` because there's a chance that `elem_type` is
       // the Tensor default
       const auto elem_type_hint =
-          type_hint && type_hint->kind() == ListType::Kind ? type_hint->cast<ListType>()->getElementType() : nullptr;
+          type_hint && type_hint->kind() == ListType::Kind
+          ? type_hint->cast<ListType>()->getElementType()
+          : nullptr;
 
       c10::optional<TypePtr> unified_elem_type = unifyTypeList(
           types, nowhere, /*default_to_union=*/true, elem_type_hint);
@@ -4050,14 +4066,16 @@ struct to_ir {
         TORCH_WARN(
             "List consists of heterogeneous types, which means",
             " that it has been typed as containing ",
-            (*unified_elem_type)->repr_str(), ". To use any of the "
+            (*unified_elem_type)->repr_str(),
+            ". To use any of the "
             "values in this List, it will be necessary to add an "
             "`assert isinstance` statement before first use to trigger "
             "type refinement.\n",
             ll.range().str());
       }
 
-      if (all_candidates.empty() && type_hint && !(*unified_elem_type)->isSubtypeOf(inferred_elem_type)) {
+      if (all_candidates.empty() && type_hint &&
+          !(*unified_elem_type)->isSubtypeOf(inferred_elem_type)) {
         throw ErrorReport(ll)
             << "List type annotation `" << type_hint->repr_str()
             << "` did not match the types of the given list elements,"
@@ -4066,29 +4084,33 @@ struct to_ir {
 
       if (!all_candidates.empty()) {
         TypePtr greatest_elem_type = nullptr;
-        std::for_each(all_candidates.begin(), all_candidates.end(),
-                      [&](TypePtr candidate) {
-                        auto candidate_elem_type = candidate->expect<ListType>()->getElementType();
-                        if ((*unified_elem_type)->isSubtypeOf(candidate_elem_type)) {
-                          if (!greatest_elem_type) {
-                            greatest_elem_type = candidate_elem_type;
-                          } else {
-                            greatest_elem_type = *(unifyTypes(greatest_elem_type, candidate_elem_type));
-                          }
-                        }
-        });
+        std::for_each(
+            all_candidates.begin(),
+            all_candidates.end(),
+            [&](TypePtr candidate) {
+              auto candidate_elem_type =
+                  candidate->expect<ListType>()->getElementType();
+              if ((*unified_elem_type)->isSubtypeOf(candidate_elem_type)) {
+                if (!greatest_elem_type) {
+                  greatest_elem_type = candidate_elem_type;
+                } else {
+                  greatest_elem_type =
+                      *(unifyTypes(greatest_elem_type, candidate_elem_type));
+                }
+              }
+            });
         if (!greatest_elem_type) {
-            std::stringstream vector_repr;
-            for (size_t i = 0; i < all_candidates.size(); ++i) {
-              if (i > 0 && all_candidates.size() > 2) {
-                vector_repr << ", ";
-              }
-              if (i != 0 && i == all_candidates.size() - 1) {
-                vector_repr << " or ";
-              }
-              vector_repr << all_candidates[i]->repr_str();
+          std::stringstream vector_repr;
+          for (size_t i = 0; i < all_candidates.size(); ++i) {
+            if (i > 0 && all_candidates.size() > 2) {
+              vector_repr << ", ";
             }
-            throw ErrorReport(ll)
+            if (i != 0 && i == all_candidates.size() - 1) {
+              vector_repr << " or ";
+            }
+            vector_repr << all_candidates[i]->repr_str();
+          }
+          throw ErrorReport(ll)
               << "Union type annotation `" << type_hint->repr_str()
               << "` can hold " << vector_repr.str() << ", but none of "
               << "those list types can hold the types of the given list"
@@ -4108,7 +4130,8 @@ struct to_ir {
       }
     }
 
-    Node* result = graph->insertNode(graph->createList(inferred_elem_type, values));
+    Node* result =
+        graph->insertNode(graph->createList(inferred_elem_type, values));
     if (annotated_union_type) {
       Node* n = graph->insertNode(
           graph->create(prim::unchecked_cast, {result->output()}));
@@ -4246,20 +4269,20 @@ struct to_ir {
             } else if (dict_types.size() > 1) {
               if (values.empty()) {
                 throw ErrorReport(dl)
-                  << "Cannot assign an empty dict to a "
-                  << "variable annotated to be type " << type_hint->repr_str()
-                  << " because there are multiple possible Dict "
-                  << "type candidates in the Union annotation";
-              }  else {
+                    << "Cannot assign an empty dict to a "
+                    << "variable annotated to be type " << type_hint->repr_str()
+                    << " because there are multiple possible Dict "
+                    << "type candidates in the Union annotation";
+              } else {
                 all_candidates = std::move(dict_types);
               }
             } else {
               type_hint = dict_types[0];
             }
-          } else if (auto optional_type_hint = type_hint->cast<OptionalType>()) {
+          } else if (
+              auto optional_type_hint = type_hint->cast<OptionalType>()) {
             type_hint = optional_type_hint->getElementType();
           }
-
 
           if (all_candidates.empty()) {
             if (auto dict_type_hint = type_hint->cast<DictType>()) {
@@ -4267,8 +4290,9 @@ struct to_ir {
               key_type = dict_type->getKeyType();
               value_type = dict_type->getValueType();
             } else {
-              throw ErrorReport(dl) << "Expected an annotation of type "
-                                    << "Dict, but got " << type_hint->repr_str();
+              throw ErrorReport(dl)
+                  << "Expected an annotation of type "
+                  << "Dict, but got " << type_hint->repr_str();
             }
           }
         } else if (keys.empty()) {
@@ -4279,7 +4303,9 @@ struct to_ir {
           value_type = values.at(0)->type();
         }
 
-        AT_ASSERT(!all_candidates.empty() || (key_type != nullptr && value_type != nullptr));
+        AT_ASSERT(
+            !all_candidates.empty() ||
+            (key_type != nullptr && value_type != nullptr));
 
         if (!keys.empty()) {
           auto key_types = fmap(keys, [](const Value* v) { return v->type(); });
@@ -4290,19 +4316,21 @@ struct to_ir {
 
           for (const auto i : c10::irange(keys.size())) {
             std::stringstream ss;
-            if (!keys[i]->type()->isSubtypeOfExt(first_key_type, &ss)
-                && !first_key_type->isSubtypeOfExt(keys[i]->type(), &ss)) {
+            if (!keys[i]->type()->isSubtypeOfExt(first_key_type, &ss) &&
+                !first_key_type->isSubtypeOfExt(keys[i]->type(), &ss)) {
               throw ErrorReport(key_trees[i])
                   << "Dict keys must contain "
-                  << "only a single type. Expected: " << first_key_type->repr_str()
-                  << " but found " << keys[i]->type()->repr_str() << " instead.\n"
+                  << "only a single type. Expected: "
+                  << first_key_type->repr_str() << " but found "
+                  << keys[i]->type()->repr_str() << " instead.\n"
                   << ss.str();
             }
           }
         }
 
         if (!values.empty()) {
-          auto value_types = fmap(values, [](const Value* v) { return v->type(); });
+          auto value_types =
+              fmap(values, [](const Value* v) { return v->type(); });
 
           std::stringstream nowhere; // never used
 
@@ -4321,10 +4349,15 @@ struct to_ir {
             TypePtr candidate = nullptr;
 
             for (const auto& current_candidate : all_candidates) {
-              auto current_key_type = current_candidate->expect<DictType>()->getKeyType();
-              auto current_value_type = current_candidate->expect<DictType>()->getValueType();
-              if (known_key_type->isSubtypeOf(current_key_type) && known_value_type->isSubtypeOf(current_value_type)) {
-                if (!candidate || (candidate_key_type->isSubtypeOf(current_key_type) && candidate_value_type->isSubtypeOf(current_value_type))) {
+              auto current_key_type =
+                  current_candidate->expect<DictType>()->getKeyType();
+              auto current_value_type =
+                  current_candidate->expect<DictType>()->getValueType();
+              if (known_key_type->isSubtypeOf(current_key_type) &&
+                  known_value_type->isSubtypeOf(current_value_type)) {
+                if (!candidate ||
+                    (candidate_key_type->isSubtypeOf(current_key_type) &&
+                     candidate_value_type->isSubtypeOf(current_value_type))) {
                   candidate_key_type = current_key_type;
                   candidate_value_type = current_value_type;
                   candidate = current_candidate;
@@ -4333,17 +4366,17 @@ struct to_ir {
             }
 
             if (!candidate) {
-                std::stringstream vector_repr;
-                for (size_t i = 0; i < all_candidates.size(); ++i) {
-                  if (i > 0 && all_candidates.size() > 2) {
-                    vector_repr << ", ";
-                  }
-                  if (i != 0 && i == all_candidates.size() - 1) {
-                    vector_repr << " or ";
-                  }
-                  vector_repr << all_candidates[i]->repr_str();
+              std::stringstream vector_repr;
+              for (size_t i = 0; i < all_candidates.size(); ++i) {
+                if (i > 0 && all_candidates.size() > 2) {
+                  vector_repr << ", ";
                 }
-                throw ErrorReport(dl)
+                if (i != 0 && i == all_candidates.size() - 1) {
+                  vector_repr << " or ";
+                }
+                vector_repr << all_candidates[i]->repr_str();
+              }
+              throw ErrorReport(dl)
                   << "Union type annotation `" << type_hint->repr_str()
                   << "` can hold " << vector_repr.str() << ", but none of "
                   << "those types can hold the types of the given dict"
