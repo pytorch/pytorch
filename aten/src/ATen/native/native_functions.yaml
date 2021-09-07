@@ -2764,7 +2764,7 @@
   device_check: NoCheck   # TensorIterator
   structured: True
   precomputed:
-    - dim -> int dim
+  - dim -> int dim
   dispatch:
     CPU, CUDA: max_out
 
@@ -2905,7 +2905,7 @@
   device_check: NoCheck   # TensorIterator
   structured: True
   precomputed:
-    - dim -> int dim
+  - dim -> int dim
   dispatch:
     CPU, CUDA: min_out
 
