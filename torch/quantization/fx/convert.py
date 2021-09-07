@@ -36,7 +36,7 @@ from .utils import (
     WEIGHT_INDEX_DICT,
 )
 
-from torch.ao.quantization.quantize import (
+from ..quantize import (
     _remove_qconfig,
     is_activation_post_process,
 )
