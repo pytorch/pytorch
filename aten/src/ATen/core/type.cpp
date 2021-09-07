@@ -990,7 +990,7 @@ UnionType::UnionType(std::vector<TypePtr> reference, TypeKind kind) : Type(kind)
 }
 
 UnionTypePtr UnionType::create(std::vector<TypePtr> reference) {
-  auto union_type = new UnionType(std::move(reference));
+  UnionTypePtr union_type(new UnionType(std::move(reference)));
 
   // Some very special-cased logic for `Optional`. This will be deleted
   // in a later PR
@@ -1029,7 +1029,7 @@ UnionTypePtr UnionType::create(std::vector<TypePtr> reference) {
     }
   }
 
-  return UnionTypePtr(union_type);
+  return union_type;
 }
 
 bool UnionType::operator==(const Type& rhs) const {
