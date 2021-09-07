@@ -1485,7 +1485,7 @@ struct to_ir {
     Value* dict_value =
         graph->insertNode(graph->create(prim::DictConstruct, 1))->output();
 
-    // Set the default type to be Dict[Str, Tensor]
+    // Set the default type to be Dict[str, Tensor]
     dict_value->setType(DictType::create(StringType::get(), TensorType::get()));
 
     TypePtr annotated_union_type =
@@ -1546,20 +1546,23 @@ struct to_ir {
       // be set to `(str, Tensor)`. We don't want to unify this default
       // type with the actual elements in the dict, so let the type
       // begin as the first element in the dict
-      if (!first_generated_key_type) {
+      if (k->type()->kind() == UnionType::Kind) {
+        throw ErrorReport(dc)
+          << "Dicts may only contain homogeneous keys, but the type of "
+          << "the first generated key was "
+          << k->type()->repr_str();
+      } else if (first_generated_key_type && first_generated_key_type != k->type()) {
+        // Values can be heterogenous, so we only need to check that the
+        // key types are all the same
+        throw ErrorReport(dc)
+          << "Dicts may only contain homogeneous keys. Expected "
+          << "dict comprehension to generate type "
+          << first_generated_key_type->repr_str() << ", but got "
+          << k->type()->repr_str();
+      } else {
         dict_value->setType(DictType::create(k->type(), v->type()));
         first_generated_key_type = k->type();
         first_generated_value_type = v->type();
-      } else {
-        // Values can be heterogenous, so we only need to check that the
-        // key types are all the same
-        if (first_generated_key_type != k->type()) {
-          throw ErrorReport(dc)
-              << "Dicts may only contain homogeneous keys. Expected "
-              << "dict comprehension to generate type "
-              << first_generated_key_type->repr_str() << ", but got "
-              << k->type()->repr_str();
-        }
       }
 
       // If we had any annotation OTHER THAN a Union that can hold more
@@ -4289,6 +4292,15 @@ struct to_ir {
               auto dict_type = type_hint->expect<DictType>();
               key_type = dict_type->getKeyType();
               value_type = dict_type->getValueType();
+            } else if (type_hint == AnyType::get()) {
+              // @ansley: Clean up later
+              if (keys.empty()) {
+                key_type = StringType::get();
+                value_type = TensorType::get();
+              } else {
+                key_type = keys.at(0)->type();
+                value_type = values.at(0)->type();
+              }
             } else {
               throw ErrorReport(dl)
                   << "Expected an annotation of type "
