@@ -42,6 +42,7 @@ from torch.testing._internal.common_device_type import (instantiate_device_type_
                                                         onlyCPU, onlyCUDA, onlyOnCPUAndCUDA, dtypes, dtypesIfCUDA,
                                                         deviceCountAtLeast, skipCUDAIfCudnnVersionLessThan,
                                                         skipCUDAIf, skipMeta)
+from torch.testing._internal.common_dtype import get_all_dtypes
 
 import pickle
 
@@ -8474,7 +8475,7 @@ class TestAutogradDeviceType(TestCase):
         # At the time of writing this test, copy_ is not generated from native_functions.yaml
         # there was a bug that bfloat16 was not recognized as floating.
         x = torch.randn(10, device=device, requires_grad=True)
-        floating_dt = [dt for dt in torch.testing.get_all_dtypes() if dt.is_floating_point]
+        floating_dt = [dt for dt in get_all_dtypes() if dt.is_floating_point]
         for dt in floating_dt:
             y = torch.empty(10, device=device, dtype=dt)
             y.copy_(x)

@@ -3,6 +3,12 @@
 #include <ATen/Dispatch.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/ScalarOps.h>
+#include <ATen/Config.h>
+
+#if AT_MKLDNN_ENABLED()
+#include <ATen/native/mkldnn/Utils.h>
+#include <ATen/native/mkldnn/Matmul.h>
+#endif // AT_MKLDNN_ENABLED
 
 namespace at {
 namespace meta {
@@ -62,6 +68,19 @@ TORCH_IMPL_FUNC(addmv_out_cpu)(const Tensor &self, const Tensor &mat, const Tens
       at::native::copy_(const_cast<Tensor&>(result), *self_);
     }
     if (result.numel() != 0) {
+
+#if AT_MKLDNN_ENABLED()
+      NoNamesGuard guard;
+      // mkldnn matmul expect dim >= 2
+      auto vec_ = vec.unsqueeze(1);
+      if (use_mkldnn_bf16_gemm(mat, vec_, /*result=*/Tensor())){
+        mkldnn_matmul(mat, vec_, result.unsqueeze_(1), beta_.to<float>(), alpha_.to<float>());
+        // recover tensor's dim = 1
+        result.squeeze_(1);
+        return;
+      }
+#endif // AT_MKLDNN_ENABLED
+
       auto r_stride = result.stride(0);
       AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kBFloat16, mat.scalar_type(), "addmv_impl_cpu", [&] {
         auto beta = beta_.to<scalar_t>();
@@ -148,7 +167,20 @@ Tensor dot(const Tensor &self, const Tensor &other){
   at::NoNamesGuard guard;
   dot_check(self, other);
 
-  return AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(at::ScalarType::Half, self.scalar_type(), "dot", [&] {
+#if AT_MKLDNN_ENABLED()
+  // mkldnn matmul expect dim >= 2
+  auto self_ = self.unsqueeze(0);
+  auto other_= other.unsqueeze(1);
+  if (use_mkldnn_bf16_gemm(self_, other_, /*result=*/Tensor())){
+    // mkldnn matmul expect result have sizes info to create ideep tensor
+    auto r =  at::empty({1, 1}, self.options());
+    mkldnn_matmul(self_, other_, r, /*beta=*/0);
+    // recovery tensor's dim = 1
+    return r.squeeze_();
+  }
+#endif // AT_MKLDNN_ENABLED
+
+  return AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, self.scalar_type(), "dot", [&] {
     Tensor result = at::empty({}, self.options());
     result.fill_(dot_impl<scalar_t>(self.numel(), self.data_ptr<scalar_t>(), self.stride(0), other.data_ptr<scalar_t>(), other.stride(0)));
     return result;
