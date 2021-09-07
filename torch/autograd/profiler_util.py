@@ -635,12 +635,14 @@ def _filter_stack_entry(entry):
     ]
     return all([not (f[0] in entry and f[1] in entry) for f in filtered_entries])
 
-MEMORY_EVENT_NAME = "[memory]"
+MEMORY_ALLOCATE_EVENT_NAME = "[memory_allocate]"
+MEMORY_FREE_EVENT_NAME = "[memory_free]"
+
 
 def _filter_name(name):
     # ignoring the following utility ops
     filtered_out_names = [
-        MEMORY_EVENT_NAME,  # used only for the top-level memory events
+        MEMORY_ALLOCATE_EVENT_NAME, MEMORY_FREE_EVENT_NAME,  # used only for the top-level memory events
         "profiler::_record_function_enter",
         "profiler::_record_function_exit",
         "aten::is_leaf",
