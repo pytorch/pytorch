@@ -217,8 +217,8 @@ int extendFrozenModules(
   }
   if (frozentensorrt) {
     for (d = 0; frozentensorrt[d].name != nullptr; d++) {
-      // std::cout << "oldfrozen[" << c << "]: " <<
-      // PyImport_FrozenModules[c].name
+      // std::cout << "oldfrozen[" << d << "]: " <<
+      // PyImport_FrozenModules[d].name
       // << std::endl;
     }
   }
