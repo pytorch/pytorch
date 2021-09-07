@@ -1,7 +1,6 @@
 import unittest
 import onnxruntime
 import torch
-import torchvision
 
 import numpy as np
 import io
@@ -9,9 +8,6 @@ import itertools
 import copy
 import os
 import random
-
-import model_defs.word_language_model as word_language_model
-import onnx
 
 from torch.nn.utils import rnn as rnn_utils
 from model_defs.lstm_flattening_result import (LstmFlatteningResultWithSeqLength,
@@ -26,7 +22,11 @@ from test_pytorch_common import BATCH_SIZE
 from test_pytorch_common import RNN_BATCH_SIZE, RNN_SEQUENCE_LENGTH, RNN_INPUT_SIZE, RNN_HIDDEN_SIZE
 from typing import List, Tuple, Optional, Dict
 from torch import Tensor
+import model_defs.word_language_model as word_language_model
 
+import onnx
+
+import torchvision
 from torchvision import ops
 from torchvision.models.detection.image_list import ImageList
 from torchvision.models.detection.transform import GeneralizedRCNNTransform
@@ -36,8 +36,6 @@ from torchvision.models.detection.faster_rcnn import FastRCNNPredictor, TwoMLPHe
 from collections import OrderedDict
 
 from torch.nn.utils.rnn import PackedSequence
-from torch.onnx import register_custom_op_symbolic, unregister_custom_op_symbolic
-from torch.onnx.utils import ONNXCheckerError
 
 def to_numpy(tensor):
     if tensor.requires_grad:
@@ -1508,7 +1506,7 @@ class TestONNXRuntime(unittest.TestCase):
 
         class Min(torch.nn.Module):
             def forward(self, x):
-                boxes = [x, x, x]
+                boxes = [x for _ in range(3)]
                 return list_append(boxes)
 
         x = torch.rand(5, 5)
@@ -8058,7 +8056,7 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.randn(32, 3)
         f = io.BytesIO()
-        torch.onnx._export(test_model, (x,), f, do_constant_folding=False)
+        torch.onnx._export(test_model, (x,), f, _retain_param_name=True, do_constant_folding=False)
         loaded_model = onnx.load_from_string(f.getvalue())
 
         actual_list = [p.name for p in loaded_model.graph.initializer]
@@ -8108,7 +8106,7 @@ class TestONNXRuntime(unittest.TestCase):
         example_output = (test_model(x, y),)
         f = io.BytesIO()
 
-        torch.onnx.export(test_model, (x, y), f, example_outputs=example_output, do_constant_folding=False)
+        torch.onnx.export(test_model, (x, y), f, example_outputs=example_output, _retain_param_name=True, do_constant_folding=False)
         loaded_model = onnx.load_from_string(f.getvalue())
 
         actual_list = [p.name for p in loaded_model.graph.initializer]
@@ -9610,31 +9608,6 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.randn(10, 5)
         self.run_test(M(), (x,))
-
-    def test_onnx_checker_invalid_graph(self):
-        class CustomAddModule(torch.nn.Module):
-            def forward(self, x, y):
-                return torch.add(x, y)
-
-        def symbolic_custom_invalid_add(g, input, other, alpha=None):
-            return g.op("Add", input, other, invalid_attr_i=1)
-
-        register_custom_op_symbolic("::add", symbolic_custom_invalid_add, 1)
-
-        x = torch.randn(2, 3, 4)
-        y = torch.randn(2, 3, 4)
-
-        test_model = CustomAddModule()
-        f = io.BytesIO()
-
-        try:
-            with self.assertRaises(ONNXCheckerError) as cm:
-                torch.onnx.export(test_model, (x, y), f)
-        finally:
-            unregister_custom_op_symbolic("::add", 1)
-
-        self.assertTrue(f.getvalue(), "ONNX graph was not exported.")
-        loaded_model = onnx.load_from_string(f.getvalue())
 
 
     def test_tuple_output_from_if_with_raised_exception(self):
