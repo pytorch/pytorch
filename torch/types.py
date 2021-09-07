@@ -35,6 +35,7 @@ Device = Union[_device, str, None]
 class Storage(object):
     _cdata: int
     device: torch.device
+    dtype: torch.dtype
     _torch_load_uninitialized: bool
 
     def __deepcopy__(self, memo) -> 'Storage':

@@ -1113,7 +1113,10 @@ static PyObject* THPVariable_set_(
         pybind11::gil_scoped_release no_gil;
         return self.set_(source);
       };
-      return wrap(dispatch_set_(self, _r.storage(0)));
+      at::ScalarType storage_scalar_type;
+      at::Storage storage = _r.storage(0, &storage_scalar_type);
+      TORCH_INTERNAL_ASSERT(storage_scalar_type == self.dtype() || storage_scalar_type == at::kByte);
+      return wrap(dispatch_set_(self, storage));
     }
     case 2: {
       // aten::set_.source_Storage_storage_offset(Tensor(a!) self, Storage
@@ -1126,8 +1129,11 @@ static PyObject* THPVariable_set_(
         pybind11::gil_scoped_release no_gil;
         return self.set_(source, storage_offset, size, stride);
       };
+      at::ScalarType storage_scalar_type;
+      at::Storage storage = _r.storage(0, &storage_scalar_type);
+      TORCH_INTERNAL_ASSERT(storage_scalar_type == self.dtype() || storage_scalar_type == at::kByte);
       return wrap(dispatch_set_(
-          self, _r.storage(0), _r.toInt64(1), _r.intlist(2), _r.intlist(3)));
+          self, storage, _r.toInt64(1), _r.intlist(2), _r.intlist(3)));
     }
     case 3: {
       // aten::set_.source_Tensor(Tensor(a!) self, Tensor source) -> Tensor(a!)
@@ -1216,7 +1222,7 @@ PyMethodDef variable_methods[] = {
   {"numel", THPVariable_numel, METH_NOARGS, NULL},
   {"numpy", THPVariable_numpy, METH_NOARGS, NULL},
   {"requires_grad_", castPyCFunctionWithKeywords(THPVariable_requires_grad_), METH_VARARGS | METH_KEYWORDS, NULL},
-  {"_set_", castPyCFunctionWithKeywords(THPVariable_set_), METH_VARARGS | METH_KEYWORDS, NULL},
+  {"set_", castPyCFunctionWithKeywords(THPVariable_set_), METH_VARARGS | METH_KEYWORDS, NULL},
   {"short", castPyCFunctionWithKeywords(THPVariable_short), METH_VARARGS | METH_KEYWORDS, NULL},
   {"size", castPyCFunctionWithKeywords(THPVariable_size), METH_VARARGS | METH_KEYWORDS, NULL},
   {"_storage", THPVariable_storage, METH_NOARGS, NULL},

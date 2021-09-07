@@ -121,18 +121,19 @@ PyObject* createPyObject(
   return obj.release();
 }
 
-PyTypeObject* getTypedStorageTypeObject() {
-  static PyTypeObject* typed_storage_type_obj = nullptr;
-  if (typed_storage_type_obj == nullptr) {
-    PyObject* storage_module = PyImport_ImportModule("torch.storage");
-    TORCH_INTERNAL_ASSERT(storage_module && PyModule_Check(storage_module));
+PyTypeObject* loadTypedStorageTypeObject() {
+  PyObject* storage_module = PyImport_ImportModule("torch.storage");
+  TORCH_INTERNAL_ASSERT(storage_module && PyModule_Check(storage_module));
 
-    PyObject* typed_storage_obj = PyObject_GetAttrString(storage_module, "TypedStorage");
-    TORCH_INTERNAL_ASSERT(typed_storage_obj && PyType_Check(typed_storage_obj));
-    typed_storage_type_obj = reinterpret_cast<PyTypeObject*>(
-        PyObject_GetAttrString(storage_module, "TypedStorage"));
-  }
-  return typed_storage_type_obj;
+  PyObject* typed_storage_obj = PyObject_GetAttrString(storage_module, "TypedStorage");
+  TORCH_INTERNAL_ASSERT(typed_storage_obj && PyType_Check(typed_storage_obj));
+  return reinterpret_cast<PyTypeObject*>(
+      PyObject_GetAttrString(storage_module, "TypedStorage"));
+}
+
+PyTypeObject* getTypedStorageTypeObject() {
+  static const PyTypeObject* typed_storage_type_obj = loadTypedStorageTypeObject();
+  return const_cast<PyTypeObject*>(typed_storage_type_obj);
 }
 
 bool isStorage(PyObject* obj)

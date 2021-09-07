@@ -111,47 +111,6 @@ class Tensor(torch._C._TensorBase):
         func, args = self._reduce_ex_internal(proto)
         return (_rebuild_from_type, (func, type(self), args, self.__dict__))
 
-    def set_(self, *args, **kwargs):
-        r"""
-        set_(source=None, storage_offset=0, size=None, stride=None) -> Tensor
-
-        Sets the underlying storage, size, and strides. If :attr:`source` is a tensor,
-        :attr:`self` tensor will share the same storage and have the same size and
-        strides as :attr:`source`. Changes to elements in one tensor will be reflected
-        in the other.
-
-        If :attr:`source` is a :class:`~torch.Storage`, the method sets the underlying
-        storage, offset, size, and stride.
-
-        Args:
-            source (Tensor or Storage): the tensor or storage to use
-            storage_offset (int, optional): the offset in the storage
-            size (torch.Size, optional): the desired size. Defaults to the size of the source.
-            stride (tuple, optional): the desired stride. Defaults to C-contiguous strides.
-        """
-        if has_torch_function_unary(self):
-            return handle_torch_function(Tensor.storage, (self,), self, *args, **kwargs)
-
-        if len(args) >= 1 and isinstance(args[0], torch.storage.TypedStorage):
-            storage = args[0]
-            if storage.dtype != self.dtype:
-                raise RuntimeError((
-                    'Expected either ByteStorage or storage with dtype '
-                    f'{self.dtype}, but got {storage.dtype} instead'))
-
-            return self._set_(storage._untyped(), *args[1:], **kwargs)
-
-        elif 'source' in kwargs and isinstance(kwargs['source'], torch.storage.TypedStorage):
-            storage = kwargs['source']
-            if storage.dtype != self.dtype:
-                raise RuntimeError((
-                    'Expected either ByteStorage or storage with dtype '
-                    f'{self.dtype}, but got {storage.dtype} instead'))
-            kwargs['source'] = storage._untyped()
-            return self._set_(*args, **kwargs)
-
-        return self._set_(*args, **kwargs)
-
     def storage(self):
         r"""
         storage() -> torch.Storage

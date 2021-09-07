@@ -2,15 +2,16 @@ import io
 
 import torch
 from ._utils import _type, _cuda, classproperty
-from typing import Any, TypeVar, Type
+from typing import Any, TypeVar, Type, Union
 import copy
 import collections
 
-T = TypeVar('T', bound='_StorageBase')
+T = TypeVar('T', bound='Union[_StorageBase, TypedStorage]')
 class _StorageBase(object):
     _cdata: Any
     is_cuda: bool = False
     is_sparse: bool = False
+    device: torch.device
 
     def __init__(self, *args, **kwargs): ...  # noqa: E704
     def __len__(self) -> int: ...  # noqa: E704
@@ -25,6 +26,7 @@ class _StorageBase(object):
     def cuda(self, device=None, non_blocking=False, **kwargs) -> T: ...  # noqa: E704
     def element_size(self) -> int: ...  # noqa: E704
     def get_device(self) -> int: ...  # noqa: E704
+    def data_ptr(self) -> int: ... # noqa: E704
 
     # Defined in torch/csrc/generic/StorageSharing.cpp
     def _share_filename_(self): ...  # noqa: E704
@@ -388,17 +390,13 @@ class TypedStorage:
         return tmp_tensor[idx_wrapped].item()
 
     def copy_(self, source: T, non_blocking=None) -> T:
-        if isinstance(source, TypedStorage):
-            source = source._storage
-
-        self._storage.copy_(source, non_blocking)
-
+        self._storage.copy_(source._untyped(), non_blocking)
         return self
 
     def nbytes(self):
         return self._storage.nbytes()
 
-    def type(self, dtype: str = None, non_blocking: bool = False) -> T:
+    def type(self, dtype: str = None, non_blocking: bool = False) -> Union[T, str]:
         if dtype is None:
             return '.'.join([self.__module__, type(self).__name__])
         else:
