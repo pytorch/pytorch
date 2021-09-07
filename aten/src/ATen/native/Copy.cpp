@@ -28,6 +28,7 @@ bool copy_transpose_valid(const Tensor& self, const Tensor& src) {
   return self.is_contiguous() && src.numel() != 0 && src.dim() == 2 &&
       src.stride(0) == 1 && src.stride(1) == src.size(0) &&
       self.scalar_type() == src.scalar_type() &&
+      self.sizes().equals(src.sizes()) &&
       self.numel() >= MIN_SZ;
 }
 
@@ -44,6 +45,9 @@ void copy_same_type_transpose_(Tensor& self, const Tensor& src) {
     BLOCK_SZ = 60;
   }
   Tensor buf = empty({BLOCK_SZ, BLOCK_SZ}, self.options());
+
+  // The code below is implemented with the assumption that sizes are equal
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(self.sizes().equals(src.sizes()));
 
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kHalf, kBool, kBFloat16, self.scalar_type(), "copy_", [&] {
     scalar_t* sp = src.data_ptr<scalar_t>();
@@ -253,7 +257,22 @@ Tensor& copy_(Tensor& self, const Tensor& src, bool non_blocking) {
   return self;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+void copy_ignoring_overlaps(const Tensor &dst, const Tensor &src) {
+  // Called when we are copying into an overlapping index `dst`, but we don't
+  // care which writer wins. Hacky but it works. This is only used by
+  // CUDA_tensor_apply2 in case that there are write overlaps.
+  // FIXME: really, overlapping writes should be illegal/an error in Torch
+  auto iter = TensorIteratorConfig()
+      .add_output(dst)
+      .add_input(src)
+      .resize_outputs(false)
+      .set_check_mem_overlap(false)
+      .check_all_same_dtype(true)
+      .check_all_same_device(true)
+      .build();
+  copy_stub(iter.device_type(), iter, /*non_blocking=*/false);
+}
+
 DEFINE_DISPATCH(copy_stub);
 
 } // namespace native

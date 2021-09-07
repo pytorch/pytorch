@@ -13,13 +13,12 @@
 #include <thrust/for_each.h>
 #include <thrust/sequence.h>
 
-#include <THC/THCTensorMathPointwise.cuh>
 #include <THC/THCThrustAllocator.cuh>
 
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAUtils.h>
 #include <cusparse.h>
-#include <ATen/native/sparse/cuda/SparseCUDABlas.cuh>
+#include <ATen/native/sparse/cuda/SparseCUDABlas.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 
 #include <thrust/device_vector.h>

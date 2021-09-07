@@ -3,6 +3,7 @@
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/jit/runtime/symbolic_shape_registry.h>
+#include <torch/csrc/jit/serialization/import_source.h>
 #include <unordered_map>
 
 namespace torch {
@@ -36,10 +37,17 @@ const std::string shape_compute_functions =
           return expandedSizes
 
         def adaptive_avg_pool2d(self: List[int], out: List[int]):
-          # TODO: return out directly, list len refiner would need to
-          # annotate the List Type with len directly in IR
           assert len(out) == 2
-          return [out[0], out[1]]
+          assert len(self) == 3 or len(self) == 4
+          for i in range (1, len(self)):
+            assert self[i] != 0
+
+          shape: List[int] = []
+          for i in range(0, len(self) -2):
+            shape.append(self[i])
+          for elem in out:
+            shape.append(elem)
+          return shape
 
         # TODO: maybe make it customary that extra arguments are unused ?
         # TODO: return self directly
@@ -47,6 +55,42 @@ const std::string shape_compute_functions =
           out: List[int] = []
           for elem in self:
             out.append(elem)
+          return out
+
+        def unary_one_unused_input(self: List[int], inp0: Any):
+          out: List[int] = []
+          for elem in self:
+            out.append(elem)
+          return out
+
+        def unary(self: List[int]):
+          out: List[int] = []
+          for elem in self:
+            out.append(elem)
+          return out
+
+        def view(self: List[int], sizes: List[int]):
+          # TODO: add assertions to check whether requested dims are valid
+          out: List[int] = []
+          for elem in sizes:
+            if elem == -1:
+              # TODO: support -1 in view dimensions
+              raise AssertionError("Shape function doesn't support -1 view dims yet")
+            out.append(elem)
+          return out
+
+        def mean_dim(self: List[int], dims: List[int], keep_dim: bool, dt : Any):
+          out: List[int] = []
+          for idx in range(len(self)):
+            is_mean_dim : bool = False
+            for reduce_dim in dims:
+              if idx == maybe_wrap_dim(reduce_dim, len(self)):
+                is_mean_dim = True
+            if is_mean_dim:
+              if keep_dim:
+                out.append(1)
+            else:
+              out.append(self[idx])
           return out
 
         def broadcast_one_unused_input(self: List[int], other: List[int], unused: Any):
@@ -62,8 +106,8 @@ const std::string shape_compute_functions =
         def dot(self: List[int], tensor: List[int]):
           assert len(self) == 1 and len(tensor) == 1
           assert self[0] == tensor[0]
-          # TODO: return self
-          return [self[0]]
+          out: List[int] = []
+          return out
 
         def mv(self: List[int], vec: List[int]):
           assert len(self) == 2 and len(vec) == 1
@@ -150,11 +194,16 @@ const std::string shape_compute_functions =
             assert broadcast(bias, out) == out
           return out
 
+        def addmm(self: List[int], mat1: List[int], mat2: List[int], beta: Any, alpha: Any):
+          return broadcast(self, mm(mat1, mat2))
+
         def check_non_negative(array: List[int]) -> bool:
+          # TODO: look into rewriting with early return and getting loop unrolling to fire
+          non_negative = False
           for val in array:
             if val < 0:
-              return True
-          return False
+              non_negative = True
+          return non_negative
 
         def check_shape_forward(input: List[int], weight_sizes: List[int], bias: Optional[List[int]], stride: List[int], padding: List[int], dilation: List[int], groups: int):
           k = len(input)
@@ -244,7 +293,21 @@ const std::string shape_compute_functions =
           for i in range(end_dim + 1, len(input)):
             shape.append(input[i])
           return shape
-    )";
+    )"
+#ifdef USE_XNNPACK
+    R"(
+        def prepacked_conv2d_clamp_run(input: List[int], conv2dOpContext: Any):
+          assert isinstance(conv2dOpContext, __torch__.torch.classes.xnnpack.Conv2dOpContext)
+          (weight, bias, stride, padding, dilation, groups) = ops.prepacked.unpack_prepacked_sizes_conv2d(conv2dOpContext)
+          return conv2d(input, weight, bias, stride, padding, dilation, groups)
+
+        def prepacked_linear_clamp_run(input: List[int], linearOpContext: Any):
+          assert isinstance(linearOpContext, __torch__.torch.classes.xnnpack.LinearOpContext)
+          (weight, bias) = ops.prepacked.unpack_prepacked_sizes_linear(linearOpContext)
+          return linear(input, weight, bias)
+    )"
+#endif
+    ;
 
 // mapping function schema to shape compute graphs allows multiple functions to
 // share the same shape compute graph, which is memory efficient and also will
@@ -264,21 +327,36 @@ static const OperatorMap<std::string>& get_schema_to_function_graph() {
   // clang-format off
   static const OperatorMap<std::string> schema_to_function_graph{
       {"aten::mul.Tensor(Tensor self, Tensor other) -> Tensor", "broadcast"},
+      {"aten::mul.Scalar(Tensor self, Scalar other) -> Tensor", "unary_one_unused_input"},
       {"aten::div.Tensor(Tensor self, Tensor other) -> Tensor", "broadcast"},
+      {"aten::div.Scalar(Tensor self, Scalar other) -> Tensor", "unary_one_unused_input"},
       {"aten::gt.Tensor(Tensor self, Tensor other) -> Tensor", "broadcast"},
       {"aten::add.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor", "broadcast_one_unused_input"},
+      {"aten::add_.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor", "broadcast_one_unused_input"},
+      {"aten::add.Scalar(Tensor self, Scalar other, Scalar alpha=1) -> Tensor", "unary_two_unused_inputs"},
       {"aten::hardtanh(Tensor self, Scalar min_val=-1, Scalar max_val=1) -> Tensor", "unary_two_unused_inputs"},
+      {"aten::hardswish_(Tensor self) -> Tensor", "unary"},
+      {"aten::hardsigmoid_(Tensor self) -> Tensor", "unary"},
       {"aten::adaptive_avg_pool2d(Tensor self, int[2] output_size) -> Tensor", "adaptive_avg_pool2d"},
       {"aten::mm(Tensor self, Tensor mat2) -> Tensor", "mm"},
       {"aten::dot(Tensor self, Tensor tensor) -> Tensor", "dot"},
       {"aten::mv(Tensor self, Tensor vec) -> Tensor", "mv"},
-      {"aten::matmul(Tensor self, Tensor other) -> Tensor", "linear"},
+      {"aten::matmul(Tensor self, Tensor other) -> Tensor", "matmul"},
       {"aten::linear(Tensor input, Tensor weight, Tensor? bias=None) -> Tensor", "linear"},
       {"aten::t(Tensor(a) self) -> Tensor(a)", "t"},
       {"aten::conv1d(Tensor input, Tensor weight, Tensor? bias=None, int[1] stride=1, int[1] padding=0, int[1] dilation=1, int groups=1) -> Tensor", "conv1d"},
       {"aten::conv2d(Tensor input, Tensor weight, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] dilation=1, int groups=1) -> Tensor", "conv2d"},
       {"aten::conv3d(Tensor input, Tensor weight, Tensor? bias=None, int[3] stride=1, int[3] padding=0, int[3] dilation=1, int groups=1) -> Tensor", "conv3d"},
       {"aten::flatten.using_ints(Tensor(a) self, int start_dim=0, int end_dim=-1) -> Tensor(a)", "flatten"},
+      {"aten::relu(Tensor self) -> Tensor", "unary"},
+      {"aten::view(Tensor(a) self, int[] size) -> Tensor(a)", "view"},
+      {"aten::expand_as(Tensor(a) self, Tensor other) -> Tensor(a)", "view"},
+      {"aten::mean.dim(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor", "mean_dim"},
+      {"aten::addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor", "addmm"},
+#ifdef USE_XNNPACK
+      {"prepacked::conv2d_clamp_run(Tensor X, __torch__.torch.classes.xnnpack.Conv2dOpContext W_prepack) -> Tensor Y", "prepacked_conv2d_clamp_run"},
+      {"prepacked::linear_clamp_run(Tensor X, __torch__.torch.classes.xnnpack.LinearOpContext W_prepack) -> Tensor Y", "prepacked_linear_clamp_run"},
+#endif
   };
   // clang-format on
   return schema_to_function_graph;
@@ -288,7 +366,7 @@ std::unordered_map<const FunctionSchema*, std::shared_ptr<Graph>>
     cached_schema_to_graph;
 
 // CompilationUnit that holds all these Functions and keeps them alive.
-CompilationUnit compilation_unit;
+auto compilation_unit = std::make_shared<CompilationUnit>();
 
 void loadModule(const CompilationUnit& module) {
   std::unordered_map<std::string, std::shared_ptr<Graph>> reused_functions;
@@ -315,9 +393,16 @@ void loadModule(const CompilationUnit& module) {
 }
 
 void loadFunctions() {
-  compilation_unit.define(
-      c10::nullopt, shape_compute_functions, nativeResolver(), nullptr);
-  loadModule(compilation_unit);
+  auto src = std::make_shared<Source>(shape_compute_functions);
+  std::vector<at::IValue> constantTable;
+  auto resolver = std::make_shared<SourceImporterImpl>(
+      compilation_unit,
+      &constantTable,
+      [&](const std::string& name) -> std::shared_ptr<Source> { return src; },
+      1);
+  compilation_unit->define(
+      c10::nullopt, shape_compute_functions, resolver, nullptr);
+  loadModule(*compilation_unit);
 }
 } // anonymous namespace
 

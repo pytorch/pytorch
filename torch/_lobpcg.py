@@ -273,7 +273,7 @@ class LOBPCGAutogradFunction(torch.autograd.Function):
                 tol: Optional[float] = None,
                 largest: Optional[bool] = None,
                 method: Optional[str] = None,
-                tracker: Optional[None] = None,
+                tracker: None = None,
                 ortho_iparams: Optional[Dict[str, int]] = None,
                 ortho_fparams: Optional[Dict[str, float]] = None,
                 ortho_bparams: Optional[Dict[str, bool]] = None
@@ -345,7 +345,7 @@ def lobpcg(A: Tensor,
            tol: Optional[float] = None,
            largest: Optional[bool] = None,
            method: Optional[str] = None,
-           tracker: Optional[None] = None,
+           tracker: None = None,
            ortho_iparams: Optional[Dict[str, int]] = None,
            ortho_fparams: Optional[Dict[str, float]] = None,
            ortho_bparams: Optional[Dict[str, bool]] = None
@@ -545,7 +545,7 @@ def _lobpcg(A: Tensor,
             tol: Optional[float] = None,
             largest: Optional[bool] = None,
             method: Optional[str] = None,
-            tracker: Optional[None] = None,
+            tracker: None = None,
             ortho_iparams: Optional[Dict[str, int]] = None,
             ortho_fparams: Optional[Dict[str, float]] = None,
             ortho_bparams: Optional[Dict[str, bool]] = None
@@ -658,7 +658,7 @@ class LOBPCG(object):
                  fparams,  # type: Dict[str, float]
                  bparams,  # type: Dict[str, bool]
                  method,   # type: str
-                 tracker   # type: Optional[None]
+                 tracker   # type: None
                  ):
         # type: (...) -> None
 

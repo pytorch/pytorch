@@ -9,7 +9,6 @@ namespace {
 // process' thread-pool, but since those threads don't exist, the thread-pool
 // is corrupt. It's leaked in order to prevent segfaults.
 // Ref: https://github.com/pytorch/pytorch/issues/54752#issuecomment-810315302
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 bool leak_corrupted_threadpool = false;
 
 void child_atfork() {
@@ -96,7 +95,6 @@ PThreadPool* pthreadpool() {
       auto num_threads = leaked->get_thread_count();
       // NOLINTNEXTLINE(modernize-make-unique)
       threadpool.reset(new PThreadPool(num_threads));
-      TORCH_WARN("Leaking Caffe2 thread-pool after fork.");
     }
   }
   return threadpool.get();

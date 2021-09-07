@@ -312,7 +312,7 @@ at::Tensor PackedLinearWeightsQnnp::apply_impl(
       at::Tensor bias_quant_scales =
           weight_contig.q_per_channel_scales() * input_scale;
       at::Tensor bias_zp = at::zeros(bias_quant_scales.sizes(), c10::kInt);
-      qbias = at::native::quantize_per_channel_cpu(
+      qbias = at::native::quantize_per_channel(
           bias_fp32, bias_quant_scales, bias_zp, 0, c10::kQInt32);
     } else {
       qbias = at::native::quantize_per_tensor(
@@ -339,8 +339,7 @@ at::Tensor PackedLinearWeightsQnnp::apply_impl(
 
   size_t rows_input = 1;
   size_t cols_input = input_contig.size(input_contig.dim() - 1);
-  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-  for (size_t i = 0; i < input_contig.dim() - 1; ++i) {
+  for (const auto i : c10::irange(input_contig.dim() -1)) {
     rows_input *= input_contig.size(i);
   }
 

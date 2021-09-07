@@ -16,6 +16,10 @@ class Identity(Module):
         args: any argument (unused)
         kwargs: any keyword argument (unused)
 
+    Shape:
+        - Input: :math:`(*)`, where :math:`*` means any number of dimensions.
+        - Output: :math:`(*)`, same shape as the input.
+
     Examples::
 
         >>> m = nn.Identity(54, unused_argument1=0.1, unused_argument2=False)
@@ -44,9 +48,9 @@ class Linear(Module):
             Default: ``True``
 
     Shape:
-        - Input: :math:`(N, *, H_{in})` where :math:`*` means any number of
-          additional dimensions and :math:`H_{in} = \text{in\_features}`
-        - Output: :math:`(N, *, H_{out})` where all but the last dimension
+        - Input: :math:`(*, H_{in})` where :math:`*` means any number of
+          dimensions including none and :math:`H_{in} = \text{in\_features}`.
+        - Output: :math:`(*, H_{out})` where all but the last dimension
           are the same shape as the input and :math:`H_{out} = \text{out\_features}`.
 
     Attributes:

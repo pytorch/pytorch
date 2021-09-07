@@ -279,6 +279,7 @@ def _wait_all_workers():
         logger.error(
             f"Failed to respond to 'Shutdown Proceed' in time, got error {ex}"
         )
+        raise ex
 
 
 @_require_initialized
@@ -331,9 +332,17 @@ def shutdown(graceful=True):
         >>> rpc.shutdown()
     """
     if graceful:
-        _wait_all_workers()
-        _delete_all_user_and_unforked_owner_rrefs()
-        _get_current_rpc_agent().join(shutdown=True)
+        try:
+            _wait_all_workers()
+            _delete_all_user_and_unforked_owner_rrefs()
+            _get_current_rpc_agent().join(shutdown=True)
+        finally:
+            # In case of errors, continue to complete the local shutdown.
+            _finalize_shutdown()
+    else:
+        _finalize_shutdown()
+
+def _finalize_shutdown():
     try:
         # This raises a `TORCH_CHECK()` exception on RRef leak detected.
         _destroy_rref_context(_ignore_rref_leak)
@@ -352,7 +361,6 @@ def shutdown(graceful=True):
         # resolved.
         _cleanup_python_rpc_handler()
         _reset_current_rpc_agent()
-
 
 @_require_initialized
 def get_worker_info(worker_name=None):

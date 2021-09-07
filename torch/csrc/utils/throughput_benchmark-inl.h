@@ -58,8 +58,8 @@ BenchmarkExecutionStats BenchmarkHelper<Input, Output, Model>::benchmark(
   std::atomic<int64_t> num_attempted_iters{0};
   std::vector<std::thread> callers;
 
+  callers.reserve(config.num_calling_threads);
   for (const auto thread_id : c10::irange(config.num_calling_threads)) {
-    // NOLINTNEXTLINE(performance-inefficient-vector-operation)
     callers.emplace_back([&, thread_id]() {
       // We use conditional variable as a barrier to make sure each thread
       // performs required warmeup iterations before we start measuring
@@ -94,10 +94,11 @@ BenchmarkExecutionStats BenchmarkHelper<Input, Output, Model>::benchmark(
   }
 
   using Clock = std::chrono::high_resolution_clock;
+  using RecordProfile = torch::autograd::profiler::RecordProfile;
   using TimePoint = std::chrono::time_point<Clock>;
   TimePoint start_time;
 
-  std::unique_ptr<torch::autograd::profiler::RecordProfile> profiler_guard;
+  std::unique_ptr<RecordProfile> profiler_guard;
   {
     std::unique_lock<std::mutex> lock(m);
     while (initialized != config.num_calling_threads) {
@@ -106,9 +107,7 @@ BenchmarkExecutionStats BenchmarkHelper<Input, Output, Model>::benchmark(
     if (!config.profiler_output_path.empty()) {
       LOG(INFO) << "Using Autograd profiler. Trace will be saved to "
                 << config.profiler_output_path;
-      // NOLINTNEXTLINE(modernize-make-unique)
-      profiler_guard.reset(new torch::autograd::profiler::RecordProfile(
-        config.profiler_output_path));
+      profiler_guard = std::make_unique<RecordProfile>(config.profiler_output_path);
     }
     LOG(INFO) << "Starting threads";
     start = true;

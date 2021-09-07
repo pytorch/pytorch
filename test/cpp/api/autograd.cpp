@@ -1,6 +1,8 @@
 #include <gtest/gtest.h>
+#include <ATen/core/boxing/impl/test_helpers.h>
 
 #include <torch/torch.h>
+#include <ATen/core/op_registration/op_registration.h>
 
 #include <torch/csrc/autograd/functions/basic_ops.h>
 
@@ -28,7 +30,6 @@ Variable simple_fn(const Variable& x, const Variable& y) {
   return x + 2 * y + x * y;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(AutogradAPITests, BackwardSimpleTest) {
   Variable x = torch::randn({2, 2}, torch::requires_grad());
   Variable y = torch::randn({2, 2}, torch::requires_grad());
@@ -39,7 +40,6 @@ TEST(AutogradAPITests, BackwardSimpleTest) {
   ASSERT_VARIABLE_EQ(y.grad(), x + torch::ones({2, 2})*2);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(AutogradAPITests, BackwardTest) {
   Variable x = torch::randn({2, 2}, torch::requires_grad());
   Variable y = torch::randn({2, 2}, torch::requires_grad());
@@ -52,7 +52,6 @@ TEST(AutogradAPITests, BackwardTest) {
   ASSERT_VARIABLE_EQ(y.grad(), 2 * (x + torch::ones({2, 2})*2));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(AutogradAPITests, GradSimpleTest) {
   // basic grad
   Variable x = torch::randn({2,2}, torch::requires_grad());
@@ -64,7 +63,6 @@ TEST(AutogradAPITests, GradSimpleTest) {
   ASSERT_VARIABLE_EQ(grad_res[1], x + torch::ones({2, 2}) * 2);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(AutogradAPITests, GradTest) {
   Variable x = torch::randn({2, 2}, torch::requires_grad());
   Variable y = torch::randn({2, 2}, torch::requires_grad());
@@ -84,7 +82,6 @@ TEST(AutogradAPITests, GradTest) {
   ASSERT_VARIABLE_EQ(y.grad(), y_grad);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(AutogradAPITests, GradNonLeafTest) {
   Variable x_init = torch::randn({2, 2}, torch::requires_grad());
   Variable x = x_init;
@@ -111,7 +108,6 @@ TEST(AutogradAPITests, GradNonLeafTest) {
   ASSERT_TRUE(y.grad().defined());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(AutogradAPITests, GradUnreachableTest) {
   Variable x = torch::ones({1}, torch::requires_grad());
   Variable y = torch::ones({1}, torch::requires_grad());
@@ -135,7 +131,6 @@ TEST(AutogradAPITests, GradUnreachableTest) {
   ASSERT_THROWS_WITH(grad({x * 2}, {x, y}, {}, {}, false, false), "Set allow_unused=True");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CustomAutogradTest, GradUnreachableDiscoveryTest) {
   // Test that certain nodes are not erroneously executed when an input
   // is unreachable. See #39784
@@ -159,7 +154,12 @@ TEST(CustomAutogradTest, GradUnreachableDiscoveryTest) {
   ASSERT_FALSE(grad_res[0].defined());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(AutogradAPITests, EmptyInput) {
+  Variable x = torch::ones({1}, torch::requires_grad());
+  ASSERT_THROWS_WITH(grad({x * 2}, /*inputs=*/{}, {x}),
+                     "grad requires non-empty inputs.");
+}
+
 TEST(AutogradAPITests, RetainGrad) {
   auto input = torch::rand({1, 3}, torch::requires_grad());
   auto h1 = input * 3;
@@ -203,7 +203,6 @@ TEST(AutogradAPITests, RetainGrad) {
   ASSERT_VARIABLE_EQ(input * 18, input.grad());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(AutogradAPITests, AnomalyMode) {
   // Needs to have backtrace as warning and then throw an error
   torch::autograd::DetectAnomalyGuard detect_anomaly;
@@ -238,7 +237,6 @@ TEST(AutogradAPITests, AnomalyMode) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CustomAutogradTest, CustomFunction) {
   struct MyFunction : public Function<MyFunction> {
     static Variable forward(AutogradContext *ctx, Variable var1, int mul, Variable var2) {
@@ -267,7 +265,6 @@ TEST(CustomAutogradTest, CustomFunction) {
   ASSERT_VARIABLE_EQ(y.grad(), x + torch::ones({5,5})*2);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CustomAutogradTest, FunctionReturnsInput) {
   struct MyFunction : public Function<MyFunction> {
     static Variable forward(AutogradContext *ctx, Variable var1) {
@@ -284,7 +281,6 @@ TEST(CustomAutogradTest, FunctionReturnsInput) {
   ASSERT_VARIABLE_EQ(x.grad(), torch::full(1, 2.));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CustomAutogradTest, FunctionReturnsUndefined) {
   struct MyFunction : public Function<MyFunction> {
     static Variable forward(AutogradContext *ctx, Variable var) {
@@ -312,7 +308,6 @@ TEST(CustomAutogradTest, FunctionReturnsUndefined) {
     {MyFunction::apply(x)}, {x}, {}, false, false, true)[0].defined());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CustomAutogradTest, MaterializeGrads) {
   struct MyFunction : public Function<MyFunction> {
     static Variable forward(AutogradContext *ctx, Variable var) {
@@ -329,7 +324,6 @@ TEST(CustomAutogradTest, MaterializeGrads) {
   UndefinedGrad().apply({MyFunction::apply(x)})[0].backward();
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CustomAutogradTest, DontMaterializeGrads) {
   struct MyFunction : public Function<MyFunction> {
     static Variable forward(AutogradContext *ctx, Variable var) {
@@ -347,7 +341,6 @@ TEST(CustomAutogradTest, DontMaterializeGrads) {
   UndefinedGrad().apply({MyFunction::apply(x)})[0].backward();
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CustomAutogradTest, NoGradCustomFunction) {
   // Custom Function should respect grad mode
  struct MyOp : public Function<MyOp> {
@@ -368,7 +361,6 @@ TEST(CustomAutogradTest, NoGradCustomFunction) {
  }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CustomAutogradTest, MarkDirty) {
   struct MyFunction : public Function<MyFunction> {
     static Variable forward(AutogradContext *ctx, Variable v) {
@@ -393,7 +385,6 @@ TEST(CustomAutogradTest, MarkDirty) {
   out.sum().backward();
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CustomAutogradTest, MarkNonDifferentiable) {
   struct MyFunction : public Function<MyFunction> {
     static Variable forward(AutogradContext *ctx, Variable v) {
@@ -414,7 +405,6 @@ TEST(CustomAutogradTest, MarkNonDifferentiable) {
   y.sum().backward();
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CustomAutogradTest, MarkNonDifferentiableMixed) {
   struct MyFunction : public Function<MyFunction> {
     static variable_list forward(AutogradContext *ctx, Variable input) {
@@ -441,7 +431,6 @@ TEST(CustomAutogradTest, MarkNonDifferentiableMixed) {
   ASSERT_VARIABLE_EQ(x.grad(), torch::ones({5,5}));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CustomAutogradTest, MarkNonDifferentiableNone) {
   struct MyFunction : public Function<MyFunction> {
     static Variable forward(AutogradContext *ctx, Variable input) {
@@ -460,7 +449,6 @@ TEST(CustomAutogradTest, MarkNonDifferentiableNone) {
   (r * x).sum().backward();
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CustomAutogradTest, ReturnLeafInplace) {
   struct Inplace : public Function<Inplace> {
     static variable_list forward(AutogradContext *ctx, Variable a, Variable b) {
@@ -484,7 +472,6 @@ TEST(CustomAutogradTest, ReturnLeafInplace) {
   ASSERT_VARIABLE_EQ(y.grad(), torch::ones({5,5}));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CustomAutogradTest, ReturnDuplicateInplace) {
   struct DoubleInplace : public Function<DoubleInplace> {
     static variable_list forward(AutogradContext *ctx, Variable x) {
@@ -507,7 +494,6 @@ TEST(CustomAutogradTest, ReturnDuplicateInplace) {
   ASSERT_TRUE(torch::equal(out[0],out[1]));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CustomAutogradTest, ReturnDuplicate) {
   struct DoubleDuplicate : public Function<DoubleDuplicate> {
     static variable_list forward(AutogradContext *ctx, Variable x) {
@@ -525,7 +511,6 @@ TEST(CustomAutogradTest, ReturnDuplicate) {
   ASSERT_TRUE(torch::equal(out[0],out[1]));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CustomAutogradTest, SaveEmptyForBackward) {
   struct MyFunction : public Function<MyFunction> {
     static Variable forward(AutogradContext *ctx, Variable input) {
@@ -547,7 +532,6 @@ TEST(CustomAutogradTest, SaveEmptyForBackward) {
   ASSERT_VARIABLE_EQ(x.grad(), 2*x);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CustomAutogradTest, InvalidGradients) {
   struct MyFunction : public Function<MyFunction> {
     static Variable forward(AutogradContext *ctx, Variable x) {
@@ -565,7 +549,6 @@ TEST(CustomAutogradTest, InvalidGradients) {
   auto input2 = torch::randn(10, torch::dtype(torch::kDouble).requires_grad(true));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CustomAutogradTest, NoGradInput) {
   struct MyFunction : public Function<MyFunction> {
     static Variable forward(AutogradContext*, Variable x) {
@@ -588,7 +571,6 @@ TEST(CustomAutogradTest, NoGradInput) {
   ASSERT_FALSE(y.grad_fn());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CustomAutogradTest, TooManyGrads) {
   struct MyFunction : public Function<MyFunction> {
     static Variable forward(AutogradContext*, Variable input) {
@@ -602,7 +584,6 @@ TEST(CustomAutogradTest, TooManyGrads) {
   };
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CustomAutogradTest, DepNoGrad) {
   struct F1 : public Function<F1> {
     static variable_list forward(AutogradContext *ctx, Variable input) {
@@ -638,7 +619,6 @@ TEST(CustomAutogradTest, DepNoGrad) {
   ASSERT_VARIABLE_EQ(x.grad(), torch::ones(x.sizes()));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CustomAutogradTest, Reentrant) {
   static Variable y_data = torch::randn({2, 2});
   struct Reenter : public Function<Reenter> {
@@ -676,7 +656,6 @@ TEST(CustomAutogradTest, Reentrant) {
 
 // NOTE: If this fails for apparently unrelated reasons in TSAN be aware of
 // the TSAN limit on mutex: https://github.com/google/sanitizers/issues/950
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CustomAutogradTest, DeepReentrant) {
   struct DeepReenter : public Function<DeepReenter> {
     static Variable forward(AutogradContext *ctx, Variable x) {
@@ -704,7 +683,6 @@ TEST(CustomAutogradTest, DeepReentrant) {
   DeepReenter::apply(v).sum().backward();
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CustomAutogradTest, ReentrantPriority) {
   static std::vector<int> order;
 
@@ -756,7 +734,6 @@ TEST(CustomAutogradTest, ReentrantPriority) {
   order.clear();
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CustomAutogradTest, Hooks) {
   Variable x = torch::ones({5,5}, torch::requires_grad());
   Variable y = torch::ones({5,5})*4;
@@ -806,7 +783,6 @@ TEST(CustomAutogradTest, Hooks) {
   ASSERT_THROWS_WITH(y.remove_hook(3), "Invalid index");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CustomAutogradTest, HookNone) {
   struct NoneGradientFunction : public Function<NoneGradientFunction> {
     static variable_list forward(AutogradContext *ctx, Variable x, Variable y) {
@@ -837,7 +813,6 @@ TEST(CustomAutogradTest, HookNone) {
   ASSERT_TRUE(was_called);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CustomAutogradTest, BackwardWithInputs) {
   Variable x = torch::randn({5,5}, torch::requires_grad());
   Variable y = torch::randn({5,5}, torch::requires_grad());
@@ -851,7 +826,6 @@ TEST(CustomAutogradTest, BackwardWithInputs) {
   ASSERT_FALSE(y.grad().defined());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CustomAutogradTest, BackwardWithEmptyInputs) {
   Variable x = torch::randn({5,5}, torch::requires_grad());
   Variable y = torch::randn({5,5}, torch::requires_grad());
@@ -861,13 +835,20 @@ TEST(CustomAutogradTest, BackwardWithEmptyInputs) {
   ASSERT_THROWS_WITH(z.backward(torch::ones({5, 5}), false, false, std::vector<Variable>{}), "cannot be empty");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CustomAutogradTest, BackwardWithNonLeafInputs) {
   Variable x = torch::randn({5,5}, torch::requires_grad());
   Variable y = torch::randn({5,5}, torch::requires_grad());
   Variable z = x * x;
-  Variable w = z + x * y + y * y;
-  ASSERT_THROWS_WITH(w.backward(torch::ones({5, 5}), false, false, {z}), "is not a leaf Tensor");
+  Variable w = y * z + x * y + y * y;
+
+  Variable x_grad_expected = 2 * x * y + y;
+  Variable z_grad_expected = y;
+
+  w.backward(torch::ones({5, 5}), false, false, std::vector<Variable>{x, z});
+
+  ASSERT_VARIABLE_EQ(x.grad(), x_grad_expected);
+  ASSERT_VARIABLE_EQ(z.grad(), z_grad_expected);
+  ASSERT_FALSE(y.grad().defined());
 }
 
 TEST(CustomAutogradTest, BackwardWithCreateGraphWarns) {
@@ -889,6 +870,261 @@ TEST(CustomAutogradTest, BackwardWithCreateGraphWarns) {
         warnings.str().find("Using backward() with create_graph=True") != std::string::npos);
   }
 }
+
+/**
+ * Tests for AutogradNotImplementedFallback
+ * - Check that we created the NotImplemented kernel when inputs require grad
+ *   but when no inputs require grad, we should not create this node
+ * - check_inplace logic
+ * - view ops (TODO: not an official view yet, update this once InplaceOrView kernel is landed)
+ * - TODO: Tests for NDEBUG checks?
+ * - tensorlist input and output
+ * - multiple outputs / non-tensor output
+ * - rebase_history vs set_history
+ */
+namespace {
+
+torch::Tensor inplace_op(const torch::Tensor& self, const torch::Tensor& other) {
+  return self.add_(other);
+}
+
+std::tuple<torch::Tensor, torch::Tensor> two_arg_inplace_op(const torch::Tensor& self, const torch::Tensor& other) {
+  other.add_(self);
+  self.add_(other);
+  return std::tuple<torch::Tensor, torch::Tensor>(self, other);
+}
+
+std::tuple<torch::Tensor, torch::Tensor> two_pairs_of_view_op(const torch::Tensor& self, const torch::Tensor& other) {
+  // This is not allowed. We test below that this calling into the boxed kernel will raise an error
+  auto self_view = self.view(-1);
+  auto other_view = other.view(-1);
+  return std::tuple<torch::Tensor, torch::Tensor>(self_view, other_view);
+}
+
+int64_t ret_single_non_tensor(const torch::Tensor& self, const torch::Tensor& other) {
+  return 12;
+}
+
+torch::Tensor opt_op(const torch::Tensor& self, const c10::optional<at::Tensor>& other) {
+  if (other.has_value()) {
+      return self + other.value();
+  } else {
+      return self.clone();
+  }
+}
+
+torch::Tensor my_custom_op(const torch::Tensor& self, const torch::Tensor& other) {
+  return self + other;
+}
+
+std::tuple<torch::Tensor, torch::Tensor, int64_t> ret_tuple_non_tensor(const torch::Tensor& self, const torch::Tensor& other) {
+  auto a = self - other;
+  auto b = self + other;
+  return std::tuple<torch::Tensor, torch::Tensor, int64_t>(a, b, 12);
+}
+
+torch::Tensor view_op(const torch::Tensor& self, const torch::Tensor& other) {
+  return self.view(-1);
+}
+
+std::vector<at::Tensor> ret_tensor_vector(const torch::Tensor& self, const torch::Tensor& other) {
+  std::vector<at::Tensor> out;
+  out.push_back(self + other);
+  out.push_back(self - other);
+  return out;
+}
+
+torch::Tensor tensorlist_op(const torch::Tensor& self, at::TensorList other) {
+  const auto& res = self.clone();
+  for (const auto& t : other) {
+      res.add_(t);
+  }
+  return res;
+}
+
+#define REGISTER_TEST_OP(name, schema, fn)                                               \
+  auto m = MAKE_TORCH_LIBRARY(_test);                                                    \
+  m.def(schema);                                                                         \
+  auto m_autograd = MAKE_TORCH_LIBRARY_IMPL(_test, Autograd);                            \
+  auto m_cpu = MAKE_TORCH_LIBRARY_IMPL(_test, CPU);                                      \
+  m_cpu.impl(name, c10::DispatchKey::CPU, TORCH_FN(fn));                                 \
+  m_autograd.impl(name, c10::DispatchKey::Autograd, autogradNotImplementedFallback());
+
+template <typename F>
+void assertBasicChecks(F op) {
+  auto a = torch::tensor({1.}, {torch::kFloat32}).set_requires_grad(true);
+  auto b = torch::tensor({1.}, {torch::kFloat32});
+  auto c = torch::tensor({1.}, {torch::kFloat32});
+
+  // If any inputs require grad,
+  auto out1 = op(a, b);
+  ASSERT_THROWS_WITH(out1.backward(), "is not implemented");
+
+  // # Should not have grad_fn if none require grad
+  auto out2 = op(b, c);
+  ASSERT_THROWS_WITH(out2.backward(), "element 0 of tensors does not require grad and does not have a grad_fn");
+
+  // TODO: Forward AD Tests?
+}
+
+} // namespace
+
+TEST(TestAutogradNotImplementedFallback, RetSingleNonTensor) {
+  REGISTER_TEST_OP("ret_single_non_tensor", "_test::ret_single_non_tensor(Tensor self, Tensor other) -> int", ret_single_non_tensor);
+  auto opHandle = c10::Dispatcher::singleton().findSchemaOrThrow("_test::ret_single_non_tensor", "");
+  auto op = [&](const torch::Tensor& _1, const torch::Tensor& _2) {
+    return callOpUnboxed<int64_t, const torch::Tensor&, const torch::Tensor&>(opHandle, _1, _2);
+  };
+
+  auto a = torch::tensor({1.}, {torch::kFloat32}).set_requires_grad(true);
+  auto b = torch::tensor({1.}, {torch::kFloat32});
+
+  ASSERT_EQ(op(a, b), ret_single_non_tensor(a, b));
+}
+
+TEST(TestAutogradNotImplementedFallback, DoubleViewOP) {
+  REGISTER_TEST_OP("two_pairs_of_view_op", "_test::two_pairs_of_view_op(Tensor(a) self, Tensor(b) other) -> (Tensor(a), Tensor(b))", two_pairs_of_view_op);
+  auto opHandle = c10::Dispatcher::singleton().findSchemaOrThrow("_test::two_pairs_of_view_op", "");
+  auto op = [&](const torch::Tensor& _1, const torch::Tensor& _2) {
+    return callOpUnboxed<std::tuple<torch::Tensor, torch::Tensor>, const torch::Tensor&, const torch::Tensor&>(opHandle, _1, _2);
+  };
+  auto a = torch::tensor({1.}, {torch::kFloat32}).set_requires_grad(true);
+  auto b = torch::tensor({1.}, {torch::kFloat32});
+  ASSERT_THROWS_WITH(op(a, b),
+    "Expected only a single output in the operator schema to have a non-write alias annotation");
+}
+
+TEST(TestAutogradNotImplementedFallback, InplaceOp) {
+  REGISTER_TEST_OP("inplace_op", "_test::inplace_op(Tensor(a!) self, Tensor other) -> Tensor(a!)", inplace_op);
+  auto opHandle = c10::Dispatcher::singleton().findSchemaOrThrow("_test::inplace_op", "");
+  auto op = [&](const torch::Tensor& _1, const torch::Tensor& _2) {
+    return callOpUnboxed<torch::Tensor, const torch::Tensor&, const torch::Tensor&>(opHandle, _1, _2);
+  };
+
+  auto a = torch::tensor({1.}, {torch::kFloat32}).set_requires_grad(true);
+  auto b = torch::tensor({1.}, {torch::kFloat32});
+
+  // Check in-place
+  ASSERT_THROWS_WITH(op(a, b),
+    "a leaf Variable that requires grad is being used in an in-place operation");
+  op(b, a);
+  a = a.clone();
+  b = b.clone();
+  auto c = op(a, b);
+  ASSERT_TRUE(torch::allclose(c, inplace_op(a, b)));
+
+  // Test in-place on view
+  auto base = torch::tensor({1.}, {torch::kFloat32}).set_requires_grad(true).clone();
+  auto view = base.view(-1);
+  auto t = torch::tensor({1.}, {torch::kFloat32});
+
+  torch::Tensor v_nograd;
+  {
+    c10::NoGradGuard guard;
+    v_nograd = base.view(-1);
+    op(v_nograd, t);
+  }
+
+  ASSERT_THROWS_WITH(op(v_nograd, t), "A view was created in no_grad mode");
+  ASSERT_EQ(op(view, t).unsafeGetTensorImpl(), view.unsafeGetTensorImpl());
+
+  // TODO: once we have InplaceOrView kernel, renable this since version counter would actually
+  // be incremented
+  // ASSERT_THAT(op(view, t).grad_fn()->name(), ::testing::HasSubstr("AsStridedBackward"));
+}
+
+TEST(TestAutogradNotImplementedFallback, DoubleInplaceOp) {
+  REGISTER_TEST_OP("two_arg_inplace_op", "_test::two_arg_inplace_op(Tensor(a!) self, Tensor(b!) other) -> (Tensor(a!), Tensor(b!))", two_arg_inplace_op);
+  auto opHandle = c10::Dispatcher::singleton().findSchemaOrThrow("_test::two_arg_inplace_op", "");
+  auto op = [&](const torch::Tensor& _1, const torch::Tensor& _2) {
+    return callOpUnboxed<std::tuple<torch::Tensor, torch::Tensor>, const torch::Tensor&, const torch::Tensor&>(opHandle, _1, _2);
+  };
+  auto a = torch::tensor({1.}, {torch::kFloat32}).set_requires_grad(true);
+  auto b = torch::tensor({1.}, {torch::kFloat32});
+
+  // Both are modified in-place!
+  ASSERT_THROWS_WITH(op(a, b),
+    "a leaf Variable that requires grad is being used in an in-place operation");
+  ASSERT_THROWS_WITH(op(b, a),
+    "a leaf Variable that requires grad is being used in an in-place operation");
+}
+
+TEST(TestAutogradNotImplementedFallback, OptOp) {
+  REGISTER_TEST_OP("opt_op", "_test::opt_op(Tensor self, Tensor? other) -> Tensor", opt_op);
+  auto opHandle = c10::Dispatcher::singleton().findSchemaOrThrow("_test::opt_op", "");
+  auto op = [&](const torch::Tensor& _1, const c10::optional<torch::Tensor>& _2) {
+    return callOpUnboxed<torch::Tensor, const torch::Tensor&, const c10::optional<torch::Tensor>&>(opHandle, _1, _2);
+  };
+
+  auto a = torch::tensor({1.}, {torch::kFloat32}).set_requires_grad(true);
+  auto b = torch::tensor({1.}, {torch::kFloat32});
+
+  ASSERT_TRUE(torch::allclose(op(a, b), opt_op(a, b)));
+  ASSERT_TRUE(torch::allclose(op(a, {}), opt_op(a, {})));
+}
+
+TEST(TestAutogradNotImplementedFallback, OutOfPlaceAddition) {
+  REGISTER_TEST_OP("my_custom_op", "_test::my_custom_op(Tensor self, Tensor other) -> Tensor", my_custom_op);
+  auto opHandle = c10::Dispatcher::singleton().findSchemaOrThrow("_test::my_custom_op", "");
+  auto op = [&](const torch::Tensor& _1, const torch::Tensor& _2) {
+    return callOpUnboxed<torch::Tensor, const torch::Tensor&, const torch::Tensor&>(opHandle, _1, _2);
+  };
+
+  assertBasicChecks(op);
+}
+
+TEST(TestAutogradNotImplementedFallback, RetTupleNonTensor) {
+  REGISTER_TEST_OP("ret_tuple_non_tensor", "_test::ret_tuple_non_tensor(Tensor self, Tensor other) -> (Tensor, Tensor, int)", ret_tuple_non_tensor);
+  auto opHandle = c10::Dispatcher::singleton().findSchemaOrThrow("_test::ret_tuple_non_tensor", "");
+  auto op = [&](const torch::Tensor& _1, const torch::Tensor& _2) {
+    torch::Tensor out0;
+    torch::Tensor out1;
+    int64_t out2;
+    auto out = callOpUnboxed<std::tuple<torch::Tensor, torch::Tensor, int64_t>, const torch::Tensor&, const torch::Tensor&>(opHandle, _1, _2);
+    std::tie(out0, out1, out2) = std::move(out);
+    return out0;
+  };
+
+  assertBasicChecks(op);
+}
+
+TEST(TestAutogradNotImplementedFallback, ViewOp) {
+  REGISTER_TEST_OP("view_op", "_test::view_op(Tensor(a) self, Tensor other) -> Tensor(a)", view_op);
+  auto opHandle = c10::Dispatcher::singleton().findSchemaOrThrow("_test::view_op", "");
+  auto op = [&](const torch::Tensor& _1, const torch::Tensor& _2) {
+    return callOpUnboxed<torch::Tensor, const torch::Tensor&, const torch::Tensor&>(opHandle, _1, _2);
+  };
+  assertBasicChecks(op);
+}
+
+TEST(TestAutogradNotImplementedFallback, RetTensorVector) {
+  REGISTER_TEST_OP("ret_tensor_vector", "_test::ret_tensor_vector(Tensor self, Tensor other) -> Tensor[]", ret_tensor_vector);
+  auto opHandle = c10::Dispatcher::singleton().findSchemaOrThrow("_test::ret_tensor_vector", "");
+  auto op = [&](const torch::Tensor& _1, const torch::Tensor& _2) {
+    return callOpUnboxed<std::vector<at::Tensor>, const torch::Tensor&, const torch::Tensor&>(opHandle, _1, _2)[0];
+  };
+  assertBasicChecks(op);
+}
+
+TEST(TestAutogradNotImplementedFallback, TensorlistOp) {
+  REGISTER_TEST_OP("tensorlist_op", "_test::tensorlist_op(Tensor self, Tensor[] other) -> Tensor", tensorlist_op);
+  auto opHandle = c10::Dispatcher::singleton().findSchemaOrThrow("_test::tensorlist_op", "");
+  auto op = [&](torch::Tensor _1, at::TensorList _2) {
+    return callOpUnboxed<torch::Tensor, const torch::Tensor&, at::TensorList>(opHandle, _1, _2);
+  };
+
+  auto a = torch::tensor({1.}, {torch::kFloat32});
+  auto b = torch::tensor({1.}, {torch::kFloat32});
+  auto c = torch::tensor({1.}, {torch::kFloat32}).set_requires_grad(true);
+  std::vector<torch::Tensor> vec = {b, c};
+  auto out = op(a, vec);
+
+  ASSERT_THROWS_WITH(torch::autograd::grad({out}, {vec[0]}), "One of the differentiated Tensors does not require grad");
+  ASSERT_THROWS_WITH(torch::autograd::grad({out}, {vec[1]}), "is not implemented");
+
+  ASSERT_TRUE(at::allclose(op(a, vec), tensorlist_op(a, vec)));
+}
+
 
 // TODO add these tests if needed
 // test_once_differentiable

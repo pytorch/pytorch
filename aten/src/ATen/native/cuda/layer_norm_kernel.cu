@@ -1,5 +1,9 @@
 #include <ATen/native/layer_norm.h>
 
+#include <type_traits>
+
+#include <thrust/tuple.h>
+
 #include <ATen/ATen.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
@@ -27,24 +31,35 @@ __global__ void RowwiseMomentsCUDAKernel(
     T* mean,
     T* rstd) {
   using T_ACC = acc_type<T, true>;
-  __shared__ T_ACC m_shared[C10_WARP_SIZE];
-  __shared__ T_ACC v_shared[C10_WARP_SIZE];
+  using WelfordType = WelfordData<T_ACC, int64_t, T_ACC>;
+  using WelfordOp =
+      WelfordOps<T_ACC, T_ACC, int64_t, T_ACC, thrust::pair<T_ACC, T_ACC>>;
+
+  __shared__
+      typename std::aligned_storage<sizeof(WelfordType), alignof(WelfordType)>::
+          type val_shared[C10_WARP_SIZE];
+  WelfordType* val_shared_ptr = reinterpret_cast<WelfordType*>(val_shared);
+
   const int64_t i = blockIdx.x;
-  T_ACC sum1 = 0;
-  T_ACC sum2 = 0;
+  WelfordOp welford_op = {/*correction=*/0, /*take_sqrt=*/false};
+  WelfordType val(0, 0, 0, 0);
+
   for (int64_t j = threadIdx.x; j < N; j += blockDim.x) {
     const int64_t index = i * N + j;
-    sum1 += static_cast<T_ACC>(X[index]);
-    sum2 += static_cast<T_ACC>(X[index]) * static_cast<T_ACC>(X[index]);
+    val = welford_op.reduce(val, static_cast<T_ACC>(X[index]), index);
   }
-  sum1 = cuda_utils::BlockReduceSum<T_ACC>(sum1, m_shared);
-  sum2 = cuda_utils::BlockReduceSum<T_ACC>(sum2, v_shared);
+  val = cuda_utils::BlockReduce(
+      val,
+      welford_op,
+      /*identity_element=*/WelfordType(0, 0, 0, 0),
+      val_shared_ptr);
+
   if (threadIdx.x == 0) {
-    const T_ACC scale = T_ACC(1) / static_cast<T_ACC>(N);
-    sum1 *= scale;
-    sum2 = c10::cuda::compat::max(sum2 * scale - sum1 * sum1, T_ACC(0));
-    mean[i] = sum1;
-    rstd[i] = c10::cuda::compat::rsqrt(sum2 + static_cast<T_ACC>(eps));
+    T_ACC m1;
+    T_ACC m2;
+    thrust::tie(m2, m1) = welford_op.project(val);
+    mean[i] = m1;
+    rstd[i] = c10::cuda::compat::rsqrt(m2 + static_cast<T_ACC>(eps));
   }
 }
 
@@ -294,8 +309,12 @@ void LayerNormKernelImpl(
     Tensor* Y,
     Tensor* mean,
     Tensor* rstd) {
-  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16,
-      X.scalar_type(), "LayerNormKernelImpl", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      at::ScalarType::Half,
+      at::ScalarType::BFloat16,
+      X.scalar_type(),
+      "LayerNormKernelImpl",
+      [&]() {
         LayerNormKernelImplInternal<scalar_t>(
             X, gamma, beta, M, N, static_cast<scalar_t>(eps), Y, mean, rstd);
       });
@@ -328,7 +347,10 @@ void LayerNormBackwardKernelImplInternal(
   T* dX_data = dX->defined() ? dX->template data_ptr<T>() : nullptr;
   cudaStream_t cuda_stream = at::cuda::getCurrentCUDAStream();
   if (dX_data != nullptr) {
-    const auto kAccType = (X.scalar_type() == kHalf || X.scalar_type() == kBFloat16) ? kFloat : X.scalar_type();
+    const auto kAccType =
+        (X.scalar_type() == kHalf || X.scalar_type() == kBFloat16)
+        ? kFloat
+        : X.scalar_type();
     Tensor ds = at::empty({M}, X.options().dtype(kAccType));
     Tensor db = at::empty({M}, X.options().dtype(kAccType));
     Tensor scale = at::empty({M}, X.options().dtype(kAccType));
@@ -413,10 +435,14 @@ void LayerNormBackwardKernelImpl(
     Tensor* dX,
     Tensor* dgamma,
     Tensor* dbeta) {
-  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16,
-      X.scalar_type(), "LayerNormBackwardKernelImpl", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      at::ScalarType::Half,
+      at::ScalarType::BFloat16,
+      X.scalar_type(),
+      "LayerNormBackwardKernelImpl",
+      [&]() {
         LayerNormBackwardKernelImplInternal<scalar_t>(
-            dY, X, mean, rstd, gamma, M, N, dX, dgamma, dbeta);
+            dY.contiguous(), X, mean, rstd, gamma, M, N, dX, dgamma, dbeta);
       });
 }
 

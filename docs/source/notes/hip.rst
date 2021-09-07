@@ -112,6 +112,34 @@ hipFFT/rocFFT plan cache
 
 Setting the size of the cache for hipFFT/rocFFT plans is not supported.
 
+.. _torch-distributed-backends:
+
+torch.distributed backends
+--------------------------
+
+Currently, only the "nccl" and "gloo" backends for torch.distributed are supported on ROCm.
+
+.. _cuda-api-to_hip-api-mappings:
+
+CUDA API to HIP API mappings in C++
+-----------------------------------
+
+Please refer: https://rocmdocs.amd.com/en/latest/Programming_Guides/HIP_API_Guide.html
+
+NOTE: The CUDA_VERSION macro, cudaRuntimeGetVersion and cudaDriverGetVersion APIs do not
+semantically map to the same values as HIP_VERSION macro, hipRuntimeGetVersion and
+hipDriverGetVersion APIs. Please do not use them interchangeably when doing version checks.
+
+Eg: Instead of
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
+If it is desired to not take the code path for ROCm/HIP:
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000 && !defined(USE_ROCM)
+If it is desired to take the code path for ROCm/HIP:
+#if (defined(CUDA_VERSION) && CUDA_VERSION >= 11000) || defined(USE_ROCM)
+If it is desired to take the code path for ROCm/HIP only for specific HIP versions:
+#if (defined(CUDA_VERSION) && CUDA_VERSION >= 11000) || (defined(USE_ROCM) && ROCM_VERSION >= 40300)
+
+
 Refer to CUDA Semantics doc
 ---------------------------
 

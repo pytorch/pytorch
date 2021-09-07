@@ -1,10 +1,8 @@
 #include "caffe2/operators/accumulate_op.h"
 
 namespace caffe2 {
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(Accumulate, AccumulateOp<float, CPUContext>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Accumulate)
   .NumInputs(1)
   .NumOutputs(1)
@@ -27,6 +25,5 @@ argument.
          "then, accumulation is done.")
   .Output(0, "output", "Accumulated output tensor");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(Accumulate);
 }  // namespace caffe2

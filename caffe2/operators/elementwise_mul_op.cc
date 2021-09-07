@@ -2,9 +2,8 @@
 
 namespace caffe2 {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     Mul,
-    BinaryElementwiseOp<NumericTypes, CPUContext, MulFunctor<CPUContext>>);
+    BinaryElementwiseBroadcastOp<NumericTypes, CPUContext, MulFunctor<CPUContext>>);
 
 } // namespace caffe2

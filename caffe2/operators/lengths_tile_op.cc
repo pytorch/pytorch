@@ -44,10 +44,8 @@ bool LengthsTileOp<CPUContext>::RunOnDevice() {
   return true;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(LengthsTile, LengthsTileOp<CPUContext>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(LengthsTile)
     .NumInputs(2)
     .NumOutputs(1)
@@ -95,6 +93,5 @@ class GetLengthsTileGradient : public GradientMakerBase {
         vector<string>{GI(0)});
   }
 };
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(LengthsTile, GetLengthsTileGradient);
 } // namespace caffe2

@@ -56,6 +56,7 @@ struct TORCH_API KernelSpec {
   // Note: assumes the spec is a single block
   // Note: This is the appropriate place to generalize if you want to add other
   //  passes to upfront compilation that walk the graph.
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   KernelSpec(const int64_t _key, const std::shared_ptr<Graph>& _graph)
       : key_{_key},
         graph_{_graph},

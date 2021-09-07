@@ -2,6 +2,7 @@
 
 #include "caffe2/core/operator.h"
 #include "caffe2/core/tensor.h"
+#include "caffe2/core/types.h"
 
 namespace caffe2 {
 
@@ -78,12 +79,21 @@ OpSchema::Cost CostInferenceForBatchOneHot(
   const auto& length = in[1];
   const auto& values = in[2];
 
-  uint64_t nBytesData = nElemFromDim(data) * sizeof(data.data_type());
-  uint64_t nBytesLength = nElemFromDim(length) * sizeof(length.data_type());
-  uint64_t nBytesValues = nElemFromDim(values) * sizeof(values.data_type());
+  auto const& data_element_size_byte =
+      DataTypeToTypeMeta(data.data_type()).itemsize();
+  auto const& length_element_size_byte =
+      DataTypeToTypeMeta(length.data_type()).itemsize();
+  auto const& values_element_size_byte =
+      DataTypeToTypeMeta(values.data_type()).itemsize();
+  auto const& output_element_size_byte =
+      DataTypeToTypeMeta(output.data_type()).itemsize();
+
+  uint64_t nBytesData = nElemFromDim(data) * data_element_size_byte;
+  uint64_t nBytesLength = nElemFromDim(length) * length_element_size_byte;
+  uint64_t nBytesValues = nElemFromDim(values) * values_element_size_byte;
   c.flops = 0;
   c.bytes_read = nBytesData + nBytesLength + nBytesValues;
-  c.bytes_written = nElemFromDim(output) * sizeof(output.data_type());
+  c.bytes_written = nElemFromDim(output) * output_element_size_byte;
   c.params_bytes = 0;
   return c;
 }
@@ -145,15 +155,15 @@ bool BatchBucketOneHotOp<CPUContext>::RunOnDevice() {
     for (int64_t j = 0; j < D; j++) {
       // here we assume the boundary values for each feature are sorted
       int64_t lower_bucket_idx = std::lower_bound(
-                                    boundaries_offset,
-                                    boundaries_offset + lens_data[j],
-                                    input_data[pos]) -
+                                     boundaries_offset,
+                                     boundaries_offset + lens_data[j],
+                                     input_data[pos]) -
           boundaries_offset;
 
       int64_t upper_bucket_idx = std::upper_bound(
-                                    boundaries_offset,
-                                    boundaries_offset + lens_data[j],
-                                    input_data[pos]) -
+                                     boundaries_offset,
+                                     boundaries_offset + lens_data[j],
+                                     input_data[pos]) -
           boundaries_offset;
 
       int64_t bucket_idx = (lower_bucket_idx + upper_bucket_idx) / 2;
@@ -206,16 +216,11 @@ class SegmentOneHotOp : public Operator<CPUContext> {
     return true;
   }
 };
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(BatchBucketOneHot, BatchBucketOneHotOp<CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(BatchOneHot, BatchOneHotOp<CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(OneHot, OneHotOp<CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(SegmentOneHot, SegmentOneHotOp);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(BatchBucketOneHot)
     .NumInputs(3)
     .NumOutputs(1)
@@ -248,7 +253,6 @@ For example
         "based on the bucketization")
     .TensorInferenceFunction(TensorInferenceForBucketBatchOneHot);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(BatchOneHot)
     .NumInputs(3)
     .NumOutputs(1)
@@ -278,7 +282,6 @@ of one-hot encoding for each column. For example
     .CostInferenceFunction(
         OpSchema::CostInferenceFunctionType(CostInferenceForBatchOneHot));
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(OneHot)
     .NumInputs(2)
     .NumOutputs(1)
@@ -346,7 +349,6 @@ one_hots:
         "Scalar with the size of the index. Must be in CPU context")
     .Output(0, "one_hots", "Matrix of size len(indices) x index_size");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SegmentOneHot)
     .NumInputs(3)
     .NumOutputs(1)
@@ -360,13 +362,9 @@ that has the elements in each sequence set to 1.0, and 0.0 everywhere else.
     .Input(2, "index_size_tensor", "Size of the index")
     .Output(0, "one_hots", "Matrix of size len(lengths) x index_size");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 NO_GRADIENT(BatchOneHot);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 NO_GRADIENT(OneHot);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 NO_GRADIENT(SegmentOneHot);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 NO_GRADIENT(BucketBatchOneHot);
 } // namespace caffe2
 

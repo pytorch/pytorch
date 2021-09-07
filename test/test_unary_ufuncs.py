@@ -11,7 +11,7 @@ import unittest
 from torch._six import inf, nan
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, torch_to_numpy_dtype_dict, numpy_to_torch_dtype_dict,
-    suppress_warnings, make_tensor, TEST_SCIPY, slowTest, skipIfNoSciPy, IS_WINDOWS)
+    suppress_warnings, TEST_SCIPY, slowTest, skipIfNoSciPy, IS_WINDOWS)
 from torch.testing._internal.common_methods_invocations import (
     unary_ufuncs, _NOTHING)
 from torch.testing._internal.common_device_type import (
@@ -19,7 +19,7 @@ from torch.testing._internal.common_device_type import (
     onlyCUDA, dtypesIfCUDA, precisionOverride, skipCUDAIfRocm, dtypesIfCPU,
     OpDTypes)
 from torch.testing import (
-    floating_types_and, all_types_and_complex_and, floating_and_complex_types_and)
+    floating_types_and, all_types_and_complex_and, floating_and_complex_types_and, make_tensor)
 
 if TEST_SCIPY:
     import scipy
@@ -359,10 +359,7 @@ class TestUnaryUfuncs(TestCase):
         tensors = generate_numeric_tensors_extremal(device, dtype,
                                                     domain=op.domain)
 
-        # https://github.com/pytorch/pytorch/issues/50749
-        equal_nan = "relaxed" if device.startswith('cuda') else True
-
-        self._test_reference_numerics(dtype, op, tensors, equal_nan)
+        self._test_reference_numerics(dtype, op, tensors)
 
     # Tests for testing (non)contiguity consistency
 
@@ -542,7 +539,7 @@ class TestUnaryUfuncs(TestCase):
             torch.nan_to_num(x, out=out, nan=nan, posinf=posinf, neginf=neginf)
             self.assertEqual(result, out)
 
-    @dtypes(torch.cfloat, torch.cdouble)
+    @dtypes(torch.cdouble)
     def test_complex_edge_values(self, device, dtype):
         # sqrt Test Reference: https://github.com/pytorch/pytorch/pull/47424
         x = torch.tensor(0. - 1.0e+20j, dtype=dtype, device=device)

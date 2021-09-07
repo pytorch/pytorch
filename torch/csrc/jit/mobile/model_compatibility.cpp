@@ -6,6 +6,7 @@
 #include <torch/csrc/jit/mobile/model_compatibility.h>
 #include <torch/csrc/jit/serialization/import_read.h>
 
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -58,38 +59,42 @@ std::vector<IValue> get_bytecode_ivalues(PyTorchStreamReader& reader) {
 /********************** Bytecode **********************/
 
 // Forward declare
-int64_t _get_model_bytecode_version(
+uint64_t _get_model_bytecode_version(
     const std::vector<IValue>& bytecode_ivalues);
 
-int64_t _get_model_bytecode_version(std::istream& in) {
+uint64_t _get_model_bytecode_version(std::istream& in) {
   std::unique_ptr<IStreamAdapter> rai = std::make_unique<IStreamAdapter>(&in);
   return _get_model_bytecode_version(std::move(rai));
 }
 
-int64_t _get_model_bytecode_version(const std::string& filename) {
+uint64_t _get_model_bytecode_version(const std::string& filename) {
   std::unique_ptr<FileAdapter> rai = std::make_unique<FileAdapter>(filename);
   return _get_model_bytecode_version(std::move(rai));
 }
 
-int64_t _get_model_bytecode_version(std::shared_ptr<ReadAdapterInterface> rai) {
+uint64_t _get_model_bytecode_version(
+    std::shared_ptr<ReadAdapterInterface> rai) {
   if (!check_zip_file(rai)) {
-    TORCH_WARN(
-        "The input model might not be generated from _save_for_mobile()");
-    return -1;
+    TORCH_CHECK(
+        false,
+        "Failed to open .ptl file please ensure the model was exported for mobile");
   }
   PyTorchStreamReader reader(std::move(rai));
   auto bytecode_values = get_bytecode_ivalues(reader);
   return _get_model_bytecode_version(bytecode_values);
 }
 
-int64_t _get_model_bytecode_version(
+uint64_t _get_model_bytecode_version(
     const std::vector<IValue>& bytecode_ivalues) {
   if (!bytecode_ivalues.empty() && bytecode_ivalues[0].isInt()) {
     int64_t model_version = bytecode_ivalues[0].toInt();
-    return model_version;
+    TORCH_CHECK(
+        model_version > 0,
+        "Expected model bytecode version > 0 got ",
+        model_version);
+    return static_cast<uint64_t>(model_version);
   }
-  TORCH_WARN("Fail to get bytecode version.");
-  return -1;
+  TORCH_CHECK(false, "Failed to get bytecode version.");
 }
 
 /********************** Operators and Info **********************/
@@ -147,7 +152,7 @@ std::unordered_map<std::string, OperatorInfo> _get_model_ops_and_info(
     return result;
   }
   // loop over all the functions in the bytecode
-  for (int i = 1; i < bytecode_ivalues.size(); i++) {
+  for (const auto i : c10::irange(1, bytecode_ivalues.size())) {
     // descend to the operators list
     auto method_tuple = bytecode_ivalues.at(i).toTuple()->elements();
     auto operators_tuple = method_tuple.at(1).toTuple()->elements()[1];
@@ -168,6 +173,94 @@ std::unordered_map<std::string, OperatorInfo> _get_model_ops_and_info(
         result.emplace(op_name, OperatorInfo{(int)op.at(2).toInt()});
       } else { // no schema information use default
         result.emplace(op_name, OperatorInfo{});
+      }
+    }
+  }
+  return result;
+}
+
+/********************** Compatibility Checker **********************/
+
+ModelCompatibilityInfo ModelCompatibilityInfo::get(std::istream& in) {
+  std::unique_ptr<IStreamAdapter> rai = std::make_unique<IStreamAdapter>(&in);
+  return get(std::move(rai));
+}
+
+ModelCompatibilityInfo ModelCompatibilityInfo::get(
+    const std::string& filename) {
+  std::unique_ptr<FileAdapter> rai = std::make_unique<FileAdapter>(filename);
+  return get(std::move(rai));
+}
+
+ModelCompatibilityInfo ModelCompatibilityInfo::get(
+    std::shared_ptr<caffe2::serialize::ReadAdapterInterface> rai) {
+  if (!check_zip_file(rai)) {
+    TORCH_CHECK(
+        false, "Failed to open zip file for model compatibility information");
+  }
+  PyTorchStreamReader reader(std::move(rai));
+  auto bytecode_values = get_bytecode_ivalues(reader);
+  uint64_t model_bytecode_version =
+      _get_model_bytecode_version(bytecode_values);
+  auto model_info = _get_model_ops_and_info(bytecode_values);
+  return ModelCompatibilityInfo{model_bytecode_version, model_info};
+}
+
+ModelCompatCheckResult is_compatible(
+    RuntimeCompatibilityInfo runtime_info,
+    ModelCompatibilityInfo model_info) {
+  ModelCompatCheckResult result = {ModelCompatibilityStatus::OK, {}};
+  // Check that the models bytecode version is less than or equal to
+  // kMaxSupportedBytecodeVersion from the runtime
+  if (model_info.bytecode_version > runtime_info.bytecode_version) {
+    result.status = ModelCompatibilityStatus::ERROR;
+    std::ostringstream s;
+    s << "model bytecode version " << model_info.bytecode_version
+      << "is greater than the runtimes " << runtime_info.bytecode_version;
+    result.errors.emplace_back(s.str());
+  }
+
+  // Check operators
+  std::unordered_map<std::string, OperatorInfo> operator_info =
+      model_info.operator_info;
+  for (auto const& op : operator_info) {
+    std::string op_name = op.first;
+    OperatorInfo model_op_info = op.second;
+
+    // Check if operator not present in runtime
+    if (runtime_info.operator_info.find(op_name) ==
+        runtime_info.operator_info.end()) {
+      result.status = ModelCompatibilityStatus::ERROR;
+      std::ostringstream s;
+      s << "Operator '" << op_name << "' missing from runtime (not found)";
+      result.errors.push_back(s.str());
+    } else {
+      OperatorInfo runtime_op_info = runtime_info.operator_info.at(op_name);
+
+      // If the runtime op has no schema information its a false alarm and isn't
+      // actually useable
+      if (!runtime_op_info.num_schema_args.has_value()) {
+        result.status = ModelCompatibilityStatus::ERROR;
+        std::ostringstream s;
+        s << "Operator '" << op_name
+          << "' missing from runtime (missing schema)";
+        result.errors.push_back(s.str());
+      } else {
+        // Check if the model operator has schema information. If it doesn't
+        // then the model is from a bytecode version < 6 and we are done. If the
+        // model has more args than the runtime, then the runtime can't know
+        // what to do so we aren't compatible. If the runtime has more args than
+        // the model then we can just use default values and be fine.
+        if (model_op_info.num_schema_args.has_value() &&
+            (model_op_info.num_schema_args.value() >
+             runtime_op_info.num_schema_args.value())) {
+          std::ostringstream s;
+          s << "Operator schema for'" << op_name << "' has "
+            << model_op_info.num_schema_args.value()
+            << " args in model but only "
+            << runtime_op_info.num_schema_args.value() << " in the runtime";
+          result.errors.push_back(s.str());
+        }
       }
     }
   }

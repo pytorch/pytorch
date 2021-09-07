@@ -352,6 +352,9 @@ static inline void copy_to(const Tensor& dst, const Tensor& src) {
     // appear. Users can workaround that case by dst[index..] = src.reshape(..)
     dst.copy_(src);
     return;
+  } else if (src.sizes().size() == 0 && src.device().type() == at::kCPU) {
+    dst.fill_(src.item());
+    return;
   }
   auto src_view = src.view(slicePrefix1sSize(src.sizes()));
   c10::MaybeOwned<Tensor> b_src = expand_inplace(dst, src_view, "setitem");

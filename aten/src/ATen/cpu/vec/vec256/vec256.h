@@ -3,9 +3,9 @@
 // DO NOT DEFINE STATIC DATA IN THIS HEADER!
 // See Note [Do not compile initializers with AVX]
 
-#include <ATen/cpu/vec/vec256/intrinsics.h>
+#include <ATen/cpu/vec/intrinsics.h>
 
-#include <ATen/cpu/vec/vec256/vec256_base.h>
+#include <ATen/cpu/vec/vec_base.h>
 #if !defined(__VSX__)  || !defined(CPU_CAPABILITY_VSX)
 #include <ATen/cpu/vec/vec256/vec256_float.h>
 #include <ATen/cpu/vec/vec256/vec256_float_neon.h>
@@ -23,7 +23,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
-#include <iostream>
+#include <ostream>
 
 namespace at {
 namespace vec {
@@ -68,9 +68,9 @@ std::ostream& operator<<(std::ostream& stream, const Vectorized<T>& vec) {
 }
 
 
-#if (defined(CPU_CAPABILITY_AVX) || defined(CPU_CAPABILITY_AVX2)) && !defined(_MSC_VER)
+#if defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
 
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ CAST (AVX) ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ CAST (AVX2) ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 template<>
 inline Vectorized<float> cast<float, double>(const Vectorized<double>& src) {
@@ -81,29 +81,6 @@ template<>
 inline Vectorized<double> cast<double, float>(const Vectorized<float>& src) {
   return _mm256_castps_pd(src);
 }
-
-#if defined(CPU_CAPABILITY_AVX2)
-
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ CAST (AVX2) ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-#define DEFINE_FLOAT_INT_CAST(int_t, float_t, float_ch)            \
-template<>                                                         \
-inline  Vectorized<int_t> cast<int_t, float_t>(const Vectorized<float_t>& src) {   \
-  return _mm256_castp ## float_ch ## _si256(src);                  \
-}                                                                  \
-template<>                                                         \
-inline Vectorized<float_t> cast<float_t, int_t>(const Vectorized<int_t>& src) {   \
-  return _mm256_castsi256_p ## float_ch (src);                     \
-}
-
-DEFINE_FLOAT_INT_CAST(int64_t, double, d)
-DEFINE_FLOAT_INT_CAST(int32_t, double, d)
-DEFINE_FLOAT_INT_CAST(int16_t, double, d)
-DEFINE_FLOAT_INT_CAST(int64_t, float, s)
-DEFINE_FLOAT_INT_CAST(int32_t, float, s)
-DEFINE_FLOAT_INT_CAST(int16_t, float, s)
-
-#undef DEFINE_FLOAT_INT_CAST
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ GATHER ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -243,8 +220,6 @@ inline deinterleave2<float>(const Vectorized<float>& a, const Vectorized<float>&
                         _mm256_permute2f128_ps(a_grouped, b_grouped, 0b0110001)); // 1, 3.   4 bits apart
 }
 
-#endif  // defined(CPU_CAPABILITY_AVX2)
-
-#endif // (defined(CPU_CAPABILITY_AVX) || defined(CPU_CAPABILITY_AVX2)) && !defined(_MSC_VER)
+#endif // (defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
 
 }}}

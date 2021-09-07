@@ -4,7 +4,7 @@ import shlex
 import unittest
 from typing import List, Optional
 
-from tools import test_history
+from tools.stats import test_history
 from typing_extensions import TypedDict
 
 

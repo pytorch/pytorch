@@ -13,14 +13,14 @@
 #include <cuda_runtime.h>
 #include <type_traits>
 
-#include <THC/THCTensorMathPointwise.cuh>
 #include <THC/THCThrustAllocator.cuh>
 
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAUtils.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 
-#include <ATen/native/sparse/cuda/SparseCUDABlas.cuh>
+#include <ATen/native/sparse/cuda/SparseBlasLegacy.h>
+#include <ATen/native/sparse/cuda/SparseCUDABlas.h>
 #include <ATen/native/sparse/cuda/SparseCUDATensorMath.cuh>
 
 #include <thrust/device_ptr.h>
@@ -30,6 +30,44 @@
 
 namespace at {
 namespace native {
+
+namespace {
+
+template <typename input_t, typename output_t>
+__global__ void convert_indices_from_coo_to_csr_cuda_kernel(output_t* data_out, const input_t* data_in, const int64_t size, const int64_t numel) {
+  int64_t tid = blockDim.x * blockIdx.x + threadIdx.x;
+  if (tid == 0) {
+    for (int64_t i = 0; i <= data_in[0]; i++)
+      data_out[i] = static_cast<output_t>(0);
+  } else if (tid < numel) {
+    for (int64_t i = data_in[tid - 1]; i < data_in[tid]; i++)
+      data_out[i + 1] = static_cast<output_t>(tid);
+  } else if (tid == numel) {
+    for (int64_t i = data_in[numel - 1] + 1; i < size + 1; i++)
+      data_out[i] = static_cast<output_t>(numel);
+  }
+}
+
+template <typename input_t, typename output_t>
+void convert_indices_from_coo_to_csr_cuda(const Tensor& result, const Tensor& input, const int64_t size) {
+  int64_t numel = input.numel();
+  const input_t* data_in = input.data_ptr<input_t>();
+  output_t* data_out = result.data_ptr<output_t>();
+
+  if (numel == 0) {
+    result.zero_();
+    return;
+  }
+
+  // Run (numel + 1) threads...
+  int64_t THREADS = at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock;
+  int64_t BLOCKS = (numel + THREADS) / THREADS;
+  at::cuda::CUDAStream stream = at::cuda::getCurrentCUDAStream();
+  convert_indices_from_coo_to_csr_cuda_kernel<<<BLOCKS, THREADS, 0, stream>>>(data_out, data_in, size, numel);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+}
+
+} // namespace
 
 using namespace at::sparse_csr;
 // certain utiliy functions are usable from sparse COO.
@@ -156,7 +194,8 @@ Tensor& add_out_dense_sparse_csr_cuda(
   } else if (!is_same_tensor(output, dense)) {
     resultBuffer.copy_(dense);
   }
-  AT_DISPATCH_ALL_TYPES(
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
+      kHalf, kBool, kBFloat16,
       commonDtype,
       "add_out_op2_sparse_csr",
       [&valuesBuffer, &resultBuffer, &alpha, &src_crow_indices, &src_col_indices]() {
@@ -224,6 +263,20 @@ Tensor& add_out_sparse_csr_cuda(
         "NotImplementedError: Addition of sparse CSR tensors is not yet implemented.")
   }
   return out;
+}
+
+TORCH_IMPL_FUNC(_convert_indices_from_coo_to_csr_structured_cuda) (
+  const Tensor& input, const int64_t size, const bool out_int32, const Tensor& result
+) {
+  if (out_int32) {
+    AT_DISPATCH_INTEGRAL_TYPES(input.scalar_type(), "convert_indices_from_coo_to_csr_cuda", [&] {
+      convert_indices_from_coo_to_csr_cuda<scalar_t, int>(result, input, size);
+    });
+  } else {
+    AT_DISPATCH_INTEGRAL_TYPES(input.scalar_type(), "convert_indices_from_coo_to_csr_cuda", [&] {
+      convert_indices_from_coo_to_csr_cuda<scalar_t, int64_t>(result, input, size);
+    });
+  }
 }
 
 } // namespace native

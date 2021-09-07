@@ -59,6 +59,8 @@ namespace {
     class QuantizationTests : public ::testing::Test {};
     template <typename T>
     class FunctionalTests : public ::testing::Test {};
+    template <typename T>
+    class FunctionalBF16Tests : public ::testing::Test {};
     using RealFloatTestedTypes = ::testing::Types<vfloat, vdouble>;
     using FloatTestedTypes = ::testing::Types<vfloat, vdouble, vcomplex, vcomplexDbl>;
     using ALLTestedTypes = ::testing::Types<vfloat, vdouble, vcomplex, vlong, vint, vshort, vqint8, vquint8, vqint>;
@@ -66,6 +68,7 @@ namespace {
     using RealFloatIntTestedTypes = ::testing::Types<vfloat, vdouble, vlong, vint, vshort>;
     using FloatIntTestedTypes = ::testing::Types<vfloat, vdouble, vcomplex, vcomplexDbl, vlong, vint, vshort>;
     using ComplexTypes = ::testing::Types<vcomplex, vcomplexDbl>;
+    using BFloatTestedTypes = ::testing::Types<vBFloat16>;
     TYPED_TEST_CASE(Memory, ALLTestedTypes);
     TYPED_TEST_CASE(Arithmetics, FloatIntTestedTypes);
     TYPED_TEST_CASE(Comparison, RealFloatIntTestedTypes);
@@ -94,7 +97,7 @@ namespace {
     TYPED_TEST_CASE(BitwiseFloatsAdditional2, FloatTestedTypes);
     TYPED_TEST_CASE(QuantizationTests, QuantTestedTypes);
     TYPED_TEST_CASE(FunctionalTests, RealFloatIntTestedTypes);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+    TYPED_TEST_CASE(FunctionalBF16Tests, BFloatTestedTypes);
     TYPED_TEST(Memory, UnAlignedLoadStore) {
         using vec = TypeParam;
         using VT = ValueType<TypeParam>;
@@ -143,7 +146,6 @@ namespace {
             std::memset(storage, 0, sizeof storage);
         }
     }
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(SignManipulation, Absolute) {
         using vec = TypeParam;
         bool checkRelativeErr = is_complex<ValueType<TypeParam>>();
@@ -153,7 +155,6 @@ namespace {
             createDefaultUnaryTestCase<vec>(TestSeed(), false, checkRelativeErr),
             RESOLVE_OVERLOAD(filter_int_minimum));
     }
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(SignManipulation, Negate) {
         using vec = TypeParam;
         // negate overflows for minimum on int and long
@@ -163,7 +164,6 @@ namespace {
             createDefaultUnaryTestCase<vec>(TestSeed()),
             RESOLVE_OVERLOAD(filter_int_minimum));
     }
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(Rounding, Round) {
         using vec = TypeParam;
         using UVT = UvalueType<TypeParam>;
@@ -183,7 +183,6 @@ namespace {
             [](vec v) { return v.round(); },
             test_case);
     }
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(Rounding, Ceil) {
         using vec = TypeParam;
         test_unary<vec>(
@@ -192,7 +191,6 @@ namespace {
             [](vec v) { return v.ceil(); },
             createDefaultUnaryTestCase<vec>(TestSeed()));
     }
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(Rounding, Floor) {
         using vec = TypeParam;
         test_unary<vec>(
@@ -201,7 +199,6 @@ namespace {
             [](vec v) { return v.floor(); },
             createDefaultUnaryTestCase<vec>(TestSeed()));
     }
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(Rounding, Trunc) {
         using vec = TypeParam;
         test_unary<vec>(
@@ -210,7 +207,6 @@ namespace {
             [](vec v) { return v.trunc(); },
             createDefaultUnaryTestCase<vec>(TestSeed()));
     }
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(SqrtAndReciprocal, Sqrt) {
         using vec = TypeParam;
         test_unary<vec>(
@@ -219,7 +215,6 @@ namespace {
             [](vec v) { return v.sqrt(); },
             createDefaultUnaryTestCase<vec>(TestSeed(), false, true));
     }
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(SqrtAndReciprocalReal, RSqrt) {
         using vec = TypeParam;
         test_unary<vec>(
@@ -229,7 +224,6 @@ namespace {
             createDefaultUnaryTestCase<vec>(TestSeed()),
             RESOLVE_OVERLOAD(filter_zero));
     }
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(SqrtAndReciprocalReal, Reciprocal) {
         using vec = TypeParam;
         test_unary<vec>(
@@ -239,7 +233,6 @@ namespace {
             createDefaultUnaryTestCase<vec>(TestSeed()),
             RESOLVE_OVERLOAD(filter_zero));
     }
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(FractionAndRemainderReal, Frac) {
       using vec = TypeParam;
       test_unary<vec>(
@@ -248,7 +241,6 @@ namespace {
           [](vec v) { return v.frac(); },
           createDefaultUnaryTestCase<vec>(TestSeed(), false, true));
     }
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(FractionAndRemainderReal, Fmod) {
       using vec = TypeParam;
       test_binary<vec>(
@@ -258,7 +250,6 @@ namespace {
           createDefaultBinaryTestCase<vec>(TestSeed()),
           RESOLVE_OVERLOAD(filter_fmod));
     }
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(Trigonometric, Sin) {
         using vec = TypeParam;
         using UVT = UvalueType<TypeParam>;
@@ -273,7 +264,6 @@ namespace {
             [](vec v) { return v.sin(); },
             test_case);
     }
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(Trigonometric, Cos) {
         using vec = TypeParam;
         using UVT = UvalueType<TypeParam>;
@@ -288,7 +278,6 @@ namespace {
             [](vec v) { return v.cos(); },
             test_case);
     }
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(Trigonometric, Tan) {
         using vec = TypeParam;
         test_unary<vec>(
@@ -297,7 +286,6 @@ namespace {
             [](vec v) { return v.tan(); },
             createDefaultUnaryTestCase<vec>(TestSeed()));
     }
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(Hyperbolic, Tanh) {
         using vec = TypeParam;
         test_unary<vec>(
@@ -306,7 +294,6 @@ namespace {
             [](vec v) { return v.tanh(); },
             createDefaultUnaryTestCase<vec>(TestSeed()));
     }
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(Hyperbolic, Sinh) {
         using vec = TypeParam;
         using UVT = UvalueType<TypeParam>;
@@ -321,7 +308,6 @@ namespace {
             [](vec v) { return v.sinh(); },
             test_case);
     }
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(Hyperbolic, Cosh) {
         using vec = TypeParam;
         using UVT = UvalueType<TypeParam>;
@@ -336,7 +322,6 @@ namespace {
             [](vec v) { return v.cosh(); },
             test_case);
     }
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(InverseTrigonometric, Asin) {
         using vec = TypeParam;
         using UVT = UvalueType<TypeParam>;
@@ -352,7 +337,6 @@ namespace {
             [](vec v) { return v.asin(); },
             test_case);
     }
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(InverseTrigonometric, ACos) {
         using vec = TypeParam;
         using UVT = UvalueType<TypeParam>;
@@ -368,7 +352,6 @@ namespace {
             [](vec v) { return v.acos(); },
             test_case);
     }
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(InverseTrigonometric, ATan) {
         bool checkRelativeErr = is_complex<ValueType<TypeParam>>();
         using vec = TypeParam;
@@ -385,7 +368,6 @@ namespace {
             test_case,
             RESOLVE_OVERLOAD(filter_zero));
     }
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(Logarithm, Log) {
         using vec = TypeParam;
         test_unary<vec>(
@@ -394,7 +376,6 @@ namespace {
             [](const vec& v) { return v.log(); },
             createDefaultUnaryTestCase<vec>(TestSeed()));
     }
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(LogarithmReals, Log2) {
         using vec = TypeParam;
         test_unary<vec>(
@@ -403,7 +384,6 @@ namespace {
             [](const vec& v) { return v.log2(); },
             createDefaultUnaryTestCase<vec>(TestSeed()));
     }
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(Logarithm, Log10) {
         using vec = TypeParam;
         test_unary<vec>(
@@ -412,7 +392,6 @@ namespace {
             [](const vec& v) { return v.log10(); },
             createDefaultUnaryTestCase<vec>(TestSeed()));
     }
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(LogarithmReals, Log1p) {
         using vec = TypeParam;
         using UVT = UvalueType<TypeParam>;
@@ -428,7 +407,6 @@ namespace {
             [](const vec& v) { return v.log1p(); },
             test_case);
     }
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(Exponents, Exp) {
         using vec = TypeParam;
         test_unary<vec>(
@@ -437,7 +415,6 @@ namespace {
             [](const vec& v) { return v.exp(); },
             createDefaultUnaryTestCase<vec>(TestSeed()));
     }
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(Exponents, Expm1) {
         using vec = TypeParam;
         test_unary<vec>(
@@ -446,7 +423,6 @@ namespace {
             [](const vec& v) { return v.expm1(); },
             createDefaultUnaryTestCase<vec>(TestSeed(), false, true));
     }
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(ErrorFunctions, Erf) {
         using vec = TypeParam;
         test_unary<vec>(
@@ -455,7 +431,6 @@ namespace {
             [](const vec& v) { return v.erf(); },
             createDefaultUnaryTestCase<vec>(TestSeed(), false, true));
     }
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(ErrorFunctions, Erfc) {
         using vec = TypeParam;
         test_unary<vec>(
@@ -464,7 +439,6 @@ namespace {
             [](const vec& v) { return v.erfc(); },
             createDefaultUnaryTestCase<vec>(TestSeed(), false, true));
     }
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(ErrorFunctions, Erfinv) {
         using vec = TypeParam;
         test_unary<vec>(
@@ -473,7 +447,6 @@ namespace {
             [](const vec& v) { return v.erfinv(); },
             createDefaultUnaryTestCase<vec>(TestSeed(), false, true));
     }
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(Nan, IsNan) {
         using vec = TypeParam;
         using VT = ValueType<TypeParam>;
@@ -499,7 +472,6 @@ namespace {
           AssertVectorized<vec>(NAME_INFO(isnan), expected, actual).check();
         }
     }
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(LGamma, LGamma) {
         using vec = TypeParam;
         using UVT = UvalueType<vec>;
@@ -517,7 +489,6 @@ namespace {
             [](vec v) { return v.lgamma(); },
             testCase);
     }
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(InverseTrigonometricReal, ATan2) {
         using vec = TypeParam;
         test_binary<vec>(
@@ -528,7 +499,6 @@ namespace {
             },
             createDefaultBinaryTestCase<vec>(TestSeed()));
     }
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(Pow, Pow) {
         using vec = TypeParam;
         test_binary<vec>(
@@ -537,7 +507,6 @@ namespace {
             [](vec v0, vec v1) { return v0.pow(v1); },
             createDefaultBinaryTestCase<vec>(TestSeed(), false, true));
     }
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(RealTests, Hypot) {
         using vec = TypeParam;
         test_binary<vec>(
@@ -546,7 +515,6 @@ namespace {
             [](vec v0, vec v1) { return v0.hypot(v1); },
             createDefaultBinaryTestCase<vec>(TestSeed(), false, true));
     }
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(RealTests, NextAfter) {
         using vec = TypeParam;
         test_binary<vec>(
@@ -555,7 +523,6 @@ namespace {
             [](vec v0, vec v1) { return v0.nextafter(v1); },
             createDefaultBinaryTestCase<vec>(TestSeed(), false, true));
     }
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(Interleave, Interleave) {
         using vec = TypeParam;
         using VT = ValueType<TypeParam>;
@@ -576,7 +543,6 @@ namespace {
         AssertVectorized<vec>(NAME_INFO(Interleave FirstHalf), std::get<0>(cc), vec::loadu(interleaved)).check(true);
         AssertVectorized<vec>(NAME_INFO(Interleave SecondHalf), std::get<1>(cc), vec::loadu(interleaved + vec::size())).check(true);
     }
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(Interleave, DeInterleave) {
         using vec = TypeParam;
         using VT = ValueType<TypeParam>;
@@ -598,7 +564,6 @@ namespace {
         AssertVectorized<vec>(NAME_INFO(DeInterleave FirstHalf), std::get<0>(cc), vec::loadu(vals)).check(true);
         AssertVectorized<vec>(NAME_INFO(DeInterleave SecondHalf), std::get<1>(cc), vec::loadu(vals + vec::size())).check(true);
     }
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(Arithmetics, Plus) {
         using vec = TypeParam;
         using VT = ValueType<TypeParam>;
@@ -611,7 +576,6 @@ namespace {
             createDefaultBinaryTestCase<vec>(TestSeed()),
                 RESOLVE_OVERLOAD(filter_add_overflow));
     }
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(Arithmetics, Minus) {
         using vec = TypeParam;
         using VT = ValueType<TypeParam>;
@@ -624,7 +588,6 @@ namespace {
             createDefaultBinaryTestCase<vec>(TestSeed()),
                 RESOLVE_OVERLOAD(filter_sub_overflow));
     }
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(Arithmetics, Multiplication) {
         using vec = TypeParam;
         test_binary<vec>(
@@ -634,7 +597,6 @@ namespace {
             createDefaultBinaryTestCase<vec>(TestSeed(), false, true),
             RESOLVE_OVERLOAD(filter_mult_overflow));
     }
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(Arithmetics, Division) {
         using vec = TypeParam;
         TestSeed seed;
@@ -645,7 +607,6 @@ namespace {
             createDefaultBinaryTestCase<vec>(seed),
             RESOLVE_OVERLOAD(filter_div_ub));
     }
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(Bitwise, BitAnd) {
         using vec = TypeParam;
         test_binary<vec>(
@@ -654,7 +615,6 @@ namespace {
             [](const vec& v0, const vec& v1) { return v0 & v1; },
             createDefaultBinaryTestCase<vec>(TestSeed(), true));
     }
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(Bitwise, BitOr) {
         using vec = TypeParam;
         test_binary<vec>(
@@ -663,7 +623,6 @@ namespace {
             [](const vec& v0, const vec& v1) { return v0 | v1; },
             createDefaultBinaryTestCase<vec>(TestSeed(), true));
     }
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(Bitwise, BitXor) {
         using vec = TypeParam;
         test_binary<vec>(
@@ -672,7 +631,6 @@ namespace {
             [](const vec& v0, const vec& v1) { return v0 ^ v1; },
             createDefaultBinaryTestCase<vec>(TestSeed(), true));
     }
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(Comparison, Equal) {
         using vec = TypeParam;
         using VT = ValueType<TypeParam>;
@@ -682,7 +640,6 @@ namespace {
             [](const vec& v0, const vec& v1) { return v0 == v1; },
             createDefaultBinaryTestCase<vec>(TestSeed(), true));
     }
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(Comparison, NotEqual) {
         using vec = TypeParam;
         using VT = ValueType<TypeParam>;
@@ -692,7 +649,6 @@ namespace {
             [](const vec& v0, const vec& v1) { return v0 != v1; },
             createDefaultBinaryTestCase<vec>(TestSeed(), true));
     }
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(Comparison, Greater) {
         using vec = TypeParam;
         using VT = ValueType<TypeParam>;
@@ -702,7 +658,6 @@ namespace {
             [](const vec& v0, const vec& v1) { return v0 > v1; },
             createDefaultBinaryTestCase<vec>(TestSeed(), true));
     }
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(Comparison, Less) {
         using vec = TypeParam;
         using VT = ValueType<TypeParam>;
@@ -712,7 +667,6 @@ namespace {
             [](const vec& v0, const vec& v1) { return v0 < v1; },
             createDefaultBinaryTestCase<vec>(TestSeed(), true));
     }
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(Comparison, GreaterEqual) {
         using vec = TypeParam;
         using VT = ValueType<TypeParam>;
@@ -722,7 +676,6 @@ namespace {
             [](const vec& v0, const vec& v1) { return v0 >= v1; },
             createDefaultBinaryTestCase<vec>(TestSeed(), true));
     }
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(Comparison, LessEqual) {
         using vec = TypeParam;
         using VT = ValueType<TypeParam>;
@@ -732,7 +685,6 @@ namespace {
             [](const vec& v0, const vec& v1) { return v0 <= v1; },
             createDefaultBinaryTestCase<vec>(TestSeed(), true));
     }
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(MinMax, Minimum) {
         using vec = TypeParam;
         using VT = ValueType<TypeParam>;
@@ -744,7 +696,6 @@ namespace {
             },
             createDefaultBinaryTestCase<vec>(TestSeed()));
     }
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(MinMax, Maximum) {
         using vec = TypeParam;
         using VT = ValueType<TypeParam>;
@@ -756,7 +707,6 @@ namespace {
             },
             createDefaultBinaryTestCase<vec>(TestSeed()));
     }
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(MinMax, ClampMin) {
         using vec = TypeParam;
         using VT = ValueType<TypeParam>;
@@ -768,7 +718,6 @@ namespace {
             },
             createDefaultBinaryTestCase<vec>(TestSeed()));
     }
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(MinMax, ClampMax) {
         using vec = TypeParam;
         using VT = ValueType<TypeParam>;
@@ -780,7 +729,6 @@ namespace {
             },
             createDefaultBinaryTestCase<vec>(TestSeed()));
     }
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(MinMax, Clamp) {
         using vec = TypeParam;
         using VT = ValueType<TypeParam>;
@@ -792,7 +740,6 @@ namespace {
             createDefaultTernaryTestCase<vec>(TestSeed()),
                 RESOLVE_OVERLOAD(filter_clamp));
     }
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(BitwiseFloatsAdditional, ZeroMask) {
         using vec = TypeParam;
         using VT = ValueType<TypeParam>;
@@ -817,7 +764,6 @@ namespace {
                 << "\nActual:\n#\t" << actual;
         }
     }
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(BitwiseFloatsAdditional, Convert) {
         using vec = TypeParam;
         using VT = ValueType<TypeParam>;
@@ -857,7 +803,6 @@ namespace {
         auto actual2 = vec::loadu(actual_vals2);
         AssertVectorized<vec>(NAME_INFO(test_convert_to_float), expected2, actual2).check();
     }
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(BitwiseFloatsAdditional, Fmadd) {
         using vec = TypeParam;
         using VT = ValueType<TypeParam>;
@@ -974,7 +919,6 @@ namespace {
         a[1] = a[0] + add;
         b[1] = b[0] + add;
     }
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(BitwiseFloatsAdditional, Blendv) {
         using vec = TypeParam;
         using VT = ValueType<TypeParam>;
@@ -989,7 +933,6 @@ namespace {
         blend_init(a, b);
         test_blendv<vec, VT, 0, vec::size()>(expected_val, a, b, mask);
     }
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(BitwiseFloatsAdditional2, Blend) {
         using vec = TypeParam;
         using VT = ValueType<TypeParam>;
@@ -1023,7 +966,6 @@ namespace {
         }
         test_set<vec, VT>(expected_val, a, b, (count == 0 ? -1 : count / 2));
     }
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(BitwiseFloatsAdditional2, Set) {
         using vec = TypeParam;
         using VT = ValueType<TypeParam>;
@@ -1048,7 +990,6 @@ namespace {
        base = T(5.0, 5.0);
        step = T(2.0, 3.0);
     }
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(RangeFactories, Arange) {
         using vec = TypeParam;
         using VT = ValueType<TypeParam>;
@@ -1064,16 +1005,19 @@ namespace {
         auto actual = vec::arange(base, step);
         AssertVectorized<vec>(NAME_INFO(test_arange), expected, actual).check();
     }
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TEST(ComplexTests, TestComplexFloatImagRealConj) {
         // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers,cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
-        float aa[] = { 1.5488e-28,2.5488e-28,3.5488e-28,4.5488e-28,5.5488e-28,6.5488e-28,7.5488e-28,8.5488e-28 };
+        float aa[] = { 1.5488e-28,2.5488e-28,3.5488e-28,4.5488e-28,5.5488e-28,6.5488e-28,7.5488e-28,8.5488e-28,
+                       9.5488e-28,10.5488e-28,11.5488e-28,12.5488e-28,13.5488e-28,14.5488e-28,15.5488e-28,16.5488e-28};
         // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers,cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
-        float exp[] = { aa[0],0,aa[2],0,aa[4],0,aa[6],0 };
+        float exp[] = { aa[0],0,aa[2],0,aa[4],0,aa[6],0,aa[8],0,aa[10],0,aa[12],0,aa[14],0 };
         // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers,cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
-        float exp3[] = { aa[1],0,aa[3],0,aa[5],0,aa[7],0 };
+        float exp3[] = { aa[1],0,aa[3],0,aa[5],0,aa[7],0,aa[9],0,aa[11],0,aa[13],0,aa[15],0 };
         // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers,cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
-        float exp4[] = { 1.5488e-28, -2.5488e-28,3.5488e-28,-4.5488e-28,5.5488e-28,-6.5488e-28,7.5488e-28,-8.5488e-28 };
+        float exp4[] = { 1.5488e-28, -2.5488e-28,3.5488e-28,-4.5488e-28,
+                         5.5488e-28,-6.5488e-28,7.5488e-28,-8.5488e-28,
+                         9.5488e-28,-10.5488e-28,11.5488e-28,-12.5488e-28,
+                         13.5488e-28,-14.5488e-28,15.5488e-28,-16.5488e-28 };
         auto a = vcomplex::loadu(aa);
         auto actual1 = a.real();
         auto actual3 = a.imag();
@@ -1085,7 +1029,6 @@ namespace {
         AssertVectorized<vcomplex>(NAME_INFO(complex imag), expected3, actual3).check();
         AssertVectorized<vcomplex>(NAME_INFO(complex conj), expected4, actual4).check();
     }
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(QuantizationTests, Quantize) {
         using vec = TypeParam;
         using underlying = ValueType<vec>;
@@ -1127,7 +1070,6 @@ namespace {
             if (AssertVectorized<vec>(NAME_INFO(Quantize), expected, actual).check()) return;
         } //trials;
     }
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(QuantizationTests, DeQuantize) {
         using vec = TypeParam;
         using underlying = ValueType<vec>;
@@ -1176,7 +1118,6 @@ namespace {
             }
         } //trials;
     }
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(QuantizationTests, ReQuantizeFromInt) {
         using vec = TypeParam;
         using underlying = ValueType<vec>;
@@ -1214,7 +1155,6 @@ namespace {
             }
         } //trials;
     }
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(QuantizationTests, WideningSubtract) {
         using vec = TypeParam;
         using underlying = ValueType<vec>;
@@ -1257,7 +1197,6 @@ namespace {
             }
         } //trials;
     }
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(QuantizationTests, Relu) {
         using vec = TypeParam;
         using VT = ValueType<TypeParam>;
@@ -1275,7 +1214,6 @@ namespace {
             },
             test_case);
     }
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(QuantizationTests, Relu6) {
         using vec = TypeParam;
         using VT = ValueType<TypeParam>;
@@ -1335,10 +1273,144 @@ namespace {
         at::vec::map3<VT>([](vec x1, vec x2, vec x3) { return x1 + x2 + x3; }, y, x1, x2, x3, N);
         for (int64_t i = 0; i < N; i++) { ref_y[i] = x1[i] + x2[i] + x3[i]; }
         cmp(y, ref_y);
-        // test map3: y = x1 + x2 + x3 + x4
+        // test map4: y = x1 + x2 + x3 + x4
         at::vec::map4<VT>([](vec x1, vec x2, vec x3, vec x4) { return x1 + x2 + x3 + x4; }, y, x1, x2, x3, x4, N);
         for (int64_t i = 0; i < N; i++) { ref_y[i] = x1[i] + x2[i] + x3[i] + x4[i]; }
         cmp(y, ref_y);
+    }
+      TYPED_TEST(FunctionalBF16Tests, Reduce) {
+      using vec = TypeParam;
+      // Can't use ValueType<TypeParam> here:
+      // Vectorized<BFloat16>::value_type returns uint16_t on AVX2/AVX512
+      using VT = c10::BFloat16;
+      using RT = float; // reference
+      constexpr auto R = 2LL; // residual
+      constexpr auto N = vec::size() * 2 + R;
+      CACHE_ALIGN RT x_f1[N];
+      CACHE_ALIGN RT x_f2[N];
+      CACHE_ALIGN RT x_f3[N];
+      CACHE_ALIGN VT x_b1[N];
+      CACHE_ALIGN VT x_b2[N];
+      CACHE_ALIGN VT x_b3[N];
+      auto seed = TestSeed();
+      ValueGen<RT> generator(RT(-1), RT(1), seed);
+      for (int64_t i = 0; i < N; i++) {
+        x_f1[i] = generator.get();
+        x_f2[i] = generator.get();
+        x_f3[i] = generator.get();
+        x_b1[i] = VT(x_f1[i]);
+        x_b2[i] = VT(x_f2[i]);
+        x_b3[i] = VT(x_f3[i]);
+      }
+      float atol = 0.01f;
+      float rtol = 0.01f;
+      auto cmp = [=](RT ref, VT val) { return std::abs(ref - val) <= atol + rtol * std::abs(val); };
+      auto sum = [](auto& x, auto& y) { return x + y; };
+      auto max = [](auto& x, auto& y) { return at::vec::maximum(x, y); };
+      // ReduceAll
+      for (int64_t len = 1; len <= N; len++) {
+        auto y1 = at::vec::reduce_all<RT>(sum, x_f1, len);
+        auto y2 = at::vec::reduce_all<VT>(sum, x_b1, len);
+        ASSERT_TRUE(cmp(y1, y2)) << "Failure Details:\nTest Seed to reproduce: " << seed
+            << "\nreduce_all, Length: " << len << "; fp32: " << y1 << "; bf16: " << RT(y2);
+      }
+      // Reduce2All
+      for (int64_t len = 1; len <= N; len++) {
+        auto y1 = at::vec::reduce2_all<RT>(sum, max, x_f1, len);
+        auto y2 = at::vec::reduce2_all<VT>(sum, max, x_b1, len);
+        ASSERT_TRUE(cmp(y1.first, y2.first) && cmp(y1.second, y2.second)) << "Failure Details:\nTest Seed to reproduce: " << seed
+            << "\nreduce2_all, Length: " << len << "; fp32(fun1): " << y1.first << "; bf16(fun1): " << RT(y2.first)
+            << "; fp32(fun2): " << y1.second << "; bf16(fun2): " << y2.second;
+      }
+      // MapReduceAll
+      for (int64_t len = 1; len <= N; len++) {
+        auto y1 = at::vec::map_reduce_all<RT>([](auto x) { return x - x.exp(); }, sum, x_f1, len);
+        auto y2 = at::vec::map_reduce_all<VT>([](auto x) { return x - x.exp(); }, sum, x_b1, len);
+        ASSERT_TRUE(cmp(y1, y2)) << "Failure Details:\nTest Seed to reproduce: " << seed
+            << "\nmap_reduce_all, Length: " << len << "; fp32: " << y1 << "; bf16: " << RT(y2);
+      }
+      // Map2ReduceAll
+      for (int64_t len = 1; len <= N; len++) {
+        auto y1 = at::vec::map2_reduce_all<RT>([](auto x, auto y) { return x * y; }, sum, x_f1, x_f2, len);
+        auto y2 = at::vec::map2_reduce_all<VT>([](auto x, auto y) { return x * y; }, sum, x_b1, x_b2, len);
+        ASSERT_TRUE(cmp(y1, y2)) << "Failure Details:\nTest Seed to reproduce: " << seed
+            << "\nmap2_reduce_all, Length: " << len << "; fp32: " << y1 << "; bf16: " << RT(y2);
+      }
+      // Map3ReduceAll
+      for (int64_t len = 1; len <= N; len++) {
+        auto y1 = at::vec::map3_reduce_all<RT>([](auto x, auto y, auto z) { return x * y + z; }, sum, x_f1, x_f2, x_f3, len);
+        auto y2 = at::vec::map3_reduce_all<VT>([](auto x, auto y, auto z) { return x * y + z; }, sum, x_b1, x_b2, x_b3, len);
+        ASSERT_TRUE(cmp(y1, y2)) << "Failure Details:\nTest Seed to reproduce: " << seed
+            << "\nmap3_reduce_all, Length: " << len << "; fp32: " << y1 << "; bf16: " << RT(y2);
+      }
+    }
+    TYPED_TEST(FunctionalBF16Tests, Map) {
+      using vec = TypeParam;
+      using VT = c10::BFloat16;
+      using RT = float; // reference
+      constexpr auto R = 2LL; // residual
+      constexpr auto N = vec::size() * 2 + R;
+      CACHE_ALIGN RT x_f1[N];
+      CACHE_ALIGN RT x_f2[N];
+      CACHE_ALIGN RT x_f3[N];
+      CACHE_ALIGN RT x_f4[N];
+      CACHE_ALIGN VT x_b1[N];
+      CACHE_ALIGN VT x_b2[N];
+      CACHE_ALIGN VT x_b3[N];
+      CACHE_ALIGN VT x_b4[N];
+      CACHE_ALIGN RT y_f[N];
+      CACHE_ALIGN VT y_b[N];
+      auto seed = TestSeed();
+      ValueGen<RT> generator(RT(-1), RT(1), seed);
+      for (int64_t i = 0; i < N; i++) {
+        x_f1[i] = generator.get();
+        x_f2[i] = generator.get();
+        x_f3[i] = generator.get();
+        x_f4[i] = generator.get();
+        x_b1[i] = VT(x_f1[i]);
+        x_b2[i] = VT(x_f2[i]);
+        x_b3[i] = VT(x_f3[i]);
+        x_b4[i] = VT(x_f4[i]);
+      }
+      float atol = 0.01f;
+      float rtol = 0.01f;
+      auto cmp = [=](RT ref, VT val) { return std::abs(ref - val) <= atol + rtol * std::abs(val); };
+      // Map
+      for (int64_t len = 1; len <= N; len++) {
+        at::vec::map<RT>([](auto x) { return x; }, y_f, x_f1, len);
+        at::vec::map<VT>([](auto x) { return x; }, y_b, x_b1, len);
+        for (int64_t i = 0; i < len; i++) {
+          ASSERT_TRUE(cmp(y_f[i], y_b[i])) << "Failure Details:\nTest Seed to reproduce: " << seed
+              << "\nmap, Length: " << len << "; index: " << i << "; fp32 reference: " << y_f[i] << "; bf16 value: " << RT(y_b[i]);
+        }
+      }
+      // Map2
+      for (int64_t len = 1; len <= N; len++) {
+        at::vec::map2<RT>([](auto x, auto y) { return x + y; }, y_f, x_f1, x_f2, len);
+        at::vec::map2<VT>([](auto x, auto y) { return x + y; }, y_b, x_b1, x_b2, len);
+        for (int64_t i = 0; i < len; i++) {
+          ASSERT_TRUE(cmp(y_f[i], y_b[i])) << "Failure Details:\nTest Seed to reproduce: " << seed
+              << "\nmap2, Length: " << len << "; index: " << i << "; fp32 reference: " << y_f[i] << "; bf16 value: " << RT(y_b[i]);
+        }
+      }
+      // Map3
+      for (int64_t len = 1; len <= N; len++) {
+        at::vec::map3<RT>([](auto x, auto y, auto z) { return x + y * z; }, y_f, x_f1, x_f2, x_f3, len);
+        at::vec::map3<VT>([](auto x, auto y, auto z) { return x + y * z; }, y_b, x_b1, x_b2, x_b3, len);
+        for (int64_t i = 0; i < len; i++) {
+          ASSERT_TRUE(cmp(y_f[i], y_b[i])) << "Failure Details:\nTest Seed to reproduce: " << seed
+              << "\nmap3, Length: " << len << "; index: " << i << "; fp32 reference: " << y_f[i] << "; bf16 value: " << RT(y_b[i]);
+        }
+      }
+      // Map4
+      for (int64_t len = 1; len <= N; len++) {
+         at::vec::map4<RT>([](auto x, auto y, auto z, auto w) { return x + y * z - w; }, y_f, x_f1, x_f2, x_f3, x_f4, len);
+         at::vec::map4<VT>([](auto x, auto y, auto z, auto w) { return x + y * z - w; }, y_b, x_b1, x_b2, x_b3, x_b4, len);
+         for (int64_t i = 0; i < len; i++) {
+           ASSERT_TRUE(cmp(y_f[i], y_b[i])) << "Failure Details:\nTest Seed to reproduce: " << seed
+               << "\nmap4, Length: " << len << "; index: " << i << "; fp32 reference: " << y_f[i] << "; bf16 value: " << RT(y_b[i]);
+         }
+      }
     }
 
 #else
