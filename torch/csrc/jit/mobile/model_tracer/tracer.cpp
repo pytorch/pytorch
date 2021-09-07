@@ -42,12 +42,41 @@ C10_DEFINE_string(
     return 1;                                               \
   }
 
-void printYAML(std::ostream& out, const std::set<std::string>& operator_list) {
-  std::cout << "test" << std::endl;
+void printOpYAML(
+    std::ostream& out,
+    int indent,
+    const std::string& op_name,
+    bool is_used_for_training,
+    bool is_root_operator,
+    bool include_all_overloads) {
+  out << std::string(indent, ' ') << op_name << ":" << std::endl;
+  out << std::string(indent + 2, ' ')
+      << "is_used_for_training: " << (is_used_for_training ? "true" : "false")
+      << std::endl;
+  out << std::string(indent + 2, ' ')
+      << "is_root_operator: " << (is_root_operator ? "true" : "false")
+      << std::endl;
+  out << std::string(indent + 2, ' ')
+      << "include_all_overloads: " << (include_all_overloads ? "true" : "false")
+      << std::endl;
+}
+
+void printOpsYAML(
+    std::ostream& out,
+    const std::set<std::string>& operator_list,
+    bool is_used_for_training,
+    bool is_root_operator,
+    bool include_all_overloads) {
   for (auto& it : operator_list) {
-    out << "- " << it << std::endl;
+    printOpYAML(out, 2, it, false, is_root_operator, false);
   }
 }
+
+const std::vector<std::string> always_included_root_ops = {
+    // The following ops are missing in tracing.
+    "aten::addmm_",
+    "aten::slow_conv_dilated2d",
+};
 
 /**
  * Converts a pytorch model (full/lite) to lite interpreter model for
@@ -73,5 +102,18 @@ int main(int argc, char* argv[]) {
   torch::jit::mobile::TracerResult tracer_result =
       torch::jit::mobile::trace_run(FLAGS_model_input_path);
 
-  printYAML(yaml_out, tracer_result.traced_operators);
+  tracer_result.root_ops.insert(
+      always_included_root_ops.begin(), always_included_root_ops.end());
+
+  for (auto& it : tracer_result.called_kernel_tags) {
+    std::cout << "kernal tag, key: " << it.first << " value: " << it.second
+              << std::endl;
+  }
+  for (auto& it : tracer_result.traced_operators) {
+    std::cout << "- " << it << std::endl;
+  }
+  yaml_out << "include_all_kernel_dtypes: true" << std::endl;
+  yaml_out << "operators:" << std::endl;
+  printOpsYAML(yaml_out, tracer_result.root_ops, false, true, false);
+  printOpsYAML(yaml_out, tracer_result.traced_operators, false, false, false);
 }
