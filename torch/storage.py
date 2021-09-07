@@ -2,7 +2,8 @@ import io
 
 import torch
 from ._utils import _type, _cuda, classproperty
-from typing import Any, TypeVar, Type, Union
+from torch.types import Storage
+from typing import Any, TypeVar, Type, Union, cast
 import copy
 import collections
 
@@ -26,7 +27,7 @@ class _StorageBase(object):
     def cuda(self, device=None, non_blocking=False, **kwargs) -> T: ...  # noqa: E704
     def element_size(self) -> int: ...  # noqa: E704
     def get_device(self) -> int: ...  # noqa: E704
-    def data_ptr(self) -> int: ... # noqa: E704
+    def data_ptr(self) -> int: ...  # noqa: E704
 
     # Defined in torch/csrc/generic/StorageSharing.cpp
     def _share_filename_(self): ...  # noqa: E704
@@ -80,7 +81,7 @@ class _StorageBase(object):
         return _type(self, getattr(torch, self.__class__.__name__))
 
     def _to(self, dtype):
-        storage = torch.tensor([], dtype=self.dtype, device=self.device).set_(self).to(dtype).storage()
+        storage = torch.tensor([], dtype=self.dtype, device=self.device).set_(cast(Storage, self)).to(dtype).storage()
         if storage.data_ptr() == self.data_ptr():
             storage = storage.clone()
         return storage
