@@ -28,7 +28,7 @@ void insertProfileNodesForSpecializeAutogradZero(
     auto n = *it;
     for (const auto offset : c10::irange(n->inputs().size())) {
       auto i = n->input(offset);
-      if (i->type()->isOptional() && hasGradSumToSizeUses(i)) {
+      if (i->type()->cast<OptionalType>() && hasGradSumToSizeUses(i)) {
         // here we are profile the definition instead of the use,
         // because we are only optimizing in the case of a None value which is
         // immutable

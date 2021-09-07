@@ -101,11 +101,22 @@ void restoreAccurateTypeTags(const IValue& root, const TypePtr& type_tag) {
           to_process.emplace_back(std::move(elem));
         }
       } break;
+      case OptionalType::Kind: {
+        if (!w.value.isNone()) {
+          auto t = w.static_type->expect<OptionalType>();
+          Work elem = {t->getElementType(), w.value};
+          to_process.emplace_back(std::move(elem));
+        }
+      } break;
       case UnionType::Kind: {
         auto t = w.static_type->expect<UnionType>();
-        if (t->isOptional()) {
+        if (t->containedTypes().size() == 2 &&
+            t->canHoldType(NoneType::get())) {
           if (!w.value.isNone()) {
-            Work elem = {t->getContainedElementIfOptional(), w.value};
+            auto inner = t->containedTypes()[0] != NoneType::get()
+                ? t->containedTypes()[0]
+                : t->containedTypes()[1];
+            Work elem = {inner, w.value};
             to_process.emplace_back(std::move(elem));
           }
         }
@@ -147,13 +158,7 @@ void restoreAccurateTypeTags(const IValue& root, const TypePtr& type_tag) {
           Work elem = {typ->getAttribute(i), obj->getSlot(i)};
           to_process.emplace_back(std::move(elem));
         }
-      } break;
-      default:
-        TORCH_INTERNAL_ASSERT(
-            false,
-            "Unknown type found during "
-            "deserialization! Check "
-            "`restoreAccurateTypeTags` for details");
+      };
     }
   }
 }

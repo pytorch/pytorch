@@ -22,6 +22,7 @@ using c10::IntType;
 using c10::ListType;
 using c10::NoneType;
 using c10::NumberType;
+using c10::OptionalType;
 using c10::QSchemeType;
 using c10::QuantizerType;
 using c10::RRefType;
@@ -390,7 +391,7 @@ std::pair<TypePtr, c10::optional<AliasInfo>> SchemaTypeParser::parseType() {
       }
       alias_info = std::move(container);
     } else if (L.nextIf('?')) {
-      value = UnionType::createOptionalOf(value);
+      value = OptionalType::create(value);
     } else {
       break;
     }

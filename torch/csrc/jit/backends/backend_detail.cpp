@@ -207,7 +207,7 @@ Module codegen_backend_module(
   TORCH_CHECK(debug_info_cls, "BackendDebugInfo class must be available.");
   loweredModule.register_attribute(
       "__backend_debug_info",
-      UnionType::createOptionalOf(debug_info_cls),
+      OptionalType::create(debug_info_cls),
       IValue::make_capsule(backend_debug_info_class));
   static const auto create_backend_debug_info_ct = CodeTemplate(R"(
             def __create_backend_debug_info(self):

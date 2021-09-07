@@ -787,6 +787,7 @@ bool Value::mustBeNone() const {
 }
 bool Value::mustNotBeNone() const {
   return node_->kind() != prim::AutogradAdd && type() != NoneType::get() &&
+      !type()->cast<OptionalType>() &&
       !(type()->cast<UnionType>() &&
         type()->expect<UnionType>()->canHoldType(NoneType::get()));
 }
@@ -1036,7 +1037,7 @@ bool Node::mustBeNone() const {
       (outputs().size() == 1 && output()->type() == NoneType::get()) ||
       // It's a constant optional with no value in the attributes.
       (kind_ == prim::Constant && !this->hasAttributes() &&
-       output()->type()->isOptional());
+       output()->type()->cast<OptionalType>());
 }
 
 void Node::dump() const {

@@ -61,6 +61,7 @@ from jit.test_convert_activation import TestFunctionalToInplaceActivation, TestI
 from jit.test_parametrization import TestParametrization  # noqa: F401
 from jit.test_attr import TestGetDefaultAttr  # noqa: F401
 from jit.test_aten_pow import TestAtenPow  # noqa: F401
+from jit.test_optimize_for_mobile_preserve_debug_info import TestOptimizeForMobilePreserveDebugInfo  # noqa: F401
 from jit.test_union import TestUnion  # noqa: F401
 
 # Torch
@@ -391,11 +392,6 @@ class TestJit(JitTestCase):
         self.assertEqual(tuple(m.buffers()), tuple(m2.buffers()))
         self.assertFalse(m2.p0.is_cuda)
         self.assertFalse(m2.b0.is_cuda)
-
-    def test_model_save_error(self):
-        with TemporaryFileName() as fname:
-            with self.assertRaisesRegex(pickle.PickleError, "not supported"):
-                torch.save(FooToPickle(), fname)
 
     @unittest.skipIf(not RUN_CUDA, "restore device requires CUDA")
     def test_restore_device_cuda(self):
@@ -3675,6 +3671,10 @@ def foo(x):
                 return a + 2
             torch.jit.script(invalid4)
 
+    def test_is_optional(self):
+        ann = Union[List[int], List[float]]
+        torch._jit_internal.is_optional(ann)
+
     def test_interpreter_fuzz(self):
         import builtins
         # This test generates random tree-like programs to fuzz test
@@ -6109,7 +6109,7 @@ a")
         g = torch.jit.last_executed_optimized_graph()
         first_input = next(g.inputs())
         # check if input is disconnected
-        self.assertEqual(first_input.type().kind(), 'UnionType')
+        self.assertEqual(first_input.type().kind(), 'OptionalType')
         self.assertEqual(first_input.uses(), [])
         t = torch.ones(1)
         res = fn(t, 1)
@@ -6153,7 +6153,7 @@ a")
         g = torch.jit.last_executed_optimized_graph()
         first_input = next(g.inputs())
         # check if input is disconnected
-        self.assertEqual(first_input.type().kind(), 'UnionType')
+        self.assertEqual(first_input.type().kind(), 'OptionalType')
         self.assertEqual(first_input.uses(), [])
         l = [2, 3]
         res = fn(l, 1)

@@ -169,8 +169,9 @@ std::pair<Value*, Value*> PrepareCopyForONNX(Node* node) {
   // 3. Apply broadcasting for scripting.
   WithInsertPoint guard(node);
   auto graph = node->owningGraph();
-  TypePtr opt_ten = UnionType::createOptionalOf(TensorType::get());
-  auto dummy_list = graph->insertNode(graph->createList(opt_ten, {}))->output();
+  auto dummy_list =
+      graph->insertNode(graph->createList(OptionalType::ofTensor(), {}))
+          ->output();
 
   auto expanded_value =
       graph->insert(aten::expand_as, {node->input(1), node->input(0)});

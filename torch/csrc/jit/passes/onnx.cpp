@@ -55,9 +55,10 @@ void checkONNXCompatibility(const c10::FunctionSchema& schema) {
       continue;
     }
     auto type = arg.type();
-    if (type->isOptional()) {
-      type = type->expect<UnionType>()->getContainedElementIfOptional();
-      AT_ASSERT(!type->isOptional());
+    if (type->kind() == TypeKind::OptionalType) {
+      type = reinterpret_cast<OptionalType*>(type.get())->getElementType();
+      // recursive optional type is not supported
+      AT_ASSERT(type->kind() != TypeKind::OptionalType);
     }
     if (type->kind() == TypeKind::ListType) {
       const auto& elem_type =
@@ -92,14 +93,9 @@ void preprocessCaffe2Ops(Block* block) {
         auto type = arg.type();
         AT_ASSERT(origin_inputs_index < origin_inputs.size());
         const auto& origin_input = origin_inputs[origin_inputs_index++];
-        if (type->isOptional()) {
-          type = type->expect<UnionType>()->getContainedElementIfOptional();
-          if (origin_input->mustBeNone()) {
-            continue;
-          } else {
-            // recursive optional type is not supported
-            AT_ASSERT(!type->isOptional());
-          }
+        if (type->kind() == TypeKind::OptionalType &&
+            origin_input->mustBeNone()) {
+          continue;
         }
         if (type->isSubtypeOf(TensorType::get())) {
           it->addInput(origin_input);

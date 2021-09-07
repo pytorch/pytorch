@@ -102,6 +102,10 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
       std::unordered_map<std::string, std::string>,
       EnumClassHash>;
   static const PropertiesLookup builtin_properties = {
+      {TypeKind::OptionalType,
+       {
+           {"unchecked_unwrap_optional", "prim"},
+       }},
       {TypeKind::TensorType,
        {
            {"dtype", "prim"},         {"device", "prim"},
@@ -118,15 +122,6 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
            {"retains_grad", "aten"},  {"is_ort", "prim"},
        }},
       {TypeKind::DeviceObjType, {{"type", "prim"}, {"index", "prim"}}}};
-
-  // Special case calling `unchecked_unwrap_optional` now that
-  // `OptionalType` has been deprecated
-  if (value_->type()->isOptional() && field == "unchecked_unwrap_optional") {
-    auto r = m.graph()->insert(
-        Symbol::fromQualString("prim::unchecked_unwrap_optional"), {value_});
-    return std::make_shared<SimpleValue>(r);
-  }
-
   auto kind = value_->type()->kind();
   auto types_for_builtin = builtin_properties.find(kind);
   if (types_for_builtin != builtin_properties.end()) {

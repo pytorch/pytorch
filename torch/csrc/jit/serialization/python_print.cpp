@@ -517,7 +517,8 @@ struct PythonPrintImpl {
     if (lhs.size() == 1) {
       Value* v = lhs.at(0);
       if (!annotated_unions_.count(v) && !expr_table_.count(v) &&
-          v->type()->kind() == UnionType::Kind) {
+          (v->type()->kind() == UnionType::Kind ||
+           v->type()->kind() == OptionalType::Kind)) {
         body_ << " : " << v->type()->annotation_str();
         annotated_unions_.insert(v);
       }
@@ -529,7 +530,8 @@ struct PythonPrintImpl {
   }
 
   bool requiresAnnotation(Value* lhs, Value* rhs) {
-    if (lhs->type()->kind() == UnionType::Kind) {
+    if (lhs->type()->kind() == UnionType::Kind ||
+        lhs->type()->kind() == OptionalType::Kind) {
       return annotated_unions_.insert(lhs).second;
     } else {
       return *lhs->type() != *rhs->type();
@@ -1117,7 +1119,7 @@ struct PythonPrintImpl {
         // the call to unwrap_optional(annotated(Optional[T], None))
         if (node->input()->type()->isSubtypeOf(NoneType::get()) ||
             node->input()->mustBeNone()) {
-          auto input_type = UnionType::createOptionalOf(node->output()->type());
+          auto input_type = OptionalType::create(node->output()->type());
           stmt << "annotate(" << input_type->annotation_str(type_printer_)
                << ", " << useOf(node->input()) << ")";
         } else {

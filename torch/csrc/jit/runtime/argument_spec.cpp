@@ -32,11 +32,11 @@ void ArgumentSpecCreator::scan(
   if (typ->isSubtypeOf(TensorType::get())) {
     num_tensors_++;
     instructions_.emplace_back(SPECIALIZE_TENSOR);
-  } else if (typ->isSubtypeOf(UnionType::createOptionalOf(TensorType::get()))) {
+  } else if (typ->isSubtypeOf(OptionalType::ofTensor())) {
     num_tensors_++;
     num_optionals_++;
     instructions_.emplace_back(SPECIALIZE_OPTIONAL_TENSOR);
-  } else if (typ->isOptional()) {
+  } else if (typ->kind() == TypeKind::OptionalType) {
     // note that Optional[Tuple] or Optional[Class] will just register
     // as optional (previously they didn't at all, so it's not a regression).
     num_optionals_++;
@@ -230,18 +230,11 @@ void ArgumentSpecCreator::specializeTypes(
       } break;
       case SPECIALIZE_OPTIONAL: {
         auto is_present = spec.isPresent(optional_arg_spec_offset++);
-        bool is_opt = (*input_stack.back())->isOptional();
-        TORCH_INTERNAL_ASSERT(
-            is_opt,
-            "Cannot use a SPECIALIZE_OPTIONAL"
-            " instruction with the type on the top of"
-            " the stack, which is ",
-            (*input_stack.back())->annotation_str());
-        auto ot = (*input_stack.back()++)->expect<UnionType>();
+        auto ot = (*input_stack.back()++)->expect<OptionalType>();
         if (!is_present) {
           result_stack.back().emplace_back(ot);
         } else {
-          result_stack.back().emplace_back(ot->getContainedElementIfOptional());
+          result_stack.back().emplace_back(ot->getElementType());
         }
       } break;
       case ENTER_TUPLE: {
@@ -279,7 +272,7 @@ void ArgumentSpecCreator::specializeTypes(
   auto inputs = graph.inputs();
   for (const auto i : c10::irange(inputs.size())) {
     auto t = result_stack.back()[i];
-    if (t->isOptional()) {
+    if (auto ot = t->cast<OptionalType>()) {
       // if an optional input hasn't been specialized above, it is None
       // so we disconnect the input here and replace its uses with
       // a constant
