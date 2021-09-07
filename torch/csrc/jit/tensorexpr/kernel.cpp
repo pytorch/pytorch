@@ -34,7 +34,10 @@ static bool checkTypes(const ScalarType highType, const int typeConstraints) {
   }
 
   // assume JIT not supporting complex and qint yet
-  TORCH_INTERNAL_ASSERT((typeConstraints & (kQintTypes | kComplexTypes)) == 0);
+  TORCH_INTERNAL_ASSERT(
+      (typeConstraints & (kQintTypes | kComplexTypes)) == 0,
+      buildErrorMessage(
+          "Qint and Complex types are not supported in the fuser."));
   return false;
 }
 
@@ -49,7 +52,7 @@ static ExprHandle promoteToDtype(ExprHandle e, ScalarType dt) {
   case ScalarType::Name:      \
     e = cast<Type>(e);        \
     break;
-    AT_FORALL_SCALAR_TYPES_AND2(Half, Bool, TYPE_CASE);
+    AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TYPE_CASE);
 #undef TYPE_CASE
     default:
       throw unsupported_dtype();
@@ -62,6 +65,19 @@ static ExprHandle promoteToDtype(ExprHandle e, ScalarType dt) {
 namespace torch {
 namespace jit {
 namespace tensorexpr {
+
+std::string buildErrorMessage(const std::string& s) {
+  static const std::string generic_error_message =
+      "This error occured in the fuser. You can turn off the fuser with "
+      "torch._C._jit_override_can_fuse_on_cpu(False)";
+  if (s.empty()) {
+    return generic_error_message;
+  }
+  if (s.back() == '.') {
+    return s + " " + generic_error_message;
+  }
+  return s + ". " + generic_error_message;
+}
 
 static int te_cuda_pointwise_loop_levels = -1;
 static int te_cuda_pointwise_block_count = -1;
@@ -164,13 +180,18 @@ c10::optional<at::Device> pickDeviceType(const std::shared_ptr<Graph>& graph) {
     for (auto const& input : node->inputs()) {
       if (auto tt = input->type()->cast<TensorType>()) {
         if (auto inputDevice = tt->device()) {
-          TORCH_INTERNAL_ASSERT(!device || *device == *inputDevice);
+          TORCH_INTERNAL_ASSERT(
+              !device || *device == *inputDevice,
+              buildErrorMessage(
+                  "Different devices specified for inputs to the fuser."));
           device = inputDevice;
         }
       }
     }
   }
-  TORCH_INTERNAL_ASSERT(device);
+  TORCH_INTERNAL_ASSERT(
+      device,
+      buildErrorMessage("Could not find device in fuser graph inputs."));
   return device;
 }
 
@@ -356,7 +377,9 @@ bool matmulIsSupported(const torch::jit::Node* node) {
 void annotateInputShapes(
     const std::shared_ptr<Graph>& graph,
     const std::vector<c10::optional<at::Tensor>>& example_inputs) {
-  TORCH_INTERNAL_ASSERT(graph->inputs().size() == example_inputs.size());
+  TORCH_INTERNAL_ASSERT(
+      graph->inputs().size() == example_inputs.size(),
+      buildErrorMessage("Given inputs do not match the fuser graph inputs."));
   for (size_t idx = 0; idx < example_inputs.size(); idx++) {
     if (auto t = example_inputs[idx]) {
       auto concrete_tensor_type = tensorTypeInCurrentExecutionContext(*t);
@@ -503,7 +526,7 @@ ExprHandle demoteOutput(
 #define TYPE_CASE(Type, Name) \
   case ScalarType::Name:      \
     return cast<Type>(e);
-    AT_FORALL_SCALAR_TYPES_AND(Half, TYPE_CASE);
+    AT_FORALL_SCALAR_TYPES_AND2(Half, BFloat16, TYPE_CASE);
 #undef TYPE_CASE
     case ScalarType::Bool:
       return cast<bool>(e);
@@ -526,7 +549,7 @@ std::vector<int64_t> bufferSizes(BufPtr b) {
   std::vector<int64_t> sizes;
   for (size_t i = 0; i < b->ndim(); i++) {
     auto dim = intValue(b->dim(i));
-    TORCH_INTERNAL_ASSERT(dim);
+    TORCH_INTERNAL_ASSERT(dim, buildErrorMessage("Non-constant buf dims"));
     sizes.push_back(*dim);
   }
   return sizes;
@@ -820,7 +843,10 @@ std::vector<ExprHandle> TensorExprKernel::inferSizesForValue(
         throw std::runtime_error("Empty input list is passed to aten::cat");
       }
 
-      TORCH_INTERNAL_ASSERT(n->input(1)->node()->kind() == prim::Constant);
+      TORCH_INTERNAL_ASSERT(
+          n->input(1)->node()->kind() == prim::Constant,
+          buildErrorMessage(
+              "aten::cat op's dim input is not constant in fuser."));
       int64_t dim = n->input(1)->node()->i(attr::value);
       auto shape = sizesForValue(inputs[0]);
       auto norm_dim = normalizeAndCheckIndex(dim, shape.size());
@@ -863,7 +889,8 @@ ExprHandle promoteIntegerToDefaultType(const ExprHandle& e) {
 
   // We intend to promote Integers to floating-point types
   TORCH_INTERNAL_ASSERT(
-      !c10::isIntegralType(defaultType, /*includeBool*/ true));
+      !c10::isIntegralType(defaultType, /*includeBool*/ true),
+      buildErrorMessage("Non-integer type"));
 
   return Cast::make(
       Dtype(
@@ -1139,7 +1166,8 @@ std::pair<ScalarType, std::vector<BufHandle>> processCatList(
   std::vector<BufHandle> nonEmptyInputs;
   for (auto buf : bufList) {
     bufInputs.push_back(buf);
-    TORCH_INTERNAL_ASSERT(buf.node()->dims().size() > 0);
+    TORCH_INTERNAL_ASSERT(
+        buf.node()->dims().size() > 0, buildErrorMessage("Invalid buf rank"));
     if (buf.node()->dims().size() == 1 &&
         immediateAs<int>(buf.node()->dim(0)) == 0) {
       continue;
@@ -1352,7 +1380,9 @@ Tensor tensorexpr::computeOperandValue(
       auto add_lambda = [](const ExprHandle& lhs, const ExprHandle& rhs) {
         return boolToInteger(lhs) + boolToInteger(rhs);
       };
-      TORCH_INTERNAL_ASSERT(inputs.size() == 2 || inputs.size() == 3);
+      TORCH_INTERNAL_ASSERT(
+          inputs.size() == 2 || inputs.size() == 3,
+          buildErrorMessage("Invalid number of input operands"));
       return (inputs.size() > 2)
           ? computeTwoOperandWithAlpha(
                 "aten_add", inputs, outputShape, outputType, add_lambda)
@@ -1364,7 +1394,9 @@ Tensor tensorexpr::computeOperandValue(
         // NB: sub isn't supported on boolean, no need to promote to integer.
         return lhs - rhs;
       };
-      TORCH_INTERNAL_ASSERT(inputs.size() == 2 || inputs.size() == 3);
+      TORCH_INTERNAL_ASSERT(
+          inputs.size() == 2 || inputs.size() == 3,
+          buildErrorMessage("Invalid number of input operands"));
       return (inputs.size() > 2)
           ? computeTwoOperandWithAlpha(
                 "aten_sub", inputs, outputShape, outputType, sub_lambda)
@@ -2127,7 +2159,8 @@ Tensor tensorexpr::computeOperandValue(
           outputShape,
           outputType,
           [outputType](const ExprHandle& a) {
-            TORCH_INTERNAL_ASSERT(outputType);
+            TORCH_INTERNAL_ASSERT(
+                outputType, buildErrorMessage("Output type is null."));
             return Cast::make(ToDtype(*outputType), a);
           });
     } break;
@@ -2246,7 +2279,9 @@ Tensor tensorexpr::computeOperandValue(
             "aten_transpose",
             c10::fmap<DimArg>(outputShape),
             [&](std::vector<VarHandle> axes) {
-              TORCH_INTERNAL_ASSERT(axes.size() <= 1);
+              TORCH_INTERNAL_ASSERT(
+                  axes.size() <= 1,
+                  buildErrorMessage("Invalid axes size in transpose"));
               return A.load(axes);
             });
       }
@@ -2689,7 +2724,11 @@ StmtPtr TensorExprKernel::transformLoops(BackendType backendType, StmtPtr st) {
         blockSize = default_uint8_blocksize;
       }
       std::vector<ForPtr> loops = l.getLoopStmtsFor(buf);
-      TORCH_INTERNAL_ASSERT(!loops.empty(), "loops should not be empty");
+      TORCH_INTERNAL_ASSERT(
+          !loops.empty(),
+          buildErrorMessage(
+              "No loops found for the buffer " + buf->name_hint() +
+              " in the fuser."));
       ForPtr flattened = nullptr;
       LoopNest::flatten(loops, &flattened);
       assert(flattened);
@@ -2905,7 +2944,10 @@ bool denseAndNonOverlapping(
 
 Tensor TensorExprKernel::convertOutputToCorrectStrides(torch::jit::Value* v) {
   const TensorTypePtr& tt = v->type()->expect<TensorType>();
-  TORCH_INTERNAL_ASSERT(bufs_.count(v));
+  TORCH_INTERNAL_ASSERT(
+      bufs_.count(v),
+      buildErrorMessage(
+          "Ouput tensor has no corresponding bufs in the fuser."));
   BufPtr buf = bufs_.at(v);
 
   // No shape info is present in the graph
@@ -2915,13 +2957,17 @@ Tensor TensorExprKernel::convertOutputToCorrectStrides(torch::jit::Value* v) {
     throw malformed_input(msg);
   }
 
-  TORCH_INTERNAL_ASSERT(tt->sizes().concrete_sizes());
+  TORCH_INTERNAL_ASSERT(
+      tt->sizes().concrete_sizes(),
+      buildErrorMessage("Output shapes are unknown."));
   auto sizes = *tt->sizes().concrete_sizes();
   std::vector<int64_t> default_strides = TensorType::contiguousStridesOf(sizes);
   if (!tt->strides().concrete_sizes()) {
     return Tensor(buf, nullptr);
   }
-  TORCH_INTERNAL_ASSERT(tt->strides().concrete_sizes());
+  TORCH_INTERNAL_ASSERT(
+      tt->strides().concrete_sizes(),
+      buildErrorMessage("Output strides are unknown."));
   const std::vector<int64_t> strides = *tt->strides().concrete_sizes();
   // All Tensors in NNC are layed out in default, contiguous layout.
   // If the output is also default contiguous we don't need to do anything

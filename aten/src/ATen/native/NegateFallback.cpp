@@ -60,6 +60,7 @@ TORCH_LIBRARY_IMPL(aten, Negative, m) {
   m.impl("view", torch::CppFunction::makeFallthrough());
   m.impl("_unsafe_view", torch::CppFunction::makeFallthrough());
   m.impl("reshape", torch::CppFunction::makeFallthrough());
+  m.impl("alias", torch::CppFunction::makeFallthrough());
   m.impl("linalg_solve_triangular", torch::CppFunction::makeFallthrough());
   m.impl("linalg_solve_triangular.out", torch::CppFunction::makeFromBoxedFunction<&negationFallbackToHandleOnlyMutableInputs>());
 }
