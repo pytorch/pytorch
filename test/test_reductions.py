@@ -349,7 +349,7 @@ class TestReductions(TestCase):
     @dtypes(torch.float, torch.bfloat16)
     def test_dim_reduction_lastdim(self, device, dtype):
         x = torch.randn(3, 5, 40, device=device, dtype=dtype)
-        x = x[:,:,0:40:2]
+        x = x[:, :, 0:40:2]
         x2 = x.contiguous()
         ops = [torch.norm, torch.argmax, torch.argmin]
         for op in ops:
