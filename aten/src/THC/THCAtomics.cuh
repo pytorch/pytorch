@@ -182,7 +182,7 @@ static inline __device__ void gpuAtomicAdd(bool *address, bool val) {
 }
 
 static inline  __device__ at::Half gpuAtomicAdd(at::Half *address, at::Half val) {
-#if ((CUDA_VERSION < 10000) || (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 700))) || (define(USE_ROCM))
+#if ((defined(CUDA_VERSION) && CUDA_VERSION < 10000) || (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 700))) || (defined(USE_ROCM))
   return AtomicFPOp<at::Half>()(address, val,
                                 [](at::Half hsum, at::Half val) {
                                   return THCNumerics<at::Half>::add(hsum, val);
@@ -199,7 +199,7 @@ static inline __device__ at::BFloat16 gpuAtomicAdd(at::BFloat16 *address, at::BF
                                     });
 }
 
-#if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 600 || CUDA_VERSION < 8000)
+#if defined(CUDA_VERSION) && defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 600 || CUDA_VERSION < 8000)
 // from CUDA C Programmic Guide
 static inline __device__ double atomicAdd(double* address, double val)
 #if defined(__clang__) && defined(__CUDA__)
@@ -215,7 +215,7 @@ static inline __device__ double atomicAdd(double* address, double val)
                                 return __double_as_longlong(val + __longlong_as_double(assumed));
                               });
 }
-#elif !defined(__CUDA_ARCH__) && (CUDA_VERSION < 8000) || defined(USE_ROCM)
+#elif !defined(__CUDA_ARCH__) && (defined(CUDA_VERSION) && CUDA_VERSION < 8000) || defined(USE_ROCM)
 
 /* Note [hip-clang differences to hcc]
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

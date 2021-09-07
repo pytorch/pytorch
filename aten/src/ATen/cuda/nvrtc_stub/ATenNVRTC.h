@@ -56,7 +56,7 @@ namespace at { namespace cuda {
   _(cuLinkAddData)                               \
   _(cuLinkComplete)
 
-#if CUDA_VERSION >= 11010
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 11010
 #define AT_FORALL_NVRTC(_) \
   AT_FORALL_NVRTC_BASE(_)  \
   _(nvrtcGetCUBINSize)     \

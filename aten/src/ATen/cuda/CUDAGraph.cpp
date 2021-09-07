@@ -9,7 +9,7 @@ namespace at {
 namespace cuda {
 
 MempoolId_t graph_pool_handle() {
-#if CUDA_VERSION >= 11000
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
   // uuid count starts at 1. 0 is reserved to mean "wasn't set by graph_pool_handle".
   static std::atomic<CaptureId_t> uuid{1};
   // Sets just the second value, to distinguish it from MempoolId_ts created from
@@ -45,13 +45,13 @@ MempoolId_t graph_pool_handle() {
 CUDAGraph::CUDAGraph()
   // CUDAStreams may not be default-constructed.
   : capture_stream_(at::cuda::getCurrentCUDAStream()) {
-#if CUDA_VERSION < 11000 || defined(USE_ROCM)
+#if (defined(CUDA_VERSION) && CUDA_VERSION < 11000) || defined(USE_ROCM)
   TORCH_CHECK(false, "CUDA graphs may only be used in Pytorch built with CUDA >= 11.0 and not yet supported on ROCM");
 #endif
 }
 
 void CUDAGraph::capture_begin(MempoolId_t pool/*=0*/) {
-#if CUDA_VERSION >= 11000
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
   TORCH_CHECK(!has_graph_exec_,
               "This CUDAGraph instance already owns a captured graph. "
               "To capture a new graph, create a new instance.");
@@ -125,7 +125,7 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*=0*/) {
 }
 
 void CUDAGraph::capture_end() {
-#if CUDA_VERSION >= 11000
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
   auto stream = at::cuda::getCurrentCUDAStream();
 
   TORCH_CHECK(stream == capture_stream_,
@@ -161,7 +161,7 @@ void CUDAGraph::capture_end() {
 }
 
 void CUDAGraph::replay() {
-#if CUDA_VERSION >= 11000
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
   TORCH_CHECK(has_graph_exec_,
               "Called CUDAGraph::replay without a preceding successful capture.");
 
@@ -195,7 +195,7 @@ void CUDAGraph::replay() {
 }
 
 void CUDAGraph::reset() {
-#if CUDA_VERSION >= 11000
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
   // I'd prefer these checks throw exceptions, not print warnings,
   // but the destructor calls reset(), and at least one CI build
   // refuses to compile with a throwing destructor.
@@ -232,7 +232,7 @@ void CUDAGraph::reset() {
 
 // Returns an id another graph's capture_begin can use to share the same memory pool as this graph.
 MempoolId_t CUDAGraph::pool() {
-#if CUDA_VERSION >= 11000
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
   TORCH_CHECK(has_graph_exec_,
               "Called CUDAGraph::pool() without a preceding successful capture.");
 #else

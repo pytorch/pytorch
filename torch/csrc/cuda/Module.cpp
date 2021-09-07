@@ -181,7 +181,11 @@ PyObject * THCPModule_setStream_wrap(PyObject *self, PyObject *obj)
 
 PyObject * THCPModule_getCompiledVersion(PyObject *self, PyObject *noargs)
 {
+#if defined(USE_ROCM)
+  return THPUtils_packInt64((int64_t) ROCM_VERSION);
+#else
   return THPUtils_packInt64((int64_t) CUDA_VERSION);
+#endif
 }
 
 PyObject * THCPModule_cudaHostAllocator(PyObject *_unused, PyObject *noargs)

@@ -284,7 +284,7 @@ void bgemm<at::Half>(CUDABLAS_BGEMM_ARGTYPES(at::Half)) {
     // On CUDA versions prior to 11, users are required to set the math mode to CUBLAS_TENSOR_OP_MATH
     // manually to be able to use tensor cores for FP16. On CUDA 11, this is no longer required.
     TORCH_CUDABLAS_CHECK(cublasSetMathMode(handle, CUBLAS_TENSOR_OP_MATH));
-  #endif  // CUDA_VERSION < 11000
+  #endif  // defined(CUDA_VERSION) && CUDA_VERSION < 11000
 
   cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
   if (prop->major >= 5){
@@ -308,7 +308,7 @@ void bgemm<at::Half>(CUDABLAS_BGEMM_ARGTYPES(at::Half)) {
     // On CUDA versions prior to 11, users are required to set the math mode to CUBLAS_TENSOR_OP_MATH
     // manually to be able to use tensor cores for FP16. On CUDA 11, this is no longer required.
     TORCH_CUDABLAS_CHECK(cublasSetMathMode(handle, CUBLAS_DEFAULT_MATH));
-  #endif  // CUDA_VERSION < 11000
+  #endif  // defined(CUDA_VERSION) && CUDA_VERSION < 11000
 #endif // USE_ROCM
 }
 
@@ -450,7 +450,7 @@ void gemm<at::Half>(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
     // On CUDA versions prior to 11, users are required to set the math mode to CUBLAS_TENSOR_OP_MATH
     // manually to be able to use tensor cores for FP16. On CUDA 11, this is no longer required.
     TORCH_CUDABLAS_CHECK(cublasSetMathMode(handle, CUBLAS_TENSOR_OP_MATH));
-#endif  // CUDA_VERSION < 11000
+#endif  // defined(CUDA_VERSION) && CUDA_VERSION < 11000
     TORCH_CUDABLAS_CHECK(cublasGemmEx(
         handle,
         opa,
@@ -475,7 +475,7 @@ void gemm<at::Half>(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
     // On CUDA versions prior to 11, users are required to set the math mode to CUBLAS_TENSOR_OP_MATH
     // manually to be able to use tensor cores for FP16. On CUDA 11, this is no longer required.
     TORCH_CUDABLAS_CHECK(cublasSetMathMode(handle, CUBLAS_DEFAULT_MATH));
-#endif  // CUDA_VERSION < 11000
+#endif  // defined(CUDA_VERSION) && CUDA_VERSION < 11000
   } else {
     TORCH_CUDABLAS_CHECK(cublasSgemmEx(
         handle,
@@ -569,7 +569,7 @@ void gemm<at::BFloat16>(CUDABLAS_GEMM_ARGTYPES(at::BFloat16)) {
       CUDA_R_32F,
       CUBLAS_GEMM_DFALT_TENSOR_OP));
 }
-#endif
+#endif // defined(CUDA_VERSION) && CUDA_VERSION >= 11000
 
 template <>
 void trsm<float>(CUDABLAS_TRSM_ARGTYPES(float)) {
@@ -838,7 +838,7 @@ void dot<c10::complex<float>>(CUDABLAS_DOT_ARGTYPES(c10::complex<float>)) {
 
 template <>
 void dot<at::Half>(CUDABLAS_DOT_ARGTYPES(at::Half)) {
-#if CUDA_VERSION >= 8000
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 8000
   TORCH_CUDABLAS_CHECK(cublasDotEx(
       handle,
       n,
@@ -851,7 +851,7 @@ void dot<at::Half>(CUDABLAS_DOT_ARGTYPES(at::Half)) {
       result,
       CUDA_R_16F,
       CUDA_R_32F));
-#elif ROCM_VERSION >= 21000
+#elif defined(ROCM_VERSION) && ROCM_VERSION >= 21000
   TORCH_CUDABLAS_CHECK(rocblas_hdot(
       handle,
       n,
@@ -867,7 +867,7 @@ void dot<at::Half>(CUDABLAS_DOT_ARGTYPES(at::Half)) {
 
 template <>
 void dot<at::BFloat16>(CUDABLAS_DOT_ARGTYPES(at::BFloat16)) {
-#if CUDA_VERSION >= 11000
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
   TORCH_CUDABLAS_CHECK(cublasDotEx(
       handle,
       n,
@@ -880,7 +880,7 @@ void dot<at::BFloat16>(CUDABLAS_DOT_ARGTYPES(at::BFloat16)) {
       result,
       CUDA_R_16BF,
       CUDA_R_32F));
-#elif ROCM_VERSION >= 21000
+#elif defined(ROCM_VERSION) && ROCM_VERSION >= 21000
   TORCH_CUDABLAS_CHECK(rocblas_bfdot(
       handle,
       n,
