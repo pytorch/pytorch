@@ -3,7 +3,6 @@ import torch
 import torch.distributed as dist
 
 from enum import Enum
-from typing import Callable, Any
 
 TORCH_HALF_MIN = torch.finfo(torch.float16).min
 TORCH_HALF_MAX = torch.finfo(torch.float16).max
