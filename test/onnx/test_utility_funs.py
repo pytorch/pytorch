@@ -2,7 +2,7 @@ from test_pytorch_common import TestCase, run_tests
 
 import torch
 import torch.onnx
-from torch.onnx import utils, OperatorExportTypes, TrainingMode, register_custom_op_symbolic
+from torch.onnx import utils, OperatorExportTypes, TrainingMode
 from torch.onnx.symbolic_helper import _set_opset_version, _set_operator_export_type, _set_onnx_shape_inference
 import torch.utils.cpp_extension
 from test_pytorch_common import (skipIfUnsupportedMinOpsetVersion,
@@ -104,19 +104,20 @@ class TestUtilityFuns(TestCase):
     def test_output_list(self):
         class PaddingLayer(torch.jit.ScriptModule):
             @torch.jit.script_method
-            def forward(self, input_t):
-                # type: (Tensor) -> Tensor
-                for i in range(2):
+            def forward(self, input_t, n):
+                # type: (Tensor, int) -> Tensor
+                for i in range(n):
                     input_t = input_t * 2
                 return input_t
 
         input_t = torch.ones(size=[10], dtype=torch.long)
+        n = 2
         model = torch.jit.script(PaddingLayer())
-        example_output = model(input_t)
+        example_output = model(input_t, n)
 
         with self.assertRaises(RuntimeError):
             torch.onnx.export(model,
-                              (input_t, ),
+                              (input_t, n),
                               "test.onnx",
                               opset_version=self.opset_version,
                               example_outputs=[example_output])
@@ -557,27 +558,27 @@ class TestUtilityFuns(TestCase):
             assert node.kind() != "onnx::Shape"
         assert len(list(graph.nodes())) == 1
 
-    def test_verbose(self):
+    def test_strip_doc_string(self):
         class MyModule(torch.nn.Module):
             def forward(self, input):
                 return torch.exp(input)
         x = torch.randn(3, 4)
 
-        def is_model_stripped(f, verbose=None):
-            if verbose is None:
+        def is_model_stripped(f, strip_doc_string=None):
+            if strip_doc_string is None:
                 torch.onnx.export(MyModule(), x, f, opset_version=self.opset_version)
             else:
-                torch.onnx.export(MyModule(), x, f, verbose=verbose,
+                torch.onnx.export(MyModule(), x, f, strip_doc_string=strip_doc_string,
                                   opset_version=self.opset_version)
             model = onnx.load(io.BytesIO(f.getvalue()))
             model_strip = copy.copy(model)
             onnx.helper.strip_doc_string(model_strip)
             return model == model_strip
 
-        # test verbose=False (default)
+        # test strip_doc_string=True (default)
         self.assertTrue(is_model_stripped(io.BytesIO()))
-        # test verbose=True
-        self.assertFalse(is_model_stripped(io.BytesIO(), True))
+        # test strip_doc_string=False
+        self.assertFalse(is_model_stripped(io.BytesIO(), False))
 
     # NB: remove this test once DataParallel can be correctly handled
     def test_error_on_data_parallel(self):
@@ -683,44 +684,6 @@ class TestUtilityFuns(TestCase):
                                             dynamic_axes={'x': [0, 1, 2], 'y': [0, 1, 2]})
         iter = graph.nodes()
         assert next(iter).kind() == "custom_namespace::custom_op"
-
-    def test_custom_opsets_gelu(self):
-        def gelu(g, self):
-            return g.op("com.microsoft::Gelu", self).setType(self.type())
-
-        register_custom_op_symbolic("::gelu", gelu, 1)
-        model = torch.nn.GELU()
-        x = torch.randn(3, 3)
-        f = io.BytesIO()
-        torch.onnx.export(model, (x, ), f,
-                          opset_version=self.opset_version, custom_opsets={"com.microsoft": 1})
-
-        graph = onnx.load(io.BytesIO(f.getvalue()))
-        assert graph.graph.node[0].op_type == "Gelu"
-        assert graph.opset_import[0].version == self.opset_version
-        assert graph.opset_import[1].domain == 'com.microsoft'
-        assert graph.opset_import[1].version == 1
-
-    def test_custom_opsets_inverse(self):
-        class CustomInverse(torch.nn.Module):
-            def forward(self, x):
-                return torch.inverse(x) + x
-
-        def inverse(g, self):
-            return g.op("com.microsoft::Inverse", self).setType(self.type())
-
-        register_custom_op_symbolic('::inverse', inverse, 1)
-        model = CustomInverse()
-        x = torch.randn(2, 3, 3)
-        f = io.BytesIO()
-        torch.onnx.export(model, (x, ), f,
-                          opset_version=self.opset_version, custom_opsets={"com.microsoft": 1})
-
-        graph = onnx.load(io.BytesIO(f.getvalue()))
-        assert graph.graph.node[0].op_type == "Inverse"
-        assert graph.opset_import[0].version == self.opset_version
-        assert graph.opset_import[1].domain == 'com.microsoft'
-        assert graph.opset_import[1].version == 1
 
     def test_onnx_fallthrough(self):
         # Test aten export of op with symbolic for aten
