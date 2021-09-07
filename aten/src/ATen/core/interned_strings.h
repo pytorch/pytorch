@@ -211,6 +211,8 @@ namespace c10 {
   _(aten, linalg_norm)               \
   _(aten, linalg_vector_norm)        \
   _(aten, linalg_matrix_norm)        \
+  _(aten, matmul)                    \
+  _(aten, linalg_matmul)             \
   _(aten, append)                    \
   _(aten, item)                      \
   _(aten, format)                    \
@@ -306,6 +308,9 @@ namespace c10 {
   _(aten, bin)                       \
   _(aten, pop)                       \
   _(aten, insert)                    \
+  _(aten, _cat)                      \
+  _(aten, cat)                       \
+  _(aten, concat)                    \
   _(aten, vstack)                    \
   _(aten, row_stack)                 \
   _(prim, unchecked_unwrap_optional) \
