@@ -920,7 +920,7 @@ Tensor istft(const Tensor& self, const int64_t n_fft, const optional<int64_t> ho
 
   // We need to trim the front padding away if centered
   const auto start = center ? n_fft / 2 : 0;
-  const auto end = lengthOpt.has_value()? start + lengthOpt.value() : - n_fft / 2;
+  const auto end = lengthOpt.has_value() ? start + lengthOpt.value() : (center ? - n_fft / 2 : -1);
 
   y = y.slice(2, start, end, 1);
   window_envelop = window_envelop.slice(2, start, end, 1);
@@ -934,6 +934,14 @@ Tensor istft(const Tensor& self, const int64_t n_fft, const optional<int64_t> ho
   y = (y / window_envelop).squeeze(1);  // size: (channel, expected_output_signal_len)
   if (input_dim == 3) {
     y = y.squeeze(0);
+  }
+  // zero padding if the given lengthOpt is longer than expected
+  if(end > expected_output_signal_len) {
+    TORCH_WARN_ONCE(
+      "The length of signal is shorter than the length parameter. Result is being padded with zeros in the tail. "
+      "Please check your center and hop_length settings."
+    );
+    y = at::constant_pad_nd(y, {0, end - expected_output_signal_len}, 0);
   }
   return y;
 
