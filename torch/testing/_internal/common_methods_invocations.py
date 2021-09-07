@@ -16,12 +16,12 @@ import collections.abc
 
 from typing import Any, Callable, List, Optional, Sequence, Tuple, Union, Dict
 
-from torch.testing import \
-    (make_non_contiguous, floating_types, floating_types_and, complex_types,
-     floating_and_complex_types, floating_and_complex_types_and,
-     all_types_and_complex_and, all_types_and, all_types_and_complex,
-     integral_types_and, all_types, double_types, make_tensor)
-from .._core import _dispatch_dtypes
+from torch.testing import make_non_contiguous, make_tensor
+from torch.testing._internal.common_dtype import (
+    _dispatch_dtypes, floating_types, floating_types_and, complex_types, floating_and_complex_types,
+    floating_and_complex_types_and, all_types_and_complex_and, all_types_and, all_types_and_complex, integral_types_and,
+    all_types, double_types,
+)
 from torch.testing._internal.common_device_type import \
     (onlyOnCPUAndCUDA, skipCUDAIfNoMagma, skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfNoCusolver,
      skipCPUIfNoLapack, skipCPUIfNoFFT, skipCUDAIfRocm, precisionOverride, toleranceOverride, tol)
