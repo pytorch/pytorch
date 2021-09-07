@@ -700,6 +700,33 @@ class MyParameterServer:
                     fut.set_result(result)
         return fut
 
+from typing import Dict, List
+
+@torch.jit.script
+class MyClassWithTensor:
+    def __init__(self, t):
+        self.t = t
+
+def _test_expected_device(t: torch.Tensor,
+                          ts: List[torch.Tensor],
+                          obj: Dict[str, torch.Tensor],
+                          expected_device1: torch.device,
+                          expected_device2: torch.device,
+                          expected_device3: torch.device
+                          ):
+    if t.device != expected_device1:
+        return False
+    for t in ts:
+        if t.device != expected_device2:
+            return False
+    for t in obj.values():
+        if t.device != expected_device3:
+            return False
+    return True
+
+
+_test_expected_device_jit = torch.jit.script(_test_expected_device)
+
 
 class RpcTest(RpcAgentTestFixture):
     @dist_init
@@ -6483,5 +6510,104 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture):
         rref.rpc_sync().increase(1)
         ret = rref.rpc_sync().sum()
         self.assertEqual(ret, 42)
+
+        rpc.shutdown()
+
+    def _test_device_map_rpc_sync(self, _test_fn):
+        dst = worker_name((self.rank + 1) % self.world_size)
+        options = self.rpc_backend_options
+        if self.rank == 0:
+            options.set_device_map(dst, {"cuda:0": "cuda:1"})
+        elif self.rank == 1:
+            options.set_devices(["cuda:1", "cuda:2", "cuda:3", "cuda:4"])
+        rpc.init_rpc(
+            name=worker_name(self.rank),
+            backend=self.rpc_backend,
+            rank=self.rank,
+            world_size=self.world_size,
+            rpc_backend_options=options,
+        )
+
+        if self.rank == 0:
+            t1 = torch.randn(10, device="cuda:0")
+            t2 = torch.randn(10, device="cuda:0")
+            t3 = torch.randn(10, device="cuda:0")
+            t4 = torch.randn(10, device="cuda:0")
+            self.assertTrue(
+                rpc.rpc_sync(
+                    dst,
+                    _test_fn,
+                    args=(
+                        t1,
+                        [t2, t3],
+                        {"t4": t4},
+                        torch.device("cuda:2"),
+                        torch.device("cuda:3"),
+                        torch.device("cuda:4"),
+                        ),
+                    arg_devices=(
+                        torch.device("cuda:2"),
+                        torch.device("cuda:3"),
+                        torch.device("cuda:4"),
+                        None,
+                        None,
+                        None,
+                    )
+                )
+            )
+
+        rpc.shutdown()
+
+    @skip_if_lt_x_gpu(3)
+    def test_my_device_map_rpc_sync(self):
+        self._test_device_map_rpc_sync(_test_expected_device)
+
+    @skip_if_lt_x_gpu(3)
+    def test_my_device_map_rpc_sync_jit(self):
+        self._test_device_map_rpc_sync(_test_expected_device_jit)
+
+    @skip_if_lt_x_gpu(3)
+    def test_my_device_map_jit_rpc_sync(self):
+        dst = worker_name((self.rank + 1) % self.world_size)
+        options = self.rpc_backend_options
+        if self.rank == 0:
+            options.set_device_map(dst, {"cuda:0": "cuda:1"})
+        elif self.rank == 1:
+            options.set_devices(["cuda:1", "cuda:2", "cuda:3", "cuda:4"])
+        rpc.init_rpc(
+            name=worker_name(self.rank),
+            backend=self.rpc_backend,
+            rank=self.rank,
+            world_size=self.world_size,
+            rpc_backend_options=options,
+        )
+
+        @torch.jit.script
+        def foo(dst: str) -> bool:
+            t1 = torch.randn(10, device="cuda:0")
+            t2 = torch.randn(10, device="cuda:0")
+            t3 = torch.randn(10, device="cuda:0")
+            t4 = torch.randn(10, device="cuda:0")
+            args=(
+                    t1,
+                    [t2, t3],
+                    {"t4": t4},
+                    torch.device("cuda:2"),
+                    torch.device("cuda:3"),
+                    torch.device("cuda:4"),
+                 )
+            kwargs: Dict[str, Any] = {}
+            tensor_to_device={
+                t1: torch.device("cuda:2"),
+                t2: torch.device("cuda:3"),
+                t3: torch.device("cuda:3"),
+                t4: torch.device("cuda:4"),
+            }
+            return rpc.rpc_sync(
+                dst, _test_expected_device_jit, args, kwargs, tensor_to_device
+            )
+
+        if self.rank == 0:
+            self.assertTrue(foo(dst))
 
         rpc.shutdown()

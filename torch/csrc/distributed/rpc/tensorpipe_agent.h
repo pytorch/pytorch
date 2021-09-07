@@ -276,7 +276,8 @@ class TORCH_API TensorPipeAgent : public RpcAgent {
 
   inline std::vector<c10::Device> getDevicesForRemote(
       const std::string& remoteName,
-      const Message& message) const;
+      const Message& message,
+      const TensorToDeviceMap& tensorToDevice) const;
 
   // When a request+response completes, we need to mark the future message as
   // complete. However, if its timeout has already expired, it already has an

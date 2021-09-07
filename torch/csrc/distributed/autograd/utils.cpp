@@ -167,9 +167,9 @@ c10::intrusive_ptr<JitFuture> sendMessageWithAutograd(
         rpc::MessageType::RUN_WITH_PROFILING_REQ,
         // NOLINTNEXTLINE(performance-move-const-arg)
         std::move(profilerConfig));
-    fut = agent.send(dst, std::move(msgWithProfiling), rpc::TensorToDeviceMap(), {}, rpcTimeoutSeconds);
+    fut = agent.send(dst, std::move(msgWithProfiling), tensorToDevice, {}, rpcTimeoutSeconds);
   } else {
-    fut = agent.send(dst, std::move(msg), rpc::TensorToDeviceMap(), {}, rpcTimeoutSeconds);
+    fut = agent.send(dst, std::move(msg), tensorToDevice, {}, rpcTimeoutSeconds);
   }
 
   return fut;

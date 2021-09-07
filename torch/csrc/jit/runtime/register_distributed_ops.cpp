@@ -43,11 +43,13 @@ void prepare_and_call_rpc_op(
   auto& argsTupleIValue = num_inputs >= 3 ? *stackIter++ : emptyTuple;
   // `kwargs = kwargs if kwargs is not None else {}`.
   auto& kwargsDictIValue = num_inputs >= 4 ? *stackIter++ : emptyDict;
+  // `tensorToDeviceDictIValue = tensorToDeviceDictIValue if tensorToDeviceDictIValue is not None else {}`.
+  auto& tensorToDeviceDictIValue = num_inputs >= 5 ? *stackIter++ : emptyDict;
 
   // IValue corresponding to placeholder for RPC timeout. Used if no
   // rpc timeout is specified by user.
   IValue noTimeout(torch::distributed::rpc::kUnsetRpcTimeout);
-  const auto rpcMaxInputs = 5;
+  const auto rpcMaxInputs = 6;
   auto& timeoutIValue = num_inputs >= rpcMaxInputs ? *stackIter++ : noTimeout;
   TORCH_INTERNAL_ASSERT(
       dstWorkerIValue.isString() ||
@@ -56,6 +58,7 @@ void prepare_and_call_rpc_op(
   TORCH_INTERNAL_ASSERT(qualifiedNameIValue.isString());
   TORCH_INTERNAL_ASSERT(argsTupleIValue.isTuple());
   TORCH_INTERNAL_ASSERT(kwargsDictIValue.isGenericDict());
+  TORCH_INTERNAL_ASSERT(tensorToDeviceDictIValue.isGenericDict());
   TORCH_INTERNAL_ASSERT(timeoutIValue.isDouble());
 
   // Get FunctionSchema for qualifiedName.
@@ -127,6 +130,11 @@ void prepare_and_call_rpc_op(
   // Get RPC timeout, if specified by user.
   const auto rpcTimeout = timeoutIValue.toDouble();
 
+  dist_rpc::TensorToDeviceMap tensorToDevice;
+  for (const auto& pair : tensorToDeviceDictIValue.toGenericDict()) {
+    tensorToDevice.insert(pair.key().toTensor(), pair.value().toDevice());
+  }
+
   if (rpc_op == "rpc_async") {
     // Send RPC request.
     auto futureIValuePtr = dist_rpc::rpcTorchscript(
@@ -134,7 +142,7 @@ void prepare_and_call_rpc_op(
         qualifiedName,
         functionSchema,
         userCallableStack,
-        dist_rpc::TensorToDeviceMap(), // TODO(pbelevich)
+        tensorToDevice,
         rpcTimeout);
     // Push output to the stack.
     drop(stack, num_inputs);
@@ -146,7 +154,7 @@ void prepare_and_call_rpc_op(
         qualifiedName,
         functionSchema,
         userCallableStack,
-        dist_rpc::TensorToDeviceMap(), // TODO(pbelevich)
+        tensorToDevice,
         rpcTimeout);
     futureIValuePtr->wait();
     if (futureIValuePtr->hasError()) {
@@ -164,7 +172,7 @@ void prepare_and_call_rpc_op(
         qualifiedName,
         functionSchema,
         userCallableStack,
-        dist_rpc::TensorToDeviceMap(), // TODO(pbelevich)
+        tensorToDevice,
         rpcTimeout);
     // Push output to the stack.
     drop(stack, num_inputs);

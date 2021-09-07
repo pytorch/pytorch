@@ -37,6 +37,7 @@ const std::string kServerActiveAsyncCalls = "agent.server_active_async_calls";
 
 std::vector<c10::Device> getDevicesForTensors(
     const std::vector<torch::Tensor>& tensors,
+    const TensorToDeviceMap& tensorToDevice,
     const DeviceMap& deviceMap,
     const std::string& remoteName) {
   // If the deviceMap is overridden, use that instead.
@@ -52,28 +53,45 @@ std::vector<c10::Device> getDevicesForTensors(
   bool hasMappedDevice = false;
   for (const auto& t : tensors) {
     if (t.device().is_cpu()) {
-      const auto deviceIter = deviceMap.find(c10::kCPU);
-      if (deviceIter == deviceMap.end()) {
-        devices.emplace_back(c10::kCPU);
-      } else {
-        devices.emplace_back(deviceIter->second);
+      const auto iter = tensorToDevice.find(t);
+      if (iter != tensorToDevice.end()) {
+        devices.emplace_back(iter->value());
         hasMappedDevice = true;
+      } else {
+        const auto deviceIter = deviceMap.find(c10::kCPU);
+        if (deviceIter == deviceMap.end()) {
+          devices.emplace_back(c10::kCPU);
+        } else {
+          devices.emplace_back(deviceIter->second);
+          hasMappedDevice = true;
+        }
       }
     } else {
-      const auto deviceIter = deviceMap.find(t.device());
-      TORCH_CHECK(
-          deviceIter != deviceMap.end(),
-          errStr,
-          " for device ",
-          t.device(),
-          " but received a tensor on that device.");
-      if (t.is_sparse()) {
-        devices.push_back(deviceIter->second);
-        devices.push_back(deviceIter->second);
+      const auto iter = tensorToDevice.find(t);
+      if (iter != tensorToDevice.end()) {
+        if (t.is_sparse()) {
+          devices.push_back(iter->value());
+          devices.push_back(iter->value());
+        } else {
+          devices.push_back(iter->value());
+        }
+        hasMappedDevice = true;
       } else {
-        devices.push_back(deviceIter->second);
+        const auto deviceIter = deviceMap.find(t.device());
+        TORCH_CHECK(
+            deviceIter != deviceMap.end(),
+            errStr,
+            " for device ",
+            t.device(),
+            " but received a tensor on that device.");
+        if (t.is_sparse()) {
+          devices.push_back(deviceIter->second);
+          devices.push_back(deviceIter->second);
+        } else {
+          devices.push_back(deviceIter->second);
+        }
+        hasMappedDevice = true;
       }
-      hasMappedDevice = true;
     }
   }
   if (!hasMappedDevice) {
@@ -599,9 +617,21 @@ void TensorPipeAgent::sendCompletedResponseMessage(
         futureResponseMessage.value().toCustomClass<Message>();
     responseMessage->setId(messageId);
 
+    auto deviceMap = DeviceMap(); // TODO(pbelevich): responseMessage->getDeviceMap();
+    auto tensorToDevice = TensorToDeviceMap(); // TODO(pbelevich): responseMessage->getTensorToDevice();
+
     std::vector<c10::Device> devices;
     try {
-      devices = getDevicesForRemote(pipe->getRemoteName(), *responseMessage);
+      if (deviceMap.empty()) {
+        devices = getDevicesForRemote(pipe->getRemoteName(), *responseMessage, tensorToDevice);
+      } else {
+        // If deviceMap is specified, use that instead.
+        devices = getDevicesForTensors(
+            responseMessage->tensors(),
+            tensorToDevice,
+            deviceMap,
+            pipe->getRemoteName());
+      }
     } catch (const std::exception& e) {
       responseMessage = createExceptionResponse(e.what(), messageId);
     }
@@ -802,12 +832,15 @@ c10::intrusive_ptr<JitFuture> TensorPipeAgent::send(
   // maps are not configured properly for this request.
   std::vector<c10::Device> devices;
   if (deviceMap.empty()) {
-    devices =
-        getDevicesForRemote(clientPipe.pipe_->getRemoteName(), *requestMessage);
+    devices = getDevicesForRemote(
+      clientPipe.pipe_->getRemoteName(),
+      *requestMessage,
+      tensorToDevice);
   } else {
     // If deviceMap is specified, use that instead.
     devices = getDevicesForTensors(
         requestMessage->tensors(),
+        tensorToDevice,
         deviceMap,
         clientPipe.pipe_->getRemoteName());
   }
@@ -1263,7 +1296,8 @@ void TensorPipeAgent::markFutureWithError(
 
 std::vector<c10::Device> TensorPipeAgent::getDevicesForRemote(
     const std::string& remoteName,
-    const Message& message) const {
+    const Message& message,
+    const TensorToDeviceMap& tensorToDevice) const {
   const auto& deviceMaps =
       message.isRequest() ? opts_.deviceMaps : reverseDeviceMaps_;
 
@@ -1287,7 +1321,7 @@ std::vector<c10::Device> TensorPipeAgent::getDevicesForRemote(
     }
     return {};
   } else {
-    return getDevicesForTensors(message.tensors(), iter->second, errStr);
+    return getDevicesForTensors(message.tensors(), tensorToDevice, iter->second, errStr);
   }
 }
 
