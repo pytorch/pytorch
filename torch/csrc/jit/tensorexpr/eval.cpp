@@ -62,6 +62,10 @@ inline c10::Half div_value(c10::Half lhs, c10::Half rhs) {
   return lhs / rhs;
 }
 
+inline c10::BFloat16 div_value(c10::BFloat16 lhs, c10::BFloat16 rhs) {
+  return lhs / rhs;
+}
+
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 class SimpleIREvaluatorImpl : public IRVisitor {
  public:
@@ -347,7 +351,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
   case ScalarType::Name:                               \
     value_ = binary_op<Type>(lhs_v, rhs_v, expr_type); \
     break;
-      AT_FORALL_SCALAR_TYPES_AND(Half, TYPE_CASE);
+      AT_FORALL_SCALAR_TYPES_AND2(Half, BFloat16, TYPE_CASE);
 #undef TYPE_CASE
       case ScalarType::Bool:
         value_ = binary_op<unsigned char>(lhs_v, rhs_v, expr_type);
@@ -370,7 +374,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
   case ScalarType::Name:                                                    \
     value = compare_select_op<T, Type>(lhs, rhs, retval1, retval2, cmp_op); \
     break;
-      AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, TYPE_CASE);
+      AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TYPE_CASE);
 #undef TYPE_CASE
       default:
         throw unsupported_dtype();
@@ -402,7 +406,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
     value_ = compare_select_op_helper<Type>(           \
         lhs_v, rhs_v, ret_val1_v, ret_val2_v, cmp_op); \
     break;
-      AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, TYPE_CASE);
+      AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TYPE_CASE);
 #undef TYPE_CASE
       default:
         throw unsupported_dtype();
@@ -413,7 +417,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
   TORCH_API void visit(Name##ImmPtr v) override { \
     value_ = Value(v->value());                   \
   }
-  AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, IMM_VISIT);
+  AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, IMM_VISIT);
 #undef IMM_VISIT
 
   TORCH_API void visit(BlockPtr v) override {
@@ -464,7 +468,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
   case ScalarType::Name:                                           \
     this->value_ = Value(castValues<SrcType, Type>(src_dtype, v)); \
     break;
-      AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, DST_TYPE_CASE);
+      AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, DST_TYPE_CASE);
 #undef DST_TYPE_CASE
       default:
         throw unsupported_dtype();
@@ -486,7 +490,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
   case ScalarType::Name:                               \
     doCastFromSrc<Type>(src_dtype, dst_dtype, value_); \
     break;
-        AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, SRC_TYPE_CASE);
+        AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, SRC_TYPE_CASE);
 #undef SRC_TYPE_CASE
         default:
           throw unsupported_dtype();
@@ -590,7 +594,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
     std::vector<Type> v(lanes, value.as<Type>()); \
     value_ = Value(v);                            \
   } break;
-      AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, TYPE_CASE);
+      AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TYPE_CASE);
 #undef TYPE_CASE
       default:
         throw unsupported_dtype();
@@ -610,6 +614,9 @@ class SimpleIREvaluatorImpl : public IRVisitor {
 #undef TYPE_CASE
       case ScalarType::Half:
         throw unsupported_dtype("IfThenElse condition can't have Half dtype");
+      case ScalarType::BFloat16:
+        throw unsupported_dtype(
+            "IfThenElse condition can't have BFloat16 dtype");
       default:
         throw unsupported_dtype();
     }
@@ -660,7 +667,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
     }                                                \
     value_ = Value(v);                               \
   } break;
-      AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, TYPE_CASE);
+      AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TYPE_CASE);
 #undef TYPE_CASE
       default:
         throw unsupported_dtype();
@@ -693,7 +700,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
       ptr##Name[index[i]] = value[i];                           \
     }                                                           \
   } break;
-      AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, TYPE_CASE);
+      AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TYPE_CASE);
 #undef TYPE_CASE
       default:
         throw unsupported_dtype();
@@ -800,6 +807,8 @@ class SimpleIREvaluatorImpl : public IRVisitor {
       } else if (inp_dtype == ScalarType::Double) {
         visit_intrinsics_helper<int, double>(v);
       } else if (inp_dtype == ScalarType::Half) {
+        throw unsupported_dtype(); // TODO
+      } else if (inp_dtype == ScalarType::BFloat16) {
         throw unsupported_dtype(); // TODO
       }
     } else {
@@ -1039,7 +1048,7 @@ void SimpleIREvaluator::bindArg(const BufferArg& bufArg, void* data) {
     impl_->bindVar(bufArg.var(), typed_data); \
     break;                                    \
   }
-    AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, TYPE_CASE);
+    AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TYPE_CASE);
 #undef TYPE_CASE
     default:
       throw unsupported_dtype();

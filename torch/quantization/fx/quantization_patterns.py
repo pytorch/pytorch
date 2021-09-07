@@ -638,19 +638,22 @@ class ConvReluQuantizeHandler(QuantizeHandler):
                 # and qparam is a dictionary of
                 # {"qscheme": ..., "scale": ..., "zero_point": ...} for per tensor quantization or
                 # {"qscheme": ..., "scale": ..., "zero_point": ..., "axis": ...} for per channel quantization
+                float_conv = self.conv
+                fused_conv = None
                 if isinstance(
-                        self.conv,
+                        float_conv,
                         QAT_CONV_MODULE_CLASSES):
                     # case 1. converting qat conv module to
                     # a float conv module, we need to attch
                     # weight fake_quant to the conv module,
                     # weight fake_quant is assumed to be run during
                     # QAT so we don't need to run it again here
-                    float_conv = self.conv.to_float()
+                    float_conv = self.conv.to_float()  # type: ignore[operator]
                     # change qat conv to conv
                     parent_name, name = _parent_name(self.conv_node.target)
                     setattr(modules[parent_name], name, float_conv)
                     if isinstance(float_conv, torch.nn.intrinsic._FusedModule):
+                        fused_conv = float_conv
                         float_conv = float_conv[0]
                     weight_post_process = self.conv.weight_fake_quant
                 else:
@@ -658,15 +661,28 @@ class ConvReluQuantizeHandler(QuantizeHandler):
                     # to float conv module, we need to attach
                     # weight observer to the conv module and run it
                     # with conv weight
-                    float_conv = self.conv
-                    if isinstance(self.conv, torch.nn.intrinsic._FusedModule):
-                        float_conv = self.conv[0]
+                    if isinstance(float_conv, torch.nn.intrinsic._FusedModule):
+                        fused_conv = float_conv
+                        float_conv = float_conv[0]  # type: ignore[index]
                     assert qconfig is not None
                     weight_post_process = qconfig.weight()
                     # run weight observer
-                    weight_post_process(float_conv.weight)
+                    weight_post_process(float_conv.weight)  # type: ignore[operator]
                 weight_qparams = get_qparam_dict(weight_post_process)
-                _to_reference(float_conv, weight_qparams)
+                # hardcoded for now, TODO: expose the api to user,
+                # we can have a map from module to reference module
+                # and allow user to register new ones
+                qconv_cls = get_static_quant_module_class(
+                    type(float_conv), is_reference=is_reference)
+                ref_conv = qconv_cls.from_float(float_conv, weight_qparams)  # type: ignore[attr-defined]
+                # if the parent is a fused conv (Sequential), we can replace the first
+                # item to ref conv, otherwise we can update
+                # the conv instance in the module tree
+                if fused_conv is not None:
+                    fused_conv[0] = ref_conv
+                else:
+                    parent_name, name = _parent_name(self.conv_node.target)
+                    setattr(modules[parent_name], name, ref_conv)
                 op_out = quantized_graph.create_node(
                     'call_module',
                     self.conv_node.target,
