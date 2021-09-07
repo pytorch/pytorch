@@ -60,9 +60,7 @@ env:
   USE_CUDA: 1
 {%- endif %}
 
-concurrency:
-  group: !{{ build_environment }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
-  cancel-in-progress: true
+!{{ common.concurrency(build_environment) }}
 
 jobs:
 {%- if ciflow_config.enabled %}
