@@ -193,8 +193,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
   return result;
 }
 
-template <typename Meta>
-void common_baddbmm_bmm_checks_cuda(Meta& meta, Tensor& result, const Tensor& self, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha) {
+Tensor& baddbmm_out_cuda_impl(const Tensor& result, const Tensor& self, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha) { 
   TORCH_CHECK(self.dim() == 3, "self must be a 3D tensor");
   TORCH_CHECK(batch1.dim() == 3, "batch1 must be a 3D tensor");
   TORCH_CHECK(batch2.dim() == 3, "batch2 must be a 3D tensor");
@@ -211,10 +210,6 @@ void common_baddbmm_bmm_checks_cuda(Meta& meta, Tensor& result, const Tensor& se
   TORCH_CHECK(self_sizes[1] == batch1_sizes[1], "self dim 1 must match batch1 dim 1");
   TORCH_CHECK(self_sizes[2] == batch2_sizes[2], "self dim 2 must match batch2 dim 2");
   TORCH_CHECK(batch1_sizes[2] == batch2_sizes[1], "batch1 dim 2 must match batch2 dim 1");
-}
-
-Tensor& baddbmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha) { 
-  IntArrayRef batch1_sizes = batch1.sizes();
 
   if (!result.is_same(self)) {
     result.resize_as_(self);
@@ -315,9 +310,7 @@ TORCH_IMPL_FUNC(baddbmm_out_cuda)(const Tensor& self, const Tensor& batch1, cons
   return result;
 }
 
-Tensor& bmm_out_cuda(const Tensor& batch1, const Tensor& batch2, Tensor &result) {
-  TORCH_CHECK(batch1.dim() == 3, "batch1 must be a 3D tensor");
-  TORCH_CHECK(batch2.dim() == 3, "batch2 must be a 3D tensor");
+TORCH_IMPL_FUNC(bmm_out_cuda)(const Tensor& batch1, const Tensor& batch2, const Tensor &result) {
   at::native::resize_output(result, {batch1.sizes()[0], batch1.sizes()[1], batch2.sizes()[2]});
   Scalar beta(0.0);
   Scalar alpha(1.0);
@@ -329,13 +322,6 @@ Tensor& bmm_out_cuda(const Tensor& batch1, const Tensor& batch2, Tensor &result)
       result,
       namedinference::compute_bmm_outnames(result, batch1, batch2));
   return result;
-}
-
-Tensor bmm_cuda(const Tensor& self, const Tensor& mat2) {
-  TORCH_CHECK(self.dim() == 3, "self must be a 3D tensor");
-  TORCH_CHECK(mat2.dim() == 3, "batch2 must be a 3D tensor");
-  Tensor result = at::empty({self.sizes()[0], self.sizes()[1], mat2.sizes()[2]}, self.options());
-  return native::bmm_out_cuda(self, mat2, result);
 }
 
 namespace {

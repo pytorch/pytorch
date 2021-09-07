@@ -736,7 +736,8 @@
   structured: True
   variants: function
   dispatch:
-    CPU, CUDA: baddbmm_out_cpu
+    CPU: baddbmm_out_cpu
+    CUDA: baddbmm_out_cuda
 
 - func: bartlett_window(int window_length, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
@@ -946,7 +947,8 @@
   structured: True
   variants: function
   dispatch:
-    CPU, CUDA: bmm_out_cpu
+    CPU: bmm_out_cpu
+    CUDA: bmm_out_cuda
     SparseCPU: bmm_out_sparse_cpu
     SparseCUDA: bmm_out_sparse_cuda
 

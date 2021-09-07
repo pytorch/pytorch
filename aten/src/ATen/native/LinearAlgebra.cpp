@@ -89,7 +89,7 @@ void common_checks_baddbmm_bmm(Meta& meta, const Tensor& batch1, const Tensor& b
   TORCH_CHECK(batch2_sizes[0] == bs && batch2_sizes[1] == contraction_size);
 
   if (is_bmm) {
-    meta.set_output({bs, res_rows, res_cols});
+    meta.set_output({bs, res_rows, res_cols}, batch1.options());
   } else {
     if (self_or_result.has_value()) {
       const auto self_sizes = self_or_result.value().sizes();
@@ -1197,28 +1197,7 @@ TORCH_IMPL_FUNC(mm_out_cpu)(const Tensor & self, const Tensor & mat2, const Tens
     at::NoNamesGuard guard;
     addmm_impl_cpu_(const_cast<Tensor&>(result), result, self, mat2, 0, 1);
   }
-
-TORCH_IMPL_FUNC(baddbmm_out)
-(const Tensor & self, const Tensor & batch1, const Tensor & batch2, const Scalar& beta, const Scalar& alpha, const Tensor& result) {
-    bool self_is_conj = self.is_conj();
-    bmm_out_or_baddbmm_(self, batch1.resolve_cobj(), batch2.resolve_cobj(), beta, alpha, false);
-    return conjugate_mutable_input_if_needed(self, self_is_conj);
-  }
-
-TORCH_IMPL_FUNC(bmm_out)
-(const Tensor & batch1, const Tensor & batch2, const Tensor & result) {
-    {
-    NoNamesGuard guard;
-    bool result_is_conj = result.is_conj();
-    bmm_out_or_baddbmm_(self, batch1.resolve_conj(), batch2.resolve_conj(), Scalar(0.0), Scalar(1.0), true);
-    conjugate_mutable_input_if_needed(result, result_is_conj);
-    }
-    namedinference::propagate_names_if_nonempty(
-      result,
-      namedinference::compute_bmm_outnames(result, batch1, batch2)
-    );
-    return result; 
-  }
+}
 
 template <typename scalar_t, bool is_bmm>
 inline void baddbmm_cpu_kernel(const Tensor& result, const Tensor& self, const Tensor& mat2, const Scalar& beta_, const Scalar& alpha_) {
@@ -1425,12 +1404,33 @@ static inline Tensor& bmm_out_or_baddbmm_(Tensor& self_or_result, const Tensor& 
 /*   return at::native::baddbmm__cpu(result, batch1, batch2, beta, alpha); */
 /* } */
 
-Tensor& conjugate_mutable_input_if_needed(Tensor& self, bool conjugate) {
+const Tensor& conjugate_mutable_input_if_needed(const Tensor& self, bool conjugate) {
   if (conjugate) {
     self.conj_physical_();
   }
   return self;
 }
+
+TORCH_IMPL_FUNC(baddbmm_out_cpu)
+(const Tensor & self, const Tensor & batch1, const Tensor & batch2, const Scalar& beta, const Scalar& alpha, const Tensor& result) {
+    bool self_is_conj = self.is_conj();
+    bmm_out_or_baddbmm_(const_cast<Tensor&>(self), batch1.resolve_conj(), batch2.resolve_conj(), beta, alpha, false);
+    conjugate_mutable_input_if_needed(const_cast<Tensor&>(self), self_is_conj);
+  }
+
+TORCH_IMPL_FUNC(bmm_out_cpu)
+(const Tensor & batch1, const Tensor & batch2, const Tensor & result) {
+    {
+    NoNamesGuard guard;
+    bool result_is_conj = result.is_conj();
+    bmm_out_or_baddbmm_(const_cast<Tensor&>(result), batch1.resolve_conj(), batch2.resolve_conj(), Scalar(0.0), Scalar(1.0), true);
+    conjugate_mutable_input_if_needed(result, result_is_conj);
+    }
+    namedinference::propagate_names_if_nonempty(
+      const_cast<Tensor&>(result),
+      namedinference::compute_bmm_outnames(const_cast<Tensor&>(result), batch1, batch2)
+    );
+  }
 
 /* Tensor& baddbmm__cpu(Tensor& self, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha) { */
 /*   bool self_is_conj = self.is_conj(); */
