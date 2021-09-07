@@ -5394,6 +5394,24 @@ def single_batch_reference_criterion_fn(*args):
     # reduction is 'sum' or 'mean' which results in a scalar
     return output
 
+def single_batch_reference_cosineembeddingloss(*args):
+    # Reference function for CosineEmbeddingLoss
+    criterion = args[-1]
+
+    def unsqueeze_inp(inp):
+        if isinstance(inp, (list, tuple)):
+            return (t.unsqueeze(0) for t in inp)
+        return inp.unsqueeze(0)
+
+    (x1, x2), target = (unsqueeze_inp(input) for input in args[:-1])
+    output = criterion(x1, x2, target)
+    reduction = get_reduction(criterion)
+
+    if reduction == 'none':
+        return output.squeeze(0)
+    # reduction is 'sum' or 'mean' which results in a scalar
+    return output
+
 
 # Check that regression criterion work with no batch dimensions
 regression_criterion_no_batch = [
@@ -5421,19 +5439,22 @@ classification_criterion_no_batch = [
     ('MultiLabelMarginLoss', lambda: torch.randn(4), lambda: torch.tensor([3, 0, -1, 1])),
     ('SoftMarginLoss', lambda: torch.randn(9), lambda: torch.tensor([-1, 1, 1] * 3)),
     ('NLLLoss', lambda: F.log_softmax(torch.randn(3), dim=0), lambda: torch.tensor(1)),
+    ('CosineEmbeddingLoss', lambda: (torch.randn(9), torch.randn(9)), lambda: torch.tensor(1)),
 ]
 classification_criterion_no_batch_extra_info: Dict[str, dict] = {
     'MultiLabelMarginLoss': {'check_gradgrad': False},
 }
+single_batch_reference_dict = {'CosineEmbeddingLoss': single_batch_reference_cosineembeddingloss}
 reductions = ['none', 'mean', 'sum']
 for (name, input_fn, target_fn), reduction in product(classification_criterion_no_batch,
                                                       reductions):
+    ref_fn = single_batch_reference_dict.get(name, single_batch_reference_criterion_fn)
     classification_test_info = dict(
         fullname="{}_no_batch_dim_{}".format(name, reduction),
         constructor=lambda *args, name=name: getattr(nn, name)(reduction=reduction),
         input_fn=lambda f=input_fn: f(),
         target_fn=lambda f=target_fn: f(),
-        reference_fn=single_batch_reference_criterion_fn,
+        reference_fn=ref_fn,
         test_cpp_api_parity=False,
     )
     extra_info = classification_criterion_no_batch_extra_info.get(name, {})
