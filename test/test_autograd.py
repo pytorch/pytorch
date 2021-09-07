@@ -1,3 +1,4 @@
+import dataclasses
 import gc
 import io
 import math
@@ -15,6 +16,14 @@ from collections import OrderedDict
 from itertools import product, permutations
 from operator import mul
 from functools import reduce, partial
+from typing import Counter
+
+from utils.tools_package import tools  # allows for imports from tools below
+
+from tools.autograd import gen_autograd_functions
+from tools.autograd import load_derivatives
+import tools.codegen.model
+
 import torch
 
 from torch import nn
@@ -2735,36 +2744,6 @@ class TestAutograd(TestCase):
                               lambda a, b, c: torch.block_diag(a, b, c),
                               True, f_args_variable, f_args_tensor)
 
-    def test_cat(self):
-        f_args_variable = (torch.randn(1, S, S, dtype=torch.double, requires_grad=True),
-                           torch.randn(2, S, S, dtype=torch.double, requires_grad=True),
-                           torch.randn(3, S, S, dtype=torch.double, requires_grad=True),
-                           0)
-        f_args_tensor = deepcopy(unpack_variables(f_args_variable))
-        run_functional_checks(self, "test_cat", "cat",
-                              lambda a, b, c, dim: torch.cat((a, b, c), dim),
-                              True, f_args_variable, f_args_tensor, check_forward_ad=True)
-
-    def test_cat_negdim_1(self):
-        f_args_variable = (torch.randn(S, S, 1, dtype=torch.double, requires_grad=True),
-                           torch.randn(S, S, 2, dtype=torch.double, requires_grad=True),
-                           torch.randn(S, S, 3, dtype=torch.double, requires_grad=True),
-                           -1)
-        f_args_tensor = deepcopy(unpack_variables(f_args_variable))
-        run_functional_checks(self, "test_cat_negdim_1", "cat",
-                              lambda a, b, c, dim: torch.cat((a, b, c), dim),
-                              True, f_args_variable, f_args_tensor, check_forward_ad=True)
-
-    def test_cat_negdim_2(self):
-        f_args_variable = (torch.randn(S, 1, S, dtype=torch.double, requires_grad=True),
-                           torch.randn(S, 2, S, dtype=torch.double, requires_grad=True),
-                           torch.randn(S, 3, S, dtype=torch.double, requires_grad=True),
-                           -2)
-        f_args_tensor = deepcopy(unpack_variables(f_args_variable))
-        run_functional_checks(self, "test_cat_negdim_2", "cat",
-                              lambda a, b, c, dim: torch.cat((a, b, c), dim),
-                              True, f_args_variable, f_args_tensor, check_forward_ad=True)
-
     def test_cat_empty_legacy(self):
         f_args_variable = (torch.randn(0, dtype=torch.double, requires_grad=True),
                            torch.randn(S, S, dtype=torch.double, requires_grad=True))
@@ -2775,14 +2754,6 @@ class TestAutograd(TestCase):
                               lambda a, b: torch.cat((a, b)),
                               False, f_args_variable, f_args_tensor, check_forward_ad=True)
         self.assertTrue(gradcheck(lambda a, b: torch.cat((a, b)), f_args_variable, eps=1e-6, atol=PRECISION))
-
-    def test_cat_empty(self):
-        f_args_variable = (torch.randn(0, S, dtype=torch.double, requires_grad=True),
-                           torch.randn(S, S, dtype=torch.double, requires_grad=True))
-        f_args_tensor = deepcopy(unpack_variables(f_args_variable))
-        run_functional_checks(self, "test_cat_empty", "cat",
-                              lambda a, b: torch.cat((a, b)),
-                              True, f_args_variable, f_args_tensor, check_forward_ad=True)
 
     def test_var_mean_differentiable(self):
         dim = [2, 4]
@@ -9539,11 +9510,138 @@ class TestMultithreadAutograd(TestCase):
         torch.autograd.gradcheck(fn, [inp_r, inp_c], check_forward_ad=True)
         torch.autograd.gradcheck(fn, [inp_c, inp_r], check_forward_ad=True)
 
+
+class TestCreateDerivative(TestCase):
+
+    def test_named_grads(self):
+        schema = tools.codegen.model.FunctionSchema.parse(
+            'func(Tensor a, Tensor b) -> (Tensor x, Tensor y)')
+        native_function = dataclasses.replace(DEFAULT_NATIVE_FUNCTION,
+                                              func=schema)
+
+        derivative = load_derivatives.create_derivative(
+            native_function,
+            formula='func_backward(grad_x, grad_y)',
+            var_names=(),
+            available_named_gradients=['grad_x', 'grad_y'])
+        self.assertSetEqual(derivative.named_gradients, {'grad_x', 'grad_y'})
+
+    def test_non_differentiable_output(self):
+        specification = 'func(Tensor a, Tensor b) -> (Tensor x, bool y, Tensor z)'
+        schema = tools.codegen.model.FunctionSchema.parse(specification)
+        native_function = dataclasses.replace(DEFAULT_NATIVE_FUNCTION,
+                                              func=schema)
+
+        differentiability_info = load_derivatives.create_differentiability_info(
+            defn={'name': specification,
+                  'a': 'grads[0]',
+                  'b': 'grads[2]',
+                  },
+            functions_by_signature={schema.signature(): [native_function]},
+            functions_by_schema={specification: native_function},
+            op_counter=Counter[str](),
+        )
+
+        self.assertListEqual(differentiability_info.available_named_gradients,
+                             # grad_y is not present because y is a
+                             # bool and thus not differentiable.
+                             ['grad_x', 'grad_z'])
+
+    def test_indexed_grads(self):
+        schema = tools.codegen.model.FunctionSchema.parse(
+            'func(Tensor a, Tensor b) -> (Tensor x, Tensor y)')
+        native_function = dataclasses.replace(DEFAULT_NATIVE_FUNCTION,
+                                              func=schema)
+
+        derivative = load_derivatives.create_derivative(
+            native_function,
+            formula='func_backward(grads[0], grads[1])',
+            var_names=(),
+            available_named_gradients=['grad_x', 'grad_y'])
+        self.assertSetEqual(derivative.named_gradients, set())
+
+    def test_named_grads_and_indexed_grads(self):
+        specification = 'func(Tensor a, Tensor b) -> (Tensor x, Tensor y)'
+        schema = tools.codegen.model.FunctionSchema.parse(specification)
+        native_function = dataclasses.replace(DEFAULT_NATIVE_FUNCTION,
+                                              func=schema)
+
+        with self.assertRaisesRegex(RuntimeError,
+                                    'illegally mixes use of "grad_RETURN_NAME"'):
+            load_derivatives.create_differentiability_info(
+                defn={'name': specification,
+                      # Uh-oh, the derivatives reference gradients by
+                      # name and by index.
+                      'a': 'grad_x',
+                      'b': 'grads[1]',
+                      },
+                functions_by_signature={schema.signature(): [native_function]},
+                functions_by_schema={specification: native_function},
+                op_counter=Counter[str](),
+            )
+
+
+class TestGenAutogradFunctions(TestCase):
+    def test_non_differentiable_output_invalid_type(self):
+        specification = 'func(Tensor a, Tensor b) -> (Tensor x, bool y, Tensor z)'
+        schema = tools.codegen.model.FunctionSchema.parse(specification)
+        native_function = dataclasses.replace(DEFAULT_NATIVE_FUNCTION,
+                                              func=schema)
+
+        differentiability_info = load_derivatives.create_differentiability_info(
+            defn={'name': specification,
+                  'a': 'grad_x',
+                  'b': 'grad_z',
+                  },
+            functions_by_signature={schema.signature(): [native_function]},
+            functions_by_schema={specification: native_function},
+            op_counter=Counter[str](),
+        )
+        definition = gen_autograd_functions.process_function(
+            differentiability_info,
+            gen_autograd_functions.FUNCTION_DEFINITION)
+        # grad_z should map to grads[1], not grads[2] because output 1
+        # (y) is not differentiable.
+        assert 'grad_z = grads[2]' not in definition
+        assert 'grad_z = grads[1]' in definition
+
+
+    def test_non_differentiable_output_output_differentiability(self):
+        specification = 'func(Tensor a, Tensor b) -> (Tensor x, Tensor y, Tensor z)'
+        schema = tools.codegen.model.FunctionSchema.parse(specification)
+        native_function = dataclasses.replace(DEFAULT_NATIVE_FUNCTION,
+                                              func=schema)
+
+        differentiability_info = load_derivatives.create_differentiability_info(
+            defn={'name': specification,
+                  'a': 'grad_x',
+                  'b': 'grad_z',
+                  'output_differentiability': [True, False, True],
+                  },
+            functions_by_signature={schema.signature(): [native_function]},
+            functions_by_schema={specification: native_function},
+            op_counter=Counter[str](),
+        )
+        definition = gen_autograd_functions.process_function(
+            differentiability_info,
+            gen_autograd_functions.FUNCTION_DEFINITION)
+        # grad_z should map to grads[1], not grads[2] because output 1
+        # (y) is not differentiable.
+        assert 'grad_z = grads[2]' not in definition
+        assert 'grad_z = grads[1]' in definition
+
+
+# Represents the most basic NativeFunction. Use dataclasses.replace()
+# to edit for use.
+DEFAULT_NATIVE_FUNCTION, _ = tools.codegen.model.NativeFunction.from_yaml(
+    {'func': 'func() -> bool'},
+    loc=tools.codegen.model.Location(__file__, 1))
+
+
 # Import test cases from below autograd/ here. These are found
 # implicitly by the loader, so Flake8 thinks they are unused, hence
 # the suppressions.
 
-from autograd.test_codegen import TestCreateDerivative, TestGenAutogradFunctions  # noqa: F401
 from autograd.test_complex import TestAutogradComplex  # noqa: F401
 
 
