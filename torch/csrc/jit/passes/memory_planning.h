@@ -101,13 +101,21 @@ inline bool operator==(const MemAllocation lhs, const MemAllocation rhs) {
 }
 
 inline bool valid_add(size_t a, size_t b) {
+#if defined(_MSC_VER)
+  return a + b >= a;
+#else
   size_t _carry = 0;
   return !__builtin_add_overflow(a, b, &_carry);
+#endif
 }
 
 inline bool valid_sub(size_t a, size_t b) {
+#if defined(_MSC_VER)
+  return a >= b;
+#else
   size_t _carry = 0;
   return !__builtin_sub_overflow(a, b, &_carry);
+#endif
 }
 
 c10::optional<size_t> computeStorageSize(const Value& value);
