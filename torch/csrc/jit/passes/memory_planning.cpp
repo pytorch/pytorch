@@ -362,16 +362,20 @@ void planMemory(const std::shared_ptr<Graph>& graph, Strategy strat) {
       allocations = linearScanHeuristic(managed_live_ranges);
       break;
     };
-    case Strategy::GREEDY_BY_SIZE: {
-      allocations = greedyBySize(managed_live_ranges);
+    case Strategy::GREEDY_BY_SIZE_WITH_SMALLEST_GAP: {
+      allocations = greedyBySizeWithSmallestGap(managed_live_ranges);
       break;
     }
     case Strategy::GREEDY_BY_SIZE_WITH_FIRST_GAP: {
       allocations = greedyBySizeWithFirstGap(managed_live_ranges);
       break;
     }
-    case Strategy::GREEDY_BY_LONGEST_AND_SIZE: {
-      allocations = greedyBySizeAndLongestWithFirstGap(managed_live_ranges);
+    case Strategy::GREEDY_BY_LONGEST_AND_SIZE_WITH_SMALLEST_GAP: {
+      allocations = greedyByLongestAndSizeWithSmallestGap(managed_live_ranges);
+      break;
+    }
+    case Strategy::GREEDY_BY_LONGEST_AND_SIZE_WITH_FIRST_GAP: {
+      allocations = greedyByLongestAndSizeWithFirstGap(managed_live_ranges);
       break;
     }
     default:
