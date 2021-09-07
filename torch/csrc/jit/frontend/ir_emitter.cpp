@@ -1353,6 +1353,8 @@ struct to_ir {
         } else {
           all_candidates = std::move(list_types);
         }
+      } else if (auto optional_type_hint = type_hint->cast<OptionalType>()) {
+        type_hint = optional_type_hint->getElementType();
       }
 
       if (all_candidates.empty()) {
@@ -1502,7 +1504,10 @@ struct to_ir {
         } else {
           all_candidates = std::move(dict_types);
         }
+      } else if (auto optional_type_hint = type_hint->cast<OptionalType>()) {
+        type_hint = optional_type_hint->getElementType();
       }
+
 
       if (all_candidates.empty()) {
         if (type_hint->kind() == DictType::Kind) {
@@ -4008,7 +4013,10 @@ struct to_ir {
         } else {
           type_hint = list_types[0];
         }
+      } else if (auto optional_type_hint = type_hint->cast<OptionalType>()) {
+        type_hint = optional_type_hint->getElementType();
       }
+
 
       // If we had any annotation OTHER THAN a Union that can hold more
       // than one type of List
@@ -4248,7 +4256,10 @@ struct to_ir {
             } else {
               type_hint = dict_types[0];
             }
+          } else if (auto optional_type_hint = type_hint->cast<OptionalType>()) {
+            type_hint = optional_type_hint->getElementType();
           }
+
 
           if (all_candidates.empty()) {
             if (auto dict_type_hint = type_hint->cast<DictType>()) {
