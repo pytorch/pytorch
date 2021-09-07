@@ -141,17 +141,17 @@ inline bool valid_sub(size_t a, size_t b) {
 struct TORCH_API MemEvent {
   enum class EventType { Allocate = 0, Free };
 
-  uint64_t time;
+  size_t time;
   std::string allocation_trace;
   std::string ptr_addr;
-  int64_t size;
+  size_t size;
   EventType type;
   c10::optional<FrameNodeId> frame_node_id;
   MemEvent(
-      int64_t t,
+      size_t t,
       std::string alloc_trace,
       std::string address,
-      int64_t s,
+      size_t s,
       EventType e,
       c10::optional<FrameNodeId> frame_nodeid = c10::nullopt)
       : time(t),

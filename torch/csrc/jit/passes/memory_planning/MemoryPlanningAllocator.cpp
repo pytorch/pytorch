@@ -1,6 +1,6 @@
 #include <torch/csrc/jit/passes/memory_planning.h>
 
-#include <sstream> //for std::stringstream
+#include <sstream>
 
 #include <c10/util/Backtrace.h>
 #include <torch/csrc/jit/mobile/interpreter.h>
@@ -11,7 +11,7 @@ static void DoNothing(void* ptr) {
   return;
 }
 
-inline int64_t timeSinceEpoch(
+inline size_t timeSinceEpoch(
     const std::chrono::time_point<std::chrono::system_clock>& t) {
   return std::chrono::duration_cast<std::chrono::microseconds>(
              t.time_since_epoch())
@@ -95,7 +95,7 @@ at::DataPtr MemoryTracingAllocator::allocate(size_t nbytes) const {
           frame_node_id});
     } else {
       allocation_traces_.emplace_back(torch::jit::MemEvent{
-          std::numeric_limits<uint64_t>::max(),
+          std::numeric_limits<size_t>::max(),
           bt,
           dataPtrAddrToStr(ptr),
           nbytes,

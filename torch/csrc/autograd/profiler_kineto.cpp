@@ -1,5 +1,6 @@
 #include <c10/util/irange.h>
 #include <torch/csrc/autograd/profiler_kineto.h>
+#include <torch/csrc/jit/runtime/interpreter.h>
 
 #include <torch/csrc/jit/frontend/tracer.h>
 #include <torch/csrc/jit/runtime/operator.h>
@@ -154,7 +155,7 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalState {
         act.addMetadata("Call stack", stacksToStr(backTraceToVecStr(bt), ";"));
       }
       act.startTime = start_time;
-      if (jit::currentFrameId().has_value()) {
+      if (jit::currentFrameId()) {
         auto frame_id = jit::currentFrameId().value();
         act.addMetadata("pc", std::to_string(frame_id.pc));
         act.addMetadata("NodeSchema", "\"" + frame_id.node_schema + "\"");
