@@ -7,6 +7,7 @@ import operator
 import random
 import numbers
 import unittest
+import os
 
 import torch
 import numpy as np
@@ -15,12 +16,12 @@ import collections.abc
 
 from typing import Any, Callable, List, Optional, Sequence, Tuple, Union, Dict
 
-from torch.testing import \
-    (make_non_contiguous, floating_types, floating_types_and, complex_types,
-     floating_and_complex_types, floating_and_complex_types_and,
-     all_types_and_complex_and, all_types_and, all_types_and_complex,
-     integral_types_and, all_types, double_types, make_tensor)
-from .._core import _dispatch_dtypes
+from torch.testing import make_non_contiguous, make_tensor
+from torch.testing._internal.common_dtype import (
+    _dispatch_dtypes, floating_types, floating_types_and, complex_types, floating_and_complex_types,
+    floating_and_complex_types_and, all_types_and_complex_and, all_types_and, all_types_and_complex, integral_types_and,
+    all_types, double_types,
+)
 from torch.testing._internal.common_device_type import \
     (onlyOnCPUAndCUDA, skipCUDAIfNoMagma, skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfNoCusolver,
      skipCPUIfNoLapack, skipCPUIfNoFFT, skipCUDAIfRocm, precisionOverride, toleranceOverride, tol)
@@ -2181,6 +2182,25 @@ def sample_inputs_stack(op_info, device, dtype, requires_grad, **kwargs):
 
     return (SampleInput(tensors, args=(0,)),)
 
+def sample_inputs_cat_concat(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    cases: Tuple[tuple, tuple, dict] = (  # type: ignore[assignment]
+        ((S, S), (S, S), {'dim': -1}),
+        ((S, S), (S, S), {'dim': 1}),
+        ((M, S), (S, S), {'dim': 0}),  # different shapes
+        ((1, 2, 3), (1, 2, 3), {'dim': -2}),
+        ((0,), (0,), {'dim': 0}),  # empty tensor
+        ((0, S), (S, S), {'dim': 0}),
+        ((1,), (1,), {})  # dim not passed, fallback to default
+    )
+
+    def generator():
+        for input_shape1, input_shape2, kwargs in cases:
+            yield SampleInput([make_arg(input_shape1), make_arg(input_shape2)], kwargs=kwargs)
+
+    return list(generator())
+
 def sample_inputs_hstack_dstack_vstack(op_info, device, dtype, requires_grad, **kwargs):
     tensors = [
         make_tensor((S, S), device, dtype, requires_grad=requires_grad),
@@ -2648,30 +2668,6 @@ def sample_inputs_hardswish(self, device, dtype, requires_grad):
     tensors = [SampleInput(make_tensor((N * 2, N * 2), device=device, dtype=dtype,
                requires_grad=requires_grad, low=-5, high=5)) for _ in range(1, N)]
     return tensors
-
-def sample_inputs_linear(self, device, dtype, requires_grad):
-    features_options = [[3, 4], [128, 128]]
-    batch_options: List[List[int]] = [
-        [],  # no batch
-        [0],
-        [64],
-        [5, 7],
-    ]
-    create_tensor = partial(make_tensor, device=device, dtype=dtype,
-                            requires_grad=requires_grad, low=-2, high=2)
-
-    sample_inputs = []
-    for has_bias, (in_feat, out_feat), batch_shape in \
-            itertools.product([True, False], features_options, batch_options):
-        input_tensor = create_tensor(batch_shape + [in_feat])
-        weight = create_tensor([out_feat, in_feat])
-        if not has_bias:
-            sample_inputs.append(SampleInput(input_tensor, args=(weight,)))
-            continue
-
-        bias = create_tensor([out_feat])
-        sample_inputs.append(SampleInput(input_tensor, args=(weight, bias)))
-    return sample_inputs
 
 def sample_inputs_interpolate(mode, self, device, dtype, requires_grad):
     N, C = 2, 3
@@ -7385,6 +7381,7 @@ op_db: List[OpInfo] = [
                    toleranceOverride({torch.float32: tol(atol=1e-05, rtol=1e-03)}),
                    'TestCommon', 'test_reference_testing'
                ),
+               unittest.skipIf("tbb" in os.getenv("BUILD_ENVIRONMENT", ""), "This test makes TBB Sad"),
            ],
            sample_inputs_func=sample_inputs_layer_norm,),
     OpInfo('nn.functional.pad',
@@ -7544,17 +7541,6 @@ op_db: List[OpInfo] = [
            dtypesIfCPU=floating_types_and(torch.int64),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_avgpool2d),
-    OpInfo('nn.functional.linear',
-           aten_name='linear',
-           supports_autograd=True,
-           sample_inputs_func=sample_inputs_linear,
-           dtypesIfCPU=all_types_and_complex_and(torch.half, torch.bfloat16),
-           dtypesIfROCM=floating_and_complex_types_and(torch.float16, torch.bfloat16),
-           dtypesIfCUDA=floating_and_complex_types_and(torch.float16, *[torch.bfloat16] if CUDA11OrLater else []),
-           backward_dtypesIfCUDA=floating_and_complex_types_and(torch.float16,
-                                                                *[torch.bfloat16] if CUDA11OrLater else []),
-           supports_forward_ad=True,
-           supports_out=False),
     UnaryUfuncInfo(
         'nn.functional.logsigmoid',
         aten_name="log_sigmoid",
@@ -8620,17 +8606,11 @@ op_db: List[OpInfo] = [
     OpInfo('stack',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_stack,
-           assert_autodiffed=True,
-           skips=(
-               # stack does not correctly warn when resizing out= inputs
-               SkipInfo('TestCommon', 'test_out'),),),
+           assert_autodiffed=True),
     OpInfo('hstack',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_hstack_dstack_vstack,
-           supports_forward_ad=True,
-           skips=(
-               # hstack does not correctly warn when resizing out= inputs
-               SkipInfo('TestCommon', 'test_out'),),),
+           supports_forward_ad=True),
     OpInfo('hypot',
            dtypes=floating_types(),
            dtypesIfCPU=floating_types_and(torch.bfloat16),
@@ -8647,24 +8627,31 @@ op_db: List[OpInfo] = [
                # JIT tests don't work with Tensor keyword arguments
                # https://github.com/pytorch/pytorch/issues/58507
                SkipInfo('TestJit', 'test_variant_consistency_jit'),),),
+    OpInfo('cat',
+           ref=lambda input_seq, dim=0, **kwargs: np.concatenate(input_seq, axis=dim, **kwargs),
+           aliases=('concat',),
+           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+           sample_inputs_func=sample_inputs_cat_concat,
+           supports_forward_ad=True,
+           assert_autodiffed=True,
+           skips=(
+               # RuntimeError: Arguments for call not valid.
+               #               Expected a value of type 'List[Tensor]' for argument
+               #               'tensors' but instead found type 'Tensor (inferred)'.
+               SkipInfo('TestJit', 'test_jit_alias_remapping'),)),
     OpInfo('vstack',
            aliases=('row_stack',),
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_hstack_dstack_vstack,
            supports_forward_ad=True,
            skips=(
-               # vstack does not correctly warn when resizing out= inputs
-               SkipInfo('TestCommon', 'test_out'),
                # RuntimeError: _fn() Expected a value of type
                #   'Tensor (inferred)' for argument 't0' but instead found type 'tuple'.
-               SkipInfo('TestJit', 'test_jit_alias_remapping'))),
+               SkipInfo('TestJit', 'test_jit_alias_remapping'),)),
     OpInfo('dstack',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_hstack_dstack_vstack,
-           supports_forward_ad=True,
-           skips=(
-               # dstack does not correctly warn when resizing out= inputs
-               SkipInfo('TestCommon', 'test_out'),)),
+           supports_forward_ad=True),
     OpInfo('unfold',
            op=lambda x, *args: x.unfold(*args),
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
@@ -9471,8 +9458,8 @@ def _compare_trilu_indices(
         # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
         self.assertEqualIgnoreType(
             torch.ones(row, col, device='cpu')
-                 .tril(offset).nonzero().to(dtype).transpose(0, 1),
-            torch.tril_indices(row, col, offset, dtype=dtype, device=device))
+                 .triu(offset).nonzero().to(dtype).transpose(0, 1),
+            torch.triu_indices(row, col, offset, dtype=dtype, device=device))
 
 
 def _compare_large_trilu_indices(
