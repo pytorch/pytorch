@@ -124,11 +124,9 @@ if __name__ == "__main__":
     with open(CONFIG_YML, "w") as f:
         yaml.dump(config_yml, f)
 
-    fnmatch.fnmatch
     if args.filter_gha:
         for relative_file in WORKFLOWS_DIR.iterdir():
             path = REPO_ROOT.joinpath(relative_file)
-            # print(path)
             if not fnmatch.fnmatch(path.name, args.filter_gha):
                 touched_files.append(path)
                 path.resolve().unlink()
