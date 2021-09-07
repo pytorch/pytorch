@@ -149,7 +149,7 @@ add_docstr(torch.absolute,
 absolute(input, *, out=None) -> Tensor
 
 Alias for :func:`torch.abs`
-""".format(**common_args))
+""")
 
 add_docstr(torch.acos, r"""
 acos(input, *, out=None) -> Tensor
@@ -211,7 +211,7 @@ add_docstr(torch.arccosh, r"""
 arccosh(input, *, out=None) -> Tensor
 
 Alias for :func:`torch.acosh`.
-""".format(**common_args))
+""")
 
 add_docstr(torch.add, r"""
 add(input, other, *, alpha=1, out=None) -> Tensor
@@ -2269,7 +2269,7 @@ add_docstr(torch.clip, r"""
 clip(input, min=None, max=None, *, out=None) -> Tensor
 
 Alias for :func:`torch.clamp`.
-""".format(**common_args))
+""")
 
 add_docstr(torch.column_stack,
            r"""
@@ -4468,7 +4468,7 @@ add_docstr(torch.inverse, r"""
 inverse(input, *, out=None) -> Tensor
 
 Alias for :func:`torch.linalg.inv`
-""".format(**common_args))
+""")
 
 add_docstr(torch.isin, r"""
 isin(elements, test_elements, *, assume_unique=False, invert=False) -> Tensor
@@ -5701,7 +5701,7 @@ add_docstr(torch.matrix_power, r"""
 matrix_power(input, n, *, out=None) -> Tensor
 
 Alias for :func:`torch.linalg.matrix_power`
-""".format(**common_args))
+""")
 
 add_docstr(torch.matrix_exp, r"""
 matrix_exp(input) -> Tensor
@@ -6667,7 +6667,7 @@ add_docstr(torch.multiply, r"""
 multiply(input, other, *, out=None)
 
 Alias for :func:`torch.mul`.
-""".format(**common_args))
+""")
 
 add_docstr(torch.multinomial,
            r"""
@@ -7017,7 +7017,7 @@ add_docstr(torch.negative,
 negative(input, *, out=None) -> Tensor
 
 Alias for :func:`torch.neg`
-""".format(**common_args))
+""")
 
 add_docstr(torch.nextafter,
            r"""
@@ -7390,7 +7390,7 @@ add_docstr(torch.polygamma,
 polygamma(n, input, *, out=None) -> Tensor
 
 Alias for :func:`torch.special.polygamma`.
-""".format(**common_args))
+""")
 
 add_docstr(torch.positive,
            r"""
@@ -8249,7 +8249,7 @@ add_docstr(torch.row_stack,
 row_stack(tensors, *, out=None) -> Tensor
 
 Alias of :func:`torch.vstack`.
-""".format(**common_args))
+""")
 
 add_docstr(torch.round,
            r"""
@@ -9974,7 +9974,7 @@ add_docstr(torch.true_divide, r"""
 true_divide(dividend, divisor, *, out) -> Tensor
 
 Alias for :func:`torch.div` with ``rounding_mode=None``.
-""".format(**common_args))
+""")
 
 add_docstr(torch.trunc,
            r"""
@@ -10090,7 +10090,7 @@ add_docstr(torch.fix,
 fix(input, *, out=None) -> Tensor
 
 Alias for :func:`torch.trunc`
-""".format(**common_args))
+""")
 
 add_docstr(torch.unsqueeze,
            r"""
@@ -10876,11 +10876,12 @@ elements :math:`{x_0, x_1, ..., x_n}`, the computation becomes
         \sum_{i = 1}^{n-1} \frac{(x_i - x_{i-1})}{2} (y_i + y_{i-1})
     \end{aligned}
 
-When :attr:`y` is two or more dimensions, this computation is performed independently
-along dimension :attr:`dim`. If :attr:`x` is also specified and is one-dimensional,
-then that dimension defines the spacing for each computation.
-If :attr:`x` is also specified and is not one-dimensional, then it is broadcast to
-the shape of :attr:`y` and the corresponding sizes are used for each computation.
+When :attr:`x` and :attr:`y` have the same size, the computation is as described above and no broadcasting is needed.
+The broadcasting behavior of this function is as follows when their sizes are different. For both :attr:`x`
+and :attr:`y`, the function computes the difference between consecutive elements along
+dimension :attr:`dim`. This effectively creates two tensors, `x_diff` and `y_diff`, that have
+the same shape as the original tensors except their lengths along the dimension :attr:`dim` is reduced by 1.
+After that, those two tensors are broadcast together to compute final output as part of the trapezoidal rule.
 See the examples below for details.
 
 .. note::
