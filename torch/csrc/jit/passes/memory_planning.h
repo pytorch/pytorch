@@ -8,9 +8,10 @@ namespace jit {
 enum class Strategy {
   NAIVE = 0,
   LINEAR_SCAN,
-  GREEDY_BY_SIZE,
+  GREEDY_BY_SIZE_WITH_SMALLEST_GAP,
   GREEDY_BY_SIZE_WITH_FIRST_GAP,
-  GREEDY_BY_LONGEST_AND_SIZE,
+  GREEDY_BY_LONGEST_AND_SIZE_WITH_SMALLEST_GAP,
+  GREEDY_BY_LONGEST_AND_SIZE_WITH_FIRST_GAP,
   GREEDY_BY_BREADTH,
 };
 
@@ -20,12 +21,14 @@ inline const char* toString(Strategy s) {
       return "NAIVE";
     case Strategy::LINEAR_SCAN:
       return "LINEAR_SCAN";
-    case Strategy::GREEDY_BY_SIZE:
+    case Strategy::GREEDY_BY_SIZE_WITH_SMALLEST_GAP:
       return "GREEDY_BY_SIZE";
     case Strategy::GREEDY_BY_SIZE_WITH_FIRST_GAP:
       return "GREEDY_BY_SIZE_WITH_FIRST_GAP";
-    case Strategy::GREEDY_BY_LONGEST_AND_SIZE:
-      return "GREEDY_BY_LONGEST_AND_SIZE";
+    case Strategy::GREEDY_BY_LONGEST_AND_SIZE_WITH_SMALLEST_GAP:
+      return "GREEDY_BY_LONGEST_AND_SIZE_WITH_SMALLEST_GAP";
+    case Strategy::GREEDY_BY_LONGEST_AND_SIZE_WITH_FIRST_GAP:
+      return "GREEDY_BY_LONGEST_AND_SIZE_WITH_FIRST_GAP";
     case Strategy::GREEDY_BY_BREADTH:
       return "GREEDY_BY_BREADTH";
     default:
