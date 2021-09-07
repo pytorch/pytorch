@@ -240,7 +240,7 @@ class TestProfiler(TestCase):
                     found_memory_events = False
                     for evt in events:
                         assert "name" in evt
-                        if evt["name"] in {"[memory_allocate]", "[memory_free]"}:
+                        if evt["name"] == "[memory]":
                             found_memory_events = True
                             assert "args" in evt
                             assert "Addr" in evt["args"]
@@ -307,7 +307,7 @@ class TestProfiler(TestCase):
                 "aten::empty"
             ],
             deallocs=[
-                "[memory_free]"
+                "[memory]"
             ]
         )
         if torch.cuda.is_available():
@@ -315,7 +315,7 @@ class TestProfiler(TestCase):
                 stats,
                 "cuda_memory_usage",
                 deallocs=[
-                    "[memory_free]"
+                    "[memory]"
                 ]
             )
 
