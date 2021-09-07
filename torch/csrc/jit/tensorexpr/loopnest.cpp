@@ -536,7 +536,8 @@ class FunctionInliner : public IRMutator {
         // (since we don't support in-place writes). Resolves issue 52581.
         TORCH_INTERNAL_ASSERT(
             *intValue(i) == 0,
-            "Constant index impression should always be zero");
+            buildErrorMessage(
+                "Unexpected non-zero constant index in inlined buffer in the fuser."));
         producer_index_vars_.push_back(nullptr);
       } else {
         throw std::logic_error("cannot inline Buf with compound indices");
@@ -547,21 +548,25 @@ class FunctionInliner : public IRMutator {
  private:
   ExprPtr mutate_loads(BufPtr buf, std::vector<ExprPtr> dims) {
     std::vector<VarPtr> index_vars;
-    TORCH_INTERNAL_ASSERT(buf->ndim() == producer_index_vars_.size());
+    TORCH_INTERNAL_ASSERT(
+        buf->ndim() == producer_index_vars_.size(),
+        buildErrorMessage(
+            "Dimensions of producer and consumer expressions do not match in inliner in the fuser."));
     for (const auto i : c10::irange(buf->ndim())) {
       VarPtr func_callee_arg = producer_index_vars_.at(i);
       ExprPtr func_caller_param = dims.at(i);
       if (func_callee_arg == nullptr) {
         TORCH_INTERNAL_ASSERT(
             intValue(func_caller_param) && *intValue(func_caller_param) == 0,
-            "We are implicitly assuming that if you have an index of 0, that must also be inlined into an index of 0");
+            buildErrorMessage(
+                "We are implicitly assuming that if you have an index of 0, that must also be inlined into an index of 0"));
         continue;
       }
       if (func_callee_arg == nullptr)
         continue;
       auto iter = inline_mapping_.find(func_callee_arg);
       if (iter != inline_mapping_.end()) {
-        throw std::runtime_error(
+        throw std::logic_error(
             "Duplicated variables: " + func_callee_arg->name_hint());
       }
       // Add a mapping for each function parameter to it's source name.
@@ -603,10 +608,10 @@ class FunctionInliner : public IRMutator {
       return IRMutator::mutate(v);
     }
 
-    if (v->indices().size() != buf->ndim()) {
-      throw malformed_input(
-          "Placeholder indexed access is inconsistent with its rank", v);
-    }
+    TORCH_INTERNAL_ASSERT(
+        v->indices().size() == buf->ndim(),
+        buildErrorMessage(
+            "Number of indices doesn't match buf rank in the fuser."));
     return mutate_loads(buf, v->indices());
   }
 
@@ -646,7 +651,10 @@ class FunctionInliner : public IRMutator {
     if (v == producer_ && !outputs_.count(buf_)) {
       in_producer_ = true;
       producer_ = to<Store>(IRMutator::mutate(v));
-      TORCH_INTERNAL_ASSERT(producer_ != nullptr);
+      TORCH_INTERNAL_ASSERT(
+          producer_,
+          buildErrorMessage(
+              "Producer statement for output buf should remain non-null in the fuser"));
       in_producer_ = false;
       return nullptr;
     } else {
@@ -748,7 +756,10 @@ bool LoopNest::computeInline(BufPtr b) {
     }
   }
 
-  TORCH_INTERNAL_ASSERT(relevant_store);
+  TORCH_INTERNAL_ASSERT(
+      relevant_store,
+      buildErrorMessage(
+          "Cannot find a relevant store to inline a buf in the fuser."));
 
   GRAPH_DEBUG("ComputeInline: Def: ", std::to_string(relevant_store));
   FunctionInliner inliner(relevant_store, output_bufs_);
@@ -772,7 +783,11 @@ void LoopNest::inlineIntermediateBufs(bool allow_duplicated_work) {
     auto input_bufs = getInputBufs();
 
     for (auto buf : intermediate_bufs) {
-      TORCH_INTERNAL_ASSERT(buf_load_store_uses.count(buf));
+      TORCH_INTERNAL_ASSERT(
+          buf_load_store_uses.count(buf),
+          buildErrorMessage(
+              "Could not find uses of buf '" + buf->name_hint() +
+              "' in the fuser."));
       std::vector<BufLoadOrStoreUse>& uses = buf_load_store_uses[buf];
       auto stores = c10::filter(
           uses, [](const BufLoadOrStoreUse& use) { return use.isStore; });
@@ -789,7 +804,11 @@ void LoopNest::inlineIntermediateBufs(bool allow_duplicated_work) {
           }
         } else {
           // If S is not a store, it must be an ExternalCall.
-          TORCH_INTERNAL_ASSERT(to<ExternalCall>(stores[0].s));
+          TORCH_INTERNAL_ASSERT(
+              to<ExternalCall>(stores[0].s),
+              buildErrorMessage(
+                  "Expected stmt: " + std::to_string(stores[0].s) +
+                  "\nto be either a Store or an ExternalCall in the fuser."));
         }
       }
 
@@ -1154,7 +1173,10 @@ bool LoopNest::optimizeConditionals() {
             ifthenelse_exprs.front(), &cond_var, &comp_values, &sub_exprs)) {
       continue;
     }
-    TORCH_INTERNAL_ASSERT(comp_values.size() >= 1);
+    TORCH_INTERNAL_ASSERT(
+        comp_values.size() >= 1,
+        buildErrorMessage(
+            "Expected at least one expression in optimizeConditional in the fuser."));
     comp_values.insert(comp_values.begin(), immLike(comp_values[0], 0));
 
     auto fors = getLoopStmtsFor(store);
@@ -1513,7 +1535,10 @@ void LoopNest::splitWithMask(ForPtr f, int factor, ForPtr* inner) {
 std::vector<ForPtr> LoopNest::distributeLoop(
     ForPtr loop,
     const std::unordered_set<StmtPtr>& pivots) {
-  TORCH_INTERNAL_ASSERT(loop);
+  TORCH_INTERNAL_ASSERT(
+      loop,
+      buildErrorMessage(
+          "Expected non-null loop in distributeLoop in the fuser."));
   auto root = loop->get_parent();
   if (root == nullptr) {
     throw malformed_input("Loop without parent: ", loop);
@@ -1758,7 +1783,10 @@ bool LoopNest::unsafeFuseLoops(
       break;
     }
   }
-  TORCH_INTERNAL_ASSERT(it != root_block->end());
+  TORCH_INTERNAL_ASSERT(
+      it != root_block->end(),
+      buildErrorMessage(
+          "Could not find the given loop in the root stmt in unsafeFuseLoop the fuser."));
   for (auto l : loops) {
     if (*it != l) {
       return false;
@@ -2032,7 +2060,10 @@ std::vector<ForPtr> LoopNest::reorder(
   parent->replace_stmt(loops.front(), empty_block);
   for (size_t i = 1; i < loops.size(); ++i) {
     auto block = to<Block>(loops[i]->get_parent());
-    TORCH_INTERNAL_ASSERT(block);
+    TORCH_INTERNAL_ASSERT(
+        block,
+        buildErrorMessage(
+            "Expected parent stmt to be a non-null Block in reorder transformation the fuser."));
     block->remove_stmt(loops[i]);
   }
 
@@ -2191,9 +2222,13 @@ std::vector<ForPtr> LoopNest::getLoopStmtsInLoopNest(ForPtr f, size_t num) {
   ForPtr curr_for = f;
   loops[0] = curr_for;
   for (size_t i = 1; i < num; ++i) {
-    TORCH_INTERNAL_ASSERT(curr_for->body()->nstmts() == 1);
+    TORCH_INTERNAL_ASSERT(
+        curr_for->body()->nstmts() == 1,
+        buildErrorMessage("Expected a single stmt in the loop body."));
     curr_for = to<For>(curr_for->body()->front());
-    TORCH_INTERNAL_ASSERT(curr_for);
+    TORCH_INTERNAL_ASSERT(
+        curr_for,
+        buildErrorMessage("Expected the only child stmt to be a For loop."));
     loops[i] = curr_for;
   }
   return loops;
@@ -2303,7 +2338,10 @@ void LoopNest::compressBuffer(BufPtr buf, StmtPtr stmt) {
 
   // Find the parent common to all the buffer accesses.
   BlockPtr parent = to<Block>(writes.front()->get_parent());
-  TORCH_INTERNAL_ASSERT(parent);
+  TORCH_INTERNAL_ASSERT(
+      parent,
+      buildErrorMessage(
+          "Expected parent stmt to be a non-null block in compressBuffer in the fuser."));
   for (auto w : writes) {
     parent = Block::getSharedParent(parent, w);
   }
@@ -2325,7 +2363,10 @@ void LoopNest::compressBuffer(BufPtr buf, StmtPtr stmt) {
   // Vector to indicate which dimensions could be compressed away.
   std::vector<bool> dims(buf->dims().size(), true);
   auto check_indices = [&](const std::vector<ExprPtr>& indices) {
-    TORCH_INTERNAL_ASSERT(indices.size() == dims.size());
+    TORCH_INTERNAL_ASSERT(
+        indices.size() == dims.size(),
+        buildErrorMessage(
+            "Expected ranks to match in compressBuffer in the fuser."));
     for (size_t i = 0; i < indices.size(); ++i) {
       auto index_vars = NodeFinder<Var>::find(indices[i]);
       for (auto iv : index_vars) {
@@ -2367,7 +2408,10 @@ void LoopNest::compressBuffer(BufPtr buf, StmtPtr stmt) {
 
   // Modify all access to reflect the removed dims.
   auto get_new_indices = [&](const std::vector<ExprPtr>& indices) {
-    TORCH_INTERNAL_ASSERT(indices.size() == dims.size());
+    TORCH_INTERNAL_ASSERT(
+        indices.size() == dims.size(),
+        buildErrorMessage(
+            "Expected ranks to match in compressBuffer in the fuser."));
     std::vector<ExprPtr> new_indices(indices);
     for (size_t i = 0; i < dims.size(); ++i) {
       if (dims[i]) {
@@ -2573,7 +2617,10 @@ class CacheReplacer : public IRMutator {
 
     // Map indices to call-parameters.
     std::vector<ExprPtr> newIndices;
-    TORCH_INTERNAL_ASSERT(offsets_.size() == v->indices().size());
+    TORCH_INTERNAL_ASSERT(
+        offsets_.size() == v->indices().size(),
+        buildErrorMessage(
+            "Expected ranks to match in CacheReplacer in the fuser."));
     for (size_t i = 0; i < v->indices().size(); ++i) {
       ExprPtr index = v->indices()[i]->accept_mutator(this);
       ExprPtr offset = offsets_[i];
@@ -2595,7 +2642,10 @@ class CacheReplacer : public IRMutator {
 
     // Map indices to call-parameters.
     std::vector<ExprPtr> newIndices;
-    TORCH_INTERNAL_ASSERT(offsets_.size() == v->indices().size());
+    TORCH_INTERNAL_ASSERT(
+        offsets_.size() == v->indices().size(),
+        buildErrorMessage(
+            "Expected ranks to match in CacheReplacer in the fuser."));
     for (size_t i = 0; i < v->indices().size(); ++i) {
       ExprPtr index = v->indices()[i]->accept_mutator(this);
       ExprPtr offset = offsets_[i];
@@ -2643,7 +2693,10 @@ LoopNest::AccessResult LoopNest::cacheAccesses(
     return {nullptr, nullptr};
   }
 
-  TORCH_INTERNAL_ASSERT(bounds_it->second.size() == 1);
+  TORCH_INTERNAL_ASSERT(
+      bounds_it->second.size() == 1,
+      buildErrorMessage(
+          "Unexpected number of bound info entries in cacheAccesses in the fuser."));
   TensorAccessBoundsInfo& info = bounds_it->second[0];
   bool hasReads = info.kind == kLoad || info.kind == kMutate;
   bool hasWrites = info.kind == kStore || info.kind == kMutate;
@@ -2998,7 +3051,10 @@ class RfactorStoreRewriter : public IRMutator {
       return IRMutator::mutate(v);
     }
 
-    TORCH_INTERNAL_ASSERT(old_indices_.size() == v->indices().size());
+    TORCH_INTERNAL_ASSERT(
+        old_indices_.size() == v->indices().size(),
+        buildErrorMessage(
+            "Expected ranks to match in RfactorStoreRewriter in the fuser."));
 
     bool equal_indices = true;
     for (size_t i = 0; i < v->indices().size(); ++i) {
@@ -3032,7 +3088,10 @@ class RfactorStoreRewriter : public IRMutator {
       return IRMutator::mutate(v);
     }
 
-    TORCH_INTERNAL_ASSERT(old_indices_.size() == v->indices().size());
+    TORCH_INTERNAL_ASSERT(
+        old_indices_.size() == v->indices().size(),
+        buildErrorMessage(
+            "Expected ranks to match in RfactorStoreRewriter in the fuser."));
 
     bool equal_indices = true;
     for (size_t i = 0; i < v->indices().size(); ++i) {
@@ -3141,7 +3200,10 @@ bool LoopNest::rfactor(
   //   X[*indexes] = ReduceOp(X[*indexes] + T[*indexes + {reduction_var}],
   //                          reduce_axis={reduction_var})
   BlockPtr b = outer_reduction_for->body();
-  TORCH_INTERNAL_ASSERT(b->nstmts() == 1);
+  TORCH_INTERNAL_ASSERT(
+      b->nstmts() == 1,
+      buildErrorMessage(
+          "Expected to have a single stmt in the block in rfactor transformation in the fuser."));
   StmtPtr first_reduction_loop = b->stmts().front();
   auto rfac_buf_indices = orig_buf_indices;
   rfac_buf_indices.emplace_back(reduction_var);
