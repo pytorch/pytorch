@@ -31,7 +31,7 @@ env:
   USE_CUDA: 1
 
 concurrency:
-  group: win-vs2019-cuda11.3-py3-${{ github.event.pull_request.number || github.sha }}
+  group: win-vs2019-cuda11.3-py3-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true
 
 jobs:
