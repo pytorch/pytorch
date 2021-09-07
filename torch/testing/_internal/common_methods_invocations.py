@@ -2823,6 +2823,23 @@ def sample_inputs_outer(op_info, device, dtype, requires_grad, **kwargs):
     inputs.append(SampleInput(arg_a, args=(arg_b,)))
     return inputs
 
+
+def sample_inputs_igamma_igammac(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, low=1e-3)
+    cases = (((S, S), (S, S), False),
+             ((S, S), (S, ), False),
+             ((S, ), (S, S), True),
+             ((), (), False))
+
+    def generator():
+        for shape, other_shape, broadcasts_input in cases:
+            yield SampleInput(make_arg(shape, requires_grad=requires_grad),
+                              args=(make_arg(other_shape, requires_grad=False),),
+                              broadcasts_input=broadcasts_input)
+
+    return list(generator())
+
+
 def sample_inputs_dist(op_info, device, dtype, requires_grad):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
     sizes = ((S, S, S), (S,), (S, 1, S), (), (S, S))
@@ -7577,6 +7594,58 @@ op_db: List[OpInfo] = [
                # Topk is not raising a warning when the out is resized
                SkipInfo('TestCommon', 'test_out'),
            )),
+    # We have to add 2 OpInfo entry for `igamma` and `igammac`.First is the
+    # standard entry, second is to run gradcheck tests on the second argument.
+    OpInfo('igamma',
+           dtypes=floating_types_and(torch.bfloat16, torch.float16),
+           aliases=('torch.special.gammainc',),
+           dtypesIfCUDA=floating_types(),
+           supports_autograd=False,
+           sample_inputs_func=sample_inputs_igamma_igammac),
+    OpInfo('igamma',
+           variant_test_name='grad_other',
+           # Since autograd formula is implemented only for other and
+           # gradcheck test verifies the formula for input in SampleInput,
+           # we permute the arguments.
+           op=lambda self, other, **kwargs: torch.igamma(other, self, **kwargs),
+           dtypes=floating_types_and(torch.bfloat16, torch.float16),
+           backward_dtypesIfCPU=floating_types_and(torch.bfloat16),
+           dtypesIfCUDA=floating_types(),
+           backward_dtypesIfCUDA=floating_types(),
+           supports_inplace_autograd=False,
+           skips=(
+               # test does not work with passing lambda for op
+               SkipInfo('TestJit', 'test_variant_consistency_jit'),
+               # test fails are we permute the arguments function variant
+               # but not for inplace or method.
+               SkipInfo('TestCommon', 'test_variant_consistency_eager'),
+           ),
+           sample_inputs_func=sample_inputs_igamma_igammac),
+    OpInfo('igammac',
+           dtypes=floating_types_and(torch.bfloat16, torch.float16),
+           aliases=('torch.special.gammaincc',),
+           dtypesIfCUDA=floating_types(),
+           supports_autograd=False,
+           sample_inputs_func=sample_inputs_igamma_igammac),
+    OpInfo('igammac',
+           variant_test_name='grad_other',
+           # Since autograd formula is implemented only for other and
+           # gradcheck test verifies the formula for input in SampleInput,
+           # we permute the arguments
+           op=lambda self, other, **kwargs: torch.igammac(other, self, **kwargs),
+           dtypes=floating_types_and(torch.bfloat16, torch.float16),
+           backward_dtypesIfCPU=floating_types_and(torch.bfloat16),
+           dtypesIfCUDA=floating_types(),
+           backward_dtypesIfCUDA=floating_types(),
+           supports_inplace_autograd=False,
+           skips=(
+               # test does not work with passing lambda for op
+               SkipInfo('TestJit', 'test_variant_consistency_jit'),
+               # test fails are we permute the arguments function variant
+               # but not for inplace or method.
+               SkipInfo('TestCommon', 'test_variant_consistency_eager'),
+           ),
+           sample_inputs_func=sample_inputs_igamma_igammac),
     OpInfo('nn.functional.hardshrink',
            aten_name="hardshrink",
            dtypes=floating_types(),
