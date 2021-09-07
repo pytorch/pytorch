@@ -1,5 +1,4 @@
 # @generated DO NOT EDIT MANUALLY
-
 # Template is at:    .github/templates/windows_ci_workflow.yml.j2
 # Generation script: .github/scripts/generate_ci_workflows.py
 name: win-vs2019-cpu-py3
@@ -20,6 +19,7 @@ env:
   IN_CI: 1
   INSTALL_WINDOWS_SDK: 1
   PYTHON_VERSION: "3.8"
+  PR_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
   SCCACHE_BUCKET: "ossci-compiler-cache"
   VC_PRODUCT: "BuildTools"
   VC_VERSION: ""
@@ -29,7 +29,7 @@ env:
   no_proxy: localhost,127.0.0.1,amazonaws.com,s3.amazonaws.com,169.254.169.254,169.254.170.2,/var/run/docker.sock
 
 concurrency:
-  group: win-vs2019-cpu-py3-${{ github.event.pull_request.number || github.sha }}
+  group: win-vs2019-cpu-py3-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true
 
 jobs:
@@ -98,7 +98,7 @@ jobs:
           path: C:\${{ github.run_id }}\build-results
       - name: Upload artifacts to s3
         if: always()
-        uses: seemethere/upload-artifact-s3@9d7ceb0ab39c2c88d93ef7792b27425b27d59162
+        uses: seemethere/upload-artifact-s3@v3
         with:
           retention-days: 14
           if-no-files-found: error
