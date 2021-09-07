@@ -5,11 +5,13 @@ import os
 import re
 import shutil
 import sys
+import string
 import tempfile
 import torch
 import warnings
 import zipfile
 
+from urllib.error import HTTPError
 from urllib.request import urlopen, Request
 from urllib.parse import urlparse  # noqa: F401
 
@@ -119,29 +121,72 @@ def _read_url(url):
         return r.read().decode(r.headers.get_content_charset('utf-8'))
 
 
-def _validate_not_a_forked_repo(repo_owner, repo_name, branch):
-    # Use urlopen to avoid depending on local git.
-    headers = {'Accept': 'application/vnd.github.v3+json'}
-    token = os.environ.get(ENV_GITHUB_TOKEN)
-    if token is not None:
-        headers['Authorization'] = f'token {token}'
-    for url_prefix in (
-            f'https://api.github.com/repos/{repo_owner}/{repo_name}/branches',
-            f'https://api.github.com/repos/{repo_owner}/{repo_name}/tags'):
-        page = 0
-        while True:
-            page += 1
-            url = f'{url_prefix}?per_page=100&page={page}'
-            response = json.loads(_read_url(Request(url, headers=headers)))
-            # Empty response means no more data to process
-            if not response:
-                break
-            for br in response:
-                if br['name'] == branch or br['commit']['sha'].startswith(branch):
-                    return
+def _validate_branch(repo_owner, repo_name, branch):
+    # Here we try to make sure that the branch isn't a potentially malicious commit.
+    # This is important because in GitHub the download URL
+    # f'https://github.com/{repo_owner}/{repo_name}/archive/{commit_hash}.zip'
+    # may actually exist *even if* commit_hash is from a different repo_owner / fork.
+    # For example this URL exists:
+    # https://github.com/pytorch/vision/archive/8949c7011facf7801fdf077cc3e4ecd8f0940c7e.zip
+    # even though the commit hash doesn't come from pytorch/vision. It actually comes from a fork
+    # https://github.com/NicolasHug/vision/commit/8949c7011facf7801fdf077cc3e4ecd8f0940c7e
+    # So we want avoid downloading code that can come from a potentionally malicious fork.
 
-    raise ValueError(f'Cannot find {branch} in https://github.com/{repo_owner}/{repo_name}. '
-                     'If it\'s a commit from a forked repo, please call hub.load() with forked repo directly.')
+    allowed_hash_chars = string.hexdigits.lower()
+    if any(c.lower() not in allowed_hash_chars for c in branch):
+        # The above issue only exists for commit hashes. So if we know that ``branch``
+        # isn't a commit hash, we can return early. This should avoid many GitHub API calls
+        return
+    # Note: here it's still possible that the branch param corresponds to a branch name
+    # or a tag name, so we need to check for those as well.
+
+    def branch_belongs_to_repo():
+        # Return True if either:
+        # - branch corresponds to a branch name in the repo
+        # - branch corresponds to a tag name in the repo
+        # - branch corresponds to a commit that has an associated tag in the repo
+
+        def find_in_refs(ref_kind):
+            # We limit the search to 5k branches / tags, which should be more than enough
+            for page in range(1, 50):
+                url = f'https://api.github.com/repos/{repo_owner}/{repo_name}/{ref_kind}?per_page=100&page={page}'
+                response = json.loads(_read_url(Request(url, headers=headers)))
+                # Empty response means no more data to process
+                if not response:
+                    return False
+                for br in response:
+                    if br['name'] == branch or br['commit']['sha'].startswith(branch):
+                        return True
+            return False
+
+        headers = {'Accept': 'application/vnd.github.v3+json'}
+        token = os.environ.get(ENV_GITHUB_TOKEN)
+        if token is not None:
+            headers['Authorization'] = f'token {token}'
+        return any(find_in_refs(ref_kind) for ref_kind in ('branches', 'tag'))
+
+    try:
+        branch_found = branch_belongs_to_repo()
+    except HTTPError as e:
+        if e.code == 403 and "rate limit exceeded" in str(e):
+            raise ValueError(
+                f"Torchhub was unable to verify that {branch} is indeed part of the {repo_owner}/{repo_name} repo, "
+                f"as it received a GitHub API rate limit error. Consider setting the {ENV_GITHUB_TOKEN} env variable "
+                "to a GitHub token that has more API credits. "
+                "If you're absolutely sure about what you are doing, you can bypass this security check by setting "
+                "skip_validation=True."
+            )
+        else:
+            raise
+
+    if not branch_found:
+        raise ValueError(
+            f"Torchhub tried to look for {branch} in the {repo_owner}/{repo_name} repo, but couldn't find it. "
+            "We error now to avoid downloading and executing code that is potentially malicious. "
+            "Perhaps you specified the wrong repo owner, or a wrong commit hash? If you're absolutely "
+            "sure about what you are doing, you can bypass this security check by setting "
+            "skip_validation=True."
+        )
 
 
 def _get_cache_or_reload(github, force_reload, verbose=True, skip_validation=False):
@@ -170,7 +215,7 @@ def _get_cache_or_reload(github, force_reload, verbose=True, skip_validation=Fal
     else:
         # Validate the tag/branch is from the original repo instead of a forked repo
         if not skip_validation:
-            _validate_not_a_forked_repo(repo_owner, repo_name, branch)
+            _validate_branch(repo_owner, repo_name, branch)
 
         cached_file = os.path.join(hub_dir, normalized_br + '.zip')
         _remove_if_exists(cached_file)
