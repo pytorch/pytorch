@@ -103,10 +103,10 @@ OpSchema::Cost CostInferenceForSplit(
   cost.flops = 0;
   auto const& input_0_element_size_byte =
       DataTypeToTypeMeta(in[0].data_type()).itemsize();
-  auto const& input_1_element_size_byte =
-      (in.size() > 1) ? DataTypeToTypeMeta(in[1].data_type()).itemsize() : 0;
   auto input_bytes_count = nElemFromDim(in[0]) * input_0_element_size_byte;
-  auto split_bytes_count = nElemFromDim(in[1]) * input_1_element_size_byte;
+  auto split_bytes_count = in.size() > 1
+      ? nElemFromDim(in[1]) * DataTypeToTypeMeta(in[1].data_type()).itemsize()
+      : 0;
   // There can be two input blobs:
   // (1) actual tensor to be split
   // (2) lengths of outputs along split axis
