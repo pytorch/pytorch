@@ -30,7 +30,8 @@
 // CAFFE2_CUDA_API gets translated to CAFFE2_HIP_API in hipify script, which
 // causes a marco redefinition issue with the later definition of
 // CAFFE2_HIP_API, so we exclude this definition when HIP is specified
-#if !defined(USE_ROCM)
+//#if !defined(USE_ROCM)
+#if !defined(__HIP_PLATFORM_HCC__)
 #define CAFFE2_CUDA_API TORCH_CUDA_CPP_API
 #else
 #define CAFFE2_CUDA_API TORCH_HIP_API
