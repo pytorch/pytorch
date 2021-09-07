@@ -33,6 +33,7 @@ struct PythonEngine : public Engine {
       InputBuffer&& input_buffer) override;
 
   std::unique_ptr<AnomalyMetadata> make_anomaly_metadata() override;
+  std::unique_ptr<SavedVariableHooks> get_default_saved_variable_hooks() override;
   private:
     PythonEngine();
 };

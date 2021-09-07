@@ -38,8 +38,8 @@ endif()
 message(STATUS "Caffe2: CUDA detected: " ${CUDA_VERSION})
 message(STATUS "Caffe2: CUDA nvcc is: " ${CUDA_NVCC_EXECUTABLE})
 message(STATUS "Caffe2: CUDA toolkit directory: " ${CUDA_TOOLKIT_ROOT_DIR})
-if(CUDA_VERSION VERSION_LESS 9.0)
-  message(FATAL_ERROR "PyTorch requires CUDA 9.0 and above.")
+if(CUDA_VERSION VERSION_LESS 9.2)
+  message(FATAL_ERROR "PyTorch requires CUDA 9.2 or above.")
 endif()
 
 if(CUDA_FOUND)
@@ -64,31 +64,33 @@ if(CUDA_FOUND)
     "  return 0;\n"
     "}\n"
     )
-  try_run(run_result compile_result ${PROJECT_RANDOM_BINARY_DIR} ${file}
-    CMAKE_FLAGS "-DINCLUDE_DIRECTORIES=${CUDA_INCLUDE_DIRS}"
-    LINK_LIBRARIES ${CUDA_LIBRARIES}
-    RUN_OUTPUT_VARIABLE cuda_version_from_header
-    COMPILE_OUTPUT_VARIABLE output_var
-    )
-  if(NOT compile_result)
-    message(FATAL_ERROR "Caffe2: Couldn't determine version from header: " ${output_var})
-  endif()
-  message(STATUS "Caffe2: Header version is: " ${cuda_version_from_header})
-  if(NOT cuda_version_from_header STREQUAL ${CUDA_VERSION_STRING})
-    # Force CUDA to be processed for again next time
-    # TODO: I'm not sure if this counts as an implementation detail of
-    # FindCUDA
-    set(${cuda_version_from_findcuda} ${CUDA_VERSION_STRING})
-    unset(CUDA_TOOLKIT_ROOT_DIR_INTERNAL CACHE)
-    # Not strictly necessary, but for good luck.
-    unset(CUDA_VERSION CACHE)
-    # Error out
-    message(FATAL_ERROR "FindCUDA says CUDA version is ${cuda_version_from_findcuda} (usually determined by nvcc), "
-      "but the CUDA headers say the version is ${cuda_version_from_header}.  This often occurs "
-      "when you set both CUDA_HOME and CUDA_NVCC_EXECUTABLE to "
-      "non-standard locations, without also setting PATH to point to the correct nvcc.  "
-      "Perhaps, try re-running this command again with PATH=${CUDA_TOOLKIT_ROOT_DIR}/bin:$PATH.  "
-      "See above log messages for more diagnostics, and see https://github.com/pytorch/pytorch/issues/8092 for more details.")
+  if(NOT CMAKE_CROSSCOMPILING)
+    try_run(run_result compile_result ${PROJECT_RANDOM_BINARY_DIR} ${file}
+      CMAKE_FLAGS "-DINCLUDE_DIRECTORIES=${CUDA_INCLUDE_DIRS}"
+      LINK_LIBRARIES ${CUDA_LIBRARIES}
+      RUN_OUTPUT_VARIABLE cuda_version_from_header
+      COMPILE_OUTPUT_VARIABLE output_var
+      )
+    if(NOT compile_result)
+      message(FATAL_ERROR "Caffe2: Couldn't determine version from header: " ${output_var})
+    endif()
+    message(STATUS "Caffe2: Header version is: " ${cuda_version_from_header})
+    if(NOT cuda_version_from_header STREQUAL ${CUDA_VERSION_STRING})
+      # Force CUDA to be processed for again next time
+      # TODO: I'm not sure if this counts as an implementation detail of
+      # FindCUDA
+      set(${cuda_version_from_findcuda} ${CUDA_VERSION_STRING})
+      unset(CUDA_TOOLKIT_ROOT_DIR_INTERNAL CACHE)
+      # Not strictly necessary, but for good luck.
+      unset(CUDA_VERSION CACHE)
+      # Error out
+      message(FATAL_ERROR "FindCUDA says CUDA version is ${cuda_version_from_findcuda} (usually determined by nvcc), "
+        "but the CUDA headers say the version is ${cuda_version_from_header}.  This often occurs "
+        "when you set both CUDA_HOME and CUDA_NVCC_EXECUTABLE to "
+        "non-standard locations, without also setting PATH to point to the correct nvcc.  "
+        "Perhaps, try re-running this command again with PATH=${CUDA_TOOLKIT_ROOT_DIR}/bin:$PATH.  "
+        "See above log messages for more diagnostics, and see https://github.com/pytorch/pytorch/issues/8092 for more details.")
+    endif()
   endif()
 endif()
 

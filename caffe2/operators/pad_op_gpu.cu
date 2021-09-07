@@ -2,6 +2,7 @@
 
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/operators/pad_op.h"
+#include "caffe2/utils/GpuAtomics.cuh"
 
 namespace caffe2 {
 
@@ -161,7 +162,7 @@ __global__ void PadImageGradientReflectNCHW(
     w = max(w, -w);
     h = min(h, 2 * height - h - 2);
     w = min(w, 2 * width - w - 2);
-    atomicAdd(&bottom_diff[(nc * height + h) * width + w], top_diff[index]);
+    gpu_atomic_add(&bottom_diff[(nc * height + h) * width + w], top_diff[index]);
   }
 }
 
@@ -178,7 +179,7 @@ __global__ void PadImageGradientEdgeNCHW(
     nc /= padded_height;
     const int h = min(height - 1, max(ph - pad_t, 0));
     const int w = min(width - 1, max(pw - pad_l, 0));
-    atomicAdd(&bottom_diff[(nc * height + h) * width + w], top_diff[index]);
+    gpu_atomic_add(&bottom_diff[(nc * height + h) * width + w], top_diff[index]);
   }
 }
 
@@ -219,7 +220,7 @@ __global__ void PadImageGradientReflectNHWC(
     w = max(w, -w);
     h = min(h, 2 * height - h - 2);
     w = min(w, 2 * width - w - 2);
-    atomicAdd(
+    gpu_atomic_add(
         &bottom_diff[((n * height + h) * width + w) * channels + c],
         top_diff[index]);
   }
@@ -240,7 +241,7 @@ __global__ void PadImageGradientEdgeNHWC(
     n /= padded_height;
     const int h = min(height - 1, max(ph - pad_t, 0));
     const int w = min(width - 1, max(pw - pad_l, 0));
-    atomicAdd(
+    gpu_atomic_add(
         &bottom_diff[((n * height + h) * width + w) * channels + c],
         top_diff[index]);
   }

@@ -1,6 +1,7 @@
-#include <torch/csrc/jit/passes/onnx/scalar_type_analysis.h>
-
+#include <c10/util/irange.h>
+#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
+#include <torch/csrc/jit/passes/onnx/scalar_type_analysis.h>
 
 namespace torch {
 namespace jit {
@@ -88,7 +89,7 @@ static c10::optional<c10::ScalarType> PromoteScalarTypes(
     return c10::nullopt;
   }
   auto st = types[0];
-  for (size_t i = 1; i < types.size(); ++i) {
+  for (const auto i : c10::irange(1, types.size())) {
     st = c10::promoteTypes(st, types[i]);
   }
   return st;
@@ -227,7 +228,10 @@ static c10::optional<c10::ScalarType> InferExpectedScalarType(const Node* n) {
 static c10::optional<c10::ScalarType> LowPrecisionCastForStandardOps(
     const Node* n,
     const c10::ScalarType& scalar_type) {
-  // StandardOps do not support uint8\int8\int16 in ONNX now.
+  // Some of standardOps do not support uint8\int8\int16 type for ONNX
+  // opset version < 14.
+  // Fix in this ONNX PR:
+  // https://github.com/onnx/onnx/pull/3334
   if (n->kind() != onnx::Gemm && IsStandardOp(n->kind()) &&
       (scalar_type == c10::kByte || scalar_type == c10::kChar ||
        scalar_type == c10::kShort)) {
@@ -257,7 +261,7 @@ static void UpdateScalarTypeForInputs(
         (input_scalar_type && (*input_scalar_type != scalar_type))) {
       if (input->node()->kind() == onnx::Constant) {
         // Fix up the scalar directly instead of inserting a cast operator.
-        // NOTE: Keep only the else branch once constant_folding is enabled by
+        // TODO: Keep only the else branch once constant_folding is enabled by
         // default.
         at::Tensor val = input->node()->t(attr::value);
         at::Tensor new_val = val.to(scalar_type);
@@ -300,6 +304,21 @@ static void RecoverScalarTypeForOutput(
   out->replaceAllUsesAfterNodeWith(cast_node, cast_node->output());
 }
 
+// This example error found when exports transfo_xl model using add op in uint8
+// type, as below:
+// if self.same_length:
+//     all_ones = word_emb.new_ones((qlen, klen), dtype=torch.uint8)
+//     mask_len = klen - self.mem_len
+//     if mask_len > 0:
+//         mask_shift_len = qlen - mask_len
+//     else:
+//         mask_shift_len = qlen
+//     dec_attn_mask = (torch.triu(all_ones, 1 + mlen) + torch.tril(all_ones,
+//     -mask_shift_len))[:, :, None]  # -1
+//
+// `all_ones is` an uint8 tensor, But the calculation of `dec_attn_mask` using
+// add(+) op to get the uint8 result. Reference Link:
+// https://github.com/huggingface/transformers/blob/b020a736c374460af1b34267283f957988350630/src/transformers/models/transfo_xl/modeling_transfo_xl.py#L936
 static void LowPrecisionCastNodeForStandardOps(Node* n, int opset_version) {
   TORCH_INTERNAL_ASSERT(n->outputs().size() == 1);
   if (n->output()->type()->cast<TensorType>() == nullptr ||
@@ -381,6 +400,7 @@ void ScalarTypeAnalysisForONNX(
   if (lowprecision_cast) {
     LowPrecisionCastForStandardOpsONNX(graph->block(), opset_version);
   }
+  GRAPH_DUMP("After ScalarTypeAnalysisForONNX: ", graph);
 }
 
 void ScalarTypeAnalysisNodeForONNX(Node* n) {

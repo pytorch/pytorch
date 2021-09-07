@@ -1,3 +1,4 @@
+#include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
 #include <ATen/Parallel.h>
@@ -37,7 +38,6 @@ graph(%a.1 : Tensor,
   }
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(TypeCheckTest, MatchingType) {
   // TypeCheck yields to true! Shape, grad and device matches.
   auto a = at::zeros({2, 2}, at::kFloat);
@@ -51,7 +51,6 @@ TEST_F(TypeCheckTest, MatchingType) {
   ASSERT_TRUE(stack[2].toBool());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(TypeCheckTest, SizeMismatch) {
   auto a = at::zeros({2, 2}, at::kFloat);
   auto b = at::ones({2, 2}, at::kFloat); // Size mismatch
@@ -62,7 +61,6 @@ TEST_F(TypeCheckTest, SizeMismatch) {
   ASSERT_FALSE(stack[2].toBool());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(TypeCheckTest, GradientMismatch) {
   auto a = at::zeros({2, 2}, at::kFloat);
   auto b = at::ones({3, 3}, at::kFloat);
@@ -73,7 +71,6 @@ TEST_F(TypeCheckTest, GradientMismatch) {
   ASSERT_FALSE(stack[2].toBool());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(TypeCheckTest, ScalarTypeMismatch) {
   auto a = at::zeros({2, 2}, at::kFloat);
   auto b = at::ones({3, 3}, at::kFloat);
@@ -85,7 +82,6 @@ TEST_F(TypeCheckTest, ScalarTypeMismatch) {
   ASSERT_FALSE(stack[2].toBool());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(TypeCheckTest, DeviceMismatch_CUDA) {
   auto a = at::zeros({2, 2}, at::kFloat);
   auto b = at::ones({3, 3}, at::kFloat);
@@ -128,7 +124,6 @@ TEST_F(TypeCheckTest, DeviceMismatch_CUDA) {
 //       vmap));
 // }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InterpreterTest, Basic_CUDA) {
   constexpr int batch_size = 4;
   constexpr int input_size = 256;
@@ -152,14 +147,13 @@ TEST(InterpreterTest, Basic_CUDA) {
   ASSERT_TRUE(exactlyEqual(outputs[1], cx));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InterpreterTest, IgnorableArgsInSchema) {
   auto graph = build_mobile_export_analysis_graph();
   MobileCode function(graph, "");
   auto op_to_specified_args = function.op_to_num_specified_args();
   ASSERT_TRUE(op_to_specified_args.size() == 2);
   ASSERT_TRUE(op_to_specified_args["aten::slice.Tensor"] == 4);
-  ASSERT_TRUE(op_to_specified_args["aten::slice.str"] == 1);
+  ASSERT_TRUE(op_to_specified_args["aten::slice.str"] == 4);
   auto graph_vararg = build_mobile_export_analysis_graph_with_vararg();
   MobileCode function_vararg(graph_vararg, "");
   auto op_to_specified_args_vararg = function_vararg.op_to_num_specified_args();
@@ -172,7 +166,7 @@ TEST(InterpreterTest, IgnorableArgsInSchema) {
   MobileCode function_nested(graph_nested, "");
   auto op_to_specified_args_nested = function_nested.op_to_num_specified_args();
   ASSERT_TRUE(op_to_specified_args_nested["aten::slice.Tensor"] == 4);
-  ASSERT_TRUE(op_to_specified_args_nested["aten::slice.str"] == 1);
+  ASSERT_TRUE(op_to_specified_args_nested["aten::slice.str"] == 4);
 
   auto graph_non_const = build_mobile_export_analysis_graph_non_const();
   MobileCode function_non_const(graph_non_const, "");
@@ -181,7 +175,15 @@ TEST(InterpreterTest, IgnorableArgsInSchema) {
   ASSERT_TRUE(op_to_specified_args_non_const["aten::conv2d"] == 6);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(InterpreterTest, IgnorableArgsInSchemaWithOut) {
+  auto graph = build_mobile_export_with_out();
+  MobileCode function(graph, "");
+  auto op_to_specified_args = function.op_to_num_specified_args();
+  ASSERT_TRUE(op_to_specified_args.size() == 1);
+  // this should be 3 when the add_out flag is set to True
+  ASSERT_TRUE(op_to_specified_args["aten::add.out"] == 4);
+}
+
 TEST(InterpreterTest, runAsyncBasicTest) {
   /*
   TODO: there are some problem with C++ parsing script program involving
@@ -218,5 +220,77 @@ TEST(InterpreterTest, runAsyncBasicTest) {
   interp.runAsync(stack)->wait();
   ASSERT_TRUE(asyncCounter > 0);
 }
+
+TEST(
+    EnableRethrowCaughtExceptionTest,
+    EnableRethrowCaughtExceptionTestRethrowsCaughtException) {
+  auto graph = std::make_shared<Graph>();
+  std::unordered_map<std::string, Value*> vmap;
+  parseIR(
+      R"IR(
+graph(%0 : Tensor,
+      %1 : Tensor):
+  %2 : int = prim::Constant[value=2]()
+  %3 : Tensor = aten::add(%0, %1, %2)
+  return (%3)
+  )IR",
+      &*graph,
+      vmap);
+  Code function(graph, "");
+  InterpreterState interp = InterpreterState(function);
+  auto a = at::zeros({2, 2}, at::kFloat);
+  auto b = at::ones({2, 3}, at::kFloat);
+  a.set_requires_grad(true);
+  a = a.to(at::kCPU);
+  std::vector<IValue> stack({a, b});
+
+  bool original_flag_value = FLAGS_torch_jit_enable_rethrow_caught_exception;
+  bool exception_handled = false;
+  try {
+    FLAGS_torch_jit_enable_rethrow_caught_exception = false;
+    interp.run(stack);
+  } catch (std::runtime_error& e) {
+    exception_handled = true;
+    std::string exception_msg = e.what();
+    EXPECT_THAT(
+        exception_msg,
+        ::testing::HasSubstr("%3 : Tensor = aten::add(%0, %1, %2)"));
+    EXPECT_THAT(
+        exception_msg,
+        ::testing::HasSubstr(
+            "The size of tensor a (2) must match the size of tensor b (3) at non-singleton dimension 1"));
+  }
+  EXPECT_TRUE(exception_handled);
+
+  exception_handled = false;
+  try {
+    FLAGS_torch_jit_enable_rethrow_caught_exception = true;
+    interp.run(stack);
+  } catch (c10::Error& e) {
+    exception_handled = true;
+    std::string exception_msg = e.what_without_backtrace();
+    EXPECT_STREQ(
+        exception_msg.c_str(),
+        "The size of tensor a (2) must match the size of tensor b (3) at non-singleton dimension 1");
+  }
+  EXPECT_TRUE(exception_handled);
+
+  FLAGS_torch_jit_enable_rethrow_caught_exception = true;
+  c10::intrusive_ptr<Future> future = interp.runAsync(stack);
+  future->wait();
+  ASSERT_TRUE(future->completed());
+  ASSERT_TRUE(future->hasError());
+  try {
+    std::rethrow_exception(future->exception_ptr());
+  } catch (c10::Error& e) {
+    std::string exception_msg = e.what_without_backtrace();
+    EXPECT_STREQ(
+        exception_msg.c_str(),
+        "The size of tensor a (2) must match the size of tensor b (3) at non-singleton dimension 1");
+  }
+
+  FLAGS_torch_jit_enable_rethrow_caught_exception = original_flag_value;
+}
+
 } // namespace jit
 } // namespace torch

@@ -494,6 +494,7 @@ class TORCH_CUDA_CU_API OptInDispatch {
   }
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 class TORCH_CUDA_CU_API OptOutMutator {
  public:
   virtual ~OptOutMutator() = default;
@@ -559,6 +560,7 @@ class TORCH_CUDA_CU_API OptOutMutator {
   virtual Statement* mutate(kir::Sync*);
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 class TORCH_CUDA_CU_API OptInMutator {
  public:
   virtual ~OptInMutator() = default;

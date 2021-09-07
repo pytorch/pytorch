@@ -1,8 +1,8 @@
 #import <ATen/native/metal/MetalCommandBuffer.h>
 #import <ATen/native/metal/MetalTensorImpl.h>
 #import <ATen/native/metal/MetalTensorImplStorage.h>
-#import <ATen/native/metal/MetalUtils.h>
-#import <ATen/native/metal/mpscnn/MPSCNNContext.h>
+#import <ATen/native/metal/MetalTensorUtils.h>
+#import <ATen/native/metal/MetalContext.h>
 #import <ATen/native/metal/mpscnn/MPSCNNUtils.h>
 #import <ATen/native/metal/mpscnn/MPSImage+Tensor.h>
 #import <ATen/native/metal/mpscnn/MPSImageUtils.h>
@@ -48,14 +48,14 @@ Tensor reflection_pad2d(const Tensor& input, IntArrayRef padding) {
   }
 
   MPSImage* X = imageFromTensor(input);
-  MetalCommandBuffer* commandBuffer = getCommandBufferFromTensor(input);
+  MetalCommandBuffer* commandBuffer = getCommandBuffer(input);
   MetalTensorImplStorage mt{output_size};
   mt.texture()->allocateTemporaryStorage(output_size, commandBuffer);
   MPSImage* Y = mt.texture()->image();
 
   id<MTLComputeCommandEncoder> encoder =
       [commandBuffer.buffer computeCommandEncoder];
-  id<MTLComputePipelineState> state = [[MPSCNNContext sharedInstance]
+  id<MTLComputePipelineState> state = [[MetalContext sharedInstance]
       specializedPipelineState:"reflection_pad2d"
                      Constants:@[
                        @(Y.height),
@@ -81,7 +81,6 @@ Tensor reflection_pad2d(const Tensor& input, IntArrayRef padding) {
   [encoder dispatchThreadgroups:launchParams.threadgroupsPerGrid
           threadsPerThreadgroup:launchParams.threadsPerThreadgroup];
   [encoder endEncoding];
-  [X markRead];
   auto output = makeTensor(std::move(mt), input.options());
   return output;
 }

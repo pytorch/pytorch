@@ -16,13 +16,22 @@ if(NOT AT_INSTALL_BIN_DIR OR NOT AT_INSTALL_LIB_DIR OR NOT AT_INSTALL_INCLUDE_DI
   set(AT_INSTALL_SHARE_DIR "share" CACHE PATH "AT install include subdirectory")
 endif()
 
-# this flag is used in Config but set externally, we must normalize it
-# to 0/1 otherwise `#if ON` will be evaluated to false.
-if(CAFFE2_STATIC_LINK_CUDA)
-  set(CAFFE2_STATIC_LINK_CUDA_INT 1)
-else()
-  set(CAFFE2_STATIC_LINK_CUDA_INT 0)
-endif()
+# These flag are used in Config but set externally. We must normalize them to
+# 0/1 otherwise `#if ON` will be evaluated to false.
+macro(set_bool OUT IN)
+  if(${IN})
+    set(${OUT} 1)
+  else()
+    set(${OUT} 0)
+  endif()
+endmacro()
+
+set_bool(AT_BUILD_WITH_BLAS USE_BLAS)
+set_bool(AT_BUILD_WITH_LAPACK USE_LAPACK)
+set_bool(AT_BLAS_F2C BLAS_F2C)
+set_bool(AT_BLAS_USE_CBLAS_DOT BLAS_USE_CBLAS_DOT)
+set_bool(CAFFE2_STATIC_LINK_CUDA_INT CAFFE2_STATIC_LINK_CUDA)
+
 configure_file(Config.h.in "${CMAKE_CURRENT_SOURCE_DIR}/Config.h")
 # TODO: Don't unconditionally generate CUDAConfig.h.in.  Unfortunately,
 # this file generates AT_ROCM_ENABLED() which is required by the miopen
@@ -41,7 +50,7 @@ if(NOT BUILD_LITE_INTERPRETER)
 endif()
 EXCLUDE(ATen_CORE_SRCS "${ATen_CORE_SRCS}" ${ATen_CORE_TEST_SRCS})
 
-file(GLOB base_h "*.h" "detail/*.h" "cpu/*.h" "cpu/vec/vec256/*.h" "cpu/vec/*.h" "quantized/*.h")
+file(GLOB base_h "*.h" "detail/*.h" "cpu/*.h" "cpu/vec/vec512/*.h" "cpu/vec/vec256/*.h" "cpu/vec/*.h" "quantized/*.h")
 file(GLOB base_cpp "*.cpp" "detail/*.cpp" "cpu/*.cpp")
 file(GLOB cuda_h "cuda/*.h" "cuda/detail/*.h" "cuda/*.cuh" "cuda/detail/*.cuh")
 file(GLOB cuda_cpp "cuda/*.cpp" "cuda/detail/*.cpp")
@@ -158,13 +167,12 @@ else()
 endif()
 
 # Metal
-if(USE_PYTORCH_METAL)
-  if(APPLE)
-    set(all_cpu_cpp ${all_cpu_cpp} ${metal_cpp} ${native_metal_srcs})
-  else()
-    # Add files needed from optimized_for_mobile
-    set(all_cpu_cpp ${all_cpu_cpp} ${metal_cpp} ${metal_prepack_cpp})
-  endif()
+if(USE_PYTORCH_METAL_EXPORT)
+  # Add files needed from exporting metal models(optimized_for_mobile)
+  set(all_cpu_cpp ${all_cpu_cpp} ${metal_cpp} ${metal_prepack_cpp})
+elseif(APPLE AND USE_PYTORCH_METAL)
+  # Compile Metal kernels
+  set(all_cpu_cpp ${all_cpu_cpp} ${metal_cpp} ${native_metal_srcs})
 else()
   set(all_cpu_cpp ${all_cpu_cpp} ${metal_cpp})
 endif()
@@ -203,9 +211,13 @@ list(APPEND ATen_CPU_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/..)
 list(APPEND ATen_CPU_INCLUDE ${CMAKE_CURRENT_BINARY_DIR})
 
 if(USE_TBB)
-  message("ATen is compiled with TBB (${TBB_ROOT_DIR})")
-  list(APPEND ATen_CPU_INCLUDE ${TBB_ROOT_DIR}/include)
-  list(APPEND ATen_CPU_DEPENDENCY_LIBS tbb)
+  if(USE_SYSTEM_TBB)
+    message("ATen is compiled with system-provided Intel TBB.")
+  else()
+    message("ATen is compiled with Intel TBB (${TBB_ROOT_DIR}).")
+  endif()
+  list(APPEND ATen_CPU_INCLUDE ${TBB_INCLUDE_DIR})
+  list(APPEND ATen_CPU_DEPENDENCY_LIBS TBB::tbb)
 endif()
 
 if(BLAS_FOUND)
@@ -437,13 +449,21 @@ install(FILES "${CMAKE_CURRENT_BINARY_DIR}/cmake-exports/ATenConfig.cmake"
 set(INSTALL_HEADERS ${base_h} ${ATen_CORE_HEADERS})
 if(NOT INTERN_BUILD_MOBILE)
   list(APPEND INSTALL_HEADERS ${native_h} ${native_cpu_h} ${native_ao_sparse_h} ${native_quantized_h} ${cuda_h} ${native_cuda_h} ${native_hip_h} ${cudnn_h} ${hip_h} ${miopen_h})
+  # Metal
+  if(USE_PYTORCH_METAL_EXPORT)
+    # Add files needed from exporting metal models(optimized_for_mobile)
+    list(APPEND INSTALL_HEADERS ${metal_h} ${metal_prepack_h})
+  elseif(APPLE AND USE_PYTORCH_METAL)
+    # Needed by Metal kernels
+    list(APPEND INSTALL_HEADERS ${metal_h} ${native_metal_h})
+  else()
+    list(APPEND INSTALL_HEADERS ${metal_h})
+  endif()
 else()
-  if(USE_PYTORCH_METAL)
-    if(IOS)
+  if(IOS AND USE_PYTORCH_METAL)
       list(APPEND INSTALL_HEADERS ${metal_h} ${native_metal_h})
-    else()
+  else()
       list(APPEND INSTALL_HEADERS ${metal_h} ${metal_prepack_h})
-    endif()
   endif()
 endif()
 

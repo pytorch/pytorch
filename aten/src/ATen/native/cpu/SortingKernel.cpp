@@ -162,11 +162,17 @@ static void topk_kernel(
   auto mode_indices_stride = indices.strides()[dim];
   auto tmp_values_stride = self.strides()[dim];
 
-  AT_DISPATCH_ALL_TYPES(self.scalar_type(), "topk_cpu", [&] {
+  AT_DISPATCH_ALL_TYPES_AND(ScalarType::BFloat16, self.scalar_type(), "topk_cpu", [&] {
     auto loop = [&](char** data, const int64_t* strides, int64_t n) {
-      return topk_impl_loop<scalar_t>(
-          mode_values_stride, mode_indices_stride, tmp_values_stride,
-          k, sizes[dim], largest, sorted, data, strides, n);
+      if (self.scalar_type() == ScalarType::BFloat16) {
+        return topk_impl_loop<scalar_t, float>(
+            mode_values_stride, mode_indices_stride, tmp_values_stride,
+            k, sizes[dim], largest, sorted, data, strides, n);
+      } else {
+        return topk_impl_loop<scalar_t, scalar_t>(
+            mode_values_stride, mode_indices_stride, tmp_values_stride,
+            k, sizes[dim], largest, sorted, data, strides, n);
+      }
     };
 
     int64_t grain_size = internal::GRAIN_SIZE / std::max(int64_t{1}, sizes[dim]);
@@ -176,9 +182,7 @@ static void topk_kernel(
 
 } // anonymous namespace
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(sort_stub, &sort_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(topk_stub, &topk_kernel);
 
 }} //at::native

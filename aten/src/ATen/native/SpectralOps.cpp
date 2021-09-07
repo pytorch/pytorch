@@ -1,9 +1,10 @@
 #include <ATen/ATen.h>
 #include <ATen/Config.h>
-#include <ATen/NativeFunctions.h>
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/native/SpectralOpsUtils.h>
 #include <ATen/native/TensorIterator.h>
+#include <ATen/NativeFunctions.h>
+#include <c10/util/irange.h>
 
 #include <algorithm>
 #include <vector>
@@ -73,8 +74,7 @@ Tensor resize_fft_input(Tensor x, IntArrayRef dims, IntArrayRef sizes) {
   bool must_copy = false;
   auto x_sizes = x.sizes();
   DimVector pad_amount(x_sizes.size() * 2);
-  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-  for (int64_t i = 0; i < dims.size(); ++i) {
+  for (const auto i : c10::irange(dims.size())) {
     if (sizes[i] == -1) {
       continue;
     }
@@ -208,10 +208,10 @@ ShapeAndDims canonicalize_fft_shape_and_dim_args(
 
   if (shape) {
     // Has shape, may have dim
-    TORCH_CHECK(!dim || dim->size() == shape->size(),
+    TORCH_CHECK(!dim ||
+                dim->size() == shape->size(),
                 "When given, dim and shape arguments must have the same length");
-    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-    TORCH_CHECK(shape->size() <= input_dim,
+    TORCH_CHECK(static_cast<int64_t>(shape->size()) <= input_dim,
                 "Got shape with ", shape->size(), " values but input tensor "
                 "only has ", input_dim, " dimensions.");
     const int64_t transform_ndim = shape->size();
@@ -236,16 +236,14 @@ ShapeAndDims canonicalize_fft_shape_and_dim_args(
   } else {
     // No shape, has dim
     ret.shape.resize(ret.dim.size());
-    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-    for (int64_t i = 0; i < ret.dim.size(); ++i) {
+    for (const auto i : c10::irange(ret.dim.size())) {
       ret.shape[i] = input_sizes[ret.dim[i]];
     }
   }
 
-  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-  for (int64_t i = 0; i < ret.shape.size(); ++i) {
-    TORCH_CHECK(ret.shape[i] > 0,
-                "Invalid number of data points (", ret.shape[i], ") specified");
+  for (const auto & shape : ret.shape) {
+    TORCH_CHECK(shape > 0,
+                "Invalid number of data points (", shape, ") specified");
   }
 
   return ret;
@@ -552,8 +550,7 @@ DimVector default_alldims(const Tensor& self, c10::optional<IntArrayRef> dim_opt
   if (dim_opt) {
     IntArrayRef dim_unwrapped = *dim_opt;
     dim.resize(dim_unwrapped.size());
-    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-    for (int64_t i = 0; i < dim.size(); ++i) {
+    for (const auto i : c10::irange(dim.size())) {
       dim[i] = maybe_wrap_dim(dim_unwrapped[i], self.dim());
     }
   } else {
@@ -568,8 +565,7 @@ Tensor fft_fftshift(const Tensor& x, c10::optional<IntArrayRef> dim_opt) {
 
   IntArrayRef x_sizes = x.sizes();
   DimVector shift(dim.size());
-  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-  for (int64_t i = 0; i < dim.size(); ++i) {
+  for (const auto i : c10::irange(dim.size())) {
     shift[i] = x_sizes[dim[i]] / 2;
   }
 
@@ -581,8 +577,7 @@ Tensor fft_ifftshift(const Tensor& x, c10::optional<IntArrayRef> dim_opt) {
 
   IntArrayRef x_sizes = x.sizes();
   DimVector shift(dim.size());
-  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-  for (int64_t i = 0; i < dim.size(); ++i) {
+  for (const auto i : c10::irange(dim.size())) {
     shift[i] = (x_sizes[dim[i]] + 1) / 2;
   }
 
@@ -766,8 +761,7 @@ Tensor stft(const Tensor& self, const int64_t n_fft, const optional<int64_t> hop
 static Tensor as_complex(const Tensor& self) {
   const bool can_view_as_complex = [&]{
     auto strides = self.strides();
-    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-    for (int64_t i = 0; i + 1 < strides.size(); ++i) {
+    for (const auto i : c10::irange(static_cast<int64_t>(strides.size()) - 1)) {
       if (strides[i] % 2 != 0) {
         return false;
       }
@@ -816,7 +810,7 @@ Tensor istft(const Tensor& self, const int64_t n_fft, const optional<int64_t> ho
       "istft will require a complex-valued input tensor in a future PyTorch release. "
       "Matching the output from stft with return_complex=True. ");
   }
-  Tensor input = self.is_complex() ? at::view_as_real(self) : self;
+  Tensor input = self.is_complex() ? self.is_conj() ? at::view_as_real(self.resolve_conj()) : at::view_as_real(self) : self;
   const auto input_dim = input.dim();
   const auto n_frames = input.size(-2);
   const auto fft_size = input.size(-3);
@@ -926,7 +920,7 @@ Tensor istft(const Tensor& self, const int64_t n_fft, const optional<int64_t> ho
 
   // We need to trim the front padding away if centered
   const auto start = center ? n_fft / 2 : 0;
-  const auto end = lengthOpt.has_value()? start + lengthOpt.value() : - n_fft / 2;
+  const auto end = lengthOpt.has_value() ? start + lengthOpt.value() : (center ? - n_fft / 2 : -1);
 
   y = y.slice(2, start, end, 1);
   window_envelop = window_envelop.slice(2, start, end, 1);
@@ -940,6 +934,14 @@ Tensor istft(const Tensor& self, const int64_t n_fft, const optional<int64_t> ho
   y = (y / window_envelop).squeeze(1);  // size: (channel, expected_output_signal_len)
   if (input_dim == 3) {
     y = y.squeeze(0);
+  }
+  // zero padding if the given lengthOpt is longer than expected
+  if(end > expected_output_signal_len) {
+    TORCH_WARN_ONCE(
+      "The length of signal is shorter than the length parameter. Result is being padded with zeros in the tail. "
+      "Please check your center and hop_length settings."
+    );
+    y = at::constant_pad_nd(y, {0, end - expected_output_signal_len}, 0);
   }
   return y;
 
@@ -992,7 +994,7 @@ void _fft_fill_with_conjugate_symmetry_(const Tensor& input, IntArrayRef dim_) {
 
   const auto iter_strides = iter.strides(0);
   const auto iter_sizes = iter.shape();
-  const auto ndim = iter_strides.size() + dim.size();
+  const auto ndim = static_cast<int64_t>(iter_strides.size() + dim.size());
   DimVector in_strides(ndim), signal_half_sizes(ndim);
   // Take coalesced batch dimensions from TensorIterator
   std::copy(iter_strides.begin(), iter_strides.end(), in_strides.begin());
@@ -1000,8 +1002,7 @@ void _fft_fill_with_conjugate_symmetry_(const Tensor& input, IntArrayRef dim_) {
 
   // Take transformed dimensions directly from the input
   const auto element_size = iter.element_size(0);
-  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-  for (int64_t i = 0; i < dim.size(); ++i) {
+  for (const auto i : c10::irange(dim.size())) {
     // Convert to byte strides to match TensorIterator
     in_strides[iter_strides.size() + i] = input_strides[dim[i]] * element_size;
     signal_half_sizes[iter_strides.size() + i] = input_sizes[dim[i]];
@@ -1028,8 +1029,7 @@ void _fft_fill_with_conjugate_symmetry_(const Tensor& input, IntArrayRef dim_) {
   DimVector temp(ndim);
   auto apply_permutation = [&] (DimVector & vec) {
     // Do permuted index copy into a temporary, then copy back
-    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-    for (int64_t i = 0; i < ndim; ++i) {
+    for (const auto i : c10::irange(ndim)) {
       temp[i] = vec[dim_permute[i]];
     }
     vec = temp;
@@ -1042,11 +1042,8 @@ void _fft_fill_with_conjugate_symmetry_(const Tensor& input, IntArrayRef dim_) {
   // These are the dimensions that need explicit Hermitian mirroring
   DimVector mirror_dims;
   mirror_dims.reserve(dim.size() - 1);
-  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-  for (int64_t i = 0; i < ndim; ++i) {
-    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-    if (dim_permute[i] >= iter_strides.size() &&  // Not a batch dimension
-        // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
+  for (const auto i : c10::irange(ndim)) {
+    if (dim_permute[i] >= static_cast<int64_t>(iter_strides.size()) &&  // Not a batch dimension
         dim_permute[i] != ndim - 1) {  // Not the last dim, which is mirrored separately with negative strides
       mirror_dims.push_back(i);
     }
@@ -1059,7 +1056,6 @@ void _fft_fill_with_conjugate_symmetry_(const Tensor& input, IntArrayRef dim_) {
       mirror_dims, signal_half_sizes, in_strides, in_data, out_strides, out_data);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(fft_fill_with_conjugate_symmetry_stub);
 
 }} // at::native

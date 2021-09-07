@@ -45,7 +45,7 @@ class TestImporter(PackageTestCase):
         import package_a
 
         buffer = BytesIO()
-        with PackageExporter(buffer, verbose=False) as pe:
+        with PackageExporter(buffer) as pe:
             pe.save_module(package_a.__name__)
 
         buffer.seek(0)
@@ -71,7 +71,7 @@ class TestImporter(PackageTestCase):
         import package_a
 
         buffer = BytesIO()
-        with PackageExporter(buffer, verbose=False) as pe:
+        with PackageExporter(buffer) as pe:
             pe.save_module(package_a.__name__)
 
         buffer.seek(0)
@@ -135,7 +135,7 @@ class TestImporter(PackageTestCase):
 
         # Set up a PackageImporter which has a torch.float16 object pickled:
         buffer = BytesIO()
-        with PackageExporter(buffer, verbose=False) as exporter:
+        with PackageExporter(buffer) as exporter:
             exporter.save_pickle("foo", "foo.pkl", my_dtype)
         buffer.seek(0)
 
@@ -144,7 +144,7 @@ class TestImporter(PackageTestCase):
 
         # Re-save a package with only our PackageImporter as the importer
         buffer2 = BytesIO()
-        with PackageExporter(buffer2, verbose=False, importer=importer) as exporter:
+        with PackageExporter(buffer2, importer=importer) as exporter:
             exporter.save_pickle("foo", "foo.pkl", my_loaded_dtype)
 
         buffer2.seek(0)

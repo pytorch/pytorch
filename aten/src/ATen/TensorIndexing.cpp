@@ -46,11 +46,15 @@ static inline void set_item(const Tensor& self, ArrayRef<TensorIndex> indices, c
 
   {
     at::AutoDispatchBelowADInplaceOrView guard;
+    at::Device self_device = self.device();
+
     // TODO: This qint special case looks very suspicious...
     if (isQIntType(self.scalar_type())) {
       value = at::indexing::scalarToTensor(v, device(kCPU).dtype(kFloat), at::Device(kCPU));
+    } else if (self_device.is_cuda()) {
+      value = at::indexing::scalarToTensor(v, self.options(), at::Device(kCPU));
     } else {
-      value = at::indexing::scalarToTensor(v, self.options(), self.device());
+      value = at::indexing::scalarToTensor(v, self.options(), self_device);
     }
   }
 

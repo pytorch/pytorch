@@ -563,6 +563,8 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_impl(
     const at::Tensor& act,
     double output_scale,
     int64_t output_zero_point) {
+  // QNNPack is not thread safe
+  std::lock_guard<std::mutex> lock(qnnp_mutex_);
   const std::string func_name = transpose() ? "quantized::conv_transpose"
                                             : "quantized::conv";
   TORCH_CHECK(!(kReluFused && transpose()),
@@ -648,7 +650,7 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_impl(
       at::Tensor bias_quant_scales =
           weight_contig.q_per_channel_scales() * act_input_scale;
       at::Tensor bias_zp = at::zeros(bias_quant_scales.sizes(), c10::kInt);
-      qbias = at::native::quantize_per_channel_cpu(
+      qbias = at::native::quantize_per_channel(
           bias_fp32, bias_quant_scales, bias_zp, 0, c10::kQInt32);
     } else {
       qbias = at::native::quantize_per_tensor(

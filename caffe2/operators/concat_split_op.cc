@@ -62,7 +62,7 @@ vector<TensorShape> TensorInferenceForSplit(
       return ret_invalid_shape();
     }
     split.resize(output_size, input_channels / output_size);
-  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   } else if (split.size() != output_size) {
     LOG(WARNING) << "`split` size (" << split.size()
                  << ") should be equal to output size (" << output_size << ")";
@@ -94,13 +94,34 @@ vector<TensorShape> TensorInferenceForSplit(
   }
   return output_shapes;
 }
+
+OpSchema::Cost CostInferenceForSplit(
+    const OperatorDef&,
+    const vector<TensorShape>& in) {
+  CAFFE_ENFORCE_GT(in.size(), 0);
+  struct OpSchema::Cost cost;
+  cost.flops = 0;
+  auto const& input_0_element_size_byte =
+      DataTypeToTypeMeta(in[0].data_type()).itemsize();
+  auto input_bytes_count = nElemFromDim(in[0]) * input_0_element_size_byte;
+  auto split_bytes_count = in.size() > 1
+      ? nElemFromDim(in[1]) * DataTypeToTypeMeta(in[1].data_type()).itemsize()
+      : 0;
+  // There can be two input blobs:
+  // (1) actual tensor to be split
+  // (2) lengths of outputs along split axis
+  // So, bytes_read is the sum of the bytes in the two blobs.
+  cost.bytes_read = input_bytes_count + split_bytes_count;
+  // Split operator only changes shape, does not change element count. So,
+  // bytes_written is same as input_bytes_count.
+  cost.bytes_written = input_bytes_count;
+  cost.params_bytes = 0;
+  return cost;
+}
 } // namespace.
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(Split, SplitOp<CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(SplitByLengths, SplitByLengthsOp<CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Split)
     .NumInputs(1, 2)
     .NumOutputs(1, INT_MAX)
@@ -120,6 +141,7 @@ OPERATOR_SCHEMA(Split)
         "(*string*): order of dimensions of input and output blobs; either \"NCHW\" or \"NHWC\"")
     .Output(0, "[output_0, output_1, ...]", "(*Tensor*): output tensor")
     .TensorInferenceFunction(TensorInferenceForSplit)
+    .CostInferenceFunction(CostInferenceForSplit)
     .DeviceInferenceFunction(splitOpDevInfer)
     .SetDoc(R"DOC(
 Split an `input` tensor into a list of tensors, along the axis specified by the `axis` dimension. The lengths of the split can be specified using argument `split` or optional second input blob to the operator. Otherwise, the tensor is split to equal sized parts.
@@ -170,7 +192,6 @@ output_2: [0 5 7 4]
 )DOC")
     .InheritOnnxSchema();
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SplitByLengths)
     .NumInputs(2)
     .NumOutputs(1, INT_MAX)
@@ -300,7 +321,7 @@ OpSchema::Cost CostInferenceForConcat(
       out_shape[canonical_axis] += in[i].dims(canonical_axis);
     }
   }
-  uint64_t nElemRead = 1;
+  uint64_t nElemRead = 0;
   // NOLINTNEXTLINE(modernize-loop-convert,clang-diagnostic-sign-compare)
   for (int i = 0; i < in.size(); ++i) {
     nElemRead += nElemFromDim(in[i]);
@@ -309,11 +330,15 @@ OpSchema::Cost CostInferenceForConcat(
   for (auto& s : out_shape) {
     size *= s;
   }
+  auto split_info_bytes_count = in.size() * sizeof(int);
 
+  auto const& input_0_element_size_byte =
+      DataTypeToTypeMeta(in[0].data_type()).itemsize();
   struct OpSchema::Cost cost;
   cost.flops = 0;
-  cost.bytes_read = nElemRead * sizeof(in[0].data_type());
-  cost.bytes_written = size * sizeof(in[0].data_type());
+  cost.bytes_read = nElemRead * input_0_element_size_byte;
+  cost.bytes_written =
+      size * input_0_element_size_byte + split_info_bytes_count;
   cost.params_bytes = 0;
   return cost;
 }
@@ -411,9 +436,7 @@ vector<TensorShape> TensorInferenceForConcat(
       CreateTensorShape(split_shape, TensorProto::INT32)};
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(Concat, ConcatOp<CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Concat)
     .NumInputs(1, INT_MAX)
     .NumOutputs(2)
@@ -559,16 +582,12 @@ split_info: [1 1]
     .InheritOnnxSchema();
 
 // Backward compatibility names.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(DepthSplit, SplitOp<CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(DepthConcat, ConcatOp<CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(DepthSplit)
     .NumInputs(1, 2)
     .NumOutputs(1, INT_MAX)
     .SetDoc("Backward compatible operator name for Split.");
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(DepthConcat)
     .NumInputs(1, INT_MAX)
     .NumOutputs(2)
@@ -593,11 +612,8 @@ class GetSplitGradient : public GradientMakerBase {
         vector<string>{GI(0), "_" + GI(0) + "_dims"});
   }
 };
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(Split, GetSplitGradient);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(DepthSplit, GetSplitGradient);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(SplitByLengths, GetSplitGradient);
 
 class GetConcatGradient : public GradientMakerBase {
@@ -614,8 +630,6 @@ class GetConcatGradient : public GradientMakerBase {
     return SingleGradientDef("Split", "", vector<string>{GO(0), O(1)}, grads);
   }
 };
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(Concat, GetConcatGradient);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(DepthConcat, GetConcatGradient);
 } // namespace caffe2

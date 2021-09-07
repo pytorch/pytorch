@@ -37,19 +37,16 @@ void cat_serial_kernel_impl(Tensor& result, TensorList tensors, int64_t dim) {
     for (int64_t j = 0; j < ninputs; j++) {
       int64_t local_inner = inputs[j].inner_size;
       scalar_t* input_ptr = (scalar_t*)(inputs[j].data_ptr) + i * local_inner;
-      if (local_inner < Vec::size()) {
-        #if !defined(_MSC_VER) && !defined(COMPILING_FOR_MIN_SIZE)
-        # pragma unroll
-        #endif
-        for (int64_t k = 0; k < local_inner; k++) {
-          result_ptr[k] = input_ptr[k];
-        }
-      } else {
-        vec::map(
-            [](Vec x) { return x; },
-            result_ptr,
-            input_ptr,
-            local_inner);
+      int64_t d = 0;
+      for (; d < local_inner - (local_inner % Vec::size()); d += Vec::size()) {
+        Vec in_vec = Vec::loadu(input_ptr + d);
+        in_vec.store(result_ptr + d);
+      }
+      #if !defined(_MSC_VER) && !defined(COMPILING_FOR_MIN_SIZE)
+      # pragma unroll
+      #endif
+      for (; d < local_inner; d++) {
+        result_ptr[d] = input_ptr[d];
       }
       result_ptr += local_inner;
     }
@@ -64,7 +61,6 @@ void cat_serial_kernel(Tensor& result, TensorList tensors, int64_t dim) {
 
 } // anonymous namespace
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(cat_serial_stub, &cat_serial_kernel);
 
 }} // at::native

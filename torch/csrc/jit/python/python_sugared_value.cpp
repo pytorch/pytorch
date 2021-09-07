@@ -930,41 +930,41 @@ TypePtr registerNamedTuple(const py::object& obj, const SourceRange& loc) {
   TORCH_INTERNAL_ASSERT(isNamedTupleClass(obj));
   auto qualifiedName = c10::QualifiedName(py::cast<std::string>(
       py::module::import("torch._jit_internal").attr("_qualified_name")(obj)));
-  // Currently don't support default values
-  if (py::hasattr(obj, "_field_defaults")) {
-    auto default_dict = py::cast<std::map<std::string, py::object>>(
-        py::getattr(obj, "_field_defaults"));
-    if (default_dict.size()) {
-      std::string error_msg =
-          "Default values are currently not supported"
-          " on NamedTuple fields in TorchScript. Fields "
-          "with default values: [";
-      bool first = true;
-      for (const auto& kv : default_dict) {
-        if (!first) {
-          error_msg += ", ";
-        }
-        error_msg += kv.first;
-      }
-      error_msg += "]";
-      throw ErrorReport(loc) << error_msg;
-    }
-  }
 
   py::object props = py::module::import("torch._jit_internal")
                          .attr("_get_named_tuple_properties")(obj);
-  std::string unqualName;
-  std::vector<std::string> fields;
-  std::vector<TypePtr> annotations;
-  std::tie(unqualName, fields, annotations) = py::cast<
-      std::tuple<std::string, decltype(fields), decltype(annotations)>>(props);
 
-  auto tt = TupleType::createNamed(qualifiedName, fields, annotations);
+  std::string unqualName;
+  std::vector<std::string> field_names;
+  std::vector<TypePtr> field_types;
+  std::vector<py::object> objects;
+
+  std::tie(unqualName, field_names, field_types, objects) = py::cast<std::tuple<
+      std::string,
+      std::vector<std::string>,
+      std::vector<TypePtr>,
+      std::vector<py::object>>>(props);
+
+  std::vector<IValue> field_defaults;
+  auto min_default_idx = field_names.size() - objects.size();
+  for (size_t i = min_default_idx, j = 0; i < field_names.size(); ++i, ++j) {
+    py::object o = objects[j];
+    auto type = tryToInferType(objects[j]);
+    IValue ival = toIValue(objects[j], type.type());
+    TORCH_CHECK(
+        ival.tagKind() != "Tensor",
+        "Tensors are"
+        " not supported as default NamedTuple fields. Their "
+        "mutability could lead to potential memory aliasing "
+        "problems");
+    field_defaults.emplace_back(ival);
+  }
+
+  auto tt = TupleType::createNamed(
+      qualifiedName, field_names, field_types, field_defaults);
   if (auto type = get_python_cu()->get_type(qualifiedName)) {
     TORCH_CHECK(
-        type->isSubtypeOf(tt),
-        "Can't to redefine NamedTuple: ",
-        tt->repr_str());
+        type->isSubtypeOf(tt), "Can't redefine NamedTuple: ", tt->repr_str());
     return type;
   }
   get_python_cu()->register_type(tt);

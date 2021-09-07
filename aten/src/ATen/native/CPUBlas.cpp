@@ -78,7 +78,7 @@ char to_blas(TransposeType trans) {
   switch (trans) {
   case Transpose: return 't';
   case NoTranspose: return 'n';
-  // case ConjTranspose: return 'c';
+  case ConjTranspose: return 'c';
   }
   TORCH_INTERNAL_ASSERT(false, "Invalid transpose type");
 }
@@ -89,7 +89,7 @@ fbgemm::matrix_op_t to_fbgemm(TransposeType trans) {
   switch (trans) {
   case Transpose: return fbgemm::matrix_op_t::Transpose;
   case NoTranspose: return fbgemm::matrix_op_t::NoTranspose;
-  // case ConjTranspose: return fbgemm::matrix_op_t::Transpose;
+  case ConjTranspose: TORCH_INTERNAL_ASSERT(false, "ConjTranspose type is not supported in fbgemm");
   }
   TORCH_INTERNAL_ASSERT(false, "Invalid transpose type");
 }
@@ -97,7 +97,6 @@ fbgemm::matrix_op_t to_fbgemm(TransposeType trans) {
 
 }  // namespace (anonymous)
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(gemm_stub);
 
 void gemm(
@@ -263,7 +262,6 @@ void gemm(
       transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(axpy_stub);
 
 void axpy(int64_t n, double a, const double *x, int64_t incx, double *y, int64_t incy) {
@@ -350,7 +348,6 @@ void axpy(int64_t n, c10::complex<float> a, const c10::complex<float> *x, int64_
       n, a, x, incx, y, incy);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(copy_stub);
 
 void copy(int64_t n, const double *x, int64_t incx, double *y, int64_t incy) {

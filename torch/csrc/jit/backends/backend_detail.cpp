@@ -106,10 +106,10 @@ Module codegen_backend_module(
   // Clone orig_module to make sure backend transformation is
   // functional.
   auto cloned_module = orig_module.clone();
-
+  auto module_name = orig_module.type()->name()->qualifiedName();
   // Generate LoweredModule.
   Module loweredModule(
-      "torch.jit." + backend_name + "LoweredModule",
+      "torch.jit.LoweredModule." + backend_name + "." + module_name,
       std::make_shared<CompilationUnit>(),
       /*shouldMangle=*/true);
 
@@ -293,7 +293,8 @@ Module codegen_backend_module(
         // backend_execute.
         TORCH_INTERNAL_ASSERT(default_value.has_value());
         std::stringstream def_ss, fwd_ss;
-        def_ss << name << "=";
+        // Annotate type of the arg
+        def_ss << name << ": " << arg.type()->annotation_str(nullptr) << "=";
         fwd_ss << name << "=" << name;
         default_value->repr(
             def_ss, [](std::ostream&, const IValue&) -> bool { return false; });
@@ -302,7 +303,10 @@ Module codegen_backend_module(
       } else {
         // If this is not a kwarg, it should be emitted as is in the
         // signature and the call to backend_execute.
-        def_inputs.emplace_back(name);
+        std::stringstream def_ss;
+        // Annotate type of the arg
+        def_ss << name << ": " << arg.type()->annotation_str(nullptr);
+        def_inputs.emplace_back(def_ss.str());
         fwd_inputs.emplace_back(name);
       }
     }
@@ -322,18 +326,18 @@ Module codegen_backend_module(
 
     if (out_tuple_ty) {
       auto tuple_elements = out_tuple_ty->elements();
-      type_check_ss << tuple_elements[0]->str() << ")";
+      type_check_ss << tuple_elements[0]->annotation_str() << ")";
       type_checks.emplace_back(type_check_ss.str());
       for (unsigned i = 1, e = tuple_elements.size(); i < e; ++i) {
         type_check_ss.str(std::string());
         type_check_ss.clear();
         out_ss << ", _" << i;
         type_check_ss << "assert isinstance(_" << i << ", "
-                      << tuple_elements[i]->str() << ")";
+                      << tuple_elements[i]->annotation_str() << ")";
         type_checks.emplace_back(type_check_ss.str());
       }
     } else {
-      type_check_ss << out_ty->str() << ")";
+      type_check_ss << out_ty->annotation_str() << ")";
       type_checks.emplace_back(type_check_ss.str());
     }
 

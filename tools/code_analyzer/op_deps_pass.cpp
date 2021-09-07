@@ -66,10 +66,13 @@
 
 #include "llvm/Demangle/Demangle.h"
 #include "llvm/Analysis/LazyCallGraph.h"
+#if LLVM_VERSION_MAJOR < 8
 #include "llvm/IR/CallSite.h"
+#endif
 #include "llvm/IR/Constant.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Instruction.h"
+#include "llvm/IR/Instructions.h"
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/Module.h"
 #include "llvm/Pass.h"
@@ -194,6 +197,10 @@ using VALUE_SET = std::unordered_set<Value*>;
 using PATH = std::unordered_map<std::string,
                                 std::unordered_map<std::string, std::string>>;
 
+inline std::string _name(const Value* V) {
+  return V->getName().str();
+}
+
 // Referenced the logic in llvm-cxxfilt.cpp.
 // Starting from LLVM 9 it provides a `demangle()` API. Here we keep our ad-hoc
 // version for backward compatibility.
@@ -211,6 +218,22 @@ std::string _demangle(const std::string& mangled) {
   std::string result(undecorated ? undecorated : mangled);
   free(undecorated);
   return result;
+}
+
+inline bool _isCallSite(Value* V) {
+#if LLVM_VERSION_MAJOR >= 8
+  return isa<CallBase>(V);
+#else
+  return !!CallSite(V);
+#endif
+}
+
+inline Function* _getCalledFunction(Value* V) {
+#if LLVM_VERSION_MAJOR >= 8
+  return dyn_cast<CallBase>(V)->getCalledFunction();
+#else
+  return CallSite(V).getCalledFunction();
+#endif
 }
 
 // LLVM_DEBUG needs opt to be built with debug support.
@@ -276,7 +299,7 @@ private:
     }
     SET roots;
     for (const auto& F : visibleFuncs) {
-      std::string name = F->getName();
+      std::string name = _name(F);
       auto demangled = _demangle(name);
       if (RootSymbolPatternLoc.pattern->match(demangled)) {
         roots.insert(name);
@@ -300,12 +323,12 @@ private:
       if (F.hasDefaultVisibility()) {
         visibleFuncs->insert(&F);
       }
-      std::string caller = F.getName();
+      std::string caller = _name(&F);
       std::string callerDemangled = _demangle(caller);
       for (BasicBlock& BB : F) {
         for (Instruction& I : BB) {
           scanReferredFunctions(I, [&](Function* func) -> void {
-            std::string callee = func->getName();
+            std::string callee = _name(func);
             std::string calleeDemangled = _demangle(callee);
             (*deps)[caller].insert(callee);
             if (Verbose > 1) {
@@ -363,8 +386,8 @@ private:
     SmallVector<Constant*, 16> worklist;
     SmallPtrSet<Constant*, 16> visited;
 
-    if (auto CS = CallSite(&I)) {
-      Function* callee = CS.getCalledFunction();
+    if (_isCallSite(&I)) {
+      Function* callee = _getCalledFunction(&I);
       if (callee && !callee->isIntrinsic() && visited.insert(callee).second) {
         CB(callee);
       }
@@ -553,7 +576,7 @@ private:
           if (!visitedOps->empty()) {
             if (Verbose) {
               std::cerr << "[INFO] ignore extra op schema str: " << *schemaStr
-                        << " in: " << _demangle(src->getFunction()->getName())
+                        << " in: " << _demangle(_name(src->getFunction()))
                         << ", because already found valid op schema str: "
                         << *visitedOps->begin() << std::endl;
             }
@@ -570,10 +593,10 @@ private:
           return;
         }
         if (visitedFunctions) {
-          (*visitedFunctions).insert(F->getName());
+          (*visitedFunctions).insert(_name(F));
         }
         if (Verbose > 1) {
-          std::cerr << "[DEBUG][FUNC] " << _demangle(F->getName()) << std::endl;
+          std::cerr << "[DEBUG][FUNC] " << _demangle(_name(F)) << std::endl;
           printDebugPath(debugPath.get(), src, V);
         }
       }
@@ -624,7 +647,7 @@ private:
     for (auto V : instructions) {
       auto I = dyn_cast<Instruction>(V);
       // We only need to process call/invoke instructions.
-      if (!I || !CallSite(I)) {
+      if (!I || !_isCallSite(I)) {
         continue;
       }
       auto contextualNamespace = inferContextualNamespace(I);
@@ -648,7 +671,7 @@ private:
           std::cerr << op << " ";
         }
         std::cerr << ") in a registration call in function: "
-                  << _demangle(I->getFunction()->getName())
+                  << _demangle(_name(I->getFunction()))
                   << " contextualNamespace: " << contextualNamespace
                   << std::endl;
       }
@@ -657,7 +680,7 @@ private:
         if (visitedFunctions.empty()) {
           std::cerr << "[WARNING] could not find registered function for op: "
                     << op << " in function: "
-                    << _demangle(I->getFunction()->getName())
+                    << _demangle(_name(I->getFunction()))
                     << " contextualNamespace: " << contextualNamespace
                     << std::endl;
         }
@@ -673,7 +696,7 @@ private:
   }
 
   static std::string inferContextualNamespace(Instruction* I) {
-    auto functionName = _demangle(I->getFunction()->getName());
+    auto functionName = _demangle(_name(I->getFunction()));
     for (auto& pattern : TorchLibraryInitPattern) {
       if (!pattern.pattern->match(functionName)) {
         continue;
@@ -717,13 +740,13 @@ private:
     for (auto V : instructions) {
       auto I = dyn_cast<Instruction>(V);
       // We only need to process call/invoke instructions.
-      if (!I || !CallSite(I)) {
+      if (!I || !_isCallSite(I)) {
         continue;
       }
       if (Verbose > 2) {
         std::cerr << "[DEBUG][CALL][INST] " << *I << std::endl;
       }
-      std::string caller = I->getFunction()->getName();
+      std::string caller = _name(I->getFunction());
       SET visitedOps;
       scanOpSchemaStrAndFunction(I, {}, {}, &visitedOps, nullptr);
       if (visitedOps.size() != 1) {
@@ -747,6 +770,12 @@ private:
 
   static void extractStringValue(
       Value* V, const std::function<void(const std::string&)>& CB) {
+    if (isa<UndefValue>(V)) {
+      // UndefValue inherits from ConstantValue, but don't contain any data
+      // See: https://llvm.org/docs/LangRef.html#undefined-values
+      return;
+    }
+
     if (auto array = dyn_cast<ConstantDataArray>(V)) {
       // Normal case for c-style string literal and "std::basic_string".
       if (array->isCString()) {
@@ -820,7 +849,7 @@ private:
 
   static void printDebugValue(Value* V) {
     if (auto F = dyn_cast<Function>(V)) {
-      std::cerr << "[FUNC] " << _demangle(F->getName());
+      std::cerr << "[FUNC] " << _demangle(_name(F));
     } else if (isa<Constant>(V)) {
       std::cerr << "[CONST] " << *V;
     } else if (isa<Instruction>(V)) {

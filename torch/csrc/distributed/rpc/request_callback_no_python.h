@@ -66,7 +66,8 @@ class TORCH_API RequestCallbackNoPython : public RequestCallback {
       std::vector<c10::Stream> streams) const;
 
   c10::intrusive_ptr<JitFuture> processBackwardAutogradReq(
-      RpcCommandBase& rpc) const;
+      RpcCommandBase& rpc,
+      std::vector<c10::Stream> streams) const;
 
   c10::intrusive_ptr<JitFuture> processCleanupAutogradContextReq(
       RpcCommandBase& rpc) const;

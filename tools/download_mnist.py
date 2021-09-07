@@ -40,7 +40,7 @@ def download(destination_path: str, resource: str, quiet: bool) -> None:
             try:
                 hook = None if quiet else report_download_progress
                 urlretrieve(url, destination_path, reporthook=hook)
-            except URLError as e:
+            except (URLError, ConnectionError) as e:
                 print('Failed to download (trying next):\n{}'.format(e))
                 continue
             finally:

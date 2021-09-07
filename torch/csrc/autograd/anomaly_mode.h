@@ -18,7 +18,6 @@ struct TORCH_API AnomalyMode {
   }
 
 private:
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
   static bool _enabled;
 };
 

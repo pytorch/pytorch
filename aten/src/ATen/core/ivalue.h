@@ -274,8 +274,8 @@ struct TORCH_API IValue final {
    * for consistency, because Python does the same thing. This actually
    * provokes user-visible changes in behavior due to quirks in torch:
    *      [tensor1] == [tensor1] -> True (because container equality will first
-   * compare identity) [tensor1] == [tensor1_copy] -> RuntimeError: bool value
-   * of Tensor is ambiguous
+   * compare identity) [tensor1] == [tensor1_copy] -> RuntimeError:
+   * Boolean value of Tensor with more than one value is ambiguous
    */
   TORCH_API friend bool _fastEqualsForContainer(
       const IValue& lhs,
@@ -872,14 +872,17 @@ struct TORCH_API IValue final {
   struct HashAliasedIValue {
     size_t operator()(const IValue& val) const {
       if (val.isTensor()) {
-        if (val.toTensor().is_mkldnn()) {
+        auto& tensor = val.toTensor();
+        if (tensor.is_mkldnn() || tensor.is_sparse()) {
           // MKLDNN tensors dont have storage and dont create views
           // or aliasing so we can just use Tensor pointer, TODO: find way
           // to use mkldnn storage
-          return reinterpret_cast<size_t>(val.toTensor().unsafeGetTensorImpl());
+          // Sparse tensors don't have storage use unsafeGetTensorImpl
+          // instead of using the storage of indices or values.
+          return reinterpret_cast<size_t>(tensor.unsafeGetTensorImpl());
         } else {
           return reinterpret_cast<size_t>(
-              val.toTensor().storage().unsafeGetStorageImpl());
+              tensor.storage().unsafeGetStorageImpl());
         }
       }
       // If it is not a Tensor, then two mutable IValues alias each other only

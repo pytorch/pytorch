@@ -7,13 +7,23 @@
 import binascii
 import logging
 import os
+import tempfile
 from base64 import b64decode, b64encode
 from datetime import timedelta
 from typing import Any, Optional, Tuple, cast
 
-from torch.distributed import Store, TCPStore
+from torch.distributed import FileStore, Store, TCPStore
+from torch.distributed.elastic.events import (
+    NodeState,
+    construct_and_record_rdzv_event,
+)
 
-from .api import RendezvousConnectionError, RendezvousParameters, RendezvousStateError
+from .api import (
+    RendezvousConnectionError,
+    RendezvousError,
+    RendezvousParameters,
+    RendezvousStateError,
+)
 from .dynamic_rendezvous import RendezvousBackend, Token
 from .utils import _matches_machine_hostname, parse_rendezvous_endpoint
 
@@ -142,14 +152,16 @@ def _create_tcp_store(params: RendezvousParameters) -> TCPStore:
     # see the explanation in the except clause below.
     for is_server in [is_host, False]:
         try:
-            store = TCPStore(  # type: ignore[call-arg]
+            store = TCPStore(
                 host, port, is_master=is_server, timeout=timedelta(seconds=read_timeout)
             )
 
             if is_server:
-                log.info(
-                    f"Process {os.getpid()} hosts the TCP store for the C10d rendezvous backend."
+                msg = f"Process {os.getpid()} hosts the TCP store for the C10d rendezvous backend."
+                construct_and_record_rdzv_event(
+                    run_id=params.run_id, message=msg, node_state=NodeState.INIT
                 )
+                log.info(msg)
 
             break
         except (ValueError, RuntimeError) as exc:
@@ -167,6 +179,30 @@ def _create_tcp_store(params: RendezvousParameters) -> TCPStore:
     return store
 
 
+def _create_file_store(params: RendezvousParameters) -> FileStore:
+    # If a user specifies an endpoint, we treat it as a path to a file.
+    if params.endpoint:
+        path = params.endpoint
+    else:
+        try:
+            # The temporary file is readable and writable only by the user of
+            # this process.
+            _, path = tempfile.mkstemp()
+        except OSError as exc:
+            raise RendezvousError(
+                "The file creation for C10d store has failed. See inner exception for details."
+            ) from exc
+
+    try:
+        store = FileStore(path)
+    except (ValueError, RuntimeError) as exc:
+        raise RendezvousConnectionError(
+            "The connection to the C10d store has failed. See inner exception for details."
+        ) from exc
+
+    return store
+
+
 def create_backend(params: RendezvousParameters) -> Tuple[C10dRendezvousBackend, Store]:
     """Creates a new :py:class:`C10dRendezvousBackend` from the specified
     parameters.
@@ -174,12 +210,19 @@ def create_backend(params: RendezvousParameters) -> Tuple[C10dRendezvousBackend,
     +--------------+-----------------------------------------------------------+
     | Parameter    | Description                                               |
     +==============+===========================================================+
-    | store_type   | The type of the C10d store. As of today the only          |
-    |              | supported type is "tcp" which corresponds to              |
-    |              | :py:class:`torch.distributed.TCPStore`. Defaults to "tcp".|
+    | store_type   | The type of the C10d store. The currently supported types |
+    |              | are "tcp" and "file" which correspond to                  |
+    |              | :py:class:`torch.distributed.TCPStore` and                |
+    |              | :py:class:`torch.distributed.FileStore`, respectively.    |
+    |              | Defaults to "tcp".                                        |
     +--------------+-----------------------------------------------------------+
     | read_timeout | The read timeout, in seconds, for store operations.       |
     |              | Defaults to 60 seconds.                                   |
+    |              |                                                           |
+    |              | Note this only applies to                                 |
+    |              | :py:class:`torch.distributed.TCPStore`. It is not relevant|
+    |              | to :py:class:`torch.distributed.FileStore` which does not |
+    |              | take in timeout as a parameter.                           |
     +--------------+-----------------------------------------------------------+
     | is_host      | A boolean value indicating whether this backend instance  |
     |              | will host the C10d store. If not specified it will be     |
@@ -195,12 +238,27 @@ def create_backend(params: RendezvousParameters) -> Tuple[C10dRendezvousBackend,
     |              | the hostname or does not match the FQDN of the machine).  |
     +--------------+-----------------------------------------------------------+
     """
-    # As of today we only support TCPStore. Other store types do not have the
-    # required functionality (e.g. compare_set) yet.
+    # As of today we only support TCPStore and FileStore. Other store types do
+    # not have the required functionality (e.g. compare_set) yet.
     store_type = params.get("store_type", "tcp").strip().lower()
-    if store_type != "tcp":
-        raise ValueError("The store type must be 'tcp'. Other store types are not supported yet.")
+    store: Store
 
-    store = _create_tcp_store(params)
+    try:
+        if store_type == "file":
+            store = _create_file_store(params)
+        elif store_type == "tcp":
+            store = _create_tcp_store(params)
+        else:
+            raise ValueError("Invalid store type given. Currently only supports file and tcp.")
 
-    return C10dRendezvousBackend(store, params.run_id), store
+        backend = C10dRendezvousBackend(store, params.run_id)
+
+    except Exception as e:
+        construct_and_record_rdzv_event(
+            message=f"{type(e).__name__}: {str(e)}",
+            run_id=params.run_id,
+            node_state=NodeState.FAILED,
+        )
+        raise
+
+    return backend, store

@@ -66,14 +66,21 @@ void Message::setId(int64_t id) {
   id_ = id;
 }
 
-std::vector<std::reference_wrapper<const at::DataPtr>> Message::getDataPtrs()
+std::vector<c10::weak_intrusive_ptr<c10::StorageImpl>> Message::getStorages()
     const {
-  std::vector<std::reference_wrapper<const at::DataPtr>> dataPtrs;
-  dataPtrs.reserve(tensors_.size());
+  // Sparse tensors do not have storage. Instead, a sparse tensor
+  // contains two tensors indices and values, and both contain storage.
+  std::vector<c10::weak_intrusive_ptr<c10::StorageImpl>> storages;
+  storages.reserve(2 * tensors_.size());
   for (const auto& tensor : tensors_) {
-    dataPtrs.emplace_back(tensor.storage().data_ptr());
+    if (tensor.is_sparse()) {
+      storages.emplace_back(tensor._indices().storage().getWeakStorageImpl());
+      storages.emplace_back(tensor._values().storage().getWeakStorageImpl());
+    } else {
+      storages.emplace_back(tensor.storage().getWeakStorageImpl());
+    }
   }
-  return dataPtrs;
+  return storages;
 }
 
 c10::intrusive_ptr<Message> createExceptionResponse(

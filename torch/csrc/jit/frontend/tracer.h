@@ -97,6 +97,7 @@ struct TORCH_API TracingState
 // data dependencies, but once they get to the ATen call where we actually have
 // the tracing logic, they get converted into a raw IntArrayRef, and we loose
 // all information. To prevent this, we temporarily stash it in here.
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 struct ArgumentStash {
   struct IntArrayRefTrace : std::vector<Value*> {
     IntArrayRefTrace(int size) : std::vector<Value*>(size, nullptr) {}
@@ -142,7 +143,6 @@ struct ArgumentStash {
   }
 
  private:
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
   static thread_local ArgumentStash stash;
   std::unordered_map<std::string, IntArrayRefTrace> intlists;
   std::unordered_map<std::string, Value*> values;
@@ -158,13 +158,9 @@ inline bool isTracing() {
 }
 
 using warn_fn_type = void (*)(const std::string& msg);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TORCH_API extern const char* WARN_PYTHON_DATAFLOW;
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TORCH_API extern const char* WARN_CONSTRUCTOR;
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TORCH_API extern const char* WARN_RESIZE;
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TORCH_API extern const char* STRICT_TRACER_MSG;
 TORCH_API void _do_warn(const char* _reason, const char* _kind);
 inline void warn(const char* _reason, const char* _kind = nullptr) {
@@ -177,6 +173,7 @@ inline void warn(const char* _reason, const char* _kind = nullptr) {
 TORCH_API void setWarn(warn_fn_type fn);
 
 struct TORCH_API NoWarn {
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   NoWarn() : state(getTracingState()) {
     if (state) {
       prev = state->warn;

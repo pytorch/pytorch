@@ -256,6 +256,7 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
 
   void set_fw_grad(const Variable& new_grad, const Variable& self, uint64_t level, bool is_inplace_op) override;
 
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   AutogradMeta(at::TensorImpl* self_impl = nullptr, bool requires_grad = false, Edge gradient_edge = Edge() ) {
     grad_fn_ = std::move(gradient_edge.function);
     requires_grad_ = false;
@@ -641,6 +642,7 @@ inline Variable make_variable_differentiable_view(
       shared_view_info, creation_meta));
       return data;
     } else {
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       c10::intrusive_ptr<at::TensorImpl> data_impl_copy = data.getIntrusivePtr()->shallow_copy_and_detach(
         /*version_counter=*/0,
         /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
@@ -689,6 +691,7 @@ inline Variable make_variable(
     if (data.getIntrusivePtr().use_count() == 1 && data.getIntrusivePtr()->unique_version()) {
       auto data_impl = data.unsafeReleaseIntrusivePtr();
       data_impl->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
+      // NOLINTNEXTLINE(bugprone-branch-clone)
       if (requires_grad) {
         data_impl->set_autograd_meta(std::make_unique<AutogradMeta>(data_impl.get(), requires_grad));
       } else {
@@ -699,6 +702,7 @@ inline Variable make_variable(
       auto data_impl_copy = data.getIntrusivePtr()->shallow_copy_and_detach(
         /*version_counter=*/0,
         /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
+      // NOLINTNEXTLINE(bugprone-branch-clone)
       if (requires_grad) {
         data_impl_copy->set_autograd_meta(std::make_unique<AutogradMeta>(
           data_impl_copy.get(), requires_grad));

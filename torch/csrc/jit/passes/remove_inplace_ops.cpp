@@ -87,6 +87,8 @@ void RemoveInplaceOps(Block* block) {
 // Before:
 // graph(%0 : Float),
 //        %1 : Half):
+//   # Should result in a Half, but after translation to out-of-place,
+//   # would become a Float b/c Half+Float -> Float.
 //   %4 : Float = onnx::Cast[to=1](%1)
 //   %5 : Float = onnx::Add(%4, %0)
 //   ...
@@ -106,22 +108,22 @@ void ImplicitCastForBinaryInplaceOps(Block* b) {
     // Check type if inplace operation is a binary node
     if ((it->kind() == aten::add_) || (it->kind() == aten::sub_) ||
         (it->kind() == aten::mul_) || (it->kind() == aten::div_)) {
-      auto orignalInputs = it->inputs();
-      if (orignalInputs.at(0) == orignalInputs.at(1)) {
+      auto originalInputs = it->inputs();
+      if (originalInputs.at(0) == originalInputs.at(1)) {
         continue;
       }
       TensorTypePtr firstInp_tensor =
-          orignalInputs.at(0)->type()->cast<TensorType>();
+          originalInputs.at(0)->type()->cast<TensorType>();
       TensorTypePtr secondInp_tensor =
-          orignalInputs.at(1)->type()->cast<TensorType>();
+          originalInputs.at(1)->type()->cast<TensorType>();
       if (!(firstInp_tensor) || !(secondInp_tensor) ||
           !(firstInp_tensor->scalarType().has_value())) {
         continue;
       }
       auto newInputNode = it->owningGraph()->create(aten::type_as, 1);
       newInputNode->insertBefore(*it);
-      newInputNode->addInput(orignalInputs.at(1));
-      newInputNode->addInput(orignalInputs.at(0));
+      newInputNode->addInput(originalInputs.at(1));
+      newInputNode->addInput(originalInputs.at(0));
       it->replaceInput(1, newInputNode->outputs().at(0));
     }
   }

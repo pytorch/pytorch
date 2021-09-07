@@ -8,6 +8,7 @@
 #include <c10/util/StringUtil.h>
 #include <c10/util/hash.h>
 #include <cmath>
+#include <iostream>
 
 namespace c10 {
 bool _fastEqualsForContainer(const IValue& lhs, const IValue& rhs) {
@@ -288,11 +289,12 @@ IValue IValue::equals(const IValue& rhs) const {
       // In Python you're not supposed to do this comparison apparently. Not
       // sure if we should warn here or what
       return rhs.isNone();
-    case Tag::Tensor:
+    case Tag::Tensor: {
       if (!rhs.isTensor()) {
         return false;
       }
       return lhs.toTensor().eq(rhs.toTensor());
+    }
     case Tag::Storage:
       return rhs.isStorage() && lhs.toStorage().unsafeGetStorageImpl() == rhs.toStorage().unsafeGetStorageImpl();
     case Tag::Double:
@@ -944,18 +946,27 @@ getClassConverter() {
 }
 
 // Needs to be in this .cpp file to access the full definition of PyObjectHolder
-std::vector<std::reference_wrapper<const at::DataPtr>> ivalue::Future::extractDataPtrs(
-    const at::IValue& value) {
-  std::vector<std::reference_wrapper<const at::DataPtr>> data_ptrs;
+std::vector<c10::weak_intrusive_ptr<c10::StorageImpl>> ivalue::Future::
+    extractStorages(const at::IValue& value) {
+  std::vector<c10::weak_intrusive_ptr<c10::StorageImpl>> weakStorageImpls;
   // getSubValues works poorly on Python objects: it only works if they can be
   // converted to a "regular" IValue type hence, for example, it doesn't support
   // custom subclasses. Thus, instead, we extract the tensors through pickling.
+  // Sparse tensors do not have storage. Instead, a sparse tensor
+  // contains two tensors indices and values, and both contain storage.
   if (value.isPyObject()) {
     std::vector<at::Tensor> tensors =
         value.toPyObjectHolder()->extractTensors();
-    data_ptrs.reserve(tensors.size());
-    for (const at::Tensor& tensor : tensors) {
-      data_ptrs.emplace_back(tensor.storage().data_ptr());
+    weakStorageImpls.reserve(2 * tensors.size());
+    for (const auto& tensor : tensors) {
+      if (tensor.is_sparse()) {
+        weakStorageImpls.push_back(
+            tensor._indices().storage().getWeakStorageImpl());
+        weakStorageImpls.push_back(
+            tensor._values().storage().getWeakStorageImpl());
+      } else {
+        weakStorageImpls.push_back(tensor.storage().getWeakStorageImpl());
+      }
     }
   } else {
     at::IValue::HashAliasedIValues sub_values;
@@ -964,11 +975,19 @@ std::vector<std::reference_wrapper<const at::DataPtr>> ivalue::Future::extractDa
     value.getSubValues(sub_values);
     for (const at::IValue& sub_value : sub_values) {
       if (sub_value.isTensor()) {
-        data_ptrs.emplace_back(sub_value.toTensor().storage().data_ptr());
+        auto& tensor = sub_value.toTensor();
+        if (tensor.is_sparse()) {
+          weakStorageImpls.push_back(
+              tensor._indices().storage().getWeakStorageImpl());
+          weakStorageImpls.push_back(
+              tensor._values().storage().getWeakStorageImpl());
+        } else {
+          weakStorageImpls.push_back(tensor.storage().getWeakStorageImpl());
+        }
       }
     }
   }
-  return data_ptrs;
+  return weakStorageImpls;
 }
 
 TORCH_API intrusive_ptr<ivalue::Future> collectAll(
@@ -1070,7 +1089,7 @@ TORCH_API intrusive_ptr<ivalue::Future> collectAny(
       if (src.hasError()) {
         dst->setError(src.exception_ptr());
       } else {
-        dst->markCompleted(src.constValue(), src.dataPtrs());
+        dst->markCompleted(src.constValue(), src.storages());
       }
     }
   };

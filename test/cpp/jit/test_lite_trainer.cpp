@@ -18,7 +18,6 @@
 namespace torch {
 namespace jit {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LiteTrainerTest, Params) {
   Module m("m");
   m.register_parameter("foo", torch::ones({1}, at::requires_grad()), false);
@@ -136,7 +135,6 @@ TEST(MobileTest, SaveLoadParameters) {
 }
 */
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(MobileTest, SaveLoadParametersEmpty) {
   Module m("m");
   m.define(R"(
@@ -160,7 +158,6 @@ TEST(MobileTest, SaveLoadParametersEmpty) {
   AT_ASSERT(mobile_params.size() == 0);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LiteTrainerTest, SGD) {
   Module m("m");
   m.register_parameter("foo", torch::ones({1}, at::requires_grad()), false);
@@ -235,7 +232,6 @@ struct DummyDataset : torch::data::datasets::Dataset<DummyDataset, int> {
 };
 } // namespace
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LiteTrainerTest, SequentialSampler) {
   // test that sampler can be used with dataloader
   const int kBatchSize = 10;
@@ -250,7 +246,6 @@ TEST(LiteTrainerTest, SequentialSampler) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LiteTrainerTest, RandomSamplerReturnsIndicesInCorrectRange) {
   mobile::RandomSampler sampler(10);
 
@@ -275,7 +270,6 @@ TEST(LiteTrainerTest, RandomSamplerReturnsIndicesInCorrectRange) {
   AT_ASSERT(sampler.next(10).has_value() == false);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LiteTrainerTest, RandomSamplerReturnsLessValuesForLastBatch) {
   mobile::RandomSampler sampler(5);
   AT_ASSERT(sampler.next(3).value().size() == 3);
@@ -283,7 +277,6 @@ TEST(LiteTrainerTest, RandomSamplerReturnsLessValuesForLastBatch) {
   AT_ASSERT(sampler.next(2).has_value() == false);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LiteTrainerTest, RandomSamplerResetsWell) {
   mobile::RandomSampler sampler(5);
   AT_ASSERT(sampler.next(5).value().size() == 5);
@@ -293,7 +286,6 @@ TEST(LiteTrainerTest, RandomSamplerResetsWell) {
   AT_ASSERT(sampler.next(2).has_value() == false);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LiteTrainerTest, RandomSamplerResetsWithNewSizeWell) {
   mobile::RandomSampler sampler(5);
   AT_ASSERT(sampler.next(5).value().size() == 5);

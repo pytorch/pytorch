@@ -1,5 +1,6 @@
 import argparse
 from typing import Any, Callable, Tuple, Dict, Optional
+import logging
 
 import torch
 import torch.fx
@@ -16,6 +17,8 @@ from .tools_common import (
     FxNetAccFusionsFinder,
     Names
 )
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class FxNetMinimizerBadModuleError(Exception):
@@ -256,7 +259,7 @@ class _MinimizerBase:
             if node in selected_nodes:
                 node.tag = "minimize"
             elif any(
-                n.tag in {"minimize", "main_1"}  # type: ignore[attr-defined]
+                n.tag in {"minimize", "main_1"}
                 for n in node.all_input_nodes
                 if n.op in CALLABLE_NODE_OPS
             ):
@@ -403,6 +406,7 @@ class _MinimizerBase:
         culprits: NodeSet = set()
 
         for node in nodes:
+            _LOGGER.info(f"Visit node: {node.name}")
             cur_nodes: NodeSet = {node}
 
             if node in self.fusions:

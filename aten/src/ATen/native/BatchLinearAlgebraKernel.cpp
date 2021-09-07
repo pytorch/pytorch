@@ -1,12 +1,11 @@
 #include <ATen/ATen.h>
 #include <ATen/Dispatch.h>
+#include <ATen/Parallel.h>
 #include <ATen/native/BatchLinearAlgebra.h>
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/cpu/zmath.h>
 
 #include <c10/util/irange.h>
-
-#include <TH/TH.h>  // for USE_LAPACK
 
 namespace at { namespace native {
 
@@ -27,7 +26,7 @@ namespace {
 */
 template <typename scalar_t>
 void apply_cholesky(const Tensor& input, const Tensor& info, bool upper) {
-#ifndef USE_LAPACK
+#if !AT_BUILD_WITH_LAPACK()
   TORCH_CHECK(
       false,
       "Calling torch.linalg.cholesky on a CPU tensor requires compiling ",
@@ -96,7 +95,7 @@ For more information see LAPACK's documentation for POTRI routine.
 */
 template <typename scalar_t>
 void apply_cholesky_inverse(Tensor& input, Tensor& infos, bool upper) {
-#ifndef USE_LAPACK
+#if !AT_BUILD_WITH_LAPACK()
   TORCH_CHECK(false, "cholesky_inverse: LAPACK library not found in compilation");
 #else
   char uplo = upper ? 'U' : 'L';
@@ -131,7 +130,7 @@ Tensor& cholesky_inverse_kernel_impl(Tensor& result, Tensor& infos, bool upper) 
 
 template <typename scalar_t>
 void apply_eig(const Tensor& self, bool eigenvectors, Tensor& vals_, Tensor& vecs_, int64_t* info_ptr) {
-#ifndef USE_LAPACK
+#if !AT_BUILD_WITH_LAPACK()
   TORCH_CHECK(false, "Calling torch.eig on a CPU tensor requires compiling ",
     "PyTorch with LAPACK. Please use PyTorch built with LAPACK support.");
 #else
@@ -219,7 +218,7 @@ std::tuple<Tensor, Tensor> eig_kernel_impl(const Tensor& self, bool& eigenvector
 */
 template <typename scalar_t>
 void apply_linalg_eig(Tensor& values, Tensor& vectors, Tensor& input, Tensor& infos, bool compute_eigenvectors) {
-#ifndef USE_LAPACK
+#if !AT_BUILD_WITH_LAPACK()
   TORCH_CHECK(false, "Calling torch.linalg.eig on a CPU tensor requires compiling ",
     "PyTorch with LAPACK. Please use PyTorch built with LAPACK support.");
 #else
@@ -294,8 +293,8 @@ void linalg_eig_kernel(Tensor& eigenvalues, Tensor& eigenvectors, Tensor& infos,
   This function doesn't do any error checks and it's assumed that every argument is valid.
 */
 template <typename scalar_t>
-void apply_lapack_eigh(Tensor& values, Tensor& vectors, Tensor& infos, bool upper, bool compute_eigenvectors) {
-#ifndef USE_LAPACK
+void apply_lapack_eigh(const Tensor& values, const Tensor& vectors, const Tensor& infos, bool upper, bool compute_eigenvectors) {
+#if !AT_BUILD_WITH_LAPACK()
   TORCH_CHECK(
       false,
       "Calling torch.linalg.eigh or eigvalsh on a CPU tensor requires compiling ",
@@ -366,7 +365,7 @@ void apply_lapack_eigh(Tensor& values, Tensor& vectors, Tensor& infos, bool uppe
 }
 
 // This is a type dispatching helper function for 'apply_lapack_eigh'
-void linalg_eigh_kernel(Tensor& eigenvalues, Tensor& eigenvectors, Tensor& infos, bool upper, bool compute_eigenvectors) {
+void linalg_eigh_kernel(const Tensor& eigenvalues, const Tensor& eigenvectors, const Tensor& infos, bool upper, bool compute_eigenvectors) {
   // This function calculates the symmetric/hermitian eigendecomposition
   // in-place tensors should be in batched column major memory format the
   // content of eigenvalues, eigenvectors and infos is overwritten by
@@ -398,7 +397,7 @@ void linalg_eigh_kernel(Tensor& eigenvalues, Tensor& eigenvectors, Tensor& infos
 */
 template <typename scalar_t>
 static void apply_geqrf(const Tensor& input, const Tensor& tau) {
-#ifndef USE_LAPACK
+#if !AT_BUILD_WITH_LAPACK()
   TORCH_CHECK(
       false,
       "Calling torch.geqrf on a CPU tensor requires compiling ",
@@ -464,7 +463,7 @@ void geqrf_kernel(const Tensor& input, const Tensor& tau) {
 */
 template <typename scalar_t>
 inline void apply_orgqr(Tensor& self, const Tensor& tau) {
-#ifndef USE_LAPACK
+#if !AT_BUILD_WITH_LAPACK()
   TORCH_CHECK(false, "Calling torch.orgqr on a CPU tensor requires compiling ",
     "PyTorch with LAPACK. Please use PyTorch built with LAPACK support.");
 #else
@@ -553,7 +552,7 @@ struct LapackLstsqDriverTypeHash {
 */
 template <typename scalar_t>
 void apply_lstsq(const Tensor& A, Tensor& B, Tensor& rank, Tensor& singular_values, Tensor& infos, double rcond, LapackLstsqDriverType driver_type) {
-#ifndef USE_LAPACK
+#if !AT_BUILD_WITH_LAPACK()
   TORCH_CHECK(
       false,
       "Calling torch.linalg.lstsq on a CPU tensor requires compiling ",
@@ -724,7 +723,7 @@ void lstsq_kernel(const Tensor& a, Tensor& b, Tensor& rank, Tensor& singular_val
 */
 template <typename scalar_t>
 void apply_ormqr(const Tensor& input, const Tensor& tau, const Tensor& other, bool left, bool transpose) {
-#ifndef USE_LAPACK
+#if !AT_BUILD_WITH_LAPACK()
   TORCH_CHECK(false, "Calling torch.ormqr on a CPU tensor requires compiling ",
     "PyTorch with LAPACK. Please use PyTorch built with LAPACK support.");
 #else
@@ -800,7 +799,7 @@ For more information see LAPACK's documentation for TRTRS routine.
 */
 template<typename scalar_t>
 void apply_triangular_solve(Tensor& A, Tensor& B, Tensor& infos, bool upper, bool transpose, bool conjugate_transpose, bool unitriangular) {
-#ifndef USE_LAPACK
+#if !AT_BUILD_WITH_LAPACK()
   TORCH_CHECK(
       false,
       "Calling torch.triangular_solve on a CPU tensor requires compiling ",
@@ -857,7 +856,7 @@ void triangular_solve_kernel(Tensor& A, Tensor& B, Tensor& infos, bool upper, bo
 */
 template <typename scalar_t>
 void apply_lu(const Tensor& input, const Tensor& pivots, const Tensor& infos, bool compute_pivots) {
-#ifndef USE_LAPACK
+#if !AT_BUILD_WITH_LAPACK()
   TORCH_CHECK(
       false,
       "Calling torch.lu on a CPU tensor requires compiling ",
@@ -905,14 +904,13 @@ void lu_kernel(const Tensor& input, const Tensor& pivots, const Tensor& infos, b
   For further details, please see the LAPACK documentation for GETRS.
 */
 template <typename scalar_t>
-void apply_lu_solve(const Tensor& b, const Tensor& lu, const Tensor& pivots) {
-#ifndef USE_LAPACK
+void apply_lu_solve(const Tensor& b, const Tensor& lu, const Tensor& pivots, char trans = 'N') {
+#if !AT_BUILD_WITH_LAPACK()
   TORCH_CHECK(
       false,
       "Calling torch.lu_solve on a CPU tensor requires compiling ",
       "PyTorch with LAPACK. Please use PyTorch built with LAPACK support.");
 #else
-  char trans = 'N';
   auto b_data = b.data_ptr<scalar_t>();
   auto lu_data = lu.data_ptr<scalar_t>();
   auto pivots_data = pivots.data_ptr<int>();
@@ -942,101 +940,88 @@ void apply_lu_solve(const Tensor& b, const Tensor& lu, const Tensor& pivots) {
 }
 
 // This is a type dispatching helper function for 'apply_lu_solve'
-void lu_solve_kernel(const Tensor& b, const Tensor& lu, const Tensor& pivots) {
+void lu_solve_trans_kernel(const Tensor& b, const Tensor& lu, const Tensor& pivots, char trans) {
+  switch (trans) {
+    case 'N':
+    case 'T':
+    case 'C':
+      break;
+    default:
+      TORCH_INTERNAL_ASSERT(false, "lu_solve_trans_cpu: wrong value for `trans`, it must be one of 'N', 'T', 'C'");
+  }
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(b.scalar_type(), "lu_solve_cpu", [&]{
-    apply_lu_solve<scalar_t>(b, lu, pivots);
+    apply_lu_solve<scalar_t>(b, lu, pivots, trans);
   });
+}
+
+void lu_solve_kernel(const Tensor& b, const Tensor& lu, const Tensor& pivots) {
+  lu_solve_trans_kernel(b, lu, pivots, 'N');
 }
 
 } // anonymous namespace
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_ARCH_DISPATCH(cholesky_stub, DEFAULT, &cholesky_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-REGISTER_AVX_DISPATCH(cholesky_stub, &cholesky_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+REGISTER_AVX512_DISPATCH(cholesky_stub, &cholesky_kernel);
 REGISTER_AVX2_DISPATCH(cholesky_stub, &cholesky_kernel);
 REGISTER_VSX_DISPATCH(cholesky_stub, &cholesky_kernel);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_ARCH_DISPATCH(cholesky_inverse_stub, DEFAULT, &cholesky_inverse_kernel_impl);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-REGISTER_AVX_DISPATCH(cholesky_inverse_stub, &cholesky_inverse_kernel_impl);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+REGISTER_AVX512_DISPATCH(cholesky_inverse_stub, &cholesky_inverse_kernel_impl);
 REGISTER_AVX2_DISPATCH(cholesky_inverse_stub, &cholesky_inverse_kernel_impl);
 REGISTER_VSX_DISPATCH(cholesky_inverse_stub, &cholesky_inverse_kernel_impl);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_ARCH_DISPATCH(eig_stub, DEFAULT, &eig_kernel_impl);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-REGISTER_AVX_DISPATCH(eig_stub, &eig_kernel_impl);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+REGISTER_AVX512_DISPATCH(eig_stub, &eig_kernel_impl);
 REGISTER_AVX2_DISPATCH(eig_stub, &eig_kernel_impl);
 REGISTER_VSX_DISPATCH(eig_stub, &eig_kernel_impl);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_ARCH_DISPATCH(linalg_eig_stub, DEFAULT, &linalg_eig_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-REGISTER_AVX_DISPATCH(linalg_eig_stub, &linalg_eig_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+REGISTER_AVX512_DISPATCH(linalg_eig_stub, &linalg_eig_kernel);
 REGISTER_AVX2_DISPATCH(linalg_eig_stub, &linalg_eig_kernel);
 REGISTER_VSX_DISPATCH(linalg_eig_stub, &linalg_eig_kernel);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_ARCH_DISPATCH(linalg_eigh_stub, DEFAULT, &linalg_eigh_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-REGISTER_AVX_DISPATCH(linalg_eigh_stub, &linalg_eigh_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+REGISTER_AVX512_DISPATCH(linalg_eigh_stub, &linalg_eigh_kernel);
 REGISTER_AVX2_DISPATCH(linalg_eigh_stub, &linalg_eigh_kernel);
 REGISTER_VSX_DISPATCH(linalg_eigh_stub, &linalg_eigh_kernel);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_ARCH_DISPATCH(geqrf_stub, DEFAULT, &geqrf_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-REGISTER_AVX_DISPATCH(geqrf_stub, &geqrf_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+REGISTER_AVX512_DISPATCH(geqrf_stub, &geqrf_kernel);
 REGISTER_AVX2_DISPATCH(geqrf_stub, &geqrf_kernel);
 REGISTER_VSX_DISPATCH(geqrf_stub, &geqrf_kernel);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_ARCH_DISPATCH(orgqr_stub, DEFAULT, &orgqr_kernel_impl);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-REGISTER_AVX_DISPATCH(orgqr_stub, &orgqr_kernel_impl);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+REGISTER_AVX512_DISPATCH(orgqr_stub, &orgqr_kernel_impl);
 REGISTER_AVX2_DISPATCH(orgqr_stub, &orgqr_kernel_impl);
 REGISTER_VSX_DISPATCH(orgqr_stub, &orgqr_kernel_impl);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_ARCH_DISPATCH(ormqr_stub, DEFAULT, &ormqr_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-REGISTER_AVX_DISPATCH(ormqr_stub, &ormqr_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+REGISTER_AVX512_DISPATCH(ormqr_stub, &ormqr_kernel);
 REGISTER_AVX2_DISPATCH(ormqr_stub, &ormqr_kernel);
 REGISTER_VSX_DISPATCH(ormqr_stub, &ormqr_kernel);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_ARCH_DISPATCH(lstsq_stub, DEFAULT, &lstsq_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-REGISTER_AVX_DISPATCH(lstsq_stub, &lstsq_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+REGISTER_AVX512_DISPATCH(lstsq_stub, &lstsq_kernel);
 REGISTER_AVX2_DISPATCH(lstsq_stub, &lstsq_kernel);
 REGISTER_VSX_DISPATCH(lstsq_stub, &lstsq_kernel);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_ARCH_DISPATCH(triangular_solve_stub, DEFAULT, &triangular_solve_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-REGISTER_AVX_DISPATCH(triangular_solve_stub, &triangular_solve_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+REGISTER_AVX512_DISPATCH(triangular_solve_stub, &triangular_solve_kernel);
 REGISTER_AVX2_DISPATCH(triangular_solve_stub, &triangular_solve_kernel);
 REGISTER_VSX_DISPATCH(triangular_solve_stub, &triangular_solve_kernel);
 
 REGISTER_ARCH_DISPATCH(lu_stub, DEFAULT, &lu_kernel);
-REGISTER_AVX_DISPATCH(lu_stub, &lu_kernel);
+REGISTER_AVX512_DISPATCH(lu_stub, &lu_kernel);
 REGISTER_AVX2_DISPATCH(lu_stub, &lu_kernel);
 REGISTER_VSX_DISPATCH(lu_stub, &lu_kernel);
 
+REGISTER_ARCH_DISPATCH(lu_solve_trans_stub, DEFAULT, &lu_solve_trans_kernel);
+REGISTER_AVX512_DISPATCH(lu_solve_trans_stub, &lu_solve_trans_kernel);
+REGISTER_AVX2_DISPATCH(lu_solve_trans_stub, &lu_solve_trans_kernel);
+REGISTER_VSX_DISPATCH(lu_solve_trans_stub, &lu_solve_trans_kernel);
+
 REGISTER_ARCH_DISPATCH(lu_solve_stub, DEFAULT, &lu_solve_kernel);
-REGISTER_AVX_DISPATCH(lu_solve_stub, &lu_solve_kernel);
+REGISTER_AVX512_DISPATCH(lu_solve_stub, &lu_solve_kernel);
 REGISTER_AVX2_DISPATCH(lu_solve_stub, &lu_solve_kernel);
 REGISTER_VSX_DISPATCH(lu_solve_stub, &lu_solve_kernel);
 
