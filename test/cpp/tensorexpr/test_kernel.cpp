@@ -1418,5 +1418,43 @@ TEST_F(Kernel, CustomLowering) {
   torch::jit::testing::FileCheck().check("isnan")->run(oss.str());
 }
 
+TEST_F(Kernel, Vectorize) {
+  const auto graph_string = R"IR(
+      graph(%0 : Float(100, 16, strides=[16, 1], device=cpu),
+            %1 : Float(100, 16, strides=[16, 1], device=cpu)):
+        %2 : Float(100, 16, strides=[16, 1]) = aten::mul(%0, %1)
+        %3 : Float(100, 16, strides=[16, 1]) = aten::mul(%0, %2)
+        return (%3))IR";
+  auto graph = std::make_shared<Graph>();
+  parseIR(graph_string, &*graph);
+
+  auto a = at::rand({100, 16}, TensorOptions(kCPU).dtype(at::kFloat));
+  auto b = at::rand({100, 16}, TensorOptions(kCPU).dtype(at::kFloat));
+  auto o = at::zeros({100, 16}, TensorOptions(kCPU).dtype(at::kFloat));
+  auto ref = a * (a * b);
+  TensorExprKernel k(graph);
+  std::vector<at::Tensor> inputs = {a, b};
+  StmtPtr s = k.getCodeGenStmt();
+
+  std::ostringstream oss;
+  oss << *s;
+
+  // Check the IR we produced
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for
+# CHECK-NEXT: for
+# CHECK-NEXT: Ramp
+# CHECK-NOT: for)IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+
+  std::vector<IValue> stack = fmap<IValue>(inputs);
+  k.run(stack);
+  o = stack[0].toTensor();
+  for (size_t i = 0; i < 100 * 16; i++) {
+    CHECK_EQ(((float*)o.data_ptr())[i], ((float*)ref.data_ptr())[i]);
+  }
+}
+
 } // namespace jit
 } // namespace torch
