@@ -740,6 +740,10 @@ Create a view of an existing `torch.Tensor` :attr:`input` with specified
     :meth:`torch.Tensor.expand`, are easier to read and are therefore more
     advisable to use.
 
+.. warning::
+    This function will raise a ``RuntimeError`` if the :attr:`input` storage
+    does not have enough allocated memory for the given combination of
+    parameters.
 
 Args:
     {input}
@@ -10317,8 +10321,14 @@ empty_strided(size, stride, *, dtype=None, layout=None, device=None, requires_gr
 
 Returns a tensor filled with uninitialized data. The shape and strides of the tensor is
 defined by the variable argument :attr:`size` and :attr:`stride` respectively.
-``torch.empty_strided(size, stride)`` is equivalent to
-``torch.empty(size).as_strided(size, stride)``.
+``torch.empty_strided(size, stride)`` will allocate as much memory as necessary in order
+to accomodate the given parameters.
+
+.. note::
+    This function is slightly different from ``torch.empty(size).as_strided(size, stride)``.
+    :func:`torch.as_strided` will raise a ``RuntimeError`` if the given combination of
+    :attr:`size` and :attr:`stride` requires more space than previously allocated
+    (by :func:`torch.empty`).
 
 .. warning::
     More than one element of the created tensor may refer to a single memory
