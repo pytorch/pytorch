@@ -356,6 +356,9 @@ class BinaryOpQuantizeHandler(QuantizeHandler):
         the pattern matched to this QuantizeHandler instance during the
         prepare step.
         """
+        dtypes = get_qconfig_dtypes(qconfig)
+        if not (self.binary_op in binary_op_supported_dtypes and dtypes in binary_op_supported_dtypes[self.binary_op]):
+            return False
         if self.num_tensor_args == 1:
             return True
         elif self.all_node_args_are_tensors and self.input_output_observed():
