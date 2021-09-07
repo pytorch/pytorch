@@ -31,7 +31,7 @@ class DataChunk(list, Generic[T]):
         self.items = items
 
     def as_str(self, indent=''):
-        res = indent + "[" + ", ".join([str(i) for i in iter(self)]) + "]"
+        res = indent + "[" + ", ".join(str(i) for i in iter(self)) + "]"
         return res
 
     def __iter__(self) -> Iterator[T]:
@@ -271,9 +271,8 @@ class ConcatDataset(Dataset[T_co]):
 
     def __init__(self, datasets: Iterable[Dataset]) -> None:
         super(ConcatDataset, self).__init__()
-        # Cannot verify that datasets is Sized
-        assert len(datasets) > 0, 'datasets should not be an empty iterable'  # type: ignore[arg-type]
         self.datasets = list(datasets)
+        assert len(self.datasets) > 0, 'datasets should not be an empty iterable'  # type: ignore[arg-type]
         for d in self.datasets:
             assert not isinstance(d, IterableDataset), "ConcatDataset does not support IterableDataset"
         self.cumulative_sizes = self.cumsum(self.datasets)
