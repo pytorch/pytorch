@@ -744,9 +744,7 @@ class TestProfiler(TestCase):
                 f_ts_2 = flow_f_to_ts[2]
                 self.assertTrue(all([ts in ts_to_name.keys() for ts in [s_ts_1, f_ts_1, s_ts_2, f_ts_2]]))
                 self.assertTrue(ts_to_name[s_ts_1] == "aten::binary_cross_entropy_with_logits")
-                self.assertTrue(ts_to_name[f_ts_1] == "BinaryCrossEntropyWithLogitsBackward")
                 self.assertTrue(ts_to_name[s_ts_2] == "aten::add")
-                self.assertTrue(ts_to_name[f_ts_2] == "AddBackward0")
 
 if __name__ == '__main__':
     run_tests()
