@@ -1,1 +1,2 @@
-python ~/rsync/nnc/test/test-shape-prop.py
+#!/bin/bash
+python test-shape-prop.py
