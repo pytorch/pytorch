@@ -54,6 +54,7 @@ Tensor computeAddMM(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
     const c10::optional<ScalarType>& outputType) {
+  std::cout << "XXX " << __FILE__ << ":" << __LINE__ << " " << __FUNCTION__ << std::endl;
   Dtype dtype = kFloat;
   if (outputType) {
     dtype = Dtype(*outputType);

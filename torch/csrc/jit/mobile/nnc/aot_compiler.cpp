@@ -29,11 +29,17 @@ namespace nnc {
 
 std::vector<int64_t> getConstSizes(const BufPtr b) {
   std::vector<int64_t> r;
+  std::cout << __FILE__ << " " << __FUNCTION__ << ":" << __LINE__ << " buf name hint:" << b->name_hint() << std::endl;
   for (auto dim : b->dims()) {
-    IntImmPtr int_imm_dim = to<IntImm>(dim);
+    LongImmPtr imm_dim = to<LongImm>(dim);
+    std::cout << __FILE__ << " " << __FUNCTION__ << ":" << __LINE__ << " dim.dtype:" << dim->dtype() << std::endl;
+    std::cout << __FILE__ << " " << __FUNCTION__ << ":" << __LINE__ << " buf name hint:" << b->name_hint() << std::endl;
     // TODO: assert it's actually immediate
-    int64_t s = int_imm_dim->value();
+    int64_t s = imm_dim->value();
+    std::cout << __FILE__ << " " << __FUNCTION__ << ":" << __LINE__ << " buf name hint:" << b->name_hint() << std::endl;
+    std::cout << s << std::endl;
     r.push_back(s);
+    std::cout << __FILE__ << " " << __FUNCTION__ << ":" << __LINE__ << " buf name hint:" << b->name_hint() << std::endl;
   }
   return r;
 }
@@ -44,7 +50,9 @@ void get_compiled_function(
   std::vector<at::Tensor> parameters;
 
   auto const_descriptors = kernel->getConstantDescriptors();
+  std::cout << "XXX const_descriptors.size():" << const_descriptors.size() << std::endl;
   for (auto cd : const_descriptors) {
+    std::cout << __FILE__ << ":" << __LINE__ << " " << __FUNCTION__ << std::endl;
     auto sizes = getConstSizes(cd.buf);
     at::Tensor const_tensor = at::from_blob(cd.ptr, sizes).clone();
     parameters.push_back(const_tensor);
@@ -62,6 +70,7 @@ void get_compiled_function(
   for (int64_t idx = n_inputs; idx < n_inputs + n_outputs; idx++) {
     const auto& ba = kernel->getBufferArgs()[idx];
     OutputSpec output;
+    std::cout << __FUNCTION__ << ":" << __LINE__ << std::endl;
     output.sizes_ = getConstSizes(ba.buf());
     // TODO: assert the output is a buffer and not a scalar
     // TODO: use actual dtype
