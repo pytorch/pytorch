@@ -16,12 +16,12 @@ import collections.abc
 
 from typing import Any, Callable, List, Optional, Sequence, Tuple, Union, Dict
 
-from torch.testing import \
-    (make_non_contiguous, floating_types, floating_types_and, complex_types,
-     floating_and_complex_types, floating_and_complex_types_and,
-     all_types_and_complex_and, all_types_and, all_types_and_complex,
-     integral_types_and, all_types, double_types, make_tensor)
-from .._core import _dispatch_dtypes
+from torch.testing import make_non_contiguous, make_tensor
+from torch.testing._internal.common_dtype import (
+    _dispatch_dtypes, floating_types, floating_types_and, complex_types, floating_and_complex_types,
+    floating_and_complex_types_and, all_types_and_complex_and, all_types_and, all_types_and_complex, integral_types_and,
+    all_types, double_types,
+)
 from torch.testing._internal.common_device_type import \
     (onlyOnCPUAndCUDA, skipCUDAIfNoMagma, skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfNoCusolver,
      skipCPUIfNoLapack, skipCPUIfNoFFT, skipCUDAIfRocm, precisionOverride, toleranceOverride, tol)
@@ -5939,14 +5939,14 @@ op_db: List[OpInfo] = [
            ),
            sample_inputs_func=sample_inputs_baddbmm),
     OpInfo('dot',
-           dtypes=all_types_and_complex_and(torch.float16),
+           dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16, *[torch.bfloat16] if CUDA11OrLater else []),
            assert_autodiffed=True,
            sample_inputs_func=sample_inputs_dot_vdot,
            supports_forward_ad=True,
            ),
     OpInfo('vdot',
-           dtypes=all_types_and_complex_and(torch.float16),
+           dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16, *[torch.bfloat16] if CUDA11OrLater else []),
            sample_inputs_func=sample_inputs_dot_vdot,
            supports_forward_ad=True,
@@ -7116,8 +7116,9 @@ op_db: List[OpInfo] = [
            supports_out=False,
            ),
     OpInfo('matmul',
+           aliases=('linalg.matmul',),
            dtypes=floating_types(),
-           dtypesIfCPU=all_types_and_complex(),
+           dtypesIfCPU=all_types_and_complex_and(torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16, *[torch.bfloat16] if CUDA11OrLater else []),
            dtypesIfROCM=floating_types_and(torch.half, torch.bfloat16),
            backward_dtypesIfCUDA=floating_and_complex_types_and(torch.float16,
@@ -7909,7 +7910,7 @@ op_db: List[OpInfo] = [
     OpInfo('__rmatmul__',
            op=torch.Tensor.__rmatmul__,
            dtypes=floating_types(),
-           dtypesIfCPU=all_types_and_complex(),
+           dtypesIfCPU=all_types_and_complex_and(torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.float16, *[torch.bfloat16] if CUDA11OrLater else [],
                                            torch.complex64, torch.complex128),
            backward_dtypesIfCUDA=floating_types_and(torch.float16,
