@@ -36,7 +36,6 @@ _(aten, _cast_Half) \
 _(aten, _cast_Int) \
 _(aten, _cast_Long) \
 _(aten, _cast_Short) \
-_(aten, _cat) \
 _(aten, _ceil) \
 _(aten, _clamp_max) \
 _(aten, _clamp_min) \
@@ -224,7 +223,6 @@ _(aten, bmm) \
 _(aten, broadcast_tensors) \
 _(aten, broadcast_to) \
 _(aten, cartesian_prod) \
-_(aten, cat) \
 _(aten, cauchy) \
 _(aten, ceil) \
 _(aten, celu) \
