@@ -29,7 +29,7 @@ env:
   no_proxy: localhost,127.0.0.1,amazonaws.com,s3.amazonaws.com,169.254.169.254,169.254.170.2,/var/run/docker.sock
 
 concurrency:
-  group: win-vs2019-cpu-py3-${{ github.event.pull_request.number || github.sha }}
+  group: win-vs2019-cpu-py3-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true
 
 jobs:
