@@ -886,17 +886,27 @@ def is_dict(ann) -> bool:
             getattr(ann, '__origin__', None) is dict)
 
 def is_union(ann):
-    if ann is Optional:
-        raise_error_container_parameter_missing("Optional")
     if ann is Union:
         raise_error_container_parameter_missing("Union")
 
-    if not hasattr(ann, '__module__') or not ann.__module__ == 'typing':
-        return False
+    return (hasattr(ann, '__module__') and
+            ann.__module__ == 'typing' and
+            (getattr(ann, '__origin__', None) is Union))
 
-    typ = getattr(ann, '__origin__', None)
+def is_optional(ann):
+    if ann is Optional:
+        raise_error_container_parameter_missing("Optional")
 
-    return typ is Union or typ is Optional
+    def is_optional_as_optional(ann):
+        return (hasattr(ann, '__module__') and
+                ann.__module__ == 'typing' and
+                (getattr(ann, '__origin__', None) is Optional))
+
+    def is_union_as_optional(ann):
+        ann_args = ann.__args__
+        return len(ann_args) == 2 and None in ann_args
+
+    return is_optional_as_optional(ann) or (is_union(ann) and is_union_as_optional(ann))
 
 def is_future(ann) -> bool:
     if ann is Future:
@@ -1115,8 +1125,7 @@ def check_args_exist(target_type) -> None:
         raise_error_container_parameter_missing("Dict")
     elif target_type is None or target_type is Optional:
         raise_error_container_parameter_missing("Optional")
-    elif target_type is Union:
-        raise_error_container_parameter_missing("Union")
+
 
 def check_empty_containers(obj) -> None:
     if obj == [] or obj == {} or obj == ():

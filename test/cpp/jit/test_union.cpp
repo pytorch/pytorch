@@ -13,61 +13,65 @@ class UnionTypeTest : public ::testing::Test {
   const TypePtr none = NoneType::get();
 
   // List[str]
-  // We have two because we want to check if certain equality
-  // relationships work for container types
   const TypePtr l1 = ListType::ofStrings();
-  const TypePtr l2 = ListType::ofStrings();
 
   // Optional[int]
-  const TypePtr opt1 = UnionType::createOptionalOf(IntType::get());
+  const TypePtr opt1 = OptionalType::create(IntType::get());
 
   // Optional[float]
-  const TypePtr opt2 = UnionType::createOptionalOf(FloatType::get());
+  const TypePtr opt2 = OptionalType::create(FloatType::get());
 
   // Optional[List[str]]
-  const TypePtr opt3 = UnionType::createOptionalOf(ListType::ofStrings());
+  const TypePtr opt3 = OptionalType::create(ListType::ofStrings());
 
   // Tuple[Optional[int], int]
-  const TypePtr tup1 = TupleType::create(
-      {UnionType::createOptionalOf(IntType::get()), IntType::get()});
+  const TypePtr tup1 =
+      TupleType::create({OptionalType::create(IntType::get()), IntType::get()});
 
   // Tuple[int, int]
   const TypePtr tup2 = TupleType::create({IntType::get(), IntType::get()});
 
-  bool hasType(TypePtr u, TypePtr t) {
-    auto res =
-        std::find(u->containedTypes().begin(), u->containedTypes().end(), t);
-    return res != u->containedTypes().end();
+  bool hasType(UnionTypePtr u, TypePtr t) {
+    auto res = std::find(u->getTypes().begin(), u->getTypes().end(), t);
+    return res != u->getTypes().end();
   }
 };
 
-TEST_F(UnionTypeTest, UnionOps_OperatorEquals) {
+TEST_F(UnionTypeTest, UnionOperatorEquals) {
   const UnionTypePtr u1 = UnionType::create({l1, tup2, StringType::get()});
 
   // Same thing, but using different TypePtrs
+  const TypePtr l1_ = ListType::ofStrings();
   const TypePtr tup2_ = TupleType::create({IntType::get(), IntType::get()});
-  const UnionTypePtr u2 = UnionType::create({l2, tup2_, StringType::get()});
+  const UnionTypePtr u2 = UnionType::create({l1_, tup2_, StringType::get()});
 
   ASSERT_TRUE(*u1 == *u2);
 }
 
-TEST_F(UnionTypeTest, UnionCreate_DuplicateTypesRemoved) {
-  // Goal: Union[List[str], List[str], Union[List[str], None]]
-  //       -> Union[List[str]], None]
-  const UnionTypePtr u = UnionType::create({l1, opt3, l2});
+TEST_F(UnionTypeTest, UnionCreate_OptionalT1AndOptionalT2) {
+  // Goal: Union[int, float, None]
+  const UnionTypePtr u = UnionType::create({opt1, opt2});
 
-  ASSERT_EQ(u->containedTypes().size(), 2);
+  ASSERT_EQ(u->getTypes().size(), 3);
+  ASSERT_TRUE(UnionTypeTest::hasType(u, IntType::get()));
+  ASSERT_TRUE(UnionTypeTest::hasType(u, FloatType::get()));
   ASSERT_TRUE(UnionTypeTest::hasType(u, NoneType::get()));
-  ASSERT_FALSE(UnionTypeTest::hasType(u, StringType::get()));
-  ASSERT_TRUE(UnionTypeTest::hasType(u, ListType::ofStrings()));
+}
+
+TEST_F(UnionTypeTest, UnionCreate_OptionalTAndT) {
+  // Goal: Union[int, None]
+  const UnionTypePtr u = UnionType::create({opt1, IntType::get()});
+
+  ASSERT_EQ(u->getTypes().size(), 2);
+  ASSERT_TRUE(UnionTypeTest::hasType(u, IntType::get()));
+  ASSERT_TRUE(UnionTypeTest::hasType(u, NoneType::get()));
 }
 
 TEST_F(UnionTypeTest, UnionCreate_TupleWithSubtypingRelationship) {
-  // Goal: Union[Tuple[int, int], Tuple[Optional[int], int], str]
-  //       -> Union[Tuple[Optional[int], int], str]
+  // Goal: Union[Tuple[Optional[int], int], str]
   const UnionTypePtr u = UnionType::create({StringType::get(), tup1, tup2});
 
-  ASSERT_EQ(u->containedTypes().size(), 2);
+  ASSERT_EQ(u->getTypes().size(), 2);
   ASSERT_TRUE(UnionTypeTest::hasType(u, StringType::get()));
   ASSERT_TRUE(UnionTypeTest::hasType(u, tup1));
 }
@@ -76,7 +80,7 @@ TEST_F(UnionTypeTest, UnionCreate_ContainerTAndT) {
   // Goal: Union[List[str], str]
   const UnionTypePtr u = UnionType::create({l1, StringType::get()});
 
-  ASSERT_EQ(u->containedTypes().size(), 2);
+  ASSERT_EQ(u->getTypes().size(), 2);
   ASSERT_TRUE(UnionTypeTest::hasType(u, StringType::get()));
   ASSERT_TRUE(UnionTypeTest::hasType(u, ListType::ofStrings()));
 }
@@ -85,7 +89,7 @@ TEST_F(UnionTypeTest, UnionCreate_OptionalContainerTAndContainerTAndT) {
   // Goal: Union[List[str], None, str]
   const UnionTypePtr u = UnionType::create({l1, opt3, StringType::get()});
 
-  ASSERT_EQ(u->containedTypes().size(), 3);
+  ASSERT_EQ(u->getTypes().size(), 3);
   ASSERT_TRUE(UnionTypeTest::hasType(u, StringType::get()));
   ASSERT_TRUE(UnionTypeTest::hasType(u, ListType::ofStrings()));
 }
@@ -123,12 +127,6 @@ TEST_F(UnionTypeTest, Subtyping_OptionalType) {
   const UnionTypePtr union3 = UnionType::create(
       {IntType::get(), StringType::get(), ListType::ofStrings()});
 
-  // Union[Tuple[Optional[int], int], int]
-  const UnionTypePtr union4 = UnionType::create({tup1, IntType::get()});
-
-  // Union[Tuple[int, int], int]
-  const UnionTypePtr union5 = UnionType::create({tup2, IntType::get()});
-
   ASSERT_TRUE(none->isSubtypeOf(opt1));
   ASSERT_TRUE(none->isSubtypeOf(union1));
   ASSERT_TRUE(none->isSubtypeOf(union2));
@@ -145,9 +143,6 @@ TEST_F(UnionTypeTest, Subtyping_OptionalType) {
   ASSERT_FALSE(union1->isSubtypeOf(union3));
 
   ASSERT_FALSE(union2->isSubtypeOf(union1));
-
-  ASSERT_FALSE(union4->isSubtypeOf(union5));
-  ASSERT_TRUE(union5->isSubtypeOf(union4));
 }
 
 } // namespace jit

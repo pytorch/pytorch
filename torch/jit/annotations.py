@@ -6,12 +6,12 @@ import builtins
 import torch
 import warnings
 from .._jit_internal import List, Tuple, is_tuple, is_list, Dict, is_dict, Optional, \
-    _qualified_name, Any, Future, is_future, is_ignored_fn, Union, is_union
+    is_optional, _qualified_name, Any, Future, is_future, is_ignored_fn, Union, is_union
 from .._jit_internal import BroadcastingList1, BroadcastingList2, BroadcastingList3  # type: ignore[attr-defined]
 from ._state import _get_script_class
 
 from torch._C import TensorType, TupleType, FloatType, IntType, ComplexType, \
-    ListType, StringType, DictType, BoolType, InterfaceType, AnyType, \
+    ListType, StringType, DictType, BoolType, OptionalType, InterfaceType, AnyType, \
     NoneType, DeviceObjType, StreamObjType, FutureType, EnumType, UnionType
 
 
@@ -320,6 +320,15 @@ def try_ann_to_type(ann, loc):
         if value is None:
             raise ValueError(f"Unknown type annotation: '{ann.__args__[1]}' at {loc.highlight()}")
         return DictType(key, value)
+    if is_optional(ann):
+        if issubclass(ann.__args__[1], type(None)):
+            contained = ann.__args__[0]
+        else:
+            contained = ann.__args__[1]
+        valid_type = try_ann_to_type(contained, loc)
+        msg = "Unsupported annotation {} could not be resolved because {} could not be resolved."
+        assert valid_type, msg.format(repr(ann), repr(contained))
+        return OptionalType(valid_type)
     if is_union(ann):
         inner: List = []
         # We need these extra checks because both `None` and invalid
@@ -397,6 +406,7 @@ __all__ = [
     'is_list',
     'Dict',
     'is_dict',
+    'is_optional',
     'is_union',
     'TensorType',
     'TupleType',

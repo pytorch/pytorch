@@ -870,14 +870,10 @@ void initPythonIRBindings(PyObject* module_) {
         return types;
       });
   py::class_<UnionType, Type, std::shared_ptr<UnionType>>(m, "UnionType")
-      .def(py::init([](std::vector<TypePtr> a) {
-        return UnionType::create(std::move(a));
-      }))
-      .def(
-          "containedTypes",
-          [](UnionType& self) { return self.containedTypes().vec(); })
-      .def_static("createOptionalOf", [](std::shared_ptr<Type>& a) {
-        return UnionType::createOptionalOf(a);
+      .def(py::init(
+          [](const std::vector<TypePtr>& a) { return UnionType::create(a); }))
+      .def("containedTypes", [](UnionType& self) {
+        return self.containedTypes().vec();
       });
   py::class_<ListType, Type, std::shared_ptr<ListType>>(m, "ListType")
       .def(py::init([](TypePtr a) { return ListType::create(a); }))
@@ -893,9 +889,16 @@ void initPythonIRBindings(PyObject* module_) {
       }))
       .def("getKeyType", &DictType::getKeyType)
       .def("getValueType", &DictType::getValueType);
+  py::class_<OptionalType, Type, std::shared_ptr<OptionalType>>(
+      m, "OptionalType")
+      .def(py::init(
+          [](TypePtr a) { return OptionalType::create(std::move(a)); }))
+      .def_static("ofTensor", &OptionalType::ofTensor)
+      .def("getElementType", &OptionalType::getElementType);
   py::class_<RRefType, Type, std::shared_ptr<RRefType>>(m, "RRefType")
       .def(py::init([](TypePtr a) { return RRefType::create(std::move(a)); }))
       .def("getElementType", &RRefType::getElementType);
+
   py::class_<FutureType, Type, std::shared_ptr<FutureType>>(m, "FutureType")
       .def(py::init([](TypePtr a) { return FutureType::create(std::move(a)); }))
       .def("getElementType", &FutureType::getElementType);

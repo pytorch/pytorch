@@ -69,7 +69,7 @@ void initTensorExprBindings(PyObject* module) {
 #define DTYPE_SINGLETON_ACCESSOR(ctype, name) \
   dtype_class.def_property_readonly_static(   \
       #name, [](py::object) { return k##name; }); // NOLINT
-  AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, DTYPE_SINGLETON_ACCESSOR)
+  AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, DTYPE_SINGLETON_ACCESSOR)
 #undef DTYPE_SINGLETON_ACCESSOR
 
   auto expr_handle_class =
@@ -144,7 +144,7 @@ void initTensorExprBindings(PyObject* module) {
 
 #define EXPRHANDLE_CTOR(ctype, name) \
   expr_handle_class.def_static(#ctype, [](ctype v) { return ExprHandle(v); });
-  AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, EXPRHANDLE_CTOR)
+  AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, EXPRHANDLE_CTOR)
 #undef EXPRHANDLE_CTOR
 
   py::class_<VarHandle, ExprHandle>(te, "VarHandle")

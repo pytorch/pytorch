@@ -230,7 +230,7 @@ void checkAliasAnnotation(
       if (inputValue) {
         push(stack, *inputValue);
       } else {
-        AT_ASSERT(input->type()->isOptional());
+        AT_ASSERT(input->type()->kind() == TypeKind::OptionalType);
         push(stack, IValue());
       }
     }

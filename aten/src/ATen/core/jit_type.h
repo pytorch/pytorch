@@ -108,9 +108,7 @@ struct TORCH_API UnionType : public Type {
 
   std::string str() const override;
 
-  static UnionTypePtr create(std::vector<TypePtr> types);
-
-  static TypePtr createOptionalOf(TypePtr type);
+  static UnionTypePtr create(std::vector<TypePtr> reference);
 
   bool operator==(const Type& rhs) const override;
 
@@ -133,12 +131,12 @@ struct TORCH_API UnionType : public Type {
     return has_free_variables_;
   }
 
-  TypePtr getContainedElementIfOptional() const;
+  c10::optional<TypePtr> toOptional() const;
 
   c10::optional<TypePtr> subtractTypeSet(std::vector<TypePtr>& to_subtract) const;
 
  protected:
-    explicit UnionType(std::vector<TypePtr> types);
+    explicit UnionType(std::vector<TypePtr> types, TypeKind kind=TypeKind::UnionType);
     std::string annotation_str_impl(TypePrinter printer = nullptr) const override;
     std::string unionStr(TypePrinter printer = nullptr, bool is_annotation_str = false) const;
     // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
@@ -147,6 +145,65 @@ struct TORCH_API UnionType : public Type {
     std::vector<TypePtr> types_;
     // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
     bool can_hold_none_;
+
+};
+
+struct OptionalType;
+using OptionalTypePtr = std::shared_ptr<OptionalType>;
+// This type represents an optional type. There is one `Optional` for
+// each element type. `Optional[T]` can accept both `T` and
+// `None`(`c10::nullopt` in C++)
+// Subtype hierarchy for Optional:
+//     - Optional[T] <: Optional[R] iff T <: R
+//     - T <: Optional[R] if T <: R
+//     - None <: Optional[T] for all T
+//     - Optional[T] == Union[T, None] for all T
+struct TORCH_API OptionalType : public UnionType {
+  static OptionalTypePtr create(TypePtr contained) {
+    return OptionalTypePtr(new OptionalType(std::move(contained)));
+  }
+
+  static const TypeKind Kind = TypeKind::OptionalType;
+
+  friend struct Type;
+
+  bool operator==(const Type& rhs) const override;
+
+  TypePtr getElementType() const {
+    return contained_;
+  }
+
+  at::ArrayRef<TypePtr> containedTypes() const override {
+    return contained_;
+  }
+
+  std::string str() const override {
+    std::stringstream ss;
+    ss << getElementType()->str() << "?";
+    return ss.str();
+  }
+
+  TypePtr createWithContained(
+      std::vector<TypePtr> contained_types) const override {
+    AT_ASSERT(contained_types.size() == 1);
+    return create(contained_types[0]);
+  }
+
+  bool isSubtypeOfExt(const TypePtr& rhs, std::ostream* why_not) const override;
+
+  // common cast Optional[Tensor] for undefined tensor type
+  static OptionalTypePtr ofTensor();
+
+ private:
+  explicit OptionalType(TypePtr contained);
+
+  TypePtr contained_;
+
+  std::string annotation_str_impl(TypePrinter printer = nullptr) const override {
+    std::stringstream ss;
+    ss << "Optional[" << getElementType()->annotation_str(printer) << "]";
+    return ss.str();
+  }
 };
 
 template <typename T>
@@ -1335,6 +1392,7 @@ struct TORCH_API NoneType : public Type {
   std::string str() const override {
     return "NoneType";
   }
+  bool isSubtypeOfExt(const TypePtr& rhs, std::ostream *why_not) const override;
 
   static const TypeKind Kind = TypeKind::NoneType;
   // global singleton
@@ -1707,8 +1765,7 @@ struct getTypePtr_<c10::QScheme> final {
 template <>
 struct getTypePtr_<at::Generator> final {
   static TypePtr call() {
-    static auto type = UnionType::createOptionalOf(GeneratorType::get());
-    return type;
+    return OptionalType::create(GeneratorType::get());
   }
 };
 template <>
@@ -1776,7 +1833,7 @@ struct getTypePtr_<c10::Dict<K, V>> final {
 template <class T>
 struct getTypePtr_<at::optional<T>> final {
   static TypePtr call() {
-    static auto type = UnionType::createOptionalOf(getTypePtr_<T>::call());
+    static auto type = OptionalType::create(getTypePtr_<T>::call());
     return type;
   }
 };
@@ -1804,7 +1861,6 @@ inline TypePtr getTypePtr() {
 }
 
 using TypeEnv = std::unordered_map<std::string, TypePtr>;
-
 struct MatchTypeReturn {
   MatchTypeReturn(std::string reason) : reason_(std::move(reason)) {}
   static MatchTypeReturn Success() {

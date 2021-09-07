@@ -179,6 +179,15 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
           dict_type->getKeyType(),
           dict_type->getValueType());
     }
+    case TypeKind::OptionalType: {
+      // check if it's a none obj since optional accepts NoneType
+      if (obj.is_none()) {
+        // check if it's a none obj since optional accepts NoneType
+        // return an IValue() to denote a NoneType
+        return {};
+      }
+      return toIValue(obj, type->expectRef<OptionalType>().getElementType());
+    }
     case TypeKind::ClassType: {
       auto classType = type->expect<ClassType>();
       auto object = py::cast<py::object>(obj);
@@ -326,7 +335,7 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
     case TypeKind::AnyClassType:
     case TypeKind::AnyEnumType:
       break;
-    case TypeKind::EnumType: {
+    case TypeKind::EnumType:
       EnumTypePtr enum_type = type->expect<EnumType>();
       py::object py_obj = py::reinterpret_borrow<py::object>(obj);
       std::string name = py::cast<std::string>(obj.attr("name"));
@@ -334,7 +343,6 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
       auto enum_holder =
           c10::make_intrusive<c10::ivalue::EnumHolder>(enum_type, name, value);
       return IValue(enum_holder);
-    }
   }
   throw py::cast_error(c10::str(
       "toIValue() cannot handle converting to type: ", type->repr_str()));

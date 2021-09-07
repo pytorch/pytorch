@@ -176,13 +176,13 @@ void general_trace_function(
       // appropriately; after that, we can get rid of the giant if-else
       // block we will clean this tech debt together in the following PRs
       auto type = args[i].type();
-      if (type->isOptional()) {
+      if (type->kind() == TypeKind::OptionalType) {
         if (iter->isNone()) {
           Value* none = graph->insertNode(graph->createNone())->output();
           node->addInput(none);
           continue;
         } else {
-          type = type->expectRef<UnionType>().getContainedElementIfOptional();
+          type = type->expectRef<OptionalType>().getElementType();
         }
       }
       if (type->isSubtypeOf(TensorType::get())) {

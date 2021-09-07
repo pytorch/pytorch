@@ -63,7 +63,7 @@ TypePtr ScriptTypeParser::subscriptToType(
     }
     auto elem_type =
         parseTypeFromExprImpl(*subscript.subscript_exprs().begin());
-    return UnionType::createOptionalOf(elem_type);
+    return OptionalType::create(elem_type);
 
   } else if (typeName == "Union") {
     std::vector<TypePtr> subscript_expr_types;
@@ -135,7 +135,7 @@ c10::optional<std::pair<TypePtr, int32_t>> ScriptTypeParser::parseBroadcastList(
   if (var.name().name() == "Optional") {
     auto broadcast_list = parseBroadcastList(subscript_exprs[0]);
     if (broadcast_list) {
-      TypePtr opt_type = UnionType::createOptionalOf(broadcast_list->first);
+      TypePtr opt_type = OptionalType::create(broadcast_list->first);
       return std::pair<TypePtr, int32_t>(opt_type, broadcast_list->second);
     } else {
       return c10::nullopt;

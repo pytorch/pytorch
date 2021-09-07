@@ -309,8 +309,7 @@ std::vector<Value*> ConvertIndexPutToONNX(
 
   // Create new index_put node with converted indices.
   const auto list_indices =
-      old_graph
-          ->createList(UnionType::createOptionalOf(TensorType::get()), indices)
+      old_graph->createList(OptionalType::ofTensor(), indices)
           ->insertBefore(index_put_node)
           ->output();
   auto new_index_put_node = old_graph->create(

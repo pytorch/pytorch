@@ -1,6 +1,7 @@
 #pragma once
 
 #include <c10/util/StringUtil.h>
+#include <c10/util/string_view.h>
 #include <ATen/core/jit_type.h>
 #include <ATen/core/interned_strings.h>
 #include <ATen/core/ivalue.h>
@@ -272,7 +273,7 @@ struct FunctionSchema {
         });
   }
 
-  c10::optional<int> argumentIndexWithName(const std::string& name) const {
+  c10::optional<int> argumentIndexWithName(c10::string_view name) const {
     for(size_t i = 0; i < arguments().size(); ++i) {
       if(name == arguments()[i].name())
         return i;
@@ -391,8 +392,8 @@ inline std::ostream& operator<<(std::ostream& out, const Argument& arg) {
   // however, t?(a!) doesn't work with schema parser.
   // so we always use Type(alias)? format
   auto type = arg.type();
-  bool is_opt = type->isOptional();
-  auto unopt_type = is_opt ? type->castRaw<UnionType>()->getContainedElementIfOptional() : type;
+  bool is_opt = type->kind() == OptionalType::Kind;
+  auto unopt_type = is_opt ? type->castRaw<OptionalType>()->getElementType() : type;
 
   if (unopt_type->kind() == ListType::Kind && arg.N()) {
     // sized lists get size N from arg, not type

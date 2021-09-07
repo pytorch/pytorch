@@ -93,6 +93,10 @@ class MutableTypePtrHelper {
         }
         return mutable_types;
       }
+      case TypeKind::OptionalType: {
+        auto inner = type->castRaw<OptionalType>()->getElementType();
+        return mapTypeToAliasTypeSet(inner);
+      }
       case TypeKind::AnyType:
         return {AliasTypeSet{type}};
       case TypeKind::FutureType: {

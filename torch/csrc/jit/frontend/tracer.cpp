@@ -714,9 +714,8 @@ void addInputs(
   Node* list_node = nullptr;
   if (allow_undefined) {
     // if allow undefined, we create a list of optional tensors
-    list_node = g->insertNode(g->createList(
-        UnionType::createOptionalOf(TensorType::get()),
-        fmap(value, getValueTrace)));
+    list_node = g->insertNode(
+        g->createList(OptionalType::ofTensor(), fmap(value, getValueTrace)));
   } else {
     list_node = g->insertNode(
         g->createList(TensorType::get(), fmap(value, getValueTrace)));
@@ -728,9 +727,9 @@ TORCH_API void addInputs(
     const char* name,
     const List<c10::optional<at::Tensor>>& value) {
   Graph* g = n->owningGraph();
-  TypePtr opt_ten = UnionType::createOptionalOf(TensorType::get());
-  Node* list_node = g->insertNode(
-      g->createList(opt_ten, fmap(value, getOptTensorValueTrace)));
+  Node* list_node = nullptr;
+  list_node = g->insertNode(g->createList(
+      OptionalType::ofTensor(), fmap(value, getOptTensorValueTrace)));
   n->addInput(list_node->output());
 }
 
