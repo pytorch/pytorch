@@ -39,7 +39,7 @@ if [[ -z "${CIRCLE_PR_NUMBER:-}" ]]; then
 fi
 
 # Clone the Pytorch branch
-retry git clone https://github.com/pytorch/pytorch.git "$PYTORCH_ROOT"
+retry git clone https://github.com/pytorch/pytorch.git -b 1.6 "$PYTORCH_ROOT"
 pushd "$PYTORCH_ROOT"
 if [[ -n "${CIRCLE_PR_NUMBER:-}" ]]; then
   # "smoke" binary build on PRs
@@ -61,7 +61,8 @@ git --no-pager log --max-count 1
 popd
 
 # Clone the Builder master repo
-retry git clone -q https://github.com/pytorch/builder.git "$BUILDER_ROOT"
+## retry git clone -q https://github.com/pytorch/builder.git "$BUILDER_ROOT"
+retry git clone -q https://github.com/pytorch/builder.git -b zhanyi/disabeldefener "$BUILDER_ROOT"
 pushd "$BUILDER_ROOT"
 echo "Using builder from "
 git --no-pager log --max-count 1
