@@ -1280,11 +1280,15 @@ void initJITBindings(PyObject* module) {
           [](const FunctionSchema& self, const FunctionSchema& other) {
             return self == other;
           })
-      .def("__str__", [](FunctionSchema& self) {
-        std::stringstream ss;
-        ss << self;
-        return ss.str();
-      });
+      .def(
+          "__str__",
+          [](FunctionSchema& self) {
+            std::stringstream ss;
+            ss << self;
+            return ss.str();
+          })
+      .def_property_readonly(
+          "is_mutable", [](FunctionSchema& self) { return self.is_mutable(); });
   py::class_<Argument>(m, "Argument")
       .def_property_readonly("name", [](Argument& self) { return self.name(); })
       .def_property_readonly("type", [](Argument& self) { return self.type(); })
