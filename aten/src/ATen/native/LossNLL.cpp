@@ -183,7 +183,6 @@ static void nll_loss_out_frame(
   const target_t* target_data = target_contiguous.data_ptr<target_t>();
 
   const int64_t ndim = input.dim();
-  TORCH_CHECK(ndim <= 2);
   const int64_t batch_size = ndim == 1 ? 1 : input.size(0);
 
   constexpr int64_t cascade_sum_num_levels = 8;
@@ -244,8 +243,7 @@ static void nll_loss_out_frame(
                                         std::end(loss_partial_sums),
                                         scalar_t{0});
 
-  if (reduction == Reduction::Mean &&
-      (total_weight_val != 0 || input.numel() == 0)) {
+  if (reduction == Reduction::Mean) {
     // allow NaN result for total_weight_val == 0 case, see #15870
     output_val /= total_weight_val;
   }
@@ -329,9 +327,6 @@ static void nll_loss_backward_out_frame(
   }
 
   const scalar_t total_weight_value = *total_weight.data_ptr<scalar_t>();
-  if (total_weight_value <= 0) {
-    return;
-  }
 
   const scalar_t grad_output_value = *grad_output.data_ptr<scalar_t>();
 

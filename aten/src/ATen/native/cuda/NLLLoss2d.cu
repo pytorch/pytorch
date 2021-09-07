@@ -121,9 +121,7 @@ __global__ void nll_loss2d_forward_size_average_kernel(
     // Mean reduction on empty tensors produces NaN
     *output = std::numeric_limits<double>::quiet_NaN();
   }
-  if (*total_weight != 0) {
-    *output /= *total_weight;
-  }
+  *output /= *total_weight;
 }
 
 template <typename scalar_t>
@@ -169,10 +167,6 @@ __global__ void nll_loss2d_backward_kernel(
   int blocks_per_sample,
   int64_t ignore_index
 ) {
-  if (*total_weight <= 0) {
-    return;
-  }
-
   scalar_t norm = size_average ? (static_cast<scalar_t>(1) / *total_weight) : static_cast<scalar_t>(1);
 
   int sample = blockIdx.x / blocks_per_sample;

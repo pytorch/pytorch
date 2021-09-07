@@ -212,8 +212,7 @@ static void nll_loss2d_forward_out_frame(
                                         std::end(loss_partial_sums),
                                         scalar_t{0});
 
-  if (reduction == Reduction::Mean &&
-      (total_weight_val != 0 || input.numel() == 0)) {
+  if (reduction == Reduction::Mean) {
     // allow NaN result for total_weight_val == 0 case, see #15870
     output_val /= total_weight_val;
   }
@@ -295,9 +294,6 @@ static void nll_loss2d_backward_out_frame(
   }
 
   const scalar_t total_weight_value = *total_weight.data_ptr<scalar_t>();
-  if (total_weight_value <= 0) {
-    return;
-  }
 
   TORCH_CHECK(
       grad_output.dim() <= 1 && grad_output.numel() == 1,
