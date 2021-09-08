@@ -230,9 +230,9 @@ class TypedStorage:
             ' * (int size)\n'
             ' * (Sequence data)\n')
         if type(self) == TypedStorage:
-            arg_error_msg += f' * (wrap_storage=<ByteStorage>, dtype=<torch.dtype>)'
+            arg_error_msg += ' * (wrap_storage=<ByteStorage>, dtype=<torch.dtype>)'
         else:
-            arg_error_msg += f' * (wrap_storage=<ByteStorage>)'
+            arg_error_msg += ' * (wrap_storage=<ByteStorage>)'
 
         if 'wrap_storage' in kwargs:
             assert len(args) == 0, (
