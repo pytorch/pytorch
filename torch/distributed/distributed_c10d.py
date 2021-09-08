@@ -597,8 +597,7 @@ def init_process_group(
     
     if os.environ.get('ENABLE_SERVICE') == 'TRUE':
         from torch.profiler._service import Listener, BASE_PORT
-        fqdn = socket.getfqdn()
-        host = 'localhost' if master_host in ['localhost', '127.0.0.1', fqdn] else fqdn
+        host = 'localhost' if socket.gethostbyname(master_host) == '127.0.0.1' else socket.getfqdn()
         listener = Listener(host, BASE_PORT + rank if rank >= 0 else BASE_PORT, False, master_host)
         listener.open()
 
