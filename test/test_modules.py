@@ -3,7 +3,7 @@ from copy import deepcopy
 import tempfile
 
 import torch
-from torch.testing._internal.common_device_type import instantiate_device_type_tests, onlyCUDA
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_modules import module_db, modules
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, freeze_rng_state, mock_wrapper, get_tensors_from)
