@@ -1419,6 +1419,8 @@ def get_overridable_functions() -> Dict[Any, List[Callable]]:
                     continue
                 elif func_name == 'unique_dim':
                     continue
+                elif func_name == 'overload':
+                    continue
             else:
                 func = getattr(namespace, func_name)
                 if getattr(object, func_name, None) == func:
