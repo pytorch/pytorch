@@ -210,7 +210,8 @@ algorithms.
     lr_scheduler.MultiplicativeLR
     lr_scheduler.StepLR
     lr_scheduler.MultiStepLR
-    lr_scheduler.WarmUpLR
+    lr_scheduler.ConstantLR
+    lr_scheduler.LinearLR
     lr_scheduler.ExponentialLR
     lr_scheduler.CosineAnnealingLR
     lr_scheduler.ReduceLROnPlateau
