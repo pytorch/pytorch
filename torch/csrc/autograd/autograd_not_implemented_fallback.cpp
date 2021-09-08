@@ -196,66 +196,123 @@ void inplaceOrViewFallbackImpl(const c10::OperatorHandle& op, c10::DispatchKeySe
   const auto num_arguments = arguments.size();
   const auto num_returns = returns.size();
   const auto stack_start = stack->size() - num_arguments;
-  const bool grad_mode = GradMode::is_enabled();
-  std::vector<const at::Tensor*> tensors_to_increment_version_on_stack;
-  const at::Tensor* aliased_input = nullptr;
+  bool any_is_inplace = false;
 
-  // There seems to be some recomputation here? Can we
+  at::Tensor aliased_input;
+
   int64_t aliased_output_idx = -1;
   for (const auto i : c10::irange(num_returns)) {
     const auto& alias_info = returns[i].alias_info();
-    // Is this the criteria for a view? What if we have alias, but the exact same tensor is returned (shouldn't this be caught by the)
-    // what if we have an in-place op, that returns the input as-is. The output is aliased to the input
     if (alias_info.has_value() && !alias_info->isWrite()) {
-      AT_ASSERT(aliased_output_idx == -1, "Expected a single output to be aliased, but observed at least 2 outputs with alias info");
+      AT_ASSERT(
+        aliased_output_idx == -1,
+        "Expected only a single output in the operator schema to have a non-write alias annotation (i.e., 'Tensor(a)'). "
+        "Non-composite functions where multiple outputs are aliased with inputs aren't supported."
+        "Please rewrite your function as a composite function.");
       aliased_output_idx = i;
     }
   }
 
+  int64_t aliased_input_idx = -1;
   for (const auto i : c10::irange(num_arguments)) {
     const auto& alias_info = arguments[i].alias_info();
-    if (alias_info.has_value() && !alias_info->isWrite()) {
-      AT_ASSERT(aliased_input == nullptr, "Expected a single input to be aliased, but observed at least 2 input with alias info");
-      const c10::IValue& aliased_input_iv = (*stack)[stack_start + i];
-      AT_ASSERT(aliased_input_iv.isTensor());
-      const at::Tensor* aliased_input = &(aliased_input_iv.toTensor());;
+    if (alias_info.has_value()) {
+      if (!alias_info->isWrite()) {
+        AT_ASSERT(
+          aliased_input_idx == -1,
+          "Expected only a single input in the operator schema to have a non-write alias annotation (i.e., 'Tensor(a)'). "
+          "Non-composite functions where multiple inputs are aliased with outputs aren't supported. "
+          "Please rewrite your function as a composite function.");
+        aliased_input_idx = i;
+        const c10::IValue& aliased_input_iv = (*stack)[stack_start + i]; // get a reference to an ivalue on the stack
+        TORCH_CHECK(aliased_input_iv.isTensor());
+        // copy assignment
+        aliased_input = aliased_input_iv.toTensor();
+      } else {
+        any_is_inplace = true;
+      }
     }
   }
+  // NOTE: [ Limitations of ADInplaceOrView boxed kernel ]
+  // We can assume the view is always the first return, and that there will only be a single return
+  // TODO: Document the limitations of this kernel for custom op writers
+  TORCH_INTERNAL_ASSERT((aliased_input_idx == -1 && aliased_output_idx == -1) ||
+    (aliased_input_idx == 0 && aliased_output_idx == 0))
+  const bool is_view = aliased_input_idx != -1;
+  const bool need_view_func = is_view
+                         && (std::find(NEEDS_METADATA_CHANGE.begin(), NEEDS_METADATA_CHANGE.end(), op_name) != NEEDS_METADATA_CHANGE.end()
+                             || !aliased_input.unsafeGetTensorImpl()->support_as_strided());
+  std::function<at::Tensor(const at::Tensor&)> view_func = nullptr;
+  std::vector<c10::IValue> stack_args_copy;
+  if (need_view_func) {
+    stack_args_copy = std::vector<c10::IValue>(stack->begin() + stack_start, stack->end());
+  }
 
-  _foreach_tensor([&](size_t _, size_t i, const at::Tensor& t) {
-    const auto& alias_info = arguments[i].alias_info();
-    if (alias_info.has_value() && alias_info->isWrite()) {
-      tensors_to_increment_version_on_stack.push_back(&t);
-    }
-  }, stack, stack_start, num_arguments);
+  if (need_view_func) {
+    view_func = [=](const at::Tensor& t) {
+      // - Maybe add a test for this...
+      // - See NOTE: [ Limitations of ADInplaceOrView boxed kernel ]
+      // - We have to make another copy because the same lambda can be used twice! e.g., double backward
+      std::vector<c10::IValue> stack_args_copy_copy(stack_args_copy);
+      stack_args_copy_copy.at(0) = t;
+      op.callBoxed(&stack_args_copy_copy);
+      return stack_args_copy_copy[0].toTensor();
+    };
+  }
 
   {
     at::AutoDispatchBelowADInplaceOrView guard;
-    op.redispatchBoxed(dispatch_keys & c10::after_autograd_keyset, stack);
+    op.redispatchBoxed(dispatch_keys & c10::after_ADInplaceOrView_keyset, stack);
   }
 
-  for (const auto i : c10::irange(tensors_to_increment_version_on_stack.size())) {
-    increment_version(*tensors_to_increment_version_on_stack[i]);
+  for (const auto i : c10::irange(num_returns)) {
+    const auto& alias_info = returns[i].alias_info();
+    if (alias_info->isWrite()) {
+      increment_version((*stack)[stack->size() - num_returns + i].toTensor());
+    }
   }
-  if (aliased_output_idx != -1) {
+
+  if (is_view) {
     const c10::IValue& aliased_output_iv = (*stack)[stack->size() - num_returns + aliased_output_idx];
-    AT_ASSERT(aliased_output_iv.isTensor()); // We do not support views embedded inside tensorlist
-    const at::Tensor& aliased_output = aliased_output_iv.toTensor();
-    auto result = as_view(
-      /* base=*/*aliased_input,
-      /* output=*/aliased_output,
-      /* is_bw_differentiable=*/ true,
-      /* is_fw_differentiable=*/ true,
-      /* view_func=*/ nullptr, // What are the consequences of not providing this?
-      /* creation_meta=*/ InferenceMode::is_enabled() ? CreationMeta::INFERENCE_MODE : (at::GradMode::is_enabled() ? CreationMeta::DEFAULT : CreationMeta::NO_GRAD_MODE));
+    if (aliased_output_iv.isTensorList()) {
+      auto aliased_output = aliased_output_iv.toTensorVector();
+      // Only allow rebasing of the history if we return a single Tensor
+      // If view was created in a no grad or inference mode block, raise an error
+      // See NOTE [ View + Inplace detection ] for more details about this logic
+      auto result = as_view(
+        /* base=*/aliased_input,
+        /* output=*/aliased_output,
+        /* is_bw_differentiable=*/true,
+        /* is_fw_differentiable=*/true,
+        /* creation_meta=*/InferenceMode::is_enabled() ? CreationMeta::INFERENCE_MODE : (at::GradMode::is_enabled() ? CreationMeta::MULTI_OUTPUT_NODE : CreationMeta::NO_GRAD_MODE));
+        // ^ pass in creation meta unecessarily even if not isDifferentiableType
+      stack->at(stack->size() - num_returns + aliased_output_idx) = result;
+    } else {
+      AT_ASSERT(aliased_output_iv.isTensor());
+      const at::Tensor& aliased_output = aliased_output_iv.toTensor();
+      if (isDifferentiableType(aliased_output.scalar_type())) {
+        auto result = as_view(
+          /* base=*/aliased_input,
+          /* output=*/aliased_output,
+          /* is_bw_differentiable=*/true,
+          /* is_fw_differentiable=*/true,
+          /* view_func=*/view_func,
+          /* creation_meta=*/InferenceMode::is_enabled() ? CreationMeta::INFERENCE_MODE : (at::GradMode::is_enabled() ? CreationMeta::DEFAULT : CreationMeta::NO_GRAD_MODE));
+        stack->at(stack->size() - num_returns + aliased_output_idx) = result;
+      } else {
+        auto result = as_view(
+        /* base=*/aliased_input,
+        /* output=*/aliased_output,
+        /* is_bw_differentiable=*/false,
+        /* is_fw_differentiable=*/false);
+        stack->at(stack->size() - num_returns + aliased_output_idx) = result;
+      }
+    }
   }
 }
 
-torch::CppFunction autogradInplaceOrViewFallback() {
-  return torch::CppFunction::makeFromBoxedFunction<&inplaceOrViewFallbackImpl>();
+torch::CppFunction ADInplaceOrViewFallback() {
+  return torch::CppFunction::makeFromBoxedFunction<&ADInplaceOrViewFallbackImpl>();
 }
-
-
-
 
 }} // namespace torch::autograd
