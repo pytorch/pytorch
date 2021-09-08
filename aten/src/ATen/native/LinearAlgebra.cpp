@@ -1496,13 +1496,13 @@ Tensor matmul(
     if (is_tensor1_matrix) {
       // FIXME This does two extra copies as the returned result from BLAS is already C-transposed,
       // so transposing its strides it would already be C-contiguous
-			const Tensor result = matmul(out_opt, tensor2.transpose(-2, -1), tensor1.t())
+      const Tensor result = matmul(out_opt, tensor2.transpose(-2, -1), tensor1.t())
                               .transpose_(-2, -1)
                               .contiguous();
       return has_out ? out_opt->set_(result) : result;
     }
     else {
-			return matmul(out_opt, tensor2.transpose(-2, -1), tensor1);
+      return matmul(out_opt, tensor2.transpose(-2, -1), tensor1);
     }
   } else if ((dim_tensor1 >= 1 && dim_tensor2 >= 1) && (dim_tensor1 >= 3 || dim_tensor2 >= 3)) {
     // We are multiplying b1 x n x m1 by x2 x m2 x p (where b1 can be a list);
