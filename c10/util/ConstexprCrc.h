@@ -98,11 +98,13 @@ constexpr uint64_t crc64_table[] = {
     0x29b7d047efec8728,
 };
 
-inline constexpr uint64_t
-crc64impl(uint64_t accumulator, const char* data, size_t size) {
+inline constexpr uint64_t crc64impl(
+  uint64_t accumulator,
+  const char* data,
+  size_t size) {
   for (size_t i = 0; i < size; ++i) {
     accumulator =
-        crc64_table[(accumulator ^ data[i]) & 0xFF] ^ (accumulator >> 8);
+      crc64_table[(accumulator ^ data[i]) & 0xFF] ^ (accumulator >> 8);
   }
   return accumulator;
 }
