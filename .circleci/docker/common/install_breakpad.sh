@@ -2,14 +2,8 @@
 
 set -ex
 
-git clone https://github.com/driazati/breakpad.git
+git clone https://github.com/malfet/breakpad.git -b pytorch/release-1.9
 pushd breakpad
-
-# breakpad has no actual releases, so this is pinned to the top commit from
-# main when this was forked (including the one patch commit). This uses a fork
-# of the breakpad mainline that automatically daisy-chains out to any previously
-# installed signal handlers (instead of overwriting them).
-git checkout 5485e473ed46d065e05489e50dfc59d90dfd7e22
 
 git clone https://chromium.googlesource.com/linux-syscall-support src/third_party/lss
 pushd src/third_party/lss
