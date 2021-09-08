@@ -1186,12 +1186,12 @@
   result: auto_element_wise
 
 - name: scatter.src(Tensor self, int dim, Tensor index, Tensor src) -> Tensor
-  self: grad.clone().scatter_(dim, index, 0)
+  self: grad.scatter(dim, index, 0)
   index: non_differentiable
   src: grad.gather(dim, index)
 
 - name: scatter.value(Tensor self, int dim, Tensor index, Scalar value) -> Tensor
-  self: grad.clone().scatter_(dim, index, 0)
+  self: grad.scatter(dim, index, 0)
   index: non_differentiable
 
 - name: scatter_add(Tensor self, int dim, Tensor index, Tensor src) -> Tensor
