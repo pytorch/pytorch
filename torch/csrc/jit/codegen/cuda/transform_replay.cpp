@@ -290,16 +290,26 @@ std::pair<TensorDomain*, unsigned int> TransformReplay::replayPasC(
     }
   }
 
-  auto processed_roots = IterVisitor::getInputsTo(unordered_non_root_leaf_vals);
-
   auto producer_root = producer->getMaybeRFactorDomain();
+
+  // Figure out all id's that have been processed to generate the
+  // unordered_non_root_leaf_vals. This needs to be done because we want to
+  // match on producer's rfactor domain, not root domain.
+  std::unordered_set<IterDomain*> all_processed_ids;
+  {
+    auto all_processed_vals_vec = DependencyCheck::getAllValsBetween(
+        {producer_root.begin(), producer_root.end()},
+        unordered_non_root_leaf_vals);
+    auto all_processed_ids_vec =
+        ir_utils::filterByType<IterDomain>(all_processed_vals_vec);
+    all_processed_ids.insert(
+        all_processed_ids_vec.begin(), all_processed_ids_vec.end());
+  }
 
   // Any root domain that was not used to generate computeIDs we can also put in
   // the map to forward their transformations.
   for (auto producer_root_id : producer_root) {
-    if (std::find(
-            processed_roots.begin(), processed_roots.end(), producer_root_id) ==
-            processed_roots.end() &&
+    if (all_processed_ids.find(producer_root_id) == all_processed_ids.end() &&
         std::find(needed_dims.begin(), needed_dims.end(), producer_root_id) ==
             needed_dims.end()) {
       producer_self_replay_map[producer_root_id] = producer_root_id;
@@ -383,10 +393,11 @@ std::pair<TensorDomain*, unsigned int> TransformReplay::replayPasC(
   }
 
   // Add axes in (4)
-  for (auto id : producer_replayed_leaves.getLeafIDs())
-    if (used_IDs.find(id) == used_IDs.end())
+  for (auto id : producer_replayed_leaves.getLeafIDs()) {
+    if (used_IDs.find(id) == used_IDs.end()) {
       new_IDs.push_back(id);
-
+    }
+  }
   TensorDomain* replayed = new TensorDomain(
       producer->getRootDomain(),
       producer->getRFactorDomain(),

@@ -957,210 +957,6 @@ void IndexSwizzle::handle(Expr* e) {
   }
 }
 
-std::vector<kir::Val*> Index::getGlobalProducerStridedIndices(
-    TensorView* producer_tv,
-    const TensorView* consumer_tv,
-    const std::vector<kir::ForLoop*>& loops) {
-  FUSER_PERF_SCOPE("GpuLower::Lower::getGlobalProducerIndex");
-  const auto gpu_lower = GpuLower::current();
-  kir::IrBuilder ir_builder(gpu_lower->kernel());
-
-  // Get a reference tensor replayed as existing loop structure
-  auto reference = IndexReferenceReplay::getReference(loops);
-  auto reference_domain = reference.domain;
-  auto reference_id_map = reference.concrete_to_id;
-
-  // Replay producer to look like consumer so we can index on producer since our
-  // loop nests look like consumer
-  auto pairwiseMap = PairwiseRootDomainMap(producer_tv, consumer_tv);
-  auto producerAsC =
-      TransformReplay::replayPasC(producer_tv, consumer_tv, -1, pairwiseMap)
-          .first;
-
-  // Make the producer_tv look like consumer while performing indexing math
-  ir_utils::TVDomainGuard domain_guard(producer_tv, producerAsC);
-
-  // Map reference tensor to producer
-  std::unordered_map<IterDomain*, IterDomain*> root_ref_to_producer;
-  for (auto p_root : producer_tv->getMaybeRFactorDomain()) {
-    auto concrete_id = gpu_lower->caIndexMap().getConcreteMappedID(p_root);
-    auto ref_id_it = reference_id_map.find(concrete_id);
-    if (ref_id_it != reference_id_map.end()) {
-      root_ref_to_producer[ref_id_it->second] = p_root;
-    }
-  }
-
-  // Index into the reference tensor. Reference indexing will handle vectorized
-  // dims where index should be set to 0
-  auto ref_compute = getReferenceIndexing(loops, reference_domain);
-
-  // Replay producer as reference to get reference to producer ID map
-  BestEffortReplay replay_producer_as_ref(
-      producer_tv->domain()->domain(),
-      reference_domain->domain(),
-      root_ref_to_producer);
-
-  const auto& ref_2_producer = replay_producer_as_ref.getReplay();
-
-  // Forward vectorized IDs to index into producer correctly
-  // We want p_id to be vectorized like consumer just for the indexing, then we
-  // need to switch it back later. Store previous state here when changing. We
-  // need to do this as replaying producer as consumer can use replay best
-  // effort which means some domains may be the originals.
-  std::vector<std::pair<IterDomain*, ParallelType>> p_id_backup;
-  for (auto entry : ref_2_producer) {
-    auto ref_id = entry.first;
-    auto p_id = entry.second;
-    if (ref_id->getParallelType() == ParallelType::Vectorize) {
-      p_id_backup.emplace_back(std::make_pair(p_id, p_id->getParallelType()));
-      p_id->parallelize(ParallelType::Vectorize);
-    } else if (ref_id->getParallelType() == ParallelType::MisalignedVectorize) {
-      p_id->parallelize(ParallelType::MisalignedVectorize);
-    }
-  }
-
-  const auto reference_halo_extent_map = getReferenceHaloExtentMap(
-      reference, consumer_tv, ref_2_producer, ref_compute.extentMap());
-
-  // Index into producer using reference indexing
-  auto producer_indexing = ref_compute.updateIndexCompute(
-      producer_tv->domain(),
-      ref_2_producer,
-      producer_tv->domain()->contiguity(),
-      reference_halo_extent_map);
-
-  // Revert p_ids
-  for (auto entry : p_id_backup) {
-    entry.first->parallelize(entry.second);
-  }
-
-  // Indices should now be mapped onto IterDomains in producer, so just grab
-  // and use them.
-  auto root_dom = producer_tv->getMaybeRFactorDomain();
-
-  // TODO: Abstract stride logic to reuse with consumer indexing
-  auto zero = ir_builder.create<kir::Int>(0);
-  std::vector<kir::Val*> strides(root_dom.size(), nullptr);
-  {
-    int stride_i = 0;
-    for (size_t i = 0; i < root_dom.size(); i++) {
-      if (root_dom[i]->isReduction() ||
-          root_dom[i]->getIterType() == IterType::BroadcastWithoutStride) {
-        strides[i] = zero;
-        continue;
-      }
-      std::stringstream ss;
-      ss << "T" << producer_tv->name() << ".stride[" << stride_i++ << "]";
-      strides[i] = ir_builder.create<kir::NamedScalar>(ss.str(), DataType::Int);
-    }
-  }
-
-  kir::Val* cur_contig_stride = ir_builder.create<kir::Int>(1);
-  // if we have rfactor we can't simplify the indexing like this, we would need
-  // to fix contiguity size to be rfactor size not root size
-  if (root_dom.size() == producer_tv->domain()->contiguity().size()) {
-    for (size_t i = 0; i < root_dom.size(); i++) {
-      auto dim = root_dom.size() - i - 1;
-      if (root_dom[dim]->isReduction()) {
-        continue;
-      }
-      if (root_dom[dim]->getIterType() == IterType::BroadcastWithoutStride) {
-        continue;
-      }
-
-      kir::Val* root_ind = nullptr;
-      auto kir_root_dom =
-          gpu_lower->lowerValue(root_dom[dim])->as<kir::IterDomain>();
-      if (producer_indexing.indexMap().find(kir_root_dom) !=
-          producer_indexing.indexMap().end()) {
-        root_ind = producer_indexing.indexMap().at(kir_root_dom);
-      } else if (
-          root_dom[dim]->getIterType() == IterType::BroadcastWithStride) {
-        root_ind = zero;
-      }
-
-      TORCH_INTERNAL_ASSERT(
-          root_ind != nullptr,
-          "Couldn't find root mapping for TV",
-          producer_tv->name(),
-          " dim: ",
-          i,
-          " id: ",
-          root_dom[dim]);
-
-      if (producer_tv->domain()->contiguity()[dim]) {
-        // If contig, used the stored stride which may be the previous
-        // dimensions stride * previous dimensions size
-        strides[dim] = cur_contig_stride;
-        // Prepare for the next dimension which may also be contiguous, multiply
-        // by extent of this dimension
-        auto root_dim_extent = getHaloExtentOfRootAxis(root_dom[dim]);
-        cur_contig_stride =
-            ir_builder.mulExpr(cur_contig_stride, root_dim_extent);
-      } else {
-        // If non contiguous dimension, keep local stride information, set cur
-        // stride to local stride * local raw extent
-        auto root_dim_extent = getHaloExtentOfRootAxis(root_dom[dim]);
-        cur_contig_stride = ir_builder.mulExpr(strides[dim], root_dim_extent);
-      }
-    }
-  }
-
-  auto vectorize_shift =
-      loops.empty() ? nullptr : loops.back()->vectorize_shift();
-
-  // Global striding
-  std::vector<kir::Val*> strided_inds(root_dom.size(), ir_builder.zeroVal());
-  for (const auto i : c10::irange(root_dom.size())) {
-    // If the domain is derived from a trivial reduction, no indexing
-    // to create.
-    if (root_dom[i]->isReduction() ||
-        root_dom[i]->getIterType() == IterType::BroadcastWithoutStride ||
-        root_dom[i]->getIterType() == IterType::BroadcastWithStride ||
-        gpu_lower->trivialReductionInfo().isDerived(root_dom[i])) {
-      continue;
-    }
-
-    auto kir_root_dom_i =
-        gpu_lower->lowerValue(root_dom[i])->as<kir::IterDomain>();
-
-    TORCH_INTERNAL_ASSERT(
-        producer_indexing.indexMap().find(kir_root_dom_i) !=
-            producer_indexing.indexMap().end(),
-        "Couldn't find root mapping for TV",
-        producer_tv->name(),
-        " dim: ",
-        i,
-        " id: ",
-        kir::toString(kir_root_dom_i));
-
-    auto root_ind = producer_indexing.indexMap().at(kir_root_dom_i);
-
-    root_ind = getProducerIndexWithHalo(producer_tv, i, root_ind, consumer_tv);
-
-    root_ind = getProducerIndexWithGather(
-        i,
-        root_ind,
-        producer_tv,
-        consumer_tv,
-        ref_compute.indexMap(),
-        reference_id_map);
-
-    if (root_ind->isZeroInt()) {
-      continue;
-    } else {
-      auto strided_ind = ir_builder.mulExpr(root_ind, strides[i]);
-      if (i == root_dom.size() - 1 && vectorize_shift != nullptr) {
-        strided_inds[i] = ir_builder.addExpr(strided_ind, vectorize_shift);
-      } else {
-        strided_inds[i] = strided_ind;
-      }
-    }
-  }
-
-  return strided_inds;
-}
-
 namespace {
 
 // Used for local and shared index mapping
@@ -1320,7 +1116,250 @@ void ensureStaticIndexing(
   }
 }
 
+// Map everything we can from reference to provided tv using the provided
+// compute at map. We can't simply try to use the provided tv root domains and
+// map those to the reference as the provided tv may have root domains that
+// don't exist in reference. This can happen when the provided tv is from before
+// a view, but all the loops are generated from TVs generated after the view
+// operation.
+std::unordered_map<IterDomain*, IterDomain*> indexMapReferenceTo(
+    const TensorView* tv,
+    const ComputeAtMap& ca_map,
+    const std::unordered_map<IterDomain*, IterDomain*>&
+        reference_concrete_to_id_map) {
+  std::unordered_map<IterDomain*, IterDomain*> index_map_ref_to_producer;
+  auto all_pid_vals = DependencyCheck::getAllValsBetween(
+      {tv->getRootDomain().begin(), tv->getRootDomain().end()},
+      {tv->domain()->domain().begin(), tv->domain()->domain().end()});
+  auto all_pids = ir_utils::filterByType<IterDomain>(all_pid_vals);
+  for (auto p_id : all_pids) {
+    auto concrete_id = ca_map.getConcreteMappedID(p_id);
+    auto ref_id_it = reference_concrete_to_id_map.find(concrete_id);
+    if (ref_id_it != reference_concrete_to_id_map.end()) {
+      index_map_ref_to_producer[ref_id_it->second] = p_id;
+    }
+  }
+  return index_map_ref_to_producer;
+}
+
 } // namespace
+
+std::vector<kir::Val*> Index::getGlobalProducerStridedIndices(
+    TensorView* producer_tv,
+    const TensorView* consumer_tv,
+    const std::vector<kir::ForLoop*>& loops) {
+  FUSER_PERF_SCOPE("GpuLower::Lower::getGlobalProducerIndex");
+  const auto gpu_lower = GpuLower::current();
+  kir::IrBuilder ir_builder(gpu_lower->kernel());
+
+  // Get a reference tensor replayed as existing loop structure
+  auto reference = IndexReferenceReplay::getReference(loops);
+  auto reference_domain = reference.domain;
+  auto reference_id_map = reference.concrete_to_id;
+
+  // Replay producer to look like consumer so we can index on producer since
+  // our loop nests look like consumer
+  auto pairwise_map = PairwiseRootDomainMap(producer_tv, consumer_tv);
+  auto producerAsC =
+      TransformReplay::replayPasC(producer_tv, consumer_tv, -1, pairwise_map)
+          .first;
+
+  // Make the producer_tv look like consumer while performing indexing math
+  ir_utils::TVDomainGuard domain_guard(producer_tv, producerAsC);
+
+  // Map everything we can from reference to producer using compute at index
+  // map. Use consumer as a proxy between producer and the generated reference.
+  std::unordered_map<IterDomain*, IterDomain*> index_map_ref_to_producer;
+  {
+    // This replay has to be consistent with compute at index map.
+    BestEffortReplay replay_producer_as_consumer(
+        producer_tv->domain()->domain(),
+        consumer_tv->domain()->domain(),
+        pairwise_map.mapConsumerToProducer(
+            consumer_tv->domain(), producer_tv->domain()));
+
+    const auto& c2p_map = replay_producer_as_consumer.getReplay();
+
+    std::unordered_map<IterDomain*, IterDomain*> index_map_ref_to_consumer =
+        indexMapReferenceTo(
+            consumer_tv, gpu_lower->caIndexMap(), reference_id_map);
+
+    for (auto entry : index_map_ref_to_consumer) {
+      auto r_id = entry.first;
+      auto c_id = entry.second;
+      auto c2p_it = c2p_map.find(c_id);
+      if (c2p_it != c2p_map.end()) {
+        auto p_id = c2p_it->second;
+        index_map_ref_to_producer[r_id] = p_id;
+      }
+    }
+  }
+
+  // Index into the reference tensor. Reference indexing will handle vectorized
+  // dims where index should be set to 0
+  auto ref_compute = getReferenceIndexing(loops, reference_domain);
+
+  // Forward vectorized IDs to index into producer correctly
+  // We want p_id to be vectorized like consumer just for the indexing, then we
+  // need to switch it back later. Store previous state here when changing. We
+  // need to do this as replaying producer as consumer can use replay best
+  // effort which means some domains may be producer's original domains.
+  std::vector<std::pair<IterDomain*, ParallelType>> p_id_backup;
+  for (auto entry : index_map_ref_to_producer) {
+    auto ref_id = entry.first;
+    auto p_id = entry.second;
+    if (ref_id->getParallelType() == ParallelType::Vectorize) {
+      p_id_backup.emplace_back(std::make_pair(p_id, p_id->getParallelType()));
+      p_id->parallelize(ParallelType::Vectorize);
+    } else if (ref_id->getParallelType() == ParallelType::MisalignedVectorize) {
+      p_id->parallelize(ParallelType::MisalignedVectorize);
+    }
+  }
+
+  const auto reference_halo_extent_map = getReferenceHaloExtentMap(
+      reference,
+      consumer_tv,
+      index_map_ref_to_producer,
+      ref_compute.extentMap());
+
+  // Index into producer using reference indexing
+  auto producer_indexing = ref_compute.updateIndexCompute(
+      producer_tv->domain(),
+      index_map_ref_to_producer,
+      producer_tv->domain()->contiguity(),
+      reference_halo_extent_map);
+
+  // Revert p_ids
+  for (auto entry : p_id_backup) {
+    entry.first->parallelize(entry.second);
+  }
+
+  // Indices should now be mapped onto IterDomains in producer, so just grab
+  // and use them.
+  auto root_dom = producer_tv->getMaybeRFactorDomain();
+
+  // TODO: Abstract stride logic to reuse with consumer indexing
+  auto zero = ir_builder.create<kir::Int>(0);
+  std::vector<kir::Val*> strides(root_dom.size(), nullptr);
+  {
+    int stride_i = 0;
+    for (size_t i = 0; i < root_dom.size(); i++) {
+      if (root_dom[i]->isReduction() ||
+          root_dom[i]->getIterType() == IterType::BroadcastWithoutStride) {
+        strides[i] = zero;
+        continue;
+      }
+      std::stringstream ss;
+      ss << "T" << producer_tv->name() << ".stride[" << stride_i++ << "]";
+      strides[i] = ir_builder.create<kir::NamedScalar>(ss.str(), DataType::Int);
+    }
+  }
+
+  kir::Val* cur_contig_stride = ir_builder.create<kir::Int>(1);
+  // if we have rfactor we can't simplify the indexing like this, we would need
+  // to fix contiguity size to be rfactor size not root size
+  if (root_dom.size() == producer_tv->domain()->contiguity().size()) {
+    for (size_t i = 0; i < root_dom.size(); i++) {
+      auto dim = root_dom.size() - i - 1;
+      if (root_dom[dim]->isReduction()) {
+        continue;
+      }
+      if (root_dom[dim]->getIterType() == IterType::BroadcastWithoutStride) {
+        continue;
+      }
+
+      kir::Val* root_ind = nullptr;
+      auto kir_root_dom =
+          gpu_lower->lowerValue(root_dom[dim])->as<kir::IterDomain>();
+      if (producer_indexing.indexMap().find(kir_root_dom) !=
+          producer_indexing.indexMap().end()) {
+        root_ind = producer_indexing.indexMap().at(kir_root_dom);
+      } else if (
+          root_dom[dim]->getIterType() == IterType::BroadcastWithStride) {
+        root_ind = zero;
+      }
+
+      TORCH_INTERNAL_ASSERT(
+          root_ind != nullptr,
+          "Couldn't find root mapping for TV",
+          producer_tv->name(),
+          " dim: ",
+          i,
+          " id: ",
+          root_dom[dim]);
+
+      if (producer_tv->domain()->contiguity()[dim]) {
+        // If contig, used the stored stride which may be the previous
+        // dimensions stride * previous dimensions size
+        strides[dim] = cur_contig_stride;
+        // Prepare for the next dimension which may also be contiguous, multiply
+        // by extent of this dimension
+        auto root_dim_extent = getHaloExtentOfRootAxis(root_dom[dim]);
+        cur_contig_stride =
+            ir_builder.mulExpr(cur_contig_stride, root_dim_extent);
+      } else {
+        // If non contiguous dimension, keep local stride information, set cur
+        // stride to local stride * local raw extent
+        auto root_dim_extent = getHaloExtentOfRootAxis(root_dom[dim]);
+        cur_contig_stride = ir_builder.mulExpr(strides[dim], root_dim_extent);
+      }
+    }
+  }
+
+  auto vectorize_shift =
+      loops.empty() ? nullptr : loops.back()->vectorize_shift();
+
+  // Global striding
+  std::vector<kir::Val*> strided_inds(root_dom.size(), ir_builder.zeroVal());
+  for (const auto i : c10::irange(root_dom.size())) {
+    // If the domain is derived from a trivial reduction, no indexing
+    // to create.
+    if (root_dom[i]->isReduction() ||
+        root_dom[i]->getIterType() == IterType::BroadcastWithoutStride ||
+        root_dom[i]->getIterType() == IterType::BroadcastWithStride ||
+        gpu_lower->trivialReductionInfo().isDerived(root_dom[i])) {
+      continue;
+    }
+
+    auto kir_root_dom_i =
+        gpu_lower->lowerValue(root_dom[i])->as<kir::IterDomain>();
+
+    TORCH_INTERNAL_ASSERT(
+        producer_indexing.indexMap().find(kir_root_dom_i) !=
+            producer_indexing.indexMap().end(),
+        "Couldn't find root mapping for TV",
+        producer_tv->name(),
+        " dim: ",
+        i,
+        " id: ",
+        kir::toString(kir_root_dom_i));
+
+    auto root_ind = producer_indexing.indexMap().at(kir_root_dom_i);
+
+    root_ind = getProducerIndexWithHalo(producer_tv, i, root_ind, consumer_tv);
+
+    root_ind = getProducerIndexWithGather(
+        i,
+        root_ind,
+        producer_tv,
+        consumer_tv,
+        ref_compute.indexMap(),
+        reference_id_map);
+
+    if (root_ind->isZeroInt()) {
+      continue;
+    } else {
+      auto strided_ind = ir_builder.mulExpr(root_ind, strides[i]);
+      if (i == root_dom.size() - 1 && vectorize_shift != nullptr) {
+        strided_inds[i] = ir_builder.addExpr(strided_ind, vectorize_shift);
+      } else {
+        strided_inds[i] = strided_ind;
+      }
+    }
+  }
+
+  return strided_inds;
+}
 
 // Producer index for either shared or local memory
 std::vector<kir::Val*> Index::getNonGlobalProducerStridedIndices(
@@ -1345,24 +1384,29 @@ std::vector<kir::Val*> Index::getNonGlobalProducerStridedIndices(
   ir_utils::TVDomainGuard domain_guard(
       producer_tv, producer_replayed_as_consumer);
 
-  //  We want to play producer as consumer instead of the other way around since
-  //  consumer may have some broadcasted axes producer doesn't have merged into
-  //  loops producer may use. If we did consumer as producer we wouldn't have
-  //  this information in the mapping.
-  auto replay_PasC =
-      BestEffortReplay::replayPasC(producer_tv, consumer_tv, -1, pairwise_map);
+  // This map has forwarded broadcast axes, it should only be used to compute
+  // the allocation position of the producer, and to figure out which producer
+  // indices are mapped to consumer trivial reductions.
+  std::unordered_map<IterDomain*, IterDomain*> p2c_alloc_map;
+  {
+    //  We want to play producer as consumer instead of the other way around
+    //  since consumer may have some broadcasted axes producer doesn't have
+    //  merged into loops producer may use. If we did consumer as producer we
+    //  wouldn't have this information in the mapping.
+    auto replay_PasC = BestEffortReplay::replayPasC(
+        producer_tv, consumer_tv, -1, pairwise_map);
 
-  auto c2p_map = replay_PasC.getReplay();
+    auto c2p_map = replay_PasC.getReplay();
 
-  // Grab consumer domain entries and reverse replay map. TODO: Maybe
-  // TransformReplay::replayPasC could return this map
-  decltype(c2p_map) p2c_map;
-  for (auto id : consumer_tv->domain()->domain()) {
-    auto c2p_it = c2p_map.find(id);
-    if (c2p_it != c2p_map.end()) {
-      auto c_id = c2p_it->first;
-      auto p_id = c2p_it->second;
-      p2c_map[p_id] = c_id;
+    // Grab consumer domain entries and reverse replay map. TODO: Maybe
+    // TransformReplay::replayPasC could return this map
+    for (auto id : consumer_tv->domain()->domain()) {
+      auto c2p_it = c2p_map.find(id);
+      if (c2p_it != c2p_map.end()) {
+        auto c_id = c2p_it->first;
+        auto p_id = c2p_it->second;
+        p2c_alloc_map[p_id] = c_id;
+      }
     }
   }
 
@@ -1370,11 +1414,11 @@ std::vector<kir::Val*> Index::getNonGlobalProducerStridedIndices(
   // required because producer was replayed as consumer, so we can't use the
   // regular compute at maps to line up its iter domains with the for loops.
   auto alloc_point =
-      loop_utils::getAllocPoint(producer_tv, loops, p2c_map, true);
+      loop_utils::getAllocPoint(producer_tv, loops, p2c_alloc_map, true);
   std::unordered_map<kir::ForLoop*, kir::Val*> loop_to_ind_map =
       indexMapFromTV(producer_tv, loops, alloc_point, false);
 
-  ensureStaticIndexing(producer_tv, alloc_point.first, loops, p2c_map);
+  ensureStaticIndexing(producer_tv, alloc_point.first, loops, p2c_alloc_map);
 
   // Map loop nests to indicies, zeroing out those not used due to locality of
   // memory
@@ -1390,20 +1434,41 @@ std::vector<kir::Val*> Index::getNonGlobalProducerStridedIndices(
     ref_id_to_ind_map[ref_axis] = loop_to_ind_map[loops[loop_i]];
   }
 
-  // Map reference tensor to producer
-  std::unordered_map<IterDomain*, IterDomain*> root_ref_to_producer;
-  for (auto p_root : producer_tv->getMaybeRFactorDomain()) {
-    auto concrete_id = gpu_lower->caIndexMap().getConcreteMappedID(p_root);
-    auto ref_id_it = reference_id_map.find(concrete_id);
-    if (ref_id_it != reference_id_map.end()) {
-      root_ref_to_producer[ref_id_it->second] = p_root;
+  // Map everything we can from reference to producer using compute at index
+  // map. All producer id's don't exist in the compute at map. The rfactor axes
+  // all may be, but since I haven't proven that to be the case, going to do a
+  // more conservative approach, which is to use the consumer as a proxy between
+  // producer to reference.
+  std::unordered_map<IterDomain*, IterDomain*> index_map_ref_to_producer;
+  {
+    // This replay has to be consistent with compute at index map.
+    BestEffortReplay replay_producer_as_consumer(
+        producer_tv->domain()->domain(),
+        consumer_tv->domain()->domain(),
+        pairwise_map.mapConsumerToProducer(
+            consumer_tv->domain(), producer_tv->domain()));
+
+    const auto& c2p_map = replay_producer_as_consumer.getReplay();
+
+    std::unordered_map<IterDomain*, IterDomain*> index_map_ref_to_consumer =
+        indexMapReferenceTo(
+            consumer_tv, gpu_lower->caIndexMap(), reference_id_map);
+
+    for (auto entry : index_map_ref_to_consumer) {
+      auto r_id = entry.first;
+      auto c_id = entry.second;
+      auto c2p_it = c2p_map.find(c_id);
+      if (c2p_it != c2p_map.end()) {
+        auto p_id = c2p_it->second;
+        index_map_ref_to_producer[r_id] = p_id;
+      }
     }
   }
 
   // Grab roots that map into producer and save them into the preferred roots
   // set for references indexing
   std::unordered_set<IterDomain*> preferred_roots;
-  for (auto entry : root_ref_to_producer) {
+  for (auto entry : index_map_ref_to_producer) {
     if (entry.second->isBroadcast() || entry.second->isReduction()) {
       continue;
     }
@@ -1419,22 +1484,13 @@ std::vector<kir::Val*> Index::getNonGlobalProducerStridedIndices(
   auto ref_compute = getReferenceIndexing(
       loops, reference_domain, ref_id_to_ind_map, preferred_paths);
 
-  // Directly replay the producer as the reference to get the mapping of
-  // reference to producer we will use to map the indexing into producer
-  BestEffortReplay replay_producer_as_ref(
-      producer_tv->domain()->domain(),
-      reference_domain->domain(),
-      root_ref_to_producer);
-
-  const auto& ref_2_producer = replay_producer_as_ref.getReplay();
-
   // Forward vectorized IDs to index into producer correctly
   // We want p_id to be vectorized like consumer just for the indexing, then we
   // need to switch it back later. Store previous state here when changing. We
   // need to do this as replaying producer as consumer can use replay best
   // effort which means some domains may be the originals.
   std::vector<std::pair<IterDomain*, ParallelType>> p_id_backup;
-  for (auto entry : ref_2_producer) {
+  for (auto entry : index_map_ref_to_producer) {
     auto ref_id = entry.first;
     auto p_id = entry.second;
     if (ref_id->getParallelType() == ParallelType::Vectorize) {
@@ -1448,11 +1504,14 @@ std::vector<kir::Val*> Index::getNonGlobalProducerStridedIndices(
   // Index into producer using reference indexing
 
   const auto reference_halo_extent_map = getReferenceHaloExtentMap(
-      reference, consumer_tv, ref_2_producer, ref_compute.extentMap());
+      reference,
+      consumer_tv,
+      index_map_ref_to_producer,
+      ref_compute.extentMap());
 
   auto producer_indexing = ref_compute.updateIndexCompute(
       producer_tv->domain(),
-      ref_2_producer,
+      index_map_ref_to_producer,
       producer_tv->domain()->contiguity(),
       reference_halo_extent_map);
 
@@ -1494,8 +1553,9 @@ std::vector<kir::Val*> Index::getNonGlobalProducerStridedIndices(
     }
 
     // Maps to consumers trivial reduction, don't index
-    if (p2c_map.find(root_id) != p2c_map.end() &&
-        gpu_lower->trivialReductionInfo().isDerived(p2c_map.at(root_id))) {
+    if (p2c_alloc_map.find(root_id) != p2c_alloc_map.end() &&
+        gpu_lower->trivialReductionInfo().isDerived(
+            p2c_alloc_map.at(root_id))) {
       skip_indexing.emplace(root_id);
     }
   }
@@ -1592,22 +1652,11 @@ std::vector<kir::Val*> Index::getGlobalConsumerStridedIndices(
   auto reference_domain = reference.domain;
   auto reference_id_map = reference.concrete_to_id;
 
-  // Map reference tensor to consumer
-  std::unordered_map<IterDomain*, IterDomain*> root_ref_to_consumer;
-  for (auto c_root : consumer_tv->getMaybeRFactorDomain()) {
-    auto concrete_id = gpu_lower->caIndexMap().getConcreteMappedID(c_root);
-    auto ref_id_it = reference_id_map.find(concrete_id);
-    if (ref_id_it != reference_id_map.end()) {
-      root_ref_to_consumer[ref_id_it->second] = c_root;
-    }
-  }
-
-  BestEffortReplay replay_consumer_as_ref(
-      consumer_tv->domain()->domain(),
-      reference_domain->domain(),
-      root_ref_to_consumer);
-
-  const auto& ref_2_consumer = replay_consumer_as_ref.getReplay();
+  // Map everything we can from reference to consumer using compute at index
+  // map.
+  std::unordered_map<IterDomain*, IterDomain*> index_map_ref_to_consumer =
+      indexMapReferenceTo(
+          consumer_tv, gpu_lower->caIndexMap(), reference_id_map);
 
   // Index into the reference tensor. Reference indexing will handle vectorized
   // dims where index should be set to 0
@@ -1616,11 +1665,14 @@ std::vector<kir::Val*> Index::getGlobalConsumerStridedIndices(
   // Index into consumer using reference indexing
 
   const auto reference_halo_extent_map = getReferenceHaloExtentMap(
-      reference, consumer_tv, ref_2_consumer, ref_compute.extentMap());
+      reference,
+      consumer_tv,
+      index_map_ref_to_consumer,
+      ref_compute.extentMap());
 
   auto consumer_indexing = ref_compute.updateIndexCompute(
       consumer_tv->domain(),
-      ref_2_consumer,
+      index_map_ref_to_consumer,
       consumer_tv->domain()->contiguity(),
       reference_halo_extent_map);
 
@@ -1772,20 +1824,16 @@ std::vector<kir::Val*> Index::getNonGlobalConsumerStridedIndices(
     ref_id_to_ind_map[ref_axis] = loop_to_ind_map[loops[loop_i]];
   }
 
-  // Map reference tensor to consumer
-  std::unordered_map<IterDomain*, IterDomain*> root_ref_to_consumer;
-  for (auto c_root : consumer_tv->getMaybeRFactorDomain()) {
-    auto concrete_id = gpu_lower->caIndexMap().getConcreteMappedID(c_root);
-    auto ref_id_it = reference_id_map.find(concrete_id);
-    if (ref_id_it != reference_id_map.end()) {
-      root_ref_to_consumer[ref_id_it->second] = c_root;
-    }
-  }
+  // Map everything we can from reference to consumer using compute at index
+  // map.
+  std::unordered_map<IterDomain*, IterDomain*> index_map_ref_to_consumer =
+      indexMapReferenceTo(
+          consumer_tv, gpu_lower->caIndexMap(), reference_id_map);
 
   // Grab roots that map into consumer and save them into the preferred roots
   // set for references indexing
   std::unordered_set<IterDomain*> preferred_roots;
-  for (auto entry : root_ref_to_consumer) {
+  for (auto entry : index_map_ref_to_consumer) {
     if (entry.second->isBroadcast() || entry.second->isReduction()) {
       continue;
     }
@@ -1800,20 +1848,16 @@ std::vector<kir::Val*> Index::getNonGlobalConsumerStridedIndices(
   auto ref_compute = getReferenceIndexing(
       loops, reference_domain, ref_id_to_ind_map, preferred_paths);
 
-  BestEffortReplay replay_consumer_as_ref(
-      consumer_tv->domain()->domain(),
-      reference_domain->domain(),
-      root_ref_to_consumer);
-
-  const auto& ref_2_consumer = replay_consumer_as_ref.getReplay();
-
   const auto reference_halo_extent_map = getReferenceHaloExtentMap(
-      reference, consumer_tv, ref_2_consumer, ref_compute.extentMap());
+      reference,
+      consumer_tv,
+      index_map_ref_to_consumer,
+      ref_compute.extentMap());
 
   // Index into consumer using reference indexing
   auto consumer_indexing = ref_compute.updateIndexCompute(
       consumer_tv->domain(),
-      ref_2_consumer,
+      index_map_ref_to_consumer,
       consumer_tv->domain()->contiguity(),
       reference_halo_extent_map);
 

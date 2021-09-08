@@ -72,6 +72,7 @@ void parallelizeAllLike(
     const std::vector<TensorView*>& all_tvs) {
   FusionGuard fg(reference_tv->fusion());
 
+  // Use loop map as that is the most permissive.
   auto ca_loop_map = ComputeAtMap(ComputeAtMap::MappingMode::LOOP);
   ca_loop_map.build(FusionGuard::getCurFusion());
   for (auto id : reference_tv->domain()->domain()) {
@@ -384,8 +385,8 @@ std::unordered_set<IterDomain*> getTrivialReductionMap(Fusion* fusion) {
   }
 
   if (!mapped_to_trivial_reduction.empty()) {
-    // Shouldn't matter which compute at map we use
-    auto ca_index_map = ComputeAtMap(ComputeAtMap::MappingMode::INDEX);
+    // Use the loop map as that is the most permissive
+    auto ca_index_map = ComputeAtMap(ComputeAtMap::MappingMode::LOOP);
     ca_index_map.build(fusion);
     // Make a copy we need to check mappings of all
     auto trivial_ids = mapped_to_trivial_reduction;

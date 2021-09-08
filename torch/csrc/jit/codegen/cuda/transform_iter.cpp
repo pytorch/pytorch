@@ -242,6 +242,17 @@ BestEffortReplay::BestEffortReplay(
       FusionGuard::getCurFusion(),
       std::vector<Val*>(replay_domain.begin(), replay_domain.end()));
 
+  // Track which id's in replay have to be replayed to guarantee rfactor
+  // transformations. The iteration domains in the rfactor axes don't have
+  // to be used in a matching expression in target, so we want to exclude those.
+  // Only the iteration domains [root_domains, rfactor) domains have to be used
+  // in matching transformation to guarantee rfactor domain is consistent.
+  // However, if any rfactor id was used to produce the rfactor domain, we need
+  // transformations on them to match the target exactly.
+  std::unordered_set<IterDomain*> replay_rfactor_ids;
+
+  // Track which expressions iteration domains are used, they should only be
+  // used in one expression.
   std::unordered_map<IterDomain*, Expr*> replay_id2expr_map;
   for (auto replay_expr : replay_exprs) {
     for (auto id : ir_utils::filterByType<IterDomain>(replay_expr->inputs())) {
@@ -251,6 +262,16 @@ BestEffortReplay::BestEffortReplay(
           " An IterDomain was found to be used in more than one expression.");
       // Only want to forward rfactor in map
       replay_id2expr_map[id] = replay_expr;
+
+      auto out_ids = ir_utils::filterByType<IterDomain>(replay_expr->outputs());
+
+      if (std::any_of(out_ids.begin(), out_ids.end(), [](IterDomain* id) {
+            return id->isRFactorProduct();
+          })) {
+        auto inp_ids =
+            ir_utils::filterByType<IterDomain>(replay_expr->inputs());
+        replay_rfactor_ids.insert(inp_ids.begin(), inp_ids.end());
+      }
     }
   }
 
@@ -309,9 +330,13 @@ BestEffortReplay::BestEffortReplay(
     }
 
     // Check if any of the associated replay id's are part of an rfactor domain
-    bool replay_has_rfactor_inp =
-        std::any_of(replay_inps.begin(), replay_inps.end(), [](IterDomain* id) {
-          return id == nullptr ? false : id->isRFactorProduct();
+    bool replay_has_rfactor_inp = std::any_of(
+        replay_inps.begin(),
+        replay_inps.end(),
+        [&replay_rfactor_ids](IterDomain* id) {
+          return id == nullptr ? false
+                               : id->isRFactorProduct() &&
+                  (replay_rfactor_ids.find(id) != replay_rfactor_ids.end());
         });
 
     // If some replay id inputs are part of rfactor, make sure all target

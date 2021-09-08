@@ -137,6 +137,10 @@ void ParallelDimensionMap::populateDimensionMapWithMultipleCASet(
 
   // Check all of concrete domains to see if they match all together.
   for (auto concrete_id : dom_set) {
+    if (concrete_id->isBroadcast()) {
+      // Broadcasted concrete id's don't specify anything about shape
+      continue;
+    }
     // If this concrete domain has a constant extent, check if it
     // matches with the known constant extent.
     auto it = constant_extent_map_.find(concrete_id);

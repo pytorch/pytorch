@@ -15,15 +15,15 @@ namespace cuda {
 
 IndexLowering::IndexLowering() : ir_builder_(GpuLower::current()->kernel()) {}
 
-kir::Val* IndexLowering::lowerSrcIndex(kir::Val* val, kir::Val* dst) const {
-  if (auto tv = dynamic_cast<kir::TensorView*>(val)) {
+kir::Val* IndexLowering::lowerSrcIndex(kir::Val* src, kir::Val* dst) const {
+  if (auto tv = dynamic_cast<kir::TensorView*>(src)) {
     TORCH_INTERNAL_ASSERT(dst->isA<kir::TensorView>());
     return Index::getProducerIndex(
         tv->fuserTv(),
         dst->as<kir::TensorView>()->fuserTv(),
         scope_utils::getLoops(active_scope_expr_));
   } else {
-    return val;
+    return src;
   }
 }
 
