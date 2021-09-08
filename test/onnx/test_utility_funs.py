@@ -627,7 +627,7 @@ class TestUtilityFuns(TestCase):
             def __init__(self, num_layers):
                 super().__init__()
                 self.num_layers = num_layers
-                self.lns = torch.nn.ModuleList([torch.nn.LayerNorm(3, eps = i) for i in range(num_layers)])
+                self.lns = torch.nn.ModuleList([torch.nn.LayerNorm(3, eps=i) for i in range(num_layers)])
                 self.celu1 = torch.nn.CELU(1.0)
                 self.celu2 = torch.nn.CELU(2.0)
                 self.dropout = N(0.5)

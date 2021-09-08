@@ -983,17 +983,10 @@ void GraphEncoder::EncodeLocalFunction(
     bool add_node_names,
     bool use_external_data_format,
     const std::string& onnx_file_path) {
-  // setup
-  //  1. name
-  //  2. input + output
-  //  3. nodes
-  //  4. opset_import
-  //  5. domain
   const auto fsub_g = n->g(Symbol::attr("graph"));
   func_proto->set_name(n->s(::c10::attr::name));
 
   for (auto input : fsub_g->inputs()) {
-    // TODO: massage input names. or perhaps massage it in passes.
     func_proto->add_input(input->debugName());
   }
   for (auto output : fsub_g->outputs()) {
@@ -1097,6 +1090,7 @@ void GraphEncoder::EncodeTensor(
 void GraphEncoder::EncodeIntermediateValueInfo(
     onnx::GraphProto* graph_proto,
     const Value* v) {
+  // Motivation is to encode ValueInfo for onnx local function nodes.
   auto n = v->node();
   if (n->kind().is_onnx()) {
     // Encode value info only for non-onnx nodes.
