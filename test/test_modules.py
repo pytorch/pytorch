@@ -1,7 +1,8 @@
+from copy import deepcopy
 import tempfile
 
 import torch
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import instantiate_device_type_tests, onlyCUDA
 from torch.testing._internal.common_modules import module_db, modules
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, freeze_rng_state, mock_wrapper, get_tensors_from)
@@ -153,6 +154,112 @@ class TestModule(TestCase):
                     m_copy = torch.load(f)
                     output_from_copy = m_copy(*args, **kwargs)
                     self.assertEqual(output, output_from_copy)
+
+    @onlyCUDA
+    @modules(module_db)
+    def test_cpu_cuda_equal(self, device, dtype, module_info):
+        # Test cpu and cuda results are the same
+        module_cls = module_info.module_cls
+        module_inputs_cpu = module_info.module_inputs_func(module_info, device="cpu", dtype=dtype,
+                                                           requires_grad=True)
+
+        def set_zero_grad(items):
+            if isinstance(items, dict):
+                items = items.values()
+
+            for item in items:
+                if not isinstance(item, torch.Tensor):
+                    continue
+                requires_grad = item.requires_grad
+                if not item.is_leaf:
+                    item.detach_()
+                    item.requires_grad = requires_grad
+                if item.requires_grad and item.grad is not None:
+                    item.grad.detach_()
+                    item.grad.zero_()
+
+        def set_zero_grad_parameters(module):
+            for p in module.parameters():
+                if p.grad is None:
+                    continue
+                with torch.no_grad():
+                    p.grad.zero_()
+                p.grad.detach_()
+
+        def to_device(obj):
+            if isinstance(obj, torch.Tensor):
+                with torch.no_grad():
+                    res = obj.detach().to(device=device)
+                    res.requires_grad = obj.requires_grad
+                return res
+            elif isinstance(obj, tuple):
+                return tuple(to_device(o) for o in obj)
+            elif isinstance(obj, dict):
+                return {key: to_device(o) for key, o in obj.items()}
+            else:
+                return deepcopy(obj)
+
+        if dtype == torch.float32:
+            atol = 5e-2
+        else:
+            atol = 4e-4
+
+        for module_input in module_inputs_cpu:
+
+            # === Move input from cpu to device ===
+            cpu_forward_args = module_input.forward_input.args
+            cpu_forward_kwargs = module_input.forward_input.kwargs
+
+            gpu_forward_args = to_device(cpu_forward_args)
+            gpu_forward_kwargs = to_device(cpu_forward_kwargs)
+
+            set_zero_grad(cpu_forward_args)
+            set_zero_grad(cpu_forward_kwargs)
+            set_zero_grad(gpu_forward_args)
+            set_zero_grad(gpu_forward_kwargs)
+
+            # === Construct module on cpu and gpu ===
+            args, kwargs = module_input.constructor_input.args, module_input.constructor_input.kwargs
+
+            cpu_module = module_cls(*args, **kwargs).to(dtype).to("cpu")
+            gpu_module = module_cls(*args, **kwargs).to(dtype).to(device)
+
+            set_zero_grad_parameters(cpu_module)
+            set_zero_grad_parameters(gpu_module)
+
+            for cpu_p, gpu_p in zip(cpu_module.parameters(), gpu_module.parameters()):
+                gpu_p.data.copy_(cpu_p)
+
+            # === Compare forward resputs for cpu and gpu ===
+            with freeze_rng_state():
+                cpu_output = cpu_module(*cpu_forward_args, **cpu_forward_kwargs)
+            with freeze_rng_state():
+                gpu_output = gpu_module(*gpu_forward_args, **gpu_forward_kwargs)
+
+            self.assertEqual(cpu_output, gpu_output, atol=atol, rtol=0)
+
+            # === Run backwards on CPU and GPU and compare results ===
+            for _ in range(5):
+                cpu_grad_output = cpu_output.clone().normal_()
+                gpu_grad_output = cpu_grad_output.type_as(gpu_output)
+
+                cpu_output.backward(cpu_grad_output, retain_graph=True)
+                gpu_output.backward(gpu_grad_output, retain_graph=True)
+
+                cpu_grad_input = tuple(i.grad.data if i.grad is not None else None for i in cpu_forward_args)
+                gpu_grad_input = tuple(i.grad.data if i.grad is not None else None for i in gpu_forward_args)
+                self.assertEqual(cpu_grad_input, gpu_grad_input, atol=atol, rtol=0)
+
+                for cpu_p, gpu_p in zip(cpu_module.parameters(), gpu_module.parameters()):
+                    self.assertEqual(cpu_p.grad, gpu_p.grad, atol=atol, rtol=0)
+
+                cpu_grad_kwarg_input = {name: i.grad.data if i.grad is not None else None
+                                        for name, i in cpu_forward_kwargs.items()
+                                        if isinstance(i, torch.Tensor)}
+                gpu_grad_kwarg_input = {name: i.grad.data if i.grad is not None else None
+                                        for name, i in gpu_forward_kwargs.items()
+                                        if isinstance(i, torch.Tensor)}
+                self.assertEqual(cpu_grad_kwarg_input, gpu_grad_kwarg_input, atol=atol, rtol=0)
 
 
 instantiate_device_type_tests(TestModule, globals())

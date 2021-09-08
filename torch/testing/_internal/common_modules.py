@@ -159,8 +159,8 @@ def module_inputs_torch_nn_Linear(module_info, device, dtype, requires_grad, **k
 
     module_inputs = [
         ModuleInput(constructor_input=FunctionInput(10, 8),
-                    forward_input=FunctionInput(make_input((4, 10))),
-                    reference_fn=lambda m, p, i: torch.mm(i, p[0].t()) + p[1].view(1, -1).expand(4, 8)),
+                    forward_input=FunctionInput(input=make_input((4, 10))),
+                    reference_fn=lambda m, p, input: torch.mm(input, p[0].t()) + p[1].view(1, -1).expand(4, 8)),
         ModuleInput(constructor_input=FunctionInput(10, 8, bias=False),
                     forward_input=FunctionInput(make_input((4, 10))),
                     desc='no_bias',
@@ -176,13 +176,14 @@ def module_inputs_torch_nn_Linear(module_info, device, dtype, requires_grad, **k
 
 def module_inputs_torch_nn_NLLLoss(module_info, device, dtype, requires_grad, **kwargs):
     make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    make_weight = partial(make_tensor, device=device, dtype=dtype, requires_grad=False)
 
     cases: List[Tuple[str, dict]] = [
         ('', {}),
         ('ignore_index', {'ignore_index': 2}),
-        ('weights', {'weight': make_input(10)}),
-        ('weights_ignore_index', {'weight': make_input(10), 'ignore_index': 2}),
-        ('weights_ignore_index_neg', {'weight': make_input(10), 'ignore_index': -1})
+        ('weights', {'weight': make_weight(10).abs()}),
+        ('weights_ignore_index', {'weight': make_weight(10).abs(), 'ignore_index': 2}),
+        ('weights_ignore_index_neg', {'weight': make_weight(10).abs(), 'ignore_index': -1})
     ]
     module_inputs = []
     for desc, constructor_kwargs in cases:
