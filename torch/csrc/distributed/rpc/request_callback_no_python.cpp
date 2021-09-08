@@ -290,7 +290,7 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::
 
   // Need to reverse the device map for the backward pass of distributed
   // autograd.
-  std::unordered_map<c10::Device, c10::Device> reverseDeviceMap;
+  DeviceMap reverseDeviceMap;
   for (const auto& mapEntry : rpcWithAutograd.deviceMap()) {
     reverseDeviceMap.insert({mapEntry.second, mapEntry.first});
   }
@@ -582,7 +582,7 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::runJitOperator(
     std::vector<c10::Stream> streams) const {
   c10::MultiStreamGuard guard(streams);
   try {
-    op.getOperation()(&stack);
+    op.getOperation()(stack);
   } catch (const std::exception&) {
     return asFuture(std::current_exception());
   }
