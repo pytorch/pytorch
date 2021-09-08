@@ -1442,20 +1442,19 @@ Tensor matmul(
     const Tensor& tensor1,
     const Tensor& tensor2) {
   NoNamesGuard guard;
-  auto dim_tensor1 = tensor1.dim();
-  auto dim_tensor2 = tensor2.dim();
-  auto has_out = out_opt.has_value();
-  Tensor out = out_opt.value_or(Tensor());
+  const auto dim_tensor1 = tensor1.dim();
+  const auto dim_tensor2 = tensor2.dim();
+  const auto has_out = out_opt.has_value();
 
   if (dim_tensor1 == 1 && dim_tensor2 == 1) {
-    return has_out ? at::native::dot_out(tensor1, tensor2, out) : tensor1.dot(tensor2);
+    return has_out ? at::native::dot_out(tensor1, tensor2, *out_opt) : tensor1.dot(tensor2);
   } else if (dim_tensor1 == 2 && dim_tensor2 == 1) {
-    return has_out ? at::mv_out(out, tensor1, tensor2) : tensor1.mv(tensor2);
+    return has_out ? at::native::mv_out(tensor1, tensor2, *out_opt) : tensor1.mv(tensor2);
   } else if (dim_tensor1 == 1 && dim_tensor2 == 2) {
     // optimization: use mv instead of mm by calling mv with swaped (and transposed) args
-    return has_out ? at::mv_out(out, tensor2.t(), tensor1) : tensor2.t().mv(tensor1);
+    return has_out ? at::native::mv_out(tensor2.t(), tensor1, *out_opt) : tensor2.t().mv(tensor1);
   } else if (dim_tensor1 == 2 && dim_tensor2 == 2) {
-    return has_out ? at::mm_out(out, tensor1, tensor2) : tensor1.mm(tensor2);
+    return has_out ? at::mm_out(*out_opt, tensor1, tensor2) : tensor1.mm(tensor2);
   } else if (dim_tensor1 >= 3 && (dim_tensor2 == 1 || dim_tensor2 == 2)) {
     // optimization: use mm instead of bmm by folding tensor1's batch into
     // its leading matrix dimension.
@@ -1472,33 +1471,38 @@ Tensor matmul(
     if (is_tensor2_matrix) {
       output_size.push_back(tensor2.sizes()[1]);
     }
-    auto t1 = tensor1.expect_contiguous()->view({dim1_size, sizes_1.back()});
-    Tensor output = has_out ? at::_unsafe_view(at::mm_out(out, t1,
-                                                          is_tensor2_matrix ? tensor2 : tensor2.unsqueeze(1)), output_size)
-                            : at::_unsafe_view(t1.mm(is_tensor2_matrix ? tensor2 : tensor2.unsqueeze(1)), output_size);
-
-    return has_out ? out.set_(output) : output;
+    const Tensor t1 = tensor1.expect_contiguous()->view({dim1_size, sizes_1.back()});
+    if (has_out) {
+      if (is_tensor2_matrix) {
+        const Tensor output = at::_unsafe_view(at::mm_out(*out_opt, t1, tensor2), output_size);
+        return out_opt->set_(output);
+      } else {
+        const Tensor output = at::_unsafe_view(at::native::mv_out(t1, tensor2, *out_opt), output_size);
+        return out_opt->set_(output);
+      }
+    } else {
+      if (is_tensor2_matrix) {
+        return at::_unsafe_view(at::mm(t1, tensor2), output_size);
+      } else {
+        return at::_unsafe_view(at::mv(t1, tensor2), output_size);
+      }
+    }
   } else if ((dim_tensor1 == 1 || dim_tensor1 == 2) && dim_tensor2 >= 3) {
     // optimization: transpose the inner dimensions of the arguments, call
     // matmul on the swapped arguments, then transpose the inner dimensions
     // of the result.
     const bool is_tensor1_matrix = dim_tensor1 == 2;
 
-    const Tensor t2_T = tensor2.transpose(-1, -2);
-    const Tensor res_T = matmul(out_opt, t2_T, is_tensor1_matrix ? tensor1.t() : tensor1);
-
     if (is_tensor1_matrix) {
-      Tensor res = res_T.transpose(-1, -2).contiguous();
-      return has_out ? out.set_(res) : res;
+      // FIXME This does two extra copies as the returned result from BLAS is already C-transposed,
+      // so transposing its strides it would already be C-contiguous
+			const Tensor result = matmul(out_opt, tensor2.transpose(-2, -1), tensor1.t())
+                              .transpose_(-2, -1)
+                              .contiguous();
+      return has_out ? out_opt->set_(result) : result;
     }
     else {
-      // Remove the penultimate element of the size of tensor2
-      const auto sizes_2 = tensor2.sizes();
-      DimVector shape((size_t *) sizes_2.begin(), (size_t *) (sizes_2.end() - 2));
-      shape.push_back(sizes_2.back());
-
-      Tensor res = res_T.reshape(shape).contiguous();
-      return has_out ? out.set_(res) : res;
+			return matmul(out_opt, tensor2.transpose(-2, -1), tensor1);
     }
   } else if ((dim_tensor1 >= 1 && dim_tensor2 >= 1) && (dim_tensor1 >= 3 || dim_tensor2 >= 3)) {
     // We are multiplying b1 x n x m1 by x2 x m2 x p (where b1 can be a list);
@@ -1514,17 +1518,20 @@ Tensor matmul(
 
     // expand the batch portion (i.e. cut off matrix dimensions and expand rest)
     DimVector output_shape = infer_size_dimvector(batch_tensor1, batch_tensor2);
-    DimVector tensor1_expand_size(output_shape);
-    DimVector tensor2_expand_size(output_shape);
-
-    tensor1_expand_size.append({n, m1});
-    tensor2_expand_size.append({m2, p});
+    const auto tensor1_expand_size = [&output_shape, n, m1]{ DimVector ret(output_shape);
+                                                             ret.append({n, m1});
+                                                             return ret; }();
+    const auto tensor2_expand_size = [&output_shape, m2, p]{ DimVector ret(output_shape);
+                                                             ret.append({m2, p});
+                                                             return ret; }();
 
     const int64_t expand_batch_product = c10::multiply_integers(output_shape);
 
     // flatten expanded batches
-    Tensor tensor1_expanded = tensor1.expand(tensor1_expand_size).reshape({expand_batch_product, n, m1});
-    Tensor tensor2_expanded = tensor2.expand(tensor2_expand_size).reshape({expand_batch_product, m2, p});
+    const Tensor tensor1_expanded = tensor1.expand(tensor1_expand_size)
+                                           .reshape({expand_batch_product, n, m1});
+    const Tensor tensor2_expanded = tensor2.expand(tensor2_expand_size)
+                                           .reshape({expand_batch_product, m2, p});
 
     // reshape batches back into result
     // we make the most likely path explicit
@@ -1538,14 +1545,15 @@ Tensor matmul(
       output_shape.push_back(p);
     }
 
-    Tensor output = has_out ? at::_unsafe_view(at::bmm_out(out, tensor1_expanded, tensor2_expanded), output_shape)
-                            : at::_unsafe_view(tensor1_expanded.bmm(tensor2_expanded), output_shape);
-
-    return has_out ? out.set_(output) : output;
+    if (has_out) {
+      return out_opt->set_(at::_unsafe_view(at::bmm_out(*out_opt, tensor1_expanded, tensor2_expanded), output_shape));
+    } else {
+      return at::_unsafe_view(tensor1_expanded.bmm(tensor2_expanded), output_shape);
+    }
   }
 
- AT_ERROR("both arguments to matmul need to be at least 1D, but they are ",
-          dim_tensor1, "D and ", dim_tensor2, "D");
+  AT_ERROR("both arguments to matmul need to be at least 1D, but they are ",
+           dim_tensor1, "D and ", dim_tensor2, "D");
 }
 
 Tensor matmul(const Tensor & tensor1, const Tensor & tensor2) {
