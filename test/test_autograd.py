@@ -42,6 +42,7 @@ from torch.testing._internal.common_device_type import (instantiate_device_type_
                                                         onlyCPU, onlyCUDA, onlyOnCPUAndCUDA, dtypes, dtypesIfCUDA,
                                                         deviceCountAtLeast, skipCUDAIfCudnnVersionLessThan,
                                                         skipCUDAIf, skipMeta)
+from torch.testing._internal.common_dtype import get_all_dtypes
 
 import pickle
 
@@ -2735,36 +2736,6 @@ class TestAutograd(TestCase):
                               lambda a, b, c: torch.block_diag(a, b, c),
                               True, f_args_variable, f_args_tensor)
 
-    def test_cat(self):
-        f_args_variable = (torch.randn(1, S, S, dtype=torch.double, requires_grad=True),
-                           torch.randn(2, S, S, dtype=torch.double, requires_grad=True),
-                           torch.randn(3, S, S, dtype=torch.double, requires_grad=True),
-                           0)
-        f_args_tensor = deepcopy(unpack_variables(f_args_variable))
-        run_functional_checks(self, "test_cat", "cat",
-                              lambda a, b, c, dim: torch.cat((a, b, c), dim),
-                              True, f_args_variable, f_args_tensor, check_forward_ad=True)
-
-    def test_cat_negdim_1(self):
-        f_args_variable = (torch.randn(S, S, 1, dtype=torch.double, requires_grad=True),
-                           torch.randn(S, S, 2, dtype=torch.double, requires_grad=True),
-                           torch.randn(S, S, 3, dtype=torch.double, requires_grad=True),
-                           -1)
-        f_args_tensor = deepcopy(unpack_variables(f_args_variable))
-        run_functional_checks(self, "test_cat_negdim_1", "cat",
-                              lambda a, b, c, dim: torch.cat((a, b, c), dim),
-                              True, f_args_variable, f_args_tensor, check_forward_ad=True)
-
-    def test_cat_negdim_2(self):
-        f_args_variable = (torch.randn(S, 1, S, dtype=torch.double, requires_grad=True),
-                           torch.randn(S, 2, S, dtype=torch.double, requires_grad=True),
-                           torch.randn(S, 3, S, dtype=torch.double, requires_grad=True),
-                           -2)
-        f_args_tensor = deepcopy(unpack_variables(f_args_variable))
-        run_functional_checks(self, "test_cat_negdim_2", "cat",
-                              lambda a, b, c, dim: torch.cat((a, b, c), dim),
-                              True, f_args_variable, f_args_tensor, check_forward_ad=True)
-
     def test_cat_empty_legacy(self):
         f_args_variable = (torch.randn(0, dtype=torch.double, requires_grad=True),
                            torch.randn(S, S, dtype=torch.double, requires_grad=True))
@@ -2775,14 +2746,6 @@ class TestAutograd(TestCase):
                               lambda a, b: torch.cat((a, b)),
                               False, f_args_variable, f_args_tensor, check_forward_ad=True)
         self.assertTrue(gradcheck(lambda a, b: torch.cat((a, b)), f_args_variable, eps=1e-6, atol=PRECISION))
-
-    def test_cat_empty(self):
-        f_args_variable = (torch.randn(0, S, dtype=torch.double, requires_grad=True),
-                           torch.randn(S, S, dtype=torch.double, requires_grad=True))
-        f_args_tensor = deepcopy(unpack_variables(f_args_variable))
-        run_functional_checks(self, "test_cat_empty", "cat",
-                              lambda a, b: torch.cat((a, b)),
-                              True, f_args_variable, f_args_tensor, check_forward_ad=True)
 
     def test_var_mean_differentiable(self):
         dim = [2, 4]
@@ -2948,22 +2911,6 @@ class TestAutograd(TestCase):
                          dtype=torch.double,
                          requires_grad=True)
         gradcheck(torch.sinc, a)
-
-    def test_igamma(self):
-        # 1e-3 offset to avoid zeros
-        # NOTE: derivative for s is not implemented
-        s = (torch.rand(100, dtype=torch.double) + 1e-3)
-        x = (torch.rand(100, dtype=torch.double) + 1e-3).requires_grad_()
-        gradcheck(torch.igamma, (s, x))
-        gradgradcheck(torch.igamma, (s, x))
-
-    def test_igammac(self):
-        # 1e-3 offset to avoid zeros in s
-        # NOTE: derivative for s is not implemented
-        s = (torch.rand(100, dtype=torch.double) + 1e-3)
-        x = (torch.rand(100, dtype=torch.double)).requires_grad_()
-        gradcheck(torch.igamma, (s, x))
-        gradgradcheck(torch.igamma, (s, x))
 
     def test_profiler(self):
         x = torch.randn(10, 10)
@@ -8512,7 +8459,7 @@ class TestAutogradDeviceType(TestCase):
         # At the time of writing this test, copy_ is not generated from native_functions.yaml
         # there was a bug that bfloat16 was not recognized as floating.
         x = torch.randn(10, device=device, requires_grad=True)
-        floating_dt = [dt for dt in torch.testing.get_all_dtypes() if dt.is_floating_point]
+        floating_dt = [dt for dt in get_all_dtypes() if dt.is_floating_point]
         for dt in floating_dt:
             y = torch.empty(10, device=device, dtype=dt)
             y.copy_(x)
