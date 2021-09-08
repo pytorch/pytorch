@@ -11,7 +11,7 @@
     - [Cherry Picking Fixes](#cherry-picking-fixes)
   - [Promoting RCs to Stable](#promoting-rcs-to-stable)
 - [Doing a Patch Release](#doing-a-patch-release)
-  - [Things to consider for a patch release](#things-to-consider-for-a-patch-release)
+  - [Patch Release Criteria](#patch-release-criteria)
   - [Patch release process](#patch-release-process)
 - [Special Topics](#special-topics)
   - [Updating submodules for a release](#updating-submodules-for-a-release)
@@ -124,13 +124,15 @@ Promotion should occur in two steps:
 
 A patch release is a maintenance release of PyTorch that includes fixes for regressions found in a previous minor release.
 
-## Things to consider for a patch release
+## Patch Release Criteria
 
-1. Does the regression break core functionality?
-2. Does the regression break first party domain libraries that depend on locked versions of `pytorch`?
-    * [pytorch/vision](https://github.com/pytorch/vision)
-    * [pytorch/audio](https://github.com/pytorch/audio)
-    * [pytorch/text](https://github.com/pytorch/text)
+Patch releases should be considered if a regression meets the following criteria:
+
+1. Does the regression break core functionality (stable / beta features) including functionality in first party domain libraries?
+    * First party domain libraries:
+        * [pytorch/vision](https://github.com/pytorch/vision)
+        * [pytorch/audio](https://github.com/pytorch/audio)
+        * [pytorch/text](https://github.com/pytorch/text)
 3. Is there not a viable workaround?
 
 ## Patch release process
