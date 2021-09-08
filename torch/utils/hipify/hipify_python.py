@@ -959,6 +959,30 @@ def hipify(
     if not os.path.exists(output_directory):
         shutil.copytree(project_directory, output_directory)
 
+    # change gloo cmake file
+    gloo_cmake_file = os.path.join(output_directory, "third_party/gloo/cmake/Modules/Findrccl.cmake")
+    if os.path.exists(gloo_cmake_file):
+        with open(gloo_cmake_file, "r") as sources:
+            lines = sources.readlines()
+
+        newlines = []
+        for line in lines:
+            start_idx = line.find('RCCL_LIBRARY')
+            if start_idx != -1:
+                if line[start_idx:].startswith('RCCL_LIBRARY_PATH'):
+                    newlines.append(line)
+                else:
+                    newlines.append(line.replace('RCCL_LIBRARY', 'RCCL_LIBRARY_PATH'))
+            else:
+                newlines.append(line)
+
+        if lines == newlines:
+            print("%s skipped" % gloo_cmake_file)
+        else:
+            with open(gloo_cmake_file, "w") as sources:
+                sources.writelines(newlines)
+            print("%s updated" % gloo_cmake_file)
+
     all_files = list(matched_files_iter(output_directory, includes=includes,
                                         ignores=ignores, extensions=extensions,
                                         out_of_place_only=out_of_place_only,

@@ -135,20 +135,6 @@ if is_hip_clang():
                 sources.write(line)
         print("%s updated" % gloo_cmake_file)
 
-gloo_cmake_file = "third_party/gloo/cmake/Modules/Findrccl.cmake"
-if os.path.exists(gloo_cmake_file):
-    do_write = False
-    with open(gloo_cmake_file, "r") as sources:
-        lines = sources.readlines()
-    newlines = [line.replace('RCCL_LIBRARY', 'RCCL_LIBRARY_PATH') for line in lines]
-    if lines == newlines:
-        print("%s skipped" % gloo_cmake_file)
-    else:
-        with open(gloo_cmake_file, "w") as sources:
-            for line in newlines:
-                sources.write(line)
-        print("%s updated" % gloo_cmake_file)
-
 # TODO Remove once gloo submodule is recent enough to contain upstream fix.
 if is_hip_clang():
     gloo_cmake_file = "third_party/gloo/cmake/Dependencies.cmake"
