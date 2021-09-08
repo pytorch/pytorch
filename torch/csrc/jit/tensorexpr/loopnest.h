@@ -538,6 +538,15 @@ class TORCH_API LoopNest {
   void vectorizeInnerLoops();
 
   void eliminateDeadStores();
+
+  // Make the stmt ready for codegen. The optional argument 'interm_bufs' allows
+  // users to specify intermediate buffers that need runtime allocation. In
+  // default, we will insert 'Alloc/Free' stmts to allocate all intermediate
+  // buffers at runtime but users may have pre-allocated some of them at compile
+  // time, and in that case the user can specify what buffers to insert
+  // 'Alloc/Free' stmts for using 'interm_bufs'.
+  // TODO: refactor function 'prepareForCodegen' to remove argument
+  // 'interm_bufs'.
   void prepareForCodegen(
       const c10::optional<std::unordered_set<BufPtr>>& interm_bufs =
           c10::nullopt);
