@@ -1,14 +1,17 @@
 #!/bin/bash
 set -eux -o pipefail
 
-cuda_major_version=${CUDA_VERSION%.*}
+# This is typically blank but for CUDA 10* it'll be set to 10
+windows_version_qualifier=""
 
 case ${CUDA_VERSION} in
     10.1)
         archive_version="v7.6.4.38"
+        windows_version_qualifier="10"
         ;;
     10.2)
         archive_version="v7.6.5.32"
+        windows_version_qualifier="10"
         ;;
     11.1)
         archive_version="v8.0.5.39"
@@ -24,7 +27,7 @@ esac
 
 cudnn_installer_name="cudnn_installer.zip"
 trap EXIT 'rm -rf ${cudnn_installer_name}'
-cudnn_installer_link="https://ossci-windows.s3.amazonaws.com/cudnn-${CUDA_VERSION}-windows10-x64-${archive_version}.zip"
+cudnn_installer_link="https://ossci-windows.s3.amazonaws.com/cudnn-${CUDA_VERSION}-windows${windows_version_qualifier}-x64-${archive_version}.zip"
 cudnn_install_folder="C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v${CUDA_VERSION}/"
 
 curl --retry 3 -o "${cudnn_installer_name}" "$cudnn_installer_link"
