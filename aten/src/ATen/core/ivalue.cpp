@@ -946,25 +946,36 @@ getClassConverter() {
 }
 
 // Needs to be in this .cpp file to access the full definition of PyObjectHolder
-std::vector<c10::weak_intrusive_ptr<c10::StorageImpl>> ivalue::Future::
-    extractStorages(const at::IValue& value) {
+std::vector<c10::weak_intrusive_ptr<c10::StorageImpl>> ivalue::Future::extractStorages(
+    const at::IValue& value) {
   std::vector<c10::weak_intrusive_ptr<c10::StorageImpl>> weakStorageImpls;
   // getSubValues works poorly on Python objects: it only works if they can be
   // converted to a "regular" IValue type hence, for example, it doesn't support
   // custom subclasses. Thus, instead, we extract the tensors through pickling.
-  // Sparse tensors do not have storage. Instead, a sparse tensor
-  // contains two tensors indices and values, and both contain storage.
   if (value.isPyObject()) {
     std::vector<at::Tensor> tensors =
         value.toPyObjectHolder()->extractTensors();
-    weakStorageImpls.reserve(2 * tensors.size());
-    for (const auto& tensor : tensors) {
+    size_t num_storages = 0;
+    for (const at::Tensor& tensor : tensors) {
       if (tensor.is_sparse()) {
-        weakStorageImpls.push_back(
-            tensor._indices().storage().getWeakStorageImpl());
-        weakStorageImpls.push_back(
-            tensor._values().storage().getWeakStorageImpl());
+        // Sparse tensor is indices and values. Both are tensors
+        // and contain storage. Therefore num_storages needs to be
+        // incremented by 2.
+        num_storages += 2;
       } else {
+        // A dense/strided tensor contains 1 storage.
+        num_storages += 1;
+      }
+    }
+    weakStorageImpls.reserve(num_storages);
+    for (const at::Tensor& tensor : tensors) {
+      if (tensor.is_sparse()) {
+        // Sparse tensor is indices and values. Both are tensors
+        // and contain storage.
+        weakStorageImpls.push_back(tensor.indices().storage().getWeakStorageImpl());
+        weakStorageImpls.push_back(tensor.values().storage().getWeakStorageImpl());
+      } else {
+        // A dense/strided tensor contains 1 storage
         weakStorageImpls.push_back(tensor.storage().getWeakStorageImpl());
       }
     }
@@ -975,15 +986,7 @@ std::vector<c10::weak_intrusive_ptr<c10::StorageImpl>> ivalue::Future::
     value.getSubValues(sub_values);
     for (const at::IValue& sub_value : sub_values) {
       if (sub_value.isTensor()) {
-        auto& tensor = sub_value.toTensor();
-        if (tensor.is_sparse()) {
-          weakStorageImpls.push_back(
-              tensor._indices().storage().getWeakStorageImpl());
-          weakStorageImpls.push_back(
-              tensor._values().storage().getWeakStorageImpl());
-        } else {
-          weakStorageImpls.push_back(tensor.storage().getWeakStorageImpl());
-        }
+        weakStorageImpls.push_back(sub_value.toTensor().storage().getWeakStorageImpl());
       }
     }
   }
