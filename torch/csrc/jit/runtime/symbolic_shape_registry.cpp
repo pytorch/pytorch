@@ -208,6 +208,8 @@ const std::string shape_compute_functions =
         def max_pool2d_with_indices(input: List[int], kernel_size: List[int], stride: List[int], padding: List[int], dilation: List[int], ceil_mode: bool):
           out = max_pool2d(input, kernel_size, stride, padding, dilation, ceil_mode)
           return (out, out)
+    )"
+    R"(
 
         def mm(self: List[int] , mat2: List[int]):
           assert len(self) == 2, "self must be a matrix"
@@ -376,7 +378,8 @@ const std::string shape_compute_functions =
             else:
               out.append(self[i])
           return out
-
+    )"
+    R"(
         def linear(input: List[int], weight: List[int], bias: Optional[List[int]]):
           out = matmul(input, t(weight))
           if bias is not None:
@@ -531,7 +534,7 @@ const std::string shape_compute_functions =
           return linear(input, weight, bias)
     )"
 #endif
-    ;
+;
 
 // mapping function schema to shape compute graphs allows multiple functions to
 // share the same shape compute graph, which is memory efficient and also will
@@ -660,6 +663,7 @@ void loadModule(const CompilationUnit& module) {
 
 void loadFunctions() {
   auto src = std::make_shared<Source>(shape_compute_functions);
+  std::stringstream ss;
   std::vector<at::IValue> constantTable;
   auto resolver = std::make_shared<SourceImporterImpl>(
       compilation_unit,
