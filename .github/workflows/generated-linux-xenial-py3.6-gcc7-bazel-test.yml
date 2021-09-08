@@ -16,6 +16,7 @@ env:
   BUILD_ENVIRONMENT: linux-xenial-py3.6-gcc7-bazel-test
   DOCKER_IMAGE_BASE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-bionic-cuda10.2-cudnn7-py3.9-gcc7
   SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
+  XLA_CLANG_CACHE_S3_BUCKET_NAME: ossci-compiler-clang-cache-circleci-xla
   TORCH_CUDA_ARCH_LIST: 5.2
   IN_CI: 1
   # This is used for the phase of adding wheel tests only, will be removed once completed
@@ -26,16 +27,20 @@ env:
   PR_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
 
 concurrency:
-  group: linux-xenial-py3.6-gcc7-bazel-test-${{ github.event.pull_request.number || github.sha }}
+  group: linux-xenial-py3.6-gcc7-bazel-test-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true
 
 jobs:
   ciflow_should_run:
     runs-on: ubuntu-18.04
     if: ${{ (github.event_name != 'pull_request') || (github.event.action !='unassigned') || (contains(github.event.pull_request.labels.*.name, 'ciflow/all') || contains(github.event.pull_request.labels.*.name, 'ciflow/bazel') || contains(github.event.pull_request.labels.*.name, 'ciflow/cpu') || contains(github.event.pull_request.labels.*.name, 'ciflow/default') || contains(github.event.pull_request.labels.*.name, 'ciflow/linux')) }}
+    env:
+      LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
     steps:
       - name: noop
         run: echo running ciflow_should_run
+      - name: print labels
+        run: echo "${LABELS}"
   calculate-docker-image:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: linux.2xlarge
@@ -208,7 +213,8 @@ jobs:
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Build PyTorch
         run: |
-          docker run \
+          # detached container should get cleaned up by teardown_ec2_linux
+          container_name=$(docker run \
             -e BUILD_ENVIRONMENT \
             -e JOB_BASE_NAME \
             -e MAX_JOBS="$(nproc --ignore=2)" \
@@ -222,11 +228,13 @@ jobs:
             --security-opt seccomp=unconfined \
             --cap-add=SYS_PTRACE \
             --tty \
+            --detach \
             --user jenkins \
             -v "${GITHUB_WORKSPACE}:/var/lib/jenkins/workspace" \
             -w /var/lib/jenkins/workspace \
-            "${DOCKER_IMAGE}" \
-            sh -c 'sudo chown -R jenkins . && sudo chown -R jenkins /dev && .jenkins/pytorch/build.sh'
+            "${DOCKER_IMAGE}"
+          )
+          docker exec -t "${container_name}" sh -c 'sudo chown -R jenkins . && sudo chown -R jenkins /dev && .jenkins/pytorch/build.sh'
       - name: Parse ref
         id: parse-ref
         run: .github/scripts/parse_ref.py
@@ -244,18 +252,16 @@ jobs:
         run: |
           COMMIT_TIME=$(git log --max-count=1 --format=%ct || echo 0)
           export COMMIT_TIME
-          pip3 install requests
+          pip3 install requests==2.26
           python3 -m tools.stats.upload_binary_size_to_scuba || exit 0
       - name: Test PyTorch
         run: |
+          # detached container should get cleaned up by teardown_ec2_linux
           export SHARD_NUMBER=0
           # TODO: Stop building test binaries as part of the build phase
-          # Used for GPU_FLAG since that doesn't play nice
-          # shellcheck disable=SC2086
           # Make sure we copy test results from bazel-testlogs symlink to
           # a regular directory ./test/test-reports
-          docker run \
-            ${GPU_FLAG:-} \
+          container_name=$(docker run \
             -e BUILD_ENVIRONMENT \
             -e CUSTOM_TEST_ARTIFACT_BUILD_DIR \
             -e GITHUB_ACTIONS \
@@ -272,11 +278,13 @@ jobs:
             --cap-add=SYS_PTRACE \
             --shm-size="${SHM_SIZE}" \
             --tty \
+            --detach \
             --user jenkins \
             -v "${GITHUB_WORKSPACE}:/var/lib/jenkins/workspace" \
             -w /var/lib/jenkins/workspace \
-            "${DOCKER_IMAGE}" \
-            sh -c 'sudo chown -R jenkins . && sudo chown -R jenkins /dev && .jenkins/pytorch/test.sh && cp -Lr ./bazel-testlogs ./test/test-reports'
+            "${DOCKER_IMAGE}"
+          )
+          docker exec -t "${container_name}" sh -c 'sudo chown -R jenkins . && sudo chown -R jenkins /dev && .jenkins/pytorch/test.sh && cp -Lr ./bazel-testlogs ./test/test-reports'
       - name: Chown workspace
         if: always()
         run: |
