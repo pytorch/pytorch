@@ -1232,6 +1232,25 @@ void initJitScriptBindings(PyObject* module) {
                 py::cast<Module>(other)._ivalue().get();
           })
       .def(
+          "__call__",
+          [](const Module& self, py::args args, py::kwargs kwargs) {
+            HANDLE_TH_ERRORS
+            Method method = self.get_method("forward");
+            return invokeScriptMethodFromPython(
+                method,
+                // NOLINTNEXTLINE(performance-move-const-arg)
+                std::move(args),
+                // NOLINTNEXTLINE(performance-move-const-arg)
+                std::move(kwargs));
+            // return invokeScriptMethodFromPython(
+            //     method,
+            //     // NOLINTNEXTLINE(performance-move-const-arg)
+            //     tuple_slice(std::move(args), 1),
+            //     // NOLINTNEXTLINE(performance-move-const-arg)
+            //     std::move(kwargs));
+            END_HANDLE_TH_ERRORS_PYBIND
+          })
+      .def(
           "__deepcopy__",
           [](const Module& self, const py::dict& memo) {
             return Module(

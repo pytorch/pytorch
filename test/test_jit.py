@@ -8200,6 +8200,28 @@ dedent """
         # c is used, then unused should be ordered by alphabetical
         FileCheck().check(r"%c : int, %a : int, %b : int").run(loop_unused.graph)
 
+    def test_script_module_conversion(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super(Foo, self).__init__()
+
+            def forward(self):
+                return 2
+
+        scripted_foo = torch.jit.script(Foo())
+        cpp_module = scripted_foo._c
+
+        class Bar(torch.nn.Module):
+            def __init__(self, m):
+                super(Bar, self).__init__()
+                self.m = m
+
+            def forward(self):
+                return self.m()
+
+        bar = Bar(cpp_module)
+        self.checkModule(bar, ())
+
     def test_filecheck(self):
         def test_check():
             file = "232"

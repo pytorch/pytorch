@@ -299,6 +299,23 @@ def infer_concrete_type_builder(nn_module, share_types=True):
                 torch._C._jit_try_infer_type(value).type(),
                 value)
             continue
+        # TODO since torch._C.ScriptModule doesn't live inside nn_module._modules
+        # we manually add it to concrete_type so that TS compiles it as a module.
+        if isinstance(value, torch._C.ScriptModule):
+            if name in user_annotated_ignored_attributes:
+                continue
+            # Since it is already valid TS model, we wrap it in script-able wrapper.
+            value = wrap_cpp_module(value)
+            attr_type, _ = infer_type(name, value)
+            # TODO copied from adding model logic, clean later
+            if attr_type.success():
+                assert attr_type.type().is_interface_type()
+                # if the type can be inferred, it should be a module interface type
+                sub_concrete_type = torch._C.ConcreteModuleType.from_jit_type(attr_type.type())
+            else:
+                # otherwise we get the concrete module type for item and add it to concrete_type
+                sub_concrete_type = get_module_concrete_type(value, share_types)
+            concrete_type_builder.add_module(name, sub_concrete_type)
 
         # If we got here, this is a regular "data" attribute, add it to the concrete type
         attr_type, inferred = infer_type(name, value)
@@ -479,13 +496,15 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn):
         #    recursively scripting them.
         for name, sub_concrete_type in concrete_type.get_modules():
             orig_value = getattr(nn_module, name)
-            assert isinstance(orig_value, Module), "Expected Module but got {}".format(type(orig_value))
+            assert isinstance(orig_value, Module) or isinstance(orig_value, torch._C.ScriptModule), "Expected Module or ScriptModule but got {}".format(type(orig_value))
             module_type = sub_concrete_type.jit_type
             if isinstance(module_type, torch._C.InterfaceType):
                 # use the interface inference rule to compile the module
                 scripted = interface_script(module_type, orig_value)
             elif isinstance(orig_value, torch.jit.ScriptModule):
                 scripted = orig_value
+            elif isinstance(orig_value, torch._C.ScriptModule):
+                scripted = wrap_cpp_module(orig_value)
             else:
                 # always reuse the provided stubs_fn to infer the methods to compile
                 scripted = create_script_module_impl(orig_value, sub_concrete_type, stubs_fn)
