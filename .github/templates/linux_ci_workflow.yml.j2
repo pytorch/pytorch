@@ -381,7 +381,7 @@ jobs:
 {% endblock %}
 {%- endif -%}
 {%- if enable_doc_jobs %}
-  pytorch_doc_build:
+  build-docs:
     runs-on: linux.2xlarge
     strategy:
       matrix:
@@ -440,17 +440,19 @@ jobs:
         if: ${{ github.event_name == 'pull_request' && matrix.docs_type == 'python' }}
         with:
           retention-days: 14
+          s3-bucket: doc-previews
           if-no-files-found: error
           path: pytorch.github.io/docs/merge/
-          s3-prefix: ${{ github.repository }}/pr-previews/pr/${{ github.event.pull_request.number }}
+          s3-prefix: pytorch/${{ github.event.pull_request.number }}
       - uses: !{{ common.upload_artifact_s3_action }}
         name: Upload C++ Docs Preview
-        if: ${{ github.event_name == 'pull_request' && matrix.docs_type == 'cppdocs' }}
+        if: ${{ github.event_name == 'pull_request' && matrix.docs_type == 'cpp' }}
         with:
           retention-days: 14
           if-no-files-found: error
+          s3-bucket: doc-previews
           path: cppdocs/
-          s3-prefix: ${{ github.repository }}/pr-previews/pr/${{ github.event.pull_request.number }}/cppdocs
+          s3-prefix: pytorch/${{ github.event.pull_request.number }}/cppdocs
       - name: Archive artifacts into zip
         run: |
           zip -r "docs_${DOCS_TYPE}.zip" "${GITHUB_WORKSPACE}/pytorch.github.io" "${GITHUB_WORKSPACE}/cppdocs"
