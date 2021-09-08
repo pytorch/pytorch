@@ -111,8 +111,8 @@ struct TORCH_API Module : public Object {
     return true;
   }
 
-  IValue forward(std::vector<IValue> inputs) {
-    return get_method("forward")(std::move(inputs));
+  IValue forward(std::vector<IValue> inputs, const Kwargs& kwargs = Kwargs()) {
+    return get_method("forward")(std::move(inputs), kwargs);
   }
 
   // In script modules, buffers are Tensors attribute that are _not_ registered
@@ -461,6 +461,7 @@ struct slot_list_impl {
       size_ = size_t(0);
       // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
       for (const value_type& s : *(this)) {
+        (void)s; // Suppress unused variable warning
         ++*size_;
       }
     }

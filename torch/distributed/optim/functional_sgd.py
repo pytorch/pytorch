@@ -23,7 +23,7 @@ class _FunctionalSGD(object):
         dampening: float = 0.0,
         weight_decay: float = 0.0,
         nesterov: bool = False,
-        allow_empty_param_list: bool = False
+        _allow_empty_param_list: bool = False
     ):
         self.defaults = {
             "lr": lr,
@@ -34,7 +34,7 @@ class _FunctionalSGD(object):
         self.nesterov = nesterov
         self.state = torch.jit.annotate(Dict[torch.Tensor, Dict[str, torch.Tensor]], {})
 
-        if len(params) == 0 and not allow_empty_param_list:
+        if len(params) == 0 and not _allow_empty_param_list:
             raise ValueError("optimizer got an empty parameter list")
 
         # NOTE: we only have one param_group and don't allow user to add additional
@@ -83,6 +83,7 @@ class _FunctionalSGD(object):
 
     def step(self, gradients: List[Optional[Tensor]]):
         params = self.param_group['params']
+        params_with_grad = []
         grads = []
         momentum_buffer_list: List[Optional[Tensor]] = []
         lr = self.defaults['lr']
@@ -99,6 +100,7 @@ class _FunctionalSGD(object):
 
         for param, gradient in zip(params, gradients):
             if gradient is not None:
+                params_with_grad.append(param)
                 grads.append(gradient)
 
                 if param not in self.state:
@@ -111,7 +113,7 @@ class _FunctionalSGD(object):
                     momentum_buffer_list.append(state['momentum_buffer'])
 
         with torch.no_grad():
-            F.sgd(params,
+            F.sgd(params_with_grad,
                   grads,
                   momentum_buffer_list,
                   weight_decay=weight_decay,
@@ -121,7 +123,7 @@ class _FunctionalSGD(object):
                   nesterov=self.nesterov)
 
         # update momentum_buffers in state
-        for i, p in enumerate(params):
+        for i, p in enumerate(params_with_grad):
             state = self.state[p]
             momentum_buffer = momentum_buffer_list[i]
             if momentum_buffer is not None:

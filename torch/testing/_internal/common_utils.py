@@ -23,6 +23,7 @@ import warnings
 import random
 import contextlib
 import shutil
+import threading
 from pathlib import Path
 import socket
 import subprocess
@@ -39,18 +40,20 @@ import json
 import __main__  # type: ignore[import]
 import errno
 from typing import cast, Any, Dict, Iterable, Iterator, Optional, Union
+from unittest.mock import MagicMock
 
 import numpy as np
 
-from torch.testing import floating_types_and, integral_types, complex_types
 import expecttest
 from .._core import \
     (_compare_tensors_internal, _compare_scalars_internal, _compare_return_type)
 
 import torch
 import torch.cuda
+from torch.testing import make_tensor
 from torch._utils_internal import get_writable_path
 from torch._six import string_classes
+from torch import Tensor
 import torch.backends.cudnn
 import torch.backends.mkl
 from enum import Enum
@@ -154,7 +157,7 @@ def _get_test_report_path():
     return os.path.join('test-reports', test_source)
 
 
-parser = argparse.ArgumentParser(add_help=False)
+parser = argparse.ArgumentParser()
 parser.add_argument('--subprocess', action='store_true',
                     help='whether to run each test in a subprocess')
 parser.add_argument('--seed', type=int, default=1234)
@@ -170,6 +173,15 @@ parser.add_argument('--log-suffix', type=str, default="")
 parser.add_argument('--run-parallel', type=int, default=1)
 parser.add_argument('--import-slow-tests', type=str, nargs='?', const=SLOW_TESTS_FILE)
 parser.add_argument('--import-disabled-tests', type=str, nargs='?', const=DISABLED_TESTS_FILE)
+
+# Only run when -h or --help flag is active to display both unittest and parser help messages.
+def run_unittest_help(argv):
+    unittest.main(argv=argv)
+
+if '-h' in sys.argv or '--help' in sys.argv:
+    help_thread = threading.Thread(target=run_unittest_help, args=(sys.argv,))
+    help_thread.start()
+    help_thread.join()
 
 args, remaining = parser.parse_known_args()
 if args.jit_executor == 'legacy':
@@ -412,6 +424,7 @@ TEST_LIBROSA = _check_module_exists('librosa')
 # Python 2.7 doesn't have spawn
 NO_MULTIPROCESSING_SPAWN = os.environ.get('NO_MULTIPROCESSING_SPAWN', '0') == '1'
 TEST_WITH_ASAN = os.getenv('PYTORCH_TEST_WITH_ASAN', '0') == '1'
+TEST_WITH_DEV_DBG_ASAN = os.getenv('PYTORCH_TEST_WITH_DEV_DBG_ASAN', '0') == '1'
 TEST_WITH_TSAN = os.getenv('PYTORCH_TEST_WITH_TSAN', '0') == '1'
 TEST_WITH_UBSAN = os.getenv('PYTORCH_TEST_WITH_UBSAN', '0') == '1'
 TEST_WITH_ROCM = os.getenv('PYTORCH_TEST_WITH_ROCM', '0') == '1'
@@ -499,6 +512,21 @@ class DeterministicGuard:
 
     def __exit__(self, exception_type, exception_value, traceback):
         torch.use_deterministic_algorithms(self.deterministic_restore)
+
+# Context manager for setting cuda sync debug mode and reset it
+# to original value
+# we are not exposing it to the core because sync debug mode is
+# global and thus not thread safe
+class CudaSyncGuard:
+    def __init__(self, sync_debug_mode):
+        self.mode = sync_debug_mode
+
+    def __enter__(self):
+        self.debug_mode_restore = torch.cuda.get_sync_debug_mode()
+        torch.cuda.set_sync_debug_mode(self.mode)
+
+    def __exit__(self, exception_type, exception_value, traceback):
+        torch.cuda.set_sync_debug_mode(self.debug_mode_restore)
 
 # This decorator can be used for API tests that call
 # torch.use_deterministic_algorithms().  When the test is finished, it will
@@ -888,14 +916,17 @@ def check_if_enable(test: unittest.TestCase):
             platform_to_conditional: Dict = {
                 "mac": IS_MACOS,
                 "macos": IS_MACOS,
+                "win": IS_WINDOWS,
                 "windows": IS_WINDOWS,
-                "linux": IS_LINUX
+                "linux": IS_LINUX,
+                "rocm": TEST_WITH_ROCM
             }
             if platforms == [] or any([platform_to_conditional[platform] for platform in platforms]):
                 raise unittest.SkipTest(
                     f"Test is disabled because an issue exists disabling it: {issue_url}" +
-                    f" for {'all' if platforms == [] else ''}platform(s) {', '.join(platforms)}." +
-                    " To enable, set the environment variable PYTORCH_RUN_DISABLED_TESTS=1")
+                    f" for {'all' if platforms == [] else ''}platform(s) {', '.join(platforms)}. " +
+                    "If you're seeing this on your local machine and would like to enable this test, " +
+                    "please make sure IN_CI is not set and you are not using the flag --import-disabled-tests.")
     if TEST_SKIP_FAST:
         if not getattr(test, test._testMethodName).__dict__.get('slow_test', False):
             raise unittest.SkipTest("test is fast; we disabled it with PYTORCH_TEST_SKIP_FAST")
@@ -1918,81 +1949,7 @@ def retry(ExceptionToCheck, tries=3, delay=3, skip_after_retries=False):
     return deco_retry
 
 
-# Methods for matrix and tensor generation
-
-def make_tensor(size, device: torch.device, dtype: torch.dtype, *, low=None, high=None,
-                requires_grad: bool = False, noncontiguous: bool = False,
-                exclude_zero: bool = False) -> torch.Tensor:
-    """ Creates a random tensor with the given size, device and dtype.
-
-        By default, the tensor's values are in the range [-9, 9] for most dtypes. If low
-        and/or high are specified then the values will be in the range [max(-9, low), min(9, high)].
-
-        For unsigned types the values are in the range[0, 9] and for complex types the real and imaginary
-        parts are each in the range [-9, 9].
-
-        If noncontiguous=True, a noncontiguous tensor with the given size will be returned unless the size
-        specifies a tensor with a 1 or 0 elements in which case the noncontiguous parameter is ignored because
-        it is not possible to create a noncontiguous Tensor with a single element.
-
-        If exclude_zero is passed with True (default is False), all the matching values (with zero) in
-        created tensor are replaced with an epsilon value if floating type, [`eps + `eps`.j] if
-        complex type and 1 if integer/boolean type.
-    """
-
-    assert low is None or low < 9, "low value too high!"
-    assert high is None or high > -9, "high value too low!"
-
-    if dtype is torch.bool:
-        result = torch.randint(0, 2, size, device=device, dtype=dtype)
-    elif dtype is torch.uint8:
-        low = math.floor(0 if low is None else max(low, 0))
-        high = math.ceil(10 if high is None else min(high, 10))
-        result = torch.randint(low, high, size, device=device, dtype=dtype)
-    elif dtype in integral_types():
-        low = math.floor(-9 if low is None else max(low, -9))
-        high = math.ceil(10 if high is None else min(high, 10))
-        result = torch.randint(low, high, size, device=device, dtype=dtype)
-    elif dtype in floating_types_and(torch.half, torch.bfloat16):
-        low = -9 if low is None else max(low, -9)
-        high = 9 if high is None else min(high, 10)
-        span = high - low
-        # Windows doesn't support torch.rand(bfloat16) on CUDA
-        if IS_WINDOWS and torch.device(device).type == 'cuda' and dtype is torch.bfloat16:
-            result = (torch.rand(size, device=device, dtype=torch.float32) * span + low).to(torch.bfloat16)
-        else:
-            result = torch.rand(size, device=device, dtype=dtype) * span + low
-    else:
-        assert dtype in complex_types()
-        low = -9 if low is None else max(low, -9)
-        high = 9 if high is None else min(high, 10)
-        span = high - low
-        float_dtype = torch.float if dtype is torch.cfloat else torch.double
-        real = torch.rand(size, device=device, dtype=float_dtype) * span + low
-        imag = torch.rand(size, device=device, dtype=float_dtype) * span + low
-        result = torch.complex(real, imag)
-
-    if noncontiguous and result.numel() > 1:
-        result = torch.repeat_interleave(result, 2, dim=-1)
-        result = result[..., ::2]
-
-    if exclude_zero:
-        if dtype in integral_types() or dtype is torch.bool:
-            replace_with = torch.tensor(1, device=device, dtype=dtype)
-        elif dtype in floating_types_and(torch.half, torch.bfloat16):
-            replace_with = torch.tensor(torch.finfo(dtype).eps, device=device, dtype=dtype)
-        else:
-            assert dtype in complex_types()
-            float_dtype = torch.float if dtype is torch.cfloat else torch.double
-            float_eps = torch.tensor(torch.finfo(float_dtype).eps, device=device, dtype=float_dtype)
-            replace_with = torch.complex(float_eps, float_eps)
-        result[result == 0] = replace_with
-
-    if dtype in floating_types_and(torch.half, torch.bfloat16) or\
-       dtype in complex_types():
-        result.requires_grad = requires_grad
-
-    return result
+# Methods for matrix generation
 
 def random_square_matrix_of_rank(l, rank, dtype=torch.double, device='cpu'):
     assert rank <= l
@@ -2492,13 +2449,6 @@ def disable_gc():
     else:
         yield
 
-def has_breakpad() -> bool:
-    # If not on a special build, check that the library was actually linked in
-    try:
-        torch._C._get_minidump_directory()  # type: ignore[attr-defined]
-        return True
-    except RuntimeError as e:
-        return False
 
 def find_library_location(lib_name: str) -> Path:
     # return the shared library file in the installed folder if exist,
@@ -2509,3 +2459,82 @@ def find_library_location(lib_name: str) -> Path:
         return path
     torch_root = Path(__file__).resolve().parent.parent.parent
     return torch_root / 'build' / 'lib' / lib_name
+
+def sandcastle_skip(reason):
+    """
+    Similar to unittest.skip, however in the sandcastle environment it just
+    "passes" the test instead to avoid creating tasks complaining about tests
+    skipping continuously.
+    """
+    def decorator(func):
+        if not IS_SANDCASTLE:
+            func.__unittest_skip__ = True
+            func.__unittest_skip_why__ = reason
+            return func
+
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            print(f'Skipping {func.__name__} on sandcastle for following reason: {reason}', file=sys.stderr)
+            return
+        return wrapper
+
+    return decorator
+
+def mock_wrapper(method):
+    """
+    Returns a function that calls the real implementation of a method
+    in addition to passing args to a mock object.
+    """
+    mock = MagicMock()
+
+    @wraps(method)
+    def wrapper(self, *args, **kwargs):
+        mock(*args, **kwargs)
+        return method(self, *args, **kwargs)
+    wrapper.mock = mock  # type: ignore[attr-defined]
+    return wrapper
+
+def get_tensors_from(args, kwargs):
+    """ Returns a set of all Tensor objects in the given args and kwargs. """
+    return set([arg for arg in args if isinstance(arg, Tensor)] +
+               [v for v in kwargs.values() if isinstance(v, Tensor)])
+
+
+def has_breakpad():
+    # We always build with breakpad in CI
+    if IS_IN_CI:
+        return True
+
+    # If not on a special build, check that the library was actually linked in
+    try:
+        torch._C._get_minidump_directory()  # type: ignore[attr-defined]
+        return True
+    except RuntimeError as e:
+        if "Minidump handler is uninintialized" in str(e):
+            return True
+        return False
+
+
+def sandcastle_skip_if(condition, reason):
+    """
+    Similar to unittest.skipIf, however in the sandcastle environment it just
+    "passes" the test instead to avoid creating tasks complaining about tests
+    skipping continuously.
+    """
+    def decorator(func):
+
+        if not IS_SANDCASTLE and condition:
+            func.__unittest_skip__ = True
+            func.__unittest_skip_why__ = reason
+            return func
+
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            if condition and IS_SANDCASTLE:
+                print(f'Skipping {func.__name__} on sandcastle for following reason: {reason}', file=sys.stderr)
+                return
+            else:
+                return func(*args, **kwargs)
+        return wrapper
+
+    return decorator
