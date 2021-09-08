@@ -163,6 +163,30 @@ class TestBinaryUfuncs(TestCase):
             )
             raise AssertionError(msg)
 
+    @ops([op for op in binary_ufuncs if op.ref])
+    def test_reference_numerics_normal(self, device, dtype, op):
+        def to_numpy(t):
+            dtype = t.dtype if t.dtype in torch_to_numpy_dtype_dict else torch.get_default_dtype()
+            return t.cpu().to(dtype).numpy()
+
+        for shape in [
+            (812,),
+            (1029, 917),
+            *((),) * 812,
+            (0,),
+            (0, 3, 3),
+            (1, 0, 5),
+            (6, 0, 0, 0),
+            (3, 0, 1, 0),
+        ]:
+            lhs = make_tensor(shape, device=device, dtype=dtype, **op.lhs_make_tensor_kwargs)
+            rhs = make_tensor(shape, device=device, dtype=dtype, **op.rhs_make_tensor_kwargs)
+
+            output = op(lhs, rhs)
+            output_ref = torch.as_tensor(op.ref(to_numpy(lhs), to_numpy(rhs)), device=device, dtype=dtype)
+
+            torch.testing.assert_close(output, output_ref)
+
     def test_add_broadcast_empty(self, device):
         # empty + empty
         self.assertRaises(RuntimeError, lambda: torch.randn(5, 0, device=device) + torch.randn(0, 5, device=device))
