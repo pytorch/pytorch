@@ -1969,7 +1969,7 @@ class AbstractTestCases:
             torch.set_printoptions(show_shape=True)
             self.assertEqual(x.__repr__(), str(x))
             self.assertExpectedInline(str(x), '''tensor([3, 4], shape=(2,))''')
-            torch.set_printoptions(show_shape=False) # reset to the default value
+            torch.set_printoptions(show_shape=False)  # reset to the default value
 
             # test no leading space if all elements positive
             x = torch.tensor([1, 2])

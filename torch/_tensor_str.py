@@ -299,11 +299,11 @@ def _str_intern(inp):
     self, tangent = torch.autograd.forward_ad.unpack_dual(inp)
     # print shape of the tensor
     if PRINT_OPTS.show_shape\
-        and not self.is_sparse\
-        and not self.is_sparse_csr\
-        and not self.is_quantized\
-        and not self.is_meta\
-        and self.numel() != 0:
+            and not self.is_sparse\
+            and not self.is_sparse_csr\
+            and not self.is_quantized\
+            and not self.is_meta\
+            and self.numel() != 0:
         suffixes.append('shape=' + str(tuple(self.shape)))
 
     # Note [Print tensor device]:
