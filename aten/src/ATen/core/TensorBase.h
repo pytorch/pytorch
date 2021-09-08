@@ -83,6 +83,7 @@ class TORCH_API TensorBase {
   explicit TensorBase(unsafe_borrow_t, const TensorBase& rhs)
       : impl_(c10::intrusive_ptr<at::TensorImpl, UndefinedTensorImpl>::reclaim(rhs.impl_.get())) {}
   friend MaybeOwnedTraits<TensorBase>;
+  friend OptionalTensorRef;  // so it can get at unsafe_borrow_t
 
  public:
   TensorBase() = default;

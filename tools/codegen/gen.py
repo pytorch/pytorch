@@ -1114,6 +1114,12 @@ def main() -> None:
     grouped_native_functions = get_grouped_native_functions(native_functions)
     structured_native_functions = [g for g in grouped_native_functions if isinstance(g, NativeFunctionsGroup)]
 
+    #print(len([g for g in structured_native_functions if g.structured]))
+    print(sum([len(list(g.functions())) for g in structured_native_functions if g.structured]))
+    print(sum([len(list(g.functions())) for g in structured_native_functions]))
+    print(len(grouped_native_functions))
+    print("----")
+
     template_dir = os.path.join(options.source_path, "templates")
 
     # NB: It is mandatory to NOT use os.path.join here, as the install directory
