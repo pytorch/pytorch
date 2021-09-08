@@ -3062,6 +3062,8 @@ class TestOperatorSignatures(JitTestCase):
                            'expand_as',
                            'fill_',
                            'hstack',
+                           'igamma',
+                           'igammac',
                            'linalg.multi_dot',
                            'lu',
                            'norm',
