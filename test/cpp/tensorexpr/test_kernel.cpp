@@ -1419,6 +1419,7 @@ TEST_F(Kernel, CustomLowering) {
 }
 
 TEST_F(Kernel, Vectorize) {
+#ifdef TORCH_ENABLE_LLVM
   const auto graph_string = R"IR(
       graph(%0 : Float(100, 16, strides=[16, 1], device=cpu),
             %1 : Float(100, 16, strides=[16, 1], device=cpu)):
@@ -1449,10 +1450,12 @@ TEST_F(Kernel, Vectorize) {
   for (size_t i = 0; i < 100 * 16; i++) {
     CHECK_EQ(((float*)o.data_ptr())[i], ((float*)ref.data_ptr())[i]);
   }
+#endif
 }
 
 // TODO: To vectorize loopnest for 100x3 case, we need to flatten loops first.
 TEST_F(Kernel, DISABLED_FlattenVectorize) {
+#ifdef TORCH_ENABLE_LLVM
   const auto graph_string = R"IR(
       graph(%0 : Float(100, 3, strides=[3, 1], device=cpu),
             %1 : Float(100, 3, strides=[3, 1], device=cpu)):
@@ -1483,6 +1486,7 @@ TEST_F(Kernel, DISABLED_FlattenVectorize) {
   for (size_t i = 0; i < 100 * 3; i++) {
     CHECK_EQ(((float*)o.data_ptr())[i], ((float*)ref.data_ptr())[i]);
   }
+#endif
 }
 
 } // namespace jit
