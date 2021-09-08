@@ -3742,15 +3742,13 @@ Tensor lu_solve_forward_AD(
   auto dL = dLU_data.tril(-1);
   auto dU = dLU_data.triu();
 
-  Tensor U;
-  std::tie(std::ignore, std::ignore, U) = at::lu_unpack(LU_data, LU_pivots);
-
   // From the derivations from above we have that:
   // dX = -U^{-1} dU U^{-1} L^{-1} P^T B - U^{-1} L^{-1} dL L^{-1} P^T B + U^{-1} L^{-1} P^T dB,
   // or, using that X = (LU)^{-1} P^T B,
   // dX = -U^{-1} dU X - (LU)^{-1} dL U X + (LU)^{-1} P^T dB
 
   // -U^{-1} dU X
+  auto U = LU_data.triu();
   auto dU_part = -std::get<0>(at::triangular_solve(
     dU.matmul(X),
     U,
