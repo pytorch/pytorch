@@ -74,16 +74,16 @@ inline bool variable_excluded_from_dispatch() {
 //   the other hand can materialize a `const Tensor &` without
 //   touching the reference-count.
 class TORCH_API TensorBase {
- protected:
+ public:
   struct unsafe_borrow_t { explicit unsafe_borrow_t() = default; };
 
+ protected:
   // Create a Tensor with a +0 reference count. Special care must be
   // taken to avoid decrementing this reference count at destruction
   // time. Intended to support MaybeOwnedTraits<Tensor>.
   explicit TensorBase(unsafe_borrow_t, const TensorBase& rhs)
       : impl_(c10::intrusive_ptr<at::TensorImpl, UndefinedTensorImpl>::reclaim(rhs.impl_.get())) {}
   friend MaybeOwnedTraits<TensorBase>;
-  friend OptionalTensorRef;  // so it can get at unsafe_borrow_t
 
  public:
   TensorBase() = default;
