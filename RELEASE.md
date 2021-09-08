@@ -10,9 +10,12 @@
     - [Release Candidate Storage](#release-candidate-storage)
     - [Cherry Picking Fixes](#cherry-picking-fixes)
   - [Promoting RCs to Stable](#promoting-rcs-to-stable)
-- [Doing a Patch Release](#doing-a-patch-release)
+- [Patch Releases](#patch-releases)
   - [Patch Release Criteria](#patch-release-criteria)
-  - [Patch release process](#patch-release-process)
+  - [Patch Release Process](#patch-release-process)
+    - [Triage](#triage)
+    - [Building a release schedule / cherry picking](#building-a-release-schedule--cherry-picking)
+    - [Building Binaries / Promotion to Stable](#building-binaries--promotion-to-stable)
 - [Special Topics](#special-topics)
   - [Updating submodules for a release](#updating-submodules-for-a-release)
 
@@ -120,9 +123,9 @@ Promotion should occur in two steps:
 
 **NOTE**: The promotion of wheels to PyPI can only be done once so take caution when attempting to promote wheels to PyPI, (see https://github.com/pypa/warehouse/issues/726 for a discussion on potential draft releases within PyPI)
 
-# Doing a Patch Release
+# Patch Releases
 
-A patch release is a maintenance release of PyTorch that includes fixes for regressions found in a previous minor release.
+A patch release is a maintenance release of PyTorch that includes fixes for regressions found in a previous minor release. Patch releases typically will bump the `patch` version from semver (i.e. `[major].[minor].[patch]`
 
 ## Patch Release Criteria
 
@@ -134,16 +137,36 @@ Patch releases should be considered if a regression meets the following criteria
         * [pytorch/audio](https://github.com/pytorch/audio)
         * [pytorch/text](https://github.com/pytorch/text)
 3. Is there not a viable workaround?
+    * Can the regression be solved simply or is it not overcomable?
 
-## Patch release process
+> *NOTE*: Patch releases should only be considered when functionality is broken, documentation does not typically fall within this category
 
-1. Tag issues / pull requests with `patch release triage`
-    * ![image](https://user-images.githubusercontent.com/1700823/131175874-1526d098-d69c-48e4-ad75-c4afa1099f62.png)
-2. Patch release managers should triage all issues (on a bi-weekly basis) and submit issues into the related milestone (i.e. 1.9.1) if submitted issue match the patch release criteria
-    * ![image](https://user-images.githubusercontent.com/1700823/131175980-148ff38d-44c3-4611-8a1f-cd2fd1f4c49d.png)
-3. Patch release managers should vote on a potential release date and create a cherry pick tracker with dates outlined
-    * Milestone should also be updated to reflect new release date
-4. Proceed with patch release as if regular release process
+## Patch Release Process
+
+### Triage
+
+> Main POC: Triage Reviewers
+
+1. Tag issues / pull requests that are candidates for a potential patch release with `triage review`
+    * ![adding triage review label](https://user-images.githubusercontent.com/1700823/132589089-a9210a14-6159-409d-95e5-f79067f6fa38.png)
+2. Triage reviewers will then check if the regression / fix identified fits within above mentioned [Patch Release Criteria](#patch-release-criteria)
+3. Triage reviewers will then add the issue / pull request to the related milestone (i.e. `1.9.1`) if the regressions if found to be within the [Patch Release Criteria](#patch-release-criteria)
+    * ![adding to milestone](https://user-images.githubusercontent.com/1700823/131175980-148ff38d-44c3-4611-8a1f-cd2fd1f4c49d.png)
+
+### Building a release schedule / cherry picking
+
+> Main POC: Patch Release Managers
+
+1. After regressions / fixes have been triaged Patch Release Managers will work together and build /announce a schedule for the patch release
+    * *NOTE*: Ideally this should be ~2-3 weeks after a regression has been identified to allow other regressions to be identified
+2. Patch Release Managers will work with the authors of the regressions / fixes to cherry pick their change into the related release branch (i.e. `release/1.9` for `1.9.1`)
+
+### Building Binaries / Promotion to Stable
+
+> Main POC: Patch Release managers
+
+1. Patch Release Managers will follow the process of [Drafting RCs (Release Candidates)](#drafting-rcs-release-candidates)
+2. Patch Release Managers will follow the process of [Promoting RCs to Stable](#promoting-rcs-to-stable)
 
 # Special Topics
 
