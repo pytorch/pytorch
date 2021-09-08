@@ -2668,6 +2668,11 @@ class TestBinaryUfuncs(TestCase):
         test_x((1, 10), 0, [1.0], device)
         test_x((0, 2), 0, [], device)
         test_x((0, 2), 1, [1.0, 2.0], device)
+        test_x((2, 3, 4), -1, [1.0, 2.0, 3.0, 4.0], device)
+        test_x((2, 3, 4), 0, [1.0, 2.0], device)
+        test_x((2, 3, 4), 1, [1.0, 2.0, 3.0], device)
+        test_x((2, 3, 4), 2, [1.0, 2.0, 3.0, 4.0], device)
+        test_x((2, 2, 4), -1, [[1.0, 2.0, 3.0, 4.0], [1.0, 2.0, 3.0, 4.0]], device)
         with self.assertRaisesRegex(
                 IndexError,
                 'Dimension out of range'):
@@ -2726,6 +2731,10 @@ class TestBinaryUfuncs(TestCase):
         test_x((10, 2), 0, [2.0, 3.0, 4.0, 7.0, 11.0, 14.0, 22.0, 26.0, 26.1, 30.3], device)
         test_x((1, 10), 0, [1.0], device)
         test_x((0, 2), 1, [1, 2], device)
+        test_x((2, 3, 4), -1, [1.0, 2.0, 3.0, 4.0], device)
+        test_x((2, 3, 4), 0, [1.0, 2.0], device)
+        test_x((2, 3, 4), 1, [1.0, 2.0, 3.0], device)
+        test_x((2, 3, 4), 2, [1.0, 2.0, 3.0, 4.0], device)
 
         test_empty_x((0, 2), 0, [], device)  # SciPy failing when x == [], but our version returns empty
 
