@@ -3,13 +3,13 @@ import yaml
 
 from tools.codegen.gen import get_grouped_native_functions, parse_native_yaml
 from tools.codegen.gen_backend_stubs import parse_backend_yaml
-from tools.codegen.model import Argument, OptionalType
+from tools.codegen.model import Argument, BaseTy, BaseType, OptionalType
 from tools.codegen.utils import YamlLoader
 from typing import Optional, Tuple
 
 def has_optional_parameters(arguments: Tuple[Argument, ...]) -> bool:
     for argument in arguments:
-        if type(argument.type) is OptionalType:
+        if (type(argument.type) is OptionalType) and argument.type.is_tensor_like():
             return True
 
     return False
@@ -45,19 +45,19 @@ def main() -> None:
 
     result_functions = []
     for function in native_functions:
-      if len(filter_set) > 0 and (str(function.func.name) not in filter_set):
-        continue
-      # TODO(jwtan): Examine the remaining attributes.
-      if has_optional_parameters(function.func.arguments.pre_self_positional):
-        result_functions.append(str(function.func))
-        continue
-      if has_optional_parameters(function.func.arguments.post_self_positional):
-        result_functions.append(str(function.func))
-        continue
+        if len(filter_set) > 0 and (str(function.func.name) not in filter_set):
+            continue
+        # TODO(jwtan): Examine the remaining attributes.
+        if has_optional_parameters(function.func.arguments.pre_self_positional):
+            result_functions.append(str(function.func))
+            continue
+        if has_optional_parameters(function.func.arguments.post_self_positional):
+            result_functions.append(str(function.func))
+            continue
 
     result_functions.sort()
-
-    print('The following functions, total {}, have optional parameters:\n'.format(len(result_functions)))
+    result_functions_size = len(result_functions)
+    print('The following functions, total {} ({:.2f}), have optional parameters:\n'.format(result_functions_size, result_functions_size / total_operators))
     for function in result_functions:
         print(function)
 
