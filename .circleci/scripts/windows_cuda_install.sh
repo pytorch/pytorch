@@ -4,9 +4,9 @@ set -eux -o pipefail
 cuda_major_version=${CUDA_VERSION%.*}
 
 if [[ "$cuda_major_version" == "10" ]]; then
-    cuda_installer_name="cuda_10.1.243_426.00_win10"
+    cuda_installer_name="cuda_10.2.89_441.22_win10"
     msbuild_project_dir="CUDAVisualStudioIntegration/extras/visual_studio_integration/MSBuildExtensions"
-    cuda_install_packages="nvcc_10.1 cuobjdump_10.1 nvprune_10.1 cupti_10.1 cublas_10.1 cublas_dev_10.1 cudart_10.1 cufft_10.1 cufft_dev_10.1 curand_10.1 curand_dev_10.1 cusolver_10.1 cusolver_dev_10.1 cusparse_10.1 cusparse_dev_10.1 nvgraph_10.1 nvgraph_dev_10.1 npp_10.1 npp_dev_10.1 nvrtc_10.1 nvrtc_dev_10.1 nvml_dev_10.1"
+    cuda_install_packages="nvcc_10.2 cuobjdump_10.2 nvprune_10.2 cupti_10.2 cublas_10.2 cublas_dev_10.2 cudart_10.2 cufft_10.2 cufft_dev_10.2 curand_10.2 curand_dev_10.2 cusolver_10.2 cusolver_dev_10.2 cusparse_10.2 cusparse_dev_10.2 nvgraph_10.2 nvgraph_dev_10.2 npp_10.2 npp_dev_10.2 nvrtc_10.2 nvrtc_dev_10.2 nvml_dev_10.2"
 elif [[ "$cuda_major_version" == "11" ]]; then
     if [[ "${CUDA_VERSION}" == "11.1" ]]; then
         cuda_installer_name="cuda_11.1.0_456.43_win10"
