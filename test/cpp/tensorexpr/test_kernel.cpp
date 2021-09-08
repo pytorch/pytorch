@@ -1440,8 +1440,7 @@ TEST_F(Kernel, Vectorize) {
   oss << *s;
 
   // Check the IR we produced
-  const std::string& verification_pattern =
-      R"IR(# CHECK: Ramp)IR";
+  const std::string& verification_pattern = R"IR(# CHECK: Ramp)IR";
   torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 
   std::vector<IValue> stack = fmap<IValue>(inputs);
@@ -1475,8 +1474,7 @@ TEST_F(Kernel, DISABLED_FlattenVectorize) {
   oss << *s;
 
   // Check the IR we produced
-  const std::string& verification_pattern =
-      R"IR(# CHECK: Ramp)IR";
+  const std::string& verification_pattern = R"IR(# CHECK: Ramp)IR";
   torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 
   std::vector<IValue> stack = fmap<IValue>(inputs);
