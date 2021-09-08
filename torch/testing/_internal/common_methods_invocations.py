@@ -8711,6 +8711,8 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            assert_autodiffed=True,
            skips=(
+               # TODO: see https://github.com/pytorch/pytorch/issues/64709
+               SkipInfo('TestCommon', 'test_out'),
                # RuntimeError: Arguments for call not valid.
                #               Expected a value of type 'List[Tensor]' for argument
                #               'tensors' but instead found type 'Tensor (inferred)'.
