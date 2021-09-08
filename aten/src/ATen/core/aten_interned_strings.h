@@ -253,6 +253,7 @@ _(aten, conv_tbc) \
 _(aten, conv_tbc_backward) \
 _(aten, conv_transpose1d) \
 _(aten, convolution) \
+_(aten, convolution_relu) \
 _(aten, copy_sparse_to_sparse) \
 _(aten, corrcoef) \
 _(aten, cos) \
@@ -279,7 +280,6 @@ _(aten, cudnn_convolution_transpose_backward) \
 _(aten, cudnn_convolution_transpose_backward_bias) \
 _(aten, cudnn_convolution_transpose_backward_input) \
 _(aten, cudnn_convolution_transpose_backward_weight) \
-_(aten, cudnn_convolution_relu) \
 _(aten, cudnn_convolution_add_relu) \
 _(aten, cudnn_grid_sampler) \
 _(aten, cudnn_grid_sampler_backward) \

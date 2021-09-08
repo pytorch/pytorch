@@ -12,6 +12,12 @@ Tensor mkldnn_convolution(
   TORCH_CHECK(false, "mkldnn_convolution_forward: ATen not compiled with MKLDNN support");
 }
 
+Tensor mkldnn_convolution_relu(
+    const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias_opt,
+    IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups) {
+  TORCH_CHECK(false, "mkldnn_convolution_relu: ATen not compiled with MKLDNN support");
+}
+
 Tensor mkldnn_convolution_backward_input(
     IntArrayRef input_size, const Tensor& grad_output, const Tensor& weight,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups, bool bias_defined) {
@@ -47,7 +53,8 @@ ideep::tensor _mkldnn_convolution(
     IntArrayRef padding,
     IntArrayRef stride,
     IntArrayRef dilation,
-    int64_t groups) {
+    int64_t groups,
+    const ideep::attr_t& attr = ideep::attr_t()) {
 
   auto kernel_size = w.get_dims();
 
@@ -67,7 +74,11 @@ ideep::tensor _mkldnn_convolution(
         {dilation.begin(), dilation.end()},
         {padding.begin(), padding.end()},
         {padding.begin(), padding.end()},
-        groups);
+        groups,
+        ideep::scale_t(),
+        ideep::scale_t(),
+        ideep::scale_t(),
+        attr);
   } else {
     ideep::convolution_forward::compute(
         x,
@@ -78,14 +89,19 @@ ideep::tensor _mkldnn_convolution(
         {dilation.begin(), dilation.end()},
         {padding.begin(), padding.end()},
         {padding.begin(), padding.end()},
-        groups);
+        groups,
+        ideep::scale_t(),
+        ideep::scale_t(),
+        ideep::scale_t(),
+        attr);
   }
   return y;
 }
 
 Tensor mkldnn_convolution(
     const Tensor& input,
-    const Tensor& weight, const c10::optional<Tensor>& bias_opt,
+    const Tensor& weight,
+    const c10::optional<Tensor>& bias_opt,
     IntArrayRef padding,
     IntArrayRef stride,
     IntArrayRef dilation,
@@ -113,6 +129,52 @@ Tensor mkldnn_convolution(
       stride,
       dilation,
       groups);
+
+  if (input.is_mkldnn()) {
+    return new_with_itensor_mkldnn(std::move(mkldnn_output), optTypeMetaToScalarType(input.options().dtype_opt()),
+                                   input.options().device_opt());
+  } else {
+    return mkldnn_to_dense(
+        new_with_itensor_mkldnn(std::move(mkldnn_output), optTypeMetaToScalarType(input.options().dtype_opt()),
+                                input.options().device_opt()));
+  }
+}
+
+Tensor mkldnn_convolution_relu(
+    const Tensor& input,
+    const Tensor& weight,
+    const c10::optional<Tensor>& bias_opt,
+    IntArrayRef stride,
+    IntArrayRef padding,
+    IntArrayRef dilation,
+    int64_t groups) {
+  TORCH_CHECK(input.dim() == 4 || input.dim() == 5,
+    "mkldnn_convolution_relu: currently mkldnn only support 2d or 3d convolution relu fusion");
+
+  // See [Note: hacky wrapper removal for optional tensor]
+  c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
+  const Tensor& bias = *bias_maybe_owned;
+
+  if (input.scalar_type() == ScalarType::BFloat16) {
+    TORCH_CHECK(mkldnn_bf16_device_check(),
+        "mkldnn_convolution_relu: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq");
+  }
+  const ideep::tensor mkldnn_input = itensor_from_tensor(input);
+  const ideep::tensor mkldnn_weight = itensor_from_tensor(weight);
+  c10::optional<ideep::tensor> mkldnn_bias{c10::nullopt};
+  if (bias.defined()) {
+    mkldnn_bias = itensor_from_tensor(bias);
+  }
+
+  ideep::tensor mkldnn_output = _mkldnn_convolution(
+      mkldnn_input,
+      mkldnn_weight,
+      mkldnn_bias,
+      padding,
+      stride,
+      dilation,
+      groups,
+      ideep::attr_t::fuse_relu());
 
   if (input.is_mkldnn()) {
     return new_with_itensor_mkldnn(std::move(mkldnn_output), optTypeMetaToScalarType(input.options().dtype_opt()),

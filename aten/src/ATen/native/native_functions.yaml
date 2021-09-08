@@ -1370,10 +1370,6 @@
   dispatch:
     CUDA: cudnn_convolution_transpose_backward_weight
 
-- func: cudnn_convolution_relu(Tensor self, Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, int groups) -> Tensor
-  dispatch:
-    CUDA: cudnn_convolution_relu
-
 - func: cudnn_convolution_add_relu(Tensor self, Tensor weight, Tensor z, Scalar? alpha, Tensor? bias, int[] stride, int[] padding, int[] dilation, int groups) -> Tensor
   dispatch:
     CUDA: cudnn_convolution_add_relu
@@ -2933,6 +2929,11 @@
 - func: mkldnn_convolution(Tensor self, Tensor weight, Tensor? bias, int[] padding, int[] stride, int[] dilation, int groups) -> Tensor
   dispatch:
     CompositeExplicitAutograd: mkldnn_convolution
+
+- func: convolution_relu(Tensor self, Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, int groups) -> Tensor
+  dispatch:
+    CPU, MkldnnCPU: mkldnn_convolution_relu
+    CUDA: cudnn_convolution_relu
 
 - func: mkldnn_convolution_backward_input(int[] self_size, Tensor grad_output, Tensor weight, int[] padding, int[] stride, int[] dilation, int groups, bool bias_defined) -> Tensor
 

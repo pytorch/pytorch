@@ -1805,6 +1805,44 @@ class TestFrozenOptimizations(JitTestCase):
             FileCheck().check_count("to_dense", 1, exactly=True).run(mod.graph)
             self.assertEqual(mod(inp), sub_model(inp))
 
+    @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
+    def test_freeze_conv_relu_fusion_mkldnn(self):
+        conv_bias = [True, False]
+        conv_ops = [nn.Conv2d, nn.Conv3d]
+        use_tracing = [True, False]
+        use_inplace = [True, False]
+        for use_bias, conv, tracing, inplace in product(conv_bias, conv_ops, use_tracing, use_inplace):
+            class Net(nn.Module):
+                def __init__(self, in_channels, out_channels, **kwargs):
+                    super(Net, self).__init__()
+                    self.conv = conv(in_channels, out_channels, bias=use_bias, **kwargs)
+                    self.relu = nn.ReLU(inplace=inplace)
+
+                def forward(self, x):
+                    out = self.conv(x)
+                    out = self.relu(out)
+                    return out
+
+            with set_default_dtype(torch.float):
+                mod_eager = Net(3, 6, kernel_size=3, stride=2).eval()
+
+                inps = [5, 3, 4, 4]
+                if conv == nn.Conv3d:
+                    inps.append(inps[-1])
+                inp = torch.rand(inps)
+
+                if tracing:
+                    scripted_mod = torch.jit.trace(mod_eager, (inp))
+                else:
+                    scripted_mod = torch.jit.script(mod_eager)
+
+                frozen_mod = torch.jit.freeze(scripted_mod)
+                self.run_pass("fuse_frozen_conv_add_relu", frozen_mod.graph)
+
+                FileCheck().check("aten::convolution_relu").run(frozen_mod.graph)
+                y = frozen_mod(inp)
+                self.assertEqual(mod_eager(inp), frozen_mod(inp))
+
     @unittest.skipIf(torch._C.has_mkldnn, "Testing no mkldnn")
     def test_conv_to_mkldnn_no_mkldnn(self):
         # test no error when mkldnn not available
