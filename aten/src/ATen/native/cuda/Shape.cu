@@ -534,7 +534,7 @@ Tensor& cat_out_cuda(TensorList inputs, int64_t dimension, Tensor& out) {
   // for understanding why at::native::resize_output is not called directly.
   // if (at::native::resize_output_check(out, size)) {
   // TODO: restore the above, see https://github.com/pytorch/pytorch/issues/64709
-  
+
   if (out.sizes() != size) {
     out.resize_(size, memory_format);
   }

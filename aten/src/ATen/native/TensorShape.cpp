@@ -197,7 +197,7 @@ Tensor & _cat_out_cpu(TensorList tensors, int64_t dim, Tensor& result) {
   // for understanding why at::native::resize_output is not called directly.
   // if (at::native::resize_output_check(result, result_size)) {
   // TODO: restore the above, see https://github.com/pytorch/pytorch/issues/64709
-  
+
   if (result.sizes() != result_size) {
     result.resize_(result_size, first_tensor_mem_format);
   }
