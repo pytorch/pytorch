@@ -103,27 +103,11 @@ PyObject* THPModule_DisableTorchFunctionType() {
 
 PyObject* THPModule_disable_torch_function(PyObject *self, PyObject *a) {
   HANDLE_TH_ERRORS
-  PyObject *func=nullptr, *types=nullptr, *args=nullptr, *kwargs=nullptr;
-  if (!PyArg_ParseTuple(a, "OO|OO", &func, &types, &args, &kwargs)) {
-    return nullptr;
-  }
-  py::tuple py_args;
-  if (args == nullptr) {
-    py_args = py::make_tuple();
-  }
-  else {
-    py_args = py::reinterpret_borrow<py::tuple>(args);
-  }
-
-  // These are all C-API calls so no exceptions will be raised
-  // and therefore no need for RAII approach to storing
-  // the old value.
-  bool old_value = torch::enable_torch_function;
-  torch::enable_torch_function = false;
-  // kwargs can safely be nullptr here.
-  PyObject *result = PyObject_Call(func, py_args.ptr(), kwargs);
-  torch::enable_torch_function = old_value;
-  return result;
+  TORCH_INTERNAL_ASSERT(false,
+    "torch._C._disabled_torch_function_impl should never be called directly; "
+    "it is a magic function that affects how we determine overloaded types in "
+    "__torch_function__ and is not directly implementable as a regular function "
+    "(see https://github.com/pytorch/pytorch/issues/64690 for more details).")
   END_HANDLE_TH_ERRORS
 }
 
