@@ -7,7 +7,7 @@ import torch.jit.frontend
 import torch.jit.quantized
 
 # Testing utils
-from torch.testing import floating_and_complex_types_and
+from torch.testing._internal.common_dtype import floating_and_complex_types_and
 from torch.testing._internal.common_utils import TestCase, \
     freeze_rng_state, TemporaryFileName, enable_profiling_mode_for_profiling_tests, is_iterable_of_tensors
 from torch.testing._internal.common_utils import enable_profiling_mode  # noqa: F401
@@ -136,7 +136,7 @@ def check_against_reference(self, func, reference_func, output_func, args, kwarg
         for g2, g2_test in zip(grads2, grads2_test):
             if g2 is None and g2_test is None:
                 continue
-            self.assertTrue(torch.allclose(g2, g2_test, atol=5e-4, rtol=1e-4))
+            self.assertEqual(g2, g2_test, atol=5e-4, rtol=1e-4)
 
 class JitCommonTestCase(TestCase):
     def createFunctionFromGraph(self, trace):
