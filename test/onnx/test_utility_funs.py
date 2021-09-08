@@ -652,12 +652,14 @@ class TestUtilityFuns(TestCase):
 
         # Check function definition
         funcs = onnx_model.functions
-        assert funcs[0].name == "CELU"
-        assert funcs[0].domain == "torch.nn.modules.activation"
-        assert len(funcs[0].attribute) == 1
-        assert funcs[1].name == "LayerNorm"
-        assert funcs[1].domain == "torch.nn.modules.normalization"
-        assert len(funcs[1].attribute) == 1
+        celu_funcs = [f for f in funcs if f.name == "CELU"]
+        assert len(celu_funcs) == 1
+        assert celu_funcs[0].domain == "torch.nn.modules.activation"
+        assert len(celu_funcs[0].attribute) == 1
+        ln_funcs = [f for f in funcs if f.name == "LayerNorm"]
+        assert len(ln_funcs) == 1
+        assert ln_funcs[0].domain == "torch.nn.modules.normalization"
+        assert len(ln_funcs[0].attribute) == 1
 
         # Check local function nodes
         nodes = onnx_model.graph.node
