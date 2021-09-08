@@ -39,6 +39,13 @@ jobs:
           git remote prune origin
           git fetch
           popd
+      - name: Install TorchBench dependencies
+        run: |
+          # shellcheck disable=SC1091
+          . "${HOME}"/anaconda3/etc/profile.d/conda.sh
+          conda activate pr-ci
+          pushd "${PWD}"/benchmark
+          python install.py
       - name: Run TorchBench
         run: |
           pushd "${HOME}"/pytorch
