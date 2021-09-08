@@ -221,8 +221,6 @@ class TypedStorage:
 
     def __init__(self, *args, **kwargs):
         # TODO: This error message could definitely be formatted better.
-        #       Also, `dtype` should not appear along with `wrap_storage` if
-        #       using a derived type.
         arg_error_msg = (
             f'{type(self)} constructor received an invalid combination '
             f'of arguments - got args={tuple(type(arg) for arg in args)}, '
@@ -230,8 +228,11 @@ class TypedStorage:
             'expected one of:\n'
             ' * no arguments\n'
             ' * (int size)\n'
-            ' * (Sequence data)\n'
-            f' * (wrap_storage=<ByteStorage>, dtype=<torch.dtype>)')
+            ' * (Sequence data)\n')
+        if type(self) == TypedStorage:
+            arg_error_msg += f' * (wrap_storage=<ByteStorage>, dtype=<torch.dtype>)'
+        else:
+            arg_error_msg += f' * (wrap_storage=<ByteStorage>)'
 
         if 'wrap_storage' in kwargs:
             assert len(args) == 0, (
@@ -390,7 +391,7 @@ class TypedStorage:
         tmp_tensor = torch.tensor([], dtype=self.dtype, device=self.device).set_(self)
         return tmp_tensor[idx_wrapped].item()
 
-    def copy_(self, source: T, non_blocking=None) -> T:
+    def copy_(self, source: T, non_blocking=None):
         self._storage.copy_(source._untyped(), non_blocking)
         return self
 

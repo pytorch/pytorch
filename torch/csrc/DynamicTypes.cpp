@@ -121,7 +121,7 @@ PyObject* createPyObject(
   return obj.release();
 }
 
-static PyTypeObject* loadTypedStorageTypeObject() {
+PyTypeObject* loadTypedStorageTypeObject() {
   PyObject* storage_module = PyImport_ImportModule("torch.storage");
   TORCH_INTERNAL_ASSERT(storage_module && PyModule_Check(storage_module));
 
@@ -131,7 +131,8 @@ static PyTypeObject* loadTypedStorageTypeObject() {
       PyObject_GetAttrString(storage_module, "TypedStorage"));
 }
 
-static PyTypeObject* getTypedStorageTypeObject() {
+PyTypeObject* getTypedStorageTypeObject() {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
   static PyTypeObject* typed_storage_type_obj = loadTypedStorageTypeObject();
   return typed_storage_type_obj;
 }
