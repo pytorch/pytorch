@@ -2609,7 +2609,7 @@ TEST(NVFuserTest, FusionUnaryOps_CUDA) {
   // [Note: explicit tuple type for uniform initialization list]
   // Tuple type must be explicitly specified for each uniform initialization
   // list within the vector to make this code compatible with some old env
-  // which we still need to support. eg. gcc 5.4 + cuda 9.2.
+  // which we still need to support. e.g., gcc 5.4 + cuda 9.2.
   std::vector<OpTuple> ops{
       OpTuple{at::abs, UnaryOpType::Abs, "abs"},
       OpTuple{at::acos, UnaryOpType::Acos, "acos"},

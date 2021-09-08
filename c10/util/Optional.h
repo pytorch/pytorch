@@ -499,9 +499,7 @@ template <typename T>
 struct is_arrayref<c10::ArrayRef<T>> : std::true_type {};
 } // namespace detail_
 
-// CUDA 9.2 and below fail while trying to compile default move constructor
-// see https://github.com/pytorch/csprng/issues/84
-#if (!defined(__CUDA_ARCH__) || !defined(CUDA_VERSION) || CUDA_VERSION > 9200)
+#if (!defined(__CUDA_ARCH__) || !defined(CUDA_VERSION))
 template <class T>
 using OptionalBase = std::conditional_t<
     detail_::is_arrayref<T>::value,
@@ -538,9 +536,7 @@ using OptionalBase = std::conditional_t<
 
 template <class T>
 class optional : private OptionalBase<T> {
-// CUDA 9.2 and below fail while trying to compile default move constructor
-// see https://github.com/pytorch/csprng/issues/84
-#if (!defined(__CUDA_ARCH__) || !defined(CUDA_VERSION) || CUDA_VERSION > 9200)
+#if (!defined(__CUDA_ARCH__) || !defined(CUDA_VERSION))
   template <class U> // re-declaration for nvcc on Windows.
   using OptionalBase = std::conditional_t<
       detail_::is_arrayref<U>::value,
@@ -635,9 +631,7 @@ class optional : private OptionalBase<T> {
 
   optional(const optional& rhs) = default;
 
-// CUDA 9.2 and below fail while trying to compile default move constructor
-// see https://github.com/pytorch/csprng/issues/84
-#if (!defined(__CUDA_ARCH__) || !defined(CUDA_VERSION) || CUDA_VERSION > 9200)
+#if (!defined(__CUDA_ARCH__) || !defined(CUDA_VERSION))
   optional(optional&& rhs) = default;
 #else
   optional(optional&& rhs) noexcept(
