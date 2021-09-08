@@ -166,24 +166,13 @@ class TestModule(TestCase):
         def set_zero_grad(items):
             if isinstance(items, dict):
                 items = items.values()
-
             for item in items:
                 if not isinstance(item, torch.Tensor):
                     continue
-                requires_grad = item.requires_grad
-                if not item.is_leaf:
-                    item.detach_()
-                    item.requires_grad = requires_grad
-                if item.requires_grad and item.grad is not None:
-                    item.grad.detach_()
-                    item.grad.zero_()
-
-        def set_zero_grad_parameters(module):
-            for p in module.parameters():
-                if p.grad is None:
+                if item.is_leaf:
                     continue
-                p.grad.detach_()
-                p.grad.zero_()
+                old_requires_grad = item.requires_grad
+                item.detach_().requires_grad_(old_requires_grad)
 
         def to_device(obj):
             if isinstance(obj, torch.Tensor):
@@ -221,9 +210,6 @@ class TestModule(TestCase):
 
             cpu_module = module_cls(*args, **kwargs).to(dtype).to("cpu")
             gpu_module = module_cls(*args, **kwargs).to(dtype).to(device)
-
-            set_zero_grad_parameters(cpu_module)
-            set_zero_grad_parameters(gpu_module)
 
             for cpu_p, gpu_p in zip(cpu_module.parameters(), gpu_module.parameters()):
                 gpu_p.data.copy_(cpu_p)
