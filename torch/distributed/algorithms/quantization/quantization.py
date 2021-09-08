@@ -159,9 +159,9 @@ def auto_quantize(func, qtype, quant_loss=None):
         in_splits = kwargs.get('in_splits', None)
 
 
-        if ((func == dist.all_to_all_single) or (func == dist.all_to_all) or (func == dist.all_gather)):
+        try:
             dispatch[func](qtype, *args, **kwargs)
-        else:
+        except KeyError:
             raise RuntimeError(
                 f"The collective op {func} is not supported yet"
             )
