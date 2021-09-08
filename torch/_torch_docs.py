@@ -149,7 +149,7 @@ add_docstr(torch.absolute,
 absolute(input, *, out=None) -> Tensor
 
 Alias for :func:`torch.abs`
-""".format(**common_args))
+""")
 
 add_docstr(torch.acos, r"""
 acos(input, *, out=None) -> Tensor
@@ -211,28 +211,29 @@ add_docstr(torch.arccosh, r"""
 arccosh(input, *, out=None) -> Tensor
 
 Alias for :func:`torch.acosh`.
-""".format(**common_args))
+""")
 
 add_docstr(torch.add, r"""
-add(input, other, *, out=None) -> Tensor
+add(input, other, *, alpha=1, out=None) -> Tensor
 
-Adds the scalar :attr:`other` to each element of the input :attr:`input`
-and returns a new resulting tensor.
+Adds :attr:`other`, scaled by :attr:`alpha`, to :attr:`input`.
 
 .. math::
-    \text{{out}} = \text{{input}} + \text{{other}}
+    \text{{out}}_i = \text{{input}}_i + \text{{alpha}} \times \text{{other}}_i
+""" + r"""
 
-If :attr:`input` is of type FloatTensor or DoubleTensor, :attr:`other` must be
-a real number, otherwise it should be an integer.
+Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`,
+:ref:`type promotion <type-promotion-doc>`, and integer, float, and complex inputs.
 
 Args:
     {input}
-    other (Number): the number to be added to each element of :attr:`input`
+    other (Tensor or Number): the tensor or number to add to input.
 
 Keyword arguments:
+    alpha (Number): the multiplier for :attr:`other`.
     {out}
 
-Example::
+Examples::
 
     >>> a = torch.randn(4)
     >>> a
@@ -240,42 +241,16 @@ Example::
     >>> torch.add(a, 20)
     tensor([ 20.0202,  21.0985,  21.3506,  19.3944])
 
-.. function:: add(input, other, *, alpha=1, out=None) -> Tensor
-   :noindex:
-
-Each element of the tensor :attr:`other` is multiplied by the scalar
-:attr:`alpha` and added to each element of the tensor :attr:`input`.
-The resulting tensor is returned.
-
-The shapes of :attr:`input` and :attr:`other` must be
-:ref:`broadcastable <broadcasting-semantics>`.
-
-.. math::
-    \text{{out}} = \text{{input}} + \text{{alpha}} \times \text{{other}}
-
-If :attr:`other` is of type FloatTensor or DoubleTensor, :attr:`alpha` must be
-a real number, otherwise it should be an integer.
-
-Args:
-    input (Tensor): the first input tensor
-    other (Tensor): the second input tensor
-
-Keyword args:
-    alpha (Number): the scalar multiplier for :attr:`other`
-    {out}
-
-Example::
-
-    >>> a = torch.randn(4)
-    >>> a
-    tensor([-0.9732, -0.3497,  0.6245,  0.4022])
-    >>> b = torch.randn(4, 1)
+    >>> b = torch.randn(4)
     >>> b
+    tensor([-0.9732, -0.3497,  0.6245,  0.4022])
+    >>> c = torch.randn(4, 1)
+    >>> c
     tensor([[ 0.3743],
             [-1.7724],
             [-0.5811],
             [-0.8017]])
-    >>> torch.add(a, b, alpha=10)
+    >>> torch.add(b, c, alpha=10)
     tensor([[  2.7695,   3.3930,   4.3672,   4.1450],
             [-18.6971, -18.0736, -17.0994, -17.3216],
             [ -6.7845,  -6.1610,  -5.1868,  -5.4090],
@@ -1881,6 +1856,13 @@ Example::
              -0.5790,  0.1497]])
 """.format(**common_args))
 
+add_docstr(torch.concat,
+           r"""
+concat(tensors, dim=0, *, out=None) -> Tensor
+
+Alias of :func:`torch.cat`.
+""")
+
 add_docstr(torch.ceil,
            r"""
 ceil(input, *, out=None) -> Tensor
@@ -2287,7 +2269,7 @@ add_docstr(torch.clip, r"""
 clip(input, min=None, max=None, *, out=None) -> Tensor
 
 Alias for :func:`torch.clamp`.
-""".format(**common_args))
+""")
 
 add_docstr(torch.column_stack,
            r"""
@@ -3999,8 +3981,9 @@ See `LAPACK documentation for geqrf`_ for further details.
 
 .. seealso::
 
-        :func:`torch.linalg.qr`, which computes Q and R matrices, and :func:`torch.linalg.lstsq`
-        with the ``driver="gels"`` option for a function that can solve matrix equations using a QR decomposition.
+        :func:`torch.linalg.qr`, which computes Q and R matrices.
+        :func:`torch.linalg.lstsq`with the ``driver="gels"`` option for a function
+        that can solve matrix equations using a QR decomposition.
 
 Args:
     input (Tensor): the input matrix
@@ -4487,7 +4470,7 @@ add_docstr(torch.inverse, r"""
 inverse(input, *, out=None) -> Tensor
 
 Alias for :func:`torch.linalg.inv`
-""".format(**common_args))
+""")
 
 add_docstr(torch.isin, r"""
 isin(elements, test_elements, *, assume_unique=False, invert=False) -> Tensor
@@ -5720,7 +5703,7 @@ add_docstr(torch.matrix_power, r"""
 matrix_power(input, n, *, out=None) -> Tensor
 
 Alias for :func:`torch.linalg.matrix_power`
-""".format(**common_args))
+""")
 
 add_docstr(torch.matrix_exp, r"""
 matrix_exp(input) -> Tensor
@@ -6641,23 +6624,24 @@ Example::
 add_docstr(torch.mul, r"""
 mul(input, other, *, out=None) -> Tensor
 
-Multiplies each element of the input :attr:`input` with the scalar
-:attr:`other` and returns a new resulting tensor.
+Multiplies :attr:`input` by :attr:`other`.
+
 
 .. math::
-    \text{out}_i = \text{other} \times \text{input}_i
+    \text{out}_i = \text{input}_i \times \text{other}_i
 """ + r"""
-If :attr:`input` is of type `FloatTensor` or `DoubleTensor`, :attr:`other`
-should be a real number, otherwise it should be an integer
+
+Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`,
+:ref:`type promotion <type-promotion-doc>`, and integer, float, and complex inputs.
 
 Args:
     {input}
-    other (Number): the number to be multiplied to each element of :attr:`input`
+    other (Tensor or Number) - the tensor or number to multiply input by.
 
 Keyword args:
     {out}
 
-Example::
+Examples::
 
     >>> a = torch.randn(3)
     >>> a
@@ -6665,38 +6649,16 @@ Example::
     >>> torch.mul(a, 100)
     tensor([  20.1494,  -42.5491,  260.8663])
 
-.. function:: mul(input, other, *, out=None) -> Tensor
-   :noindex:
-
-Each element of the tensor :attr:`input` is multiplied by the corresponding
-element of the Tensor :attr:`other`. The resulting tensor is returned.
-
-The shapes of :attr:`input` and :attr:`other` must be
-:ref:`broadcastable <broadcasting-semantics>`.
-
-.. math::
-    \text{{out}}_i = \text{{input}}_i \times \text{{other}}_i
-""".format(**common_args) + r"""
-
-Args:
-    input (Tensor): the first multiplicand tensor
-    other (Tensor): the second multiplicand tensor
-
-Keyword args:
-    {out}
-
-Example::
-
-    >>> a = torch.randn(4, 1)
-    >>> a
+    >>> b = torch.randn(4, 1)
+    >>> b
     tensor([[ 1.1207],
             [-0.3137],
             [ 0.0700],
             [ 0.8378]])
-    >>> b = torch.randn(1, 4)
-    >>> b
+    >>> c = torch.randn(1, 4)
+    >>> c
     tensor([[ 0.5146,  0.1216, -0.5244,  2.2382]])
-    >>> torch.mul(a, b)
+    >>> torch.mul(b, c)
     tensor([[ 0.5767,  0.1363, -0.5877,  2.5083],
             [-0.1614, -0.0382,  0.1645, -0.7021],
             [ 0.0360,  0.0085, -0.0367,  0.1567],
@@ -6707,7 +6669,7 @@ add_docstr(torch.multiply, r"""
 multiply(input, other, *, out=None)
 
 Alias for :func:`torch.mul`.
-""".format(**common_args))
+""")
 
 add_docstr(torch.multinomial,
            r"""
@@ -7057,7 +7019,7 @@ add_docstr(torch.negative,
 negative(input, *, out=None) -> Tensor
 
 Alias for :func:`torch.neg`
-""".format(**common_args))
+""")
 
 add_docstr(torch.nextafter,
            r"""
@@ -7430,7 +7392,7 @@ add_docstr(torch.polygamma,
 polygamma(n, input, *, out=None) -> Tensor
 
 Alias for :func:`torch.special.polygamma`.
-""".format(**common_args))
+""")
 
 add_docstr(torch.positive,
            r"""
@@ -8289,7 +8251,7 @@ add_docstr(torch.row_stack,
 row_stack(tensors, *, out=None) -> Tensor
 
 Alias of :func:`torch.vstack`.
-""".format(**common_args))
+""")
 
 add_docstr(torch.round,
            r"""
@@ -8979,10 +8941,10 @@ Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`,
 
 Args:
     {input}
-    other (Tensor or Scalar): the tensor or scalar to subtract from :attr:`input`
+    other (Tensor or Number): the tensor or number to subtract from :attr:`input`.
 
 Keyword args:
-    alpha (Scalar): the scalar multiplier for :attr:`other`
+    alpha (Number): the multiplier for :attr:`other`.
     {out}
 
 Example::
@@ -9569,9 +9531,8 @@ Functions that return indices along a dimension, like :func:`torch.argmax` and :
 are designed to work with this function. See the examples below.
 
 .. seealso::
-        NumPy's `take_along_axis` which accepts an axis argument along which 1-D slices are taken.
         :func:`torch.gather` which does not view the input as 1-D and accepts an additional argument
-        that specifies the indexing dimension.
+        ``dim`` that specifies the indexing dimension.
 
 Args:
     {input}
@@ -9711,7 +9672,7 @@ of the other.
 
 .. seealso::
 
-        :func:`torch.t` for a function that transposes tensors with <=2 dimensions.
+        :func:`torch.t` swaps the dimensions of two-dimensional tensors (matrices).
 
 Args:
     {input}
@@ -9732,7 +9693,7 @@ Example::
 
 add_docstr(torch.triangular_solve,
            r"""
-triangular_solve(b, A, upper=True, transpose=False, unitriangular=False) -> (Tensor, Tensor)
+triangular_solve(b, A, upper=True, transpose=False, unitriangular=False, *, out=None) -> (Tensor, Tensor)
 
 Solves a system of equations with a triangular coefficient matrix :math:`A`
 and multiple right-hand sides :math:`b`.
@@ -9758,6 +9719,10 @@ Args:
     unitriangular (bool, optional): whether :math:`A` is unit triangular.
         If True, the diagonal elements of :math:`A` are assumed to be
         1 and not referenced from :math:`A`. Default: ``False``.
+
+Keyword args:
+    out ((Tensor, Tensor), optional): tuple of two tensors to write
+        the output to. Ignored if `None`. Default: `None`.
 
 Returns:
     A namedtuple `(solution, cloned_coefficient)` where `cloned_coefficient`
@@ -10016,7 +9981,7 @@ add_docstr(torch.true_divide, r"""
 true_divide(dividend, divisor, *, out) -> Tensor
 
 Alias for :func:`torch.div` with ``rounding_mode=None``.
-""".format(**common_args))
+""")
 
 add_docstr(torch.trunc,
            r"""
@@ -10132,7 +10097,7 @@ add_docstr(torch.fix,
 fix(input, *, out=None) -> Tensor
 
 Alias for :func:`torch.trunc`
-""".format(**common_args))
+""")
 
 add_docstr(torch.unsqueeze,
            r"""
@@ -10499,9 +10464,8 @@ Example::
 .. function:: where(condition) -> tuple of LongTensor
    :noindex:
 
-.. seealso::
-
-        :func:`torch.nonzero`; ``torch.nonzero(condition, as_tuple=True)`` is identical to ``torch.where(condition)``.
+    A shorthand for ``torch.nonzero(condition, as_tuple=True)``. Prefer using ``torch.nonzero`` directly
+    for readability and performance.
 """)
 
 add_docstr(torch.logdet,
@@ -10916,11 +10880,12 @@ elements :math:`{x_0, x_1, ..., x_n}`, the computation becomes
         \sum_{i = 1}^{n-1} \frac{(x_i - x_{i-1})}{2} (y_i + y_{i-1})
     \end{aligned}
 
-When :attr:`y` is two or more dimensions, this computation is performed independently
-along dimension :attr:`dim`. If :attr:`x` is also specified and is one-dimensional,
-then that dimension defines the spacing for each computation.
-If :attr:`x` is also specified and is not one-dimensional, then it is broadcast to
-the shape of :attr:`y` and the corresponding sizes are used for each computation.
+When :attr:`x` and :attr:`y` have the same size, the computation is as described above and no broadcasting is needed.
+The broadcasting behavior of this function is as follows when their sizes are different. For both :attr:`x`
+and :attr:`y`, the function computes the difference between consecutive elements along
+dimension :attr:`dim`. This effectively creates two tensors, `x_diff` and `y_diff`, that have
+the same shape as the original tensors except their lengths along the dimension :attr:`dim` is reduced by 1.
+After that, those two tensors are broadcast together to compute final output as part of the trapezoidal rule.
 See the examples below for details.
 
 .. note::
