@@ -1548,17 +1548,17 @@ struct to_ir {
       // begin as the first element in the dict
       if (k->type()->kind() == UnionType::Kind) {
         throw ErrorReport(dc)
-          << "Dicts may only contain homogeneous keys, but the type of "
-          << "the first generated key was "
-          << k->type()->repr_str();
-      } else if (first_generated_key_type && first_generated_key_type != k->type()) {
+            << "Dicts may only contain homogeneous keys, but the type of "
+            << "the first generated key was " << k->type()->repr_str();
+      } else if (
+          first_generated_key_type && first_generated_key_type != k->type()) {
         // Values can be heterogenous, so we only need to check that the
         // key types are all the same
         throw ErrorReport(dc)
-          << "Dicts may only contain homogeneous keys. Expected "
-          << "dict comprehension to generate type "
-          << first_generated_key_type->repr_str() << ", but got "
-          << k->type()->repr_str();
+            << "Dicts may only contain homogeneous keys. Expected "
+            << "dict comprehension to generate type "
+            << first_generated_key_type->repr_str() << ", but got "
+            << k->type()->repr_str();
       } else {
         dict_value->setType(DictType::create(k->type(), v->type()));
         first_generated_key_type = k->type();
