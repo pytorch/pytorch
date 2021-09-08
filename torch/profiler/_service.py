@@ -23,9 +23,6 @@ TMPLOG = './tmplog'
 logger = logging.getLogger("profiler_service")
 logger.setLevel(logging.INFO)
 
-def is_local_address(host: str):
-    return True if host in ['localhost', '127.0.0.1', socket.getfqdn()] else False
-
 class PyTorchServiceWSGIApp(object):
     
     def __init__(self, is_master_server, main_TLS):
@@ -86,8 +83,8 @@ class PyTorchServiceWSGIApp(object):
         if self.g is None:
             self.g = _ThreadLocalStateGuard(self.main_TLS)
 
-        request_host = wsgi.get_host(request.environ).split(":")[0]
-        self.request_is_local = is_local_address(request_host)
+        self.request_is_local = request.remote_addr == '127.0.0.1'
+        print(self.request_is_local)
         request_data = json.loads(request.data)
         request_data['log_dir'] = TMPLOG if not self.request_is_local else request_data['log_dir']
         self.run_name = request_data['run_name']
@@ -261,7 +258,7 @@ class Listener(object):
             json={'host': self.host, 'port': self.port, 'pid': os.getpid()}, 
             params={'cmd': 'unregister'})
 
-if current_process().name == 'MainProcess' and SLAVE_NODE == 'FALSE':
+if current_process().name == 'MainProcess':
     def deleteTmpLog():
         tmp_log = TMPLOG
         if os.path.exists(tmp_log):
@@ -269,5 +266,6 @@ if current_process().name == 'MainProcess' and SLAVE_NODE == 'FALSE':
 
     atexit.register(deleteTmpLog)
 
-    listener = Listener(HOST, MASTER_PORT, True, None)
-    listener.open()
+    if SLAVE_NODE == 'FALSE':
+        listener = Listener(HOST, MASTER_PORT, True, None)
+        listener.open()
