@@ -74,9 +74,10 @@ inline bool variable_excluded_from_dispatch() {
 //   the other hand can materialize a `const Tensor &` without
 //   touching the reference-count.
 class TORCH_API TensorBase {
- protected:
+ public:
   struct unsafe_borrow_t { explicit unsafe_borrow_t() = default; };
 
+ protected:
   // Create a Tensor with a +0 reference count. Special care must be
   // taken to avoid decrementing this reference count at destruction
   // time. Intended to support MaybeOwnedTraits<Tensor>.
