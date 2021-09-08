@@ -193,7 +193,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
   return result;
 }
 
-Tensor& baddbmm_out_cuda_impl(const Tensor& result, const Tensor& self, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha) { 
+const Tensor& baddbmm_out_cuda_impl(const Tensor& result, const Tensor& self, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha) { 
   TORCH_CHECK(self.dim() == 3, "self must be a 3D tensor");
   TORCH_CHECK(batch1.dim() == 3, "batch1 must be a 3D tensor");
   TORCH_CHECK(batch2.dim() == 3, "batch2 must be a 3D tensor");
@@ -301,13 +301,12 @@ TORCH_IMPL_FUNC(baddbmm_out_cuda)(const Tensor& self, const Tensor& batch1, cons
     : expand_size(self, {batch1.size(0), batch1.size(1), batch2.size(2)}, "baddbmm");
   {
     at::NoNamesGuard guard;
-    baddbmm_out_cuda_impl(const_cast<Tensor&>(result), *self_, batch1, batch2, beta, alpha);
+    baddbmm_out_cuda_impl(result, *self_, batch1, batch2, beta, alpha);
   }
   namedinference::propagate_names_if_nonempty(
     result,
     namedinference::compute_baddbmm_outnames(const_cast<Tensor&>(result), batch1, batch2, self)
   );
-  return result;
 }
 
 TORCH_IMPL_FUNC(bmm_out_cuda)(const Tensor& batch1, const Tensor& batch2, const Tensor &result) {
@@ -320,8 +319,7 @@ TORCH_IMPL_FUNC(bmm_out_cuda)(const Tensor& batch1, const Tensor& batch2, const 
   }
   namedinference::propagate_names_if_nonempty(
       result,
-      namedinference::compute_bmm_outnames(result, batch1, batch2));
-  return result;
+      namedinference::compute_bmm_outnames(const_cast<Tensor&>(result), batch1, batch2));
 }
 
 namespace {
