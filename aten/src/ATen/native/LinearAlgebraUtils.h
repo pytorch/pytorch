@@ -12,6 +12,23 @@
 
 namespace at { namespace native {
 
+// Used as an interface between the different BLAS-like libraries
+enum class TransposeType {
+  NoTranspose,
+  Transpose,
+  ConjTranspose,
+};
+
+// Transforms TransposeType into the BLAS / LAPACK format
+static char to_blas(TransposeType trans) {
+  switch (trans) {
+    case TransposeType::Transpose: return 'T';
+    case TransposeType::NoTranspose: return 'N';
+    case TransposeType::ConjTranspose: return 'C';
+  }
+  TORCH_INTERNAL_ASSERT(false, "Invalid transpose type");
+}
+
 /*
  * Clones a Tensor so that the following conditions hold:
  * If we think of a Tensor of having size (B, M, N), where B is any number
@@ -19,8 +36,8 @@ namespace at { namespace native {
  * - Each (M, N) matrix is in column major form
  * - Let Tensor P have size (B, M, N) and Q have size (B, M', N').
  *   Then when laid out in memory, the M by N matrix starting at
- *   P.data_ptr()[b * M * N] is of the same corresponding batch as the M' by N'
- *   matrix starting at Q.data_ptr()[b * M' * N'].
+ *   P.data_ptr()[B * M * N] is of the same corresponding batch as the M' by N'
+ *   matrix starting at Q.data_ptr()[B * M' * N'].
  */
 static inline Tensor cloneBatchedColumnMajor(const Tensor& src) {
   // If src is already in batched column major format, then
