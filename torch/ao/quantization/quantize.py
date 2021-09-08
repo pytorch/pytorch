@@ -7,7 +7,6 @@ import torch.nn as nn
 import torch.nn.quantized as nnq
 from torch.nn.intrinsic import _FusedModule
 
-# Import the duplicated API
 from torch.quantization.quantization_mappings import (
     get_default_dynamic_quant_module_mappings,
     get_default_static_quant_module_mappings,
@@ -17,6 +16,7 @@ from torch.quantization.quantization_mappings import (
     _has_special_act_post_process,
     _get_special_act_post_process,
 )
+
 from torch.quantization.stubs import DeQuantStub, QuantWrapper
 from torch.quantization.qconfig import (
     add_module_to_qconfig_obs_ctr,
