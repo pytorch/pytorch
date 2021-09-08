@@ -1187,8 +1187,7 @@ reflectable_magic_methods = {
     'and': '{} & {}',
     'or': '{} | {}',
     'xor': '{} ^ {}',
-    'getitem': '{}[{}]',
-    'matmul': '{} @ {}',
+    'getitem': '{}[{}]'
 }
 
 magic_methods = dict({
