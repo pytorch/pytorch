@@ -186,6 +186,9 @@ torch::CppFunction autogradNotImplementedFallback() {
   return torch::CppFunction::makeFromBoxedFunction<&autogradNotImplementedFallbackImpl>();
 }
 
+// If we need to we could codegen this to avoid duplication
+static const std::vector<std::string> NEEDS_METADATA_CHANGE = {"aten::view_as_complex", "aten::view_as_real", "aten::_conj", "aten::_neg_view"};
+
 void ADInplaceOrViewFallbackImpl(const c10::OperatorHandle& op, c10::DispatchKeySet dispatch_keys, torch::jit::Stack* stack) {
   const auto& schema = op.schema();
   const auto& op_name = schema.operator_name().name;
@@ -237,7 +240,9 @@ void ADInplaceOrViewFallbackImpl(const c10::OperatorHandle& op, c10::DispatchKey
   TORCH_INTERNAL_ASSERT((aliased_input_idx == -1 && aliased_output_idx == -1) ||
     (aliased_input_idx == 0 && aliased_output_idx == 0))
   const bool is_view = aliased_input_idx != -1;
-  const bool need_view_func = is_view && !aliased_input.unsafeGetTensorImpl()->support_as_strided();
+  const bool need_view_func = is_view
+                         && (std::find(NEEDS_METADATA_CHANGE.begin(), NEEDS_METADATA_CHANGE.end(), op_name) != NEEDS_METADATA_CHANGE.end()
+                             || !aliased_input.unsafeGetTensorImpl()->support_as_strided());
 
   std::function<at::Tensor(const at::Tensor&)> view_func = nullptr;
   std::vector<c10::IValue> stack_args_copy;
