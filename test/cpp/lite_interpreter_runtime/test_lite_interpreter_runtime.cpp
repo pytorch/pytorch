@@ -171,7 +171,6 @@ Traceback of TorchScript (most recent call last):
   )";
   ASSERT_THROWS_WITH_MESSAGE(mlm.forward(inputs), error_pattern);
 }
-
 } // namespace mobile
 } // namespace jit
 } // namespace torch

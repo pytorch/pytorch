@@ -55,7 +55,7 @@ void parseInstructions(
                               BYTECODE_INDEX_MODULE_DEBUG_HANDLES)
                               .toTuple()
                               ->elements())[0]
-                              .toIntList();
+                             .toIntList();
     TORCH_CHECK(
         debug_handles_list.size() == ins_list.size(),
         "The numbers of instructions and debug handles do not match.");

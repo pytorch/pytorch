@@ -293,42 +293,41 @@ void BytecodeDeserializer::parseFunctionSchema(
     const at::optional<IValue>& schemaTable,
     const int64_t& model_version,
     mobile::Function* function) {
-
-    // function schema
-    if (schemaTable) { // (schema is optional for back compat)
-      auto parseArgList = [this](const std::vector<IValue>& argTables) {
-        std::vector<c10::Argument> args;
-        for (auto&& argTable : argTables) {
-          auto name =
-              expect_field(argTable, "name", BYTECODE_INDEX_ARGUMENT_NAME)
-                  .toStringRef();
-          const auto& type = resolveTypeName(
-              (expect_field(argTable, "type", BYTECODE_INDEX_ARGUMENT_TYPE))
-                  .toStringRef());
-          const IValue& default_value = expect_field(
-              argTable, "default_value", BYTECODE_INDEX_ARGUMENT_DEFAULT_VALUE);
-          args.emplace_back(name, type, c10::nullopt /*N*/, default_value);
-        }
-        return args;
-      };
-      const auto& arg_list =
-          expect_field(
-              schemaTable.value(), "arguments", BYTECODE_INDEX_SCHEMA_ARGUMENTS)
-              .toTuple()
-              ->elements();
-      const auto& ret_list =
-          expect_field(schemaTable.value(), "returns", BYTECODE_INDEX_SCHEMA_RETURNS)
-              .toTuple()
-              ->elements();
-      c10::FunctionSchema schema(
-          function_name,
-          "" /*overload_name*/,
-          parseArgList(arg_list),
-          parseArgList(ret_list),
-          false /*is_varargs*/,
-          false /*is_varret*/);
-      function->setSchema(std::move(schema));
-    }
+  // function schema
+  if (schemaTable) { // (schema is optional for back compat)
+    auto parseArgList = [this](const std::vector<IValue>& argTables) {
+      std::vector<c10::Argument> args;
+      for (auto&& argTable : argTables) {
+        auto name = expect_field(argTable, "name", BYTECODE_INDEX_ARGUMENT_NAME)
+                        .toStringRef();
+        const auto& type = resolveTypeName(
+            (expect_field(argTable, "type", BYTECODE_INDEX_ARGUMENT_TYPE))
+                .toStringRef());
+        const IValue& default_value = expect_field(
+            argTable, "default_value", BYTECODE_INDEX_ARGUMENT_DEFAULT_VALUE);
+        args.emplace_back(name, type, c10::nullopt /*N*/, default_value);
+      }
+      return args;
+    };
+    const auto& arg_list =
+        expect_field(
+            schemaTable.value(), "arguments", BYTECODE_INDEX_SCHEMA_ARGUMENTS)
+            .toTuple()
+            ->elements();
+    const auto& ret_list =
+        expect_field(
+            schemaTable.value(), "returns", BYTECODE_INDEX_SCHEMA_RETURNS)
+            .toTuple()
+            ->elements();
+    c10::FunctionSchema schema(
+        function_name,
+        "" /*overload_name*/,
+        parseArgList(arg_list),
+        parseArgList(ret_list),
+        false /*is_varargs*/,
+        false /*is_varret*/);
+    function->setSchema(std::move(schema));
+  }
 }
 
 void parseOperators(
@@ -415,7 +414,8 @@ void BytecodeDeserializer::parseMethods(
 
     parseRegisterSize(codeTable, function.get());
 
-    at::optional<IValue> schemaTable = // older files do not store function schema
+    at::optional<IValue>
+        schemaTable = // older files do not store function schema
         (model_version > 0x4L || (model_version == 0x4L && m_tuple.size() >= 3))
         ? m_tuple[2]
         : c10::nullopt;
