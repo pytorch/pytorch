@@ -163,6 +163,61 @@ class TestBinaryUfuncs(TestCase):
             )
             raise AssertionError(msg)
 
+    @ops(binary_ufuncs)
+    def test_type_promotion(self, device, dtype, op):
+        shapes = [(), (1,)]
+        other_dtypes = set(op.supported_dtypes(device)) - {dtype}
+
+        inputs = [
+            (
+                make_tensor(lhs_shape, device=device, dtype=dtype, **op.lhs_make_tensor_kwargs),
+                make_tensor(lhs_shape, device=device, dtype=rhs_dtype, **op.rhs_make_tensor_kwargs),
+            )
+            for lhs_shape, rhs_shape, rhs_dtype in itertools.product(shapes, shapes, other_dtypes)
+        ]
+
+        for lhs, rhs in inputs:
+            expected = torch.result_type(lhs, rhs)
+            actual = op(lhs, rhs).dtype
+
+            if expected != actual:
+                msg = (
+                    f"On {device}, torch.{op.name} promoted the dtype for inputs of shape and dtype "
+                    f"({lhs.shape}, {lhs.dtype}) and ({rhs.shape}, {rhs.dtype}) incorrectly: "
+                    f"{actual} != {expected}"
+                )
+                raise AssertionError(msg)
+
+    @ops(binary_ufuncs)
+    def test_type_promotion_scalar(self, device, dtype, op):
+        lhs_inputs = [
+            make_tensor(shape, device=device, dtype=dtype, **op.lhs_make_tensor_kwargs) for shape in [(), (1,)]
+        ]
+
+        all_dtypes = op.supported_dtypes(device)
+        rhs_scalar_dtypes = []
+        if any(dtype.is_floating_point for dtype in all_dtypes):
+            rhs_scalar_dtypes.append(torch.float64)
+        # Is there no better way to check for integral dtypes but to check it is not floating point or complex?
+        if not any(dtype.is_complex for dtype in all_dtypes):
+            rhs_scalar_dtypes.append(torch.int64)
+        rhs_inputs = [
+            make_tensor((), device=device, dtype=dtype, **op.rhs_make_tensor_kwargs).item()
+            for dtype in rhs_scalar_dtypes
+        ]
+
+        for lhs, rhs in itertools.product(lhs_inputs, rhs_inputs):
+            expected = torch.result_type(lhs, rhs)
+            actual = op(lhs, rhs).dtype
+
+            if expected != actual:
+                msg = (
+                    f"On {device}, torch.{op.name} promoted the dtype for input of shape "
+                    f"{lhs.shape} and dtype {lhs.dtype} and a Python {type(rhs).__name__} scalar incorrectly: "
+                    f"{actual} != {expected}"
+                )
+                raise AssertionError(msg)
+
     def test_add_broadcast_empty(self, device):
         # empty + empty
         self.assertRaises(RuntimeError, lambda: torch.randn(5, 0, device=device) + torch.randn(0, 5, device=device))
