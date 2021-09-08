@@ -1963,14 +1963,14 @@ class AbstractTestCases:
             self.assertEqual(x.__repr__(), str(x))
             self.assertExpectedInline(str(x), '''tensor([  100.0000,     0.0100])''')
             torch.set_printoptions(sci_mode=None)  # reset to the default value
-            
+
             # test show_shape using set_printoptions
             x = torch.tensor([3, 4])
             torch.set_printoptions(show_shape=True)
             self.assertEqual(x.__repr__(), str(x))
             self.assertExpectedInline(str(x), '''tensor([3, 4], shape=(2,))''')
-            torch.set_printoptions(show_shape=False)
-            
+            torch.set_printoptions(show_shape=False) # reset to the default value
+
             # test no leading space if all elements positive
             x = torch.tensor([1, 2])
             self.assertEqual(x.__repr__(), str(x))
