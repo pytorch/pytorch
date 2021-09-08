@@ -45,9 +45,9 @@ inline bool use_mkldnn_bf16_gemm(
   int64_t n = mat1.dim() == 2? mat1.size(1) : mat1.size(2);
   int64_t k = mat2.dim() == 2? mat2.size(1) : mat2.size(2);
   return (
-    mat1.scalar_type() == kBFloat16 &&
-    mat2.scalar_type() == kBFloat16 &&
-    (!result.defined() || result.scalar_type() == kBFloat16) &&
+    mat1.scalar_type() == kBFloat16 && mat1.device().type() == at::kCPU &&
+    mat2.scalar_type() == kBFloat16 && mat2.device().type() == at::kCPU &&
+    (!result.defined() || (result.scalar_type() == kBFloat16 && result.device().type() == at::kCPU) ) &&
     mat1.numel() != 0 &&
     mat2.numel() != 0 &&
     mkldnn_bf16_device_check() &&
