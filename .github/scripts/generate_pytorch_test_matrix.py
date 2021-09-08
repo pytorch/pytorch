@@ -59,6 +59,10 @@ def main() -> None:
         configs['docs_test'] = {'num_shards': 1, 'runner': TEST_RUNNER_TYPE}
     if os.getenv('ENABLE_BACKWARDS_COMPAT_TEST'):
         configs['backwards_compat'] = {'num_shards': 1, 'runner': TEST_RUNNER_TYPE}
+    if os.getenv('ENABLE_XLA_TEST'):
+        configs['xla'] = {'num_shards': 1, 'runner': TEST_RUNNER_TYPE}
+    if os.getenv('ENABLE_NOARCH_TEST'):
+        configs['noarch'] = {'num_shards': 1, 'runner': TEST_RUNNER_TYPE}
     matrix = {
         'include': [
             {
