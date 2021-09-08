@@ -122,7 +122,7 @@ if __name__ == "__main__":
     try:
         identify_torchbench_branch(args.torchbench_path, args.pr_body)
     except RuntimeError as e:
-        print(f"Identify TorchBench branch failed: {e.message}")
+        print(f"Identify TorchBench branch failed: {str(e)}")
         exit(1)
     print(f"Ready to run TorchBench with benchmark. Result will be saved in the directory: {output_dir}.")
     # Run TorchBench with the generated config
