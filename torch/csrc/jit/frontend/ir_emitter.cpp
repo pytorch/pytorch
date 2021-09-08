@@ -1315,7 +1315,7 @@ struct to_ir {
     return emitIfExpr(expr.range(), cond_value, true_expr, false_expr);
   }
 
-  Value* emitListComprehension(const ListComp& lc, TypePtr type_hint) {
+  Value* emitListComprehension(const ListComp& lc, const TypePtr& type_hint) {
     const auto loc = lc.range();
     const auto targets_list = List<Expr>::create(lc.range(), {lc.target()});
     const auto itrs = List<Expr>::create(lc.range(), {lc.iter()});
@@ -1328,14 +1328,15 @@ struct to_ir {
 
     // See notes on logic in `emitListLiteral`
 
+    TypePtr refined_type_hint = type_hint;
     TypePtr annotated_union_type =
         type_hint && type_hint->kind() == UnionType::Kind ? type_hint : nullptr;
 
     std::vector<TypePtr> all_candidates = {};
 
-    if (type_hint) {
-      // If necessary/possible, make `type_hint` a ListType
-      if (auto union_type_hint = type_hint->cast<UnionType>()) {
+    if (refined_type_hint) {
+      // If necessary/possible, refine `refined_type_hint` to a ListType
+      if (auto union_type_hint = refined_type_hint->cast<UnionType>()) {
         std::vector<TypePtr> list_types;
         std::copy_if(
             union_type_hint->containedTypes().begin(),
@@ -1345,21 +1346,22 @@ struct to_ir {
               return type_ptr->kind() == ListType::Kind;
             });
         if (list_types.empty()) {
-          throw ErrorReport(lc)
-              << "Expected an Union type annotation "
-              << "with an inner List type, but got " << type_hint->repr_str();
+          throw ErrorReport(lc) << "Expected an Union type annotation "
+                                << "with an inner List type, but got "
+                                << refined_type_hint->repr_str();
         } else if (list_types.size() == 1) {
-          type_hint = list_types[0];
+          refined_type_hint = list_types[0];
         } else {
           all_candidates = std::move(list_types);
         }
-      } else if (auto optional_type_hint = type_hint->cast<OptionalType>()) {
-        type_hint = optional_type_hint->getElementType();
+      } else if (
+          auto optional_type_hint = refined_type_hint->cast<OptionalType>()) {
+        refined_type_hint = optional_type_hint->getElementType();
       }
 
       if (all_candidates.empty()) {
-        if (type_hint->kind() == ListType::Kind) {
-          list_value->setType(type_hint);
+        if (refined_type_hint->kind() == ListType::Kind) {
+          list_value->setType(refined_type_hint);
         } else {
           throw ErrorReport(lc) << "Expected an annotation of type "
                                 << "List, but got " << type_hint->repr_str();
@@ -1388,8 +1390,8 @@ struct to_ir {
       }
 
       const auto elem_type_hint =
-          type_hint && type_hint->kind() == ListType::Kind
-          ? type_hint->cast<ListType>()->getElementType()
+          refined_type_hint && refined_type_hint->kind() == ListType::Kind
+          ? refined_type_hint->cast<ListType>()->getElementType()
           : nullptr;
 
       c10::optional<TypePtr> unified_elem_type = unifyTypes(
@@ -1411,16 +1413,20 @@ struct to_ir {
             out->type()->repr_str(),
             ", while the elements "
             " before it were ",
-            type_hint->expect<ListType>()->getElementType()->repr_str(),
+            list_value->type()
+                ->expect<ListType>()
+                ->getElementType()
+                ->repr_str(),
             "\n",
             lc.range().str());
       }
 
-      if (all_candidates.empty() && type_hint &&
+      if (all_candidates.empty() && refined_type_hint &&
           !(*unified_elem_type)
-               ->isSubtypeOf(type_hint->expect<ListType>()->getElementType())) {
+               ->isSubtypeOf(
+                   refined_type_hint->expect<ListType>()->getElementType())) {
         throw ErrorReport(lc)
-            << "List type annotation `" << type_hint->repr_str()
+            << "List type annotation `" << refined_type_hint->repr_str()
             << "` did not match the types of the given list elements,"
             << " which were unified to " << (*unified_elem_type)->repr_str();
       }
@@ -1460,11 +1466,11 @@ struct to_ir {
               << "elements, which were unified to "
               << (*unified_elem_type)->repr_str();
         } else {
-          type_hint = greatest_elem_type;
+          refined_type_hint = greatest_elem_type;
         }
       }
 
-      if (!type_hint) {
+      if (!refined_type_hint) {
         list_value->setType(ListType::create(*unified_elem_type));
       }
 
@@ -1477,7 +1483,7 @@ struct to_ir {
     return list_value;
   }
 
-  Value* emitDictComprehension(const DictComp& dc, TypePtr type_hint) {
+  Value* emitDictComprehension(const DictComp& dc, const TypePtr& type_hint) {
     const auto loc = dc.range();
     const auto targets_list = List<Expr>::create(dc.range(), {dc.target()});
     const auto itrs = List<Expr>::create(dc.range(), {dc.iter()});
@@ -1488,15 +1494,16 @@ struct to_ir {
     // Set the default type to be Dict[str, Tensor]
     dict_value->setType(DictType::create(StringType::get(), TensorType::get()));
 
+    TypePtr refined_type_hint = nullptr;
     TypePtr annotated_union_type =
         type_hint && type_hint->kind() == UnionType::Kind ? type_hint : nullptr;
 
     std::vector<TypePtr> all_candidates = {};
 
     // See notes on logic in `emitListLiteral`
-    if (type_hint) {
+    if (refined_type_hint) {
       // If necessary/possible, make `type_hint` a DictType
-      if (auto union_type_hint = type_hint->cast<UnionType>()) {
+      if (auto union_type_hint = refined_type_hint->cast<UnionType>()) {
         std::vector<TypePtr> dict_types;
         std::copy_if(
             union_type_hint->containedTypes().begin(),
@@ -1506,21 +1513,22 @@ struct to_ir {
               return type_ptr->kind() == DictType::Kind;
             });
         if (dict_types.empty()) {
-          throw ErrorReport(dc)
-              << "Expected an Union type annotation "
-              << "with an inner Dict type, but got " << type_hint->repr_str();
+          throw ErrorReport(dc) << "Expected an Union type annotation "
+                                << "with an inner Dict type, but got "
+                                << refined_type_hint->repr_str();
         } else if (dict_types.size() == 1) {
-          type_hint = dict_types[0];
+          refined_type_hint = dict_types[0];
         } else {
           all_candidates = std::move(dict_types);
         }
-      } else if (auto optional_type_hint = type_hint->cast<OptionalType>()) {
-        type_hint = optional_type_hint->getElementType();
+      } else if (
+          auto optional_type_hint = refined_type_hint->cast<OptionalType>()) {
+        refined_type_hint = optional_type_hint->getElementType();
       }
 
       if (all_candidates.empty()) {
-        if (type_hint->kind() == DictType::Kind) {
-          dict_value->setType(type_hint);
+        if (refined_type_hint->kind() == DictType::Kind) {
+          dict_value->setType(refined_type_hint);
         } else {
           throw ErrorReport(dc) << "Expected an annotation of type "
                                 << "Dict, but got " << type_hint->repr_str();
@@ -1567,8 +1575,8 @@ struct to_ir {
 
       // If we had any annotation OTHER THAN a Union that can hold more
       // than one type of Dict
-      if (type_hint && all_candidates.empty()) {
-        DictTypePtr dict_type_hint = type_hint->expect<DictType>();
+      if (refined_type_hint && all_candidates.empty()) {
+        DictTypePtr dict_type_hint = refined_type_hint->expect<DictType>();
 
         std::stringstream ss;
         std::stringstream err;
@@ -1602,8 +1610,8 @@ struct to_ir {
       }
 
       const TypePtr value_type_hint =
-          type_hint && type_hint->kind() == DictType::Kind
-          ? type_hint->expect<DictType>()->getValueType()
+          refined_type_hint && refined_type_hint->kind() == DictType::Kind
+          ? refined_type_hint->expect<DictType>()->getValueType()
           : nullptr;
 
       c10::optional<TypePtr> unified_value_type = unifyTypes(
@@ -1672,11 +1680,11 @@ struct to_ir {
               << "those list types can hold the types of the given dict"
               << " elements, which were unified to " << candidate->repr_str();
         } else {
-          type_hint = candidate;
+          refined_type_hint = candidate;
         }
       }
 
-      if (!type_hint) {
+      if (!refined_type_hint) {
         dict_value->setType(DictType::create(k->type(), *unified_value_type));
       } else {
         dict_value->setType(type_hint);
@@ -3979,7 +3987,7 @@ struct to_ir {
             ->call(tree->range(), method, named_values, {}, 0));
   }
 
-  Value* emitListLiteral(ListLiteral ll, TypePtr type_hint) {
+  Value* emitListLiteral(ListLiteral ll, const TypePtr& type_hint) {
     auto values = getValues(ll.inputs(), /*maybe_unpack=*/true);
 
     // Determine the element type of the list. If we have a type hint
@@ -3988,13 +3996,17 @@ struct to_ir {
     // `Any` as a catch-all supertype). Assume `[]` is `List[Tensor]`
     TypePtr inferred_elem_type = TensorType::get();
 
+    TypePtr refined_type_hint = type_hint;
+
     // If `type_hint` is a Union, we're going to change it to be
     // the type of the rhs List, so we need to store the original
     // UnionType for later. `nullptr` means that we don't need to emit
     // an `unchecked_cast` node (either because we don't have a type
     // hint or because the type hint wasn't a Union)
     TypePtr annotated_union_type =
-        type_hint && type_hint->kind() == UnionType::Kind ? type_hint : nullptr;
+        refined_type_hint && refined_type_hint->kind() == UnionType::Kind
+        ? refined_type_hint
+        : nullptr;
 
     // This is used for error reporting in the case that we have a Union
     // annotation that contains multiple Lists. We need to determine the
@@ -4004,9 +4016,9 @@ struct to_ir {
     // Basic `type_hint` check here for better error reporting. We also
     // see if we can narrow down the actual type if the given type hint
     // is a Union
-    if (type_hint) {
+    if (refined_type_hint) {
       // If necessary/possible, make `type_hint` a ListType
-      if (auto union_type_hint = type_hint->cast<UnionType>()) {
+      if (auto union_type_hint = refined_type_hint->cast<UnionType>()) {
         std::vector<TypePtr> list_types;
         std::copy_if(
             union_type_hint->containedTypes().begin(),
@@ -4016,35 +4028,38 @@ struct to_ir {
               return type_ptr->kind() == ListType::Kind;
             });
         if (list_types.empty()) {
-          throw ErrorReport(ll)
-              << "Expected an Union type annotation "
-              << "with an inner List type, but got " << type_hint->repr_str();
+          throw ErrorReport(ll) << "Expected an Union type annotation "
+                                << "with an inner List type, but got "
+                                << refined_type_hint->repr_str();
         } else if (list_types.size() > 1) {
           if (values.empty()) {
             throw ErrorReport(ll)
                 << "Cannot assign an empty list to a "
-                << "variable annotated to be type " << type_hint->repr_str()
+                << "variable annotated to be type "
+                << refined_type_hint->repr_str()
                 << " because there are multiple possible List "
                 << "type candidates in the Union annotation";
           } else {
             all_candidates = std::move(list_types);
           }
         } else {
-          type_hint = list_types[0];
+          refined_type_hint = list_types[0];
         }
-      } else if (auto optional_type_hint = type_hint->cast<OptionalType>()) {
-        type_hint = optional_type_hint->getElementType();
+      } else if (
+          auto optional_type_hint = refined_type_hint->cast<OptionalType>()) {
+        refined_type_hint = optional_type_hint->getElementType();
       }
 
       // If we had any annotation OTHER THAN a Union that can hold more
       // than one type of List
       if (all_candidates.empty()) {
-        if (type_hint->kind() == ListType::Kind) {
-          auto list_type_hint = type_hint->cast<ListType>();
+        if (refined_type_hint->kind() == ListType::Kind) {
+          auto list_type_hint = refined_type_hint->cast<ListType>();
           inferred_elem_type = list_type_hint->getElementType();
         } else {
-          throw ErrorReport(ll) << "Expected an annotation of type "
-                                << "List, but got " << type_hint->repr_str();
+          throw ErrorReport(ll)
+              << "Expected an annotation of type "
+              << "List, but got " << refined_type_hint->repr_str();
         }
       }
     }
@@ -4058,14 +4073,15 @@ struct to_ir {
       // `unifyTypeList` because there's a chance that `elem_type` is
       // the Tensor default
       const auto elem_type_hint =
-          type_hint && type_hint->kind() == ListType::Kind
-          ? type_hint->cast<ListType>()->getElementType()
+          refined_type_hint && refined_type_hint->kind() == ListType::Kind
+          ? refined_type_hint->cast<ListType>()->getElementType()
           : nullptr;
 
       c10::optional<TypePtr> unified_elem_type = unifyTypeList(
           types, nowhere, /*default_to_union=*/true, elem_type_hint);
 
-      if (!type_hint && (*unified_elem_type)->kind() == UnionType::Kind) {
+      if (!refined_type_hint &&
+          (*unified_elem_type)->kind() == UnionType::Kind) {
         TORCH_WARN(
             "List consists of heterogeneous types, which means",
             " that it has been typed as containing ",
@@ -4077,10 +4093,10 @@ struct to_ir {
             ll.range().str());
       }
 
-      if (all_candidates.empty() && type_hint &&
+      if (all_candidates.empty() && refined_type_hint &&
           !(*unified_elem_type)->isSubtypeOf(inferred_elem_type)) {
         throw ErrorReport(ll)
-            << "List type annotation `" << type_hint->repr_str()
+            << "List type annotation `" << refined_type_hint->repr_str()
             << "` did not match the types of the given list elements,"
             << " which were unified to " << (*unified_elem_type)->repr_str();
       }
@@ -4120,15 +4136,16 @@ struct to_ir {
               << " elements, which were unified to "
               << (*unified_elem_type)->repr_str();
         } else {
-          type_hint = ListType::create(greatest_elem_type);
-          inferred_elem_type = type_hint->expect<ListType>()->getElementType();
+          refined_type_hint = ListType::create(greatest_elem_type);
+          inferred_elem_type =
+              refined_type_hint->expect<ListType>()->getElementType();
         }
       }
 
       // We only want to set `elem_type` if we don't have a type hint
       // to allow for the case that `*unified` is a subtype of
       // `type_hint`
-      if (!type_hint) {
+      if (!refined_type_hint) {
         inferred_elem_type = *unified_elem_type;
       }
     }
@@ -4249,14 +4266,17 @@ struct to_ir {
 
         // See notes on logic in `emitListLiteral`
 
+        TypePtr refined_type_hint = type_hint;
+
         TypePtr annotated_union_type =
-            type_hint && type_hint->kind() == UnionType::Kind ? type_hint
-                                                              : nullptr;
+            refined_type_hint && refined_type_hint->kind() == UnionType::Kind
+            ? refined_type_hint
+            : nullptr;
 
         std::vector<TypePtr> all_candidates = {};
 
-        if (type_hint) {
-          if (auto union_type_hint = type_hint->cast<UnionType>()) {
+        if (refined_type_hint) {
+          if (auto union_type_hint = refined_type_hint->cast<UnionType>()) {
             std::vector<TypePtr> dict_types;
             std::copy_if(
                 union_type_hint->containedTypes().begin(),
@@ -4280,19 +4300,20 @@ struct to_ir {
                 all_candidates = std::move(dict_types);
               }
             } else {
-              type_hint = dict_types[0];
+              refined_type_hint = dict_types[0];
             }
           } else if (
-              auto optional_type_hint = type_hint->cast<OptionalType>()) {
-            type_hint = optional_type_hint->getElementType();
+              auto optional_type_hint =
+                  refined_type_hint->cast<OptionalType>()) {
+            refined_type_hint = optional_type_hint->getElementType();
           }
 
           if (all_candidates.empty()) {
-            if (auto dict_type_hint = type_hint->cast<DictType>()) {
-              auto dict_type = type_hint->expect<DictType>();
+            if (auto dict_type_hint = refined_type_hint->cast<DictType>()) {
+              auto dict_type = refined_type_hint->expect<DictType>();
               key_type = dict_type->getKeyType();
               value_type = dict_type->getValueType();
-            } else if (type_hint == AnyType::get()) {
+            } else if (refined_type_hint == AnyType::get()) {
               // @ansley: Clean up later
               if (keys.empty()) {
                 key_type = StringType::get();
@@ -4352,7 +4373,7 @@ struct to_ir {
               /*default_to_union=*/true,
               value_type);
 
-          if (type_hint && !all_candidates.empty()) {
+          if (refined_type_hint && !all_candidates.empty()) {
             auto known_key_type = keys[0]->type();
             auto known_value_type = *unified_value_type;
 
@@ -4389,7 +4410,7 @@ struct to_ir {
                 vector_repr << all_candidates[i]->repr_str();
               }
               throw ErrorReport(dl)
-                  << "Union type annotation `" << type_hint->repr_str()
+                  << "Union type annotation `" << refined_type_hint->repr_str()
                   << "` can hold " << vector_repr.str() << ", but none of "
                   << "those types can hold the types of the given dict"
                   << " elements, which were unified to Dict["
@@ -4398,11 +4419,12 @@ struct to_ir {
             } else {
               key_type = candidate_key_type;
               value_type = candidate_value_type;
-              type_hint = candidate;
+              refined_type_hint = candidate;
             }
           }
 
-          if (!type_hint && (*unified_value_type)->kind() == UnionType::Kind) {
+          if (!refined_type_hint &&
+              (*unified_value_type)->kind() == UnionType::Kind) {
             TORCH_WARN(
                 "Dict values consist of heterogeneous types, which "
                 "means that they have been typed as `Any`. To use "
@@ -4412,15 +4434,15 @@ struct to_ir {
                 dl.range().str());
           }
 
-          if (type_hint) {
+          if (refined_type_hint) {
             TypePtr value_type_hint =
-                type_hint->expect<DictType>()->getValueType();
+                refined_type_hint->expect<DictType>()->getValueType();
             for (const auto i : c10::irange(value_types.size())) {
               TORCH_CHECK(
                   value_types[i]->isSubtypeOf(value_type_hint),
                   "Type "
                   "hint for dict was ",
-                  type_hint->repr_str(),
+                  refined_type_hint->repr_str(),
                   ", but the value ",
                   "at index ",
                   i,
@@ -4435,7 +4457,7 @@ struct to_ir {
           // We only want to set `value_type` if we don't have a type
           // hint to allow for the case that `*unified` is a subtype of
           // the value type given by `type_hint`
-          if (!type_hint) {
+          if (!refined_type_hint) {
             value_type = *unified_value_type;
           }
         }
