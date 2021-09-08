@@ -103,5 +103,8 @@ from quantization.jit.test_deprecated_jit_quant import TestDeprecatedJitQuantize
 # AO Migration tests
 from quantization.ao_migration.test_quantize_py import TestAOMigrationQuantizePy  # noqa: F401
 
+from quantization.test_auto_tracing import TestAutoTracing  # noqa: F401
+from quantization.test_auto_tracing import TestAutoTracingModels  # noqa: F401
+
 if __name__ == '__main__':
     run_tests()

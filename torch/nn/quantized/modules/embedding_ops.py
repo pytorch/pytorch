@@ -149,7 +149,10 @@ class Embedding(torch.nn.Module):
 
         dtype = weight_observer.dtype
 
-        assert dtype == torch.quint8, 'The only supported dtype for nnq.Embedding is torch.quint8'
+        # TODO split this into separate PR
+        # assert dtype == torch.quint8, 'The only supported dtype for nnq.Embedding is torch.quint8'
+        assert dtype == torch.quint8, \
+            f'The only supported dtype for nnq.Embedding is torch.quint8, got {dtype}'
 
         # Run the observer to calculate qparams.
         weight_observer(mod.weight)
