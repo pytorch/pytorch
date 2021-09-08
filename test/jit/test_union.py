@@ -663,7 +663,9 @@ class TestUnion(JitTestCase):
 
     def _assert_raises(self, template: str, ann: str, lhs: str, msg: str):
         code = template.format(ann=ann, lhs=lhs)
-        self.checkScriptRaisesRegex(code, (), Exception, msg, name="fn", test_python=False)
+        with self.assertRaisesRegex(RuntimeError, msg):
+            cu = torch.jit.CompilationUnit(code, _frames_up=1)
+            string_frontend = getattr(cu, "fn")    # noqa: B009
 
     def test_union_with_list_assignment(self):
         template = dedent('''
@@ -760,13 +762,13 @@ class TestUnion(JitTestCase):
 
         self._assert_raises(template, "Union[List[torch.Tensor], int]",
                             lhs["list_literal_of_str"],
-                            "List type annotation `List\[Tensor\]` did "    # noqa: W605
+                            r"List type annotation `List\[Tensor\]` did "
                             "not match the types of the given list "
                             "elements")
 
         self._assert_raises(template, "Union[List[torch.Tensor], int]",
                             lhs["list_literal_of_mixed"],
-                            "List type annotation `List\[Tensor\]` did "    # noqa: W605
+                            r"List type annotation `List\[Tensor\]` did "
                             "not match the types of the given list "
                             "elements")
 
@@ -777,7 +779,7 @@ class TestUnion(JitTestCase):
         self._assert_raises(template,
                             "Union[List[torch.Tensor], int]",
                             lhs["list_comprehension_of_str"],
-                            "List type annotation `List\[Tensor\]` did "    # noqa: W605
+                            r"List type annotation `List\[Tensor\]` did "
                             "not match the types of the given list "
                             "elements")
 
@@ -894,14 +896,14 @@ class TestUnion(JitTestCase):
         self._assert_raises(template,
                             "Union[Dict[str, torch.Tensor], int]",
                             lhs["dict_literal_of_str_int"],
-                            "Type hint for dict was Dict\[str, Tensor\]"    # noqa: W605
+                            r"Type hint for dict was Dict\[str, Tensor\]"
                             ", but the value at index 0 has type int, "
                             "which is not a valid subtype of Tensor")
 
         self._assert_raises(template,
                             "Union[Dict[str, torch.Tensor], int]",
                             lhs["dict_literal_of_mixed"],
-                            "Type hint for dict was Dict\[str, Tensor\]"    # noqa: W605
+                            r"Type hint for dict was Dict\[str, Tensor\]"
                             ", but the value at index 1 has type int, "
                             "which is not a valid subtype of Tensor")
 

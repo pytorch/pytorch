@@ -376,8 +376,7 @@ class JitTestCase(JitCommonTestCase):
 
     def checkScriptRaisesRegex(self, script, inputs, exception, regex,
                                name=None, outputs=None, capture_output=False,
-                               frames_up=1, profiling=ProfilingMode.PROFILING,
-                               test_python=True):
+                               frames_up=1, profiling=ProfilingMode.PROFILING):
         """
         Checks that a given function will throw the correct exception,
         when executed with normal python, the string frontend, and the
@@ -386,19 +385,18 @@ class JitTestCase(JitCommonTestCase):
         """
         with enable_profiling_mode_for_profiling_tests():
             # Normal Python
-            if test_python:
-                with self.assertRaisesRegex(exception, regex):
-                    if isinstance(script, str):
-                        frame = self.get_frame_vars(frames_up)
-                        the_locals: Dict[str, Any] = {}
-                        execWrapper(script, glob=frame, loc=the_locals)
-                        frame.update(the_locals)
+            with self.assertRaisesRegex(exception, regex):
+                if isinstance(script, str):
+                    frame = self.get_frame_vars(frames_up)
+                    the_locals: Dict[str, Any] = {}
+                    execWrapper(script, glob=frame, loc=the_locals)
+                    frame.update(the_locals)
 
-                        python_fn = frame[name]
-                    else:
-                        python_fn = script
+                    python_fn = frame[name]
+                else:
+                    python_fn = script
 
-                    python_fn(*inputs)
+                python_fn(*inputs)
 
             # String frontend
             with self.assertRaisesRegex(exception, regex):

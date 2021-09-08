@@ -173,7 +173,7 @@ class TestTyping(JitTestCase):
         with self.assertRaisesRegex(RuntimeError, "Dicts may only "
                                     "contain homogeneous keys, but the "
                                     "type of the first generated key "
-                                    "was Union\[int, str\]"):
+                                    r"was Union\[int, str\]"):
             torch.jit.script(fn)
 
     def test_dict_type_refinement_annotation_value_mismatch(self):
@@ -181,7 +181,7 @@ class TestTyping(JitTestCase):
             l1 = ["foo", "bar", "baz", "qux"]
             l2 = [1, 2, "foo", 3]
             d: Dict[str, int] = {k : v for k, v in zip(l1, l2)}
-            return l
+            return d
 
         with self.assertRaisesRegex(RuntimeError, "Dict type annotation"
                                     r" `Dict\[str, int\]` did not match"
