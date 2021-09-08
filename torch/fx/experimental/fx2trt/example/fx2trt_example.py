@@ -236,7 +236,7 @@ if __name__ == "__main__":
 
     # Assert results are equal with the original model.
     rn18 = rn18.cuda()
-    torch.testing.assert_allclose(split_mod(x), rn18(x))
+    torch.testing.assert_close(split_mod(x), rn18(x))
 
     import time
     NITER = 100

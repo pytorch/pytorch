@@ -1214,7 +1214,6 @@ class TestQuantizeJitPasses(QuantizationTestCase):
             def __init__(self):
                 super(Res, self).__init__()
                 self.conv = torch.nn.Conv2d(3, 3, 1).float()
-                self.conv2 = torch.nn.Conv2d(3, 3, 1).float()
                 self.use_skip = True
 
             def forward(self, x: torch.Tensor, cond: bool) -> torch.Tensor:
@@ -1223,7 +1222,7 @@ class TestQuantizeJitPasses(QuantizationTestCase):
                 if self.use_skip:
                     return self.conv(x)
                 else:
-                    return self.conv2(x)
+                    return self.conv(x)
 
         class M(torch.nn.Module):
             def __init__(self):
