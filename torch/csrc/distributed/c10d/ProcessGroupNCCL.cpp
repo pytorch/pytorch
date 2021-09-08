@@ -21,7 +21,6 @@
 #include <torch/csrc/cuda/nccl.h>
 
 #include <c10d/Utils.hpp>
-#include <fmt/format.h>
 
 namespace c10d {
 
@@ -383,11 +382,9 @@ void ProcessGroupNCCL::WorkNCCL::synchronizeInternal(
         // here, it was observed that CUDA GPU will have 100% utilization and
         // can not run new events successfully.
 
-        // WorkNCCL operator << does not work with fmt::format directly.
         std::stringstream ss;
         ss << *this;
-        auto timeoutErrorMsg =
-            fmt::format("Work: {} timed out in call to wait().", ss.str());
+        auto timeoutErrorMsg = c10::str("Work ", ss.str(), " timed out in call to wait().");
         for (const auto& ncclComm : ncclComms_) {
           ncclComm->ncclCommAbort(timeoutErrorMsg);
           const auto& storeKey = getNcclAbortedCommStoreKey(
@@ -555,7 +552,7 @@ ProcessGroupNCCL::~ProcessGroupNCCL() {
 
       for (const auto& ncclComm : ncclComms) {
         std::string abortReason =
-            fmt::format("Process Group destroyed on rank {}", rank_);
+            c10::str("Process Group destroyed on rank ", rank_);
         ncclComm->ncclCommAbort(abortReason);
       }
     }
@@ -802,8 +799,8 @@ std::exception_ptr ProcessGroupNCCL::checkForNCCLErrorsInternal(
     if (commFailureReason != c10::nullopt) {
         return std::make_exception_ptr(
           std::runtime_error(
-            fmt::format(
-              "NCCL communicator encountered error set by ProcessGroupNCCL: {}",
+            c10::str(
+              "NCCL communicator encountered error set by ProcessGroupNCCL: ",
                *commFailureReason
             )
           )

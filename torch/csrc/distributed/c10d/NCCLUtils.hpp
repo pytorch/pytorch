@@ -158,8 +158,6 @@ class NCCLComm {
     std::swap(ncclAsyncErr_, other.ncclAsyncErr_);
   }
 
-  // Implemented in NCCLUtils.cpp because header files run into issues including
-  // <fmt/format.h>
   ncclComm_t getNcclComm();
 
   c10::optional<std::string> getNcclCommFailureReason() const {
