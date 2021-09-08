@@ -75,7 +75,7 @@ auto parseDebugDumpOptions() {
             "\tfusion_ir, fusion_ir_math, kernel_ir, cuda_kernel, cuda_full,\n",
             "\tcuda_to_file, launch_param, segmented_fusion, print_args,\n",
             "\tdump_eff_bandwidth, draw_segmented_fusion, scheduler_params\n",
-            "\tparallel_dimensions,buffer_reuse_verbose\n");
+            "\tparallel_dimensions, buffer_reuse_verbose, ptxas_verbose\n");
       }
       options_view = (end_pos != c10::string_view::npos)
           ? options_view.substr(end_pos + 1)
