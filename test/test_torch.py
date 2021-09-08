@@ -3047,7 +3047,7 @@ class TestTorchDeviceType(TestCase):
                 v[dim0][dim1])
 
     @onlyOnCPUAndCUDA
-    @dtypes(*torch.testing.get_all_dtypes())
+    @dtypes(*get_all_dtypes())
     def test_tensor_from_storage(self, device, dtype):
         a = make_tensor((4, 5, 3), device, dtype, low=-9, high=9)
         a_s = a.storage()
