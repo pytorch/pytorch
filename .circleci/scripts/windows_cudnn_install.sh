@@ -26,7 +26,6 @@ case ${CUDA_VERSION} in
 esac
 
 cudnn_installer_name="cudnn_installer.zip"
-trap EXIT 'rm -rf ${cudnn_installer_name}'
 cudnn_installer_link="https://ossci-windows.s3.amazonaws.com/cudnn-${CUDA_VERSION}-windows${windows_version_qualifier}-x64-${archive_version}.zip"
 cudnn_install_folder="C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v${CUDA_VERSION}/"
 
