@@ -360,6 +360,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.bucketize: lambda input, boundaries, out_int32=False, right=False, out=None: -1,
         torch.cartesian_prod: lambda *tensors: -1,
         torch.cat: lambda tensors, dim=0, out=None: -1,
+        torch.concat: lambda tensors, dim=0, out=None: -1,  # alias for torch.cat
         torch.cdist: lambda x1, x2, p=2.0, compute_mode='use_mm_for_euclid_dist_if_necessary': -1,
         torch.ceil: lambda input, out=None: -1,
         torch.celu: lambda input, alhpa=1., inplace=False: -1,
@@ -598,6 +599,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.masked_scatter: lambda input, mask, source: -1,
         torch.masked_select: lambda input, mask, out=None: -1,
         torch.matmul: lambda input, other, out=None: -1,
+        torch.linalg.matmul: lambda input, other, out=None: -1,  # alias for torch.matmul
         torch.matrix_power: lambda input, n: -1,
         torch.linalg.matrix_power: lambda input, n, out=None: -1,
         torch.matrix_rank: lambda input, tol=None, symmetric=False: -1,
@@ -919,6 +921,8 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.special.polygamma: lambda input, n, out=None: -1,
         torch.special.digamma: lambda input: -1,
         torch.special.psi: lambda input: -1,
+        torch.special.gammainc: lambda input, other, out=None: -1,
+        torch.special.gammaincc: lambda input, other, out=None: -1,
         torch.special.gammaln: lambda input: -1,
         torch.special.i0: lambda input: -1,
         torch.special.i0e: lambda input: -1,
