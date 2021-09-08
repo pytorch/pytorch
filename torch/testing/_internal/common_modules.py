@@ -3,8 +3,9 @@ from copy import deepcopy
 from functools import wraps, partial
 from itertools import chain
 import torch.nn.functional as F
-from torch.testing import floating_types, make_tensor
+from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import floating_types
+from torch.testing._internal.common_device_type import (
     _TestParametrizer, _dtype_test_suffix, _update_param_kwargs, skipIf)
 from torch.testing._internal.common_nn import nllloss_reference, get_reduction
 from torch.testing._internal.common_utils import freeze_rng_state
@@ -194,6 +195,13 @@ def module_inputs_torch_nn_NLLLoss(module_info, device, dtype, requires_grad, **
         ('weights_ignore_index', {'weight': make_weight(10).abs(), 'ignore_index': 2}),
         ('weights_ignore_index_neg', {'weight': make_weight(10).abs(), 'ignore_index': -1})
     ]
+
+    # TODO: Uncomment when negative weights is supported.
+    # negative_weight = make_weight(10)
+    # negative_weight[0] = -1
+    # cases.append(
+    #     ('weights_negative', {'weight': negative_weight})
+    # )
     module_inputs = []
     for desc, constructor_kwargs in cases:
 
