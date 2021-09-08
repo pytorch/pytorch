@@ -2968,18 +2968,14 @@ TEST(NVFuserTest, FusionShiftNoPadding1_CUDA) {
   tv5->split(-1, 8);
   tv5->reorder({{1, 2}});
 
-  tv1->split(0, 4);
-  tv1->split(-1, 8);
-  tv1->reorder({{1, 2}});
+  TransformPropagator::from(tv5);
 
   tv2->computeAt(tv5, -1);
   tv3->computeAt(tv5, -1);
 
   tv5->axis(-1)->parallelize(ParallelType::TIDx);
   tv5->axis(-2)->parallelize(ParallelType::TIDy);
-
-  tv1->axis(-1)->parallelize(ParallelType::TIDx);
-  tv1->axis(-2)->parallelize(ParallelType::TIDy);
+  scheduler_utils::parallelizeAllLike(tv5, ir_utils::allTvs(&fusion));
 
   FusionExecutor fe;
   fe.compileFusion(&fusion);
@@ -3028,16 +3024,13 @@ TEST(NVFuserTest, FusionShiftNoPadding2_CUDA) {
   tv5->reorder({{1, 2}});
   tv5->merge(-2, -1);
 
+  TransformPropagator::from(tv5);
+
   tv2->computeAt(tv5, -1);
   tv3->computeAt(tv5, -1);
 
-  tv1->split(0, 4);
-  tv1->split(-1, 8);
-  tv1->reorder({{1, 2}});
-  tv1->merge(-2, -1);
-
   tv5->axis(-1)->parallelize(ParallelType::TIDx);
-  tv1->axis(-1)->parallelize(ParallelType::TIDx);
+  scheduler_utils::parallelizeAllLike(tv5, ir_utils::allTvs(&fusion));
 
   FusionExecutor fe;
   fe.compileFusion(&fusion);
@@ -3091,16 +3084,13 @@ TEST(NVFuserTest, FusionShiftNoPadding3_CUDA) {
   tv_avg->reorder({{1, 2}});
   tv_avg->merge(-2, -1);
 
+  TransformPropagator::from(tv_avg);
+
   tv2->computeAt(tv_avg, -1);
   tv3->computeAt(tv_avg, -1);
 
-  tv1->split(0, 4);
-  tv1->split(-1, 8);
-  tv1->reorder({{1, 2}});
-  tv1->merge(-2, -1);
-
   tv_avg->axis(-1)->parallelize(ParallelType::TIDx);
-  tv1->axis(-1)->parallelize(ParallelType::TIDx);
+  scheduler_utils::parallelizeAllLike(tv_avg, ir_utils::allTvs(&fusion));
 
   FusionExecutor fe;
   fe.compileFusion(&fusion);
