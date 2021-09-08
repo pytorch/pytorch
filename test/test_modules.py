@@ -167,9 +167,7 @@ class TestModule(TestCase):
             if isinstance(items, dict):
                 items = items.values()
             for item in items:
-                if not isinstance(item, torch.Tensor):
-                    continue
-                if item.is_leaf:
+                if not isinstance(item, torch.Tensor) or item.is_leaf:
                     continue
                 old_requires_grad = item.requires_grad
                 item.detach_().requires_grad_(old_requires_grad)
@@ -186,6 +184,7 @@ class TestModule(TestCase):
             else:
                 return deepcopy(obj)
 
+        # TODO: Allow ModuleInfo to change this?
         if dtype == torch.float32:
             atol = 5e-2
         else:
