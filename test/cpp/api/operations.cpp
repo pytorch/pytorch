@@ -55,3 +55,33 @@ TEST_F(OperationTest, Cross) {
     ASSERT_TRUE(out.allclose(exp));
   }
 }
+
+TEST_F(OperationTest, Linear_out) {
+  {
+    const auto x = torch::arange(100., 118).resize_({3, 3, 2});
+    const auto w = torch::arange(200., 206).resize_({3, 2});
+    const auto b = torch::arange(300., 303);
+    auto y = torch::empty({3, 3, 3});
+    at::linear_out(y, x, w, b);
+    const auto y_exp = torch::tensor(
+        {{{40601, 41004, 41407}, {41403, 41814, 42225}, {42205, 42624, 43043}},
+         {{43007, 43434, 43861}, {43809, 44244, 44679}, {44611, 45054, 45497}},
+         {{45413, 45864, 46315}, {46215, 46674, 47133}, {47017, 47484, 47951}}},
+        torch::kFloat);
+    ASSERT_TRUE(torch::allclose(y, y_exp));
+  }
+  {
+    const auto x = torch::arange(100., 118).resize_({3, 3, 2});
+    const auto w = torch::arange(200., 206).resize_({3, 2});
+    auto y = torch::empty({3, 3, 3});
+    at::linear_out(y, x, w);
+    ASSERT_EQ(y.ndimension(), 3);
+    ASSERT_EQ(y.sizes(), torch::IntArrayRef({3, 3, 3}));
+    const auto y_exp = torch::tensor(
+        {{{40301, 40703, 41105}, {41103, 41513, 41923}, {41905, 42323, 42741}},
+         {{42707, 43133, 43559}, {43509, 43943, 44377}, {44311, 44753, 45195}},
+         {{45113, 45563, 46013}, {45915, 46373, 46831}, {46717, 47183, 47649}}},
+        torch::kFloat);
+    ASSERT_TRUE(torch::allclose(y, y_exp));
+  }
+}
