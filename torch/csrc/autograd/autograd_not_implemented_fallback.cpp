@@ -282,7 +282,7 @@ void ADInplaceOrViewFallbackImpl(const c10::OperatorHandle& op, c10::DispatchKey
       // See NOTE [ View + Inplace detection ] for more details about this logic
       auto result = as_view(
         /* base=*/aliased_input,
-        /* output=*/aliased_output,
+        /* tensor=*/aliased_output,
         /* is_bw_differentiable=*/true,
         /* is_fw_differentiable=*/true,
         /* creation_meta=*/InferenceMode::is_enabled() ? CreationMeta::INFERENCE_MODE : (at::GradMode::is_enabled() ? CreationMeta::MULTI_OUTPUT_NODE : CreationMeta::NO_GRAD_MODE));
@@ -291,23 +291,14 @@ void ADInplaceOrViewFallbackImpl(const c10::OperatorHandle& op, c10::DispatchKey
     } else {
       AT_ASSERT(aliased_output_iv.isTensor());
       const at::Tensor& aliased_output = aliased_output_iv.toTensor();
-      if (isDifferentiableType(aliased_output.scalar_type())) {
-        auto result = as_view(
-          /* base=*/aliased_input,
-          /* output=*/aliased_output,
-          /* is_bw_differentiable=*/true,
-          /* is_fw_differentiable=*/true,
-          /* view_func=*/view_func,
-          /* creation_meta=*/InferenceMode::is_enabled() ? CreationMeta::INFERENCE_MODE : (at::GradMode::is_enabled() ? CreationMeta::DEFAULT : CreationMeta::NO_GRAD_MODE));
-        stack->at(stack->size() - num_returns + aliased_output_idx) = result;
-      } else {
-        auto result = as_view(
+      auto result = as_view(
         /* base=*/aliased_input,
-        /* output=*/aliased_output,
-        /* is_bw_differentiable=*/false,
-        /* is_fw_differentiable=*/false);
-        stack->at(stack->size() - num_returns + aliased_output_idx) = result;
-      }
+        /* tensor=*/aliased_output,
+        /* is_bw_differentiable=*/true,
+        /* is_fw_differentiable=*/true,
+        /* view_func=*/view_func,
+        /* creation_meta=*/InferenceMode::is_enabled() ? CreationMeta::INFERENCE_MODE : (at::GradMode::is_enabled() ? CreationMeta::DEFAULT : CreationMeta::NO_GRAD_MODE));
+      stack->at(stack->size() - num_returns + aliased_output_idx) = result;
     }
   }
 }
