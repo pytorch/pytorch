@@ -279,7 +279,6 @@ class TORCH_API TensorExprKernel {
   bool use_fallback_{false};
   bool hasRandom_{false};
   bool hasBroadcast_{false};
-  bool pre_alloc_{false};
   std::unordered_map<const torch::jit::Value*, std::vector<ExprHandle>>
       known_sizes_;
 
@@ -287,6 +286,7 @@ class TORCH_API TensorExprKernel {
   std::vector<ConstantDescr> constants_;
 
   std::unordered_map<c10::Symbol, NNCLoweringFunction> custom_lowerings_;
+  bool pre_alloc_{false};
 };
 
 TORCH_API int& getTECudaPointwiseLoopLevels();

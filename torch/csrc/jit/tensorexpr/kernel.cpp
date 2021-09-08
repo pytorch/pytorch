@@ -69,7 +69,7 @@ namespace tensorexpr {
 std::string buildErrorMessage(const std::string& s) {
   static const std::string generic_error_message =
       "This error occured in the fuser. You can turn off the fuser with "
-      "torch._C._jit_override_can_fuse_on_cpu(False)";
+      "torch.jit.enable_fusion(False).";
   if (s.empty()) {
     return generic_error_message;
   }
@@ -734,6 +734,7 @@ std::vector<ExprHandle> TensorExprKernel::inferSizesForValue(
     case aten::hardtanh:
     case aten::hardsigmoid:
     case aten::hardswish:
+    case aten::softplus:
     case aten::sqrt:
     case aten::rsqrt:
     case aten::abs:
@@ -2028,6 +2029,27 @@ Tensor tensorexpr::computeOperandValue(
           });
     } break;
 
+    case aten::softplus: {
+      return computeThreeOperand(
+          "aten_softplus",
+          inputs,
+          outputShape,
+          outputType,
+          [](const ExprHandle& a,
+             const ExprHandle& beta,
+             const ExprHandle& threshold) {
+            auto beta_promoted = Cast::make(a.dtype(), beta);
+            auto threshold_promoted = Cast::make(a.dtype(), threshold);
+            auto beta_a = beta_promoted * a;
+            return CompareSelect::make(
+                beta_a,
+                threshold_promoted,
+                a,
+                log1p(exp(beta_a)) / beta_promoted,
+                kGT);
+          });
+    } break;
+
     case aten::hardsigmoid: {
       return computeOneOperand(
           "aten_hardsigmoid",
@@ -3074,7 +3096,7 @@ void TensorExprKernel::preAllocIntermediateBufs(
     bool is_static = true;
     size_t size =
         elementSize(buf->dtype().scalar_type()) * buf->dtype().lanes();
-    for (auto d : buf->dims()) {
+    for (auto& d : buf->dims()) {
       if (!d->isConstant()) {
         is_static = false;
         break;
@@ -3091,7 +3113,7 @@ void TensorExprKernel::preAllocIntermediateBufs(
       ++it;
       continue;
     }
-    allocated_bufs.push_back(std::make_pair(buf, bp));
+    allocated_bufs.emplace_back(buf, bp);
     it = interm_bufs.erase(it);
   }
   std::sort(
@@ -3100,7 +3122,7 @@ void TensorExprKernel::preAllocIntermediateBufs(
       [](const auto& a, const auto& b) {
         return a.first->name_hint() > b.first->name_hint();
       });
-  for (auto a : allocated_bufs) {
+  for (auto& a : allocated_bufs) {
     constants_.push_back({a.first, a.second});
   }
 }
@@ -3202,7 +3224,8 @@ TensorExprKernel::TensorExprKernel(
     bool pre_alloc /*= false*/)
     : graph_(subgraph),
       code_(subgraph, ""),
-      custom_lowerings_(std::move(custom_lowerings)), pre_alloc_(pre_alloc) {
+      custom_lowerings_(std::move(custom_lowerings)),
+      pre_alloc_(pre_alloc) {
   allow_fallback_ = fallbackAllowed();
   if (!allow_fallback_) {
     compile();
