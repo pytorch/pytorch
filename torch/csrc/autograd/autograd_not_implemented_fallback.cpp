@@ -186,6 +186,9 @@ torch::CppFunction autogradNotImplementedFallback() {
   return torch::CppFunction::makeFromBoxedFunction<&autogradNotImplementedFallbackImpl>();
 }
 
+// TODO: we can codegen this to avoid duplication
+static const std::vector<std::string> NEEDS_METADATA_CHANGE = {"aten::view_as_complex", "aten::view_as_real", "aten::_conj", "aten::_neg_view"};
+
 void ADInplaceOrViewFallbackImpl(const c10::OperatorHandle& op, c10::DispatchKeySet dispatch_keys, torch::jit::Stack* stack) {
   const auto& schema = op.schema();
   const auto& op_name = schema.operator_name().name;
