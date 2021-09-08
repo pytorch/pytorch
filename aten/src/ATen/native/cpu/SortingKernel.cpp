@@ -168,12 +168,7 @@ static void topk_kernel(
         return topk_impl_loop<scalar_t, float>(
             mode_values_stride, mode_indices_stride, tmp_values_stride,
             k, sizes[dim], largest, sorted, data, strides, n);
-      } else if (self.scalar_type() == ScalarType::Bool) {
-        return topk_impl_loop<scalar_t, bool>(
-            mode_values_stride, mode_indices_stride, tmp_values_stride,
-            k, sizes[dim], largest, sorted, data, strides, n);
-      }
-        else {
+      } else {
         return topk_impl_loop<scalar_t, scalar_t>(
             mode_values_stride, mode_indices_stride, tmp_values_stride,
             k, sizes[dim], largest, sorted, data, strides, n);
