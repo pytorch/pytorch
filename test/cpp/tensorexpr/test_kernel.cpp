@@ -85,6 +85,44 @@ TEST_F(Kernel, InliningIntermediates) {
   }
 }
 
+TEST_F(Kernel, PreAllocIntermediateBufs) {
+  const auto graph_string = R"IR(
+graph(%a.1 : Float(8, 8, strides=[8, 1], requires_grad=0, device=cpu),
+      %b.1 : Float(8, 8, strides=[8, 1], requires_grad=0, device=cpu)):
+  %2 : int = prim::Constant[value=1]()
+  %c.2 : Float(8, 8, strides=[8, 1], requires_grad=0, device=cpu) = aten::matmul(%a.1, %b.1) # test_matmul.py:12:12
+  %3 : Float(8, 8, strides=[8, 1], requires_grad=0, device=cpu) = aten::add(%a.1, %c.2, %2) # test_matmul.py:13:15
+  return (%3))IR";
+  auto graph = std::make_shared<Graph>();
+  parseIR(graph_string, &*graph);
+
+  auto a = at::rand({8, 8}, TensorOptions(kCPU).dtype(at::kFloat));
+  auto b = at::rand({8, 8}, TensorOptions(kCPU).dtype(at::kFloat));
+  auto o = at::zeros({8, 8}, TensorOptions(kCPU).dtype(at::kFloat));
+  auto ref = at::matmul(a, b) + a;
+  TensorExprKernel k(graph, {}, true);
+
+  std::vector<at::Tensor> inputs = {a, b};
+  auto stmt = k.getCodeGenStmt();
+
+  std::ostringstream oss;
+  oss << *stmt;
+
+  // Check whether the intermediate buffer has been added to constants
+  auto constants = k.getConstantDescriptors();
+  ASSERT_EQ(constants.size(), 1);
+
+  // Check the IR we produced
+  torch::jit::testing::FileCheck().check_not("Alloc")->run(oss.str());
+  torch::jit::testing::FileCheck().check_not("Free")->run(oss.str());
+
+  // Check correctness
+  std::vector<IValue> stack = fmap<IValue>(inputs);
+  k.run(stack);
+  o = stack[0].toTensor();
+  ASSERT_TRUE(at::allclose(o, ref));
+}
+
 TEST_F(Kernel, _1) {
   const auto graph_string = R"IR(
       graph(%0 : Float(5, 3, strides=[3, 1], device=cpu),
