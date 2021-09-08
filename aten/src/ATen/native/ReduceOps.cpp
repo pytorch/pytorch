@@ -92,13 +92,7 @@ ScalarType get_result_or_bytebool_dtype(const Tensor& self, const Tensor& result
   }
 }
 
-void check_all_any(const char* name, const Tensor& self, const Tensor& result) {
-  // Refer [all, any : uint8 compatibility]
-  TORCH_CHECK(
-      self.layout() == Layout::Strided,
-      name, " only supports strided layout, got: ",
-      self.layout());
-
+void check_result_is_bytebool(const char* name, const Tensor& self, const Tensor& result) {
   if (result.defined()) {
     // Refer [all, any : uint8 compatibility]
     TORCH_CHECK(
@@ -109,18 +103,34 @@ void check_all_any(const char* name, const Tensor& self, const Tensor& result) {
   }
 }
 
+void allany_meta(
+    impl::MetaBase& meta,
+    const char* name,
+    const Tensor& self,
+    IntArrayRef dims,
+    bool keepdim) {
+  const auto& result = meta.maybe_get_output();
+  check_result_is_bytebool(name, self, result);
+  auto out_dtype = get_result_or_bytebool_dtype(self, result);
+  resize_reduction(meta, self, dims, keepdim, out_dtype);
+}
+
 TORCH_PRECOMPUTE_META_FUNC2(all, dim)(const Tensor& self, int64_t dim, bool keepdim) {
-  check_all_any("all", self, maybe_get_output());
-  auto out_dtype = get_result_or_bytebool_dtype(self, maybe_get_output());
-  resize_reduction(*this, self, dim, keepdim, out_dtype);
+  allany_meta(*this, "all", self, dim, keepdim);
   return TORCH_PRECOMPUTE_STRUCT2(all, dim)().set_dim(maybe_wrap_dim(dim, self.dim()));
 }
 
+TORCH_META_FUNC(all)(const Tensor& self) {
+  allany_meta(*this, "all", self, {}, false);
+}
+
 TORCH_PRECOMPUTE_META_FUNC2(any, dim)(const Tensor& self, int64_t dim, bool keepdim) {
-  check_all_any("any", self, maybe_get_output());
-  auto out_dtype = get_result_or_bytebool_dtype(self, maybe_get_output());
-  resize_reduction(*this, self, dim, keepdim, out_dtype);
+  allany_meta(*this, "any", self, dim, keepdim);
   return TORCH_PRECOMPUTE_STRUCT2(any, dim)().set_dim(maybe_wrap_dim(dim, self.dim()));
+}
+
+TORCH_META_FUNC(any)(const Tensor& self) {
+  allany_meta(*this, "any", self, {}, false);
 }
 
 void check_argmax_argmin(
@@ -1341,10 +1351,12 @@ Tensor all(const Tensor& self) {
 TORCH_IMPL_FUNC(all_out)
 (const Tensor& self, int64_t dim, bool keepdim, const Tensor& result) {
   auto iter = get_allany_iter(self, result, dim, keepdim);
-  auto mut_result = const_cast<Tensor&>(result);
-  if (!_dimreduce_return_trivial(mut_result, self, 1, dim, keepdim)) {
-    _all(mut_result, iter);
-  }
+  _all(result, iter);
+}
+
+TORCH_IMPL_FUNC(all_full_out)(const Tensor& self, const Tensor& result) {
+  auto iter = get_allany_iter(self, result, {}, false);
+  _all(result, iter);
 }
 
 inline const Tensor & _any(const Tensor & result, TensorIterator & iter) {
@@ -1376,10 +1388,12 @@ TORCH_IMPL_FUNC(any_out)
  bool keepdim,
  const Tensor& result) {
   auto iter = get_allany_iter(self, result, dim, keepdim);
-  auto mut_result = const_cast<Tensor&>(result);
-  if (!_dimreduce_return_trivial(mut_result, self, 0, dim, keepdim)) {
-    _any(mut_result, iter);
-  }
+  _any(result, iter);
+}
+
+TORCH_IMPL_FUNC(any_full_out)(const Tensor& self, const Tensor& result) {
+  auto iter = get_allany_iter(self, result, {}, false);
+  _any(result, iter);
 }
 
 Tensor &amin_out(const Tensor& self, IntArrayRef dim, bool keepdim, Tensor& result) {
