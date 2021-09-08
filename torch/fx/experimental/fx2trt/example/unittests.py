@@ -1,7 +1,6 @@
 from torch.quantization.quantize_fx import (
     prepare_fx,
     convert_fx,
-    prepare_qat_fx,
     get_tensorrt_backend_config_dict
 )
 import torch.fx.experimental.fx_acc.acc_tracer
@@ -39,12 +38,12 @@ class TestQuantizeFxTRT(QuantizationTestCase):
         m(conv2d_input)
         m = convert_fx(m, is_reference=True)
         # lower to trt
-        # m = acc_tracer.trace(m, [conv2d_input])  # type: ignore[attr-defined]
-        # interp = TRTInterpreter(m, [InputTensorSpec(data.shape[1:], torch.float, has_batch_dim=False)])
-        # engine, input_names, output_names = interp.run(fp16_mode=False, int8_mode=True)
-        # trt_mod = TRTModule(engine, input_names, output_names)
-        # # make sure it runs
-        # trt_mod(conv2d_input.cuda())
+        m = acc_tracer.trace(m, [conv2d_input])  # type: ignore[attr-defined]
+        interp = TRTInterpreter(m, [InputTensorSpec(data.shape[1:], torch.float, has_batch_dim=False)])
+        engine, input_names, output_names = interp.run(fp16_mode=False, int8_mode=True)
+        trt_mod = TRTModule(engine, input_names, output_names)
+        # make sure it runs
+        trt_mod(conv2d_input.cuda())
 
 if __name__ == '__main__':
     run_tests()
