@@ -591,6 +591,8 @@ Alias for :func:`torch.round`.
 
 softmax = _add_docstr(_special.special_softmax,
                       r"""
+softmax(input, dim, *, dtype=None) -> Tensor
+
 Computes the softmax function.
 
 Softmax is defined as:
@@ -618,6 +620,7 @@ Examples::
 log_softmax = _add_docstr(_special.special_log_softmax,
                           r"""
 log_softmax(input, dim, *, dtype=None) -> Tensor
+
 Computes softmax followed by a logarithm.
 
 While mathematically equivalent to log(softmax(x)), doing these two
