@@ -294,7 +294,7 @@ void BytecodeDeserializer::parseFunctionSchema(
     const int64_t& model_version,
     mobile::Function* function) {
   // function schema
-  if (schemaTable) { // (schema is optional for back compat)
+  if (schemaTable.has_value()) { // (schema is optional for back compat)
     auto parseArgList = [this](const std::vector<IValue>& argTables) {
       std::vector<c10::Argument> args;
       for (auto&& argTable : argTables) {
@@ -414,12 +414,11 @@ void BytecodeDeserializer::parseMethods(
 
     parseRegisterSize(codeTable, function.get());
 
-    at::optional<IValue>
-        schemaTable = // older files do not store function schema
-        (model_version > 0x4L || (model_version == 0x4L && m_tuple.size() >= 3))
-        ? m_tuple[2]
-        : c10::nullopt;
-    // function schema
+    at::optional<IValue> schemaTable;
+    if (model_version > 0x4L ||
+        (model_version == 0x4L && m_tuple.size() >= 3)) {
+      schemaTable = m_tuple[2];
+    }
     parseFunctionSchema(
         function_name, schemaTable, model_version, function.get());
 
