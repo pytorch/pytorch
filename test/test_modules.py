@@ -163,7 +163,7 @@ class TestModule(TestCase):
         module_inputs_cpu = module_info.module_inputs_func(module_info, device="cpu", dtype=dtype,
                                                            requires_grad=True)
 
-        def set_zero_grad(items):
+        def detach_inputs(items):
             if isinstance(items, dict):
                 items = items.values()
             for item in items:
@@ -199,10 +199,10 @@ class TestModule(TestCase):
             gpu_forward_args = to_device(cpu_forward_args)
             gpu_forward_kwargs = to_device(cpu_forward_kwargs)
 
-            set_zero_grad(cpu_forward_args)
-            set_zero_grad(cpu_forward_kwargs)
-            set_zero_grad(gpu_forward_args)
-            set_zero_grad(gpu_forward_kwargs)
+            detach_inputs(cpu_forward_args)
+            detach_inputs(cpu_forward_kwargs)
+            detach_inputs(gpu_forward_args)
+            detach_inputs(gpu_forward_kwargs)
 
             # === Construct module on cpu and gpu ===
             args, kwargs = module_input.constructor_input.args, module_input.constructor_input.kwargs
