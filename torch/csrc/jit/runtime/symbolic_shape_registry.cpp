@@ -211,6 +211,8 @@ const std::string shape_compute_functions =
         def max_pool2d_with_indices(input: List[int], kernel_size: List[int], stride: List[int], padding: List[int], dilation: List[int], ceil_mode: bool):
           out = max_pool2d(input, kernel_size, stride, padding, dilation, ceil_mode)
           return (out, out)
+    )"
+    R"(
 
         def mm(self: List[int] , mat2: List[int]):
           assert len(self) == 2, "self must be a matrix"
@@ -387,7 +389,8 @@ const std::string shape_compute_functions =
             else:
               out.append(self[i])
           return out
-
+    )"
+    R"(
         def linear(input: List[int], weight: List[int], bias: Optional[List[int]]):
           out = matmul(input, t(weight))
           if bias is not None:
@@ -616,7 +619,6 @@ static const OperatorMap<std::string>& get_schema_to_function_graph() {
       {"aten::expand_as(Tensor(a) self, Tensor other) -> Tensor(a)", "expand"},
       {"aten::expand(Tensor(a) self, int[] size, *, bool implicit=False) -> Tensor(a)", "expand_one_unused"},
       {"aten::mean.dim(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor", "mean_dim"},
-      {"aten::embedding(Tensor weight, Tensor indices, int padding_idx=-1, bool scale_grad_by_freq=False, bool sparse=False) -> Tensor", "embedding"},
       {"aten::addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor", "addmm"},
 #ifdef USE_XNNPACK
       {"prepacked::conv2d_clamp_run(Tensor X, __torch__.torch.classes.xnnpack.Conv2dOpContext W_prepack) -> Tensor Y", "prepacked_conv2d_clamp_run"},
@@ -675,6 +677,7 @@ void loadModule(const CompilationUnit& module) {
 
 void loadFunctions() {
   auto src = std::make_shared<Source>(shape_compute_functions);
+  std::stringstream ss;
   std::vector<at::IValue> constantTable;
   auto resolver = std::make_shared<SourceImporterImpl>(
       compilation_unit,

@@ -880,14 +880,14 @@ c10::IValue StaticRuntime::operator()(
 
 namespace {
 
-std::string generate_node_time_json(const std::string& kind, float millis) {
+std::string generate_latency_json(const std::string& label, double millis) {
 #ifdef FBCODE_CAFFE2
   folly::dynamic json = folly::dynamic::object();
-  json["type"] = kind;
+  json["type"] = label;
   json["metric"] = "latency";
   json["unit"] = "ms";
   json["value"] = millis;
-  return folly::toJson(json);
+  return "PyTorchObserver " + folly::toJson(json);
 #else
   return "";
 #endif
@@ -941,8 +941,12 @@ void StaticRuntime::benchmark(
     }
 
     if (generate_ai_pep_output) {
-      LOG(INFO) << "PyTorchObserver " << generate_node_time_json(kind, ms);
+      LOG(INFO) << generate_latency_json(kind, ms);
     }
+  }
+  if (generate_ai_pep_output) {
+    LOG(INFO) << generate_latency_json(
+        "static_runtime_first_iter", results.first_iter_time);
   }
   std::cout << std::setw(15) << results.total_time << " ms. in Total"
             << std::endl;
@@ -954,6 +958,8 @@ void StaticRuntime::benchmark(
             << " ms" << std::endl;
   std::cout << "Outputs deallocation time: " << results.output_dealloc_time
             << " ms" << std::endl;
+  std::cout << "First iter time: " << results.first_iter_time << " ms"
+            << std::endl;
 
   if (planner_) {
     std::cout << "Total memory managed: " << planner_->total_managed()
@@ -1084,7 +1090,7 @@ StaticRuntime::IndividualMetrics StaticRuntime::benchmark_individual_ops(
     const std::unordered_map<std::string, c10::IValue>& kwargs,
     const int warmup_runs,
     const int main_runs) {
-  TORCH_CHECK(warmup_runs >= 0 && main_runs >= 1);
+  TORCH_CHECK(warmup_runs >= 1 && main_runs >= 1);
 
   // See comment on above use of InferenceMode for
   // explanation.
@@ -1100,8 +1106,15 @@ StaticRuntime::IndividualMetrics StaticRuntime::benchmark_individual_ops(
 
   results.setup_time = timer.MilliSeconds();
 
+  // The first iteration profiles each node's output Tensors' sizes and
+  // initializes the memory planner with the profile information. Folllowing
+  // iterations just use the already established memory planning.
+  timer.Start();
+  operator()(args, kwargs);
+  results.first_iter_time = timer.MilliSeconds();
+
   // warmup runs
-  for (const auto i : c10::irange(warmup_runs)) {
+  for (const auto i : c10::irange(warmup_runs - 1)) {
     (void)i; // Suppress unused variable warning
     operator()(args, kwargs);
   }
