@@ -4,7 +4,7 @@ set -eux -o pipefail
 cuda_major_version=${CUDA_VERSION%.*}
 
 if [[ "$cuda_major_version" == "10" ]]; then
-    cudnn_installer_name="cudnn-${CUDA_VERSION}-windows10-x64-v7.6.4.38"
+    cudnn_installer_name="cudnn-${CUDA_VERSION}-windows10-x64-v7.6.5.32"
 elif [[ "$cuda_major_version" == "11" ]]; then
     if [[ "${CUDA_VERSION}" == "11.1" ]]; then
         cudnn_installer_name="cudnn-${CUDA_VERSION}-windows-x64-v8.0.5.39"
