@@ -157,8 +157,8 @@ class TestModule(TestCase):
                     self.assertEqual(output, output_from_copy)
 
     @modules(module_db, allow_devices={"cuda"})
-    def test_cpu_cuda_equal(self, device, dtype, module_info):
-        # Test cpu and cuda results are the same
+    def test_cpu_gpu_results_are_equal(self, device, dtype, module_info):
+        # Test cpu and gpu results are the same
         module_cls = module_info.module_cls
         module_inputs_cpu = module_info.module_inputs_func(module_info, device="cpu", dtype=dtype,
                                                            requires_grad=True)
