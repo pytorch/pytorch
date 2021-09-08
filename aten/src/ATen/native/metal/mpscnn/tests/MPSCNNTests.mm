@@ -250,7 +250,7 @@ bool test_hardsigmoid() {
   });
 }
 
-bool test_hardswish() {
+bool test_hardswish_() {
   __block std::vector<int64_t> size{3, 3, 44, 44};
   return TEST(size, __PRETTY_FUNCTION__, ^bool {
     auto X =
@@ -258,6 +258,18 @@ bool test_hardswish() {
     auto X2 = X.metal();
     auto Y1 = at::hardswish_(X);
     auto Y2 = at::hardswish_(X2).cpu();
+    return almostEqual(Y1, Y2);
+  });
+}
+
+bool test_hardswish() {
+  __block std::vector<int64_t> size{1, 3, 44, 44};
+  return TEST(size, __PRETTY_FUNCTION__, ^bool {
+    auto X =
+        at::rand(size, at::TensorOptions(at::kCPU).dtype(at::kFloat)) * 12 - 6;
+    auto X2 = X.metal();
+    auto Y1 = at::hardswish(X);
+    auto Y2 = at::hardswish(X2).cpu();
     return almostEqual(Y1, Y2);
   });
 }
@@ -740,6 +752,24 @@ bool test_upsampling_nearest2d_vec() {
   });
 }
 
+bool test_upsampling_nearest2d_vec2() {
+  __block std::vector<int64_t> size{1, 3, 24, 24};
+  return TEST(size, __PRETTY_FUNCTION__, ^bool {
+    auto X1 = at::rand(size, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+    auto Y1 = at::upsample_nearest2d(
+        X1,
+        c10::optional<at::IntArrayRef>({}),
+        c10::optional<at::ArrayRef<double>>({2, 2}));
+    auto X2 = X1.metal();
+    auto Y2 = at::upsample_nearest2d(
+                  X2,
+                  c10::optional<at::IntArrayRef>({}),
+                  c10::optional<at::ArrayRef<double>>({2, 2}))
+                  .cpu();
+    return almostEqual(Y1, Y2);
+  });
+}
+
 bool test_adaptive_avg_pool2d() {
   __block std::vector<int64_t> size{1, 48, 24, 24};
   return TEST(size, __PRETTY_FUNCTION__, ^bool {
@@ -774,7 +804,6 @@ bool test_reflection_pad2d() {
 }
 
 bool test_hardtanh_() {
-#if TARGET_OS_IPHONE
   __block std::vector<int64_t> size{1, 32, 112, 112};
   return TEST(size, __PRETTY_FUNCTION__, ^bool {
     auto X1 = at::rand(size, at::TensorOptions(at::kCPU).dtype(at::kFloat));
@@ -783,11 +812,17 @@ bool test_hardtanh_() {
     auto Y2 = at::hardtanh_(X2, 0, 6.0).cpu();
     return almostEqual(Y1, Y2);
   });
-#else
-  // Skip this test on MacOS as the shader function doesn't work well
-  // Will get back and fix it - T82700462
-  return true;
-#endif
+}
+
+bool test_hardtanh() {
+  __block std::vector<int64_t> size{1, 3, 4, 4};
+  return TEST(size, __PRETTY_FUNCTION__, ^bool {
+    auto X1 = at::rand(size, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+    auto Y1 = at::hardtanh(X1, 0, 6.0);
+    auto X2 = X1.metal();
+    auto Y2 = at::hardtanh(X2, 0, 6.0).cpu();
+    return almostEqual(Y1, Y2);
+  });
 }
 
 bool test_mean_dim() {
@@ -822,7 +857,6 @@ bool test_mean_dim3() {
       return almostEqual(Y1, Y2);
     });
 }
-
 
 bool test_chunk() {
 __block std::vector<int64_t> size{1, 4, 2, 2};

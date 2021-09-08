@@ -90,9 +90,9 @@ def get_conda_packages(run_lambda):
     if get_platform() == 'win32':
         system_root = os.environ.get('SYSTEMROOT', 'C:\\Windows')
         findstr_cmd = os.path.join(system_root, 'System32', 'findstr')
-        grep_cmd = r'{} /R "torch numpy cudatoolkit soumith mkl magma"'.format(findstr_cmd)
+        grep_cmd = r'{} /R "torch numpy cudatoolkit soumith mkl magma mypy"'.format(findstr_cmd)
     else:
-        grep_cmd = r'grep "torch\|numpy\|cudatoolkit\|soumith\|mkl\|magma"'
+        grep_cmd = r'grep "torch\|numpy\|cudatoolkit\|soumith\|mkl\|magma\|mypy"'
     conda = os.environ.get('CONDA_EXE', 'conda')
     out = run_and_read_all(run_lambda, conda + ' list | ' + grep_cmd)
     if out is None:
@@ -272,31 +272,20 @@ def get_pip_packages(run_lambda):
     """Returns `pip list` output. Note: will also find conda-installed pytorch
     and numpy packages."""
     # People generally have `pip` as `pip` or `pip3`
+    # But here it is incoved as `python -mpip`
     def run_with_pip(pip):
         if get_platform() == 'win32':
             system_root = os.environ.get('SYSTEMROOT', 'C:\\Windows')
             findstr_cmd = os.path.join(system_root, 'System32', 'findstr')
-            grep_cmd = r'{} /R "numpy torch"'.format(findstr_cmd)
+            grep_cmd = r'{} /R "numpy torch mypy"'.format(findstr_cmd)
         else:
-            grep_cmd = r'grep "torch\|numpy"'
+            grep_cmd = r'grep "torch\|numpy\|mypy"'
         return run_and_read_all(run_lambda, pip + ' list --format=freeze | ' + grep_cmd)
 
-    # Try to figure out if the user is running pip or pip3.
-    out2 = run_with_pip('pip')
-    out3 = run_with_pip('pip3')
+    pip_version = 'pip3' if sys.version[0] == '3' else 'pip'
+    out = run_with_pip(sys.executable + ' -mpip')
 
-    num_pips = len([x for x in [out2, out3] if x is not None])
-    if num_pips == 0:
-        return 'pip', out2
-
-    if num_pips == 1:
-        if out2 is not None:
-            return 'pip', out2
-        return 'pip3', out3
-
-    # num_pips is 2. Return pip3 by default b/c that most likely
-    # is the one associated with Python 3
-    return 'pip3', out3
+    return pip_version, out
 
 
 def get_cachingallocator_config():
