@@ -614,6 +614,7 @@ class TestUtilityFuns(TestCase):
         # verify that the model state is preserved
         assert model.training == old_state
 
+    @skipIfUnsupportedMinOpsetVersion(12)
     def test_local_function(self):
         class N(torch.nn.Module):
             def __init__(self, prob):
