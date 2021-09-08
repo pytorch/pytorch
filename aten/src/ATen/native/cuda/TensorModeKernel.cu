@@ -138,13 +138,11 @@ void handle_fused_mode(
     cuda::detail::TensorInfo<int64_t, unsigned int>& ti_indices,
     int64_t slice_size,
     int64_t slices) {
-  constexpr int num_threads = size / 2;
-  static_assert(num_threads % C10_WARP_SIZE == 0 &&
-                num_threads <= cuda_utils::kCUDABlockReduceMaxThreads, "");
+  const dim3 block(size / 2);
   const auto memsize =
       (sizeof(scalar_t) * size) + (2 * size * sizeof(unsigned int));
   compute_mode<scalar_t, size>
-      <<<grid, num_threads, memsize, at::cuda::getCurrentCUDAStream()>>>(
+      <<<grid, block, memsize, at::cuda::getCurrentCUDAStream()>>>(
           self.data_ptr<scalar_t>(), ti_values, ti_indices, slice_size, slices);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
@@ -184,19 +182,16 @@ void fused_mode(
       break;
     case 128:
     case 64:
+      handle_fused_mode<128, scalar_t>(
+          grid, self, ti_values, ti_indices, slice_size, slices);
+      break;
     case 32:
     case 16:
     case 8:
     case 4:
-    case 2: {
-      if (ceilPowerOf2 > 2 * C10_WARP_SIZE) {
-        handle_fused_mode<128, scalar_t>(
-            grid, self, ti_values, ti_indices, slice_size, slices);
-      } else {
-        handle_fused_mode<2 * C10_WARP_SIZE, scalar_t>(
-            grid, self, ti_values, ti_indices, slice_size, slices);
-      }
-    }
+    case 2:
+      handle_fused_mode<32, scalar_t>(
+          grid, self, ti_values, ti_indices, slice_size, slices);
       break;
     case 1:
     default:
