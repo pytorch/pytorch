@@ -1335,19 +1335,6 @@ inline TensorIterator get_allany_iter(
       self, result, dims, keepdim, result.scalar_type());
 }
 
-Tensor all(const Tensor& self) {
-  Tensor result;
-
-  meta::check_all_any("all", self, result);
-  auto out_dtype = meta::get_result_or_bytebool_dtype(self, result);
-  auto shape = meta::get_reduction_shape(self, {}, false);
-
-  result = at::empty(shape, self.options().dtype(out_dtype));
-  auto iter = get_allany_iter(self, result, {}, false);
-
-  return _all(result, iter);
-}
-
 TORCH_IMPL_FUNC(all_out)
 (const Tensor& self, int64_t dim, bool keepdim, const Tensor& result) {
   auto iter = get_allany_iter(self, result, dim, keepdim);
@@ -1367,19 +1354,6 @@ inline const Tensor & _any(const Tensor & result, TensorIterator & iter) {
   }
 
   return result;
-}
-
-Tensor any(const Tensor& self) {
-  Tensor result;
-
-  meta::check_all_any("any", self, result);
-  auto out_dtype = meta::get_result_or_bytebool_dtype(self, result);
-  auto shape = meta::get_reduction_shape(self, {}, false);
-
-  result = at::empty(shape, self.options().dtype(out_dtype));
-  auto iter = get_allany_iter(self, result, {}, false);
-
-  return _any(result, iter);
 }
 
 TORCH_IMPL_FUNC(any_out)
