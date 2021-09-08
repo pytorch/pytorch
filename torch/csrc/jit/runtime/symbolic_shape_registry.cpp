@@ -106,14 +106,12 @@ const std::string shape_compute_functions =
               newsize *= shape[dim]
             else:
               raise AssertionError("invalid shape dimensions")
-          if numel == newsize or (infer_dim is not None and newsize > 0 and numel % newsize == 0):
-            if infer_dim is not None:
-              out = _copy(shape)
-              out[infer_dim] = numel // newsize
-              return out
-            else:
-              return _copy(shape)
-          raise AssertionError("invalid shape")
+          if not (numel == newsize or (infer_dim is not None and newsize > 0 and numel % newsize == 0)):
+            raise AssertionError("invalid shape")
+          out = _copy(shape)
+          if infer_dim is not None:
+            out[infer_dim] = numel // newsize
+          return out
 
         def view(self: List[int], sizes: List[int]):
           numel = 1
