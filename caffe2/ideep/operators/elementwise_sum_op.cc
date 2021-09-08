@@ -12,7 +12,7 @@ class IDEEPSumOp final : public IDEEPOperator {
   USE_IDEEP_DEF_ALIASES();
   USE_IDEEP_OPERATOR_FUNCTIONS();
   using FALLBACK_SUM = IDEEPFallbackOp<SumOp<CPUContext>, SkipIndices<0>>;
-  using FALLBACK_ADD = IDEEPFallbackOp<BinaryElementwiseOp<
+  using FALLBACK_ADD = IDEEPFallbackOp<BinaryElementwiseBroadcastOp<
     NumericTypes, CPUContext, AddFunctor<CPUContext>>, SkipIndices<0>>;
 
   IDEEPSumOp(const OperatorDef& operator_def, Workspace* ws)
@@ -76,9 +76,7 @@ class IDEEPSumOp final : public IDEEPOperator {
   OUTPUT_TAGS(OUTPUT);
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(Sum, IDEEPSumOp);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(Add, IDEEPSumOp);
 
 } // namespace

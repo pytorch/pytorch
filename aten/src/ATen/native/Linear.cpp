@@ -41,6 +41,24 @@ Tensor linear(const Tensor& input, const Tensor& weight, const c10::optional<Ten
   return output;
 }
 
+Tensor& linear_out(const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias_opt, Tensor& output) {
+  TORCH_CHECK(!input.is_mkldnn(), "linear doesn't support out for MKLDNN tensors");
+  // See [Note: hacky wrapper removal for optional tensor]
+  auto bias = bias_opt.has_value()
+              ? c10::MaybeOwned<Tensor>::borrowed(*bias_opt)
+              : c10::MaybeOwned<Tensor>::owned(c10::in_place);
+
+  if (input.dim() == 2 && bias->defined()) {
+    // Fused op is marginally faster.
+    return at::addmm_out(output, *bias, input, weight.t());
+  }
+  output = at::matmul_out(output, input, weight.t());
+  if (bias->defined()) {
+    output.add_(*bias);
+  }
+  return output;
+}
+
 // sumproduct_pair computes `(left*right).sum(sumdims)` by means of permutation and
 // batch matrix multiplication
 // its main purpose is to provide a pairwise reduction for einsum
@@ -546,21 +564,27 @@ Tensor _trilinear(const Tensor& i1_, const Tensor& i2_, const Tensor& i3_,
   int64_t slicemul3 = (expand3[unroll_dim] ? 0 : 1);
 
   auto output = at::zeros(output_size, i1.options());
-  if (! sumdim[unroll_dim]) {
-    for (const auto k : c10::irange(unroll_size)) {
-      Tensor buf = at::native::sumproduct_pair(i1.narrow(unroll_dim, k * slicemul1, 1),
-                                               i2.narrow(unroll_dim, k * slicemul2, 1),
-                                               sum_dims_12, true);
-      buf = at::native::sumproduct_pair(buf, i3.narrow(unroll_dim, k * slicemul3, 1), sum_dims_23, true);
-      output.narrow(unroll_dim, k, 1).add_(buf);
+
+  // Three conditionals are necessary since this function is meant to work for both
+  // forward and backward, which changes the dimensions of the inputs.
+  // Note that if output has zero elems is because (at least) one of i1, i2, i3 has zero elems.
+  if (i1.numel() != 0 && i2.numel() != 0 && i3.numel() != 0) {
+    if (! sumdim[unroll_dim]) {
+      for (const auto k : c10::irange(unroll_size)) {
+        Tensor buf = at::native::sumproduct_pair(i1.narrow(unroll_dim, k * slicemul1, 1),
+                                                 i2.narrow(unroll_dim, k * slicemul2, 1),
+                                                 sum_dims_12, true);
+        buf = at::native::sumproduct_pair(buf, i3.narrow(unroll_dim, k * slicemul3, 1), sum_dims_23, true);
+        output.narrow(unroll_dim, k, 1).add_(buf);
+      }
     }
-  }
-  else {
-    for (const auto k : c10::irange(unroll_size)) {
-      Tensor buf = at::native::sumproduct_pair(i1.narrow(unroll_dim, k*slicemul1, 1),
-                                               i2.narrow(unroll_dim, k*slicemul2, 1), sum_dims_12, true);
-      buf = at::native::sumproduct_pair(buf, i3.narrow(unroll_dim, k*slicemul3, 1), sum_dims_23, true);
-      output.add_(buf);
+    else {
+      for (const auto k : c10::irange(unroll_size)) {
+        Tensor buf = at::native::sumproduct_pair(i1.narrow(unroll_dim, k*slicemul1, 1),
+                                                 i2.narrow(unroll_dim, k*slicemul2, 1), sum_dims_12, true);
+        buf = at::native::sumproduct_pair(buf, i3.narrow(unroll_dim, k*slicemul3, 1), sum_dims_23, true);
+        output.add_(buf);
+      }
     }
   }
   for (int64_t i = output.dim()-1; i >= 0; i--)

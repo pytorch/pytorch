@@ -9,7 +9,6 @@
 namespace torch {
 namespace jit {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(PeepholeOptimizeTest, IsAndIsNot)
 // test is / is not none optimization
 {
@@ -30,7 +29,6 @@ graph(%0 : int):
       ->run(*graph);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(PeepholeOptimizeTest, IsAndIsNot2) {
   auto graph = std::make_shared<Graph>();
   parseIR(
@@ -49,7 +47,6 @@ graph(%0: int?):
       ->run(*graph);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(PeepholeOptimizeTest, IsAndIsNot3) {
   auto graph = std::make_shared<Graph>();
   parseIR(
@@ -69,7 +66,6 @@ graph(%0: int?):
       ->run(*graph);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(PeepholeOptimizeTest, UnwrapOptional)
 // test unwrap optional
 {
@@ -87,7 +83,6 @@ graph():
   testing::FileCheck().check_not("unwrap")->run(*graph);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(PeepholeOptimizeTest, UnwrapOptional2) {
   auto graph = std::make_shared<Graph>();
   parseIR(
@@ -102,7 +97,6 @@ graph(%1 : Float(*, *, *)?):
   testing::FileCheck().check_count("unwrap", 2)->run(*graph);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(PeepholeOptimizeTest, AddMMFusion) {
   auto graph = std::make_shared<Graph>();
   parseIR(

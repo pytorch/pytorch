@@ -47,18 +47,22 @@ namespace {
 // directly against incoming TensorImpl*s.
 using weakref_type = c10::weak_intrusive_ptr<TensorImpl, UndefinedTensorImpl>;
 using val_type = std::tuple<weakref_type, Tensor>;
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 thread_local std::unordered_map<TensorImpl*, val_type> cached_casts;
 
 // nesting tracks the nesting depth of the Python-side context manager.
 // When the autocast context manager exits to a nesting level that's outside
 // any instance of autocast (which should occur at the end of each forward pass)
 // it calls clear_cache() to ensure cached Tensors don't leak outside the autocasting region.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 thread_local int nesting = 0;
 
 // autocast_cpu_dtype is the lower_precision_fp used by AutocastCPU.
 thread_local at::ScalarType autocast_cpu_dtype = at::kBFloat16;
+
+// should we enabled the cache inside autocast.
+thread_local bool cache_enabled = true;
+
+// autocast_gpu_dtype is the lower_precision_fp used by AutocastGPU.
+thread_local at::ScalarType autocast_gpu_dtype = at::kHalf;
 }
 
 void clear_cache() {
@@ -73,6 +77,10 @@ int decrement_nesting() {
   return --nesting;
 }
 
+at::ScalarType get_autocast_gpu_dtype() {
+  return autocast_gpu_dtype;
+}
+
 at::ScalarType get_autocast_cpu_dtype() {
   return autocast_cpu_dtype;
 }
@@ -82,6 +90,18 @@ void set_autocast_cpu_dtype(at::ScalarType dtype) {
       dtype == at::kBFloat16,
       "Currently, AutocastCPU only support Bfloat16 as the autocast_cpu_dtype");
   autocast_cpu_dtype = dtype;
+}
+
+void set_autocast_gpu_dtype(at::ScalarType dtype) {
+  autocast_gpu_dtype = dtype;
+}
+
+bool is_autocast_cache_enabled() {
+  return cache_enabled;
+}
+
+void set_autocast_cache_enabled(bool enabled) {
+  cache_enabled = enabled;
 }
 
 // Overload to catch Tensor args
@@ -94,7 +114,7 @@ Tensor cached_cast(at::ScalarType to_type, const Tensor& arg, DeviceType device_
     // See cached_casts declaration above for detailed strategy.
     bool can_try_cache = (to_type == get_lower_precision_fp_from_device_type(device_type) &&
                          arg.scalar_type() == at::kFloat && arg.requires_grad() &&
-                         arg.is_leaf() && !arg.is_view());
+                         arg.is_leaf() && !arg.is_view() && cache_enabled);
     if (can_try_cache) {
       auto it = cached_casts.find(arg.unsafeGetTensorImpl());
       if (it != cached_casts.end()) {
@@ -452,22 +472,22 @@ TORCH_LIBRARY_IMPL(aten, AutocastCPU, m) {
   KERNEL_CPU(ADD_NS(conv1d), "conv1d", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, IntArrayRef, IntArrayRef, IntArrayRef, int64_t), lower_precision_fp)
   KERNEL_CPU(ADD_NS(conv2d), "conv2d", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, IntArrayRef, IntArrayRef, IntArrayRef, int64_t), lower_precision_fp)
   KERNEL_CPU(ADD_NS(conv3d), "conv3d", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, IntArrayRef, IntArrayRef, IntArrayRef, int64_t), lower_precision_fp)
-  KERNEL_CPU(ADD_NS(_log_softmax), "_log_softmax", Tensor (const Tensor &, int64_t, bool), lower_precision_fp)
   KERNEL_CPU(ADD_NS(bmm), "bmm", Tensor (const Tensor &, const Tensor &), lower_precision_fp)
   KERNEL_CPU(ADD_NS(mm), "mm", Tensor (const Tensor &, const Tensor &), lower_precision_fp)
   KERNEL_CPU(ADD_NS(baddbmm), "baddbmm", Tensor (const Tensor &, const Tensor &, const Tensor &, const Scalar&, const Scalar&), lower_precision_fp)
   KERNEL_CPU(ADD_NS(addmm), "addmm", Tensor (const Tensor &, const Tensor &, const Tensor &, const Scalar&, const Scalar&), lower_precision_fp)
   KERNEL_CPU(ADD_NS(addbmm), "addbmm", Tensor (const Tensor &, const Tensor &, const Tensor &, const Scalar&, const Scalar&), lower_precision_fp)
   KERNEL_CPU(ADD_NS(linear), "linear", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor> &), lower_precision_fp)
+  KERNEL_CPU(ADD_NS(_convolution), "_convolution.deprecated", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, IntArrayRef, IntArrayRef, IntArrayRef, bool, IntArrayRef, int64_t, bool, bool, bool), lower_precision_fp)
 
   // fp32 cast policy
+  KERNEL_CPU(ADD_NS(conv_transpose1d), "conv_transpose1d", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor> &, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, IntArrayRef), fp32)
+  KERNEL_CPU(ADD_NS(conv_transpose2d), "conv_transpose2d.input", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor> &, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, IntArrayRef), fp32)
   KERNEL_CPU(ADD_NS(conv_transpose3d), "conv_transpose3d.input", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor> &, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, IntArrayRef), fp32)
   KERNEL_CPU(ADD_NS(batch_norm), "batch_norm", Tensor (const Tensor &, const c10::optional<Tensor> &, const c10::optional<Tensor> &, const c10::optional<Tensor> &, const c10::optional<Tensor> &, bool, double, double, bool), fp32)
-  KERNEL_CPU(ADD_NS(max_pool2d), "max_pool2d", Tensor (const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, IntArrayRef, bool), fp32)
-  KERNEL_CPU(ADD_NS(adaptive_avg_pool2d), "adaptive_avg_pool2d", Tensor (const Tensor &, IntArrayRef), fp32)
 
-  KERNEL_CPU(ADD_NS(convolution), "convolution", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, IntArrayRef, IntArrayRef, IntArrayRef, bool, IntArrayRef, int64_t), fp32)
   KERNEL_CPU(ADD_NS(dropout), "dropout", Tensor (const Tensor &, double, bool), fp32)
+  KERNEL_CPU(ADD_NS(avg_pool1d), "avg_pool1d", Tensor (const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, bool, bool), fp32)
   KERNEL_CPU(ADD_NS(avg_pool2d), "avg_pool2d", Tensor (const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, bool, bool, c10::optional<int64_t>), fp32)
   KERNEL_CPU(ADD_NS(avg_pool3d), "avg_pool3d", Tensor (const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, bool, bool, c10::optional<int64_t>), fp32)
   KERNEL_CPU(ADD_NS(gelu), "gelu", Tensor (const Tensor &), fp32)
@@ -483,45 +503,285 @@ TORCH_LIBRARY_IMPL(aten, AutocastCPU, m) {
   KERNEL_CPU(ADD_NS(upsample_bilinear2d), "upsample_bilinear2d.vec", Tensor (const Tensor &, c10::optional<IntArrayRef>, bool, c10::optional<ArrayRef<double>>), fp32)
   KERNEL_CPU(ADD_NS(upsample_trilinear3d), "upsample_trilinear3d", Tensor (const Tensor &, IntArrayRef, bool, c10::optional<double>, c10::optional<double>, c10::optional<double>), fp32)
   KERNEL_CPU(ADD_NS(upsample_trilinear3d), "upsample_trilinear3d.vec", Tensor (const Tensor &, c10::optional<IntArrayRef>, bool, c10::optional<ArrayRef<double>>), fp32)
+
   KERNEL_CPU(ADD_NS(binary_cross_entropy), "binary_cross_entropy", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, int64_t), fp32)
   KERNEL_CPU(ADD_NS(binary_cross_entropy_with_logits), "binary_cross_entropy_with_logits", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, const c10::optional<Tensor>&, int64_t), fp32)
-  KERNEL_CPU(ADD_NS(pow), "pow.Tensor_Scalar", Tensor (const Tensor &, const Scalar &), fp32)
-  KERNEL_CPU(ADD_NS(pow), "pow.Tensor_Tensor", Tensor (const Tensor &, const Tensor &), fp32)
-  KERNEL_CPU(ADD_NS(pow), "pow.Scalar", Tensor (const Scalar&, const Tensor &), fp32)
-  KERNEL_CPU(ADD_NS(smooth_l1_loss), "smooth_l1_loss", Tensor (const Tensor &, const Tensor &, int64_t, double), fp32)
-  KERNEL_CPU(ADD_NS(reflection_pad1d), "reflection_pad1d", Tensor (const Tensor &, IntArrayRef), fp32)
-  KERNEL_CPU(ADD_NS(std), "std", Tensor (const Tensor &, bool), fp32)
-  KERNEL_CPU(ADD_NS(std), "std.dim", Tensor (const Tensor &, IntArrayRef, bool, bool), fp32)
   KERNEL_CPU(ADD_NS(instance_norm), "instance_norm", Tensor (const Tensor &, const c10::optional<Tensor>&, const c10::optional<Tensor>&, const c10::optional<Tensor>&, const c10::optional<Tensor>&, bool, double, double, bool), fp32)
+  KERNEL_CPU(ADD_NS(grid_sampler), "grid_sampler", Tensor(const Tensor &, const Tensor &, int64_t, int64_t, bool), fp32)
+  KERNEL_CPU(ADD_NS(polar), "polar", Tensor(const Tensor &, const Tensor &), fp32)
+  KERNEL_CPU(ADD_NS(multinomial), "multinomial", Tensor(const Tensor &, int64_t, bool, c10::optional<at::Generator>), fp32)
+  KERNEL_CPU(ADD_NS(poisson), "poisson", Tensor(const Tensor &, c10::optional<at::Generator>), fp32)
+  KERNEL_CPU(ADD_NS(fmod), "fmod.Tensor", Tensor(const Tensor &, const Tensor &), fp32)
+  KERNEL_CPU(ADD_NS(fmod), "fmod.Scalar", Tensor(const Tensor &, const Scalar &), fp32)
+  KERNEL_CPU(ADD_NS(prod), "prod", Tensor(const Tensor &, c10::optional<at::ScalarType>), fp32)
+  KERNEL_CPU(ADD_NS(prod), "prod.dim_int", Tensor(const Tensor &, int64_t, bool, c10::optional<at::ScalarType>), fp32)
+  KERNEL_CPU(ADD_NS(prod), "prod.dim_Dimname", Tensor(const Tensor &, at::Dimname, bool, c10::optional<at::ScalarType>), fp32)
+  KERNEL_CPU(ADD_NS(quantile), "quantile", Tensor(const Tensor &, const Tensor &, c10::optional<int64_t>, bool), fp32)
+  KERNEL_CPU(ADD_NS(quantile), "quantile.scalar", Tensor(const Tensor &, double, c10::optional<int64_t>, bool), fp32)
+  KERNEL_CPU(ADD_NS(quantile), "quantile.new", Tensor(const Tensor &, const Tensor &, c10::optional<int64_t>, bool, c10::string_view), fp32)
+  KERNEL_CPU(ADD_NS(quantile), "quantile.new_scalar", Tensor(const Tensor &, double, c10::optional<int64_t>, bool, c10::string_view), fp32)
+  KERNEL_CPU(ADD_NS(nanquantile), "nanquantile", Tensor(const Tensor &, const Tensor &, c10::optional<int64_t>, bool), fp32)
+  KERNEL_CPU(ADD_NS(nanquantile), "nanquantile.scalar", Tensor(const Tensor &, double, c10::optional<int64_t>, bool), fp32)
+  KERNEL_CPU(ADD_NS(nanquantile), "nanquantile.new", Tensor(const Tensor &, const Tensor &, c10::optional<int64_t>, bool, c10::string_view), fp32)
+  KERNEL_CPU(ADD_NS(nanquantile), "nanquantile.new_scalar", Tensor(const Tensor &, double, c10::optional<int64_t>, bool, c10::string_view), fp32)
+  KERNEL_CPU(ADD_NS(stft), "stft", Tensor(const Tensor &, int64_t, c10::optional<int64_t>, c10::optional<int64_t>, const c10::optional<Tensor> &, bool, c10::optional<bool>, c10::optional<bool>), fp32)
+  KERNEL_CPU(ADD_NS(cdist), "cdist", Tensor(const Tensor &, const Tensor &, double, c10::optional<int64_t>), fp32)
+  KERNEL_CPU(ADD_NS(cross), "cross", Tensor(const Tensor &, const Tensor &, c10::optional<int64_t>), fp32)
+  KERNEL_CPU(ADD_NS(cumprod), "cumprod", Tensor(const Tensor &, int64_t, c10::optional<at::ScalarType>), fp32)
+  KERNEL_CPU(ADD_NS(cumprod), "cumprod.dimname", Tensor(const Tensor &, at::Dimname, c10::optional<at::ScalarType>), fp32)
+  KERNEL_CPU(ADD_NS(cumsum), "cumsum", Tensor(const Tensor &, int64_t, c10::optional<at::ScalarType>), fp32)
+  KERNEL_CPU(ADD_NS(cumsum), "cumsum.dimname", Tensor(const Tensor &, at::Dimname, c10::optional<at::ScalarType>), fp32)
+  KERNEL_CPU(ADD_NS(diag), "diag", Tensor(const Tensor &, int64_t), fp32)
+  KERNEL_CPU(ADD_NS(diagflat), "diagflat", Tensor(const Tensor &, int64_t), fp32)
+  KERNEL_CPU(ADD_NS(histc), "histc", Tensor(const Tensor &, int64_t, const at::Scalar &, const at::Scalar &), fp32)
+  KERNEL_CPU(ADD_NS(logcumsumexp), "logcumsumexp", Tensor(const Tensor &, int64_t), fp32)
+  KERNEL_CPU(ADD_NS(searchsorted), "searchsorted.Tensor", Tensor(const Tensor &, const Tensor &, bool, bool), fp32)
+  KERNEL_CPU(ADD_NS(searchsorted), "searchsorted.Scalar", Tensor(const Tensor &, const at::Scalar &, bool, bool), fp32)
+  KERNEL_CPU(ADD_NS(trace), "trace", Tensor(const Tensor &), fp32)
+  KERNEL_CPU(ADD_NS(tril), "tril", Tensor(const Tensor &, int64_t), fp32)
+  KERNEL_CPU(ADD_NS(triu), "triu", Tensor(const Tensor &, int64_t), fp32)
+  KERNEL_CPU(ADD_NS(vander), "vander", Tensor(const Tensor &, c10::optional<int64_t>, bool), fp32)
+  KERNEL_CPU(ADD_NS(view_as_complex), "view_as_complex", Tensor(const Tensor &), fp32)
+  KERNEL_CPU(ADD_NS(cholesky), "cholesky", Tensor(const Tensor &, bool), fp32)
+  KERNEL_CPU(ADD_NS(cholesky_inverse), "cholesky_inverse", Tensor(const Tensor &, bool), fp32)
+  KERNEL_CPU(ADD_NS(cholesky_solve), "cholesky_solve", Tensor(const Tensor &, const Tensor &, bool), fp32)
+  KERNEL_CPU(ADD_NS(dot), "dot", Tensor(const Tensor &, const Tensor &), fp32)
+  KERNEL_CPU(ADD_NS(inverse), "inverse", Tensor(const Tensor &), fp32)
+  KERNEL_CPU(ADD_NS(lu_solve), "lu_solve", Tensor(const Tensor &, const Tensor &, const Tensor &), fp32)
+  KERNEL_CPU(ADD_NS(matrix_rank), "matrix_rank", Tensor(const Tensor &, bool), fp32)
+  KERNEL_CPU(ADD_NS(orgqr), "orgqr", Tensor(const Tensor &, const Tensor &), fp32)
+  KERNEL_CPU(ADD_NS(ormqr), "ormqr", Tensor(const Tensor &, const Tensor &, const Tensor &, bool, bool), fp32)
+  KERNEL_CPU(ADD_NS(pinverse), "pinverse", Tensor(const Tensor &, double), fp32)
+  KERNEL_CPU(ADD_NS(vdot), "vdot", Tensor(const Tensor &, const Tensor &), fp32)
+  KERNEL_CPU(ADD_NS(im2col), "im2col", Tensor(const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, IntArrayRef), fp32)
+  KERNEL_CPU(ADD_NS(col2im), "col2im", Tensor(const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, IntArrayRef, IntArrayRef), fp32)
+  KERNEL_CPU(ADD_NS(max_pool3d), "max_pool3d", Tensor(const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, IntArrayRef, bool), fp32)
+  KERNEL_CPU(ADD_NS(max_unpool2d), "max_unpool2d", Tensor(const Tensor &, const Tensor &, IntArrayRef), fp32)
+  KERNEL_CPU(ADD_NS(max_unpool3d), "max_unpool3d", Tensor(const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef), fp32)
+  KERNEL_CPU(ADD_NS(adaptive_avg_pool3d), "adaptive_avg_pool3d", Tensor(const Tensor &, IntArrayRef), fp32)
+  KERNEL_CPU(ADD_NS(reflection_pad1d), "reflection_pad1d", Tensor(const Tensor &, IntArrayRef), fp32)
+  KERNEL_CPU(ADD_NS(reflection_pad2d), "reflection_pad2d", Tensor(const Tensor &, IntArrayRef), fp32)
+  KERNEL_CPU(ADD_NS(replication_pad1d), "replication_pad1d", Tensor(const Tensor &, IntArrayRef), fp32)
+  KERNEL_CPU(ADD_NS(replication_pad2d), "replication_pad2d", Tensor(const Tensor &, IntArrayRef), fp32)
+  KERNEL_CPU(ADD_NS(replication_pad3d), "replication_pad3d", Tensor(const Tensor &, IntArrayRef), fp32)
+  KERNEL_CPU(ADD_NS(elu), "elu", Tensor(const Tensor &, const Scalar &, const Scalar &, const Scalar &), fp32)
+  KERNEL_CPU(ADD_NS(hardshrink), "hardshrink", Tensor(const Tensor &, const Scalar &), fp32)
+  KERNEL_CPU(ADD_NS(hardsigmoid), "hardsigmoid", Tensor(const Tensor &), fp32)
+  KERNEL_CPU(ADD_NS(hardswish), "hardswish", Tensor(const Tensor &), fp32)
+  KERNEL_CPU(ADD_NS(log_sigmoid), "log_sigmoid", Tensor(const Tensor &), fp32)
+  KERNEL_CPU(ADD_NS(prelu), "prelu", Tensor(const Tensor &, const Tensor &), fp32)
+  KERNEL_CPU(ADD_NS(selu), "selu", Tensor(const Tensor &), fp32)
+  KERNEL_CPU(ADD_NS(celu), "celu", Tensor(const Tensor &, const Scalar &), fp32)
+  KERNEL_CPU(ADD_NS(softplus), "softplus", Tensor(const Tensor &, const Scalar &, const Scalar &), fp32)
+  KERNEL_CPU(ADD_NS(softshrink), "softshrink", Tensor(const Tensor &, const Scalar &), fp32)
+  KERNEL_CPU(ADD_NS(group_norm), "group_norm", Tensor(const Tensor &, int64_t, const c10::optional<Tensor> &, const c10::optional<Tensor> &, double, bool), fp32)
+  KERNEL_CPU(ADD_NS(smooth_l1_loss), "smooth_l1_loss", Tensor (const Tensor &, const Tensor &, int64_t, double), fp32)
+  KERNEL_CPU(ADD_NS(mse_loss), "mse_loss", Tensor(const Tensor &, const Tensor &, int64_t), fp32)
+  KERNEL_CPU(ADD_NS(ctc_loss), "ctc_loss.IntList", Tensor(const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, int64_t, int64_t, bool), fp32)
+  KERNEL_CPU(ADD_NS(ctc_loss), "ctc_loss.Tensor", Tensor(const Tensor &, const Tensor &, const Tensor &, const Tensor &, int64_t, int64_t, bool), fp32)
+  KERNEL_CPU(ADD_NS(kl_div), "kl_div", Tensor(const Tensor &, const Tensor &, int64_t, bool), fp32)
+  KERNEL_CPU(ADD_NS(multilabel_margin_loss), "multilabel_margin_loss", Tensor(const Tensor &, const Tensor &, int64_t), fp32)
+  KERNEL_CPU(ADD_NS(fft_fft), "fft_fft", Tensor(const Tensor &, c10::optional<int64_t>, int64_t, c10::optional<c10::string_view>), fp32)
+  KERNEL_CPU(ADD_NS(fft_ifft), "fft_ifft", Tensor(const Tensor &, c10::optional<int64_t>, int64_t, c10::optional<c10::string_view>), fp32)
+  KERNEL_CPU(ADD_NS(fft_fft2), "fft_fft2", Tensor(const Tensor &, c10::optional<at::IntArrayRef>, at::IntArrayRef, c10::optional<c10::string_view>), fp32)
+  KERNEL_CPU(ADD_NS(fft_ifft2), "fft_ifft2", Tensor(const Tensor &, c10::optional<at::IntArrayRef>, at::IntArrayRef, c10::optional<c10::string_view>), fp32)
+  KERNEL_CPU(ADD_NS(fft_fftn), "fft_fftn", Tensor(const Tensor &, c10::optional<at::IntArrayRef>, c10::optional<at::IntArrayRef>, c10::optional<c10::string_view>), fp32)
+  KERNEL_CPU(ADD_NS(fft_ifftn), "fft_ifftn", Tensor(const Tensor &, c10::optional<at::IntArrayRef>, c10::optional<at::IntArrayRef>, c10::optional<c10::string_view>), fp32)
+  KERNEL_CPU(ADD_NS(fft_rfft), "fft_rfft", Tensor(const Tensor &, c10::optional<int64_t>, int64_t, c10::optional<c10::string_view>), fp32)
+  KERNEL_CPU(ADD_NS(fft_irfft), "fft_irfft", Tensor(const Tensor &, c10::optional<int64_t>, int64_t, c10::optional<c10::string_view>), fp32)
+  KERNEL_CPU(ADD_NS(fft_rfft2), "fft_rfft2", Tensor(const Tensor &, c10::optional<at::IntArrayRef>, at::IntArrayRef, c10::optional<c10::string_view>), fp32)
+  KERNEL_CPU(ADD_NS(fft_irfft2), "fft_irfft2", Tensor(const Tensor &, c10::optional<at::IntArrayRef>, at::IntArrayRef, c10::optional<c10::string_view>), fp32)
+  KERNEL_CPU(ADD_NS(fft_rfftn), "fft_rfftn", Tensor(const Tensor &, c10::optional<at::IntArrayRef>, c10::optional<at::IntArrayRef>, c10::optional<c10::string_view>), fp32)
+  KERNEL_CPU(ADD_NS(fft_irfftn), "fft_irfftn", Tensor(const Tensor &, c10::optional<at::IntArrayRef>, c10::optional<at::IntArrayRef>, c10::optional<c10::string_view>), fp32)
+  KERNEL_CPU(ADD_NS(fft_hfft), "fft_hfft", Tensor(const Tensor &, c10::optional<int64_t>, int64_t, c10::optional<c10::string_view>), fp32)
+  KERNEL_CPU(ADD_NS(fft_ihfft), "fft_ihfft", Tensor(const Tensor &, c10::optional<int64_t>, int64_t, c10::optional<c10::string_view>), fp32)
+  KERNEL_CPU(ADD_NS(conv_tbc), "conv_tbc", Tensor(const Tensor &, const Tensor &, const Tensor &, int64_t), fp32)
+  KERNEL_CPU(ADD_NS(linalg_matrix_norm), "linalg_matrix_norm", Tensor(const Tensor &, const at::Scalar &, at::IntArrayRef, bool, c10::optional<at::ScalarType>), fp32)
+  KERNEL_CPU(ADD_NS(linalg_matrix_norm), "linalg_matrix_norm.str_ord", Tensor(const Tensor &, c10::string_view, at::IntArrayRef, bool, c10::optional<at::ScalarType>), fp32)
+  KERNEL_CPU(ADD_NS(linalg_cond), "linalg_cond", Tensor(const Tensor &, const c10::optional<at::Scalar> &), fp32)
+  KERNEL_CPU(ADD_NS(linalg_cond), "linalg_cond.p_str", Tensor(const Tensor &, c10::string_view), fp32)
+  KERNEL_CPU(ADD_NS(linalg_matrix_rank), "linalg_matrix_rank", Tensor(const Tensor &, const c10::optional<double>, bool), fp32)
+  KERNEL_CPU(ADD_NS(linalg_matrix_rank), "linalg_matrix_rank.tol_tensor", Tensor(const Tensor &, const Tensor &, bool), fp32)
+  KERNEL_CPU(ADD_NS(linalg_solve), "linalg_solve", Tensor(const Tensor &, const Tensor &), fp32)
+  KERNEL_CPU(ADD_NS(linalg_cholesky), "linalg_cholesky", Tensor(const Tensor &, bool), fp32)
+  KERNEL_CPU(ADD_NS(linalg_svdvals), "linalg_svdvals", Tensor(const Tensor &), fp32)
+  KERNEL_CPU(ADD_NS(linalg_eigvals), "linalg_eigvals", Tensor(const Tensor &), fp32)
+  KERNEL_CPU(ADD_NS(linalg_eigvalsh), "linalg_eigvalsh", Tensor(const Tensor &, c10::string_view), fp32)
+  KERNEL_CPU(ADD_NS(linalg_inv), "linalg_inv", Tensor(const Tensor &), fp32)
+  KERNEL_CPU(ADD_NS(linalg_householder_product), "linalg_householder_product", Tensor(const Tensor &, const Tensor &), fp32)
+  KERNEL_CPU(ADD_NS(linalg_tensorinv), "linalg_tensorinv", Tensor(const Tensor &, int64_t), fp32)
+  KERNEL_CPU(ADD_NS(linalg_tensorsolve), "linalg_tensorsolve", Tensor(const Tensor &, const Tensor &, c10::optional<at::IntArrayRef>), fp32)
   KERNEL_CPU(ADD_NS(fake_quantize_per_tensor_affine), "fake_quantize_per_tensor_affine", Tensor (const Tensor &, double, int64_t, int64_t, int64_t), fp32)
+  KERNEL_CPU(ADD_NS(glu), "glu", Tensor (const Tensor &, int64_t), fp32)
+
+  m.impl(TORCH_SELECTIVE_NAME("aten::cummax"),
+         TORCH_FN((&WrapFunction<CastPolicy::fp32, DeviceType::CPU,
+                                 std::tuple<Tensor, Tensor> (const Tensor &, int64_t),
+                                 std::tuple<Tensor, Tensor> (const Tensor &, int64_t),
+                                 &ADD_NS(cummax)>::type::call)));
+
+  m.impl(TORCH_SELECTIVE_NAME("aten::cummax.dimname"),
+         TORCH_FN((&WrapFunction<CastPolicy::fp32, DeviceType::CPU,
+                                 std::tuple<Tensor, Tensor> (const Tensor &, at::Dimname),
+                                 std::tuple<Tensor, Tensor> (const Tensor &, at::Dimname),
+                                 &ADD_NS(cummax)>::type::call)));
+
+  m.impl(TORCH_SELECTIVE_NAME("aten::cummin"),
+         TORCH_FN((&WrapFunction<CastPolicy::fp32, DeviceType::CPU,
+                                 std::tuple<Tensor, Tensor> (const Tensor &, int64_t),
+                                 std::tuple<Tensor, Tensor> (const Tensor &, int64_t),
+                                 &ADD_NS(cummin)>::type::call)));
+
+  m.impl(TORCH_SELECTIVE_NAME("aten::cummin.dimname"),
+         TORCH_FN((&WrapFunction<CastPolicy::fp32, DeviceType::CPU,
+                                 std::tuple<Tensor, Tensor> (const Tensor &, at::Dimname),
+                                 std::tuple<Tensor, Tensor> (const Tensor &, at::Dimname),
+                                 &ADD_NS(cummin)>::type::call)));
+
+  m.impl(TORCH_SELECTIVE_NAME("aten::eig"),
+         TORCH_FN((&WrapFunction<CastPolicy::fp32, DeviceType::CPU,
+                                 std::tuple<Tensor, Tensor> (const Tensor &, bool),
+                                 std::tuple<Tensor, Tensor> (const Tensor &, bool),
+                                 &ADD_NS(eig)>::type::call)));
+
+  m.impl(TORCH_SELECTIVE_NAME("aten::geqrf"),
+         TORCH_FN((&WrapFunction<CastPolicy::fp32, DeviceType::CPU,
+                                 std::tuple<Tensor, Tensor> (const Tensor &),
+                                 std::tuple<Tensor, Tensor> (const Tensor &),
+                                 &ADD_NS(geqrf)>::type::call)));
+
+  m.impl(TORCH_SELECTIVE_NAME("aten::lstsq"),
+         TORCH_FN((&WrapFunction<CastPolicy::fp32, DeviceType::CPU,
+                                 std::tuple<Tensor, Tensor> (const Tensor &, const Tensor &),
+                                 std::tuple<Tensor, Tensor> (const Tensor &, const Tensor &),
+                                 &ADD_NS(lstsq)>::type::call)));
+
+  m.impl(TORCH_SELECTIVE_NAME("aten::_lu_with_info"),
+         TORCH_FN((&WrapFunction<CastPolicy::fp32, DeviceType::CPU,
+                                 std::tuple<Tensor, Tensor, Tensor> (const Tensor &, bool, bool),
+                                 std::tuple<Tensor, Tensor, Tensor> (const Tensor &, bool, bool),
+                                 &ADD_NS(_lu_with_info)>::type::call)));
+
+  m.impl(TORCH_SELECTIVE_NAME("aten::lu_unpack"),
+         TORCH_FN((&WrapFunction<CastPolicy::fp32, DeviceType::CPU,
+                                 std::tuple<Tensor, Tensor, Tensor> (const Tensor &, const Tensor &, bool, bool),
+                                 std::tuple<Tensor, Tensor, Tensor> (const Tensor &, const Tensor &, bool, bool),
+                                 &ADD_NS(lu_unpack)>::type::call)));
+
+  m.impl(TORCH_SELECTIVE_NAME("aten::qr"),
+         TORCH_FN((&WrapFunction<CastPolicy::fp32, DeviceType::CPU,
+                                 std::tuple<Tensor, Tensor> (const Tensor &, bool),
+                                 std::tuple<Tensor, Tensor> (const Tensor &, bool),
+                                 &ADD_NS(qr)>::type::call)));
+
+  m.impl(TORCH_SELECTIVE_NAME("aten::solve"),
+         TORCH_FN((&WrapFunction<CastPolicy::fp32, DeviceType::CPU,
+                                 std::tuple<Tensor, Tensor> (const Tensor &, const Tensor &),
+                                 std::tuple<Tensor, Tensor> (const Tensor &, const Tensor &),
+                                 &ADD_NS(solve)>::type::call)));
+
+  m.impl(TORCH_SELECTIVE_NAME("aten::svd"),
+         TORCH_FN((&WrapFunction<CastPolicy::fp32, DeviceType::CPU,
+                                 std::tuple<Tensor, Tensor, Tensor> (const Tensor &, bool, bool),
+                                 std::tuple<Tensor, Tensor, Tensor> (const Tensor &, bool, bool),
+                                 &ADD_NS(svd)>::type::call)));
+
+  m.impl(TORCH_SELECTIVE_NAME("aten::symeig"),
+         TORCH_FN((&WrapFunction<CastPolicy::fp32, DeviceType::CPU,
+                                 std::tuple<Tensor, Tensor> (const Tensor &, bool, bool),
+                                 std::tuple<Tensor, Tensor> (const Tensor &, bool, bool),
+                                 &ADD_NS(symeig)>::type::call)));
+
+  m.impl(TORCH_SELECTIVE_NAME("aten::triangular_solve"),
+         TORCH_FN((&WrapFunction<CastPolicy::fp32, DeviceType::CPU,
+                                 std::tuple<Tensor, Tensor> (const Tensor &, const Tensor &, bool, bool, bool),
+                                 std::tuple<Tensor, Tensor> (const Tensor &, const Tensor &, bool, bool, bool),
+                                 &ADD_NS(triangular_solve)>::type::call)));
+
+  m.impl(TORCH_SELECTIVE_NAME("aten::fractional_max_pool2d"),
+         TORCH_FN((&WrapFunction<CastPolicy::fp32, DeviceType::CPU,
+                                 std::tuple<Tensor, Tensor> (const Tensor &, IntArrayRef, IntArrayRef, const Tensor &),
+                                 std::tuple<Tensor, Tensor> (const Tensor &, IntArrayRef, IntArrayRef, const Tensor &),
+                                 &ADD_NS(fractional_max_pool2d)>::type::call)));
+
+  m.impl(TORCH_SELECTIVE_NAME("aten::fractional_max_pool3d"),
+         TORCH_FN((&WrapFunction<CastPolicy::fp32, DeviceType::CPU,
+                                 std::tuple<Tensor, Tensor> (const Tensor &, IntArrayRef, IntArrayRef, const Tensor &),
+                                 std::tuple<Tensor, Tensor> (const Tensor &, IntArrayRef, IntArrayRef, const Tensor &),
+                                 &ADD_NS(fractional_max_pool3d)>::type::call)));
+
+  m.impl(TORCH_SELECTIVE_NAME("aten::adaptive_max_pool1d"),
+         TORCH_FN((&WrapFunction<CastPolicy::fp32, DeviceType::CPU,
+                                 std::tuple<Tensor, Tensor> (const Tensor &, IntArrayRef),
+                                 std::tuple<Tensor, Tensor> (const Tensor &, IntArrayRef),
+                                 &ADD_NS(adaptive_max_pool1d)>::type::call)));
+
+  m.impl(TORCH_SELECTIVE_NAME("aten::adaptive_max_pool2d"),
+         TORCH_FN((&WrapFunction<CastPolicy::fp32, DeviceType::CPU,
+                                 std::tuple<Tensor, Tensor> (const Tensor &, IntArrayRef),
+                                 std::tuple<Tensor, Tensor> (const Tensor &, IntArrayRef),
+                                 &ADD_NS(adaptive_max_pool2d)>::type::call)));
+
+  m.impl(TORCH_SELECTIVE_NAME("aten::adaptive_max_pool3d"),
+         TORCH_FN((&WrapFunction<CastPolicy::fp32, DeviceType::CPU,
+                                 std::tuple<Tensor, Tensor> (const Tensor &, IntArrayRef),
+                                 std::tuple<Tensor, Tensor> (const Tensor &, IntArrayRef),
+                                 &ADD_NS(adaptive_max_pool3d)>::type::call)));
+
+  m.impl(TORCH_SELECTIVE_NAME("aten::multilabel_margin_loss_forward"),
+         TORCH_FN((&WrapFunction<CastPolicy::fp32, DeviceType::CPU,
+                                 std::tuple<Tensor, Tensor> (const Tensor &, const Tensor &, int64_t),
+                                 std::tuple<Tensor, Tensor> (const Tensor &, const Tensor &, int64_t),
+                                 &ADD_NS(multilabel_margin_loss_forward)>::type::call)));
+
+  m.impl(TORCH_SELECTIVE_NAME("aten::linalg_qr"),
+         TORCH_FN((&WrapFunction<CastPolicy::fp32, DeviceType::CPU,
+                                 std::tuple<Tensor, Tensor> (const Tensor &, c10::string_view),
+                                 std::tuple<Tensor, Tensor> (const Tensor &, c10::string_view),
+                                 &ADD_NS(linalg_qr)>::type::call)));
+
+  m.impl(TORCH_SELECTIVE_NAME("aten::linalg_cholesky_ex"),
+         TORCH_FN((&WrapFunction<CastPolicy::fp32, DeviceType::CPU,
+                                 std::tuple<Tensor, Tensor> (const Tensor &, bool, bool),
+                                 std::tuple<Tensor, Tensor> (const Tensor &, bool, bool),
+                                 &ADD_NS(linalg_cholesky_ex)>::type::call)));
+
+  m.impl(TORCH_SELECTIVE_NAME("aten::linalg_svd"),
+         TORCH_FN((&WrapFunction<CastPolicy::fp32, DeviceType::CPU,
+                                 std::tuple<Tensor, Tensor, Tensor> (const Tensor &, bool),
+                                 std::tuple<Tensor, Tensor, Tensor> (const Tensor &, bool),
+                                 &ADD_NS(linalg_svd)>::type::call)));
+
+  m.impl(TORCH_SELECTIVE_NAME("aten::linalg_eig"),
+         TORCH_FN((&WrapFunction<CastPolicy::fp32, DeviceType::CPU,
+                                 std::tuple<Tensor, Tensor> (const Tensor &),
+                                 std::tuple<Tensor, Tensor> (const Tensor &),
+                                 &ADD_NS(linalg_eig)>::type::call)));
+
+  m.impl(TORCH_SELECTIVE_NAME("aten::linalg_eigh"),
+         TORCH_FN((&WrapFunction<CastPolicy::fp32, DeviceType::CPU,
+                                 std::tuple<Tensor, Tensor> (const Tensor &, c10::string_view),
+                                 std::tuple<Tensor, Tensor> (const Tensor &, c10::string_view),
+                                 &ADD_NS(linalg_eigh)>::type::call)));
+
+  m.impl(TORCH_SELECTIVE_NAME("aten::linalg_lstsq"),
+         TORCH_FN((&WrapFunction<CastPolicy::fp32, DeviceType::CPU,
+                                 std::tuple<Tensor, Tensor, Tensor, Tensor> (const Tensor &, const Tensor &, c10::optional<double>, c10::optional<c10::string_view>),
+                                 std::tuple<Tensor, Tensor, Tensor, Tensor> (const Tensor &, const Tensor &, c10::optional<double>, c10::optional<c10::string_view>),
+                                 &ADD_NS(linalg_lstsq)>::type::call)));
+
+  m.impl(TORCH_SELECTIVE_NAME("aten::linalg_inv_ex"),
+         TORCH_FN((&WrapFunction<CastPolicy::fp32, DeviceType::CPU,
+                                 std::tuple<Tensor, Tensor> (const Tensor &, bool),
+                                 std::tuple<Tensor, Tensor> (const Tensor &, bool),
+                                 &ADD_NS(linalg_inv_ex)>::type::call)));
 
   // promote
   KERNEL_CPU(ADD_NS(cat), "cat", Tensor (TensorList, int64_t), promote)
   KERNEL_CPU(ADD_NS(stack), "stack", Tensor (TensorList, int64_t), promote)
+  KERNEL_CPU(ADD_NS(index_copy), "index_copy", Tensor (const Tensor &, int64_t, const Tensor &, const Tensor &), promote)
+  KERNEL_CPU(ADD_NS(index_copy), "index_copy.dimname", Tensor (const Tensor &, at::Dimname, const Tensor &, const Tensor &), promote)
 
-  m.impl(TORCH_SELECTIVE_NAME("aten::topk"),
-         TORCH_FN((&WrapFunction<CastPolicy::fp32, DeviceType::CPU,
-                                 std::tuple<Tensor,Tensor> (const Tensor &, int64_t, int64_t, bool, bool),
-                                 std::tuple<Tensor,Tensor> (const Tensor &, int64_t, int64_t, bool, bool),
-                                 &ADD_NS(topk)>::type::call)));
-
-  m.impl(TORCH_SELECTIVE_NAME("aten::sort"),
-         TORCH_FN((&WrapFunction<CastPolicy::fp32, DeviceType::CPU,
-                                 std::tuple<Tensor,Tensor> (const Tensor &, int64_t, bool),
-                                 std::tuple<Tensor,Tensor> (const Tensor &, int64_t, bool),
-                                 &ADD_NS(sort)>::type::call)));
-
-   m.impl(TORCH_SELECTIVE_NAME("aten::kthvalue"),
-         TORCH_FN((&WrapFunction<CastPolicy::fp32, DeviceType::CPU,
-                                 std::tuple<Tensor,Tensor> (const Tensor &, int64_t, int64_t, bool),
-                                 std::tuple<Tensor,Tensor> (const Tensor &, int64_t, int64_t, bool),
-                                 &ADD_NS(kthvalue)>::type::call)));
-
-   m.impl(TORCH_SELECTIVE_NAME("aten::kthvalue.dimname"),
-         TORCH_FN((&WrapFunction<CastPolicy::fp32, DeviceType::CPU,
-                                 std::tuple<Tensor,Tensor> (const Tensor &, int64_t, at::Dimname, bool),
-                                 std::tuple<Tensor,Tensor> (const Tensor &, int64_t, at::Dimname, bool),
-                                 &ADD_NS(kthvalue)>::type::call)));
 }
 } // namespace
 } // namespace autocast

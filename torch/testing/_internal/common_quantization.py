@@ -5,6 +5,7 @@ checking quantization api and properties of resulting modules.
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torch.nn.intrinsic.quantized.dynamic as nniqd
 import torch.nn.quantized as nnq
 import torch.nn.quantized.dynamic as nnqd
 from torch.nn.intrinsic import _FusedModule
@@ -422,6 +423,13 @@ class QuantizationTestCase(TestCase):
         self.assertEqual(type(mod), nnqd.Linear)
         self.assertEqual(mod._packed_params.dtype, dtype)
 
+    def checkDynamicQuantizedLinearRelu(self, mod, dtype):
+        r"""Checks that mod has been swapped for an nnqd.Linear
+            module, the bias is float.
+        """
+        self.assertEqual(type(mod), nniqd.LinearReLU)
+        self.assertEqual(mod._packed_params.dtype, dtype)
+
     def check_eager_serialization(self, ref_model, loaded_model, x):
         # Check state dict serialization and torch.save APIs
         model_dict = ref_model.state_dict()
@@ -732,6 +740,13 @@ class QuantizationTestCase(TestCase):
                                         values_0.shape == values_1.shape,
                                         f"Layer {layer_name}, {model_name_0} and {model_name_1} " +
                                         f"have a shape mismatch at idx {idx}.")
+                                elif isinstance(values_0, list):
+                                    values_0 = values_0[0]
+                                    values_1 = values_1[0]
+                                    self.assertTrue(
+                                        values_0.shape == values_1.shape,
+                                        f"Layer {layer_name}, {model_name_0} and {model_name_1} " +
+                                        f"have a shape mismatch at idx {idx}.")
                                 else:
                                     assert isinstance(values_0, tuple), \
                                         f"unhandled type {type(values_0)}"
@@ -753,17 +768,21 @@ class QuantizationTestCase(TestCase):
                             self.assertTrue(ref_node_name_0 != prev_node_name_0)
                             self.assertTrue(ref_node_name_1 != prev_node_name_1)
 
-        def checkGraphModeFxOp(self, model, inputs, quant_type,
-                               expected_node=None,
-                               expected_node_occurrence=None,
-                               expected_node_list=None,
-                               is_reference=False,
-                               print_debug_info=False,
-                               custom_qconfig_dict=None,
-                               prepare_expected_node=None,
-                               prepare_expected_node_occurrence=None,
-                               prepare_expected_node_list=None,
-                               prepare_custom_config_dict=None):
+        def checkGraphModeFxOp(
+                self,
+                model,
+                inputs,
+                quant_type,
+                expected_node=None,
+                expected_node_occurrence=None,
+                expected_node_list=None,
+                is_reference=False,
+                print_debug_info=False,
+                custom_qconfig_dict=None,
+                prepare_expected_node=None,
+                prepare_expected_node_occurrence=None,
+                prepare_expected_node_list=None,
+                prepare_custom_config_dict=None):
             """ Quantizes model with graph mode quantization on fx and check if the
                 quantized model contains the quantized_node
 
@@ -790,6 +809,17 @@ class QuantizationTestCase(TestCase):
                         expected_node_occurrence, but for prepare
                     prepare_expected_node_list: same as expected_node_list, but
                         for prepare
+
+                Returns:
+                    A dictionary with the following structure:
+                   {
+                       "prepared": ...,  # the prepared model
+                       "quantized": ...,  # the quantized non-reference model
+                       "quantized_reference": ...,  # the quantized reference model
+                       "result": ...,  # the result for either quantized or
+                                       # quantized_reference model depending on the
+                                       # is_reference arguemnt
+                   }
             """
             # TODO: make img_data a single example instead of a list
             if type(inputs) == list:
@@ -832,10 +862,13 @@ class QuantizationTestCase(TestCase):
                 prepare_expected_node_occurrence, prepare_expected_node_list)
 
             prepared_copy = copy.deepcopy(prepared)
+            result_prepared = copy.deepcopy(prepared)
             qgraph = convert_fx(prepared)
             qgraph_reference = convert_fx(prepared_copy, is_reference=True)
             result = qgraph(*inputs)
+            result_quantized = copy.deepcopy(qgraph)
             result_reference = qgraph_reference(*inputs)
+            result_quantized_reference = copy.deepcopy(qgraph_reference)
 
             qgraph_to_check = qgraph_reference if is_reference else qgraph
             if print_debug_info:
@@ -845,7 +878,10 @@ class QuantizationTestCase(TestCase):
                 print()
             self.checkGraphModuleNodes(
                 qgraph_to_check, expected_node, expected_node_occurrence, expected_node_list)
-            return result
+            return {"prepared": result_prepared,
+                    "quantized": result_quantized,
+                    "quantized_reference": result_quantized_reference,
+                    "result": result}
 
 
     def checkEmbeddingSerialization(self, qemb, num_embeddings, embedding_dim, indices, offsets,
@@ -947,12 +983,12 @@ class QuantizationLiteTestCase(QuantizationTestCase):
 
                     mobile_module_result = mobile_module(input)
 
-                    torch.testing.assert_allclose(script_module_result, mobile_module_result)
+                    torch.testing.assert_close(script_module_result, mobile_module_result)
                     mobile_module_forward_result = mobile_module.forward(input)
-                    torch.testing.assert_allclose(script_module_result, mobile_module_forward_result)
+                    torch.testing.assert_close(script_module_result, mobile_module_forward_result)
 
                     mobile_module_run_method_result = mobile_module.run_method("forward", input)
-                    torch.testing.assert_allclose(script_module_result, mobile_module_run_method_result)
+                    torch.testing.assert_close(script_module_result, mobile_module_run_method_result)
                 except AssertionError as e:
                     if retry == max_retry:
                         raise e
@@ -1685,7 +1721,7 @@ class ModelForFusion(nn.Module):
         x = self.sub1(x)
         x = self.dequant(x)
         x = self.sub2(x)
-        x = x.reshape(-1, 36).contiguous()
+        x = x.view(-1, 36).contiguous()
         x = self.fc(x)
         y = self.conv2(y)
         y = self.relu2(y)

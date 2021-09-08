@@ -16,7 +16,8 @@ import warnings
 import threading
 from typing import List, Optional, Tuple, Union, Any
 from ._utils import _get_device_index, _dummy_type
-from .streams import Stream, Event, _Graph, _graph_pool_handle
+from .graphs import CUDAGraph, graph_pool_handle, graph, make_graphed_callables
+from .streams import Stream, Event
 from .. import device as _device
 import torch._C
 
@@ -31,6 +32,33 @@ _initialization_lock = threading.Lock()
 _queued_calls = []  # don't invoke these until initialization occurs
 _is_in_bad_fork = getattr(torch._C, "_cuda_isInBadFork", lambda: False)
 _device_t = Union[_device, str, int, None]
+
+
+class _LazySeedTracker:
+    # Since seeding is memory-less, only track the latest seed.
+    # Note: `manual_seed_all` followed by `manual_seed` overwrites
+    # the seed on current device. We track the order of **latest**
+    # calls between these two API.
+    def __init__(self):
+        self.manual_seed_all_cb = None
+        self.manual_seed_cb = None
+        self.call_order = []
+
+    def queue_seed_all(self, cb, traceback):
+        self.manual_seed_all_cb = (cb, traceback)
+        # update seed_all to be latest
+        self.call_order = [self.manual_seed_cb, self.manual_seed_all_cb]
+
+    def queue_seed(self, cb, traceback):
+        self.manual_seed_cb = (cb, traceback)
+        # update seed to be latest
+        self.call_order = [self.manual_seed_all_cb, self.manual_seed_cb]
+
+    def get_calls(self) -> List:
+        return self.call_order
+
+
+_lazy_seed_tracker = _LazySeedTracker()
 
 # Define dummy _CudaDeviceProperties type if PyTorch was compiled without CUDA
 if hasattr(torch._C, '_CudaDeviceProperties'):
@@ -51,6 +79,15 @@ def is_available() -> bool:
     # be initialized
     return torch._C._cuda_getDeviceCount() > 0
 
+def is_bf16_supported():
+    r"""Returns a bool indicating if the current CUDA device supports dtype bfloat16"""
+    cu_vers = torch.version.cuda
+    if cu_vers is not None:
+        cuda_maj_decide = int(cu_vers.split('.')[0]) >= 11
+
+    else:
+        cuda_maj_decide = False
+    return torch.cuda.get_device_properties(torch.cuda.current_device()).major >= 8 and cuda_maj_decide
 
 def _sleep(cycles):
     torch._C._cuda_sleep(cycles)
@@ -111,16 +148,21 @@ def is_initialized():
     return _initialized and not _is_in_bad_fork()
 
 
-def _lazy_call(callable):
+def _lazy_call(callable, **kwargs):
     if is_initialized():
         callable()
     else:
         # TODO(torch_deploy): this accesses linecache, which attempts to read the
         # file system to get traceback info. Patch linecache or do something
         # else here if this ends up being important.
-
-        # Don't store the actual traceback to avoid memory cycle
-        _queued_calls.append((callable, traceback.format_stack()))
+        global _lazy_seed_tracker
+        if kwargs.get("seed_all", False):
+            _lazy_seed_tracker.queue_seed_all(callable, traceback.format_stack())
+        elif kwargs.get("seed", False):
+            _lazy_seed_tracker.queue_seed(callable, traceback.format_stack())
+        else:
+            # Don't store the actual traceback to avoid memory cycle
+            _queued_calls.append((callable, traceback.format_stack()))
 
 _lazy_call(_check_capability)
 _lazy_call(_check_cubins)
@@ -174,6 +216,11 @@ def _lazy_init():
         # we need to just return without initializing in that case.
         # However, we must not let any *other* threads in!
         _tls.is_initializing = True
+
+        for calls in _lazy_seed_tracker.get_calls():
+            if calls:
+                _queued_calls.append(calls)
+
         try:
             for queued_call, orig_traceback in _queued_calls:
                 try:
@@ -491,6 +538,37 @@ def current_blas_handle():
     r"""Returns cublasHandle_t pointer to current cuBLAS handle"""
     _lazy_init()
     return torch._C._cuda_getCurrentBlasHandle()
+
+def set_sync_debug_mode(debug_mode: Union[int, str]) -> None:
+    r"""Sets the debug mode for cuda synchronizing operations.
+
+    Args:
+        debug_mode(str or int): if "default" or 0, don't error or warn on synchronizing operations,
+            if "warn" or 1, warn on synchronizing operations, if "error" or 2, error out synchronizing operations.
+
+    Warning:
+        This is an experimental feature, and not all synchronizing operations will trigger warning or error. In
+        particular, operations in torch.distributed and torch.sparse namespaces are not covered yet.
+    """
+
+    _lazy_init()
+    if isinstance(debug_mode, str):
+        if debug_mode == "default":
+            debug_mode = 0
+        elif debug_mode == "warn":
+            debug_mode = 1
+        elif debug_mode == "error":
+            debug_mode = 2
+        else:
+            raise RuntimeError("invalid value of debug_mode, expected one of `default`, `warn`, `error`")
+
+    torch._C._cuda_set_sync_debug_mode(debug_mode)
+
+def get_sync_debug_mode() -> int:
+    r"""Returns current value of debug mode for cuda synchronizing operations."""
+
+    _lazy_init()
+    return torch._C._cuda_get_sync_debug_mode()
 
 
 from .memory import *  # noqa: F403

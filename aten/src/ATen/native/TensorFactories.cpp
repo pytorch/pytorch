@@ -49,9 +49,7 @@ void window_function_checks(
 
 } // namespace
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(complex_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(polar_stub);
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ arange ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1413,17 +1411,18 @@ Tensor from_file(c10::string_view filename, c10::optional<bool> shared, c10::opt
 Tensor clone(const Tensor& src, c10::optional<c10::MemoryFormat> optional_memory_format) {
   auto memory_format =
       optional_memory_format.value_or(MemoryFormat::Preserve);
+  Tensor self;
   if (memory_format == MemoryFormat::Preserve) {
     if (src.is_non_overlapping_and_dense()) {
-      // Copy all strides
-      auto self = at::empty_strided(src.sizes(), src.strides(), src.options());
-      self.copy_(src);
-      return self;
+      // Copy all strides, this is marginally faster than calling empty_like
+      self = at::empty_strided(src.sizes(), src.strides(), src.options());
     } else {
-      memory_format = src.suggest_memory_format();
+      self = at::empty_like(src);
     }
+  } else {
+    self = at::empty_like(src, src.options(), memory_format);
   }
-  auto self = at::empty_like(src, src.options(), memory_format);
+
   self.copy_(src);
   return self;
 }
@@ -1526,7 +1525,6 @@ Tensor rand(
 }
 
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(kaiser_window_stub);
 
 } // namespace native

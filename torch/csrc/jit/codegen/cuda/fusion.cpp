@@ -17,7 +17,6 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static thread_local Fusion* ACTIVE_FUSION = nullptr;
 
 FusionGuard::FusionGuard(Fusion* fusion) {

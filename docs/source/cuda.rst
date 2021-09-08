@@ -21,12 +21,14 @@ torch.cuda
     get_device_name
     get_device_properties
     get_gencode_flags
+    get_sync_debug_mode
     init
     ipc_collect
     is_available
     is_initialized
     set_device
     set_stream
+    set_sync_debug_mode
     stream
     synchronize
 
@@ -68,6 +70,17 @@ Streams and events
 
     Stream
     Event
+
+Graphs (prototype)
+------------------
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    graph_pool_handle
+    CUDAGraph
+    graph
+    make_graphed_callables
 
 Memory management
 -----------------

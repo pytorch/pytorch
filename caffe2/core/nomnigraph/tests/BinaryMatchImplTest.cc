@@ -7,7 +7,6 @@
 #include "nomnigraph/Graph/Algorithms.h"
 #include "nomnigraph/Graph/Graph.h"
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BinaryMatch, NoMatch) {
   auto graph = createGraph();
   auto matches = nom::algorithm::binaryMatch(
@@ -15,7 +14,6 @@ TEST(BinaryMatch, NoMatch) {
   EXPECT_EQ(matches.size(), 0);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BinaryMatch, AllMatch) {
   auto graph = createGraph();
   auto matches = nom::algorithm::binaryMatch(
@@ -24,7 +22,6 @@ TEST(BinaryMatch, AllMatch) {
   EXPECT_EQ(matches.front().getNodesCount(), graph.getMutableNodes().size());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BinaryMatch, EmptyGraph) {
   nom::Graph<std::string> graph;
   auto matches = nom::algorithm::binaryMatch(
@@ -48,7 +45,6 @@ TEST(BinaryMatch, EmptyGraph) {
 //   |       +-------+
 //   +-----> |   6   |
 //           +-------+
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BinaryMatch, Basic) {
   auto graph = createGraph();
   auto matches =
@@ -94,7 +90,6 @@ TEST(BinaryMatch, Basic) {
 //           +-------+
 //
 // should match as { 4, 2 }, { 6 } not { 4, 2, 6 }
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BinaryMatch, RemovedMiddleNode) {
   auto graph = createGraph();
   auto matches =

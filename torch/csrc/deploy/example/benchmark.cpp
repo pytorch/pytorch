@@ -18,7 +18,6 @@
 
 typedef void (*function_type)(const char*);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 bool cuda = false;
 
 constexpr auto latency_p = {
@@ -95,7 +94,6 @@ struct RunPython {
 
 static torch::IValue to_device(const torch::IValue& v, torch::Device to);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static std::vector<torch::IValue> to_device_vec(
     at::ArrayRef<torch::IValue> vs,
     torch::Device to) {
@@ -297,6 +295,7 @@ struct Benchmark {
   std::function<void(int)> run_one_work_item;
 };
 
+// NOLINTNEXTLINE(bugprone-exception-escape)
 int main(int argc, char* argv[]) {
   int max_thread = atoi(argv[1]);
   cuda = std::string(argv[2]) == "cuda";

@@ -38,7 +38,7 @@ torch.set_default_dtype(torch.double)
 from torch._six import inf
 from torch.testing._internal.common_utils import \
     (TestCase, run_tests, set_rng_seed, TEST_WITH_UBSAN, load_tests,
-     gradcheck, IS_MACOS)
+     gradcheck, IS_MACOS, IS_WINDOWS)
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.autograd import grad
 from torch.autograd.functional import jacobian
@@ -387,6 +387,12 @@ EXAMPLES = [
         },
         {
             'rate': 0.2,
+        },
+        {
+            'rate': torch.tensor([0.0], requires_grad=True),
+        },
+        {
+            'rate': 0.0,
         }
     ]),
     Example(RelaxedBernoulli, [
@@ -667,7 +673,7 @@ BAD_EXAMPLES = [
     ]),
     Example(Poisson, [
         {
-            'rate': torch.tensor([0.0], requires_grad=True),
+            'rate': torch.tensor([-0.1], requires_grad=True),
         },
         {
             'rate': -1.0,
@@ -1028,6 +1034,7 @@ class TestDistributions(TestCase):
         self.assertEqual(Geometric(p).entropy(), scipy.stats.geom(p.detach().numpy(), loc=-1).entropy(), atol=1e-3, rtol=0)
         self.assertEqual(float(Geometric(s).entropy()), scipy.stats.geom(s, loc=-1).entropy().item(), atol=1e-3, rtol=0)
 
+    @unittest.skipIf(IS_WINDOWS, "See https://github.com/pytorch/pytorch/issues/64595")
     @unittest.skipIf(IS_MACOS, "See https://github.com/pytorch/pytorch/issues/60347")
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_geometric_sample(self):
@@ -1045,6 +1052,7 @@ class TestDistributions(TestCase):
         self.assertRaises(NotImplementedError, Binomial(10, p).rsample)
         self.assertRaises(NotImplementedError, Binomial(10, p).entropy)
 
+    @unittest.skipIf(IS_WINDOWS, "See https://github.com/pytorch/pytorch/issues/64595")
     @unittest.skipIf(IS_MACOS, "See https://github.com/pytorch/pytorch/issues/60347")
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_binomial_sample(self):
@@ -1315,17 +1323,30 @@ class TestDistributions(TestCase):
     def test_poisson_log_prob(self):
         rate = torch.randn(2, 3).abs().requires_grad_()
         rate_1d = torch.randn(1).abs().requires_grad_()
+        rate_zero = torch.zeros([], requires_grad=True)
 
-        def ref_log_prob(idx, x, log_prob):
-            l = rate.view(-1)[idx].detach()
+        def ref_log_prob(ref_rate, idx, x, log_prob):
+            l = ref_rate.view(-1)[idx].detach()
             expected = scipy.stats.poisson.logpmf(x, l)
             self.assertEqual(log_prob, expected, atol=1e-3, rtol=0)
 
         set_rng_seed(0)
-        self._check_log_prob(Poisson(rate), ref_log_prob)
+        self._check_log_prob(Poisson(rate), lambda *args: ref_log_prob(rate, *args))
+        self._check_log_prob(Poisson(rate_zero), lambda *args: ref_log_prob(rate_zero, *args))
         self._gradcheck_log_prob(Poisson, (rate,))
         self._gradcheck_log_prob(Poisson, (rate_1d,))
 
+        # We cannot check gradients automatically for zero rates because the finite difference
+        # approximation enters the forbidden parameter space. We instead compare with the
+        # theoretical results.
+        dist = Poisson(rate_zero)
+        s = dist.sample()
+        dist.log_prob(s).backward()
+        torch.testing.assert_allclose(rate_zero.grad, -1.0)
+        dist.log_prob(torch.ones_like(rate_zero)).backward()
+        torch.testing.assert_allclose(rate_zero.grad, torch.inf)
+
+    @unittest.skipIf(IS_WINDOWS, "See https://github.com/pytorch/pytorch/issues/64595")
     @unittest.skipIf(IS_MACOS, "See https://github.com/pytorch/pytorch/issues/60347")
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_poisson_sample(self):
@@ -1336,6 +1357,7 @@ class TestDistributions(TestCase):
                                          'Poisson(lambda={})'.format(rate),
                                          failure_rate=1e-3)
 
+    @unittest.skipIf(IS_WINDOWS, "See https://github.com/pytorch/pytorch/issues/64595")
     @unittest.skipIf(not TEST_CUDA, "CUDA not found")
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_poisson_gpu_sample(self):
@@ -4204,37 +4226,39 @@ class TestLazyLogitsInitialization(TestCase):
     def test_lazy_logits_initialization(self):
         for Dist, params in self.examples:
             param = params[0].copy()
-            if 'probs' in param:
-                probs = param.pop('probs')
-                param['logits'] = probs_to_logits(probs)
-                dist = Dist(**param)
-                # Create new instance to generate a valid sample
-                dist.log_prob(Dist(**param).sample())
-                message = 'Failed for {} example 0/{}'.format(Dist.__name__, len(params))
-                self.assertFalse('probs' in vars(dist), msg=message)
-                try:
-                    dist.enumerate_support()
-                except NotImplementedError:
-                    pass
-                self.assertFalse('probs' in vars(dist), msg=message)
-                batch_shape, event_shape = dist.batch_shape, dist.event_shape
-                self.assertFalse('probs' in vars(dist), msg=message)
+            if 'probs' not in param:
+                continue
+            probs = param.pop('probs')
+            param['logits'] = probs_to_logits(probs)
+            dist = Dist(**param)
+            # Create new instance to generate a valid sample
+            dist.log_prob(Dist(**param).sample())
+            message = 'Failed for {} example 0/{}'.format(Dist.__name__, len(params))
+            self.assertNotIn('probs', dist.__dict__, msg=message)
+            try:
+                dist.enumerate_support()
+            except NotImplementedError:
+                pass
+            self.assertNotIn('probs', dist.__dict__, msg=message)
+            batch_shape, event_shape = dist.batch_shape, dist.event_shape
+            self.assertNotIn('probs', dist.__dict__, msg=message)
 
     def test_lazy_probs_initialization(self):
         for Dist, params in self.examples:
             param = params[0].copy()
-            if 'probs' in param:
-                dist = Dist(**param)
-                dist.sample()
-                message = 'Failed for {} example 0/{}'.format(Dist.__name__, len(params))
-                self.assertFalse('logits' in vars(dist), msg=message)
-                try:
-                    dist.enumerate_support()
-                except NotImplementedError:
-                    pass
-                self.assertFalse('logits' in vars(dist), msg=message)
-                batch_shape, event_shape = dist.batch_shape, dist.event_shape
-                self.assertFalse('logits' in vars(dist), msg=message)
+            if 'probs' not in param:
+                continue
+            dist = Dist(**param)
+            dist.sample()
+            message = 'Failed for {} example 0/{}'.format(Dist.__name__, len(params))
+            self.assertNotIn('logits', dist.__dict__, msg=message)
+            try:
+                dist.enumerate_support()
+            except NotImplementedError:
+                pass
+            self.assertNotIn('logits', dist.__dict__, msg=message)
+            batch_shape, event_shape = dist.batch_shape, dist.event_shape
+            self.assertNotIn('logits', dist.__dict__, msg=message)
 
 
 @unittest.skipIf(not TEST_NUMPY, "NumPy not found")

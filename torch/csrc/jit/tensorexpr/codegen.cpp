@@ -14,7 +14,7 @@ RegisterCodeGenList::StmtFactoryMethod RegisterCodeGenList::
     oss << "Invalid stmt codegen name: " << name << ". ";
     oss << "Existing codegen names: [";
     int index = 0;
-    for (const auto& entry : stmt_factory_methods_) {
+    for (auto& entry : stmt_factory_methods_) {
       if (index != 0) {
         oss << ", ";
       }
@@ -35,7 +35,7 @@ void RegisterCodeGenList::AddStmtFactoryMethod(
 
 std::unique_ptr<CodeGen> CreateCodeGen(
     const std::string& name,
-    Stmt* stmt,
+    StmtPtr stmt,
     const std::vector<CodeGen::BufferArg>& params,
     at::Device device,
     const std::string& kernel_func_name) {
@@ -44,7 +44,7 @@ std::unique_ptr<CodeGen> CreateCodeGen(
   return method(stmt, params, device, kernel_func_name);
 }
 
-const Expr* GenericIntrinsicsExpander::mutate(const Intrinsics* v) {
+ExprPtr GenericIntrinsicsExpander::mutate(IntrinsicsPtr v) {
   if (v->op_type() == kSigmoid) {
     auto x = v->param(0)->accept_mutator(this);
     auto one = expr_to_vec(
@@ -67,7 +67,7 @@ void* CodeGen::argToPtr(const BufferArg& bufferArg, const CallArg& callArg) {
   case ScalarType::Name:    \
     return callArg.Name##Ptr();
 
-    AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, TYPE_CASE);
+    AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TYPE_CASE);
 #undef TYPE_CASE
 
     default:

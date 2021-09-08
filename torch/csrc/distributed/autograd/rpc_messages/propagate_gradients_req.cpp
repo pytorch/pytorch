@@ -80,9 +80,8 @@ std::unique_ptr<PropagateGradientsReq> PropagateGradientsReq::fromMessage(
     grads[i] = tupleElements[i].toTensor();
   }
 
-  // NOLINTNEXTLINE(modernize-make-unique)
-  return std::unique_ptr<PropagateGradientsReq>(
-      new PropagateGradientsReq(autogradMetadata, grads, retainGraph));
+  return std::make_unique<PropagateGradientsReq>(
+    autogradMetadata, grads, retainGraph);
 }
 
 const AutogradMetadata& PropagateGradientsReq::getAutogradMetadata() {
