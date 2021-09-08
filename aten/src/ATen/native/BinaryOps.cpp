@@ -387,6 +387,22 @@ Tensor& special_zeta_out(const Tensor& self, const Scalar& other, Tensor& result
   return at::special_zeta_out(result, self, wrapped_scalar_tensor(other));
 }
 
+Tensor& special_gammainc_out(const Tensor& self, const Tensor& other, Tensor& result) {
+  return at::igamma_out(result, self, other);
+}
+
+Tensor special_gammainc(const Tensor& self, const Tensor& other) {
+  return at::igamma(self, other);
+}
+
+Tensor& special_gammaincc_out(const Tensor& self, const Tensor& other, Tensor& result) {
+  return at::igammac_out(result, self, other);
+}
+
+Tensor special_gammaincc(const Tensor& self, const Tensor& other) {
+  return at::igammac(self, other);
+}
+
 TORCH_IMPL_FUNC(atan2_out) (const Tensor& self, const Tensor& other, const Tensor& result) {
   atan2_stub(device_type(), *this);
 }
