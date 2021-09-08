@@ -1,7 +1,7 @@
 #include "torch/csrc/autograd/VariableTypeUtils.h"
 
 #include <torch/library.h>
-
+#include <torch/csrc/autograd/autograd_not_implemented_fallback.h>
 
 #include <ATen/RedispatchFunctions.h>
 
