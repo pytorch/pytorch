@@ -111,7 +111,6 @@ ViewInfo ViewInfo::chain(const Variable & base, const Variable & tensor,
 
 namespace {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 at::Tensor singleton_undefined_tensor;
 
 struct ConcreteAutogradMetaFactory : public c10::impl::AutogradMetaFactory {
@@ -123,10 +122,8 @@ struct ConcreteAutogradMetaFactory : public c10::impl::AutogradMetaFactory {
   }
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 ConcreteAutogradMetaFactory meta_factory;
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static c10::impl::AutogradMetaFactoryRegisterer meta_factory_registerer(&meta_factory);
 
 }
@@ -285,7 +282,6 @@ namespace impl {
   }
 
   namespace {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     std::vector<std::shared_ptr<FunctionPreHook>> empty_singleton;
   }
 
@@ -354,9 +350,7 @@ struct VariableHooks final : at::impl::VariableHooksInterface {
   void requires_grad_(const Tensor& self, bool _requires_grad) const override;
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 VariableHooks variableHooks;
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 at::impl::VariableHooksRegisterer registerVariableHooks(&variableHooks);
 
 Tensor VariableHooks::variable_data(const Tensor& self) const {
@@ -518,7 +512,6 @@ const Tensor& VariableHooks::base(const Tensor& self) const {
 }
 
 namespace {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
   std::string singleton_string;
 }
 
@@ -532,7 +525,6 @@ const std::string& VariableHooks::name(const Tensor& self) const {
 }
 
 namespace {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
   std::shared_ptr<torch::autograd::Node> singleton_shared_ptr;
 }
 
@@ -559,10 +551,10 @@ const std::shared_ptr<torch::autograd::Node>& VariableHooks::grad_fn(const Tenso
       //   self = view_op_n(view_n-1)
       //   self = inplace_op(self)
       //
-      // For CPU/CUDA backends, we employ one AsStridedBackward Node to represent the chain of
+      // For CPU/CUDA backends, we employ one AsStridedBackward0 Node to represent the chain of
       // view backward ops for effienciency.
       //
-      // However in XLA backend we don't have full support of AsStridedBackward, we instead run a full
+      // However in XLA backend we don't have full support of AsStridedBackward0, we instead run a full
       // forward pass with a tensor that requires gradient to get proper grad_fn setup,
       // then save it to DifferentiableViewMeta for future use.
       // This is fairly cheap for XLA lazy tensor approach (but would be really expensive for CPU/CUDA).
@@ -580,7 +572,7 @@ const std::shared_ptr<torch::autograd::Node>& VariableHooks::grad_fn(const Tenso
         auto diff_view = view_fn(view_info.base_);
         diff_view_meta->grad_fn_ = diff_view.grad_fn();
       } else {
-        auto fn = std::make_shared<torch::autograd::generated::AsStridedBackward>();
+        auto fn = std::make_shared<torch::autograd::generated::AsStridedBackward0>();
         fn->self_geometry = at::TensorGeometry(view_info.base_);
         fn->size = self.sizes().vec();
         fn->stride = self.strides().vec();

@@ -27,13 +27,14 @@ from torch._six import inf, nan, string_classes
 from itertools import product, combinations, permutations
 from functools import partial
 from torch import multiprocessing as mp
+from torch.testing import make_tensor
 from torch.testing._internal.common_utils import (
     TestCase, TEST_WITH_ROCM, run_tests,
     IS_WINDOWS, IS_FILESYSTEM_UTF8_ENCODING, NO_MULTIPROCESSING_SPAWN,
     do_test_dtypes, IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, load_tests, slowTest,
     skipCUDAMemoryLeakCheckIf, BytesIOContext, noarchTest,
     skipIfRocm, skipIfNoSciPy, TemporaryFileName, TemporaryDirectoryName,
-    wrapDeterministicFlagAPITest, DeterministicGuard, make_tensor,
+    wrapDeterministicFlagAPITest, DeterministicGuard, CudaSyncGuard,
     bytes_to_scalar)
 from multiprocessing.reduction import ForkingPickler
 from torch.testing._internal.common_device_type import (
@@ -48,6 +49,9 @@ from typing import Dict, List, Tuple
 import torch.backends.quantized
 import torch.testing._internal.data
 from torch.testing._internal.common_cuda import tf32_on_and_off, tf32_is_not_fp32
+from torch.testing._internal.common_dtype import (
+    get_all_fp_dtypes, get_all_int_dtypes, get_all_math_dtypes, get_all_dtypes, get_all_complex_dtypes
+)
 
 # Protects against includes accidentally setting the default dtype
 assert torch.get_default_dtype() is torch.float32
@@ -222,10 +226,10 @@ class AbstractTestCases:
             # TODO: add torch.* tests when we have proper namespacing on ATen functions
             # test_namespace(torch)
 
-        def test_msnpu_error(self):
+        def test_ort_error(self):
             with self.assertRaisesRegex(RuntimeError,
-                                        "Could not run 'aten::empty.memory_format' with arguments from the 'MSNPU' backend"):
-                torch.zeros(1, device=torch.device('msnpu'))
+                                        "Could not run 'aten::empty.memory_format' with arguments from the 'ORT' backend"):
+                torch.zeros(1, device=torch.device('ort'))
 
         def test_has_storage(self):
             self.assertIsNotNone(torch.tensor([]).storage())
@@ -274,8 +278,8 @@ class AbstractTestCases:
             height = 5
             width = 5
             for device in torch.testing.get_all_device_types():
-                for dt1 in torch.testing.get_all_dtypes():
-                    for dt2 in torch.testing.get_all_dtypes():
+                for dt1 in get_all_dtypes():
+                    for dt2 in get_all_dtypes():
                         for contiguous in [True, False]:
                             x1 = get_tensor((height, width), dt1, device, contiguous)
                             x2 = get_tensor((height, width), dt2, device, contiguous)
@@ -293,14 +297,14 @@ class AbstractTestCases:
                                 self.assertEqual(expected, result)
 
         def test_dtypes(self):
-            all_dtypes = torch.testing.get_all_dtypes()
+            all_dtypes = get_all_dtypes()
             do_test_dtypes(self, all_dtypes, torch.strided, torch.device('cpu'))
             if torch.cuda.is_available():
                 all_dtypes.remove(torch.bfloat16)  # Remove once _th_zero_ is enabled on cuda for bfloat16
                 do_test_dtypes(self, all_dtypes, torch.strided, torch.device('cuda:0'))
 
         def test_copy_dtypes(self):
-            all_dtypes = torch.testing.get_all_dtypes()
+            all_dtypes = get_all_dtypes()
             for dtype in all_dtypes:
                 copied_dtype = copy.deepcopy(dtype)
                 self.assertIs(dtype, copied_dtype)
@@ -323,6 +327,14 @@ class AbstractTestCases:
             y.copy_(x)
             self.assertEqual(y[:, 0], range(100))
             self.assertEqual(y[:, 40], range(4000, 4100))
+
+        # Verifies the bugfix for https://github.com/pytorch/pytorch/issues/64358
+        def test_copy_transpose_2d_broadcast(self):
+            # The shape (60, 60) is chosen because of
+            # `MIN_SZ = 60 * 60` in `copy_transpose_valid` from aten/src/ATen/native/Copy.cpp
+            A = torch.randn(60, 60)
+            A.copy_(torch.tensor([[1.]]))
+            self.assertEqual(A, torch.ones(60, 60))
 
         def test_device(self):
             cpu = torch.device('cpu')
@@ -714,7 +726,7 @@ class AbstractTestCases:
             self._test_conv_corr_eq(lambda x, k: torch.conv3(x, k, 'F'), reference)
 
         def test_dtype_is_signed(self):
-            for dtype in torch.testing.get_all_dtypes():
+            for dtype in get_all_dtypes():
                 self.assertEqual(dtype.is_signed, torch.is_signed(torch.tensor(0, dtype=dtype)))
 
             self.assertRaisesRegex(RuntimeError, 'not supported for quantized', lambda: torch.quint8.is_signed)
@@ -951,7 +963,7 @@ class AbstractTestCases:
         # https://github.com/pytorch/pytorch/issues/29153
         def test_index_add_all_dtypes(self):
             for device in torch.testing.get_all_device_types():
-                for dtype in torch.testing.get_all_math_dtypes(device):
+                for dtype in get_all_math_dtypes(device):
                     for idx_dtype in [torch.int, torch.long]:
                         size = [5, 5]
                         if dtype.is_floating_point or dtype.is_complex:
@@ -1057,8 +1069,11 @@ class AbstractTestCases:
                 torch.gather(src, dim, idx.to(torch.int))
 
             # should throw an error when out.dtype != src.dtype.
-            with self.assertRaisesRegex(RuntimeError, 'Expected self.dtype to be equal to src.dtype'):
-                torch.gather(src, dim, idx, out=expected.to(torch.int))
+            # Note that on Windows, the out tensor's dtype is returned as: struct c10::complex<double> in the error
+            # message, hence the use of .* in regex here
+            with self.assertRaisesRegex(RuntimeError,
+                                        'Expected out tensor to have dtype .*c10::complex<double>, but got int instead'):
+                torch.gather(src.to(torch.complex128), dim, idx, out=expected.to(torch.int))
 
             # checks for the same dimensionality
             with self.assertRaisesRegex(RuntimeError, 'Index tensor must have the same number of dimensions as input tensor'):
@@ -1567,7 +1582,7 @@ class AbstractTestCases:
             n_half = len(ref_sample) // 2
             _ = engine.draw(n=n_half)
             sample = engine.draw(n=n_half)
-            torch.testing.assert_allclose(sample, ref_sample[n_half:])
+            torch.testing.assert_close(sample, ref_sample[n_half:])
 
         def test_sobolengine_continuing_scrambled(self):
             self.test_sobolengine_continuing(scramble=True)
@@ -1579,7 +1594,7 @@ class AbstractTestCases:
             engine.reset()
             self.assertEqual(engine.num_generated, 0)
             sample = engine.draw(n=len(ref_sample))
-            torch.testing.assert_allclose(sample, ref_sample)
+            torch.testing.assert_close(sample, ref_sample)
 
         def test_sobolengine_reset_scrambled(self):
             self.test_sobolengine_reset(scramble=True)
@@ -1589,7 +1604,7 @@ class AbstractTestCases:
             engine = torch.quasirandom.SobolEngine(2, scramble=scramble, seed=123456)
             engine.fast_forward(4)
             sample = engine.draw(n=4)
-            torch.testing.assert_allclose(sample, ref_sample[4:])
+            torch.testing.assert_close(sample, ref_sample[4:])
             # alternate fast forwarding with sampling
             engine.reset()
             even_draws = []
@@ -1598,9 +1613,9 @@ class AbstractTestCases:
                     even_draws.append(engine.draw())
                 else:
                     engine.fast_forward(1)
-            torch.testing.assert_allclose(
+            torch.testing.assert_close(
                 ref_sample[[i for i in range(8) if i % 2 == 0]],
-                np.concatenate(even_draws),
+                torch.from_numpy(np.concatenate(even_draws)),
             )
 
         def test_sobolengine_fast_forward_scrambled(self):
@@ -1610,13 +1625,13 @@ class AbstractTestCases:
             d = 50
             engine = torch.quasirandom.SobolEngine(d, scramble=scramble, seed=123456)
             sample = engine.draw(1024)
-            torch.testing.assert_allclose(
+            torch.testing.assert_close(
                 torch.mean(sample, dim=0), torch.full((d,), 0.5), atol=2, rtol=2
             )
-            torch.testing.assert_allclose(
+            torch.testing.assert_close(
                 np.percentile(sample, 25, axis=0), np.repeat(0.25, d), atol=2, rtol=2
             )
-            torch.testing.assert_allclose(
+            torch.testing.assert_close(
                 np.percentile(sample, 75, axis=0), np.repeat(0.75, d), atol=2, rtol=2
             )
 
@@ -2445,7 +2460,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             actual_norm, actual_mean, actual_stdev = \
                 torch.ops._caffe2.LayerNorm(torch.tensor(X), torch.tensor(
                     weight), torch.tensor(bias), 1, epsilon, True)
-            torch.testing.assert_allclose(expected_norm, actual_norm)
+            torch.testing.assert_close(expected_norm, actual_norm)
 
         def test_memory_format(self):
             def test_helper(x, memory_format):
@@ -2966,34 +2981,6 @@ class TestTorchDeviceType(TestCase):
         for i in range(dim):
             shape.append(random.randint(min_size, max_size))
         return tuple(shape)
-
-    @onlyCPU
-    def test_set_deterministic_deprecated_warning(self, device):
-        with DeterministicGuard(torch.are_deterministic_algorithms_enabled()):
-            # Calling set_deterministic throws a warning about deprecation once
-            # per process but testing this is tricky here since we actually get
-            # two warnings: one for the deprecated use of `set_deterministic`
-            # and one for the 'beta' use of `use_deterministic_algorithms`.
-            # The assertWarnsOnceRegex cannot handle two different warnings
-            with warnings.catch_warnings(record=True) as ws:
-                warnings.simplefilter("always")  # allow any warning to be raised
-                prev = torch.is_warn_always_enabled()
-                torch.set_warn_always(True)
-                try:
-                    torch.set_deterministic(True)
-                finally:
-                    torch.set_warn_always(prev)
-                for w in ws:
-                    txt = str(w.message)
-                    assert ("torch.use_deterministic_algorithms is in beta" in txt or
-                            "torch.set_deterministic is deprecated" in txt)
-
-    @onlyCPU
-    def test_is_deterministic_deprecated_warning(self, device):
-        with DeterministicGuard(torch.are_deterministic_algorithms_enabled()):
-            # Calling is_deterministic throws a warning about deprecation once per process
-            with self.assertWarnsOnceRegex(UserWarning, "torch.is_deterministic is deprecated"):
-                torch.is_deterministic()
 
     # Validates that mathematical constants are defined properly, as required by
     # the Python Array API (https://data-apis.org/array-api/latest/API_specification/constants.html)
@@ -4030,7 +4017,7 @@ else:
         input = torch.randn(2, 3, 5, 5, device=device)
         target = torch.rand(2, 5, 5, device=device).mul(3).floor().long()
 
-        @expectedAlertNondeterministic('SpatialClassNLLCriterion_updateOutput', 'cuda')
+        @expectedAlertNondeterministic('nll_loss2d_forward_out_cuda_template', 'cuda')
         def forward_func(slf, device):
             module(input, target)
 
@@ -4309,13 +4296,72 @@ else:
 
             self.assertEqual(res, expected, atol=0, rtol=0)
 
-    @dtypes(*torch.testing.get_all_fp_dtypes())
+    @onlyCUDA
+    def test_sync_warning(self, device):
+
+        def _sync_raises_helper(f, level):
+            with CudaSyncGuard(level):
+                if level == 1:
+                    with self.assertWarnsRegex(UserWarning, "called a synchronizing "):
+                        f()
+                elif level == 2:
+                    with self.assertRaisesRegex(RuntimeError, "called a synchronizing "):
+                        f()
+
+        def _no_sync_helper(f, level):
+            with CudaSyncGuard(level):
+                f()
+
+        def _ind_put_fn(x, ind, val):
+            x[ind] = val
+            return x
+
+        def _ind_get_fn(x, ind):
+            return x[ind]
+
+        def _cond_fn(x):
+            if x:  # taking boolean value of a tensor synchronizes
+                return x
+            else:
+                return 2 * x
+
+        # prepare inputs for subsequent ops
+        size = 4
+        x = torch.rand(size, device=device)
+        y = torch.rand((), device=device)
+        ind = torch.randint(size, (3,), device=device)
+        ind_cpu = ind.cpu()
+        repeats = torch.full((1,), 2, device=device)
+        mask = torch.randint(2, (size,), device=device, dtype=bool)
+        expect_no_sync = (lambda: _ind_put_fn(x, mask, 1.),
+                          lambda: _ind_put_fn(x, ind, y),
+                          lambda: _ind_get_fn(x, ind),
+                          lambda: torch.nn.functional.one_hot(ind, num_classes=size),
+                          lambda: torch.randperm(20000, device=device),
+                          lambda: torch.repeat_interleave(x, 2, output_size=2 * size),
+                          lambda: torch.repeat_interleave(x, repeats, output_size=2 * size))
+        expect_sync = (lambda: _ind_put_fn(x, mask, y),
+                       lambda: _ind_put_fn(x, ind_cpu, y),
+                       lambda: _ind_get_fn(x, mask),
+                       lambda: _ind_get_fn(x, ind_cpu),
+                       lambda: x.nonzero(),
+                       lambda: _cond_fn(y),
+                       lambda: torch.nn.functional.one_hot(ind),
+                       lambda: torch.repeat_interleave(x, 2),
+                       lambda: torch.repeat_interleave(x, repeats))
+        for f, level in product(expect_no_sync, (1, 2)):
+            _no_sync_helper(f, level)
+        for f, level in product(expect_sync, (1, 2)):
+            _sync_raises_helper(f, level)
+
+
+    @dtypes(*get_all_fp_dtypes())
     def test_log_normal(self, device, dtype):
         a = torch.tensor([10], dtype=dtype, device=device).log_normal_()
         self.assertEqual(a.dtype, dtype)
         self.assertEqual(a.size(), torch.Size([1]))
 
-    @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes()))
+    @dtypes(*(get_all_int_dtypes() + get_all_fp_dtypes()))
     def test_geometric(self, device, dtype):
         a = torch.tensor([10], dtype=dtype, device=device).geometric_(0.5)
         self.assertEqual(a.dtype, dtype)
@@ -4347,8 +4393,9 @@ else:
             self.assertEqual(a_with_output.dtype, y.dtype)
             self.assertEqual(a_with_output.size(), torch.Size([3, 2]))
 
-    @dtypes(*(torch.testing.get_all_fp_dtypes(include_half=False, include_bfloat16=False)))
-    @dtypesIfCUDA(*(torch.testing.get_all_fp_dtypes(include_bfloat16=False)))
+    @dtypes(*get_all_fp_dtypes(include_half=False, include_bfloat16=False))
+    @dtypesIfCPU(*(get_all_fp_dtypes(include_half=False, include_bfloat16=True)))
+    @dtypesIfCUDA(*(get_all_fp_dtypes(include_bfloat16=False)))
     def test_bernoulli_p(self, device, dtype):
         for trivial_p in ([0, 1], [1, 0, 1, 1, 0, 1]):
             x = torch.tensor(trivial_p, dtype=dtype, device=device)
@@ -4368,9 +4415,9 @@ else:
         self.assertTrue(isBinary(p))
 
     # RngUniform not implemented for Integral type in XLA test
-    @dtypes(*(torch.testing.get_all_fp_dtypes(include_half=False, include_bfloat16=False)))
-    @dtypesIfCPU(*(torch.testing.get_all_dtypes(include_half=False, include_bfloat16=False, include_complex=False)))
-    @dtypesIfCUDA(*(torch.testing.get_all_dtypes(include_bfloat16=False, include_complex=False)))
+    @dtypes(*(get_all_fp_dtypes(include_half=False, include_bfloat16=False)))
+    @dtypesIfCPU(*(get_all_dtypes(include_half=False, include_bfloat16=False, include_complex=False)))
+    @dtypesIfCUDA(*(get_all_dtypes(include_bfloat16=False, include_complex=False)))
     def test_bernoulli_self(self, device, dtype):
 
         def isBinary(t):
@@ -4382,8 +4429,7 @@ else:
         t.bernoulli_(0.5)
         self.assertTrue(isBinary(t))
 
-        for p_dtype in torch.testing.get_all_fp_dtypes(include_half=device.startswith('cuda'),
-                                                       include_bfloat16=False):
+        for p_dtype in get_all_fp_dtypes(include_half=device.startswith('cuda'), include_bfloat16=False):
             p = torch.rand(10, dtype=p_dtype, device=device).expand(10, 10)
             t.fill_(2)
             t.bernoulli_(p)
@@ -4398,8 +4444,8 @@ else:
             self.assertTrue(isBinary(t))
 
     @slowTest
-    @dtypes(*(torch.testing.get_all_fp_dtypes(include_half=False, include_bfloat16=False)))
-    @dtypesIfCUDA(*(torch.testing.get_all_fp_dtypes(include_bfloat16=False)))
+    @dtypes(*(get_all_fp_dtypes(include_half=False, include_bfloat16=False)))
+    @dtypesIfCUDA(*(get_all_fp_dtypes(include_bfloat16=False)))
     def test_bernoulli_edge_cases(self, device, dtype):
         # Need to draw a lot of samples to cover every random floating point number.
         a = torch.zeros(10000, 10000, dtype=dtype, device=device)  # probability of drawing "1" is 0
@@ -4410,7 +4456,7 @@ else:
         num_zeros = (torch.bernoulli(b) == 0).sum()
         self.assertEqual(num_zeros, 0)
 
-    @dtypes(*torch.testing.get_all_fp_dtypes())
+    @dtypes(*get_all_fp_dtypes())
     def test_exponential(self, device, dtype):
         a = torch.tensor([10], dtype=dtype, device=device).exponential_(0.5)
         self.assertEqual(a.dtype, dtype)
@@ -4493,7 +4539,7 @@ else:
         check(r'aweights cannot be negative', a, aweights=torch.tensor([-1., -2.]))
 
     @skipIfNoSciPy
-    @dtypes(*torch.testing.get_all_fp_dtypes())
+    @dtypes(*get_all_fp_dtypes())
     def test_uniform_kstest(self, device, dtype):
         from scipy import stats
         size = 1000
@@ -4505,8 +4551,8 @@ else:
                     self.assertTrue(res.statistic < 0.1)
 
     @skipIfNoSciPy
-    @dtypes(*torch.testing.get_all_fp_dtypes(include_bfloat16=False))
-    @dtypesIfCUDA(*torch.testing.get_all_fp_dtypes())
+    @dtypes(*get_all_fp_dtypes(include_bfloat16=False))
+    @dtypesIfCUDA(*get_all_fp_dtypes())
     def test_normal_kstest(self, device, dtype):
         from scipy import stats
         size = 1000
@@ -4517,7 +4563,7 @@ else:
                 self.assertTrue(res.statistic < 0.1)
 
     @skipIfNoSciPy
-    @dtypes(*torch.testing.get_all_fp_dtypes())
+    @dtypes(*get_all_fp_dtypes())
     def test_lognormal_kstest(self, device, dtype):
         from scipy import stats
         size = 1000
@@ -4531,7 +4577,7 @@ else:
                     self.assertTrue(res.statistic < 0.1)
 
     @skipIfNoSciPy
-    @dtypes(*torch.testing.get_all_fp_dtypes())
+    @dtypes(*get_all_fp_dtypes())
     def test_exponential_kstest(self, device, dtype):
         from scipy import stats
         size = 1000
@@ -4541,7 +4587,7 @@ else:
             self.assertTrue(res.statistic < 0.1)
 
     @skipIfNoSciPy
-    @dtypes(*torch.testing.get_all_fp_dtypes())
+    @dtypes(*get_all_fp_dtypes())
     def test_cauchy_kstest(self, device, dtype):
         from scipy import stats
         size = 1000
@@ -4562,7 +4608,7 @@ else:
             self.assertFalse(x.isinf().sum())
 
     @skipIfNoSciPy
-    @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes()))
+    @dtypes(*(get_all_int_dtypes() + get_all_fp_dtypes()))
     def test_geometric_kstest(self, device, dtype):
         from scipy import stats
         size = 1000
@@ -5016,7 +5062,7 @@ else:
 
     # All tensors appear contiguous on XLA
     @onlyOnCPUAndCUDA
-    @dtypes(*torch.testing.get_all_dtypes())
+    @dtypes(*get_all_dtypes())
     def test_diff_noncontig(self, device, dtype):
         shapes = (
             (1,),
@@ -5036,9 +5082,9 @@ else:
             self._test_diff_numpy(non_contig)
 
     # RngNormal not implemented for type f16 for XLA
-    @dtypes(*torch.testing.get_all_dtypes(include_half=False))
-    @dtypesIfCPU(*torch.testing.get_all_dtypes())
-    @dtypesIfCUDA(*torch.testing.get_all_dtypes())
+    @dtypes(*get_all_dtypes(include_half=False))
+    @dtypesIfCPU(*get_all_dtypes())
+    @dtypesIfCUDA(*get_all_dtypes())
     def test_diff(self, device, dtype):
         shapes = (
             (1,),
@@ -5143,7 +5189,7 @@ else:
                 spacing = [space.cpu().detach().numpy() for space in spacing]
             expected = np.gradient(t_np, *self._wrap_to_list(spacing), axis=dims, edge_order=edge_order)
             actual, expected = self._inf_nan_preprocess(list(actual), self._wrap_to_list(expected))
-            self.assertEqual(actual, expected, equal_nan="relaxed", atol=1e-4, rtol=0, exact_dtype=False)
+            self.assertEqual(actual, expected, equal_nan=True, atol=1e-4, rtol=0, exact_dtype=False)
 
     @onlyOnCPUAndCUDA
     @dtypes(torch.long, torch.float32, torch.complex64)
@@ -5210,7 +5256,7 @@ else:
                     self.assertEqual(expected[i].imag, torch.zeros(actual[i].shape), exact_dtype=False)
             else:
                 actual, expected = self._inf_nan_preprocess(list(actual), expected)
-                self.assertEqual(actual, expected, equal_nan="relaxed", exact_dtype=False)
+                self.assertEqual(actual, expected, equal_nan=True, exact_dtype=False)
 
     @onlyOnCPUAndCUDA
     @dtypes(torch.long, torch.float32, torch.complex64)
@@ -5309,7 +5355,7 @@ else:
         self.assertEqual(x, torch.tensor([False, True], dtype=torch.bool, device=device))
 
     def test_unfold_all_devices_and_dtypes(self, device):
-        for dt in torch.testing.get_all_dtypes():
+        for dt in get_all_dtypes():
 
             if dt == torch.bool:
                 x = torch.empty((0, 1, 3, 0), dtype=dt, device=device)
@@ -5329,7 +5375,7 @@ else:
 
     def test_copy_all_dtypes_and_devices(self, device):
         from copy import copy
-        for dt in torch.testing.get_all_dtypes():
+        for dt in get_all_dtypes():
             x = torch.tensor([1, 2, 3, 4], dtype=dt, device=device)
             x_clone = x.clone()
             y = copy(x)
@@ -5339,7 +5385,7 @@ else:
             self.assertEqual(x, y)
 
     def test_clone_all_dtypes_and_devices(self, device):
-        for dt in torch.testing.get_all_dtypes():
+        for dt in get_all_dtypes():
             x = torch.tensor((1, 1), dtype=dt, device=device)
             y = x.clone()
             self.assertEqual(x, y)
@@ -5350,8 +5396,15 @@ else:
         y = x.as_strided([2, 1, 5], [1, 0, 2])
         self.assertEqual(y, y.clone())
 
-    @dtypesIfCUDA(*set(torch.testing.get_all_math_dtypes('cuda')))
-    @dtypes(*set(torch.testing.get_all_math_dtypes('cpu')))
+    def test_clone_not_memory_dense(self):
+        # github issue: https://github.com/pytorch/pytorch/issues/64176
+        x = torch.randn(10, 8).t()[::2, ::2]
+        y = x.clone()
+        # should retain permutation after densification
+        self.assertTrue(y.stride() == (1, 4))
+
+    @dtypesIfCUDA(*set(get_all_math_dtypes('cuda')))
+    @dtypes(*set(get_all_math_dtypes('cpu')))
     def test_addcmul(self, device, dtype):
         # Returns floating or integral scalar corresponding to dtype
         def _number(floating, integer, dtype):
@@ -5400,7 +5453,7 @@ else:
             sz[d] = 0
             self.assertEqual(sz, y.size())
 
-    @dtypes(*torch.testing.get_all_dtypes())
+    @dtypes(*get_all_dtypes())
     def test_index_copy(self, device, dtype):
         # We just test for num_copy <= num_dest, as otherwise there are repeated indices
         # and the behavior is undefined
@@ -5434,7 +5487,7 @@ else:
     # onlyOnCPUAndCUDA due to an XLA error:
     # https://github.com/pytorch/pytorch/issues/53256
     @onlyOnCPUAndCUDA
-    @dtypes(*torch.testing.get_all_dtypes())
+    @dtypes(*get_all_dtypes())
     def test_index_copy_scalars(self, device, dtype):
         # Create the 8 possible combinations of scalar sizes for target / index / source
         scalars = ((make_tensor(size_t, dtype=dtype, device=device, low=None, high=None),
@@ -5539,7 +5592,7 @@ else:
 
                 self.assertEqual(output, input_list)
 
-    @dtypes(*torch.testing.get_all_dtypes())
+    @dtypes(*get_all_dtypes())
     def test_index_fill(self, device, dtype):
         x = torch.tensor([[1, 2], [4, 5]], dtype=dtype, device=device)
         index = torch.tensor([0], device=device)
@@ -5556,7 +5609,7 @@ else:
 
     # The test fails for zero-dimensional tensors on XLA
     @onlyOnCPUAndCUDA
-    @dtypes(*torch.testing.get_all_dtypes())
+    @dtypes(*get_all_dtypes())
     def test_index_select(self, device, dtype):
         num_src, num_out = 3, 5
 
@@ -5599,7 +5652,7 @@ else:
             out = source.index_select(0, idx)
             self.assertEqual(out.item(), source.item())
 
-    @dtypes(*torch.testing.get_all_dtypes())
+    @dtypes(*get_all_dtypes())
     def test_take(self, device, dtype):
         idx_size = (4,)
 
@@ -5633,7 +5686,7 @@ else:
 
     # The bool instance does not work on GPU. See
     # https://github.com/pytorch/pytorch/issues/54317
-    @dtypes(*torch.testing.get_all_dtypes(include_bool=False))
+    @dtypes(*get_all_dtypes(include_bool=False))
     def test_put(self, device, dtype):
         src_size = (4,)
 
@@ -5703,7 +5756,7 @@ else:
 
     # The bool instance does not work on GPU. See
     # https://github.com/pytorch/pytorch/issues/54317
-    @dtypes(*torch.testing.get_all_dtypes(include_bool=False))
+    @dtypes(*get_all_dtypes(include_bool=False))
     def test_put_accumulate(self, device, dtype):
         # Test for parallel adds with accumulate == True
         low_precision = dtype == torch.half or dtype == torch.bfloat16
@@ -5746,10 +5799,10 @@ else:
 
     # torch.{zeros, ones} do not support ComplexHalf (torch.complex32)
     # So, we are skipping it here.
-    @dtypes(*(torch.testing.get_all_fp_dtypes(include_bfloat16=False, include_half=False) +
-              torch.testing.get_all_complex_dtypes()))
-    @dtypesIfCPU(*torch.testing.get_all_dtypes())
-    @dtypesIfCUDA(*torch.testing.get_all_dtypes())
+    @dtypes(*(get_all_fp_dtypes(include_bfloat16=False, include_half=False) +
+              get_all_complex_dtypes()))
+    @dtypesIfCPU(*get_all_dtypes())
+    @dtypesIfCUDA(*get_all_dtypes())
     def test_scatter_reduce_operations_to_large_input(self, device, dtype):
         index = torch.tensor([[1], [2]], device=device, dtype=torch.long)
         test_data = [
@@ -5776,10 +5829,10 @@ else:
 
     # torch.{zeros, ones} do not support ComplexHalf (torch.complex32)
     # So, we are skipping it here.
-    @dtypes(*(torch.testing.get_all_fp_dtypes(include_bfloat16=False, include_half=False) +
-              torch.testing.get_all_complex_dtypes()))
-    @dtypesIfCPU(*torch.testing.get_all_dtypes())
-    @dtypesIfCUDA(*torch.testing.get_all_dtypes())
+    @dtypes(*(get_all_fp_dtypes(include_bfloat16=False, include_half=False) +
+              get_all_complex_dtypes()))
+    @dtypesIfCPU(*get_all_dtypes())
+    @dtypesIfCUDA(*get_all_dtypes())
     def test_scatter_reduce_scalar(self, device, dtype):
         index = torch.tensor([[1], [2]], device=device, dtype=torch.long)
         test_data = [
@@ -5817,10 +5870,10 @@ else:
 
     # torch.{zeros, ones} do not support ComplexHalf (torch.complex32)
     # So, we are skipping it here.
-    @dtypes(*(torch.testing.get_all_fp_dtypes(include_bfloat16=False, include_half=False) +
-              torch.testing.get_all_complex_dtypes()))
-    @dtypesIfCPU(*torch.testing.get_all_dtypes())
-    @dtypesIfCUDA(*torch.testing.get_all_dtypes())
+    @dtypes(*(get_all_fp_dtypes(include_bfloat16=False, include_half=False) +
+              get_all_complex_dtypes()))
+    @dtypesIfCPU(*get_all_dtypes())
+    @dtypesIfCUDA(*get_all_dtypes())
     def test_scatter_reduce_non_unique_index(self, device, dtype):
         height = 2
         width = 2
@@ -5844,8 +5897,8 @@ else:
     # torch.{zeros, ones} do not support ComplexHalf (torch.complex32)
     # So, we are skipping it here.
     @onlyCUDA
-    @dtypesIfCUDA(*(torch.testing.get_all_complex_dtypes() +
-                    torch.testing.get_all_int_dtypes()))
+    @dtypesIfCUDA(*(get_all_complex_dtypes() +
+                    get_all_int_dtypes()))
     def test_scatter_reduce_multiply_unsupported_dtypes(self, device, dtype):
         height = 2
         width = 2
@@ -5892,7 +5945,7 @@ else:
                                             [True, False, True, False, True]], device=device))
 
     @onlyOnCPUAndCUDA
-    @dtypes(*torch.testing.get_all_dtypes())
+    @dtypes(*get_all_dtypes())
     def test_masked_scatter(self, device, dtype):
         dt = dtype
         with warnings.catch_warnings(record=True) as w:
@@ -5977,7 +6030,7 @@ else:
         result = t.masked_scatter(t, t)
         self.assertEqual(result, result_cpu)
 
-    @dtypes(*torch.testing.get_all_dtypes())
+    @dtypes(*get_all_dtypes())
     def test_masked_select(self, device, dtype):
         if device == 'cpu':
             warn = 'masked_select received a mask with dtype torch.uint8,'
@@ -6035,15 +6088,15 @@ else:
             out_dc = torch.empty(size * size, device=device)[::2]
             for v, m in product(vals_list, mask_list):
                 if m.is_contiguous():
-                    expected = v[:, ::2].clone().view(-1)
+                    expected = v[:, ::2].clone().reshape((-1, ))
                 else:
-                    expected = v[::2].clone().view(-1)
+                    expected = v[::2].clone().reshape((-1, ))
                 out = torch.masked_select(v, m)
                 self.assertEqual(out, expected, atol=0, rtol=0)
                 torch.masked_select(v, m, out=out_dc)
                 self.assertEqual(out_dc, expected, atol=0, rtol=0)
 
-    @dtypes(*product(torch.testing.get_all_dtypes(), (torch.uint8, torch.bool)))
+    @dtypes(*product(get_all_dtypes(), (torch.uint8, torch.bool)))
     def test_masked_fill(self, device, dtypes):
         dtype = dtypes[0]
         mask_dtype = dtypes[1]
@@ -6353,8 +6406,8 @@ else:
             self.assertEqual(expected_cpu, actual_gpu.cpu())
 
     @onlyOnCPUAndCUDA
-    @dtypesIfCUDA(*set(torch.testing.get_all_math_dtypes('cuda')))
-    @dtypes(*set(torch.testing.get_all_math_dtypes('cpu')))
+    @dtypesIfCUDA(*set(get_all_math_dtypes('cuda')))
+    @dtypes(*set(get_all_math_dtypes('cpu')))
     def test_addcdiv(self, device, dtype):
         # Returns floating or integral scalar corresponding to dtype
         def _number(floating, integer, dtype):
@@ -7097,7 +7150,7 @@ else:
                 _test_helper(x, op, unary=True)
 
     @skipMeta
-    @dtypes(*torch.testing.get_all_dtypes())
+    @dtypes(*get_all_dtypes())
     def test_dlpack_conversion(self, device, dtype):
         # DLpack does not explicitly support bool
         # It does it through uint8 type
@@ -7697,8 +7750,8 @@ else:
         return False
 
     @onlyOnCPUAndCUDA
-    @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes() +
-              torch.testing.get_all_complex_dtypes()))
+    @dtypes(*(get_all_int_dtypes() + get_all_fp_dtypes() +
+              get_all_complex_dtypes()))
     def test_where_scalar_invalid_combination_raises(self, device, dtype):
 
         def checkRaises(scalar_type, dtype, condition, x, scalar_1):
@@ -7710,8 +7763,8 @@ else:
         self._test_where_scalar_template(device, dtype, checkRaises)
 
     @skipCUDAVersionIn([(11, 2)])  # test fails for 11.2, see https://github.com/pytorch/pytorch/issues/51980
-    @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes() +
-              torch.testing.get_all_complex_dtypes()))
+    @dtypes(*(get_all_int_dtypes() + get_all_fp_dtypes() +
+              get_all_complex_dtypes()))
     def test_where_scalar_valid_combination(self, device, dtype):
 
         def checkResult(scalar_type, dtype, condition, x, scalar_1):

@@ -13,9 +13,7 @@ int main(int argc, char* argv[]) {
   return rc;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 const char* simple = "torch/csrc/deploy/example/generated/simple";
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 const char* simple_jit = "torch/csrc/deploy/example/generated/simple_jit";
 
 const char* path(const char* envname, const char* path) {
@@ -23,7 +21,6 @@ const char* path(const char* envname, const char* path) {
   return e ? e : path;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TorchDeployGPUTest, SimpleModel) {
   if (!torch::cuda::is_available()) {
     GTEST_SKIP();
@@ -55,4 +52,16 @@ TEST(TorchDeployGPUTest, SimpleModel) {
   at::Tensor ref_output = ref_model.forward(inputs).toTensor();
 
   ASSERT_TRUE(ref_output.allclose(output, 1e-03, 1e-05));
+}
+
+TEST(TorchDeployGPUTest, UsesDistributed) {
+  const auto model_filename = path(
+      "USES_DISTRIBUTED",
+      "torch/csrc/deploy/example/generated/uses_distributed");
+  torch::deploy::InterpreterManager m(1);
+  torch::deploy::Package p = m.load_package(model_filename);
+  {
+    auto I = p.acquire_session();
+    I.self.attr("import_module")({"uses_distributed"});
+  }
 }

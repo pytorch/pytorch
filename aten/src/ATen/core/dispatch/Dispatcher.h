@@ -344,6 +344,10 @@ public:
     c10::Dispatcher::singleton().callBoxed(*this, stack);
   }
 
+  void callBoxed(Stack& stack) const {
+    callBoxed(&stack);
+  }
+
   void redispatchBoxed(DispatchKeySet ks, Stack* stack) const {
     c10::Dispatcher::singleton().redispatchBoxed(*this, ks, stack);
   }

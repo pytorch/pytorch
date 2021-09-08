@@ -1,6 +1,6 @@
 #pragma once
-#include <ATen/cpu/vec/vec256/intrinsics.h>
-#include <ATen/cpu/vec/vec256/vec256_base.h>
+#include <ATen/cpu/vec/intrinsics.h>
+#include <ATen/cpu/vec/vec_base.h>
 #include <ATen/cpu/vec/vec256/vsx/vsx_helpers.h>
 #include <c10/util/complex.h>
 
@@ -141,7 +141,7 @@ class Vectorized<ComplexDbl> {
           vec_vsx_ld(offset16, reinterpret_cast<const double*>(ptr))};
     }
 
-    __at_align32__ value_type tmp_values[size()];
+    __at_align__ value_type tmp_values[size()];
     std::memcpy(tmp_values, ptr, std::min(count, size()) * sizeof(value_type));
 
     return {
@@ -153,7 +153,7 @@ class Vectorized<ComplexDbl> {
       vec_vsx_st(_vec0, offset0, reinterpret_cast<double*>(ptr));
       vec_vsx_st(_vec1, offset16, reinterpret_cast<double*>(ptr));
     } else if (count > 0) {
-      __at_align32__ value_type tmp_values[size()];
+      __at_align__ value_type tmp_values[size()];
       vec_vsx_st(_vec0, offset0, reinterpret_cast<double*>(tmp_values));
       vec_vsx_st(_vec1, offset16, reinterpret_cast<double*>(tmp_values));
       std::memcpy(
@@ -165,7 +165,7 @@ class Vectorized<ComplexDbl> {
   ComplexDbl& operator[](int idx) = delete;
 
   Vectorized<ComplexDbl> map(ComplexDbl (*const f)(ComplexDbl)) const {
-    __at_align32__ ComplexDbl tmp[size()];
+    __at_align__ ComplexDbl tmp[size()];
     store(tmp);
     for (int i = 0; i < size(); i++) {
       tmp[i] = f(tmp[i]);
@@ -174,7 +174,7 @@ class Vectorized<ComplexDbl> {
   }
 
   Vectorized<ComplexDbl> map(ComplexDbl (*const f)(const ComplexDbl&)) const {
-    __at_align32__ ComplexDbl tmp[size()];
+    __at_align__ ComplexDbl tmp[size()];
     store(tmp);
     for (int i = 0; i < size(); i++) {
       tmp[i] = f(tmp[i]);
@@ -455,8 +455,8 @@ class Vectorized<ComplexDbl> {
   }
 
   Vectorized<ComplexDbl> pow(const Vectorized<ComplexDbl>& exp) const {
-    __at_align32__ ComplexDbl x_tmp[size()];
-    __at_align32__ ComplexDbl y_tmp[size()];
+    __at_align__ ComplexDbl x_tmp[size()];
+    __at_align__ ComplexDbl y_tmp[size()];
     store(x_tmp);
     exp.store(y_tmp);
     for (int i = 0; i < size(); i++) {
