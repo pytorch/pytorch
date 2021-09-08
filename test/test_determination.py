@@ -33,6 +33,13 @@ class DeterminationTest(unittest.TestCase):
             if run_test.should_run_test(run_test.TARGET_DET_LIST, test, changed_files, DummyOptions())
         ]
 
+    def test_target_det_list_is_sorted(self):
+        # We keep TARGET_DET_LIST sorted to minimize merge conflicts
+        # but most importantly to allow us to comment on the absence
+        # of a test. It would be very difficult to add a file right
+        # next to a comment that says to keep it out of the list.
+        self.assertListEqual(run_test.TARGET_DET_LIST, sorted(run_test.TARGET_DET_LIST))
+
     def test_config_change_only(self):
         """CI configs trigger all tests"""
         self.assertEqual(
