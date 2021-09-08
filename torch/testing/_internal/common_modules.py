@@ -199,9 +199,7 @@ def module_inputs_torch_nn_NLLLoss(module_info, device, dtype, requires_grad, **
     # TODO: Uncomment when negative weights is supported.
     # negative_weight = make_weight(10)
     # negative_weight[0] = -1
-    # cases.append(
-    #     ('weights_negative', {'weight': negative_weight})
-    # )
+    # cases.append(('weights_negative', {'weight': negative_weight}))
     module_inputs = []
     for desc, constructor_kwargs in cases:
 
