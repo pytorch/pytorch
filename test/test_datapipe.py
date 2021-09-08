@@ -967,8 +967,12 @@ class TestFunctionalIterDataPipe(TestCase):
         #  Unmatched output columns with fn outputs
         with self.assertRaises(TypeError):
             _helper(None, fn_1n, "y", ["x", "y", "z"])
-        #  _helper(lambda data: (-data[1], -data[2], data[1] + data[2]), fn_nn, [1, 2], [0, 1, 2])
-        _helper(lambda data: _dict_update(data, {"x": -data["y"], "y": -data["z"], "z": data["y"] + data["z"]}), fn_nn, ["y", "z"], ["x", "y", "z"])
+        _helper(
+            lambda data: _dict_update(
+                data, {"x": -data["y"], "y": -data["z"], "z": data["y"] + data["z"]}
+            ),
+            fn_nn, ["y", "z"], ["x", "y", "z"]
+        )
 
         # Adding new key to dict for the output
         _helper(lambda data: _dict_update(data, {"a": -data["y"]}), fn_11, "y", "a")
@@ -978,11 +982,21 @@ class TestFunctionalIterDataPipe(TestCase):
 
         # Adding new keys for the expanded output
         _helper(lambda data: _dict_update(data, {"a": -data["y"], "b": data["y"]}), fn_1n, "y", ["a", "b"])
-        _helper(lambda data: _dict_update(data, {"a": -data["y"], "b": -data["z"], "c": data["y"] + data["z"]}), fn_nn, ["y", "z"], ["a", "b", "c"])
+        _helper(
+            lambda data: _dict_update(
+                data, {"a": -data["y"], "b": -data["z"], "c": data["y"] + data["z"]}
+            ),
+            fn_nn, ["y", "z"], ["a", "b", "c"]
+        )
 
         # Replacing and adding
         _helper(lambda data: _dict_update(data, {"x": -data["y"], "b": data["y"]}), fn_1n, "y", ["x", "b"])
-        _helper(lambda data: _dict_update(data, {"z": -data["y"], "a": -data["z"], "y": data["y"] + data["z"]}), fn_nn, ["y", "z"], ["z", "a", "y"])
+        _helper(
+            lambda data: _dict_update(
+                data, {"z": -data["y"], "a": -data["z"], "y": data["y"] + data["z"]}
+            ),
+            fn_nn, ["y", "z"], ["z", "a", "y"]
+        )
 
     # TODO(VitalyFedyunin): If dill installed this test fails
     def _test_map_datapipe_nested_level(self):
