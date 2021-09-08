@@ -4,6 +4,8 @@ from torch.fx._symbolic_trace import Tracer
 from torch.fx.node import Target, Node, Argument
 from .fx import Fuser  # noqa: F401
 from .fx import prepare, convert  # noqa: F401
+from .fx import get_fbgemm_backend_config_dict  # noqa: F401
+from .fx import get_tensorrt_backend_config_dict  # noqa: F401
 from .fx.utils import graph_pretty_str  # noqa: F401
 from .fx.utils import get_custom_module_class_keys  # noqa: F401
 from .fx.graph_module import ObservedGraphModule, QuantizedGraphModule

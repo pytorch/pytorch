@@ -1688,3 +1688,145 @@ class StandaloneModuleQuantizeHandler(QuantizeHandler):
         setattr(modules[parent_name], name, quantized_standalone_module)
         modules[str(node.target)] = quantized_standalone_module
         return quantized_graph.node_copy(node, load_arg(quantized=input_quantized_idxs))
+
+
+class ConvReLUQuantizeHandlerNew(QuantizeHandler):
+    def __init__(self, node: Node, modules: Dict[str, torch.nn.Module]):
+        super().__init__(node, modules)
+        self.relu_node = None
+        if (node.op == 'call_function' and node.target is torch.nn.functional.relu) or \
+           (node.op == 'call_module' and isinstance(modules[str(node.target)], torch.nn.ReLU)):
+            self.relu_node = node
+            node = node.args[0]  # type: ignore[assignment]
+        self.conv_node = node
+        if node.op == "call_module":
+            self.conv = modules[str(self.conv_node.target)]
+        elif node.op == "call_function":
+            self.conv = node.target  # type: ignore[assignment]
+
+    def convert(self,
+                node: Node,
+                qconfig: QConfigAny,
+                modules: Dict[str, torch.nn.Module],
+                quantized_graph: Graph,
+                node_name_to_scope: Dict[str, Tuple[str, type]],
+                load_arg: Callable,
+                is_reference: bool = False,
+                convert_custom_config_dict: Dict[str, Any] = None) -> Node:
+        assert is_reference, "ConvReLUQuantizeHandlerNew only works for the case when is_reference=True"
+        activation_int8_quantized = activation_is_int8_quantized(qconfig)
+        if self.conv_node.op == 'call_module':
+            # note that relu should already be fused into conv module in the fusion step
+            assert self.relu_node is None, 'conv module and relu fusion is not executed, ' \
+                'please make sure to run fusion before prepare'
+            output_activation_post_process = \
+                self._maybe_get_last_node_only_observer(modules)
+            assert output_activation_post_process is not None
+            # produce dequant - float_op - quant pattern
+            dtype = torch.float
+            if activation_int8_quantized:
+                dtype = activation_dtype(qconfig)
+            activation = load_arg(quantized=dtype)(self.conv_node.args[0])
+            args = load_arg(quantized=torch.float)(self.conv_node.args)
+            # Get the float conv and attach quantization scheme and quantization
+            # parameters of weight to the module
+            # and qparam is a dictionary of
+            # {"qscheme": ..., "scale": ..., "zero_point": ...} for per tensor quantization or
+            # {"qscheme": ..., "scale": ..., "zero_point": ..., "axis": ...} for per channel quantization
+            float_conv = self.conv
+            fused_conv = None
+            if isinstance(
+                    float_conv,
+                    QAT_CONV_MODULE_CLASSES):
+                # case 1. converting qat conv module to
+                # a float conv module, we need to attch
+                # weight fake_quant to the conv module,
+                # weight fake_quant is assumed to be run during
+                # QAT so we don't need to run it again here
+                float_conv = self.conv.to_float()  # type: ignore[operator]
+                # change qat conv to conv
+                parent_name, name = _parent_name(self.conv_node.target)
+                setattr(modules[parent_name], name, float_conv)
+                if isinstance(float_conv, torch.nn.intrinsic._FusedModule):
+                    fused_conv = float_conv
+                    float_conv = float_conv[0]
+                weight_post_process = self.conv.weight_fake_quant
+            else:
+                # case 2. converting a conv module/fused conv module
+                # to float conv module, we need to attach
+                # weight observer to the conv module and run it
+                # with conv weight
+                if isinstance(float_conv, torch.nn.intrinsic._FusedModule):
+                    fused_conv = float_conv
+                    float_conv = float_conv[0]  # type: ignore[index]
+                assert qconfig is not None
+                weight_post_process = qconfig.weight()
+                # run weight observer
+                weight_post_process(float_conv.weight)  # type: ignore[operator]
+            weight_qparams = get_qparam_dict(weight_post_process)
+            # hardcoded for now, TODO: expose the api to user,
+            # we can have a map from module to reference module
+            # and allow user to register new ones
+            qconv_cls = get_static_quant_module_class(
+                type(float_conv), is_reference=is_reference)
+            ref_conv = qconv_cls.from_float(float_conv, weight_qparams)  # type: ignore[attr-defined]
+            # if the parent is a fused conv (Sequential), we can replace the first
+            # item to ref conv, otherwise we can update
+            # the conv instance in the module tree
+            if fused_conv is not None:
+                fused_conv[0] = ref_conv
+            else:
+                parent_name, name = _parent_name(self.conv_node.target)
+                setattr(modules[parent_name], name, ref_conv)
+            op_out = quantized_graph.create_node(
+                'call_module',
+                self.conv_node.target,
+                args, {})
+            # disabling quantize node for output for now, this will be controlled by the
+            # backend_config_dict in the final design
+            # if output_activation_post_process:
+            #     op_out = quantize_node(
+            #         op_out,
+            #         output_activation_post_process,
+            #         node,
+            #         modules,
+            #         quantized_graph,
+            #         node_name_to_scope,
+            #         is_input=False)
+            return op_out
+        else:
+            assert self.conv_node.op == "call_function"
+            # make sure the input and weight are quantized to torch.quint8, torch.qint8, respectively
+            load_arg(quantized={0: torch.quint8, 1: torch.qint8})(self.conv_node.args)
+            args = load_arg(quantized=torch.float)(self.conv_node.args)
+            kwargs = load_arg(quantized=torch.float)(self.conv_node.kwargs)
+            op_out = quantized_graph.create_node(
+                "call_function", self.conv, args, kwargs)
+            if self.relu_node:
+                relu_args = [op_out]
+                relu_args.extend(load_arg(quantized=torch.float)(self.relu_node.args[1:]))
+                relu_kwargs = load_arg(quantized=torch.float)(self.relu_node.kwargs)
+                op_out = quantized_graph.create_node(
+                    "call_function", torch.nn.functional.relu, tuple(relu_args), relu_kwargs)
+
+            # disabling quantize node for output for now, this will be controlled by the
+            # backend_config_dict in the final design
+            # if activation_int8_quantized:
+            #     root_module = modules['']
+            #     act_post_process_name = self.relu_node.name if self.relu_node else self.conv_node.name
+            #     act_post_process_node = self.relu_node if self.relu_node else self.conv_node
+            #     activation_post_process = \
+            #         self._maybe_get_last_node_only_observer(modules)
+            #     assert activation_post_process is not None
+            #     return quantize_node(
+            #         op_out,
+            #         activation_post_process,
+            #         act_post_process_node,
+            #         modules,
+            #         quantized_graph,
+            #         node_name_to_scope,
+            #         is_input=False)
+            # else:
+            #     # output for dynamically quantized conv op is not quantized
+            #     return op_out
+            return op_out
