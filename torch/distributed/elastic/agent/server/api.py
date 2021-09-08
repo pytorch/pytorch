@@ -160,7 +160,7 @@ class Worker:
 
         #  rank of the worker among all the workers with the same role
         #  across all ``agent`` instances.
-        #  Global rank is not stable between re-rendezvous.
+        #  Role rank is not stable between re-rendezvous.
         self.role_rank: int = role_rank
 
         # total number of workers (globally). Due to elasticity
