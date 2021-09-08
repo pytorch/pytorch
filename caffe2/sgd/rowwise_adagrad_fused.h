@@ -15,7 +15,11 @@ inline float compute_square_average_inlined_(const float* a, int len) {
   __m256 partial_sum = _mm256_setzero_ps();
   for (; i + kSize <= len; i += kSize) {
     __m256 ai = _mm256_loadu_ps(a + i);
+#ifdef __FMA__
+    partial_sum = _mm256_fmadd_ps(ai, ai, partial_sum);
+#else
     partial_sum = _mm256_add_ps(partial_sum, _mm256_mul_ps(ai, ai));
+#endif
   }
   // Reduce sum to 1 value
   __m256 partial_sum_2 = _mm256_hadd_ps(partial_sum, partial_sum);
@@ -48,10 +52,11 @@ inline float compute_square_average_with_weight_decay_inlined_(
     __m256 wi = _mm256_loadu_ps(w + i);
 #ifdef __FMA__
     ai = _mm256_fmadd_ps(weight_decay_v, wi, ai);
+    partial_sum = _mm256_fmadd_ps(ai, ai, partial_sum);
 #else
     ai = _mm256_add_ps(_mm256_mul_ps(weight_decay_v, wi), ai);
-#endif
     partial_sum = _mm256_add_ps(partial_sum, _mm256_mul_ps(ai, ai));
+#endif
   }
   // Reduce sum to 1 value
   __m256 partial_sum_2 = _mm256_hadd_ps(partial_sum, partial_sum);
@@ -86,10 +91,11 @@ inline float compute_square_average_with_weight_decay_inlined_(
     __m256 wi = _mm256_cvtph_ps(whi);
 #ifdef __FMA__
     ai = _mm256_fmadd_ps(weight_decay_v, wi, ai);
+    partial_sum = _mm256_fmadd_ps(ai, ai, partial_sum);
 #else
     ai = _mm256_add_ps(_mm256_mul_ps(weight_decay_v, wi), ai);
-#endif
     partial_sum = _mm256_add_ps(partial_sum, _mm256_mul_ps(ai, ai));
+#endif
   }
   // Reduce sum to 1 value
   __m256 partial_sum_2 = _mm256_hadd_ps(partial_sum, partial_sum);
@@ -834,8 +840,12 @@ class RowWiseSparseAdagradFusedWithSparseLengthsWeightedSumGradientApproxOp
             __m256 a_v = _mm256_loadu_ps(g + i);
             __m256 b_v = _mm256_loadu_ps(
                 reinterpret_cast<const float*>(paramIn + offsetIdx + i));
+#ifdef __FMA__
+            acc_v = _mm256_fmadd_ps(a_v, b_v, acc_v);
+#else
             __m256 c_v = _mm256_mul_ps(a_v, b_v);
             acc_v = _mm256_add_ps(acc_v, c_v);
+#endif
             _mm256_storeu_ps(&temp_grad[i], _mm256_mul_ps(a_v, scalar_v));
           }
         } else if (std::is_same<Tdata, at::Half>::value) {
@@ -843,8 +853,12 @@ class RowWiseSparseAdagradFusedWithSparseLengthsWeightedSumGradientApproxOp
             __m256 a_v = _mm256_loadu_ps(g + i);
             __m256 b_v = _mm256_cvtph_ps(
                 _mm_load_si128((__m128i*)(paramIn + offsetIdx + i)));
+#ifdef __FMA__
+            acc_v = _mm256_fmadd_ps(a_v, b_v, acc_v);
+#else
             __m256 c_v = _mm256_mul_ps(a_v, b_v);
             acc_v = _mm256_add_ps(acc_v, c_v);
+#endif
             _mm256_storeu_ps(&temp_grad[i], _mm256_mul_ps(a_v, scalar_v));
           }
         } else {
@@ -959,7 +973,11 @@ struct rowwise_adagrad_update_inlined {
 #endif
       }
 
+#ifdef __FMA__
+      _mm256_storeu_ps(w + i, _mm256_fmadd_ps(gi, step, wi));
+#else
       _mm256_storeu_ps(w + i, _mm256_add_ps(wi, _mm256_mul_ps(gi, step)));
+#endif
     }
 #endif
 
