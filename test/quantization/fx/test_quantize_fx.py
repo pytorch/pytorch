@@ -4162,6 +4162,9 @@ class TestQuantizeFxOps(QuantizationTestCase):
             module, functional, qconfig, is_reference, node_list)
 
     def test_bmm_int_reference(self):
+        """ int8 is not supported for bmm so we won't produce reference
+            pattern for it
+        """
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -4179,10 +4182,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
             ns.call_function(torch.quantize_per_tensor),
             ns.call_function(torch.quantize_per_tensor),
             ns.call_method('dequantize'),
-            ns.call_method('dequantize'),
             ns.call_function(torch.bmm),
-            ns.call_function(torch.quantize_per_tensor),
-            ns.call_method('dequantize'),
         ]
 
         m = M().eval()

@@ -399,7 +399,8 @@ class BinaryOpQuantizeHandler(QuantizeHandler):
 
         if is_reference:
             act_dtype = activation_dtype(qconfig)
-            if act_dtype == torch.float:
+            dtypes = get_qconfig_dtypes(qconfig)
+            if act_dtype == torch.float or not (self.binary_op in binary_op_supported_dtypes and dtypes in binary_op_supported_dtypes[self.binary_op]):
                 return quantized_graph.node_copy(node, load_arg(quantized=torch.float))
             else:
                 if self.num_tensor_args == 2:
