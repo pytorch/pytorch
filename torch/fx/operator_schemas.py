@@ -4,9 +4,12 @@ import numbers
 import typing
 import enum
 import warnings
-from typing import Any, Callable, Dict, List, Optional, Tuple, NamedTuple, cast
+from typing import Any, Callable, Dict, List, Optional, Tuple, NamedTuple, cast, TYPE_CHECKING
 from torch._jit_internal import boolean_dispatched
 from ._compatibility import compatibility
+
+if TYPE_CHECKING:
+    from .node import Argument
 
 @compatibility(is_backward_compatible=False)
 class ArgsKwargsPair(NamedTuple):
@@ -115,7 +118,7 @@ def check_for_mutable_operation(target : Callable, args : Tuple['Argument', ...]
             pass
 
 @compatibility(is_backward_compatible=False)
-def get_signature_for_torch_op(op : Callable, return_schemas : bool = False) -> Optional[List[inspect.Signature]]:
+def get_signature_for_torch_op(op : Callable, return_schemas : bool = False):
     """
     Given an operator on the `torch` namespace, return a list of `inspect.Signature`
     objects corresponding to the overloads of that op.. May return `None` if a signature
@@ -126,7 +129,9 @@ def get_signature_for_torch_op(op : Callable, return_schemas : bool = False) -> 
 
     Returns:
         Optional[List[inspect.Signature]]: A list of signatures for the overloads of this
-            operator, or None if the operator signatures could not be retrieved.
+            operator, or None if the operator signatures could not be retrieved. If
+            return_schemas=True, returns a tuple containing the optional Python signatures
+            and the optional TorchScript Function signature
     """
     override = _manual_overrides.get(op)
     if override:

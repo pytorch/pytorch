@@ -1,4 +1,5 @@
 #include <c10d/ProcessGroupNCCL.hpp>
+#include <sstream>
 
 #ifdef USE_C10D_NCCL
 
@@ -11,6 +12,7 @@
 #include <THC/THC.h>
 
 #include <ATen/cuda/CUDAContext.h>
+#include <c10/cuda/CUDAGraphsC10Utils.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/util/irange.h>
 #include <c10/util/Logging.h>
@@ -19,6 +21,7 @@
 #include <torch/csrc/cuda/nccl.h>
 
 #include <c10d/Utils.hpp>
+
 namespace c10d {
 
 constexpr const char* const kNCCLAbortedCommStoreKey = "NCCLABORTEDCOMM";
@@ -34,12 +37,12 @@ struct AutoNcclGroup {
   AutoNcclGroup() {
     (c10::cuda::CUDACachingAllocator::getFreeMutex())->lock();
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR >= 2)
-    C10D_NCCL_CHECK(ncclGroupStart());
+    C10D_NCCL_CHECK(ncclGroupStart(), c10::nullopt);
 #endif
   }
   ~AutoNcclGroup() noexcept(false) {
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR >= 2)
-    C10D_NCCL_CHECK(ncclGroupEnd());
+    C10D_NCCL_CHECK(ncclGroupEnd(), c10::nullopt);
 #endif
     (c10::cuda::CUDACachingAllocator::getFreeMutex())->unlock();
   }
@@ -186,6 +189,17 @@ std::string getExceptionMsgFromExceptionPtr(
     return e.what();
   } catch (...) {
     return "Unknown exception type";
+  }
+}
+
+inline void errorIfCapturingNonCapturableNCCL() {
+  auto status = c10::cuda::currentStreamCaptureStatusMayInitCtx();
+  // parentheses avoid some compiler warnings
+  static const uint64_t min_version = (((uint64_t)2) << 32) + (((uint64_t)9) << 16) + ((uint64_t)6);
+  static const uint64_t cur_version = torch::cuda::nccl::version();
+  if (cur_version < min_version) {
+    TORCH_CHECK(status == c10::cuda::CaptureStatus::None,
+                "Capturing NCCL collectives is only allowed with NCCL >= 2.9.6");
   }
 }
 
@@ -367,8 +381,12 @@ void ProcessGroupNCCL::WorkNCCL::synchronizeInternal(
         // if throwing timed out excepiton without aborting nccl communicators
         // here, it was observed that CUDA GPU will have 100% utilization and
         // can not run new events successfully.
+
+        std::stringstream ss;
+        ss << *this;
+        auto timeoutErrorMsg = c10::str("Work ", ss.str(), " timed out in call to wait().");
         for (const auto& ncclComm : ncclComms_) {
-          ncclComm->ncclCommAbort();
+          ncclComm->ncclCommAbort(timeoutErrorMsg);
           const auto& storeKey = getNcclAbortedCommStoreKey(
               buildNcclUniqueIdStr(ncclComm->getNcclId()));
           auto rankStr = std::to_string(rank_);
@@ -533,7 +551,9 @@ ProcessGroupNCCL::~ProcessGroupNCCL() {
       auto& ncclComms = it.second;
 
       for (const auto& ncclComm : ncclComms) {
-        ncclComm->ncclCommAbort();
+        std::string abortReason =
+            c10::str("Process Group destroyed on rank ", rank_);
+        ncclComm->ncclCommAbort(abortReason);
       }
     }
   }
@@ -569,7 +589,7 @@ void ProcessGroupNCCL::abortTimedOutCollectives(
           std::make_exception_ptr(std::runtime_error(exceptionMsg));
       work.setException(exception_ptr);
       for (const auto& ncclComm : work.ncclComms_) {
-        ncclComm->ncclCommAbort();
+        ncclComm->ncclCommAbort(exceptionMsg);
         abortedCommIds.emplace(buildNcclUniqueIdStr(ncclComm->getNcclId()));
       }
     }
@@ -608,6 +628,8 @@ void ProcessGroupNCCL::ncclCommWatchdogInternal() {
         }
         std::exception_ptr ncclErrorException = checkForNCCLErrors(ncclComms);
         if (ncclErrorException) {
+          auto exceptionMsg
+            = getExceptionMsgFromExceptionPtr(ncclErrorException);
           LOG(INFO)
               << "[Rank " << rank_
               << "] Received NCCL errors for communicators in the cache: \n"
@@ -623,7 +645,10 @@ void ProcessGroupNCCL::ncclCommWatchdogInternal() {
             // collectives and throw exceptions if an exception has been set on
             // any of the work objects from this thread.
             for (const auto& ncclComm : ncclComms) {
-              ncclComm->ncclCommAbort();
+              // We are aborting remaining communicators due to an error in
+              // at least one of these communicators, so propagate that reason
+              // for better debugability.
+              ncclComm->ncclCommAbort(exceptionMsg);
               // Note that we don't remove the aborted communicators from the
               // cache. The reason is that if we do remove the communicator
               // from the cache, it is possible that a new collective operation
@@ -680,17 +705,24 @@ void ProcessGroupNCCL::ncclCommWatchdogInternal() {
                 std::chrono::milliseconds(kWaitForAbortCommStoreKey));
             auto val = store_->get(storeKey);
             std::string rank(reinterpret_cast<char*>(val.data()), val.size());
-            LOG(INFO) << "[Rank " << rank_
+            std::stringstream ss;
+            ss << "[Rank " << rank_
                       << "] Found key in store: " << storeKey
                       << ", from rank: " << rank
-                      << ", aborting appropriate communicators";
+                      << ". This means that rank has aborted its NCCL communicators previously and is not in a healthy state."
+                      << ". Aborting appropriate communicators";
+            std::string abortReason = ss.str();
+            LOG(WARNING) << abortReason;
 
             // Now abort the appropriate communicators.
             std::lock_guard<std::mutex> lock(mutex_);
             auto it = ncclIdToCommMap_.find(commId);
             TORCH_INTERNAL_ASSERT(it != ncclIdToCommMap_.end());
             for (const auto& ncclComm : it->second) {
-              ncclComm->ncclCommAbort();
+              // The reason we are aborting is because some other ranks have
+              // aborted their communicators originally, so propagate that
+              // reason.
+              ncclComm->ncclCommAbort(abortReason);
             }
             abortedComms_.emplace(commId);
             LOG(INFO) << "[Rank " << rank_
@@ -761,6 +793,19 @@ std::exception_ptr ProcessGroupNCCL::checkForNCCLErrors(
 std::exception_ptr ProcessGroupNCCL::checkForNCCLErrorsInternal(
     const std::vector<std::shared_ptr<NCCLComm>>& ncclComms) {
   for (const auto& ncclComm : ncclComms) {
+    // Prioritize commFailureReason over checkForNcclError() result if
+    // commFailureReason is set.
+    auto commFailureReason = ncclComm->getNcclCommFailureReason();
+    if (commFailureReason != c10::nullopt) {
+        return std::make_exception_ptr(
+          std::runtime_error(
+            c10::str(
+              "NCCL communicator encountered error set by ProcessGroupNCCL: ",
+               *commFailureReason
+            )
+          )
+        );
+    }
     ncclResult_t ncclAsyncErr = ncclComm->checkForNcclError();
     if (ncclAsyncErr != ncclSuccess) {
       return std::make_exception_ptr(std::runtime_error(
@@ -843,7 +888,7 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
 
   // For point-to-point communication, lower rank of the two will get unique id.
   if (rank_ == 0 || (isP2POp(opType) && p2pRank == 0)) {
-    C10D_NCCL_CHECK(ncclGetUniqueId(&ncclID));
+    C10D_NCCL_CHECK(ncclGetUniqueId(&ncclID), c10::nullopt);
   }
 
   // For point-to-point communication on the same process, don't need broadcast.
@@ -874,11 +919,11 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
   // created before encountering any communication calls. This is why we need
   // the following for loop.
   for (const auto i : c10::irange(ncclActiveGroupCounter_)) {
-    C10D_NCCL_CHECK(ncclGroupEnd());
+    C10D_NCCL_CHECK(ncclGroupEnd(), c10::nullopt);
   }
 
   // [Note 1] Create the NCCL communicators for each GPU
-  C10D_NCCL_CHECK(ncclGroupStart());
+  C10D_NCCL_CHECK(ncclGroupStart(), c10::nullopt);
 
   for (const auto i : c10::irange(devices.size())) {
     // GPU world size and GPU rank
@@ -909,11 +954,11 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
   }
 
   // [Note 2 ]
-  C10D_NCCL_CHECK(ncclGroupEnd());
+  C10D_NCCL_CHECK(ncclGroupEnd(), c10::nullopt);
 
   // See [Group Start/End Note]
   for (const auto i : c10::irange(ncclActiveGroupCounter_)) {
-    C10D_NCCL_CHECK(ncclGroupStart());
+    C10D_NCCL_CHECK(ncclGroupStart(), c10::nullopt);
   }
 
   ncclStreams_.emplace(devicesKey, std::move(streamVal));
@@ -1079,6 +1124,8 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
     OpType opType,
     const char* profilingTitle) {
 
+  errorIfCapturingNonCapturableNCCL();
+
   // Bump collective counter
   if (sequenceNum_) {
     sequenceNum_->increment();
@@ -1129,7 +1176,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
       gpuGuard.set_index(devices[i].index());
       at::cuda::CUDAStream& ncclStream = ncclStreams_[key][i];
       C10D_NCCL_CHECK(
-          fn(inputs[i], outputs[i], ncclComms[i]->getNcclComm(), ncclStream));
+          fn(inputs[i], outputs[i], ncclComms[i]->getNcclComm(), ncclStream), ncclComms[i]->getNcclCommFailureReason());
     }
   }
 
@@ -1230,7 +1277,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::pointToPoint(
       // be 0 or 1.
       int p2pTargetRank = isSendRecvSelf ? 0 : 1 - p2pRank;
       C10D_NCCL_CHECK(fn(
-          tensors[i], ncclComms[i]->getNcclComm(), ncclStream, p2pTargetRank));
+          tensors[i], ncclComms[i]->getNcclComm(), ncclStream, p2pTargetRank), ncclComms[i]->getNcclCommFailureReason());
     }
   }
 
@@ -1851,14 +1898,14 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::recv(
 
 void ProcessGroupNCCL::groupStart() {
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR >= 2)
-  C10D_NCCL_CHECK(ncclGroupStart());
+  C10D_NCCL_CHECK(ncclGroupStart(), c10::nullopt);
 #endif
   ++ncclActiveGroupCounter_;
 }
 
 void ProcessGroupNCCL::groupEnd() {
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR >= 2)
-  C10D_NCCL_CHECK(ncclGroupEnd());
+  C10D_NCCL_CHECK(ncclGroupEnd(), c10::nullopt);
 #endif
   --ncclActiveGroupCounter_;
 }
