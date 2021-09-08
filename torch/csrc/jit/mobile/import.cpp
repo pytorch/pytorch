@@ -440,7 +440,7 @@ void BytecodeDeserializer::parseMethods(
     // function schema
     if (schemaTable) { // (schema is optional for back compat)
       auto parseArgList = [this](const std::vector<IValue>& argTables) {
-        std::vector<c10::Argument> args;
+        c10::ArgumentVector args;
         for (auto&& argTable : argTables) {
           auto name =
               expect_field(argTable, "name", BYTECODE_INDEX_ARGUMENT_NAME)

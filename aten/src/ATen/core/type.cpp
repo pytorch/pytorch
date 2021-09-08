@@ -782,7 +782,7 @@ TupleTypePtr TupleType::createNamed(const c10::optional<c10::QualifiedName>& qua
     std::vector<IValue>& field_defaults) {
   TORCH_INTERNAL_ASSERT(field_names.size() == field_types.size());
 
-  std::vector<Argument> arguments;
+  ArgumentVector arguments;
   arguments.reserve(field_names.size());
   auto min_default_idx = field_names.size() - field_defaults.size();
   for (size_t i = 0; i < field_names.size(); ++i) {
@@ -812,7 +812,7 @@ TupleTypePtr TupleType::createNamed(const c10::optional<c10::QualifiedName>& qua
       /*name=*/qualName.value_or(c10::QualifiedName()).name(),
       /*overload_name=*/std::string(""),
       /*arguments=*/std::move(arguments),
-      /*returns=*/std::vector<Argument>{});
+      /*returns=*/ArgumentVector{});
   return std::shared_ptr<TupleType>(new TupleType(
       field_types, qualName, schema)); // NOLINT(modernize-make-shared)
 }
@@ -1618,7 +1618,7 @@ torch::jit::Function* ClassType::findForwardHook(const std::string& name) const 
 
 std::string getSchemaInputTypesString(const FunctionSchema& schema) {
   std::stringstream input_types;
-  const std::vector<Argument>& forward_args = schema.arguments();
+  const ArgumentVector& forward_args = schema.arguments();
   for (const auto i : c10::irange(1, forward_args.size())) {
     input_types << forward_args[i].type()->annotation_str();
     if (forward_args.size() - 1 != i) {
@@ -1635,7 +1635,7 @@ std::string ClassType::getForwardPreHookErrorMessage(int pre_hook_idx) const {
   const std::string& pre_hook_name = forward_pre_hooks_[pre_hook_idx]->name();
   const FunctionSchema& forward_schema = getMethod("forward").getSchema();
   std::string input_types = getSchemaInputTypesString(forward_schema);
-  const std::vector<Argument>& forward_args = forward_schema.arguments();
+  const ArgumentVector& forward_args = forward_schema.arguments();
 
   std::string single_output = "";
   if (forward_args.size() == 2 &&
@@ -1698,7 +1698,7 @@ void checkForwardHookInputArguments(
     const std::string& hook_id,
     const std::string& hook_err_msg) {
   // check for proper tuple input types
-  const std::vector<Argument>& forward_args = forward_schema.arguments();
+  const ArgumentVector& forward_args = forward_schema.arguments();
   const Argument input_arg = hook_schema.arguments()[1];
   TORCH_CHECK(
       input_arg.type()->cast<TupleType>() != nullptr,
@@ -1767,7 +1767,7 @@ void ClassType::checkForwardPreHookSchema(
    );
 
   const FunctionSchema& forward_schema = getMethod("forward").getSchema();
-  const std::vector<Argument>& forward_args = forward_schema.arguments();
+  const ArgumentVector& forward_args = forward_schema.arguments();
   checkForwardHookInputArguments(forward_schema, pre_hook_schema, hook_id, pre_hook_err_msg);
 
   // check return type, expected to be either None, the same type as the input,
