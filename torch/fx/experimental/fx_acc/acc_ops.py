@@ -763,6 +763,12 @@ def torch_argmin_mapper(node: torch.fx.Node, _: torch.nn.Module) -> torch.fx.Nod
     """
     return argmin_max_mapper_impl(node, largest=False)
 
+@register_acc_op_mapping(op_and_target=("call_function", torch.linalg.norm))
+@register_acc_op
+def linalg_norm(*, input, ord, dim, keepdim):
+    return torch.linalg.norm(**locals())
+
+
 @register_custom_acc_mapper_fn(
     op_and_target=("call_method", "split"),
     arg_replacement_tuples=[
