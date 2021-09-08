@@ -16,8 +16,6 @@ from functorch import make_functional, grad_and_value, vmap, combine_state_for_e
 # GOAL: Demonstrate that it is possible to use eager-mode vmap
 # to parallelize training over models.
 
-# NB: this code runs off of a branch on zou3519/pytorch:dynlayer
-
 DEVICE = 'cpu'
 
 # Step 1: Make some spirals
@@ -110,7 +108,7 @@ def step6():
 step6()
 
 # Step 7: Now, the flaw with step 6 is that we were training on the same exact
-# data. This can lead to all of the models in the ensemble overfitting in the 
+# data. This can lead to all of the models in the ensemble overfitting in the
 # same way. The solution that http://willwhitney.com/parallel-training-jax.html
 # applies is to randomly subset the data in a way that the models do not recieve
 # exactly the same data in each training step!
