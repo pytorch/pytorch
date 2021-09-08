@@ -133,7 +133,7 @@ const std::unordered_map<Symbol, Symbol>& getOperatorAliasMap() {
       {aten::special_polygamma, aten::polygamma},
       {aten::special_gammainc, aten::igamma},
       {aten::special_gammaincc, aten::igammac},
-      {aten::special_gammaln, aten::lgamma}},
+      {aten::special_gammaln, aten::lgamma},
       {aten::tensordot, aten::linalg_tensordot},
   };
   return alias_map;
