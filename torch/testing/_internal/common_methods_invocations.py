@@ -1469,7 +1469,7 @@ class BinaryUfuncInfo(OpInfo):
     (https://numpy.org/doc/stable/reference/ufuncs.html) for more details
     about the concept of ufuncs.
     """
-    def __init__(self, name, *, lhs_make_tensor_kwargs=None, rhs_make_tensor_kwargs=None, **kwargs):
+    def __init__(self, name, *, lhs_make_tensor_kwargs=None, rhs_make_tensor_kwargs=None, result_type=None, **kwargs):
         super().__init__(name, **kwargs)
 
         # [lr]hs_make_tensor_kwargs are part of the OpInfo to be able to dynamically generate valid samples later on.
@@ -1480,6 +1480,15 @@ class BinaryUfuncInfo(OpInfo):
         if rhs_make_tensor_kwargs is None:
             rhs_make_tensor_kwargs = {}
         self.rhs_make_tensor_kwargs = rhs_make_tensor_kwargs
+
+        if result_type is None:
+            result_type = {}
+        self._result_type = result_type
+
+    def result_type(self, lhs, rhs):
+        lhs_dtype = lhs.dtype if isinstance(lhs, torch.Tensor) else type(lhs)
+        rhs_dtype = rhs.dtype if isinstance(rhs, torch.Tensor) else type(rhs)
+        return self._result_type.get((lhs_dtype, rhs_dtype), torch.result_type(lhs, rhs))
 
 
 def _resolve_binay_pwise_kwargs(
@@ -5760,6 +5769,12 @@ def gradcheck_wrapper_triangular_input(op, input, *args, upper=False, **kwargs):
     """
     return op(input.triu() if upper else input.tril(), upper)
 
+def div_result_type():
+    return {
+        (lhs_dtype, rhs_dtype): torch.get_default_dtype()
+        for lhs_dtype, rhs_dtype in itertools.product(integral_types_and(torch.bool), repeat=2)
+    }
+
 
 # Operator database (sorted alphabetically)
 op_db: List[OpInfo] = [
@@ -6427,7 +6442,8 @@ op_db: List[OpInfo] = [
                     sample_inputs_func=sample_inputs_binary_pwise,
                     supports_forward_ad=True,
                     assert_autodiffed=True,
-                    rhs_make_tensor_kwargs=dict(exclude_zero=True)),
+                    rhs_make_tensor_kwargs=dict(exclude_zero=True),
+                    result_type=div_result_type()),
     BinaryUfuncInfo('div',
                     aliases=('divide',),
                     variant_test_name='trunc_rounding',
@@ -6439,7 +6455,8 @@ op_db: List[OpInfo] = [
                         SkipInfo('TestJit', 'test_variant_consistency_jit'),
                     ),
                     assert_autodiffed=True,
-                    rhs_make_tensor_kwargs=dict(exclude_zero=True)),
+                    rhs_make_tensor_kwargs=dict(exclude_zero=True),
+                    result_type=div_result_type()),
     BinaryUfuncInfo('div',
                     aliases=('divide',),
                     variant_test_name='floor_rounding',
@@ -6451,12 +6468,14 @@ op_db: List[OpInfo] = [
                         SkipInfo('TestJit', 'test_variant_consistency_jit'),
                     ),
                     assert_autodiffed=True,
-                    rhs_make_tensor_kwargs=dict(exclude_zero=True)),
+                    rhs_make_tensor_kwargs=dict(exclude_zero=True),
+                    result_type=div_result_type()),
     BinaryUfuncInfo('true_divide',
                     dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
                     supports_forward_ad=True,
                     sample_inputs_func=sample_inputs_binary_pwise,
-                    rhs_make_tensor_kwargs=dict(exclude_zero=True)),
+                    rhs_make_tensor_kwargs=dict(exclude_zero=True),
+                    result_type=div_result_type()),
     UnaryUfuncInfo('exp',
                    ref=np_unary_ufunc_integer_promotion_wrapper(np.exp),
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),

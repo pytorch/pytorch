@@ -177,7 +177,7 @@ class TestBinaryUfuncs(TestCase):
         ]
 
         for lhs, rhs in inputs:
-            expected = torch.result_type(lhs, rhs)
+            expected = op.result_type(lhs, rhs)
             actual = op(lhs, rhs).dtype
 
             if expected != actual:
