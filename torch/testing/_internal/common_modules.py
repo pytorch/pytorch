@@ -4,7 +4,7 @@ from functools import wraps, partial
 from itertools import chain
 import torch.nn.functional as F
 from torch.testing import floating_types, make_tensor
-from torch.testing._internal.common_device_type import (
+from torch.testing._internal.common_dtype import floating_types
     _TestParametrizer, _dtype_test_suffix, _update_param_kwargs, skipIf)
 from torch.testing._internal.common_nn import nllloss_reference, get_reduction
 from torch.testing._internal.common_utils import freeze_rng_state
