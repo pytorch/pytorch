@@ -73,9 +73,7 @@ using Stream = c10::Stream;
 // Note that Tensor can also be NULL, i.e. it is not associated with any underlying TensorImpl, and
 // special care must be taken to handle this.
 class TORCH_API Tensor: public TensorBase {
- private:
-  using TensorBase::unsafe_borrow_t;
-
+ protected:
   // Create a Tensor with a +0 reference count. Special care must be
   // taken to avoid decrementing this reference count at destruction
   // time. Intended to support MaybeOwnedTraits<Tensor>.
