@@ -80,7 +80,7 @@ def identify_torchbench_branch(torchbench_path: str, prbody_file: str) -> None:
         magic_lines = list(filter(lambda x: x.startswith(MAGIC_TORCHBENCH_PREFIX), lines))
         if magic_lines:
             # Only the first magic line will be recognized.
-            branch_name = magiclines[0][len(MAGIC_TORCHBENCH_PREFIX):].strip()
+            branch_name = magic_lines[0][len(MAGIC_TORCHBENCH_PREFIX):].strip()
     # If not specified, directly return without the branch checkout
     if not branch_name:
         return
