@@ -81,6 +81,9 @@ class TORCH_CUDA_CU_API FusionExecutor : public NonCopyable {
     uint64_t rand_offset;
   };
 
+  using ExecutorCompileTimeInfoCache =
+      executor_utils::caching::ExecutorCompileTimeInfoCache;
+
   kir::Kernel* kernel() const {
     return lowered_.kernel();
   }
@@ -116,6 +119,11 @@ class TORCH_CUDA_CU_API FusionExecutor : public NonCopyable {
   void runRtc(
       const LaunchParams& launch_params,
       const std::vector<at::Tensor>& args);
+
+  //! Internal knob used for debugging/profiling only
+  void disableLaunchParamCache() {
+    disable_parameter_cache_ = true;
+  }
 
  private:
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
@@ -164,6 +172,10 @@ class TORCH_CUDA_CU_API FusionExecutor : public NonCopyable {
     return used_tvs_;
   };
 
+  ExecutorCompileTimeInfoCache* compileTimeDataCache() {
+    return &compile_time_info_cache_;
+  }
+
  private:
   Fusion fusion_;
 
@@ -193,6 +205,15 @@ class TORCH_CUDA_CU_API FusionExecutor : public NonCopyable {
 
   // The last kernel execution time, if measure_kernel_time_ is true
   float kernel_time_ms_ = 0;
+
+  // Profiling support: knob to disable caching of launch params
+  bool disable_parameter_cache_ = false;
+
+  // Compile time information caching. This is used for shape inference
+  //  support. The cache stores graph information that are available
+  //  without shape information so that each shape inference call will
+  //  not need to re-compute them.
+  ExecutorCompileTimeInfoCache compile_time_info_cache_;
 };
 
 } // namespace cuda
