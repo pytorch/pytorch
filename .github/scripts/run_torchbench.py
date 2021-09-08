@@ -87,7 +87,9 @@ def identify_torchbench_branch(torchbench_path: str, prbody_file: str) -> None:
     try:
         print(f"Checking out the TorchBench branch: {branch_name} ...")
         repo = git.Repo(torchbench_path)
-        repo.git.checkout(branch_name)
+        origin = repo.remotes.origin
+        origin.fetch(branch_name)
+        repo.create_head(branch_name, origin.refs[branch_name]).checkout()
     except git.exc.GitCommandError:
         raise RuntimeError(f'{branch_name} doesn\'t exist in the pytorch/benchmark repository. Please double check.')
 
@@ -119,8 +121,8 @@ if __name__ == "__main__":
     # Identify the specified TorchBench branch, verify the branch exists, and checkout the branch
     try:
         identify_torchbench_branch(args.torchbench_path, args.pr_body)
-    except RuntimeError:
-        print(f"Failed to checkout the specified TorchBench branch. Exit.")
+    except RuntimeError as e:
+        print(f"Identify TorchBench branch failed: {e.message}")
         exit(1)
     print(f"Ready to run TorchBench with benchmark. Result will be saved in the directory: {output_dir}.")
     # Run TorchBench with the generated config
