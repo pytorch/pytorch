@@ -156,8 +156,7 @@ class TestModule(TestCase):
                     output_from_copy = m_copy(*args, **kwargs)
                     self.assertEqual(output, output_from_copy)
 
-    @onlyCUDA
-    @modules(module_db)
+    @modules(module_db, allow_devices={"cuda"})
     def test_cpu_cuda_equal(self, device, dtype, module_info):
         # Test cpu and cuda results are the same
         module_cls = module_info.module_cls
@@ -183,15 +182,13 @@ class TestModule(TestCase):
             for p in module.parameters():
                 if p.grad is None:
                     continue
-                with torch.no_grad():
-                    p.grad.zero_()
                 p.grad.detach_()
+                p.grad.zero_()
 
         def to_device(obj):
             if isinstance(obj, torch.Tensor):
-                with torch.no_grad():
-                    res = obj.detach().to(device=device)
-                    res.requires_grad = obj.requires_grad
+                res = obj.detach().to(device=device)
+                res.requires_grad = obj.requires_grad
                 return res
             elif isinstance(obj, tuple):
                 return tuple(to_device(o) for o in obj)
