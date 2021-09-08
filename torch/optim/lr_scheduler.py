@@ -1122,11 +1122,9 @@ class CosineAnnealingWarmRestarts(_LRScheduler):
         self.T_0 = T_0
         self.T_i = T_0
         self.T_mult = T_mult
-        self.eta_min = eta_min
-
-        super(CosineAnnealingWarmRestarts, self).__init__(optimizer, last_epoch, verbose)
-
+        self.eta_min = eta_min                                                                                                              
         self.T_cur = self.last_epoch
+        super(CosineAnnealingWarmRestarts, self).__init__(optimizer, last_epoch, verbose)
 
     def get_lr(self):
         if not self._get_lr_called_within_step:
