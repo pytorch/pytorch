@@ -1,4 +1,3 @@
-# type: ignore[]
 import ast
 import builtins
 import copy
@@ -279,6 +278,7 @@ def _rewrite(mod_to_rewrite: nn.Module, allow_list: Optional[Set] = None) -> nn.
                     continue
 
                 # Only rewrite those Modules explicitly in the allow_list.
+                assert allow_list is not None
                 if base_class not in allow_list:
                     vars()[method_name] = method
                 else:

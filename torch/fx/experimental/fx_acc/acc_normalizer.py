@@ -56,7 +56,7 @@ class NormalizationInfo(NamedTuple):
     it was registered via `register_custom_acc_mapper_fn`.
     """
 
-    new_fn_target: Callable
+    new_fn_target: Optional[Callable[..., Any]]
     arg_replacement_tuples: Optional[ArgReplacementTuplesType]
     custom_mapping_fn: Optional[Callable]
     kwargs_to_move_to_acc_out_ty: Optional[Optional[List[Tuple[str, str]]]]
@@ -73,7 +73,7 @@ _acc_ops: Set[Callable] = set()
 def _insert_fun(
     op_and_target: Tuple[str, Union[str, Callable]],
     arg_replacement_tuples: List[Tuple],
-    new_fn_target: Optional[Callable] = None,
+    new_fn_target: Optional[Callable[..., Any]] = None,
     custom_mapping_fn: Optional[Callable] = None,
     kwargs_to_move_to_acc_out_ty: Optional[Optional[List[Tuple[str, str]]]] = None,
     needs_shapes_for_normalization=False,
@@ -113,6 +113,7 @@ def _insert_fun(
         )
 
     assert op_and_target not in _normalization_dict.keys()
+    assert new_fn_target is not None
     norm_info = NormalizationInfo(
         new_fn_target=new_fn_target,
         arg_replacement_tuples=final_arg_replacement_tuples,
@@ -127,6 +128,7 @@ def _insert_fun(
     # torch_package module prefix. Note that we leave off any integer at the end of
     # "<torch_package_>" in order to allow for whatever mangling index is used.
     if allow_normalize_from_torch_package:
+        assert not isinstance(op_and_target[0], str)
         torch_package_op_and_target = (
             op_and_target[0],
             f"<torch_package_>.{_get_qualified_name(op_and_target[1])}",
@@ -216,6 +218,7 @@ def move_kwargs_to_acc_out_ty(
     a node to fetch NormalizationInfo for, check if kwargs_to_move_to_acc_out_ty exists
     in the NormalizationInfo, and if so perform the move of kwargs to acc_out_ty.
     """
+    assert node_or_normalization_info is not None
     if isinstance(node_or_normalization_info, torch.fx.Node):
         node = node_or_normalization_info
         normalization_info = _normalization_dict.get((node.op, node.target))
@@ -367,6 +370,7 @@ def normalize(mod: torch.fx.GraphModule, expect_nodes_have_shapes: bool = False)
         # Get the normalized kwargs to be used by normalize_to_acc_op below. If
         # normalization_info.arg_replacement_tuples is empty then assume the function
         # signature must be left as is.
+        assert normalization_info.arg_replacement_tuples is not None
         if len(normalization_info.arg_replacement_tuples) == 0:
             normalized_args = node.args
             normalized_kwargs = node.kwargs
