@@ -122,8 +122,9 @@ LazyTensor SmoothL1Loss(const LazyTensor& input, const LazyTensor& target,
     case ReductionMode::kNone:
       return elementwise_loss;
     case ReductionMode::kMean:
-      return LazyTensor::mean(elementwise_loss, all_dimensions, false,
-                              broadcasted_input.dtype());
+        throw std::runtime_error("TODO fix this either by codegenning SmoothL1 or constructing codegenned Mean IR node here");
+    //   return LazyTensor::mean(elementwise_loss, all_dimensions, false,
+                            //   broadcasted_input.dtype());
     case ReductionMode::kSum:
       return LazyTensor::sum(elementwise_loss, all_dimensions, false,
                              broadcasted_input.dtype());

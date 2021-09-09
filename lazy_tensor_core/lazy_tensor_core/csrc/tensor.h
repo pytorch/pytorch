@@ -780,11 +780,6 @@ class LazyTensor {
       const LazyTensor& grad_output, const LazyTensor& input,
       const LazyTensor& indices, std::vector<lazy_tensors::int64> output_size);
 
-  static LazyTensor mean(const LazyTensor& input,
-                         std::vector<lazy_tensors::int64> dimensions,
-                         bool keep_reduced_dimensions,
-                         c10::optional<at::ScalarType> dtype);
-
   static LazyTensor min(
       const LazyTensor& input, const LazyTensor& other,
       c10::optional<at::ScalarType> logical_element_type = c10::nullopt);

@@ -68,7 +68,6 @@
 #include "lazy_tensor_core/csrc/ops/max_pool_nd_backward.h"
 #include "lazy_tensor_core/csrc/ops/max_unpool_nd.h"
 #include "lazy_tensor_core/csrc/ops/max_unpool_nd_backward.h"
-#include "lazy_tensor_core/csrc/ops/mean.h"
 #include "lazy_tensor_core/csrc/ops/min_in_dim.h"
 #include "lazy_tensor_core/csrc/ops/mse_loss.h"
 #include "lazy_tensor_core/csrc/ops/mse_loss_backward.h"
@@ -1735,21 +1734,6 @@ LazyTensor LazyTensor::max_unpool_backward(
   return grad_output.CreateFrom(ir::MakeNode<ir::ops::MaxUnpoolNdBackward>(
       grad_output.GetIrValue(), input.GetIrValue(), indices.GetIrValue(),
       std::move(output_size)));
-}
-
-LazyTensor LazyTensor::mean(const LazyTensor& input,
-                            std::vector<lazy_tensors::int64> dimensions,
-                            bool keep_reduced_dimensions,
-                            c10::optional<at::ScalarType> dtype) {
-  if (!dtype) {
-    dtype = input.dtype_optional();
-  }
-  return input.CreateFrom(
-      ir::MakeNode<ir::ops::Mean>(input.GetIrValue(),
-                                  Helpers::GetCanonicalDimensionIndices(
-                                      dimensions, input.shape().get().rank()),
-                                  keep_reduced_dimensions, dtype),
-      dtype);
 }
 
 LazyTensor LazyTensor::min(const LazyTensor& input, const LazyTensor& other,
