@@ -6,6 +6,7 @@
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/onnx/helper.h>
 #include <torch/csrc/jit/passes/onnx/peephole.h>
+#include <torch/csrc/jit/passes/onnx/shape_type_inference.h>
 
 namespace torch {
 namespace jit {
@@ -263,7 +264,8 @@ void InferShapeTypeForUninitializedOutput(
     Graph* graph,
     Block* block,
     Value* uninitialized_output,
-    Value* other_output) {
+    Value* other_output,
+    int opset_version) {
   Node* const_node = nullptr;
   if (auto output_type = other_output->type()->cast<TensorType>()) {
     auto elem_type =
@@ -295,6 +297,9 @@ void InferShapeTypeForUninitializedOutput(
       const_node->output()->setType(other_output->type());
     }
   }
+
+  const ParamMap empty_params_dict = {};
+  ONNXShapeTypeInference(const_node, empty_params_dict, opset_version);
   const_node->insertBefore(block->return_node());
   uninitialized_output->replaceAllUsesWith(const_node->output());
   uninitialized_output->node()->destroy();
@@ -321,7 +326,7 @@ void InferShapeTypeForUninitializedOutput(
 //       -> (%1, %y.1, %7)
 //   ...
 
-void ONNXFixupUninitializedOutput(Node* node) {
+void ONNXFixupUninitializedOutput(Node* node, int opset_version) {
   if (node->kind() != ::c10::onnx::If) {
     return;
   }
@@ -357,11 +362,19 @@ void ONNXFixupUninitializedOutput(Node* node) {
 
     if (IsUninitializedNode(then_block_output->node())) {
       InferShapeTypeForUninitializedOutput(
-          graph, then_block, then_block_output, else_block_output);
+          graph,
+          then_block,
+          then_block_output,
+          else_block_output,
+          opset_version);
       if_node->outputs()[i]->setType(then_block->outputs()[i]->type());
     } else if (IsUninitializedNode(else_block_output->node())) {
       InferShapeTypeForUninitializedOutput(
-          graph, else_block, else_block_output, then_block_output);
+          graph,
+          else_block,
+          else_block_output,
+          then_block_output,
+          opset_version);
       if_node->outputs()[i]->setType(else_block->outputs()[i]->type());
     }
   }
@@ -459,7 +472,7 @@ std::vector<Value*> FixupONNXIfNode(Node* node, int opset_version) {
   }
   GRAPH_DUMP("Graph before fixing controlflow: ", node->owningGraph());
   FixupONNXSubblockOutputs(node);
-  ONNXFixupUninitializedOutput(node);
+  ONNXFixupUninitializedOutput(node, opset_version);
   // Copy type of block output to node output.
   ONNXMergeIfBlockOutputShapes(node);
 
