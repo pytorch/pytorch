@@ -5,7 +5,7 @@ namespace native {
 
  // Check to see if the shape of tensors is compatible
  // for being concatenated along a given dimension.
-void check_cat_shape_except_dim(const Tensor & first, const Tensor & second, int64_t dimension, int64_t index) {
+inline void check_cat_shape_except_dim(const Tensor & first, const Tensor & second, int64_t dimension, int64_t index) {
    int64_t first_dims = first.dim();
    int64_t second_dims = second.dim();
    TORCH_CHECK(first_dims == second_dims, "Tensors must have same number of dimensions: got ",
