@@ -12,24 +12,25 @@ from tools.codegen.model import (BaseType, OptionalType, DispatchKey, NativeFunc
                                  TensorOptionsArguments, ListType,
                                  DeviceCheckType, Argument, assert_never,
                                  is_cuda_dispatch_key, BackendIndex,
-                                 gets_generated_out_inplace_wrapper, OperatorName)
+                                 gets_generated_out_inplace_wrapper, OperatorName,
+                                 SelfArgument, Arguments)
 from tools.codegen.api.types import (BaseTy, BaseCppType, BaseCType, OptionalCType,
                                      Binding, ConstRefCType, NamedCType,
                                      CppSignature, CppSignatureGroup,
                                      Expr, MutRefCType, kernel_signature,
-                                     DispatcherSignature)
+                                     DispatcherSignature, ListCType)
 import tools.codegen.api.meta as meta
 import tools.codegen.api.cpp as cpp
 import tools.codegen.api.structured as structured
 from tools.codegen.api.translate import translate
 from tools.codegen.selective_build.selector import SelectiveBuilder
-from .lazy_ir import process_ir_types, ir_node_name
+from .lazy_ir import ir_node_name, valueT, valueListT, update_schema_for_lazy_ir, separate_value_scalar_types
 
 
 @dataclass(frozen=True)
 class TsLowering:
     backend_index: BackendIndex
-    
+
     # Names of operators we want to codegen for, a subset of backend_index
     codegen: List[OperatorName]
 
@@ -42,7 +43,6 @@ class TsLowering:
         Literal[TsLoweringTarget.DISPATCH],
         Literal[TsLoweringTarget.LOWERING],
     ]
-
 
     @method_with_native_function
     def __call__(self, f: Union[NativeFunctionsGroup, NativeFunction]) -> List[str]:
@@ -63,12 +63,13 @@ case at::aten::{func.name}:
     return Lower{ir_node_name(func)}(function, loctx, ir::NodeCast<ir::ops::{ir_node_name(func)}>(node, ir::OpKind(at::aten::{func.name})));
 """, ]
 
-
-        elif self.target == TsLowering.TsLoweringTarget.LOWERING: 
-            all_types, value_types, scalar_types = process_ir_types(func)
+        elif self.target == TsLowering.TsLoweringTarget.LOWERING:
+            schema = update_schema_for_lazy_ir(func)
+            all_types, value_types, scalar_types = separate_value_scalar_types(schema)
             emplace_values = [f"loctx->GetOutputOp(node->operand({i}))" for i in range(len(value_types))]
             emplace_scalars = [f"node->{t.name}_" for t in scalar_types]
-            emplace_arguments = "\n    ".join([f"arguments.emplace_back({a});" for a in emplace_values + emplace_scalars])
+            emplace_arguments = "\n    ".join(
+                [f"arguments.emplace_back({a});" for a in emplace_values + emplace_scalars])
             return [f"""\
 TSOpVector Lower{ir_node_name(func)}(std::shared_ptr<torch::jit::GraphFunction> function, ts_backend::TSLoweringContext* loctx, const ir::ops::{ir_node_name(func)}* node) {{
     std::vector<torch::jit::NamedValue> arguments;

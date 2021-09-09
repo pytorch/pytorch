@@ -6,7 +6,7 @@ from tools.codegen.model import NativeFunction, NativeFunctionsGroup, BackendInd
 from tools.codegen.api.types import kernel_signature, BaseCType, OptionalCType
 import tools.codegen.api.meta as meta
 import tools.codegen.api.structured as structured
-from .lazy_ir import process_ir_types, ir_node_name, node_ctor_inputs
+from .lazy_ir import  update_schema_for_lazy_ir, separate_value_scalar_types, ir_node_name, node_ctor_inputs
 
 @with_native_function_and_index
 def gen_unstructured(f: NativeFunction, backend_index: BackendIndex) -> Optional[str]:
@@ -59,9 +59,9 @@ def compute_native_function_declaration(
 def lazy_tensor_decls(value_types):
     lazy_tensor_decls = []
     for t in value_types:
-        if isinstance(t.type.elem, BaseCType):
+        if isinstance(t.type, BaseCType):
             lazy_tensor_decls.append(f"LazyTensor l_{t.name} = bridge::GetLtcTensor({t.name});")
-        elif isinstance(t.type.elem, OptionalCType):
+        elif isinstance(t.type, OptionalCType):
             lazy_tensor_decls.append(f"c10::optional<LazyTensor> l_{t.name} =  {t.name}.has_value() ? c10::make_optional(bridge::GetLtcTensor({t.name}.value())) : c10::nullopt;")
         else:
             assert False, ""
@@ -81,7 +81,8 @@ def gen_unstructured_lazy_definition(f: NativeFunction, backend_index: BackendIn
 
  
     # Lazy IR stuff
-    all_types, value_types, scalar_types = process_ir_types(f.func)
+    schema = update_schema_for_lazy_ir(f.func)
+    all_types, value_types, scalar_types = separate_value_scalar_types(schema)
     lazy_tensor_decls_str = lazy_tensor_decls(value_types)
     node_ctor_input_str = node_ctor_inputs(value_types, scalar_types)
 
