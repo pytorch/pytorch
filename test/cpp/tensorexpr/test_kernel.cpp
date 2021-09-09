@@ -567,10 +567,10 @@ TEST_F(Kernel, CatWoConditionals) {
 # CHECK: for
 # CHECK-NEXT: for
 # CHECK-NEXT: for
-# CHECK-NEXT: aten_cat
+# CHECK: aten_cat
 # CHECK: for
 # CHECK-NEXT: for
-# CHECK-NEXT: aten_cat
+# CHECK: aten_cat
 # CHECK: for
 # CHECK-NEXT: for
 # CHECK-NEXT: aten_cat)IR";
