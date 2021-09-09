@@ -204,6 +204,9 @@ class ConditionalExceptionWrapper(nn.Module):
 # Custom tracer that traces to the functional level and rewrites asserts and
 # exceptions.
 class AccRewritingTracer(Tracer):
+    # Add an explicit check for mutable operations, which break symbolic tracing.
+    check_mutable_operations = True
+
     # Note: Treat ConditionalExceptionWrapper as a leaf so that we don't
     # trace into it, because it contains control flow and raises an exception.
     DEFAULT_LEAF_MODULE_LIST = {
