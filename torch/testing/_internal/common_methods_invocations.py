@@ -8682,7 +8682,7 @@ op_db: List[OpInfo] = [
     OpInfo('stack',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_stack,
-           assert_autodiffed=True
+           assert_autodiffed=True,
            skips=(
                # TODO: see https://github.com/pytorch/pytorch/issues/64709
                SkipInfo('TestCommon', 'test_out'),
