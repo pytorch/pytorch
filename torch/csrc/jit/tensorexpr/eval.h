@@ -267,6 +267,10 @@ class ExprEval {
   Value ret_value_;
 };
 
+// Evaluates the given expression and returns an int64_t value if the result of
+// the given expression is int64_t.
+c10::optional<int64_t> evalInt(ExprPtr e);
+
 // Substitutes the given vars with their corresponding expressions in the input
 // expression.
 inline ExprPtr Substitute(ExprPtr expr, const VarMapping& var_mapping) {
