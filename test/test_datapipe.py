@@ -873,10 +873,7 @@ class TestFunctionalIterDataPipe(TestCase):
         # Unmatched input columns with fn arguments
         with self.assertRaises(TypeError):
             _helper(None, fn_n1, 1)
-        # Replacing with multiple input columns and default output column
-        _helper(lambda data: (data[0] + data[2], data[1], data[2]), fn_n1, [0, 2])
-        _helper(lambda data: (data[0], (-data[1], -data[2], data[1] + data[2]), data[2]), fn_nn, [1, 2])
-        # Replace the left-most input column as default
+        # Replacing with multiple input columns and default output column (the left-most input column)
         _helper(lambda data: (data[0], data[1], data[2] + data[0]), fn_n1, [2, 0])
         _helper(lambda data: (data[0], data[1], (-data[2], -data[1], data[2] + data[1])), fn_nn, [2, 1])
 
@@ -949,10 +946,7 @@ class TestFunctionalIterDataPipe(TestCase):
         # Unmatched input columns with fn arguments
         with self.assertRaises(TypeError):
             _helper(None, fn_n1, "y")
-        # Replacing with multiple input columns and default output column
-        _helper(lambda data: _dict_update(data, {"x": data["x"] + data["z"]}), fn_n1, ["x", "z"])
-        _helper(lambda data: _dict_update(data, {"y": (-data["y"], -data["z"], data["y"] + data["z"])}), fn_nn, ["y", "z"])
-        # Replace the left-most input column as default
+        # Replacing with multiple input columns and default output column (the left-most input column)
         _helper(lambda data: _dict_update(data, {"z": data["x"] + data["z"]}), fn_n1, ["z", "x"])
         _helper(lambda data: _dict_update(data, {"z": (-data["z"], -data["y"], data["y"] + data["z"])}), fn_nn, ["z", "y"])
 
