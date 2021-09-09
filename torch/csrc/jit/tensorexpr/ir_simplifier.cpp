@@ -2881,6 +2881,29 @@ ExprPtr SimplifierUnderContext::mutate(DivPtr v) {
     return ret->accept_mutator(this);
   }
 
+  // i / N -> 0 if the range of i's values is a subset of [0, N)
+  // where N is an integer constant
+  auto lhsVar = to<Var>(lhs);
+  ExprPtr rhsScalar = rhs->isConstant() ? rhs : nullptr;
+  if (lhsVar && rhsScalar && !rhsScalar->dtype().is_floating_point()) {
+    auto got = var_bound_info_.find(lhsVar);
+    if (got != var_bound_info_.end()) {
+      auto start = got->second.first;
+      auto end = got->second.second;
+      ExprPtr check_start = IRSimplifier::simplify(
+          alloc<CompareSelect>(start, immLike(start, 0), kGE));
+      ExprPtr check_end =
+          IRSimplifier::simplify(alloc<CompareSelect>(end, rhsScalar, kLE));
+      if (check_start->isConstant() && check_end->isConstant() &&
+          immediateEquals(check_start, 1) && immediateEquals(check_end, 1)) {
+        oss << "SimplifierUnderContext: " << *v << " => " << immLike(lhsVar, 0)
+            << "\n";
+        GRAPH_DEBUG(oss.str());
+        return immLike(lhsVar, 0);
+      }
+    }
+  }
+
   ExprPtr lhs_new = lhs->accept_mutator(this);
   ExprPtr rhs_new = rhs->accept_mutator(this);
   if (lhs == lhs_new && rhs == rhs_new) {
