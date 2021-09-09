@@ -342,6 +342,8 @@ $6 = torch._ops.aten.add_($1, $5)''')
         # subclasses, these are cleanly overwritten.
         class Foo(torch.Tensor):
             pass
+
+        err_msg = "subclass Foo but.*already associated to a python object of type LoggingTensor"
         a = torch.Tensor._make_subclass(Foo, LoggingTensor(torch.rand(2)))
         b = LoggingTensor(torch.rand(2)).as_subclass(Foo)
 
