@@ -4015,7 +4015,7 @@ Tensor _lu_with_info_backward(
   return plu_backward_base({/*L_grad=*/grad, /*U_grad=*/grad}, self, P, L, U);
 }
 
-Tensor _lu_with_info_forward_AD(
+Tensor _lu_with_info_jvp(
   const Tensor& dX,
   const Tensor& LU,
   const Tensor& pivs

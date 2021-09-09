@@ -280,7 +280,7 @@ Tensor _lu_with_info_backward(
   const Tensor& LU,
   const Tensor& pivs
 );
-Tensor _lu_with_info_forward_AD(
+Tensor _lu_with_info_jvp(
   const Tensor& dX,
   const Tensor& LU,
   const Tensor& pivs
