@@ -3,6 +3,7 @@
 #include <ATen/MemoryOverlap.h>
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/native/TypeProperties.h>
+#include <ATen/native/TensorShape.h>
 #include <ATen/Dispatch.h>
 #include <c10/core/MemoryFormat.h>
 #include <c10/util/Optional.h>
@@ -169,27 +170,6 @@ __global__ void CatArrayBatchedCopy(
       }
     tid += stride;
     }
-}
-
-void check_shape_except_dim(const Tensor &first, const Tensor &second,
-                            int dimension, int index)
-{
-  int first_dims = first.dim();
-  int second_dims = second.dim();
-  TORCH_CHECK(first_dims == second_dims,
-      "Tensors must have same number of dimensions: got ", first_dims,
-      " and ", second_dims);
-  for (int dim = 0; dim < first_dims; dim++) {
-    if (dim == dimension) {
-      continue;
-    }
-    int64_t first_dim_size = at::native::size(first, dim);
-    int64_t second_dim_size = at::native::size(second, dim);
-    TORCH_CHECK(first_dim_size == second_dim_size,
-        "Sizes of tensors must match except in dimension ", dimension, ". Got ",
-        static_cast<long long>(first_dim_size), " and ",
-        static_cast<long long>(second_dim_size), " in dimension ", dim, ".");
-  }
 }
 
 template <typename scalar_t>
@@ -487,6 +467,7 @@ Tensor& cat_out_cuda(TensorList inputs, int64_t dimension, Tensor& out) {
     }
     nDims = inputs[i].dim();
     notSkippedTensor = &inputs[i];
+    break;
   }
 
   // If all inputs are empty tensors, return an empty tensor
@@ -519,7 +500,7 @@ Tensor& cat_out_cuda(TensorList inputs, int64_t dimension, Tensor& out) {
     if (should_skip(tensor)) {
       continue;
     }
-    check_shape_except_dim(*notSkippedTensor, tensor, dimension, i);
+    check_cat_shape_except_dim(*notSkippedTensor, tensor, dimension, i);
     cat_dim_size += at::native::size(tensor, dimension);
   }
 
