@@ -107,7 +107,7 @@ Tensor& quantize_tensor_per_tensor_affine(
     Tensor& qtensor,
     double scale,
     int64_t zero_point) {
-  static const std::string fn_name = "quantize_tensor_per_tensor_affine";
+  static constexpr auto fn_name = "quantize_tensor_per_tensor_affine";
 
   checkRoundingMode(fn_name);
   checkFloatTensor(fn_name, rtensor);
@@ -138,7 +138,7 @@ Tensor& quantize_tensor_per_channel_affine(
     Tensor scales,
     Tensor zero_points,
     int64_t axis) {
-  static const std::string fn_name = "quantize_tensor_per_channel_affine";
+  static constexpr auto fn_name = "quantize_tensor_per_channel_affine";
 
   checkRoundingMode(fn_name);
   checkFloatTensor(fn_name, rtensor);
@@ -178,7 +178,7 @@ Tensor& quantize_tensor_per_channel_float_qparams(
     Tensor scales,
     Tensor zero_points,
     int64_t axis) {
-  static const std::string fn_name =
+  static constexpr auto fn_name =
       "quantize_tensor_per_channel_float_qparams";
 
   checkRoundingMode(fn_name);
@@ -216,7 +216,7 @@ Tensor& dequantize_tensor_per_tensor_affine(
     Tensor& rtensor,
     double scale,
     int64_t zero_point) {
-  static const std::string fn_name = "dequantize_tensor_per_tensor_affine";
+  static constexpr auto fn_name = "dequantize_tensor_per_tensor_affine";
   checkFloatTensor(fn_name, rtensor);
   checkSameDevice(fn_name, rtensor, qtensor);
   checkSameSize(fn_name, qtensor, rtensor);
@@ -243,7 +243,7 @@ Tensor& dequantize_tensor_per_channel_affine(
     Tensor scales,
     Tensor zero_points,
     int64_t axis) {
-  static const std::string fn_name = "dequantize_tensor_per_channel_affine";
+  static constexpr auto fn_name = "dequantize_tensor_per_channel_affine";
 
   checkFloatTensor(fn_name, rtensor);
   checkSameDevice(fn_name, rtensor, qtensor);
@@ -282,7 +282,7 @@ Tensor& dequantize_tensor_per_channel_float_qparams(
     Tensor scales,
     Tensor zero_points,
     int64_t axis) {
-  static const std::string fn_name = "dequantize_tensor_per_channel_affine";
+  static constexpr auto fn_name = "dequantize_tensor_per_channel_affine";
 
   checkFloatTensor(fn_name, rtensor);
   checkSameDevice(fn_name, rtensor, qtensor);
