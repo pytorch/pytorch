@@ -7114,6 +7114,7 @@ workflows:
             branches:
               only:
                 - master
+                - nightly
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           requires:
@@ -7135,6 +7136,7 @@ workflows:
             branches:
               only:
                 - master
+                - nightly
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           requires:
@@ -7156,38 +7158,6 @@ workflows:
           requires:
             - pytorch_linux_xenial_py3_6_gcc5_4_build
           build_environment: "pytorch-linux-pytorch_linux_xenial_py3_6_gcc5_4_distributed-test"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc5.4"
-          resource_class: large
-      - pytorch_linux_build:
-          name: pytorch_paralleltbb_linux_xenial_py3_6_gcc5_4_build
-          requires:
-            - "docker-pytorch-linux-xenial-py3.6-gcc5.4"
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
-                - /release\/.*/
-          build_environment: "pytorch-paralleltbb-linux-xenial-py3.6-gcc5.4-build"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc5.4"
-      - pytorch_linux_test:
-          name: pytorch_paralleltbb_linux_xenial_py3_6_gcc5_4_test
-          requires:
-            - pytorch_paralleltbb_linux_xenial_py3_6_gcc5_4_build
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
-                - /release\/.*/
-          build_environment: "pytorch-paralleltbb-linux-xenial-py3.6-gcc5.4-test"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc5.4"
-          resource_class: large
-      - pytorch_linux_test:
-          name: pytorch_linux_pytorch_paralleltbb_linux_xenial_py3_6_gcc5_4_distributed_test
-          requires:
-            - pytorch_paralleltbb_linux_xenial_py3_6_gcc5_4_build
-          build_environment: "pytorch-linux-pytorch_paralleltbb_linux_xenial_py3_6_gcc5_4_distributed-test"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc5.4"
           resource_class: large
       - pytorch_linux_build:
@@ -9267,19 +9237,6 @@ workflows:
       - pytorch_cpp_doc_build:
           requires:
             - pytorch_linux_xenial_py3_6_gcc5_4_build
-      - pytorch_linux_build:
-          name: pytorch_paralleltbb_linux_xenial_py3_6_gcc5_4_build
-          requires:
-            - "docker-pytorch-linux-xenial-py3.6-gcc5.4"
-          build_environment: "pytorch-paralleltbb-linux-xenial-py3.6-gcc5.4-build"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc5.4"
-      - pytorch_linux_test:
-          name: pytorch_paralleltbb_linux_xenial_py3_6_gcc5_4_test
-          requires:
-            - pytorch_paralleltbb_linux_xenial_py3_6_gcc5_4_build
-          build_environment: "pytorch-paralleltbb-linux-xenial-py3.6-gcc5.4-test"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc5.4"
-          resource_class: large
       - pytorch_linux_build:
           name: pytorch_linux_xenial_py3_6_gcc7_build
           requires:
