@@ -1,6 +1,6 @@
 // (c) Facebook, Inc. and its affiliates. Confidential and proprietary.
 
-#include "aot_compiler.h"
+#include <aot_compiler.h>
 
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
@@ -30,9 +30,9 @@ namespace nnc {
 std::vector<int64_t> getConstSizes(const BufPtr b) {
   std::vector<int64_t> r;
   for (auto dim : b->dims()) {
-    IntImmPtr int_imm_dim = to<IntImm>(dim);
+    LongImmPtr imm_dim = to<LongImm>(dim);
     // TODO: assert it's actually immediate
-    int64_t s = int_imm_dim->value();
+    int64_t s = imm_dim->value();
     r.push_back(s);
   }
   return r;
