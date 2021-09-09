@@ -377,9 +377,9 @@ bool matmulIsSupported(const torch::jit::Node* node) {
 void annotateInputShapes(
     const std::shared_ptr<Graph>& graph,
     const std::vector<c10::optional<at::Tensor>>& example_inputs) {
-  TORCH_INTERNAL_ASSERT(
-      graph->inputs().size() == example_inputs.size(),
-      buildErrorMessage("Given inputs do not match the fuser graph inputs."));
+  // TORCH_INTERNAL_ASSERT(
+  //    graph->inputs().size() == example_inputs.size(),
+  //    buildErrorMessage("Given inputs do not match the fuser graph inputs."));
   for (size_t idx = 0; idx < example_inputs.size(); idx++) {
     if (auto t = example_inputs[idx]) {
       auto concrete_tensor_type = tensorTypeInCurrentExecutionContext(*t);
@@ -1335,7 +1335,9 @@ Tensor computeCat(
 Tensor computeConv2d(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
-    const c10::optional<ScalarType>& outputType) {
+    const c10::optional<ScalarType>& outputType,
+    std::vector<TensorExprKernel::ConstantDescr>& constants,
+    std::vector<at::Tensor>& unpacked_constant_tensors) {
   Dtype dtype = kFloat;
   if (outputType) {
     dtype = Dtype(*outputType);
@@ -1344,7 +1346,24 @@ Tensor computeConv2d(
   BufHandle ResultBuf("conv", outputShape, dtype);
   BufHandle inp = c10::get<BufHandle>(inputs[0]);
   BufHandle w = c10::get<BufHandle>(inputs[1]);
-  BufHandle b = c10::get<BufHandle>(inputs[2]);
+  bool noBias = true;
+  if (c10::get_if<ArgNone>(&inputs[2])) {
+    noBias = true;
+  }
+  BufHandle b = [&]() {
+    if (noBias) {
+      std::vector<ExprHandle> biasShape;
+      biasShape.push_back(outputShape[1]);
+      auto bias_tensor = at::zeros({outputShape[1].AsNode<LongImm>()->value()});
+      unpacked_constant_tensors.push_back(bias_tensor);
+      BufPtr buf = alloc<Buf>(
+          "conv2d_bias_opt_", ExprHandleVectorToExprVector(biasShape), dtype);
+
+      constants.push_back({buf, bias_tensor.data_ptr()});
+      return BufHandle(buf);
+    }
+    return c10::get<BufHandle>(inputs[2]);
+  }();
 
   auto strides = _pair_int(inputs[3]);
   auto padding = _pair_int(inputs[4]);
@@ -2317,7 +2336,10 @@ Tensor tensorexpr::computeOperandValue(
           aten::transpose,
           {inputs[0], (int64_t)1, (int64_t)0},
           outputShape,
-          outputType);
+          outputType,
+          device,
+          constants,
+          unpacked_constant_tensors);
     }
     case aten::transpose: {
       auto A = c10::get<BufHandle>(inputs[0]);
@@ -2471,7 +2493,25 @@ Tensor tensorexpr::computeOperandValue(
       return computeSoftmax(inputs, outputShape, true);
     }
     case aten::conv2d: {
-      return computeConv2d(inputs, outputShape, outputType);
+      return computeConv2d(
+          inputs,
+          outputShape,
+          outputType,
+          constants,
+          unpacked_constant_tensors);
+    } break;
+    case aten::linear: {
+      // linear = inputs[0] @ inputs[1] + inputs[2]
+      // addmm = beta(inputs[3]) * inputs[0] + alpha(inputs[4]) * inputs[1] @
+      // inputs[2]
+      std::vector<ArgValue> addmmInputs;
+      addmmInputs.reserve(5);
+      addmmInputs.push_back(inputs[2]);
+      addmmInputs.push_back(inputs[0]);
+      addmmInputs.push_back(inputs[1]);
+      addmmInputs.push_back(1l); // beta
+      addmmInputs.push_back(1l); // alpha
+      return computeAddMM(addmmInputs, outputShape, outputType);
     } break;
     case aten::addmm: {
       return computeAddMM(inputs, outputShape, outputType);
@@ -2535,7 +2575,14 @@ Tensor TensorExprKernel::computeValue(const torch::jit::Value* v) {
   if (NNCLoweringFunction custom_lowering = getCustomLoweringFor(op)) {
     return custom_lowering(argInputs, outputShape, outputType, device_);
   }
-  return computeOperandValue(op, argInputs, outputShape, outputType, device_);
+  return computeOperandValue(
+      op,
+      argInputs,
+      outputShape,
+      outputType,
+      device_,
+      constants_,
+      unpacked_constant_tensors_);
 }
 
 // Return the (lower, upper) loop bounds if they are constants, else nullopt.
@@ -3101,9 +3148,9 @@ void TensorExprKernel::bindConstant(const torch::jit::Value* v) {
   for (auto s : sizes) {
     te_sizes.push_back(s);
   }
-
+  auto name_hint = "const_" + sanitizeName(v->debugName());
   BufPtr buf = alloc<Buf>(
-      "const_" + sanitizeName(v->debugName()),
+      name_hint,
       ExprHandleVectorToExprVector(te_sizes),
       ToDtype(static_cast<ScalarType>(*tt->scalarType())));
 
