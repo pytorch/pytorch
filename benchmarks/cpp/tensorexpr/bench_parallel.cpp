@@ -35,19 +35,18 @@ class ParallelAdd : public benchmark::Fixture {
 };
 
 BENCHMARK_DEFINE_F(ParallelAdd, Simple)(benchmark::State& state) {
-  KernelScope kernel_scope;
   Placeholder a_buf("a", kFloat, {M});
   Placeholder b_buf("b", kFloat, {M});
-  Tensor* c_tensor = Compute(
+  Tensor c_tensor = Compute(
       "c", {{M, "m"}}, [&](const VarHandle& m) {
         return a_buf.load(m) + b_buf.load(m);
       });
   LoopNest loop_nest({c_tensor});
   auto const& loops = loop_nest.getLoopStmtsFor(c_tensor);
-  For* m = loops[0];
+  ForPtr m = loops[0];
   m->set_parallel();
   loop_nest.prepareForCodegen();
-  Stmt* stmt = loop_nest.root_stmt();
+  StmtPtr stmt = loop_nest.root_stmt();
   LLVMCodeGen cg(stmt, {c_tensor, a_buf, b_buf});
 
   float* a_ptr = A.data_ptr<float>();

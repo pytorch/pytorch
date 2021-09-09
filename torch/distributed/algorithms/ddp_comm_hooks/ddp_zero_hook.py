@@ -1,9 +1,13 @@
+import weakref
 from typing import Any, Callable, List, Optional
 
 import torch
 import torch.distributed as dist
 from torch.distributed.optim import ZeroRedundancyOptimizer
-from torch.distributed.optim.zero_redundancy_optimizer import _OverlapStatus
+from torch.distributed.optim.zero_redundancy_optimizer import (
+    _get_global_rank,
+    _OverlapStatus,
+)
 from torch.nn.parallel.distributed import DistributedDataParallel
 
 # Functional optimizers require passing a list of gradients to their `step()`
@@ -44,9 +48,13 @@ def _perform_local_step(
         [_NO_PARAM_UPDATE for _ in range(num_local_optim_params)]
     assert bucket_index in overlap_info.offsets, \
         f"Bucket index {bucket_index} was not assigned to rank {rank}"
-    offset = overlap_info.offsets[bucket_index]
-    for i, grad in enumerate(bucket.gradients()):
-        gradients[offset + i] = grad
+    gradients_offset = overlap_info.offsets[bucket_index]
+    bucket_assignment = zero._bucket_assignments_per_rank[rank][bucket_index]
+    bucket_offset = bucket_assignment.offset
+    length = len(bucket_assignment.parameters)
+    bucket_gradients = bucket.gradients()[bucket_offset:bucket_offset + length]
+    for i, grad in enumerate(bucket_gradients):
+        gradients[gradients_offset + i] = grad
 
     zero._local_step(gradients)
 
@@ -54,7 +62,6 @@ def _perform_local_step(
 def _broadcast_bucket(
     bucket_index: int,
     zero: ZeroRedundancyOptimizer,
-    assigned_rank: int,
 ):
     r"""
     Broadcasts a bucket's parameters.
@@ -64,58 +71,104 @@ def _broadcast_bucket(
             parameters to broadcast.
         zero (ZeroRedundancyOptimizer): the calling process's
             :class:`ZeroRedundancyOptimizer` instance.
-        assigned_rank (int): the rank assigned to the bucket; it has the
-            updated parameters and serves as the source for the broadcast.
     """
     overlap_info = zero._overlap_info
-    device = overlap_info.params_per_bucket[bucket_index][0].device
-    device_index = zero._device_to_device_index[device]
-    assert bucket_index in zero._buckets[device_index][assigned_rank]
-    overlap_info.broadcast_handles.append(
-        dist.broadcast(
-            zero._buckets[device_index][assigned_rank][bucket_index],
-            src=assigned_rank,
-            async_op=True
-        )
-    )
+    assert len(overlap_info.assigned_ranks_per_bucket) > bucket_index, \
+        "`assigned_ranks_per_bucket` is not fully constructed"
+    # Sort to ensure the same ordering across ranks
+    assigned_ranks = sorted(overlap_info.assigned_ranks_per_bucket[bucket_index])
+    assert len(assigned_ranks) > 0, f"Bucket {bucket_index} should be " \
+        "assigned to at least one rank"
+    for assigned_rank in assigned_ranks:
+        bucket_assignments = zero._bucket_assignments_per_rank[assigned_rank]
+        if bucket_index in bucket_assignments:
+            overlap_info.broadcast_handles.append(
+                dist.broadcast(
+                    bucket_assignments[bucket_index].tensor,
+                    src=_get_global_rank(zero.process_group, assigned_rank),
+                    group=zero.process_group,
+                    async_op=True,
+                )
+            )
 
-def _collect_ddp_bucket_info(
+
+def _save_ddp_bucket_info(
     bucket: dist.GradBucket,
     zero: ZeroRedundancyOptimizer,
-    rank: int,
-    assigned_rank: int,
 ):
     r"""
-    Collects :class:`DistributedDataParallel` gradient bucket information for
-    the :class:`ZeroRedundancyOptimizer` instance ``zero`` to use when
-    overlapping.
+    Saves :class:`DistributedDataParallel` gradient bucket information for the
+    :class:`ZeroRedundancyOptimizer` instance ``zero`` to use when overlapping.
+    In particular, this function is meant to be called upon seeing each
+    gradient bucket, meaning it does not save or compute any global
+    information.
 
     Arguments:
         bucket (dist.GradBucket): the current gradient bucket.
         zero (ZeroRedundancyOptimizer): the calling process's
             :class:`ZeroRedundancyOptimizer` instance.
-        rank (int): the calling process's rank.
-        assigned_rank (int): the rank assigned to update the parameters
-            corresponding to ``bucket``.
     """
     overlap_info = zero._overlap_info
-    bucket_index = bucket.index()
     bucket_params = bucket.parameters()
-    assert len(bucket_params) > 0, "Bucket {bucket_index} is empty"
-    params_per_rank = overlap_info.params_per_rank
-    params_per_bucket = overlap_info.params_per_bucket
+    assert len(bucket_params) > 0, "Empty bucket"
 
-    # Collect relevant information
-    if assigned_rank == rank:
-        overlap_info.offsets[bucket_index] = len(params_per_rank[assigned_rank])
-    params_per_rank[assigned_rank].extend(bucket_params)
-    params_per_bucket.append(bucket_params)
+    # Save the parameters in the bucket
+    overlap_info.params_per_bucket.append(bucket_params)
+    if overlap_info.shard_buckets:
+        # Additionally save the bucket size for the assignment heuristic to use
+        bucket_size = 0
+        for param in bucket_params:
+            bucket_size += param.numel()
+        assert overlap_info.total_size is not None
+        overlap_info.total_size += bucket_size
+
+
+def _hook_with_zero_step_setup(
+    ddp_ref: weakref.ReferenceType,
+    zero: ZeroRedundancyOptimizer,
+    bucket: dist.GradBucket,
+):
+    r"""
+    Encapsulates the setup logic for :func:`hook_with_zero_step` and
+    :func:`hook_with_zero_step_interleaved`, meaning the logic to run in the
+    hook before the backward pass and optimizer step can actually be
+    overlapped. This is factored out since it is common to both
+    :func:`hook_with_zero_step` and :func:`hook_with_zero_step_interleaved`.
+
+    Arguments:
+        ddp_ref (weakref.ReferenceType): weak reference to the process's
+            :class:`DistributedDataParallel` instance.
+        zero (ZeroRedundancyOptimizer): the calling process's
+            :class:`ZeroRedundancyOptimizer` instance.
+        bucket (dist.GradBucket): the current gradient bucket.
+    """
+    # Proceed as normal until the DDP buckets have been rebuilt
+    if not ddp_ref()._has_rebuilt_buckets:  # type: ignore[union-attr]
+        assert zero._overlap_info.status == _OverlapStatus.UNINITIALIZED
+        return
+
+    bucket_index = bucket.index()
+    overlap_info = zero._overlap_info
+    if overlap_info.status == _OverlapStatus.UNINITIALIZED:
+        overlap_info.status = _OverlapStatus.DDP_HAS_REBUILT_BUCKETS
+
+    if overlap_info.status == _OverlapStatus.DDP_HAS_REBUILT_BUCKETS:
+        if bucket_index == 0 and len(overlap_info.params_per_bucket) > 0:
+            # This corresponds to the first bucket of the backward pass
+            # immediately after all information has been saved, so we
+            # can perform the delayed ZeRO initialization
+            zero._init_zero_for_overlap()
+        else:
+            # Once DDP buckets have been rebuilt but ZeRO has not been
+            # properly initialized yet, save the information needed
+            _save_ddp_bucket_info(bucket, zero)
 
 
 def hook_with_zero_step(
     hook: Callable[[Any, dist.GradBucket], torch.futures.Future],
     ddp: DistributedDataParallel,
     zero: ZeroRedundancyOptimizer,
+    shard_buckets: bool = False,
 ) -> Callable[[Any, dist.GradBucket], torch.futures.Future[torch.Tensor]]:
     r"""
     Modifies the given ``hook`` to overlap the :class:`ZeroRedundancyOptimizer`
@@ -139,6 +192,12 @@ def hook_with_zero_step(
             instance to use.
         zero (ZeroRedundancyOptimizer): the :class:`ZeroRedundancyOptimizer`
             instance to use.
+        shard_buckets (bool): if ``True``, then the assignment of each
+            :class:`DistributedDataParallel` bucket is partitioned across
+            possibly multiple :class:`ZeroRedundancyOptimizer` instances (i.e.
+            across possibly multiple ranks) to approximate uniformity; if
+            ``False``, then each bucket is wholly assigned to a single
+            :class:`ZeroRedundancyOptimizer` instance (i.e. to a single rank).
 
     Returns:
         The modified hook.
@@ -151,24 +210,32 @@ def hook_with_zero_step(
     .. warning::
         Given the way that overlapping :class:`DistributedDataParallel` with
         :class:`ZeroRedundancyOptimizer` is currently implemented, the first
-        two training iterations do not perform parameter updates in the
-        optimizer step. This is because it needs information about the gradient
-        bucketing strategy used by :class:`DistributedDataParallel`, which is
-        not finalized until the second forward pass.
+        two or three training iterations do not perform parameter updates in
+        the optimizer step, depending on if ``static_graph=False`` or
+        ``static_graph=True``, respectively. This is because it needs
+        information about the gradient bucketing strategy used by
+        :class:`DistributedDataParallel`, which is not finalized until the
+        second forward pass if ``static_graph=False`` or until the third
+        forward pass if ``static_graph=True``.
     """
     if not zero._overlap_with_ddp:
         raise ValueError(
             "ZeroRedundancyOptimizer must be constructed with "
             "`overlap_with_ddp=True` to use this hook properly"
         )
+    ddp_ref = weakref.ref(ddp)
 
     # NOTE: Gloo may hang with this overlapping approach, so we require
     # NCCL backend for now; see https://github.com/pytorch/pytorch/issues/62300
-    if dist.get_backend() != dist.Backend.NCCL:
+    if dist.get_backend(ddp_ref().process_group) != dist.Backend.NCCL:  # type: ignore[union-attr]
         raise RuntimeError(
             "Overlapping DDP with ZeRO using this approach currently requires "
             "NCCL backend to avoid hangs"
         )
+
+    if shard_buckets:
+        zero._overlap_info.shard_buckets = True
+        zero._overlap_info.total_size = 0
 
     def hook_with_zero_fn(
         state: Any,
@@ -189,30 +256,21 @@ def hook_with_zero_step(
                 gradient bucket.
         """
         fut = hook(state, bucket)
+        _hook_with_zero_step_setup(ddp_ref, zero, bucket)
+        if zero._overlap_info.status != _OverlapStatus.INITIALIZED:
+            return fut
+
         overlap_info = zero._overlap_info
         bucket_index = bucket.index()
-
-        # Proceed as normal until the DDP buckets have been rebuilt
-        if not ddp._has_rebuilt_buckets:
-            assert overlap_info.status == _OverlapStatus.UNINITIALIZED
-            return fut
-
-        if overlap_info.status == _OverlapStatus.UNINITIALIZED:
-            overlap_info.status = _OverlapStatus.DDP_HAS_REBUILT_BUCKETS
-
         rank = zero.global_rank
-        assigned_rank = zero._ddp_bucket_index_to_rank(bucket_index)
-
-        # Once DDP buckets have been rebuilt but ZeRO has not been
-        # properly initialized yet, collect the information needed
-        if overlap_info.status == _OverlapStatus.DDP_HAS_REBUILT_BUCKETS:
-            _collect_ddp_bucket_info(bucket, zero, rank, assigned_rank)
-            return fut
 
         assert overlap_info.status == _OverlapStatus.INITIALIZED
+        assert len(overlap_info.assigned_ranks_per_bucket) > bucket_index, \
+            "`assigned_ranks_per_bucket` is not fully constructed"
+        assigned_to_bucket = rank in overlap_info.assigned_ranks_per_bucket[bucket_index]
 
         # Save the bucket reference and all-reduce future for the final bucket
-        if assigned_rank == rank:
+        if assigned_to_bucket:
             overlap_info.bucket_index_to_bucket[bucket_index] = bucket
             overlap_info.bucket_index_to_future[bucket_index] = fut
 
@@ -238,8 +296,8 @@ def hook_with_zero_step(
         # all-reduce future since that would add synchronization that delays
         # all optimizer computation to wait for that last all-reduce
         for bucket_index in range(num_buckets):
-            assigned_rank = zero._ddp_bucket_index_to_rank(bucket_index)
-            if assigned_rank == rank:
+            assigned_ranks = overlap_info.assigned_ranks_per_bucket[bucket_index]
+            if rank in assigned_ranks:
                 # Wait on the bucket's all-reduce future to ensure correct
                 # gradients
                 assert bucket_index in overlap_info.bucket_index_to_future, \
@@ -252,11 +310,11 @@ def hook_with_zero_step(
                 curr_bucket = overlap_info.bucket_index_to_bucket[bucket_index]
                 _perform_local_step(curr_bucket, zero, rank)
 
-            _broadcast_bucket(bucket_index, zero, assigned_rank)
+            _broadcast_bucket(bucket_index, zero)
 
         # Ensure that all parameter updates are finished before the
         # next forward pass
-        overlap_info.wait_for_broadcasts(num_buckets, rank)
+        overlap_info.wait_for_broadcasts()
         overlap_info.clear_per_iter_info()
 
         return fut
@@ -268,6 +326,7 @@ def hook_with_zero_step_interleaved(
     hook: Callable[[Any, dist.GradBucket], torch.futures.Future],
     ddp: DistributedDataParallel,
     zero: ZeroRedundancyOptimizer,
+    shard_buckets: bool = False,
 ) -> Callable[[Any, dist.GradBucket], torch.futures.Future[torch.Tensor]]:
     r"""
     Modifies the given ``hook`` to overlap the :class:`ZeroRedundancyOptimizer`
@@ -292,6 +351,12 @@ def hook_with_zero_step_interleaved(
             instance to use.
         zero (ZeroRedundancyOptimizer): the :class:`ZeroRedundancyOptimizer`
             instance to use.
+        shard_buckets (bool): if ``True``, then the assignment of each
+            :class:`DistributedDataParallel` bucket is partitioned across
+            possibly multiple :class:`ZeroRedundancyOptimizer` instances (i.e.
+            across possibly multiple ranks) to approximate uniformity; if
+            ``False``, then each bucket is wholly assigned to a single
+            :class:`ZeroRedundancyOptimizer` instance (i.e. to a single rank).
 
     Returns:
         The modified hook.
@@ -304,24 +369,32 @@ def hook_with_zero_step_interleaved(
     .. warning::
         Given the way that overlapping :class:`DistributedDataParallel` with
         :class:`ZeroRedundancyOptimizer` is currently implemented, the first
-        two training iterations do not perform parameter updates in the
-        optimizer step. This is because it needs information about the gradient
-        bucketing strategy used by :class:`DistributedDataParallel`, which is
-        not finalized until the second forward pass.
+        two or three training iterations do not perform parameter updates in
+        the optimizer step, depending on if ``static_graph=False`` or
+        ``static_graph=True``, respectively. This is because it needs
+        information about the gradient bucketing strategy used by
+        :class:`DistributedDataParallel`, which is not finalized until the
+        second forward pass if ``static_graph=False`` or until the third
+        forward pass if ``static_graph=True``.
     """
     if not zero._overlap_with_ddp:
         raise ValueError(
             "ZeroRedundancyOptimizer must be constructed with "
             "`overlap_with_ddp=True` to use this hook properly"
         )
+    ddp_ref = weakref.ref(ddp)
 
     # NOTE: Gloo may hang with this overlapping approach, so we require
     # NCCL backend for now; see https://github.com/pytorch/pytorch/issues/62300
-    if dist.get_backend() != dist.Backend.NCCL:
+    if dist.get_backend(ddp_ref().process_group) != dist.Backend.NCCL:  # type: ignore[union-attr]
         raise RuntimeError(
             "Overlapping DDP with ZeRO using this approach currently requires "
             "NCCL backend to avoid hangs"
         )
+
+    if shard_buckets:
+        zero._overlap_info.shard_buckets = True
+        zero._overlap_info.total_size = 0
 
     def hook_with_zero_interleaved_fn(
         state,
@@ -337,10 +410,8 @@ def hook_with_zero_step_interleaved(
                 gradient bucket.
         """
         fut = hook(state, bucket)
-
-        # Proceed as normal until the DDP buckets have been rebuilt
-        if not ddp._has_rebuilt_buckets:
-            assert zero._overlap_info.status == _OverlapStatus.UNINITIALIZED
+        _hook_with_zero_step_setup(ddp_ref, zero, bucket)
+        if zero._overlap_info.status != _OverlapStatus.INITIALIZED:
             return fut
 
         def zero_step(fut: torch.futures.Future) -> torch.Tensor:
@@ -353,32 +424,22 @@ def hook_with_zero_step_interleaved(
                 A :class:`torch.Tensor` representing the contents of the
                 gradient bucket.
             """
-            assert ddp._has_rebuilt_buckets
-
+            overlap_info = zero._overlap_info
             bucket_index = bucket.index()
             rank = zero.global_rank
-            assigned_rank = zero._ddp_bucket_index_to_rank(bucket_index)
-            overlap_info = zero._overlap_info
-            if overlap_info.status == _OverlapStatus.UNINITIALIZED:
-                overlap_info.status = _OverlapStatus.DDP_HAS_REBUILT_BUCKETS
 
-            # Once DDP buckets have been rebuilt but ZeRO has not been
-            # properly initialized yet, collect the information needed
-            if overlap_info.status == _OverlapStatus.DDP_HAS_REBUILT_BUCKETS:
-                _collect_ddp_bucket_info(bucket, zero, rank, assigned_rank)
-                return bucket.buffer()
-
+            assigned_ranks = overlap_info.assigned_ranks_per_bucket[bucket_index]
             overlap_info.bucket_indices_seen.append(bucket_index)
-            if assigned_rank == rank:
+            if rank in assigned_ranks:
                 _perform_local_step(bucket, zero, rank)
 
-            _broadcast_bucket(bucket_index, zero, assigned_rank)
+            _broadcast_bucket(bucket_index, zero)
 
             num_buckets = len(overlap_info.params_per_bucket)
             if len(overlap_info.bucket_indices_seen) == num_buckets:
                 # Ensure that all parameter updates are finished before the
                 # next forward pass
-                overlap_info.wait_for_broadcasts(num_buckets, rank)
+                overlap_info.wait_for_broadcasts()
                 overlap_info.clear_per_iter_info()
 
             return bucket.buffer()

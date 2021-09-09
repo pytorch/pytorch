@@ -515,7 +515,7 @@ Tensor cudnn_convolution_relu(
       /*layout=*/c10::nullopt,
       /*device=*/kCUDA,
       /*pin_memory=*/c10::nullopt,
-      /*memory_format=*/at::MemoryFormat::Contiguous);
+      /*memory_format=*/input_t.suggest_memory_format());
   if (output_t.numel() == 0) {
     return output_t;
   }

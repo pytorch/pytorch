@@ -18,6 +18,7 @@
 #include <c10/core/ScalarType.h>
 
 #include <set>
+#include <unordered_set>
 
 struct DisableTorchDispatch {
   DisableTorchDispatch() : guard_(c10::DispatchKey::Python) {
@@ -73,7 +74,13 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
       .value("CUDA", ActivityType::CUDA);
 
   py::class_<ProfilerConfig>(m, "ProfilerConfig")
-      .def(py::init<ProfilerState, bool, bool, bool, bool>());
+      .def(py::init<ProfilerState,
+          bool, /* record_input_shapes */
+          bool, /* profile_memory */
+          bool, /* with_stac k*/
+          bool, /* with_flops */
+          bool  /* with_modules */
+          >());
 
   py::class_<LegacyEvent>(m, "ProfilerEvent")
       .def("kind", &LegacyEvent::kindStr)
@@ -107,7 +114,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
       .value("IDEEP", c10::DeviceType::IDEEP)
       .value("HIP", c10::DeviceType::HIP)
       .value("FPGA", c10::DeviceType::FPGA)
-      .value("MSNPU", c10::DeviceType::MSNPU)
+      .value("ORT", c10::DeviceType::ORT)
       .value("XLA", c10::DeviceType::XLA)
       .value("Lazy", c10::DeviceType::Lazy)
       .value("MLC", c10::DeviceType::MLC)
@@ -217,7 +224,11 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
 #endif // USE_KINETO
     ;
 
-  m.def("_enable_profiler", enableProfiler);
+  m.def("_enable_profiler",
+        &enableProfiler,
+        py::arg("config"),
+        py::arg("activities"),
+        py::arg("scopes") = std::unordered_set<at::RecordScope>());
   m.def("_disable_profiler", disableProfiler);
   m.def("_prepare_profiler", prepareProfiler);
 
@@ -272,10 +283,10 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
   m.def("_clear_callbacks", []() {
     at::clearCallbacks();
   });
-  m.def("_register_default_hooks", [](py::function &pack_hook, py::function &unpack_hook) {
+  m.def("_register_saved_tensors_default_hooks", [](py::function &pack_hook, py::function &unpack_hook) {
     torch::autograd::PyDefaultSavedVariableHooks::set_hooks(pack_hook, unpack_hook);
   });
-  m.def("_reset_default_hooks", []() {
+  m.def("_reset_saved_tensors_default_hooks", []() {
     torch::autograd::PyDefaultSavedVariableHooks::reset_hooks();
   });
 
@@ -339,6 +350,18 @@ static PyObject * is_autocast_cpu_enabled(PyObject* _unused, PyObject *arg) {
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject * set_autocast_gpu_dtype(PyObject* _unused, PyObject *arg) {
+  HANDLE_TH_ERRORS
+  if (!THPDtype_Check(arg)) {
+    throw TypeError(
+        "dtype must be a torch.dtype (got %s)", Py_TYPE(arg)->tp_name);
+  }
+  at::ScalarType targetType = reinterpret_cast<THPDtype*>(arg)->scalar_type;
+  at::autocast::set_autocast_gpu_dtype(targetType);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject * set_autocast_cpu_dtype(PyObject* _unused, PyObject *arg) {
   HANDLE_TH_ERRORS
   if (!THPDtype_Check(arg)) {
@@ -361,6 +384,13 @@ static const char* scalarTypeName(const at::ScalarType type) {
     default:
       throw std::runtime_error("unknown scalar type for autocast");
   }
+}
+
+static PyObject * get_autocast_gpu_dtype(PyObject* _unused, PyObject *arg){
+  HANDLE_TH_ERRORS
+  at::ScalarType current_dtype = at::autocast::get_autocast_gpu_dtype();
+  return THPDtype_New(current_dtype, scalarTypeName(current_dtype));
+  END_HANDLE_TH_ERRORS
 }
 
 static PyObject * get_autocast_cpu_dtype(PyObject* _unused, PyObject *arg){
@@ -386,6 +416,26 @@ static PyObject * autocast_increment_nesting(PyObject* _unused, PyObject *arg) {
 static PyObject * autocast_decrement_nesting(PyObject* _unused, PyObject *arg) {
   HANDLE_TH_ERRORS
   return THPUtils_packInt64(at::autocast::decrement_nesting());
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject * is_autocast_cache_enabled(PyObject* _unused, PyObject *arg) {
+  HANDLE_TH_ERRORS
+  if (at::autocast::is_autocast_cache_enabled()) {
+    Py_RETURN_TRUE;
+  } else {
+    Py_RETURN_FALSE;
+  }
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject * set_autocast_cache_enabled(PyObject* _unused, PyObject *arg) {
+  HANDLE_TH_ERRORS
+  if (!PyBool_Check(arg)) {
+    throw TypeError("enabled must be a bool (got %s)", Py_TYPE(arg)->tp_name);
+  }
+  at::autocast::set_autocast_cache_enabled(arg == Py_True);
+  Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
 
@@ -476,8 +526,12 @@ static PyMethodDef methods[] = { // NOLINT
   {"is_autocast_cpu_enabled", is_autocast_cpu_enabled, METH_NOARGS, nullptr},
   {"set_autocast_cpu_dtype", set_autocast_cpu_dtype, METH_O, nullptr},
   {"get_autocast_cpu_dtype", get_autocast_cpu_dtype, METH_NOARGS, nullptr},
+  {"set_autocast_gpu_dtype", set_autocast_gpu_dtype, METH_O, nullptr},
+  {"get_autocast_gpu_dtype", get_autocast_gpu_dtype, METH_NOARGS, nullptr},
   {"autocast_increment_nesting", autocast_increment_nesting, METH_NOARGS, nullptr},
   {"autocast_decrement_nesting", autocast_decrement_nesting, METH_NOARGS, nullptr},
+  {"is_autocast_cache_enabled", is_autocast_cache_enabled, METH_NOARGS, nullptr},
+  {"set_autocast_cache_enabled", set_autocast_cache_enabled, METH_O, nullptr},
   {"set_anomaly_enabled", set_anomaly_mode_enabled, METH_O, nullptr},
   {"is_anomaly_enabled", is_anomaly_mode_enabled, METH_NOARGS, nullptr},
   {"_enter_dual_level", python_enter_dual_level, METH_NOARGS, nullptr},
