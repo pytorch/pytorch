@@ -1,5 +1,7 @@
 #include <torch/csrc/autograd/FunctionsManual.h>
 #include <torch/csrc/autograd/variable.h>
+#include <torch/csrc/autograd/functions/utils.h>
+
 
 #include <ATen/ATen.h>
 #include <ATen/AccumulateType.h>
@@ -42,10 +44,6 @@ const char* kCudnnDoubleBackwardMsg = "Double backwards is not supported for CuD
 
 bool isDefined(const c10::optional<Tensor>& t) {
   return t.has_value() && t->defined();
-}
-
-bool isFwGradDefined(const c10::optional<Tensor>& t) {
-  return t.has_value() && t->defined() && t->_fw_grad(/*level */ 0).defined();
 }
 
 Tensor toNonOptTensor(const c10::optional<Tensor>& t) {
@@ -1006,6 +1004,20 @@ Tensor masked_scatter_backward(const Tensor & grad, const Tensor & mask, IntArra
     mask_selected = at::cat({mask_selected, zeros_fillin}, 0);
   }
   return mask_selected.view(sizes);
+}
+
+Tensor cholesky_jvp(const Tensor& input_tangent, const Tensor& L, bool upper) {
+  // Differentiation of the Cholesky decomposition, Iain Murray
+  // https://arxiv.org/abs/1602.07527
+  // equation 8
+  auto input_tangent_ = upper ? input_tangent.transpose(-1, -2).conj() : input_tangent;
+  auto L_ = upper ? L.transpose(-1, -2).conj() : L;
+
+  auto L_inverse = std::get<0>(at::triangular_solve(at::eye(L.size(-1), L.options()), L_, /*upper=*/false));
+  auto phi = at::matmul(at::matmul(L_inverse, input_tangent_), L_inverse.transpose(-2, -1).conj());
+  phi.tril_().diagonal(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1).mul_(0.5);
+  auto L_tangent = L_.matmul(phi);
+  return upper ? L_tangent.transpose(-1, -2).conj() : L_tangent;
 }
 
 Tensor cholesky_backward(Tensor grad, bool upper, Tensor L) {

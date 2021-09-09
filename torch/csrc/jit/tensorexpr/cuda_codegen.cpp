@@ -45,18 +45,9 @@ class ScopedVarName {
   VarPtr var_ = nullptr;
 };
 
-static int as_int(ExprPtr expr) {
-  auto v = to<IntImm>(expr);
-  if (!v) {
-    throw malformed_input(
-        "cuda_codegen: non Int expr interpreted as int", expr);
-  }
-
-  return v->value();
-}
-
 static bool is_zero(ExprPtr expr) {
-  return as_int(expr) == 0;
+  auto v = intValue(expr);
+  return v && *v == 0;
 }
 
 static const at::cuda::NVRTC& nvrtc() {
@@ -107,6 +98,8 @@ std::string CudaPrinter::dtypeToCppString(const Dtype& dtype) {
       return "bool";
     case ScalarType::Half:
       return "half";
+    case ScalarType::BFloat16:
+      return "__nv_bfloat16";
     case ScalarType::Char:
       return "char";
     case ScalarType::Byte:
@@ -222,11 +215,11 @@ void CudaPrinter::print_flat_alloc(AllocatePtr alloc) {
   // TODO: this should be merged with the storage flattener.
   int64_t flat_size = 1;
   for (auto dim : dims) {
-    IntImmPtr dim_i = to<IntImm>(dim);
+    auto dim_i = intValue(dim);
     if (dim_i) {
-      flat_size *= dim_i->value();
+      flat_size *= *dim_i;
     } else {
-      throw std::runtime_error("Only IntImm dimensions are supported for now");
+      throw std::runtime_error("Only integer dimensions are supported for now");
     }
   }
   os() << dtypeToCppString(alloc->dtype()) << " " << (*alloc->buffer_var())
@@ -260,20 +253,15 @@ void CudaPrinter::visit(ForPtr v) {
 }
 
 void CudaPrinter::visit(CastPtr v) {
-  if (v->dtype().scalar_type() == ScalarType::Half) {
-    os() << "__float2half(";
-    v->src_value()->accept(this);
-    os() << ")";
-    return;
-  } else if (v->src_value()->dtype().scalar_type() == ScalarType::Half) {
-    os() << "__half2float(";
-    v->src_value()->accept(this);
-    os() << ")";
-    return;
-  }
-
-  os() << "(" << dtypeToCppString(v->dtype()) << ")";
-  os() << "(";
+  std::string castFn = v->dtype().scalar_type() == ScalarType::Half
+      ? "__float2half"
+      : v->dtype().scalar_type() == ScalarType::BFloat16 ? "__float2bfloat16"
+      : v->src_value()->dtype().scalar_type() == ScalarType::Half
+      ? "__half2float"
+      : v->src_value()->dtype().scalar_type() == ScalarType::BFloat16
+      ? "__bfloat162float"
+      : ("(" + dtypeToCppString(v->dtype()) + ")");
+  os() << castFn << "(";
   v->src_value()->accept(this);
   os() << ")";
 }
@@ -329,7 +317,8 @@ void CudaPrinter::visit(LoadPtr v) {
     return;
   }
   if (v->dtype().scalar_type() == ScalarType::Bool ||
-      v->dtype().scalar_type() == ScalarType::Half) {
+      v->dtype().scalar_type() == ScalarType::Half ||
+      v->dtype().scalar_type() == ScalarType::BFloat16) {
     // There's no __ldg overload for bool or half.
     os() << *v->base_handle() << "[" << *v->flat_index() << "]";
     return;
@@ -389,34 +378,33 @@ class AtomicAddFuser : public IRMutator {
 
   StmtPtr mutate(StorePtr v) override {
     BufPtr buf = v->buf();
-    StorePtr orig = const_cast<StorePtr>(v); // NOLINT
 
     // Thread locals never need to be atomic.
     if (thread_local_bufs_.count(buf->base_handle()) != 0) {
-      return orig;
+      return v;
     }
 
     ScalarType dtype = v->value()->dtype().scalar_type();
     if (dtype != ScalarType::Float && dtype != ScalarType::Double) {
-      return orig;
+      return v;
     }
     AddPtr add_v = to<Add>(v->value());
     if (!add_v) {
-      return orig;
+      return v;
     }
     LoadPtr load_v = to<Load>(add_v->lhs());
     if (!load_v) {
-      return orig;
+      return v;
     }
     if (v->base_handle() != load_v->base_handle()) {
-      return orig;
+      return v;
     }
     if (v->indices().empty() && load_v->indices().empty()) {
-      return orig;
+      return v;
     }
     bool index_equal = CheckEqual(v->flat_index(), load_v->flat_index());
     if (!index_equal) {
-      return orig;
+      return v;
     }
 
     // TODO: this checks that the metavars occur directly as an index, but this
@@ -431,7 +419,7 @@ class AtomicAddFuser : public IRMutator {
 
     if (vars_to_find.empty()) {
       // All metavars accounted for.
-      return orig;
+      return v;
     }
 
     return alloc<AtomicAdd>(buf, v->indices(), add_v->rhs());
@@ -609,23 +597,21 @@ class PrioritizeLoad : public IRMutator {
   }
 
   StmtPtr mutate(BlockPtr v) override {
-    BlockPtr v1 = const_cast<BlockPtr>(v); // NOLINT
-    assert(v1);
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    std::list<StmtPtr> stmts = v1->stmts();
+    std::list<StmtPtr> stmts = v->stmts();
     for (StmtPtr stmt : stmts) {
       PushList();
       StmtPtr stmt_new = stmt->accept_mutator(this);
 
-      AddMemLoadsFromList(v1, stmt);
+      AddMemLoadsFromList(v, stmt);
       PopList();
 
       if (stmt_new == stmt) {
         continue;
       }
-      v1->replace_stmt(stmt, stmt_new);
+      v->replace_stmt(stmt, stmt_new);
     }
-    return v1;
+    return v;
   }
 
   ExprPtr mutate(IfThenElsePtr v) override {
@@ -821,7 +807,7 @@ StmtPtr GPUMetaVarRewriter::mutate(BlockPtr v) {
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     std::vector<StmtPtr> stmts;
     for (auto& v : innerSegments) {
-      for (auto* s : v.stmts()) {
+      for (auto s : v.stmts()) {
         stmts.push_back(s);
       }
     }
@@ -835,7 +821,7 @@ StmtPtr GPUMetaVarRewriter::mutate(BlockPtr v) {
     bool need_sync = false;
     // We never mask loops, they'll mask their contents.
     if (!segment.mask()) {
-      TORCH_INTERNAL_ASSERT(segment.stmts().size() == 1);
+      TORCH_INTERNAL_ASSERT(segment.stmts().size() == 1, buildErrorMessage());
       stmts.push_back(segment.stmts()[0]);
       continue;
     }
@@ -955,6 +941,9 @@ void CudaCodeGen::Initialize() {
 
   if (halfChecker.hasHalf()) {
     os() << fuser::cuda::half_support_literal << std::endl;
+  }
+  if (halfChecker.hasBFloat16()) {
+    os() << fuser::cuda::bfloat16_support_literal << std::endl;
   }
 
   std::string func_name = GetUniqueFuncName(kernel_func_name());

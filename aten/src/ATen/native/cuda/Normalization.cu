@@ -2,7 +2,6 @@
 #include <ATen/native/ReduceOps.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/cuda/Loops.cuh>
-#include <ATen/native/cuda/Reduce.cuh>
 #include <ATen/native/cuda/Resize.cuh>
 #include <ATen/native/cuda/Normalization.cuh>
 #include <c10/cuda/CUDAMathCompat.h>
@@ -487,7 +486,8 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cuda(const Tensor& grad_o
   // save_mean and save_invstd, so it needs recalculated.
   const auto acc_type = at::toAccumulateType(input.scalar_type(), /*is_cuda=*/true);
   Tensor mean;
-  if (save_mean->defined()) {
+  TORCH_INTERNAL_ASSERT(save_mean->defined(), "save_mean should always be defined\n");
+  if (save_mean->numel() != 0) {
     mean = *save_mean;
   } else if (needs_reduction) {
     TORCH_CHECK(!train && running_mean->defined());
@@ -496,7 +496,8 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cuda(const Tensor& grad_o
   }
 
   Tensor invstd;
-  if (save_invstd->defined()) {
+  TORCH_INTERNAL_ASSERT(save_invstd->defined(), "save_invstd should always be defined\n");
+  if (save_invstd->numel() != 0) {
     invstd = *save_invstd;
   } else {
     TORCH_CHECK(!train && running_var->defined());
@@ -646,7 +647,9 @@ Tensor batch_norm_backward_elemt_cuda(const Tensor& self, const Tensor& input, c
   c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
   const Tensor& weight = *weight_maybe_owned;
 
-  if (at::cuda::detail::canUse32BitIndexMath(self) && batch_norm_use_channels_last_kernels(self)){
+  if (at::cuda::detail::canUse32BitIndexMath(self) &&
+      batch_norm_use_channels_last_kernels(self) &&
+      batch_norm_use_channels_last_kernels(input))  {
     return batch_norm_backward_elemt_channels_last_cuda_template(self, input, mean, invstd, weight, sum_dy, sum_dy_xmu, count);
   }
 
