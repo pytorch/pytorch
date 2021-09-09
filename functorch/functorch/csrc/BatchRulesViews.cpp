@@ -189,7 +189,7 @@ const Tensor& resize__plumbing(
   return self;
 }
 
-std::tuple<Tensor, optional<int64_t>> squeeze_batching_rule(const Tensor& self, optional<int64_t> bdim) {
+std::tuple<Tensor, optional<int64_t>> squeeze_batch_rule(const Tensor& self, optional<int64_t> bdim) {
   TORCH_INTERNAL_ASSERT(bdim.has_value());
   // Special case for scalar arrays to replicate PyTorch behavior.
   if (self.dim() == 1) {
@@ -224,7 +224,7 @@ std::tuple<Tensor, optional<int64_t>> squeeze_batching_rule(const Tensor& self, 
   return std::make_tuple(result, c10::optional<int64_t>(new_batch_idx));
 }
 
-std::tuple<Tensor, optional<int64_t>> squeeze_dim_batching_rule(const Tensor& self, optional<int64_t> bdim, int64_t dim) {
+std::tuple<Tensor, optional<int64_t>> squeeze_dim_batch_rule(const Tensor& self, optional<int64_t> bdim, int64_t dim) {
   TORCH_INTERNAL_ASSERT(bdim.has_value());
   // Special case for scalar arrays to replicate PyTorch behavior.
   if (self.dim() == 1) {
@@ -265,8 +265,8 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   VMAP_SUPPORT("_unsafe_view", _unsafe_view_batch_rule);
   VMAP_SUPPORT("unsqueeze", unsqueeze_batch_rule);
   m.impl("resize_", resize__plumbing);
-  VMAP_SUPPORT("squeeze", squeeze_batching_rule);
-  VMAP_SUPPORT("squeeze.dim", squeeze_dim_batching_rule);
+  VMAP_SUPPORT("squeeze", squeeze_batch_rule);
+  VMAP_SUPPORT("squeeze.dim", squeeze_dim_batch_rule);
 }
 
 }}
