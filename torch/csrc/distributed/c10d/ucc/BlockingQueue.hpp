@@ -4,6 +4,17 @@
 #include <condition_variable>
 #include <c10/util/Optional.h>
 
+// BlockingQueue is a thread-safe implementation of queue.
+//
+// BlockingQueue::pop() returns a c10::optional of the object.
+// If there is no object in the queue, then pop will block for
+// 1ms or until there is an element pushed to the queue. If pop
+// returns becaue of getting an object, then that object will be
+// returned. If pop returns because of timeout, then c10::nullopt
+// will be returned.
+//
+// BlockingQueue::push() pushes an object to the queue.
+
 template<typename T>
 class BlockingQueue {
   std::queue<T> queue;
