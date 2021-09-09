@@ -66,6 +66,24 @@ namespace torch {
 namespace jit {
 namespace tensorexpr {
 
+static bool isValidIdentifierChar(char c, size_t pos) {
+  return islower(c) || isupper(c) || c == '_' || (pos > 0 && isdigit(c));
+}
+
+// replaces all invalid characters with underscore
+std::string sanitizeName(const std::string& input_name) {
+  std::stringstream sanitized_name;
+  for (size_t i = 0; i < input_name.size(); ++i) {
+    if (isValidIdentifierChar(input_name[i], i)) {
+      sanitized_name << input_name[i];
+    } else {
+      sanitized_name << "_";
+    }
+  }
+  return sanitized_name.str();
+}
+
+
 std::string buildErrorMessage(const std::string& s) {
   static const std::string generic_error_message =
       "This error occured in the fuser. You can turn off the fuser with "
@@ -1338,9 +1356,7 @@ Tensor computeCat(
 Tensor computeConv2d(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
-    const c10::optional<ScalarType>& outputType,
-    std::vector<TensorExprKernel::ConstantDescr>& constants,
-    std::vector<at::Tensor>& constant_tensors) {
+    const c10::optional<ScalarType>& outputType) {
   Dtype dtype = kFloat;
   if (outputType) {
     dtype = Dtype(*outputType);
@@ -1349,23 +1365,7 @@ Tensor computeConv2d(
   BufHandle ResultBuf("conv", outputShape, dtype);
   BufHandle inp = c10::get<BufHandle>(inputs[0]);
   BufHandle w = c10::get<BufHandle>(inputs[1]);
-  bool noBias = true;
-  if (c10::get_if<ArgNone>(&inputs[2])) {
-    noBias = true;
-  }
-  BufHandle b = [&]() {
-    if (noBias) {
-      std::vector<ExprHandle> biasShape;
-      biasShape.push_back(outputShape[1]);
-      auto bias_tensor = at::zeros({outputShape[1].AsNode<LongImm>()->value()});
-      constant_tensors.push_back(bias_tensor);
-      BufPtr buf = alloc<Buf>(
-          "conv2d_bias_opt_", ExprHandleVectorToExprVector(biasShape), dtype);
-      constants.push_back({buf, bias_tensor.data_ptr()});
-      return BufHandle(buf);
-    }
-    return c10::get<BufHandle>(inputs[2]);
-  }();
+  BufHandle b = c10::get<BufHandle>(inputs[2]);
 
   auto strides = _pair_int(inputs[3]);
   auto padding = _pair_int(inputs[4]);
@@ -1438,9 +1438,7 @@ Tensor tensorexpr::computeOperandValue(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
     const c10::optional<ScalarType>& outputType,
-    at::Device device,
-    std::vector<TensorExprKernel::ConstantDescr>& constants,
-    std::vector<at::Tensor>& constant_tensors) {
+    at::Device device) {
   const std::string opStr = op.toQualString();
   if (opStr == "prepacked::conv2d_clamp_run") {
     return computePrepackedConv2dClampRun(inputs, outputShape, outputType);
@@ -2367,9 +2365,7 @@ Tensor tensorexpr::computeOperandValue(
           {inputs[0], (int64_t)1, (int64_t)0},
           outputShape,
           outputType,
-          device,
-          constants,
-          constant_tensors);
+          device);
     }
     case aten::transpose: {
       auto A = c10::get<BufHandle>(inputs[0]);
@@ -2525,8 +2521,7 @@ Tensor tensorexpr::computeOperandValue(
       return computeSoftmax(inputs, outputShape, true);
     }
     case aten::conv2d: {
-      return computeConv2d(
-          inputs, outputShape, outputType, constants, constant_tensors);
+      return computeConv2d(inputs, outputShape, outputType);
     } break;
     case aten::linear: {
       // linear = inputs[0] @ inputs[1] + inputs[2]
@@ -2598,20 +2593,34 @@ Tensor TensorExprKernel::computeValue(const torch::jit::Value* v) {
   } else {
     argInputs.push_back(toArg(inputs[0]));
   }
+
   auto outputType = findDtypeForValue(v->node()->output());
   std::vector<ExprHandle> outputShape = sizesForValue(v);
+  // handle ops optional arguments
+  switch (op) {
+    case aten::conv2d: {
+      // handle optional bias
+      if (c10::get_if<ArgNone>(&argInputs[2])) {
+        Dtype dtype = outputType ? Dtype(*outputType) : kFloat;
+        std::vector<ExprHandle> biasShape;
+        biasShape.push_back(outputShape[1]);
+        auto bias_tensor =
+            at::zeros({outputShape[1].AsNode<LongImm>()->value()});
+        unpacked_constant_tensors_.push_back(bias_tensor);
+        BufPtr buf = alloc<Buf>(
+            "conv2d_bias_opt_" + sanitizeName(v->debugName()),
+            ExprHandleVectorToExprVector(biasShape),
+            dtype);
+        constants_.push_back({buf, bias_tensor.data_ptr()});
+        argInputs[2] = BufHandle(buf);
+      }
+    } break;
+  }
 
   if (NNCLoweringFunction custom_lowering = getCustomLoweringFor(op)) {
     return custom_lowering(argInputs, outputShape, outputType, device_);
   }
-  return computeOperandValue(
-      op,
-      argInputs,
-      outputShape,
-      outputType,
-      device_,
-      constants_,
-      unpacked_constant_tensors_);
+  return computeOperandValue(op, argInputs, outputShape, outputType, device_);
 }
 
 // Return the (lower, upper) loop bounds if they are constants, else nullopt.
@@ -2937,23 +2946,6 @@ TensorExprKernel::BackendType TensorExprKernel::inferBackendTypeFromDevice(
     throw std::runtime_error("Invalid device type");
   }
   return backendType;
-}
-
-static bool isValidIdentifierChar(char c, size_t pos) {
-  return islower(c) || isupper(c) || c == '_' || (pos > 0 && isdigit(c));
-}
-
-// replaces all invalid characters with underscore
-std::string sanitizeName(const std::string& input_name) {
-  std::stringstream sanitized_name;
-  for (size_t i = 0; i < input_name.size(); ++i) {
-    if (isValidIdentifierChar(input_name[i], i)) {
-      sanitized_name << input_name[i];
-    } else {
-      sanitized_name << "_";
-    }
-  }
-  return sanitized_name.str();
 }
 
 // we use the debug names in printing cuda code, they need to be removed
