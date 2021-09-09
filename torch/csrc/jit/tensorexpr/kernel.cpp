@@ -2525,7 +2525,8 @@ Tensor tensorexpr::computeOperandValue(
       return computeSoftmax(inputs, outputShape, true);
     }
     case aten::conv2d: {
-      return computeConv2d(inputs, outputShape, outputType, constants, constant_tensors);
+      return computeConv2d(
+          inputs, outputShape, outputType, constants, constant_tensors);
     } break;
     case aten::linear: {
       // linear = inputs[0] @ inputs[1] + inputs[2]
