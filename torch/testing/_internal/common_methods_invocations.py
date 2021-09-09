@@ -9453,11 +9453,6 @@ op_db: List[OpInfo] = [
         promotes_int_to_float=True,
         dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
         ref=reference_reduction_numpy(np.mean),
-        decorators=(
-            DecorateInfo(toleranceOverride({
-                torch.float16: tol(atol=1e-05, rtol=1e-02),
-            }), 'TestReductions'),
-        ),
         skips=(
             # FIXME: mean does not support passing keepdim without passing dim
             SkipInfo('TestReductions', 'test_dim_default_keepdim'),
@@ -9467,6 +9462,11 @@ op_db: List[OpInfo] = [
             # FIXME: mean does not support passing None to dim
             SkipInfo('TestReductions', 'test_dim_none'),
             SkipInfo('TestReductions', 'test_dim_none_keepdim'),
+            # FIXME: improve precision
+            SkipInfo('TestReductions', 'test_noncontiguous_all',
+                     dtypes=[torch.float16]),
+            SkipInfo('TestReductions', 'test_ref_small_input',
+                     dtypes=[torch.float16]),
             SkipInfo('TestReductions', 'test_ref_extremal_values',
                      device_type='cuda', dtypes=[torch.complex64]),
         ),
@@ -9483,11 +9483,6 @@ op_db: List[OpInfo] = [
         dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
         sample_inputs_func=sample_inputs_prod,
         ref=reference_reduction_numpy(np.prod),
-        decorators=(
-            DecorateInfo(toleranceOverride({
-                torch.float16: tol(atol=1e-05, rtol=1e-02),
-            }), 'TestReductions'),
-        ),
         skips=(
             # FIXME: prod does not support passing keepdim without passing dim
             SkipInfo('TestReductions', 'test_dim_default_keepdim'),
@@ -9513,11 +9508,6 @@ op_db: List[OpInfo] = [
         promotes_int_to_int64=True,
         dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
         ref=reference_reduction_numpy(np.sum),
-        decorators=(
-            DecorateInfo(toleranceOverride({
-                torch.float16: tol(atol=1e-05, rtol=1e-02),
-            }), 'TestReductions'),
-        ),
         skips=(
             # FIXME: sum does not support passing keepdim without passing dim
             SkipInfo('TestReductions', 'test_dim_default_keepdim'),
@@ -9527,6 +9517,13 @@ op_db: List[OpInfo] = [
             # FIXME: sum does not support passing None to dim
             SkipInfo('TestReductions', 'test_dim_none'),
             SkipInfo('TestReductions', 'test_dim_none_keepdim'),
+            # FIXME: improve precision
+            SkipInfo('TestReductions', 'test_noncontiguous_all',
+                     dtypes=[torch.float16]),
+            SkipInfo('TestReductions', 'test_ref_small_input',
+                     dtypes=[torch.float16]),
+            SkipInfo('TestReductions', 'test_ref_duplicate_values',
+                     dtypes=[torch.float16]),
         ),
     ),
     ReductionOpInfo(
@@ -9537,11 +9534,6 @@ op_db: List[OpInfo] = [
         promotes_int_to_int64=True,
         dtypes=all_types_and(torch.bool, torch.float16, torch.bfloat16),
         ref=reference_reduction_numpy(np.nansum),
-        decorators=(
-            DecorateInfo(toleranceOverride({
-                torch.float16: tol(atol=1e-05, rtol=1e-02),
-            }), 'TestReductions'),
-        ),
         skips=(
             # FIXME: nansum does not support passing keepdim without passing dim
             SkipInfo('TestReductions', 'test_dim_default_keepdim'),
@@ -9551,6 +9543,13 @@ op_db: List[OpInfo] = [
             # FIXME: nansum does not support passing None to dim
             SkipInfo('TestReductions', 'test_dim_none'),
             SkipInfo('TestReductions', 'test_dim_none_keepdim'),
+            # FIXME: improve precision
+            SkipInfo('TestReductions', 'test_noncontiguous_all',
+                     dtypes=[torch.float16]),
+            SkipInfo('TestReductions', 'test_ref_small_input',
+                     dtypes=[torch.float16]),
+            SkipInfo('TestReductions', 'test_ref_duplicate_values',
+                     dtypes=[torch.float16]),
         ),
     ),
     OpInfo(
