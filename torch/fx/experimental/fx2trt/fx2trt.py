@@ -231,7 +231,6 @@ class TRTInterpreter(torch.fx.Interpreter):
             EXPLICIT_PRECISION = 1 << (int)(
                 trt.NetworkDefinitionCreationFlag.EXPLICIT_PRECISION
             )
-            print("explicit precision")
             flag |= EXPLICIT_PRECISION
         self.network = self.builder.create_network(flag)
 

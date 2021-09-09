@@ -242,25 +242,23 @@ def acc_ops_conv2d(network, target, args, kwargs, name):
         assert input_val.shape[1] != -1, "Channel dim can't be dynamic for convolution."
 
     weight = get_trt_tensor(network, kwargs["weight"], f"{name}_weight")
-    print("acc ops conv2d")
-    print("weight:", weight.shape)
-    print("weight:", dir(weight.shape))
-    print("weight:", weight)
-    dummy_weight = to_numpy(torch.empty(tuple(weight.shape)))
-    # TODO: assert bias is Tensor
+    # will need to use uninitialized weight and set it later to support
+    # ITensor weights
+    dummy_weight = trt.Weights()
+    # for now we'll assume bias is constant Tensor or None,
+    # and bias being ITensor is not supported in TensorRT api
+    # right now
     bias = to_numpy(kwargs["bias"])
 
     layer = network.add_convolution(
         input=input_val,
-        num_output_maps=dummy_weight.shape[0],
-        kernel_shape=dummy_weight.shape[2:],
+        num_output_maps=weight.shape[0],
+        kernel_shape=weight.shape[2:],
         kernel=dummy_weight,
         bias=bias,
     )
 
-    print("layer dir:", dir(layer))
     layer.set_input(1, weight)
-    print("after set input call")
 
     layer.name = name
     layer.stride = kwargs["stride"]
@@ -1038,34 +1036,31 @@ def acc_ops_linear(network, target, args, kwargs, name):
     # lowering as matmul + add. TensorRT documentation suggests to always lower it as
     # matmul + add but we found in some cases this results in performance regression compared
     # with lowering to fully_connected layer.
-    if isinstance(weight, torch.Tensor):
-        layer = network.add_shuffle(input_val)
-        layer.reshape_dims = tuple(input_val.shape) + (1, 1)
-        layer.name = f"{name}_pre_shuffle"
+    layer = network.add_shuffle(input_val)
+    layer.reshape_dims = tuple(input_val.shape) + (1, 1)
+    layer.name = f"{name}_pre_shuffle"
 
-        # add fully connected
-        layer = network.add_fully_connected(
-            input=layer.get_output(0),
-            num_outputs=kwargs["weight"].shape[0],
-            kernel=to_numpy(kwargs["weight"]),
-            bias=to_numpy(kwargs["bias"]),
-        )
-        layer.name = f"{name}_linear"
+    weight = get_trt_tensor(network, kwargs["weight"], f"{name}_weight")
+    # will need to use uninitialized weight and set it later to support
+    # ITensor weights
+    dummy_weight = trt.Weights()
 
-        # reshape back
-        layer = network.add_shuffle(layer.get_output(0))
-        layer.reshape_dims = tuple(input_val.shape[:-1]) + (kwargs["weight"].shape[0],)
-        layer.name = f"{name}_post_shuffle"
+    # add fully connected
+    layer = network.add_fully_connected(
+        input=layer.get_output(0),
+        num_outputs=weight.shape[0],
+        kernel=dummy_weight,
+        bias=to_numpy(kwargs["bias"]),
+    )
+    layer.set_input(1, weight)
+    layer.name = f"{name}_linear"
 
-        return layer.get_output(0)
-    else:
-        # add matrix multiply and add
-        output = add_matrix_multiply_layer(network, input_val, weight, f"{name}_linear_mm", transpose_other=True)
-        if kwargs["bias"] is not None:
-            return add_binary_elementwise_layer(network, output, kwargs["bias"], trt.ElementWiseOperation.SUM, f"{name}_linear_add")
-        else:
-            return output
+    # reshape back
+    layer = network.add_shuffle(layer.get_output(0))
+    layer.reshape_dims = tuple(input_val.shape[:-1]) + (kwargs["weight"].shape[0],)
+    layer.name = f"{name}_post_shuffle"
 
+    return layer.get_output(0)
 
 def add_clamp(network, input, val, op):
     acc_ops_clamp_shape = (1,) * len(input.shape)  # broadcast all dimensions

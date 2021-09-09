@@ -22,6 +22,7 @@ def build_fp16_trt(rn18):
 def build_int8_trt(rn18):
     rn18 = copy.deepcopy(rn18)
     data = torch.randn(1, 3, 224, 224)
+    # data = torch.randn(1, 32)
     # data = torch.randn(1, 64, 10, 10)
     # TensorRT only supports symmetric quantization
     qconfig = torch.quantization.QConfig(
@@ -80,23 +81,26 @@ def build_int8_trt_implicit_quant(rn18):
 class M(torch.nn.Module):
     def __init__(self):
         super().__init__()
-        self.conv = torch.nn.Conv2d(3, 3, 3, padding=1)
+        self.linear = torch.nn.Linear(32, 46)
+        # self.conv = torch.nn.Conv2d(3, 3, 3, padding=1)
 
     def forward(self, x):
-        out = self.conv(x)
+        # out = self.conv(x)
+        out = self.linear(x)
         # out = torch.nn.functional.relu(out)
-        out += x
+        # out += x
         # out += out
-        out = torch.nn.functional.relu(out)
+        # out = torch.nn.functional.relu(out)
         return out
 
-rn18 = M().eval()
+# rn18 = M().eval()
 # rn18 = rn18.layer1
 print("building int8 graph")
 int8_trt = build_int8_trt(rn18)
 # implicit_int8_trt = build_int8_trt_implicit_quant(rn18)
 # fp16_trt = build_fp16_trt(rn18)
 x = torch.randn(5, 3, 224, 224, device="cuda")
+# x = torch.randn(1, 32, device="cuda")
 rn18 = rn18.cuda()
 
 print("benchmarking")
