@@ -1418,5 +1418,103 @@ TEST_F(Kernel, CustomLowering) {
   torch::jit::testing::FileCheck().check("isnan")->run(oss.str());
 }
 
+//TODO: Why Tensor(2, 2) does not work? Need dtype propagation? 
+//%q.1 : Tensor(2, 2) = aten::quantize_per_tensor(%x.1, %4, %3, %2)
+TEST_F(Kernel, QuantDequant) {
+#ifdef TORCH_ENABLE_LLVM
+  const auto graph_string = R"IR(
+      graph(%x.1 : Float(2, 2, strides=[2, 1], device=cpu)):
+        %2 : int = prim::Constant[value=13]()
+        %3 : int = prim::Constant[value=130]()
+        %4 : float = prim::Constant[value=0.1]()
+        %q.1 : Float(2, 2) = aten::quantize_per_tensor(%x.1, %4, %3, %2)
+        %6 : Float(2, 2) = aten::dequantize(%q.1)
+        return (%6))IR";
+  auto graph = std::make_shared<Graph>();
+  parseIR(graph_string, &*graph);
+
+  auto x = at::rand({2, 2}, TensorOptions(kCPU).dtype(at::kFloat));
+  std::cout << "XXX x:\n" << x << std::endl;
+  auto q = at::quantize_per_tensor(x, 0.1f, 130, at::kQUInt8);
+  c10::quint8* p = q.data_ptr<c10::quint8>();
+  for (int i = 0; i < 4; ++i) {
+    std::cout << i << " -> " << p[i].val_ << std::endl;
+  }
+  std::cout << "XXX q:\n" << q << std::endl;
+  auto dq = at::dequantize(q);
+  std::cout << "XXX dq:\n" << dq << std::endl;
+  TensorExprKernel k(graph);
+  std::vector<at::Tensor> inputs = {x};
+  StmtPtr s = k.getCodeGenStmt();
+  std::cout << "XXX stmt:" << *s << std::endl;
+
+  std::ostringstream oss;
+  oss << *s;
+
+  // Check the IR we produced
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for
+# CHECK-NEXT: for
+# CHECK-NOT: for)IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+
+  std::vector<IValue> stack = fmap<IValue>(inputs);
+  k.run(stack);
+  auto aot_o = stack[0].toTensor();
+  std::cout << "XXX aot_o:\n" << aot_o << std::endl;
+  for (size_t i = 0; i < 2 * 2; i++) {
+    auto of = ((float*)aot_o.data_ptr())[i];
+    auto dqf = ((float*)dq.data_ptr())[i];
+    std::cout << "XXX dq:" << dq << std::endl;
+    std::cout << "XXX of:" << of << std::endl;
+    CHECK_EQ(of, dqf);
+  }
+#endif
+}
+
+TEST_F(Kernel, Quant) {
+#ifdef TORCH_ENABLE_LLVM
+  const auto graph_string = R"IR(
+      graph(%x.1 : Float(2, 2, strides=[2, 1], device=cpu)):
+        %2 : int = prim::Constant[value=13]()
+        %3 : int = prim::Constant[value=130]()
+        %4 : float = prim::Constant[value=0.1]()
+        %q.1 : Float(2, 2) = aten::quantize_per_tensor(%x.1, %4, %3, %2)
+        return (%q.1))IR";
+  auto graph = std::make_shared<Graph>();
+  parseIR(graph_string, &*graph);
+
+  auto x = at::rand({2, 2}, TensorOptions(kCPU).dtype(at::kFloat));
+  std::cout << "XXX x:\n" << x << std::endl;
+  auto q = at::quantize_per_tensor(x, 0.1f, 130, at::kQUInt8);
+  c10::quint8* p = q.data_ptr<c10::quint8>();
+  for (int i = 0; i < 4; ++i) {
+    std::cout << i << " -> " << p[i].val_ << std::endl;
+  }
+  std::cout << "XXX q:\n" << q << std::endl;
+  TensorExprKernel k(graph);
+  std::vector<at::Tensor> inputs = {x};
+  StmtPtr s = k.getCodeGenStmt();
+
+  std::ostringstream oss;
+  oss << *s;
+
+  // Check the IR we produced
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for
+# CHECK-NEXT: for
+# CHECK-NOT: for)IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+
+  std::vector<IValue> stack = fmap<IValue>(inputs);
+  k.run(stack);
+  auto aot_q = stack[0].toTensor();
+  std::cout << "XXX aot_q:\n" << aot_q << std::endl;
+#endif
+}
+
+
 } // namespace jit
 } // namespace torch
