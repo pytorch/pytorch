@@ -17,7 +17,7 @@ namespace jit {
 
 namespace {
 
-void fuseFrozenConvAddReluImpl_cuda(std::shared_ptr<Graph>& graph) {
+void fuseFrozenConvAddReluGPUImpl(std::shared_ptr<Graph>& graph) {
 #ifdef USE_CUDA
 #if AT_CUDNN_ENABLED()
   SubgraphRewriter rewriter;
@@ -120,17 +120,23 @@ void fuseFrozenConvAddReluImpl_cuda(std::shared_ptr<Graph>& graph) {
 #endif
 }
 
-void fuseFrozenConvAddReluImpl_cpu(std::shared_ptr<Graph>& graph) {
+void fuseFrozenConvAddReluCPUImpl(std::shared_ptr<Graph>& graph) {
 #if AT_MKLDNN_ENABLED()
-  SubgraphRewriter rewriter;
+  SubgraphRewriter rewriter_dense_input, rewriter_mkldnn_input;
 
   // MKLDNN does not support conv1d
   std::array<std::string, 2> conv_operators = {"conv2d", "conv3d"};
   std::array<std::string, 2> relu_operators = {"relu", "relu_"};
 
-  auto conv_relu_rstring = CodeTemplate(R"(
+  auto conv_relu_rstring_dense = CodeTemplate(R"(
     graph(%input, %weight, %bias, %stride:int[], %padding:int[], %dilation:int[], %groups:int):
       %x = aten::${conv}(%input, %weight, %bias, %stride, %padding, %dilation, %groups)
+      %res = aten::${relu}(%x)
+      return (%res))");
+
+  auto conv_relu_rstring_mkldnn = CodeTemplate(R"(
+    graph(%input, %weight, %bias, %stride:int[], %padding:int[], %dilation:int[], %groups:int):
+      %x = prim::mkldnn_convolution(%input, %weight, %bias, %stride, %padding, %dilation, %groups)
       %res = aten::${relu}(%x)
       return (%res))");
 
@@ -139,14 +145,23 @@ void fuseFrozenConvAddReluImpl_cpu(std::shared_ptr<Graph>& graph) {
         %res = aten::convolution_relu(%input, %weight, %bias, %stride, %padding, %dilation, %groups)
         return (%res))";
 
+  // dense cpu tensor input path.
   for (const auto& conv : conv_operators) {
     for (const auto& relu : relu_operators) {
       TemplateEnv env;
       env.s("conv", conv);
       env.s("relu", relu);
-      rewriter.RegisterRewritePattern(
-          conv_relu_rstring.format(env), conv_relu_fused);
+      rewriter_dense_input.RegisterRewritePattern(
+          conv_relu_rstring_dense.format(env), conv_relu_fused);
     }
+  }
+
+  // mkldnn tensor input path.
+  for (const auto& relu : relu_operators) {
+    TemplateEnv env;
+    env.s("relu", relu);
+    rewriter_mkldnn_input.RegisterRewritePattern(
+        conv_relu_rstring_mkldnn.format(env), conv_relu_fused);
   }
 
   auto filter = [](const Match& match,
@@ -155,6 +170,7 @@ void fuseFrozenConvAddReluImpl_cpu(std::shared_ptr<Graph>& graph) {
     if (!weight.has_value() || !weight.value().isTensor()) {
       return false;
     }
+
     const at::Tensor& weight_t = weight.value().toTensor();
     if (!(weight_t.device().is_cpu() && weight_t.scalar_type() == at::kFloat) ||
         !weight_t.is_contiguous()) {
@@ -180,15 +196,15 @@ void fuseFrozenConvAddReluImpl_cpu(std::shared_ptr<Graph>& graph) {
   // Convert _convolution and in-place operators for simpler replacement pattern
   // matching
   graph_rewrite_helper::replaceConvolutionWithAtenConv(graph);
-
-  rewriter.runOnGraph(graph, filter);
+  rewriter_dense_input.runOnGraph(graph, filter);
+  rewriter_mkldnn_input.runOnGraph(graph);
 #endif
 }
 } // namespace
 
 void FuseFrozenConvAddRelu(std::shared_ptr<Graph>& graph) {
-  fuseFrozenConvAddReluImpl_cuda(graph);
-  fuseFrozenConvAddReluImpl_cpu(graph);
+  fuseFrozenConvAddReluGPUImpl(graph);
+  fuseFrozenConvAddReluCPUImpl(graph);
 }
 
 } // namespace jit

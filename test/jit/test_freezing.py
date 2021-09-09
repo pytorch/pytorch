@@ -1811,6 +1811,7 @@ class TestFrozenOptimizations(JitTestCase):
         conv_ops = [nn.Conv2d, nn.Conv3d]
         use_tracing = [True, False]
         use_inplace = [True, False]
+        convert_to_mkldnn = [True, False]
         for use_bias, conv, tracing, inplace in product(conv_bias, conv_ops, use_tracing, use_inplace):
             class Net(nn.Module):
                 def __init__(self, in_channels, out_channels, **kwargs):
@@ -1837,10 +1838,11 @@ class TestFrozenOptimizations(JitTestCase):
                     scripted_mod = torch.jit.script(mod_eager)
 
                 frozen_mod = torch.jit.freeze(scripted_mod)
+                if convert_to_mkldnn:
+                    self.run_pass("convert_frozen_ops_to_mkldnn", frozen_mod.graph)
                 self.run_pass("fuse_frozen_conv_add_relu", frozen_mod.graph)
 
                 FileCheck().check("aten::convolution_relu").run(frozen_mod.graph)
-                y = frozen_mod(inp)
                 self.assertEqual(mod_eager(inp), frozen_mod(inp))
 
     @unittest.skipIf(torch._C.has_mkldnn, "Testing no mkldnn")
