@@ -98,6 +98,8 @@ wrap(a_lifted_leaf2)
 
 wrap('len')
 
+wrap('getattr')
+
 @wrap
 def wrapped_via_decorator(a):
     return a + 1
@@ -130,10 +132,17 @@ class Foo(object):  # noqa: B209
 
 class TestFX(JitTestCase):
     def setUp(self):
-        if TEST_WITH_ROCM or IS_FBCODE or IS_WINDOWS or IS_MACOS:
-            return
-        lib_file_path = find_library_location('libtorchbind_test.so')
-        torch.ops.load_library(str(lib_file_path))
+        # Checking for mutable operations whil tracing is feature flagged
+        # Enable it in testing but not by default
+        self.orig_tracer_mutable_flag = torch.fx.proxy.TracerBase.check_mutable_operations
+        torch.fx.proxy.TracerBase.check_mutable_operations = True
+
+        if not (TEST_WITH_ROCM or IS_FBCODE or IS_WINDOWS or IS_MACOS):
+            lib_file_path = find_library_location('libtorchbind_test.so')
+            torch.ops.load_library(str(lib_file_path))
+
+    def tearDown(self):
+        torch.fx.proxy.TracerBase.check_mutable_operations = self.orig_tracer_mutable_flag
 
     def checkGraphModule(self, m: torch.nn.Module, args, kwargs=None):
         """Check that an nn.Module's results match the GraphModule version
@@ -250,6 +259,24 @@ class TestFX(JitTestCase):
         m = MyDictMod()
 
         self.checkGraphModule(m, (input_dict,))
+
+    def test_matmul_tracing(self):
+        const = torch.randn(3)
+
+        def matmul_f(x):
+            return x @ const
+
+        mod = symbolic_trace(matmul_f)
+        inp = torch.randn(3)
+        self.assertEqual(mod(inp), matmul_f(inp))
+
+        def rmatmul_f(x):
+            return const @ x
+
+        mod = symbolic_trace(rmatmul_f)
+        inp = torch.randn(3)
+        self.assertEqual(mod(inp), rmatmul_f(inp))
+
 
     def test_disallow_override(self):
         # Custom delegate to disallow in-place tensor operations
@@ -941,6 +968,14 @@ class TestFX(JitTestCase):
         inp = torch.rand(3, 4)
         self.assertEqual(traced2(inp), inp + 3.0)
         self.assertIs(len, builtins.len)
+
+    def test_torch_fx_getattr(self):
+        class FXGetattrTest(torch.nn.Module):
+            def forward(self, x):
+                return getattr(x, 'nonexistent_attr', torch.Tensor([2, 3]))
+
+        traced = symbolic_trace(FXGetattrTest())
+        self.assertEqual(traced(torch.rand(3, 4)), torch.Tensor([2, 3]))
 
     def test_sqrt(self):
         class Sqrt1(torch.nn.Module):
@@ -2357,6 +2392,19 @@ class TestFX(JitTestCase):
 
         traced.graph.lint()
 
+    def test_throw_out_variant(self):
+        def foo(x):
+            y = torch.rand_like(x)
+            torch.sigmoid(x, out=y)
+            return y
+
+        class MyTracer(torch.fx.Tracer):
+            check_mutable_operations = True
+
+        tracer = MyTracer()
+        with self.assertRaisesRegex(RuntimeError, 'mutable operation aten::sigmoid.out'):
+            traced_graph = tracer.trace(foo)
+
     def test_ast_rewriter_reassigns_submodules(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -3011,6 +3059,15 @@ def run_getitem_target():
 
 
 class TestOperatorSignatures(JitTestCase):
+    def setUp(self):
+        # Checking for mutable operations whil tracing is feature flagged
+        # Enable it in testing but not by default
+        self.orig_tracer_mutable_flag = torch.fx.proxy.TracerBase.check_mutable_operations
+        torch.fx.proxy.TracerBase.check_mutable_operations = True
+
+    def tearDown(self):
+        torch.fx.proxy.TracerBase.check_mutable_operations = self.orig_tracer_mutable_flag
+
     @onlyCPU
     @ops(op_db, allowed_dtypes=(torch.float,))
     def test_get_torch_func_signature_exhaustive(self, device, dtype, op):
@@ -3023,6 +3080,8 @@ class TestOperatorSignatures(JitTestCase):
                            'expand_as',
                            'fill_',
                            'hstack',
+                           'igamma',
+                           'igammac',
                            'linalg.multi_dot',
                            'lu',
                            'norm',
@@ -3079,6 +3138,15 @@ class TestOperatorSignatures(JitTestCase):
 class TestFXAPIBackwardCompatibility(JitTestCase):
     def setUp(self):
         self.maxDiff = None
+
+        # Checking for mutable operations whil tracing is feature flagged
+        # Enable it in testing but not by default
+        self.orig_tracer_mutable_flag = torch.fx.proxy.TracerBase.check_mutable_operations
+        torch.fx.proxy.TracerBase.check_mutable_operations = True
+
+    def tearDown(self):
+        torch.fx.proxy.TracerBase.check_mutable_operations = self.orig_tracer_mutable_flag
+
 
     def _fn_to_stable_annotation_str(self, obj):
         """
@@ -3316,6 +3384,15 @@ class TestFXAPIBackwardCompatibility(JitTestCase):
                                  f"BC guarantees.")
 
 class TestFunctionalTracing(JitTestCase):
+    def setUp(self):
+        # Checking for mutable operations whil tracing is feature flagged
+        # Enable it in testing but not by default
+        self.orig_tracer_mutable_flag = torch.fx.proxy.TracerBase.check_mutable_operations
+        torch.fx.proxy.TracerBase.check_mutable_operations = True
+
+    def tearDown(self):
+        torch.fx.proxy.TracerBase.check_mutable_operations = self.orig_tracer_mutable_flag
+
     IGNORE_FUNCS = ("has_torch_function", "has_torch_function_unary",
                     "has_torch_function_variadic", "handle_torch_function",
                     "boolean_dispatch")
@@ -3330,6 +3407,7 @@ class TestFunctionalTracing(JitTestCase):
     ARG_TYPE_MISMATCH = (TypeError, r", not Proxy$")
     CONTROL_FLOW = (TraceError, r"symbolically traced variables cannot be used as inputs to control flow")
     INTERPOLATE_ARGS_CONFLICT = (ValueError, r"only one of size or scale_factor should be defined")
+    MUTABLE = (RuntimeError, r"Tried to trace mutable operation")
 
     UNTRACEABLE_FUNCTIONALS = {
         "adaptive_avg_pool1d": BUILT_IN_FUNC,
@@ -3449,6 +3527,8 @@ class TestFunctionalTracing(JitTestCase):
 
         "upsample_bilinear": INTERPOLATE_ARGS_CONFLICT,
         "upsample_nearest": INTERPOLATE_ARGS_CONFLICT,
+
+        "normalize" : MUTABLE,
     }
 
     # List of nn.functionals with Tensor inputs but not with type annotation
@@ -3563,6 +3643,15 @@ instantiate_device_type_tests(TestOperatorSignatures, globals())
 
 @skipIfNoTorchVision
 class TestVisionTracing(JitTestCase):
+    def setUp(self):
+        # Checking for mutable operations whil tracing is feature flagged
+        # Enable it in testing but not by default
+        self.orig_tracer_mutable_flag = torch.fx.proxy.TracerBase.check_mutable_operations
+        torch.fx.proxy.TracerBase.check_mutable_operations = True
+
+    def tearDown(self):
+        torch.fx.proxy.TracerBase.check_mutable_operations = self.orig_tracer_mutable_flag
+
     PROXY_ITERATED = (TraceError, r"Proxy object cannot be iterated")
     INCONSISTENT_TYPE = (
         RuntimeError,

@@ -65,16 +65,16 @@ bool Function::append_operator(
   }
 
   auto jit_op = findOperatorFor(opname);
-  std::vector<c10::Argument> args;
+  const std::vector<c10::Argument>* pArgs = nullptr;
   if (jit_op) {
     fn = [jit_op](Stack& stack) { jit_op->getOperation()(stack); };
-    args = jit_op->schema().arguments();
+    pArgs = &jit_op->schema().arguments();
   } else {
     auto op = c10::Dispatcher::singleton().findSchema(opname_c10);
     if (op.has_value()) {
       fn = [op](Stack& stack) { op->callBoxed(&stack); };
       if (op->hasSchema()) {
-        args = op->schema().arguments();
+        pArgs = &op->schema().arguments();
       } else {
         TORCH_CHECK(false, "arguments are missing for operator ", opname);
       }
@@ -83,6 +83,8 @@ bool Function::append_operator(
     }
   }
 
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(pArgs);
+  const auto& args = *pArgs;
   if (model_version == 0x3LL &&
       opname == c10::OperatorName("aten::_convolution", "")) {
     // Since byte-code versions 0x4L, convolution has an additional
@@ -99,21 +101,35 @@ bool Function::append_operator(
     // from model. We can use it to handle backward compatibility.
     if (num_specified_args &&
         num_specified_args.value() < static_cast<int64_t>(args.size())) {
-      // Sanity check at load time, to save perf at runtime
-      for (size_t i = num_specified_args.value(); i < args.size(); ++i) {
-        auto default_val = args[i].default_value();
-        TORCH_CHECK(
-            default_val.has_value(),
-            "Error happened at preparing for default values for the argument. The ",
-            i,
-            "th arguement of operator",
-            opname,
-            " does not have a specified value or default value. ");
-      }
       fn = [fn, num_specified_args, args](Stack& stack) {
-        for (size_t i = num_specified_args.value(); i < args.size(); ++i) {
+        std::vector<IValue> out_args;
+        // The following logic pops and temporarily stores all out arguments
+        // from the stack (which can be 0 or more, and always appended to the
+        // schema), in order to push the necessary default values. Finally, the
+        // out arguments are pushed back into the stack.
+        for (size_t i = args.size() - 1; i > 0 && args.at(i).is_out(); i--) {
+          out_args.push_back(stack.back());
+          stack.pop_back();
+        }
+        size_t start_index = num_specified_args.value() - out_args.size();
+        TORCH_CHECK(
+            start_index >= 0,
+            "The number of output arguments is: ",
+            out_args.size(),
+            ", which is more then the number of specified arguments: ",
+            num_specified_args.value());
+        for (size_t i = start_index; i < (args.size() - out_args.size()); ++i) {
+          TORCH_CHECK(
+              args[i].default_value().has_value(),
+              "Error happened at preparing for default values for the argument. The ",
+              i,
+              "th argument ",
+              args[i].name(),
+              " does not have a specified value or default value. ");
+
           stack.push_back(args[i].default_value());
         }
+        stack.insert(stack.end(), out_args.rbegin(), out_args.rend());
         fn(stack);
       };
     }
