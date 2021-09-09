@@ -434,17 +434,6 @@ Tensor permute_batching_rule(const Tensor& self, IntArrayRef dims) {
   return self_physical.getPhysicalToLogicalMap().apply(result);
 }
 
-Tensor select_batching_rule(const Tensor& self, int64_t dim, int64_t index) {
-  if (!participatesInCurrentLevel(self)) {
-    c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
-    return at::select(self, dim, index);
-  }
-  auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
-  auto dim_physical = self_physical.getPhysicalDim(dim);
-  auto result = self_physical.tensor().select(dim_physical, index);
-  return self_physical.getPhysicalToLogicalMap().apply(result);
-}
-
 static int64_t getGradInputPhysicalDim(int64_t dim, IntArrayRef input_sizes, int64_t num_batch_dims) {
   return maybe_wrap_dim(dim, input_sizes.size()) + num_batch_dims;
 }
@@ -1143,7 +1132,6 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   m.impl("reshape", reshape_batching_rule);
   m.impl("_reshape_alias", _reshape_alias_batching_rule);
   m.impl("reshape_as", native::reshape_as); // composite wrt autograd
-  m.impl("select.int", select_batching_rule);
   m.impl("slice.Tensor", slice_batching_rule);
   m.impl("split.Tensor", split_batching_rule);
   m.impl("split_with_sizes", split_with_sizes_batching_rule);
