@@ -90,12 +90,13 @@ class MapperIterDataPipe(IterDataPipe[T_co]):
         if self.input_col is None and self.output_col is None:
             return res
 
+        # Copy tuple to list and run in-place modification because tuple is immutable.
         if isinstance(data, tuple):
             t_flag = True
             data = list(data)
         else:
             t_flag = False
-            # Deepcopy data to prevent the original date modified. E.g. list, dict
+            # Deepcopy data to prevent the original data modified. E.g. list, dict
             data = copy.deepcopy(data)
 
         if self.output_col is None:
@@ -121,6 +122,7 @@ class MapperIterDataPipe(IterDataPipe[T_co]):
             else:
                 data[self.output_col] = res
 
+        # Convert list back to tuple
         return tuple(data) if t_flag else data
 
     def _apply(self, data, nesting_level):
