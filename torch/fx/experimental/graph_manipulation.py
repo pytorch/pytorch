@@ -385,6 +385,17 @@ def serialize_module(fx_module: GraphModule, weights: Dict, name_prefix="") -> D
                     == stripped_name
                 ):
                     weight[stripped_name]["dtype"] = "acc.uint8fused"
+                # Same as above, but for the 4 bit version.
+                if (
+                    "acc_ops.embedding_bag_4bit_rowwise_offsets" in user_targets
+                    and str(
+                        user_targets[
+                            "acc_ops.embedding_bag_4bit_rowwise_offsets"
+                        ].kwargs["weight"]
+                    )
+                    == stripped_name
+                ):
+                    weight[stripped_name]["dtype"] = "acc.uint4fused"
 
                 serialized_dict["weights"].update(weight)
             else:
