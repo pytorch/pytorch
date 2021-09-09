@@ -3532,10 +3532,10 @@ def sample_inputs_linalg_cholesky(op_info, device, dtype, requires_grad=False, *
     batches = [(), (0, ), (2, ), (1, 1)]
     ns = [5, 0]
     out = []
-    for batch, n in product(batches, ns):
+    for batch, n, upper in product(batches, ns, [True, False]):
         a = random_hermitian_pd_matrix(n, *batch, dtype=dtype, device=device)
         a.requires_grad = requires_grad
-        out.append(SampleInput(a))
+        out.append(SampleInput(a, kwargs={"upper": upper}))
     return out
 
 def sample_inputs_symeig(op_info, device, dtype, requires_grad=False):
@@ -6840,6 +6840,7 @@ op_db: List[OpInfo] = [
            # got: vmap: Calling Tensor.as_strided is not supported
            # unless the batch dims being vmapped over are at the front of the tensor (in memory layout).
            check_batched_gradgrad=False,
+           supports_forward_ad=True,
            sample_inputs_func=sample_inputs_linalg_cholesky,
            gradcheck_wrapper=gradcheck_wrapper_hermitian_input,
            decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, skipCPUIfNoLapack],
@@ -6853,9 +6854,14 @@ op_db: List[OpInfo] = [
            aten_name='linalg_cholesky_ex',
            dtypes=floating_and_complex_types(),
            check_batched_gradgrad=False,
+           supports_forward_ad=True,
            sample_inputs_func=sample_inputs_linalg_cholesky,
            gradcheck_wrapper=gradcheck_wrapper_hermitian_input,
-           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, skipCPUIfNoLapack]),
+           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, skipCPUIfNoLapack],
+           skips=(
+               # Gradcheck for complex generates invalid inputs for this function
+               SkipInfo('TestGradients', 'test_forward_mode_AD', dtypes=complex_types()),),
+           ),
     OpInfo('linalg.cond',
            aten_name='linalg_cond',
            dtypes=floating_and_complex_types(),
@@ -7095,6 +7101,7 @@ op_db: List[OpInfo] = [
            op=torch.lu_solve,
            dtypes=floating_and_complex_types(),
            check_batched_gradgrad=False,
+           supports_forward_ad=True,
            sample_inputs_func=sample_inputs_lu_solve,
            decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, skipCPUIfNoLapack]),
     OpInfo('lu_unpack',
@@ -8676,11 +8683,19 @@ op_db: List[OpInfo] = [
     OpInfo('stack',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_stack,
-           assert_autodiffed=True),
+           assert_autodiffed=True,
+           skips=(
+               # TODO: see https://github.com/pytorch/pytorch/issues/64709
+               SkipInfo('TestCommon', 'test_out'),
+           )),
     OpInfo('hstack',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_hstack_dstack_vstack,
-           supports_forward_ad=True),
+           supports_forward_ad=True,
+           skips=(
+               # TODO: see https://github.com/pytorch/pytorch/issues/64709
+               SkipInfo('TestCommon', 'test_out'),
+           )),
     OpInfo('hypot',
            dtypes=floating_types(),
            dtypesIfCPU=floating_types_and(torch.bfloat16),
@@ -8705,6 +8720,8 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            assert_autodiffed=True,
            skips=(
+               # TODO: see https://github.com/pytorch/pytorch/issues/64709
+               SkipInfo('TestCommon', 'test_out'),
                # RuntimeError: Arguments for call not valid.
                #               Expected a value of type 'List[Tensor]' for argument
                #               'tensors' but instead found type 'Tensor (inferred)'.
@@ -8715,13 +8732,19 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_hstack_dstack_vstack,
            supports_forward_ad=True,
            skips=(
+               # TODO: see https://github.com/pytorch/pytorch/issues/64709
+               SkipInfo('TestCommon', 'test_out'),
                # RuntimeError: _fn() Expected a value of type
                #   'Tensor (inferred)' for argument 't0' but instead found type 'tuple'.
                SkipInfo('TestJit', 'test_jit_alias_remapping'),)),
     OpInfo('dstack',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_hstack_dstack_vstack,
-           supports_forward_ad=True),
+           supports_forward_ad=True,
+           skips=(
+               # TODO: see https://github.com/pytorch/pytorch/issues/64709
+               SkipInfo('TestCommon', 'test_out'),
+           )),
     OpInfo('unfold',
            op=lambda x, *args: x.unfold(*args),
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
