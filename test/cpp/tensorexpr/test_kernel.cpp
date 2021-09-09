@@ -210,7 +210,12 @@ TEST_F(Kernel, Huge) {
   TensorExprKernel k(graph);
   std::ostringstream oss;
   oss << *k.getCodeGenStmt();
-  const std::string& verification_pattern = "# CHECK: 4000000000";
+  // The 4000000000 iterations loop will be split into 500000000 x 8 and the
+  // outer loop will be parallel
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: < 500000000ll;
+# CHECK-NEXT: < 8ll;)IR";
   torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 }
 
@@ -566,10 +571,8 @@ TEST_F(Kernel, CatWoConditionals) {
 # CHECK-NEXT: aten_cat
 # CHECK: for
 # CHECK-NEXT: for
-# CHECK-NEXT: for
 # CHECK-NEXT: aten_cat
 # CHECK: for
-# CHECK-NEXT: for
 # CHECK-NEXT: for
 # CHECK-NEXT: aten_cat)IR";
   torch::jit::testing::FileCheck().run(verification_pattern, oss.str());

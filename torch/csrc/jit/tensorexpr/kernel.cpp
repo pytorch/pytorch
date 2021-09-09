@@ -2529,6 +2529,9 @@ void fuseAllLoops(StmtPtr st) {
       }
       loopsToFuse.push_back(loop);
     }
+    if (loopsToFuse.empty()) {
+      return;
+    }
     if (!loopBoundsAllEqual(loopsToFuse)) {
       return;
     }
@@ -2636,6 +2639,8 @@ StmtPtr TensorExprKernel::transformLoops(BackendType backendType, StmtPtr st) {
     auto root_stmt = l.root_stmt();
     root_stmt->accept(block_analysis.get());
   }
+  l.simplify();
+  GRAPH_DEBUG("after simplify", *l.root_stmt());
 
   // Inlining output & intermediate buffers can duplicate computation.
   // Duplicating work can slow down the program if it's not ameliorated in some
