@@ -740,8 +740,11 @@ _(aten, upsample_linear1d) \
 _(aten, upsample_linear1d_backward) \
 _(aten, upsample_linear1d_forward) \
 _(aten, upsample_nearest1d) \
+_(aten, upsample_nearest_exact1d) \
 _(aten, upsample_nearest1d_backward) \
+_(aten, upsample_nearest_exact1d_backward) \
 _(aten, upsample_nearest1d_forward) \
+_(aten, upsample_nearest_exact1d_forward) \
 _(aten, upsample_nearest2d) \
 _(aten, upsample_nearest2d_backward) \
 _(aten, upsample_nearest2d_forward) \

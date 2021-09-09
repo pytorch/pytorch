@@ -14467,12 +14467,30 @@ class TestNNDeviceType(NNTestCase):
         input = torch.randn(1, 1, 20, requires_grad=True, device=device)
         gradcheck(lambda x: F.interpolate(x, 11, mode='nearest'), [input])
 
+    def test_upsamplingNearestExact1d(self, device):
+        m = nn.Upsample(size=4, mode='nearest-exact')
+        in_t = torch.ones(1, 1, 2, device=device)
+        in_uint8_t = torch.ones(1, 1, 2, dtype=torch.uint8, device=device)
+        with warnings.catch_warnings(record=True) as w:
+            out_t = m(in_t)
+            out_uint8_t = m(in_uint8_t)
+        self.assertEqual(torch.ones(1, 1, 4, device=device), out_t.data)
+        self.assertEqual(torch.ones(1, 1, 4, dtype=torch.uint8, device=device), out_uint8_t.data)
+
+        # Checks upsampling
+        input = torch.randn(1, 1, 2, requires_grad=True, device=device)
+        gradcheck(lambda x: F.interpolate(x, 4, mode='nearest-exact'), [input])
+
+        # Checks downsampling
+        input = torch.randn(1, 1, 20, requires_grad=True, device=device)
+        gradcheck(lambda x: F.interpolate(x, 11, mode='nearest-exact'), [input])
+
         # consistency CUDA/CPU check
         if torch.device(device).type == 'cuda':
             input_cuda = torch.randn(1, 1, 20, device=device)
             input_cpu = input_cuda.cpu()
-            output_cuda = F.interpolate(input_cuda, 4, mode='nearest')
-            output_cpu = F.interpolate(input_cpu, 4, mode='nearest')
+            output_cuda = F.interpolate(input_cuda, 4, mode='nearest-exact')
+            output_cpu = F.interpolate(input_cpu, 4, mode='nearest-exact')
             self.assertEqual(output_cuda.cpu(), output_cpu)
 
         # Checks https://github.com/pytorch/pytorch/issues/34808
@@ -14480,7 +14498,7 @@ class TestNNDeviceType(NNTestCase):
         osize = 11
         in_t = torch.arange(isize, dtype=torch.float, device=device).unsqueeze(0).unsqueeze(0)
         out_t = F.interpolate(
-            in_t, size=(osize, ), recompute_scale_factor=False, mode="nearest"
+            in_t, size=(osize, ), recompute_scale_factor=False, mode="nearest-exact"
         )
         # compute expected output as scikit-image/scipy
         expected_out = torch.zeros(osize, dtype=torch.float, device=device).unsqueeze(0).unsqueeze(0)
@@ -14497,7 +14515,7 @@ class TestNNDeviceType(NNTestCase):
         # See issue: https://github.com/pytorch/pytorch/issues/62396
         for s in [1.00001, ]:
             out_t = F.interpolate(
-                in_t, scale_factor=s, recompute_scale_factor=False, mode="nearest"
+                in_t, scale_factor=s, recompute_scale_factor=False, mode="nearest-exact"
             )
             expected_out = in_t
             self.assertEqual(out_t, expected_out, msg=f"scale: {s}")
@@ -14507,7 +14525,7 @@ class TestNNDeviceType(NNTestCase):
         # See issue: https://github.com/pytorch/pytorch/issues/62396
         for s in [2.00001, ]:
             out_t = F.interpolate(
-                in_t, scale_factor=s, recompute_scale_factor=False, mode="nearest"
+                in_t, scale_factor=s, recompute_scale_factor=False, mode="nearest-exact"
             )
             # input is [[[0, 1, 2, 3, ..., 9]]]
             # expected out is [[[0, 0, 1, 1, 2, 2, ..., 9, 9]]]
