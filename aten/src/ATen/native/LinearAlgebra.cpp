@@ -100,18 +100,47 @@ void common_checks_baddbmm_bmm(Meta& meta, const Tensor& batch1, const Tensor& b
 }
 
 TORCH_META_FUNC(bmm)(const Tensor& self, const Tensor& mat2) {
-  common_checks_baddbmm_bmm(*this, self.resolve_conj(), mat2.resolve_conj(), Scalar(0.0), Scalar(1.0), true);
+    if (self.is_cuda()) {
+        auto& result = maybe_get_output(0);
+
+        TORCH_CHECK(self.dim() == 3, "batch1 must be a 3D tensor");
+        TORCH_CHECK(mat2.dim() == 3, "batch2 must be a 3D tensor");
+
+        set_output({self.sizes()[0], self.sizes()[1], mat2.sizes()[2]}, self.options());
+    } else {
+        common_checks_baddbmm_bmm(*this, self.resolve_conj(), mat2.resolve_conj(), Scalar(0.0), Scalar(1.0), true);
+    }
 }
 
-TORCH_META_FUNC(baddbmm)(const Tensor& self, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha) {
+TORCH_META_FUNC(baddbmm)(const Tensor& self, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha) { 
   auto& result = maybe_get_output(0);
   if (!result.defined()) {
-    set_output({0}, self.options());
+    set_output({0}, batch1.options());
   }
-  auto self_ = expand_size(self, {batch1.size(0), batch1.size(1), batch2.size(2)}, "baddbmm");
-  result.resize_(self_->sizes());
-  result.copy_(*self_);
-  common_checks_baddbmm_bmm(*this, batch1, batch2, beta, alpha, false, result);
+  if (self.is_cuda()) {
+      /* TORCH_CHECK(self_.dim() == 3, "self must be a 3D tensor"); */
+      TORCH_CHECK(batch1.dim() == 3, "batch1 must be a 3D tensor");
+      TORCH_CHECK(batch2.dim() == 3, "batch2 must be a 3D tensor");
+
+      TensorArg args[]{{result, "out", 0}, {self, "self", 1}, {batch1, "batch1", 2}, {batch2, "batch2", 3}};
+      checkAllSameGPU(__func__, args);
+
+      IntArrayRef batch1_sizes = batch1.sizes();
+      IntArrayRef batch2_sizes = batch2.sizes();
+      /* IntArrayRef self_sizes = self_.sizes(); */
+
+      /* TORCH_CHECK(self_sizes[0] == batch1_sizes[0], "self dim 0 must match batch1 dim 0"); */
+      /* TORCH_CHECK(self_sizes[0] == batch2_sizes[0], "self dim 0 must match batch2 dim 0"); */
+      /* TORCH_CHECK(self_sizes[1] == batch1_sizes[1], "self dim 1 must match batch1 dim 1"); */
+      /* TORCH_CHECK(self_sizes[2] == batch2_sizes[2], "self dim 2 must match batch2 dim 2"); */
+      TORCH_CHECK(batch1_sizes[2] == batch2_sizes[1], "batch1 dim 2 must match batch2 dim 1");
+  } else {
+      auto self_ = expand_size(self, {batch1.size(0), batch1.size(1), batch2.size(2)}, "baddbmm");
+      result.resize_(self_->sizes());
+      result.copy_(*self_);
+      common_checks_baddbmm_bmm(*this, batch1, batch2, beta, alpha, false, result);
+  }
+
 }
 
 } // namespace meta

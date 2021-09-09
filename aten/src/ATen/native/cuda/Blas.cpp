@@ -195,11 +195,6 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
 
 const Tensor& baddbmm_out_cuda_impl(const Tensor& result, const Tensor& self, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha) { 
   TORCH_CHECK(self.dim() == 3, "self must be a 3D tensor");
-  TORCH_CHECK(batch1.dim() == 3, "batch1 must be a 3D tensor");
-  TORCH_CHECK(batch2.dim() == 3, "batch2 must be a 3D tensor");
-
-  TensorArg args[]{{result, "out", 0}, {self, "self", 1}, {batch1, "batch1", 2}, {batch2, "batch2", 3}};
-  checkAllSameGPU(__func__, args);
 
   IntArrayRef batch1_sizes = batch1.sizes();
   IntArrayRef batch2_sizes = batch2.sizes();
@@ -207,9 +202,8 @@ const Tensor& baddbmm_out_cuda_impl(const Tensor& result, const Tensor& self, co
 
   TORCH_CHECK(self_sizes[0] == batch1_sizes[0], "self dim 0 must match batch1 dim 0");
   TORCH_CHECK(self_sizes[0] == batch2_sizes[0], "self dim 0 must match batch2 dim 0");
-  TORCH_CHECK(self_sizes[1] == batch1_sizes[1], "self dim 1 must match batch1 dim 1");
+  TORCH_CHECK(self_sizes[1] == batch1_sizes[1], "self dim 1 must match batch1 dim 0");
   TORCH_CHECK(self_sizes[2] == batch2_sizes[2], "self dim 2 must match batch2 dim 2");
-  TORCH_CHECK(batch1_sizes[2] == batch2_sizes[1], "batch1 dim 2 must match batch2 dim 1");
 
   if (!result.is_same(self)) {
     result.resize_as_(self);
