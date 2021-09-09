@@ -11,6 +11,7 @@
 #include <THC/THC.h>
 
 #include <ATen/cuda/CUDAContext.h>
+#include <c10/cuda/CUDAGraphsC10Utils.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/util/irange.h>
 #include <c10/util/Logging.h>
@@ -51,10 +52,6 @@ const std::map<ReduceOp, ncclRedOp_t> ncclOp = {
     {ReduceOp::MAX, ncclMax},
     {ReduceOp::SUM, ncclSum},
     {ReduceOp::PRODUCT, ncclProd},
-#if defined(NCCL_MAJOR) && ((NCCL_MAJOR > 2) || \
-                            (NCCL_MAJOR == 2) && (NCCL_MINOR >= 10))
-    {ReduceOp::AVG, ncclAvg},
-#endif
 };
 
 // NCCL type typing
@@ -67,7 +64,7 @@ std::map<at::ScalarType, ncclDataType_t> ncclDataType = {
     {at::kLong, ncclInt64},
     {at::kHalf, ncclHalf},
     {at::kBool, ncclUint8},
-#if defined(__HIP_PLATFORM_HCC__) && HIP_VERSION >= 301
+#if defined(ENABLE_NCCL_BF16_DATATYPE)
     {at::kBFloat16, ncclBfloat16},
 #endif
 };
@@ -84,19 +81,11 @@ ncclDataType_t getNcclDataType(at::ScalarType type) {
 
 ncclRedOp_t getNcclReduceOp(const ReduceOp reduceOp, at::Tensor& input) {
   try {
-    if (input.scalar_type() == at::kBool) {
-      if (reduceOp == ReduceOp::SUM) {
-        // For bool tensors, map sum to max, which both represent a bitwise or.
-        // This is to prevent overflow issues with sum, since we use uint8 to
-        // represent a bool (see ncclDataType mapping).
-        return ncclMax;
-      }
-#if defined(NCCL_MAJOR) && ((NCCL_MAJOR > 2) || \
-                            (NCCL_MAJOR == 2) && (NCCL_MINOR >= 10))
-      if (reduceOp == ReduceOp::AVG) {
-        TORCH_CHECK(false, "Cannot use ReduceOp.AVG with boolean inputs");
-      }
-#endif
+    if (reduceOp == ReduceOp::SUM && input.scalar_type() == at::kBool) {
+      // For bool tensors, map sum to max, which both represent a bitwise or.
+      // This is to prevent overflow issues with sum, since we use uint8 to
+      // represent a bool (see ncclDataType mapping).
+      return ncclMax;
     }
     return ncclOp.at(reduceOp);
   } catch (const std::out_of_range& e) {
@@ -198,6 +187,17 @@ std::string getExceptionMsgFromExceptionPtr(
     return e.what();
   } catch (...) {
     return "Unknown exception type";
+  }
+}
+
+inline void errorIfCapturingNonCapturableNCCL() {
+  auto status = c10::cuda::currentStreamCaptureStatusMayInitCtx();
+  // parentheses avoid some compiler warnings
+  static const uint64_t min_version = (((uint64_t)2) << 32) + (((uint64_t)9) << 16) + ((uint64_t)6);
+  static const uint64_t cur_version = torch::cuda::nccl::version();
+  if (cur_version < min_version) {
+    TORCH_CHECK(status == c10::cuda::CaptureStatus::None,
+                "Capturing NCCL collectives is only allowed with NCCL >= 2.9.6");
   }
 }
 
@@ -1090,6 +1090,8 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
     PostProcess post,
     OpType opType,
     const char* profilingTitle) {
+
+  errorIfCapturingNonCapturableNCCL();
 
   // Bump collective counter
   if (sequenceNum_) {
