@@ -771,10 +771,10 @@ moduleToFlatbuffers(
 
   std::vector<flatbuffers::Offset<mobile::serialization::ObjectType>> obj_types;
   for (const auto& classptr : serializer->memoized_class_types_) {
-    std::vector<flatbuffers::Offset<flatbuffers::String>> attr_names(classptr->numAttributes());
-    for (size_t i = 0, n = classptr->numAttributes(); i < n; ++i) {
-      attr_names[i] = fbb.CreateSharedString(classptr->getAttributeName(i));
-    }
+    // std::vector<flatbuffers::Offset<flatbuffers::String>> attr_names(classptr->numAttributes());
+    // for (size_t i = 0, n = classptr->numAttributes(); i < n; ++i) {
+    //   attr_names[i] = fbb.CreateSharedString(classptr->getAttributeName(i));
+    // }
     flatbuffers::Offset<mobile::serialization::Function> setattr_offset = 0;
     if (checkHasValidSetGetState(classptr)) {
       Function& setstate = classptr->getMethod("__setstate__");
@@ -787,7 +787,7 @@ moduleToFlatbuffers(
     }
     std::cerr << "module level types " << classptr->name()->qualifiedName() << std::endl;
     obj_types.push_back(
-      CreateObjectTypeDirect(fbb, classptr->name()->qualifiedName().c_str(), &attr_names, setattr_offset));
+      CreateObjectTypeDirect(fbb, classptr->name()->qualifiedName().c_str(), nullptr, setattr_offset));
   }
   auto obj_types_offset = fbb.CreateVector(obj_types);
 

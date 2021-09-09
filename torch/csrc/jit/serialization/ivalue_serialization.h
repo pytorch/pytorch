@@ -70,18 +70,18 @@ class IValueDeserializer {
   IValueDeserializer(
     const std::vector<c10::Storage>& tensor_data,
     const std::vector<c10::StrongTypePtr>& types,
-    std::function<IValue(int, IValue)> obj_loader) :
+    std::function<IValue(int, IValue&&)> obj_loader) :
     tensor_data_(&tensor_data), types_(&types), object_loader_(std::move(obj_loader)) {}
 
   IValueDeserializer(
     std::function<c10::Storage(int)> tensor_loader,
     const std::vector<c10::StrongTypePtr>& types,
-    std::function<IValue(int, IValue)> obj_loader) :
+    std::function<IValue(int, IValue&&)> obj_loader) :
     tensor_data_(nullptr), types_(&types), tensor_loader_(tensor_loader), object_loader_(std::move(obj_loader)) {}
 
   IValue parseIValue(const mobile::serialization::IValue ivalue_type, const void* ivalue_data);
   IValue parseList(const mobile::serialization::List* list);
-  IValue parseTensor(const mobile::serialization::TensorMetadata* tensor);
+  at::Tensor parseTensor(const mobile::serialization::TensorMetadata* tensor);
   IValue parseTuple(const mobile::serialization::Tuple* tuple);
   IValue parseDict(const mobile::serialization::Dict* dict);
   IValue parseObject(const mobile::serialization::Object* object);
@@ -90,7 +90,7 @@ class IValueDeserializer {
   const std::vector<c10::Storage>* tensor_data_;
   const std::vector<c10::StrongTypePtr>* types_;
   std::function<c10::Storage(int)> tensor_loader_;
-  std::function<IValue(int, IValue)> object_loader_;
+  std::function<IValue(int, IValue&&)> object_loader_;
 };
 
 

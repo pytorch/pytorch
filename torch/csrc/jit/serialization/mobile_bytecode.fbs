@@ -4,7 +4,6 @@
 namespace torch.jit.mobile.serialization;
 
 struct Int {
-  // NOTE: pickler uses hand rolled varint
   int_val:long;
 }
 
@@ -31,14 +30,11 @@ table QuantizedSchema {
 }
 
 table TensorMetadata {
-  // TODO(quantized?)
   // torch._utils _rebuild_tensor_v2
   storage_location_index:int;
   // enum ScalarType
   scalar_type: byte;
   storage_offset:int;
-  nbytes:long;
-  element_size:int;
   sizes:[int];
   strides:[int];
   requires_grad:bool;
@@ -99,7 +95,7 @@ table ObjectType {
 }
 
 table Object {
-  type_index: byte;
+  type_index: ubyte;
   attr_names:[string];
   use_setstate:bool;
   state: IValue;
@@ -115,7 +111,7 @@ struct Instruction {
 table Operator {
   name:string;
   overload_name:string;
-  num_args_serialized:byte= -1;
+  num_args_serialized:int = -1;
 }
 
 table Arg {
@@ -132,7 +128,6 @@ table Schema {
 }
 
 table DebugInfo {
-  // put this with instr?
   debug_handle:[long];
 }
 
@@ -141,10 +136,7 @@ table Function {
   instructions:[Instruction];
   operators:[Operator];
   constants:[IValue];
-
-  // index into type table
   types:[ubyte];
-
   register_size:int;
   schema:Schema;
   debug_info:DebugInfo;
@@ -166,7 +158,7 @@ table Module {
 
   storage_data_size:int;  // number of storage data;
 
-  type_annotations:[string];
+  type_annotations: [string];
 }
 
 root_type Module;

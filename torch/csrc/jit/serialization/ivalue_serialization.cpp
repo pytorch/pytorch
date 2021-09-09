@@ -214,8 +214,6 @@ IValueFlatbufferSerializer::IValueFlatbufferSerializer::tensorToFB(flatbuffers::
     /* storage_location_index */ storage_index,
     /* scalar_type */ static_cast<int8_t>(tensor.scalar_type()),
     /* int32_t storage_offset */ tensor.storage_offset(),
-    /* int64_t nbytes */ storage.nbytes(),
-    /* int32_t element_size */ tensor.element_size(),
     /* sizes */ &sizes,
     /* strides */ &strides,
     /* bool requires_grad */ tensor.requires_grad(),
@@ -292,7 +290,7 @@ IValueFlatbufferSerializer::iValueToFB(flatbuffers::FlatBufferBuilder& fbb, cons
 
 }
 
-IValue IValueDeserializer::parseTensor(const mobile::serialization::TensorMetadata* tensor_md) {
+at::Tensor IValueDeserializer::parseTensor(const mobile::serialization::TensorMetadata* tensor_md) {
   at::ScalarType type = static_cast<at::ScalarType>(tensor_md->scalar_type());
   auto options = at::CPU(type).options();
   at::Tensor tensor;
@@ -307,8 +305,8 @@ IValue IValueDeserializer::parseTensor(const mobile::serialization::TensorMetada
       } break;
       case at::kPerChannelAffineFloatQParams:
       case at::kPerChannelAffine: {
-        at::Tensor scales = parseTensor(schema->scales()).toTensor();
-        at::Tensor zero_points = parseTensor(schema->zero_points()).toTensor();
+        at::Tensor scales = parseTensor(schema->scales());
+        at::Tensor zero_points = parseTensor(schema->zero_points());
         tensor = at::_empty_per_channel_affine_quantized(
           {0}, scales, zero_points, schema->axis(), options);
       } break;
@@ -335,7 +333,7 @@ IValue IValueDeserializer::parseTensor(const mobile::serialization::TensorMetada
 
   std::vector<int64_t> size{tensor_md->sizes()->begin(), tensor_md->sizes()->end()};
   std::vector<int64_t> stride{tensor_md->strides()->begin(), tensor_md->strides()->end()};
-  impl->set_sizes_and_strides(size, stride);
+  impl->set_sizes_and_strides(std::move(size), std::move(stride));
   tensor = autograd::make_variable(tensor, tensor_md->requires_grad());
   return tensor;
 }
@@ -375,7 +373,7 @@ IValue IValueDeserializer::parseObject(const mobile::serialization::Object* obje
   IValue state = parseIValue(object->state_type(), object->state());
   auto type_ptr = types_->at(object->type_index());
   if (object->use_setstate()) {
-    return object_loader_(object->type_index(), state);
+    return object_loader_(object->type_index(), std::move(state));
   } else {
     const auto& elements = state.toTuple()->elements();
     size_t ndict = elements.size();
@@ -390,6 +388,7 @@ IValue IValueDeserializer::parseObject(const mobile::serialization::Object* obje
     }
     return obj;
   }
+  std::cerr << "shouldnt be here (ivalue_serialization.cpp:391)" << std::endl;
   return IValue();
 }
 

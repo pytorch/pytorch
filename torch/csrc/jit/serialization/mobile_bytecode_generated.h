@@ -405,12 +405,10 @@ struct TensorMetadata FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
     VT_STORAGE_LOCATION_INDEX = 4,
     VT_SCALAR_TYPE = 6,
     VT_STORAGE_OFFSET = 8,
-    VT_NBYTES = 10,
-    VT_ELEMENT_SIZE = 12,
-    VT_SIZES = 14,
-    VT_STRIDES = 16,
-    VT_REQUIRES_GRAD = 18,
-    VT_QUANTIZED_SCHEMA = 20
+    VT_SIZES = 10,
+    VT_STRIDES = 12,
+    VT_REQUIRES_GRAD = 14,
+    VT_QUANTIZED_SCHEMA = 16
   };
   int32_t storage_location_index() const {
     return GetField<int32_t>(VT_STORAGE_LOCATION_INDEX, 0);
@@ -420,12 +418,6 @@ struct TensorMetadata FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
   }
   int32_t storage_offset() const {
     return GetField<int32_t>(VT_STORAGE_OFFSET, 0);
-  }
-  int64_t nbytes() const {
-    return GetField<int64_t>(VT_NBYTES, 0);
-  }
-  int32_t element_size() const {
-    return GetField<int32_t>(VT_ELEMENT_SIZE, 0);
   }
   const flatbuffers::Vector<int32_t> *sizes() const {
     return GetPointer<const flatbuffers::Vector<int32_t> *>(VT_SIZES);
@@ -444,8 +436,6 @@ struct TensorMetadata FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
            VerifyField<int32_t>(verifier, VT_STORAGE_LOCATION_INDEX) &&
            VerifyField<int8_t>(verifier, VT_SCALAR_TYPE) &&
            VerifyField<int32_t>(verifier, VT_STORAGE_OFFSET) &&
-           VerifyField<int64_t>(verifier, VT_NBYTES) &&
-           VerifyField<int32_t>(verifier, VT_ELEMENT_SIZE) &&
            VerifyOffset(verifier, VT_SIZES) &&
            verifier.VerifyVector(sizes()) &&
            VerifyOffset(verifier, VT_STRIDES) &&
@@ -469,12 +459,6 @@ struct TensorMetadataBuilder {
   }
   void add_storage_offset(int32_t storage_offset) {
     fbb_.AddElement<int32_t>(TensorMetadata::VT_STORAGE_OFFSET, storage_offset, 0);
-  }
-  void add_nbytes(int64_t nbytes) {
-    fbb_.AddElement<int64_t>(TensorMetadata::VT_NBYTES, nbytes, 0);
-  }
-  void add_element_size(int32_t element_size) {
-    fbb_.AddElement<int32_t>(TensorMetadata::VT_ELEMENT_SIZE, element_size, 0);
   }
   void add_sizes(flatbuffers::Offset<flatbuffers::Vector<int32_t>> sizes) {
     fbb_.AddOffset(TensorMetadata::VT_SIZES, sizes);
@@ -504,18 +488,14 @@ inline flatbuffers::Offset<TensorMetadata> CreateTensorMetadata(
     int32_t storage_location_index = 0,
     int8_t scalar_type = 0,
     int32_t storage_offset = 0,
-    int64_t nbytes = 0,
-    int32_t element_size = 0,
     flatbuffers::Offset<flatbuffers::Vector<int32_t>> sizes = 0,
     flatbuffers::Offset<flatbuffers::Vector<int32_t>> strides = 0,
     bool requires_grad = false,
     flatbuffers::Offset<torch::jit::mobile::serialization::QuantizedSchema> quantized_schema = 0) {
   TensorMetadataBuilder builder_(_fbb);
-  builder_.add_nbytes(nbytes);
   builder_.add_quantized_schema(quantized_schema);
   builder_.add_strides(strides);
   builder_.add_sizes(sizes);
-  builder_.add_element_size(element_size);
   builder_.add_storage_offset(storage_offset);
   builder_.add_storage_location_index(storage_location_index);
   builder_.add_requires_grad(requires_grad);
@@ -528,8 +508,6 @@ inline flatbuffers::Offset<TensorMetadata> CreateTensorMetadataDirect(
     int32_t storage_location_index = 0,
     int8_t scalar_type = 0,
     int32_t storage_offset = 0,
-    int64_t nbytes = 0,
-    int32_t element_size = 0,
     const std::vector<int32_t> *sizes = nullptr,
     const std::vector<int32_t> *strides = nullptr,
     bool requires_grad = false,
@@ -541,8 +519,6 @@ inline flatbuffers::Offset<TensorMetadata> CreateTensorMetadataDirect(
       storage_location_index,
       scalar_type,
       storage_offset,
-      nbytes,
-      element_size,
       sizes__,
       strides__,
       requires_grad,
@@ -1068,8 +1044,8 @@ struct Object FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
     VT_STATE_TYPE = 10,
     VT_STATE = 12
   };
-  int8_t type_index() const {
-    return GetField<int8_t>(VT_TYPE_INDEX, 0);
+  uint8_t type_index() const {
+    return GetField<uint8_t>(VT_TYPE_INDEX, 0);
   }
   const flatbuffers::Vector<flatbuffers::Offset<flatbuffers::String>> *attr_names() const {
     return GetPointer<const flatbuffers::Vector<flatbuffers::Offset<flatbuffers::String>> *>(VT_ATTR_NAMES);
@@ -1122,7 +1098,7 @@ struct Object FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
   }
   bool Verify(flatbuffers::Verifier &verifier) const {
     return VerifyTableStart(verifier) &&
-           VerifyField<int8_t>(verifier, VT_TYPE_INDEX) &&
+           VerifyField<uint8_t>(verifier, VT_TYPE_INDEX) &&
            VerifyOffset(verifier, VT_ATTR_NAMES) &&
            verifier.VerifyVector(attr_names()) &&
            verifier.VerifyVectorOfStrings(attr_names()) &&
@@ -1186,8 +1162,8 @@ struct ObjectBuilder {
   typedef Object Table;
   flatbuffers::FlatBufferBuilder &fbb_;
   flatbuffers::uoffset_t start_;
-  void add_type_index(int8_t type_index) {
-    fbb_.AddElement<int8_t>(Object::VT_TYPE_INDEX, type_index, 0);
+  void add_type_index(uint8_t type_index) {
+    fbb_.AddElement<uint8_t>(Object::VT_TYPE_INDEX, type_index, 0);
   }
   void add_attr_names(flatbuffers::Offset<flatbuffers::Vector<flatbuffers::Offset<flatbuffers::String>>> attr_names) {
     fbb_.AddOffset(Object::VT_ATTR_NAMES, attr_names);
@@ -1214,7 +1190,7 @@ struct ObjectBuilder {
 
 inline flatbuffers::Offset<Object> CreateObject(
     flatbuffers::FlatBufferBuilder &_fbb,
-    int8_t type_index = 0,
+    uint8_t type_index = 0,
     flatbuffers::Offset<flatbuffers::Vector<flatbuffers::Offset<flatbuffers::String>>> attr_names = 0,
     bool use_setstate = false,
     torch::jit::mobile::serialization::IValue state_type = torch::jit::mobile::serialization::IValue_NONE,
@@ -1230,7 +1206,7 @@ inline flatbuffers::Offset<Object> CreateObject(
 
 inline flatbuffers::Offset<Object> CreateObjectDirect(
     flatbuffers::FlatBufferBuilder &_fbb,
-    int8_t type_index = 0,
+    uint8_t type_index = 0,
     const std::vector<flatbuffers::Offset<flatbuffers::String>> *attr_names = nullptr,
     bool use_setstate = false,
     torch::jit::mobile::serialization::IValue state_type = torch::jit::mobile::serialization::IValue_NONE,
@@ -1258,8 +1234,8 @@ struct Operator FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
   const flatbuffers::String *overload_name() const {
     return GetPointer<const flatbuffers::String *>(VT_OVERLOAD_NAME);
   }
-  int8_t num_args_serialized() const {
-    return GetField<int8_t>(VT_NUM_ARGS_SERIALIZED, -1);
+  int32_t num_args_serialized() const {
+    return GetField<int32_t>(VT_NUM_ARGS_SERIALIZED, -1);
   }
   bool Verify(flatbuffers::Verifier &verifier) const {
     return VerifyTableStart(verifier) &&
@@ -1267,7 +1243,7 @@ struct Operator FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
            verifier.VerifyString(name()) &&
            VerifyOffset(verifier, VT_OVERLOAD_NAME) &&
            verifier.VerifyString(overload_name()) &&
-           VerifyField<int8_t>(verifier, VT_NUM_ARGS_SERIALIZED) &&
+           VerifyField<int32_t>(verifier, VT_NUM_ARGS_SERIALIZED) &&
            verifier.EndTable();
   }
 };
@@ -1282,8 +1258,8 @@ struct OperatorBuilder {
   void add_overload_name(flatbuffers::Offset<flatbuffers::String> overload_name) {
     fbb_.AddOffset(Operator::VT_OVERLOAD_NAME, overload_name);
   }
-  void add_num_args_serialized(int8_t num_args_serialized) {
-    fbb_.AddElement<int8_t>(Operator::VT_NUM_ARGS_SERIALIZED, num_args_serialized, -1);
+  void add_num_args_serialized(int32_t num_args_serialized) {
+    fbb_.AddElement<int32_t>(Operator::VT_NUM_ARGS_SERIALIZED, num_args_serialized, -1);
   }
   explicit OperatorBuilder(flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
@@ -1300,11 +1276,11 @@ inline flatbuffers::Offset<Operator> CreateOperator(
     flatbuffers::FlatBufferBuilder &_fbb,
     flatbuffers::Offset<flatbuffers::String> name = 0,
     flatbuffers::Offset<flatbuffers::String> overload_name = 0,
-    int8_t num_args_serialized = -1) {
+    int32_t num_args_serialized = -1) {
   OperatorBuilder builder_(_fbb);
+  builder_.add_num_args_serialized(num_args_serialized);
   builder_.add_overload_name(overload_name);
   builder_.add_name(name);
-  builder_.add_num_args_serialized(num_args_serialized);
   return builder_.Finish();
 }
 
@@ -1312,7 +1288,7 @@ inline flatbuffers::Offset<Operator> CreateOperatorDirect(
     flatbuffers::FlatBufferBuilder &_fbb,
     const char *name = nullptr,
     const char *overload_name = nullptr,
-    int8_t num_args_serialized = -1) {
+    int32_t num_args_serialized = -1) {
   auto name__ = name ? _fbb.CreateString(name) : 0;
   auto overload_name__ = overload_name ? _fbb.CreateString(overload_name) : 0;
   return torch::jit::mobile::serialization::CreateOperator(

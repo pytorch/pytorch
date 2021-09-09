@@ -118,7 +118,7 @@ class TORCH_API Module {
   }
 
   void set_delptr(void* ptr) {
-    delptr = ptr;
+    delptr.reset((char*)ptr);
   }
   void set_unmap_ptr(void* ptr, size_t size) {
     unmap_ptr = ptr;
@@ -126,9 +126,6 @@ class TORCH_API Module {
   }
 
   ~Module() {
-    if (delptr != nullptr) {
-      c10::GetCPUAllocator()->raw_deallocate(delptr);
-    }
     if (unmap_ptr != nullptr) {
       munmap(unmap_ptr, unmap_size);
     }
@@ -140,7 +137,7 @@ class TORCH_API Module {
   std::unordered_map<std::string, std::string> metadata_;
   std::shared_ptr<CompilationUnit> cu_;
   MobileDebugTable debug_table_;
-  void* delptr = nullptr;
+  std::shared_ptr<char> delptr;
   void* unmap_ptr = nullptr;
   size_t unmap_size = 0;
 };
