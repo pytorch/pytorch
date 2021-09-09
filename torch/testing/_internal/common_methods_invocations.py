@@ -8741,8 +8741,8 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_hstack_dstack_vstack,
            supports_forward_ad=True,
            skips=(
-             # TODO: see https://github.com/pytorch/pytorch/issues/64709
-             SkipInfo('TestCommon', 'test_out'),
+               # TODO: see https://github.com/pytorch/pytorch/issues/64709
+               SkipInfo('TestCommon', 'test_out'),
            )),
     OpInfo('unfold',
            op=lambda x, *args: x.unfold(*args),
