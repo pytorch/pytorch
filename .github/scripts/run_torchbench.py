@@ -13,7 +13,7 @@ Testing environment:
 # 1. Does not reuse the build artifact in other CI workflows
 # 2. CI jobs are serialized because there is only one worker
 import os
-import git  # type: ignore
+import git  # type: ignore[missing-imports]
 import pathlib
 import argparse
 import subprocess
