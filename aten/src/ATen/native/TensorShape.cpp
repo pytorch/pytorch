@@ -195,7 +195,10 @@ Tensor & _cat_out_cpu(TensorList tensors, int64_t dim, Tensor& result) {
   // raise a warning while resizing if output has one or more elements
   // See https://github.com/pytorch/pytorch/pull/62560#discussion_r687363362
   // for understanding why at::native::resize_output is not called directly.
-  if (at::native::resize_output_check(result, result_size)) {
+  // if (at::native::resize_output_check(result, result_size)) {
+  // TODO: restore the above, see https://github.com/pytorch/pytorch/issues/64709
+
+  if (result.sizes() != result_size) {
     result.resize_(result_size, first_tensor_mem_format);
   }
 
@@ -1517,7 +1520,13 @@ bool inline maybe_native_stack(Tensor& result, TensorList tensors, int64_t dim) 
 
     // skip resizing if size of result is same as expected
     // raise a warning while resizing if output has one or more elements
-    at::native::resize_output(result, result_sizes);
+    // at::native::resize_output(result, result_sizes);
+    // TODO: restore the above, see https://github.com/pytorch/pytorch/issues/64709
+
+    if (result.sizes() != result_sizes) {
+      result.resize_(result_sizes);
+    }
+
     stack_serial_stub(kCPU, result, tensors, dim);
     return true;
   }
