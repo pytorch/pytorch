@@ -1,3 +1,7 @@
+# Generates ADInplaceOrViewType.h/cpp
+# **If any changes are being made to the ADInplaceOrView codegen please also check
+# if updates are needed in torch/csrc/autograd/autograd_not_implemented_fallback.cpp
+
 from tools.codegen.api import cpp
 from tools.codegen.api.autograd import (
     NativeFunctionWithDifferentiabilityInfo, gen_differentiable_outputs,
@@ -18,7 +22,6 @@ from .context import with_native_function_with_differentiability_info
 from .gen_trace_type import (
     MANUAL_AUTOGRAD, type_wrapper_name, tie_return_values, get_return_value
 )
-
 
 # See NOTE [ Autograd View Variables ] in variable.h for details.
 # If you update list VIEW_FUNCTIONS or RETURNS_VIEWS_OF_INPUT,
@@ -405,9 +408,9 @@ def inplace_or_view_method_registration(fn: NativeFunctionWithDifferentiabilityI
     if get_view_info(fn) is None and (not modifies_arguments(f) or is_foreach_op(str(f.func.name))):
         return None
     INPLACE_OR_VIEW_NOT_IMPLEMENTED_REGISTRATION = CodeTemplate("""\
-    m.impl("${unqual_operator_name_with_overload}", torch::autograd::ADInplaceOrViewFallback());
+    m.impl("${unqual_operator_name_with_overload}", torch::autograd::autogradNotImplementedInplaceOrViewFallback());
     """)
-    if get_base_name(f) not in ["_values", "_indices", "values", "indices"] and type_wrapper_name(f) not in ["view_dtype"]:
+    if get_base_name(f) not in ["_values", "_indices", "values", "indices", "chunk", "tensor_split", "split", "split_with_sizes", "hsplit", "vsplit", "dsplit", "unbind"] and type_wrapper_name(f) not in ["view_dtype"]:
         return INPLACE_OR_VIEW_NOT_IMPLEMENTED_REGISTRATION.substitute(
             unqual_operator_name_with_overload=f.func.name,
         )

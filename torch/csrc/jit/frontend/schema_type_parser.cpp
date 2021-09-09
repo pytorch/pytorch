@@ -389,13 +389,6 @@ std::pair<TypePtr, c10::optional<AliasInfo>> SchemaTypeParser::parseType() {
       if (container && alias_info) {
         container->addContainedType(std::move(*alias_info));
       }
-      if (alias_info) {
-        if (container) {
-          container->addContainedType(std::move(*alias_info));
-        } else {
-          container = std::move(alias_info);
-        }
-      }
       alias_info = std::move(container);
     } else if (L.nextIf('?')) {
       value = OptionalType::create(value);

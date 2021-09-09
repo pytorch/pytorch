@@ -44,7 +44,8 @@ void _foreach_tensor(
 }
 
 void autogradNotImplementedFallbackImpl(const c10::OperatorHandle& op, c10::DispatchKeySet dispatch_keys, torch::jit::Stack* stack) {
-  // Mimics the logic of a VariableType NotImplemented kernel
+  // Mimics a subset of the logic of a VariableType NotImplemented kernel
+  // - see gen_variable_type.py
   const auto& schema = op.schema();
   const auto& op_name = schema.operator_name().name;
   const auto& arguments = schema.arguments();
@@ -68,14 +69,13 @@ void autogradNotImplementedFallbackImpl(const c10::OperatorHandle& op, c10::Disp
     is_inplace_output.push_back(alias_info.has_value() && alias_info->isWrite());
     any_is_inplace_output |= alias_info.has_value() && alias_info->isWrite();
     is_aliased_output.push_back(alias_info.has_value());
-
   }
   int aliased_input_idx = -1;
   int aliased_output_idx = -1;
   for (const auto i : c10::irange(num_returns)) {
     const auto& alias_info = returns[i].alias_info();
     if (alias_info.has_value() && !alias_info->isWrite()) {
-      AT_ASSERT(
+      TORCH_CHECK(
         aliased_output_idx == -1,
         "Expected only a single output in the operator schema to have a non-write alias annotation (i.e., 'Tensor(a)'). "
         "Non-composite functions where multiple outputs are aliased with inputs aren't supported."
@@ -86,7 +86,7 @@ void autogradNotImplementedFallbackImpl(const c10::OperatorHandle& op, c10::Disp
   for (const auto i : c10::irange(num_arguments)) {
     const auto& alias_info = arguments[i].alias_info();
     if (alias_info.has_value() && !alias_info->isWrite()) {
-      AT_ASSERT(
+      TORCH_CHECK(
         aliased_input_idx == -1,
         "Expected only a single input in the operator schema to have a non-write alias annotation (i.e., 'Tensor(a)'). "
         "Non-composite functions where multiple inputs are aliased with outputs aren't supported. "
@@ -96,7 +96,6 @@ void autogradNotImplementedFallbackImpl(const c10::OperatorHandle& op, c10::Disp
   }
 
   size_t num_tensor_inputs = 0;  // Only used for DEBUG-only checks
-
   _foreach_tensor([&](size_t _, size_t idx_arg, const at::Tensor& t) {
     if (grad_mode && t.requires_grad()) {
       tensors_requiring_grad_on_stack.push_back(&t);
@@ -138,7 +137,7 @@ void autogradNotImplementedFallbackImpl(const c10::OperatorHandle& op, c10::Disp
   } else {
     // If neither in-place nor view
     at::AutoDispatchBelowADInplaceOrView guard;
-    op.redispatchBoxed(dispatch_keys & c10::after_autograd_keyset, stack);
+    op.redispatchBoxed(dispatch_keys & c10::after_ADInplaceOrView_keyset, stack);
   }
   #ifndef NDEBUG
   _foreach_tensor([&](size_t idx_tensor, size_t _, const at::Tensor& t) {
@@ -189,7 +188,28 @@ torch::CppFunction autogradNotImplementedFallback() {
 // If we need to we could codegen this to avoid duplication
 static const std::vector<std::string> NEEDS_METADATA_CHANGE = {"aten::view_as_complex", "aten::view_as_real", "aten::_conj", "aten::_neg_view"};
 
-void ADInplaceOrViewFallbackImpl(const c10::OperatorHandle& op, c10::DispatchKeySet dispatch_keys, torch::jit::Stack* stack) {
+void autogradNotImplementedInplaceOrViewFallbackImpl(const c10::OperatorHandle& op, c10::DispatchKeySet dispatch_keys, torch::jit::Stack* stack) {
+  // Mimics a subset of the logic from ADInplaceOrViewType kernel
+  // - see gen_inplace_or_view_type.py
+  // - this should only be used with autogradNotImplementedFallback above
+  //
+  // NOTE [ Limitations of ADInplaceOrView boxed kernel ]
+  //
+  // This op should only be used with autogradNotImplementedFallback kernel
+  // because there is some logic we need specifically to enforce that even
+  // if we do in-place on view's created in this kernel, the proper "derivative
+  // is not implemented" error is still raised.
+  //
+  // For views:
+  // - We enforce that the view relationship is between the first input
+  //   and the first output (which may be either Tensor or vec of Tensor)
+  //
+  // For inplace ops:
+  // - (TODO?) enforce that the same op cannot be both a view and
+  //   that is not allowed in the gen_inplace_or_view logic
+  //
+  // TODO: We could just link to the documentation once we have that
+  // instead of repeating this.
   const auto& schema = op.schema();
   const auto& op_name = schema.operator_name().name;
   const auto& arguments = schema.arguments();
@@ -205,9 +225,10 @@ void ADInplaceOrViewFallbackImpl(const c10::OperatorHandle& op, c10::DispatchKey
   for (const auto i : c10::irange(num_returns)) {
     const auto& alias_info = returns[i].alias_info();
     if (alias_info.has_value() && !alias_info->isWrite()) {
-      AT_ASSERT(
+      TORCH_CHECK(
         aliased_output_idx == -1,
-        "Expected only a single output in the operator schema to have a non-write alias annotation (i.e., 'Tensor(a)'). "
+        "Fallback ADInplaceOrView kernel expects only a single output in the operator schema to have a "
+        "non-write alias annotation (i.e., 'Tensor(a)'). "
         "Non-composite functions where multiple outputs are aliased with inputs aren't supported."
         "Please rewrite your function as a composite function.");
       aliased_output_idx = i;
@@ -219,26 +240,31 @@ void ADInplaceOrViewFallbackImpl(const c10::OperatorHandle& op, c10::DispatchKey
     const auto& alias_info = arguments[i].alias_info();
     if (alias_info.has_value()) {
       if (!alias_info->isWrite()) {
-        AT_ASSERT(
+        TORCH_CHECK(
           aliased_input_idx == -1,
-          "Expected only a single input in the operator schema to have a non-write alias annotation (i.e., 'Tensor(a)'). "
+          "Fallback ADInplaceOrView kernel expects only a single input in the operator schema to have a "
+          "non-write alias annotation (i.e., 'Tensor(a)'). "
           "Non-composite functions where multiple inputs are aliased with outputs aren't supported. "
           "Please rewrite your function as a composite function.");
         aliased_input_idx = i;
         const c10::IValue& aliased_input_iv = (*stack)[stack_start + i]; // get a reference to an ivalue on the stack
         TORCH_CHECK(aliased_input_iv.isTensor());
-        // copy assignment
+        // copy assignment (TODO: how to avoid this extra reference count bump??)
+        // It doesn't seem like we can save merely a pointer to Tensor because it would
+        // get dropped from the stack...
         aliased_input = aliased_input_iv.toTensor();
       } else {
         any_is_inplace = true;
       }
     }
   }
-  // NOTE: [ Limitations of ADInplaceOrView boxed kernel ]
-  // We can assume the view is always the first return, and that there will only be a single return
-  // TODO: Document the limitations of this kernel for custom op writers
-  TORCH_INTERNAL_ASSERT((aliased_input_idx == -1 && aliased_output_idx == -1) ||
-    (aliased_input_idx == 0 && aliased_output_idx == 0))
+  // See NOTE [ Limitations of ADInplaceOrView boxed kernel ] above
+  TORCH_CHECK(
+    (aliased_input_idx == -1 && aliased_output_idx == -1) ||
+    (aliased_input_idx == 0 && aliased_output_idx == 0),
+    "Fallback ADInplaceOrView kernel can only create view relationships between the first "
+    "input and the first output (the output can be a vector of tensors). Please change the "
+    "order of your operator's parameters so that this is the case.");
   const bool is_view = aliased_input_idx != -1;
   const bool need_view_func = is_view
                          && (std::find(NEEDS_METADATA_CHANGE.begin(), NEEDS_METADATA_CHANGE.end(), op_name) != NEEDS_METADATA_CHANGE.end()
@@ -247,16 +273,18 @@ void ADInplaceOrViewFallbackImpl(const c10::OperatorHandle& op, c10::DispatchKey
   std::function<at::Tensor(const at::Tensor&)> view_func = nullptr;
   std::vector<c10::IValue> stack_args_copy;
   if (need_view_func) {
-    stack_args_copy = std::vector<c10::IValue>(stack->begin() + stack_start, stack->end());
+    // We always override the 0th index, so skip copying it
+    stack_args_copy = std::vector<c10::IValue>(stack->begin() + stack_start + 1, stack->end());
   }
 
   if (need_view_func) {
-    view_func = [=](const at::Tensor& t) {
+    view_func = [op=op, stack_args_copy=stack_args_copy](const at::Tensor& t) {
       // - Maybe add a test for this...
       // - See NOTE: [ Limitations of ADInplaceOrView boxed kernel ]
       // - We have to make another copy because the same lambda can be used twice! e.g., double backward
+      //   and also concurrently from multiple threads
       std::vector<c10::IValue> stack_args_copy_copy(stack_args_copy);
-      stack_args_copy_copy.at(0) = t;
+      stack_args_copy_copy.insert(stack_args_copy_copy.begin(), t);
       op.callBoxed(&stack_args_copy_copy);
       return stack_args_copy_copy[0].toTensor();
     };
@@ -278,8 +306,8 @@ void ADInplaceOrViewFallbackImpl(const c10::OperatorHandle& op, c10::DispatchKey
     const c10::IValue& aliased_output_iv = (*stack)[stack->size() - num_returns + aliased_output_idx];
     if (aliased_output_iv.isTensorList()) {
       auto aliased_output = aliased_output_iv.toTensorVector();
-      // Only allow rebasing of the history if we return a single Tensor
-      // If view was created in a no grad or inference mode block, raise an error
+      // Only allow rebasing of the history if we return a single Tensor that is
+      // why we don't have to care about the view_func logic below.
       // See NOTE [ View + Inplace detection ] for more details about this logic
       auto result = as_view(
         /* base=*/aliased_input,
@@ -287,10 +315,11 @@ void ADInplaceOrViewFallbackImpl(const c10::OperatorHandle& op, c10::DispatchKey
         /* is_bw_differentiable=*/true,
         /* is_fw_differentiable=*/true,
         /* creation_meta=*/InferenceMode::is_enabled() ? CreationMeta::INFERENCE_MODE : (at::GradMode::is_enabled() ? CreationMeta::MULTI_OUTPUT_NODE : CreationMeta::NO_GRAD_MODE));
-        // ^ pass in creation meta unecessarily even if not isDifferentiableType
+        // ^ pass in creation meta unecessarily even if not isDifferentiableType, but we don't have that
+        //   information here anyway.
       stack->at(stack->size() - num_returns + aliased_output_idx) = result;
     } else {
-      AT_ASSERT(aliased_output_iv.isTensor());
+      TORCH_CHECK(aliased_output_iv.isTensor());
       const at::Tensor& aliased_output = aliased_output_iv.toTensor();
       auto result = as_view(
         /* base=*/aliased_input,
@@ -304,8 +333,8 @@ void ADInplaceOrViewFallbackImpl(const c10::OperatorHandle& op, c10::DispatchKey
   }
 }
 
-torch::CppFunction ADInplaceOrViewFallback() {
-  return torch::CppFunction::makeFromBoxedFunction<&ADInplaceOrViewFallbackImpl>();
+torch::CppFunction autogradNotImplementedInplaceOrViewFallback() {
+  return torch::CppFunction::makeFromBoxedFunction<&autogradNotImplementedInplaceOrViewFallbackImpl>();
 }
 
 }} // namespace torch::autograd
