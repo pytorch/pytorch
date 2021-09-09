@@ -6,7 +6,8 @@ from tools.codegen.model import NativeFunction, NativeFunctionsGroup, BackendInd
 from tools.codegen.api.types import kernel_signature, BaseCType, OptionalCType
 import tools.codegen.api.meta as meta
 import tools.codegen.api.structured as structured
-from .lazy_ir import process_ir_types, ir_node_name
+from .lazy_ir import process_ir_types, ir_node_name, node_ctor_inputs
+
 @with_native_function_and_index
 def gen_unstructured(f: NativeFunction, backend_index: BackendIndex) -> Optional[str]:
     sig = kernel_signature(f, backend_index)
@@ -55,11 +56,22 @@ def compute_native_function_declaration(
         return [] if x is None else [x]
 
 
-# @with_native_function_and_index
+def lazy_tensor_decls(value_types):
+    lazy_tensor_decls = []
+    for t in value_types:
+        if isinstance(t.type.elem, BaseCType):
+            lazy_tensor_decls.append(f"LazyTensor l_{t.name} = bridge::GetLtcTensor({t.name});")
+        elif isinstance(t.type.elem, OptionalCType):
+            lazy_tensor_decls.append(f"c10::optional<LazyTensor> l_{t.name} =  {t.name}.has_value() ? c10::make_optional(bridge::GetLtcTensor({t.name}.value())) : c10::nullopt;")
+        else:
+            assert False, ""
+    lazy_tensor_decls = "\n    ".join(lazy_tensor_decls)
+    return lazy_tensor_decls
+
+
 def gen_unstructured_lazy_definition(f: NativeFunction, backend_index: BackendIndex, codegen: List[OperatorName], class_method_name: str) -> Optional[str]:
     sig = kernel_signature(f, backend_index)
     metadata = backend_index.get_kernel(f)
-    
     if f.func.name not in codegen:
         return None
     if metadata is None:
@@ -67,39 +79,20 @@ def gen_unstructured_lazy_definition(f: NativeFunction, backend_index: BackendIn
     if "legacy::" in metadata.kernel:
         return None
 
-
+ 
     # Lazy IR stuff
     all_types, value_types, scalar_types = process_ir_types(f.func)
+    lazy_tensor_decls_str = lazy_tensor_decls(value_types)
+    node_ctor_input_str = node_ctor_inputs(value_types, scalar_types)
 
-    lazy_tensor_decls = []
-    node_ctor_values = []
-    for t in value_types:
-        if isinstance(t.type.elem, BaseCType):
-            lazy_tensor_decls.append(f"LazyTensor l_{t.name} = bridge::GetLtcTensor({t.name});")
-            node_ctor_values.append(f"l_{t.name}.GetIrValue()")
-        elif isinstance(t.type.elem, OptionalCType):
-            lazy_tensor_decls.append(f"c10::optional<LazyTensor> l_{t.name} =  {t.name}.has_value() ? c10::make_optional(bridge::GetLtcTensor({t.name}.value())) : c10::nullopt;")
-            node_ctor_values.append(f"l_{t.name}.has_value() ? l_{t.name}.value().GetIrValue() : torch_lazy_tensors::ir::ops::kNullValue")
-        else:
-            assert False, ""
-    lazy_tensor_decls = "\n    ".join(lazy_tensor_decls)
-
-    node_ctor_scalars = [] 
-    for t in scalar_types:
-        if isinstance(t.type, BaseCType) and t.type.type.name == "vector<int64_t>":
-            node_ctor_scalars.append(f"std::vector<int64_t>({t.name}.begin(), {t.name}.end())")
-        else:
-            node_ctor_scalars.append(t.name)
-
-    node_ctor_inputs = ",\n                              ".join(node_ctor_values + node_ctor_scalars)
     assert len(value_types) > 0, f"Only supporting tensor ops so far, none found in {sig}"
     first_tensor = value_types[0]
 
     return f"""\
 {sig.decl(name=f"{class_method_name}::{metadata.kernel}")} {{
-    {lazy_tensor_decls}
+    {lazy_tensor_decls_str}
     return bridge::AtenFromLtcTensor(l_{first_tensor.name}.CreateFrom(
-        ir::MakeNode<ir::ops::{ir_node_name(f.func)}>({node_ctor_inputs})));
+        ir::MakeNode<ir::ops::{ir_node_name(f.func)}>({node_ctor_input_str})));
 }};
 """
 

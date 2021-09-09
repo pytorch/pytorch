@@ -25,9 +25,10 @@ from tools.codegen.selective_build.selector import SelectiveBuilder
 
 # Generates {backend}_lazy_ir.h and .cpp
 #
-valueListT = BaseCppType('at', 'ValueList') # TODO, not sure this type exists
+valueListT = BaseCppType('at', 'ValueList')  # TODO, not sure this type exists
 valueT = BaseCppType('ir', 'Value')
-intArrayT = BaseCppType('std', 'vector<int64_t>') # TODO this should probably be different
+intArrayT = BaseCppType('std', 'vector<int64_t>')  # TODO this should probably be different
+
 
 def process_ir_types(func: FunctionSchema) -> Tuple[List[NamedCType], List[NamedCType], List[NamedCType]]:
     """
@@ -82,8 +83,35 @@ def process_ir_types(func: FunctionSchema) -> Tuple[List[NamedCType], List[Named
             raise AssertionError(f"unrecognized type {repr(t)}")
     return types, value_types, scalar_types
 
+
+def node_ctor_inputs(value_types: List[NamedCType], scalar_types: List[NamedCType]) -> str:
+    """
+    Produce a formatted string with the arguments as passed into the constructor of a node class.
+    """
+    node_ctor_values = []
+    for t in value_types:
+        if isinstance(t.type.elem, BaseCType):
+            node_ctor_values.append(f"l_{t.name}.GetIrValue()")
+        elif isinstance(t.type.elem, OptionalCType):
+            node_ctor_values.append(
+                f"l_{t.name}.has_value() ? l_{t.name}.value().GetIrValue() : torch_lazy_tensors::ir::ops::kNullValue")
+        else:
+            assert False, ""
+
+    node_ctor_scalars = []
+    for t in scalar_types:
+        if isinstance(t.type, BaseCType) and t.type.type.name == "vector<int64_t>":
+            node_ctor_scalars.append(f"std::vector<int64_t>({t.name}.begin(), {t.name}.end())")
+        else:
+            node_ctor_scalars.append(t.name)
+
+    node_ctor_inputs = ",\n                              ".join(node_ctor_values + node_ctor_scalars)
+    return node_ctor_inputs
+
+
 def ir_node_name(func: FunctionSchema):
     return str(func.name).lower().capitalize()
+
 
 @dataclass(frozen=True)
 class LazyIR:
@@ -121,7 +149,23 @@ class LazyIR:
                 assert False, ""
         base_ctor_value_args = ", ".join(base_ctor_value_args)
         members_to_string = "\n    ".join([f'lazy_tensors::ToString("{t.name}", {t.name}_, ss);' for t in scalar_types])
+
+        # clone needs hand-overrides for cases where there are optional Tensor? args,
+        # unless we clean up the OpList API to deal unambiguously with optionals.
+        clone_impl_args = ",".join(
+            [f"operands.at({i})" for i in range(len(value_types))] +
+            [f"{s.name}_" for s in scalar_types])
+        if any([isinstance(t.type.elem, OptionalCType) for t in value_types]):
+            scalar_args = ",".join([f"{s.name}_" for s in scalar_types])
+            clone_impl = f"return Clone{class_name}(operands, {scalar_args});"
+            clone_decl_args = ", ".join([f"{i.cpp_type()} {i.name}" for i in scalar_types])
+            clone_handcoded_decl = f"NodePtr Clone{class_name}(OpList operands, {clone_decl_args});"
+        else:
+            clone_impl = f"ir::MakeNode<ir::ops::{ir_node_name(func)}>({clone_impl_args});"
+            clone_handcoded_decl = ""
+
         return [f"""\
+{clone_handcoded_decl}
 class {class_name} : public Node {{
  public:
   {class_name}({node_ctor_args})
@@ -141,6 +185,10 @@ class {class_name} : public Node {{
     return ss.str();
   }}
 
+  NodePtr Clone(OpList operands) const override {{
+      {clone_impl}
+  }}
+ 
   {scalar_decls}
 
 }};

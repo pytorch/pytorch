@@ -2,7 +2,7 @@ backend: Lazy
 cpp_namespace: torch_lazy_tensors
 codegen:
   - mean
-  - conv2d
+  # - conv2d
   - addcdiv
   - addcmul
 supported:
