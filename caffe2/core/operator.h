@@ -15,6 +15,7 @@
 
 #include <c10/macros/Macros.h>
 #include <c10/util/Registry.h>
+#include <c10/util/string_view.h>
 #include <c10/util/typeid.h>
 #include <c10/core/Stream.h>
 #include "caffe2/core/blob.h"
@@ -97,7 +98,7 @@ class TORCH_API OperatorBase : public Observable<OperatorBase> {
 
   /** @brief Checks if the operator has an argument of the given name.
    */
-  inline bool HasArgument(const string& name) const {
+  inline bool HasArgument(c10::string_view name) const {
     if (isLegacyOperator()) {
       CAFFE_ENFORCE(operator_def_, "operator_def was null!");
       return ArgumentHelper::HasArgument(*operator_def_, name);
@@ -108,7 +109,7 @@ class TORCH_API OperatorBase : public Observable<OperatorBase> {
   // Functions that deal with arguments. Basically, this allows us to map an
   // argument name to a specific type of argument that we are trying to access.
   template <typename T>
-  inline T GetSingleArgument(const string& name, const T& default_value) const {
+  inline T GetSingleArgument(c10::string_view name, const T& default_value) const {
     if (isLegacyOperator()) {
       CAFFE_ENFORCE(operator_def_, "operator_def was null!");
       return ArgumentHelper::GetSingleArgument<OperatorDef, T>(
@@ -126,7 +127,7 @@ class TORCH_API OperatorBase : public Observable<OperatorBase> {
   }
 
   template <typename T>
-  inline bool HasSingleArgumentOfType(const string& name) const {
+  inline bool HasSingleArgumentOfType(c10::string_view name) const {
     CAFFE_ENFORCE(operator_def_, "operator_def was null!");
     return ArgumentHelper::HasSingleArgumentOfType<OperatorDef, T>(
         *operator_def_, name);
@@ -141,7 +142,7 @@ class TORCH_API OperatorBase : public Observable<OperatorBase> {
 
   template <typename T>
   inline vector<T> GetRepeatedArgument(
-      const string& name,
+      c10::string_view name,
       const vector<T>& default_value = {}) const;
 
   // Get the inputs and outputs as specific types.
@@ -654,7 +655,7 @@ class TORCH_API OperatorBase : public Observable<OperatorBase> {
     }
   }
 
-  c10::optional<int> argumentIndexWithName(const std::string& name) const;
+  c10::optional<int> argumentIndexWithName(c10::string_view name) const;
 
   // An event used by asynchronous execution.
   std::unique_ptr<Event> event_;
@@ -664,7 +665,7 @@ class TORCH_API OperatorBase : public Observable<OperatorBase> {
 
 template <>
 inline NetDef OperatorBase::GetSingleArgument<NetDef>(
-    const std::string& name,
+    c10::string_view name,
     const NetDef& default_value) const {
   if (isLegacyOperator()) {
     CAFFE_ENFORCE(operator_def_, "operator_def was null!");
@@ -756,7 +757,7 @@ inline vector<int16_t> OperatorBase::GetVectorFromIValueList<int16_t>(
 
 template <typename T>
 inline vector<T> OperatorBase::GetRepeatedArgument(
-    const string& name,
+    c10::string_view name,
     const vector<T>& default_value) const {
   if (isLegacyOperator()) {
     CAFFE_ENFORCE(operator_def_, "operator_def was null!");
@@ -778,7 +779,7 @@ inline vector<T> OperatorBase::GetRepeatedArgument(
 // int16_t. We need to load it as List<int64_t> and transform to int16_t.
 template <>
 inline vector<int16_t> OperatorBase::GetRepeatedArgument<int16_t>(
-    const string& name,
+    c10::string_view name,
     const vector<int16_t>& default_value) const {
   if (isLegacyOperator()) {
     CAFFE_ENFORCE(operator_def_, "operator_def was null!");
@@ -1330,17 +1331,14 @@ typedef c10::Registry<
 TORCH_API std::map<DeviceType, OperatorRegistry*>* gDeviceTypeRegistry();
 
 struct TORCH_API DeviceTypeRegisterer {
-  explicit DeviceTypeRegisterer(DeviceType type, RegistryFunction func) {
-    if (gDeviceTypeRegistry()->count(type)) {
-      std::cerr << "Device type " << DeviceTypeName(type)
-                << "registered twice. This should not happen. Did you have "
-                   "duplicated numbers assigned to different devices?";
-      std::exit(1);
-    }
-    // Calling the registry function to get the actual registry pointer.
-    gDeviceTypeRegistry()->emplace(type, func());
-  }
+  explicit DeviceTypeRegisterer(DeviceType type, RegistryFunction func);
 };
+
+#if defined(_MSC_VER)
+#define IMPORT_IF_NOT_MSVC
+#else
+#define IMPORT_IF_NOT_MSVC C10_IMPORT
+#endif
 
 #define CAFFE_REGISTER_DEVICE_TYPE(type, registry_function) \
   namespace {                                               \
@@ -1362,11 +1360,11 @@ C10_DECLARE_REGISTRY(
     Workspace*);
 #define REGISTER_CPU_OPERATOR_CREATOR(key, ...) \
   C10_REGISTER_CREATOR(CPUOperatorRegistry, key, __VA_ARGS__)
-#define REGISTER_CPU_OPERATOR(name, ...)                           \
-  C10_IMPORT void CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name();  \
-  static void CAFFE2_UNUSED CAFFE_ANONYMOUS_VARIABLE_CPU##name() { \
-    CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name();                \
-  }                                                                \
+#define REGISTER_CPU_OPERATOR(name, ...)                                   \
+  IMPORT_IF_NOT_MSVC void CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name();  \
+  static void CAFFE2_UNUSED CAFFE_ANONYMOUS_VARIABLE_CPU##name() {         \
+    CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name();                        \
+  }                                                                        \
   C10_REGISTER_CLASS(CPUOperatorRegistry, name, __VA_ARGS__)
 #define REGISTER_CPU_OPERATOR_STR(str_name, ...) \
   C10_REGISTER_TYPED_CLASS(CPUOperatorRegistry, str_name, __VA_ARGS__)
@@ -1397,11 +1395,11 @@ C10_DECLARE_REGISTRY(
     Workspace*);
 #define REGISTER_CUDA_OPERATOR_CREATOR(key, ...) \
   C10_REGISTER_CREATOR(CUDAOperatorRegistry, key, __VA_ARGS__)
-#define REGISTER_CUDA_OPERATOR(name, ...)                           \
-  C10_IMPORT void CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name();   \
-  static void CAFFE2_UNUSED CAFFE_ANONYMOUS_VARIABLE_CUDA##name() { \
-    CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name();                 \
-  }                                                                 \
+#define REGISTER_CUDA_OPERATOR(name, ...)                                   \
+  IMPORT_IF_NOT_MSVC void CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name();   \
+  static void CAFFE2_UNUSED CAFFE_ANONYMOUS_VARIABLE_CUDA##name() {         \
+    CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name();                         \
+  }                                                                         \
   C10_REGISTER_CLASS(CUDAOperatorRegistry, name, __VA_ARGS__)
 #define REGISTER_CUDA_OPERATOR_STR(str_name, ...) \
   C10_REGISTER_TYPED_CLASS(CUDAOperatorRegistry, str_name, __VA_ARGS__)
@@ -1421,11 +1419,11 @@ C10_DECLARE_REGISTRY(
     Workspace*);
 #define REGISTER_HIP_OPERATOR_CREATOR(key, ...) \
   C10_REGISTER_CREATOR(HIPOperatorRegistry, key, __VA_ARGS__)
-#define REGISTER_HIP_OPERATOR(name, ...)                           \
-  C10_IMPORT void CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name();  \
-  static void CAFFE2_UNUSED CAFFE_ANONYMOUS_VARIABLE_HIP##name() { \
-    CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name();                \
-  }                                                                \
+#define REGISTER_HIP_OPERATOR(name, ...)                                   \
+  IMPORT_IF_NOT_MSVC void CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name();  \
+  static void CAFFE2_UNUSED CAFFE_ANONYMOUS_VARIABLE_HIP##name() {         \
+    CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name();                        \
+  }                                                                        \
   C10_REGISTER_CLASS(HIPOperatorRegistry, name, __VA_ARGS__)
 #define REGISTER_HIP_OPERATOR_STR(str_name, ...) \
   C10_REGISTER_TYPED_CLASS(HIPOperatorRegistry, str_name, __VA_ARGS__)
