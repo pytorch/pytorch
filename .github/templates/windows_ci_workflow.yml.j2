@@ -60,9 +60,7 @@ env:
   USE_CUDA: 1
 {%- endif %}
 
-concurrency:
-  group: !{{ build_environment }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
-  cancel-in-progress: true
+!{{ common.concurrency(build_environment) }}
 
 jobs:
 {%- if ciflow_config.enabled %}
@@ -172,7 +170,7 @@ jobs:
       image: python:3.9
     steps:
       - name: Install dependencies
-        run: pip install typing-extensions
+        run: pip install typing-extensions==3.10
       - name: Clone pytorch/pytorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
       - name: Generating test matrix
