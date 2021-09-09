@@ -105,6 +105,37 @@ class TestConstFold(unittest.TestCase):
         fold_result = mod_folded(in_x, in_y)
         self.assertTrue(torch.equal(fold_result, base_result))
 
+    def test_const_fold_basic_placeholder_reordered(self):
+        """
+        Test code path where placeholder comes after normal op node in FX
+        """
+        class ConstFoldTestModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, y):
+                return x * 2 + y
+
+        mod = ConstFoldTestModule()
+        mod = torch.fx.symbolic_trace(mod)
+        yy = None
+        for n in mod.graph.nodes:
+            if n.op == "placeholder" and n.target == "y":
+                yy = n
+            elif yy is not None and n.op == "call_function":
+                yy.prepend(n)
+                break
+
+        mod_folded: const_fold.FoldedGraphModule = const_fold.split_const_subgraphs(mod)
+
+        self.assertTrue(mod_folded.const_subgraph_module is None)
+        # Now run both folded and non-folded to check results equal.
+        in_x = torch.tensor([[-0.45]])
+        in_y = torch.tensor([[0.45]])
+        base_result = mod(in_x, in_y)
+        fold_result = mod_folded(in_x, in_y)
+        self.assertTrue(torch.equal(fold_result, base_result))
+
     def test_const_fold_noop(self):
         r"""
         Check that a graph with no constant folding is handled correctly.
@@ -271,4 +302,38 @@ class TestConstFold(unittest.TestCase):
         in_x, in_y = torch.randn(4, 4), torch.randn(4)
         fold_result = mod_folded(in_x, in_y)
         base_result = mod(in_x, in_y)
+        self.assertTrue(torch.equal(fold_result, base_result))
+
+    def test_const_fold_submod_hierarchy(self):
+        r"""
+        Perform constant folding conversion, from original mod to split constant folding
+        module where one of the folded attrs comes from a submod deeper in the hierarchy
+        of the base module.
+        """
+
+        class TracedThroughModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.internal_attr = torch.nn.Parameter(torch.randn(2, 3))
+
+            def forward(self):
+                return self.internal_attr
+
+        class ConstFoldTestModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.my_mod = TracedThroughModule()
+                self.attr = torch.nn.Parameter(torch.randn(2, 3))
+
+            def forward(self, x):
+                return self.attr + self.my_mod() + x
+
+        mod = ConstFoldTestModule()
+        mod_folded: const_fold.FoldedGraphModule = const_fold.split_const_subgraphs(mod)
+        self._verify_const_fold_mod(mod_folded)
+
+        # Now run both folded and non-folded to check results equal.
+        in_x = torch.randn(2, 3)
+        fold_result = mod_folded(in_x)
+        base_result = mod(in_x)
         self.assertTrue(torch.equal(fold_result, base_result))
