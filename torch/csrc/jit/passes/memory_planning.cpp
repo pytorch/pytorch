@@ -78,32 +78,44 @@ std::vector<MemAllocation> naive(
 }
 
 c10::optional<size_t> computeStorageSize(const Value& value) {
+  auto node_header = getHeader(value.node());
   auto ttp = value.type()->cast<TensorType>();
   if (!ttp) {
-    TORCH_WARN("out isn't a tensortype ", *value.type());
+    TORCH_WARN(
+        node_header,
+        "; ",
+        value.debugName(),
+        " isn't a tensortype: ",
+        *value.type());
     return c10::nullopt;
   }
   if (!ttp->scalarType().has_value()) {
     TORCH_WARN(
-        "This output was profiled but didn't have a scalar type: ",
-        *ttp,
-        ", ",
-        value.debugName());
+        node_header,
+        "; ",
+        value.debugName(),
+        " was profiled but didn't have a scalar type: ",
+        *ttp);
     return c10::nullopt;
   }
   if (!ttp->sizes().concrete_sizes().has_value()) {
     TORCH_WARN(
-        "This output was profiled but doesn't have sizes: ",
-        *ttp,
-        ", ",
-        value.debugName());
+        node_header,
+        "; ",
+        value.debugName(),
+        " was profiled but doesn't have sizes: ",
+        *ttp);
     return c10::nullopt;
   }
 
   auto scalar_type = ttp->scalarType();
   if (!scalar_type.has_value()) {
     TORCH_WARN(
-        "This value doesn't have a scalar type", *ttp, ", ", value.debugName());
+        node_header,
+        "; ",
+        value.debugName(),
+        " doesn't have a scalar type: ",
+        *ttp);
     return c10::nullopt;
   }
 
@@ -111,7 +123,8 @@ c10::optional<size_t> computeStorageSize(const Value& value) {
   // TODO: when does this fail? answer: in place mutation
   auto numel = ttp->numel();
   if (!numel.has_value()) {
-    TORCH_WARN("doesn't have numel", *ttp, ", ", value.debugName());
+    TORCH_WARN(
+        node_header, "; ", value.debugName(), " doesn't have numel: ", *ttp);
     return c10::nullopt;
   }
 
@@ -223,10 +236,9 @@ bool hasOutVariant(Node* node) {
   return false;
 }
 
-std::pair<
-    FastMap<const Value*, std::pair<UniqueLiveRange, size_t>>,
-    std::vector<const Node*>>
-getManagedValues(const std::shared_ptr<Graph>& graph, bool frozen = false) {
+FastMap<const Value*, std::pair<UniqueLiveRange, size_t>> getManagedValues(
+    const std::shared_ptr<Graph>& graph,
+    bool frozen = false) {
   AliasDb alias_db(graph, frozen);
   FastSet<const Value*> always_alive_values =
       jit::GetAlwaysAliveValues(graph, alias_db);
@@ -236,13 +248,9 @@ getManagedValues(const std::shared_ptr<Graph>& graph, bool frozen = false) {
   FastMap<const Value*, std::pair<UniqueLiveRange, size_t>> managed_values;
   FastSet<const Value*> leaked_values;
   FastMap<Node*, bool> node_has_out_variant;
-  std::vector<const Node*> out_nodes;
   for (auto* node : graph->nodes()) {
     auto has_out = hasOutVariant(node);
     node_has_out_variant.insert({node, has_out});
-    if (has_out) {
-      out_nodes.emplace_back(node);
-    }
   }
 
   for (auto node : graph->nodes()) {
@@ -265,7 +273,7 @@ getManagedValues(const std::shared_ptr<Graph>& graph, bool frozen = false) {
   }
 
   GRAPH_DEBUG("memory planning leaked values: ", c10::Join(",", leaked_values));
-  return std::make_pair(managed_values, out_nodes);
+  return managed_values;
 }
 
 // "high watermark" of memory
@@ -281,7 +289,7 @@ bool validateAllocations(
     std::vector<MemAllocation> allocations,
     SortedLiveRangeMap<size_t> managed_live_ranges,
     size_t total_size) {
-  if (total_size >= (size_t)std::numeric_limits<int64_t>::max) {
+  if (total_size >= (size_t)std::numeric_limits<int64_t>::max()) {
     TORCH_WARN("total allocation is too big ", total_size);
     return false;
   }
@@ -301,9 +309,9 @@ bool validateAllocations(
   if (allocations.size() != managed_live_ranges.size()) {
     TORCH_WARN(
         "not the right number of allocations: ",
-        allocations.size(),
-        ", ",
-        managed_live_ranges.size());
+        c10::Join("; ", allocations),
+        "\n",
+        c10::Join("; ", managed_live_ranges));
     return false;
   }
 
@@ -343,9 +351,7 @@ bool validateAllocations(
 }
 
 void planMemory(const std::shared_ptr<Graph>& graph, Strategy strat) {
-  FastMap<const Value*, std::pair<UniqueLiveRange, size_t>> managed_values;
-  std::vector<const Node*> out_nodes;
-  std::tie(managed_values, out_nodes) = getManagedValues(graph);
+  auto managed_values = getManagedValues(graph);
   SortedLiveRangeMap<size_t> managed_live_ranges;
   for (auto& item : managed_values) {
     auto ulvr = item.second.first;
