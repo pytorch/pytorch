@@ -81,6 +81,12 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalState {
     op.id = ctx->correlationId;
     op.startTime = ctx->startUs;
     op.endTime = end_time;
+    if (jit::currentFrameId()) {
+      auto frame_id = jit::currentFrameId().value();
+      op.addMetadata("pc", std::to_string(frame_id.pc));
+      op.addMetadata("NodeSchema", "\"" + frame_id.node_schema + "\"");
+      op.addMetadata("NodeHeader", "\"" + frame_id.node_header + "\"");
+    }
     // optimization - postpone shapesToStr till finalizeCPUTrace
     // is called from disableProfiler
     // if (ctx->shapes && !ctx->shapes->empty()) {
@@ -122,6 +128,7 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalState {
       }
       kineto_events_.back().cuda_event_start_ = ctx->cuda_event_start_;
       kineto_events_.back().cuda_event_end_ = ctx->cuda_event_end_;
+
 #ifdef USE_KINETO
       cpu_trace->activities.emplace_back(std::move(op));
 #endif // USE_KINETO

@@ -489,20 +489,19 @@ TEST(MemoryPlannerTest, LSTMGreedyByLongestAndSizeWithSmallestGap) {
   jit::planMemory(
       graph, Strategy::GREEDY_BY_LONGEST_AND_SIZE_WITH_SMALLEST_GAP);
 
-  StorageAttrs expected_storage = {3072, DeviceType::CPU};
+  StorageAttrs expected_storage = {3328, DeviceType::CPU};
   std::vector<AllocAttrs> expected_allocs = {
-      {1024, 1024, {1, 256}, {256, 1}, DeviceType::CPU, at::ScalarType::Float},
-      {1024, 0, {1, 256}, {256, 1}, DeviceType::CPU, at::ScalarType::Float},
-      {1024, 2048, {1, 256}, {256, 1}, DeviceType::CPU, at::ScalarType::Float},
+      {1024, 1280, {1, 256}, {256, 1}, DeviceType::CPU, at::ScalarType::Float},
+      {1024, 2304, {1, 256}, {256, 1}, DeviceType::CPU, at::ScalarType::Float},
+      {1024, 256, {1, 256}, {256, 1}, DeviceType::CPU, at::ScalarType::Float},
 
-      {256, 768, {1, 64}, {64, 1}, DeviceType::CPU, at::ScalarType::Float},
-      {256, 1024, {1, 64}, {64, 1}, DeviceType::CPU, at::ScalarType::Float},
+      {256, 1280, {1, 64}, {64, 1}, DeviceType::CPU, at::ScalarType::Float},
+      {256, 0, {1, 64}, {64, 1}, DeviceType::CPU, at::ScalarType::Float},
+      {256, 1536, {1, 64}, {64, 1}, DeviceType::CPU, at::ScalarType::Float},
+      {256, 1792, {1, 64}, {64, 1}, DeviceType::CPU, at::ScalarType::Float},
       {256, 256, {1, 64}, {64, 1}, DeviceType::CPU, at::ScalarType::Float},
-      {256, 0, {1, 64}, {64, 1}, DeviceType::CPU, at::ScalarType::Float},
       {256, 512, {1, 64}, {64, 1}, DeviceType::CPU, at::ScalarType::Float},
-      {256, 0, {1, 64}, {64, 1}, DeviceType::CPU, at::ScalarType::Float},
-      {256, 0, {1, 64}, {64, 1}, DeviceType::CPU, at::ScalarType::Float},
-
+      {256, 256, {1, 64}, {64, 1}, DeviceType::CPU, at::ScalarType::Float},
   };
   std::vector<std::string> expected_successors = {
       "aten::mm",
@@ -535,18 +534,18 @@ TEST(MemoryPlannerTest, LSTMGreedyByLongestAndSizeWithFirstGap) {
   jit::RemoveProfileNodesAndSpecializeTypes(graph);
   jit::planMemory(graph, Strategy::GREEDY_BY_LONGEST_AND_SIZE_WITH_FIRST_GAP);
 
-  StorageAttrs expected_storage = {3072, DeviceType::CPU};
+  StorageAttrs expected_storage = {3328, DeviceType::CPU};
   std::vector<AllocAttrs> expected_allocs = {
-      {1024, 1024, {1, 256}, {256, 1}, DeviceType::CPU, at::ScalarType::Float},
-      {1024, 0, {1, 256}, {256, 1}, DeviceType::CPU, at::ScalarType::Float},
-      {1024, 2048, {1, 256}, {256, 1}, DeviceType::CPU, at::ScalarType::Float},
-      {256, 768, {1, 64}, {64, 1}, DeviceType::CPU, at::ScalarType::Float},
-      {256, 1024, {1, 64}, {64, 1}, DeviceType::CPU, at::ScalarType::Float},
+      {1024, 1280, {1, 256}, {256, 1}, DeviceType::CPU, at::ScalarType::Float},
+      {1024, 2304, {1, 256}, {256, 1}, DeviceType::CPU, at::ScalarType::Float},
+      {1024, 256, {1, 256}, {256, 1}, DeviceType::CPU, at::ScalarType::Float},
+      {256, 1280, {1, 64}, {64, 1}, DeviceType::CPU, at::ScalarType::Float},
+      {256, 0, {1, 64}, {64, 1}, DeviceType::CPU, at::ScalarType::Float},
+      {256, 1536, {1, 64}, {64, 1}, DeviceType::CPU, at::ScalarType::Float},
+      {256, 1792, {1, 64}, {64, 1}, DeviceType::CPU, at::ScalarType::Float},
       {256, 256, {1, 64}, {64, 1}, DeviceType::CPU, at::ScalarType::Float},
-      {256, 0, {1, 64}, {64, 1}, DeviceType::CPU, at::ScalarType::Float},
       {256, 512, {1, 64}, {64, 1}, DeviceType::CPU, at::ScalarType::Float},
-      {256, 0, {1, 64}, {64, 1}, DeviceType::CPU, at::ScalarType::Float},
-      {256, 0, {1, 64}, {64, 1}, DeviceType::CPU, at::ScalarType::Float},
+      {256, 256, {1, 64}, {64, 1}, DeviceType::CPU, at::ScalarType::Float},
   };
   std::vector<std::string> expected_successors = {
       "aten::mm",
@@ -581,18 +580,16 @@ TEST(MemoryPlannerTest, LSTMGreedyByBreadth) {
 
   StorageAttrs expected_storage = {3072, DeviceType::CPU};
   std::vector<AllocAttrs> expected_allocs = {
-      {1024, 1024, {1, 256}, {256, 1}, DeviceType::CPU, at::ScalarType::Float},
       {1024, 0, {1, 256}, {256, 1}, DeviceType::CPU, at::ScalarType::Float},
+      {1024, 1024, {1, 256}, {256, 1}, DeviceType::CPU, at::ScalarType::Float},
       {1024, 2048, {1, 256}, {256, 1}, DeviceType::CPU, at::ScalarType::Float},
-
-      {256, 512, {1, 64}, {64, 1}, DeviceType::CPU, at::ScalarType::Float},
+      {256, 0, {1, 64}, {64, 1}, DeviceType::CPU, at::ScalarType::Float},
       {256, 1024, {1, 64}, {64, 1}, DeviceType::CPU, at::ScalarType::Float},
-      {256, 768, {1, 64}, {64, 1}, DeviceType::CPU, at::ScalarType::Float},
-      {256, 0, {1, 64}, {64, 1}, DeviceType::CPU, at::ScalarType::Float},
       {256, 256, {1, 64}, {64, 1}, DeviceType::CPU, at::ScalarType::Float},
+      {256, 512, {1, 64}, {64, 1}, DeviceType::CPU, at::ScalarType::Float},
+      {256, 768, {1, 64}, {64, 1}, DeviceType::CPU, at::ScalarType::Float},
+      {256, 512, {1, 64}, {64, 1}, DeviceType::CPU, at::ScalarType::Float},
       {256, 0, {1, 64}, {64, 1}, DeviceType::CPU, at::ScalarType::Float},
-      {256, 0, {1, 64}, {64, 1}, DeviceType::CPU, at::ScalarType::Float},
-
   };
   std::vector<std::string> expected_successors = {
       "aten::mm",
@@ -898,18 +895,18 @@ TEST(MemoryTracingAllocatorTest, LSTMGreedyBySizeAndLongestWithFirstGap) {
       mem_events,
       at::kCPU);
 
-  StorageAttrs expected_storage = {3072, DeviceType::CPU};
+  StorageAttrs expected_storage = {3584, DeviceType::CPU};
   std::vector<PreAllocAttrs> expected_allocs = {
-      {1024, 1024, DeviceType::CPU},
-      {1024, 0, DeviceType::CPU},
-      {1024, 2048, DeviceType::CPU},
-      {256, 768, DeviceType::CPU},
-      {256, 1024, DeviceType::CPU},
-      {256, 512, DeviceType::CPU},
-      {256, 0, DeviceType::CPU},
-      {256, 256, DeviceType::CPU},
-      {256, 0, DeviceType::CPU},
-      {256, 0, DeviceType::CPU},
+      {1024, 1536,  DeviceType::CPU},
+      {1024, 2560,  DeviceType::CPU},
+      {1024, 512,  DeviceType::CPU},
+      {256, 256,  DeviceType::CPU},
+      {256, 0,  DeviceType::CPU},
+      {256, 1536,  DeviceType::CPU},
+      {256, 1792,  DeviceType::CPU},
+      {256, 512,  DeviceType::CPU},
+      {256, 768,  DeviceType::CPU},
+      {256, 256,  DeviceType::CPU},
   };
   std::vector<std::string> expected_successors = {
       "aten::mm",

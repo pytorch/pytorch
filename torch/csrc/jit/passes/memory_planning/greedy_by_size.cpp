@@ -9,7 +9,7 @@ std::vector<MemAllocation> greedyBySizeWithSmallestGap(
   // sort tensor usage records in non-increasing order of size
   std::vector<std::pair<UniqueLiveRange, size_t>> sorted_size_live_ranges(
       live_ranges.begin(), live_ranges.end());
-  std::stable_sort(
+  std::sort(
       sorted_size_live_ranges.begin(),
       sorted_size_live_ranges.end(),
       [](auto& p1, auto& p2) { return p1.second > p2.second; });
@@ -23,7 +23,7 @@ std::vector<MemAllocation> greedyBySizeWithSmallestGap(
   }
 
   auto cmp = liveRangeStartCmp();
-  std::stable_sort(
+  std::sort(
       ordered_allocations.begin(),
       ordered_allocations.end(),
       [&cmp](auto m1, auto m2) { return cmp(m1.ulvr, m2.ulvr); });
@@ -35,7 +35,7 @@ std::vector<MemAllocation> greedyBySizeWithFirstGap(
   // sort tensor usage records in non-increasing order of size
   std::vector<std::pair<UniqueLiveRange, size_t>> sorted_size_live_ranges(
       live_ranges.begin(), live_ranges.end());
-  std::stable_sort(
+  std::sort(
       sorted_size_live_ranges.begin(),
       sorted_size_live_ranges.end(),
       [](auto& p1, auto& p2) { return p1.second > p2.second; });
@@ -49,7 +49,7 @@ std::vector<MemAllocation> greedyBySizeWithFirstGap(
   }
 
   auto cmp = liveRangeStartCmp();
-  std::stable_sort(
+  std::sort(
       ordered_allocations.begin(),
       ordered_allocations.end(),
       [&cmp](auto m1, auto m2) { return cmp(m1.ulvr, m2.ulvr); });
@@ -63,12 +63,12 @@ std::vector<MemAllocation> greedyByLongestAndSizeWithFirstGap(
       sorted_length_then_size_live_ranges(
           live_ranges.begin(), live_ranges.end());
   auto cmp = liveRangeStartCmp();
-  std::stable_sort(
+  std::sort(
       sorted_length_then_size_live_ranges.begin(),
       sorted_length_then_size_live_ranges.end(),
       [&cmp](auto& p1, auto& p2) {
-        auto len1 = p1.first.lvr.begin - p1.first.lvr.end;
-        auto len2 = p2.first.lvr.begin - p2.first.lvr.end;
+        auto len1 = p1.first.lvr.end - p1.first.lvr.begin;
+        auto len2 = p2.first.lvr.end - p2.first.lvr.begin;
         return len1 == len2 ? (p1.second == p2.second ? cmp(p1.first, p2.first)
                                                       : p1.second > p2.second)
                             : len1 > len2;
@@ -82,7 +82,7 @@ std::vector<MemAllocation> greedyByLongestAndSizeWithFirstGap(
     makeAllocation(ulvr, size, ordered_allocations, findFirstOffset);
   }
 
-  std::stable_sort(
+  std::sort(
       ordered_allocations.begin(),
       ordered_allocations.end(),
       [&cmp](auto m1, auto m2) { return cmp(m1.ulvr, m2.ulvr); });
@@ -96,12 +96,12 @@ std::vector<MemAllocation> greedyByLongestAndSizeWithSmallestGap(
       sorted_length_then_size_live_ranges(
           live_ranges.begin(), live_ranges.end());
   auto cmp = liveRangeStartCmp();
-  std::stable_sort(
+  std::sort(
       sorted_length_then_size_live_ranges.begin(),
       sorted_length_then_size_live_ranges.end(),
       [&cmp](auto& p1, auto& p2) {
-        auto len1 = p1.first.lvr.begin - p1.first.lvr.end;
-        auto len2 = p2.first.lvr.begin - p2.first.lvr.end;
+        auto len1 = p1.first.lvr.end - p1.first.lvr.begin;
+        auto len2 = p2.first.lvr.end - p2.first.lvr.begin;
         return len1 == len2 ? (p1.second == p2.second ? cmp(p1.first, p2.first)
                                                       : p1.second > p2.second)
                             : len1 > len2;
@@ -115,7 +115,7 @@ std::vector<MemAllocation> greedyByLongestAndSizeWithSmallestGap(
     makeAllocation(ulvr, size, ordered_allocations, findOffsetWithSmallestGap);
   }
 
-  std::stable_sort(
+  std::sort(
       ordered_allocations.begin(),
       ordered_allocations.end(),
       [&cmp](auto m1, auto m2) { return cmp(m1.ulvr, m2.ulvr); });
