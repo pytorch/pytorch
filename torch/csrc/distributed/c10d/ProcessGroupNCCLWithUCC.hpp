@@ -9,7 +9,33 @@
 namespace c10d {
 
 constexpr const char* BACKEND_NAME = "nccl";
+constexpr const char *TORCH_NCCL_ENABLED = "TORCH_NCCL_ENABLED";
+constexpr const char *TORCH_UCC_ENABLED = "TORCH_UCC_ENABLED";
 
+// ProcessGroupNCCLWithUCC is the unified NCCL & UCX & UCC bindings for c10d.
+//
+// This process group itself does not do any operation itself. But instead, it
+// act as a dispatcher:
+// When the user creates a backend "nccl" from Python, the user actually creates
+// an object of ProcessGroupNCCLWithUCC. ProcessGroupNCCLWithUCC is a container
+// process group that has both a ProcessGroupNCCL and a ProcessGroupUCC, where
+// the ProcessGroupUCC provides the binding for both UCX and UCC. Operations
+// in ProcessGroupNCCLWithUCC will dispatch to either ProcessGroupNCCL or
+// ProcessGroupUCC based on the operation. Most GPU operations are dispatched
+// to ProcessGroupNCCL. Non-GPU operations are dispatched to ProcessGroupUCC.
+//
+// Some GPU operations are dispatched to ProcessGroupUCC because NCCL does not
+// support such operations. Examples are:
+//   - send/recv/recvAnysource with non-zero tag
+//
+// Users can control whether NCCL or UCX & UCC bindings are enabled by environmental
+// variables TORCH_NCCL_ENABLED and TORCH_UCC_ENABLED. When NCCL is disabled
+// by the user, ProcessGroupUCC will be used for GPU operations.
+//
+// Both ProcessGroupNCCL and ProcessGroupUCC supports profilers. Operations done
+// by ProcessGroupNCCL will be profiled as something like `nccl:recv` and oparations
+// of ProcessGroupUCC will appear as `ucc:recv`. This allows users to tell which
+// backend is actually used by profiling.
 class TORCH_API ProcessGroupNCCLWithUCC : public ProcessGroup {
 public:
 

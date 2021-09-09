@@ -13,9 +13,6 @@
 
 #if defined(USE_C10D_NCCL) || defined(USE_C10D_UCC)
 
-constexpr const char *TORCH_NCCL_ENABLED = "TORCH_NCCL_ENABLED";
-constexpr const char *TORCH_UCC_ENABLED = "TORCH_UCC_ENABLED";
-
 inline bool string_is_true(char *s) {
   return s == nullptr || (std::string(s) != "0" && std::string(s) != "false");
 }

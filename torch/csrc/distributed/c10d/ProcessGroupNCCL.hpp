@@ -38,6 +38,15 @@ constexpr const char* NCCL_BACKEND_NAME = "_internal_nccl";
 
 // ProcessGroupNCCL implements NCCL bindings for c10d.
 //
+// The NCCL binding is not published to the user directly on Python. When the
+// user creates a backend "nccl" from Python, the user actually creates an
+// object of ProcessGroupNCCLWithUCC. ProcessGroupNCCLWithUCC is a container
+// process group that has both a ProcessGroupNCCL and a ProcessGroupUCC.
+// Operations in ProcessGroupNCCLWithUCC will dispatch to either ProcessGroupNCCL
+// or ProcessGroupUCC based on the operation. Most GPU operations are dispatched
+// to ProcessGroupNCCL. Non-GPU operations are dispatched to ProcessGroupUCC.
+// Please see the docs of ProcessGroupNCCLWithUCC for more detail.
+//
 // All functions of the class are expected to be called in the same order
 // across all processes in the process group.  This is the only way that we
 // can guarantee to match up the same calls among all processes.

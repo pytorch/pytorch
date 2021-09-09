@@ -4,9 +4,6 @@
 #include <c10/macros/Export.h>
 #include <thread>
 
-// TODO support profiler:
-// Reference PR: https://github.com/pytorch/pytorch/pull/52004/files
-
 namespace {
 
 static void check_tensor(const std::vector<at::Tensor>& tensors) {
@@ -24,8 +21,6 @@ namespace tagging {
 // real tag. When receiving from a specified endpoint, the entire ucp_tag_t
 // should match. And when receiving from any source, tag mask is used to
 // disable the matching of the higher bits.
-
-// TODO: add test for INT_MAX tag
 
 using world_size_t = int;
 using tag_t = int;
@@ -73,10 +68,16 @@ constexpr const char* UCC_BACKEND_NAME = "_internal_ucc";
 // ProcessGroupUCC implements UCC & UCX bindings for c10d. UCC is used for
 // collective operations, and UCX is used for P2P operations.
 //
-// The UCC & UCX binding is not published to the user directly, but it provided
-// a process group called `_internal_ucc`. The `_internal_ucc` is only for
-// testing purposes, and for power users who really knows what they are doing.
-//
+// The UCC & UCX binding is not published to the user directly, but it is
+// used as a supplementary backend for the "nccl" process group. When the
+// user creates a backend "nccl" from Python, the user actually creates an
+// object of ProcessGroupNCCLWithUCC. ProcessGroupNCCLWithUCC is a container
+// process group that has both a ProcessGroupNCCL and a ProcessGroupUCC.
+// Operations in ProcessGroupNCCLWithUCC will dispatch to either ProcessGroupNCCL
+// or ProcessGroupUCC based on the operation. Most GPU operations are dispatched
+// to ProcessGroupNCCL. Non-GPU operations are dispatched to ProcessGroupUCC.
+// Please see the docs of ProcessGroupNCCLWithUCC for more detail.
+// 
 // All functions of the class are expected to be called in the same order
 // across all processes in the process group.  This is the only way that we
 // can guarantee to match up the same calls among all processes.
@@ -85,11 +86,6 @@ constexpr const char* UCC_BACKEND_NAME = "_internal_ucc";
 // ucx: https://github.com/openucx/ucx
 // ucc: https://github.com/openucx/ucc
 // Original torch_ucc: https://github.com/facebookresearch/torch_ucc
-//
-// *****************************************************************************
-// This ProcessGroup is still under development, and there are some know issues:
-// - Only send and recv are supported.
-// - It is fake async: UCP worker are progressed only when checking status.
 class ProcessGroupUCC final : public ProcessGroup {
 public:
   class WorkUCP : public ProcessGroup::Work {
