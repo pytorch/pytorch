@@ -49,6 +49,8 @@ LABEL_CIFLOW_LINUX = "ciflow/linux"
 LABEL_CIFLOW_SCHEDULED = "ciflow/scheduled"
 LABEL_CIFLOW_SLOW = "ciflow/slow"
 LABEL_CIFLOW_WIN = "ciflow/win"
+LABEL_CIFLOW_XLA = "ciflow/xla"
+LABEL_CIFLOW_NOARCH = "ciflow/noarch"
 
 
 @dataclass
@@ -150,6 +152,8 @@ class CIWorkflow:
     enable_slow_test: YamlShellBool = "''"
     enable_docs_test: YamlShellBool = "''"
     enable_backwards_compat_test: YamlShellBool = "''"
+    enable_xla_test: YamlShellBool = "''"
+    enable_noarch_test: YamlShellBool = "''"
 
     def __post_init__(self) -> None:
         if self.is_libtorch:
@@ -220,8 +224,8 @@ WINDOWS_WORKFLOWS = [
     ),
     CIWorkflow(
         arch="windows",
-        build_environment="win-vs2019-cuda10.1-py3",
-        cuda_version="10.1",
+        build_environment="win-vs2019-cuda10.2-py3",
+        cuda_version="10.2",
         test_runner_type=WINDOWS_CUDA_TEST_RUNNER,
         on_pull_request=True,
         only_run_smoke_tests_on_pull_request=True,
@@ -276,24 +280,47 @@ LINUX_WORKFLOWS = [
             labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CPU}
         ),
     ),
-    # CIWorkflow(
-    #     arch="linux",
-    #     build_environment="paralleltbb-linux-xenial-py3.6-gcc5.4",
-    #     docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-py3.6-gcc5.4",
-    #     test_runner_type=LINUX_CPU_TEST_RUNNER,
-    # ),
-    # CIWorkflow(
-    #     arch="linux",
-    #     build_environment="parallelnative-linux-xenial-py3.6-gcc5.4",
-    #     docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-py3.6-gcc5.4",
-    #     test_runner_type=LINUX_CPU_TEST_RUNNER,
-    # ),
-    # CIWorkflow(
-    #     arch="linux",
-    #     build_environment="pure_torch-linux-xenial-py3.6-gcc5.4",
-    #     docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-py3.6-gcc5.4",
-    #     test_runner_type=LINUX_CPU_TEST_RUNNER,
-    # ),
+    CIWorkflow(
+        arch="linux",
+        build_environment="paralleltbb-linux-xenial-py3.6-gcc5.4",
+        docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-py3.6-gcc5.4",
+        test_runner_type=LINUX_CPU_TEST_RUNNER,
+        # This is a master only job despite on_pull_request is set to True
+        on_pull_request=True,
+        ciflow_config=CIFlowConfig(
+            enabled=True,
+            trigger_action_only=True,
+            labels={LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CPU},
+        ),
+    ),
+    CIWorkflow(
+        arch="linux",
+        build_environment="parallelnative-linux-xenial-py3.6-gcc5.4",
+        docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-py3.6-gcc5.4",
+        test_runner_type=LINUX_CPU_TEST_RUNNER,
+        # This is a master only job despite on_pull_request is set to True
+        on_pull_request=True,
+        ciflow_config=CIFlowConfig(
+            enabled=True,
+            trigger_action_only=True,
+            labels={LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CPU},
+        ),
+    ),
+    # Build PyTorch with BUILD_CAFFE2=OFF
+    CIWorkflow(
+        arch="linux",
+        build_environment="puretorch-linux-xenial-py3.6-gcc5.4",
+        docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-py3.6-gcc5.4",
+        test_runner_type=LINUX_CPU_TEST_RUNNER,
+        exclude_test=True,
+        # This is a master only job despite on_pull_request is set to True
+        on_pull_request=True,
+        ciflow_config=CIFlowConfig(
+            enabled=True,
+            trigger_action_only=True,
+            labels={LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CPU},
+        ),
+    ),
     # CIWorkflow(
     #     arch="linux",
     #     build_environment="linux-xenial-py3.6-gcc7",
@@ -409,24 +436,6 @@ LINUX_WORKFLOWS = [
             labels={LABEL_CIFLOW_SCHEDULED, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_LIBTORCH, LABEL_CIFLOW_CUDA},
         ),
     ),
-    # CIWorkflow(
-    #     arch="linux",
-    #     build_environment="linux-bionic-py3.6-clang9-noarch",
-    #     docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-py3.6-clang9",
-    #     test_runner_type=LINUX_CPU_TEST_RUNNER,
-    # ),
-    # CIWorkflow(
-    #     arch="linux",
-    #     build_environment="xla-linux-bionic-py3.6-clang9",
-    #     docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-py3.6-clang9",
-    #     test_runner_type=LINUX_CPU_TEST_RUNNER,
-    # ),
-    # CIWorkflow(
-    #     arch="linux",
-    #     build_environment="vulkan-linux-bionic-py3.6-clang9",
-    #     docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-py3.6-clang9",
-    #     test_runner_type=LINUX_CPU_TEST_RUNNER,
-    # ),
     CIWorkflow(
         arch="linux",
         build_environment="linux-bionic-py3.8-gcc9-coverage",
@@ -438,6 +447,20 @@ LINUX_WORKFLOWS = [
         ciflow_config=CIFlowConfig(
             enabled=True,
             labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_COVERAGE, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CPU},
+        ),
+    ),
+    CIWorkflow(
+        arch="linux",
+        build_environment="linux-bionic-py3.6-clang9",
+        docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-py3.6-clang9",
+        test_runner_type=LINUX_CPU_TEST_RUNNER,
+        on_pull_request=True,
+        num_test_shards=2,
+        distributed_test=False,
+        enable_noarch_test=1,
+        ciflow_config=CIFlowConfig(
+            enabled=True,
+            labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CPU, LABEL_CIFLOW_XLA, LABEL_CIFLOW_NOARCH},
         ),
     ),
     # CIWorkflow(
