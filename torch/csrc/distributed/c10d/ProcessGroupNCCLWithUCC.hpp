@@ -6,11 +6,12 @@
 
 #if defined(USE_C10D_NCCL) || defined(USE_C10D_UCC)
 
-namespace c10d {
-
-constexpr const char* BACKEND_NAME = "nccl";
 constexpr const char *TORCH_NCCL_ENABLED = "TORCH_NCCL_ENABLED";
 constexpr const char *TORCH_UCC_ENABLED = "TORCH_UCC_ENABLED";
+
+namespace c10d {
+
+constexpr const char *BACKEND_NAME = "nccl";
 
 // ProcessGroupNCCLWithUCC is the unified NCCL & UCX & UCC bindings for c10d.
 //
