@@ -592,9 +592,7 @@ TEST_F(Kernel, CatAndInlineWithAConstantDim) {
 
   auto graph = std::make_shared<Graph>();
   parseIR(graph_string, &*graph);
-
   TensorExprKernel k(graph);
-  StmtPtr s = k.getCodeGenStmt();
 
   auto a = at::rand({1, 512}, TensorOptions(kCPU).dtype(at::kFloat));
   auto b = at::rand({1, 512}, TensorOptions(kCPU).dtype(at::kFloat));
