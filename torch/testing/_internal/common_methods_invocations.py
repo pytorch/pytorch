@@ -9514,16 +9514,9 @@ op_db: List[OpInfo] = [
         dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
         ref=reference_reduction_numpy(np.sum),
         decorators=(
-            # FIXME: fix precision
             DecorateInfo(toleranceOverride({
                 torch.float16: tol(atol=1e-05, rtol=1e-02),
             }), 'TestReductions'),
-            DecorateInfo(toleranceOverride({
-                torch.float32: tol(atol=1e-03, rtol=1e-03),
-            }), 'TestReductions', 'test_ref_large_input_2D'),
-            DecorateInfo(toleranceOverride({
-                torch.float32: tol(atol=1e-03, rtol=1e-03),
-            }), 'TestReductions', 'test_ref_large_input_64bit_indexing'),
         ),
         skips=(
             # FIXME: sum does not support passing keepdim without passing dim
@@ -9545,16 +9538,9 @@ op_db: List[OpInfo] = [
         dtypes=all_types_and(torch.bool, torch.float16, torch.bfloat16),
         ref=reference_reduction_numpy(np.nansum),
         decorators=(
-            # FIXME: fix precision
             DecorateInfo(toleranceOverride({
                 torch.float16: tol(atol=1e-05, rtol=1e-02),
             }), 'TestReductions'),
-            DecorateInfo(toleranceOverride({
-                torch.float32: tol(atol=1e-03, rtol=1e-03),
-            }), 'TestReductions', 'test_ref_large_input_2D'),
-            DecorateInfo(toleranceOverride({
-                torch.float32: tol(atol=1e-03, rtol=1e-03),
-            }), 'TestReductions', 'test_ref_large_input_64bit_indexing'),
         ),
         skips=(
             # FIXME: nansum does not support passing keepdim without passing dim

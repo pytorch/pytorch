@@ -370,20 +370,20 @@ class TestReductions(TestCase):
             self._test_ref(op, t, dim=dim)
 
     @ops(filter(lambda op: op.ref is not None, reduction_ops),
-         allowed_dtypes=[torch.float32])
+         allowed_dtypes=[torch.float64])
     def test_ref_large_input_1D(self, device, dtype, op: ReductionOpInfo):
         """Compares op against reference for a large 1D input tensor to check stability"""
         self._test_ref(op, make_tensor((2 ** 20,), device, dtype, low=-1, high=1, exclude_zero=True))
 
     @ops(filter(lambda op: op.ref is not None, reduction_ops),
-         allowed_dtypes=[torch.float32])
+         allowed_dtypes=[torch.float64])
     def test_ref_large_input_2D(self, device, dtype, op: ReductionOpInfo):
         """Compares op against reference for a large 2D input tensor to test parallelism"""
         t = make_tensor((32, 2 ** 16), device, dtype, low=-1, high=1, exclude_zero=True)
         self._test_ref(op, t, dim=1)
 
     @ops(filter(lambda op: op.ref is not None, reduction_ops),
-         allowed_dtypes=[torch.float32])
+         allowed_dtypes=[torch.float64])
     def test_ref_large_input_64bit_indexing(self, device, dtype, op: ReductionOpInfo):
         """Compares op against reference for a very large input tensor that requires 64 bit indexing"""
         self._test_ref(op, make_tensor((275000000,), device, dtype, low=-1, high=1, exclude_zero=True))
