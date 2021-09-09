@@ -10,7 +10,7 @@ namespace rpc {
 using worker_id_t = int16_t;
 using local_id_t = int64_t;
 
-bool getAllowJitRRefPickle();
+TORCH_API bool getAllowJitRRefPickle();
 TORCH_API void enableJitRRefPickle();
 TORCH_API void disableJitRRefPickle();
 
@@ -60,6 +60,8 @@ struct TORCH_API SerializedPyObj final {
   std::string payload_;
   std::vector<at::Tensor> tensors_;
 };
+
+using TensorToDeviceMap = c10::Dict<at::Tensor, c10::Device>;
 
 } // namespace rpc
 } // namespace distributed

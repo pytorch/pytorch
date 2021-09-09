@@ -12,7 +12,6 @@ namespace distributed {
 namespace rpc {
 
 using DeviceMap = std::unordered_map<c10::Device, c10::Device>;
-using TensorToDeviceMap = c10::Dict<torch::Tensor, c10::Device>;
 
 // Default RPC timeout
 constexpr float kDefaultRpcTimeoutSeconds = 60;

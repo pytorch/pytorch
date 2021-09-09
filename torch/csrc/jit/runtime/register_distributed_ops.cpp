@@ -43,8 +43,8 @@ void prepare_and_call_rpc_op(
   auto& argsTupleIValue = num_inputs >= 3 ? *stackIter++ : emptyTuple;
   // `kwargs = kwargs if kwargs is not None else {}`.
   auto& kwargsDictIValue = num_inputs >= 4 ? *stackIter++ : emptyDict;
-  // `tensorToDeviceDictIValue = tensorToDeviceDictIValue if tensorToDeviceDictIValue is not None else {}`.
-  auto& tensorToDeviceDictIValue = num_inputs >= 5 ? *stackIter++ : emptyDict;
+  // `arg_devices = arg_devices if arg_devices is not None else ()`.
+  auto& argDevicesTupleIValue = num_inputs >= 5 ? *stackIter++ : emptyTuple;
 
   // IValue corresponding to placeholder for RPC timeout. Used if no
   // rpc timeout is specified by user.
@@ -58,7 +58,7 @@ void prepare_and_call_rpc_op(
   TORCH_INTERNAL_ASSERT(qualifiedNameIValue.isString());
   TORCH_INTERNAL_ASSERT(argsTupleIValue.isTuple());
   TORCH_INTERNAL_ASSERT(kwargsDictIValue.isGenericDict());
-  TORCH_INTERNAL_ASSERT(tensorToDeviceDictIValue.isGenericDict());
+  TORCH_INTERNAL_ASSERT(argDevicesTupleIValue.isTuple());
   TORCH_INTERNAL_ASSERT(timeoutIValue.isDouble());
 
   // Get FunctionSchema for qualifiedName.
@@ -69,6 +69,24 @@ void prepare_and_call_rpc_op(
     cuPtr = get_python_cu();
   }
   auto& functionSchema = cuPtr->get_function(qualifiedName).getSchema();
+
+  TORCH_CHECK(argDevicesTupleIValue.toTuple()->elements().size() <= argsTupleIValue.toTuple()->elements().size(),
+              "len(arg_devices) must be less or equal to len(args)");
+  dist_rpc::TensorToDeviceMap tensorToDevice;
+  for (int i = 0; i < argsTupleIValue.toTuple()->elements().size(); i++) {
+    auto arg = argsTupleIValue.toTuple()->elements()[i];
+    std::vector<at::Tensor> tensor_table;
+    bool allowJitRRefPickle = dist_rpc::getAllowJitRRefPickle();
+    if (!allowJitRRefPickle) dist_rpc::enableJitRRefPickle();
+    jit::pickle(arg, &tensor_table);
+    if (!allowJitRRefPickle) dist_rpc::disableJitRRefPickle();
+    if (!tensor_table.empty()) {
+      auto device = argDevicesTupleIValue.toTuple()->elements()[i].toDevice();
+      for (auto tensor : tensor_table) {
+        tensorToDevice.insert(tensor, device);
+      }
+    }
+  }
 
   // Build the stack for the user callable.
   // It's similar to
@@ -129,11 +147,6 @@ void prepare_and_call_rpc_op(
   }
   // Get RPC timeout, if specified by user.
   const auto rpcTimeout = timeoutIValue.toDouble();
-
-  dist_rpc::TensorToDeviceMap tensorToDevice;
-  for (const auto& pair : tensorToDeviceDictIValue.toGenericDict()) {
-    tensorToDevice.insert(pair.key().toTensor(), pair.value().toDevice());
-  }
 
   if (rpc_op == "rpc_async") {
     // Send RPC request.
