@@ -7,7 +7,7 @@ import torch.jit.frontend
 import torch.jit.quantized
 
 # Testing utils
-from torch.testing import floating_and_complex_types_and
+from torch.testing._internal.common_dtype import floating_and_complex_types_and
 from torch.testing._internal.common_utils import TestCase, \
     freeze_rng_state, TemporaryFileName, enable_profiling_mode_for_profiling_tests, is_iterable_of_tensors
 from torch.testing._internal.common_utils import enable_profiling_mode  # noqa: F401
@@ -136,7 +136,7 @@ def check_against_reference(self, func, reference_func, output_func, args, kwarg
         for g2, g2_test in zip(grads2, grads2_test):
             if g2 is None and g2_test is None:
                 continue
-            self.assertTrue(torch.allclose(g2, g2_test, atol=5e-4, rtol=1e-4))
+            self.assertEqual(g2, g2_test, atol=5e-4, rtol=1e-4)
 
 class JitCommonTestCase(TestCase):
     def createFunctionFromGraph(self, trace):
@@ -281,7 +281,7 @@ class JitCommonTestCase(TestCase):
         self.assertEqual(should_autodiff_node,
                          found_all_nonfusible_nodes and found_all_fusible_nodes, err_msg)
 
-    def checkShapeAnalysis(self, out_size, traced_graph, assert_propagation):
+    def checkShapeAnalysis(self, out_size, traced_graph, assert_propagation, constant_prop=True):
         # repropagte input shapes provided by tracing,
         prev_symbolic_shapes_test_enabled = torch._C._jit_symbolic_shapes_test_mode_enabled()
         for enable_test_mode in [True, False]:
@@ -289,7 +289,8 @@ class JitCommonTestCase(TestCase):
             # disallowing constants helps stress test partial eval and substitution pipeline
             torch._C._jit_set_symbolic_shapes_test_mode(enable_test_mode)
             torch._C._jit_erase_non_input_shape_information(traced_graph)
-            torch._C._jit_pass_constant_propagation(traced_graph)
+            if constant_prop:
+                torch._C._jit_pass_constant_propagation(traced_graph)
             torch._C._jit_pass_propagate_shapes_on_graph(traced_graph)
             # Add sizes to default tensor type to avoid checking something out of scope
             # and difficulties with tracer leaving in other parts of tensor type

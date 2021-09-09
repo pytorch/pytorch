@@ -16,6 +16,10 @@ class Identity(Module):
         args: any argument (unused)
         kwargs: any keyword argument (unused)
 
+    Shape:
+        - Input: :math:`(*)`, where :math:`*` means any number of dimensions.
+        - Output: :math:`(*)`, same shape as the input.
+
     Examples::
 
         >>> m = nn.Identity(54, unused_argument1=0.1, unused_argument2=False)

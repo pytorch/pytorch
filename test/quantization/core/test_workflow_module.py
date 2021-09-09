@@ -205,11 +205,11 @@ class TestObserver(QuantizationTestCase):
             if reduce_range:
                 ref_scales = [s * 255 / 127 for s in ref_scales]
                 ref_zero_points = [math.floor(z / 2) for z in ref_zero_points]
-            self.assertTrue(torch.allclose(qparams[0], torch.tensor(ref_scales, dtype=qparams[0].dtype), atol=0.0001))
+            self.assertEqual(qparams[0], torch.tensor(ref_scales, dtype=qparams[0].dtype), rtol=1e-5, atol=0.0001)
             if qscheme == torch.per_channel_affine_float_qparams:
-                self.assertTrue(torch.allclose(qparams[1], torch.tensor(ref_zero_points, dtype=qparams[1].dtype), atol=1))
+                self.assertEqual(qparams[1], torch.tensor(ref_zero_points, dtype=qparams[1].dtype), rtol=1e-5, atol=1)
             else:
-                self.assertTrue(torch.allclose(qparams[1], torch.tensor(ref_zero_points, dtype=qparams[1].dtype)))
+                self.assertEqual(qparams[1], torch.tensor(ref_zero_points, dtype=qparams[1].dtype))
 
 
             # Test for serializability

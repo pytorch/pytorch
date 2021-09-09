@@ -31,7 +31,6 @@ struct IndexRangeGenerator {
     size_t i = 0;
 };
 
-bool isFwGradDefined(const c10::optional<Tensor>& t);
 Tensor toNonOptFwGrad(const c10::optional<Tensor>& t);
 Tensor toNonOptPrimal(const c10::optional<Tensor>& t);
 Tensor toNonOptTensor(const c10::optional<Tensor>& t);
@@ -102,6 +101,7 @@ at::Tensor mean_backward(at::Tensor grad, const at::IntArrayRef sizes, int64_t n
 at::Tensor var_std_mean_backward(const variable_list& grads, const at::Tensor& self, const at::Tensor& r1, const at::Tensor& r2, c10::optional<IntArrayRef> dim, c10::optional<int64_t> correction, bool keepdim, bool is_std);
 at::Tensor masked_scatter_backward(const at::Tensor & grad, const at::Tensor & mask, at::IntArrayRef sizes);
 at::Tensor cholesky_backward(at::Tensor grad, bool upper, at::Tensor L);
+at::Tensor cholesky_jvp(const at::Tensor& input_tangent, const at::Tensor& L, bool upper);
 at::Tensor cholesky_inverse_backward(at::Tensor grad, at::Tensor L, bool upper, at::Tensor inverse);
 at::Tensor split_with_sizes_backward(const std::vector<torch::autograd::Variable> &grads,
                                      IntArrayRef split_sizes, int64_t dim, IntArrayRef sizes, const at::TensorOptions &options);
@@ -258,11 +258,26 @@ Tensor lu_unpack_backward(
   const Tensor& LU_data,
   bool unpack_data
 );
+
 Tensor _det_lu_based_helper_backward(
   const Tensor& det_grad,
   const Tensor& det,
   const Tensor& self,
   const Tensor& lu,
+  const Tensor& pivs
+);
+
+Tensor lu_backward_base(
+  const variable_list& grads,
+  const Tensor& self,
+  const Tensor& P,
+  const Tensor& L,
+  const Tensor& U
+);
+Tensor _lu_with_info_backward(
+  const Tensor& grad,
+  const Tensor& self,
+  const Tensor& LU,
   const Tensor& pivs
 );
 
