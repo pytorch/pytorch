@@ -1708,7 +1708,7 @@ class TestQuantizedOps(TestCase):
                                               min_side=5, max_side=10),
                        qparams=hu.qparams()),
            size=st.sampled_from((1, 3, 5, 10)),
-           mode=st.sampled_from(("bilinear", "nearest")),
+           mode=st.sampled_from(("bilinear", "nearest", "nearest-exact")),
            scale_factor=st.sampled_from((None, 1.5, 2.0)),
            align_corners=st.sampled_from((True, False)),
            nhwc_layout=st.sampled_from((True, False)))
@@ -1721,7 +1721,7 @@ class TestQuantizedOps(TestCase):
 
         if scale_factor is not None:
             size = None
-        if mode == "nearest":
+        if mode in ("nearest", "nearest-exact"):
             align_corners = None
 
         if nhwc_layout:
@@ -2269,7 +2269,7 @@ class TestQuantizedOps(TestCase):
 
         # interpolate
         op = torch.nn.quantized.functional.interpolate
-        for mode in ["nearest", "bilinear"]:
+        for mode in ["nearest", "bilinear", "nearest-exact"]:
             qY = op(qX, scale_factor=2, mode=mode)
             np.testing.assert_equal(qY.size(), (0, 2, 8, 8),
                                     "Quantized interpolate with batch size 0 failed.")
