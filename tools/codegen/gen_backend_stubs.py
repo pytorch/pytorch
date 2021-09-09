@@ -144,7 +144,7 @@ def error_on_missing_kernels(
         list(backend_indices[backend_key].index.keys()) + list(backend_indices[autograd_key].index.keys())
     expected_backend_native_funcs: List[NativeFunction] = [
         f for f in native_functions if f.func.name in expected_backend_op_names and f.func.name not in codegen]
-    
+
     expected_backend_kernel_name_counts: Dict[str, List[NativeFunction]] = defaultdict(list)
     for native_f in expected_backend_native_funcs:
         expected_backend_kernel_name_counts[dispatcher.name(native_f.func)].append(native_f)
@@ -280,7 +280,7 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
         # generate native function impls that build IR nodes
         for dispatch_key in [backend_dispatch_key]:  # , autograd_dispatch_key
             fm.write_with_template(f'{dispatch_key}NativeFunctions.cpp', 'NativeFunctions.cpp', lambda: {
-                'generated_comment' : '', 
+                'generated_comment': '',
                 'includes': [f'#include "{path}"' for path in [
                     "lazy_tensor_core/csrc/tensor.h",
                     "lazy_tensor_core/csrc/aten_ltc_bridge.h",
@@ -289,13 +289,17 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
                 ]],
                 'native_functions_include': '',
                 'backend_namespace': 'torch_lazy_tensors',  # this is wrong
-                'native_function_definitions': 
+                'native_function_definitions':
                 list(concatMap(
-                    lambda f: dest.compute_lazy_native_function_definition(f, backend_indices[dispatch_key], codegen),
+                    lambda f: dest.compute_lazy_native_function_definition(
+                        f,
+                        backend_indices[dispatch_key],
+                        codegen,
+                        class_method_name=f'{backend_dispatch_key}NativeFunctions'),
                     grouped_native_functions
                 )),
             })
-        
+
         # and generate IR nodes
         for dispatch_key in [backend_dispatch_key]:  # , autograd_dispatch_key
             fm.write_with_template(f'{dispatch_key}LazyIr.h', 'LazyIr.h', lambda: {
@@ -317,7 +321,7 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
                     grouped_native_functions
                 )),
             })
-        
+
         # and TorchScript Lowerings for the IR nodes
         for dispatch_key in [backend_dispatch_key]:  # , autograd_dispatch_key
             fm.write_with_template(f'TSLowering.cpp', 'TSLowering.cpp', lambda: {
@@ -348,6 +352,6 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
                 )),
             })
 
+
 if __name__ == '__main__':
     main()
-

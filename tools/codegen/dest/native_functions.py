@@ -56,7 +56,7 @@ def compute_native_function_declaration(
 
 
 # @with_native_function_and_index
-def gen_unstructured_lazy_definition(f: NativeFunction, backend_index: BackendIndex) -> Optional[str]:
+def gen_unstructured_lazy_definition(f: NativeFunction, backend_index: BackendIndex, class_method_name: str) -> Optional[str]:
     sig = kernel_signature(f, backend_index)
     metadata = backend_index.get_kernel(f)
     
@@ -78,7 +78,6 @@ def gen_unstructured_lazy_definition(f: NativeFunction, backend_index: BackendIn
 
     node_ctor_scalars = [] 
     for t in scalar_types:
-        # import ipdb; ipdb.set_trace()
         if isinstance(t.type, BaseCType) and t.type.type.name == "vector<int64_t>":
             node_ctor_scalars.append(f"std::vector<int64_t>({t.name}.begin(), {t.name}.end())")
         else:
@@ -94,7 +93,7 @@ def gen_unstructured_lazy_definition(f: NativeFunction, backend_index: BackendIn
         return None
     else:
         return f"""\
-{sig.decl(name=metadata.kernel)} {{
+{sig.decl(name=f"{class_method_name}::{metadata.kernel}")} {{
     {lazy_tensor_decls}
     return bridge::AtenFromLtcTensor(l_{first_tensor.name}.CreateFrom(
         ir::MakeNode<ir::ops::{ir_node_name(f.func)}>({node_ctor_inputs})));
@@ -106,6 +105,7 @@ def compute_lazy_native_function_definition(
         g: Union[NativeFunctionsGroup, NativeFunction],
         backend_index: BackendIndex,
         codegen: List[OperatorName],
+        class_method_name: str,
 ) -> List[str]:
 
     metadata = backend_index.get_kernel(g)
@@ -119,6 +119,6 @@ def compute_lazy_native_function_definition(
         if g.func.name not in codegen:
             return []
         if metadata is not None:
-            x = gen_unstructured_lazy_definition(g, backend_index)
+            x = gen_unstructured_lazy_definition(g, backend_index, class_method_name)
             return [] if x is None else [x]
         return []
