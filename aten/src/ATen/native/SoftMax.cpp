@@ -281,10 +281,7 @@ TORCH_IMPL_FUNC(log_softmax_cpu_out)
   if (input_.ndimension() > 0 && dim_ == input_.ndimension() - 1) {
     log_softmax_lastdim_kernel(kCPU, output, input_);
   } else {
-    AT_DISPATCH_FLOATING_TYPES_AND(
-        at::ScalarType::BFloat16, input_.scalar_type(), "log_softmax", [&] {
-          host_softmax<scalar_t, true>(output, input_, dim_);
-        });
+    log_softmax_kernel(kCPU, output, input_, dim_);
   }
 }
 
@@ -406,6 +403,7 @@ DEFINE_DISPATCH(softmax_backward_lastdim_kernel);
 DEFINE_DISPATCH(log_softmax_backward_lastdim_kernel);
 
 DEFINE_DISPATCH(softmax_kernel);
+DEFINE_DISPATCH(log_softmax_kernel);
 
 Tensor softmax(const Tensor& self, Dimname dim, optional<ScalarType> dtype) {
   return at::softmax(self, dimname_to_position(self, dim), dtype);
