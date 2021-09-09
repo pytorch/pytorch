@@ -84,7 +84,6 @@ class PyTorchServiceWSGIApp(object):
             self.g = _ThreadLocalStateGuard(self.main_TLS)
 
         self.request_is_local = request.remote_addr == '127.0.0.1'
-        print(self.request_is_local)
         request_data = json.loads(request.data)
         request_data['log_dir'] = TMPLOG if not self.request_is_local else request_data['log_dir']
         self.run_name = request_data['run_name']
@@ -212,7 +211,7 @@ class Listener(object):
         self.master_port = MASTER_PORT
         self.is_master_server = is_master_server
         self.master_host = master_host
-        self.fqdn = socket.getfqdn()
+        self.fqdn = self.host if self.host == 'localhost' else socket.getfqdn()
         _init_kineto_TLS()
         self.state = _ThreadLocalState(True)
     
