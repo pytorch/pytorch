@@ -529,7 +529,7 @@ def relu(*, input, inplace=False):
 )
 def torch_log1p_mapper(node: torch.fx.Node, _: torch.nn.Module) -> torch.fx.Node:
     with node.graph.inserting_before(node):
-        add_kwargs = {"input": node.kwargs["input"], "other": 1}
+        add_kwargs = {"input": node.kwargs["input"], "other": 1.0}
         add_node = node.graph.call_function(add, kwargs=add_kwargs)
         add_node.meta = node.meta.copy()
         log_kwargs = {"input": add_node}
@@ -762,6 +762,12 @@ def torch_argmin_mapper(node: torch.fx.Node, _: torch.nn.Module) -> torch.fx.Nod
     + acc_ops.squeeze (depends on keepdim).
     """
     return argmin_max_mapper_impl(node, largest=False)
+
+@register_acc_op_mapping(op_and_target=("call_function", torch.linalg.norm))
+@register_acc_op
+def linalg_norm(*, input, ord, dim, keepdim):
+    return torch.linalg.norm(**locals())
+
 
 @register_custom_acc_mapper_fn(
     op_and_target=("call_method", "split"),
