@@ -631,7 +631,7 @@ void initTensorExprBindings(PyObject* module) {
           argInputs.push_back(convertPyToArgValue(inp));
         }
         return computeOperandValue(
-            op, argInputs, outputShape, outputType.scalar_type(), at::kCPU);
+            op, argInputs, outputShape, outputType.scalar_type());
       });
 
   py::class_<ArgValue>(te, "ArgValue")
