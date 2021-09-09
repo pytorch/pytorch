@@ -163,32 +163,33 @@ class TestModule(TestCase):
         module_inputs_cpu = module_info.module_inputs_func(module_info, device="cpu", dtype=dtype,
                                                            requires_grad=True)
 
-        def make_leafs_input(items):
-            if isinstance(items, dict):
-                items = items.values()
-            for item in items:
+        def _make_leafs(item):
+            if isinstance(item, dict):
+                for i in item.values():
+                    _make_leafs(i)
+            elif isinstance(item, tuple):
+                for i in item:
+                    _make_leafs(i)
+            else:
                 if not isinstance(item, torch.Tensor) or item.is_leaf:
-                    continue
+                    return
                 old_requires_grad = item.requires_grad
                 item.detach_().requires_grad_(old_requires_grad)
 
-        def to_device(obj):
+        def _to_device(obj):
             if isinstance(obj, torch.Tensor):
                 res = obj.detach().to(device=device)
                 res.requires_grad = obj.requires_grad
                 return res
             elif isinstance(obj, tuple):
-                return tuple(to_device(o) for o in obj)
+                return tuple(_to_device(o) for o in obj)
             elif isinstance(obj, dict):
-                return {key: to_device(o) for key, o in obj.items()}
+                return {key: _to_device(o) for key, o in obj.items()}
             else:
                 return deepcopy(obj)
 
         # TODO: Allow ModuleInfo to change this?
-        if dtype == torch.float32:
-            atol = 5e-2
-        else:
-            atol = 4e-4
+        atol = 5e-2 if dtype == torch.float32 else 4e-4
 
         for module_input in module_inputs_cpu:
 
@@ -196,13 +197,9 @@ class TestModule(TestCase):
             cpu_forward_args = module_input.forward_input.args
             cpu_forward_kwargs = module_input.forward_input.kwargs
 
-            gpu_forward_args = to_device(cpu_forward_args)
-            gpu_forward_kwargs = to_device(cpu_forward_kwargs)
+            gpu_forward_args, gpu_forward_kwargs = _to_device((cpu_forward_args, cpu_forward_kwargs))
 
-            make_leafs_input(cpu_forward_args)
-            make_leafs_input(cpu_forward_kwargs)
-            make_leafs_input(gpu_forward_args)
-            make_leafs_input(gpu_forward_kwargs)
+            _make_leafs((cpu_forward_args, cpu_forward_kwargs, gpu_forward_args, gpu_forward_kwargs))
 
             # === Construct module on cpu and gpu ===
             args, kwargs = module_input.constructor_input.args, module_input.constructor_input.kwargs
@@ -229,8 +226,10 @@ class TestModule(TestCase):
                 cpu_output.backward(cpu_grad_output, retain_graph=True)
                 gpu_output.backward(gpu_grad_output, retain_graph=True)
 
-                cpu_grad_input = tuple(i.grad.data if i.grad is not None else None for i in cpu_forward_args)
-                gpu_grad_input = tuple(i.grad.data if i.grad is not None else None for i in gpu_forward_args)
+                cpu_grad_input = tuple(i.grad.data if i.grad is not None else None for i in cpu_forward_args
+                                       if isinstance(i, torch.Tensor) and i.is_leaf)
+                gpu_grad_input = tuple(i.grad.data if i.grad is not None else None for i in gpu_forward_args
+                                       if isinstance(i, torch.Tensor) and i.is_leaf)
                 self.assertEqual(cpu_grad_input, gpu_grad_input, atol=atol, rtol=0)
 
                 for cpu_p, gpu_p in zip(cpu_module.parameters(), gpu_module.parameters()):
@@ -238,10 +237,10 @@ class TestModule(TestCase):
 
                 cpu_grad_kwarg_input = {name: i.grad.data if i.grad is not None else None
                                         for name, i in cpu_forward_kwargs.items()
-                                        if isinstance(i, torch.Tensor)}
+                                        if isinstance(i, torch.Tensor) and i.is_leaf}
                 gpu_grad_kwarg_input = {name: i.grad.data if i.grad is not None else None
                                         for name, i in gpu_forward_kwargs.items()
-                                        if isinstance(i, torch.Tensor)}
+                                        if isinstance(i, torch.Tensor) and i.is_leaf}
                 self.assertEqual(cpu_grad_kwarg_input, gpu_grad_kwarg_input, atol=atol, rtol=0)
 
 
