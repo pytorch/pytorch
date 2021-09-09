@@ -7177,10 +7177,16 @@
 
 - func: min(Tensor self) -> Tensor
   device_check: NoCheck   # TensorIterator
+  structured_delegate: min.all_out
   variants: method, function
   dispatch:
-    CPU, CUDA: min
     QuantizedCPU: min_quantized_cpu
+
+- func: min.all_out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck   # TensorIterator
+  structured: True
+  dispatch:
+    CPU, CUDA: min_all_out
 
 - func: fmin(Tensor self, Tensor other) -> Tensor
   structured_delegate: fmin.out
@@ -7196,10 +7202,16 @@
 
 - func: max(Tensor self) -> Tensor
   device_check: NoCheck   # TensorIterator
+  structured_delegate: max.all_out
   variants: method, function
   dispatch:
-    CPU, CUDA: max
     QuantizedCPU: max_quantized_cpu
+
+- func: max.all_out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck   # TensorIterator
+  structured: True
+  dispatch:
+    CPU, CUDA: max_all_out
 
 - func: fmax(Tensor self, Tensor other) -> Tensor
   structured_delegate: fmax.out

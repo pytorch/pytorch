@@ -4,25 +4,38 @@
 #include <ATen/NativeFunctions.h>
 
 namespace at {
+namespace meta {
+
+void check_not_empty(const char* name, const Tensor& self) {
+  TORCH_CHECK(
+      self.numel() > 0,
+      name, ": Expected reduction dim to be specified for input.numel() == 0. ",
+      "Specify the reduction dim with the 'dim' argument.");
+}
+
+TORCH_META_FUNC(min)(const Tensor& self) {
+  check_not_empty("min()", self);
+  set_output({}, self.options());
+}
+
+TORCH_META_FUNC(max)(const Tensor& self) {
+  check_not_empty("max()", self);
+  set_output({}, self.options());
+}
+
+} // namespace meta
+
 namespace native {
 
 DEFINE_DISPATCH(min_all_stub);
 DEFINE_DISPATCH(max_all_stub);
 
-Tensor min(const Tensor &self) {
-  TORCH_CHECK(self.numel() > 0,
-              "min(): Expected reduction dim to be specified for input.numel() == 0. Specify the reduction dim with the 'dim' argument.");
-  Tensor result = at::empty({}, self.options());
+TORCH_IMPL_FUNC(min_all_out)(const Tensor& self, const Tensor& result) {
   min_all_stub(self.device().type(), result, self.contiguous());
-  return result;
 }
 
-Tensor max(const Tensor &self) {
-  TORCH_CHECK(self.numel() > 0,
-              "max(): Expected reduction dim to be specified for input.numel() == 0. Specify the reduction dim with the 'dim' argument.");
-  Tensor result = at::empty({}, self.options());
+TORCH_IMPL_FUNC(max_all_out)(const Tensor& self, const Tensor& result) {
   max_all_stub(self.device().type(), result, self.contiguous());
-  return result;
 }
 
 // DEPRECATED: Use at::aminmax instead

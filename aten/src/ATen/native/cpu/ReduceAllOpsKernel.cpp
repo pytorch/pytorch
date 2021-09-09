@@ -19,7 +19,7 @@ using namespace vec;
 
 template <typename scalar_t, typename func_t, typename vec_func_t>
 inline void reduce_all_impl_vec(
-    Tensor& output,
+    const Tensor& output,
     const Tensor& input,
     const scalar_t ident_v,
     func_t op,
@@ -42,7 +42,7 @@ inline void reduce_all_impl_vec(
 // For operation not support in avx/avx2
 template <typename scalar_t, typename func_t>
 inline void reduce_all_impl(
-    Tensor& output,
+    const Tensor& output,
     const Tensor& input,
     const scalar_t ident_v,
     func_t op) {
@@ -59,7 +59,7 @@ inline void reduce_all_impl(
   output.fill_(result);
 }
 
-static void min_all_kernel_impl(Tensor& result, const Tensor& input) {
+static void min_all_kernel_impl(const Tensor& result, const Tensor& input) {
   if (input.scalar_type() == ScalarType::Bool) {
     TensorIterator iter = TensorIteratorConfig()
       .add_input(input)
@@ -84,7 +84,7 @@ static void min_all_kernel_impl(Tensor& result, const Tensor& input) {
   }
 }
 
-static void max_all_kernel_impl(Tensor& result, const Tensor& input) {
+static void max_all_kernel_impl(const Tensor& result, const Tensor& input) {
   if (input.scalar_type() == ScalarType::Bool) {
     TensorIterator iter = TensorIteratorConfig()
       .add_input(input)
