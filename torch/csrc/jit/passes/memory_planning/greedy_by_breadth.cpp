@@ -1,110 +1,94 @@
+#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/memory_planning/greedy_by_breadth.h>
 #include <torch/csrc/jit/passes/memory_planning/greedy_util.h>
 
 namespace torch {
 namespace jit {
 
-std::unordered_map<const Value*, size_t> getOpNodeTensorSizes(
-    std::vector<const Node*> nodes) {
-  std::unordered_map<const Value*, size_t> all_tensor_sizes;
-  for (auto node : nodes) {
-    for (const auto& in_v : node->inputs()) {
-      auto size = computeStorageSize(*in_v);
-      if (size.has_value() && size.value() > 0) {
-        all_tensor_sizes.insert({in_v, size.value()});
-      }
-    }
-
-    for (const auto& out_v : node->outputs()) {
-      auto size = computeStorageSize(*out_v);
-      if (size.has_value() && size.value() > 0) {
-        all_tensor_sizes.insert({out_v, size.value()});
-      }
-    }
-  }
-  return all_tensor_sizes;
-}
-
 std::vector<MemAllocation> greedyByOperatorBreadth(
-    FastMap<const Value*, std::pair<UniqueLiveRange, size_t>> managed_values,
-    std::vector<const Node*> ops) {
-  auto all_tensor_sizes = getOpNodeTensorSizes(ops);
-  std::stable_sort(
-      ops.begin(),
-      ops.end(),
-      [&all_tensor_sizes](const Node* op1, const Node* op2) {
-        if (!op1 || !op2) {
-          TORCH_WARN(
-              "one of op1, op2 is null:", op1 == nullptr, op2 == nullptr);
-          return false;
-        }
-        std::unordered_map<const Node*, size_t> breadth_op = {
-            {op1, 0}, {op2, 0}};
-        for (const auto& item : breadth_op) {
-          auto op = item.first;
-          for (const auto& inp : op->inputs()) {
-            if (all_tensor_sizes.count(inp)) {
-              breadth_op[op] += all_tensor_sizes[inp];
-            }
-          }
-          for (const auto& outp : op->outputs()) {
-            if (all_tensor_sizes.count(outp)) {
-              breadth_op[op] += all_tensor_sizes[outp];
-            }
-          }
-        }
-        return breadth_op[op1] > breadth_op[op2];
-      });
-
+    FastMap<const Value*, std::pair<UniqueLiveRange, size_t>> managed_values) {
   auto ulvr_cmp = liveRangeStartCmp();
-  SortedLiveRangeMap<MemRegion> allocations;
-  std::vector<MemAllocation> ordered_allocations;
 
-  auto cmp = [&ulvr_cmp, &managed_values](auto v1, auto v2) {
-    return managed_values[v1].second == managed_values[v2].second
-        ? ulvr_cmp(managed_values[v1].first, managed_values[v2].first)
-        : managed_values[v1].second > managed_values[v2].second;
+  // sort values by their size (breaking ties according to live range)
+  auto val_cmp = [&managed_values, &ulvr_cmp](
+                     const Value* v1, const Value* v2) {
+    auto item1 = managed_values[v1];
+    auto item2 = managed_values[v2];
+    return item1.second == item2.second ? ulvr_cmp(item1.first, item2.first)
+                                        : item1.second > item2.second;
   };
 
-  for (const auto& op : ops) {
-    std::vector<const Value*> op_managed_tensors;
-    std::copy_if(
-        op->inputs().begin(),
-        op->inputs().end(),
-        std::back_inserter(op_managed_tensors),
-        [&](auto v) { return managed_values.count(v); });
-    std::copy_if(
-        op->outputs().begin(),
-        op->outputs().end(),
-        std::back_inserter(op_managed_tensors),
-        [&](auto v) { return managed_values.count(v); });
+  // collect all nodes and their input/output values
+  using OpBreadth = std::pair<const Node*, std::vector<const Value*>>;
+  std::vector<OpBreadth> ops;
 
-    std::stable_sort(op_managed_tensors.begin(), op_managed_tensors.end(), cmp);
-    for (const auto& t_val : op_managed_tensors) {
+  // this is a hack (using debugNames) but nodes.size() doesn't exist
+  ops.reserve(managed_values.begin()
+                  ->first->node()
+                  ->owningGraph()
+                  ->debugNames()
+                  .size());
+  for (const auto& item : managed_values) {
+    auto node = item.first->node();
+    std::vector<const Value*> vs;
+    std::copy_if(
+        node->inputs().begin(),
+        node->inputs().end(),
+        std::back_inserter(vs),
+        [&managed_values](auto inp) { return managed_values.count(inp); });
+    std::copy_if(
+        node->outputs().begin(),
+        node->outputs().end(),
+        std::back_inserter(vs),
+        [&managed_values](auto outp) { return managed_values.count(outp); });
+    std::sort(vs.begin(), vs.end(), val_cmp);
+    ops.emplace_back(node, vs);
+  }
+
+  // sort all nodes by sum of tensor sizes (i.e., op breadth)
+  auto breadth_cmp = [&managed_values](OpBreadth item1, OpBreadth item2) {
+    auto accum = [&managed_values](auto acc, auto v) {
+      return acc + managed_values[v].second;
+    };
+    auto breadth1 =
+        std::accumulate(item1.second.begin(), item1.second.end(), 0, accum);
+    auto breadth2 =
+        std::accumulate(item2.second.begin(), item2.second.end(), 0, accum);
+    return breadth1 > breadth2;
+  };
+  std::sort(ops.begin(), ops.end(), breadth_cmp);
+
+  SortedLiveRangeMap<MemRegion> allocations;
+  // will be ordered by offset (maintained by makeAllocation)
+  std::vector<MemAllocation> ordered_allocations;
+  for (const auto& op : ops) {
+    for (const auto& t_val : op.second) {
       auto ulvr = managed_values[t_val].first;
       if (allocations.count(ulvr)) {
         continue;
       }
       auto size = managed_values[t_val].second;
-      makeAllocation(
+      auto mem_alloc = makeAllocation(
           ulvr, size, ordered_allocations, findOffsetWithSmallestGap);
-    }
-
-    for (auto& alloc : ordered_allocations) {
-      if (allocations.count(alloc.ulvr)) {
+      if (allocations.count(mem_alloc.ulvr)) {
         // this is probably bad to call in a loop?
         TORCH_INTERNAL_ASSERT(
-            allocations[alloc.ulvr] == alloc.reg, "overwritten allocation");
+            allocations[mem_alloc.ulvr] == mem_alloc.reg,
+            "overwritten allocation");
       } else {
-        allocations[alloc.ulvr] = alloc.reg;
+        allocations[mem_alloc.ulvr] = mem_alloc.reg;
       }
     }
   }
+
   TORCH_INTERNAL_ASSERT(
       allocations.size() == ordered_allocations.size(),
-      "ill defined allocation");
+      "ill defined allocation ",
+      c10::Join("; ", allocations),
+      "\n",
+      c10::Join("; ", ordered_allocations));
 
-  std::stable_sort(
+  std::sort(
       ordered_allocations.begin(),
       ordered_allocations.end(),
       [&ulvr_cmp](auto m1, auto m2) { return ulvr_cmp(m1.ulvr, m2.ulvr); });

@@ -12,7 +12,7 @@ OffsetFinder findOffsetWithSmallestGap;
 
 OffsetFinder findFirstOffset;
 
-void makeAllocation(
+MemAllocation makeAllocation(
     UniqueLiveRange ulvr,
     size_t size,
     std::vector<MemAllocation>& ordered_allocations,
