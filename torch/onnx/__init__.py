@@ -34,7 +34,7 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
            opset_version=None, _retain_param_name=None, do_constant_folding=True,
            example_outputs=None, strip_doc_string=None, dynamic_axes=None,
            keep_initializers_as_inputs=None, custom_opsets=None, enable_onnx_checker=None,
-           use_external_data_format=None, export_modules_as_functions=None):
+           use_external_data_format=None, export_modules_as_functions=False):
     r"""
     Exports a model into ONNX format. If ``model`` is not a
     :class:`torch.jit.ScriptModule` nor a :class:`torch.jit.ScriptFunction`, this runs
@@ -319,12 +319,13 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
             If True,  argument ``f`` must be a string specifying the location of the model.
             The external data files will be stored in the same directory as ``f``.
             This argument is ignored unless ``operator_export_type=OperatorExportTypes.ONNX``.
-        export_modules_as_functions (list of str, type or nn.Module default None): A list to indicate
-            the module names to export ``nn.Module`` forward calls as local functions in ONNX.
-            * ``None``(default): export ``nn.Module`` forward calls as fine grained nodes.
-            * Empty list: export all ``nn.Module`` forward calls as local function nodes.
-            * List of str, type or nn.Module: export ``nn.Module`` forward calls as local function nodes,
-              only if the name, type or obj of the ``nn.Module`` is found in the list.
+        export_modules_as_functions (bool or set of str, type or nn.Module, default False): Flag to enable
+            exporting all ``nn.Module`` forward calls as local functions in ONNX. Or a set to indicate the
+            particular modules to export as local functions in ONNX.
+            * ``False``(default): export ``nn.Module`` forward calls as fine grained nodes.
+            * ``True``: export all ``nn.Module`` forward calls as local function nodes.
+            * Set of str, type or nn.Module: export ``nn.Module`` forward calls as local function nodes,
+              only if the name, type or obj of the ``nn.Module`` is found in the set.
 
     Raises:
       ONNXCheckerError: If the ONNX checker detects an invalid ONNX graph. Will still export the

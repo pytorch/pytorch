@@ -644,9 +644,12 @@ class TestUtilityFuns(TestCase):
         y = torch.randn(2, 3)
         z = torch.randn(2, 3)
 
+        """
+        Export specified modules, containing non-existed dropout.
+        """
         f = io.BytesIO()
         torch.onnx.export(M(3), (x, y, z), f, opset_version=self.opset_version,
-                          export_modules_as_functions=[torch.nn.CELU, torch.nn.Dropout, torch.nn.LayerNorm])
+                          export_modules_as_functions={torch.nn.CELU, torch.nn.Dropout, torch.nn.LayerNorm})
 
         onnx_model = onnx.load(io.BytesIO(f.getvalue()))
 
@@ -671,6 +674,40 @@ class TestUtilityFuns(TestCase):
         assert len(ln_ns) == 3
         assert ln_ns[0].domain == 'torch.nn.modules.normalization'
         assert len(ln_ns[0].attribute) == 1
+
+        """
+        Export specified modules.
+        """
+        f = io.BytesIO()
+        torch.onnx.export(M(3), (x, y, z), f, opset_version=self.opset_version,
+                          export_modules_as_functions={"torch.nn.modules.activation.CELU"})
+
+        onnx_model = onnx.load(io.BytesIO(f.getvalue()))
+        funcs = onnx_model.functions
+        assert len(funcs) == 1
+        assert funcs[0].name == "CELU"
+
+        """
+        Export with empty specified modules. Normal export.
+        """
+        f = io.BytesIO()
+        torch.onnx.export(M(3), (x, y, z), f, opset_version=self.opset_version,
+                          export_modules_as_functions=set())
+
+        onnx_model = onnx.load(io.BytesIO(f.getvalue()))
+        funcs = onnx_model.functions
+        assert len(funcs) == 0
+
+        """
+        Export all modules. Should contain {M, CELU, LayerNorm}.
+        """
+        f = io.BytesIO()
+        torch.onnx.export(M(3), (x, y, z), f, opset_version=self.opset_version,
+                          export_modules_as_functions=True)
+
+        onnx_model = onnx.load(io.BytesIO(f.getvalue()))
+        funcs = onnx_model.functions
+        assert len(funcs) == 3
 
     def test_diagnose_export_mode(self):
         class MyModule(torch.nn.Module):

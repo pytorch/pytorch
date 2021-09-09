@@ -18,7 +18,7 @@ struct FunctionExtractor {
  public:
   FunctionExtractor(
       const std::shared_ptr<Graph>& graph,
-      const std::vector<std::string>& module_names,
+      const std::unordered_set<std::string>& module_names,
       const std::vector<std::string>& param_names)
       : graph_(graph),
         module_names_(module_names.begin(), module_names.end()),
@@ -71,7 +71,7 @@ struct FunctionExtractor {
 
   static bool IsValidScope(ScopePtr s);
   static c10::optional<ScopePtr> InferScope(Node* n);
-  static bool IsAncester(ScopePtr parent, ScopePtr child);
+  static bool IsAncestor(ScopePtr parent, ScopePtr child);
   static c10::optional<ScopePtr> FindCommonAncestor(ScopePtr a, ScopePtr b);
   static c10::optional<ScopePtr> FindCommonAncestor(const scope_list& scopes);
   std::shared_ptr<Graph> ConstructFuncGraph(FunctionContext& ctx);
@@ -320,7 +320,7 @@ bool FunctionExtractor::IsValidScope(ScopePtr s) {
   return !s->isRoot() && !s->isBlank();
 }
 
-bool FunctionExtractor::IsAncester(ScopePtr parent, ScopePtr child) {
+bool FunctionExtractor::IsAncestor(ScopePtr parent, ScopePtr child) {
   if (!IsValidScope(parent) || !IsValidScope(child) ||
       parent->getDepth() >= child->getDepth()) {
     return false;
@@ -337,8 +337,6 @@ bool FunctionExtractor::IsAncester(ScopePtr parent, ScopePtr child) {
 c10::optional<ScopePtr> FunctionExtractor::FindCommonAncestor(
     ScopePtr a,
     ScopePtr b) {
-  auto common_ancestor = a;
-
   if (!IsValidScope(a) || !IsValidScope(b)) {
     return c10::nullopt;
   }
@@ -665,8 +663,7 @@ void FunctionExtractor::ConvertScopeToFunction(
   auto construct_unique_module_name = [&](std::string module_name) {
     auto module_name_variant = module_variant_count_.find(module_name);
     if (module_name_variant != module_variant_count_.end()) {
-      module_name =
-          module_name + "." + std::to_string(module_name_variant->second);
+      module_name += ("." + std::to_string(module_name_variant->second));
     } else {
       module_variant_count_[module_name] = 0;
     }
@@ -697,7 +694,7 @@ void FunctionExtractor::ConvertScopeToFunction(
       const auto& parent_scope = it.first;
       auto& parent_ctx = *it.second;
 
-      if (!IsAncester(parent_scope, scope)) {
+      if (!IsAncestor(parent_scope, scope)) {
         continue;
       }
 
@@ -1050,9 +1047,8 @@ std::pair<ValAttrNameMap, NodeAttrNameMap> FunctionExtractor::run() {
   // Deepest scope comes first, guaranteeing no other scope can be its child.
   auto sorted_scope_keys = SortScopesByMaxDepth(identical_scope_map);
   for (const auto& scope_key : sorted_scope_keys) {
-    if (module_names_.empty() ||
-        module_names_.find(scope_key->name().toUnqualString()) !=
-            module_names_.end()) {
+    if (module_names_.find(scope_key->name().toUnqualString()) !=
+        module_names_.end()) {
       ConvertScopeToFunction(
           scope_key, identical_scope_map[scope_key], scope_ctxs, graph_);
     }
@@ -1088,10 +1084,11 @@ std::pair<ValAttrNameMap, NodeAttrNameMap> FunctionExtractor::run() {
 
 std::pair<ValAttrNameMap, NodeAttrNameMap> ONNXFunctionExtraction(
     std::shared_ptr<Graph>& graph,
-    const std::vector<std::string>& module_names,
+    const std::unordered_set<std::string>& module_names,
     const std::vector<std::string>& param_names) {
   GRAPH_UPDATE(
-      "Export these module forward calls as functions: ", module_names);
+      "Export these module forward calls as functions: ",
+      std::vector<std::string>{module_names.begin(), module_names.end()});
   FunctionExtractor fe(graph, module_names, param_names);
   return fe.run();
 }

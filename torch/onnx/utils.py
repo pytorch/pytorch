@@ -80,7 +80,7 @@ def export(model, args, f, export_params=True, verbose=False, training=None,
            example_outputs=None, strip_doc_string=None, dynamic_axes=None,
            keep_initializers_as_inputs=None, custom_opsets=None,
            enable_onnx_checker=None, use_external_data_format=None,
-           export_modules_as_functions=None):
+           export_modules_as_functions=False):
     if operator_export_type is None:
         if torch.onnx.PYTORCH_ONNX_CAFFE2_BUNDLE:
             operator_export_type = OperatorExportTypes.ONNX_ATEN_FALLBACK
@@ -671,14 +671,23 @@ def _find_missing_ops_onnx_export(model, args, f, verbose=False, training=Traini
             unsupported_ops.append(node.kind())
     return graph, unsupported_ops
 
-def _setup_trace_module_map(model, export_modules_as_functions=None):
-    if export_modules_as_functions is not None and isinstance(export_modules_as_functions, list):
+def _setup_trace_module_map(model, export_modules_as_functions):
+    def __setup_trace_module_map():
         trace_module_map = {_m : torch.typename(_m) for _m in model.modules()}
         torch.jit._trace._trace_module_map = trace_module_map
+        return trace_module_map
 
-        for i in range(len(export_modules_as_functions)):
-            if isinstance(export_modules_as_functions[i], (torch.nn.Module, type)):
-                export_modules_as_functions[i] = torch.typename(export_modules_as_functions[i])
+    if isinstance(export_modules_as_functions, bool) and export_modules_as_functions:
+        trace_module_map = __setup_trace_module_map()
+        export_modules_as_functions = {v for k, v in trace_module_map.items()}
+    elif isinstance(export_modules_as_functions, set) and len(export_modules_as_functions) > 0:
+        trace_module_map = __setup_trace_module_map()
+        module_typenames = {torch.typename(v) if isinstance(v, (torch.nn.Module, type)) else v \
+                for v in export_modules_as_functions}
+        export_modules_as_functions = module_typenames
+    else:
+        export_modules_as_functions = None
+    return export_modules_as_functions
 
 def _reset_trace_module_map():
     torch.jit._trace._trace_module_map = None
@@ -690,9 +699,9 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
             dynamic_axes=None, keep_initializers_as_inputs=None,
             fixed_batch_size=False, custom_opsets=None, add_node_names=True,
             use_external_data_format=None, onnx_shape_inference=True,
-            export_modules_as_functions=None):
+            export_modules_as_functions=False):
 
-    _setup_trace_module_map(model, export_modules_as_functions)
+    export_modules_as_functions = _setup_trace_module_map(model, export_modules_as_functions)
 
     if isinstance(model, torch.nn.DataParallel):
         raise ValueError("torch.nn.DataParallel is not supported by ONNX "
@@ -757,6 +766,7 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
             val_attr_to_name = {}  # type: ignore[var-annotated]
             node_attr_to_name = {}  # type: ignore[var-annotated]
             if export_modules_as_functions is not None:
+                # NOTE: cannot call DCE after this pass. DCE will remove function definition nodes.
                 val_attr_to_name, node_attr_to_name = torch._C._jit_pass_onnx_function_extraction(
                     graph, export_modules_as_functions, list(params_dict.keys()))
             if export_params:
