@@ -14,8 +14,7 @@ from torch.testing._internal.common_utils import TestCase, TEST_WITH_ROCM, TEST_
     skipCUDANonDefaultStreamIf, TEST_WITH_ASAN, TEST_WITH_UBSAN, TEST_WITH_TSAN, \
     IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, DeterministicGuard, TEST_SKIP_NOARCH
 from torch.testing._internal.common_cuda import _get_torch_cuda_version
-from torch.testing import \
-    (get_all_dtypes)
+from torch.testing._internal.common_dtype import get_all_dtypes
 
 try:
     import psutil  # type: ignore[import]
@@ -761,25 +760,12 @@ class ops(_TestParametrizer):
                 #   Test-specific decorators are applied to the original test,
                 #   however.
                 try:
-                    active_decorators = []
-                    if op.should_skip(generic_cls.__name__, test.__name__, device_cls.device_type, dtype):
-                        active_decorators.append(skipIf(True, "Skipped!"))
-
-                    if op.decorators is not None:
-                        for decorator in op.decorators:
-                            # Can't use isinstance as it would cause a circular import
-                            if decorator.__class__.__name__ == 'DecorateInfo':
-                                if decorator.is_active(generic_cls.__name__, test.__name__,
-                                                       device_cls.device_type, dtype):
-                                    active_decorators += decorator.decorators
-                            else:
-                                active_decorators.append(decorator)
-
                     @wraps(test)
                     def test_wrapper(*args, **kwargs):
                         return test(*args, **kwargs)
 
-                    for decorator in active_decorators:
+                    for decorator in op.get_decorators(
+                            generic_cls.__name__, test.__name__, device_cls.device_type, dtype):
                         test_wrapper = decorator(test_wrapper)
 
                     yield (test_wrapper, test_name, param_kwargs)
