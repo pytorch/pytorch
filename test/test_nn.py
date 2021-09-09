@@ -33,7 +33,7 @@ from torch.nn.utils import parameters_to_vector, vector_to_parameters
 from torch.nn import Parameter
 from torch.nn.parameter import UninitializedParameter, UninitializedBuffer
 from torch.nn.parallel._functions import Broadcast
-from torch.testing import get_all_fp_dtypes
+from torch.testing._internal.common_dtype import integral_types, get_all_fp_dtypes, get_all_math_dtypes
 from torch.testing._internal.common_utils import freeze_rng_state, run_tests, TestCase, skipIfNoLapack, skipIfRocm, \
     TEST_NUMPY, TEST_SCIPY, TEST_WITH_ROCM, download_file, \
     get_function_arglist, load_tests, repeat_test_for_types, ALL_TENSORTYPES, \
@@ -9406,9 +9406,9 @@ class TestNN(NNTestCase):
             input2 = torch.tensor([[2, 3, 5], [3, 2, 1]], dtype=torch.double, device=device)
             target = torch.tensor([1, -1], dtype=torch.int, device=device)
             expected = torch.nn.functional.cosine_embedding_loss(input1, input2, target)
-            for dt1 in torch.testing.get_all_math_dtypes(device):
-                for dt2 in torch.testing.get_all_math_dtypes(device):
-                    for dt3 in torch.testing.get_all_math_dtypes(device):
+            for dt1 in get_all_math_dtypes(device):
+                for dt2 in get_all_math_dtypes(device):
+                    for dt3 in get_all_math_dtypes(device):
                         # dt3 is used as dtype for target = [1, -1], so let's skip unsigned type
                         if dt3 == torch.uint8:
                             continue
@@ -9425,7 +9425,7 @@ class TestNN(NNTestCase):
             input = torch.tensor([[2, 3, 5], [3, 2, 1]], dtype=torch.double, device=device)
             target = torch.tensor([[1, 2, 3], [4, 5, 6]], dtype=torch.double, device=device)
             expected = torch.nn.functional.kl_div(input, target)
-            for input_dtype in torch.testing.get_all_math_dtypes(device):
+            for input_dtype in get_all_math_dtypes(device):
                 if input_dtype.is_complex:
                     continue
                 for target_dtype in [torch.float32, torch.float64, torch.float16]:
@@ -9441,7 +9441,7 @@ class TestNN(NNTestCase):
             input = torch.tensor([[2, 3, 5], [3, 2, 1]], dtype=torch.double, device=device)
             target = torch.tensor([[1, 2, 3], [4, 5, 6]], dtype=torch.double, device=device).log()
             expected = torch.nn.functional.kl_div(input, target, log_target=True)
-            for input_dtype in torch.testing.get_all_math_dtypes(device):
+            for input_dtype in get_all_math_dtypes(device):
                 if input_dtype.is_complex:
                     continue
                 for target_dtype in [torch.float32, torch.float64, torch.float16]:
@@ -9584,7 +9584,7 @@ class TestNN(NNTestCase):
             return input.grad
 
         for device, dtype, reduction in product(device_(),
-                                                torch.testing.integral_types(),
+                                                integral_types(),
                                                 ('none', 'sum', 'mean')):
             input = torch.randn(2, 2, device=device, requires_grad=True)
             target = torch.randint(0, 9, (2, 2), device=device, dtype=dtype)
@@ -13282,6 +13282,32 @@ class TestNNDeviceType(NNTestCase):
             self._test_LayerNorm_cuda_half(device)
 
     @onlyOnCPUAndCUDA
+    def test_LayerNorm_numeric(self, device):
+        def layer_norm_ref(X, gamma, beta, normalized_shape, eps):
+            feature_size = np.prod(normalized_shape)
+            X_view = X.view(-1, feature_size)
+            mean = X_view.mean(dim=-1, keepdim=True)
+            var = X_view.var(dim=-1, unbiased=False, keepdim=True)
+            Y = (X_view - mean) / torch.sqrt(var + eps)
+            Y = Y * gamma.view(-1) + beta.view(-1)
+            return Y.view(*X.size())
+
+        normalized_shape = [256, 256, 144]
+        layer_norm = nn.LayerNorm(normalized_shape).float().to(device)
+        X = torch.rand(2, *normalized_shape, dtype=torch.float32,
+                       device=device)
+
+        Y = layer_norm(X)
+        Y_ref = layer_norm_ref(X, layer_norm.weight.data, layer_norm.bias.data,
+                               normalized_shape, layer_norm.eps)
+        self.assertEqual(Y, Y_ref, rtol=0, atol=1e-5)
+
+        if self.device_type == 'cuda':
+            layer_norm.cpu()
+            Y_cpu = layer_norm(X.cpu())
+            self.assertEqual(Y_cpu, Y, rtol=0, atol=1e-5)
+
+    @onlyOnCPUAndCUDA
     def test_GroupNorm_general(self, device):
         self._test_GroupNorm_general(device)
 
@@ -13736,6 +13762,40 @@ class TestNNDeviceType(NNTestCase):
         with self.assertRaisesRegex(RuntimeError, "Expected"):
             inp = torch.ones(1, 0, 50, 44, 31, device=device)
             mod(inp)
+
+    @onlyOnCPUAndCUDA
+    def test_MaxUnpool_zero_batch_dim(self, device):
+        pool = torch.nn.MaxPool1d(2, stride=2, return_indices=True).to(device)
+        unpool = torch.nn.MaxUnpool1d(2, stride=2).to(device)
+        inp = torch.randn(0, 10, 10, requires_grad=True, device=device)
+        output, indices = pool(inp)
+        output.requires_grad_(True)
+        unpool_out = unpool(output, indices)
+        unpool_out.sum().backward()
+
+        self.assertEqual(inp.grad, torch.zeros_like(inp))
+        self.assertEqual(unpool_out, torch.zeros_like(unpool_out))
+
+        pool = torch.nn.MaxPool2d(2, stride=2, return_indices=True).to(device)
+        unpool = torch.nn.MaxUnpool2d(2, stride=2).to(device)
+        inp = torch.randn(0, 10, 10, 10, requires_grad=True, device=device)
+        output, indices = pool(inp)
+        unpool_out = unpool(output, indices)
+        unpool_out.sum().backward()
+
+        self.assertEqual(inp.grad, torch.zeros_like(inp))
+        self.assertEqual(unpool_out, torch.zeros_like(unpool_out))
+
+        pool = torch.nn.MaxPool3d(2, stride=2, return_indices=True).to(device)
+        unpool = torch.nn.MaxUnpool3d(2, stride=2).to(device)
+        inp = torch.randn(0, 10, 10, 10, 10, requires_grad=True, device=device)
+        output, indices = pool(inp)
+        output.requires_grad_(True)
+        unpool_out = unpool(output, indices)
+        unpool_out.sum().backward()
+
+        self.assertEqual(inp.grad, torch.zeros_like(inp))
+        self.assertEqual(unpool_out, torch.zeros_like(unpool_out))
 
     @onlyOnCPUAndCUDA
     def test_AdaptiveMaxPool_zero_batch_dim(self, device):

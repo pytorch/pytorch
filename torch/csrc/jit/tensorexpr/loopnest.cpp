@@ -59,7 +59,7 @@ LoopNest::LoopNest(const std::vector<Tensor>& output_tensors) {
   verify(root_stmt_);
 }
 
-const std::unordered_set<BufPtr> LoopNest::getIntermediateBufs() const {
+std::unordered_set<BufPtr> LoopNest::getIntermediateBufs() const {
   std::unordered_set<BufPtr> result;
   auto input_bufs = getInputBufs();
   auto bufs = NodeFinder<Buf>::find(root_stmt_);
@@ -130,13 +130,15 @@ class Vectorizer : public IRMutator {
     auto start_imm = intValue(start);
     auto stop_imm = intValue(stop);
     if (!start_imm) {
-      throw std::runtime_error(
-          "Can't vectorize due to non-constant loop start!");
+      // Can't vectorize due to non-constant loop start!
+      success_ = false;
+      return v;
     }
 
     if (!stop_imm) {
-      throw std::runtime_error(
-          "Can't vectorize due to non-constant loop stop!");
+      // Can't vectorize due to non-constant loop stop!
+      success_ = false;
+      return v;
     }
 
     var_ = var;
@@ -145,10 +147,16 @@ class Vectorizer : public IRMutator {
 
     StmtPtr new_body = body->accept_mutator(this);
     if (new_body == body) {
-      throw std::runtime_error("Vectorization failed!");
+      // Vectorization failed!
+      success_ = false;
+      return v;
     }
 
     return new_body;
+  }
+
+  bool success() const {
+    return success_;
   }
 
   ExprPtr mutate(AddPtr v) override {
@@ -269,7 +277,9 @@ class Vectorizer : public IRMutator {
 
   ExprPtr mutate(VarPtr v) override {
     if (v == var_) {
-      return Ramp::make(ExprHandle(start_), 1, lanes_).node();
+      return Ramp::make(
+                 ExprHandle(start_), ExprHandle(immLike(start_, 1)), lanes_)
+          .node();
     }
 
     return v;
@@ -286,7 +296,9 @@ class Vectorizer : public IRMutator {
       return v;
     }
 
-    throw std::runtime_error("Can't vectorize a Ramp!");
+    // Can't vectorize a Ramp!
+    success_ = false;
+    return v;
   }
 
   ExprPtr mutate(LoadPtr v) override {
@@ -317,14 +329,18 @@ class Vectorizer : public IRMutator {
       return v;
     }
 
-    throw std::runtime_error("Can't vectorize a Broadcast!");
+    // Can't vectorize a Broadcast!
+    success_ = false;
+    return v;
   }
 
   ExprPtr mutate(IfThenElsePtr v) override {
     ExprPtr condition = v->condition();
     ExprPtr new_condition = condition->accept_mutator(this);
     if (new_condition != condition) {
-      throw std::runtime_error("Can't vectorize an IfThenElse condition!");
+      // Can't vectorize an IfThenElse condition!
+      success_ = false;
+      return v;
     }
 
     std::vector<ExprPtr> inputs = {v->true_value(), v->false_value()};
@@ -360,8 +376,9 @@ class Vectorizer : public IRMutator {
     ExprPtr new_stop = stop->accept_mutator(this);
 
     if (new_start != start || new_stop != stop) {
-      throw std::runtime_error(
-          "Can't vectorize nested For with dependent loop bounds!");
+      // Can't vectorize nested For with dependent loop bounds!
+      success_ = false;
+      return v;
     }
 
     StmtPtr body = v->body();
@@ -452,6 +469,7 @@ class Vectorizer : public IRMutator {
   VarPtr var_ = nullptr;
   int lanes_ = 0;
   ExprPtr start_ = nullptr;
+  bool success_ = true;
 };
 
 bool LoopNest::vectorize(ForPtr f) {
@@ -471,12 +489,11 @@ bool LoopNest::vectorize(ForPtr f) {
 
   Vectorizer v;
   StmtPtr new_f = nullptr;
-  try {
-    new_f = Stmt::clone(f);
-    normalize(to<For>(new_f));
-    new_f = FlattenIndexes(new_f);
-    new_f = v.vectorize(to<For>(new_f));
-  } catch (std::runtime_error& e) {
+  new_f = Stmt::clone(f);
+  normalize(to<For>(new_f));
+  new_f = FlattenIndexes(new_f);
+  new_f = v.vectorize(to<For>(new_f));
+  if (!v.success()) {
     // We clone f before vectorizing. So, any partial vectorization will
     // have modified the clone. In case of an exception, we can continue
     // using f.
@@ -556,14 +573,13 @@ class FunctionInliner : public IRMutator {
       VarPtr func_callee_arg = producer_index_vars_.at(i);
       ExprPtr func_caller_param = dims.at(i);
       if (func_callee_arg == nullptr) {
+        auto param_val = evalInt(func_caller_param);
         TORCH_INTERNAL_ASSERT(
-            intValue(func_caller_param) && *intValue(func_caller_param) == 0,
+            param_val && *param_val == 0,
             buildErrorMessage(
                 "We are implicitly assuming that if you have an index of 0, that must also be inlined into an index of 0"));
         continue;
       }
-      if (func_callee_arg == nullptr)
-        continue;
       auto iter = inline_mapping_.find(func_callee_arg);
       if (iter != inline_mapping_.end()) {
         throw std::logic_error(
@@ -946,8 +962,17 @@ BlockPtr findLowestContainingBlock(const std::vector<BufLoadOrStoreUse>& uses) {
   return b;
 }
 
-StmtPtr LoopNest::insertAllocFree(StmtPtr stmt) {
-  auto intermediate_bufs = getIntermediateBufs();
+StmtPtr LoopNest::insertAllocFree(
+    StmtPtr stmt,
+    const c10::optional<std::unordered_set<BufPtr>>&
+        interm_bufs /* = c10::nullopt*/) {
+  std::unordered_set<BufPtr> intermediate_bufs;
+  if (interm_bufs) {
+    intermediate_bufs = *interm_bufs;
+  } else {
+    intermediate_bufs = getIntermediateBufs();
+  }
+
   if (intermediate_bufs.size() == 0ULL) {
     return stmt;
   }
@@ -1024,7 +1049,9 @@ void LoopNest::eliminateDeadStores() {
   root_stmt_ = root_stmt_->accept_mutator(&deleter);
 }
 
-void LoopNest::prepareForCodegen() {
+void LoopNest::prepareForCodegen(
+    const c10::optional<std::unordered_set<BufPtr>>&
+        interm_bufs /*= c10::nullopt*/) {
   // Expand reduction ops.
   ReductionExpander reduceExpander;
   root_stmt_ = reduceExpander.expand(root_stmt_);
@@ -1032,7 +1059,7 @@ void LoopNest::prepareForCodegen() {
   root_stmt_ = FlattenIndexes(root_stmt_);
 
   // Add allocs and frees for intermediate buffers at the global level.
-  root_stmt_ = insertAllocFree(root_stmt_);
+  root_stmt_ = insertAllocFree(root_stmt_, interm_bufs);
 }
 
 namespace {

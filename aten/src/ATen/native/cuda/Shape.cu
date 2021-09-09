@@ -2,6 +2,7 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/MemoryOverlap.h>
 #include <ATen/cuda/detail/IndexUtils.cuh>
+#include <ATen/native/Resize.h>
 #include <ATen/native/TypeProperties.h>
 #include <ATen/Dispatch.h>
 #include <c10/core/MemoryFormat.h>
@@ -528,6 +529,12 @@ Tensor& cat_out_cuda(TensorList inputs, int64_t dimension, Tensor& out) {
   size[dimension] = cat_dim_size;
 
   // skip resizing if size of result is same as expected
+  // raise a warning while resizing if output has one or more elements
+  // See https://github.com/pytorch/pytorch/pull/62560#discussion_r687363362
+  // for understanding why at::native::resize_output is not called directly.
+  // if (at::native::resize_output_check(out, size)) {
+  // TODO: restore the above, see https://github.com/pytorch/pytorch/issues/64709
+
   if (out.sizes() != size) {
     out.resize_(size, memory_format);
   }
