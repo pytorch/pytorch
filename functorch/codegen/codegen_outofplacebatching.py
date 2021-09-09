@@ -43,11 +43,15 @@ def is_optional_tensor(typ: str) -> bool:
         return True
     return False
 
+def is_vector_tensor(typ: str) -> bool:
+    # (chilli): I don't really understand why there's 2 dots in front?
+    return (typ == '::std::vector<Tensor>')
+
 def add_bdim_after_tensor(types: Tuple[str]) -> Tuple[str]:
     result = []
     for typ in types:
         result.append(typ)
-        if is_tensor(typ) or is_optional_tensor(typ):
+        if is_tensor(typ) or is_optional_tensor(typ) or is_vector_tensor(typ):
             result.append('c10::optional<int64_t>')
     return tuple(result)
 
@@ -113,6 +117,9 @@ def lower(returns: Tuple[str], args: List[Tuple[str, str]], unique_count: int) -
     for ret in returns:
         if is_tensor(ret):
             wrapped_returns.append(f'makeBatched(std::get<{idx}>(results), std::get<{idx + 1}>(results), cur_level)')
+            idx += 2
+        elif is_vector_tensor(ret):
+            wrapped_returns.append(f'makeBatchedVector(std::get<{idx}>(results), std::get<{idx + 1}>(results), cur_level)')
             idx += 2
         else:
             wrapped_returns.append(f'std::get<{idx}>(results)')

@@ -1129,7 +1129,7 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
 
   // view operations
   m.impl("as_strided", as_strided_batching_rule);
-  m.impl("chunk", chunk_batching_rule);
+  // m.impl("chunk", chunk_batching_rule);
   m.impl("tensor_split.sections", tensor_split_sections_batching_rule);
   m.impl("tensor_split.indices", tensor_split_indices_batching_rule);
   m.impl("diagonal", diagonal_batching_rule);
