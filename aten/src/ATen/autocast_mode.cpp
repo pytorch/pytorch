@@ -58,6 +58,9 @@ thread_local int nesting = 0;
 // autocast_cpu_dtype is the lower_precision_fp used by AutocastCPU.
 thread_local at::ScalarType autocast_cpu_dtype = at::kBFloat16;
 
+// should we enabled the cache inside autocast.
+thread_local bool cache_enabled = true;
+
 // autocast_gpu_dtype is the lower_precision_fp used by AutocastGPU.
 thread_local at::ScalarType autocast_gpu_dtype = at::kHalf;
 }
@@ -93,6 +96,14 @@ void set_autocast_gpu_dtype(at::ScalarType dtype) {
   autocast_gpu_dtype = dtype;
 }
 
+bool is_autocast_cache_enabled() {
+  return cache_enabled;
+}
+
+void set_autocast_cache_enabled(bool enabled) {
+  cache_enabled = enabled;
+}
+
 // Overload to catch Tensor args
 // TODO (possible optimization):
 // Move cast_cache to an inline function in a header with cached_casts declared as
@@ -103,7 +114,7 @@ Tensor cached_cast(at::ScalarType to_type, const Tensor& arg, DeviceType device_
     // See cached_casts declaration above for detailed strategy.
     bool can_try_cache = (to_type == get_lower_precision_fp_from_device_type(device_type) &&
                          arg.scalar_type() == at::kFloat && arg.requires_grad() &&
-                         arg.is_leaf() && !arg.is_view());
+                         arg.is_leaf() && !arg.is_view() && cache_enabled);
     if (can_try_cache) {
       auto it = cached_casts.find(arg.unsafeGetTensorImpl());
       if (it != cached_casts.end()) {

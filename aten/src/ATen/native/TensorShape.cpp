@@ -6,7 +6,6 @@
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/core/DimVector.h>
 #include <ATen/native/Copy.h>
-#include <ATen/native/cpu/CatKernel.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/TypeProperties.h>
@@ -193,6 +192,12 @@ Tensor & _cat_out_cpu(TensorList tensors, int64_t dim, Tensor& result) {
   result_size[dim] = cat_dim_size;
 
   // skip resizing if size of result is same as expected
+  // raise a warning while resizing if output has one or more elements
+  // See https://github.com/pytorch/pytorch/pull/62560#discussion_r687363362
+  // for understanding why at::native::resize_output is not called directly.
+  // if (at::native::resize_output_check(result, result_size)) {
+  // TODO: restore the above, see https://github.com/pytorch/pytorch/issues/64709
+
   if (result.sizes() != result_size) {
     result.resize_(result_size, first_tensor_mem_format);
   }
@@ -299,6 +304,23 @@ Tensor& cat_out(TensorList tensors, Dimname dim, Tensor& result) {
 Tensor cat(TensorList tensors, Dimname dim) {
   TORCH_CHECK(!tensors.empty(), "expected a non-empty list of Tensors");
   return at::cat(tensors, dimname_to_position(tensors[0], dim));
+}
+
+// torch.concat, alias for torch.cat
+Tensor& concat_out(TensorList tensors, Dimname dim, Tensor& result) {
+  return at::cat_out(result, tensors, dimname_to_position(tensors[0], dim));
+}
+
+Tensor concat(TensorList tensors, Dimname dim) {
+  return at::cat(tensors, dimname_to_position(tensors[0], dim));
+}
+
+Tensor & concat_out(TensorList tensors, int64_t dim, Tensor & result) {
+  return at::cat_out(result, tensors, dim);
+}
+
+Tensor concat(TensorList tensors, int64_t dim) {
+  return at::cat(tensors, dim);
 }
 
 static bool sizes_match_except(IntArrayRef s1, IntArrayRef s2, int64_t dim_except /* should already be wrapped */) {
@@ -1497,9 +1519,14 @@ bool inline maybe_native_stack(Tensor& result, TensorList tensors, int64_t dim) 
     result_sizes.insert(result_sizes.begin() + dim, tensors.size());
 
     // skip resizing if size of result is same as expected
+    // raise a warning while resizing if output has one or more elements
+    // at::native::resize_output(result, result_sizes);
+    // TODO: restore the above, see https://github.com/pytorch/pytorch/issues/64709
+
     if (result.sizes() != result_sizes) {
       result.resize_(result_sizes);
     }
+
     stack_serial_stub(kCPU, result, tensors, dim);
     return true;
   }
@@ -2042,6 +2069,8 @@ Tensor flatten(const Tensor& self, Dimname start_dim, Dimname end_dim, Dimname o
 
 Tensor flatten(const Tensor& self, DimnameList dims, Dimname out_dim) {
   auto positions = dimnames_to_positions(self, dims);
+  TORCH_CHECK(positions.size() > 0,
+      "flatten(tensor, dims, out_dim): dims cannot be empty");
   for (const auto i : c10::irange(positions.size() - 1)) {
     if (positions[i] + 1 == positions[i + 1]) continue;
     TORCH_CHECK(positions[i] + 1 == positions[i + 1],

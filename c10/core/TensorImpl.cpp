@@ -40,8 +40,7 @@ static c10::intrusive_ptr<TensorImpl> noop_detach_fn(
 static void noop_dispatch_fn(
     const PyInterpreter*,
     const c10::OperatorHandle& op,
-    torch::jit::Stack* stack,
-    const std::shared_ptr<TorchDispatchTypeObject>& type) {
+    torch::jit::Stack* stack) {
   TORCH_INTERNAL_ASSERT(
       0,
       "attempted to dispatch (__torch_dispatch__) an operator on Tensor with nontrivial PyObject after corresponding interpreter died");
@@ -84,8 +83,9 @@ const at::Tensor& TensorImpl::grad() const {
   return autograd_meta_->grad();
 }
 
-const at::Tensor& TensorImpl::_fw_grad(uint64_t level, const at::Tensor& self)
-    const {
+const at::Tensor& TensorImpl::_fw_grad(
+    uint64_t level,
+    const at::TensorBase& self) const {
   // See TensorImpl::grad() above for explanation about the line below
   if (!autograd_meta_)
     return impl::GetAutogradMetaFactory()->undefined_tensor();
@@ -93,8 +93,8 @@ const at::Tensor& TensorImpl::_fw_grad(uint64_t level, const at::Tensor& self)
 }
 
 void TensorImpl::_set_fw_grad(
-    const at::Tensor& new_grad,
-    const at::Tensor& self,
+    const at::TensorBase& new_grad,
+    const at::TensorBase& self,
     uint64_t level,
     bool is_inplace_op) {
   if (!autograd_meta_)
@@ -607,23 +607,6 @@ void TensorImpl::copy_tensor_metadata(
   if (!dest_impl->is_inference()) {
     dest_impl->set_version_counter(std::move(version_counter));
   }
-}
-
-TorchDispatchTypeObject::TorchDispatchTypeObject(
-    PyObject* type_object,
-    c10::impl::PyInterpreter* pyinterpreter)
-    : data_(type_object), pyinterpreter_(pyinterpreter) {}
-
-TorchDispatchTypeObject::~TorchDispatchTypeObject() {
-  pyinterpreter_->decref(data_);
-}
-
-c10::impl::PyInterpreter* TorchDispatchTypeObject::pyinterpreter() const {
-  return pyinterpreter_;
-}
-
-PyObject* TorchDispatchTypeObject::ptr() const {
-  return data_;
 }
 
 namespace impl {
