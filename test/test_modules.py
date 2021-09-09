@@ -227,9 +227,9 @@ class TestModule(TestCase):
                 gpu_output.backward(gpu_grad_output, retain_graph=True)
 
                 cpu_grad_input = tuple(i.grad.data if i.grad is not None else None for i in cpu_forward_args
-                                       if isinstance(i, torch.Tensor) and i.is_leaf)
+                                       if isinstance(i, torch.Tensor))
                 gpu_grad_input = tuple(i.grad.data if i.grad is not None else None for i in gpu_forward_args
-                                       if isinstance(i, torch.Tensor) and i.is_leaf)
+                                       if isinstance(i, torch.Tensor))
                 self.assertEqual(cpu_grad_input, gpu_grad_input, atol=atol, rtol=0)
 
                 for cpu_p, gpu_p in zip(cpu_module.parameters(), gpu_module.parameters()):
@@ -237,10 +237,10 @@ class TestModule(TestCase):
 
                 cpu_grad_kwarg_input = {name: i.grad.data if i.grad is not None else None
                                         for name, i in cpu_forward_kwargs.items()
-                                        if isinstance(i, torch.Tensor) and i.is_leaf}
+                                        if isinstance(i, torch.Tensor)}
                 gpu_grad_kwarg_input = {name: i.grad.data if i.grad is not None else None
                                         for name, i in gpu_forward_kwargs.items()
-                                        if isinstance(i, torch.Tensor) and i.is_leaf}
+                                        if isinstance(i, torch.Tensor)}
                 self.assertEqual(cpu_grad_kwarg_input, gpu_grad_kwarg_input, atol=atol, rtol=0)
 
 
