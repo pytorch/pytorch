@@ -117,6 +117,11 @@ PyObject *THPVariableClass = nullptr;
 
 PyObject *ParameterClass = nullptr;
 
+static PyObject* THPVariable_NewWithVar(
+    PyTypeObject* type,
+    Variable _var,
+    c10::impl::PyInterpreterStatus status);
+
 // clang-tidy gets confused by static const
 static const char* VOLATILE_WARNING =
     "volatile was removed and now has no effect. Use "
@@ -132,7 +137,7 @@ static bool check_has_torch_dispatch(PyObject *obj) {
 }
 
 // TODO: Make this take Variable by const reference
-PyObject * THPVariable_Wrap(Variable var)
+PyObject * THPVariable_Wrap(at::TensorBase var)
 {
   if (!var.defined()) {
     Py_RETURN_NONE;
