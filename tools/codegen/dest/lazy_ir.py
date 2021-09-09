@@ -226,7 +226,7 @@ class {class_name} : public Node {{
               lazy_tensors::util::MHash({scalar_hashes})),
         {scalar_initializers}
   {{
-      throw std::runtime_error("need to hash scalars properly");
+    //  throw std::runtime_error("need to hash scalars properly");
   }}
 
   std::string ToString() const override {{

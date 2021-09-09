@@ -24,8 +24,20 @@ import tools.codegen.api.cpp as cpp
 import tools.codegen.api.structured as structured
 from tools.codegen.api.translate import translate
 from tools.codegen.selective_build.selector import SelectiveBuilder
-from .lazy_ir import ir_node_name, valueT, valueListT, update_schema_for_lazy_ir, separate_value_scalar_types
+from .lazy_ir import ir_node_name, valueT, valueListT, update_schema_for_lazy_ir, isValueType
 
+def separate_args_kwargs_types(func: FunctionSchema) -> Tuple[List[NamedCType], List[NamedCType], List[NamedCType], List[NamedCType], List[NamedCType]]:
+    """
+    Since there are significant differences in how Values and 'everything else' are handled in the IR node class,
+    it's useful to have a way to get a list of just the values, just the scalars, or all of them.
+    """
+    args = func.arguments
+    types = [arg.type for arg in func.schema_order_arguments()]
+    positional_values = [t.type for t in args.flat_positional if isValueType(t.type)]
+    positional_scalars = [t.type for t in args.flat_positional if not isValueType(t.type)]
+    kw_values = [t.type for t in args.flat_kwarg_only if isValueType(t.type)]
+    kw_scalars = [t.type for t in args.flat_kwarg_only if not isValueType(t.type)]
+    return types, positional_values, positional_scalars, kw_values, kw_scalars
 
 @dataclass(frozen=True)
 class TsLowering:
@@ -65,17 +77,25 @@ case at::aten::{func.name}:
 
         elif self.target == TsLowering.TsLoweringTarget.LOWERING:
             schema = update_schema_for_lazy_ir(func)
-            all_types, value_types, scalar_types = separate_value_scalar_types(schema)
-            emplace_values = [f"loctx->GetOutputOp(node->operand({i}))" for i in range(len(value_types))]
-            emplace_scalars = [f"node->{t.name}_" for t in scalar_types]
+            types, positional_values, positional_scalars, kw_values, kw_scalars = separate_args_kwargs_types(schema)
+            emplace_arg_values = [f'loctx->GetOutputOp(node->operand({i}))' for i in range(len(positional_values))]
+            emplace_arg_scalars = [f'"{t.name}", node->{t.name}_' for t in positional_scalars]
             emplace_arguments = "\n    ".join(
-                [f"arguments.emplace_back({a});" for a in emplace_values + emplace_scalars])
+                [f"arguments.emplace_back({a});" for a in emplace_arg_values + emplace_arg_scalars])
+            emplace_kwarg_values = [f'loctx->GetOutputOp(node->operand({i}))' for i in range(len(kw_values))]
+            emplace_kwarg_scalars = [f'"{t.name}", node->{t.name}_' for t in kw_scalars]
+            assert len(kw_values) == 0, "TODO the logic for operand(i) is broken if there are kw values"
+            emplace_kwarguments = "\n    ".join(
+                [f"kwarguments.emplace_back({a});" for a in emplace_kwarg_values + emplace_kwarg_scalars])
             return [f"""\
 TSOpVector Lower{ir_node_name(func)}(std::shared_ptr<torch::jit::GraphFunction> function, ts_backend::TSLoweringContext* loctx, const ir::ops::{ir_node_name(func)}* node) {{
     std::vector<torch::jit::NamedValue> arguments;
-    arguments.reserve({len(all_types)});
+    std::vector<torch::jit::NamedValue> kwarguments;
+    arguments.reserve({len(emplace_arg_values + emplace_arg_scalars)});
+    kwarguments.reserve({len(emplace_kwarg_values + emplace_kwarg_scalars)});
     {emplace_arguments}
-    TSOpVector {func.name}_out = LowerBuiltin(function, node, arguments);
+    {emplace_kwarguments}
+    TSOpVector {func.name}_out = LowerBuiltin(function, node, arguments, kwarguments);
     LTC_CHECK_EQ({func.name}_out.size(), {len(func.returns)});
     
     // TODO: need to call GenerateClone sometimes? Or else return LowerBuiltIn() directly
