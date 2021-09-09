@@ -335,6 +335,24 @@ class ProcessGroupNCCLTest(TestCase):
 
     @requires_nccl()
     @sandcastle_skip_if(torch.cuda.device_count() < 2, "NCCL test requires 2+ GPUs")
+    def test_allreduce_coalesced_error(self):
+        store = c10d.FileStore(self.file.name, self.world_size)
+        pg = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+
+        tensors = [torch.tensor([i],
+                                dtype=torch.float,
+                                device=torch.device("cuda:" + str(i))) for i in range(self.num_gpus)]
+
+        with self.assertRaisesRegex(
+            RuntimeError, "Expected list of tensors on the same device"
+        ):
+            opts = c10d.AllreduceCoalescedOptions()
+            opts.reduceOp = c10d.ReduceOp.SUM
+            work = pg.allreduce_coalesced(tensors, opts)
+            work.wait()  # technically we shouldn't get here
+
+    @requires_nccl()
+    @sandcastle_skip_if(torch.cuda.device_count() < 2, "NCCL test requires 2+ GPUs")
     def test_reduce_ops(self):
         store = c10d.FileStore(self.file.name, self.world_size)
         pg = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
