@@ -353,7 +353,7 @@ void dequantize(Stack& stack) {
   auto iv = pop(stack);
   if (iv.isTuple()) {
     auto tuple = iv.toTuple();
-    auto elems = tuple->elements();
+    const auto& elems = tuple->elements();
     std::vector<IValue> output_elems;
     output_elems.reserve(elems.size());
     for (const auto& elem : elems) {
