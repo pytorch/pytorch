@@ -1001,5 +1001,21 @@ class TestRNN(TestCase):
         model(input)
 
 
+class TestDisabledTorchFunction(TestCase):
+    # Regression test for gh-64687
+    def test_parameter_does_not_prevent_dispatch(self):
+        class MyTensor():
+            def __torch_function__(self, func, types, args=(), kwargs=None):
+                return "called"
+
+        t1 = MyTensor()
+        t2 = torch.nn.Parameter(torch.rand(2, 2))
+        self.assertEqual(torch.add(t2, t1), "called")
+
+        inp = torch.rand(10, 10)
+        self.assertEqual(torch.nn.functional.linear(inp, t1, t2), "called")
+        self.assertEqual(torch.nn.functional.linear(inp, t2, t1), "called")
+
+
 if __name__ == '__main__':
     run_tests()

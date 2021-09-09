@@ -214,7 +214,7 @@ def gen_docs_configs(xenial_parent_config):
         HiddenConf(
             "pytorch_python_doc_build",
             parent_build=xenial_parent_config,
-            filters=gen_filter_dict(branches_list=["master"],
+            filters=gen_filter_dict(branches_list=["master", "nightly"],
                                     tags_list=RC_PATTERN),
         )
     )
@@ -230,7 +230,7 @@ def gen_docs_configs(xenial_parent_config):
         HiddenConf(
             "pytorch_cpp_doc_build",
             parent_build=xenial_parent_config,
-            filters=gen_filter_dict(branches_list=["master"],
+            filters=gen_filter_dict(branches_list=["master", "nightly"],
                                     tags_list=RC_PATTERN),
         )
     )
