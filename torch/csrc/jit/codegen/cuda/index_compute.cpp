@@ -1089,8 +1089,7 @@ void ensureStaticIndexing(
       continue;
     }
     kir::IterDomain* loop_id = loop->iter_domain();
-    if (isParallelTypeVectorize(loop_id->parallelType()) ||
-        loop_id->isThread()) {
+    if (loop->vectorize() || loop_id->isThread()) {
       continue;
     }
     // Look for a domain that is mapped with the loop. If mapped in

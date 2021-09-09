@@ -589,7 +589,7 @@ bool ForLoop::isUnrollable() const {
   // vectorized.
   return start()->isConstScalar() && stop()->isConstScalar() &&
       !iter_domain()->isThread() && !iter_domain()->isBroadcast() &&
-      !isParallelTypeVectorize(iter_domain()->parallelType());
+      !vectorize();
 }
 
 bool ForLoop::isUnrolled() const {
