@@ -277,25 +277,23 @@ bool Reducer::ddp_graph_static() {
 }
 
 void Reducer::initialize_local_used_map() {
-  const auto replica_count = 1;
-  size_t params_index = 0;
   const auto variable_count = params_.size();
-  local_used_maps_.resize(replica_count);
-  local_used_maps_dev_.resize(replica_count);
+  local_used_maps_.resize(1);
+  local_used_maps_dev_.resize(1);
 
   at::TensorOptions options;
   options = options.dtype(at::kInt);
 
   // Deliberately don't pin the memory even if local_used_maps_dev_ will
   // be cuda. See Note [local_used_maps_ -> local_used_maps_dev copying]
-  local_used_maps_[params_index] =
+  local_used_maps_[0] =
       at::zeros({static_cast<long>(variable_count)}, options);
 
   // This tensor needs to be on the same device as the replica params because
   // backend such as NCCL may not support CPU tensors, and hence it might not
   // work if we always put it on CPU.
   options = options.device(params_[0].device());
-  local_used_maps_dev_[params_index] =
+  local_used_maps_dev_[0] =
       at::empty({static_cast<long>(variable_count)}, options);
 }
 
@@ -2059,9 +2057,9 @@ compute_bucket_assignment_by_size(
 // across processes.
 void verify_params_across_processes(
     c10::intrusive_ptr<c10d::ProcessGroup> process_group,
-    std::vector<at::Tensor> model_replica) {
+    std::vector<at::Tensor> params) {
   size_t i = 0;
-  for (const auto& t : model_replica) {
+  for (const auto& t : params) {
     i += 2 * t.dim();
   }
   at::TensorOptions options;
@@ -2072,7 +2070,7 @@ void verify_params_across_processes(
   // to populate metadata.  But no harm keeping work aligned across processes.
   auto metadata_accessor = metadata.accessor<int64_t, 1>();
   i = 0;
-  for (const auto& t : model_replica) {
+  for (const auto& t : params) {
     for (const auto& sz : t.sizes()) {
       metadata_accessor[i++] = sz;
     }
@@ -2081,7 +2079,7 @@ void verify_params_across_processes(
     }
   }
 
-  auto metadata_dev = metadata.clone().to(model_replica[0].device());
+  auto metadata_dev = metadata.clone().to(params[0].device());
   std::vector<at::Tensor> vec{metadata_dev};
   process_group->broadcast(vec)->wait();
 
@@ -2091,8 +2089,8 @@ void verify_params_across_processes(
   control.copy_(metadata_dev, /*non_blocking=*/false);
   auto control_accessor = control.accessor<int64_t, 1>();
   i = 0;
-  for (const auto p : c10::irange(model_replica.size())) {
-    const auto& t = model_replica[p];
+  for (const auto p : c10::irange(params.size())) {
+    const auto& t = params[p];
     // I'd like to include which process we are in the message,
     // but ProcessGroup::getRank is not public!
     for (const auto& sz : t.sizes()) {

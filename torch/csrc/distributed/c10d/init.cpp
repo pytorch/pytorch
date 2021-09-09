@@ -1555,7 +1555,7 @@ Example::
       "_verify_params_across_processes",
       &::c10d::verify_params_across_processes,
       py::arg("process_group"),
-      py::arg("model_replica"),
+      py::arg("params"),
       py::call_guard<py::gil_scoped_release>());
 
   module.def(

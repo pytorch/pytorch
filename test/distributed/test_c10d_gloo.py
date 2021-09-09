@@ -2110,16 +2110,6 @@ class ReducerTest(TestCase):
         )
 
     @requires_gloo()
-    def test_reducer_no_multi_replicas(self):
-        num_replicas = 2
-        models = [self._create_mixed_precision_model() for _ in range(num_replicas)]
-        with self.assertRaisesRegex(
-            AssertionError,
-            "False is not true : Scalars failed to compare as equal! 2 != 1",
-        ):
-            reducer = self._create_reducer_for_models(models)
-
-    @requires_gloo()
     def test_forward_backward(self):
         batch_size = 10
         model = self._create_mixed_precision_model()

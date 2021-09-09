@@ -608,5 +608,5 @@ compute_bucket_assignment_by_size(
 // matching dtype/size/layout.
 TORCH_API void verify_params_across_processes(
     c10::intrusive_ptr<c10d::ProcessGroup> process_group,
-    std::vector<at::Tensor> model_replica);
+    std::vector<at::Tensor> params);
 } // namespace c10d
