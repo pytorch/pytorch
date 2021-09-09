@@ -374,7 +374,7 @@ def gen_variable_type(
     """
     fm = FileManager(install_dir=out, template_dir=template_path, dry_run=False)
     fm.write('VariableType.h', lambda: {
-        'generated_comment': f'@generated from {template_path}/VariableType.h'
+        'generated_comment': "@" f'generated from {template_path}/VariableType.h'
     })
 
     # NOTE: see Note [Sharded File] at the top of the VariableType.cpp
@@ -385,7 +385,7 @@ def gen_variable_type(
         key_fn=lambda fn: cpp.name(fn.func.func),
         base_env={
             'generated_comment':
-            f'@generated from {template_path}/VariableType.cpp',
+            "@" f'generated from {template_path}/VariableType.cpp',
         },
         env_callable=gen_variable_type_func,
         num_shards=5,
@@ -411,9 +411,9 @@ def gen_variable_type_func(
         if fn.info is None and not get_base_name(f) in RESET_GRAD_ACCUMULATOR \
                 and not get_base_name(f) in DONT_REQUIRE_DERIVATIVE \
                 and len(gen_differentiable_outputs(fn)) > 0 \
-                and not get_base_name(f) in DONT_ENFORCE_SAME_TENSOR_IMPL_OR_STORAGE \
-                and not get_base_name(f) in DONT_ENFORCE_STORAGE_IMPL_USE_COUNT \
-                and not get_base_name(f) in DONT_ENFORCE_TENSOR_IMPL_USE_COUNT:
+                and not cpp.name(f.func) in DONT_ENFORCE_SAME_TENSOR_IMPL_OR_STORAGE \
+                and not type_wrapper_name(f) in DONT_ENFORCE_STORAGE_IMPL_USE_COUNT \
+                and not type_wrapper_name(f) in DONT_ENFORCE_TENSOR_IMPL_USE_COUNT:
             # NOTE: [ Registering AutogradNotImplemented boxed kernel ]
             #
             # When there is no derivatives.yaml entry, we register a generic boxed

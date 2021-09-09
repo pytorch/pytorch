@@ -339,6 +339,7 @@
 
 - name: linalg_cholesky_ex(Tensor self, *, bool upper=False, bool check_errors=False) -> (Tensor L, Tensor info)
   self: cholesky_backward(grad, upper, L)
+  L: cholesky_jvp(self_t, L, upper)
 
 - name: cholesky_solve(Tensor self, Tensor input2, bool upper=False) -> Tensor
   self, input2: cholesky_solve_backward(grad, self, input2, result, upper)
@@ -865,6 +866,7 @@
 
 - name: lu_solve(Tensor self, Tensor LU_data, Tensor LU_pivots) -> Tensor
   self, LU_data: lu_solve_backward(grad, self, LU_data, LU_pivots)
+  result: lu_solve_forward_AD(self_t, LU_data_t, LU_data_p, LU_pivots, result)
 
 - name: lu_unpack(Tensor LU_data, Tensor LU_pivots, bool unpack_data=True, bool unpack_pivots=True) -> (Tensor P, Tensor L, Tensor U)
   LU_data: lu_unpack_backward(grads, LU_data, unpack_data)
@@ -1185,12 +1187,12 @@
   result: auto_element_wise
 
 - name: scatter.src(Tensor self, int dim, Tensor index, Tensor src) -> Tensor
-  self: grad.clone().scatter_(dim, index, 0)
+  self: grad.scatter(dim, index, 0)
   index: non_differentiable
   src: grad.gather(dim, index)
 
 - name: scatter.value(Tensor self, int dim, Tensor index, Scalar value) -> Tensor
-  self: grad.clone().scatter_(dim, index, 0)
+  self: grad.scatter(dim, index, 0)
   index: non_differentiable
 
 - name: scatter_add(Tensor self, int dim, Tensor index, Tensor src) -> Tensor

@@ -949,11 +949,13 @@ class Graph:
                     return
                 qualified_name = _get_qualified_name(node.target)
                 global_name = add_global(qualified_name, node.target)
+                # special case for getattr: node.args could be 2-argument or 3-argument
+                # 2-argument: attribute access; 3-argument: fall through to attrib function call with default value
                 if global_name == 'getattr' and \
                    isinstance(node.args, tuple) and \
                    isinstance(node.args[1], str) and \
-                   node.args[1].isidentifier():
-                    # pretty print attribute access
+                   node.args[1].isidentifier() and \
+                   len(node.args) == 2:
                     body.append(f'{repr(node)}{maybe_type_annotation} = {_format_target(repr(node.args[0]), node.args[1])}')
                     return
                 body.append(f'{repr(node)}{maybe_type_annotation} = {global_name}({_format_args(node.args, node.kwargs)})')
@@ -1185,7 +1187,8 @@ reflectable_magic_methods = {
     'and': '{} & {}',
     'or': '{} | {}',
     'xor': '{} ^ {}',
-    'getitem': '{}[{}]'
+    'getitem': '{}[{}]',
+    'matmul': '{} @ {}',
 }
 
 magic_methods = dict({
