@@ -8685,7 +8685,7 @@ op_db: List[OpInfo] = [
            assert_autodiffed=True
            skips=(
                # TODO: see https://github.com/pytorch/pytorch/issues/64709
-               SkipInfo('TestCommon', 'test_out'), 
+               SkipInfo('TestCommon', 'test_out'),
            )),
     OpInfo('hstack',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
@@ -8693,7 +8693,7 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            skips=(
                # TODO: see https://github.com/pytorch/pytorch/issues/64709
-               SkipInfo('TestCommon', 'test_out'), 
+               SkipInfo('TestCommon', 'test_out'),
            )),
     OpInfo('hypot',
            dtypes=floating_types(),
