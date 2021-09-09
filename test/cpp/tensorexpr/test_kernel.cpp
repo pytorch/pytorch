@@ -603,15 +603,15 @@ TEST_F(Kernel, CatWoConditionals) {
   const std::string& verification_pattern =
       R"IR(
 # CHECK: for
-# CHECK-NEXT: for
-# CHECK-NEXT: for
+# CHECK: for
+# CHECK: for
 # CHECK: aten_cat
 # CHECK: for
-# CHECK-NEXT: for
+# CHECK: for
 # CHECK: aten_cat
 # CHECK: for
-# CHECK-NEXT: for
-# CHECK-NEXT: aten_cat)IR";
+# CHECK: for
+# CHECK: aten_cat)IR";
   torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 
   auto a = at::rand({5, 3, 2}, TensorOptions(kCPU).dtype(at::kFloat));
