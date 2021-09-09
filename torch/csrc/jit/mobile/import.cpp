@@ -309,8 +309,8 @@ class OpCodeCache {
  private:
   // We store as void* to emphasize that we care only about the
   // address and should not be dereferencing these pointers.
-  std::array<const void*, numOpcodes> keys_;
-  std::array<OpCode, numOpcodes> values_;
+  std::array<const void*, numOpcodes> keys_{};
+  std::array<OpCode, numOpcodes> values_{};
   size_t usedEntries_ = 0;
 
  public:
