@@ -470,7 +470,6 @@ class TestOperators(TestCase):
         xfail('roll'),
         xfail('rot90'),
         xfail('scatter_add'),
-        xfail('scatter'),
         xfail('select'),
         xfail('solve'),
         xfail('sort'),
