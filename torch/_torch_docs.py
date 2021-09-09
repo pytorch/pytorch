@@ -4338,92 +4338,15 @@ add_docstr(torch.igamma,
            r"""
 igamma(input, other, *, out=None) -> Tensor
 
-Computes the regularized lower incomplete gamma function:
-
-.. math::
-    \text{out}_{i} = \frac{1}{\Gamma(\text{input}_i)} \int_0^{\text{other}_i} t^{\text{input}_i-1} e^{-t} dt
-
-where both :math:`\text{input}_i` and :math:`\text{other}_i` are weakly positive
-and at least one is strictly positive.
-If both are zero or either is negative then :math:`\text{out}_i=\text{nan}`.
-:math:`\Gamma(\cdot)` in the equation above is the gamma function,
-
-.. math::
-    \Gamma(\text{input}_i) = \int_0^\infty t^{(\text{input}_i-1)} e^{-t} dt.
-
-See :func:`torch.igammac` and :func:`torch.lgamma` for related functions.
-
-Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`
-and float inputs.
-
-.. note::
-    The backward pass with respect to :attr:`input` is not yet supported.
-    Please open an issue on PyTorch's Github to request it.
-
-""" + r"""
-Args:
-    input (Tensor): the first non-negative input tensor
-    other (Tensor): the second non-negative input tensor
-
-Keyword args:
-    {out}
-
-Example::
-
-    >>> a1 = torch.tensor([4.0])
-    >>> a2 = torch.tensor([3.0, 4.0, 5.0])
-    >>> a = torch.igammac(a1, a2)
-    tensor([0.3528, 0.5665, 0.7350])
-    tensor([0.3528, 0.5665, 0.7350])
-    >>> b = torch.igamma(a1, a2) + torch.igammac(a1, a2)
-    tensor([1., 1., 1.])
-
-""".format(**common_args))
+Alias for :func:`torch.special.gammainc`.
+""")
 
 add_docstr(torch.igammac,
            r"""
 igammac(input, other, *, out=None) -> Tensor
 
-Computes the regularized upper incomplete gamma function:
-
-.. math::
-    \text{out}_{i} = \frac{1}{\Gamma(\text{input}_i)} \int_{\text{other}_i}^{\infty} t^{\text{input}_i-1} e^{-t} dt
-
-where both :math:`\text{input}_i` and :math:`\text{other}_i` are weakly positive
-and at least one is strictly positive.
-If both are zero or either is negative then :math:`\text{out}_i=\text{nan}`.
-:math:`\Gamma(\cdot)` in the equation above is the gamma function,
-
-.. math::
-    \Gamma(\text{input}_i) = \int_0^\infty t^{(\text{input}_i-1)} e^{-t} dt.
-
-See :func:`torch.igamma` and :func:`torch.lgamma` for related functions.
-
-Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`
-and float inputs.
-
-.. note::
-    The backward pass with respect to :attr:`input` is not yet supported.
-    Please open an issue on PyTorch's Github to request it.
-
-""" + r"""
-Args:
-    input (Tensor): the first non-negative input tensor
-    other (Tensor): the second non-negative input tensor
-
-Keyword args:
-    {out}
-
-Example::
-
-    >>> a1 = torch.tensor([4.0])
-    >>> a2 = torch.tensor([3.0, 4.0, 5.0])
-    >>> a = torch.igammac(a1, a2)
-    tensor([0.6472, 0.4335, 0.2650])
-    >>> b = torch.igamma(a1, a2) + torch.igammac(a1, a2)
-    tensor([1., 1., 1.])
-
-""".format(**common_args))
+Alias for :func:`torch.special.gammaincc`.
+""")
 
 add_docstr(torch.index_select,
            r"""
@@ -9531,8 +9454,8 @@ Functions that return indices along a dimension, like :func:`torch.argmax` and :
 are designed to work with this function. See the examples below.
 
 .. seealso::
-        :func:`torch.gather` which does not view the input as 1-D and accepts an additional argument
-        ``dim`` that specifies the indexing dimension.
+        :func:`torch.gather` which performs the same operation but does not support broadcasting
+        and requires that the indices have the same number of dimensions as the input.
 
 Args:
     {input}
@@ -9704,6 +9627,10 @@ with the default keyword arguments.
 `torch.triangular_solve(b, A)` can take in 2D inputs `b, A` or inputs that are
 batches of 2D matrices. If the inputs are batches, then returns
 batched outputs `X`
+
+If the diagonal of :attr:`A` contains zeros or elements that are very close to zero and
+:attr:`unitriangular`\ `= False` (default) or if the input matrix is badly conditioned,
+the result may contain `NaN` s.
 
 Supports input of float, double, cfloat and cdouble data types.
 
