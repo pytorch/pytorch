@@ -282,7 +282,6 @@ TORCH_API Tensor computeOperandValue(
     std::vector<TensorExprKernel::ConstantDescr>& constants,
     std::vector<at::Tensor>& unpacked_constant_tensors);
 
-
 TORCH_API int& getTECudaPointwiseLoopLevels();
 TORCH_API int& getTECudaPointwiseBlockCount();
 TORCH_API int& getTECudaPointwiseBlockSize();
