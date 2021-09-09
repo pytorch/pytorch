@@ -212,6 +212,7 @@ class Listener(object):
         self.master_port = MASTER_PORT
         self.is_master_server = is_master_server
         self.master_host = master_host
+        self.fqdn = socket.getfqdn()
         _init_kineto_TLS()
         self.state = _ThreadLocalState(True)
     
@@ -242,7 +243,7 @@ class Listener(object):
             try:
                 r = requests.put(
                     url='http://{}:{}/registration'.format(self.master_host, self.master_port), 
-                    json={'host': self.host, 'port': self.port, 'pid': os.getpid()}, 
+                    json={'host': self.fqdn, 'port': self.port, 'pid': os.getpid()},
                     params={'cmd': 'register'})
                 if r.json()['success']:
                     registered = True
@@ -255,7 +256,7 @@ class Listener(object):
     def __unregister(self):
         requests.put(
             url='http://{}:{}/registration'.format(self.master_host, self.master_port), 
-            json={'host': self.host, 'port': self.port, 'pid': os.getpid()}, 
+            json={'host': self.fqdn, 'port': self.port, 'pid': os.getpid()}, 
             params={'cmd': 'unregister'})
 
 if current_process().name == 'MainProcess':

@@ -597,10 +597,20 @@ def init_process_group(
     
     if os.environ.get('ENABLE_SERVICE') == 'TRUE':
         from torch.profiler._service import Listener, BASE_PORT
-        host = 'localhost' if socket.gethostbyname(master_host) == '127.0.0.1' else socket.getfqdn()
+        host = 'localhost' if socket.gethostbyname(master_host) in ['127.0.0.1', get_local_ip()] else '0.0.0.0'
         listener = Listener(host, BASE_PORT + rank if rank >= 0 else BASE_PORT, False, master_host)
         listener.open()
 
+def get_local_ip():
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.connect(('10.255.255.255', 1))
+        IP = s.getsockname()[0]
+    except Exception:
+        IP = '127.0.0.1'
+    finally:
+        s.close()
+    return IP
 
 def _new_process_group_helper(
     world_size,
