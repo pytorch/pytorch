@@ -160,7 +160,7 @@ def add_auto_observation(
                 try:
                     parent_module = module_stack[-1] if len(module_stack) else None
                     module_stack.append(self)
-                    fqn = module_id_to_fqn[id(self)]
+                    fqn = module_id_to_fqn.get(id(self), None)
                     can_have_op_hooks = parent_module is not None and \
                         hasattr(parent_module, '_auto_quant_state')
                     needs_op_hooks = can_have_op_hooks and \
@@ -422,7 +422,7 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
                 if isinstance(self, AutoQuantizationState):
                     return args[0]
 
-                fqn = module_id_to_fqn[id(self)]
+                fqn = module_id_to_fqn.get(id(self), None)
                 logger.debug(f"starting fqn {fqn}")
 
                 nonlocal cur_module

@@ -35,7 +35,15 @@ def _allclose(a, b):
 
 
 class AutoTracingTestCase(QuantizationTestCase):
-    def _test_auto_tracing(self, m, qconfig, example_args, fuse_modules=True):
+    def _test_auto_tracing(
+        self,
+        m,
+        qconfig,
+        example_args,
+        fuse_modules=True,
+        do_fx_comparison=True,
+        do_torchscript_checks=True,
+    ):
         m_copy = copy.deepcopy(m)
 
         m.qconfig = qconfig
@@ -51,40 +59,42 @@ class AutoTracingTestCase(QuantizationTestCase):
         # print(out_q)
 
         # compare it against FX
-        m_copy_p = prepare_fx(m_copy, {'': qconfig})
-        out_m_copy_p = m_copy_p(*example_args)
-        # print(m_copy_p)
-        m_copy_q = convert_fx(m_copy_p)
-        print(m_copy_q)
-        out_q_fx = m_copy_q(*example_args)
-        self.assertTrue(_allclose(out_p, out_m_copy_p))
-        # print(out_q)
-        # print(out_q_fx)
-        self.assertTrue(_allclose(out_q, out_q_fx))
+        if do_fx_comparison:
+            m_copy_p = prepare_fx(m_copy, {'': qconfig})
+            out_m_copy_p = m_copy_p(*example_args)
+            # print(m_copy_p)
+            m_copy_q = convert_fx(m_copy_p)
+            print(m_copy_q)
+            out_q_fx = m_copy_q(*example_args)
+            self.assertTrue(_allclose(out_p, out_m_copy_p))
+            # print(out_q)
+            # print(out_q_fx)
+            self.assertTrue(_allclose(out_q, out_q_fx))
 
-        # verify torch.jit.trace works
-        mq_jit_traced = torch.jit.trace(
-            mq, example_args, check_trace=False)
-        # print(mq_jit_traced.graph)
-        traced_out = mq_jit_traced(*example_args)
-        self.assertTrue(_allclose(traced_out, out_q))
+        if do_torchscript_checks:
+            # verify torch.jit.trace works
+            mq_jit_traced = torch.jit.trace(
+                mq, example_args, check_trace=False)
+            # print(mq_jit_traced.graph)
+            traced_out = mq_jit_traced(*example_args)
+            self.assertTrue(_allclose(traced_out, out_q))
 
-        # verify torch.jit.script works
-        rewritten = mq.rewrite_for_scripting()
-        rewritten_out = rewritten(*example_args)
-        # print(rewritten)
-        self.assertTrue(_allclose(rewritten_out, out_q))
+            # verify torch.jit.script works
+            rewritten = mq.rewrite_for_scripting()
+            rewritten_out = rewritten(*example_args)
+            # print(rewritten)
+            self.assertTrue(_allclose(rewritten_out, out_q))
 
-        scripted_rewritten = torch.jit.script(rewritten)
-        # print(scripted_rewritten.graph)
-        scripted_rewritten_out = scripted_rewritten(*example_args)
-        # print('scripted_rewritten_out', scripted_rewritten_out)
-        self.assertTrue(_allclose(scripted_rewritten_out, out_q))
+            scripted_rewritten = torch.jit.script(rewritten)
+            # print(scripted_rewritten.graph)
+            scripted_rewritten_out = scripted_rewritten(*example_args)
+            # print('scripted_rewritten_out', scripted_rewritten_out)
+            self.assertTrue(_allclose(scripted_rewritten_out, out_q))
 
-        traced_rewritten = torch.jit.trace(
-            rewritten, example_args, check_trace=False)
-        traced_rewritten_out = traced_rewritten(*example_args)
-        self.assertTrue(_allclose(traced_rewritten_out, out_q))
+            traced_rewritten = torch.jit.trace(
+                rewritten, example_args, check_trace=False)
+            traced_rewritten_out = traced_rewritten(*example_args)
+            self.assertTrue(_allclose(traced_rewritten_out, out_q))
 
 
 class TestAutoTracing(AutoTracingTestCase):
@@ -359,14 +369,41 @@ class TestAutoTracing(AutoTracingTestCase):
         qconfig = torch.quantization.default_qconfig
         self._test_auto_tracing(model_fp32, qconfig, (torch.randn(1, 1, 1, 1),))
 
+    @skipIfNoFBGEMM
+    def test_module_created_during_forward(self):
+        """Some BERT models have this pattern"""
+        class M(torch.nn.Module):
+            def forward(self, x):
+                x = nn.Softmax(dim=-1)(x)
+                return x
+
+        model_fp32 = M().eval()
+        qconfig = torch.quantization.default_qconfig
+        self._test_auto_tracing(
+            model_fp32, qconfig, (torch.randn(1, 1, 1, 1),),
+            # This syntax is not supported by FX or TorchScript
+            do_fx_comparison=False, do_torchscript_checks=False)
+
     @unittest.skip('TODO build this')
     @skipIfNoFBGEMM
     def test_module_input_types(self):
         class M(torch.nn.Module):
-            def forward(self, x=None):
-                return x
+            def forward(self, x=None, y=None):
+                print('x', x)
+                print('y', y)
+                assert x is not None and y is not None
+                return (x, y)
 
         model_fp32 = M().eval()
+        example_inputs = {'y': torch.randn(1), 'x': torch.randn(1)}
+        print('example_inputs', example_inputs)
+        import collections
+        ExampleInputsTupleCtr = collections.namedtuple('ExampleInputs', example_inputs)
+        example_inputs_tuple = ExampleInputsTupleCtr(**example_inputs)
+        ms = torch.jit.trace(model_fp32, example_inputs_tuple)
+        print(ms.graph)
+
+        return
         qconfig = torch.quantization.default_qconfig
 
         # dict
@@ -423,6 +460,8 @@ class TestAutoTracing(AutoTracingTestCase):
 
     @skipIfNoFBGEMM
     def test_embedding(self):
+        # test subclass
+
         class EmbeddingSubclass(nn.Embedding):
             pass
 
@@ -440,6 +479,26 @@ class TestAutoTracing(AutoTracingTestCase):
         self._test_auto_tracing(
             model_fp32, qconfig, (torch.LongTensor([[0]]),),
             fuse_modules=False)
+
+        # test regular embedding
+        # TODO(next): fix this to unblock BERT models, need to specify
+        # qconfig per module type
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.embedding = nn.Embedding(1, 1)
+
+            def forward(self, x):
+                x = self.embedding(x)
+                return x
+
+        model_fp32 = M().eval()
+        qconfig = torch.quantization.default_dynamic_qconfig
+        self._test_auto_tracing(
+            model_fp32, qconfig, (torch.LongTensor([[0]]),),
+            fuse_modules=False)
+
 
     # TODO(future PR): enable this test
     @unittest.skip("this is currently broken")

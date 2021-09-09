@@ -168,8 +168,11 @@ class AutoQuantizationState(torch.nn.Module):
                         new_outputs.append(output)
                 return tuple(new_outputs)
             else:
-                raise AssertionError(
-                    f'module outputs with type {type(outputs)} are not handled yet')
+                if False:
+                    print('unhandled outputs', outputs)
+                    raise AssertionError(
+                        f'module outputs with type {type(outputs)} are not handled yet')
+                pass
 
         return outputs
 
