@@ -22,6 +22,7 @@
 #include <functional>
 #include <limits>
 #include <numeric>
+#include <iostream>
 
 
 namespace at {
@@ -103,7 +104,10 @@ TORCH_META_FUNC(bmm)(const Tensor& self, const Tensor& mat2) {
 }
 
 TORCH_META_FUNC(baddbmm)(const Tensor& self, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha) {
-  auto result = maybe_get_output(0);
+  auto& result = maybe_get_output(0);
+  if (!result.defined()) {
+    set_output({0}, self.options());
+  }
   auto self_ = expand_size(self, {batch1.size(0), batch1.size(1), batch2.size(2)}, "baddbmm");
   result.resize_(self_->sizes());
   result.copy_(*self_);
@@ -1250,7 +1254,7 @@ inline void baddbmm_cpu_kernel(const Tensor& result, const Tensor& self, const T
 // optimization, it likely depends on the characteristics of the CPU, MKL will be different from non-MKL etc.,
 // but this seems to be a first starting point.
 
-static inline Tensor& bmm_out_or_baddbmm_(Tensor& self_or_result, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha, bool is_bmm_out) {
+static inline void bmm_out_or_baddbmm_(Tensor& self_or_result, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha, bool is_bmm_out) {
   // is_bmm_out: true for bmm_out, false for baddbmm_
   // self_or_result is "self" for baddbmm_ and "result" for bmm_out
   CheckedFrom c = (is_bmm_out ? "bmm" : "baddbmm");
@@ -1291,12 +1295,14 @@ static inline Tensor& bmm_out_or_baddbmm_(Tensor& self_or_result, const Tensor& 
 
   // handle pathological cases that blas may not like
   if (self_or_result.numel() == 0) {
-    return self_or_result;
+    return;
   } else if (contraction_size == 0) {
     if (is_bmm_out || (beta.to<c10::complex<double>>() == 0.0)) {
-      return self_or_result.zero_();
+      self_or_result.zero_();
+      return;
     } else {
-      return self_or_result.mul_(beta);
+      self_or_result.mul_(beta);
+      return;
     }
   }
 
@@ -1388,7 +1394,7 @@ static inline Tensor& bmm_out_or_baddbmm_(Tensor& self_or_result, const Tensor& 
       }
     }
   }
-  return self_or_result;
+  return;
 }
 
 
@@ -1404,18 +1410,18 @@ static inline Tensor& bmm_out_or_baddbmm_(Tensor& self_or_result, const Tensor& 
 /*   return at::native::baddbmm__cpu(result, batch1, batch2, beta, alpha); */
 /* } */
 
-const Tensor& conjugate_mutable_input_if_needed(const Tensor& self, bool conjugate) {
+void conjugate_mutable_input_if_needed(Tensor& self, bool conjugate) {
   if (conjugate) {
     self.conj_physical_();
   }
-  return self;
 }
 
 TORCH_IMPL_FUNC(baddbmm_out_cpu)
 (const Tensor & self, const Tensor & batch1, const Tensor & batch2, const Scalar& beta, const Scalar& alpha, const Tensor& result) {
-    bool self_is_conj = self.is_conj();
-    bmm_out_or_baddbmm_(const_cast<Tensor&>(self), batch1.resolve_conj(), batch2.resolve_conj(), beta, alpha, false);
-    conjugate_mutable_input_if_needed(const_cast<Tensor&>(self), self_is_conj);
+    bool self_is_conj = result.is_conj();
+    // std::cout << self_is_conj << std::endl;
+    bmm_out_or_baddbmm_(const_cast<Tensor&>(result), batch1.resolve_conj(), batch2.resolve_conj(), beta, alpha, false);
+    conjugate_mutable_input_if_needed(const_cast<Tensor&>(result), self_is_conj);
   }
 
 TORCH_IMPL_FUNC(bmm_out_cpu)
@@ -1424,7 +1430,7 @@ TORCH_IMPL_FUNC(bmm_out_cpu)
     NoNamesGuard guard;
     bool result_is_conj = result.is_conj();
     bmm_out_or_baddbmm_(const_cast<Tensor&>(result), batch1.resolve_conj(), batch2.resolve_conj(), Scalar(0.0), Scalar(1.0), true);
-    conjugate_mutable_input_if_needed(result, result_is_conj);
+    conjugate_mutable_input_if_needed(const_cast<Tensor&>(result), result_is_conj);
     }
     namedinference::propagate_names_if_nonempty(
       const_cast<Tensor&>(result),
