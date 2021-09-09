@@ -2317,7 +2317,8 @@ Tensor tensorexpr::computeOperandValue(
           aten::transpose,
           {inputs[0], (int64_t)1, (int64_t)0},
           outputShape,
-          outputType);
+          outputType,
+          device);
     }
     case aten::transpose: {
       auto A = c10::get<BufHandle>(inputs[0]);
@@ -2529,8 +2530,27 @@ Tensor TensorExprKernel::computeValue(const torch::jit::Value* v) {
   } else {
     argInputs.push_back(toArg(inputs[0]));
   }
+
   auto outputType = findDtypeForValue(v->node()->output());
   std::vector<ExprHandle> outputShape = sizesForValue(v);
+  // handle ops optional arguments
+  switch (op) {
+    case aten::conv2d: {
+      // handle optional bias
+      if (c10::get_if<ArgNone>(&argInputs[2])) {
+        Dtype dtype = outputType ? Dtype(*outputType) : kFloat;
+        std::vector<ExprHandle> biasShape;
+        biasShape.push_back(outputShape[1]);
+        auto bias_tensor =
+            at::zeros({outputShape[1].AsNode<LongImm>()->value()});
+        unpacked_constant_tensors_.push_back(bias_tensor);
+        BufPtr buf = alloc<Buf>(
+            "conv2d_bias_opt_", ExprHandleVectorToExprVector(biasShape), dtype);
+        constants_.push_back({buf, bias_tensor.data_ptr()});
+        argInputs[2] = BufHandle(buf);
+      }
+    } break;
+  }
 
   if (NNCLoweringFunction custom_lowering = getCustomLoweringFor(op)) {
     return custom_lowering(argInputs, outputShape, outputType, device_);
