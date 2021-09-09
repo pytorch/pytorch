@@ -53,7 +53,7 @@ class AutoQuantizationState(torch.nn.Module):
     def has_at_least_one_seen_op(self) -> bool:
         return len(self.idx_to_seen_ops) > 0
 
-    def validate_is_at_last_seen_idx(self) -> bool:
+    def validate_is_at_last_seen_idx(self) -> None:
         is_at_last_seen_idx = (
             len(self.idx_to_seen_ops) == 0 or
             self.idx == len(self.idx_to_seen_ops)
@@ -70,10 +70,9 @@ class AutoQuantizationState(torch.nn.Module):
             s += "}\n"
         else:
             s += "(seen_ops): {}\n"
-        s += "(idx): " + str(self.idx) + ",\n"
         s += "(output_qtensor_infos): ["
         for i in self.output_qtensor_infos:
-            s += f"{i}"
+            s += f"{i} "
         s += "]"
         return s
 
@@ -98,7 +97,6 @@ class AutoQuantizationState(torch.nn.Module):
         assert self.cur_op_needs_hooks(cur_op)
         try:
             seen_op = self._get_cur_seen_op()
-            # print('validate_cur_op', cur_op, seen_op)
             expected_op = seen_op.type
         except IndexError:
             _raise_obs_not_found_error(cur_op)
@@ -212,6 +210,35 @@ class AutoQuantizationState(torch.nn.Module):
         """
         return self.output_dtypes
 
+    def _op_prepare_before_hook_tensor_first_call(
+        self,
+        arg: Any,
+        arg_tensor_infos: List[QTensorInfo],
+        qtensor_id: List[int],
+    ) -> None:
+        # TODO(next): fix this for torch.cat
+        if not isinstance(arg, torch.Tensor):
+            arg_tensor_infos.append(None)
+            return
+
+        # If a tensor does not have an ID, add it. This allows
+        # us to track inputs shared by multiple quantizeable modules.
+        if not hasattr(arg, '_qtensor_info'):
+            arg._qtensor_info = QTensorInfo(qtensor_id[0], torch.float)  # type: ignore[attr-defined]
+            qtensor_id[0] += 1
+        arg_tensor_infos.append(arg._qtensor_info)  # type: ignore[attr-defined]
+
+        # if the existing inf_dtype is not torch.quint8, add an observer
+        # which will be converted to a quant later
+        # TODO(future PR): share these observers if multiple ops need
+        # this quant.
+        # TODO(future PR): create from qconfig of op instead of global
+        # qconfig.
+        if arg._qtensor_info.inf_dtype != torch.quint8:  # type: ignore[attr-defined]
+            tensor_id = arg._qtensor_info.id  # type: ignore[attr-defined]
+            self.tensor_id_to_observer[str(tensor_id)] = \
+                self.qconfig.activation()
+
     def op_prepare_before_hook(
         self,
         op: Callable,
@@ -239,27 +266,13 @@ class AutoQuantizationState(torch.nn.Module):
         if first_call:
             arg_tensor_infos: List[Optional[QTensorInfo]] = []
             for arg in args:
-                if not isinstance(arg, torch.Tensor):
-                    arg_tensor_infos.append(None)
-                    continue
-
-                # If a tensor does not have an ID, add it. This allows
-                # us to track inputs shared by multiple quantizeable modules.
-                if not hasattr(arg, '_qtensor_info'):
-                    arg._qtensor_info = QTensorInfo(qtensor_id[0], torch.float)  # type: ignore[attr-defined]
-                    qtensor_id[0] += 1
-                arg_tensor_infos.append(arg._qtensor_info)  # type: ignore[attr-defined]
-
-                # if the existing inf_dtype is not torch.quint8, add an observer
-                # which will be converted to a quant later
-                # TODO(future PR): share these observers if multiple ops need
-                # this quant.
-                # TODO(future PR): create from qconfig of op instead of global
-                # qconfig.
-                if arg._qtensor_info.inf_dtype != torch.quint8:  # type: ignore[attr-defined]
-                    tensor_id = arg._qtensor_info.id  # type: ignore[attr-defined]
-                    self.tensor_id_to_observer[str(tensor_id)] = \
-                        self.qconfig.activation()
+                if isinstance(arg, (list, tuple)):
+                    for inner_arg in arg:
+                        self._op_prepare_before_hook_tensor_first_call(
+                            inner_arg, arg_tensor_infos, qtensor_id)
+                else:
+                    self._op_prepare_before_hook_tensor_first_call(
+                        arg, arg_tensor_infos, qtensor_id)
 
             key = str(self.idx)
             if key not in self.idx_to_seen_ops:
@@ -281,7 +294,13 @@ class AutoQuantizationState(torch.nn.Module):
                     if str(tensor_id) in self.tensor_id_to_observer:
                         observer = self.tensor_id_to_observer[str(tensor_id)]
                         # TODO: return this to the caller
-                        observer(args[input_arg_idx])
+
+                        # special case torch.cat because its first argument
+                        # is a list of tensors
+                        if seen_op.type == torch.cat:
+                            observer(args[0][input_arg_idx])
+                        else:
+                            observer(args[input_arg_idx])
             return args, kwargs
 
     def op_prepare_after_hook(
@@ -354,17 +373,30 @@ class AutoQuantizationState(torch.nn.Module):
         # potentially quantize args, based on arg_quant_infos
         new_args = []
         tensor_arg_idx = 0
-        for arg in args:
-            if not isinstance(arg, torch.Tensor):
+        if op == torch.ops.quantized.cat:
+            # input tensors
+            new_first_arg = []
+            for arg in args[0]:
+                # TODO: handle non-tensor inputs
+                quant_info = arg_quant_infos[tensor_arg_idx]
+                if quant_info is not None:
+                    scale, zp = quant_info
+                    arg = torch.quantize_per_tensor(arg, scale, zp, torch.quint8)
+                new_first_arg.append(arg)
+                tensor_arg_idx += 1
+            new_args = [new_first_arg, *args[1:]]
+        else:
+            for arg in args:
+                if not isinstance(arg, torch.Tensor):
+                    new_args.append(arg)
+                    continue
+                # TODO: handle non-tensor inputs
+                quant_info = arg_quant_infos[tensor_arg_idx]
+                if quant_info is not None:
+                    scale, zp = quant_info
+                    arg = torch.quantize_per_tensor(arg, scale, zp, torch.quint8)
                 new_args.append(arg)
-                continue
-            # TODO: handle non-tensor inputs
-            quant_info = arg_quant_infos[tensor_arg_idx]
-            if quant_info is not None:
-                scale, zp = quant_info
-                arg = torch.quantize_per_tensor(arg, scale, zp, torch.quint8)
-            new_args.append(arg)
-            tensor_arg_idx += 1
+                tensor_arg_idx += 1
 
         # potentially extend kwargs with scale and zero_point
         kwargs.update(**additional_kwargs)

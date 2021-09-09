@@ -2014,6 +2014,7 @@ def embedding(
                  [ 0.0000,  0.0000,  0.0000],
                  [ 0.6262,  0.2438,  0.7471]]])
     """
+
     if has_torch_function_variadic(input, weight):
         return handle_torch_function(
             embedding, (input, weight),

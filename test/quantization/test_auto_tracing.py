@@ -35,28 +35,28 @@ def _allclose(a, b):
 
 
 class AutoTracingTestCase(QuantizationTestCase):
-    def _test_auto_tracing(self, m, qconfig, example_inputs, fuse_modules=True):
+    def _test_auto_tracing(self, m, qconfig, example_args, fuse_modules=True):
         m_copy = copy.deepcopy(m)
 
         m.qconfig = qconfig
 
         mp = _quantize_dynamic_tracing.prepare(
-            m, example_inputs, fuse_modules=fuse_modules)
-        out_p = mp(*example_inputs)
+            m, example_args, fuse_modules=fuse_modules)
+        out_p = mp(*example_args)
         print(mp)
         mq = _quantize_dynamic_tracing.convert(mp)
         print(mq)
         # verify it runs
-        out_q = mq(*example_inputs)
+        out_q = mq(*example_args)
         # print(out_q)
 
         # compare it against FX
         m_copy_p = prepare_fx(m_copy, {'': qconfig})
-        out_m_copy_p = m_copy_p(*example_inputs)
+        out_m_copy_p = m_copy_p(*example_args)
         # print(m_copy_p)
         m_copy_q = convert_fx(m_copy_p)
         print(m_copy_q)
-        out_q_fx = m_copy_q(*example_inputs)
+        out_q_fx = m_copy_q(*example_args)
         self.assertTrue(_allclose(out_p, out_m_copy_p))
         # print(out_q)
         # print(out_q_fx)
@@ -64,26 +64,26 @@ class AutoTracingTestCase(QuantizationTestCase):
 
         # verify torch.jit.trace works
         mq_jit_traced = torch.jit.trace(
-            mq, example_inputs, check_trace=False)
+            mq, example_args, check_trace=False)
         # print(mq_jit_traced.graph)
-        traced_out = mq_jit_traced(*example_inputs)
+        traced_out = mq_jit_traced(*example_args)
         self.assertTrue(_allclose(traced_out, out_q))
 
         # verify torch.jit.script works
         rewritten = mq.rewrite_for_scripting()
-        rewritten_out = rewritten(*example_inputs)
+        rewritten_out = rewritten(*example_args)
         # print(rewritten)
         self.assertTrue(_allclose(rewritten_out, out_q))
 
         scripted_rewritten = torch.jit.script(rewritten)
         # print(scripted_rewritten.graph)
-        scripted_rewritten_out = scripted_rewritten(*example_inputs)
+        scripted_rewritten_out = scripted_rewritten(*example_args)
         # print('scripted_rewritten_out', scripted_rewritten_out)
         self.assertTrue(_allclose(scripted_rewritten_out, out_q))
 
         traced_rewritten = torch.jit.trace(
-            rewritten, example_inputs, check_trace=False)
-        traced_rewritten_out = traced_rewritten(*example_inputs)
+            rewritten, example_args, check_trace=False)
+        traced_rewritten_out = traced_rewritten(*example_args)
         self.assertTrue(_allclose(traced_rewritten_out, out_q))
 
 
@@ -111,6 +111,26 @@ class TestAutoTracing(AutoTracingTestCase):
         mp = _quantize_dynamic_tracing.prepare(m, (torch.randn(1, 1, 1, 1),))
         self.assertTrue(isinstance(mp.conv, nni.ConvReLU2d))
         self.assertTrue(isinstance(mp.child[0], nni.ConvReLU2d))
+
+    @skipIfNoFBGEMM
+    def test_fusion2(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(1, 1, 1)
+                self.bn = torch.nn.BatchNorm2d(1)
+                # self.conv2 = torch.nn.Conv2d(1, 1, 1)
+                self.relu = torch.nn.LeakyReLU()
+
+            def forward(self, x):
+                x = self.conv(x)
+                x = self.bn(x)
+                x = self.relu(x)
+                return x
+
+        m = M().eval()
+        qconfig = torch.quantization.default_qconfig
+        self._test_auto_tracing(m, qconfig, (torch.randn(1, 1, 2, 2),))
 
     @skipIfNoFBGEMM
     def test_observers_not_touched_by_tracing(self):
@@ -159,6 +179,29 @@ class TestAutoTracing(AutoTracingTestCase):
         qconfig = torch.quantization.default_qconfig
         self._test_auto_tracing(m, qconfig, (torch.randn(1, 1, 2, 2),))
 
+    # TODO(future PR): implement observer sharing to match FX
+    @skipIfNoFBGEMM
+    def test_cat(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                x = torch.cat([x, x], dim=1)
+                return x
+
+        m = M().eval()
+        qconfig = torch.quantization.default_qconfig
+        self._test_auto_tracing(m, qconfig, (torch.randn(1, 1, 2, 2),))
+
+        class M(torch.nn.Module):
+            def forward(self, x):
+                x = torch.cat((x, x), dim=1)
+                return x
+
+        m = M().eval()
+        qconfig = torch.quantization.default_qconfig
+        self._test_auto_tracing(m, qconfig, (torch.randn(1, 1, 2, 2),))
+
+    # TODO: fix this test (iteration over the (1, 1) arg for arg_quant_infos)
+    @unittest.skip('foo')
     @skipIfNoFBGEMM
     def test_conv_flatten_linear(self):
         class M(torch.nn.Module):
@@ -215,6 +258,42 @@ class TestAutoTracing(AutoTracingTestCase):
 
         qconfig = torch.quantization.default_qconfig
         self._test_auto_tracing(model_fp32, qconfig, (torch.randn(1, 1, 2, 2),))
+
+    @skipIfNoFBGEMM
+    def test_gelu_linear(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.gelu = torch.nn.GELU()
+                self.linear = torch.nn.Linear(1, 1)
+
+            def forward(self, x):
+                x = self.linear(x)
+                x = self.gelu(x)
+                return x
+
+        model_fp32 = M().eval()
+        qconfig = torch.quantization.default_qconfig
+        self._test_auto_tracing(model_fp32, qconfig, (torch.randn(1, 1, 1, 1),))
+
+    @skipIfNoFBGEMM
+    def test_dropout(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.dropout = nn.Dropout()
+                self.linear = torch.nn.Linear(1, 1)
+                self.linear2 = torch.nn.Linear(1, 1)
+
+            def forward(self, x):
+                x = self.linear(x)
+                x = self.dropout(x)
+                x = self.linear2(x)
+                return x
+
+        model_fp32 = M().eval()
+        qconfig = torch.quantization.default_qconfig
+        self._test_auto_tracing(model_fp32, qconfig, (torch.randn(1, 1, 1, 1),))
 
     @skipIfNoFBGEMM
     def test_add(self):
@@ -280,6 +359,20 @@ class TestAutoTracing(AutoTracingTestCase):
         qconfig = torch.quantization.default_qconfig
         self._test_auto_tracing(model_fp32, qconfig, (torch.randn(1, 1, 1, 1),))
 
+    @unittest.skip('TODO build this')
+    @skipIfNoFBGEMM
+    def test_module_input_types(self):
+        class M(torch.nn.Module):
+            def forward(self, x=None):
+                return x
+
+        model_fp32 = M().eval()
+        qconfig = torch.quantization.default_qconfig
+
+        # dict
+        kwargs = {'x': torch.randn(1, 1, 2, 2)}
+        self._test_auto_tracing(model_fp32, qconfig, (), kwargs)
+
     @skipIfNoFBGEMM
     def test_module_return_types(self):
         class M1(torch.nn.Module):
@@ -314,7 +407,6 @@ class TestAutoTracing(AutoTracingTestCase):
         qconfig = torch.quantization.default_qconfig
         self._test_auto_tracing(model_fp32, qconfig, (torch.randn(1, 1, 2, 2),))
 
-    @unittest.skip('TODO fix this')
     @skipIfNoFBGEMM
     def test_unknown_op_after_quantized(self):
         class M(torch.nn.Module):

@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.nn.quantized as nnq
 import torch.nn.intrinsic as nni
 import torch.nn.intrinsic.quantized as nniq
@@ -19,6 +20,8 @@ fp32_to_int8_fun_mapping = {
     torch.cat: torch.ops.quantized.cat,
 }
 
+# TODO: enforce that functions in fp32_to_int8_fun_mapping must both be
+# in functions_supported_by_quantization
 functions_supported_by_quantization = set([
     torch.Tensor.add,
     torch.Tensor.mul,
@@ -30,6 +33,8 @@ functions_supported_by_quantization = set([
     torch.flatten,
     toq.add,
     toq.mul,
+    toq.cat,
+    F.conv2d,
 ])
 
 module_types_supported_by_quantization = set([
@@ -43,6 +48,9 @@ module_types_supported_by_quantization = set([
     nn.ReLU6,
     nn.Linear,
     nnq.Linear,
+    nn.Dropout,
+    nn.Identity,
+    nn.LeakyReLU,
 ])
 
 # TODO(future PR): reuse existing mapping
@@ -51,4 +59,5 @@ q_mod_to_float_mod_mapping = {
     nniq.ConvReLU2d: nni.ConvReLU2d,
     nnq.ReLU6: nn.ReLU6,
     nnq.Linear: nn.Linear,
+    nnq.LeakyReLU: nn.LeakyReLU,
 }

@@ -1,9 +1,11 @@
 import copy
+import math
 import operator
 
 import torch
 import torch.fx
 from .quantization_state import AutoQuantizationState
+from types import ModuleType
 from typing import Callable, Any, Tuple, Dict
 
 class AllModuleTracer(torch.fx.Tracer):
@@ -12,25 +14,65 @@ class AllModuleTracer(torch.fx.Tracer):
     dynamic dispatch into their corresponding quantized subgraphs.
     """
 
+    node_name_to_dtype: Dict[str, Any]
+
+    def __init__(self, autowrap_modules: Tuple[ModuleType] = (math, ),
+                 autowrap_functions: Tuple[Callable, ...] = (),
+                 enable_cpatching: bool = False,
+                 param_shapes_constant: bool = False) -> None:
+        super().__init__(
+            autowrap_modules, autowrap_functions, enable_cpatching,
+            param_shapes_constant)
+        self.node_name_to_dtype = {}
+
     def is_leaf_module(self, m, module_qualified_name) -> bool:
         return True
 
-    def _maybe_update_args_with_quants(self, args, arg_quant_infos):
+    def _maybe_update_args_with_quants(self, args, arg_quant_infos, target):
         # insert quants for inputs, if needed
         if len(arg_quant_infos):
             new_args = []
-            for idx, input_arg_quant_info in enumerate(arg_quant_infos):
-                if input_arg_quant_info is None:
-                    new_args.append(args[idx])
-                else:
-                    # create a quant node
-                    scale, zp = input_arg_quant_info
-                    quant = super().create_node(
-                        'call_function', torch.quantize_per_tensor,
-                        (args[idx], scale.item(), zp.item(), torch.quint8), {}, None, None)
-                    new_args.append(quant)
+            if target == torch.ops.quantized.cat:
+                new_first_arg = []
+                for idx, input_arg_quant_info in enumerate(arg_quant_infos):
+                    if input_arg_quant_info is None:
+                        new_first_arg.append(args[0][idx])
+                    else:
+                        # create a quant node
+                        scale, zp = input_arg_quant_info
+                        quant = super().create_node(
+                            'call_function', torch.quantize_per_tensor,
+                            (args[0][idx], scale.item(), zp.item(), torch.quint8), {}, None, None)
+                        new_first_arg.append(quant)
+                new_args = [new_first_arg, *args[1:]]
+            else:
+                for idx, input_arg_quant_info in enumerate(arg_quant_infos):
+
+                    if input_arg_quant_info is None:
+                        new_args.append(args[idx])
+                    else:
+                        # create a quant node
+                        scale, zp = input_arg_quant_info
+                        quant = super().create_node(
+                            'call_function', torch.quantize_per_tensor,
+                            (args[idx], scale.item(), zp.item(), torch.quint8), {}, None, None)
+                        new_args.append(quant)
             args = tuple(new_args)
         return args
+
+    def _maybe_update_args_with_dequants(self, args):
+        new_args = []
+        for arg in args:
+            if (
+                isinstance(arg, torch.fx.Node) and
+                arg.name in self.node_name_to_dtype and
+                self.node_name_to_dtype[arg.name] != torch.float
+            ):
+                dequant = torch.fx.Proxy(arg).dequantize().node
+                new_args.append(dequant)
+            else:
+                new_args.append(arg)
+        return tuple(new_args)
 
     def _maybe_update_outputs(self, outputs, output_qtensor_infos, output_dtypes):
         # TODO(future PR): handle other output types
@@ -52,20 +94,28 @@ class AllModuleTracer(torch.fx.Tracer):
         if target == operator.mul:
             target = torch.mul
 
-        if kind == 'call_function':
+        dtype_to_use = torch.float
+
+        if kind == 'call_function' or kind == 'call_method':
             qstate = self.root._auto_quant_state
             assert isinstance(qstate, AutoQuantizationState)
             if qstate.cur_op_needs_hooks(target):
+                # need to test this path with call_method
+                assert kind == 'call_function'
                 qstate.validate_cur_op(target)
 
                 old_target = target
                 target, arg_quant_infos, additional_kwargs = \
                     qstate.get_op_convert_info(target, unwrap_scale_zp=True)
 
-                args = self._maybe_update_args_with_quants(args, arg_quant_infos)
+                args = self._maybe_update_args_with_quants(args, arg_quant_infos, target)
                 kwargs.update(**additional_kwargs)
 
                 qstate.mark_cur_op_complete(old_target)
+                dtype_to_use = torch.quint8
+
+            else:
+                args = self._maybe_update_args_with_dequants(args)
 
         elif kind == 'call_module':
             # TODO: handle fqn
@@ -79,10 +129,14 @@ class AllModuleTracer(torch.fx.Tracer):
                     qstate.get_op_convert_info(
                         module_instance, unwrap_scale_zp=True)
 
-                args = self._maybe_update_args_with_quants(args, arg_quant_infos)
+                args = self._maybe_update_args_with_quants(args, arg_quant_infos, target)
                 kwargs.update(**additional_kwargs)
 
                 qstate.mark_cur_op_complete(module_instance)
+                dtype_to_use = torch.quint8
+
+            else:
+                args = self._maybe_update_args_with_dequants(args)
 
         elif kind == 'output':
             qstate = self.root._auto_quant_state
@@ -93,6 +147,7 @@ class AllModuleTracer(torch.fx.Tracer):
                 args, output_qtensor_infos, output_dtypes)
 
         out = super().create_node(kind, target, args, kwargs, name, type_expr)
+        self.node_name_to_dtype[out.name] = dtype_to_use
         return out
 
     # This is a hack to enable nn.Sequential to properly work with this

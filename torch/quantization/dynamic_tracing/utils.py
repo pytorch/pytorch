@@ -1,6 +1,6 @@
 import collections
 import enum
-from typing import Callable, Tuple, Any
+from typing import Callable, Tuple, Any, Dict
 
 import torch
 
@@ -110,13 +110,13 @@ def unwrap_observers_from_placeholders(module: torch.nn.Module) -> None:
 
 def trace_with_inputs(
     model: torch.nn.Module,
-    example_inputs: Tuple[Any],
+    example_args: Tuple[Any],
 ) -> None:
     with torch.no_grad():
         old_training = model.training
         model.eval()
         wrap_observers_in_placeholders(model)
-        model(*example_inputs)
+        model(*example_args)
         unwrap_observers_from_placeholders(model)
         if old_training:
             model.train()
@@ -161,5 +161,8 @@ def converted_func_needs_scale_zp(op: Callable, seen_op: SeenOp) -> bool:
         both_args_tensors = len(inputs) == 2 and inputs[0] is not None and \
             inputs[1] is not None
         return both_args_tensors
+    elif op in (torch.cat,):
+        return True
     # TODO: add more ops
+    print('op', op)
     return False

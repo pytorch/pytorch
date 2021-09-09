@@ -1,6 +1,8 @@
+import logging
+from typing import Tuple, Any, List, Dict
+
 import torch
 from torch.fx.node import map_aggregate
-from typing import Tuple, Any, List, Dict
 
 from .quantization_state import (
     AutoQuantizationState,
@@ -10,6 +12,10 @@ from .utils import (
     is_leaf,
 )
 from . import auto_trace_rewrite
+
+logger = logging.getLogger('auto_trace')
+# logging.basicConfig(level=logging.DEBUG)
+# logging.basicConfig(level=logging.INFO)
 
 
 def add_auto_observation(
@@ -58,6 +64,7 @@ def add_auto_observation(
             # to prevent printing things from going into an infinite loop
             if func == torch.Tensor.__repr__:
                 return super().__torch_function__(func, types, args, kwargs)
+            logger.debug(f'__torch_function__ {str(func)}')
 
             nonlocal qtensor_id
             kwargs = kwargs if kwargs else {}
@@ -87,7 +94,6 @@ def add_auto_observation(
                 with torch._C.DisableTorchFunction():
                     output = func(*args, **kwargs).as_subclass(
                         QuantizationInterceptionProxy)
-                    # print('new output', output)
                 assert output is not NotImplemented
 
             return output
@@ -145,6 +151,8 @@ def add_auto_observation(
                 # TODO(future PR): fix it without hacks
                 if isinstance(self, AutoQuantizationState):
                     return args[0]
+
+                logger.debug(f"record_module: {type(self)}")
 
                 nonlocal cur_module
                 old_module = cur_module
@@ -260,6 +268,8 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
         else:
             return x
 
+    module_id_to_fqn: Dict[int, str] = {}
+
     class QuantizationDispatchProxy(torch.Tensor):
         """
         An override of `torch.Tensor` to enable dynamic dispatch for
@@ -292,7 +302,13 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
                 cur_module is not None and \
                 isinstance(cur_module._auto_quant_state, AutoQuantizationState) and \
                 cur_module._auto_quant_state.cur_op_needs_hooks(func)
-            # print('__torch_function__', func, 'op_hooks', needs_op_hooks, 'arg_types', [type(arg) for arg in args], 'args', args)
+            needs_arg_dequants = can_have_op_hooks and not needs_op_hooks
+
+            with torch._C.DisableTorchFunction():
+                logger.debug(f"__torch_function__ {func} " +
+                    f"op_hooks {needs_op_hooks} " +
+                    f"arg_types {[type(arg) for arg in args]}) " +
+                    f"arg_dtypes {[arg.dtype if isinstance(arg, torch.Tensor) else None for arg in args]}")
 
             if needs_op_hooks:
                 assert cur_module is not None
@@ -302,27 +318,43 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
                 func, args, kwargs = qstate.op_convert_before_hook(
                     func, args, kwargs)
 
-                # TODO(future PR): remove this after https://github.com/pytorch/pytorch/issues/64660 is fixed
-                if (
-                    func == torch.ops.quantized.add and
-                    isinstance(args[1], torch.Tensor) and
-                    args[0].shape != args[1].shape
-                ):
-                    new_args = [*args]
-                    new_shape1 = list(args[1].shape)
-                    for idx in range(len(args[0].shape)):
-                        if idx == 0:
-                            new_shape1[idx] = args[0].shape[idx]
-                        else:
-                            new_shape1[idx] = 1
-                    new_args[1] = new_args[1].repeat(*new_shape1)
-                    args = tuple(new_args)
+                if False:
+                    # TODO(future PR): remove this after https://github.com/pytorch/pytorch/issues/64660 is fixed
+                    if (
+                        func == torch.ops.quantized.add and
+                        isinstance(args[1], torch.Tensor) and
+                        args[0].shape != args[1].shape
+                    ):
+                        new_args = [*args]
+                        new_shape1 = list(args[1].shape)
+                        for idx in range(len(new_shape1)):
+                            if idx == 0:
+                                new_shape1[idx] = args[0].shape[idx]
+                            else:
+                                new_shape1[idx] = 1
+                        new_args[1] = new_args[1].repeat(*new_shape1)
+                        args = tuple(new_args)
 
                 # forward
                 output = super().__torch_function__(func, types, args, kwargs)
                 # after hooks
                 output = qstate.op_convert_after_hook(func, output)
                 qstate.mark_cur_op_complete(func)
+
+            elif needs_arg_dequants:
+                # disabling torch function to prevent infinite recursion on
+                # getset
+                # TODO(future PR): handle more dtypes
+                with torch._C.DisableTorchFunction():
+                    new_args = []
+                    for arg in args:
+                        if isinstance(arg, torch.Tensor) and arg.is_quantized:
+                            new_args.append(arg.dequantize())
+                        else:
+                            new_args.append(arg)
+                    args = tuple(new_args)
+                output = super().__torch_function__(func, types, args, kwargs)
+
             else:
                 output = super().__torch_function__(func, types, args, kwargs)
 
@@ -333,7 +365,7 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
                         QuantizationDispatchProxy)
                 assert output is not NotImplemented
 
-            # print('__torch_function__', func, 'out', type(output), 'end')
+            logger.debug(f"__torch_function__ {func} out {type(output)} end")
 
             return output
 
@@ -390,6 +422,9 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
                 if isinstance(self, AutoQuantizationState):
                     return args[0]
 
+                fqn = module_id_to_fqn[id(self)]
+                logger.debug(f"starting fqn {fqn}")
+
                 nonlocal cur_module
                 old_module = cur_module
                 cur_module = self
@@ -406,7 +441,11 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
                         hasattr(cur_module, '_auto_quant_state') and
                         (not needs_op_hooks)
                     )
-                    # print('record_module', type(self), 'args', [type(arg) for arg in args], 'op_hooks', needs_op_hooks, 'io_hooks', needs_io_hooks)
+                    needs_arg_dequants = can_have_op_hooks and not needs_op_hooks
+                    logger.debug(f"record_module {type(self)} " +
+                      f"arg_types {[type(arg) for arg in args]} " +
+                      f"arg_dtypes {[arg.dtype if isinstance(arg, torch.Tensor) else None for arg in args]} " +
+                      f"op_hooks {needs_op_hooks} io_hooks {needs_io_hooks}")
 
                     if needs_op_hooks:
                         # before hooks
@@ -432,18 +471,40 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
                         output = cur_qstate.outputs_convert_hook(output)
                         cur_qstate.validate_is_at_last_seen_idx()
 
+                    elif needs_arg_dequants:
+                        # disabling torch function to prevent infinite recursion on
+                        # getset
+                        # TODO(future PR): handle more dtypes
+                        with torch._C.DisableTorchFunction():
+                            new_args = []
+                            for arg in args:
+                                if isinstance(arg, torch.Tensor) and arg.is_quantized:
+                                    dequant = arg.dequantize().as_subclass(
+                                        QuantizationDispatchProxy)  # type: ignore[arg-type]
+                                    new_args.append(dequant)
+                                else:
+                                    new_args.append(arg)
+                            args = tuple(new_args)
+                        output = orig_module_call(self, *args, **kwargs)
+
                     else:
                         output = orig_module_call(self, *args, **kwargs)
 
-                    # print('record_module', type(self), 'out', type(output), 'end')
+                    logger.debug(f"record_module {type(self)} " +
+                        f"out {type(output)} " +
+                        f"dtype {output.dtype if isinstance(output, torch.Tensor) else None} " +
+                        f"end")
+                    logger.debug(f"ending fqn {fqn}")
                     return output
                 finally:
                     module_stack.pop()
                     cur_module = old_module
+
             torch.nn.Module.__call__ = record_module
 
             try:
                 for k, v in self.named_modules():
+                    module_id_to_fqn[id(v)] = k
                     if hasattr(v, '_auto_quant_state'):
                         v._auto_quant_state.reset_to_new_call()
 
