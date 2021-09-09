@@ -318,7 +318,7 @@ Tensor & embedding_renorm_cuda_(Tensor & self, const Tensor & indices,
     dim3 block = 128;
     int dim = self.stride(0);
 
-    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, self.scalar_type(), "embedding_backward", [&] {
+    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, self.scalar_type(), "embedding_renorm_cuda_", [&] {
       using accscalar_t = acc_type<scalar_t, true>;
       renorm_kernel<<<grid, block, 128 * sizeof(accscalar_t), stream>>>(
         self.data_ptr<scalar_t>(),
