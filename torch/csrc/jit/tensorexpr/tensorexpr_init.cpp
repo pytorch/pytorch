@@ -616,6 +616,7 @@ void initTensorExprBindings(PyObject* module) {
       [](StmtPtr stmt) { return IRSimplifier::simplify(stmt); },
       py::return_value_policy::reference);
 
+  /*
   te.def(
       "lower",
       [](std::string op_str,
@@ -630,7 +631,7 @@ void initTensorExprBindings(PyObject* module) {
         return computeOperandValue(
             op, argInputs, outputShape, outputType.scalar_type());
       });
-
+*/
   py::class_<ArgValue>(te, "ArgValue")
       .def(py::init([](py::handle inp) {
         return std::make_unique<ArgValue>(convertPyToArgValue(inp));

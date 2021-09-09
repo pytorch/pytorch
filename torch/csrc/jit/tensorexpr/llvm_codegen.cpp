@@ -1835,6 +1835,7 @@ void LLVMCodeGenImpl::visit(ExternalCallPtr v) {
   int i = 0;
   int dim_idx = 0;
   for (BufPtr b : bufs) {
+    std::cout << "XXX " << __FILE__ << ":" << __LINE__ << " " << __FUNCTION__ << " buf i:" << i << std::endl;
     // Store value for buf pointer
     auto gep = irb_.CreateInBoundsGEP(
         buf_ptrs, {llvm::ConstantInt::getSigned(IntTy_, i)});

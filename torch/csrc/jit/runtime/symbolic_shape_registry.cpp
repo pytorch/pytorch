@@ -257,6 +257,12 @@ const std::string shape_compute_functions =
           assert len(input) == 4
           return conv_output_size(input, weight, bias, stride, padding, dilation, groups)
 
+        def batch_norm(input: List[int], weight: List[int], bias: Optional[List[int]], running_mean: Optional[List[int]], running_var: Optional[List[int]], training: bool, momentum: float, eps: float, cudnn_enabled: bool):
+          out: List[int] = []
+          for elem in input:
+            out.append(elem)
+          return out
+
         def conv3d(input: List[int], weight: List[int], bias: Optional[List[int]], stride: List[int], padding: List[int], dilation: List[int], groups: int):
           assert len(weight) == 5
           assert len(input) == 5
@@ -341,8 +347,11 @@ static const OperatorMap<std::string>& get_schema_to_function_graph() {
       {"aten::add_.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor", "broadcast_one_unused_input"},
       {"aten::add.Scalar(Tensor self, Scalar other, Scalar alpha=1) -> Tensor", "unary_two_unused_inputs"},
       {"aten::hardtanh(Tensor self, Scalar min_val=-1, Scalar max_val=1) -> Tensor", "unary_two_unused_inputs"},
+      {"aten::hardswish(Tensor self) -> Tensor", "unary"},
       {"aten::hardswish_(Tensor self) -> Tensor", "unary"},
+      {"aten::hardsigmoid(Tensor self) -> Tensor", "unary"},
       {"aten::hardsigmoid_(Tensor self) -> Tensor", "unary"},
+      {"aten::dropout(Tensor input, float p, bool train) -> Tensor", "unary_two_unused_inputs"},
       {"aten::adaptive_avg_pool2d(Tensor self, int[2] output_size) -> Tensor", "adaptive_avg_pool2d"},
       {"aten::mm(Tensor self, Tensor mat2) -> Tensor", "mm"},
       {"aten::dot(Tensor self, Tensor tensor) -> Tensor", "dot"},
@@ -352,6 +361,7 @@ static const OperatorMap<std::string>& get_schema_to_function_graph() {
       {"aten::t(Tensor(a) self) -> Tensor(a)", "t"},
       {"aten::conv1d(Tensor input, Tensor weight, Tensor? bias=None, int[1] stride=1, int[1] padding=0, int[1] dilation=1, int groups=1) -> Tensor", "conv1d"},
       {"aten::conv2d(Tensor input, Tensor weight, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] dilation=1, int groups=1) -> Tensor", "conv2d"},
+      {"aten::batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps, bool cudnn_enabled) -> Tensor", "batch_norm"},
       {"aten::conv3d(Tensor input, Tensor weight, Tensor? bias=None, int[3] stride=1, int[3] padding=0, int[3] dilation=1, int groups=1) -> Tensor", "conv3d"},
       {"aten::flatten.using_ints(Tensor(a) self, int start_dim=0, int end_dim=-1) -> Tensor(a)", "flatten"},
       {"aten::relu(Tensor self) -> Tensor", "unary"},
