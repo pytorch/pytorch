@@ -357,13 +357,20 @@ class CMake:
 
         from .env import build_type
 
-        max_jobs = os.getenv('MAX_JOBS', str(multiprocessing.cpu_count()))
         build_args = ['--build', '.', '--target', 'install', '--config', build_type.build_type_string]
-        # This ``if-else'' clause would be unnecessary when cmake 3.12 becomes
-        # minimum, which provides a '-j' option: build_args += ['-j', max_jobs]
-        # would be sufficient by then.
-        if IS_WINDOWS and not USE_NINJA:  # We are likely using msbuild here
-            build_args += ['--', '/p:CL_MPCount={}'.format(max_jobs)]
-        else:
-            build_args += ['--', '-j', max_jobs]
+        if not USE_NINJA:
+            # Ninja is capable of figuring out the parallelism on its
+            # own.
+            max_jobs = os.getenv('MAX_JOBS', str(multiprocessing.cpu_count()))
+            # This ``if-else'' clause would be unnecessary when cmake
+            # 3.12 becomes minimum, which provides a '-j' option:
+            # build_args += ['-j', max_jobs] would be sufficient by
+            # then. Until then, we use "--" to pass parameters to the
+            # underlying build system.
+            build_args += ['--']
+            if IS_WINDOWS:
+                # We are likely using msbuild here
+                build_args += ['/p:CL_MPCount={}'.format(max_jobs)]
+            else:
+                build_args += ['-j', max_jobs]
         self.run(build_args, my_env)
