@@ -3,6 +3,7 @@
 #include <ATen/Dispatch.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/NamedTensorUtils.h>
+#include <ATen/native/mkldnn/Matmul.h>
 #include <ATen/native/CPUBlas.h>
 #include <ATen/native/IndexingUtils.h>
 #include <ATen/native/LinearAlgebra.h>
@@ -22,11 +23,6 @@
 #include <functional>
 #include <limits>
 #include <numeric>
-
-#if AT_MKLDNN_ENABLED()
-#include <ATen/native/mkldnn/Utils.h>
-#include <ATen/native/mkldnn/Matmul.h>
-#endif // AT_MKLDNN_ENABLED
 
 namespace at {
 namespace meta {
@@ -1054,8 +1050,7 @@ static void addmm_impl_cpu_(
   // Always ensure the conjugation for c is resolved since there's no way to specify c's conjugation in the gemm call
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!c.is_conj());
 
-#if AT_MKLDNN_ENABLED()
-  if (use_mkldnn_bf16_gemm(a, b, c)){
+  if (use_mkldnn_bf16_matmul(a, b, c)){
     if (transpose_c){
       // m1, m2 are swapped
       mkldnn_matmul(b, a, c, beta.to<float>(), alpha.to<float>());
@@ -1067,7 +1062,6 @@ static void addmm_impl_cpu_(
     }
     return;
   }
-#endif // AT_MKLDNN_ENABLED
 
   // Apply BLAS routine
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kHalf, kBFloat16,
@@ -1122,13 +1116,6 @@ static void addbmm_impl_(
     }
     return;
   }
-
-#if AT_MKLDNN_ENABLED()
-  if (use_mkldnn_bf16_gemm(batch1, batch2, result)){
-    mkldnn_matmul(batch1, batch2, result, beta.to<float>(), alpha.to<float>());
-    return;
-  }
-#endif // AT_MKLDNN_ENABLED
 
   auto adjusted_beta(beta);
   for (int64_t batch = 0; batch < num_batches; ++batch) {
@@ -1280,12 +1267,10 @@ static inline Tensor& bmm_out_or_baddbmm_(Tensor& self_or_result, const Tensor& 
             || (strides[1] == 1 && strides[2] >= sizes[1]);
   };
 
-#if AT_MKLDNN_ENABLED()
-  if (use_mkldnn_bf16_gemm(batch1, batch2, self_or_result)){
+  if (use_mkldnn_bf16_matmul(batch1, batch2, self_or_result)){
     mkldnn_matmul(batch1, batch2, self_or_result, beta.to<float>(), alpha.to<float>());
     return self_or_result;
   }
-#endif // AT_MKLDNN_ENABLED
 
   if (contraction_size * res_rows * res_cols < 400) {
     if (is_bmm_out) {

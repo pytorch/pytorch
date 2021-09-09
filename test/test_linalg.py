@@ -4011,12 +4011,12 @@ class TestLinalg(TestCase):
         check(x, y)
 
         # Contiguous
-        x = torch.randn(200, dtype=dtype, device=device)
-        y = torch.randn(200, dtype=dtype, device=device)
+        x = 0.1 * torch.randn(5000, dtype=dtype, device=device)
+        y = 0.1 * torch.randn(5000, dtype=dtype, device=device)
         check(x, y)
 
         # 0 strided
-        y = torch.randn(1, dtype=dtype, device=device).expand(200)
+        y = 0.1 * torch.randn(1, dtype=dtype, device=device).expand(5000)
         check(x, y)
 
         # 2 strided
@@ -5958,31 +5958,32 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         # have to use torch.randn(...).to(bfloat16) instead of
         # torch.randn(..., dtype=bfloat16). randn does not support
         # bfloat16 yet.
+        # "*0.2" to reduce errors for low precision
         ts = [
-            torch.randn(10, device=device).to(dtype),
-            torch.randn(1, device=device).to(dtype).expand(10),
+            0.2 * torch.randn(50, device=device).to(dtype),
+            0.2 * torch.randn(1, device=device).to(dtype).expand(50),
         ]
         vs = [
-            torch.randn(100, device=device).to(dtype),
-            torch.ones(1, device=device).to(dtype).expand(100),  # to reduce errors for low precision
+            0.2 * torch.randn(100, device=device).to(dtype),
+            0.2 * torch.ones(1, device=device).to(dtype).expand(100),  # to reduce errors for low precision
         ]
         ms = [
             # 0d
-            torch.ones((), device=device).to(dtype).expand(10, 100),  # to reduce errors for low precision
+            0.2 * torch.ones((), device=device).to(dtype).expand(50, 100),  # to reduce errors for low precision
             # 1d
-            torch.randn((1, 100), device=device).to(dtype).expand(10, 100),
+            0.2 * torch.randn((1, 100), device=device).to(dtype).expand(50, 100),
             # this initialization reduces errors for low precision for broadcasted matrices
             # by making sure that intermediate and result values are exactly representable
             # in low precision type
-            torch.randint(3, (10, 1), dtype=torch.float, device=device).to(dtype).expand(10, 100),
+            0.2 * torch.randint(3, (50, 1), dtype=torch.float, device=device).to(dtype).expand(50, 100),
             # 2d
-            torch.randn((10, 100), device=device).to(dtype),
-            torch.randn((100, 10), device=device).to(dtype).t(),
+            0.2 * torch.randn((50, 100), device=device).to(dtype),
+            0.2 * torch.randn((100, 50), device=device).to(dtype).t(),
         ]
         for m, v, t in itertools.product(ms, vs, ts):
             self._test_addmm_addmv(torch.addmv, t, m, v)
         # Test beta=0, t=nan
-        t = torch.full((10,), math.nan, device=device).to(dtype)
+        t = torch.full((50,), math.nan, device=device).to(dtype)
         for m, v in itertools.product(ms, vs):
             self._test_addmm_addmv(torch.addmv, t, m, v, beta=0)
 
