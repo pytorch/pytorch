@@ -24,7 +24,7 @@ if [[ "$BUILD_ENVIRONMENT" == *-mobile-code-analysis* ]]; then
   exec "$(dirname "${BASH_SOURCE[0]}")/build-mobile-code-analysis.sh" "$@"
 fi
 
-if [[ "$BUILD_ENVIRONMENT" == *linux-xenial-cuda11.1-cudnn8-py3-gcc7* ]]; then
+if [[ "$BUILD_ENVIRONMENT" == *linux-xenial-cuda11.1* ]]; then
   # Enabling DEPLOY build (embedded torch python interpreter, experimental)
   # only on one config for now, can expand later
   export USE_DEPLOY=ON
@@ -59,7 +59,7 @@ if [[ "$BUILD_ENVIRONMENT" == *cuda11* ]]; then
   export BUILD_SPLIT_CUDA=ON
 fi
 
-if [[ ${BUILD_ENVIRONMENT} == *"pure_torch"* ]]; then
+if [[ ${BUILD_ENVIRONMENT} == *"pure_torch"* || ${BUILD_ENVIRONMENT} == *"puretorch"* ]]; then
   export BUILD_CAFFE2=OFF
 fi
 
@@ -88,6 +88,8 @@ if ! which conda; then
   else
     export USE_MKLDNN=0
   fi
+else
+  export CMAKE_PREFIX_PATH=/opt/conda
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *libtorch* ]]; then
@@ -130,6 +132,7 @@ if [[ "${BUILD_ENVIRONMENT}" == *-android* ]]; then
   if [[ "${BUILD_ENVIRONMENT}" == *vulkan* ]]; then
     build_args+=("-DUSE_VULKAN=ON")
   fi
+  build_args+=("-DUSE_LITE_INTERPRETER_PROFILER=OFF")
   exec ./scripts/build_android.sh "${build_args[@]}" "$@"
 fi
 
@@ -185,7 +188,7 @@ fi
 export TORCH_CUDA_ARCH_LIST="5.2"
 
 # Add sm_75 support for the Linux CUDA 11.1 cuDNN 8 CircleCI build
-if [[ "$BUILD_ENVIRONMENT" == *xenial-cuda11.1-cudnn8*build ]]; then
+if [[ "$BUILD_ENVIRONMENT" == *xenial-cuda11.1*build ]]; then
   export TORCH_CUDA_ARCH_LIST=$TORCH_CUDA_ARCH_LIST";7.5"
 fi
 
@@ -221,7 +224,11 @@ if [[ "$BUILD_ENVIRONMENT" == *-bazel-* ]]; then
 
   get_bazel
 
+  # first build the whole torch for CPU-only
   tools/bazel build --config=no-tty :torch
+  # then build selected set of targets with GPU-support.
+  # TODO: eventually this should converge to building the whole :torch with GPU-support
+  tools/bazel build --config=no-tty --config=gpu :c10
 else
   # check that setup.py would fail with bad arguments
   echo "The next three invocations are expected to fail with invalid command error messages."

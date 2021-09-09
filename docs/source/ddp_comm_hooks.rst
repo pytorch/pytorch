@@ -32,6 +32,7 @@ Particularly, :class:`torch.distributed.GradBucket` represents a bucket of gradi
 .. autofunction:: torch.distributed.GradBucket.gradients
 .. autofunction:: torch.distributed.GradBucket.is_last
 .. autofunction:: torch.distributed.GradBucket.set_buffer
+.. autofunction:: torch.distributed.GradBucket.parameters
 
 Default Communication Hooks
 ---------------------------
@@ -43,11 +44,13 @@ The input ``bucket`` is a :class:`torch.distributed.GradBucket` object.
 .. currentmodule:: torch.distributed.algorithms.ddp_comm_hooks.default_hooks
 .. autofunction:: allreduce_hook
 .. autofunction:: fp16_compress_hook
+.. autofunction:: bf16_compress_hook
 
-Additionally, a communication hook wraper is provided to support :meth:`~fp16_compress_hook` as a wrapper,
+Additionally, a communication hook wraper is provided to support :meth:`~fp16_compress_hook` or :meth:`~bf16_compress_hook` as a wrapper,
 which can be combined with other communication hooks.
 
 .. autofunction:: fp16_compress_wrapper
+.. autofunction:: bf16_compress_wrapper
 
 PowerSGD Communication Hook
 ---------------------------
@@ -80,6 +83,18 @@ PowerSGD Hooks
 
 .. autofunction:: powerSGD_hook
 .. autofunction:: batched_powerSGD_hook
+
+Debugging Communication Hooks
+-----------------------------
+
+As the name implies, debugging communication hooks are **only** used for debugging and performance optimization purpose.
+
+.. currentmodule:: torch.distributed.algorithms.ddp_comm_hooks.debugging_hooks
+
+.. warning ::
+    Debugging communication hooks do not necessarily output the correct results.
+
+.. autofunction:: noop_hook
 
 Acknowledgements
 ----------------

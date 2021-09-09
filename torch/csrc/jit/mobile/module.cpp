@@ -7,6 +7,7 @@
 #include <exception>
 
 #include <ATen/record_function.h>
+#include <c10/util/ScopeExit.h>
 #include <c10/util/irange.h>
 
 namespace torch {
@@ -121,13 +122,30 @@ const std::map<std::string, at::Tensor> Module::named_parameters() const {
   return params;
 }
 
+std::string Module::getModuleHierarchy(const int64_t debug_handle) const {
+#if defined(SYMBOLICATE_MOBILE_DEBUG_HANDLE)
+  return getDebugTable().getModuleHierarchyInfo(
+      debug_handle, getTopModuleTypeName(*this));
+#else
+  return "";
+#endif
+}
+
+std::string Module::getCallStack(const int64_t debug_handle) const {
+#if defined(SYMBOLICATE_MOBILE_DEBUG_HANDLE)
+  return getDebugTable().getSourceDebugString(
+      debug_handle, getTopModuleTypeName(*this));
+#else
+  return "";
+#endif
+}
+
 // We will continue to support this API for now as this is being relied upon
 // for profiling.
 // We really need to change this part, so in the next step for profiling support
 // for delegates, the first thing will be to rewrite how profiling is done
 // for lite interpreter.
-std::string Module::get_forward_method_debug_info(size_t pc) const {
-  auto debug_handle = find_method("forward")->get_debug_handle(pc);
+std::string Module::get_forward_method_debug_info(int64_t debug_handle) const {
 #if defined(SYMBOLICATE_MOBILE_DEBUG_HANDLE)
   return getDebugTable().getModuleHierarchyInfo(
       debug_handle, getTopModuleTypeName(*this));
@@ -178,23 +196,41 @@ void Method::run(Stack& stack) const {
   debug_info->setMethodName(function_->name());
   at::DebugInfoGuard guard(at::DebugInfoKind::MOBILE_RUNTIME_INFO, debug_info);
 
+  std::string error_message;
+  auto failure_guard = c10::make_scope_exit([&]() {
+    if (!observer) {
+      return;
+    }
+
+#if defined(SYMBOLICATE_MOBILE_DEBUG_HANDLE)
+    if (error_message.empty()) {
+      error_message = owner_->getDebugTable().getSourceDebugString(
+          function_->getExceptionDebugHandle(), getTopModuleTypeName(*owner_));
+    }
+#endif
+
+    observer->onFailRunMethod(
+        instance_key,
+        error_message.empty() ? "Unknown exception" : error_message.c_str());
+  });
+
   try {
     stack.insert(stack.begin(), owner_->_ivalue()); // self
     function_->run(stack);
     if (observer) {
       observer->onExitRunMethod(instance_key);
     }
+    failure_guard.release();
     // This exception must be caught first as it derived from c10::Error
   } catch (c10::BackendRuntimeException& e) {
 #if defined(SYMBOLICATE_MOBILE_DEBUG_HANDLE)
     e.pushDebugHandle(function_->getExceptionDebugHandle());
     // symbolicate all handles
-    e.add_context(owner_->getDebugTable().getSourceDebugString(
-        e.getDebugHandles(), getTopModuleTypeName(*owner_)));
+    auto debug_string = owner_->getDebugTable().getSourceDebugString(
+        e.getDebugHandles(), getTopModuleTypeName(*owner_));
+    e.add_context(debug_string);
 #endif
-    if (observer) {
-      observer->onFailRunMethod(instance_key, e.what());
-    }
+    error_message = e.what();
     TORCH_RETHROW(e);
   } catch (c10::Error& error) {
 #if defined(SYMBOLICATE_MOBILE_DEBUG_HANDLE)
@@ -202,33 +238,8 @@ void Method::run(Stack& stack) const {
         function_->getExceptionDebugHandle(), getTopModuleTypeName(*owner_));
     error.add_context(debug_string);
 #endif
-    if (observer) {
-      observer->onFailRunMethod(instance_key, error.what());
-    }
+    error_message = error.what();
     TORCH_RETHROW(error);
-  } catch (...) {
-    auto currentException = std::current_exception();
-    try {
-      if (!currentException) {
-        TORCH_CHECK(false, "Unknown exception");
-      } else {
-        try {
-          std::rethrow_exception(currentException);
-        } catch (const std::exception& e) {
-          TORCH_CHECK(false, e.what());
-        }
-      }
-    } catch (c10::Error& error) {
-#if defined(SYMBOLICATE_MOBILE_DEBUG_HANDLE)
-      auto debug_string = owner_->getDebugTable().getSourceDebugString(
-          function_->getExceptionDebugHandle(), getTopModuleTypeName(*owner_));
-      error.add_context(debug_string);
-#endif
-      if (observer) {
-        observer->onFailRunMethod(instance_key, error.what());
-      }
-      TORCH_RETHROW(error);
-    }
   }
 }
 
