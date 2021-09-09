@@ -1540,7 +1540,7 @@ def log1p(g, self):
 
 
 def log10(g, self):
-    return div(g, log(g, self), sym_help._if_scalar_type_as(g, torch.log(10), self))
+    return div(g, log(g, self), sym_help._if_scalar_type_as(g, torch.ones(1) * 10, self))
 
 
 def pow(g, self, exponent):
