@@ -125,6 +125,7 @@ def vjp(f, *primals):
     return results, wrapper
 
 def jacrev(f, argnums=0):
+    @wraps(f)
     def wrapper_fn(*args):
         f_wrapper, primals = _argnums_partial(f, args, argnums)
         output, vjp_fn = vjp(f_wrapper, *primals)
@@ -176,7 +177,7 @@ def _slice_argnums(args, argnums):
 
 def _argnums_partial(f, args, argnums):
     def f_wrapper(*wrapper_args):
-        replaced_args = _replace_args(args, wrapper_args, argnums) 
+        replaced_args = _replace_args(args, wrapper_args, argnums)
         return f(*replaced_args)
     wrapper_args = _slice_argnums(args, argnums)
     wrapper_args = wrapper_args if isinstance(wrapper_args, tuple) else (wrapper_args, )
