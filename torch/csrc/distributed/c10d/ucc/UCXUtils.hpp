@@ -81,6 +81,7 @@ private:
 
 class UCPEndpoint;
 
+// UCPWorker is a C++ wrapper for ucp_worker_h.
 class UCPWorker: public std::enable_shared_from_this<UCPWorker> {
   ucp_worker_h worker;
   static void recv_callback(
@@ -104,6 +105,7 @@ public:
   std::shared_ptr<UCPRequest> recv_with_tag_and_mask(void *data, size_t size, ucp_tag_t tag, ucp_tag_t tag_mask, c10::DeviceType device) const;
 };
 
+// UCPEndpoint is a C++ wrapper for ucp_ep_h.
 class UCPEndpoint {
   ucp_ep_h endpoint;
   std::shared_ptr<const UCPWorker> worker;

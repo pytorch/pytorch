@@ -3,6 +3,7 @@
 
 namespace c10d {
 
+// UCPContext is a C++ wrapper for ucp_context_h.
 class UCPContext {
   ucp_context_h context;
   static void request_init_callback(void* request);
