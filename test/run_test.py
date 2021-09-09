@@ -8,6 +8,7 @@ import os
 import pathlib
 import shutil
 import signal
+import site
 import subprocess
 import sys
 import tempfile
@@ -25,6 +26,120 @@ import torch.distributed as dist
 from typing import Dict, Optional, List
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
+TORCH_INSTALL_DIR = os.path.join(site.getsitepackages()[0], "torch")
+TORCH_BIN_DIR = os.path.join(TORCH_INSTALL_DIR, "bin")
+TORCH_LIB_DIR = os.path.join(TORCH_INSTALL_DIR, "lib")
+TORCH_TEST_DIR = os.path.join(TORCH_INSTALL_DIR, "test")
+
+BUILD_DIR = "build"
+BUILD_RENAMED_DIR = "build_renamed"
+BUILD_BIN_DIR = os.path.join(BUILD_DIR, "bin")
+
+os_env = os.environ.copy()
+BUILD_ENVIRONMENT = os_env.get("BUILD_ENVIRONMENT", "")
+TEST_CONFIG = os_env.get("TEST_CONFIG", "")
+PR_NUMBER = os_env.get("PR_NUMBER", "")
+IN_WHEEL_TEST = os_env.get("IN_WHEEL_TEST", "")
+JOB_BASE_NAME = os_env.get("JOB_BASE_NAME", "")
+SHARD_NUMBER = os_env.get("SHARD_NUMBER", "")
+
+if TEST_CONFIG:
+    BUILD_ENVIRONMENT += "-" + TEST_CONFIG
+
+if not PR_NUMBER:
+    PR_NUMBER = os_env.get("CIRCLE_PR_NUMBER", "")
+
+if "-slow-" in BUILD_ENVIRONMENT or TEST_CONFIG == "slow":
+    os_env["PYTORCH_TEST_WITH_SLOW"] = "1"
+    os_env["PYTORCH_TEST_SKIP_FAST"] = "1"
+
+if "old-gradcheck" in BUILD_ENVIRONMENT:
+    os_env["PYTORCH_TEST_WITH_SLOW_GRADCHECK"] = "ON"
+
+if "coverage" in BUILD_ENVIRONMENT:
+    os_env["PYTORCH_COLLECT_COVERAGE"] = "1"
+    # coverage config file needed for plug-ins and settings to work
+    os_env["COVERAGE_RCFILE"] = os.path.join(os_env.get("PWD", ""), ".coveragerc")
+    # allows coverage to run with JitPlugin for JIT coverage
+    shell("pip install -e tools/coverage_plugins_package".split())
+
+if "cuda" in BUILD_ENVIRONMENT:
+    # Used so that only cuda specific versions of tests are generated
+    # mainly used so that we're not spending extra cycles testing cpu
+    # devices on expensive gpu machines
+    os_env["PYTORCH_TESTING_DEVICE_ONLY_FOR"] = "cuda"
+
+if "cuda11" in BUILD_ENVIRONMENT:
+    os_env["BUILD_SPLIT_CUDA"] = "ON"
+
+if "noarch" in BUILD_ENVIRONMENT:
+    os_env["PYTORCH_TEST_SKIP_NOARCH"] = "0"
+else:
+    os_env["PYTORCH_TEST_SKIP_NOARCH"] = "1"
+
+if PR_NUMBER and (not os_env.get("CI_MASTER") or os_env.get("CI_MASTER") == "false"):
+    # skip expensive checks when on PR and CI_MASTER flag is not set
+    os_env["PYTORCH_TEST_SKIP_CUDA_MEM_LEAK_CHECK"] = "1"
+else:
+    os_env["PYTORCH_TEST_SKIP_CUDA_MEM_LEAK_CHECK"] = "0"
+
+if "rocm" in BUILD_ENVIRONMENT:
+    # Print GPU info
+    shell(r"rocminfo | grep -E 'Name:.*\sgfx|Marketing'".split())
+
+if "ppc64le" not in BUILD_ENVIRONMENT and "-bazel-" not in BUILD_ENVIRONMENT:
+    # JIT C++ extensions require ninja.
+    shell("pip install --user ninja".split())
+    # ninja is installed in $HOME/.local/bin, e.g., /var/lib/jenkins/.local/bin for CI user jenkins
+    # but this script should be runnable by any user, including root
+    os_env["PATH"] = os_env.get("HOME", "") + "/.local/bin:" + os_env.get("PATH", "")
+
+if "asan" in BUILD_ENVIRONMENT:
+    # Suppress vptr violations arising from multiple copies of pybind11
+    os_env["ASAN_OPTIONS"] = "detect_leaks=0:symbolize=1:strict_init_order=true:detect_odr_violation=0"
+    os_env["UBSAN_OPTIONS"] = "print_stacktrace=1:suppressions=" + os_env.get("PWD", "") + "/ubsan.supp"
+    os_env["PYTORCH_TEST_WITH_ASAN"] = "1"
+    os_env["PYTORCH_TEST_WITH_UBSAN"] = "1"
+    # TODO: Figure out how to avoid hard-coding these paths
+    os_env["ASAN_SYMBOLIZER_PATH"] = "/usr/lib/llvm-7/bin/llvm-symbolizer"
+    os_env["TORCH_USE_RTLD_GLOBAL"] = "1"
+    # NB: We load libtorch.so with RTLD_GLOBAL for UBSAN, unlike our
+    # default behavior.
+    os_env["LD_PRELOAD"] = "/usr/lib/llvm-7/lib/clang/7.1.0/lib/linux/libclang_rt.asan-x86_64.so"
+
+if "-NO_AVX-" in BUILD_ENVIRONMENT or TEST_CONFIG == "nogpu_NO_AVX":
+    os_env["ATEN_CPU_CAPABILITY"] = "default"
+elif "-NO_AVX2-" in BUILD_ENVIRONMENT or TEST_CONFIG == "nogpu_NO_AVX2":
+    os_env["ATEN_CPU_CAPABILITY"] = "default"
+elif "-NO_AVX512-" in BUILD_ENVIRONMENT or TEST_CONFIG == "nogpu_NO_AVX512":
+    os_env["ATEN_CPU_CAPABILITY"] = "avx2"
+
+def print_to_stderr(message):
+    print(message, file=sys.stderr)
+
+def setup_test_aten():
+    if "asan" not in BUILD_ENVIRONMENT and "rocm" not in BUILD_ENVIRONMENT:
+        print_to_stderr("Setting up env for ATen tests")
+
+        if IN_WHEEL_TEST:
+            print_to_stderr("Using install folder")
+            # Rename the build folder when running test to ensure it
+            # is not depended on the folder
+            shutil.move(BUILD_DIR, BUILD_RENAMED_DIR)
+            TEST_BASE_DIR = TORCH_TEST_DIR
+        else:
+            print_to_stderr("Using build folder")
+            TEST_BASE_DIR = BUILD_BIN_DIR
+
+        os_env["LD_LIBRARY_PATH"] = f"{TORCH_LIB_DIR}:{os_env.get('LD_LIBRARY_PATH','')}"
+
+        if IN_WHEEL_TEST:
+            # Restore the build folder to avoid any impact on other tests
+            shutil.move(BUILD_RENAMED_DIR, BUILD_DIR)
+
+# Setup for ATen tests
+if BUILD_ENVIRONMENT.endswith("-test1") or JOB_BASE_NAME.endswith("-test1") or SHARD_NUMBER == "1":
+    setup_test_aten()
 
 try:
     # using tools/ to optimize test run.
@@ -120,6 +235,9 @@ TESTS = discover_tests(
     extra_tests=[
         "test_cpp_extensions_aot_ninja",
         "test_cpp_extensions_aot_no_ninja",
+        "cpp/c10d/FileStoreTest",
+        "cpp/c10d/HashStoreTest",
+        "cpp/c10d/TCPStoreTest",
         "distributed/elastic/timer/api_test",
         "distributed/elastic/timer/local_timer_example",
         "distributed/elastic/timer/local_timer_test",
@@ -131,6 +249,13 @@ TESTS = discover_tests(
         "distributed/elastic/multiprocessing/api_test",
     ]
 )
+
+# Migrated tests from test.sh. Run using subprocess.
+MIGRATED_CPP_TESTS = [
+    "cpp/c10d/FileStoreTest",
+    "cpp/c10d/HashStoreTest",
+    "cpp/c10d/TCPStoreTest",
+]
 
 # Tests need to be run with pytest.
 USE_PYTEST_LIST = [
@@ -286,6 +411,9 @@ JIT_EXECUTOR_TESTS = [
 ]
 
 DISTRIBUTED_TESTS = [
+    "cpp/c10d/FileStoreTest",
+    "cpp/c10d/HashStoreTest",
+    "cpp/c10d/TCPStoreTest",
     "distributed/test_data_parallel",
     "distributed/test_launcher",
     "distributed/nn/jit/test_instantiator",
@@ -351,10 +479,6 @@ SPECIFIED_TEST_CASES_DICT: Dict[str, List[str]] = {}
 # The file from which the SPECIFIED_TEST_CASES_DICT will be filled, a CSV of test cases that would be run when
 # options.run_specified_test_cases is enabled.
 SPECIFIED_TEST_CASES_FILE: str = ".pytorch_specified_test_cases.csv"
-
-
-def print_to_stderr(message):
-    print(message, file=sys.stderr)
 
 
 def get_test_case_args(test_module, using_pytest) -> List[str]:
@@ -922,6 +1046,32 @@ def run_test_module(test: str, test_directory: str, options) -> Optional[str]:
     return message
 
 
+def run_migrated_cpp_test(test: str):
+    print_to_stderr("Running {} ... [{}]".format(test, datetime.now()))
+    command = ""
+    if test in DISTRIBUTED_TESTS:
+        if "cuda" not in BUILD_ENVIRONMENT:
+            print_to_stderr("Skipping {} ... CUDA is not enabled".format(test))
+            return None
+
+        test_reports_dir = "test/test-reports/cpp-distributed/test_distributed"
+        os.makedirs(test_reports_dir, exist_ok=True)
+        os_env["LD_LIBRARY_PATH"] = f"{TORCH_LIB_DIR}:{os_env.get('LD_LIBRARY_PATH','')}"
+        test_name = test.split("/")[-1]
+        command = TORCH_BIN_DIR + "/" + test_name + " --gtest_output=xml:" + test_reports_dir + "/" + test_name + ".xml"
+
+    print_to_stderr("Executing {} ... [{}]".format(command, datetime.now()))
+    return_code = shell(command.split(), env=os_env)
+    if return_code == 0:
+        return None
+
+    message = f"{test} failed!"
+    if return_code < 0:
+        signal_name = SIGNALS_TO_NAMES_DICT[-return_code]
+        message += f" Received signal: {signal_name}"
+    return message
+
+
 def main():
     options = parse_args()
 
@@ -992,7 +1142,10 @@ def main():
             options_clone = copy.deepcopy(options)
             if test in USE_PYTEST_LIST:
                 options_clone.pytest = True
-            err_message = run_test_module(test, test_directory, options_clone)
+            if test in MIGRATED_CPP_TESTS:
+                err_message = run_migrated_cpp_test(test)
+            else:
+                err_message = run_test_module(test, test_directory, options_clone)
             if err_message is None:
                 continue
             has_failed = True
