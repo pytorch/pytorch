@@ -1405,7 +1405,7 @@ TEST(LoopNest, ScheduleSplitAThenInline) {
   LoopNest l({b}, {a, b});
   std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(a.buf()).at(0);
   LoopNest::splitWithMask(loops[0], 4);
-  ASSERT_THROWS_WITH(l.computeInline(a.buf()), "compound indices");
+  ASSERT_FALSE(l.computeInline(a.buf()));
 }
 
 // Split a Compute then inline another Compute into it.
@@ -1446,7 +1446,7 @@ TEST(LoopNest, ScheduleSplitTwiceThenInline) {
   std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(a.buf()).at(0);
   LoopNest::splitWithMask(loops[0], 4, &i_inner);
   LoopNest::splitWithMask(i_inner, 2);
-  ASSERT_THROWS_WITH(l.computeInline(a.buf()), "compound indices");
+  ASSERT_FALSE(l.computeInline(a.buf()));
 }
 
 // Inline a Compute, then split.
@@ -1511,7 +1511,7 @@ TEST(LoopNest, ScheduleSplitInlineSimplify) {
   LoopNest l({b}, {a, b});
   std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(a.buf()).at(0);
   LoopNest::splitWithMask(loops[0], 4);
-  ASSERT_THROWS_WITH(l.computeInline(a.buf()), "compound indices");
+  ASSERT_FALSE(l.computeInline(a.buf()));
 }
 
 // Inline a Compute with two consumers.
@@ -1622,7 +1622,7 @@ TEST(LoopNest, ScheduleInlineThreeMixedSplit) {
   loops = l.getAllLoopNestsWritingToBuf(c.buf()).at(0);
   LoopNest::splitWithMask(loops[0], 2);
 
-  ASSERT_THROWS_WITH(l.computeInline(a.buf()), "compound indices");
+  ASSERT_FALSE(l.computeInline(a.buf()));
 }
 
 // Check that inlining works for output tensors too
@@ -3593,9 +3593,7 @@ TEST(LoopNest, DetectInlineRankMismatch) {
       {{kTotalSize / 2, "i"}, {2, "j"}},
       [&](const VarHandle& i, const VarHandle& j) { return a.load(i, j); });
   LoopNest l({reshape}, {a, reshape});
-  ASSERT_THROWS_WITH(
-      l.computeInline(l.getLoopBodyFor(a)),
-      "Number of indices doesn't match buf rank in the fuser.");
+  ASSERT_FALSE(l.computeInline(l.getLoopBodyFor(a)));
 }
 
 TEST(LoopNest, CacheReadsSimple) {

@@ -551,39 +551,48 @@ class FunctionInliner : public IRMutator {
       } else if (intValue(i)) {
         // If the index can be a constant, then that dimension must have size 1
         // (since we don't support in-place writes). Resolves issue 52581.
-        TORCH_INTERNAL_ASSERT(
-            *intValue(i) == 0,
-            buildErrorMessage(
-                "Unexpected non-zero constant index in inlined buffer in the fuser."));
+        if (*intValue(i) != 0) {
+          success_ = false;
+        }
         producer_index_vars_.push_back(nullptr);
       } else {
-        throw std::logic_error("cannot inline Buf with compound indices");
+        // Cannot inline Buf with compound indices
+        success_ = false;
       }
     }
+  }
+
+  bool success() const {
+    return success_;
   }
 
  private:
   ExprPtr mutate_loads(BufPtr buf, std::vector<ExprPtr> dims) {
     std::vector<VarPtr> index_vars;
-    TORCH_INTERNAL_ASSERT(
-        buf->ndim() == producer_index_vars_.size(),
-        buildErrorMessage(
-            "Dimensions of producer and consumer expressions do not match in inliner in the fuser."));
+    if (buf->ndim() != producer_index_vars_.size()) {
+      // Dimensions of producer and consumer expressions do not match in inliner
+      // in the fuser
+      success_ = false;
+      return nullptr;
+    }
     for (const auto i : c10::irange(buf->ndim())) {
       VarPtr func_callee_arg = producer_index_vars_.at(i);
       ExprPtr func_caller_param = dims.at(i);
       if (func_callee_arg == nullptr) {
         auto param_val = evalInt(func_caller_param);
-        TORCH_INTERNAL_ASSERT(
-            param_val && *param_val == 0,
-            buildErrorMessage(
-                "We are implicitly assuming that if you have an index of 0, that must also be inlined into an index of 0"));
+        if (!param_val || *param_val != 0) {
+          // We are implicitly assuming that if you have an index of 0, that
+          // must also be inlined into an index of 0.
+          success_ = false;
+          return nullptr;
+        }
         continue;
       }
       auto iter = inline_mapping_.find(func_callee_arg);
       if (iter != inline_mapping_.end()) {
-        throw std::logic_error(
-            "Duplicated variables: " + func_callee_arg->name_hint());
+        // Duplicated variables
+        success_ = false;
+        return nullptr;
       }
       // Add a mapping for each function parameter to it's source name.
       inline_mapping_[func_callee_arg] = func_caller_param;
@@ -624,11 +633,18 @@ class FunctionInliner : public IRMutator {
       return IRMutator::mutate(v);
     }
 
-    TORCH_INTERNAL_ASSERT(
-        v->indices().size() == buf->ndim(),
-        buildErrorMessage(
-            "Number of indices doesn't match buf rank in the fuser."));
-    return mutate_loads(buf, v->indices());
+    if (v->indices().size() != buf->ndim()) {
+      // Number of indices doesn't match buf rank in the fuser
+      success_ = false;
+      return v;
+    }
+    auto result = mutate_loads(buf, v->indices());
+    if (!result) {
+      // If we don't inline successfully return the given load.
+      success_ = false;
+      return v;
+    }
+    return result;
   }
 
   // Replace the target variable with the caller expressions.
@@ -667,10 +683,11 @@ class FunctionInliner : public IRMutator {
     if (v == producer_ && !outputs_.count(buf_)) {
       in_producer_ = true;
       producer_ = to<Store>(IRMutator::mutate(v));
-      TORCH_INTERNAL_ASSERT(
-          producer_,
-          buildErrorMessage(
-              "Producer statement for output buf should remain non-null in the fuser"));
+      if (!producer_) {
+        // Producer statement for output buf should remain non-null in the fuser
+        success_ = false;
+        return v;
+      }
       in_producer_ = false;
       return nullptr;
     } else {
@@ -734,12 +751,14 @@ class FunctionInliner : public IRMutator {
   bool in_producer_ = false;
   std::unordered_map<LetPtr, std::unordered_set<VarPtr>> random_bindings_;
   std::unordered_set<BufPtr> outputs_;
+  bool success_ = true;
 };
 
 bool LoopNest::computeInline(StmtPtr s) {
   auto s_store = to<Store>(s);
   if (s_store == nullptr) {
-    throw std::logic_error("Could not find buffer producer to inline");
+    // Could not find buffer producer to inline
+    return false;
   }
   return computeInline(s_store->buf());
 }
@@ -772,16 +791,18 @@ bool LoopNest::computeInline(BufPtr b) {
     }
   }
 
-  TORCH_INTERNAL_ASSERT(
-      relevant_store,
-      buildErrorMessage(
-          "Cannot find a relevant store to inline a buf in the fuser."));
+  if (!relevant_store) {
+    // Cannot find a relevant store to inline a buf in the fuser
+    return false;
+  }
 
   GRAPH_DEBUG("ComputeInline: Def: ", std::to_string(relevant_store));
   FunctionInliner inliner(relevant_store, output_bufs_);
-  root_stmt_ = root_stmt_->accept_mutator(&inliner);
-
-  return true;
+  auto result = root_stmt_->accept_mutator(&inliner);
+  if (inliner.success()) {
+    root_stmt_ = result;
+  }
+  return inliner.success();
 }
 
 // inlining buffers with multiple uses can create duplicated work, which can
