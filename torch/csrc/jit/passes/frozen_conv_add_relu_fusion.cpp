@@ -1,5 +1,5 @@
-#include <ATen/Utils.h>
 #include <ATen/Config.h>
+#include <ATen/Utils.h>
 #include <torch/csrc/jit/frontend/code_template.h>
 #include <torch/csrc/jit/ir/constants.h>
 #include <torch/csrc/jit/ir/ir.h>
@@ -156,8 +156,8 @@ void fuseFrozenConvAddReluImpl_cpu(std::shared_ptr<Graph>& graph) {
       return false;
     }
     const at::Tensor& weight_t = weight.value().toTensor();
-    if (!(weight_t.device().is_cpu() && weight_t.scalar_type() == at::kFloat)
-        || !weight_t.is_contiguous()) {
+    if (!(weight_t.device().is_cpu() && weight_t.scalar_type() == at::kFloat) ||
+        !weight_t.is_contiguous()) {
       return false;
     }
 
