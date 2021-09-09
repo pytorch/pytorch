@@ -914,7 +914,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
     Node* node = frame.function->instructions_source_[frame.pc];
 
     return {
-        frame.pc, canonicalSchemaString(node->schema()), getHeader(node), node};
+      frame.pc, node->maybeSchema() ? canonicalSchemaString(node->schema()) : "no operator", getHeader(node), node};
   }
 
   c10::intrusive_ptr<Future> getOrCreateFuture() {

@@ -61,7 +61,7 @@ size_t findFirstOffset(
   return best_offset.value();
 }
 
-void makeAllocation(
+MemAllocation makeAllocation(
     UniqueLiveRange ulvr,
     size_t size,
     std::vector<MemAllocation>& ordered_allocations,
@@ -72,8 +72,10 @@ void makeAllocation(
   while (it != ordered_allocations.end() && it->reg.offset <= offset) {
     ++it;
   }
+  auto mem_alloc = MemAllocation{ulvr, MemRegion{offset, aligned_size}};
   ordered_allocations.insert(
-      it, MemAllocation{ulvr, MemRegion{offset, aligned_size}});
+      it, mem_alloc);
+  return mem_alloc;
 }
 
 } // namespace jit
