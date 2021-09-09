@@ -39,7 +39,7 @@ C10_DECLARE_int64(caffe2_max_keep_on_shrink_memory);
 namespace at {
 class Tensor;
 class TensorBase;
-}
+} // namespace at
 
 namespace c10 {
 class Scalar;
