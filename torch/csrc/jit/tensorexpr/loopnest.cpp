@@ -59,7 +59,7 @@ LoopNest::LoopNest(const std::vector<Tensor>& output_tensors) {
   verify(root_stmt_);
 }
 
-const std::unordered_set<BufPtr> LoopNest::getIntermediateBufs() const {
+std::unordered_set<BufPtr> LoopNest::getIntermediateBufs() const {
   std::unordered_set<BufPtr> result;
   auto input_bufs = getInputBufs();
   auto bufs = NodeFinder<Buf>::find(root_stmt_);
@@ -963,8 +963,17 @@ BlockPtr findLowestContainingBlock(const std::vector<BufLoadOrStoreUse>& uses) {
   return b;
 }
 
-StmtPtr LoopNest::insertAllocFree(StmtPtr stmt) {
-  auto intermediate_bufs = getIntermediateBufs();
+StmtPtr LoopNest::insertAllocFree(
+    StmtPtr stmt,
+    const c10::optional<std::unordered_set<BufPtr>>&
+        interm_bufs /* = c10::nullopt*/) {
+  std::unordered_set<BufPtr> intermediate_bufs;
+  if (interm_bufs) {
+    intermediate_bufs = *interm_bufs;
+  } else {
+    intermediate_bufs = getIntermediateBufs();
+  }
+
   if (intermediate_bufs.size() == 0ULL) {
     return stmt;
   }
@@ -1041,7 +1050,9 @@ void LoopNest::eliminateDeadStores() {
   root_stmt_ = root_stmt_->accept_mutator(&deleter);
 }
 
-void LoopNest::prepareForCodegen() {
+void LoopNest::prepareForCodegen(
+    const c10::optional<std::unordered_set<BufPtr>>&
+        interm_bufs /*= c10::nullopt*/) {
   // Expand reduction ops.
   ReductionExpander reduceExpander;
   root_stmt_ = reduceExpander.expand(root_stmt_);
@@ -1049,7 +1060,7 @@ void LoopNest::prepareForCodegen() {
   root_stmt_ = FlattenIndexes(root_stmt_);
 
   // Add allocs and frees for intermediate buffers at the global level.
-  root_stmt_ = insertAllocFree(root_stmt_);
+  root_stmt_ = insertAllocFree(root_stmt_, interm_bufs);
 }
 
 namespace {
