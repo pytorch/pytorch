@@ -10,6 +10,9 @@ class PostLocalSGDState(object):
     r"""
     Stores the state for all-reducing gradients globally using ``process_group`` until step ``start_localSGD_iter``,
     and all-reducing gradients locally using ``subgroup`` afterwards.
+
+    If ``process_group`` is ``None``, the global process group will be used.
+    If ``subgroup`` is ``None``, the intra-node process group on each machine will be used.
     """
 
     __slots__ = [
@@ -91,4 +94,6 @@ def post_localSGD_hook(
     # Run allreduce using `subgroup` after the first `start_localSGD_iter` iterations.
     # From this moment, model averaging should run after the optimizer step,
     # to globally allreduce all the parameters.
+    if state.subgroup is None:
+        state.subgroup, _ = dist.new_subgroups()
     return default._allreduce_fut(state.subgroup, input_tensor)

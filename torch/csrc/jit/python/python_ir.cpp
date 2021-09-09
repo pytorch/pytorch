@@ -759,11 +759,16 @@ void initPythonIRBindings(PyObject* module_) {
           })
       .def(
           "with_sizes",
-          [](Type& t, std::vector<c10::optional<int64_t>> sizes) -> py::object {
-            if (auto ptt = t.expect<TensorType>()) {
-              return py::cast(ptt->withSymbolicShapes(sizes));
+          [](Type& t, c10::optional<std::vector<c10::optional<int64_t>>> sizes)
+              -> py::object {
+            auto ptt = t.expect<TensorType>();
+            if (!ptt) {
+              return py::none();
             }
-            return py::none();
+            if (!sizes) {
+              return py::cast(ptt->withSymbolicShapes(c10::SymbolicShape()));
+            }
+            return py::cast(ptt->withSymbolicShapes(*sizes));
           })
       .def(
           "varyingSizes",
@@ -863,6 +868,12 @@ void initPythonIRBindings(PyObject* module_) {
           types.push_back(type);
         }
         return types;
+      });
+  py::class_<UnionType, Type, std::shared_ptr<UnionType>>(m, "UnionType")
+      .def(py::init(
+          [](const std::vector<TypePtr>& a) { return UnionType::create(a); }))
+      .def("containedTypes", [](UnionType& self) {
+        return self.containedTypes().vec();
       });
   py::class_<ListType, Type, std::shared_ptr<ListType>>(m, "ListType")
       .def(py::init([](TypePtr a) { return ListType::create(a); }))
