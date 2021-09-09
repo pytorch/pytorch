@@ -755,6 +755,42 @@ bool LoopNest::computeInline(BufPtr b) {
     }
   }
 
+  // This is a hack and we should instead not throw exceptions in compute-inline
+  bool failed = false;
+  try {
+    auto t = Stmt::clone(root_stmt_);
+    StorePtr relevant_store{nullptr};
+    auto stores = NodeFinder<Store>::find(t);
+    for (auto s : stores) {
+      if (s->buf() == b) {
+        auto reductions = NodeFinder<ReduceOp>::find(s);
+        if (!reductions.empty()) {
+          // Cannot inline a reduction computation
+          return false;
+        }
+        if (relevant_store != nullptr) {
+          // Cannot inline Buf with multiple Tensors
+          return false;
+        }
+        relevant_store = s;
+      }
+    }
+    TORCH_INTERNAL_ASSERT(
+        relevant_store,
+        buildErrorMessage(
+            "Cannot find a relevant store to inline a buf in the fuser."));
+
+    GRAPH_DEBUG("ComputeInline: Def: ", std::to_string(relevant_store));
+    FunctionInliner inliner(relevant_store, output_bufs_);
+    t = t->accept_mutator(&inliner);
+  } catch (...) {
+    failed = true;
+  }
+
+  if (failed) {
+    return false;
+  }
+
   // Find producers.
   StorePtr relevant_store{nullptr};
   auto stores = NodeFinder<Store>::find(root_stmt_);
@@ -3251,6 +3287,215 @@ bool LoopNest::rfactor(
       alloc<Store>(rfac_buf, rfac_buf_indices, rfac_init),
       first_reduction_loop);
   return true;
+}
+
+void LoopNest::randomTransform(int64_t seed) {
+  std::srand(seed);
+  int n_transforms = std::rand() % 30;
+  std::string history = "";
+  // clang-format off
+  //   Transformations list:
+  //
+  //       StmtPtr simplify();
+  //       bool computeInline(BufPtr b);
+  //       void inlineIntermediateBufs(bool allow_duplicated_work);
+  //       bool optimizeConditionals();
+  //       static void splitWithTail(ForPtr f, int factor);
+  //       static void splitWithMask(ForPtr f, int factor);
+  //       static std::vector<ForPtr> distributeLoop(ForPtr loop, const std::unordered_set<StmtPtr>& pivots);
+  //       static std::vector<ForPtr> distributeLoop(ForPtr loop);
+  //       static std::vector<ForPtr> distributeLoopAndParents(ForPtr loop);
+  //       static std::vector<ForPtr> distributeLoopOverInnerLoops(ForPtr loop);
+  //       static std::vector<ForPtr> distributeLoopAndParentsOverInnerLoops(ForPtr loop);
+  //       static bool fuseLoops(const std::vector<ForPtr>& loops, ForPtr* fused);
+  //       static void reorderAxis(ForPtr a, ForPtr b);
+  //       static std::vector<ForPtr> reorder(const std::vector<ForPtr>& loops, const std::vector<size_t>& permutation);
+  //       ForPtr tile(ForPtr x, ForPtr y, int x_factor, int y_factor);
+  //       static void unroll(ForPtr f);
+  //       static bool normalize(ForPtr f);
+  //       static bool flatten(const std::vector<ForPtr>& f, ForPtr* flattened);
+  //       static void compressBuffer(BufPtr buf, StmtPtr stmt);
+  //       static void compressAllBuffers(StmtPtr stmt);
+  //       static void sliceHead(ForPtr f, int factor, ForPtr* head, ForPtr* tail);
+  //       static void sliceHead(ForPtr f, int factor);
+  //       static void sliceTail(ForPtr f, int factor, ForPtr* head, ForPtr* tail);
+  //       static void sliceTail(ForPtr f, int factor);
+  //       static AccessResult cacheAccesses(BufPtr producer, const std::string& name, StmtPtr consumer);
+  //       static void computeAt(StmtPtr s, ForPtr at);
+  //       static bool rfactor(StmtPtr s, ForPtr outer_reduction_for);
+  //       static bool vectorize(ForPtr);
+  //       void vectorizeInnerLoops();
+  //       void eliminateDeadStores();
+  //       void prepareForCodegen();
+  // clang-format on
+  enum TransformKind {
+    SIMPLIFY = 0,
+    COMPUTE_INLINE,
+    INLINE_ALL,
+    OPT_COND,
+    SPLIT_TAIL,
+    SPLIT_MASK,
+    DIST1,
+    DIST2,
+    DIST3,
+    DIST4,
+    DIST5,
+    MAX_TRANSFORM
+  };
+  bool no_more_inlining = false;
+  try {
+    for (int i = 0; i < n_transforms; i++) {
+      int transform = std::rand() % MAX_TRANSFORM;
+      switch (transform) {
+        case SIMPLIFY: {
+          simplify();
+          history += "simplify\n";
+          break;
+        }
+        case COMPUTE_INLINE: {
+          if (!no_more_inlining) {
+            auto bufs = NodeFinder<Buf>::find(root_stmt_);
+            if (bufs.size() > 0) {
+              int buf_number = std::rand() % bufs.size();
+              computeInline(bufs[buf_number]);
+              history +=
+                  "compute_inline " + bufs[buf_number]->name_hint() + "\n";
+            }
+          }
+          break;
+        }
+        case INLINE_ALL: {
+          if (!no_more_inlining) {
+            int allow_dup = std::rand() % 2;
+            inlineIntermediateBufs(allow_dup);
+            history +=
+                "inlineIntermediateBufs(" + std::to_string(allow_dup) + ")\n";
+            no_more_inlining = true;
+          }
+          break;
+        }
+        case OPT_COND: {
+          optimizeConditionals();
+          history += "optimizeConditionals\n";
+          break;
+        }
+        case SPLIT_TAIL: {
+          auto loops = NodeFinder<For>::find(root_stmt_);
+          if (loops.size() == 0) {
+            break;
+          }
+          int loop_n = std::rand() % loops.size();
+          auto loop = loops[loop_n];
+          int factor = std::rand() % 20 + 1;
+          splitWithTail(loop, factor);
+          history += "splitWithTail(loops[" + std::to_string(loop_n) + "], " +
+              std::to_string(factor) + ")\n";
+          break;
+        }
+        case SPLIT_MASK: {
+          auto loops = NodeFinder<For>::find(root_stmt_);
+          if (loops.size() == 0) {
+            break;
+          }
+          int loop_n = std::rand() % loops.size();
+          auto loop = loops[loop_n];
+          int factor = std::rand() % 20 + 1;
+          splitWithMask(loop, factor);
+          history += "splitWithMask(loops[" + std::to_string(loop_n) + "], " +
+              std::to_string(factor) + ")\n";
+          break;
+        }
+        case DIST1: {
+          // TODO: Fix infinite loop somewhere in the code below and reenable
+#if 0
+        auto loops = NodeFinder<For>::find(root_stmt_);
+        if (loops.size() == 0) {
+          break;
+        }
+        int loop_n = std::rand() % loops.size();
+        auto loop = loops[loop_n];
+        std::vector<StmtPtr> stmts(loop->body()->stmts().begin(), loop->body()->stmts().end());
+        int n_pivots = std::rand() % stmts.size();
+        std::unordered_set<StmtPtr> pivots;
+        if (stmts.size() == 0) {
+          break;
+        }
+        for (int j = 0; j < n_pivots; j++) {
+          int stmt_n = std::rand() % stmts.size();
+          pivots.insert(stmts[stmt_n]);
+        }
+        distributeLoop(loop, pivots);
+        history += "distributeLoop(loops[" + std::to_string(loop_n) + "], pivots_num=" + std::to_string(n_pivots) + ")\n";
+#endif
+          break;
+        }
+        case DIST2: {
+          auto loops = NodeFinder<For>::find(root_stmt_);
+
+          if (loops.size() == 0) {
+            break;
+          }
+          int loop_n = std::rand() % loops.size();
+          auto loop = loops[loop_n];
+
+          distributeLoop(loop);
+          history += "distributeLoop(loops[" + std::to_string(loop_n) + "])\n";
+          break;
+        }
+        case DIST3: {
+          auto loops = NodeFinder<For>::find(root_stmt_);
+
+          if (loops.size() == 0) {
+            break;
+          }
+          int loop_n = std::rand() % loops.size();
+          auto loop = loops[loop_n];
+
+          distributeLoopAndParents(loop);
+          history += "distributeLoopAndParents(loops[" +
+              std::to_string(loop_n) + "])\n";
+          break;
+        }
+        case DIST4: {
+          auto loops = NodeFinder<For>::find(root_stmt_);
+
+          if (loops.size() == 0) {
+            break;
+          }
+          int loop_n = std::rand() % loops.size();
+          auto loop = loops[loop_n];
+
+          distributeLoopOverInnerLoops(loop);
+          history += "distributeLoopOverInnerLoops(loops[" +
+              std::to_string(loop_n) + "])\n";
+          break;
+        }
+        case DIST5: {
+          auto loops = NodeFinder<For>::find(root_stmt_);
+
+          if (loops.size() == 0) {
+            break;
+          }
+          int loop_n = std::rand() % loops.size();
+          auto loop = loops[loop_n];
+
+          distributeLoopAndParentsOverInnerLoops(loop);
+          history += "distributeLoopAndParentsOverInnerLoops(loops[" +
+              std::to_string(loop_n) + "])\n";
+          break;
+        }
+          // TODO: Add remaining transforms
+        default:
+          break;
+      }
+    }
+  } catch (...) {
+    std::cout << "EXCEPTION THROWN!\n";
+    std::cout << "SEED: " << seed << "\n" << history;
+  }
+  GRAPH_DEBUG("SEED: ", seed, "\n", history);
+
+  return;
 }
 
 } // namespace tensorexpr
