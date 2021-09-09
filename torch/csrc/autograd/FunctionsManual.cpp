@@ -4027,15 +4027,15 @@ Tensor _lu_with_info_forward_AD(
   auto n = LU.size(-1);
   auto k = std::min(m, n);
 
-  auto dpX = P.transpose(-1, -2).matmul(dX);
+  auto pdX = P.transpose(-1, -2).matmul(dX);
 
-  auto dpX1 = dpX.narrow(-2, 0, k).narrow(-1, 0, k);
+  auto pdX1 = pdX.narrow(-2, 0, k).narrow(-1, 0, k);
   auto L1 = L.narrow(-2, 0, k).narrow(-1, 0, k);
   auto U1 = U.narrow(-2, 0, k).narrow(-1, 0, k);
 
-  // dK = L1^{-1} dpX1
+  // dK = L1^{-1} pdX1
   auto dK = std::get<0>(at::triangular_solve(
-    dpX1,
+    pdX1,
     L1,
     /*upper=*/false,
     /*transpose=*/false,
@@ -4060,10 +4060,10 @@ Tensor _lu_with_info_forward_AD(
     dLU.narrow(-2, 0, k).narrow(-1, 0, k).copy_(dU1 + dL1);
 
     if (m < n) {
-      auto dpX2 = dpX.narrow(-1, k, n - k);
+      auto pdX2 = pdX.narrow(-1, k, n - k);
       auto U2 = U.narrow(-1, k, n - k);
       dLU.narrow(-1, k, n - k).copy_(std::get<0>(at::triangular_solve(
-        dpX2 - dL1.matmul(U2),
+        pdX2 - dL1.matmul(U2),
         L1,
         /*upper=*/false,
         /*transpose=*/false,
@@ -4071,10 +4071,10 @@ Tensor _lu_with_info_forward_AD(
       )));
     }
     else {
-      auto dpX2 = dpX.narrow(-2, k, m - k);
+      auto pdX2 = pdX.narrow(-2, k, m - k);
       auto L2 = L.narrow(-2, k, m - k);
       dLU.narrow(-2, k, m - k).copy_(std::get<0>(at::triangular_solve(
-        (dpX2 - L2.matmul(dU1)).transpose(-1, -2),
+        (pdX2 - L2.matmul(dU1)).transpose(-1, -2),
         U1,
         /*upper=*/true,
         /*transpose=*/true
