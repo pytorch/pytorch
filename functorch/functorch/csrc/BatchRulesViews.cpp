@@ -254,8 +254,15 @@ std::tuple<Tensor, optional<int64_t>> squeeze_dim_batch_rule(const Tensor& self,
   }
 }
 
+std::tuple<std::vector<Tensor>, optional<int64_t>> chunk_batching_rule(const Tensor& self, optional<int64_t> self_bdim, int64_t chunks, int64_t dim) {
+  auto self_ = moveBatchDimToFront(self, self_bdim);
+  int64_t new_dim = getPhysicalDim(self, self_bdim.has_value(), dim);
+  return std::make_tuple(at::chunk(self_, chunks, new_dim), 0);
+}
+
 TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   VMAP_SUPPORT("diag", diag_batch_rule);
+  VMAP_SUPPORT("chunk", chunk_batching_rule);
   m.impl("flatten.using_ints", static_cast<decltype(&ATEN_FN2(flatten, using_ints))>(native::flatten));
   VMAP_SUPPORT("flip", flip_batch_rule);
   m.impl("trace", trace_decomp);
