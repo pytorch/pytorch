@@ -281,8 +281,8 @@ std::unordered_set<std::string> BytecodeDeserializer::
       num_args = op_item[2].toInt();
     }
     auto op_found = function->append_operator(
-        *op_item[0].toString(),
-        *op_item[1].toString(),
+        op_item[0].toString()->string(),
+        op_item[1].toString()->string(),
         num_args,
         model_version,
         operator_cache);
@@ -309,8 +309,8 @@ class OpCodeCache {
  private:
   // We store as void* to emphasize that we care only about the
   // address and should not be dereferencing these pointers.
-  std::array<const void*, numOpcodes> keys_;
-  std::array<OpCode, numOpcodes> values_;
+  std::array<const void*, numOpcodes> keys_{};
+  std::array<OpCode, numOpcodes> values_{};
   size_t usedEntries_ = 0;
 
  public:
