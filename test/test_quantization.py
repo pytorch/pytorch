@@ -23,6 +23,7 @@ from quantization.core.test_quantized_op import TestDynamicQuantizedRNNOp  # noq
 # 2. Quantized Functional/Workflow Ops
 from quantization.core.test_quantized_functional import TestQuantizedFunctionalOps  # noqa: F401
 from quantization.core.test_workflow_ops import TestFakeQuantizeOps  # noqa: F401
+from quantization.core.test_workflow_ops import TestFusedObsFakeQuant  # noqa: F401
 # 3. Quantized Tensor
 from quantization.core.test_quantized_tensor import TestQuantizedTensor  # noqa: F401
 # 4. Modules
@@ -33,6 +34,7 @@ from quantization.core.test_quantized_module import TestDynamicQuantizedModule  
 from quantization.core.test_workflow_module import TestRecordHistogramObserver  # noqa: F401
 from quantization.core.test_workflow_module import TestHistogramObserver  # noqa: F401
 from quantization.core.test_workflow_module import TestDistributed  # noqa: F401
+from quantization.core.test_workflow_module import TestFusedObsFakeQuantModule  # noqa: F401
 
 
 # Eager Mode Workflow. Tests for the functionality of APIs and different features implemented
@@ -97,6 +99,9 @@ from quantization.jit.test_quantize_jit import TestQuantizeDynamicJitOps  # noqa
 # Quantization specific fusion passes
 from quantization.jit.test_fusion_passes import TestFusionPasses  # noqa: F401
 from quantization.jit.test_deprecated_jit_quant import TestDeprecatedJitQuantized  # noqa: F401
+
+# AO Migration tests
+from quantization.ao_migration.test_quantize import TestAOMigrationQuantizePy  # noqa: F401
 
 
 if __name__ == '__main__':

@@ -194,7 +194,7 @@ TORCH_META_FUNC(fmin) (const Tensor& self, const Tensor& other) {
     build_binary_op(maybe_get_output(), self, other);
 }
 
-void comparison_op_check(const Tensor& self, const Tensor& other) {
+void comparison_op_check(const Tensor& self, const Tensor& other, const Tensor& result) {
   // Validate that is possible to convert zero-dim tensor's dtype to other dtype
   // without overflow
   if (self.scalar_type() != other.scalar_type()) {
@@ -204,12 +204,20 @@ void comparison_op_check(const Tensor& self, const Tensor& other) {
       native::check_convert(self.item(), other.scalar_type());
     }
   }
+  // In-place operation To avoid overflow during type promotion we will check that
+  // both dtypes of self and other are same
+  if (result.is_same(self)) {
+    TORCH_CHECK(self.dtype() == other.dtype(),
+                "Expected object of scalar type ", self.dtype(), " but got scalar type ",
+                other.dtype(), " for argument 'other'");
+  }
 }
 
 #define CREATE_COMPARISON_SCALAR_TENSOR_META_FUNC(func)                     \
   TORCH_META_FUNC2(func, Tensor)(const Tensor& self, const Tensor& other) { \
-    comparison_op_check(self, other);                                       \
-    build_comparison_op(maybe_get_output(), self, other);                   \
+    const Tensor& result = maybe_get_output();                              \
+    comparison_op_check(self, other, result);                               \
+    build_comparison_op(result, self, other);                               \
   }                                                                         \
                                                                             \
   TORCH_META_FUNC2(func, Scalar)(const Tensor& self, const Scalar& other) { \
@@ -230,89 +238,47 @@ CREATE_COMPARISON_SCALAR_TENSOR_META_FUNC(ge);
 
 namespace native {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(add_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(add_clamp_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(sub_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(mul_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(div_true_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(div_floor_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(div_trunc_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(remainder_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(atan2_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(bitwise_and_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(bitwise_or_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(bitwise_xor_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(lshift_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(rshift_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(logical_and_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(logical_or_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(logical_xor_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(lt_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(le_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(gt_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(ge_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(eq_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(ne_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(sigmoid_backward_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(logit_backward_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(tanh_backward_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(maximum_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(minimum_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(fmax_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(fmin_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(fmod_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(logaddexp_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(logaddexp2_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(gcd_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(lcm_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(hypot_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(igamma_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(igammac_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(nextafter_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(heaviside_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(copysign_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(xlogy_stub);
 DEFINE_DISPATCH(xlog1py_stub);
 DEFINE_DISPATCH(zeta_stub);
@@ -427,6 +393,22 @@ Tensor& special_zeta_out(const Scalar& self, const Tensor& other, Tensor& result
 
 Tensor& special_zeta_out(const Tensor& self, const Scalar& other, Tensor& result) {
   return at::special_zeta_out(result, self, wrapped_scalar_tensor(other));
+}
+
+Tensor& special_gammainc_out(const Tensor& self, const Tensor& other, Tensor& result) {
+  return at::igamma_out(result, self, other);
+}
+
+Tensor special_gammainc(const Tensor& self, const Tensor& other) {
+  return at::igamma(self, other);
+}
+
+Tensor& special_gammaincc_out(const Tensor& self, const Tensor& other, Tensor& result) {
+  return at::igammac_out(result, self, other);
+}
+
+Tensor special_gammaincc(const Tensor& self, const Tensor& other) {
+  return at::igammac(self, other);
 }
 
 TORCH_IMPL_FUNC(atan2_out) (const Tensor& self, const Tensor& other, const Tensor& result) {

@@ -370,7 +370,9 @@ def serialize_module(fx_module: GraphModule, weights: Dict, name_prefix="") -> D
                 # For quantized embedding tables we need to update the shape/type,
                 # so we check if the users of this get_attr is a quantized EB and this is the weight for the EB.
                 user_targets = {
-                    _get_qualified_name(n.target).replace("glow.fb.fx.", ""): n
+                    _get_qualified_name(
+                        n.target
+                    ).replace("torch.fx.experimental.fx_acc.", "").replace("glow.fb.fx.", ""): n
                     for n in node.users.keys()
                 }
                 if (
@@ -383,6 +385,17 @@ def serialize_module(fx_module: GraphModule, weights: Dict, name_prefix="") -> D
                     == stripped_name
                 ):
                     weight[stripped_name]["dtype"] = "acc.uint8fused"
+                # Same as above, but for the 4 bit version.
+                if (
+                    "acc_ops.embedding_bag_4bit_rowwise_offsets" in user_targets
+                    and str(
+                        user_targets[
+                            "acc_ops.embedding_bag_4bit_rowwise_offsets"
+                        ].kwargs["weight"]
+                    )
+                    == stripped_name
+                ):
+                    weight[stripped_name]["dtype"] = "acc.uint4fused"
 
                 serialized_dict["weights"].update(weight)
             else:
@@ -410,7 +423,7 @@ def serialize_module(fx_module: GraphModule, weights: Dict, name_prefix="") -> D
         def get_arg_info(arg: Argument) -> Any:
             if isinstance(arg, torch.fx.Node):
                 return {"is_node": True, "name": str(arg)}
-            elif isinstance(arg, torch.dtype):
+            elif isinstance(arg, (torch.dtype, torch.memory_format, torch.qscheme)):
                 return str(arg)
             else:
                 return arg

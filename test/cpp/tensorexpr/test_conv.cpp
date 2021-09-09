@@ -21,7 +21,6 @@ static at::Tensor genTestData(c10::IntArrayRef args) {
 #ifdef TORCH_ENABLE_LLVM
 
 TEST(Conv, DepthwiseConv2D) {
-  te::KernelScope kernel_scope;
   constexpr int N = 1, C = 72, H = 56, W = 56;
   constexpr int K = 72, R = 3, S = 3;
   constexpr int kPad = 1, kStride = 2, kGroups = C;
@@ -30,7 +29,7 @@ TEST(Conv, DepthwiseConv2D) {
   te::Placeholder input("input", te::kFloat, {N, C, H, W});
   te::Placeholder weight("weight", te::kFloat, {K, CperG, R, S});
   te::Placeholder bias("bias", te::kFloat, {K});
-  te::Tensor* output = te::conv2d_depthwise(
+  te::Tensor output = te::conv2d_depthwise(
       input.handle(), weight.handle(), bias.handle(), kStride, kPad, kGroups);
 
   te::LoopNest loop({output});
@@ -53,7 +52,6 @@ TEST(Conv, DepthwiseConv2D) {
 }
 
 TEST(Conv, DepthwiseConv2DNoBias) {
-  te::KernelScope kernel_scope;
   constexpr int N = 1, C = 72, H = 56, W = 56;
   constexpr int K = 72, R = 3, S = 3;
   constexpr int kPad = 1, kStride = 2, kGroups = C;
@@ -61,7 +59,7 @@ TEST(Conv, DepthwiseConv2DNoBias) {
 
   te::Placeholder input("input", te::kFloat, {N, C, H, W});
   te::Placeholder weight("weight", te::kFloat, {K, CperG, R, S});
-  te::Tensor* output = te::conv2d_depthwise(
+  te::Tensor output = te::conv2d_depthwise(
       input.handle(), weight.handle(), kStride, kPad, kGroups);
 
   te::LoopNest loop({output});
@@ -80,7 +78,6 @@ TEST(Conv, DepthwiseConv2DNoBias) {
 }
 
 TEST(Conv, DepthwiseConv2DDynamicShapes) {
-  te::KernelScope kernel_scope;
   te::VarHandle N_var("N", te::kInt);
   te::VarHandle C_var("C", te::kInt);
   te::VarHandle H_var("H", te::kInt);
@@ -96,7 +93,7 @@ TEST(Conv, DepthwiseConv2DDynamicShapes) {
   te::Placeholder input("input", te::kFloat, {N_var, C_var, H_var, W_var});
   te::Placeholder weight(
       "weight", te::kFloat, {K_var, CperG_var, R_var, S_var});
-  te::Tensor* output = te::conv2d_depthwise(
+  te::Tensor output = te::conv2d_depthwise(
       input.handle(),
       weight.handle(),
       N_var,
@@ -163,10 +160,7 @@ TEST(Conv, DepthwiseConv2DDynamicShapes) {
 
 #endif
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Conv, Conv2D) {
-  te::KernelScope kernel_scope;
-
   // Input dimensions.
   constexpr int N = 1;
   constexpr int C = 3;
@@ -196,7 +190,7 @@ TEST(Conv, Conv2D) {
   te::Placeholder inputB(te::BufHandle("input", {N, C, H, W}, te::kFloat));
   te::Placeholder filterB(te::BufHandle("filter", {K, C, R, S}, te::kFloat));
 
-  te::Tensor* conv = te::Reduce(
+  te::Tensor conv = te::Reduce(
       "conv",
       {{N, "n"}, {K, "k"}, {OH, "oh"}, {OW, "ow"}},
       te::Sum(),
@@ -224,7 +218,7 @@ TEST(Conv, Conv2D) {
   // LoopNest, IRSimplifier, etc.
   te::LoopNest loop({conv});
   loop.prepareForCodegen();
-  te::Stmt* s = loop.root_stmt();
+  te::StmtPtr s = loop.root_stmt();
   s = te::IRSimplifier::simplify(s);
 
   at::Tensor result = at::empty_like(ref);

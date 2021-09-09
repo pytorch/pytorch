@@ -1,5 +1,5 @@
 from io import IOBase
-from typing import Tuple
+from typing import Sized, Tuple
 from urllib.error import HTTPError, URLError
 import urllib.request as urllib
 from torch.utils.data import IterDataPipe
@@ -10,16 +10,18 @@ class HTTPReaderIterDataPipe(IterDataPipe[Tuple[str, IOBase]]):
 
     Iterable DataPipe to load file url(s) (http url(s) pointing to file(s)),
     yield file url and IO stream in a tuple
-    args:
-        timeout : timeout for http request
+
+    Args:
+        datapipe: Iterable DataPipe providing urls
+        timeout: Timeout for http request
     """
 
-    def __init__(self, source_datapipe, timeout=None):
-        self.source_datapipe = source_datapipe
+    def __init__(self, datapipe, timeout=None):
+        self.datapipe = datapipe
         self.timeout = timeout
 
     def __iter__(self):
-        for furl in self.source_datapipe:
+        for furl in self.datapipe:
             try:
                 if self.timeout is None:
                     r = urllib.urlopen(furl)
@@ -37,3 +39,8 @@ class HTTPReaderIterDataPipe(IterDataPipe[Tuple[str, IOBase]]):
                                 .format(reason=e.reason, url=furl))
             except Exception:
                 raise
+
+    def __len__(self) -> int:
+        if isinstance(self.datapipe, Sized):
+            return len(self.datapipe)
+        raise TypeError("{} instance doesn't have valid length".format(type(self).__name__))

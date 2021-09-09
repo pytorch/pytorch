@@ -1,7 +1,7 @@
 
 #pragma once
-#include <ATen/cpu/vec/vec256/intrinsics.h>
-#include <ATen/cpu/vec/vec256/vec256_base.h>
+#include <ATen/cpu/vec/intrinsics.h>
+#include <ATen/cpu/vec/vec_base.h>
 #include <ATen/cpu/vec/vec256/vsx/vsx_helpers.h>
 #include <c10/util/complex.h>
 
@@ -196,7 +196,7 @@ class Vectorized<ComplexFlt> {
           vec_vsx_ld(offset16, reinterpret_cast<const float*>(ptr))};
     }
 
-    __at_align32__ value_type tmp_values[size()];
+    __at_align__ value_type tmp_values[size()];
     std::memcpy(tmp_values, ptr, std::min(count, size()) * sizeof(value_type));
 
     return {
@@ -209,7 +209,7 @@ class Vectorized<ComplexFlt> {
       vec_vsx_st(_vec0, offset0, reinterpret_cast<float*>(ptr));
       vec_vsx_st(_vec1, offset16, reinterpret_cast<float*>(ptr));
     } else if (count > 0) {
-      __at_align32__ value_type tmp_values[size()];
+      __at_align__ value_type tmp_values[size()];
       vec_vsx_st(_vec0, offset0, reinterpret_cast<float*>(tmp_values));
       vec_vsx_st(_vec1, offset16, reinterpret_cast<float*>(tmp_values));
       std::memcpy(
@@ -221,7 +221,7 @@ class Vectorized<ComplexFlt> {
   ComplexFlt& operator[](int idx) = delete;
 
   Vectorized<ComplexFlt> map(ComplexFlt (*const f)(ComplexFlt)) const {
-    __at_align32__ ComplexFlt tmp[size()];
+    __at_align__ ComplexFlt tmp[size()];
     store(tmp);
     for (int i = 0; i < size(); i++) {
       tmp[i] = f(tmp[i]);
@@ -230,7 +230,7 @@ class Vectorized<ComplexFlt> {
   }
 
   Vectorized<ComplexFlt> map(ComplexFlt (*const f)(const ComplexFlt&)) const {
-    __at_align32__ ComplexFlt tmp[size()];
+    __at_align__ ComplexFlt tmp[size()];
     store(tmp);
     for (int i = 0; i < size(); i++) {
       tmp[i] = f(tmp[i]);
@@ -434,8 +434,8 @@ class Vectorized<ComplexFlt> {
   }
 
   Vectorized<ComplexFlt> pow(const Vectorized<ComplexFlt>& exp) const {
-    __at_align32__ ComplexFlt x_tmp[size()];
-    __at_align32__ ComplexFlt y_tmp[size()];
+    __at_align__ ComplexFlt x_tmp[size()];
+    __at_align__ ComplexFlt y_tmp[size()];
     store(x_tmp);
     exp.store(y_tmp);
     for (int i = 0; i < size(); i++) {

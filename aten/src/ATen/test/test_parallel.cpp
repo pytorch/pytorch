@@ -8,6 +8,10 @@
 // NOLINTNEXTLINE(modernize-deprecated-headers)
 #include <string.h>
 #include <sstream>
+#ifdef TH_BLAS_MKL
+#include <mkl.h>
+#include <thread>
+#endif
 
 struct NumThreadsGuard {
   int old_num_threads_;
@@ -23,7 +27,6 @@ struct NumThreadsGuard {
 
 using namespace at;
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TestParallel, TestParallel) {
   manual_seed(123);
   NumThreadsGuard guard(1);
@@ -39,7 +42,6 @@ TEST(TestParallel, TestParallel) {
   ASSERT_TRUE(a.sum(0).equal(as));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TestParallel, NestedParallel) {
   Tensor a = ones({1024, 1024});
   auto expected = a.sum();
@@ -51,7 +53,18 @@ TEST(TestParallel, NestedParallel) {
   });
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+#ifdef TH_BLAS_MKL
+TEST(TestParallel, LocalMKLThreadNumber) {
+  auto master_thread_num = mkl_get_max_threads();
+  auto f = [](int nthreads){
+    set_num_threads(nthreads);
+  };
+  std::thread t(f, 1);
+  t.join();
+  ASSERT_EQ(master_thread_num, mkl_get_max_threads());
+}
+#endif
+
 TEST(TestParallel, NestedParallelThreadId) {
   // check that thread id within a nested parallel block is accurate
   at::parallel_for(0, 10, 1, [&](int64_t begin, int64_t end) {
@@ -75,7 +88,6 @@ TEST(TestParallel, NestedParallelThreadId) {
   });
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TestParallel, Exceptions) {
   // parallel case
   // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
@@ -94,7 +106,6 @@ TEST(TestParallel, Exceptions) {
     std::runtime_error);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TestParallel, IntraOpLaunchFuture) {
   int v1 = 0;
   int v2 = 0;

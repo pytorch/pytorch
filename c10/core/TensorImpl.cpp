@@ -6,13 +6,11 @@
 #include <c10/core/impl/LocalDispatchKeySet.h>
 #include <c10/util/Optional.h>
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_bool(
     caffe2_keep_on_shrink,
     true,
     "If set, keeps memory when a tensor is shrinking its size.");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_int64(
     caffe2_max_keep_on_shrink_memory,
     LLONG_MAX,
@@ -85,8 +83,9 @@ const at::Tensor& TensorImpl::grad() const {
   return autograd_meta_->grad();
 }
 
-const at::Tensor& TensorImpl::_fw_grad(uint64_t level, const at::Tensor& self)
-    const {
+const at::Tensor& TensorImpl::_fw_grad(
+    uint64_t level,
+    const at::TensorBase& self) const {
   // See TensorImpl::grad() above for explanation about the line below
   if (!autograd_meta_)
     return impl::GetAutogradMetaFactory()->undefined_tensor();
@@ -94,8 +93,8 @@ const at::Tensor& TensorImpl::_fw_grad(uint64_t level, const at::Tensor& self)
 }
 
 void TensorImpl::_set_fw_grad(
-    const at::Tensor& new_grad,
-    const at::Tensor& self,
+    const at::TensorBase& new_grad,
+    const at::TensorBase& self,
     uint64_t level,
     bool is_inplace_op) {
   if (!autograd_meta_)
@@ -613,7 +612,6 @@ void TensorImpl::copy_tensor_metadata(
 namespace impl {
 
 namespace {
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 AutogradMetaFactory* meta_factory = nullptr;
 } // namespace
 

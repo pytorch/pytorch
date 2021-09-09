@@ -23,11 +23,9 @@ namespace at {
 namespace {
 // used with _set_in_parallel_region to mark master thread
 // as in parallel region while executing parallel primitives
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 thread_local bool in_parallel_region_ = false;
 
 // thread number (task_id) set by parallel primitive
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 thread_local int thread_num_ = 0;
 
 void _set_in_parallel_region(bool in_region) {
@@ -60,7 +58,6 @@ const int CONSUMED = -2;
 //  - NOT_SET - pool not initialized, user value is not set
 //  - positive value - pool not initialized, user value set
 //  - CONSUMED - pool is initialized
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::atomic<int> num_intraop_threads{NOT_SET};
 
 int _num_pool_threads(int nthreads) {
@@ -225,6 +222,7 @@ void set_num_threads(int nthreads) {
 }
 
 int get_num_threads() {
+  at::internal::lazy_init_num_threads();
 #ifndef C10_MOBILE
   // not initializing pool unnecessarily,
   // because pool cannot be resized after initialization
