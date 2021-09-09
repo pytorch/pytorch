@@ -737,6 +737,18 @@ class DistributedDataParallel(Module, Joinable):
         # The following modules_params and modules_buffers are used for
         # param/buffer sync in _sync_params.
         self.modules_params = [list(self._get_parameters(self.module))]
+        self._assign_modules_buffers()
+
+        return parameters, expect_sparse_gradient
+
+    def _assign_modules_buffers(self):
+        """
+        Assigns module buffers to self.modules_buffers which are then used to
+        broadcast across ranks when broadcast_buffers=True. Note that this
+        must be called every time buffers need to be synced because buffers can
+        be reassigned by user module,
+        see https://github.com/pytorch/pytorch/issues/63916.
+        """
         # Collect buffers for modules, filtering out buffers that should be ignored.
         named_module_buffers = [
             [
@@ -753,7 +765,6 @@ class DistributedDataParallel(Module, Joinable):
             for module_buffers in named_module_buffers
         ]
 
-        return parameters, expect_sparse_gradient
 
     def _build_param_to_name_mapping(self, parameters):
         param_to_param_index = {parameters[0][i]: i for i in range(len(parameters[0]))}
@@ -1371,6 +1382,9 @@ class DistributedDataParallel(Module, Joinable):
                 else:
                     # The process with rank 0 is considered the authoritative copy.
                     authoritative_rank = 0
+                # Update self.modules_buffers incase any buffers were
+                # reassigned.
+                self._assign_modules_buffers()
                 self._distributed_broadcast_coalesced(
                     self.modules_buffers[0],
                     self.broadcast_bucket_size,
