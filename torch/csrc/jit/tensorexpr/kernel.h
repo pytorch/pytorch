@@ -123,20 +123,12 @@ struct TensorInfo {
   c10::ScalarType dtype;
 };
 
-TORCH_API Tensor computeOperandValue(
-    c10::Symbol op,
-    const std::vector<ArgValue>& inputs,
-    const std::vector<ExprHandle>& outputShape,
-    const c10::optional<ScalarType>& outputType,
-    at::Device = at::kCPU);
-
 class TORCH_API TensorExprKernel {
+ public:
   struct ConstantDescr {
     BufPtr buf;
     void* ptr;
   };
-
- public:
   explicit TensorExprKernel(
       const std::shared_ptr<Graph>& subgraph,
       std::unordered_map<c10::Symbol, NNCLoweringFunction> custom_lowerings =
@@ -288,6 +280,15 @@ class TORCH_API TensorExprKernel {
   std::unordered_map<c10::Symbol, NNCLoweringFunction> custom_lowerings_;
   bool pre_alloc_{false};
 };
+
+TORCH_API Tensor computeOperandValue(
+    c10::Symbol op,
+    const std::vector<ArgValue>& inputs,
+    const std::vector<ExprHandle>& outputShape,
+    const c10::optional<ScalarType>& outputType,
+    at::Device,
+    std::vector<TensorExprKernel::ConstantDescr>& constants,
+    std::vector<at::Tensor>& constant_tensors);
 
 TORCH_API int& getTECudaPointwiseLoopLevels();
 TORCH_API int& getTECudaPointwiseBlockCount();
