@@ -360,8 +360,16 @@ class CMake:
         build_args = ['--build', '.', '--target', 'install', '--config', build_type.build_type_string]
         if not USE_NINJA:
             # Ninja is capable of figuring out the parallelism on its
-            # own.
+            # own: only specify it explicitly if we are not using
+            # Ninja.
+
+            # This lists the number of processors available on the
+            # machine. This may be an overestimate of the usable
+            # processors if CPU scheduling affinity limits it
+            # further. In the future, we should check for that with
+            # os.sched_getaffinity(0) on platforms that support it.
             max_jobs = os.getenv('MAX_JOBS', str(multiprocessing.cpu_count()))
+
             # This ``if-else'' clause would be unnecessary when cmake
             # 3.12 becomes minimum, which provides a '-j' option:
             # build_args += ['-j', max_jobs] would be sufficient by
