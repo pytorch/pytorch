@@ -4035,7 +4035,7 @@ Tensor _lu_with_info_forward_AD(
   // similar to the backward implementation, we also consider block structures such as:
   // for a matrix A of size m x n we decompose it as
   // A = (A1 | A2) with A1 of size m x m if m <= n and
-  // A = (A1 | A2)^T with A1 of size n x n if m > n.
+  // A = (A1^T | A2^T)^T with A1 of size n x n if m > n.
   auto pdX1 = pdX.narrow(-2, 0, k).narrow(-1, 0, k);
   auto L1 = L.narrow(-2, 0, k).narrow(-1, 0, k);
   auto U1 = U.narrow(-2, 0, k).narrow(-1, 0, k);
@@ -4060,7 +4060,7 @@ Tensor _lu_with_info_forward_AD(
   auto dU1 = dK.triu().matmul(U1);
 
   // since LU = L + U - I, we have that dLU = dL + dU
-  // if LU is of size m x n, with k = min(m, n) we always have
+  // if LU is of size m x n, we always have
   // dLU1 = dL1 + dU1, where the block indexing follows the rules
   // outlined above.
   if (m == n) {
