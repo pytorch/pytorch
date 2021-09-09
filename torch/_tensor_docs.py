@@ -3363,12 +3363,15 @@ Args:
 add_docstr_all('set_',
                r"""
 set_(source=None, storage_offset=0, size=None, stride=None) -> Tensor
+
 Sets the underlying storage, size, and strides. If :attr:`source` is a tensor,
 :attr:`self` tensor will share the same storage and have the same size and
 strides as :attr:`source`. Changes to elements in one tensor will be reflected
 in the other.
+
 If :attr:`source` is a :class:`~torch.Storage`, the method sets the underlying
 storage, offset, size, and stride.
+
 Args:
     source (Tensor or Storage): the tensor or storage to use
     storage_offset (int, optional): the offset in the storage

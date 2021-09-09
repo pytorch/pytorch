@@ -127,6 +127,7 @@ static PyObject * THPStorage_(fromBuffer)(PyObject *_unused, PyObject *args, PyO
   TORCH_CHECK(
     (scalar_type == at::kByte) || (scalar_type == at::kChar) || (byte_order_str != nullptr),
     "function missing required argument 'byte_order' (pos 2)");
+  size_t element_size = c10::elementSize(scalar_type);
 
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   torch::utils::THPByteOrder byte_order;
@@ -156,18 +157,23 @@ static PyObject * THPStorage_(fromBuffer)(PyObject *_unused, PyObject *args, PyO
     return nullptr;
   }
 
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  size_t size_bytes;
   if (count < 0) {
-    if ((buffer.len - offset) % sizeof(scalar_t) != 0) {
+    if ((buffer.len - offset) % element_size != 0) {
       PyErr_SetString(PyExc_ValueError, fmt::format(
          "buffer size ({}) must be a multiple of element size ({})",
-         buffer.len, sizeof(scalar_t)));
+         buffer.len, element_size));
       PyBuffer_Release(&buffer);
       return nullptr;
     }
-    count = (buffer.len - offset) / sizeof(scalar_t);
+    size_bytes = buffer.len - offset;
+    count = size_bytes / element_size;
+  } else {
+    size_bytes = count * element_size;
   }
 
-  if (offset + (count * (Py_ssize_t)sizeof(scalar_t)) > buffer.len) {
+  if (offset + (count * (Py_ssize_t)element_size) > buffer.len) {
     PyErr_SetString(PyExc_ValueError, fmt::format(
         "buffer has only {} elements after offset {}, but specified a size of {}",
         buffer.len - offset, offset, count));
@@ -176,7 +182,7 @@ static PyObject * THPStorage_(fromBuffer)(PyObject *_unused, PyObject *args, PyO
   }
 
   uint8_t* src = (uint8_t*) buffer.buf;
-  THWStorage* storage = THWStorage_(newWithSize)(count);
+  THWStorage* storage = THWStorage_(newWithSize)(size_bytes);
 
   if (scalar_type == at::kByte || scalar_type == at::kChar) {
     memcpy(THWStorage_(data)(storage), src + offset, count);

@@ -3023,7 +3023,6 @@ class TestTorchDeviceType(TestCase):
         v = make_tensor((3, 5), device, dtype, low=-9, high=9)
         self.assertEqual(v.storage()[0], v[0][0])
         self.assertEqual(v.storage()[14], v[2][4])
-
         v_s = v.storage()
 
         for el_num in range(v.numel()):
@@ -3034,7 +3033,6 @@ class TestTorchDeviceType(TestCase):
                 v[dim0][dim1])
 
         v_s_byte = v.storage()._untyped()
-
         el_size = v.element_size()
 
         for el_num in range(v.numel()):

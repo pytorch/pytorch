@@ -527,7 +527,6 @@ def _handle_complex(tensor):
     return torch.view_as_real(tensor) if not isinstance(tensor,
                                                         torch.nn.UninitializedParameter) and tensor.is_complex() else tensor
 
-
 def _element_size(dtype):
     """
     Returns the element size for a dtype, in bytes

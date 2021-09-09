@@ -1074,8 +1074,6 @@ static PyObject * TypeError_to_NotImplemented_(PyObject* self, PyObject* args, P
   return ret;
 }
 
-// TODO: Since we no longer need to check for Python storage type, I suppose
-// we probably don't need this specialized template any more
 // set_ has to be defined in the template because the c10::Storage object
 // does not have a type, and we need to make sure the Python storage object's
 // type matches the tensor's type
@@ -1109,18 +1107,21 @@ static PyObject* THPVariable_set_(
     case 1: {
       // aten::set_.source_Storage(Tensor(a!) self, Storage source) ->
       // Tensor(a!)
+      at::ScalarType storage_scalar_type;
+      at::Storage storage = _r.storage(0, &storage_scalar_type);
+      TORCH_INTERNAL_ASSERT(storage_scalar_type == self.dtype() || storage_scalar_type == at::kByte);
       auto dispatch_set_ = [](const Tensor& self, Storage source) -> Tensor {
         pybind11::gil_scoped_release no_gil;
         return self.set_(source);
       };
-      at::ScalarType storage_scalar_type;
-      at::Storage storage = _r.storage(0, &storage_scalar_type);
-      TORCH_INTERNAL_ASSERT(storage_scalar_type == self.dtype() || storage_scalar_type == at::kByte);
       return wrap(dispatch_set_(self, storage));
     }
     case 2: {
       // aten::set_.source_Storage_storage_offset(Tensor(a!) self, Storage
       // source, int storage_offset, int[] size, int[] stride=[]) -> Tensor(a!)
+      at::ScalarType storage_scalar_type;
+      at::Storage storage = _r.storage(0, &storage_scalar_type);
+      TORCH_INTERNAL_ASSERT(storage_scalar_type == self.dtype() || storage_scalar_type == at::kByte);
       auto dispatch_set_ = [](const Tensor& self,
                               Storage source,
                               int64_t storage_offset,
@@ -1129,9 +1130,6 @@ static PyObject* THPVariable_set_(
         pybind11::gil_scoped_release no_gil;
         return self.set_(source, storage_offset, size, stride);
       };
-      at::ScalarType storage_scalar_type;
-      at::Storage storage = _r.storage(0, &storage_scalar_type);
-      TORCH_INTERNAL_ASSERT(storage_scalar_type == self.dtype() || storage_scalar_type == at::kByte);
       return wrap(dispatch_set_(
           self, storage, _r.toInt64(1), _r.intlist(2), _r.intlist(3)));
     }

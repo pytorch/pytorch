@@ -161,8 +161,8 @@ class Tensor(torch._C._TensorBase):
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor.storage, (self,), self)
 
-        if self.dtype == torch.complex32:
-            raise RuntimeError('unsupported Storage type')
+        if self.dtype not in torch.storage._dtype_to_pickle_storage_type_map():
+            raise RuntimeError(f'unsupported Storage type: {self.dtype}')
 
         storage = self._storage()
 
