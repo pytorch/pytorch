@@ -26,77 +26,65 @@ namespace torch {
 namespace jit {
 namespace tensorexpr {
 
-TORCH_API std::string buildErrorMessage(const std::string& s);
-
-class compilation_error : public c10::Error {
+class unsupported_dtype : public std::runtime_error {
  public:
-  explicit compilation_error(const std::string& err)
-      : c10::Error(
-            {
-                __func__,
-                __FILE__,
-                static_cast<uint32_t>(__LINE__),
-            },
-            buildErrorMessage(err)) {}
-};
-
-class unsupported_dtype : public compilation_error {
- public:
-  explicit unsupported_dtype() : compilation_error("UNSUPPORTED DTYPE") {}
+  explicit unsupported_dtype() : std::runtime_error("UNSUPPORTED DTYPE") {}
   explicit unsupported_dtype(const std::string& err)
-      : compilation_error("UNSUPPORTED DTYPE: " + err) {}
+      : std::runtime_error("UNSUPPORTED DTYPE: " + err) {}
 };
 
-class out_of_range_index : public compilation_error {
+class out_of_range_index : public std::runtime_error {
  public:
-  explicit out_of_range_index() : compilation_error("OUT OF RANGE INDEX") {}
+  explicit out_of_range_index() : std::runtime_error("OUT OF RANGE INDEX") {}
   explicit out_of_range_index(const std::string& err)
-      : compilation_error("OUT OF RANGE INDEX: " + err) {}
+      : std::runtime_error("OUT OF RANGE INDEX: " + err) {}
 };
 
-class unimplemented_lowering : public compilation_error {
+class unimplemented_lowering : public std::runtime_error {
  public:
   explicit unimplemented_lowering()
-      : compilation_error("UNIMPLEMENTED LOWERING") {}
+      : std::runtime_error("UNIMPLEMENTED LOWERING") {}
   explicit unimplemented_lowering(ExprPtr expr)
-      : compilation_error("UNIMPLEMENTED LOWERING: " + std::to_string(expr)) {}
+      : std::runtime_error("UNIMPLEMENTED LOWERING: " + std::to_string(expr)) {}
   explicit unimplemented_lowering(StmtPtr stmt)
-      : compilation_error("UNIMPLEMENTED LOWERING: " + std::to_string(stmt)) {}
+      : std::runtime_error("UNIMPLEMENTED LOWERING: " + std::to_string(stmt)) {}
 };
 
-class malformed_input : public compilation_error {
+class malformed_input : public std::runtime_error {
  public:
-  explicit malformed_input() : compilation_error("MALFORMED INPUT") {}
+  explicit malformed_input() : std::runtime_error("MALFORMED INPUT") {}
   explicit malformed_input(const std::string& err)
-      : compilation_error("MALFORMED INPUT: " + err) {}
+      : std::runtime_error("MALFORMED INPUT: " + err) {}
   explicit malformed_input(ExprPtr expr)
-      : compilation_error("MALFORMED INPUT: " + std::to_string(expr)) {}
+      : std::runtime_error("MALFORMED INPUT: " + std::to_string(expr)) {}
   explicit malformed_input(const std::string& err, ExprPtr expr)
-      : compilation_error(
+      : std::runtime_error(
             "MALFORMED INPUT: " + err + " - " + std::to_string(expr)) {}
   explicit malformed_input(StmtPtr stmt)
-      : compilation_error("MALFORMED INPUT: " + std::to_string(stmt)) {}
+      : std::runtime_error("MALFORMED INPUT: " + std::to_string(stmt)) {}
   explicit malformed_input(const std::string& err, StmtPtr stmt)
-      : compilation_error(
+      : std::runtime_error(
             "MALFORMED INPUT: " + err + " - " + std::to_string(stmt)) {}
 };
 
-class malformed_ir : public compilation_error {
+class malformed_ir : public std::runtime_error {
  public:
-  explicit malformed_ir() : compilation_error("MALFORMED IR") {}
+  explicit malformed_ir() : std::runtime_error("MALFORMED IR") {}
   explicit malformed_ir(const std::string& err)
-      : compilation_error("MALFORMED IR: " + err) {}
+      : std::runtime_error("MALFORMED IR: " + err) {}
   explicit malformed_ir(ExprPtr expr)
-      : compilation_error("MALFORMED IR: " + std::to_string(expr)) {}
+      : std::runtime_error("MALFORMED IR: " + std::to_string(expr)) {}
   explicit malformed_ir(const std::string& err, ExprPtr expr)
-      : compilation_error(
+      : std::runtime_error(
             "MALFORMED IR: " + err + " - " + std::to_string(expr)) {}
   explicit malformed_ir(StmtPtr stmt)
-      : compilation_error("MALFORMED IR: " + std::to_string(stmt)) {}
+      : std::runtime_error("MALFORMED IR: " + std::to_string(stmt)) {}
   explicit malformed_ir(const std::string& err, StmtPtr stmt)
-      : compilation_error(
+      : std::runtime_error(
             "MALFORMED IR: " + err + " - " + std::to_string(stmt)) {}
 };
+
+TORCH_API std::string buildErrorMessage(const std::string& s = "");
 
 } // namespace tensorexpr
 } // namespace jit
