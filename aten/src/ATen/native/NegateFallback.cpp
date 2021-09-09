@@ -36,7 +36,7 @@ TORCH_LIBRARY_IMPL(aten, Negative, m) {
   m.impl("clone", torch::CppFunction::makeFallthrough());
   m.impl("neg_", torch::CppFunction::makeFallthrough());
   m.impl("resolve_neg", torch::CppFunction::makeFallthrough());
-  // m.impl("resolve_conj", torch::CppFunction::makeFallthrough());
+  m.impl("resolve_conj", torch::CppFunction::makeFallthrough());
 
   TORCH_VIEW_FNS(m)
   TENSOR_UTILITIES_AND_CONSTRUCTORS(m)
