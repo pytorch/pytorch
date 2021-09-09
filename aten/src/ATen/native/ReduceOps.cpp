@@ -1341,7 +1341,7 @@ TORCH_IMPL_FUNC(all_out)
   _all(result, iter);
 }
 
-TORCH_IMPL_FUNC(all_full_out)(const Tensor& self, const Tensor& result) {
+TORCH_IMPL_FUNC(all_all_out)(const Tensor& self, const Tensor& result) {
   auto iter = get_allany_iter(self, result, {}, false);
   _all(result, iter);
 }
@@ -1365,7 +1365,7 @@ TORCH_IMPL_FUNC(any_out)
   _any(result, iter);
 }
 
-TORCH_IMPL_FUNC(any_full_out)(const Tensor& self, const Tensor& result) {
+TORCH_IMPL_FUNC(any_all_out)(const Tensor& self, const Tensor& result) {
   auto iter = get_allany_iter(self, result, {}, false);
   _any(result, iter);
 }

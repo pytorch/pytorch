@@ -7360,27 +7360,27 @@
 
 - func: all(Tensor self) -> Tensor
   device_check: NoCheck   # TensorIterator
-  structured_delegate: all.full_out
+  structured_delegate: all.all_out
   variants: method, function
 
-- func: all.full_out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+- func: all.all_out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck
   structured: True
   dispatch:
-    CPU, CUDA: all_full_out
+    CPU, CUDA: all_all_out
 
 - func: any(Tensor self) -> Tensor
   device_check: NoCheck   # TensorIterator
-  structured_delegate: any.full_out
+  structured_delegate: any.all_out
   variants: method, function
   dispatch:
     SparseCPU, SparseCUDA: any_sparse
 
-- func: any.full_out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+- func: any.all_out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck
   structured: True
   dispatch:
-    CPU, CUDA: any_full_out
+    CPU, CUDA: any_all_out
 
 - func: renorm.out(Tensor self, Scalar p, int dim, Scalar maxnorm, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
