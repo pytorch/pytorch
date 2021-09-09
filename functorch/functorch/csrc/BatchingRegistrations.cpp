@@ -97,17 +97,6 @@ static bool participatesInCurrentLevel(TensorList self) {
   return false;
 }
 
-Tensor log_softmax_batching_rule(const Tensor& self, int64_t dim, optional<ScalarType> dtype) {
-  if (!participatesInCurrentLevel(self)) {
-    c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
-    return at::log_softmax(self, dim, dtype);
-  }
-  auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
-  auto dim_physical = self_physical.getPhysicalDim(dim);
-  auto result = at::log_softmax(self_physical.tensor(), dim_physical, dtype);
-  return self_physical.getPhysicalToLogicalMap().apply(result);
-}
-
 Tensor _log_softmax_batching_rule(const Tensor& self, int64_t dim, bool half_to_float) {
   if (!participatesInCurrentLevel(self)) {
     c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -145,46 +134,6 @@ std::tuple<Tensor,Tensor> max_pool2d_with_indices_batching_rule(
   return std::make_tuple<Tensor, Tensor>(std::move(first), std::move(second));
 }
 
-Tensor sum_batching_rule(const Tensor& self, IntArrayRef dims, bool keepdim, optional<ScalarType> dtype) {
-  if (!participatesInCurrentLevel(self)) {
-    c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
-    return self.sum(dims, keepdim, dtype);
-  }
-  // PyTorch has a special case where sum(scalar_tensor, dim=0) does not fail
-  // and instead returns a new scalar tensor (this also happens for dim=-1)
-  // If the following happens:
-  // >>> x = torch.randn(B0)  # the per-examples are all scalars
-  // >>> vmap(partial(torch.sum, dim=0), x)
-  // then we replicate the behavior of sum(scalar_tensor, dim=0).
-  if (/*logical*/self.dim() == 0 && dims.size() == 1 && is_allowed_dim_on_scalar_tensor(dims[0])) {
-    return self.clone();
-  }
-  auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
-  auto dims_physical = self_physical.getPhysicalDims(dims);
-  auto result = at::sum(self_physical.tensor(), dims_physical, keepdim, dtype);
-  return self_physical.getPhysicalToLogicalMap().apply(result);
-}
-
-Tensor mean_int_batching_rule(
-    const Tensor& self, IntArrayRef dims, bool keepdim, optional<ScalarType> dtype) {
-  if (!participatesInCurrentLevel(self)) {
-    c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
-    return self.mean(dims, keepdim, dtype);
-  }
-  // PyTorch has a special case where mean(scalar_tensor, dim=0) does not fail
-  // and instead returns a new scalar tensor (this also happens for dim=-1)
-  // If the following happens:
-  // >>> x = torch.randn(B0)  # the per-examples are all scalars
-  // >>> vmap(partial(torch.mean, dim=0), x)
-  // then we replicate the behavior of mean(scalar_tensor, dim=0).
-  if (/*logical*/self.dim() == 0 && dims.size() == 1 && is_allowed_dim_on_scalar_tensor(dims[0])) {
-    return self.clone();
-  }
-  auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
-  auto dims_physical = self_physical.getPhysicalDims(dims);
-  auto result = at::mean(self_physical.tensor(), dims_physical, keepdim, dtype);
-  return self_physical.getPhysicalToLogicalMap().apply(result);
-}
 
 bool isPhysicalScalarTensor(const Tensor& logical_tensor) {
   if (logical_tensor.dim() > 0) {
@@ -315,39 +264,6 @@ std::vector<Tensor> chunk_batching_rule(const Tensor& self, int64_t chunks, int6
   auto result = at::chunk(self_physical.tensor(), chunks, dim_physical);
   self_physical.getPhysicalToLogicalMap().applyInplace(result);
   return result;
-}
-
-Tensor clamp_batching_rule(const Tensor& self, optional<Scalar> min, optional<Scalar> max) {
-  if (!participatesInCurrentLevel(self)) {
-    c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
-    return self.clamp(min, max);
-  }
-
-  auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
-  auto result = at::clamp(self_physical.tensor(), min, max);
-  return self_physical.getPhysicalToLogicalMap().apply(result);
-}
-
-Tensor clamp_min_batching_rule(const Tensor& self, Scalar min) {
-  if (!participatesInCurrentLevel(self)) {
-    c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
-    return at::clamp_min(self, min);
-  }
-
-  auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
-  auto result = at::clamp_min(self_physical.tensor(), min);
-  return self_physical.getPhysicalToLogicalMap().apply(result);
-}
-
-Tensor clamp_max_batching_rule(const Tensor& self, Scalar max) {
-  if (!participatesInCurrentLevel(self)) {
-    c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
-    return at::clamp_max(self, max);
-  }
-
-  auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
-  auto result = at::clamp_max(self_physical.tensor(), max);
-  return self_physical.getPhysicalToLogicalMap().apply(result);
 }
 
 std::vector<Tensor> tensor_split_sections_batching_rule(const Tensor& self, int64_t sections, int64_t dim) {
@@ -1199,9 +1115,6 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   m.impl("max_pool2d", at::native::max_pool2d); // composite
   m.impl("max_pool2d_with_indices", max_pool2d_with_indices_batching_rule);
 
-  // m.impl("mean.dim", mean_int_batching_rule);
-  // m.impl("sum.dim_IntList", sum_batching_rule);
-  // m.impl("log_softmax.int", log_softmax_batching_rule);
   m.impl("_log_softmax", _log_softmax_batching_rule);
   m.impl("is_complex", native::is_complex);
 //
@@ -1246,9 +1159,6 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
 
   m.impl("addmm", addmm_batching_rule);
   // clamp operations
-//   m.impl("clamp", clamp_batching_rule);
-//   m.impl("clamp_min", clamp_min_batching_rule);
-//   m.impl("clamp_max", clamp_max_batching_rule);
 
 // unary pointwise, out-of-place, no additional arguments.
 #define TO_BATCHING_RULE(name, ...) \
