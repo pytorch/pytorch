@@ -5,11 +5,11 @@
 TEST(OperatorNameTest, SetNamespaceIfNotSetWithoutExistingNamespace) {
   c10::OperatorName testName("operator", "operator.overload");
 
-  const auto result = testName.setNamespaceIfNotSet("namespace");
+  const auto result = testName.setNamespaceIfNotSet("ns");
   EXPECT_TRUE(result);
-  EXPECT_EQ(testName.name, "namespace::operator");
+  EXPECT_EQ(testName.name, "ns::operator");
   EXPECT_EQ(testName.overload_name, "operator.overload");
-  EXPECT_EQ(testName.getNamespace(), c10::optional<c10::string_view>("namespace"));
+  EXPECT_EQ(testName.getNamespace(), c10::optional<c10::string_view>("ns"));
 }
 
 TEST(OperatorNameTest, SetNamespaceIfNotSetWithExistingNamespace) {
