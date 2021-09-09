@@ -177,14 +177,28 @@ public:
    *
    * Example:
    *
-   * > class MyFunctor final {
+   * > class MyFunctor final : public c10::OperatorKernel {
    * >   public:
    * >     Tensor operator()(Tensor a, Tensor b) {...}
    * > };
-   * > KernelFunction func = KernelFunction::makeFromUnboxedFunctor(std::make_unique<MyFunctor>());
+   * > KernelFunction func = KernelFunction::makeFromUnboxedFunctor<MyFunctor>(std::make_unique<MyFunctor>());
    */
   template<bool AllowLegacyTypes = false, class KernelFunctor>
   static KernelFunction makeFromUnboxedFunctor(std::unique_ptr<OperatorKernel> kernelFunctor);
+
+  /**
+   * Create a KernelFunction from a boxed functor.
+   *
+   * Example:
+   *
+   * > class MyFunctor final : public c10::OperatorKernel {
+   * >   public:
+   * >     void operator()(const OperatorHandle&, DispatchKeySet, Stack*) {...}
+   * > };
+   * > KernelFunction func = KernelFunction::makeFromBoxedFunctor(std::make_unique<MyFunctor>());
+   */
+  template<class KernelFunctor>
+  static KernelFunction makeFromBoxedFunctor(std::unique_ptr<KernelFunctor> kernelFunctor);
 
   /**
    * Create a KernelFunction from an unboxed function.

@@ -17,9 +17,9 @@ from torch._C._jit_tree_views import (
     SliceExpr, Subscript, TernaryIf, With, WithItem, Property,
     DictComp,
 )
-from torch._utils_internal import get_source_lines_and_file
+from torch._sources import get_source_lines_and_file, parse_def, make_source_context
 from torch.jit._monkeytype_config import monkeytype_trace, get_qualified_name
-from torch._jit_internal import make_source_context, should_drop, is_static_fn, FunctionModifiers  # noqa: F401
+from torch._jit_internal import should_drop, is_static_fn, FunctionModifiers  # noqa: F401
 import torch.jit.annotations
 
 _IS_ASTUNPARSE_INSTALLED = False
@@ -215,42 +215,6 @@ def get_jit_class_def(cls, self_name):
     return build_class_def(ctx, class_ast, methods, properties, self_name, assigns)
 
 
-def normalize_source_lines(sourcelines: List[str]) -> List[str]:
-    """
-    This helper function accepts a list of source lines. It finds the
-    indentation level of the function definition (`def`), then it indents
-    all lines in the function body to a point at or greater than that
-    level. This allows for comments and continued string literals that
-    are at a lower indentation than the rest of the code.
-    Args:
-        sourcelines: function source code, separated into lines by
-                        the '\n' character
-    Returns:
-        A list of source lines that have been correctly aligned
-    """
-
-    def remove_prefix(text, prefix):
-        return text[text.startswith(prefix) and len(prefix):]
-
-    # Find the line and line number containing the function definition
-    for i, l in enumerate(sourcelines):
-        if l.lstrip().startswith("def"):
-            idx = i
-            break
-    fn_def = sourcelines[idx]
-
-    # Get a string representing the amount of leading whitespace
-    whitespace = fn_def.split("def")[0]
-
-    # Add this leading whitespace to all lines before and after the `def`
-    aligned_prefix = [whitespace + remove_prefix(s, whitespace) for s in sourcelines[:idx]]
-    aligned_suffix = [whitespace + remove_prefix(s, whitespace) for s in sourcelines[idx + 1:]]
-
-    # Put it together again
-    aligned_prefix.append(fn_def)
-    return aligned_prefix + aligned_suffix
-
-
 def get_jit_def(fn, def_name, self_name=None, is_classmethod=False):
     """
     Build a JIT AST (TreeView) from the given function.
@@ -266,17 +230,9 @@ def get_jit_def(fn, def_name, self_name=None, is_classmethod=False):
             but we want the result AST to have the name "forward".
         self_name: If this function is a method, what the type name of `self` is.
     """
-    sourcelines, file_lineno, filename = get_source_lines_and_file(fn, torch._C.ErrorReport.call_stack())
-    sourcelines = normalize_source_lines(sourcelines)
-    source = ''.join(sourcelines)
-    dedent_src = dedent(source)
-    py_ast = ast.parse(dedent_src)
-    if len(py_ast.body) != 1 or not isinstance(py_ast.body[0], ast.FunctionDef):
-        raise RuntimeError(f"Expected a single top-level function: {filename}:{file_lineno}")
-    leading_whitespace_len = len(source.split('\n', 1)[0]) - len(dedent_src.split('\n', 1)[0])
-    type_line = torch.jit.annotations.get_type_line(source)
-    ctx = make_source_context(source, filename, file_lineno, leading_whitespace_len, True)
-    fn_def = py_ast.body[0]
+    parsed_def = parse_def(fn)
+    type_line = torch.jit.annotations.get_type_line(parsed_def.source)
+    fn_def = parsed_def.ast.body[0]
 
     if is_classmethod:
         arg_name = fn_def.args.args[0].arg
@@ -288,7 +244,7 @@ def get_jit_def(fn, def_name, self_name=None, is_classmethod=False):
     if should_drop(fn):
         unused_fn_def = ast.parse("def unused_fn(self: Any):\n\traise RuntimeError(\"Cannot call @unused methods\")")
         if len(unused_fn_def.body) != 1 or not isinstance(unused_fn_def.body[0], ast.FunctionDef):
-            raise RuntimeError(f"Expected a single top-level function: {filename}:{file_lineno}")
+            raise RuntimeError(f"Expected a single top-level function: {parsed_def.filename}:{parsed_def.file_lineno}")
         unused_def = unused_fn_def.body[0]
         fn_def.body = unused_def.body
         # kwarg/vararg not supported by `build_def`
@@ -305,7 +261,7 @@ def get_jit_def(fn, def_name, self_name=None, is_classmethod=False):
         qualname = get_qualified_name(fn)
         pdt_arg_types = type_trace_db.get_args_types(qualname)
 
-    return build_def(ctx, fn_def, type_line, def_name, self_name=self_name, pdt_arg_types=pdt_arg_types)
+    return build_def(parsed_def.ctx, fn_def, type_line, def_name, self_name=self_name, pdt_arg_types=pdt_arg_types)
 
 # TODO: more robust handling of recognizing ignore context manager
 def is_torch_jit_ignore_context_manager(stmt):
@@ -381,9 +337,9 @@ def build_param_list(ctx, py_args, self_name, pdt_arg_types=None):
                 raise NotSupportedError(ctx_range, _vararg_kwarg_err)
 
     # List of Tuple of args and type as inferred by profile directed typing
-    arg_and_types = [(arg, next(iter(pdt_arg_types[arg.arg])) if pdt_arg_types and bool(pdt_arg_types[arg.arg]) else None)
+    arg_and_types = [(arg, pdt_arg_types[arg.arg] if pdt_arg_types and bool(pdt_arg_types[arg.arg]) else None)
                      for arg in py_args.args]
-    arg_and_types_kwonlyargs = [(arg, next(iter(pdt_arg_types[arg.arg])) if pdt_arg_types and bool(pdt_arg_types[arg.arg])
+    arg_and_types_kwonlyargs = [(arg, pdt_arg_types[arg.arg] if pdt_arg_types and bool(pdt_arg_types[arg.arg])
                                 else None) for arg in py_args.kwonlyargs]
 
     result = [build_param(ctx, arg, self_name, kwarg_only=False, pdt_arg_type=arg_type)
@@ -496,6 +452,7 @@ def get_default_args(fn):
         return {}
 
     signature = inspect.signature(fn)
+
     return {
         k: v.default
         for k, v in signature.parameters.items()

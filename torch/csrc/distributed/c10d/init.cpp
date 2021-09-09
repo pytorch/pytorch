@@ -17,6 +17,7 @@
 
 #ifdef USE_C10D_NCCL
 #include <c10d/ProcessGroupNCCL.hpp>
+#include <torch/csrc/distributed/c10d/frontend_cuda.hpp>
 #endif
 
 #ifdef USE_C10D_MPI
@@ -31,6 +32,7 @@
 #include <c10d/frontend.hpp>
 #include <c10d/logger.hpp>
 #include <c10d/reducer.hpp>
+
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/distributed/c10d/python_comm_hook.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
@@ -230,6 +232,9 @@ void _register_builtin_comm_hook(
 PyObject* c10d_init(PyObject* _unused, PyObject* noargs) {
   C10_LOG_API_USAGE_ONCE("c10d.python.import");
   ::c10d::initCustomClassBindings();
+#ifdef USE_C10D_NCCL
+  ::c10d::initCustomClassBindingsNccl();
+#endif
 
   auto c10d_module = THPObjectPtr(PyImport_ImportModule("torch.distributed"));
   if (!c10d_module) {
@@ -286,7 +291,7 @@ Returns:
 )")
       .def(
           "buffer",
-          &::c10d::GradBucket::getTensor,
+          &::c10d::GradBucket::getBuffer,
           py::call_guard<py::gil_scoped_release>(),
           R"(
 Returns:
@@ -321,8 +326,8 @@ Returns:
 )")
       .def(
           "set_buffer",
-          &::c10d::GradBucket::setTensor,
-          py::arg("tensor"),
+          &::c10d::GradBucket::setBuffer,
+          py::arg("buffer"),
           py::call_guard<py::gil_scoped_release>(),
           R"(
 Replaces the tensor in the bucket with the input tensor buffer.
@@ -344,7 +349,8 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
               int64_t,
               bool,
               bool,
-              std::unordered_map<size_t, std::string>>(),
+              std::unordered_map<size_t, std::string>,
+              int64_t>(),
           py::arg("replicas"),
           py::arg("bucket_indices"),
           py::arg("per_bucket_size_limits"),
@@ -355,6 +361,7 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           py::arg("gradient_as_bucket_view") = false,
           py::arg("param_to_name_mapping") =
               std::unordered_map<size_t, std::string>(),
+          py::arg("first_bucket_bytes_cap") = ::c10d::kDefaultFirstBucketBytes,
           py::call_guard<py::gil_scoped_release>())
       .def(
           "prepare_for_forward",
@@ -392,10 +399,6 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
       .def(
           "_get_local_used_maps",
           &::c10d::Reducer::get_local_used_maps_on_device)
-      .def(
-          "save_thread_local_state",
-          &::c10d::Reducer::save_thread_local_state,
-          py::call_guard<py::gil_scoped_release>())
       .def(
           "_set_ddp_runtime_logging_sample_rate",
           &::c10d::Reducer::set_ddp_runtime_logging_sample_rate,
@@ -490,11 +493,8 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
 An enum-like class for available reduction operations: ``SUM``, ``PRODUCT``,
 ``MIN``, ``MAX``, ``BAND``, ``BOR``, and ``BXOR``.
 
-``BAND``, ``BOR``, and ``BXOR`` reductions are not available when
+Note that ``BAND``, ``BOR``, and ``BXOR`` reductions are not available when
 using the ``NCCL`` backend.
-
-``AVG`` is only available with the ``NCCL`` backend,
-and only for NCCL versions 2.10 or later.
 
 Additionally, ``MAX``, ``MIN`` and ``PRODUCT`` are not supported for complex tensors.
 
@@ -502,10 +502,6 @@ The values of this class can be accessed as attributes, e.g., ``ReduceOp.SUM``.
 They are used in specifying strategies for reduction collectives, e.g.,
 :func:`reduce`, :func:`all_reduce_multigpu`, etc.)")
       .value("SUM", ::c10d::ReduceOp::SUM)
-#if defined(NCCL_MAJOR) && ((NCCL_MAJOR > 2) || \
-                            (NCCL_MAJOR == 2) && (NCCL_MINOR >= 10))
-      .value("AVG", ::c10d::ReduceOp::AVG)
-#endif
       .value("PRODUCT", ::c10d::ReduceOp::PRODUCT)
       .value("MIN", ::c10d::ReduceOp::MIN)
       .value("MAX", ::c10d::ReduceOp::MAX)
@@ -1652,7 +1648,6 @@ static PyMethodDef methods[] = { // NOLINT
 PyMethodDef* python_functions() {
   return methods;
 }
-
 } // namespace c10d
 } // namespace distributed
 } // namespace torch
