@@ -2622,13 +2622,17 @@ def is_floating_point(g, self):
     return g.op("Constant", value_t=torch.BoolTensor([0]))
 
 
-def __isnot_(g, self, other):
+def __is_(g, self, other):
     if sym_help._is_none(other):
         if sym_help._is_none(self):
-            return g.op("Constant", value_t=torch.BoolTensor([0]))
-        return g.op("Constant", value_t=torch.BoolTensor([1]))
-    return ne(g, self, other)
+            return g.op("Constant", value_t=torch.BoolTensor([1]))
+        return g.op("Constant", value_t=torch.BoolTensor([0]))
+    return eq(g, self, other)
 
+
+@wrap_logical_op_with_negation
+def __isnot_(g, self, other):
+    return __is_(g, self, other)
 
 # exists to refine the type of the Value
 # if x is an optional Tensor, unchecked_cast will cast
