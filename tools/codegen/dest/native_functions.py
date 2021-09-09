@@ -56,10 +56,18 @@ def compute_native_function_declaration(
 
 
 # @with_native_function_and_index
-def gen_unstructured_lazy_definition(f: NativeFunction, backend_index: BackendIndex, class_method_name: str) -> Optional[str]:
+def gen_unstructured_lazy_definition(f: NativeFunction, backend_index: BackendIndex, codegen: List[OperatorName], class_method_name: str) -> Optional[str]:
     sig = kernel_signature(f, backend_index)
     metadata = backend_index.get_kernel(f)
     
+    if f.func.name not in codegen:
+        return None
+    if metadata is None:
+        return None
+    if "legacy::" in metadata.kernel:
+        return None
+
+
     # Lazy IR stuff
     all_types, value_types, scalar_types = process_ir_types(f.func)
 
@@ -87,12 +95,7 @@ def gen_unstructured_lazy_definition(f: NativeFunction, backend_index: BackendIn
     assert len(value_types) > 0, f"Only supporting tensor ops so far, none found in {sig}"
     first_tensor = value_types[0]
 
-    if metadata is None:
-        return None
-    if "legacy::" in metadata.kernel:
-        return None
-    else:
-        return f"""\
+    return f"""\
 {sig.decl(name=f"{class_method_name}::{metadata.kernel}")} {{
     {lazy_tensor_decls}
     return bridge::AtenFromLtcTensor(l_{first_tensor.name}.CreateFrom(
@@ -100,7 +103,6 @@ def gen_unstructured_lazy_definition(f: NativeFunction, backend_index: BackendIn
 }};
 """
 
-# @with_native_function_and_index
 def compute_lazy_native_function_definition(
         g: Union[NativeFunctionsGroup, NativeFunction],
         backend_index: BackendIndex,
@@ -113,12 +115,7 @@ def compute_lazy_native_function_definition(
         if metadata is not None and metadata.structured:
             raise AssertionError("Structured lazy functions are not implemented yet.")
         else:
-            # return list(mapMaybe(lambda f: gen_unstructured_lazy_definition(f, backend_index), g.functions()))
-            return []
+            return list(mapMaybe(lambda f: gen_unstructured_lazy_definition(f, backend_index, codegen, class_method_name), g.functions()))
     else:
-        if g.func.name not in codegen:
-            return []
-        if metadata is not None:
-            x = gen_unstructured_lazy_definition(g, backend_index, class_method_name)
-            return [] if x is None else [x]
-        return []
+        x = gen_unstructured_lazy_definition(g, backend_index, codegen, class_method_name)
+        return [] if x is None else [x]
