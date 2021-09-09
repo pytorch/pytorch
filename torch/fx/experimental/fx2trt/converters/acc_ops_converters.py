@@ -241,24 +241,35 @@ def acc_ops_conv2d(network, target, args, kwargs, name):
     if has_dynamic_shape(input_val.shape):
         assert input_val.shape[1] != -1, "Channel dim can't be dynamic for convolution."
 
-    weight = get_trt_tensor(network, kwargs["weight"], f"{name}_weight")
-    # will need to use uninitialized weight and set it later to support
-    # ITensor weights
-    dummy_weight = trt.Weights()
     # for now we'll assume bias is constant Tensor or None,
     # and bias being ITensor is not supported in TensorRT api
     # right now
     bias = to_numpy(kwargs["bias"])
 
-    layer = network.add_convolution(
-        input=input_val,
-        num_output_maps=weight.shape[0],
-        kernel_shape=weight.shape[2:],
-        kernel=dummy_weight,
-        bias=bias,
-    )
+    weight = get_trt_tensor(network, kwargs["weight"], f"{name}_weight")
+    weight_shape = tuple(kwargs["weight"].shape)
+    if network.has_explicit_precision:
+        # will need to use uninitialized weight and set it later to support
+        # ITensor weights
+        dummy_weight = trt.Weights()
 
-    layer.set_input(1, weight)
+        layer = network.add_convolution(
+            input=input_val,
+            num_output_maps=weight_shape[0],
+            kernel_shape=weight_shape[2:],
+            kernel=dummy_weight,
+            bias=bias,
+        )
+
+        layer.set_input(1, weight)
+    else:
+        layer = network.add_convolution(
+            input=input_val,
+            num_output_maps=weight_shape[0],
+            kernel_shape=weight_shape[2:],
+            kernel=to_numpy(kwargs["weight"]),
+            bias=bias,
+        )
 
     layer.name = name
     layer.stride = kwargs["stride"]
@@ -1027,8 +1038,6 @@ def acc_ops_linear(network, target, args, kwargs, name):
         "dim for linear and it can't be the last dim."
     )
 
-    weight = kwargs["weight"]
-
     # For quantization, weight here would be a trt tensor because it goes through
     # quant + dequant. In this case, we need to use matmul + add because fully_connected
     # can't take non-constant weight.
@@ -1039,20 +1048,30 @@ def acc_ops_linear(network, target, args, kwargs, name):
     layer = network.add_shuffle(input_val)
     layer.reshape_dims = tuple(input_val.shape) + (1, 1)
     layer.name = f"{name}_pre_shuffle"
+    bias = to_numpy(kwargs["bias"])
 
-    weight = get_trt_tensor(network, kwargs["weight"], f"{name}_weight")
-    # will need to use uninitialized weight and set it later to support
-    # ITensor weights
-    dummy_weight = trt.Weights()
+    if network.has_explicit_precision:
+        weight = get_trt_tensor(network, kwargs["weight"], f"{name}_weight")
+        # will need to use uninitialized weight and set it later to support
+        # ITensor weights
+        dummy_weight = trt.Weights()
 
-    # add fully connected
-    layer = network.add_fully_connected(
-        input=layer.get_output(0),
-        num_outputs=weight.shape[0],
-        kernel=dummy_weight,
-        bias=to_numpy(kwargs["bias"]),
-    )
-    layer.set_input(1, weight)
+        # add fully connected
+        layer = network.add_fully_connected(
+            input=layer.get_output(0),
+            num_outputs=weight.shape[0],
+            kernel=dummy_weight,
+            bias=bias,
+        )
+        layer.set_input(1, weight)
+    else:
+        weight = to_numpy(kwargs["weight"])
+        layer = network.add_fully_connected(
+            input=layer.get_output(0),
+            num_outputs=weight.shape[0],
+            kernel=weight,
+            bias=bias,
+        )
     layer.name = f"{name}_linear"
 
     # reshape back

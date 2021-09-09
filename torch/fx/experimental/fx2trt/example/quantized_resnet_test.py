@@ -13,8 +13,7 @@ def build_fp16_trt(rn18):
     rn18 = copy.deepcopy(rn18)
     rn18 = acc_tracer.trace(rn18, [torch.randn(1, 3, 224, 224)])  # type: ignore[attr-defined]
     interp = TRTInterpreter(
-        rn18, [InputTensorSpec(torch.Size([3, 224, 224]), torch.float, has_batch_dim=False)],
-        explicit_precision=True)
+        rn18, [InputTensorSpec(torch.Size([3, 224, 224]), torch.float, has_batch_dim=False)])
     engine, input_names, output_names = interp.run(fp16_mode=True)
     return TRTModule(engine, input_names, output_names)
 
@@ -40,12 +39,12 @@ def build_int8_trt(rn18):
 
     quantized_rn18 = acc_tracer.trace(quantized_rn18, [data])  # type: ignore[attr-defined]
     interp = TRTInterpreter(
-        quantized_rn18, [InputTensorSpec(data.shape, torch.float, has_batch_dim=True)],
+        quantized_rn18, [InputTensorSpec([-1, *data.shape[1:]], torch.float, shape_ranges=[((1, 3, 224, 224), (5, 3, 224, 224), (10, 3, 224, 224))], has_batch_dim=True)],
         explicit_batch_dimension=True, explicit_precision=True)
     engine, input_names, output_names = interp.run(fp16_mode=False, int8_mode=True)
     trt_mod = TRTModule(engine, input_names, output_names)
     trt_res = trt_mod(data.cuda())
-    print("result diff", ref_res - trt_res.cpu())
+    print("result diff max", torch.max(ref_res - trt_res.cpu()))
     return trt_mod
 
 @torch.no_grad()
@@ -69,10 +68,8 @@ def build_int8_trt_implicit_quant(rn18):
     traced_rn18 = torch.fx.symbolic_trace(quantized_rn18)
     shape_prop.ShapeProp(traced_rn18).propagate(data)
     traced_rn18 = NormalizeArgs(traced_rn18).transform()
-    print("interpreter run")
     interp = TRTInterpreter(traced_rn18, InputTensorSpec.from_tensors([data]))
     engine, input_names, output_names = interp.run(fp16_mode=False, int8_mode=True, strict_type_constraints=True)
-    print("construct TRTModule")
     trt_mod = TRTModule(engine, input_names, output_names)
     trt_res = trt_mod(data.cuda())
     print("result equal?", torch.equal(ref_res, trt_res))
@@ -95,24 +92,22 @@ class M(torch.nn.Module):
 
 # rn18 = M().eval()
 # rn18 = rn18.layer1
-print("building int8 graph")
 int8_trt = build_int8_trt(rn18)
 # implicit_int8_trt = build_int8_trt_implicit_quant(rn18)
-# fp16_trt = build_fp16_trt(rn18)
+fp16_trt = build_fp16_trt(rn18)
 x = torch.randn(5, 3, 224, 224, device="cuda")
 # x = torch.randn(1, 32, device="cuda")
 rn18 = rn18.cuda()
 
-print("benchmarking")
 import time
 NITER = 100
 
-# torch.cuda.synchronize()
-# s = time.time()
-# for _ in range(NITER):
-#     fp16_trt(x)
-#     torch.cuda.synchronize()
-# print('trt fp16 time (ms/iter)', (time.time() - s) / NITER * 1000)
+torch.cuda.synchronize()
+s = time.time()
+for _ in range(NITER):
+    fp16_trt(x)
+    torch.cuda.synchronize()
+print('trt fp16 time (ms/iter)', (time.time() - s) / NITER * 1000)
 
 torch.cuda.synchronize()
 s = time.time()
