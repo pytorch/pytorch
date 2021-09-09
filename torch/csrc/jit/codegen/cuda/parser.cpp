@@ -659,7 +659,7 @@ class IrParser {
                     value_map[node->input(3)->unique()]->as<TensorView>();
                 TORCH_INTERNAL_ASSERT(
                     fusion->hasInput(running_mean),
-                    "IO_tensor `batch_norm::running_mean` can only be input tensor to fusion");
+                    "IO_tensor `instance_norm::running_mean` can only be input tensor to fusion");
               }
 
               TensorView* running_var = nullptr;
@@ -669,7 +669,7 @@ class IrParser {
                     value_map[node->input(4)->unique()]->as<TensorView>();
                 TORCH_INTERNAL_ASSERT(
                     fusion->hasInput(running_var),
-                    "IO_tensor `batch_norm::running_var` can only be input tensor to fusion");
+                    "IO_tensor `instance_norm::running_var` can only be input tensor to fusion");
               }
 
               // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
@@ -2059,26 +2059,6 @@ bool insertProfileIValue(ProfilingRecord* pr, Node* node, size_t offset) {
     switch (offset) {
       case 1:
         profileIntList(pr, node, offset);
-        break;
-      default:
-        return false;
-    }
-    return true;
-  }
-
-  static auto native_batch_norm_backward_schema =
-      getOperatorForLiteral(
-          "aten::native_batch_norm_backward(Tensor grad_out, Tensor input, Tensor? weight, Tensor? running_mean, Tensor? running_var, Tensor? save_mean, Tensor? save_invstd, bool train, float eps, bool[3] output_mask) -> (Tensor, Tensor, Tensor)")
-          ->schema();
-  if (node->matches(native_batch_norm_backward_schema)) {
-    switch (offset) {
-      // argument 7: training;
-      case 7:
-        profileBool(pr, node, offset);
-        break;
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-      case 9:
-        profileBoolList(pr, node, offset);
         break;
       default:
         return false;

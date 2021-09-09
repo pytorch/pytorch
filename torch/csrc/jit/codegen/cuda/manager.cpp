@@ -6,10 +6,11 @@
 #include <torch/csrc/jit/codegen/cuda/manager.h>
 #include <torch/csrc/jit/codegen/cuda/parser.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler/all_schedulers.h>
-#include <torch/csrc/jit/codegen/cuda/shape_inference.h>
+#include <torch/csrc/jit/codegen/cuda/type_inference.h>
 #include <torch/csrc/jit/codegen/cuda/utils.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
+#include <torch/csrc/jit/passes/symbolic_shape_analysis.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
 
@@ -237,6 +238,7 @@ void compileCudaFusionGroup(Node* fusion_node) {
     // Note that even for Profiling Executor, scalar type could still be
     // missing, especially for output tensor from a given node (as profiling
     // node only insert meta information after itself).
+    PropagateShapesOnGraph(graph);
     TypePropagate(graph);
 
     int32_t fusion_cache_id =

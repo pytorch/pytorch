@@ -412,7 +412,7 @@ def find_changed_lines(diff: str) -> Dict[str, List[Tuple[int, int]]]:
             if end == 0:
                 continue
 
-            files[file.path].append((start, end))
+            files[file.target_file[2:]].append((start, end))
 
     return dict(files)
 
