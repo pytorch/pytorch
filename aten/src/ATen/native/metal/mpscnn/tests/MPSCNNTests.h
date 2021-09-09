@@ -40,6 +40,7 @@ bool test_log_softmax();
 bool test_softmax();
 bool test_sigmoid();
 bool test_hardsigmoid();
+bool test_hardswish_();
 bool test_hardswish();
 bool test_upsampling_nearest2d_vec();
 bool test_upsampling_nearest2d_vec2();
