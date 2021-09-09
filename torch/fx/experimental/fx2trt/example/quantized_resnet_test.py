@@ -39,7 +39,8 @@ def build_int8_trt(rn18):
 
     quantized_rn18 = acc_tracer.trace(quantized_rn18, [data])  # type: ignore[attr-defined]
     interp = TRTInterpreter(
-        quantized_rn18, [InputTensorSpec([-1, *data.shape[1:]], torch.float, shape_ranges=[((1, 3, 224, 224), (5, 3, 224, 224), (10, 3, 224, 224))], has_batch_dim=True)],
+        quantized_rn18, [InputTensorSpec(torch.Size([-1, *data.shape[1:]]), torch.float,
+        shape_ranges=[((1, 3, 224, 224), (5, 3, 224, 224), (10, 3, 224, 224))], has_batch_dim=True)],
         explicit_batch_dimension=True, explicit_precision=True)
     engine, input_names, output_names = interp.run(fp16_mode=False, int8_mode=True)
     trt_mod = TRTModule(engine, input_names, output_names)
