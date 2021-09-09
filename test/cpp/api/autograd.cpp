@@ -876,7 +876,7 @@ TEST(CustomAutogradTest, BackwardWithCreateGraphWarns) {
  * - Check that we created the NotImplemented kernel when inputs require grad
  *   but when no inputs require grad, we should not create this node
  * - check_inplace logic
- * - view ops (TODO: not an official view yet, update this once InplaceOrView kernel is landed)
+ * - view ops
  * - TODO: Tests for NDEBUG checks?
  * - tensorlist input and output
  * - multiple outputs / non-tensor output
@@ -923,8 +923,12 @@ std::tuple<torch::Tensor, torch::Tensor, int64_t> ret_tuple_non_tensor(const tor
   return std::tuple<torch::Tensor, torch::Tensor, int64_t>(a, b, 12);
 }
 
-torch::Tensor view_op(const torch::Tensor& self, const torch::Tensor& other) {
-  return self.view(-1);
+torch::Tensor view_op(const torch::Tensor& self) {
+  return self;
+}
+
+torch::Tensor view_op_with_extra_arg(const torch::Tensor& self, const torch::Tensor& other) {
+  return self;
 }
 
 std::vector<at::Tensor> ret_tensor_vector(const torch::Tensor& self, const torch::Tensor& other) {
@@ -947,8 +951,10 @@ torch::Tensor tensorlist_op(const torch::Tensor& self, at::TensorList other) {
   m.def(schema);                                                                         \
   auto m_autograd = MAKE_TORCH_LIBRARY_IMPL(_test, Autograd);                            \
   auto m_cpu = MAKE_TORCH_LIBRARY_IMPL(_test, CPU);                                      \
+  auto m_inplaceorview = MAKE_TORCH_LIBRARY_IMPL(_test, ADInplaceOrView);                \
   m_cpu.impl(name, c10::DispatchKey::CPU, TORCH_FN(fn));                                 \
-  m_autograd.impl(name, c10::DispatchKey::Autograd, autogradNotImplementedFallback());
+  m_autograd.impl(name, c10::DispatchKey::Autograd, autogradNotImplementedFallback());   \
+  m_inplaceorview.impl(name, c10::DispatchKey::ADInplaceOrView, autogradNotImplementedInplaceOrViewFallback());
 
 template <typename F>
 void assertBasicChecks(F op) {
@@ -1027,10 +1033,7 @@ TEST(TestAutogradNotImplementedFallback, InplaceOp) {
 
   ASSERT_THROWS_WITH(op(v_nograd, t), "A view was created in no_grad mode");
   ASSERT_EQ(op(view, t).unsafeGetTensorImpl(), view.unsafeGetTensorImpl());
-
-  // TODO: once we have InplaceOrView kernel, renable this since version counter would actually
-  // be incremented
-  // ASSERT_THAT(op(view, t).grad_fn()->name(), ::testing::HasSubstr("AsStridedBackward"));
+  ASSERT_THAT(op(view, t).grad_fn()->name(), ::testing::HasSubstr("AsStridedBackward"));
 }
 
 TEST(TestAutogradNotImplementedFallback, DoubleInplaceOp) {
@@ -1047,6 +1050,15 @@ TEST(TestAutogradNotImplementedFallback, DoubleInplaceOp) {
     "a leaf Variable that requires grad is being used in an in-place operation");
   ASSERT_THROWS_WITH(op(b, a),
     "a leaf Variable that requires grad is being used in an in-place operation");
+
+  auto c = torch::tensor({1.}, {torch::kFloat32}).set_requires_grad(true).clone();
+  auto d = torch::tensor({1.}, {torch::kFloat32}).set_requires_grad(true).clone();
+
+  auto saved_version_c = c._version();
+  auto saved_version_d = d._version();
+  op(c, d);
+  ASSERT_NE(c._version(), saved_version_c);
+  ASSERT_NE(d._version(), saved_version_d);
 }
 
 TEST(TestAutogradNotImplementedFallback, OptOp) {
@@ -1089,12 +1101,43 @@ TEST(TestAutogradNotImplementedFallback, RetTupleNonTensor) {
 }
 
 TEST(TestAutogradNotImplementedFallback, ViewOp) {
-  REGISTER_TEST_OP("view_op", "_test::view_op(Tensor(a) self, Tensor other) -> Tensor(a)", view_op);
+  REGISTER_TEST_OP("view_op", "_test::view_op(Tensor(a) self) -> Tensor(a)", view_op);
   auto opHandle = c10::Dispatcher::singleton().findSchemaOrThrow("_test::view_op", "");
+  auto op = [&](const torch::Tensor& _1) {
+    return callOpUnboxed<torch::Tensor, const torch::Tensor&>(opHandle, _1);
+  };
+  auto b = torch::tensor({1.}, {torch::kFloat32});
+  auto v = op(b);
+  ASSERT_TRUE(v.is_view());
+  ASSERT_EQ(v._base().unsafeGetTensorImpl(), b.unsafeGetTensorImpl());
+
+  auto b1 = torch::tensor({1.}, {torch::kFloat32}).set_requires_grad(true).clone();
+  auto v1 = op(b1);
+  ASSERT_TRUE(v1.is_view());
+  ASSERT_EQ(v1._base().unsafeGetTensorImpl(), b1.unsafeGetTensorImpl());
+
+  // Test inplace on view
+  auto t = torch::tensor({1.}, {torch::kFloat32}).set_requires_grad(true);
+
+  // raise on rebase_history when it refreshes grad_fn
+  ASSERT_THROWS_WITH(v1.add_(t), "which does not have a derivative implemented is forbidden");
+  // base should not be aware of the views, so this is still okay
+  b1.add_(t);
+  ASSERT_THROWS_WITH(v1.grad_fn(), "which does not have a derivative implemented is forbidden");
+}
+
+TEST(TestAutogradNotImplementedFallback, ViewOpWithExtraArg) {
+  REGISTER_TEST_OP("view_op_with_extra_arg", "_test::view_op_with_extra_arg(Tensor(a) self, Tensor other) -> Tensor(a)", view_op_with_extra_arg);
+  auto opHandle = c10::Dispatcher::singleton().findSchemaOrThrow("_test::view_op_with_extra_arg", "");
   auto op = [&](const torch::Tensor& _1, const torch::Tensor& _2) {
     return callOpUnboxed<torch::Tensor, const torch::Tensor&, const torch::Tensor&>(opHandle, _1, _2);
   };
   assertBasicChecks(op);
+  auto a = torch::tensor({1.}, {torch::kFloat32});
+  auto b = torch::tensor({2.}, {torch::kFloat32});
+  auto out1 = op(a, b);
+  ASSERT_TRUE(out1.is_view());
+  ASSERT_EQ(out1._base().unsafeGetTensorImpl(), a.unsafeGetTensorImpl());
 }
 
 TEST(TestAutogradNotImplementedFallback, RetTensorVector) {
