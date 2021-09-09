@@ -377,9 +377,9 @@ bool matmulIsSupported(const torch::jit::Node* node) {
 void annotateInputShapes(
     const std::shared_ptr<Graph>& graph,
     const std::vector<c10::optional<at::Tensor>>& example_inputs) {
-  TORCH_INTERNAL_ASSERT(
-      graph->inputs().size() == example_inputs.size(),
-      buildErrorMessage("Given inputs do not match the fuser graph inputs."));
+  // TORCH_INTERNAL_ASSERT(
+  //    graph->inputs().size() == example_inputs.size(),
+  //    buildErrorMessage("Given inputs do not match the fuser graph inputs."));
   for (size_t idx = 0; idx < example_inputs.size(); idx++) {
     if (auto t = example_inputs[idx]) {
       auto concrete_tensor_type = tensorTypeInCurrentExecutionContext(*t);
@@ -2523,6 +2523,12 @@ Tensor tensorexpr::computeOperandValue(
     case aten::adaptive_avg_pool2d: {
       return computeAdaptiveAvgPool2d(inputs, outputShape, outputType);
     } break;
+    case aten::quantize_per_tensor: {
+      return computeQuantizePerTensor(inputs, outputShape, outputType);
+    } break;
+    case aten::dequantize: {
+      return computeDequantize(inputs, outputShape, outputType);
+    } break;
   }
   std::string msg =
       std::string("Unhandled node kind (in computeOperandValue): ") +
@@ -3149,7 +3155,6 @@ void TensorExprKernel::bindConstant(const torch::jit::Value* v) {
   for (auto s : sizes) {
     te_sizes.push_back(s);
   }
-
   BufPtr buf = alloc<Buf>(
       "const_" + sanitizeName(v->debugName()),
       ExprHandleVectorToExprVector(te_sizes),
