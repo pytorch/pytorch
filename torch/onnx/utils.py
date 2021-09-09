@@ -682,8 +682,8 @@ def _setup_trace_module_map(model, export_modules_as_functions):
         export_modules_as_functions = {v for k, v in trace_module_map.items()}
     elif isinstance(export_modules_as_functions, set) and len(export_modules_as_functions) > 0:
         trace_module_map = __setup_trace_module_map()
-        module_typenames = {torch.typename(v) if isinstance(v, (torch.nn.Module, type)) else v \
-                for v in export_modules_as_functions}
+        module_typenames = {torch.typename(v) if isinstance(v, (torch.nn.Module, type)) else v
+                            for v in export_modules_as_functions}
         export_modules_as_functions = module_typenames
     else:
         export_modules_as_functions = None
