@@ -10,6 +10,7 @@
 #include <torch/csrc/jit/frontend/source_range.h>
 
 C10_DECLARE_bool(torch_jit_disable_warning_prints);
+C10_DECLARE_bool(torch_jit_enable_rethrow_caught_exception);
 
 namespace at {
 class Tensor;
@@ -81,6 +82,7 @@ struct TORCH_API MobileCode : Code {
       const std::shared_ptr<Graph>& graph,
       std::string function_name,
       bool emit_default_input_instructions = true,
+      bool support_default_args_before_out = false,
       size_t remaining_bailout_depth = 0);
   ~MobileCode();
 };
@@ -153,6 +155,7 @@ TORCH_API at::TensorTypePtr tensorTypeInCurrentExecutionContext(
 
 // current (TLS) TorchScript interpreter callstack
 TORCH_API std::vector<StackEntry> currentCallstack();
+TORCH_API std::vector<std::string> currentModuleHierarchy();
 
 } // namespace jit
 } // namespace torch
