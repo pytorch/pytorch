@@ -7090,6 +7090,7 @@ op_db: List[OpInfo] = [
            # This causes vmap failures, hence we skip batched gradient checks
            check_batched_grad=False,
            check_batched_gradgrad=False,
+           supports_forward_ad=True,
            supports_out=False,
            sample_inputs_func=sample_inputs_lu,
            decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, skipCPUIfNoLapack],
