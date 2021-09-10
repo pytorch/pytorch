@@ -613,6 +613,10 @@ Tensor& floor_divide_(Tensor& self, const Tensor& other) {
 // TODO: Make this structured to undo the perf regression from native:: removal
 // in call here
 Tensor mul(const Tensor& self, const Scalar& other) {
+  // prob ok if self never requires grad
+  if (self.is_zerotensor()) {
+    return self;
+  }
   return at::mul(self, wrapped_scalar_tensor(other)); // redispatch!
 }
 

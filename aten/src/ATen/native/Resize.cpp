@@ -27,8 +27,7 @@ bool resize_output_check(const Tensor& output, IntArrayRef shape) {
 
 static auto kFunctorchWrappedTensors = DispatchKeySet({
     DispatchKey::FuncTorchGradWrapper,
-    DispatchKey::FuncTorchBatched,
-    DispatchKey::FuncTorchPython});
+    DispatchKey::FuncTorchBatched});
 
 static bool is_functorch_wrapped_tensor(const Tensor& tensor) {
   auto key_set = tensor.unsafeGetTensorImpl()->key_set();

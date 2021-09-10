@@ -109,6 +109,9 @@ const char* toString(DispatchKey t) {
       return "AutogradPrivateUse3";
     case DispatchKey::AutogradOther:
       return "AutogradOther";
+
+    case DispatchKey::ZeroTensor:
+      return "ZeroTensor";
     case DispatchKey::BackendSelect:
       return "BackendSelect";
     case DispatchKey::Named:
@@ -144,8 +147,6 @@ const char* toString(DispatchKey t) {
     // https://github.com/zou3519/functorch
     // We plan on eventually upstreaming the prototype into core, at which
     // point it will have a different design that should use fewer keys.
-    case DispatchKey::FuncTorchPython:
-      return "FuncTorchPython";
     case DispatchKey::FuncTorchDynamicLayerBackMode:
       return "FuncTorchDynamicLayerBackMode";
     case DispatchKey::FuncTorchDynamicLayerFrontMode:

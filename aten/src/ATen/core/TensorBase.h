@@ -300,6 +300,14 @@ class TORCH_API TensorBase {
     return impl_->storage().is_alias_of(other.storage());
   }
 
+  inline bool is_zerotensor() const {
+    return impl_->is_zerotensor();
+  }
+
+  inline void _set_zero(bool zero) const {
+    impl_->_set_zero(zero);
+  }
+
   inline bool is_conj() const {
     return impl_->is_conj();
   }
