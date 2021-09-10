@@ -2135,9 +2135,9 @@ class TestCase(expecttest.TestCase):
         (stdout, stderr) = popen.communicate()
         return (stdout, stderr)
 
-    # returns captured stderr or stdout
+    # returns captured stderr
     @staticmethod
-    def _runWithPytorchAPIUsageOutput(code, select_stderr=True):
+    def runWithPytorchAPIUsageStderr(code):
         env = os.environ.copy()
         env["PYTORCH_API_USAGE_STDERR"] = "1"
         # remove IN_CI flag since this is a wrapped test process.
@@ -2145,15 +2145,7 @@ class TestCase(expecttest.TestCase):
         if "IN_CI" in env.keys():
             del env["IN_CI"]
         (stdout, stderr) = TestCase.run_process_no_exception(code, env=env)
-        return stderr.decode('ascii') if select_stderr else stdout.decode('ascii')
-
-    @staticmethod
-    def runWithPytorchAPIUsageStderr(code):
-        return TestCase._runWithPytorchAPIUsageOutput(code, select_stderr=True)
-
-    @staticmethod
-    def runWithPytorchAPIUsageStdout(code):
-        return TestCase._runWithPytorchAPIUsageOutput(code, select_stderr=False)
+        return stderr.decode('ascii')
 
 
 def download_file(url, binary=True):

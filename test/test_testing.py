@@ -18,7 +18,7 @@ from torch.testing._internal.common_utils import \
 from torch.testing._internal.common_device_type import \
     (PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY, PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY, dtypes,
      get_device_type_test_bases, instantiate_device_type_tests, onlyCUDA, onlyOnCPUAndCUDA,
-     deviceCountAtLeast)
+     deviceCountAtLeast, ops)
 from torch.testing._internal.common_methods_invocations import op_db
 import torch.testing._internal.opinfo_helper as opinfo_helper
 from torch.testing._internal.common_dtype import get_all_dtypes
@@ -1427,44 +1427,27 @@ class TestAssertCloseQuantized(TestCase):
             fn()
 
 
-def _get_test_names_for_test_class(class_code):
-    """ Convenience function that returns test names given code for a test class. """
-
-    # Indent class code to fit with below template.
-    indented_code = textwrap.dedent(class_code)
-    stdout = TestCase.runWithPytorchAPIUsageStdout("""\
-#!/usr/bin/env python3
-
-import torch
-import unittest
-from torch.testing._internal.common_device_type import instantiate_device_type_tests, ops
-from torch.testing._internal.common_utils import (run_tests, parametrize,
-    instantiate_parametrized_tests, _print_test_names, subtest)
-from torch.testing._internal.common_distributed import TestCase
-from torch.testing._internal.common_methods_invocations import op_db
-
-{}
-
-if __name__ == '__main__':
-    _print_test_names()
-""".format(indented_code)).strip()
-    test_names = [line.strip() for line in stdout.split('\n')]
-    return test_names
+def _get_test_names_for_test_class(test_cls):
+    """ Convenience function to get all test names for a given test class. """
+    test_names = ['{}.{}'.format(test_cls.__name__, key) for key in test_cls.__dict__
+                  if key.startswith('test_')]
+    return sorted(test_names)
 
 
 class TestTestParametrization(TestCase):
     def test_default_names(self):
-        test_names = _get_test_names_for_test_class("""
-            class TestParametrized(TestCase):
-                @parametrize("x", range(5))
-                def test_default_names(self, x):
-                    pass
 
-                @parametrize("x,y", [(1, 2), (2, 3), (3, 4)])
-                def test_two_things_default_names(self, x, y):
-                    pass
+        class TestParametrized(TestCase):
+            @parametrize("x", range(5))
+            def test_default_names(self, x):
+                pass
 
-            instantiate_parametrized_tests(TestParametrized)""")
+            @parametrize("x,y", [(1, 2), (2, 3), (3, 4)])
+            def test_two_things_default_names(self, x, y):
+                pass
+
+        instantiate_parametrized_tests(TestParametrized)
+
         expected_test_names = [
             'TestParametrized.test_default_names_x_0',
             'TestParametrized.test_default_names_x_1',
@@ -1475,26 +1458,28 @@ class TestTestParametrization(TestCase):
             'TestParametrized.test_two_things_default_names_x_2_y_3',
             'TestParametrized.test_two_things_default_names_x_3_y_4',
         ]
+        test_names = _get_test_names_for_test_class(TestParametrized)
         self.assertEqual(expected_test_names, test_names)
 
     def test_name_fn(self):
-        test_names = _get_test_names_for_test_class("""
-            class TestParametrized(TestCase):
-                @parametrize("bias", [False, True], name_fn=lambda b: 'bias' if b else 'no_bias')
-                def test_custom_names(self, bias):
-                    pass
 
-                @parametrize("x", [1, 2], name_fn=str)
-                @parametrize("y", [3, 4], name_fn=str)
-                @parametrize("z", [5, 6], name_fn=str)
-                def test_three_things_composition_custom_names(self, x, y, z):
-                    pass
+        class TestParametrized(TestCase):
+            @parametrize("bias", [False, True], name_fn=lambda b: 'bias' if b else 'no_bias')
+            def test_custom_names(self, bias):
+                pass
 
-                @parametrize("x,y", [(1, 2), (1, 3), (1, 4)], name_fn=lambda x, y: '{}__{}'.format(x, y))
-                def test_two_things_custom_names_alternate(self, x, y):
-                    pass
+            @parametrize("x", [1, 2], name_fn=str)
+            @parametrize("y", [3, 4], name_fn=str)
+            @parametrize("z", [5, 6], name_fn=str)
+            def test_three_things_composition_custom_names(self, x, y, z):
+                pass
 
-            instantiate_parametrized_tests(TestParametrized)""")
+            @parametrize("x,y", [(1, 2), (1, 3), (1, 4)], name_fn=lambda x, y: '{}__{}'.format(x, y))
+            def test_two_things_custom_names_alternate(self, x, y):
+                pass
+
+        instantiate_parametrized_tests(TestParametrized)
+
         expected_test_names = [
             'TestParametrized.test_custom_names_bias',
             'TestParametrized.test_custom_names_no_bias',
@@ -1510,23 +1495,25 @@ class TestTestParametrization(TestCase):
             'TestParametrized.test_two_things_custom_names_alternate_1__3',
             'TestParametrized.test_two_things_custom_names_alternate_1__4',
         ]
+        test_names = _get_test_names_for_test_class(TestParametrized)
         self.assertEqual(expected_test_names, test_names)
 
     def test_subtest_names(self):
-        test_names = _get_test_names_for_test_class("""
-            class TestParametrized(TestCase):
-                @parametrize("bias", [subtest(True, name='bias'),
-                                      subtest(False, name='no_bias')])
-                def test_custom_names(self, bias):
-                    pass
 
-                @parametrize("x,y", [subtest((1, 2), name='double'),
-                                     subtest((1, 3), name='triple'),
-                                     subtest((1, 4), name='quadruple')])
-                def test_two_things_custom_names(self, x, y):
-                    pass
+        class TestParametrized(TestCase):
+            @parametrize("bias", [subtest(True, name='bias'),
+                                  subtest(False, name='no_bias')])
+            def test_custom_names(self, bias):
+                pass
 
-            instantiate_parametrized_tests(TestParametrized)""")
+            @parametrize("x,y", [subtest((1, 2), name='double'),
+                                 subtest((1, 3), name='triple'),
+                                 subtest((1, 4), name='quadruple')])
+            def test_two_things_custom_names(self, x, y):
+                pass
+
+        instantiate_parametrized_tests(TestParametrized)
+
         expected_test_names = [
             'TestParametrized.test_custom_names_bias',
             'TestParametrized.test_custom_names_no_bias',
@@ -1534,6 +1521,7 @@ class TestTestParametrization(TestCase):
             'TestParametrized.test_two_things_custom_names_quadruple',
             'TestParametrized.test_two_things_custom_names_triple',
         ]
+        test_names = _get_test_names_for_test_class(TestParametrized)
         self.assertEqual(expected_test_names, test_names)
 
     @parametrize("x", [1, subtest(2, decorators=[unittest.expectedFailure]), 3])
@@ -1551,27 +1539,31 @@ class TestTestParametrization(TestCase):
 class TestTestParametrizationDeviceType(TestCase):
     def test_default_names(self, device):
         device = self.device_type
-        test_names = _get_test_names_for_test_class("""
-            class TestParametrized(TestCase):
-                @parametrize("x", range(5))
-                def test_default_names(self, device, x):
-                    pass
 
-                @parametrize("x,y", [(1, 2), (2, 3), (3, 4)])
-                def test_two_things_default_names(self, device, x, y):
-                    pass
+        class TestParametrized(TestCase):
+            @parametrize("x", range(5))
+            def test_default_names(self, device, x):
+                pass
 
-            instantiate_device_type_tests(TestParametrized, globals(), only_for='{}')""".format(device))
-        expected_test_names = [name.format(device.upper(), device) for name in (
-            'TestParametrized{}.test_default_names_x_0_{}',
-            'TestParametrized{}.test_default_names_x_1_{}',
-            'TestParametrized{}.test_default_names_x_2_{}',
-            'TestParametrized{}.test_default_names_x_3_{}',
-            'TestParametrized{}.test_default_names_x_4_{}',
-            'TestParametrized{}.test_two_things_default_names_x_1_y_2_{}',
-            'TestParametrized{}.test_two_things_default_names_x_2_y_3_{}',
-            'TestParametrized{}.test_two_things_default_names_x_3_y_4_{}')
+            @parametrize("x,y", [(1, 2), (2, 3), (3, 4)])
+            def test_two_things_default_names(self, device, x, y):
+                pass
+
+
+        instantiate_device_type_tests(TestParametrized, locals(), only_for=device)
+
+        device_cls = locals()['TestParametrized{}'.format(device.upper())]
+        expected_test_names = [name.format(device_cls.__name__, device) for name in (
+            '{}.test_default_names_x_0_{}',
+            '{}.test_default_names_x_1_{}',
+            '{}.test_default_names_x_2_{}',
+            '{}.test_default_names_x_3_{}',
+            '{}.test_default_names_x_4_{}',
+            '{}.test_two_things_default_names_x_1_y_2_{}',
+            '{}.test_two_things_default_names_x_2_y_3_{}',
+            '{}.test_two_things_default_names_x_3_y_4_{}')
         ]
+        test_names = _get_test_names_for_test_class(device_cls)
         self.assertEqual(expected_test_names, test_names)
 
     # Note: Currently, the device string is inserted into the name multiple times.
@@ -1582,63 +1574,69 @@ class TestTestParametrizationDeviceType(TestCase):
     @unittest.expectedFailure
     def test_name_fn(self, device):
         device = self.device_type
-        test_names = _get_test_names_for_test_class("""
-            class TestParametrized(TestCase):
-                @parametrize("bias", [False, True], name_fn=lambda b: 'bias' if b else 'no_bias')
-                def test_custom_names(self, device, bias):
-                    pass
 
-                @parametrize("x", [1, 2], name_fn=str)
-                @parametrize("y", [3, 4], name_fn=str)
-                @parametrize("z", [5, 6], name_fn=str)
-                def test_three_things_composition_custom_names(self, device, x, y, z):
-                    pass
+        class TestParametrized(TestCase):
+            @parametrize("bias", [False, True], name_fn=lambda b: 'bias' if b else 'no_bias')
+            def test_custom_names(self, device, bias):
+                pass
 
-                @parametrize("x,y", [(1, 2), (1, 3), (1, 4)], name_fn=lambda x, y: '{}__{}'.format(x, y))
-                def test_two_things_custom_names_alternate(self, device, x, y):
-                    pass
+            @parametrize("x", [1, 2], name_fn=str)
+            @parametrize("y", [3, 4], name_fn=str)
+            @parametrize("z", [5, 6], name_fn=str)
+            def test_three_things_composition_custom_names(self, device, x, y, z):
+                pass
 
-            instantiate_device_type_tests(TestParametrized, globals(), only_for='""" + device + "')")
-        expected_test_names = [name.format(device.upper(), device) for name in (
-            'TestParametrized{}.test_custom_names_bias_{}',
-            'TestParametrized{}.test_custom_names_no_bias_{}',
-            'TestParametrized{}.test_three_things_composition_custom_names_1_3_5_{}',
-            'TestParametrized{}.test_three_things_composition_custom_names_1_3_6_{}',
-            'TestParametrized{}.test_three_things_composition_custom_names_1_4_5_{}',
-            'TestParametrized{}.test_three_things_composition_custom_names_1_4_6_{}',
-            'TestParametrized{}.test_three_things_composition_custom_names_2_3_5_{}',
-            'TestParametrized{}.test_three_things_composition_custom_names_2_3_6_{}',
-            'TestParametrized{}.test_three_things_composition_custom_names_2_4_5_{}',
-            'TestParametrized{}.test_three_things_composition_custom_names_2_4_6_{}',
-            'TestParametrized{}.test_two_things_custom_names_alternate_1__2_{}',
-            'TestParametrized{}.test_two_things_custom_names_alternate_1__3_{}',
-            'TestParametrized{}.test_two_things_custom_names_alternate_1__4_{}')
+            @parametrize("x,y", [(1, 2), (1, 3), (1, 4)], name_fn=lambda x, y: '{}__{}'.format(x, y))
+            def test_two_things_custom_names_alternate(self, device, x, y):
+                pass
+
+        instantiate_device_type_tests(TestParametrized, locals(), only_for=device)
+
+        device_cls = locals()['TestParametrized{}'.format(device.upper())]
+        expected_test_names = [name.format(device_cls.__name__, device) for name in (
+            '{}.test_custom_names_bias_{}',
+            '{}.test_custom_names_no_bias_{}',
+            '{}.test_three_things_composition_custom_names_1_3_5_{}',
+            '{}.test_three_things_composition_custom_names_1_3_6_{}',
+            '{}.test_three_things_composition_custom_names_1_4_5_{}',
+            '{}.test_three_things_composition_custom_names_1_4_6_{}',
+            '{}.test_three_things_composition_custom_names_2_3_5_{}',
+            '{}.test_three_things_composition_custom_names_2_3_6_{}',
+            '{}.test_three_things_composition_custom_names_2_4_5_{}',
+            '{}.test_three_things_composition_custom_names_2_4_6_{}',
+            '{}.test_two_things_custom_names_alternate_1__2_{}',
+            '{}.test_two_things_custom_names_alternate_1__3_{}',
+            '{}.test_two_things_custom_names_alternate_1__4_{}')
         ]
+        test_names = _get_test_names_for_test_class(device_cls)
         self.assertEqual(expected_test_names, test_names)
 
     def test_subtest_names(self, device):
         device = self.device_type
-        test_names = _get_test_names_for_test_class("""
-            class TestParametrized(TestCase):
-                @parametrize("bias", [subtest(True, name='bias'),
-                                      subtest(False, name='no_bias')])
-                def test_custom_names(self, device, bias):
-                    pass
 
-                @parametrize("x,y", [subtest((1, 2), name='double'),
-                                     subtest((1, 3), name='triple'),
-                                     subtest((1, 4), name='quadruple')])
-                def test_two_things_custom_names(self, device, x, y):
-                    pass
+        class TestParametrized(TestCase):
+            @parametrize("bias", [subtest(True, name='bias'),
+                                  subtest(False, name='no_bias')])
+            def test_custom_names(self, device, bias):
+                pass
 
-            instantiate_device_type_tests(TestParametrized, globals(), only_for='{}')""".format(device))
-        expected_test_names = [name.format(device.upper(), device) for name in (
-            'TestParametrized{}.test_custom_names_bias_{}',
-            'TestParametrized{}.test_custom_names_no_bias_{}',
-            'TestParametrized{}.test_two_things_custom_names_double_{}',
-            'TestParametrized{}.test_two_things_custom_names_quadruple_{}',
-            'TestParametrized{}.test_two_things_custom_names_triple_{}')
+            @parametrize("x,y", [subtest((1, 2), name='double'),
+                                 subtest((1, 3), name='triple'),
+                                 subtest((1, 4), name='quadruple')])
+            def test_two_things_custom_names(self, device, x, y):
+                pass
+
+        instantiate_device_type_tests(TestParametrized, locals(), only_for=device)
+
+        device_cls = locals()['TestParametrized{}'.format(device.upper())]
+        expected_test_names = [name.format(device_cls.__name__, device) for name in (
+            '{}.test_custom_names_bias_{}',
+            '{}.test_custom_names_no_bias_{}',
+            '{}.test_two_things_custom_names_double_{}',
+            '{}.test_two_things_custom_names_quadruple_{}',
+            '{}.test_two_things_custom_names_triple_{}')
         ]
+        test_names = _get_test_names_for_test_class(device_cls)
         self.assertEqual(expected_test_names, test_names)
 
     # Note: Currently, the device string is inserted into the name multiple times.
@@ -1649,22 +1647,25 @@ class TestTestParametrizationDeviceType(TestCase):
     @unittest.expectedFailure
     def test_ops_composition_names(self, device):
         device = self.device_type
-        test_names = _get_test_names_for_test_class("""
-            class TestParametrized(TestCase):
-                @ops(op_db)
-                @parametrize("flag", [False, True], lambda f: 'flag_enabled' if f else 'flag_disabled')
-                def test_op_parametrized(self, device, dtype, op, flag):
-                    pass
 
-            instantiate_device_type_tests(TestParametrized, globals(), only_for='{}')""".format(device))
+        class TestParametrized(TestCase):
+            @ops(op_db)
+            @parametrize("flag", [False, True], lambda f: 'flag_enabled' if f else 'flag_disabled')
+            def test_op_parametrized(self, device, dtype, op, flag):
+                pass
 
+        instantiate_device_type_tests(TestParametrized, locals(), only_for=device)
+
+        device_cls = locals()['TestParametrized{}'.format(device.upper())]
         expected_test_names = []
         for op in op_db:
             for dtype in op.default_test_dtypes(device):
                 for flag_part in ('_flag_disabled_', '_flag_enabled_'):
                     op_name = '{}{}'.format(op.name, '_' + op.variant_test_name if op.variant_test_name else '')
-                    part1 = 'TestParametrized{}.test_op_parametrized_{}'.format(device.upper(), op_name)
+                    part1 = '{}.test_op_parametrized_{}'.format(device_cls.__name__, op_name)
                     expected_test_names.append(part1 + '_' + dtype_name(dtype) + flag_part + device)
+
+        test_names = _get_test_names_for_test_class(device_cls)
         self.assertEqual(sorted(expected_test_names), sorted(test_names))
 
 
