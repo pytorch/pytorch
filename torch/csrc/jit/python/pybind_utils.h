@@ -724,7 +724,7 @@ inline py::object toPyObject(IValue ivalue) {
         tuple->type()->schema()->name() != "") {
       auto unqualName = tuple->type()->name()->name();
 
-      const std::vector<Argument>& tuple_args =
+      const auto& tuple_args =
           tuple->type()->schema()->arguments();
 
       std::vector<pybind11::object> defaults;
