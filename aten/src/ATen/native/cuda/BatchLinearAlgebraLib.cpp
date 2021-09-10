@@ -632,28 +632,25 @@ std::tuple<Tensor, Tensor, Tensor> _svd_helper_cuda_lib(const Tensor& self, bool
   // heuristic for using `gesvdjBatched` over `gesvdj`
   if (m <= 32 && n <= 32 && batch_size > 1 && (!some || m == n)) {
     apply_svd_lib_gesvdjBatched(self, U_working_copy, S_working_copy, VT_working_copy, infos, compute_uv);
+  } else {
+    apply_svd_lib_gesvdj(self, U_working_copy, S_working_copy, VT_working_copy, infos, compute_uv, some);
+  }
+
+  // A device-host sync will be performed.
+  std::vector<int64_t> gesvdj_convergence_check = _check_gesvdj_convergence(infos, std::min(m, n) + 1);
+
+  if (!gesvdj_convergence_check.empty()) {
+    // fall back to gesvd path for those non-converging batches
+
+    TORCH_WARN_ONCE("cuSOLVER SVD failed to converge for the given inputs. "
+                    "A more accurate method will be used to calculate the SVD as a fallback.");
+    apply_svd_lib_gesvd(self, U_working_copy, S_working_copy, VT_working_copy, infos, compute_uv, some,
+      /* calculate_all_batches = */ false,
+      /* batches = */ gesvdj_convergence_check
+      );
 
     // A device-host sync will be performed.
     batchCheckErrors(infos, "svd_cuda");
-  } else {
-    apply_svd_lib_gesvdj(self, U_working_copy, S_working_copy, VT_working_copy, infos, compute_uv, some);
-
-    // A device-host sync will be performed.
-    std::vector<int64_t> gesvdj_convergence_check = _check_gesvdj_convergence(infos, std::min(m, n) + 1);
-
-    if (!gesvdj_convergence_check.empty()) {
-      // fall back to gesvd path for those non-converging batches
-
-      TORCH_WARN_ONCE("cuSOLVER SVD failed to converge for the given inputs. "
-                      "A more accurate method will be used to calculate the SVD as a fallback.");
-      apply_svd_lib_gesvd(self, U_working_copy, S_working_copy, VT_working_copy, infos, compute_uv, some,
-        /* calculate_all_batches = */ false,
-        /* batches = */ gesvdj_convergence_check
-        );
-
-      // A device-host sync will be performed.
-      batchCheckErrors(infos, "svd_cuda");
-    }
   }
 
   // gesvdjBatched fails with illegal memory access and
