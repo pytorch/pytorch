@@ -154,10 +154,10 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalState {
             "Addr", std::to_string(reinterpret_cast<intptr_t>(ptr)));
         act.addMetadata("Bytes", std::to_string(alloc_size));
         if (total_allocated >= 0) {
-          act.addMetadata("Allocated Bytes", std::to_string(total_allocated));
+          act.addMetadata("Total Allocated", std::to_string(total_allocated));
         }
         if (total_reserved >= 0) {
-          act.addMetadata("Reserved Bytes", std::to_string(total_reserved));
+          act.addMetadata("Total Reserved", std::to_string(total_reserved));
         }
 #endif // USE_KINETO
 
