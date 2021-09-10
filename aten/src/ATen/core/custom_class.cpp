@@ -79,7 +79,7 @@ c10::FunctionSchema class_base::withNewArguments(
     const c10::FunctionSchema& schema,
     std::initializer_list<arg> default_args) {
   const auto& old_args = schema.arguments();
-  std::vector<c10::Argument> new_args;
+  c10::ArgumentVector new_args;
   new_args.reserve(old_args.size());
 
   new_args.emplace_back(old_args[0]);
