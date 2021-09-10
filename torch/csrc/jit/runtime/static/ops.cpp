@@ -1833,6 +1833,7 @@ REGISTER_OPERATOR_FUNCTOR(
           check_cat_no_zero_dim(inputs);
           dim = legacy_cat_wrap_dim(dim, inputs);
           auto& out_t = p_node->Output(0).toTensor();
+          fastResizeToZero(out_t);
           at::native::_cat_out_cpu(inputs, dim, out_t);
         }
       };
