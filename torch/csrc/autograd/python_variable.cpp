@@ -1252,6 +1252,17 @@ static PyObject* THPVariable_NewWithVar(
     PyTypeObject* type,
     Variable _var,
     c10::impl::PyInterpreterStatus status) {
+  // This function overwrite the Tensor's pyobj field without extra checks
+  // Make sure it is not set otherwise we would leak memory
+  auto mb_obj = _var.unsafeGetTensorImpl()->check_pyobj(self_interpreter.get());
+  TORCH_CHECK(!mb_obj.has_value() || !mb_obj.value(), "Creating a new Tensor subclass ",
+    type->tp_name, " but the raw Tensor object is already associated to a python object ",
+    "of type ", mb_obj.value()->ob_type->tp_name);
+
+  // Make sure that the reinterpret into a THPVariable* will be valid
+  TORCH_CHECK(PyType_IsSubtype(type, &THPVariableType), "Creating a Tensor subclass from a class ",
+    "that does not inherit from Tensor is not possible. Make sure your class inherits from Tensor.");
+
   PyObject* obj = type->tp_alloc(type, 0);
   if (obj) {
     auto v = (THPVariable*) obj;

@@ -519,6 +519,15 @@ class AbstractTestCases:
             # declared with requires_grad.
             self.assertTrue(t.grad is not None)
 
+            # Make sure invalid subclasses raise nice errors
+            class BadSubTensor():
+                member_var = object()
+
+            err_msg = "Creating a Tensor subclass from a class that does not inherit from Tensor"
+            with self.assertRaisesRegex(RuntimeError, err_msg):
+                s0 = t0.as_subclass(BadSubTensor)
+
+
         def test_type(self):
             x = torch.randn(3, 3).double()
             self.assertEqual(x.type('torch.FloatTensor').dtype, torch.float32)
