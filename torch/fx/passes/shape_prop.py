@@ -1,7 +1,7 @@
 import torch
 import torch.fx
 from torch.fx.node import Node, map_aggregate
-from typing import Any, Tuple, NamedTuple, Optional
+from typing import Any, Tuple, NamedTuple, Optional, Dict
 from torch.fx._compatibility import compatibility
 
 @compatibility(is_backward_compatible=True)
@@ -18,12 +18,7 @@ class TensorMetadata(NamedTuple):
 
     # Quantization metadata
     is_quantized : bool
-    qscheme : Optional[torch.qscheme]
-    q_scale : Optional[float]
-    q_zero_point : Optional[int]
-    q_per_channel_scales : Optional[torch.Tensor] = None
-    q_per_channel_zero_points : Optional[torch.Tensor] = None
-    q_per_channel_axis : Optional[int] = None
+    qparams: Optional[Dict[str, Any]]
 
 def _extract_tensor_metadata(result : torch.Tensor) -> TensorMetadata:
     """
@@ -48,7 +43,7 @@ def _extract_tensor_metadata(result : torch.Tensor) -> TensorMetadata:
             break
 
     is_quantized = result.is_quantized
-    qscheme = None
+    qparams = None
     q_scale = None
     q_zero_point = None
     q_per_channel_scales = None
@@ -56,20 +51,19 @@ def _extract_tensor_metadata(result : torch.Tensor) -> TensorMetadata:
     q_per_channel_axis = None
 
     if is_quantized:
-        qscheme = result.qscheme()
-
-        if qscheme in {torch.per_tensor_affine, torch.per_tensor_symmetric}:
-            q_scale = result.q_scale()
-            q_zero_point = result.q_zero_point()
-        elif qscheme in {torch.per_channel_affine, torch.per_channel_affine_float_qparams, torch.per_channel_symmetric}:
-            q_per_channel_scales = result.q_per_channel_scales()
-            q_per_channel_zero_points = result.q_per_channel_zero_points()
-            q_per_channel_axis = result.q_per_channel_axis()
-
+        qparams = {}
+        qparams["qscheme"] = result.qscheme()
+        qparams["dtype"] = result.dtype
+        if qparams["qscheme"] in {torch.per_tensor_affine, torch.per_tensor_symmetric}:
+            qparams["scale"] = result.q_scale()
+            qparams["zero_point"] = result.q_zero_point()
+        elif qparams["qscheme"] in {torch.per_channel_affine, torch.per_channel_affine_float_qparams, torch.per_channel_symmetric}:
+            qparams["scale"] = result.q_per_channel_scales()
+            qparams["zero_point"] = result.q_per_channel_zero_points()
+            qparams["axis"] = result.q_per_channel_axis()
 
     return TensorMetadata(
-        shape, dtype, requires_grad, stride, memory_format, is_quantized, qscheme,
-        q_scale, q_zero_point, q_per_channel_scales, q_per_channel_zero_points, q_per_channel_axis)
+        shape, dtype, requires_grad, stride, memory_format, is_quantized, qparams)
 
 @compatibility(is_backward_compatible=True)
 class ShapeProp(torch.fx.Interpreter):
