@@ -259,18 +259,29 @@ class Proxy:
                            "this call to be recorded, please call torch.fx.wrap('len') at "
                            "module scope")
 
-    def __torch_function__(self, orig_method, types, args=None, kwargs=None):
+    @classmethod
+    def __torch_function__(cls, orig_method, types, args=None, kwargs=None):
         args = args if args else ()
         kwargs = kwargs if kwargs else {}
 
+        # Find an instance of this class in the arguments to get a tracer
+        args_of_this_cls = []
+        for a in args:
+            if isinstance(a, cls):
+                args_of_this_cls.append(a)
+            elif isinstance(a, collections.Sequence):
+                args_of_this_cls.extend(el for el in a if isinstance(el, cls))
+        assert len(args_of_this_cls) > 0
+        tracer = args_of_this_cls[0].tracer
+
         if isinstance(orig_method, torch._C.ScriptMethod):
             args = (orig_method.owner,) + args
-            return self.tracer.create_proxy('call_method', orig_method.name, args, kwargs)
+            return tracer.create_proxy('call_method', orig_method.name, args, kwargs)
         if torch.overrides.is_tensor_method_or_property(orig_method):
-            return self.tracer.create_proxy('call_method', orig_method.__name__, args, kwargs)
+            return tracer.create_proxy('call_method', orig_method.__name__, args, kwargs)
         else:
-            return self.tracer.create_proxy('call_function', orig_method, args, kwargs,
-                                            name=self.tracer.graph._target_to_str(orig_method.__name__))
+            return tracer.create_proxy('call_function', orig_method, args, kwargs,
+                                            name=tracer.graph._target_to_str(orig_method.__name__))
 
 @compatibility(is_backward_compatible=True)
 class Attribute(Proxy):
