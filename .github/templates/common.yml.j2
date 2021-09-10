@@ -5,6 +5,12 @@
 {# squid_no_proxy is a list of common set of fixed domains or IPs that we don't need to proxy. See https://docs.aws.amazon.com/AmazonECS/latest/developerguide/http_proxy_config.html#windows-proxy #}
 {%- set squid_no_proxy = "localhost,127.0.0.1,amazonaws.com,s3.amazonaws.com,169.254.169.254,169.254.170.2,/var/run/docker.sock" -%}
 
+{%- macro concurrency(build_environment) -%}
+concurrency:
+  group: !{{ build_environment }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true
+{%- endmacro -%}
+
 {%- macro display_ec2_information() -%}
       - name: Display EC2 information
         shell: bash
