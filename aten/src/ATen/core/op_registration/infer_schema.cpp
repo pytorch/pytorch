@@ -12,8 +12,7 @@ ArgumentVector createArgumentVector(c10::ArrayRef<ArgumentDef> args) {
   result.reserve(args.size());
   for (size_t i = 0; i < args.size(); ++i) {
     // Arguments are named "_<index>"
-    // NOLINTNEXTLINE(modernize-use-emplace)
-    result.push_back(Argument("_" + c10::guts::to_string(i), (*args[i].getTypeFn)()));
+    result.emplace_back("_" + c10::guts::to_string(i), (*args[i].getTypeFn)());
   }
   return result;
 }
