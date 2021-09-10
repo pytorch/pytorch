@@ -20,5 +20,7 @@ TORCH_API bool HasInplaceOp(
     std::shared_ptr<Graph>& graph,
     const AliasDb& alias_db);
 
+TORCH_API void FuseSignLog1P(std::shared_ptr<Graph>& graph);
+
 } // namespace jit
 } // namespace torch
