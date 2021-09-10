@@ -163,7 +163,7 @@ TEST(LLVM, FloatToCharCastTest) {
   ASSERT_EQ(cg.value<int8_t>(), -2);
 }
 
-TEST(LLVM, BytoToFloatCastTest) {
+TEST(LLVM, ByteToFloatCastTest) {
   auto a = ByteImm::make(254);
   auto b = Cast::make(kFloat, a);
   LLVMExprEval cg(b);
