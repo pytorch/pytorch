@@ -35,14 +35,14 @@ else
 
     curl --retry 3 -kLO $cuda_installer_link
     7z x ${cuda_installer_name}.exe -o${cuda_installer_name}
-    mkdir cuda_install_logs
-    trap 'rm -rf ${cuda_installer_name} ${cuda_installer_name}.exe cuda_install_logs' EXIT
+    cuda_install_logs=$(mktemp -d)
+    trap 'rm -rf ${cuda_installer_name} ${cuda_installer_name}.exe ${cuda_install_logs}' EXIT
 
     (
         # subshell for +e
         set +e
         pushd "${cuda_installer_name}"
-        ./setup.exe -s "${cuda_install_packages}" -loglevel:6 -log:"$(pwd -W)/cuda_install_logs"
+        ./setup.exe -s "${cuda_install_packages}" -loglevel:6 -log:"${cuda_install_logs}"
     )
 
     if [[ ! -f "/c/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v${CUDA_VERSION}/bin/nvcc.exe" ]]; then
