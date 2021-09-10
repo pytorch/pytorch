@@ -197,8 +197,8 @@ def split_const_subgraphs(
     for node in split.submod_1.graph.nodes:
         if node.op != "placeholder":
             continue
-        is_folded_attr = ph_idx in submod_1_input_idx_to_folded_attr_name.keys()
-        is_unfolded_attr = ph_idx in submod_1_input_idx_to_unfolded_attr_name.keys()
+        is_folded_attr = ph_idx in submod_1_input_idx_to_folded_attr_name
+        is_unfolded_attr = ph_idx in submod_1_input_idx_to_unfolded_attr_name
         if not is_folded_attr and not is_unfolded_attr:
             ph_idx += 1
             continue
@@ -208,6 +208,7 @@ def split_const_subgraphs(
             if is_folded_attr
             else submod_1_input_idx_to_unfolded_attr_name[ph_idx]
         )
+
         if is_folded_attr:
             assert not hasattr(mod_traced, const_output_name)
             # Use a dummy param, which will be overwritten when we run const folding.
