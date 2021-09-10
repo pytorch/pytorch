@@ -85,7 +85,7 @@ void common_checks_baddbmm_bmm(Meta& meta, const Tensor& batch1, const Tensor& b
   int64_t contraction_size = batch1_sizes[2];
   int64_t res_rows = batch1_sizes[1];
   int64_t res_cols = batch2_sizes[2];
-  
+
   TORCH_CHECK(batch2_sizes[0] == bs && batch2_sizes[1] == contraction_size);
 
   if (is_bmm) {
@@ -111,7 +111,7 @@ TORCH_META_FUNC(bmm)(const Tensor& self, const Tensor& mat2) {
     }
 }
 
-TORCH_META_FUNC(baddbmm)(const Tensor& self, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha) { 
+TORCH_META_FUNC(baddbmm)(const Tensor& self, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha) {
   auto& result = maybe_get_output(0);
   if (!result.defined()) {
     set_output({0}, batch1.options());
