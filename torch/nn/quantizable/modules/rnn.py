@@ -80,7 +80,7 @@ class LSTMCell(torch.nn.Module):
         return h, c
 
     def _get_name(self):
-        if isinstance(self.layers[0].layer_fw.cell.igates, torch.nn.quantized.Linear):
+        if isinstance(self.layers[0].layer_fw.cell.igates, torch.nn.quantized.Linear):  # type: ignore[index, union-attr]
             return 'QuantizedLSTMCell'
         else:
             return 'QuantizableLSTMCell'
