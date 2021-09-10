@@ -376,16 +376,12 @@ __host__ __device__
 
 #if defined(__ANDROID__)
 #define C10_ANDROID 1
-#ifndef C10_MOBILE
-#error "building for Android but forgot to define C10_MOBILE!"
-#endif
+#define C10_MOBILE 1
 #elif (                   \
     defined(__APPLE__) && \
     (TARGET_IPHONE_SIMULATOR || TARGET_OS_SIMULATOR || TARGET_OS_IPHONE))
 #define C10_IOS 1
-#ifndef C10_MOBILE
-#error "building for iOS but forgot to define C10_MOBILE!"
-#endif
+#define C10_MOBILE 1
 #endif // ANDROID / IOS
 
 // Portable determination of whether type T is trivially copyable.
