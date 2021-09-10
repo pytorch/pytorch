@@ -78,7 +78,7 @@ targets.each do |target|
         end
     end
 end
-	
+
 # link system frameworks
 if frameworks
     frameworks.each do |framework|
