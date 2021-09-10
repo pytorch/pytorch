@@ -3,11 +3,11 @@ r"""
 This file is in the process of migration to `torch/ao/quantization`, and
 is kept here for compatibility while the migration process is ongoing.
 If you are adding a new entry/functionality, please, add it to the
-`torch/ao/quantization/stubs.py`, while adding an import statement
+`torch/ao/quantization/quantize_jit.py`, while adding an import statement
 here.
 """
 
-from torch.ao.quantization.stubs import (
+from torch.ao.quantization.quantize_jit import (
     _check_is_script_module,
     _check_forward_method,
     script_qconfig,
