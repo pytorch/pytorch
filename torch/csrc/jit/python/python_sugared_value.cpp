@@ -42,7 +42,7 @@ FunctionSchema PythonValue::getSchema(
 
   auto signature = annotations.attr("get_signature")(
       callable, rcb ? *rcb : py::none(), loc, bool(moduleSelf_));
-  std::vector<Argument> args, rets;
+  at::ArgumentVector args, rets;
 
   auto py_param_names = annotations.attr("get_param_names")(callable, n_args);
   auto param_names = py::cast<std::vector<std::string>>(py_param_names);
