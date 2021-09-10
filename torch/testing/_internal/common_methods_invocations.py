@@ -811,7 +811,7 @@ def sample_inputs_reduction(op_info, device, dtype, requires_grad, **kwargs):
     supports_multiple_dims: bool = kwargs.get('supports_multiple_dims', True)
 
     # TODO(@heitorschueroff) Once all reduction operators are using ReductionOpInfo
-    # use op_info.genearte_args_kwargs directly.
+    # use op_info.generate_args_kwargs directly.
     generate_args_kwargs = kwargs.get('generate_args_kwargs', lambda *args, **kwargs: (yield tuple(), {}))
 
     inputs: List[SampleInput] = []
@@ -821,6 +821,47 @@ def sample_inputs_reduction(op_info, device, dtype, requires_grad, **kwargs):
                 kwargs.update(reduction_kwargs)
                 inputs.append(SampleInput(t, args=args, kwargs=kwargs))
 
+    return inputs
+
+
+def _generate_masked_reduction_mask(input_shape, device, **kwargs):
+    yield None
+    yield make_tensor(input_shape, device, torch.bool, requires_grad=False)
+    if len(input_shape) > 3:
+        # broadcast last mask dimension:
+        yield make_tensor(input_shape[:-1] + (1,), device, torch.bool, requires_grad=False)
+        # broadcast middle mask dimension:
+        yield make_tensor(input_shape[:1] + (1,) + input_shape[2:], device, torch.bool, requires_grad=False)
+        # broadcast first mask dimension:
+        yield make_tensor((1,) + input_shape[1:], device, torch.bool, requires_grad=False)
+        # mask.ndim < input.ndim
+        yield make_tensor(input_shape[2:], device, torch.bool, requires_grad=False)
+        # mask.ndim == 1
+        yield make_tensor(input_shape[-1:], device, torch.bool, requires_grad=False)
+    # masks that require broadcasting of inputs (mask.ndim >
+    # input.ndim) will not be supported, however, we may reconsider
+    # this if there will be demand on this kind of degenerate cases.
+
+
+def sample_inputs_masked_reduction(op_info, device, dtype, requires_grad, **kwargs):
+    """Sample inputs for masked reduction operators."""
+    inputs: List[SampleInput] = []
+    for sample_input in sample_inputs_reduction(op_info, device, dtype, requires_grad, **kwargs):
+        for mask in _generate_masked_reduction_mask(sample_input.input.shape, device, **kwargs):
+            inputs.append(SampleInput(sample_input.input,
+                                      args=sample_input.args,
+                                      kwargs=dict(mask=mask, **sample_input.kwargs)))
+            if(dtype.is_floating_point and sample_input.input.ndim ==
+               2 and mask is not None and mask.shape ==
+               sample_input.input.shape):
+                # inputs with non-finite values (nan, inf, -inf)
+                for v in [torch.inf, -torch.inf, torch.nan]:
+                    t = sample_input.input.clone()
+                    t.diagonal()[:] = v
+                    inputs.append(SampleInput(t,
+                                              args=sample_input.args,
+                                              kwargs=dict(mask=mask, **sample_input.kwargs)))
+    # TODO: inputs with special values like nan, inf, -inf.
     return inputs
 
 
@@ -10039,6 +10080,29 @@ op_db: List[OpInfo] = [
                          dtypes=[torch.float16]),
         ),
     ),
+    ReductionOpInfo(
+        'sparse.masked_sum',
+        ref=np.sum,
+        method_variant=None,
+        identity=0,
+        nan_policy='propagate',
+        supports_out=False,
+        supports_forward_ad=True,
+        promotes_int_to_int64=False,
+        dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+        skips=(
+            # FIXME: sum does not support passing keepdim without passing dim
+            SkipInfo('TestReductions', 'test_dim_default_keepdim'),
+            # FIXME: sum reduces all dimensions when dim=[]
+            SkipInfo('TestReductions', 'test_dim_empty'),
+            SkipInfo('TestReductions', 'test_dim_empty_keepdim'),
+            # FIXME: sum does not support passing None to dim
+            SkipInfo('TestReductions', 'test_dim_none'),
+            SkipInfo('TestReductions', 'test_dim_none_keepdim'),
+        ),
+        supports_sparse=True,
+        sample_inputs_func=sample_inputs_masked_reduction
+    ),
     OpInfo(
         "nn.functional.nll_loss",
         ref=_NOTHING,
@@ -10093,6 +10157,7 @@ spectral_funcs = [op for op in op_db if isinstance(op, SpectralFuncInfo)]
 sparse_unary_ufuncs = [op for op in op_db if isinstance(op, UnaryUfuncInfo) and op.supports_sparse is True]
 shape_funcs = [op for op in op_db if isinstance(op, ShapeFuncInfo)]
 reduction_ops = [op for op in op_db if isinstance(op, ReductionOpInfo)]
+sparse_reduction_ops = [op for op in op_db if isinstance(op, ReductionOpInfo) and op.supports_sparse is True]
 
 # TODO: review porting these to make_tensor
 def index_variable(shape, max_indices, device=torch.device('cpu')):

@@ -201,3 +201,260 @@ def log_softmax(input: Tensor, dim: int, dtype: Optional[DType] = None) -> Tenso
           overflows. Default: None
     """
     return torch._sparse_log_softmax(input, dim, dtype=dtype)
+
+
+# All masked reduction/normalization operations have the same
+# signatures. Here we introduce docstring templates that are applied
+# to docstrings of reduction/normalization functions via
+# _apply_docstring_templates decorator.
+
+def _apply_docstring_templates(func):
+    """Decorator that applies docstring templates to function docstring
+    and returns the function instance.
+    """
+
+    docstring_templates = dict(
+        masked_reduction_signature='''\
+{function_name}(input, dim, keepdim=False, dtype=None, mask=None) -> Tensor''',
+        masked_reduction_descr='''\
+Returns {operation name} of :attr:`input` tensor along given dimension
+:attr:`dim` while the :attr:`input` elements are masked out according
+to the boolean tensor :attr:`mask`.''',
+        masked_reduction_args='''\
+If :attr:`keepdim` is ``True``, the output tensor is of the same
+size as :attr:`input` except in the dimension(s) :attr:`dim` where
+it is of size 1.  Otherwise, :attr:`dim` is squeezed (see
+:func:`torch.squeeze`), resulting in the output tensor having 1
+fewer dimension.
+
+The boolean tensor :attr:`mask` defines the "validity" of
+:attr:`input` tensor elements: if :attr:`mask` element is True
+then the corresponding element in :attr:`input` tensor will be
+included in {function name} computation, otherwise the element is
+ignored.
+
+When all elements of :attr:`input` along the given dimension
+:attr:`dim` are ignored, the corresponding element of the output
+tensor will have undefined value: it may or may not correspond to the
+identity value of {operation name} operation; the choice may
+correspond to the value that leads to the most efficient storage of
+:attr:`output` tensor.
+
+The shapes of the :attr:`mask` tensor and the :attr:`input` tensor
+don't need to match, but they must be :ref:`broadcastable
+<broadcasting-semantics>`.
+
+Args:
+    input (Tensor): the input tensor
+    dim (int): a dimension along which {function name} will be
+      computed.
+
+Keyword args:
+    keepdim (bool, optional): whether the output tensor has
+      :attr:`dim` retained or not. Default: False.
+    dtype (:class:`torch.dtype`, optional): the desired data type
+      of returned tensor.  If specified, the input tensor is
+      casted to :attr:`dtype` before the operation is
+      performed. Default: None
+    mask (:class:`torch.Tensor`, optional): the boolean tensor
+      containing the binary mask of validity of input tensor
+      elements.
+      Default: ``torch.ones(input.shape, dtype=torch.bool)``.''',
+        masked_reduction_example='''\
+Example::
+
+    >>> input = torch.tensor([[-3, -2, -1], [0, 1, 2]])
+    >>> input
+    tensor([[-3, -2, -1],
+            [ 0,  1,  2]])
+    >>> mask = torch.tensor([[True, False, True], [False, False, False]])
+    >>> mask
+    tensor([[ True, False,  True],
+            [False, False, False]])''',
+        masked_normalization_args='''\
+    TBD
+''')
+
+    # Apply function name info to docstring templates:
+    templates = dict(
+        (k, v.format_map(
+            {'function_name': func.__name__,
+             'function name': func.__name__.replace('_', ' '),
+             'operation_name': '_'.join(func.__name__.split('_')[1:]),
+             'operation name': ' '.join(func.__name__.split('_')[1:])}
+        )) for k, v in docstring_templates.items())
+
+    # Apply docstring templates to function doctring:
+    func.__doc__ = func.__doc__.format_map(templates)
+
+    # Expose function as public symbol
+    __all__.append(func.__name__)
+
+    return func
+
+
+def _canonical_dim(dim, ndim):
+    if dim is None:
+        return tuple(range(ndim))
+    dim = (dim,) if isinstance(dim, int) else dim
+    return tuple(d % (ndim or 1) for d in dim)
+
+
+@_apply_docstring_templates
+def masked_sum(input: Tensor,
+               dim: DimOrDims = None,
+               *,
+               keepdim: Optional[bool] = False,
+               dtype: Optional[DType] = None,
+               mask: Optional[Tensor] = None) -> Tensor:
+    """
+{masked_reduction_signature}
+
+{masked_reduction_descr}
+
+{masked_reduction_args}
+
+{masked_reduction_example}
+    >>> torch.sparse.masked_sum(input, 1, mask=mask)
+    tensor([-4,  0])
+    """
+    if dtype is None:
+        dtype = input.dtype
+    # TODO: What follows is a reference implementation of masked sum
+    # that is to be replaced with an optimized one.
+    if input.layout == torch.strided:
+        mask_input = input if mask is None else torch.where(mask, input, torch.zeros_like(input))
+        if dim is None:
+            return torch.sum(mask_input, dtype=dtype)
+        else:
+            return torch.sum(mask_input, dim, keepdim, dtype=dtype)
+    elif input.layout == torch.sparse_coo:
+        if mask is None or mask is input:
+            # mask is defined by input
+            mask_input = input
+        else:
+            # intersection of input and mask indices
+            indices_dtype = torch.int64
+            input_indices = input.indices()
+            a = torch.sparse_coo_tensor(input_indices,
+                                        torch.arange(1, input._nnz() + 1, dtype=indices_dtype, device=input.device))
+            b = mask.to(indices_dtype)
+            if a.shape != b.shape:
+                # FIXME: implement torch.broadcast_to for sparse tensor input
+                b = torch.broadcast_to(b.to_dense(), a.shape).to_sparse()
+            if a.ndim == 0:
+                # Workaround https://github.com/pytorch/pytorch/issues/65396
+                flat_indices = (a.to_dense() * b.to_dense()).to_sparse().coalesce().values() - 1
+            else:
+                flat_indices = (a * b).coalesce().values() - 1
+            mask_input = torch.sparse_coo_tensor(input_indices.T[flat_indices].T,
+                                                 input.values()[flat_indices],
+                                                 input.shape).coalesce()
+
+        if mask_input._nnz() == 0:
+            # Workaround https://github.com/pytorch/pytorch/issues/65394
+            dim = _canonical_dim(dim, mask_input.ndim)
+            shape = tuple(mask_input.shape[i] for i in range(mask_input.ndim) if i not in dim)
+            indices = torch.zeros((len(shape), 0), dtype=mask_input._indices().dtype, device=mask_input.device)
+            values = torch.zeros((0,), dtype=mask_input._values().dtype, device=mask_input.device)
+            result = torch.sparse_coo_tensor(indices, values, shape, device=mask_input.device)
+        else:
+            if mask_input.ndim == 0:
+                # Workaround https://github.com/pytorch/pytorch/issues/65400
+                assert dim in (None, -1, 0, (-1,), (0,), ()), dim
+                dim = ()
+            result = torch.sparse.sum(mask_input, dim=dim, dtype=dtype)
+            if result.dtype != dtype:
+                # Workaround https://github.com/pytorch/pytorch/issues/65392
+                result = result.to(dtype=dtype)
+            if result.layout == torch.strided:
+                result = result.to_sparse()
+
+        if keepdim and mask_input.ndim > 0:
+            # torch.sparse.sum does not support keepdim argument, so,
+            # here we restore the squeezed dimensions
+            if mask_input.dense_dim() > 0:
+                raise NotImplementedError('torch.sparse.masked_sum on hybrid COO sparse tensor')
+            dim = _canonical_dim(dim, mask_input.ndim)
+            indices = torch.zeros((mask_input.ndim, result._nnz()), dtype=torch.int64, device=mask_input.device)
+            i = 0
+            for d in range(mask_input.ndim):
+                if d in dim:
+                    continue
+                indices[d] = result._indices()[i]
+                i += 1
+            shape = tuple((1 if i in dim else mask_input.shape[i]) for i in range(mask_input.ndim))
+            result = torch.sparse_coo_tensor(indices, result._values(), shape, dtype=result.dtype, device=result.device)
+        return result
+
+    # TODO: elif input.layout == torch.sparse_coo:
+    else:
+        raise NotImplementedError(f'masked_sum of {input.layout} tensor')
+
+
+@_apply_docstring_templates
+def masked_prod(input: Tensor,
+                dim: DimOrDims = None,
+                *,
+                keepdim: Optional[bool] = False,
+                dtype: Optional[DType] = None,
+                mask: Optional[Tensor] = None) -> Tensor:
+    """
+{masked_reduction_signature}
+
+{masked_reduction_descr}
+
+{masked_reduction_args}
+
+{masked_reduction_example}
+    >>> torch.sparse.masked_prod(input, 1, mask=mask)
+    tensor([3,  1])
+    """
+    if dtype is None:
+        dtype = input.dtype
+    # TODO: What follows is a reference implementation of masked
+    # product that is to be replaced with an optimized one.
+    mask_input = input if mask is None else torch.where(mask, input, torch.ones_like(input))
+    if dim is None:
+        return torch.prod(mask_input, dtype=dtype)
+    else:
+        return torch.prod(mask_input, dim, keepdim=keepdim, dtype=dtype)
+
+
+def masked_mask(input: Tensor,
+                dim: DimOrDims = None,
+                *,
+                keepdim: Optional[bool] = False,
+                dtype: Optional[DType] = None,  # unused
+                mask: Optional[Tensor] = None) -> Tensor:
+    """
+    Return the output mask of an masked reduction operation.
+    """
+    if mask is None:
+        if input.layout == torch.strided:
+            outmask = torch.ones(input.shape, dtype=torch.bool, device=input.device)
+        elif input.layout == torch.sparse:
+            # TODO: implement coo.any(dim=dim, keepdim=keepdim)
+            outmask = torch.sparse_coo_tensor(input.indices(),
+                                              torch.ones(input.values().shape, dtype=torch.bool, device=input.device)).to_dense()
+        elif input.layout == torch.sparse_csr:
+            # TODO: implement csr.any(dim=dim, keepdim=keepdim)
+            outmask = torch.sparse_csr_tensor(input.crow_indices(), input.col_indices(),
+                                              torch.ones(input.values().shape, dtype=torch.bool, device=input.device)).to_dense()
+        else:
+            raise NotImplementedError(f'mask from layout {input.layout}')
+    elif mask.ndim < input.ndim:
+        outmask = torch.broadcast_to(mask.clone(), input.shape).to(dtype=torch.bool)
+    elif mask.ndim > input.ndim:
+        raise NotImplementedError("mask dimensionality higher than of input")
+    else:
+        outmask = mask.to(dtype=torch.bool)
+    if isinstance(dim, tuple):
+        # Workaround https://github.com/pytorch/pytorch/issues/56586
+        for d in reversed(dim):
+            outmask = outmask.any(dim=d, keepdim=keepdim)
+    elif dim is not None:
+        outmask = outmask.any(dim=dim, keepdim=keepdim)
+    return outmask
+
+# TODO: masked_mean, masked_amin, masked_amax

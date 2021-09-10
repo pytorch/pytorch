@@ -19,10 +19,9 @@ from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, ops, dtypes, dtypesIfCUDA, onlyCPU, onlyCUDA, precisionOverride,
      deviceCountAtLeast)
 from torch.testing._internal.common_methods_invocations import \
-    (sparse_unary_ufuncs)
-from torch.testing._internal.common_dtype import (
-    floating_and_complex_types, floating_and_complex_types_and, get_all_dtypes, get_all_int_dtypes,
-)
+    (sparse_unary_ufuncs, sparse_reduction_ops)
+from torch.testing._internal.common_dtype import \
+    (floating_and_complex_types, floating_and_complex_types_and, get_all_dtypes, get_all_int_dtypes)
 
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -3444,8 +3443,48 @@ class TestSparseUnaryUfuncs(TestCase):
         actual = op(sparse_0x0)
         self.assertEqual(expected, actual)
 
+
+sparse_masked_reduction_ops = list(filter(lambda op: (op.op.__name__.startswith('masked_')
+                                                      and op.op.__module__ == 'torch.sparse'),
+                                          sparse_reduction_ops))
+
+
+class TestSparseMaskedReductions(TestCase):
+    exact_dtype = True
+
+    @ops(sparse_masked_reduction_ops)
+    def test_sparse_consistency(self, device, dtype, op):
+        """Here we test masked reduction operations on sparse COO tensors
+        using masked reductions on strided tensors as reference.
+        """
+        unsupportedTypes = [torch.bfloat16, torch.float16, torch.bool]
+        if dtype in unsupportedTypes:
+            self.skipTest('Skipped! Unsupported dtypes for Sparse')
+
+        samples = op.sample_inputs_func(op, device, dtype, requires_grad=False)
+        for sample_input in samples:
+            t = sample_input.input
+            mask = sample_input.kwargs.get('mask')
+            expected = op(t, *sample_input.args, **sample_input.kwargs)
+            sparse_op_kwargs = dict(sample_input.kwargs)
+            if mask is not None:
+                sparse_op_kwargs['mask'] = mask.to_sparse()
+            actual = op(t.to_sparse(), *sample_input.args, **sparse_op_kwargs)
+            self.assertEqual(actual.layout, torch.sparse_coo)
+
+            msg = ("Failed to produce expected results! Input tensor was"
+                   " {0}, torch result is {1}, and reference result is"
+                   " {2}.").format(t, actual, expected) if t.numel() < 10 else None
+            outmask = torch.sparse.masked_mask(t, **sample_input.kwargs)
+            expected = torch.where(outmask, expected, torch.zeros_like(expected))
+            actual = actual.to_dense()
+            actual = torch.where(outmask, actual, torch.zeros_like(actual))
+            self.assertEqual(actual, expected, msg, equal_nan=True)
+
 # e.g., TestSparseUnaryUfuncsCPU and TestSparseUnaryUfuncsCUDA
 instantiate_device_type_tests(TestSparseUnaryUfuncs, globals())
+
+instantiate_device_type_tests(TestSparseMaskedReductions, globals())
 
 # e.g., TestSparseCPU and TestSparseCUDA
 instantiate_device_type_tests(TestSparse, globals())
