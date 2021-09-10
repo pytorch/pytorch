@@ -2,7 +2,6 @@
 import os
 import sys
 
-import numpy as np
 import torch
 from torch import nn
 import torch.distributed as dist
@@ -105,7 +104,9 @@ class DistributedDataParallelCommHookTest(MultiProcessTestCase):
         # Run backward
         output.mean().backward()
 
-        return [p.grad.data.cpu().numpy() for p in model.parameters()]
+        # The only layer
+        param = next(model.parameters())
+        return param.grad
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
@@ -122,7 +123,7 @@ class DistributedDataParallelCommHookTest(MultiProcessTestCase):
         # Register hook case, get the hook grads.
         hook_grads = self._get_grads(process_group, DDPCommHookType.ALLREDUCE)
 
-        np.testing.assert_allclose(hook_grads, reference_grads, rtol=1e-5, atol=0)
+        torch.testing.assert_allclose(hook_grads, reference_grads, rtol=1e-5, atol=0)
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
@@ -139,7 +140,7 @@ class DistributedDataParallelCommHookTest(MultiProcessTestCase):
         # Register hook case, get the hook grads.
         hook_grads = self._get_grads(process_group, DDPCommHookType.FP16_COMPRESS)
 
-        np.testing.assert_allclose(hook_grads, reference_grads, rtol=1e-5, atol=1e-4)
+        torch.testing.assert_allclose(hook_grads, reference_grads, rtol=1e-5, atol=1e-4)
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
@@ -156,7 +157,7 @@ class DistributedDataParallelCommHookTest(MultiProcessTestCase):
         # Register hook case, get the hook grads.
         hook_grads = self._get_grads(process_group, DDPCommHookType.QUANTIZE_PER_TENSOR)
 
-        np.testing.assert_allclose(hook_grads, reference_grads, rtol=1e-5, atol=1e-4)
+        torch.testing.assert_allclose(hook_grads, reference_grads, rtol=1e-5, atol=1e-4)
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
@@ -175,7 +176,28 @@ class DistributedDataParallelCommHookTest(MultiProcessTestCase):
             process_group, DDPCommHookType.QUANTIZE_PER_CHANNEL
         )
 
-        np.testing.assert_allclose(hook_grads, reference_grads, rtol=1e-5, atol=1e-4)
+        torch.testing.assert_allclose(hook_grads, reference_grads, rtol=1e-5, atol=1e-4)
+
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_ddp_comm_hook_noop_hook(self):
+        """
+        This unit test verifies the ``noop`` hook registered case and a subsequent allreduce
+        gives same result with no hook registered case.
+        """
+        store = dist.FileStore(self.file_name, self.world_size)
+        process_group = dist.ProcessGroupNCCL(store, self.rank, self.world_size)
+
+        # No hook registered case, get the reference grads.
+        reference_grads = self._get_grads(process_group, None)
+        # Register hook case, get the hook grads.
+        hook_grads = self._get_grads(process_group, DDPCommHookType.NOOP)
+        # Apply a subsequent allreduce to average grads.
+        hook_grads.div_(self.world_size)
+        dist.all_reduce(hook_grads, group=process_group)
+
+        torch.testing.assert_allclose(hook_grads, reference_grads, rtol=1e-5, atol=0)
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)

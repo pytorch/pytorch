@@ -57,6 +57,9 @@ bool InterpreterState::run(Stack& stack) {
       auto inst_with_handle = code_->instructions_with_handles_.at(pc);
       Instruction inst = inst_with_handle.instruction;
       DebugHandle debug_handle = inst_with_handle.debug_handle;
+      // If no valid debug handle found then just log pc.
+      // This is possible when we did not save debug handles
+      debug_handle = debug_handle == -1 ? pc : debug_handle;
 
       // std::cout << "RUNNING " << pc << " "
       //           << code_->instructions_with_handles_[pc].instruction;
