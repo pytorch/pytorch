@@ -14,21 +14,33 @@
 - (void)testLiteInterpreter {
   NSString* modelPath = [[NSBundle bundleForClass:[self class]] pathForResource:@"model_lite"
                                                                          ofType:@"ptl"];
-  XCTAssertTrue([self runModel:modelPath], @"");
+  XCTAssertTrue([self runModel:modelPath metal:NO], @"");
 }
 
 - (void)testFullJIT {
   NSString* modelPath = [[NSBundle bundleForClass:[self class]] pathForResource:@"model"
                                                                          ofType:@"pt"];
-  XCTAssertTrue([self runModel:modelPath], @"");
+  XCTAssertTrue([self runModel:modelPath metal:NO], @"");
 }
 
-- (bool)runModel:(NSString*)path {
+- (void)testMetal {
+    NSString* modelPath = [[NSBundle bundleForClass:[self class]] pathForResource:@"model_metal"
+                                                                           ofType:@"ptl"];
+    XCTAssertTrue([self runModel:modelPath metal:YES], @"");
+}
+
+- (bool)runModel:(NSString*)path metal:(BOOL) metal{
   XCTAssertTrue([NSFileManager.defaultManager fileExistsAtPath:path], @"model doesn't exist!");
   torch::jit::mobile::Module module = torch::jit::_load_for_mobile(path.UTF8String);
   c10::InferenceMode mode;
   auto input = torch::ones({1, 3, 224, 224}, at::kFloat);
-  auto outputTensor = module.forward({input}).toTensor();
+  at::outputTensor;
+  if(metal) {
+    auto metal_input = input.metal();
+    outputTensor = module.forward({metal_input}).toTensor().cpu();
+  } else {
+    outputTensor = module.forward({input}).toTensor();
+  }
   return outputTensor.numel() == 1000;
 }
 
