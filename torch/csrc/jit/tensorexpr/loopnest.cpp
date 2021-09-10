@@ -573,14 +573,13 @@ class FunctionInliner : public IRMutator {
       VarPtr func_callee_arg = producer_index_vars_.at(i);
       ExprPtr func_caller_param = dims.at(i);
       if (func_callee_arg == nullptr) {
+        auto param_val = evalInt(func_caller_param);
         TORCH_INTERNAL_ASSERT(
-            intValue(func_caller_param) && *intValue(func_caller_param) == 0,
+            param_val && *param_val == 0,
             buildErrorMessage(
                 "We are implicitly assuming that if you have an index of 0, that must also be inlined into an index of 0"));
         continue;
       }
-      if (func_callee_arg == nullptr)
-        continue;
       auto iter = inline_mapping_.find(func_callee_arg);
       if (iter != inline_mapping_.end()) {
         throw std::logic_error(
@@ -748,6 +747,9 @@ bool LoopNest::computeInline(StmtPtr s) {
 bool LoopNest::computeInline(BufPtr b) {
   // If buf is used or defined in an ExternalCall, we cannot inline it
   auto buf_load_store_uses = findLoadOrStoreUses(root_stmt_);
+  if (!buf_load_store_uses.count(b)) {
+    return false;
+  }
   for (auto& use : buf_load_store_uses.at(b)) {
     StmtPtr s = use.s;
     if (to<ExternalCall>(s)) {
