@@ -3,6 +3,7 @@
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/jit/runtime/symbolic_shape_registry.h>
+#include <torch/csrc/jit/serialization/import_source.h>
 #include <unordered_map>
 
 namespace torch {
@@ -48,35 +49,78 @@ const std::string shape_compute_functions =
             shape.append(elem)
           return shape
 
-        # TODO: maybe make it customary that extra arguments are unused ?
-        # TODO: return self directly
-        def unary_two_unused_inputs(self: List[int], inp0: Any, inp1: Any):
+        def _copy(self: List[int]):
           out: List[int] = []
           for elem in self:
             out.append(elem)
           return out
+
+        def unary_five_unused_inputs(self: List[int], inp0: Any, inp1: Any, inp2: Any, inp3: Any, inp4: Any):
+          return _copy(self)
+
+        def unary_two_unused_inputs(self: List[int], inp0: Any, inp1: Any):
+          return _copy(self)
 
         def unary_one_unused_input(self: List[int], inp0: Any):
-          out: List[int] = []
-          for elem in self:
-            out.append(elem)
-          return out
+          return _copy(self)
+
+        def unary_four_unused_inputs(self: List[int], inp0: Any, inp1: Any, inp2: Any, inp3: Any):
+          return _copy(self)
 
         def unary(self: List[int]):
+          return _copy(self)
+
+        def expand(self: List[int], sizes: List[int]):
+          assert len(sizes) >= len(self)
+          ndim = len(sizes)
+          tensor_dim = len(self)
+          if ndim == 0:
+            return _copy(sizes)
           out: List[int] = []
-          for elem in self:
-            out.append(elem)
+          for i in range(ndim):
+            offset = ndim - 1 - i
+            dim = tensor_dim - 1 - offset
+            size = self[dim] if dim >=0 else 1
+            targetSize = sizes[i]
+            if targetSize == -1:
+              assert dim >= 0
+              targetSize = size
+            if size != targetSize:
+              assert size == 1
+              size = targetSize
+            out.append(size)
+          return out
+
+        def expand_one_unused(self: List[int], sizes: List[int], inp0: Any):
+          return expand(self, sizes)
+
+        def infer_size_impl(shape: List[int], numel: int) -> List[int]:
+          newsize = 1
+          infer_dim: Optional[int] = None
+          for dim in range(len(shape)):
+            if shape[dim] == -1:
+              if infer_dim is not None:
+                raise AssertionError("only one dimension can be inferred")
+              infer_dim = dim
+            elif shape[dim] >= 0:
+              newsize *= shape[dim]
+            else:
+              raise AssertionError("invalid shape dimensions")
+          if not (numel == newsize or (infer_dim is not None and newsize > 0 and numel % newsize == 0)):
+            raise AssertionError("invalid shape")
+          out = _copy(shape)
+          if infer_dim is not None:
+            out[infer_dim] = numel // newsize
           return out
 
         def view(self: List[int], sizes: List[int]):
-          # TODO: add assertions to check whether requested dims are valid
-          out: List[int] = []
-          for elem in sizes:
-            if elem == -1:
-              # TODO: support -1 in view dimensions
-              raise AssertionError("Shape function doesn't support -1 view dims yet")
-            out.append(elem)
-          return out
+          numel = 1
+          for elem in self:
+            numel *= elem
+          return infer_size_impl(sizes, numel)
+
+        def view_one_unused(self: List[int], sizes: List[int], *, implicit: bool=False):
+          return view(self, sizes)
 
         def mean_dim(self: List[int], dims: List[int], keep_dim: bool, dt : Any):
           out: List[int] = []
@@ -114,24 +158,84 @@ const std::string shape_compute_functions =
           # TODO: return self
           return [self[0]]
 
-        # TODO: optional dim, then expose as a registered shape function
         def unsqueeze(li: List[int], dim: int):
-          out: List[int] = []
-          for i in range(len(li)):
-            if i == dim:
-              out.append(1)
-            out.append(li[i])
+          dim = maybe_wrap_dim(dim, len(li) + 1)
+          out = _copy(li)
+          out.insert(dim, 1)
           return out
 
-        # TODO: optional dim, then expose as a registered shape function
-        def squeeze(li: List[int], dim: int):
+        def squeeze_nodim(li: List[int]):
           out: List[int] = []
           for i in range(len(li)):
-            if i == dim:
+            if li[i] != 1:
+              out.append(li[i])
+          return out
+
+        def squeeze(li: List[int], dim: int):
+          out: List[int] = []
+          wrapped_dim = maybe_wrap_dim(dim, len(li))
+          for i in range(len(li)):
+            if i == wrapped_dim:
               if li[i] != 1:
                 out.append(li[i])
             else:
               out.append(li[i])
+          return out
+
+        def index_select(self: List[int], dim: int, index: List[int]):
+          dim = maybe_wrap_dim(dim, len(self))
+          numel = multiply_integers(index)
+          assert len(index) <= 1
+          assert dim == 0 or dim < len(self)
+          result_size: List[int] = []
+          for i in range(len(self)):
+            if dim == i:
+              result_size.append(numel)
+            else:
+              result_size.append(self[i])
+          return result_size
+
+        def max_int():
+          return 9223372036854775807
+
+        def slice(self: List[int], dim: int, start: Optional[int], end: Optional[int], step: int):
+          ndim = len(self)
+          assert ndim != 0
+          dim = maybe_wrap_dim(dim, ndim)
+          start_val =  start if start is not None else 0
+          end_val = end if end is not None else max_int()
+          assert step > 0
+          if (start_val == max_int()):
+            start_val = 0
+          if start_val < 0:
+            start_val += self[dim]
+          if end_val < 0:
+            end_val += self[dim]
+          if start_val < 0:
+            start_val = 0
+          elif start_val >= self[dim]:
+            start_val = self[dim]
+          if end_val < start_val:
+            end_val = start_val
+          elif end_val >= self[dim]:
+            end_val = self[dim]
+          len = end_val - start_val
+          out = _copy(self)
+          out[dim] = (len + step - 1) // step
+          return out
+
+        def select(self: List[int], dim: int, index: int):
+          ndim = len(self)
+          assert ndim != 0
+          dim = maybe_wrap_dim(dim, ndim)
+          size = self[dim]
+          assert not (index < -size or index >= size)
+          if index < 0:
+            index += size
+          out: List[int] = []
+          for i in range(ndim):
+            if i != dim:
+              out.append(self[i])
           return out
 
         def matmul(tensor1: List[int] , tensor2: List[int]):
@@ -186,6 +290,22 @@ const std::string shape_compute_functions =
             return [self[0]]
           else:
             return [self[1], self[0]]
+
+        def transpose(self: List[int], dim0: int, dim1: int):
+          ndims = len(self)
+          dim0 = maybe_wrap_dim(dim0, ndims)
+          dim1 = maybe_wrap_dim(dim1, ndims)
+          if (dim0 == dim1):
+            return _copy(self)
+          out: List[int] = []
+          for i in range(ndims):
+            if i == dim0:
+              out.append(self[dim1])
+            elif i == dim1:
+              out.append(self[dim0])
+            else:
+              out.append(self[i])
+          return out
 
         def linear(input: List[int], weight: List[int], bias: Optional[List[int]]):
           out = matmul(input, t(weight))
@@ -266,11 +386,46 @@ const std::string shape_compute_functions =
             dim += dim_post_expr
           return dim
 
+        def zero_dim_tensor(input: Any):
+          out: List[int] = []
+          return out
+
         def multiply_integers(li: List[int]):
           out = 1
           for elem in li:
             out = out * elem
           return out
+
+        def arange_end(end: number, inp0: Any, inp1: Any, inp2: Any, inp3: Any):
+          assert end >= 0
+          return [int(torch.ceil(end))]
+
+        def arange_start(start: number, end: number, inp0: Any, inp1: Any, inp2: Any, inp3: Any):
+          assert end >= 0
+          assert end >= start
+          return [int(torch.ceil(end - start))]
+
+        def arange_start_step(start: number, end: number, step: number, inp0: Any, inp1: Any, inp2: Any, inp3: Any):
+          assert step != 0
+          if step < 0:
+            assert start >= end
+          else:
+            assert end >= start
+          return [int(torch.ceil((end - start) / step))]
+
+        def permute(input: List[int], dims: List[int]):
+          assert len(input) == len(dims)
+          ndim = len(dims)
+          seen_dims: List[int] = []
+          newSizes: List[int] = []
+          for i in range(ndim):
+            dim = maybe_wrap_dim(dims[i], ndim)
+            seen_dims.append(dim)
+            newSizes.append(input[dim])
+          for i in range(1, ndim):
+            for j in range(i):
+              assert seen_dims[i] != seen_dims[j]
+          return newSizes
 
         def flatten(input: List[int], start_dim: int, end_dim: int):
           start_dim = maybe_wrap_dim(start_dim, len(input))
@@ -292,7 +447,21 @@ const std::string shape_compute_functions =
           for i in range(end_dim + 1, len(input)):
             shape.append(input[i])
           return shape
-    )";
+    )"
+#ifdef USE_XNNPACK
+    R"(
+        def prepacked_conv2d_clamp_run(input: List[int], conv2dOpContext: Any):
+          assert isinstance(conv2dOpContext, __torch__.torch.classes.xnnpack.Conv2dOpContext)
+          (weight, bias, stride, padding, dilation, groups) = ops.prepacked.unpack_prepacked_sizes_conv2d(conv2dOpContext)
+          return conv2d(input, weight, bias, stride, padding, dilation, groups)
+
+        def prepacked_linear_clamp_run(input: List[int], linearOpContext: Any):
+          assert isinstance(linearOpContext, __torch__.torch.classes.xnnpack.LinearOpContext)
+          (weight, bias) = ops.prepacked.unpack_prepacked_sizes_linear(linearOpContext)
+          return linear(input, weight, bias)
+    )"
+#endif
+    ;
 
 // mapping function schema to shape compute graphs allows multiple functions to
 // share the same shape compute graph, which is memory efficient and also will
@@ -315,26 +484,57 @@ static const OperatorMap<std::string>& get_schema_to_function_graph() {
       {"aten::mul.Scalar(Tensor self, Scalar other) -> Tensor", "unary_one_unused_input"},
       {"aten::div.Tensor(Tensor self, Tensor other) -> Tensor", "broadcast"},
       {"aten::div.Scalar(Tensor self, Scalar other) -> Tensor", "unary_one_unused_input"},
+      {"aten::contiguous(Tensor(a) self, *, MemoryFormat memory_format=contiguous_format) -> Tensor(a)", "unary_one_unused_input"},
       {"aten::gt.Tensor(Tensor self, Tensor other) -> Tensor", "broadcast"},
+      {"aten::rsub.Tensor(Tensor self, Scalar other, Scalar alpha=1) -> Tensor", "unary_two_unused_inputs"},
       {"aten::add.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor", "broadcast_one_unused_input"},
+      {"aten::add_.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor", "broadcast_one_unused_input"},
       {"aten::add.Scalar(Tensor self, Scalar other, Scalar alpha=1) -> Tensor", "unary_two_unused_inputs"},
       {"aten::hardtanh(Tensor self, Scalar min_val=-1, Scalar max_val=1) -> Tensor", "unary_two_unused_inputs"},
+      {"aten::hardswish_(Tensor self) -> Tensor", "unary"},
+      {"aten::hardsigmoid_(Tensor self) -> Tensor", "unary"},
       {"aten::adaptive_avg_pool2d(Tensor self, int[2] output_size) -> Tensor", "adaptive_avg_pool2d"},
+      {"aten::gelu(Tensor self) -> Tensor", "unary"},
+      {"aten::tanh(Tensor self) -> Tensor", "unary"},
+      {"aten::erf(Tensor self) -> (Tensor)", "unary"},
+      {"prim::NumToTensor.Scalar(Scalar a) -> Tensor", "zero_dim_tensor"},
+      {"prim::NumToTensor.bool(bool a) -> Tensor", "zero_dim_tensor"},
+      {"aten::zeros(int[] size, *, int? dtype=None, int? layout=None, Device? device=None, bool? pin_memory=None) -> (Tensor)", "unary_four_unused_inputs"},
+      {"aten::to.dtype(Tensor(a) self, int dtype, bool non_blocking=False, bool copy=False, int? memory_format=None) -> (Tensor(a))", "unary_four_unused_inputs"},
+      {"aten::arange(Scalar end, *, int? dtype=None, int? layout=None, Device? device=None, bool? pin_memory=None) -> (Tensor)", "arange_end"},
+      {"aten::arange.start(Scalar start, Scalar end, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor", "arange_start"},
+      {"aten::arange.start_step(Scalar start, Scalar end, Scalar step, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor", "arange_start_step"},
+      {"aten::squeeze(Tensor(a) self) -> Tensor(a)", "squeeze_nodim"},
+      {"aten::squeeze.dim(Tensor(a) self, int dim) -> Tensor(a)", "squeeze"},
+      {"aten::unsqueeze(Tensor(a) self, int dim) -> Tensor(a)", "unsqueeze"},
+      {"aten::slice.Tensor(Tensor(a) self, int dim=0, int? start=None, int? end=None, int step=1) -> Tensor(a)", "slice"},
+      {"aten::select.int(Tensor(a) self, int dim, int index) -> Tensor(a)", "select"},
+      {"aten::index_select(Tensor self, int dim, Tensor index) -> Tensor", "index_select"},
+      {"aten::layer_norm(Tensor input, int[] normalized_shape, Tensor? weight=None, Tensor? bias=None, "
+       "float eps=1e-05, bool cudnn_enable=True) -> Tensor", "unary_five_unused_inputs"},
+      {"aten::softmax.int(Tensor self, int dim, ScalarType? dtype=None) -> Tensor", "unary_two_unused_inputs"},
       {"aten::mm(Tensor self, Tensor mat2) -> Tensor", "mm"},
       {"aten::dot(Tensor self, Tensor tensor) -> Tensor", "dot"},
       {"aten::mv(Tensor self, Tensor vec) -> Tensor", "mv"},
       {"aten::matmul(Tensor self, Tensor other) -> Tensor", "matmul"},
       {"aten::linear(Tensor input, Tensor weight, Tensor? bias=None) -> Tensor", "linear"},
       {"aten::t(Tensor(a) self) -> Tensor(a)", "t"},
+      {"aten::transpose.int(Tensor(a) self, int dim0, int dim1) -> Tensor(a)", "transpose"},
       {"aten::conv1d(Tensor input, Tensor weight, Tensor? bias=None, int[1] stride=1, int[1] padding=0, int[1] dilation=1, int groups=1) -> Tensor", "conv1d"},
       {"aten::conv2d(Tensor input, Tensor weight, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] dilation=1, int groups=1) -> Tensor", "conv2d"},
       {"aten::conv3d(Tensor input, Tensor weight, Tensor? bias=None, int[3] stride=1, int[3] padding=0, int[3] dilation=1, int groups=1) -> Tensor", "conv3d"},
       {"aten::flatten.using_ints(Tensor(a) self, int start_dim=0, int end_dim=-1) -> Tensor(a)", "flatten"},
       {"aten::relu(Tensor self) -> Tensor", "unary"},
+      {"aten::permute(Tensor(a) self, int[] dims) -> Tensor(a)", "permute"},
       {"aten::view(Tensor(a) self, int[] size) -> Tensor(a)", "view"},
-      {"aten::expand_as(Tensor(a) self, Tensor other) -> Tensor(a)", "view"},
+      {"aten::expand_as(Tensor(a) self, Tensor other) -> Tensor(a)", "expand"},
+      {"aten::expand(Tensor(a) self, int[] size, *, bool implicit=False) -> Tensor(a)", "expand_one_unused"},
       {"aten::mean.dim(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor", "mean_dim"},
       {"aten::addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor", "addmm"},
+#ifdef USE_XNNPACK
+      {"prepacked::conv2d_clamp_run(Tensor X, __torch__.torch.classes.xnnpack.Conv2dOpContext W_prepack) -> Tensor Y", "prepacked_conv2d_clamp_run"},
+      {"prepacked::linear_clamp_run(Tensor X, __torch__.torch.classes.xnnpack.LinearOpContext W_prepack) -> Tensor Y", "prepacked_linear_clamp_run"},
+#endif
   };
   // clang-format on
   return schema_to_function_graph;
@@ -344,7 +544,7 @@ std::unordered_map<const FunctionSchema*, std::shared_ptr<Graph>>
     cached_schema_to_graph;
 
 // CompilationUnit that holds all these Functions and keeps them alive.
-CompilationUnit compilation_unit;
+auto compilation_unit = std::make_shared<CompilationUnit>();
 
 void loadModule(const CompilationUnit& module) {
   std::unordered_map<std::string, std::shared_ptr<Graph>> reused_functions;
@@ -371,9 +571,16 @@ void loadModule(const CompilationUnit& module) {
 }
 
 void loadFunctions() {
-  compilation_unit.define(
-      c10::nullopt, shape_compute_functions, nativeResolver(), nullptr);
-  loadModule(compilation_unit);
+  auto src = std::make_shared<Source>(shape_compute_functions);
+  std::vector<at::IValue> constantTable;
+  auto resolver = std::make_shared<SourceImporterImpl>(
+      compilation_unit,
+      &constantTable,
+      [&](const std::string& name) -> std::shared_ptr<Source> { return src; },
+      1);
+  compilation_unit->define(
+      c10::nullopt, shape_compute_functions, resolver, nullptr);
+  loadModule(*compilation_unit);
 }
 } // anonymous namespace
 

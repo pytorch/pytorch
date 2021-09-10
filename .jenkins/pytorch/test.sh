@@ -213,6 +213,7 @@ test_aten() {
     ${SUDO} ln -sf "$TORCH_LIB_DIR"/libmkldnn* "$TEST_BASE_DIR"
     ${SUDO} ln -sf "$TORCH_LIB_DIR"/libnccl* "$TEST_BASE_DIR"
     ${SUDO} ln -sf "$TORCH_LIB_DIR"/libtorch* "$TEST_BASE_DIR"
+    ${SUDO} ln -sf "$TORCH_LIB_DIR"/libtbb* "$TEST_BASE_DIR"
 
     ls "$TEST_BASE_DIR"
     aten/tools/run_tests.sh "$TEST_BASE_DIR"
@@ -494,6 +495,10 @@ test_torch_deploy() {
   assert_git_not_dirty
 }
 
+test_docs_test() {
+  .jenkins/pytorch/docs-test.sh
+}
+
 if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* || "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
   (cd test && python -c "import torch; print(torch.__config__.show())")
   (cd test && python -c "import torch; print(torch.__config__.parallel_info())")
@@ -517,7 +522,6 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-test1 || "${JOB_BASE_NAME}" == *-test1 || "$
   test_without_numpy
   install_torchvision
   test_python_shard1
-  test_distributed
   test_aten
 elif [[ "${BUILD_ENVIRONMENT}" == *-test2 || "${JOB_BASE_NAME}" == *-test2 || "${SHARD_NUMBER}" == 2 ]]; then
   install_torchvision
@@ -533,6 +537,8 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
 elif [[ "${BUILD_ENVIRONMENT}" == *distributed* ]]; then
   test_distributed
   test_rpc
+elif [[ "${TEST_CONFIG}" = docs_test ]]; then
+  test_docs_test
 else
   install_torchvision
   install_monkeytype

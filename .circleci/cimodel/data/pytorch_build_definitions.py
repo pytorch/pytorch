@@ -214,7 +214,7 @@ def gen_docs_configs(xenial_parent_config):
         HiddenConf(
             "pytorch_python_doc_build",
             parent_build=xenial_parent_config,
-            filters=gen_filter_dict(branches_list=r"/.*/",
+            filters=gen_filter_dict(branches_list=["master", "nightly"],
                                     tags_list=RC_PATTERN),
         )
     )
@@ -230,7 +230,7 @@ def gen_docs_configs(xenial_parent_config):
         HiddenConf(
             "pytorch_cpp_doc_build",
             parent_build=xenial_parent_config,
-            filters=gen_filter_dict(branches_list=r"/.*/",
+            filters=gen_filter_dict(branches_list=["master", "nightly"],
                                     tags_list=RC_PATTERN),
         )
     )
@@ -239,13 +239,6 @@ def gen_docs_configs(xenial_parent_config):
             "pytorch_cpp_doc_push",
             parent_build="pytorch_cpp_doc_build",
             branch="master",
-        )
-    )
-
-    configs.append(
-        HiddenConf(
-            "pytorch_doc_test",
-            parent_build=xenial_parent_config
         )
     )
     return configs
@@ -396,24 +389,6 @@ def instantiate_configs(only_slow_gradcheck):
         if cuda_version == "10.2" and python_version == "3.6" and not is_libtorch and not is_slow_gradcheck:
             c.dependent_tests = gen_dependent_configs(c)
 
-        if (
-            compiler_name == "gcc"
-            and compiler_version == "5.4"
-            and not is_libtorch
-            and not is_vulkan
-            and not is_pure_torch
-            and parallel_backend is None
-        ):
-            bc_breaking_check = Conf(
-                "backward-compatibility-check",
-                [],
-                is_xla=False,
-                restrict_phases=["test"],
-                is_libtorch=False,
-                is_important=True,
-                parent_build=c,
-            )
-            c.dependent_tests.append(bc_breaking_check)
 
         if (
             compiler_name != "clang"
