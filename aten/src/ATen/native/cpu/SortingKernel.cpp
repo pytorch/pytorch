@@ -15,6 +15,10 @@ namespace at { namespace native {
 
 namespace {
 
+// use float as accumulation type for BFloat16
+template <typename scalar_t> struct AccType { using type = scalar_t; };
+template <> struct AccType<BFloat16> { using type = float; };
+
 template <typename func_t>
 void _dim_apply(
     const TensorBase &values,
@@ -62,7 +66,8 @@ void _dim_apply(
         }
       };
 
-      iter.for_each(loop);
+      int64_t grain_size = internal::GRAIN_SIZE / std::max(int64_t{1}, dim_size);
+      iter.for_each(loop, /*grain_size=*/grain_size);
     }
   );
 }
@@ -101,32 +106,73 @@ static void sort_kernel(
       int64_t dim_size
     ) {
       using scalar_t = typename std::remove_pointer<decltype(values)>::type;
+      using accscalar_t = typename AccType<scalar_t>::type;
       auto values_accessor = StridedRandomAccessor<scalar_t>(
         values, values_dim_stride);
       auto indices_accessor = StridedRandomAccessor<int64_t>(
         indices, indices_dim_stride);
-      auto composite_accessor = CompositeRandomAccessorCPU<
-        decltype(values_accessor), decltype(indices_accessor)
-      >(values_accessor, indices_accessor);
-
-      if (descending) {
-        if (stable) {
-          std::stable_sort(composite_accessor, composite_accessor + dim_size,
-            KeyValueCompDesc<scalar_t>());
+      // If the stride of the sorting dimension is not 1 or the data type of the values is BFloat16,
+      // allocate a new array of accscalar_t data type and copy the values into it,
+      // and make the sorting dimension memory contiguous.
+      if (values_dim_stride != 1 || std::is_same<scalar_t, BFloat16>::value) {
+        std::unique_ptr<accscalar_t[]> accvalue(new accscalar_t[dim_size]);
+        std::unique_ptr<int64_t[]> accvalue_indices(new int64_t[dim_size]);
+        for (int64_t j = 0; j < dim_size; j++) {
+          accvalue[j] = static_cast<accscalar_t>(values_accessor[j]);
+          accvalue_indices[j] = indices_accessor[j];
         }
-        else {
-          std::sort(composite_accessor, composite_accessor + dim_size,
-            KeyValueCompDesc<scalar_t>());
+        auto accvalue_accessor = StridedRandomAccessor<accscalar_t>(
+          accvalue.get(), 1);
+        auto accvalue_indices_accessor = StridedRandomAccessor<int64_t>(
+          accvalue_indices.get(), 1);
+        auto composite_accessor = CompositeRandomAccessorCPU<
+          decltype(accvalue_accessor), decltype(accvalue_indices_accessor)
+        >(accvalue_accessor, accvalue_indices_accessor);
+        if (descending) {
+          if (stable) {
+            std::stable_sort(composite_accessor, composite_accessor + dim_size,
+              KeyValueCompDesc<accscalar_t>());
+          }
+          else {
+            std::sort(composite_accessor, composite_accessor + dim_size,
+              KeyValueCompDesc<accscalar_t>());
+          }
+        } else {
+          if (stable) {
+            std::stable_sort(composite_accessor, composite_accessor + dim_size,
+              KeyValueCompAsc<accscalar_t>());
+          }
+          else {
+            std::sort(composite_accessor, composite_accessor + dim_size,
+              KeyValueCompAsc<accscalar_t>());
+          }
         }
-      }
-      else {
-        if (stable) {
-          std::stable_sort(composite_accessor, composite_accessor + dim_size,
-            KeyValueCompAsc<scalar_t>());
+        for (int64_t j = 0; j < dim_size; j++) {
+          values_accessor[j] = static_cast<scalar_t>(accvalue[j]);
+          indices_accessor[j] = accvalue_indices[j];
         }
-        else {
-          std::sort(composite_accessor, composite_accessor + dim_size,
-            KeyValueCompAsc<scalar_t>());
+      } else {
+        auto composite_accessor = CompositeRandomAccessorCPU<
+          decltype(values_accessor), decltype(indices_accessor)
+        >(values_accessor, indices_accessor);
+        if (descending) {
+          if (stable) {
+            std::stable_sort(composite_accessor, composite_accessor + dim_size,
+              KeyValueCompDesc<scalar_t>());
+          }
+          else {
+            std::sort(composite_accessor, composite_accessor + dim_size,
+              KeyValueCompDesc<scalar_t>());
+          }
+        } else {
+          if (stable) {
+            std::stable_sort(composite_accessor, composite_accessor + dim_size,
+              KeyValueCompAsc<scalar_t>());
+          }
+          else {
+            std::sort(composite_accessor, composite_accessor + dim_size,
+              KeyValueCompAsc<scalar_t>());
+          }
         }
       }
     }
