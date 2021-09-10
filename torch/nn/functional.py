@@ -3723,8 +3723,8 @@ def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optiona
         return torch._C._nn.upsample_nearest_exact1d(input, output_size, scale_factors)
     if input.dim() == 4 and mode == "nearest-exact":
         return torch._C._nn.upsample_nearest_exact2d(input, output_size, scale_factors)
-    # if input.dim() == 5 and mode == "nearest-exact":
-    #     return torch._C._nn.upsample_nearest_exact3d(input, output_size, scale_factors)
+    if input.dim() == 5 and mode == "nearest-exact":
+        return torch._C._nn.upsample_nearest_exact3d(input, output_size, scale_factors)
 
     if input.dim() == 3 and mode == "area":
         assert output_size is not None

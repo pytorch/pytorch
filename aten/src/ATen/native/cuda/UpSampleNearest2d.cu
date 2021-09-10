@@ -98,7 +98,7 @@ __global__ void upsample_nearest2d_nhwc_out_frame(
 }
 
 // see NOTE [ Nearest neighbor upsampling kernel implementation ]
-template <typename scalar_t, typename accscalar_t, nn_compute_source_index_fn_t nn_compute_source_index_fn>
+template <typename scalar_t, typename accscalar_t, nn_bw_compute_source_index_fn_t nn_bw_compute_source_index_fn>
 C10_LAUNCH_BOUNDS_1(1024)
 __global__ void upsample_nearest2d_backward_out_frame(
     const scalar_t* grad_o,
@@ -124,16 +124,16 @@ __global__ void upsample_nearest2d_backward_out_frame(
   // note that we do not want to clamp src_y to src_dim_y, since we might
   // intentionally want to skip in case of scale_factor < 1.0
   int src_y =
-      nn_compute_source_index_fn(height_scale, dst_y, src_dim_h);
-  int src_y_up = nn_compute_source_index_fn(
+      nn_bw_compute_source_index_fn(height_scale, dst_y, src_dim_h);
+  int src_y_up = nn_bw_compute_source_index_fn(
       height_scale, dst_y + 1, src_dim_h);
 
   int dst_x = dst_idx % dst_dim_w;
   // note that we do not want to clamp src_x to src_dim_w, since we might
   // intentionally want to skip in case of scale_factor < 1.0
   int src_x =
-      nn_compute_source_index_fn(width_scale, dst_x, src_dim_w);
-  int src_x_up = nn_compute_source_index_fn(
+      nn_bw_compute_source_index_fn(width_scale, dst_x, src_dim_w);
+  int src_x_up = nn_bw_compute_source_index_fn(
       width_scale, dst_x + 1, src_dim_w);
 
   for (int b = 0; b < dim_b; b++) {
@@ -320,7 +320,7 @@ static void upsample_nearest2d_out_cuda_template(
   }
 }
 
-template<nn_compute_source_index_fn_t nn_bw_compute_source_index_fn>
+template<nn_bw_compute_source_index_fn_t nn_bw_compute_source_index_fn>
 static void upsample_nearest2d_backward_out_cuda_template(
     const Tensor& grad_input,
     const Tensor& grad_output_,
