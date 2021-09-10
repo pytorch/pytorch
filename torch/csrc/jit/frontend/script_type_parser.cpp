@@ -345,7 +345,7 @@ std::vector<IValue> ScriptTypeParser::evaluateDefaults(
   return stack.at(0).toTuple()->elements();
 }
 
-std::vector<Argument> ScriptTypeParser::parseArgsFromDecl(
+c10::ArgumentVector ScriptTypeParser::parseArgsFromDecl(
     const Decl& decl,
     bool skip_self) {
   auto params_begin = decl.params().begin();
@@ -353,7 +353,7 @@ std::vector<Argument> ScriptTypeParser::parseArgsFromDecl(
   if (skip_self) {
     ++params_begin;
   }
-  std::vector<Argument> retval;
+  c10::ArgumentVector retval;
 
   std::vector<Expr> default_types;
   std::vector<Expr> default_exprs;
@@ -416,7 +416,7 @@ std::vector<Argument> ScriptTypeParser::parseArgsFromDecl(
   return retval;
 }
 
-std::vector<Argument> ScriptTypeParser::parseReturnFromDecl(const Decl& decl) {
+c10::ArgumentVector ScriptTypeParser::parseReturnFromDecl(const Decl& decl) {
   // we represent no annoation on a return type as having no values in the
   // schema's return() list
   // in emitReturn we take the actual return value to be the value of the
@@ -442,8 +442,8 @@ FunctionSchema ScriptTypeParser::parseSchemaFromDef(
     const Def& def,
     bool skip_self) {
   const auto name = def.name().name();
-  std::vector<Argument> args = parseArgsFromDecl(def.decl(), skip_self);
-  std::vector<Argument> returns = parseReturnFromDecl(def.decl());
+  c10::ArgumentVector args = parseArgsFromDecl(def.decl(), skip_self);
+  c10::ArgumentVector returns = parseReturnFromDecl(def.decl());
   return FunctionSchema(
       name, "", std::move(args), std::move(returns), false, false);
 }
