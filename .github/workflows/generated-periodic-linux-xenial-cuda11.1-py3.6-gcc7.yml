@@ -231,11 +231,7 @@ jobs:
         run: |
           COMMIT_TIME=$(git log --max-count=1 --format=%ct || echo 0)
           export COMMIT_TIME
-<<<<<<< HEAD
-          pip3 install requests==2.26
-=======
-          pip3 install requests boto3==1.16.34
->>>>>>> 2853327bbe8 ([wip] Check RDS proxy)
+          pip3 install requests==2.26 boto3==1.16.34
           python3 -m tools.stats.upload_binary_size_to_scuba || exit 0
       - name: Chown workspace
         run: |

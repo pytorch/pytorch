@@ -8,6 +8,10 @@ from typing import Dict, Any, List, Union
 _lambda_client = None
 
 
+def sprint(*args):
+    print("[scribe]", *args)
+
+
 def aws_lambda() -> Any:
     global _lambda_client
     # lazy import so that we don't need to introduce extra dependencies
@@ -17,6 +21,16 @@ def aws_lambda() -> Any:
         _lambda_client = boto3.client("lambda")
 
     return _lambda_client
+
+
+def invoke_lambda(name: str, payload: Any) -> Any:
+    res = aws_lambda().invoke(
+        FunctionName="gh-ci-scribe-proxy", Payload=json.dumps(payload).encode()
+    )
+    payload = str(res["Payload"].read().decode())
+    if res.get("FunctionError"):
+        raise Exception(payload)
+    return payload
 
 
 def send_to_scribe(logs: str) -> str:
@@ -31,23 +45,16 @@ def send_to_scribe(logs: str) -> str:
 
 
 def _send_to_scribe_via_boto3(logs: str) -> str:
-
-    print("Scribe access token not provided, sending report via boto3...")
+    sprint("Scribe access token not provided, sending report via boto3...")
     event = {"base64_bz2_logs": base64.b64encode(bz2.compress(logs.encode())).decode()}
-    res = aws_lambda().invoke(
-        FunctionName="gh-ci-scribe-proxy", Payload=json.dumps(event).encode()
-    )
-    payload = str(res["Payload"].read().decode())
-    if res.get("FunctionError"):
-        raise Exception(payload)
-    return payload
+    return str(invoke_lambda("gh-ci-scribe-proxy", event))
 
 
 def _send_to_scribe_via_http(access_token: str, logs: str) -> str:
     # lazy import so that we don't need to introduce extra dependencies
     import requests  # type: ignore[import]
 
-    print("Scribe access token provided, sending report via http...")
+    sprint("Scribe access token provided, sending report via http...")
     r = requests.post(
         "https://graph.facebook.com/scribe_logs",
         data={"access_token": access_token, "logs": logs},
@@ -56,18 +63,11 @@ def _send_to_scribe_via_http(access_token: str, logs: str) -> str:
     return str(r.text)
 
 
-def _rds_invoke(events: List[Dict[str, Any]]) -> Any:
-    res = aws_lambda().invoke(
-        FunctionName="rds-proxy", Payload=json.dumps(events).encode()
-    )
-    payload = str(res["Payload"].read().decode())
-    if res.get("FunctionError"):
-        raise Exception(payload)
-
-    return json.loads(payload)
+def invoke_rds(events: List[Dict[str, Any]]) -> Any:
+    return invoke_lambda("rds-proxy", events)
 
 
-def register_rds_table(table_name: str, schema: Dict[str, str]) -> None:
+def register_rds_schema(table_name: str, schema: Dict[str, str]) -> None:
     base = {
         "pr": "string",
         "ref": "string",
@@ -84,7 +84,7 @@ def register_rds_table(table_name: str, schema: Dict[str, str]) -> None:
         }
     ]
 
-    _rds_invoke(event)
+    invoke_rds(event)
 
 
 def schema_from_sample(data: Dict[str, Any]) -> Dict[str, str]:
@@ -110,7 +110,7 @@ def rds_query(queries: Union[Query, List[Query]]) -> Any:
     for query in queries:
         events.append({"read": {**query}})
 
-    return _rds_invoke(events)
+    return invoke_rds(events)
 
 
 def rds_saved_query(query_names: Union[str, List[str]]) -> Any:
@@ -127,15 +127,22 @@ def rds_saved_query(query_names: Union[str, List[str]]) -> Any:
             }
         )
 
-    return _rds_invoke(events)
+    return invoke_rds(events)
 
 
-def rds_write(table_name: str, values_list: List[Dict[str, Any]]) -> None:
+def rds_write(
+    table_name: str, values_list: List[Dict[str, Any]], only_on_master: bool = True
+) -> None:
+    sprint("Writing for ", os.getenv("CIRCLE_PR_NUMBER"))
+    if not only_on_master and os.getenv("CIRCLE_PR_NUMBER"):
+        sprint("Skipping RDS write on PR")
+        return
+
     base = {
-        "pr": os.environ.get("CIRCLE_PR_NUMBER"),
-        "ref": os.environ.get("CIRCLE_SHA1"),
-        "branch": os.environ.get("CIRCLE_BRANCH"),
-        "workflow_id": os.environ.get("CIRCLE_WORKFLOW_ID"),
+        "pr": os.getenv("CIRCLE_PR_NUMBER"),
+        "ref": os.getenv("CIRCLE_SHA1"),
+        "branch": os.getenv("CIRCLE_BRANCH"),
+        "workflow_id": os.getenv("CIRCLE_WORKFLOW_ID"),
     }
 
     events = []
@@ -149,7 +156,8 @@ def rds_write(table_name: str, values_list: List[Dict[str, Any]]) -> None:
             }
         )
 
-    _rds_invoke(events)
+    print("Wrote stats for", table_name)
+    invoke_rds(events)
 
 
 if __name__ == "__main__":

@@ -13,7 +13,7 @@ from typing import Any, Dict, Generator, List
 from tools.stats.scribe import (
     send_to_scribe,
     rds_write,
-    register_rds_table,
+    register_rds_schema,
     schema_from_sample,
 )
 
@@ -155,7 +155,7 @@ if __name__ == "__main__":
         **base_data(),
         **sample_lib,
     }
-    register_rds_table("binary_size", schema_from_sample(sample_data))
+    register_rds_schema("binary_size", schema_from_sample(sample_data))
 
     if "-android" in os.environ.get("BUILD_ENVIRONMENT", ""):
         report_android_sizes(file_dir)
