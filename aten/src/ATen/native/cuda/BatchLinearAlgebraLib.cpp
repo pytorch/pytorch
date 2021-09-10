@@ -471,9 +471,9 @@ inline static void apply_svd_lib_gesvd(const Tensor& self, const Tensor& U, cons
   int n = cuda_int_cast(self.size(-1), "n");
 
   // cusolver gesvd only supports m >= n, we transpose the whole svd calculation if m < n
-  // i.e.: A = U S V^H  --> A^T = V^H^T S U^T
+  // i.e.: A = U S V^H  --> A^H = V S U^H
   if (m < n) {
-    apply_svd_lib_gesvd(self.transpose(-2, -1), VT, S, U, infos, compute_uv, some, calculate_all_batches, batches);
+    apply_svd_lib_gesvd(self.transpose(-2, -1).conj(), VT, S, U, infos, compute_uv, some, calculate_all_batches, batches);
     return;
   }
 
