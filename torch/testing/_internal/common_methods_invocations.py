@@ -1784,11 +1784,11 @@ def sample_inputs_addcmul_addcdiv(op_info, device, dtype, requires_grad, **kwarg
 
 def sample_inputs_baddbmm(op_info, device, dtype, requires_grad, **kwargs):
     test_cases = [((S, S, M), (S, S, S), (S, S, M), 1, 1, False),
-                  # ((1,), (S, S, S), (S, S, M), 1, 1, True),
-                  # ((S, S, M), (S, S, S), (S, S, M), 0.6, 0.2, False),
-                  # ((1,), (S, S, S), (S, S, M), 0.6, 0.2, True),
-                  # ((), (S, S, S), (S, S, M), 1, 1, True),
-                  # ((), (S, S, S), (S, S, M), 0.6, 0.2, True),
+                  ((1,), (S, S, S), (S, S, M), 1, 1, True),
+                  ((S, S, M), (S, S, S), (S, S, M), 0.6, 0.2, False),
+                  ((1,), (S, S, S), (S, S, M), 0.6, 0.2, True),
+                  ((), (S, S, S), (S, S, M), 1, 1, True),
+                  ((), (S, S, S), (S, S, M), 0.6, 0.2, True),
                   ]
     sample_inputs = []
     for (input_shape, batch1_shape, batch2_shape, alpha, beta, broadcasts_input) in test_cases:

@@ -118,7 +118,6 @@ TORCH_META_FUNC(baddbmm)(const Tensor& self, const Tensor& batch1, const Tensor&
     set_output({0}, batch1.options());
   }
   if (self.is_cuda()) {
-      /* TORCH_CHECK(self_.dim() == 3, "self must be a 3D tensor"); */
       TORCH_CHECK(batch1.dim() == 3, "batch1 must be a 3D tensor");
       TORCH_CHECK(batch2.dim() == 3, "batch2 must be a 3D tensor");
 
@@ -127,17 +126,13 @@ TORCH_META_FUNC(baddbmm)(const Tensor& self, const Tensor& batch1, const Tensor&
 
       IntArrayRef batch1_sizes = batch1.sizes();
       IntArrayRef batch2_sizes = batch2.sizes();
-      /* IntArrayRef self_sizes = self_.sizes(); */
-
-      /* TORCH_CHECK(self_sizes[0] == batch1_sizes[0], "self dim 0 must match batch1 dim 0"); */
-      /* TORCH_CHECK(self_sizes[0] == batch2_sizes[0], "self dim 0 must match batch2 dim 0"); */
-      /* TORCH_CHECK(self_sizes[1] == batch1_sizes[1], "self dim 1 must match batch1 dim 1"); */
-      /* TORCH_CHECK(self_sizes[2] == batch2_sizes[2], "self dim 2 must match batch2 dim 2"); */
       TORCH_CHECK(batch1_sizes[2] == batch2_sizes[1], "batch1 dim 2 must match batch2 dim 1");
   } else {
-      auto self_ = expand_size(self, {batch1.size(0), batch1.size(1), batch2.size(2)}, "baddbmm");
-      result.resize_(self_->sizes());
-      result.copy_(*self_);
+      if (!result.is_same(self)) {
+        auto self_ = expand_size(self, {batch1.size(0), batch1.size(1), batch2.size(2)}, "baddbmm");
+        result.resize_(self_->sizes());
+        result.copy_(*self_);
+      }
       common_checks_baddbmm_bmm(*this, batch1, batch2, beta, alpha, false, result);
   }
 
@@ -1426,19 +1421,6 @@ static inline void bmm_out_or_baddbmm_(Tensor& self_or_result, const Tensor& bat
   return;
 }
 
-
-/* Tensor baddbmm_cpu(const Tensor& self, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha) { */
-/*   Tensor result = at::empty({0}, self.options()); */
-/*   return at::native::baddbmm_out_cpu(self, batch1, batch2, beta, alpha, result); */
-/* } */
-
-/* Tensor& baddbmm_out_cpu(const Tensor& self_, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha, Tensor &result) { */
-/*   auto self = expand_size(self_, {batch1.size(0), batch1.size(1), batch2.size(2)}, "baddbmm"); */
-/*   result.resize_(self->sizes()); */
-/*   result.copy_(*self); */
-/*   return at::native::baddbmm__cpu(result, batch1, batch2, beta, alpha); */
-/* } */
-
 void conjugate_mutable_input_if_needed(Tensor& self, bool conjugate) {
   if (conjugate) {
     self.conj_physical_();
@@ -1447,9 +1429,13 @@ void conjugate_mutable_input_if_needed(Tensor& self, bool conjugate) {
 
 TORCH_IMPL_FUNC(baddbmm_out_cpu)
 (const Tensor & self, const Tensor & batch1, const Tensor & batch2, const Scalar& beta, const Scalar& alpha, const Tensor& result) {
+    const Tensor& self_or_result = result;
+    if (result.is_same(self)) {
+      self_or_result.copy_(self);
+    }
     bool self_is_conj = result.is_conj();
     conjugate_mutable_input_if_needed(const_cast<Tensor&>(result), self_is_conj);
-    bmm_out_or_baddbmm_(const_cast<Tensor&>(result), batch1.resolve_conj(), batch2.resolve_conj(), beta, alpha, false); 
+    bmm_out_or_baddbmm_(const_cast<Tensor&>(result), batch1.resolve_conj(), batch2.resolve_conj(), beta, alpha, false);
     conjugate_mutable_input_if_needed(const_cast<Tensor&>(result), self_is_conj);
   }
 
