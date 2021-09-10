@@ -382,10 +382,6 @@ _(aten, hsplit) \
 _(aten, hstack) \
 _(aten, hypot) \
 _(aten, i0_) \
-_(aten, igamma) \
-_(aten, igamma_) \
-_(aten, igammac) \
-_(aten, igammac_) \
 _(aten, ifft) \
 _(aten, index) \
 _(aten, index_add) \
@@ -453,7 +449,6 @@ _(aten, margin_ranking_loss) \
 _(aten, masked_fill) \
 _(aten, masked_scatter) \
 _(aten, masked_select) \
-_(aten, matmul) \
 _(aten, matrix_rank) \
 _(aten, matrix_exp) \
 _(aten, max) \
