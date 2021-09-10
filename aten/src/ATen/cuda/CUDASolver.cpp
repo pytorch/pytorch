@@ -163,58 +163,41 @@ void getrs<c10::complex<float>>(
 
 
 template<>
-void gesvd_buffersize<float>(
-    cusolverDnHandle_t handle, int m, int n, int *lwork
-) {
+void gesvd_buffersize<float>(CUDASOLVER_GESVD_BUFFERSIZE_ARGTYPES()) {
   TORCH_CUSOLVER_CHECK(cusolverDnSgesvd_bufferSize(handle, m, n, lwork));
 }
 
 template<>
-void gesvd_buffersize<double>(
-    cusolverDnHandle_t handle, int m, int n, int *lwork
-) {
+void gesvd_buffersize<double>(CUDASOLVER_GESVD_BUFFERSIZE_ARGTYPES()) {
   TORCH_CUSOLVER_CHECK(cusolverDnDgesvd_bufferSize(handle, m, n, lwork));
 }
 
 template<>
-void gesvd_buffersize<c10::complex<float>>(
-    cusolverDnHandle_t handle, int m, int n, int *lwork
-) {
+void gesvd_buffersize<c10::complex<float>>(CUDASOLVER_GESVD_BUFFERSIZE_ARGTYPES()) {
   TORCH_CUSOLVER_CHECK(cusolverDnCgesvd_bufferSize(handle, m, n, lwork));
 }
 
 template<>
-void gesvd_buffersize<c10::complex<double>>(
-    cusolverDnHandle_t handle, int m, int n, int *lwork
-) {
+void gesvd_buffersize<c10::complex<double>>(CUDASOLVER_GESVD_BUFFERSIZE_ARGTYPES()) {
   TORCH_CUSOLVER_CHECK(cusolverDnZgesvd_bufferSize(handle, m, n, lwork));
 }
 
 
 template<>
-void gesvd<float>(
-    cusolverDnHandle_t handle, signed char jobu, signed char jobvt, int m, int n, float *A, int lda,
-    float *S, float *U, int ldu, float *VT, int ldvt, float *work, int lwork, float *rwork, int *info
-) {
+void gesvd<float>(CUDASOLVER_GESVD_ARGTYPES(float, float)) {
   TORCH_CUSOLVER_CHECK(cusolverDnSgesvd(
       handle, jobu, jobvt, m, n, A, lda, S, U, ldu, VT, ldvt, work, lwork, rwork, info));
 }
 
 template<>
-void gesvd<double>(
-    cusolverDnHandle_t handle, signed char jobu, signed char jobvt, int m, int n, double *A, int lda,
-    double *S, double *U, int ldu, double *VT, int ldvt, double *work, int lwork, double *rwork, int *info
-) {
+void gesvd<double>(CUDASOLVER_GESVD_ARGTYPES(double, double)) {
   TORCH_CUSOLVER_CHECK(cusolverDnDgesvd(
       handle, jobu, jobvt, m, n, A, lda, S, U, ldu, VT, ldvt, work, lwork, rwork, info));
 }
 
 
 template<>
-void gesvd<c10::complex<float>>(
-    cusolverDnHandle_t handle, signed char jobu, signed char jobvt, int m, int n, c10::complex<float> *A, int lda,
-    float *S, c10::complex<float> *U, int ldu, c10::complex<float> *VT, int ldvt, c10::complex<float> *work, int lwork, float *rwork, int *info
-) {
+void gesvd<c10::complex<float>>(CUDASOLVER_GESVD_ARGTYPES(c10::complex<float>, float)) {
   TORCH_CUSOLVER_CHECK(cusolverDnCgesvd(
       handle, jobu, jobvt, m, n,
       reinterpret_cast<cuComplex*>(A),
@@ -229,10 +212,7 @@ void gesvd<c10::complex<float>>(
 }
 
 template<>
-void gesvd<c10::complex<double>>(
-    cusolverDnHandle_t handle, signed char jobu, signed char jobvt, int m, int n, c10::complex<double> *A, int lda,
-    double *S, c10::complex<double> *U, int ldu, c10::complex<double> *VT, int ldvt, c10::complex<double> *work, int lwork, double *rwork, int *info
-) {
+void gesvd<c10::complex<double>>(CUDASOLVER_GESVD_ARGTYPES(c10::complex<double>, double)) {
   TORCH_CUSOLVER_CHECK(cusolverDnZgesvd(
       handle, jobu, jobvt, m, n,
       reinterpret_cast<cuDoubleComplex*>(A),
