@@ -9,15 +9,19 @@
 
 namespace torch { namespace autograd {
 
+using optional_variable_list = std::vector<c10::optional<Variable>>;
+using _jvp_fn_t = std::function<variable_list(variable_list, variable_list)>;
+
 TORCH_API std::vector<c10::optional<Variable>> _wrap_outputs(
   const variable_list &input_vars,
   const std::unordered_set<at::TensorImpl*> &non_differentiable,
   const std::unordered_set<at::TensorImpl*> &dirty_inputs,
   const at::ArrayRef<c10::optional<Variable>> raw_outputs,
-  const std::shared_ptr<Node> &cdata);
+  const std::shared_ptr<Node> &cdata,
+  _jvp_fn_t jvp_user_function);
 
-TORCH_API void check_variable_result(const Variable& original,
-  const Variable& result, std::string hook_name);
+TORCH_API void check_variable_result(const at::TensorBase& original,
+    const at::TensorBase& result, std::string hook_name);
 
 // Get the return type of the forward function of the custom Function class X
 template<typename X, typename... Args>
@@ -263,12 +267,18 @@ auto Function<T>::apply(Args&&... args) -> std::enable_if_t<std::is_same<X,T>::v
     outputs = T::forward(&node->ctx_, std::forward<Args>(args)...);
   }
 
+  _jvp_fn_t jvp_fn = [](variable_list inputs, variable_list gI) -> variable_list {
+    TORCH_CHECK(false, "jvp is not implemented for the c++ API of custom Function yet.",
+                "Please open a feature request on Github if you need this.");
+  };
+
   auto wrapped_outputs = _wrap_outputs(
     input_vars,
     node->ctx_.get_non_differentiable(),
     node->ctx_.get_and_bump_dirty(),
     to_optional(outputs),
-    is_executable ? node : nullptr);
+    is_executable ? node : nullptr,
+    jvp_fn);
 
   node->output_info_.reserve(wrapped_outputs.size());
   for (auto& output : wrapped_outputs) {

@@ -85,9 +85,8 @@ installed`. (You should only have to `pip uninstall` a few times, but
 you can always `uninstall` with `timeout` or in a loop if you're feeling
 lazy.)
 
-
 ```bash
-conda -y uninstall pytorch
+conda uninstall pytorch -y
 yes | pip uninstall torch
 ```
 
@@ -108,9 +107,7 @@ git submodule update --init --recursive --jobs 0
 
 If you want to have no-op incremental rebuilds (which are fast), see the section below titled "Make no-op build fast."
 
-
 3. Install PyTorch in `develop` mode:
-
 
 The change you have to make is to replace
 
@@ -147,6 +144,7 @@ torch as it is not installed`; next run `python setup.py clean`. After
 that, you can install in `develop` mode again.
 
 ### Tips and Debugging
+
 * A prerequisite to installing PyTorch is CMake. We recommend installing it with [Homebrew](https://brew.sh/)
 with `brew install cmake` if you are developing on MacOS or Linux system.
 * Our `setup.py` requires Python >= 3.6
@@ -188,7 +186,7 @@ with `brew install cmake` if you are developing on MacOS or Linux system.
     ```
     this is likely that you are using HTTP proxying and the certificate expired. To check if the certificate is valid, run
     `git config --global --list` and search for config like `http.proxysslcert=<cert_file>`. Then check certificate valid date by running
-    ```
+    ```bash
     openssl x509 -noout -in <cert_file> -dates
     ```
 
@@ -197,6 +195,7 @@ with `brew install cmake` if you are developing on MacOS or Linux system.
     Could not find .../pytorch/third_party/pybind11/CMakeLists.txt
     ```
     remove any `submodule.*` settings in your local git config (`.git/config` of your pytorch repo) and try again.
+* If you're a Windows contributor, please check out [Best Practices](https://github.com/pytorch/pytorch/wiki/Best-Practices-to-Edit-and-Compile-Pytorch-Source-Code-On-Windows).
 
 ## Nightly Checkout & Pull
 
@@ -242,8 +241,7 @@ into the repo directory.
 * [aten](aten) - C++ tensor library for PyTorch (no autograd support)
   * [src](aten/src) - [README](aten/src/README.md)
     * [TH](aten/src/TH)
-      [THC](aten/src/THC)
-      [THCUNN](aten/src/THCUNN) - Legacy library code from the original
+      [THC](aten/src/THC) - Legacy library code from the original
       Torch. Try not to add things here; we're slowly porting these to
       [native](aten/src/ATen/native).
       * generic - Contains actual implementations of operators,
@@ -354,6 +352,7 @@ an optional dependency, and `pytest` may help run tests more selectively.
 All these packages can be installed with `conda` or `pip`.
 
 ### Better local unit tests with `pytest`
+
 We don't officially support `pytest`, but it works well with our
 `unittest` tests and offers a number of useful features for local
 developing. Install it via `pip install pytest`.
@@ -368,7 +367,6 @@ pytest test/test_nn.py -k Loss -v
 The above is an example of testing a change to all Loss functions: this
 command runs tests such as `TestNN.test_BCELoss` and
 `TestNN.test_MSELoss` and can be useful to save keystrokes.
-
 
 ### Local linting
 
@@ -407,6 +405,7 @@ make clang-tidy
 ```
 
 To run a lint only on changes, add the `CHANGED_ONLY` option:
+
 ```bash
 make <name of lint> CHANGED_ONLY=--changed-only
 ```
@@ -435,12 +434,12 @@ is `./build/bin/FILENAME --gtest_filter=TESTSUITE.TESTNAME`, where
 `TESTNAME` is the name of the test you'd like to run and `TESTSUITE` is
 the suite that test is defined in.
 
-For example, if you wanted to run the test ` MayContainAlias`, which
+For example, if you wanted to run the test `MayContainAlias`, which
 is part of the test suite `ContainerAliasingTest` in the file
 `test/cpp/jit/test_alias_analysis.cpp`, the command would be:
 
 ```bash
-./build/bin/test_jit --gtest_filter=ContainerAliasingTest.UnionAliasing
+./build/bin/test_jit --gtest_filter=ContainerAliasingTest.MayContainAlias
 ```
 
 
@@ -451,8 +450,9 @@ You can generate a commit that limits the CI to only run a specific job by using
 
 ```bash
 # --job: specify one or more times to filter to a specific job + its dependencies
+# --filter-gha: specify github actions worklfows to keep
 # --make-commit: commit CI changes to git with a message explaining the change
-python tools/testing/explicit_ci_jobs.py --job binary_linux_manywheel_3_6m_cpu_devtoolset7_nightly_test --make-commit
+python tools/testing/explicit_ci_jobs.py --job binary_linux_manywheel_3_6m_cpu_devtoolset7_nightly_test --filter-gha '*generated*gcc5.4*' --make-commit
 
 # Make your changes
 
@@ -500,14 +500,13 @@ pip install -r requirements.txt
 
 > Note that if you are a Facebook employee using a devserver, yarn may be more convenient to install katex:
 
-```
+```bash
 yarn global add katex
 ```
 
 3. Generate the documentation HTML files. The generated files will be in `docs/build/html`.
 
 ```bash
-cd docs
 make html
 ```
 
@@ -532,6 +531,7 @@ git add index.rst jit.rst
 ```
 
 #### Building C++ Documentation
+
 For C++ documentation (https://pytorch.org/cppdocs), we use
 [Doxygen](http://www.doxygen.nl/) and then convert it to
 [Sphinx](http://www.sphinx-doc.org/) via
@@ -570,12 +570,13 @@ Then navigate to `localhost:8000` in your web browser.
 **Tip:**
 You can start a lightweight HTTP server on the remote machine with:
 
-```
+```bash
 python -m http.server 8000 <path_to_html_output>
 ```
 
 Alternatively, you can run `rsync` on your local machine to copy the files from
 your remote machine:
+
 ```bash
 mkdir -p build cpp/build
 rsync -az me@my_machine:/path/to/pytorch/docs/build/html build
@@ -613,7 +614,7 @@ that has the ability to profile native code and Python code in the same session.
 `py-spy` can be installed via `pip`:
 
 ```bash
-$ pip install py-spy
+pip install py-spy
 ```
 
 To use `py-spy`, first write a Python test script that exercises the
@@ -636,7 +637,7 @@ number of times to get good statistics. The most straightforward way to use
 graph](http://www.brendangregg.com/flamegraphs.html):
 
 ```bash
-$ py-spy record -o profile.svg --native -- python test_tensor_tensor_add.py
+py-spy record -o profile.svg --native -- python test_tensor_tensor_add.py
 ```
 
 This will output a file named `profile.svg` containing a flame graph you can
@@ -705,6 +706,7 @@ variables `DEBUG`, `USE_DISTRIBUTED`, `USE_MKLDNN`, `USE_CUDA`, `BUILD_TEST`, `U
 - `USE_XNNPACK=0` will disable compiling with XNNPACK.
 
 For example:
+
 ```bash
 DEBUG=1 USE_DISTRIBUTED=0 USE_MKLDNN=0 USE_CUDA=0 BUILD_TEST=0 USE_FBGEMM=0 USE_NNPACK=0 USE_QNNPACK=0 USE_XNNPACK=0 python setup.py develop
 ```
@@ -735,119 +737,62 @@ succeed.
 
 #### Use CCache
 
-Even when dependencies are tracked with file modification,
-there are many situations where files get rebuilt when a previous
-compilation was exactly the same.
+Even when dependencies are tracked with file modification, there are many
+situations where files get rebuilt when a previous compilation was exactly the
+same. Using ccache in a situation like this is a real time-saver.
 
-Using ccache in a situation like this is a real time-saver. The ccache manual
-describes [two ways to use ccache](https://ccache.samba.org/manual/latest.html#_run_modes).
-In the PyTorch project, currently only the latter method of masquerading as
-the compiler via symlinks works for CUDA compilation.
-
-Here are the instructions for installing ccache from source (tested at commit
-`3c302a7` of the `ccache` repo):
+Before building pytorch, install ccache from your package manager of choice:
 
 ```bash
-#!/bin/bash
-
-if ! ls ~/ccache/bin/ccache
-then
-    set -ex
-    sudo apt-get update
-    sudo apt-get install -y cmake
-    mkdir -p ~/ccache
-    pushd ~/ccache
-    rm -rf ccache
-    git clone https://github.com/ccache/ccache.git
-    mkdir -p ccache/build
-    pushd ccache/build
-    cmake -DCMAKE_INSTALL_PREFIX=${HOME}/ccache -DENABLE_TESTING=OFF -DZSTD_FROM_INTERNET=ON ..
-    make -j$(nproc) install
-    popd
-    popd
-
-    mkdir -p ~/ccache/lib
-    mkdir -p ~/ccache/cuda
-    ln -s ~/ccache/bin/ccache ~/ccache/lib/cc
-    ln -s ~/ccache/bin/ccache ~/ccache/lib/c++
-    ln -s ~/ccache/bin/ccache ~/ccache/lib/gcc
-    ln -s ~/ccache/bin/ccache ~/ccache/lib/g++
-    ln -s ~/ccache/bin/ccache ~/ccache/cuda/nvcc
-
-    ~/ccache/bin/ccache -M 25Gi
-fi
-
-export PATH=~/ccache/lib:$PATH
-export CUDA_NVCC_EXECUTABLE=~/ccache/cuda/nvcc
+conda install ccache -f conda-forge
+sudo apt install ccache
+sudo yum install ccache
+brew install ccache
 ```
 
-Alternatively, `ccache` provided by newer Linux distributions (e.g. Debian/sid)
-also works, but the `nvcc` symlink to `ccache` as described above is still required.
-
-Note that the original `nvcc` binary (typically at `/usr/local/cuda/bin`) must
-be on your `PATH`, otherwise `ccache` will emit the following error:
-
-    ccache: error: Could not find compiler "nvcc" in PATH
-
-For example, here is how to install/configure `ccache` on Ubuntu:
+You may also find the default cache size in ccache is too small to be useful.
+The cache sizes can be increased from the command line:
 
 ```bash
-# install ccache
-sudo apt install ccache
-
-# update symlinks and create/re-create nvcc link
-sudo /usr/sbin/update-ccache-symlinks
-sudo ln -s /usr/bin/ccache /usr/lib/ccache/nvcc
-
 # config: cache dir is ~/.ccache, conf file ~/.ccache/ccache.conf
 # max size of cache
 ccache -M 25Gi  # -M 0 for unlimited
 # unlimited number of files
 ccache -F 0
-
-# deploy (and add to ~/.bashrc for later)
-export PATH="/usr/lib/ccache:$PATH"
-```
-
-It is also possible to install `ccache` via `conda` by installing it from the
-community-maintained `conda-forge` channel. Here is how to set up `ccache` this
-way:
-
-```bash
-# install ccache
-conda install -c conda-forge ccache
-
-# set up ccache compiler symlinks
-mkdir ~/ccache
-mkdir ~/ccache/lib
-mkdir ~/ccache/cuda
-ln -s $CONDA_PREFIX/bin/ccache ~/ccache/lib/cc
-ln -s $CONDA_PREFIX/bin/ccache ~/ccache/lib/c++
-ln -s $CONDA_PREFIX/bin/ccache ~/ccache/lib/gcc
-ln -s $CONDA_PREFIX/bin/ccache ~/ccache/lib/g++
-ln -s $CONDA_PREFIX/bin/ccache ~/ccache/cuda/nvcc
-
-# update PATH to reflect symlink locations, consider
-# adding this to your .bashrc
-export PATH=~/ccache/lib:$PATH
-export CUDA_NVCC_EXECUTABLE=~/ccache/cuda/nvcc
-
-# increase ccache cache size to 25 GiB
-ccache -M 25Gi
 ```
 
 To check this is working, do two clean builds of pytorch in a row. The second
-build should be substantially and noticeably faster than the first build. If this doesn't seem to be the case, check that each of the symlinks above actually link to your installation of `ccache`. For example, if you followed the first option and installed `ccache` from source on a Linux machine, running `readlink -e $(which g++)` should return `~/ccache/bin/ccache`.
+build should be substantially and noticeably faster than the first build. If
+this doesn't seem to be the case, check the `CMAKE_<LANG>_COMPILER_LAUNCHER`
+rules in `build/CMakeCache.txt`, where `<LANG>` is `C`, `CXX` and `CUDA`.
+Each of these 3 variables should contain ccache, e.g.
 
+```
+//CXX compiler launcher
+CMAKE_CXX_COMPILER_LAUNCHER:STRING=/usr/bin/ccache
+```
+
+If not, you can define these variables on the command line before invoking `setup.py`.
+
+```bash
+export CMAKE_C_COMPILER_LAUNCHER=ccache
+export CMAKE_CXX_COMPILER_LAUNCHER=ccache
+export CMAKE_CUDA_COMPILER_LAUNCHER=ccache
+python setup.py develop
+```
 
 #### Use a faster linker
+
 If you are editing a single file and rebuilding in a tight loop, the time spent
 linking will dominate. The system linker available in most Linux distributions
 (GNU `ld`) is quite slow. Use a faster linker, like [lld](https://lld.llvm.org/).
 
+People on Mac, follow [this guide](https://stackoverflow.com/questions/42730345/how-to-install-llvm-for-mac) instead.
+
 The easiest way to use `lld` this is download the
 [latest LLVM binaries](http://releases.llvm.org/download.html#8.0.0) and run:
-```
+
+```bash
 ln -s /path/to/downloaded/ld.lld /usr/local/bin/ld
 ```
 
@@ -923,7 +868,7 @@ tensor([1., 2., 3., 4.], dtype=torch.float64)
 GDB tries to automatically load `pytorch-gdb` thanks to the
 [.gdbinit](.gdbinit) at the root of the pytorch repo. However, auto-loadings is disabled by default, because of security reasons:
 
-```
+```bash
 $ gdb
 warning: File "/path/to/pytorch/.gdbinit" auto-loading has been declined by your `auto-load safe-path' set to "$debugdir:$datadir/auto-load".
 To enable execution of this file add
@@ -941,10 +886,10 @@ For more information about this security protection see the
 As gdb itself suggests, the best way to enable auto-loading of `pytorch-gdb`
 is to add the following line to your `~/.gdbinit` (i.e., the `.gdbinit` file
 which is in your home directory, **not** `/path/to/pytorch/.gdbinit`):
-```
+
+```bash
 add-auto-load-safe-path /path/to/pytorch/.gdbinit
 ```
-
 
 ## CUDA development tips
 
@@ -1151,7 +1096,7 @@ formatting and semantic checking of code. We provide a pre-commit git hook for
 performing these checks, before a commit is created:
 
   ```bash
-  ln -s tools/git-pre-commit .git/hooks/pre-commit
+  ln -s ../../tools/git-pre-commit .git/hooks/pre-commit
   ```
 
 You'll need to install an appropriately configured flake8; see
@@ -1180,7 +1125,7 @@ folder (later called `$LLVM_ROOT`).
 
 Then set up the appropriate scripts. You can put this in your `.bashrc`:
 
-```
+```bash
 LLVM_ROOT=<wherever your llvm install is>
 PYTORCH_ROOT=<wherever your pytorch checkout is>
 

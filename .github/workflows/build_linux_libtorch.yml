@@ -16,7 +16,7 @@ jobs:
       image: python:3.9
     steps:
       - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
       - name: Generating build matrix
         id: set-matrix
         run: |
@@ -51,12 +51,12 @@ jobs:
       - name: Clean runner workspace
         run: rm -rf "$GITHUB_WORKSPACE"
       - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
           path: pytorch
           submodules: recursive
       - name: Clone pytorch/builder
-        uses: actions/checkout@v2
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
           repository: pytorch/builder
           path: builder
@@ -106,9 +106,9 @@ jobs:
         run: |
           COMMIT_TIME=$(git log --max-count=1 --format=%ct || echo 0)
           export COMMIT_TIME
-          pip3 install requests
+          pip3 install requests==2.26
           python3 -m tools.stats.upload_binary_size_to_scuba || exit 0
 
 concurrency:
-  group: build-linux-libtorch-${{ github.event.pull_request.number || github.sha }}
+  group: build-linux-libtorch-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true

@@ -762,6 +762,9 @@ class Wrapper:
     def __int__(self):
         return self.__torch_function__(torch.Tensor.__int__, (Wrapper,), (self,))
 
+    def __len__(self):
+        return len(self._data)
+
 
 # unwrap inputs if necessary
 def unwrap(v):
@@ -782,15 +785,15 @@ class TestEinsumOverride(TestCase):
     def test_wrapper(self):
         x = Wrapper(torch.randn(5))
         y = Wrapper(torch.randn(4))
-        self.assertTrue(torch.allclose(torch.einsum('i,j->ij', x, y),
-                                       torch.ger(x, y)))
+        self.assertEqual(torch.einsum('i,j->ij', x, y)._data,
+                         torch.ger(x, y)._data)
 
         # in the old einsum interface, `operands` is a list
         a = Wrapper(torch.randn(2, 3))
         b = Wrapper(torch.randn(5, 3, 7))
         c = Wrapper(torch.randn(2, 7))
-        self.assertTrue(torch.allclose(torch.einsum('ik,jkl,il->ij', [a, b, c]),
-                                       torch.nn.functional.bilinear(a, c, b)))
+        self.assertEqual(torch.einsum('ik,jkl,il->ij', [a, b, c])._data,
+                         torch.nn.functional.bilinear(a, c, b)._data)
 
 class TestGradCheckOverride(TestCase):
     "Test that wrappers work with gradcheck."
@@ -996,6 +999,22 @@ class TestRNN(TestCase):
         model = torch.nn.RNN(10, 20, 2)
         input = Wrapper(torch.randn(1, 5, 10))
         model(input)
+
+
+class TestDisabledTorchFunction(TestCase):
+    # Regression test for gh-64687
+    def test_parameter_does_not_prevent_dispatch(self):
+        class MyTensor():
+            def __torch_function__(self, func, types, args=(), kwargs=None):
+                return "called"
+
+        t1 = MyTensor()
+        t2 = torch.nn.Parameter(torch.rand(2, 2))
+        self.assertEqual(torch.add(t2, t1), "called")
+
+        inp = torch.rand(10, 10)
+        self.assertEqual(torch.nn.functional.linear(inp, t1, t2), "called")
+        self.assertEqual(torch.nn.functional.linear(inp, t2, t1), "called")
 
 
 if __name__ == '__main__':
