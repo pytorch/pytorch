@@ -35,6 +35,7 @@ class PyTorchServiceWSGIApp(object):
         self.app = DispatcherMiddleware(self.not_found, {
             '/registration': self.registration_route,
             '/service': self.service_route,
+            '/status': self.status_route
         })
         self.app = SharedDataMiddleware(self.app, {
             '/log': TMPLOG
@@ -55,6 +56,20 @@ class PyTorchServiceWSGIApp(object):
                 return self.respond_as_json({"success": True})
             else:
                 return self.respond_as_json({"success": False})
+        else:
+            self.method_not_allowed(request)
+    
+    @wrappers.Request.application
+    def status_route(self, request):
+        if request.method == 'GET':
+            if request.args.get('cmd') == 'stop':
+                if self.profiling_warmup:
+                    return self.respond_as_json({"success": False, "message": "Profiling service is still in warmup state."})
+                if not self.profiling_started:
+                    return self.respond_as_json({"success": False, "message": "Profiling service hasn't been started yet."})
+                return self.respond_as_json({"success": True})
+            else:
+                self.bad_request(request)
         else:
             self.method_not_allowed(request)
     
@@ -126,6 +141,13 @@ class PyTorchServiceWSGIApp(object):
             self.respond_file_names = []
             for unique_url_seq in self.slave_urls:
                 url_arr = unique_url_seq.split(':')
+                baseUrl = 'http://{}:{}'.format(url_arr[0], url_arr[1])
+                r = requests.get(url="/".join([baseUrl, "status"]), params={'cmd': 'stop'})
+                res = r.json()
+                if not res['success']:
+                    return self.respond_as_json(res)
+            for unique_url_seq in self.slave_urls:
+                url_arr = unique_url_seq.split(':')
                 thread = Thread(target=self.stop_child_profiling, args=(url_arr[0], url_arr[1],))
                 stop_threads.append(thread)
                 thread.start()
@@ -153,8 +175,7 @@ class PyTorchServiceWSGIApp(object):
         r = requests.put(
             url="/".join([baseUrl, "service"]),
             params={'cmd': 'stop'})
-        if r.status_code == 200:
-            res = r.json()
+        res = r.json()
         if res['success']:
             file_names = res.pop("file_names")
             if res['need_log_fetch']:
