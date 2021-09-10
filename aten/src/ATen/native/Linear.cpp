@@ -661,10 +661,8 @@ static Tensor linalg_tensordot_allocate_out(const Tensor& input1, const Tensor& 
 
   auto cdims1 = at::dim_list_to_bitset(dims1, input1.dim());
   auto cdims2 = at::dim_list_to_bitset(dims2, input2.dim());
-  std::vector<int64_t> rsizes;  // rsizes: sizes of the result
+  std::vector<int64_t> rsizes;  // sizes of the result
   rsizes.reserve(input1.dim() + input2.dim() - (int64_t) dims1.size());
-
-  // compute sizes
   for (const auto i : c10::irange(input1.dim())) {
     if (! cdims1[i]) {
       rsizes.emplace_back(t1_sizes[i]);
@@ -682,7 +680,6 @@ static Tensor linalg_tensordot_allocate_out(const Tensor& input1, const Tensor& 
 Tensor linalg_tensordot(const Tensor& input1, const Tensor& input2, IntArrayRef dims1, IntArrayRef dims2) {
   Tensor out = linalg_tensordot_allocate_out(input1, input2, dims1, dims2);
 
-  TORCH_CHECK(dims1.size() == dims2.size(), "both dimension lists should have same length");
   int64_t csize = 1;  // total size of the contracted dimensions
   Tensor t1 = input1;
   Tensor t2 = input2;
@@ -694,18 +691,16 @@ Tensor linalg_tensordot(const Tensor& input1, const Tensor& input2, IntArrayRef 
     } else if (s1 == 1) {
       t2 = t2.sum(dims2[i], true);
     } else {
-      TORCH_CHECK(s1 == s2, "contracted dimensions need to match, but first has size ", s1, " in dim ", dims1[i],
-               " and second has size ", s2, " in dim ", dims2[i]);
+      TORCH_INTERNAL_ASSERT(s1 == s2); // we already checked this in TORCH_META_FUNC
       csize *= s1;
     }
   }
 
   auto cdims1 = at::dim_list_to_bitset(dims1, input1.dim());
   auto cdims2 = at::dim_list_to_bitset(dims2, input2.dim());
-  std::vector<int64_t> p1, p2, rsizes;  // p1, p2: input permutations, rsizes: sizes of the result
+  std::vector<int64_t> p1, p2;  // input permutations
   p1.reserve(input1.dim());
   p2.reserve(input2.dim());
-  rsizes.reserve(input1.dim() + input2.dim() - (int64_t) dims1.size());
   int64_t size1 = 1; // number of non-contracted elements in input1
   int64_t size2 = 1; // number of non-contracted elements in input2
 
@@ -714,7 +709,6 @@ Tensor linalg_tensordot(const Tensor& input1, const Tensor& input2, IntArrayRef 
     if (! cdims1[i]) {
       p1.emplace_back(i);
       size1 *= t1.size(i);
-      rsizes.emplace_back(t1.size(i));
     }
   }
   for (const auto x : dims1) {
@@ -727,15 +721,13 @@ Tensor linalg_tensordot(const Tensor& input1, const Tensor& input2, IntArrayRef 
     if (! cdims2[i]) {
       p2.emplace_back(i);
       size2 *= t2.size(i);
-      rsizes.emplace_back(t2.size(i));
     }
   }
   // permut and reshape for matrix multiplication
   t1 = t1.permute(p1).reshape({size1, csize});
   t2 = t2.permute(p2).reshape({csize, size2});
   // multiply and reshape to target size
-  auto tmp = at::mm(t1, t2).reshape(rsizes);
-  assert(tmp.sizes() == out.sizes());
+  auto tmp = at::mm(t1, t2).reshape(out.sizes());
   out.copy_(tmp);
   return out;
 }
