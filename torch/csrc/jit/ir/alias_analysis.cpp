@@ -743,7 +743,7 @@ void AliasDb::analyzeImpl(Node* node) {
   // schema arguments represent
   std::unordered_map<Symbol, Value*> formalToActual;
   for (const auto i : c10::irange(schema.arguments().size())) {
-    const auto& formal = schema.arguments()[i].alias_info();
+    const at::AliasInfo* formal = schema.arguments()[i].alias_info();
     const auto& actualValue = node->inputs().at(i);
     // Skip if there's no alias annotation
     if (!formal) {
@@ -795,7 +795,7 @@ void AliasDb::analyzeImpl(Node* node) {
   // Use the formal-actual mapping to give aliases to the outputs
   for (const auto i : c10::irange(schema.returns().size())) {
     const auto actual = node->outputs().at(i);
-    const auto& formal = schema.returns()[i].alias_info();
+    const at::AliasInfo* formal = schema.returns()[i].alias_info();
     if (!formal) {
       // This is a fresh tensor
       giveFreshAlias(actual);

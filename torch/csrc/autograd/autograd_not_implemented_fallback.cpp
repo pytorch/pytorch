@@ -64,17 +64,17 @@ void autogradNotImplementedFallbackImpl(const c10::OperatorHandle& op, c10::Disp
   is_aliased_output.reserve(num_returns);
 
   for (const auto i : c10::irange(num_returns)) {
-    const auto& alias_info = returns[i].alias_info();
-    is_inplace_output.push_back(alias_info.has_value() && alias_info->isWrite());
-    any_is_inplace_output |= alias_info.has_value() && alias_info->isWrite();
-    is_aliased_output.push_back(alias_info.has_value());
+    const at::AliasInfo* alias_info = returns[i].alias_info();
+    is_inplace_output.push_back(alias_info != nullptr && alias_info->isWrite());
+    any_is_inplace_output |= alias_info != nullptr && alias_info->isWrite();
+    is_aliased_output.push_back(alias_info != nullptr);
 
   }
   int aliased_input_idx = -1;
   int aliased_output_idx = -1;
   for (const auto i : c10::irange(num_returns)) {
-    const auto& alias_info = returns[i].alias_info();
-    if (alias_info.has_value() && !alias_info->isWrite()) {
+    const at::AliasInfo* alias_info = returns[i].alias_info();
+    if (alias_info != nullptr && !alias_info->isWrite()) {
       AT_ASSERT(
         aliased_output_idx == -1,
         "Expected only a single output in the operator schema to have a non-write alias annotation (i.e., 'Tensor(a)'). "
@@ -84,8 +84,8 @@ void autogradNotImplementedFallbackImpl(const c10::OperatorHandle& op, c10::Disp
     }
   }
   for (const auto i : c10::irange(num_arguments)) {
-    const auto& alias_info = arguments[i].alias_info();
-    if (alias_info.has_value() && !alias_info->isWrite()) {
+    const at::AliasInfo* alias_info = arguments[i].alias_info();
+    if (alias_info != nullptr && !alias_info->isWrite()) {
       AT_ASSERT(
         aliased_input_idx == -1,
         "Expected only a single input in the operator schema to have a non-write alias annotation (i.e., 'Tensor(a)'). "
@@ -108,8 +108,8 @@ void autogradNotImplementedFallbackImpl(const c10::OperatorHandle& op, c10::Disp
   const bool any_requires_grad = tensors_requiring_grad_on_stack.size() > 0;
 
   _foreach_tensor([&](size_t _, size_t i, const at::Tensor& t) {
-    const auto& alias_info = arguments[i].alias_info();
-    if (alias_info.has_value() && alias_info->isWrite()) {
+    const at::AliasInfo* alias_info = arguments[i].alias_info();
+    if (alias_info != nullptr && alias_info->isWrite()) {
       check_inplace(t, any_requires_grad);
     }
   }, stack, stack_start, num_arguments);
