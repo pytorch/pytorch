@@ -12,9 +12,10 @@ from torch.fx.experimental.fx2trt.fx2trt import (
     torch_dtype_from_trt,
     get_dynamic_dims,
 )
+from typing import Optional
 
 
-def to_numpy(tensor: torch.Tensor):
+def to_numpy(tensor: Optional[torch.Tensor]):
     """
     Convert a PyTorch Tensor to a Numpy Array.
     """
@@ -23,6 +24,8 @@ def to_numpy(tensor: torch.Tensor):
 
     if tensor.is_quantized:
         tensor = tensor.dequantize()
+
+    assert isinstance(tensor, torch.Tensor), f"to_numpy can't be called on None or a torch.Tensor, got: {tensor}"
 
     return tensor.cpu().detach().contiguous().numpy()
 
@@ -246,28 +249,29 @@ def acc_ops_conv2d(network, target, args, kwargs, name):
     # right now
     bias = to_numpy(kwargs["bias"])
 
-    weight = get_trt_tensor(network, kwargs["weight"], f"{name}_weight")
-    weight_shape = tuple(kwargs["weight"].shape)
     if network.has_explicit_precision:
+        weight = get_trt_tensor(network, kwargs["weight"], f"{name}_weight")
+        weight_shape = tuple(kwargs["weight"].shape)
         # will need to use uninitialized weight and set it later to support
         # ITensor weights
         dummy_weight = trt.Weights()
 
         layer = network.add_convolution(
             input=input_val,
-            num_output_maps=weight_shape[0],
-            kernel_shape=weight_shape[2:],
+            num_output_maps=weight.shape[0],
+            kernel_shape=weight.shape[2:],
             kernel=dummy_weight,
             bias=bias,
         )
 
         layer.set_input(1, weight)
     else:
+        weight = to_numpy(kwargs["weight"])
         layer = network.add_convolution(
             input=input_val,
-            num_output_maps=weight_shape[0],
-            kernel_shape=weight_shape[2:],
-            kernel=to_numpy(kwargs["weight"]),
+            num_output_maps=weight.shape[0],
+            kernel_shape=weight.shape[2:],
+            kernel=weight,
             bias=bias,
         )
 
@@ -1038,9 +1042,6 @@ def acc_ops_linear(network, target, args, kwargs, name):
         "dim for linear and it can't be the last dim."
     )
 
-    # For quantization, weight here would be a trt tensor because it goes through
-    # quant + dequant. In this case, we need to use matmul + add because fully_connected
-    # can't take non-constant weight.
     # TODO: Need to benchmark the performance of lowering linear as fully_connected versus
     # lowering as matmul + add. TensorRT documentation suggests to always lower it as
     # matmul + add but we found in some cases this results in performance regression compared
@@ -1331,7 +1332,6 @@ def acc_ops_permute(network, target, args, kwargs, name):
 
 @tensorrt_converter(acc_ops.quantize_per_tensor)
 def acc_ops_quantize_per_tensor(network, target, args, kwargs, name):
-    # input_val = kwargs["input"]
     input_val = get_trt_tensor(network, kwargs["input"], f"{name}_input")
 
 
