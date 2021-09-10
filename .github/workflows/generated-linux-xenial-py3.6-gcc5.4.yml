@@ -192,7 +192,8 @@ jobs:
           docker pull "${DOCKER_IMAGE}"
       - name: Build PyTorch
         run: |
-          docker run \
+          # detached container should get cleaned up by teardown_ec2_linux
+          container_name=$(docker run \
             -e BUILD_ENVIRONMENT \
             -e JOB_BASE_NAME \
             -e MAX_JOBS="$(nproc --ignore=2)" \
@@ -207,11 +208,13 @@ jobs:
             --security-opt seccomp=unconfined \
             --cap-add=SYS_PTRACE \
             --tty \
+            --detach \
             --user jenkins \
             -v "${GITHUB_WORKSPACE}:/var/lib/jenkins/workspace" \
             -w /var/lib/jenkins/workspace \
-            "${DOCKER_IMAGE}" \
-            sh -c 'sudo chown -R jenkins . && .jenkins/pytorch/build.sh'
+            "${DOCKER_IMAGE}"
+          )
+          docker exec -t "${container_name}" sh -c 'sudo chown -R jenkins . && .jenkins/pytorch/build.sh'
       - name: Parse ref
         id: parse-ref
         run: .github/scripts/parse_ref.py
@@ -229,7 +232,7 @@ jobs:
         run: |
           COMMIT_TIME=$(git log --max-count=1 --format=%ct || echo 0)
           export COMMIT_TIME
-          pip3 install requests
+          pip3 install requests==2.26
           python3 -m tools.stats.upload_binary_size_to_scuba || exit 0
       - name: Chown workspace
         run: |
@@ -302,7 +305,7 @@ jobs:
       image: python:3.9
     steps:
       - name: Install dependencies
-        run: pip install typing-extensions
+        run: pip install typing-extensions==3.10
       - name: Clone pytorch/pytorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
       - name: Generating test matrix
@@ -407,10 +410,11 @@ jobs:
           if [[ $NUM_TEST_SHARDS -ne 2 ]]; then
             export SHARD_NUMBER=0
           fi
+          # detached container should get cleaned up by teardown_ec2_linux
           # TODO: Stop building test binaries as part of the build phase
           # Used for GPU_FLAG since that doesn't play nice
           # shellcheck disable=SC2086
-          docker run \
+          container_name=$(docker run \
             ${GPU_FLAG:-} \
             -e BUILD_ENVIRONMENT \
             -e PR_NUMBER \
@@ -434,11 +438,14 @@ jobs:
             --cap-add=SYS_PTRACE \
             --shm-size="${SHM_SIZE}" \
             --tty \
+            --detach \
+            --name="${container_name}" \
             --user jenkins \
             -v "${GITHUB_WORKSPACE}:/var/lib/jenkins/workspace" \
             -w /var/lib/jenkins/workspace \
-            "${DOCKER_IMAGE}" \
-            sh -c 'sudo chown -R jenkins . && pip install dist/*.whl && '$TEST_COMMAND
+            "${DOCKER_IMAGE}"
+          )
+          docker exec -t "${container_name}" sh -c "sudo chown -R jenkins . && pip install dist/*.whl && ${TEST_COMMAND}"
       - name: Chown workspace
         if: always()
         run: |
@@ -509,7 +516,7 @@ jobs:
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
 
-  pytorch_doc_build:
+  build-docs:
     runs-on: linux.2xlarge
     strategy:
       matrix:
@@ -577,7 +584,8 @@ jobs:
           echo "${GITHUB_REF}"
           ref=${GITHUB_REF##*/}
           target=${ref//v}
-          docker run \
+          # detached container should get cleaned up by teardown_ec2_linux
+          container_name=$(docker run \
             -e BUILD_ENVIRONMENT \
             -e CUSTOM_TEST_ARTIFACT_BUILD_DIR \
             -e IN_CI \
@@ -589,13 +597,14 @@ jobs:
             --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
             --security-opt seccomp=unconfined \
             --cap-add=SYS_PTRACE \
-            --name="$GITHUB_SHA" \
             --tty \
+            --detach \
             --user jenkins \
             -v "${GITHUB_WORKSPACE}:/var/lib/jenkins/workspace" \
             -w /var/lib/jenkins/workspace \
-            "${DOCKER_IMAGE}" \
-            bash -c "sudo chown -R jenkins . && pip install dist/*.whl && ./.circleci/scripts/${DOCS_TYPE}_doc_push_script.sh"
+            "${DOCKER_IMAGE}"
+          )
+          docker exec -t "${container_name}" bash -c "sudo chown -R jenkins . && pip install dist/*.whl && ./.circleci/scripts/${DOCS_TYPE}_doc_push_script.sh"
       - name: Chown workspace
         run: |
           # Ensure the working directory gets chowned back to the current user
@@ -605,17 +614,19 @@ jobs:
         if: ${{ github.event_name == 'pull_request' && matrix.docs_type == 'python' }}
         with:
           retention-days: 14
+          s3-bucket: doc-previews
           if-no-files-found: error
           path: pytorch.github.io/docs/merge/
-          s3-prefix: ${{ github.repository }}/pr-previews/pr/${{ github.event.pull_request.number }}
+          s3-prefix: pytorch/${{ github.event.pull_request.number }}
       - uses: seemethere/upload-artifact-s3@v3
         name: Upload C++ Docs Preview
-        if: ${{ github.event_name == 'pull_request' && matrix.docs_type == 'cppdocs' }}
+        if: ${{ github.event_name == 'pull_request' && matrix.docs_type == 'cpp' }}
         with:
           retention-days: 14
           if-no-files-found: error
+          s3-bucket: doc-previews
           path: cppdocs/
-          s3-prefix: ${{ github.repository }}/pr-previews/pr/${{ github.event.pull_request.number }}/cppdocs
+          s3-prefix: pytorch/${{ github.event.pull_request.number }}/cppdocs
       - name: Archive artifacts into zip
         run: |
           zip -r "docs_${DOCS_TYPE}.zip" "${GITHUB_WORKSPACE}/pytorch.github.io" "${GITHUB_WORKSPACE}/cppdocs"
