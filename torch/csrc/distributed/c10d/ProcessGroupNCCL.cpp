@@ -1183,7 +1183,8 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
         gpuGuard.set_index(devices[i].index());
       }
       decltype(i) stream_comm_i = (inputs_same_dev ? 0 : i);
-      at::cuda::CUDAStream& ncclStream = ncclStreams[stream_comm_i];
+      auto& ncclStream = ncclStreams[stream_comm_i];
+      auto& ncclComm = ncclComms[stream_comm_i];
       // Both `inputs' and `outputs' are created on a worker stream and used in
       // different ncclStreams.  Hence, both must record the ncclStream to
       // prevent being freed before the collective finishes.
@@ -1194,8 +1195,11 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
       // See [Sync Streams].
       c10::cuda::CUDACachingAllocator::recordStream(
           inputs[i].storage().data_ptr(), ncclStream);
-      C10D_NCCL_CHECK(
-          fn(inputs[i], outputs[i], ncclComms[i]->getNcclComm(), ncclStream), ncclComms[i]->getNcclCommFailureReason());
+      C10D_NCCL_CHECK(fn(inputs[i],
+                         outputs[i],
+                         ncclComm->getNcclComm(),
+                         ncclStream),
+                      ncclComm->getNcclCommFailureReason());
     }
   }
 
