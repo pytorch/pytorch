@@ -746,11 +746,17 @@ _(aten, upsample_nearest_exact1d_backward) \
 _(aten, upsample_nearest1d_forward) \
 _(aten, upsample_nearest_exact1d_forward) \
 _(aten, upsample_nearest2d) \
+_(aten, upsample_nearest_exact2d) \
 _(aten, upsample_nearest2d_backward) \
+_(aten, upsample_nearest_exact2d_backward) \
 _(aten, upsample_nearest2d_forward) \
+_(aten, upsample_nearest_exact2d_forward) \
 _(aten, upsample_nearest3d) \
+_(aten, upsample_nearest_exact3d) \
 _(aten, upsample_nearest3d_backward) \
+_(aten, upsample_nearest_exact3d_backward) \
 _(aten, upsample_nearest3d_forward) \
+_(aten, upsample_nearest_exact3d_forward) \
 _(aten, upsample_trilinear3d) \
 _(aten, upsample_trilinear3d_backward) \
 _(aten, upsample_trilinear3d_forward) \
