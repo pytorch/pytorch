@@ -877,7 +877,7 @@ TEST(CustomAutogradTest, BackwardWithCreateGraphWarns) {
  *   but when no inputs require grad, we should not create this node
  * - check_inplace logic
  * - view ops
- * - TODO: Tests for NDEBUG checks?
+ * - TODO: Tests for NDEBUG checks? Don't need for now because CI doesn't test NDEBUG builds.
  * - tensorlist input and output
  * - multiple outputs / non-tensor output
  * - rebase_history vs set_history
@@ -896,9 +896,12 @@ std::tuple<torch::Tensor, torch::Tensor> two_arg_inplace_op(const torch::Tensor&
 
 std::tuple<torch::Tensor, torch::Tensor> two_pairs_of_view_op(const torch::Tensor& self, const torch::Tensor& other) {
   // This is not allowed. We test below that this calling into the boxed kernel will raise an error
-  auto self_view = self.view(-1);
-  auto other_view = other.view(-1);
-  return std::tuple<torch::Tensor, torch::Tensor>(self_view, other_view);
+  return std::tuple<torch::Tensor, torch::Tensor>(self, other);
+}
+
+std::tuple<torch::Tensor, torch::Tensor> non_first_view_op(const torch::Tensor& self, const torch::Tensor& other) {
+  // This is not allowed. We test below that this calling into the boxed kernel will raise an error
+  return std::tuple<torch::Tensor, torch::Tensor>(self.clone(), other);
 }
 
 int64_t ret_single_non_tensor(const torch::Tensor& self, const torch::Tensor& other) {
@@ -929,6 +932,10 @@ torch::Tensor view_op(const torch::Tensor& self) {
 
 torch::Tensor view_op_with_extra_arg(const torch::Tensor& self, const torch::Tensor& other) {
   return self;
+}
+
+std::vector<torch::Tensor> ret_tensor_vector_view(const torch::Tensor& self, const torch::Tensor& other) {
+  return {self, self};
 }
 
 std::vector<at::Tensor> ret_tensor_vector(const torch::Tensor& self, const torch::Tensor& other) {
@@ -986,18 +993,6 @@ TEST(TestAutogradNotImplementedFallback, RetSingleNonTensor) {
   auto b = torch::tensor({1.}, {torch::kFloat32});
 
   ASSERT_EQ(op(a, b), ret_single_non_tensor(a, b));
-}
-
-TEST(TestAutogradNotImplementedFallback, DoubleViewOP) {
-  REGISTER_TEST_OP("two_pairs_of_view_op", "_test::two_pairs_of_view_op(Tensor(a) self, Tensor(b) other) -> (Tensor(a), Tensor(b))", two_pairs_of_view_op);
-  auto opHandle = c10::Dispatcher::singleton().findSchemaOrThrow("_test::two_pairs_of_view_op", "");
-  auto op = [&](const torch::Tensor& _1, const torch::Tensor& _2) {
-    return callOpUnboxed<std::tuple<torch::Tensor, torch::Tensor>, const torch::Tensor&, const torch::Tensor&>(opHandle, _1, _2);
-  };
-  auto a = torch::tensor({1.}, {torch::kFloat32}).set_requires_grad(true);
-  auto b = torch::tensor({1.}, {torch::kFloat32});
-  ASSERT_THROWS_WITH(op(a, b),
-    "Expected only a single output in the operator schema to have a non-write alias annotation");
 }
 
 TEST(TestAutogradNotImplementedFallback, InplaceOp) {
@@ -1138,6 +1133,45 @@ TEST(TestAutogradNotImplementedFallback, ViewOpWithExtraArg) {
   auto out1 = op(a, b);
   ASSERT_TRUE(out1.is_view());
   ASSERT_EQ(out1._base().unsafeGetTensorImpl(), a.unsafeGetTensorImpl());
+}
+
+TEST(TestAutogradNotImplementedFallback, RetTensorVectorView) {
+  REGISTER_TEST_OP("ret_tensor_vector_view", "_test::ret_tensor_vector_view(Tensor(a) self, Tensor other) -> Tensor[](a)", ret_tensor_vector_view);
+  auto opHandle = c10::Dispatcher::singleton().findSchemaOrThrow("_test::ret_tensor_vector_view", "");
+  auto op = [&](const torch::Tensor& _1, const torch::Tensor& _2) {
+    return callOpUnboxed<std::vector<at::Tensor>, const torch::Tensor&, const torch::Tensor&>(opHandle, _1, _2);
+  };
+  auto a = torch::tensor({1.}, {torch::kFloat32});
+  auto b = torch::tensor({1.}, {torch::kFloat32});
+  auto out = op(a, b);
+  ASSERT_TRUE(out[0].is_view());
+  ASSERT_EQ(out[0]._base().unsafeGetTensorImpl(), a.unsafeGetTensorImpl());
+  ASSERT_TRUE(out[1].is_view());
+  ASSERT_EQ(out[1]._base().unsafeGetTensorImpl(), a.unsafeGetTensorImpl());
+}
+
+TEST(TestAutogradNotImplementedFallback, DoubleViewOP) {
+  REGISTER_TEST_OP("two_pairs_of_view_op", "_test::two_pairs_of_view_op(Tensor(a) self, Tensor(b) other) -> (Tensor(a), Tensor(b))", two_pairs_of_view_op);
+  auto opHandle = c10::Dispatcher::singleton().findSchemaOrThrow("_test::two_pairs_of_view_op", "");
+  auto op = [&](const torch::Tensor& _1, const torch::Tensor& _2) {
+    return callOpUnboxed<std::tuple<torch::Tensor, torch::Tensor>, const torch::Tensor&, const torch::Tensor&>(opHandle, _1, _2);
+  };
+  auto a = torch::tensor({1.}, {torch::kFloat32}).set_requires_grad(true);
+  auto b = torch::tensor({1.}, {torch::kFloat32});
+  ASSERT_THROWS_WITH(op(a, b),
+    "Expected only a single output in the operator schema to have a non-write alias annotation");
+}
+
+TEST(TestAutogradNotImplementedFallback, NonFirstViewOP) {
+  REGISTER_TEST_OP("non_first_view_op", "_test::non_first_view_op(Tensor self, Tensor(b) other) -> (Tensor, Tensor(b))", non_first_view_op);
+  auto opHandle = c10::Dispatcher::singleton().findSchemaOrThrow("_test::non_first_view_op", "");
+  auto op = [&](const torch::Tensor& _1, const torch::Tensor& _2) {
+    return callOpUnboxed<std::tuple<torch::Tensor, torch::Tensor>, const torch::Tensor&, const torch::Tensor&>(opHandle, _1, _2);
+  };
+  auto a = torch::tensor({1.}, {torch::kFloat32}).set_requires_grad(true);
+  auto b = torch::tensor({1.}, {torch::kFloat32});
+  ASSERT_THROWS_WITH(op(a, b),
+    "can only create view relationships between the first");
 }
 
 TEST(TestAutogradNotImplementedFallback, RetTensorVector) {
