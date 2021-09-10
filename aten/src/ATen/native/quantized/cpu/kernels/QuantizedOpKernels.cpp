@@ -2344,73 +2344,65 @@ void fake_quantize_learnable_tensor_grad_kernel_cpu(
   });
 }
 
-template <typename ZeroPointType,
-              std::enable_if_t<!std::is_floating_point<ZeroPointType>::value && !std::is_same<ZeroPointType, at::Half>::value, bool> = true
-    >
+template <typename SelfType>
 void _fake_quant_per_channel_cachemask_cpu_helper(
     TensorIterator& iter,
     TensorIterator& iter_mask,
     const int64_t quant_min,
-    const int64_t quant_max){
+    const int64_t quant_max) {
 
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "fake_quantize_channel_cachemask_cpu_type_handling", [&] {
-    // write mask
-    cpu_kernel(iter_mask, [=](scalar_t self, float scale, ZeroPointType zero_point) -> bool {
-      float inv_scale = 1.0f / scale;
-      const auto qval = static_cast<int64_t>(zero_point + std::nearbyint(self * inv_scale));
-      return ((quant_min <= qval) && (qval <= quant_max));
-    });
+  const auto& zero_point_dtype = iter.input_dtype(2);
 
-    // write fake_quant
-    cpu_kernel(iter, [=](scalar_t self, float scale, ZeroPointType zero_point) -> scalar_t {
-      float inv_scale = 1.0f / scale;
-      // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
-      return (std::fmin(
-                  std::fmax(
-                      static_cast<int64_t>(
-                          zero_point + std::nearbyint(self * inv_scale)),
-                      quant_min),
-                  quant_max) -
-              zero_point) *
-          scale;
-    });
-  });
-}
-
-
-
-template <typename ZeroPointType,
-              std::enable_if_t<std::is_floating_point<ZeroPointType>::value || std::is_same<ZeroPointType, at::Half>::value, bool> = true
-    >
-void _fake_quant_per_channel_cachemask_cpu_helper(
-    TensorIterator& iter,
-    TensorIterator& iter_mask,
-    const int64_t quant_min,
-    const int64_t quant_max){
-
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "fake_quantize_channel_cachemask_cpu_type_handling", [&] {
+  if(at::isFloatingType(zero_point_dtype)){
+    // When zero_point is float, quantize mirroring affine quantizer equation
+    // Xq = Round(Xf * inv_scale + zero_point)
+    // where zero_point is in float.
+    AT_DISPATCH_FLOATING_TYPES_AND_HALF(zero_point_dtype, "fake_quantize_channel_cachemask_cpu_zero_point_handling", [&] {
       // write mask
-      cpu_kernel(iter_mask, [=](scalar_t self, float scale, ZeroPointType zero_point) -> bool {
+      cpu_kernel(iter_mask, [=](SelfType self, float scale, scalar_t zero_point) -> bool {
         float inv_scale = 1.0f / scale;
-        const auto qval = zero_point + self * inv_scale;
+        const auto qval = std::lrintf(zero_point + (self * inv_scale));
         return ((quant_min <= qval) && (qval <= quant_max));
       });
 
       // write fake_quant
-      cpu_kernel(iter, [=](scalar_t self, float scale, ZeroPointType zero_point) -> scalar_t {
+      cpu_kernel(iter, [=](SelfType self, float scale, scalar_t zero_point) -> SelfType {
         float inv_scale = 1.0f / scale;
         // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
         return (std::fmin(
                     std::fmax(
-                        zero_point + self * inv_scale,
+                        std::lrintf(zero_point + self * inv_scale),
                         quant_min),
                     quant_max) -
                 zero_point) *
             scale;
       });
-  });
-}
+    });
 
+  } else {
+      // write mask
+      cpu_kernel(iter_mask, [=](SelfType self, float scale, int32_t zero_point) -> bool {
+        float inv_scale = 1.0f / scale;
+        const auto qval = static_cast<int64_t>(zero_point + std::nearbyint(self * inv_scale));
+        return ((quant_min <= qval) && (qval <= quant_max));
+      });
+
+      // write fake_quant
+      cpu_kernel(iter, [=](SelfType self, float scale, int32_t zero_point) -> SelfType {
+        float inv_scale = 1.0f / scale;
+        // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
+        return (std::fmin(
+                    std::fmax(
+                        static_cast<int64_t>(
+                            zero_point + std::nearbyint(self * inv_scale)),
+                        quant_min),
+                    quant_max) -
+                zero_point) *
+            scale;
+      });
+  }
+
+}
 
 
 void fake_quant_per_channel_cachemask_cpu(
@@ -2421,12 +2413,11 @@ void fake_quant_per_channel_cachemask_cpu(
   // TODO(future, optional): read once, write twice.  Not done at the moment
   //   for simplicity, as we do not expect this to be a bottleneck.
 
-  // Dispatch on dtype of zero_point input.
-  AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::Int, ScalarType::Half, iter.input_dtype(2), "fake_quantize_channel_cachemask_cpu_zero_point_handling", [&] {
-    // write mask
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "fake_quantize_channel_cachemask_cpu_type_handling", [&] {
     _fake_quant_per_channel_cachemask_cpu_helper<scalar_t>(iter, iter_mask, quant_min, quant_max);
   });
 }
+
 
 void fake_quantize_learnable_channel_grad_kernel_cpu(
     TensorIterator& iter,
