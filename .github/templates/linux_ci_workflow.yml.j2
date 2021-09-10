@@ -336,7 +336,7 @@ jobs:
             -w /var/lib/jenkins/workspace \
             "${DOCKER_IMAGE}"
           )
-          docker exec -t "${container_name}" sh -c "sudo chown -R jenkins . && pip install dist/*.whl && ${TEST_COMMAND}"
+          docker exec -t "${container_name}" sh -c "sudo chown -R jenkins . && pip install dist/*.whl && pytest test/"
       - name: Chown workspace
         if: always()
         run: |
