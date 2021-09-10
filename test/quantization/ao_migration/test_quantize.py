@@ -62,6 +62,17 @@ class TestAOMigrationQuantizePy(AOMigrationTestCase):
         ]
         self._test_function_import('quantize', function_list)
 
+    def test_package_import_stubs(self):
+        self._test_package_import('stubs')
+
+    def test_function_import_stubs(self):
+        function_list = [
+            'QuantStub',
+            'DeQuantStub',
+            'QuantWrapper',
+        ]
+        self._test_function_import('stubs', function_list)
+
     def test_package_import_quantize_jit(self):
         self._test_package_import('quantize_jit')
 
