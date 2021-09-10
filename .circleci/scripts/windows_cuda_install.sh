@@ -1,8 +1,6 @@
 #!/bin/bash
 set -eux -o pipefail
 
-cuda_major_version=${CUDA_VERSION%.*}
-
 case ${CUDA_VERSION} in
     10.1)
         cuda_installer_name="cuda_10.1.243_426.00_win10"
@@ -38,12 +36,12 @@ else
     curl --retry 3 -kLO $cuda_installer_link
     7z x ${cuda_installer_name}.exe -o${cuda_installer_name}
     mkdir cuda_install_logs
-    trap 'rm -rf $cuda_installer_link $cuda_installer_name cuda_install_logs' EXIT
+    trap 'rm -rf ${cuda_installer_name} ${cuda_installer_name}.exe cuda_install_logs' EXIT
 
     (
         # subshell for +e
         set +e
-        pushd ${cuda_installer_name}
+        pushd "${cuda_installer_name}"
         ./setup.exe -s "${cuda_install_packages}" -loglevel:6 -log:"$(pwd -W)/cuda_install_logs"
     )
 
