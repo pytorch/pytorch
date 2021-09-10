@@ -157,24 +157,25 @@ class TestModule(TestCase):
                     self.assertEqual(output, output_from_copy)
 
     @modules(module_db, allow_devices={"cuda"})
-    def test_cpu_gpu_results_are_equal(self, device, dtype, module_info):
+    def test_cpu_gpu_parity(self, device, dtype, module_info):
         # Test cpu and gpu results are the same
         module_cls = module_info.module_cls
         module_inputs_cpu = module_info.module_inputs_func(module_info, device="cpu", dtype=dtype,
                                                            requires_grad=True)
 
-        def _make_leafs(item):
+        def _retain_grad(item):
             if isinstance(item, dict):
                 for i in item.values():
-                    _make_leafs(i)
+                    _retain_grad(i)
             elif isinstance(item, tuple):
                 for i in item:
-                    _make_leafs(i)
+                    _retain_grad(i)
             else:
-                if not isinstance(item, torch.Tensor) or item.is_leaf:
+                if (not isinstance(item, torch.Tensor)
+                    or item.is_leaf
+                    or not item.requires_grad):
                     return
-                old_requires_grad = item.requires_grad
-                item.detach_().requires_grad_(old_requires_grad)
+                item.retain_grad()
 
         def _to_device(obj):
             if isinstance(obj, torch.Tensor):
@@ -199,7 +200,7 @@ class TestModule(TestCase):
 
             gpu_forward_args, gpu_forward_kwargs = _to_device((cpu_forward_args, cpu_forward_kwargs))
 
-            _make_leafs((cpu_forward_args, cpu_forward_kwargs, gpu_forward_args, gpu_forward_kwargs))
+            _retain_grad((cpu_forward_args, cpu_forward_kwargs, gpu_forward_args, gpu_forward_kwargs))
 
             # === Construct module on cpu and gpu ===
             args, kwargs = module_input.constructor_input.args, module_input.constructor_input.kwargs
