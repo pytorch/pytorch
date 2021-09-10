@@ -390,8 +390,7 @@ inline static void _apply_svd_lib_gesvd(const Tensor& self, const Tensor& U, con
 
   TORCH_INTERNAL_ASSERT(m >= n, "cusolver gesvd only supports matrix with sizes m >= n");
 
-  char jobu = compute_uv ? (some ? 'S' : 'A') : 'N';
-  char jobvt = compute_uv ? (some ? 'S' : 'A') : 'N';
+  char job = compute_uv ? (some ? 'S' : 'A') : 'N';
   auto handle = at::cuda::getCurrentCUDASolverDnHandle();
 
   int lwork = -1;
@@ -429,7 +428,7 @@ inline static void _apply_svd_lib_gesvd(const Tensor& self, const Tensor& U, con
     int i = get_batch_index(_i);
 
     at::cuda::solver::gesvd<scalar_t>(
-      handle, jobu, jobvt, m, n,
+      handle, job, job, m, n,
       self_data + i * self_stride,
       lda,
       S_data + i * S_stride,
