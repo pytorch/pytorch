@@ -240,6 +240,7 @@ from typing import Callable, List, Tuple, Union
 import torch
 from torch.distributed.argparse_util import check_env, env
 from torch.distributed.elastic.multiprocessing import Std
+from torch.distributed.elastic.multiprocessing.errors import record
 from torch.distributed.elastic.rendezvous.utils import _parse_rendezvous_config
 from torch.distributed.elastic.utils import macros
 from torch.distributed.elastic.utils.logging import get_logger
@@ -269,7 +270,7 @@ def get_args_parser() -> ArgumentParser:
         "--nproc_per_node",
         action=env,
         type=str,
-        default="auto",
+        default="1",
         help="Number of workers per node; supported values: [auto, cpu, gpu, int].",
     )
 
