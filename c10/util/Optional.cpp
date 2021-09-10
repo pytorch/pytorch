@@ -3,7 +3,6 @@
 
 #include <type_traits>
 
-#if (!defined(__CUDA_ARCH__) || !defined(CUDA_VERSION))
 static_assert(
     C10_IS_TRIVIALLY_COPYABLE(c10::optional<int>),
     "c10::optional<int> should be trivially copyable");
@@ -16,4 +15,3 @@ static_assert(
 static_assert(
     sizeof(c10::optional<c10::IntArrayRef>) == sizeof(c10::IntArrayRef),
     "c10::optional<IntArrayRef> should be size-optimized");
-#endif
