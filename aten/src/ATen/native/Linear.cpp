@@ -628,56 +628,21 @@ Tensor bilinear(const Tensor& input1, const Tensor& input2, const Tensor& weight
 
 // Alias
 Tensor tensordot(const Tensor& input1, const Tensor& input2, IntArrayRef dims1, IntArrayRef dims2) {
-    return at::native::linalg_tensordot(input1, input2, dims1, dims2);
+  TORCH_CHECK(false, "TODO: tensordot");
+  return Tensor();
+  //return at::native::linalg_tensordot(input1, input2, dims1, dims2);
 }
 
 Tensor &tensordot_out(const Tensor& input1, const Tensor& input2, IntArrayRef dims1, IntArrayRef dims2, Tensor& result) {
-    return at::native::linalg_tensordot_out(input1, input2, dims1, dims2, result);
+  TORCH_CHECK(false, "TODO: tensordot_out");
+  return result;
+  //return at::native::linalg_tensordot_out(input1, input2, dims1, dims2, result);
 }
 
 // implements tensordot, a matrix-multiplication-like contraction, but the dimensions given
 // in the two dimension lists
 
-static Tensor linalg_tensordot_allocate_out(const Tensor& input1, const Tensor& input2,
-                                            IntArrayRef dims1, IntArrayRef dims2)
-{
-  TORCH_CHECK(dims1.size() == dims2.size(), "both dimension lists should have same length");
-
-  std::vector<int64_t> t1_sizes = input1.sizes().vec();
-  std::vector<int64_t> t2_sizes = input2.sizes().vec();
-
-  for (const auto i : c10::irange(dims1.size())) {
-    int s1 = input1.size(dims1[i]);
-    int s2 = input2.size(dims2[i]);
-    if (s2 == 1) { // broadcasted dimensions can be summed right away
-      t1_sizes[dims1[i]] = 1;
-    } else if (s1 == 1) {
-      t2_sizes[dims2[i]] = 2;
-    } else {
-      TORCH_CHECK(s1 == s2, "contracted dimensions need to match, but first has size ", s1, " in dim ", dims1[i],
-               " and second has size ", s2, " in dim ", dims2[i]);
-    }
-  }
-
-  auto cdims1 = at::dim_list_to_bitset(dims1, input1.dim());
-  auto cdims2 = at::dim_list_to_bitset(dims2, input2.dim());
-  std::vector<int64_t> rsizes;  // sizes of the result
-  rsizes.reserve(input1.dim() + input2.dim() - (int64_t) dims1.size());
-  for (const auto i : c10::irange(input1.dim())) {
-    if (! cdims1[i]) {
-      rsizes.emplace_back(t1_sizes[i]);
-    }
-  }
-  for (const auto i : c10::irange(input2.dim())) {
-    if (! cdims2[i]) {
-      rsizes.emplace_back(t2_sizes[i]);
-    }
-  }
-
-  return at::empty(rsizes, input1.options());
-}
-
-static void linalg_tensordot_helper(const Tensor& input1, const Tensor& input2, IntArrayRef dims1, IntArrayRef dims2, const Tensor& out) {
+TORCH_IMPL_FUNC(linalg_tensordot_out)(const Tensor& input1, const Tensor& input2, IntArrayRef dims1, IntArrayRef dims2, const Tensor& out) {
   int64_t csize = 1;  // total size of the contracted dimensions
   Tensor t1 = input1;
   Tensor t2 = input2;
@@ -729,37 +694,45 @@ static void linalg_tensordot_helper(const Tensor& input1, const Tensor& input2, 
   out.copy_(tmp);
 }
 
-Tensor linalg_tensordot(const Tensor& input1, const Tensor& input2, IntArrayRef dims1, IntArrayRef dims2) {
-  Tensor out = linalg_tensordot_allocate_out(input1, input2, dims1, dims2);
-  linalg_tensordot_helper(input1, input2, dims1, dims2, out);
-  return out;
-}
-
-Tensor &linalg_tensordot_out(const Tensor& input1, const Tensor& input2, IntArrayRef dims1, IntArrayRef dims2, Tensor& result) {
-  // this is unnecessary but goes away once we are a structured kernel
-  Tensor result_tmp = linalg_tensordot_allocate_out(input1, input2, dims1, dims2);
-
-  auto result_dtype = result_tmp.scalar_type();
-  auto output_tensor_dtype = result.scalar_type();
-  auto output_device = result.device();
-  auto input1_device = input1.device();
-  auto input2_device = input2.device();
-  // check if the input & output tensors are on the same device.
-  TORCH_CHECK(
-    (output_device == input1_device) && (input1_device == input2_device),
-    "tensordot: Expected the output and input tensors to be on the "
-    "same device, but got the output tensor on ", output_device,
-    ", input tensor a on ", input1_device, ", and input tensor b on ", input2_device);
-  // check if the computed result has the same dtype as the out tensor
-  // (because tensordot does not support type promotion)
-  TORCH_CHECK(
-    result_dtype == output_tensor_dtype, "tensordot",
-    ": Expected the output tensor to have dtype ", result_dtype,
-    ", but got an output tensor with dtype ", output_tensor_dtype);
-  at::native::resize_output(result, result_tmp.sizes());
-
-  linalg_tensordot_helper(input1, input2, dims1, dims2, result);
-  return result;
-}
-
 }}  // namespace at::native
+
+namespace at { namespace meta {
+TORCH_META_FUNC(linalg_tensordot)(const Tensor& input1, const Tensor& input2,
+                                  IntArrayRef dims1, IntArrayRef dims2) {
+  TORCH_CHECK(dims1.size() == dims2.size(), "both dimension lists should have same length");
+
+  std::vector<int64_t> t1_sizes = input1.sizes().vec();
+  std::vector<int64_t> t2_sizes = input2.sizes().vec();
+
+  for (const auto i : c10::irange(dims1.size())) {
+    int s1 = input1.size(dims1[i]);
+    int s2 = input2.size(dims2[i]);
+    if (s2 == 1) { // broadcasted dimensions can be summed right away
+      t1_sizes[dims1[i]] = 1;
+    } else if (s1 == 1) {
+      t2_sizes[dims2[i]] = 2;
+    } else {
+      TORCH_CHECK(s1 == s2, "contracted dimensions need to match, but first has size ", s1, " in dim ", dims1[i],
+               " and second has size ", s2, " in dim ", dims2[i]);
+    }
+  }
+
+  auto cdims1 = at::dim_list_to_bitset(dims1, input1.dim());
+  auto cdims2 = at::dim_list_to_bitset(dims2, input2.dim());
+  std::vector<int64_t> rsizes;  // sizes of the result
+  rsizes.reserve(input1.dim() + input2.dim() - (int64_t) dims1.size());
+  for (const auto i : c10::irange(input1.dim())) {
+    if (! cdims1[i]) {
+      rsizes.emplace_back(t1_sizes[i]);
+    }
+  }
+  for (const auto i : c10::irange(input2.dim())) {
+    if (! cdims2[i]) {
+      rsizes.emplace_back(t2_sizes[i]);
+    }
+  }
+
+  set_output(rsizes, input1.options());
+}
+
+}}  // namespace at::meta

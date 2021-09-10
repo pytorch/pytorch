@@ -10561,10 +10561,12 @@
 - func: linalg_tensordot(Tensor self, Tensor other, int[] dims_self, int[] dims_other) -> Tensor
   python_module: linalg
   variants: function
+  structured_delegate: linalg_tensordot.out
 
 - func: linalg_tensordot.out(Tensor self, Tensor other, int[] dims_self, int[] dims_other, *, Tensor(a!) out) -> Tensor(a!)
   python_module: linalg
   variants: function
+  structured: True
   dispatch:
     CPU, CUDA: linalg_tensordot_out
 
