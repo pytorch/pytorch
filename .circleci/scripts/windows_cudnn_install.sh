@@ -34,7 +34,7 @@ if [[ -f "${cudnn_install_folder}/include/cudnn.h" ]]; then
 else
     curl --retry 3 -o "${cudnn_installer_name}" "$cudnn_installer_link"
     7z x "${cudnn_installer_name}" -ocudnn
-    # shellcheck recommends to use '${var:?}/*' to avoid potentially expanding to '/*'
+    # Use '${var:?}/*' to avoid potentially expanding to '/*'
     # Remove all of the directories before attempting to copy files
     rm -rf "${cudnn_install_folder:?}/*"
     cp -rf cudnn/cuda/* "${cudnn_install_folder}"

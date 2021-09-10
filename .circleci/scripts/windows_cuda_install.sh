@@ -37,13 +37,14 @@ else
 
     curl --retry 3 -kLO $cuda_installer_link
     7z x ${cuda_installer_name}.exe -o${cuda_installer_name}
-    cd ${cuda_installer_name}
     mkdir cuda_install_logs
+    trap 'rm -rf $cuda_installer_link $cuda_installer_name cuda_install_logs' EXIT
 
     (
         # subshell for +e
         set +e
-        ./setup.exe -s ${cuda_install_packages} -loglevel:6 -log:"$(pwd -W)/cuda_install_logs"
+        pushd ${cuda_installer_name}
+        ./setup.exe -s "${cuda_install_packages}" -loglevel:6 -log:"$(pwd -W)/cuda_install_logs"
     )
 
     if [[ ! -f "/c/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v${CUDA_VERSION}/bin/nvcc.exe" ]]; then
@@ -52,10 +53,6 @@ else
         7z a "c:\\w\\build-results\\cuda_install_logs.7z" cuda_install_logs
         exit 1
     fi
-
-    cd ..
-    rm -rf ./${cuda_installer_name}
-    rm -f ./${cuda_installer_name}.exe
 fi
 
 if [[ -f "/c/Program Files/NVIDIA Corporation/NvToolsExt/bin/x64/nvToolsExt64_1.dll" ]]; then
