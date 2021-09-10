@@ -38,6 +38,9 @@ class LocalSyncInserter {
     for (auto expr : exprs) {
       if (auto fl = dynamic_cast<kir::ForLoop*>(expr)) {
         LocalSyncInserter sync_inserter(fl);
+      } else if (auto ite = dynamic_cast<kir::IfThenElse*>(expr)) {
+        insertSyncs(ite->thenBody().exprs());
+        insertSyncs(ite->elseBody().exprs());
       }
     }
   }
