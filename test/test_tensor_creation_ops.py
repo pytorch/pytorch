@@ -1,6 +1,7 @@
 import torch
 import numpy as np
 
+import os
 import sys
 import math
 import warnings
@@ -1190,6 +1191,8 @@ class TestTensorCreation(TestCase):
         self.assertRaises(RuntimeError, lambda: torch.zeros((2, 3), device=device, dtype=torch.float32, out=d))
 
     # TODO: update to work on CUDA, too
+    @unittest.skipIf("tbb" in os.getenv("BUILD_ENVIRONMENT", ""),
+                     "This test makes TBB sad, see https://github.com/pytorch/pytorch/issues/64571")
     @onlyCPU
     def test_trilu_indices(self, device):
         for test_args in tri_tests_args:
