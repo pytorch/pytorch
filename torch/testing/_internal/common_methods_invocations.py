@@ -7108,6 +7108,7 @@ op_db: List[OpInfo] = [
            op=torch.lu_unpack,
            dtypes=floating_and_complex_types(),
            supports_inplace_autograd=False,
+           supports_forward_ad=True,
            # we use in-place operations which cannot be avoided.
            # This causes vmap failures, hence we skip batched gradient checks
            check_batched_grad=False,

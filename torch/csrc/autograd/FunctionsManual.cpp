@@ -3814,6 +3814,12 @@ Tensor lu_unpack_backward(
   return res;
 }
 
+Tensor lu_unpack_jvp_P(const Tensor& dLU_data) {
+  auto shape = dLU_data.sizes().vec();
+  shape.back() = dLU_data.size(-2);
+  return at::zeros(shape, dLU_data.options());
+}
+
 Tensor cat_jvp(at::TensorList tensors, int64_t dim) {
   Tensor out_fw_grad;
 

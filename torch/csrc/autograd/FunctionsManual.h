@@ -265,6 +265,7 @@ Tensor lu_unpack_backward(
   const Tensor& LU_data,
   bool unpack_data
 );
+Tensor lu_unpack_jvp_P(const Tensor& dLU_data);
 
 Tensor _det_lu_based_helper_backward(
   const Tensor& det_grad,

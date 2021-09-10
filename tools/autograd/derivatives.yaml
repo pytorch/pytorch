@@ -871,6 +871,12 @@
 - name: lu_unpack(Tensor LU_data, Tensor LU_pivots, bool unpack_data=True, bool unpack_pivots=True) -> (Tensor P, Tensor L, Tensor U)
   LU_data: lu_unpack_backward(grads, LU_data, unpack_data)
   LU_pivots: non_differentiable
+  # regarding P. It does not change, hence its differential is zero.
+  # It is possible to mark it as such with setting output_differentiability: [False, True, True],
+  # but it causes OpInfo test_dtypes to fail.
+  P: lu_unpack_jvp_P(LU_data_t)
+  L: "LU_data_t.size(-2) <= LU_data_t.size(-1) ? LU_data_t.tril(-1).narrow(-1, 0, LU_data_t.size(-2)) : LU_data_t.tril(-1)"
+  U: "LU_data_t.size(-2) <= LU_data_t.size(-1) ? LU_data_t.triu() : LU_data_t.triu().narrow(-2, 0, LU_data_t.size(-1))"
 
 - name: masked_fill_.Scalar(Tensor(a!) self, Tensor mask, Scalar value) -> Tensor(a!)
   self: grad.clone().masked_fill_(mask, 0)
