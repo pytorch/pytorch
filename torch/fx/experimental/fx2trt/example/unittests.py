@@ -1,9 +1,10 @@
+import torch
 from torch.quantization.quantize_fx import (
     prepare_fx,
     convert_fx,
     get_tensorrt_backend_config_dict
 )
-import torch.fx.experimental.fx_acc.acc_tracer
+import torch.fx.experimental.fx_acc.acc_tracer as acc_tracer
 from torch.fx.experimental.fx2trt.fx2trt import TRTInterpreter, InputTensorSpec, TRTModule
 from torch.testing._internal.common_quantization import QuantizationTestCase
 from torch.testing._internal.common_cuda import TEST_CUDA
@@ -26,7 +27,7 @@ class TestQuantizeFxTRT(QuantizationTestCase):
         conv2d_input = torch.rand(1, 3, 224, 224)
         conv2d_module_args = (3, 3, 3)
 
-        m = Conv2d(*conv_module_args).eval()
+        m = Conv2d(*conv2d_module_args).eval()
         qconfig = torch.quantization.QConfig(
             activation=torch.quantization.observer.HistogramObserver.with_args(
                 qscheme=torch.per_tensor_symmetric, dtype=torch.qint8

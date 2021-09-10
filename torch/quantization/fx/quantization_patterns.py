@@ -190,6 +190,7 @@ class QuantizeHandler(ABC):
 # tuple (activation_dtype, weight_dtype, compute_dtype)
 # these are supported types for common binary ops like add/mul etc.
 all_dtypes = [
+    (torch.qint8, torch.qint8, None),
     (torch.quint8, torch.qint8, None),
     (torch.float16, torch.float16, None),
 ]
@@ -197,6 +198,7 @@ fp16_dtypes = [
     (torch.float16, torch.float16, None)
 ]
 int8_dtypes = [
+    (torch.qint8, torch.qint8, None),
     (torch.quint8, torch.qint8, None),
 ]
 binary_op_supported_dtypes : Dict[Union[Callable, str], List[Tuple[torch.dtype, torch.dtype, None]]] = {
