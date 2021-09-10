@@ -122,13 +122,14 @@ MobileDebugTable::MobileDebugTable(
       size_t debug_size{0};
       std::tie(debug_data, debug_size) = reader->getRecord(record_name);
       auto ivalues =
-          jit::unpickle(
-              reinterpret_cast<const char*>(debug_data.get()), debug_size)
-              .toTuple()
-              ->elements();
+          std::move(
+              *jit::unpickle(
+                   reinterpret_cast<const char*>(debug_data.get()), debug_size)
+                   .toTuple())
+              .elements();
       SourceRangeDeserializer deserializer;
       for (auto& val : ivalues) {
-        auto tup_elems = val.toTuple()->elements();
+        auto tup_elems = std::move(*std::move(val).toTuple()).elements();
         // For BC we decode only tuples with 3 elements
         // assuming it contains
         // byte_offset, debug_handle (=source range tag), source range
