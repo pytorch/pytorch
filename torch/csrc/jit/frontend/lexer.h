@@ -337,16 +337,12 @@ struct TORCH_API SharedParserData {
       // rather the
       // identifier 'max'
       if (cur) {
-        size_t child_offset = 0;
-        for (size_t e = cur->child_chars.size(); child_offset < e;
-             ++child_offset) {
-          if (cur->child_chars[child_offset] == str[pos + i])
-            break;
-        }
+        const auto begin_it = cur->child_chars.begin();
+        const auto end_it = cur->child_chars.end();
+        const auto ch_it = std::find(begin_it, end_it, str[pos + i]);
 
-        cur = (child_offset == cur->child_chars.size())
-            ? nullptr
-            : cur->child_tries[child_offset].get();
+        cur = (ch_it == end_it) ? nullptr
+                                : cur->child_tries[ch_it - begin_it].get();
 
         if (cur && cur->kind != 0) {
           matched = true;
@@ -406,7 +402,7 @@ struct Lexer {
   Token next() {
     if (next_tokens.size() == 0)
       reportError("Lexer invariant violated: empty token queue");
-    Token r = next_tokens.front();
+    Token r = std::move(next_tokens.front());
     next_tokens.erase(next_tokens.begin());
     if (next_tokens.size() == 0) {
       lex();
