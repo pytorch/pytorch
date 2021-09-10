@@ -3039,6 +3039,46 @@ class TestQuantizeFx(QuantizationTestCase):
         }
         self.checkGraphModuleNodes(m, expected_node_occurrence=occurrence)
 
+    def test_functioanl_conv_lowering(self):
+        class FunctionalConv2d(torch.nn.Module):
+            def __init__(self, weight):
+                super().__init__()
+                self.weight = torch.nn.Parameter(weight)
+                self.stride = (1, 1)
+                self.padding = (0, 0)
+                self.dilation = (1, 1)
+                self.groups = 1
+
+            def forward(self, x):
+                return F.conv2d(x, self.weight, None, self.stride, self.padding, self.dilation, self.groups)
+
+        conv2d_input = torch.rand(1, 3, 224, 224)
+        conv2d_weight = torch.rand(3, 3, 3, 3)
+        conv2d_module_args = (3, 3, 3)
+
+        m = FunctionalConv2d(conv2d_weight).eval()
+        m = prepare_fx(m, {"": default_qconfig})
+        m = convert_fx(m, is_reference=True)
+
+        def conv2d_pattern(x, w, b, scale, zero_point):
+            x = x.dequantize()
+            w = w.dequantize()
+            x = torch.conv2d(x, w, b)
+            x = torch.quantize_per_tensor(x, scale, zero_point, torch.quint8)
+            return x
+
+        def conv2d_replacement(x, w, b, scale, zero_point):
+            x = torch.nn.quantized.functional.conv2d(x, w, b)
+            return x
+
+        print("before:", m)
+        from torch.fx import subgraph_rewriter
+        subgraph_rewriter.replace_pattern(m, conv2d_pattern, conv2d_replacement)
+        m.graph.lint()
+        print("after:", m)
+
+
+
 @skipIfNoFBGEMM
 class TestQuantizeFxOps(QuantizationTestCase):
     """Unit tests for individual ops
