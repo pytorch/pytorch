@@ -3,6 +3,7 @@ import torch
 import inspect
 import operator
 import traceback
+import collections
 
 from .graph import magic_methods, reflectable_magic_methods, Graph
 from typing import Tuple, Dict, Optional, Iterable, Any, Iterator, Callable
