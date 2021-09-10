@@ -67,6 +67,3 @@ else
     cp -r NvToolsExt/* "C:/Program Files/NVIDIA Corporation/NvToolsExt/"
     export NVTOOLSEXT_PATH="C:\\Program Files\\NVIDIA Corporation\\NvToolsExt\\"
 fi
-
-# Always copy vc integration to set env variables
-cp -r ${msbuild_project_dir}/* "C:/Program Files (x86)/Microsoft Visual Studio/2019/${VC_PRODUCT}/MSBuild/Microsoft/VC/v160/BuildCustomizations/"
