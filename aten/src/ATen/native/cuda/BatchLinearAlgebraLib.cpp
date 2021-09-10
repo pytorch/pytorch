@@ -369,7 +369,8 @@ Tensor _inverse_helper_cuda_lib(const Tensor& self) {
 
 // call cusolver gesvd function to calculate svd
 template<typename scalar_t>
-inline static void _apply_svd_lib_gesvd(const Tensor& self, Tensor& U, Tensor& S, Tensor& VT, Tensor& infos, bool compute_uv, bool some,
+inline static void _apply_svd_lib_gesvd(const Tensor& self, const Tensor& U, const Tensor& S, const Tensor& VT,
+  const Tensor& infos, bool compute_uv, bool some,
   const bool calculate_all_batches,
   const std::vector<int64_t>& batches
 ) {
@@ -450,7 +451,8 @@ inline static void _apply_svd_lib_gesvd(const Tensor& self, Tensor& U, Tensor& S
 
 // wrapper around _apply_svd_lib_gesvd that handles dtype dispatch
 // note that gesvd returns V^H, which needs to be conjugated and transposed, we want this function to return V
-inline static void apply_svd_lib_gesvd(const Tensor& self, Tensor& U, Tensor& S, Tensor& VT, Tensor& infos, bool compute_uv, bool some,
+inline static void apply_svd_lib_gesvd(const Tensor& self, const Tensor& U, const Tensor& S, const Tensor& VT,
+  const Tensor& infos, bool compute_uv, bool some,
   const bool calculate_all_batches = true,
   const std::vector<int64_t>& batches = {}
 ) {
@@ -476,7 +478,9 @@ inline static void apply_svd_lib_gesvd(const Tensor& self, Tensor& U, Tensor& S,
 
 // call cusolver gesvdj function to calculate svd
 template<typename scalar_t>
-inline static void _apply_svd_lib_gesvdj(const Tensor& self, Tensor& U, Tensor& S, Tensor& VT, Tensor& infos, bool compute_uv, bool some) {
+inline static void _apply_svd_lib_gesvdj(const Tensor& self, const Tensor& U, const Tensor& S, const Tensor& VT,
+  const Tensor& infos, bool compute_uv, bool some
+) {
   using value_t = typename c10::scalar_value_type<scalar_t>::type;
   auto self_data = self.data_ptr<scalar_t>();
   auto U_data = U.data_ptr<scalar_t>();
@@ -535,7 +539,9 @@ inline static void _apply_svd_lib_gesvdj(const Tensor& self, Tensor& U, Tensor& 
 
 // wrapper around _apply_svd_lib_gesvdj that handles dtype dispatch
 // note that gesvdj returns V, which is what we want
-inline static void apply_svd_lib_gesvdj(const Tensor& self, Tensor& U, Tensor& S, Tensor& VT, Tensor& infos, bool compute_uv, bool some) {
+inline static void apply_svd_lib_gesvdj(const Tensor& self, const Tensor& U, const Tensor& S, const Tensor& VT,
+  const Tensor& infos, bool compute_uv, bool some
+) {
   if (self.numel() == 0) {
     return;
   }
@@ -548,7 +554,9 @@ inline static void apply_svd_lib_gesvdj(const Tensor& self, Tensor& U, Tensor& S
 
 // call cusolver gesvdj batched function to calculate svd
 template<typename scalar_t>
-inline static void _apply_svd_lib_gesvdjBatched(const Tensor& self, Tensor& U, Tensor& S, Tensor& VT, Tensor& infos, bool compute_uv) {
+inline static void _apply_svd_lib_gesvdjBatched(const Tensor& self, const Tensor& U, const Tensor& S, const Tensor& VT,
+  const Tensor& infos, bool compute_uv
+) {
   using value_t = typename c10::scalar_value_type<scalar_t>::type;
   auto self_data = self.data_ptr<scalar_t>();
   auto U_data = U.data_ptr<scalar_t>();
@@ -585,7 +593,9 @@ inline static void _apply_svd_lib_gesvdjBatched(const Tensor& self, Tensor& U, T
 
 // wrapper around _apply_svd_lib_gesvdjBatched that handles dtype dispatch
 // note that gesvdjBatched returns V, which is what we want
-inline static void apply_svd_lib_gesvdjBatched(const Tensor& self, Tensor& U, Tensor& S, Tensor& VT, Tensor& infos, bool compute_uv) {
+inline static void apply_svd_lib_gesvdjBatched(const Tensor& self, const Tensor& U, const Tensor& S, const Tensor& VT,
+  const Tensor& infos, bool compute_uv
+) {
   Tensor self_working_copy = cloneBatchedColumnMajor(self);
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "svd_cuda_gesvdjBatched", [&] {
     _apply_svd_lib_gesvdjBatched<scalar_t>(self_working_copy, U, S, VT, infos, compute_uv);
