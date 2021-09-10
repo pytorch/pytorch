@@ -242,21 +242,28 @@ jobs:
       - name: Zip test reports for upload
         if: always()
         env:
-          COMMIT_SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
-          WORKFLOW_ID: '${{ github.run_id }}_${{ github.run_number }}'
+          FILE_SUFFIX: '${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}'
         shell: powershell
         run: |
           # -ir => recursive include all files in pattern
-          7z a "test-reports-$Env:COMMIT_SHA1-$Env:WORKFLOW_ID.zip" -ir'!test\*.xml'
+          7z a "test-reports-$Env:FILE_SUFFIX.zip" -ir'!test\*.xml'
       - uses: actions/upload-artifact@v2
-        name: Store PyTorch Test Reports
+        name: Store Test Reports
         if: always()
         with:
           name: test-reports-${{ matrix.config }}
           retention-days: 14
           if-no-files-found: error
           path:
-            pytorch-${{ github.run_id }}/test-reports-*.zip
+            test-reports-*.zip
+      - uses: seemethere/upload-artifact-s3@v3
+        name: Store Test Reports on S3
+        if: always()
+        with:
+          retention-days: 14
+          if-no-files-found: error
+          path:
+            test-reports-*.zip
       - name: Wait until all sessions have drained
         shell: powershell
         if: always()

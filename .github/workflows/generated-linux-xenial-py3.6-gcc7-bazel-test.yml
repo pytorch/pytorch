@@ -293,17 +293,24 @@ jobs:
       - name: Zip test reports for upload
         if: always()
         env:
-          COMMIT_SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
-          WORKFLOW_ID: '${{ github.run_id }}_${{ github.run_number }}'
+          FILE_SUFFIX: 'bazel-${{ github.job }}'
         run: |
           # Remove any previous test reports if they exist
           rm -f test-reports-*.zip
-          zip -r "test-reports-${COMMIT_SHA1}-${WORKFLOW_ID}.zip" test -i '*.xml'
+          zip -r "test-reports-${FILE_SUFFIX}.zip" test -i '*.xml'
       - uses: actions/upload-artifact@v2
-        name: Store PyTorch Test Reports
+        name: Store Test Reports
         if: always()
         with:
-          name: test-reports
+          name: test-reports-bazel
+          retention-days: 14
+          if-no-files-found: error
+          path:
+            test-reports-*.zip
+      - uses: seemethere/upload-artifact-s3@v3
+        name: Store Test Reports on S3
+        if: always()
+        with:
           retention-days: 14
           if-no-files-found: error
           path:
