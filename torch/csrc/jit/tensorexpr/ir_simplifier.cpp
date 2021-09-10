@@ -2895,7 +2895,8 @@ ExprPtr SimplifierUnderContext::mutate(DivPtr v) {
           IRSimplifier::simplify(alloc<CompareSelect>(end, rhsScalar, kLE));
       if (check_start->isConstant() && check_end->isConstant() &&
           immediateEquals(check_start, 1) && immediateEquals(check_end, 1)) {
-        GRAPH_DEBUG("SimplifierUnderContext: ", *v, " => ", *immLike(lhsVar, 0));
+        GRAPH_DEBUG(
+            "SimplifierUnderContext: ", *v, " => ", *immLike(lhsVar, 0));
         return immLike(lhsVar, 0);
       }
     }
@@ -2935,7 +2936,7 @@ ExprPtr SimplifierUnderContext::mutate(ModPtr v) {
           IRSimplifier::simplify(alloc<CompareSelect>(end, rhsScalar, kLE));
       if (check_start->isConstant() && check_end->isConstant() &&
           immediateEquals(check_start, 1) && immediateEquals(check_end, 1)) {
-        GRAPH_DEBUG("SimplifierUnderContext: ", *v," => ", *lhsVar);
+        GRAPH_DEBUG("SimplifierUnderContext: ", *v, " => ", *lhsVar);
         return lhsVar;
       }
     }
