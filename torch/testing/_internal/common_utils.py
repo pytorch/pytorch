@@ -428,6 +428,11 @@ TEST_WITH_DEV_DBG_ASAN = os.getenv('PYTORCH_TEST_WITH_DEV_DBG_ASAN', '0') == '1'
 TEST_WITH_TSAN = os.getenv('PYTORCH_TEST_WITH_TSAN', '0') == '1'
 TEST_WITH_UBSAN = os.getenv('PYTORCH_TEST_WITH_UBSAN', '0') == '1'
 TEST_WITH_ROCM = os.getenv('PYTORCH_TEST_WITH_ROCM', '0') == '1'
+
+# TODO: Remove PYTORCH_MIOPEN_SUGGEST_NHWC once ROCm officially supports NHWC in MIOpen
+# See #64427
+TEST_WITH_MIOPEN_SUGGEST_NHWC = os.getenv('PYTORCH_MIOPEN_SUGGEST_NHWC', '0') == '1'
+
 # Enables tests that are slow to run (disabled by default)
 TEST_WITH_SLOW = os.getenv('PYTORCH_TEST_WITH_SLOW', '0') == '1'
 
@@ -496,6 +501,33 @@ def skipIfRocm(fn):
     def wrapper(*args, **kwargs):
         if TEST_WITH_ROCM:
             raise unittest.SkipTest("test doesn't currently work on the ROCm stack")
+        else:
+            fn(*args, **kwargs)
+    return wrapper
+
+# Skips a test on CUDA if ROCm is unavailable or its version is lower than requested.
+def skipIfRocmVersionLessThan(version=None):
+    def dec_fn(fn):
+        @wraps(fn)
+        def wrap_fn(self, *args, **kwargs):
+            if not TEST_WITH_ROCM:
+                reason = "ROCm not available"
+                raise unittest.SkipTest(reason)
+            rocm_version = str(torch.version.hip)
+            rocm_version = rocm_version.split("-")[0]    # ignore git sha
+            rocm_version_tuple = tuple(int(x) for x in rocm_version.split("."))
+            if rocm_version_tuple is None or version is None or rocm_version_tuple < tuple(version):
+                reason = "ROCm {0} is available but {1} required".format(rocm_version_tuple, version)
+                raise unittest.SkipTest(reason)
+            return fn(self, *args, **kwargs)
+        return wrap_fn
+    return dec_fn
+
+def skipIfNotMiopenSuggestNHWC(fn):
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        if not TEST_WITH_MIOPEN_SUGGEST_NHWC:
+            raise unittest.SkipTest("test doesn't currently work without MIOpen NHWC activation")
         else:
             fn(*args, **kwargs)
     return wrapper
