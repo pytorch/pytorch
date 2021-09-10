@@ -6,7 +6,7 @@ import torch
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_modules import module_db, modules
 from torch.testing._internal.common_utils import (
-    TestCase, run_tests, freeze_rng_state, mock_wrapper, get_tensors_from)
+    TestCase, run_tests, freeze_rng_state, mock_wrapper, get_tensors_from, gradcheck, gradgradcheck)
 from unittest.mock import patch
 
 
@@ -204,6 +204,58 @@ class TestModule(TestCase):
             output_op.backward(grad)
             output_ip.backward(grad)
             self.assertEqual(input_args[0].grad, input_arg_copy[0].grad)
+
+
+    def _test_gradients_helper(self, device, dtype, module_info, check):
+        # Check gradients
+        module_cls = module_info.module_cls
+        module_inputs = module_info.module_inputs_func(module_info, device=device, dtype=dtype,
+                                                       requires_grad=True)
+
+        for module_input in module_inputs:
+            if module_input.forward_input is None:
+                continue
+
+            # === Instantiate the module. ===
+            args, kwargs = module_input.constructor_input.args, module_input.constructor_input.kwargs
+            m = module_cls(*args, **kwargs)
+            m.to(device).to(dtype)
+
+            params = tuple(m.parameters())
+
+            # === Perform gradient check on the input_args ===
+            input_args, input_kwargs = module_input.forward_input.args, module_input.forward_input.kwargs
+
+            other_kwargs = {}
+            kwarg_tensors = []
+            for name, obj in input_kwargs.items():
+                if isinstance(obj, torch.Tensor):
+                    kwarg_tensors.append((name, obj))
+                else:
+                    other_kwargs[name] = obj
+
+            grad_input = input_args + params + tuple(obj for (_, obj) in kwarg_tensors)
+
+            def fn_to_gradcheck(*input_and_params):
+                new_input_args = input_and_params[:len(input_args)]
+                kwarg_args = input_and_params[-len(kwarg_tensors):]
+                new_kwargs = {name: obj for (name, _), obj in zip(kwarg_tensors, kwarg_args)}
+
+                with freeze_rng_state():
+                    return m(*new_input_args, **new_kwargs, **other_kwargs)
+
+            self.assertTrue(check(fn_to_gradcheck, grad_input))
+
+
+    @modules(module_db, allowed_dtypes=[torch.double])
+    def test_grad(self, device, dtype, module_info):
+        self._test_gradients_helper(device, dtype, module_info, gradcheck)
+
+    @modules(module_db, allowed_dtypes=[torch.double])
+    def test_gradgrad(self, device, dtype, module_info):
+        if not module_info.supports_gradgrad:
+            self.skipTest("Skipped! Module does not support gradgrad")
+        self._test_gradients_helper(device, dtype, module_info, gradgradcheck)
 
 
 instantiate_device_type_tests(TestModule, globals())
