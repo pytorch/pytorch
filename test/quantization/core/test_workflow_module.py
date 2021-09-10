@@ -21,8 +21,6 @@ from torch.quantization import (
     FusedMovingAvgObsFakeQuantize,
 )
 
-import torch.nn as nn
-
 # Standard library
 import copy
 import io
@@ -30,7 +28,10 @@ import itertools
 import unittest
 import math
 import numpy as np
+import os
+import tempfile
 
+import torch.nn as nn
 # Testing utils
 from hypothesis import given, settings
 from hypothesis import strategies as st
@@ -898,6 +899,57 @@ class TestDistributed(QuantizationTestCase):
         # ensure that running an input on CUDA works without any needed changes
         input = torch.randn(4, 1, 4, 4, device=device)
         model(input)
+
+    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    def test_model_parallel(self):
+        """
+        Tests that doing QAT in multiple machines seeded from CPU does throw
+        an error complaining model exists on CPU and GPU.
+        """
+        def dummyModel(self, device):
+            model = nn.Sequential(
+                torch.quantization.QuantStub(),
+                nn.Conv2d(3, 1, 1, bias=False),
+                nn.BatchNorm2d(1),
+                nn.ReLU(),
+                nn.Conv2d(1, 2, 3, stride=2, padding=1, bias=False),
+                nn.BatchNorm2d(2),
+                nn.AvgPool2d(14),
+                nn.Sigmoid(),
+                torch.quantization.DeQuantStub(),
+            )
+            torch.quantization.fuse_modules(model, [['1', '2', '3'], ['4', '5']], inplace=True)
+            model.qconfig = torch.quantization.get_default_qat_qconfig('fbgemm')
+            torch.quantization.prepare_qat(model, inplace=True)
+            return model.to(device)
+
+        if 'fbgemm' not in torch.backends.quantized.supported_engines:
+            return
+        with override_quantized_engine('fbgemm'):
+            device = torch.device('cpu')
+            model_to_save = self.dummyModel(device)
+
+            temp_file_name = os.path.join(
+                tempfile._get_default_tempdir(), "temp_stat_dict.pt"
+            )
+            torch.save(model_to_save.state_dict(), temp_file_name)
+            temp_states = torch.load(temp_file_name,  map_location=(lambda s, _: torch.serialization.default_restore_location(s, 'cpu')))
+            model = torch.device('gpu')
+            model.train()
+
+            for epoch in range(3):
+                inputs = torch.rand(2, 3, 28, 28).to(device)
+                model(inputs)
+                if epoch >= 1:
+                    model.apply(torch.quantization.disable_observer)
+                if epoch >= 2:
+                    model.apply(torch.nn.intrinsic.qat.freeze_bn_stats)
+                quant_model = copy.deepcopy(model.module)
+                quant_model = torch.quantization.convert(quant_model.eval().cpu(), inplace=False)
+                with torch.no_grad():
+                    out = quant_model(torch.rand(1, 3, 28, 28))
+
 
 class TestFusedObsFakeQuantModule(TestCase):
     @given(

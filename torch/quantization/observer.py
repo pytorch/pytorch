@@ -275,6 +275,12 @@ class _ObserverBase(ObserverBase):
         scale = torch.ones(min_val_neg.size(), dtype=torch.float32, device=device)
         zero_point = torch.zeros(min_val_neg.size(), dtype=torch.int64, device=device)
 
+        # Copying self.eps to GPU to avoid loaded eps from state-dict staying on cpu,
+        # which causes error " Expected all tensors to be on the same device,
+        # but found at least two devices"
+        # In this case, moving self variables to max_val_pos.device allows
+        # models to run fast under a distributed GPU setup.
+        self.eps = self.eps.to(device=max_val_pos.device)
         if (
             self.qscheme == torch.per_tensor_symmetric
             or self.qscheme == torch.per_channel_symmetric
@@ -436,8 +442,13 @@ class MinMaxObserver(_ObserverBase):
         x = x_orig.detach()  # avoid keeping autograd tape
         x = x.to(self.min_val.dtype)
         min_val_cur, max_val_cur = torch._aminmax(x)
-        min_val = torch.min(min_val_cur, self.min_val)
-        max_val = torch.max(max_val_cur, self.max_val)
+        # self.min_val, if loaded state from existing cpu state_dict, will be stored on
+        # CPU, and hence this line will throw error if devices are not unified:
+        # "Expected all tensors to be on the same device, but found at least two
+        # devices, cuda and cpu!". Moving self variables to max_val_pos.device allows
+        # models to run fast under a distributed GPU setup.
+        min_val = torch.min(min_val_cur, self.min_val.to(device=min_val_cur.device))
+        max_val = torch.max(max_val_cur, self.max_val.to(device=max_val_cur.device))
         self.min_val.copy_(min_val)
         self.max_val.copy_(max_val)
         return x_orig
@@ -531,9 +542,15 @@ class MovingAverageMinMaxObserver(MinMaxObserver):
         if min_val == float("inf") and max_val == float("-inf"):
             min_val, max_val = torch._aminmax(x)
         else:
+            # Moving self variables to max_val_pos.device allows
+            # models to run fast under a distributed GPU setup.
             min_val_cur, max_val_cur = torch._aminmax(x)
-            min_val = min_val + self.averaging_constant * (min_val_cur - min_val)
-            max_val = max_val + self.averaging_constant * (max_val_cur - max_val)
+            min_val = min_val.to(device=min_val_cur.device) + \
+                self.averaging_constant * \
+                (min_val_cur - min_val.to(device=min_val_cur.device))
+            max_val = max_val.to(device=max_val_cur.device) + \
+                self.averaging_constant * \
+                (max_val_cur - max_val.to(device=max_val_cur.device))
         self.min_val.copy_(min_val)
         self.max_val.copy_(max_val)
         return x_orig
@@ -621,8 +638,13 @@ class PerChannelMinMaxObserver(_ObserverBase):
             min_val, max_val = torch._aminmax(y, 1)
         else:
             min_val_cur, max_val_cur = torch._aminmax(y, 1)
-            min_val = torch.min(min_val_cur, min_val)
-            max_val = torch.max(max_val_cur, max_val)
+            # self.min_val, if loaded state from existing cpu state_dict, will be stored on
+            # CPU, and hence this line will throw error if devices are not unified:
+            # "Expected all tensors to be on the same device, but found at least two devices,
+            # cuda and cpu!". Moving self variables to max_val_pos.device allows
+            # models to run fast under a distributed GPU setup.
+            min_val = torch.min(min_val_cur, min_val.to(device=min_val_cur.device))
+            max_val = torch.max(max_val_cur, max_val.to(device=max_val_cur.device))
         self.min_val.resize_(min_val.shape)
         self.max_val.resize_(max_val.shape)
         self.min_val.copy_(min_val)
@@ -786,9 +808,15 @@ class MovingAveragePerChannelMinMaxObserver(PerChannelMinMaxObserver):
         if min_val.numel() == 0 or max_val.numel() == 0:
             min_val, max_val = torch._aminmax(y, 1)
         else:
+            # Moving self variables to max_val_pos.device allows
+            # models to run fast under a distributed GPU setup.
             min_val_cur, max_val_cur = torch._aminmax(y, 1)
-            min_val = min_val + self.averaging_constant * (min_val_cur - min_val)
-            max_val = max_val + self.averaging_constant * (max_val_cur - max_val)
+            min_val = min_val.to(device=min_val_cur.device) + \
+                self.averaging_constant * \
+                (min_val_cur - min_val.to(device=min_val_cur.device))
+            max_val = max_val.to(device=max_val_cur.device) + \
+                self.averaging_constant * \
+                (max_val_cur - max_val.to(device=max_val_cur.device))
         self.min_val.resize_(min_val.shape)
         self.max_val.resize_(max_val.shape)
         self.min_val.copy_(min_val)

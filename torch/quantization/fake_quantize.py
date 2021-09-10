@@ -141,6 +141,11 @@ class FakeQuantize(FakeQuantizeBase):
             self.zero_point.copy_(_zero_point)
 
         if self.fake_quant_enabled[0] == 1:
+            # Make sure computation are done on the same device.
+            # In this case, moving self variables to X.device allows
+            # models to run fast under a distributed GPU setup.
+            self.scale = self.scale.to(device=X.device)
+            self.zero_point = self.zero_point.to(device=X.device)
             if self.is_per_channel:
                 X = torch.fake_quantize_per_channel_affine(
                     X, self.scale, self.zero_point,
@@ -231,6 +236,11 @@ class FixedQParamsFakeQuantize(FakeQuantizeBase):
 
     def forward(self, X):
         if self.fake_quant_enabled[0] == 1:
+            # Make sure computation are done on the same device.
+            # In this case, moving self variables to X.device allows
+            # models to run fast under a distributed GPU setup.
+            self.scale = self.scale.to(device=X.device)
+            self.zero_point = self.zero_point.to(device=X.device)
             X = torch.fake_quantize_per_tensor_affine(X, self.scale,
                                                       self.zero_point, self.quant_min,
                                                       self.quant_max)
