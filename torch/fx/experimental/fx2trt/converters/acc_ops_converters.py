@@ -1379,13 +1379,17 @@ def acc_ops_quantize_per_channel(network, target, args, kwargs, name):
 
     # make sure zero_points are all 0 because only symmetric quantization
     # is supported in TensorRT
-    if not torch.equal(q_per_channel_zero_points, torch.zeros(q_per_channel_zero_points.shape, dtype=q_per_channel_zero_points.dtype)):
+    if not torch.equal(
+            q_per_channel_zero_points,
+            torch.zeros(q_per_channel_zero_points.shape, dtype=q_per_channel_zero_points.dtype)):
         raise RuntimeError(f"Only support zero_point == 0, get {q_per_channel_zero_points}")
 
     if not torch.all(torch.ge(q_per_channel_scales, 0)):
         raise RuntimeError(f"All scale values must be >= 0, get {q_per_channel_scales}")
 
-    scale_layer = network.add_constant(q_per_channel_scales.shape, trt.Weights(np.ascontiguousarray(q_per_channel_scales, dtype=np.float32)))
+    scale_layer = network.add_constant(
+        q_per_channel_scales.shape,
+        trt.Weights(np.ascontiguousarray(q_per_channel_scales, dtype=np.float32)))
     scale_layer.name = input_val.name + ".quant.scale"
     scale = scale_layer.get_output(0)
     # assert trt.__version__ > "8.0", "Explicit quantize op is only supported in "
