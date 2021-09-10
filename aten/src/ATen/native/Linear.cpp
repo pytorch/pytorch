@@ -677,9 +677,7 @@ static Tensor linalg_tensordot_allocate_out(const Tensor& input1, const Tensor& 
   return at::empty(rsizes, input1.options());
 }
 
-Tensor linalg_tensordot(const Tensor& input1, const Tensor& input2, IntArrayRef dims1, IntArrayRef dims2) {
-  Tensor out = linalg_tensordot_allocate_out(input1, input2, dims1, dims2);
-
+static void linalg_tensordot_helper(const Tensor& input1, const Tensor& input2, IntArrayRef dims1, IntArrayRef dims2, const Tensor& out) {
   int64_t csize = 1;  // total size of the contracted dimensions
   Tensor t1 = input1;
   Tensor t2 = input2;
@@ -729,10 +727,17 @@ Tensor linalg_tensordot(const Tensor& input1, const Tensor& input2, IntArrayRef 
   // multiply and reshape to target size
   auto tmp = at::mm(t1, t2).reshape(out.sizes());
   out.copy_(tmp);
+}
+
+Tensor linalg_tensordot(const Tensor& input1, const Tensor& input2, IntArrayRef dims1, IntArrayRef dims2) {
+  Tensor out = linalg_tensordot_allocate_out(input1, input2, dims1, dims2);
+  linalg_tensordot_helper(input1, input2, dims1, dims2, out);
   return out;
 }
 
 Tensor &linalg_tensordot_out(const Tensor& input1, const Tensor& input2, IntArrayRef dims1, IntArrayRef dims2, Tensor& result) {
+
+    
   Tensor result_tmp = at::native::linalg_tensordot(input1, input2, dims1, dims2);
   auto result_dtype = result_tmp.scalar_type();
   auto output_tensor_dtype = result.scalar_type();
