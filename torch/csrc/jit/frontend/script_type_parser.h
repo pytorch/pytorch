@@ -41,9 +41,9 @@ class TORCH_API ScriptTypeParser {
       const SourceRange& r,
       const std::vector<Expr>& default_types,
       const std::vector<Expr>& default_exprs);
-  std::vector<Argument> parseArgsFromDecl(const Decl& decl, bool skip_self);
+  c10::ArgumentVector parseArgsFromDecl(const Decl& decl, bool skip_self);
 
-  std::vector<Argument> parseReturnFromDecl(const Decl& decl);
+  c10::ArgumentVector parseReturnFromDecl(const Decl& decl);
 
   ResolverPtr resolver_ = nullptr;
 
