@@ -38,7 +38,7 @@ torch.set_default_dtype(torch.double)
 from torch._six import inf
 from torch.testing._internal.common_utils import \
     (TestCase, run_tests, set_rng_seed, TEST_WITH_UBSAN, load_tests,
-     gradcheck, IS_MACOS, IS_WINDOWS)
+     gradcheck, IS_MACOS)
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.autograd import grad
 from torch.autograd.functional import jacobian
@@ -1034,7 +1034,6 @@ class TestDistributions(TestCase):
         self.assertEqual(Geometric(p).entropy(), scipy.stats.geom(p.detach().numpy(), loc=-1).entropy(), atol=1e-3, rtol=0)
         self.assertEqual(float(Geometric(s).entropy()), scipy.stats.geom(s, loc=-1).entropy().item(), atol=1e-3, rtol=0)
 
-    @unittest.skipIf(IS_WINDOWS, "See https://github.com/pytorch/pytorch/issues/64595")
     @unittest.skipIf(IS_MACOS, "See https://github.com/pytorch/pytorch/issues/60347")
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_geometric_sample(self):
@@ -1052,7 +1051,6 @@ class TestDistributions(TestCase):
         self.assertRaises(NotImplementedError, Binomial(10, p).rsample)
         self.assertRaises(NotImplementedError, Binomial(10, p).entropy)
 
-    @unittest.skipIf(IS_WINDOWS, "See https://github.com/pytorch/pytorch/issues/64595")
     @unittest.skipIf(IS_MACOS, "See https://github.com/pytorch/pytorch/issues/60347")
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_binomial_sample(self):
@@ -1346,7 +1344,6 @@ class TestDistributions(TestCase):
         dist.log_prob(torch.ones_like(rate_zero)).backward()
         torch.testing.assert_allclose(rate_zero.grad, torch.inf)
 
-    @unittest.skipIf(IS_WINDOWS, "See https://github.com/pytorch/pytorch/issues/64595")
     @unittest.skipIf(IS_MACOS, "See https://github.com/pytorch/pytorch/issues/60347")
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_poisson_sample(self):
@@ -1357,7 +1354,6 @@ class TestDistributions(TestCase):
                                          'Poisson(lambda={})'.format(rate),
                                          failure_rate=1e-3)
 
-    @unittest.skipIf(IS_WINDOWS, "See https://github.com/pytorch/pytorch/issues/64595")
     @unittest.skipIf(not TEST_CUDA, "CUDA not found")
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_poisson_gpu_sample(self):
