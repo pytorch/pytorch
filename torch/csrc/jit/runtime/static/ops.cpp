@@ -503,7 +503,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::bmm, aten_bmm, [](Node* n) -> SROperator {
       p_node->Output(0) = create_empty_from(in0_t);
     }
     auto& out_t = p_node->Output(0).toTensor();
- 
+
     fastResizeToZero(out_t);
     at::cpu::bmm_out(out_t, in0_t, in1_t);
   };
