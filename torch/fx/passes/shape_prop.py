@@ -21,9 +21,9 @@ class TensorMetadata(NamedTuple):
     qscheme : Optional[torch.qscheme]
     q_scale : Optional[float]
     q_zero_point : Optional[int]
-    q_per_channel_scales : Optional[torch.Tensor]
-    q_per_channel_zero_points : Optional[torch.Tensor]
-    q_per_channel_axis : Optional[int]
+    q_per_channel_scales : Optional[torch.Tensor] = None
+    q_per_channel_zero_points : Optional[torch.Tensor] = None
+    q_per_channel_axis : Optional[int] = None
 
 def _extract_tensor_metadata(result : torch.Tensor) -> TensorMetadata:
     """
