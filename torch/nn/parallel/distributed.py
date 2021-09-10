@@ -748,8 +748,8 @@ class DistributedDataParallel(Module, Joinable):
         return parameters, expect_sparse_gradient
 
     def _build_param_to_name_mapping(self, parameters):
-        param_to_param_index = {parameters[0][i]: i for i in range(len(parameters[0]))}
-        param_set = set(parameters[0])
+        param_to_param_index = {parameters[i]: i for i in range(len(parameters))}
+        param_set = set(parameters)
         param_index_to_param_fqn = {}
         for module_name, module in self.module.named_modules():
             for param_name, param in module.named_parameters(recurse=False):
