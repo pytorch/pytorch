@@ -609,6 +609,27 @@ std::vector<int64_t> _check_gesvdj_convergence(const Tensor& infos, int64_t non_
   return res;
 }
 
+// Depending on the number of non-converging batches,
+// format the non-converging batches string as either (no leading or trailing whitespaces)
+// batches 2, 3, 5  // or
+// batches 2, 3, 5, 7, 11 and other 65535 batches
+std::string _format_non_converging_batches(const std::vector<int64_t>& batches) {
+  std::stringstream ss;
+  const int too_long = 5;
+
+  if (batches.size() <= too_long) {
+    ss << "batches ";
+    for (int i = 0; i < batches.size() - 1; i++) ss << batches[i] << ", ";
+    ss << batches.back();
+  } else {
+    ss << "batches ";
+    for (int i = 0; i < too_long; i++) ss << batches[i] << ", ";
+    ss << "and other " << batches.size() - too_long << " batches";
+  }
+
+  return ss.str();
+}
+
 // entrance of calculations of `svd` using cusolver gesvdj and gesvdjBatched
 // This function returns V, not V^T, not V^H.
 std::tuple<Tensor, Tensor, Tensor> _svd_helper_cuda_lib(const Tensor& self, bool some, bool compute_uv) {
@@ -642,7 +663,9 @@ std::tuple<Tensor, Tensor, Tensor> _svd_helper_cuda_lib(const Tensor& self, bool
   if (!gesvdj_convergence_check.empty()) {
     // fall back to gesvd path for those non-converging batches
 
-    TORCH_WARN_ONCE("cuSOLVER SVD failed to converge for the given inputs. "
+    TORCH_WARN_ONCE("During the SVD execution, ",
+                    _format_non_converging_batches(gesvdj_convergence_check),
+                    " failed to converge. ",
                     "A more accurate method will be used to calculate the SVD as a fallback.");
     apply_svd_lib_gesvd(self, U_working_copy, S_working_copy, VT_working_copy, infos, compute_uv, some,
       /* calculate_all_batches = */ false,
