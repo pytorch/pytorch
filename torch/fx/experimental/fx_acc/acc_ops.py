@@ -10,7 +10,6 @@ from torch.fx.experimental.fx_acc.acc_normalizer import (
     register_acc_op_mapping,
     register_custom_acc_mapper_fn,
 )
-from torch.fx.passes.shape_prop import _extract_tensor_metadata
 
 this_arg_is_optional = True
 
