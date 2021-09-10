@@ -24,7 +24,7 @@ from ..utils import (
     get_qparam_dict,
 )
 
-from ..quantize import (
+from torch.ao.quantization.quantize import (
     is_activation_post_process,
 )
 
