@@ -2465,6 +2465,11 @@ class TestQuantizedOps(TestCase):
                     lstm_prepared, convert_custom_config_dict=custom_module_config)
                 qy = lstm_quantized(qx)
 
+                # Check names
+                self.assertEqual(lstm[0]._get_name(), "LSTM")
+                self.assertEqual(lstm_prepared[0]._get_name(), "QuantizableLSTM")
+                self.assertEqual(lstm_quantized[0]._get_name(), "QuantizedLSTM")
+
                 snr = _snr(y, qy)
                 snr = [snr[0]] + snr[1]
 

@@ -80,7 +80,10 @@ class LSTMCell(torch.nn.Module):
         return h, c
 
     def _get_name(self):
-        return 'QuantizableLSTMCell'
+        if isinstance(self.layers[0].layer_fw.cell.igates, torch.nn.quantized.Linear):
+            return 'QuantizedLSTMCell'
+        else:
+            return 'QuantizableLSTMCell'
 
     @classmethod
     def from_params(cls, wi, wh, bi=None, bh=None):
@@ -390,7 +393,10 @@ class LSTM(torch.nn.Module):
         return x, (hx_tensor, cx_tensor)
 
     def _get_name(self):
-        return 'QuantizableLSTM'
+        if isinstance(self.layers[0].layer_fw.cell.igates, torch.nn.quantized.Linear):
+            return 'QuantizedLSTM'
+        else:
+            return 'QuantizableLSTM'
 
     @classmethod
     def from_float(cls, other, qconfig=None):
