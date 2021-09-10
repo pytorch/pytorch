@@ -902,11 +902,6 @@ class TORCH_API Intrinsics : public ExprNode<Intrinsics> {
   IntrinsicsOp op_type_;
 };
 
-class Polynomial;
-class Term;
-class MaxTerm;
-class MinTerm;
-
 TORCH_API std::vector<ExprPtr> ExprHandleVectorToExprVector(
     const std::vector<ExprHandle>&);
 TORCH_API std::vector<ExprHandle> ExprVectorToExprHandleVector(
