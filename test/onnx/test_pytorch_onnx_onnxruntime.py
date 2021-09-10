@@ -6176,10 +6176,10 @@ class TestONNXRuntime(unittest.TestCase):
     def test_log10(self):
         class Log10(torch.nn.Module):
             def forward(self, input):
-                return torch.log1p(input)
+                return torch.log10(input)
+
         x = torch.rand(2, 3, 4)
-        model = Log10()
-        self.run_test(model, x)
+        self.run_test(Log10(), x)
 
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_round(self):
@@ -7012,7 +7012,7 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.tensor([[1, 2, float("inf")], [2, float("nan"), float("inf")]])
         self.run_test(M(), (x, ))
 
-    @skipIfUnsupportedMinOpsetVersion(10)  # ONNX IsInf op is added in opset 10.
+    @skipIfUnsupportedMinOpsetVersion(10)
     def test_isfinite(self):
         class M(torch.nn.Module):
             def forward(self, x):
