@@ -1108,6 +1108,22 @@ class TestTensorExprFuser(BaseTestClass):
             ref = foo(*values)
             np.testing.assert_allclose(ref.cpu().numpy(), x.cpu().numpy())
 
+    def test_cat_with_constant_dim(self):
+        for device in self.devices:
+            def foo(*args):
+                v1 = torch.cat(args, dim=1)
+                v2 = torch.cat([v1], dim=1)
+                return v2 * v2
+
+            empty = torch.tensor([], device=device, dtype=torch.float32)
+            inputs = [empty] + [torch.randn(1, 64, device=device), torch.randn(1, 64, device=device)]
+            traced = torch.jit.trace(foo, inputs)
+
+            x = warmup_and_run_forward(traced, *inputs)
+            self.assertLastGraphAllFused()
+            ref = foo(*inputs)
+            np.testing.assert_allclose(ref.cpu().numpy(), x.cpu().numpy())
+
     def test_scalar(self):
         @torch.jit.script
         def test_float(x: torch.Tensor, y: torch.Tensor, z: torch.Tensor, a: float, b: float) -> torch.Tensor:
