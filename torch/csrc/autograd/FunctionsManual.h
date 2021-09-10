@@ -287,6 +287,11 @@ Tensor _lu_with_info_backward(
   const Tensor& LU,
   const Tensor& pivs
 );
+Tensor _lu_with_info_jvp(
+  const Tensor& dX,
+  const Tensor& LU,
+  const Tensor& pivs
+);
 
 Tensor cat_jvp(at::TensorList tensors, int64_t dim);
 Tensor cumprod_jvp(Tensor self_t, Tensor self_p, Tensor result, int dim);
