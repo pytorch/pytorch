@@ -60,6 +60,7 @@ supported:
   - t
   - t_
   - tanh
+  - threshold
   - threshold_backward
   - transpose.int
   - transpose_

@@ -32,6 +32,7 @@
 #include "lazy_tensor_core/csrc/ops/squeeze.h"
 #include "lazy_tensor_core/csrc/ops/stack.h"
 #include "lazy_tensor_core/csrc/ops/sum.h"
+#include "lazy_tensor_core/csrc/ops/threshold.h"
 #include "lazy_tensor_core/csrc/ops/threshold_backward.h"
 #include "lazy_tensor_core/csrc/ops/ts_embedding_dense_backward.h"
 #include "lazy_tensor_core/csrc/ops/ts_log_softmax_backward.h"
@@ -320,6 +321,10 @@ class TSNodeLowering : public NodeLowering {
     if (node->op().op == at::aten::sum) {
       return LowerSum(
           ir::NodeCast<ir::ops::Sum>(node, ir::OpKind(at::aten::sum)));
+    }
+    if (node->op().op == at::aten::threshold) {
+      return LowerThreshold(
+          ir::NodeCast<ir::ops::Threshold>(node, ir::OpKind(at::aten::threshold)));
     }
     if (node->op().op == at::aten::threshold_backward) {
       return LowerThresholdBackward(
@@ -886,6 +891,16 @@ class TSNodeLowering : public NodeLowering {
     std::vector<torch::jit::NamedValue> kwarguments;
     kwarguments.emplace_back("dtype", sum->dtype());
     return LowerBuiltin(sum, arguments, kwarguments);
+  }
+
+  TSOpVector LowerThreshold(const ir::ops::Threshold* node) {
+    std::vector<torch::jit::NamedValue> arguments;
+    for (auto& operand : node->operands()) {
+      arguments.emplace_back(loctx()->GetOutputOp(operand));
+    }
+    arguments.emplace_back(node->threshold());
+    arguments.emplace_back(node->value());
+    return LowerBuiltin(node, arguments);
   }
 
   TSOpVector LowerThresholdBackward(const ir::ops::ThresholdBackward* node) {
