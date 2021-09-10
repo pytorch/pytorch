@@ -5384,27 +5384,24 @@ def single_batch_reference_criterion_fn(*args):
     The output is squeezed to compare with the no-batch input.
     """
     criterion = args[-1]
-    single_batch_input_args = [input.unsqueeze(0) for input in args[:-1]]
-
-    output = criterion(*single_batch_input_args)
-    reduction = get_reduction(criterion)
-
-    if reduction == 'none':
-        return output.squeeze(0)
-    # reduction is 'sum' or 'mean' which results in a scalar
-    return output
-
-def single_batch_reference_cosineembeddingloss(*args):
-    # Reference function for CosineEmbeddingLoss
-    criterion = args[-1]
 
     def unsqueeze_inp(inp):
         if isinstance(inp, (list, tuple)):
-            return (t.unsqueeze(0) for t in inp)
+            return [t.unsqueeze(0) for t in inp]
         return inp.unsqueeze(0)
 
-    (x1, x2), target = (unsqueeze_inp(input) for input in args[:-1])
-    output = criterion(x1, x2, target)
+    def flatten(xs):
+        result = []
+        if isinstance(xs, (list, tuple)):
+            for x in xs:
+                result.extend(flatten(x))
+        else:
+            result.append(xs)
+        return result
+
+    single_batch_input_args = flatten([unsqueeze_inp(input) for input in args[:-1]])
+
+    output = criterion(*single_batch_input_args)
     reduction = get_reduction(criterion)
 
     if reduction == 'none':
@@ -5444,17 +5441,15 @@ classification_criterion_no_batch = [
 classification_criterion_no_batch_extra_info: Dict[str, dict] = {
     'MultiLabelMarginLoss': {'check_gradgrad': False},
 }
-single_batch_reference_dict = {'CosineEmbeddingLoss': single_batch_reference_cosineembeddingloss}
 reductions = ['none', 'mean', 'sum']
 for (name, input_fn, target_fn), reduction in product(classification_criterion_no_batch,
                                                       reductions):
-    ref_fn = single_batch_reference_dict.get(name, single_batch_reference_criterion_fn)
     classification_test_info = dict(
         fullname="{}_no_batch_dim_{}".format(name, reduction),
         constructor=lambda *args, name=name: getattr(nn, name)(reduction=reduction),
         input_fn=lambda f=input_fn: f(),
         target_fn=lambda f=target_fn: f(),
-        reference_fn=ref_fn,
+        reference_fn=single_batch_reference_criterion_fn,
         test_cpp_api_parity=False,
     )
     extra_info = classification_criterion_no_batch_extra_info.get(name, {})
