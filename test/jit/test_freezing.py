@@ -1811,8 +1811,11 @@ class TestFrozenOptimizations(JitTestCase):
         conv_ops = [nn.Conv2d, nn.Conv3d]
         use_tracing = [True, False]
         use_inplace = [True, False]
-        convert_to_mkldnn = [True, False]
-        for use_bias, conv, tracing, inplace in product(conv_bias, conv_ops, use_tracing, use_inplace):
+        convert_to_mkldnn = [True]
+        empty_input = [True, False]
+        for use_bias, conv, tracing, inplace, to_mkldnn, use_empty \
+                in product(conv_bias, conv_ops, use_tracing, use_inplace, convert_to_mkldnn, empty_input):
+
             class Net(nn.Module):
                 def __init__(self, in_channels, out_channels, **kwargs):
                     super(Net, self).__init__()
@@ -1828,6 +1831,8 @@ class TestFrozenOptimizations(JitTestCase):
                 mod_eager = Net(3, 6, kernel_size=3, stride=2).eval()
 
                 inps = [5, 3, 4, 4]
+                if use_empty:
+                    inps[0] = 0
                 if conv == nn.Conv3d:
                     inps.append(inps[-1])
                 inp = torch.rand(inps)
@@ -1838,8 +1843,9 @@ class TestFrozenOptimizations(JitTestCase):
                     scripted_mod = torch.jit.script(mod_eager)
 
                 frozen_mod = torch.jit.freeze(scripted_mod)
-                if convert_to_mkldnn:
+                if to_mkldnn:
                     self.run_pass("convert_frozen_ops_to_mkldnn", frozen_mod.graph)
+                    FileCheck().check("prim::mkldnn_convolution").run(frozen_mod.graph)
                 self.run_pass("fuse_frozen_conv_add_relu", frozen_mod.graph)
 
                 FileCheck().check("aten::convolution_relu").run(frozen_mod.graph)
