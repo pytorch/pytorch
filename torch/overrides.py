@@ -1526,7 +1526,8 @@ def is_tensor_like(inp):
     But, they can be made Tensor-like by implementing __torch_function__.
 
     >>> class TensorLike:
-    ...     def __torch_function__(self, func, types, args, kwargs):
+    ...     @classmethod
+    ...     def __torch_function__(cls, func, types, args, kwargs):
     ...         return -1
     >>> is_tensor_like(TensorLike())
     True
