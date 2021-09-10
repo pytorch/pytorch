@@ -402,7 +402,7 @@ struct Lexer {
   Token next() {
     if (next_tokens.size() == 0)
       reportError("Lexer invariant violated: empty token queue");
-    Token r = next_tokens.front();
+    Token r = std::move(next_tokens.front());
     next_tokens.erase(next_tokens.begin());
     if (next_tokens.size() == 0) {
       lex();
