@@ -1,7 +1,7 @@
 import socket
 from .profiler import profile, tensorboard_trace_handler
-from torch.autograd import (_ThreadLocalState, _ThreadLocalStateGuard, _init_kineto_TLS)
-from werkzeug import exceptions, wrappers, serving, wsgi
+from torch.autograd import (_ThreadLocalState, _ThreadLocalStateGuard, _ThreadLocalStateManualGuard, _init_kineto_TLS)
+from werkzeug import exceptions, wrappers, serving
 from werkzeug.middleware.dispatcher import DispatcherMiddleware
 from werkzeug.middleware.shared_data import SharedDataMiddleware
 from threading import Thread
@@ -189,13 +189,14 @@ class PyTorchServiceWSGIApp(object):
     
     def start_profiling_with_warmup(self, warmup_dur, state):
         try:
-            g = _ThreadLocalStateGuard(state)
+            g = _ThreadLocalStateManualGuard(state)
             self.prof._start_warmup()
             time.sleep(warmup_dur)
             self.prof._start_trace()
             self.profiling_started = True
         finally:
             self.profiling_warmup = False
+            g.destruct_guard()
 
     @wrappers.Request.application
     def bad_request(self, request):

@@ -46,20 +46,20 @@ class TORCH_API ThreadLocalState {
   // Whether pre-sampling RecordFunction optimization was enabled
   bool bumped_record_all_functions_ = false;
 
-  friend class ThreadLocalStateGuard;
+  friend class ThreadLocalStateManualGuard;
 };
 
 // Guard to set and reset the thread local state
-class TORCH_API ThreadLocalStateGuard {
+class TORCH_API ThreadLocalStateManualGuard {
  public:
-  explicit ThreadLocalStateGuard(const ThreadLocalState& state)
+  explicit ThreadLocalStateManualGuard(const ThreadLocalState& state)
       : prev_state_(ThreadLocalState()),
         bumped_record_all_functions_(state.bumped_record_all_functions_) {
     // Special handling of RecordFunction pre-sampling optimization:
     // pre-samping is enabled (bumped) when there're non-sampled
     // (or high-frequency) global or TLS callbacks.
     //
-    // ThreadLocalStateGuard simply resets RecordFunction's TLS and
+    // ThreadLocalStateManualGuard simply resets RecordFunction's TLS and
     // hence its thread local callbacks.
     //
     // Checking if the pre-sampling was enabled and preserving it in the
@@ -72,7 +72,7 @@ class TORCH_API ThreadLocalStateGuard {
     ThreadLocalState::setThreadLocalState(state);
   }
 
-  ~ThreadLocalStateGuard() {
+  void DestructGuard() {
     // restore previously set variables
     ThreadLocalState::setThreadLocalState(prev_state_);
     if (bumped_record_all_functions_) {
@@ -84,6 +84,16 @@ class TORCH_API ThreadLocalStateGuard {
   const ThreadLocalState prev_state_;
   // Whether pre-sampling RecordFunction optimization was enabled
   bool bumped_record_all_functions_ = false;
+};
+
+class TORCH_API ThreadLocalStateGuard : ThreadLocalStateManualGuard {
+ public:
+  explicit ThreadLocalStateGuard(const ThreadLocalState& state)
+      : ThreadLocalStateManualGuard(state) {}
+  
+  ~ThreadLocalStateGuard() {
+    DestructGuard();
+  }
 };
 
 template <typename T>
