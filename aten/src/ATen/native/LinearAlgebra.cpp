@@ -1135,8 +1135,8 @@ static void addmm_impl_cpu_(
       result.scalar_type(), "addmm_impl_cpu_",
       [&]{
         at::native::cpublas::gemm(
-            transpose_a ? a.is_conj() ? cpublas::ConjTranspose : cpublas::Transpose : cpublas::NoTranspose,
-            transpose_b ? b.is_conj() ? cpublas::ConjTranspose : cpublas::Transpose : cpublas::NoTranspose,
+            transpose_a ? a.is_conj() ? TransposeType::ConjTranspose : TransposeType::Transpose : TransposeType::NoTranspose,
+            transpose_b ? b.is_conj() ? TransposeType::ConjTranspose : TransposeType::Transpose : TransposeType::NoTranspose,
             m, n, k,
             alpha.to<scalar_t>(),
             a.data_ptr<scalar_t>(), lda,
@@ -1632,6 +1632,15 @@ Tensor& matmul_out(const Tensor & tensor1, const Tensor & tensor2, Tensor &resul
   at::native::matmul(c10::optional<Tensor>(result), tensor1, tensor2);
   namedinference::propagate_names_if_nonempty(result, maybe_outnames);
   return result;
+}
+
+// torch.linalg.matmul, alias for torch.matmul
+Tensor linalg_matmul(const Tensor & tensor1, const Tensor & tensor2) {
+  return at::native::matmul(tensor1, tensor2);
+}
+
+Tensor& linalg_matmul_out(const Tensor & tensor1, const Tensor & tensor2, Tensor &result) {
+  return at::native::matmul_out(tensor1, tensor2, result);
 }
 
 // helper methods for matrix_exp

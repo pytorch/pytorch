@@ -971,6 +971,15 @@
 
 - func: cat.names_out(Tensor[] tensors, Dimname dim, *, Tensor(a!) out) -> Tensor(a!)
 
+# alias for torch.cat
+- func: concat(Tensor[] tensors, int dim=0) -> Tensor
+
+- func: concat.out(Tensor[] tensors, int dim=0, *, Tensor(a!) out) -> Tensor(a!)
+
+- func: concat.names(Tensor[] tensors, Dimname dim) -> Tensor
+
+- func: concat.names_out(Tensor[] tensors, Dimname dim, *, Tensor(a!) out) -> Tensor(a!)
+
 - func: block_diag(Tensor[] tensors) -> Tensor
   variants: function
 
@@ -2411,6 +2420,9 @@
     CPU, CUDA: nan_to_num_out
 
 - func: linear(Tensor input, Tensor weight, Tensor? bias=None) -> Tensor
+  python_module: nn
+
+- func: linear.out(Tensor input, Tensor weight, Tensor? bias=None, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
 
 - func: mkldnn_linear(Tensor self, Tensor weight, Tensor? bias=None) -> Tensor
@@ -10042,6 +10054,22 @@
   python_module: special
   variants: function
 
+- func: special_gammainc.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: special
+  variants: function
+
+- func: special_gammainc(Tensor self, Tensor other) -> Tensor
+  python_module: special
+  variants: function
+
+- func: special_gammaincc.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: special
+  variants: function
+
+- func: special_gammaincc(Tensor self, Tensor other) -> Tensor
+  python_module: special
+  variants: function
+
 - func: special_multigammaln(Tensor self, int p) -> Tensor
   python_module: special
   variants: function
@@ -10259,6 +10287,14 @@
   variants: function
   dispatch:
     CPU, CUDA: linalg_lstsq_out
+
+# torch.linalg.matmul, alias for torch.matmul
+- func: linalg_matmul(Tensor self, Tensor other) -> Tensor
+  python_module: linalg
+  variants: function
+
+- func: linalg_matmul.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: linalg
 
 - func: linalg_slogdet(Tensor self) -> (Tensor sign, Tensor logabsdet)
   python_module: linalg
