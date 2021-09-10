@@ -3,7 +3,9 @@ from copy import deepcopy
 import tempfile
 
 import torch
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests, onlyCUDA, toleranceOverride, tol
+)
 from torch.testing._internal.common_modules import module_db, modules
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, freeze_rng_state, mock_wrapper, get_tensors_from)
@@ -156,7 +158,10 @@ class TestModule(TestCase):
                     output_from_copy = m_copy(*args, **kwargs)
                     self.assertEqual(output, output_from_copy)
 
-    @modules(module_db, allow_devices={"cuda"})
+    @onlyCUDA
+    @toleranceOverride({torch.float32: tol(5e-2, 0),
+                        torch.float64: tol(4e-4, 0)})
+    @modules(module_db)
     def test_cpu_gpu_parity(self, device, dtype, module_info):
         # Test cpu and gpu results are the same
         module_cls = module_info.module_cls
@@ -167,7 +172,7 @@ class TestModule(TestCase):
             if isinstance(item, dict):
                 for i in item.values():
                     _retain_grad(i)
-            elif isinstance(item, tuple):
+            elif isinstance(item, (tuple, list)):
                 for i in item:
                     _retain_grad(i)
             else:
@@ -189,9 +194,6 @@ class TestModule(TestCase):
             else:
                 return deepcopy(obj)
 
-        # TODO: Allow ModuleInfo to change this?
-        atol = 5e-2 if dtype == torch.float32 else 4e-4
-
         for module_input in module_inputs_cpu:
 
             # === Move input from cpu to device ===
@@ -211,13 +213,13 @@ class TestModule(TestCase):
             for cpu_p, gpu_p in zip(cpu_module.parameters(), gpu_module.parameters()):
                 gpu_p.data.copy_(cpu_p)
 
-            # === Compare forward resputs for cpu and gpu ===
+            # === Compare forward output between cpu and gpu ===
             with freeze_rng_state():
                 cpu_output = cpu_module(*cpu_forward_args, **cpu_forward_kwargs)
             with freeze_rng_state():
                 gpu_output = gpu_module(*gpu_forward_args, **gpu_forward_kwargs)
 
-            self.assertEqual(cpu_output, gpu_output, atol=atol, rtol=0)
+            self.assertEqual(cpu_output, gpu_output)
 
             # === Run backwards on CPU and GPU and compare results ===
             for _ in range(5):
@@ -231,10 +233,10 @@ class TestModule(TestCase):
                                        if isinstance(i, torch.Tensor))
                 gpu_grad_input = tuple(i.grad.data if i.grad is not None else None for i in gpu_forward_args
                                        if isinstance(i, torch.Tensor))
-                self.assertEqual(cpu_grad_input, gpu_grad_input, atol=atol, rtol=0)
+                self.assertEqual(cpu_grad_input, gpu_grad_input)
 
                 for cpu_p, gpu_p in zip(cpu_module.parameters(), gpu_module.parameters()):
-                    self.assertEqual(cpu_p.grad, gpu_p.grad, atol=atol, rtol=0)
+                    self.assertEqual(cpu_p.grad, gpu_p.grad)
 
                 cpu_grad_kwarg_input = {name: i.grad.data if i.grad is not None else None
                                         for name, i in cpu_forward_kwargs.items()
@@ -242,7 +244,7 @@ class TestModule(TestCase):
                 gpu_grad_kwarg_input = {name: i.grad.data if i.grad is not None else None
                                         for name, i in gpu_forward_kwargs.items()
                                         if isinstance(i, torch.Tensor)}
-                self.assertEqual(cpu_grad_kwarg_input, gpu_grad_kwarg_input, atol=atol, rtol=0)
+                self.assertEqual(cpu_grad_kwarg_input, gpu_grad_kwarg_input)
 
 
     @modules([module_info for module_info in module_db

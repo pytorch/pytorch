@@ -48,13 +48,10 @@ for namespace in MODULE_NAMESPACES:
 class modules(_TestParametrizer):
     """ PROTOTYPE: Decorator for specifying a list of modules over which to run a test. """
 
-    def __init__(self, module_info_list, allow_devices=None):
+    def __init__(self, module_info_list):
         self.module_info_list = module_info_list
-        self.allow_devices = set(allow_devices) if allow_devices is not None else None
 
     def _parametrize_test(self, test, generic_cls, device_cls):
-        if self.allow_devices is not None and device_cls.device_type not in self.allow_devices:
-            return
         for module_info in self.module_info_list:
             # TODO: Factor some of this out since it's similar to OpInfo.
             for dtype in floating_types():
