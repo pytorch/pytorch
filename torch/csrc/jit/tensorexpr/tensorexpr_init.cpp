@@ -627,16 +627,8 @@ void initTensorExprBindings(PyObject* module) {
         for (auto inp : inputs) {
           argInputs.push_back(convertPyToArgValue(inp));
         }
-        std::vector<TensorExprKernel::ConstantDescr> constants;
-        std::vector<at::Tensor> constant_tensors;
         return computeOperandValue(
-            op,
-            argInputs,
-            outputShape,
-            outputType.scalar_type(),
-            at::kCPU,
-            constants,
-            constant_tensors);
+            op, argInputs, outputShape, outputType.scalar_type(), at::kCPU);
       });
 
   py::class_<ArgValue>(te, "ArgValue")
