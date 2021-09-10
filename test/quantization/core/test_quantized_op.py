@@ -2455,8 +2455,6 @@ class TestQuantizedOps(TestCase):
                 lstm.qconfig = torch.quantization.get_default_qconfig(qengine)
                 lstm_prepared = torch.quantization.prepare(
                     lstm, prepare_custom_config_dict=custom_module_config)
-                self.assertTrue(hasattr(lstm_prepared[0], 'layers'))
-                self.assertEqual(num_layers, len(lstm_prepared[0].layers))
 
                 # Calibrate
                 y = lstm_prepared(x)
@@ -2477,11 +2475,44 @@ class TestQuantizedOps(TestCase):
                              f"Signal: {signal}, MSE: {mse}"))
 
                 # Trace
-                jit_qmodule = torch.jit.trace(lstm_quantized, qx)
+                lstm_quantized_trace = torch.jit.trace(lstm_quantized, qx)
 
                 # Script
                 # TODO: Fix the scripting in the torch/nn/quantizable/modules/rnn.py
-                # jit_qmodule = torch.jit.script(lstm_quantized)
+                # lstm_quantized_script = torch.jit.script(lstm_quantized)
+
+                # Check if the variable names are there at every step of the conversion
+                for var_name in ['weight'] + ['bias'] if lstm[0].bias else []:
+                    for var_type in ['i', 'h']:
+                        for var_layer in range(lstm[0].num_layers):
+                            attr_name = f"{var_name}_{var_type}h_l{var_layer}"
+                            self.assertTrue(hasattr(lstm_prepared[0], attr_name))
+                            self.assertTrue(hasattr(lstm_quantized[0], attr_name))
+                            self.assertEqual(getattr(lstm[0], attr_name),
+                                             getattr(lstm_prepared[0], attr_name))
+                            # Quantized
+                            fpvalue = getattr(lstm[0], attr_name)
+                            qvalue = getattr(lstm_quantized[0], attr_name)()
+                            if qvalue.is_quantized:
+                                qvalue = qvalue.dequantize()
+                            np.testing.assert_almost_equal(fpvalue.numpy(),
+                                                           qvalue.numpy(),
+                                                           decimal=2)
+
+                            if lstm[0].bidirectional:
+                                attr_name += '_reverse'
+                                self.assertTrue(hasattr(lstm_prepared[0], attr_name))
+                                self.assertTrue(hasattr(lstm_quantized[0], attr_name))
+                                self.assertEqual(getattr(lstm[0], attr_name),
+                                                 getattr(lstm_prepared[0], attr_name))
+                                # Quantized
+                                fpvalue = getattr(lstm[0], attr_name)
+                                qvalue = getattr(lstm_quantized[0], attr_name)()
+                                if qvalue.is_quantized:
+                                    qvalue = qvalue.dequantize()
+                                np.testing.assert_almost_equal(fpvalue.numpy(),
+                                                               qvalue.numpy(),
+                                                               decimal=2)
 
     @override_qengines
     def test_custom_module_multi_head_attention(self):
