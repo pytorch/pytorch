@@ -303,6 +303,31 @@ TORCH_LIBRARY_FRAGMENT(static_runtime, m) {
       "static_runtime::to_copy.dtype(Tensor self, ScalarType dtype, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor");
   m.def(
       "static_runtime::to_copy.other(Tensor self, Tensor other, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor");
+  m.def(torch::schema(
+      "static_runtime::layer_norm(Tensor input, int[] normalized_shape, Tensor? weight=None, Tensor? bias=None, float eps=1e-05, bool cudnn_enable=True) -> (Tensor, Tensor, Tensor)",
+      c10::AliasAnalysisKind::PURE_FUNCTION));
+  m.def("static_runtime::signed_log1p(Tensor input) -> Tensor");
+}
+
+void FuseSignLog1P(std::shared_ptr<torch::jit::Graph>& graph) {
+  std::string pattern = R"IR(
+    graph(%input):
+        %0 : Tensor = aten::sign(%input)
+        %1 : Tensor = aten::abs(%input)
+        %2 : Tensor = aten::log1p(%1)
+        %res : Tensor = aten::mul(%0, %2)
+        return (%res)
+  )IR";
+
+  std::string fused_pattern = R"IR(
+    graph(%input):
+        %res : Tensor = static_runtime::signed_log1p(%input)
+        return (%res)
+    )IR";
+
+  SubgraphRewriter fuse;
+  fuse.RegisterRewritePattern(pattern, fused_pattern);
+  fuse.runOnGraph(graph);
 }
 
 bool HasInplaceOp(std::shared_ptr<Graph>& graph, const AliasDb& alias_db) {
@@ -412,6 +437,7 @@ void ReplaceWithCopy(
 // c10::AliasAnalysisKind::PURE_FUNCTION to make alias analysis work.
 void FuseListUnpack(std::shared_ptr<torch::jit::Graph>& graph) {
   auto nodes = graph->nodes();
+  std::vector<Node*> equally_splits_to_remove;
   for (auto it = nodes.begin(); it != nodes.end(); ++it) {
     Node* node = *it;
     const char* node_qual_string = node->kind().toQualString();
@@ -445,13 +471,57 @@ void FuseListUnpack(std::shared_ptr<torch::jit::Graph>& graph) {
       it_next.destroyCurrent(); // remove list_unpack
 
       node->eraseOutput(0);
+
+      if (strcmp(node_qual_string, "fb::equally_split") == 0 &&
+          node->outputs().size() == 1) {
+        // This captures a case of `y = fb::equally_split(x, 1, _)` where y
+        // becomes just an alias of x.
+        // If this case is found, replace y with x to avoid executing this op.
+        equally_splits_to_remove.push_back(node);
+      }
     }
   }
+
+  for (Node* node : equally_splits_to_remove) {
+    node->output(0)->replaceAllUsesWith(node->input(0));
+    node->destroy();
+  }
+
 #ifndef NDEBUG
   graph->lint();
   AliasDb db2(graph);
   torch::jit::Lint(&db2);
 #endif
+}
+
+void EnableStaticRuntimeLayerNorm(std::shared_ptr<torch::jit::Graph>& graph) {
+  const c10::Symbol static_runtime_layer_norm_symbol =
+      c10::Symbol::fromQualString("static_runtime::layer_norm");
+  auto nodes = graph->nodes();
+  std::vector<std::pair<Node*, Node*>> replacement;
+  for (auto it = nodes.begin(); it != nodes.end(); ++it) {
+    Node* old_node = *it;
+    if (!old_node->matches(torch::schema(
+            "aten::layer_norm(Tensor input, int[] normalized_shape, Tensor? weight=None, Tensor? bias=None, float eps=1e-05, bool cudnn_enable=True) -> Tensor"))) {
+      continue;
+    }
+    TORCH_CHECK(old_node->outputs().size() == 1);
+    auto* new_node = graph->create(
+        static_runtime_layer_norm_symbol,
+        /*layer_norm*/ 1 + /*mean*/ 1 + /*rst=*/1);
+    new_node->insertBefore(old_node);
+    for (auto* input : old_node->inputs()) {
+      new_node->addInput(input);
+    }
+    replacement.emplace_back(old_node, new_node);
+  }
+  for (const auto& p : replacement) {
+    auto* old_node = p.first;
+    auto* new_node = p.second;
+    new_node->output(0)->copyMetadata(old_node->output(0));
+    old_node->output(0)->replaceAllUsesWith(new_node->output(0));
+    old_node->destroy();
+  }
 }
 
 } // namespace jit

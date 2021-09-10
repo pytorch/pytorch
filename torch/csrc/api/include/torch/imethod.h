@@ -4,7 +4,7 @@
 
 namespace torch {
 
-class IMethod {
+class TORCH_API IMethod {
   /*
   IMethod provides a portable interface for torch methods, whether
   they are backed by torchscript or python/deploy.
@@ -27,6 +27,8 @@ class IMethod {
   virtual c10::IValue operator()(
       std::vector<c10::IValue> args,
       const IValueMap& kwargs = IValueMap()) const = 0;
+
+  virtual const std::string& name() const = 0;
 
   // Returns an ordered list of argument names, possible in both
   // script and python methods.  This is a more portable dependency

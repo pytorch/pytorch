@@ -214,6 +214,7 @@ option(USE_LMDB "Use LMDB" OFF)
 option(USE_MAGMA "Use MAGMA" ON)
 option(USE_METAL "Use Metal for Caffe2 iOS build" ON)
 option(USE_PYTORCH_METAL "Use Metal for PyTorch iOS build" OFF)
+option(USE_PYTORCH_METAL_EXPORT "Export Metal models on MacOSX desktop" OFF)
 option(USE_NATIVE_ARCH "Use -march=native" OFF)
 cmake_dependent_option(
     USE_MLCOMPUTE "Use ML Compute for macOS build" ON
@@ -686,6 +687,10 @@ endif()
 
 if(USE_PYTORCH_METAL)
   string(APPEND CMAKE_CXX_FLAGS " -DUSE_PYTORCH_METAL")
+endif()
+
+if(USE_PYTORCH_METAL_EXPORT)
+  string(APPEND CMAKE_CXX_FLAGS " -DUSE_PYTORCH_METAL_EXPORT")
 endif()
 
 if(USE_SOURCE_DEBUG_ON_MOBILE)

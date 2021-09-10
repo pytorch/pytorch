@@ -800,7 +800,8 @@ def destroy_process_group(group=None):
 
 def get_rank(group=None):
     """
-    Returns the rank of current process group
+    Returns the rank of the current process in the provided ``group`` or the
+    default group if none was provided.
 
     Rank is a unique identifier assigned to each process within a distributed
     process group. They are always consecutive integers ranging from 0 to
@@ -1342,7 +1343,7 @@ def all_reduce_coalesced(tensors, op=ReduceOp.SUM, group=None, async_op=False):
         work = group.allreduce_coalesced(tensors, opts)
 
     if async_op:
-        return work
+        return work.get_future()
     else:
         work.wait()
 
@@ -2144,7 +2145,7 @@ def all_gather_coalesced(
         work = group.allgather_coalesced(output_tensor_lists, input_tensor_list)
 
     if async_op:
-        return work
+        return work.get_future()
     else:
         work.wait()
 

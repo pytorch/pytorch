@@ -361,6 +361,7 @@ def _insert_copy_of_subgraph_a_after_input_node_c(
     if isinstance(input_node_c, Node):
         graph_c = input_node_c.graph
     else:
+        assert isinstance(input_node_c, list)
         graph_c = input_node_c[0].graph
 
     # create a sequential list of the subgraphs' nodes from start to end,
@@ -450,6 +451,7 @@ def _insert_copy_of_node_a_after_input_node_c(
     if isinstance(input_node_c, Node):
         graph_c = input_node_c.graph
     else:
+        assert isinstance(input_node_c, list)
         graph_c = input_node_c[0].graph
 
     # generically handle all args and kwargs except for the input

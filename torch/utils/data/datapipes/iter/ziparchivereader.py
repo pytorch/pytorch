@@ -13,9 +13,10 @@ class ZipArchiveReaderIterDataPipe(IterDataPipe[Tuple[str, BufferedIOBase]]):
 
     Iterable data pipe to extract zip binary streams from input iterable which contains tuples of
     pathname and zip binary stream, yields pathname and extracted binary stream in a tuple.
-    args:
+
+    Args:
         datapipe: Iterable datapipe that provides pathname and zip binary stream in tuples
-        length: a nominal length of the datapipe
+        length: Nominal length of the datapipe
 
     Note:
         The opened file handles will be closed automatically if the default DecoderDataPipe
@@ -24,12 +25,11 @@ class ZipArchiveReaderIterDataPipe(IterDataPipe[Tuple[str, BufferedIOBase]]):
     """
     def __init__(
             self,
-            datapipe : Iterable[Tuple[str, BufferedIOBase]],
-            length : int = -1):
+            datapipe: Iterable[Tuple[str, BufferedIOBase]],
+            length: int = -1):
         super().__init__()
-        self.datapipe : Iterable[Tuple[str, BufferedIOBase]] = datapipe
-        self.length : int = length
-
+        self.datapipe: Iterable[Tuple[str, BufferedIOBase]] = datapipe
+        self.length: int = length
 
     def __iter__(self) -> Iterator[Tuple[str, BufferedIOBase]]:
         if not isinstance(self.datapipe, Iterable):
@@ -59,7 +59,6 @@ class ZipArchiveReaderIterDataPipe(IterDataPipe[Tuple[str, BufferedIOBase]]):
                 warnings.warn(
                     "Unable to extract files from corrupted zipfile stream {} due to: {}, abort!".format(pathname, e))
                 raise e
-
 
     def __len__(self):
         if self.length == -1:
