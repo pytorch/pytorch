@@ -69,46 +69,36 @@ void validateBlock(
   throw std::runtime_error(                        \
       std::string("ONNX export failed: ") + name + \
       "\n\nGraph we tried to export:\n" + b->owningGraph()->toString());
-    if (node->kind() == prim::PythonOp) {
-      auto py_node = static_cast<PythonOp*>(node);
-      FAIL_EXPORT(
-          "Couldn't export Python operator " + py_node->name() +
-          "\n\nDefined at:\n" + getNodeStackTraceString(node))
-    } else {
-      // Special error messages for certain types of operators
-      if (node->kind() == aten::expand) {
-        if (operator_export_type ==
-            onnx_torch::OperatorExportTypes::ONNX_ATEN_FALLBACK) {
-          WithInsertPoint guard(node);
-          auto* new_node =
-              b->owningGraph()->insertNode(b->owningGraph()->create(
-                  Symbol(::c10::onnx::ATen),
-                  node->inputs(),
-                  node->outputs().size()));
-          for (size_t i = 0; i < node->outputs().size(); ++i) {
-            node->output(i)->replaceAllUsesWith(new_node->output(i));
-          }
-          new_node->s_(Symbol::fromQualString("attr::operator"), "expand");
+    // Special error messages for certain types of operators
+    if (node->kind() == aten::expand) {
+      if (operator_export_type ==
+          onnx_torch::OperatorExportTypes::ONNX_ATEN_FALLBACK) {
+        WithInsertPoint guard(node);
+        auto* new_node = b->owningGraph()->insertNode(b->owningGraph()->create(
+            Symbol(::c10::onnx::ATen), node->inputs(), node->outputs().size()));
+        for (size_t i = 0; i < node->outputs().size(); ++i) {
+          node->output(i)->replaceAllUsesWith(new_node->output(i));
         }
+        new_node->s_(Symbol::fromQualString("attr::operator"), "expand");
       }
-      if (node->kind() == prim::PackPadded || node->kind() == prim::PadPacked) {
-        if (operator_export_type !=
-            onnx_torch::OperatorExportTypes::ONNX_FALLTHROUGH) {
-          FAIL_EXPORT(
-              "Cannot export individual pack_padded_sequence or pad_packed_sequence; these operations must occur in pairs.\n\nUsage of this operation occurred at:\n" +
-              getNodeStackTraceString(node));
-        }
-      }
-      bool is_aten_enabled = operator_export_type ==
-              onnx_torch::OperatorExportTypes::ONNX_ATEN_FALLBACK ||
-          operator_export_type == onnx_torch::OperatorExportTypes::ONNX_ATEN ||
-          operator_export_type ==
-              onnx_torch::OperatorExportTypes::ONNX_FALLTHROUGH;
-      if (node->kind().is_aten() && !is_aten_enabled && !node->mustBeNone()) {
+    }
+    if (node->kind() == prim::PackPadded || node->kind() == prim::PadPacked) {
+      if (operator_export_type !=
+          onnx_torch::OperatorExportTypes::ONNX_FALLTHROUGH) {
         FAIL_EXPORT(
-            "Couldn't export operator " + node->kind().toDisplayString() +
-            "\n\nDefined at:\n" + getNodeStackTraceString(node));
+            "Cannot export individual pack_padded_sequence or pad_packed_sequence; these operations must occur in pairs.\n\nUsage of this operation occurred at:\n" +
+            getNodeStackTraceString(node));
       }
+    }
+    bool is_aten_enabled = operator_export_type ==
+            onnx_torch::OperatorExportTypes::ONNX_ATEN_FALLBACK ||
+        operator_export_type == onnx_torch::OperatorExportTypes::ONNX_ATEN ||
+        operator_export_type ==
+            onnx_torch::OperatorExportTypes::ONNX_FALLTHROUGH;
+    if (node->kind().is_aten() && !is_aten_enabled && !node->mustBeNone()) {
+      FAIL_EXPORT(
+          "Couldn't export operator " + node->kind().toDisplayString() +
+          "\n\nDefined at:\n" + getNodeStackTraceString(node));
     }
 #undef FAIL_EXPORT
   }
@@ -530,9 +520,7 @@ void EncoderBase::EncodeBlock(
       p_n->set_domain(domain);
     }
     if (operator_export_type_ == onnx_torch::OperatorExportTypes::ONNX) {
-      AT_ASSERT(
-          !node->kind().is_aten() && !node->kind().is_prim() &&
-          !node->kind().is_attr());
+      AT_ASSERT(!node->kind().is_aten() && !node->kind().is_attr());
     }
     p_n->set_op_type(node->kind().toUnqualString());
     if (add_node_names) {

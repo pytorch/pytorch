@@ -409,10 +409,6 @@ All autograd ``Function``\ s appear in the TorchScript graph as ``prim::PythonOp
 In order to differentiate between different ``Function`` subclasses, the
 symbolic function should use the ``name`` kwarg which gets set to the name of the class.
 
-:func:`register_custom_op_symbolic` does not allow registration for ops in
-the ``prim`` namespace, so for this use case, there's a back door: register the
-symbolic for ``"::prim_PythonOp"``.
-
 Custom symbolic functions should add type and shape information by calling ``setType(...)``
 on Value objects before returning them (implemented in C++ by
 ``torch::jit::Value::setType``). This is not required, but it can help the exporter's
@@ -434,7 +430,7 @@ The example below shows how you can access ``requires_grad`` via the ``Node`` ob
             ctx.save_for_backward(input)
             return input.clamp(min=0)
 
-    def symbolic_pythonop(g: torch._C.Graph, n: torch._C.Node, *args, **kwargs):
+    def symbolic_python_op(g: torch._C.Graph, n: torch._C.Node, *args, **kwargs):
         print("original node: ", n)
         for i, out in enumerate(n.outputs()):
             print("original output {}: {}, requires grad: {}".format(i, out, out.requiresGrad()))
@@ -446,7 +442,7 @@ The example below shows how you can access ``requires_grad`` via the ``Node`` ob
         name = kwargs["name"]
         ret = None
         if name == "MyClip":
-            ret = g.op("Clip", args[0], min_f=args[1])
+            ret = g.op("Clip", args[0], args[1])
         elif name == "MyRelu":
             ret = g.op("Relu", args[0])
         else:
@@ -457,7 +453,7 @@ The example below shows how you can access ``requires_grad`` via the ``Node`` ob
         return ret
 
     from torch.onnx import register_custom_op_symbolic
-    register_custom_op_symbolic("::prim_PythonOp", symbolic_pythonop, 1)
+    register_custom_op_symbolic("prim::PythonOp", symbolic_python_op, 1)
 
 Custom operators
 ^^^^^^^^^^^^^^^^

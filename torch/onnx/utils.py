@@ -1145,14 +1145,15 @@ def _run_symbolic_function(g, block, n, inputs, env, operator_export_type=Operat
                         torch._C._jit_pass_onnx_node_shape_type_inference(new_node, _params_dict, opset_version)
                     return new_op_outputs
             else:
-                symbolic_name = "prim_" + op_name
-                domain = ""
-                symbolic_fn = _find_symbolic_in_registry(domain, symbolic_name, opset_version,
+                symbolic_fn = _find_symbolic_in_registry("prim", op_name, opset_version,
                                                          operator_export_type)
                 if symbolic_fn is None:
                     return None
                 attrs = {k: n[k] for k in n.attributeNames()}
-                if op_name == 'PythonOp':
+                # TODO: https://msdata.visualstudio.com/Vienna/_workitems/edit/1408006
+                # PythonOp symbolic need access thde node to resolve the name conflict,
+                # this is inconsistent with regular op symbolic.
+                if op_name == "PythonOp":
                     inputs = (n, *inputs)
                 return symbolic_fn(g, *inputs, **attrs)
 
@@ -1253,8 +1254,9 @@ def get_ns_op_name_from_custom_op(symbolic_name):
                            alphanumerical characters"
                            .format(symbolic_name))
     ns, op_name = symbolic_name.split("::")
-    unaccepted_domain_names = ["onnx", "aten", "prim"]
-    if ns in unaccepted_domain_names:
+    # TODO: Allow users to register custom symbolic in aten domain.
+    # https://msdata.visualstudio.com/Vienna/_workitems/edit/1407799
+    if ns in ("onnx", "aten"):
         raise RuntimeError("Failed to register operator {}. The domain {} is already a used domain."
                            .format(symbolic_name, ns))
     return ns, op_name
