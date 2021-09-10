@@ -377,11 +377,9 @@ inline static void _apply_svd_lib_gesvd(const Tensor& self, Tensor& U, Tensor& S
   auto self_data = self.data_ptr<scalar_t>();
   auto U_data = U.data_ptr<scalar_t>();
   auto S_data = S.data_ptr<value_t>();
-  auto VT_data = VT.data_ptr<scalar_t>();
   auto self_stride = matrixStride(self);
   auto U_stride = !compute_uv ? 1 : matrixStride(U);
   auto S_stride = S.size(-1);
-  auto VT_stride = !compute_uv ? 1 : matrixStride(VT);
 
   int _batchsize = cuda_int_cast(batchCount(self), "batch size");
   int m = cuda_int_cast(self.size(-2), "m");
@@ -409,6 +407,12 @@ inline static void _apply_svd_lib_gesvd(const Tensor& self, Tensor& U, Tensor& S
     VT_view = VT.view({-1, n, n});
   }
 
+  // This function `gesvd` mainly serves as a fallback of `gesvdj` when the latter failed to converge for some large matrices.
+  // `gesvdj` returns matrix V in original form of V, while `gesvd` returns matrix V as Hermitian conjugate V^H.
+  // With that, we can't directly write `gesvd` output into the memory of tensor VT, which has preset strides and conjugate flag
+  // of V, not V^H.
+  // One solution is to use an intermediate buffer vt_workspace to get V^H output from `gesvd`, then copy it to the result
+  // tensor VT. The pytorch tensor copy implementation will correctly handle the strides and conjugate flag.
   // Note that gesvd returns V^H in column-major.
   // Without a transpose here, it will be V.conj() in the actual memory space.
   at::Tensor vt_workspace = at::empty({n, n}, VT.options()).conj();
