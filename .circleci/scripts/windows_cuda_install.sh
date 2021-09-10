@@ -30,27 +30,37 @@ case ${CUDA_VERSION} in
         ;;
 esac
 
-cuda_installer_link="https://ossci-windows.s3.amazonaws.com/${cuda_installer_name}.exe"
-
-curl --retry 3 -kLO $cuda_installer_link
-7z x ${cuda_installer_name}.exe -o${cuda_installer_name}
-cd ${cuda_installer_name}
-mkdir cuda_install_logs
-
-set +e
-
-./setup.exe -s ${cuda_install_packages} -loglevel:6 -log:"$(pwd -W)/cuda_install_logs"
-
-set -e
-
-if [[ "${VC_YEAR}" == "2017" ]]; then
-    cp -r ${msbuild_project_dir}/* "C:/Program Files (x86)/Microsoft Visual Studio/2017/${VC_PRODUCT}/Common7/IDE/VC/VCTargets/BuildCustomizations/"
+if [[ -f "/c/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v${CUDA_VERSION}/bin/nvcc.exe" ]]; then
+    echo "Existing CUDA Toolkit installation found, skipping install..."
 else
-    cp -r ${msbuild_project_dir}/* "C:/Program Files (x86)/Microsoft Visual Studio/2019/${VC_PRODUCT}/MSBuild/Microsoft/VC/v160/BuildCustomizations/"
+    cuda_installer_link="https://ossci-windows.s3.amazonaws.com/${cuda_installer_name}.exe"
+
+    curl --retry 3 -kLO $cuda_installer_link
+    7z x ${cuda_installer_name}.exe -o${cuda_installer_name}
+    cd ${cuda_installer_name}
+    mkdir cuda_install_logs
+
+    (
+        # subshell for +e
+        set +e
+        ./setup.exe -s ${cuda_install_packages} -loglevel:6 -log:"$(pwd -W)/cuda_install_logs"
+    )
+
+    if [[ ! -f "/c/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v${CUDA_VERSION}/bin/nvcc.exe" ]]; then
+        echo "CUDA installation failed"
+        mkdir -p /c/w/build-results
+        7z a "c:\\w\\build-results\\cuda_install_logs.7z" cuda_install_logs
+        exit 1
+    fi
+
+    cd ..
+    rm -rf ./${cuda_installer_name}
+    rm -f ./${cuda_installer_name}.exe
 fi
 
-if ! ls "/c/Program Files/NVIDIA Corporation/NvToolsExt/bin/x64/nvToolsExt64_1.dll"
-then
+if [[ -f "/c/Program Files/NVIDIA Corporation/NvToolsExt/bin/x64/nvToolsExt64_1.dll" ]]; then
+    echo "Existing nvtools installation found, skipping install..."
+else
     curl --retry 3 -kLO https://ossci-windows.s3.amazonaws.com/NvToolsExt.7z
     7z x NvToolsExt.7z -oNvToolsExt
     mkdir -p "C:/Program Files/NVIDIA Corporation/NvToolsExt"
@@ -58,14 +68,5 @@ then
     export NVTOOLSEXT_PATH="C:\\Program Files\\NVIDIA Corporation\\NvToolsExt\\"
 fi
 
-if ! ls "/c/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v${CUDA_VERSION}/bin/nvcc.exe"
-then
-    echo "CUDA installation failed"
-    mkdir -p /c/w/build-results
-    7z a "c:\\w\\build-results\\cuda_install_logs.7z" cuda_install_logs
-    exit 1
-fi
-
-cd ..
-rm -rf ./${cuda_installer_name}
-rm -f ./${cuda_installer_name}.exe
+# Always copy vc integration to set env variables
+cp -r ${msbuild_project_dir}/* "C:/Program Files (x86)/Microsoft Visual Studio/2019/${VC_PRODUCT}/MSBuild/Microsoft/VC/v160/BuildCustomizations/"
