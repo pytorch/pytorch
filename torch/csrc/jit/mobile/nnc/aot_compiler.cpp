@@ -1,6 +1,6 @@
 // (c) Facebook, Inc. and its affiliates. Confidential and proprietary.
 
-#include <aot_compiler.h>
+#include "aot_compiler.h"
 
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>

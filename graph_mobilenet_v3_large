@@ -1,0 +1,277 @@
+graph(%self.1 : __torch__.torchvision.models.mobilenetv3.___torch_mangle_506.MobileNetV3,
+      %x.1 : Tensor):
+  %2 : int[] = prim::Constant[value=[1, 1]]()
+  %3 : int = prim::Constant[value=-1]()
+  %4 : int = prim::Constant[value=1]() # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torchvision/models/mobilenetv3.py:178:29
+  %5 : str = prim::Constant[value="AssertionError: "]() # :0:0
+  %6 : int = prim::Constant[value=2]() # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/modules/conv.py:442:45
+  %7 : float = prim::Constant[value=0.20000000000000001]() # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/modules/dropout.py:58:32
+  %self.features.2.use_res_connect : bool = prim::Constant[value=0]()
+  %9 : __torch__.torch.classes.xnnpack.LinearOpContext = prim::Constant[value=object(0x563755a31880)]()
+  %10 : __torch__.torch.classes.xnnpack.LinearOpContext = prim::Constant[value=object(0x563756ea3310)]()
+  %self.prepack_folding_forward._jit_pass_packed_weight_61 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x5637577bfad0)]()
+  %self.prepack_folding_forward._jit_pass_packed_weight_60 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x563756d26190)]()
+  %self.prepack_folding_forward._jit_pass_packed_weight_59 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x563756d6d490)]()
+  %self.prepack_folding_forward._jit_pass_packed_weight_58 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x5637566af140)]()
+  %self.prepack_folding_forward._jit_pass_packed_weight_57 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x563756ef7220)]()
+  %self.prepack_folding_forward._jit_pass_packed_weight_56 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x563755505dd0)]()
+  %self.prepack_folding_forward._jit_pass_packed_weight_55 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x56375689bdd0)]()
+  %self.prepack_folding_forward._jit_pass_packed_weight_54 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x563756645790)]()
+  %self.prepack_folding_forward._jit_pass_packed_weight_53 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x563756daab90)]()
+  %self.prepack_folding_forward._jit_pass_packed_weight_52 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x563756dc64d0)]()
+  %self.prepack_folding_forward._jit_pass_packed_weight_51 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x563757797670)]()
+  %self.prepack_folding_forward._jit_pass_packed_weight_50 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x563756abc580)]()
+  %self.prepack_folding_forward._jit_pass_packed_weight_49 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x5637576d8bc0)]()
+  %self.prepack_folding_forward._jit_pass_packed_weight_48 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x563756deba70)]()
+  %self.prepack_folding_forward._jit_pass_packed_weight_47 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x5637576c6730)]()
+  %self.prepack_folding_forward._jit_pass_packed_weight_46 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x563756d02640)]()
+  %self.prepack_folding_forward._jit_pass_packed_weight_45 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x5637578033d0)]()
+  %self.prepack_folding_forward._jit_pass_packed_weight_44 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x56375762cb80)]()
+  %self.prepack_folding_forward._jit_pass_packed_weight_43 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x563757681ee0)]()
+  %self.prepack_folding_forward._jit_pass_packed_weight_42 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x563757644b70)]()
+  %self.prepack_folding_forward._jit_pass_packed_weight_41 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x563756e2a800)]()
+  %self.prepack_folding_forward._jit_pass_packed_weight_40 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x563756dc3290)]()
+  %self.prepack_folding_forward._jit_pass_packed_weight_39 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x5637565feb80)]()
+  %self.prepack_folding_forward._jit_pass_packed_weight_38 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x563756cd9d00)]()
+  %self.prepack_folding_forward._jit_pass_packed_weight_37 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x56375770cc50)]()
+  %self.prepack_folding_forward._jit_pass_packed_weight_36 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x5637567ac4f0)]()
+  %self.prepack_folding_forward._jit_pass_packed_weight_35 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x563756ad6e80)]()
+  %self.prepack_folding_forward._jit_pass_packed_weight_34 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x56375680ecd0)]()
+  %self.prepack_folding_forward._jit_pass_packed_weight_33 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x563756da9390)]()
+  %self.prepack_folding_forward._jit_pass_packed_weight_32 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x563756ab21c0)]()
+  %self.prepack_folding_forward._jit_pass_packed_weight_31 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x56375744ca10)]()
+  %self.prepack_folding_forward._jit_pass_packed_weight_30 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x56375772af20)]()
+  %self.prepack_folding_forward._jit_pass_packed_weight_29 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x5637568e37c0)]()
+  %self.prepack_folding_forward._jit_pass_packed_weight_28 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x5637568fa790)]()
+  %self.prepack_folding_forward._jit_pass_packed_weight_27 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x563756ace8b0)]()
+  %self.prepack_folding_forward._jit_pass_packed_weight_26 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x563756d34a80)]()
+  %self.prepack_folding_forward._jit_pass_packed_weight_25 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x56375677eb10)]()
+  %self.prepack_folding_forward._jit_pass_packed_weight_24 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x563756749ce0)]()
+  %self.prepack_folding_forward._jit_pass_packed_weight_23 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x563756518730)]()
+  %self.prepack_folding_forward._jit_pass_packed_weight_22 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x5637566073f0)]()
+  %self.prepack_folding_forward._jit_pass_packed_weight_21 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x5637565c85f0)]()
+  %self.prepack_folding_forward._jit_pass_packed_weight_20 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x5637567cc210)]()
+  %self.prepack_folding_forward._jit_pass_packed_weight_19 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x563756c1e3a0)]()
+  %self.prepack_folding_forward._jit_pass_packed_weight_18 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x5637566f10d0)]()
+  %self.prepack_folding_forward._jit_pass_packed_weight_17 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x5637566c7700)]()
+  %self.prepack_folding_forward._jit_pass_packed_weight_16 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x5637566ed6c0)]()
+  %self.prepack_folding_forward._jit_pass_packed_weight_15 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x563757702770)]()
+  %self.prepack_folding_forward._jit_pass_packed_weight_14 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x56375674cef0)]()
+  %self.prepack_folding_forward._jit_pass_packed_weight_13 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x563756ac8d60)]()
+  %self.prepack_folding_forward._jit_pass_packed_weight_12 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x563756685350)]()
+  %self.prepack_folding_forward._jit_pass_packed_weight_11 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x563756617440)]()
+  %self.prepack_folding_forward._jit_pass_packed_weight_10 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x563756600180)]()
+  %self.prepack_folding_forward._jit_pass_packed_weight_9 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x563756dcfd90)]()
+  %self.prepack_folding_forward._jit_pass_packed_weight_8 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x563756725380)]()
+  %self.prepack_folding_forward._jit_pass_packed_weight_7 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x5637567a2500)]()
+  %self.prepack_folding_forward._jit_pass_packed_weight_6 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x56375774ff90)]()
+  %self.prepack_folding_forward._jit_pass_packed_weight_5 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x56375779ebd0)]()
+  %self.prepack_folding_forward._jit_pass_packed_weight_4 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x563756716ff0)]()
+  %self.prepack_folding_forward._jit_pass_packed_weight_3 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x5637568c6d50)]()
+  %self.prepack_folding_forward._jit_pass_packed_weight_2 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x563756bfc760)]()
+  %self.prepack_folding_forward._jit_pass_packed_weight_1 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x5637573ee810)]()
+  %self.prepack_folding_forward._jit_pass_packed_weight_0 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x56375778ba90)]()
+  %73 : Tensor = prepacked::conv2d_clamp_run(%x.1, %self.prepack_folding_forward._jit_pass_packed_weight_0) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/modules/conv.py:442:15
+  %input0.7 : Tensor = aten::hardswish_(%73) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/functional.py:1940:15
+  %75 : Tensor = prepacked::conv2d_clamp_run(%input0.7, %self.prepack_folding_forward._jit_pass_packed_weight_1) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/functional.py:1296:17
+  %76 : Tensor = prepacked::conv2d_clamp_run(%75, %self.prepack_folding_forward._jit_pass_packed_weight_2) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/modules/conv.py:442:15
+  %result0.2 : Tensor = aten::add_(%76, %input0.7, %4) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torchvision/models/mobilenetv3.py:97:12
+  %78 : Tensor = prepacked::conv2d_clamp_run(%result0.2, %self.prepack_folding_forward._jit_pass_packed_weight_3) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/functional.py:1296:17
+  %79 : Tensor = prepacked::conv2d_clamp_run(%78, %self.prepack_folding_forward._jit_pass_packed_weight_4) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/functional.py:1296:17
+  %80 : Tensor = prepacked::conv2d_clamp_run(%79, %self.prepack_folding_forward._jit_pass_packed_weight_5) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/modules/conv.py:442:15
+  %81 : Tensor = prepacked::conv2d_clamp_run(%80, %self.prepack_folding_forward._jit_pass_packed_weight_6) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/functional.py:1296:17
+  %82 : Tensor = prepacked::conv2d_clamp_run(%81, %self.prepack_folding_forward._jit_pass_packed_weight_7) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/functional.py:1296:17
+  %83 : Tensor = prepacked::conv2d_clamp_run(%82, %self.prepack_folding_forward._jit_pass_packed_weight_8) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/modules/conv.py:442:15
+  %result0.6 : Tensor = aten::add_(%83, %80, %4) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torchvision/models/mobilenetv3.py:97:12
+  %85 : Tensor = prepacked::conv2d_clamp_run(%result0.6, %self.prepack_folding_forward._jit_pass_packed_weight_9) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/functional.py:1296:17
+  %86 : Tensor = prepacked::conv2d_clamp_run(%85, %self.prepack_folding_forward._jit_pass_packed_weight_10) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/functional.py:1296:17
+  %87 : int[] = aten::size(%86) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/functional.py:1129:51
+  %88 : int = aten::len(%87) # <string>:5:9
+  %89 : bool = aten::gt(%88, %6) # <string>:5:9
+   = prim::If(%89) # <string>:5:2
+    block0():
+      -> ()
+    block1():
+       = prim::RaiseException(%5) # <string>:5:2
+      -> ()
+  %scale.2 : Tensor = aten::adaptive_avg_pool2d(%86, %2) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/functional.py:1130:11
+  %91 : Tensor = prepacked::conv2d_clamp_run(%scale.2, %self.prepack_folding_forward._jit_pass_packed_weight_11) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/functional.py:1296:17
+  %92 : Tensor = prepacked::conv2d_clamp_run(%91, %self.prepack_folding_forward._jit_pass_packed_weight_12) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/modules/conv.py:442:15
+  %93 : Tensor = aten::hardsigmoid_(%92) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/functional.py:1827:15
+  %input2.6 : Tensor = aten::mul(%93, %86) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torchvision/models/mobilenetv3.py:39:15
+  %95 : Tensor = prepacked::conv2d_clamp_run(%input2.6, %self.prepack_folding_forward._jit_pass_packed_weight_13) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/modules/conv.py:442:15
+  %96 : Tensor = prepacked::conv2d_clamp_run(%95, %self.prepack_folding_forward._jit_pass_packed_weight_14) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/functional.py:1296:17
+  %97 : Tensor = prepacked::conv2d_clamp_run(%96, %self.prepack_folding_forward._jit_pass_packed_weight_15) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/functional.py:1296:17
+  %98 : int[] = aten::size(%97) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/functional.py:1129:51
+  %99 : int = aten::len(%98) # <string>:5:9
+  %100 : bool = aten::gt(%99, %6) # <string>:5:9
+   = prim::If(%100) # <string>:5:2
+    block0():
+      -> ()
+    block1():
+       = prim::RaiseException(%5) # <string>:5:2
+      -> ()
+  %scale.4 : Tensor = aten::adaptive_avg_pool2d(%97, %2) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/functional.py:1130:11
+  %102 : Tensor = prepacked::conv2d_clamp_run(%scale.4, %self.prepack_folding_forward._jit_pass_packed_weight_16) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/functional.py:1296:17
+  %103 : Tensor = prepacked::conv2d_clamp_run(%102, %self.prepack_folding_forward._jit_pass_packed_weight_17) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/modules/conv.py:442:15
+  %104 : Tensor = aten::hardsigmoid_(%103) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/functional.py:1827:15
+  %input2.8 : Tensor = aten::mul(%104, %97) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torchvision/models/mobilenetv3.py:39:15
+  %106 : Tensor = prepacked::conv2d_clamp_run(%input2.8, %self.prepack_folding_forward._jit_pass_packed_weight_18) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/modules/conv.py:442:15
+  %result0.10 : Tensor = aten::add_(%106, %95, %4) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torchvision/models/mobilenetv3.py:97:12
+  %108 : Tensor = prepacked::conv2d_clamp_run(%result0.10, %self.prepack_folding_forward._jit_pass_packed_weight_19) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/functional.py:1296:17
+  %109 : Tensor = prepacked::conv2d_clamp_run(%108, %self.prepack_folding_forward._jit_pass_packed_weight_20) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/functional.py:1296:17
+  %110 : int[] = aten::size(%109) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/functional.py:1129:51
+  %111 : int = aten::len(%110) # <string>:5:9
+  %112 : bool = aten::gt(%111, %6) # <string>:5:9
+   = prim::If(%112) # <string>:5:2
+    block0():
+      -> ()
+    block1():
+       = prim::RaiseException(%5) # <string>:5:2
+      -> ()
+  %scale.6 : Tensor = aten::adaptive_avg_pool2d(%109, %2) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/functional.py:1130:11
+  %114 : Tensor = prepacked::conv2d_clamp_run(%scale.6, %self.prepack_folding_forward._jit_pass_packed_weight_21) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/functional.py:1296:17
+  %115 : Tensor = prepacked::conv2d_clamp_run(%114, %self.prepack_folding_forward._jit_pass_packed_weight_22) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/modules/conv.py:442:15
+  %116 : Tensor = aten::hardsigmoid_(%115) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/functional.py:1827:15
+  %input2.10 : Tensor = aten::mul(%116, %109) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torchvision/models/mobilenetv3.py:39:15
+  %118 : Tensor = prepacked::conv2d_clamp_run(%input2.10, %self.prepack_folding_forward._jit_pass_packed_weight_23) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/modules/conv.py:442:15
+  %result0.12 : Tensor = aten::add_(%118, %result0.10, %4) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torchvision/models/mobilenetv3.py:97:12
+  %120 : Tensor = prepacked::conv2d_clamp_run(%result0.12, %self.prepack_folding_forward._jit_pass_packed_weight_24) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/modules/conv.py:442:15
+  %input0.45 : Tensor = aten::hardswish_(%120) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/functional.py:1940:15
+  %122 : Tensor = prepacked::conv2d_clamp_run(%input0.45, %self.prepack_folding_forward._jit_pass_packed_weight_25) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/modules/conv.py:442:15
+  %input1.16 : Tensor = aten::hardswish_(%122) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/functional.py:1940:15
+  %124 : Tensor = prepacked::conv2d_clamp_run(%input1.16, %self.prepack_folding_forward._jit_pass_packed_weight_26) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/modules/conv.py:442:15
+  %125 : Tensor = prepacked::conv2d_clamp_run(%124, %self.prepack_folding_forward._jit_pass_packed_weight_27) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/modules/conv.py:442:15
+  %input0.51 : Tensor = aten::hardswish_(%125) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/functional.py:1940:15
+  %127 : Tensor = prepacked::conv2d_clamp_run(%input0.51, %self.prepack_folding_forward._jit_pass_packed_weight_28) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/modules/conv.py:442:15
+  %input1.18 : Tensor = aten::hardswish_(%127) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/functional.py:1940:15
+  %129 : Tensor = prepacked::conv2d_clamp_run(%input1.18, %self.prepack_folding_forward._jit_pass_packed_weight_29) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/modules/conv.py:442:15
+  %result0.16 : Tensor = aten::add_(%129, %124, %4) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torchvision/models/mobilenetv3.py:97:12
+  %131 : Tensor = prepacked::conv2d_clamp_run(%result0.16, %self.prepack_folding_forward._jit_pass_packed_weight_30) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/modules/conv.py:442:15
+  %input0.57 : Tensor = aten::hardswish_(%131) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/functional.py:1940:15
+  %133 : Tensor = prepacked::conv2d_clamp_run(%input0.57, %self.prepack_folding_forward._jit_pass_packed_weight_31) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/modules/conv.py:442:15
+  %input1.20 : Tensor = aten::hardswish_(%133) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/functional.py:1940:15
+  %135 : Tensor = prepacked::conv2d_clamp_run(%input1.20, %self.prepack_folding_forward._jit_pass_packed_weight_32) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/modules/conv.py:442:15
+  %result0.18 : Tensor = aten::add_(%135, %result0.16, %4) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torchvision/models/mobilenetv3.py:97:12
+  %137 : Tensor = prepacked::conv2d_clamp_run(%result0.18, %self.prepack_folding_forward._jit_pass_packed_weight_33) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/modules/conv.py:442:15
+  %input0.63 : Tensor = aten::hardswish_(%137) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/functional.py:1940:15
+  %139 : Tensor = prepacked::conv2d_clamp_run(%input0.63, %self.prepack_folding_forward._jit_pass_packed_weight_34) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/modules/conv.py:442:15
+  %input1.22 : Tensor = aten::hardswish_(%139) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/functional.py:1940:15
+  %141 : Tensor = prepacked::conv2d_clamp_run(%input1.22, %self.prepack_folding_forward._jit_pass_packed_weight_35) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/modules/conv.py:442:15
+  %result0.20 : Tensor = aten::add_(%141, %result0.18, %4) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torchvision/models/mobilenetv3.py:97:12
+  %143 : Tensor = prepacked::conv2d_clamp_run(%result0.20, %self.prepack_folding_forward._jit_pass_packed_weight_36) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/modules/conv.py:442:15
+  %input0.69 : Tensor = aten::hardswish_(%143) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/functional.py:1940:15
+  %145 : Tensor = prepacked::conv2d_clamp_run(%input0.69, %self.prepack_folding_forward._jit_pass_packed_weight_37) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/modules/conv.py:442:15
+  %input1.24 : Tensor = aten::hardswish_(%145) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/functional.py:1940:15
+  %147 : int[] = aten::size(%input1.24) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/functional.py:1129:51
+  %148 : int = aten::len(%147) # <string>:5:9
+  %149 : bool = aten::gt(%148, %6) # <string>:5:9
+   = prim::If(%149) # <string>:5:2
+    block0():
+      -> ()
+    block1():
+       = prim::RaiseException(%5) # <string>:5:2
+      -> ()
+  %scale.8 : Tensor = aten::adaptive_avg_pool2d(%input1.24, %2) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/functional.py:1130:11
+  %151 : Tensor = prepacked::conv2d_clamp_run(%scale.8, %self.prepack_folding_forward._jit_pass_packed_weight_38) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/functional.py:1296:17
+  %152 : Tensor = prepacked::conv2d_clamp_run(%151, %self.prepack_folding_forward._jit_pass_packed_weight_39) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/modules/conv.py:442:15
+  %153 : Tensor = aten::hardsigmoid_(%152) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/functional.py:1827:15
+  %input2.12 : Tensor = aten::mul(%153, %input1.24) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torchvision/models/mobilenetv3.py:39:15
+  %155 : Tensor = prepacked::conv2d_clamp_run(%input2.12, %self.prepack_folding_forward._jit_pass_packed_weight_40) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/modules/conv.py:442:15
+  %156 : Tensor = prepacked::conv2d_clamp_run(%155, %self.prepack_folding_forward._jit_pass_packed_weight_41) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/modules/conv.py:442:15
+  %input0.75 : Tensor = aten::hardswish_(%156) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/functional.py:1940:15
+  %158 : Tensor = prepacked::conv2d_clamp_run(%input0.75, %self.prepack_folding_forward._jit_pass_packed_weight_42) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/modules/conv.py:442:15
+  %input1.26 : Tensor = aten::hardswish_(%158) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/functional.py:1940:15
+  %160 : int[] = aten::size(%input1.26) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/functional.py:1129:51
+  %161 : int = aten::len(%160) # <string>:5:9
+  %162 : bool = aten::gt(%161, %6) # <string>:5:9
+   = prim::If(%162) # <string>:5:2
+    block0():
+      -> ()
+    block1():
+       = prim::RaiseException(%5) # <string>:5:2
+      -> ()
+  %scale.10 : Tensor = aten::adaptive_avg_pool2d(%input1.26, %2) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/functional.py:1130:11
+  %164 : Tensor = prepacked::conv2d_clamp_run(%scale.10, %self.prepack_folding_forward._jit_pass_packed_weight_43) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/functional.py:1296:17
+  %165 : Tensor = prepacked::conv2d_clamp_run(%164, %self.prepack_folding_forward._jit_pass_packed_weight_44) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/modules/conv.py:442:15
+  %166 : Tensor = aten::hardsigmoid_(%165) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/functional.py:1827:15
+  %input2.14 : Tensor = aten::mul(%166, %input1.26) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torchvision/models/mobilenetv3.py:39:15
+  %168 : Tensor = prepacked::conv2d_clamp_run(%input2.14, %self.prepack_folding_forward._jit_pass_packed_weight_45) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/modules/conv.py:442:15
+  %result0.24 : Tensor = aten::add_(%168, %155, %4) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torchvision/models/mobilenetv3.py:97:12
+  %170 : Tensor = prepacked::conv2d_clamp_run(%result0.24, %self.prepack_folding_forward._jit_pass_packed_weight_46) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/modules/conv.py:442:15
+  %input0.81 : Tensor = aten::hardswish_(%170) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/functional.py:1940:15
+  %172 : Tensor = prepacked::conv2d_clamp_run(%input0.81, %self.prepack_folding_forward._jit_pass_packed_weight_47) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/modules/conv.py:442:15
+  %input1.28 : Tensor = aten::hardswish_(%172) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/functional.py:1940:15
+  %174 : int[] = aten::size(%input1.28) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/functional.py:1129:51
+  %175 : int = aten::len(%174) # <string>:5:9
+  %176 : bool = aten::gt(%175, %6) # <string>:5:9
+   = prim::If(%176) # <string>:5:2
+    block0():
+      -> ()
+    block1():
+       = prim::RaiseException(%5) # <string>:5:2
+      -> ()
+  %scale.12 : Tensor = aten::adaptive_avg_pool2d(%input1.28, %2) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/functional.py:1130:11
+  %178 : Tensor = prepacked::conv2d_clamp_run(%scale.12, %self.prepack_folding_forward._jit_pass_packed_weight_48) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/functional.py:1296:17
+  %179 : Tensor = prepacked::conv2d_clamp_run(%178, %self.prepack_folding_forward._jit_pass_packed_weight_49) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/modules/conv.py:442:15
+  %180 : Tensor = aten::hardsigmoid_(%179) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/functional.py:1827:15
+  %input2.16 : Tensor = aten::mul(%180, %input1.28) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torchvision/models/mobilenetv3.py:39:15
+  %182 : Tensor = prepacked::conv2d_clamp_run(%input2.16, %self.prepack_folding_forward._jit_pass_packed_weight_50) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/modules/conv.py:442:15
+  %183 : Tensor = prepacked::conv2d_clamp_run(%182, %self.prepack_folding_forward._jit_pass_packed_weight_51) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/modules/conv.py:442:15
+  %input0.87 : Tensor = aten::hardswish_(%183) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/functional.py:1940:15
+  %185 : Tensor = prepacked::conv2d_clamp_run(%input0.87, %self.prepack_folding_forward._jit_pass_packed_weight_52) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/modules/conv.py:442:15
+  %input1.30 : Tensor = aten::hardswish_(%185) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/functional.py:1940:15
+  %187 : int[] = aten::size(%input1.30) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/functional.py:1129:51
+  %188 : int = aten::len(%187) # <string>:5:9
+  %189 : bool = aten::gt(%188, %6) # <string>:5:9
+   = prim::If(%189) # <string>:5:2
+    block0():
+      -> ()
+    block1():
+       = prim::RaiseException(%5) # <string>:5:2
+      -> ()
+  %scale.14 : Tensor = aten::adaptive_avg_pool2d(%input1.30, %2) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/functional.py:1130:11
+  %191 : Tensor = prepacked::conv2d_clamp_run(%scale.14, %self.prepack_folding_forward._jit_pass_packed_weight_53) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/functional.py:1296:17
+  %192 : Tensor = prepacked::conv2d_clamp_run(%191, %self.prepack_folding_forward._jit_pass_packed_weight_54) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/modules/conv.py:442:15
+  %193 : Tensor = aten::hardsigmoid_(%192) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/functional.py:1827:15
+  %input2.18 : Tensor = aten::mul(%193, %input1.30) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torchvision/models/mobilenetv3.py:39:15
+  %195 : Tensor = prepacked::conv2d_clamp_run(%input2.18, %self.prepack_folding_forward._jit_pass_packed_weight_55) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/modules/conv.py:442:15
+  %result0.28 : Tensor = aten::add_(%195, %182, %4) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torchvision/models/mobilenetv3.py:97:12
+  %197 : Tensor = prepacked::conv2d_clamp_run(%result0.28, %self.prepack_folding_forward._jit_pass_packed_weight_56) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/modules/conv.py:442:15
+  %input0.2 : Tensor = aten::hardswish_(%197) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/functional.py:1940:15
+  %199 : Tensor = prepacked::conv2d_clamp_run(%input0.2, %self.prepack_folding_forward._jit_pass_packed_weight_57) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/modules/conv.py:442:15
+  %input1.2 : Tensor = aten::hardswish_(%199) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/functional.py:1940:15
+  %201 : int[] = aten::size(%input1.2) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/functional.py:1129:51
+  %202 : int = aten::len(%201) # <string>:5:9
+  %203 : bool = aten::gt(%202, %6) # <string>:5:9
+   = prim::If(%203) # <string>:5:2
+    block0():
+      -> ()
+    block1():
+       = prim::RaiseException(%5) # <string>:5:2
+      -> ()
+  %scale.1 : Tensor = aten::adaptive_avg_pool2d(%input1.2, %2) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/functional.py:1130:11
+  %205 : Tensor = prepacked::conv2d_clamp_run(%scale.1, %self.prepack_folding_forward._jit_pass_packed_weight_58) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/functional.py:1296:17
+  %206 : Tensor = prepacked::conv2d_clamp_run(%205, %self.prepack_folding_forward._jit_pass_packed_weight_59) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/modules/conv.py:442:15
+  %207 : Tensor = aten::hardsigmoid_(%206) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/functional.py:1827:15
+  %input2.2 : Tensor = aten::mul(%207, %input1.2) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torchvision/models/mobilenetv3.py:39:15
+  %209 : Tensor = prepacked::conv2d_clamp_run(%input2.2, %self.prepack_folding_forward._jit_pass_packed_weight_60) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/modules/conv.py:442:15
+  %result0.1 : Tensor = aten::add_(%209, %result0.28, %4) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torchvision/models/mobilenetv3.py:97:12
+  %211 : Tensor = prepacked::conv2d_clamp_run(%result0.1, %self.prepack_folding_forward._jit_pass_packed_weight_61) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/modules/conv.py:442:15
+  %x0.1 : Tensor = aten::hardswish_(%211) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/functional.py:1940:15
+  %213 : int[] = aten::size(%x0.1) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/functional.py:1129:51
+  %214 : int = aten::len(%213) # <string>:5:9
+  %215 : bool = aten::gt(%214, %6) # <string>:5:9
+   = prim::If(%215) # <string>:5:2
+    block0():
+      -> ()
+    block1():
+       = prim::RaiseException(%5) # <string>:5:2
+      -> ()
+  %x1.1 : Tensor = aten::adaptive_avg_pool2d(%x0.1, %2) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/functional.py:1130:11
+  %x2.1 : Tensor = aten::flatten(%x1.1, %4, %3) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torchvision/models/mobilenetv3.py:178:12
+  %218 : Tensor = prepacked::linear_clamp_run(%x2.1, %9) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/functional.py:1847:11
+  %input1.1 : Tensor = aten::hardswish_(%218) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/functional.py:1940:15
+  %221 : Tensor = prepacked::linear_clamp_run(%input1.1, %10) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/functional.py:1847:11
+  return (%221)
+

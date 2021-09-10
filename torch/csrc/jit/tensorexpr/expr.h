@@ -211,18 +211,24 @@ class TORCH_API Buf : public ExprNode<Buf> {
   Buf(const std::string& name_hint,
       const std::vector<ExprPtr>& dims,
       Dtype dtype,
-      ExprPtr initializer = nullptr)
-      : Buf(alloc<Var>(name_hint, kHandle), dims, dtype, initializer) {}
+      ExprPtr initializer = nullptr,
+      ExprPtr qscale = nullptr,
+      ExprPtr qzero = nullptr)
+      : Buf(alloc<Var>(name_hint, kHandle), dims, dtype, initializer, qscale, qzero) {}
 
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   Buf(VarPtr var,
       std::vector<ExprPtr> dims,
       Dtype dtype,
-      ExprPtr initializer = nullptr)
+      ExprPtr initializer = nullptr,
+      ExprPtr qscale = nullptr,
+      ExprPtr qzero = nullptr)
       : ExprNodeBase(dtype, kPrimitive),
         base_handle_(var),
         dims_(std::move(dims)),
-        initializer_(initializer) {
+        initializer_(initializer),
+        qscale_(qscale),
+        qzero_(qzero) {
     TORCH_CHECK(var);
   }
 
@@ -246,6 +252,14 @@ class TORCH_API Buf : public ExprNode<Buf> {
     return initializer_;
   };
 
+  ExprPtr qzero() const {
+    return qzero_;
+  };
+
+  ExprPtr qscale() const {
+    return qscale_;
+  };
+
   bool hasConstantDims() const {
     for (auto d : dims_) {
       if (!d->isConstant()) {
@@ -259,6 +273,8 @@ class TORCH_API Buf : public ExprNode<Buf> {
   VarPtr base_handle_;
   std::vector<ExprPtr> dims_;
   ExprPtr initializer_;
+  ExprPtr qscale_;
+  ExprPtr qzero_;
 };
 
 class TORCH_API BufHandle : public ExprHandle {
