@@ -149,6 +149,34 @@ TEST(LLVM, ByteToDoubleCastTest) {
   ASSERT_EQ(cg.value<double>(), 2);
 }
 
+TEST(LLVM, FloatToByteCastTest) {
+  auto a = FloatImm::make(254.0);
+  auto b = Cast::make(kByte, a);
+  LLVMExprEval cg(b);
+  ASSERT_EQ(cg.value<uint8_t>(), 254);
+}
+
+TEST(LLVM, FloatToCharCastTest) {
+  auto a = FloatImm::make(-2.0);
+  auto b = Cast::make(kChar, a);
+  LLVMExprEval cg(b);
+  ASSERT_EQ(cg.value<int8_t>(), -2);
+}
+
+TEST(LLVM, BytoToFloatCastTest) {
+  auto a = ByteImm::make(254);
+  auto b = Cast::make(kFloat, a);
+  LLVMExprEval cg(b);
+  ASSERT_EQ(cg.value<float>(), 254.0);
+}
+
+TEST(LLVM, CharToFloatCastTest) {
+  auto a = CharImm::make(-2);
+  auto b = Cast::make(kFloat, a);
+  LLVMExprEval cg(b);
+  ASSERT_EQ(cg.value<float>(), -2.0);
+}
+
 TEST(LLVM, BitCast) {
   constexpr int16_t ref16 = 1337;
   constexpr int32_t ref32 = 1337;
