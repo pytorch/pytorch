@@ -502,6 +502,29 @@ class TestProfiler(TestCase):
             sort_by="self_cuda_time_total", row_limit=-1)
         self.assertIn("Total MFLOPs", profiler_output)
 
+    def test_custom_function_shapes(self):
+        class DummyFunction(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, tensor, constant):
+                ctx.constant = constant
+                return tensor * constant
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                return grad_output * ctx.constant, None
+
+        func = DummyFunction.apply
+
+        with _profile(with_stack=True, use_kineto=kineto_available(), record_shapes=True) as p:
+            u = torch.randn(3, 4, 5, requires_grad=True)
+            v = func(u, 2)
+            w = v.sum()
+            w.backward()
+
+        for e in p.function_events:
+            if "DummyFunction" in e.name:
+                self.assertTrue(e.input_shapes == [[3, 4, 5]])
+
     def test_kineto_profiler_api(self):
         called_num = [0]
 

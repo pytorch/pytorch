@@ -611,14 +611,18 @@ PyObject *THPFunction_apply(PyObject *cls, PyObject *inputs)
   auto iv_inputs = std::vector<c10::IValue>();
   bool record = false;
   if (C10_UNLIKELY(at::shouldRunRecordFunction(&record))) {
-    for (auto i : info_pair.first.input_vars) {
-       iv_inputs.push_back(c10::IValue(i));
+    at::RecordFunction guard(at::RecordScope::FUNCTION);
+    if (guard.isActive()) {
+      if (guard.needsInputs()) {
+        for (auto i : info_pair.first.input_vars) {
+           iv_inputs.push_back(c10::IValue(i));
+        }
+        guard.before(((PyTypeObject*)cls)->tp_name, iv_inputs, at::sequence_number::peek());
+      } else {
+        guard.before(((PyTypeObject*)cls)->tp_name, at::sequence_number::peek());
+      }
     }
   }
-  RECORD_FUNCTION(
-    ((PyTypeObject*)cls)->tp_name,
-    iv_inputs,
-    at::sequence_number::peek());
 
   THPObjectPtr backward_cls(PyObject_GetAttrString(cls, "_backward_cls"));
   if (!backward_cls) return nullptr;
