@@ -1449,7 +1449,7 @@ TORCH_IMPL_FUNC(bmm_out_cpu)
     conjugate_mutable_input_if_needed(const_cast<Tensor&>(result), result_is_conj);
     }
     namedinference::propagate_names_if_nonempty(
-      const_cast<Tensor&>(result),
+      result,
       namedinference::compute_bmm_outnames(const_cast<Tensor&>(result), batch1, batch2)
     );
   }
