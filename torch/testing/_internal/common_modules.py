@@ -2,7 +2,8 @@ import torch
 from copy import deepcopy
 from functools import wraps, partial
 from itertools import chain
-from torch.testing import floating_types, make_tensor
+from torch.testing import make_tensor
+from torch.testing._internal.common_dtype import floating_types
 from torch.testing._internal.common_device_type import (
     _TestParametrizer, _dtype_test_suffix, _update_param_kwargs, skipIf)
 from torch.testing._internal.common_nn import nllloss_reference, get_reduction
@@ -273,6 +274,18 @@ def module_inputs_torch_nn_CELU(module_info, device, dtype, requires_grad, **kwa
                     desc='no_batch_dim',
                     reference_fn=no_batch_dim_reference_fn)]
 
+def module_inputs_torch_nn_ReLU(module_info, device, dtype, requires_grad):
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    module_inputs = [
+        ModuleInput(constructor_input=FunctionInput(),
+                    forward_input=FunctionInput(make_input((2, 3, 4, 5)))),
+        ModuleInput(constructor_input=FunctionInput(),
+                    forward_input=FunctionInput(make_input(4)),
+                    desc='no_batch_dim'),
+    ]
+    return module_inputs
+
 
 def module_inputs_torch_nn_L1Loss(module_info, device, dtype, requires_grad, **kwargs):
     make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -300,5 +313,7 @@ module_db: List[ModuleInfo] = [
     ModuleInfo(torch.nn.Linear,
                module_inputs_func=module_inputs_torch_nn_Linear),
     ModuleInfo(torch.nn.NLLLoss,
-               module_inputs_func=module_inputs_torch_nn_NLLLoss)
+               module_inputs_func=module_inputs_torch_nn_NLLLoss),
+    ModuleInfo(torch.nn.ReLU,
+               module_inputs_func=module_inputs_torch_nn_ReLU),
 ]
