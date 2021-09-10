@@ -18,7 +18,7 @@ working with ``torch.distributed.run`` with these differences:
    ``save_checkpoint(path)`` logic in your script. When any number of
    workers fail we restart all the workers with the same program
    arguments so you will lose progress up to the most recent checkpoint
-   (see `elastic launch <distributed.html>`_).
+   (see `elastic launch <run.html>`_).
 
 4. ``use_env`` flag has been removed. If you were parsing local rank by parsing
    the ``--local_rank`` option, you need to get the local rank from the
