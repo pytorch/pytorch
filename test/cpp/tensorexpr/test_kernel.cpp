@@ -85,6 +85,44 @@ TEST_F(Kernel, InliningIntermediates) {
   }
 }
 
+TEST_F(Kernel, PreAllocIntermediateBufs) {
+  const auto graph_string = R"IR(
+graph(%a.1 : Float(8, 8, strides=[8, 1], requires_grad=0, device=cpu),
+      %b.1 : Float(8, 8, strides=[8, 1], requires_grad=0, device=cpu)):
+  %2 : int = prim::Constant[value=1]()
+  %c.2 : Float(8, 8, strides=[8, 1], requires_grad=0, device=cpu) = aten::matmul(%a.1, %b.1) # test_matmul.py:12:12
+  %3 : Float(8, 8, strides=[8, 1], requires_grad=0, device=cpu) = aten::add(%a.1, %c.2, %2) # test_matmul.py:13:15
+  return (%3))IR";
+  auto graph = std::make_shared<Graph>();
+  parseIR(graph_string, &*graph);
+
+  auto a = at::rand({8, 8}, TensorOptions(kCPU).dtype(at::kFloat));
+  auto b = at::rand({8, 8}, TensorOptions(kCPU).dtype(at::kFloat));
+  auto o = at::zeros({8, 8}, TensorOptions(kCPU).dtype(at::kFloat));
+  auto ref = at::matmul(a, b) + a;
+  TensorExprKernel k(graph, {}, true);
+
+  std::vector<at::Tensor> inputs = {a, b};
+  auto stmt = k.getCodeGenStmt();
+
+  std::ostringstream oss;
+  oss << *stmt;
+
+  // Check whether the intermediate buffer has been added to constants
+  auto constants = k.getConstantDescriptors();
+  ASSERT_EQ(constants.size(), 1);
+
+  // Check the IR we produced
+  torch::jit::testing::FileCheck().check_not("Alloc")->run(oss.str());
+  torch::jit::testing::FileCheck().check_not("Free")->run(oss.str());
+
+  // Check correctness
+  std::vector<IValue> stack = fmap<IValue>(inputs);
+  k.run(stack);
+  o = stack[0].toTensor();
+  ASSERT_TRUE(at::allclose(o, ref));
+}
+
 TEST_F(Kernel, _1) {
   const auto graph_string = R"IR(
       graph(%0 : Float(5, 3, strides=[3, 1], device=cpu),
@@ -210,7 +248,11 @@ TEST_F(Kernel, Huge) {
   TensorExprKernel k(graph);
   std::ostringstream oss;
   oss << *k.getCodeGenStmt();
-  const std::string& verification_pattern = "# CHECK: 4000000000";
+  // The 4000000000 iterations loop will be split into 500000000 x 8 and the
+  // outer loop will be parallel. If LLVM is not present, it will not be split,
+  // and to cover both of these cases we're looking for 00000000ll; in the
+  // output.
+  const std::string& verification_pattern = R"IR(# CHECK: 00000000ll;)IR";
   torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 }
 
@@ -539,6 +581,36 @@ TEST_F(Kernel, CatInputTypesPromotion) {
   }
 }
 
+TEST_F(Kernel, CatAndInlineWithAConstantDim) {
+  const auto graph_string = R"IR(
+      graph(%0 : Float(1, 512, strides=[1024, 1], requires_grad=0, device=cpu),
+            %1 : Float(1, 512, strides=[1024, 1], requires_grad=0, device=cpu)):
+        %2 : bool = prim::Constant[value=0]()
+        %3 : int = prim::Constant[value=1]()
+        %4 : Tensor[] = prim::ListConstruct(%0, %1)
+        %5 : Float(1, 1024, strides=[1024, 1], requires_grad=0, device=cpu) = aten::cat(%4, %3)
+        %6 : Tensor[] = prim::ListConstruct(%5)
+        %7 : Float(1, 1024, strides=[1024, 1], requires_grad=0, device=cpu) = aten::cat(%6, %3)
+        %8 : Float(1, 1024, strides=[1024, 1], requires_grad=0, device=cpu) = aten::_cast_Float(%7, %2)
+        return (%8, %7))IR";
+
+  auto graph = std::make_shared<Graph>();
+  parseIR(graph_string, &*graph);
+  TensorExprKernel k(graph);
+
+  auto a = at::rand({1, 512}, TensorOptions(kCPU).dtype(at::kFloat));
+  auto b = at::rand({1, 512}, TensorOptions(kCPU).dtype(at::kFloat));
+  auto ref = at::_cast_Float(at::cat({a, b}, 1), 0);
+
+  std::vector<at::Tensor> inputs = {a, b};
+  std::vector<IValue> stack = fmap<IValue>(inputs);
+  k.run(stack);
+  auto o = stack[0].toTensor();
+  ASSERT_EQ(o.sizes(), ref.sizes());
+  ASSERT_EQ(o.dtype(), ref.dtype());
+  ASSERT_TRUE(at::allclose(o, ref));
+}
+
 TEST_F(Kernel, CatWoConditionals) {
   getCatWoConditionals() = true;
   const auto graph_string = R"IR(
@@ -561,17 +633,15 @@ TEST_F(Kernel, CatWoConditionals) {
   const std::string& verification_pattern =
       R"IR(
 # CHECK: for
-# CHECK-NEXT: for
-# CHECK-NEXT: for
-# CHECK-NEXT: aten_cat
 # CHECK: for
-# CHECK-NEXT: for
-# CHECK-NEXT: for
-# CHECK-NEXT: aten_cat
 # CHECK: for
-# CHECK-NEXT: for
-# CHECK-NEXT: for
-# CHECK-NEXT: aten_cat)IR";
+# CHECK: aten_cat
+# CHECK: for
+# CHECK: for
+# CHECK: aten_cat
+# CHECK: for
+# CHECK: for
+# CHECK: aten_cat)IR";
   torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 
   auto a = at::rand({5, 3, 2}, TensorOptions(kCPU).dtype(at::kFloat));
@@ -1416,6 +1486,77 @@ TEST_F(Kernel, CustomLowering) {
   // Check that our custom lowering is actually used
   torch::jit::testing::FileCheck().check("custom_nan_to_num")->run(oss.str());
   torch::jit::testing::FileCheck().check("isnan")->run(oss.str());
+}
+
+TEST_F(Kernel, Vectorize) {
+#ifdef TORCH_ENABLE_LLVM
+  const auto graph_string = R"IR(
+      graph(%0 : Float(100, 16, strides=[16, 1], device=cpu),
+            %1 : Float(100, 16, strides=[16, 1], device=cpu)):
+        %2 : Float(100, 16, strides=[16, 1]) = aten::mul(%0, %1)
+        %3 : Float(100, 16, strides=[16, 1]) = aten::mul(%0, %2)
+        return (%3))IR";
+  auto graph = std::make_shared<Graph>();
+  parseIR(graph_string, &*graph);
+
+  auto a = at::rand({100, 16}, TensorOptions(kCPU).dtype(at::kFloat));
+  auto b = at::rand({100, 16}, TensorOptions(kCPU).dtype(at::kFloat));
+  auto o = at::zeros({100, 16}, TensorOptions(kCPU).dtype(at::kFloat));
+  auto ref = a * (a * b);
+  TensorExprKernel k(graph);
+  std::vector<at::Tensor> inputs = {a, b};
+  StmtPtr s = k.getCodeGenStmt();
+
+  std::ostringstream oss;
+  oss << *s;
+
+  // Check the IR we produced
+  const std::string& verification_pattern = R"IR(# CHECK: Ramp)IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+
+  std::vector<IValue> stack = fmap<IValue>(inputs);
+  k.run(stack);
+  o = stack[0].toTensor();
+  for (size_t i = 0; i < 100 * 16; i++) {
+    CHECK_EQ(((float*)o.data_ptr())[i], ((float*)ref.data_ptr())[i]);
+  }
+#endif
+}
+
+// TODO: To vectorize loopnest for 100x3 case, we need to flatten loops first.
+TEST_F(Kernel, DISABLED_FlattenVectorize) {
+#ifdef TORCH_ENABLE_LLVM
+  const auto graph_string = R"IR(
+      graph(%0 : Float(100, 3, strides=[3, 1], device=cpu),
+            %1 : Float(100, 3, strides=[3, 1], device=cpu)):
+        %2 : Float(100, 3, strides=[3, 1]) = aten::mul(%0, %1)
+        %3 : Float(100, 3, strides=[3, 1]) = aten::mul(%0, %2)
+        return (%3))IR";
+  auto graph = std::make_shared<Graph>();
+  parseIR(graph_string, &*graph);
+
+  auto a = at::rand({100, 3}, TensorOptions(kCPU).dtype(at::kFloat));
+  auto b = at::rand({100, 3}, TensorOptions(kCPU).dtype(at::kFloat));
+  auto o = at::zeros({100, 3}, TensorOptions(kCPU).dtype(at::kFloat));
+  auto ref = a * (a * b);
+  TensorExprKernel k(graph);
+  std::vector<at::Tensor> inputs = {a, b};
+  StmtPtr s = k.getCodeGenStmt();
+
+  std::ostringstream oss;
+  oss << *s;
+
+  // Check the IR we produced
+  const std::string& verification_pattern = R"IR(# CHECK: Ramp)IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+
+  std::vector<IValue> stack = fmap<IValue>(inputs);
+  k.run(stack);
+  o = stack[0].toTensor();
+  for (size_t i = 0; i < 100 * 3; i++) {
+    CHECK_EQ(((float*)o.data_ptr())[i], ((float*)ref.data_ptr())[i]);
+  }
+#endif
 }
 
 } // namespace jit
