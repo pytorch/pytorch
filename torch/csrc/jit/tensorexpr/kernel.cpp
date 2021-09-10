@@ -69,7 +69,7 @@ namespace tensorexpr {
 std::string buildErrorMessage(const std::string& s) {
   static const std::string generic_error_message =
       "This error occured in the fuser. You can turn off the fuser with "
-      "torch._C._jit_override_can_fuse_on_cpu(False)";
+      "torch.jit.enable_fusion(False).";
   if (s.empty()) {
     return generic_error_message;
   }
@@ -466,7 +466,7 @@ std::vector<ExprHandle> computeIndicesToBroadcast(
   while (sizeIt != inputSizes.rend()) {
     auto const& size = intValue(*sizeIt);
     if (size && *size == 1) {
-      bcast.emplace_back(0);
+      bcast.emplace_back(LongImm::make(0));
     } else {
       bcast.emplace_back(*axisIt);
     }
@@ -734,6 +734,7 @@ std::vector<ExprHandle> TensorExprKernel::inferSizesForValue(
     case aten::hardtanh:
     case aten::hardsigmoid:
     case aten::hardswish:
+    case aten::softplus:
     case aten::sqrt:
     case aten::rsqrt:
     case aten::abs:
@@ -2028,6 +2029,27 @@ Tensor tensorexpr::computeOperandValue(
           });
     } break;
 
+    case aten::softplus: {
+      return computeThreeOperand(
+          "aten_softplus",
+          inputs,
+          outputShape,
+          outputType,
+          [](const ExprHandle& a,
+             const ExprHandle& beta,
+             const ExprHandle& threshold) {
+            auto beta_promoted = Cast::make(a.dtype(), beta);
+            auto threshold_promoted = Cast::make(a.dtype(), threshold);
+            auto beta_a = beta_promoted * a;
+            return CompareSelect::make(
+                beta_a,
+                threshold_promoted,
+                a,
+                log1p(exp(beta_a)) / beta_promoted,
+                kGT);
+          });
+    } break;
+
     case aten::hardsigmoid: {
       return computeOneOperand(
           "aten_hardsigmoid",
@@ -2741,7 +2763,14 @@ StmtPtr TensorExprKernel::transformLoops(BackendType backendType, StmtPtr st) {
     }
   }
 
-  l.prepareForCodegen();
+  if (pre_alloc_) {
+    auto interm_bufs = l.getIntermediateBufs();
+    preAllocIntermediateBufs(interm_bufs);
+    l.prepareForCodegen(interm_bufs);
+  } else {
+    l.prepareForCodegen();
+  }
+
   GRAPH_DEBUG("after prepareForCodegen", *l.root_stmt());
   l.simplify();
   GRAPH_DEBUG("after simplification", *l.root_stmt());
@@ -3058,6 +3087,46 @@ void TensorExprKernel::bindConstant(const torch::jit::Value* v) {
   bufs_[v] = buf;
 }
 
+void TensorExprKernel::preAllocIntermediateBufs(
+    std::unordered_set<BufPtr>& interm_bufs) {
+  std::vector<std::pair<BufPtr, void*>> allocated_bufs;
+  for (auto it = interm_bufs.begin(); it != interm_bufs.end();) {
+    // Check if buf shape is static and compute its size if static.
+    auto buf = *it;
+    bool is_static = true;
+    size_t size =
+        elementSize(buf->dtype().scalar_type()) * buf->dtype().lanes();
+    for (auto& d : buf->dims()) {
+      if (!d->isConstant()) {
+        is_static = false;
+        break;
+      }
+      size = size * (*intValue(d));
+    }
+    // Only allocate memory for static bufs.
+    if (!is_static) {
+      ++it;
+      continue;
+    }
+    auto bp = (void*)malloc(size);
+    if (!bp) {
+      ++it;
+      continue;
+    }
+    allocated_bufs.emplace_back(buf, bp);
+    it = interm_bufs.erase(it);
+  }
+  std::sort(
+      allocated_bufs.begin(),
+      allocated_bufs.end(),
+      [](const auto& a, const auto& b) {
+        return a.first->name_hint() > b.first->name_hint();
+      });
+  for (auto& a : allocated_bufs) {
+    constants_.push_back({a.first, a.second});
+  }
+}
+
 void TensorExprKernel::compile() {
   GRAPH_DUMP("TensorExprKernel graph:", graph_);
 
@@ -3133,12 +3202,12 @@ void TensorExprKernel::compile() {
     bufs_.erase(output);
   }
 
+  BackendType backendType = inferBackendTypeFromDevice(device_);
+  StmtPtr stmt = transformLoops(backendType, block);
+
   for (auto c : constants_) {
     bufferArgs_.emplace_back(BufHandle(c.buf));
   }
-
-  BackendType backendType = inferBackendTypeFromDevice(device_);
-  StmtPtr stmt = transformLoops(backendType, block);
 
   // Generate code.
   codegen_ = CreateCodeGen(
@@ -3151,10 +3220,12 @@ void TensorExprKernel::compile() {
 
 TensorExprKernel::TensorExprKernel(
     const std::shared_ptr<Graph>& subgraph,
-    std::unordered_map<c10::Symbol, NNCLoweringFunction> custom_lowerings)
+    std::unordered_map<c10::Symbol, NNCLoweringFunction> custom_lowerings,
+    bool pre_alloc /*= false*/)
     : graph_(subgraph),
       code_(subgraph, ""),
-      custom_lowerings_(std::move(custom_lowerings)) {
+      custom_lowerings_(std::move(custom_lowerings)),
+      pre_alloc_(pre_alloc) {
   allow_fallback_ = fallbackAllowed();
   if (!allow_fallback_) {
     compile();
