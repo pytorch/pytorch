@@ -177,8 +177,8 @@ class TestModule(TestCase):
                     _retain_grad(i)
             else:
                 if (not isinstance(item, torch.Tensor)
-                    or item.is_leaf
-                    or not item.requires_grad):
+                        or item.is_leaf
+                        or not item.requires_grad):
                     return
                 item.retain_grad()
 
