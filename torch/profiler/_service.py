@@ -25,9 +25,7 @@ logger.setLevel(logging.INFO)
 
 class PyTorchServiceWSGIApp(object):
     
-    def __init__(self, is_master_server, main_TLS):
-        self.main_TLS = main_TLS
-        self.g = None
+    def __init__(self, is_master_server):
         self.prof: profile = None
         self.profiling_warmup = False
         self.profiling_started = False
@@ -79,9 +77,6 @@ class PyTorchServiceWSGIApp(object):
     def start_profiling(self, request):
         if self.profiling_warmup or self.profiling_started:
             return self.respond_as_json({"success": False, "message": "Profiling service has already been started."})
-
-        if self.g is None:
-            self.g = _ThreadLocalStateGuard(self.main_TLS)
 
         self.request_is_local = request.remote_addr == '127.0.0.1'
         request_data = json.loads(request.data)
@@ -220,6 +215,7 @@ class Listener(object):
         self.thread.start()
 
     def __open(self):
+        g = _ThreadLocalStateGuard(self.state)
         while True:
             registered = False
             try:
@@ -227,7 +223,7 @@ class Listener(object):
                     registered = self.__register()
                     if not registered:
                         break
-                serving.run_simple(self.host, self.port, PyTorchServiceWSGIApp(self.is_master_server, self.state))
+                serving.run_simple(self.host, self.port, PyTorchServiceWSGIApp(self.is_master_server))
             except OSError as e:
                 if registered:
                     self.__unregister()
