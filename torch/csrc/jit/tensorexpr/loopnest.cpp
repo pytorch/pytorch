@@ -747,6 +747,9 @@ bool LoopNest::computeInline(StmtPtr s) {
 bool LoopNest::computeInline(BufPtr b) {
   // If buf is used or defined in an ExternalCall, we cannot inline it
   auto buf_load_store_uses = findLoadOrStoreUses(root_stmt_);
+  if (!buf_load_store_uses.count(b)) {
+    return false;
+  }
   for (auto& use : buf_load_store_uses.at(b)) {
     StmtPtr s = use.s;
     if (to<ExternalCall>(s)) {
