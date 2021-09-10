@@ -34,7 +34,6 @@ struct OperatorName final {
 
   // Returns true if we successfully set the namespace
   bool setNamespaceIfNotSet(const char* ns) {
-    std::ostringstream oss;
     if (!getNamespace().has_value()) {
       const auto ns_len = strlen(ns);
       const auto old_name_size = name.size();
