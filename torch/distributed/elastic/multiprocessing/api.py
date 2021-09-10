@@ -465,24 +465,32 @@ class SubprocessHandler:
         entrypoint: str,
         args: Tuple,
         env: Dict[str, str],
-        preexec_fn: Callable,
+        preexec_fn: Optional[Callable],
         stdout: str,
         stderr: str,
     ):
         self._stdout = open(stdout, "w") if stdout else None
         self._stderr = open(stderr, "w") if stderr else None
-        args_str = [str(e) for e in args]
-
         # inherit parent environment vars
         env_vars = os.environ.copy()
         env_vars.update(env)
 
-        self.proc: subprocess.Popen = subprocess.Popen(
+        args_str = (entrypoint, *[str(e) for e in args])
+        self.proc: subprocess.Popen = self._popen(args_str, env_vars, preexec_fn)
+
+    def _popen(
+        self, args: Tuple, env: Dict[str, str], preexec_fn: Optional[Callable]
+    ) -> subprocess.Popen:
+        if IS_WINDOWS:
+            # Reset preexec_fn on windows, since windows does not support it
+            preexec_fn = None
+
+        return subprocess.Popen(
             # pyre-fixme[6]: Expected `Union[typing.Sequence[Union[_PathLike[bytes],
             #  _PathLike[str], bytes, str]], bytes, str]` for 1st param but got
             #  `Tuple[str, *Tuple[Any, ...]]`.
-            args=(entrypoint, *args_str),
-            env=env_vars,
+            args=args,
+            env=env,
             preexec_fn=preexec_fn,
             stdout=self._stdout,
             stderr=self._stderr,
@@ -495,6 +503,17 @@ class SubprocessHandler:
             self._stdout.close()
         if self._stderr:
             self._stderr.close()
+
+
+def _pr_set_pdeathsig() -> None:
+    """
+    Sets PR_SET_PDEATHSIG to ensure a child process is
+    terminated appropriately.
+
+    See http://stackoverflow.com/questions/1884941/ for more information.
+    For libc.so.6 read http://www.linux-m68k.org/faq/glibcinfo.html
+    """
+    mp._prctl_pr_set_pdeathsig(signal.SIGTERM)  # type: ignore[attr-defined]
 
 
 class SubprocessContext(PContext):
@@ -541,7 +560,7 @@ class SubprocessContext(PContext):
                 entrypoint=self.entrypoint,  # type: ignore[arg-type] # entrypoint is always a str
                 args=self.args[local_rank],
                 env=self.envs[local_rank],
-                preexec_fn=mp._prctl_pr_set_pdeathsig(signal.SIGTERM),  # type: ignore[attr-defined]
+                preexec_fn=_pr_set_pdeathsig,
                 stdout=self.stdouts[local_rank],
                 stderr=self.stderrs[local_rank],
             )
