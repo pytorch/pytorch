@@ -372,9 +372,16 @@ def normalize(mod: torch.fx.GraphModule, expect_nodes_have_shapes: bool = False)
             normalized_kwargs = node.kwargs
         else:
             normalized_args = ()
-            normalized_kwargs = get_normalized_kwargs(
-                node, normalization_info.arg_replacement_tuples
-            )
+            try:
+                normalized_kwargs = get_normalized_kwargs(
+                    node, normalization_info.arg_replacement_tuples
+                )
+            except Exception:
+                print(
+                    f"Error during kwarg normalization for: {node.format_node()}; "
+                    f"arg_replacement_tuples={normalization_info.arg_replacement_tuples}"
+                )
+                raise
 
         if (
             normalization_info.needs_shapes_for_normalization

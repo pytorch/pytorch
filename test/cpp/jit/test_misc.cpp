@@ -2685,6 +2685,13 @@ TEST(ComputeFlopsTest, Basic) {
   ASSERT_EQ(flops, 360);
 }
 
+TEST(TestConstant, TensorGrad) {
+  auto graph = std::make_shared<Graph>();
+  IValue ten = torch::randn({3, 5}).requires_grad_(true);
+  auto con = tryInsertConstant(*graph, ten);
+  ASSERT_TRUE(con == c10::nullopt);
+}
+
 TEST(TestMutation, Basic) {
   auto graph = std::make_shared<Graph>();
   std::unordered_map<std::string, Value*> vmap;
