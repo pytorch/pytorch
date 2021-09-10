@@ -466,7 +466,7 @@ std::vector<ExprHandle> computeIndicesToBroadcast(
   while (sizeIt != inputSizes.rend()) {
     auto const& size = intValue(*sizeIt);
     if (size && *size == 1) {
-      bcast.emplace_back(0);
+      bcast.emplace_back(LongImm::make(0));
     } else {
       bcast.emplace_back(*axisIt);
     }
