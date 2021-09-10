@@ -736,9 +736,9 @@ Tensor linalg_tensordot(const Tensor& input1, const Tensor& input2, IntArrayRef 
 }
 
 Tensor &linalg_tensordot_out(const Tensor& input1, const Tensor& input2, IntArrayRef dims1, IntArrayRef dims2, Tensor& result) {
+  // this is unnecessary but goes away once we are a structured kernel
+  Tensor result_tmp = linalg_tensordot_allocate_out(input1, input2, dims1, dims2);
 
-    
-  Tensor result_tmp = at::native::linalg_tensordot(input1, input2, dims1, dims2);
   auto result_dtype = result_tmp.scalar_type();
   auto output_tensor_dtype = result.scalar_type();
   auto output_device = result.device();
@@ -757,7 +757,8 @@ Tensor &linalg_tensordot_out(const Tensor& input1, const Tensor& input2, IntArra
     ": Expected the output tensor to have dtype ", result_dtype,
     ", but got an output tensor with dtype ", output_tensor_dtype);
   at::native::resize_output(result, result_tmp.sizes());
-  result.copy_(result_tmp);
+
+  linalg_tensordot_helper(input1, input2, dims1, dims2, result);
   return result;
 }
 
