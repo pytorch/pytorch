@@ -182,7 +182,7 @@ static inline __device__ void gpuAtomicAdd(bool *address, bool val) {
 }
 
 static inline  __device__ at::Half gpuAtomicAdd(at::Half *address, at::Half val) {
-#if ((defined(CUDA_VERSION) && CUDA_VERSION < 10000) || (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 700))) || (defined(USE_ROCM))
+#if defined(USE_ROCM) || ((defined(CUDA_VERSION) && CUDA_VERSION < 10000) || (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 700)))
   return AtomicFPOp<at::Half>()(address, val,
                                 [](at::Half hsum, at::Half val) {
                                   return THCNumerics<at::Half>::add(hsum, val);
