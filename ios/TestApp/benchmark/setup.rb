@@ -103,10 +103,7 @@ targets.each do |target|
             target.frameworks_build_phases.add_file_reference(libref)
         end
     end
-end
-
-# link system frameworks
-if frameworks
+    # link system frameworks
     frameworks.each do |framework|
         path = "System/Library/Frameworks/#{framework}.framework"
         framework_ref = project.frameworks_group.new_reference(path)
