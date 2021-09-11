@@ -32,12 +32,11 @@
 // CAFFE2_HIP_API, so we exclude this definition when HIP is specified
 #if !defined(USE_ROCM)
 #define CAFFE2_CUDA_API TORCH_CUDA_CPP_API
-#else
-#define CAFFE2_CUDA_API TORCH_HIP_API
 #endif // USE_ROCM
 
 //TODO: [ROCm] Need to remove this after CUDA->HIP mapping is updated.
 #define CAFFE2_HIP_EXPORT C10_EXPORT
+#define CAFFE2_HIP_API TORCH_HIP_API
 
 // This is a macro defined for cuda fp16 support. In default, cuda fp16 is
 // supported by NVCC 7.5, but it is also included in the Tegra X1 platform with
