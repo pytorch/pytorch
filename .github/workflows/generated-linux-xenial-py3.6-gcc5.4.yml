@@ -293,7 +293,7 @@ jobs:
       ENABLE_BACKWARDS_COMPAT_TEST: 1
       ENABLE_XLA_TEST: ''
       ENABLE_NOARCH_TEST: ''
-      NUM_TEST_SHARDS: 2
+      NUM_TEST_SHARDS: 6
       MULTIGPU_RUNNER_TYPE: linux.16xlarge.nvidia.gpu
       NOGPU_RUNNER_TYPE: linux.2xlarge
       PR_BODY: ${{ github.event.pull_request.body }}
