@@ -16716,6 +16716,55 @@ TEST(NVFuserTest, FusionSerialAndParallelIndexing_CUDA) {
       &fusion, outputs, aten_inputs, {ref, ref, ref}, __LINE__, __FILE__);
 }
 
+// Repro of issue #1105
+TEST(NVFuserTest, FusionWARSyncAliasedSmem_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(1);
+  fusion.addInput(tv0);
+
+  auto tv1 = add(tv0, new Double(1));
+  auto tv2 = add(tv1, new Double(1));
+  auto tv3 = add(tv2, new Double(1));
+
+  fusion.addOutput(tv3);
+
+  tv1->setMemoryType(MemoryType::Shared);
+  tv2->setMemoryType(MemoryType::Shared);
+
+  tv3->split(0, 4);
+  tv0->computeAt(tv3, 1);
+
+  tv1->axis(-1)->parallelize(ParallelType::TIDx);
+  tv2->axis(-1)->parallelize(ParallelType::TIDx);
+  tv3->axis(-1)->parallelize(ParallelType::TIDx);
+
+  // Make sure a WAR sync is inserted at the end of the outer loop
+  GpuLower gpulw(&fusion);
+  for (const auto& kir_node : gpulw.kernel()->topLevelExprs()) {
+    if (auto loop = dynamic_cast<kir::ForLoop*>(kir_node)) {
+      const auto& body = loop->body().exprs();
+      TORCH_CHECK(!body.empty());
+      auto last_expr = dynamic_cast<kir::Sync*>(body.back());
+      TORCH_CHECK(last_expr != nullptr, "Invalid expr found");
+      TORCH_CHECK(last_expr->isWarHazardSync(), "Not a sync for WAR hazard");
+    }
+  }
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({17}, options);
+  std::vector<IValue> aten_inputs = {t0};
+  auto outputs = fe.runFusion(aten_inputs);
+
+  auto ref1 = t0 + 3;
+
+  testValidate(&fusion, outputs, aten_inputs, {ref1}, __LINE__, __FILE__);
+}
+
 } // namespace jit
 } // namespace torch
 #endif // #if defined(USE_CUDA)

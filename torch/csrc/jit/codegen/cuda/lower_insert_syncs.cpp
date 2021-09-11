@@ -27,28 +27,56 @@ namespace {
 //!
 //! In this case, additional syncthreads is needed at the end of the
 //! loop body to avoid a hazard with smem_buf.
-class LocalSyncInserter {
-  using TvSet = std::unordered_set<const kir::TensorView*>;
 
+//! Keeping track the allocations of SMEM TVs
+class SmemAllocMap {
  public:
-  //! Write-After-Read race conditions are only found within for-loops.
-  //! Sync nodes are inserted directly into the for-loops.
-  //! The expressions are modified in-place and exprs is const.
-  static void insertSyncs(const std::vector<kir::Expr*>& exprs) {
-    for (auto expr : exprs) {
-      if (auto fl = dynamic_cast<kir::ForLoop*>(expr)) {
-        LocalSyncInserter sync_inserter(fl);
-      } else if (auto ite = dynamic_cast<kir::IfThenElse*>(expr)) {
-        insertSyncs(ite->thenBody().exprs());
-        insertSyncs(ite->elseBody().exprs());
+  //! Insert a new node if it's a SMEM allocation
+  void insert(kir::Allocate* alloc) {
+    if (auto tv = dynamic_cast<kir::TensorView*>(alloc->buffer())) {
+      if (tv->memoryType() == MemoryType::Shared) {
+        // Note that a TensorView can have two allocations due to
+        // unswitch.
+        auto p = map_.insert({tv, alloc});
+        // If there's an existing entry, reset it with the new
+        // alloc. Currently, the existing alloc is actually the same
+        // as the new one as each expression is just inserted to both
+        // then and else parts of the unswitched loop, but this should
+        // be changed.
+        if (!p.second) {
+          p.first->second = alloc;
+        }
       }
     }
   }
 
+  //! Get the buffer that is actually allocated for a given TV
+  kir::TensorView* getRealBuffer(kir::TensorView* tv) const {
+    auto it = map_.find(tv);
+    TORCH_INTERNAL_ASSERT(
+        it != map_.end(), "Allocation not found for ", kir::toString(tv));
+    const kir::Allocate* alloc = it->second;
+    while (alloc->alias()) {
+      alloc = alloc->alias();
+    }
+    auto buf = alloc->buffer();
+    TORCH_INTERNAL_ASSERT(buf->isA<kir::TensorView>());
+    return buf->as<kir::TensorView>();
+  }
+
  private:
+  std::unordered_map<kir::TensorView*, kir::Allocate*> map_;
+};
+
+//! Insert WAR sync for a given ForLoop
+class LocalSyncInserterForLoop {
+  using TvSet = std::unordered_set<const kir::TensorView*>;
+
+ public:
   //! Insert Sync nodes at the end of a given for-loop when a WAR
   //! hazard may happen.
-  LocalSyncInserter(kir::ForLoop* fl) {
+  LocalSyncInserterForLoop(kir::ForLoop* fl, SmemAllocMap& alloc_map)
+      : alloc_map_(alloc_map) {
     for (auto expr : fl->body().exprs()) {
       handle(expr);
     }
@@ -111,6 +139,8 @@ class LocalSyncInserter {
       handle(ite);
     } else if (auto for_loop = dynamic_cast<kir::ForLoop*>(expr)) {
       handle(for_loop);
+    } else if (auto alloc = dynamic_cast<kir::Allocate*>(expr)) {
+      alloc_map_.insert(alloc);
     }
   }
 
@@ -130,7 +160,7 @@ class LocalSyncInserter {
   }
 
   void handle(kir::ForLoop* fl) {
-    LocalSyncInserter child_sync_inserter(fl);
+    LocalSyncInserterForLoop child_sync_inserter(fl, alloc_map_);
 
     const auto& child_inputs = child_sync_inserter.all_smem_inputs();
     const auto& child_outputs = child_sync_inserter.all_smem_outputs();
@@ -190,48 +220,81 @@ class LocalSyncInserter {
     return false;
   }
 
-  static void addOutputSmemTvs(const kir::Expr* expr, TvSet& set) {
+  void addOutputSmemTvs(const kir::Expr* expr, TvSet& set) {
     for (auto out : expr->outputs()) {
       if (auto tv = dynamic_cast<kir::TensorView*>(out)) {
         if (tv->memoryType() == MemoryType::Shared) {
-          set.insert(tv);
+          auto real_tv = alloc_map_.getRealBuffer(tv);
+          set.insert(real_tv);
         }
       }
     }
   }
 
-  static void addInputSmemTvs(const kir::Expr* expr, TvSet& set) {
+  void addInputSmemTvs(const kir::Expr* expr, TvSet& set) {
     for (auto in : expr->inputs()) {
       if (auto tv = dynamic_cast<kir::TensorView*>(in)) {
         if (tv->memoryType() == MemoryType::Shared) {
-          set.insert(tv);
+          auto real_tv = alloc_map_.getRealBuffer(tv);
+          set.insert(real_tv);
         }
       }
     }
   }
 
  private:
-  // Track Shared Memory Inputs (Reads) for parent for-loop
+  //! Allocation map of SMEM buffers
+  SmemAllocMap& alloc_map_;
+
+  //! Track Shared Memory Inputs (Reads) for parent for-loop
   TvSet all_smem_inputs_;
 
-  // Track Shared Memory Outputs (Writes) for parent for-loop
+  //! Track Shared Memory Outputs (Writes) for parent for-loop
   TvSet all_smem_outputs_;
 
-  // Shared Memory Writes at beginning of the for-loop
-  // before first SyncThreads
+  //! Shared Memory Writes at beginning of the for-loop
+  //! before first SyncThreads
   TvSet initial_;
 
-  // Shared Memory Reads at end of the for-loop
-  // Cleared after each SyncThreads
+  //! Shared Memory Reads at end of the for-loop
+  //! Cleared after each SyncThreads
   TvSet final_;
 
-  // Track first sync deterministically found in for-loop. Even when a
-  // child loop has a sync, if it may not be executed due to non-zero
-  // start value, this flag remains false.
+  //! Track first sync deterministically found in for-loop. Even when a
+  //! child loop has a sync, if it may not be executed due to non-zero
+  //! start value, this flag remains false.
   bool initial_sync_ = false;
 
-  // Track if last op is sync
+  //! Track if last op is sync
   bool is_last_op_sync_ = false;
+};
+
+class LocalSyncInserter {
+ public:
+  //! Write-After-Read race conditions are only found within for-loops.
+  //! Sync nodes are inserted directly into the for-loops.
+  //! The expressions are modified in-place and exprs is const.
+  static void insertSyncs(const std::vector<kir::Expr*>& exprs) {
+    LocalSyncInserter inserter;
+    inserter.insert(exprs);
+  }
+
+ private:
+  void insert(const std::vector<kir::Expr*>& exprs) {
+    for (auto expr : exprs) {
+      if (auto fl = dynamic_cast<kir::ForLoop*>(expr)) {
+        LocalSyncInserterForLoop sync_inserter(fl, alloc_map_);
+      } else if (auto ite = dynamic_cast<kir::IfThenElse*>(expr)) {
+        insert(ite->thenBody().exprs());
+        insert(ite->elseBody().exprs());
+      } else if (auto alloc = dynamic_cast<kir::Allocate*>(expr)) {
+        alloc_map_.insert(alloc);
+      }
+    }
+  }
+
+ private:
+  SmemAllocMap alloc_map_;
 };
 
 class ExprFlattener : private kir::IrVisitor {
