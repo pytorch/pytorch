@@ -70,7 +70,7 @@ add_to_env_file IN_CI 1
 add_to_env_file CI_MASTER "${CI_MASTER:-}"
 add_to_env_file COMMIT_SOURCE "${CIRCLE_BRANCH:-}"
 add_to_env_file BUILD_ENVIRONMENT "${BUILD_ENVIRONMENT}"
-add_to_env_file CIRCLE_PULL_REQUEST "${CIRCLE_PULL_REQUEST}"
+add_to_env_file CIRCLE_PR_NUMBER "${CIRCLE_PR_NUMBER}"
 
 
 if [[ "${BUILD_ENVIRONMENT}" == *-build ]]; then

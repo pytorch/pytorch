@@ -42,10 +42,10 @@ fi
 
 export SCRIPT_HELPERS_DIR=$SCRIPT_PARENT_DIR/win-test-helpers
 
-# Try to pull value from CIRCLE_PULL_REQUEST
+# Try to pull value from CIRCLE_PR_NUMBER
 # NOTE: file_diff_from_base is currently bugged for GHA due to an issue finding a merge base for ghstack PRs
 #       see https://github.com/pytorch/pytorch/issues/60111
-IN_PULL_REQUEST=${CIRCLE_PULL_REQUEST:-}
+IN_PULL_REQUEST=${CIRCLE_PR_NUMBER:-}
 if [ -n "$IN_PULL_REQUEST" ]; then
   DETERMINE_FROM="${TMP_DIR}/determine_from"
   file_diff_from_base "$DETERMINE_FROM"

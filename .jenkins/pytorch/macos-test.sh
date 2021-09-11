@@ -51,11 +51,11 @@ test_python_all() {
   export GLOO_SOCKET_IFNAME=lo0
   echo "Ninja version: $(ninja --version)"
 
-  # Try to pull value from CIRCLE_PULL_REQUEST first then GITHUB_HEAD_REF second
-  # CIRCLE_PULL_REQUEST comes from CircleCI
+  # Try to pull value from CIRCLE_PR_NUMBER first then GITHUB_HEAD_REF second
+  # CIRCLE_PR_NUMBER comes from CircleCI
   # NOTE: file_diff_from_base is currently bugged for GHA due to an issue finding a merge base for ghstack PRs
   #       see https://github.com/pytorch/pytorch/issues/60111
-  IN_PULL_REQUEST=${CIRCLE_PULL_REQUEST:-${GITHUB_HEAD_REF:-}}
+  IN_PULL_REQUEST=${CIRCLE_PR_NUMBER:-${GITHUB_HEAD_REF:-}}
   if [ -n "$IN_PULL_REQUEST" ]; then
     DETERMINE_FROM=$(mktemp)
     file_diff_from_base "$DETERMINE_FROM"
