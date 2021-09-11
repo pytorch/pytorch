@@ -19,7 +19,6 @@
   auto input = torch::ones({1, 3, 224, 224}, at::kFloat);
   auto outputTensor = module.forward({input}).toTensor();
   XCTAssertTrue(outputTensor.numel() == 1000);
-
 }
 
 - (void)testFullJIT {
