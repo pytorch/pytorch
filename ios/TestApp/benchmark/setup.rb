@@ -65,6 +65,25 @@ targets.each do |target|
         target.resources_build_phase.add_file_reference(ref, true)
     end
 end
+
+# add test files
+testTarget = targets[1]
+testFilePath = File.expand_path('../TestAppTests/')
+group = project.main_group.find_subpath(File.join('TestAppTests'),true)
+group.files.each do |file|
+    if (file.path.end_with?(".mm"))
+        file.remove_from_project
+    end
+end
+
+if(options[:lite])
+    file = group.new_file("TestLiteInterpreter.mm")
+    testTarget.add_file_references([file])
+else
+    file = group.new_file("TestFullJIT.mm")
+    testTarget.add_file_references([file])
+end
+
 puts "Linking static libraries..."
 libs = ['libc10.a', 'libclog.a', 'libpthreadpool.a', 'libXNNPACK.a', 'libeigen_blas.a', 'libcpuinfo.a', 'libpytorch_qnnpack.a', 'libtorch_cpu.a', 'libtorch.a']
 frameworks = ['CoreML', 'Metal', 'MetalPerformanceShaders', 'Accelerate']
