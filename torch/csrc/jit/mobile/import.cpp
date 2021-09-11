@@ -220,7 +220,7 @@ class BytecodeDeserializer final {
       std::shared_ptr<mobile::CompilationUnit> mcu);
   void parseFunctionSchema(
       const std::string& function_name,
-      const at::optional<IValue>& schemaTable,
+      IValue* schemaTable,
       const int64_t& model_version,
       mobile::Function* function);
   /**
@@ -290,40 +290,57 @@ TypePtr BytecodeDeserializer::resolveTypeName(const c10::QualifiedName& qn) {
 // of the specific BytecodeDeserializer, like parsing other tables
 void BytecodeDeserializer::parseFunctionSchema(
     const std::string& function_name,
-    const at::optional<IValue>& schemaTable,
+    IValue* schemaTable,
     const int64_t& model_version,
     mobile::Function* function) {
   // function schema
-  if (schemaTable.has_value()) { // (schema is optional for back compat)
-    auto parseArgList = [this](const std::vector<IValue>& argTables) {
+  if (schemaTable) { // (schema is optional for back compat)
+    auto parseArgList = [this](std::vector<IValue>&& argTables) {
       std::vector<c10::Argument> args;
-      for (auto&& argTable : argTables) {
-        auto name = expect_field(argTable, "name", BYTECODE_INDEX_ARGUMENT_NAME)
-                        .toStringRef();
-        const auto& type = resolveTypeName(
-            (expect_field(argTable, "type", BYTECODE_INDEX_ARGUMENT_TYPE))
+      for (auto&& argTable : std::move(argTables)) {
+        auto argTableElements =
+            std::move(*std::move(argTable).toTuple()).elements();
+        auto name =
+            expect_field(
+                argTableElements, "name", BYTECODE_INDEX_ARGUMENT_NAME)
+                .toStringRef();
+        c10::TypePtr type = resolveTypeName(
+            (expect_field(
+                argTableElements, "type", BYTECODE_INDEX_ARGUMENT_TYPE))
                 .toStringRef());
-        const IValue& default_value = expect_field(
-            argTable, "default_value", BYTECODE_INDEX_ARGUMENT_DEFAULT_VALUE);
-        args.emplace_back(name, type, c10::nullopt /*N*/, default_value);
+        IValue default_value = expect_field(
+            argTableElements,
+            "default_value",
+            BYTECODE_INDEX_ARGUMENT_DEFAULT_VALUE);
+        args.emplace_back(
+            name,
+            std::move(type),
+            c10::nullopt /*N*/,
+            std::move(default_value));
       }
       return args;
     };
-    const auto& arg_list =
-        expect_field(
-            schemaTable.value(), "arguments", BYTECODE_INDEX_SCHEMA_ARGUMENTS)
-            .toTuple()
-            ->elements();
-    const auto& ret_list =
-        expect_field(
-            schemaTable.value(), "returns", BYTECODE_INDEX_SCHEMA_RETURNS)
-            .toTuple()
-            ->elements();
+    auto schemaTableElements =
+        std::move(*std::move(*schemaTable).toTuple()).elements();
+    std::vector<IValue> arg_list =
+        std::move(*expect_field(
+            schemaTableElements,
+            "arguments",
+            BYTECODE_INDEX_SCHEMA_ARGUMENTS)
+            .toTuple())
+            .elements();
+    std::vector<IValue> ret_list =
+        std::move(*expect_field(
+            schemaTableElements,
+            "returns",
+            BYTECODE_INDEX_SCHEMA_RETURNS)
+            .toTuple())
+            .elements();
     c10::FunctionSchema schema(
         function_name,
         "" /*overload_name*/,
-        parseArgList(arg_list),
-        parseArgList(ret_list),
+        parseArgList(std::move(arg_list)),
+        parseArgList(std::move(ret_list)),
         false /*is_varargs*/,
         false /*is_varret*/);
     function->setSchema(std::move(schema));
@@ -331,15 +348,11 @@ void BytecodeDeserializer::parseFunctionSchema(
 }
 
 void parseOperators(
-    const IValue& codeTable,
+    const std::vector<IValue>& ops_list,
     const int64_t& model_version,
     const uint64_t& module_load_options,
     mobile::Function* function,
     mobile::Function::OperatorCacheType& operator_cache) {
-  const auto& ops_list =
-      expect_field(codeTable, "operators", BYTECODE_INDEX_OPERATOR)
-          .toTuple()
-          ->elements();
   std::unordered_set<std::string> unsupported_op_names =
       load_and_find_unsupported_operator_names(
           ops_list, function, model_version, operator_cache);
@@ -424,107 +437,21 @@ void BytecodeDeserializer::parseMethods(
             codeTableElements, "register_size", BYTECODE_INDEX_REGISTER_SIZE)
             .toInt();
 
-    c10::List<int64_t> debug_handles_list;
+    std::vector<IValue> debug_handles_m_tuple;
     if (debug_handles) {
-      auto debug_handles_m_tuple =
-          std::move(*std::move((*debug_handles)[i]).toTuple()).elements();
-      const std::string& debug_info_function_name =
-          debug_handles_m_tuple[0].toStringRef();
-      TORCH_CHECK(
-          debug_info_function_name == function_name,
-          "The function names in the bytecode table and the debug info table do not match.");
-      IValue& debug_handles_table = debug_handles_m_tuple[1];
-      debug_handles_list =
-          (expect_field(
-               std::move(debug_handles_table).toTuple()->elements(),
-               "function_debug_handles",
-               BYTECODE_INDEX_MODULE_DEBUG_HANDLES)
-               .toTuple()
-               ->elements())[0]
-              .toIntList();
-      TORCH_CHECK(
-          debug_handles_list.size() == ins_list.size(),
-          "The numbers of instructions and debug handles strings do not match.");
+      debug_handles_m_tuple = std::move(*std::move((*debug_handles)[i]).toTuple()).elements();
     }
 
-    for (const auto j : c10::irange(ins_list.size())) {
-      std::vector<IValue> ins_item =
-          std::move(*std::move(ins_list[j]).toTuple()).elements();
-      TORCH_CHECK(
-          ins_item.size() == 3,
-          "There should be three parts in an instruction. The function name is ",
-          function_name);
-      OpCode op_code = parseOpCode(ins_item[0].toString()->string().c_str());
-      int X = ins_item[1].toInt();
-      int N = ins_item[2].toInt();
-      if (debug_handles) {
-        int64_t debug_handle = debug_handles_list[j];
-        function->append_instruction(op_code, X, N, debug_handle);
-      } else {
-        function->append_instruction(op_code, X, N);
-      }
-    }
+    parseInstructions(function_name, ins_list, debug_handles_m_tuple, function.get());
 
-    parseConstants(codeTable, function.get());
+    parseOperators(ops_list, model_version, module_load_options_, function.get(), operator_cache);
 
-    parseTypes(codeTable, function.get());
+    parseConstants(consts_list, function.get());
 
-    parseRegisterSize(codeTable, function.get());
+    parseTypes(types_list, function.get());
 
     function->set_register_size(register_size);
 
-    // function schema
-    if (schemaTable) { // (schema is optional for back compat)
-      auto parseArgList = [this](std::vector<IValue>&& argTables) {
-        std::vector<c10::Argument> args;
-        for (auto&& argTable : std::move(argTables)) {
-          auto argTableElements =
-              std::move(*std::move(argTable).toTuple()).elements();
-          auto name =
-              expect_field(
-                  argTableElements, "name", BYTECODE_INDEX_ARGUMENT_NAME)
-                  .toStringRef();
-          c10::TypePtr type = resolveTypeName(
-              (expect_field(
-                   argTableElements, "type", BYTECODE_INDEX_ARGUMENT_TYPE))
-                  .toStringRef());
-          IValue default_value = expect_field(
-              argTableElements,
-              "default_value",
-              BYTECODE_INDEX_ARGUMENT_DEFAULT_VALUE);
-          args.emplace_back(
-              name,
-              std::move(type),
-              c10::nullopt /*N*/,
-              std::move(default_value));
-        }
-        return args;
-      };
-      auto schemaTableElements =
-          std::move(*std::move(*schemaTable).toTuple()).elements();
-      std::vector<IValue> arg_list =
-          std::move(*expect_field(
-                         schemaTableElements,
-                         "arguments",
-                         BYTECODE_INDEX_SCHEMA_ARGUMENTS)
-                         .toTuple())
-              .elements();
-      std::vector<IValue> ret_list =
-          std::move(*expect_field(
-                         schemaTableElements,
-                         "returns",
-                         BYTECODE_INDEX_SCHEMA_RETURNS)
-                         .toTuple())
-              .elements();
-      c10::FunctionSchema schema(
-          function_name,
-          "" /*overload_name*/,
-          parseArgList(std::move(arg_list)),
-          parseArgList(std::move(ret_list)),
-          false /*is_varargs*/,
-          false /*is_varret*/);
-      function->setSchema(std::move(schema));
-    }
     parseFunctionSchema(
         function_name, schemaTable, model_version, function.get());
 

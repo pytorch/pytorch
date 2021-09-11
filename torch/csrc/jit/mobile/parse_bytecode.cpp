@@ -10,18 +10,18 @@ namespace jit {
 OpCode parseOpCode(const char* str);
 using c10::IValue;
 
-const IValue& expect_field(
-    const IValue& tup,
+IValue expect_field(
+    std::vector<IValue>& elements,
     const std::string& expected_name,
     size_t entry) {
-  auto row = tup.toTuple()->elements().at(entry).toTuple();
+  auto row = std::move(elements.at(entry)).toTuple();
   TORCH_INTERNAL_ASSERT(
       row->elements().at(0).toStringRef() == expected_name,
       "Expected ",
       expected_name,
       " found ",
       row->elements().at(0).toStringRef());
-  return row->elements().at(1);
+  return std::move(row->elements().at(1));
 }
 
 namespace mobile {
@@ -30,39 +30,33 @@ namespace {} // namespace
 
 void parseInstructions(
     const std::string& function_name,
-    const IValue& codeTable,
-    const IValue& debug_handles_element,
+    const std::vector<IValue>& ins_list,
+    std::vector<IValue>& debug_handles_m_tuple,
     mobile::Function* function) {
-  const auto& ins_list =
-      expect_field(codeTable, "instructions", BYTECODE_INDEX_INSTRUCTION)
-          .toTuple()
-          ->elements();
-
   c10::List<int64_t> debug_handles_list;
-  bool has_debug_handle = !debug_handles_element.isNone();
-  if (has_debug_handle) {
-    const auto& debug_handles_m_tuple =
-        debug_handles_element.toTuple()->elements();
+  if (!debug_handles_m_tuple.empty()) {
     const std::string& debug_info_function_name =
         debug_handles_m_tuple[0].toStringRef();
     TORCH_CHECK(
         debug_info_function_name == function_name,
         "The function names in the bytecode table and the debug info table do not match.");
-    const IValue& debug_handles_table = debug_handles_m_tuple[1];
-    debug_handles_list = (expect_field(
-                              debug_handles_table,
-                              "function_debug_handles",
-                              BYTECODE_INDEX_MODULE_DEBUG_HANDLES)
-                              .toTuple()
-                              ->elements())[0]
-                             .toIntList();
+    IValue& debug_handles_table = debug_handles_m_tuple[1];
+    debug_handles_list =
+        (expect_field(
+            std::move(debug_handles_table).toTuple()->elements(),
+            "function_debug_handles",
+            BYTECODE_INDEX_MODULE_DEBUG_HANDLES)
+            .toTuple()
+            ->elements())[0]
+            .toIntList();
     TORCH_CHECK(
         debug_handles_list.size() == ins_list.size(),
-        "The numbers of instructions and debug handles do not match.");
+        "The numbers of instructions and debug handles strings do not match.");
   }
 
   for (const auto j : c10::irange(ins_list.size())) {
-    const auto& ins_item = ins_list[j].toTuple()->elements();
+    std::vector<IValue> ins_item =
+        std::move(*std::move(ins_list[j]).toTuple()).elements();
     TORCH_CHECK(
         ins_item.size() == 3,
         "There should be three parts in an instruction. The function name is ",
@@ -70,7 +64,7 @@ void parseInstructions(
     OpCode op_code = parseOpCode(ins_item[0].toString()->string().c_str());
     int X = ins_item[1].toInt();
     int N = ins_item[2].toInt();
-    if (has_debug_handle) {
+    if (!debug_handles_list.empty()) {
       int64_t debug_handle = debug_handles_list[j];
       function->append_instruction(op_code, X, N, debug_handle);
     } else {
@@ -79,20 +73,13 @@ void parseInstructions(
   }
 }
 
-void parseConstants(const IValue& codeTable, mobile::Function* function) {
-  const auto& consts_list =
-      expect_field(codeTable, "constants", BYTECODE_INDEX_CONSTANT)
-          .toTuple()
-          ->elements();
+void parseConstants(const std::vector<IValue>& consts_list, mobile::Function* function) {
   for (const auto& constant : consts_list) {
     function->append_constant(constant);
   }
 }
 
-void parseTypes(const IValue& codeTable, mobile::Function* function) {
-  const auto& types_list = expect_field(codeTable, "types", BYTECODE_INDEX_TYPE)
-                               .toTuple()
-                               ->elements();
+void parseTypes(const std::vector<IValue>& types_list, mobile::Function* function) {
   static const c10::QualifiedName classPrefix = "__torch__.torch.classes";
   for (const auto& t : types_list) {
     c10::QualifiedName qn(t.toStringRef());
@@ -110,11 +97,8 @@ void parseTypes(const IValue& codeTable, mobile::Function* function) {
   }
 }
 
-void parseRegisterSize(const IValue& codeTable, mobile::Function* function) {
-  const auto& register_size =
-      expect_field(codeTable, "register_size", BYTECODE_INDEX_REGISTER_SIZE)
-          .toInt();
-  function->set_register_size(register_size);
+void parseRegisterSize(size_t rsize, mobile::Function* function) {
+  function->set_register_size(rsize);
 }
 
 } // namespace mobile

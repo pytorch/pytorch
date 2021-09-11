@@ -928,21 +928,15 @@ TEST(RunTimeTest, ParseBytecode) {
   std::vector<IValue> constants; // empty for this example
 
   std::vector<IValue> types{"List[int]", "List[int]"};
-  auto codeTable = Table(
-      {{"instructions", to_tuple(instructions)},
-       {"operators", to_tuple(operators)},
-       {"constants", to_tuple(constants)},
-       {"types", to_tuple(types)},
-       {"register_size", 5}});
-
   // 2. Parse the function
   std::string function_name("test_function");
   auto function = std::unique_ptr<mobile::Function>(
       new mobile::Function(c10::QualifiedName(function_name)));
-  parseInstructions(function_name, codeTable, IValue(), function.get());
-  parseConstants(codeTable, function.get());
-  parseTypes(codeTable, function.get());
-  parseRegisterSize(codeTable, function.get());
+  std::vector<IValue> debug_handles_m_tuple;
+  parseInstructions(function_name, instructions, debug_handles_m_tuple, function.get());
+  parseTypes(types, function.get());
+  const size_t rsize = 5;
+  parseRegisterSize(rsize, function.get());
 
   // 3. Prepare for inputs and run the function
   // Note that the first input is reserved for Module object.
