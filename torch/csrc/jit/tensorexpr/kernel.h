@@ -76,6 +76,10 @@ void promoteInputs(
     std::vector<ExprHandle>& inputs,
     const int typeConstraints = kAllTypes);
 
+ExprHandle promoteToDtype(ExprHandle e, ScalarType dt);
+
+ExprHandle promoteIntegerToDefaultType(const ExprHandle& e);
+
 ExprHandle demoteOutput(
     const ExprHandle& e,
     const c10::optional<ScalarType> type);
