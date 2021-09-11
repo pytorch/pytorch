@@ -569,13 +569,17 @@
             cd ${PROJ_ROOT}/ios/TestApp/benchmark
             mkdir -p ../models
             python trace_model.py
-            ruby setup.rb
+            if [ $(BUILD_LITE_INTERPRETER) == 1 ]; then
+              ruby setup.rb --lite 1
+            else
+              ruby setup.rb
+            fi
             cd ${PROJ_ROOT}/ios/TestApp
             instruments -s -devices
             if [ $(BUILD_LITE_INTERPRETER) == 1 ]; then
-              fastlane scan --only_testing TestAppTests/TestAppTests/testLiteInterpreter
+              fastlane scan --only_testing TestAppTests/TestLiteInterpreter/testLiteInterpreter
             else
-              fastlane scan --only_testing TestAppTests/TestAppTests/testFullJIT
+              fastlane scan --only_testing TestAppTests/TestFullJIT/testFullJIT
             fi
   pytorch_linux_bazel_build:
     <<: *pytorch_params
