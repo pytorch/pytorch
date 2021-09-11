@@ -8,7 +8,12 @@ option_parser = OptionParser.new do |opts|
  opts.on('-t', '--team_id ', 'development team ID') { |value|
     options[:team_id] = value
  }
+ opts.on('-l', '--lite ', 'use lite interpreter') { |value|
+    options[:lite] = value
+ }
 end.parse!
+puts options.inspect
+
 puts "Current directory: #{Dir.pwd}"
 install_path = File.expand_path("../../../build_ios/install")
 if not Dir.exist? (install_path)
@@ -52,6 +57,7 @@ end
 
 file_refs = []
 # collect models
+puts "Installing models..."
 models_dir = File.expand_path("../models")
 Dir.foreach(models_dir) do |model|
     if(model.end_with?(".pt") || model.end_with?(".ptl"))
@@ -67,6 +73,7 @@ targets.each do |target|
 end
 
 # add test files
+puts "Adding test files..."
 testTarget = targets[1]
 testFilePath = File.expand_path('../TestAppTests/')
 group = project.main_group.find_subpath(File.join('TestAppTests'),true)

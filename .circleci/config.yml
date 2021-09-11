@@ -1840,11 +1840,13 @@ jobs:
             cd ${PROJ_ROOT}/ios/TestApp
             instruments -s -devices
             if [ $(BUILD_LITE_INTERPRETER) == 1 ]; then
-              fastlane scan --only_testing TestAppTests/TestLiteInterpreter/testLiteInterpreter
-            elif [ $(USE_PYTORCH_METAL) == 1 ]; then
-              fastlane scan --only_testing TestAppTests/TestLiteInterpreter/testMetal
+              if [ $(USE_PYTORCH_METAL) == 1 ]; then
+                fastlane scan --only_testing TestAppTests/TestAppTests/testMetal
+              else
+                fastlane scan --only_testing TestAppTests/TestAppTests/testLiteInterpreter
+              fi
             else
-              fastlane scan --only_testing TestAppTests/TestFullJIT/testFullJIT
+              fastlane scan --only_testing TestAppTests/TestAppTests/testFullJIT
             fi
   pytorch_linux_bazel_build:
     <<: *pytorch_params
