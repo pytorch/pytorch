@@ -568,7 +568,7 @@
             # generate models for differnet backends
             cd ${PROJ_ROOT}/ios/TestApp/benchmark
             mkdir -p ../models
-            python benchmark/trace_model.py
+            python trace_model.py
             ruby setup.rb
             cd ${PROJ_ROOT}/ios/TestApp
             instruments -s -devices
