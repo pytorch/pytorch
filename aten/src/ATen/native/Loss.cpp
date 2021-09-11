@@ -79,10 +79,14 @@ Tensor hinge_embedding_loss(const Tensor& self, const Tensor& target, double mar
 
 Tensor triplet_margin_loss(const Tensor& anchor, const Tensor& positive, const Tensor& negative, double margin,
                            double p, double eps, bool swap, int64_t reduction) {
-  auto dist_pos = at::pairwise_distance(anchor, positive, p, eps);
-  auto dist_neg = at::pairwise_distance(anchor, negative, p, eps);
+  auto pairwise_distance = [&p, &eps](const Tensor& x1, const Tensor& x2) {
+    auto innermost_dim = x1.dim() - 1;
+    return at::norm(x1 - x2 + eps, p, innermost_dim, false);
+  };
+  auto dist_pos = pairwise_distance(anchor, positive);
+  auto dist_neg = pairwise_distance(anchor, negative);
   if (swap) {
-    auto dist_swap = at::pairwise_distance(positive, negative, p, eps);
+    auto dist_swap = pairwise_distance(positive, negative);
     dist_neg = at::min(dist_neg, dist_swap);
   }
   auto output = at::clamp_min(margin + dist_pos - dist_neg, 0);
