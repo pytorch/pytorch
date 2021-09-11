@@ -172,40 +172,31 @@ if(INTERN_BUILD_ATEN_OPS)
     endif()
   endif()
 
-  if(SELECTED_OP_LIST)
-    # With static dispatch we can omit the OP_DEPENDENCY flag. It will not calculate the transitive closure
-    # of used ops. It only needs to register used root ops.
-    if(NOT STATIC_DISPATCH_BACKEND AND NOT OP_DEPENDENCY)
-      message(WARNING
-        "For custom build with dynamic dispatch you have to provide the dependency graph of PyTorch operators.\n"
-        "Switching to STATIC_DISPATCH_BACKEND=CPU. If you run into problems with static dispatch and still want"
-        " to use selective build with dynamic dispatch, please try:\n"
-        "1. Run the static analysis tool to generate the dependency graph, e.g.:\n"
-        "   LLVM_DIR=/usr ANALYZE_TORCH=1 tools/code_analyzer/build.sh\n"
-        "2. Run the custom build with the OP_DEPENDENCY option pointing to the generated dependency graph, e.g.:\n"
-        "   scripts/build_android.sh -DSELECTED_OP_LIST=<op_list.yaml> -DOP_DEPENDENCY=<dependency_graph.yaml>\n"
-      )
-      set(STATIC_DISPATCH_BACKEND CPU)
-    else()
-      execute_process(
-        COMMAND
-        "${PYTHON_EXECUTABLE}" ${CMAKE_CURRENT_LIST_DIR}/../tools/code_analyzer/gen_op_registration_allowlist.py
-        --op-dependency "${OP_DEPENDENCY}"
-        --root-ops "${SELECTED_OP_LIST}"
-        OUTPUT_VARIABLE OP_REGISTRATION_WHITELIST
-      )
-      separate_arguments(OP_REGISTRATION_WHITELIST)
-      message(STATUS "Custom build with op registration whitelist: ${OP_REGISTRATION_WHITELIST}")
-      list(APPEND CUSTOM_BUILD_FLAGS
-        --force_schema_registration
-        --op_registration_whitelist ${OP_REGISTRATION_WHITELIST})
-    endif()
-  endif()
-
   if(STATIC_DISPATCH_BACKEND)
     message(STATUS "Custom build with static dispatch backend: ${STATIC_DISPATCH_BACKEND}")
     list(APPEND CUSTOM_BUILD_FLAGS
       --static_dispatch_backend ${STATIC_DISPATCH_BACKEND})
+  endif()
+
+  if(SELECTED_OP_LIST)
+    # With static dispatch we can omit the OP_DEPENDENCY flag. It will not calculate the transitive closure
+    # of used ops. It only needs to register used root ops.
+    if(NOT STATIC_DISPATCH_BACKEND AND NOT OP_DEPENDENCY)
+      message(INFO "Use default op dependency graph .yaml file for custom build with dynamic dispatch.")
+      set(OP_DEPENDENCY ${CMAKE_CURRENT_LIST_DIR}/../tools/code_analyzer/default_op_deps.yaml)
+    endif()
+    execute_process(
+      COMMAND
+      "${PYTHON_EXECUTABLE}" ${CMAKE_CURRENT_LIST_DIR}/../tools/code_analyzer/gen_op_registration_allowlist.py
+      --op-dependency "${OP_DEPENDENCY}"
+      --root-ops "${SELECTED_OP_LIST}"
+      OUTPUT_VARIABLE OP_REGISTRATION_WHITELIST
+    )
+    separate_arguments(OP_REGISTRATION_WHITELIST)
+    message(STATUS "Custom build with op registration whitelist: ${OP_REGISTRATION_WHITELIST}")
+    list(APPEND CUSTOM_BUILD_FLAGS
+      --force_schema_registration
+      --op_registration_whitelist ${OP_REGISTRATION_WHITELIST})
   endif()
 
   set(GEN_COMMAND
