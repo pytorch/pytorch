@@ -14,34 +14,32 @@
 - (void)testLiteInterpreter {
   NSString* modelPath = [[NSBundle bundleForClass:[self class]] pathForResource:@"model_lite"
                                                                          ofType:@"ptl"];
-  XCTAssertTrue([self runModel:modelPath metal:NO], @"");
+  auto module = torch::jit::_load_for_mobile(modelPath.UTF8String);
+  c10::InferenceMode mode;
+  auto input = torch::ones({1, 3, 224, 224}, at::kFloat);
+  auto outputTensor = module.forward({input}).toTensor();
+  XCTAssertTrue(outputTensor.numel() == 1000);
+
 }
 
 - (void)testFullJIT {
   NSString* modelPath = [[NSBundle bundleForClass:[self class]] pathForResource:@"model"
                                                                          ofType:@"pt"];
-  XCTAssertTrue([self runModel:modelPath metal:NO], @"");
+  auto module = torch::jit::load(modelPath.UTF8String);
+  c10::InferenceMode mode;
+  auto input = torch::ones({1, 3, 224, 224}, at::kFloat);
+  auto outputTensor = module.forward({input}).toTensor();
+  XCTAssertTrue(outputTensor.numel() == 1000);
 }
 
 - (void)testMetal {
-    NSString* modelPath = [[NSBundle bundleForClass:[self class]] pathForResource:@"model_metal"
-                                                                           ofType:@"ptl"];
-    XCTAssertTrue([self runModel:modelPath metal:YES], @"");
-}
-
-- (bool)runModel:(NSString*)path metal:(BOOL) metal{
-  XCTAssertTrue([NSFileManager.defaultManager fileExistsAtPath:path], @"model doesn't exist!");
-  torch::jit::mobile::Module module = torch::jit::_load_for_mobile(path.UTF8String);
+  NSString* modelPath = [[NSBundle bundleForClass:[self class]] pathForResource:@"model_metal"
+                                                                         ofType:@"ptl"];
+  auto module = torch::jit::_load_for_mobile(modelPath.UTF8String);
   c10::InferenceMode mode;
-  auto input = torch::ones({1, 3, 224, 224}, at::kFloat);
-  at::outputTensor;
-  if(metal) {
-    auto metal_input = input.metal();
-    outputTensor = module.forward({metal_input}).toTensor().cpu();
-  } else {
-    outputTensor = module.forward({input}).toTensor();
-  }
-  return outputTensor.numel() == 1000;
+  auto input = torch::ones({1, 3, 224, 224}, at::kFloat).metal();
+  auto outputTensor = module.forward({input}).toTensor().cpu();
+  XCTAssertTrue(outputTensor.numel() == 1000);
 }
 
 @end
