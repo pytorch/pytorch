@@ -107,7 +107,7 @@ TORCH_META_FUNC(bmm)(const Tensor& self, const Tensor& mat2) {
 
         set_output({self.sizes()[0], self.sizes()[1], mat2.sizes()[2]}, self.options());
     } else {
-        common_checks_baddbmm_bmm(*this, self.resolve_conj(), mat2.resolve_conj(), Scalar(0.0), Scalar(1.0), true);
+        common_checks_baddbmm_bmm(*this, self, mat2, Scalar(0.0), Scalar(1.0), true);
     }
 }
 
@@ -1448,7 +1448,7 @@ TORCH_IMPL_FUNC(bmm_out_cpu)
     conjugate_mutable_input_if_needed(const_cast<Tensor&>(result), result_is_conj);
     }
     namedinference::propagate_names_if_nonempty(
-      result,
+      const_cast<Tensor&>(result),
       namedinference::compute_bmm_outnames(const_cast<Tensor&>(result), batch1, batch2)
     );
   }
