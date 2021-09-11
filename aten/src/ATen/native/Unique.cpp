@@ -136,6 +136,11 @@ ForwardIt _unique_dim_cpu_impl(ForwardIt first, ForwardIt last,
       return last;
     }
 
+    TORCH_INTERNAL_ASSERT(inverse_indices_vec.is_contiguous(),
+        "_unique_dim_cpu_impl only support contiguous inverse_indices_vec");
+    TORCH_INTERNAL_ASSERT(counts.is_contiguous(),
+        "_unique_dim_cpu_impl only support contiguous counts");
+
     int64_t *indices_data = indices.data();
     int64_t *inverse_data = inverse_indices_vec.data_ptr<int64_t>();
     int64_t *counts_data = counts.data_ptr<int64_t>();
@@ -274,7 +279,7 @@ unique_dim_consecutive_cpu(const Tensor& self, const int64_t dim, const bool ret
 
 std::tuple<Tensor, Tensor, Tensor>
 unique_consecutive_cpu(const Tensor& self, const bool return_inverse, const bool return_counts, c10::optional<int64_t> dim) {
-  if (!dim.has_value() || (dim.value() == 0 && self.sizes().size() == 1)) {
+  if (!dim.has_value()) {
     return AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::BFloat16, at::ScalarType::Bool, self.scalar_type(), "unique", [&] {
       return unique_consecutive_cpu_template<scalar_t>(self, return_inverse, return_counts);
     });
