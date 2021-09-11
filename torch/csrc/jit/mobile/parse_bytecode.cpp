@@ -43,11 +43,11 @@ void parseInstructions(
     IValue& debug_handles_table = debug_handles_m_tuple[1];
     debug_handles_list =
         (expect_field(
-            std::move(debug_handles_table).toTuple()->elements(),
-            "function_debug_handles",
-            BYTECODE_INDEX_MODULE_DEBUG_HANDLES)
-            .toTuple()
-            ->elements())[0]
+             std::move(debug_handles_table).toTuple()->elements(),
+             "function_debug_handles",
+             BYTECODE_INDEX_MODULE_DEBUG_HANDLES)
+             .toTuple()
+             ->elements())[0]
             .toIntList();
     TORCH_CHECK(
         debug_handles_list.size() == ins_list.size(),
@@ -73,13 +73,17 @@ void parseInstructions(
   }
 }
 
-void parseConstants(const std::vector<IValue>& consts_list, mobile::Function* function) {
+void parseConstants(
+    const std::vector<IValue>& consts_list,
+    mobile::Function* function) {
   for (const auto& constant : consts_list) {
     function->append_constant(constant);
   }
 }
 
-void parseTypes(const std::vector<IValue>& types_list, mobile::Function* function) {
+void parseTypes(
+    const std::vector<IValue>& types_list,
+    mobile::Function* function) {
   static const c10::QualifiedName classPrefix = "__torch__.torch.classes";
   for (const auto& t : types_list) {
     c10::QualifiedName qn(t.toStringRef());

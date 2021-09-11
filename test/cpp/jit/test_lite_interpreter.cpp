@@ -933,7 +933,8 @@ TEST(RunTimeTest, ParseBytecode) {
   auto function = std::unique_ptr<mobile::Function>(
       new mobile::Function(c10::QualifiedName(function_name)));
   std::vector<IValue> debug_handles_m_tuple;
-  parseInstructions(function_name, instructions, debug_handles_m_tuple, function.get());
+  parseInstructions(
+      function_name, instructions, debug_handles_m_tuple, function.get());
   parseTypes(types, function.get());
   const size_t rsize = 5;
   parseRegisterSize(rsize, function.get());

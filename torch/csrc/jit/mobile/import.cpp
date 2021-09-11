@@ -301,12 +301,11 @@ void BytecodeDeserializer::parseFunctionSchema(
         auto argTableElements =
             std::move(*std::move(argTable).toTuple()).elements();
         auto name =
-            expect_field(
-                argTableElements, "name", BYTECODE_INDEX_ARGUMENT_NAME)
+            expect_field(argTableElements, "name", BYTECODE_INDEX_ARGUMENT_NAME)
                 .toStringRef();
         c10::TypePtr type = resolveTypeName(
             (expect_field(
-                argTableElements, "type", BYTECODE_INDEX_ARGUMENT_TYPE))
+                 argTableElements, "type", BYTECODE_INDEX_ARGUMENT_TYPE))
                 .toStringRef());
         IValue default_value = expect_field(
             argTableElements,
@@ -324,17 +323,16 @@ void BytecodeDeserializer::parseFunctionSchema(
         std::move(*std::move(*schemaTable).toTuple()).elements();
     std::vector<IValue> arg_list =
         std::move(*expect_field(
-            schemaTableElements,
-            "arguments",
-            BYTECODE_INDEX_SCHEMA_ARGUMENTS)
-            .toTuple())
+                       schemaTableElements,
+                       "arguments",
+                       BYTECODE_INDEX_SCHEMA_ARGUMENTS)
+                       .toTuple())
             .elements();
     std::vector<IValue> ret_list =
-        std::move(*expect_field(
-            schemaTableElements,
-            "returns",
-            BYTECODE_INDEX_SCHEMA_RETURNS)
-            .toTuple())
+        std::move(
+            *expect_field(
+                 schemaTableElements, "returns", BYTECODE_INDEX_SCHEMA_RETURNS)
+                 .toTuple())
             .elements();
     c10::FunctionSchema schema(
         function_name,
@@ -439,12 +437,19 @@ void BytecodeDeserializer::parseMethods(
 
     std::vector<IValue> debug_handles_m_tuple;
     if (debug_handles) {
-      debug_handles_m_tuple = std::move(*std::move((*debug_handles)[i]).toTuple()).elements();
+      debug_handles_m_tuple =
+          std::move(*std::move((*debug_handles)[i]).toTuple()).elements();
     }
 
-    parseInstructions(function_name, ins_list, debug_handles_m_tuple, function.get());
+    parseInstructions(
+        function_name, ins_list, debug_handles_m_tuple, function.get());
 
-    parseOperators(ops_list, model_version, module_load_options_, function.get(), operator_cache);
+    parseOperators(
+        ops_list,
+        model_version,
+        module_load_options_,
+        function.get(),
+        operator_cache);
 
     parseConstants(consts_list, function.get());
 
