@@ -1006,6 +1006,20 @@ Tensor masked_scatter_backward(const Tensor & grad, const Tensor & mask, IntArra
   return mask_selected.view(sizes);
 }
 
+Tensor cholesky_jvp(const Tensor& input_tangent, const Tensor& L, bool upper) {
+  // Differentiation of the Cholesky decomposition, Iain Murray
+  // https://arxiv.org/abs/1602.07527
+  // equation 8
+  auto input_tangent_ = upper ? input_tangent.transpose(-1, -2).conj() : input_tangent;
+  auto L_ = upper ? L.transpose(-1, -2).conj() : L;
+
+  auto L_inverse = std::get<0>(at::triangular_solve(at::eye(L.size(-1), L.options()), L_, /*upper=*/false));
+  auto phi = at::matmul(at::matmul(L_inverse, input_tangent_), L_inverse.transpose(-2, -1).conj());
+  phi.tril_().diagonal(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1).mul_(0.5);
+  auto L_tangent = L_.matmul(phi);
+  return upper ? L_tangent.transpose(-1, -2).conj() : L_tangent;
+}
+
 Tensor cholesky_backward(Tensor grad, bool upper, Tensor L) {
   // cf. Iain Murray (2016); arXiv 1602.07527
   // This gradient is symmetric, and not triangular.
@@ -3730,6 +3744,42 @@ std::tuple<Tensor, Tensor> lu_solve_backward(
 
 
   return std::make_tuple(self_grad, LU_data_grad);
+}
+
+Tensor lu_solve_forward_AD(
+  const Tensor& dB,
+  const Tensor& dLU_data,
+  const Tensor& LU_data,
+  const Tensor& LU_pivots,
+  const Tensor& X
+) {
+  auto dL = dLU_data.tril(-1);
+  auto dU = dLU_data.triu();
+
+  // From the derivations from above we have that:
+  // dX = -U^{-1} dU U^{-1} L^{-1} P^T B - U^{-1} L^{-1} dL L^{-1} P^T B + U^{-1} L^{-1} P^T dB,
+  // or, using that X = (LU)^{-1} P^T B,
+  // dX = -U^{-1} dU X - (LU)^{-1} dL U X + (LU)^{-1} P^T dB
+
+  // -U^{-1} dU X
+  auto U = LU_data.triu();
+  auto dU_part = -std::get<0>(at::triangular_solve(
+    dU.matmul(X),
+    U,
+    /*upper=*/true
+  ));
+
+  // (LU)^{-1} dL U X,
+  // we use lu_solve to solve this system which requires pivots which are returned by the lu routine.
+  // Since no pivoting is required for the system, we create a tensor of identity permutations
+  // which are 1-based because of the Fortran-like LAPACK interfaces.
+  auto identity_pivots = at::arange(1, LU_data.size(-1) + 1, LU_pivots.options()).expand(LU_pivots.sizes());
+  auto dL_part = at::lu_solve(dL.matmul(U).matmul(X), LU_data, identity_pivots);
+
+  // (LU)^{-1} P^T dB
+  auto dB_part = at::lu_solve(dB, LU_data, LU_pivots);
+
+  return dU_part - dL_part + dB_part;
 }
 
 Tensor lu_unpack_backward(
