@@ -7490,6 +7490,14 @@ workflows:
           name: pytorch_ios_12_5_1_arm64_metal_build
           use_metal: "1"
       - pytorch_ios_build:
+          build_environment: pytorch-ios-12.5.1-x86_64_metal_build
+          context: org-member
+          ios_arch: x86_64
+          ios_platform: SIMULATOR
+          lite_interpreter: "1"
+          name: pytorch_ios_12_5_1_x86_64_metal_build
+          use_metal: "1"
+      - pytorch_ios_build:
           build_environment: pytorch-ios-12.5.1-arm64_full_jit_build
           context: org-member
           ios_arch: arm64
