@@ -4,6 +4,9 @@
 #include <ATen/native/TensorAdvancedIndexing.h>
 #include <ATen/Parallel.h>
 
+#include <algorithm>
+#include <vector>
+
 namespace at { namespace native {
 
 namespace {
@@ -191,24 +194,35 @@ struct cpu_scatter_gather_base_kernel {
     const Tensor& index, const Tensor& src,
     const std::string& method_name, func_t& kernel_func) {
 
+    auto src_size = src.size();
+    auto index_size = index.size();
+    std::vector<int64_t> shape(src.dim());
+
+    for (auto i = 0; i < shape.size(); ++i) {
+      shape[i] = std::min(src_size[i], index_size[i]);
+    }
+
+    auto src_restrided = src.reshape(shape);
+    auto index_restrided = index.reshape_as(src_restrided);
+
     auto iter = TensorIteratorConfig()
       .check_all_same_dtype(false)
       .resize_outputs(false)
       // NOLINTNEXTLINE(bugprone-argument-comment)
-      .declare_static_shape(index.sizes(), /*squash_dim=*/dim)
-      .add_output(self)
-      .add_input(src)
-      .add_input(index)
+      .declare_static_shape(index_restrided.sizes(), /*squash_dim=*/dim)
+      .add_output(self.reshape_as(src_restrided))
+      .add_input(src_restrided)
+      .add_input(index_restrided)
       .build();
 
     auto self_dim_stride = ensure_nonempty_stride(self, dim);
     auto self_dim_size = ensure_nonempty_size(self, dim);
 
-    auto index_dim_stride = ensure_nonempty_stride(index, dim);
-    auto index_dim_size = ensure_nonempty_size(index, dim);
+    auto index_dim_stride = ensure_nonempty_stride(index_restrided, dim);
+    auto index_dim_size = ensure_nonempty_size(index_restrided, dim);
 
-    auto src_dim_stride = ensure_nonempty_stride(src, dim);
-    auto src_dim_size = ensure_nonempty_size(src, dim);
+    auto src_dim_stride = ensure_nonempty_stride(src_restrided, dim);
+    auto src_dim_size = ensure_nonempty_size(src_restrided, dim);
 
     auto index_upper_bound = is_scatter_like ? self_dim_size : src_dim_size;
 
