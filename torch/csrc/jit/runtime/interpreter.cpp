@@ -996,11 +996,13 @@ MobileCode::MobileCode(
     const std::shared_ptr<Graph>& graph,
     std::string function_name,
     bool emit_default_input_instructions,
+    bool support_default_args_before_out,
     size_t remaining_bailout_depth)
     : Code(new interpreter::MobileCodeImpl(
           graph,
           std::move(function_name),
           emit_default_input_instructions,
+          support_default_args_before_out,
           remaining_bailout_depth)) {}
 
 MobileCode::~MobileCode() = default;

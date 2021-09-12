@@ -235,7 +235,8 @@ class TORCH_API StaticRuntime {
       const std::unordered_map<std::string, c10::IValue>& kwargs,
       const int warmup_runs,
       const int main_runs,
-      bool print_per_node_time = false);
+      bool print_per_node_time = false,
+      bool generate_ai_pep_output = false);
 
   float benchmark_model(
       const std::vector<c10::IValue>& args,
@@ -248,6 +249,7 @@ class TORCH_API StaticRuntime {
     float memory_alloc_time{0.0};
     float memory_dealloc_time{0.0};
     float output_dealloc_time{0.0};
+    float first_iter_time{0.0};
     float total_time{0.0};
     size_t out_nodes_count{0};
     size_t total_nodes_count{0};
