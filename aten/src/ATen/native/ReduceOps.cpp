@@ -1313,7 +1313,7 @@ inline const Tensor & _all(const Tensor & self, const Tensor & result, TensorIte
   if (iter.numel() == 0) {
     result.fill_(1);
   } else if (iter.numel() == 1) {
-    result.fill_(self);
+    result.fill_(self.item());
   } else {
     and_stub(iter.device_type(), iter);
   }
@@ -1352,7 +1352,7 @@ inline const Tensor & _any(const Tensor & self, const Tensor & result, TensorIte
   if (iter.numel() == 0) {
     result.fill_(0);
   } else if (iter.numel() == 1) {
-    result.fill_(self);
+    result.fill_(self.item());
   } else {
     or_stub(iter.device_type(), iter);
   }
