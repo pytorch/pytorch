@@ -374,7 +374,7 @@ def gen_variable_type(
     """
     fm = FileManager(install_dir=out, template_dir=template_path, dry_run=False)
     fm.write('VariableType.h', lambda: {
-        'generated_comment': f'@generated from {template_path}/VariableType.h'
+        'generated_comment': "@" f'generated from {template_path}/VariableType.h'
     })
 
     # NOTE: see Note [Sharded File] at the top of the VariableType.cpp
@@ -385,7 +385,7 @@ def gen_variable_type(
         key_fn=lambda fn: cpp.name(fn.func.func),
         base_env={
             'generated_comment':
-            f'@generated from {template_path}/VariableType.cpp',
+            "@" f'generated from {template_path}/VariableType.cpp',
         },
         env_callable=gen_variable_type_func,
         num_shards=5,
