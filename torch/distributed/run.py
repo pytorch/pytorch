@@ -320,7 +320,7 @@ from torch.distributed.elastic.rendezvous.utils import _parse_rendezvous_config
 from torch.distributed.elastic.utils import macros
 from torch.distributed.elastic.utils.logging import get_logger
 from torch.distributed.launcher.api import LaunchConfig, elastic_launch
-from torch.distributed.elastic.multiprocessing.errors import record
+
 
 log = get_logger()
 
