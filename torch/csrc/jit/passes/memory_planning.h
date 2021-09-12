@@ -125,25 +125,29 @@ c10::optional<size_t> computeStorageSize(const Value& value);
 
 TORCH_API bool hasOutVariant(Node* node);
 
-TORCH_API void planMemory(const std::shared_ptr<Graph>&, Strategy);
+TORCH_API std::
+    pair<size_t, FastMap<const Value*, std::pair<UniqueLiveRange, size_t>>>
+    planMemory(const std::shared_ptr<Graph>&, Strategy);
 
 } // namespace jit
 } // namespace torch
 
 namespace std {
+
+using namespace torch::jit;
+
 template <>
-struct hash<torch::jit::MemRegion> {
-  size_t operator()(torch::jit::MemRegion const& reg) const {
+struct hash<MemRegion> {
+  size_t operator()(const MemRegion& reg) const {
     return std::hash<size_t>()(reg.offset) ^
         (std::hash<size_t>()(reg.size) << 1);
   }
 };
 
 template <>
-struct hash<torch::jit::UniqueLiveRange> {
-  size_t operator()(torch::jit::UniqueLiveRange const& ulvr) const {
-    return std::hash<torch::jit::LiveRange>()(ulvr.lvr) ^
-        (std::hash<string>()(ulvr.id));
+struct hash<UniqueLiveRange> {
+  size_t operator()(const UniqueLiveRange& ulvr) const {
+    return std::hash<LiveRange>()(ulvr.lvr) ^ (std::hash<string>()(ulvr.id));
   }
 };
 

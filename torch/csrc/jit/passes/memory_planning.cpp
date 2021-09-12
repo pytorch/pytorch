@@ -130,51 +130,32 @@ c10::optional<size_t> computeStorageSize(const Value& value) {
   return numel.value() * element_size;
 }
 
-std::pair<std::vector<int64_t>, std::vector<int64_t>> getSizesStrides(
-    const c10::TensorTypePtr& ttp) {
-  std::vector<int64_t> sizes;
-  auto _sizes = ttp->sizes().concrete_sizes();
-  // TODO: why does this break? answer: in place mutation
-  // also %9 : Long(requires_grad=0, device=cpu) = prim::Constant[value={0}]()
-  if (_sizes.has_value() && _sizes.value().size() > 0 &&
-      _sizes.value()[0] != 0) {
-    sizes = _sizes.value();
+Node* insertSlabNode(
+    const std::shared_ptr<Graph>& graph,
+    size_t total_size,
+    c10::optional<at::Device> device_type = c10::nullopt) {
+  auto slab = graph->create(prim::AllocateSlab, 1);
+  slab->output()->setType(StorageType::get());
+  slab->i_(attr::total_size, (int64_t)total_size);
+
+  if (device_type || (device_type = jit::tensorexpr::pickDeviceType(graph))) {
+    slab->i_(attr::device_type, static_cast<int8_t>(device_type->type()));
   } else {
-    sizes = std::vector<int64_t>{0};
+    slab->i_(attr::device_type, static_cast<int8_t>(at::kCPU));
   }
-  std::vector<int64_t> strides;
-  auto _strides = ttp->strides().concrete_sizes();
-  if (_strides.has_value() && _strides.value().size() > 0 &&
-      _strides.value()[0] != 0) {
-    strides = _strides.value();
-  } else {
-    strides = at::detail::defaultStrides(sizes);
-  }
-  return std::make_pair(sizes, strides);
+  slab->insertBefore(graph->nodes().front());
+  return slab;
 }
 
-Node* insertAllocStorageNode(
+void insertAllocNodes(
     const std::shared_ptr<Graph>& graph,
-    size_t total_size) {
-  auto* storage = graph->create(prim::AllocateStorage, 1);
-  // there is no e.g. ui_ because pytorch doesn't have a uint64 ScalarType
-  storage->i_(attr::total_size, (int64_t)total_size);
+    size_t total_size,
+    std::vector<std::pair<const Value*, MemRegion>>& managed_value_allocations,
+    c10::optional<at::Device> device_type = c10::nullopt) {
+  auto slab = insertSlabNode(graph, total_size, device_type);
+  auto release_slab = graph->create(prim::ReleaseSlab, 0);
+  release_slab->addInput(slab->output());
 
-  auto device_type = jit::tensorexpr::pickDeviceType(graph);
-  if (device_type.has_value()) {
-    storage->i_(attr::device, static_cast<int8_t>(device_type.value().type()));
-  } else {
-    storage->i_(attr::device, static_cast<int8_t>(at::kCPU));
-  }
-  storage->insertBefore(graph->nodes().front());
-  return storage;
-}
-
-void insertAllocTensorNodes(
-    const std::shared_ptr<Graph>& graph,
-    Node& storage,
-    std::vector<std::pair<const Value*, MemRegion>>&
-        managed_value_allocations) {
   for (auto& item : managed_value_allocations) {
     auto val = item.first;
     auto region = item.second;
@@ -188,19 +169,15 @@ void insertAllocTensorNodes(
     auto* alloc = graph->create(prim::AllocateTensor, 1);
     node->addInput(alloc->output());
     alloc->insertBefore(node);
-    alloc->addInput(storage.output());
+    alloc->addInput(slab->output());
 
     auto ttp = val->type()->expect<c10::TensorType>();
-    std::vector<int64_t> sizes, strides;
-    std::tie(sizes, strides) = getSizesStrides(ttp);
-
+    alloc->ty_(attr::profiled_type, ttp);
     alloc->i_(attr::size, (int64_t)region.size);
     alloc->i_(attr::offset, (int64_t)region.offset);
-    alloc->is_(attr::sizes, sizes);
-    alloc->is_(attr::stride, strides);
-    alloc->i_(attr::device, static_cast<int8_t>(storage.i(attr::device)));
-    alloc->i_(attr::dtype, static_cast<int8_t>(ttp->scalarType().value()));
+    release_slab->addInput(alloc->output());
   }
+  release_slab->insertBefore(graph->return_node());
 }
 
 bool hasOutVariant(Node* node) {
@@ -235,7 +212,10 @@ bool hasOutVariant(Node* node) {
   return false;
 }
 
-FastMap<const Value*, std::pair<UniqueLiveRange, size_t>> getManagedValues(
+std::pair<
+    FastMap<const Value*, std::pair<UniqueLiveRange, size_t>>,
+    FastMap<const Value*, std::pair<UniqueLiveRange, size_t>>>
+getManagedAndUnManagedValues(
     const std::shared_ptr<Graph>& graph,
     bool frozen = false) {
   AliasDb alias_db(graph, frozen);
@@ -254,6 +234,7 @@ FastMap<const Value*, std::pair<UniqueLiveRange, size_t>> getManagedValues(
 
   for (auto node : graph->nodes()) {
     if (!node_has_out_variant[node]) {
+      leaked_values.insert(node->outputs().begin(), node->outputs().end());
       continue;
     }
     for (const auto* out_v : node->outputs()) {
@@ -261,8 +242,7 @@ FastMap<const Value*, std::pair<UniqueLiveRange, size_t>> getManagedValues(
         continue;
       }
       auto size = computeStorageSize(*out_v);
-      if (size && size.value() > 0 &&
-          !isOptimizableContainerType(node, node_has_out_variant)) {
+      if (size > 0 && !isOptimizableContainerType(node, node_has_out_variant)) {
         managed_values.insert(
             {out_v, {{live_ranges[out_v], out_v->debugName()}, size.value()}});
       } else {
@@ -271,8 +251,21 @@ FastMap<const Value*, std::pair<UniqueLiveRange, size_t>> getManagedValues(
     }
   }
 
-  GRAPH_DEBUG("memory planning leaked values: ", c10::Join(",", leaked_values));
-  return managed_values;
+  FastMap<const Value*, std::pair<UniqueLiveRange, size_t>> unmanaged_values;
+  for (auto* val : always_alive_values) {
+    auto size = computeStorageSize(*val);
+    unmanaged_values.insert(
+        {val, {{live_ranges[val], val->debugName()}, size.value_or(0)}});
+  }
+  for (auto* val : leaked_values) {
+    auto size = computeStorageSize(*val);
+    unmanaged_values.insert(
+        {val, {{live_ranges[val], val->debugName()}, size.value_or(0)}});
+  }
+
+  GRAPH_DEBUG(
+      "memory planning unmanaged values: ", c10::Join(",", leaked_values));
+  return std::make_pair(unmanaged_values, managed_values);
 }
 
 // "high watermark" of memory
@@ -349,8 +342,12 @@ bool validateAllocations(
   return true;
 }
 
-void planMemory(const std::shared_ptr<Graph>& graph, Strategy strat) {
-  auto managed_values = getManagedValues(graph);
+std::pair<size_t, FastMap<const Value*, std::pair<UniqueLiveRange, size_t>>>
+planMemory(const std::shared_ptr<Graph>& graph, Strategy strat) {
+  FastMap<const Value*, std::pair<UniqueLiveRange, size_t>> managed_values,
+      unmanaged_values;
+  std::tie(unmanaged_values, managed_values) =
+      getManagedAndUnManagedValues(graph);
   SortedLiveRangeMap<size_t> managed_live_ranges;
   for (auto& item : managed_values) {
     auto ulvr = item.second.first;
@@ -368,7 +365,7 @@ void planMemory(const std::shared_ptr<Graph>& graph, Strategy strat) {
       break;
     };
     default:
-      return;
+      return {};
   }
 
   auto total_size = getTotalAllocationSize(allocations);
@@ -377,11 +374,6 @@ void planMemory(const std::shared_ptr<Graph>& graph, Strategy strat) {
       validateAllocations(allocations, managed_live_ranges, total_size),
       "invalid allocation",
       strat);
-
-  GRAPH_DEBUG("\ngraph before inserting storage node\n", *graph);
-
-  auto storage_node = insertAllocStorageNode(graph, total_size);
-  GRAPH_DEBUG("\ngraph after inserting storage node\n", *graph);
 
   // the only way to identify an allocation with the value that needs it
   // is by matching on live range and size request. but we need the original
@@ -403,8 +395,10 @@ void planMemory(const std::shared_ptr<Graph>& graph, Strategy strat) {
     managed_value_allocations.emplace_back(val, reg);
   }
 
-  insertAllocTensorNodes(graph, *storage_node, managed_value_allocations);
+  insertAllocNodes(graph, total_size, managed_value_allocations);
   GRAPH_DEBUG("\ngraph after inserting alloc nodes\n", *graph);
+
+  return std::make_pair(total_size, unmanaged_values);
 }
 } // namespace jit
 } // namespace torch
