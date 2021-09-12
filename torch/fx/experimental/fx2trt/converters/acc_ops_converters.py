@@ -12,9 +12,10 @@ from torch.fx.experimental.fx2trt.fx2trt import (
     torch_dtype_from_trt,
     get_dynamic_dims,
 )
+from typing import Optional
 
 
-def to_numpy(tensor: torch.Tensor):
+def to_numpy(tensor: Optional[torch.Tensor]):
     """
     Convert a PyTorch Tensor to a Numpy Array.
     """
@@ -23,6 +24,8 @@ def to_numpy(tensor: torch.Tensor):
 
     if tensor.is_quantized:
         tensor = tensor.dequantize()
+
+    assert isinstance(tensor, torch.Tensor), f"to_numpy can't be called on None or a torch.Tensor, got: {tensor}"
 
     return tensor.cpu().detach().contiguous().numpy()
 
@@ -241,16 +244,36 @@ def acc_ops_conv2d(network, target, args, kwargs, name):
     if has_dynamic_shape(input_val.shape):
         assert input_val.shape[1] != -1, "Channel dim can't be dynamic for convolution."
 
-    kernel = to_numpy(kwargs["weight"])
+    # for now we'll assume bias is constant Tensor or None,
+    # and bias being ITensor is not supported in TensorRT api
+    # right now
     bias = to_numpy(kwargs["bias"])
 
-    layer = network.add_convolution(
-        input=input_val,
-        num_output_maps=kernel.shape[0],
-        kernel_shape=kernel.shape[2:],
-        kernel=kernel,
-        bias=bias,
-    )
+    if network.has_explicit_precision:
+        weight = get_trt_tensor(network, kwargs["weight"], f"{name}_weight")
+        weight_shape = tuple(kwargs["weight"].shape)
+        # will need to use uninitialized weight and set it later to support
+        # ITensor weights
+        dummy_weight = trt.Weights()
+
+        layer = network.add_convolution(
+            input=input_val,
+            num_output_maps=weight.shape[0],
+            kernel_shape=weight.shape[2:],
+            kernel=dummy_weight,
+            bias=bias,
+        )
+
+        layer.set_input(1, weight)
+    else:
+        weight = to_numpy(kwargs["weight"])
+        layer = network.add_convolution(
+            input=input_val,
+            num_output_maps=weight.shape[0],
+            kernel_shape=weight.shape[2:],
+            kernel=weight,
+            bias=bias,
+        )
 
     layer.name = name
     layer.stride = kwargs["stride"]
@@ -813,7 +836,7 @@ def acc_ops_topk(network, target, args, kwargs, name):
 
     num_dims = len(input_val.shape) + (1 if network.has_implicit_batch_dimension else 0)
     k = kwargs["k"]
-    dim = (kwargs["dim"] if kwargs["dim"] else -1) % num_dims
+    dim = (kwargs["dim"] if kwargs["dim"] is not None else -1) % num_dims
     operation = trt.TopKOperation.MAX if kwargs["largest"] else trt.TopKOperation.MIN
     layer = network.add_topk(
         input_val, operation, k, get_axes_for_reduce_op(dim, network.has_implicit_batch_dimension)
@@ -1019,43 +1042,45 @@ def acc_ops_linear(network, target, args, kwargs, name):
         "dim for linear and it can't be the last dim."
     )
 
-    weight = kwargs["weight"]
-
-    # For quantization, weight here would be a trt tensor because it goes through
-    # quant + dequant. In this case, we need to use matmul + add because fully_connected
-    # can't take non-constant weight.
     # TODO: Need to benchmark the performance of lowering linear as fully_connected versus
     # lowering as matmul + add. TensorRT documentation suggests to always lower it as
     # matmul + add but we found in some cases this results in performance regression compared
     # with lowering to fully_connected layer.
-    if isinstance(weight, torch.Tensor):
-        layer = network.add_shuffle(input_val)
-        layer.reshape_dims = tuple(input_val.shape) + (1, 1)
-        layer.name = f"{name}_pre_shuffle"
+    layer = network.add_shuffle(input_val)
+    layer.reshape_dims = tuple(input_val.shape) + (1, 1)
+    layer.name = f"{name}_pre_shuffle"
+    bias = to_numpy(kwargs["bias"])
+
+    if network.has_explicit_precision:
+        weight = get_trt_tensor(network, kwargs["weight"], f"{name}_weight")
+        # will need to use uninitialized weight and set it later to support
+        # ITensor weights
+        dummy_weight = trt.Weights()
 
         # add fully connected
         layer = network.add_fully_connected(
             input=layer.get_output(0),
-            num_outputs=kwargs["weight"].shape[0],
-            kernel=to_numpy(kwargs["weight"]),
-            bias=to_numpy(kwargs["bias"]),
+            num_outputs=weight.shape[0],
+            kernel=dummy_weight,
+            bias=bias,
         )
-        layer.name = f"{name}_linear"
-
-        # reshape back
-        layer = network.add_shuffle(layer.get_output(0))
-        layer.reshape_dims = tuple(input_val.shape[:-1]) + (kwargs["weight"].shape[0],)
-        layer.name = f"{name}_post_shuffle"
-
-        return layer.get_output(0)
+        layer.set_input(1, weight)
     else:
-        # add matrix multiply and add
-        output = add_matrix_multiply_layer(network, input_val, weight, f"{name}_linear_mm", transpose_other=True)
-        if kwargs["bias"] is not None:
-            return add_binary_elementwise_layer(network, output, kwargs["bias"], trt.ElementWiseOperation.SUM, f"{name}_linear_add")
-        else:
-            return output
+        weight = to_numpy(kwargs["weight"])
+        layer = network.add_fully_connected(
+            input=layer.get_output(0),
+            num_outputs=weight.shape[0],
+            kernel=weight,
+            bias=bias,
+        )
+    layer.name = f"{name}_linear"
 
+    # reshape back
+    layer = network.add_shuffle(layer.get_output(0))
+    layer.reshape_dims = tuple(input_val.shape[:-1]) + (kwargs["weight"].shape[0],)
+    layer.name = f"{name}_post_shuffle"
+
+    return layer.get_output(0)
 
 def add_clamp(network, input, val, op):
     acc_ops_clamp_shape = (1,) * len(input.shape)  # broadcast all dimensions
@@ -1097,7 +1122,6 @@ def acc_ops_clamp(network, target, args, kwargs, name):
         input_val = clamp_max_layer.get_output(0)
 
     return input_val
-
 
 @tensorrt_converter(acc_ops.tuple_construct)
 def acc_ops_tuple_construct(network, target, args, kwargs, name):
@@ -1308,7 +1332,8 @@ def acc_ops_permute(network, target, args, kwargs, name):
 
 @tensorrt_converter(acc_ops.quantize_per_tensor)
 def acc_ops_quantize_per_tensor(network, target, args, kwargs, name):
-    input_val = kwargs["input"]
+    input_val = get_trt_tensor(network, kwargs["input"], f"{name}_input")
+
 
     if not isinstance(input_val, trt.tensorrt.ITensor):
         raise RuntimeError(f"{name} received input {input_val} that is not part "

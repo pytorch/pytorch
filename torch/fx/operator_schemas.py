@@ -4,9 +4,14 @@ import numbers
 import typing
 import enum
 import warnings
-from typing import Any, Callable, Dict, List, Optional, Tuple, NamedTuple, cast
+from typing import Any, Callable, Dict, List, Optional, Tuple, NamedTuple, cast, TYPE_CHECKING
 from torch._jit_internal import boolean_dispatched
+from ._compatibility import compatibility
 
+if TYPE_CHECKING:
+    from .node import Argument
+
+@compatibility(is_backward_compatible=False)
 class ArgsKwargsPair(NamedTuple):
     """
     Simple named tuple for wrapping args/kwargs pairs.
@@ -76,7 +81,44 @@ def _torchscript_schema_to_signature(ts_schema : torch._C.FunctionSchema) -> ins
 
     return inspect.Signature(parameters, return_annotation=return_type)
 
-def get_signature_for_torch_op(op : Callable) -> Optional[List[inspect.Signature]]:
+@compatibility(is_backward_compatible=False)
+def check_for_mutable_operation(target : Callable, args : Tuple['Argument', ...], kwargs : Dict[str, 'Argument']):
+    signatures, schemas = get_signature_for_torch_op(target, return_schemas=True)
+
+    if signatures and schemas:
+        matched_schemas = []
+
+        # Iterate through all of the schema until we find one that matches
+        # If one matches, populate `new_args_and_kwargs` with the new args/kwargs
+        # values. If none matches, `new_args_and_kwargs` will be None
+        for candidate_signature, schema in zip(signatures, schemas):
+            try:
+                candidate_signature.bind(*args, **kwargs)
+                matched_schemas.append((candidate_signature, schema))
+            except TypeError as e:
+                continue
+
+        def throw_if_mutable(schema):
+            if schema.is_mutable:
+                raise RuntimeError(f'Tried to trace mutable operation {schema}. FX only supports functional '
+                                   f'code, so operations that mutate operands in-place (e.g. via `out` arguments) '
+                                   f'are not supported')
+
+        if len(matched_schemas) == 0:
+            # Did not match any schema. Cannot check for mutation
+            pass
+        elif len(matched_schemas) == 1:
+            # Matched exactly one schema, unambiguous
+            _, schema_to_check = matched_schemas[0]
+            throw_if_mutable(schema_to_check)
+            pass
+        else:
+            # Ambiguous schema match. Since mutability checking is best effort,
+            # do nothing.
+            pass
+
+@compatibility(is_backward_compatible=False)
+def get_signature_for_torch_op(op : Callable, return_schemas : bool = False):
     """
     Given an operator on the `torch` namespace, return a list of `inspect.Signature`
     objects corresponding to the overloads of that op.. May return `None` if a signature
@@ -87,22 +129,25 @@ def get_signature_for_torch_op(op : Callable) -> Optional[List[inspect.Signature
 
     Returns:
         Optional[List[inspect.Signature]]: A list of signatures for the overloads of this
-            operator, or None if the operator signatures could not be retrieved.
+            operator, or None if the operator signatures could not be retrieved. If
+            return_schemas=True, returns a tuple containing the optional Python signatures
+            and the optional TorchScript Function signature
     """
     override = _manual_overrides.get(op)
     if override:
-        return override
+        return (override, None) if return_schemas else None
 
     aten_fn = torch.jit._builtins._find_builtin(op)
 
     if aten_fn is None:
-        return None
+        return (None, None) if return_schemas else None
 
     schemas = torch._C._jit_get_schemas_for_operator(aten_fn)
     signatures = [_torchscript_schema_to_signature(schema) for schema in schemas]
 
-    return signatures
+    return (signatures, schemas) if return_schemas else signatures
 
+@compatibility(is_backward_compatible=False)
 def create_type_hint(x):
     try:
         if isinstance(x, list) or isinstance(x, tuple):
@@ -130,6 +175,7 @@ def create_type_hint(x):
         pass
     return x
 
+@compatibility(is_backward_compatible=False)
 def type_matches(signature_type : Any, argument_type : Any):
     sig_origin_type = getattr(signature_type, '__origin__', signature_type)
 
@@ -177,6 +223,7 @@ def type_matches(signature_type : Any, argument_type : Any):
 
     return False
 
+@compatibility(is_backward_compatible=False)
 def normalize_function(
         target: Callable, args: Tuple[Any], kwargs : Optional[Dict[str, Any]] = None, arg_types : Optional[Tuple[Any]] = None,
         kwarg_types : Optional[Dict[str, Any]] = None,
@@ -272,6 +319,7 @@ def normalize_function(
 
     return new_args_and_kwargs
 
+@compatibility(is_backward_compatible=False)
 def normalize_module(
         root: torch.nn.Module, target: str, args: Tuple[Any], kwargs : Optional[Dict[str, Any]] = None,
         normalize_to_only_use_kwargs : bool = False) -> Optional[ArgsKwargsPair]:

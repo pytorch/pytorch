@@ -511,13 +511,31 @@ struct PythonPrintImpl {
     }
     indent();
     printValueList(body_, lhs);
+    // We need to preserve Union/Optional type annotations, but only if
+    // we're not assigning values as part of a tuple unpacking statement
+    // (Python doesn't allow type annotations in multiple assignment)
+    if (lhs.size() == 1) {
+      Value* v = lhs.at(0);
+      if (!annotated_unions_.count(v) && !expr_table_.count(v) &&
+          (v->type()->kind() == UnionType::Kind ||
+           v->type()->kind() == OptionalType::Kind)) {
+        body_ << " : " << v->type()->annotation_str();
+        annotated_unions_.insert(v);
+      }
+    }
     body_ << " = ";
+    // or if value is being assigned to something of a union type
     printValueList(body_, rhs);
     body_ << "\n";
   }
 
   bool requiresAnnotation(Value* lhs, Value* rhs) {
-    return *lhs->type() != *rhs->type();
+    if (lhs->type()->kind() == UnionType::Kind ||
+        lhs->type()->kind() == OptionalType::Kind) {
+      return annotated_unions_.insert(lhs).second;
+    } else {
+      return *lhs->type() != *rhs->type();
+    }
   }
 
   void printAnnotatedAssignment(
@@ -1302,10 +1320,12 @@ struct PythonPrintImpl {
         body_ << arg_name;
         if (print_first_argument_type) {
           body_ << ": " << arg.type()->annotation_str(type_printer_);
+          annotated_unions_.insert(*param_it);
         }
       } else {
         body_ << ",\n    " << arg_name << ": "
               << arg.type()->annotation_str(type_printer_);
+        annotated_unions_.insert(*param_it);
       }
       if (arg.default_value()) {
         printDefaultValue(arg, body_, *arg.default_value());
@@ -1558,6 +1578,12 @@ struct PythonPrintImpl {
   // Any NamedTypes (classes, functions, NamedTuples) used are written to this
   // table.
   PrintDepsTable& deps_table_;
+
+  // We need to preserve Union/Optional type annotations, but we should
+  // only print the annotation on variable declaration (not on any
+  // following uses). This set tracks the Value*s that we've already
+  // printed with annotations
+  std::unordered_set<Value*> annotated_unions_;
 
   // A function that, given a named type, returns us the correct string to print
   // for it.

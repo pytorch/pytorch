@@ -231,7 +231,7 @@ class LLVMCodeGenImpl : public IRVisitor {
   void visit(CompareSelectPtr v) override;
 
 #define IMM_VISIT_DECLARE(_1, Name) void visit(Name##ImmPtr v) override;
-  AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, IMM_VISIT_DECLARE);
+  AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, IMM_VISIT_DECLARE);
 #undef IMM_VISIT_DECLARE
 
   void visit(CastPtr v) override;
@@ -902,6 +902,12 @@ void LLVMCodeGenImpl::visit(HalfImmPtr v) {
   value_ = llvm::ConstantFP::get(HalfTy_, v->value());
 }
 
+void LLVMCodeGenImpl::visit(BFloat16ImmPtr v) {
+  TORCH_INTERNAL_ASSERT(
+      false,
+      buildErrorMessage("Fuser's LLVM codegen does not support bfloat16"));
+}
+
 void LLVMCodeGenImpl::visit(BoolImmPtr v) {
   value_ = llvm::ConstantInt::get(BoolTy_, v->value());
 }
@@ -928,6 +934,9 @@ void LLVMCodeGenImpl::visit(CastPtr v) {
 
   bool destUnsigned = v->dtype().scalar_type() == ScalarType::Byte ||
       v->dtype().scalar_type() == ScalarType::Bool;
+  bool srcUnsigned =
+      v->src_value()->dtype().scalar_type() == ScalarType::Byte ||
+      v->src_value()->dtype().scalar_type() == ScalarType::Bool;
 
   // Scalar casts
   if (srcType->isFPOrFPVectorTy()) {
@@ -967,7 +976,7 @@ void LLVMCodeGenImpl::visit(CastPtr v) {
     throw unimplemented_lowering(v);
   }
   if (dstType->isFPOrFPVectorTy()) {
-    if (destUnsigned) {
+    if (srcUnsigned) {
       value_ = irb_.CreateUIToFP(value_, dstType);
     } else {
       value_ = irb_.CreateSIToFP(value_, dstType);
@@ -1531,7 +1540,10 @@ void LLVMCodeGenImpl::emitIsNan(IntrinsicsPtr v) {
   if (!v->param(0)->dtype().is_floating_point()) {
     value_ = toVec(llvm::ConstantInt::get(dstType, 0), v->dtype().lanes());
   } else {
-    TORCH_INTERNAL_ASSERT(v->dtype().scalar_type() == ScalarType::Int);
+    TORCH_INTERNAL_ASSERT(
+        v->dtype().scalar_type() == ScalarType::Int,
+        buildErrorMessage(
+            "Unexpected non-Int dtype of Intrinsics' result value in the fuser."));
     auto is_nan = irb_.CreateFCmpUNO(
         value_, llvm::ConstantFP::get(value_->getType(), 0.));
     if (v->dtype().lanes() > 1) {
@@ -1758,11 +1770,11 @@ void LLVMCodeGenImpl::visit(IntrinsicsPtr v) {
   } else {
     TORCH_INTERNAL_ASSERT(
         false,
-        v,
-        "Unimplemented lowering:",
-        v->op_type(),
-        " for input of dtype",
-        v->dtype().scalar_dtype());
+        buildErrorMessage(
+            std::string("Unimplemented lowering for intrinsic '") +
+            std::to_string(v->op_type()) + "' for input of dtype " +
+            std::to_string(v->dtype().scalar_dtype()) +
+            " in LLVM codegen of the fuser."));
   }
 
   std::vector<llvm::Value*> params;
