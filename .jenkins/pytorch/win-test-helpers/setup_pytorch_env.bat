@@ -20,7 +20,7 @@ if NOT "%BUILD_ENVIRONMENT%"=="" (
 )
 call %CONDA_PARENT_DIR%\Miniconda3\Scripts\activate.bat %CONDA_PARENT_DIR%\Miniconda3
 if NOT "%BUILD_ENVIRONMENT%"=="" (
-    call conda install -y -q python=3.8 numpy mkl cffi pyyaml boto3 protobuf numba scipy typing_extensions dataclasses libuv
+    call conda install -y -q python=3.8 numpy mkl cffi pyyaml boto3 protobuf numba scipy=1.6.3 typing_extensions dataclasses libuv
     if %errorlevel% neq 0 ( exit /b %errorlevel% )
     call conda install -y -q -c conda-forge cmake
     if %errorlevel% neq 0 ( exit /b %errorlevel% )
