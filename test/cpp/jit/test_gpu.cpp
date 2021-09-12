@@ -16765,6 +16765,65 @@ TEST(NVFuserTest, FusionWARSyncAliasedSmem_CUDA) {
   testValidate(&fusion, outputs, aten_inputs, {ref1}, __LINE__, __FILE__);
 }
 
+TEST(NVFuserTest, FusionIssue1099_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(1);
+  fusion.addInput(tv0);
+
+  auto tv1 = add(tv0, new Double(1));
+  auto tv2 = add(tv1, new Double(1));
+  fusion.addOutput(tv2);
+
+  auto tv3 = makeSymbolicTensor(1);
+  fusion.addInput(tv3);
+
+  // Just to make TIDx/y/z non-exact
+  auto tv4 = add(tv3, new Double(1));
+  auto tv5 = add(tv4, new Double(1));
+  auto tv6 = add(tv5, new Double(1));
+  fusion.addOutput(tv6);
+
+  tv2->split(0, 4);
+  tv0->computeAt(tv2, 1);
+
+  tv0->axis(-1)->parallelize(ParallelType::TIDx);
+  tv1->axis(-1)->parallelize(ParallelType::TIDy);
+  tv2->axis(-1)->parallelize(ParallelType::TIDz);
+  tv2->axis(0)->parallelize(ParallelType::BIDx);
+
+  tv1->setMemoryType(MemoryType::Shared);
+
+  tv4->split(0, 5);
+  tv4->axis(-1)->parallelize(ParallelType::TIDx);
+  tv4->setMemoryType(MemoryType::Shared);
+  tv5->split(0, 6);
+  tv5->axis(-1)->parallelize(ParallelType::TIDy);
+  tv5->setMemoryType(MemoryType::Shared);
+  tv6->split(0, 7);
+  tv6->axis(-1)->parallelize(ParallelType::TIDz);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({17}, options);
+  at::Tensor t3 = at::randn({19}, options);
+  std::vector<IValue> aten_inputs = {t0, t3};
+  auto outputs = fe.runFusion(aten_inputs);
+
+  auto ref_t2 = t0 + 2;
+  auto ref_t3 = t3 + 3;
+
+  // Validation still fails due to #1102.
+  // TODO: Enable validation
+#if 0
+  testValidate(
+      &fusion, outputs, aten_inputs, {ref_t2, ref_t3}, __LINE__, __FILE__);
+#endif
+}
+
 } // namespace jit
 } // namespace torch
 #endif // #if defined(USE_CUDA)

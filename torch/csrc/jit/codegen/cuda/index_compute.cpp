@@ -699,13 +699,18 @@ void IndexCompute::run() {
 }
 
 kir::Val* IndexCompute::getExtent(kir::IterDomain* id) {
-  if (isParallelTypeThread(id->parallelType())) {
+  // Pick from extent_map_ first if available, and then check if id is
+  // threaded. Note that extent_map_ is built with a reference tensor,
+  // which is always supposed to have the correct parallelization, so
+  // if the extent of id is mapped in the extent map, that should be
+  // always the right one.
+  if (extent_map_.find(id) != extent_map_.end()) {
+    return extent_map_.at(id);
+  } else if (isParallelTypeThread(id->parallelType())) {
     auto parallel_dim =
         GpuLower::current()->parallelDimensionMap().get(id->parallelType());
     TORCH_INTERNAL_ASSERT(parallel_dim != nullptr);
     return parallel_dim;
-  } else if (extent_map_.find(id) != extent_map_.end()) {
-    return extent_map_.at(id);
   } else {
     return id->extent();
   }

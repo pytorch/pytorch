@@ -116,7 +116,6 @@ void IndexReferenceReplay::handle(Expr* e) {
 }
 
 TensorDomain* IndexReferenceReplay::computeReplay() {
-  auto gpu_lower = GpuLower::current();
   // Throw an error when two loops are mapped with each other, which
   // violates an assumption that unique mappings between concrete
   // IterDomains and the IterDomains of the loop structure must be
@@ -206,10 +205,8 @@ TensorDomain* IndexReferenceReplay::computeReplay() {
     auto ref_id = *ref_id_it;
     loops_replayed_domain.emplace_back(ref_id);
 
-    // Preserve vectorization
-    if (isParallelTypeVectorize(loop_id->getParallelType())) {
-      ref_id->parallelize(loop_id->getParallelType());
-    }
+    // Preserve parallelization
+    ref_id->parallelize(loop_id->getParallelType());
   }
 
   // If no domains were replayed to make the reference, just return the root
