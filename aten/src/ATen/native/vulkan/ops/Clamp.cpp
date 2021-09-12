@@ -207,7 +207,7 @@ Tensor& activation_(
 
   TORCH_CHECK(
       self.is_vulkan(),
-      "Vulkan: In-place clamp is only supported on Vulkan tensors.");
+      "Vulkan: In-place operator is only supported on Vulkan tensors.");
 
   vTensor& v_self = convert(self);
 
@@ -289,9 +289,10 @@ Tensor& hardsigmoid_(Tensor& self) {
   return ops::activation_(self, VK_KERNEL(hardsigmoid_));
 }
 
-Tensor hardshrink(
+Tensor activation_scalar(
     const Tensor& self_arg,
-    const Scalar& lambd) {
+    const Scalar& scalar_arg,
+    const api::Shader::Descriptor& shader_descriptor) {
   api::Context* const context = api::context();
 
   const Tensor self = self_arg.is_vulkan() ? self_arg : self_arg.vulkan();
@@ -310,11 +311,11 @@ Tensor hardshrink(
       const struct Block final {
         uvec3 extents;
         uint32_t _;
-        float lambd;
+        float scalar_value;
       } block {
         v_output.extents(),
         0u,
-        lambd.to<float>(),
+        scalar_arg.to<float>(),
       };
 
       context->dispatch(
@@ -324,7 +325,7 @@ Tensor hardshrink(
             VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
             VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
           },
-          VK_KERNEL(hardshrink),
+          shader_descriptor,
           v_output.extents(),
           context->gpu().adapter->local_work_group_size(),
           // Write-only access bypasses synchronization but inserts appropriate
@@ -349,174 +350,84 @@ Tensor hardshrink(
   command_pool.submit(context->gpu().queue, command_buffer);
 
   return convert(v_output);
+}
+
+Tensor& activation_scalar_(
+    Tensor& self,
+    const Scalar& scalar_arg,
+    const api::Shader::Descriptor& shader_descriptor) {
+  api::Context* const context = api::context();
+
+  TORCH_CHECK(
+      self.is_vulkan(),
+      "Vulkan: In-place operator is only supported on Vulkan tensors.");
+
+  vTensor& v_self = convert(self);
+
+  api::Command::Pool& command_pool = context->command().pool;
+  api::Command::Buffer& command_buffer = command_pool.stream();
+  {
+    if C10_LIKELY(v_self.has_image()) {
+      const struct Block final {
+        uvec3 extents;
+        uint32_t _;
+        float scalar_value;
+      } block {
+        v_self.extents(),
+        0u,
+        scalar_arg.to<float>(),
+      };
+
+      context->dispatch(
+          command_buffer,
+          {
+            VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+            VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+          },
+          shader_descriptor,
+          v_self.extents(),
+          context->gpu().adapter->local_work_group_size(),
+          // Read-Write access triggers an async synchronization if necessory
+          // and inserts appropriate barriers if hazards are detected.
+          v_self.image(
+              command_buffer,
+              vTensor::Stage::Compute,
+              vTensor::Access::Read | vTensor::Access::Write),
+          // Object lifetime is managed by the resource pool.
+          // It is OK not to keep track of the handle.
+          context->resource().pool.uniform(block).object);
+    }
+    else {
+      TORCH_CHECK(false, "Not implemented!");
+    }
+  }
+  command_pool.submit(context->gpu().queue, command_buffer);
+
+  return self;
+}
+
+Tensor hardshrink(
+    const Tensor& self_arg,
+    const Scalar& lambd) {
+  return ops::activation_scalar(self_arg, lambd, VK_KERNEL(hardshrink));
 }
 
 Tensor& hardshrink_(
     Tensor& self,
     const Scalar& lambd) {
-  api::Context* const context = api::context();
-
-  TORCH_CHECK(
-      self.is_vulkan(),
-      "Vulkan: In-place hardshrink is only supported on Vulkan tensors.");
-
-  vTensor& v_self = convert(self);
-
-  api::Command::Pool& command_pool = context->command().pool;
-  api::Command::Buffer& command_buffer = command_pool.stream();
-  {
-    if C10_LIKELY(v_self.has_image()) {
-      const struct Block final {
-        uvec3 extents;
-        uint32_t _;
-        float lambd;
-      } block {
-        v_self.extents(),
-        0u,
-        lambd.to<float>(),
-      };
-
-      context->dispatch(
-          command_buffer,
-          {
-            VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-            VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-          },
-          VK_KERNEL(hardshrink_),
-          v_self.extents(),
-          context->gpu().adapter->local_work_group_size(),
-          // Read-Write access triggers an async synchronization if necessory
-          // and inserts appropriate barriers if hazards are detected.
-          v_self.image(
-              command_buffer,
-              vTensor::Stage::Compute,
-              vTensor::Access::Read | vTensor::Access::Write),
-          // Object lifetime is managed by the resource pool.
-          // It is OK not to keep track of the handle.
-          context->resource().pool.uniform(block).object);
-    }
-    else {
-      TORCH_CHECK(false, "Not implemented!");
-    }
-  }
-  command_pool.submit(context->gpu().queue, command_buffer);
-
-  return self;
+  return ops::activation_scalar_(self, lambd, VK_KERNEL(hardshrink_));
 }
 
 Tensor leaky_relu(
     const Tensor& self_arg,
     const Scalar& negative_slope) {
-  api::Context* const context = api::context();
-
-  const Tensor self = self_arg.is_vulkan() ? self_arg : self_arg.vulkan();
-  const vTensor& v_self = convert(self);
-
-  vTensor v_output{
-    context,
-    v_self.sizes(),
-    v_self.options(),
-  };
-
-  api::Command::Pool& command_pool = context->command().pool;
-  api::Command::Buffer& command_buffer = command_pool.stream();
-  {
-    if C10_LIKELY(v_output.has_image() && v_self.has_image()) {
-      const struct Block final {
-        uvec3 extents;
-        uint32_t _;
-        float negative_slope;
-      } block {
-        v_output.extents(),
-        0u,
-        negative_slope.to<float>(),
-      };
-
-      context->dispatch(
-          command_buffer,
-          {
-            VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-            VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-            VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-          },
-          VK_KERNEL(leaky_relu),
-          v_output.extents(),
-          context->gpu().adapter->local_work_group_size(),
-          // Write-only access bypasses synchronization but inserts appropriate
-          // barriers if necessary.
-          v_output.image(
-              command_buffer,
-              vTensor::Stage::Compute,
-              vTensor::Access::Write),
-          // Read-only access is implied on const tensors and triggers an async
-          // synchronization if necessary.
-          v_self.image(
-              command_buffer,
-              vTensor::Stage::Compute),
-          // Object lifetime is managed by the resource pool.
-          // It is OK not to keep track of the handle.
-          context->resource().pool.uniform(block).object);
-    }
-    else {
-      TORCH_CHECK(false, "Not implemented!");
-    }
-  }
-  command_pool.submit(context->gpu().queue, command_buffer);
-
-  return convert(v_output);
+  return ops::activation_scalar(self_arg, negative_slope, VK_KERNEL(leaky_relu));
 }
 
 Tensor& leaky_relu_(
     Tensor& self,
     const Scalar& negative_slope) {
-  api::Context* const context = api::context();
-
-  TORCH_CHECK(
-      self.is_vulkan(),
-      "Vulkan: In-place leaky relu is only supported on Vulkan tensors.");
-
-  vTensor& v_self = convert(self);
-
-  api::Command::Pool& command_pool = context->command().pool;
-  api::Command::Buffer& command_buffer = command_pool.stream();
-  {
-    if C10_LIKELY(v_self.has_image()) {
-      const struct Block final {
-        uvec3 extents;
-        uint32_t _;
-        float negative_slope;
-      } block {
-        v_self.extents(),
-        0u,
-        negative_slope.to<float>(),
-      };
-
-      context->dispatch(
-          command_buffer,
-          {
-            VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-            VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-          },
-          VK_KERNEL(leaky_relu_),
-          v_self.extents(),
-          context->gpu().adapter->local_work_group_size(),
-          // Read-Write access triggers an async synchronization if necessory
-          // and inserts appropriate barriers if hazards are detected.
-          v_self.image(
-              command_buffer,
-              vTensor::Stage::Compute,
-              vTensor::Access::Read | vTensor::Access::Write),
-          // Object lifetime is managed by the resource pool.
-          // It is OK not to keep track of the handle.
-          context->resource().pool.uniform(block).object);
-    }
-    else {
-      TORCH_CHECK(false, "Not implemented!");
-    }
-  }
-  command_pool.submit(context->gpu().queue, command_buffer);
-
-  return self;
+  return ops::activation_scalar_(self, negative_slope, VK_KERNEL(leaky_relu_));
 }
 
 Tensor sigmoid(const Tensor& self) {
@@ -542,8 +453,8 @@ TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
   m.impl(TORCH_SELECTIVE_NAME("aten::clamp_"), TORCH_FN(clamp_));
   m.impl(TORCH_SELECTIVE_NAME("aten::hardsigmoid"), hardsigmoid);
   m.impl(TORCH_SELECTIVE_NAME("aten::hardsigmoid_"), hardsigmoid_);
-  m.impl(TORCH_SELECTIVE_NAME("aten::hardshrink"), TORCH_FN(hardshrink));
-  m.impl(TORCH_SELECTIVE_NAME("aten::hardshrink_"), TORCH_FN(hardshrink_));
+  m.impl(TORCH_SELECTIVE_NAME("aten::hardshrink"), hardshrink);
+  m.impl(TORCH_SELECTIVE_NAME("aten::hardshrink_"), hardshrink_);
   m.impl(TORCH_SELECTIVE_NAME("aten::hardswish"), hardswish);
   m.impl(TORCH_SELECTIVE_NAME("aten::hardswish_"), hardswish_);
   m.impl(TORCH_SELECTIVE_NAME("aten::hardtanh"), hardtanh);
