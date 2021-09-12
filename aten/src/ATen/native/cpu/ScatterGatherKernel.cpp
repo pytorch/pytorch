@@ -194,8 +194,8 @@ struct cpu_scatter_gather_base_kernel {
     const Tensor& index, const Tensor& src,
     const std::string& method_name, func_t& kernel_func) {
 
-    auto src_size = src.size();
-    auto index_size = index.size();
+    auto src_size = src.sizes();
+    auto index_size = index.sizes();
     std::vector<int64_t> shape(src.dim());
 
     for (auto i = 0; i < shape.size(); ++i) {
