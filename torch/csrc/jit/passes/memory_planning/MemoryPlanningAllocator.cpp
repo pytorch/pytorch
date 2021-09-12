@@ -1,4 +1,5 @@
-#include <torch/csrc/jit/passes/memory_planning.h>
+#include <torch/csrc/jit/passes/memory_planning/MemoryPlanningAllocator.h>
+#include <torch/csrc/jit/passes/memory_planning/memory_observer.h>
 
 #include <sstream>
 
@@ -9,13 +10,6 @@ namespace c10 {
 
 static void DoNothing(void* ptr) {
   return;
-}
-
-inline size_t timeSinceEpoch(
-    const std::chrono::time_point<std::chrono::system_clock>& t) {
-  return std::chrono::duration_cast<std::chrono::microseconds>(
-             t.time_since_epoch())
-      .count();
 }
 
 MemoryPlanningAllocator::MemoryPlanningAllocator(at::DeviceType device_type)
@@ -49,59 +43,35 @@ void MemoryPlanningAllocator::push_allocation(
   allocs_.push(std::make_pair(size, src));
 }
 
-at::DeleterFnPtr raw_deleter() {
-  return &DoNothing;
-}
-
-std::string dataPtrAddrToStr(void* ptr) {
-  std::stringstream ss;
-  ss << ptr;
-  return ss.str();
-}
+using namespace torch::jit;
 
 at::DataPtr MemoryTracingAllocator::allocate(size_t nbytes) const {
   auto orig_ptr = orig_allocator_.raw_allocate(nbytes);
   auto bt = c10::get_backtrace(0, 200, true);
   auto frame_node_id = torch::jit::currentFrameId();
-  if (frame_node_id.has_value()) {
-    allocation_traces_.emplace_back(torch::jit::MemEvent{
-        frame_node_id.value().pc,
-        bt,
-        dataPtrAddrToStr(orig_ptr),
-        nbytes,
-        torch::jit::MemEvent::EventType::Allocate,
-        frame_node_id});
-  } else {
-    allocation_traces_.emplace_back(torch::jit::MemEvent{
-        0,
-        bt,
-        dataPtrAddrToStr(orig_ptr),
-        nbytes,
-        torch::jit::MemEvent::EventType::Allocate,
-        c10::nullopt});
-  }
+  auto time = torch::jit::timeSinceEpoch();
+  allocation_traces_.emplace_back(MemoryEvent{
+      time,
+      time,
+      bt,
+      reinterpret_cast<intptr_t>(orig_ptr),
+      (int64_t)nbytes,
+      MemoryEvent::EventType::ALLOCATE,
+      frame_node_id});
   allocations_.insert({orig_ptr, nbytes});
 
   auto deleter = [this, nbytes = nbytes](void* ptr) {
     auto bt = c10::get_backtrace(0, 200, true);
     auto frame_node_id = torch::jit::currentFrameId();
-    if (frame_node_id.has_value()) {
-      allocation_traces_.emplace_back(torch::jit::MemEvent{
-          frame_node_id.value().pc,
-          bt,
-          dataPtrAddrToStr(ptr),
-          nbytes,
-          torch::jit::MemEvent::EventType::Free,
-          frame_node_id});
-    } else {
-      allocation_traces_.emplace_back(torch::jit::MemEvent{
-          std::numeric_limits<size_t>::max(),
-          bt,
-          dataPtrAddrToStr(ptr),
-          nbytes,
-          torch::jit::MemEvent::EventType::Free,
-          c10::nullopt});
-    }
+    auto time = torch::jit::timeSinceEpoch();
+    allocation_traces_.emplace_back(MemoryEvent{
+      time,
+      time,
+      bt,
+      reinterpret_cast<intptr_t>(ptr),
+      (int64_t)nbytes,
+      MemoryEvent::EventType::FREE,
+      frame_node_id});
     orig_allocator_.raw_deallocate(ptr);
   };
 
@@ -113,7 +83,7 @@ WithProfileTracingAllocationsGuard::WithProfileTracingAllocationsGuard(
     at::DeviceType device_type)
     : tracer_(MemoryTracingAllocator{device_type}), device_type_(device_type) {}
 
-std::vector<torch::jit::MemEvent> WithProfileTracingAllocationsGuard::
+std::vector<torch::jit::MemoryEvent> WithProfileTracingAllocationsGuard::
     getAllocationTraces() {
   return tracer_.allocation_traces_;
 }

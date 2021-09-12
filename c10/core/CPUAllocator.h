@@ -44,7 +44,6 @@ class C10_API ProfiledCPUMemoryReporter {
   ProfiledCPUMemoryReporter() {}
   void New(void* ptr, size_t nbytes);
   void Delete(void* ptr);
-  void Reset();
 
  private:
   std::mutex mutex_;

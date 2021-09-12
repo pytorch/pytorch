@@ -321,12 +321,6 @@ void ProfiledCPUMemoryReporter::Delete(void* ptr) {
   }
 }
 
-void ProfiledCPUMemoryReporter::Reset() {
-  allocated_ = 0;
-  size_table_.clear();
-  log_cnt_ = 0;
-}
-
 C10_API at::Allocator* cpu_caching_alloc = nullptr;
 C10_API uint8_t cpu_caching_alloc_priority = 0;
 

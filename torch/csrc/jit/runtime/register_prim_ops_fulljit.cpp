@@ -2,8 +2,8 @@
 
 #include <ATen/core/ivalue.h>
 #include <c10/util/irange.h>
-#include <torch/csrc/jit/passes/memory_planning.h>
 #include <torch/csrc/jit/runtime/static/impl.h>
+#include <jit/passes/memory_planning/MemoryPlanningAllocator.h>
 
 #include <algorithm>
 #include <bitset>
@@ -130,53 +130,65 @@ RegisterOperators reg(
          },
          aliasAnalysisSpecialCase()),
      Operator(
-         prim::AllocateStorage, /*size, device*/
+         "prim::AllocateSlab() -> Storage",
          [](const Node* node) -> Operation {
            int64_t total_size = node->i(attr::total_size);
-           auto device_type = static_cast<DeviceType>(node->i(attr::device));
+           auto device_type =
+               static_cast<DeviceType>(node->i(attr::device_type));
            return [total_size, device_type](Stack* stack) {
-             at::DataPtr buffer =
-                 MemoryPlanner::allocateBuffer(total_size, device_type);
-             auto storage = c10::Storage(
+             auto allocator = GetAllocator(device_type);
+             auto slab = c10::Storage(
                  c10::Storage::use_byte_size_t(),
                  total_size,
-                 std::move(buffer),
-                 /*allocator=*/nullptr,
+                 allocator,
                  /*resizable=*/false);
-             push(stack, std::move(storage));
+             push(stack, std::move(slab));
            };
          },
          aliasAnalysisSpecialCase()),
      Operator(
-         prim::AllocateTensor, /*size, sizes, offset, strides, dtype, device*/
+         prim::AllocateTensor,
          [](const Node* node) -> Operation {
            int64_t size = node->i(attr::size);
            int64_t offset = node->i(attr::offset);
-           const auto& strides = node->is(attr::stride);
-           const auto& sizes = node->is(attr::sizes);
-           at::ScalarType dtype =
-               static_cast<at::ScalarType>(node->i(attr::dtype));
-           auto device_type = static_cast<DeviceType>(node->i(attr::device));
+           auto type = node->ty(attr::profiled_type)->expect<TensorType>();
 
-           return [offset, size, sizes, strides, dtype, device_type](Stack* stack) {
-             c10::Storage buffer;
-             pop(stack, buffer);
-
-             uint8_t* start = static_cast<uint8_t*>(buffer.data());
+           return [offset, size, type](Stack* stack) {
+             c10::Storage slab;
+             pop(stack, slab);
+             uint8_t* start = static_cast<uint8_t*>(slab.data());
              void* src = static_cast<void*>(start + offset);
-             at::Tensor sub_tensor = at::from_blob(
-                 src, sizes, strides, at::TensorOptions(device_type).dtype(dtype));
-             sub_tensor.storage().set_nbytes(size);
-             push(stack, std::move(sub_tensor));
+             at::Tensor temp_tensor = at::from_blob(
+                 src,
+                 *type->sizes().concrete_sizes(),
+                 *type->strides().concrete_sizes(),
+                 at::TensorOptions(*type->device()).dtype(*type->scalarType()));
+             temp_tensor.storage().set_nbytes(size);
+             push(stack, std::move(temp_tensor));
            };
          },
          aliasAnalysisSpecialCase()),
      Operator(
-         prim::PreAllocateTensor,
+         "prim::ReleaseSlab(Storage slab, ...) -> ()",
+         [](Stack* stack) {
+           auto num_inputs = pop(stack).toInt();
+           std::vector<at::Tensor> inputs(num_inputs - 1);
+           for (int i = 0; i < num_inputs - 1; ++i) {
+             auto temp_tensor = pop(stack).toTensor();
+             temp_tensor.storage().unsafeGetStorageImpl()->reset();
+             temp_tensor.unsafeReleaseTensorImpl()->release_resources();
+           }
+           auto slab = pop(stack).toStorage();
+           //           slab.allocator()->raw_deallocate(slab.data());
+           //           slab.unsafeReleaseStorageImpl();
+         },
+         aliasAnalysisSpecialCase()),
+     Operator(
+         prim::PreallocateTensor,
          [](const Node* node) -> Operation {
            int64_t size = node->i(attr::size);
            int64_t offset = node->i(attr::offset);
-           auto device_type = static_cast<DeviceType>(node->i(attr::device));
+           auto device_type = static_cast<DeviceType>(node->i(attr::device_type));
            return [offset, size, device_type](Stack* stack) {
              c10::Storage buffer;
              pop(stack, buffer);
@@ -184,6 +196,7 @@ RegisterOperators reg(
                  dynamic_cast<c10::MemoryPlanningAllocator*>(c10::GetAllocator(device_type));
              if (planning_allocator) {
                planning_allocator->push_allocation(buffer, size, offset, device_type);
+
              IValue null;
              push(stack, std::move(null));
              }
