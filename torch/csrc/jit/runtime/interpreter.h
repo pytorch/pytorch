@@ -158,8 +158,6 @@ TORCH_API std::vector<std::string> currentModuleHierarchy();
 
 typedef struct TORCH_API FrameNodeId {
   size_t pc;
-  std::string node_schema;
-  std::string node_header;
   Node* node;
 } FrameNodeId;
 

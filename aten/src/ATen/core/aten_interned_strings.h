@@ -822,6 +822,7 @@ _(attr, dense_dim) \
 _(attr, descending) \
 _(attr, deterministic) \
 _(attr, device) \
+_(attr, device_type) \
 _(attr, diagonal) \
 _(attr, dilation) \
 _(attr, dim) \

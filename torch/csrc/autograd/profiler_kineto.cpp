@@ -1,11 +1,9 @@
 #include <c10/util/irange.h>
 #include <torch/csrc/autograd/profiler_kineto.h>
-#include <torch/csrc/jit/runtime/interpreter.h>
 
 #include <torch/csrc/jit/frontend/tracer.h>
 #include <torch/csrc/jit/runtime/operator.h>
 
-#include <regex>
 #include <sstream>
 #include <stdexcept>
 
@@ -47,7 +45,6 @@ inline int64_t getTimeUs() {
 std::string shapesToStr(const std::vector<std::vector<int64_t>>& shapes);
 std::string stacksToStr(const std::vector<std::string>& stacks, const char* delim);
 std::string dtypesToStr(const std::vector<std::string>& types);
-std::vector<std::string> backTraceToVecStr(const std::string& bt);
 std::vector<std::string> inputTypes(const at::RecordFunction& fn);
 
 struct KinetoThreadLocalState : public ProfilerThreadLocalState {
@@ -81,12 +78,6 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalState {
     op.id = ctx->correlationId;
     op.startTime = ctx->startUs;
     op.endTime = end_time;
-    if (jit::currentFrameId()) {
-      auto frame_id = jit::currentFrameId().value();
-      op.addMetadata("pc", std::to_string(frame_id.pc));
-      op.addMetadata("NodeSchema", "\"" + frame_id.node_schema + "\"");
-      op.addMetadata("NodeHeader", "\"" + frame_id.node_header + "\"");
-    }
     // optimization - postpone shapesToStr till finalizeCPUTrace
     // is called from disableProfiler
     // if (ctx->shapes && !ctx->shapes->empty()) {
@@ -128,7 +119,6 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalState {
       }
       kineto_events_.back().cuda_event_start_ = ctx->cuda_event_start_;
       kineto_events_.back().cuda_event_end_ = ctx->cuda_event_end_;
-
 #ifdef USE_KINETO
       cpu_trace->activities.emplace_back(std::move(op));
 #endif // USE_KINETO
@@ -148,45 +138,32 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalState {
 #ifdef USE_KINETO
       libkineto::api().activityProfiler().recordThreadInfo();
 
-      cpu_trace->activities.emplace_back(libkineto::GenericTraceActivity(
-          cpu_trace->span,
-          libkineto::ActivityType::CPU_INSTANT_EVENT,
-          kMemoryEventName));
-      auto& act = cpu_trace->activities.back();
-      act.device = libkineto::processId();
-      act.resource = libkineto::systemThreadId();
+      cpu_trace->activities.emplace_back(
+          libkineto::GenericTraceActivity(
+            cpu_trace->span,
+            libkineto::ActivityType::CPU_INSTANT_EVENT,
+            kMemoryEventName));
+        auto& act = cpu_trace->activities.back();
+        act.device = libkineto::processId();
+        act.resource = libkineto::systemThreadId();
 
-      if (config_.with_stack) {
-        auto bt = c10::get_backtrace(1, 200, true);
-        act.addMetadata("Call stack", stacksToStr(backTraceToVecStr(bt), ";"));
-      }
-      act.startTime = start_time;
-      if (jit::currentFrameId()) {
-        auto frame_id = jit::currentFrameId().value();
-        act.addMetadata("pc", std::to_string(frame_id.pc));
-        act.addMetadata("NodeSchema", "\"" + frame_id.node_schema + "\"");
-        act.addMetadata("NodeHeader", "\"" + frame_id.node_header + "\"");
-      } else {
-        auto bt = c10::get_backtrace(1, 200, true);
-        act.addMetadata("Call stack", stacksToStr(backTraceToVecStr(bt), ";"));
-      }
-      act.endTime = getTimeUs();
-
-      act.addMetadata("Device Type", std::to_string((int8_t)device.type()));
-      act.addMetadata("Device Id", std::to_string(device.index()));
-      act.addMetadata("Addr", std::to_string(reinterpret_cast<intptr_t>(ptr)));
-      act.addMetadata("Bytes", std::to_string(alloc_size));
-      if (total_allocated >= 0) {
-        act.addMetadata("Allocated Bytes", std::to_string(total_allocated));
-      }
-      if (total_reserved >= 0) {
-        act.addMetadata("Reserved Bytes", std::to_string(total_reserved));
-      }
+        act.startTime = start_time;
+        act.addMetadata("Device Type", std::to_string((int8_t)device.type()));
+        act.addMetadata("Device Id", std::to_string(device.index()));
+        act.addMetadata(
+            "Addr", std::to_string(reinterpret_cast<intptr_t>(ptr)));
+        act.addMetadata("Bytes", std::to_string(alloc_size));
+        if (total_allocated >= 0) {
+          act.addMetadata("Allocated Bytes", std::to_string(total_allocated));
+        }
+        if (total_reserved >= 0) {
+          act.addMetadata("Reserved Bytes", std::to_string(total_reserved));
+        }
 #endif // USE_KINETO
 
-      kineto_events_.emplace_back();
-      auto& evt = kineto_events_.back();
-      evt.name(kMemoryEventName)
+        kineto_events_.emplace_back();
+        auto& evt = kineto_events_.back();
+        evt.name(kMemoryEventName)
           .startUs(start_time)
           .deviceIndex(device.index())
           .deviceType(device.type())
@@ -460,19 +437,6 @@ std::string dtypesToStr(const std::vector<std::string>& types) {
     rc.erase(rc.length() - 2); // remove last ", "
     return "[" + rc + "]";
   }
-}
-
-std::vector<std::string> backTraceToVecStr(const std::string& bt) {
-  std::istringstream bt_stream(bt);
-  std::string bt_line;
-  std::vector<std::string> bt_lines;
-  while (std::getline(bt_stream, bt_line, '\n')) {
-    if (!bt_line.empty()) {
-      bt_lines.push_back(
-          std::regex_replace(bt_line, std::regex(R"(^frame\s#\d*:\s)"), ""));
-    }
-  }
-  return bt_lines;
 }
 
 std::string stacksToStr(const std::vector<std::string>& stacks, const char* delim) {
