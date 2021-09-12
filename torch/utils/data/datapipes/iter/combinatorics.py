@@ -1,7 +1,7 @@
 import random
 
 from torch.utils.data import IterDataPipe, Sampler, SequentialSampler, functional_datapipe
-from typing import TypeVar, Type, Iterator, Sized, Optional, Tuple, Dict, List
+from typing import Dict, Iterator, List, Optional, Sized, Tuple, Type, TypeVar
 
 T_co = TypeVar('T_co', covariant=True)
 
@@ -72,7 +72,6 @@ class ShufflerIterDataPipe(IterDataPipe[T_co]):
     """
     datapipe: IterDataPipe[T_co]
     buffer_size: int
-    _buffer: List[T_co]
 
     def __init__(self,
                  datapipe: IterDataPipe[T_co],
@@ -87,24 +86,24 @@ class ShufflerIterDataPipe(IterDataPipe[T_co]):
         else:
             self.datapipe = datapipe.unbatch(unbatch_level=unbatch_level)
         self.buffer_size = buffer_size
-        self._buffer = []
 
-    def buffer_replace(self, x):
-        idx = random.randint(0, self.buffer_size - 1)
-        val = self._buffer[idx]
-        self._buffer[idx] = x
+    @staticmethod
+    def buffer_replace(buffer, x):
+        idx = random.randint(0, len(buffer) - 1)
+        val = buffer[idx]
+        buffer[idx] = x
         return val
 
     def __iter__(self) -> Iterator[T_co]:
-        # TODO: Buffer is global, should be per __iter__ !!!
+        buffer: List[T_co] = []
         for x in self.datapipe:
-            if len(self._buffer) == self.buffer_size:
-                yield self.buffer_replace(x)
+            if len(buffer) == self.buffer_size:
+                yield ShufflerIterDataPipe.buffer_replace(buffer, x)
             else:
-                self._buffer.append(x)
-        random.shuffle(self._buffer)
-        while self._buffer:
-            yield self._buffer.pop()
+                buffer.append(x)
+        random.shuffle(buffer)
+        while buffer:
+            yield buffer.pop()
 
     def __len__(self) -> int:
         if isinstance(self.datapipe, Sized):
