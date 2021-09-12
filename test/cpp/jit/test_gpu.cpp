@@ -16663,6 +16663,111 @@ TEST(NVFuserTest, FusionParallelDimensionMap5_CUDA) {
   testValidate(&fusion, outputs, {input1, input2}, {ref}, __LINE__, __FILE__);
 }
 
+TEST(NVFuserTest, FusionSegmenterCombineReductionsCycleRepro_CUDA) {
+  auto fusion_ptr = std::make_unique<Fusion>();
+  auto& fusion = *fusion_ptr.get();
+  FusionGuard fg(&fusion);
+
+  auto t0 = makeSymbolicTensor(3, DataType::Float);
+  auto t1 = makeSymbolicTensor(3, DataType::Half);
+  auto t3 = makeSymbolicTensor(3, DataType::Half);
+  auto t5 = makeSymbolicTensor(3, DataType::Half);
+  auto t7 = makeSymbolicTensor(1, DataType::Half);
+  auto t11 = makeSymbolicTensor(3, DataType::Half);
+  auto t13 = makeSymbolicTensor(3, DataType::Half);
+  auto t15 = makeSymbolicTensor(3, DataType::Half);
+  auto t17 = makeSymbolicTensor(3, DataType::Half);
+  auto d56 = new Double();
+
+  fusion.addInput(t0);
+  fusion.addInput(t1);
+  fusion.addInput(t3);
+  fusion.addInput(t5);
+  fusion.addInput(t7);
+  fusion.addInput(t11);
+  fusion.addInput(t13);
+  fusion.addInput(t15);
+  fusion.addInput(t17);
+  fusion.addInput(d56);
+
+  auto t2 = castOp(DataType::Float, t1);
+  auto t4 = castOp(DataType::Float, t3);
+  auto t22 = sub(t2, t4);
+  auto t6 = castOp(DataType::Float, t5);
+  auto t23 = mul(t22, t6);
+  auto t16 = castOp(DataType::Float, t15);
+  auto t18 = castOp(DataType::Float, t17);
+  auto t19 = add(t16, t18);
+  auto t14 = castOp(DataType::Float, t13);
+  auto t20 = add(t19, t14);
+  auto t12 = castOp(DataType::Float, t11);
+  auto t21 = add(t20, t12);
+  auto t8 = castOp(DataType::Float, t7);
+  auto t24 = broadcast(t8, {true, true, false});
+  auto t25 = mul(t21, t24);
+  auto t27 = sum(t25, {2});
+  auto t28 = broadcast(t27, {false, false, true});
+  auto t29 = mul(t25, t23);
+  auto t30 = sum(t29, {2});
+  auto t31 = broadcast(t30, {false, false, true});
+  auto d59 = mul(t1->getRootDomain()[2]->extent(), new Double(1));
+  auto t26 = mul(d59, t25);
+  auto txx = mul(t26, new Double(1));
+  auto t33 = sub(txx, t28);
+  auto d70 = unaryOp(UnaryOpType::Reciprocal, d59);
+  auto t35 = mul(d70, t6);
+  auto t39 = sum(t21, {0, 1});
+  auto t47 = castOp(DataType::Half, t39);
+  auto t37 = mul(t21, t23);
+  auto t38 = sum(t37, {0, 1});
+  auto t46 = castOp(DataType::Half, t38);
+  auto t32 = mul(t23, t31);
+  auto t34 = sub(t33, t32);
+  auto t36 = mul(t35, t34);
+  auto t45 = castOp(DataType::Half, t36);
+  auto t40 = mul(t36, t0);
+  auto t41 = mul(t40, d56);
+  auto t44 = castOp(DataType::Half, t41);
+  auto t42 = sum(t41, {0, 1});
+  auto t43 = castOp(DataType::Half, t42);
+
+  fusion.addOutput(t43);
+  fusion.addOutput(t44);
+  fusion.addOutput(t45);
+  fusion.addOutput(t46);
+  fusion.addOutput(t47);
+
+  auto options_half = at::TensorOptions().dtype(at::kHalf).device(at::kCUDA, 0);
+  auto options_float =
+      at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor at_t0 = at::randn({128, 64, 1024}, options_float);
+  at::Tensor at_t1 = at::randn({128, 64, 1024}, options_half);
+  at::Tensor at_t3 = at::randn({128, 64, 1024}, options_half);
+  at::Tensor at_t5 = at::randn({128, 64, 1024}, options_half);
+  at::Tensor at_t7 = at::randn({1024}, options_half);
+  at::Tensor at_t11 = at::randn({128, 64, 1024}, options_half);
+  at::Tensor at_t13 = at::randn({128, 64, 1024}, options_half);
+  at::Tensor at_t15 = at::randn({128, 64, 1024}, options_half);
+  at::Tensor at_t17 = at::randn({128, 64, 1024}, options_half);
+  double at_d56 = 1.1111;
+
+  std::vector<IValue> aten_inputs = {
+      at_t0,
+      at_t1,
+      at_t3,
+      at_t5,
+      at_t7,
+      at_t11,
+      at_t13,
+      at_t15,
+      at_t17,
+      at_d56};
+  for (auto _ : c10::irange(5)) {
+    auto segmented_fusion =
+        SegmentCandidateFinder::segment(fusion_ptr.get(), aten_inputs);
+  }
+}
+
 TEST(NVFuserTest, FusionSerialAndParallelIndexing_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);

@@ -2077,8 +2077,7 @@ class CombineReductions {
       SegmentedGroup* first_group,
       SegmentedGroup* second_group) {
     // This is part of ReductionCombine pass, and we should only call this
-    // function on a pair of
-    //  reduction/normalization groups
+    // function on a pair of reduction/normalization groups
     TORCH_INTERNAL_ASSERT(
         group_reduction_signature_map_.at(first_group)
             ->sameAs(group_reduction_signature_map_.at(second_group)));
@@ -2157,8 +2156,7 @@ class CombineReductions {
   //!  consumer.
   //!
   //!  TODO: This implementation looks at common producers only, since common
-  //!  consumers
-  //!          are not computed easily with current dependency analysis.
+  //!  consumers are not computed easily with current dependency analysis.
   SegmentedGroup* horizontalReductionMerge(
       SegmentedGroup* first_group,
       SegmentedGroup* second_group) {
@@ -2198,24 +2196,24 @@ class CombineReductions {
     //
     // The specific pattern we look for contains a common producer P with
     // immediate consumers C1, C2 such that all paths from C1 to first_group and
-    // all paths from C2
-    //  to second_group won't hit a reduction with a different signature.
+    // all paths from C2 to second_group won't hit a reduction with a different
+    // signature.
 
     // Topologically sort the common producers and start with the topologically
     // minimal,
     //  i.e. one that are closest to the two groups. This will cut the search
     //  space.
-    std::vector<SegmentedGroup*> common_producers(
-        common_producers_set.begin(), common_producers_set.end());
-    std::sort(
-        common_producers.begin(),
-        common_producers.end(),
-        [&dependency_analysis](SegmentedGroup* a, SegmentedGroup* b) {
-          return dependency_analysis->isConsumerOf(a, b);
-        });
-
-    // Use a visited filter to prune search space.
-    GroupSet visited_common_producers;
+    std::vector<SegmentedGroup*> common_producers;
+    for (auto producer : common_producers_set) {
+      if (!std::any_of(
+              common_producers_set.begin(),
+              common_producers_set.end(),
+              [dependency_analysis, producer](SegmentedGroup* group) {
+                return dependency_analysis->isProducerOf(producer, group);
+              })) {
+        common_producers.push_back(producer);
+      }
+    }
 
     // Visit the common producers found, starting from topologically minimum,
     // i.e. the ones closer to the groups
@@ -2225,12 +2223,6 @@ class CombineReductions {
       //  better than the other
       for (auto first_consumer_edge : common_producer->consumer_edges) {
         auto producer_of_first_group = first_consumer_edge->to;
-        if (visited_common_producers.count(producer_of_first_group)) {
-          // We have visited this node as common producer before and it
-          //  had conflicts. It'd hit the same conflict again if we continued
-          //  to pursue this edge.
-          continue;
-        }
         auto to_merge_with_first_group = getValidMinVerticalMergedGroupSet(
             producer_of_first_group, first_group);
         if (to_merge_with_first_group.empty()) {
@@ -2239,14 +2231,10 @@ class CombineReductions {
           //  no path to first group
           continue;
         }
+        TORCH_INTERNAL_ASSERT(!dependency_analysis->isProducerOf(
+            producer_of_first_group, second_group));
         for (auto second_consumer_edge : common_producer->consumer_edges) {
           auto producer_of_second_group = second_consumer_edge->to;
-          if (visited_common_producers.count(producer_of_second_group)) {
-            // We have visited this node as common producer before and it
-            //  had conflicts. It'd hit the same conflict again if we continued
-            //  to pursue this edge.
-            continue;
-          }
           auto to_merge_with_second_group = getValidMinVerticalMergedGroupSet(
               producer_of_second_group, second_group);
           if (to_merge_with_second_group.empty()) {
@@ -2256,7 +2244,8 @@ class CombineReductions {
             //  there's no path to second group
             continue;
           }
-
+          TORCH_INTERNAL_ASSERT(!dependency_analysis->isProducerOf(
+              producer_of_second_group, first_group));
           // At this point we should have a pair of valid candidates,final check
           // is to see if the combined group
           //  can be scheduled by schedulers
@@ -2295,10 +2284,6 @@ class CombineReductions {
           }
         }
       }
-      // Here we should have searched all consumer edges of this common producer
-      // and
-      //  found no valid pattern. Should just add it to the visted list.
-      visited_common_producers.insert(common_producer);
     }
 
     // Searched all possibilities and there is no valid horizontal merge pattern
