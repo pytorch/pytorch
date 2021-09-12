@@ -205,7 +205,7 @@ struct TORCH_API PerChannelAffineFloatQParamsQuantizer : public PerChannelAffine
 // setters/getters for QTensorImpl fields; otherwise, you should use
 // the low level setters/getters that were implemented using this.
 // This may be called repeatedly, so make sure it's pretty cheap.
-TORCH_API QTensorImpl* get_qtensorimpl(const TensorBase& self);
+TORCH_API QTensorImpl* get_qtensorimpl(const Tensor& self);
 
 // double and int64_t are because of the native function API, we only have these
 // argument types right now in native functions

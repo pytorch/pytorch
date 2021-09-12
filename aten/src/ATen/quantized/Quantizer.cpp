@@ -29,7 +29,7 @@ namespace {
 } // anonymous namespace
 
 // Note: this is not a native function as Quantizer is not exposed to python yet
-QuantizerPtr TensorBase::quantizer() const {
+QuantizerPtr Tensor::quantizer() const {
   // This is a terrible hack to emulate what VariableType is doing
   at::AutoDispatchBelowAutograd mode;
   return get_qtensorimpl(*this)->quantizer();
@@ -71,7 +71,7 @@ QuantizerPtr make_per_channel_affine_quantizer(
   }
 }
 
-QTensorImpl* get_qtensorimpl(const TensorBase& self) {
+QTensorImpl* get_qtensorimpl(const Tensor& self) {
   TORCH_CHECK(
       !self.requires_grad(),
       "quantized tensors do not support autograd");

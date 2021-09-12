@@ -511,8 +511,8 @@ void MultiheadAttentionImpl::reset() {
     bias_k = register_parameter("bias_k", torch::empty({1, 1, options.embed_dim()}));
     bias_v = register_parameter("bias_v", torch::empty({1, 1, options.embed_dim()}));
   } else {
-    bias_k.reset();
-    bias_v.reset();
+    bias_k = {};
+    bias_v = {};
   }
   _reset_parameters();
 }

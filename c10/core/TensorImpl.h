@@ -38,8 +38,7 @@ C10_DECLARE_int64(caffe2_max_keep_on_shrink_memory);
 
 namespace at {
 class Tensor;
-class TensorBase;
-} // namespace at
+}
 
 namespace c10 {
 class Scalar;
@@ -152,11 +151,11 @@ struct C10_API AutogradMetaInterface {
   virtual bool requires_grad() const = 0;
   virtual at::Tensor& mutable_grad() = 0;
   virtual const at::Tensor& grad() const = 0;
-  virtual const at::Tensor& fw_grad(uint64_t level, const at::TensorBase& self)
+  virtual const at::Tensor& fw_grad(uint64_t level, const at::Tensor& self)
       const = 0;
   virtual void set_fw_grad(
-      const at::TensorBase& new_grad,
-      const at::TensorBase& self,
+      const at::Tensor& new_grad,
+      const at::Tensor& self,
       uint64_t level,
       bool is_inplace_op) = 0;
   virtual ~AutogradMetaInterface();
@@ -1056,7 +1055,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    *   - "self" should represent the Tensor whose forward grad is accessed. It
    * is required when dealing with view.
    */
-  const at::Tensor& _fw_grad(uint64_t level, const at::TensorBase& self) const;
+  const at::Tensor& _fw_grad(uint64_t level, const at::Tensor& self) const;
 
   /**
    * Sets the forward gradient for this Tensor.
@@ -1079,8 +1078,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * better error checking.
    */
   void _set_fw_grad(
-      const at::TensorBase& new_grad,
-      const at::TensorBase& self,
+      const at::Tensor& new_grad,
+      const at::Tensor& self,
       uint64_t level,
       bool is_inplace_op);
 

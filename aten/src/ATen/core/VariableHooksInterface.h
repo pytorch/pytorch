@@ -40,25 +40,23 @@ namespace impl {
 
 struct TORCH_API VariableHooksInterface {
   virtual ~VariableHooksInterface() = default;
-  virtual TensorBase tensor_data(const TensorBase&) const = 0;
-  virtual TensorBase variable_data(const TensorBase&) const = 0;
-  virtual const std::shared_ptr<torch::autograd::Node>& grad_fn(const TensorBase&) const = 0;
-  virtual unsigned _register_hook(
-      const TensorBase&,
-      std::function<TensorBase(const TensorBase&)> hook) const = 0;
-  virtual void remove_hook(const TensorBase&, unsigned pos) const = 0;
-  virtual bool is_view(const TensorBase&) const = 0;
-  virtual const TensorBase& base(const TensorBase&) const = 0;
-  virtual const std::string& name(const TensorBase&) const = 0;
-  virtual bool is_leaf(const TensorBase&) const = 0;
-  virtual int64_t output_nr(const TensorBase&) const = 0;
-  virtual void set_data(const TensorBase&, const TensorBase&) const = 0;
-  virtual TensorBase data(const TensorBase&) const = 0;
-  virtual int64_t _version(const TensorBase&) const = 0;
-  virtual void retain_grad(const TensorBase&) const = 0;
-  virtual bool retains_grad(const TensorBase&) const = 0;
+  virtual Tensor tensor_data(const Tensor&) const = 0;
+  virtual Tensor variable_data(const Tensor&) const = 0;
+  virtual const std::shared_ptr<torch::autograd::Node>& grad_fn(const Tensor&) const = 0;
+  virtual unsigned _register_hook(const Tensor&, std::function<Tensor(const Tensor&)> hook) const = 0;
+  virtual void remove_hook(const Tensor&, unsigned pos) const = 0;
+  virtual bool is_view(const Tensor&) const = 0;
+  virtual const Tensor& base(const Tensor&) const = 0;
+  virtual const std::string& name(const Tensor&) const = 0;
+  virtual bool is_leaf(const Tensor&) const = 0;
+  virtual int64_t output_nr(const Tensor&) const = 0;
+  virtual void set_data(const Tensor&, const Tensor&) const = 0;
+  virtual Tensor data(const Tensor&) const = 0;
+  virtual int64_t _version(const Tensor&) const = 0;
+  virtual void retain_grad(const Tensor&) const = 0;
+  virtual bool retains_grad(const Tensor&) const = 0;
   virtual void _backward(const Tensor&, TensorList, const c10::optional<Tensor>&, c10::optional<bool>, bool) const = 0;
-  virtual void requires_grad_(const TensorBase&, bool) const = 0;
+  virtual void requires_grad_(const Tensor&, bool) const = 0;
 };
 
 TORCH_API void SetVariableHooks(VariableHooksInterface* hooks);

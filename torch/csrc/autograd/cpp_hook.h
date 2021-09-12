@@ -5,7 +5,7 @@
 
 namespace torch { namespace autograd {
 
-using hooks_list = std::vector<std::function<at::TensorBase(const at::TensorBase&)>>;
+using hooks_list = std::vector<std::function<Variable(const Variable&)>>;
 
 struct CppFunctionPreHook : public FunctionPreHook {
   CppFunctionPreHook(const std::shared_ptr<hooks_list> &hooks, int value_idx);

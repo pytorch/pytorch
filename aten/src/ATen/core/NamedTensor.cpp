@@ -1,7 +1,6 @@
-#define TORCH_ASSERT_NO_OPERATORS
 #include <ATen/core/NamedTensor.h>
 
-#include <ATen/core/TensorBase.h>
+#include <ATen/core/Tensor.h>
 #include <c10/util/C++17.h>
 
 namespace at {
@@ -17,12 +16,12 @@ void NamesMode::set_enabled(bool enabled) {
   c10::impl::tls_set_dispatch_key_excluded(DispatchKey::Named, !enabled);
 }
 
-const TensorBase& internal_set_names_inplace(const TensorBase& tensor, optional<DimnameList> names) {
+const Tensor& internal_set_names_inplace(const Tensor& tensor, optional<DimnameList> names) {
   impl::internal_set_names_inplace(tensor.unsafeGetTensorImpl(), names, /*validate_names=*/true);
   return tensor;
 }
 
-const TensorBase& internal_set_names_inplace(const TensorBase& tensor, std::vector<Dimname>&& names, bool validate_names) {
+const Tensor& internal_set_names_inplace(const Tensor& tensor, std::vector<Dimname>&& names, bool validate_names) {
   impl::internal_set_names_inplace(tensor.unsafeGetTensorImpl(), std::move(names), validate_names);
   return tensor;
 }
@@ -49,7 +48,7 @@ static void check_unique_names(DimnameList names) {
   }
 }
 
-void check_names_valid_for(const TensorBase& tensor, DimnameList names) {
+void check_names_valid_for(const Tensor& tensor, DimnameList names) {
   return impl::check_names_valid_for(tensor.unsafeGetTensorImpl(), names);
 }
 

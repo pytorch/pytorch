@@ -4,7 +4,7 @@
 
 namespace {
 using torch::autograd::Variable;
-void check_single_result (const at::TensorBase &value, const at::TensorBase &result, std::string hook_name) {
+void check_single_result (Variable value, Variable result, std::string hook_name) {
   if (!value.defined()) {
     throw std::runtime_error("can't replace a empty gradient with a non-empty value");
   }
@@ -34,7 +34,7 @@ variable_list CppFunctionPreHook::operator()(const variable_list& values) {
       continue;
     }
     check_single_result(value, res, c10::to_string(i));
-    value = std::move(res);
+    value = res;
   }
   variable_list results(values);
   results[value_idx_] = value;

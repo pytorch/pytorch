@@ -101,7 +101,7 @@ namespace {
 
 // This function is will ensure that the fw_grad_ is properly a view of the base for inplace ops on
 // Tensors that do not have forward grad originally.
-void AutogradMeta::set_fw_grad(const at::TensorBase& new_grad_base, const at::TensorBase& self_base, uint64_t level, bool is_inplace_op) {
+void AutogradMeta::set_fw_grad(const Variable& new_grad_, const Variable& self, uint64_t level, bool is_inplace_op) {
   // Lazy initialization
   {
     std::lock_guard<std::mutex> lock(mutex_);
@@ -112,23 +112,21 @@ void AutogradMeta::set_fw_grad(const at::TensorBase& new_grad_base, const at::Te
   if (fw_grad_->contains(level)) {
     // Setting the forward grad again is only allowed if it is a no-op.
     // We do allow this case to simplify writing codegen for inplace ops.
-    TORCH_INTERNAL_ASSERT(new_grad_base.defined(), "Cannot set a forward grad that is an undefined Tensor. Use "
+    TORCH_INTERNAL_ASSERT(new_grad_.defined(), "Cannot set a forward grad that is an undefined Tensor. Use "
                           "_fw_primal(level) to get a new Tensor with this forward grad unset.");
 
     TORCH_INTERNAL_ASSERT(is_inplace_op, "Only inplace operations can re-set the forward grad of a Tensor that "
                           "already has one.");
 
-    TORCH_INTERNAL_ASSERT(fw_grad_->value(level).is_same(new_grad_base), "Cannot set a value of a forward grad if it "
+    TORCH_INTERNAL_ASSERT(fw_grad_->value(level).is_same(new_grad_), "Cannot set a value of a forward grad if it "
                           "already exists. Inplace operations should modify it inplace.");
   } else {
     // TODO(alband) remove this spurious version counter bump
-    Tensor new_grad(new_grad_base);
-    at::OptionalTensorRef self_ref(self_base);
-    const Tensor &self = *self_ref;
+    auto new_grad = new_grad_;
 
-    TORCH_CHECK(self.is_same_size(new_grad), "Trying to set a forward gradient that has a different size than that "
+    TORCH_CHECK(self.is_same_size(new_grad_), "Trying to set a forward gradient that has a different size than that "
                 "of the original Tensor, this is not supported. Tensor is of size ", self.sizes(), " while the given "
-                "forward gradient is of size ", new_grad.sizes(), ".");
+                "forward gradient is of size ", new_grad_.sizes(), ".");
 
     if (is_inplace_op && is_view_) {
       auto this_view_meta = static_cast<DifferentiableViewMeta*>(this);
@@ -184,7 +182,7 @@ void AutogradMeta::set_fw_grad(const at::TensorBase& new_grad_base, const at::Te
   }
 }
 
-const Variable& AutogradMeta::fw_grad(uint64_t level, const at::TensorBase& self) const {
+const Variable& AutogradMeta::fw_grad(uint64_t level, const Variable& self) const {
   // TLS that disables forward AD
   // This is only used for custom Function implementation
   if (!c10::AutogradState::get_tls_state().get_fw_grad_mode()) {

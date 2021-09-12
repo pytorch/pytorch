@@ -83,9 +83,8 @@ const at::Tensor& TensorImpl::grad() const {
   return autograd_meta_->grad();
 }
 
-const at::Tensor& TensorImpl::_fw_grad(
-    uint64_t level,
-    const at::TensorBase& self) const {
+const at::Tensor& TensorImpl::_fw_grad(uint64_t level, const at::Tensor& self)
+    const {
   // See TensorImpl::grad() above for explanation about the line below
   if (!autograd_meta_)
     return impl::GetAutogradMetaFactory()->undefined_tensor();
@@ -93,8 +92,8 @@ const at::Tensor& TensorImpl::_fw_grad(
 }
 
 void TensorImpl::_set_fw_grad(
-    const at::TensorBase& new_grad,
-    const at::TensorBase& self,
+    const at::Tensor& new_grad,
+    const at::Tensor& self,
     uint64_t level,
     bool is_inplace_op) {
   if (!autograd_meta_)

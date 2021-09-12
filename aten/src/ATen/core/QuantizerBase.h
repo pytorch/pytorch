@@ -1,9 +1,5 @@
 #pragma once
 
-#include <c10/core/ScalarType.h>
-#include <c10/core/QScheme.h>
-#include <c10/util/intrusive_ptr.h>
-
 namespace at {
 
 class Tensor;

@@ -130,7 +130,7 @@ static c10::impl::AutogradMetaFactoryRegisterer meta_factory_registerer(&meta_fa
 
 namespace impl {
 
-  AutogradMeta* materialize_autograd_meta(const at::TensorBase& self) {
+  AutogradMeta* materialize_autograd_meta(const Variable& self) {
     TORCH_CHECK(self.defined(), "cannot call materialize_autograd_meta() on undefined tensor");
     auto p = self.unsafeGetTensorImpl();
     if (!p->autograd_meta()) {
@@ -165,7 +165,7 @@ namespace impl {
     set_gradient_edge(self, std::move(gradient_edge));
   }
 
-  void create_cpp_hook(const at::TensorBase& self) {
+  void create_cpp_hook(const Variable& self) {
     auto &list = materialize_autograd_meta(self)->cpp_hooks_list_;
     // NOLINTNEXTLINE(modernize-make-shared)
     list.reset(new hooks_list());
@@ -277,7 +277,7 @@ namespace impl {
   // Hooks
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-  void add_hook(const at::TensorBase& self, std::shared_ptr<FunctionPreHook> hook) {
+  void add_hook(const Variable& self, std::shared_ptr<FunctionPreHook> hook) {
     materialize_autograd_meta(self)->hooks_.push_back(std::move(hook));
   }
 
@@ -296,7 +296,7 @@ namespace impl {
     }
   }
 
-  void clear_hooks(const at::TensorBase& self) {
+  void clear_hooks(const Variable& self) {
     // This is a little goofy, but usually this should be a no oop
     materialize_autograd_meta(self)->hooks_.clear();
   }
@@ -308,13 +308,13 @@ namespace impl {
   // Miscellaneous
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-  AutogradMeta* get_autograd_meta(const at::TensorBase& self) {
+  AutogradMeta* get_autograd_meta(const Variable& self) {
     // NB: could return nullptr
     TORCH_CHECK(self.defined(), "cannot call get_autograd_meta() on undefined tensor");
     return static_cast<AutogradMeta*>(self.unsafeGetTensorImpl()->autograd_meta());
   }
 
-  DifferentiableViewMeta* get_view_autograd_meta(const at::TensorBase& self) {
+  DifferentiableViewMeta* get_view_autograd_meta(const Variable& self) {
     // NB: return nullptr if self is not a view
     AutogradMeta* meta = get_autograd_meta(self);
     if (meta && meta->is_view_) {
@@ -329,32 +329,31 @@ namespace impl {
 using at::Tensor;
 
 struct VariableHooks final : at::impl::VariableHooksInterface {
-  at::TensorBase tensor_data(const at::TensorBase&) const override;
-  at::TensorBase variable_data(const at::TensorBase&) const override;
-  const std::shared_ptr<torch::autograd::Node>& grad_fn(const at::TensorBase&) const override;
-  unsigned _register_hook(
-      const at::TensorBase&, std::function<at::TensorBase(const at::TensorBase&)> hook) const override;
-  void remove_hook(const at::TensorBase&, unsigned pos) const override;
-  bool is_view(const at::TensorBase&) const override;
-  const at::TensorBase& base(const at::TensorBase&) const override;
-  const std::string& name(const at::TensorBase&) const override;
-  bool is_leaf(const at::TensorBase&) const override;
-  int64_t output_nr(const at::TensorBase&) const override;
-  void set_data(const at::TensorBase & self, const at::TensorBase & new_data) const override;
-  at::TensorBase data(const at::TensorBase & self) const override;
-  int64_t _version(const at::TensorBase & self) const override;
-  void retain_grad(const at::TensorBase& self) const override;
-  bool retains_grad(const at::TensorBase& self) const override;
+  Tensor tensor_data(const Tensor&) const override;
+  Tensor variable_data(const Tensor&) const override;
+  const std::shared_ptr<torch::autograd::Node>& grad_fn(const Tensor&) const override;
+  unsigned _register_hook(const Tensor&, std::function<Tensor(const Tensor&)> hook) const override;
+  void remove_hook(const Tensor&, unsigned pos) const override;
+  bool is_view(const Tensor&) const override;
+  const Tensor& base(const Tensor&) const override;
+  const std::string& name(const Tensor&) const override;
+  bool is_leaf(const Tensor&) const override;
+  int64_t output_nr(const Tensor&) const override;
+  void set_data(const Tensor & self, const Tensor & new_data) const override;
+  Tensor data(const Tensor & self) const override;
+  int64_t _version(const Tensor & self) const override;
+  void retain_grad(const Tensor& self) const override;
+  bool retains_grad(const Tensor& self) const override;
   void _backward(const Tensor& self, at::TensorList inputs,
     const c10::optional<Tensor>& gradient, c10::optional<bool> keep_graph,
     bool create_graph) const override;
-  void requires_grad_(const at::TensorBase& self, bool _requires_grad) const override;
+  void requires_grad_(const Tensor& self, bool _requires_grad) const override;
 };
 
 VariableHooks variableHooks;
 at::impl::VariableHooksRegisterer registerVariableHooks(&variableHooks);
 
-at::TensorBase VariableHooks::variable_data(const at::TensorBase& self) const {
+Tensor VariableHooks::variable_data(const Tensor& self) const {
   TORCH_CHECK(self.defined(), "cannot call variable_data() on undefined tensor");
   auto self_impl_copy = self.unsafeGetTensorImpl()->shallow_copy_and_detach(
     /*version_counter=*/0,
@@ -363,7 +362,7 @@ at::TensorBase VariableHooks::variable_data(const at::TensorBase& self) const {
   return at::Tensor(self_impl_copy);
 }
 
-at::TensorBase VariableHooks::tensor_data(const at::TensorBase& self) const {
+Tensor VariableHooks::tensor_data(const Tensor& self) const {
   TORCH_CHECK(self.defined(), "cannot call tensor_data() on undefined tensor");
   auto self_impl_copy = self.unsafeGetTensorImpl()->shallow_copy_and_detach(
     /*version_counter=*/self.unsafeGetTensorImpl()->version_counter(),
@@ -371,7 +370,7 @@ at::TensorBase VariableHooks::tensor_data(const at::TensorBase& self) const {
   return at::Tensor(self_impl_copy);
 }
 
-bool VariableHooks::is_leaf(const at::TensorBase & self) const {
+bool VariableHooks::is_leaf(const Tensor & self) const {
   if (impl::get_autograd_meta(self)) {
     return impl::get_autograd_meta(self)->grad_fn_ == nullptr;
   } else {
@@ -379,7 +378,7 @@ bool VariableHooks::is_leaf(const at::TensorBase & self) const {
   }
 }
 
-int64_t VariableHooks::output_nr(const at::TensorBase & self) const {
+int64_t VariableHooks::output_nr(const Tensor & self) const {
   if (impl::get_autograd_meta(self)) {
     return impl::get_autograd_meta(self)->output_nr_;
   } else {
@@ -387,12 +386,7 @@ int64_t VariableHooks::output_nr(const at::TensorBase & self) const {
   }
 }
 
-void VariableHooks::set_data(const at::TensorBase & self_base, const at::TensorBase & new_data_base) const {
-  at::OptionalTensorRef self_ref(self_base);
-  const Tensor &self = *self_ref;
-  at::OptionalTensorRef new_data_ref(new_data_base);
-  const Tensor &new_data = *new_data_ref;
-
+void VariableHooks::set_data(const Tensor & self, const Tensor & new_data) const {
   // `var.set_data(new_data)` shallow-copies all non-autograd TensorImpl fields
   // from `new_data` to `var`. It requires that `new_data` and `var` have compatible
   // tensor type.
@@ -426,15 +420,15 @@ void VariableHooks::set_data(const at::TensorBase & self_base, const at::TensorB
   self.unsafeGetTensorImpl()->shallow_copy_from(new_data.getIntrusivePtr());
 }
 
-at::TensorBase VariableHooks::data(const at::TensorBase & self) const {
+Tensor VariableHooks::data(const Tensor & self) const {
   return self.variable_data();
 }
 
-int64_t VariableHooks::_version(const at::TensorBase & self) const {
+int64_t VariableHooks::_version(const Tensor & self) const {
   return self.unsafeGetTensorImpl()->version_counter().current_version();
 }
 
-void VariableHooks::retain_grad(const at::TensorBase& self) const {
+void VariableHooks::retain_grad(const Tensor& self) const {
   TORCH_CHECK(self.requires_grad(), "can't retain_grad on Tensor that has requires_grad=False");
   if (self.is_leaf()) {  // no-op for leaves
     return;
@@ -444,7 +438,7 @@ void VariableHooks::retain_grad(const at::TensorBase& self) const {
   }
   c10::weak_intrusive_ptr<c10::TensorImpl> weak_self(self.getIntrusivePtr());
 
-  auto retain_grad_hook = [weak_self](const at::Tensor& grad) {
+  std::function<void(Tensor)> retain_grad_hook([weak_self](const Tensor& grad) {
     if (weak_self.expired()) {
       return;
     } else {
@@ -459,13 +453,13 @@ void VariableHooks::retain_grad(const at::TensorBase& self) const {
         var->mutable_grad() = var->grad() + grad;
       }
     }
-  };
+  });
 
-  at::OptionalTensorRef(self)->register_hook(retain_grad_hook);
+  self.register_hook(retain_grad_hook);
   impl::get_autograd_meta(self)->retains_grad_ = true;
 }
 
-bool VariableHooks::retains_grad(const at::TensorBase& self) const {
+bool VariableHooks::retains_grad(const Tensor& self) const {
   if (impl::get_autograd_meta(self)) {
     return impl::get_autograd_meta(self)->retains_grad_;
   } else {
@@ -486,7 +480,7 @@ void VariableHooks::_backward(
   torch::autograd::backward({self}, {_gradient}, keep_graph, create_graph, input_vars);
 }
 
-void VariableHooks::requires_grad_(const at::TensorBase& self, bool _requires_grad) const {
+void VariableHooks::requires_grad_(const Tensor& self, bool _requires_grad) const {
   if (!self.is_leaf() && !_requires_grad) {
     throw std::runtime_error(
       autograd::utils::requires_grad_leaf_error(_requires_grad)
@@ -498,7 +492,7 @@ void VariableHooks::requires_grad_(const at::TensorBase& self, bool _requires_gr
 // Backward View Variables
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-bool VariableHooks::is_view(const at::TensorBase& self) const {
+bool VariableHooks::is_view(const Tensor& self) const {
   auto diff_view_meta = torch::autograd::impl::get_view_autograd_meta(self);
   if (diff_view_meta) {
     return diff_view_meta->has_bw_view();
@@ -507,7 +501,7 @@ bool VariableHooks::is_view(const at::TensorBase& self) const {
   }
 }
 
-const at::TensorBase& VariableHooks::base(const at::TensorBase& self) const {
+const Tensor& VariableHooks::base(const Tensor& self) const {
   auto diff_view_meta = torch::autograd::impl::get_view_autograd_meta(self);
   if (diff_view_meta) {
     TORCH_CHECK(diff_view_meta->has_bw_view(), "Can't get base of non-backward view Tensor");
@@ -521,7 +515,7 @@ namespace {
   std::string singleton_string;
 }
 
-const std::string& VariableHooks::name(const at::TensorBase& self) const {
+const std::string& VariableHooks::name(const Tensor& self) const {
   TORCH_CHECK(self.defined(), "cannot call variable_data() on undefined tensor");
   if (torch::autograd::impl::get_autograd_meta(self)) {
     return torch::autograd::impl::get_autograd_meta(self)->name_;
@@ -534,7 +528,7 @@ namespace {
   std::shared_ptr<torch::autograd::Node> singleton_shared_ptr;
 }
 
-const std::shared_ptr<torch::autograd::Node>& VariableHooks::grad_fn(const at::TensorBase& self) const {
+const std::shared_ptr<torch::autograd::Node>& VariableHooks::grad_fn(const Tensor& self) const {
   auto diff_view_meta = torch::autograd::impl::get_view_autograd_meta(self);
   if (diff_view_meta && diff_view_meta->has_bw_view()) {
     // See NOTE [ View + Inplace detection ]
@@ -602,15 +596,14 @@ const std::shared_ptr<torch::autograd::Node>& VariableHooks::grad_fn(const at::T
   }
 }
 
-void VariableHooks::remove_hook(const at::TensorBase& self, unsigned pos) const {
+void VariableHooks::remove_hook(const Tensor& self, unsigned pos) const {
   auto &list = torch::autograd::impl::materialize_autograd_meta(self)->cpp_hooks_list_;
   TORCH_CHECK(list && pos < list->size() , "Invalid index, no hook at position ", pos);
   // Hook will be ignored
   (*list)[pos] = nullptr;
 }
 
-unsigned VariableHooks::_register_hook(
-    const at::TensorBase& self, std::function<at::TensorBase(const at::TensorBase&)> hook) const {
+unsigned VariableHooks::_register_hook(const Tensor& self, std::function<Tensor(const Tensor&)> hook) const {
   TORCH_CHECK(self.requires_grad(), "cannot register a hook on a variable that "
                            "doesn't require gradient");
   // NB: materialize_autograd_meta unnecessary due to requires grad check
