@@ -442,8 +442,8 @@ TEST(Cuda, OneBlockOneThreadGlobalReduce1_CUDA) {
 
   StorePtr init_store = output_buf.store({0}, 0.f);
   VarHandle i1("i1", kInt);
-  ExprHandle load_data = Load::make(BufHandle(data_buf.data()), {i1});
-  ExprHandle load_output = Load::make(BufHandle(output_buf.data()), {0});
+  ExprHandle load_data = Load::make(data_buf, {i1});
+  ExprHandle load_output = Load::make(output_buf, {0});
   ExprHandle add_value = load_output + load_data;
   StorePtr store_output = output_buf.store({0}, add_value);
   ForPtr for_output = For::make(i1, 0, N, store_output);
@@ -524,8 +524,8 @@ TEST(Cuda, OneBlockMultiThreadGlobalReduce1_CUDA) {
 
   //  for t in 0..1024: // thread-idx
   //    b[0] = b[0] + a[t] // implied atomic
-  ExprHandle load_a = Load::make(BufHandle(a_buf.data()), {t});
-  ExprHandle load_b = Load::make(BufHandle(b_buf.data()), {0});
+  ExprHandle load_a = Load::make(a_buf, {t});
+  ExprHandle load_b = Load::make(b_buf, {0});
   ExprHandle add_value = load_b + load_a;
   StorePtr store_b = b_buf.store({0}, add_value);
   ForPtr for_b = For::make(t, 0, N, store_b, thread_idx_options);
@@ -597,7 +597,7 @@ TEST(Cuda, NoThreadIdxWrite_1_CUDA) {
   //   for n in 0..2:
   //     a[0] = a[0] + n
   StorePtr store_a0_0 = a_buf.store({0}, 0.f);
-  ExprHandle load_a0 = Load::make(BufHandle(a_buf.data()), {0});
+  ExprHandle load_a0 = Load::make(a_buf, {0});
   ExprHandle v1 = load_a0 + n;
   StorePtr store_a0_v1 = a_buf.store({0}, v1);
   ForPtr loop_a_0 = For::make(n, 0, 2, store_a0_v1);
@@ -715,8 +715,7 @@ TEST(Cuda, SharedMemReduce_1_CUDA) {
     //    for n in 0..64:  // thread_idx
     //      c(n) = c(n) + a(k, m, n)
     ExprHandle load_cn = Load::make(kFloat, c, {n});
-    ExprHandle a_kmn =
-        Load::make(BufHandle(a.data()), {k * (M * N) + m * N + n});
+    ExprHandle a_kmn = Load::make(a, {k * (M * N) + m * N + n});
     ExprHandle v_add = load_cn + a_kmn;
     StorePtr store_cn_v = Store::make(c, {n}, v_add);
     ForPtr loop_n2 = For::make(n, 0, N, store_cn_v, thread_idx_opt);
@@ -1088,8 +1087,8 @@ TEST(Cuda, PrioritizeDependents_CUDA) {
    *   c[i] = (i < 10 ? a[i] + b[i] : b[i]);
    * }
    */
-  ExprHandle load_a = Load::make(BufHandle(a.data()), {i});
-  ExprHandle load_b = Load::make(BufHandle(b.data()), {i});
+  ExprHandle load_a = a.load({i});
+  ExprHandle load_b = b.load({i});
   ExprHandle cmp = CompareSelect::make(i, 10, CompareSelectOperation::kLT);
   ExprHandle ite = IfThenElse::make(cmp, Add::make(load_a, load_b), load_b);
 
