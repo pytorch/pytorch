@@ -755,6 +755,10 @@ private:
   TensorBase __dispatch_contiguous(c10::MemoryFormat) const;
 };
 
+// wobble for testing
+#if 0
+#endif
+
 // For "multiple ... operators specified" warnings, closing brace of class
 // declaration must be included between pragma push & pop
 #ifdef _MSC_VER
