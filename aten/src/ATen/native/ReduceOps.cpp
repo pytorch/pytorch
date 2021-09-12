@@ -1309,9 +1309,11 @@ Tensor norm(const Tensor& self, const Scalar& p) {
 // Tensor of dtype `bool`. However for compatibility reason,
 // for `uint8`, they return Tensor of same dtype `uint8`.
 // Reference: https://github.com/pytorch/pytorch/pull/47878#issuecomment-747108561
-inline const Tensor & _all(const Tensor & result, TensorIterator & iter) {
+inline const Tensor & _all(const Tensor & self, const Tensor & result, TensorIterator & iter) {
   if (iter.numel() == 0) {
     result.fill_(1);
+  } else if (iter.numel() == 1) {
+    result.fill_(self);
   } else {
     and_stub(iter.device_type(), iter);
   }
@@ -1338,17 +1340,19 @@ inline TensorIterator get_allany_iter(
 TORCH_IMPL_FUNC(all_out)
 (const Tensor& self, int64_t dim, bool keepdim, const Tensor& result) {
   auto iter = get_allany_iter(self, result, dim, keepdim);
-  _all(result, iter);
+  _all(self, result, iter);
 }
 
 TORCH_IMPL_FUNC(all_all_out)(const Tensor& self, const Tensor& result) {
   auto iter = get_allany_iter(self, result, {}, false);
-  _all(result, iter);
+  _all(self, result, iter);
 }
 
-inline const Tensor & _any(const Tensor & result, TensorIterator & iter) {
+inline const Tensor & _any(const Tensor & self, const Tensor & result, TensorIterator & iter) {
   if (iter.numel() == 0) {
     result.fill_(0);
+  } else if (iter.numel() == 1) {
+    result.fill_(self);
   } else {
     or_stub(iter.device_type(), iter);
   }
@@ -1362,12 +1366,12 @@ TORCH_IMPL_FUNC(any_out)
  bool keepdim,
  const Tensor& result) {
   auto iter = get_allany_iter(self, result, dim, keepdim);
-  _any(result, iter);
+  _any(self, result, iter);
 }
 
 TORCH_IMPL_FUNC(any_all_out)(const Tensor& self, const Tensor& result) {
   auto iter = get_allany_iter(self, result, {}, false);
-  _any(result, iter);
+  _any(self, result, iter);
 }
 
 Tensor &amin_out(const Tensor& self, IntArrayRef dim, bool keepdim, Tensor& result) {
