@@ -4,23 +4,21 @@
 # size for mobile devices and the flow to integrate it with a simple predictor
 # in c++.
 #
-# There are three custom build types:
+# Supported custom build types:
 #
 # 1. `TEST_DEFAULT_BUILD=1 ./build.sh` - it is similar to the prebuilt libtorch
 # libraries released for Android and iOS (same CMake build options + host
 # toolchain), which doesn't contain autograd function nor backward ops thus is
 # smaller than full LibTorch.
 #
-# 2. `TEST_CUSTOM_BUILD_STATIC=1 ./build.sh` - it further optimizes libtorch
+# 2. `TEST_CUSTOM_BUILD_DYNAMIC=1 ./build.sh` - it further optimizes libtorch
 # size by only including ops used by a specific model.
-#
-# 3. `TEST_CUSTOM_BUILD_DYNAMIC=1 ./build.sh` - similar as 2) except that it
-# relies on the op dependency graph (instead of static dispatch) to calculate
-# and keep all transitively dependent ops by the model.
 # Note that LLVM_DIR environment variable should be set to the location of
 # LLVM-dev toolchain.
 #
-# Type 2) will be deprecated by type 3) in the future.
+# 3. `TEST_CUSTOM_BUILD_STATIC=1 ./build.sh` - similar as 2) except that it
+# relies on the static dispatch + linker to prune code.
+#
 ###############################################################################
 
 set -ex -o pipefail
@@ -47,7 +45,7 @@ generate_op_dependency_graph() {
   if [ ! -f "${OP_DEPENDENCY}" ]; then
     BUILD_ROOT="${ANALYZER_BUILD_ROOT}" \
       ANALYZE_TORCH=1 \
-      "${SRC_ROOT}/tools/code_analyzer/build.sh" -closure=false
+      "${SRC_ROOT}/tools/code_analyzer/build.sh"
   fi
 }
 
@@ -63,10 +61,16 @@ run_custom_build_with_static_dispatch() {
   LIBTORCH_BUILD_ROOT="${BUILD_ROOT}/build_custom_libtorch_static"
   LIBTORCH_INSTALL_PREFIX="${LIBTORCH_BUILD_ROOT}/install"
 
+  # Here we omitted the OP_DEPENDENCY flag so it generates registration
+  # code for used ROOT ops only, whose unboxing kernels are still needed
+  # by the JIT runtime. The intermediate ops will be automatically kepted
+  # by the linker as they are statically referenced by the static dispatch
+  # code, for which we can bypass the registration.
+  # We don't set '-DSTATIC_DISPATCH_BACKEND=CPU' explicitly to test automatic
+  # fallback to static dispatch when '-DOP_DEPENDENCY' is omitted.
   BUILD_ROOT="${LIBTORCH_BUILD_ROOT}" \
     "${SRC_ROOT}/scripts/build_mobile.sh" \
     -DCMAKE_CXX_FLAGS="-DSTRIP_ERROR_MESSAGES" \
-    -DUSE_STATIC_DISPATCH=ON \
     -DSELECTED_OP_LIST="${ROOT_OPS}"
 }
 
@@ -77,7 +81,6 @@ run_custom_build_with_dynamic_dispatch() {
   BUILD_ROOT="${LIBTORCH_BUILD_ROOT}" \
     "${SRC_ROOT}/scripts/build_mobile.sh" \
     -DCMAKE_CXX_FLAGS="-DSTRIP_ERROR_MESSAGES" \
-    -DUSE_STATIC_DISPATCH=OFF \
     -DSELECTED_OP_LIST="${ROOT_OPS}" \
     -DOP_DEPENDENCY="${OP_DEPENDENCY}"
 }

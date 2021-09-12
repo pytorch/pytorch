@@ -242,21 +242,20 @@ class TestTypeSharing(JitTestCase):
         """
         Attributes whose type cannot be inferred should fail cleanly with nice hints
         """
-        class NotScriptable(object):
-            pass
-
         class M(torch.nn.Module):
             def __init__(self):
                 super(M, self).__init__()
                 # assign a type we know can't be converted to TorchScript
-                self.foo = NotScriptable()
+                self.foo = object
 
             def forward(self):
                 # try to use it in forward
                 return self.foo
 
         m = M()
-        with self.assertRaisesRegex(RuntimeError, "failed to convert Python type"):
+        with self.assertRaisesRegexWithHighlight(RuntimeError,
+                                                 "failed to convert Python type",
+                                                 "self.foo"):
             torch.jit.script(m)
 
     def test_script_function_attribute_different(self):
@@ -501,3 +500,113 @@ class TestTypeSharing(JitTestCase):
         c = Foo({'bar': A()})
         self.assertDifferentType(a, b)
         self.assertSameType(b, c)
+
+    def test_type_sharing_define_in_init(self):
+        """
+        Tests that types between instances of a ScriptModule
+        subclass that defines methods in its __init__ are not
+        shared.
+        """
+        class A(torch.jit.ScriptModule):
+            def __init__(self, val):
+                super().__init__()
+                self.define(f"""
+                def forward(self) -> int:
+                    return {val}
+                """)
+
+        one = A(1)
+        two = A(2)
+
+        self.assertEqual(one(), 1)
+        self.assertEqual(two(), 2)
+
+    def test_type_sharing_disabled(self):
+        """
+        Test that type sharing can be disabled.
+        """
+        class A(torch.nn.Module):
+            def __init__(self, sub):
+                super().__init__()
+                self.sub = sub
+
+            def forward(self, x):
+                return x
+
+        class B(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                return x
+
+        top1 = A(A(B()))
+        top2 = A(A(B()))
+
+        top1_s = torch.jit._recursive.create_script_module(
+            top1,
+            torch.jit._recursive.infer_methods_to_compile,
+            share_types=False,
+        )
+        top2_s = torch.jit._recursive.create_script_module(
+            top2,
+            torch.jit._recursive.infer_methods_to_compile,
+            share_types=False,
+        )
+
+        self.assertDifferentType(top1_s, top2_s)
+        self.assertDifferentType(top1_s, top1_s.sub)
+        self.assertDifferentType(top1_s, top2_s.sub)
+        self.assertDifferentType(top2_s, top2_s.sub)
+        self.assertDifferentType(top2_s, top1_s.sub)
+
+    def test_type_shared_ignored_attributes(self):
+        """
+        Test that types are shared if the exclusion of their
+        ignored attributes makes them equal.
+        """
+        class A(torch.nn.Module):
+            __jit_ignored_attributes__ = ["a"]
+
+            def __init__(self, a, b):
+                super().__init__()
+                self.a = a
+                self.b = b
+
+            def forward(self, x):
+                return x
+
+        a_with_linear = A(torch.nn.Linear(5, 5), 5)
+        a_with_string = A("string", 10)
+
+        # Both should have the same type because the attribute
+        # that differs in type is ignored and the common attribute
+        # has the same type.
+        self.assertSameType(a_with_linear, a_with_string)
+
+    def test_type_not_shared_ignored_attributes(self):
+        """
+        Test that types are not shared if the exclusion of their
+        ignored attributes makes them not equal.
+        """
+        class A(torch.nn.Module):
+            __jit_ignored_attributes__ = ["a"]
+
+            def __init__(self, a, b, c):
+                super().__init__()
+                self.a = a
+                self.b = b
+                self.c = c
+
+            def forward(self, x):
+                return x
+
+        mod = A(torch.nn.Linear(5, 5), 5, "string")
+        s1 = torch.jit.script(mod)
+        A.__jit_ignored_attributes__ = ["a", "b"]
+        s2 = torch.jit.script(mod)
+
+        # The types of s1 and s2 should differ. Although they are instances
+        # of A, __jit_ignored_attributes__ was modified before scripting s2,
+        # so the set of ignored attributes is different between s1 and s2.
+        self.assertDifferentType(s1, s2)

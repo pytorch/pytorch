@@ -1,13 +1,14 @@
-#include "torch/csrc/jit/tensorexpr/unique_name_manager.h"
+#include <torch/csrc/jit/tensorexpr/unique_name_manager.h>
 
+#include <c10/util/string_utils.h>
+#include <torch/csrc/jit/tensorexpr/ir.h>
 #include <cctype>
-#include "torch/csrc/jit/tensorexpr/ir.h"
 
 namespace torch {
 namespace jit {
 namespace tensorexpr {
 
-const std::string& UniqueNameManager::get_unique_name(const Var* v) {
+const std::string& UniqueNameManager::get_unique_name(VarPtr v) {
   // Find if we have already encountered this variable.
   auto iter = unique_name_mapping_.find(v);
   if (iter != unique_name_mapping_.end()) {
@@ -29,7 +30,7 @@ const std::string& UniqueNameManager::get_unique_name(const Var* v) {
     int count_v = count++;
     std::string unique_name = name_hint;
     if (count_v > 0) {
-      unique_name += "_" + std::to_string(count_v);
+      unique_name += "_" + c10::to_string(count_v);
     }
     if (all_unique_names_.count(unique_name) == 0) {
       all_unique_names_.insert(unique_name);

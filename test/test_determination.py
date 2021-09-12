@@ -13,15 +13,14 @@ class DeterminationTest(unittest.TestCase):
     # Test determination on a subset of tests
     TESTS = [
         "test_nn",
-        "test_jit_simple",
+        "test_jit_profiling",
         "test_jit",
         "test_torch",
-        "distributed/test_distributed",
-        "distributed/rpc/test_rpc_spawn",
         "test_cpp_extensions_aot_ninja",
         "test_cpp_extensions_aot_no_ninja",
         "test_utils",
         "test_determination",
+        "test_quantization",
     ]
 
     @classmethod
@@ -30,8 +29,15 @@ class DeterminationTest(unittest.TestCase):
         return [
             test
             for test in cls.TESTS
-            if run_test.determine_target(test, changed_files, DummyOptions())
+            if run_test.should_run_test(run_test.TARGET_DET_LIST, test, changed_files, DummyOptions())
         ]
+
+    def test_target_det_list_is_sorted(self):
+        # We keep TARGET_DET_LIST sorted to minimize merge conflicts
+        # but most importantly to allow us to comment on the absence
+        # of a test. It would be very difficult to add a file right
+        # next to a comment that says to keep it out of the list.
+        self.assertListEqual(run_test.TARGET_DET_LIST, sorted(run_test.TARGET_DET_LIST))
 
     def test_config_change_only(self):
         """CI configs trigger all tests"""
@@ -61,15 +67,26 @@ class DeterminationTest(unittest.TestCase):
     def test_test_file(self):
         """Test files trigger themselves and dependent tests"""
         self.assertEqual(
-            self.determined_tests(["test/test_jit.py"]), ["test_jit_simple", "test_jit"]
+            self.determined_tests(["test/test_jit.py"]), ["test_jit_profiling", "test_jit"]
         )
         self.assertEqual(
             self.determined_tests(["test/jit/test_custom_operators.py"]),
-            ["test_jit_simple", "test_jit"],
+            ["test_jit_profiling", "test_jit"],
         )
         self.assertEqual(
-            self.determined_tests(["test/distributed/rpc/test_rpc_spawn.py"]),
-            ["distributed/rpc/test_rpc_spawn"],
+            self.determined_tests(["test/quantization/eager/test_quantize_eager_ptq.py"]),
+            ["test_quantization"],
+        )
+
+    def test_test_internal_file(self):
+        """testing/_internal files trigger dependent tests"""
+        self.assertEqual(
+            self.determined_tests(["torch/testing/_internal/common_quantization.py"]),
+            [
+                "test_jit_profiling",
+                "test_jit",
+                "test_quantization",
+            ],
         )
 
     def test_torch_file(self):
@@ -94,6 +111,7 @@ class DeterminationTest(unittest.TestCase):
             [
                 "test_cpp_extensions_aot_ninja",
                 "test_cpp_extensions_aot_no_ninja",
+                "test_utils",
                 "test_determination",
             ],
         )

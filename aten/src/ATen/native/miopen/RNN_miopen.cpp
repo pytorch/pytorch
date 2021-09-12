@@ -15,19 +15,18 @@ namespace at { namespace native {
 
     std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> miopen_rnn(
             const Tensor& input_r, TensorList weight, int64_t weight_stride0,
-            const Tensor& hx, const Tensor& cx,
+            const Tensor& hx, const c10::optional<Tensor>& cx_opt,
             int64_t fn_mode, int64_t fn_hidden_size, int64_t fn_num_layers,
             bool batch_first, double fn_dropout, bool fn_train, bool fn_bidirectional,
-            IntArrayRef fn_batch_sizes, const Tensor& fn_dropout_state
+            IntArrayRef fn_batch_sizes, const c10::optional<Tensor>& fn_dropout_state_opt
             ) {
         AT_ERROR("miopen_rnn : ATen not compiled with MIOpen support.");
     }
 
     std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> miopen_rnn_backward(
-            const Tensor& input, TensorList weight, int64_t weight_stride0, const Tensor& weight_buf, const Tensor& hx, const Tensor& cx,
-            const Tensor& output, const Tensor& grad_output_r, const Tensor& grad_hy_r,
-            const Tensor& grad_cy_r, int64_t mode, int64_t hidden_size, int64_t num_layers, bool batch_first,
-            double dropout, bool train, bool bidirectional, IntArrayRef batch_sizes, const Tensor& dropout_state,
+            const Tensor& input, TensorList weight, int64_t weight_stride0, const Tensor& weight_buf, const Tensor& hx, const c10::optional<Tensor>& cx_opt,
+            const Tensor& output, const c10::optional<Tensor>& grad_output_r_opt, const c10::optional<Tensor>& grad_hy_r_opt, const c10::optional<Tensor>& grad_cy_r_opt, int64_t mode, int64_t hidden_size, int64_t num_layers, bool batch_first,
+            double dropout, bool train, bool bidirectional, IntArrayRef batch_sizes, const c10::optional<Tensor>& dropout_state_opt,
             const Tensor& reserve, std::array<bool, 4> output_mask
             ) {
         AT_ERROR("miopen_rnn_backward: ATen not compiled with MIOpen support.");
@@ -246,7 +245,7 @@ Tensor permute_wei_for_miopen(Tensor wei, int64_t mode)
 }
 
 void _viewOrCopyParams(MatrixRef<Tensor> params_from, MatrixRef<Tensor> params_to, bool copy) {
-    AT_ASSERTM(params_from.size(0) == params_to.size(0), "number of layers mismatch");
+    TORCH_CHECK(params_from.size(0) == params_to.size(0), "number of layers mismatch");
     for (size_t i = 0; i < params_from.size(0); i++) {
         auto layer_params_from = params_from[i];
         auto layer_params_to = params_to[i];
@@ -257,7 +256,7 @@ void _viewOrCopyParams(MatrixRef<Tensor> params_from, MatrixRef<Tensor> params_t
                 a != layer_params_from.end() && b != layer_params_to.end();
                 ++a, ++b) {
             auto param_from = *a, param_to = *b;
-            AT_ASSERTM(param_from.type() == param_to.type(), "parameter types mismatch");
+            TORCH_CHECK(param_from.type() == param_to.type(), "parameter types mismatch");
             if (copy) {
                 param_to.copy_(param_from.view_as(param_to));
             } else {
@@ -268,7 +267,7 @@ void _viewOrCopyParams(MatrixRef<Tensor> params_from, MatrixRef<Tensor> params_t
 }
 
 void _copyParams_and_permute(MatrixRef<Tensor> params_from, MatrixRef<Tensor> params_to, int64_t mode) {
-    AT_ASSERTM(params_from.size(0) == params_to.size(0), "number of layers mismatch");
+    TORCH_CHECK(params_from.size(0) == params_to.size(0), "number of layers mismatch");
     for (size_t i = 0; i < params_from.size(0); i++) {
         auto layer_params_from = params_from[i];
         auto layer_params_to = params_to[i];
@@ -276,7 +275,7 @@ void _copyParams_and_permute(MatrixRef<Tensor> params_from, MatrixRef<Tensor> pa
                 a != layer_params_from.end() && b != layer_params_to.end();
                 ++a, ++b) {
             auto param_from = *a, param_to = *b;
-            AT_ASSERTM(param_from.type() == param_to.type(), "parameter types mismatch");
+            TORCH_CHECK(param_from.type() == param_to.type(), "parameter types mismatch");
             auto tmp = permute_wei_for_miopen(param_from, mode);
             param_to.copy_(tmp.view_as(param_to));
         }
@@ -297,7 +296,7 @@ int64_t get_num_weights(miopenHandle_t handle, const RNNDescriptor& rnn_desc,
     size_t weight_size;
     MIOPEN_CHECK(miopenGetRNNParamsSize(handle, rnn_desc.desc(), x_desc.desc(), &weight_size, datatype));
     auto element_size = dataSize(datatype);
-    AT_ASSERTM(weight_size % element_size == 0, "miopenGetRNNParamsSize returned nonsensical weight_size.");
+    TORCH_CHECK(weight_size % element_size == 0, "miopenGetRNNParamsSize returned nonsensical weight_size.");
     return weight_size / element_size;
 }
 
@@ -359,7 +358,8 @@ std::pair<std::vector<Tensor>, size_t> get_parameters(miopenHandle_t handle, con
                 params.emplace_back(std::move(param));
                 layer_params_count++;
             } else {
-                AT_ASSERTM(cur_offset == offset, "cur_offset = ", cur_offset, " ; offset = ", offset);
+                TORCH_INTERNAL_ASSERT(cur_offset == offset,
+                                      "cur_offset = ", cur_offset, " ; offset = ", offset);
             }
             cur_offset = offset + param_size;
         }
@@ -392,7 +392,8 @@ std::pair<std::vector<Tensor>, size_t> get_parameters(miopenHandle_t handle, con
                     params.emplace_back(std::move(param));
                     layer_params_count++;
                 } else {
-                    AT_ASSERTM(cur_offset == offset, "cur_offset = ", cur_offset, " ; offset = ", offset);
+                    TORCH_INTERNAL_ASSERT(cur_offset == offset,
+                                          "cur_offset = ", cur_offset, " ; offset = ", offset);
                 }
                 cur_offset = offset + bias_size;
             }
@@ -401,9 +402,9 @@ std::pair<std::vector<Tensor>, size_t> get_parameters(miopenHandle_t handle, con
         if (layer == 0) {
             global_layer_params_count = layer_params_count;
         } else {
-            AT_ASSERTM(global_layer_params_count == layer_params_count,
-                "global_layer_params_count = ", global_layer_params_count,
-                "; layer_params_count = ", layer_params_count);
+            TORCH_INTERNAL_ASSERT(global_layer_params_count == layer_params_count,
+                                  "global_layer_params_count = ", global_layer_params_count,
+                                  "; layer_params_count = ", layer_params_count);
         }
     } // layer
     return std::make_pair(params, global_layer_params_count);
@@ -431,13 +432,17 @@ std::vector<int64_t> _output_size(const RNNDescriptorParams& rnn, const TensorDe
 
 std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> miopen_rnn(
         const Tensor& input_r, TensorList weight, int64_t weight_stride0,
-        const Tensor& hx, const Tensor& cx,
+        const Tensor& hx, const c10::optional<Tensor>& cx_opt,
         int64_t fn_mode, int64_t fn_hidden_size, int64_t fn_num_layers,
         bool batch_first, double fn_dropout, bool fn_train, bool fn_bidirectional,
-        IntArrayRef fn_batch_sizes, const Tensor& fn_dropout_state
+        IntArrayRef fn_batch_sizes, const c10::optional<Tensor>& fn_dropout_state_opt
         ) {
+    // See [Note: hacky wrapper removal for optional tensor]
+    c10::MaybeOwned<Tensor> cx_maybe_owned = at::borrow_from_optional_tensor(cx_opt);
+    const Tensor& cx = *cx_maybe_owned;
+    const Tensor& fn_dropout_state = c10::value_or_else(fn_dropout_state_opt, [] {return Tensor();});
 
-    check_device(input_r, weight, {hx, cx});
+    check_attributes(input_r, weight, {hx, cx});
     auto input = input_r;
 
     RNNParams fn;
@@ -447,7 +452,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> miopen_rnn(
     fn.tensors.set(input.sizes(), fn_batch_sizes, batch_first);
 
     if (fn.rnn.rnn_mode != miopenLSTM) {
-        AT_CHECK(!cx.defined(), "miopen_rnn: illegal defined cx for non-LSTM RNN.");
+        TORCH_CHECK(!cx.defined(), "miopen_rnn: illegal defined cx for non-LSTM RNN.");
     }
 
     auto is_input_packed = fn.tensors.batch_sizes.size() != 0;
@@ -458,8 +463,8 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> miopen_rnn(
     auto hidden_size = _hidden_size(fn.rnn, fn.tensors);
     auto output_size = _output_size(fn.rnn, fn.tensors);
 
-    AT_CHECK(hx.is_contiguous(), "miopen_rnn : hx is not contiguous.");
-    AT_CHECK(!cx.defined() || cx.is_contiguous(), "miopen_rnn : cx is not contiguous.");
+    TORCH_CHECK(hx.is_contiguous(), "miopen_rnn : hx is not contiguous.");
+    TORCH_CHECK(!cx.defined() || cx.is_contiguous(), "miopen_rnn : cx is not contiguous.");
 
     auto x = input.contiguous();
     auto output = at::empty(output_size, input.options());
@@ -493,7 +498,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> miopen_rnn(
         _copyParams_and_permute(MatrixRef<Tensor>{weight, static_cast<size_t>(weight_stride0)},
                     MatrixRef<Tensor>{params, params_stride0}, fn_mode);
 
-    AT_CHECK(!cx.defined() || cx.sizes().equals(hidden_size), "Expected cell size ", IntArrayRef{hidden_size}, ", got", cx.sizes());
+    TORCH_CHECK(!cx.defined() || cx.sizes().equals(hidden_size), "Expected cell size ", IntArrayRef{hidden_size}, ", got", cx.sizes());
 
     size_t workspace_size;
     auto x_descs_arr = descs.get_x_descs();
@@ -509,7 +514,6 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> miopen_rnn(
         size_t reserver_size;
         MIOPEN_CHECK(miopenGetRNNTrainingReserveSize(handle, descs.rnn_desc.desc(), fn.tensors.seq_length, x_descs_arr.data(), &reserver_size));
         reserve = at::empty(reserver_size, input.options().dtype(kByte));
-        setMIOpenStreamToCurrent();
         MIOPEN_CHECK(miopenRNNForwardTraining(handle, descs.rnn_desc.desc(), fn.tensors.seq_length,
                 x_descs_arr.data(), x.data_ptr(),
                 descs.hx_desc.desc(), hx.data_ptr(),
@@ -521,7 +525,6 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> miopen_rnn(
                 workspace.data_ptr(), workspace_size, reserve.data_ptr(), reserver_size ));
     } else { //Inference.
         reserve = at::empty({0}, input.options().dtype(kByte));
-        setMIOpenStreamToCurrent();
         MIOPEN_CHECK(miopenRNNForwardInference(handle, descs.rnn_desc.desc(), fn.tensors.seq_length,
                 x_descs_arr.data(), x.data_ptr(),
                 descs.hx_desc.desc(), hx.data_ptr(),
@@ -563,7 +566,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> miopen_rnn_backward_input(
     auto handle = getMiopenHandle();
 
     if(fn.rnn.rnn_mode != miopenLSTM) {
-        AT_CHECK(!cx.defined(), "rnn: illegal defined cx for non-LSTM RNN");
+        TORCH_CHECK(!cx.defined(), "rnn: illegal defined cx for non-LSTM RNN");
     }
 
     auto is_input_packed = fn_batch_sizes.size() != 0;
@@ -577,8 +580,8 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> miopen_rnn_backward_input(
     auto hidden_size = _hidden_size(fn.rnn, fn.tensors);
     auto output_size = _output_size(fn.rnn, fn.tensors);
 
-    AT_CHECK(hx.is_contiguous(), "rnn: hx is not contiguous");
-    AT_CHECK(!cx.defined() || cx.is_contiguous(), "rnn: cx is not contiguous");
+    TORCH_CHECK(hx.is_contiguous(), "rnn: hx is not contiguous");
+    TORCH_CHECK(!cx.defined() || cx.is_contiguous(), "rnn: cx is not contiguous");
 
     auto x = input.contiguous();
     auto dy = grad_output.contiguous();
@@ -588,26 +591,27 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> miopen_rnn_backward_input(
     auto dhy = grad_hy.contiguous().view(hidden_size);
     auto dcy = grad_cy.defined() ? grad_cy.contiguous().view(hidden_size) : Tensor();
     auto dhx = at::empty(hidden_size, hx.options());
-    AT_ASSERTM(cx.defined() || !output_mask[2], "illegally required grad of cx for non-LSTM RNN");
+    TORCH_INTERNAL_ASSERT(cx.defined() || !output_mask[2],
+                          "illegally required grad of cx for non-LSTM RNN");
     auto dcx = cx.defined() ? at::empty(hidden_size, cx.options()) : Tensor();
 
-    AT_CHECK(fn_train, "miopen RNN backward can only be called in training mode");
+    TORCH_CHECK(fn_train, "miopen RNN backward can only be called in training mode");
 
-    AT_CHECK(input.sizes().equals(input_size),
+    TORCH_CHECK(input.sizes().equals(input_size),
         "Expected input size ", IntArrayRef{input_size}, ", got ", input.sizes());
-    AT_CHECK(output.sizes().equals(output_size),
+    TORCH_CHECK(output.sizes().equals(output_size),
         "Expected output size ", IntArrayRef{output_size}, ", got ", output.sizes());
 
-    AT_CHECK(!hx.defined() || hx.sizes().equals(hidden_size),
+    TORCH_CHECK(!hx.defined() || hx.sizes().equals(hidden_size),
         "Expected hidden size ", IntArrayRef{hidden_size}, ", got ", hx.sizes());
-    AT_CHECK(!cx.defined() || cx.sizes().equals(hidden_size),
+    TORCH_CHECK(!cx.defined() || cx.sizes().equals(hidden_size),
         "Expected cell size ", IntArrayRef{hidden_size}, ", got ", cx.sizes());
-    AT_CHECK(!dhy.defined() || dhy.sizes().equals(hidden_size),
+    TORCH_CHECK(!dhy.defined() || dhy.sizes().equals(hidden_size),
         "Expected d_hidden size ", IntArrayRef{hidden_size}, ", got ", dhy.sizes());
-    AT_CHECK(!dcy.defined() || dcy.sizes().equals(hidden_size),
+    TORCH_CHECK(!dcy.defined() || dcy.sizes().equals(hidden_size),
         "Expected d_cell size ", IntArrayRef{hidden_size}, ", got ", dcy.sizes());
 
-    AT_CHECK(dhy.is_cuda() && dy.is_cuda() && (!dcy.defined() || dcy.is_cuda()),
+    TORCH_CHECK(dhy.is_cuda() && dy.is_cuda() && (!dcy.defined() || dcy.is_cuda()),
         "Gradients aren't HIP tensors");
 
     miopenRNNAlgo_t algo = miopenRNNdefault;
@@ -630,7 +634,6 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> miopen_rnn_backward_input(
         ));
     auto workspace = at::empty(workspace_size, input.options().dtype(kByte));
 
-    setMIOpenStreamToCurrent();
     MIOPEN_CHECK(miopenRNNBackwardData(
         handle,
         descs.rnn_desc.desc(),
@@ -679,7 +682,7 @@ std::vector<Tensor> miopen_rnn_backward_weight(
     auto handle = getMiopenHandle();
 
     if (fn.rnn.rnn_mode != miopenLSTM) {
-        AT_CHECK(!cx.defined(), "rnn: illegal defined cx for non-LSTM RNN");
+        TORCH_CHECK(!cx.defined(), "rnn: illegal defined cx for non-LSTM RNN");
     }
 
     auto is_input_packed = fn_batch_sizes.size() != 0;
@@ -691,15 +694,15 @@ std::vector<Tensor> miopen_rnn_backward_weight(
     auto input_size = _input_size(fn.tensors);
     auto hidden_size = _hidden_size(fn.rnn, fn.tensors);
 
-    AT_CHECK(fn_train, "miopen RNN backward can only be called in training mode");
+    TORCH_CHECK(fn_train, "miopen RNN backward can only be called in training mode");
 
-    AT_CHECK(input.sizes().equals(input_size),
+    TORCH_CHECK(input.sizes().equals(input_size),
         "Expected input size ", IntArrayRef{input_size}, ", got ", input.sizes());
-    AT_CHECK(!hx.defined() || hx.sizes().equals(hidden_size),
+    TORCH_CHECK(!hx.defined() || hx.sizes().equals(hidden_size),
         "Expected hidden size ", IntArrayRef{hidden_size}, ", got ", hx.sizes());
 
-    AT_CHECK(hx.is_contiguous(), "rnn: hx is not contiguous");
-    AT_CHECK(!cx.defined() || cx.is_contiguous(), "rnn: cx is not contiguous");
+    TORCH_CHECK(hx.is_contiguous(), "rnn: hx is not contiguous");
+    TORCH_CHECK(!cx.defined() || cx.is_contiguous(), "rnn: cx is not contiguous");
 
     auto x = input.contiguous();
     const auto& y = output;
@@ -715,7 +718,6 @@ std::vector<Tensor> miopen_rnn_backward_weight(
     auto x_descs_arr = descs.get_x_descs();
     auto y_descs_arr = descs.get_y_descs();
 
-    setMIOpenStreamToCurrent();
     MIOPEN_CHECK(miopenRNNBackwardWeights(
         handle,
         descs.rnn_desc.desc(),
@@ -748,12 +750,22 @@ std::vector<Tensor> miopen_rnn_backward_weight(
 }
 
 std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> miopen_rnn_backward(
-        const Tensor& input, TensorList weight, int64_t weight_stride0, const Tensor& weight_buf, const Tensor& hx, const Tensor& cx,
-        const Tensor& output, const Tensor& grad_output_r, const Tensor& grad_hy_r,
-        const Tensor& grad_cy_r, int64_t mode, int64_t hidden_size, int64_t num_layers, bool batch_first,
-        double dropout, bool train, bool bidirectional, IntArrayRef batch_sizes, const Tensor& dropout_state,
+        const Tensor& input, TensorList weight, int64_t weight_stride0, const Tensor& weight_buf, const Tensor& hx, const c10::optional<Tensor>& cx_opt,
+        const Tensor& output, const c10::optional<Tensor>& grad_output_r_opt, const c10::optional<Tensor>& grad_hy_r_opt, const c10::optional<Tensor>& grad_cy_r_opt, int64_t mode, int64_t hidden_size, int64_t num_layers, bool batch_first,
+        double dropout, bool train, bool bidirectional, IntArrayRef batch_sizes, const c10::optional<Tensor>& dropout_state_opt,
         const Tensor& reserve, std::array<bool, 4> output_mask
         ) {
+    // See [Note: hacky wrapper removal for optional tensor]
+    c10::MaybeOwned<Tensor> cx_maybe_owned = at::borrow_from_optional_tensor(cx_opt);
+    const Tensor& cx = *cx_maybe_owned;
+    const Tensor& grad_output_r = c10::value_or_else(grad_output_r_opt, [] {return Tensor();});
+    const Tensor& grad_hy_r = c10::value_or_else(grad_hy_r_opt, [] {return Tensor();});
+    const Tensor& grad_cy_r = c10::value_or_else(grad_cy_r_opt, [] {return Tensor();});
+    const Tensor& dropout_state = c10::value_or_else(dropout_state_opt, [] {return Tensor();});
+
+    if (!grad_output_r.defined() && !grad_hy_r.defined() && !grad_cy_r.defined()) {
+        return std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>>(Tensor(), Tensor(), Tensor(), std::vector<Tensor>(weight.size()));
+    }
     auto grad_output = grad_output_r.defined() ? grad_output_r : at::zeros_like(output, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
     auto grad_hy = grad_hy_r.defined() ? grad_hy_r : at::zeros_like(hx, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
     auto grad_cy = cx.defined() ? (grad_cy_r.defined() ? grad_cy_r : at::zeros_like(cx, LEGACY_CONTIGUOUS_MEMORY_FORMAT)) : grad_cy_r;
@@ -808,7 +820,7 @@ std::pair<Tensor, hidden_type> _miopen_impl(
     std::tie(hx, cx) = unpack_hidden(hidden);
     int64_t hidden_size = hx.size(2);
 
-    AT_CHECK(_batch_sizes.dim() == 1, "batch_sizes tensor should be 1D");
+    TORCH_CHECK(_batch_sizes.dim() == 1, "batch_sizes tensor should be 1D");
     IntArrayRef batch_sizes { _batch_sizes.data_ptr<int64_t>(), static_cast<size_t>(_batch_sizes.size(0)) };
 
     Tensor dropout_state = at::empty({0}, input.options());

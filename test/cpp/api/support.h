@@ -4,6 +4,7 @@
 
 #include <gtest/gtest.h>
 
+#include <c10/util/Exception.h>
 #include <ATen/TensorIndexing.h>
 #include <torch/nn/cloneable.h>
 #include <torch/types.h>
@@ -35,15 +36,31 @@ struct SeedingFixture : public ::testing::Test {
   }
 };
 
-struct CerrRedirect {
-  CerrRedirect(std::streambuf * new_buffer) : prev_buffer(std::cerr.rdbuf(new_buffer)) {}
-
-  ~CerrRedirect( ) {
-    std::cerr.rdbuf(prev_buffer);
+struct WarningCapture : public WarningHandler {
+  WarningCapture() : prev_(Warning::get_warning_handler()) {
+    Warning::set_warning_handler(this);
   }
 
-private:
-  std::streambuf * prev_buffer;
+  ~WarningCapture() {
+    Warning::set_warning_handler(prev_);
+  }
+
+  const std::vector<std::string>& messages() {
+    return messages_;
+  }
+
+  std::string str() {
+    return c10::Join("\n", messages_);
+  }
+
+  void process(const SourceLocation& source_location, const std::string& msg, const bool /*verbatim*/)
+      override {
+    messages_.push_back(msg);
+  }
+
+ private:
+  WarningHandler* prev_;
+  std::vector<std::string> messages_;
 };
 
 inline bool pointer_equal(at::Tensor first, at::Tensor second) {
@@ -153,5 +170,13 @@ struct AutoDefaultDtypeMode {
   c10::ScalarType prev_default_dtype;
 };
 
+
+inline void assert_tensor_creation_meta(torch::Tensor& x, torch::autograd::CreationMeta creation_meta) {
+  auto autograd_meta = x.unsafeGetTensorImpl()->autograd_meta();
+  TORCH_CHECK(autograd_meta);
+  auto view_meta = static_cast<torch::autograd::DifferentiableViewMeta*>(autograd_meta);
+  TORCH_CHECK(view_meta->has_bw_view());
+  ASSERT_EQ(view_meta->get_creation_meta(), creation_meta);
+}
 } // namespace test
 } // namespace torch

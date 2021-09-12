@@ -21,11 +21,14 @@ ext_modules = [
         'torch_test_cpp_extension.cpp', ['extension.cpp'],
         extra_compile_args=CXX_FLAGS),
     CppExtension(
-        'torch_test_cpp_extension.msnpu', ['msnpu_extension.cpp'],
+        'torch_test_cpp_extension.ort', ['ort_extension.cpp'],
+        extra_compile_args=CXX_FLAGS),
+    CppExtension(
+        'torch_test_cpp_extension.rng', ['rng_extension.cpp'],
         extra_compile_args=CXX_FLAGS),
 ]
 
-if torch.cuda.is_available() and CUDA_HOME is not None:
+if torch.cuda.is_available() and (CUDA_HOME is not None or ROCM_HOME is not None):
     extension = CUDAExtension(
         'torch_test_cpp_extension.cuda', [
             'cuda_extension.cpp',
@@ -35,25 +38,19 @@ if torch.cuda.is_available() and CUDA_HOME is not None:
         extra_compile_args={'cxx': CXX_FLAGS,
                             'nvcc': ['-O2']})
     ext_modules.append(extension)
-elif torch.cuda.is_available() and ROCM_HOME is not None:
-    from torch.utils.hipify import hipify_python
-    this_dir = os.path.dirname(os.path.abspath(__file__))
-    hipify_python.hipify(
-        project_directory=this_dir,
-        output_directory=this_dir,
-        includes="./*",
-        show_detailed=True,
-        is_pytorch_extension=True,)
+
+if torch.cuda.is_available() and (CUDA_HOME is not None or ROCM_HOME is not None):
     extension = CUDAExtension(
-        'torch_test_cpp_extension.cuda', [
-            'cuda_extension.cpp',
-            'hip/hip_extension_kernel.hip',
-            'hip/hip_extension_kernel2.hip',
-        ])
+        'torch_test_cpp_extension.torch_library', [
+            'torch_library.cu'
+        ],
+        extra_compile_args={'cxx': CXX_FLAGS,
+                            'nvcc': ['-O2']})
     ext_modules.append(extension)
 
 setup(
     name='torch_test_cpp_extension',
     packages=['torch_test_cpp_extension'],
     ext_modules=ext_modules,
+    include_dirs='self_compiler_include_dirs_test',
     cmdclass={'build_ext': BuildExtension.with_options(use_ninja=USE_NINJA)})

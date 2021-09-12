@@ -27,12 +27,15 @@ list(APPEND Caffe2_CPU_SRCS
   "${CMAKE_CURRENT_SOURCE_DIR}/elementwise_mul_dnnlowp_op.cc"
   "${CMAKE_CURRENT_SOURCE_DIR}/elementwise_sum_dnnlowp_op.cc"
   "${CMAKE_CURRENT_SOURCE_DIR}/elementwise_sum_relu_op.cc"
+  "${CMAKE_CURRENT_SOURCE_DIR}/fb_fc_packed_op.cc"
+  "${CMAKE_CURRENT_SOURCE_DIR}/fbgemm_fp16_pack_op.cc"
   "${CMAKE_CURRENT_SOURCE_DIR}/fbgemm_pack_matrix_cache.cc"
   "${CMAKE_CURRENT_SOURCE_DIR}/fbgemm_pack_op.cc"
   "${CMAKE_CURRENT_SOURCE_DIR}/fully_connected_dnnlowp_acc16_op.cc"
   "${CMAKE_CURRENT_SOURCE_DIR}/fully_connected_dnnlowp_op.cc"
   "${CMAKE_CURRENT_SOURCE_DIR}/fully_connected_fake_lowp_op.cc"
   "${CMAKE_CURRENT_SOURCE_DIR}/group_norm_dnnlowp_op.cc"
+  "${CMAKE_CURRENT_SOURCE_DIR}/int8_gen_quant_params.cc"
   "${CMAKE_CURRENT_SOURCE_DIR}/lstm_unit_dnnlowp_op.cc"
   "${CMAKE_CURRENT_SOURCE_DIR}/pool_dnnlowp_op.cc"
   "${CMAKE_CURRENT_SOURCE_DIR}/quantize_dnnlowp_op.cc"
@@ -60,13 +63,13 @@ list(APPEND Caffe2_CPU_SRCS
   #"${CMAKE_CURRENT_SOURCE_DIR}/sigmoid_test.cc")
   #"${CMAKE_CURRENT_SOURCE_DIR}/tanh_test.cc")
 
-if (CAFFE2_COMPILER_SUPPORTS_AVX2_EXTENSIONS)
+if(CXX_AVX2_FOUND)
   add_library(caffe2_dnnlowp_avx2_ops OBJECT ${caffe2_dnnlowp_avx2_ops_SRCS})
   add_dependencies(caffe2_dnnlowp_avx2_ops fbgemm Caffe2_PROTO c10)
   target_include_directories(caffe2_dnnlowp_avx2_ops BEFORE
     PRIVATE $<BUILD_INTERFACE:${FBGEMM_SOURCE_DIR}/include>)
 
-  if (MSVC)
+  if(MSVC)
     set_property(SOURCE ${caffe2_dnnlowp_avx2_ops_SRCS}
       APPEND_STRING PROPERTY COMPILE_FLAGS " /arch:AVX2 ")
   else()

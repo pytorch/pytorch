@@ -10,7 +10,8 @@ public final class PyTorchAndroid {
     if (!NativeLoader.isInitialized()) {
       NativeLoader.init(new SystemDelegate());
     }
-    NativeLoader.loadLibrary("pytorch_jni");
+    NativeLoader.loadLibrary("pytorch_jni_lite");
+    PyTorchCodegenLoader.loadNativeLibs();
   }
 
   /**
@@ -21,8 +22,13 @@ public final class PyTorchAndroid {
    * <p>This method is meant to use in tests and demos.
    */
   public static Module loadModuleFromAsset(
+      final AssetManager assetManager, final String assetName, final Device device) {
+    return new Module(new NativePeer(assetName, assetManager, device));
+  }
+
+  public static Module loadModuleFromAsset(
       final AssetManager assetManager, final String assetName) {
-    return new Module(new NativePeer(assetName, assetManager));
+    return new Module(new NativePeer(assetName, assetManager, Device.CPU));
   }
 
   /**

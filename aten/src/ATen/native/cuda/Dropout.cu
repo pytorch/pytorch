@@ -1,9 +1,10 @@
 #include <ATen/ATen.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
-#include <ATen/CUDAGenerator.h>
+#include <ATen/CUDAGeneratorImpl.h>
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/cuda/detail/TensorInfo.cuh>
+#include <ATen/cuda/CUDAGraphsUtils.cuh>
 #include <c10/macros/Macros.h>
 #include <curand_kernel.h>
 
@@ -24,37 +25,42 @@ namespace {
 const int UNROLL = 4;
 
 template <
-          typename scalar_t,
-          typename accscalar_t,
-          typename IndexType,
-          int ADims,
-          int VEC>
-#if __CUDA_ARCH__ >= 350
-C10_LAUNCH_BOUNDS_2(256, 8)
-#elif defined (__HIP_PLATFORM_HCC__)
+    typename scalar_t,
+    typename accscalar_t,
+    typename IndexType,
+    int ADims,
+    int VEC>
+#if __CUDA_ARCH__ >= 350 || defined __HIP_PLATFORM_HCC__
 C10_LAUNCH_BOUNDS_2(256, 4)
 #endif
-__global__ void
-fused_dropout_kernel_vec(at::cuda::detail::TensorInfo<scalar_t, IndexType> a,
-                            at::cuda::detail::TensorInfo<scalar_t, IndexType> b,
-                            at::cuda::detail::TensorInfo<uint8_t, IndexType> c,
-                            IndexType totalElements, accscalar_t p, std::pair<uint64_t, uint64_t> seeds
-                           ) {
-
+__global__ void fused_dropout_kernel_vec(
+    at::cuda::detail::TensorInfo<scalar_t, IndexType> a,
+    at::cuda::detail::TensorInfo<scalar_t, IndexType> b,
+    at::cuda::detail::TensorInfo<uint8_t, IndexType> c,
+    IndexType totalElements,
+    accscalar_t p,
+    PhiloxCudaState philox_args) {
   // make sure we don't break assumption that we can't have > 4 elements / thread
   static_assert(VEC <= 4, "Value of VEC must be in [2, 4]");
 
   using LoadT = memory::aligned_vector<scalar_t, VEC>;
   using MaskLoadT = memory::aligned_vector<uint8_t, VEC>;
 
-  accscalar_t pinv = accscalar_t(1)/p;
+  auto seeds = at::cuda::philox::unpack(philox_args);
   IndexType idx = blockIdx.x * blockDim.x + threadIdx.x;
   curandStatePhilox4_32_10_t state;
-  curand_init(
-      seeds.first,
-      idx,
-      seeds.second,
-      &state);
+  curand_init(std::get<0>(seeds),
+              idx,
+              std::get<1>(seeds),
+              &state);
+
+  accscalar_t pinv = accscalar_t(1)/p;
+
+  // Helps align the total number of times curand_uniform4 is called by each thread for the same totalElements
+  // in the vec=2 and vec=4 cases.
+  bool gridxvec_loop_state = 0;
+
+  float4 rand;
 
   // Note: Vectorized loads means we'll stride each thread by an additional VEC factor, as we'll load VEC elements at a time
   for (IndexType linearIndex = idx * VEC;
@@ -68,12 +74,21 @@ fused_dropout_kernel_vec(at::cuda::detail::TensorInfo<scalar_t, IndexType> a,
     //curand_uniform_double was pure evil anyway, not doing what it promises, and there's nothing for halfs, so generate float for everything
     // Note: need a new set of random values per 4 elements -- we'll handle VEC elements in this thread, so need ceil(VEC / 4)
     // sets of rand.
-    float4 rand = curand_uniform4(&state);
+    if ((VEC == 4) || (gridxvec_loop_state == 0)) {
+      rand = curand_uniform4(&state);
+    } else {
+      // sets up the last two values we generated last iteration to be used this iteration.
+      rand.x = rand.z;
+      rand.y = rand.w;
+      gridxvec_loop_state ^= 1;
+    }
 
     rand.x = rand.x < p;
     rand.y = rand.y < p;
-    rand.z = rand.z < p;
-    rand.w = rand.w < p;
+    if (VEC == 4) {
+      rand.z = rand.z < p;
+      rand.w = rand.w < p;
+    }
 
     // Note: We explicitly check for is_contiguous() before launching the vectorized kernel
     // and replace IndexToOffset call with linearIndex to allow vectorization of NHWC (or other)
@@ -99,30 +114,31 @@ fused_dropout_kernel_vec(at::cuda::detail::TensorInfo<scalar_t, IndexType> a,
 }
 
 template <
-          typename scalar_t,
-          typename accscalar_t,
-          typename IndexType,
-          int ADims>
-#if __CUDA_ARCH__ >= 350
-C10_LAUNCH_BOUNDS_2(256, 8)
-#elif defined (__HIP_PLATFORM_HCC__)
+    typename scalar_t,
+    typename accscalar_t,
+    typename IndexType,
+    int ADims,
+    int BDims = ADims>
+#if __CUDA_ARCH__ >= 350 || defined __HIP_PLATFORM_HCC__
 C10_LAUNCH_BOUNDS_2(256, 4)
 #endif
-__global__ void
-fused_dropout_kernel(cuda::detail::TensorInfo<scalar_t, IndexType> a,
-                      cuda::detail::TensorInfo<scalar_t, IndexType> b,
-                      cuda::detail::TensorInfo<uint8_t, IndexType> c,
-                      IndexType totalElements, accscalar_t p, std::pair<uint64_t, uint64_t> seeds
-                      ) {
-
-  accscalar_t pinv = accscalar_t(1)/p;
+__global__ void fused_dropout_kernel(
+    cuda::detail::TensorInfo<scalar_t, IndexType> a,
+    cuda::detail::TensorInfo<scalar_t, IndexType> b,
+    cuda::detail::TensorInfo<uint8_t, IndexType> c,
+    IndexType totalElements,
+    accscalar_t p,
+    PhiloxCudaState philox_args) {
+  auto seeds = at::cuda::philox::unpack(philox_args);
   IndexType idx = blockIdx.x * blockDim.x + threadIdx.x;
   curandStatePhilox4_32_10_t state;
-    curand_init(
-        seeds.first,
-        idx,
-        seeds.second,
-        &state);
+  curand_init(std::get<0>(seeds),
+              idx,
+              std::get<1>(seeds),
+              &state);
+
+  accscalar_t pinv = accscalar_t(1)/p;
+
   IndexType rounded_size = ((totalElements - 1)/(blockDim.x * gridDim.x * UNROLL)+1) *
         blockDim.x * gridDim.x * UNROLL;
   for (IndexType linearIndex = idx;
@@ -149,7 +165,7 @@ fused_dropout_kernel(cuda::detail::TensorInfo<scalar_t, IndexType> a,
            if (li < totalElements) {
     // Convert `linearIndex` into an offset of `b`
                const IndexType bOffset =
-                   cuda::detail::IndexToOffset<scalar_t, IndexType, 1>::get(li, b);
+                   cuda::detail::IndexToOffset<scalar_t, IndexType, BDims>::get(li, b);
                b.data[bOffset] = src[ii]*(&rand.x)[ii]*pinv;
                c.data[bOffset] = (uint8_t)(&rand.x)[ii];
            }
@@ -159,14 +175,13 @@ fused_dropout_kernel(cuda::detail::TensorInfo<scalar_t, IndexType> a,
 }
 
 template<typename scalar_t, typename accscalar_t>
-void masked_scale_kernel(at::Tensor& ret, const at::Tensor src, const at::Tensor mask, accscalar_t scale){
-   auto iter = at::TensorIterator();
-   iter.add_output(ret);
-   iter.add_input(src);
-   iter.add_input(mask);
-   iter.dont_compute_common_dtype();
-
-   iter.build();
+void masked_scale_kernel(at::Tensor& ret, const at::Tensor& src, const at::Tensor& mask, accscalar_t scale){
+   auto iter = at::TensorIteratorConfig()
+     .check_all_same_dtype(false)
+     .add_output(ret)
+     .add_input(src)
+     .add_input(mask)
+     .build();
 
    at::native::gpu_kernel(
        iter,
@@ -179,8 +194,7 @@ template <typename scalar_t>
 int get_vector_size(at::Tensor self, at::Tensor ret, at::Tensor mask) {
   int vec_size = 4;
   // get the vector size
-  auto memory_format = self.suggest_memory_format();
-  if (!self.is_contiguous(memory_format) || !ret.is_contiguous(memory_format) || !mask.is_contiguous(memory_format)) {
+  if (!self.is_non_overlapping_and_dense() || !ret.is_non_overlapping_and_dense() || !mask.is_non_overlapping_and_dense()) {
     vec_size = 1;
   } else {
     vec_size = memory::can_vectorize_up_to<scalar_t>((char*)self.data_ptr());
@@ -195,13 +209,126 @@ int get_vector_size(at::Tensor self, at::Tensor ret, at::Tensor mask) {
   return can_vectorize ? vec_size : 1;
 }
 
+template <typename index_type>
+inline void launcher(
+    const Tensor& self,
+    Tensor& ret,
+    Tensor& mask,
+    double p,
+    const int64_t nelem,
+    const PhiloxCudaState rng_engine_inputs,
+    dim3 grid,
+    dim3 dim_block) {
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      at::ScalarType::Half,
+      at::ScalarType::BFloat16,
+      self.scalar_type(),
+      "fused_dropout",
+      [&] {
+        using accscalar_t = acc_type<scalar_t, true>;
+        accscalar_t pa = (accscalar_t)(p);
+        auto self_info =
+            cuda::detail::getTensorInfo<scalar_t, index_type>(self);
+        auto ret_info =
+            cuda::detail::getTensorInfo<scalar_t, index_type>(ret);
+        auto mask_info =
+            cuda::detail::getTensorInfo<uint8_t, index_type>(mask);
+        self_info.collapseDims();
+        ret_info.collapseDims();
+        mask_info.collapseDims(); // ret and mask are collapsed to 1d
+                                  // contiguous tensor
+
+        int vec_size = get_vector_size<scalar_t>(self, ret, mask);
+
+        if (vec_size > 1) {
+          switch (vec_size) {
+            case 4:
+              fused_dropout_kernel_vec<
+                  scalar_t,
+                  accscalar_t,
+                  index_type,
+                  1,
+                  4>
+                  <<<grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
+                      self_info,
+                      ret_info,
+                      mask_info,
+                      nelem,
+                      pa,
+                      rng_engine_inputs);
+              C10_CUDA_KERNEL_LAUNCH_CHECK();
+              break;
+            case 2:
+              fused_dropout_kernel_vec<
+                  scalar_t,
+                  accscalar_t,
+                  index_type,
+                  1,
+                  2>
+                  <<<grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
+                      self_info,
+                      ret_info,
+                      mask_info,
+                      nelem,
+                      pa,
+                      rng_engine_inputs);
+              C10_CUDA_KERNEL_LAUNCH_CHECK();
+              break;
+          }
+        } else {
+          switch (self_info.dims) {
+            case 1:
+              fused_dropout_kernel<scalar_t, accscalar_t, index_type, 1>
+                  <<<grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
+                      self_info,
+                      ret_info,
+                      mask_info,
+                      nelem,
+                      pa,
+                      rng_engine_inputs);
+              C10_CUDA_KERNEL_LAUNCH_CHECK();
+              break;
+            default:
+              if (!self.is_contiguous() && ret.is_contiguous() &&
+                  mask.is_contiguous()) {
+                fused_dropout_kernel<scalar_t, accscalar_t, index_type, -1, 1>
+                    <<<grid,
+                        dim_block,
+                        0,
+                        at::cuda::getCurrentCUDAStream()>>>(
+                        self_info,
+                        ret_info,
+                        mask_info,
+                        nelem,
+                        pa,
+                        rng_engine_inputs);
+                C10_CUDA_KERNEL_LAUNCH_CHECK();
+              } else {
+                fused_dropout_kernel<scalar_t, accscalar_t, index_type, -1>
+                    <<<grid,
+                        dim_block,
+                        0,
+                        at::cuda::getCurrentCUDAStream()>>>(
+                        self_info,
+                        ret_info,
+                        mask_info,
+                        nelem,
+                        pa,
+                        rng_engine_inputs);
+                C10_CUDA_KERNEL_LAUNCH_CHECK();
+              }
+          }
+        }
+      });
+}
+
 } //anonymous namespace
 
 std::tuple<Tensor,Tensor>
-fused_dropout_cuda(const Tensor& self, double p, Generator * gen_){
-  auto gen = get_generator_or_default<CUDAGenerator>(gen_, cuda::detail::getDefaultCUDAGenerator());
-  Tensor ret = at::empty_like(self, self.suggest_memory_format());
-  Tensor mask = at::empty(self.sizes(), self.options().dtype(kByte), self.suggest_memory_format());
+fused_dropout_cuda(const Tensor& self, double p, c10::optional<Generator> gen_){
+  auto gen = get_generator_or_default<CUDAGeneratorImpl>(gen_, cuda::detail::getDefaultCUDAGenerator());
+  Tensor ret = at::empty_like(self);
+  Tensor mask = at::empty_like(self, self.options().dtype(kByte));
   const int64_t nelem = self.numel();
 //empty tensors should not get here, but just in case, avoid FPE
   if (nelem==0) return std::tuple<Tensor,Tensor>(self, mask);
@@ -212,88 +339,29 @@ fused_dropout_cuda(const Tensor& self, double p, Generator * gen_){
   grid.x = std::min((unsigned int)at::cuda::getCurrentDeviceProperties()->multiProcessorCount * blocks_per_sm, grid.x);
 //number of times random will be generated per thread, to offset philox counter in thc random state
   int64_t counter_offset = ((nelem - 1)/(block_size*grid.x*UNROLL)+1)*UNROLL;
-  std::pair<uint64_t, uint64_t> rng_engine_inputs;
+  PhiloxCudaState rng_engine_inputs;
   {
     // See Note [Acquire lock when using random generators]
     std::lock_guard<std::mutex> lock(gen->mutex_);
-    rng_engine_inputs = gen->philox_engine_inputs(counter_offset);
+    rng_engine_inputs = gen->philox_cuda_state(counter_offset);
   }
   if (cuda::detail::canUse32BitIndexMath(self)){
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(self.scalar_type(), "fused_dropout", [&] {
-      using accscalar_t = acc_type<scalar_t, true>;
-      accscalar_t pa = (accscalar_t)(p);
-      auto self_info = cuda::detail::getTensorInfo<scalar_t, unsigned int>(self);
-      auto ret_info = cuda::detail::getTensorInfo<scalar_t, unsigned int>(ret);
-      auto mask_info = cuda::detail::getTensorInfo<uint8_t, unsigned int>(mask);
-      self_info.collapseDims();
-      ret_info.collapseDims();
-      mask_info.collapseDims(); //ret and mask are collapsed to 1d contiguous tensor
-
-      int vec_size = get_vector_size<scalar_t>(self, ret, mask);
-
-      if (vec_size > 1) {
-        switch (vec_size) {
-         case 4:
-          fused_dropout_kernel_vec<scalar_t, accscalar_t, unsigned int, 1, 4><<<grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(self_info, ret_info, mask_info, nelem, pa, rng_engine_inputs);
-          break;
-         case 2:
-          fused_dropout_kernel_vec<scalar_t, accscalar_t, unsigned int, 1, 2><<<grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(self_info, ret_info, mask_info, nelem, pa, rng_engine_inputs);
-          break;
-        }
-      } else {
-        switch (self_info.dims) {
-          case 1:
-              fused_dropout_kernel<scalar_t, accscalar_t, unsigned int, 1><<<grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(self_info, ret_info, mask_info, nelem, pa, rng_engine_inputs);
-              break;
-          default:
-              fused_dropout_kernel<scalar_t, accscalar_t, unsigned int, -1><<<grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(self_info, ret_info, mask_info, nelem, pa, rng_engine_inputs);
-        }
-      }
-   });
+    launcher<unsigned int>(
+        self, ret, mask, p, nelem, rng_engine_inputs, grid, dim_block);
   } else {
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(self.scalar_type(), "fused_dropout", [&] {
-      using accscalar_t = acc_type<scalar_t, true>;
-      accscalar_t pa = (accscalar_t)(p);
-      auto self_info = cuda::detail::getTensorInfo<scalar_t, uint64_t>(self);
-      auto ret_info = cuda::detail::getTensorInfo<scalar_t, uint64_t>(ret);
-      auto mask_info = cuda::detail::getTensorInfo<uint8_t, uint64_t>(mask);
-      self_info.collapseDims();
-      ret_info.collapseDims();
-      mask_info.collapseDims(); //ret and mask are collapsed to 1d contiguous tensor
-
-      int vec_size = get_vector_size<scalar_t>(self, ret, mask);
-
-      if (vec_size > 1) {
-        switch (vec_size) {
-         case 4:
-          fused_dropout_kernel_vec<scalar_t, accscalar_t, uint64_t, 1, 4><<<grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(self_info, ret_info, mask_info, nelem, pa, rng_engine_inputs);
-          break;
-         case 2:
-          fused_dropout_kernel_vec<scalar_t, accscalar_t, uint64_t, 1, 2><<<grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(self_info, ret_info, mask_info, nelem, pa, rng_engine_inputs);
-          break;
-        }
-      } else {
-        switch (self_info.dims) {
-          case 1:
-              fused_dropout_kernel<scalar_t, accscalar_t, uint64_t, 1><<<grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(self_info, ret_info, mask_info, nelem, pa, rng_engine_inputs);
-              break;
-          default:
-              fused_dropout_kernel<scalar_t, accscalar_t, uint64_t, -1><<<grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(self_info, ret_info, mask_info, nelem, pa, rng_engine_inputs);
-        }
-      }
-   });
+    launcher<uint64_t>(
+        self, ret, mask, p, nelem, rng_engine_inputs, grid, dim_block);
   }
-  AT_CUDA_CHECK(cudaGetLastError());
   return std::tuple<Tensor,Tensor>(ret, mask);
 }
 
 Tensor masked_scale_cuda(const Tensor& self, const Tensor& mask, double scale){
    Tensor ret = at::empty_like(self, self.suggest_memory_format());
    TORCH_CHECK(mask.scalar_type() == at::ScalarType::Byte, "mask should be torch.uint8 dtype");
-   AT_DISPATCH_FLOATING_TYPES_AND_HALF(ret.scalar_type(), "masked_scale", [&] {
+   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, ret.scalar_type(), "masked_scale", [&] {
       using accscalar_t = acc_type<scalar_t, true>;
       accscalar_t pa = (accscalar_t)(scale);
-    masked_scale_kernel<scalar_t>(ret, self, mask, pa);
+      masked_scale_kernel<scalar_t>(ret, self, mask, pa);
   });
   return ret;
 }

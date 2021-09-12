@@ -1,6 +1,8 @@
 from .module import Module
 from .. import functional as F
 
+from torch import Tensor
+
 
 class PairwiseDistance(Module):
     r"""
@@ -26,19 +28,22 @@ class PairwiseDistance(Module):
         >>> output = pdist(input1, input2)
     """
     __constants__ = ['norm', 'eps', 'keepdim']
+    norm: float
+    eps: float
+    keepdim: bool
 
-    def __init__(self, p=2., eps=1e-6, keepdim=False):
+    def __init__(self, p: float = 2., eps: float = 1e-6, keepdim: bool = False) -> None:
         super(PairwiseDistance, self).__init__()
         self.norm = p
         self.eps = eps
         self.keepdim = keepdim
 
-    def forward(self, x1, x2):
+    def forward(self, x1: Tensor, x2: Tensor) -> Tensor:
         return F.pairwise_distance(x1, x2, self.norm, self.eps, self.keepdim)
 
 
 class CosineSimilarity(Module):
-    r"""Returns cosine similarity between :math:`x_1` and :math:`x_2`, computed along dim.
+    r"""Returns cosine similarity between :math:`x_1` and :math:`x_2`, computed along `dim`.
 
     .. math ::
         \text{similarity} = \dfrac{x_1 \cdot x_2}{\max(\Vert x_1 \Vert _2 \cdot \Vert x_2 \Vert _2, \epsilon)}.
@@ -49,7 +54,8 @@ class CosineSimilarity(Module):
             Default: 1e-8
     Shape:
         - Input1: :math:`(\ast_1, D, \ast_2)` where D is at position `dim`
-        - Input2: :math:`(\ast_1, D, \ast_2)`, same shape as the Input1
+        - Input2: :math:`(\ast_1, D, \ast_2)`, same number of dimensions as x1, matching x1 size at dimension `dim`,
+              and broadcastable with x1 at other dimensions.
         - Output: :math:`(\ast_1, \ast_2)`
     Examples::
         >>> input1 = torch.randn(100, 128)
@@ -58,11 +64,13 @@ class CosineSimilarity(Module):
         >>> output = cos(input1, input2)
     """
     __constants__ = ['dim', 'eps']
+    dim: int
+    eps: float
 
-    def __init__(self, dim=1, eps=1e-8):
+    def __init__(self, dim: int = 1, eps: float = 1e-8) -> None:
         super(CosineSimilarity, self).__init__()
         self.dim = dim
         self.eps = eps
 
-    def forward(self, x1, x2):
+    def forward(self, x1: Tensor, x2: Tensor) -> Tensor:
         return F.cosine_similarity(x1, x2, self.dim, self.eps)

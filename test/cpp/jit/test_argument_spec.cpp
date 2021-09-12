@@ -1,3 +1,5 @@
+#include <gtest/gtest.h>
+
 #include <torch/jit.h>
 #include "test/cpp/jit/test_utils.h"
 #include "torch/csrc/jit/runtime/argument_spec.h"
@@ -5,8 +7,11 @@
 namespace torch {
 namespace jit {
 
-int device(const autograd::Variable& v) {
-  return v.device().is_cuda() ? v.get_device() : -1;
+namespace {
+
+at::Device device(const autograd::Variable& v) {
+  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
+  return v.device();
 }
 
 bool isEqual(at::IntArrayRef lhs, at::IntArrayRef rhs) {
@@ -29,34 +34,40 @@ bool isEqual(const ArgumentInfo& ti, const autograd::Variable& v) {
       ti.type() == v.scalar_type() && ti.dim() == v.dim();
 }
 
-autograd::Variable var(at::TensorOptions t, at::IntArrayRef sizes, bool requires_grad) {
+autograd::Variable var(
+    at::TensorOptions t,
+    at::IntArrayRef sizes,
+    bool requires_grad) {
   return autograd::make_variable(at::rand(sizes, t), requires_grad);
 }
 autograd::Variable undef() {
   return autograd::Variable();
 }
+} // namespace
 
-void testCompleteArgumentSpec() {
+TEST(ArgumentSpecTest, CompleteArgumentSpec_CUDA) {
   auto const CF = at::CPU(at::kFloat);
   auto const CD = at::CPU(at::kDouble);
   auto const GF = at::CUDA(at::kFloat);
   auto const GD = at::CUDA(at::kDouble);
 
-  auto list = createStack({var(CF, {1}, true),
-                           var(CD, {1, 2}, false),
-                           var(GF, {}, true),
-                           var(GD, {4, 5, 6}, false),
-                           undef()});
+  auto list = createStack(
+      {var(CF, {1}, true),
+       var(CD, {1, 2}, false),
+       var(GF, {}, true),
+       var(GD, {4, 5, 6}, false),
+       undef()});
 
   // make sure we have some non-standard strides
   list[1].toTensor().transpose_(0, 1);
 
   // same list but different backing values
-  auto list2 = createStack({var(CF, {1}, true),
-                            var(CD, {1, 2}, false),
-                            var(GF, {}, true),
-                            var(GD, {4, 5, 6}, false),
-                            undef()});
+  auto list2 = createStack(
+      {var(CF, {1}, true),
+       var(CD, {1, 2}, false),
+       var(GF, {}, true),
+       var(GD, {4, 5, 6}, false),
+       undef()});
   list2[1].toTensor().transpose_(0, 1);
 
   CompleteArgumentSpec a(true, list);
@@ -91,41 +102,35 @@ void testCompleteArgumentSpec() {
   ASSERT_EQ(with_const.at(2).sizes().size(), 2);
 }
 
-size_t hashCode(const TensorTypePtr& ptr) {
-  return std::hash<TensorType>()(*ptr.get());
-}
+// TODO: this test was disabled for unknown reasons and doesn't run.
+// static size_t hashCode(const TensorTypePtr& ptr) {
+//   return std::hash<TensorType>()(*ptr.get());
+// }
 
-void testProfiledTensorTypeHashing() {
-  c10::VaryingShape vs(c10::optional<size_t>{});
-  auto ptt_empty1 = TensorType::create({}, {}, vs, vs, false);
-  auto ptt_empty2 = TensorType::create({}, {}, vs, vs, false);
-  ASSERT_EQ(hashCode(ptt_empty1), hashCode(ptt_empty2));
+// TEST(ArgumentSpecTest, VaryingShape) {
+//   c10::VaryingShape<int64_t> vs(c10::optional<size_t>{});
+//   auto ptt_empty1 = TensorType::create({}, {}, vs, vs, false);
+//   auto ptt_empty2 = TensorType::create({}, {}, vs, vs, false);
+//   ASSERT_EQ(hashCode(ptt_empty1), hashCode(ptt_empty2));
 
-  c10::VaryingShape vs22(std::vector<int64_t>{2, 2});
-  auto ptt_vs22_1 = TensorType::create({}, {}, vs22, vs, false);
-  auto ptt_vs22_2 = TensorType::create({}, {}, vs22, vs, false);
-  ASSERT_EQ(hashCode(ptt_vs22_1), hashCode(ptt_vs22_2));
+//   c10::VaryingShape<int64_t> vs22(std::vector<int64_t>{2, 2});
+//   auto ptt_vs22_vs22_1 = TensorType::create({}, {}, vs22, vs22, false);
+//   auto ptt_vs22_vs22_2 = TensorType::create({}, {}, vs22, vs22, false);
+//   ASSERT_EQ(hashCode(ptt_vs22_vs22_1), hashCode(ptt_vs22_vs22_2));
 
-  c10::VaryingShape vs23(std::vector<int64_t>{2, 3});
-  auto ptt_vs23_1 = TensorType::create({}, {}, vs23, vs, false);
-  ASSERT_NE(hashCode(ptt_vs22_1), hashCode(ptt_vs23_1));
+//   c10::VaryingShape<int64_t> vs23(std::vector<int64_t>{2, 3});
+//   auto ptt_vs22_vs23_2 = TensorType::create({}, {}, vs22, vs23, false);
+//   ASSERT_NE(hashCode(ptt_vs22_vs22_1), hashCode(ptt_vs22_vs23_2));
 
-  auto ptt_vs22_vs22_1 = TensorType::create({}, {}, vs22, vs22, false);
-  auto ptt_vs22_vs22_2 = TensorType::create({}, {}, vs22, vs22, false);
-  ASSERT_EQ(hashCode(ptt_vs22_vs22_1), hashCode(ptt_vs22_vs22_2));
+//   auto ptt_vs22_vs22_1_true = TensorType::create({}, {}, vs22, vs22, true);
+//   auto ptt_vs22_vs22_2_true = TensorType::create({}, {}, vs22, vs22, true);
+//   ASSERT_EQ(hashCode(ptt_vs22_vs22_1_true), hashCode(ptt_vs22_vs22_2_true));
 
-  auto ptt_vs22_vs23_2 = TensorType::create({}, {}, vs22, vs23, false);
-  ASSERT_NE(hashCode(ptt_vs22_vs22_1), hashCode(ptt_vs22_vs23_2));
+//   auto ptt_vs22_vs22_1_false = TensorType::create({}, {}, vs22, vs22, false);
+//   ASSERT_NE(hashCode(ptt_vs22_vs22_1_true), hashCode(ptt_vs22_vs22_1_false));
+// }
 
-  auto ptt_vs22_vs22_1_true = TensorType::create({}, {}, vs22, vs22, true);
-  auto ptt_vs22_vs22_2_true = TensorType::create({}, {}, vs22, vs22, true);
-  ASSERT_EQ(hashCode(ptt_vs22_vs22_1_true), hashCode(ptt_vs22_vs22_2_true));
-
-  auto ptt_vs22_vs22_1_false = TensorType::create({}, {}, vs22, vs22, false);
-  ASSERT_NE(hashCode(ptt_vs22_vs22_1_true), hashCode(ptt_vs22_vs22_1_false));
-}
-
-void testArgumentSpec() {
+TEST(ArgumentSpecTest, Basic_CUDA) {
   auto& CF = at::CPU(at::kFloat);
   auto& CD = at::CPU(at::kDouble);
   auto& GF = at::CUDA(at::kFloat);
@@ -140,23 +145,24 @@ void testArgumentSpec() {
 
   ArgumentSpecCreator arg_spec_creator(*graph);
 
-  auto list = createStack({var(CF, {1}, true),
-                           var(CD, {1, 2}, false),
-                           var(GF, {}, true),
-                           var(GD, {4, 5, 6}, false),
-                           undef()});
+  auto list = createStack(
+      {var(CF, {1}, true),
+       var(CD, {1, 2}, false),
+       var(GF, {}, true),
+       var(GD, {4, 5, 6}, false),
+       undef()});
 
   // make sure we have some non-standard strides
   list[1].toTensor().transpose_(0, 1);
 
   // same list but different backing values
-  auto list2 = createStack({var(CF, {1}, true),
-                            var(CD, {1, 2}, false),
-                            var(GF, {}, true),
-                            var(GD, {4, 5, 6}, false),
-                            undef()});
+  auto list2 = createStack(
+      {var(CF, {1}, true),
+       var(CD, {1, 2}, false),
+       var(GF, {}, true),
+       var(GD, {4, 5, 6}, false),
+       undef()});
   list2[1].toTensor().transpose_(0, 1);
-
 
   ArgumentSpec a = arg_spec_creator.create(true, list);
   ArgumentSpec b = arg_spec_creator.create(true, list);

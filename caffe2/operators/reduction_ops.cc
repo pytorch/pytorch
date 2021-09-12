@@ -264,6 +264,12 @@ Y:
 </details>
 
     )DOC")
+    .TensorInferenceFunction([](const OperatorDef& /*unused*/,
+                                const std::vector<TensorShape>& in) {
+      vector<int64_t> output_dims = {in[0].dims()[0], in[0].dims()[2]};
+      return vector<TensorShape>{
+          CreateTensorShape(vector<int64_t>{output_dims}, in[0].data_type())};
+    })
     .Input(
         0,
         "X",

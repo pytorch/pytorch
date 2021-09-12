@@ -6,6 +6,7 @@
 #include <torch/optim/serialize.h>
 
 #include <ATen/ATen.h>
+#include <c10/util/irange.h>
 
 #include <functional>
 
@@ -36,6 +37,14 @@ void AdagradOptions::serialize(torch::serialize::InputArchive& archive) {
   _TORCH_OPTIM_DESERIALIZE_TORCH_ARG(double, weight_decay);
   _TORCH_OPTIM_DESERIALIZE_TORCH_ARG(double, initial_accumulator_value);
   _TORCH_OPTIM_DESERIALIZE_TORCH_ARG(double, eps);
+}
+
+double AdagradOptions::get_lr() const {
+  return lr();
+}
+
+void AdagradOptions::set_lr(const double lr) {
+  this->lr(lr);
 }
 
 bool operator==(const AdagradParamState& lhs, const AdagradParamState& rhs) {
@@ -109,22 +118,6 @@ Tensor Adagrad::step(LossClosure closure) {
   return loss;
 }
 
-void Adagrad::add_parameters(const std::vector<Tensor>& parameters) {
-  return _add_parameters_new_design(parameters);
-}
-
-const std::vector<Tensor>& Adagrad::parameters() const noexcept {
-  return _parameters_new_design();
-}
-
-std::vector<Tensor>& Adagrad::parameters() noexcept {
-  return _parameters_new_design();
-}
-
-size_t Adagrad::size() const noexcept {
-  return _size_new_design();
-}
-
 void Adagrad::save(serialize::OutputArchive& archive) const {
   serialize(*this, archive);
 }
@@ -144,7 +137,7 @@ void Adagrad::load(serialize::InputArchive& archive) {
     torch::optim::serialize(archive, "step_buffers", step_buffers);
     // since there were no param_groups prior to version 1.5.0, assuming all tensors are now in one param_group
     std::vector<Tensor> params = param_groups_.at(0).params();
-    for (size_t idx = 0; idx < params.size(); idx++) {
+    for(const auto idx : c10::irange(params.size())) {
       auto state = std::make_unique<AdagradParamState>();
       state->step(step_buffers[idx]);
       state->sum(sum_buffers[idx]);

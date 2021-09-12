@@ -1,0 +1,13 @@
+build --copt=--std=c++14
+build --copt=-I.
+build --copt=-isystem --copt bazel-out/k8-fastbuild/bin
+
+# Configuration to disable tty features for environments like CI
+build:no-tty --curses no
+build:no-tty --progress_report_interval 10
+build:no-tty --show_progress_rate_limit 10
+
+# Configuration to build with GPU support
+build:gpu --define=cuda=true
+# define a separate build folder for faster switching between configs
+build:gpu --platform_suffix=-gpu

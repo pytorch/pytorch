@@ -1,5 +1,3 @@
-from __future__ import absolute_import, division, print_function
-
 import math
 
 import torch
@@ -51,7 +49,7 @@ def _log_modified_bessel_fn(x, order=0):
     return result
 
 
-@torch.jit.script
+@torch.jit.script_if_tracing
 def _rejection_sample(loc, concentration, proposal_r, x):
     done = torch.zeros(x.shape, dtype=torch.bool, device=loc.device)
     while not done.all():
@@ -100,6 +98,8 @@ class VonMises(Distribution):
         super(VonMises, self).__init__(batch_shape, event_shape, validate_args)
 
     def log_prob(self, value):
+        if self._validate_args:
+            self._validate_sample(value)
         log_prob = self.concentration * torch.cos(value - self.loc)
         log_prob = log_prob - math.log(2 * math.pi) - _log_modified_bessel_fn(self.concentration, order=0)
         return log_prob

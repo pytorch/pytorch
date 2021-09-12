@@ -1,10 +1,11 @@
 #pragma once
 
-#include <torch/csrc/WindowsTorchApiMacro.h>
 #include <ATen/core/ivalue.h>
+#include <c10/util/ArrayRef.h>
+#include <caffe2/serialize/inline_container.h>
+#include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/jit/serialization/pickler.h>
 #include <torch/csrc/jit/serialization/unpickler.h>
-#include <caffe2/serialize/inline_container.h>
 
 namespace torch {
 namespace jit {
@@ -52,7 +53,6 @@ TORCH_API std::vector<char> pickle(
     const IValue& ivalue,
     std::vector<at::Tensor>* tensor_table = nullptr);
 
-
 /// Save a `torch::IValue` in a format that can be loaded by both
 /// `torch::pickle_load` in C++ and `torch.load` in Python.
 TORCH_API std::vector<char> pickle_save(const IValue& ivalue);
@@ -60,7 +60,6 @@ TORCH_API std::vector<char> pickle_save(const IValue& ivalue);
 /// Deserialize a `torch::IValue` from bytes produced by either
 /// `torch::pickle_save` in C++ or `torch.save` in Python
 TORCH_API IValue pickle_load(const std::vector<char>& data);
-
 
 /// `reader` is a function that takes in a size to read from some pickled
 /// binary. `reader` should remember where it last read, and return
@@ -70,7 +69,7 @@ TORCH_API IValue pickle_load(const std::vector<char>& data);
 TORCH_API IValue unpickle(
     std::function<size_t(char*, size_t)> reader,
     TypeResolver type_resolver,
-    const std::vector<at::Tensor>* tensor_table);
+    c10::ArrayRef<at::Tensor> tensor_table);
 
 /// Decode a chunk of memory containing pickled data into its `torch::IValue`s.
 ///
@@ -82,7 +81,7 @@ TORCH_API IValue unpickle(
     const char* data,
     size_t size,
     TypeResolver type_resolver = nullptr,
-    const std::vector<at::Tensor>* tensor_table = nullptr);
+    c10::ArrayRef<at::Tensor> tensor_table = {});
 
 } // namespace jit
 } // namespace torch

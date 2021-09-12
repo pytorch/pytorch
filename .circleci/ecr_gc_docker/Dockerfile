@@ -1,10 +1,10 @@
-FROM ubuntu:16.04
+FROM ubuntu:18.04
 
-RUN apt-get update && apt-get install -y python-pip && rm -rf /var/lib/apt/lists/* /var/log/dpkg.log
+RUN apt-get update && apt-get install -y python3-pip git && rm -rf /var/lib/apt/lists/* /var/log/dpkg.log
 
 ADD requirements.txt /requirements.txt
 
-RUN pip install -r /requirements.txt
+RUN pip3 install -r /requirements.txt
 
 ADD gc.py /usr/bin/gc.py
 

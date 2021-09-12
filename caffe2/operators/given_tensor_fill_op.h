@@ -61,10 +61,13 @@ class GivenTensorFillOp final : public FillerOp<Context> {
  private:
   template <typename Type>
   void ExtractValues() {
-    auto source_values =
-        this->template GetRepeatedArgument<Type>("values");
-    ReinitializeTensor(&values_, {static_cast<int64_t>(source_values.size())}, at::dtype<Type>().device(CPU));
+    auto source_values = this->template GetRepeatedArgument<Type>("values");
+    ReinitializeTensor(
+        &values_,
+        {static_cast<int64_t>(source_values.size())},
+        at::dtype<Type>().device(CPU));
     Type* values_data = values_.template mutable_data<Type>();
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (int i = 0; i < source_values.size(); i++) {
       values_data[i] = static_cast<Type>(source_values[i]);
     }
@@ -73,9 +76,7 @@ class GivenTensorFillOp final : public FillerOp<Context> {
 
   template <typename Type>
   bool FillWithType(Tensor* output) {
-    DCHECK_EQ(output->numel(), values_.numel())
-        << "output size: " << output->numel()
-        << " given size: " << values_.numel();
+    CAFFE_ENFORCE_EQ(output->numel(), values_.numel());
     auto* data = output->template mutable_data<Type>();
     const Type* values_data = values_.template data<Type>();
     if (output->numel()) {

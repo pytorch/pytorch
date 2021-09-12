@@ -28,7 +28,8 @@ inline std::unique_ptr<int8::Int8TensorCPU> q(
   ReinitializeTensor(&r->t, dims, at::dtype<uint8_t>().device(CPU));
   std::random_device rd;
   std::mt19937 gen(rd());
-  std::uniform_int_distribution<uint8_t> dis;
+  std::uniform_int_distribution<uint32_t> dis{
+      0, std::numeric_limits<uint8_t>::max()};
   for (auto i = 0; i < r->t.numel(); ++i) {
     r->t.mutable_data<uint8_t>()[i] = dis(gen);
   }

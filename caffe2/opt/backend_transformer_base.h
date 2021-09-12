@@ -60,7 +60,7 @@ class BackendTransformerBase {
       NetDef* pred_net,
       const std::vector<std::string>& weight_names,
       const ShapeInfoMap& shape_hints,
-      const std::unordered_set<int>& blacklisted_ops) = 0;
+      const std::unordered_set<int>& blocklisted_ops) = 0;
 
   static void annotateOpIndex(NetDef* net);
 

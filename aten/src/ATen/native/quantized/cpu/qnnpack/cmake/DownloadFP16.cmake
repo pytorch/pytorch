@@ -4,11 +4,11 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
-CMAKE_MINIMUM_REQUIRED(VERSION 2.8.12 FATAL_ERROR)
+cmake_minimum_required(VERSION 2.8.12 FATAL_ERROR)
 
-PROJECT(fp16-download NONE)
+project(fp16-download NONE)
 
-INCLUDE(ExternalProject)
+include(ExternalProject)
 ExternalProject_Add(fp16
   GIT_REPOSITORY https://github.com/Maratyszcza/FP16.git
   GIT_TAG master

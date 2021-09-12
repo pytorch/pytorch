@@ -6,7 +6,6 @@ import itertools
 import functools
 import torch
 from torch import Tensor
-from torch._six import PY2
 import torch.nn.functional as F
 from multiprocessing.reduction import ForkingPickler
 import pickle
@@ -90,7 +89,7 @@ class TestNamedTensor(TestCase):
             return
         result = op(*args)
         self.assertEqual(result.names, expected_names,
-                         message='Name inference for {} on device {} failed'.format(
+                         msg='Name inference for {} on device {} failed'.format(
                              op.__name__, device))
 
     # TODO(rzou): Some form of this check should be added to self.assertEqual.
@@ -117,8 +116,15 @@ class TestNamedTensor(TestCase):
         x = factory(1, 2, 3, names=('N', None, 'D'), device=device)
         self.assertEqual(x.names, ('N', None, 'D'))
 
+        x = factory(1, 2, 3, names=('_1', 'batch9', 'BATCH_5'), device=device)
+        self.assertEqual(x.names, ('_1', 'batch9', 'BATCH_5'))
+
         with self.assertRaisesRegex(RuntimeError,
-                                    'must contain alphabetical characters and/or underscore'):
+                                    'a valid identifier contains only'):
+            x = factory(2, names=('1',), device=device)
+
+        with self.assertRaisesRegex(RuntimeError,
+                                    'a valid identifier contains only'):
             x = factory(2, names=('?',), device=device)
 
         with self.assertRaisesRegex(RuntimeError, 'Number of names'):
@@ -140,16 +146,18 @@ class TestNamedTensor(TestCase):
             names65 = ['A' * i for i in range(1, 66)]
             x = factory([1] * 65, names=names64, device=device)
 
-    def test_none_names_refcount(self):
+    def test_none_names_refcount(self, N=10):
         def scope():
             unnamed = torch.empty(2, 3)
             unnamed.names  # materialize [None, None]
 
         prev_none_refcnt = sys.getrefcount(None)
-        scope()
-        self.assertEqual(sys.getrefcount(None), prev_none_refcnt,
-                         message='Using tensor.names should not change '
-                                 'the refcount of Py_None')
+        # Ran it N times to reduce flakiness
+        [scope() for i in range(N)]
+        after_none_refcnt = sys.getrefcount(None)
+        self.assertTrue(after_none_refcnt - prev_none_refcnt < N / 2,
+                        msg='Using tensor.names should not change '
+                            'the refcount of Py_None')
 
     def test_has_names(self):
         unnamed = torch.empty(2, 3)
@@ -162,14 +170,10 @@ class TestNamedTensor(TestCase):
         self.assertTrue(partially_named.has_names())
         self.assertTrue(fully_named.has_names())
 
-    @unittest.skipIf(PY2, "Ellipsis object not supported in python 2")
     def test_py3_ellipsis(self):
-        # Need to exec or else flake8 will complain about invalid python 2.
         tensor = torch.randn(2, 3, 5, 7)
-        scope = {'tensor': tensor}
-        code_str = "output = tensor.refine_names('N', ..., 'C')"
-        exec(code_str, globals(), scope)
-        self.assertEqual(scope['output'].names, ['N', None, None, 'C'])
+        output = tensor.refine_names('N', ..., 'C')
+        self.assertEqual(output.names, ['N', None, None, 'C'])
 
     def test_refine_names(self):
         # Unnamed tensor -> Unnamed tensor
@@ -291,6 +295,15 @@ class TestNamedTensor(TestCase):
             check_tuple_return(F.max_pool1d_with_indices, [named_tensor_1d, 2], named_tensor_1d.names)
             check_tuple_return(F.max_pool2d_with_indices, [named_tensor_2d, [2, 2]], named_tensor_2d.names)
             check_tuple_return(F.max_pool3d_with_indices, [named_tensor_3d, [2, 2, 2]], named_tensor_3d.names)
+
+    def test_max_pooling_without_names_does_not_warn(self):
+        for device in torch.testing.get_all_device_types():
+            tensor_2d = torch.zeros(2, 3, 5, 7, device=device, requires_grad=True)
+            with warnings.catch_warnings(record=True) as warns:
+                warnings.simplefilter("always")
+                result = F.max_pool2d(tensor_2d, [2, 2])
+                result.sum().backward()
+                self.assertEqual(len(warns), 0)
 
     def test_no_save_support(self):
         named_tensor = torch.zeros(2, 3, names=('N', 'C'))
@@ -464,8 +477,8 @@ class TestNamedTensor(TestCase):
         # Test torch.full
         for device in torch.testing.get_all_device_types():
             names = ('N', 'T', 'D')
-            result = torch.full([1, 2, 3], 2, names=names, device=device)
-            expected = torch.full([1, 2, 3], 2, device=device).rename_(*names)
+            result = torch.full([1, 2, 3], 2., names=names, device=device)
+            expected = torch.full([1, 2, 3], 2., device=device).rename_(*names)
             self.assertTensorDataAndNamesEqual(result, expected)
 
     def test_tensor_from_lists(self):
@@ -838,9 +851,9 @@ class TestNamedTensor(TestCase):
                 out = testcase.lambd(tensor)
             except RuntimeError as err:
                 # Get a better error message by catching the error and asserting.
-                raise RuntimeError('{}: {}'.format(testcase.name, err))
+                raise RuntimeError('{}: {}'.format(testcase.name, err)) from err
             self.assertEqual(out.names, tensor.names,
-                             message=testcase.name)
+                             msg=testcase.name)
 
         def fn(name, *args, **kwargs):
             return [Function(name, lambda t: getattr(torch, name)(t, *args, **kwargs))]
@@ -989,6 +1002,13 @@ class TestNamedTensor(TestCase):
         test_ops(torch.cummax)
         test_ops(torch.cummin)
 
+    def test_logcumsumexp(self):
+        for device in torch.testing.get_all_device_types():
+            names = ('N', 'D')
+            tensor = torch.rand(2, 3, names=names)
+            result = torch.logcumsumexp(tensor, 'D')
+            self.assertEqual(result.names, names)
+
     def test_bitwise_not(self):
         for device in torch.testing.get_all_device_types():
             names = ('N', 'D')
@@ -1052,13 +1072,71 @@ class TestNamedTensor(TestCase):
         with self.assertRaisesRegex(RuntimeError, "must be consecutive in"):
             tensor.flatten(['H', 'D', 'W'], 'features')
 
-    def test_unflatten(self):
-        tensor = torch.randn(7, 2 * 3 * 5, 11, names=('N', 'D', 'K'))
+    def test_flatten_nodims(self):
+        tensor = torch.empty((2, 3))
+        with self.assertRaisesRegex(RuntimeError, "cannot be empty"):
+            tensor.flatten((), 'abcd')
 
-        # accepts iterable of tuples
-        out = tensor.unflatten('D', (('C', 2), ('H', 3), ('W', 5)))
-        self.assertEqual(out.names, ('N', 'C', 'H', 'W', 'K'))
-        self.assertEqual(out.shape, (7, 2, 3, 5, 11))
+    def test_unflatten(self):
+        # test args: tensor, int, namedshape
+        self.assertTrue(torch.equal(
+            torch.ones(4).unflatten(0, (('A', 2), ('B', 2))),
+            torch.ones(2, 2, names=('A', 'B'))))
+        self.assertTrue(torch.equal(
+            torch.ones(4).unflatten(0, [('A', 2), ('B', 2)]),
+            torch.ones(2, 2, names=('A', 'B'))))
+        self.assertTrue(torch.equal(
+            torch.ones(4).unflatten(0, (['A', 2], ['B', 2])),
+            torch.ones(2, 2, names=('A', 'B'))))
+        self.assertTrue(torch.equal(
+            torch.ones(4).unflatten(-1, (['A', 2], ['B', 2])),
+            torch.ones(2, 2, names=('A', 'B'))))
+        self.assertTrue(torch.equal(
+            torch.ones(4).unflatten(-1, (['A', -1], ['B', 2])),
+            torch.ones(2, 2, names=('A', 'B'))))
+        self.assertTrue(torch.equal(
+            torch.ones(4).unflatten(-1, (['A', 2], ['B', -1])),
+            torch.ones(2, 2, names=('A', 'B'))))
+        self.assertTrue(torch.equal(
+            torch.ones(2, 10, names=('A', 'B')).unflatten('B', (['B1', -1],)),
+            torch.ones(2, 10, names=('A', 'B1'))))
+        self.assertTrue(torch.equal(
+            torch.ones(2, 3 * 4 * 5 * 6, names=('A', 'B'))
+                 .unflatten('B', (['B1', 3], ['B2', 4], ['B3', -1], ['B4', 6])),
+            torch.ones(2, 3, 4, 5, 6, names=('A', 'B1', 'B2', 'B3', 'B4'))))
+        self.assertTrue(torch.equal(
+            torch.ones(2, 0, names=('A', 'B'))
+                 .unflatten('B', (['B1', 3], ['B2', -1], ['B3', 4])),
+            torch.ones(2, 3, 0, 4, names=('A', 'B1', 'B2', 'B3'))))
+
+        # test args: namedtensor, int, namedshape
+        self.assertTrue(torch.equal(
+            torch.ones(2, 4, names=('A', 'B')).unflatten(1, (('B1', 2), ('B2', 2))),
+            torch.ones(2, 2, 2, names=('A', 'B1', 'B2'))))
+
+        # test args: namedtensor, str, namedshape
+        self.assertTrue(torch.equal(
+            torch.ones(2, 4, names=('A', 'B')).unflatten('B', (('B1', 2), ('B2', 2))),
+            torch.ones(2, 2, 2, names=('A', 'B1', 'B2'))))
+
+        # test invalid args: namedtensor, str, sizes
+        with self.assertRaisesRegex(TypeError, r"received an invalid combination of arguments"):
+            torch.tensor([1], names=('A',)).unflatten('A', (1, 1))
+
+        # test invalid args: namedtensor, int, sizes
+        with self.assertRaisesRegex(RuntimeError, r"input is a named tensor but no names were given for unflattened sizes"):
+            torch.tensor([1], names=("A",)).unflatten(0, (1, 1))
+
+        with self.assertRaisesRegex(RuntimeError,
+                                    r"Provided sizes \[3, -1\] don't multiply up to the "
+                                    r"size of dim 1 \('B': 4\) in Tensor\['A', 'B'\]"):
+            torch.ones(2, 4, names=('A', 'B')).unflatten('B', (('B1', 3), ('B2', -1)))
+
+        with self.assertRaisesRegex(RuntimeError,
+                                    r"the unspecified dimension size -1 can be any value and is ambiguous"):
+            torch.ones(2, 0, names=('A', 'B')).unflatten('B', (('B1', 0), ('B2', -1)))
+
+        tensor = torch.randn(7, 2 * 3 * 5, 11, names=('N', 'D', 'K'))
 
         # accepts OrderedDict
         out = tensor.unflatten('D', OrderedDict((('C', 2), ('H', 3), ('W', 5))))
@@ -1075,20 +1153,10 @@ class TestNamedTensor(TestCase):
         self.assertEqual(out.names, ('N', 'D', 'K', 'H'))
         self.assertEqual(out.shape, (7, 2 * 3 * 5, 11, 1))
 
-        # takes positional dim
-        out = tensor.unflatten(1, (('C', 2), ('H', 3), ('W', 5)))
-        self.assertEqual(out.names, ('N', 'C', 'H', 'W', 'K'))
-        self.assertEqual(out.shape, (7, 2, 3, 5, 11))
-
-        # takes negative positional dim
-        out = tensor.unflatten(-2, (('C', 2), ('H', 3), ('W', 5)))
-        self.assertEqual(out.names, ('N', 'C', 'H', 'W', 'K'))
-        self.assertEqual(out.shape, (7, 2, 3, 5, 11))
-
         with self.assertRaisesRegex(RuntimeError, "don't multiply up to"):
             tensor.unflatten('D', (('H', 3), ('W', 5)))
 
-        with self.assertRaisesRegex(RuntimeError, 'OrderedDict or iterable of tuples'):
+        with self.assertRaisesRegex(RuntimeError, 'sizes must be non-empty'):
             tensor.unflatten('D', None)
 
         with self.assertRaisesRegex(RuntimeError, 'non-empty'):
@@ -1097,8 +1165,11 @@ class TestNamedTensor(TestCase):
     def test_unsupported_op_error_msg(self):
         named = torch.randn(3, 3, names=('N', 'C'))
         with self.assertRaisesRegex(
-                RuntimeError, "pdist is not yet supported with named tensors"):
+                RuntimeError, r"pdist.+is not yet supported with named tensors"):
             torch.pdist(named)
+        with self.assertRaisesRegex(
+                RuntimeError, r"as_strided_.+is not yet supported with named tensors"):
+            named.as_strided_((3, 3), (3, 1))
 
     def test_reduction_fns(self):
         def check_output(output, expected_names):
@@ -1189,6 +1260,7 @@ class TestNamedTensor(TestCase):
             Case(torch.mode, False, False, True, True, values_and_indices),
             Case(kthvalue_wrapper, False, False, True, True, values_and_indices),
             Case(torch.median, True, False, True, True, values_and_indices),
+            Case(torch.nanmedian, True, False, True, True, values_and_indices),
         ]
 
         for testcase, device in itertools.product(tests, torch.testing.get_all_device_types()):
@@ -1383,7 +1455,7 @@ class TestNamedTensor(TestCase):
 
     def test_no_jit_tracer_support(self):
         def foo(x):
-            return torch.full(x.shape, 2, names=('N',))
+            return torch.full(x.shape, 2., names=('N',))
 
         with self.assertRaisesRegex(RuntimeError, 'not supported with the tracer'):
             x = torch.randn(3)

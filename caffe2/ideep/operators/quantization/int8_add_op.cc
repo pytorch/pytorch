@@ -25,6 +25,7 @@ class IDEEPInt8SumReluOp final : public IDEEPOperator {
 
     Y_scales_ = ConvertScales({scale_});
   }
+  // NOLINTNEXTLINE(modernize-use-equals-default,modernize-use-override)
   virtual ~IDEEPInt8SumReluOp() {}
 
   bool RunOnDevice() override {
@@ -39,7 +40,8 @@ class IDEEPInt8SumReluOp final : public IDEEPOperator {
       if (input_dims.empty())
         input_dims = Xi.get_dims();
       CAFFE_ENFORCE(input_dims == Xi.get_dims());
-      inputs_itensor.emplace_back(Xi);
+      inputs_itensor.emplace_back(
+          Xi.get_data_type() != idtype::f32 ? Xi.dequantize() : Xi);
     }
 
     temp_ten.init({input_dims, idtype::f32});

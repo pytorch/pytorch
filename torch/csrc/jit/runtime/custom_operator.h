@@ -1,8 +1,8 @@
 #pragma once
 
-#include <torch/csrc/jit/runtime/operator.h>
-#include <ATen/core/stack.h>
 #include <ATen/core/op_registration/op_registration.h>
+#include <ATen/core/stack.h>
+#include <torch/csrc/jit/runtime/operator.h>
 
 namespace torch {
 namespace jit {
@@ -17,9 +17,13 @@ struct TORCH_API RegisterOperators {
   RegisterOperators() = default;
 
   /// Registers a vector of already created `Operator`s.
-  RegisterOperators(std::vector<Operator> operators) {
-    for (Operator& o : operators) {
-      registerOperator(std::move(o));
+  /// The operator element is now optional to filter null ops. It's backward
+  /// compatible and works for selective operator registration.
+  explicit RegisterOperators(std::vector<c10::optional<Operator>> operators) {
+    for (c10::optional<Operator>& o : operators) {
+      if (o) {
+        registerOperator(std::move(o.value()));
+      }
     }
   }
 };

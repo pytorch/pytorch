@@ -1,13 +1,22 @@
 #import <XCTest/XCTest.h>
 
 #include <torch/script.h>
+#include <torch/csrc/jit/mobile/function.h>
+#include <torch/csrc/jit/mobile/import.h>
+#include <torch/csrc/jit/mobile/interpreter.h>
+#include <torch/csrc/jit/mobile/module.h>
+#include <torch/csrc/jit/mobile/observer.h>
+#include "ATen/ATen.h"
+#include "caffe2/core/timer.h"
+#include "caffe2/utils/string_utils.h"
+#include "torch/csrc/autograd/grad_mode.h"
 
 @interface TestAppTests : XCTestCase
 
 @end
 
 @implementation TestAppTests {
-  torch::jit::Module _module;
+  torch::jit::mobile::Module _module;
 }
 
 + (void)setUp {
@@ -17,17 +26,17 @@
 - (void)setUp {
   [super setUp];
   NSString* modelPath = [[NSBundle bundleForClass:[self class]] pathForResource:@"model"
-                                                                         ofType:@"pt"];
+                                                                         ofType:@"ptl"];
   XCTAssertTrue([NSFileManager.defaultManager fileExistsAtPath:modelPath],
-                @"model.pt doesn't exist!");
-  _module = torch::jit::load(modelPath.UTF8String);
+                @"model.ptl doesn't exist!");
+  _module = torch::jit::_load_for_mobile(modelPath.UTF8String);
 }
 
 - (void)testForward {
-  _module.eval();
+//  _module.eval();
+  c10::InferenceMode mode;
   std::vector<c10::IValue> inputs;
   inputs.push_back(torch::ones({1, 3, 224, 224}, at::ScalarType::Float));
-  torch::autograd::AutoGradMode guard(false);
   auto outputTensor = _module.forward(inputs).toTensor();
   float* outputBuffer = outputTensor.data_ptr<float>();
   XCTAssertTrue(outputBuffer != nullptr, @"");

@@ -7,6 +7,7 @@
 #include "caffe2/core/context.h"
 #include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
+#include "caffe2/core/types.h"
 #include "caffe2/proto/caffe2_legacy.pb.h"
 #include "caffe2/utils/math.h"
 
@@ -340,6 +341,7 @@ class ConvPoolOpBase : public Operator<Context> {
       kernel_ = dims;
     } else if (legacy_pad_ != LegacyPadding::NOTSET) {
       int output_unused;
+      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
       for (int dim = 0; dim < dims.size(); ++dim) {
         ComputeSizeAndPad(
             dims[dim],
@@ -373,6 +375,7 @@ class ConvPoolOpBase : public Operator<Context> {
   void SetDeviceTensor(const std::vector<int>& data, Tensor* tensor) {
     bool reset_tensor_device_ = false;
 
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     if (tensor->numel() != data.size()) {
       tensor->Resize(data.size());
       reset_tensor_device_ = true;
@@ -517,14 +520,20 @@ class ConvPoolOpBase : public Operator<Context> {
     uint64_t nElemW = nElemFromDim(W);
     uint64_t nElemBias = inputs.size() > 2 ? nElemFromDim(inputs[2]) : 0;
 
+    auto const& X_elemenet_size_byte =
+        DataTypeToTypeMeta(X.data_type()).itemsize();
+    auto const& Y_element_size_byte =
+        DataTypeToTypeMeta(Y.data_type()).itemsize();
+    auto const& W_element_size_byte =
+        DataTypeToTypeMeta(W.data_type()).itemsize();
+
     // grouping is NOT properly handled yet
     c.flops = N * Y_t * Y_h * Y_w * kernel_t * kernel_w * kernel_h *
         in_channels * out_channels * 2;
-    c.bytes_read = (nElemX + nElemW + nElemBias) * sizeof(X.data_type());
-    c.bytes_written =
-        N * out_channels * Y_t * Y_h * Y_w * sizeof(Y.data_type());
+    c.bytes_read = (nElemX + nElemW + nElemBias) * X_elemenet_size_byte;
+    c.bytes_written = N * out_channels * Y_t * Y_h * Y_w * Y_element_size_byte;
     c.params_bytes = out_channels * in_channels * kernel_t * kernel_h *
-        kernel_w * sizeof(W.data_type());
+        kernel_w * W_element_size_byte;
     return c;
   }
 
@@ -533,7 +542,7 @@ class ConvPoolOpBase : public Operator<Context> {
       const vector<TensorShape>& in,
       int output_channel) {
     ArgumentHelper helper(def);
-    CAFFE_ENFORCE_GT(in.size(), 0);
+    CAFFE_ENFORCE_GT(in.size(), 0U);
     CAFFE_ENFORCE_GT(in[0].dims_size(), 0);
     vector<int> pads = helper.GetRepeatedArgument<int>("pads");
     vector<int> kernel = helper.GetRepeatedArgument<int>("kernels");

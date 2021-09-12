@@ -156,6 +156,7 @@ void ReduceTensorCUDAImpl(
   ReduceTensorCUDAKernel<T, Reducer, D>
       <<<outer_size, CAFFE_CUDA_NUM_THREADS, 0, context->cuda_stream()>>>(
           inner_size, X_strides, Y_dims, reducer, init, alpha, X, Y);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 template <typename T, class Reducer>
@@ -188,12 +189,14 @@ void ReduceTensorCUDA(
     RowwiseReduceCUDAKernel<T, Reducer>
         <<<rows, CAFFE_CUDA_NUM_THREADS, 0, context->cuda_stream()>>>(
             cols, reducer, init, alpha, X, Y);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
     return;
   }
   if (utils::IsColwiseReduce(ndim, X_dims, Y_dims, &rows, &cols)) {
     ColwiseReduceCUDAKernel<T, Reducer>
         <<<cols, CAFFE_CUDA_NUM_THREADS, 0, context->cuda_stream()>>>(
             rows, cols, reducer, init, alpha, X, Y);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
     return;
   }
   int M;
@@ -393,6 +396,7 @@ void MomentsCUDAImpl(
   MomentsCUDAKernel<T, D>
       <<<outer_size, CAFFE_CUDA_NUM_THREADS, 0, context->cuda_stream()>>>(
           inner_size, X_strides, Y_dims, X, mean, var);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 template <typename T>
@@ -430,12 +434,14 @@ void MomentsCUDA(
     RowwiseMomentsCUDAKernel<T>
         <<<rows, CAFFE_CUDA_NUM_THREADS, 0, context->cuda_stream()>>>(
             cols, X, mean, var);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
     return;
   }
   if (utils::IsColwiseReduce(ndim, X_dims, Y_dims, &rows, &cols)) {
     ColwiseMomentsCUDAKernel<T>
         <<<cols, CAFFE_CUDA_NUM_THREADS, 0, context->cuda_stream()>>>(
             rows, cols, X, mean, var);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
     return;
   }
   int M;
@@ -485,7 +491,8 @@ void MomentsCUDA(
       const T alpha,                                                   \
       const T* X,                                                      \
       T* Y,                                                            \
-      CUDAContext* context) {                                          \
+      CUDAContext* context,                                            \
+      bool) {                                                          \
     ReduceTensorCUDA<T, Reducer>(                                      \
         ndim, X_dims, Y_dims, Reducer(), kInit, alpha, X, Y, context); \
   }
@@ -544,7 +551,8 @@ DELEGATE_CUDA_REDUCE_FUNCTION(double, ReduceSum, cub::Sum, 0.0)
       const T alpha,                                  \
       const T* X,                                     \
       T* Y,                                           \
-      CUDAContext* context) {                         \
+      CUDAContext* context,                           \
+      bool) {                                         \
     int scale = 1;                                    \
     for (int i = 0; i < ndim; ++i) {                  \
       if (Y_dims[i] == 1) {                           \
@@ -574,7 +582,8 @@ CAFFE2_SPECIALIZED_CUDA_REDUCE_MEAN(float)
       const T* X,                                                \
       T* mean,                                                   \
       T* var,                                                    \
-      CUDAContext* context) {                                    \
+      CUDAContext* context,                                      \
+      bool) {                                                    \
     MomentsCUDA<T>(ndim, X_dims, Y_dims, X, mean, var, context); \
   }
 CAFFE2_SPECIALIZED_CUDA_MOMENTS(float)

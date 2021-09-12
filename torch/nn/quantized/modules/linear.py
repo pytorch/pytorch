@@ -1,17 +1,16 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
-
+from collections.abc import Iterable
 import torch
 
-from torch._jit_internal import Optional  # noqa: F401
 import torch.nn as nn
 import torch.nn.intrinsic as nni
-from torch.nn.quantized.modules.utils import _quantize_weight
+from torch.nn.quantized.modules.utils import _quantize_weight, hide_packed_params_repr
+from typing import Optional
 
 class LinearPackedParams(torch.nn.Module):
-    _version = 2
+    _version = 3
 
     def __init__(self, dtype=torch.qint8):
-        super(LinearPackedParams, self).__init__()
+        super().__init__()
         self.dtype = dtype
         if self.dtype == torch.qint8:
             wq = torch._empty_affine_quantized([1, 1], scale=1.0, zero_point=0, dtype=torch.qint8)
@@ -20,8 +19,7 @@ class LinearPackedParams(torch.nn.Module):
         self.set_weight_bias(wq, None)
 
     @torch.jit.export
-    def set_weight_bias(self, weight, bias):
-        # type: (torch.Tensor, Optional[torch.Tensor]) -> None
+    def set_weight_bias(self, weight: torch.Tensor, bias: Optional[torch.Tensor]) -> None:
         if self.dtype == torch.qint8:
             self._packed_params = torch.ops.quantized.linear_prepack(weight, bias)
         elif self.dtype == torch.float16:
@@ -42,19 +40,29 @@ class LinearPackedParams(torch.nn.Module):
     def forward(self, x):
         return x
 
+    # Version 1
+    #   self
+    #   |--- weight : Tensor
+    #   |--- bias : Tensor
+    #
+    # Version 2
+    #   self
+    #   |--- weight : Tensor
+    #   |--- bias : Tensor
+    #   |--- dtype : torch.dtype
+    #
+    # Version 3
+    #   self
+    #   |--- _packed_params : (Tensor, Tensor) representing (weight, bias)
+    #                         of LinearPackedParams
+    #   |--- dtype : torch.dtype
     def _save_to_state_dict(self, destination, prefix, keep_vars):
         super(LinearPackedParams, self)._save_to_state_dict(destination, prefix, keep_vars)
-        (w, b) = self._weight_bias()
-        destination[prefix + 'weight'] = w
-        destination[prefix + 'bias'] = b
         destination[prefix + 'dtype'] = self.dtype
+        destination[prefix + '_packed_params'] = self._weight_bias()
 
     def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
                               missing_keys, unexpected_keys, error_msgs):
-        self.set_weight_bias(state_dict[prefix + 'weight'], state_dict[prefix + 'bias'])
-        state_dict.pop(prefix + 'weight')
-        state_dict.pop(prefix + 'bias')
-
         version = local_metadata.get('version', None)
         if version is None or version < 2:
             self.dtype = torch.qint8
@@ -62,15 +70,21 @@ class LinearPackedParams(torch.nn.Module):
             self.dtype = state_dict[prefix + 'dtype']
             state_dict.pop(prefix + 'dtype')
 
+        if version is None or version < 3:
+            self.set_weight_bias(state_dict[prefix + 'weight'], state_dict[prefix + 'bias'])
+            state_dict.pop(prefix + 'weight')
+            state_dict.pop(prefix + 'bias')
+
+        if version == 3:
+            weight, bias = state_dict[prefix + '_packed_params']
+            state_dict.pop(prefix + '_packed_params')
+            self.set_weight_bias(weight, bias)
+
         super(LinearPackedParams, self)._load_from_state_dict(state_dict, prefix, local_metadata, False,
                                                               missing_keys, unexpected_keys, error_msgs)
 
     @torch.jit.export
     def __getstate__(self):
-        if not torch.jit.is_scripting():
-            raise RuntimeError('torch.save() is not currently supported for quantized modules.'
-                               ' See https://github.com/pytorch/pytorch/issues/24045.'
-                               ' Please use state_dict or torch.jit serialization.')
         qweight, bias = self._weight_bias()
         return qweight, bias, self.training, self.dtype
 
@@ -79,6 +93,20 @@ class LinearPackedParams(torch.nn.Module):
         self.dtype = state[3]
         self.set_weight_bias(state[0], state[1])
         self.training = state[2]
+
+    def __deepcopy__(self, memo):
+        new_instance = type(self).__new__(type(self))
+        torch.nn.Module.__init__(new_instance)
+        state = self.__getstate__()
+        new_instance.__setstate__(state)
+        return new_instance
+
+    def __copy__(self):
+        return self.__deepcopy__({})
+
+    def __repr__(self):
+        return self._weight_bias().__repr__()
+
 
 class Linear(torch.nn.Module):
     r"""
@@ -106,11 +134,12 @@ class Linear(torch.nn.Module):
         >>> print(output.size())
         torch.Size([128, 30])
     """
-    _version = 2
-    _FLOAT_MODULE = nn.Linear
+    _version = 3
+    _FLOAT_MODULE = (nn.Linear, nn.modules.linear.NonDynamicallyQuantizableLinear)
 
-    def __init__(self, in_features, out_features, bias_=True, dtype=torch.qint8):
-        super(Linear, self).__init__()
+    def __init__(self, in_features, out_features, bias_=True,
+                 dtype=torch.qint8):
+        super().__init__()
         # We don't muck around with buffers or attributes or anything here
         # to keep the module simple. *everything* is simply a Python attribute.
         # Serialization logic is explicitly handled in the below serialization and
@@ -142,7 +171,10 @@ class Linear(torch.nn.Module):
             self.in_features, self.out_features, self.scale, self.zero_point, self.weight().qscheme()
         )
 
-    def forward(self, x):
+    def __repr__(self):
+        return hide_packed_params_repr(self, LinearPackedParams)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         return torch.ops.quantized.linear(
             x, self._packed_params._packed_params, self.scale, self.zero_point)
 
@@ -151,8 +183,32 @@ class Linear(torch.nn.Module):
     # regular QTensor form for serialization. Packed weights should not live
     # outside the process in which they were created, rather they should be derived
     # from the QTensor weight.
+    #
+    # Version 1
+    #   self
+    #   |--- scale : float
+    #   |--- zero_point : int
+    #   |--- weight : Tensor
+    #   |--- bias : Tensor
+    #
+    # Version 2
+    #   self
+    #   |--- scale : float
+    #   |--- zero_point : int
+    #   |--- _packed_params : Module
+    #        |--- weight : Tensor
+    #        |--- bias : Tensor
+    #
+    # Version 3
+    #   self
+    #   |--- scale : float
+    #   |--- zero_point : int
+    #   |--- _packed_params : Module
+    #        |--- _packed_params : (Tensor, Tensor) representing weight, bias
+    #                              of LinearPackedParams C++ struct
+    #
     def _save_to_state_dict(self, destination, prefix, keep_vars):
-        super(Linear, self)._save_to_state_dict(destination, prefix, keep_vars)
+        super()._save_to_state_dict(destination, prefix, keep_vars)
         destination[prefix + 'scale'] = torch.tensor(self.scale)
         destination[prefix + 'zero_point'] = torch.tensor(self.zero_point)
 
@@ -168,6 +224,7 @@ class Linear(torch.nn.Module):
         state_dict.pop(prefix + 'zero_point')
 
         version = local_metadata.get('version', None)
+
         if version is None or version == 1:
             # We moved the parameters into a LinearPackedParameters submodule
             weight = state_dict.pop(prefix + 'weight')
@@ -175,8 +232,9 @@ class Linear(torch.nn.Module):
             state_dict.update({prefix + '_packed_params.weight': weight,
                                prefix + '_packed_params.bias': bias})
 
-        super(Linear, self)._load_from_state_dict(state_dict, prefix, local_metadata, False,
-                                                  missing_keys, unexpected_keys, error_msgs)
+        super()._load_from_state_dict(
+            state_dict, prefix, local_metadata, False,
+            missing_keys, unexpected_keys, error_msgs)
 
     # Function rather than property to make sure that JIT serialization doesn't
     # register this as an attribute
@@ -189,8 +247,7 @@ class Linear(torch.nn.Module):
     def bias(self):
         return self._weight_bias()[1]
 
-    def set_weight_bias(self, w, b):
-        # type: (torch.Tensor, Optional[torch.Tensor]) -> None
+    def set_weight_bias(self, w: torch.Tensor, b: Optional[torch.Tensor]) -> None:
         self._packed_params.set_weight_bias(w, b)
 
     @classmethod
@@ -206,21 +263,27 @@ class Linear(torch.nn.Module):
             weight_post_process = mod.weight_fake_quant
             activation_post_process = mod.activation_post_process
         else:
-            assert type(mod) == cls._FLOAT_MODULE, ' nnq.' + cls.__name__ + '.from_float only works for ' + \
-                cls._FLOAT_MODULE.__name__
+            # This function does not participate in JIT, so it is OK to ignore
+            # the type mismatch in assignment. Also, mypy has an issue with
+            # iterables not being implemented, so we are ignoring those too.
+            if not isinstance(cls._FLOAT_MODULE, Iterable):
+                cls._FLOAT_MODULE = [cls._FLOAT_MODULE]  # type: ignore[assignment]
+            supported_modules = ', '.join([float_mod.__name__ for float_mod in cls._FLOAT_MODULE])  # type: ignore[attr-defined]
+            error_msg = 'nnq.{}.from_float only works for {}, but got: {}'.format(cls.__name__, supported_modules, type(mod))
+            assert type(mod) in cls._FLOAT_MODULE, error_msg.format()  # type: ignore[attr-defined]
             assert hasattr(mod, 'qconfig'), 'Input float module must have qconfig defined'
+            activation_post_process = mod.activation_post_process
             if type(mod) == nni.LinearReLU:
-                activation_post_process = mod[1].activation_post_process
                 mod = mod[0]
-            else:
-                activation_post_process = mod.activation_post_process
             weight_post_process = mod.qconfig.weight()
         weight_post_process(mod.weight)
         dtype = weight_post_process.dtype
         act_scale, act_zp = activation_post_process.calculate_qparams()
         assert dtype == torch.qint8, 'Weight observer must have dtype torch.qint8'
         qweight = _quantize_weight(mod.weight.float(), weight_post_process)
-        qlinear = cls(mod.in_features, mod.out_features, dtype=dtype)
+        qlinear = cls(mod.in_features,
+                      mod.out_features,
+                      dtype=dtype)
         qlinear.set_weight_bias(qweight, mod.bias)
         qlinear.scale = float(act_scale)
         qlinear.zero_point = int(act_zp)

@@ -67,11 +67,15 @@ If you don't see an operation listed here, but it would help your use case, plea
    :meth:`Tensor.cos_`,None
    ":meth:`Tensor.cosh`, :func:`torch.cosh`",:ref:`keeps_input_names-doc`
    :meth:`Tensor.cosh_`,None
+   ":meth:`Tensor.acosh`, :func:`torch.acosh`",:ref:`keeps_input_names-doc`
+   :meth:`Tensor.acosh_`,None
    :meth:`Tensor.cpu`,:ref:`keeps_input_names-doc`
    :meth:`Tensor.cuda`,:ref:`keeps_input_names-doc`
    ":meth:`Tensor.cumprod`, :func:`torch.cumprod`",:ref:`keeps_input_names-doc`
    ":meth:`Tensor.cumsum`, :func:`torch.cumsum`",:ref:`keeps_input_names-doc`
    :meth:`Tensor.data_ptr`,None
+   ":meth:`Tensor.deg2rad`, :func:`torch.deg2rad`",:ref:`keeps_input_names-doc`
+   :meth:`Tensor.deg2rad_`,None
    ":meth:`Tensor.detach`, :func:`torch.detach`",:ref:`keeps_input_names-doc`
    :meth:`Tensor.detach_`,None
    ":attr:`Tensor.device`, :func:`torch.device`",None
@@ -122,6 +126,7 @@ If you don't see an operation listed here, but it would help your use case, plea
    :meth:`Tensor.is_shared`,None
    ":meth:`Tensor.is_signed`, :func:`torch.is_signed`",None
    :attr:`Tensor.is_sparse`,None
+   :attr:`Tensor.is_sparse_csr`,None
    :func:`torch.is_tensor`,None
    :meth:`Tensor.item`,None
    ":meth:`Tensor.kthvalue`, :func:`torch.kthvalue`",:ref:`removes_dimensions-doc`
@@ -147,6 +152,7 @@ If you don't see an operation listed here, but it would help your use case, plea
    ":meth:`Tensor.matmul`, :func:`torch.matmul`",:ref:`contracts_away_dims-doc`
    ":meth:`Tensor.mean`, :func:`torch.mean`",:ref:`removes_dimensions-doc`
    ":meth:`Tensor.median`, :func:`torch.median`",:ref:`removes_dimensions-doc`
+   ":meth:`Tensor.nanmedian`, :func:`torch.nanmedian`",:ref:`removes_dimensions-doc`
    ":meth:`Tensor.mm`, :func:`torch.mm`",:ref:`contracts_away_dims-doc`
    ":meth:`Tensor.mode`, :func:`torch.mode`",:ref:`removes_dimensions-doc`
    ":meth:`Tensor.mul`, :func:`torch.mul`",:ref:`unifies_names_from_inputs-doc`
@@ -166,6 +172,8 @@ If you don't see an operation listed here, but it would help your use case, plea
    ":meth:`Tensor.pow`, :func:`torch.pow`",:ref:`unifies_names_from_inputs-doc`
    :meth:`Tensor.pow_`,None
    ":meth:`Tensor.prod`, :func:`torch.prod`",:ref:`removes_dimensions-doc`
+   ":meth:`Tensor.rad2deg`, :func:`torch.rad2deg`",:ref:`keeps_input_names-doc`
+   :meth:`Tensor.rad2deg_`,None
    :func:`torch.rand`,:ref:`factory-doc`
    :func:`torch.rand`,:ref:`factory-doc`
    :func:`torch.randn`,:ref:`factory-doc`
@@ -191,10 +199,14 @@ If you don't see an operation listed here, but it would help your use case, plea
    :meth:`Tensor.sigmoid_`,None
    ":meth:`Tensor.sign`, :func:`torch.sign`",:ref:`keeps_input_names-doc`
    :meth:`Tensor.sign_`,None
+   ":meth:`Tensor.sgn`, :func:`torch.sgn`",:ref:`keeps_input_names-doc`
+   :meth:`Tensor.sgn_`,None
    ":meth:`Tensor.sin`, :func:`torch.sin`",:ref:`keeps_input_names-doc`
    :meth:`Tensor.sin_`,None
    ":meth:`Tensor.sinh`, :func:`torch.sinh`",:ref:`keeps_input_names-doc`
    :meth:`Tensor.sinh_`,None
+   ":meth:`Tensor.asinh`, :func:`torch.asinh`",:ref:`keeps_input_names-doc`
+   :meth:`Tensor.asinh_`,None
    :meth:`Tensor.size`,None
    ":meth:`Tensor.split`, :func:`torch.split`",:ref:`keeps_input_names-doc`
    ":meth:`Tensor.sqrt`, :func:`torch.sqrt`",:ref:`keeps_input_names-doc`
@@ -210,6 +222,8 @@ If you don't see an operation listed here, but it would help your use case, plea
    :meth:`Tensor.tan_`,None
    ":meth:`Tensor.tanh`, :func:`torch.tanh`",:ref:`keeps_input_names-doc`
    :meth:`Tensor.tanh_`,None
+   ":meth:`Tensor.atanh`, :func:`torch.atanh`",:ref:`keeps_input_names-doc`
+   :meth:`Tensor.atanh_`,None
    :func:`torch.tensor`,:ref:`factory-doc`
    :meth:`Tensor.to`,:ref:`keeps_input_names-doc`
    ":meth:`Tensor.topk`, :func:`torch.topk`",:ref:`removes_dimensions-doc`
@@ -453,7 +467,7 @@ A tensor specified as an ``out=`` tensor has the following behavior:
   must be exactly equal to the existing names. Otherwise, the operation errors.
 
 All in-place methods modify inputs to have names equal to the computed names
-from name inference. For example,
+from name inference. For example:
 
 ::
 

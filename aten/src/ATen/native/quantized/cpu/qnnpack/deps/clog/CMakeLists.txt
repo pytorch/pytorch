@@ -4,97 +4,97 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
-CMAKE_MINIMUM_REQUIRED(VERSION 3.1 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.1 FATAL_ERROR)
 
-INCLUDE(GNUInstallDirs)
+include(GNUInstallDirs)
 
 # ---[ Project and semantic versioning.
-PROJECT(clog C CXX)
+project(clog C CXX)
 
 # ---[ Options.
-SET(CLOG_RUNTIME_TYPE "default" CACHE STRING "Type of runtime library (shared, static, or default) to use")
-SET_PROPERTY(CACHE CLOG_RUNTIME_TYPE PROPERTY STRINGS default static shared)
-IF(ANDROID)
-  OPTION(CLOG_LOG_TO_STDIO "Log errors, warnings, and information to stdout/stderr" OFF)
-ELSE()
-  OPTION(CLOG_LOG_TO_STDIO "Log errors, warnings, and information to stdout/stderr" ON)
-ENDIF()
-OPTION(CLOG_BUILD_TESTS "Build clog tests" ON)
+set(CLOG_RUNTIME_TYPE "default" CACHE STRING "Type of runtime library (shared, static, or default) to use")
+set_property(CACHE CLOG_RUNTIME_TYPE PROPERTY STRINGS default static shared)
+if(ANDROID)
+  option(CLOG_LOG_TO_STDIO "Log errors, warnings, and information to stdout/stderr" OFF)
+else()
+  option(CLOG_LOG_TO_STDIO "Log errors, warnings, and information to stdout/stderr" ON)
+endif()
+option(CLOG_BUILD_TESTS "Build clog tests" ON)
 
 # ---[ CMake options
-IF(CLOG_BUILD_TESTS)
-  ENABLE_TESTING()
-ENDIF()
+if(CLOG_BUILD_TESTS)
+  enable_testing()
+endif()
 
-MACRO(CLOG_TARGET_RUNTIME_LIBRARY target)
-  IF(MSVC AND NOT CLOG_RUNTIME_TYPE STREQUAL "default")
-    IF(CLOG_RUNTIME_TYPE STREQUAL "shared")
-      TARGET_COMPILE_OPTIONS(${target} PRIVATE
+macro(CLOG_TARGET_RUNTIME_LIBRARY target)
+  if(MSVC AND NOT CLOG_RUNTIME_TYPE STREQUAL "default")
+    if(CLOG_RUNTIME_TYPE STREQUAL "shared")
+      target_compile_options(${target} PRIVATE
         "/MD$<$<CONFIG:Debug>:d>")
-    ELSEIF(CLOG_RUNTIME_TYPE STREQUAL "static")
-      TARGET_COMPILE_OPTIONS(${target} PRIVATE
+    elseif(CLOG_RUNTIME_TYPE STREQUAL "static")
+      target_compile_options(${target} PRIVATE
         "/MT$<$<CONFIG:Debug>:d>")
-    ENDIF()
-  ENDIF()
-ENDMACRO()
+    endif()
+  endif()
+endmacro()
 
 # ---[ Download deps
-SET(CONFU_DEPENDENCIES_SOURCE_DIR ${CMAKE_SOURCE_DIR}/deps
+set(CONFU_DEPENDENCIES_SOURCE_DIR ${CMAKE_SOURCE_DIR}/deps
   CACHE PATH "Confu-style dependencies source directory")
-SET(CONFU_DEPENDENCIES_BINARY_DIR ${CMAKE_BINARY_DIR}/deps
+set(CONFU_DEPENDENCIES_BINARY_DIR ${CMAKE_BINARY_DIR}/deps
   CACHE PATH "Confu-style dependencies binary directory")
 
-IF(CLOG_BUILD_TESTS)
-  IF(NOT DEFINED GOOGLETEST_SOURCE_DIR)
-    MESSAGE(STATUS "Downloading Google Test to ${CONFU_DEPENDENCIES_SOURCE_DIR}/googletest (define GOOGLETEST_SOURCE_DIR to avoid it)")
-    CONFIGURE_FILE(cmake/DownloadGoogleTest.cmake "${CONFU_DEPENDENCIES_BINARY_DIR}/googletest-download/CMakeLists.txt")
-    EXECUTE_PROCESS(COMMAND "${CMAKE_COMMAND}" -G "${CMAKE_GENERATOR}" .
+if(CLOG_BUILD_TESTS)
+  if(NOT DEFINED GOOGLETEST_SOURCE_DIR)
+    message(STATUS "Downloading Google Test to ${CONFU_DEPENDENCIES_SOURCE_DIR}/googletest (define GOOGLETEST_SOURCE_DIR to avoid it)")
+    configure_file(cmake/DownloadGoogleTest.cmake "${CONFU_DEPENDENCIES_BINARY_DIR}/googletest-download/CMakeLists.txt")
+    execute_process(COMMAND "${CMAKE_COMMAND}" -G "${CMAKE_GENERATOR}" .
       WORKING_DIRECTORY "${CONFU_DEPENDENCIES_BINARY_DIR}/googletest-download")
-    EXECUTE_PROCESS(COMMAND "${CMAKE_COMMAND}" --build .
+    execute_process(COMMAND "${CMAKE_COMMAND}" --build .
       WORKING_DIRECTORY "${CONFU_DEPENDENCIES_BINARY_DIR}/googletest-download")
-    SET(GOOGLETEST_SOURCE_DIR "${CONFU_DEPENDENCIES_SOURCE_DIR}/googletest" CACHE STRING "Google Test source directory")
-  ENDIF()
-ENDIF()
+    set(GOOGLETEST_SOURCE_DIR "${CONFU_DEPENDENCIES_SOURCE_DIR}/googletest" CACHE STRING "Google Test source directory")
+  endif()
+endif()
 
 # ---[ clog library
-ADD_LIBRARY(clog STATIC src/clog.c)
-SET_TARGET_PROPERTIES(clog PROPERTIES
+add_library(clog STATIC src/clog.c)
+set_target_properties(clog PROPERTIES
   C_STANDARD 99
   C_EXTENSIONS NO)
 CLOG_TARGET_RUNTIME_LIBRARY(clog)
-SET_TARGET_PROPERTIES(clog PROPERTIES PUBLIC_HEADER include/clog.h)
-TARGET_INCLUDE_DIRECTORIES(clog BEFORE PUBLIC include)
-IF(CLOG_LOG_TO_STDIO)
-  TARGET_COMPILE_DEFINITIONS(clog PRIVATE CLOG_LOG_TO_STDIO=1)
-ELSE()
-  TARGET_COMPILE_DEFINITIONS(clog PRIVATE CLOG_LOG_TO_STDIO=0)
-ENDIF()
-IF(ANDROID AND NOT CLOG_LOG_TO_STDIO)
-  TARGET_LINK_LIBRARIES(clog PRIVATE log)
-ENDIF()
+set_target_properties(clog PROPERTIES PUBLIC_HEADER include/clog.h)
+target_include_directories(clog BEFORE PUBLIC include)
+if(CLOG_LOG_TO_STDIO)
+  target_compile_definitions(clog PRIVATE CLOG_LOG_TO_STDIO=1)
+else()
+  target_compile_definitions(clog PRIVATE CLOG_LOG_TO_STDIO=0)
+endif()
+if(ANDROID AND NOT CLOG_LOG_TO_STDIO)
+  target_link_libraries(clog PRIVATE log)
+endif()
 
-INSTALL(TARGETS clog
+install(TARGETS clog
   LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
   ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
   PUBLIC_HEADER DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}")
 
 # ---[ clog tests
-IF(CLOG_BUILD_TESTS)
+if(CLOG_BUILD_TESTS)
   # ---[ Build google test
-  IF(NOT TARGET gtest)
-    IF(MSVC AND NOT CLOG_RUNTIME_TYPE STREQUAL "static")
-      SET(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
-    ENDIF()
-    ADD_SUBDIRECTORY(
+  if(NOT TARGET gtest)
+    if(MSVC AND NOT CLOG_RUNTIME_TYPE STREQUAL "static")
+      set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+    endif()
+    add_subdirectory(
       "${GOOGLETEST_SOURCE_DIR}"
       "${CONFU_DEPENDENCIES_BINARY_DIR}/googletest")
-  ENDIF()
+  endif()
 
-  ADD_EXECUTABLE(clog-test test/clog.cc)
-  SET_TARGET_PROPERTIES(clog-test PROPERTIES
+  add_executable(clog-test test/clog.cc)
+  set_target_properties(clog-test PROPERTIES
     CXX_STANDARD 11
     CXX_EXTENSIONS NO)
   CLOG_TARGET_RUNTIME_LIBRARY(clog-test)
-  TARGET_LINK_LIBRARIES(clog-test PRIVATE clog gtest gtest_main)
-  ADD_TEST(clog-test clog-test)
-ENDIF()
+  target_link_libraries(clog-test PRIVATE clog gtest gtest_main)
+  add_test(clog-test clog-test)
+endif()

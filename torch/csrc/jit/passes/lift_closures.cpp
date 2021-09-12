@@ -1,11 +1,12 @@
 #include <torch/csrc/jit/passes/lift_closures.h>
-#include <torch/csrc/jit/ir/ir.h>
+
 #include <torch/csrc/jit/frontend/ir_emitter.h>
+#include <torch/csrc/jit/ir/ir.h>
 
 namespace torch {
 namespace jit {
 
-// Closures are initially emitted as prim::Function nodes with a single block.
+// Closures are initially emitted as prim::Closure nodes with a single block.
 // Here, we convert the block to a subgraph, adding all closed over variables
 // as a context tuple input to the closure node.
 // At this point the closure has already undergone conversion to SSA,
@@ -58,7 +59,7 @@ void liftClosures(Block* block) {
     Node* n = *it;
     it++;
     switch (n->kind()) {
-      case prim::Function: {
+      case prim::Closure: {
         liftClosure(n);
       } break;
       default: {

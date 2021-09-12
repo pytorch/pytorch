@@ -12,7 +12,7 @@ class BatchMatMulConverter : public Converter {
   std::unique_ptr<repr::NeuralNetOperator> convertToNeuralNetOperator(
       const OperatorDef& op) override {
     std::unique_ptr<repr::NeuralNetOperator> nnOp =
-        util::make_unique<repr::BatchMatMul>();
+        std::make_unique<repr::BatchMatMul>();
     auto argMap = getArgumentsFromOperator(op);
 
     auto c = dyn_cast<repr::BatchMatMul>(nnOp.get());
@@ -46,7 +46,7 @@ class MulConverter : public Converter {
   std::unique_ptr<repr::NeuralNetOperator> convertToNeuralNetOperator(
       const OperatorDef& op) override {
     std::unique_ptr<repr::NeuralNetOperator> nnOp =
-        util::make_unique<repr::Mul>();
+        std::make_unique<repr::Mul>();
     auto argMap = getArgumentsFromOperator(op);
 
     auto c = dyn_cast<repr::Mul>(nnOp.get());
@@ -67,7 +67,7 @@ class AddConverter : public Converter {
   std::unique_ptr<repr::NeuralNetOperator> convertToNeuralNetOperator(
       const OperatorDef& op) override {
     std::unique_ptr<repr::NeuralNetOperator> nnOp =
-        util::make_unique<repr::Add>();
+        std::make_unique<repr::Add>();
     auto argMap = getArgumentsFromOperator(op);
 
     auto c = dyn_cast<repr::Add>(nnOp.get());
@@ -88,7 +88,7 @@ class CastConverter : public Converter {
   std::unique_ptr<repr::NeuralNetOperator> convertToNeuralNetOperator(
       const OperatorDef& op) override {
     std::unique_ptr<repr::NeuralNetOperator> nnOp =
-        util::make_unique<repr::Cast>();
+        std::make_unique<repr::Cast>();
     auto argMap = getArgumentsFromOperator(op);
 
     auto c = dyn_cast<repr::Cast>(nnOp.get());
@@ -106,7 +106,7 @@ class ReplaceNaNConverter : public Converter {
   std::unique_ptr<repr::NeuralNetOperator> convertToNeuralNetOperator(
       const OperatorDef& op) override {
     std::unique_ptr<repr::NeuralNetOperator> nnOp =
-        util::make_unique<repr::ReplaceNaN>();
+        std::make_unique<repr::ReplaceNaN>();
     auto argMap = getArgumentsFromOperator(op);
 
     auto c = dyn_cast<repr::ReplaceNaN>(nnOp.get());
@@ -127,7 +127,7 @@ class ConcatAddMulReplaceNaNClipConverter : public Converter {
   std::unique_ptr<repr::NeuralNetOperator> convertToNeuralNetOperator(
       const OperatorDef& op) override {
     std::unique_ptr<repr::NeuralNetOperator> nnOp =
-        util::make_unique<repr::ConcatAddMulReplaceNaNClip>();
+        std::make_unique<repr::ConcatAddMulReplaceNaNClip>();
     auto argMap = getArgumentsFromOperator(op);
 
     auto c = dyn_cast<repr::ConcatAddMulReplaceNaNClip>(nnOp.get());
@@ -152,6 +152,7 @@ class ConcatAddMulReplaceNaNClipConverter : public Converter {
     auto max_arg = op.add_arg();
     max_arg->set_name("clip_max");
     max_arg->set_f(cc_amrc->getClipMax());
+    op.mutable_device_option()->CopyFrom(getDeviceOption(nnOp));
     return op;
   }
   ~ConcatAddMulReplaceNaNClipConverter() override {}
@@ -164,7 +165,7 @@ class SliceConverter : public Converter {
   std::unique_ptr<repr::NeuralNetOperator> convertToNeuralNetOperator(
       const OperatorDef& op) override {
     std::unique_ptr<repr::NeuralNetOperator> nnOp =
-        util::make_unique<repr::Slice>();
+        std::make_unique<repr::Slice>();
     const caffe2::ArgumentHelper args(op);
 
     auto c = dyn_cast<repr::Slice>(nnOp.get());
@@ -186,6 +187,7 @@ class SliceConverter : public Converter {
         caffe2::MakeArgument<vector<int64_t>>("starts", slice->getStarts()));
     op.add_arg()->CopyFrom(
         caffe2::MakeArgument<vector<int64_t>>("ends", slice->getEnds()));
+    op.mutable_device_option()->CopyFrom(getDeviceOption(nnOp));
     return op;
   }
 
@@ -197,7 +199,7 @@ class ClipRangesGatherSigridHashConverter : public Converter {
   std::unique_ptr<repr::NeuralNetOperator> convertToNeuralNetOperator(
       const OperatorDef& op) override {
     std::unique_ptr<repr::NeuralNetOperator> nnOp =
-        util::make_unique<repr::ClipRangesGatherSigridHash>();
+        std::make_unique<repr::ClipRangesGatherSigridHash>();
     const caffe2::ArgumentHelper args(op);
 
     auto c = dyn_cast<repr::ClipRangesGatherSigridHash>(nnOp.get());
@@ -236,6 +238,7 @@ class ClipRangesGatherSigridHashConverter : public Converter {
         "max_values", fuse->getMaxValues()));
     op.add_arg()->CopyFrom(caffe2::MakeArgument<bool>(
         "hash_into_int32", fuse->getHashIntoInt32()));
+    op.mutable_device_option()->CopyFrom(getDeviceOption(nnOp));
     return op;
   }
 
@@ -245,11 +248,58 @@ REGISTER_CONVERTER(
     ClipRangesGatherSigridHash,
     ClipRangesGatherSigridHashConverter);
 
+class ClipRangesGatherSigridHashV2Converter : public Converter {
+  std::unique_ptr<repr::NeuralNetOperator> convertToNeuralNetOperator(
+      const OperatorDef& op) override {
+    std::unique_ptr<repr::NeuralNetOperator> nnOp =
+        std::make_unique<repr::ClipRangesGatherSigridHashV2>();
+    const caffe2::ArgumentHelper args(op);
+
+    auto c = dyn_cast<repr::ClipRangesGatherSigridHashV2>(nnOp.get());
+    if (args.HasArgument("max_lengths")) {
+      c->setMaxLengths(args.GetRepeatedArgument<int64_t>("max_lengths"));
+    }
+    if (args.HasArgument("salts")) {
+      c->setSalts(args.GetRepeatedArgument<int64_t>("salts"));
+    }
+    if (args.HasArgument("max_values")) {
+      c->setMaxValues(args.GetRepeatedArgument<int64_t>("max_values"));
+    }
+    if (args.HasArgument("hash_into_int32")) {
+      c->setHashIntoInt32(
+          args.GetSingleArgument<bool>("hash_into_int32", false));
+    }
+    return nnOp;
+  }
+
+  OperatorDef convertToOperatorDef(
+      const nom::repr::NeuralNetOperator* nnOp) override {
+    auto fuse = dyn_cast<repr::ClipRangesGatherSigridHashV2>(nnOp);
+    OperatorDef op;
+    op.set_type("ClipRangesGatherSigridHashV2");
+    op.add_arg()->CopyFrom(caffe2::MakeArgument<vector<int64_t>>(
+        "max_lengths", fuse->getMaxLengths()));
+    op.add_arg()->CopyFrom(
+        caffe2::MakeArgument<vector<int64_t>>("salts", fuse->getSalts()));
+    op.add_arg()->CopyFrom(caffe2::MakeArgument<vector<int64_t>>(
+        "max_values", fuse->getMaxValues()));
+    op.add_arg()->CopyFrom(caffe2::MakeArgument<bool>(
+        "hash_into_int32", fuse->getHashIntoInt32()));
+    op.mutable_device_option()->CopyFrom(getDeviceOption(nnOp));
+    return op;
+  }
+
+  ~ClipRangesGatherSigridHashV2Converter() override {}
+};
+REGISTER_CONVERTER(
+    ClipRangesGatherSigridHashV2,
+    ClipRangesGatherSigridHashV2Converter);
+
 class ClipRangesConverter : public Converter {
   std::unique_ptr<repr::NeuralNetOperator> convertToNeuralNetOperator(
       const OperatorDef& op) override {
     std::unique_ptr<repr::NeuralNetOperator> nnOp =
-        util::make_unique<repr::ClipRanges>();
+        std::make_unique<repr::ClipRanges>();
     const caffe2::ArgumentHelper args(op);
     auto c = dyn_cast<repr::ClipRanges>(nnOp.get());
     c->setMaxLength(args.GetSingleArgument<int64_t>("max_length", 0));
@@ -263,6 +313,7 @@ class ClipRangesConverter : public Converter {
     op.set_type("ClipRanges");
     op.add_arg()->CopyFrom(caffe2::MakeArgument<int64_t>(
         "max_length", clipRanges->getMaxLength()));
+    op.mutable_device_option()->CopyFrom(getDeviceOption(nnOp));
     return op;
   }
 
@@ -274,11 +325,12 @@ class SigridHashConverter : public Converter {
   std::unique_ptr<repr::NeuralNetOperator> convertToNeuralNetOperator(
       const OperatorDef& op) override {
     std::unique_ptr<repr::NeuralNetOperator> nnOp =
-        util::make_unique<repr::SigridHash>();
+        std::make_unique<repr::SigridHash>();
     const caffe2::ArgumentHelper args(op);
     auto c = dyn_cast<repr::SigridHash>(nnOp.get());
     c->setSalt(args.GetSingleArgument<int64_t>("salt", 0));
     c->setMaxValue(args.GetSingleArgument<int64_t>("maxValue", 0));
+    c->setHashIntoInt32(args.GetSingleArgument<bool>("hashIntoInt32", false));
     return nnOp;
   }
 
@@ -291,6 +343,9 @@ class SigridHashConverter : public Converter {
         caffe2::MakeArgument<int64_t>("salt", sigridHash->getSalt()));
     op.add_arg()->CopyFrom(
         caffe2::MakeArgument<int64_t>("maxValue", sigridHash->getMaxValue()));
+    op.add_arg()->CopyFrom(caffe2::MakeArgument<bool>(
+        "hashIntoInt32", sigridHash->getHashIntoInt32()));
+    op.mutable_device_option()->CopyFrom(getDeviceOption(nnOp));
     return op;
   }
 

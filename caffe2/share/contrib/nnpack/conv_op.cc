@@ -152,6 +152,7 @@ bool NNPACKConvOp::RunOnDeviceWithOrderNCHW() {
   auto& filter = Input(1);
   auto* Y = Output(0);
   CAFFE_ENFORCE(X.ndim() == 4, "Input dim should be 4");
+  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores,clang-diagnostic-unused-variable)
   const int N = X.dim32(0), C = X.dim32(1), H = X.dim32(2), W = X.dim32(3);
   CAFFE_ENFORCE(filter.ndim() == 4, "");
   const int M = filter.dim32(0);
@@ -163,6 +164,7 @@ bool NNPACKConvOp::RunOnDeviceWithOrderNCHW() {
   ConvPoolOpBase<CPUContext>::SetOutputSize(X, Y, filter.dim32(0));
   const int oH = Y->dim32(2), oW = Y->dim32(3);
 
+  // NOLINTNEXTLINE(modernize-use-nullptr)
   const float* biasData = NULL;
   if (InputSize() == 3) {
     /* Convolution with bias */
@@ -172,14 +174,18 @@ bool NNPACKConvOp::RunOnDeviceWithOrderNCHW() {
     biasData = bias.template data<float>();
   } else {
     /* NNPACK interface requires bias. Use a dummy zero-filled vector. */
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     if (dummyBias_.size() != M) {
       dummyBias_.resize(M);
     }
     biasData = dummyBias_.data();
   }
 
+  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores,clang-diagnostic-unused-variable)
   const size_t batch_size = X.dim32(0);
+  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores,clang-diagnostic-unused-variable)
   const size_t input_channels = X.dim32(1);
+  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores,clang-diagnostic-unused-variable)
   const size_t output_channels = Y->dim32(1);
   const nnp_size input_size = {.width = static_cast<size_t>(X.dim32(3)),
                                .height = static_cast<size_t>(X.dim32(2))};
@@ -195,7 +201,12 @@ bool NNPACKConvOp::RunOnDeviceWithOrderNCHW() {
   const nnp_size output_subsample = {.width = static_cast<size_t>(stride_w()),
                                      .height = static_cast<size_t>(stride_h())};
   initNNPACK();
+
+#if !defined(USE_INTERNAL_PTHREADPOOL_IMPL)
+  pthreadpool_t pool = nullptr;
+#else
   pthreadpool_t pool = reinterpret_cast<pthreadpool_t>(ws_->GetThreadPool());
+#endif
 
   runWithSharedBuffer<CPUContext>(ws_, [&](Tensor* buffer) {
     if (transformStrategy_ == nnp_convolution_transform_strategy_precompute) {
@@ -292,6 +303,7 @@ bool NNPACKConvOp::RunOnDeviceWithOrderNCHW() {
     const auto N = X.dim32(0);
     for (auto n = 0; n < N; ++n) {
       for (auto g = 0; g < group_; ++g) {
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
         nnp_profile profile;
         size_t workspaceSize = buffer->nbytes();
         if (workspaceSize == 0) {
@@ -384,12 +396,15 @@ bool NNPACKConvOp::RunOnDeviceWithOrderNCHW() {
             nnp_status_success == status,
             "NNPACK convolution computation returned error");
         if (FLAGS_caffe2_profile_nnpack) {
+          // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-magic-numbers,modernize-avoid-c-arrays)
           char buffer[1024];
           const double gmacs =
               double(
+                  // NOLINTNEXTLINE(bugprone-integer-division)
                   Y->dim32(2) * Y->dim32(3) * Y->dim32(1) * X.dim32(1) *
                   kernel_size.width * kernel_size.height / group_ / group_) /
               1.0E9;
+          // NOLINTNEXTLINE(clang-analyzer-core.UndefinedBinaryOperatorResult)
           const double gflops = 2 * gmacs / profile.total;
           auto ret = snprintf(
               buffer,

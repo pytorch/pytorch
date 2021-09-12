@@ -11,11 +11,23 @@ namespace nn {
 
 namespace detail {
 
-typedef c10::variant<enumtype::kZeros, enumtype::kCircular> conv_padding_mode_t;
+typedef c10::variant<
+  enumtype::kZeros,
+  enumtype::kReflect,
+  enumtype::kReplicate,
+  enumtype::kCircular
+> conv_padding_mode_t;
+
+template <size_t D>
+using conv_padding_t = c10::variant<
+  ExpandingArray<D>,
+  enumtype::kValid,
+  enumtype::kSame>;
 
 /// Options for a `D`-dimensional convolution or convolution transpose module.
 template <size_t D>
 struct ConvNdOptions {
+  using padding_t = conv_padding_t<D>;
   ConvNdOptions(
       int64_t in_channels,
       int64_t out_channels,
@@ -48,7 +60,12 @@ struct ConvNdOptions {
   /// For a `D`-dim convolution, must be a single number or a list of `D`
   /// numbers.
   /// This parameter __can__ be changed after construction.
-  TORCH_ARG(ExpandingArray<D>, padding) = 0;
+  TORCH_ARG(padding_t, padding) = 0;
+
+public:
+  decltype(auto) padding(std::initializer_list<int64_t> il) {
+    return padding(IntArrayRef{il});
+  }
 
   /// The kernel dilation.
   /// For a `D`-dim convolution, must be a single number or a list of `D`
@@ -75,7 +92,7 @@ struct ConvNdOptions {
   /// Changing this parameter after construction __has no effect__.
   TORCH_ARG(bool, bias) = true;
 
-  /// Accepted values `zeros` and `circular` Default: `zeros`
+  /// Accepted values `torch::kZeros`, `torch::kReflect`, `torch::kReplicate` or `torch::kCircular`. Default: `torch::kZeros`
   TORCH_ARG(conv_padding_mode_t, padding_mode) = torch::kZeros;
 };
 
@@ -87,6 +104,7 @@ struct ConvNdOptions {
 template <size_t D>
 struct ConvOptions {
   using padding_mode_t = detail::conv_padding_mode_t;
+  using padding_t = detail::conv_padding_t<D>;
 
   ConvOptions(
       int64_t in_channels,
@@ -120,7 +138,12 @@ struct ConvOptions {
   /// For a `D`-dim convolution, must be a single number or a list of `D`
   /// numbers.
   /// This parameter __can__ be changed after construction.
-  TORCH_ARG(ExpandingArray<D>, padding) = 0;
+  TORCH_ARG(padding_t, padding) = 0;
+
+public:
+  decltype(auto) padding(std::initializer_list<int64_t> il) {
+    return padding(IntArrayRef{il});
+  }
 
   /// The kernel dilation.
   /// For a `D`-dim convolution, must be a single number or a list of `D`
@@ -136,7 +159,7 @@ struct ConvOptions {
   /// Changing this parameter after construction __has no effect__.
   TORCH_ARG(bool, bias) = true;
 
-  /// Accepted values `zeros` and `circular` Default: `zeros`
+  /// Accepted values `torch::kZeros`, `torch::kReflect`, `torch::kReplicate` or `torch::kCircular`. Default: `torch::kZeros`
   TORCH_ARG(padding_mode_t, padding_mode) = torch::kZeros;
 };
 
@@ -171,6 +194,8 @@ namespace functional {
 /// Options for a `D`-dimensional convolution functional.
 template <size_t D>
 struct ConvFuncOptions {
+  using padding_t = torch::nn::detail::conv_padding_t<D>;
+
   /// optional bias of shape `(out_channels)`. Default: ``None``
   TORCH_ARG(torch::Tensor, bias) = Tensor();
 
@@ -182,7 +207,12 @@ struct ConvFuncOptions {
   /// Implicit paddings on both sides of the input.
   /// For a `D`-dim convolution, must be a single number or a list of `D`
   /// numbers.
-  TORCH_ARG(ExpandingArray<D>, padding) = 0;
+  TORCH_ARG(padding_t, padding) = 0;
+
+public:
+  decltype(auto) padding(std::initializer_list<int64_t> il) {
+    return padding(IntArrayRef{il});
+  }
 
   /// The spacing between kernel elements.
   /// For a `D`-dim convolution, must be a single number or a list of `D`
@@ -283,7 +313,7 @@ struct ConvTransposeOptions {
   /// This parameter __can__ be changed after construction.
   TORCH_ARG(ExpandingArray<D>, dilation) = 1;
 
-  /// Accepted values `zeros` and `circular` Default: `zeros`
+  /// Accepted values `torch::kZeros`, `torch::kReflect`, `torch::kReplicate` or `torch::kCircular`. Default: `torch::kZeros`
   TORCH_ARG(padding_mode_t, padding_mode) = torch::kZeros;
 };
 

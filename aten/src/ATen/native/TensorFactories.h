@@ -1,5 +1,9 @@
 #pragma once
 
+#include <ATen/Functions.h>
+#include <ATen/Utils.h>
+#include <ATen/native/DispatchStub.h>
+#include <ATen/native/TensorIterator.h>
 #include <c10/core/TensorOptions.h>
 
 namespace at { namespace native {
@@ -48,25 +52,23 @@ inline int64_t get_tril_size(int64_t row, int64_t col, int64_t offset) {
 }
 
 inline void check_args(
-    int64_t row, int64_t col, const TensorOptions& options) {
+    int64_t row, int64_t col, c10::optional<Layout> layout_opt) {
   TORCH_CHECK(row >= 0, "row must be non-negative, got", row);
   TORCH_CHECK(col >= 0, "col must be non-negative, got", col);
-  if (options.has_layout()) {
+  if (layout_opt.has_value()) {
     TORCH_CHECK(
-      options.layout() == at::kStrided,
+      *layout_opt == at::kStrided,
       "only support layout=torch.strided, got",
-      options.layout())
+      *layout_opt)
   }
 }
 
-inline void check_size_nonnegative(IntArrayRef size) {
-  for (auto x: size) {
-    TORCH_CHECK(x >= 0, "Trying to create tensor with negative dimension ", x, ": ", size);
-  }
-}
+using at::check_size_nonnegative;
 
+// assumes maximum value in created tensor is n-1 (e.g., torch.randperm(n))
 inline void check_supported_max_int_with_precision(int64_t n, const Tensor& tensor) {
-  TORCH_CHECK(at::scalar_tensor(n, tensor.options()).defined(),
+  // match defined() to behavior of checks below
+  TORCH_CHECK(at::scalar_tensor(n>0?n-1:n, tensor.options()).defined(),
               "n is too large for result tensor type: '", tensor.toString(), "'");
 
   // Ensure sufficient precision for floating point representation.
@@ -84,5 +86,11 @@ inline void check_supported_max_int_with_precision(int64_t n, const Tensor& tens
       break;
   }
 }
+
+using binary_fn = void (*)(TensorIterator&);
+
+DECLARE_DISPATCH(binary_fn, complex_stub);
+DECLARE_DISPATCH(binary_fn, polar_stub);
+
 } // namespace native
 } // namespace at

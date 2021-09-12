@@ -1,3 +1,4 @@
+#include <ATen/Config.h>
 #if AT_PARALLEL_NATIVE
 #include <ATen/Parallel.h>
 #include <ATen/PTThreadPool.h>
@@ -5,8 +6,7 @@
 #ifndef C10_MOBILE
 #include <c10/core/thread_pool.h>
 #else
-#include <caffe2/utils/threadpool/ThreadPool.h>
-#include <caffe2/utils/threadpool/ThreadPoolMobile.h>
+#include <caffe2/utils/threadpool/pthreadpool-cpp.h>
 #endif // C10_MOBILE
 
 #include <atomic>
@@ -26,16 +26,21 @@ namespace {
 thread_local bool in_parallel_region_ = false;
 
 // thread number (task_id) set by parallel primitive
-thread_local size_t thread_num_ = 0;
+thread_local int thread_num_ = 0;
 
 void _set_in_parallel_region(bool in_region) {
   in_parallel_region_ = in_region;
 }
 
-void _set_thread_num(size_t thread_num) {
+}  // namespace (anonymous)
+
+namespace internal {
+void set_thread_num(int thread_num) {
   thread_num_ = thread_num;
 }
+}
 
+namespace {
 void _unset_thread_num() {
   thread_num_ = 0;
 }
@@ -87,22 +92,22 @@ void _run_with_pool(const std::function<void(int, size_t)>& fn, size_t range) {
   // Run the first task on the current thread directly.
   fn(0, 0);
 #else
-  caffe2::ThreadPool* pool = caffe2::mobile_threadpool();
-  if (pool) {
-    // caffe2::ThreadPool can utilize the current thread.
-    pool->run(fn, range);
-  } else {
-    for (size_t i = 0; i < range; ++i) {
-      fn(0, i);
-    }
-  }
+  caffe2::PThreadPool* const pool = caffe2::pthreadpool();
+  TORCH_INTERNAL_ASSERT(pool, "Invalid thread pool!");
+
+  pool->run(
+    // PThreadPool::run() is blocking.  A std::function [const] reference to
+    // this lambda cannot go out of scope before PThreadPool::run() returns.
+    [&fn](const size_t task_id) {
+      fn(0 /* unused */, task_id);
+    }, range);
 #endif // C10_MOBILE
 }
 
 // RAII guard helps to support in_parallel_region() and get_thread_num() API.
 struct ParallelRegionGuard {
-  ParallelRegionGuard(int64_t task_id) {
-    _set_thread_num(task_id);
+  ParallelRegionGuard(int task_id) {
+    internal::set_thread_num(task_id);
     _set_in_parallel_region(true);
   }
 
@@ -121,17 +126,23 @@ void _parallel_run(
   const int64_t end,
   const int64_t grain_size,
   const std::function<void(int64_t, int64_t, size_t)>& f) {
+  at::internal::lazy_init_num_threads();
+
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   size_t num_tasks, chunk_size;
   std::tie(num_tasks, chunk_size) =
       internal::calc_num_tasks_and_chunk_size(begin, end, grain_size);
 
-  std::atomic_flag err_flag = ATOMIC_FLAG_INIT;
-  std::exception_ptr eptr;
-  std::vector<std::shared_ptr<c10::ivalue::Future>> futures(num_tasks);
-  for (size_t task_id = 0; task_id < num_tasks; ++task_id) {
-    futures[task_id] = std::make_shared<c10::ivalue::Future>(c10::NoneType::get());
-  }
-  auto task = [f, &eptr, &err_flag, &futures, begin, end, chunk_size]
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+  struct {
+    std::atomic_flag err_flag = ATOMIC_FLAG_INIT;
+    std::exception_ptr eptr;
+    std::mutex mutex;
+    volatile size_t remaining;
+    std::condition_variable cv;
+  } state;
+
+  auto task = [f, &state, begin, end, chunk_size]
       (int /* unused */, size_t task_id) {
     int64_t local_start = begin + task_id * chunk_size;
     if (local_start < end) {
@@ -140,21 +151,30 @@ void _parallel_run(
         ParallelRegionGuard guard(task_id);
         f(local_start, local_end, task_id);
       } catch (...) {
-        if (!err_flag.test_and_set()) {
-          eptr = std::current_exception();
+        if (!state.err_flag.test_and_set()) {
+          state.eptr = std::current_exception();
         }
       }
     }
-    futures[task_id]->markCompleted();
+    {
+      std::unique_lock<std::mutex> lk(state.mutex);
+      if (--state.remaining == 0) {
+        state.cv.notify_one();
+      }
+    }
   };
+  state.remaining = num_tasks;
   _run_with_pool(task, num_tasks);
 
   // Wait for all tasks to finish.
-  for (size_t task_id = 0; task_id < num_tasks; ++task_id) {
-    futures[task_id]->wait();
+  {
+    std::unique_lock<std::mutex> lk(state.mutex);
+    if (state.remaining != 0) {
+      state.cv.wait(lk);
+    }
   }
-  if (eptr) {
-    std::rethrow_exception(eptr);
+  if (state.eptr) {
+    std::rethrow_exception(state.eptr);
   }
 }
 
@@ -170,7 +190,7 @@ void init_num_threads() {
 #endif
 
 #ifdef C10_MOBILE
-  caffe2::mobile_threadpool();
+  caffe2::pthreadpool();
 #endif
 }
 
@@ -184,6 +204,7 @@ void set_num_threads(int nthreads) {
     int stored_nthreads = num_intraop_threads.load();
     if (stored_nthreads <= 0) {
       // plus one because of master thread
+      // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
       stored_nthreads = _get_intraop_pool().size() + 1;
     }
     if (stored_nthreads != nthreads) {
@@ -194,11 +215,14 @@ void set_num_threads(int nthreads) {
     }
   }
 #else
-  TORCH_CHECK(false, "set_num_threads is not supported for mobile.");
+  caffe2::PThreadPool* const pool = caffe2::pthreadpool();
+  TORCH_INTERNAL_ASSERT(pool, "Invalid thread pool!");
+  pool->set_thread_count(nthreads);
 #endif // C10_MOBILE
 }
 
 int get_num_threads() {
+  at::internal::lazy_init_num_threads();
 #ifndef C10_MOBILE
   // not initializing pool unnecessarily,
   // because pool cannot be resized after initialization
@@ -209,12 +233,13 @@ int get_num_threads() {
     return intraop_default_num_threads();
   } else {
     TORCH_INTERNAL_ASSERT(nthreads == CONSUMED);
+    // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
     return _get_intraop_pool().size() + 1;
   }
 #else
-  caffe2::ThreadPool* pool = caffe2::mobile_threadpool();
-  // caffe2::ThreadPool::getNumThreads() counts the current thread.
-  return !pool || in_parallel_region() ? 1 /* current thread */ : pool->getNumThreads();
+  caffe2::PThreadPool* const pool = caffe2::pthreadpool();
+  TORCH_INTERNAL_ASSERT(pool, "Invalid thread pool!")
+  return in_parallel_region() ? 1 /* current thread */ : pool->get_thread_count();
 #endif // C10_MOBILE
 }
 
@@ -243,16 +268,16 @@ void intraop_launch(std::function<void()> func) {
     func();
   }
 #else
-  // TODO: caffe2::ThreadPool doesn't support submitting tasks separately and
-  // running in parallel. Should fix it when this API becomes popular.
+  // TODO: caffe2::PThreadPool only provides a data-parallel API.
+  // Task parallelism is not currently supported.
   func();
 #endif // C10_MOBILE
 }
 
-std::shared_ptr<c10::ivalue::Future> intraop_launch_future(
+c10::intrusive_ptr<c10::ivalue::Future> intraop_launch_future(
     std::function<void()> func) {
 #ifndef C10_MOBILE
-  auto future = std::make_shared<c10::ivalue::Future>(c10::NoneType::get());
+  auto future = c10::make_intrusive<c10::ivalue::Future>(c10::NoneType::get());
   if (!in_parallel_region() && get_num_threads() > 1) {
     _get_intraop_pool().run(
       [func, future]() {
@@ -266,9 +291,9 @@ std::shared_ptr<c10::ivalue::Future> intraop_launch_future(
   }
   return future;
 #else
-  // TODO: caffe2::ThreadPool doesn't support submitting tasks separately and
-  // running in parallel. Should fix it when this API becomes popular.
-  auto future = std::make_shared<c10::ivalue::Future>(NoneType::get());
+  // TODO: caffe2::PThreadPool only provides a data-parallel API.
+  // Task parallelism is not currently supported.
+  auto future = c10::make_intrusive<c10::ivalue::Future>(NoneType::get());
   func();
   future->markCompleted();
   return future;

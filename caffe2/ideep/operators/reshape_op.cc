@@ -12,7 +12,7 @@ class IDEEPReshapeOp final : public IDEEPOperator {
 
   IDEEPReshapeOp(const OperatorDef& operator_def, Workspace* ws)
       : IDEEPOperator(operator_def, ws),
-        new_shape_(OperatorBase::GetRepeatedArgument<int>("shape")) {}
+        new_shape_(OperatorBase::GetRepeatedArgument<itensor::dim>("shape")) {}
 
   bool RunOnDevice() override {
     ideep::tensor::dims actual_new_shape = new_shape_;
@@ -45,6 +45,7 @@ class IDEEPReshapeOp final : public IDEEPOperator {
 
     auto& input = Input(0);
     // Copy over the dimensions for those that are specified zero.
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (int i = 0; i < actual_new_shape.size() && i < input.ndims(); ++i) {
       if (actual_new_shape[i] == 0) {
         actual_new_shape[i] = input.get_dim(i);
@@ -57,6 +58,7 @@ class IDEEPReshapeOp final : public IDEEPOperator {
     auto total_size = input.get_nelems();
     int size = 1;
     int unknown_idx = -1;
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (int i = 0; i < actual_new_shape.size(); ++i) {
       const auto dim = actual_new_shape[i];
       if (dim == -1) {

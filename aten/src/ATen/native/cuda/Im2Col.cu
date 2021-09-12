@@ -53,7 +53,7 @@ static void im2col_out_cuda_template(
 
   TensorArg input_arg{input_, "input", 1};
   TensorArg output_arg{output, "output", 2};
-  checkAllSameGPU("im2col_cuda", {input_arg, output_arg});
+  checkAllSameGPU(__func__, {input_arg, output_arg});
 
   im2col_shape_check(
       input_,
@@ -96,7 +96,8 @@ static void im2col_out_cuda_template(
   output.zero_();
 
   // Launch kernel
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "im2col_out_cuda", [&] {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kHalf,
+      input.scalar_type(), "im2col_out_cuda", [&] {
     Tensor input_n;
     Tensor output_n;
 
@@ -142,25 +143,24 @@ static void im2col_backward_out_cuda_template(
       "It is expected input_size equals to 2, but got size ",
       input_size.size());
   // col2im_out_cuda checks size of kernel_size, dilation, padding and stride
-  col2im_out_cuda(
-      grad_input,
+  at::native::col2im_out_cuda(
       grad_output,
       input_size,
       kernel_size,
       dilation,
       padding,
-      stride);
+      stride,
+      grad_input);
 }
 
 } // namespace
 
-Tensor& im2col_out_cuda(
-    Tensor& output,
-    const Tensor& input,
+Tensor& im2col_out_cuda(const Tensor& input,
     IntArrayRef kernel_size,
     IntArrayRef dilation,
     IntArrayRef padding,
-    IntArrayRef stride) {
+    IntArrayRef stride,
+    Tensor& output) {
   im2col_out_cuda_template(
       output, input, kernel_size, dilation, padding, stride);
   return output;
@@ -178,14 +178,13 @@ Tensor im2col_cuda(
   return output;
 }
 
-Tensor& im2col_backward_out_cuda(
-    Tensor& grad_input,
-    const Tensor& grad_output,
+Tensor& im2col_backward_out_cuda(const Tensor& grad_output,
     IntArrayRef input_size,
     IntArrayRef kernel_size,
     IntArrayRef dilation,
     IntArrayRef padding,
-    IntArrayRef stride) {
+    IntArrayRef stride,
+    Tensor& grad_input) {
   im2col_backward_out_cuda_template(
       grad_input,
       grad_output,

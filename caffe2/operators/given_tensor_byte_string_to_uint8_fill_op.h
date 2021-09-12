@@ -13,7 +13,9 @@ template <class Context>
 class GivenTensorByteStringToUInt8FillOp final : public FillerOp<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  explicit GivenTensorByteStringToUInt8FillOp(const OperatorDef& operator_def, Workspace* ws)
+  explicit GivenTensorByteStringToUInt8FillOp(
+      const OperatorDef& operator_def,
+      Workspace* ws)
       : FillerOp<Context>(operator_def, ws) {
     const ArgumentHelper helper(operator_def);
     if (!helper.HasArgument("dtype")) {
@@ -53,13 +55,17 @@ class GivenTensorByteStringToUInt8FillOp final : public FillerOp<Context> {
         << " given size: " << source_values.size();
 
     auto str = source_values[0];
-    ReinitializeTensor(&values_, {static_cast<int64_t>(str.size())}, at::dtype<uint8_t>().device(CPU));
+    ReinitializeTensor(
+        &values_,
+        {static_cast<int64_t>(str.size())},
+        at::dtype<uint8_t>().device(CPU));
     uint8_t* values_data = values_.template mutable_data<uint8_t>();
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (int i = 0; i < str.size(); i++) {
       values_data[i] = static_cast<uint8_t>(str[i]);
     }
-}
+  }
 
-Tensor values_;
+  Tensor values_;
 };
 } // namespace caffe2

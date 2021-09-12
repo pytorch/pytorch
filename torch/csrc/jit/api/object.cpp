@@ -32,10 +32,15 @@ c10::optional<Method> Object::find_method(const std::string& basename) const {
 void Object::define(const std::string& src, const ResolverPtr& resolver) {
   const auto self = SimpleSelf(type());
   _ivalue()->compilation_unit()->define(
-      *type()->name(),
-      src,
-      resolver ? resolver : nativeResolver(),
-      &self);
+      *type()->name(), src, resolver ? resolver : nativeResolver(), &self);
+}
+
+Object Object::copy() const {
+  return Object(_ivalue()->copy());
+}
+
+Object Object::deepcopy() const {
+  return Object(_ivalue()->deepcopy());
 }
 
 } // namespace jit

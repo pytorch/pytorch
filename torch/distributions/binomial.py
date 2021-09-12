@@ -1,4 +1,3 @@
-from numbers import Number
 import torch
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
@@ -42,18 +41,13 @@ class Binomial(Distribution):
             raise ValueError("Either `probs` or `logits` must be specified, but not both.")
         if probs is not None:
             self.total_count, self.probs, = broadcast_all(total_count, probs)
-            self.total_count = self.total_count.type_as(self.logits)
-            is_scalar = isinstance(self.probs, Number)
+            self.total_count = self.total_count.type_as(self.probs)
         else:
             self.total_count, self.logits, = broadcast_all(total_count, logits)
             self.total_count = self.total_count.type_as(self.logits)
-            is_scalar = isinstance(self.logits, Number)
 
         self._param = self.probs if probs is not None else self.logits
-        if is_scalar:
-            batch_shape = torch.Size()
-        else:
-            batch_shape = self._param.size()
+        batch_shape = self._param.size()
         super(Binomial, self).__init__(batch_shape, validate_args=validate_args)
 
     def expand(self, batch_shape, _instance=None):
@@ -73,7 +67,7 @@ class Binomial(Distribution):
     def _new(self, *args, **kwargs):
         return self._param.new(*args, **kwargs)
 
-    @constraints.dependent_property
+    @constraints.dependent_property(is_discrete=True, event_dim=0)
     def support(self):
         return constraints.integer_interval(0, self.total_count)
 
@@ -98,19 +92,9 @@ class Binomial(Distribution):
         return self._param.size()
 
     def sample(self, sample_shape=torch.Size()):
+        shape = self._extended_shape(sample_shape)
         with torch.no_grad():
-            max_count = max(int(self.total_count.max()), 1)
-            shape = self._extended_shape(sample_shape) + (max_count,)
-            bernoullis = torch.bernoulli(self.probs.unsqueeze(-1).expand(shape))
-            if self.total_count.min() != max_count:
-                arange = torch.arange(max_count, dtype=self._param.dtype, device=self._param.device)
-                mask = arange >= self.total_count.unsqueeze(-1)
-                if torch._C._get_tracing_state():
-                    # [JIT WORKAROUND] lack of support for .masked_fill_()
-                    bernoullis[mask.expand(shape)] = 0.
-                else:
-                    bernoullis.masked_fill_(mask, 0.)
-            return bernoullis.sum(dim=-1)
+            return torch.binomial(self.total_count.expand(shape), self.probs.expand(shape))
 
     def log_prob(self, value):
         if self._validate_args:

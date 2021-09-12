@@ -1,6 +1,5 @@
 #pragma once
 
-#include <torch/arg.h>
 #include <torch/nn/module.h>
 #include <torch/optim/optimizer.h>
 #include <torch/optim/serialize.h>
@@ -22,7 +21,7 @@ namespace torch {
 namespace optim {
 
 struct TORCH_API SGDOptions : public OptimizerCloneableOptions<SGDOptions> {
-  /* implicit */ SGDOptions(double lr);
+  SGDOptions(double lr);
   TORCH_ARG(double, lr);
   TORCH_ARG(double, momentum) = 0;
   TORCH_ARG(double, dampening) = 0;
@@ -32,7 +31,9 @@ public:
   void serialize(torch::serialize::InputArchive& archive) override;
   void serialize(torch::serialize::OutputArchive& archive) const override;
   TORCH_API friend bool operator==(const SGDOptions& lhs, const SGDOptions& rhs);
-  ~SGDOptions() = default;
+  ~SGDOptions() override = default;
+  double get_lr() const override;
+  void set_lr(const double lr) override;
 };
 
 struct TORCH_API SGDParamState : public OptimizerCloneableParamState<SGDParamState> {
@@ -42,7 +43,7 @@ public:
   void serialize(torch::serialize::InputArchive& archive) override;
   void serialize(torch::serialize::OutputArchive& archive) const override;
   TORCH_API friend bool operator==(const SGDParamState& lhs, const SGDParamState& rhs);
-  ~SGDParamState() = default;
+  ~SGDParamState() override = default;
 };
 
 class TORCH_API SGD : public Optimizer {
@@ -56,21 +57,10 @@ class TORCH_API SGD : public Optimizer {
   }
 
   explicit SGD(std::vector<Tensor> params,
+      // NOLINTNEXTLINE(performance-move-const-arg)
       SGDOptions defaults) : SGD({std::move(OptimizerParamGroup(params))}, defaults) {}
 
   torch::Tensor step(LossClosure closure = nullptr) override;
-
-  /// Adds the given vector of parameters to the optimizer's parameter list.
-  void add_parameters(const std::vector<Tensor>& parameters) override;
-
-  /// Provides a const reference to the parameters this optimizer holds.
-  const std::vector<Tensor>& parameters() const noexcept override;
-
-  /// Provides a reference to the parameters this optimizer holds.
-  std::vector<Tensor>& parameters() noexcept override;
-
-  /// Returns the number of parameters referenced by the optimizer.
-  size_t size() const noexcept override;
 
   void save(serialize::OutputArchive& archive) const override;
   void load(serialize::InputArchive& archive) override;

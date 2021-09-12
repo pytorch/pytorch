@@ -5,14 +5,14 @@
 #include <torch/utils.h>
 
 #include <ATen/ATen.h>
+#include <c10/util/irange.h>
 
 #include <functional>
 
 namespace torch {
 namespace optim {
 
-RMSpropOptions::RMSpropOptions(double lr)
-    : lr_(lr) {}
+RMSpropOptions::RMSpropOptions(double lr) : lr_(lr) {}
 
 bool operator==(const RMSpropOptions& lhs, const RMSpropOptions& rhs) {
   return (lhs.lr() == rhs.lr()) &&
@@ -41,15 +41,19 @@ void RMSpropOptions::serialize(torch::serialize::InputArchive& archive) {
   _TORCH_OPTIM_DESERIALIZE_TORCH_ARG(bool, centered);
 }
 
+double RMSpropOptions::get_lr() const {
+  return lr();
+}
+
+void RMSpropOptions::set_lr(const double lr) {
+  this->lr(lr);
+}
+
 bool operator==(const RMSpropParamState& lhs, const RMSpropParamState& rhs) {
   return (lhs.step() == rhs.step()) &&
          torch::equal(lhs.square_avg(), rhs.square_avg()) &&
-         ((!lhs.momentum_buffer().defined() && !rhs.momentum_buffer().defined()) ||
-          (lhs.momentum_buffer().defined() && rhs.momentum_buffer().defined() &&
-          torch::equal(lhs.momentum_buffer(), rhs.momentum_buffer()))) &&
-         ((!lhs.grad_avg().defined() && !rhs.grad_avg().defined()) ||
-           (lhs.grad_avg().defined() && rhs.grad_avg().defined() &&
-           torch::equal(lhs.grad_avg(), rhs.grad_avg())));
+         torch::equal_if_defined(lhs.momentum_buffer(), rhs.momentum_buffer()) &&
+         torch::equal_if_defined(lhs.grad_avg(), rhs.grad_avg());
 }
 
 void RMSpropParamState::serialize(torch::serialize::OutputArchive& archive) const {
@@ -134,22 +138,6 @@ Tensor RMSprop::step(LossClosure closure)  {
   return loss;
 }
 
-void RMSprop::add_parameters(const std::vector<Tensor>& parameters) {
-  return _add_parameters_new_design(parameters);
-}
-
-const std::vector<Tensor>& RMSprop::parameters() const noexcept {
-  return _parameters_new_design();
-}
-
-std::vector<Tensor>& RMSprop::parameters() noexcept {
-  return _parameters_new_design();
-}
-
-size_t RMSprop::size() const noexcept {
-  return _size_new_design();
-}
-
 void RMSprop::save(serialize::OutputArchive& archive) const {
   serialize(*this, archive);
 }
@@ -172,7 +160,7 @@ void RMSprop::load(serialize::InputArchive& archive) {
     torch::optim::serialize(archive, "grad_average_buffers", grad_average_buffers);
     // since there were no param_groups prior to version 1.5.0, assuming all tensors are now in one param_group
     std::vector<Tensor> params = param_groups_.at(0).params();
-    for (size_t idx = 0; idx < square_average_buffers.size(); idx++) {
+    for(const auto idx : c10::irange(square_average_buffers.size())) {
       auto state = std::make_unique<RMSpropParamState>();
       state->square_avg(square_average_buffers[idx]);
       if(idx < momentum_buffers.size()) {

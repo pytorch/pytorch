@@ -5,6 +5,35 @@
 #include <cmath>
 
 namespace quant_utils {
+namespace {
+  float RawUint16ToFp16(unsigned short value) {
+    // Convert raw 16 bits half precision floating point number
+    // to single precision floating point number.
+    const unsigned short sign_bits = value >> 15;
+    const unsigned short exponent_bits = value >> 10 & 0x1f;
+    const unsigned short significand_bits = value & 0x3ff;
+
+    const float sign = sign_bits ? -1 : 1;
+    const float significand =
+        1 + significand_bits * 0.0009765625f; // 0.0009765625f = 0x1p-10 = 2^-10;
+    const float exponent = exponent_bits - 0xf;
+
+    return sign * std::ldexp(significand, exponent);
+}
+
+template <typename T>
+bool CheckAndSaturate(T max_val, T* element) {
+  if (*element > max_val) {
+    *element = max_val;
+    return true;
+  }
+  if (*element < -max_val) {
+    *element = -max_val;
+    return true;
+  }
+  return false;
+}
+}
 using namespace std;
 // A structure to hold quantization parameters 'scale' and 'zero_point'.
 // The meaning of these values is as the constants in the quantization equation
@@ -15,11 +44,17 @@ using namespace std;
 // to the real value 0, and 'scale' is the difference of real values
 // corresponding to consecutive quantized values.
 struct TensorQuantizationParams {
-  float scale;
+  double scale;
   std::int32_t zero_point;
   int precision;
 };
 
+// Use fp16_min as the small scale cutoff because we don't want to use scales in
+// fp16 subnormal range. This is to be consistent with Glow and FakeLowP
+// implementation for NNPI.
+constexpr float SMALL_SCALE_THRESHOLD = 6.1e-5f;
+
+// Following implementation should be identical to fbgemm::ChooseQuantizationParams
 inline TensorQuantizationParams ChooseQuantizationParams(
     float min,
     float max,
@@ -33,8 +68,8 @@ inline TensorQuantizationParams ChooseQuantizationParams(
       "In ChooseQuantizationParams, min should be less than or equal to max");
 
   if (reduce_range) {
-    qmin = 0;
-    qmax = 127;
+    qmin = qmin/2;
+    qmax = qmax/2;
   }
   if (min < 0 && max > 0 && preserve_sparsity) {
     int symmetric_qmin = -((qmax - qmin) / 2 + 1);
@@ -57,15 +92,14 @@ inline TensorQuantizationParams ChooseQuantizationParams(
 
   // Use double precision for intermediate computation but use single precision
   // in final number to reflect the actual number used during quantization.
-  float scale = (static_cast<double>(max) - min) / (qmax - qmin);
+  double scale = (static_cast<double>(max) - min) / (qmax - qmin);
   // If scale is 0 or too small so its reciprocal is infinity, we arbitrary
   // adjust the scale to 0.1 . We want to avoid scale's reciprocal being
   // infinity because some of fbgemm code pre-computes scale's reciprocal to do
   // multiplication instead of division in the time critical part of code.
-  if (scale == 0.0f || isinf(1.0f / scale)) {
+  if (float(scale) == 0.0f || std::isinf(1.0f / float(scale))) {
     scale = 0.1;
   }
-
   TORCH_CHECK(scale > 0, "quantization scale should be > 0");
 
   if (force_scale_power_of_two) {
@@ -73,6 +107,22 @@ inline TensorQuantizationParams ChooseQuantizationParams(
       scale = 1.0 / (1 << static_cast<int>(floor(log(1.0 / scale) / log(2))));
     } else {
       scale = 1 << static_cast<int>(ceil(log(scale) / log(2)));
+    }
+  }
+
+  // Cut off small scale
+  if (scale < SMALL_SCALE_THRESHOLD) {
+    float org_scale = scale;
+    scale = SMALL_SCALE_THRESHOLD;
+    // Adjust the min and max based on the new scale
+    if (min == 0.0f) {
+      max = SMALL_SCALE_THRESHOLD * (qmax - qmin);
+    } else if (max == 0.0f) {
+      min = -SMALL_SCALE_THRESHOLD * (qmax - qmin);
+    } else {
+      float amplifier = SMALL_SCALE_THRESHOLD / org_scale;
+      min *= amplifier;
+      max *= amplifier;
     }
   }
 
@@ -99,7 +149,7 @@ inline TensorQuantizationParams ChooseQuantizationParams(
   // to be a middle value between qmin and qmax.
   // If either min or max is 0, then we just use 0 as zero_point.
   if (min < 0 && max > 0 && preserve_sparsity) {
-    initial_zero_point = (qmin + qmax) / 2 + 1;
+    initial_zero_point = static_cast<double>(qmin + qmax) / 2;
   }
 
   // Now we need to nudge the zero point to be an integer
@@ -120,6 +170,38 @@ inline TensorQuantizationParams ChooseQuantizationParams(
   result.scale = scale;
   result.zero_point = nudged_zero_point;
   return result;
+}
+
+// This function helps to convert the Conv1D dimensions usable by the Conv2d op.
+constexpr int64_t kConv1dSqueezeDim = 0;
+static C10_UNUSED torch::List<int64_t> MakeArgForConv1d(const torch::List<int64_t>& arg,
+                                             int64_t base_value) {
+  TORCH_CHECK(arg.size() > 0, "Argument must have elements.");
+  torch::List<int64_t> result({arg.get(0), base_value});
+  if (arg.size() == 1) {
+    result[1] = arg.get(0);
+  } else {
+    result[1] = arg.get(1);
+  }
+  result[kConv1dSqueezeDim] = base_value;
+  return result;
+}
+
+// The range for using FP16 quantization of weights requires that the elements
+// should be in the range of [5.96e-8, 65504]. If it is out of range, then the
+// number will be saturated to max or min representable values by FP16.
+inline void HandleWeightsSaturation(int64_t N, float* weight) {
+  const float kFp16Max = RawUint16ToFp16(0x7BFF);
+  bool found_out_of_range = false;
+  for (int64_t i = 0; i < N; ++i) {
+    bool saturate = CheckAndSaturate<float>(kFp16Max, weight + i);
+    if (saturate) {
+      found_out_of_range = true;
+    }
+  }
+  if (found_out_of_range) {
+    TORCH_WARN("FOUND weight out of range ");
+  }
 }
 
 } // namespace quant_utils

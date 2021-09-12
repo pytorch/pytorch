@@ -1,4 +1,5 @@
 from collections import OrderedDict
+from typing import Dict, Any
 
 from tensorboard.compat.proto.config_pb2 import RunMetadata
 from tensorboard.compat.proto.graph_pb2 import GraphDef
@@ -213,7 +214,7 @@ def parse(graph, trace, args=None, omit_useless_nodes=True):
         if node.type().kind() != CLASSTYPE_KIND:
             nodes_py.append(NodePyIO(node, 'input'))
 
-    attr_to_scope = dict()
+    attr_to_scope: Dict[Any, str] = dict()
     for node in graph.nodes():
         if node.kind() == GETATTR_KIND:
             attr_name = node.s('name')
@@ -228,16 +229,16 @@ def parse(graph, trace, args=None, omit_useless_nodes=True):
             # We don't need classtype nodes; scope will provide this information
             if node.output().type().kind() != CLASSTYPE_KIND:
                 node_py = NodePyOP(node)
-                node_py.scopeName = attr_to_scope[attr_name]
+                node_py.scopeName = attr_to_scope[attr_name]  # type: ignore[attr-defined]
                 nodes_py.append(node_py)
         else:
             nodes_py.append(NodePyOP(node))
 
     for i, node in enumerate(graph.outputs()):  # Create sink nodes for output ops
-        node_py = NodePyIO(node, 'output')
-        node_py.debugName = "output.{}".format(i + 1)
-        node_py.inputs = [node.debugName()]
-        nodes_py.append(node_py)
+        node_pyio = NodePyIO(node, 'output')
+        node_pyio.debugName = "output.{}".format(i + 1)
+        node_pyio.inputs = [node.debugName()]
+        nodes_py.append(node_pyio)
 
     def parse_traced_name(module):
         if isinstance(module, torch.jit.TracedModule):
@@ -269,7 +270,7 @@ def parse(graph, trace, args=None, omit_useless_nodes=True):
     return nodes_py.to_proto()
 
 
-def graph(model, args, verbose=False):
+def graph(model, args, verbose=False, use_strict_trace=True):
     """
     This method processes a PyTorch model and produces a `GraphDef` proto
     that can be logged to TensorBoard.
@@ -279,10 +280,13 @@ def graph(model, args, verbose=False):
       args (tuple): input tensor[s] for the model.
       verbose (bool): Whether to print out verbose information while
         processing.
+      use_strict_trace (bool): Whether to pass keyword argument `strict` to
+        `torch.jit.trace`. Pass False when you want the tracer to
+        record your mutable container types (list, dict)
     """
-    with torch.onnx.set_training(model, False):  # TODO: move outside of torch.onnx?
+    with torch.onnx.select_model_mode_for_export(model, torch.onnx.TrainingMode.EVAL):  # TODO: move outside of torch.onnx?
         try:
-            trace = torch.jit.trace(model, args)
+            trace = torch.jit.trace(model, args, strict=use_strict_trace)
             graph = trace.graph
             torch._C._jit_pass_inline(graph)
         except RuntimeError as e:

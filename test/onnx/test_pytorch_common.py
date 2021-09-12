@@ -1,8 +1,3 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
-
 import functools
 import os
 import unittest
@@ -13,9 +8,9 @@ import torch.autograd.function as function
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.insert(-1, pytorch_test_dir)
 
-from torch.testing._internal.common_utils import *  # noqa: F401
+from torch.testing._internal.common_utils import *  # noqa: F401,F403
 
-torch.set_default_tensor_type('torch.FloatTensor')
+torch.set_default_tensor_type("torch.FloatTensor")
 
 BATCH_SIZE = 2
 
@@ -37,10 +32,10 @@ def _skipper(condition, reason):
 
 
 skipIfNoCuda = _skipper(lambda: not torch.cuda.is_available(),
-                        'CUDA is not available')
+                        "CUDA is not available")
 
-skipIfTravis = _skipper(lambda: os.getenv('TRAVIS'),
-                        'Skip In Travis')
+skipIfTravis = _skipper(lambda: os.getenv("TRAVIS"),
+                        "Skip In Travis")
 
 # skips tests for all versions below min_opset_version.
 # if exporting the op is only supported after a specific version,
@@ -55,6 +50,26 @@ def skipIfUnsupportedMinOpsetVersion(min_opset_version):
         return wrapper
     return skip_dec
 
+# skips tests for all versions above min_opset_version.
+def skipIfUnsupportedMaxOpsetVersion(min_opset_version):
+    def skip_dec(func):
+        def wrapper(self):
+            if self.opset_version > min_opset_version:
+                raise unittest.SkipTest("Skip verify test for unsupported opset_version")
+            return func(self)
+        return wrapper
+    return skip_dec
+
+# skips tests for all opset versions.
+def skipForAllOpsetVersions():
+    def skip_dec(func):
+        def wrapper(self):
+            if self.opset_version:
+                raise unittest.SkipTest("Skip verify test for unsupported opset_version")
+            return func(self)
+        return wrapper
+    return skip_dec
+
 # Enables tests for scripting, instead of only tracing the model.
 def enableScriptTest():
     def script_dec(func):
@@ -64,6 +79,17 @@ def enableScriptTest():
         return wrapper
     return script_dec
 
+
+# Disable tests for scripting.
+def disableScriptTest():
+    def script_dec(func):
+        def wrapper(self):
+            self.is_script_test_enabled = False
+            return func(self)
+        return wrapper
+    return script_dec
+
+
 # skips tests for opset_versions listed in unsupported_opset_versions.
 # if the caffe2 test cannot be run for a specific version, add this wrapper
 # (for example, an op was modified but the change is not supported in caffe2)
@@ -71,6 +97,15 @@ def skipIfUnsupportedOpsetVersion(unsupported_opset_versions):
     def skip_dec(func):
         def wrapper(self):
             if self.opset_version in unsupported_opset_versions:
+                raise unittest.SkipTest("Skip verify test for unsupported opset_version")
+            return func(self)
+        return wrapper
+    return skip_dec
+
+def skipIfONNXShapeInference(onnx_shape_inference):
+    def skip_dec(func):
+        def wrapper(self):
+            if self.onnx_shape_inference is onnx_shape_inference:
                 raise unittest.SkipTest("Skip verify test for unsupported opset_version")
             return func(self)
         return wrapper

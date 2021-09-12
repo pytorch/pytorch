@@ -1,8 +1,3 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
-
 
 import operator_benchmark as op_bench
 import torch
@@ -50,11 +45,13 @@ hardsigmoid_ops_list = op_bench.op_list(
 
 class HardsigmoidBenchmark(op_bench.TorchBenchmarkBase):
     def init(self, N, C, H, W, device, op_func):
-        self.input_one = torch.rand(N, C, H, W, device=device)
+        self.inputs = {
+            "input_one": torch.rand(N, C, H, W, device=device)
+        }
         self.op_func = op_func()
 
-    def forward(self):
-        return self.op_func(self.input_one)
+    def forward(self, input_one):
+        return self.op_func(input_one)
 
 
 op_bench.generate_pt_tests_from_op_list(hardsigmoid_ops_list,

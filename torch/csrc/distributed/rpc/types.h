@@ -10,6 +10,15 @@ namespace rpc {
 using worker_id_t = int16_t;
 using local_id_t = int64_t;
 
+bool getAllowJitRRefPickle();
+TORCH_API void enableJitRRefPickle();
+TORCH_API void disableJitRRefPickle();
+
+struct TORCH_API JitRRefPickleGuard {
+  JitRRefPickleGuard();
+  ~JitRRefPickleGuard();
+};
+
 struct TORCH_API GloballyUniqueId final {
   GloballyUniqueId(worker_id_t createdOn, local_id_t localId);
   GloballyUniqueId(const GloballyUniqueId& other) = default;
@@ -39,6 +48,7 @@ TORCH_API std::ostream& operator<<(
 
 using RRefId = GloballyUniqueId;
 using ForkId = GloballyUniqueId;
+using ProfilingId = GloballyUniqueId;
 
 struct TORCH_API SerializedPyObj final {
   SerializedPyObj(std::string&& payload, std::vector<at::Tensor>&& tensors)

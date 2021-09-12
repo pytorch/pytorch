@@ -10,9 +10,11 @@ REGISTER_CPU_OPERATOR(Int8FC, int8::Int8FCOp);
 
 using namespace std::placeholders;
 OPERATOR_SCHEMA(Int8FC)
-    .NumInputs(3)
+    .NumInputs(3, 4)
     .NumOutputs(1, 4)
+    // NOLINTNEXTLINE(modernize-avoid-bind)
     .TensorInferenceFunction(std::bind(FCShapeInference, _1, _2, false))
+    // NOLINTNEXTLINE(modernize-avoid-bind)
     .CostInferenceFunction(std::bind(CostInferenceForFC, _1, _2, false))
     .SetDoc(R"DOC(
 Computes the result of passing an input vector X into a fully
@@ -43,6 +45,11 @@ will throw errors.
         "A tensor that is coerced into a 2D blob of size (KxN) "
         "containing fully connected weight matrix")
     .Input(2, "b", "1D blob containing bias vector")
+    .Input(
+        3,
+        "Qparam",
+        "Optional Qparam blob that contains quant param computed on activation histogram data"
+        "Will overwrite Y_scale and Y_zero_point argument if specified")
     .Output(0, "Y", "2D output tensor");
 
 } // namespace caffe2

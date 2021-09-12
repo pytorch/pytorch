@@ -1,15 +1,22 @@
 #include <torch/csrc/THP.h>
 #include <torch/csrc/utils/tensor_numpy.h>
+#define WITH_NUMPY_IMPORT_ARRAY
 #include <torch/csrc/utils/numpy_stub.h>
+#include <c10/util/irange.h>
 
 #ifndef USE_NUMPY
 namespace torch { namespace utils {
 PyObject* tensor_to_numpy(const at::Tensor& tensor) {
   throw std::runtime_error("PyTorch was compiled without NumPy support");
 }
-at::Tensor tensor_from_numpy(PyObject* obj) {
+at::Tensor tensor_from_numpy(PyObject* obj, bool warn_if_not_writeable/*=true*/) {
   throw std::runtime_error("PyTorch was compiled without NumPy support");
 }
+
+bool is_numpy_available() {
+  throw std::runtime_error("PyTorch was compiled without NumPy support");
+}
+
 bool is_numpy_int(PyObject* obj) {
   throw std::runtime_error("PyTorch was compiled without NumPy support");
 }
@@ -17,7 +24,7 @@ bool is_numpy_scalar(PyObject* obj) {
   throw std::runtime_error("PyTorch was compiled without NumPy support");
 }
 at::Tensor tensor_from_cuda_array_interface(PyObject* obj) {
-    throw std::runtime_error("PyTorch was compiled without NumPy support");
+  throw std::runtime_error("PyTorch was compiled without NumPy support");
 }
 }}
 #else
@@ -38,11 +45,36 @@ using namespace torch::autograd;
 
 namespace torch { namespace utils {
 
+bool is_numpy_available() {
+  static bool available = []() {
+    if (_import_array() >= 0) {
+      return true;
+    }
+    // Try to get exception message, print warning and return false
+    std::string message = "Failed to initialize NumPy";
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+    PyObject *type, *value, *traceback;
+    PyErr_Fetch(&type, &value, &traceback);
+    if (auto str = value ? PyObject_Str(value) : nullptr) {
+      if (auto enc_str = PyUnicode_AsEncodedString(str, "utf-8", "strict")) {
+        if (auto byte_str = PyBytes_AS_STRING(enc_str)) {
+          message += ": " + std::string(byte_str);
+        }
+        Py_XDECREF(enc_str);
+      }
+      Py_XDECREF(str);
+    }
+    PyErr_Clear();
+    TORCH_WARN(message);
+    return false;
+  }();
+  return available;
+}
 static std::vector<npy_intp> to_numpy_shape(IntArrayRef x) {
   // shape and stride conversion from int64_t to npy_intp
   auto nelem = x.size();
   auto result = std::vector<npy_intp>(nelem);
-  for (size_t i = 0; i < nelem; i++) {
+  for(const auto i : c10::irange(nelem)) {
     result[i] = static_cast<npy_intp>(x[i]);
   }
   return result;
@@ -51,7 +83,7 @@ static std::vector<npy_intp> to_numpy_shape(IntArrayRef x) {
 static std::vector<int64_t> to_aten_shape(int ndim, npy_intp* values) {
   // shape and stride conversion from npy_intp to int64_t
   auto result = std::vector<int64_t>(ndim);
-  for (int i = 0; i < ndim; i++) {
+  for(const auto i : c10::irange(ndim)) {
     result[i] = static_cast<int64_t>(values[i]);
   }
   return result;
@@ -63,7 +95,7 @@ static std::vector<int64_t> seq_to_aten_shape(PyObject *py_seq) {
     throw TypeError("shape and strides must be sequences");
   }
   auto result = std::vector<int64_t>(ndim);
-  for (int i = 0; i < ndim; i++) {
+  for(const auto i : c10::irange(ndim)) {
     auto item = THPObjectPtr(PySequence_GetItem(py_seq, i));
     if (!item) throw python_error();
 
@@ -74,21 +106,30 @@ static std::vector<int64_t> seq_to_aten_shape(PyObject *py_seq) {
 }
 
 PyObject* tensor_to_numpy(const at::Tensor& tensor) {
-  if (tensor.device().type() != DeviceType::CPU) {
-    throw TypeError(
-      "can't convert %s device type tensor to numpy. Use Tensor.cpu() to "
-      "copy the tensor to host memory first.", tensor.device().str().c_str());
-  }
-  if (tensor.layout() != Layout::Strided) {
-      throw TypeError(
-        "can't convert %s layout tensor to numpy."
-        "convert the tensor to a strided layout first.", c10::str(tensor.layout()).c_str());
-  }
-  if (tensor.requires_grad()) {
-    throw std::runtime_error(
-        "Can't call numpy() on Variable that requires grad. "
-        "Use var.detach().numpy() instead.");
-  }
+  TORCH_CHECK(is_numpy_available(), "Numpy is not available");
+
+  TORCH_CHECK_TYPE(tensor.device().type() == DeviceType::CPU,
+      "can't convert ", tensor.device().str().c_str(),
+      " device type tensor to numpy. Use Tensor.cpu() to ",
+      "copy the tensor to host memory first.");
+
+  TORCH_CHECK_TYPE(tensor.layout() == Layout::Strided,
+      "can't convert ", c10::str(tensor.layout()).c_str(),
+      " layout tensor to numpy.",
+      "convert the tensor to a strided layout first.");
+
+  TORCH_CHECK(!(at::GradMode::is_enabled() && tensor.requires_grad()),
+      "Can't call numpy() on Tensor that requires grad. "
+      "Use tensor.detach().numpy() instead.");
+
+  TORCH_CHECK(!tensor.is_conj(),
+      "Can't call numpy() on Tensor that has conjugate bit set. ",
+      "Use tensor.resolve_conj().numpy() instead.");
+
+  TORCH_CHECK(!tensor.is_neg(),
+      "Can't call numpy() on Tensor that has negative bit set. "
+      "Use tensor.resolve_neg().numpy() instead.");
+
   auto dtype = aten_to_numpy_dtype(tensor.scalar_type());
   auto sizes = to_numpy_shape(tensor.sizes());
   auto strides = to_numpy_shape(tensor.strides());
@@ -125,13 +166,18 @@ PyObject* tensor_to_numpy(const at::Tensor& tensor) {
   return array.release();
 }
 
-at::Tensor tensor_from_numpy(PyObject* obj) {
+at::Tensor tensor_from_numpy(PyObject* obj, bool warn_if_not_writeable/*=true*/) {
+  if (!is_numpy_available()) {
+    throw std::runtime_error("Numpy is not available");
+  }
   if (!PyArray_Check(obj)) {
     throw TypeError("expected np.ndarray (got %s)", Py_TYPE(obj)->tp_name);
   }
   auto array = (PyArrayObject*)obj;
 
-  if (!PyArray_ISWRITEABLE(array)) {
+  // warn_if_not_writable is true when a copy of numpy variable is created.
+  // the warning is suppressed when a copy is being created.
+  if (!PyArray_ISWRITEABLE(array) && warn_if_not_writeable) {
     TORCH_WARN_ONCE(
       "The given NumPy array is not writeable, and PyTorch does "
       "not support non-writeable tensors. This means you can write to the "
@@ -157,7 +203,7 @@ at::Tensor tensor_from_numpy(PyObject* obj) {
   }
 
   size_t storage_size = 1;
-  for (int i = 0; i < ndim; i++) {
+  for(const auto i : c10::irange(ndim)) {
     if (strides[i] < 0) {
       throw ValueError(
           "At least one stride in the given numpy array is negative, "
@@ -190,11 +236,11 @@ at::Tensor tensor_from_numpy(PyObject* obj) {
 
 int aten_to_numpy_dtype(const ScalarType scalar_type) {
   switch (scalar_type) {
-    case kComplexDouble: return NPY_COMPLEX128;
-    case kComplexFloat: return NPY_COMPLEX64;
     case kDouble: return NPY_DOUBLE;
     case kFloat: return NPY_FLOAT;
     case kHalf: return NPY_HALF;
+    case kComplexDouble: return NPY_COMPLEX128;
+    case kComplexFloat: return NPY_COMPLEX64;
     case kLong: return NPY_INT64;
     case kInt: return NPY_INT32;
     case kShort: return NPY_INT16;
@@ -211,6 +257,8 @@ ScalarType numpy_dtype_to_aten(int dtype) {
     case NPY_DOUBLE: return kDouble;
     case NPY_FLOAT: return kFloat;
     case NPY_HALF: return kHalf;
+    case NPY_COMPLEX64: return kComplexFloat;
+    case NPY_COMPLEX128: return kComplexDouble;
     case NPY_INT16: return kShort;
     case NPY_INT8: return kChar;
     case NPY_UINT8: return kByte;
@@ -236,19 +284,23 @@ ScalarType numpy_dtype_to_aten(int dtype) {
   if (!pytype) throw python_error();
   throw TypeError(
       "can't convert np.ndarray of type %s. The only supported types are: "
-      "float64, float32, float16, int64, int32, int16, int8, uint8, and bool.",
+      "float64, float32, float16, complex64, complex128, int64, int32, int16, int8, uint8, and bool.",
       ((PyTypeObject*)pytype.get())->tp_name);
 }
 
 bool is_numpy_int(PyObject* obj) {
-  return PyArray_IsScalar((obj), Integer);
+  return is_numpy_available() && PyArray_IsScalar((obj), Integer);
 }
 
 bool is_numpy_scalar(PyObject* obj) {
-  return is_numpy_int(obj) || PyArray_IsScalar(obj, Floating);
+  return is_numpy_available() && (is_numpy_int(obj) || PyArray_IsScalar(obj, Bool) ||
+         PyArray_IsScalar(obj, Floating) || PyArray_IsScalar(obj, ComplexFloating));
 }
 
 at::Tensor tensor_from_cuda_array_interface(PyObject* obj) {
+  if (!is_numpy_available()) {
+    throw std::runtime_error("Numpy is not available");
+  }
   auto cuda_dict = THPObjectPtr(PyObject_GetAttrString(obj, "__cuda_array_interface__"));
   TORCH_INTERNAL_ASSERT(cuda_dict);
 
@@ -268,12 +320,14 @@ at::Tensor tensor_from_cuda_array_interface(PyObject* obj) {
 
   // Extract the `obj.__cuda_array_interface__['typestr']` attribute
   ScalarType dtype;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int dtype_size_in_bytes;
   {
     PyObject *py_typestr = PyDict_GetItemString(cuda_dict, "typestr");
     if (py_typestr == nullptr) {
       throw TypeError("attribute `typestr` must exist");
     }
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     PyArray_Descr *descr;
     if(!PyArray_DescrConverter(py_typestr, &descr)) {
       throw ValueError("cannot parse `typestr`");
@@ -284,6 +338,7 @@ at::Tensor tensor_from_cuda_array_interface(PyObject* obj) {
   }
 
   // Extract the `obj.__cuda_array_interface__['data']` attribute
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   void *data_ptr;
   {
     PyObject *py_data = PyDict_GetItemString(cuda_dict, "data");

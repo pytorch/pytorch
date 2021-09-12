@@ -8,6 +8,7 @@ namespace nn {
 
 /// Base class for all (dimension-specialized) instance norm modules
 template <size_t D, typename Derived>
+// NOLINTNEXTLINE(bugprone-exception-escape)
 class InstanceNormImpl : public torch::nn::NormImplBase<D, Derived, InstanceNormOptions> {
  public:
   using torch::nn::NormImplBase<D, Derived, InstanceNormOptions>::NormImplBase;
@@ -36,9 +37,10 @@ class InstanceNormImpl : public torch::nn::NormImplBase<D, Derived, InstanceNorm
 /// ```
 /// InstanceNorm1d model(InstanceNorm1dOptions(4).eps(0.5).momentum(0.1).affine(false).track_running_stats(true));
 /// ```
+// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API InstanceNorm1dImpl : public InstanceNormImpl<1, InstanceNorm1dImpl> {
  protected:
-  virtual void _check_input_dim(const Tensor& input) override;
+   void _check_input_dim(const Tensor& input) override;
 
  public:
   using InstanceNormImpl<1, InstanceNorm1dImpl>::InstanceNormImpl;
@@ -64,9 +66,10 @@ TORCH_MODULE(InstanceNorm1d);
 /// ```
 /// InstanceNorm2d model(InstanceNorm2dOptions(4).eps(0.5).momentum(0.1).affine(false).track_running_stats(true));
 /// ```
+// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API InstanceNorm2dImpl : public InstanceNormImpl<2, InstanceNorm2dImpl> {
  protected:
-  virtual void _check_input_dim(const Tensor& input) override;
+   void _check_input_dim(const Tensor& input) override;
 
  public:
   using InstanceNormImpl<2, InstanceNorm2dImpl>::InstanceNormImpl;
@@ -92,9 +95,10 @@ TORCH_MODULE(InstanceNorm2d);
 /// ```
 /// InstanceNorm3d model(InstanceNorm3dOptions(4).eps(0.5).momentum(0.1).affine(false).track_running_stats(true));
 /// ```
+// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API InstanceNorm3dImpl : public InstanceNormImpl<3, InstanceNorm3dImpl> {
  protected:
-  virtual void _check_input_dim(const Tensor& input) override;
+   void _check_input_dim(const Tensor& input) override;
 
  public:
   using InstanceNormImpl<3, InstanceNorm3dImpl>::InstanceNormImpl;

@@ -5,6 +5,7 @@
 #include <torch/csrc/jit/codegen/fuser/fallback.h>
 #include <torch/csrc/jit/codegen/fuser/kernel_cache.h>
 
+#include <c10/util/Flags.h>
 #include <stdexcept>
 
 namespace torch {
@@ -12,8 +13,11 @@ namespace jit {
 
 namespace detail {
 
-// Note: CPU fusion is currently disabled due to test flakiness
+#ifdef TORCH_ENABLE_LLVM
+bool cpu_fuser_enabled = true;
+#else
 bool cpu_fuser_enabled = false;
+#endif
 
 bool gpu_fuser_enabled = true;
 
@@ -30,13 +34,11 @@ void runFusion(const int64_t key, Stack& stack) {
 }
 
 bool canFuseOnCPU() {
-  return fuser::hasFusionBackend(at::DeviceType::CPU) &&
-      detail::cpu_fuser_enabled;
+  return fuser::hasFusionBackend(DeviceType::CPU) && detail::cpu_fuser_enabled;
 }
 
 bool canFuseOnGPU() {
-  return fuser::hasFusionBackend(at::DeviceType::CUDA) &&
-      detail::gpu_fuser_enabled;
+  return fuser::hasFusionBackend(DeviceType::CUDA) && detail::gpu_fuser_enabled;
 }
 
 void overrideCanFuseOnCPU(bool value) {
@@ -76,8 +78,8 @@ std::string debugGetFusedKernelCode(
     at::ArrayRef<at::Tensor> inputs) {
   // Creates a fusion group node
   auto wrapper_graph = std::make_shared<Graph>();
-  Node* fusion_group =
-      wrapper_graph->insertNode(wrapper_graph->createWithSubgraph(prim::FusionGroup));
+  Node* fusion_group = wrapper_graph->insertNode(
+      wrapper_graph->createWithSubgraph(prim::FusionGroup));
   fusion_group->g_(attr::Subgraph, graph.copy());
   for (size_t i = 0; i < graph.inputs().size(); ++i) {
     fusion_group->addInput(wrapper_graph->addInput());

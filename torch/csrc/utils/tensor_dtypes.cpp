@@ -10,7 +10,7 @@
 namespace torch {
 namespace utils {
 
-static std::pair<std::string, std::string> getDtypeNames(
+std::pair<std::string, std::string> getDtypeNames(
     at::ScalarType scalarType) {
   switch (scalarType) {
     case at::ScalarType::Byte:
@@ -36,9 +36,9 @@ static std::pair<std::string, std::string> getDtypeNames(
     case at::ScalarType::ComplexHalf:
       return std::make_pair("complex32", "");
     case at::ScalarType::ComplexFloat:
-      return std::make_pair("complex64", "");
+      return std::make_pair("complex64", "cfloat");
     case at::ScalarType::ComplexDouble:
-      return std::make_pair("complex128", "");
+      return std::make_pair("complex128", "cdouble");
     case at::ScalarType::Bool:
       return std::make_pair("bool", "");
     case at::ScalarType::QInt8:
@@ -49,6 +49,8 @@ static std::pair<std::string, std::string> getDtypeNames(
       return std::make_pair("qint32", "");
     case at::ScalarType::BFloat16:
       return std::make_pair("bfloat16", "");
+    case at::ScalarType::QUInt4x2:
+      return std::make_pair("quint4x2", "");
     default:
       throw std::runtime_error("Unimplemented scalar type");
   }
@@ -61,6 +63,7 @@ void initializeDtypes() {
 
 #define DEFINE_SCALAR_TYPE(_1, n) at::ScalarType::n,
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
   at::ScalarType all_scalar_types[] = {
       AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(DEFINE_SCALAR_TYPE)};
 

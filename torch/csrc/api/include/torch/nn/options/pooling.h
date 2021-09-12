@@ -29,7 +29,8 @@ struct AvgPoolOptions {
   /// when True, will include the zero-padding in the averaging calculation
   TORCH_ARG(bool, count_include_pad) = true;
 
-  /// if specified, it will be used as divisor, otherwise `kernel_size` will be used
+  /// if specified, it will be used as divisor, otherwise size of the pooling region will be used.
+
   TORCH_ARG(c10::optional<int64_t>, divisor_override) = c10::nullopt;
 };
 
@@ -183,13 +184,13 @@ using MaxPool3dFuncOptions = MaxPool3dOptions;
 // ============================================================================
 
 /// Options for a `D`-dimensional adaptive maxpool module.
-template <size_t D>
+template <typename output_size_t>
 struct AdaptiveMaxPoolOptions {
-  AdaptiveMaxPoolOptions(ExpandingArray<D> output_size)
+  AdaptiveMaxPoolOptions(output_size_t output_size)
       : output_size_(output_size) {}
 
   /// the target output size
-  TORCH_ARG(ExpandingArray<D>, output_size);
+  TORCH_ARG(output_size_t, output_size);
 };
 
 /// `AdaptiveMaxPoolOptions` specialized for the `AdaptiveMaxPool1d` module.
@@ -198,7 +199,7 @@ struct AdaptiveMaxPoolOptions {
 /// ```
 /// AdaptiveMaxPool1d model(AdaptiveMaxPool1dOptions(3));
 /// ```
-using AdaptiveMaxPool1dOptions = AdaptiveMaxPoolOptions<1>;
+using AdaptiveMaxPool1dOptions = AdaptiveMaxPoolOptions<ExpandingArray<1>>;
 
 /// `AdaptiveMaxPoolOptions` specialized for the `AdaptiveMaxPool2d` module.
 ///
@@ -206,7 +207,7 @@ using AdaptiveMaxPool1dOptions = AdaptiveMaxPoolOptions<1>;
 /// ```
 /// AdaptiveMaxPool2d model(AdaptiveMaxPool2dOptions({3, 2}));
 /// ```
-using AdaptiveMaxPool2dOptions = AdaptiveMaxPoolOptions<2>;
+using AdaptiveMaxPool2dOptions = AdaptiveMaxPoolOptions<ExpandingArrayWithOptionalElem<2>>;
 
 /// `AdaptiveMaxPoolOptions` specialized for the `AdaptiveMaxPool3d` module.
 ///
@@ -214,7 +215,7 @@ using AdaptiveMaxPool2dOptions = AdaptiveMaxPoolOptions<2>;
 /// ```
 /// AdaptiveMaxPool3d model(AdaptiveMaxPool3dOptions(3));
 /// ```
-using AdaptiveMaxPool3dOptions = AdaptiveMaxPoolOptions<3>;
+using AdaptiveMaxPool3dOptions = AdaptiveMaxPoolOptions<ExpandingArrayWithOptionalElem<3>>;
 
 namespace functional {
 /// Options for `torch::nn::functional::adaptive_max_pool1d` and `torch::nn::functional::adaptive_max_pool1d_with_indices`
@@ -252,13 +253,13 @@ using AdaptiveMaxPool3dFuncOptions = AdaptiveMaxPool3dOptions;
 // ============================================================================
 
 /// Options for a `D`-dimensional adaptive avgpool module.
-template <size_t D>
+template <typename output_size_t>
 struct AdaptiveAvgPoolOptions {
-  AdaptiveAvgPoolOptions(ExpandingArray<D> output_size)
+  AdaptiveAvgPoolOptions(output_size_t output_size)
       : output_size_(output_size) {}
 
   /// the target output size
-  TORCH_ARG(ExpandingArray<D>, output_size);
+  TORCH_ARG(output_size_t, output_size);
 };
 
 /// `AdaptiveAvgPoolOptions` specialized for the `AdaptiveAvgPool1d` module.
@@ -267,7 +268,7 @@ struct AdaptiveAvgPoolOptions {
 /// ```
 /// AdaptiveAvgPool1d model(AdaptiveAvgPool1dOptions(5));
 /// ```
-using AdaptiveAvgPool1dOptions = AdaptiveAvgPoolOptions<1>;
+using AdaptiveAvgPool1dOptions = AdaptiveAvgPoolOptions<ExpandingArray<1>>;
 
 /// `AdaptiveAvgPoolOptions` specialized for the `AdaptiveAvgPool2d` module.
 ///
@@ -275,7 +276,7 @@ using AdaptiveAvgPool1dOptions = AdaptiveAvgPoolOptions<1>;
 /// ```
 /// AdaptiveAvgPool2d model(AdaptiveAvgPool2dOptions({3, 2}));
 /// ```
-using AdaptiveAvgPool2dOptions = AdaptiveAvgPoolOptions<2>;
+using AdaptiveAvgPool2dOptions = AdaptiveAvgPoolOptions<ExpandingArrayWithOptionalElem<2>>;
 
 /// `AdaptiveAvgPoolOptions` specialized for the `AdaptiveAvgPool3d` module.
 ///
@@ -283,7 +284,7 @@ using AdaptiveAvgPool2dOptions = AdaptiveAvgPoolOptions<2>;
 /// ```
 /// AdaptiveAvgPool3d model(AdaptiveAvgPool3dOptions(3));
 /// ```
-using AdaptiveAvgPool3dOptions = AdaptiveAvgPoolOptions<3>;
+using AdaptiveAvgPool3dOptions = AdaptiveAvgPoolOptions<ExpandingArrayWithOptionalElem<3>>;
 
 namespace functional {
 /// Options for `torch::nn::functional::adaptive_avg_pool1d`.

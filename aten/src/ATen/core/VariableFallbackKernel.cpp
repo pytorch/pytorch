@@ -1,10 +1,11 @@
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/core/LegacyTypeDispatch.h>
+#include <torch/library.h>
 
 /*
  * This file implements a variable fallback kernel for custom operators.
- * Since tensors always have the VariableTensorId set, but custom operators
- * usually don't have a kernel registered for VariableTensorId, the dispatcher
+ * Since tensors always have the Autograd set, but custom operators
+ * usually don't have a kernel registered for Autograd, the dispatcher
  * will call into this fallback kernel instead.
  * Note that this is not a correct autograd implementation. It will just
  * fallthrough to the custom operator implementation.
@@ -27,14 +28,41 @@ using c10::KernelFunction;
 
 namespace {
 
-void variable_fallback_kernel(const OperatorHandle& op, Stack* stack) {
-    at::AutoNonVariableTypeMode _var_guard(true);
-    Dispatcher::singleton().callBoxed(op, stack);
+// Register fallthrough for Autograd backends dispatch keys
+// NB: But not the private use ones; maybe the extension wants
+// to override it themselves!
+
+TORCH_LIBRARY_IMPL(_, AutogradOther, m) {
+  m.fallback(torch::CppFunction::makeFallthrough());
 }
 
-static auto registry = Dispatcher::singleton().registerBackendFallbackKernel(
-    DispatchKey::VariableTensorId,
-    KernelFunction::makeFromBoxedFunction<&variable_fallback_kernel>()
-);
+TORCH_LIBRARY_IMPL(_, AutogradCPU, m) {
+  m.fallback(torch::CppFunction::makeFallthrough());
+}
+
+TORCH_LIBRARY_IMPL(_, AutogradXPU, m) {
+  m.fallback(torch::CppFunction::makeFallthrough());
+}
+
+TORCH_LIBRARY_IMPL(_, AutogradCUDA, m) {
+  m.fallback(torch::CppFunction::makeFallthrough());
+}
+
+TORCH_LIBRARY_IMPL(_, AutogradXLA, m) {
+  m.fallback(torch::CppFunction::makeFallthrough());
+}
+
+TORCH_LIBRARY_IMPL(_, AutogradLazy, m) {
+  m.fallback(torch::CppFunction::makeFallthrough());
+}
+
+TORCH_LIBRARY_IMPL(_, AutogradMLC, m) {
+  m.fallback(torch::CppFunction::makeFallthrough());
+}
+
+// see Note [ADInplaceOrView key]
+TORCH_LIBRARY_IMPL(_, ADInplaceOrView, m) {
+      m.fallback(torch::CppFunction::makeFallthrough());
+}
 
 }

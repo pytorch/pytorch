@@ -1,14 +1,14 @@
 #pragma once
 
 #include <ATen/ATen.h>
+#include <ATen/core/stack.h>
 #include <c10/util/Optional.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/jit/codegen/fuser/arg_spec.h>
 #include <torch/csrc/jit/codegen/fuser/fused_kernel.h>
 #include <torch/csrc/jit/codegen/fuser/interface.h>
-#include <torch/csrc/jit/runtime/interpreter.h>
 #include <torch/csrc/jit/ir/ir.h>
-#include <ATen/core/stack.h>
+#include <torch/csrc/jit/runtime/interpreter.h>
 
 #include <cstdint>
 #include <memory>
@@ -56,6 +56,7 @@ struct TORCH_API KernelSpec {
   // Note: assumes the spec is a single block
   // Note: This is the appropriate place to generalize if you want to add other
   //  passes to upfront compilation that walk the graph.
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   KernelSpec(const int64_t _key, const std::shared_ptr<Graph>& _graph)
       : key_{_key},
         graph_{_graph},
@@ -66,7 +67,9 @@ struct TORCH_API KernelSpec {
         inputChunks_{},
         has_random_{false},
         kernels_{} {
-    for (const auto& n : graph_->nodes()) {
+    // No need to iterate over reference since n is pointer
+    for (const auto n : graph_->nodes()) {
+      static_assert(std::is_pointer<decltype(n)>::value, "n must be a pointer");
       if (n->kind() == aten::rand_like) {
         has_random_ = true;
         break;
@@ -139,7 +142,7 @@ struct TORCH_API KernelSpec {
   bool has_random_;
   mutable std::mutex mutex_;
   mutable std::
-      unordered_map<ArgSpec, std::shared_ptr<FusedKernel>, torch::hash<ArgSpec>>
+      unordered_map<ArgSpec, std::shared_ptr<FusedKernel>, c10::hash<ArgSpec>>
           kernels_;
 };
 

@@ -13,7 +13,7 @@ class IDEEPInt8GivenTensorFillOp final : public IDEEPOperator {
       : IDEEPOperator(operator_def, ws),
         zero_point_(
             this->template GetSingleArgument<int32_t>("Y_zero_point", 0)),
-        shape_(this->template GetRepeatedArgument<int>("shape")) {
+        shape_(this->template GetRepeatedArgument<itensor::dim>("shape")) {
     CAFFE_ENFORCE(shape_.size() == 4 || shape_.size() == 2 || shape_.size() == 1);
     CAFFE_ENFORCE(zero_point_ == 0 || zero_point_ == 128,
         "Not support zero point");
@@ -37,9 +37,11 @@ class IDEEPInt8GivenTensorFillOp final : public IDEEPOperator {
     }
 
     auto source_values = this->template GetSingleArgument<string>("values", "");
-    values_.Resize(source_values.size());
+    auto src_size = source_values.size();
+    values_.Resize(src_size);
     uint8_t* values_data = values_.template mutable_data<uint8_t>();
-    for (int i = 0; i < source_values.size(); i++) {
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
+    for (int i = 0; i < src_size; i++) {
       values_data[i] = static_cast<uint8_t>(source_values[i]);
     }
   }
@@ -64,7 +66,8 @@ class IDEEPInt8GivenTensorFillOp final : public IDEEPOperator {
       // Shift quantized data to s8 per zero point
       if (zero_point_ == 128) {
         auto* data_s8 = static_cast<int8_t*>(temp_ten.get_data_handle());
-        for (int i = 0; i < temp_ten.get_nelems(); i++) {
+        auto nelems = temp_ten.get_nelems();
+        for (int i = 0; i < nelems; i++) {
           data_s8[i] = data_s8[i] - zero_point_;
         }
       }
@@ -95,7 +98,7 @@ class IDEEPInt8GivenIntTensorFillOp final : public IDEEPOperator {
       : IDEEPOperator(operator_def, ws),
         zero_point_(
             this->template GetSingleArgument<int32_t>("Y_zero_point", 0)),
-        shape_(this->template GetRepeatedArgument<int>("shape")) {
+        shape_(this->template GetRepeatedArgument<itensor::dim>("shape")) {
     CAFFE_ENFORCE(zero_point_ == 0, "Not support zero point");
     if (HasArgument("Y_scales")) {
       scales_ = this->template GetRepeatedArgument<float>("Y_scales");
@@ -105,9 +108,11 @@ class IDEEPInt8GivenIntTensorFillOp final : public IDEEPOperator {
     }
 
     auto source_values = this->template GetRepeatedArgument<int32_t>("values");
-    values_.Resize(source_values.size());
+    auto src_size = source_values.size();
+    values_.Resize(src_size);
     auto* values_data = values_.template mutable_data<int32_t>();
-    for (int i = 0; i < source_values.size(); i++) {
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
+    for (int i = 0; i < src_size; i++) {
       values_data[i] = static_cast<int32_t>(source_values[i]);
     }
   }

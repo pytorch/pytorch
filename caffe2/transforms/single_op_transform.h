@@ -15,7 +15,7 @@ namespace caffe2 {
  * Transforms which derive from SingleOpTransform need to override:
  * ReplaceOperator and MatchOperator.
  */
-class CAFFE2_API SingleOpTransform : public Transform {
+class TORCH_API SingleOpTransform : public Transform {
  protected:
   bool PatternRule(
       const transform::Graph& g,

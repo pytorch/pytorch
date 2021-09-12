@@ -30,7 +30,9 @@ public:
   void serialize(torch::serialize::InputArchive& archive) override;
   void serialize(torch::serialize::OutputArchive& archive) const override;
   TORCH_API friend bool operator==(const AdagradOptions& lhs, const AdagradOptions& rhs);
-  ~AdagradOptions() = default;
+  ~AdagradOptions() override = default;
+  double get_lr() const override;
+  void set_lr(const double lr) override;
 };
 
 struct TORCH_API AdagradParamState : public OptimizerCloneableParamState<AdagradParamState> {
@@ -41,13 +43,13 @@ public:
   void serialize(torch::serialize::InputArchive& archive) override;
   void serialize(torch::serialize::OutputArchive& archive) const override;
   TORCH_API friend bool operator==(const AdagradParamState& lhs, const AdagradParamState& rhs);
-  ~AdagradParamState() = default;
+  ~AdagradParamState() override = default;
 };
 
 class TORCH_API Adagrad : public Optimizer {
  public:
   explicit Adagrad(std::vector<OptimizerParamGroup> param_groups,
-      AdagradOptions defaults) : Optimizer(std::move(param_groups), std::make_unique<AdagradOptions>(defaults)) {
+      AdagradOptions defaults = {}) : Optimizer(std::move(param_groups), std::make_unique<AdagradOptions>(defaults)) {
     TORCH_CHECK(defaults.lr() >= 0, "Invalid learning rate: ", defaults.lr());
     TORCH_CHECK(defaults.lr_decay() >= 0, "Invalid lr_decay value: ", defaults.lr_decay());
     TORCH_CHECK(defaults.weight_decay() >= 0, "Invalid weight_decay value: ", defaults.weight_decay());
@@ -66,22 +68,10 @@ class TORCH_API Adagrad : public Optimizer {
 
   explicit Adagrad(
       std::vector<Tensor> params,
-      AdagradOptions defaults) : Adagrad({std::move(OptimizerParamGroup(params))}, defaults) {}
+      // NOLINTNEXTLINE(performance-move-const-arg)
+      AdagradOptions defaults = {}) : Adagrad({std::move(OptimizerParamGroup(params))}, defaults) {}
 
   torch::Tensor step(LossClosure closure = nullptr) override;
-
-  /// Adds the given vector of parameters to the optimizer's parameter list.
-  void add_parameters(const std::vector<Tensor>& parameters) override;
-
-  /// Provides a const reference to the parameters this optimizer holds.
-  const std::vector<Tensor>& parameters() const noexcept override;
-
-  /// Provides a reference to the parameters this optimizer holds.
-  std::vector<Tensor>& parameters() noexcept override;
-
-  /// Returns the number of parameters referenced by the optimizer.
-  size_t size() const noexcept override;
-
   void save(serialize::OutputArchive& archive) const override;
   void load(serialize::InputArchive& archive) override;
 

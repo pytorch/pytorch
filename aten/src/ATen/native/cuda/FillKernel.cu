@@ -6,12 +6,19 @@
 
 namespace at { namespace native {
 
-void fill_kernel_cuda(TensorIterator& iter, Scalar value) {
+template<typename scalar_t>
+struct FillFunctor {
+  FillFunctor(scalar_t v): value(v) {}
+  __device__ __forceinline__ scalar_t operator() () const {
+    return value;
+  }
+  private:
+    scalar_t value;
+};
+
+void fill_kernel_cuda(TensorIterator& iter, const Scalar& value) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(at::ScalarType::Bool, at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "fill_cuda", [&]() {
-    auto value_converted = value.to<scalar_t>();
-    gpu_kernel(iter, [value_converted]GPU_LAMBDA() -> scalar_t {
-      return value_converted;
-    });
+    gpu_kernel(iter, FillFunctor<scalar_t>(value.to<scalar_t>()));
   });
 }
 

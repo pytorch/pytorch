@@ -5,7 +5,8 @@
 #include <iostream>
 #include <sstream>
 
-#include "caffe2/core/asan.h"
+#include <c10/cuda/CUDAFunctions.h>
+
 #include "caffe2/core/common.h"
 #include "caffe2/core/init.h"
 #include "caffe2/core/logging.h"
@@ -21,58 +22,8 @@ int NumCudaDevices() {
                 << std::endl;
     }
   }
-  static int count = -1;
-  if (count < 0) {
-    auto err = cudaGetDeviceCount(&count);
-    switch (err) {
-      case cudaSuccess:
-        // Everything is good.
-        break;
-      case cudaErrorNoDevice:
-        count = 0;
-        break;
-      case cudaErrorInsufficientDriver:
-        LOG(WARNING) << "Insufficient cuda driver. Cannot use cuda.";
-        count = 0;
-        break;
-      case cudaErrorInitializationError:
-        LOG(WARNING) << "Cuda driver initialization failed, you might not "
-                        "have a cuda gpu.";
-        count = 0;
-        break;
-      case cudaErrorUnknown:
-        LOG(ERROR) << "Found an unknown error - this may be due to an "
-                      "incorrectly set up environment, e.g. changing env "
-                      "variable CUDA_VISIBLE_DEVICES after program start. "
-                      "Setting the available devices to be zero.";
-        count = 0;
-        break;
-      case cudaErrorMemoryAllocation:
-#if CAFFE2_ASAN_ENABLED
-        // In ASAN mode, we know that a cudaErrorMemoryAllocation error will
-        // pop up.
-        LOG(ERROR) << "It is known that CUDA does not work well with ASAN. As "
-                      "a result we will simply shut down CUDA support. If you "
-                      "would like to use GPUs, turn off ASAN.";
-        count = 0;
-        break;
-#else // CAFFE2_ASAN_ENABLED
-        // If we are not in ASAN mode and we get cudaErrorMemoryAllocation,
-        // this means that something is wrong before NumCudaDevices() call.
-        LOG(FATAL) << "Unexpected error from cudaGetDeviceCount(). Did you run "
-                      "some cuda functions before calling NumCudaDevices() "
-                      "that might have already set an error? Error: "
-                   << err;
-        break;
-#endif // CAFFE2_ASAN_ENABLED
-      default:
-        LOG(FATAL) << "Unexpected error from cudaGetDeviceCount(). Did you run "
-                      "some cuda functions before calling NumCudaDevices() "
-                      "that might have already set an error? Error: "
-                   << err;
-    }
-  }
-  return count;
+  // It logs warnings on first run
+  return c10::cuda::device_count();
 }
 
 namespace {
@@ -215,15 +166,10 @@ bool GetCudaPeerAccessPattern(vector<vector<bool> >* pattern) {
 }
 
 bool TensorCoreAvailable() {
-  // requires CUDA 9.0 and above
-#if CUDA_VERSION < 9000
-  return false;
-#else
   int device = CaffeCudaGetDevice();
   auto& prop = GetDeviceProperty(device);
 
   return prop.major >= 7;
-#endif
 }
 
 const char* cublasGetErrorString(cublasStatus_t error) {
@@ -238,23 +184,18 @@ const char* cublasGetErrorString(cublasStatus_t error) {
     return "CUBLAS_STATUS_INVALID_VALUE";
   case CUBLAS_STATUS_ARCH_MISMATCH:
     return "CUBLAS_STATUS_ARCH_MISMATCH";
+  case CUBLAS_STATUS_INTERNAL_ERROR:
+    return "CUBLAS_STATUS_INTERNAL_ERROR";
 #ifndef __HIP_PLATFORM_HCC__
   case CUBLAS_STATUS_MAPPING_ERROR:
     return "CUBLAS_STATUS_MAPPING_ERROR";
   case CUBLAS_STATUS_EXECUTION_FAILED:
     return "CUBLAS_STATUS_EXECUTION_FAILED";
-#endif
-  case CUBLAS_STATUS_INTERNAL_ERROR:
-    return "CUBLAS_STATUS_INTERNAL_ERROR";
-#if CUDA_VERSION >= 6000
   case CUBLAS_STATUS_NOT_SUPPORTED:
     return "CUBLAS_STATUS_NOT_SUPPORTED";
-#if CUDA_VERSION >= 6050
   case CUBLAS_STATUS_LICENSE_ERROR:
     return "CUBLAS_STATUS_LICENSE_ERROR";
-#endif  // CUDA_VERSION >= 6050
-#endif  // CUDA_VERSION >= 6000
-#ifdef __HIP_PLATFORM_HCC__
+#else
   case rocblas_status_invalid_size:
     return "rocblas_status_invalid_size";
   case rocblas_status_perf_degraded:

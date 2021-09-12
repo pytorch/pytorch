@@ -1,56 +1,14 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
 
-import torch
 import copy
 
-import torch.nn.intrinsic.modules.fused as torch_fused
+import torch.nn as nn
 
-def fuse_conv_bn(conv, bn):
-    r"""Given the conv and bn modules, fuses them and returns the fused module
+from .fuser_method_mappings import get_fuser_method
+# for backward compatiblity
+from .fuser_method_mappings import fuse_conv_bn  # noqa: F401
+from .fuser_method_mappings import fuse_conv_bn_relu  # noqa: F401
 
-    Args:
-        conv: Module instance of type conv2d
-        bn: Spatial BN instance that needs to be fused with the conv
-
-    Examples::
-
-        >>> m1 = nn.Conv2d(10, 20, 3)
-        >>> b1 = nn.BatchNorm2d(20)
-        >>> m2 = fuse_conv_bn(m1, b1)
-    """
-    assert(conv.training == bn.training),\
-        "Conv and BN both must be in the same mode (train or eval)."
-
-    if conv.training:
-        assert conv.bias is None, 'Only support fusing Conv2d that does not have bias'
-        assert bn.num_features == conv.out_channels, 'Output channel of Conv2d must match num_features of BatchNorm2d'
-        assert bn.affine, 'Only support fusing BatchNorm2d with affine set to True'
-        assert bn.track_running_stats, 'Only support fusing BatchNorm2d with tracking_running_stats set to True'
-        return torch.nn.intrinsic.ConvBn2d(conv, bn)
-    else:
-        return torch.nn.utils.fuse_conv_bn_eval(conv, bn)
-
-def fuse_conv_bn_relu(conv, bn, relu):
-    r"""Given the conv and bn modules, fuses them and returns the fused module
-
-    Args:
-        conv: Module instance of type conv2d
-        bn: Spatial BN instance that needs to be fused with the conv
-
-    Examples::
-
-        >>> m1 = nn.Conv2d(10, 20, 3)
-        >>> b1 = nn.BatchNorm2d(20)
-        >>> m2 = fuse_conv_bn(m1, b1)
-    """
-    assert(conv.training == bn.training == relu.training),\
-        "Conv and BN both must be in the same mode (train or eval)."
-
-    if conv.training:
-        return torch_fused.ConvBnReLU2d(conv, bn, relu)
-    else:
-        return torch_fused.ConvReLU2d(
-            torch.nn.utils.fusion.fuse_conv_bn_eval(conv, bn), relu)
+from typing import List, Optional
 
 # Generalization of getattr
 def _get_module(model, submodule_key):
@@ -70,7 +28,7 @@ def _set_module(model, submodule_key, module):
 
     setattr(cur_mod, tokens[-1], module)
 
-def fuse_known_modules(mod_list):
+def fuse_known_modules(mod_list, additional_fuser_method_mapping=None):
     r"""Returns a list of modules that fuses the operations specified
      in the input module list.
 
@@ -78,63 +36,65 @@ def fuse_known_modules(mod_list):
     conv, bn
     conv, bn, relu
     conv, relu
+    linear, bn
     linear, relu
     For these sequences, the first element in the output module list performs
     the fused operation. The rest of the elements are set to nn.Identity()
     """
-
-    OP_LIST_TO_FUSER_METHOD = {
-        (torch.nn.Conv2d, torch.nn.BatchNorm2d): fuse_conv_bn,
-        (torch.nn.Conv2d, torch.nn.BatchNorm2d, torch.nn.ReLU): fuse_conv_bn_relu,
-        (torch.nn.Conv2d, torch.nn.ReLU): torch.nn.intrinsic.ConvReLU2d,
-        (torch.nn.Linear, torch.nn.ReLU): torch.nn.intrinsic.LinearReLU
-    }
-
     types = tuple(type(m) for m in mod_list)
-    fuser_method = OP_LIST_TO_FUSER_METHOD.get(types, None)
+    fuser_method = get_fuser_method(types, additional_fuser_method_mapping)
     if fuser_method is None:
         raise NotImplementedError("Cannot fuse modules: {}".format(types))
-    new_mod = [None] * len(mod_list)
-    new_mod[0] = fuser_method(*mod_list)
+    new_mod : List[Optional[nn.Module]] = [None] * len(mod_list)
+    fused = fuser_method(*mod_list)
+    # NOTE: forward hooks not processed in the two following for loops will be lost after the fusion
+    # Move pre forward hooks of the base module to resulting fused module
+    for handle_id, pre_hook_fn in mod_list[0]._forward_pre_hooks.items():
+        fused.register_forward_pre_hook(pre_hook_fn)
+        del mod_list[0]._forward_pre_hooks[handle_id]
+    # Move post forward hooks of the last module to resulting fused module
+    for handle_id, hook_fn in mod_list[-1]._forward_hooks.items():
+        fused.register_forward_hook(hook_fn)
+        del mod_list[-1]._forward_hooks[handle_id]
+    new_mod[0] = fused
 
     for i in range(1, len(mod_list)):
-        new_mod[i] = torch.nn.Identity()
-        new_mod[i].training = mod_list[0].training
+        identity = nn.Identity()
+        identity.training = mod_list[0].training
+        new_mod[i] = identity
 
     return new_mod
 
-def _fuse_modules(model, modules_to_fuse, fuser_func=fuse_known_modules):
-
+def _fuse_modules(model, modules_to_fuse, fuser_func=fuse_known_modules, fuse_custom_config_dict=None):
+    if fuse_custom_config_dict is None:
+        fuse_custom_config_dict = {}
+    additional_fuser_method_mapping = fuse_custom_config_dict.get("additional_fuser_method_mapping", {})
     mod_list = []
     for item in modules_to_fuse:
         mod_list.append(_get_module(model, item))
 
     # Fuse list of modules
-    new_mod_list = fuser_func(mod_list)
+    new_mod_list = fuser_func(mod_list, additional_fuser_method_mapping)
 
     # Replace original module list with fused module list
     for i, item in enumerate(modules_to_fuse):
         _set_module(model, item, new_mod_list[i])
 
-def fuse_modules(model, modules_to_fuse, inplace=False, fuser_func=fuse_known_modules):
+def fuse_modules(model, modules_to_fuse, inplace=False, fuser_func=fuse_known_modules, fuse_custom_config_dict=None):
     r"""Fuses a list of modules into a single module
 
     Fuses only the following sequence of modules:
-
-    * conv, bn
-
-    * conv, bn, relu
-
-    * conv, relu
-
-    * linear, relu
-
+    conv, bn
+    conv, bn, relu
+    conv, relu
+    linear, relu
+    bn, relu
     All other sequences are left unchanged.
     For these sequences, replaces the first item in the list
     with the fused module, replacing the rest of the modules
     with identity.
 
-    Arguments:
+    Args:
         model: Model containing the modules to be fused
         modules_to_fuse: list of list of module names to fuse. Can also be a list
                          of strings if there is only a single list of modules to fuse.
@@ -144,6 +104,18 @@ def fuse_modules(model, modules_to_fuse, inplace=False, fuser_func=fuse_known_mo
                     of the same length. For example,
                     fuser_func([convModule, BNModule]) returns the list [ConvBNModule, nn.Identity()]
                     Defaults to torch.quantization.fuse_known_modules
+        `fuse_custom_config_dict`: custom configuration for fusion
+
+    .. code-block:: python
+
+       # Example of fuse_custom_config_dict
+       fuse_custom_config_dict = {
+           # Additional fuser_method mapping
+           "additional_fuser_method_mapping": {
+               (torch.nn.Conv2d, torch.nn.BatchNorm2d): fuse_conv_bn
+           },
+       }
+
     Returns:
         model with fused modules. A new copy is created if inplace=True.
 
@@ -167,9 +139,9 @@ def fuse_modules(model, modules_to_fuse, inplace=False, fuser_func=fuse_known_mo
 
     if all(isinstance(module_element, str) for module_element in modules_to_fuse):
         # Handle case of modules_to_fuse being a list
-        _fuse_modules(model, modules_to_fuse, fuser_func)
+        _fuse_modules(model, modules_to_fuse, fuser_func, fuse_custom_config_dict)
     else:
         # Handle case of modules_to_fuse being a list of lists
         for module_list in modules_to_fuse:
-            _fuse_modules(model, module_list, fuser_func)
+            _fuse_modules(model, module_list, fuser_func, fuse_custom_config_dict)
     return model

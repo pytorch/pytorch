@@ -232,6 +232,7 @@ TEST(DictTest, whenCallingAtWithNonExistingKey_thenReturnsCorrectElement) {
   Dict<int64_t, string> dict;
   dict.insert(3, "3");
   dict.insert(4, "4");
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   EXPECT_THROW(dict.at(5), std::out_of_range);
 }
 
@@ -295,6 +296,7 @@ TEST(DictTest, whenCopyConstructingDict_thenAreEqual) {
   dict1.insert(3, "3");
   dict1.insert(4, "4");
 
+  // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
   Dict<int64_t, string> dict2(dict1);
 
   EXPECT_EQ(2, dict2.size());
@@ -358,6 +360,7 @@ TEST(DictTest, whenMoveConstructingDict_thenOldIsEmpty) {
   dict1.insert(4, "4");
 
   Dict<int64_t, string> dict2(std::move(dict1));
+  // NOLINTNEXTLINE(bugprone-use-after-move)
   EXPECT_TRUE(dict1.empty());
 }
 
@@ -368,6 +371,7 @@ TEST(DictTest, whenMoveAssigningDict_thenOldIsEmpty) {
 
   Dict<int64_t, string> dict2;
   dict2 = std::move(dict1);
+  // NOLINTNEXTLINE(bugprone-use-after-move)
   EXPECT_TRUE(dict1.empty());
 }
 
@@ -456,6 +460,7 @@ TEST(ListTest_IValueBasedList, givenIterator_whenWritingToValueFromIterator_then
 
 TEST(DictTest, isReferenceType) {
   Dict<int64_t, string> dict1;
+  // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
   Dict<int64_t, string> dict2(dict1);
   Dict<int64_t, string> dict3;
   dict3 = dict1;
@@ -495,4 +500,26 @@ TEST(DictTest, dictTensorAsKey) {
   Dict<at::Tensor, string>::iterator found_nokey2 = dict.find(at::tensor(5));
   EXPECT_EQ(dict.end(), found_nokey1);
   EXPECT_EQ(dict.end(), found_nokey2);
+}
+
+TEST(DictTest, dictEquality) {
+  Dict<string, int64_t> dict;
+  dict.insert("one", 1);
+  dict.insert("two", 2);
+
+  Dict<string, int64_t> dictSameValue;
+  dictSameValue.insert("one", 1);
+  dictSameValue.insert("two", 2);
+
+  Dict<string, int64_t> dictNotEqual;
+  dictNotEqual.insert("foo", 1);
+  dictNotEqual.insert("bar", 2);
+
+  Dict<string, int64_t> dictRef = dict;
+
+  EXPECT_EQ(dict, dictSameValue);
+  EXPECT_NE(dict, dictNotEqual);
+  EXPECT_NE(dictSameValue, dictNotEqual);
+  EXPECT_FALSE(dict.is(dictSameValue));
+  EXPECT_TRUE(dict.is(dictRef));
 }

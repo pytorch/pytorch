@@ -9,7 +9,7 @@
 #define WIN32_LEAN_AND_MEAN
 #endif
 #endif
-#include "tbb/tbb.h"
+#include <tbb/tbb.h>
 
 #define INTRA_OP_PARALLEL
 
@@ -22,10 +22,12 @@ inline void parallel_for(
     const int64_t grain_size,
     const F& f) {
   TORCH_CHECK(grain_size >= 0);
+  at::internal::lazy_init_num_threads();
   if (begin >= end) {
     return;
   }
   if ((end - begin) < grain_size || get_num_threads() == 1) {
+    internal::ThreadIdGuard tid_guard(0);
     f(begin, end);
     return;
   }
@@ -40,6 +42,8 @@ inline void parallel_for(
   tbb::parallel_for(tbb::blocked_range<int64_t>(begin, end, chunk_size),
     [&eptr, &err_flag, f](const tbb::blocked_range<int64_t>& r) {
       try {
+        internal::ThreadIdGuard tid_guard(
+            tbb::this_task_arena::current_thread_index());
         f(r.begin(), r.end());
       } catch (...) {
         if (!err_flag.test_and_set()) {
@@ -61,10 +65,12 @@ inline scalar_t parallel_reduce(
     const F& f,
     const SF& sf) {
   TORCH_CHECK(grain_size >= 0);
+  at::internal::lazy_init_num_threads();
   if (begin >= end) {
     return ident;
   }
   if ((end - begin) < grain_size || get_num_threads() == 1) {
+    internal::ThreadIdGuard tid_guard(0);
     return f(begin, end, ident);
   }
 
@@ -81,6 +87,8 @@ inline scalar_t parallel_reduce(
     [&eptr, &err_flag, f]
         (const tbb::blocked_range<int64_t>& r, scalar_t ident) {
       try {
+        internal::ThreadIdGuard tid_guard(
+            tbb::this_task_arena::current_thread_index());
         return f(r.begin(), r.end(), ident);
       } catch (...) {
         if (!err_flag.test_and_set()) {

@@ -3,15 +3,16 @@
 #include <ATen/ATen.h>
 #include <ATen/core/jit_type.h>
 #include <c10/util/Exception.h>
-#include <torch/csrc/jit/frontend/code_template.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/codegen/fuser/codegen.h>
 #include <torch/csrc/jit/codegen/fuser/interface.h>
 #include <torch/csrc/jit/codegen/fuser/kernel_cache.h>
 #include <torch/csrc/jit/codegen/fuser/tensor_desc.h>
+#include <torch/csrc/jit/frontend/code_template.h>
 #include <torch/csrc/jit/ir/ir.h>
-#include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
+#include <torch/csrc/jit/runtime/operator.h>
 
 #include <atomic>
 #include <iostream>
@@ -28,7 +29,7 @@ std::mutex& fusionBackendLock() {
   static std::mutex fusion_backends_lock_{};
   return fusion_backends_lock_;
 }
-}
+} // namespace
 
 namespace torch {
 namespace jit {
@@ -93,7 +94,7 @@ static void setInputChunkDescriptors(KernelSpec& spec) {
   // furthermore we know that the tensor inputs are in the
   // beginning of the fusion group's inputs.
   spec.inputChunks().reserve(spec.nTensorInputs());
-  for (int64_t i = 0; i < spec.nTensorInputs(); i++) {
+  for (const auto i : c10::irange(spec.nTensorInputs())) {
     const Value* input = spec.graph()->inputs()[i];
     if (const Node* chunk = usedInFusedChunk(input)) {
       spec.inputChunks().emplace_back(
@@ -145,7 +146,7 @@ static std::vector<int64_t> getInputDependencies(const Value* output) {
 }
 
 static void setInputBroadcastGroups(KernelSpec& spec) {
-  std::unordered_set<std::vector<int64_t>, torch::hash<std::vector<int64_t>>>
+  std::unordered_set<std::vector<int64_t>, c10::hash<std::vector<int64_t>>>
       broadcast_groups;
   for (const Value* output : (spec.graph())->outputs()) {
     if (output->node()->kind() == prim::FusedConcat) {
@@ -207,7 +208,7 @@ std::shared_ptr<FusedKernel> compileKernel(
 
   auto graph = spec.graph()->copy();
 
-  for (size_t i = 0; i < input_desc.size(); i++) {
+  for (const auto i : c10::irange(input_desc.size())) {
     const auto& desc = input_desc[i];
 
     // TODO: can't get rid of this use of TensorType
@@ -216,8 +217,7 @@ std::shared_ptr<FusedKernel> compileKernel(
     graph->inputs()[i]->setType(TensorType::create(
         desc.scalar_type,
         device,
-        c10::VaryingShape(desc.nDim()),
-        c10::VaryingShape(desc.nDim()),
+        {desc.nDim()},
         false)); // TODO: nDim is bad, as it is collapsed
   }
 
@@ -225,7 +225,8 @@ std::shared_ptr<FusedKernel> compileKernel(
 
   // Creates chunk and flattened input descriptions
   std::vector<PartitionDesc> chunk_desc;
-  std::vector<std::pair<const Value*, const c10::optional<TensorDesc>>> flat_inputs;
+  std::vector<std::pair<const Value*, const c10::optional<TensorDesc>>>
+      flat_inputs;
   {
     size_t input_index = 0;
     for (const auto& p : graph->inputs()) {
@@ -260,7 +261,7 @@ std::shared_ptr<FusedKernel> compileKernel(
       sizes.at(o->node()->i(attr::dim)) *= o->node()->inputs().size();
     }
 
-    auto scalar_type = o->type()->expect<TensorType>()->scalarType();
+    auto scalar_type = o->type()->expectRef<TensorType>().scalarType();
     TORCH_INTERNAL_ASSERT(scalar_type);
     auto type = TensorType::createContiguous(*scalar_type, device, sizes);
     output_desc.emplace_back(type);
@@ -284,7 +285,7 @@ std::shared_ptr<FusedKernel> compileKernel(
   std::string code =
       generateKernel(name, *graph, flat_inputs, flat_outputs, use_cuda);
   const FusedKernelConstructor& kernel_ctor =
-      getConstructor(use_cuda ? at::DeviceType::CUDA : at::DeviceType::CPU);
+      getConstructor(use_cuda ? DeviceType::CUDA : DeviceType::CPU);
   return kernel_ctor(
       device.index(),
       name,

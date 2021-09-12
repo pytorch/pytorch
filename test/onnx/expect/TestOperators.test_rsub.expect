@@ -1,6 +1,6 @@
 ir_version: 6
 producer_name: "pytorch"
-producer_version: "1.4"
+producer_version: "CURRENT_VERSION"
 graph {
   node {
     output: "1"
@@ -17,14 +17,14 @@ graph {
   }
   node {
     input: "1"
-    input: "x"
+    input: "0"
     output: "2"
     name: "Sub_1"
     op_type: "Sub"
   }
   name: "torch-jit-export"
   input {
-    name: "x"
+    name: "0"
     type {
       tensor_type {
         elem_type: 11

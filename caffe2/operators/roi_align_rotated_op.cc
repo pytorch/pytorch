@@ -50,10 +50,12 @@ void pre_calc_for_bilinear_interpolate(
     for (int pw = 0; pw < pooled_width; pw++) {
       for (int iy = 0; iy < iy_upper; iy++) {
         const T yy = roi_start_h + ph * bin_size_h +
+            // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
             static_cast<T>(iy + .5f) * bin_size_h /
                 static_cast<T>(roi_bin_grid_h); // e.g., 0.5, 1.5
         for (int ix = 0; ix < ix_upper; ix++) {
           const T xx = roi_start_w + pw * bin_size_w +
+              // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
               static_cast<T>(ix + .5f) * bin_size_w /
                   static_cast<T>(roi_bin_grid_w);
 
@@ -64,6 +66,7 @@ void pre_calc_for_bilinear_interpolate(
           // deal with: inverse elements are out of feature map boundary
           if (y < -1.0 || y > height || x < -1.0 || x > width) {
             // empty
+            // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
             PreCalc<T> pc;
             pc.pos1 = 0;
             pc.pos2 = 0;
@@ -87,7 +90,9 @@ void pre_calc_for_bilinear_interpolate(
 
           int y_low = (int)y;
           int x_low = (int)x;
+          // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
           int y_high;
+          // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
           int x_high;
 
           if (y_low >= height - 1) {
@@ -110,6 +115,7 @@ void pre_calc_for_bilinear_interpolate(
           T w1 = hy * hx, w2 = hy * lx, w3 = ly * hx, w4 = ly * lx;
 
           // Save weights and indices
+          // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
           PreCalc<T> pc;
           pc.pos1 = y_low * width + x_low;
           pc.pos2 = y_low * width + x_high;
@@ -291,7 +297,7 @@ void ROIAlignRotatedForward(
 } // namespace
 
 template <>
-bool RoIAlignRotatedOp<float, CPUContext>::RunOnDevice() {
+C10_EXPORT bool RoIAlignRotatedOp<float, CPUContext>::RunOnDevice() {
   auto& X = Input(0); // Input data to pool
   auto& R = Input(1); // RoIs
 
@@ -423,4 +429,5 @@ C10_EXPORT_CAFFE2_OP_TO_C10_CPU(
       "bool aligned"
     ") -> Tensor",
     RoIAlignRotatedOpFloatCPU);
+
 // clang-format on

@@ -25,6 +25,19 @@ class Context;
 // NB: Class must live in `at` due to limitations of Registry.h.
 namespace at {
 
+#ifdef _MSC_VER
+constexpr const char* CUDA_HELP =
+  "PyTorch splits its backend into two shared libraries: a CPU library "
+  "and a CUDA library; this error has occurred because you are trying "
+  "to use some CUDA functionality, but the CUDA library has not been "
+  "loaded by the dynamic linker for some reason.  The CUDA library MUST "
+  "be loaded, EVEN IF you don't directly use any symbols from the CUDA library! "
+  "One common culprit is a lack of -INCLUDE:?warp_size@cuda@at@@YAHXZ "
+  "in your link arguments; many dynamic linkers will delete dynamic library "
+  "dependencies if you don't depend on any of their symbols.  You can check "
+  "if this has occurred by using link on your binary to see if there is a "
+  "dependency on *_cuda.dll library.";
+#else
 constexpr const char* CUDA_HELP =
   "PyTorch splits its backend into two shared libraries: a CPU library "
   "and a CUDA library; this error has occurred because you are trying "
@@ -36,6 +49,7 @@ constexpr const char* CUDA_HELP =
   "depend on any of their symbols.  You can check if this has occurred by "
   "using ldd on your binary to see if there is a dependency on *_cuda.so "
   "library.";
+#endif
 
 // The CUDAHooksInterface is an omnibus interface for any CUDA functionality
 // which we may want to call into from CPU code (and thus must be dynamically
@@ -53,7 +67,7 @@ constexpr const char* CUDA_HELP =
 // TODO: Consider putting the stub definitions in another class, so that one
 // never forgets to implement each virtual function in the real implementation
 // in CUDAHooks.  This probably doesn't buy us much though.
-struct CAFFE2_API CUDAHooksInterface {
+struct TORCH_API CUDAHooksInterface {
   // This should never actually be implemented, but it is used to
   // squelch -Werror=non-virtual-dtor
   virtual ~CUDAHooksInterface() {}
@@ -63,7 +77,7 @@ struct CAFFE2_API CUDAHooksInterface {
     TORCH_CHECK(false, "Cannot initialize CUDA without ATen_cuda library. ", CUDA_HELP);
   }
 
-  virtual Generator* getDefaultCUDAGenerator(DeviceIndex device_index = -1) const {
+  virtual const Generator& getDefaultCUDAGenerator(DeviceIndex device_index = -1) const {
     TORCH_CHECK(false, "Cannot get default CUDA generator without ATen_cuda library. ", CUDA_HELP);
   }
 
@@ -79,6 +93,10 @@ struct CAFFE2_API CUDAHooksInterface {
     return false;
   }
 
+  virtual bool hasCUDART() const {
+    return false;
+  }
+
   virtual bool hasMAGMA() const {
     return false;
   }
@@ -91,20 +109,20 @@ struct CAFFE2_API CUDAHooksInterface {
     TORCH_CHECK(false, "NVRTC requires CUDA. ", CUDA_HELP);
   }
 
-  virtual int64_t current_device() const {
-    return -1;
-  }
-
   virtual bool hasPrimaryContext(int64_t device_index) const {
     TORCH_CHECK(false, "Cannot call hasPrimaryContext(", device_index, ") without ATen_cuda library. ", CUDA_HELP);
   }
 
-  virtual c10::optional<int64_t> getDevceIndexWithPrimaryContext() const {
-    return c10::nullopt;
+  virtual int64_t current_device() const {
+    return -1;
   }
 
   virtual Allocator* getPinnedMemoryAllocator() const {
     TORCH_CHECK(false, "Pinned memory requires CUDA. ", CUDA_HELP);
+  }
+
+  virtual Allocator* getCUDADeviceAllocator() const {
+    TORCH_CHECK(false, "CUDADeviceAllocator requires CUDA. ", CUDA_HELP);
   }
 
   virtual bool compiledWithCuDNN() const {
@@ -125,6 +143,10 @@ struct CAFFE2_API CUDAHooksInterface {
 
   virtual long versionCuDNN() const {
     TORCH_CHECK(false, "Cannot query cuDNN version without ATen_cuda library. ", CUDA_HELP);
+  }
+
+  virtual long versionCUDART() const {
+    TORCH_CHECK(false, "Cannot query CUDART version without ATen_cuda library. ", CUDA_HELP);
   }
 
   virtual std::string showConfig() const {
@@ -155,17 +177,21 @@ struct CAFFE2_API CUDAHooksInterface {
   virtual int getNumGPUs() const {
     return 0;
   }
+
+  virtual void deviceSynchronize(int64_t device_index) const {
+    TORCH_CHECK(false, "Cannot synchronize CUDA device without ATen_cuda library. ", CUDA_HELP);
+  }
 };
 
 // NB: dummy argument to suppress "ISO C++11 requires at least one argument
 // for the "..." in a variadic macro"
-struct CAFFE2_API CUDAHooksArgs {};
+struct TORCH_API CUDAHooksArgs {};
 
 C10_DECLARE_REGISTRY(CUDAHooksRegistry, CUDAHooksInterface, CUDAHooksArgs);
 #define REGISTER_CUDA_HOOKS(clsname) \
   C10_REGISTER_CLASS(CUDAHooksRegistry, clsname, clsname)
 
 namespace detail {
-CAFFE2_API const CUDAHooksInterface& getCUDAHooks();
+TORCH_API const CUDAHooksInterface& getCUDAHooks();
 } // namespace detail
 } // namespace at

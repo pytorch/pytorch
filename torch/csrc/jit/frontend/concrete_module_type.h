@@ -1,8 +1,8 @@
 #pragma once
 
-#include <torch/csrc/jit/python/pybind_utils.h>
+#include <ATen/core/ivalue.h>
 #include <torch/csrc/jit/api/module.h>
-#include <aten/src/ATen/core/ivalue.h>
+#include <torch/csrc/jit/python/pybind_utils.h>
 #include <memory>
 #include <string>
 #include <vector>
@@ -47,7 +47,8 @@ class ConcreteModuleType;
 // ConcreteModuleType has two phases.
 // 1. Creation: First we build it up, during the ScriptModule conversion
 // process. This is represented by ConcreteModuleTypeBuilder.
-//    ...then the converter calls ConcreteModuleTypeBuilder::build(), producing a
+//    ...then the converter calls ConcreteModuleTypeBuilder::build(), producing
+//    a
 //       ConcreteModuleType ready for querying.
 // 2. Querying: We use ConcreteModuleType as a source of truth for
 // ModuleValue::attr calls during method compilation.
@@ -57,10 +58,17 @@ class ConcreteModuleType;
 class VISIBILITY_HIDDEN ConcreteModuleTypeBuilder {
  public:
   explicit ConcreteModuleTypeBuilder(py::object pyClass) {
+    TORCH_INTERNAL_ASSERT(pyClass);
     pyClass_ = std::move(pyClass);
   }
+
   void addConstant(std::string name, py::object value);
-  void addAttribute(std::string name, TypePtr type, bool isParameter);
+  void addConstant(std::string name, IValue value);
+  void addAttribute(
+      std::string name,
+      const TypePtr& type,
+      bool isParameter,
+      bool isBuffer);
   void addFunctionAttribute(
       std::string name,
       const TypePtr& type,
@@ -68,15 +76,19 @@ class VISIBILITY_HIDDEN ConcreteModuleTypeBuilder {
 
   void addModule(std::string name, std::shared_ptr<ConcreteModuleType> meta);
 
+  void addForwardHook(py::object hook);
+  void addForwardPreHook(py::object pre_hook);
+
   void addOverload(
       std::string methodName,
       std::vector<std::string> overloadedMethodNames);
-  void addBuiltinFunction(std::string name, std::string symbol_name);
+  void addBuiltinFunction(std::string name, const std::string& symbol_name);
   void addFailedAttribute(std::string name, std::string failureReason);
+  void addIgnoredAttribute(std::string name);
   void setIterableModuleKind(IterableModuleKind kind);
 
-  // If a ConcreteModuleType is poisoned, it will never compare equal to any other
-  // concrete type
+  // If a ConcreteModuleType is poisoned, it will never compare equal to any
+  // other concrete type
   void setPoisoned();
 
   std::shared_ptr<ConcreteModuleType> build() const {
@@ -87,19 +99,6 @@ class VISIBILITY_HIDDEN ConcreteModuleTypeBuilder {
   // used by ConcreteModuleType have been defined such that operator==
   // implements a meaningful comparison in that context.
   bool equals(const ConcreteModuleTypeBuilder& other) const;
-
-  struct Constant {
-    /* implicit */ Constant(py::object v) : v_(std::move(v)) {}
-    friend bool operator==(const Constant& lhs, const Constant& rhs) {
-      // Perform the equivalent of `lhs == rhs` in Python.
-      int rv = PyObject_RichCompareBool(lhs.v_.ptr(), rhs.v_.ptr(), Py_EQ);
-      if (rv == -1) {
-        throw py::error_already_set();
-      }
-      return rv == 1;
-    }
-    py::object v_;
-  };
 
   struct FunctionAttribute {
     FunctionTypePtr function_;
@@ -116,14 +115,15 @@ class VISIBILITY_HIDDEN ConcreteModuleTypeBuilder {
   };
 
   struct Attribute {
-    Attribute(TypePtr type, bool isParam)
-        : type_(std::move(type)), isParam_(isParam) {}
+    Attribute(TypePtr type, bool isParam, bool isBuffer)
+        : type_(std::move(type)), isParam_(isParam), isBuffer_(isBuffer) {}
 
     friend bool operator==(const Attribute& lhs, const Attribute& rhs) {
       return *(lhs.type_) == *(rhs.type_) && lhs.isParam_ == rhs.isParam_;
     }
     TypePtr type_;
     bool isParam_;
+    bool isBuffer_;
   };
 
   struct ModuleInfo {
@@ -137,7 +137,7 @@ class VISIBILITY_HIDDEN ConcreteModuleTypeBuilder {
   };
 
  private:
-  ConcreteModuleTypeBuilder() {}
+  ConcreteModuleTypeBuilder() = default;
   ClassTypePtr createTypeFromThis() const;
 
   // If true, this type will never compare equally to anything else. This is
@@ -146,7 +146,7 @@ class VISIBILITY_HIDDEN ConcreteModuleTypeBuilder {
   bool isPoisoned_ = false;
 
   // The value of any constants defined by the module.
-  std::unordered_map<std::string, Constant> constants_;
+  std::unordered_map<std::string, IValue> constants_;
   // The types of any attributes
   OrderedDict<std::string, Attribute> attributes_;
   // Overloads, in the same format as `__overloads__` in Python
@@ -154,15 +154,24 @@ class VISIBILITY_HIDDEN ConcreteModuleTypeBuilder {
   // Any attributes we failed to convert to TorchScript, along with a hint as to
   // why
   std::unordered_map<std::string, std::string> failedAttributes_;
+  // Any attributes that were marked as ignored. They cannot be used in
+  // TorchScript but can still be used in ignored function in Python.
+  std::unordered_set<std::string> ignoredAttributes_;
   // Any function attributes. These are special right now because functions are
   // not first-class in the type system.
   std::unordered_map<std::string, FunctionAttribute> functionAttributes_;
-  // Function attributes that are calls to builtin functions. These get de-sugared
-  // directly into the corresponding aten:: call.
-  // The map is attribute name -> aten symbol name
+  // Function attributes that are calls to builtin functions. These get
+  // de-sugared directly into the corresponding aten:: call. The map is
+  // attribute name -> aten symbol name
   std::unordered_map<std::string, c10::Symbol> builtinFunctions_;
   // The concrete types of any submodules
   std::vector<ModuleInfo> modules_;
+  // Hooks to be called before/after forward when the module
+  // is called directly. Used to ensure modules have different types
+  // when they have different python hooks
+  // Actual hooks are added to ClassType directly during compilation
+  std::vector<py::object> forwardHooks_;
+  std::vector<py::object> forwardPreHooks_;
 
   // If something is a ModuleDict/ModuleList, it means:
   //   1. The order of the submodules matters for comparing the type
@@ -186,7 +195,7 @@ class VISIBILITY_HIDDEN ConcreteModuleType {
   static std::shared_ptr<ConcreteModuleType> fromJitType(TypePtr type);
 
   TypePtr getJitType() const;
-  py::object getPyClass() const;
+  c10::optional<py::object> getPyClass() const;
   IterableModuleKind getIterableModuleKind() const;
   c10::optional<std::vector<std::string>> findOverloads(
       const std::string& name) const;
@@ -195,6 +204,7 @@ class VISIBILITY_HIDDEN ConcreteModuleType {
   std::shared_ptr<ConcreteModuleType> findSubmoduleConcreteType(
       const std::string& name) const;
   c10::optional<std::string> findFailedAttribute(const std::string& name) const;
+  bool isIgnoredAttribute(const std::string& name) const;
 
   // These getters are only here to return things as types that can be
   // automatically converted by pybind.
@@ -220,7 +230,7 @@ class VISIBILITY_HIDDEN ConcreteModuleType {
   void dump() const;
 
  private:
-  ConcreteModuleType() {}
+  ConcreteModuleType() = default;
 
   // The JIT type derived from this ConcreteModuleType.
   ConcreteModuleTypeBuilder data_;

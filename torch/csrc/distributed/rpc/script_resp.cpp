@@ -22,11 +22,10 @@ const at::IValue& ScriptResp::value() {
   return value_;
 }
 
-Message ScriptResp::toMessage() && {
+c10::intrusive_ptr<Message> ScriptResp::toMessageImpl() && {
   std::vector<torch::Tensor> tensor_table;
   auto payload = jit::pickle(value_, &tensor_table);
-  ;
-  return Message(
+  return c10::make_intrusive<Message>(
       std::move(payload), std::move(tensor_table), MessageType::SCRIPT_RET);
 }
 
@@ -37,7 +36,7 @@ std::unique_ptr<ScriptResp> ScriptResp::fromMessage(const Message& message) {
       payload,
       payload_size,
       *RpcAgent::getCurrentRpcAgent()->getTypeResolver(),
-      &message.tensors());
+      message.tensors());
   return std::make_unique<ScriptResp>(std::move(value));
 }
 

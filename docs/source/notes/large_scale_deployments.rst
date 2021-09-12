@@ -26,29 +26,27 @@ gathering information about PyTorch workloads running in a given process or
 across the entire set of machines.
 
 New callbacks for any operator invocation can be added with
-``torch::autograd::profiler::pushCallback``. Hooks will be called with
-``torch::autograd::profiler::RecordFunction`` struct that describes invocation
+``torch::addGlobalCallback``. Hooks will be called with
+``torch::RecordFunction`` struct that describes invocation
 context (e.g. `name`). If enabled, ``RecordFunction::inputs()`` contains arguments
 of the function represented as ``torch::IValue`` variant type. Note, that inputs
 logging is relatively expensive and thus has to be enabled explicitly.
 
-The operator callbacks also have access to ``at::getThreadLocalDebugInfo()``
-interface that returns a pointer to the struct holding the debug information. This
-debug information is supposed to be set earlier with the corresponding
-``at::setThreadLocalDebugInfo(debug_info)`` call. Debug information is propagated
-through the forward (including async ``fork`` tasks) and backward passes and can
-be useful for passing some extra information about execution environment
-(e.g. model id) from the higher layers of the application down to the operator
-callbacks.
+The operator callbacks also have access to ``c10::ThreadLocalDebugInfo::get()``
+interface that returns a pointer to the struct holding the debug information.
+This debug information can be set earlier by using ``at::DebugInfoGuard`` object.
+Debug information is propagated through the forward (including async ``fork``
+tasks) and backward passes and can be useful for passing some extra information
+about execution environment (e.g. model id) from the higher layers of the
+application down to the operator callbacks.
 
 Invoking callbacks adds some overhead, so usually it's useful to just randomly
-sample operator invocations. This can be enabled on per-callback basis with a
-global sampling rate specified by
-`torch::autograd::profiler::setSamplingProbability`.
+sample operator invocations. This can be enabled on per-callback basis with an
+optional sampling rate passed into ``torch::addGlobalCallback``.
 
-Note, that ``pushCallback`` and ``setSamplingProbability`` are not thread-safe
-and can be called only when no PyTorch operator is running. Usually, it's a good
-idea to call them once during initialization.
+Note, that ``addGlobalCallback`` is not thread-safe and can be called only when no
+PyTorch operator is running. Usually, it's a good idea to call them once during
+initialization.
 
 Here's an example:
 
@@ -57,17 +55,19 @@ Here's an example:
     // Called somewhere in the program beginning
     void init() {
         // Sample one in a hundred operator runs randomly
-        torch::autograd::setSamplingProbability(0.01);
-        pushCallback(
+        addGlobalCallback(
+          RecordFunctionCallback(
             &onFunctionEnter,
-            &onFunctionExit,
-            /* needs_inputs */ true,
-            /* sampled */ true
+            &onFunctionExit)
+          .needsInputs(true)
+          .samplingProb(0.01)
         );
+        // Note, to enable observers in the model calling thread,
+        // call enableRecordFunction() in the thread before running a model
     }
 
     void onFunctionEnter(const RecordFunction& fn) {
-        std::cerr << "Before function " << fn.name() 
+        std::cerr << "Before function " << fn.name()
                   << " with " << fn.inputs().size() << " inputs" << std::endl;
     }
 

@@ -1,16 +1,124 @@
-#include <torch/csrc/jit/api/module.h>
+#include <ATen/core/interned_strings.h>
+#include <ATen/record_function.h>
 #include <c10/util/Exception.h>
+#include <c10/util/StringUtil.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/autograd/generated/variable_factories.h>
-#include <torch/csrc/jit/jit_log.h>
-#include <torch/csrc/jit/runtime/operator.h>
-#include <torch/csrc/jit/passes/dead_code_elimination.h>
-#include <torch/csrc/jit/passes/inliner.h>
+#include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/frontend/error_report.h>
 #include <torch/csrc/jit/frontend/ir_emitter.h>
 #include <torch/csrc/jit/frontend/schema_matching.h>
+#include <torch/csrc/jit/jit_log.h>
+#include <torch/csrc/jit/passes/dead_code_elimination.h>
+#include <torch/csrc/jit/passes/freeze_module.h>
+#include <torch/csrc/jit/passes/frozen_conv_add_relu_fusion.h>
+#include <torch/csrc/jit/passes/frozen_graph_optimizations.h>
+#include <torch/csrc/jit/passes/frozen_ops_to_mkldnn.h>
+#include <torch/csrc/jit/passes/inliner.h>
+#include <torch/csrc/jit/runtime/operator.h>
 
 namespace torch {
 namespace jit {
+
+namespace {
+
+std::string getInputDebugName(const Node& n, const int idx) {
+  return n.inputs().at(idx)->debugName();
+}
+
+std::vector<Node*> findAllNodes(
+    c10::ArrayRef<torch::jit::Block*> blocks,
+    Symbol kind,
+    bool recurse) {
+  std::vector<Node*> ret;
+  for (Block* block : blocks) {
+    for (Node* n : block->nodes()) {
+      if (n->kind() == kind) {
+        ret.push_back(n);
+      }
+      if (recurse) {
+        auto nodes = findAllNodes(n->blocks(), kind, recurse);
+        ret.insert(ret.end(), nodes.begin(), nodes.end());
+      }
+    }
+  }
+  return ret;
+}
+
+void assert_ignored_methods_not_called(
+    torch::jit::Function* fn,
+    const std::unordered_set<std::string>& ignored_methods) {
+  if (ignored_methods.empty()) {
+    return;
+  }
+  const bool recurse = true;
+  std::vector<Node*> all_nodes =
+      findAllNodes({fn->graph()->block()}, c10::prim::CallMethod, recurse);
+
+  // Extract method names from these nodes.
+  std::unordered_set<std::string> encountered_ignored_methods;
+
+  for (Node* n : all_nodes) {
+    if (ignored_methods.count(n->s(attr::name)) > 0 &&
+        getInputDebugName(*n, 0) == "self") {
+      encountered_ignored_methods.insert(
+          getInputDebugName(*n, 0) + "." + n->s(attr::name));
+    }
+  }
+  if (encountered_ignored_methods.empty()) {
+    return;
+  }
+
+  const std::string encountered_ignored_methods_str =
+      c10::Join(", ", encountered_ignored_methods);
+
+  TORCH_CHECK(
+      false,
+      "Preserved method '",
+      fn->name(),
+      "' references ignored method(s) '",
+      encountered_ignored_methods_str,
+      "'. This is not permitted.");
+}
+
+void assert_ignored_attributes_not_referenced(
+    torch::jit::Function* fn,
+    const std::unordered_set<std::string>& ignored_attributes) {
+  if (ignored_attributes.empty()) {
+    return;
+  }
+
+  const bool recurse = true;
+  std::vector<Node*> all_nodes =
+      findAllNodes({fn->graph()->block()}, c10::prim::GetAttr, recurse);
+
+  // Extract attribute names from these nodes.
+  std::unordered_set<std::string> encountered_ignored_attributes;
+
+  for (Node* n : all_nodes) {
+    if (ignored_attributes.count(n->s(attr::name)) > 0 &&
+        getInputDebugName(*n, 0) == "self") {
+      encountered_ignored_attributes.insert(
+          getInputDebugName(*n, 0) + "." + n->s(attr::name));
+    }
+  }
+  if (encountered_ignored_attributes.empty()) {
+    return;
+  }
+
+  const std::string encountered_ignored_attributes_str =
+      c10::Join(", ", encountered_ignored_attributes);
+
+  TORCH_CHECK(
+      false,
+      "Preserved method '",
+      fn->name(),
+      "' references ignored attribute(s) '",
+      encountered_ignored_attributes_str,
+      "'. This is not permitted.");
+}
+
+} // namespace
 
 static ObjectPtr create_module_object(
     c10::QualifiedName class_name,
@@ -74,7 +182,7 @@ void Module::to(at::Device device, bool non_blocking) {
 }
 
 void module_state_to(
-    autograd::Variable variable,
+    const autograd::Variable& variable,
     const c10::optional<at::Device>& device,
     const c10::optional<at::ScalarType>& dtype,
     bool non_blocking) {
@@ -106,13 +214,71 @@ Module Method::owner() const {
   return Module(owner_);
 }
 void Method::run(Stack& stack) {
-  stack.insert(stack.begin(), owner()._ivalue());
+  stack.insert(stack.begin(), owner()._ivalue()); // self
+  RECORD_TORCHSCRIPT_FUNCTION(name(), stack);
   function_->run(stack);
 }
 
-IValue Method::operator()(std::vector<IValue> stack, const Kwargs& kwargs) {
-  stack.insert(stack.begin(), owner()._ivalue());
+IValue Method::operator()(std::vector<IValue> stack, const Kwargs& kwargs)
+    const {
+  stack.insert(stack.begin(), owner()._ivalue()); // self
+  RECORD_TORCHSCRIPT_FUNCTION(name(), stack);
   return (*function_)(std::move(stack), kwargs);
+}
+
+c10::intrusive_ptr<c10::ivalue::Future> Method::run_async(
+    std::vector<IValue> stack,
+    const Kwargs& kwargs,
+    TaskLauncher taskLauncher) {
+  stack.insert(stack.begin(), owner()._ivalue());
+  RECORD_TORCHSCRIPT_FUNCTION(name(), stack);
+
+  function_->getSchema().checkAndNormalizeInputs(stack, kwargs);
+  return function_->runAsync(stack, std::move(taskLauncher));
+}
+
+void Method::setArgumentNames(
+    std::vector<std::string>& argumentNamesOut) const {
+  TORCH_INTERNAL_ASSERT(function_);
+  auto& arguments = function_->getSchema().arguments();
+  argumentNamesOut.reserve(arguments.size());
+  for (auto& argument : arguments) {
+    if (argument.name() == "self") {
+      continue;
+    }
+    argumentNamesOut.push_back(argument.name());
+  }
+}
+
+IValue Module::operator()(std::vector<IValue> inputs) {
+  const auto& pre_forward_hooks = type()->getForwardPreHooks();
+  const auto& forward_hooks = type()->getForwardHooks();
+
+  // call forward pre_hooks
+  for (const auto& pre_hook : pre_forward_hooks) {
+    auto tuple_input = c10::ivalue::Tuple::create(inputs);
+    IValue result = Method(_ivalue(), pre_hook)({tuple_input});
+    if (!result.isNone()) {
+      if (result.isTuple()) {
+        inputs = result.toTuple()->elements();
+      } else {
+        inputs = {result};
+      }
+    }
+  }
+
+  // call forward
+  auto outputs = forward(inputs);
+
+  // call forward hooks
+  for (const auto& hook : forward_hooks) {
+    auto tuple_input = c10::ivalue::Tuple::create(inputs);
+    auto hook_result = Method(_ivalue(), hook)({tuple_input, outputs});
+    if (!hook_result.isNone()) {
+      outputs = hook_result;
+    }
+  }
+  return outputs;
 }
 
 void Module::clone_method(
@@ -160,13 +326,39 @@ void Module::clone_method(const Module& orig, const std::string& name) {
   return clone_method(orig, orig.get_method(name).function(), type_remap);
 }
 
-Module Module::clone() const {
+Module Module::copy() const {
+  return Module(_ivalue()->copy());
+}
+
+Module Module::deepcopy() const {
+  return Module(_ivalue()->deepcopy());
+}
+
+Module Module::clone(bool inplace) const {
   std::unordered_map<TypePtr, TypePtr> type_remap;
-  return clone_impl(type_remap);
+  IValue::HashAliasedIValueMap memo;
+  const std::unordered_set<std::string> ignored_methods;
+  const std::unordered_set<std::string> ignored_attributes;
+  return clone_impl(
+      type_remap, inplace, memo, ignored_methods, ignored_attributes);
+}
+
+Module Module::clone(
+    bool inplace,
+    const std::unordered_set<std::string>& ignored_methods,
+    const std::unordered_set<std::string>& ignored_attributes) const {
+  std::unordered_map<TypePtr, TypePtr> type_remap;
+  IValue::HashAliasedIValueMap memo;
+  return clone_impl(
+      type_remap, inplace, memo, ignored_methods, ignored_attributes);
 }
 
 Module Module::clone_impl(
-    std::unordered_map<TypePtr, TypePtr>& type_remap) const {
+    std::unordered_map<TypePtr, TypePtr>& type_remap,
+    bool inplace,
+    IValue::HashAliasedIValueMap memo,
+    const std::unordered_set<std::string>& ignored_methods,
+    const std::unordered_set<std::string>& ignored_attributes) const {
   // Create a new _ivalue in the same compilation unit.
   // Since now we have shared ClassType, we need to preserve the shared
   // ClassType during cloning, so we first need to check if the type
@@ -176,7 +368,8 @@ Module Module::clone_impl(
   Module r;
   if (type_already_cloned) {
     // if we cloned the class type before, we'll reuse it
-    Module new_module(_ivalue()->compilation_unit(), type_remap[type()]->cast<ClassType>());
+    Module new_module(
+        _ivalue()->compilation_unit(), type_remap[type()]->cast<ClassType>());
     r = new_module;
   } else {
     Module new_module(*type()->name(), _ivalue()->compilation_unit(), true);
@@ -186,22 +379,44 @@ Module Module::clone_impl(
 
   // Copy slots. If a slot is a module - recursively clone it.
   size_t N = type()->numAttributes();
-  for (size_t i = 0; i < N; ++i) {
+  for (const auto i : c10::irange(N)) {
     IValue s = _ivalue()->getSlot(i);
-    if (type()->getAttribute(i)->is_module()) {
+    std::string attr_name = type()->getAttributeName(i);
+
+    // If this attribute is in the list of ignored attributes, skip it
+    // (i.e. do not clone it).
+    if (ignored_attributes.count(attr_name) != 0) {
+      continue;
+    }
+
+    TypePtr attr_type = type()->getAttribute(i);
+    if (attr_type->is_module()) {
       const Module& orig = Module(s.toObject());
-      Module cloned = orig.clone_impl(type_remap);
+      const std::unordered_set<std::string> empty_set;
+      Module cloned =
+          orig.clone_impl(type_remap, inplace, memo, empty_set, empty_set);
       type_remap[orig.type()] = cloned.type();
-      r.register_module(type()->getAttributeName(i), cloned);
+      // NOTE: why do we need to manually setattr on object instead of using
+      // register_module here? because the attr can be a module interface
+      // type and hold a Module object still. register_module will not let us
+      // correctly set up the type for this attr, so we had to do this manually.
+      // In the case it's an interface type, the type will be shared by the new
+      // cloned instance in the same compilation unit bc it only contains a list
+      // of functionSchema
+      r.type()->addOrCheckAttribute(
+          attr_name, attr_type->cast<ClassType>() ? cloned.type() : attr_type);
+      r._ivalue()->setAttr(attr_name, cloned._ivalue());
     } else {
-      // this adds new slot and creates a new attribute for the underlying type if
-      // the type is not already cloned, otherwise it will only
-      // add a new slot and typecheck
+      // this adds new slot and creates a new attribute for the underlying type
+      // if the type is not already cloned, otherwise it will only add a new
+      // slot and typecheck
       r.register_attribute(
           type()->getAttributeName(i),
-          type()->getAttribute(i),
-          s,
-          type()->is_parameter(i));
+          attr_type,
+          // we'll deepcopy the IValue in non inplace option
+          inplace ? s : s.deepcopy(memo),
+          type()->is_parameter(i),
+          type()->is_buffer(i));
     }
   }
 
@@ -213,28 +428,22 @@ Module Module::clone_impl(
     }
     // clone methods, remapping the types to the cloned ones.
     for (auto& fn : type()->methods()) {
-      r.clone_method(*this, *fn, type_remap);
+      // If this method is not in the list of ignored methods, clone it.
+      if (ignored_methods.count(fn->name()) == 0) {
+        assert_ignored_methods_not_called(fn, ignored_methods);
+        assert_ignored_attributes_not_referenced(fn, ignored_attributes);
+        r.clone_method(*this, *fn, type_remap);
+      }
+    }
+
+    // Execute __setstate__(__getstate__()) to initialize custom class members.
+    if (auto setstate_method = r.find_method("__setstate__")) {
+      auto getstate_method = r.find_method("__getstate__");
+      TORCH_INTERNAL_ASSERT(getstate_method, "expect __getstate__");
+      auto state = (*getstate_method)(Stack{});
+      (*setstate_method)(Stack{state});
     }
   }
-  return r;
-}
-
-Module Module::clone_instance() const {
-  Module r(_ivalue()->compilation_unit(), type());
-
-  // Copy slots. If a slot is a module - recursively clone it.
-  size_t N = type()->numAttributes();
-  for (size_t i = 0; i < N; ++i) {
-    IValue s = _ivalue()->getSlot(i);
-    if (type()->getAttribute(i)->is_module()) {
-      const Module& orig = Module(s.toObject());
-      Module cloned = orig.clone_instance();
-      r._ivalue()->setAttr(type()->getAttributeName(i), cloned._ivalue());
-    } else {
-      r._ivalue()->setAttr(type()->getAttributeName(i), s);
-    }
-  }
-
   return r;
 }
 
@@ -271,9 +480,36 @@ IValue Module::create_class(const c10::QualifiedName& name, Stack stack) const {
   }
   // Note: following Python, `__init__()` modifies its first parameter in-place
   // and returns nothing.
-  classType->getMethod("__init__")->operator()(std::move(stackWithSelf));
+  classType->getMethod("__init__").operator()(std::move(stackWithSelf));
 
   return obj;
+}
+
+Module freeze(
+    const Module& module,
+    c10::optional<std::vector<std::string>> preserved_attrs,
+    bool optimize_numerics) {
+  TORCH_CHECK(
+      !module.hasattr("training") || !module.is_training(),
+      "Freezing is currently only implemented for modules in eval mode. Please call .eval() before freezing");
+
+  Module out_mod = freeze_module(
+      module, preserved_attrs.value_or(std::vector<std::string>({})));
+  auto graph = module.get_method("forward").graph();
+  OptimizeFrozenGraph(graph, optimize_numerics);
+  return out_mod;
+}
+
+Module optimize_for_inference(Module& module) {
+  // not frozen yet
+  if (module._ivalue()->type()->hasAttribute("training")) {
+    auto mod = freeze(module, {}, true);
+  }
+
+  auto graph = module.get_method("forward").graph();
+  FuseFrozenConvAddRelu(graph);
+  ConvertFrozenOpsToMKLDNN(graph);
+  return module;
 }
 
 buffer_list Module::buffers(bool recurse) const {
@@ -319,8 +555,7 @@ void Module::apply(const std::function<void(Module&)>& fn) {
 std::string Module::dump_to_str(
     bool print_method_bodies,
     bool print_attr_values,
-    bool print_param_values,
-    int level = 0) const {
+    bool print_param_values) const {
   std::stringstream ss;
   std::stringstream parameters_ss;
   std::stringstream attributes_ss;
@@ -367,16 +602,18 @@ std::string Module::dump_to_str(
   ss << "  }" << std::endl;
   ss << "  submodules {" << std::endl;
   for (const NameModule& s : named_children()) {
-    // We do level + 2, because one level of indentation comes from 'submodules'
-    // scope and the other one goes from a specific submodule we're printing.
-    ss << s.value.dump_to_str(
-        print_method_bodies, print_attr_values, print_param_values, level + 2);
+    // We do 4 spaces here, because one level of indentation comes from
+    // 'submodules' scope and the other one goes from a specific submodule we're
+    // printing.
+    ss << torch::jit::jit_log_prefix(
+        "    ",
+        s.value.dump_to_str(
+            print_method_bodies, print_attr_values, print_param_values));
   }
   ss << "  }" << std::endl;
   ss << "}" << std::endl;
 
-  std::string indent(2 * level, ' ');
-  return torch::jit::jit_log_prefix(indent, ss.str());
+  return ss.str();
 }
 
 void Module::dump(

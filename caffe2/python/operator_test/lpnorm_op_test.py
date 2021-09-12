@@ -1,12 +1,12 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 import numpy as np
 from caffe2.python import core, workspace
 import caffe2.python.hypothesis_test_util as hu
-from hypothesis import given
+from hypothesis import given, settings
 import hypothesis.strategies as st
 
 
@@ -15,7 +15,8 @@ class LpnormTest(hu.HypothesisTestCase):
                              min_dim=1,
                              max_dim=3,
                              dtype=np.float32),
-           **hu.gcs_cpu_only)
+           **hu.gcs)
+    @settings(deadline=10000)
     def test_Lp_Norm(self, inputs, gc, dc):
         X = inputs[0]
         # avoid kinks by moving away from 0

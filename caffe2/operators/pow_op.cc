@@ -13,6 +13,7 @@ struct EigenPowFunctor {
   template <int b_is_scalar, typename T1, typename T2, typename R>
   inline void
   Run(size_t n, const T1* a, const T2* b, T2 e, R* out, CPUContext*) {
+    // NOLINTNEXTLINE(modernize-use-nullptr)
     if (b == NULL) {
       EigenVectorArrayMap<R>(out, n) =
           EIGEN_POW((ConstEigenVectorArrayMap<T1>(a, n)), (e));
@@ -69,7 +70,7 @@ struct EigenPowFunctor {
       size_t n,
       size_t post,
       CPUContext*) {
-    for (int i = 0; i < pre; ++i) {
+    for (auto i = 0U; i < pre; ++i) {
       EigenArrayMap<R>(out + i * n * post, post, n) = EIGEN_POW(
           (ConstEigenArrayMap<T1>(a + i * n * post, post, n)),
           (Eigen::Map<const Eigen::Array<T2, 1, Eigen::Dynamic>>(b, n))

@@ -1,8 +1,8 @@
+#include <array>
 #include <cstring>
 #include <string>
 #include <unordered_map>
 
-#include <TH/TH.h>
 #include <libshm/err.h>
 #include <libshm/socket.h>
 #include <libshm/libshm.h>
@@ -16,16 +16,17 @@ AllocInfo get_alloc_info(const char* filename) {
   info.free = false;
   size_t len = strlen(filename);
   if (len >= sizeof(info.filename)) {
-    throw std::runtime_error("THMapAllocatorContext_filename too long");
+    throw std::runtime_error("MapAllocatorContext_filename too long");
   }
   memcpy(info.filename, filename, len + 1);
   return info;
 }
 
 void start_manager() {
-  int pipe_ends[2];
-  SYSCHECK_ERR_RETURN_NEG1(pipe(pipe_ends));
+  std::array<int, 2> pipe_ends;
+  SYSCHECK_ERR_RETURN_NEG1(pipe(pipe_ends.data()));
 
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   pid_t pid;
   SYSCHECK_ERR_RETURN_NEG1(pid = fork());
   if (!pid) {
@@ -33,31 +34,43 @@ void start_manager() {
     SYSCHECK_ERR_RETURN_NEG1(dup2(pipe_ends[1], 1)); // Replace stdout
     SYSCHECK_ERR_RETURN_NEG1(close(pipe_ends[1]));
     execl(manager_executable_path.c_str(), "torch_shm_manager", NULL);
+
+    std::string msg("ERROR: execl failed: ");
+    msg += std::strerror(errno);
+    msg += '\n';
+    write(1, msg.c_str(), msg.size());
+
     exit(1);
   }
   SYSCHECK_ERR_RETURN_NEG1(close(pipe_ends[1]));
 
-  ssize_t bytes_read;
-  char buffer[1000];
+  constexpr auto MAX_BUFFER_SIZE = 1000;
+  std::array<char, MAX_BUFFER_SIZE> buffer;
   std::string handle;
-  for (;;) {
-    SYSCHECK_ERR_RETURN_NEG1(bytes_read = read(pipe_ends[0], buffer, sizeof(buffer)));
-    handle.append(buffer, bytes_read);
-    if (bytes_read == 0 || handle[handle.length() - 1] == '\n') {
+  while(handle.empty() || handle.back() != '\n') {
+    const auto bytes_read = read(pipe_ends[0], buffer.data(), buffer.size());
+    SYSCHECK_ERR_RETURN_NEG1(bytes_read);
+    if (bytes_read == 0) {
       break;
     }
+    handle.append(buffer.data(), bytes_read);
   }
   SYSCHECK_ERR_RETURN_NEG1(close(pipe_ends[0]));
   if (handle.length() == 0) {
-    std::string msg("error executing torch_shm_manager at \"");
+    std::string msg("no response from torch_shm_manager at \"");
     msg += manager_executable_path;
     msg += "\"";
     throw std::runtime_error(msg);
   }
 
   handle.pop_back(); // remove \n
-  if (handle == "ERROR")
-    throw std::exception();
+  if (handle.rfind("ERROR: ", 0) == 0) {
+    std::string msg("torch_shm_manager at \"");
+    msg += manager_executable_path;
+    msg += "\": ";
+    msg += handle.substr(7);  // remove "ERROR: "
+    throw std::runtime_error(msg);
+  }
 
   ClientSocket manager {handle};
   managers.emplace(std::move(handle), std::move(manager));
@@ -82,6 +95,7 @@ THManagedMapAllocatorInit::THManagedMapAllocatorInit(const char* manager_handle,
   : manager_handle_(manager_handle ? manager_handle : "") {
   // TODO: unlock GIL when contacting the manager
   try {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     ClientSocket *socket;
     if (!manager_handle_.empty()) {
       socket = &get_manager_socket(manager_handle_);
@@ -96,19 +110,19 @@ THManagedMapAllocatorInit::THManagedMapAllocatorInit(const char* manager_handle,
     AllocInfo info = get_alloc_info(filename);
     socket->register_allocation(info);
   } catch(std::exception &e) {
-    THError(e.what());
+    TORCH_CHECK(false, e.what());
   }
 }
 
 THManagedMapAllocator::THManagedMapAllocator(const char *manager_handle, const char *filename, int flags, ptrdiff_t size)
-  : THManagedMapAllocatorInit(manager_handle, filename), THRefcountedMapAllocator(filename, flags, size) {}
+  : THManagedMapAllocatorInit(manager_handle, filename), at::RefcountedMapAllocator(filename, flags, size) {}
 
 void THManagedMapAllocator::close() {
   if (closed_) return;
   AllocInfo info = get_alloc_info(filename());
   info.free = true;
   ClientSocket &socket = get_manager_socket(manager_handle_);
-  THRefcountedMapAllocator::close();
+  at::RefcountedMapAllocator::close();
   socket.register_deallocation(info);
 }
 

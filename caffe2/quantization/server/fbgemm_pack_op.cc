@@ -4,6 +4,7 @@
 #include "caffe2/core/tensor_int8.h"
 
 #include "caffe2_dnnlowp_utils.h"
+#include <fbgemm/FbgemmConvert.h>
 
 C10_DECLARE_int32(caffe2_dnnlowp_nbits_in_non_outlier);
 C10_DECLARE_double(caffe2_dnnlowp_acc16_density_threshold);
@@ -44,10 +45,12 @@ void QuantizeWeight(
       W_quantized[i] = W_data[i] + signed_min;
     }
   } else {
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (int g = 0; g < qparams.size(); ++g) {
       size_t offset = g * (M / qparams.size()) * kernel_dim;
       qparams[g] = qfactory->ChooseQuantizationParams(
           filter.data<float>() + offset,
+          // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
           (M / qparams.size()) * kernel_dim,
           true /*weight*/);
 
@@ -182,16 +185,18 @@ fbgemm::CompressedSparseColumn* ExtractOutlierMatrix(
 }
 
 // FIXME: code duplication with ConvDNNLowPOp::QuantizeBias_
-static void QuantizeConvBias(
+void QuantizeConvBias(
     const Blob& blob,
     int M,
     const TensorQuantizationParams& in_qparams,
     const vector<TensorQuantizationParams>& filter_qparams,
-    vector<int32_t>& b_quantized) {
+    vector<int32_t>& b_quantized, bool use_fp16,
+    bool round_to_nearest_even) {
   const auto& bias = blob.IsType<int8::Int8TensorCPU>()
       ? blob.Get<int8::Int8TensorCPU>().t
       : blob.Get<TensorCPU>();
   if (blob.IsType<int8::Int8TensorCPU>()) {
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
     TensorQuantizationParams bias_qparams;
     bias_qparams.scale = blob.Get<int8::Int8TensorCPU>().scale;
     bias_qparams.zero_point = blob.Get<int8::Int8TensorCPU>().zero_point;
@@ -205,17 +210,32 @@ static void QuantizeConvBias(
         bias.data<int32_t>(), bias.data<int32_t>() + bias.numel());
   } else {
     const float* bdata = bias.data<float>();
+    vector<float> bdata_local;
+    if (use_fp16) {
+      bdata_local.resize(bias.numel());
+      fbgemm::RoundToFloat16(
+              bdata, bdata_local.data(), bias.numel(), false /* FLAGS_caffe2_fbgemm_fake_fp16_clamp */);
+      bdata = bdata_local.data();
+    }
     b_quantized.resize(bias.numel());
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (int g = 0; g < filter_qparams.size(); ++g) {
+      // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
       int i_begin = g * (M / filter_qparams.size());
+      // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
       int i_end = i_begin + (M / filter_qparams.size());
       for (int i = i_begin; i < i_end; ++i) {
-        b_quantized[i] = fbgemm::Quantize<int32_t>(
-            bdata[i],
-            0,
-            in_qparams.scale * filter_qparams[g].scale,
-            32,
-            true /* signed */);
+        if (round_to_nearest_even) {
+          b_quantized[i] = fbgemm::Quantize<int32_t>(
+              bdata[i],
+              0,
+              in_qparams.scale * filter_qparams[g].scale,
+              32,
+              true /* signed */);
+        } else {
+          b_quantized[i] = round((1.0f / in_qparams.scale) * (1.0f / filter_qparams[g].scale) * bdata[i]);
+          b_quantized[i] = std::max(std::min(b_quantized[i], INT32_MAX), INT32_MIN);
+        }
       }
     }
   }
@@ -280,6 +300,7 @@ bool FullyConnectedDNNLowPPackWeightOp::RunOnDevice() {
   // Pre-compute column offsets
   // This should happen before ExtractOutlierMatrix because W_quantized is
   // changed in ExtractOutlierMatrix.
+  // NOLINTNEXTLINE(modernize-make-shared)
   Y->column_offsets.reset(new vector<int32_t>());
   ComputeColumnOffsets(
       K, N, W_quantized.data(), Y->qparams, *Y->column_offsets);
@@ -297,6 +318,7 @@ bool FullyConnectedDNNLowPPackWeightOp::RunOnDevice() {
     }
 
     Y->nbits_in_non_outlier = nbits_in_non_outlier_;
+    // NOLINTNEXTLINE(modernize-make-shared)
     Y->W_acc16.reset(new fbgemm::PackBMatrix<int8_t, int16_t>(
         fbgemm::matrix_op_t::Transpose,
         K,
@@ -306,6 +328,7 @@ bool FullyConnectedDNNLowPPackWeightOp::RunOnDevice() {
         nullptr, // pmat
         1)); // group
   } else {
+    // NOLINTNEXTLINE(modernize-make-shared)
     Y->W.reset(new fbgemm::PackBMatrix<int8_t>(
         fbgemm::matrix_op_t::Transpose,
         K,
@@ -318,9 +341,11 @@ bool FullyConnectedDNNLowPPackWeightOp::RunOnDevice() {
 
   // Quantize bias
   if (InputSize() >= 2) {
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
     TensorQuantizationParams in_qparams;
     CAFFE_ENFORCE(HasSingleArgumentOfType<float>("in_scale"));
     in_qparams.scale = GetSingleArgument<float>("in_scale", 0);
+    // NOLINTNEXTLINE(modernize-make-shared)
     Y->bias.reset(new vector<int32_t>());
     QuantizeConvBias(InputBlob(1), N, in_qparams, Y->qparams, *Y->bias);
   } else {
@@ -402,6 +427,7 @@ bool ConvDNNLowPPackWeightOp::TakeDepthWise3x3x3FastPath_() {
       this->dilation_[0] == 1 && this->dilation_[1] == 1 &&
       this->dilation_[2] == 1 &&
       accumulate(
+          // NOLINTNEXTLINE(modernize-use-transparent-functors)
           this->pads_.begin(), this->pads_.end(), 1, multiplies<int>()) == 1 &&
       GetCpuId().avx2();
   return ret;
@@ -514,6 +540,7 @@ bool ConvDNNLowPPackWeightOp::RunOnDevice() {
   // Pre-compute column offsets
   // This should happen before ExtractOutlierMatrix because W_quantized is
   // changed in ExtractOutlierMatrix.
+  // NOLINTNEXTLINE(modernize-make-shared)
   Y->column_offsets.reset(new vector<int32_t>());
   ComputeColumnOffsets(
       kernel_dim, M, W_quantized.data(), Y->qparams, *Y->column_offsets);
@@ -579,6 +606,7 @@ bool ConvDNNLowPPackWeightOp::RunOnDevice() {
 
     if (!fallback_to_32_bit_accumulation) {
       Y->nbits_in_non_outlier = nbits_in_non_outlier_;
+      // NOLINTNEXTLINE(modernize-make-shared)
       Y->W_acc16.reset(new fbgemm::PackBMatrix<int8_t, int16_t>(
           fbgemm::matrix_op_t::Transpose,
           group_ * kernel_dim,
@@ -599,19 +627,23 @@ bool ConvDNNLowPPackWeightOp::RunOnDevice() {
       fallback_to_32_bit_accumulation) {
     // acc32
     if (TakeDepthWise3x3FastPath_()) {
+      // NOLINTNEXTLINE(modernize-make-shared)
       Y->W_depthwise.reset(new fbgemm::PackedDepthWiseConvMatrix(
           group_, 3 * 3, W_quantized.data()));
     } else if (TakeDepthWise3x3x3FastPath_()) {
+      // NOLINTNEXTLINE(modernize-make-shared)
       Y->W_depthwise.reset(new fbgemm::PackedDepthWiseConvMatrix(
           group_, 3 * 3 * 3, W_quantized.data()));
     } else if (TakeGConvFastPath_()) {
       if (this->kernel_.size() == 2) {
+        // NOLINTNEXTLINE(modernize-make-shared)
         Y->W_gconv.reset(new fbgemm::PackWeightMatrixForGConv<int8_t>(
             fbgemm::matrix_op_t::Transpose,
             GetConvParam_(),
             W_quantized.data()));
       } else {
         CAFFE_ENFORCE_EQ(this->kernel_.size(), 3);
+        // NOLINTNEXTLINE(modernize-make-shared)
         Y->W_gconv3d.reset(
             new fbgemm::PackWeightMatrixForGConv<int8_t, int32_t, 3>(
                 fbgemm::matrix_op_t::Transpose,
@@ -619,6 +651,7 @@ bool ConvDNNLowPPackWeightOp::RunOnDevice() {
                 W_quantized.data()));
       }
     } else {
+      // NOLINTNEXTLINE(modernize-make-shared)
       Y->W.reset(new fbgemm::PackBMatrix<int8_t>(
           fbgemm::matrix_op_t::Transpose,
           group_ * kernel_dim,
@@ -631,9 +664,11 @@ bool ConvDNNLowPPackWeightOp::RunOnDevice() {
   }
 
   if (InputSize() >= 2) {
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
     TensorQuantizationParams in_qparams;
     CAFFE_ENFORCE(HasSingleArgumentOfType<float>("in_scale"));
     in_qparams.scale = GetSingleArgument<float>("in_scale", 0);
+    // NOLINTNEXTLINE(modernize-make-shared)
     Y->bias.reset(new vector<int32_t>());
     QuantizeConvBias(InputBlob(BIAS), M, in_qparams, Y->qparams, *Y->bias);
   } else {
@@ -663,6 +698,7 @@ TypeIdentifier Int8ConvDNNLowpPackedWeightBlobShapeFunctions::GetTypeMetaId() {
 
 TypeMeta Int8FCDNNLowpPackedWeightBlobShapeFunctions::GetExternalTensorType(
     const void* c) {
+  // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
   const Int8FCDNNLowPPackedWeightBlob* int8_tensor =
       reinterpret_cast<const Int8FCDNNLowPPackedWeightBlob*>(c);
   // We forced the output type to be uint8_t since we know it always is.
@@ -673,6 +709,7 @@ TypeMeta Int8FCDNNLowpPackedWeightBlobShapeFunctions::GetExternalTensorType(
 
 TypeMeta Int8ConvDNNLowpPackedWeightBlobShapeFunctions::GetExternalTensorType(
     const void* c) {
+  // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
   const Int8ConvDNNLowPPackedWeightBlob* int8_tensor =
       reinterpret_cast<const Int8ConvDNNLowPPackedWeightBlob*>(c);
   // return (int8_tensor->original_tensor).dtype();
@@ -842,6 +879,8 @@ REGISTER_EXTERNAL_TENSOR_FUNCTIONS(
     (TypeMeta::Id<Int8ConvDNNLowPPackedWeightBlob>()),
     Int8ConvDNNLowpPackedWeightBlobShapeFunctions);
 
+REGISTER_CPU_OPERATOR(Int8FCPackWeight, FullyConnectedDNNLowPPackWeightOp);
+
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     Int8FCPackWeight,
     DNNLOWP,
@@ -860,11 +899,41 @@ REGISTER_CPU_OPERATOR_WITH_ENGINE(
 OPERATOR_SCHEMA(Int8FCPackWeight)
     .NumInputs(1, 2)
     .NumOutputs(1, 2)
+    .TensorInferenceFunction([](const OperatorDef& def,
+                                const vector<TensorShape>& in) {
+      vector<TensorShape> out;
+      TensorShape W = in[0];
+      out.emplace_back(std::move(W));
+      out[0].set_data_type(TensorProto_DataType_INT8);
+      if (def.output_size() > 1) {
+        TensorShape b = in[1];
+        out.emplace_back(std::move(b));
+        out[1].set_data_type(TensorProto_DataType_INT32);
+      }
+      return out;
+    })
     .SetDoc(R"DOC(Prepack weight for Int8FC)DOC")
     .Input(0, "W", "Weight tensor in KRSC layout")
     .Input(1, "b", "Bias tensor")
-    .Output(0, "W_q", "Weight/bias tensor in a packed format")
-    .Output(1, "B_q", "Bias int32 quantized tensor");
+    .Output(
+        0,
+        "W_q",
+        "Weight/bias tensor in a packed format "
+        "with type Int8FCDNNLowPPackedWeightBlob")
+    .Output(1, "B_q", "Bias int32 quantized tensor")
+    .Arg("axis_w", "See FC operator")
+    .Arg(
+        "quantize_channelwise",
+        "Default false. Per output channel quantization")
+    .Arg(
+        "save_unpacked_weights",
+        "Default false. "
+        "Store unpacked quantized weights to W_q.original_tensor")
+    .Arg(
+        "in_scale",
+        "The scale of input activation tensor. "
+        "Only meaningful when bias is provided "
+        "(NOTE: this is not the scale of weight");
 
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     Int8ConvPackWeight,
@@ -879,9 +948,36 @@ REGISTER_CPU_OPERATOR_WITH_ENGINE(
 OPERATOR_SCHEMA(Int8ConvPackWeight)
     .NumInputs(1, 2)
     .NumOutputs(1)
+    .TensorInferenceFunction([](const OperatorDef& def,
+                                const vector<TensorShape>& in) {
+      vector<TensorShape> out;
+      TensorShape W = in[0];
+      out.emplace_back(std::move(W));
+      out[0].set_data_type(TensorProto_DataType_INT8);
+      if (def.output_size() > 1) {
+        TensorShape b = in[1];
+        out.emplace_back(std::move(b));
+        out[1].set_data_type(TensorProto_DataType_INT32);
+      }
+      return out;
+    })
     .SetDoc(R"DOC(Prepack weight for Int8Conv)DOC")
     .Input(0, "W", "Weight tensor in KRSC layout")
     .Input(1, "b", "Bias tensor")
-    .Output(0, "W_q", "Weight/bias tensor in a packed format");
+    .Output(
+        0,
+        "W_q",
+        "Weight/bias tensor in a packed format "
+        "with type Int8ConvDNNLowPPackedWeightBlob")
+    .Arg("quantize_groupwise", "Default false. Per group quantization")
+    .Arg(
+        "save_unpacked_weights",
+        "Default false. "
+        "Store unpacked quantized weights to W_q.original_tensor")
+    .Arg(
+        "in_scale",
+        "The scale of input activation tensor. "
+        "Only meaningful when bias is provided "
+        "(NOTE: this is not the scale of weight");
 
 } // namespace caffe2

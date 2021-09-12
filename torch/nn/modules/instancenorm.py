@@ -1,12 +1,23 @@
-from .batchnorm import _NormBase
+from torch import Tensor
+
+from .batchnorm import _LazyNormBase, _NormBase
 from .. import functional as F
 
 
 class _InstanceNorm(_NormBase):
-    def __init__(self, num_features, eps=1e-5, momentum=0.1, affine=False,
-                 track_running_stats=False):
+    def __init__(
+        self,
+        num_features: int,
+        eps: float = 1e-5,
+        momentum: float = 0.1,
+        affine: bool = False,
+        track_running_stats: bool = False,
+        device=None,
+        dtype=None
+    ) -> None:
+        factory_kwargs = {'device': device, 'dtype': dtype}
         super(_InstanceNorm, self).__init__(
-            num_features, eps, momentum, affine, track_running_stats)
+            num_features, eps, momentum, affine, track_running_stats, **factory_kwargs)
 
     def _check_input_dim(self, input):
         raise NotImplementedError
@@ -41,9 +52,8 @@ class _InstanceNorm(_NormBase):
             state_dict, prefix, local_metadata, strict,
             missing_keys, unexpected_keys, error_msgs)
 
-    def forward(self, input):
+    def forward(self, input: Tensor) -> Tensor:
         self._check_input_dim(input)
-
         return F.instance_norm(
             input, self.running_mean, self.running_var, self.weight, self.bias,
             self.training or not self.track_running_stats, self.momentum, self.eps)
@@ -52,7 +62,8 @@ class _InstanceNorm(_NormBase):
 class InstanceNorm1d(_InstanceNorm):
     r"""Applies Instance Normalization over a 3D input (a mini-batch of 1D
     inputs with optional additional channel dimension) as described in the paper
-    `Instance Normalization: The Missing Ingredient for Fast Stylization`_ .
+    `Instance Normalization: The Missing Ingredient for Fast Stylization
+    <https://arxiv.org/abs/1607.08022>`__.
 
     .. math::
 
@@ -61,6 +72,8 @@ class InstanceNorm1d(_InstanceNorm):
     The mean and standard-deviation are calculated per-dimension separately
     for each object in a mini-batch. :math:`\gamma` and :math:`\beta` are learnable parameter vectors
     of size `C` (where `C` is the input size) if :attr:`affine` is ``True``.
+    The standard-deviation is calculated via the biased estimator, equivalent to
+    `torch.var(input, unbiased=False)`.
 
     By default, this layer uses instance statistics computed from input data in
     both training and evaluation modes.
@@ -74,7 +87,7 @@ class InstanceNorm1d(_InstanceNorm):
         This :attr:`momentum` argument is different from one used in optimizer
         classes and the conventional notion of momentum. Mathematically, the
         update rule for running statistics here is
-        :math:`\hat{x}_\text{new} = (1 - \text{momentum}) \times \hat{x} + \text{momemtum} \times x_t`,
+        :math:`\hat{x}_\text{new} = (1 - \text{momentum}) \times \hat{x} + \text{momentum} \times x_t`,
         where :math:`\hat{x}` is the estimated statistic and :math:`x_t` is the
         new observed value.
 
@@ -112,10 +125,46 @@ class InstanceNorm1d(_InstanceNorm):
         >>> m = nn.InstanceNorm1d(100, affine=True)
         >>> input = torch.randn(20, 100, 40)
         >>> output = m(input)
-
-    .. _`Instance Normalization: The Missing Ingredient for Fast Stylization`:
-        https://arxiv.org/abs/1607.08022
     """
+
+    def _check_input_dim(self, input):
+        if input.dim() == 2:
+            raise ValueError(
+                'InstanceNorm1d returns 0-filled tensor to 2D tensor.'
+                'This is because InstanceNorm1d reshapes inputs to'
+                '(1, N * C, ...) from (N, C,...) and this makes'
+                'variances 0.'
+            )
+        if input.dim() != 3:
+            raise ValueError('expected 3D input (got {}D input)'
+                             .format(input.dim()))
+
+
+class LazyInstanceNorm1d(_LazyNormBase, _InstanceNorm):
+    r"""A :class:`torch.nn.InstanceNorm1d` module with lazy initialization of
+    the ``num_features`` argument of the :class:`InstanceNorm1d` that is inferred
+    from the ``input.size(1)``.
+    The attributes that will be lazily initialized are `weight`, `bias`,
+    `running_mean` and `running_var`.
+
+    Check the :class:`torch.nn.modules.lazy.LazyModuleMixin` for further documentation
+    on lazy modules and their limitations.
+
+    Args:
+        num_features: :math:`C` from an expected input of size
+            :math:`(N, C, L)` or :math:`L` from input of size :math:`(N, L)`
+        eps: a value added to the denominator for numerical stability. Default: 1e-5
+        momentum: the value used for the running_mean and running_var computation. Default: 0.1
+        affine: a boolean value that when set to ``True``, this module has
+            learnable affine parameters, initialized the same way as done for batch normalization.
+            Default: ``False``.
+        track_running_stats: a boolean value that when set to ``True``, this
+            module tracks the running mean and variance, and when set to ``False``,
+            this module does not track such statistics and always uses batch
+            statistics in both training and eval modes. Default: ``False``
+    """
+
+    cls_to_become = InstanceNorm1d  # type: ignore[assignment]
 
     def _check_input_dim(self, input):
         if input.dim() == 2:
@@ -133,7 +182,8 @@ class InstanceNorm1d(_InstanceNorm):
 class InstanceNorm2d(_InstanceNorm):
     r"""Applies Instance Normalization over a 4D input (a mini-batch of 2D inputs
     with additional channel dimension) as described in the paper
-    `Instance Normalization: The Missing Ingredient for Fast Stylization`_ .
+    `Instance Normalization: The Missing Ingredient for Fast Stylization
+    <https://arxiv.org/abs/1607.08022>`__.
 
     .. math::
 
@@ -142,6 +192,8 @@ class InstanceNorm2d(_InstanceNorm):
     The mean and standard-deviation are calculated per-dimension separately
     for each object in a mini-batch. :math:`\gamma` and :math:`\beta` are learnable parameter vectors
     of size `C` (where `C` is the input size) if :attr:`affine` is ``True``.
+    The standard-deviation is calculated via the biased estimator, equivalent to
+    `torch.var(input, unbiased=False)`.
 
     By default, this layer uses instance statistics computed from input data in
     both training and evaluation modes.
@@ -155,7 +207,7 @@ class InstanceNorm2d(_InstanceNorm):
         This :attr:`momentum` argument is different from one used in optimizer
         classes and the conventional notion of momentum. Mathematically, the
         update rule for running statistics here is
-        :math:`\hat{x}_\text{new} = (1 - \text{momentum}) \times \hat{x} + \text{momemtum} \times x_t`,
+        :math:`\hat{x}_\text{new} = (1 - \text{momentum}) \times \hat{x} + \text{momentum} \times x_t`,
         where :math:`\hat{x}` is the estimated statistic and :math:`x_t` is the
         new observed value.
 
@@ -193,9 +245,6 @@ class InstanceNorm2d(_InstanceNorm):
         >>> m = nn.InstanceNorm2d(100, affine=True)
         >>> input = torch.randn(20, 100, 35, 45)
         >>> output = m(input)
-
-    .. _`Instance Normalization: The Missing Ingredient for Fast Stylization`:
-        https://arxiv.org/abs/1607.08022
     """
 
     def _check_input_dim(self, input):
@@ -204,10 +253,42 @@ class InstanceNorm2d(_InstanceNorm):
                              .format(input.dim()))
 
 
+class LazyInstanceNorm2d(_LazyNormBase, _InstanceNorm):
+    r"""A :class:`torch.nn.InstanceNorm2d` module with lazy initialization of
+    the ``num_features`` argument of the :class:`InstanceNorm2d` that is inferred
+    from the ``input.size(1)``.
+    The attributes that will be lazily initialized are `weight`, `bias`,
+    `running_mean` and `running_var`.
+
+    Check the :class:`torch.nn.modules.lazy.LazyModuleMixin` for further documentation
+    on lazy modules and their limitations.
+
+    Args:
+        num_features: :math:`C` from an expected input of size
+            :math:`(N, C, H, W)`
+        eps: a value added to the denominator for numerical stability. Default: 1e-5
+        momentum: the value used for the running_mean and running_var computation. Default: 0.1
+        affine: a boolean value that when set to ``True``, this module has
+            learnable affine parameters, initialized the same way as done for batch normalization.
+            Default: ``False``.
+        track_running_stats: a boolean value that when set to ``True``, this
+            module tracks the running mean and variance, and when set to ``False``,
+            this module does not track such statistics and always uses batch
+            statistics in both training and eval modes. Default: ``False``
+    """
+
+    cls_to_become = InstanceNorm2d  # type: ignore[assignment]
+
+    def _check_input_dim(self, input):
+        if input.dim() != 4:
+            raise ValueError("expected 4D input (got {}D input)".format(input.dim()))
+
+
 class InstanceNorm3d(_InstanceNorm):
     r"""Applies Instance Normalization over a 5D input (a mini-batch of 3D inputs
     with additional channel dimension) as described in the paper
-    `Instance Normalization: The Missing Ingredient for Fast Stylization`_ .
+    `Instance Normalization: The Missing Ingredient for Fast Stylization
+    <https://arxiv.org/abs/1607.08022>`__.
 
     .. math::
 
@@ -216,6 +297,8 @@ class InstanceNorm3d(_InstanceNorm):
     The mean and standard-deviation are calculated per-dimension separately
     for each object in a mini-batch. :math:`\gamma` and :math:`\beta` are learnable parameter vectors
     of size C (where C is the input size) if :attr:`affine` is ``True``.
+    The standard-deviation is calculated via the biased estimator, equivalent to
+    `torch.var(input, unbiased=False)`.
 
     By default, this layer uses instance statistics computed from input data in
     both training and evaluation modes.
@@ -229,7 +312,7 @@ class InstanceNorm3d(_InstanceNorm):
         This :attr:`momentum` argument is different from one used in optimizer
         classes and the conventional notion of momentum. Mathematically, the
         update rule for running statistics here is
-        :math:`\hat{x}_\text{new} = (1 - \text{momentum}) \times \hat{x} + \text{momemtum} \times x_t`,
+        :math:`\hat{x}_\text{new} = (1 - \text{momentum}) \times \hat{x} + \text{momentum} \times x_t`,
         where :math:`\hat{x}` is the estimated statistic and :math:`x_t` is the
         new observed value.
 
@@ -267,12 +350,40 @@ class InstanceNorm3d(_InstanceNorm):
         >>> m = nn.InstanceNorm3d(100, affine=True)
         >>> input = torch.randn(20, 100, 35, 45, 10)
         >>> output = m(input)
-
-    .. _`Instance Normalization: The Missing Ingredient for Fast Stylization`:
-        https://arxiv.org/abs/1607.08022
     """
 
     def _check_input_dim(self, input):
         if input.dim() != 5:
             raise ValueError('expected 5D input (got {}D input)'
                              .format(input.dim()))
+
+
+class LazyInstanceNorm3d(_LazyNormBase, _InstanceNorm):
+    r"""A :class:`torch.nn.InstanceNorm3d` module with lazy initialization of
+    the ``num_features`` argument of the :class:`InstanceNorm3d` that is inferred
+    from the ``input.size(1)``.
+    The attributes that will be lazily initialized are `weight`, `bias`,
+    `running_mean` and `running_var`.
+
+    Check the :class:`torch.nn.modules.lazy.LazyModuleMixin` for further documentation
+    on lazy modules and their limitations.
+
+    Args:
+        num_features: :math:`C` from an expected input of size
+            :math:`(N, C, D, H, W)`
+        eps: a value added to the denominator for numerical stability. Default: 1e-5
+        momentum: the value used for the running_mean and running_var computation. Default: 0.1
+        affine: a boolean value that when set to ``True``, this module has
+            learnable affine parameters, initialized the same way as done for batch normalization.
+            Default: ``False``.
+        track_running_stats: a boolean value that when set to ``True``, this
+            module tracks the running mean and variance, and when set to ``False``,
+            this module does not track such statistics and always uses batch
+            statistics in both training and eval modes. Default: ``False``
+    """
+
+    cls_to_become = InstanceNorm3d  # type: ignore[assignment]
+
+    def _check_input_dim(self, input):
+        if input.dim() != 5:
+            raise ValueError("expected 5D input (got {}D input)".format(input.dim()))

@@ -2,6 +2,7 @@
 #include <ATen/CPUApplyUtils.h>
 #include <ATen/Dispatch.h>
 #include <ATen/NativeFunctions.h>
+#include <ATen/native/Resize.h>
 
 #include <ATen/Parallel.h>
 #include <ATen/native/TriangularOpsUtils.h>
@@ -60,6 +61,7 @@ void apply_triu_tril(Tensor& result, const Tensor& self, bool inplace, int64_t k
   auto self_column_stride = self.stride(-1);
 
   auto result_data = result.data_ptr<scalar_t>();
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int64_t result_stride, result_row_stride, result_column_stride;
   if (result_data != self_data) {
     result_stride = (result.dim() > 2 && result.stride(-3) > 0) ? result.stride(-3) : 1;
@@ -92,6 +94,7 @@ Tensor& tril_cpu_(Tensor &self, int64_t k) {
   if (self.numel() == 0) {
     return self;
   }
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   bool inplace;
   Tensor self_c;
   std::tie(inplace, self_c) = checkTrilTriuBatchContiguous(self, true);
@@ -103,10 +106,8 @@ Tensor& tril_cpu_(Tensor &self, int64_t k) {
   return self;
 }
 
-Tensor& tril_cpu_out(Tensor &result, const Tensor& self, int64_t k) {
-  if (result.sizes() != self.sizes()) {
-    result.resize_as_(self);
-  }
+Tensor& tril_cpu_out(const Tensor& self, int64_t k, Tensor &result) {
+  at::native::resize_output(result, self.sizes());
   if (self.numel() == 0) {
     return result;
   }
@@ -128,6 +129,7 @@ Tensor& triu_cpu_(Tensor &self, int64_t k) {
   if (self.numel() == 0) {
     return self;
   }
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   bool inplace;
   Tensor self_c;
   std::tie(inplace, self_c) = checkTrilTriuBatchContiguous(self, true);
@@ -139,10 +141,8 @@ Tensor& triu_cpu_(Tensor &self, int64_t k) {
   return self;
 }
 
-Tensor& triu_cpu_out(Tensor &result, const Tensor& self, int64_t k) {
-  if (result.sizes() != self.sizes()) {
-    result.resize_as_(self);
-  }
+Tensor& triu_cpu_out(const Tensor& self, int64_t k, Tensor &result) {
+  at::native::resize_output(result, self.sizes());
   if (self.numel() == 0) {
     return result;
   }
@@ -153,6 +153,18 @@ Tensor& triu_cpu_out(Tensor &result, const Tensor& self, int64_t k) {
   });
   return result;
 }
+
+Tensor trace_backward(const Tensor& grad, IntArrayRef sizes) {
+  if (sizes.size() != 2) {
+    throw std::runtime_error("expected matrix input");
+  }
+
+  auto grad_input = at::zeros(sizes[0] * sizes[1], grad.options());
+  auto indices = at::arange(0, grad_input.numel(), sizes[1] + 1, grad.options().dtype(at::kLong));
+  grad_input.index_fill_(0, indices, grad);
+  return grad_input.view(sizes);
+}
+
 
 }  // namespace native
 }  // namespace at

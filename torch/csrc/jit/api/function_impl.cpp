@@ -1,7 +1,11 @@
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/passes/inliner.h>
 
 #include <torch/csrc/jit/frontend/error_report.h>
+#include <torch/csrc/jit/passes/constant_pooling.h>
+#include <torch/csrc/jit/passes/constant_propagation.h>
+#include <torch/csrc/jit/passes/peephole.h>
 
 namespace torch {
 namespace jit {
@@ -11,13 +15,13 @@ c10::FunctionSchema defaultSchemaFor(const Function& function) {
   std::vector<c10::Argument> returns;
   Graph& g = *function.graph();
   size_t num_inputs = function.num_inputs();
-  for (size_t i = 0; i < num_inputs; ++i) {
+  for (const auto i : c10::irange(num_inputs)) {
     const Value* v = g.inputs().at(i);
     std::string name = v->hasDebugName() ? v->debugNameBase()
                                          : ("argument_" + c10::to_string(i));
     args.emplace_back(std::move(name), unshapedType(g.inputs()[i]->type()));
   }
-  for (size_t i = 0; i < g.outputs().size(); ++i) {
+  for (const auto i : c10::irange(g.outputs().size())) {
     returns.emplace_back("", unshapedType(g.outputs()[i]->type()));
   }
   return {function.name(), "", std::move(args), std::move(returns)};
@@ -34,6 +38,12 @@ void GraphFunction::run(Stack& stack) {
 
 void GraphFunction::run(Stack&& stack) {
   run(stack);
+}
+
+c10::intrusive_ptr<c10::ivalue::Future> GraphFunction::runAsync(
+    Stack& stack,
+    TaskLauncher taskLauncher) {
+  return get_executor().runAsync(stack, std::move(taskLauncher));
 }
 
 IValue GraphFunction::operator()(
@@ -62,9 +72,14 @@ const c10::FunctionSchema& GraphFunction::getSchema() const {
 }
 
 void preoptimizeGraph(std::shared_ptr<Graph>& graph) {
-  // TODO: Invoke cleanup passes before and after inlining to reduce amount of
-  // code we're copying.
   Inline(*graph);
+  // Peephole Optimize cleans up many "is None" checks and creates constant prop
+  // opportunities
+  PeepholeOptimize(graph, true);
+  // // AliasDb construction can be slow, so run it just on immutable types
+  // // to clean up constant Ifs & other easy wins
+  ConstantPropagationImmutableTypes(graph);
+  ConstantPooling(graph);
 }
 
 } // namespace jit

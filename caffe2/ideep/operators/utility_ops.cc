@@ -58,6 +58,7 @@ class CopyIDEEPToCPUOp final : public IDEEPOperator {
       const auto& X = OperatorBase::Input<itensor>(0);
       if (X.get_data_type() == itensor::data_type::f32) {
         std::vector<int64_t> dims;
+        // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
         for (int i = 0; i < X.get_dims().size(); ++i) {
           dims.push_back(X.get_dims()[i]);
         }
@@ -65,7 +66,8 @@ class CopyIDEEPToCPUOp final : public IDEEPOperator {
             OperatorBase::OutputTensor(0, dims, at::dtype<float>().device(CPU));
         X.to_public(Y->template mutable_data<float>());
       } else {
-        CAFFE_THROW("Unsupported ideep type: ", X.get_data_type());
+        CAFFE_THROW("Unsupported ideep type: ",
+                    static_cast<int>(X.get_data_type()));
       }
     }
     return true;
@@ -112,11 +114,13 @@ REGISTER_IDEEP_OPERATOR(CopyIDEEPToCPU, CopyIDEEPToCPUOp);
 REGISTER_IDEEP_OPERATOR(Copy, IDEEPCopyOp);
 REGISTER_IDEEP_OPERATOR(WeightedSum, IDEEPWeightedSumOp);
 
+// NOLINTNEXTLINE(clang-diagnostic-unused-function,cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(CopyCPUToIDEEP)
     .NumInputs(1)
     .NumOutputs(1)
     .Input(0, "cpu_blob", "The input TensorCPU to copy")
     .Output(0, "ideep_blob", "The output IDEEP tensort to copy to");
+// NOLINTNEXTLINE(clang-diagnostic-unused-function,cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(CopyIDEEPToCPU)
     .NumInputs(1)
     .NumOutputs(1)

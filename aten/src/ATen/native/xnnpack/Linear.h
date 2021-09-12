@@ -12,25 +12,24 @@ namespace xnnpack {
 namespace internal {
 namespace linear {
 
-class LinearPrePack final : public torch::OperatorKernel {
-  public:
-  c10::intrusive_ptr<xnnpack::XNNPackLinearOpContext> operator()(
-      Tensor weight,
-      c10::optional<Tensor> bias);
-};
+c10::intrusive_ptr<xnnpack::LinearOpContext> createLinearClampPrePackOpContext(
+    Tensor weight,
+    c10::optional<Tensor> bias,
+    const c10::optional<Scalar>& output_min,
+    const c10::optional<Scalar>& output_max);
 
-class LinearPacked final : public torch::OperatorKernel {
-  public:
-  Tensor operator()(
-      const Tensor& input,
-      const c10::intrusive_ptr<xnnpack::XNNPackLinearOpContext>& op_context);
-};
+Tensor linear_clamp_run(const Tensor& input, const c10::intrusive_ptr<xnnpack::LinearOpContext>& op_context);
+
+std::tuple<IntArrayRef, c10::optional<IntArrayRef>>
+unpack_prepacked_sizes_linear(const IValue& ivalue);
 
 ContextLinear create(
     const Tensor& weight,
     const c10::optional<Tensor>& bias,
     const float output_min,
     const float output_max);
+
+Tensor run(const ContextLinear& context, const Tensor& input);
 } // namespace linear
 } // namespace internal
 } // namespace xnnpack

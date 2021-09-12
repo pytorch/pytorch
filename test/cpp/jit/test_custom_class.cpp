@@ -1,3 +1,7 @@
+#include <gtest/gtest.h>
+
+#include <test/cpp/jit/test_custom_class_registrations.h>
+#include <torch/csrc/jit/passes/freeze_module.h>
 #include <torch/custom_class.h>
 #include <torch/script.h>
 
@@ -8,136 +12,125 @@
 namespace torch {
 namespace jit {
 
+TEST(CustomClassTest, TorchbindIValueAPI) {
+  script::Module m("m");
+
+  // test make_custom_class API
+  auto custom_class_obj = make_custom_class<MyStackClass<std::string>>(
+      std::vector<std::string>{"foo", "bar"});
+  m.define(R"(
+    def forward(self, s : __torch__.torch.classes._TorchScriptTesting._StackString):
+      return s.pop(), s
+  )");
+
+  auto test_with_obj = [&m](IValue obj, std::string expected) {
+    auto res = m.run_method("forward", obj);
+    auto tup = res.toTuple();
+    AT_ASSERT(tup->elements().size() == 2);
+    auto str = tup->elements()[0].toStringRef();
+    auto other_obj =
+        tup->elements()[1].toCustomClass<MyStackClass<std::string>>();
+    AT_ASSERT(str == expected);
+    auto ref_obj = obj.toCustomClass<MyStackClass<std::string>>();
+    AT_ASSERT(other_obj.get() == ref_obj.get());
+  };
+
+  test_with_obj(custom_class_obj, "bar");
+
+  // test IValue() API
+  auto my_new_stack = c10::make_intrusive<MyStackClass<std::string>>(
+      std::vector<std::string>{"baz", "boo"});
+  auto new_stack_ivalue = c10::IValue(my_new_stack);
+
+  test_with_obj(new_stack_ivalue, "boo");
+}
+
+class TorchBindTestClass : public torch::jit::CustomClassHolder {
+ public:
+  std::string get() {
+    return "Hello, I am your test custom class";
+  }
+};
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
+constexpr char class_doc_string[] = R"(
+  I am docstring for TorchBindTestClass
+  Args:
+      What is an argument? Oh never mind, I don't take any.
+
+  Return:
+      How would I know? I am just a holder of some meaningless test methods.
+  )";
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
+constexpr char method_doc_string[] =
+    "I am docstring for TorchBindTestClass get_with_docstring method";
+
 namespace {
-
-struct Foo : torch::CustomClassHolder {
-  int x, y;
-  Foo() : x(0), y(0) {}
-  Foo(int x_, int y_) : x(x_), y(y_) {}
-  int64_t info() {
-    return this->x * this->y;
-  }
-  int64_t add(int64_t z) {
-    return (x + y) * z;
-  }
-  void increment(int64_t z) {
-    this->x += z;
-    this->y += z;
-  }
-  int64_t combine(c10::intrusive_ptr<Foo> b) {
-    return this->info() + b->info();
-  }
-  ~Foo() {
-    // std::cout<<"Destroying object with values: "<<x<<' '<<y<<std::endl;
-  }
-};
-
-template <class T>
-struct Stack : torch::CustomClassHolder {
-  std::vector<T> stack_;
-  Stack(std::vector<T> init) : stack_(init.begin(), init.end()) {}
-
-  void push(T x) {
-    stack_.push_back(x);
-  }
-  T pop() {
-    auto val = stack_.back();
-    stack_.pop_back();
-    return val;
-  }
-
-  c10::intrusive_ptr<Stack> clone() const {
-    return c10::make_intrusive<Stack>(stack_);
-  }
-
-  void merge(const c10::intrusive_ptr<Stack>& c) {
-    for (auto& elem : c->stack_) {
-      push(elem);
-    }
-  }
-
-  std::tuple<double, int64_t> return_a_tuple() const {
-    return std::make_tuple(1337.0f, 123);
-  }
-};
-
-struct PickleTester : torch::CustomClassHolder {
-  PickleTester(std::vector<int64_t> vals) : vals(std::move(vals)) {}
-  std::vector<int64_t> vals;
-};
-
-static auto test = torch::class_<Foo>("_TorchScriptTesting_Foo")
-                       .def(torch::init<int64_t, int64_t>())
-                       // .def(torch::init<>())
-                       .def("info", &Foo::info)
-                       .def("increment", &Foo::increment)
-                       .def("add", &Foo::add)
-                       .def("combine", &Foo::combine);
-
-static auto testStack =
-    torch::class_<Stack<std::string>>("_TorchScriptTesting_StackString")
-        .def(torch::init<std::vector<std::string>>())
-        .def("push", &Stack<std::string>::push)
-        .def("pop", &Stack<std::string>::pop)
-        .def("clone", &Stack<std::string>::clone)
-        .def("merge", &Stack<std::string>::merge)
-        .def_pickle(
-            [](const c10::intrusive_ptr<Stack<std::string>>& self) {
-              return self->stack_;
-            },
-            [](std::vector<std::string> state) { // __setstate__
-              return c10::make_intrusive<Stack<std::string>>(
-                  std::vector<std::string>{"i", "was", "deserialized"});
-            })
-        .def("return_a_tuple", &Stack<std::string>::return_a_tuple)
-        .def(
-            "top",
-            [](const c10::intrusive_ptr<Stack<std::string>>& self)
-                -> std::string { return self->stack_.back(); });
-// clang-format off
-        // The following will fail with a static assert telling you you have to
-        // take an intrusive_ptr<Stack> as the first argument.
-        // .def("foo", [](int64_t a) -> int64_t{ return 3;});
-// clang-format on
-
-static auto testPickle =
-    torch::class_<PickleTester>("_TorchScriptTesting_PickleTester")
-        .def(torch::init<std::vector<int64_t>>())
-        .def_pickle(
-            [](c10::intrusive_ptr<PickleTester> self) { // __getstate__
-              return std::vector<int64_t>{1, 3, 3, 7};
-            },
-            [](std::vector<int64_t> state) { // __setstate__
-              return c10::make_intrusive<PickleTester>(std::move(state));
-            })
-        .def(
-            "top",
-            [](const c10::intrusive_ptr<PickleTester>& self) {
-              return self->vals.back();
-            })
-        .def("pop", [](const c10::intrusive_ptr<PickleTester>& self) {
-          auto val = self->vals.back();
-          self->vals.pop_back();
-          return val;
-        });
-
-at::Tensor take_an_instance(const c10::intrusive_ptr<PickleTester>& instance) {
-  return torch::zeros({instance->vals.back(), 4});
-}
-
-torch::RegisterOperators& register_take_instance() {
-  static auto instance_registry = torch::RegisterOperators().op(
-  torch::RegisterOperators::options()
-      .schema(
-          "_TorchScriptTesting::take_an_instance(__torch__.torch.classes._TorchScriptTesting_PickleTester x) -> Tensor Y")
-      .catchAllKernel<decltype(take_an_instance), &take_an_instance>());
-  return instance_registry;
-}
-
-static auto& ensure_take_instance_registered = register_take_instance();
-
+static auto reg =
+    torch::class_<TorchBindTestClass>(
+        "_TorchBindTest",
+        "_TorchBindTestClass",
+        class_doc_string)
+        .def("get", &TorchBindTestClass::get)
+        .def("get_with_docstring", &TorchBindTestClass::get, method_doc_string);
 
 } // namespace
+
+// Tests DocString is properly propagated when defining CustomClasses.
+TEST(CustomClassTest, TestDocString) {
+  auto class_type = getCustomClass(
+      "__torch__.torch.classes._TorchBindTest._TorchBindTestClass");
+  AT_ASSERT(class_type);
+  AT_ASSERT(class_type->doc_string() == class_doc_string);
+
+  AT_ASSERT(class_type->getMethod("get").doc_string().empty());
+  AT_ASSERT(
+      class_type->getMethod("get_with_docstring").doc_string() ==
+      method_doc_string);
+}
+
+TEST(CustomClassTest, Serialization) {
+  script::Module m("m");
+
+  // test make_custom_class API
+  auto custom_class_obj = make_custom_class<MyStackClass<std::string>>(
+      std::vector<std::string>{"foo", "bar"});
+  m.register_attribute(
+      "s",
+      custom_class_obj.type(),
+      custom_class_obj,
+      // NOLINTNEXTLINE(bugprone-argument-comment)
+      /*is_parameter=*/false);
+  m.define(R"(
+    def forward(self):
+      return self.s.return_a_tuple()
+  )");
+
+  auto test_with_obj = [](script::Module& mod) {
+    auto res = mod.run_method("forward");
+    auto tup = res.toTuple();
+    AT_ASSERT(tup->elements().size() == 2);
+    auto i = tup->elements()[1].toInt();
+    AT_ASSERT(i == 123);
+  };
+
+  auto frozen_m = torch::jit::freeze_module(m.clone());
+
+  test_with_obj(m);
+  test_with_obj(frozen_m);
+
+  std::ostringstream oss;
+  m.save(oss);
+  std::istringstream iss(oss.str());
+  caffe2::serialize::IStreamAdapter adapter{&iss};
+  auto loaded_module = torch::jit::load(iss, torch::kCPU);
+
+  std::ostringstream oss_frozen;
+  frozen_m.save(oss_frozen);
+  std::istringstream iss_frozen(oss_frozen.str());
+  caffe2::serialize::IStreamAdapter adapter_frozen{&iss_frozen};
+  auto loaded_frozen_module = torch::jit::load(iss_frozen, torch::kCPU);
+}
 
 } // namespace jit
 } // namespace torch

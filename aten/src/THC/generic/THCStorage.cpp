@@ -5,14 +5,10 @@
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/typeid.h>
 
+
 scalar_t* THCStorage_(data)(THCState *state, const THCStorage *self)
 {
   return self->data<scalar_t>();
-}
-
-ptrdiff_t THCStorage_(size)(THCState *state, const THCStorage *self)
-{
-  return THStorage_size(self);
 }
 
 int THCStorage_(elementSize)(THCState *state)
@@ -22,42 +18,48 @@ int THCStorage_(elementSize)(THCState *state)
 
 void THCStorage_(set)(THCState *state, THCStorage *self, ptrdiff_t index, scalar_t value)
 {
-  THArgCheck((index >= 0) && (index < self->numel()), 2, "index out of bounds");
+  THArgCheck(
+      (index >= 0) && (index < static_cast<int64_t>(self->nbytes() / sizeof(scalar_t))),
+      2,
+      "index out of bounds");
   cudaStream_t stream = c10::cuda::getCurrentCUDAStream();
-  THCudaCheck(cudaMemcpyAsync(THCStorage_(data)(state, self) + index, &value, sizeof(scalar_t),
+  at::cuda::memcpy_and_sync(THCStorage_(data)(state, self) + index, &value, sizeof(scalar_t),
                               cudaMemcpyHostToDevice,
-                              stream));
-  THCudaCheck(cudaStreamSynchronize(stream));
+                              stream);
 }
 
 scalar_t THCStorage_(get)(THCState *state, const THCStorage *self, ptrdiff_t index)
 {
-  THArgCheck((index >= 0) && (index < self->numel()), 2, "index out of bounds");
+  THArgCheck(
+      (index >= 0) && (index < static_cast<int64_t>(self->nbytes() / sizeof(scalar_t))),
+      2,
+      "index out of bounds");
   scalar_t value;
   cudaStream_t stream = c10::cuda::getCurrentCUDAStream();
-  THCudaCheck(cudaMemcpyAsync(&value, THCStorage_(data)(state, self) + index, sizeof(scalar_t),
-                              cudaMemcpyDeviceToHost, stream));
-  THCudaCheck(cudaStreamSynchronize(stream));
+  at::cuda::memcpy_and_sync(&value, THCStorage_(data)(state, self) + index, sizeof(scalar_t),
+                                  cudaMemcpyDeviceToHost, stream);
   return value;
 }
 
 THCStorage* THCStorage_(new)(THCState *state)
 {
   THStorage* storage = c10::make_intrusive<at::StorageImpl>(
-      caffe2::TypeMeta::Make<scalar_t>(),
-      0,
-      c10::cuda::CUDACachingAllocator::get(),
-      true).release();
+                           c10::StorageImpl::use_byte_size_t(),
+                           0,
+                           c10::cuda::CUDACachingAllocator::get(),
+                           true)
+                           .release();
   return storage;
 }
 
 THCStorage* THCStorage_(newWithSize)(THCState *state, ptrdiff_t size)
 {
   THStorage* storage = c10::make_intrusive<at::StorageImpl>(
-      caffe2::TypeMeta::Make<scalar_t>(),
-      size,
-      c10::cuda::CUDACachingAllocator::get(),
-      true).release();
+                           c10::StorageImpl::use_byte_size_t(),
+                           size * sizeof(scalar_t),
+                           c10::cuda::CUDACachingAllocator::get(),
+                           true)
+                           .release();
   return storage;
 }
 
@@ -65,10 +67,11 @@ THCStorage* THCStorage_(newWithAllocator)(THCState *state, ptrdiff_t size,
                                           at::Allocator* allocator)
 {
   THStorage* storage = c10::make_intrusive<at::StorageImpl>(
-      caffe2::TypeMeta::Make<scalar_t>(),
-      size,
-      allocator,
-      true).release();
+                           c10::StorageImpl::use_byte_size_t(),
+                           size * sizeof(scalar_t),
+                           allocator,
+                           true)
+                           .release();
   return storage;
 }
 
@@ -91,11 +94,12 @@ THCStorage* THCStorage_(newWithDataAndAllocator)(
     ptrdiff_t size,
     at::Allocator* allocator) {
   THStorage* storage = c10::make_intrusive<at::StorageImpl>(
-      caffe2::TypeMeta::Make<scalar_t>(),
-      size,
-      std::move(data),
-      allocator,
-      allocator != nullptr).release();
+                           c10::StorageImpl::use_byte_size_t(),
+                           size * sizeof(scalar_t),
+                           std::move(data),
+                           allocator,
+                           allocator != nullptr)
+                           .release();
   return storage;
 }
 

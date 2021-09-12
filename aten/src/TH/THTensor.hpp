@@ -82,11 +82,6 @@ inline int64_t THTensor_sizeLegacyNoScalars(const THTensor *self, int dim)
   return self->dim() == 0 ? 1 : self->size(dim);
 }
 
-#include <TH/generic/THTensorFastGetSet.hpp>
-#include <TH/THGenerateAllTypes.h>
-
-#include <TH/generic/THTensorFastGetSet.hpp>
-#include <TH/THGenerateBFloat16Type.h>
 
 inline std::vector<int64_t> THTensor_sizesLegacyNoScalars(const THTensor *self) {
   if (self->dim() == 0) {
@@ -95,27 +90,16 @@ inline std::vector<int64_t> THTensor_sizesLegacyNoScalars(const THTensor *self) 
     return self->sizes().vec();
   }
 }
-
-inline std::vector<int64_t> THTensor_stridesLegacyNoScalars(const THTensor *self) {
-  if (self->dim() == 0) {
-    return {1};
-  } else {
-    return self->strides().vec();
-  }
-}
-
-// NB: Steals ownership of storage
-TH_API void THTensor_stealAndSetStoragePtr(THTensor* tensor, THStorage* storage);
-
 TH_API void THTensor_free(THTensor *self);
-TH_API void THTensor_setStorageNd(THTensor *self, THStorage *storage, ptrdiff_t storageOffset, int nDimension, const int64_t *size, const int64_t *stride);
-TH_API void THTensor_resizeNd(THTensor *self, int nDimension, const int64_t *size, const int64_t *stride);
 
 TH_CPP_API void THTensor_resize(THTensor *self, at::IntArrayRef size, at::IntArrayRef stride);
 TH_CPP_API void THTensor_setStorage(THTensor *self, THStorage *storage_, ptrdiff_t storageOffset_, at::IntArrayRef size_, at::IntArrayRef stride_);
 
 #include <TH/generic/THTensor.hpp>
 #include <TH/THGenerateAllTypes.h>
+
+#include <TH/generic/THTensor.hpp>
+#include <TH/THGenerateComplexTypes.h>
 
 #include <TH/generic/THTensor.hpp>
 #include <TH/THGenerateHalfType.h>

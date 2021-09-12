@@ -1,9 +1,9 @@
 ## @package download
 # Module caffe2.python.models.download
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 import argparse
 import os
 import sys
@@ -14,15 +14,8 @@ import json
 from caffe2.proto import caffe2_pb2
 
 # Import urllib
-try:
-    import urllib.error as urlliberror
-    import urllib.request as urllib
-    HTTPError = urlliberror.HTTPError
-    URLError = urlliberror.URLError
-except ImportError:
-    import urllib2 as urllib
-    HTTPError = urllib.HTTPError
-    URLError = urllib.URLError
+from urllib.error import HTTPError, URLError
+import urllib.request as urllib
 
 # urllib requires more work to deal with a redirect, so not using vanity url
 DOWNLOAD_BASE_URL = "https://s3.amazonaws.com/download.caffe2.ai/models/"
@@ -80,8 +73,6 @@ def downloadFromURLToFile(url, filename, show_progress=True):
     except URLError as e:
         raise Exception("Could not download model. [URL Error] {reason}."
                         .format(reason=e.reason))
-    except Exception as e:
-        raise e
 
 
 def getURLFromName(name, filename):

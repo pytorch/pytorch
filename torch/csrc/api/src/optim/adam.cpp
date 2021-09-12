@@ -6,12 +6,14 @@
 #include <torch/utils.h>
 
 #include <ATen/ATen.h>
+#include <c10/util/irange.h>
 
 #include <cmath>
 #include <functional>
 
 namespace torch {
 namespace optim {
+
 AdamOptions::AdamOptions(double lr) : lr_(lr) {}
 
 bool operator==(const AdamOptions& lhs, const AdamOptions& rhs) {
@@ -39,12 +41,19 @@ void AdamOptions::serialize(torch::serialize::InputArchive& archive) {
   _TORCH_OPTIM_DESERIALIZE_TORCH_ARG(bool, amsgrad);
 }
 
+double AdamOptions::get_lr() const {
+  return lr();
+}
+
+void AdamOptions::set_lr(const double lr) {
+  this->lr(lr);
+}
+
 bool operator==(const AdamParamState& lhs, const AdamParamState& rhs) {
   return (lhs.step() == rhs.step()) &&
           torch::equal(lhs.exp_avg(), rhs.exp_avg()) &&
           torch::equal(lhs.exp_avg_sq(), rhs.exp_avg_sq()) &&
-          ((!lhs.max_exp_avg_sq().defined() && !rhs.max_exp_avg_sq().defined()) ||
-           (lhs.max_exp_avg_sq().defined() && rhs.max_exp_avg_sq().defined() && torch::equal(lhs.max_exp_avg_sq(), rhs.max_exp_avg_sq())));
+          torch::equal_if_defined(lhs.max_exp_avg_sq(), rhs.max_exp_avg_sq());
 }
 
 void AdamParamState::serialize(torch::serialize::OutputArchive& archive) const {
@@ -130,22 +139,6 @@ Tensor Adam::step(LossClosure closure)  {
   return loss;
 }
 
-void Adam::add_parameters(const std::vector<Tensor>& parameters) {
-  return _add_parameters_new_design(parameters);
-}
-
-const std::vector<Tensor>& Adam::parameters() const noexcept {
-  return _parameters_new_design();
-}
-
-std::vector<Tensor>& Adam::parameters() noexcept {
-  return _parameters_new_design();
-}
-
-size_t Adam::size() const noexcept {
-  return _size_new_design();
-}
-
 void Adam::save(serialize::OutputArchive& archive) const {
   serialize(*this, archive);
 }
@@ -169,7 +162,7 @@ void Adam::load(serialize::InputArchive& archive) {
     torch::optim::serialize(archive, "max_exp_average_sq_buffers", max_exp_average_sq_buffers);
     // since there were no param_groups prior to version 1.5.0, assuming all tensors are now in one param_group
     std::vector<Tensor> params = param_groups_.at(0).params();
-    for (size_t idx = 0; idx < step_buffers.size(); idx++) {
+    for(const auto idx : c10::irange(step_buffers.size())) {
       auto state = std::make_unique<AdamParamState>();
       state->step(step_buffers.at(idx));
       state->exp_avg(exp_average_buffers.at(idx));

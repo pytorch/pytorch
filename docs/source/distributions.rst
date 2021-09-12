@@ -78,7 +78,7 @@ Probability distributions - torch.distributions
     :show-inheritance:
 
 :hidden:`ContinuousBernoulli`
-~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. currentmodule:: torch.distributions.continuous_bernoulli
 .. autoclass:: ContinuousBernoulli
@@ -163,6 +163,24 @@ Probability distributions - torch.distributions
 
 .. currentmodule:: torch.distributions.independent
 .. autoclass:: Independent
+    :members:
+    :undoc-members:
+    :show-inheritance:
+
+:hidden:`Kumaraswamy`
+~~~~~~~~~~~~~~~~~~~~~
+
+.. currentmodule:: torch.distributions.kumaraswamy
+.. autoclass:: Kumaraswamy
+    :members:
+    :undoc-members:
+    :show-inheritance:
+
+:hidden:`LKJCholesky`
+~~~~~~~~~~~~~~~~~~~~~~~
+
+.. currentmodule:: torch.distributions.lkj_cholesky
+.. autoclass:: LKJCholesky
     :members:
     :undoc-members:
     :show-inheritance:
@@ -328,7 +346,7 @@ Probability distributions - torch.distributions
     :members:
     :undoc-members:
     :show-inheritance:
-    
+
 :hidden:`Weibull`
 ~~~~~~~~~~~~~~~~~~~~~~~
 

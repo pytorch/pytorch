@@ -153,6 +153,24 @@ static void slow_conv2d_update_output_frame(
     int64_t n_output_plane,
     int64_t output_height,
     int64_t output_width) {
+  // Note: this is a no_group conv2d
+  if ((input.ndimension() == 4) && (kernel_height == 1) && (stride_height == 1) && (pad_height == 0) &&
+      (kernel_width == 1) && (stride_width == 1) && (pad_width == 0)) {
+    auto output2d =
+        output.reshape({n_output_plane, output_height * output_width});
+    auto weight_new =
+        weight.view({n_output_plane, n_input_plane});
+    auto input_new =
+        input.view({n_input_plane, output_height * output_width});
+
+    if (bias.defined()) {
+      output.copy_(bias.unsqueeze(-1).unsqueeze(-1));
+      output2d.addmm_(weight_new, input_new, 1, 1);
+    } else {
+      at::mm_out(output2d, weight_new, input_new);
+    }
+    return;
+  }
   unfolded2d_copy_stub(
       kCPU,
       finput,
@@ -172,14 +190,11 @@ static void slow_conv2d_update_output_frame(
   auto output2d =
       output.reshape({n_output_plane, output_height * output_width});
   if (bias.defined()) {
-    for (int64_t i = 0; i < n_output_plane; i++) {
-      output[i].fill_(bias[i].item());
-    }
+    output.copy_(bias.unsqueeze(-1).unsqueeze(-1));
+    output2d.addmm_(weight, finput, 1, 1);
   } else {
-    output.zero_();
+    output2d.addmm_(weight, finput, 0, 1);
   }
-
-  output2d.addmm_(weight, finput, 1, 1);
 }
 
 void slow_conv2d_backward_update_grad_input_frame(
@@ -255,7 +270,7 @@ void slow_conv2d_backward_out_cpu_template(
   const int64_t batch_size = input.size(0);
   at::parallel_for(0, batch_size, 0, [&](int64_t start, int64_t end) {
     NoGradGuard no_grad;
-    AutoNonVariableTypeMode non_variable_type_mode;
+    AutoDispatchBelowADInplaceOrView non_variable_type_mode;
     for (int64_t t = start; t < end; t++) {
       Tensor grad_input_t = grad_input[t];
       Tensor grad_output_t = grad_output[t];
@@ -369,16 +384,18 @@ static void slow_conv2d_backward_parameters_out_cpu_template(
 
 } // namespace
 
-std::tuple<Tensor&, Tensor&, Tensor&> slow_conv2d_forward_out_cpu(
+std::tuple<Tensor&, Tensor&, Tensor&> slow_conv2d_forward_out_cpu(const Tensor& self,
+    const Tensor& weight_,
+    IntArrayRef kernel_size, const c10::optional<Tensor>& bias_opt,
+    IntArrayRef stride,
+    IntArrayRef padding,
     Tensor& output,
     Tensor& finput,
-    Tensor& fgrad_input,
-    const Tensor& self,
-    const Tensor& weight_,
-    IntArrayRef kernel_size,
-    const Tensor& bias,
-    IntArrayRef stride,
-    IntArrayRef padding) {
+    Tensor& fgrad_input) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
+  const Tensor& bias = *bias_maybe_owned;
+
   const int64_t kernel_height = kernel_size[0];
   const int64_t kernel_width = kernel_size[1];
   const int64_t pad_height = padding[0];
@@ -402,7 +419,6 @@ std::tuple<Tensor&, Tensor&, Tensor&> slow_conv2d_forward_out_cpu(
       false);
 
   const Tensor input = self.contiguous();
-  const int64_t ndim = input.dim();
   const int64_t dim_planes = 1;
   const int64_t dim_height = 2;
   const int64_t dim_width = 3;
@@ -418,16 +434,23 @@ std::tuple<Tensor&, Tensor&, Tensor&> slow_conv2d_forward_out_cpu(
 
   const int64_t batch_size = input.size(0);
 
-  finput.resize_({batch_size,
+  if ((input.ndimension() == 4) && (kernel_height == 1) && (stride_height == 1) && (pad_height == 0) &&
+      (kernel_width == 1) && (stride_width == 1) && (pad_width == 0)) {
+    finput =
+        input.view({batch_size, n_input_plane, output_height * output_width})
+            .detach();
+  } else {
+     finput.resize_({batch_size,
                   n_input_plane * kernel_height * kernel_width,
                   output_height * output_width});
+  }
   output.resize_({batch_size, n_output_plane, output_height, output_width});
 
   at::parallel_for(0, batch_size, 0, [&](int64_t start, int64_t end) {
     NoGradGuard no_grad;
-    AutoNonVariableTypeMode non_variable_type_mode;
+    AutoDispatchBelowADInplaceOrView non_variable_type_mode;
     for (int64_t t = start; t < end; t++) {
-      Tensor input_t = input[t];
+      Tensor input_t = input[t].unsqueeze(0);
       Tensor output_t = output[t];
       Tensor finput_t = finput[t];
       slow_conv2d_update_output_frame(
@@ -457,38 +480,40 @@ std::tuple<Tensor&, Tensor&, Tensor&> slow_conv2d_forward_out_cpu(
 std::tuple<Tensor, Tensor, Tensor> slow_conv2d_forward_cpu(
     const Tensor& self,
     const Tensor& weight,
-    IntArrayRef kernel_size,
-    const Tensor& bias,
+    IntArrayRef kernel_size, const c10::optional<Tensor>& bias_opt,
     IntArrayRef stride,
     IntArrayRef padding) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
+  const Tensor& bias = *bias_maybe_owned;
+
   auto output = at::empty({0}, self.options());
   auto finput = at::empty({0}, self.options());
   auto fgrad_input = at::empty({0}, self.options());
-  slow_conv2d_forward_out_cpu(
-      output,
-      finput,
-      fgrad_input,
+  at::native::slow_conv2d_forward_out_cpu(
       self,
       weight,
       kernel_size,
       bias,
       stride,
-      padding);
+      padding,
+      output,
+      finput,
+      fgrad_input);
   return std::make_tuple(output, finput, fgrad_input);
 }
 
-std::tuple<Tensor&, Tensor&, Tensor&> slow_conv2d_backward_out_cpu(
-    Tensor& grad_input,
-    Tensor& grad_weight,
-    Tensor& grad_bias,
-    const Tensor& grad_output,
+std::tuple<Tensor&, Tensor&, Tensor&> slow_conv2d_backward_out_cpu(const Tensor& grad_output,
     const Tensor& self,
     const Tensor& weight,
     IntArrayRef kernel_size,
     IntArrayRef stride,
     IntArrayRef padding,
     const Tensor& finput,
-    const Tensor& fgrad_input) {
+    const Tensor& fgrad_input,
+    Tensor& grad_input,
+    Tensor& grad_weight,
+    Tensor& grad_bias) {
   if (grad_input.defined()) {
     slow_conv2d_backward_out_cpu_template(
         grad_input,
@@ -496,6 +521,7 @@ std::tuple<Tensor&, Tensor&, Tensor&> slow_conv2d_backward_out_cpu(
         self,
         weight,
         finput,
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
         const_cast<Tensor&>(fgrad_input),   // cast away auto-generated const of buffer
         kernel_size,
         stride,
@@ -555,10 +581,7 @@ std::tuple<Tensor, Tensor, Tensor> slow_conv2d_backward_cpu(
     grad_bias = at::empty({0}, grad_output.options());
   }
 
-  slow_conv2d_backward_out_cpu(
-      grad_input,
-      grad_weight,
-      grad_bias,
+  at::native::slow_conv2d_backward_out_cpu(
       grad_output,
       self,
       weight,
@@ -566,9 +589,30 @@ std::tuple<Tensor, Tensor, Tensor> slow_conv2d_backward_cpu(
       stride,
       padding,
       finput,
-      fgrad_input);
+      fgrad_input,
+      grad_input,
+      grad_weight,
+      grad_bias);
 
   return std::make_tuple(grad_input, grad_weight, grad_bias);
+}
+
+Tensor & thnn_conv2d_out(const Tensor & self, const Tensor & weight, IntArrayRef kernel_size, const c10::optional<Tensor>& bias_opt, IntArrayRef stride, IntArrayRef padding, Tensor & output) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
+  const Tensor& bias = *bias_maybe_owned;
+
+  Tensor finput = at::empty({0}, self.options());
+  Tensor fgrad_input = at::empty({0}, self.options());
+  return std::get<0>(at::thnn_conv2d_forward_out(output, finput, fgrad_input, self, weight, kernel_size, bias, stride, padding));
+}
+
+Tensor thnn_conv2d(const Tensor & self, const Tensor & weight, IntArrayRef kernel_size, const c10::optional<Tensor>& bias_opt, IntArrayRef stride, IntArrayRef padding) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
+  const Tensor& bias = *bias_maybe_owned;
+
+  return std::get<0>(at::thnn_conv2d_forward(self, weight, kernel_size, bias, stride, padding));
 }
 
 } // namespace native

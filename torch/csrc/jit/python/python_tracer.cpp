@@ -1,15 +1,16 @@
 #include <torch/csrc/python_headers.h>
 
-#include <torch/csrc/jit/serialization/export.h>
+#include <torch/csrc/jit/frontend/tracer.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/passes/lower_tuples.h>
 #include <torch/csrc/jit/python/pybind.h>
 #include <torch/csrc/jit/python/python_tracer.h>
-#include <torch/csrc/jit/frontend/tracer.h>
+#include <torch/csrc/jit/serialization/export.h>
 #include <torch/csrc/utils/python_strings.h>
 
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 
 #include <sstream>
 
@@ -23,24 +24,43 @@ namespace tracer {
 
 // Python interpreter retrieval routine adapted from
 // https://stackoverflow.com/a/8706144
+std::vector<StackEntry> _pythonCallstack() {
+  pybind11::gil_scoped_acquire gil;
+  PyFrameObject* frame = PyEval_GetFrame();
+  std::vector<StackEntry> entries;
+
+  while (nullptr != frame) {
+    size_t line = PyCode_Addr2Line(frame->f_code, frame->f_lasti);
+    std::string filename = THPUtils_unpackString(frame->f_code->co_filename);
+    std::string funcname = THPUtils_unpackString(frame->f_code->co_name);
+    auto source = std::make_shared<Source>(funcname, filename, line);
+    entries.emplace_back(
+        StackEntry{funcname, SourceRange(source, 0, funcname.size())});
+    frame = frame->f_back;
+  }
+  return entries;
+}
+
 SourceRange getPythonInterpreterSourceRange() {
+  auto cs = pythonCallstack();
   c10::optional<std::string> source_filename;
   size_t source_line = 0;
   std::stringstream stack_trace;
-
-  pybind11::gil_scoped_acquire gil;
-  PyFrameObject* frame = PyEval_GetFrame();
-
-  while (nullptr != frame) {
-    int line = PyCode_Addr2Line(frame->f_code, frame->f_lasti);
-    std::string filename = THPUtils_unpackString(frame->f_code->co_filename);
-    std::string funcname = THPUtils_unpackString(frame->f_code->co_name);
-    stack_trace << filename << "(" << line << "): " << funcname << "\n";
-    if (!source_filename) {
-      source_filename = filename;
-      source_line = line;
+  for (const auto& entry : cs) {
+    auto& range = entry.range;
+    if (range.source()) {
+      auto& src = range.source();
+      if (src && src->filename()) {
+        auto line =
+            src->starting_line_no() + src->lineno_for_offset(range.start());
+        stack_trace << *(src->filename()) << "(" << line
+                    << "): " << entry.filename << "\n";
+        if (!source_filename) {
+          source_filename = *(src->filename());
+          source_line = line;
+        }
+      }
     }
-    frame = frame->f_back;
   }
 
   auto stack_trace_text = stack_trace.str();
@@ -53,8 +73,10 @@ std::pair<std::shared_ptr<Graph>, Stack> createGraphByTracing(
     const py::function& func,
     Stack trace_inputs,
     const py::function& var_name_lookup_fn,
+    bool strict,
     bool force_outplace,
-    Module* self) {
+    Module* self,
+    const std::vector<std::string>& argument_names) {
   C10_LOG_API_USAGE_ONCE("torch.tracer");
 
   auto lookup_fn_adapter =
@@ -68,7 +90,7 @@ std::pair<std::shared_ptr<Graph>, Stack> createGraphByTracing(
       [&func](Stack inputs) -> Stack {
         size_t num_func_inputs = inputs.size();
         py::tuple py_inputs(num_func_inputs);
-        for (size_t i = 0; i < num_func_inputs; ++i) {
+        for (const auto i : c10::irange(num_func_inputs)) {
           py_inputs[i] = py::cast(inputs[i]);
         }
         auto out = func(*py_inputs);
@@ -80,8 +102,10 @@ std::pair<std::shared_ptr<Graph>, Stack> createGraphByTracing(
         return {toTypeInferredIValue(out)};
       },
       lookup_fn_adapter,
+      strict,
       force_outplace,
-      self);
+      self,
+      argument_names);
   return std::make_pair(std::get<0>(outs)->graph, std::get<1>(outs));
 }
 
@@ -121,6 +145,7 @@ void pythonWarn(const std::string& reason) {
 }
 
 void initPythonTracerBindings(PyObject* module) {
+  setPythonCallstack(_pythonCallstack);
   setRecordSourceLocation(pythonRecordSourceLocation);
 
   auto m = py::handle(module).cast<py::module>();
@@ -154,16 +179,25 @@ void initPythonTracerBindings(PyObject* module) {
           })
       .def(
           "set_graph",
-          [](TracingState& s, std::shared_ptr<Graph> g) { s.graph = g; })
+          [](TracingState& s, std::shared_ptr<Graph> g) {
+            s.graph = std::move(g);
+          })
       .def("graph", [](TracingState& s) { return s.graph; });
 
   m.def("_tracer_warn_use_python", []() { tracer::setWarn(pythonWarn); });
-  m.def("_create_graph_by_tracing", createGraphByTracing,
-    py::arg("func"), py::arg("inputs"), py::arg("var_name_lookup_fn"),
-    py::arg("force_outplace"), py::arg("self") = nullptr);
+  m.def(
+      "_create_graph_by_tracing",
+      createGraphByTracing,
+      py::arg("func"),
+      py::arg("inputs"),
+      py::arg("var_name_lookup_fn"),
+      py::arg("strict"),
+      py::arg("force_outplace"),
+      py::arg("self") = nullptr,
+      py::arg("argument_names") = std::vector<std::string>());
   m.def("_get_tracing_state", []() { return getTracingState(); });
   m.def("_set_tracing_state", [](std::shared_ptr<TracingState> state) {
-    return setTracingState(state);
+    return setTracingState(std::move(state));
   });
   m.def("_get_value_trace", [](const Variable& var) {
     return getValueTrace(var);
@@ -171,7 +205,7 @@ void initPythonTracerBindings(PyObject* module) {
   m.def("_set_value_trace", [](const Variable& var, Value* value) {
     return setValueTrace(var, value);
   });
-  m.def("_tracer_set_get_unique_name_fn", [](py::function func) {
+  m.def("_tracer_set_get_unique_name_fn", [](const py::function& func) {
     const auto& tracing_state = getTracingState();
     AT_ASSERT(tracing_state);
     tracing_state->lookup_var_name_fn =

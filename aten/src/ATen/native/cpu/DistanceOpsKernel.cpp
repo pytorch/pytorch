@@ -12,7 +12,7 @@ namespace at { namespace native { namespace {
 
 template<typename scalar_t>
 struct Dist {
-  using Vec = vec256::Vec256<scalar_t>;
+  using Vec = vec::Vectorized<scalar_t>;
 
   // Depending on the value of the pnorm, there are specific implementations
   // that are much faster than std::pow(std::abs(a - b), p), but have the same
@@ -39,10 +39,10 @@ struct Dist {
   // there's a struct with only a backward pass for this case.
 
   // TODO This is an inefficient way to compite sign, and can be much faster
-  // using native SSE instructions that should be added to Vec256.
+  // using native SSE instructions that should be added to Vectorized.
   static inline Vec sign(Vec val) {
-    return vec256::minimum(vec256::maximum(Vec(0), val.ceil()), Vec(1)) +
-      vec256::minimum(vec256::maximum(Vec(-1), val.floor()), Vec(0));
+    return vec::minimum(vec::maximum(Vec(0), val.ceil()), Vec(1)) +
+      vec::minimum(vec::maximum(Vec(-1), val.floor()), Vec(0));
   }
 
   static inline Vec abs(Vec val) {
@@ -62,7 +62,7 @@ struct Dist {
   }
 
   static inline Vec min(Vec val, scalar_t other) {
-    return vec256::minimum(val, Vec(other));
+    return vec::minimum(val, Vec(other));
   }
 
   static inline scalar_t min(scalar_t val, scalar_t other) {
@@ -70,7 +70,7 @@ struct Dist {
   }
 
   static inline Vec max(Vec val, Vec other) {
-    return vec256::maximum(val, other);
+    return vec::maximum(val, other);
   }
 
   static inline scalar_t max(scalar_t val, scalar_t other) {
@@ -104,7 +104,11 @@ struct Dist {
 
   // Special general pnorm derivative if p is less than two
   struct lttdist_calc {
-    static inline Vec backward(const Vec& diff, const scalar_t grad, const scalar_t dist, const Vec& p) { return dist == 0.0 ? Vec(0) : sign(diff) * diff.abs().pow(p - Vec(1)) * Vec(grad) / Vec(dist).pow(p - Vec(1)); }
+    static inline Vec backward(const Vec& diff, const scalar_t grad, const scalar_t dist, const Vec& p) {
+      Vec result = (dist == 0.0) ? Vec(0) : (sign(diff) * diff.abs().pow(p - Vec(1)) * Vec(grad) / Vec(dist).pow(p - Vec(1)));
+      result = Vec::blendv(result, Vec(0), (diff == Vec(0)) & (p < Vec(1)));
+      return result;
+    }
   };
 
   // Two norm
@@ -126,7 +130,7 @@ struct Dist {
     static inline Vec backward(const Vec& diff, const scalar_t grad, const scalar_t dist, const Vec& p) { return dist == 0.0 ? Vec(0) : diff * diff.abs().pow(p - Vec(2)) * Vec(grad) / Vec(dist).pow(p - Vec(1)); }
   };
 
-  // Info norm
+  // Inf norm
   template<typename data_t>
   struct idist_calc {
     static inline data_t map(const data_t& diff, const data_t& p) { return diff; }
@@ -134,7 +138,7 @@ struct Dist {
     static inline scalar_t finish(const scalar_t agg, const scalar_t p) { return agg; }
     // TODO This backward pass uses a very complext expression to compute (diff
     // == dist) that could be much faster if using SSE instructions.
-    static inline Vec backward(const Vec& diff, const scalar_t grad, const scalar_t dist, const Vec& p) { return Vec(grad) * sign(diff) * (Vec(1) - vec256::minimum(Vec(1), (diff.abs() - Vec(dist)).abs().ceil())); }
+    static inline Vec backward(const Vec& diff, const scalar_t grad, const scalar_t dist, const Vec& p) { return Vec(grad) * sign(diff) * (Vec(1) - vec::minimum(Vec(1), (diff.abs() - Vec(dist)).abs().ceil())); }
   };
 
   template <typename F>
@@ -155,6 +159,7 @@ struct Dist {
       const Vec pvec(p);
       double n2 = n - .5;
       // The -1 accounts for floating point truncation issues
+      // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
       int64_t i = static_cast<int64_t>((n2 - std::sqrt(n2 * n2 - 2 * k - 1)));
       int64_t j = k - n * i + i * (i + 1) / 2 + i + 1;
 
@@ -164,7 +169,7 @@ struct Dist {
       const scalar_t * const res_end = res_start + end;
 
       while (res != res_end) {
-        *res = F::finish(vec256::map2_reduce_all<scalar_t>(
+        *res = F::finish(vec::map2_reduce_all<scalar_t>(
           [&pvec](Vec a, Vec b) { return F::map((a - b).abs(), pvec); },
           F::red, self_i, self_j, m), p);
 

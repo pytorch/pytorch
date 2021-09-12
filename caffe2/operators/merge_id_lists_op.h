@@ -5,6 +5,9 @@
 #include <vector>
 #include "caffe2/core/context.h"
 #include "caffe2/core/operator.h"
+#include "caffe2/core/export_caffe2_op_to_c10.h"
+
+C10_DECLARE_EXPORT_CAFFE2_OP_TO_C10(MergeIdLists);
 
 namespace caffe2 {
 
@@ -29,6 +32,7 @@ class MergeIdListsOp : public Operator<Context> {
      * and perform checks.
      */
     auto M = 0;
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (size_t i = 0; i < InputSize(); i += 2) {
       auto& lengths = Input(i);
       CAFFE_ENFORCE_EQ(lengths.dim(), 1, "LENGTHS should be 1-D");

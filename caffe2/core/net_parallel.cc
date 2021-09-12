@@ -61,7 +61,7 @@ ParallelNet::ParallelNet(
   }
 
   // initialize task graph
-  for (auto chain_id = 0; chain_id < chains.size(); ++chain_id) {
+  for (auto chain_id = 0U; chain_id < chains.size(); ++chain_id) {
     std::vector<OperatorBase*> ops;
     ops.reserve(chains[chain_id].size());
     for (auto op_id : chains[chain_id]) {
@@ -69,7 +69,7 @@ ParallelNet::ParallelNet(
     }
     CAFFE_ENFORCE(task_graph_->CreateNode(chain_id, ops));
   }
-  for (auto chain_id = 0; chain_id < chain_nodes.size(); ++chain_id) {
+  for (auto chain_id = 0U; chain_id < chain_nodes.size(); ++chain_id) {
     if (!chain_nodes[chain_id].parents_.empty()) {
       CAFFE_ENFORCE(
           task_graph_->AddDependency(chain_id, chain_nodes[chain_id].parents_));

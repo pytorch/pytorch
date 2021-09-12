@@ -1,16 +1,29 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
 
 import sys
 import torch
 
 
 def is_available():
-    return sys.version_info >= (3, 0) and hasattr(torch._C, "_dist_autograd_init")
+    return hasattr(torch._C, "_dist_autograd_init")
 
 
 if is_available() and not torch._C._dist_autograd_init():
     raise RuntimeError("Failed to initialize torch.distributed.autograd")
 
+if is_available():
+    from torch._C._distributed_autograd import (
+        get_gradients,
+        backward,
+        _init,
+        _new_context,
+        _release_context,
+        _get_max_id,
+        _is_valid_context,
+        _retrieve_context,
+        _current_context,
+        _get_debug_info,
+        DistAutogradContext,
+    )
 
 class context(object):
     '''
@@ -22,13 +35,12 @@ class context(object):
     autograd pass.
 
     Example::
-
-        >> import torch.distributed.autograd as dist_autograd
-        >> with dist_autograd.context() as context_id:
-        >>   t1 = torch.rand((3, 3), requires_grad=True)
-        >>   t2 = torch.rand((3, 3), requires_grad=True)
-        >>   loss = rpc.rpc_sync("worker1", torch.add, args=(t1, t2)).sum()
-        >>   dist_autograd.backward(context_id, [loss])
+        >>> import torch.distributed.autograd as dist_autograd
+        >>> with dist_autograd.context() as context_id:
+        >>>   t1 = torch.rand((3, 3), requires_grad=True)
+        >>>   t2 = torch.rand((3, 3), requires_grad=True)
+        >>>   loss = rpc.rpc_sync("worker1", torch.add, args=(t1, t2)).sum()
+        >>>   dist_autograd.backward(context_id, [loss])
     '''
     def __enter__(self):
         self.autograd_context = _new_context()

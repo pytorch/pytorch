@@ -12,22 +12,18 @@
 #include <string>
 #include <vector>
 
-#include "c10/util/Flags.h"
+#include <c10/util/Flags.h>
 
-// Log severity level constants.
-const int FATAL = 3;
-#if !defined(_MSC_VER) || !defined(ERROR)
-// Windows defines the ERROR macro already, and as a result we will
-// simply use that one. The downside is that one will now mix LOG(INFO)
-// and LOG(ERROR) because ERROR is defined to be zero. Anyway, the
-// recommended way is to use glog so fixing this is a low-pri item.
-const int ERROR = 2;
-#endif
-const int WARNING = 1;
-const int INFO = 0;
 const char CAFFE2_SEVERITY_PREFIX[] = "FEWIV";
 
 namespace c10 {
+
+// Log severity level constants.
+const int GLOG_FATAL = 3;
+const int GLOG_ERROR = 2;
+const int GLOG_WARNING = 1;
+const int GLOG_INFO = 0;
+
 class C10_API MessageLogger {
  public:
   MessageLogger(const char* file, int line, int severity);
@@ -62,7 +58,7 @@ class C10_API LoggerVoidify {
 // Log a message and terminate.
 template <class T>
 void LogMessageFatal(const char* file, int line, const T& message) {
-  MessageLogger(file, line, FATAL).stream() << message;
+  MessageLogger(file, line, GLOG_FATAL).stream() << message;
 }
 
 // Helpers for CHECK_NOTNULL(). Two are necessary to support both raw pointers
@@ -89,27 +85,38 @@ T& CheckNotNull(const char* file, int line, const char* names, T& t) {
 // ---------------------- Logging Macro definitions --------------------------
 
 static_assert(
-    CAFFE2_LOG_THRESHOLD <= FATAL,
-    "CAFFE2_LOG_THRESHOLD should at most be FATAL.");
+    CAFFE2_LOG_THRESHOLD <= ::c10::GLOG_FATAL,
+    "CAFFE2_LOG_THRESHOLD should at most be GLOG_FATAL.");
 // If n is under the compile time caffe log threshold, The _CAFFE_LOG(n)
 // should not generate anything in optimized code.
-#define LOG(n)                   \
-  if (n >= CAFFE2_LOG_THRESHOLD) \
-  ::c10::MessageLogger((char*)__FILE__, __LINE__, n).stream()
-#define VLOG(n) LOG((-n))
+#define LOG(n)                                 \
+  if (::c10::GLOG_##n >= CAFFE2_LOG_THRESHOLD) \
+  ::c10::MessageLogger((char*)__FILE__, __LINE__, ::c10::GLOG_##n).stream()
+#define VLOG(n)                   \
+  if (-n >= CAFFE2_LOG_THRESHOLD) \
+  ::c10::MessageLogger((char*)__FILE__, __LINE__, -n).stream()
 
-#define LOG_IF(n, condition)                    \
-  if (n >= CAFFE2_LOG_THRESHOLD && (condition)) \
-  ::c10::MessageLogger((char*)__FILE__, __LINE__, n).stream()
-#define VLOG_IF(n, condition) LOG_IF((-n), (condition))
+#define LOG_IF(n, condition)                                  \
+  if (::c10::GLOG_##n >= CAFFE2_LOG_THRESHOLD && (condition)) \
+  ::c10::MessageLogger((char*)__FILE__, __LINE__, ::c10::GLOG_##n).stream()
+#define VLOG_IF(n, condition)                    \
+  if (-n >= CAFFE2_LOG_THRESHOLD && (condition)) \
+  ::c10::MessageLogger((char*)__FILE__, __LINE__, -n).stream()
 
 #define VLOG_IS_ON(verboselevel) (CAFFE2_LOG_THRESHOLD <= -(verboselevel))
 
+// Log with source location information override (to be used in generic
+// warning/error handlers implemented as functions, not macros)
+#define LOG_AT_FILE_LINE(n, file, line)        \
+  if (::c10::GLOG_##n >= CAFFE2_LOG_THRESHOLD) \
+  ::c10::MessageLogger(file, line, ::c10::GLOG_##n).stream()
+
 // Log only if condition is met.  Otherwise evaluates to void.
-#define FATAL_IF(condition)            \
-  condition ? (void)0                  \
-            : ::c10::LoggerVoidify() & \
-          ::c10::MessageLogger((char*)__FILE__, __LINE__, FATAL).stream()
+#define FATAL_IF(condition)                                                  \
+  condition ? (void)0                                                        \
+            : ::c10::LoggerVoidify() &                                       \
+          ::c10::MessageLogger((char*)__FILE__, __LINE__, ::c10::GLOG_FATAL) \
+              .stream()
 
 // Check for a given boolean condition.
 #define CHECK(condition) FATAL_IF(condition) << "Check failed: " #condition " "
@@ -124,10 +131,9 @@ static_assert(
   CHECK(condition)
 #endif // NDEBUG
 
-#define CHECK_OP(val1, val2, op)                      \
-  FATAL_IF(((val1) op (val2)))                        \
-    << "Check failed: " #val1 " " #op " " #val2 " ("  \
-    << (val1) << " vs. " << (val2) << ") "
+#define CHECK_OP(val1, val2, op)                                              \
+  FATAL_IF(((val1)op(val2))) << "Check failed: " #val1 " " #op " " #val2 " (" \
+                             << (val1) << " vs. " << (val2) << ") "
 
 // Check_op macro definitions
 #define CHECK_EQ(val1, val2) CHECK_OP(val1, val2, ==)
@@ -223,8 +229,7 @@ inline std::ostream& operator<<(
   return out;
 }
 
-inline std::ostream& operator<<(
-    std::ostream& out, const std::nullptr_t&) {
+inline std::ostream& operator<<(std::ostream& out, const std::nullptr_t&) {
   out << "(null)";
   return out;
 }

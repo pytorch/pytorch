@@ -1,6 +1,6 @@
 # Fast RNN benchmarks
 
-Benchmarks for TorchScript models 
+Benchmarks for TorchScript models
 
 For most stable results, do the following:
 - Set CPU Governor to performance mode (as opposed to energy save)
@@ -24,7 +24,7 @@ or run the test independently:
 
 should give a good comparison, or you can specify the type of model to run
 
-`python -m fastrnns.bench --rnns cudnn aten jit --group rnns` 
+`python -m fastrnns.bench --rnns cudnn aten jit --group rnns`
 
 ## Run model profiling, calls nvprof
 
@@ -33,10 +33,9 @@ should give a good comparison, or you can specify the type of model to run
 should generate nvprof file for all models somewhere.
 you can also specify the models to generate nvprof files separately:
 
-`python -m fastrnns.profile --rnns aten jit` 
+`python -m fastrnns.profile --rnns aten jit`
 
 ### Caveats
 
 Use Linux for the most accurate timing. A lot of these tests only run
 on CUDA.
-

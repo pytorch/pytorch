@@ -52,6 +52,7 @@ namespace nn {
 /// iteration over submodules, positional access, adding a new module after
 /// construction via `push_back`, as well as joining two `ModuleList`s via
 /// `extend`.
+// NOLINTNEXTLINE(bugprone-exception-escape)
 class ModuleListImpl : public Cloneable<ModuleListImpl> {
  public:
   using Iterator = std::vector<std::shared_ptr<Module>>::iterator;
@@ -74,7 +75,7 @@ class ModuleListImpl : public Cloneable<ModuleListImpl> {
     for (const auto& module : modules_) {
       clone->push_back(module->clone(device));
     }
-    return std::move(clone);
+    return clone;
   }
 
   /// `reset()` is empty for `ModuleList`, since it does not have parameters of

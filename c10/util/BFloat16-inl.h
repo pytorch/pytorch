@@ -7,30 +7,65 @@ namespace c10 {
 
 /// Constructors
 inline C10_HOST_DEVICE BFloat16::BFloat16(float value) {
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000 && \
+    defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
+  x = __bfloat16_as_ushort(__float2bfloat16(value));
+#else
   // RNE by default
   x = detail::round_to_nearest_even(value);
+#endif
 }
 
 /// Implicit conversions
 inline C10_HOST_DEVICE BFloat16::operator float() const {
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
+  return __bfloat162float(*reinterpret_cast<const __nv_bfloat16*>(&x));
+#else
   return detail::f32_from_bits(x);
+#endif
 }
+
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
+inline C10_HOST_DEVICE BFloat16::BFloat16(const __nv_bfloat16& value) {
+  x = *reinterpret_cast<const unsigned short*>(&value);
+}
+inline C10_HOST_DEVICE BFloat16::operator __nv_bfloat16() const {
+  return *reinterpret_cast<const __nv_bfloat16*>(&x);
+}
+#endif
+
+// CUDA intrinsics
+
+#if defined(__CUDACC__) || defined(__HIPCC__)
+inline C10_DEVICE BFloat16 __ldg(const BFloat16* ptr) {
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000 && \
+    defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
+  return __ldg(reinterpret_cast<const __nv_bfloat16*>(ptr));
+#else
+  return *ptr;
+#endif
+}
+#endif
 
 /// Arithmetic
 
-inline C10_HOST_DEVICE BFloat16 operator+(const BFloat16& a, const BFloat16& b) {
+inline C10_HOST_DEVICE BFloat16
+operator+(const BFloat16& a, const BFloat16& b) {
   return static_cast<float>(a) + static_cast<float>(b);
 }
 
-inline C10_HOST_DEVICE BFloat16 operator-(const BFloat16& a, const BFloat16& b) {
+inline C10_HOST_DEVICE BFloat16
+operator-(const BFloat16& a, const BFloat16& b) {
   return static_cast<float>(a) - static_cast<float>(b);
 }
 
-inline C10_HOST_DEVICE BFloat16 operator*(const BFloat16& a, const BFloat16& b) {
+inline C10_HOST_DEVICE BFloat16
+operator*(const BFloat16& a, const BFloat16& b) {
   return static_cast<float>(a) * static_cast<float>(b);
 }
 
-inline C10_HOST_DEVICE BFloat16 operator/(const BFloat16& a, const BFloat16& b) {
+inline C10_HOST_DEVICE BFloat16 operator/(const BFloat16& a, const BFloat16& b)
+    __ubsan_ignore_float_divide_by_zero__ {
   return static_cast<float>(a) / static_cast<float>(b);
 }
 
@@ -198,13 +233,23 @@ inline C10_HOST_DEVICE BFloat16 operator/(int64_t a, BFloat16 b) {
   return static_cast<BFloat16>(a) / b;
 }
 
+// Overloading < and > operators, because std::max and std::min use them.
+
+inline C10_HOST_DEVICE bool operator>(BFloat16& lhs, BFloat16& rhs) {
+  return float(lhs) > float(rhs);
+}
+
+inline C10_HOST_DEVICE bool operator<(BFloat16& lhs, BFloat16& rhs) {
+  return float(lhs) < float(rhs);
+}
+
 } // namespace c10
 
 namespace std {
 
 template <>
 class numeric_limits<c10::BFloat16> {
-public:
+ public:
   static constexpr bool is_signed = true;
   static constexpr bool is_specialized = true;
   static constexpr bool is_integer = false;
@@ -259,9 +304,5 @@ public:
     return c10::BFloat16(0x0001, c10::BFloat16::from_bits());
   }
 };
-
-/// Used by vec256<c10::BFloat16>::map
-inline c10::BFloat16 exp(c10::BFloat16 a) { return std::exp(float(a)); }
-inline c10::BFloat16 log(c10::BFloat16 a) { return std::log(float(a)); }
 
 } // namespace std

@@ -19,6 +19,9 @@ option_parser = OptionParser.new do |opts|
  opts.on('-t', '--team_id ', 'development team ID') { |value|
     options[:team_id] = value
  }
+ opts.on('-f', '--framework ', 'system frameworks') { |value|
+    options[:framework] = value.split(',')
+}
 end.parse!
 puts options.inspect
 
@@ -51,7 +54,7 @@ end
 
 # link static libraries
 target.frameworks_build_phases.clear
-libs = ['libc10.a', 'libclog.a', 'libnnpack.a', 'libXNNPACK.a', 'libeigen_blas.a', 'libcpuinfo.a', 'libpytorch_qnnpack.a', 'libtorch_cpu.a', 'libtorch.a']
+libs = ['libc10.a', 'libclog.a', 'libpthreadpool.a', 'libXNNPACK.a', 'libeigen_blas.a', 'libcpuinfo.a', 'libpytorch_qnnpack.a', 'libtorch_cpu.a', 'libtorch.a', 'libkineto.a']
 for lib in libs do
     path = "#{install_path}/lib/#{lib}"
     if File.exist?(path)
@@ -59,13 +62,27 @@ for lib in libs do
         target.frameworks_build_phases.add_file_reference(libref)
     end
 end
+# link system frameworks
+frameworks = options[:framework]
+if frameworks
+    frameworks.each do |framework|
+        path = "System/Library/Frameworks/#{framework}.framework"
+        framework_ref = project.frameworks_group.new_reference(path)
+        framework_ref.name = "#{framework}.framework"
+        framework_ref.source_tree = 'SDKROOT'
+        target.frameworks_build_phases.add_file_reference(framework_ref)
+    end
+end
 project.save
 
 sdk = nil
+arch = nil
 if options[:platform] == 'SIMULATOR'
     sdk = 'iphonesimulator'
+    arch = 'x86_64'
 elsif options[:platform] == 'OS'
     sdk = 'iphoneos'
+    arch = 'arm64'
 else
     raise "unsupported platform #{options[:platform]}"
 end
@@ -76,4 +93,4 @@ if not profile and options[:platform] == 'OS'
 end
 
 # run xcodebuild
-exec "xcodebuild clean build  -project #{xcodeproj_path}  -target #{target.name} -sdk #{sdk} -configuration Release PROVISIONING_PROFILE_SPECIFIER=#{profile}"
+exec "xcodebuild clean build  -project #{xcodeproj_path}  -target #{target.name} -sdk #{sdk} -configuration Release PROVISIONING_PROFILE_SPECIFIER=#{profile} -arch #{arch}"

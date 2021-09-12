@@ -435,6 +435,7 @@ bool GenerateProposalsOp<CUDAContext>::RunOnDevice() {
       0,
       context_.cuda_stream()>>>(
       num_images, conv_layer_nboxes, d_image_offset, d_conv_layer_indexes);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   // Sorting input scores
   dev_sorted_conv_layer_indexes_.Resize(num_images, conv_layer_nboxes);
@@ -496,6 +497,7 @@ bool GenerateProposalsOp<CUDAContext>::RunOnDevice() {
         nboxes_to_generate,
         d_sorted_scores,
         d_boxes_keep_flags);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   } else {
     GeneratePreNMSRotatedBoxesKernel<<<
         (CAFFE_GET_BLOCKS(nboxes_to_generate), num_images),
@@ -523,6 +525,7 @@ bool GenerateProposalsOp<CUDAContext>::RunOnDevice() {
         nboxes_to_generate,
         d_sorted_scores,
         d_boxes_keep_flags);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
   const int nboxes_generated = nboxes_to_generate;
   dev_image_prenms_boxes_.Resize(box_dim * nboxes_generated);
@@ -633,6 +636,7 @@ bool GenerateProposalsOp<CUDAContext>::RunOnDevice() {
           image_index,
           d_image_postnms_rois,
           d_image_postnms_rois_probs);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     } else {
       WriteRotatedBoxesOutput<<<
           CAFFE_GET_BLOCKS(postnms_nboxes),
@@ -646,6 +650,7 @@ bool GenerateProposalsOp<CUDAContext>::RunOnDevice() {
           image_index,
           d_image_postnms_rois,
           d_image_postnms_rois_probs);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     }
 
     nrois_in_output += postnms_nboxes;

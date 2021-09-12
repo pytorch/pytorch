@@ -1,0 +1,77 @@
+ir_version: 6
+producer_name: "pytorch"
+producer_version: "CURRENT_VERSION"
+graph {
+  node {
+    input: "input"
+    input: "target"
+    output: "2"
+    name: "SoftmaxCrossEntropyLoss_0"
+    op_type: "SoftmaxCrossEntropyLoss"
+    attribute {
+      name: "ignore_index"
+      i: -100
+      type: INT
+    }
+    attribute {
+      name: "reduction"
+      s: "none"
+      type: STRING
+    }
+  }
+  name: "torch-jit-export"
+  input {
+    name: "input"
+    type {
+      tensor_type {
+        elem_type: 1
+        shape {
+          dim {
+            dim_value: 3
+          }
+          dim {
+            dim_value: 5
+          }
+          dim {
+            dim_value: 2
+          }
+        }
+      }
+    }
+  }
+  input {
+    name: "target"
+    type {
+      tensor_type {
+        elem_type: 7
+        shape {
+          dim {
+            dim_value: 3
+          }
+          dim {
+            dim_value: 2
+          }
+        }
+      }
+    }
+  }
+  output {
+    name: "2"
+    type {
+      tensor_type {
+        elem_type: 1
+        shape {
+          dim {
+            dim_value: 3
+          }
+          dim {
+            dim_value: 2
+          }
+        }
+      }
+    }
+  }
+}
+opset_import {
+  version: 12
+}

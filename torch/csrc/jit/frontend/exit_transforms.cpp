@@ -1,9 +1,12 @@
 #include <torch/csrc/jit/frontend/exit_transforms.h>
+
 #include <ATen/core/jit_type.h>
+#include <c10/util/irange.h>
+#include <torch/csrc/jit/frontend/error_report.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/ir_views.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
-#include <torch/csrc/jit/frontend/error_report.h>
+#include <torch/csrc/jit/runtime/graph_iterator.h>
 
 namespace torch {
 namespace jit {
@@ -119,7 +122,7 @@ struct ExitTransformer {
 
   static bool isGraphOrClosureBlock(Block* block) {
     return block->owningNode() == nullptr ||
-        owningNodeKind(block) == prim::Function;
+        owningNodeKind(block) == prim::Closure;
   }
 
   static void removeOutputs(Block* b) {
@@ -146,9 +149,11 @@ struct ExitTransformer {
     IfView if_view(n);
     registerBlockOutputs(if_view.thenBlock(), true_outs);
     registerBlockOutputs(if_view.elseBlock(), false_outs);
-    for (size_t i = 0; i < true_outs.size(); ++i) {
-      auto out_type =
-          unifyTypes(true_outs.at(i)->type(), false_outs.at(i)->type());
+    for (const auto i : c10::irange(true_outs.size())) {
+      auto out_type = unifyTypes(
+          true_outs.at(i)->type(),
+          false_outs.at(i)->type(),
+          /*default_to_union=*/true);
       n->addOutput()->setType(*out_type);
     }
   }
@@ -273,8 +278,8 @@ struct ExitTransformer {
       return constructWontExitPair();
     }
 
-    // for the block that is not exitting, its' exit values will not get
-    // used so we create uninitialized values of the same type as the other
+    // The exit values of the block that is not exiting will not get
+    // used, so we create uninitialized values of the same type as the other
     // block.
     if (then_status == ExitStatus::WONT || then_status == ExitStatus::THROWS) {
       std::vector<Value*> exit_vals =
@@ -287,6 +292,7 @@ struct ExitTransformer {
       else_pair = ExitPair(else_pair.hasExited(), exit_vals);
     }
 
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     Value* has_exited;
     if (if_status == ExitStatus::WILL) {
       // Need to maintain the invariant that if hasExited() == true_val_
@@ -301,6 +307,13 @@ struct ExitTransformer {
     auto exit_vals =
         node->outputs().slice(node->outputs().size() - num_exit_vals);
     return ExitPair(has_exited, exit_vals);
+  }
+
+  // Recursively transforms the With node.
+  ExitPair transformWith(Node* node) {
+    auto body_block = node->blocks().at(0);
+    auto body_pair = transformExits(body_block);
+    return body_pair;
   }
 
   // Guards the remaining nodes in the block with an if node that takes
@@ -384,6 +397,7 @@ struct ExitTransformer {
   // otherwise, target_block_ remains the same.
   void updateTargetBlock(Block* block) {
     if (owningNodeKind(block) == prim::Loop &&
+        // NOLINTNEXTLINE(bugprone-branch-clone)
         current_exit_kind_ == prim::LoopContinuation) {
       target_block_ = block;
     } else if (
@@ -397,6 +411,7 @@ struct ExitTransformer {
     Block* prev_target_block = target_block_;
     updateTargetBlock(block);
     ExitPair exit_pair = constructWontExitPair();
+
     for (auto it = block->nodes().begin(); it != block->nodes().end();) {
       Node* node = *it;
       it++;
@@ -414,7 +429,10 @@ struct ExitTransformer {
         case prim::If: {
           exit_pair = transformIf(node);
         } break;
-        case prim::Function: {
+        case prim::With: {
+          exit_pair = transformWith(node);
+        } break;
+        case prim::Closure: {
           // exits of closure declaration stay local to the closure
           transformExits(node->blocks().at(0));
         } break;
@@ -505,6 +523,244 @@ struct ExitTransformer {
   std::shared_ptr<Graph> graph_;
 };
 
+bool inlineConsecutiveIfs(Node* node) {
+  if (node->kind() != prim::If || node->next()->kind() != prim::If) {
+    return false;
+  }
+
+  IfView first_if(node);
+  IfView second_if(node->next());
+
+  // the second if must depend on a value outputted in the first if for us to
+  // inline the second if
+  if (second_if.cond()->node() != node) {
+    return false;
+  }
+
+  // both blocks must output a constant value for us to inline, and those values
+  // must be different. if the values are the same, then the subsequent if node
+  // will get constant prop'd away, and inlining it into the first node would
+  // double code size
+
+  auto input_offset = second_if.cond()->offset();
+  auto maybe_then_value = toIValue(first_if.thenOutputs().at(input_offset));
+  auto maybe_else_value = toIValue(first_if.elseOutputs().at(input_offset));
+  if (!maybe_then_value || !maybe_else_value ||
+      maybe_then_value->toBool() == maybe_else_value->toBool()) {
+    return false;
+  }
+
+  bool then_value = maybe_then_value->toBool();
+  bool else_value = maybe_else_value->toBool();
+
+  for (const auto i : c10::irange(2)) {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+    Block* first_if_block;
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+    Block* second_if_block;
+
+    if (i == 0) {
+      first_if_block = first_if.thenBlock();
+      second_if_block =
+          then_value ? second_if.thenBlock() : second_if.elseBlock();
+    } else {
+      first_if_block = first_if.elseBlock();
+      second_if_block =
+          else_value ? second_if.thenBlock() : second_if.elseBlock();
+      ;
+    }
+
+    // we need to replace values that were used in the second if that were
+    // outputs of the first if with the equivalent value in the scope of the
+    // block we're copying into
+    auto value_map = [&](Value* v) {
+      if (v->node() != first_if.node()) {
+        return v;
+      }
+      auto offset = v->offset();
+      return first_if_block->outputs().at(offset);
+    };
+
+    // clone from also copies block outputs from second_if_block onto
+    // first_if_block
+    first_if_block->cloneFrom(second_if_block, value_map);
+  }
+
+  for (Value* output : second_if.outputs()) {
+    auto new_out = first_if.node()->addOutput()->copyMetadata(output);
+    output->replaceAllUsesWith(new_out);
+  }
+  second_if.node()->destroy();
+  return true;
+}
+
+// After an early return, we conditionalize all further execution
+// This means code like the following:
+// if x:
+//     return 1
+// return 2
+// Gets generated as one if statement checking `if x`, and then a second if
+// statement that conditionalizes execution. We can rewrite cases like these
+// into one if statement, so that the above examples gets rewritten to look
+// like: if x:
+//   return 1
+// else:
+//   return 2
+void inlineConsecutiveIfs(Block* block) {
+  for (auto it = block->nodes().begin(), end = block->nodes().end();
+       it != end;) {
+    for (Block* b : it->blocks()) {
+      inlineConsecutiveIfs(b);
+    }
+
+    // if we fused two ifs, we need to check current node and new next node
+    if (!inlineConsecutiveIfs(*it)) {
+      it++;
+    }
+  }
+}
+
+// Adds prim::With nodes to a graph to help handle early exits between
+// prim::Enter and prim::Exit nodes. More specifically, it transforms
+// IR that looks like this:
+//
+//   %a = prim::Enter(%b)
+//   <code>
+//   %c = prim::Exit(%b)
+//
+// to this:
+//
+//   %a = prim::Enter(%b)
+//   = prim::With()
+//     block0():
+//       <code>
+//     -> ()
+//     block1():
+//       %c = prim::Exit(%b)
+//     -> ()
+//
+static void convertEnterExitNodesToWithBlocks(std::shared_ptr<Graph>& graph) {
+  // First, find all Enter-Exit pairs up front to avoid iterator invalidation
+  // issues later when moving nodes around. Do this by iterating through the
+  // nodes of the graph while keeping a stack of encountered Enter nodes. Each
+  // time an Exit node is seen, its corresponding Enter node must be at the
+  // top of the stack. Pop it and record the pair.
+  std::vector<std::pair<Node*, Node*>> enter_exit_pairs;
+  std::vector<Node*> enter_node_stack;
+
+  DepthFirstGraphNodeIterator it(graph);
+  Node* node = it.next();
+
+  while (node) {
+    if (node->kind() == prim::Enter) {
+      enter_node_stack.emplace_back(node);
+    } else if (node->kind() == prim::Exit) {
+      // enter_node_stack should not be empty.
+      TORCH_INTERNAL_ASSERT(!enter_node_stack.empty());
+      // The input to this Exit node should be the same as that of the Enter
+      // node on the top of the enter_node_stack.
+      TORCH_INTERNAL_ASSERT(
+          enter_node_stack.back()->input(0) == node->input(0));
+      // Record the pair.
+      enter_exit_pairs.emplace_back(enter_node_stack.back(), node);
+      enter_node_stack.pop_back();
+    }
+
+    node = it.next();
+  }
+
+  // The stack should be empty; an Exit should have been found for every Enter.
+  TORCH_INTERNAL_ASSERT(enter_node_stack.empty());
+
+  // Now, add a With block for each Enter-Exit pair. The innermost pairs were
+  // found first, so they will be converted first.
+  for (auto& pair : enter_exit_pairs) {
+    Node* enter = pair.first;
+    Node* exit = pair.second;
+
+    auto* with = graph->create(prim::With, /*num_outputs=*/0);
+    auto* body_block = with->addBlock();
+    auto* exit_block = with->addBlock();
+
+    // Insert the With after the Enter.
+    Node* cur = enter->next();
+    Node* insert_point = body_block->param_node();
+
+    // Move all of the nodes between the Enter and Exit into the body block.
+    while (cur != exit) {
+      auto* next = cur->next();
+      cur->moveAfter(insert_point);
+      insert_point = insert_point->next();
+      cur = next;
+    }
+
+    // Move the Exit node into the exit block.
+    exit->moveAfter(exit_block->param_node());
+    with->insertAfter(enter);
+  }
+}
+
+// Removes prim::With nodes from a graph. More specifically, it transforms
+// IR that looks like this:
+//
+//   %a = prim::Enter(%b)
+//   = prim::With()
+//     block0():
+//       <code>
+//     -> ()
+//     block1():
+//       %c = prim::Exit(%b)
+//      ->()
+//
+// to this:
+//   %a = prim::Enter(%b)
+//   <code>
+//   %c = prim::Exit(%b)
+//
+static void convertWithBlocksToEnterExitNodes(std::shared_ptr<Graph>& graph) {
+  // First, find all With blocks to avoid iterator invalidation issues when
+  // moving nodes around later.
+  std::vector<Node*> with_nodes;
+
+  DepthFirstGraphNodeIterator it(graph);
+  Node* node = it.next();
+
+  while (node) {
+    if (node->kind() == prim::With) {
+      with_nodes.emplace_back(node);
+    }
+    node = it.next();
+  }
+
+  // For each With node:
+  for (auto& node : with_nodes) {
+    auto* body_block = node->blocks().at(0);
+    auto* exit_block = node->blocks().at(1);
+
+    std::vector<Node*> to_append;
+
+    // Record all nodes that need to be appended after the Enter that precedes
+    // the With block to avoid iterator invalidation issues later when moving
+    // nodes around.
+    for (auto body_node : body_block->nodes()) {
+      to_append.emplace_back(body_node);
+    }
+
+    for (auto exit_node : exit_block->nodes()) {
+      to_append.emplace_back(exit_node);
+    }
+
+    Node* cur = node->prev();
+
+    // Move all nodes inside the with block outside of it.
+    for (auto& node : to_append) {
+      node->moveAfter(cur);
+      cur = node;
+    }
+    node->destroy();
+  }
+}
+
 // This pass takes in a graph where LoopContinuation & ReturnStmts exist in the
 // graph and erases them in the graph, correctly setting block outputs.
 // prim::LoopContinuation(*vals) means that the values are targeting the most
@@ -582,10 +838,13 @@ struct ExitTransformer {
 //     -> (%44, %i)
 
 void TransformExits(std::shared_ptr<Graph>& graph) {
+  convertEnterExitNodesToWithBlocks(graph);
   ExitTransformer e_loop(graph);
   e_loop.transformLoopContinuations();
   ExitTransformer e_ret(graph);
   e_ret.transformReturnStmts();
+  inlineConsecutiveIfs(graph->block());
+  convertWithBlocksToEnterExitNodes(graph);
 }
 } // namespace jit
 } // namespace torch

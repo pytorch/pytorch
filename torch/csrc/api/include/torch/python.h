@@ -67,12 +67,7 @@ void bind_cpp_module_wrapper(
 
   // `type()` always needs a `str`, but pybind11's `str()` method always creates
   // a `unicode` object.
-#if PY_MAJOR_VERSION < 3
-  py::object name_str =
-      py::reinterpret_steal<py::object>(PyString_FromString(name));
-#else
   py::object name_str = py::str(name);
-#endif
 
   // Dynamically create the subclass of `ModuleWrapper`, which is a subclass of
   // `torch.nn.Module`, and will delegate all calls to the C++ module we're
@@ -142,11 +137,12 @@ py::class_<ModuleType, Extra...> add_module_bindings(
         "_modules", [](ModuleType& module) { return module.named_children(); })
       .def("modules", [](ModuleType& module) { return module.modules(); })
       .def("named_modules",
-          [](ModuleType& module, py::object /* unused */, std::string prefix) {
+           [](ModuleType& module, py::object /* unused */, std::string prefix, bool remove_duplicate /* unused */) {
             return module.named_modules(std::move(prefix));
           },
           py::arg("memo") = py::none(),
-          py::arg("prefix") = std::string())
+          py::arg("prefix") = std::string(),
+          py::arg("remove_duplicate") = true)
       .def("children", [](ModuleType& module) { return module.children(); })
       .def("named_children",
           [](ModuleType& module) { return module.named_children(); })

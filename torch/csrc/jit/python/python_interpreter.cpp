@@ -5,12 +5,12 @@
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/profiler.h>
 #include <torch/csrc/autograd/variable.h>
-#include <torch/csrc/jit/runtime/custom_operator.h>
-#include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/jit/ir/ir.h>
-#include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/jit/python/python_ir.h>
+#include <torch/csrc/jit/runtime/custom_operator.h>
+#include <torch/csrc/jit/runtime/graph_executor.h>
+#include <torch/csrc/jit/runtime/operator.h>
 
 #include <typeinfo>
 
@@ -53,7 +53,9 @@ Operation createPythonOperation(const Node* op_) {
       if (arg_type == 'c') {
         py_inputs[i] = py::reinterpret_borrow<const py::object>(
             // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-            const_cast<ConcretePythonOp*>(op)->scalar_args[next_scalar++].get());
+            const_cast<ConcretePythonOp*>(op)
+                ->scalar_args[next_scalar++]
+                .get());
       } else if (arg_type == 'd') {
         py_inputs[i] =
             toPyObject(std::move(peek(stack, next_tensor, num_inputs)));
@@ -68,7 +70,6 @@ Operation createPythonOperation(const Node* op_) {
     } catch (py::error_already_set& e) {
       throw std::runtime_error(e.what());
     }
-    return 0;
   };
 }
 

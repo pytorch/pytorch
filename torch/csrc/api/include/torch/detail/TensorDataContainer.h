@@ -104,6 +104,7 @@ struct TensorDataContainer {
       type_(TensorDataContainerType::Scalar), \
       scalar_(value) {}
 AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
+AT_FORALL_COMPLEX_TYPES(TENSOR)
 #undef TENSOR
   TensorDataContainer(std::initializer_list<TensorDataContainer> init_list) :
       sizes_(),
@@ -136,7 +137,7 @@ AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
       sizes_({(int64_t)values.size()}), \
       scalar_type_(at::k##S), \
       type_(TensorDataContainerType::Tensor) { \
-    at::AutoNonVariableTypeMode non_var_type_mode(true); \
+    at::AutoDispatchBelowAutograd mode; \
     if (scalar_type_ == at::kBool) { \
       tensor_ = at::tensor(values, at::TensorOptions().device(at::kCPU)); \
     } else { \
@@ -144,6 +145,7 @@ AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
     } \
   }
 AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
+AT_FORALL_COMPLEX_TYPES(TENSOR)
 #undef TENSOR
 
   // NOTE: We need to handle `std::vector` explicitly instead of relying on an implicit conversion
@@ -160,6 +162,7 @@ AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
 #define TENSOR(T, S) \
   TensorDataContainer(const std::vector<T>& values) : TensorDataContainer(at::ArrayRef<T>(values)) {}
 AT_FORALL_SCALAR_TYPES_AND2(Half, BFloat16, TENSOR)
+AT_FORALL_COMPLEX_TYPES(TENSOR)
 #undef TENSOR
 
   bool is_scalar() const {
@@ -209,7 +212,7 @@ AT_FORALL_SCALAR_TYPES_AND2(Half, BFloat16, TENSOR)
     }
 
     if (is_scalar()) {
-      at::AutoNonVariableTypeMode non_var_type_mode(true);
+      at::AutoDispatchBelowAutograd mode;
       return at::scalar_tensor(scalar_, options);
     } else if (is_init_list()) {
       // NOTE: Here we explicitly choose to initialize the tensor on CPU first,
@@ -219,13 +222,15 @@ AT_FORALL_SCALAR_TYPES_AND2(Half, BFloat16, TENSOR)
       // filling each element of it (which involves `N` CUDA kernel launches where
       // `N` is the number of the elements in the tensor).
       at::Tensor tensor = ([&]() {
-        at::AutoNonVariableTypeMode non_var_type_mode(true);
+        at::AutoDispatchBelowAutograd mode;
         return at::empty(sizes_, options.device(at::kCPU));
       })();
       fill_tensor(tensor);
       return tensor.to(options.device());
     } else if (is_tensor()) {
-      return tensor_.to(options);
+      auto output = tensor_.to(options);
+      TORCH_CHECK(!tensor_.is_complex() || output.is_complex(), "can not do torch::tensor(complex, dtype=non-complex) because complex can not be casted to real number without loss of information");
+      return output;
     } else {
       TORCH_INTERNAL_ASSERT(false, "Invalid TensorDataContainer type");
     }

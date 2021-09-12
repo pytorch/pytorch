@@ -1,5 +1,9 @@
 #pragma once
 
+#if !defined(_MSC_VER) && __cplusplus < 201402L
+#error C++14 or later compatible compiler is required to use ATen.
+#endif
+
 #include <c10/core/Allocator.h>
 #include <ATen/core/ATenGeneral.h>
 #include <ATen/Context.h>
@@ -7,7 +11,6 @@
 #include <ATen/DeviceGuard.h>
 #include <ATen/DimVector.h>
 #include <ATen/Dispatch.h>
-#include <ATen/DynamicLibrary.h>
 #include <ATen/Formatting.h>
 #include <ATen/Functions.h>
 #include <ATen/NamedTensor.h>
@@ -26,3 +29,6 @@
 #include <ATen/core/Reduction.h>
 #include <c10/util/Exception.h>
 #include <ATen/core/UnsafeFromTH.h>
+#include <ATen/core/ivalue.h>
+#include <ATen/core/jit_type.h>
+#include <c10/core/InferenceMode.h>

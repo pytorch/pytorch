@@ -3,129 +3,123 @@
 #ifdef TORCH_ENABLE_LLVM
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
-#include "llvm/ExecutionEngine/Orc/ThreadSafeModule.h"
-#include "torch/csrc/jit/tensorexpr/codegen.h"
-#include "torch/csrc/jit/tensorexpr/ir.h"
-#include "torch/csrc/jit/tensorexpr/ir_visitor.h"
-#include "torch/csrc/jit/tensorexpr/llvm_jit.h"
+#include <torch/csrc/jit/tensorexpr/codegen.h>
+#include <torch/csrc/jit/tensorexpr/ir.h>
+#include <torch/csrc/jit/tensorexpr/ir_visitor.h>
 
-#include <llvm/IR/IRBuilder.h>
-#include <llvm/IR/LegacyPassManager.h>
-#include <llvm/IR/Verifier.h>
+#include <c10/util/Optional.h>
+
 #include <unordered_map>
 #include <vector>
-
-#define DEBUG_PRINT 0
-
-#if DEBUG_PRINT
-#include <llvm/IR/LegacyPassManager.h>
-#endif
 
 namespace torch {
 namespace jit {
 namespace tensorexpr {
 
-class TORCH_API LLVMCodeGen : public CodeGen, public IRVisitor {
- private:
-  llvm::orc::ThreadSafeContext context_;
-  llvm::IRBuilder<> irb_;
-  std::unique_ptr<llvm::TargetMachine> TM_;
-  std::unique_ptr<llvm::orc::PytorchLLVMJIT> jit_;
-  std::unique_ptr<llvm::Module> module_;
-  llvm::Function* fn_;
-  llvm::BasicBlock* bb_;
-  llvm::Value* value_;
-  llvm::JITTargetAddress kernelAddress_;
+class LLVMCodeGenImpl;
 
-#define LLVM_TYPE_DECLARE(_1, Name) llvm::Type* Name##Ty_;
-  AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, LLVM_TYPE_DECLARE);
-#undef LLVM_TYPE_DECLARE
-
-  std::unordered_map<const Var*, int> varToArg_;
-  std::unordered_map<const Var*, llvm::Value*> varToVal_;
-
-  std::vector<void*> args_;
-
- private:
-  llvm::LLVMContext& getContext();
-  llvm::Type* dtypeToLLVM(Dtype dtype);
-  llvm::Type* dtypeToLLVMPtr(Dtype dtype);
-  void emitWrapper(const std::vector<llvm::Type*>& params);
-  void emitKernel(Stmt* stmt, const std::vector<llvm::Type*>& params);
-
+class TORCH_API LLVMCodeGen : public CodeGen {
  public:
   explicit LLVMCodeGen(
-      Stmt* stmt,
+      StmtPtr stmt,
       const std::vector<BufferArg>& args,
-      Dtype dtype = kInt);
-  explicit LLVMCodeGen(Stmt* stmt);
+      at::Device device = at::kCPU,
+      const std::string& kernel_func_name = "func",
+      Dtype dtype = kInt,
+      c10::optional<std::string> triple = c10::nullopt,
+      c10::optional<std::string> cpu = c10::nullopt,
+      c10::optional<std::string> attrs = c10::nullopt);
+  explicit LLVMCodeGen(StmtPtr stmt);
 
-  ~LLVMCodeGen() override {}
+  LLVMCodeGen() = delete;
+  ~LLVMCodeGen() override;
 
   TORCH_API void call(const std::vector<CallArg>& args) override;
+  TORCH_API void call_raw(const std::vector<void*>& args) override;
 
-  void visit(const Add* v) override;
-  void visit(const Sub* v) override;
-  void visit(const Mul* v) override;
-  void visit(const Div* v) override;
-  void visit(const Mod* v) override;
-  void visit(const Max* v) override;
-  void visit(const Min* v) override;
-  void visit(const And* v) override;
-  void visit(const Or* v) override;
-  void visit(const Xor* v) override;
-  void visit(const Lshift* v) override;
-  void visit(const Rshift* v) override;
-  void visit(const CompareSelect* v) override;
-
-#define IMM_VISIT_DECLARE(_1, Name) void visit(const Name##Imm* v) override;
-  AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, IMM_VISIT_DECLARE);
-#undef IMM_VISIT_DECLARE
-
-  void visit(const Cast* v) override;
-  void visit(const Var* v) override;
-  void visit(const Let* v) override;
-  void visit(const LetStmt* v) override;
-  void visit(const Ramp* v) override;
-  void visit(const Load* v) override;
-  void visit(const For* v) override;
-  void visit(const Block* v) override;
-  void visit(const Store* v) override;
-  void visit(const Broadcast* v) override;
-  void visit(const IfThenElse* v) override;
-  void visit(const BaseCallNode* v) override;
-  void visit(const Intrinsics* v) override;
-  void visit(const FunctionCall* v) override;
-  void visit(const Allocate* v) override;
-  void visit(const Free* v) override;
-  void visit(const Cond* v) override;
-
-  llvm::Value* emitUnmaskedLoad(llvm::Value* addr, llvm::Value* idx);
-  llvm::Value* emitMaskedLoad(
-      llvm::Value* addr,
-      llvm::Value* idx,
-      llvm::Value* mask);
-  void emitUnmaskedStore(llvm::Value* base, llvm::Value* idx, llvm::Value* val);
-  void emitMaskedStore(
-      llvm::Value* base,
-      llvm::Value* idx,
-      llvm::Value* mask,
-      llvm::Value* val);
-
-  void optimize(llvm::Module& M);
+  at::Tensor empty_strided(
+      c10::IntArrayRef size,
+      c10::IntArrayRef stride,
+      c10::optional<c10::ScalarType> dtype_opt,
+      c10::optional<c10::Layout> layout_opt,
+      c10::optional<c10::Device> device_opt,
+      c10::optional<bool> pin_memory_opt) override;
 
   template <typename T>
   T value() {
-    std::vector<void*> args;
-    return value<T>(args);
+    return value<T>(nullptr);
   }
 
   template <typename T>
   T value(std::vector<void*>& args) {
-    T (*fp)(void**) = (T(*)(void**))kernelAddress_;
-    T rv = fp(args.data());
+    return value<T>(args.data());
+  }
+
+  template <typename T>
+  T value(void** args) {
+    T (*fp)(void**) = (T(*)(void**))getKernelAddress(impl_.get());
+    T rv = fp(args);
     return rv;
   }
+
+  std::string getCodeText(const std::string& attr = "") override;
+
+ private:
+  void* getKernelAddress(LLVMCodeGenImpl* impl);
+
+  std::unique_ptr<LLVMCodeGenImpl> impl_;
+};
+
+struct TORCH_API LLVMCodeGenBuilder {
+  using BufferArg = CodeGen::BufferArg;
+
+  LLVMCodeGenBuilder(StmtPtr stmt, std::vector<BufferArg> args)
+      : stmt_(stmt), args_(std::move(args)) {}
+
+  LLVMCodeGenBuilder& device(at::Device device) {
+    device_ = device;
+    return *this;
+  }
+
+  LLVMCodeGenBuilder& kernelFuncName(std::string name) {
+    kernelFuncName_ = std::move(name);
+    return *this;
+  }
+
+  LLVMCodeGenBuilder& dtype(Dtype d) {
+    dtype_ = d;
+    return *this;
+  }
+
+  LLVMCodeGenBuilder& triple(std::string triple) {
+    triple_ = std::move(triple);
+    return *this;
+  }
+
+  LLVMCodeGenBuilder& cpu(std::string cpu) {
+    cpu_ = std::move(cpu);
+    return *this;
+  }
+
+  LLVMCodeGenBuilder& attrs(std::string attrs) {
+    attrs_ = std::move(attrs);
+    return *this;
+  }
+
+  std::unique_ptr<LLVMCodeGen> build() {
+    return std::make_unique<LLVMCodeGen>(
+        stmt_, args_, device_, kernelFuncName_, dtype_, triple_, cpu_, attrs_);
+  }
+
+ private:
+  StmtPtr stmt_;
+  std::vector<BufferArg> args_;
+  at::Device device_ = at::kCPU;
+  std::string kernelFuncName_ = "func";
+  Dtype dtype_ = kInt;
+  c10::optional<std::string> triple_ = c10::nullopt;
+  c10::optional<std::string> cpu_ = c10::nullopt;
+  c10::optional<std::string> attrs_ = c10::nullopt;
 };
 
 } // namespace tensorexpr

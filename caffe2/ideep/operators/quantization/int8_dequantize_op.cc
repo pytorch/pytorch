@@ -14,25 +14,28 @@ class IDEEPInt8DequantizeOp final : public IDEEPOperator {
 
     if (HasArgument("output_order")) {
       Y_fmt_ = static_cast<iformat>(
-        this->template GetSingleArgument<int>("output_order", iformat::nchw));
+        this->template GetSingleArgument<int>("output_order",
+                                              static_cast<int>(iformat::nchw)));
     }
   }
+  // NOLINTNEXTLINE(modernize-use-override,modernize-use-equals-default)
   virtual ~IDEEPInt8DequantizeOp() {}
 
   bool RunOnDevice() override {
     const auto& X = Input(0);
     auto* Y = Output(0);
-
-    Y->init({X.get_dims(), idtype::f32,
-        Y_fmt_ != iformat::format_undef
-        ? Y_fmt_ : X.get_public_format()});
+    if (Y_fmt_ != iformat::undef) {
+      Y->init(X.get_desc().to_type(idtype::f32).to_format(Y_fmt_));
+    } else {
+      Y->init(X.get_desc().to_type(idtype::f32));
+    }
     Y->feed_from(X);
 
     return true;
   }
 
  private:
-  iformat Y_fmt_ {iformat::format_undef};
+  iformat Y_fmt_ {iformat::undef};
 };
 
 REGISTER_IDEEP_OPERATOR_WITH_ENGINE(Int8Dequantize, DNNLOWP, IDEEPInt8DequantizeOp);

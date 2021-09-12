@@ -48,6 +48,7 @@ bool PercentileOp<CPUContext>::RunOnDevice() {
 
   int current_ind = 0;
   int current_dist_start = 0;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int current_length;
   for (int i = 0; i < num_examples; i++) {
     current_dist_start = 0;
@@ -137,3 +138,8 @@ OPERATOR_SCHEMA(Percentile)
 NO_GRADIENT(Percentile);
 
 } // namespace caffe2
+
+C10_EXPORT_CAFFE2_OP_TO_C10_CPU(
+    Percentile,
+    "_caffe2::Percentile(Tensor original_values, Tensor value_to_pct, Tensor lengths) -> Tensor percentile_values",
+    caffe2::PercentileOp<caffe2::CPUContext>);

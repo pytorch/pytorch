@@ -3,17 +3,17 @@
 
 #include <c10/macros/Macros.h>
 #include "caffe2/core/storage.h"
-#include "caffe2/core/tensor_impl.h"
 
 #include <ATen/core/UndefinedTensorImpl.h>
+#include <c10/core/TensorOptions.h>
 #include <c10/util/intrusive_ptr.h>
+
 #if defined(EXPOSE_C2_OPS) || \
     !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
-#include "ATen/core/Tensor.h"
-#include <ATen/core/grad_mode.h>
+namespace at {
+class Tensor;
+};
 #endif
-#include <c10/core/TensorOptions.h>
-
 namespace caffe2 {
 
 using at::UndefinedTensorImpl;
@@ -26,7 +26,7 @@ using at::UndefinedTensorImpl;
  *
  * NB: See TensorImpl for documentation on these methods.
  */
-class CAFFE2_API Tensor final {
+class TORCH_API Tensor final {
  private:
   enum Unsafe { IDoWantAliasing };
   Tensor(const Tensor& other, Unsafe _) : impl_(other.getIntrusivePtr()) {}
@@ -40,18 +40,12 @@ class CAFFE2_API Tensor final {
  public:
   Tensor() : impl_() {}
 
-  // caffe2::Tensor is explicitly marked as moveable-only because before
-  // the refactoring the class used to be a value type and a lot of user code
-  // is written this way. With PyTorch unification, caffe2::Tensor actually
-  // has semantics of a shared_ptr now (via intrusive_ptr). However, to prevent
-  // accidental mistakes when changing legacy code we keep caffe2::Tensor
-  // to have movable semantics.
-  //
-  // If you need to get a pointer to the same Tensor instance (not to be
-  // confused with shared storage), `UnsafeSharedInstance` can be used. It has
-  // the same behavior as `at::Tensor a = b`.
-  Tensor(const Tensor&) = delete;
-  Tensor& operator=(const Tensor&) = delete;
+  Tensor(const Tensor& t) : impl_(t.impl_) {}
+  Tensor& operator=(const Tensor& t) {
+    impl_ = t.impl_;
+    return *this;
+  }
+
   Tensor(Tensor&&) = default;
   Tensor& operator=(Tensor&&) = default;
 
@@ -74,11 +68,10 @@ class CAFFE2_API Tensor final {
    * you resize the tensor and then call mutable_data().
    */
   explicit Tensor(at::Device device)
-    : impl_(c10::make_intrusive<TensorImpl, UndefinedTensorImpl>(
-        Storage::create_legacy(device, TypeMeta()),
-        c10::computeDispatchKey(at::device(device).layout(at::kStrided))
-      )) {
-  }
+      : impl_(c10::make_intrusive<TensorImpl, UndefinedTensorImpl>(
+            Storage::create_legacy(device),
+            c10::computeDispatchKey(c10::nullopt, at::kStrided, device),
+            TypeMeta())) {}
 
   /**
    * @brief Creates a tensor of the given dimension.
@@ -95,13 +88,12 @@ class CAFFE2_API Tensor final {
   }
 
   // we want to preserve index information
-  explicit Tensor(at::IntArrayRef dims, at::Device device): Tensor(device) {
+  explicit Tensor(at::IntArrayRef dims, at::Device device) : Tensor(device) {
     Resize(dims);
   }
 
   // TODO: remove?
-  explicit Tensor(const vector<int>& dims, DeviceType type)
-      : Tensor(type) {
+  explicit Tensor(const vector<int>& dims, DeviceType type) : Tensor(type) {
     Resize(dims);
   }
 
@@ -109,8 +101,7 @@ class CAFFE2_API Tensor final {
    * @brief: Create a Tensor of at::DeviceType `type` and initialize it with
    * src Tensor
    */
-  Tensor(const Tensor& src, DeviceType type)
-      : Tensor(type) {
+  Tensor(const Tensor& src, DeviceType type) : Tensor(type) {
     CopyFrom(src);
   }
 
@@ -122,18 +113,11 @@ class CAFFE2_API Tensor final {
    */
 #if defined(EXPOSE_C2_OPS) || \
     !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
-    explicit Tensor(at::Tensor tensor)
-        : impl_(std::move(tensor.impl_)) {
-      enforce_invariants();
-  }
+  explicit Tensor(at::Tensor tensor);
 
-  explicit operator at::Tensor() const& {
-    return at::Tensor::wrap_tensor_impl(impl_);
-  }
+  explicit operator at::Tensor() const&;
 
-  explicit operator at::Tensor() && {
-    return at::Tensor::wrap_tensor_impl(std::move(impl_));
-  }
+  explicit operator at::Tensor() &&;
 #endif
 
   bool is_same(const Tensor& other) const noexcept {
@@ -162,14 +146,14 @@ class CAFFE2_API Tensor final {
   Tensor Alias() const {
     Tensor x(sizes(), GetDevice());
     if (!dtype_initialized()) {
-      C10_LOG_EVERY_MS(WARNING, 1000) <<
-                   "Cloning a tensor that don't have a data type (did you call mutable_data<T> on the tensor?)";
+      C10_LOG_EVERY_MS(WARNING, 1000)
+          << "Cloning a tensor that don't have a data type (did you call mutable_data<T> on the tensor?)";
     }
     AT_ASSERTM(
         storage_initialized(),
         "Cloning a tensor that has no content and has size > 0");
     // set_storage already sets data_type_ of TensorImpl
-    x.impl_->set_storage(storage());
+    x.impl_->set_storage_and_dtype(storage(), impl_->dtype());
     x.impl_->set_storage_offset(impl_->storage_offset());
     x.impl_->set_sizes_and_strides(sizes(), strides());
     return x;
@@ -196,70 +180,7 @@ class CAFFE2_API Tensor final {
    *
    * 'async' parameter triggers async copy for CUDA tensors
    */
-  void CopyFrom(const Tensor& src, bool async = false) {
-    // TODO: only check `!impl_->requires_grad()` after Variable and Tensor are merged
-#if defined(EXPOSE_C2_OPS) || \
-    !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
-    AT_ASSERT(!(impl_->requires_grad() && at::GradMode::is_enabled()));
-#endif
-    AT_ASSERTM(
-        src.impl_->is_contiguous(),
-        "Right now only copy of contiguous source Tensor is supported.");
-    AT_ASSERTM(
-        src.impl_->storage_initialized(),
-        "Cannot copy from an uninitialized Tensor");
-
-    if (src.impl_.get() == impl_.get()) {
-      return;
-    }
-
-    // Test if we need to allocate a new storage
-    // Uninitialized storages are guaranteed to be uniquely owned,
-    // so we don't need to swap in dst case.
-    // If the dtype changed, we need to reallocate storage.
-    if (impl_->dtype() != src.impl_->dtype()) {
-      // NB: copy preserves device_type
-      // This storage will get initialized by the mutable_data call below.
-      impl_->set_storage(at::Storage::create_legacy(impl_->device_type(), src.impl_->dtype()));
-    }
-    impl_->Resize(src.impl_->sizes());
-
-    if (impl_->numel() > 0) {
-      if (impl_->dtype().copy()) {
-        AT_ASSERTM(
-            impl_->device_type() == ::at::DeviceType::CPU,
-            "In CopyFrom source and dest tensors must both be CPU for "
-            "non-POD copy, but dest tensor was ",
-            impl_->device_type());
-        AT_ASSERTM(
-            src.impl_->device_type() == ::at::DeviceType::CPU,
-            "In CopyFrom source and dest tensors must both be CPU for "
-            "non-POD copy, but src tensor was ",
-            src.impl_->device_type());
-        impl_->dtype().copy()(src.impl_->data(), impl_->raw_mutable_data(impl_->dtype()), impl_->numel());
-      } else {
-        // The following copy uses the current (thread local) stream for copying
-        // and also takes the GPU id from the device() field passed in.
-        //
-        // TODO: Potentially more enforcements are necessary to avoid accidental
-        // switch to sync copy if the currently set device is wrong.
-        //
-        // Specifically, we might need to switch to a different context device
-        // here explicitly to avoid relying on user synchronizing things
-        // properly.
-        //
-        // note: raw_mutable_data initializes device here
-        void* new_data = impl_->raw_mutable_data(impl_->dtype());
-        at::CopyBytes(
-            impl_->numel() * impl_->itemsize(),
-            src.impl_->data(),
-            src.impl_->device(),
-            new_data,
-            impl_->device(),
-            async);
-      }
-    }
-  }
+  void CopyFrom(const Tensor& src, bool async = false);
 
   /**
    * @brief Extend the outer-most dimension of this tensor
@@ -306,6 +227,11 @@ class CAFFE2_API Tensor final {
     impl_.get()->Resize(dim_source...);
   }
 
+  template <typename T>
+  void Resize(const std::vector<T>& dim_source) const {
+    impl_.get()->Resize(ArrayRef<T>(dim_source));
+  }
+
   /**
    * Resize the tensor like the source tensor. Note that this is just a
    * sugar wrapper that essentially calls Resize(src_tensor.dims()).
@@ -339,7 +265,7 @@ class CAFFE2_API Tensor final {
    */
   string DebugString() const {
     std::stringstream ss;
-    ss << "A Tensor of item size " << impl_->storage().itemsize() << " and type "
+    ss << "A Tensor of item size " << impl_->dtype().itemsize() << " and type "
        << impl_->dtype().name() << " and dimension (";
     for (int d : impl_->sizes()) {
       ss << d << ",";
@@ -365,37 +291,38 @@ class CAFFE2_API Tensor final {
   template <typename T>
   void ShareExternalPointer(
       T* src,
-      size_t capacity = 0,
+      size_t nbytes = 0,
       MemoryDeleter d = nullptr) const {
-    ShareExternalPointer((void*)src, caffe2::TypeMeta::Make<T>(), capacity, d);
+    ShareExternalPointer((void*)src, caffe2::TypeMeta::Make<T>(), nbytes, d);
   }
 
   template <typename T>
-  void ShareExternalPointer(at::DataPtr&& data_ptr, size_t capacity = 0) const {
-    ShareExternalPointer(std::move(data_ptr), caffe2::TypeMeta::Make<T>(), capacity);
+  void ShareExternalPointer(at::DataPtr&& data_ptr, size_t nbytes = 0) const {
+    ShareExternalPointer(
+        std::move(data_ptr), caffe2::TypeMeta::Make<T>(), nbytes);
   }
 
   void ShareExternalPointer(
       void* src,
-      const TypeMeta& data_type,
-      size_t capacity = 0,
+      const TypeMeta data_type,
+      size_t nbytes = 0,
       MemoryDeleter d = nullptr) const {
     CAFFE_ENFORCE_WITH_CALLER(
         impl_->is_contiguous(),
         "Right now ShareExternalPointer is only supported for contiguous Tensor.");
     CAFFE_ENFORCE_WITH_CALLER(
-        data_type.id() != caffe2::TypeIdentifier::uninitialized(),
+        data_type != ScalarType::Undefined,
         "To share with a raw external pointer you need to pass in an "
         "initialized data_type(TypeMeta).");
     impl_.get()->ShareExternalPointer(
-        at::DataPtr(src, src, d, impl_->device_type()), data_type, capacity);
+        at::DataPtr(src, src, d, impl_->device_type()), data_type, nbytes);
   }
 
   void ShareExternalPointer(
       at::DataPtr&& data_ptr,
-      const TypeMeta& data_type,
-      size_t capacity) {
-    impl_.get()->ShareExternalPointer(std::move(data_ptr), data_type, capacity);
+      const TypeMeta data_type,
+      size_t nbytes) {
+    impl_.get()->ShareExternalPointer(std::move(data_ptr), data_type, nbytes);
   }
 
   const c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl>& getIntrusivePtr()
@@ -420,7 +347,7 @@ class CAFFE2_API Tensor final {
     return impl_.get()->data<T>();
   }
 
-  inline void* raw_mutable_data(const TypeMeta& meta) const {
+  inline void* raw_mutable_data(const TypeMeta meta) const {
     return impl_.get()->raw_mutable_data(meta);
   }
 
@@ -436,7 +363,7 @@ class CAFFE2_API Tensor final {
   inline void* raw_mutable_data() const {
     const auto& data_type = impl_->dtype();
     CAFFE_ENFORCE_WITH_CALLER(
-        data_type.id() != caffe2::TypeIdentifier::uninitialized(),
+        data_type != ScalarType::Undefined,
         "Calling raw_mutable_data() without meta, but the current meta is "
         "of unknown type.");
     return raw_mutable_data(data_type);
@@ -480,7 +407,7 @@ class CAFFE2_API Tensor final {
    * Return the number of bytes each item takes in the tensor.
    */
   inline size_t itemsize() const {
-    return impl_->storage().itemsize();
+    return impl_->dtype().itemsize();
   }
 
   /**
@@ -531,7 +458,8 @@ class CAFFE2_API Tensor final {
     return impl_.get()->strides();
   }
 
-  inline bool is_contiguous(at::MemoryFormat memory_format=at::MemoryFormat::Contiguous) const {
+  inline bool is_contiguous(
+      at::MemoryFormat memory_format = at::MemoryFormat::Contiguous) const {
     return impl_.get()->is_contiguous(memory_format);
   }
 
@@ -540,13 +468,13 @@ class CAFFE2_API Tensor final {
    */
   template <typename T>
   inline bool IsType() const {
-    return impl_->storage().IsType<T>();
+    return impl_->dtype().Match<T>();
   }
 
   /**
    * Returns the TypeMeta object associated with the current data type.
    */
-  inline const TypeMeta& dtype() const {
+  inline const TypeMeta dtype() const {
     return impl_->dtype();
   }
 
@@ -554,7 +482,7 @@ class CAFFE2_API Tensor final {
    * (To be deprecated) Returns the TypeMeta object associated with the current
    * data type.
    */
-  inline const TypeMeta& meta() const {
+  inline const TypeMeta meta() const {
     return impl_->dtype();
   }
 
@@ -567,10 +495,13 @@ class CAFFE2_API Tensor final {
    */
   inline int dim32(const int i) const {
 #ifndef NDEBUG
-    CAFFE_ENFORCE_LT_WITH_CALLER(i, static_cast<int>(impl_->dim()), "Exceeding ndim limit");
+    CAFFE_ENFORCE_LT_WITH_CALLER(
+        i, static_cast<int>(impl_->dim()), "Exceeding ndim limit");
     CAFFE_ENFORCE_GE_WITH_CALLER(i, 0, "Cannot have negative dimension index");
 #endif
-    auto s = impl_->size(i);
+    // Avoid TensorImpl::size() because it is a virtual call that
+    // supports out-of-range indexing like Python.
+    auto s = impl_->sizes()[i];
     CAFFE_ENFORCE_LT_WITH_CALLER(s, std::numeric_limits<int>::max());
     return static_cast<int>(s);
   }
@@ -606,9 +537,10 @@ class CAFFE2_API Tensor final {
  * this will not do anything if the
  * Tensor already has correct size and data type
  */
-CAFFE2_API void ReinitializeTensor(Tensor* t, at::IntArrayRef dims, at::TensorOptions options);
+TORCH_API void
+ReinitializeTensor(Tensor* t, at::IntArrayRef dims, at::TensorOptions options);
 
-CAFFE2_API void ReinitializeAndCopyFrom(
+TORCH_API void ReinitializeAndCopyFrom(
     Tensor* t,
     at::TensorOptions options,
     const Tensor& src,
@@ -627,10 +559,8 @@ TypeCall GetTypeCallFunction(TypeIdentifier id);
 void RegisterTypeCallFunction(TypeIdentifier id, TypeCall c);
 
 // Shape call registry
-typedef vector<int64_t> (*TensorInfoCall)(
-    const void*,
-    size_t* capacity,
-    DeviceOption* device);
+typedef vector<int64_t> (
+    *TensorInfoCall)(const void*, size_t* capacity, DeviceOption* device);
 TensorInfoCall GetTensorInfoFunction(TypeIdentifier id);
 void RegisterTensorInfoFunction(TypeIdentifier id, TensorInfoCall c);
 
@@ -641,7 +571,7 @@ void TensorVectorResize(
     DeviceType type);
 
 // Tensor factory function
-CAFFE2_API Tensor empty(at::IntArrayRef dims, at::TensorOptions options);
+TORCH_API Tensor empty(at::IntArrayRef dims, at::TensorOptions options);
 
 /**
  * @brief Creates a CPU tensor, and fills its contents with the given values.
@@ -662,7 +592,7 @@ Tensor TensorCPUFromValues(at::IntArrayRef dims, at::ArrayRef<T> values) {
 vector<int64_t>
 GetTensorInfo(const void* c, size_t* capacity, DeviceOption* device);
 
-class CAFFE2_API TensorPrinter {
+class TORCH_API TensorPrinter {
  public:
   explicit TensorPrinter(
       const std::string& tensor_name = "",

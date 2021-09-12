@@ -6,6 +6,7 @@
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/order_preserving_flat_hash_map.h>
 #include <c10/util/Optional.h>
+#include <torch/csrc/WindowsTorchApiMacro.h>
 #include <ATen/core/TensorBody.h>
 
 namespace c10 {
@@ -15,12 +16,12 @@ struct Type;
 using TypePtr = std::shared_ptr<Type>;
 
 namespace impl {
-bool shallowEquals(const IValue& lhs, const IValue& rhs);
 
 using valid_dict_key_types = guts::typelist::typelist<
   int64_t,
   std::string,
   double,
+  c10::complex<double>,
   bool,
   at::Tensor
 >;
@@ -33,9 +34,7 @@ struct DictKeyHash {
 };
 
 struct DictKeyEqualTo {
-  bool operator()(const IValue& lhs, const IValue& rhs) const {
-    return impl::shallowEquals(lhs, rhs);
-  }
+  bool operator()(const IValue& lhs, const IValue& rhs) const;
 };
 
 struct DictImpl final : public c10::intrusive_ptr_target {
@@ -53,6 +52,7 @@ struct DictImpl final : public c10::intrusive_ptr_target {
   DictElementTypes elementTypes;
 
   intrusive_ptr<DictImpl> copy() const;
+  friend TORCH_API bool operator==(const DictImpl& lhs, const DictImpl& rhs);
 };
 
 }
@@ -173,7 +173,7 @@ private:
 
   DictEntryRef<Key, Value, Iterator> entryRef_;
 
-  friend class DictIterator<Key, Value, typename detail::DictImpl::dict_map_type::iterator>;
+  friend class DictIterator<Key, Value, typename c10::detail::DictImpl::dict_map_type::iterator>;
   friend class Dict<Key, Value>;
 };
 
@@ -338,6 +338,25 @@ public:
    */
   void reserve(size_type count) const;
 
+  /**
+   * Value equality comparison. This function implements Python-like semantics for
+   * equality: two dicts with the same identity (e.g. same pointer) trivially
+   * compare equal, otherwise each element is compared for equality.
+   */
+  template <class Key_, class Value_>
+  friend bool operator==(
+      const Dict<Key_, Value_>& lhs,
+      const Dict<Key_, Value_>& rhs);
+  template <class Key_, class Value_>
+  friend bool operator!=(
+      const Dict<Key_, Value_>& lhs,
+      const Dict<Key_, Value_>& rhs);
+
+  /**
+   * Identity comparison. Returns true if and only if `rhs` represents the same
+   * Dict object as `this`.
+   */
+  bool is(const Dict& rhs) const;
 
   // private API for now because the return type will change to TypePtr
   // instead of optional<TypePtr> once types are mandatory.

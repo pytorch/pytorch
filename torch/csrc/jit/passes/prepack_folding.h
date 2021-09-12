@@ -8,7 +8,7 @@ namespace jit {
 
 using PrePackingOpsFilterFn = std::function<bool(Node*)>;
 
-void FoldPrePackingOps(
+void PrePackingOpsFolder(
     script::Module& m,
     const PrePackingOpsFilterFn& is_foldable_op,
     const std::string& attr_prefix);

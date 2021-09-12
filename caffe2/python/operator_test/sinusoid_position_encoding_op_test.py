@@ -1,10 +1,10 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 from caffe2.python import core
-from hypothesis import given
+from hypothesis import given, settings
 import caffe2.python.hypothesis_test_util as hu
 import caffe2.python.serialized_test.serialized_test_util as serial
 import hypothesis.strategies as st
@@ -21,7 +21,7 @@ MAX_TEST_AMPLITUDE = 10.0
 
 
 class TestSinusoidPositionEncodingOp(serial.SerializedTestCase):
-    @serial.given(
+    @given(
         positions_vec=hu.arrays(
             dims=[MAX_TEST_SEQUENCE_LENGTH],
             dtype=np.int32,
@@ -33,6 +33,7 @@ class TestSinusoidPositionEncodingOp(serial.SerializedTestCase):
         amplitude=st.floats(MIN_TEST_AMPLITUDE, MAX_TEST_AMPLITUDE),
         **hu.gcs_cpu_only
     )
+    @settings(deadline=10000)
     def test_sinusoid_embedding(
         self, positions_vec, embedding_size, batch_size, alpha, amplitude, gc, dc
     ):

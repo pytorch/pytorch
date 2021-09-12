@@ -1,7 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/native/UpSample.h>
+#include <ATen/native/quantized/affine_quantizer.h>
 #include <ATen/native/quantized/cpu/quantized_ops.h>
-#include <ATen/quantized/Quantizer.h>
 
 #include <algorithm>
 #include <cmath>
@@ -48,6 +48,7 @@ static void upsample_bilinear2d_out_frame(
 
   const auto rwidth =
       area_pixel_compute_scale<float>(input_width, output_width, align_corners, scales_w);
+  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   float output_scale = output.q_scale() / input.q_scale();
 
   for (int64_t h2 = 0; h2 < output_height; ++h2) {
@@ -78,7 +79,7 @@ static void upsample_bilinear2d_out_frame(
                 (w0lambda * pos1[h1p * input_width] +
                  w1lambda * pos1[h1p * input_width + w1p]) - input.q_zero_point();
         // requantization
-        pos2[0] = at::quantize_val<scalar_t>(
+        pos2[0] = at::native::quantize_val<scalar_t>(
                       output_scale, output.q_zero_point(), result)
                       .val_;
         pos1 += input_width * input_height;
@@ -90,7 +91,7 @@ static void upsample_bilinear2d_out_frame(
 
 } // namespace
 
-Tensor quantized_upsample_bilinear2d_cpu(
+Tensor upsample_bilinear2d_quantized_cpu(
     const Tensor& input,
     IntArrayRef output_size,
     bool align_corners,
@@ -102,7 +103,7 @@ Tensor quantized_upsample_bilinear2d_cpu(
       output_size.size());
 
   TORCH_CHECK(
-      input.numel() != 0 && input.dim() == 4,
+      input.dim() == 4,
       "Non-empty 4D data tensor expected but got a tensor with sizes ",
       input.sizes());
 
@@ -118,10 +119,10 @@ Tensor quantized_upsample_bilinear2d_cpu(
   if (input.is_contiguous(c10::MemoryFormat::ChannelsLast)) {
     Tensor output = at::_empty_affine_quantized(
         {nbatch, channels, output_height, output_width},
-        input.options(),
+        input.options().memory_format(input.suggest_memory_format()),
         input.q_scale(),
         input.q_zero_point(),
-        input.suggest_memory_format());
+        c10::nullopt);
 
     qupsample_bilinear2d_nhwc_stub(
         input.device().type(),
@@ -162,6 +163,20 @@ Tensor quantized_upsample_bilinear2d_cpu(
         });
     return output;
   }
+}
+
+using at::native::upsample::compute_output_size;
+using at::native::upsample::get_scale_value;
+
+Tensor upsample_bilinear2d_quantized_cpu(
+    const Tensor& input,
+    c10::optional<IntArrayRef> output_size,
+      bool align_corners,
+    c10::optional<ArrayRef<double>> scale_factors) {
+  auto osize = compute_output_size(input.sizes(), output_size, scale_factors);
+  auto scale_h = get_scale_value(scale_factors, 0);
+  auto scale_w = get_scale_value(scale_factors, 1);
+  return upsample_bilinear2d_quantized_cpu(input, osize, align_corners, scale_h, scale_w);
 }
 
 DEFINE_DISPATCH(qupsample_bilinear2d_nhwc_stub);

@@ -13,60 +13,51 @@ if "%BUILD_ENVIRONMENT%"=="" (
 )
 if NOT "%BUILD_ENVIRONMENT%"=="" (
     IF EXIST %CONDA_PARENT_DIR%\Miniconda3 ( rd /s /q %CONDA_PARENT_DIR%\Miniconda3 )
-    curl --retry 3 https://repo.continuum.io/miniconda/Miniconda3-latest-Windows-x86_64.exe --output %TMP_DIR_WIN%\Miniconda3-latest-Windows-x86_64.exe
+    curl --retry 3 https://repo.anaconda.com/miniconda/Miniconda3-latest-Windows-x86_64.exe --output %TMP_DIR_WIN%\Miniconda3-latest-Windows-x86_64.exe
+    if %errorlevel% neq 0 ( exit /b %errorlevel% )
     %TMP_DIR_WIN%\Miniconda3-latest-Windows-x86_64.exe /InstallationType=JustMe /RegisterPython=0 /S /AddToPath=0 /D=%CONDA_PARENT_DIR%\Miniconda3
+    if %errorlevel% neq 0 ( exit /b %errorlevel% )
 )
 call %CONDA_PARENT_DIR%\Miniconda3\Scripts\activate.bat %CONDA_PARENT_DIR%\Miniconda3
 if NOT "%BUILD_ENVIRONMENT%"=="" (
-    :: We have to pin Python version to 3.6.7, until mkl supports Python 3.7
-    :: Numba is pinned to 0.44.0 to avoid https://github.com/numba/numba/issues/4352
-    call conda install -y -q python=3.6.7 numpy mkl cffi pyyaml boto3 protobuf numba==0.44.0
+    call conda install -y -q python=3.8 numpy mkl cffi pyyaml boto3 protobuf numba scipy typing_extensions dataclasses libuv
+    if %errorlevel% neq 0 ( exit /b %errorlevel% )
     call conda install -y -q -c conda-forge cmake
+    if %errorlevel% neq 0 ( exit /b %errorlevel% )
 )
+
+pushd .
+if "%VC_VERSION%" == "" (
+    call "C:\Program Files (x86)\Microsoft Visual Studio\%VC_YEAR%\%VC_PRODUCT%\VC\Auxiliary\Build\vcvarsall.bat" x64
+) else (
+    call "C:\Program Files (x86)\Microsoft Visual Studio\%VC_YEAR%\%VC_PRODUCT%\VC\Auxiliary\Build\vcvarsall.bat" x64 -vcvars_ver=%VC_VERSION%
+)
+if %errorlevel% neq 0 ( exit /b %errorlevel% )
+@echo on
+popd
+
 :: The version is fixed to avoid flakiness: https://github.com/pytorch/pytorch/issues/31136
-pip install ninja future "hypothesis==4.53.2" "librosa>=0.6.2" psutil pillow
-:: No need to install faulthandler since we only test Python >= 3.6 on Windows
-:: faulthandler is builtin since Python 3.3
+pip install "ninja==1.10.0.post1" future "hypothesis==4.53.2" "expecttest==0.1.3" "librosa>=0.6.2" psutil pillow unittest-xml-reporting pytest
 
-if "%CUDA_VERSION%" == "9" goto cuda_build_9
-if "%CUDA_VERSION%" == "10" goto cuda_build_10
-goto cuda_build_end
-
-:cuda_build_9
-
-pushd .
-if "%VC_VERSION%" == "" (
-    call "C:\Program Files (x86)\Microsoft Visual Studio\%VC_YEAR%\%VC_PRODUCT%\VC\Auxiliary\Build\vcvarsall.bat" x64
-) else (
-    call "C:\Program Files (x86)\Microsoft Visual Studio\%VC_YEAR%\%VC_PRODUCT%\VC\Auxiliary\Build\vcvarsall.bat" x64 -vcvars_ver=%VC_VERSION%
+:: Only the CPU tests run coverage, which I know is not super clear: https://github.com/pytorch/pytorch/issues/56264
+if "%BUILD_ENVIRONMENT%" == "win-vs2019-cpu-py3" (
+    :: coverage config file needed for plug-ins and settings to work
+    set PYTORCH_COLLECT_COVERAGE=1
+    python -mpip install coverage==5.5
+    python -mpip install -e tools/coverage_plugins_package
 )
-@echo on
-popd
-
-set CUDA_PATH=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v9.2
-set CUDA_PATH_V9_2=%CUDA_PATH%
-
-goto cuda_build_common
-
-:cuda_build_10
-
-pushd .
-if "%VC_VERSION%" == "" (
-    call "C:\Program Files (x86)\Microsoft Visual Studio\%VC_YEAR%\%VC_PRODUCT%\VC\Auxiliary\Build\vcvarsall.bat" x64
-) else (
-    call "C:\Program Files (x86)\Microsoft Visual Studio\%VC_YEAR%\%VC_PRODUCT%\VC\Auxiliary\Build\vcvarsall.bat" x64 -vcvars_ver=%VC_VERSION%
-)
-@echo on
-popd
-
-set CUDA_PATH=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v10.1
-set CUDA_PATH_V10_1=%CUDA_PATH%
-
-goto cuda_build_common
-
-:cuda_build_common
+if %errorlevel% neq 0 ( exit /b %errorlevel% )
 
 set DISTUTILS_USE_SDK=1
+
+if not "%USE_CUDA%"=="1" goto cuda_build_end
+
+set CUDA_PATH=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v%CUDA_VERSION%
+
+rem version transformer, for example 10.1 to 10_1.
+set VERSION_SUFFIX=%CUDA_VERSION:.=_%
+set CUDA_PATH_V%VERSION_SUFFIX%=%CUDA_PATH%
+
 set CUDNN_LIB_DIR=%CUDA_PATH%\lib\x64
 set CUDA_TOOLKIT_ROOT_DIR=%CUDA_PATH%
 set CUDNN_ROOT_DIR=%CUDA_PATH%
@@ -82,7 +73,7 @@ set PYTHONPATH=%TMP_DIR_WIN%\build;%PYTHONPATH%
 
 if NOT "%BUILD_ENVIRONMENT%"=="" (
     pushd %TMP_DIR_WIN%\build
-    python %SCRIPT_HELPERS_DIR%\download_image.py %TMP_DIR_WIN%\%IMAGE_COMMIT_TAG%.7z
+    copy /Y %PYTORCH_FINAL_PACKAGE_DIR_WIN%\%IMAGE_COMMIT_TAG%.7z %TMP_DIR_WIN%\
     :: 7z: -aos skips if exists because this .bat can be called multiple times
     7z x %TMP_DIR_WIN%\%IMAGE_COMMIT_TAG%.7z -aos
     popd
@@ -91,6 +82,15 @@ if NOT "%BUILD_ENVIRONMENT%"=="" (
 )
 
 @echo off
-echo @echo off >> %TMP_DIR%/ci_scripts/pytorch_env_restore.bat
-for /f "usebackq tokens=*" %%i in (`set`) do echo set "%%i" >> %TMP_DIR%/ci_scripts/pytorch_env_restore.bat
+echo @echo off >> %TMP_DIR_WIN%/ci_scripts/pytorch_env_restore.bat
+for /f "usebackq tokens=*" %%i in (`set`) do echo set "%%i" >> %TMP_DIR_WIN%/ci_scripts/pytorch_env_restore.bat
 @echo on
+
+if NOT "%BUILD_ENVIRONMENT%" == "" (
+  :: Create a shortcut to restore pytorch environment
+  echo @echo off >> %TMP_DIR_WIN%/ci_scripts/pytorch_env_restore_helper.bat
+  echo call "%TMP_DIR_WIN%/ci_scripts/pytorch_env_restore.bat" >> %TMP_DIR_WIN%/ci_scripts/pytorch_env_restore_helper.bat
+  echo cd /D "%CD%" >> %TMP_DIR_WIN%/ci_scripts/pytorch_env_restore_helper.bat
+
+  aws s3 cp "s3://ossci-windows/Restore PyTorch Environment.lnk" "C:\Users\circleci\Desktop\Restore PyTorch Environment.lnk"
+)

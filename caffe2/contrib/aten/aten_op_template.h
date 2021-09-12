@@ -2,6 +2,7 @@
 #include <unordered_map>
 #include <string>
 #include <ATen/ATen.h>
+#include <c10/macros/Macros.h>
 #include <caffe2/core/context.h>
 #include <caffe2/core/operator.h>
 #include <caffe2/utils/math.h>
@@ -17,6 +18,12 @@ namespace caffe2 {
 
 using at::Half; // for AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, ...)
 
+namespace internal {
+TORCH_API at::Tensor index_with_uint8_handling(
+    const at::Tensor& self,
+    const torch::List<c10::optional<at::Tensor>>& indices);
+}
+
 template <class Context>
 class ATenOp : public Operator<Context> {
  public:
@@ -24,7 +31,7 @@ class ATenOp : public Operator<Context> {
   : Operator<Context>(operator_def, ws) {
     VLOG(2) << "ATen OpDef: " << ProtoDebugString(operator_def) << "\n";
     switch(findImplementation(operator_def)) {
-      ${implementations}
+      ${cases}
       default:
         CAFFE_THROW("Unexpected key value for aten operator");
     }
@@ -79,6 +86,16 @@ private:
 
   std::vector<at::Tensor> peekSlice(size_t i, size_t len, size_t N) {
     std::vector<at::Tensor> results;
+    results.reserve(len);
+    for (size_t ii = i; ii < i + len; ++ii) {
+      results.push_back(peek(ii, N));
+    }
+    return results;
+  }
+
+  torch::List<c10::optional<at::Tensor>> peekSliceOptionals(size_t i, size_t len, size_t N) {
+    torch::List<c10::optional<at::Tensor>> results;
+    results.reserve(len);
     for (size_t ii = i; ii < i + len; ++ii) {
       results.push_back(peek(ii, N));
     }
@@ -91,7 +108,7 @@ private:
     caffe2::TypeMeta type_meta = typeMetaFor(src);
     at::Device device = src.device();
 #ifdef __HIP_PLATFORM_HCC__
-    if (device.type() == at::DeviceType::CUDA) {
+    if (device.is_cuda()) {
       device = at::Device(at::DeviceType::HIP, device.index());
     }
 #endif
@@ -132,7 +149,7 @@ private:
     return s.toDouble();
   }
 
-  void assignTo(Tensor* dst, at::ScalarType scalar_type, at::Scalar scalar) {
+  void assignTo(Tensor* dst, at::ScalarType scalar_type, const at::Scalar& scalar) {
     switch(scalar_type) {
       #define DEFINE_CASE(ctype,aten_name) \
         case at::k##aten_name: { \
@@ -211,6 +228,8 @@ private:
     }
     return result;
   }
+
+  ${implementations}
 };
 
 }

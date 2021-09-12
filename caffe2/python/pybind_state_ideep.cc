@@ -69,6 +69,7 @@ public:
     std::vector<npy_intp> npy_dims(dims.begin(), dims.end());
 
     result.copied = force_copy || atensor.need_reorder();
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     void *outPtr;
     if (result.copied) {
       result.obj = py::reinterpret_steal<py::object>(
@@ -97,7 +98,7 @@ public:
 };
 
 class IDeepFeeder : public BlobFeederBase {
-  itensor::data_type type_transform(const TypeMeta &meta) {
+  itensor::data_type type_transform(const TypeMeta meta) {
     if (meta == TypeMeta::Make<float>())
       return itensor::data_type::f32;
     else if (meta == TypeMeta::Make<int>())
@@ -107,7 +108,7 @@ class IDeepFeeder : public BlobFeederBase {
     else if (meta == TypeMeta::Make<uint8_t>())
       return itensor::data_type::u8;
     else
-      return itensor::data_type::data_undef;
+      return itensor::data_type::undef;
   }
 
 public:
@@ -119,10 +120,10 @@ public:
     PyArrayObject *array = PyArray_GETCONTIGUOUS(original_array);
     auto g = MakeGuard([&]() { Py_XDECREF(array); });
     const auto npy_type = PyArray_TYPE(array);
-    const TypeMeta &meta = NumpyTypeToCaffe(npy_type);
+    const TypeMeta meta = NumpyTypeToCaffe(npy_type);
     CAFFE_ENFORCE_NE(
-        meta.id(),
-        TypeIdentifier::uninitialized(),
+        meta,
+        ScalarType::Undefined,
         "This numpy data type is not supported: ",
         PyArray_TYPE(array), ".");
 
@@ -172,7 +173,7 @@ public:
       auto g = MakeGuard([&]() { Py_XDECREF(array); });
 
       const auto npy_type = PyArray_TYPE(array);
-      const TypeMeta &meta = NumpyTypeToCaffe(npy_type);
+      const TypeMeta meta = NumpyTypeToCaffe(npy_type);
 
       // TODO: if necessary, use dispatcher.
       if ((in_place && blob->IsType<itensor>())

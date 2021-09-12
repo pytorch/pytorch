@@ -2,11 +2,15 @@ from collections import namedtuple
 import warnings
 
 import torch
+from torch import Tensor
 from ... import _VF
 from ..._jit_internal import Optional
 
+from typing import List, Tuple
 
-PackedSequence_ = namedtuple('PackedSequence',
+
+
+PackedSequence_ = namedtuple('PackedSequence_',
                              ['data', 'batch_sizes', 'sorted_indices', 'unsorted_indices'])
 
 # type annotation for PackedSequence_ to make it compatible with TorchScript
@@ -150,7 +154,7 @@ class PackedSequence(PackedSequence_):
 # TorchScript doesn't support constructors on named tuples, so we use this helper
 # method to construct PackedSequence
 def _packed_sequence_init_args(data, batch_sizes=None, sorted_indices=None, unsorted_indices=None):
-    # type: (Tensor, Optional[Tensor], Optional[Tensor], Optional[Tensor]) -> Tuple[Tensor, Tensor, Optional[Tensor], Optional[Tensor]]  # noqa
+    # type: (Tensor, Optional[Tensor], Optional[Tensor], Optional[Tensor]) -> Tuple[Tensor, Tensor, Optional[Tensor], Optional[Tensor]]  # noqa: B950
     # NB: if unsorted_indices is provided, it should be the inverse permutation
     # to sorted_indices. Don't assert it here because the PackedSequence ctor
     # should only be used internally.
@@ -213,9 +217,10 @@ def pack_padded_sequence(input, lengths, batch_first=False, enforce_sorted=True)
         them to compute the loss directly. A Tensor can be retrieved from
         a :class:`PackedSequence` object by accessing its ``.data`` attribute.
 
-    Arguments:
+    Args:
         input (Tensor): padded batch of variable length sequences.
-        lengths (Tensor): list of sequences lengths of each batch element.
+        lengths (Tensor or list(int)): list of sequence lengths of each batch
+            element (must be on the CPU if provided as a tensor).
         batch_first (bool, optional): if ``True``, the input is expected in ``B x T x *``
             format.
         enforce_sorted (bool, optional): if ``True``, the input is expected to
@@ -278,7 +283,7 @@ def pad_packed_sequence(sequence, batch_first=False, padding_value=0.0, total_le
         See :ref:`this FAQ section <pack-rnn-unpack-with-data-parallelism>` for
         details.
 
-    Arguments:
+    Args:
         sequence (PackedSequence): batch to pad
         batch_first (bool, optional): if ``True``, the output will be in ``B x T x *``
             format.
@@ -315,7 +320,8 @@ def pad_packed_sequence(sequence, batch_first=False, padding_value=0.0, total_le
     return padded_output, lengths
 
 
-def pad_sequence(sequences, batch_first=False, padding_value=0):
+def pad_sequence(sequences, batch_first=False, padding_value=0.0):
+    # type: (List[Tensor], bool, float) -> Tensor
     r"""Pad a list of variable length Tensors with ``padding_value``
 
     ``pad_sequence`` stacks a list of Tensors along a new dimension,
@@ -341,7 +347,7 @@ def pad_sequence(sequences, batch_first=False, padding_value=0):
         where `T` is the length of the longest sequence. This function assumes
         trailing dimensions and type of all the Tensors in sequences are same.
 
-    Arguments:
+    Args:
         sequences (list[Tensor]): list of variable length sequences.
         batch_first (bool, optional): output will be in ``B x T x *`` if True, or in
             ``T x B x *`` otherwise
@@ -354,24 +360,7 @@ def pad_sequence(sequences, batch_first=False, padding_value=0):
 
     # assuming trailing dimensions and type of all the Tensors
     # in sequences are same and fetching those from sequences[0]
-    max_size = sequences[0].size()
-    trailing_dims = max_size[1:]
-    max_len = max([s.size(0) for s in sequences])
-    if batch_first:
-        out_dims = (len(sequences), max_len) + trailing_dims
-    else:
-        out_dims = (max_len, len(sequences)) + trailing_dims
-
-    out_tensor = sequences[0].data.new(*out_dims).fill_(padding_value)
-    for i, tensor in enumerate(sequences):
-        length = tensor.size(0)
-        # use index notation to prevent duplicate references to the tensor
-        if batch_first:
-            out_tensor[i, :length, ...] = tensor
-        else:
-            out_tensor[:length, i, ...] = tensor
-
-    return out_tensor
+    return torch._C._nn.pad_sequence(sequences, batch_first, padding_value)
 
 
 def pack_sequence(sequences, enforce_sorted=True):
@@ -396,7 +385,7 @@ def pack_sequence(sequences, enforce_sorted=True):
         PackedSequence(data=tensor([ 1,  4,  6,  2,  5,  3]), batch_sizes=tensor([ 3,  2,  1]))
 
 
-    Arguments:
+    Args:
         sequences (list[Tensor]): A list of sequences of decreasing length.
         enforce_sorted (bool, optional): if ``True``, checks that the input
             contains sequences sorted by length in a decreasing order. If
@@ -405,5 +394,5 @@ def pack_sequence(sequences, enforce_sorted=True):
     Returns:
         a :class:`PackedSequence` object
     """
-    lengths = [v.size(0) for v in sequences]
+    lengths = torch.as_tensor([v.size(0) for v in sequences])
     return pack_padded_sequence(pad_sequence(sequences), lengths, enforce_sorted=enforce_sorted)

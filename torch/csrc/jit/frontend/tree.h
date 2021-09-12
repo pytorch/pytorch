@@ -5,27 +5,24 @@
 #include <unordered_map>
 #include <vector>
 
-#include <torch/csrc/jit/frontend/lexer.h>
-#include <c10/util/intrusive_ptr.h>
 #include <c10/util/SmallVector.h>
+#include <c10/util/intrusive_ptr.h>
+#include <torch/csrc/jit/frontend/lexer.h>
 
 namespace torch {
 namespace jit {
 
-// Tree's are used to represent all forms of TC IR, pre- and post- typechecking.
-// Rather than have a full class hierarchy for all TC statements,
-// Trees are a slight variation of Lisp S-expressions.
-// for instance the expression a*b+1 is represented as:
+// Trees are used to represent all forms of TC IR, pre- and post-typechecking.
+// Rather than have a full class hierarchy for all TC statements, trees are a
+// slight variation of Lisp s-expressions. For instance, the expression a*b+1
+// is represented as:
 // (+ (* (ident a) (ident b)) (const 1))
 // Atoms like 'a', 'b', and '1' are represented by subclasses of Tree which
-// define stringValue().
-// Everything else is a Compound object, which has a 'kind' that is a token from
-// Lexer.h's TokenKind enum, and contains a list of subtrees.
-// Like TokenKind single-character operators like '+' are representing using the
-// character itself, so add.kind() == '+'.
-// Compound objects are also always associated with a SourceRange for
-// reporting error message.
-
+// define stringValue(). Everything else is a Compound object, which has a
+// 'kind' that is a token from lexer.h's TokenKind enum. Single-character
+// operators like '+' are represented using the character itself (so, add.kind()
+// would be '+'). Each Compound object also contains a list of subtrees and is
+// associated with a SourceRange for error reporting.
 // Memory management of trees is done using intrusive_ptr.
 
 struct Tree;
@@ -101,7 +98,7 @@ struct Tree : c10::intrusive_ptr_target {
       throw std::runtime_error(ss.str());
     }
   }
-  virtual ~Tree() = default;
+  ~Tree() override = default;
 
  private:
   int kind_;

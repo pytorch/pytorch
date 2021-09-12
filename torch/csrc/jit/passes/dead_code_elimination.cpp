@@ -1,8 +1,9 @@
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 
+#include <c10/util/irange.h>
+#include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/ir/ir_views.h>
 #include <torch/csrc/jit/jit_log.h>
-#include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/utils/memory.h>
 
 #include <unordered_map>
@@ -16,10 +17,14 @@ using namespace ::c10::prim;
 
 class DeadCodeEliminator {
  public:
-  explicit DeadCodeEliminator(std::shared_ptr<Graph> graph, DCESideEffectPolicy sideEffectPolicy)
-      : sideEffectPolicy_(sideEffectPolicy), aliasDb_(torch::make_unique<AliasDb>(std::move(graph))) {}
+  explicit DeadCodeEliminator(
+      std::shared_ptr<Graph> graph,
+      DCESideEffectPolicy sideEffectPolicy)
+      : sideEffectPolicy_(sideEffectPolicy),
+        graph_(std::move(graph)),
+        useAliasDb_(true) {}
   DeadCodeEliminator(DCESideEffectPolicy sideEffectPolicy)
-  : sideEffectPolicy_(sideEffectPolicy) {}
+      : sideEffectPolicy_(sideEffectPolicy) {}
 
   // The algorithm is an inverse mark-and-sweep. Starting from the return node,
   // we mark "live" nodes that are necessary for the output. Nodes that have
@@ -56,6 +61,8 @@ class DeadCodeEliminator {
         continue;
       }
       Graph& g = *node->g(attr::Subgraph);
+      // WARNING: Do not use a ranged loop. The loop bounds are changed by the
+      // loop body.
       for (size_t i = 0; i < g.inputs().size(); ++i) {
         if (!g.inputs().at(i)->hasUses()) {
           GRAPH_UPDATE(
@@ -110,7 +117,7 @@ class DeadCodeEliminator {
         outerNode->kind() == c10::onnx::Loop) {
       // Special handling to deal with loop carried dependencies.
       auto loop = LoopView(outerNode);
-      for (size_t i = 0; i < loop.carriedOutputs().size(); i++) {
+      for (const auto i : c10::irange(loop.carriedOutputs().size())) {
         if (outerNode->kind() == c10::onnx::Loop) {
           // Special handling for onnx loop.
           // The number of body carried inputs and outputs are different.
@@ -131,7 +138,7 @@ class DeadCodeEliminator {
       liveValues_.insert(loop.nextCond());
     } else {
       AT_ASSERT(outerNode->outputs().size() == node->inputs().size());
-      for (size_t i = 0; i < outerNode->outputs().size(); i++) {
+      for (const auto i : c10::irange(outerNode->outputs().size())) {
         auto innerOutput = node->inputs()[i];
         auto outerOutput = outerNode->outputs()[i];
         if (liveValues_.count(outerOutput)) {
@@ -215,11 +222,12 @@ class DeadCodeEliminator {
       }
     }
 
-    if (aliasDb_) {
-      if (aliasDb_->writesToAlias(node, liveValues_)) {
+    if (useAliasDb_) {
+      if (getOrCreateAliasDb()->writesToAlias(node, liveValues_)) {
         return mark(node);
       }
     }
+
     return false;
   }
 
@@ -245,6 +253,7 @@ class DeadCodeEliminator {
       curNode = curNode->owningBlock()->owningNode();
     }
 
+    // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
     for (const auto input : node->inputs()) {
       if (liveValues_.count(input)) {
         continue;
@@ -286,7 +295,7 @@ class DeadCodeEliminator {
   }
 
   bool hasUntrackedMutation(Node* node) {
-    if (!aliasDb_) {
+    if (!useAliasDb_) {
       // If we don't have alias information, all mutable ops have unknown
       // effects and can't be considered for elimination.
 
@@ -296,7 +305,7 @@ class DeadCodeEliminator {
       auto schema = node->maybeSchema();
       return schema && schema->is_mutable();
     } else {
-      return aliasDb_->writesToWildcard(node);
+      return getOrCreateAliasDb()->writesToWildcard(node);
     }
   }
 
@@ -400,7 +409,18 @@ class DeadCodeEliminator {
         " will be removed");
   }
 
+  AliasDb* getOrCreateAliasDb() {
+    if (!aliasDb_) {
+      aliasDb_ = std::make_unique<AliasDb>(graph_);
+    }
+    return aliasDb_.get();
+  }
+
   DCESideEffectPolicy sideEffectPolicy_;
+
+  std::shared_ptr<Graph> graph_;
+  bool useAliasDb_ = false;
+  // lazily initialized
   std::unique_ptr<AliasDb> aliasDb_ = nullptr;
   std::unordered_map<Node*, bool> memo_;
   std::unordered_set<Node*> marked_;
@@ -409,12 +429,18 @@ class DeadCodeEliminator {
       [](const std::unordered_set<const Value*>&) {};
 };
 
-void EliminateDeadCode(const std::shared_ptr<Graph>& graph, DCESideEffectPolicy sideEffectPolicy) {
-  DeadCodeEliminator(graph, sideEffectPolicy).run(graph->block(), /*recurse=*/true);
+void EliminateDeadCode(
+    const std::shared_ptr<Graph>& graph,
+    DCESideEffectPolicy sideEffectPolicy) {
+  DeadCodeEliminator(graph, sideEffectPolicy)
+      .run(graph->block(), /*recurse=*/true);
   GRAPH_DUMP("After EliminateDeadCode: ", graph);
 }
 
-void EliminateDeadCode(Block* block, bool recurse, DCESideEffectPolicy sideEffectPolicy) {
+void EliminateDeadCode(
+    Block* block,
+    bool recurse,
+    DCESideEffectPolicy sideEffectPolicy) {
   DeadCodeEliminator(sideEffectPolicy).run(block, recurse);
 }
 

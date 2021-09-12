@@ -1,6 +1,7 @@
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/runtime/instruction.h>
-#include <iostream>
 #include <cstring>
+#include <iostream>
 
 namespace torch {
 namespace jit {
@@ -15,7 +16,7 @@ std::ostream& operator<<(std::ostream& out, OpCode op) {
   return out;
 }
 
-char const * toString(OpCode op) {
+char const* toString(OpCode op) {
   switch (op) {
 #define OP_STRING(x, _) \
   case x:               \
@@ -31,6 +32,7 @@ const char* OpInfo(OpCode op) {
 #define OP_INFO(x, info) \
   case x:                \
     return info;
+    // NOLINTNEXTLINE(bugprone-branch-clone)
     FORALL_OPCODES(OP_INFO)
 #undef OP_INFO
   }
@@ -38,7 +40,9 @@ const char* OpInfo(OpCode op) {
 }
 
 static constexpr size_t instruction_size = 8;
-static_assert(sizeof(Instruction) == instruction_size, "Instructions should be 8 bytes");
+static_assert(
+    sizeof(Instruction) == instruction_size,
+    "Instructions should be 8 bytes");
 std::ostream& operator<<(std::ostream& out, Instruction inst) {
   // TODO: use op info to print out the op in a more user-friendly way
   int nargs = std::strlen(OpInfo(inst.op));
@@ -52,34 +56,39 @@ std::ostream& operator<<(std::ostream& out, Instruction inst) {
   return out;
 }
 
-static constexpr char *strOpCode[] = {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
+static constexpr const char* strOpCode[] = {
 #define STR_OP(x, _) #x,
     FORALL_OPCODES(STR_OP)
 #undef STR_OP
 };
 
-OpCode parseOpCode(const char *str) {
+OpCode parseOpCode(const char* str) {
   const int n = sizeof(strOpCode) / sizeof(strOpCode[0]);
-  for (int i = 0; i < n; ++i)
-  {
+  for (const auto i : c10::irange(n)) {
     if (strcmp(strOpCode[i], str) == 0)
-      return (OpCode) i;
+      return (OpCode)i;
   }
   return OP;
 }
 
 bool isOpSupportedInMobile(OpCode op) {
   // clang-format off
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
   static constexpr OpCode supported_ops_in_mobile[] {
-      OP, OPN, LOAD, MOVE, STOREN, STORE, DROP, DROPR, LOADC, JF, JMP, LOOP, RET, GET_ATTR, SET_ATTR, LIST_CONSTRUCT, TUPLE_CONSTRUCT, WARN, INTERFACE_CALL
+      OP, OPN, LOAD, MOVE, STOREN, STORE, DROP, DROPR, LOADC, JF, JMP, LOOP,
+      RET, GET_ATTR, SET_ATTR, LIST_CONSTRUCT, TUPLE_CONSTRUCT, WARN,
+      INTERFACE_CALL, LIST_UNPACK, TUPLE_SLICE, DICT_CONSTRUCT,
+      NAMED_TUPLE_CONSTRUCT, CREATE_OBJECT, ISINSTANCE
   };
   // clang-format on
 
   for (auto sop : supported_ops_in_mobile) {
-    if (op == sop) return true;
+    if (op == sop)
+      return true;
   }
   return false;
 }
 
-}
-}
+} // namespace jit
+} // namespace torch

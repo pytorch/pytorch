@@ -17,12 +17,13 @@ class ExpandOp final : public Operator<Context> {
 
   template <class... Args>
   explicit ExpandOp(Args&&... args)
-      : Operator<Context>(std::forward<Args>(args)...) {}
+      : Operator<Context>(std::forward<Args>(args)...),
+        OP_SINGLE_ARG(bool, "allow_broadcast_fastpath", allow_broadcast_fastpath_, false) {}
 
   bool RunOnDevice() override {
     return DispatchHelper<InputTypes>::call(this, Input(0));
   }
- template <typename T>
+  template <typename T>
   bool DoRunWithType() {
     const auto& X = Input(0);
     const auto& Y_shape_tensor = Input(1);
@@ -61,10 +62,12 @@ class ExpandOp final : public Operator<Context> {
         T(1),
         X.template data<T>(),
         Y->template mutable_data<T>(),
-        &context_);
+        &context_,
+        allow_broadcast_fastpath_);
     return true;
   }
 
+  const bool allow_broadcast_fastpath_;
 };
 
 template <typename InputTypes, class Context>
@@ -74,7 +77,8 @@ class ExpandGradientOp final : public Operator<Context> {
 
   template <class... Args>
   explicit ExpandGradientOp(Args&&... args)
-      : Operator<Context>(std::forward<Args>(args)...) {}
+      : Operator<Context>(std::forward<Args>(args)...),
+        OP_SINGLE_ARG(bool, "allow_broadcast_fastpath", allow_broadcast_fastpath_, false) {}
 
   bool RunOnDevice() override {
     return DispatchHelper<InputTypes>::call(this, Input(0));
@@ -107,9 +111,12 @@ class ExpandGradientOp final : public Operator<Context> {
         T(1),
         dY.template data<T>(),
         dX->template mutable_data<T>(),
-        &context_);
+        &context_,
+        allow_broadcast_fastpath_);
     return true;
   }
+
+  const bool allow_broadcast_fastpath_;
 };
 
 } // namespace caffe2

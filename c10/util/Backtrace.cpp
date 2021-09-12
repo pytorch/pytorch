@@ -1,6 +1,6 @@
-#include "c10/util/Backtrace.h"
-#include "c10/util/Optional.h"
-#include "c10/util/Type.h"
+#include <c10/util/Backtrace.h>
+#include <c10/util/Optional.h>
+#include <c10/util/Type.h>
 
 #include <functional>
 #include <memory>
@@ -8,25 +8,81 @@
 #include <string>
 #include <vector>
 
-#if (defined(__ANDROID__)) ||                                                 \
-    (defined(__APPLE__) &&                                                    \
-     (TARGET_IPHONE_SIMULATOR || TARGET_OS_SIMULATOR || TARGET_OS_IPHONE)) || \
-    defined(_WIN32) || defined(__EMSCRIPTEN__)
-// No backtrace on mobile, windows and emscripten platforms.
-#define SUPPORTS_BACKTRACE 0
-#else
-#define SUPPORTS_BACKTRACE 1
+#ifdef _MSC_VER
+#include <c10/util/win32-headers.h>
+#include <iomanip>
+#pragma comment(lib, "Dbghelp.lib")
+#endif
+
+#if SUPPORTS_BACKTRACE
 #include <cxxabi.h>
+#ifdef C10_ANDROID
+#include <dlfcn.h>
+#include <unwind.h>
+#else
 #include <execinfo.h>
+#endif
+#endif
+
+#ifdef FBCODE_CAFFE2
+#include <common/process/StackTrace.h>
 #endif
 
 namespace c10 {
 
-// TODO: This backtrace retrieval can be implemented on Windows via the Windows
-// API using `CaptureStackBackTrace` and `SymFromAddr`.
-// https://stackoverflow.com/questions/5693192/win32-backtrace-from-c-code
-// https://stackoverflow.com/questions/26398064/counterpart-to-glibcs-backtrace-and-backtrace-symbols-on-windows
-// https://msdn.microsoft.com/en-us/library/windows/desktop/bb204633%28v=vs.85%29.aspx.
+#if SUPPORTS_BACKTRACE && defined(C10_ANDROID)
+
+struct AndroidBacktraceState {
+  std::vector<void*> buffer;
+};
+
+_Unwind_Reason_Code android_unwind_callback(
+    struct _Unwind_Context* context,
+    void* arg) {
+  AndroidBacktraceState* state = (AndroidBacktraceState*)arg;
+  uintptr_t pc = _Unwind_GetIP(context);
+  if (pc) {
+    state->buffer.emplace_back(reinterpret_cast<void*>(pc));
+  }
+  return _URC_NO_REASON;
+}
+
+void dump_stack(
+    std::ostream& os,
+    size_t frames_to_skip,
+    size_t maximum_number_of_frames) {
+  AndroidBacktraceState state;
+
+  _Unwind_Backtrace(android_unwind_callback, &state);
+
+  int idx = 0;
+  char* demangled = nullptr;
+  size_t length = 0;
+
+  for (const void* addr : state.buffer) {
+    const char* symbol = "";
+
+    Dl_info info;
+    if (dladdr(addr, &info) && info.dli_sname) {
+      symbol = info.dli_sname;
+    }
+
+    int status = 0;
+    demangled = __cxxabiv1::__cxa_demangle(
+        /*mangled_name*/ symbol,
+        /*output_buffer*/ demangled,
+        /*length*/ &length,
+        /*status*/ &status);
+
+    os << " frame #" << idx++ << "\t"
+       << ((demangled != NULL && status == 0) ? demangled : symbol) << "["
+       << addr << "]\t" << std::endl;
+  }
+  free(demangled);
+}
+
+#endif /* SUPPORTS_BACKTRACE && defined(C10_ANDROID) */
+
 #if SUPPORTS_BACKTRACE
 namespace {
 
@@ -44,6 +100,7 @@ struct FrameInformation {
   std::string object_file;
 };
 
+#ifndef C10_ANDROID
 bool is_python_frame(const FrameInformation& frame) {
   return frame.object_file == "python" || frame.object_file == "python3" ||
       (frame.object_file.find("libpython") != std::string::npos);
@@ -115,7 +172,58 @@ c10::optional<FrameInformation> parse_frame_information(
   frame.function_name = demangle(mangled_function_name.c_str());
   return frame;
 }
+#endif /* !defined(C10_ANDROID) */
+} // anonymous namespace
+#elif defined(_MSC_VER)
+namespace {
+const int max_name_len = 256;
+std::string get_module_base_name(void* addr) {
+  HMODULE h_module;
+  char module[max_name_len];
+  strcpy(module, "");
+  GetModuleHandleEx(
+      GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+          GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+      (LPCTSTR)addr,
+      &h_module);
+  if (h_module != NULL) {
+    GetModuleFileNameA(h_module, module, max_name_len);
+  }
+  char* last_slash_pos = strrchr(module, '\\');
+  if (last_slash_pos) {
+    std::string module_base_name(last_slash_pos + 1);
+    return module_base_name;
+  } else {
+    std::string module_base_name(module);
+    return module_base_name;
+  }
+}
+class SymbolHelper {
+ public:
+  static SymbolHelper& getInstance() {
+    static SymbolHelper instance;
+    return instance;
+  }
+  bool inited = false;
+  HANDLE process;
 
+ private:
+  SymbolHelper() {
+    process = GetCurrentProcess();
+    DWORD flags = SymGetOptions();
+    SymSetOptions(flags | SYMOPT_DEFERRED_LOADS);
+    inited = SymInitialize(process, NULL, TRUE);
+  }
+  ~SymbolHelper() {
+    if (inited) {
+      SymCleanup(process);
+    }
+  }
+
+ public:
+  SymbolHelper(SymbolHelper const&) = delete;
+  void operator=(SymbolHelper const&) = delete;
+};
 } // anonymous namespace
 #endif // SUPPORTS_BACKTRACE
 
@@ -123,7 +231,14 @@ std::string get_backtrace(
     size_t frames_to_skip,
     size_t maximum_number_of_frames,
     bool skip_python_frames) {
-#if SUPPORTS_BACKTRACE
+#ifdef FBCODE_CAFFE2
+  // For some reason, the stacktrace implementation in fbcode is
+  // better than ours, see  https://github.com/pytorch/pytorch/issues/56399
+  // When it's available, just use that.
+  facebook::process::StackTrace st;
+  return st.toString();
+
+#elif SUPPORTS_BACKTRACE && !defined(C10_ANDROID)
 
   // We always skip this frame (backtrace).
   frames_to_skip += 1;
@@ -194,7 +309,94 @@ std::string get_backtrace(
   }
 
   return stream.str();
-#else // !SUPPORTS_BACKTRACE
+
+#elif SUPPORTS_BACKTRACE && defined(C10_ANDROID)
+
+  std::ostringstream oss;
+  dump_stack(oss, frames_to_skip, maximum_number_of_frames);
+  return oss.str().c_str();
+
+#elif defined(_MSC_VER) // !SUPPORTS_BACKTRACE
+  // This backtrace retrieval is implemented on Windows via the Windows
+  // API using `CaptureStackBackTrace`, `SymFromAddr` and
+  // `SymGetLineFromAddr64`.
+  // https://stackoverflow.com/questions/5693192/win32-backtrace-from-c-code
+  // https://stackoverflow.com/questions/26398064/counterpart-to-glibcs-backtrace-and-backtrace-symbols-on-windows
+  // https://docs.microsoft.com/en-us/windows/win32/debug/capturestackbacktrace
+  // https://docs.microsoft.com/en-us/windows/win32/api/dbghelp/nf-dbghelp-symfromaddr
+  // https://docs.microsoft.com/en-us/windows/win32/api/dbghelp/nf-dbghelp-symgetlinefromaddr64
+  // TODO: Support skipping python frames
+
+  // We always skip this frame (backtrace).
+  frames_to_skip += 1;
+
+  DWORD64 displacement;
+  DWORD disp;
+  std::unique_ptr<IMAGEHLP_LINE64> line;
+
+  char buffer[sizeof(SYMBOL_INFO) + MAX_SYM_NAME * sizeof(TCHAR)];
+  PSYMBOL_INFO p_symbol = (PSYMBOL_INFO)buffer;
+
+  std::unique_ptr<void*[]> back_trace(new void*[maximum_number_of_frames]);
+  bool with_symbol = false;
+  bool with_line = false;
+
+  // The backtrace string goes into here.
+  std::ostringstream stream;
+
+  // Get the frames
+  const USHORT n_frame = CaptureStackBackTrace(
+      static_cast<DWORD>(frames_to_skip),
+      static_cast<DWORD>(maximum_number_of_frames),
+      back_trace.get(),
+      NULL);
+
+  // Initialize symbols if necessary
+  SymbolHelper& sh = SymbolHelper::getInstance();
+
+  for (USHORT i_frame = 0; i_frame < n_frame; ++i_frame) {
+    // Get the address and the name of the symbol
+    if (sh.inited) {
+      p_symbol->SizeOfStruct = sizeof(SYMBOL_INFO);
+      p_symbol->MaxNameLen = MAX_SYM_NAME;
+      with_symbol = SymFromAddr(
+          sh.process, (ULONG64)back_trace[i_frame], &displacement, p_symbol);
+    }
+
+    // Get the line number and the module
+    if (sh.inited) {
+      line.reset(new IMAGEHLP_LINE64());
+      line->SizeOfStruct = sizeof(IMAGEHLP_LINE64);
+      with_line = SymGetLineFromAddr64(
+          sh.process, (ULONG64)back_trace[i_frame], &disp, line.get());
+    }
+
+    // Get the module basename
+    std::string module = get_module_base_name(back_trace[i_frame]);
+
+    // The pattern on Windows is
+    // `<return-address> <symbol-address>
+    // <module-name>!<demangled-function-name> [<file-name> @ <line-number>]
+    stream << std::setfill('0') << std::setw(16) << std::uppercase << std::hex
+           << back_trace[i_frame] << std::dec;
+    if (with_symbol) {
+      stream << std::setfill('0') << std::setw(16) << std::uppercase << std::hex
+             << p_symbol->Address << std::dec << " " << module << "!"
+             << p_symbol->Name;
+    } else {
+      stream << " <unknown symbol address> " << module << "!<unknown symbol>";
+    }
+    stream << " [";
+    if (with_line) {
+      stream << line->FileName << " @ " << line->LineNumber;
+    } else {
+      stream << "<unknown file> @ <unknown line number>";
+    }
+    stream << "]" << std::endl;
+  }
+
+  return stream.str();
+#else // !SUPPORTS_BACKTRACE && !_WIN32
   return "(no backtrace available)";
 #endif // SUPPORTS_BACKTRACE
 }

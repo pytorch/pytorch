@@ -144,19 +144,6 @@ template class MaxPoolImpl<3, MaxPool3dImpl>;
 
 // ============================================================================
 
-template <size_t D, typename Derived>
-AdaptiveMaxPoolImpl<D, Derived>::AdaptiveMaxPoolImpl(
-  const AdaptiveMaxPoolOptions<D>& options_) : options(options_) {}
-
-template <size_t D, typename Derived>
-void AdaptiveMaxPoolImpl<D, Derived>::reset() {}
-
-template <size_t D, typename Derived>
-void AdaptiveMaxPoolImpl<D, Derived>::pretty_print(std::ostream& stream) const {
-  stream << "torch::nn::AdaptiveMaxPool" << D << "d"
-         << "(output_size=" << options.output_size() << ")";
-}
-
 Tensor AdaptiveMaxPool1dImpl::forward(const Tensor& input) {
   return F::detail::adaptive_max_pool1d(input, options.output_size());
 }
@@ -181,24 +168,11 @@ std::tuple<Tensor, Tensor> AdaptiveMaxPool3dImpl::forward_with_indices(const Ten
   return F::detail::adaptive_max_pool3d_with_indices(input, options.output_size());
 }
 
-template class AdaptiveMaxPoolImpl<1, AdaptiveMaxPool1dImpl>;
-template class AdaptiveMaxPoolImpl<2, AdaptiveMaxPool2dImpl>;
-template class AdaptiveMaxPoolImpl<3, AdaptiveMaxPool3dImpl>;
+template class AdaptiveMaxPoolImpl<1, ExpandingArray<1>, AdaptiveMaxPool1dImpl>;
+template class AdaptiveMaxPoolImpl<2, ExpandingArrayWithOptionalElem<2>, AdaptiveMaxPool2dImpl>;
+template class AdaptiveMaxPoolImpl<3, ExpandingArrayWithOptionalElem<3>, AdaptiveMaxPool3dImpl>;
 
 // ============================================================================
-
-template <size_t D, typename Derived>
-AdaptiveAvgPoolImpl<D, Derived>::AdaptiveAvgPoolImpl(
-  const AdaptiveAvgPoolOptions<D>& options_) : options(options_) {}
-
-template <size_t D, typename Derived>
-void AdaptiveAvgPoolImpl<D, Derived>::reset() {}
-
-template <size_t D, typename Derived>
-void AdaptiveAvgPoolImpl<D, Derived>::pretty_print(std::ostream& stream) const {
-  stream << "torch::nn::AdaptiveAvgPool" << D << "d"
-         << "(output_size=" << options.output_size() << ")";
-}
 
 Tensor AdaptiveAvgPool1dImpl::forward(const Tensor& input) {
   return F::detail::adaptive_avg_pool1d(input, options.output_size());
@@ -212,9 +186,9 @@ Tensor AdaptiveAvgPool3dImpl::forward(const Tensor& input) {
   return F::detail::adaptive_avg_pool3d(input, options.output_size());
 }
 
-template class AdaptiveAvgPoolImpl<1, AdaptiveAvgPool1dImpl>;
-template class AdaptiveAvgPoolImpl<2, AdaptiveAvgPool2dImpl>;
-template class AdaptiveAvgPoolImpl<3, AdaptiveAvgPool3dImpl>;
+template class AdaptiveAvgPoolImpl<1, ExpandingArray<1>, AdaptiveAvgPool1dImpl>;
+template class AdaptiveAvgPoolImpl<2, ExpandingArrayWithOptionalElem<2>, AdaptiveAvgPool2dImpl>;
+template class AdaptiveAvgPoolImpl<3, ExpandingArrayWithOptionalElem<3>, AdaptiveAvgPool3dImpl>;
 
 // ============================================================================
 
@@ -275,6 +249,7 @@ template class MaxUnpoolImpl<3, MaxUnpool3dImpl>;
 
 FractionalMaxPool2dImpl::FractionalMaxPool2dImpl(const FractionalMaxPool2dOptions& options_) // NOLINT(modernize-pass-by-value)
     : options(options_) {
+  // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
   reset();
 }
 
@@ -294,7 +269,7 @@ void FractionalMaxPool2dImpl::reset() {
     if (!(0 < output_ratio[0] && output_ratio[0] < 1 &&
           0 < output_ratio[1] && output_ratio[1] < 1)) {
       TORCH_CHECK(false, "output_ratio must be between 0 and 1 (got ", output_ratio, ")");
-    }           
+    }
   }
 }
 
@@ -316,6 +291,7 @@ void FractionalMaxPool2dImpl::pretty_print(std::ostream& stream) const {
 
 FractionalMaxPool3dImpl::FractionalMaxPool3dImpl(const FractionalMaxPool3dOptions& options_) // NOLINT(modernize-pass-by-value)
     : options(options_) {
+  // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
   reset();
 }
 
@@ -332,11 +308,11 @@ void FractionalMaxPool3dImpl::reset() {
   }
   if (options.output_ratio() != c10::nullopt) {
     at::ArrayRef<double> output_ratio = at::ArrayRef<double>(options.output_ratio().value());
-    if (!(0 < output_ratio[0] && output_ratio[0] < 1 && 
+    if (!(0 < output_ratio[0] && output_ratio[0] < 1 &&
           0 < output_ratio[1] && output_ratio[1] < 1 &&
           0 < output_ratio[2] && output_ratio[2] < 1)) {
       TORCH_CHECK(false, "output_ratio must be between 0 and 1 (got ", output_ratio, ")");
-    }           
+    }
   }
 }
 

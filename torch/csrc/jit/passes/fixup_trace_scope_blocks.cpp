@@ -1,10 +1,11 @@
 #include <torch/csrc/jit/passes/fixup_trace_scope_blocks.h>
 
+#include <c10/util/irange.h>
+#include <torch/csrc/jit/frontend/schema_matching.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/passes/lower_tuples.h>
-#include <torch/csrc/jit/frontend/schema_matching.h>
 
 #include <algorithm>
 
@@ -144,7 +145,6 @@ struct ConvertTracedAttrReferences {
     // the correctness of CSE over GetAttr Nodes (i think)
     std::unordered_map<Value*, Value*> local_remaps;
 
-    auto prefix_atoms = prefix.atoms();
     for (Node* n : b->nodes()) {
       // The only difference between these two branches is for
       // TracedModuleForward we advance the scope, but for other
@@ -201,14 +201,14 @@ struct ConvertTracedAttrReferences {
         // the proper attribute.
         auto attr_atoms = attr_qualname.atoms();
         Value* replaced_value = self;
-        for (size_t i = 0; i < attr_atoms.size(); i++) {
+        for (const auto i : c10::irange(attr_atoms.size())) {
           if (i < prefix_atoms.size()) {
             TORCH_INTERNAL_ASSERT(attr_atoms[i] == prefix_atoms[i]);
           } else {
             replaced_value = n->owningBlock()->owningGraph()->insertGetAttr(
                 replaced_value, attr_atoms[i]);
           } // if (i < prefix_atoms.size())
-        } // for (size_t i = 0; i < attr_atoms.size(); i++)
+        } // for(const auto i : c10::irange(attr_atoms.size()))
         n->replaceInput(inp_idx, replaced_value);
         local_remaps[inp] = replaced_value;
       } else {
@@ -242,7 +242,7 @@ struct ConvertTracedAttrReferences {
 // add block and Node outputs to lift it into a scope in which
 // it dominates the Use.
 struct MakeDefsDominateUses {
-  MakeDefsDominateUses() {}
+  MakeDefsDominateUses() = default;
 
   void run(Block* b) {
     processNode(b->param_node(), b);
@@ -282,7 +282,8 @@ struct MakeDefsDominateUses {
         // the domination condition is met.
         while (b_itr != common_ancestor) {
           b_itr->registerOutput(v_itr);
-          Value* remapped = b_itr->owningNode()->addOutput();
+          Value* remapped =
+              b_itr->owningNode()->addOutput()->setType(v_itr->type());
           v_itr = remapped;
           b_itr = b_itr->owningNode()->owningBlock();
         }
@@ -334,7 +335,7 @@ void convertReturnsToTuples(Block* b) {
         // Make node outputs a single tuple;
         std::vector<TypePtr> types;
         for (size_t i = 0; i < n->outputs().size(); ++i) {
-          types.push_back(n->output(0)->type());
+          types.push_back(n->output(i)->type());
         }
         Value* tup_output = n->addOutput()->setType(TupleType::create(types));
         Node* tup_unpack = g->createTupleUnpack(tup_output)->insertAfter(n);
@@ -428,8 +429,7 @@ void createMethodCalls(const std::shared_ptr<Graph>& g) {
       for (Value* i : n->inputs()) {
         nvs.emplace_back(i->node()->sourceRange(), i);
       }
-      auto schema =
-          matchSchema(f->getSchema(), n->sourceRange(), *g, nvs, {});
+      auto schema = matchSchema(f->getSchema(), n->sourceRange(), *g, nvs, {});
       Value* retval = g->insertMethodCall(f->qualname().name(), schema);
       n->output()->replaceAllUsesWith(retval);
       n->destroy();
@@ -459,7 +459,7 @@ void inlineScopeBlocks(Block* b) {
       const auto& old_outputs = n->outputs();
 
       AT_ASSERT(new_outputs.size() == old_outputs.size());
-      for (size_t i = 0; i < old_outputs.size(); ++i) {
+      for (const auto i : c10::irange(old_outputs.size())) {
         old_outputs[i]->replaceAllUsesWith(new_outputs[i]);
       }
       n->destroy();
@@ -522,9 +522,7 @@ void runCleanupPasses(Module* m) {
 
 } // namespace
 
-void FixupTraceScopeBlocks(
-    std::shared_ptr<Graph>& graph,
-    Module* self) {
+void FixupTraceScopeBlocks(std::shared_ptr<Graph>& graph, Module* self) {
   if (self) {
     ConvertTracedAttrReferences().run(graph);
   } else {

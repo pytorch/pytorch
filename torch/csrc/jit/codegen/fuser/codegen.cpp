@@ -2,10 +2,10 @@
 
 #include <ATen/ATen.h>
 #include <c10/util/Exception.h>
-#include <torch/csrc/jit/frontend/code_template.h>
 #include <torch/csrc/jit/codegen/fuser/compiler.h>
 #include <torch/csrc/jit/codegen/fuser/interface.h>
 #include <torch/csrc/jit/codegen/fuser/tensor_info.h>
+#include <torch/csrc/jit/frontend/code_template.h>
 #include <torch/csrc/jit/ir/ir.h>
 
 #include <torch/csrc/jit/codegen/fuser/cpu/resource_strings.h>
@@ -65,6 +65,9 @@ static const char* scalarTypeName(const at::ScalarType type) {
   if (type == at::ScalarType::Half) {
     return "half";
   }
+  if (type == at::ScalarType::BFloat16) {
+    return "__nv_bfloat16";
+  }
 
   switch (type) {
 #define DEFINE_CASE(ctype, name) \
@@ -81,6 +84,9 @@ static const char* calcScalarTypeName(const at::ScalarType type) {
   if (type == at::ScalarType::Half) {
     return "float";
   }
+  if (type == at::ScalarType::BFloat16) {
+    return "float";
+  }
   return scalarTypeName(type);
 }
 
@@ -91,7 +97,7 @@ static std::string variableType(const std::shared_ptr<c10::Type>& t) {
     return "double";
   } else if (t->kind() == TypeKind::BoolType) {
     return "bool";
-  } else if (auto scalar_type = t->expect<TensorType>()->scalarType()) {
+  } else if (auto scalar_type = t->expectRef<TensorType>().scalarType()) {
     return calcScalarTypeName(*scalar_type);
   }
   // something went wrong with the type analysis during shape propagation
@@ -118,7 +124,7 @@ static std::string typeCastedValueName(
   } else if (t->kind() == TypeKind::NoneType) {
     // Support None value for optional arguments like memory format
     return vn;
-  } else if (auto scalar_type = t->expect<TensorType>()->scalarType()) {
+  } else if (auto scalar_type = t->expectRef<TensorType>().scalarType()) {
     if (*scalar_type != outtype) {
       return std::string("((") + calcScalarTypeName(outtype) + ") " + vn + ")";
     }
@@ -210,13 +216,15 @@ static std::string encodeRHS(const Node* n) {
       {aten::floor, {"floorf(${0})", "floor(${0})"}},
       {aten::round, {"roundf(${0})", "round(${0})"}},
       {aten::trunc, {"truncf(${0})", "trunc(${0})"}},
-      {aten::frac, {"fracf(${0})", "frac(${0})"}},
+      {aten::frac, {"${0} - truncf(${0})", "${0} - trunc(${0})"}},
       {aten::reciprocal, {"1.f/(${0})", "1./(${0})"}},
       {aten::neg, "-${0}"},
       // simple binary
       {aten::atan2, "atan2(${0}, ${1})"},
-      {aten::min, {"fminf(${0}, ${1})", "fmin(${0}, ${1})"}},
-      {aten::max, {"fmaxf(${0}, ${1})", "fmax(${0}, ${1})"}},
+      {aten::min,
+       "isnan(${0}) ? ${0} : (isnan(${1}) ? ${1} : (${0} < ${1} ? ${0} : ${1}))"},
+      {aten::max,
+       "isnan(${0}) ? ${0} : (isnan(${1}) ? ${1} : (${0} < ${1} ? ${1} : ${0}))"},
 
       // binary with other
       // TODO: some of these ops will not get generated because
@@ -240,7 +248,7 @@ static std::string encodeRHS(const Node* n) {
       {aten::type_as, "(${0})"},
       {aten::mul, "${0} * ${1}"},
       {aten::ne, "${0_nocast} != ${1_nocast}"},
-      {aten::remainder, "remainderf(${0}, ${1})"},
+      {aten::remainder, "fmod((${1} + fmod(${0}, ${1})), ${1})"},
       {aten::pow, {"powf(${0}, ${1})", "pow(${0}, ${1})"}},
 
       // alpha
@@ -250,10 +258,6 @@ static std::string encodeRHS(const Node* n) {
 
       // where
       {aten::where, "(${0} ? ${1} : ${2})"},
-
-      // simple derivatives
-      {aten::_sigmoid_backward, "${0} * ${1} * (1.f - ${1})"},
-      {aten::_tanh_backward, "${0} * (1.f - ${1} * ${1})"},
   };
 
   TemplateEnv env;
@@ -263,7 +267,7 @@ static std::string encodeRHS(const Node* n) {
   } else {
     size_t i = 0;
 
-    auto outtype = n->output()->type()->expect<TensorType>()->scalarType();
+    auto outtype = n->output()->type()->expectRef<TensorType>().scalarType();
     TORCH_INTERNAL_ASSERT(outtype);
 
     for (auto in : n->inputs()) {
@@ -313,11 +317,55 @@ static void emitIndexingFor(
   }
 }
 
+static void emitCheckFor(
+    std::ostream& out,
+    const std::string& tensor,
+    const int ndim,
+    const TensorDesc& desc) {
+  TemplateEnv env;
+  env.s("tensor", tensor);
+  env.s("scalar_type", scalarTypeName(desc.scalar_type));
+
+  // allocate buffer to load 4
+  out << format("${scalar_type} ${tensor}_buf[4];\n", env);
+
+  // check if last dim is contiguous
+  if (!desc.lastIsContiguous()) {
+    out << "flag_vec4 = false;\n";
+    return;
+  }
+
+  // disable on dtype > 4 bytes for performance
+  if (at::elementSize(desc.scalar_type) > 4) {
+    out << "flag_vec4 = false;\n";
+    return;
+  }
+
+  // last dim size multiple of 4, other dim stride multiple of 4
+  for (int d = ndim - 1; d >= 0; --d) {
+    env.d("d", d);
+    if (d == ndim - 1) {
+      // last dim stride already checked above at compile time
+      out << format(
+          "if(${tensor}.sizes[${d}] % 4 != 0) flag_vec4 = false;\n", env);
+    } else {
+      out << format(
+          "if(${tensor}.strides[${d}] % 4 != 0) flag_vec4 = false;\n", env);
+    }
+  }
+
+  // pointer aligned
+  out << format(
+      "if(((uint64_t) ${tensor}.data) % (4 * sizeof(${scalar_type})) != 0) flag_vec4 = false;\n",
+      env);
+}
+
 // TODO: handle cases where we need to generate > 2^32 element tensors
 std::string generateKernel(
     const std::string& name,
     const Graph& graph,
-    const std::vector<std::pair<const Value*, const c10::optional<TensorDesc>>>& inputs,
+    const std::vector<std::pair<const Value*, const c10::optional<TensorDesc>>>&
+        inputs,
     const std::vector<std::pair<const Value*, const TensorDesc>>& outputs,
     const bool use_cuda) {
   TemplateEnv env;
@@ -326,7 +374,11 @@ std::string generateKernel(
       "IndexType",
       "unsigned int"); // Note: not uint32_t to avoid including cstdint
 
+  std::stringstream tensorChecks;
   std::stringstream body;
+  std::stringstream body_vec4;
+  std::stringstream load;
+  std::stringstream store;
   std::stringstream tensorOffsets;
   std::vector<std::string> formals;
   std::vector<std::string> argument_loads;
@@ -337,23 +389,24 @@ std::string generateKernel(
         "formal_index",
         formals.size() +
             1); // + 1 because the first argument is the linearIndex
-      std::string tensor =
-          "t" +
-          c10::to_string(
-              formals.size()); // can't be unique() because Param may be an output
-      const auto nDim = desc.nDim();
-      emitIndexingFor(tensorOffsets, tensor, nDim, desc.lastIsContiguous());
-      env.s("tensor", tensor);
-      env.d("nDim", nDim);
-      env.s("scalar_type", scalarTypeName(desc.scalar_type));
-      formals.push_back(
-          format("const TensorInfo<${scalar_type},${nDim}> ${tensor}", env));
-      argument_loads.push_back(format(
-          "*static_cast<TensorInfo<${scalar_type},${nDim}>*>(args[${formal_index}])",
-          env));
+    std::string tensor =
+        "t" +
+        c10::to_string(
+            formals.size()); // can't be unique() because Param may be an output
+    const auto nDim = desc.nDim();
+    emitCheckFor(tensorChecks, tensor, nDim, desc);
+    emitIndexingFor(tensorOffsets, tensor, nDim, desc.lastIsContiguous());
+    env.s("tensor", tensor);
+    env.d("nDim", nDim);
+    env.s("scalar_type", scalarTypeName(desc.scalar_type));
+    formals.push_back(
+        format("const TensorInfo<${scalar_type},${nDim}> ${tensor}", env));
+    argument_loads.push_back(format(
+        "*static_cast<TensorInfo<${scalar_type},${nDim}>*>(args[${formal_index}])",
+        env));
   };
 
-  auto emitScalarFormal = [&](const Value* n){
+  auto emitScalarFormal = [&](const Value* n) {
     env.d(
         "formal_index",
         formals.size() +
@@ -369,14 +422,13 @@ std::string generateKernel(
     env.s("scalar", scalar);
     env.s("scalar_type", variableType(n->type()));
     formals.push_back(format("${scalar_type} ${scalar}", env));
-    argument_loads.push_back(format(
-    "*static_cast<${scalar_type}*>(args[${formal_index}])", env));
+    argument_loads.push_back(
+        format("*static_cast<${scalar_type}*>(args[${formal_index}])", env));
   };
-
 
   // Writes input parameters
   for (const auto& input : inputs) {
-    if (input.second.has_value()){
+    if (input.second.has_value()) {
       emitFormal(input.first, *input.second);
     } else {
       emitScalarFormal(input.first);
@@ -390,6 +442,7 @@ std::string generateKernel(
 
   // Acquires input values
   bool has_half_tensor = false;
+  bool has_bfloat_tensor = false;
   size_t formal_count = 0;
   for (const auto& input : inputs) {
     auto p = input.first;
@@ -401,30 +454,80 @@ std::string generateKernel(
     //  The conversion immediately converts fp16 inputs to float.
     //  Access for other types is common to CUDA and CPU kernels.
     if (input.second.has_value()) {
-      const auto is_half = input.second.has_value() && ((*input.second).scalar_type == at::ScalarType::Half);
-      const auto is_bool = input.second.has_value() && ((*input.second).scalar_type == at::ScalarType::Bool);
+      const auto is_half = input.second.has_value() &&
+          ((*input.second).scalar_type == at::ScalarType::Half);
+      const auto is_bfloat = input.second.has_value() &&
+          ((*input.second).scalar_type == at::ScalarType::BFloat16);
+      const auto is_bool = input.second.has_value() &&
+          ((*input.second).scalar_type == at::ScalarType::Bool);
       if (is_half) {
         AT_ASSERT(use_cuda);
         env.s(
             "access",
             format("__half2float(t${formal}.data[t${formal}_offset])", env));
+        env.s("access_vec4", format("__half2float(t${formal}_buf[i])", env));
         has_half_tensor = true;
+      } else if (is_bfloat) {
+        AT_ASSERT(use_cuda);
+        env.s(
+            "access",
+            format(
+                "__bfloat162float(t${formal}.data[t${formal}_offset])", env));
+        env.s(
+            "access_vec4", format("__bfloat162float(t${formal}_buf[i])", env));
+        has_bfloat_tensor = true;
       } else if (use_cuda) {
         // No __ldg overload for bool
         if (is_bool) {
           env.s("access", format("t${formal}.data[t${formal}_offset]", env));
         } else {
-          env.s("access", format("__ldg(&t${formal}.data[t${formal}_offset])", env));
+          env.s(
+              "access",
+              format("__ldg(&t${formal}.data[t${formal}_offset])", env));
         }
+        env.s("access_vec4", format("t${formal}_buf[i]", env));
       } else {
         env.s("access", format("t${formal}.data[t${formal}_offset]", env));
+        env.s("access_vec4", format("t${formal}_buf[i]", env));
       }
       env.s("lhs_type", calcScalarTypeName(input.second.value().scalar_type));
+
+      // load input in vectorized code path
+      auto ele_size = at::elementSize((*input.second).scalar_type);
+      if (ele_size == 1) {
+        env.s(
+            "load4",
+            format(
+                "*(reinterpret_cast<float*>(t${formal}_buf)) = *(reinterpret_cast<float*>(t${formal}.data + t${formal}_offset))",
+                env));
+      } else if (ele_size == 2) {
+        env.s(
+            "load4",
+            format(
+                "*(reinterpret_cast<float2*>(t${formal}_buf)) = *(reinterpret_cast<float2*>(t${formal}.data + t${formal}_offset))",
+                env));
+      } else if (ele_size == 4) {
+        env.s(
+            "load4",
+            format(
+                "*(reinterpret_cast<float4*>(t${formal}_buf)) = *(reinterpret_cast<float4*>(t${formal}.data + t${formal}_offset))",
+                env));
+      } else {
+        env.s(
+            "load4",
+            format(
+                "for(int i = 0; i<4; i++) t${formal}_buf[i] = t${formal}.data[t${formal}_offset + i]",
+                env));
+      }
+      load << format("${load4};\n", env);
+
     } else {
       env.s("access", format("s${formal}", env));
+      env.s("access_vec4", format("s${formal}", env));
       env.s("lhs_type", variableType(input.first->type()));
     }
     body << format("${lhs_type} ${node} = ${access};\n", env);
+    body_vec4 << format("${lhs_type} ${node} = ${access_vec4};\n", env);
   }
 
   bool has_random = false;
@@ -433,7 +536,9 @@ std::string generateKernel(
   // Note: Random number generation is only supported for CUDA kernels.
   // Note: Constant None node is ignored and we will handle it in the
   //       places where the constant None node is used
-  for (const auto& n : graph.nodes()) {
+  // Note: No need to iterate over reference as n is a pointer
+  for (const auto n : graph.nodes()) {
+    static_assert(std::is_pointer<decltype(n)>::value, "n must be a pointer");
     // Note: FusedConcat nodes work by narrowing the output Tensors before the
     // kernel runs
     if (n->kind() == prim::FusedConcat)
@@ -471,24 +576,64 @@ std::string generateKernel(
     }
 
     body << format("${lhs_type} ${node} = ${rhs};\n", env);
+    body_vec4 << format("${lhs_type} ${node} = ${rhs};\n", env);
   }
 
   // Generates writes to output tensors
   for (const auto& output : outputs) {
     env.d("formal", formal_count++);
     env.s("access", format("t${formal}.data[t${formal}_offset]", env));
+    env.s("access_vec4", format("t${formal}_buf[i]", env));
     env.s("node", valueName(output.first));
 
     // Acquires and converts (if needed) outputs
     // Note: conversion to half is only supported for CUDA kernels.
     const auto is_half = (output.second.scalar_type == at::ScalarType::Half);
+    const auto is_bfloat =
+        (output.second.scalar_type == at::ScalarType::BFloat16);
     if (is_half) {
       AT_ASSERT(use_cuda);
       body << format("${access} = __float2half(${node});\n", env);
+      body_vec4 << format("${access_vec4} = __float2half(${node});\n", env);
       has_half_tensor = true;
+    } else if (is_bfloat) {
+      AT_ASSERT(use_cuda);
+      body << format("${access} = __float2bfloat16(${node});\n", env);
+      body_vec4 << format("${access_vec4} = __float2bfloat16(${node});\n", env);
+      has_bfloat_tensor = true;
     } else {
       body << format("${access} = ${node};\n", env);
+      body_vec4 << format("${access_vec4} = ${node};\n", env);
     }
+
+    // store output in vectorized code path
+    auto ele_size = at::elementSize(output.second.scalar_type);
+    if (ele_size == 1) {
+      env.s(
+          "store4",
+          format(
+              "*(reinterpret_cast<float*>(t${formal}.data + t${formal}_offset)) = *(reinterpret_cast<float*>(t${formal}_buf))",
+              env));
+    } else if (ele_size == 2) {
+      env.s(
+          "store4",
+          format(
+              "*(reinterpret_cast<float2*>(t${formal}.data + t${formal}_offset)) = *(reinterpret_cast<float2*>(t${formal}_buf))",
+              env));
+    } else if (ele_size == 4) {
+      env.s(
+          "store4",
+          format(
+              "*(reinterpret_cast<float4*>(t${formal}.data + t${formal}_offset)) = *(reinterpret_cast<float4*>(t${formal}_buf))",
+              env));
+    } else {
+      env.s(
+          "store4",
+          format(
+              "for(int i = 0; i<4; i++) t${formal}.data[t${formal}_offset + i] = t${formal}_buf[i]",
+              env));
+    }
+    store << format("${store4};\n", env);
   }
 
   // Includes headers
@@ -497,6 +642,11 @@ std::string generateKernel(
     env.s("HalfHeader", cuda::half_support_literal);
   } else {
     env.s("HalfHeader", "");
+  }
+  if (has_bfloat_tensor) {
+    env.s("BFloat16Header", cuda::bfloat16_support_literal);
+  } else {
+    env.s("BFloat16Header", "");
   }
 
   if (has_random) {
@@ -509,9 +659,34 @@ std::string generateKernel(
     env.s("RandInit", "");
   }
 
+  // HIP headers must be included until precompiled header feature is available
+  // clang-format off
+#ifdef __HIP_PLATFORM_HCC__
+#if ROCM_VERSION < 40200
+  if (use_cuda && has_half_tensor) {
+    env.s("RuntimeHeader", R"(
+#include <hip/hip_runtime.h>
+#include <hip/hip_fp16.h>
+)");
+  } else if (use_cuda) {
+    env.s("RuntimeHeader", R"(
+#include <hip/hip_runtime.h>
+)");
+  }
+#else
+  // Still need the key defined, but empty.
+  env.s("RuntimeHeader", R"()");
+#endif
+#endif
+  // clang-format on
+
   // Instantiates the CUDA or CPU-specific templates
   env.s("tensorOffsets", tensorOffsets.str());
+  env.s("tensorChecks", tensorChecks.str());
   env.s("kernelBody", body.str());
+  env.s("kernelBody_vec4", body_vec4.str());
+  env.s("kernelLoad", load.str());
+  env.s("kernelStore", store.str());
   env.v("formals", formals);
   env.v("argument_loads", argument_loads);
   std::string code_string;

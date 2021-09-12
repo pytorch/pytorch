@@ -4,6 +4,23 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
+// Thread local flag to enforce rref JIT pickling to be allowed only
+// in the scope of an rpc call. For other scopes like when model is
+// saved by calling torch.save(), rref is not allowed to be pickled directly.
+static thread_local bool allowJitRRefPickle = false;
+
+bool getAllowJitRRefPickle() {
+  return allowJitRRefPickle;
+}
+
+void enableJitRRefPickle() {
+  allowJitRRefPickle = true;
+}
+
+void disableJitRRefPickle() {
+  allowJitRRefPickle = false;
+}
+
 static_assert(
     std::numeric_limits<local_id_t>::max() <=
         std::numeric_limits<int64_t>::max(),
@@ -12,6 +29,14 @@ static_assert(
     std::numeric_limits<worker_id_t>::max() <=
         std::numeric_limits<int64_t>::max(),
     "The max value of worker_id_t must be within the range of int64_t");
+
+///////////////////////////  JitRRefPickleGuard   ///////////////////////////
+JitRRefPickleGuard::JitRRefPickleGuard() {
+  allowJitRRefPickle = true;
+}
+JitRRefPickleGuard::~JitRRefPickleGuard() {
+  allowJitRRefPickle = false;
+}
 
 ///////////////////////////  GloballyUniqueId   ///////////////////////////
 
@@ -32,6 +57,9 @@ at::IValue GloballyUniqueId::toIValue() const {
 }
 
 GloballyUniqueId GloballyUniqueId::fromIValue(const at::IValue& ivalue) {
+  TORCH_INTERNAL_ASSERT(
+      ivalue.isTuple(),
+      "GloballyUniqueId::fromIValue expected ivalue to be a tuple.");
   auto ivalues = ivalue.toTuple()->elements();
   TORCH_CHECK(
       ivalues.size() == 2,
@@ -55,8 +83,8 @@ GloballyUniqueId GloballyUniqueId::fromIValue(const at::IValue& ivalue) {
 }
 
 std::ostream& operator<<(std::ostream& os, GloballyUniqueId const& globalId) {
-  return os << "GloballyUniqueId(" << globalId.createdOn_ << ", "
-            << globalId.localId_ << ")";
+  return os << "GloballyUniqueId(created_on=" << globalId.createdOn_
+            << ", local_id=" << globalId.localId_ << ")";
 }
 
 ///////////////////////////  SerializedPyObj   ///////////////////////////

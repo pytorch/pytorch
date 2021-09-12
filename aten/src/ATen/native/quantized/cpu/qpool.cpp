@@ -1,7 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/Parallel.h>
-#include <ATen/core/op_registration/op_registration.h>
+#include <torch/library.h>
 #include <ATen/native/Pool.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/Loops.h>
@@ -9,7 +9,7 @@
 #include <ATen/native/quantized/cpu/quantized_ops.h>
 #include <ATen/native/quantized/cpu/init_qnnpack.h>
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
-#include <caffe2/utils/threadpool/ThreadPoolMobile.h>
+#include <caffe2/utils/threadpool/pthreadpool-cpp.h>
 
 #include <algorithm>
 #include <vector>
@@ -44,6 +44,7 @@ void spatial_dilated_max_pooling(
     T* oData) { // output arrays (data and max-index)
   at::parallel_for(0, iC, 0, [&](int64_t start, int64_t end) {
     for (auto p = start; p < end; ++p) {
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       int64_t row, col;
       const T* i_p = iData + p * iW * iH;
       for (row = 0; row < oH; ++row) {
@@ -63,6 +64,7 @@ void spatial_dilated_max_pooling(
           // local max
           auto max_val = std::numeric_limits<typename T::underlying>::lowest();
           int64_t tcntr = 0; // center point
+          // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
           int64_t x, y;
           for (y = h_start; y < h_end; y += dH) {
             for (x = w_start; x < w_end; x += dW) {
@@ -124,7 +126,7 @@ Tensor q_maxpool_2d(
   int64_t iW = qx.size(dimw);
   TORCH_CHECK(iC > 0 && iH > 0 && iW > 0, "input dimensions must be non-zero.");
   TORCH_CHECK(
-      qx.numel() > 0 && (ndim == 3 || ndim == 4),
+      (ndim == 3 || ndim == 4),
       "non-empty 3D or 4D input tensor is expected.");
   TORCH_CHECK(
       kH / 2 >= pH && kW / 2 >= pW,
@@ -134,7 +136,12 @@ Tensor q_maxpool_2d(
   int64_t oC = iC;
   int64_t oH = pooling_output_shape(iH, kH, pH, sH, dH, ceil_mode);
   int64_t oW = pooling_output_shape(iW, kW, pW, sW, dW, ceil_mode);
-  TORCH_CHECK(oH > 0 && oW > 0, "the resulting Tensor is too small.");
+  TORCH_CHECK(oH > 0 && oW > 0,
+              "Given input size: (",
+              iC, "x", iH, "x", iW,
+              "). Calculated output size: (",
+              oC, "x", oH, "x", oW,
+              "). Output size is too small.");
 
   std::vector<int64_t> oSizes;
   if (ndim == 3) {
@@ -150,10 +157,12 @@ Tensor q_maxpool_2d(
     // vectorization.
     Tensor qy = at::_empty_affine_quantized(
         oSizes,
-        qx.options().dtype(toQIntType(qx.scalar_type())),
+        qx.options()
+          .dtype(toQIntType(qx.scalar_type()))
+          .memory_format(qx.suggest_memory_format()),
         qx.q_scale(),
         qx.q_zero_point(),
-        qx.suggest_memory_format());
+        c10::nullopt);
     qmaxpool_2d_nhwc_stub(qx.device().type(), qx, iC, iH, iW, oH, oW, kH, kW, sH, sW, pH, pW, dH, dW, qy);
     return qy;
   } else {
@@ -229,6 +238,130 @@ void check_maxpool2d_params(
               "Expected 1d or 2d dilation, got ", dilation.size());
 }
 
+#ifdef USE_PYTORCH_QNNPACK
+ static Tensor qnnpack_maxpool2d(
+     Tensor input,
+     IntArrayRef kernel_size,
+     IntArrayRef stride,
+     IntArrayRef padding,
+     IntArrayRef dilation,
+     bool ceil_mode) {
+   Tensor qy;
+
+   TORCH_CHECK(
+       input.ndimension() == 4,
+       "qnnpack_maxpool2d(): Expected input to be 4-dimensional: got ",
+       input.ndimension());
+   TORCH_CHECK(
+       kernel_size.size() == 2,
+       "qnnpack_maxpool2d(): Expected kernel_size to be 2-dimensional: got ",
+       kernel_size.size());
+   TORCH_CHECK(
+       stride.size() == 2,
+       "qnnpack_maxpool2d(): Expected stride to be 2-dimensional: got ",
+       stride.size());
+   TORCH_CHECK(
+       dilation.size() == 2,
+       "qnnpack_maxpool2d(): Expected dilation to be 2-dimensional: got ",
+       dilation.size());
+   TORCH_CHECK(
+       padding.size() == 2,
+       "qnnpack_maxpool2d(): Expected padding to be 2-dimensional: got ",
+       padding.size());
+
+   int64_t batch_size = input.size(0);
+   int64_t inC = input.size(1);
+   int64_t inH = input.size(2);
+   int64_t inW = input.size(3);
+   Tensor input_contig = input.contiguous(MemoryFormat::ChannelsLast);
+
+   initQNNPACK();
+   const auto scale = input_contig.q_scale();
+   const auto zero_point = input_contig.q_zero_point();
+   pytorch_qnnp_operator_t qnnpack_operator{nullptr};
+
+   int64_t padH = padding[0];
+   int64_t padW = padding[1];
+   int64_t kH = kernel_size[0];
+   int64_t kW = kernel_size[1];
+   int64_t strideH = stride[0];
+   int64_t strideW = stride[1];
+   int64_t dilationH = dilation[0];
+   int64_t dilationW = dilation[1];
+
+   TORCH_CHECK(
+       kH > 0 && kW > 0,
+       "qnnpack_maxpool2d(): kernel_size should be greater than zero.");
+   TORCH_CHECK(
+       strideH > 0 && strideW > 0,
+       "qnnpack_maxpool2d(): strides should be greater than zero.");
+
+   const pytorch_qnnp_status createStatus =
+       pytorch_qnnp_create_max_pooling2d_nhwc_u8(
+           padH /* input_padding_top */,
+           padW /* input_padding_right */,
+           padH /* input_padding_bottom */,
+           padW /* input_padding_left */,
+           kH /* pooling height */,
+           kW /* pooling width */,
+           strideH /* stride height */,
+           strideW /* stride width */,
+           dilationH /* dilation height */,
+           dilationW /* dilation width */,
+           inC /* input channels */,
+           std::numeric_limits<uint8_t>::min() /* output min */,
+           std::numeric_limits<uint8_t>::max() /* output max */,
+           0 /* flags */,
+           &qnnpack_operator);
+   TORCH_INTERNAL_ASSERT(
+       createStatus == pytorch_qnnp_status_success,
+       "failed to create QNNPACK MaxPool operator");
+
+   int64_t outC = inC;
+   int64_t outH =
+       pooling_output_shape(inH, kH, padH, strideH, dilationH, ceil_mode);
+   int64_t outW =
+       pooling_output_shape(inW, kW, padW, strideW, dilationW, ceil_mode);
+
+   TORCH_CHECK(
+       outH > 0 && outW > 0,
+       "qnnpack_maxpool2d(): the resulting output Tensor size should be >= 0");
+
+   std::unique_ptr<pytorch_qnnp_operator, QnnpackOperatorDeleter>
+       qnnpack_uniq_ptr(qnnpack_operator);
+
+   // NHWC output
+   qy = at::_empty_affine_quantized(
+       {batch_size, outC, outH, outW},
+       at::device(kCPU).dtype(kQUInt8),
+       scale,
+       zero_point,
+       MemoryFormat::ChannelsLast);
+
+   const pytorch_qnnp_status setupStatus =
+       pytorch_qnnp_setup_max_pooling2d_nhwc_u8(
+           qnnpack_operator /* max pooling */,
+           batch_size /* batch size */,
+           inH /* input height */,
+           inW /* input width */,
+           (uint8_t*)input_contig.data_ptr<c10::quint8>() /* input */,
+           inC /* input_pixel_stride */,
+           (uint8_t*)qy.data_ptr<c10::quint8>() /* output data */,
+           outC /* output_pixel_stride */,
+           nullptr /* thread pool */);
+   TORCH_INTERNAL_ASSERT(
+       setupStatus == pytorch_qnnp_status_success,
+       "failed to setup QNNPACK MaxPool operator");
+
+   pthreadpool_t threadpool = caffe2::pthreadpool_();
+   const pytorch_qnnp_status runStatus =
+       pytorch_qnnp_run_operator(qnnpack_operator, threadpool);
+   TORCH_INTERNAL_ASSERT(
+       runStatus == pytorch_qnnp_status_success,
+       "failed to run QNNPACK MaxPool operator");
+   return qy.contiguous(input.suggest_memory_format());
+ }
+ #endif
 }  // namespace
 
 // at::native functions for the native_functions.yaml
@@ -247,6 +380,11 @@ Tensor quantized_max_pool2d(
   if (stride.empty()) {
     stride = kernel_size;
   }
+#ifdef USE_PYTORCH_QNNPACK
+  if (at::globalContext().qEngine() == at::QEngine::QNNPACK && qx.scalar_type() == kQUInt8 && !ceil_mode) {
+    return qnnpack_maxpool2d(qx, kernel_size, stride, padding, dilation, ceil_mode);
+  }
+#endif
   Tensor qy;
   AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "max_pool2d", [&]() {
     qy = q_maxpool_2d<scalar_t>(
@@ -264,161 +402,60 @@ Tensor quantized_max_pool2d(
   return qy;
 }
 
+// Quantized max_pool1d is a special case of the max_pool2d, with one of the
+// dimensions and kernels removed.
+Tensor quantized_max_pool1d(
+    const Tensor& qx,
+    IntArrayRef kernel_size,
+    IntArrayRef stride,
+    IntArrayRef padding,
+    IntArrayRef dilation,
+    bool ceil_mode) {
+  // (C, L) -> (C, 1, L) => kSqueezeDim = 1
+  // (N, C, L) -> (N, C, 1, L) => kSqueezeDim = 2
+  const int32_t kSqueezeDim = qx.dim() - 1;
+  const auto qx_unsqueeze = qx.unsqueeze(kSqueezeDim);
+  if (stride.empty()) {
+    stride = kernel_size;
+  }
+  auto qy = at::quantized_max_pool2d(
+    qx.unsqueeze(kSqueezeDim),
+    {1, kernel_size[0]},
+    {1, stride[0]},
+    {0, padding[0]},
+    {1, dilation[0]},
+    ceil_mode);
+  qy = qy.squeeze(kSqueezeDim);
+  return qy;
+}
+
 // Keep the registry in the anonymous namespace.
 namespace {
-class QMaxPool2D_arr_args final : public torch::OperatorKernel {
+template <uint32_t kSpatialDim>
+class QMaxPool_arr_args final {
  public:
-  #ifdef USE_PYTORCH_QNNPACK
-   Tensor qnnpack_maxpool(
-       Tensor input,
-       IntArrayRef kernel_size,
-       IntArrayRef stride,
-       IntArrayRef padding,
-       IntArrayRef dilation,
-       bool ceil_mode) {
-     Tensor qy;
-
-     TORCH_CHECK(
-         input.ndimension() == 4,
-         "qnnpack_maxpool(): Expected input to be 4-dimensional: got ",
-         input.ndimension());
-     TORCH_CHECK(
-         kernel_size.size() == 2,
-         "qnnpack_maxpool(): Expected kernel_size to be 2-dimensional: got ",
-         kernel_size.size());
-     TORCH_CHECK(
-         stride.size() == 2,
-         "qnnpack_maxpool(): Expected stride to be 2-dimensional: got ",
-         stride.size());
-     TORCH_CHECK(
-         dilation.size() == 2,
-         "qnnpack_maxpool(): Expected dilation to be 2-dimensional: got ",
-         dilation.size());
-     TORCH_CHECK(
-         padding.size() == 2,
-         "qnnpack_maxpool(): Expected padding to be 2-dimensional: got ",
-         padding.size());
-
-     int64_t batch_size = input.size(0);
-     int64_t inC = input.size(1);
-     int64_t inH = input.size(2);
-     int64_t inW = input.size(3);
-     // TODO: change it to contiguous(MemoryFormat::ChannelsLast) once a perf
-     // regression of it is fixed.
-     Tensor input_contig = input.permute({0, 2, 3, 1}).contiguous();
-
-     initQNNPACK();
-     const auto scale = input_contig.q_scale();
-     const auto zero_point = input_contig.q_zero_point();
-     pytorch_qnnp_operator_t qnnpack_operator{nullptr};
-
-     int64_t padH = padding[0];
-     int64_t padW = padding[1];
-     int64_t kH = kernel_size[0];
-     int64_t kW = kernel_size[1];
-     int64_t strideH = stride[0];
-     int64_t strideW = stride[1];
-     int64_t dilationH = dilation[0];
-     int64_t dilationW = dilation[1];
-
-     TORCH_CHECK(
-         kH > 0 && kW > 0,
-         "qnnpack_maxpool(): kernel_size should be greater than zero.");
-     TORCH_CHECK(
-         strideH > 0 && strideW > 0,
-         "qnnpack_maxpool(): strides should be greater than zero.");
-
-     const pytorch_qnnp_status createStatus =
-         pytorch_qnnp_create_max_pooling2d_nhwc_u8(
-             padH /* input_padding_top */,
-             padW /* input_padding_right */,
-             padH /* input_padding_bottom */,
-             padW /* input_padding_left */,
-             kH /* pooling height */,
-             kW /* pooling width */,
-             strideH /* stride height */,
-             strideW /* stride width */,
-             dilationH /* dilation height */,
-             dilationW /* dilation width */,
-             inC /* input channels */,
-             std::numeric_limits<uint8_t>::min() /* output min */,
-             std::numeric_limits<uint8_t>::max() /* output max */,
-             0 /* flags */,
-             &qnnpack_operator);
-     TORCH_INTERNAL_ASSERT(
-         createStatus == pytorch_qnnp_status_success,
-         "failed to create QNNPACK MaxPool operator");
-
-     int64_t outC = inC;
-     int64_t outH =
-         pooling_output_shape(inH, kH, padH, strideH, dilationH, ceil_mode);
-     int64_t outW =
-         pooling_output_shape(inW, kW, padW, strideW, dilationW, ceil_mode);
-
-     TORCH_CHECK(
-         outH > 0 && outW > 0,
-         "qnnpack_maxpool(): the resulting output Tensor size should be >= 0");
-
-     std::unique_ptr<pytorch_qnnp_operator, QnnpackOperatorDeleter>
-         qnnpack_uniq_ptr(qnnpack_operator);
-
-     // NHWC output
-     qy = at::_empty_affine_quantized(
-         {batch_size, outH, outW, outC},
-         at::device(kCPU).dtype(kQUInt8),
-         scale,
-         zero_point);
-
-     const pytorch_qnnp_status setupStatus =
-         pytorch_qnnp_setup_max_pooling2d_nhwc_u8(
-             qnnpack_operator /* max pooling */,
-             batch_size /* batch size */,
-             inH /* input height */,
-             inW /* input width */,
-             (uint8_t*)input_contig.data_ptr<c10::quint8>() /* input */,
-             inC /* input_pixel_stride */,
-             (uint8_t*)qy.data_ptr<c10::quint8>() /* output data */,
-             outC /* output_pixel_stride */,
-             nullptr /* thread pool */);
-     TORCH_INTERNAL_ASSERT(
-         setupStatus == pytorch_qnnp_status_success,
-         "failed to setup QNNPACK MaxPool operator");
-
-     pthreadpool_t threadpool = caffe2::mobile_pthreadpool();
-     const pytorch_qnnp_status runStatus =
-         pytorch_qnnp_run_operator(qnnpack_operator, threadpool);
-     TORCH_INTERNAL_ASSERT(
-         runStatus == pytorch_qnnp_status_success,
-         "failed to run QNNPACK MaxPool operator");
-     //TODO: remove permute once MemoryLayout is added above
-     return qy.permute({0, 3, 1, 2});
-   }
-   #endif
-  Tensor operator()(
+  static Tensor run(
       Tensor qx,
       std::vector<int64_t> kernel_size,
       std::vector<int64_t> stride,
       std::vector<int64_t> padding,
       std::vector<int64_t> dilation,
       bool ceil_mode) {
-    #ifdef USE_PYTORCH_QNNPACK
-    if (at::globalContext().qEngine() == at::QEngine::QNNPACK && qx.scalar_type() == kQUInt8) {
-      return qnnpack_maxpool(qx, kernel_size, stride, padding, dilation, ceil_mode);
+    if (kSpatialDim == 1) {
+      return at::quantized_max_pool1d(qx, kernel_size, stride, padding,
+                                      dilation, ceil_mode);
+    } else if (kSpatialDim == 2) {
+      return at::quantized_max_pool2d(qx, kernel_size, stride, padding,
+                                      dilation, ceil_mode);
     }
-    #endif
-    return at::max_pool2d(qx, kernel_size, stride, padding, dilation, ceil_mode);
+    TORCH_CHECK(false, "MaxPool", kSpatialDim, "D is not supported.");
   }
 };
 
-static auto registry = torch::RegisterOperators().op(
-    "quantized::max_pool2d(Tensor qx, "
-    "int[] kernel_size, "
-    "int[] stride, "
-    "int[] padding, "
-    "int[] dilation,"
-    "bool ceil_mode) -> Tensor",
-    torch::RegisterOperators::options().kernel<QMaxPool2D_arr_args>(
-        DispatchKey::QuantizedCPUTensorId));
+TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
+  m.impl(TORCH_SELECTIVE_NAME("quantized::max_pool1d"), TORCH_FN(QMaxPool_arr_args<1>::run));
+  m.impl(TORCH_SELECTIVE_NAME("quantized::max_pool2d"), TORCH_FN(QMaxPool_arr_args<2>::run));
+}
 
 } // namespace
 } // namespace native

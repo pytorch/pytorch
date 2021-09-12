@@ -12,7 +12,7 @@ class TORCH_API PythonResp final : public RpcCommandBase {
  public:
   explicit PythonResp(SerializedPyObj&& serializedPyObj);
 
-  Message toMessage() && override;
+  c10::intrusive_ptr<Message> toMessageImpl() && override;
 
   static std::unique_ptr<PythonResp> fromMessage(const Message& message);
 

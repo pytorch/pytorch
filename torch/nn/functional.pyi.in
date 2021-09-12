@@ -1,6 +1,7 @@
-from .. import Tensor, _size
-from typing import Any, Optional, Tuple, Dict, List, Callable
-from .common_types import _ratio_any_t
+from torch import Tensor
+from torch.types import _size
+from typing import Any, Optional, Tuple, Dict, List, Callable, Sequence, Union
+from .common_types import _ratio_any_t, _size_any_t, _size_1_t, _size_2_t, _size_3_t, _size_2_opt_t, _size_3_opt_t
 
 # 'TypedDict' is a new accepted type that represents a dictionary with a fixed set of allowed keys.
 # It is standards-track but not in `typing` yet. We leave this hear to be uncommented once the feature
@@ -21,9 +22,9 @@ GRID_SAMPLE_PADDING_MODES = Dict[str, int]
 # This was necessary since the JIT uses BroadcastingList* types but static checking with mypy etc requires a `Sequence`
 # type. There is no way to express the expected lengths of these lists in the current Python typing system.
 #
-# Functions created via `_add_docstr` in `functional.py` where merely typed as `Any` by `stubgen`, so those were 
-# deleted from the stub and replaced by generated declarations. See `gen_pyi` for the implementation of the code 
-# generation logic for those functions. In the future, it might be worth looking into using the mypy plugin system 
+# Functions created via `_add_docstr` in `functional.py` where merely typed as `Any` by `stubgen`, so those were
+# deleted from the stub and replaced by generated declarations. See `gen_pyi` for the implementation of the code
+# generation logic for those functions. In the future, it might be worth looking into using the mypy plugin system
 # to encode the type semantics of `_add_docstr`, should that system ever become widespread.
 def fractional_max_pool2d_with_indices(input: Tensor, kernel_size: _size, output_size: Optional[_size] = ...,
                                        output_ratio: Optional[_ratio_any_t] = ..., return_indices: bool = ...,
@@ -62,11 +63,11 @@ def max_unpool3d(input: Tensor, indices: Tensor, kernel_size: _size, stride: Opt
                  padding: _size = ..., output_size: Optional[_size] = ...) -> Tensor: ...
 
 
-def lp_pool2d(input: Tensor, norm_type: float, kernel_size: int, stride: Optional[_size] = ...,
+def lp_pool1d(input: Tensor, norm_type: float, kernel_size: _size_1_t, stride: Union[Optional[_size], Optional[int]] = ...,
               ceil_mode: bool = ...) -> Tensor: ...
 
 
-def lp_pool1d(input: Tensor, norm_type: float, kernel_size: int, stride: Optional[_size] = ...,
+def lp_pool2d(input: Tensor, norm_type: float, kernel_size: _size_2_t, stride: Union[Optional[_size], Optional[int]] = ...,
               ceil_mode: bool = ...) -> Tensor: ...
 
 
@@ -74,18 +75,21 @@ def adaptive_max_pool1d_with_indices(input: Tensor, output_size: _size, return_i
     Tensor, Tensor]: ...
 
 
-def adaptive_max_pool2d_with_indices(input: Tensor, output_size: _size, return_indices: bool = ...) -> Tuple[
+def adaptive_max_pool2d_with_indices(input: Tensor, output_size: _size_2_opt_t, return_indices: bool = ...) -> Tuple[
     Tensor, Tensor]: ...
 
 
-def adaptive_max_pool3d_with_indices(input: Tensor, output_size: _size, return_indices: bool = ...) -> Tuple[
+def adaptive_max_pool3d_with_indices(input: Tensor, output_size: _size_3_opt_t, return_indices: bool = ...) -> Tuple[
     Tensor, Tensor]: ...
 
 
-def adaptive_avg_pool2d(input: Tensor, output_size: _size) -> Tensor: ...
+def adaptive_avg_pool1d(input: Tensor, output_size: _size_1_t) -> Tensor: ...
 
 
-def adaptive_avg_pool3d(input: Tensor, output_size: _size) -> Tensor: ...
+def adaptive_avg_pool2d(input: Tensor, output_size: _size_2_opt_t) -> Tensor: ...
+
+
+def adaptive_avg_pool3d(input: Tensor, output_size: _size_3_opt_t) -> Tensor: ...
 
 
 def dropout(input: Tensor, p: float = ..., training: bool = ..., inplace: bool = ...) -> Tensor: ...
@@ -165,7 +169,9 @@ def log_softmax(input: Tensor, dim: Optional[int] = ..., _stacklevel: int = ...,
 def tanh(input: Any): ...
 
 
-def sigmoid(input: Any): ...
+def sigmoid(input: Any) -> Tensor: ...
+
+def hardsigmoid(input: Tensor, inplace: bool = False) -> Tensor: ...
 
 
 def linear(input: Tensor, weight: Tensor, bias: Optional[Tensor] = ...) -> Tensor: ...
@@ -174,13 +180,21 @@ def linear(input: Tensor, weight: Tensor, bias: Optional[Tensor] = ...) -> Tenso
 def bilinear(input1: Tensor, input2: Tensor, weight: Tensor, bias: Optional[Tensor] = ...) -> Tensor: ...
 
 
+def silu(input: Tensor, inplace: bool = False) -> Tensor: ...
+
+def mish(input: Tensor, inplace: bool = False) -> Tensor: ...
+
+def hardswish(input: Tensor, inplace: bool = False) -> Tensor: ...
+
+
 def embedding(input: Tensor, weight: Tensor, padding_idx: Optional[int] = ..., max_norm: Optional[float] = ...,
               norm_type: float = ..., scale_grad_by_freq: bool = ..., sparse: bool = ...) -> Tensor: ...
 
 
 def embedding_bag(input: Tensor, weight: Tensor, offsets: Optional[Tensor] = ..., max_norm: Optional[float] = ...,
                   norm_type: float = ..., scale_grad_by_freq: bool = ..., mode: str = ...,
-                  sparse: bool = ...) -> Tensor: ...
+                  sparse: bool = ..., per_sample_weights: Optional[Tensor] = ...,
+                  include_last_offset: bool = ..., padding_idx: Optional[int] = ...) -> Tensor: ...
 
 def batch_norm(input: Tensor, running_mean: Optional[Tensor], running_var: Optional[Tensor],
                weight: Optional[Tensor] = ..., bias: Optional[Tensor] = ..., training: bool = ...,
@@ -192,7 +206,7 @@ def instance_norm(input: Tensor, running_mean: Optional[Tensor] = ..., running_v
                   momentum: float = ..., eps: float = ...) -> Tensor: ...
 
 
-def layer_norm(input: Tensor, normalized_shape: List[int], weight: Optional[Tensor] = ..., bias: Optional[Tensor] = ...,
+def layer_norm(input: Tensor, normalized_shape: Sequence[int], weight: Optional[Tensor] = ..., bias: Optional[Tensor] = ...,
                eps: float = ...) -> Tensor: ...
 
 
@@ -216,12 +230,17 @@ def poisson_nll_loss(input: Tensor, target: Tensor, log_input: bool = ..., full:
                      reduction: str = ...) -> Tensor: ...
 
 
+def gaussian_nll_loss(input: Tensor, target: Tensor, var: Tensor, full: Optional[bool] = ...,
+                      eps: Optional[float] = ..., reduction: Optional[str] = ...) -> Tensor: ...
+
+
 def kl_div(input: Tensor, target: Tensor, size_average: Optional[bool] = ..., reduce: Optional[bool] = ...,
-           reduction: str = ...) -> Tensor: ...
+           reduction: str = ..., log_target: bool = ...) -> Tensor: ...
 
 
 def cross_entropy(input: Tensor, target: Tensor, weight: Optional[Tensor] = ..., size_average: Optional[bool] = ...,
-                  ignore_index: int = ..., reduce: Optional[bool] = ..., reduction: str = ...) -> Tensor: ...
+                  ignore_index: int = ..., reduce: Optional[bool] = ..., reduction: str = ...,
+                  label_smoothing: float = ...) -> Tensor: ...
 
 
 def binary_cross_entropy(input: Tensor, target: Tensor, weight: Optional[Tensor] = ...,
@@ -235,7 +254,10 @@ def binary_cross_entropy_with_logits(input: Tensor, target: Tensor, weight: Opti
 
 
 def smooth_l1_loss(input: Tensor, target: Tensor, size_average: Optional[bool] = ..., reduce: Optional[bool] = ...,
-                   reduction: str = ...) -> Tensor: ...
+                   reduction: str = ..., beta: float = ...) -> Tensor: ...
+
+
+def huber_loss(input: Tensor, target: Tensor, reduction: str = ..., delta: float = ...) -> Tensor: ...
 
 
 def l1_loss(input: Tensor, target: Tensor, size_average: Optional[bool] = ..., reduce: Optional[bool] = ...,
@@ -299,7 +321,7 @@ def grid_sample(input: Tensor, grid: Tensor, mode: str = ..., padding_mode: str 
 def affine_grid(theta: Tensor, size: List[int], align_corners: Optional[Any] = ...) -> Tensor: ...
 
 
-def pad(input: Tensor, pad: List[int], mode: str = ..., value: float = ...) -> Tensor: ...
+def pad(input: Tensor, pad: Sequence[int], mode: str = ..., value: float = ...) -> Tensor: ...
 
 
 def pairwise_distance(x1: Tensor, x2: Tensor, p: float = ..., eps: float = ..., keepdim: bool = ...) -> Tensor: ...
@@ -310,6 +332,11 @@ def triplet_margin_loss(anchor: Tensor, positive: Tensor, negative: Tensor, marg
                         reduce: Optional[bool] = ..., reduction: str = ...) -> Tensor: ...
 
 
+def triplet_margin_with_distance_loss(anchor: Tensor, positive: Tensor, negative: Tensor, *,
+                                      distance_function: Optional[Callable[[Tensor, Tensor], Tensor]]=...,
+                                      margin: float=..., swap: bool=..., reduction: str=...) -> Tensor: ...
+
+
 def normalize(input: Tensor, p: float = ..., dim: int = ..., eps: float = ...,
               out: Optional[Tensor] = ...) -> Tensor: ...
 
@@ -317,12 +344,39 @@ def normalize(input: Tensor, p: float = ..., dim: int = ..., eps: float = ...,
 def assert_int_or_pair(arg: Any, arg_name: Any, message: Any) -> None: ...
 
 
-def unfold(input: Tensor, kernel_size: _size, dilation: _size = ..., padding: _size = ...,
-           stride: _size = ...) -> Tensor: ...
+def unfold(input: Tensor, kernel_size: _size_any_t, dilation: _size_any_t = ..., padding: _size_any_t = ...,
+           stride: _size_any_t = ...) -> Tensor: ...
 
 
-def fold(input: Tensor, output_size: _size, kernel_size: _size, dilation: _size = ..., padding: _size = ...,
-         stride: _size = ...) -> Tensor: ...
+def fold(input: Tensor, output_size: _size_any_t, kernel_size: _size_any_t, dilation: _size_any_t = ..., padding: _size_any_t = ...,
+         stride: _size_any_t = ...) -> Tensor: ...
+
+
+def multi_head_attention_forward(query: Tensor,
+                                 key: Tensor,
+                                 value: Tensor,
+                                 embed_dim_to_check: int,
+                                 num_heads: int,
+                                 in_proj_weight: Tensor,
+                                 in_proj_bias: Tensor,
+                                 bias_k: Optional[Tensor],
+                                 bias_v: Optional[Tensor],
+                                 add_zero_attn: bool,
+                                 dropout_p: float,
+                                 out_proj_weight: Tensor,
+                                 out_proj_bias: Tensor,
+                                 training: bool = True,
+                                 key_padding_mask: Optional[Tensor] = None,
+                                 need_weights: bool = True,
+                                 attn_mask: Optional[Tensor] = None,
+                                 use_separate_proj_weight: bool = False,
+                                 q_proj_weight: Optional[Tensor] = None,
+                                 k_proj_weight: Optional[Tensor] = None,
+                                 v_proj_weight: Optional[Tensor] = None,
+                                 static_k: Optional[Tensor] = None,
+                                 static_v: Optional[Tensor] = None
+                                 ) -> Tuple[Tensor, Optional[Tensor]]: ...
+
 
 ${imported_hints}
 

@@ -51,6 +51,16 @@ inline std::ostream& operator<<(std::ostream& out, const FunctionSchema& schema)
   return out;
 }
 
+inline size_t findFirstOutArg(const std::vector<Argument>& args) {
+  // find the start of out args in the schema
+  for (size_t out_start_idx = 0; out_start_idx < args.size(); out_start_idx++) {
+    if (args.at(out_start_idx).is_out()) {
+      return out_start_idx;
+    }
+  }
+  return args.size();
+}
+
 inline bool Argument::isBackwardCompatibleWith(
       const Argument& old,
       std::ostream* why_not) const {
@@ -68,8 +78,7 @@ inline bool Argument::isBackwardCompatibleWith(
       return false;
     }
     if (rhs->default_value().has_value() &&
-        !detail::defaultValueEquals_(lhs->default_value(),
-                                     rhs->default_value())) {
+        lhs->default_value() != rhs->default_value()) {
       return false;
     }
     return true;
@@ -112,69 +121,47 @@ inline bool FunctionSchema::isBackwardCompatibleWith(
     return false;
   }
   for (size_t i = 0; i < returns().size(); ++i) {
-    // functions are covariant in arguments but contravariant in returns
+    // Backwards compatibility requires covariance on argument types
+    // (i.e. more generic), and contravariance on return types (i.e.
+    //  more specific).
     if (!old.returns().at(i).isBackwardCompatibleWith(
           returns().at(i),
           why_not)) {
       return false;
     }
   }
-  std::vector<const Argument*> args, old_args;
-  std::map<std::string, const Argument*> kwargs, old_kwargs;
-  auto split_func = [](const std::vector<Argument>& arguments,
-      std::vector<const Argument*>* positionals,
-      std::map<std::string, const Argument*>* nameds) {
-    for (const Argument& arg : arguments) {
-      if (!arg.kwarg_only()) {
-        positionals->emplace_back(&arg);
-      }
-      nameds->emplace(arg.name(), &arg);
-    }
-  };
-  // we split args into positional and keyward parts,
-  split_func(arguments(), &args, &kwargs);
-  split_func(old.arguments(), &old_args, &old_kwargs);
-  if (old_args.size() > args.size()) {
-    return false;
-  }
-  // make sure that all the old positional args have their corresponding
-  // backward compatible positional args in this schema
-  for (size_t i = 0; i < old_args.size(); ++i) {
-    if (!args.at(i)->isBackwardCompatibleWith(
-          *old_args.at(i),
-          why_not)) {
+
+  // we want to test both out and default args seperately
+  size_t old_out_start_idx = findFirstOutArg(old.arguments());
+  size_t new_out_start_idx = findFirstOutArg(arguments());
+
+  // make sure among the default args, they are backward compatible
+  for (size_t i = 0; i < old_out_start_idx; i++) {
+    if (!arguments().at(i).isBackwardCompatibleWith(
+          old.arguments().at(i), why_not)) {
       return false;
     }
   }
-  // check the extra positional args in this schema either has corresponding
-  // backward compatible keyward args since positional args also can be used as
-  // a keyward arg, or provided default values
-  for (size_t i = old_args.size(); i < args.size(); ++i) {
-    if (!args.at(i)->default_value()) {
-      auto it = old_kwargs.find(args.at(i)->name());
-      if (it == old_kwargs.end() ||
-          !args.at(i)->isBackwardCompatibleWith(
-            *it->second,
-            why_not)) {
-        return false;
+
+  // // Validate that all new arguments provided has a default value
+  for (size_t i = old_out_start_idx; i < new_out_start_idx; ++i) {
+    if (!arguments().at(i).default_value()) {
+      if (why_not) {
+        *why_not
+            << "Function schema not backward compatible since the new argument '"
+            << arguments().at(i).name() << "' of type "
+            << arguments().at(i).type()->str()
+            << " did not provide a default value.";
       }
-    }
-  }
-  // make sure that all the keyword args in the old schema have their
-  // corresponding backward compatible keyward args in this schema
-  for (auto& kv : old_kwargs) {
-    auto it = kwargs.find(kv.first);
-    if (it == kwargs.end() ||
-        !it->second->isBackwardCompatibleWith(
-          *kv.second,
-          why_not)) {
       return false;
     }
-    kwargs.erase(it);
   }
-  // check all the extra keyword args in this schema provide default values
-  for (auto& kv : kwargs) {
-    if (!kv.second->default_value()) {
+
+  // now compare the out args
+  for (size_t i = old_out_start_idx; i < old.arguments().size(); i++) {
+    if (!arguments()
+             .at(i - old_out_start_idx + new_out_start_idx)
+             .isBackwardCompatibleWith(old.arguments().at(i), why_not)) {
       return false;
     }
   }
@@ -186,12 +173,15 @@ inline void FunctionSchema::checkArg(
     const IValue& value,
     const Argument& argument,
     optional<size_t> pos) const {
+  if (value.isTensor() && argument.type() == TensorType::get()) {
+    // Fast-path for the common case
+    return;
+  }
   if (!value.type()->isSubtypeOf(argument.type())) {
-    std::string position = pos ? ::c10::str(" in position ", *pos) : "";
     TORCH_CHECK(
         false,
         formatTypeMismatchMsg(
-            argument, value.type()->python_str(), pos));
+            argument, value.type()->repr_str(), pos));
   }
 }
 
@@ -324,12 +314,12 @@ inline bool FunctionSchema::isSubtypeOf(
     bool as_method,
     std::ostream* why_not) const {
   size_t start = as_method ? 1 : 0;
-  // functions are covariant in arguments but contravariant in returns
+  // functions are contravariant in arguments but covariant in returns
   return isSubtypeOfList(
-             ArrayRef<Argument>(arguments()).slice(start),
              ArrayRef<Argument>(rhs.arguments()).slice(start),
+             ArrayRef<Argument>(arguments()).slice(start),
              why_not) &&
-      isSubtypeOfList(rhs.returns(), returns(), why_not);
+      isSubtypeOfList(returns(), rhs.returns(), why_not);
 }
 
 } // namespace c10

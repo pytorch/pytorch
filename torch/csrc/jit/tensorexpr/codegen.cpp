@@ -1,4 +1,4 @@
-#include "torch/csrc/jit/tensorexpr/codegen.h"
+#include <torch/csrc/jit/tensorexpr/codegen.h>
 
 #include <sstream>
 
@@ -14,7 +14,7 @@ RegisterCodeGenList::StmtFactoryMethod RegisterCodeGenList::
     oss << "Invalid stmt codegen name: " << name << ". ";
     oss << "Existing codegen names: [";
     int index = 0;
-    for (const auto& entry : stmt_factory_methods_) {
+    for (auto& entry : stmt_factory_methods_) {
       if (index != 0) {
         oss << ", ";
       }
@@ -30,20 +30,50 @@ RegisterCodeGenList::StmtFactoryMethod RegisterCodeGenList::
 void RegisterCodeGenList::AddStmtFactoryMethod(
     const std::string& name,
     const StmtFactoryMethod& stmt_factory_method) {
-  auto insert_ret =
-      stmt_factory_methods_.insert(std::make_pair(name, stmt_factory_method));
-  if (!insert_ret.second) {
-    throw std::runtime_error("Duplicated CodeGen names: " + name);
-  }
+  stmt_factory_methods_[name] = stmt_factory_method;
 }
 
 std::unique_ptr<CodeGen> CreateCodeGen(
     const std::string& name,
-    Stmt* stmt,
-    const std::vector<CodeGen::BufferArg>& params) {
+    StmtPtr stmt,
+    const std::vector<CodeGen::BufferArg>& params,
+    at::Device device,
+    const std::string& kernel_func_name) {
   RegisterCodeGenList::StmtFactoryMethod method =
       RegisterCodeGenList::GetInstance().FindStmtFactoryMethod(name);
-  return method(stmt, params);
+  return method(stmt, params, device, kernel_func_name);
+}
+
+ExprPtr GenericIntrinsicsExpander::mutate(IntrinsicsPtr v) {
+  if (v->op_type() == kSigmoid) {
+    auto x = v->param(0)->accept_mutator(this);
+    auto one = expr_to_vec(
+        ExprHandle(getImmediateByType(v->dtype(), 1.0)), v->dtype().lanes());
+    auto zero = expr_to_vec(
+        ExprHandle(getImmediateByType(v->dtype(), 0.0)), v->dtype().lanes());
+    ExprHandle y = one / (one + exp(zero - ExprHandle(x)));
+    return y.node();
+  }
+  return IRMutator::mutate(v);
+}
+
+void* CodeGen::argToPtr(const BufferArg& bufferArg, const CallArg& callArg) {
+  if (!bufferArg.isVar()) {
+    return callArg.data();
+  }
+
+  switch (bufferArg.dtype().scalar_type()) {
+#define TYPE_CASE(_1, Name) \
+  case ScalarType::Name:    \
+    return callArg.Name##Ptr();
+
+    AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TYPE_CASE);
+#undef TYPE_CASE
+
+    default:
+      throw unsupported_dtype();
+  }
+  return nullptr;
 }
 
 } // namespace tensorexpr

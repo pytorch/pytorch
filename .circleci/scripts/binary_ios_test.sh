@@ -13,7 +13,7 @@ base64 --decode cert.txt -o Certificates.p12
 rm cert.txt
 bundle exec fastlane install_cert
 # install the provisioning profile
-PROFILE=TestApp_CI.mobileprovision
+PROFILE=PyTorch_CI_2021.mobileprovision
 PROVISIONING_PROFILES=~/Library/MobileDevice/Provisioning\ Profiles
 mkdir -pv "${PROVISIONING_PROFILES}"
 cd "${PROVISIONING_PROFILES}"
@@ -24,6 +24,6 @@ rm cert.txt
 if ! [ -x "$(command -v xcodebuild)" ]; then
     echo 'Error: xcodebuild is not installed.'
     exit 1
-fi 
-PROFILE=TestApp_CI
-ruby ${PROJ_ROOT}/scripts/xcode_build.rb -i ${PROJ_ROOT}/build_ios/install -x ${PROJ_ROOT}/ios/TestApp/TestApp.xcodeproj -p ${IOS_PLATFORM} -c ${PROFILE} -t ${IOS_DEV_TEAM_ID}
+fi
+PROFILE=PyTorch_CI_2021
+ruby ${PROJ_ROOT}/scripts/xcode_build.rb -i ${PROJ_ROOT}/build_ios/install -x ${PROJ_ROOT}/ios/TestApp/TestApp.xcodeproj -p ${IOS_PLATFORM} -c ${PROFILE} -t ${IOS_DEV_TEAM_ID} -f Accelerate,MetalPerformanceShaders,CoreML

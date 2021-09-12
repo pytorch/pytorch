@@ -1,46 +1,25 @@
 #pragma once
 
 #include <ATen/core/ivalue.h>
+#include <c10/util/hash.h>
 
 namespace c10 {
+namespace detail {
+inline bool DictKeyEqualTo::operator()(const IValue& lhs, const IValue& rhs) const {
+  if (lhs.isTensor() && rhs.isTensor()) {
+    // for tensors, we compare only by identity (following how it's done in Python).
+    return lhs.is(rhs);
+  }
+  // Otherwise, we first compare by identity for efficiency, then by value (see:
+  // [container equality])
+  return _fastEqualsForContainer(lhs, rhs);
+}
+}
 
 template<class T> TypePtr getTypePtr();
 std::string toString(TypePtr typePtr);
 
 namespace impl {
-inline bool shallowEquals(const IValue& lhs, const IValue& rhs) {
-  if (lhs.isNone()) {
-    return rhs.isNone();
-  } else if (lhs.isInt()) {
-    return rhs.isInt() && lhs.toInt() == rhs.toInt();
-  } else if (lhs.isString()) {
-    return rhs.isString() && lhs.toStringRef() == rhs.toStringRef();
-  } else if (lhs.isDouble()) {
-    return rhs.isDouble() && lhs.toDouble() == rhs.toDouble();
-  } else if (lhs.isBool()) {
-    return rhs.isBool() && lhs.toBool() == rhs.toBool();
-  } else if (lhs.isList()) {
-    if (!rhs.isList()) {
-      return false;
-    }
-    auto l = lhs.toListRef();
-    auto r = rhs.toListRef();
-    if (l.size() != r.size()) {
-      return false;
-    }
-    for (size_t i = 0, N = l.size(); i < N; ++i) {
-      if (!shallowEquals(l[i], r[i])) {
-        return false;
-      }
-    }
-    return true;
-  } else if (lhs.isTensor()) {
-    return lhs.toTensor().is_same(rhs.toTensor());
-  } else {
-    AT_ERROR("shallowEquals(IValue, IValue) not implemented for type ", lhs.tagKind());
-  }
-}
-
 
 template<class Key, class Value>
 Dict<Key, Value> toTypedDict(GenericDict dict) {
@@ -60,11 +39,13 @@ namespace detail {
 
 inline size_t DictKeyHash::operator()(const IValue& ivalue) const {
   if (ivalue.isInt()) {
-    return std::hash<int>()(ivalue.toInt());
+    return std::hash<int64_t>()(ivalue.toInt());
   } else if (ivalue.isString()) {
-    return std::hash<std::string>()(ivalue.toStringRef());
+    return std::hash<c10::string_view>()(ivalue.toStringView());
   } else if (ivalue.isDouble()) {
     return std::hash<double>()(ivalue.toDouble());
+  } else if (ivalue.isComplexDouble()) {
+    return c10::hash<c10::complex<double>>()(ivalue.toComplexDouble());
   } else if (ivalue.isBool()) {
     return std::hash<bool>()(ivalue.toBool());
   } else if (ivalue.isTensor()) {
@@ -215,4 +196,24 @@ void Dict<Key, Value>::unsafeSetValueType(TypePtr t) {
   impl_->elementTypes.valueType = std::move(t);
 }
 
+template <class Key_, class Value_>
+bool operator==(const Dict<Key_, Value_>& lhs, const Dict<Key_, Value_>& rhs) {
+  // Dicts with the same identity trivially compare equal.
+  if (lhs.impl_ == rhs.impl_) {
+    return true;
+  }
+
+  // Otherwise compare the values
+  return *lhs.impl_ == *rhs.impl_;
+}
+
+template <class Key_, class Value_>
+bool operator!=(const Dict<Key_, Value_>& lhs, const Dict<Key_, Value_>& rhs) {
+  return !(lhs == rhs);
+}
+
+template <class Key, class Value>
+bool Dict<Key, Value>::is(const Dict& rhs) const {
+  return this->impl_ == rhs.impl_;
+}
 }

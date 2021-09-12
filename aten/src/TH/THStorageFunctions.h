@@ -1,12 +1,14 @@
 #pragma once
 
 #include <TH/THGeneral.h>
-#include <TH/THAllocator.h>
 
 #define THStorage_(NAME) TH_CONCAT_4(TH,Real,Storage_,NAME)
 
 #include <TH/generic/THStorage.h>
 #include <TH/THGenerateAllTypes.h>
+
+#include <TH/generic/THStorage.h>
+#include <TH/THGenerateComplexTypes.h>
 
 #include <TH/generic/THStorage.h>
 #include <TH/THGenerateHalfType.h>
@@ -22,6 +24,9 @@
 
 #include <TH/generic/THStorageCopy.h>
 #include <TH/THGenerateAllTypes.h>
+
+#include <TH/generic/THStorageCopy.h>
+#include <TH/THGenerateComplexTypes.h>
 
 #include <TH/generic/THStorageCopy.h>
 #include <TH/THGenerateHalfType.h>

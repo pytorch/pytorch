@@ -1,81 +1,103 @@
 #!/usr/bin/env bash
 set -ex -o pipefail
 
-# Set up NVIDIA docker repo
-curl -s -L --retry 3 https://nvidia.github.io/nvidia-docker/gpgkey | sudo apt-key add -
-echo "deb https://nvidia.github.io/libnvidia-container/ubuntu16.04/amd64 /" | sudo tee -a /etc/apt/sources.list.d/nvidia-docker.list
-echo "deb https://nvidia.github.io/nvidia-container-runtime/ubuntu16.04/amd64 /" | sudo tee -a /etc/apt/sources.list.d/nvidia-docker.list
-echo "deb https://nvidia.github.io/nvidia-docker/ubuntu16.04/amd64 /" | sudo tee -a /etc/apt/sources.list.d/nvidia-docker.list
-
 # Remove unnecessary sources
 sudo rm -f /etc/apt/sources.list.d/google-chrome.list
 sudo rm -f /etc/apt/heroku.list
 sudo rm -f /etc/apt/openjdk-r-ubuntu-ppa-xenial.list
 sudo rm -f /etc/apt/partner.list
 
-sudo apt-get -y update
-sudo apt-get -y remove linux-image-generic linux-headers-generic linux-generic docker-ce
-# WARNING: Docker version is hardcoded here; you must update the
-# version number below for docker-ce and nvidia-docker2 to get newer
-# versions of Docker.  We hardcode these numbers because we kept
-# getting broken CI when Docker would update their docker version,
-# and nvidia-docker2 would be out of date for a day until they
-# released a newer version of their package.
-#
-# How to figure out what the correct versions of these packages are?
-# My preferred method is to start a Docker instance of the correct
-# Ubuntu version (e.g., docker run -it ubuntu:16.04) and then ask
-# apt what the packages you need are.  Note that the CircleCI image
-# comes with Docker.
-sudo apt-get -y install \
-  linux-headers-$(uname -r) \
-  linux-image-generic \
-  moreutils \
-  docker-ce=5:18.09.4~3-0~ubuntu-xenial \
-  nvidia-container-runtime=2.0.0+docker18.09.4-1 \
-  nvidia-docker2=2.0.3+docker18.09.4-1 \
-  expect-dev
-
-sudo pkill -SIGHUP dockerd
+# To increase the network reliability, let apt decide which mirror is best to use
+sudo sed -i -e 's/http:\/\/.*archive/mirror:\/\/mirrors/' -e 's/\/ubuntu\//\/mirrors.txt/' /etc/apt/sources.list
 
 retry () {
-    $*  || $* || $* || $* || $*
+  $*  || $* || $* || $* || $*
 }
 
-retry sudo pip -q install awscli==1.16.35
+# Method adapted from here: https://askubuntu.com/questions/875213/apt-get-to-retry-downloading
+# (with use of tee to avoid permissions problems)
+# This is better than retrying the whole apt-get command
+echo "APT::Acquire::Retries \"3\";" | sudo tee /etc/apt/apt.conf.d/80-retries
+
+retry sudo apt-get update -qq
+retry sudo apt-get -y install \
+  moreutils \
+  expect-dev
+
+echo "== DOCKER VERSION =="
+docker version
+
+if ! command -v aws >/dev/null; then
+  retry sudo pip3 -q install awscli==1.19.64
+fi
 
 if [ -n "${USE_CUDA_DOCKER_RUNTIME:-}" ]; then
-  DRIVER_FN="NVIDIA-Linux-x86_64-440.59.run"
+  DRIVER_FN="NVIDIA-Linux-x86_64-460.39.run"
   wget "https://s3.amazonaws.com/ossci-linux/nvidia_driver/$DRIVER_FN"
   sudo /bin/bash "$DRIVER_FN" -s --no-drm || (sudo cat /var/log/nvidia-installer.log && false)
   nvidia-smi
+
+  # Taken directly from https://github.com/NVIDIA/nvidia-docker
+  # Add the package repositories
+  distribution=$(. /etc/os-release;echo "$ID$VERSION_ID")
+  curl -s -L https://nvidia.github.io/nvidia-docker/gpgkey | sudo apt-key add -
+  curl -s -L "https://nvidia.github.io/nvidia-docker/${distribution}/nvidia-docker.list" | sudo tee /etc/apt/sources.list.d/nvidia-docker.list
+
+  retry sudo apt-get update -qq
+  # Necessary to get the `--gpus` flag to function within docker
+  retry sudo apt-get install -y nvidia-container-toolkit
+  sudo systemctl restart docker
+else
+  # Explicitly remove nvidia docker apt repositories if not building for cuda
+  sudo rm -rf /etc/apt/sources.list.d/nvidia-docker.list
 fi
 
+add_to_env_file() {
+  local name=$1
+  local value=$2
+  case "$value" in
+    *\ *)
+      # BASH_ENV should be set by CircleCI
+      echo "${name}='${value}'" >> "${BASH_ENV:-/tmp/env}"
+      ;;
+    *)
+      echo "${name}=${value}" >> "${BASH_ENV:-/tmp/env}"
+      ;;
+  esac
+}
+
+add_to_env_file IN_CI 1
+add_to_env_file CI_MASTER "${CI_MASTER:-}"
+add_to_env_file COMMIT_SOURCE "${CIRCLE_BRANCH:-}"
+add_to_env_file BUILD_ENVIRONMENT "${BUILD_ENVIRONMENT}"
+add_to_env_file CIRCLE_PULL_REQUEST "${CIRCLE_PULL_REQUEST}"
+
+
 if [[ "${BUILD_ENVIRONMENT}" == *-build ]]; then
-  echo "declare -x IN_CIRCLECI=1" > /home/circleci/project/env
-  echo "declare -x COMMIT_SOURCE=${CIRCLE_BRANCH:-}" >> /home/circleci/project/env
-  echo "declare -x SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2" >> /home/circleci/project/env
+  add_to_env_file SCCACHE_BUCKET ossci-compiler-cache-circleci-v2
+
+  SCCACHE_MAX_JOBS=$(( $(nproc) - 1 ))
+  MEMORY_LIMIT_MAX_JOBS=8  # the "large" resource class on CircleCI has 32 CPU cores, if we use all of them we'll OOM
+  MAX_JOBS=$(( ${SCCACHE_MAX_JOBS} > ${MEMORY_LIMIT_MAX_JOBS} ? ${MEMORY_LIMIT_MAX_JOBS} : ${SCCACHE_MAX_JOBS} ))
+  add_to_env_file MAX_JOBS "${MAX_JOBS}"
+
   if [ -n "${USE_CUDA_DOCKER_RUNTIME:-}" ]; then
-    echo "declare -x TORCH_CUDA_ARCH_LIST=5.2" >> /home/circleci/project/env
+    add_to_env_file TORCH_CUDA_ARCH_LIST 5.2
   fi
-  export SCCACHE_MAX_JOBS=`expr $(nproc) - 1`
-  export MEMORY_LIMIT_MAX_JOBS=8  # the "large" resource class on CircleCI has 32 CPU cores, if we use all of them we'll OOM
-  export MAX_JOBS=$(( ${SCCACHE_MAX_JOBS} > ${MEMORY_LIMIT_MAX_JOBS} ? ${MEMORY_LIMIT_MAX_JOBS} : ${SCCACHE_MAX_JOBS} ))
-  echo "declare -x MAX_JOBS=${MAX_JOBS}" >> /home/circleci/project/env
 
   if [[ "${BUILD_ENVIRONMENT}" == *xla* ]]; then
     # This IAM user allows write access to S3 bucket for sccache & bazels3cache
     set +x
-    echo "declare -x XLA_CLANG_CACHE_S3_BUCKET_NAME=${XLA_CLANG_CACHE_S3_BUCKET_NAME:-}" >> /home/circleci/project/env
-    echo "declare -x AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_SCCACHE_AND_XLA_BAZEL_S3_BUCKET_V2:-}" >> /home/circleci/project/env
-    echo "declare -x AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_AND_XLA_BAZEL_S3_BUCKET_V2:-}" >> /home/circleci/project/env
+    add_to_env_file XLA_CLANG_CACHE_S3_BUCKET_NAME "${XLA_CLANG_CACHE_S3_BUCKET_NAME:-}"
+    add_to_env_file AWS_ACCESS_KEY_ID "${CIRCLECI_AWS_ACCESS_KEY_FOR_SCCACHE_AND_XLA_BAZEL_S3_BUCKET_V2:-}"
+    add_to_env_file AWS_SECRET_ACCESS_KEY "${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_AND_XLA_BAZEL_S3_BUCKET_V2:-}"
     set -x
   else
     # This IAM user allows write access to S3 bucket for sccache
     set +x
-    echo "declare -x XLA_CLANG_CACHE_S3_BUCKET_NAME=${XLA_CLANG_CACHE_S3_BUCKET_NAME:-}" >> /home/circleci/project/env
-    echo "declare -x AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_SCCACHE_S3_BUCKET_V4:-}" >> /home/circleci/project/env
-    echo "declare -x AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_S3_BUCKET_V4:-}" >> /home/circleci/project/env
+    add_to_env_file XLA_CLANG_CACHE_S3_BUCKET_NAME "${XLA_CLANG_CACHE_S3_BUCKET_NAME:-}"
+    add_to_env_file AWS_ACCESS_KEY_ID "${CIRCLECI_AWS_ACCESS_KEY_FOR_SCCACHE_S3_BUCKET_V4:-}"
+    add_to_env_file AWS_SECRET_ACCESS_KEY "${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_S3_BUCKET_V4:-}"
     set -x
   fi
 fi
@@ -84,5 +106,7 @@ fi
 set +x
 export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_ECR_READ_WRITE_V4:-}
 export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_ECR_READ_WRITE_V4:-}
-eval $(aws ecr get-login --region us-east-1 --no-include-email)
+export AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
+export AWS_REGION=us-east-1
+aws ecr get-login-password --region $AWS_REGION|docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com
 set -x

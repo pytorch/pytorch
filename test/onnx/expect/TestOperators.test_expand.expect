@@ -1,6 +1,6 @@
 ir_version: 6
 producer_name: "pytorch"
-producer_version: "1.4"
+producer_version: "CURRENT_VERSION"
 graph {
   node {
     output: "1"
@@ -17,15 +17,9 @@ graph {
     }
   }
   node {
-    input: "1"
-    output: "2"
-    name: "Shape_1"
-    op_type: "Shape"
-  }
-  node {
-    input: "2"
+    input: "10"
     output: "3"
-    name: "ConstantOfShape_2"
+    name: "ConstantOfShape_1"
     op_type: "ConstantOfShape"
     attribute {
       name: "value"
@@ -39,7 +33,7 @@ graph {
   }
   node {
     output: "4"
-    name: "Constant_3"
+    name: "Constant_2"
     op_type: "Constant"
     attribute {
       name: "value"
@@ -54,12 +48,12 @@ graph {
     input: "3"
     input: "4"
     output: "5"
-    name: "Mul_4"
+    name: "Mul_3"
     op_type: "Mul"
   }
   node {
     output: "6"
-    name: "Constant_5"
+    name: "Constant_4"
     op_type: "Constant"
     attribute {
       name: "value"
@@ -75,7 +69,7 @@ graph {
     input: "6"
     input: "5"
     output: "7"
-    name: "Equal_6"
+    name: "Equal_5"
     op_type: "Equal"
   }
   node {
@@ -83,17 +77,23 @@ graph {
     input: "3"
     input: "1"
     output: "8"
-    name: "Where_7"
+    name: "Where_6"
     op_type: "Where"
   }
   node {
     input: "0"
     input: "8"
     output: "9"
-    name: "Expand_8"
+    name: "Expand_7"
     op_type: "Expand"
   }
   name: "torch-jit-export"
+  initializer {
+    dims: 1
+    data_type: 7
+    name: "10"
+    raw_data: "\003\000\000\000\000\000\000\000"
+  }
   input {
     name: "0"
     type {

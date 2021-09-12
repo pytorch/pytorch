@@ -1,6 +1,6 @@
 ir_version: 6
 producer_name: "pytorch"
-producer_version: "1.4"
+producer_version: "CURRENT_VERSION"
 graph {
   node {
     output: "2"
@@ -67,7 +67,7 @@ graph {
         elem_type: 1
         shape {
           dim {
-            dim_value: 3
+            dim_param: "TopK4_dim_0"
           }
         }
       }
@@ -80,7 +80,7 @@ graph {
         elem_type: 7
         shape {
           dim {
-            dim_value: 3
+            dim_param: "TopK5_dim_0"
           }
         }
       }

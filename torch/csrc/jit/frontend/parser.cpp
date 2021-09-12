@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/frontend/parser.h>
+
 #include <c10/util/Optional.h>
 #include <torch/csrc/jit/frontend/lexer.h>
 #include <torch/csrc/jit/frontend/parse_string_literal.h>
@@ -22,8 +23,8 @@ Decl mergeTypesFromTypeComment(
         << "Number of type annotations ("
         << type_annotation_decl.params().size()
         << ") did not match the number of "
-        << (is_method ? "method" : "function")
-        << " parameters (" << expected_num_annotations << ")";
+        << (is_method ? "method" : "function") << " parameters ("
+        << expected_num_annotations << ")";
   }
   auto old = decl.params();
   auto _new = type_annotation_decl.params();
@@ -73,6 +74,13 @@ struct ParserImpl {
       case TK_MINUS_EQ:
       case TK_TIMES_EQ:
       case TK_DIV_EQ:
+      case TK_MOD_EQ:
+      case TK_BIT_OR_EQ:
+      case TK_BIT_AND_EQ:
+      case TK_BIT_XOR_EQ:
+      case TK_LSHIFT_EQ:
+      case TK_RSHIFT_EQ:
+      case TK_POW_EQ:
       case TK_NEWLINE:
       case '=':
       case ')':
@@ -107,7 +115,8 @@ struct ParserImpl {
       } break;
       case TK_TRUE:
       case TK_FALSE:
-      case TK_NONE: {
+      case TK_NONE:
+      case TK_NONE_TYPE: {
         auto k = L.cur().kind;
         auto r = L.cur().range;
         prefix = create_compound(k, r, {});
@@ -143,6 +152,16 @@ struct ParserImpl {
       } break;
       case '{': {
         L.next();
+        // If we have a dict literal, `keys` and `values` will store the keys
+        // and values used in the object's construction. EDGE CASE: We have a
+        // dict comprehension, so we'll get the first element of the dict
+        // comprehension in `keys` and a list comprehension in `values`.
+        // For example, `{i : chr(i + 65) for i in range(4)}` would give us
+        // `i` in `keys` and `chr(i + 65) for i in range(4)` in `values`.
+        // The optimal way of handling this case is to simply splice the new
+        // dict comprehension together from the existing list comprehension.
+        // Splicing prevents breaking changes to our API and does not require
+        // the use of global variables.
         std::vector<Expr> keys;
         std::vector<Expr> values;
         auto range = L.cur().range;
@@ -154,14 +173,21 @@ struct ParserImpl {
           } while (L.nextIf(','));
         }
         L.expect('}');
-        prefix = DictLiteral::create(
-            range,
-            List<Expr>::create(range, keys),
-            List<Expr>::create(range, values));
+        if (keys.size() == 1 && (*values.begin()).kind() == TK_LIST_COMP) {
+          ListComp lc(*values.begin());
+          prefix = DictComp::create(
+              range, *keys.begin(), lc.elt(), lc.target(), lc.iter());
+        } else {
+          prefix = DictLiteral::create(
+              range,
+              List<Expr>::create(range, keys),
+              List<Expr>::create(range, values));
+        }
       } break;
       case TK_STRINGLITERAL: {
         prefix = parseConcatenatedStringLiterals();
       } break;
+      case TK_ELLIPSIS:
       case TK_DOTS: {
         prefix = Dots::create(L.cur().range);
         L.next();
@@ -191,9 +217,25 @@ struct ParserImpl {
       case TK_PLUS_EQ:
       case TK_MINUS_EQ:
       case TK_TIMES_EQ:
-      case TK_DIV_EQ: {
+      case TK_DIV_EQ:
+      case TK_BIT_OR_EQ:
+      case TK_BIT_AND_EQ:
+      case TK_BIT_XOR_EQ:
+      case TK_MOD_EQ: {
         int modifier = L.next().text()[0];
         return create_compound(modifier, r, {});
+      } break;
+      case TK_LSHIFT_EQ: {
+        L.next();
+        return create_compound(TK_LSHIFT, r, {});
+      } break;
+      case TK_RSHIFT_EQ: {
+        L.next();
+        return create_compound(TK_RSHIFT, r, {});
+      } break;
+      case TK_POW_EQ: {
+        L.next();
+        return create_compound(TK_POW, r, {});
       } break;
       case '=': {
         L.next();
@@ -210,7 +252,8 @@ struct ParserImpl {
     auto cond = parseExp();
     L.expect(TK_ELSE);
     auto false_branch = parseExp(binary_prec);
-    return create_compound(TK_IF_EXPR, range, {cond, std::move(true_branch), false_branch});
+    return create_compound(
+        TK_IF_EXPR, range, {cond, std::move(true_branch), false_branch});
   }
   // parse the longest expression whose binary operators have
   // precedence strictly greater than 'precedence'
@@ -221,13 +264,15 @@ struct ParserImpl {
   }
   Expr parseExp(int precedence) {
     TreeRef prefix;
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     int unary_prec;
     if (shared.isUnary(L.cur().kind, &unary_prec)) {
       auto kind = L.cur().kind;
       auto pos = L.cur().range;
       L.next();
-      auto unary_kind =
-          kind == '*' ? TK_STARRED : kind == '-' ? TK_UNARY_MINUS : kind;
+      auto unary_kind = kind == '*' ? TK_STARRED
+          : kind == '-'             ? TK_UNARY_MINUS
+                                    : kind;
       auto subexp = parseExp(unary_prec);
       // fold '-' into constant numbers, so that attributes can accept
       // things like -1
@@ -239,6 +284,7 @@ struct ParserImpl {
     } else {
       prefix = parseBaseExp();
     }
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     int binary_prec;
     while (shared.isBinary(L.cur().kind, &binary_prec)) {
       if (binary_prec <= precedence) // not allowed to parse something which is
@@ -266,9 +312,10 @@ struct ParserImpl {
       }
 
       if (kind == TK_FOR) {
-        // TK_FOR targets should only parse exprs prec greater than 4, which only
-        // includes subset of Exprs that suppose to be on the LHS according to the
-        // python grammar https://docs.python.org/3/reference/grammar.html
+        // TK_FOR targets should only parse exprs prec greater than 4, which
+        // only includes subset of Exprs that suppose to be on the LHS according
+        // to the python grammar
+        // https://docs.python.org/3/reference/grammar.html
         auto target = parseLHSExp();
         L.expect(TK_IN);
         auto iter = parseExp();
@@ -342,13 +389,14 @@ struct ParserImpl {
     });
   }
 
-  // parse LHS acceptable exprs, which only includes subset of Exprs that prec is
-  // greater than 4 according to the python grammar
+  // parse LHS acceptable exprs, which only includes subset of Exprs that prec
+  // is greater than 4 according to the python grammar
   Expr parseLHSExp() {
     return parseExp(4);
   }
 
-  // Parse expr's of the form [a:], [:b], [a:b], [:] and all variations with "::"
+  // Parse expr's of the form [a:], [:b], [a:b], [:] and all variations with
+  // "::"
   Expr parseSubscriptExp() {
     TreeRef first, second, third;
     auto range = L.cur().range;
@@ -359,17 +407,17 @@ struct ParserImpl {
       if (L.cur().kind != ',' && L.cur().kind != ']' && L.cur().kind != ':') {
         second = parseExp();
       }
-    if (L.nextIf(':')) {
-      if (L.cur().kind != ',' && L.cur().kind != ']') {
-        third = parseExp();
+      if (L.nextIf(':')) {
+        if (L.cur().kind != ',' && L.cur().kind != ']') {
+          third = parseExp();
+        }
       }
-    }
       auto maybe_first = first ? Maybe<Expr>::create(range, Expr(first))
                                : Maybe<Expr>::create(range);
       auto maybe_second = second ? Maybe<Expr>::create(range, Expr(second))
                                  : Maybe<Expr>::create(range);
       auto maybe_third = third ? Maybe<Expr>::create(range, Expr(third))
-                                : Maybe<Expr>::create(range);
+                               : Maybe<Expr>::create(range);
       return SliceExpr::create(range, maybe_first, maybe_second, maybe_third);
     } else {
       return Expr(first);
@@ -382,7 +430,9 @@ struct ParserImpl {
     auto subscript_exprs =
         parseList('[', ',', ']', &ParserImpl::parseSubscriptExp);
 
-    return Subscript::create(range, Expr(value), subscript_exprs);
+    const auto whole_range =
+        SourceRange(range.source(), range.start(), L.cur().range.start());
+    return Subscript::create(whole_range, Expr(value), subscript_exprs);
   }
 
   Maybe<Expr> maybeParseTypeAnnotation() {
@@ -411,7 +461,11 @@ struct ParserImpl {
       def = Maybe<Expr>::create(L.cur().range);
     }
     return Param::create(
-        type->range(), Ident(ident), Maybe<Expr>(type), Maybe<Expr>(def), kwarg_only);
+        type->range(),
+        Ident(ident),
+        Maybe<Expr>(type),
+        Maybe<Expr>(def),
+        kwarg_only);
   }
 
   Param parseBareTypeAnnotation() {
@@ -504,8 +558,9 @@ struct ParserImpl {
       }
       case TK_RETURN: {
         auto range = L.next().range;
-        Expr value = L.cur().kind != TK_NEWLINE ? parseExpOrExpTuple()
-                                                : Expr(create_compound(TK_NONE, range, {}));
+        Expr value = L.cur().kind != TK_NEWLINE
+            ? parseExpOrExpTuple()
+            : Expr(create_compound(TK_NONE, range, {}));
         L.expect(TK_NEWLINE);
         return Return::create(range, value);
       }
@@ -545,10 +600,14 @@ struct ParserImpl {
         return parseFunction(/*is_method=*/in_class);
       }
       case TK_DELETE: {
-        L.expect(TK_DELETE);
-        auto expr = parseExp();
+        auto range = L.next().range;
+        auto targets =
+            parseList(TK_NOTHING, ',', TK_NOTHING, &ParserImpl::parseExp);
         L.expect(TK_NEWLINE);
-        return Delete::create(expr);
+        return Delete::create(range, targets);
+      }
+      case TK_WITH: {
+        return parseWith();
       }
       default: {
         auto lhs = parseExpOrExpTuple();
@@ -561,6 +620,25 @@ struct ParserImpl {
       }
     }
   }
+
+  WithItem parseWithItem() {
+    auto target = parseExp();
+
+    if (L.cur().kind == TK_AS) {
+      // If the current token is TK_AS, this with item is of the form
+      // "expression as target".
+      auto token = L.expect(TK_AS);
+      Ident ident = parseIdent();
+      auto var = Var::create(ident.range(), ident);
+      return WithItem::create(
+          token.range, target, Maybe<Var>::create(ident.range(), var));
+    } else {
+      // If not, this with item is of the form "expression".
+      return WithItem::create(
+          target.range(), target, Maybe<Var>::create(target.range()));
+    }
+  }
+
   TreeRef parseIf(bool expect_if = true) {
     auto r = L.cur().range;
     if (expect_if)
@@ -598,6 +676,16 @@ struct ParserImpl {
     auto itrs = parseList(TK_NOTHING, ',', ':', &ParserImpl::parseExp);
     auto body = parseStatements(/*expect_indent=*/true);
     return For::create(r, targets, itrs, body);
+  }
+
+  TreeRef parseWith() {
+    auto r = L.cur().range;
+    // Parse "with expression [as target][, expression [as target]]*:".
+    L.expect(TK_WITH);
+    auto targets = parseList(TK_NOTHING, ',', ':', &ParserImpl::parseWithItem);
+    // Parse the body.
+    auto body = parseStatements(/*expect_indent=*/true);
+    return With::create(r, targets, body);
   }
 
   TreeRef parseStatements(bool expect_indent, bool in_class = false) {
@@ -645,7 +733,7 @@ struct ParserImpl {
         paramlist.range(), List<Param>(paramlist), return_annotation);
   }
 
-TreeRef parseClass() {
+  TreeRef parseClass() {
     L.expect(TK_CLASS_DEF);
     const auto name = parseIdent();
     Maybe<Expr> superclass = Maybe<Expr>::create(name.range());

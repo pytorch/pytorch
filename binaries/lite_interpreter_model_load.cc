@@ -25,6 +25,9 @@ int main(int argc, char** argv) {
     return -1;
   }
 
+  // TODO: avoid having to set this guard for custom mobile build with mobile
+  // interpreter.
+  c10::InferenceMode mode;
   torch::jit::mobile::Module bc = torch::jit::_load_for_mobile(FLAGS_model);
   return 0;
 }
