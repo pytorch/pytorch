@@ -76,6 +76,10 @@ void promoteInputs(
     std::vector<ExprHandle>& inputs,
     const int typeConstraints = kAllTypes);
 
+ExprHandle promoteToDtype(ExprHandle e, ScalarType dt);
+
+ExprHandle promoteIntegerToDefaultType(const ExprHandle& e);
+
 ExprHandle demoteOutput(
     const ExprHandle& e,
     const c10::optional<ScalarType> type);
@@ -140,7 +144,8 @@ class TORCH_API TensorExprKernel {
   explicit TensorExprKernel(
       const std::shared_ptr<Graph>& subgraph,
       std::unordered_map<c10::Symbol, NNCLoweringFunction> custom_lowerings =
-          {});
+          {},
+      bool pre_alloc = false);
 
   void run(Stack& stack);
   void runFast(
@@ -241,6 +246,12 @@ class TORCH_API TensorExprKernel {
     return custom_lowerings_;
   }
 
+  // Allocate memory for intermediate buffers at compile time.
+  // Specifically, we pre-allocate memory for intermediate buffers with static
+  // size and manage these buffers in the way we manage JIT constant tensors:
+  // push the buf args into the stack so NNC IR can access them at runtime.
+  void preAllocIntermediateBufs(std::unordered_set<BufPtr>& interm_bufs);
+
  private:
   struct UnpackedTensorOptions {
     c10::optional<c10::ScalarType> dtype;
@@ -279,6 +290,7 @@ class TORCH_API TensorExprKernel {
   std::vector<ConstantDescr> constants_;
 
   std::unordered_map<c10::Symbol, NNCLoweringFunction> custom_lowerings_;
+  bool pre_alloc_{false};
 };
 
 TORCH_API int& getTECudaPointwiseLoopLevels();
@@ -294,12 +306,6 @@ TORCH_API bool& getOptConditionals();
 TORCH_API c10::optional<at::Device> pickDeviceType(
     const at::ArrayRef<torch::jit::Value*>& inputs);
 TORCH_API c10::optional<at::Device> pickDeviceType(
-    const std::shared_ptr<Graph>& graph);
-
-TORCH_API void annotateInputShapes(
-    const std::shared_ptr<Graph>& graph,
-    const std::vector<c10::optional<at::Tensor>>& example_inputs);
-TORCH_API std::shared_ptr<Graph> removeUnusedSelfArgument(
     const std::shared_ptr<Graph>& graph);
 
 } // namespace tensorexpr
