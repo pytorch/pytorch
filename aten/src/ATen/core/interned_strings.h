@@ -28,7 +28,8 @@ namespace c10 {
   _(prim, ReductionSizes)            \
   _(prim, Constant)                  \
   _(prim, ChunkSizes)                \
-  _(prim, AllocateStorage)           \
+  _(prim, AllocateSlab)              \
+  _(prim, ReleaseSlab)               \
   _(prim, AllocateTensor)           \
   _(prim, ConstantMKLDNNTensor)      \
   _(prim, BroadcastMKLDNNTensors)    \

@@ -10,7 +10,7 @@ namespace jit {
 namespace interpreter {
 
 // pre-processing that happens once per graph
-struct PreprocessGraph {
+struct TORCH_API PreprocessGraph {
   explicit PreprocessGraph(Graph& g);
 
   // Outputs of the preprocessing:
