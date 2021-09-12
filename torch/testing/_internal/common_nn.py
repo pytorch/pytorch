@@ -3659,6 +3659,28 @@ new_module_tests = [
         fullname='log_softmax_scalar',
         pickle=False,
     ),
+    dict(
+        module_name='Softmax2d',
+        input_size=(3, 4, 5),
+        reference_fn=single_batch_reference_fn,
+        desc='no_batch_dim',
+    ),
+    dict(
+        module_name='Softmax',
+        constructor_args=(-1,),
+        cpp_constructor_args='torch::nn::SoftmaxOptions(-1)',
+        input_size=(4, 5),
+        reference_fn=single_batch_reference_fn,
+        desc='no_batch_dim',
+    ),
+    dict(
+        module_name='LogSoftmax',
+        constructor_args=(-1,),
+        cpp_constructor_args='torch::nn::LogSoftmaxOptions(1)',
+        input_size=(4, 5),
+        reference_fn=single_batch_reference_fn,
+        desc='no_batch_dim',
+    ),
 
 
     dict(
@@ -3818,6 +3840,14 @@ new_module_tests = [
         cpp_constructor_args='torch::nn::SoftminOptions(0)',
         input_size=(),
         desc='scalar',
+    ),
+    dict(
+        module_name='Softmin',
+        constructor_args=(-1,),
+        cpp_constructor_args='torch::nn::SoftminOptions(-1)',
+        input_size=(3, 4, 10),
+        reference_fn=single_batch_reference_fn,
+        desc='no_batch_dim',
     ),
     dict(
         module_name='Tanhshrink',
@@ -3985,6 +4015,22 @@ new_module_tests = [
         with_tf32=True,
         tf32_precision=0.005,
     ),
+    dict(
+        module_name='Flatten',
+        cpp_constructor_args='torch::nn::FlattenOptions().start_dim(-3).end_dim(-1)',
+        constructor_args=(-3, -1),
+        input_size=(3, 4, 5),
+        reference_fn=single_batch_reference_fn,
+        desc="no_batch_dim",
+    ),
+    dict(
+        module_name='Unflatten',
+        cpp_constructor_args='torch::nn::UnflattenOptions(-2, {2, 2})',
+        constructor_args=(-2, torch.Size([2, 2])),
+        input_size=(3, 4, 5),
+        reference_fn=single_batch_reference_fn,
+        desc="no_batch_dim",
+    ),
 ]
 
 # add conv padding mode tests:
@@ -4027,7 +4073,7 @@ for padding_mode, cpp_padding_mode in zip(
 # Check that non linear activations work with no batch dimensions
 non_linear_activations_no_batch = [
     'ELU', 'Hardshrink', 'Hardsigmoid', 'Hardtanh', 'Hardswish', 'LeakyReLU',
-    'LogSigmoid', 'PReLU', 'ReLU', 'ReLU6', 'RReLU', 'SELU', 'CELU', 'GELU',
+    'LogSigmoid', 'PReLU', 'ReLU', 'ReLU6', 'RReLU', 'SELU', 'CELU', 'GELU', 'GLU',
     'Sigmoid', 'SiLU', 'Mish', 'Softplus', 'Softshrink', 'Softsign', 'Tanh',
     'Tanhshrink', 'Threshold'
 ]
@@ -4043,7 +4089,7 @@ non_linear_activations_extra_info: Dict[str, dict] = {
 for non_linear_activation in non_linear_activations_no_batch:
     activation_test_info = dict(
         module_name=non_linear_activation,
-        input_size=(3,),
+        input_size=(4,),
         reference_fn=single_batch_reference_fn,
         desc='no_batch_dim',
         test_cpp_api_parity=False,
