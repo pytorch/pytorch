@@ -15,7 +15,7 @@ namespace at { namespace native {
 
 namespace {
 
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
 static const int BLOCKDIMY = 16;
 #else
 static const int BLOCKDIMY = 32;
@@ -82,7 +82,7 @@ __global__ void embedding_backward_feature_kernel
           (dst_row == indices_batch[chunk_start - batch_start + threadIdx.x]);
         if(threadIdx.x >= n_this_chunk)
           match_found_this_thread = 0;
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
         unsigned long long int matchmask = WARP_BALLOT(match_found_this_thread);
         int first_remaining_peer = __ffsll(matchmask) - 1;
 #else
@@ -95,7 +95,7 @@ __global__ void embedding_backward_feature_kernel
           matchmask ^= (1 << first_remaining_peer);
           while(matchmask)
           {
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
             first_remaining_peer = __ffsll(matchmask) - 1;
 #else
             first_remaining_peer = __ffs(matchmask) - 1;

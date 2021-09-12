@@ -15,7 +15,7 @@ namespace at {
 namespace native {
 
 // Is this questionable namespace pollution?
-#if defined(__HIP_PLATFORM_HCC__)
+#if defined(USE_ROCM)
 constexpr int MAX_BLOCK_SIZE = 256;
 
 #else

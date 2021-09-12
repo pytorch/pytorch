@@ -14,7 +14,7 @@
 
 #cmakedefine USE_MAGMA
 /* Needed for hipMAGMA to correctly identify implementation */
-#if defined(USE_MAGMA) && defined(__HIP_PLATFORM_HCC__)
+#if defined(USE_MAGMA) && defined(USE_ROCM)
 #define HAVE_HIP 1
 #endif
 

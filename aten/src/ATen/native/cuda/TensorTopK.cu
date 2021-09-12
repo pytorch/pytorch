@@ -30,7 +30,7 @@ __global__ void gatherTopK(at::cuda::detail::TensorInfo<T, IndexType> input,
                            IndexType indicesWithinSliceStride) {
   // Indices are limited to integer fp precision, so counts can fit in
   // int32, regardless of IndexType
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
   __shared__ int smem[64];
 #else
   __shared__ int smem[32]; // one per each warp, up to warp limit

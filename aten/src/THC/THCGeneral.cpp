@@ -219,7 +219,7 @@ void __THCublasCheck(cublasStatus_t status, const char *file, const int line)
         errmsg = "an absent device architectural feature is required";
         break;
 
-#ifndef __HIP_PLATFORM_HCC__
+#if !defined(USE_ROCM)
       case CUBLAS_STATUS_MAPPING_ERROR:
         errmsg = "an access to GPU memory space failed";
         break;

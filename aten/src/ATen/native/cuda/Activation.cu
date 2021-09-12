@@ -433,7 +433,7 @@ std::tuple<Tensor, Tensor> prelu_backward_cuda(const Tensor& grad_out_, const Te
 // rrelu
 // -----------------------------------
 template <typename scalar_t, int unroll_factor, typename F>
-#if __CUDA_ARCH__ >= 350 || defined __HIP_PLATFORM_HCC__
+#if __CUDA_ARCH__ >= 350 || defined(USE_ROCM)
 C10_LAUNCH_BOUNDS_2(256, 4)
 #endif
 __global__ void rrelu_with_noise_cuda_kernel(

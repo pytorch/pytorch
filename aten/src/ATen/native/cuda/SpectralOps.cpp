@@ -28,7 +28,7 @@ using namespace at::native::detail;
 static void exec_cufft_plan(
     const CuFFTConfig &config, void* in_data, void* out_data, bool forward) {
   auto& plan = config.plan();
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
   auto value_type = config.data_type();
   if (value_type == kFloat) {
     switch (config.transform_type()) {

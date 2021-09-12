@@ -90,7 +90,7 @@ void binomial_cuda_kernel(
 
   at::native::distribution_binary_kernel(iter, philox_args,
       [philox_args] GPU_LAMBDA (curandStatePhilox4_32_10_t& state, scalar_t count, scalar_t prob) {
-        #if defined(__CUDA_ARCH__) || defined(__HIP_PLATFORM_HCC__)
+        #if defined(__CUDA_ARCH__) || defined(USE_ROCM)
         auto uniform_lambda = curand_uniform_wrapper(state);
         BaseSampler<accscalar_t, decltype(uniform_lambda)> standard_uniform(uniform_lambda);
         auto sample = sample_binomial<scalar_t, accscalar_t, decltype(uniform_lambda)>(count, prob, standard_uniform);
