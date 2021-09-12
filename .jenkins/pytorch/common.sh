@@ -74,7 +74,7 @@ if [[ "$BUILD_ENVIRONMENT" != *win-* ]]; then
   if which sccache > /dev/null; then
     # Save sccache logs to file
     sccache --stop-server > /dev/null  2>&1 || true
-    rm ~/sccache_error.log || true
+    rm -f ~/sccache_error.log || true
     if [[ -n "${SKIP_SCCACHE_INITIALIZATION:-}" ]]; then
       # sccache --start-server seems to hang forever on self hosted runners for GHA
       # so let's just go ahead and skip the --start-server altogether since it seems

@@ -100,6 +100,17 @@ def create_temp_dir_and_files():
     return [(temp_dir, temp_file1_name, temp_file2_name, temp_file3_name),
             (temp_sub_dir, temp_sub_file1_name, temp_sub_file2_name)]
 
+# Given a DataPipe and integer n, iterate the DataPipe for n elements and store the elements into a list
+# Then, reset the DataPipe and return a tuple of two lists
+# 1. A list of elements yielded before the reset
+# 2. A list of all elements of the DataPipe after the reset
+def reset_after_n_next_calls(datapipe: IterDataPipe[T_co], n: int) -> Tuple[List[T_co], List[T_co]]:
+    it = iter(datapipe)
+    res_before_reset = []
+    for _ in range(n):
+        res_before_reset.append(next(it))
+    return res_before_reset, list(datapipe)
+
 
 class TestDataChunk(TestCase):
     def setUp(self):
@@ -231,7 +242,7 @@ class TestIterableDataPipeBasic(TestCase):
                 self.assertEqual(data_ref[1].read(), f.read())
             data_ref[1].close()
 
-    # TODO(VitalyFedyunin): Generates unclosed buffer warning, need to investigate
+
     def test_readfilesfromzip_iterable_datapipe(self):
         temp_dir = self.temp_dir.name
         temp_zipfile_pathname = os.path.join(temp_dir, "test_zip.zip")
@@ -240,23 +251,41 @@ class TestIterableDataPipeBasic(TestCase):
             myzip.write(self.temp_files[1])
             myzip.write(self.temp_files[2])
         datapipe1 = dp.iter.FileLister(temp_dir, '*.zip')
-        datapipe2 = dp.iter.FileLoader(datapipe1)
-        datapipe3 = dp.iter.ZipArchiveReader(datapipe2)
-        # read extracted files before reaching the end of the zipfile
-        for rec, temp_file in itertools.zip_longest(datapipe3, self.temp_files):
+        datapipe2 = dp.iter.ZipArchiveReader(datapipe1)
+
+        # Test Case: read extracted files before reaching the end of the zipfile
+        for rec, temp_file in itertools.zip_longest(datapipe2, self.temp_files):
             self.assertTrue(rec is not None and temp_file is not None)
             self.assertEqual(os.path.basename(rec[0]), os.path.basename(temp_file))
             with open(temp_file, 'rb') as f:
                 self.assertEqual(rec[1].read(), f.read())
             rec[1].close()
-        # read extracted files before reaching the end of the zipile
-        data_refs = list(datapipe3)
+        # Test Case: read extracted files after reaching the end of the zipile
+        data_refs = list(datapipe2)
         self.assertEqual(len(data_refs), len(self.temp_files))
         for data_ref, temp_file in zip(data_refs, self.temp_files):
             self.assertEqual(os.path.basename(data_ref[0]), os.path.basename(temp_file))
             with open(temp_file, 'rb') as f:
                 self.assertEqual(data_ref[1].read(), f.read())
             data_ref[1].close()
+
+        # Test Case: reset the DataPipe after reading part of it
+        n_elements_before_reset = 1
+        res_before_reset, res_after_reset = reset_after_n_next_calls(datapipe2, n_elements_before_reset)
+        # Check the results accumulated before reset
+        self.assertEqual(len(res_before_reset), n_elements_before_reset)
+        for ele_before_reset, temp_file in zip(res_before_reset, self.temp_files):
+            self.assertEqual(os.path.basename(ele_before_reset[0]), os.path.basename(temp_file))
+            with open(temp_file, 'rb') as f:
+                self.assertEqual(ele_before_reset[1].read(), f.read())
+            ele_before_reset[1].close()
+        # Check the results accumulated after reset
+        self.assertEqual(len(res_after_reset), len(self.temp_files))
+        for ele_after_reset, temp_file in zip(res_after_reset, self.temp_files):
+            self.assertEqual(os.path.basename(ele_after_reset[0]), os.path.basename(temp_file))
+            with open(temp_file, 'rb') as f:
+                self.assertEqual(ele_after_reset[1].read(), f.read())
+            ele_after_reset[1].close()
 
     def test_routeddecoder_iterable_datapipe(self):
         temp_dir = self.temp_dir.name
@@ -606,8 +635,7 @@ class TestFunctionalIterDataPipe(TestCase):
 
         # Test Case: making sure all child DataPipe shares the same reference
         dp1, dp2, dp3 = input_dp.fork(num_instances=3)
-        self.assertTrue(all(n1 is n2 for n1, n2 in zip(dp1, dp2)))
-        self.assertTrue(all(n1 is n3 for n1, n3 in zip(dp1, dp3)))
+        self.assertTrue(all(n1 is n2 and n1 is n3 for n1, n2, n3 in zip(dp1, dp2, dp3)))
 
         # Test Case: one child DataPipe yields all value at a time
         output1, output2, output3 = list(dp1), list(dp2), list(dp3)
@@ -680,7 +708,6 @@ class TestFunctionalIterDataPipe(TestCase):
         output1, output2 = list(dp1), list(dp2)
         self.assertEqual(list(range(10)), output1)
         self.assertEqual(list(range(10)), output2)
-        output1, output2 = list(dp1), list(dp2)
         with warnings.catch_warnings(record=True) as wa:
             self.assertEqual(list(range(10)), list(dp1))  # Resets even though dp3 has not been read
             self.assertEqual(len(wa), 1)
@@ -1033,7 +1060,7 @@ class TestFunctionalIterDataPipe(TestCase):
         for data, exp in zip(filter_dp, range(5, 10)):
             self.assertEqual(data, exp)
 
-        with self.assertRaisesRegex(TypeError, r"instance doesn't have valid length$"):
+        with self.assertRaisesRegex(TypeError, r"has no len"):
             len(filter_dp)
 
         def _non_bool_fn(data):
@@ -1625,6 +1652,27 @@ class TestSharding(TestCase):
             items += list(sharded_dp)
 
         self.assertEqual(sorted(all_items), sorted(items))
+
+    def test_sharding_length(self):
+        numbers_dp = IDP(range(13))
+        sharded_dp0 = numbers_dp.sharding_filter()
+        torch.utils.data.sharding.apply_sharding(sharded_dp0, 3, 0)
+        sharded_dp1 = numbers_dp.sharding_filter()
+        torch.utils.data.sharding.apply_sharding(sharded_dp1, 3, 1)
+        sharded_dp2 = numbers_dp.sharding_filter()
+        torch.utils.data.sharding.apply_sharding(sharded_dp2, 3, 2)
+        self.assertEqual(13, len(numbers_dp))
+        self.assertEqual(5, len(sharded_dp0))
+        self.assertEqual(4, len(sharded_dp1))
+        self.assertEqual(4, len(sharded_dp2))
+
+        numbers_dp = IDP(range(1))
+        sharded_dp0 = numbers_dp.sharding_filter()
+        torch.utils.data.sharding.apply_sharding(sharded_dp0, 2, 0)
+        sharded_dp1 = numbers_dp.sharding_filter()
+        torch.utils.data.sharding.apply_sharding(sharded_dp1, 2, 1)
+        self.assertEqual(1, len(sharded_dp0))
+        self.assertEqual(0, len(sharded_dp1))
 
     @skipIfNoDill
     def test_old_dataloader(self):

@@ -42,7 +42,6 @@ from .graph_module import (
 
 from .pattern_utils import (
     MatchResult,
-    get_default_quant_patterns,
     get_default_output_activation_post_process_map,
 )
 
@@ -83,6 +82,9 @@ from ..utils import (
     activation_dtype,
     weight_dtype,
 )
+
+from .backend_config_dict import get_fbgemm_backend_config_dict
+from .backend_config_dict import validate_backend_config_dict
 
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
@@ -1114,6 +1116,7 @@ def prepare(
         node_name_to_scope: Dict[str, Tuple[str, type]],
         prepare_custom_config_dict: Optional[Dict[str, Any]] = None,
         equalization_qconfig_dict: Optional[Dict[str, Any]] = None,
+        backend_config_dict: Optional[Dict[str, Any]] = None,
         is_standalone_module: bool = False) -> ObservedGraphModule:
     """ standalone_module means it a submodule that is not inlined in
     parent module, and will be quantized separately as one unit.
@@ -1139,6 +1142,10 @@ def prepare(
         prepare_custom_config_dict = {}
     if equalization_qconfig_dict is None:
         equalization_qconfig_dict = {}
+    if backend_config_dict is None:
+        backend_config_dict = get_fbgemm_backend_config_dict()
+
+    validate_backend_config_dict(backend_config_dict)
 
     additional_quant_patterns = \
         prepare_custom_config_dict.get("additional_quant_pattern", {})
@@ -1152,8 +1159,9 @@ def prepare(
     #   ((<function relu at 0x7f766a7360d0>, <built-in function add>):
     #     <class 'torch.quantization.fx.quantize.Add'>),
     # }
+    quant_patterns = backend_config_dict["quant_patterns"]
     patterns: Dict[Pattern, QuantizeHandler] = get_combined_dict(
-        get_default_quant_patterns(), additional_quant_patterns)
+        quant_patterns, additional_quant_patterns)
 
     convert_dict_to_ordered_dict(qconfig_dict)
     convert_dict_to_ordered_dict(equalization_qconfig_dict)
