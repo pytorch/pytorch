@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/tensorexpr/eval.h>
 
+#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/tensorexpr/external_functions_registry.h>
 
 #include <c10/util/irange.h>
@@ -75,10 +76,13 @@ class SimpleIREvaluatorImpl : public IRVisitor {
   ~SimpleIREvaluatorImpl() override = default;
 
   void bindBuf(BufPtr buf, void* ptr) {
+    GRAPH_DEBUG("Binding ptr ", ptr, " with buf ", buf->name_hint());
     buffer_mapping_[buf] = ptr;
   }
   void bindVar(VarPtr var, const Value& val) {
     eval_context_[var] = val;
+    GRAPH_DEBUG(
+        "Binding value ", val.intValue(), " with var ", var->name_hint());
   }
 
   Value evaluateExpr(ExprPtr e) {
@@ -661,11 +665,20 @@ class SimpleIREvaluatorImpl : public IRVisitor {
 #define TYPE_CASE(Type, Name)                        \
   case ScalarType::Name: {                           \
     Type* ptr##Name = static_cast<Type*>(ptr);       \
-    std::vector<Type> v(index.size());               \
+    std::vector<Type> val(index.size());             \
     for (const auto i : c10::irange(index.size())) { \
-      v[i] = ptr##Name[index[i]];                    \
+      val[i] = ptr##Name[index[i]];                  \
+      GRAPH_DEBUG(                                   \
+          "LOAD: ptr=",                              \
+          ptr##Name,                                 \
+          ", buf=",                                  \
+          v->buf()->name_hint(),                     \
+          ", idx=",                                  \
+          index[i],                                  \
+          ", val=",                                  \
+          (int)val[i]);                              \
     }                                                \
-    value_ = Value(v);                               \
+    value_ = Value(val);                             \
   } break;
       AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TYPE_CASE);
 #undef TYPE_CASE
@@ -697,6 +710,15 @@ class SimpleIREvaluatorImpl : public IRVisitor {
     }                                                           \
     Type* ptr##Name = static_cast<Type*>(ptr);                  \
     for (const auto i : c10::irange(index.size())) {            \
+      GRAPH_DEBUG(                                              \
+          "STORE: ptr=",                                        \
+          ptr##Name,                                            \
+          ", buf=",                                             \
+          v->buf()->name_hint(),                                \
+          ", idx=",                                             \
+          index[i],                                             \
+          ", val=",                                             \
+          (int)value[i]);                                       \
       ptr##Name[index[i]] = value[i];                           \
     }                                                           \
   } break;
@@ -1062,6 +1084,16 @@ void SimpleIREvaluator::bindVar(VarPtr v, ExprPtr e) {
 Value SimpleIREvaluator::value() const {
   return impl_->value();
 }
+
+c10::optional<int64_t> evalInt(ExprPtr e) {
+  try {
+    return ExprEval<SimpleIREvaluator>(cast<int64_t>(ExprHandle(e)))
+        .value<int64_t>();
+  } catch (std::runtime_error& err) {
+    return c10::nullopt;
+  }
+}
+
 } // namespace tensorexpr
 } // namespace jit
 } // namespace torch

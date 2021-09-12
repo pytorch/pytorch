@@ -2320,9 +2320,24 @@ class TestIndividualWorkerQueue(TestCase):
                 current_worker_idx = 0
 
     def test_ind_worker_queue(self):
+        max_num_workers = None
+        if hasattr(os, 'sched_getaffinity'):
+            try:
+                max_num_workers = len(os.sched_getaffinity(0))
+            except Exception:
+                pass
+        if max_num_workers is None:
+            cpu_count = os.cpu_count()
+            if cpu_count is not None:
+                # Use half number of CPUs
+                max_num_workers = cpu_count // 2
+
+        if max_num_workers is None:
+            max_num_workers = 1
+
         for batch_size in (8, 16, 32, 64):
-            for num_workers in range(1, 6):
-                self._run_ind_worker_queue_test(batch_size=batch_size, num_workers=num_workers)
+            for num_workers in range(0, min(6, max_num_workers)):
+                self._run_ind_worker_queue_test(batch_size=batch_size, num_workers=num_workers + 1)
 
 
 class SetAffinityDataset(IterableDataset):
