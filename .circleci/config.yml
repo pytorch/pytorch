@@ -1840,7 +1840,6 @@ jobs:
             cd ${PROJ_ROOT}/ios/TestApp
             instruments -s -devices
             if [ ${BUILD_LITE_INTERPRETER} == 1 ]; then
-              fastlane scan --only_testing TestAppTests/TestAppTests/testLiteInterpreter
               if [ ${USE_PYTORCH_METAL} == 1 ]; then
                 fastlane scan --only_testing TestAppTests/TestAppTests/testMetal
               else
