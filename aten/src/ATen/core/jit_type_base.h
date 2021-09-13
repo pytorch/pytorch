@@ -128,6 +128,10 @@ struct TORCH_API Type : std::enable_shared_from_this<Type> {
     return kind_;
   }
 
+  bool isUnionType() const {
+    return false;
+  }
+
   virtual bool requires_grad() const {
     for (const auto& ct : containedTypes()) {
       if (ct->requires_grad()) {
