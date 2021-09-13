@@ -536,10 +536,11 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
        ${TORCH_SRC_DIR}/csrc/jit/mobile/function.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/import.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/import_data.cpp
+       ${TORCH_SRC_DIR}/csrc/jit/mobile/interpreter.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/model_compatibility.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/module.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/observer.cpp
-       ${TORCH_SRC_DIR}/csrc/jit/mobile/interpreter.cpp
+       ${TORCH_SRC_DIR}/csrc/jit/mobile/parse_bytecode.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/train/export_data.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/train/optim/sgd.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/train/random.cpp
@@ -573,6 +574,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/jit/codegen/fuser/cpu/fused_kernel.cpp
       ${TORCH_SRC_DIR}/csrc/jit/api/module_save.cpp
       ${TORCH_SRC_DIR}/csrc/utils/byte_order.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/mobile/prim_ops_registery.cpp
     )
 
     # Disable legacy import of building without Caffe2 support

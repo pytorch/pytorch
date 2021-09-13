@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/mobile/prim_ops_registery.h>
 #include <torch/csrc/jit/runtime/vararg_functions.h>
+#include <torch/csrc/jit/mobile/promoted_prim_ops.h>
 
 namespace torch {
 namespace jit {
@@ -30,7 +31,9 @@ std::function<void(Stack&)>& getPrimOpsFn(const std::string& name) {
   return primOpsFnTable()[name];
 }
 
-registerPrimOpsFunction("prim::TupleIndex", tupleIndex);
+void add_functions() {
+  registerPrimOpsFunction("prim::TupleIndex", tupleIndex);
+}
 
 } // namespace mobile
 } // namespace jit

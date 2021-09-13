@@ -11,12 +11,14 @@ namespace mobile {
 using Stack = std::vector<c10::IValue>;
 
 void registerPrimOpsFunction(
-    const std::string name,
-    const std::function<void(Stack&)> fn);
+    const std::string& name,
+    const std::function<void(Stack&)>& fn);
 
 bool hasPrimOpsFn(const std::string& name);
 
 std::function<void(Stack&)>& getPrimOpsFn(const std::string& name);
+
+void add_functions();
 
 } // namespace mobile
 } // namespace jit

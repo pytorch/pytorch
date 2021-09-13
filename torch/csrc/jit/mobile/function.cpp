@@ -4,8 +4,6 @@
 #include <torch/csrc/jit/mobile/interpreter.h>
 #include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/csrc/jit/runtime/operator.h>
-#include <torch/csrc/jit/runtime/vararg_functions.h>
-#include <torch/custom_class_detail.h>
 
 namespace torch {
 namespace jit {
@@ -53,8 +51,6 @@ bool Function::append_operator(
   const auto& opname_c10 = opname;
   std::function<void(Stack&)> fn;
 
-  hasPrimOpsFn("prim::TupleIndex");
-
   auto it = operator_cache.find(opname);
   if (it != operator_cache.end()) {
     // Operator (with fully qualified name) was found in the cache.
@@ -69,7 +65,12 @@ bool Function::append_operator(
 
   auto jit_op = findOperatorFor(opname);
   const std::vector<c10::Argument>* pArgs = nullptr;
-  if (jit_op) {
+  if (mobile::hasPrimOpsFn(name)) {
+    fn = mobile::getPrimOpsFn(name);
+    Operator op = Operator(name, fn, c10::AliasAnalysisKind::INTERNAL_SPECIAL_CASE);
+    pArgs = &op.schema().arguments();
+  }
+  else if (jit_op) {
     fn = [jit_op](Stack& stack) { jit_op->getOperation()(stack); };
     pArgs = &jit_op->schema().arguments();
   } else {

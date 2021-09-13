@@ -1,6 +1,5 @@
 #include <c10/util/Optional.h>
 #include <c10/util/irange.h>
-#include <torch/csrc/jit/mobile/prim_ops_registery.h>
 #include <torch/csrc/jit/runtime/custom_operator.h>
 #include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/jit/runtime/register_ops_utils.h>
@@ -3127,8 +3126,6 @@ static const OperatorGeneratorArgs opGenArgs2[] = {
 
 RegisterOperators reg2(
     createOperators(opGenArgs2, sizeof(opGenArgs2) / sizeof(opGenArgs2[0])));
-
-registerPrimOpsFunction("prim::TupleIndex", tupleIndex);
 
 } // namespace
 } // namespace jit
