@@ -450,13 +450,24 @@ class TestDataFramesPipes(TestCase):
     def test_unbatch(self):
         df_numbers = self._get_dataframes_pipe(range=100).batch(8).batch(3)
         dp_numbers = self._get_datapipe(range=100)
-        self.assertEqual(list(dp_numbers), list(df_numbers.unbatch(2)))
+        df_numbers = df_numbers.unbatch(2)
+        self.assertEqual(list(dp_numbers), list(df_numbers))
 
     @skipIfNoDataFrames
     @skipIfNoDill
     def test_filter(self):
         df_numbers = self._get_dataframes_pipe(range=10).filter(lambda x: x.i > 5)
         self.assertEqual([(6, 0), (7, 1), (8, 2), (9, 0)], list(df_numbers))
+
+    def _test_contains_dataframe(self):
+        df_numbers = self._get_dataframes_pipe(range=10)
+        self.assertTrue(df_numbers._dp_contains_dataframe)
+        self.assertEqual(bool, type(df_numbers._dp_contains_dataframe))
+        dp_numbers = self._get_datapipe(range=100)
+        self.assertFalse(dp_numbers._dp_contains_dataframe)
+        df_numbers = df_numbers.batch(10).unbatch(-1)
+        self.assertTrue(df_numbers._dp_contains_dataframe)
+        self.assertEqual(bool, type(df_numbers._dp_contains_dataframe))
 
 class FileLoggerSimpleHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
     def __init__(self, *args, logfile=None, **kwargs):

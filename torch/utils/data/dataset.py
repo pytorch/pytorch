@@ -97,6 +97,14 @@ class Dataset(Generic[T_co]):
                 if enable_df_api_tracing or isinstance(source_dp, DFIterDataPipe):
                     if function_name not in UNTRACABLE_DATAFRAME_PIPES:
                         result_pipe = result_pipe.trace_as_dataframe()
+                        result_pipe._dp_contains_dataframe = True
+                elif getattr(source_dp, '_dp_contains_dataframe', False):
+                    if function_name not in UNTRACABLE_DATAFRAME_PIPES:
+                        print('want to trace', result_pipe)
+                        print('of depth ', getattr(result_pipe, '_dp_nesting_depth', None))
+                        if getattr(result_pipe, '_dp_nesting_depth', 0) == 0:
+                            result_pipe = result_pipe.trace_as_dataframe()
+                            result_pipe._dp_contains_dataframe = True
 
             return result_pipe
 
