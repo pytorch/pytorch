@@ -72,6 +72,7 @@ from torch.distributed.elastic.multiprocessing.api import (  # noqa: F401
     ProcessFailure,
     RunProcsResult,
     Std,
+    SignalException,
     SubprocessContext,
     _validate_full_rank,
     to_map,

@@ -214,6 +214,23 @@ public:
     );
   }
 
+  /// Create a function from a boxed kernel functor which defines
+  /// `operator()(const OperatorHandle&, DispatchKeySet, Stack*)`
+  /// (receiving arguments from boxed calling convention) and inherits
+  /// from `c10::OperatorKernel`.  Unlike makeFromBoxedFunction, functions
+  /// registered in this way can also carry additional state which
+  /// is managed by the functor; this is useful if you're writing an
+  /// adapter to some other implementation, e.g., a Python callable, which
+  /// is dynamically associated with the registered kernel.
+  template<class KernelFunctor>
+  static CppFunction makeFromBoxedFunctor(std::unique_ptr<KernelFunctor> kernelFunctor) {
+    return CppFunction(
+      c10::KernelFunction::makeFromBoxedFunctor(std::move(kernelFunctor)),
+      /* cpp_signature */ c10::nullopt, // not known for boxed functions
+      /* schema */ nullptr
+    );
+  }
+
   /// Create a function from an unboxed kernel function.
   /// This is typically used to register common operators.
   template<typename FuncPtr, std::enable_if_t<c10::guts::is_function_type<FuncPtr>::value, std::nullptr_t> = nullptr>
@@ -292,14 +309,16 @@ inline CppFunction dispatch(c10::DeviceType type, Func&& raw_f) {
         return c10::DispatchKey::CUDA;
       case c10::DeviceType::XLA:
         return c10::DispatchKey::XLA;
+      case c10::DeviceType::Lazy:
+        return c10::DispatchKey::Lazy;
       case c10::DeviceType::MLC:
         return c10::DispatchKey::MLC;
       case c10::DeviceType::Meta:
         return c10::DispatchKey::Meta;
       case c10::DeviceType::HIP:
         return c10::DispatchKey::HIP;
-      case c10::DeviceType::MSNPU:
-        return c10::DispatchKey::MSNPU;
+      case c10::DeviceType::ORT:
+        return c10::DispatchKey::ORT;
       case c10::DeviceType::HPU:
         return c10::DispatchKey::HPU;
       default:

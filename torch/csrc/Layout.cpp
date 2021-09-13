@@ -27,14 +27,12 @@ PyObject *THPLayout_repr(THPLayout *self)
   return THPUtils_packString(self->name);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 PyTypeObject THPLayoutType = {
   PyVarObject_HEAD_INIT(nullptr, 0)
   "torch.layout",                        /* tp_name */
   sizeof(THPLayout),                     /* tp_basicsize */
   0,                                     /* tp_itemsize */
   nullptr,                               /* tp_dealloc */
-  // NOLINTNEXTLINE(modernize-use-nullptr)
   0,                                     /* tp_vectorcall_offset */
   nullptr,                               /* tp_getattr */
   nullptr,                               /* tp_setattr */

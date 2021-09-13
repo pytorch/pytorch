@@ -1,3 +1,4 @@
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/passes/onnx/constant_map.h>
 
 #include <torch/csrc/jit/jit_log.h>
@@ -139,7 +140,7 @@ std::vector<int64_t> ConstantValueMap::GetValueInto1DInt64Vector(
   std::vector<int64_t> value_vector;
   value_vector.reserve(value_int64_t.size(0));
   auto value_size_a = value_int64_t.accessor<int64_t, 1>();
-  for (auto i = 0; i < value_int64_t.size(0); i++) {
+  for (const auto i : c10::irange(value_int64_t.size(0))) {
     value_vector.emplace_back(static_cast<int64_t>(value_size_a[i]));
   }
   return value_vector;

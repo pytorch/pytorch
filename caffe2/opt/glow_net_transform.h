@@ -35,7 +35,8 @@ void onnxifi(
     const std::unordered_map<int, ShapeInfoMap> &shape_hints_per_bs = {},
     const c10::optional<std::string> &blacklist_ops = c10::nullopt,
     const c10::optional<size_t> &min_ops = c10::nullopt,
-    const std::unordered_set<std::string> &blocklist_blobs = {});
+    const std::unordered_set<std::string> &blocklist_blobs = {},
+    const c10::optional<bool> & verify_only_single_subnet = c10::nullopt);
 
 std::unordered_set<int> ParseNetPositionList(const std::string& str);
 std::unordered_set<std::string> ParseBlockListOps(const std::string& str);

@@ -184,14 +184,12 @@ static PyMethodDef THPDevice_methods[] = {
   {nullptr}  /* Sentinel */
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 PyTypeObject THPDeviceType = {
   PyVarObject_HEAD_INIT(nullptr, 0)
   "torch.device",                        /* tp_name */
   sizeof(THPDevice),                     /* tp_basicsize */
   0,                                     /* tp_itemsize */
   nullptr,                               /* tp_dealloc */
-  // NOLINTNEXTLINE(modernize-use-nullptr)
   0,                                     /* tp_vectorcall_offset */
   nullptr,                               /* tp_getattr */
   nullptr,                               /* tp_setattr */

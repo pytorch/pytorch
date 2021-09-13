@@ -20,14 +20,11 @@
 
 namespace caffe2 {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(SoftmaxFocalLoss, SoftmaxFocalLossOp<float, CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     SoftmaxFocalLossGradient,
     SoftmaxFocalLossGradientOp<float, CPUContext>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SoftmaxFocalLoss)
     .NumInputs(3)
     .NumOutputs(2)
@@ -78,7 +75,6 @@ See: https://arxiv.org/abs/1708.02002 for details.
         "C = num_anchors * num_classes, and softmax was applied to each of the "
         "num_anchors groups; within a group the num_classes values sum to 1.");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SoftmaxFocalLossGradient)
     .NumInputs(5)
     .NumOutputs(1)
@@ -103,7 +99,6 @@ class GetSoftmaxFocalLossGradient : public GradientMakerBase {
   }
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(SoftmaxFocalLoss, GetSoftmaxFocalLossGradient);
 
 } // namespace caffe2

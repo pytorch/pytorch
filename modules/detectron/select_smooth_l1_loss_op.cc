@@ -18,16 +18,13 @@
 
 namespace caffe2 {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     SelectSmoothL1Loss,
     SelectSmoothL1LossOp<float, CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     SelectSmoothL1LossGradient,
     SelectSmoothL1LossGradientOp<float, CPUContext>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SelectSmoothL1Loss)
     .NumInputs(4)
     .NumOutputs(1)
@@ -66,7 +63,6 @@ tensor that encodes bounding box regression predictions.
         "loss",
         "Scalar loss.");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SelectSmoothL1LossGradient)
     .NumInputs(5)
     .NumOutputs(1)
@@ -106,7 +102,6 @@ class GetSelectSmoothL1LossGradient : public GradientMakerBase {
   }
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(SelectSmoothL1Loss, GetSelectSmoothL1LossGradient);
 
 } // namespace caffe2

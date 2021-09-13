@@ -6,11 +6,9 @@
 
 namespace caffe2 {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(Int8FC, int8::Int8FCOp);
 
 using namespace std::placeholders;
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Int8FC)
     .NumInputs(3, 4)
     .NumOutputs(1, 4)

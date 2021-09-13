@@ -13,11 +13,15 @@ namespace jit {
 
 namespace {
 
+C10_ALWAYS_INLINE std::string debugHandlesNotFoundMessage(
+    const std::string& debug_handles_string) {
+  return "Debug info for handle(s): " + debug_handles_string +
+      ", was not found.";
+}
+
 std::pair<std::vector<StackEntry>, std::string> getStackTraceWithModuleHierarchy(
     const DebugInfoTuple& source_callstack,
     const std::string& caller_name) {
-  constexpr size_t kSourceRange = 1;
-  constexpr size_t kModuleInstanceInfo = 2;
   std::vector<StackEntry> entries;
 
   const SourceRange& range =
@@ -35,35 +39,28 @@ std::pair<std::vector<StackEntry>, std::string> getStackTraceWithModuleHierarchy
       const auto& opt_module_instance_info = callstack_ptr->module_instance();
       if (opt_module_instance_info.has_value()) {
         const auto& module_instance_info = opt_module_instance_info.value();
+        // Sometimes (e.g., in lowered backends) we augment instance name with
+        // type name instead of losing type name. In those cases instance_name
+        // includes both instance name and type name. See
+        // callstack_debug_info_serialization.cpp
         if (module_instance_info.class_type()) {
-          const auto& class_type = module_instance_info.class_type();
-          const auto& instance_name = module_instance_info.instance_name();
-          auto type_name = class_type->name()->qualifiedName();
-          type_name = type_name.substr(type_name.find_last_of('.') + 1);
-          module_info.append(".")
-              .append(instance_name)
-              .append("(")
-              .append(type_name)
-              .append(")");
-        } else if (!module_instance_info.instance_name().empty()) {
-          module_info += "." + module_instance_info.instance_name();
+          module_info.append(".").append(
+              utils::get_module_info(module_instance_info));
         } else {
-          const auto& instance_name = module_instance_info.instance_name();
-          module_info += "." + instance_name + "(UNKNOWN_TYPE)";
+          module_info.append(".").append(module_instance_info.instance_name());
         }
       } else {
-        module_info += ".(UNKNOWN_INSTANCE(UNKNOWN_TYPE)";
+        module_info.append(".UNKNOWN_INSTANCE(UNKNOWN_TYPE)");
       }
       // Now add source range info to stack
-      // When we serialize function names, those can be added here.
-      // TODO: Add function name separately
       entries.emplace_back(
           StackEntry{prev_function_name, callstack_ptr->source_range()});
-      if (callstack_ptr->function()) {
-        prev_function_name = callstack_ptr->function()->name();
-      } else {
-        prev_function_name = callstack_ptr->function_name();
-      }
+      prev_function_name = callstack_ptr->function_name();
+      // Function name appended here
+      // It is renamed to prev_function_name because for StackEntry
+      // it will be appended in the next iteration. This is the format
+      // in which format_stack_trace expects function names.
+      module_info.append("::").append(prev_function_name);
 
       if (callstack_ptr->callee()) {
         callstack_ptr = callstack_ptr->callee().value();
@@ -90,20 +87,21 @@ std::pair<std::string, std::string> getStackTraceWithModuleHierarchy(
   std::vector<StackEntry> stack_entries;
   std::string module_info =
       root_scope_string + "(" + top_module_type_name + ")";
-  std::string caller_fn_name = "FunctionName_UNKNOWN";
+  std::string caller_fn_name = "<unknown>";
+  module_info.append("::").append(caller_fn_name);
   for (const auto& debug_info : source_callstacks) {
     auto debug_info_pair =
         getStackTraceWithModuleHierarchy(debug_info, caller_fn_name);
     auto entries = std::move(debug_info_pair.first);
     stack_entries.insert(stack_entries.end(), entries.begin(), entries.end());
-    module_info += debug_info_pair.second;
+    module_info.append(debug_info_pair.second);
   }
   // Only last entry in the callstack will have a node name of interest.
   // Rest are likely CallMethod/CallFunction nodes
   auto last_entry = source_callstacks.back();
   const std::string& node_name =
       std::get<kDebugInfoTupleNodeNameIndex>(last_entry);
-  module_info += "." + node_name;
+  module_info.append(".").append(node_name);
   std::ostringstream ss;
   ss << "Module hierarchy:" << module_info << "\n";
   format_stack_trace(ss, stack_entries);
@@ -124,13 +122,14 @@ MobileDebugTable::MobileDebugTable(
       size_t debug_size{0};
       std::tie(debug_data, debug_size) = reader->getRecord(record_name);
       auto ivalues =
-          jit::unpickle(
-              reinterpret_cast<const char*>(debug_data.get()), debug_size)
-              .toTuple()
-              ->elements();
+          std::move(
+              *jit::unpickle(
+                   reinterpret_cast<const char*>(debug_data.get()), debug_size)
+                   .toTuple())
+              .elements();
       SourceRangeDeserializer deserializer;
       for (auto& val : ivalues) {
-        auto tup_elems = val.toTuple()->elements();
+        auto tup_elems = std::move(*std::move(val).toTuple()).elements();
         // For BC we decode only tuples with 3 elements
         // assuming it contains
         // byte_offset, debug_handle (=source range tag), source range
@@ -160,8 +159,7 @@ std::string MobileDebugTable::getModuleHierarchyInfo(
     const std::string& top_module_type_name) const {
   const auto it = callstack_ptr_map_.find(debug_handle);
   if (it == callstack_ptr_map_.end()) {
-    return "Module info for handle, " + std::to_string(debug_handle) +
-        ", not found.";
+    return debugHandlesNotFoundMessage(std::to_string(debug_handle));
   }
   return (getStackTraceWithModuleHierarchy(
               {it->second}, "top", top_module_type_name))
@@ -180,8 +178,7 @@ std::string MobileDebugTable::getSourceDebugString(
     const std::string& top_module_type_name) const {
   const auto it = callstack_ptr_map_.find(debug_handle);
   if (it == callstack_ptr_map_.end()) {
-    return "Debug info for handle, " + std::to_string(debug_handle) +
-        ", not found.";
+    return debugHandlesNotFoundMessage(std::to_string(debug_handle));
   }
   return (getStackTraceWithModuleHierarchy(
               {it->second}, "top", top_module_type_name))
@@ -216,8 +213,7 @@ std::pair<std::string, std::string> MobileDebugTable::
       debug_handles_string += std::to_string(debug_handle);
     }
     debug_handles_string += "}";
-    debug_handles_string =
-        "Debug info for handles: " + debug_handles_string + ", was not found.";
+    debug_handles_string = debugHandlesNotFoundMessage(debug_handles_string);
     return {debug_handles_string, debug_handles_string};
   }
   return (getStackTraceWithModuleHierarchy(

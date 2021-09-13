@@ -83,6 +83,31 @@ native::SCATTER_GATHER_OP get_operator_enum(const c10::string_view reduce) {
   }
 }
 
+TORCH_META_FUNC(gather)
+(const Tensor & self, int64_t dim, const Tensor & index, bool sparse_grad) {
+  const Tensor& result = maybe_get_output(0);
+  int64_t wrapped_dim = at::maybe_wrap_dim(dim, self.dim());
+
+  // Memory overlap checks need to be done after resizing (if required) is done.
+  // But it only makes sense to do these checks when result was defined, hence
+  // the boolean variable `check_result` here.
+  // For more details, see: https://github.com/pytorch/pytorch/pull/63312#discussion_r694794832
+  // and https://github.com/pytorch/pytorch/issues/63837
+  bool check_result = result.defined();
+  set_output(index.sizes(), self.options());
+  if (check_result) {
+    at::assert_no_internal_overlap(result);
+    at::assert_no_overlap(result, self);
+    at::assert_no_partial_overlap(result, index);
+  }
+
+  TORCH_CHECK(
+    index.scalar_type() == at::ScalarType::Long,
+    "gather", "(): Expected dtype int64 for index"
+  );
+  at::native::gather_shape_check(self, wrapped_dim, index);
+}
+
 template <typename Meta>
 void scatter_meta_impl(
     Meta& meta,
@@ -148,42 +173,24 @@ TORCH_META_FUNC(scatter_add)
 
 namespace native {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(index_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(index_fill_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(index_copy_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(index_put_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(index_put_with_sort_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(put_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(take_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(masked_fill_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_NO_CPU_DISPATCH(index_put_with_sort_stub, index_put_with_sort_fn);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(masked_select_serial_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(masked_select_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(masked_scatter_stub);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(gather_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(scatter_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(scatter_fill_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(scatter_add_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(scatter_reduce_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(scatter_scalar_reduce_stub);
 
 static bool all_strides_match(TensorList tensors) {
@@ -283,12 +290,44 @@ AdvancedIndex::AdvancedIndex(const Tensor& src, TensorList indices_list)
   // simplify the CUDA kernel.
   if (indices.size() >= 2 && this->src.device().type() == kCUDA) {
     if (!all_strides_match(indices)) {
-      // NOLINTNEXTLINE(modernize-loop-convert)
-      for (size_t i = 0; i < indices.size(); i++) {
-        indices[i] = indices[i].contiguous();
+      for (auto & indice : indices) {
+        indice = indice.contiguous();
       }
     }
   }
+}
+
+static std::tuple<bool, Tensor> canDispatchToMaskedFill(const Tensor& self, const torch::List<c10::optional<at::Tensor>>& indices,
+const Tensor& value){
+  if (!(value.numel() ==1 && value.device().is_cpu())){
+    return std::make_tuple(false,Tensor());
+  }
+  int64_t num_ind = 0;
+  Tensor mask;
+  auto self_device = self.device();
+  for (const c10::optional<Tensor> i: indices) {
+    if (!i.has_value() || !(*i).defined()){
+      num_ind++;
+    } else {
+      Tensor index = std::move(*i);
+      if ((index.scalar_type() != kByte && index.scalar_type() != kBool) ||
+          index.device() != self_device || mask.defined()){
+        return std::make_tuple(false, Tensor());
+      } else {
+        mask = index;
+        for (int64_t j = 0; j < index.dim(); j++) {
+          int64_t srcIdx = num_ind + j;
+          TORCH_CHECK_INDEX(index.size(j) == self.size(srcIdx), "The shape of the mask ", index.sizes(), " at index ", j,
+  " does not match the shape of the indexed tensor ", self.sizes(), " at index ", srcIdx);
+        }
+        num_ind += mask.ndimension();
+      }
+    }
+  }
+  for (int64_t i = num_ind; i< self.ndimension(); i++){
+    mask = mask.unsqueeze(-1);
+  }
+  return std::make_tuple(true, mask);
 }
 
 static AdvancedIndex make_info(Tensor self, const torch::List<c10::optional<at::Tensor>>& orig) {
@@ -312,10 +351,9 @@ static AdvancedIndex make_info(Tensor self, const torch::List<c10::optional<at::
     std::tie(self, indices) = transposeToFront(self, indices);
   }
   // Ensure indices are on the same device as self
-  // NOLINTNEXTLINE(modernize-loop-convert)
-  for (size_t i = 0; i < indices.size(); i++) {
-    if (indices[i].defined() && indices[i].device() != self.device()) {
-      indices[i] = indices[i].to(self.device());
+  for (auto & indice : indices) {
+    if (indice.defined() && indice.device() != self.device()) {
+      indice = indice.to(self.device());
     }
   }
   return AdvancedIndex(self, indices);
@@ -472,6 +510,16 @@ Tensor & _index_put_impl_(Tensor & self, const torch::List<c10::optional<Tensor>
       "Please clone() the tensor before performing this operation. "
       "This also applies to advanced indexing e.g. tensor[indices] = tensor");
   }
+  if (!accumulate) {
+    auto masked_fill_dispatch = canDispatchToMaskedFill(self, indices, value);
+    if (std::get<0>(masked_fill_dispatch)) {
+      return self.masked_fill_(std::get<1>(masked_fill_dispatch), value.item());
+    }
+  }
+  auto value_ = value;
+  if (value.device() != self.device() && value.numel() == 1 && value.dim() == 0) {
+    value_ = value.to(self.device());
+  }
   at::assert_no_overlap(self, value);
   // NOLINTNEXTLINE(performance-implicit-conversion-in-loop)
   for (const c10::optional<Tensor>& index: indices) {
@@ -479,16 +527,15 @@ Tensor & _index_put_impl_(Tensor & self, const torch::List<c10::optional<Tensor>
       at::assert_no_overlap(self, *index);
     }
   }
-
   if (self.device().type() == DeviceType::CUDA && (accumulate || globalContext().deterministicAlgorithms())) {
-      TORCH_CHECK(value.device() == self.device(), "expected device ", self.device(), " but got device ",
-      value.device(), " for value tensor");
-      index_put_with_sort_stub(self.device().type(), self, indices, value, accumulate, unsafe);
+      TORCH_CHECK(value_.device() == self.device(), "expected device ", self.device(), " but got device ",
+      value_.device(), " for value tensor");
+      index_put_with_sort_stub(self.device().type(), self, indices, value_, accumulate, unsafe);
       return self;
   }
 
   auto info = make_info(self, indices);
-  auto iter = make_index_put_iterator(info, value);
+  auto iter = make_index_put_iterator(info, value_);
   index_put_stub(iter.device_type(), iter, info.indexed_sizes, info.indexed_strides, accumulate);
   return self;
 }
@@ -847,7 +894,14 @@ Tensor & index_select_out_cpu_(const Tensor & self, int64_t dim, const Tensor & 
   if (self.dim() > 0) {
     result_size[dim] = numel;
   }
-  at::native::resize_output(result, result_size);
+  if (self.is_quantized()) {
+    TORCH_CHECK(
+        self.qscheme() == kPerTensorAffine,
+        "Only per_tensor quantized quantized tensors are supported by index_select.")
+    result = at::empty_quantized(result_size, result);
+  } else {
+    at::native::resize_output(result, result_size);
+  }
 
   auto index_contig = index.contiguous();
 
@@ -934,32 +988,61 @@ Tensor & index_select_out_cpu_(const Tensor & self, int64_t dim, const Tensor & 
     TORCH_CHECK(result.dim() <= 1, "result.dim() (", result.dim(), ") must one or zero for given self.dim() (", self.dim(), ")");
     // explicitly capture all required variables to work around windows build
     // TODO: fix this when windows can correctly capture variables in nested lambda
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16,
-      self.scalar_type(), "index_select", [&index_contig, &self, &result, &dim, &numel] {
-      auto self_stride = self.dim() == 0 ? 1 : self.stride(dim);
-      auto result_stride = result.dim() == 0 ? 1 : result.stride(dim);
+    if(self.is_quantized()){
+      AT_DISPATCH_QINT_TYPES(self.scalar_type(), "index_select_quant", [&index_contig, &self, &result, &dim, &numel] {
+        auto self_stride = self.dim() == 0 ? 1 : self.stride(dim);
+        auto result_stride = result.dim() == 0 ? 1 : result.stride(dim);
 
-      auto self_data_ptr = self.data_ptr<scalar_t>();
-      auto result_data_ptr = result.data_ptr<scalar_t>();
-      auto self_numel = self.numel();
-      AT_DISPATCH_INDEX_TYPES(index_contig.scalar_type(), "index_select_out_cpu_",
-        [&index_contig, &numel, &self_numel, &self_data_ptr, &self_stride, &result_data_ptr, &result_stride] {
-        auto index_data = index_contig.data_ptr<index_t>();
-        for (auto i = 0; i < numel; i++) {
-          auto self_i = index_data[i];
-          TORCH_CHECK_INDEX((self_i >= 0) && (self_i < self_numel), "index out of range in self");
-          scalar_t *self_ip = self_data_ptr + self_i * self_stride;
-          *(result_data_ptr + i * result_stride) = *self_ip;
-        }
+        auto self_data_ptr = self.data_ptr<scalar_t>();
+        auto result_data_ptr = result.data_ptr<scalar_t>();
+        auto self_numel = self.numel();
+        AT_DISPATCH_INDEX_TYPES(index_contig.scalar_type(), "index_select_out_cpu_quant_",
+          [&index_contig, &numel, &self_numel, &self_data_ptr, &self_stride, &result_data_ptr, &result_stride] {
+          auto index_data = index_contig.data_ptr<index_t>();
+          for (auto i = 0; i < numel; i++) {
+            auto self_i = index_data[i];
+            TORCH_CHECK_INDEX((self_i >= 0) && (self_i < self_numel), "index out of range in self");
+            scalar_t *self_ip = self_data_ptr + self_i * self_stride;
+            *(result_data_ptr + i * result_stride) = *self_ip;
+          }
+        });
       });
-    });
+    } else {
+      AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16,
+        self.scalar_type(), "index_select", [&index_contig, &self, &result, &dim, &numel] {
+        auto self_stride = self.dim() == 0 ? 1 : self.stride(dim);
+        auto result_stride = result.dim() == 0 ? 1 : result.stride(dim);
+
+        auto self_data_ptr = self.data_ptr<scalar_t>();
+        auto result_data_ptr = result.data_ptr<scalar_t>();
+        auto self_numel = self.numel();
+        AT_DISPATCH_INDEX_TYPES(index_contig.scalar_type(), "index_select_out_cpu_",
+          [&index_contig, &numel, &self_numel, &self_data_ptr, &self_stride, &result_data_ptr, &result_stride] {
+          auto index_data = index_contig.data_ptr<index_t>();
+          for (auto i = 0; i < numel; i++) {
+            auto self_i = index_data[i];
+            TORCH_CHECK_INDEX((self_i >= 0) && (self_i < self_numel), "index out of range in self");
+            scalar_t *self_ip = self_data_ptr + self_i * self_stride;
+            *(result_data_ptr + i * result_stride) = *self_ip;
+          }
+        });
+      });
+    }
   }
 
   return result;
 }
 
 Tensor index_select_cpu_(const Tensor & self, int64_t dim, const Tensor & index) {
-  Tensor result = at::empty({0}, self.options());
+  Tensor result;
+  if (self.is_quantized()) {
+    TORCH_CHECK(
+        self.qscheme() == kPerTensorAffine,
+        "Only per_tensor quantized quantized tensors are supported by index_select.")
+    result = at::empty_quantized({0}, self);
+  } else {
+    result = at::empty({0}, self.options());
+  }
   return at::native::index_select_out_cpu_(self, dim, index, result);
 }
 
@@ -1054,23 +1137,12 @@ Tensor index_fill(const Tensor & self, int64_t dim, const Tensor & index, const 
   return self.clone(at::MemoryFormat::Preserve).index_fill_(dim, index, source);
 }
 
-Tensor& gather_out_cpu_cuda(
-    const Tensor& self,
-    int64_t dim,
-    const Tensor& index,
-    bool sparse_grad,
-    Tensor& result) {
-  at::native::resize_output(result, index.sizes());
-  at::assert_no_internal_overlap(result);
-  at::assert_no_overlap(result, self);
-  at::assert_no_partial_overlap(result, index);
+// gather_out_cpu_cuda
+TORCH_IMPL_FUNC(gather_out)
+(const Tensor& self, int64_t dim, const Tensor& index, bool sparse_grad, const Tensor& result) {
+  if (index.numel() == 0) return;
+  dim = at::maybe_wrap_dim(dim, self.dim());
   gather_stub(result.device().type(), result, self, dim, index);
-  return result;
-}
-
-Tensor gather(const Tensor & self, int64_t dim, const Tensor & index, bool sparse_grad) {
-  Tensor result = at::empty({0}, self.options());
-  return at::native::gather_out_cpu_cuda(self, dim, index, sparse_grad, result);
 }
 
 Tensor gather_backward(const Tensor& grad, const Tensor& self, int64_t dim, const Tensor& index, bool sparse_grad) {
@@ -1090,6 +1162,8 @@ void scatter_impl(
     ReduceStub& reduce_stub,
     FillStub& fill_stub,
     const c10::optional<c10::string_view> reduce = nullopt) {
+  if (index.numel() == 0) return;
+  dim = at::maybe_wrap_dim(dim, self.dim());
   auto mut_out = const_cast<Tensor&>(out);
 
   if (!self.is_same(mut_out)) {
@@ -1159,10 +1233,13 @@ TORCH_IMPL_FUNC(scatter_add)
  const Tensor& src,
  const Tensor& out) {
   auto mut_out = const_cast<Tensor&>(out);
+  dim = maybe_wrap_dim(dim, self.dim());
 
   if (!self.is_same(mut_out)) {
     mut_out.copy_(self);
   }
+
+  if (index.numel() == 0) return;
 
   if (globalContext().deterministicAlgorithms() && self.device().type() == DeviceType::CUDA && self.dim() == 1) {
     TORCH_CHECK(index.dim() == 1 && src.dim() == 1, "index and src should be 1D tensors when self is a 1D tensor, "

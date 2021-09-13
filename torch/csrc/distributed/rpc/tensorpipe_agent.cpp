@@ -16,12 +16,6 @@
 #include <c10/core/StreamGuard.h>
 #include <c10/util/irange.h>
 
-#if TENSORPIPE_HAS_SHM_TRANSPORT
-// Needed for ::getpid(), which is used to create a unique address.
-#include <sys/types.h>
-#include <unistd.h>
-#endif
-
 namespace torch {
 namespace distributed {
 namespace rpc {
@@ -157,11 +151,13 @@ void makeStreamsWaitOnOthers(
 
 } // namespace
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-C10_DEFINE_REGISTRY(TensorPipeTransportRegistry, TransportRegistration);
+C10_DEFINE_REGISTRY_WITHOUT_WARNING(
+    TensorPipeTransportRegistry,
+    TransportRegistration);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-C10_DEFINE_REGISTRY(TensorPipeChannelRegistry, ChannelRegistration);
+C10_DEFINE_REGISTRY_WITHOUT_WARNING(
+    TensorPipeChannelRegistry,
+    ChannelRegistration);
 
 const std::string& TensorPipeAgent::guessAddress() {
   static const std::string uvAddress = []() {
@@ -203,34 +199,20 @@ std::unique_ptr<TransportRegistration> makeUvTransport() {
 
 // The UV transport is implemented using standard TCP connections. It leverages
 // libuv (https://github.com/libuv/libuv) in order to be cross-platform.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_REGISTER_CREATOR(TensorPipeTransportRegistry, uv, makeUvTransport);
 
 #if TENSORPIPE_HAS_SHM_TRANSPORT
 
-std::string createUniqueShmAddr() {
-  thread_local uint32_t threadLocalId = 0;
-  return c10::str(
-      "shm://tensorpipe_rpc_agent_",
-      std::this_thread::get_id(),
-      "_",
-      ::getpid(),
-      "_",
-      threadLocalId++);
-}
-
 std::unique_ptr<TransportRegistration> makeShmTransport() {
   auto context = tensorpipe::transport::shm::create();
-  std::string address = createUniqueShmAddr();
-  return std::make_unique<TransportRegistration>(TransportRegistration{
-      std::move(context), kShmTransportPriority, std::move(address)});
+  return std::make_unique<TransportRegistration>(
+      TransportRegistration{std::move(context), kShmTransportPriority, ""});
 }
 
 // The SHM implements connections using ringbuffers residing in anonymous shared
 // memory (plus UNIX domain sockets to bootstrap the connection and exchange
 // file descriptors). It is Linux-only due to some advanced features (O_TMPFILE,
 // eventfd, ...).
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_REGISTER_CREATOR(TensorPipeTransportRegistry, shm, makeShmTransport);
 
 #endif // TENSORPIPE_HAS_SHM_TRANSPORT
@@ -249,7 +231,6 @@ std::unique_ptr<TransportRegistration> makeIbvTransport() {
 // issuing a RDMA write for transferring data across machines (plus a send for
 // acknowledging it). It bootstraps using a standard TCP connection to exchange
 // setup information. It is Linux-only.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_REGISTER_CREATOR(TensorPipeTransportRegistry, ibv, makeIbvTransport);
 
 #endif // TENSORPIPE_HAS_IBV_TRANSPORT
@@ -262,7 +243,6 @@ std::unique_ptr<ChannelRegistration> makeBasicChannel() {
 
 // The basic channel is just a straightforward adapter wrapper that allows any
 // transport to be used as a channel.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_REGISTER_CREATOR(TensorPipeChannelRegistry, basic, makeBasicChannel);
 
 #if TENSORPIPE_HAS_CMA_CHANNEL
@@ -278,7 +258,6 @@ std::unique_ptr<ChannelRegistration> makeCmaChannel() {
 // process (as long as they belong to the same user and other security
 // constraints are satisfied). It does, more or less, what GDB does when it's
 // attached to a running process.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_REGISTER_CREATOR(TensorPipeChannelRegistry, cma, makeCmaChannel);
 
 #endif // TENSORPIPE_HAS_CMA_CHANNEL
@@ -306,7 +285,6 @@ std::unique_ptr<ChannelRegistration> makeMultiplexedUvChannel() {
 // is split in equal chunks and each chunks is sent on a different connection
 // and thus driven by a different thread. This is needed to reach very high
 // bandwidths.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_REGISTER_CREATOR(
     TensorPipeChannelRegistry,
     mpt_uv,
@@ -1245,10 +1223,10 @@ void TensorPipeAgent::markFutureAsComplete(
                      message{std::move(message)},
                      streams{std::move(streams)}]() mutable {
       c10::MultiStreamGuard guard(streams);
-      std::vector<std::reference_wrapper<const at::DataPtr>> data_ptrs =
-          message->getDataPtrs();
+      std::vector<c10::weak_intrusive_ptr<c10::StorageImpl>> storages =
+          message->getStorages();
       atomicFuture->jitFuture->markCompleted(
-          std::move(message), std::move(data_ptrs));
+          std::move(message), std::move(storages));
       // The future's callbacks may schedule further RPCs, increasing the count.
       // Thus we must decrease it after completing the future, otherwise it may
       // briefly dip to zero and trick join into thinking all work is done.

@@ -7,28 +7,40 @@ from typing import Any, List, Tuple, Optional, Dict, Union
 
 import torch
 import torch.nn as nn
-from .utils import check_min_max_valid
+from .utils import check_min_max_valid, calculate_qmin_qmax
 
 
 class _PartialWrapper(object):
     def __init__(self, p):
         self.p = p
+        self.callable_args = {}
 
     def __call__(self, *args, **keywords):
+        # call each arg in callable_args and add them partial, then run with keywords
+        # skip if arg_name in keywords so its possible to overwrite
+        for arg_name in self.callable_args:
+            if arg_name not in keywords:
+                keywords = {**keywords, **{arg_name: self.callable_args[arg_name]()}}
         return self.p(*args, **keywords)
 
     def __repr__(self):
-        return self.p.__repr__()
+        return self.p.__repr__() + self.callable_args.__repr__()
 
     def with_args(self, **kwargs):
         return _with_args(self, **kwargs)
+
+    def with_callable_args(self, **kwargs):
+        result = _PartialWrapper(p=self.p)
+        result.callable_args = {**self.callable_args, **kwargs}
+        return result
 
 
 def _with_args(cls_or_self, **kwargs):
     r"""Wrapper that allows creation of class factories.
 
     This can be useful when there is a need to create classes with the same
-    constructor arguments, but different instances.
+    constructor arguments, but different instances. Can be used in conjunction with
+    _callable_args
 
     Example::
 
@@ -41,6 +53,28 @@ def _with_args(cls_or_self, **kwargs):
     """
     r = _PartialWrapper(partial(cls_or_self, **kwargs))
     return r
+
+def _with_callable_args(cls_or_self, **kwargs):
+    r"""Wrapper that allows creation of class factories args that need to be
+    called at construction time.
+
+    This can be useful when there is a need to create classes with the same
+    constructor arguments, but different instances and those arguments should only
+    be calculated at construction time. Can be used in conjunction with _with_args
+
+    Example::
+
+        >>> Foo.with_callable_args = classmethod(_with_callable_args)
+        >>> Foo.with_args = classmethod(_with_args)
+        >>> foo_builder = Foo.with_callable_args(cur_time=get_time_func).with_args(name="dan")
+        >>> foo_instance1 = foo_builder()
+        >>> wait 50
+        >>> foo_instance2 = foo_builder()
+        >>> id(foo_instance1.creation_time) == id(foo_instance2.creation_time)
+        False
+    """
+    r = _PartialWrapper(partial(cls_or_self))
+    return r.with_callable_args(**kwargs)
 
 
 ABC: Any = ABCMeta(str("ABC"), (object,), {})  # compatible with Python 2 *and* 3:
@@ -72,6 +106,7 @@ class ObserverBase(ABC, nn.Module):
         pass
 
     with_args = classmethod(_with_args)
+    with_callable_args = classmethod(_with_callable_args)
 
 
 class _ObserverBase(ObserverBase):
@@ -115,7 +150,9 @@ class _ObserverBase(ObserverBase):
     # Version 3
     #   for HistogramObserver only, changed the shape of uninitialized
     #   min_val and max_val buffers from torch.Size([0]) to torch.Size([])
-    _version = 2
+    #   for PerChannelObservers, changed the name of the buffers from min_vals
+    #   to min_val and from max_vals to max_val.
+    _version = 3
 
     eps: torch.Tensor
 
@@ -157,8 +194,8 @@ class _ObserverBase(ObserverBase):
         self.has_customized_qrange = (quant_min is not None) and (quant_max is not None)
         if self.has_customized_qrange:
             self._validate_qmin_qmax(quant_min, quant_max)
-        self.quant_min = quant_min
-        self.quant_max = quant_max
+        self.quant_min, self.quant_max = \
+            calculate_qmin_qmax(quant_min, quant_max, self.has_customized_qrange, self.dtype, self.reduce_range)
 
     def _load_from_state_dict(
         self,
@@ -213,51 +250,6 @@ class _ObserverBase(ObserverBase):
         ), "qmin must be strictly less than qmax for user-specified quantization range."
 
     @torch.jit.export
-    def _calculate_qmin_qmax(self) -> Tuple[int, int]:
-        r"""Calculates actual qmin and qmax based on the quantization range,
-        observer datatype and if range is reduced.
-        """
-        if self.has_customized_qrange:
-            # This initialization here is to be resolve TorchScript compilation issues and allow
-            # using of refinement to decouple initial_qmin and initial_qmax from quantization range.
-            # The actual values of initial_qmin and initial_qmax will be reset below.
-            initial_quant_min, initial_quant_max = 0, 255
-            # The following assignment of self.qmin and self.qmax to the local variables and the if check refine the
-            # attribute from Optional valid integers for use, based on TorchScript's requirements.
-            custom_quant_min, custom_quant_max = self.quant_min, self.quant_max
-            if custom_quant_min is not None and custom_quant_max is not None:
-                initial_quant_min, initial_quant_max = (
-                    custom_quant_min,
-                    custom_quant_max,
-                )
-
-            qrange_len = initial_quant_max - initial_quant_min + 1
-            assert (
-                0 < qrange_len <= 256
-            ), "quantization range should be positive and not exceed the maximum bit range (=256)."
-            if self.dtype == torch.qint8:
-                quant_min, quant_max = -qrange_len // 2, qrange_len // 2 - 1
-            else:
-                quant_min, quant_max = 0, qrange_len - 1
-            if self.reduce_range:
-                quant_min, quant_max = quant_min // 2, quant_max // 2
-        else:
-            # Fallback onto default 8-bit qmin and qmax calculation if dynamic range is not used.
-            if self.dtype == torch.qint8:
-                if self.reduce_range:
-                    quant_min, quant_max = -64, 63
-                else:
-                    quant_min, quant_max = -128, 127
-            elif self.dtype == torch.quint8:
-                if self.reduce_range:
-                    quant_min, quant_max = 0, 127
-                else:
-                    quant_min, quant_max = 0, 255
-            else:
-                quant_min, quant_max = 0, 15
-        return quant_min, quant_max
-
-    @torch.jit.export
     def _calculate_qparams(
         self, min_val: torch.Tensor, max_val: torch.Tensor
     ) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -273,9 +265,9 @@ class _ObserverBase(ObserverBase):
             zero_points: Zero points tensor of shape (#channels,)
         """
         if not check_min_max_valid(min_val, max_val):
-            return torch.tensor([1.0]), torch.tensor([0])
+            return torch.tensor([1.0], device=min_val.device.type), torch.tensor([0], device=min_val.device.type)
 
-        quant_min, quant_max = self._calculate_qmin_qmax()
+        quant_min, quant_max = self.quant_min, self.quant_max
         min_val_neg = torch.min(min_val, torch.zeros_like(min_val))
         max_val_pos = torch.max(max_val, torch.zeros_like(max_val))
 
@@ -309,7 +301,7 @@ class _ObserverBase(ObserverBase):
         else:
             scale = (max_val_pos - min_val_neg) / float(quant_max - quant_min)
             scale = torch.max(scale, self.eps)
-            zero_point = quant_min - torch.round(min_val_neg / scale)
+            zero_point = quant_min - torch.round(min_val_neg / scale).to(torch.int)
             zero_point = torch.clamp(zero_point, quant_min, quant_max)
 
         # For scalar values, cast them to Tensors of size 1 to keep the shape
@@ -328,6 +320,10 @@ class _ObserverBase(ObserverBase):
                 )
 
         return scale, zero_point
+
+    @torch.jit.export
+    def reset_min_max_vals(self):
+        raise NotImplementedError("Cannot reset min/max values in the given observer.")
 
 
 class MinMaxObserver(_ObserverBase):
@@ -455,6 +451,11 @@ class MinMaxObserver(_ObserverBase):
     def extra_repr(self):
         return "min_val={}, max_val={}".format(self.min_val, self.max_val)
 
+    @torch.jit.export
+    def reset_min_max_vals(self):
+        """Resets the min/max values."""
+        self.min_val = torch.tensor(float("inf"))
+        self.max_val = torch.tensor(float("-inf"))
 
 class MovingAverageMinMaxObserver(MinMaxObserver):
     r"""Observer module for computing the quantization parameters based on the
@@ -533,8 +534,6 @@ class MovingAverageMinMaxObserver(MinMaxObserver):
             min_val_cur, max_val_cur = torch._aminmax(x)
             min_val = min_val + self.averaging_constant * (min_val_cur - min_val)
             max_val = max_val + self.averaging_constant * (max_val_cur - max_val)
-        self.min_val.resize_(min_val.shape)
-        self.max_val.resize_(max_val.shape)
         self.min_val.copy_(min_val)
         self.max_val.copy_(max_val)
         return x_orig
@@ -565,8 +564,8 @@ class PerChannelMinMaxObserver(_ObserverBase):
     .. note:: If the running minimum equals to the running maximum, the scales
               and zero_points are set to 1.0 and 0.
     """
-    min_vals: torch.Tensor
-    max_vals: torch.Tensor
+    min_val: torch.Tensor
+    max_val: torch.Tensor
 
     def __init__(
         self,
@@ -588,8 +587,8 @@ class PerChannelMinMaxObserver(_ObserverBase):
         )
         factory_kwargs = torch.nn.factory_kwargs(factory_kwargs)
         self.ch_axis = ch_axis
-        self.register_buffer("min_vals", torch.tensor([], **factory_kwargs))
-        self.register_buffer("max_vals", torch.tensor([], **factory_kwargs))
+        self.register_buffer("min_val", torch.tensor([], **factory_kwargs))
+        self.register_buffer("max_val", torch.tensor([], **factory_kwargs))
         if (
             self.qscheme == torch.per_channel_symmetric
             and self.reduce_range
@@ -606,8 +605,8 @@ class PerChannelMinMaxObserver(_ObserverBase):
         if x_orig.numel() == 0:
             return x_orig
         x = x_orig.detach()  # avoid keeping autograd tape
-        min_vals = self.min_vals
-        max_vals = self.max_vals
+        min_val = self.min_val
+        max_val = self.max_val
         x_dim = x.size()
 
         new_axis_list = [i for i in range(len(x_dim))]  # noqa: C416
@@ -616,28 +615,27 @@ class PerChannelMinMaxObserver(_ObserverBase):
         y = x.permute(new_axis_list)
         # Need to match dtype of min/max because the updates to buffers
         # are done in place and types need to match for comparisons
-        y = y.to(self.min_vals.dtype)
+        y = y.to(self.min_val.dtype)
         y = torch.flatten(y, start_dim=1)
-        if min_vals.numel() == 0 or max_vals.numel() == 0:
-            min_vals, max_vals = torch._aminmax(y, 1)
+        if min_val.numel() == 0 or max_val.numel() == 0:
+            min_val, max_val = torch._aminmax(y, 1)
         else:
-            min_vals_cur, max_vals_cur = torch._aminmax(y, 1)
-            min_vals = torch.min(min_vals_cur, min_vals)
-            max_vals = torch.max(max_vals_cur, max_vals)
-        self.min_vals.resize_(min_vals.shape)
-        self.max_vals.resize_(max_vals.shape)
-        self.min_vals.copy_(min_vals)
-        self.max_vals.copy_(max_vals)
+            min_val_cur, max_val_cur = torch._aminmax(y, 1)
+            min_val = torch.min(min_val_cur, min_val)
+            max_val = torch.max(max_val_cur, max_val)
+        self.min_val.resize_(min_val.shape)
+        self.max_val.resize_(max_val.shape)
+        self.min_val.copy_(min_val)
+        self.max_val.copy_(max_val)
         return x_orig
 
     @torch.jit.export
     def calculate_qparams(self):
-        return self._calculate_qparams(self.min_vals, self.max_vals)
+        return self._calculate_qparams(self.min_val, self.max_val)
 
     def extra_repr(self):
-        return "min_val={}, max_val={}".format(self.min_vals, self.max_vals)
+        return "min_val={}, max_val={}".format(self.min_val, self.max_val)
 
-    @torch.jit.export
     def _load_from_state_dict(
         self,
         state_dict: Union[Dict[str, torch.Tensor], Dict[str, torch.Tensor]],
@@ -648,26 +646,38 @@ class PerChannelMinMaxObserver(_ObserverBase):
         unexpected_keys: List[str],
         error_msgs: List[str],
     ):
-        local_state = ["min_vals", "max_vals"]
+        version = local_metadata.get("version", None)
+        if version is None or version < 3:
+            local_state = ["min_vals", "max_vals"]
+            expected_min_name = "min_vals"
+            expected_max_name = "max_vals"
+        else:
+            local_state = ["min_val", "max_val"]
+            expected_min_name = "min_val"
+            expected_max_name = "max_val"
         for name in local_state:
             key = prefix + name
             if key in state_dict:
                 val = state_dict[key]
-                # Custom handling to allow loading min_vals or max_vals
+                # Custom handling to allow loading min_val or max_val
                 # of size N into uninitialized buffers of size 0. The
                 # buffers are resized here, and the values are copied in
                 # the default state_dict loading code of the parent.
-                if name == "min_vals":
-                    self.min_vals.resize_(val.shape)
+                if name == expected_min_name:
+                    self.min_val.resize_(val.shape)
+                elif name == expected_max_name:
+                    self.max_val.resize_(val.shape)
                 else:
-                    self.max_vals.resize_(val.shape)
+                    warnings.warn("Observer load_from_state_dict got unexpected name {}".format(name))
                 # For torchscript module we need to update the attributes here since we do not
                 # call the `_load_from_state_dict` function defined module.py
                 if torch.jit.is_scripting():
-                    if name == "min_vals":
-                        self.min_vals.copy_(val)
+                    if name == expected_min_name:
+                        self.min_val.copy_(val)
+                    elif name == expected_max_name:
+                        self.max_val.copy_(val)
                     else:
-                        self.max_vals.copy_(val)
+                        warnings.warn("Observer load_from_state_dict got unexpected name {}".format(name))
             elif strict:
                 missing_keys.append(key)
 
@@ -676,13 +686,12 @@ class PerChannelMinMaxObserver(_ObserverBase):
                 state_dict,
                 prefix,
                 local_metadata,
-                strict,
+                False,
                 missing_keys,
                 unexpected_keys,
                 error_msgs,
             )
 
-    @torch.jit.export
     def _load_from_state_dict_script(
         self,
         state_dict: Union[Dict[str, torch.Tensor], Dict[str, torch.Tensor]],
@@ -703,6 +712,12 @@ class PerChannelMinMaxObserver(_ObserverBase):
             unexpected_keys,
             error_msgs,
         )
+
+    @torch.jit.export
+    def reset_min_max_vals(self):
+        """Resets the min/max values."""
+        self.min_val = torch.tensor([])
+        self.max_val = torch.tensor([])
 
 
 class MovingAveragePerChannelMinMaxObserver(PerChannelMinMaxObserver):
@@ -758,9 +773,9 @@ class MovingAveragePerChannelMinMaxObserver(PerChannelMinMaxObserver):
         if x_orig.numel() == 0:
             return x_orig
         x = x_orig.detach()  # avoid keeping autograd tape
-        x = x.to(self.min_vals.dtype)
-        min_vals = self.min_vals
-        max_vals = self.max_vals
+        x = x.to(self.min_val.dtype)
+        min_val = self.min_val
+        max_val = self.max_val
         x_dim = x.size()
 
         new_axis_list = [i for i in range(len(x_dim))]  # noqa: C416
@@ -768,16 +783,16 @@ class MovingAveragePerChannelMinMaxObserver(PerChannelMinMaxObserver):
         new_axis_list[0] = self.ch_axis
         y = x.permute(new_axis_list)
         y = torch.flatten(y, start_dim=1)
-        if min_vals.numel() == 0 or max_vals.numel() == 0:
-            min_vals, max_vals = torch._aminmax(y, 1)
+        if min_val.numel() == 0 or max_val.numel() == 0:
+            min_val, max_val = torch._aminmax(y, 1)
         else:
-            min_vals_cur, max_vals_cur = torch._aminmax(y, 1)
-            min_vals = min_vals + self.averaging_constant * (min_vals_cur - min_vals)
-            max_vals = max_vals + self.averaging_constant * (max_vals_cur - max_vals)
-        self.min_vals.resize_(min_vals.shape)
-        self.max_vals.resize_(max_vals.shape)
-        self.min_vals.copy_(min_vals)
-        self.max_vals.copy_(max_vals)
+            min_val_cur, max_val_cur = torch._aminmax(y, 1)
+            min_val = min_val + self.averaging_constant * (min_val_cur - min_val)
+            max_val = max_val + self.averaging_constant * (max_val_cur - max_val)
+        self.min_val.resize_(min_val.shape)
+        self.max_val.resize_(max_val.shape)
+        self.min_val.copy_(min_val)
+        self.max_val.copy_(max_val)
         return x_orig
 
 
@@ -1093,7 +1108,7 @@ class HistogramObserver(_ObserverBase):
                 "must run observer before calling calculate_qparams.\
                                     Returning default scale and zero point "
             )
-            return torch.tensor([1.0]), torch.tensor([0])
+            return torch.tensor([1.0], device=self.min_val.device.type), torch.tensor([0], device=self.min_val.device.type)
         assert self.bins == len(self.histogram), (
             "The number of bins in histogram should be equal to the number of bins "
             "supplied while making this observer"

@@ -240,7 +240,7 @@ void remainder_kernel(TensorIteratorBase& iter) {
   }
 }
 
-void bitwise_and_kernel(TensorIterator& iter) {
+void bitwise_and_kernel(TensorIteratorBase& iter) {
   if (iter.dtype() == ScalarType::Bool) {
     cpu_kernel(
         iter,
@@ -261,7 +261,7 @@ void bitwise_and_kernel(TensorIterator& iter) {
   }
 }
 
-void bitwise_or_kernel(TensorIterator& iter) {
+void bitwise_or_kernel(TensorIteratorBase& iter) {
   if (iter.dtype() == ScalarType::Bool) {
     cpu_kernel(
         iter,
@@ -282,7 +282,7 @@ void bitwise_or_kernel(TensorIterator& iter) {
   }
 }
 
-void bitwise_xor_kernel(TensorIterator& iter) {
+void bitwise_xor_kernel(TensorIteratorBase& iter) {
   if (iter.dtype() == ScalarType::Bool) {
     // Boolean type does not work with ^ (bitwise XOR) in C++. bitwise_xor wraps this operation for both Boolean and
     // integral types.
@@ -305,7 +305,7 @@ void bitwise_xor_kernel(TensorIterator& iter) {
   }
 }
 
-void lshift_kernel(TensorIterator& iter) {
+void lshift_kernel(TensorIteratorBase& iter) {
   if (iter.dtype() == ScalarType::Float || iter.dtype() == ScalarType::Double) {
     AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "lshift_cpu", [&]() {
       auto base_vec = Vectorized<scalar_t>((scalar_t)(2));
@@ -385,7 +385,7 @@ void logical_xor_kernel(TensorIterator& iter) {
   }
 }
 
-void rshift_kernel(TensorIterator& iter) {
+void rshift_kernel(TensorIteratorBase& iter) {
   if (iter.dtype() == ScalarType::Float || iter.dtype() == ScalarType::Double) {
     AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "rshift_cpu", [&]() {
       auto base_vec = Vectorized<scalar_t>((scalar_t)(2));
@@ -408,7 +408,7 @@ void rshift_kernel(TensorIterator& iter) {
   }
 }
 
-void lt_kernel(TensorIterator& iter) {
+void lt_kernel(TensorIteratorBase& iter) {
   // See Note [special-case bool outputs]
   if (iter.dtype() == ScalarType::Bool) {
     AT_DISPATCH_ALL_TYPES_AND3(kBool, kBFloat16, kHalf, iter.common_dtype(), "lt_cpu", [&]() {
@@ -431,7 +431,7 @@ void lt_kernel(TensorIterator& iter) {
   }
 }
 
-void le_kernel(TensorIterator& iter) {
+void le_kernel(TensorIteratorBase& iter) {
   // See Note [special-case bool outputs]
   if (iter.dtype() == ScalarType::Bool) {
     AT_DISPATCH_ALL_TYPES_AND3(kBool, kBFloat16, kHalf, iter.common_dtype(), "le_cpu", [&]() {
@@ -454,7 +454,7 @@ void le_kernel(TensorIterator& iter) {
   }
 }
 
-void gt_kernel(TensorIterator& iter) {
+void gt_kernel(TensorIteratorBase& iter) {
   // See Note [special-case bool outputs]
   if (iter.dtype() == ScalarType::Bool) {
     AT_DISPATCH_ALL_TYPES_AND3(kBool, kBFloat16, kHalf, iter.common_dtype(), "gt_cpu", [&]() {
@@ -477,7 +477,7 @@ void gt_kernel(TensorIterator& iter) {
   }
 }
 
-void ge_kernel(TensorIterator& iter) {
+void ge_kernel(TensorIteratorBase& iter) {
   // See Note [special-case bool outputs]
   if (iter.dtype() == ScalarType::Bool) {
     AT_DISPATCH_ALL_TYPES_AND3(kBool, kBFloat16, kHalf, iter.common_dtype(), "ge_cpu", [&]() {
@@ -500,7 +500,7 @@ void ge_kernel(TensorIterator& iter) {
   }
 }
 
-void eq_kernel(TensorIterator& iter) {
+void eq_kernel(TensorIteratorBase& iter) {
   // See Note [special-case bool outputs]
   if (iter.dtype() == ScalarType::Bool) {
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kBool, kBFloat16, kHalf, iter.common_dtype(), "eq_cpu", [&]() {
@@ -523,7 +523,7 @@ void eq_kernel(TensorIterator& iter) {
   }
 }
 
-void ne_kernel(TensorIterator& iter) {
+void ne_kernel(TensorIteratorBase& iter) {
   // See Note [special-case bool outputs]
   if (iter.dtype() == ScalarType::Bool) {
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kBool, kBFloat16, kHalf, iter.common_dtype(), "ne_cpu", [&]() {
@@ -671,20 +671,52 @@ void huber_kernel(TensorIterator& iter, double delta) {
   });
 }
 
-void sigmoid_backward_kernel(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "sigmoid_backward_cpu", [&]() {
-    auto one_vec = Vectorized<scalar_t>((scalar_t)(1));
-    cpu_kernel_vec(iter,
-      [=](scalar_t a, scalar_t b) -> scalar_t {
-        return a * (scalar_t(1) - b) * b;
+void sigmoid_backward_kernel(TensorIteratorBase& iter) {
+  if (isComplexType(iter.dtype())) {
+    AT_DISPATCH_COMPLEX_TYPES(iter.dtype(), "sigmoid_backward_cpu", [&]() {
+      auto one_vec = Vectorized<scalar_t>(scalar_t{1});
+      cpu_kernel_vec(
+        iter,
+        [=](scalar_t a, scalar_t b) -> scalar_t {
+          return a * std::conj((scalar_t(1) - b) * b);
+        },
+        [=](Vectorized<scalar_t> a, Vectorized<scalar_t> b) {
+          return a * ((one_vec - b) * b).conj();
+        });
+    });
+  } else if (iter.dtype() == kBFloat16) {
+    auto one_vec = Vectorized<float>((float)(1));
+    cpu_kernel_vec(
+      iter,
+      [=](BFloat16 a, BFloat16 b) -> BFloat16 {
+         float a0 = static_cast<float>(a);
+         float b0 = static_cast<float>(b);
+         return a0 * (float(1) - b0) * b0;
       },
-      [=](Vectorized<scalar_t> a, Vectorized<scalar_t> b) {
-        return a * (one_vec - b) * b;
+      [=](Vectorized<BFloat16> a, Vectorized<BFloat16> b) {
+         Vectorized<float> a0, a1, b0, b1;
+         std::tie(a0, a1) = convert_bfloat16_float(a);
+         std::tie(b0, b1) = convert_bfloat16_float(b);
+         a0 = a0 * (one_vec - b0) * b0;
+         a1 = a1 * (one_vec - b1) * b1;
+         return convert_float_bfloat16(a0, a1);
       });
-  });
+  } else {
+    AT_DISPATCH_FLOATING_TYPES_AND(kHalf, iter.dtype(), "sigmoid_backward_cpu", [&]() {
+      auto one_vec = Vectorized<scalar_t>((scalar_t)(1));
+      cpu_kernel_vec(
+        iter,
+        [=](scalar_t a, scalar_t b) -> scalar_t {
+          return a * (scalar_t(1) - b) * b;
+        },
+        [=](Vectorized<scalar_t> a, Vectorized<scalar_t> b) {
+          return a * (one_vec - b) * b;
+        });
+    });
+  }
 }
 
-void logit_backward_kernel(TensorIterator& iter, const Scalar& eps_scalar) {
+void logit_backward_kernel(TensorIteratorBase& iter, const Scalar& eps_scalar) {
   AT_DISPATCH_FLOATING_TYPES_AND(
       kBFloat16, iter.dtype(), "logit_backward_cpu", [&]() {
         const scalar_t eps = eps_scalar.to<scalar_t>();
@@ -734,19 +766,36 @@ void logit_backward_kernel(TensorIterator& iter, const Scalar& eps_scalar) {
       });
 }
 
-void tanh_backward_kernel(TensorIterator& iter) {
+void tanh_backward_kernel(TensorIteratorBase& iter) {
   if (isComplexType(iter.dtype())) {
     AT_DISPATCH_COMPLEX_TYPES(iter.dtype(), "tanh_backward_cpu", [&]() {
       auto one_vec = Vectorized<scalar_t>(scalar_t{1});
+      cpu_kernel_vec(
+        iter,
+        [=](scalar_t a, scalar_t b) -> scalar_t {
+          return a * std::conj(scalar_t{1} - b * b);
+        },
+        [=](Vectorized<scalar_t> a, Vectorized<scalar_t> b) {
+          return a * (one_vec - b * b).conj();
+        });
+    });
+  } else if (iter.dtype() == kBFloat16) {
+    auto one_vec = Vectorized<float>(float{1});
     cpu_kernel_vec(
       iter,
-      [=](scalar_t a, scalar_t b) -> scalar_t {
-        return a * std::conj(scalar_t{1} - b * b);
+      [=](BFloat16 a, BFloat16 b) -> BFloat16 {
+        float a0 = float(a);
+        float b0 = float(b);
+        return a0 * (float{1} - b0 * b0);
       },
-      [=](Vectorized<scalar_t> a, Vectorized<scalar_t> b) {
-        return a * (one_vec - b * b).conj();
+      [=](Vectorized<BFloat16> a, Vectorized<BFloat16> b) {
+        Vectorized<float> a0, a1, b0, b1;
+        std::tie(a0, a1) = convert_bfloat16_float(a);
+        std::tie(b0, b1) = convert_bfloat16_float(b);
+        a0 = a0 * (one_vec - b0 * b0);
+        a1 = a1 * (one_vec - b1 * b1);
+        return convert_float_bfloat16(a0, a1);
       });
-  });
   } else {
     AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "tanh_backward_cpu", [&]() {
       auto one_vec = Vectorized<scalar_t>(scalar_t{1});
@@ -781,7 +830,7 @@ void mse_kernel(TensorIterator& iter) {
   });
 }
 
-void fmod_kernel(TensorIterator& iter) {
+void fmod_kernel(TensorIteratorBase& iter) {
   if (isIntegralType(iter.common_dtype(), /*includeBool=*/ false)) {
     AT_DISPATCH_INTEGRAL_TYPES(iter.common_dtype(), "fmod_cpu", [&]() {
       cpu_kernel(iter, [=](scalar_t x, scalar_t d) -> scalar_t {
@@ -913,7 +962,15 @@ void igammac_kernel(TensorIteratorBase& iter) {
 }
 
 void nextafter_kernel(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "nextafter_cpu", [&]() {
+  if (iter.common_dtype() == kBFloat16) {
+    using scalar_t = c10::BFloat16;
+    cpu_kernel(
+        iter,
+        [=](scalar_t a, scalar_t b) -> scalar_t {
+            return std::nextafter(a, b);
+        });
+  } else {
+    AT_DISPATCH_FLOATING_TYPES(iter.common_dtype(), "nextafter_cpu", [&]() {
     cpu_kernel_vec(
         iter,
         [=](scalar_t a, scalar_t b) -> scalar_t {
@@ -923,6 +980,7 @@ void nextafter_kernel(TensorIteratorBase& iter) {
             return a.nextafter(b);
         });
   });
+  }
 }
 
 void heaviside_kernel(TensorIteratorBase& iter) {
@@ -945,7 +1003,7 @@ void copysign_kernel(TensorIteratorBase& iter) {
   });
 }
 
-void xlogy_kernel(TensorIterator& iter) {
+void xlogy_kernel(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, iter.common_dtype(), "xlogy_cpu", [&]() {
     cpu_kernel(iter, [](scalar_t x, scalar_t y) -> scalar_t {
       if (at::_isnan(y)){
@@ -973,99 +1031,63 @@ void xlog1py_kernel(TensorIteratorBase& iter) {
   });
 }
 
+void zeta_kernel(TensorIteratorBase& iter) {
+  AT_DISPATCH_FLOATING_TYPES(iter.common_dtype(), "zeta_cpu", [&]() {
+    cpu_kernel(iter, [](scalar_t x, scalar_t q) -> scalar_t {
+      return zeta(x, q);
+    });
+  });
+}
+
 } // namespace
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(add_stub, &add_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(add_clamp_stub, &add_clamp_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(sub_stub, &sub_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(mul_stub, &mul_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(div_true_stub, &div_true_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(div_trunc_stub, &div_trunc_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(div_floor_stub, &div_floor_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(remainder_stub, &remainder_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(atan2_stub, &atan2_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(bitwise_and_stub, &bitwise_and_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(bitwise_or_stub, &bitwise_or_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(bitwise_xor_stub, &bitwise_xor_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(lshift_stub, &lshift_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(rshift_stub, &rshift_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(logical_xor_stub, &logical_xor_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(logical_and_stub, &logical_and_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(logical_or_stub, &logical_or_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(lt_stub, &lt_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(le_stub, &le_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(gt_stub, &gt_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(ge_stub, &ge_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(eq_stub, &eq_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(ne_stub, &ne_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(maximum_stub, &maximum_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(minimum_stub, &minimum_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(fmax_stub, &fmax_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(fmin_stub, &fmin_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(smooth_l1_stub, &smooth_l1_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(huber_stub, &huber_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(sigmoid_backward_stub, &sigmoid_backward_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(logit_backward_stub, &logit_backward_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(tanh_backward_stub, &tanh_backward_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(mse_stub, &mse_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(fmod_stub, &fmod_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(logaddexp_stub, &logaddexp_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(logaddexp2_stub, &logaddexp2_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(gcd_stub, &gcd_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(lcm_stub, &lcm_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(hypot_stub, &hypot_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(igamma_stub, &igamma_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(igammac_stub, &igammac_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(nextafter_stub, &nextafter_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(heaviside_stub, &heaviside_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(copysign_stub, &copysign_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(xlogy_stub, &xlogy_kernel);
 REGISTER_DISPATCH(xlog1py_stub, &xlog1py_kernel);
+REGISTER_DISPATCH(zeta_stub, &zeta_kernel);
 
 } // namespace native
 } // namespace at

@@ -16,26 +16,26 @@ jobs:
           python-version: 3.x
           architecture: x64
       - name: Checkout PyTorch
-        uses: actions/checkout@v2
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
       - name: Install requirements
         id: requirements
-        run: pip install -r requirements.txt
+        run: pip3 install -r requirements.txt --user
       - name: Ensure consistent CircleCI YAML config
-        if: always() && steps.requirements.outcome == 'success'
+        if: ${{ always() && steps.requirements.outcome == 'success' }}
         run: cd .circleci && ./ensure-consistency.py
       - name: Lint native_functions.yaml
-        if: always() && steps.requirements.outcome == 'success'
+        if: ${{ always() && steps.requirements.outcome == 'success' }}
         run: |
-          pip install ruamel.yaml==0.17.4
+          pip3 install ruamel.yaml==0.17.4 --user
           .github/scripts/lint_native_functions.py
       - name: Ensure correct trailing newlines
-        if: always() && steps.requirements.outcome == 'success'
+        if: ${{ always() && steps.requirements.outcome == 'success' }}
         run: |
-          (! git --no-pager grep -Il '' -- . ':(exclude)**/contrib/**' ':(exclude)third_party' ':(exclude)**.expect' ':(exclude)tools/clang_format_hash' | tools/trailing_newlines.py || (echo "The above files do not have correct trailing newlines; please normalize them"; false))
+          (! git --no-pager grep -Il '' -- . ':(exclude)**/contrib/**' ':(exclude)third_party' ':(exclude)**.expect' ':(exclude)**.ipynb' ':(exclude)tools/clang_format_hash' | tools/linter/trailing_newlines.py || (echo "The above files do not have correct trailing newlines; please normalize them"; false))
       - name: Ensure no trailing spaces
         if: always()
         run: |
-          (! git --no-pager grep -In '[[:blank:]]$' -- . ':(exclude)**/contrib/**' ':(exclude)third_party' || (echo "The above lines have trailing spaces; please remove them"; false))
+          (! git --no-pager grep -In '[[:blank:]]$' -- . ':(exclude)**/contrib/**' ':(exclude)**.diff' ':(exclude)third_party' || (echo "The above lines have trailing spaces; please remove them"; false))
       - name: Ensure no tabs
         if: always()
         run: |
@@ -64,6 +64,18 @@ jobs:
         run: |
           # shellcheck disable=SC2016
           (! git --no-pager grep -InP '# type:\s*ignore(?!\[)' -- '**.py' '**.pyi' ':(exclude)test/test_jit.py' || (echo 'The above lines have unqualified `type: ignore`; please convert them to `type: ignore[xxxx]`'; false))
+      - name: Ensure GitHub PyPi dependencies are pinned
+        if: always()
+        run: |
+          (! git --no-pager grep --color=always -InP \
+                '(pip|pip3|python -m pip|python3 -m pip|python3 -mpip|python -mpip) install ([a-z][\.a-z-0-9]*+(?!(=|.*\.whl))([[:blank:]]|))+' \
+                -- .github \
+                ':(exclude)**.rst' \
+                ':(exclude)**.py' \
+                ':(exclude)**.md' \
+                ':(exclude)**.diff' \
+                ':(exclude)third_party' ||
+            (echo "The above lines have unpinned PyPi installs; please pin them to a specific version: e.g. 'thepackage==1.2'"; false))
       # note that this next step depends on a clean checkout;
       # if you run it locally then it will likely to complain
       # about all the generated files in torch/test
@@ -73,12 +85,12 @@ jobs:
           # shellcheck disable=SC2016
           (! find . \( -path ./third_party -o -path ./.git -o -path ./torch/bin -o -path ./build \) -prune -o -type f -executable -regextype posix-egrep -not -regex '.+(\.(bash|sh|py|so)|git-pre-commit|git-clang-format|gradlew)$' -print | grep . || (echo 'The above files have executable permission; please remove their executable permission by using `chmod -x`'; false))
       - name: C++ docs check
-        if: always() && steps.requirements.outcome == 'success'
+        if: ${{ always() && steps.requirements.outcome == 'success' }}
         run: |
           sudo apt-get install -y doxygen
           cd docs/cpp/source && ./check-doxygen.sh
       - name: CUDA kernel launch check
-        if: always() && steps.requirements.outcome == 'success'
+        if: ${{ always() && steps.requirements.outcome == 'success' }}
         run: |
           set -eux
           python torch/testing/_check_kernel_launches.py |& tee "${GITHUB_WORKSPACE}"/cuda_kernel_launch_checks.txt
@@ -86,6 +98,50 @@ jobs:
         if: always()
         run: |
           (! git --no-pager grep -I -no $'#include <cub/' --  ./aten  ':(exclude)aten/src/ATen/cuda/cub.cuh' || (echo "The above files have direct cub include; please include ATen/cuda/cub.cuh instead and wrap your cub calls in at::native namespace if necessary"; false))
+      - name: Ensure no raw cuda api calls
+        if: always()
+        run: |
+          (! git --no-pager grep -I -no $'cudaStreamSynchronize' --  ./aten ./c10 ':(exclude)aten/src/ATen/test' ':(exclude)c10/cuda/CUDAFunctions.h' || (echo "The above files call raw cuda APIs directly; please use at::cuda wrappers instead"; false))
+
+  clang-format:
+    runs-on: ubuntu-18.04
+    if: ${{ github.event_name == 'pull_request' }}
+    steps:
+      - name: Setup Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: 3.x
+          architecture: x64
+      - name: Fetch PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+        with:
+          fetch-depth: 0 # deep clone, to allow us to use git merge-base
+      - name: Run clang-format
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -eu
+          # This is necessary to get the same results regardless of whether the
+          # PR was opened directly or from a forked repo. See: `9f890a92` for more info.
+          git remote add upstream https://github.com/pytorch/pytorch
+          git fetch upstream "$GITHUB_BASE_REF"
+
+          # only run clang-format on allowlisted files
+          echo "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
+          echo "| clang-format failures found! Run: "
+          echo "|    tools/linter/clang_format_ci.sh ${BASE_SHA} "
+          echo "| to fix this error. "
+          echo "| For more info, see: https://github.com/pytorch/pytorch/wiki/clang-format "
+          echo "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
+
+          tools/linter/clang_format_ci.sh "${BASE_SHA}"
+
+          GIT_DIFF=$(git diff)
+          if [[ -z $GIT_DIFF ]]; then
+            exit 0
+          fi
+          echo "$GIT_DIFF"
+          exit 1
 
   py2-setup-validate-errormsg:
     runs-on: ubuntu-18.04
@@ -96,13 +152,15 @@ jobs:
           python-version: 2.x
           architecture: x64
       - name: Checkout PyTorch
-        uses: actions/checkout@v2
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
       - name: Attempt to run setup.py
         run: |
           if ! python2 setup.py | grep -q "Python 2 has reached end-of-life and is no longer supported by PyTorch."; then
             echo 'Running setup.py with Python 2 did not give the expected error message.'
             false
           fi
+      - name: Keep torch.utils.collect_env python2 compliant
+        run: python2 -m py_compile torch/utils/collect_env.py
 
   shellcheck:
     runs-on: ubuntu-18.04
@@ -113,16 +171,16 @@ jobs:
           python-version: 3.x
           architecture: x64
       - name: Checkout PyTorch
-        uses: actions/checkout@v2
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
       - name: Install requirements
         id: requirements
         run: |
-          pip install -r requirements.txt
+          pip3 install -r requirements.txt --user
       - name: Install Jinja2
         run: |
-          pip install Jinja2==3.0.1
+          pip3 install Jinja2==3.0.1 --user
       - name: Checkout PyTorch
-        uses: actions/checkout@v2
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
       - name: Regenerate workflows
         id: generate_workflows
         run: .github/scripts/generate_ci_workflows.py
@@ -148,19 +206,20 @@ jobs:
           set -x
           scversion="v0.7.2"
           wget -qO- "https://github.com/koalaman/shellcheck/releases/download/${scversion?}/shellcheck-${scversion?}.linux.x86_64.tar.xz" | tar -xJv
-          sudo cp "shellcheck-${scversion}/shellcheck" /usr/bin/
+          mkdir -p ~/.local/bin
+          cp "shellcheck-${scversion}/shellcheck" ~/.local/bin/
           rm -r "shellcheck-${scversion}"
-          shellcheck --version
+          ~/.local/bin/shellcheck --version
       - name: Extract scripts from GitHub Actions workflows
-        if: always() && steps.install_shellcheck.outcome == 'success'
+        if: ${{ always() && steps.install_shellcheck.outcome == 'success' }}
         run: |
           # For local lints, remove the .extracted_scripts folder if it was already there
           rm -rf .extracted_scripts
           tools/extract_scripts.py --out=.extracted_scripts
       - name: Run ShellCheck
-        if: always() && steps.install_shellcheck.outcome == 'success'
+        if: ${{ always() && steps.install_shellcheck.outcome == 'success' }}
         run: |
-          if ! tools/run_shellcheck.sh .extracted_scripts .jenkins/pytorch; then
+          if ! tools/linter/run_shellcheck.sh .extracted_scripts .jenkins/pytorch; then
             echo
             echo 'ShellCheck gave a nonzero exit code. Please fix the warnings'
             echo 'listed above. Note that if a path in one of the above warning'
@@ -171,9 +230,16 @@ jobs:
             false
           fi
       - name: Check that jobs will be cancelled
-        if: always() && steps.generate_workflows.outcome == 'success'
+        if: ${{ always() && steps.generate_workflows.outcome == 'success' }}
         run: |
           .github/scripts/ensure_actions_will_cancel.py
+      - name: Run actionlint
+        shell: bash
+        run: |
+          set -eux
+          bash <(curl https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)
+          ./actionlint --color
+          rm actionlint
 
   toc:
     runs-on: ubuntu-18.04
@@ -184,7 +250,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v2
       - name: Checkout PyTorch
-        uses: actions/checkout@v2
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
       - name: Install markdown-toc
         run: npm install -g markdown-toc
       - name: Regenerate ToCs and check that they didn't change
@@ -220,7 +286,7 @@ jobs:
           python-version: 3.x
           architecture: x64
       - name: Fetch PyTorch
-        uses: actions/checkout@v2
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
           fetch-depth: 2 # to allow us to use github.event.pull_request.head.sha
       - name: Prepare output dir with HEAD commit SHA
@@ -233,28 +299,23 @@ jobs:
       - name: Install dependencies
         run: |
           set -eux
-          pip install typing-extensions # for tools/translate_annotations.py
-          pip install -r requirements-flake8.txt
+          pip3 install typing-extensions==3.10 --user # for tools/linter/translate_annotations.py
+          pip3 install -r requirements-flake8.txt --user
           flake8 --version
       - name: Run flake8
         run: |
           set -eux
           flake8 | tee "${GITHUB_WORKSPACE}"/flake8-output.txt
       - name: Translate annotations
-        if: github.event_name == 'pull_request'
+        if: ${{ github.event_name == 'pull_request' }}
         env:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
-          tools/translate_annotations.py \
+          tools/linter/translate_annotations.py \
             --file="${GITHUB_WORKSPACE}"/flake8-output.txt \
             --regex='^(?P<filename>.*?):(?P<lineNumber>\d+):(?P<columnNumber>\d+): (?P<errorCode>\w+\d+) (?P<errorDesc>.*)' \
             --commit="$HEAD_SHA" \
             > flake8-output/annotations.json
-      - name: Upload artifact
-        uses: actions/upload-artifact@v2
-        with:
-          name: flake8-py3
-          path: flake8-output/
       - name: Fail if there were any warnings
         run: |
           set -eu
@@ -264,18 +325,28 @@ jobs:
             echo 'Please fix the above Flake8 warnings.'
             false
           fi
+      - name: Add annotations
+        # Don't run on forked pull requests
+        if: ${{ failure() && github.event.pull_request.head.repo.full_name == github.repository }}
+        uses: pytorch/add-annotations-github-action@master
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          check_name: 'flake8-py3'
+          linter_output_path: flake8-output/annotations.json
+          commit_sha: ${{ github.event.pull_request.head.sha }}
+          mode: json
 
   clang-tidy:
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-18.04
+    runs-on: linux.2xlarge
     container:
-      # ubuntu18.04-cuda10.2-py3.6-tidy11
-      image: ghcr.io/pytorch/cilint-clang-tidy:7f0b4616100071a4813318bfdbd5b06ae36c5272
+      # ubuntu20.04-cuda11.2-py3.8-tidy11
+      image: ghcr.io/pytorch/cilint-clang-tidy:d8f0c777964d0dd8a147360de80aed1a13eb613a
     steps:
       - name: Checkout PyTorch
-        uses: actions/checkout@v2
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          fetch-depth: 0 # to allow tools/clang_tidy.py to do its thing
+          fetch-depth: 0 # to allow tools/linter/clang_tidy.py to do its thing
       - name: Prepare output dir with HEAD commit SHA
         env:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
@@ -284,85 +355,77 @@ jobs:
           mkdir clang-tidy-output
           cd clang-tidy-output
           echo "$HEAD_SHA" > commit-sha.txt
-      - name: Generate build files
-        run: |
-          cd "${GITHUB_WORKSPACE}"
-          set -eux
-          git remote add upstream https://github.com/pytorch/pytorch
-          git fetch upstream "$GITHUB_BASE_REF"
-
-          if [ ! -d build ]; then
-            git submodule update --init --recursive
-
-            export USE_NCCL=0
-            export USE_DEPLOY=1
-            # We really only need compile_commands.json, so no need to build!
-            time python3 setup.py --cmake-only build
-
-            # Generate ATen files.
-            time python3 -m tools.codegen.gen \
-              -s aten/src/ATen \
-              -d build/aten/src/ATen
-
-            # Generate PyTorch files.
-            time python3 tools/setup_helpers/generate_code.py            \
-              --declarations-path build/aten/src/ATen/Declarations.yaml \
-              --native-functions-path aten/src/ATen/native/native_functions.yaml \
-              --nn-path aten/src
-          fi
-      - name: Run clang-tidy
+      - name: Fetch PR diff
+        if: ${{ github.event_name == 'pull_request' }}
         env:
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           cd "${GITHUB_WORKSPACE}"
-          set -eux
-
           wget -O pr.diff "https://patch-diff.githubusercontent.com/raw/pytorch/pytorch/pull/$PR_NUMBER.diff"
+      - name: Generate build files
+        run: |
+          cd "${GITHUB_WORKSPACE}"
+          python3 -m tools.linter.clang_tidy.generate_build_files
+      - name: Run clang-tidy
+        if: ${{ github.event_name == 'pull_request' }}
+        run: |
+          cd "${GITHUB_WORKSPACE}"
 
-          # Run Clang-Tidy
-          # The negative filters below are to exclude files that include onnx_pb.h or
-          # caffe2_pb.h, otherwise we'd have to build protos as part of this CI job.
-          # FunctionsManual.cpp is excluded to keep this diff clean. It will be fixed
-          # in a follow up PR.
-          # /torch/csrc/generic/*.cpp is excluded because those files aren't actually built.
-          # deploy/interpreter files are excluded due to using macros and other techniquies
-          # that are not easily converted to accepted c++
-          python3 tools/clang_tidy.py \
-            --verbose \
-            --paths torch/csrc/ \
+          # The Docker image has our custom build, so we don't need to install it
+          python3 -m tools.linter.clang_tidy \
+            --clang-tidy-exe "$(which clang-tidy)" \
             --diff-file pr.diff \
-            -g"-torch/csrc/jit/passes/onnx/helper.cpp" \
-            -g"-torch/csrc/jit/passes/onnx/shape_type_inference.cpp" \
-            -g"-torch/csrc/jit/serialization/onnx.cpp" \
-            -g"-torch/csrc/jit/serialization/export.cpp" \
-            -g"-torch/csrc/jit/serialization/import.cpp" \
-            -g"-torch/csrc/jit/serialization/import_legacy.cpp" \
-            -g"-torch/csrc/onnx/init.cpp" \
-            -g"-torch/csrc/cuda/nccl.*" \
-            -g"-torch/csrc/cuda/python_nccl.cpp" \
-            -g"-torch/csrc/autograd/FunctionsManual.cpp" \
-            -g"-torch/csrc/generic/*.cpp" \
-            -g"-torch/csrc/jit/codegen/cuda/runtime/*" \
-            -g"-torch/csrc/deploy/interpreter/interpreter.cpp" \
-            -g"-torch/csrc/deploy/interpreter/interpreter.h" \
-            -g"-torch/csrc/deploy/interpreter/interpreter_impl.h" \
-            -g"-torch/csrc/deploy/interpreter/test_main.cpp" \
-            "$@" >"${GITHUB_WORKSPACE}"/clang-tidy-output.txt
+            --disable-progress-bar 2>&1 | tee "${GITHUB_WORKSPACE}"/clang-tidy-output.txt
 
+      # Run clang-tidy on a smaller subset of the codebase on master until we
+      # make the repository clang-tidy clean
+      - name: Run clang-tidy
+        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/master' }}
+        run: |
+          cd "${GITHUB_WORKSPACE}"
 
-          cat "${GITHUB_WORKSPACE}"/clang-tidy-output.txt
+          python3 -m tools.linter.clang_tidy \
+            --paths \
+              torch/csrc/fx \
+              torch/csrc/utils \
+              torch/csrc/generic \
+              torch/csrc/deploy \
+              torch/csrc/tensor \
+            --clang-tidy-exe "$(which clang-tidy)" \
+            --disable-progress-bar 2>&1 | tee "${GITHUB_WORKSPACE}"/clang-tidy-output.txt
 
-          tools/translate_annotations.py \
+      - name: Annotate output
+        if: ${{ github.event_name == 'pull_request' }}
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          cd "${GITHUB_WORKSPACE}"
+          sed --in-place 's/^\.\.\///g' clang-tidy-output.txt
+          tools/linter/translate_annotations.py \
             --file=clang-tidy-output.txt \
             --regex='^(?P<filename>.*?):(?P<lineNumber>\d+):(?P<columnNumber>\d+): (?P<errorDesc>.*?) \[(?P<errorCode>.*)\]' \
             --commit="$HEAD_SHA" \
             > clang-tidy-output/annotations.json
-      - name: Upload artifact
-        uses: actions/upload-artifact@v2
+      - name: Check for warnings
+        run: |
+          cd "${GITHUB_WORKSPACE}"
+          set -eu
+          cat "${GITHUB_WORKSPACE}"/clang-tidy-output.txt
+          if grep -Fq "Warnings detected!" "${GITHUB_WORKSPACE}"/clang-tidy-output.txt; then
+            echo 'Please fix the above clang-tidy warnings.'
+            false
+          fi
+      - name: Add annotations
+        # Don't run on forked pull requests
+        if: ${{ failure() && github.event.pull_request.head.repo.full_name == github.repository }}
+        uses: pytorch/add-annotations-github-action@master
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          name: clang-tidy
-          path: clang-tidy-output/
+          check_name: 'clang-tidy'
+          linter_output_path: clang-tidy/annotations.json
+          commit_sha: ${{ github.event.pull_request.head.sha }}
+          mode: json
 
   cmakelint:
     runs-on: ubuntu-18.04
@@ -373,11 +436,11 @@ jobs:
           python-version: 3.x
           architecture: x64
       - name: Fetch PyTorch
-        uses: actions/checkout@v2
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
       - name: Install dependencies
         run: |
           set -eux
-          pip install cmakelint
+          pip3 install cmakelint==1.4.1 --user
           cmakelint --version
       - name: Run cmakelint
         run: |
@@ -395,14 +458,15 @@ jobs:
           python-version: 3.8
           architecture: x64
       - name: Fetch PyTorch
-        uses: actions/checkout@v2
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
       - name: Install dependencies
         run: |
           set -eux
-          pip install -r requirements.txt
-          pip install mypy==0.812
+          pip3 install -r requirements.txt --user
+          pip3 install numpy==1.20 --user # https://github.com/pytorch/pytorch/pull/60472
+          pip3 install expecttest==0.1.3 mypy==0.812 --user
           # Needed to check tools/render_junit.py
-          pip install junitparser rich
+          pip3 install junitparser==2.1.1 rich==10.9.0 --user
       - name: Run autogen
         run: |
           set -eux
@@ -410,10 +474,22 @@ jobs:
           time python -mtools.codegen.gen -s aten/src/ATen -d build/aten/src/ATen
           time python -mtools.pyi.gen_pyi --native-functions-path aten/src/ATen/native/native_functions.yaml --deprecated-functions-path "tools/autograd/deprecated.yaml"
       - name: Run mypy
+        env:
+          MYPY_FORCE_COLOR: 1
+          TERM: xterm-color
         run: |
           set -eux
-          for CONFIG in mypy*.ini; do mypy --config="$CONFIG"; done
+          STATUS=
+          for CONFIG in mypy*.ini; do
+            if ! mypy --config="$CONFIG"; then
+              STATUS=fail
+            fi
+          done
+          if [ -n "$STATUS" ]; then
+            echo 'Please fix the above mypy warnings.'
+            false
+          fi
 
 concurrency:
-  group: lint-${{ github.event.pull_request.number || github.sha }}
+  group: lint-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true

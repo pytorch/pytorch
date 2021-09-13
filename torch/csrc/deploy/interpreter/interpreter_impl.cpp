@@ -3,16 +3,14 @@
 #define PY_SSIZE_T_CLEAN
 #include <Python.h>
 #include <torch/csrc/deploy/interpreter/interpreter_impl.h>
-#include <iostream>
 
-// NOLINTNEXTLINE(modernize-deprecated-headers)
-#include <assert.h>
 #include <pybind11/embed.h>
 #include <pybind11/functional.h>
-// NOLINTNEXTLINE(modernize-deprecated-headers)
-#include <stdio.h>
 #include <torch/csrc/autograd/generated/variable_factories.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
+
+#include <cassert>
+#include <cstdio>
 #include <iostream>
 #include <map>
 #include <thread>
@@ -112,6 +110,7 @@ extern "C" struct _frozen _PyImport_FrozenModules[];
 extern "C" struct _frozen _PyImport_FrozenModules_torch[];
 
 const char* startup = R"RAW(
+import _ssl # must come before _hashlib otherwise ssl's locks will be set to a Python that might no longer exist...
 import sys
 import importlib.abc
 import linecache
@@ -271,6 +270,7 @@ struct InitLockAcquire {
     // thread grabs the GIL to do non-initialization tasks, then it might start
     // initializing (GIL -> init_lock). To avoid this, release the GIL before
     // trying to get the init_lock and then reacquire it afterward.
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     PyThreadState* _save;
     _save = PyEval_SaveThread();
     init_lock.lock();
@@ -284,7 +284,8 @@ struct InitLockAcquire {
   std::mutex& init_lock_;
 };
 
-struct ConcreteInterpreterImpl : public torch::deploy::InterpreterImpl {
+struct __attribute__((visibility("hidden"))) ConcreteInterpreterImpl
+    : public torch::deploy::InterpreterImpl {
   ConcreteInterpreterImpl() {
 #define APPEND_INIT(name) PyImport_AppendInittab(#name, PyInit_##name);
     FOREACH_LIBRARY(APPEND_INIT)
@@ -377,7 +378,7 @@ struct ConcreteInterpreterImpl : public torch::deploy::InterpreterImpl {
   std::mutex init_lock_;
 };
 
-struct ConcreteInterpreterSessionImpl
+struct __attribute__((visibility("hidden"))) ConcreteInterpreterSessionImpl
     : public torch::deploy::InterpreterSessionImpl {
   ConcreteInterpreterSessionImpl(ConcreteInterpreterImpl* interp)
       : interp_(interp) {}
@@ -491,6 +492,10 @@ struct ConcreteInterpreterSessionImpl
       override {
     std::vector<at::IValue> args;
     return call_kwargs(obj, args, kwargs);
+  }
+
+  bool hasattr(Obj obj, const char* attr) override {
+    return py::hasattr(unwrap(obj), attr);
   }
 
   Obj attr(Obj obj, const char* attr) override {

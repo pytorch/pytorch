@@ -3,36 +3,29 @@
 
 namespace caffe2 {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     Rowwise8BitQuantizedToFloat,
     Rowwise8BitQuantizedToFloatOp<CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     FloatToRowwiseQuantized8Bits,
     FloatToRowwiseQuantized8BitsOp<CPUContext>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     SparseLengthsSum8BitsRowwise,
     SparseLengths8BitsRowwiseOp<CPUContext>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     SparseLengthsWeightedSum8BitsRowwise,
     SparseLengths8BitsRowwiseOp<CPUContext, 1>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     SparseLengthsMean8BitsRowwise,
     SparseLengths8BitsRowwiseOp<CPUContext, 0, 1>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     SparseLengthsWeightedMean8BitsRowwise,
     SparseLengths8BitsRowwiseOp<CPUContext, 1, 1>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SparseLengthsSum8BitsRowwise)
     .NumInputs(4)
     .NumOutputs(1)
@@ -68,7 +61,6 @@ and biases.
 
     .Output(0, "output", "output");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SparseLengthsWeightedSum8BitsRowwise)
     .NumInputs(5)
     .NumOutputs(1)
@@ -110,7 +102,6 @@ and biases.
         "s_i, b_i -- scale and bias for i-th row")
     .Output(0, "output", "output");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SparseLengthsMean8BitsRowwise)
     .NumInputs(4)
     .NumOutputs(1)
@@ -148,7 +139,6 @@ and biases.
 
     .Output(0, "output", "output");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SparseLengthsWeightedMean8BitsRowwise)
     .NumInputs(5)
     .NumOutputs(1)
@@ -190,7 +180,6 @@ and biases.
         "s_i, b_i -- scale and bias for i-th row")
     .Output(0, "output", "output");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(FloatToRowwiseQuantized8Bits)
     .NumInputs(1)
     .NumOutputs(2)
@@ -218,7 +207,6 @@ restore input tensor (with losses).
         "Matrix of floats, each row r_i of which stores a pair "
         "s_i, b_i");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Rowwise8BitQuantizedToFloat)
     .NumInputs(2)
     .NumOutputs(1)
@@ -242,16 +230,10 @@ output tensor of size (m_1, m_2, ..., m_n).
         "s_i, b_i -- scale and bias for i-th row")
     .Output(1, "output", "output");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 NO_GRADIENT(Rowwise8BitQuantizedToFloat);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 NO_GRADIENT(FloatToRowwiseQuantized8Bits);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 NO_GRADIENT(SparseLengthsSum8BitsRowwise);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 NO_GRADIENT(SparseLengthsWeightedSum8BitsRowwise);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 NO_GRADIENT(SparseLengthsMean8BitsRowwise);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 NO_GRADIENT(SparseLengthsWeightedMean8BitsRowwise);
 }

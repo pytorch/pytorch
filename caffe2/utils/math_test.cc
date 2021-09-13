@@ -15,7 +15,6 @@
 
 namespace caffe2 {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(MathTest, GemmNoTransNoTrans) {
   DeviceOption option;
   CPUContext cpu_context(option);
@@ -91,7 +90,6 @@ TEST(MathTest, GemmNoTransNoTrans) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(MathTest, GemmNoTransTrans) {
   DeviceOption option;
   CPUContext cpu_context(option);
@@ -265,7 +263,6 @@ class GemmBatchedTest
   bool trans_W_;
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_P(GemmBatchedTest, GemmBatchedFloatTest) {
   RunGemmBatched(1.0f, 0.0f);
   VerifyOutput(10.0f);
@@ -275,7 +272,6 @@ TEST_P(GemmBatchedTest, GemmBatchedFloatTest) {
   VerifyOutput(20.0f);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_P(GemmBatchedTest, GemmStridedBatchedFloatTest) {
   RunGemmStridedBatched(1.0f, 0.0f);
   VerifyOutput(10.0f);
@@ -285,7 +281,6 @@ TEST_P(GemmBatchedTest, GemmStridedBatchedFloatTest) {
   VerifyOutput(20.0f);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 INSTANTIATE_TEST_CASE_P(
     GemmBatchedTrans,
     GemmBatchedTest,
@@ -293,7 +288,6 @@ INSTANTIATE_TEST_CASE_P(
 
 } // namespace
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(MathTest, GemvNoTrans) {
   DeviceOption option;
   CPUContext cpu_context(option);
@@ -360,7 +354,6 @@ TEST(MathTest, GemvNoTrans) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(MathTest, GemvTrans) {
   DeviceOption option;
   CPUContext cpu_context(option);
@@ -427,7 +420,6 @@ TEST(MathTest, GemvTrans) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(MathTest, FloatToHalfConversion) {
   float a = 1.0f;
   float b = 1.75f;
@@ -464,18 +456,21 @@ class BroadcastTest : public testing::Test {
     ASSERT_EQ(X_data.size(), X_.numel());
     cpu_context_->CopyFromCPU<float>(
         X_data.size(), X_data.data(), X_.mutable_data<float>());
-    math::Broadcast<float, CPUContext>(
-        X_dims.size(),
-        X_dims.data(),
-        Y_dims.size(),
-        Y_dims.data(),
-        1.0f,
-        X_.data<float>(),
-        Y_.mutable_data<float>(),
-        cpu_context_.get());
-    ASSERT_EQ(Y_data.size(), Y_.numel());
-    for (const auto i : c10::irange(Y_data.size())) {
-      EXPECT_FLOAT_EQ(Y_data[i], Y_.data<float>()[i]);
+    for (bool allow_broadcast_fastpath : {false, true}) {
+      math::Broadcast<float, CPUContext>(
+          X_dims.size(),
+          X_dims.data(),
+          Y_dims.size(),
+          Y_dims.data(),
+          1.0f,
+          X_.data<float>(),
+          Y_.mutable_data<float>(),
+          cpu_context_.get(),
+          allow_broadcast_fastpath);
+      ASSERT_EQ(Y_data.size(), Y_.numel());
+      for (const auto i : c10::irange(Y_data.size())) {
+        EXPECT_FLOAT_EQ(Y_data[i], Y_.data<float>()[i]);
+      }
     }
   }
 
@@ -490,17 +485,22 @@ class BroadcastTest : public testing::Test {
   Tensor Y_;
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(BroadcastTest, BroadcastFloatTest) {
   RunBroadcastTest({2}, {2}, {1.0f, 2.0f}, {1.0f, 2.0f});
   RunBroadcastTest({1}, {2}, {1.0f}, {1.0f, 1.0f});
   RunBroadcastTest({1}, {2, 2}, {1.0f}, {1.0f, 1.0f, 1.0f, 1.0f});
   RunBroadcastTest({2, 1}, {2, 2}, {1.0f, 2.0f}, {1.0f, 1.0f, 2.0f, 2.0f});
+  RunBroadcastTest({1, 2}, {2, 2}, {1.0f, 2.0f}, {1.0f, 2.0f, 1.0f, 2.0f});
   RunBroadcastTest(
       {2, 1},
       {2, 2, 2},
       {1.0f, 2.0f},
       {1.0f, 1.0f, 2.0f, 2.0f, 1.0f, 1.0f, 2.0f, 2.0f});
+  RunBroadcastTest(
+      {1, 2},
+      {2, 2, 2},
+      {1.0f, 2.0f},
+      {1.0f, 2.0f, 1.0f, 2.0f, 1.0f, 2.0f, 1.0f, 2.0f});
 }
 
 class RandFixedSumTest : public testing::Test {
@@ -514,7 +514,6 @@ class RandFixedSumTest : public testing::Test {
   std::unique_ptr<CPUContext> cpu_context_;
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(RandFixedSumTest, UpperBound) {
   std::vector<int> l(20);
   math::RandFixedSum<int, CPUContext>(

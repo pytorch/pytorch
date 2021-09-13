@@ -6,6 +6,7 @@
 #include <ATen/native/UpSample.h>
 #include <ATen/native/cpu/Loops.h>
 #include <ATen/native/quantized/affine_quantizer.h>
+#include <ATen/native/quantized/fake_quant_affine.h>
 #include <ATen/native/quantized/cpu/quantized_ops.h>
 #include <c10/util/irange.h>
 
@@ -32,7 +33,7 @@ void check_tensor_memory_format(const Tensor& ref, const Tensor& other) {
   TORCH_CHECK(
       other.is_contiguous(ref.suggest_memory_format()),
       "Float tensor should be contiguous "
-      "in same memory format as quantizd tensor");
+      "in same memory format as quantized tensor");
 }
 
 // ****************** HEY YOU! YES YOU! Read this! ********************
@@ -194,10 +195,31 @@ int64_t hsum(const uint8_t* A, int len) {
 
   alignas(64) int32_t temp[8];
   _mm256_store_si256(reinterpret_cast<__m256i*>(temp), sum_v);
-  for (int k = 0; k < 8; ++k) {
+  for (const auto k : c10::irange(8)) {
     row_sum += temp[k];
   }
-#endif // CPU_CAPABILITY_AVX2
+#elif defined(CPU_CAPABILITY_AVX512)
+  __m512i sum_v = _mm512_setzero_si512();
+  __m512i one_epi16_v = _mm512_set1_epi16(1);
+  __m512i one_epi8_v = _mm512_set1_epi8(1);
+  // vectorized
+  for (; i < len / 64 * 64; i += 64) {
+    __m512i src_v = _mm512_loadu_si512(reinterpret_cast<__m512i const*>(A + i));
+    sum_v = _mm512_add_epi32(
+      sum_v,
+      _mm512_madd_epi16(
+        // first argument is unsigned, second is signed
+        _mm512_maddubs_epi16(src_v, one_epi8_v),
+      one_epi16_v)
+    );
+  }
+
+  alignas(64) int32_t temp[16];
+  _mm512_store_si512(reinterpret_cast<__m512i*>(temp), sum_v);
+  for (const auto k : c10::irange(16)) {
+    row_sum += temp[k];
+  }
+#endif // CPU_CAPABILITY_AVX2 or CPU_CAPABILITY_AVX512
 
   // scalar
   for (; i < len; ++i) {
@@ -230,10 +252,31 @@ int64_t hsum(const int8_t* A, int len) {
 
   alignas(64) int32_t temp[8];
   _mm256_store_si256(reinterpret_cast<__m256i*>(temp), sum_v);
-  for (int k = 0; k < 8; ++k) {
+  for (const auto k : c10::irange(8)) {
     row_sum += temp[k];
   }
-#endif // CPU_CAPABILITY_AVX2
+#elif defined(CPU_CAPABILITY_AVX512)
+  __m512i sum_v = _mm512_setzero_si512();
+  __m512i one_epi16_v = _mm512_set1_epi16(1);
+  __m512i one_epi8_v = _mm512_set1_epi8(1);
+  // vectorized
+  for (; i < len / 64 * 64; i += 64) {
+    __m512i src_v = _mm512_loadu_si512(reinterpret_cast<__m512i const*>(A + i));
+    sum_v = _mm512_add_epi32(
+      sum_v,
+      _mm512_madd_epi16(
+        // first argument is unsigned, second is signed
+        _mm512_maddubs_epi16(one_epi8_v, src_v),
+      one_epi16_v)
+    );
+  }
+
+  alignas(64) int32_t temp[16];
+  _mm512_store_si512(reinterpret_cast<__m512i*>(temp), sum_v);
+  for (const auto k : c10::irange(16)) {
+    row_sum += temp[k];
+  }
+#endif // CPU_CAPABILITY_AVX2 or CPU_CAPABILITY_AVX512
 
   // scalar
   for (; i < len; ++i) {
@@ -255,7 +298,7 @@ int64_t hsum(const int32_t* A, int len) {
     __m256i src_epi32 = _mm256_loadu_si256(reinterpret_cast<__m256i const*>(A + i));
     // widen
     __m128i src_lo_epi32 = _mm256_castsi256_si128(src_epi32);
-    __m128i src_hi_epi32 = _mm256_extractf128_si256(src_epi32, 1);
+    __m128i src_hi_epi32 = _mm256_extracti128_si256(src_epi32, 1);
     __m256i src_lo_epi64 = _mm256_cvtepi32_epi64(src_lo_epi32);
     __m256i src_hi_epi64 = _mm256_cvtepi32_epi64(src_hi_epi32);
     // add
@@ -265,10 +308,30 @@ int64_t hsum(const int32_t* A, int len) {
 
   alignas(64) int64_t temp[4];
   _mm256_store_si256(reinterpret_cast<__m256i*>(temp), sum_epi64);
-  for (int k = 0; k < 4; ++k) {
+  for (const auto k : c10::irange(4)) {
     row_sum += temp[k];
   }
-#endif // CPU_CAPABILITY_AVX2
+#elif defined(CPU_CAPABILITY_AVX512)
+  __m512i sum_epi64 = _mm512_setzero_si512();
+  // vectorized
+  for (; i < len / 16 * 16; i += 16) {
+    __m512i src_epi32 = _mm512_loadu_si512(reinterpret_cast<__m512i const*>(A + i));
+    // widen
+    __m256i src_lo_epi32 = _mm512_castsi512_si256(src_epi32);
+    __m256i src_hi_epi32 = _mm512_extracti32x8_epi32(src_epi32, 1);
+    __m512i src_lo_epi64 = _mm512_cvtepi32_epi64(src_lo_epi32);
+    __m512i src_hi_epi64 = _mm512_cvtepi32_epi64(src_hi_epi32);
+    // add
+    sum_epi64 = _mm512_add_epi64(sum_epi64, src_lo_epi64);
+    sum_epi64 = _mm512_add_epi64(sum_epi64, src_hi_epi64);
+  }
+
+  alignas(64) int64_t temp[8];
+  _mm512_store_si512(reinterpret_cast<__m512i*>(temp), sum_epi64);
+  for (const auto k : c10::irange(8)) {
+    row_sum += temp[k];
+  }
+#endif // CPU_CAPABILITY_AVX2 or CPU_CAPABILITY_AVX512
 
   // scalar
   for (; i < len; ++i) {
@@ -308,12 +371,41 @@ int64_t hsum_sq(const uint8_t* A, int len) {
       sum_v_epu32 = _mm256_add_epi32(sum_v_epu32, sq_hi_epu32);
     }
     _mm256_store_si256(reinterpret_cast<__m256i*>(temp), sum_v_epu32);
-    for (int k = 0; k < 8; ++k) {
+    for (const auto k : c10::irange(8)) {
       row_sum += temp[k];
     }
     sum_v_epu32 = _mm256_setzero_si256();
   }
-#endif // CPU_CAPABILITY_AVX2
+#elif defined(CPU_CAPABILITY_AVX512)
+  __m512i sum_v_epu32 = _mm512_setzero_si512();
+  alignas(64) int32_t temp[16];
+  int overflow_threshold = 262144; // 2147483647(max of int32)/(512*512)*8 = 262144
+  int loop = len / overflow_threshold + 1;
+  for(int j=0; j<=loop; j++){
+    for (; ((i < overflow_threshold * j) && (i < len / 32 * 32)); i += 32) {
+      // (i31, ..., i0)
+      __m256i src_epu8 = _mm256_loadu_si256(reinterpret_cast<__m256i const*>(A + i));
+      __m512i src_epu16 = _mm512_cvtepu8_epi16(src_epu8);
+      // (i31 ^ 2, ..., i0 ^ 2)
+      __m512i sq_epu16 = _mm512_mullo_epi16(src_epu16, src_epu16);
+      // (i15 ^ 2, ..., i0 ^ 2)
+      __m256i sq_lo_epu16 = _mm512_castsi512_si256(sq_epu16);
+      // (i31 ^ 2, ..., i16 ^ 2)
+      __m256i sq_hi_epu16 = _mm512_extracti32x8_epi32(sq_epu16, 1);
+      // widen to epu32
+      __m512i sq_lo_epu32 = _mm512_cvtepu16_epi32(sq_lo_epu16);
+      __m512i sq_hi_epu32 = _mm512_cvtepu16_epi32(sq_hi_epu16);
+      // add to running sum
+      sum_v_epu32 = _mm512_add_epi32(sum_v_epu32, sq_lo_epu32);
+      sum_v_epu32 = _mm512_add_epi32(sum_v_epu32, sq_hi_epu32);
+    }
+    _mm512_store_si512(reinterpret_cast<__m512i*>(temp), sum_v_epu32);
+    for (const auto k : c10::irange(16)) {
+      row_sum += temp[k];
+    }
+    sum_v_epu32 = _mm512_setzero_si512();
+  }
+#endif // CPU_CAPABILITY_AVX2 or CPU_CAPABILITY_AVX512
 
   // scalar
   for (; i < len; ++i) {
@@ -356,12 +448,45 @@ int64_t hsum_sq(const int8_t* A, int len) {
     }
     _mm256_store_si256(reinterpret_cast<__m256i*>(temp), sum_v_epi32);
 
-    for (int k = 0; k < 8; ++k) {
+    for (const auto k : c10::irange(8)) {
       row_sum += temp[k];
     }
     sum_v_epi32 = _mm256_setzero_si256();
   }
-#endif // CPU_CAPABILITY_AVX2
+#elif defined(CPU_CAPABILITY_AVX512)
+  // vectorized
+  __m512i sum_v_epi32 = _mm512_setzero_si512();
+  alignas(64) int32_t temp[16];
+
+  int overflow_threshold = 1048576; //2147483647/(256*256)*8 = 1048576
+  int loop = len / overflow_threshold + 1;
+
+  for(int j=0; j<=loop; j++){
+    for (; ((i < overflow_threshold * j) && (i < len / 32 * 32)); i += 32) {
+      // (i31, ..., i0)
+      __m256i src_epi8 = _mm256_loadu_si256(reinterpret_cast<__m256i const*>(A + i));
+      __m512i src_epi16 = _mm512_cvtepi8_epi16(src_epi8);
+      // (i31 ^ 2, ..., i0 ^ 2)
+      __m512i sq_epi16 = _mm512_mullo_epi16(src_epi16, src_epi16);
+      // (i15 ^ 2, ..., i0 ^ 2)
+      __m256i sq_lo_epi16 = _mm512_castsi512_si256(sq_epi16);
+      // (i31 ^ 2, ..., i16 ^ 2)
+      __m256i sq_hi_epi16 = _mm512_extracti32x8_epi32(sq_epi16, 1);
+      // widen to epi32
+      __m512i sq_lo_epi32 = _mm512_cvtepi16_epi32(sq_lo_epi16);
+      __m512i sq_hi_epi32 = _mm512_cvtepi16_epi32(sq_hi_epi16);
+      // add to running sum
+      sum_v_epi32 = _mm512_add_epi32(sum_v_epi32, sq_lo_epi32);
+      sum_v_epi32 = _mm512_add_epi32(sum_v_epi32, sq_hi_epi32);
+    }
+    _mm512_store_si512(reinterpret_cast<__m512i*>(temp), sum_v_epi32);
+
+    for (const auto k : c10::irange(16)) {
+      row_sum += temp[k];
+    }
+    sum_v_epi32 = _mm512_setzero_si512();
+  }
+#endif // CPU_CAPABILITY_AVX2 or CPU_CAPABILITY_AVX512
 
   // scalar
   for (; i < len; ++i) {
@@ -388,10 +513,24 @@ float hsum_sq(const int32_t* A, int len) {
 
   alignas(64) float temp[8];
   _mm256_store_ps(temp, sum_ps);
-  for (int k = 0; k < 8; ++k) {
+  for (const auto k : c10::irange(8)) {
     row_sum += static_cast<float>(temp[k]);
   }
-#endif // CPU_CAPABILITY_AVX2
+#elif defined(CPU_CAPABILITY_AVX512)
+  __m512 sum_ps = _mm512_setzero_ps();
+  // vectorized
+  for (; i < len / 16 * 16; i += 16) {
+    __m512i src_epi32 = _mm512_loadu_si512(reinterpret_cast<__m512i const*>(A + i));
+    __m512 src_ps = _mm512_cvtepi32_ps(src_epi32);
+    sum_ps = _mm512_add_ps(sum_ps, _mm512_mul_ps(src_ps, src_ps));
+  }
+
+  alignas(64) float temp[16];
+  _mm512_store_ps(temp, sum_ps);
+  for (const auto k : c10::irange(16)) {
+    row_sum += static_cast<float>(temp[k]);
+  }
+#endif // CPU_CAPABILITY_AVX2 or CPU_CAPABILITY_AVX512
 
   // scalar
   for (; i < len; ++i) {
@@ -493,10 +632,10 @@ static void leaky_qrelu_out_kernel(Tensor& out, const Tensor& qx,
            */
           auto dx_vec_vec = qx_vec.dequantize(i_scale_vec, i_zp_vec,
                                               i_scale_zp_neg_premul_vec);
-          for (auto& dx_vec: dx_vec_vec) {
+          for (auto & dx_vec : dx_vec_vec) {
             const auto multiplicand = Vec::blendv(negval_vec, one_vec,
                                                   dx_vec > zero_vec);
-            dx_vec = dx_vec * multiplicand;
+            dx_vec *= multiplicand;
           }
           return qVec::quantize(dx_vec_vec, o_scale, o_zp, o_inv_scale);
         });
@@ -537,7 +676,7 @@ void qsigmoid_kernel(
         [&](Vec value_qx) -> Vec {
           auto value_dx = value_qx.dequantize(
               scale_vec, zero_point_vec, scale_neg_zp_premul_vec);
-          for (auto& value: value_dx) {
+          for (auto & value : value_dx) {
             value = value.neg();
             value = value.exp();
             value = Vectorized<float>(1.0f) + value;
@@ -601,7 +740,7 @@ void qhardsigmoid_kernel(const Tensor& qx, Tensor& qy) {
         [&](qVec value_qx) -> qVec {
           auto value_dx = value_qx.dequantize(
               scale_vec, zero_point_vec, scale_neg_zp_premul_vec);
-          for (auto& value : value_dx) {
+          for (auto & value : value_dx) {
             value =
                 vec::minimum(
                     vec::maximum(value + kThreeVec, kZeroVec),
@@ -761,7 +900,7 @@ void qthreshold_kernel(
           // dequantize
           auto dx_vec = value_qx.dequantize(
             input_scale_vec, input_zero_point_vec, input_scale_neg_zp_premul_vec);
-          for (auto& value : dx_vec) {
+          for (auto & value : dx_vec) {
             // check if any elements are below threshold
             const auto cmp_to_threshold = value > threshold_vec;
             if (cmp_to_threshold.zero_mask()) {
@@ -807,7 +946,7 @@ void qhardswish_kernel(const Tensor& qx, Tensor& qy) {
         [&](qVec value) -> qVec {
           auto value_dx = value.dequantize(i_scale_vec, i_zero_point_vec,
                                            i_scale_neg_zp_premul_vec);
-          for (auto& value: value_dx) {
+          for (auto & value : value_dx) {
             value = value * vec::minimum(
               vec::maximum(value + three_vec, zero_vec),
               six_vec
@@ -934,11 +1073,12 @@ void qelu_kernel(
         // dequantize
         auto dx_vec_vec = value_qx.dequantize(i_scale_vec, i_zero_point_vec,
                                             i_scale_neg_zp_premul_vec);
-        for (auto& value : dx_vec_vec) {
+        for (auto & value : dx_vec_vec) {
           // quickly check if any elements are below zero
           const auto cmp_to_zero = value > zero_vec;
 
           if (cmp_to_zero.zero_mask()) {
+
             Vec dx_vec_copy_neg_elu = value * one_vec;
             // calculate the negative part of ELU on the copy
             dx_vec_copy_neg_elu = dx_vec_copy_neg_elu * input_scale_coef_vec;
@@ -1238,7 +1378,7 @@ void qmaxpool_2d_nhwc_kernel(
 }
 
 template <typename T>
-void do_avg_pool_nhwc_on_AVX2(
+void do_avg_pool_nhwc_on_AVX_n(
     const typename T::underlying* i_p,
     typename T::underlying* o_p,
     int& c_start,
@@ -1255,17 +1395,25 @@ void do_avg_pool_nhwc_on_AVX2(
     int hsize,
     int wsize,
     int csize) {
-#if defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
+#if (defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_AVX512)) && !defined(_MSC_VER)
   // buffer for channel accumulator, used to interchange channel-loop
   // to inner-most, so that memory access of the input tensor data is
   // continuous.
+#ifdef CPU_CAPABILITY_AVX2
   constexpr int cb_size = 16;
+#else
+  constexpr int cb_size = 8;
+#endif
   constexpr int vec_width = Vectorized<T>::size() / 4;
   constexpr int cb_step = cb_size * vec_width;
   Vectorized<int32_t> acc_buffer[cb_size];
   Vectorized<float> acc_buffer_fp[cb_size];
 
+#ifdef CPU_CAPABILITY_AVX2
   if (vec_width == 8) {
+#else
+  if (vec_width == 16) {
+#endif
     for (int c = c_start; c < csize; c += cb_step) {
       int cend = std::min(cb_size, (csize - c) / vec_width);
       // initialize loop
@@ -1291,14 +1439,23 @@ void do_avg_pool_nhwc_on_AVX2(
       // convert int32 accumulative to fp32
       vec::convert((int*)acc_buffer, (float*)acc_buffer_fp, cend * vec_width);
 
-      // first quantize using AVX using 32 lanes, then 8, finally falls
+      // first quantize using AVX2 or AVX512 using 32 lanes, then 8, finally falls
       // back to single
+#ifdef CPU_CAPABILITY_AVX2
       QuantizeAvx2<T>(
           (float*)acc_buffer_fp,
           o_p + c,
           cend * vec_width,
           multiplier,
           output_zero_point);
+#else
+      QuantizeAvx512<T>(
+          (float*)acc_buffer_fp,
+          o_p + c,
+          cend * vec_width,
+          multiplier,
+          output_zero_point);
+#endif
     }
     c_start = csize / vec_width * vec_width;
   }
@@ -1306,7 +1463,7 @@ void do_avg_pool_nhwc_on_AVX2(
 }
 
 template <typename T>
-void do_avg_pool_on_AVX2(
+void do_avg_pool_on_AVX_n(
     typename T::underlying* i_p,
     typename T::underlying* o_p,
     int64_t& c,
@@ -1325,9 +1482,13 @@ void do_avg_pool_on_AVX2(
     int64_t stride_D,
     int64_t stride_H,
     int64_t stride_W) {
-#if defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
-  constexpr auto vec_width = Vectorized<T>::size() / 4;
+#if (defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_AVX512)) && !defined(_MSC_VER)
+  constexpr int vec_width = Vectorized<T>::size() / 4;
+#ifdef CPU_CAPABILITY_AVX2
   if (vec_width == 8) {
+#else
+  if (vec_width == 16) {
+#endif
     for (; c + vec_width <= channel_size; c += vec_width) {
       int64_t tcntr = 0;
 
@@ -1415,10 +1576,10 @@ void _qadaptive_avg_pool_kernel(
                                istartH * istrideH +
                                istartW * istrideW;
 
-          // Note: If AVX is not available, `do_avg_pool_on_AVX2 is a noop.
+          // Note: If AVX is not available, `do_avg_pool_on_AVX_n is a noop.
           //       In that case, the following loop takes over
           // TODO: more vectorization with loop interleaving
-          do_avg_pool_on_AVX2<scalar_t>(
+          do_avg_pool_on_AVX_n<scalar_t>(
               internal_i_p,
               o_p,
               c,
@@ -1437,7 +1598,6 @@ void _qadaptive_avg_pool_kernel(
               istrideD,
               istrideH,
               istrideW);
-
           // 1) The following loop handles the remaining channels
           // 2) It also handles the Non-AVX2 path
           for (; c < sizeC; ++c) {
@@ -1609,7 +1769,7 @@ void _qavg_pool_nhwc_kernel(
           // For int8 quantization, we implicitly use int32 as accumulation
           // Or else, it will go to the slow path
           // TODO: support 16bit, 32bit, and etc.
-          do_avg_pool_nhwc_on_AVX2<scalar_t>(
+          do_avg_pool_nhwc_on_AVX_n<scalar_t>(
               i_p,
               o_p,
               c_start,
@@ -1743,7 +1903,7 @@ void qavg_pool3d_nhwc_kernel(
 }
 
 template <typename T>
-int64_t do_quantized_bilinear_on_AVX2(
+int64_t do_quantized_bilinear_on_AVX_n(
     const typename T::underlying*& pos1,
     typename T::underlying*& pos2,
     int64_t input_height,
@@ -1761,9 +1921,13 @@ int64_t do_quantized_bilinear_on_AVX2(
     const int64_t h1p,
     const int64_t w1p) {
   int64_t c = 0;
-#if defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
+#if (defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_AVX512)) && !defined(_MSC_VER)
   constexpr auto vec_width = Vectorized<T>::size() / 4;
+#ifdef CPU_CAPABILITY_AVX2
   if (vec_width == 8) {
+#else
+  if (vec_width == 16) {
+#endif
     for (; c + vec_width <= channels; c += vec_width) {
       Vectorized<float> pos1_fp_v[4];
       Vectorized<int32_t> pos1_int_v[4];
@@ -1860,7 +2024,7 @@ void qupsample_bilinear2d_nhwc_kernel(
                   o_p + (h2 * output_width + w2) * channels;
               // We have to isolate this function out because the VS does not
               // expand the macro correctly.
-              c = do_quantized_bilinear_on_AVX2<scalar_t>(
+              c = do_quantized_bilinear_on_AVX_n<scalar_t>(
                   pos1,
                   pos2,
                   input_height,
@@ -1924,7 +2088,7 @@ void qtopk_kernel(Tensor& values,
     auto loop = [&](char** data, const int64_t* strides, int64_t n) {
       using underlying_t = typename scalar_t::underlying;
       static_assert(sizeof(scalar_t) == sizeof(underlying_t), "");
-      return topk_impl_loop<underlying_t>(
+      return topk_impl_loop<underlying_t, underlying_t>(
           mode_values_stride, mode_indices_stride, tmp_values_stride,
           k, sizes[dim], largest, sorted, data, strides, n);
     };
@@ -1988,7 +2152,7 @@ void q_batch_norm_kernel(
         reinterpret_cast<scalar_t::underlying*>(input.data_ptr());
     scalar_t::underlying* Y = reinterpret_cast<scalar_t::underlying*>(output.data_ptr());
 
-    constexpr int kVLen = 8;
+    constexpr int kVLen = Vectorized<float>::size();
     const int64_t outer_size = N * HxW;
     using Vec = Vectorized<scalar_t>;
     // Hoisted variables
@@ -2058,14 +2222,16 @@ void q_batch_norm_kernel(
 
 }
 
-void fake_quantize_tensor_cachemask_kernel(
-    Tensor& output,
-    Tensor& mask,
-    const Tensor& input,
-    float sc,
-    int64_t z_point,
-    int64_t quant_min,
-    int64_t quant_max) {
+void _fake_quantize_tensor_helper(
+  Tensor& output,
+  Tensor& mask,
+  const Tensor& input,
+  int fake_quant_on,
+  float sc,
+  int64_t z_point,
+  int64_t quant_min,
+  int64_t quant_max) {
+
   float inv_scale = 1.0f / sc;
 
   auto iter_combined = TensorIteratorConfig()
@@ -2083,12 +2249,39 @@ void fake_quantize_tensor_cachemask_kernel(
         scalar_t* input_val = (scalar_t*)(data[2] + i * strides[2]);
 
         const auto qval = static_cast<int64_t>(z_point + std::nearbyint(*input_val * inv_scale));
+        if (fake_quant_on) {
         *output_val = (std::fmin(std::fmax(qval, quant_min), quant_max) - z_point) * sc;
         *mask_val = ((quant_min <= qval) && (qval <= quant_max));
+        } else {
+          *output_val = *input_val;
+          *mask_val = 1;
+        }
       }
     });
   });
+  }
 
+void fake_quantize_tensor_cachemask_kernel(
+    Tensor& output,
+    Tensor& mask,
+    const Tensor& input,
+    float sc,
+    int64_t z_point,
+    int64_t quant_min,
+    int64_t quant_max) {
+  _fake_quantize_tensor_helper(output, mask, input, 1, sc, z_point, quant_min, quant_max);
+}
+
+void fake_quantize_tensor_cachemask_tensor_qparams_kernel(
+    Tensor& output,
+    Tensor& mask,
+    const Tensor& input,
+    const Tensor& sc,
+    const Tensor& z_point,
+    const Tensor& fake_quant_enabled,
+    int64_t quant_min,
+    int64_t quant_max) {
+  _fake_quantize_tensor_helper(output, mask, input, fake_quant_enabled.item().toInt(), sc.item().toFloat(), z_point.item().toInt(), quant_min, quant_max);
 }
 
 void fake_quantize_learnable_tensor_grad_kernel_cpu(
@@ -2153,14 +2346,14 @@ void fake_quant_per_channel_cachemask_cpu(
   //   for simplicity, as we do not expect this to be a bottleneck.
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "fake_quantize_channel_cachemask_cpu_type_handling", [&] {
     // write mask
-    cpu_kernel(iter_mask, [=](scalar_t self, float scale, int64_t zero_point) -> bool {
+    cpu_kernel(iter_mask, [=](scalar_t self, float scale, int32_t zero_point) -> bool {
       float inv_scale = 1.0f / scale;
       const auto qval = static_cast<int64_t>(zero_point + std::nearbyint(self * inv_scale));
       return ((quant_min <= qval) && (qval <= quant_max));
     });
 
     // write fake_quant
-    cpu_kernel(iter, [=](scalar_t self, float scale, int64_t zero_point) -> scalar_t {
+    cpu_kernel(iter, [=](scalar_t self, float scale, int32_t zero_point) -> scalar_t {
       float inv_scale = 1.0f / scale;
       // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
       return (std::fmin(
@@ -2262,7 +2455,7 @@ void quantized_normalize_kernel(
     float y_scale = Y->q_scale();
     float y_inv_scale = 1.0f / y_scale;
 
-    constexpr int kFloatVLen = 8;
+    constexpr int kFloatVLen = fVec::size();
     int64_t kIntVLen = kFloatVLen * qVec::float_num_vecs();
     int64_t kNumIntVecInLayer = N / kIntVLen;
     int64_t kNonVecRemInLayer = N % kIntVLen;
@@ -3065,109 +3258,135 @@ void dequantize_tensor_per_tensor_affine_sub_byte_cpu(
 
 } // namespace
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+// Some quantization tests are flaky on Windows with AVX512. If --continue-through-error
+// is used, only one fails. But if the failing test is skipped, another one fails.
+// If the second test is also skipped, a third one fails.
+// So, until Quantization support for Windows is fixed for AVX512,
+// AVX2 kernels would be used instead. Ref: GH 56992.
+#if defined(CPU_CAPABILITY_AVX512) && defined(_WIN32)
+REGISTER_NO_AVX512_DISPATCH(dequantize_tensor_per_channel_affine_stub,
+                            dequantize_tensor_per_channel_affine_fn);
+REGISTER_NO_AVX512_DISPATCH(dequantize_tensor_per_tensor_affine_stub,
+                            dequantize_tensor_per_tensor_affine_fn);
+REGISTER_NO_AVX512_DISPATCH(dequantize_tensor_per_channel_float_qparams_stub,
+                            dequantize_tensor_per_channel_float_qparams_fn);
+REGISTER_NO_AVX512_DISPATCH(fake_quant_grad_learnable_tensor_stub,
+                            fake_quant_learnable_grad_tensor_fn);
+REGISTER_NO_AVX512_DISPATCH(fake_quant_per_channel_cachemask_stub,
+                            fake_quant_per_channel_cachemask_fn);
+REGISTER_NO_AVX512_DISPATCH(fake_quant_tensor_cachemask_stub,
+                            fake_quant_tensor_cachemask_fn);
+REGISTER_NO_AVX512_DISPATCH(fake_quant_tensor_cachemask_tensor_qparams_stub,
+                            fake_quant_tensor_cachemask_tensor_qparams_fn);
+REGISTER_NO_AVX512_DISPATCH(qadaptive_avg_pool2d_nhwc_stub,
+                            qadaptive_avg_pool2d_fn);
+REGISTER_NO_AVX512_DISPATCH(qadaptive_avg_pool3d_ndhwc_stub,
+                            qadaptive_avg_pool3d_fn);
+REGISTER_NO_AVX512_DISPATCH(qadd_relu_stub, qbinary_fn);
+REGISTER_NO_AVX512_DISPATCH(qadd_scalar_relu_stub, qadd_scalar_fn);
+REGISTER_NO_AVX512_DISPATCH(qadd_scalar_stub, qadd_scalar_fn);
+REGISTER_NO_AVX512_DISPATCH(qadd_stub, qbinary_fn);
+REGISTER_NO_AVX512_DISPATCH(qavg_pool2d_nhwc_stub, qavg_pool2d_fn);
+REGISTER_NO_AVX512_DISPATCH(qavg_pool3d_nhwc_stub, qavg_pool3d_fn);
+REGISTER_NO_AVX512_DISPATCH(qbatch_norm_relu_stub, qbatch_norm_fn);
+REGISTER_NO_AVX512_DISPATCH(qbatch_norm_stub, qbatch_norm_fn);
+REGISTER_NO_AVX512_DISPATCH(qcat_nhwc_stub, qcat_nhwc_fn);
+REGISTER_NO_AVX512_DISPATCH(qcat_relu_nhwc_stub, qcat_nhwc_fn);
+REGISTER_NO_AVX512_DISPATCH(qclamp_stub, qclamp_fn);
+REGISTER_NO_AVX512_DISPATCH(qclamp_min_stub, qclamp_minmax_fn);
+REGISTER_NO_AVX512_DISPATCH(qclamp_max_stub, qclamp_minmax_fn);
+REGISTER_NO_AVX512_DISPATCH(qelu_stub, qelu_fn);
+REGISTER_NO_AVX512_DISPATCH(qhardsigmoid_stub, qhardsigmoid_fn);
+REGISTER_NO_AVX512_DISPATCH(qhardswish_stub, qhardswish_fn);
+REGISTER_NO_AVX512_DISPATCH(qmaxpool_2d_nhwc_stub, qmaxpool_2d_fn);
+REGISTER_NO_AVX512_DISPATCH(qmul_relu_stub, qbinary_fn);
+REGISTER_NO_AVX512_DISPATCH(qmul_stub, qbinary_fn);
+REGISTER_NO_AVX512_DISPATCH(qrelu6_stub, qrelu_fn);
+REGISTER_NO_AVX512_DISPATCH(qrelu_leaky_stub, qrelu_leaky_fn);
+REGISTER_NO_AVX512_DISPATCH(qrelu_stub, qrelu_fn);
+REGISTER_NO_AVX512_DISPATCH(qsigmoid_stub, qsigmoid_fn);
+REGISTER_NO_AVX512_DISPATCH(qtanh_stub, qtanh_fn);
+REGISTER_NO_AVX512_DISPATCH(qthreshold_stub, qthreshold_fn);
+REGISTER_NO_AVX512_DISPATCH(qtopk_stub, qtopk_fn);
+REGISTER_NO_AVX512_DISPATCH(fake_quant_grad_learnable_channel_stub,
+                            fake_quant_learnable_per_channel_fn);
+REGISTER_NO_AVX512_DISPATCH(quantize_tensor_per_tensor_affine_stub,
+                            quantize_tensor_per_tensor_affine_fn);
+REGISTER_NO_AVX512_DISPATCH(quantize_tensor_per_channel_affine_stub,
+                            quantize_tensor_per_channel_affine_fn);
+REGISTER_NO_AVX512_DISPATCH(quantize_tensor_per_channel_float_qparams_stub,
+                            quantize_tensor_per_channel_float_qparams_fn);
+REGISTER_NO_AVX512_DISPATCH(quantized_normalize_stub, qnormalize_fn);
+REGISTER_NO_AVX512_DISPATCH(qupsample_bilinear2d_nhwc_stub, qupsample_bilinear2d_fn);
+REGISTER_NO_AVX512_DISPATCH(quantize_tensor_per_tensor_affine_sub_byte_stub,
+                            quantize_tensor_per_tensor_affine_sub_byte_fn);
+REGISTER_NO_AVX512_DISPATCH(dequantize_tensor_per_tensor_affine_sub_byte_stub,
+                            dequantize_tensor_per_tensor_affine_sub_byte_fn);
+#else
 REGISTER_DISPATCH(dequantize_tensor_per_channel_affine_stub,
                   &dequantize_tensor_per_channel_affine_cpu);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(dequantize_tensor_per_tensor_affine_stub,
                   &dequantize_tensor_per_tensor_affine_cpu);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(dequantize_tensor_per_channel_float_qparams_stub,
                   &dequantize_tensor_per_channel_float_qparams_cpu);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(fake_quant_grad_learnable_tensor_stub,
                   &fake_quantize_learnable_tensor_grad_kernel_cpu);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(fake_quant_per_channel_cachemask_stub, &fake_quant_per_channel_cachemask_cpu);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(fake_quant_tensor_cachemask_stub,
                   &fake_quantize_tensor_cachemask_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+REGISTER_DISPATCH(fake_quant_tensor_cachemask_tensor_qparams_stub,
+                  &fake_quantize_tensor_cachemask_tensor_qparams_kernel);
 REGISTER_DISPATCH(qadaptive_avg_pool2d_nhwc_stub,
                   &qadaptive_avg_pool2d_nhwc_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(qadaptive_avg_pool3d_ndhwc_stub,
                   &qadaptive_avg_pool3d_ndhwc_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(qadd_relu_stub, &qadd_kernel<true>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(qadd_scalar_relu_stub, &qadd_scalar_kernel<true>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(qadd_scalar_stub, &qadd_scalar_kernel<false>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(qadd_stub, &qadd_kernel<false>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(qavg_pool2d_nhwc_stub, &qavg_pool2d_nhwc_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(qavg_pool3d_nhwc_stub, &qavg_pool3d_nhwc_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(qbatch_norm_relu_stub, &q_batch_norm_kernel<true>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(qbatch_norm_stub, &q_batch_norm_kernel<false>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(qcat_nhwc_stub, &qcat_nhwc_kernel<false>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(qcat_relu_nhwc_stub, &qcat_nhwc_kernel<true>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(qclamp_stub, &qclamp_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(qclamp_min_stub, &qclamp_min_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(qclamp_max_stub, &qclamp_max_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(qelu_stub, &qelu_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(qhardsigmoid_stub, &qhardsigmoid_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(qhardswish_stub, &qhardswish_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(qmaxpool_2d_nhwc_stub, &qmaxpool_2d_nhwc_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(qmul_relu_stub, &qmul_kernel<true>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(qmul_stub, &qmul_kernel<false>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(qrelu6_stub, &qrelu6_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(qrelu_leaky_stub, &leaky_qrelu_out_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(qrelu_stub, &qrelu_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(qsigmoid_stub, &qsigmoid_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(qtanh_stub, &qtanh_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(qthreshold_stub, &qthreshold_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(qtopk_stub, &qtopk_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-REGISTER_DISPATCH(fake_quant_grad_learnable_channel_stub, &fake_quantize_learnable_channel_grad_kernel_cpu);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+REGISTER_DISPATCH(fake_quant_grad_learnable_channel_stub,
+                  &fake_quantize_learnable_channel_grad_kernel_cpu);
 REGISTER_DISPATCH(
     quantize_tensor_per_tensor_affine_stub,
     &quantize_tensor_per_tensor_affine_cpu);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(
     quantize_tensor_per_channel_affine_stub,
     &quantize_tensor_per_channel_affine_cpu);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(
     quantize_tensor_per_channel_float_qparams_stub,
     &quantize_tensor_per_channel_float_qparams_cpu);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(quantized_normalize_stub, &quantized_normalize_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(qupsample_bilinear2d_nhwc_stub,
                   &qupsample_bilinear2d_nhwc_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(
     quantize_tensor_per_tensor_affine_sub_byte_stub,
     &quantize_tensor_per_tensor_affine_sub_byte_cpu);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(
     dequantize_tensor_per_tensor_affine_sub_byte_stub,
     &dequantize_tensor_per_tensor_affine_sub_byte_cpu);
-
+#endif // CPU_CAPABILITY_AVX512 && _WIN32
 
 } // namespace native
 } // namespace at

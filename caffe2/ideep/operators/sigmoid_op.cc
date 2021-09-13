@@ -58,9 +58,7 @@ class IDEEPSigmoidGradientOp final : public IDEEPOperator {
   OUTPUT_TAGS(INPUT_GRAD);
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(Sigmoid, IDEEPSigmoidOp);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(SigmoidGradient, IDEEPSigmoidGradientOp);
 
 } // namespace

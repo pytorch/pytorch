@@ -7,7 +7,7 @@ import unittest
 import torch
 import torch._C
 from torch.testing import FileCheck
-from pathlib import Path
+from torch.jit.mobile import _load_for_lite_interpreter
 
 from torch.testing._internal.common_utils import (
     IS_FBCODE,
@@ -16,6 +16,7 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     TEST_WITH_ROCM,
     skipIfRocm,
+    find_library_location,
 )
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
@@ -73,9 +74,8 @@ class JitBackendTestCase(JitTestCase):
 
     def setUp(self):
         super().setUp()
-        torch_root = Path(__file__).resolve().parent.parent.parent
-        p = torch_root / 'build' / 'lib' / 'libjitbackend_test.so'
-        torch.ops.load_library(str(p))
+        lib_file_path = find_library_location('libjitbackend_test.so')
+        torch.ops.load_library(str(lib_file_path))
         # Subclasses are expected to set up three variables in their setUp methods:
         # module - a regular, Python version of the module being tested
         # scripted_module - a scripted version of module
@@ -343,46 +343,42 @@ class SelectiveLoweringTest(JitBackendTestCase):
         FileCheck() \
             .check("OuterModule") \
             .check_not("__torch__.torch.classes.__backends__.test_backend") \
-            .check("test_backendLoweredModule") \
+            .check("LoweredModule.test_backend") \
             .run(self.lowered_module.graph)
 
         # Check that self.lowered_module.sub1/sub2 were not lowered but that BasicModule has been replaced in their graphs.
         FileCheck() \
             .check("MiddleModule") \
             .check("BasicModule") \
-            .check_not("test_backendLoweredModule") \
+            .check_not("LoweredModule.test_backend") \
             .run(self.scripted_module.sub1.graph)
         FileCheck() \
             .check("MiddleModule") \
             .check_not("__torch__.torch.classes.__backends__.test_backend") \
-            .check("test_backendLoweredModule") \
-            .check_not("BasicModule") \
+            .check("LoweredModule.test_backend") \
             .run(self.lowered_module.sub1.graph)
 
         FileCheck() \
             .check("MiddleModule") \
             .check("BasicModule") \
-            .check_not("test_backendLoweredModule") \
+            .check_not("LoweredModule.test_backend") \
             .run(self.scripted_module.sub2.graph)
         FileCheck() \
             .check("MiddleModule") \
             .check_not("__torch__.torch.classes.__backends__.test_backend") \
-            .check("test_backendLoweredModule") \
-            .check_not("BasicModule") \
+            .check("LoweredModule.test_backend") \
             .run(self.lowered_module.sub2.graph)
 
         # Check that self.lowered_module.sub1/sub2.submodule were lowered. Its graph should mention
         # __torch__.torch.classes.__backends__.test_backend, the TorchBind class for executing functions
         # on the test JIT backend.
         FileCheck() \
-            .check("test_backendLoweredModule") \
-            .check_not("BasicModule") \
+            .check("LoweredModule.test_backend") \
             .check("__torch__.torch.classes.__backends__.test_backend") \
             .run(self.lowered_module.sub1.submodule.graph)
 
         FileCheck() \
-            .check("test_backendLoweredModule") \
-            .check_not("BasicModule") \
+            .check("LoweredModule.test_backend") \
             .check("__torch__.torch.classes.__backends__.test_backend") \
             .run(self.lowered_module.sub2.submodule.graph)
 
@@ -391,12 +387,12 @@ class SelectiveLoweringTest(JitBackendTestCase):
             .check("MiddleModule") \
             .check("BasicModule") \
             .check_not("__torch__.torch.classes.__backends__.test_backend") \
-            .check_not("test_backendLoweredModule") \
+            .check_not("LoweredModule.test_backend") \
             .run(self.scripted_module.other.graph)
         FileCheck() \
             .check("BasicModule") \
             .check_not("__torch__.torch.classes.__backends__.test_backend") \
-            .check_not("test_backendLoweredModule") \
+            .check_not("LoweredModule.test_backend") \
             .run(self.scripted_module.other.submodule.graph)
 
     def test_errors(self):
@@ -465,3 +461,288 @@ class TestBackends(JitTestCase):
     @skipIfRocm
     def test_errors(self):
         self.selective_lowering_test.test_errors()
+
+"""
+Unit Tests for backend with compiler
+This test case and the existing TestBackends are separate because they cover different aspects.
+The actual backend implementation in this test is different.
+It has a simple demo compiler to test the end-to-end flow in mobile.
+However, this test cannot cover the selective_lowering for now, which is covered in TestBackends.
+"""
+class BasicModuleAdd(torch.nn.Module):
+    """
+    A simple add Module used to test to_backend lowering machinery.
+    """
+
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, x, h):
+        return x + h
+
+# This is ignored in IS_WINDOWS or IS_MACOS cases. Hence we need the one in TestBackends.
+@unittest.skipIf(TEST_WITH_ROCM or IS_SANDCASTLE or IS_WINDOWS or IS_MACOS or IS_FBCODE,
+                 "Non-portable load_library call used in test")
+class JitBackendTestCaseWithCompiler(JitTestCase):
+    """
+    A common base class for JIT backend tests with compilers that contains common utility
+    functions for output comparison.
+    """
+
+    def setUp(self):
+        super().setUp()
+        lib_file_path = find_library_location('libbackend_with_compiler.so')
+        torch.ops.load_library(str(lib_file_path))
+        # Subclasses are expected to set up four variables in their setUp methods:
+        # module - a regular, Python version of the module being tested
+        # scripted_module - a scripted version of module
+        # lowered_modle - a version of module lowered to a backend
+        # mobile_module - a module with a format that Pytorch Mobile can execute
+
+    def check_forward(self, input):
+        """
+        Check that the forward function produces the same output using
+        Python, regular JIT, the backend, and mobile for the given 'input'.
+        """
+
+        # Get outputs from forward.
+        python_output = self.module.forward(*input)
+        jit_output = self.scripted_module.forward(*input)
+        backend_output = self.lowered_module(*input)
+        mobile_output = self.mobile_module(*input)
+
+        # The answers returned by Python, JIT, to_backend, and mobile should all match.
+        self.assertEqual(python_output, backend_output)
+        self.assertEqual(jit_output, backend_output)
+        self.assertEqual(mobile_output, backend_output)
+
+    def test_execution(self):
+        """
+        Stub for correctness tests.
+        """
+        pass
+
+    def test_errors(self):
+        """
+        Stub for testing error checking.
+        """
+        pass
+
+class BasicModuleTestWithCompiler(JitBackendTestCaseWithCompiler):
+    """
+    Tests for BasicModuleAdd.
+    """
+
+    def setUp(self):
+        super().setUp()
+        # Create Python, JIT and backend versions of BasicModuleAdd.
+        self.module = BasicModuleAdd()
+        self.scripted_module = torch.jit.script(BasicModuleAdd())
+        compile_spec = {
+            "forward": {
+                "input_shapes": "((1, 1, 320, 240), (1, 3))",
+                "some_other_option": "True",
+            },
+        }
+        self.lowered_module = torch._C._jit_to_backend(
+            "backend_with_compiler_demo", self.scripted_module, compile_spec)
+        # Create mobile version of BasicModuleAdd
+        buffer = io.BytesIO(self.lowered_module._save_to_buffer_for_lite_interpreter())
+        buffer.seek(0)
+        self.mobile_module = _load_for_lite_interpreter(buffer)
+
+    def test_execution(self):
+        # Test execution with backend against Python and JIT.
+        input = torch.randn(5)
+        self.check_forward((input, input))
+
+class ErrorMessagesWithCompiler(JitBackendTestCase):
+    """
+    Tests for errors that occur with compiler, specifically:
+        * an operator is not supported by the backend
+    """
+
+    class ModuleNotSupported(torch.nn.Module):
+        """
+        A module with an operator that is not supported.
+        """
+        def __init__(self):
+            super().__init__()
+
+        def forward(self, x, h):
+            return x * h
+            self._loweredmodule.forward()
+
+    def setUp(self):
+        super().setUp()
+
+    def test_errors(self):
+        scripted_module_n = torch.jit.script(ErrorMessagesWithCompiler.ModuleNotSupported())
+        # Test exception is thrown when lowering a module with an unsupported operator
+        with self.assertRaisesRegexWithHighlight(RuntimeError,
+                                                 # Special escape characters are replaced with '.'
+                                                 r"""The node of aten::mul is not supported in this compiler. .*
+        def forward.self, x, h.:
+            return x . h
+                   ~~~~~ <--- HERE
+            self._loweredmodule.forward..
+""", ""):
+            lowered_module_n = torch._C._jit_to_backend("backend_with_compiler_demo", scripted_module_n, {"forward": {"": ""}})
+
+class CompModuleTestWithCompiler(JitBackendTestCase):
+    """
+    Tests for CompModule, which is a module with two lowered submodules
+    """
+
+    class BasicModuleSub(torch.nn.Module):
+        """
+        A simple subtraction Module to be used in CompModule.
+        """
+        def __init__(self):
+            super().__init__()
+
+        def forward(self, x, h):
+            return x - h
+
+    class CompModule(torch.nn.Module):
+        """
+        A module with two lowered submodules.
+        """
+
+        def __init__(self, addmodule, submodule):
+            super().__init__()
+            self.lowered_add = addmodule
+            self.lowered_sub = submodule
+
+        def forward(self, a, b, s):
+            c = self.lowered_add.forward(a, b)
+            d = self.lowered_sub.forward(a, b)
+            y = s * (c * d)
+            return y
+
+    def setUp(self):
+        super().setUp()
+        # Create Python and JIT versions of CompModule with lowered submodules.
+        compile_spec = {
+            "forward": {
+                "input_shapes": "((1, 1, 320, 240), (1, 3))",
+                "some_other_option": "True",
+            },
+        }
+        lowered_add = torch._C._jit_to_backend(
+            "backend_with_compiler_demo", torch.jit.script(BasicModuleAdd()), compile_spec)
+        lowered_sub = torch._C._jit_to_backend(
+            "backend_with_compiler_demo",
+            torch.jit.script(CompModuleTestWithCompiler.BasicModuleSub()),
+            {"forward": {"": ""}}
+        )
+        self.module = CompModuleTestWithCompiler.CompModule(lowered_add, lowered_sub)
+        self.scripted_module = torch.jit.script(CompModuleTestWithCompiler.CompModule(lowered_add, lowered_sub))
+        # No backend version of CompModule currently, so this is filler.
+        self.lowered_module = self.scripted_module
+        # Create a mobile version of CompModule from JIT version
+        buffer = io.BytesIO(self.scripted_module._save_to_buffer_for_lite_interpreter())
+        buffer.seek(0)
+        self.mobile_module = _load_for_lite_interpreter(buffer)
+
+    def test_execution(self):
+        # Test execution with backend against Python and JIT.
+        input1 = torch.randn(5)
+        input2 = torch.randn(5)
+
+        # Test forward.
+        self.check_function("forward", (input1, input2, input2))
+
+# This is needed for IS_WINDOWS or IS_MACOS to skip the tests.
+@unittest.skipIf(TEST_WITH_ROCM or IS_SANDCASTLE or IS_WINDOWS or IS_MACOS or IS_FBCODE,
+                 "Non-portable load_library call used in test")
+class TestBackendsWithCompiler(JitTestCase):
+    """
+    This class wraps and invokes all subclasses of JitBackendTestCaseWithCompiler
+    so that each one does not have to be individually imported in test_jit.py.
+    """
+
+    def __init__(self, name):
+        super().__init__(name)
+        self.basic_module_compiler_test = BasicModuleTestWithCompiler(name)
+        self.error_module_compiler_test = ErrorMessagesWithCompiler(name)
+        self.comp_module_compiler_test = CompModuleTestWithCompiler(name)
+
+    def setUp(self):
+        super().setUp()
+        if not TEST_WITH_ROCM:
+            self.basic_module_compiler_test.setUp()
+            self.error_module_compiler_test.setUp()
+            self.comp_module_compiler_test.setUp()
+
+    @skipIfRocm
+    def test_execution(self):
+        self.basic_module_compiler_test.test_execution()
+        self.comp_module_compiler_test.test_execution()
+
+    @skipIfRocm
+    def test_errors(self):
+        self.error_module_compiler_test.test_errors()
+
+
+class CompModuleTestSameNameWithCompiler(JitBackendTestCase):
+    """
+    Tests for CompModule, which is a module with two lowered submodules with same module name
+    """
+
+    class ModuleAdd(torch.nn.Module):
+        """
+        A simple Module used to test to_backend lowering machinery.
+        """
+
+        def __init__(self):
+            super().__init__()
+
+        def forward(self, x, h):
+            return x + h
+
+    class CompModule(torch.nn.Module):
+        """
+        A module with two lowered submodules.
+        """
+
+        def __init__(self):
+            super().__init__()
+            compile_spec = {
+                "forward": {
+                    "some_other_option": "True",
+                },
+            }
+            self.add = torch._C._jit_to_backend(
+                "backend_with_compiler_demo",
+                torch.jit.script(ModuleAdd()),
+                compile_spec,
+            )
+            self.sub = torch._C._jit_to_backend(
+                "backend_with_compiler_demo",
+                torch.jit.script(ModuleAdd()),
+                compile_spec,
+            )
+
+        def forward(self, a, b, s: int):
+            c = self.add.forward(a, b)
+            d = self.sub.forward(a, b)
+            y = s * (c * d)
+            return y
+
+
+    def setUp(self):
+        super().setUp()
+
+        self.module = CompModule()
+        self.scripted_module = torch.jit.script(self.module)
+        buffer = io.BytesIO(self.scripted_module._save_to_buffer_for_lite_interpreter())
+        buffer.seek(0)
+        self.mobile_module = _load_for_lite_interpreter(buffer)
+
+    def test_execution(self):
+        a = torch.ones(1)
+        b = 3 * torch.ones(1)
+        s = 3
+        # Test forward.
+        self.check_function("forward", (a, b, s))

@@ -20,7 +20,6 @@ namespace dataset_ops {
 namespace {
 
 const char kDatasetFieldSeparator = ':';
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 const char* kDatasetLengthField = "lengths";
 
 // how much percent to grow the dataset when needed
@@ -1105,42 +1104,24 @@ class TrimDatasetOp : public Operator<CPUContext> {
   int multiple_of_;
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(CreateTreeCursor, CreateTreeCursorOp);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(ResetCursor, ResetCursorOp);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(ReadNextBatch, ReadNextBatchOp);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(GetCursorOffset, GetCursorOffsetOp);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(ComputeOffset, ComputeOffsetOp);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(SortAndShuffle, SortAndShuffleOp);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(ReadRandomBatch, ReadRandomBatchOp);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(CheckDatasetConsistency, CheckDatasetConsistencyOp);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(Append, AppendOp<CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(AtomicAppend, AtomicAppendOp<CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(CreateTensorVector, CreateTensorVectorOp<CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(TensorVectorSize, TensorVectorSizeOp<CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(ConcatTensorVector, ConcatTensorVectorOp<CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(CollectTensor, CollectTensorOp<CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(PackRecords, PackRecordsOp);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(UnPackRecords, UnPackRecordsOp);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(TrimDataset, TrimDatasetOp);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(CreateTreeCursor)
     .NumInputs(0)
     .NumOutputs(1)
@@ -1217,7 +1198,6 @@ to pass a list of blobs containing the data to read for each one of the fields.
         "fields",
         "A list of strings each one representing a field of the dataset.");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(ResetCursor)
     .NumInputs(1)
     .NumOutputs(0)
@@ -1226,7 +1206,6 @@ Resets the offsets for the given TreeCursor. This operation is thread safe.
 )DOC")
     .Input(0, "cursor", "A blob containing a pointer to the cursor.");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(ReadNextBatch)
     .NumInputs(1, INT_MAX)
     .NumOutputs(1, INT_MAX)
@@ -1244,7 +1223,6 @@ ReadNextBatch is thread safe.
     .Output(0, "field_0", "Tensor containing the next batch for field 0.")
     .Arg("batch_size", "Number of top-level entries to read.");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(GetCursorOffset)
     .NumInputs(1)
     .NumOutputs(1)
@@ -1252,7 +1230,6 @@ OPERATOR_SCHEMA(GetCursorOffset)
     .Input(0, "cursor", "A blob containing a pointer to the cursor.")
     .Output(0, "offsets", "Tensor containing the offsets for the cursor.");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(ComputeOffset)
     .NumInputs(1, INT_MAX)
     .NumOutputs(1)
@@ -1270,7 +1247,6 @@ ComputeOffset is thread safe.
     .Input(1, "dataset_field_0", "First dataset field")
     .Output(0, "field_0", "Tensor containing offset info for this chunk.");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SortAndShuffle)
     .NumInputs(1, INT_MAX)
     .NumOutputs(1)
@@ -1301,7 +1277,6 @@ SortAndShuffle is thread safe.
     .Input(1, "dataset_field_0", "First dataset field")
     .Output(0, "indices", "Tensor containing sorted indices.");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(ReadRandomBatch)
     .NumInputs(1, INT_MAX)
     .NumOutputs(1, INT_MAX)
@@ -1325,7 +1300,6 @@ ReadRandomBatch is thread safe.
     .Arg("batch_size", "Number of top-level entries to read.")
     .Arg("loop_over", "(bool) Repeat the dataset indefinitely");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(CheckDatasetConsistency)
     .NumInputs(1, INT_MAX)
     .NumOutputs(0)
@@ -1341,7 +1315,6 @@ appended to an existing dataset, keeping it consistent.
         "List of strings representing the string names in the format"
         "specified in the doc for CreateTreeCursor.");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Append)
     .NumInputs(2)
     .NumOutputs(1)
@@ -1428,19 +1401,16 @@ A:
         "A",
         "(*Tensor*): output tensor of shape $(N+M, d_1, d_2, ..., d_n)$");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(AtomicAppend)
     .NumInputs(3, INT_MAX)
     .NumOutputs(1, INT_MAX)
     .AllowInplace([](int in, int out) { return in == out + 1; });
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(CreateTensorVector)
     .NumInputs(0)
     .NumOutputs(1)
     .SetDoc("Create a std::unique_ptr<std::vector<Tensor> >");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(TensorVectorSize)
     .NumInputs(1)
     .NumOutputs(1)
@@ -1448,7 +1418,6 @@ OPERATOR_SCHEMA(TensorVectorSize)
     .Input(0, "tensor vector", "std::unique_ptr<std::vector<Tensor> >")
     .Output(0, "size", "int32_t size");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(ConcatTensorVector)
     .NumInputs(1)
     .NumOutputs(1)
@@ -1459,7 +1428,6 @@ along the first dimension.
     .Input(0, "vector of Tensor", "std::unique_ptr<std::vector<Tensor> >")
     .Output(0, "tensor", "tensor after concatenating");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(CollectTensor)
     .NumInputs([](int n) { return n > 0 && n % 2 == 0; })
     .NumOutputs(1, INT_MAX)
@@ -1476,7 +1444,6 @@ output vectors.
 )DOC")
     .Arg("num_to_collect", "The max number of tensors to collect");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(PackRecords)
     .NumInputs(1, INT_MAX)
     .NumOutputs(1)
@@ -1497,7 +1464,6 @@ operators.
         " In order to reverse it back to the original input it has to be "
         "inserted into UnPackRecordsOp.");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(TrimDataset)
     .NumInputs(1, INT_MAX)
     .NumOutputs(1, INT_MAX)
@@ -1512,7 +1478,6 @@ of records that is a multiple of the 'multiple_of' argument.
         "List of strings representing the string names in the format"
         "specified in the doc for CreateTreeCursor.");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(UnPackRecords)
     .NumInputs(1, INT_MAX)
     .NumOutputs(1, INT_MAX)
@@ -1532,33 +1497,19 @@ process.
         "specified in the doc for CreateTreeCursor.")
     .Input(0, "packed_tensor", "The tensor to be unpacked");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(CreateTreeCursor);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(ResetCursor);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(ReadNextBatch);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(ComputeOffset);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(ReadRandomBatch);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(CheckDatasetConsistency);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(Append);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(AtomicAppend);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(CreateTensorVector);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(TensorVectorSize);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(ConcatTensorVector);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(CollectTensor);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(UnPackRecords);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(PackRecords);
 
 class TreeCursorSerializer : public BlobSerializerBase {
@@ -1641,11 +1592,9 @@ class TreeCursorDeserializer : public BlobDeserializerBase {
   }
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_BLOB_SERIALIZER(
     (TypeMeta::Id<std::unique_ptr<TreeCursor>>()),
     TreeCursorSerializer);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_BLOB_DESERIALIZER(std::unique_ptr<TreeCursor>, TreeCursorDeserializer);
 
 } // namespace
@@ -1677,12 +1626,10 @@ void SharedTensorVectorPtrDeserializer::Deserialize(
   blob->GetMutable<std::shared_ptr<std::vector<TensorCPU>>>();
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_BLOB_SERIALIZER(
     (TypeMeta::Id<std::shared_ptr<std::vector<TensorCPU>>>()),
     SharedTensorVectorPtrSerializer);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_BLOB_DESERIALIZER(
     std::shared_ptr<std::vector<TensorCPU>>,
     SharedTensorVectorPtrDeserializer);

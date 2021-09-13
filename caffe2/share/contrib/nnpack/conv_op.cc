@@ -13,7 +13,6 @@
 #include "caffe2/utils/math.h"
 #include "nnpack.h"
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_bool(caffe2_profile_nnpack, false, "");
 namespace caffe2 {
 
@@ -436,7 +435,6 @@ bool NNPACKConvOp::RunOnDeviceWithOrderNCHW() {
   return true;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(Conv, NNPACK, NNPACKConvOp);
 
 } // namespace caffe2

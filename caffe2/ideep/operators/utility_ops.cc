@@ -109,13 +109,9 @@ class IDEEPWeightedSumOp : public IDEEPOperator {
   }
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(CopyCPUToIDEEP, CopyCPUToIDEEPOp);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(CopyIDEEPToCPU, CopyIDEEPToCPUOp);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(Copy, IDEEPCopyOp);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(WeightedSum, IDEEPWeightedSumOp);
 
 // NOLINTNEXTLINE(clang-diagnostic-unused-function,cppcoreguidelines-avoid-non-const-global-variables)

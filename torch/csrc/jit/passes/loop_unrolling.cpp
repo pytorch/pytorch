@@ -2,6 +2,7 @@
 
 #include <ATen/core/interned_strings.h>
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 
 #include <torch/csrc/jit/ir/constants.h>
 #include <torch/csrc/jit/ir/ir_views.h>
@@ -128,7 +129,8 @@ void repeatBody(Block* body, size_t times, Block* dest) {
   std::vector<Value*> io = dest->inputs().vec();
   TORCH_INTERNAL_ASSERT(
       !body->inputs().at(0)->hasUses(), "loop counter should be unused");
-  for (size_t i = 0; i < times; ++i) {
+  for (const auto i : c10::irange(times)) {
+    (void)i; // Suppress unused variable warning
     io[0] = body->inputs().at(0);
     io = insertBlockCopy(*graph, body, io);
   }

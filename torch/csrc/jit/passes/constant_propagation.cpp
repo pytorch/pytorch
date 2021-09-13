@@ -3,6 +3,7 @@
 #include <ATen/core/functional.h>
 #include <ATen/core/ivalue.h>
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/ir/constants.h>
@@ -77,7 +78,7 @@ c10::optional<std::vector<IValue>> runNodeIfInputsAreConstant(
 
       try {
         auto op = n->getOperation();
-        op(&stack);
+        op(stack);
       } catch (...) {
         return c10::nullopt;
       }
@@ -104,7 +105,6 @@ c10::optional<std::vector<IValue>> runNodeIfInputsAreConstant(
 
 namespace {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::unordered_set<Symbol> skip_list = {
     prim::If,
     prim::Loop,
@@ -161,7 +161,7 @@ struct ConstantPropagator {
     }
     auto graph = n->owningGraph();
     WithInsertPoint guard(n);
-    for (size_t i = 0; i < outputs.size(); ++i) {
+    for (const auto i : c10::irange(outputs.size())) {
       auto new_output = tryInsertConstant(*graph, outputs[i]);
       if (new_output) {
         made_change_ = true;
@@ -306,21 +306,6 @@ struct ConstantPropagator {
     made_change_ |= initial_outputs != node->outputs().size();
   }
 
-  // An Op has runnable inputs if:
-  // - All inputs are constants.
-  // - It is an op that forwards tuples, and all inputs are constants
-  // or tuples that we know the ivalue for. We can't use known tuple ivalues
-  // for non-forwarding ops because that Tuple could contain an ivalue that is
-  // not allowed as a constant, for instance, a Tensor with a gradient.
-  bool runnableInputs(Node* n) {
-    if (std::all_of(n->inputs().begin(), n->inputs().end(), [&](Value* v) {
-          return v->node()->kind() == prim::Constant;
-        })) {
-      return true;
-    }
-    return false;
-  };
-
   bool noMutableValues(at::ArrayRef<Value*> values) {
     return std::none_of(values.begin(), values.end(), [](Value* v) {
       return AliasDb::isMutableType(v);
@@ -355,10 +340,13 @@ struct ConstantPropagator {
   }
 
   void ConstantPropagation(Node* n) {
-    bool runnable_inputs = runnableInputs(n);
+    bool constant_inputs =
+        std::all_of(n->inputs().begin(), n->inputs().end(), [&](Value* v) {
+          return v->node()->kind() == prim::Constant;
+        });
     if (n->kind() == prim::If) {
       // inline node if we can, otherwise check for simplified outputs
-      if (runnable_inputs) {
+      if (constant_inputs) {
         inlineIf(n);
       } else {
         ConstantPropagation(n->blocks());
@@ -371,7 +359,7 @@ struct ConstantPropagator {
         ConstantPropagation(n->blocks());
         removeExtraLoopOutputs(n);
       }
-    } else if (runnable_inputs && supportedNode(n)) {
+    } else if (constant_inputs && supportedNode(n)) {
       propagateNode(n);
     } else {
       ConstantPropagation(n->blocks());
@@ -414,7 +402,7 @@ bool ConstantPropagationImmutableTypes(std::shared_ptr<Graph>& graph) {
   if (made_change) {
     EliminateDeadCode(graph);
   }
-  GRAPH_DUMP("After ConstantPropagation: ", graph);
+  GRAPH_DUMP("After ConstantPropagationImmutableTypes: ", graph);
   return made_change;
 }
 

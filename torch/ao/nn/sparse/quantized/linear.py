@@ -1,7 +1,7 @@
 from typing import Optional
 
 import torch
-import torch.nn.intrinsic as nni
+from torch.ao.nn.sparse.quantized.utils import LinearBlockSparsePattern
 from torch.nn.quantized.modules.utils import _quantize_weight, hide_packed_params_repr
 
 # TODO (zaf): Inherit from `quantized.LinearPackedParams` (T83294430)
@@ -105,7 +105,8 @@ class Linear(torch.nn.Module):
         self.scale = 1.0
         self.zero_point = 0
 
-    def _get_name(self):
+    @classmethod
+    def _get_name(cls):
         return 'SparseQuantizedLinear'
 
     def extra_repr(self):
@@ -161,22 +162,20 @@ class Linear(torch.nn.Module):
         r"""Create a quantized sparse module from a float module.
 
         We only care about the convert at this stage, no need for observers just yet.
+
+        TODO: Need to figure out how to store the block shapes in the mod
         """
-        assert type(mod) == cls._FLOAT_MODULE, ' nnq.' + cls.__name__ + '.from_float only works for ' + \
-            cls._FLOAT_MODULE.__name__
+        assert type(mod) == cls._FLOAT_MODULE, cls._get_name() + \
+            '.from_float only works for ' + cls._FLOAT_MODULE.__name__
         # TODO: Need to add options to qconfig to avoid the calibration.
         # TODO: Add calibration for the sparsity
         assert hasattr(mod, 'qconfig'), 'Input float module must have qconfig defined'
         activation_post_process = mod.activation_post_process
-        if type(mod) == nni.LinearReLU:
-            mod = mod[0]
         weight_post_process = mod.qconfig.weight()
 
-        # It is important to multiply by the mask BEFORE calling the `weight_post_process`
-        # TODO (zaf): Mask might not be part of the qconfig (T83295194)
+        # Assumption is that the weight is already sparsified by the
+        # `sparsifier.convert`
         weight = mod.weight
-        if getattr(mod.qconfig, 'mask', False):
-            weight = mod.qconfig.mask * mod.weight
 
         weight_post_process(weight)
         dtype = weight_post_process.dtype
@@ -189,10 +188,7 @@ class Linear(torch.nn.Module):
             assert w_zp == 0, 'Weight zero point must map to 0'
         qweight = _quantize_weight(weight.float(), weight_post_process)
 
-        # Use these default values until we figure out how to augment
-        # `mod` to contain sparse config
-        row_block_size = 1
-        col_block_size = 4
+        row_block_size, col_block_size = LinearBlockSparsePattern.block_size()
         qlinear = cls(mod.in_features,
                       mod.out_features,
                       row_block_size,

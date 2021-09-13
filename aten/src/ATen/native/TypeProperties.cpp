@@ -34,6 +34,10 @@ bool is_conj(const Tensor& self) {
   return self.is_conj();
 }
 
+bool is_neg(const Tensor& self) {
+  return self.is_neg();
+}
+
 bool is_sparse(const Tensor& self) {
   return self.is_sparse();
 }

@@ -2,9 +2,7 @@
 
 namespace caffe2 {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(MomentumSGD, MomentumSGDOp<float, CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(MomentumSGD)
     .NumInputs(3)
     .NumOutputs(2)
@@ -34,14 +32,11 @@ Output is (grad, momentum)
 Note the difference to MomemtumSGDUpdate, which actually performs the
 parameter update (and is thus faster).
 )DOC");
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(MomentumSGD);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     MomentumSGDUpdate,
     MomentumSGDUpdateOp<float, CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(MomentumSGDUpdate)
     .NumInputs(4)
     .NumOutputs(3)
@@ -75,14 +70,11 @@ Note the difference to MomentumSGD, which returns a new gradient
 but does not perform the parameter update.
 
 )DOC");
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(MomentumSGDUpdate);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     SparseMomentumSGDUpdate,
     SparseMomentumSGDUpdateOp<float, CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SparseMomentumSGDUpdate)
     .NumInputs(5)
     .NumOutputs(3)
@@ -119,6 +111,5 @@ same blobs).
     .Output(2, "output_param", "Updated parameter")
     .Arg("momentum", "Momentum hyperparameter.")
     .Arg("nesterov", "(boolean) Whether to use Nesterov Accelerated Gradient.");
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(SparseMomentumSGDUpdate);
 }

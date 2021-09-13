@@ -59,7 +59,6 @@ static_assert(
     string_view::npos != get_fully_qualified_type_name<Dummy>().find("Dummy"),
     "");
 #endif
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TypeIndex, TopLevelName) {
   EXPECT_NE(
       string_view::npos, get_fully_qualified_type_name<Dummy>().find("Dummy"));
@@ -75,7 +74,6 @@ static_assert(
         get_fully_qualified_type_name<Dummy>().find("test_nested_name::Dummy"),
     "");
 #endif
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TypeIndex, NestedName) {
   EXPECT_NE(
       string_view::npos,
@@ -100,7 +98,6 @@ static_assert(
             "test_type_template_parameter::Inner"),
     "");
 #endif
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TypeIndex, TypeTemplateParameter) {
   EXPECT_NE(
       string_view::npos,
@@ -123,7 +120,6 @@ static_assert(
         get_fully_qualified_type_name<Class<38474355>>().find("38474355"),
     "");
 #endif
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TypeIndex, NonTypeTemplateParameter) {
   EXPECT_NE(
       string_view::npos,
@@ -155,7 +151,6 @@ static_assert(
             .find("*"),
     "");
 #endif
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TypeIndex, TypeComputationsAreResolved) {
   EXPECT_NE(
       string_view::npos,
@@ -181,7 +176,6 @@ static_assert(
             typename c10::guts::infer_function_traits_t<Functor>::func_type>(),
     "");
 #endif
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TypeIndex, FunctionTypeComputationsAreResolved) {
   EXPECT_EQ(
       get_fully_qualified_type_name<std::string(int64_t, const Type<int>&)>(),
@@ -205,7 +199,6 @@ static_assert(
             "test_function_arguments_and_returns::Dummy"),
     "");
 #endif
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TypeIndex, FunctionArgumentsAndReturns) {
   EXPECT_NE(
       string_view::npos,

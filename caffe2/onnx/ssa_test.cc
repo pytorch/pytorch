@@ -7,7 +7,6 @@
 #include <tuple>
 #include <unordered_map>
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SsaTest, ConvReluInplace) {
   caffe2::NetDef net;
   auto* op = net.add_op();
@@ -39,7 +38,6 @@ TEST(SsaTest, ConvReluInplace) {
   EXPECT_EQ("Y", net.external_output(0));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SsaTest, FC_Relu_FC_InPlace_Output) {
   caffe2::NetDef net;
   auto* op = net.add_op();

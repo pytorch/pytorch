@@ -4,6 +4,7 @@
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/ir/constants.h>
+#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 
 namespace torch {
@@ -14,10 +15,10 @@ namespace {
 // operators where we expect to find tuples as inputs/outputs
 // this is to assert we are only doing modifications when we know
 // we can flatten tuples
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::unordered_set<Symbol> supported_ops = {
     prim::If,
     prim::Loop,
+    prim::Uninitialized,
     prim::TupleUnpack,
     prim::TupleConstruct,
     prim::TupleIndex,
@@ -310,6 +311,7 @@ static void EnsureNoTuples(Block* block) {
 
 void LowerAllTuples(const std::shared_ptr<Graph>& graph) {
   LowerAllTuples(graph->block());
+  GRAPH_DUMP("After LowerAllTuples: ", graph);
   EliminateDeadCode(graph->block());
   EnsureNoTuples(graph->block());
 }
@@ -325,6 +327,7 @@ void LowerSimpleTuples(Block* block) {
 
 void LowerSimpleTuples(const std::shared_ptr<Graph>& graph) {
   LowerSimpleTuples(graph->block());
+  GRAPH_DUMP("After LowerSimpleTuples: ", graph);
   EliminateDeadCode(graph);
 }
 } // namespace jit

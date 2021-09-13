@@ -40,12 +40,23 @@ def get_node_target(submodules: Dict[str, torch.nn.Module], node: torch.fx.Node)
         target: Any = node.target
         return (
             f"acc_ops.{target.__name__}"
-            if target.__module__ == "glow.fb.fx.acc_ops"
+            if target.__module__ is not None and "acc_ops" in target.__module__
             else _get_qualified_name(target)
         )
     else:
         assert isinstance(node.target, str)
         return node.target
+
+
+def is_node_output_tensor(node: torch.fx.Node) -> bool:
+    """Checks if the node output produces a Tensor or not.
+
+    NOTE: This requires to run `ShapeProp` on the containing fx graph before
+    calling this function. This is because it works by checking the `type`
+    metadata on the node. This metadata is produced by the `ShapeProp`.
+    """
+    type_ = node.meta.get("type", None)
+    return type_ is not None and issubclass(type_, torch.Tensor)
 
 
 class FxNetAccFusionsFinder:

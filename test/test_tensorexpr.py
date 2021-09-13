@@ -6,9 +6,6 @@ import unittest
 
 from torch.testing._internal.common_utils import suppress_warnings, num_profiled_runs, run_tests
 
-from torch.testing._internal.te_utils import CudaCodeGenCreated, CudaCodeGenExecuted, \
-    LLVMCodeGenExecuted, SimpleIREvalExecuted
-
 from torch.testing._internal.jit_utils import JitTestCase
 
 
@@ -27,9 +24,6 @@ class BaseTestClass(JitTestCase):
         torch._C._debug_set_fusion_group_inlining(False)
         self.old_te_must_use_llvm_cpu = torch._C._jit_get_te_must_use_llvm_cpu()
         torch._C._jit_set_te_must_use_llvm_cpu(False)
-        # TODO: CPU fuser currently is disabled when multithreading.
-        self.old_fuse_parallel = torch._C._jit_texpr_parallel_cpu_enabled()
-        torch._C._jit_set_texpr_parallel_cpu_enabled(True)
 
         self.devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
 
@@ -42,7 +36,6 @@ class BaseTestClass(JitTestCase):
         torch._C._jit_override_can_fuse_on_cpu(self.old_cpu_fuser_state)
         torch._C._debug_set_fusion_group_inlining(self.old_fusion_inlining)
         torch._C._jit_set_te_must_use_llvm_cpu(self.old_te_must_use_llvm_cpu)
-        torch._C._jit_set_texpr_parallel_cpu_enabled(self.old_fuse_parallel)
 
     def assertLastGraphAllFused(self):
         self.assertAllFused(torch.jit.last_executed_optimized_graph())
@@ -69,9 +62,6 @@ class TestTensorExprFuser(BaseTestClass):
         np.testing.assert_allclose(a.numpy() + b.numpy(), x.numpy())
 
     def test_three_arg(self):
-        llvm_executed = LLVMCodeGenExecuted()
-        simple_ir_eval_executed = SimpleIREvalExecuted()
-
         def easy(x, y, z):
             aaa = torch.add(x, y)
             bbb = torch.add(aaa, z)
@@ -88,10 +78,6 @@ class TestTensorExprFuser(BaseTestClass):
         self.assertLastGraphAllFused()
         npr = a.numpy() + b.numpy() + c.numpy()
         np.testing.assert_allclose(npr, x.numpy())
-        assert (
-            llvm_executed.elapsed_value() >= 1
-            or simple_ir_eval_executed.elapsed_value() >= 1
-        )
 
     def test_four_arg(self):
         def run_addcmul(x, y, z, w):
@@ -1122,6 +1108,22 @@ class TestTensorExprFuser(BaseTestClass):
             ref = foo(*values)
             np.testing.assert_allclose(ref.cpu().numpy(), x.cpu().numpy())
 
+    def test_cat_with_constant_dim(self):
+        for device in self.devices:
+            def foo(*args):
+                v1 = torch.cat(args, dim=1)
+                v2 = torch.cat([v1], dim=1)
+                return v2 * v2
+
+            empty = torch.tensor([], device=device, dtype=torch.float32)
+            inputs = [empty] + [torch.randn(1, 64, device=device), torch.randn(1, 64, device=device)]
+            traced = torch.jit.trace(foo, inputs)
+
+            x = warmup_and_run_forward(traced, *inputs)
+            self.assertLastGraphAllFused()
+            ref = foo(*inputs)
+            np.testing.assert_allclose(ref.cpu().numpy(), x.cpu().numpy())
+
     def test_scalar(self):
         @torch.jit.script
         def test_float(x: torch.Tensor, y: torch.Tensor, z: torch.Tensor, a: float, b: float) -> torch.Tensor:
@@ -1132,16 +1134,12 @@ class TestTensorExprFuser(BaseTestClass):
             return torch.add(torch.add(x, y, alpha=a), z, alpha=b)
 
         for test in (test_float, test_int):
-            llvm = LLVMCodeGenExecuted()
-            interp = SimpleIREvalExecuted()
             x, y, z = [torch.rand(4) for i in range(3)]
             a, b = 1, 2
             test(x, y, z, a, b)
             r = test(x, y, z, a, b)
             xn, yn, zn = [t.numpy() for t in (x, y, z)]
             np.testing.assert_allclose(r.numpy(), xn + yn * a + zn * b)
-            # FIXME: interp.elapsed_value() also increments due to simplifier
-            assert llvm.elapsed_value() == 1 or interp.elapsed_value() > 1
 
     def test_loop(self):
         @torch.jit.script
@@ -1152,12 +1150,9 @@ class TestTensorExprFuser(BaseTestClass):
                 b = b + y
             return b
 
-        llvm = LLVMCodeGenExecuted()
-        interp = SimpleIREvalExecuted()
         x, y, z = (torch.zeros(32, 32), torch.ones(32, 32), 4)
         test(x, y, z)
         r = test(x, y, z)
-        assert llvm.elapsed_value == 1 or interp.elapsed_value() > 1
 
     def test_slice(self):
         def easy(x, y):
@@ -1167,16 +1162,11 @@ class TestTensorExprFuser(BaseTestClass):
 
         traced = torch.jit.trace(easy, (torch.ones(1024, 1024), torch.zeros(1024, 1024)))
 
-        llvm = LLVMCodeGenExecuted()
-        interp = SimpleIREvalExecuted()
-
         a = torch.ones(1024, 1024)
         x = traced(a, a)
         npr = a[0:512:2]
         npr = npr + npr
         np.testing.assert_allclose(npr.numpy(), x.numpy())
-        # FIXME: interp.elapsed_value() also increments due to simplifier
-        assert llvm.elapsed_value() == 1 or interp.elapsed_value() > 1
 
     def test_unsqueeze(self, N=256):
         def easy(x, y):
@@ -1186,16 +1176,11 @@ class TestTensorExprFuser(BaseTestClass):
 
         traced = torch.jit.trace(easy, (torch.ones(N, N), torch.zeros(N, N)))
 
-        llvm = LLVMCodeGenExecuted()
-        interp = SimpleIREvalExecuted()
-
         a = torch.rand(N, N)
         x = traced(a, a)
         npr = np.expand_dims(a, 0)
         npr = npr + npr
         np.testing.assert_allclose(npr, x.numpy())
-        # FIXME: interp.elapsed_value() also increments due to simplifier
-        assert llvm.elapsed_value() == 1 or interp.elapsed_value() > 1
 
     def _test_softmax(self, device):
         def test_softmax(x, y):
@@ -1230,19 +1215,14 @@ class TestTensorExprFuser(BaseTestClass):
             torch._C._jit_set_texpr_reductions_enabled(old)
 
     def test_softmax_cpu(self):
-        llvm = LLVMCodeGenExecuted()
-        interp = SimpleIREvalExecuted()
         self._test_softmax('cpu')
-        # FIXME: interp.elapsed_value() also increments due to simplifier
-        assert llvm.elapsed_value() == 1 or interp.elapsed_value() > 1
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
     @unittest.skip("global allocs are not supported yet.")
     def test_softmax_cuda(self):
-        cuda = CudaCodeGenExecuted()
         self._test_softmax('cuda')
-        assert cuda.elapsed_value() == 1
 
+    @unittest.skip("float16 is not supported yet.")
     def test_half_gelu(self):
         devices = ["cuda"] if torch.cuda.is_available() else []
 
@@ -1256,6 +1236,23 @@ class TestTensorExprFuser(BaseTestClass):
             b = torch.rand(1024, dtype=torch.half, device=device)
             traced = torch.jit.trace(bias_gelu, (a, b))
             x = warmup_and_run_forward(traced, a, b)
+            self.assertLastGraphAllFused()
+
+    def test_half_bn_relu(self):
+        devices = ["cuda"] if torch.cuda.is_available() else []
+
+        def foo(a, b, c):
+            y = torch.nn.functional.batch_norm(a, b, c)
+            z = y.relu()
+            return z
+
+        for device in devices:
+            a = torch.rand(16, 16, dtype=torch.half, device=device)
+            b = torch.rand(16, dtype=torch.half, device=device)
+            c = torch.rand(16, dtype=torch.half, device=device)
+            traced = torch.jit.trace(foo, (a, b, c))
+            print(traced.graph)
+            x = warmup_and_run_forward(traced, a, b, c)
             self.assertLastGraphAllFused()
 
     def test_exp_pow(self):
@@ -1275,31 +1272,23 @@ class TestTensorExprFuser(BaseTestClass):
         @torch.jit.script
         def test(x, y, z):
             return x.transpose(0, 1) + y + z
-        llvm = LLVMCodeGenExecuted()
-        interp = SimpleIREvalExecuted()
         x = torch.rand(4, 5, 2, 3)
         y = torch.rand(5, 4, 2, 3)
         z = torch.rand(5, 4, 2, 3)
         ref = test(x, y, z)
         res = test(x, y, z)
         np.testing.assert_allclose(ref.numpy(), res.numpy())
-        # FIXME: interp.elapsed_value() also increments due to simplifier
-        assert llvm.elapsed_value() == 1 or interp.elapsed_value() > 1
 
     def test_sliced_stride(self):
         @torch.jit.script
         def test(x, y, z):
             return x + y + z
-        llvm = LLVMCodeGenExecuted()
-        interp = SimpleIREvalExecuted()
         x = torch.rand(16, 4, 2, 3)[::2]
         y = torch.rand(8, 4, 2, 3)
         z = torch.rand(8, 4, 2, 3)
         ref = test(x, y, z)
         res = test(x, y, z)
         np.testing.assert_allclose(ref.numpy(), res.numpy())
-        # FIXME: interp.elapsed_value() also increments due to simplifier
-        assert llvm.elapsed_value() == 1 or interp.elapsed_value() > 1
 
     @unittest.skip("dynamic shapes are not quite there yet")
     @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
@@ -1308,13 +1297,11 @@ class TestTensorExprFuser(BaseTestClass):
             @torch.jit.script
             def test(x, y, z):
                 return x * y * z
-            cuda = CudaCodeGenCreated()
             x, y, z = [torch.rand(4, 8).cuda() for _ in range(3)]
             ref = test(x, y, z)
             _ = test(*[torch.rand(6, 8).cuda() for _ in range(3)])
             res = test(x, y, z)
             np.testing.assert_allclose(ref.cpu().numpy(), res.cpu().numpy())
-            assert cuda.elapsed_value() == 1
 
             # A wild broadcast appears.
             x = torch.rand(4, 8).cuda()
@@ -1323,7 +1310,6 @@ class TestTensorExprFuser(BaseTestClass):
             res = test(x, y, z)
             xn, yn, zn = [t.cpu().numpy() for t in (x, y, z)]
             np.testing.assert_allclose(res.cpu().numpy(), xn * yn * zn)
-            assert cuda.elapsed_value() == 1
 
             # Mismatched shapes shouldn't reach codegen.
             x = torch.rand(4, 8).cuda()
@@ -1333,7 +1319,6 @@ class TestTensorExprFuser(BaseTestClass):
                 res = test(x, y, z)
             except RuntimeError as e:
                 assert "The size of tensor a (4) must match" in e.args[0]
-            assert cuda.elapsed_value() == 1
 
             # Changing a static dimension fails guards.
             # x, y, z = [torch.rand(4, 7).cuda() for _ in range(3)]
@@ -1341,22 +1326,16 @@ class TestTensorExprFuser(BaseTestClass):
             # res = test(x, y, z)
             # print(test.graph_for(x, y, z))
             # np.testing.assert_allclose(res.cpu().numpy(), xn * yn * zn)
-            # assert cuda.elapsed_value() == 1
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
     def test_guard_fails(self):
         @torch.jit.script
         def test(x, y, z):
             return x * y * z
-        cuda = CudaCodeGenExecuted()
         r1 = test(*[torch.rand(4).cuda() for _ in range(3)])
-        assert cuda.elapsed_value() == 0
         r2 = test(*[torch.rand(4).cuda() for _ in range(3)])
-        assert cuda.elapsed_value() == 1
         r3 = test(*[torch.rand(4).cuda() for _ in range(3)])
-        assert cuda.elapsed_value() == 2
         r4 = test(*[torch.rand(7).cuda() for _ in range(3)])
-        assert cuda.elapsed_value() == 2
 
     def test_bitwise_ops(self):
         def run_and(x, y):
@@ -1500,7 +1479,7 @@ class TestTensorExprFuser(BaseTestClass):
         am_s = getModule(True)
         ref = am(x, x, x)
         test = am_s(x, x, x)
-        torch.testing.assert_allclose(ref, test)
+        torch.testing.assert_close(ref, test)
 
         # Now do the aliasing
         am.a = am.b
@@ -1509,7 +1488,7 @@ class TestTensorExprFuser(BaseTestClass):
         am_s.a = am_s.b
         test = am_s(x, x, x)
 
-        torch.testing.assert_allclose(ref, test)
+        torch.testing.assert_close(ref, test)
 
     def test_alias_analysis_inputs(self):
         class AliasModule(nn.Module):
@@ -1542,7 +1521,7 @@ class TestTensorExprFuser(BaseTestClass):
         x = torch.randn(128, 128)
         test = am_s(x, x, x)
 
-        torch.testing.assert_allclose(ref, test)
+        torch.testing.assert_close(ref, test)
 
     def test_alias_analysis_input_and_module(self):
         class AliasModule(nn.Module):
@@ -1577,7 +1556,7 @@ class TestTensorExprFuser(BaseTestClass):
         am_s.b = x
         test = am_s(x, x, x)
 
-        torch.testing.assert_allclose(ref, test)
+        torch.testing.assert_close(ref, test)
 
     def test_multiple_outputs(self):
         for device in self.devices:

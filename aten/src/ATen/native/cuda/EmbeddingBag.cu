@@ -17,6 +17,7 @@
 
 #include <ATen/native/cuda/SortingCommon.cuh>
 #include <ATen/native/cuda/EmbeddingBackwardKernel.cuh>
+#include <ATen/native/cuda/KernelUtils.cuh>
 
 #include <c10/macros/Macros.h>
 
@@ -235,7 +236,7 @@ template <typename scalar_t, typename index_t>
 __global__ void EmbeddingBag_accGradParametersKernel_max(
     index_t *max_indices, scalar_t *gradOutput,
     scalar_t *gradWeight, int64_t stride, int64_t numBags,
-    index_t padding_idx) {
+    index_t padding_idx, const index_t numel) {
 
   using accscalar_t = acc_type<scalar_t, true>;
 
@@ -252,8 +253,9 @@ __global__ void EmbeddingBag_accGradParametersKernel_max(
       index_t word_idx = max_indices[bag * stride + featureDim];
       if (word_idx >= 0 && word_idx != padding_idx) {
         // If bag is empty, we have max_indices[idx] set to -1 in forward.
-        gpuAtomicAdd(&(gradWeight[word_idx * stride + featureDim]),
-                gradOutput[bag * stride + featureDim]);
+        fastAtomicAdd(
+            gradWeight, static_cast<index_t>(word_idx * stride + featureDim),
+            numel, gradOutput[bag * stride + featureDim], true);
       }
     }
   }
@@ -289,7 +291,7 @@ Tensor embedding_bag_backward_cuda_max(const Tensor &grad,
               scalar_t, index_t><<<grid, block, 0, stream>>>(
               max_indices.data_ptr<index_t>(), grad.data_ptr<scalar_t>(),
               grad_weight.data_ptr<scalar_t>(), stride, numBags,
-              padding_idx);
+              padding_idx, grad_weight.numel());
         C10_CUDA_KERNEL_LAUNCH_CHECK();
       });
   });

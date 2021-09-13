@@ -7,7 +7,7 @@ import torch.jit.frontend
 import torch.jit.quantized
 
 # Testing utils
-from torch.testing import floating_and_complex_types_and
+from torch.testing._internal.common_dtype import floating_and_complex_types_and
 from torch.testing._internal.common_utils import TestCase, \
     freeze_rng_state, TemporaryFileName, enable_profiling_mode_for_profiling_tests, is_iterable_of_tensors
 from torch.testing._internal.common_utils import enable_profiling_mode  # noqa: F401
@@ -15,6 +15,7 @@ from torch.testing._internal.common_utils import enable_profiling_mode  # noqa: 
 # Standard library
 from itertools import chain
 from typing import List, Union
+from torch._C import TensorType
 
 import io
 
@@ -39,6 +40,12 @@ nn_functional_single_grad = frozenset('test_nn_' + name for name in [
 
 def check_against_reference(self, func, reference_func, output_func, args, kwargs=None,
                             allow_unused=True, check_types=True, no_grad=False, no_gradgrad=False):
+    """Verifies a function performs identically to some reference implementation.
+
+    Commonly, this is used to verify that a JIT implementation
+    (output_func) matches the behavior of the eager implementation
+    (reference_func).
+    """
     kwargs = kwargs if kwargs else {}
 
     def allSum(vs):
@@ -129,8 +136,7 @@ def check_against_reference(self, func, reference_func, output_func, args, kwarg
         for g2, g2_test in zip(grads2, grads2_test):
             if g2 is None and g2_test is None:
                 continue
-            self.assertTrue(torch.allclose(g2, g2_test, atol=5e-4, rtol=1e-4))
-
+            self.assertEqual(g2, g2_test, atol=5e-4, rtol=1e-4)
 
 class JitCommonTestCase(TestCase):
     def createFunctionFromGraph(self, trace):
@@ -274,3 +280,30 @@ class JitCommonTestCase(TestCase):
                                             nodes_in_diff_graph)
         self.assertEqual(should_autodiff_node,
                          found_all_nonfusible_nodes and found_all_fusible_nodes, err_msg)
+
+    def checkShapeAnalysis(self, out_size, traced_graph, assert_propagation, constant_prop=True):
+        # repropagte input shapes provided by tracing,
+        prev_symbolic_shapes_test_enabled = torch._C._jit_symbolic_shapes_test_mode_enabled()
+        for enable_test_mode in [True, False]:
+            # here we are testing allowing/disallowing substituting in complete shapes as constants,
+            # disallowing constants helps stress test partial eval and substitution pipeline
+            torch._C._jit_set_symbolic_shapes_test_mode(enable_test_mode)
+            torch._C._jit_erase_non_input_shape_information(traced_graph)
+            if constant_prop:
+                torch._C._jit_pass_constant_propagation(traced_graph)
+            torch._C._jit_pass_propagate_shapes_on_graph(traced_graph)
+            # Add sizes to default tensor type to avoid checking something out of scope
+            # and difficulties with tracer leaving in other parts of tensor type
+            sizes = next(traced_graph.outputs()).type().symbolic_sizes()
+            out_type = TensorType.get().with_sizes(sizes)
+            actual_type = TensorType.get().with_sizes(out_size)
+
+            # always check actual shape is a subtype of the output
+            self.assertTrue(actual_type.isSubtypeOf(out_type))
+
+            # and then if assertion flag is provided, check shape analysis
+            # is successful
+            if assert_propagation:
+                self.assertEqual(out_type.sizes(), out_size)
+
+        torch._C._jit_set_symbolic_shapes_test_mode(prev_symbolic_shapes_test_enabled)

@@ -14,7 +14,6 @@ namespace impl {
 // default state is zero, we obtain the actual include keyset by XORing
 // raw_local_dispatch_key_set.included_ with c10::default_included_set.  This
 // logic is encapsulated in struct PODLocalDispatchKeySet.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 thread_local PODLocalDispatchKeySet raw_local_dispatch_key_set;
 
 #if defined(_MSC_VER) || defined(C10_ANDROID)

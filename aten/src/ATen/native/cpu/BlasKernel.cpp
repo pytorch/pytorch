@@ -156,13 +156,13 @@ void gemm_core_(
     const scalar_t *b, int64_t ldb,
     scalar_t beta,
     scalar_t *c, int64_t ldc) {
-  if(transa == NoTranspose && transb == NoTranspose) {
+  if(transa == TransposeType::NoTranspose && transb == TransposeType::NoTranspose) {
     return gemm_notrans_(m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
-  } else if(transa == Transpose && transb != Transpose) {
+  } else if(transa == TransposeType::Transpose && transb != TransposeType::Transpose) {
     gemm_transa_(m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
-  } else if(transa == NoTranspose && transb == Transpose) {
+  } else if(transa == TransposeType::NoTranspose && transb == TransposeType::Transpose) {
     gemm_transb_(m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
-  } else {  // transa == Transpose && transb == Transpose
+  } else {  // transa == TransposeType::Transpose && transb == TransposeType::Transpose
     gemm_transab_(m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
   }
 }
@@ -215,11 +215,8 @@ void cpublas_copy_impl(at::ScalarType type, int64_t n, const void *_x, int64_t i
 }}  // namespace cpublas::(anonymous)
 
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(cpublas::gemm_stub, &cpublas::cpublas_gemm_impl);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(cpublas::axpy_stub, &cpublas::cpublas_axpy_impl);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(cpublas::copy_stub, &cpublas::cpublas_copy_impl);
 
 }}  // namespace at::native

@@ -139,10 +139,8 @@ class LastNWindowCollectorOp : public Operator<Context> {
   OUTPUT_TAGS(LAST_N, NEXT, NUM_VISITED);
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(LastNWindowCollector, LastNWindowCollectorOp<CPUContext>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(LastNWindowCollector)
     .NumInputs({3, 4, 5})
     .NumOutputs(2, 3)
@@ -221,7 +219,6 @@ This is not thread safe unless a mutex is given.
     .Output(0, "last-N buffer", "Data stored in sessions")
     .Output(1, "next cursor", "Updated input cursor")
     .Output(2, "NUM_VISITED", "number of records seen so far");
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(LastNWindowCollector);
 } // namespace
 } // namespace caffe2

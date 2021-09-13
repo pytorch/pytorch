@@ -282,12 +282,6 @@ class intrusive_ptr final {
   // intrusive_ptr out of raw pointers except from inside the make_intrusive(),
   // reclaim() and weak_intrusive_ptr::lock() implementations.
 
-  // This constructor will not increase the ref counter for you.
-  // We use the tagged dispatch mechanism to explicitly mark this constructor
-  // to not increase the refcount
-  explicit intrusive_ptr(TTarget* target, raw::DontIncreaseRefcount) noexcept
-      : target_(target) {}
-
   // This constructor will increase the ref counter for you.
   // This constructor will be used by the make_intrusive(), and also pybind11,
   // which wrap the intrusive_ptr holder around the raw pointer and incref
@@ -316,6 +310,12 @@ class intrusive_ptr final {
 
   intrusive_ptr() noexcept
       : intrusive_ptr(NullType::singleton(), raw::DontIncreaseRefcount{}) {}
+
+  // This constructor will not increase the ref counter for you.
+  // We use the tagged dispatch mechanism to explicitly mark this constructor
+  // to not increase the refcount
+  explicit intrusive_ptr(TTarget* target, raw::DontIncreaseRefcount) noexcept
+      : target_(target) {}
 
   intrusive_ptr(intrusive_ptr&& rhs) noexcept : target_(rhs.target_) {
     rhs.target_ = NullType::singleton();

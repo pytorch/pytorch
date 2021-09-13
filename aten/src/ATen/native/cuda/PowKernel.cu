@@ -22,15 +22,6 @@ namespace {
 //   pow(double, int)
 //   pow(float, float)
 //   pow(double, double)
-// As for sqrt, the following signatures are defined as the device function:
-//   sqrt(float)
-//   sqrt(double)
-// As for inverse sqrt, we must define it explicitly in MSVC, otherwise the static cast will be
-// applied to the result of the inline function, and thus the result is incorrect.
-//   e.g. if we use 1.0 / sqrt(2) for 2 ^ (-0.5) in MSVC, we get
-//          int(2 ^ (-0.5)) = int(1.0 / sqrt(2)) = int(1.0 / int(1.414)) = int(1.0 / 1) = 1
-//        However, the correct result is
-//          int(2 ^ (-0.5)) = int(1.0 / 1.414) = 0
 #ifdef _MSC_VER
 // Functions for pow
 // pow for at::Half
@@ -47,55 +38,66 @@ static inline __host__ __device__ typename std::enable_if<std::is_floating_point
   pow_(Base_type base, Exp_type exp) {
   return std::pow(base, exp);
 }
-// pow (integral, integral)
-template <typename Base_type, typename Exp_type>
-static inline __host__ __device__ typename std::enable_if<std::is_integral<Base_type>::value && std::is_same<Base_type, Exp_type>::value, Base_type>::type
-  pow_(Base_type base, Exp_type exp) {
-  return native::powi(base, exp);
-}
 // pow (Otherwise)
 template <typename Base_type, typename Exp_type>
 static inline __host__ __device__ typename std::enable_if<!std::is_same<Base_type, Exp_type>::value && !std::is_same<Exp_type, int>::value, Base_type>::type
   pow_(Base_type base, Exp_type exp) {
   return static_cast<Base_type>(std::pow(static_cast<double>(base), static_cast<double>(exp)));
 }
-// pow (Complex)
-template<typename B, typename E>
-static inline __host__ __device__ B complex_pow_(B base, E exp) {
-  return std::pow(base, exp);
-}
 #else
 template <typename Base_type, typename Exp_type>
 static inline __host__ __device__ Base_type pow_(Base_type base, Exp_type exp) {
   return ::pow(base, exp);
 }
-// pow (Otherwise)
-template<typename B, typename E>
-static inline __host__ __device__ B complex_pow_(B base, E exp) {
-  return std::pow(base, exp);
-}
 #endif
 
+template <typename T>
+static inline __host__ __device__ std::enable_if_t<std::is_integral<T>::value, T> pow_(
+    T base, T exp) {
+  return at::native::powi(base, exp);
+}
+
+template <typename T>
+static inline __host__ __device__ c10::complex<T> pow_(c10::complex<T> base, c10::complex<T> exp) {
+  return c10_complex_math::pow(base, exp);
+}
+
+void pow_tensor_scalar_kernel(TensorIteratorBase& iter, const Scalar& exp_scalar);
+
+template <typename scalar_t>
+void pow_scalar_tensor_impl(TensorIteratorBase& iter, scalar_t base) {
+  gpu_kernel(iter, [=]GPU_LAMBDA(scalar_t exp) -> scalar_t {
+    return pow_(base, exp);
+  });
+}
+
+template <typename value_t>
+void pow_scalar_tensor_impl(TensorIteratorBase& iter, c10::complex<value_t> base) {
+  // For complex, thrust::pow uses the identity
+  // pow(a, b) = exp(log(a) * b)
+  const auto fct = std::log(base);
+  gpu_kernel(iter, [=]GPU_LAMBDA(c10::complex<value_t> exp) -> c10::complex<value_t> {
+    return std::exp(fct * exp);
+  });
+}
+
 void pow_tensor_tensor_kernel(TensorIteratorBase& iter) {
-  if (isComplexType(iter.common_dtype())) {
-    AT_DISPATCH_COMPLEX_TYPES(iter.common_dtype(), "pow_cuda", [&]() {
-      gpu_kernel_with_scalars(iter, [=]GPU_LAMBDA(scalar_t base, scalar_t exp) -> scalar_t {
-        return complex_pow_(base, exp);
-      });
-    });
-  } else if (isFloatingType(iter.common_dtype())) {
-    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.common_dtype(), "pow_cuda", [&]() {
-      gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t base, scalar_t exp) -> scalar_t {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(
+      kHalf, kBFloat16, iter.common_dtype(), "pow_cuda", [&] {
+    if (iter.is_cpu_scalar(1)) {
+      const auto base = iter.scalar_value<scalar_t>(1);
+      iter.remove_operand(1);
+      pow_scalar_tensor_impl(iter, base);
+    } else if (iter.is_cpu_scalar(2)) {
+      const auto exp = iter.scalar_value<scalar_t>(2);
+      iter.remove_operand(2);
+      pow_tensor_scalar_kernel(iter, exp);
+    } else {
+      gpu_kernel(iter, [=]GPU_LAMBDA(scalar_t base, scalar_t exp) -> scalar_t {
         return pow_(base, exp);
       });
-    });
-  } else {
-    AT_DISPATCH_INTEGRAL_TYPES(iter.common_dtype(), "pow_cuda", [&]() {
-      gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t base, scalar_t exp) -> scalar_t {
-        return native::powi(base, exp);
-      });
-    });
-  }
+    }
+  });
 }
 
 
@@ -139,7 +141,7 @@ void pow_tensor_scalar_kernel(TensorIteratorBase& iter, const Scalar& exp_scalar
     AT_DISPATCH_COMPLEX_TYPES(iter.common_dtype(), "pow_cuda", [&]() {
       const auto exp = exp_scalar.to<scalar_t>();
       gpu_kernel(iter, [=]GPU_LAMBDA(scalar_t base) -> scalar_t {
-        return complex_pow_(base, exp);
+        return pow_(base, exp);
       });
     });
   } else if (isFloatingType(iter.common_dtype()) || exp_scalar.isIntegral(false)) {

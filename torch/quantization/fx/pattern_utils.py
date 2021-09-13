@@ -5,7 +5,7 @@ from torch.fx.graph import (
     Node,
 )
 from .quantization_types import Pattern
-from .qconfig_utils import QConfigAny
+from ..qconfig import QConfigAny
 # from .quantization_patterns import BinaryOpQuantizeHandler
 
 

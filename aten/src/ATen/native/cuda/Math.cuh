@@ -10,88 +10,6 @@ namespace native {
  * For licensing information, please refer to the the cpu implementation located in "ATen/native/Math.h".
  */
 template <typename scalar_t>
-static inline C10_HOST_DEVICE scalar_t zeta(scalar_t _x, scalar_t _q) {
-  using accscalar_t = at::acc_type<scalar_t, true>;
-  static const accscalar_t MACHEP = 1.11022302462515654042E-16;
-  const accscalar_t A[] = {
-      12.0,
-      -720.0,
-      30240.0,
-      -1209600.0,
-      47900160.0,
-      -1.8924375803183791606e9, /*1.307674368e12/691*/
-      7.47242496e10,
-      -2.950130727918164224e12, /*1.067062284288e16/3617*/
-      1.1646782814350067249e14, /*5.109094217170944e18/43867*/
-      -4.5979787224074726105e15, /*8.028576626982912e20/174611*/
-      1.8152105401943546773e17, /*1.5511210043330985984e23/854513*/
-      -7.1661652561756670113e18 /*1.6938241367317436694528e27/236364091*/
-  };
-  accscalar_t x = static_cast<accscalar_t>(_x);
-  accscalar_t q = static_cast<accscalar_t>(_q);
-
-  int i = 0;
-  accscalar_t a, b, k, s, t, w;
-  if( x == 1.0 ) {
-    return static_cast<scalar_t>(INFINITY);
-  }
-
-  if( x < 1.0 ){
-    std::numeric_limits<scalar_t>::quiet_NaN();
-  }
-  bool q_is_integer = q == ::floor(q);
-
-  if(q <= 0.0) {
-    if(q_is_integer) {
-      return static_cast<scalar_t>(INFINITY);
-    }
-    else {
-      std::numeric_limits<scalar_t>::quiet_NaN();
-    }
-  }
-
-  s = ::pow(q, -x);
-  a = q;
-  i = 0;
-  b = 0.0;
-  while ((i < 9) || (a <= 9.0)) {
-    i += 1;
-    a += 1.0;
-    b = ::pow( a, -x );
-    s += b;
-    if ((-MACHEP < (b / s)) && ((b / s) < MACHEP)) {
-      return static_cast<scalar_t>(s);
-    }
-  };
-  w = a;
-  s += b * w / (x - 1.0);
-  s -= 0.5 * b;
-  a = 1.0;
-  k = 0.0;
-  for (int i=0; i < 12; i++) {
-    a *= x + k;
-    b /= w;
-    t = a * b / A[i];
-    s = s + t;
-    t = t / s;
-    if (t < 0){
-      t = -t;
-    }
-    if ((-MACHEP <t) && (t < MACHEP)){
-      return static_cast<scalar_t>(s);
-    }
-    k += 1.0;
-    a *= x + k;
-    b /= w;
-    k += 1.0;
-  }
-  return static_cast<scalar_t>(s);
-}
-
-/*
- * For licensing information, please refer to the the cpu implementation located in "ATen/native/Math.h".
- */
-template <typename scalar_t>
 static inline C10_HOST_DEVICE scalar_t calc_digamma(scalar_t in) {
   // [C++ Standard Reference: Gamma Function] https://en.cppreference.com/w/cpp/numeric/math/tgamma
   using accscalar_t = at::acc_type<scalar_t, /*is_cuda=*/true>;
@@ -175,12 +93,6 @@ static inline C10_HOST_DEVICE scalar_t calc_trigamma(scalar_t in) {
   const accscalar_t ixx = 1 / (x*x);
   result += (1 + 1 / (2*x) + ixx * (one/6 - ixx * (one/30 - ixx * (one/42)))) / x;
   return static_cast<scalar_t>(sign * result);
-}
-
-template <typename scalar_t>
-static inline C10_HOST_DEVICE scalar_t calc_polygamma(int n, scalar_t x) {
-  // already blocked if n <= 1
-  return ((n % 2) ? 1.0 : -1.0) * ::exp(::lgamma(static_cast<scalar_t>(n) + 1.0)) * zeta(static_cast<scalar_t>(n + 1), x);
 }
 
 template <typename scalar_t>
@@ -388,18 +300,18 @@ static inline C10_HOST_DEVICE scalar_t calc_i0(scalar_t _x) {
   // Needed for accurate results if input is bfloat16 or float16
   accscalar_t x = ::abs(static_cast<accscalar_t>(_x));
 
-  if (x <= 8.0) {
+  if (x <= accscalar_t{8.0}) {
     auto coeff_pair = chebyshev_coefficients_i0e_A<accscalar_t>();
     auto A = std::get<0>(coeff_pair);
     auto len = std::get<1>(coeff_pair);
-    accscalar_t y = static_cast<accscalar_t>((x / 2.0) - 2.0);
+    accscalar_t y = (x / accscalar_t{2.0}) - accscalar_t{2.0};
     return static_cast<scalar_t>(::exp(x) * chbevl(y, A, len));
   }
 
   auto coeff_pair = chebyshev_coefficients_i0e_B<accscalar_t>();
   auto B = std::get<0>(coeff_pair);
   auto len = std::get<1>(coeff_pair);
-  return static_cast<scalar_t>(::exp(x) * chbevl(static_cast<accscalar_t>(32.0 / x - 2.0), B, len) / ::sqrt(x));
+  return static_cast<scalar_t>(::exp(x) * chbevl(accscalar_t{32.0} / x - accscalar_t{2.0}, B, len) / ::sqrt(x));
 }
 
 template <typename scalar_t>
@@ -410,58 +322,56 @@ static inline C10_HOST_DEVICE scalar_t calc_i0e(scalar_t _x) {
   // Needed for accurate results if input is bfloat16 or float16
   accscalar_t x = ::abs(static_cast<accscalar_t>(_x));
 
-  if (x <= 8.0) {
+  if (x <= accscalar_t{8.0}) {
     auto coeff_pair = chebyshev_coefficients_i0e_A<accscalar_t>();
     auto A = std::get<0>(coeff_pair);
     auto len = std::get<1>(coeff_pair);
-    accscalar_t y = static_cast<accscalar_t>((x / 2.0) - 2.0);
+    accscalar_t y = (x / accscalar_t{2.0}) - accscalar_t{2.0};
     return static_cast<scalar_t>(chbevl(y, A, len));
   }
 
   auto coeff_pair = chebyshev_coefficients_i0e_B<accscalar_t>();
   auto B = std::get<0>(coeff_pair);
   auto len = std::get<1>(coeff_pair);
-  return static_cast<scalar_t>(chbevl(static_cast<accscalar_t>(32.0 / x - 2.0), B, len) / ::sqrt(x));
+  return static_cast<scalar_t>(chbevl(accscalar_t{32.0} / x - accscalar_t{2.0}, B, len) / ::sqrt(x));
 }
 
 template <typename scalar_t>
 static inline C10_HOST_DEVICE scalar_t calc_i1(scalar_t _x) {
   const auto x = ::abs(_x);
-  if (x <= 8.0) {
+  if (x <= scalar_t{8.0}) {
     auto coeff_pair = chebyshev_coefficients_i1e_A<scalar_t>();
     auto A = std::get<0>(coeff_pair);
     auto len = std::get<1>(coeff_pair);
-    auto y = static_cast<scalar_t>((x / 2.0) - 2.0);
-    const auto out = static_cast<scalar_t>(::exp(x) * x * chbevl(y, A, len));
-    return (_x < 0.0) ? -out : out;
+    scalar_t y = x / scalar_t{2.0} - scalar_t{2.0};
+    const scalar_t out = ::exp(x) * x * chbevl(y, A, len);
+    return (_x < scalar_t{0.0}) ? -out : out;
   }
 
   auto coeff_pair = chebyshev_coefficients_i1e_B<scalar_t>();
   auto B = std::get<0>(coeff_pair);
   auto len = std::get<1>(coeff_pair);
-  const auto out = static_cast<scalar_t>(
-      (::exp(x) * chbevl(static_cast<scalar_t>(32.0 / x - 2.0), B, len)) / ::sqrt(x));
-  return (_x < 0.0) ? -out : out;
+  const scalar_t out = (::exp(x) * chbevl(scalar_t{32.0} / x - scalar_t{2.0}, B, len)) / ::sqrt(x);
+  return (_x < scalar_t{0.0}) ? -out : out;
 }
 
 template <typename scalar_t>
 static inline C10_HOST_DEVICE scalar_t calc_i1e(scalar_t _x) {
   const auto x = ::abs(_x);
-  if (x <= 8.0) {
+  if (x <= scalar_t{8.0}) {
     auto coeff_pair = chebyshev_coefficients_i1e_A<scalar_t>();
     auto A = std::get<0>(coeff_pair);
     auto len = std::get<1>(coeff_pair);
-    const auto y = static_cast<scalar_t>((x / 2.0) - 2.0);
-    const auto out = static_cast<scalar_t>(chbevl(y, A, len) * x);
-    return (_x < 0.0) ? -out : out;
+    const scalar_t y = x / scalar_t{2.0} - scalar_t{2.0};
+    const scalar_t out = chbevl(y, A, len) * x;
+    return (_x < scalar_t{0.0}) ? -out : out;
   }
 
   auto coeff_pair = chebyshev_coefficients_i1e_B<scalar_t>();
   auto B = std::get<0>(coeff_pair);
   auto len = std::get<1>(coeff_pair);
-  const auto out = static_cast<scalar_t>(
-      chbevl(static_cast<scalar_t>(32.0 / x - 2.0), B, len) / ::sqrt(x));
-  return (_x < 0.0) ? -out : out;
+  const scalar_t out = chbevl(scalar_t{32.0} / x - scalar_t{2.0}, B, len) / ::sqrt(x);
+  return (_x < scalar_t{0.0}) ? -out : out;
 }
 
 } // namespace native

@@ -2,7 +2,6 @@
 #define TH_GENERIC_FILE "torch/csrc/generic/Storage.cpp"
 #else
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 PyObject *THPStorageClass = nullptr;
 
 PyObject * THPStorage_(New)(THWStorage *ptr)
@@ -66,6 +65,7 @@ static PyObject * THPStorage_(pynew)(PyTypeObject *type, PyObject *args, PyObjec
 
   // torch.Storage()
   if (num_args == 0) {
+    // NOLINTNEXTLINE(bugprone-branch-clone)
     if (allocator) {
       self->cdata = THPStorage_(newWithAllocator)(0, allocator);
     } else {
@@ -79,6 +79,7 @@ static PyObject * THPStorage_(pynew)(PyTypeObject *type, PyObject *args, PyObjec
   // torch.Storage(size)
   if (num_args == 1 && THPUtils_checkLong(first_arg)) {
     int64_t size = THPUtils_unpackLong(first_arg);
+    // NOLINTNEXTLINE(bugprone-branch-clone)
     if (allocator) {
       self->cdata = THPStorage_(newWithAllocator)(size, allocator);
     } else {
@@ -103,6 +104,7 @@ static PyObject * THPStorage_(pynew)(PyTypeObject *type, PyObject *args, PyObjec
     try {
       for (Py_ssize_t i = 0; i < length; i++) {
         item = PySequence_GetItem(first_arg, i);
+        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         scalar_t value = THPUtils_(unpackReal)(item.get());
 #if !defined(THC_GENERIC_FILE)
         self->cdata->unsafe_data<scalar_t>()[i] = value;
@@ -237,7 +239,6 @@ static int THPStorage_(set)(THPStorage *self, PyObject *index, PyObject *value)
   END_HANDLE_TH_ERRORS_RET(-1)
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static PyMappingMethods THPStorage_(mappingmethods) = {
   (lenfunc)THPStorage_(length),
   (binaryfunc)THPStorage_(get),
@@ -245,14 +246,12 @@ static PyMappingMethods THPStorage_(mappingmethods) = {
 };
 
 // TODO: implement equality
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 PyTypeObject THPStorageType = {
   PyVarObject_HEAD_INIT(nullptr, 0)
   "torch._C." THPStorageBaseStr,               /* tp_name */
   sizeof(THPStorage),                          /* tp_basicsize */
   0,                                           /* tp_itemsize */
   (destructor)THPStorage_(dealloc),            /* tp_dealloc */
-  // NOLINTNEXTLINE(modernize-use-nullptr)
   0,                                           /* tp_vectorcall_offset */
   nullptr,                                     /* tp_getattr */
   nullptr,                                     /* tp_setattr */
@@ -323,9 +322,7 @@ static struct PyGetSetDef THPStorage_(properties)[] = {
   {nullptr}
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 extern THPCopyList THWStorage_(copy_functions);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 THPCopyList THWStorage_(copy_functions);
 
 void THPStorage_(initCopyMethods)()

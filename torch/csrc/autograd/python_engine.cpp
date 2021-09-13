@@ -7,6 +7,7 @@
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/functions/basic_ops.h>
 #include <torch/csrc/autograd/python_anomaly_mode.h>
+#include <torch/csrc/autograd/python_saved_variable_hooks.h>
 #include <torch/csrc/autograd/python_function.h>
 #include <torch/csrc/utils/pycfunction_helpers.h>
 #include <ATen/BatchedTensorImpl.h>
@@ -27,7 +28,6 @@ struct THPEngine {
     PyObject_HEAD
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static bool _reinitialize_engine = false;
 
 namespace torch { namespace autograd { namespace python {
@@ -105,6 +105,10 @@ std::unique_ptr<AnomalyMetadata> PythonEngine::make_anomaly_metadata() {
   return std::unique_ptr<AnomalyMetadata>(new PyAnomalyMetadata());
 }
 
+std::unique_ptr<SavedVariableHooks> PythonEngine::get_default_saved_variable_hooks() {
+  return PyDefaultSavedVariableHooks::get_hooks();
+}
+
 variable_list PythonEngine::execute(
     const edge_list& roots,
     const variable_list& inputs,
@@ -141,7 +145,6 @@ c10::intrusive_ptr<at::ivalue::Future> PythonEngine::execute_with_graph_task(
 }
 }}} // namespace torch::autograd::python
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 PyObject *THPEngineClass = nullptr;
 
 // Implementation of torch._C._EngineBase.run_backward
@@ -239,8 +242,7 @@ PyObject *THPEngine_run_backward(PyObject *self, PyObject *args, PyObject *kwarg
         grad_fn = torch::autograd::impl::try_get_grad_accumulator(tensor);
       }
       if (accumulate_grad) {
-        THPUtils_assert(tensor.is_leaf(),
-          "One of the differentiated Tensors given as 'inputs' to backward is not a leaf Tensor");
+        tensor.retain_grad();
       }
       THPUtils_assert(tensor.requires_grad(),
           "One of the differentiated Tensors does not require grad");
@@ -323,14 +325,12 @@ static struct PyMethodDef THPEngine_methods[] = {
 };
 
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 PyTypeObject THPEngineType = {
   PyVarObject_HEAD_INIT(nullptr, 0)
   "torch._C._EngineBase",                      /* tp_name */
   sizeof(THPEngine),                           /* tp_basicsize */
   0,                                           /* tp_itemsize */
   nullptr,                                     /* tp_dealloc */
-  // NOLINTNEXTLINE(modernize-use-nullptr)
   0,                                           /* tp_vectorcall_offset */
   nullptr,                                     /* tp_getattr */
   nullptr,                                     /* tp_setattr */

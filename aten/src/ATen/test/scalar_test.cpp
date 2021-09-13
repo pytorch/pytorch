@@ -55,7 +55,6 @@ void test_overflow() {
   ASSERT_THROW(s1.toInt(), std::runtime_error);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TestScalar, TestScalar) {
   manual_seed(123);
 
@@ -138,7 +137,6 @@ TEST(TestScalar, TestScalar) {
   ASSERT_EQ(float_one.item<at::Half>(), 1);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TestScalar, TestConj) {
   Scalar int_scalar = 257;
   Scalar float_scalar = 3.0;
@@ -149,7 +147,6 @@ TEST(TestScalar, TestConj) {
   ASSERT_EQ(complex_scalar.conj().toComplexDouble(), c10::complex<double>(2.3, -3.5));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TestScalar, TestEqual) {
   ASSERT_FALSE(Scalar(1.0).equal(false));
   ASSERT_FALSE(Scalar(1.0).equal(true));
@@ -170,7 +167,6 @@ TEST(TestScalar, TestEqual) {
   ASSERT_TRUE(Scalar(2).equal(2.0));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TestScalar, TestFormatting) {
   auto format = [] (Scalar a) {
     std::ostringstream str;

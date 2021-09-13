@@ -69,8 +69,8 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   }
 
   # Install PyTorch conda deps, as per https://github.com/pytorch/pytorch README
-  # DO NOT install cmake here as it would install a version newer than 3.5, but
-  # we want to pin to version 3.5.
+  # DO NOT install cmake here as it would install a version newer than 3.10, but
+  # we want to pin to version 3.10.
   SCIPY_VERSION=1.1.0
   if [ "$ANACONDA_PYTHON_VERSION" = "3.9" ]; then
     # Install llvm-8 as it is required to compile llvmlite-0.30.0 from source
@@ -86,11 +86,7 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
     conda_install numpy=1.18.5 astunparse pyyaml mkl mkl-include setuptools cffi future six dataclasses typing_extensions
   fi
 
-  if [[ "$CUDA_VERSION" == 10.0* ]]; then
-    conda_install magma-cuda100 -c pytorch
-  elif [[ "$CUDA_VERSION" == 10.1* ]]; then
-    conda_install magma-cuda101 -c pytorch
-  elif [[ "$CUDA_VERSION" == 10.2* ]]; then
+  if [[ "$CUDA_VERSION" == 10.2* ]]; then
     conda_install magma-cuda102 -c pytorch
   elif [[ "$CUDA_VERSION" == 11.0* ]]; then
     conda_install magma-cuda110 -c pytorch
@@ -116,6 +112,7 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
     boto3==1.16.34 \
     coverage==5.5 \
     hypothesis==4.53.2 \
+    expecttest==0.1.3 \
     mypy==0.812 \
     tb-nightly
 

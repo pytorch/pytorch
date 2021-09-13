@@ -4,7 +4,6 @@
 
 #include <sstream>
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_string(
     caffe2_task_graph_engine,
     "futures",
@@ -187,17 +186,14 @@ std::shared_ptr<AsyncTaskGraphBase> GetAsyncTaskGraph(
   return std::make_shared<AsyncTaskGraph>(helper, options);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_SHARED_REGISTRY(
     TaskGraphRegistry,
     AsyncTaskGraphBase,
     ExecutorHelper*,
     const ExecutionOptions&);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_REGISTER_CREATOR(TaskGraphRegistry, futures, GetAsyncTaskGraph);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_NET(parallel, ParallelNet);
 
 } // namespace caffe2

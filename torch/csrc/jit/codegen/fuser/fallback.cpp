@@ -21,13 +21,12 @@ c10::AliasAnalysisKind aliasAnalysisIsSpecialCase() {
 
 // Registers fused operators so that fused graphs can properly generate fallback
 // code.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 RegisterOperators reg_fused_operators({Operator(
     prim::FusedConcat,
     [](const Node* node) -> Operation {
       int64_t dim = node->i(attr::dim);
       int64_t num_inputs = node->inputs().size();
-      return [dim, num_inputs](Stack* stack) {
+      return [dim, num_inputs](Stack& stack) {
         auto result = at::cat(
             fmap(
                 last(stack, num_inputs),

@@ -241,6 +241,23 @@ class TestAdam(OptimizerTestBase, LRModificationTestBase, TestCase):
         for param in optimizer.get_auxiliary_parameters().local:
             workspace.FetchBlob(param)
 
+class TestSmartDecayAdam(OptimizerTestBase, LRModificationTestBase, TestCase):
+    def build_optimizer(self, model, **kwargs):
+        self._skip_gpu = False
+        kwargs['beta1'] = 0.0
+        return build_adam(model, base_learning_rate=0.1, use_smart_decay=True, **kwargs)
+
+    def check_optimizer(self, optimizer):
+        self.assertTrue(optimizer.get_auxiliary_parameters().shared)
+        self.assertTrue(optimizer.get_auxiliary_parameters().local)
+        self.assertTrue(workspace.HasBlob("optimizer_iteration"))
+        blob_names = workspace.Blobs()
+        self.assertTrue(any((bn.endswith('_last_seen') for bn in blob_names)))
+        for param in optimizer.get_auxiliary_parameters().shared:
+            workspace.FetchBlob(param)
+        for param in optimizer.get_auxiliary_parameters().local:
+            workspace.FetchBlob(param)
+
 class TestDecayAdagrad(OptimizerTestBase, LRModificationTestBase, TestCase):
     def build_optimizer(self, model, **kwargs):
         self._skip_gpu = True

@@ -109,10 +109,8 @@ bool RMACRegionsOp<CPUContext>::RunOnDevice() {
   return true;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(RMACRegions, RMACRegionsOp<CPUContext>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(RMACRegions)
     .NumInputs(1)
     .NumOutputs(1)
@@ -132,7 +130,6 @@ as described in https://arxiv.org/abs/1511.05879.
         "co-ordinates. Each region is repeated N times corresponding to each "
         "item in the batch.");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(RMACRegions);
 
 } // namespace caffe2

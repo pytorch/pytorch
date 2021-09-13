@@ -116,19 +116,16 @@ bool ChannelShuffleDNNLowPOp<T>::RunOnDeviceWithOrderNHWC() {
   return true;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     ChannelShuffle,
     DNNLOWP,
     ChannelShuffleDNNLowPOp<uint8_t>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     Int8ChannelShuffle,
     DNNLOWP,
     ChannelShuffleDNNLowPOp<uint8_t>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     ChannelShuffle,
     DNNLOWP_16,

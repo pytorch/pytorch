@@ -5,7 +5,6 @@
 
 namespace caffe2 {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(UtilsBoxesTest, TestBboxTransformRandom) {
   using EMatXf = Eigen::MatrixXf;
 
@@ -38,7 +37,6 @@ TEST(UtilsBoxesTest, TestBboxTransformRandom) {
   EXPECT_NEAR((result.matrix() - result_gt).norm(), 0.0, 1e-4);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(UtilsBoxesTest, TestBboxTransformRotated) {
   // Test rotated bbox transform w/o angle normalization
   using EMatXf = Eigen::MatrixXf;
@@ -74,7 +72,6 @@ TEST(UtilsBoxesTest, TestBboxTransformRotated) {
   EXPECT_NEAR((result.matrix() - result_gt).norm(), 0.0, 1e-2);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(UtilsBoxesTest, TestBboxTransformRotatedNormalized) {
   // Test rotated bbox transform with angle normalization
   using EMatXf = Eigen::MatrixXf;
@@ -111,7 +108,6 @@ TEST(UtilsBoxesTest, TestBboxTransformRotatedNormalized) {
   EXPECT_NEAR((result.matrix() - result_gt).norm(), 0.0, 1e-2);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(UtilsBoxesTest, ClipRotatedBoxes) {
   // Test utils::clip_boxes_rotated()
   using EMatXf = Eigen::MatrixXf;

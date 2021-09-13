@@ -117,61 +117,6 @@ static void exec_cufft_plan(
 // tensors being contiguous, and that the strides at the innermost signal
 // dimension being unit (1) w.r.t. the corresponding data type.
 
-#pragma push
-#pragma diag_suppress 177   // Function was declared but never referenced
-static inline Tensor _run_cufft(
-    const CuFFTConfig &config, Tensor& input, int64_t signal_ndim,
-    bool complex_input, bool complex_output, bool inverse,
-    IntArrayRef checked_signal_sizes, fft_norm_mode norm, bool onesided,
-    IntArrayRef output_sizes, bool input_was_cloned
-) {
-  if (config.should_clone_input() && !input_was_cloned) {
-    input = input.clone(at::MemoryFormat::Contiguous);
-  }
-
-  auto& plan = config.plan();
-
-  // set output
-  auto output = at::empty(output_sizes, input.options());
-
-  // set to current stream
-  CUFFT_CHECK(cufftSetStream(plan, at::cuda::getCurrentCUDAStream()));
-
-  auto ws = at::empty({ config.workspace_size() }, at::device(at::kCUDA).dtype(at::kByte));
-  CUFFT_CHECK(cufftSetWorkArea(plan, ws.data_ptr()));
-
-  // run
-  exec_cufft_plan(config, input.data_ptr(), output.data_ptr(), !inverse);
-
-  // rescale if requested
-  auto size_last_signal_dim = checked_signal_sizes[signal_ndim - 1];
-  if (norm != fft_norm_mode::none) {
-    auto signal_numel = c10::multiply_integers(checked_signal_sizes);
-    double scale_denom;
-    if (norm == fft_norm_mode::by_root_n) {
-      scale_denom = std::sqrt(static_cast<double>(signal_numel));
-    } else {
-      scale_denom = static_cast<double>(signal_numel);
-    }
-    if (!complex_input && complex_output && !onesided) {
-      auto end_data_slice = infer_ft_real_to_complex_onesided_size(size_last_signal_dim);
-      output.narrow(signal_ndim, 0, end_data_slice).div_(scale_denom);
-    } else {
-      output.div_(scale_denom);
-    }
-  }
-
-  // if needed, fill out the other half using conjugate symmetry
-  if (!complex_input && complex_output && !onesided) {
-    DimVector signal_dims(signal_ndim);
-    std::iota(signal_dims.begin(), signal_dims.end(), 1);
-    auto out_as_complex = at::view_as_complex(output);
-    at::native::_fft_fill_with_conjugate_symmetry_(out_as_complex, signal_dims);
-  }
-  return output;
-}
-#pragma pop
-
 // The cuFFT plan cache
 // unique_ptr for nullability and to avoid reference invalidation on vector resize
 static std::vector<std::unique_ptr<CuFFTParamsLRUCache>> plan_caches;
@@ -183,7 +128,7 @@ CuFFTParamsLRUCache &cufft_get_plan_cache(int64_t device_index) {
 
   AT_ASSERT(device_index >= 0);
 
-  if (device_index >= plan_caches.size()) {
+  if (device_index >= static_cast<int64_t>(plan_caches.size())) {
     plan_caches.resize(device_index + 1);
   }
 
@@ -233,6 +178,23 @@ void cufft_clear_plan_cache_impl(int64_t device_index) {
 
 namespace {
 constexpr int64_t cufft_max_ndim = 3;
+
+// "Large" here means a prime factor not special-cased by cuFFT
+// Ref: https://docs.nvidia.com/cuda/cufft/index.html#accuracy-and-performance
+bool has_large_prime_factor(int64_t n) {
+  constexpr int64_t first_large_prime = 11;
+  const std::array<int64_t, 4> prime_radices{{2, 3, 5, 7}};
+  for (auto prime : prime_radices) {
+    if (n < first_large_prime) {
+        return false;
+    }
+
+    while (n % prime == 0) {
+      n /= prime;
+    }
+  }
+  return n != 1;
+}
 
 // Execute a general fft operation (can be c2c, onesided r2c or onesided c2r)
 static const Tensor& _exec_fft(Tensor& out, const Tensor& self, IntArrayRef out_sizes,
@@ -293,7 +255,22 @@ static const Tensor& _exec_fft(Tensor& out, const Tensor& self, IntArrayRef out_
   c10::optional<CuFFTConfig> uncached_plan;
   const CuFFTConfig * config = nullptr;
 
-  if (plan_cache.max_size() > 0) {
+  // Workaround for gh-63152, gh-58724
+  // Bluestein plans in CUDA 11.1 (cufft 10.3) cannot be re-used
+  // Bluestein's algorithm is only used when a size has large prime factors,
+  // sizes with only small prime factors can still be cached
+  bool use_caching = true;
+#ifdef CUFFT_VERSION
+  if (10300 <= CUFFT_VERSION && CUFFT_VERSION < 10400) {
+    // Only cache plans for transforms with small prime factors
+    use_caching = std::none_of(
+        signal_size.begin() + 1, signal_size.end(), [](int64_t dim_size) {
+      return has_large_prime_factor(dim_size);
+    });
+  }
+#endif
+
+  if (use_caching && plan_cache.max_size() > 0) {
     guard.lock();
     if (plan_cache.max_size() > 0) {  // check again after acquiring the lock
       config = &plan_cache.lookup(Params);
@@ -361,6 +338,18 @@ Tensor& _fft_apply_normalization_out(Tensor& out, const Tensor& self, int64_t no
 
 }  // namespace (anonymous)
 
+// Use the optimized path to perform single R2C or C2R if transformation dim is supported by cuFFT
+bool use_optimized_cufft_path(IntArrayRef dim) {
+  // For performance reason, when dim starts with (0, 1), do not use the optimized path.
+  if (dim.size() > cufft_max_ndim || (
+    dim.size() >= 2 && dim[0] == 0 && dim[1] == 1
+  )) {
+    return false;
+  } else {
+    return true;
+  }
+}
+
 // n-dimensional real to complex FFT
 Tensor _fft_r2c_cufft(const Tensor& self, IntArrayRef dim, int64_t normalization, bool onesided) {
   TORCH_CHECK(self.is_floating_point());
@@ -385,31 +374,35 @@ Tensor _fft_r2c_cufft(const Tensor& self, IntArrayRef dim, int64_t normalization
                          .movedim(-1, last_dim);
   }
 
-  // First do the R2C transform on the last dimension
-  {
-    auto target_sizes = dim.size() == 1 ? out_sizes : onesided_sizes;
-    _exec_fft(output, working_tensor, target_sizes, last_dim, /*forward=*/true);
-    if (dim.size() > 1) {
-      working_tensor = at::empty(out_sizes, out_options);
+  if (use_optimized_cufft_path(dim)) {
+    _exec_fft(output, working_tensor, out_sizes, dim, /*forward=*/true);
+  } else {
+    // First do the R2C transform on the last dimension
+    {
+      auto target_sizes = dim.size() == 1 ? out_sizes : onesided_sizes;
+      _exec_fft(output, working_tensor, target_sizes, last_dim, /*forward=*/true);
+      if (dim.size() > 1) {
+        working_tensor = at::empty(out_sizes, out_options);
+      }
     }
-  }
 
-  // Then any remaining C2C transforms
-  DimVector sorted_dims(dim.begin(), dim.end() - 1);
-  while (!sorted_dims.empty()) {
-    std::swap(output, working_tensor);
+    // Then any remaining C2C transforms
+    DimVector sorted_dims(dim.begin(), dim.end() - 1);
+    while (!sorted_dims.empty()) {
+      std::swap(output, working_tensor);
 
-    // Resort dimensions every time as _exec_fft re-strides the output
-    auto strides = working_tensor.strides();
-    std::sort(sorted_dims.begin(), sorted_dims.end(),
-              [&](int64_t a, int64_t b) { return strides[a] > strides[b]; });
+      // Resort dimensions every time as _exec_fft re-strides the output
+      auto strides = working_tensor.strides();
+      std::sort(sorted_dims.begin(), sorted_dims.end(),
+                [&](int64_t a, int64_t b) { return strides[a] > strides[b]; });
 
-    const auto max_dims = std::min(static_cast<size_t>(cufft_max_ndim), sorted_dims.size());
-    auto last_dims = IntArrayRef(sorted_dims).slice(sorted_dims.size() - max_dims, max_dims);
+      const auto max_dims = std::min(static_cast<size_t>(cufft_max_ndim), sorted_dims.size());
+      auto last_dims = IntArrayRef(sorted_dims).slice(sorted_dims.size() - max_dims, max_dims);
 
-    // Intermediate results are always onesided
-    _exec_fft(output, working_tensor, onesided_sizes, last_dims, /*forward=*/true);
-    sorted_dims.resize(sorted_dims.size() - max_dims);
+      // Intermediate results are always onesided
+      _exec_fft(output, working_tensor, onesided_sizes, last_dims, /*forward=*/true);
+      sorted_dims.resize(sorted_dims.size() - max_dims);
+    }
   }
 
   // Only need to normalize the onesided slice since data in the other half is overwritten
@@ -451,21 +444,30 @@ Tensor _fft_c2r_cufft(const Tensor& self, IntArrayRef dim, int64_t normalization
   DimVector out_sizes(in_sizes.begin(), in_sizes.end());
   out_sizes[dim.back()] = lastdim;
 
-  // First complete any C2C transforms
-  Tensor temp;
-  if (dim.size() > 1) {
-    temp = _fft_c2c_cufft(
-        self, dim.slice(0, dim.size() - 1),
-        static_cast<int64_t>(fft_norm_mode::none), /*forward=*/false);
-  } else {
+  auto output = at::empty(out_sizes, self.options().dtype(c10::toValueType(self.scalar_type())));
+
+  if (use_optimized_cufft_path(dim)) {
+    Tensor temp;
     // Complex to real FFTs may overwrite the input buffer, so must always clone (gh-34551)
     temp = self.clone(MemoryFormat::Contiguous);
+    _exec_fft(output, temp, out_sizes, dim, /*forward=*/false);
+  } else {
+    // First complete any C2C transforms
+    Tensor temp;
+    if (dim.size() > 1) {
+      temp = _fft_c2c_cufft(
+          self, dim.slice(0, dim.size() - 1),
+          static_cast<int64_t>(fft_norm_mode::none), /*forward=*/false);
+    } else {
+      // Complex to real FFTs may overwrite the input buffer, so must always clone (gh-34551)
+      temp = self.clone(MemoryFormat::Contiguous);
+    }
+
+    // Finally, do a 1D C2R transform
+    // TODO: could transform up to 2 other dims in the same cuFFT operation
+    _exec_fft(output, temp, out_sizes, dim.back(), /*forward=*/false);
   }
 
-  // Finally, do a 1D C2R transform
-  // TODO: could transform up to 2 other dims in the same cuFFT operation
-  auto output = at::empty(out_sizes, self.options().dtype(c10::toValueType(self.scalar_type())));
-  _exec_fft(output, temp, out_sizes, dim.back(), /*forward=*/false);
   return _fft_apply_normalization(output, normalization, out_sizes, dim);
 }
 

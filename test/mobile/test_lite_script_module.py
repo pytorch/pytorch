@@ -7,6 +7,12 @@ import inspect
 
 from torch.jit.mobile import _load_for_lite_interpreter, _export_operator_list
 from torch.testing._internal.common_utils import TestCase, run_tests
+from torch.testing._internal.common_quantization import (
+    AnnotatedSingleLayerLinearModel,
+    TwoLayerLinearModel,
+    AnnotatedNestedModel
+)
+from torch.testing._internal.common_quantization import QuantizationLiteTestCase
 
 class TestLiteScriptModule(TestCase):
 
@@ -42,13 +48,13 @@ class TestLiteScriptModule(TestCase):
         mobile_module = _load_for_lite_interpreter(buffer)
 
         mobile_module_result = mobile_module(input)
-        torch.testing.assert_allclose(script_module_result, mobile_module_result)
+        torch.testing.assert_close(script_module_result, mobile_module_result)
 
         mobile_module_forward_result = mobile_module.forward(input)
-        torch.testing.assert_allclose(script_module_result, mobile_module_forward_result)
+        torch.testing.assert_close(script_module_result, mobile_module_forward_result)
 
         mobile_module_run_method_result = mobile_module.run_method("forward", input)
-        torch.testing.assert_allclose(script_module_result, mobile_module_run_method_result)
+        torch.testing.assert_close(script_module_result, mobile_module_run_method_result)
 
     def test_save_mobile_module_with_debug_info_with_trace(self):
         class A(torch.nn.Module):
@@ -82,12 +88,12 @@ class TestLiteScriptModule(TestCase):
             assert(b"callstack_debug_map.pkl" in exported_module)
 
             mobile_module = _load_for_lite_interpreter(buffer)
-            with self.assertRaisesRegex(RuntimeError, r"Module hierarchy:top\(B\).A0\(A\)"):
+            with self.assertRaisesRegex(RuntimeError, r"Module hierarchy:top\(B\)::<unknown>.A0\(A\)::forward.aten::mul"):
                 x = torch.rand((2, 3))
                 y = torch.rand((8, 10))
                 z = torch.rand((8, 10))
                 mobile_module(x, y, z)
-            with self.assertRaisesRegex(RuntimeError, r"Module hierarchy:top\(B\).A1\(A\)"):
+            with self.assertRaisesRegex(RuntimeError, r"Module hierarchy:top\(B\)::<unknown>.A1\(A\)::forward.aten::mul"):
                 x = torch.rand((2, 3))
                 y = torch.rand((2, 3))
                 z = torch.rand((8, 10))
@@ -111,13 +117,13 @@ class TestLiteScriptModule(TestCase):
         mobile_module = _load_for_lite_interpreter(buffer)
 
         mobile_module_result = mobile_module(input)
-        torch.testing.assert_allclose(script_module_result, mobile_module_result)
+        torch.testing.assert_close(script_module_result, mobile_module_result)
 
         mobile_module_forward_result = mobile_module.forward(input)
-        torch.testing.assert_allclose(script_module_result, mobile_module_forward_result)
+        torch.testing.assert_close(script_module_result, mobile_module_forward_result)
 
         mobile_module_run_method_result = mobile_module.run_method("forward", input)
-        torch.testing.assert_allclose(script_module_result, mobile_module_run_method_result)
+        torch.testing.assert_close(script_module_result, mobile_module_run_method_result)
 
     def test_find_and_run_method(self):
         class MyTestModule(torch.nn.Module):
@@ -148,7 +154,7 @@ class TestLiteScriptModule(TestCase):
 
         bundled_inputs = mobile_module.run_method("get_all_bundled_inputs")
         mobile_module_result = mobile_module.forward(*bundled_inputs[0])
-        torch.testing.assert_allclose(script_module_result, mobile_module_result)
+        torch.testing.assert_close(script_module_result, mobile_module_result)
 
     def test_method_calls_with_optional_arg(self):
         class A(torch.nn.Module):
@@ -177,7 +183,7 @@ class TestLiteScriptModule(TestCase):
         input = torch.tensor([5])
         script_module_forward_result = script_module.forward(input)
         mobile_module_forward_result = mobile_module.forward(input)
-        torch.testing.assert_allclose(
+        torch.testing.assert_close(
             script_module_forward_result,
             mobile_module_forward_result
         )
@@ -192,7 +198,7 @@ class TestLiteScriptModule(TestCase):
 
         # now both match again
         mobile_module_forward_result = mobile_module.forward(input, 2)
-        torch.testing.assert_allclose(
+        torch.testing.assert_close(
             script_module_forward_result,
             mobile_module_forward_result
         )
@@ -357,7 +363,14 @@ class TestLiteScriptModule(TestCase):
 
         _, lineno = inspect.getsourcelines(FooTest2)
 
-        with self.assertRaisesRegex(RuntimeError, 'test_lite_script_module.py\", line {}'.format(lineno + 3)):
+        # In C++ code, the type of exception thrown is torch::jit::JITException
+        # which does not extend c10::Error, and hence it isn't possible to add
+        # additional context to the exception message and preserve the correct
+        #  C++ stack trace for symbolication. i.e. it isn't possible to add
+        # the debug handle string to show where in the Python code the exception
+        # occured w/o first changing
+        # torch::jit::JITException to extend c10::Error.
+        with self.assertRaisesRegex(torch.jit.Error, 'foo'):
             ft = FooTest2()
             loaded = self.getScriptExportImportCopy(ft)
             loaded()
@@ -426,10 +439,67 @@ class TestLiteScriptModule(TestCase):
 
         try:
             loaded(42, torch.rand(3, 4), torch.rand(3, 4), torch.rand(30, 40))
-        except RuntimeError as e:
+        except torch.jit.Error as e:
             error_message = f"{e}"
-        self.assertTrue('test_lite_script_module.py\", line {}'.format(lineno + 8) in error_message)
-        self.assertTrue('top(FooTest5)' in error_message)
+
+        # In C++ code, the type of exception thrown is torch::jit::JITException
+        # which does not extend c10::Error, and hence it isn't possible to add
+        # additional context to the exception message and preserve the correct
+        #  C++ stack trace for symbolication. i.e. it isn't possible to add
+        # the debug handle string to show where in the Python code the exception
+        # occured w/o first changing
+        # torch::jit::JITException to extend c10::Error.
+        self.assertTrue('self.val and val are same' in error_message)
+
+
+class TestLiteScriptQuantizedModule(QuantizationLiteTestCase):
+
+    def test_single_layer(self):
+        input = torch.rand(2, 5, dtype=torch.float)
+        quantized_model = self._create_quantized_model(model_class=AnnotatedSingleLayerLinearModel, qengine="qnnpack")
+        self._compare_script_and_mobile(model=quantized_model, input=input)
+
+    def test_two_layer(self):
+        input = torch.rand(2, 5, dtype=torch.float)
+        quantized_model = self._create_quantized_model(model_class=TwoLayerLinearModel)
+        self._compare_script_and_mobile(model=quantized_model, input=input)
+
+    def test_annotated_nested(self):
+        input = torch.rand(2, 5, dtype=torch.float)
+        quantized_model = self._create_quantized_model(model_class=AnnotatedNestedModel, qengine="qnnpack")
+        self._compare_script_and_mobile(model=quantized_model, input=input)
+
+    def test_quantization_example(self):
+
+        # From the example in Static Quantization section of https://pytorch.org/docs/stable/quantization.html
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.quant = torch.quantization.QuantStub()
+                self.conv = torch.nn.Conv2d(1, 1, 1)
+                self.relu = torch.nn.ReLU()
+                self.dequant = torch.quantization.DeQuantStub()
+
+            def forward(self, x):
+                x = self.quant(x)
+                x = self.conv(x)
+                x = self.relu(x)
+                x = self.dequant(x)
+                return x
+
+        model_fp32 = M()
+
+        model_fp32.eval()
+        model_fp32.qconfig = torch.quantization.get_default_qconfig('qnnpack')
+        model_fp32_fused = torch.quantization.fuse_modules(model_fp32, [['conv', 'relu']])
+        model_fp32_prepared = torch.quantization.prepare(model_fp32_fused)
+        input_fp32 = torch.randn(4, 1, 4, 4)
+        model_fp32_prepared(input_fp32)
+        model_int8 = torch.quantization.convert(model_fp32_prepared)
+
+        input = torch.randn(4, 1, 4, 4)
+        self._compare_script_and_mobile(model=model_int8, input=input)
+
 
 if __name__ == '__main__':
     run_tests()

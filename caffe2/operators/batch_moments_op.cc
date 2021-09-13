@@ -93,16 +93,12 @@ bool BatchMomentsGradientOp<float, CPUContext>::ComputeBatchMomentsGradientNHWC(
   return true;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(BatchMoments, BatchMomentsOp<float, CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     BatchMomentsGradient,
     BatchMomentsGradientOp<float, CPUContext>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(BatchMoments).NumInputs(1).NumOutputs(2);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(BatchMomentsGradient).NumInputs(3).NumOutputs(1);
 
 namespace {
@@ -121,7 +117,6 @@ class GetBatchMomentsGradient : public GradientMakerBase {
 
 } // namespace
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(BatchMoments, GetBatchMomentsGradient);
 
 } // namespace caffe2

@@ -1,7 +1,7 @@
 #ifndef CAFFE2_UTILS_PROTO_WRAP_H_
 #define CAFFE2_UTILS_PROTO_WRAP_H_
 
-#include "caffe2/core/common.h"
+#include <c10/util/Logging.h>
 
 namespace caffe2 {
 

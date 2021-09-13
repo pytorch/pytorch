@@ -263,7 +263,7 @@ void DistEngine::computeDependencies(
   }
 
   if (will_use_cuda) {
-    // Collects current and default streams for devices where this process has a context,
+    // Collects current streams for devices where this process has a context,
     // so graphTask::exec_post_processing can sync them with leaf_streams.
     graphTask->stash_current_streams();
   }
@@ -359,7 +359,7 @@ void DistEngine::execute_graph_task_until_ready_queue_empty(
         continue;
       }
       if (task.fn_ && !local_graph_task->has_error_.load()) {
-        AutoGradMode grad_mode(local_graph_task->grad_mode_);
+        at::ThreadLocalStateGuard tls_guard(local_graph_task->thread_locals_);
         try {
           GraphTaskGuard guard(local_graph_task);
           engine_.evaluate_function(

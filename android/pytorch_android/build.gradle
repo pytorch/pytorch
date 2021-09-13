@@ -18,9 +18,9 @@ android {
         externalNativeBuild {
             cmake {
               if(System.env.BUILD_LITE_INTERPRETER == '0') {
-                arguments "-DANDROID_STL=c++_shared", "-DBUILD_LITE_INTERPRETER=OFF"
+                arguments "-DANDROID_STL=c++_shared", "-DBUILD_LITE_INTERPRETER=OFF", "-DUSE_LITE_INTERPRETER_PROFILER=OFF"
               } else {
-                arguments "-DANDROID_STL=c++_shared"
+                arguments "-DANDROID_STL=c++_shared", "-DUSE_LITE_INTERPRETER_PROFILER=OFF"
               }
             }
         }

@@ -1,4 +1,5 @@
 #include <gtest/gtest.h>
+#include <c10/cuda/CUDAException.h>
 
 int safeDeviceCount() {
   int count;
@@ -23,6 +24,7 @@ TEST(a##Device, b) {                                \
   SKIP_IF_NO_GPU();                                 \
   cudaDeviceSynchronize();                          \
   CUDA##a##b<<<1, 1>>>();                           \
+  C10_CUDA_KERNEL_LAUNCH_CHECK();                   \
   cudaDeviceSynchronize();                          \
   ASSERT_EQ(cudaGetLastError(), cudaSuccess);       \
 }                                                   \

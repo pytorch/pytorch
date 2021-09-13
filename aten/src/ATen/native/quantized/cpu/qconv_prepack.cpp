@@ -224,7 +224,7 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightsQnnp<
   // QNNPACK expects weights to be of the format {out_c, kH, kW, in_c/groups},
   // but PyTorch lays them out as {out_c, in_c/groups, kH, kW}
   // (or for ConvTranspose {in_c, out_c/groups, kH, kW})
-  const size_t out_ch = transpose ? weight.size(1) * groups : weight.size(0);
+  const auto out_ch = transpose ? weight.size(1) * groups : weight.size(0);
   const uint32_t kernel_h = weight.size(2);
   const uint32_t kernel_w = weight.size(3);
 
@@ -237,7 +237,6 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightsQnnp<
 
   TORCH_CHECK(
       !bias_fp32.defined() ||
-          // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
           (bias_fp32.ndimension() == 1 && bias_fp32.size(0) == out_ch),
       "quantized::conv2d_prepack (qnnpack): expected bias to be 1-dimensional "
       "with ",
@@ -253,7 +252,6 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightsQnnp<
 
   TORCH_CHECK(
       !bias_fp32.defined() ||
-          // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
           (bias_fp32.ndimension() == 1 && bias_fp32.size(0) == out_ch),
       "quantized::conv3d_prepack (qnnpack): expected bias to be 1-dimensional "
       "with ",
@@ -278,9 +276,8 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightsQnnp<
   // during the first invocation of operator run. Refer to qconv.cpp for more
   // details. TODO Update to actually call pre-pack here once bias is removed
   // from pre-packing step.
-  c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> ret_ptr =
-      c10::make_intrusive<PackedConvWeightsQnnp<kSpatialDim>>(
-          PackedConvWeightsQnnp<kSpatialDim>{
+  auto ret_ptr =
+      c10::intrusive_ptr<PackedConvWeightsQnnp<kSpatialDim>>::make(
               nullptr, /* PrePackConvWeights */
               weight_contig, /* int8_t weight */
               bias_fp32.contiguous(), /* fp32 bias */
@@ -291,10 +288,10 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightsQnnp<
               groups,
               transpose,
               c10::nullopt, /* input_scale */
-              {kernel_h, kernel_w},
+              std::vector<int64_t>{kernel_h, kernel_w},
               w_scales,
               std::move(w_zero_points),
-              is_per_channel});
+              is_per_channel);
 
   return ret_ptr;
 }

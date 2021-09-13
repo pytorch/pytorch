@@ -13,7 +13,6 @@ from torch.distributed.elastic.multiprocessing.errors import (
     record,
 )
 from torch.distributed.elastic.multiprocessing.errors.error_handler import _write_error
-from torch.testing._internal.common_utils import TEST_WITH_TSAN
 
 
 class SentinelError(Exception):
@@ -45,7 +44,6 @@ def read_resource_file(resource_file: str) -> str:
         return "".join(fp.readlines())
 
 
-@unittest.skipIf(TEST_WITH_TSAN, "test incompatible with tsan")
 class ApiTest(unittest.TestCase):
     def setUp(self):
         self.test_dir = tempfile.mkdtemp(prefix=self.__class__.__name__)

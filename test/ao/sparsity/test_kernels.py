@@ -10,10 +10,9 @@ from itertools import product
 import torch
 import torch.quantization as tq
 
-# Hopefully, the `mo` namespace will move under `nn`
 from torch import nn
 from torch.ao.nn.sparse import quantized as ao_nn_sq
-from torch.ao.nn.sparse.quantized.utils import QNNPACKLinearBlockSparsePattern
+from torch.ao.nn.sparse.quantized.utils import LinearBlockSparsePattern
 
 from torch.testing._internal.common_utils import TestCase
 from torch.testing._internal.common_quantized import (
@@ -199,7 +198,7 @@ class TestQuantizedSparseLayers(TestCase):
                 # Make sure mapping of sparse kernels does not affect the non-sparse
                 sparse_mapping = copy.deepcopy(tq.get_default_dynamic_quant_module_mappings())
                 sparse_mapping[nn.Linear] = ao_nn_sq.dynamic.Linear
-                with QNNPACKLinearBlockSparsePattern(1, 4):
+                with LinearBlockSparsePattern(1, 4):
                     tq.convert(sdqmodel, inplace=True, mapping=sparse_mapping)
                 tq.convert(dqmodel, mapping=tq.get_default_dynamic_quant_module_mappings(), inplace=True)
 
@@ -302,7 +301,7 @@ class TestQuantizedSparseLayers(TestCase):
                 # Make sure mapping of sparse kernels does not affect the non-sparse
                 sparse_mapping = copy.deepcopy(tq.get_default_dynamic_quant_module_mappings())
                 sparse_mapping[nn.Linear] = ao_nn_sq.dynamic.Linear
-                with QNNPACKLinearBlockSparsePattern(1, 4):
+                with LinearBlockSparsePattern(1, 4):
                     tq.convert(sdqmodel, inplace=True, mapping=sparse_mapping)
                 tq.convert(dqmodel, mapping=tq.get_default_dynamic_quant_module_mappings(), inplace=True)
 

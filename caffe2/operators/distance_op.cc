@@ -1,4 +1,5 @@
 #include "caffe2/operators/distance_op.h"
+#include "caffe2/core/types.h"
 #include "caffe2/utils/eigen_utils.h"
 #ifdef CAFFE2_USE_MKLDNN
 #include <caffe2/ideep/operators/operator_fallback_ideep.h>
@@ -7,7 +8,7 @@
 
 namespace caffe2 {
 
-template<>
+template <>
 bool SquaredL2DistanceOp<float, CPUContext>::RunOnDevice() {
   auto& X = Input(0);
   auto& Y = Input(1);
@@ -257,7 +258,9 @@ OpSchema::Cost CostInferenceForDotProduct(
   CAFFE_ENFORCE_EQ(out[0].dims().size(), 1);
 
   struct OpSchema::Cost c = PointwiseCostInference<2>(def, in);
-  c.bytes_written = out[0].dims(0) * sizeof(out[0].data_type());
+  auto const& out_0_element_size_byte =
+      DataTypeToTypeMeta(out[0].data_type()).itemsize();
+  c.bytes_written = out[0].dims(0) * out_0_element_size_byte;
   c.params_bytes = 0;
   return c;
 }
@@ -379,14 +382,13 @@ bool DotProductWithPaddingOp<float, CPUContext>::RunOnDevice() {
 }
 
 // L2
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-REGISTER_CPU_OPERATOR(SquaredL2Distance,
-                      SquaredL2DistanceOp<float, CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-REGISTER_CPU_OPERATOR(SquaredL2DistanceGradient,
-                      SquaredL2DistanceGradientOp<float, CPUContext>);
+REGISTER_CPU_OPERATOR(
+    SquaredL2Distance,
+    SquaredL2DistanceOp<float, CPUContext>);
+REGISTER_CPU_OPERATOR(
+    SquaredL2DistanceGradient,
+    SquaredL2DistanceGradientOp<float, CPUContext>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SquaredL2Distance)
     .NumInputs(2)
     .NumOutputs(1)
@@ -399,36 +401,31 @@ of the L2 difference between X and Y that is computed as ||(X - Y)^2 / 2||.
     .Input(1, "Y", "1D or 2D input tensor (must have the same shape as X)")
     .Output(0, "Z", "1D output tensor");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SquaredL2DistanceGradient).NumInputs(3).NumOutputs(2);
 
 class GetSquaredL2DistanceGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
   vector<OperatorDef> GetGradientDefs() override {
     return SingleGradientDef(
-        "SquaredL2DistanceGradient", "",
+        "SquaredL2DistanceGradient",
+        "",
         vector<string>{I(0), I(1), GO(0)},
         vector<string>{GI(0), GI(1)});
   }
 };
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(SquaredL2Distance, GetSquaredL2DistanceGradient);
 
 // L1
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(L1Distance, L1DistanceOp<float, CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     L1DistanceGradient,
     L1DistanceGradientOp<float, CPUContext>);
 #ifdef CAFFE2_USE_MKLDNN
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(
     L1DistanceGradient,
     IDEEPFallbackOp<L1DistanceGradientOp<float, CPUContext>>);
 #endif
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(L1Distance)
     .NumInputs(2)
     .NumOutputs(1)
@@ -500,7 +497,6 @@ Z:
     .Input(1, "Y", "Second input tensor. (must have the same shape as $X$)")
     .Output(0, "Z", "1D output tensor. One value for each row of the inputs.");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(L1DistanceGradient).NumInputs(3).NumOutputs(2);
 
 class GetL1DistanceGradient : public GradientMakerBase {
@@ -514,18 +510,14 @@ class GetL1DistanceGradient : public GradientMakerBase {
   }
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(L1Distance, GetL1DistanceGradient);
 
 // Dot Product
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(DotProduct, DotProductOp<float, CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     DotProductGradient,
     DotProductGradientOp<float, CPUContext>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(DotProduct)
     .NumInputs(2)
     .NumOutputs(1)
@@ -628,7 +620,6 @@ Z:
         OpSchema::CostInferenceFunctionType(CostInferenceForDotProduct))
     .InheritOnnxSchema();
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(DotProductGradient).NumInputs(3).NumOutputs(2);
 
 class GetDotProductGradient : public GradientMakerBase {
@@ -641,18 +632,14 @@ class GetDotProductGradient : public GradientMakerBase {
         vector<string>{GI(0), GI(1)});
   }
 };
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(DotProduct, GetDotProductGradient);
 
 // Cosine Similarity
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(CosineSimilarity, CosineSimilarityOp<float, CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     CosineSimilarityGradient,
     CosineSimilarityGradientOp<float, CPUContext>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(CosineSimilarity)
     .NumInputs(2)
     .NumOutputs(1)
@@ -726,7 +713,6 @@ Z:
     .Input(1, "Y", "1D or 2D input tensor (must have the same shape as X)")
     .Output(0, "Z", "1D output tensor");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(CosineSimilarityGradient).NumInputs(3).NumOutputs(2);
 
 class GetCosineSimilarityGradient : public GradientMakerBase {
@@ -739,20 +725,16 @@ class GetCosineSimilarityGradient : public GradientMakerBase {
         vector<string>{GI(0), GI(1)});
   }
 };
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(CosineSimilarity, GetCosineSimilarityGradient);
 
 // Dot Product allows padding
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     DotProductWithPadding,
     DotProductWithPaddingOp<float, CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     DotProductWithPaddingGradient,
     DotProductWithPaddingGradientOp<float, CPUContext>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(DotProductWithPadding)
     .NumInputs(2)
     .NumOutputs(1)
@@ -772,7 +754,6 @@ can be padded.
     .Arg("pad_value", "the padding value for tensors with smaller dimension")
     .Arg("replicate", "whether to replicate the smaller tensor or not");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(DotProductWithPaddingGradient).NumInputs(3).NumOutputs(2);
 
 class GetDotProductWithPaddingGradient : public GradientMakerBase {
@@ -787,9 +768,9 @@ class GetDotProductWithPaddingGradient : public GradientMakerBase {
       replicate = GetArgument(Def(), "replicate").i();
     }
 
-    const auto dot_arg =
-        vector<Argument>{MakeArgument<float>("pad_value", pad_value),
-                         MakeArgument<bool>("replicate", replicate)};
+    const auto dot_arg = vector<Argument>{
+        MakeArgument<float>("pad_value", pad_value),
+        MakeArgument<bool>("replicate", replicate)};
 
     return SingleGradientDef(
         "DotProductWithPaddingGradient",
@@ -799,6 +780,5 @@ class GetDotProductWithPaddingGradient : public GradientMakerBase {
         dot_arg);
   }
 };
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(DotProductWithPadding, GetDotProductWithPaddingGradient);
-}  // namespace caffe2
+} // namespace caffe2

@@ -18,9 +18,7 @@
 
 namespace caffe2 {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(WeightScale, WeightScaleOp<CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(WeightScale)
     .NumInputs(2)
     .NumOutputs(1)
@@ -47,6 +45,5 @@ Every `stepsize` iterations, multiply the weights by a constant `scale`:
         "After iter passes this bound, do not perform the weight rescaling")
     .Arg("scale", "The multiplicative factor applied to weights.");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(WeightScale);
 } // namespace caffe2

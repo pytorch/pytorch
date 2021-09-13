@@ -29,7 +29,7 @@ namespace {
 } // anonymous namespace
 
 // Note: this is not a native function as Quantizer is not exposed to python yet
-QuantizerPtr Tensor::quantizer() const {
+QuantizerPtr TensorBase::quantizer() const {
   // This is a terrible hack to emulate what VariableType is doing
   at::AutoDispatchBelowAutograd mode;
   return get_qtensorimpl(*this)->quantizer();
@@ -71,7 +71,7 @@ QuantizerPtr make_per_channel_affine_quantizer(
   }
 }
 
-QTensorImpl* get_qtensorimpl(const Tensor& self) {
+QTensorImpl* get_qtensorimpl(const TensorBase& self) {
   TORCH_CHECK(
       !self.requires_grad(),
       "quantized tensors do not support autograd");
@@ -208,11 +208,94 @@ Tensor PerChannelAffineFloatQParamsQuantizer::dequantize(const Tensor& qtensor) 
   return rtensor;
 }
 
-// NOLINTNEXTLINE(modernize-use-equals-default)
-Quantizer::~Quantizer() {}
+Quantizer::~Quantizer() = default;
 
 C10_EXPORT void set_quantizer_(const Tensor& self, ConstQuantizerPtr quantizer) {
   get_qtensorimpl(self)->set_quantizer_(quantizer);
+}
+
+Tensor from_blob_quantized_per_tensor_affine(
+    void* data,
+    IntArrayRef sizes,
+    std::function<void(void*)> deleter,
+    const float scale,
+    const int64_t zeroPoint,
+    const TensorOptions& options) {
+  auto dtype = typeMetaToScalarType(options.dtype());
+  TORCH_CHECK(
+      isQIntType(dtype),
+      "from_blob_quantized_per_tensor_affine expects QInt dtypes, got ", dtype);
+
+  const std::size_t itemsize = options.dtype().itemsize();
+  std::size_t size = 1;
+  for (std::int64_t s : sizes) {
+    size *= static_cast<std::size_t>(s);
+  }
+  const std::size_t datasize = size * itemsize;
+
+  DataPtr data_ptr = InefficientStdFunctionContext::makeDataPtr(
+      data, deleter, options.device());
+
+  Storage storage{Storage::use_byte_size_t{}, datasize, std::move(data_ptr)};
+
+  QuantizerPtr quantizer =
+      make_per_tensor_affine_quantizer(scale, zeroPoint, dtype);
+
+  Tensor qtensor = at::detail::make_tensor<QTensorImpl>(
+      std::move(storage),
+      at::DispatchKeySet(options.computeDispatchKey()),
+      options.dtype(),
+      quantizer);
+  get_qtensorimpl(qtensor)->set_sizes_contiguous(sizes);
+  return qtensor;
+}
+
+
+Tensor from_blob_quantized_per_channel_affine(
+    void* data,
+    IntArrayRef sizes,
+    std::function<void(void*)> deleter,
+    const Tensor& scales,
+    const Tensor& zero_points,
+    const int64_t axis,
+    const TensorOptions& options) {
+  checkPerChannelParamDims(scales, zero_points);
+  int64_t channel = sizes[axis];
+  TORCH_CHECK(
+      channel == int64_t(scales.numel()),
+      "length of scales must equal to channel, expected ", channel, " got, ", scales.numel());
+  TORCH_CHECK(
+      channel == int64_t(zero_points.numel()),
+      "length of zero_points must equal to channel, expected ", channel, " got, ", zero_points.numel());
+
+  auto dtype = typeMetaToScalarType(options.dtype());
+  TORCH_CHECK(
+      isQIntType(dtype),
+      "from_blob_quantized_per_channel_affine expects QInt dtypes, got ", dtype);
+
+  const std::size_t itemsize = options.dtype().itemsize();
+  std::size_t size = 1;
+  for (std::int64_t s : sizes) {
+    size *= static_cast<std::size_t>(s);
+  }
+  const std::size_t datasize = size * itemsize;
+
+  DataPtr data_ptr = InefficientStdFunctionContext::makeDataPtr(
+      data, deleter, options.device());
+
+  Storage storage{Storage::use_byte_size_t{}, datasize, std::move(data_ptr)};
+
+  QuantizerPtr quantizer =
+      make_per_channel_affine_quantizer(scales, zero_points, axis, dtype);
+
+  Tensor qtensor = at::detail::make_tensor<QTensorImpl>(
+      std::move(storage),
+      at::DispatchKeySet(options.computeDispatchKey()),
+      options.dtype(),
+      quantizer);
+  get_qtensorimpl(qtensor)->set_sizes_contiguous(sizes);
+
+  return qtensor;
 }
 
 } // namespace at

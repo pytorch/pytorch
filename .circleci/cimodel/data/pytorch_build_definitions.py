@@ -31,6 +31,7 @@ class Conf:
     is_libtorch: bool = False
     is_important: bool = False
     parallel_backend: Optional[str] = None
+    build_only: bool = False
 
     @staticmethod
     def is_test_phase(phase):
@@ -112,6 +113,8 @@ class Conf:
             parameters["resource_class"] = "xlarge"
         if hasattr(self, 'filters'):
             parameters['filters'] = self.filters
+        if self.build_only:
+            parameters['build_only'] = miniutils.quote(str(int(True)))
         return parameters
 
     def gen_workflow_job(self, phase):
@@ -211,7 +214,7 @@ def gen_docs_configs(xenial_parent_config):
         HiddenConf(
             "pytorch_python_doc_build",
             parent_build=xenial_parent_config,
-            filters=gen_filter_dict(branches_list=r"/.*/",
+            filters=gen_filter_dict(branches_list=["master", "nightly"],
                                     tags_list=RC_PATTERN),
         )
     )
@@ -227,7 +230,7 @@ def gen_docs_configs(xenial_parent_config):
         HiddenConf(
             "pytorch_cpp_doc_build",
             parent_build=xenial_parent_config,
-            filters=gen_filter_dict(branches_list=r"/.*/",
+            filters=gen_filter_dict(branches_list=["master", "nightly"],
                                     tags_list=RC_PATTERN),
         )
     )
@@ -236,13 +239,6 @@ def gen_docs_configs(xenial_parent_config):
             "pytorch_cpp_doc_push",
             parent_build="pytorch_cpp_doc_build",
             branch="master",
-        )
-    )
-
-    configs.append(
-        HiddenConf(
-            "pytorch_doc_test",
-            parent_build=xenial_parent_config
         )
     )
     return configs
@@ -369,6 +365,7 @@ def instantiate_configs(only_slow_gradcheck):
             is_libtorch=is_libtorch,
             is_important=is_important,
             parallel_backend=parallel_backend,
+            build_only=build_only,
         )
 
         # run docs builds on "pytorch-linux-xenial-py3.6-gcc5.4". Docs builds
@@ -392,16 +389,19 @@ def instantiate_configs(only_slow_gradcheck):
         if cuda_version == "10.2" and python_version == "3.6" and not is_libtorch and not is_slow_gradcheck:
             c.dependent_tests = gen_dependent_configs(c)
 
+
         if (
-            compiler_name == "gcc"
-            and compiler_version == "5.4"
+            compiler_name != "clang"
+            and not rocm_version
             and not is_libtorch
             and not is_vulkan
             and not is_pure_torch
-            and parallel_backend is None
+            and not is_noarch
+            and not is_slow_gradcheck
+            and not only_slow_gradcheck
         ):
-            bc_breaking_check = Conf(
-                "backward-compatibility-check",
+            distributed_test = Conf(
+                c.gen_build_name("") + "distributed",
                 [],
                 is_xla=False,
                 restrict_phases=["test"],
@@ -409,7 +409,7 @@ def instantiate_configs(only_slow_gradcheck):
                 is_important=True,
                 parent_build=c,
             )
-            c.dependent_tests.append(bc_breaking_check)
+            c.dependent_tests.append(distributed_test)
 
         config_list.append(c)
 

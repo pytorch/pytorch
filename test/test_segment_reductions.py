@@ -1,15 +1,32 @@
+from itertools import product
+
 import numpy as np
 import torch
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     dtypes,
-    dtypesIfCUDA,
 )
 from torch.testing._internal.common_utils import (
     TestCase,
     run_tests,
     gradcheck,
 )
+
+
+reductions = ["max", "mean", "min", "sum"]
+
+
+def get_default_value(initial_value, reduction):
+    if initial_value is not None:
+        return initial_value
+    if reduction == "max":
+        return -float("Inf")
+    elif reduction == "mean":
+        return float("nan")
+    elif reduction == "min":
+        return float("Inf")
+    elif reduction == "sum":
+        return 0.0
 
 
 class TestSegmentReductions(TestCase):
@@ -26,8 +43,9 @@ class TestSegmentReductions(TestCase):
         expected_arr,
         expected_grad_arr,
         check_backward,
+        lengths_dtype=torch.int,
     ):
-        lengths = torch.tensor(lengths_arr, device=device)
+        lengths = torch.tensor(lengths_arr, device=device, dtype=lengths_dtype)
         data = torch.tensor(
             data_arr,
             device=device,
@@ -83,27 +101,139 @@ class TestSegmentReductions(TestCase):
                 )
             )
 
-    @dtypesIfCUDA(torch.half, torch.bfloat16, torch.float, torch.double)
-    @dtypes(torch.half, torch.bfloat16, torch.float, torch.double)
-    def test_simple_1d(self, device, dtype):
+    @dtypes(
+        *product(
+            (torch.half, torch.bfloat16, torch.float, torch.double),
+            (torch.int, torch.int64),
+        )
+    )
+    def test_simple_1d(self, device, dtypes):
+        val_dtype, length_type = dtypes
         lengths = [1, 2, 3, 0]
         data = [1, float("nan"), 3, 4, 5, 5]
-        initial_value = 0
-        check_backward = True
 
-        for reduction in ("max", "mean"):
-            if reduction == "max":
-                expected_result = [1, float("nan"), 5, initial_value]
-                expected_grad = [1, 1, 0, 0, 0.5, 0.5]
-            elif reduction == "mean":
-                expected_result = [1, float("nan"), 4.666, initial_value]
-                expected_grad = [1.0, 0.5, 0.5, 0.333, 0.333, 0.333]
-            for axis in [0, -1]:
+        for reduction in reductions:
+            for initial in [0, None]:
+                check_backward = True if initial is not None else False
+                initial_value = initial
+                default_value = get_default_value(initial_value, reduction)
+                if reduction == "max":
+                    expected_result = [1, float("nan"), 5, default_value]
+                    expected_grad = [1, 1, 0, 0, 0.5, 0.5]
+                elif reduction == "mean":
+                    expected_result = [1, float("nan"), 4.666, default_value]
+                    expected_grad = [1.0, 0.5, 0.5, 0.333, 0.333, 0.333]
+                elif reduction == "min":
+                    if initial is not None:
+                        initial_value = 1000  # some high number
+                        default_value = get_default_value(initial_value, reduction)
+                    expected_result = [1, float("nan"), 4, default_value]
+                    expected_grad = [1.0, 1.0, 0, 1, 0, 0]
+                elif reduction == "sum":
+                    expected_result = [1, float("nan"), 14, default_value]
+                    expected_grad = [1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
+                for axis in [0, -1]:
+                    for unsafe in [True, False]:
+                        self._test_common(
+                            reduction,
+                            device,
+                            val_dtype,
+                            unsafe,
+                            axis,
+                            initial_value,
+                            data,
+                            lengths,
+                            expected_result,
+                            expected_grad,
+                            check_backward,
+                            length_type,
+                        )
+
+    @dtypes(
+        *product(
+            (torch.half, torch.bfloat16, torch.float, torch.double),
+            (torch.int, torch.int64),
+        )
+    )
+    def test_multi_d_simple(self, device, dtypes):
+        val_dtype, length_type = dtypes
+        axis = 0
+        lengths = [1, 2, 3, 0]
+        data = [[1, 1], [float("nan"), 1], [3, float("nan")], [4, 1], [3, 2], [2, 3]]
+
+        for reduction in reductions:
+            for initial in [0, None]:
+                check_backward = True if initial is not None else False
+                initial_value = initial
+                default_value = get_default_value(initial_value, reduction)
+                if reduction == "max":
+                    expected_result = [
+                        [1, 1],
+                        [float("nan"), float("nan")],
+                        [4, 3],
+                        [default_value, default_value],
+                    ]
+                    expected_grad = [
+                        [1, 1],
+                        [1, 0],
+                        [0, 1],
+                        [1, 0],
+                        [0, 0],
+                        [0, 1],
+                    ]
+                elif reduction == "mean":
+                    expected_result = [
+                        [1, 1],
+                        [float("nan"), float("nan")],
+                        [3, 2],
+                        [default_value, default_value],
+                    ]
+                    expected_grad = [
+                        [1.0, 1.0],
+                        [0.5, 0.5],
+                        [0.5, 0.5],
+                        [0.333, 0.333],
+                        [0.333, 0.333],
+                        [0.333, 0.333],
+                    ]
+                elif reduction == "min":
+                    if initial is not None:
+                        initial_value = 1000  # some high number
+                        default_value = get_default_value(initial_value, reduction)
+                    expected_result = [
+                        [1, 1],
+                        [float("nan"), float("nan")],
+                        [2, 1],
+                        [default_value, default_value],
+                    ]
+                    expected_grad = [
+                        [1.0, 1.0],
+                        [1, 0],
+                        [0, 1],
+                        [0, 1],
+                        [0, 0],
+                        [1, 0],
+                    ]
+                elif reduction == "sum":
+                    expected_result = [
+                        [1, 1],
+                        [float("nan"), float("nan")],
+                        [9, 6],
+                        [default_value, default_value],
+                    ]
+                    expected_grad = [
+                        [1.0, 1.0],
+                        [1.0, 1.0],
+                        [1.0, 1.0],
+                        [1.0, 1.0],
+                        [1.0, 1.0],
+                        [1.0, 1.0],
+                    ]
                 for unsafe in [True, False]:
                     self._test_common(
                         reduction,
                         device,
-                        dtype,
+                        val_dtype,
                         unsafe,
                         axis,
                         initial_value,
@@ -114,65 +244,14 @@ class TestSegmentReductions(TestCase):
                         check_backward,
                     )
 
-    @dtypesIfCUDA(torch.half, torch.bfloat16, torch.float, torch.double)
-    @dtypes(torch.half, torch.bfloat16, torch.float, torch.double)
-    def test_multi_d_simple(self, device, dtype):
-        initial_value = 0
-        check_backward = True
-        axis = 0
-        lengths = [1, 2, 3, 0]
-        data = [[1, 1], [float("nan"), 1], [3, float("nan")], [4, 1], [3, 2], [2, 3]]
-
-        for reduction in ("max", "mean"):
-            if reduction == "max":
-                expected_result = [
-                    [1, 1],
-                    [float("nan"), float("nan")],
-                    [4, 3],
-                    [initial_value, initial_value],
-                ]
-                expected_grad = [
-                    [1, 1],
-                    [1, 0],
-                    [0, 1],
-                    [1, 0],
-                    [0, 0],
-                    [0, 1],
-                ]
-            elif reduction == "mean":
-                expected_result = [
-                    [1, 1],
-                    [float("nan"), float("nan")],
-                    [3, 2],
-                    [initial_value, initial_value],
-                ]
-                expected_grad = [
-                    [1.0, 1.0],
-                    [0.5, 0.5],
-                    [0.5, 0.5],
-                    [0.333, 0.333],
-                    [0.333, 0.333],
-                    [0.333, 0.333],
-                ]
-            for unsafe in [True, False]:
-                self._test_common(
-                    reduction,
-                    device,
-                    dtype,
-                    unsafe,
-                    axis,
-                    initial_value,
-                    data,
-                    lengths,
-                    expected_result,
-                    expected_grad,
-                    check_backward,
-                )
-
-    @dtypesIfCUDA(torch.half, torch.bfloat16, torch.float, torch.double)
-    @dtypes(torch.half, torch.bfloat16, torch.float, torch.double)
-    def test_multi_d(self, device, dtype):
-        initial_value = 0
+    @dtypes(
+        *product(
+            (torch.half, torch.bfloat16, torch.float, torch.double),
+            (torch.int, torch.int64),
+        )
+    )
+    def test_multi_d(self, device, dtypes):
+        val_dtype, length_type = dtypes
         axis = 0
         lengths = [0, 2]
         data = np.arange(20).reshape(2, 2, 5).tolist()
@@ -181,7 +260,8 @@ class TestSegmentReductions(TestCase):
         # TODO: calculate grad and check correctness
         check_backward = False
 
-        for reduction in ["max", "mean"]:
+        for reduction in reductions:
+            initial_value = 0
             if reduction == "max":
                 expected_result = [
                     np.full((2, 5), initial_value).tolist(),
@@ -192,11 +272,22 @@ class TestSegmentReductions(TestCase):
                     np.full((2, 5), initial_value).tolist(),
                     np.mean(data, axis=0).tolist(),
                 ]
+            elif reduction == "min":
+                initial_value = 1000  # some high number
+                expected_result = [
+                    np.full((2, 5), initial_value).tolist(),
+                    np.min(data, axis=0).tolist(),
+                ]
+            elif reduction == "sum":
+                expected_result = [
+                    np.full((2, 5), initial_value).tolist(),
+                    np.sum(data, axis=0).tolist(),
+                ]
             for unsafe in [True, False]:
                 self._test_common(
                     reduction,
                     device,
-                    dtype,
+                    val_dtype,
                     unsafe,
                     axis,
                     initial_value,

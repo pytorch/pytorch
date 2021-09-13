@@ -2,9 +2,7 @@
 
 namespace caffe2 {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(Adadelta, AdadeltaOp<CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Adadelta)
     .NumInputs(5)
     .NumOutputs(3)
@@ -39,9 +37,7 @@ and returns (new_param, new_moment, new_moment_delta).
         "decay",
         "Default 0.95, the squared gradient sum is decayed by this factor.");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(SparseAdadelta, SparseAdadeltaOp<CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SparseAdadelta)
     .NumInputs(6)
     .NumOutputs(3)
@@ -71,8 +67,6 @@ runs the dense AdaDelta update on (param, grad, moment[indices],
         "decay",
         "Default 0.95, the squared gradient sum is decayed by this factor.");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(Adadelta);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(SparseAdadelta);
 } // namespace caffe2

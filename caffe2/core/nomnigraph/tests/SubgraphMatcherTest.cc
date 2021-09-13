@@ -19,7 +19,6 @@ using TestMatchPredicate = MatchPredicate<TestGraph>;
 
 // Have just one TestMatchGraph in the tests to make it less verbose to create
 // the match graphs.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TestMatchGraph graph;
 // Call reset before creating a new TestMatchGraph.
 void reset() {
@@ -229,7 +228,6 @@ bool isSubgraphMatch(
 using namespace nom::matcher;
 
 // Simple test cases for node matching criteria.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SubgraphMatcher, IsNodeMatch) {
   TestGraph g;
   auto n1 = g.createNode("Hello");
@@ -243,7 +241,6 @@ TEST(SubgraphMatcher, IsNodeMatch) {
 }
 
 // Test subtree matching with a simple tree graph.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SubgraphMatcher, IsSubtreeMatch) {
   TestGraph graph;
   auto n1 = graph.createNode("1");
@@ -298,7 +295,6 @@ TEST(SubgraphMatcher, IsSubtreeMatch) {
 }
 
 // Test subtree matching in which * (repeated) matching of children is allowed.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SubgraphMatcher, IsSubtreeMatchRepeated) {
   TestGraph graph;
   auto n1 = graph.createNode("1");
@@ -386,7 +382,6 @@ TEST(SubgraphMatcher, IsSubtreeMatchRepeated) {
   // clang-format on
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SubgraphMatcher, DagMatching) {
   reset();
 
@@ -460,7 +455,6 @@ TEST(SubgraphMatcher, DagMatching) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SubgraphMatcher, DagMatchingMultiEdges) {
   reset();
 
@@ -496,7 +490,6 @@ TEST(SubgraphMatcher, DagMatchingMultiEdges) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SubgraphMatcher, DagMatchingRandomLargeGraph) {
   reset();
   // clang-format off
@@ -561,7 +554,6 @@ TEST(SubgraphMatcher, DagMatchingRandomLargeGraph) {
   EXPECT_EQ(countMatch, 1072);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SubgraphMatcher, IsSubtreeMatchRealistic) {
   reset();
   auto graph = DataFlowTestGraph();
@@ -575,7 +567,6 @@ TEST(SubgraphMatcher, IsSubtreeMatchRealistic) {
   EXPECT_TRUE(isSubgraphMatch(graph.opG, subtree));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SubgraphMatcher, ReplaceGraphRealistic) {
   reset();
   auto testGraph = DataFlowTestGraph();

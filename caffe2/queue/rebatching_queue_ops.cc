@@ -6,25 +6,16 @@ CAFFE_KNOWN_TYPE(RebatchingQueuePtr);
 
 namespace {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(CreateRebatchingQueue, CreateRebatchingQueueOp);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(EnqueueRebatchingQueue, EnqueueRebatchingQueueOp);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(DequeueRebatchingQueue, DequeueRebatchingQueueOp);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(CloseRebatchingQueue, CloseRebatchingQueueOp);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 NO_GRADIENT(CreateRebatchingQueue);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 NO_GRADIENT(EnqueueRebatchingQueue);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 NO_GRADIENT(DequeueRebatchingQueue);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 NO_GRADIENT(CloseRebatchingQueue);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(CreateRebatchingQueue)
     .NumInputs(0)
     .NumOutputs(1)
@@ -37,7 +28,6 @@ Creates the Queue.
         "capacity",
         "Maximal number of elements the queue can hold at any given point");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(CloseRebatchingQueue)
     .NumInputs(1)
     .NumOutputs(0)
@@ -46,7 +36,6 @@ Closes the Queue.
 )DOC")
     .Input(0, "queue", "object representing the queue");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(EnqueueRebatchingQueue)
     .NumInputs(2, INT_MAX)
     .NumOutputs(0)
@@ -65,7 +54,6 @@ first dimension to produce single queue elements.
         "Are we enqueuing a batch or just a single element. \
         By default we enqueue single element.");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(DequeueRebatchingQueue)
     .NumInputs(1)
     .NumOutputs(1, INT_MAX)

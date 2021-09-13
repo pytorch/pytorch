@@ -12,6 +12,10 @@
 #include <ATen/core/DistributionsHelper.h>
 
 #include <c10/util/irange.h>
+#if AT_MKLDNN_ENABLED()
+#include <ATen/native/mkldnn/MKLDNNCommon.h>
+#include <ATen/native/mkldnn/Utils.h>
+#endif
 
 namespace at {
 namespace meta {
@@ -69,6 +73,12 @@ TORCH_META_FUNC(elu_backward) (
 
 TORCH_META_FUNC(silu) (const Tensor& self) {
   build_unary_op(maybe_get_output(), self);
+}
+
+TORCH_META_FUNC(silu_backward) (
+  const Tensor& grad_output, const Tensor& input
+) {
+  build_borrowing_binary_op(maybe_get_output(), grad_output, input);
 }
 
 TORCH_META_FUNC(mish) (const Tensor& self) {
@@ -172,47 +182,26 @@ namespace native {
 static const double SELU_ALPHA = 1.6732632423543772848170429916717;
 static const double SELU_SCALE = 1.0507009873554804934193349852946;
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(elu_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(elu_backward_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(softplus_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(softplus_backward_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(log_sigmoid_cpu_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-DEFINE_DISPATCH(log_sigmoid_backward_cpu_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+DEFINE_DISPATCH(log_sigmoid_backward_stub);
 DEFINE_DISPATCH(threshold_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(hardtanh_backward_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(hardsigmoid_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(hardsigmoid_backward_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(hardswish_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(hardswish_backward_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(hardshrink_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(softshrink_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(shrink_backward_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(leaky_relu_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(leaky_relu_backward_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(silu_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(silu_backward_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(mish_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(mish_backward_stub);
 
 TORCH_IMPL_FUNC(elu_out) (
@@ -237,6 +226,12 @@ TORCH_IMPL_FUNC(silu_out) (
   const Tensor& self, const Tensor& result
 ) {
   silu_stub(device_type(), *this);
+}
+
+TORCH_IMPL_FUNC(silu_backward_out) (
+  const Tensor& grad_output, const Tensor& input, const Tensor& grad_input
+) {
+  silu_backward_stub(device_type(), *this);
 }
 
 TORCH_IMPL_FUNC(mish_out) (
@@ -314,16 +309,55 @@ TORCH_IMPL_FUNC(softshrink_backward_out) (
   shrink_backward_stub(device_type(), *this, lambd);
 }
 
+bool use_mkldnn(const Tensor& input) {
+#if AT_MKLDNN_ENABLED()
+  if (!at::globalContext().userEnabledMkldnn()) {
+    return false;
+  }
+  if (!input.is_contiguous() || input.numel() == 1) {
+    return false;
+  }
+  return (input.is_mkldnn()) || // input is mkldnn Tensor
+    (input.device().is_cpu() &&
+    (((input.scalar_type() == kBFloat16) && mkldnn_bf16_device_check()) ||
+    (input.scalar_type() == kFloat))); // input is dense layout and bfloat16/float32
+#endif
+  return false;
+}
+
 TORCH_IMPL_FUNC(gelu_out_cpu) (
   const Tensor& self, const Tensor& result
 ) {
+#if AT_MKLDNN_ENABLED()
+  if (use_mkldnn(self)) {
+    const ideep::tensor& x = itensor_from_tensor(self);
+    ideep::tensor y = itensor_from_tensor(result);
+    ideep::eltwise_forward::compute(
+      x, y, ideep::algorithm::eltwise_gelu_erf, ideep::prop_kind::forward_training, /*alpha*/ 0.0);
+  } else {
+    GeluKernel(kCPU, *this);
+  }
+#else
   GeluKernel(kCPU, *this);
+#endif
 }
 
 TORCH_IMPL_FUNC(gelu_backward_out_cpu) (
   const Tensor& grad, const Tensor& self, const Tensor& grad_input
 ) {
+#if AT_MKLDNN_ENABLED()
+  if (use_mkldnn(self)) {
+    const ideep::tensor& x = itensor_from_tensor(self);
+    ideep::tensor grady = itensor_from_tensor(grad);
+    ideep::tensor gradx = itensor_from_tensor(grad_input);
+    ideep::eltwise_backward::compute(x, grady, gradx,
+      ideep::algorithm::eltwise_gelu_erf, /*alpha*/ 0.0);
+  } else {
+    GeluBackwardKernel(kCPU, *this);
+  }
+#else
   GeluBackwardKernel(kCPU, *this);
+#endif
 }
 
 Tensor hardtanh(const Tensor& self, const Scalar& min, const Scalar& max) {
@@ -426,15 +460,6 @@ Tensor & celu_(Tensor & self, const Scalar& alpha) {
   return at::elu_(self, alpha, Scalar(1.0), Scalar(inv_alpha));
 }
 
-Tensor silu_backward(
-    const Tensor& grad_output,
-    const Tensor& input) {
-  Tensor grad_input = at::empty({0}, input.options());
-  auto iter = TensorIterator::borrowing_binary_op(grad_input, grad_output, input);
-  silu_backward_stub(iter.device_type(), iter);
-  return grad_input;
-}
-
 Tensor math_silu_backward(
     const Tensor& grad_output,
     const Tensor& input) {
@@ -499,7 +524,7 @@ Tensor& rrelu_with_noise_out_cpu(const Tensor& self,
     c10::optional<Generator> generator,
     Tensor& output) {
   if (training) {
-    AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "rrelu_with_noise_out_cpu", [&] {
+    AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, self.scalar_type(), "rrelu_with_noise_out_cpu", [&] {
       _rrelu_with_noise_train<scalar_t>(output, self.contiguous(), noise, lower, upper, generator);
     });
     return output;
@@ -859,35 +884,56 @@ Tensor log_sigmoid(const Tensor & self) {
   return std::get<0>(at::log_sigmoid_forward(self));
 }
 
-Tensor log_sigmoid_backward_cpu(const Tensor& grad_output, const Tensor& input, const Tensor& buffer) {
-  Tensor grad_input;
+Tensor log_sigmoid_backward_cuda(const Tensor& grad_output, const Tensor& input, const Tensor& buffer) {
+  auto grad_input = at::empty_like(grad_output);
+  // NOTE: buffer is only used by CPU dispatch, we just ignore it here
   auto iter = at::TensorIteratorConfig()
-    .add_output(grad_input)
-    .add_input(input)
-    .add_input(buffer)
-    .add_input(grad_output)
-    .build();
-  log_sigmoid_backward_cpu_stub(kCPU, iter);
+      .add_output(grad_input)
+      .add_input(input)
+      .add_input(grad_output)
+      .build();
+  log_sigmoid_backward_stub(kCUDA, iter);
   return iter.output();
 }
 
-Tensor& log_sigmoid_backward_out_cpu(const Tensor& grad_output,
+Tensor log_sigmoid_backward_cpu(const Tensor& grad_output, const Tensor& input, const Tensor& buffer) {
+  auto grad_input = at::empty_like(grad_output);
+  auto iter = at::TensorIteratorConfig()
+      .add_output(grad_input)
+      .add_input(input)
+      .add_input(buffer)
+      .add_input(grad_output)
+      .build();
+  log_sigmoid_backward_stub(kCPU, iter);
+  return iter.output();
+}
+
+Tensor& log_sigmoid_backward_cuda_out(const Tensor& grad_output, const Tensor& input,
+                                      const Tensor& buffer, Tensor& grad_input) {
+  auto iter = TensorIteratorConfig()
+      .add_output(grad_input)
+      .add_input(input)
+      .add_input(grad_output)
+      .build();
+  log_sigmoid_backward_stub(kCUDA, iter);
+  return grad_input;
+}
+
+Tensor& log_sigmoid_backward_cpu_out(const Tensor& grad_output,
     const Tensor& input,
     const Tensor& buffer,
     Tensor& grad_input) {
   auto iter = TensorIteratorConfig()
-    .add_output(grad_input)
-    .add_input(input)
-    .add_input(buffer)
-    .add_input(grad_output)
-    .build();
-  log_sigmoid_backward_cpu_stub(kCPU, iter);
+      .add_output(grad_input)
+      .add_input(input)
+      .add_input(buffer)
+      .add_input(grad_output)
+      .build();
+  log_sigmoid_backward_stub(kCPU, iter);
   return grad_input;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(GeluKernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(GeluBackwardKernel);
 
 }}  // namespace at::native

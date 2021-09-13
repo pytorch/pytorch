@@ -3,6 +3,7 @@
 #include <ATen/core/jit_type.h>
 #include <ATen/core/stack.h>
 #include <c10/util/hash.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/jit/ir/ir.h>
@@ -67,6 +68,7 @@ static_assert(
     "ArgumentInfo is expected to be a 32-bit struct");
 
 struct ArgumentSpec {
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   ArgumentSpec(size_t num_flat_tensor_inputs, size_t num_flat_optional_inputs) {
     hash_code =
         c10::hash_combine(num_flat_tensor_inputs, num_flat_optional_inputs);
@@ -100,7 +102,9 @@ struct ArgumentSpec {
       // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
       at::Device device = t->device();
       arg.dev_type_ =
+          // NOLINTNEXTLINE(bugprone-signed-char-misuse)
           static_cast<std::underlying_type<DeviceType>::type>(device.type());
+      // NOLINTNEXTLINE(bugprone-signed-char-misuse)
       arg.device_ = device.index();
       arg.type_ = static_cast<unsigned>(t->scalar_type());
     }
@@ -233,11 +237,13 @@ static_assert(
 struct CompleteArgumentInfo;
 
 struct CompleteArgumentSpec {
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   CompleteArgumentSpec(bool with_grad, at::ArrayRef<IValue> inputs)
       : hash_code(0), ninputs(inputs.size()) {
     int32_t all_dims = 0;
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     const int32_t num_inputs = inputs.size();
-    for (int32_t i = 0; i < num_inputs; i++) {
+    for (const auto i : c10::irange(num_inputs)) {
       if (!inputs[i].isTensor())
         continue;
       auto& tensor = inputs[i].toTensor();
@@ -247,10 +253,11 @@ struct CompleteArgumentSpec {
     data.resize(ninputs + all_dims * 2);
 
     // and reinterpret our data array as these structs
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     auto* pods = reinterpret_cast<CompleteArgumentInfoPOD*>(data.data());
     int64_t* next_dim = sizes_strides();
     int32_t total_dims = 0;
-    for (int32_t i = 0; i < num_inputs; i++) {
+    for (const auto i : c10::irange(num_inputs)) {
       auto& pod = pods[i];
       pod.is_tensor = static_cast<uint32_t>(inputs[i].isTensor());
       if (pod.is_tensor) {
@@ -260,8 +267,10 @@ struct CompleteArgumentSpec {
           pod.type = static_cast<int>(t.scalar_type());
           // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
           at::Device device = t.device();
+          // NOLINTNEXTLINE(bugprone-signed-char-misuse)
           pod.dev_type = static_cast<std::underlying_type<DeviceType>::type>(
               device.type());
+          // NOLINTNEXTLINE(bugprone-signed-char-misuse)
           pod.device = device.index();
           pod.requires_grad = with_grad && t.requires_grad();
           total_dims += t.ndimension();
@@ -402,13 +411,13 @@ inline std::ostream& operator<<(std::ostream& out, const ArgumentInfo& info) {
 
 inline std::ostream& operator<<(std::ostream& out, const ArgumentSpec& spec) {
   out << "{";
-  for (size_t i = 0; i < spec.numTensors(); ++i) {
+  for (const auto i : c10::irange(spec.numTensors())) {
     if (i > 0)
       out << ", ";
     out << spec.tensorAt(i);
   }
   out << "; ";
-  for (size_t i = 0; i < spec.numOptionals(); ++i) {
+  for (const auto i : c10::irange(spec.numOptionals())) {
     if (i > 0)
       out << ", ";
     out << spec.isPresent(i);
@@ -433,7 +442,7 @@ inline std::ostream& operator<<(
     std::ostream& out,
     const CompleteArgumentSpec& spec) {
   out << "{";
-  for (size_t i = 0; i < spec.size(); ++i) {
+  for (const auto i : c10::irange(spec.size())) {
     if (i > 0)
       out << ", ";
     out << spec.at(i);

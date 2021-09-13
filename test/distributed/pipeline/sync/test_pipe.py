@@ -9,9 +9,12 @@ from copy import deepcopy
 import time
 
 import pytest
+import random
 import torch
 from torch import nn
+from torch import Tensor
 
+from torch.distributed.pipeline.sync import NoChunk
 from torch.distributed.pipeline.sync import Pipe
 from torch.distributed.pipeline.sync.pipe import PipeSequential
 
@@ -367,11 +370,9 @@ def test_non_tensor(setup_rpc):
     model = Pipe(model)
     x = torch.rand(1)
 
-    # TypeError: expected Tensor as element 0 in argument 0, but got str
     with pytest.raises(TypeError):
         model(x)
 
-    # TypeError: expected Tensor to scatter, but got str
     with pytest.raises(TypeError):
         model("hello")
 
@@ -381,21 +382,145 @@ def test_non_tensor_sequence(setup_rpc):
         def forward(self, x):
             return (x, "hello")
 
+    class NonTensorArgs(nn.Module):
+        def forward(self, x: str, y: bool):
+            return x, y
+
     model = nn.Sequential(NonTensorTuple())
     model = Pipe(model)
     x = torch.rand(1)
 
-    # TypeError: CheckpointBackward.forward: expected Variable (got str) for return value 1
-    with pytest.raises(TypeError):
-        model(x)
-
-    # TypeError: expected Tensor to scatter, but got str
     with pytest.raises(TypeError):
         model((x, "hello"))
 
-    # TypeError: expected Tensor to scatter, but got str
     with pytest.raises(TypeError):
         model([x, "hello"])
+
+    model = nn.Sequential(NonTensorArgs())
+    model = Pipe(model)
+
+    with pytest.raises(TypeError):
+        # Need atleast one Tensor.
+        model("hello", True)
+
+
+@pytest.mark.parametrize("checkpoint", ["never", "always", "except_last"])
+def test_valid_non_tensor(checkpoint, setup_rpc):
+    class NonTensor1(nn.Module):
+        def forward(self, a: int, b: Tensor, c: bool, d: Tensor):
+            res = b + a if c else b * a
+            if d is not None:
+                res += d
+            return res, c, a, b, "hello", d
+
+    class NonTensor2(nn.Module):
+        def forward(self, a: Tensor, b: bool, c: int, d: Tensor, e: str, f: Tensor):
+            res = a * c if b else a + c
+            res += d
+            return c, res, a, d + f if f is not None else d, b, e, f
+
+    model = Pipe(nn.Sequential(NonTensor1(), NonTensor2()), chunks=5, checkpoint=checkpoint)
+    a = random.randint(0, 10)
+    b = torch.rand(10, 10)
+    c = random.randint(0, 1) == 0
+    d = torch.rand(10, 10)
+    res = model(a, b, c, d).local_value()
+    assert 7 == len(res)
+    assert [a] * 5 == res[0]
+    if c:
+        assert torch.allclose(((b + a + d) * a) + b, res[1])
+        assert torch.allclose(b + a + d, res[2])
+    else:
+        assert torch.allclose(((b * a) + d + a) + b, res[1])
+        assert torch.allclose(b * a + d, res[2])
+    assert torch.allclose(b + d, res[3])
+    assert [c] * 5 == res[4]
+    assert ["hello"] * 5 == res[5]
+    assert torch.allclose(d, res[6])
+
+    # Test one of the tensors can be None
+    res = model(a, b, c, None).local_value()
+    assert 7 == len(res)
+    assert [a] * 5 == res[0]
+    if c:
+        assert torch.allclose(((b + a) * a) + b, res[1])
+        assert torch.allclose(b + a, res[2])
+    else:
+        assert torch.allclose(((b * a) + a) + b, res[1])
+        assert torch.allclose(b * a, res[2])
+    assert torch.allclose(b, res[3])
+    assert [c] * 5 == res[4]
+    assert ["hello"] * 5 == res[5]
+    assert [None] * 5 == res[6]
+
+    # Need atleast one tensor.
+    with pytest.raises(TypeError):
+        model(a, None, c, None)
+
+@pytest.mark.parametrize("checkpoint", ["never", "always", "except_last"])
+def test_no_tensor_output(checkpoint, setup_rpc):
+    class Model1(nn.Module):
+        def forward(self, a: int, b: Tensor, c: bool):
+            return a, c, "hello"
+
+    class Model2(nn.Module):
+        def forward(self, a: int, b: bool, c: str):
+            return a, c, b
+
+    model = Pipe(nn.Sequential(Model1(), Model2()), chunks=5)
+    a = random.randint(0, 10)
+    b = torch.rand(10, 10)
+    c = random.randint(0, 1) == 0
+
+    # Need atleast one tensor across partitions too.
+    with pytest.raises(TypeError):
+        res = model(a, b, c).local_value()
+
+
+@pytest.mark.parametrize("checkpoint", ["never", "always", "except_last"])
+def test_uneven_batch_size(checkpoint, setup_rpc):
+    class Model(nn.Module):
+        def forward(self, a: Tensor, b: int, c: Tensor):
+            return a, b, c
+
+    model = Pipe(nn.Sequential(Model()), checkpoint=checkpoint, chunks=5)
+    a = torch.rand(3, 10)
+    b = random.randint(0, 10)
+    c = torch.rand(6, 10)
+    res = model(a, b, c).local_value()
+    assert torch.allclose(a, res[0])
+    assert [b] * 3 == res[1]  # 3 chunks
+    assert torch.allclose(c, res[2])
+
+    # Two tensors producing uneven chunks would fail.
+    model = Pipe(nn.Sequential(Model()), checkpoint=checkpoint, chunks=5)
+    a = torch.rand(3, 10)
+    b = random.randint(0, 10)
+    c = torch.rand(4, 10)
+
+    with pytest.raises(RuntimeError, match='Found different number of chunks'):
+        model(a, b, c)
+
+@pytest.mark.parametrize("checkpoint", ["never", "always", "except_last"])
+def test_no_chunk(checkpoint, setup_rpc):
+    class Model(nn.Module):
+        def forward(self, a: Tensor, b: int, c: Tensor):
+            return a, b, c
+
+    model = Pipe(nn.Sequential(Model()), checkpoint=checkpoint, chunks=5)
+    a = torch.rand(10, 10)
+    b = random.randint(0, 10)
+    c = torch.rand(10, 10)
+    res = model(a, b, NoChunk(c)).local_value()
+    assert torch.allclose(a, res[0])
+    assert [b] * 5 == res[1]
+    # c gets replicated due to NoChunk and the same tensor gets concatenated 5
+    # times in the output.
+    assert torch.allclose(torch.cat((c, c, c, c, c)), res[2])
+
+    # Test invalid type for NoChunk
+    with pytest.raises(TypeError, match='NoChunk only supported for tensors'):
+        NoChunk(b)
 
 
 @pytest.mark.parametrize("checkpoint", ["never", "always", "except_last"])
@@ -577,7 +702,7 @@ def test_verify_module_params_on_same_device(setup_rpc):
             ' to place the module on a single device'):
         Pipe(model)
 
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="cuda required")
+@skip_if_no_cuda
 @pytest.mark.skipif(torch.cuda.device_count() < 2, reason="Need atleast two GPUs")
 def test_verify_nested_modules(setup_rpc):
     model = nn.Sequential(
@@ -652,3 +777,21 @@ def test_multiple_inputs(checkpoint, setup_rpc):
     t = torch.rand(10)
     res = model(t, t, t).local_value()
     assert torch.equal(res, (t + t + t) + (t * t * t))
+
+@skip_if_no_cuda
+@pytest.mark.skipif(torch.cuda.device_count() < 2, reason="Need atleast two GPUs")
+def test_inputs_wrong_device(setup_rpc):
+    class Module1(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.param = torch.nn.Parameter(torch.rand(5))
+
+        def forward(self, a, b):
+            return a + b + self.param, b
+
+    # Start inputs on wrong device and ensure Pipe moves them correctly.
+    a = torch.rand(10).cuda(1)
+    b = torch.rand(10).cuda(1)
+    model = Pipe(nn.Sequential(Module1().cuda(0), Module1().cuda(1)), chunks=2)
+    with pytest.raises(ValueError, match='All inputs should be on the same device as the first partition'):
+        model(a, b)

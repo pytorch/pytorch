@@ -2,7 +2,6 @@
 #include <string>
 #include <unordered_map>
 
-#include <TH/TH.h>
 #include <libshm_windows/libshm.h>
 
 

@@ -22,6 +22,17 @@ static inline void check_for_unsupported_isin_dtype(const ScalarType type) {
       "Unsupported input type encountered for isin(): ", type);
 }
 
+TORCH_META_FUNC(clamp) (
+const Tensor& self,
+const OptionalScalarRef min,
+const OptionalScalarRef max) {
+  if (!min && !max) {
+    TORCH_CHECK(false, "torch.clamp: At least one of 'min' or 'max' must not be None");
+  }
+
+  build_unary_op(maybe_get_output(), self);
+}
+
 TORCH_META_FUNC2(isin, Tensor_Tensor) (
   const Tensor& elements, const Tensor& test_elements, bool assume_unique, bool invert
 ) {
@@ -46,6 +57,20 @@ TORCH_META_FUNC2(isin, Scalar_Tensor) (
   set_output({0}, TensorOptions(test_elements.device()).dtype(ScalarType::Bool));
 }
 
+TORCH_META_FUNC(isposinf) (const Tensor& self) {
+  TORCH_CHECK(!self.is_complex(), "isposinf does not support complex inputs.");
+  TORCH_CHECK(maybe_get_output().defined() ? maybe_get_output().dtype() == at::kBool : true,
+              "isposinf does not support non-boolean outputs.");
+  build_unary_force_boolean_op(maybe_get_output(), self);
+}
+
+TORCH_META_FUNC(isneginf) (const Tensor& self) {
+  TORCH_CHECK(!self.is_complex(), "isneginf does not support complex inputs.");
+  TORCH_CHECK(maybe_get_output().defined() ? maybe_get_output().dtype() == at::kBool : true,
+              "isneginf does not support non-boolean outputs.");
+  build_unary_force_boolean_op(maybe_get_output(), self);
+}
+
 } // namespace meta
 
 namespace native {
@@ -53,7 +78,6 @@ namespace native {
 DEFINE_DISPATCH(where_kernel); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(max_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(min_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
-DEFINE_DISPATCH(_aminmax_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(isposinf_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(isneginf_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(mode_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
@@ -84,8 +108,6 @@ bool allclose(const Tensor& self, const Tensor& other, double rtol, double atol,
 //  https://github.com/numpy/numpy/issues/15959 is resolved
 Tensor isclose(const Tensor& self, const Tensor& other, double rtol, double atol, bool equal_nan) {
   TORCH_CHECK(self.scalar_type() == other.scalar_type(), self.scalar_type(), " did not match ", other.scalar_type());
-  TORCH_CHECK(!(self.is_complex() && equal_nan),
-    "isclose with equal_nan=True is not supported for complex inputs.");
   TORCH_CHECK(!(self.is_quantized() || other.is_quantized()),
     "isclose is not supported for quantized inputs.");
 
@@ -97,8 +119,14 @@ Tensor isclose(const Tensor& self, const Tensor& other, double rtol, double atol
 
   // Computes equality closeness
   Tensor close = self == other;
-  if (equal_nan && self.is_floating_point()) {
-      close.__ior__((self != self).__iand__(other != other));
+  if (equal_nan && (self.is_floating_point() || self.is_complex())) {
+      close.__ior__(self.isnan().__iand__(other.isnan()));
+  }
+
+  // In case of zero tolerances the closeness inequality degenerates to an equality check.
+  // In this case, the short-circuit prevents false positives as detailed in the paragraph below.
+  if (rtol == 0 && atol == 0){
+      return close;
   }
 
   // Note [closeness error computation]
@@ -113,14 +141,16 @@ Tensor isclose(const Tensor& self, const Tensor& other, double rtol, double atol
   // by the default scalar type then this may cause an incorrect result.
 
   // Computes allowed and actual error
-  Tensor cast_other;
+  Tensor cast_self, cast_other;
+  cast_self = self.scalar_type() == at::kBool ? self.to(at::get_default_dtype()) : self;
   if (c10::isIntegralType(self.scalar_type(), /*includeBool=*/true)) {
     cast_other = other.to(at::get_default_dtype());
   } else {
     cast_other = other;
   }
+
   Tensor allowed_error = atol + (rtol * cast_other).abs();
-  Tensor actual_error = (self - cast_other).abs();
+  Tensor actual_error = (cast_self - cast_other).abs();
 
   // Computes finite closeness
   close.__ior__(at::isfinite(actual_error).__iand__(actual_error <= allowed_error));
@@ -157,54 +187,6 @@ Tensor isinf(const Tensor &self) {
   return AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, self.scalar_type(), "isinf", [&]() {
     return self.abs() == std::numeric_limits<scalar_t>::infinity();
   });
-}
-
-Tensor isposinf(const Tensor &self) {
-  Tensor result = at::empty_like(self, at::kBool, at::MemoryFormat::Preserve);
-  at::isposinf_out(result, self);
-  return result;
-}
-
-Tensor& isposinf_out(const Tensor& self, Tensor& result) {
-  TORCH_CHECK(!self.is_complex(), "isposinf does not support complex inputs.");
-  TORCH_CHECK(result.scalar_type() == at::kBool, "isposinf does not support non-boolean outputs.");
-  result.resize_(self.sizes());
-
-  if (c10::isIntegralType(self.scalar_type(), /*includeBool=*/true)) {
-    result.fill_(false);
-  } else {
-    auto iter = TensorIteratorConfig()
-      .check_all_same_dtype(false)
-      .add_output(result)
-      .add_input(self)
-      .build();
-    isposinf_stub(iter.device_type(), iter);
-  }
-  return result;
-}
-
-Tensor isneginf(const Tensor &self) {
-  Tensor result = at::empty_like(self, at::kBool, at::MemoryFormat::Preserve);
-  at::isneginf_out(result, self);
-  return result;
-}
-
-Tensor& isneginf_out(const Tensor& self, Tensor& result) {
-  TORCH_CHECK(!self.is_complex(), "isneginf does not support complex inputs.");
-  TORCH_CHECK(result.scalar_type() == at::kBool, "isneginf does not support non-boolean outputs.");
-  result.resize_(self.sizes());
-
-  if (c10::isIntegralType(self.scalar_type(), /*includeBool=*/true)) {
-    result.fill_(false);
-  } else {
-    auto iter = TensorIteratorConfig()
-      .check_all_same_dtype(false)
-      .add_output(result)
-      .add_input(self)
-      .build();
-    isneginf_stub(iter.device_type(), iter);
-  }
-  return result;
 }
 
 Tensor isfinite(const Tensor& self) {
@@ -497,37 +479,9 @@ std::tuple<Tensor, Tensor> min(const Tensor& self, int64_t dim, bool keepdim) {
   }
 }
 
-static std::tuple<Tensor &, Tensor &> _aminmax_out_impl(Tensor& min, Tensor& max,
-                                                  const Tensor& self, int64_t dim, bool keepdim) {
-  TORCH_CHECK(self.device().is_cpu() || self.is_cuda(),
-              "min_max_val only supports CPU AND CUDA device type, got: ", self.device().type());
-  TORCH_CHECK(self.layout() == Layout::Strided,
-              "min_max only supports strided layout, got: ", self.layout());
-  TORCH_CHECK(self.device() == min.device(),
-              "expected device ", self.device(), " but got ",
-              min.device(), " for min values output");
-  TORCH_CHECK(self.device() == max.device(),
-              "expected device ", self.device(), " but got ",
-              max.device(), " for max values output");
-  dim = maybe_wrap_dim(dim, self.dim());
-  if (_dimreduce_return_trivial_no_ident(min, self, dim, keepdim, "min") &&
-      _dimreduce_return_trivial_no_ident(max, self, dim, keepdim, "max")) {
-    TORCH_CHECK(!self.is_complex(), "min_max does not support complex inputs.");
-    return std::forward_as_tuple(min, max);
-  } else {
-    _aminmax_stub(self.device().type(), min, max, self, dim, keepdim);
-    return std::tuple<Tensor &, Tensor &>{min, max};
-  }
-}
-
+// DEPRECATED: Use at::aminmax instead
 std::tuple<Tensor, Tensor> _aminmax(const Tensor& self, int64_t dim, bool keepdim) {
-  TORCH_CHECK(!self.is_quantized(), "min is not yet implemented for quantized tensors.");
-
-  Tensor min = at::empty({0}, self.options());
-  Tensor max = at::empty({0}, self.options());
-
-  auto result = _aminmax_out_impl(min, max, self, dim, keepdim);
-  return result;
+  return at::aminmax(self, dim, keepdim);
 }
 
 static std::tuple<Tensor &,Tensor &> min_out_impl(Tensor& min, Tensor& min_indices,
@@ -573,18 +527,19 @@ std::tuple<Tensor&, Tensor&> min_out(
   return result;
 }
 
-Tensor& clamp_out(const Tensor& self, const c10::optional<Scalar>& min, const c10::optional<Scalar>& max, Tensor& result) {
+TORCH_IMPL_FUNC(clamp_out)
+(
+ const Tensor& self,
+ const OptionalScalarRef min,
+ const OptionalScalarRef max,
+ const Tensor& result) {
   if (min && max) {
-    auto iter = TensorIterator::unary_op(result, self);
-    clamp_scalar_stub(iter.device_type(), iter, *min, *max);
+    clamp_scalar_stub(device_type(), *this, min.get(), max.get());
   } else if (max) {
-    at::clamp_max_outf(self, *max, result);
+    at::clamp_max_outf(self, max.get(), const_cast<Tensor&>(result));
   } else if (min) {
-    at::clamp_min_outf(self, *min, result);
-  } else {
-    TORCH_CHECK(false, "torch.clamp: At least one of 'min' or 'max' must not be None");
+    at::clamp_min_outf(self, min.get(), const_cast<Tensor&>(result));
   }
-  return result;
 }
 
 Tensor& clamp_out(const Tensor& self, const c10::optional<Tensor>& min,
@@ -785,6 +740,22 @@ TORCH_IMPL_FUNC(isin_Scalar_Tensor_out) (
   // redispatch
   at::isin_out(const_cast<Tensor&>(out), wrapped_scalar_tensor(elements, test_elements.device()),
     test_elements, assume_unique, invert);
+}
+
+TORCH_IMPL_FUNC(isposinf_out) (const Tensor& self, const Tensor& result) {
+  if (c10::isIntegralType(self.scalar_type(), /*includeBool=*/true)) {
+    result.fill_(false);
+  } else {
+    isposinf_stub(device_type(), *this);
+  }
+}
+
+TORCH_IMPL_FUNC(isneginf_out) (const Tensor& self, const Tensor& result) {
+  if (c10::isIntegralType(self.scalar_type(), /*includeBool=*/true)) {
+    result.fill_(false);
+  } else {
+    isneginf_stub(device_type(), *this);
+  }
 }
 
 } // namespace native

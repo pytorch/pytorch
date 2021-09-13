@@ -20,9 +20,10 @@ bool MutationRemover::hasSideEffectOrAlias(Value* v, AliasDb* aliasDb) {
       (v->node()->kind() == prim::Param);
 
   // if the output isn't contained or alias by the inputs to its node, it's
-  // unique
-  return unhandled_node || aliasDb->mayContainAlias(v->node()->inputs(), v) ||
-      (v->node()->kind() == prim::Param);
+  // unique. No need to check for alias if the node is a ListConstruct.
+  bool mayAliasInputs = (v->node()->kind() != prim::ListConstruct) &&
+      aliasDb->mayContainAlias(v->node()->inputs(), v);
+  return unhandled_node || mayAliasInputs || (v->node()->kind() == prim::Param);
 }
 
 Node* MutationRemover::createSpecialMappedOp(Node* n) {
@@ -67,11 +68,27 @@ Node* MutationRemover::createSpecialMappedOp(Node* n) {
   return new_node;
 }
 
+bool removableSetItem(Node* n) {
+  if (n->kind() != aten::_set_item ||
+      n->input(1)->node()->kind() != prim::Constant) {
+    return false;
+  }
+  if (n->inputs().at(0)->node()->kind() != prim::ListConstruct) {
+    return false;
+  }
+  int64_t index = *constant_as<int64_t>(n->input(1));
+  if (index < 0) {
+    index += n->inputs().size();
+  }
+  return index < static_cast<int64_t>(n->input(0)->node()->inputs().size());
+}
+
 bool MutationRemover::listMutationFollowingListConstruct(Node* n) {
   return (
       (n->kind() == aten::append ||
        (n->kind() == aten::insert &&
-        n->inputs().at(1)->node()->kind() == prim::Constant)) &&
+        n->inputs().at(1)->node()->kind() == prim::Constant) ||
+       (removableSetItem(n))) &&
       n->inputs().at(0)->node()->kind() == prim::ListConstruct);
 }
 
@@ -170,6 +187,15 @@ bool MutationRemover::RemoveListMutation(Block* block) {
         list_construct->insertInput(pos, node->inputs().at(2));
         break;
       }
+      case aten::_set_item: {
+        int pos = toIValue(node->inputs().at(1))->toInt();
+        int size = list_construct->inputs().size();
+        if (pos < 0) {
+          pos = std::max(pos + size, 0);
+        }
+        list_construct->replaceInput(pos, node->input(2));
+        break;
+      }
       default:
         TORCH_INTERNAL_ASSERT(false);
     }
@@ -256,12 +282,12 @@ bool MutationRemover::RemoveTensorMutation(Block* block) {
     // For the remainder of the function, x0 will have the
     // same aliasing relationships as the original x.
     // To avoid rebuilding the entire alias db, we can replace
-    // the memory dag element of x with x0.
+    // the memory DAG element of x with x0.
     getOrCreateAliasDb()->replaceWithNewValue(
         mutated_value, new_node->output());
 
     // it is an invariant that all mutable types have an element in the memory
-    // dag so we must regive x an alias db element. We have already verified
+    // DAG so we must regive x an alias db element. We have already verified
     // that the mutated value is a fresh alias with a single use.
     getOrCreateAliasDb()->createValue(mutated_value);
 

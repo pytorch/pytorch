@@ -7,7 +7,6 @@
 
 namespace caffe2 {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(PlanExecutorTest, EmptyPlan) {
   PlanDef plan_def;
   Workspace ws;
@@ -15,9 +14,7 @@ TEST(PlanExecutorTest, EmptyPlan) {
 }
 
 namespace {
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static std::atomic<int> cancelCount{0};
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static std::atomic<bool> stuckRun{false};
 } // namespace
 
@@ -47,9 +44,7 @@ class StuckBlockingOp final : public Operator<CPUContext> {
   std::atomic<bool> cancelled_{false};
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(StuckBlocking, StuckBlockingOp);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(StuckBlocking).NumInputs(0).NumOutputs(0);
 
 class NoopOp final : public Operator<CPUContext> {
@@ -64,9 +59,7 @@ class NoopOp final : public Operator<CPUContext> {
   }
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(Noop, NoopOp);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Noop).NumInputs(0).NumOutputs(0);
 
 
@@ -92,9 +85,7 @@ class StuckAsyncOp final : public Operator<CPUContext> {
   }
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(StuckAsync, StuckAsyncOp);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(StuckAsync).NumInputs(0).NumOutputs(0);
 
 class TestError : public std::exception {
@@ -118,12 +109,9 @@ class ErrorOp final : public Operator<CPUContext> {
   }
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(Error, ErrorOp);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Error).NumInputs(0).NumOutputs(0);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static std::atomic<int> blockingErrorRuns{0};
 class BlockingErrorOp final : public Operator<CPUContext> {
  public:
@@ -144,9 +132,7 @@ class BlockingErrorOp final : public Operator<CPUContext> {
   }
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(BlockingError, BlockingErrorOp);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(BlockingError).NumInputs(0).NumOutputs(0);
 
 PlanDef parallelErrorPlan() {
@@ -283,7 +269,6 @@ struct HandleExecutorThreadExceptionsGuard {
   }
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(PlanExecutorTest, ErrorAsyncPlan) {
   HandleExecutorThreadExceptionsGuard guard;
 
@@ -297,7 +282,6 @@ TEST(PlanExecutorTest, ErrorAsyncPlan) {
 
 // death tests not supported on mobile
 #if !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(PlanExecutorTest, BlockingErrorPlan) {
   // TSAN doesn't play nicely with death tests
 #if defined(__has_feature)
@@ -305,6 +289,8 @@ TEST(PlanExecutorTest, BlockingErrorPlan) {
   return;
 #endif
 #endif
+
+  testing::GTEST_FLAG(death_test_style) = "threadsafe";
 
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_DEATH(
@@ -339,7 +325,6 @@ TEST(PlanExecutorTest, BlockingErrorPlan) {
 }
 #endif
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(PlanExecutorTest, ErrorPlanWithCancellableStuckNet) {
   HandleExecutorThreadExceptionsGuard guard;
 
@@ -352,7 +337,6 @@ TEST(PlanExecutorTest, ErrorPlanWithCancellableStuckNet) {
   ASSERT_EQ(cancelCount, 1);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(PlanExecutorTest, ReporterErrorPlanWithCancellableStuckNet) {
   HandleExecutorThreadExceptionsGuard guard;
 
@@ -407,7 +391,6 @@ PlanDef shouldStopWithCancelPlan() {
   return plan_def;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(PlanExecutorTest, ShouldStopWithCancel) {
   HandleExecutorThreadExceptionsGuard guard;
 

@@ -1,13 +1,8 @@
 #include <ATen/ATen.h>
+#include <ATen/core/grad_mode.h>
 #include <ATen/Dispatch.h>
 #include <ATen/ExpandUtils.h>
-#include <ATen/LegacyTHFunctionsCPU.h>
 #include <ATen/NamedTensorUtils.h>
-#include <ATen/NativeFunctions.h>
-#include <ATen/Parallel.h>
-#include <ATen/TensorUtils.h>
-#include <ATen/Utils.h>
-#include <ATen/core/grad_mode.h>
 #include <ATen/native/CPUBlas.h>
 #include <ATen/native/IndexingUtils.h>
 #include <ATen/native/LinearAlgebra.h>
@@ -16,20 +11,27 @@
 #include <ATen/native/ReduceOpsUtils.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/TensorIterator.h>
+#include <ATen/NativeFunctions.h>
+#include <ATen/Parallel.h>
+#include <ATen/TensorUtils.h>
+#include <ATen/Utils.h>
 #include <c10/util/accumulate.h>
 #include <c10/util/irange.h>
 #include <c10/util/variant.h>
+
 #include <functional>
 #include <limits>
 #include <numeric>
-#include <ATen/NamedTensorUtils.h>
-#include <ATen/native/TensorIterator.h>
+
 
 namespace at {
 namespace meta {
 TORCH_META_FUNC(addmm)(const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha) {
   TORCH_CHECK(mat1.dim() == 2, "mat1 must be a matrix, got ", mat1.dim(), "-D tensor");
   TORCH_CHECK(mat2.dim() == 2, "mat2 must be a matrix, got ", mat2.dim(), "-D tensor");
+  TORCH_CHECK(
+      mat1.sizes()[1] == mat2.sizes()[0], "mat1 and mat2 shapes cannot be multiplied (",
+      mat1.sizes()[0], "x", mat1.sizes()[1], " and ", mat2.sizes()[0], "x", mat2.sizes()[1], ")");
 
   auto names = at::namedinference::propagate_names_for_addmm(mat1, mat2, self);
   set_output(0, {mat1.sizes()[0], mat2.sizes()[1]}, {}, self.options(), names);
@@ -43,6 +45,9 @@ TORCH_META_FUNC(addmm)(const Tensor& self, const Tensor& mat1, const Tensor& mat
 TORCH_META_FUNC(mm)(const Tensor & self, const Tensor & mat2) {
   TORCH_CHECK(self.dim() == 2, "self must be a matrix");
   TORCH_CHECK(mat2.dim() == 2, "mat2 must be a matrix");
+  TORCH_CHECK(
+      self.sizes()[1] == mat2.sizes()[0], "mat1 and mat2 shapes cannot be multiplied (",
+      self.sizes()[0], "x", self.sizes()[1], " and ", mat2.sizes()[0], "x", mat2.sizes()[1], ")");
 
   auto names = at::namedinference::compute_matmul_outnames(self, mat2);
   set_output(0, {self.sizes()[0], mat2.sizes()[1]}, {}, self.options(), names);
@@ -55,9 +60,7 @@ TORCH_META_FUNC(mm)(const Tensor & self, const Tensor & mat2) {
 } // namespace meta
 namespace native {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(addr_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(linalg_vector_norm_stub);
 
 // Helper function for det methods.
@@ -65,7 +68,7 @@ DEFINE_DISPATCH(linalg_vector_norm_stub);
 // det(P) = \pm 1, this method returns a 3-tuple:
 //   (det(P), diag(U), info),
 // where info helps us identify singular matrices.
-static inline std::tuple<Tensor, Tensor> _lu_det_P_diag_U(const Tensor& self) {
+static inline std::tuple<c10::ExclusivelyOwned<Tensor>, c10::ExclusivelyOwned<Tensor>> _lu_det_P_diag_U(const Tensor& self) {
   Tensor pivs, lu, infos;
   std::tie(lu, pivs, infos) = at::_lu_with_info(self, /*pivot=*/true, /*check_errors=*/false);
   TORCH_CHECK(infos.ge(0).all().item<uint8_t>(), "Invalid argument passed to lu");
@@ -73,7 +76,28 @@ static inline std::tuple<Tensor, Tensor> _lu_det_P_diag_U(const Tensor& self) {
   auto num_exchanges = (at::arange(1, n + 1, pivs.options()) != pivs)
     .sum(-1, /*keepdim=*/false, /*dtype=*/at::kLong).fmod_(2);
   auto u_diagonal = lu.diagonal(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1);
-  return std::tuple<Tensor, Tensor>(num_exchanges.mul_(-2).add_(1), u_diagonal);
+  num_exchanges.mul_(-2).add_(1);
+  return std::make_tuple(c10::ExclusivelyOwned<Tensor>(std::move(num_exchanges)), c10::ExclusivelyOwned<Tensor>(std::move(u_diagonal)));
+}
+
+// Given a pivoted LU factorization A = P L U,
+// det(A) = det(P) * det(L) * det(U).
+// Since det(P) = +- 1 (even or odd permutation), and diag(L) = I, we get that
+// det(A) = ([is P odd] * -2 + 1) * prod(diag(U))
+std::tuple<Tensor, Tensor, Tensor> _det_lu_based_helper(const Tensor& self) {
+  Tensor lu, pivs, infos;
+  std::tie(lu, pivs, infos) = at::_lu_with_info(self, /*pivot=*/true, /*check_errors*/false);
+  TORCH_CHECK(infos.ge(0).all().item<uint8_t>(), "at::_det_lu_based_helper(): Invalid argument passed to LU");
+
+  // find det(P)
+  auto n = self.size(-1);
+  auto n_transpositions_mod_2 = (at::arange(1, n + 1, pivs.options()) != pivs)
+    .sum(-1, /*keepdim=*/false, /*dtype=*/at::kLong).fmod_(2);
+  auto p_det = n_transpositions_mod_2.mul_(-2).add_(1);
+
+  auto det = p_det * at::prod(lu.diagonal(0, -2, -1), /*dim=*/-1);
+
+  return std::make_tuple(det, lu, pivs);
 }
 
 // torch.det, alias for torch.linalg.det
@@ -91,19 +115,17 @@ Tensor& linalg_det_out(const Tensor& self, Tensor& out) {
   IntArrayRef out_sizes(self.sizes().data(), self.dim() - 2);
   at::native::resize_output(out, out_sizes);
 
-  Tensor det_P, diag_U;
-  std::tie(det_P, diag_U) = _lu_det_P_diag_U(self);
-  // complete_det is 0 when U is singular (U(i, i) = 0 for some i in [1, self.size(-1)]).
-  // The product accumulation takes care of this case, and hence no special case handling is required.
-  at::prod_out(out, diag_U, -1);
-  out.mul_(det_P);
+  auto det = std::get<0>(at::native::_det_lu_based_helper(self));
+  out.copy_(det);
   return out;
 }
 
 Tensor linalg_det(const Tensor& self) {
-  auto out = at::empty({0}, self.options());
-  at::native::linalg_det_out(self, out);
-  return out;
+  squareCheckInputs(self);
+  TORCH_CHECK((at::isFloatingType(self.scalar_type()) || at::isComplexType(self.scalar_type())),
+              "Expected a floating point or complex tensor as input");
+
+  return std::get<0>(at::_det_lu_based_helper(self));
 }
 
 Tensor logdet(const Tensor& self) {
@@ -111,14 +133,14 @@ Tensor logdet(const Tensor& self) {
   TORCH_CHECK((at::isFloatingType(self.scalar_type()) || at::isComplexType(self.scalar_type())),
               "Expected a floating point tensor as input");
 
-  Tensor det_P, diag_U;
+  c10::ExclusivelyOwned<Tensor> det_P, diag_U;
   std::tie(det_P, diag_U) = _lu_det_P_diag_U(self);
-  Tensor det_sign = diag_U.sign().prod(-1).mul_(det_P);
+  Tensor det_sign = diag_U->sign().prod(-1).mul_(*det_P);
 
   // If det_sign > 0, diag_U.abs_().log_().sum(-1) gives logdet (this means U is not singular).
   // If det_sign <= 0, then we get proper nan (when det < 0, i.e., det_sign) or -inf (when det = 0, i.e., U is singular).
   // U is singular when U(i, i) = 0 for some i in [1, self.size(-1)].
-  Tensor logdet_vals = diag_U.abs_().log_().sum(-1);
+  Tensor logdet_vals = diag_U->abs_().log_().sum(-1);
   if (self.dim() > 2) {
     auto indices = toListOfOptionalTensors((det_sign < 0).nonzero_numpy());
     // NOLINTNEXTLINE(performance-move-const-arg)
@@ -135,14 +157,14 @@ std::tuple<Tensor, Tensor> linalg_slogdet(const Tensor& self) {
   TORCH_CHECK(t == ScalarType::Double || t == ScalarType::Float || t == ScalarType::ComplexFloat || t == ScalarType::ComplexDouble,
               "linalg_slogdet: expected a tensor of float, double, cfloat or cdouble types but got ", t);
 
-  Tensor det_P, diag_U;
+  c10::ExclusivelyOwned<Tensor> det_P, diag_U;
   std::tie(det_P, diag_U) = _lu_det_P_diag_U(self);
-  auto det_sign = diag_U.sgn().prod(-1).mul_(det_P);
+  auto det_sign = diag_U->sgn().prod(-1).mul_(*det_P);
   // abslogdet_val is -inf if U is singular, in which case diag_U.abs_().log_().sum(-1) will return -inf.
   // U is singular when U(i, i) = 0 for some i in [1, self.size(-1)].
   // Since abslogdet_val cannot take nan, no special case handling is required.
   // in-place abs is not supported for complex tensors
-  auto abslogdet_val = isComplexType(t) ? diag_U.abs().log_().sum(-1) : diag_U.abs_().log_().sum(-1);
+  auto abslogdet_val = isComplexType(t) ? diag_U->abs().log_().sum(-1) : diag_U->abs_().log_().sum(-1);
   return std::make_tuple(det_sign, abslogdet_val);
 }
 
@@ -937,19 +959,12 @@ Tensor outer(const Tensor& self, const Tensor& vec2) {
 static void addmm_impl_cpu_(
     Tensor &result, const Tensor &self, Tensor m1, Tensor m2, const Scalar& beta, const Scalar& alpha) {
   TORCH_INTERNAL_ASSERT(self.dim() == 2 && m1.dim() == 2 && m2.dim() == 2);
-
   // Array access is faster than .size(n) and .stride(n)
   const auto self_sizes = self.sizes();
   auto m1_strides = m1.strides();
   auto m1_sizes = m1.sizes();
   auto m2_strides = m2.strides();
   auto m2_sizes = m2.sizes();
-
-  // keeping TORCH_CHECKs here because othe mm methods also utilize this impl.
-  // TODO move this to meta once all methods have migrated to structured kernel.
-  TORCH_CHECK(
-      m1_sizes[1] == m2_sizes[0], "mat1 and mat2 shapes cannot be multiplied (",
-      m1_sizes[0], "x", m1_sizes[1], " and ", m2_sizes[0], "x", m2_sizes[1], ")");
 
   TORCH_CHECK(
       self_sizes[0] == m1_sizes[0] && self_sizes[1] == m2_sizes[1],
@@ -976,18 +991,18 @@ static void addmm_impl_cpu_(
   if (result_strides[0] == 1 &&
       (result_sizes[1] == 1 || result_strides[1] >= std::max(int64_t{1}, result_sizes[0]))) {
     transpose_c = false;
-    c = result;
+    c = result.resolve_conj();
   } else if (result_strides[1] == 1 &&
              (result_sizes[0] == 1 || result_strides[0] >= std::max(int64_t{1}, result_sizes[1]))) {
     std::swap(m1, m2);
     std::swap(m1_sizes, m2_sizes);
     std::swap(m1_strides, m2_strides);
     transpose_c = true;
-    c = result;
+    c = result.resolve_conj();
   } else {
     transpose_c = false;
     // make c FORTRAN contiguous
-    c = result.transpose(0, 1).contiguous().transpose_(0, 1);
+    c = result.resolve_conj().transpose(0, 1).contiguous().transpose_(0, 1);
   }
 
   const int64_t m = result_sizes[transpose_c ? 1 : 0];
@@ -1001,7 +1016,7 @@ static void addmm_impl_cpu_(
   if (m1_strides[transpose_c ? 1 : 0] == 1 &&
       m1_strides[transpose_c ? 0 : 1] >= std::max(int64_t{1}, m)) {
     transpose_a = false;
-    a = m1;
+    a = m1.resolve_conj();
   } else if (m1_strides[transpose_c ? 0 : 1] == 1 &&
              m1_strides[transpose_c ? 1 : 0] >= std::max(int64_t{1}, k)) {
     transpose_a = true;
@@ -1018,7 +1033,7 @@ static void addmm_impl_cpu_(
   if (m2_strides[transpose_c ? 1 : 0] == 1 &&
       m2_strides[transpose_c ? 0 : 1] >= std::max(int64_t{1}, k)) {
     transpose_b = false;
-    b = m2;
+    b = m2.resolve_conj();
   } else if (m2_strides[transpose_c ? 0 : 1] == 1 &&
              m2_strides[transpose_c ? 1 : 0] >= std::max(int64_t{1}, n)) {
     transpose_b = true;
@@ -1032,13 +1047,16 @@ static void addmm_impl_cpu_(
   const int64_t ldb = b.strides()[(transpose_b == transpose_c) ? 1 : 0];
   const int64_t ldc = c.strides()[transpose_c ? 0 : 1];
 
+  // Always ensure the conjugation for c is resolved since there's no way to specify c's conjugation in the gemm call
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!c.is_conj());
+
   // Apply BLAS routine
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kHalf, kBFloat16,
       result.scalar_type(), "addmm_impl_cpu_",
       [&]{
         at::native::cpublas::gemm(
-            transpose_a ? cpublas::Transpose : cpublas::NoTranspose,
-            transpose_b ? cpublas::Transpose : cpublas::NoTranspose,
+            transpose_a ? a.is_conj() ? TransposeType::ConjTranspose : TransposeType::Transpose : TransposeType::NoTranspose,
+            transpose_b ? b.is_conj() ? TransposeType::ConjTranspose : TransposeType::Transpose : TransposeType::NoTranspose,
             m, n, k,
             alpha.to<scalar_t>(),
             a.data_ptr<scalar_t>(), lda,
@@ -1286,7 +1304,7 @@ static inline Tensor& bmm_out_or_baddbmm_(Tensor& self_or_result, const Tensor& 
       if (enable_multithreaded_bmm) {
         auto bmm_out_fn = [&](uint64_t start, uint64_t end) {
           c10::InferenceMode guard;
-          for (int64_t b = start; b < end; b++) {
+          for (const auto b : c10::irange(start, end)) {
             auto r = self_or_result.select(0, b);
             addmm_impl_cpu_(
                 r, r, batch1.select(0, b), batch2.select(0, b), 0, 1);
@@ -1294,7 +1312,7 @@ static inline Tensor& bmm_out_or_baddbmm_(Tensor& self_or_result, const Tensor& 
         };
         at::parallel_for(0, bs, 1, bmm_out_fn);
       } else {
-        for (int64_t b = 0; b < bs; b++) {
+        for (const auto b : c10::irange(bs)) {
           auto r = self_or_result.select(0, b);
           addmm_impl_cpu_(r, r, batch1.select(0, b), batch2.select(0, b), 0, 1);
         }
@@ -1303,14 +1321,14 @@ static inline Tensor& bmm_out_or_baddbmm_(Tensor& self_or_result, const Tensor& 
       if (enable_multithreaded_bmm) {
         auto bmm_fn = [&](uint64_t start, uint64_t end) {
           c10::InferenceMode guard;
-          for (int64_t b = start; b < end; b++) {
+          for (const auto b : c10::irange(start, end)) {
             self_or_result.select(0, b).addmm_(
                 batch1.select(0, b), batch2.select(0, b), beta, alpha);
           }
         };
         at::parallel_for(0, bs, 1, bmm_fn);
       } else {
-        for (int64_t b = 0; b < bs; b++) {
+        for (const auto b : c10::irange(bs)) {
           self_or_result.select(0, b).addmm_(
               batch1.select(0, b), batch2.select(0, b), beta, alpha);
         }
@@ -1333,8 +1351,18 @@ Tensor& baddbmm_out_cpu(const Tensor& self_, const Tensor& batch1, const Tensor&
   return at::native::baddbmm__cpu(result, batch1, batch2, beta, alpha);
 }
 
+Tensor& conjugate_mutable_input_if_needed(Tensor& self, bool conjugate) {
+  if (conjugate) {
+    self.conj_physical_();
+  }
+  return self;
+}
+
 Tensor& baddbmm__cpu(Tensor& self, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha) {
-  return bmm_out_or_baddbmm_(self, batch1, batch2, beta, alpha, false);
+  bool self_is_conj = self.is_conj();
+  conjugate_mutable_input_if_needed(self, self_is_conj);
+  bmm_out_or_baddbmm_(self, batch1.resolve_conj(), batch2.resolve_conj(), beta, alpha, false);
+  return conjugate_mutable_input_if_needed(self, self_is_conj);
 }
 
 Tensor bmm_cpu(const Tensor& self, const Tensor& mat2) {
@@ -1347,7 +1375,10 @@ Tensor& bmm_out_cpu(const Tensor& batch1, const Tensor& batch2, Tensor &result) 
   Scalar alpha(1.0);
   {
   NoNamesGuard guard;
-  bmm_out_or_baddbmm_(result, batch1, batch2, beta, alpha, true);
+  bool result_is_conj = result.is_conj();
+  conjugate_mutable_input_if_needed(result, result_is_conj);
+  bmm_out_or_baddbmm_(result, batch1.resolve_conj(), batch2.resolve_conj(), beta, alpha, true);
+  conjugate_mutable_input_if_needed(result, result_is_conj);
   }
   namedinference::propagate_names_if_nonempty(
       result,
@@ -1439,7 +1470,12 @@ Tensor matmul(
     }
 
     // fold the batch into the first dimension
-    Tensor t1 = tensor1.expect_contiguous()->view({-1, size1[size1.size() - 1]});
+    // Why not tensor1.view(-1, size1[size1.size() -1])?
+    // If the last dim is 0, then view(-1, 0) won't work because the -1 becomes ambiguous.
+    // This can happen in e.g. [3, 5, 0] @ [0, 0].
+    // So we manually compute the folding as a result.
+    const auto dim1_size = c10::multiply_integers(size1.begin(), size1.end() - 1);
+    auto t1 = tensor1.expect_contiguous()->view({dim1_size, size1[size1.size() - 1]});
     Tensor output = has_out ? at::_unsafe_view(at::mm_out(out, t1, t2), output_size)
                             : at::_unsafe_view(t1.mm(t2), output_size);
     return has_out ? out.set_(output) : output;
@@ -1529,6 +1565,15 @@ Tensor& matmul_out(const Tensor & tensor1, const Tensor & tensor2, Tensor &resul
   at::native::matmul(c10::optional<Tensor>(result), tensor1, tensor2);
   namedinference::propagate_names_if_nonempty(result, maybe_outnames);
   return result;
+}
+
+// torch.linalg.matmul, alias for torch.matmul
+Tensor linalg_matmul(const Tensor & tensor1, const Tensor & tensor2) {
+  return at::native::matmul(tensor1, tensor2);
+}
+
+Tensor& linalg_matmul_out(const Tensor & tensor1, const Tensor & tensor2, Tensor &result) {
+  return at::native::matmul_out(tensor1, tensor2, result);
 }
 
 // helper methods for matrix_exp
@@ -2167,31 +2212,13 @@ static void check_str_ord_valid(const c10::string_view str_ord, optional<IntArra
     "\" can only be used if either len(dim) == 2 or (self.dim() == 2 and dim is None)");
 }
 
-// Performs vector norm for ord = +/-infinity, and the second dimension reduction
-// for matrix norms.
+// Performs second dimension reduction for matrix norms
 static Tensor _norm_min_max(Tensor& self, double ord, int64_t dim, bool keepdim) {
-  Tensor result;
-  if (self.numel() == 0 && self.sizes()[dim] > 0) {
-    // This special case is needed in matrix norm for tensors with 3 or more dims,
-    // or in vector norm for order inf and -inf for tesnsors with 2 or more dims.
-    // When the sizes of the dims to be reduced are greater than 0 but another dim
-    // in the tensor is size 0 (thus numel == 0), we must either flatten or resize
-    // the second reduction dim to 1, to avoid calling min/max, which would throw
-    // an error.
-    if (self.sizes()[dim] != 1) {
-      auto new_sizes = self.sizes().vec();
-      new_sizes[dim] = 1;
-      self.resize_(new_sizes);
-    }
-    result = keepdim ? self : self.flatten(dim);
+  if (ord > 0) {
+    return self.amax(dim, keepdim);
   } else {
-    if (ord > 0) {
-      result = std::get<0>(self.max(dim, keepdim));
-    } else {
-      result = std::get<0>(self.min(dim, keepdim));
-    }
+    return self.amin(dim, keepdim);
   }
-  return result;
 }
 
 // Performs matrix norm
@@ -2232,8 +2259,7 @@ static Tensor& _linalg_norm_matrix_out(Tensor& result, const Tensor &self, const
     result_ = _norm_min_max(result_, ord, result_.dim() - 1, keepdim);
 
     if (keepdim) {
-      result_.unsqueeze_(-1);
-      result_ = result_.permute(permutation_reverse);
+      result_ = result_.unsqueeze(-1).permute(permutation_reverse);
     }
   } else {
     // abs(p) == infinity and abs(p) == 1 will perform identical reductions, except
@@ -2649,12 +2675,9 @@ Tensor linalg_tensorinv(const Tensor& self, int64_t ind) {
   shape_ind_end.insert(shape_ind_end.cend(), shape_start_ind.cbegin(), shape_start_ind.cend());
 
   // If the reshaped self is not invertible catch this error
-  Tensor result;
-  try {
-    result = at::inverse(self.reshape({prod_ind_end, prod_ind_end}));
-  } catch (...) {
-    TORCH_CHECK(false, "Failed to invert the input tensor, because it is singular.");
-  }
+  Tensor result, info;
+  std::tie(result, info) = at::linalg_inv_ex(self.reshape({prod_ind_end, prod_ind_end}), /*check_errors=*/false);
+  TORCH_CHECK(info.item<int64_t>() == 0, "Failed to invert the input tensor, because it is singular.");
 
   return result.reshape(shape_ind_end);
 }

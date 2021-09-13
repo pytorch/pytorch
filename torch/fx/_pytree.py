@@ -1,5 +1,6 @@
-from typing import Callable, Any, Tuple, List, Dict, Type
+from typing import Callable, Any, Tuple, List, Dict, Type, NamedTuple
 from torch.utils._pytree import PyTree, TreeSpec, LeafSpec
+from collections import namedtuple
 
 FlattenFuncSpec = Callable[[PyTree, TreeSpec], List]
 
@@ -32,6 +33,10 @@ def _list_flatten_spec(d: List[Any], spec: TreeSpec) -> List[Any]:
 def _tuple_flatten_spec(d: Tuple[Any], spec: TreeSpec) -> List[Any]:
     return [d[i] for i in range(len(spec.children_specs))]
 
+def _namedtuple_flatten_spec(d: NamedTuple, spec: TreeSpec) -> List[Any]:
+    return [d[i] for i in range(len(spec.children_specs))]
+
 register_pytree_flatten_spec(dict, _dict_flatten_spec)
 register_pytree_flatten_spec(list, _list_flatten_spec)
 register_pytree_flatten_spec(tuple, _tuple_flatten_spec)
+register_pytree_flatten_spec(namedtuple, _tuple_flatten_spec)

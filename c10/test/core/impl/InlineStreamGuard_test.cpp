@@ -21,7 +21,6 @@ static Stream stream(DeviceIndex index, StreamId sid) {
 
 using TestGuard = InlineStreamGuard<TestGuardImpl>;
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InlineStreamGuard, Constructor) {
   TestGuardImpl::setDeviceIndex(0);
   TestGuardImpl::resetStreams();
@@ -40,7 +39,6 @@ TEST(InlineStreamGuard, Constructor) {
   ASSERT_EQ(TestGuardImpl::getCurrentStreamIdFor(0), 0);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InlineStreamGuard, ResetStreamSameSameDevice) {
   TestGuardImpl::setDeviceIndex(0);
   TestGuardImpl::resetStreams();
@@ -58,7 +56,6 @@ TEST(InlineStreamGuard, ResetStreamSameSameDevice) {
   ASSERT_EQ(TestGuardImpl::getCurrentStreamIdFor(0), 0);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InlineStreamGuard, ResetStreamDifferentSameDevice) {
   TestGuardImpl::setDeviceIndex(0);
   TestGuardImpl::resetStreams();
@@ -78,7 +75,6 @@ TEST(InlineStreamGuard, ResetStreamDifferentSameDevice) {
   ASSERT_EQ(TestGuardImpl::getCurrentStreamIdFor(0), 0);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InlineStreamGuard, ResetStreamDifferentDevice) {
   TestGuardImpl::setDeviceIndex(0);
   TestGuardImpl::resetStreams();
@@ -105,7 +101,6 @@ TEST(InlineStreamGuard, ResetStreamDifferentDevice) {
 
 using OptionalTestGuard = InlineOptionalStreamGuard<TestGuardImpl>;
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InlineOptionalStreamGuard, Constructor) {
   TestGuardImpl::setDeviceIndex(0);
   TestGuardImpl::resetStreams();
@@ -142,7 +137,6 @@ TEST(InlineOptionalStreamGuard, Constructor) {
   ASSERT_EQ(TestGuardImpl::getCurrentStreamIdFor(0), 0);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InlineOptionalStreamGuard, ResetStreamSameDevice) {
   TestGuardImpl::setDeviceIndex(0);
   TestGuardImpl::resetStreams();
@@ -160,7 +154,6 @@ TEST(InlineOptionalStreamGuard, ResetStreamSameDevice) {
   ASSERT_EQ(TestGuardImpl::getCurrentStreamIdFor(0), 0);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InlineOptionalStreamGuard, ResetStreamDifferentDevice) {
   TestGuardImpl::setDeviceIndex(0);
   TestGuardImpl::resetStreams();
@@ -185,7 +178,6 @@ TEST(InlineOptionalStreamGuard, ResetStreamDifferentDevice) {
 
 using MultiTestGuard = InlineMultiStreamGuard<TestGuardImpl>;
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InlineMultiStreamGuard, Constructor) {
   TestGuardImpl::resetStreams();
   {

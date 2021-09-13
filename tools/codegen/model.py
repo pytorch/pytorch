@@ -56,8 +56,9 @@ class DispatchKey(Enum):
     CUDA = auto()
     HIP = auto()
     FPGA = auto()
-    MSNPU = auto()
+    ORT = auto()
     XLA = auto()
+    Lazy = auto()
     Vulkan = auto()
     Metal = auto()
     XPU = auto()
@@ -89,6 +90,7 @@ class DispatchKey(Enum):
     AutogradCPU = auto()
     AutogradCUDA = auto()
     AutogradXLA = auto()
+    AutogradLazy = auto()
     AutogradNestedTensor = auto()
     AutogradXPU = auto()
     AutogradPrivateUse1 = auto()
@@ -227,6 +229,14 @@ class NativeFunction:
     # changes the semantics of set_output to call the parent class.
     structured_inherits: Optional[str]
 
+    # Structured kernels can declare elements as "precomputed". These elements
+    # are returned by the meta function in one struct and passed to the impl
+    # function in lieu of certain kernel arguments that these precomputed
+    # elements supersede. Information about the names and types of these
+    # precomputed elements and how they correspond to kernel arguments is stored
+    # in this member, if applicable.
+    precomputed: Optional['Precompute']
+
     # Argument names whose default  should be excluded from the C++ interface.
     # Intended for resolving overload ambiguities between signatures.
     cpp_no_default_args: Set[str]
@@ -318,6 +328,10 @@ class NativeFunction:
         category_override = e.pop('category_override', None)
         assert category_override is None or isinstance(category_override, str), f'not a str: {category_override}'
 
+        precomputed_dict = e.pop('precomputed', None)
+        assert precomputed_dict is None or structured is True
+        precomputed = Precompute.parse(precomputed_dict) if precomputed_dict else None
+
         from tools.codegen.api import cpp
 
         raw_dispatch = e.pop('dispatch', None)
@@ -338,7 +352,9 @@ class NativeFunction:
             assert dispatch != {DispatchKey.CompositeImplicitAutograd: cpp.name(func)}, \
                 "unnecessary dispatch table for this function; just delete the dispatch " \
                 "key entirely"
-            assert dispatch.keys() != {DispatchKey.CompositeImplicitAutograd}, \
+            # if a function is a structured delegate, deleting the dispatch
+            # table is NOT semantics preserving
+            assert structured_delegate or dispatch.keys() != {DispatchKey.CompositeImplicitAutograd}, \
                 f"unexpected name for singleton CompositeImplicitAutograd dispatch entry: expected {cpp.name(func)} " \
                 f"but got {dispatch[DispatchKey.CompositeImplicitAutograd]}.  Rename your implementation to the expected " \
                 "name, then delete the dispatch table"
@@ -385,6 +401,7 @@ class NativeFunction:
             structured=structured,
             structured_delegate=structured_delegate,
             structured_inherits=structured_inherits,
+            precomputed=precomputed,
             manual_kernel_registration=manual_kernel_registration,
             manual_cpp_binding=manual_cpp_binding,
             python_module=python_module,
@@ -637,6 +654,15 @@ class BackendIndex:
         if f.func.name not in self.index:
             return None
         return self.index[f.func.name]
+
+    def native_function_class_name(self) -> Optional[str]:
+        if self.external:
+            return f'{str(self.dispatch_key)}NativeFunctions'
+        else:
+            # TODO: This discrepancy isn't required; we could also generated
+            # a class for in-tree kernels. It'll just require carefully
+            # updating every kernel definition + callsite of every in-tree aten kernel.
+            return None
 
 
 # The function schema is undoubtedly the most important data structure
@@ -1454,6 +1480,18 @@ class OperatorName:
         else:
             return f"{self.name}"
 
+    # NB: This must be synchronized with the naming scheme in
+    # aten/src/ATen/templates/Operators.h
+    # Given a function schema "aten::op.overload(...)",
+    # If there is no overload name, this returns f"{op}"
+    # If there is an overload name, this returns f"{op}_{overload}"
+    def unambiguous_name(self) -> str:
+        if self.overload_name:
+            return f"{self.name}_{self.overload_name}"
+        else:
+            return f"{self.name}"
+
+
 def gets_generated_out_inplace_wrapper(f: NativeFunction, g: NativeFunctionsGroup, b: BackendIndex) -> bool:
     return f.func.kind() is not SchemaKind.functional and \
         not b.has_kernel(f) and \
@@ -1471,3 +1509,42 @@ def parse_returns(return_decl: str) -> Tuple[Return, ...]:
     if return_decl[0] == '(' and return_decl[-1] == ')':
         return_decl = return_decl[1:-1]
     return tuple(Return.parse(arg) for arg in return_decl.split(', '))
+
+
+# A Precompute instance consists of a map from kernel argument name
+# to the list of Argument instances that should replace that
+# kernel argument in the impl function.
+@dataclass(frozen=True)
+class Precompute:
+    # A map from kernel argument name -> a list of precomputed
+    # elements that replaces/supersedes it.
+    replace: Dict[str, List[Argument]]
+
+    @staticmethod
+    def parse(src: object) -> 'Precompute':
+        assert isinstance(src, list)
+
+        # src is a list of strings of the format:
+        #   {kernel param name} -> {replacement decl}[, {replacement decl}, ...]
+        # Parse this list to get the names of which precomputed elements
+        # should replace which kernel arguments.
+        replace = {}
+        for raw_replace_item in src:
+            assert isinstance(raw_replace_item, str)
+
+            arg, with_list_raw = raw_replace_item.split(' -> ')
+            with_list = with_list_raw.split(',')
+            with_list_args = [Argument.parse(name.strip()) for name in with_list]
+            replace[arg] = with_list_args
+
+        r = Precompute(replace=replace)
+        assert r.to_list() == src, 'r.to_list() != src'
+        return r
+
+    def to_list(self) -> List[str]:
+        replace_list = []
+        for kernel_param, replacement_params in self.replace.items():
+            replacements = ', '.join(str(param) for param in replacement_params)
+            replace_list.append(f'{kernel_param} -> {replacements}')
+
+        return replace_list

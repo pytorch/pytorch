@@ -2,12 +2,10 @@
 
 namespace caffe2 {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     LearningRateAdaption,
     LearningRateAdaptionOp<float, CPUContext>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(LearningRateAdaption)
     .NumInputs(3)
     .NumOutputs(1)
@@ -39,6 +37,5 @@ OPERATOR_SCHEMA(LearningRateAdaption)
     .Input(2, "effgrad", "The effective grad")
     .Output(0, "output_lr", "Updated learning rate");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 NO_GRADIENT(LearningRateAdaption);
 } // namespace caffe2

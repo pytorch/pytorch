@@ -7,7 +7,6 @@ struct THPStream {
   PyObject_HEAD
   uint64_t cdata;
 };
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 extern PyTypeObject *THPStreamClass;
 
 void THPStream_init(PyObject *module);

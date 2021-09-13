@@ -13,7 +13,7 @@ using namespace std;
 using namespace dnnlowp;
 
 using AddFp32Op =
-    BinaryElementwiseOp<NumericTypes, CPUContext, AddFunctor<CPUContext>>;
+    BinaryElementwiseBroadcastOp<NumericTypes, CPUContext, AddFunctor<CPUContext>>;
 
 template <typename T>
 class AddDNNLowPOp : public BinaryElementwiseDNNLowPOp<T, AddFp32Op> {
@@ -199,9 +199,7 @@ class AddDNNLowPOp : public BinaryElementwiseDNNLowPOp<T, AddFp32Op> {
   dnnlowp::TensorQuantizationParams intermediate_qparams_;
 }; // class AddDNNLowPOp
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(Add, DNNLOWP, AddDNNLowPOp<uint8_t>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(Int8Add, DNNLOWP, AddDNNLowPOp<uint8_t>);
 
 } // namespace caffe2

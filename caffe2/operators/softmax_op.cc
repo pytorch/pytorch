@@ -82,14 +82,11 @@ bool SoftmaxGradientOp<float, CPUContext>::RunOnDevice() {
   return true;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(Softmax, SoftmaxOp<float, CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_GRADIENT_OPERATOR(
     SoftmaxGradient,
     SoftmaxGradientOp<float, CPUContext>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Softmax)
     .NumInputs(1)
     .NumOutputs(1)
@@ -172,7 +169,6 @@ softmax: [[0.24422921 0.43525138 0.18582782 0.12303016 0.01166145]]
     .InheritOnnxSchema();
 
 // Input: Y, dY. Output: dX
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 GRADIENT_OPERATOR_SCHEMA(SoftmaxGradient).NumInputs(2).NumOutputs(1);
 
 class GetSoftmaxGradient : public GradientMakerBase {
@@ -185,9 +181,7 @@ class GetSoftmaxGradient : public GradientMakerBase {
         vector<string>{GI(0)});
   }
 };
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(Softmax, GetSoftmaxGradient);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(SoftmaxFp16, GetSoftmaxGradient);
 
 } // namespace caffe2

@@ -6,31 +6,39 @@ from torch.distributed._sharding_spec import (
     EnumerableShardingSpec,
     ShardMetadata,
 )
+from torch.distributed._sharding_spec._internals import check_tensor
+
+from torch.testing._internal.common_utils import (
+    run_tests,
+    sandcastle_skip_if,
+)
 
 class TestShardingSpec(TestCase):
 
+    @sandcastle_skip_if(torch.cuda.device_count() < 2, '2 CUDA GPUs are needed')
     def test_device_placement(self):
         # valid devices
         DevicePlacementSpec("cuda:0")
-        DevicePlacementSpec(0)
+        DevicePlacementSpec(torch.device(0))
         DevicePlacementSpec(torch.device("cuda:0"))
         DevicePlacementSpec("rank:0/cuda:0")
         DevicePlacementSpec("rank:0/cpu")
         DevicePlacementSpec("rank:0")
 
         # invalid devices
-        with self.assertRaisesRegex(ValueError, "not a valid device"):
+        with self.assertRaisesRegex(ValueError, "Could not parse remote_device"):
             DevicePlacementSpec("cuda:foo")
-        with self.assertRaisesRegex(ValueError, "not a valid device"):
+        with self.assertRaisesRegex(ValueError, "Could not parse remote_device"):
             DevicePlacementSpec("foo:0")
-        with self.assertRaisesRegex(ValueError, "not a valid device"):
+        with self.assertRaisesRegex(RuntimeError, "Invalid device string"):
             DevicePlacementSpec("rank:0/cuda:foo")
-        with self.assertRaisesRegex(ValueError, "not a valid device"):
+        with self.assertRaisesRegex(RuntimeError, "Invalid device string"):
             DevicePlacementSpec("rank:0/cpu2")
 
+    @sandcastle_skip_if(torch.cuda.device_count() < 2, '2 CUDA GPUs are needed')
     def test_chunked_sharding_spec(self):
         # Test valid specs.
-        ChunkShardingSpec(0, [0, 1])
+        ChunkShardingSpec(0, [torch.device(0), torch.device(1)])
         # Named dimension.
         ChunkShardingSpec("N", ["cuda:0", "cuda:1"])
         ChunkShardingSpec(0, [torch.device("cuda:0"), torch.device("cuda:1")])
@@ -44,19 +52,20 @@ class TestShardingSpec(TestCase):
             ChunkShardingSpec(None, ["cuda:0", "cuda:1"])
         with self.assertRaisesRegex(ValueError, "int or str"):
             ChunkShardingSpec({}, ["cuda:0", "cuda:1"])
-        with self.assertRaisesRegex(ValueError, "not a valid device"):
+        with self.assertRaisesRegex(ValueError, "Could not parse remote_device"):
             ChunkShardingSpec(0, ["random:0", "cuda:1"])
-        with self.assertRaisesRegex(ValueError, "not a valid device"):
+        with self.assertRaisesRegex(ValueError, "Could not parse remote_device"):
             ChunkShardingSpec(0, ["cuda:foo", "cuda:1"])
-        with self.assertRaisesRegex(ValueError, "not a valid device"):
+        with self.assertRaisesRegex(ValueError, "Could not parse remote_device"):
             ChunkShardingSpec(0, ["rank:foo", "cuda:1"])
-        with self.assertRaisesRegex(ValueError, "not a valid device"):
+        with self.assertRaisesRegex(RuntimeError, "Expected one of"):
             ChunkShardingSpec(0, ["rank:0/foo", "cuda:1"])
-        with self.assertRaisesRegex(ValueError, "not a valid device"):
+        with self.assertRaisesRegex(RuntimeError, "Expected one of"):
             ChunkShardingSpec(0, ["rank:0/random:0", "cuda:1"])
-        with self.assertRaisesRegex(ValueError, "not a valid device"):
+        with self.assertRaisesRegex(RuntimeError, "Invalid device string"):
             ChunkShardingSpec(0, ["rank:0/cuda:foo", "cuda:1"])
 
+    @sandcastle_skip_if(torch.cuda.device_count() < 2, '2 CUDA GPUs are needed')
     def test_enumerable_sharding_spec(self):
         # test valid specs
 
@@ -73,7 +82,7 @@ class TestShardingSpec(TestCase):
                 placement="cuda:1",
             )
         ])
-        spec.check_tensor(torch.rand(10, 5).size())
+        check_tensor(spec.shards, torch.rand(10, 5).size())
 
         # test row and column sharding
         spec = EnumerableShardingSpec([
@@ -98,7 +107,7 @@ class TestShardingSpec(TestCase):
                 placement="cuda:3",
             ),
         ])
-        spec.check_tensor(torch.rand(6, 6).size())
+        check_tensor(spec.shards, torch.rand(6, 6).size())
 
         # test uneven shard sizes.
         spec = EnumerableShardingSpec([
@@ -123,10 +132,10 @@ class TestShardingSpec(TestCase):
                 placement="cuda:3",
             ),
         ])
-        spec.check_tensor(torch.rand(6, 6).size())
+        check_tensor(spec.shards, torch.rand(6, 6).size())
 
         # test invalid sharding
-        with self.assertRaisesRegex(ValueError, 'not a valid device'):
+        with self.assertRaisesRegex(ValueError, 'Could not parse remote_device'):
             ShardMetadata(shard_offsets=[0], shard_lengths=[1], placement="cuda:foo")
 
         with self.assertRaisesRegex(ValueError, 'same number of elements'):
@@ -183,7 +192,7 @@ class TestShardingSpec(TestCase):
         ])
 
         with self.assertRaisesRegex(ValueError, 'Rank of tensor is.*but shards rank'):
-            spec.check_tensor(torch.rand(10, 10, 10).size())
+            check_tensor(spec.shards, torch.rand(10, 10, 10).size())
 
         spec = EnumerableShardingSpec([
             ShardMetadata(
@@ -199,7 +208,7 @@ class TestShardingSpec(TestCase):
         ])
 
         with self.assertRaisesRegex(ValueError, 'exceeds tensor dim'):
-            spec.check_tensor(torch.rand(10, 3).size())
+            check_tensor(spec.shards, torch.rand(10, 3).size())
 
         spec = EnumerableShardingSpec([
             ShardMetadata(
@@ -215,4 +224,7 @@ class TestShardingSpec(TestCase):
         ])
 
         with self.assertRaisesRegex(ValueError, 'does not match tensor volume'):
-            spec.check_tensor(torch.rand(10, 10).size())
+            check_tensor(spec.shards, torch.rand(10, 10).size())
+
+if __name__ == '__main__':
+    run_tests()

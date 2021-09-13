@@ -910,10 +910,7 @@ def _real_and_imag_output(fn):
             return tuple(fn_to_apply(o) if o.is_complex() else o for o in outs)
         return wrapped_fn
 
-    # TODO(@anjali411): remove this workaround once neg bit is added.
-    def torch_imag(x):
-        return x.resolve_conj().imag
-    return apply_to_c_outs(fn, torch.real), apply_to_c_outs(fn, torch_imag)
+    return apply_to_c_outs(fn, torch.real), apply_to_c_outs(fn, torch.imag)
 
 def _real_and_imag_input(fn, complex_inp_indices):
     # returns new functions that take real inputs instead of complex inputs and compute fn(x + 0 * 1j)
@@ -954,7 +951,7 @@ def _gradcheck_real_imag(gradcheck_fn, func, func_out, tupled_inputs, outputs, e
         if complex_inp_indices:
             real_fn, imag_fn = _real_and_imag_input(func, complex_inp_indices)
 
-            imag_inputs = [inp.resolve_conj().imag if is_tensor_like(inp) and inp.is_complex() else inp for inp in tupled_inputs]
+            imag_inputs = [inp.imag if is_tensor_like(inp) and inp.is_complex() else inp for inp in tupled_inputs]
             imag_func_out = imag_fn(*imag_inputs)
             diff_imag_func_out = _differentiable_outputs(imag_func_out)
             gradcheck_fn(imag_fn, imag_func_out, imag_inputs, diff_imag_func_out, eps,
@@ -1085,7 +1082,7 @@ def _run_slow_mode_and_get_error(func, tupled_inputs, outputs, input_idx, output
         def new_fn(inp):
             new_inputs = list(tupled_inputs)
             new_inputs[input_idx] = inp
-            return func(*new_inputs)[output_idx]
+            return _as_tuple(func(*new_inputs))[output_idx]
         slow_analytical = _get_analytical_jacobian_forward_ad(new_fn, (tupled_inputs[input_idx],), (outputs[output_idx],))[0][0]
     else:
         slow_analytical = _get_analytical_jacobian(tupled_inputs, outputs, input_idx, output_idx)
@@ -1363,7 +1360,7 @@ def gradgradcheck(
         # If grad_outputs is not specified, create random Tensors of the same
         # shape, type, and device as the outputs
         def randn_like(x):
-            y = torch.testing.randn_like(
+            y = torch.randn_like(
                 x if (x.is_floating_point() or x.is_complex()) else x.double(), memory_format=torch.legacy_contiguous_format)
             if gen_non_contig_grad_outputs:
                 y = torch.testing.make_non_contiguous(y)
@@ -1379,7 +1376,8 @@ def gradgradcheck(
         input_args = args[:-num_outputs]
         grad_outputs = args[-num_outputs:]
         outputs = _differentiable_outputs(func(*input_args))
-        input_args = tuple(x for x in input_args if isinstance(x, torch.Tensor) and x.requires_grad)
+        input_args = tuple(x for x in input_args
+                           if is_tensor_like(x) and x.requires_grad)
         grad_inputs = torch.autograd.grad(outputs, input_args, grad_outputs, create_graph=True,
                                           allow_unused=True)
         grad_inputs = tuple(g for g in grad_inputs if g is not None)

@@ -4,10 +4,8 @@
 
 namespace caffe2 {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(Ceil, CeilOp<float, CPUContext>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Ceil)
     .NumInputs(1)
     .NumOutputs(1)
@@ -68,7 +66,6 @@ X after running op:
     .Output(0, "Y", "*(type: Tensor`<float>`)* Output tensor.");
 
 // TODO: Write gradient for this when needed
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 GRADIENT_NOT_IMPLEMENTED_YET(Ceil);
 
 } // namespace caffe2

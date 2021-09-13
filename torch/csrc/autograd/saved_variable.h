@@ -2,6 +2,7 @@
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/autograd/forward_grad.h>
+#include <torch/csrc/autograd/saved_variable_hooks.h>
 
 #include <ATen/ATen.h>
 
@@ -13,7 +14,6 @@ namespace torch { namespace autograd {
 using Variable = at::Tensor;
 struct Node;
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TORCH_API extern const char* ERR_BACKWARD_TWICE;
 
 /// A snapshot of a variable at a certain version. A `SavedVariable` stores
@@ -37,9 +37,9 @@ class TORCH_API SavedVariable {
   /// circular reference.
   Variable unpack(std::shared_ptr<Node> saved_for = nullptr) const;
 
-  void reset_data() {
-    return data_.reset();
-  }
+  void register_hooks(std::unique_ptr<SavedVariableHooks>&& hooks);
+
+  void reset_data();
 
  private:
   // This field contains either:
@@ -52,6 +52,16 @@ class TORCH_API SavedVariable {
   // a view, see below).
   // The field saved_orignal_ below reflects the two cases: its value is true
   // in the first case and false in the second case.
+  // The value data_.defined() can be false in three cases:
+  // 1. SavedVariable was constructed without a Tensor (the value to save is None), in
+  // that case was_default_constructed_ will be kept at true
+  // 2. The saved variable has been released by calling SavedVariable::reset_data(), typically
+  // during the backward pass
+  // 3. Hooks have been registered. In that case, hooks_ will be defined instead.
+  // Note that the value of saved_original_ only reflects what happened during the construction
+  // of the SavedVariable. If saved_original_ is true, we saved the original tensor in data_,
+  // but if the user registers hooks, we will no longer have it (despite the saved_original_ still
+  // being true)
   at::Tensor data_;
 
   // This field is used to store the forward AD gradients associated with
@@ -73,5 +83,21 @@ class TORCH_API SavedVariable {
   bool was_default_constructed_ = true;
   bool is_inplace_on_view_ = false;
   bool saved_original_ = false;
+  bool is_leaf_ = false;
+  bool is_output_ = false;
+
+  // Hooks are a pair of functions pack_hook/unpack_hook that provides fine-grained control
+  // over how the SavedVariable should save its data.
+  // pack_hook is called upon registration, while unpack_hook is called when unpacking.
+  std::unique_ptr<SavedVariableHooks> hooks_;
+  // Fields grad_fn_, grad_accumulator_, and requires_grad_ are only used if hooks are defined.
+  // They are set before pack_hook is called and used after unpack_hook is called.
+  std::shared_ptr<Node> grad_fn_;
+  std::weak_ptr<Node> grad_accumulator_;
+  bool requires_grad_ = false;
+
+  void save_metadata(const Variable& data);
+  static std::unique_ptr<SavedVariableHooks> get_default_hooks();
+  void set_hooks_and_pack_data(std::unique_ptr<SavedVariableHooks>&& hooks, const Variable& data);
 };
 }} // namespace torch::autograd

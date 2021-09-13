@@ -18,6 +18,7 @@ from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
 from enum import IntFlag
 from multiprocessing import synchronize
+from types import FrameType
 from typing import Any, Callable, Dict, Optional, Set, Tuple, Union
 
 import torch.multiprocessing as mp
@@ -33,6 +34,50 @@ IS_MACOS = sys.platform == "darwin"
 
 
 log = logging.getLogger(__name__)
+
+
+class SignalException(Exception):
+    """
+    Exception is raised inside the torchelastic agent process by the termination handler
+    if the death signal got received by the process.
+    """
+
+    def __init__(self, msg: str, sigval: signal.Signals) -> None:
+        super().__init__(msg)
+        self.sigval = sigval
+
+
+def _terminate_process_handler(signum: int, frame: FrameType) -> None:
+    """Termination handler that raises exceptions on the main process.
+
+    When the process receives death signal(SIGTERM, SIGINT), this termination handler will
+    be invoked. It raises the ``SignalException`` exception that should be processed by the
+    user code. Python does not terminate process after the termination handler is finished,
+    so the exception should not be silently ignored, otherwise the process will never
+    be terminated.
+    """
+    sigval = signal.Signals(signum)
+    raise SignalException(f"Process {os.getpid()} got signal: {sigval}", sigval=sigval)
+
+
+def _get_kill_signal() -> signal.Signals:
+    """
+    Get the kill signal. SIGKILL for unix, CTRL_C_EVENT for windows.
+    """
+    if IS_WINDOWS:
+        return signal.CTRL_C_EVENT  # type: ignore[attr-defined] # noqa: F821
+    else:
+        return signal.SIGKILL
+
+
+def _get_default_signal() -> signal.Signals:
+    """
+    Get the default termination signal. SIGTERM for unix, CTRL_C_EVENT for windows.
+    """
+    if IS_WINDOWS:
+        return signal.CTRL_C_EVENT  # type: ignore[attr-defined] # noqa: F821
+    else:
+        return signal.SIGTERM
 
 
 def _validate_full_rank(d: Dict[int, Any], nprocs: int, what: str):
@@ -185,6 +230,11 @@ class PContext(abc.ABC):
         """
         Start processes using parameters defined in the constructor.
         """
+        signal.signal(signal.SIGTERM, _terminate_process_handler)
+        signal.signal(signal.SIGINT, _terminate_process_handler)
+        if not IS_WINDOWS:
+            signal.signal(signal.SIGHUP, _terminate_process_handler)
+            signal.signal(signal.SIGQUIT, _terminate_process_handler)
         self._start()
         self._stdout_tail.start()
         self._stderr_tail.start()
@@ -214,6 +264,23 @@ class PContext(abc.ABC):
         on timeout expiry. Negative timeout values are interpreted as "wait-forever".
         A timeout value of zero simply queries the status of the processes (e.g. equivalent
         to a poll).
+
+        ..note: Multiprocesing library registers SIGTERM and SIGINT signal handlers that raise
+                ``SignalException`` when the signals received. It is up to the consumer of the code
+                to properly handle the exception. It is important not to swallow the exception otherwise
+                the process would not terminate. Example of the typical workflow can be:
+
+        .. code-block:: python
+            pc = start_processes(...)
+            try:
+                pc.wait(1)
+                .. do some other work
+            except SignalException as e:
+                pc.shutdown(e.sigval, timeout=30)
+
+        If SIGTERM or SIGINT occurs, the code above will try to shutdown child processes by propagating
+        received signal. If child processes will not terminate in the timeout time, the process will send
+        the SIGKILL.
         """
 
         if timeout == 0:
@@ -239,15 +306,28 @@ class PContext(abc.ABC):
         raise NotImplementedError()
 
     @abc.abstractmethod
-    def _close(self) -> None:
+    def _close(self, death_sig: signal.Signals, timeout: int = 30) -> None:
         r"""
         Terminates all processes managed by this context and cleans up any
         meta resources (e.g. redirect, error_file files).
         """
         raise NotImplementedError()
 
-    def close(self) -> None:
-        self._close()
+    def close(
+        self, death_sig: Optional[signal.Signals] = None, timeout: int = 30
+    ) -> None:
+        r"""
+        Terminates all processes managed by this context and cleans up any
+        meta resources (e.g. redirect, error_file files).
+
+        Args:
+            death_sig: Death signal to terminate porcesses.
+            timeout: Time to wait for processes to finish, if process is
+                still alive after this time, it will be terminated via SIGKILL.
+        """
+        if not death_sig:
+            death_sig = _get_default_signal()
+        self._close(death_sig=death_sig, timeout=timeout)
         if self._stdout_tail:
             self._stdout_tail.stop()
         if self._stderr_tail:
@@ -447,11 +527,36 @@ class MultiprocessContext(PContext):
         assert self._pc is not None  # assertion for mypy type checking
         return {local_rank: pid for local_rank, pid in enumerate(self._pc.pids())}
 
-    def _close(self) -> None:
-        if self._pc:
-            for proc in self._pc.processes:
-                proc.terminate()
-                proc.join()
+    def _close(self, death_sig: signal.Signals, timeout: int = 30) -> None:
+        if not self._pc:
+            return
+        for proc in self._pc.processes:
+            if proc.is_alive():
+                log.warning(f"Closing process {proc.pid} via signal {death_sig.name}")
+                try:
+                    os.kill(proc.pid, death_sig)
+                except ProcessLookupError:
+                    # If the process exited because of some reason,
+                    # `ProcessLookupError` will be rasied, it is safe to ignore it.
+                    pass
+        end = time.monotonic() + timeout
+        for proc in self._pc.processes:
+            time_to_wait = end - time.monotonic()
+            if time_to_wait <= 0:
+                break
+            proc.join(time_to_wait)
+        for proc in self._pc.processes:
+            if proc.is_alive():
+                log.warning(
+                    f"Unable to shutdown process {proc.pid} via {death_sig}, forcefully exitting via {_get_kill_signal()}"
+                )
+                try:
+                    os.kill(proc.pid, _get_kill_signal())
+                except ProcessLookupError:
+                    # If the process exited because of some reason,
+                    # `ProcessLookupError` will be rasied, it is safe to ignore it.
+                    pass
+            proc.join()
 
 
 class SubprocessHandler:
@@ -465,32 +570,33 @@ class SubprocessHandler:
         entrypoint: str,
         args: Tuple,
         env: Dict[str, str],
-        preexec_fn: Callable,
         stdout: str,
         stderr: str,
     ):
         self._stdout = open(stdout, "w") if stdout else None
         self._stderr = open(stderr, "w") if stderr else None
-        args_str = [str(e) for e in args]
-
         # inherit parent environment vars
         env_vars = os.environ.copy()
         env_vars.update(env)
 
-        self.proc: subprocess.Popen = subprocess.Popen(
+        args_str = (entrypoint, *[str(e) for e in args])
+        self.proc: subprocess.Popen = self._popen(args_str, env_vars)
+
+    def _popen(self, args: Tuple, env: Dict[str, str]) -> subprocess.Popen:
+        return subprocess.Popen(
             # pyre-fixme[6]: Expected `Union[typing.Sequence[Union[_PathLike[bytes],
             #  _PathLike[str], bytes, str]], bytes, str]` for 1st param but got
             #  `Tuple[str, *Tuple[Any, ...]]`.
-            args=(entrypoint, *args_str),
-            env=env_vars,
-            preexec_fn=preexec_fn,
+            args=args,
+            env=env,
             stdout=self._stdout,
             stderr=self._stderr,
         )
 
-    def close(self):
-        self.proc.terminate()
-        self.proc.wait()
+    def close(self, death_sig: Optional[signal.Signals] = None) -> None:
+        if not death_sig:
+            death_sig = _get_default_signal()
+        self.proc.send_signal(death_sig)
         if self._stdout:
             self._stdout.close()
         if self._stderr:
@@ -541,7 +647,6 @@ class SubprocessContext(PContext):
                 entrypoint=self.entrypoint,  # type: ignore[arg-type] # entrypoint is always a str
                 args=self.args[local_rank],
                 env=self.envs[local_rank],
-                preexec_fn=mp._prctl_pr_set_pdeathsig(signal.SIGTERM),  # type: ignore[attr-defined]
                 stdout=self.stdouts[local_rank],
                 stderr=self.stderrs[local_rank],
             )
@@ -597,7 +702,30 @@ class SubprocessContext(PContext):
             for local_rank, sh in self.subprocess_handlers.items()
         }
 
-    def _close(self) -> None:
-        if self.subprocess_handlers:
-            for handler in self.subprocess_handlers.values():
-                handler.close()
+    def _close(self, death_sig: signal.Signals, timeout: int = 30) -> None:
+        if not self.subprocess_handlers:
+            return
+        for handler in self.subprocess_handlers.values():
+            if handler.proc.poll() is None:
+                log.warning(
+                    f"Sending process {handler.proc.pid} closing signal {death_sig.name}"
+                )
+                handler.close(death_sig=death_sig)
+        end = time.monotonic() + timeout
+        for handler in self.subprocess_handlers.values():
+            time_to_wait = end - time.monotonic()
+            if time_to_wait <= 0:
+                break
+            try:
+                handler.proc.wait(time_to_wait)
+            except subprocess.TimeoutExpired:
+                # Ignore the timeout expired exception, since
+                # the child process will be forcefully terminated via SIGKILL
+                pass
+        for handler in self.subprocess_handlers.values():
+            if handler.proc.poll() is None:
+                log.warning(
+                    f"Unable to shutdown process {handler.proc.pid} via {death_sig}, forcefully exitting via {_get_kill_signal()}"
+                )
+                handler.close(death_sig=_get_kill_signal())
+                handler.proc.wait()
