@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/mobile/import.h>
+#include <torch/csrc/jit/mobile/parse_bytecode.h>
 
 #include <ATen/core/ivalue.h>
 #include <c10/util/ScopeExit.h>
@@ -9,6 +10,7 @@
 #include <torch/csrc/jit/mobile/observer.h>
 #include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/csrc/jit/serialization/import_export_constants.h>
+#include <torch/csrc/jit/serialization/import_export_functions.h>
 #include <torch/csrc/jit/serialization/import_read.h>
 #include <torch/custom_class.h>
 
@@ -84,20 +86,6 @@ using caffe2::serialize::PyTorchStreamReader;
 using caffe2::serialize::ReadAdapterInterface;
 
 OpCode parseOpCode(const char* str);
-
-IValue expect_field(
-    c10::ivalue::TupleElements& elements,
-    const std::string& expected_name,
-    size_t entry) {
-  auto row = std::move(elements.at(entry)).toTuple();
-  TORCH_INTERNAL_ASSERT(
-      row->elements().at(0).toStringRef() == expected_name,
-      "Expected ",
-      expected_name,
-      " found ",
-      row->elements().at(0).toStringRef());
-  return std::move(row->elements().at(1));
-}
 
 std::string operator_str(
     const std::string& name,
@@ -230,22 +218,11 @@ class BytecodeDeserializer final {
   c10::IValue readArchive(
       const std::string& archive_name,
       std::shared_ptr<mobile::CompilationUnit> mcu);
-  /**
-   * Loads operators by looking them up in the Dispatcher and returns
-   * the set of operator names (with overload) that are not supported
-   * by the current runtime.
-   *
-   * Accepts an operator_cache, which allows you to cache operator
-   * functions for the entire model. This is keyed on
-   * c10::OperatorName. The value may not be what you're looking for
-   * even if the key is the same. You need to call has_same_arg_num()
-   * on the value to ensure that the number of arguments are the same.
-   */
-  std::unordered_set<std::string> load_and_find_unsupported_operator_names(
-      c10::ivalue::TupleElements&& ops_list,
-      mobile::Function* function,
-      int64_t model_version,
-      mobile::Function::OperatorCacheType& operator_cache) const;
+  void parseFunctionSchema(
+      const std::string& function_name,
+      IValue* schemaTable,
+      const int64_t& model_version,
+      mobile::Function* function);
   std::shared_ptr<CompilationUnit> compilation_unit_;
   std::unordered_set<std::string> imported_libs_;
   std::unique_ptr<PyTorchStreamReader> reader_{};
@@ -260,12 +237,22 @@ BytecodeDeserializer::BytecodeDeserializer(
       reader_(std::move(reader)),
       module_load_options_(module_load_options) {}
 
-std::unordered_set<std::string> BytecodeDeserializer::
-    load_and_find_unsupported_operator_names(
-        c10::ivalue::TupleElements&& ops_list,
-        mobile::Function* function,
-        int64_t model_version,
-        mobile::Function::OperatorCacheType& operator_cache) const {
+/**
+ * Loads operators by looking them up in the Dispatcher and returns
+ * the set of operator names (with overload) that are not supported
+ * by the current runtime.
+ *
+ * Accepts an operator_cache, which allows you to cache operator
+ * functions for the entire model. This is keyed on
+ * c10::OperatorName. The value may not be what you're looking for
+ * even if the key is the same. You need to call has_same_arg_num()
+ * on the value to ensure that the number of arguments are the same.
+ */
+std::unordered_set<std::string> load_and_find_unsupported_operator_names(
+    c10::ivalue::TupleElements&& ops_list,
+    mobile::Function* function,
+    int64_t model_version,
+    mobile::Function::OperatorCacheType& operator_cache) {
   std::unordered_set<std::string> unsupported_op_names;
   // ops_list is the list of operator names that were read in from
   // bytecode.plk for the method that is currently being processed.
@@ -298,44 +285,81 @@ TypePtr BytecodeDeserializer::resolveTypeName(const c10::QualifiedName& qn) {
   return resolveTypeNameMobile(qn, compilation_unit_);
 }
 
-namespace {
-#define COUNT_OPCODE(_, _a) 1 +
-constexpr size_t numOpcodes = FORALL_OPCODES(COUNT_OPCODE) 0;
-#undef COUNT_OPCODE
-
-// Pickled strings are memoized, so we can cache a mapping from
-// pointers to parsed OpCodes to speed up parsing.
-class OpCodeCache {
- private:
-  // We store as void* to emphasize that we care only about the
-  // address and should not be dereferencing these pointers.
-  std::array<const void*, numOpcodes> keys_{};
-  std::array<OpCode, numOpcodes> values_{};
-  size_t usedEntries_ = 0;
-
- public:
-  OpCodeCache() {
-    memset(keys_.data(), 0, keys_.size() * sizeof(keys_[0]));
-  }
-
-  OpCode parse(const c10::ivalue::ConstantString& s) {
-    const auto endIt = keys_.begin() + usedEntries_;
-    auto it = std::find_if(
-        keys_.begin(), endIt, [&s](const void* k) { return k == &s; });
-    if (it == endIt) {
-      OpCode result = parseOpCode(s.string().c_str());
-      if (usedEntries_ < numOpcodes) {
-        keys_[usedEntries_] = &s;
-        values_[usedEntries_++] = result;
+// It requires compilation_unit_ when parsing function schema. Keep it in
+// BytecodeDeserializer. It may be refacotred later to make it independent
+// of the specific BytecodeDeserializer, like parsing other tables
+void BytecodeDeserializer::parseFunctionSchema(
+    const std::string& function_name,
+    IValue* schemaTable,
+    const int64_t& model_version,
+    mobile::Function* function) {
+  // function schema
+  if (schemaTable) { // (schema is optional for back compat)
+    auto parseArgList = [this](c10::ivalue::TupleElements&& argTables) {
+      std::vector<c10::Argument> args;
+      for (auto&& argTable : std::move(argTables)) {
+        auto argTableElements =
+            std::move(*std::move(argTable).toTuple()).elements();
+        auto name =
+            expect_field(argTableElements, "name", BYTECODE_INDEX_ARGUMENT_NAME)
+                .toStringRef();
+        c10::TypePtr type = resolveTypeName(
+            (expect_field(
+                 argTableElements, "type", BYTECODE_INDEX_ARGUMENT_TYPE))
+                .toStringRef());
+        IValue default_value = expect_field(
+            argTableElements,
+            "default_value",
+            BYTECODE_INDEX_ARGUMENT_DEFAULT_VALUE);
+        args.emplace_back(
+            name,
+            std::move(type),
+            c10::nullopt /*N*/,
+            std::move(default_value));
       }
-      return result;
-    }
-    // NOTE: I tried implementing the transpose heuristic here to
-    // speed up the search, but it removed the benefit of this cache.
-    return values_[it - keys_.begin()];
+      return args;
+    };
+    auto schemaTableElements =
+        std::move(*std::move(*schemaTable).toTuple()).elements();
+    auto arg_list =
+        std::move(*expect_field(
+                       schemaTableElements,
+                       "arguments",
+                       BYTECODE_INDEX_SCHEMA_ARGUMENTS)
+                       .toTuple())
+            .elements();
+    auto ret_list =
+        std::move(
+            *expect_field(
+                 schemaTableElements, "returns", BYTECODE_INDEX_SCHEMA_RETURNS)
+                 .toTuple())
+            .elements();
+    c10::FunctionSchema schema(
+        function_name,
+        "" /*overload_name*/,
+        parseArgList(std::move(arg_list)),
+        parseArgList(std::move(ret_list)),
+        false /*is_varargs*/,
+        false /*is_varret*/);
+    function->setSchema(std::move(schema));
   }
-};
-} // namespace
+}
+
+void parseOperators(
+    c10::ivalue::TupleElements&& ops_list,
+    const int64_t& model_version,
+    const uint64_t& module_load_options,
+    mobile::Function* function,
+    mobile::Function::OperatorCacheType& operator_cache) {
+  std::unordered_set<std::string> unsupported_op_names =
+      load_and_find_unsupported_operator_names(
+          std::move(ops_list), function, model_version, operator_cache);
+  if ((module_load_options & MobileModuleLoadOptions::OPERATOR_CHECK) &&
+      !unsupported_op_names.empty()) {
+    print_unsupported_ops_and_throw(unsupported_op_names);
+  }
+}
+
 void BytecodeDeserializer::parseMethods(
     c10::ivalue::TupleElements&& vals,
     c10::optional<c10::ivalue::TupleElements>&& debug_handles,
@@ -411,130 +435,30 @@ void BytecodeDeserializer::parseMethods(
             codeTableElements, "register_size", BYTECODE_INDEX_REGISTER_SIZE)
             .toInt();
 
-    c10::List<int64_t> debug_handles_list;
+    c10::ivalue::TupleElements debug_handles_m_tuple;
     if (debug_handles) {
-      auto debug_handles_m_tuple =
+      debug_handles_m_tuple =
           std::move(*std::move((*debug_handles)[i]).toTuple()).elements();
-      const std::string& debug_info_function_name =
-          debug_handles_m_tuple[0].toStringRef();
-      TORCH_CHECK(
-          debug_info_function_name == function_name,
-          "The function names in the bytecode table and the debug info table do not match.");
-      IValue& debug_handles_table = debug_handles_m_tuple[1];
-      auto debugHandlesElements =
-          std::move(*std::move(debug_handles_table).toTuple()).elements();
-      debug_handles_list = (expect_field(
-                                debugHandlesElements,
-                                "function_debug_handles",
-                                BYTECODE_INDEX_MODULE_DEBUG_HANDLES)
-                                .toTuple()
-                                ->elements())[0]
-                               .toIntList();
-      TORCH_CHECK(
-          debug_handles_list.size() == ins_list.size(),
-          "The numbers of instructions and debug handles strings do not match.");
     }
 
-    OpCodeCache opCodeCache;
-    for (const auto j : c10::irange(ins_list.size())) {
-      // Can't remove this, need to keep Tuple alive!
-      auto ins_tuple = std::move(ins_list[j]).toTuple();
-      c10::ArrayRef<IValue> ins_item = ins_tuple->elements();
-      TORCH_CHECK(
-          ins_item.size() == 3,
-          "There should be three parts in an instruction. The function name is ",
-          function_name);
-      OpCode op_code = opCodeCache.parse(*ins_item[0].toString());
-      int X = ins_item[1].toInt();
-      int N = ins_item[2].toInt();
-      if (debug_handles) {
-        int64_t debug_handle = debug_handles_list[j];
-        function->append_instruction(op_code, X, N, debug_handle);
-      } else {
-        function->append_instruction(op_code, X, N);
-      }
-    }
+    parseInstructions(
+        function_name, ins_list, debug_handles_m_tuple, function.get());
 
-    std::unordered_set<std::string> unsupported_op_names =
-        load_and_find_unsupported_operator_names(
-            std::move(ops_list), function.get(), model_version, operator_cache);
-    if ((module_load_options_ & MobileModuleLoadOptions::OPERATOR_CHECK) &&
-        !unsupported_op_names.empty()) {
-      print_unsupported_ops_and_throw(unsupported_op_names);
-    }
+    parseOperators(
+        std::move(ops_list),
+        model_version,
+        module_load_options_,
+        function.get(),
+        operator_cache);
 
-    for (const auto& constant : consts_list) {
-      function->append_constant(constant);
-    }
+    parseConstants(consts_list, function.get());
 
-    static const c10::QualifiedName classPrefix = "__torch__.torch.classes";
-    for (const auto& t : types_list) {
-      c10::QualifiedName qn(t.toStringRef());
-      if (classPrefix.isPrefixOf(qn)) {
-        auto classType = getCustomClass(qn.qualifiedName());
-        TORCH_CHECK(
-            classType,
-            "The implementation of class ",
-            qn.qualifiedName(),
-            " cannot be found.");
-        function->append_type(classType);
-      } else {
-        function->append_type(c10::parseType(t.toStringRef()));
-      }
-    }
+    parseTypes(types_list, function.get());
 
     function->set_register_size(register_size);
 
-    // function schema
-    if (schemaTable) { // (schema is optional for back compat)
-      auto parseArgList = [this](c10::ivalue::TupleElements&& argTables) {
-        std::vector<c10::Argument> args;
-        for (auto&& argTable : std::move(argTables)) {
-          auto argTableElements =
-              std::move(*std::move(argTable).toTuple()).elements();
-          auto name =
-              expect_field(
-                  argTableElements, "name", BYTECODE_INDEX_ARGUMENT_NAME)
-                  .toStringRef();
-          c10::TypePtr type = resolveTypeName(
-              (expect_field(
-                   argTableElements, "type", BYTECODE_INDEX_ARGUMENT_TYPE))
-                  .toStringRef());
-          IValue default_value = expect_field(
-              argTableElements,
-              "default_value",
-              BYTECODE_INDEX_ARGUMENT_DEFAULT_VALUE);
-          args.emplace_back(
-              name,
-              std::move(type),
-              c10::nullopt /*N*/,
-              std::move(default_value));
-        }
-        return args;
-      };
-      auto schemaTableElements =
-          std::move(*std::move(*schemaTable).toTuple()).elements();
-      auto arg_list = std::move(*expect_field(
-                                     schemaTableElements,
-                                     "arguments",
-                                     BYTECODE_INDEX_SCHEMA_ARGUMENTS)
-                                     .toTuple())
-                          .elements();
-      auto ret_list = std::move(*expect_field(
-                                     schemaTableElements,
-                                     "returns",
-                                     BYTECODE_INDEX_SCHEMA_RETURNS)
-                                     .toTuple())
-                          .elements();
-      c10::FunctionSchema schema(
-          function_name,
-          "" /*overload_name*/,
-          parseArgList(std::move(arg_list)),
-          parseArgList(std::move(ret_list)),
-          false /*is_varargs*/,
-          false /*is_varret*/);
-      function->setSchema(std::move(schema));
-    }
+    parseFunctionSchema(
+        function_name, schemaTable, model_version, function.get());
 
     mcu.register_function(std::move(function));
   }
