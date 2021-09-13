@@ -1212,7 +1212,7 @@ TEST_F(ModulesTest, Fold) {
     Fold model(FoldOptions({8, 8}, {3, 3}));
     ASSERT_THROWS_WITH(
         model(torch::randn({1, 3, 16, 16})),
-        "Input Error: Only 3D input Tensors are supported (got 4D)");
+        "Input Error: Only batched or unbatched 3D input Tensors are supported (got 4D)");
   }
 }
 
