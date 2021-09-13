@@ -15,6 +15,7 @@
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
 #include <ATen/native/quantized/cpu/qembeddingbag.h>
 #include <ATen/native/quantized/cpu/qembeddingbag_prepack.h>
+#include <c10/core/ScalarType.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/runtime/static/impl.h>
@@ -1338,6 +1339,29 @@ REGISTER_OPERATOR_FUNCTOR(aten::argmin, aten_argmin, [](Node* n) -> SROperator {
   };
 });
 
+REGISTER_OPERATOR_FUNCTOR(aten::softmax, aten_softmax, [](Node* n) -> SROperator {
+  if (!n->matches(torch::schema(
+          "aten::softmax(Tensor self, int dim, ScalarType? dtype=None) -> Tensor"))) {
+    LogAndDumpSchema(n);
+    return nullptr;
+  }
+  return [](ProcessedNode* p_node) {
+    const auto& in_t = p_node->Input(0).toTensor();
+    const auto& dim = p_node->Input(1).toInt();
+    const auto& dtype = p_node->Input(2).toOptional<c10::ScalarType>();
+    if (p_node->Output(0).isNone()) {
+      p_node->Output(0) = at::native::softmax(in_t, dim, dtype);
+    } else {
+      auto& out_t = p_node->Output(0).toTensor();
+      fastResizeToZero(out_t);
+
+      auto half_to_float = in_t.scalar_type() == at::ScalarType::Half &&
+          dtype == at::ScalarType::Float;
+      at::cpu::_softmax_out(out_t, in_t, dim, half_to_float);
+    }
+  };
+});
+
 REGISTER_OPERATOR_FUNCTOR(
     static_runtime::layer_norm,
     aten_layer_norm,
@@ -1713,6 +1737,69 @@ REGISTER_OPERATOR_FUNCTOR(aten::linalg_norm, aten_linalg_norm, [](Node* n) -> SR
   };
 });
 
+REGISTER_OPERATOR_FUNCTOR(aten::cat, aten_cat, [](Node* n) -> SROperator {
+  if (!n->matches(
+          torch::schema("aten::cat(Tensor[] tensors, int dim=0) -> Tensor"))) {
+    LogAndDumpSchema(n);
+    return nullptr;
+  }
+  return [](ProcessedNode* p_node) {
+    const auto inputs = p_node->Input(0).toTensorVector();
+    const auto dim = p_node->Input(1).toInt();
+    if (p_node->Output(0).isNone()) {
+      p_node->Output(0) = at::native::_cat_cpu(inputs, dim);
+      return;
+    }
+
+    auto& output = p_node->Output(0).toTensor();
+    fastResizeToZero(output);
+    at::native::_cat_out_cpu(inputs, dim, output);
+  };
+});
+
+REGISTER_OPERATOR_FUNCTOR(aten::cumsum, aten_cumsum, [](Node* n) -> SROperator {
+  if (!n->matches(torch::schema(
+          "aten::cumsum(Tensor self, int dim, ScalarType? dtype=None) -> Tensor"))) {
+    LogAndDumpSchema(n);
+    return nullptr;
+  }
+  return [](ProcessedNode* p_node) {
+    const auto& input = p_node->Input(0).toTensor();
+    const auto dim = p_node->Input(1).toInt();
+    const auto dtype = p_node->Input(2).toOptional<c10::ScalarType>();
+
+    if (p_node->Output(0).isNone()) {
+      p_node->Output(0) = at::cpu::cumsum(input, dim, dtype);
+      return;
+    }
+
+    auto& output = p_node->Output(0).toTensor();
+    fastResizeToZero(output);
+    at::cpu::cumsum_out(output, input, dim, dtype);
+  };
+});
+
+REGISTER_OPERATOR_FUNCTOR(
+    aten::nonzero,
+    aten_nonzero,
+    [](Node* n) -> SROperator {
+      if (!n->matches(torch::schema("aten::nonzero(Tensor self) -> Tensor"))) {
+        LogAndDumpSchema(n);
+        return nullptr;
+      }
+      return [](ProcessedNode* p_node) {
+        const auto& input = p_node->Input(0).toTensor();
+        if (p_node->Output(0).isNone()) {
+          p_node->Output(0) = at::native::nonzero_cpu(input);
+          return;
+        }
+
+        auto& output = p_node->Output(0).toTensor();
+        fastResizeToZero(output);
+        at::native::nonzero_out_cpu(input, output);
+      };
+    });
+
 namespace {
 
 void check_cat_no_zero_dim(const std::vector<at::Tensor>& tensors) {
@@ -1746,7 +1833,71 @@ REGISTER_OPERATOR_FUNCTOR(
           check_cat_no_zero_dim(inputs);
           dim = legacy_cat_wrap_dim(dim, inputs);
           auto& out_t = p_node->Output(0).toTensor();
+          fastResizeToZero(out_t);
           at::native::_cat_out_cpu(inputs, dim, out_t);
+        }
+      };
+    });
+
+namespace {
+
+// This template and its specialization help us avoid compiler warnings
+// about taking the absolute value of an unsigned type in signed_log1p
+template <class T>
+T abs_if_signed(T val) {
+  return std::abs(val);
+}
+
+template <>
+unsigned char abs_if_signed<unsigned char>(unsigned char val) {
+  return val;
+}
+
+// Computes f(x) = sign(x) * ln(|1 + x|) for each x in the input tensor
+void signed_log1p_out(at::Tensor& out, const at::Tensor& input) {
+  at::native::resize_(out, input.sizes(), c10::nullopt);
+
+  const auto input_contig = input.expect_contiguous();
+  auto output_contig = out.expect_contiguous();
+
+  AT_DISPATCH_ALL_TYPES(input.scalar_type(), "signed_log1p_kernel", [&]() {
+    const auto input_data = input_contig->data_ptr<scalar_t>();
+    auto output_data = output_contig->data_ptr<float>();
+    const auto N = input.numel();
+
+    for (const auto i : c10::irange(N)) {
+      const int sign = input_data[i] < 0 ? -1 : 1;
+      output_data[i] = std::log1p(abs_if_signed(input_data[i])) * sign;
+    }
+  });
+}
+
+at::Tensor signed_log1p(const at::Tensor& input) {
+  auto out = create_empty_from(input);
+  signed_log1p_out(out, input);
+  return out;
+}
+
+} // namespace
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+REGISTER_OPERATOR_FUNCTOR(
+    static_runtime::signed_log1p,
+    static_runtime_signed_log1p,
+    [](Node* n) -> SROperator {
+      if (!n->matches(torch::schema(
+              "static_runtime::signed_log1p(Tensor x) -> Tensor"))) {
+        LogAndDumpSchema(n);
+        return nullptr;
+      }
+      return [](ProcessedNode* p_node) {
+        const auto& input = p_node->Input(0).toTensor();
+        if (p_node->Output(0).isNone()) {
+          p_node->Output(0) = signed_log1p(input);
+        } else {
+          auto& out = p_node->Output(0).toTensor();
+          fastResizeToZero(out);
+          signed_log1p_out(out, input);
         }
       };
     });

@@ -41,7 +41,26 @@ static bool checkTypes(const ScalarType highType, const int typeConstraints) {
   return false;
 }
 
-static ExprHandle promoteToDtype(ExprHandle e, ScalarType dt) {
+} // namespace
+
+namespace torch {
+namespace jit {
+namespace tensorexpr {
+
+std::string buildErrorMessage(const std::string& s) {
+  static const std::string generic_error_message =
+      "This error occured in the fuser. You can turn off the fuser with "
+      "torch.jit.enable_fusion(False).";
+  if (s.empty()) {
+    return generic_error_message;
+  }
+  if (s.back() == '.') {
+    return s + " " + generic_error_message;
+  }
+  return s + ". " + generic_error_message;
+}
+
+ExprHandle promoteToDtype(ExprHandle e, ScalarType dt) {
   if (e.dtype().scalar_type() == dt) {
     return e;
   }
@@ -52,25 +71,12 @@ static ExprHandle promoteToDtype(ExprHandle e, ScalarType dt) {
   case ScalarType::Name:      \
     e = cast<Type>(e);        \
     break;
-    AT_FORALL_SCALAR_TYPES_AND2(Half, Bool, TYPE_CASE);
+    AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TYPE_CASE);
 #undef TYPE_CASE
     default:
       throw unsupported_dtype();
   }
   return e;
-}
-
-} // namespace
-
-namespace torch {
-namespace jit {
-namespace tensorexpr {
-
-std::string buildErrorMessage(const std::string& s) {
-  // TODO: Update this generic error message to include details regarding
-  // turning off the fuser.
-  static const std::string generic_error_message = "";
-  return s + " " + generic_error_message;
 }
 
 static int te_cuda_pointwise_loop_levels = -1;
@@ -368,35 +374,6 @@ bool matmulIsSupported(const torch::jit::Node* node) {
   return true;
 }
 
-void annotateInputShapes(
-    const std::shared_ptr<Graph>& graph,
-    const std::vector<c10::optional<at::Tensor>>& example_inputs) {
-  TORCH_INTERNAL_ASSERT(
-      graph->inputs().size() == example_inputs.size(),
-      buildErrorMessage("Given inputs do not match the fuser graph inputs."));
-  for (size_t idx = 0; idx < example_inputs.size(); idx++) {
-    if (auto t = example_inputs[idx]) {
-      auto concrete_tensor_type = tensorTypeInCurrentExecutionContext(*t);
-      graph->inputs().at(idx)->setType(concrete_tensor_type);
-    }
-  }
-}
-
-std::shared_ptr<Graph> removeUnusedSelfArgument(
-    const std::shared_ptr<Graph>& graph) {
-  if (graph->inputs().size() == 0) {
-    return graph;
-  }
-  jit::Value* self_argument = graph->inputs().at(0);
-  if (self_argument->uses().size() != 0 ||
-      !self_argument->type()->is_module()) {
-    return graph;
-  }
-  std::shared_ptr<Graph> res = graph->copy();
-  res->eraseInput(0);
-  return res;
-}
-
 std::vector<ExprHandle> valueShape(const ArgValue& v) {
   if (auto b = c10::get_if<tensorexpr::BufHandle>(&v)) {
     return b->dims();
@@ -460,7 +437,7 @@ std::vector<ExprHandle> computeIndicesToBroadcast(
   while (sizeIt != inputSizes.rend()) {
     auto const& size = intValue(*sizeIt);
     if (size && *size == 1) {
-      bcast.emplace_back(0);
+      bcast.emplace_back(LongImm::make(0));
     } else {
       bcast.emplace_back(*axisIt);
     }
@@ -505,6 +482,24 @@ void promoteInputs(std::vector<ExprHandle>& inputs, const int typeConstraints) {
   }
 }
 
+ExprHandle promoteIntegerToDefaultType(const ExprHandle& e) {
+  auto scalarType = static_cast<c10::ScalarType>(e.dtype().scalar_type());
+  if (!c10::isIntegralType(scalarType, /*includeBool*/ true)) {
+    return e;
+  }
+
+  auto defaultType = c10::typeMetaToScalarType(c10::get_default_dtype());
+
+  // We intend to promote Integers to floating-point types
+  TORCH_INTERNAL_ASSERT(
+      !c10::isIntegralType(defaultType, /*includeBool*/ true));
+
+  return Cast::make(
+      Dtype(
+          static_cast<tensorexpr::ScalarType>(defaultType), e.dtype().lanes()),
+      e);
+}
+
 ExprHandle demoteOutput(
     const ExprHandle& e,
     const c10::optional<ScalarType> type) {
@@ -520,7 +515,7 @@ ExprHandle demoteOutput(
 #define TYPE_CASE(Type, Name) \
   case ScalarType::Name:      \
     return cast<Type>(e);
-    AT_FORALL_SCALAR_TYPES_AND(Half, TYPE_CASE);
+    AT_FORALL_SCALAR_TYPES_AND2(Half, BFloat16, TYPE_CASE);
 #undef TYPE_CASE
     case ScalarType::Bool:
       return cast<bool>(e);
@@ -543,7 +538,7 @@ std::vector<int64_t> bufferSizes(BufPtr b) {
   std::vector<int64_t> sizes;
   for (size_t i = 0; i < b->ndim(); i++) {
     auto dim = intValue(b->dim(i));
-    TORCH_INTERNAL_ASSERT(dim);
+    TORCH_INTERNAL_ASSERT(dim, buildErrorMessage("Non-constant buf dims"));
     sizes.push_back(*dim);
   }
   return sizes;
@@ -728,6 +723,7 @@ std::vector<ExprHandle> TensorExprKernel::inferSizesForValue(
     case aten::hardtanh:
     case aten::hardsigmoid:
     case aten::hardswish:
+    case aten::softplus:
     case aten::sqrt:
     case aten::rsqrt:
     case aten::abs:
@@ -739,6 +735,7 @@ std::vector<ExprHandle> TensorExprKernel::inferSizesForValue(
     case aten::lgamma:
     case aten::type_as:
     case aten::masked_fill:
+    case aten::sign:
       return sizesForValue(v->node()->input(0));
 
     case aten::sub:
@@ -871,24 +868,6 @@ std::vector<ExprHandle> TensorExprKernel::inferSizesForValue(
       throw malformed_input(msg);
     }
   }
-}
-
-ExprHandle promoteIntegerToDefaultType(const ExprHandle& e) {
-  auto scalarType = static_cast<c10::ScalarType>(e.dtype().scalar_type());
-  if (!c10::isIntegralType(scalarType, /*includeBool*/ true)) {
-    return e;
-  }
-
-  auto defaultType = c10::typeMetaToScalarType(c10::get_default_dtype());
-
-  // We intend to promote Integers to floating-point types
-  TORCH_INTERNAL_ASSERT(
-      !c10::isIntegralType(defaultType, /*includeBool*/ true));
-
-  return Cast::make(
-      Dtype(
-          static_cast<tensorexpr::ScalarType>(defaultType), e.dtype().lanes()),
-      e);
 }
 
 ExprHandle promoteHalfToFloat(const ExprHandle& e) {
@@ -1159,7 +1138,8 @@ std::pair<ScalarType, std::vector<BufHandle>> processCatList(
   std::vector<BufHandle> nonEmptyInputs;
   for (auto buf : bufList) {
     bufInputs.push_back(buf);
-    TORCH_INTERNAL_ASSERT(buf.node()->dims().size() > 0);
+    TORCH_INTERNAL_ASSERT(
+        buf.node()->dims().size() > 0, buildErrorMessage("Invalid buf rank"));
     if (buf.node()->dims().size() == 1 &&
         immediateAs<int>(buf.node()->dim(0)) == 0) {
       continue;
@@ -1372,7 +1352,9 @@ Tensor tensorexpr::computeOperandValue(
       auto add_lambda = [](const ExprHandle& lhs, const ExprHandle& rhs) {
         return boolToInteger(lhs) + boolToInteger(rhs);
       };
-      TORCH_INTERNAL_ASSERT(inputs.size() == 2 || inputs.size() == 3);
+      TORCH_INTERNAL_ASSERT(
+          inputs.size() == 2 || inputs.size() == 3,
+          buildErrorMessage("Invalid number of input operands"));
       return (inputs.size() > 2)
           ? computeTwoOperandWithAlpha(
                 "aten_add", inputs, outputShape, outputType, add_lambda)
@@ -1384,7 +1366,9 @@ Tensor tensorexpr::computeOperandValue(
         // NB: sub isn't supported on boolean, no need to promote to integer.
         return lhs - rhs;
       };
-      TORCH_INTERNAL_ASSERT(inputs.size() == 2 || inputs.size() == 3);
+      TORCH_INTERNAL_ASSERT(
+          inputs.size() == 2 || inputs.size() == 3,
+          buildErrorMessage("Invalid number of input operands"));
       return (inputs.size() > 2)
           ? computeTwoOperandWithAlpha(
                 "aten_sub", inputs, outputShape, outputType, sub_lambda)
@@ -2016,6 +2000,27 @@ Tensor tensorexpr::computeOperandValue(
           });
     } break;
 
+    case aten::softplus: {
+      return computeThreeOperand(
+          "aten_softplus",
+          inputs,
+          outputShape,
+          outputType,
+          [](const ExprHandle& a,
+             const ExprHandle& beta,
+             const ExprHandle& threshold) {
+            auto beta_promoted = Cast::make(a.dtype(), beta);
+            auto threshold_promoted = Cast::make(a.dtype(), threshold);
+            auto beta_a = beta_promoted * a;
+            return CompareSelect::make(
+                beta_a,
+                threshold_promoted,
+                a,
+                log1p(exp(beta_a)) / beta_promoted,
+                kGT);
+          });
+    } break;
+
     case aten::hardsigmoid: {
       return computeOneOperand(
           "aten_hardsigmoid",
@@ -2094,6 +2099,10 @@ Tensor tensorexpr::computeOperandValue(
           kIntegralTypes | kFloatingPointTypes | kBoolType);
     } break;
 
+    case aten::sign: {
+      return computeSign(inputs, outputShape);
+    } break;
+
     case aten::ceil: {
       return computeOneOperand(
           "aten_ceil",
@@ -2147,7 +2156,8 @@ Tensor tensorexpr::computeOperandValue(
           outputShape,
           outputType,
           [outputType](const ExprHandle& a) {
-            TORCH_INTERNAL_ASSERT(outputType);
+            TORCH_INTERNAL_ASSERT(
+                outputType, buildErrorMessage("Output type is null."));
             return Cast::make(ToDtype(*outputType), a);
           });
     } break;
@@ -2266,7 +2276,9 @@ Tensor tensorexpr::computeOperandValue(
             "aten_transpose",
             c10::fmap<DimArg>(outputShape),
             [&](std::vector<VarHandle> axes) {
-              TORCH_INTERNAL_ASSERT(axes.size() <= 1);
+              TORCH_INTERNAL_ASSERT(
+                  axes.size() <= 1,
+                  buildErrorMessage("Invalid axes size in transpose"));
               return A.load(axes);
             });
       }
@@ -2514,6 +2526,9 @@ void fuseAllLoops(StmtPtr st) {
       }
       loopsToFuse.push_back(loop);
     }
+    if (loopsToFuse.empty()) {
+      return;
+    }
     if (!loopBoundsAllEqual(loopsToFuse)) {
       return;
     }
@@ -2621,6 +2636,8 @@ StmtPtr TensorExprKernel::transformLoops(BackendType backendType, StmtPtr st) {
     auto root_stmt = l.root_stmt();
     root_stmt->accept(block_analysis.get());
   }
+  l.simplify();
+  GRAPH_DEBUG("after simplify", *l.root_stmt());
 
   // Inlining output & intermediate buffers can duplicate computation.
   // Duplicating work can slow down the program if it's not ameliorated in some
@@ -2726,7 +2743,14 @@ StmtPtr TensorExprKernel::transformLoops(BackendType backendType, StmtPtr st) {
     }
   }
 
-  l.prepareForCodegen();
+  if (pre_alloc_) {
+    auto interm_bufs = l.getIntermediateBufs();
+    preAllocIntermediateBufs(interm_bufs);
+    l.prepareForCodegen(interm_bufs);
+  } else {
+    l.prepareForCodegen();
+  }
+
   GRAPH_DEBUG("after prepareForCodegen", *l.root_stmt());
   l.simplify();
   GRAPH_DEBUG("after simplification", *l.root_stmt());
@@ -2929,7 +2953,10 @@ bool denseAndNonOverlapping(
 
 Tensor TensorExprKernel::convertOutputToCorrectStrides(torch::jit::Value* v) {
   const TensorTypePtr& tt = v->type()->expect<TensorType>();
-  TORCH_INTERNAL_ASSERT(bufs_.count(v));
+  TORCH_INTERNAL_ASSERT(
+      bufs_.count(v),
+      buildErrorMessage(
+          "Ouput tensor has no corresponding bufs in the fuser."));
   BufPtr buf = bufs_.at(v);
 
   // No shape info is present in the graph
@@ -2939,13 +2966,17 @@ Tensor TensorExprKernel::convertOutputToCorrectStrides(torch::jit::Value* v) {
     throw malformed_input(msg);
   }
 
-  TORCH_INTERNAL_ASSERT(tt->sizes().concrete_sizes());
+  TORCH_INTERNAL_ASSERT(
+      tt->sizes().concrete_sizes(),
+      buildErrorMessage("Output shapes are unknown."));
   auto sizes = *tt->sizes().concrete_sizes();
   std::vector<int64_t> default_strides = TensorType::contiguousStridesOf(sizes);
   if (!tt->strides().concrete_sizes()) {
     return Tensor(buf, nullptr);
   }
-  TORCH_INTERNAL_ASSERT(tt->strides().concrete_sizes());
+  TORCH_INTERNAL_ASSERT(
+      tt->strides().concrete_sizes(),
+      buildErrorMessage("Output strides are unknown."));
   const std::vector<int64_t> strides = *tt->strides().concrete_sizes();
   // All Tensors in NNC are layed out in default, contiguous layout.
   // If the output is also default contiguous we don't need to do anything
@@ -2979,6 +3010,7 @@ Tensor TensorExprKernel::convertOutputToCorrectStrides(torch::jit::Value* v) {
   //     cur_idx = absolute // stride
   //     absolute = absolute % stride
 
+  auto zero = LongImm::make(0);
   return Compute(
       "output_1", dims, [&](const std::vector<VarHandle>& axes_input) {
         std::vector<ExprHandle> axes(axes_input.begin(), axes_input.end());
@@ -2991,17 +3023,17 @@ Tensor TensorExprKernel::convertOutputToCorrectStrides(torch::jit::Value* v) {
             reverse_sort_indices(strides);
         std::vector<ExprHandle> new_axes(sorted_stride_indices.size());
         for (size_t stride_index : sorted_stride_indices) {
-          auto stride = strides[stride_index];
           auto size = sizes[stride_index];
-          auto index = absolute_position /
-              ExprHandle(immLike(absolute_position, stride));
+          auto index = zero;
           if (size != 1) {
+            auto stride = strides[stride_index];
+            index = absolute_position /
+                ExprHandle(immLike(absolute_position, stride));
             absolute_position = absolute_position %
                 ExprHandle(immLike(absolute_position, stride));
           }
           new_axes[stride_index] = index;
         }
-        // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
         return BufHandle(buf).load(new_axes);
       });
 }
@@ -3034,6 +3066,46 @@ void TensorExprKernel::bindConstant(const torch::jit::Value* v) {
 
   constants_.push_back({buf, const_tensor.data_ptr()});
   bufs_[v] = buf;
+}
+
+void TensorExprKernel::preAllocIntermediateBufs(
+    std::unordered_set<BufPtr>& interm_bufs) {
+  std::vector<std::pair<BufPtr, void*>> allocated_bufs;
+  for (auto it = interm_bufs.begin(); it != interm_bufs.end();) {
+    // Check if buf shape is static and compute its size if static.
+    auto buf = *it;
+    bool is_static = true;
+    size_t size =
+        elementSize(buf->dtype().scalar_type()) * buf->dtype().lanes();
+    for (auto& d : buf->dims()) {
+      if (!d->isConstant()) {
+        is_static = false;
+        break;
+      }
+      size = size * (*intValue(d));
+    }
+    // Only allocate memory for static bufs.
+    if (!is_static) {
+      ++it;
+      continue;
+    }
+    auto bp = (void*)malloc(size);
+    if (!bp) {
+      ++it;
+      continue;
+    }
+    allocated_bufs.emplace_back(buf, bp);
+    it = interm_bufs.erase(it);
+  }
+  std::sort(
+      allocated_bufs.begin(),
+      allocated_bufs.end(),
+      [](const auto& a, const auto& b) {
+        return a.first->name_hint() > b.first->name_hint();
+      });
+  for (auto& a : allocated_bufs) {
+    constants_.push_back({a.first, a.second});
+  }
 }
 
 void TensorExprKernel::compile() {
@@ -3111,12 +3183,12 @@ void TensorExprKernel::compile() {
     bufs_.erase(output);
   }
 
+  BackendType backendType = inferBackendTypeFromDevice(device_);
+  StmtPtr stmt = transformLoops(backendType, block);
+
   for (auto c : constants_) {
     bufferArgs_.emplace_back(BufHandle(c.buf));
   }
-
-  BackendType backendType = inferBackendTypeFromDevice(device_);
-  StmtPtr stmt = transformLoops(backendType, block);
 
   // Generate code.
   codegen_ = CreateCodeGen(
@@ -3129,10 +3201,12 @@ void TensorExprKernel::compile() {
 
 TensorExprKernel::TensorExprKernel(
     const std::shared_ptr<Graph>& subgraph,
-    std::unordered_map<c10::Symbol, NNCLoweringFunction> custom_lowerings)
+    std::unordered_map<c10::Symbol, NNCLoweringFunction> custom_lowerings,
+    bool pre_alloc /*= false*/)
     : graph_(subgraph),
       code_(subgraph, ""),
-      custom_lowerings_(std::move(custom_lowerings)) {
+      custom_lowerings_(std::move(custom_lowerings)),
+      pre_alloc_(pre_alloc) {
   allow_fallback_ = fallbackAllowed();
   if (!allow_fallback_) {
     compile();

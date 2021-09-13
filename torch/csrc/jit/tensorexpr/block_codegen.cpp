@@ -16,6 +16,8 @@ std::string blockDtypeCppString(const Dtype& dtype) {
       return "1";
     case ScalarType::Half:
       return "2";
+    case ScalarType::BFloat16:
+      return "2";
     // NOLINTNEXTLINE(bugprone-branch-clone)
     case ScalarType::Char:
       return "1";

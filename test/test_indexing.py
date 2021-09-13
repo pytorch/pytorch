@@ -8,7 +8,8 @@ from functools import reduce
 
 import numpy as np
 
-from torch.testing._internal.common_utils import TestCase, run_tests, make_tensor
+from torch.testing import make_tensor
+from torch.testing._internal.common_utils import TestCase, run_tests
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests, onlyCUDA, dtypes, dtypesIfCPU, dtypesIfCUDA,
     onlyOnCPUAndCUDA)
