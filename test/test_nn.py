@@ -29,7 +29,6 @@ import torch.nn.utils.rnn as rnn_utils
 from torch.nn.utils import clip_grad_norm_, clip_grad_value_
 import torch.nn.utils.parametrize as parametrize
 import torch.nn.utils.prune as prune
-import torch.nn.utils._stateless as _stateless
 from torch.nn.utils import parameters_to_vector, vector_to_parameters
 from torch.nn import Parameter
 from torch.nn.parameter import UninitializedParameter, UninitializedBuffer
@@ -18847,27 +18846,6 @@ class TestStateDictHooks(TestCase):
         m._register_load_state_dict_pre_hook(m.my_pre_load_hook_with_module, True)
         m.load_state_dict(state_dict)
         self.assertEqual(2, hook_called)
-
-
-class TestStateless(TestCase):
-    def test_functional_call(self):
-        class MyModule(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.l1 = torch.nn.Linear(1, 1)
-
-            def forward(self, x):
-                return self.l1(x)
-
-        mod = MyModule()
-        x = torch.rand((1, 1))
-        parameters = {"l1.weight": torch.nn.Parameter(torch.tensor([[1.0]])),
-                      "l1.bias": torch.nn.Parameter(torch.tensor([0.0]))}
-        prev_weight = mod.l1.weight
-        res = _stateless.functional_call(mod, parameters, x)
-        self.assertEqual(x, res.reshape((1, 1)))
-        # check that the weight remain unmodified
-        self.assertEqual(mod.l1.weight, prev_weight)
 
 
 instantiate_device_type_tests(TestNNDeviceType, globals())
