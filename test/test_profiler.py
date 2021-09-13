@@ -521,9 +521,12 @@ class TestProfiler(TestCase):
             w = v.sum()
             w.backward()
 
+        dummy_function_found = False
         for e in p.function_events:
             if "DummyFunction" in e.name:
+                dummy_function_found = True
                 self.assertTrue(e.input_shapes == [[3, 4, 5]])
+        self.assertTrue(dummy_function_found)
 
     def test_kineto_profiler_api(self):
         called_num = [0]
