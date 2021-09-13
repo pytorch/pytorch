@@ -7,7 +7,8 @@ def get_tensorrt_backend_config_dict():
     new backends, please don't use it right now.
     """
     quant_patterns = {
-        torch.nn.Conv2d: ConvReLUQuantizeHandlerNew
+        torch.nn.Conv2d: ConvReLUQuantizeHandlerNew,
+        torch.nn.Linear: LinearReLUQuantizeHandlerNew
     }
     return {
         "quant_patterns": quant_patterns

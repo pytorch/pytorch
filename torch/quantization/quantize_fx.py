@@ -141,7 +141,8 @@ class QuantizationTracer(Tracer):
         self.node_name_to_scope[node.name] = (self.scope.module_path, self.scope.module_type)
         return node
 
-def _prepare_fx(model: torch.nn.Module, qconfig_dict: Any,
+def _prepare_fx(model: torch.nn.Module,
+                qconfig_dict: Any,
                 prepare_custom_config_dict: Optional[Dict[str, Any]] = None,
                 equalization_qconfig_dict: Optional[Dict[str, Any]] = None,
                 backend_config_dict: Optional[Dict[str, Any]] = None,
@@ -197,6 +198,7 @@ forward graph of the parent module,
         tracer.node_name_to_scope,
         prepare_custom_config_dict=prepare_custom_config_dict,
         equalization_qconfig_dict=equalization_qconfig_dict,
+        backend_config_dict=backend_config_dict,
         is_standalone_module=is_standalone_module)
 
     for attr_name in preserved_attributes:
@@ -430,7 +432,12 @@ def prepare_fx(
     torch._C._log_api_usage_once("quantization_api.quantize_fx.prepare_fx")
     assert not model.training, 'prepare_fx only works for models in ' + \
         'eval mode'
-    return _prepare_fx(model, qconfig_dict, prepare_custom_config_dict, equalization_qconfig_dict, backend_config_dict)
+    return _prepare_fx(
+        model,
+        qconfig_dict,
+        prepare_custom_config_dict,
+        equalization_qconfig_dict,
+        backend_config_dict)
 
 def prepare_qat_fx(
         model: torch.nn.Module, qconfig_dict: Any,
@@ -469,7 +476,11 @@ def prepare_qat_fx(
     torch._C._log_api_usage_once("quantization_api.quantize_fx.prepare_qat_fx")
     assert model.training, 'prepare_qat_fx only works for models in  ' + \
         'train mode'
-    return _prepare_fx(model, qconfig_dict, prepare_custom_config_dict, backend_config_dict)
+    return _prepare_fx(
+        model,
+        qconfig_dict,
+        prepare_custom_config_dict,
+        backend_config_dict=backend_config_dict)
 
 def _convert_fx(
         graph_module: GraphModule, is_reference: bool,

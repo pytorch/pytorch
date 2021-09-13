@@ -248,7 +248,11 @@ TEST_F(Kernel, Huge) {
   TensorExprKernel k(graph);
   std::ostringstream oss;
   oss << *k.getCodeGenStmt();
-  const std::string& verification_pattern = "# CHECK: 4000000000";
+  // The 4000000000 iterations loop will be split into 500000000 x 8 and the
+  // outer loop will be parallel. If LLVM is not present, it will not be split,
+  // and to cover both of these cases we're looking for 00000000ll; in the
+  // output.
+  const std::string& verification_pattern = R"IR(# CHECK: 00000000ll;)IR";
   torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 }
 
@@ -629,17 +633,15 @@ TEST_F(Kernel, CatWoConditionals) {
   const std::string& verification_pattern =
       R"IR(
 # CHECK: for
-# CHECK-NEXT: for
-# CHECK-NEXT: for
-# CHECK-NEXT: aten_cat
 # CHECK: for
-# CHECK-NEXT: for
-# CHECK-NEXT: for
-# CHECK-NEXT: aten_cat
 # CHECK: for
-# CHECK-NEXT: for
-# CHECK-NEXT: for
-# CHECK-NEXT: aten_cat)IR";
+# CHECK: aten_cat
+# CHECK: for
+# CHECK: for
+# CHECK: aten_cat
+# CHECK: for
+# CHECK: for
+# CHECK: aten_cat)IR";
   torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 
   auto a = at::rand({5, 3, 2}, TensorOptions(kCPU).dtype(at::kFloat));
@@ -1174,6 +1176,84 @@ TEST_F(Kernel, Softmax4D) {
       auto output = stack[0].toTensor();
       ASSERT_EQ(output.sizes(), ref.sizes());
       ASSERT_TRUE(at::allclose(output, ref));
+    }
+  }
+}
+
+TEST_F(Kernel, SignTest) {
+  const auto graph_template = R"IR(
+      graph(%0 : ${dtype}(${size}, strides=[1], device=cpu)):
+        %2 : ${dtype}(${size}, strides=[1]) = aten::sign(%0)
+        return (%2))IR";
+
+  auto run_test = [](const std::string& graph_string, const at::Tensor& input) {
+    auto graph = std::make_shared<Graph>();
+    parseIR(graph_string, &*graph);
+
+    TensorExprKernel k(graph);
+    StmtPtr s = k.getCodeGenStmt();
+
+    std::vector<at::Tensor> inputs = {input};
+    std::vector<IValue> stack = fmap<IValue>(inputs);
+    k.run(stack);
+    auto o = stack[0].toTensor();
+    auto ref = at::sign(input);
+    ASSERT_TRUE(at::allclose(o, ref));
+  };
+  auto common_options = at::TensorOptions()
+                            .layout(at::kStrided)
+                            .device(at::kCPU)
+                            .requires_grad(false);
+  int default_input_size = 100;
+  for (auto scalar_type : {ScalarType::Float, ScalarType::Double}) {
+    at::Tensor corner_case_inputs;
+    TemplateEnv env;
+    auto options = common_options;
+    switch (scalar_type) {
+      case ScalarType::Float: {
+        env.s("dtype", "Float");
+        options = options.dtype(at::kFloat);
+        std::vector<float> input_float = {
+            0.0f,
+            -0.0f,
+            std::numeric_limits<float>::infinity(),
+            -std::numeric_limits<float>::infinity(),
+            std::nanf("1"),
+            -std::nanf("1")};
+        corner_case_inputs = at::from_blob(
+            input_float.data(),
+            {static_cast<long>(input_float.size())},
+            options);
+        auto rand_input = at::rand({default_input_size}, options);
+        auto input = at::cat({rand_input, corner_case_inputs});
+        env.d("size", at::numel(input));
+        const auto graph_string = format(graph_template, env);
+        run_test(graph_string, input);
+        break;
+      }
+      case ScalarType::Double: {
+        env.s("dtype", "Double");
+        options = options.dtype(at::kDouble);
+        std::vector<double> input_double = {
+            0.0,
+            -0.0,
+            std::numeric_limits<double>::infinity(),
+            -std::numeric_limits<double>::infinity(),
+            std::nan("1"),
+            -std::nan("1")};
+        corner_case_inputs = at::from_blob(
+            input_double.data(),
+            {static_cast<long>(input_double.size())},
+            options);
+        auto rand_input = at::rand({default_input_size}, options);
+        auto input = at::cat({rand_input, corner_case_inputs});
+        env.d("size", at::numel(input));
+        const auto graph_string = format(graph_template, env);
+        run_test(graph_string, input);
+        break;
+      }
+      default:
+        throw unsupported_dtype();
     }
   }
 }

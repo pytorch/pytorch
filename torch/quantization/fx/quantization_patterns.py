@@ -90,7 +90,6 @@ class QuantizeHandler(ABC):
                     return maybe_obs
         return None
 
-
     def input_output_observed(self) -> bool:
         """
         Returns True if the pattern matched to this qhandler could be
@@ -1693,6 +1692,9 @@ class StandaloneModuleQuantizeHandler(QuantizeHandler):
 
 
 class ConvReLUQuantizeHandlerNew(QuantizeHandler):
+    """ This is to unblock perf testing for TensorRT, this will be
+    changed in the future so don't depend on this.
+    """
     def __init__(self, node: Node, modules: Dict[str, torch.nn.Module]):
         super().__init__(node, modules)
         self.relu_node = None
@@ -1705,6 +1707,16 @@ class ConvReLUQuantizeHandlerNew(QuantizeHandler):
             self.conv = modules[str(self.conv_node.target)]
         elif node.op == "call_function":
             self.conv = node.target  # type: ignore[assignment]
+
+    def should_insert_observer_for_output(
+        self,
+        qconfig: Any,
+        model_is_training: bool,
+    ) -> bool:
+        return False
+
+    def is_output_quantized(self, qconfig, is_reference):
+        return False
 
     def convert(self,
                 node: Node,
@@ -1721,9 +1733,6 @@ class ConvReLUQuantizeHandlerNew(QuantizeHandler):
             # note that relu should already be fused into conv module in the fusion step
             assert self.relu_node is None, 'conv module and relu fusion is not executed, ' \
                 'please make sure to run fusion before prepare'
-            output_activation_post_process = \
-                self._maybe_get_last_node_only_observer(modules)
-            assert output_activation_post_process is not None
             # produce dequant - float_op - quant pattern
             dtype = torch.float
             if activation_int8_quantized:
@@ -1832,3 +1841,155 @@ class ConvReLUQuantizeHandlerNew(QuantizeHandler):
             #     # output for dynamically quantized conv op is not quantized
             #     return op_out
             return op_out
+
+class LinearReLUQuantizeHandlerNew(QuantizeHandler):
+    """ This is to unblock perf testing for TensorRT, this will be
+    changed in the future so don't depend on this.
+    """
+    def __init__(
+            self,
+            node: Node,
+            modules: Dict[str, torch.nn.Module]):
+        super().__init__(node, modules)
+        self.relu_node = None
+        if (node.op == 'call_function' and node.target is torch.nn.functional.relu) or \
+           (node.op == 'call_module' and isinstance(modules[str(node.target)], torch.nn.ReLU)):
+            self.relu_node = node
+            node = node.args[0]  # type: ignore[assignment]
+        self.linear_node = node
+        if node.op == 'call_module':
+            self.linear = modules[str(self.linear_node.target)]
+
+    def should_insert_observer_for_output(
+        self,
+        qconfig: Any,
+        model_is_training: bool,
+    ) -> bool:
+        return False
+
+    def is_output_quantized(self, qconfig, is_reference):
+        return False
+
+    def convert(self,
+                node: Node,
+                qconfig: QConfigAny,
+                modules: Dict[str, torch.nn.Module],
+                quantized_graph: Graph,
+                node_name_to_scope: Dict[str, Tuple[str, type]],
+                load_arg: Callable,
+                is_reference: bool = False,
+                convert_custom_config_dict: Dict[str, Any] = None) -> Node:
+        assert is_reference, "LinearReLUQuantizeHandlerNew only works for the case when is_reference=True"
+        if convert_custom_config_dict is None:
+            convert_custom_config_dict = {}
+        dtypes = get_qconfig_dtypes(qconfig)
+        activation_int8_quantized = activation_is_int8_quantized(qconfig)
+        activation_statically_quantized = activation_is_statically_quantized(qconfig)
+        weight_dtype = dtypes[1]
+        if self.linear_node.op == 'call_module':
+
+            # output_activation_post_process = \
+            #     self._maybe_get_last_node_only_observer(modules)
+
+            # note that relu should already be fused into linear modul in the fusion step
+            assert self.relu_node is None, 'linear module and relu fusion is not executed, ' \
+                'please make sure to run fusion before prepare'
+            # produce dequant - float_op - quant pattern
+            dtype = torch.float
+            if activation_int8_quantized:
+                dtype = activation_dtype(qconfig)
+            activation = load_arg(quantized=dtype)(self.linear_node.args[0])
+            args = load_arg(quantized=torch.float)(self.linear_node.args)
+            # Get the float linear and attach qscheme and qparams
+            # the the module
+            float_linear = self.linear
+            fused_linear = None
+            if isinstance(float_linear, (torch.nn.qat.Linear, torch.nn.intrinsic.qat.LinearReLU)):
+                float_linear = float_linear.to_float()
+                # change qat linear to linear
+                parent_name, name = _parent_name(self.linear_node.target)
+                setattr(modules[parent_name], name, float_linear)
+                # Attach weight fake quant to the linear module
+                if isinstance(float_linear, torch.nn.intrinsic.LinearReLU):
+                    fused_linear = float_linear
+                    float_linear = float_linear[0]
+                weight_post_process = self.linear.weight_fake_quant
+            else:
+                if isinstance(float_linear, torch.nn.intrinsic.LinearReLU):
+                    fused_linear = float_linear
+                    float_linear = self.linear[0]  # type: ignore[index]
+                # Attach the weight observer to the module
+                weight_post_process = qconfig.weight()  # type: ignore[union-attr]
+                # Run weight observer
+                weight_post_process(float_linear.weight)  # type: ignore[operator]
+
+            weight_qparams = get_qparam_dict(weight_post_process)
+            # TODO: include the configuration in backend_config_dict
+            # we can have a map from module to reference module
+            # and allow user to register new ones
+            qlinear_cls = get_static_quant_module_class(
+                type(float_linear), is_reference=is_reference)
+            ref_linear = qlinear_cls.from_float(float_linear, weight_qparams)
+
+            # if the parent is a fused linear (Sequential), we can replace the first
+            # item to ref linear, otherwise we can update
+            # the linear instance in the module tree
+            if fused_linear is not None:
+                fused_linear[0] = ref_linear
+            else:
+                parent_name, name = _parent_name(self.linear_node.target)
+                setattr(modules[parent_name], name, ref_linear)
+            op_out = quantized_graph.create_node(
+                'call_module',
+                self.linear_node.target,
+                args, {})
+            # if output_activation_post_process:
+            #     op_out = quantize_node(
+            #         op_out,
+            #         output_activation_post_process,
+            #         node,
+            #         modules,
+            #         quantized_graph,
+            #         node_name_to_scope,
+            #         is_input=False)
+            return op_out
+        else:  # call_function
+            assert self.linear_node.op == 'call_function'
+            quantized_input_dtypes = [torch.float, torch.float]
+            if activation_int8_quantized:
+                quantized_input_dtypes[0] = torch.quint8
+            if weight_is_statically_quantized(qconfig):
+                quantized_input_dtypes[1] = torch.qint8
+            args = load_arg(quantized=quantized_input_dtypes)(self.linear_node.args)
+            args = load_arg(quantized=torch.float)(self.linear_node.args)
+            kwargs = load_arg(quantized=torch.float)(self.linear_node.kwargs)
+            op_out = quantized_graph.create_node(
+                "call_function", torch.nn.functional.linear, args, kwargs)
+            if self.relu_node:
+                relu_args = [op_out]
+                relu_args.extend(load_arg(quantized=torch.float)(self.relu_node.args[1:]))
+                relu_kwargs = load_arg(quantized=torch.float)(self.relu_node.kwargs)
+                op_out = quantized_graph.create_node(
+                    "call_function", torch.nn.functional.relu, tuple(relu_args), relu_kwargs)
+
+            return op_out
+            # TODO: enable later
+            # if activation_statically_quantized:
+            #     # quantize output for statically quantized linear op
+            #     root_module = modules['']
+            #     act_post_process_name = self.relu_node.name if self.relu_node else self.linear_node.name
+            #     act_post_process_node = self.relu_node if self.relu_node else self.linear_node
+            #     activation_post_process = \
+            #         self._maybe_get_last_node_only_observer(modules)
+            #     assert activation_post_process is not None
+            #     return quantize_node(
+            #         op_out,
+            #         activation_post_process,
+            #         act_post_process_node,
+            #         modules,
+            #         quantized_graph,
+            #         node_name_to_scope,
+            #         is_input=False)
+            #     else:
+            #         # output for dynamically quantized linear op is not quantized
+            #         return op_out
