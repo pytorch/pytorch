@@ -56,65 +56,6 @@ using flatbuffers::FlatBufferBuilder;
 // well-spent for very small records.
 static constexpr size_t kMinToCompress = 200;
 
-void CreateAndAppendOperator(
-    flatbuffers::FlatBufferBuilder& fbb,
-    const std::string& name,
-    const std::string& overload,
-    int num_args,
-    std::vector<flatbuffers::Offset<mobile::serialization::Operator>>* operators) {
-  operators->push_back(CreateOperator(
-      fbb, fbb.CreateSharedString(name), fbb.CreateSharedString(overload), num_args));
-}
-
-flatbuffers::Offset<
-    flatbuffers::Vector<flatbuffers::Offset<flatbuffers::String>>>
-CreateTypes(
-    flatbuffers::FlatBufferBuilder& fbb,
-    const std::vector<std::string>& type_strs) {
-  return fbb.CreateVectorOfStrings(type_strs);
-}
-
-flatbuffers::Offset<jit::mobile::serialization::Schema> CreateFBSchema(
-    flatbuffers::FlatBufferBuilder& fbb,
-    const std::vector<Argument>& args,
-    const std::vector<Argument>& returns,
-    c10::TypePrinter type_printer,
-    IValueFlatbufferSerializer* serializer) {
-  std::vector<flatbuffers::Offset<jit::mobile::serialization::Arg>> arg_vec;
-  arg_vec.reserve(args.size());
-  std::vector<flatbuffers::Offset<jit::mobile::serialization::Arg>> return_vec;
-  return_vec.reserve(returns.size());
-  for (const auto& arg : args) {
-    mobile::serialization::IValue type;
-    flatbuffers::Offset<void> offset;
-    std::tie(type, offset) = serializer->iValueToFB(fbb, arg.default_value());
-    arg_vec.emplace_back(CreateArg(
-        fbb,
-        fbb.CreateSharedString(arg.name()),
-        fbb.CreateSharedString(arg.type()->annotation_str(type_printer)),
-        type, offset));
-  }
-
-  for (const auto& ret : returns) {
-    mobile::serialization::IValue type;
-    flatbuffers::Offset<void> offset;
-    std::tie(type, offset) = serializer->iValueToFB(fbb, ret.default_value());
-    return_vec.emplace_back(CreateArg(
-        fbb,
-        fbb.CreateSharedString(ret.name()),
-        fbb.CreateSharedString(ret.type()->annotation_str(type_printer)),
-        type, offset));
-  }
-
-  return CreateSchema(fbb, fbb.CreateVector(arg_vec), fbb.CreateVector(return_vec));
-}
-
-flatbuffers::Offset<jit::mobile::serialization::DebugInfo> CreateFBDebugInfo(
-  flatbuffers::FlatBufferBuilder& fbb,
-  const std::vector<int64_t>& debug_handles) {
-  return CreateDebugInfo(fbb, fbb.CreateVector(debug_handles));
-}
-
 
 ExportModuleExtraFilesHook& GetExtraFilesHook() {
   static ExportModuleExtraFilesHook func = nullptr;
@@ -609,217 +550,6 @@ convertInstructionsForMobile(
   return std::make_tuple(opnames, method_names, op_debug_handles);
 }
 
-flatbuffers::Offset<mobile::serialization::Function>
-functionToFlatbuffers(
-    FlatBufferBuilder& fbb,
-    const Module& module,
-    const Function& func,
-    BackendDebugInfoRecorder& debug_info_recorder,
-    const std::basic_string<char>& qn,
-    TypeNameUniquer& type_name_uniquer_,
-    IValueFlatbufferSerializer* serializer,
-    std::unordered_map<std::string, int>* type_annotations
-) {
-
-  auto graph = func.graph()->copy();
-  Inline(*graph);
-
-  std::shared_ptr<MobileCode> code;
-  code = std::make_shared<MobileCode>(
-      graph,
-      func.name(),
-      BytecodeEmitDefaultValueForUnspecifiedArgMode::
-          is_enabled() /* emit_default_input_instructions */);
-  auto instructions_copy = code->instructions();
-
-  std::vector<c10::OperatorName> opnames;
-  std::vector<std::string> method_names;
-  std::vector<int64_t> op_debug_handles;
-  std::tie(opnames, method_names, op_debug_handles) = convertInstructionsForMobile(
-    code.get(), &instructions_copy, debug_info_recorder);
-
-  // instructions
-  std::vector<mobile::serialization::Instruction> instruction_vector;
-  for (const auto& inst: instructions_copy) {
-    instruction_vector.emplace_back(inst.op, inst.N, inst.X);
-  }
-
-  // operators
-  std::vector<flatbuffers::Offset<mobile::serialization::Operator>> operator_vector;
-  auto op_to_specified_args = code->op_to_num_specified_args();
-  operator_vector.reserve(opnames.size());
-  for (const auto& opname : opnames) {
-    auto unique_name = c10::toString(opname);
-    // For operator with vararg, adding default arguments would be confusing and
-    // is not allowed. For an operator with num_args = -1, it means the number
-    // of arguments is not available for this operator, we don't do any backward
-    // compatibility adaptation at runtime.
-    int num_args = -1;
-    auto it = op_to_specified_args.find(unique_name);
-    if (it != op_to_specified_args.end()) {
-      num_args = it->second;
-    }
-    CreateAndAppendOperator(fbb, opname.name, opname.overload_name,
-        num_args, &operator_vector);
-  }
-
-  const auto& constants = code->constant_table();
-  std::vector<uint8_t> constant_types;
-  std::vector<flatbuffers::Offset<void>> constant_offsets;
-  std::tie(constant_types, constant_offsets) = serializer->iValueIteratorToFB(
-      fbb, constants.begin(), constants.end());
-
-  // types
-  std::vector<uint8_t> type_offsets;
-  static const std::string torch_prefix("__torch__");
-  static const std::string class_prefix("__torch__.torch.classes");
-  for (const TypePtr& t : code->type_table()) {
-    auto type_str = t->annotation_str();
-    if (type_str.find(torch_prefix) == 0) {
-      TORCH_CHECK(
-          type_str.find(class_prefix) == 0,
-          "__torch__ types other than torchbind (__torch__.torch.classes)"
-          "are not supported in lite interpreter. ",
-          "Workaround: instead of using arbitrary class type (class Foo()), ",
-          "define a pytorch class (class Foo(torch.nn.Module)).");
-    }
-    auto type_iter = type_annotations->find(type_str);
-    uint8_t type_pos = 0;
-    if (type_iter != type_annotations->end()) {
-      type_pos = type_iter->second;
-    } else {
-      type_pos = type_annotations->size();
-      type_annotations->insert(std::make_pair(type_str, type_pos));
-    }
-    type_offsets.push_back(type_pos);
-  }
-
-  // since the register location is embedded into the bytecode, pass the
-  // register size
-  auto register_size = static_cast<int>(code->register_size());
-
-  // schema
-  const auto& schema = func.getSchema();
-  auto type_printer =
-      [&](const c10::ConstTypePtr& t) -> c10::optional<std::string> {
-    auto namedType = t->cast<c10::NamedType>();
-    if (namedType && namedType->name()) {
-      return type_name_uniquer_.getUniqueName(namedType).qualifiedName();
-    }
-    return c10::nullopt;
-  };
-  TORCH_CHECK(
-      schema.overload_name().empty(), // @TODO: is this check correct?
-      "Overloads are not supported in mobile modules.");
-  TORCH_CHECK(
-      !schema.is_vararg(), "Python *args are not supported in mobile modules.");
-  TORCH_CHECK(
-      !schema.is_varret(),
-      "A variable number of return values is not supported in mobile modules.");
-
-  auto schema_offset = CreateFBSchema(
-    fbb, schema.arguments(), schema.returns(), type_printer, serializer);
-  auto debug_info_offset = CreateFBDebugInfo(fbb, op_debug_handles);
-
-  auto function_offset = CreateFunctionDirect(
-    fbb,
-    qn.c_str(),
-    &instruction_vector,
-    &operator_vector,
-    &constant_types,
-    &constant_offsets,
-    &type_offsets,
-    register_size,
-    schema_offset,
-    debug_info_offset);
-  return function_offset;
-}
-
-flatbuffers::DetachedBuffer
-moduleToFlatbuffers(
-    const Module& module,
-    std::vector<c10::IValue>& debug_info_elements,
-    BackendDebugInfoRecorder& debug_info_recorder,
-    TypeNameUniquer& type_name_uniquer_,
-    bool include_tensor_data,
-    IValueFlatbufferSerializer* serializer) {
-
-  auto methods = module.get_methods();
-  std::unordered_set<std::string> qn_cache;
-  // top level methods
-  std::vector<flatbuffers::Offset<mobile::serialization::Function>> functions;
-  std::unordered_map<std::string, int> type_annotations_map;
-  FlatBufferBuilder fbb;
-  for (const auto& method : methods) {
-    const auto qn = method.function().qualname().qualifiedName();
-    if (qn_cache.find(qn) != qn_cache.end()) {
-      continue;
-    }
-    auto func_offset = functionToFlatbuffers(
-        fbb, module, method.function(),
-        debug_info_recorder,
-        qn, type_name_uniquer_, serializer, &type_annotations_map);
-    functions.push_back(func_offset);
-    qn_cache.emplace(qn);
-  }
-
-
-  auto functions_offset = fbb.CreateVector(functions);
-  flatbuffers::Offset<mobile::serialization::Object> ivalue_offset = serializer->objectToFB(fbb, module._ivalue());
-
-  // at this point, serializer contains all type infos used:
-
-  std::vector<flatbuffers::Offset<mobile::serialization::ObjectType>> obj_types;
-  for (const auto& classptr : serializer->memoized_class_types_) {
-    // std::vector<flatbuffers::Offset<flatbuffers::String>> attr_names(classptr->numAttributes());
-    // for (size_t i = 0, n = classptr->numAttributes(); i < n; ++i) {
-    //   attr_names[i] = fbb.CreateSharedString(classptr->getAttributeName(i));
-    // }
-    flatbuffers::Offset<mobile::serialization::Function> setattr_offset = 0;
-    if (checkHasValidSetGetState(classptr)) {
-      Function& setstate = classptr->getMethod("__setstate__");
-      const auto qn = classptr->name()->qualifiedName() + ".__setstate__";
-      if (setstate.isGraphFunction()) {
-        setattr_offset = functionToFlatbuffers(
-            fbb, module, setstate,
-            debug_info_recorder, qn, type_name_uniquer_, serializer, &type_annotations_map);
-      }
-    }
-    std::cerr << "module level types " << classptr->name()->qualifiedName() << std::endl;
-    obj_types.push_back(
-      CreateObjectTypeDirect(fbb, classptr->name()->qualifiedName().c_str(), nullptr, setattr_offset));
-  }
-  auto obj_types_offset = fbb.CreateVector(obj_types);
-
-  // type annotations
-  std::vector<flatbuffers::Offset<flatbuffers::String>> type_annot_offsets(type_annotations_map.size());
-  if (type_annotations_map.size() > 256) {
-    std::cerr << "Too many annotations.\n" << std::endl;
-  }
-
-  for (auto& type_annot : type_annotations_map) {
-    auto str_offset = fbb.CreateString(type_annot.first);
-    type_annot_offsets[type_annot.second] = str_offset;
-  }
-
-  flatbuffers::Offset<flatbuffers::Vector<flatbuffers::Offset<mobile::serialization::StorageData>>> storage_data_offset = 0;
-  if (include_tensor_data) {
-    std::vector<flatbuffers::Offset<mobile::serialization::StorageData>> storage_data;
-    for (const auto& td : serializer->tensor_data_) {
-      WriteableTensorData writable_td = getWriteableTensorData(td);
-      auto storage_offset = mobile::serialization::CreateStorageData(
-        fbb, fbb.CreateVector(reinterpret_cast<const uint8_t*>(writable_td.data()), writable_td.sizeInBytes()));
-      storage_data.push_back(storage_offset);
-    }
-    storage_data_offset= fbb.CreateVector(storage_data);
-  }
-
-  auto mod = CreateModule(fbb, functions_offset, obj_types_offset, ivalue_offset,
-      storage_data_offset, serializer->tensor_data_.size(), fbb.CreateVector(type_annot_offsets));
-  fbb.Finish(mod);
-  return fbb.Release();
-}
-
 void SetExportModuleExtraFilesHook(ExportModuleExtraFilesHook hook) {
   GetExtraFilesHook() = std::move(hook);
 }
@@ -1128,26 +858,20 @@ void ScriptModuleSerializer::writeByteCode(
   if (use_flatbuffers) {
     BackendDebugInfoRecorder debug_info_recorder;
     std::vector<c10::IValue> debug_info_elements;
-    IValueFlatbufferSerializer serializer;
-    flatbuffers::DetachedBuffer buffer = moduleToFlatbuffers(
-        module,
-        debug_info_elements,
-        debug_info_recorder,
-        type_name_uniquer_,
-        true,
-        &serializer);
+    BackendDebugInfoRecorder debug_info_recorder2;
+    IValueFlatbufferSerializer serializer(debug_info_recorder2, type_name_uniquer_,
+      BytecodeEmitDefaultValueForUnspecifiedArgMode::is_enabled()
+    );
+    flatbuffers::DetachedBuffer buffer = serializer.serializeModule(module, true);
     std::fstream outfile( writer_.archiveName() + ".ff", std::ios::out | std::ios::binary);
     outfile.write((char*)buffer.data(), buffer.size());
     outfile.close();
 
-    IValueFlatbufferSerializer serializer2;
-    flatbuffers::DetachedBuffer buffer2 = moduleToFlatbuffers(
-        module,
-        debug_info_elements,
-        debug_info_recorder,
-        type_name_uniquer_,
-        false,
-        &serializer2);
+    IValueFlatbufferSerializer serializer2(debug_info_recorder, type_name_uniquer_,
+      BytecodeEmitDefaultValueForUnspecifiedArgMode::is_enabled()
+    );
+    flatbuffers::DetachedBuffer buffer2 = serializer2.serializeModule(module, false);
+
     writer_.writeRecord(
       "bytecodes.flatbuffers", buffer2.data(), buffer2.size(), false
     );

@@ -13,6 +13,29 @@
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/utils/disallow_copy.h>
 #include <torch/csrc/jit/serialization/mobile_bytecode_generated.h>
+#include <c10/util/Exception.h>
+#include <torch/csrc/jit/backends/backend_debug_handler.h>
+#include <torch/csrc/jit/backends/backend_debug_info.h>
+#include <torch/csrc/jit/frontend/source_range.h>
+#include <torch/csrc/jit/ir/attributes.h>
+#include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/ir/type_hashing.h>
+#include <torch/csrc/jit/mobile/function.h>
+#include <torch/csrc/jit/mobile/interpreter.h>
+#include <torch/csrc/jit/mobile/method.h>
+#include <torch/csrc/jit/mobile/module.h>
+#include <torch/csrc/jit/passes/inliner.h>
+#include <torch/csrc/jit/runtime/instruction.h>
+#include <torch/csrc/jit/serialization/callstack_debug_info_serialization.h>
+#include <torch/csrc/jit/serialization/ivalue_serialization.h>
+#include <torch/csrc/jit/serialization/import_export_constants.h>
+#include <torch/csrc/jit/serialization/import_export_helpers.h>
+#include <torch/csrc/jit/serialization/pickle.h>
+#include <torch/csrc/jit/serialization/python_print.h>
+#include <torch/csrc/jit/serialization/source_range_serialization.h>
+#include <torch/csrc/jit/serialization/type_name_uniquer.h>
+#include <torch/csrc/jit/serialization/mobile_bytecode_generated.h>
+#include <third_party/flatbuffers/include/flatbuffers/flatbuffers.h>
 
 namespace torch {
 namespace jit {
@@ -22,21 +45,26 @@ using ::c10::IValue;
 class IValueFlatbufferSerializer{
 
  public:
+  IValueFlatbufferSerializer(
+    BackendDebugInfoRecorder& debug_info_recorder, TypeNameUniquer& type_name_uniquer,
+    bool emit_default_input_instructions )
+    : debug_info_recorder_(debug_info_recorder), type_name_uniquer_(type_name_uniquer), emit_default_input_instructions_(emit_default_input_instructions)  {}
+
+  flatbuffers::DetachedBuffer
+  serializeModule(const Module& module, bool include_tensor_data_in_flatbuffer);
+
+  // TODO
+  std::vector<at::Tensor> tensor_data_;
+
+ private:
   template <typename It>
-  std::tuple<
-    std::vector<uint8_t>,
-    std::vector<flatbuffers::Offset<void>>>
-  iValueIteratorToFB(flatbuffers::FlatBufferBuilder& fbb, It begin, It end) {
-    std::vector<uint8_t> types;
-    std::vector<flatbuffers::Offset<void>> offsets;
-    uint8_t type;
-    flatbuffers::Offset<void> offset;
+  std::vector<uint32_t>
+  storeIValuesAndGetIndexes(flatbuffers::FlatBufferBuilder& fbb, It begin, It end) {
+    std::vector<uint32_t> indexes;
     for (; begin != end; ++begin) {
-        std::tie(type, offset) = iValueToFB(fbb, *begin);
-        types.push_back(type);
-        offsets.push_back(offset);
+      indexes.push_back(storeIValueAndGetIndex(fbb, *begin));
     }
-    return {types, offsets};
+    return indexes;
   }
 
   flatbuffers::Offset<mobile::serialization::Tuple>
@@ -54,45 +82,52 @@ class IValueFlatbufferSerializer{
   flatbuffers::Offset<mobile::serialization::TensorMetadata>
   tensorToFB(flatbuffers::FlatBufferBuilder& fbb, const IValue& ivalue);
 
+  flatbuffers::Offset<mobile::serialization::Function>
+  functionToFB(flatbuffers::FlatBufferBuilder& fbb, const Function& func);
+
+
   std::tuple<
       mobile::serialization::IValue,
       flatbuffers::Offset<void>>
   iValueToFB(flatbuffers::FlatBufferBuilder& fbb, const IValue& ivalue);
 
-  std::vector<at::Tensor> tensor_data_;
+  flatbuffers::Offset<jit::mobile::serialization::Schema> CreateFBSchema(
+    flatbuffers::FlatBufferBuilder& fbb,
+    const std::vector<Argument>& args,
+    const std::vector<Argument>& returns,
+    c10::TypePrinter type_printer);
+
+flatbuffers::Offset<mobile::serialization::ObjectType>
+classTypeToFB(
+  flatbuffers::FlatBufferBuilder& fbb, ClassTypePtr class_ptr);
+
+  uint32_t storeIValueAndGetIndex(flatbuffers::FlatBufferBuilder& fbb, const IValue& ivalue);
+  uint32_t storeFunctionAndGetIndex(flatbuffers::FlatBufferBuilder& fbb, const Function& function);
+
+  uint32_t storeClassTypeAndGetIndex(
+    flatbuffers::FlatBufferBuilder& fbb, ClassTypePtr class_type);
+
+  // cached stuff
+  template<typename T>
+  uint32_t insertIValue(uint8_t type, flatbuffers::Offset<T> offset)  {
+    uint32_t size = ivalue_types_.size();
+    ivalue_types_.push_back(type);
+    ivalue_offsets_.push_back(offset.Union());
+    return size;
+  }
+
+  BackendDebugInfoRecorder& debug_info_recorder_;
+  TypeNameUniquer& type_name_uniquer_;
+  bool emit_default_input_instructions_;
+
   std::unordered_map<const void*, uint32_t> memoized_storage_map_;
-  std::vector<c10::ClassTypePtr> memoized_class_types_;
-  std::unordered_map<c10::ClassTypePtr, int> memoized_class_map_;
+
+  std::vector<uint8_t> ivalue_types_;
+  std::vector<flatbuffers::Offset<void>> ivalue_offsets_;
+
+  // qualified name to serialized class, type or function
+  std::unordered_map<std::string, uint32_t> qn_to_serialized_values_;
 };
-
-class IValueDeserializer {
- public:
-  IValueDeserializer(
-    const std::vector<c10::Storage>& tensor_data,
-    const std::vector<c10::StrongTypePtr>& types,
-    std::function<IValue(int, IValue&&)> obj_loader) :
-    tensor_data_(&tensor_data), types_(&types), object_loader_(std::move(obj_loader)) {}
-
-  IValueDeserializer(
-    std::function<c10::Storage(int)> tensor_loader,
-    const std::vector<c10::StrongTypePtr>& types,
-    std::function<IValue(int, IValue&&)> obj_loader) :
-    tensor_data_(nullptr), types_(&types), tensor_loader_(tensor_loader), object_loader_(std::move(obj_loader)) {}
-
-  IValue parseIValue(const mobile::serialization::IValue ivalue_type, const void* ivalue_data);
-  IValue parseList(const mobile::serialization::List* list);
-  at::Tensor parseTensor(const mobile::serialization::TensorMetadata* tensor);
-  IValue parseTuple(const mobile::serialization::Tuple* tuple);
-  IValue parseDict(const mobile::serialization::Dict* dict);
-  IValue parseObject(const mobile::serialization::Object* object);
-
-
-  const std::vector<c10::Storage>* tensor_data_;
-  const std::vector<c10::StrongTypePtr>* types_;
-  std::function<c10::Storage(int)> tensor_loader_;
-  std::function<IValue(int, IValue&&)> object_loader_;
-};
-
 
 
 } // namespace jit

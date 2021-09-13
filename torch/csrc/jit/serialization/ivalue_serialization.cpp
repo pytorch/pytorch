@@ -18,8 +18,97 @@ using mobile::serialization::CreateTupleDirect;
 using mobile::serialization::CreateListDirect;
 using mobile::serialization::CreateDictDirect;
 using mobile::serialization::CreateTensorMetadataDirect;
+using mobile::serialization::CreateArg;
+using mobile::serialization::CreateOperator;
+using mobile::serialization::CreateFunctionDirect;
+using mobile::serialization::CreateDebugInfo;
+using mobile::serialization::CreateModule;
+using flatbuffers::FlatBufferBuilder;
 
-bool ValidSetGetState(const std::shared_ptr<c10::ClassType>& cls) {
+char const* toString(OpCode op);
+std::tuple<
+    std::vector<c10::OperatorName>,
+    std::vector<std::string>,
+    std::vector<int64_t>>
+// TODO get rid of thsi
+convertInstructionsForMobile2(
+  const MobileCode* code,
+  std::vector<Instruction>* instructions,
+  BackendDebugInfoRecorder& debug_info_recorder
+) {
+  std::vector<c10::OperatorName> opnames;
+  std::vector<std::string> method_names;
+  std::vector<int64_t> op_debug_handles;
+  for (size_t i = 0; i < instructions->size(); ++i) {
+    Instruction ins = instructions->at(i);
+    if (ins.op == OP || ins.op == OPN) {
+      auto node = code->instructions_source()[i];
+      opnames.emplace_back(node->schema().operator_name());
+    }
+    // CALL nodes at this point represent built-in (i.e. non-Graph)
+    // functions that were not inlined. Here we convert the CALL
+    // instructions for these functions into INTERFACE_CALL instructions
+    // s.t. at runtime, we will look up the Function* on the Type of the
+    // 0th argument in the stack and call that directly.
+    if (ins.op == CALL) {
+      auto node = code->instructions_source()[i];
+      if (node->kind() == prim::CallMethod) {
+        // NB: replacing instruction
+        auto method_name_idx =
+            code->constant_table().size() + method_names.size();
+        method_names.emplace_back(node->s(attr::name));
+        Instruction new_instr{
+            INTERFACE_CALL,
+            static_cast<int32_t>(method_name_idx),
+            static_cast<uint16_t>(node->inputs().size())};
+        instructions->at(i) = new_instr;
+      } else {
+        TORCH_INTERNAL_ASSERT(
+            false, "Unsupported node kind on CALL opcode for mobile");
+      }
+    } else if (ins.op == RET) {
+      auto node = code->instructions_source()[i];
+      for (const auto& input : node->inputs()) {
+        const auto& input_type = input->type();
+        if (input_type->kind() == TypeKind::TupleType) {
+          if (const auto& name_typed_input =
+                  input_type->cast<at::NamedType>()) {
+            TORCH_CHECK(
+                !name_typed_input->name(),
+                "A named tuple type is not supported in mobile module. ",
+                "Workaround: instead of using a named tuple type's fields, ",
+                "use a dictionary type's key-value pair itmes or ",
+                "a pytorch class (class Foo(torch.nn.Module))'s attributes.'");
+          }
+        } else if (
+            input_type->kind() == TypeKind::ListType ||
+            input_type->kind() == TypeKind::DictType) {
+          for (const TypePtr& element_type : input_type->containedTypes()) {
+            TORCH_CHECK(
+                element_type->kind() != TypeKind::ClassType,
+                "Returining a list or dictionary with pytorch class type ",
+                "is not supported in mobile module "
+                "(List[Foo] or Dict[int, Foo] for class Foo(torch.nn.Module)). "
+                "Workaround: instead of using pytorch class as their element type, ",
+                "use a combination of list, dictionary, and single types.");
+          }
+        }
+      }
+    } else {
+      TORCH_CHECK(
+          isOpSupportedInMobile(ins.op),
+          toString(ins.op),
+          " is not supported in mobile module.");
+    }
+    auto node = code->instructions_source()[i];
+    int64_t debug_handle = debug_info_recorder.getNextDebugHandle(node);
+    // Note 1-to-1 correspondence between instructions and debug handles
+    op_debug_handles.emplace_back(debug_handle);
+  }
+  return std::make_tuple(opnames, method_names, op_debug_handles);
+}
+
+bool ValidSetGetState(const c10::ClassType* cls) {
   // Check that the schemas for __getstate__ and __setstate__ are correct
   auto getstate = cls->findMethod("__getstate__");
   if (getstate == nullptr) {
@@ -79,46 +168,296 @@ bool ValidSetGetState(const std::shared_ptr<c10::ClassType>& cls) {
   return true;
 }
 
+flatbuffers::Offset<jit::mobile::serialization::Schema> IValueFlatbufferSerializer::CreateFBSchema(
+    flatbuffers::FlatBufferBuilder& fbb,
+    const std::vector<Argument>& args,
+    const std::vector<Argument>& returns,
+    c10::TypePrinter type_printer) {
+  std::vector<flatbuffers::Offset<jit::mobile::serialization::Arg>> arg_vec;
+  arg_vec.reserve(args.size());
+  std::vector<flatbuffers::Offset<jit::mobile::serialization::Arg>> return_vec;
+  return_vec.reserve(returns.size());
+  for (const auto& arg : args) {
+    int index = storeIValueAndGetIndex(fbb, arg.default_value());
+    arg_vec.emplace_back(CreateArg(
+        fbb,
+        fbb.CreateSharedString(arg.name()),
+        fbb.CreateSharedString(arg.type()->annotation_str()),
+        index));
+  }
+
+  for (const auto& ret : returns) {
+    int index = storeIValueAndGetIndex(fbb, ret.default_value());
+    return_vec.emplace_back(CreateArg(
+        fbb,
+        fbb.CreateSharedString(ret.name()),
+        fbb.CreateSharedString(ret.type()->annotation_str()),
+        index));
+  }
+  return CreateSchema(fbb, fbb.CreateVector(arg_vec), fbb.CreateVector(return_vec));
+}
+
+flatbuffers::Offset<mobile::serialization::Function>
+IValueFlatbufferSerializer::functionToFB(
+    FlatBufferBuilder& fbb,
+    const Function& func
+) {
+  const auto qn = func.qualname().qualifiedName();
+  auto graph = func.graph()->copy();
+  Inline(*graph);
+
+  std::shared_ptr<MobileCode> code;
+  code = std::make_shared<MobileCode>(
+      graph,
+      func.name(),
+      emit_default_input_instructions_);
+  auto instructions_copy = code->instructions();
+
+  std::vector<c10::OperatorName> opnames;
+  std::vector<std::string> method_names;
+  std::vector<int64_t> op_debug_handles;
+  std::tie(opnames, method_names, op_debug_handles) = convertInstructionsForMobile2(
+    code.get(), &instructions_copy, debug_info_recorder_);
+
+  // instructions
+  std::vector<mobile::serialization::Instruction> instruction_vector;
+  for (const auto& inst: instructions_copy) {
+    instruction_vector.emplace_back(inst.op, inst.N, inst.X);
+  }
+
+  // operators
+  std::vector<flatbuffers::Offset<mobile::serialization::Operator>> operator_vector;
+  auto op_to_specified_args = code->op_to_num_specified_args();
+  operator_vector.reserve(opnames.size());
+  for (const auto& opname : opnames) {
+    auto unique_name = c10::toString(opname);
+    // For operator with vararg, adding default arguments would be confusing and
+    // is not allowed. For an operator with num_args = -1, it means the number
+    // of arguments is not available for this operator, we don't do any backward
+    // compatibility adaptation at runtime.
+    int num_args = -1;
+    auto it = op_to_specified_args.find(unique_name);
+    if (it != op_to_specified_args.end()) {
+      num_args = it->second;
+    }
+    operator_vector.push_back(
+      CreateOperator(fbb, fbb.CreateSharedString(opname.name),
+                     fbb.CreateSharedString(opname.overload_name),
+                     num_args));
+  }
+
+  const auto& constants = code->constant_table();
+
+  std::vector<uint32_t> constant_indexes;
+  for (const auto& constant : constants) {
+    constant_indexes.push_back(storeIValueAndGetIndex(fbb, constant));
+  }
+
+  // types
+  static const std::string torch_prefix("__torch__");
+  static const std::string class_prefix("__torch__.torch.classes");
+  std::vector<flatbuffers::Offset<flatbuffers::String>> type_offsets;
+
+  for (const TypePtr& t : code->type_table()) {
+    auto type_str = t->annotation_str();
+    if (type_str.find(torch_prefix) == 0) {
+      std::cerr << "type is " << type_str << std::endl;
+      TORCH_CHECK(
+          type_str.find(class_prefix) == 0,
+          "__torch__ types other than torchbind (__torch__.torch.classes)"
+          "are not supported in lite interpreter. ",
+          "Workaround: instead of using arbitrary class type (class Foo()), ",
+          "define a pytorch class (class Foo(torch.nn.Module)).");
+    }
+
+    type_offsets.push_back(fbb.CreateSharedString(type_str));
+  }
+
+  // since the register location is embedded into the bytecode, pass the
+  // register size
+  auto register_size = static_cast<int>(code->register_size());
+
+  // schema
+  const auto& schema = func.getSchema();
+  auto type_printer =
+      [&](const c10::ConstTypePtr& t) -> c10::optional<std::string> {
+    auto namedType = t->cast<c10::NamedType>();
+    if (namedType && namedType->name()) {
+      return type_name_uniquer_.getUniqueName(namedType).qualifiedName();
+    }
+    return c10::nullopt;
+  };
+  TORCH_CHECK(
+      schema.overload_name().empty(), // @TODO: is this check correct?
+      "Overloads are not supported in mobile modules.");
+  TORCH_CHECK(
+      !schema.is_vararg(), "Python *args are not supported in mobile modules.");
+  TORCH_CHECK(
+      !schema.is_varret(),
+      "A variable number of return values is not supported in mobile modules.");
+
+  auto schema_offset = CreateFBSchema(
+    fbb, schema.arguments(), schema.returns(), type_printer);
+  auto debug_info_offset =  CreateDebugInfo(fbb, fbb.CreateVector(op_debug_handles));
+
+  auto function_offset = CreateFunctionDirect(
+    fbb,
+    qn.c_str(),
+    &instruction_vector,
+    &operator_vector,
+    &constant_indexes,
+    &type_offsets,
+    register_size,
+    schema_offset,
+    debug_info_offset);
+  return function_offset;
+}
+
+
+flatbuffers::DetachedBuffer
+IValueFlatbufferSerializer::serializeModule(
+  const Module& module, bool include_tensor_data_in_flatbuffer) {
+
+  FlatBufferBuilder fbb;
+  auto methods = module.get_methods();
+
+  std::vector<uint32_t> functions_index;
+  functions_index.reserve(methods.size());
+  for (const auto& method : methods) {
+    auto func_offset = storeFunctionAndGetIndex(fbb, method.function());
+    functions_index.push_back(func_offset);
+  }
+
+  auto functions_offset = fbb.CreateVector(functions_index);
+  uint32_t ivalue_index = storeIValueAndGetIndex(fbb, module._ivalue());
+
+  flatbuffers::Offset<flatbuffers::Vector<flatbuffers::Offset<mobile::serialization::StorageData>>> storage_data_offset = 0;
+  if (include_tensor_data_in_flatbuffer) {
+    std::vector<flatbuffers::Offset<mobile::serialization::StorageData>> storage_data;
+    for (const auto& td : tensor_data_) {
+      WriteableTensorData writable_td = getWriteableTensorData(td);
+      auto storage_offset = mobile::serialization::CreateStorageData(
+        fbb, fbb.CreateVector(reinterpret_cast<const uint8_t*>(writable_td.data()), writable_td.sizeInBytes()));
+      storage_data.push_back(storage_offset);
+    }
+    storage_data_offset= fbb.CreateVector(storage_data);
+  }
+
+  auto mod = CreateModule(fbb, functions_offset, ivalue_index,
+      fbb.CreateVector(ivalue_types_), fbb.CreateVector(ivalue_offsets_),
+      tensor_data_.size());
+  fbb.Finish(mod);
+  return fbb.Release();
+}
+
 
 
 
 
 flatbuffers::Offset<mobile::serialization::Tuple>
 IValueFlatbufferSerializer::tupleToFB(flatbuffers::FlatBufferBuilder& fbb, const IValue& tuple) {
-    std::vector<uint8_t> types;
-    std::vector<flatbuffers::Offset<void>> offsets;
     const auto& elements = tuple.toTuple()->elements();
-    std::tie(types, offsets) = iValueIteratorToFB(fbb, elements.begin(), elements.end());
-    return CreateTupleDirect(fbb, &types, &offsets);
+    std::vector<uint32_t> items = storeIValuesAndGetIndexes(fbb, elements.begin(), elements.end());
+    return CreateTupleDirect(fbb, &items);
 }
 
 flatbuffers::Offset<mobile::serialization::List>
 IValueFlatbufferSerializer::listToFB(flatbuffers::FlatBufferBuilder& fbb, const IValue& list) {
-    std::vector<uint8_t> types;
-    std::vector<flatbuffers::Offset<void>> offsets;
-    auto elements = list.toList();
-    std::tie(types, offsets) = iValueIteratorToFB(fbb, elements.begin(), elements.end());
-    return CreateListDirect(fbb, &types, &offsets);
+    const auto& elements = list.toList();
+    std::vector<uint32_t> items = storeIValuesAndGetIndexes(fbb, elements.begin(), elements.end());
+    return CreateListDirect(fbb, &items);
 }
 
 flatbuffers::Offset<mobile::serialization::Dict>
 IValueFlatbufferSerializer::dictToFB(flatbuffers::FlatBufferBuilder& fbb, const IValue& ivalue) {
-  std::vector<uint8_t> key_types;
-  std::vector<flatbuffers::Offset<void>> key_offsets;
-  std::vector<uint8_t> value_types;
-  std::vector<flatbuffers::Offset<void>> value_offsets;
-  uint8_t type;
-  flatbuffers::Offset<void> offset;
-  auto dict = ivalue.toGenericDict();
+  const auto& dict = ivalue.toGenericDict();
+  std::vector<uint32_t> keys;
+  std::vector<uint32_t> values;
+  keys.reserve(dict.size());
+  values.reserve(dict.size());
   for (const auto& entry: dict) {
-    std::tie(type, offset) = iValueToFB(fbb, entry.key());
-    key_types.push_back(type);
-    key_offsets.push_back(offset);
-    std::tie(type, offset) = iValueToFB(fbb, entry.value());
-    value_types.push_back(type);
-    value_offsets.push_back(offset);
+    int key_index = storeIValueAndGetIndex(fbb, entry.key());
+    keys.push_back(key_index);
+    int value_index = storeIValueAndGetIndex(fbb, entry.value());
+    values.push_back(value_index);
   }
-  return CreateDictDirect(fbb, &key_types, &key_offsets, &value_types, &value_offsets);
+  return CreateDictDirect(fbb, &keys, &keys);
+}
+
+flatbuffers::Offset<mobile::serialization::ObjectType>
+IValueFlatbufferSerializer::classTypeToFB(
+  FlatBufferBuilder& fbb, ClassTypePtr class_ptr
+) {
+
+  mobile::serialization::TypeType typetype = mobile::serialization::TypeType_UNSET;
+
+  uint32_t state_index = 0;
+  flatbuffers::Offset<flatbuffers::Vector<flatbuffers::Offset<flatbuffers::String>>> names_offset = 0;
+  auto setstate = class_ptr->findMethod("__setstate__");
+  if (setstate == nullptr) {
+    size_t num_attr = class_ptr->numAttributes();
+    std::vector<flatbuffers::Offset<flatbuffers::String>> names;
+    std::vector<uint32_t> type_index;
+    for (size_t i = 0; i < num_attr; ++i) {
+      names.push_back(fbb.CreateSharedString(class_ptr->getAttributeName(i)));
+    }
+    names_offset = fbb.CreateVector(names);
+    typetype = mobile::serialization::TypeType_CLASS_WITH_FIELD;
+  } else {
+    if (setstate->isGraphFunction()) {
+      state_index = storeFunctionAndGetIndex(fbb, *setstate);
+      typetype = mobile::serialization::TypeType_CLASS_WITH_SETSTATE;
+    } else {
+      typetype = mobile::serialization::TypeType_CUSTOM_CLASS;
+    }
+  }
+  std::cerr << " Calling CreateOjbect type: " << mobile::serialization::EnumNameTypeType(typetype) << std::endl;
+
+  /*
+
+  inline flatbuffers::Offset<ObjectType> CreateObjectType(
+    flatbuffers::FlatBufferBuilder &_fbb,
+    flatbuffers::Offset<flatbuffers::String> type_name = 0,
+    torch::jit::mobile::serialization::TypeType type = torch::jit::mobile::serialization::TypeType_UNSET,
+    flatbuffers::Offset<flatbuffers::Vector<flatbuffers::Offset<flatbuffers::String>>> attr_names = 0,
+    flatbuffers::Offset<flatbuffers::Vector<uint32_t>> attr_sample_indexes = 0,
+    uint32_t setstate = 0) {
+  */
+  auto name_offset = fbb.CreateString(type_name_uniquer_.getUniqueName(class_ptr).qualifiedName());
+  std::cerr << "    classoffset is " << (uint64_t) name_offset.o << std::endl;
+  return CreateObjectType(
+    fbb, name_offset, typetype, names_offset,
+    0, state_index
+  );
+  // std::cerr << "classType offset is " << (uint64_t) xx.o << std::endl;
+}
+
+uint32_t IValueFlatbufferSerializer::storeFunctionAndGetIndex(flatbuffers::FlatBufferBuilder& fbb, const Function& function) {
+  const auto& qn_name = function.qualname().qualifiedName();
+  auto iter = qn_to_serialized_values_.find(function.qualname().qualifiedName());
+  if (iter != qn_to_serialized_values_.end()) {
+    return iter->second;
+  }
+
+  uint32_t index = insertIValue(mobile::serialization::IValue_Function,
+             functionToFB(fbb, function));
+  qn_to_serialized_values_[qn_name] = index;
+  return index;
+}
+
+uint32_t IValueFlatbufferSerializer::storeClassTypeAndGetIndex(FlatBufferBuilder& fbb, ClassTypePtr class_ptr) {
+
+  const auto& type_str = class_ptr->name()->qualifiedName();
+  auto iter = qn_to_serialized_values_.find(type_str);
+  if (iter != qn_to_serialized_values_.end()) {
+    return iter->second;
+  }
+
+  auto offset = classTypeToFB(fbb, class_ptr);
+  uint32_t res = insertIValue(mobile::serialization::IValue_ObjectType, offset);
+  std::cerr << "      index is " << res << std::endl;
+  qn_to_serialized_values_[type_str] = res;
+  return res;
 }
 
 flatbuffers::Offset<mobile::serialization::Object>
@@ -128,40 +467,29 @@ IValueFlatbufferSerializer::objectToFB(flatbuffers::FlatBufferBuilder& fbb, cons
   // rename type?
   // check getstate
 
-  int type_index;
-  auto iter = memoized_class_map_.find(type);
-  if (iter != memoized_class_map_.end()) {
-    type_index = iter->second;
-  } else {
-    type_index = memoized_class_types_.size();
-    memoized_class_types_.push_back(type);
-    memoized_class_map_[type] = type_index;
-  }
+  bool setstate = ValidSetGetState(type.get());
 
-  mobile::serialization::IValue state_type;
-  flatbuffers::Offset<void> state_offset;
-  bool setstate = false;
+  mobile::serialization::ObjectBuilder obj_builder(fbb);
 
-  flatbuffers::Offset<flatbuffers::Vector<flatbuffers::Offset<flatbuffers::String>>> names_offset = 0;
-  if (ValidSetGetState(type)) {
+  // save state as ivalue
+  std::vector<uint32_t>tuple_index;
+  if (setstate) {
     Function& getstate = type->getMethod("__getstate__");
     auto state = getstate({obj});
-    std::tie(state_type, state_offset) = iValueToFB(fbb, state);
-    setstate = true;
+    auto state_index = storeIValueAndGetIndex(fbb, state);
+    obj_builder.add_state(state_index);
   } else {
     size_t num_attr = type->numAttributes();
-    std::vector<IValue> ivalues;
-    std::vector<flatbuffers::Offset<flatbuffers::String>> names;
     for (size_t i = 0; i < num_attr; ++i) {
-      names.push_back(fbb.CreateSharedString(type->getAttributeName(i)));
-      ivalues.push_back(obj->getSlot(i));
+      tuple_index.push_back(storeIValueAndGetIndex(fbb, obj->getSlot(i)));
     }
-    names_offset = fbb.CreateVector(names);
-    IValue state = c10::ivalue::Tuple::create(std::move(ivalues));
-    std::tie(state_type, state_offset) = iValueToFB(fbb, state);
+    obj_builder.add_attrs(fbb.CreateVector(tuple_index));
   }
-  return CreateObject(
-    fbb, type_index, names_offset, setstate, state_type, state_offset);
+
+  uint32_t type_index = storeClassTypeAndGetIndex(fbb, type);
+  obj_builder.add_type_index(type_index);
+  std::cerr << "Serializing obj of type " << type->name()->qualifiedName() << " index is " << type_index << std::endl;
+  return obj_builder.Finish();
 }
 
 flatbuffers::Offset<mobile::serialization::TensorMetadata>
@@ -222,6 +550,16 @@ IValueFlatbufferSerializer::IValueFlatbufferSerializer::tensorToFB(flatbuffers::
 }
 
 
+uint32_t IValueFlatbufferSerializer::storeIValueAndGetIndex(flatbuffers::FlatBufferBuilder& fbb, const IValue& ivalue) {
+  uint8_t type;
+  flatbuffers::Offset<void> offset;
+  std::tie(type, offset) = iValueToFB(fbb, ivalue);
+
+  uint32_t current_size = ivalue_offsets_.size();
+  ivalue_offsets_.emplace_back(offset);
+  ivalue_types_.emplace_back(type);
+  return current_size;
+}
 
 std::tuple<
     mobile::serialization::IValue,
@@ -287,156 +625,7 @@ IValueFlatbufferSerializer::iValueToFB(flatbuffers::FlatBufferBuilder& fbb, cons
     AT_ERROR("Unknown IValue type for pickling: ", ivalue.tagKind());
   }
   return {ivalue_type, offset};
-
 }
-
-at::Tensor IValueDeserializer::parseTensor(const mobile::serialization::TensorMetadata* tensor_md) {
-  at::ScalarType type = static_cast<at::ScalarType>(tensor_md->scalar_type());
-  auto options = at::CPU(type).options();
-  at::Tensor tensor;
-  if (tensor_md->quantized_schema() != nullptr) {
-    // is quantized
-    const auto* schema = tensor_md->quantized_schema();
-    auto qscheme_type = static_cast<at::QScheme>(schema->qscheme());
-    switch (qscheme_type) {
-      case at::kPerTensorAffine: {
-        tensor = at::_empty_affine_quantized(
-            {0}, options, schema->scale(), schema->zero_point());
-      } break;
-      case at::kPerChannelAffineFloatQParams:
-      case at::kPerChannelAffine: {
-        at::Tensor scales = parseTensor(schema->scales());
-        at::Tensor zero_points = parseTensor(schema->zero_points());
-        tensor = at::_empty_per_channel_affine_quantized(
-          {0}, scales, zero_points, schema->axis(), options);
-      } break;
-      default:
-        TORCH_CHECK(
-            false,
-            "Unsupported tensor quantization type in serialization ",
-            toString(qscheme_type));
-        break;
-    }
-  } else {
-    tensor = at::empty({0}, options);
-  }
-  at::TensorImpl* impl = tensor.unsafeGetTensorImpl();
-
-  c10::Storage storage;
-  if (tensor_data_ == nullptr) {
-    storage = tensor_loader_(tensor_md->storage_location_index());
-  } else {
-    storage = tensor_data_->at(tensor_md->storage_location_index());
-  }
-  impl->set_storage_keep_dtype(storage);
-  impl->set_storage_offset(tensor_md->storage_offset());
-
-  std::vector<int64_t> size{tensor_md->sizes()->begin(), tensor_md->sizes()->end()};
-  std::vector<int64_t> stride{tensor_md->strides()->begin(), tensor_md->strides()->end()};
-  impl->set_sizes_and_strides(std::move(size), std::move(stride));
-  tensor = autograd::make_variable(tensor, tensor_md->requires_grad());
-  return tensor;
-}
-IValue IValueDeserializer::parseList(const mobile::serialization::List* list) {
-  auto res = c10::impl::GenericList(AnyType::get());
-  const auto* items_type = list->items_type();
-  const auto* items = list->items();
-  for (size_t i = 0; i < items_type->size(); ++i) {
-    res.emplace_back(parseIValue(items_type->GetEnum<mobile::serialization::IValue>(i), items->GetAs<void>(i)));
-  }
-  return res;
-}
-IValue IValueDeserializer::parseTuple(const mobile::serialization::Tuple* tuple) {
-  std::vector<IValue> res;
-  const auto* items_type = tuple->items_type();
-  const auto* items = tuple->items();
-  for (size_t i = 0; i < items_type->size(); ++i) {
-    res.emplace_back(parseIValue(items_type->GetEnum<mobile::serialization::IValue>(i), items->GetAs<void>(i)));
-  }
-  return c10::ivalue::Tuple::create(res);
-}
-IValue IValueDeserializer::parseDict(const mobile::serialization::Dict* dict) {
-  auto result = c10::impl::GenericDict(AnyType::get(), AnyType::get());
-  const auto* keys_type = dict->keys_type();
-  const auto* keys = dict->keys();
-  const auto* values_type = dict->values_type();
-  const auto* values = dict->values();
-  for (size_t i = 0; i < keys_type->size(); ++i) {
-    IValue key = parseIValue(keys_type->GetEnum<mobile::serialization::IValue>(i), keys->GetAs<void>(i));
-    IValue value = parseIValue(values_type->GetEnum<mobile::serialization::IValue>(i), values->GetAs<void>(i));
-    result.insert_or_assign(std::move(key), std::move(value));
-  }
-  return result;
-}
-
-IValue IValueDeserializer::parseObject(const mobile::serialization::Object* object) {
-  IValue state = parseIValue(object->state_type(), object->state());
-  auto type_ptr = types_->at(object->type_index());
-  if (object->use_setstate()) {
-    return object_loader_(object->type_index(), std::move(state));
-  } else {
-    const auto& elements = state.toTuple()->elements();
-    size_t ndict = elements.size();
-    auto obj = c10::ivalue::Object::create(type_ptr, ndict);
-    //auto obj = c10::ivalue::Object::create(type, elements.size());
-    size_t i = 0;
-    auto cls = type_ptr.type_->expect<at::ClassType>();
-    for (const auto& ival : elements) {
-      cls->addOrCheckAttribute(object->attr_names()->Get(i)->str(), ival.type());
-      obj->setSlot(i, ival);
-      ++i;
-    }
-    return obj;
-  }
-  std::cerr << "shouldnt be here (ivalue_serialization.cpp:391)" << std::endl;
-  return IValue();
-}
-
-template <typename T, typename U>
-std::vector<T> parseListNative(const U* list) {
-  return {list->items()->begin(), list->items()->end()};
-}
-
-IValue IValueDeserializer::parseIValue(const mobile::serialization::IValue ivalue_type, const void* ivalue_data) {
-  switch (ivalue_type) {
-    case mobile::serialization::IValue_NONE:
-      return {};
-    case mobile::serialization::IValue_Int:
-      return static_cast<const mobile::serialization::Int*>(ivalue_data)->int_val();
-    case mobile::serialization::IValue_Bool:
-      return static_cast<const mobile::serialization::Bool*>(ivalue_data)->bool_val();
-    case mobile::serialization::IValue_Double:
-      return static_cast<const mobile::serialization::Double*>(ivalue_data)->double_val();
-    case mobile::serialization::IValue_TensorMetadata:
-      return parseTensor(static_cast<const mobile::serialization::TensorMetadata*>(ivalue_data));
-    case mobile::serialization::IValue_String:
-      return static_cast<const mobile::serialization::String*>(ivalue_data)->data()->str();
-    case mobile::serialization::IValue_List:
-      return parseList(static_cast<const mobile::serialization::List*>(ivalue_data));
-    case mobile::serialization::IValue_IntList:
-      return parseListNative<int64_t>(static_cast<const mobile::serialization::IntList*>(ivalue_data));
-    case mobile::serialization::IValue_DoubleList:
-      return parseListNative<double>(static_cast<const mobile::serialization::DoubleList*>(ivalue_data));
-    case mobile::serialization::IValue_BoolList: {
-      std::vector<uint8_t> res = parseListNative<uint8_t>(
-        static_cast<const mobile::serialization::BoolList*>(ivalue_data));
-      c10::List<bool> boollist;
-      for (auto x : res) {
-        boollist.push_back(x);
-      }
-      return boollist;
-    }
-    case mobile::serialization::IValue_Tuple:
-      return parseTuple(static_cast<const mobile::serialization::Tuple*>(ivalue_data));
-    case mobile::serialization::IValue_Dict:
-      return parseDict(static_cast<const mobile::serialization::Dict*>(ivalue_data));
-    case mobile::serialization::IValue_Object:
-      return parseObject(static_cast<const mobile::serialization::Object*>(ivalue_data));
-    default:
-      return {};
-  }
-}
-
 
 } // namespace jit
 } // namespace torch
