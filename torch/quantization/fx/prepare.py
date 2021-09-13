@@ -67,7 +67,7 @@ from ..quantization_mappings import (
     get_default_qat_module_mappings,
 )
 
-from torch.ao.quantization.quantize import (
+from ..quantize import (
     is_activation_post_process,
     convert
 )
