@@ -1109,6 +1109,27 @@ TEST(Simplify, SimplifyDiv) {
   }
 }
 
+TEST(Simplify, SimplifyDivWithLoopContext0) {
+  // Stmt to simplify:
+  // for (int i = 0; i < 100; i++) {
+  //  A[i] = i / 100;
+  //}
+  VarHandle i("i", kInt);
+  BufHandle a_buf("A", {100}, kInt);
+  auto for_stmt = For::make(i, 0, 100, Store::make(a_buf, {i}, (i / 100)));
+
+  const StmtPtr simplified = IRSimplifier::simplify(for_stmt);
+
+  std::ostringstream oss;
+  oss << *(simplified);
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (int i
+# CHECK-NEXT:   A[i] = 0;
+      )IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+}
+
 TEST(Simplify, SimplifyDivWithLoopContext1) {
   // Stmt to simplify:
   // for (int i = 0; i < 6; i++) {
