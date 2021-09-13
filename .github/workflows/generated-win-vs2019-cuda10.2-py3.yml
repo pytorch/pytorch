@@ -44,9 +44,6 @@ jobs:
   build:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: "windows.4xlarge"
-    defaults:
-      run:
-        working-directory: pytorch-${{ github.run_id }}
     needs: [ciflow_should_run]
     env:
       JOB_BASE_NAME: win-vs2019-cuda10.2-py3-build
@@ -60,10 +57,9 @@ jobs:
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          submodules: recursive
-          path: pytorch-${{ github.run_id }}
           # deep clone, to allow use of git merge-base
           fetch-depth: 0
+          submodules: recursive
       - name: Display EC2 information
         shell: bash
         run: |
@@ -175,17 +171,7 @@ jobs:
       matrix: ${{ fromJson(needs.generate-test-matrix.outputs.matrix) }}
       fail-fast: false
     runs-on: ${{ matrix.runner }}
-    defaults:
-      run:
-        working-directory: pytorch-${{ github.run_id }}
     steps:
-      - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
-        with:
-          submodules: recursive
-          path: pytorch-${{ github.run_id }}
-          # deep clone, to allow use of git merge-base
-          fetch-depth: 0
       - name: Display EC2 information
         shell: bash
         run: |
@@ -203,6 +189,12 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+        with:
+          # deep clone, to allow use of git merge-base
+          fetch-depth: 0
+          submodules: recursive
       - name: Install Visual Studio 2019 toolchain
         shell: powershell
         run: |
