@@ -154,7 +154,7 @@ void MemoryObserverThreadLocalState::reportMemoryUsage(
   evt.type = MemoryObserverEvent::MEMORY_EVENT;
   evt.mem_event.addr = reinterpret_cast<intptr_t>(ptr);
   evt.mem_event.size = alloc_size;
-  evt.mem_event.start_time = evt.mem_event.start_time = timeSinceEpoch();
+  evt.mem_event.ts = timeSinceEpoch();
   evt.mem_event.type =
       (alloc_size >= 0 ? MemoryEvent::EventType::ALLOCATE
                        : MemoryEvent::EventType::FREE);
