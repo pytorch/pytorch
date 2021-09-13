@@ -214,21 +214,29 @@ class TestModule(TestCase):
         module_cls = module_info.module_cls
         module_inputs = module_info.module_inputs_func(module_info, device=device, dtype=dtype,
                                                        requires_grad=True)
-        def _make_leafs(item):
+
+        # gradients needs to be retained to check for grad. This is useful when
+        # non-leafs are present in the graph.
+        def _retain_grad(item):
             if isinstance(item, dict):
                 for i in item.values():
-                    _make_leafs(i)
-            elif isinstance(item, tuple):
+                    _retain_grad(i)
+            elif isinstance(item, (tuple, list)):
                 for i in item:
-                    _make_leafs(i)
-            else:
-                if not isinstance(item, torch.Tensor) or item.is_leaf:
-                    return
-                old_requires_grad = item.requires_grad
-                item.detach_().requires_grad_(old_requires_grad)
+                    _retain_grad(i)
+            elif isinstance(item, torch.Tensor) and item.requires_grad:
+                item.retain_grad()
+
+        def _get_grads(obj):
+            if isinstance(obj, tuple):
+                return tuple(_get_grads(o) for o in obj)
+            elif isinstance(obj, dict):
+                return {name: _get_grads(o) for name, o in obj.items()}
+            elif isinstance(obj, torch.Tensor) and obj.requires_grad:
+                return obj.grad
 
         def _zero_grad(obj):
-            if isinstance(obj, tuple) or isgenerator(obj):
+            if isinstance(obj, (tuple, list)) or isgenerator(obj):
                 for o in obj:
                     _zero_grad(o)
             elif isinstance(obj, dict):
@@ -239,8 +247,8 @@ class TestModule(TestCase):
                 obj.grad.zero_()
 
         def _make_non_contiguous(obj):
-            if isinstance(obj, tuple):
-                return tuple(_make_non_contiguous(o) for o in obj)
+            if isinstance(obj, (tuple, list)):
+                return type(obj)(_make_non_contiguous(o) for o in obj)
             elif isinstance(obj, dict):
                 return {name: _make_non_contiguous(o) for name, o in obj.items()}
 
@@ -253,25 +261,16 @@ class TestModule(TestCase):
             out.requires_grad = obj.requires_grad
             return out
 
-
         def _can_be_noncontiguous(obj):
-            if isinstance(obj, tuple):
+            if isinstance(obj, (tuple, list)):
                 return any(_can_be_noncontiguous(o) for o in obj)
             elif isinstance(obj, dict):
                 return any(_can_be_noncontiguous(o) for o in obj.values())
-
+            # scalar tensors can not be noncontiguous
             if not isinstance(obj, torch.Tensor) or obj.dim() == 0:
                 return False
             return True
 
-        def _get_grads(obj):
-           if isinstance(obj, tuple):
-               return tuple(_get_grads(o) for o in obj)
-           elif isinstance(obj, dict):
-               return {name: _get_grads(o) for name, o in obj.items()}
-           if not isinstance(obj, torch.Tensor) or obj.is_leaf:
-               return obj
-           return obj.grad if obj.grad is not None else None
 
         for module_input in module_inputs:
             if module_input.forward_input is None:
@@ -286,7 +285,7 @@ class TestModule(TestCase):
             m = module_cls(*args, **kwargs)
             m.to(device).to(dtype)
 
-            _make_leafs((input_args, input_kwargs))
+            _retain_grad((input_args, input_kwargs))
 
             # === Forward with default input
             with freeze_rng_state():
