@@ -1,6 +1,7 @@
 from .node import Node, Argument, Target, map_arg, _type_repr, _get_qualified_name
 import torch.utils._pytree as pytree
 from . import _pytree as fx_pytree
+from ._compatibility import compatibility
 
 from typing import TYPE_CHECKING, Callable, Any, List, Dict, NamedTuple, Optional, Tuple, Set, FrozenSet, Type
 from dataclasses import dataclass
@@ -175,9 +176,12 @@ class _Namespace:
         return False
 
 
+@compatibility(is_backward_compatible=True)
 @dataclass
 class PythonCode:
-    """Represents all the information necessary to exec or save a graph as Python code."""
+    """
+    Represents all the information necessary to exec or save a graph as Python code.
+    """
     # Python source code for the forward function definition.
     src: str
     # Values in global scope during exection of `src_def`.
@@ -240,6 +244,7 @@ class _PyTreeInfo(NamedTuple):
     in_spec: pytree.TreeSpec
     out_spec: Optional[pytree.TreeSpec]
 
+@compatibility(is_backward_compatible=True)
 class Graph:
     """
     ``Graph`` is the main data structure used in the FX Intermediate Representation.
@@ -283,6 +288,8 @@ class Graph:
 
     For the semantics of operations represented in the ``Graph``, please see :class:`Node`.
     """
+
+    @compatibility(is_backward_compatible=True)
     def __init__(self, owning_module: Optional["GraphModule"] = None, tracer_cls: Optional[Type["Tracer"]] = None):
         """
         Construct an empty Graph.
@@ -299,6 +306,11 @@ class Graph:
 
     @property
     def owning_module(self):
+        """
+        Return the module that owns this ``GraphModule``, if there is one,
+        ``None`` if there is no owning module or if there are multiple owning
+        modules.
+        """
         return self._owning_module
 
     @owning_module.setter
@@ -322,6 +334,7 @@ class Graph:
         """
         return _node_list(self)
 
+    @compatibility(is_backward_compatible=True)
     def graph_copy(self, g : 'Graph', val_map : Dict[Node, Node], return_output_node=False) -> 'Optional[Argument]':
         """
         Copy all nodes from a given graph into ``self``.
@@ -354,7 +367,7 @@ class Graph:
         from the default implementation. This uses graph_copy to copy the nodes
         in an iterative way, rather than recursive. It also populates the
         memoization table to prevent unnecessary copies (e.g. references to
-        nodes or other parts of the Graph from a custom GraphModule implementation
+        nodes or other parts of the Graph from a custom GraphModule implementation.
         """
         memo = memo if memo else {}
         g = Graph(tracer_cls=self._tracer_cls)
@@ -364,6 +377,7 @@ class Graph:
         g.output(output_val, type_expr=getattr(old_output_val, 'type', None))
         return g
 
+    @compatibility(is_backward_compatible=True)
     def create_node(self, op: str, target: 'Target',
                     args: Optional[Tuple['Argument', ...]] = None,
                     kwargs: Optional[Dict[str, 'Argument']] = None,
@@ -410,10 +424,12 @@ class Graph:
         self._len += 1
         return n
 
+    @compatibility(is_backward_compatible=False)
     def flatten_inps(self, *args):
         flat_args, args_spec = pytree.tree_flatten(args)
         return flat_args
 
+    @compatibility(is_backward_compatible=False)
     def unflatten_outs(self, out):
         if self._pytree_info is None:
             return out
@@ -422,6 +438,7 @@ class Graph:
         assert(self._pytree_info.out_spec is not None)
         return pytree.tree_unflatten(out, self._pytree_info.out_spec)
 
+    @compatibility(is_backward_compatible=True)
     def erase_node(self, to_erase : Node) -> None:
         """
         Erases a ``Node`` from the ``Graph``. Throws an exception if
@@ -448,6 +465,7 @@ class Graph:
         assert isinstance(new_kwargs, dict)
         to_erase.kwargs = new_kwargs
 
+    @compatibility(is_backward_compatible=True)
     def inserting_before(self, n: Optional[Node] = None):
         """Set the point at which create_node and companion methods will insert into the graph.
         When used within a 'with' statement, this will temporary set the insert point and
@@ -470,6 +488,7 @@ class Graph:
         assert n.graph == self, "Node to insert before is not in graph."
         return _InsertPoint(self, n.prepend)
 
+    @compatibility(is_backward_compatible=True)
     def inserting_after(self, n: Optional[Node] = None):
         """Set the point at which create_node and companion methods will insert into the graph.
         When used within a 'with' statement, this will temporary set the insert point and
@@ -492,7 +511,7 @@ class Graph:
         assert n.graph == self, "Node to insert after is not in graph."
         return _InsertPoint(self, n.append)
 
-    # sugar for create_node when you know the op
+    @compatibility(is_backward_compatible=True)
     def placeholder(self, name: str, type_expr: Optional[Any] = None) -> Node:
         """
         Insert a ``placeholder`` node into the Graph. A ``placeholder`` represents
@@ -514,6 +533,7 @@ class Graph:
         """
         return self.create_node('placeholder', name, type_expr=type_expr)
 
+    @compatibility(is_backward_compatible=True)
     def get_attr(self, qualified_name: str, type_expr: Optional[Any] = None) -> Node:
         """
         Insert a ``get_attr`` node into the Graph. A ``get_attr`` ``Node`` represents the
@@ -571,6 +591,7 @@ class Graph:
                           "necessary buffer")
         return self.create_node('get_attr', qualified_name, type_expr=type_expr)
 
+    @compatibility(is_backward_compatible=True)
     def call_module(self,
                     module_name: str,
                     args: Optional[Tuple['Argument', ...]] = None,
@@ -615,6 +636,7 @@ class Graph:
                           "necessary submodule")
         return self.create_node('call_module', module_name, args, kwargs, type_expr=type_expr)
 
+    @compatibility(is_backward_compatible=True)
     def call_method(self,
                     method_name: str,
                     args: Optional[Tuple['Argument', ...]] = None,
@@ -649,6 +671,7 @@ class Graph:
         """
         return self.create_node('call_method', method_name, args, kwargs, type_expr=type_expr)
 
+    @compatibility(is_backward_compatible=True)
     def call_function(self,
                       the_function: Callable[..., Any],
                       args: Optional[Tuple['Argument', ...]] = None,
@@ -684,6 +707,7 @@ class Graph:
         """
         return self.create_node('call_function', the_function, args, kwargs, type_expr=type_expr)
 
+    @compatibility(is_backward_compatible=True)
     def node_copy(self, node: Node, arg_transform: Callable[[Node], 'Argument'] = lambda x: x) -> Node:
         """
         Copy a node from one graph into another. ``arg_transform`` needs to transform arguments from
@@ -714,6 +738,7 @@ class Graph:
         result_node.meta = copy.copy(node.meta)
         return result_node
 
+    @compatibility(is_backward_compatible=True)
     def output(self, result: 'Argument', type_expr: Optional[Any] = None):
         """
         Insert an ``output`` ``Node`` into the ``Graph``. An ``output`` node represents
@@ -745,6 +770,7 @@ class Graph:
         op = _snake_case(op)
         return op
 
+    @compatibility(is_backward_compatible=True)
     def python_code(self, root_module: str) -> PythonCode:
         """
         Turn this ``Graph`` into valid Python code.
@@ -923,11 +949,13 @@ class Graph:
                     return
                 qualified_name = _get_qualified_name(node.target)
                 global_name = add_global(qualified_name, node.target)
+                # special case for getattr: node.args could be 2-argument or 3-argument
+                # 2-argument: attribute access; 3-argument: fall through to attrib function call with default value
                 if global_name == 'getattr' and \
                    isinstance(node.args, tuple) and \
                    isinstance(node.args[1], str) and \
-                   node.args[1].isidentifier():
-                    # pretty print attribute access
+                   node.args[1].isidentifier() and \
+                   len(node.args) == 2:
                     body.append(f'{repr(node)}{maybe_type_annotation} = {_format_target(repr(node.args[0]), node.args[1])}')
                     return
                 body.append(f'{repr(node)}{maybe_type_annotation} = {global_name}({_format_args(node.args, node.kwargs)})')
@@ -995,7 +1023,7 @@ def forward({', '.join(orig_args)}){maybe_return_annotation[0]}:
 
     def __str__(self) -> str:
         """
-        Print a human-readable (not machine-readable) string representation
+        Return a human-readable (not machine-readable) string representation
         of this Graph
         """
         placeholder_names : List[str] = []
@@ -1011,10 +1039,12 @@ def forward({', '.join(orig_args)}){maybe_return_annotation[0]}:
                 s += '\n    ' + node_str
         return s
 
+    @compatibility(is_backward_compatible=True)
     def print_tabular(self):
         """
         Prints the intermediate representation of the graph in tabular
-        format.
+        format. Note that this API requires the ``tabulate`` module to be
+        installed.
         """
         try:
             from tabulate import tabulate
@@ -1027,6 +1057,7 @@ def forward({', '.join(orig_args)}){maybe_return_annotation[0]}:
         print(tabulate(node_specs,
               headers=['opcode', 'name', 'target', 'args', 'kwargs']))
 
+    @compatibility(is_backward_compatible=True)
     def lint(self):
         """
         Runs various checks on this Graph to make sure it is well-formed. In
@@ -1066,8 +1097,15 @@ def forward({', '.join(orig_args)}){maybe_return_annotation[0]}:
         # Check targets are legit
         if self.owning_module:
             for node in self.nodes:
+                if node.op == 'call_function':
+                    if not callable(node.target):
+                        raise ValueError(f'Node {node} target {node.target} has type {torch.typename(node.target)} but '
+                                         'a Callable is expected')
+                else:
+                    if not isinstance(node.target, str):
+                        raise ValueError(f'Node {node} target {node.target} has type {torch.typename(node.target)} but '
+                                         'a str is expected')
                 if node.op in ['get_attr', 'call_module']:
-                    assert isinstance(node.target, str)
                     target_atoms = node.target.split('.')
                     m_itr = self.owning_module
                     for i, atom in enumerate(target_atoms):
@@ -1090,6 +1128,7 @@ def forward({', '.join(orig_args)}){maybe_return_annotation[0]}:
                         else:
                             m_itr = new_m_itr
 
+    @compatibility(is_backward_compatible=True)
     def eliminate_dead_code(self):
         """
         Remove all dead code from the graph, based on each node's number of
@@ -1117,7 +1156,6 @@ def forward({', '.join(orig_args)}){maybe_return_annotation[0]}:
 
             def forward(self, x):
                 return x + self.attr_1
-
         """
         # Lint the graph first to make sure its topologically sorted, otherwise
         # DCE below will not behave as expected.
@@ -1149,7 +1187,8 @@ reflectable_magic_methods = {
     'and': '{} & {}',
     'or': '{} | {}',
     'xor': '{} ^ {}',
-    'getitem': '{}[{}]'
+    'getitem': '{}[{}]',
+    'matmul': '{} @ {}',
 }
 
 magic_methods = dict({
