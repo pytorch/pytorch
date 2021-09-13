@@ -77,7 +77,7 @@ def discover_tests(
     return sorted(rc)
 
 
-TEST = ["test_testing"]
+TESTS = ["test_testing"]
 # TESTS = discover_tests(
 #     blocklisted_patterns=[
 #         'ao',
