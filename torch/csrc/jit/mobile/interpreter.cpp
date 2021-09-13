@@ -67,7 +67,7 @@ bool InterpreterState::run(Stack& stack) {
       //     std::cout << "." << code_->op_names_[inst.X].overload_name;
       //   }
       // }
-      // std::cout << "top=" << stack.back().tagKind();
+      // std::cout << " top=" << stack.back().tagKind();
       // std::cout << std::endl;
 
       // TODO(iliacher): remove the workaround after RecordFunction is in

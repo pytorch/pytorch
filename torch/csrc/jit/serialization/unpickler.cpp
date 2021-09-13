@@ -468,6 +468,7 @@ void Unpickler::readGlobal(
     const std::string& class_name) {
   // TODO [unpickler refactor] __main__ isn't used by the pickler anymore, this
   // is only here for bc-compatibility reasons
+
   if (module_name == "__main__") {
     if (class_name == "TensorID") {
       globals_.emplace_back([this] {

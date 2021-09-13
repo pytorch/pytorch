@@ -49,6 +49,7 @@ table String {
 
 table List {
   items: [uint];
+  annotation_str: string;  // to recover key/val type
 }
 
 table IntList {
@@ -70,6 +71,7 @@ table Tuple {
 table Dict {
   keys: [uint];
   values: [uint];
+  annotation_str: string;  // to recover key/val type
 }
 
 enum TypeType : ubyte {
@@ -83,16 +85,15 @@ enum TypeType : ubyte {
 table ObjectType {
   type_name:string;
   type: TypeType;
-
+  // Below fields are optional
   attr_names:[string];
-  attr_sample_indexes: [uint];
-  setstate: uint;
 }
 
 table Object {
   type_index: uint;
   state: uint;
   attrs: [uint];
+  setstate_func: uint;
 }
 
 struct Instruction {
@@ -155,7 +156,6 @@ union IValue {
   DoubleList,
   BoolList,
   Function,
-  ObjectType
 }
 
 
@@ -165,6 +165,7 @@ table Module {
   ivalues: [IValue];
   storage_data_size:int;  // number of storage data;
   storage_data: [StorageData];
+  object_types: [ObjectType];
 }
 
 root_type Module;

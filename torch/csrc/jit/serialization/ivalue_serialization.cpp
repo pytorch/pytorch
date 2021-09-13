@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/serialization/ivalue_serialization.h>
+#include "torch/csrc/jit/serialization/mobile_bytecode_generated.h"
 
 #include <ATen/ATen.h>
 #include <ATen/core/Dict.h>
@@ -9,17 +10,17 @@
 #include <torch/csrc/jit/api/function_impl.h>
 #include <string>
 
-using flatbuffers::FlatBufferBuilder;
 
 namespace torch {
 namespace jit {
 
 using mobile::serialization::CreateTupleDirect;
-using mobile::serialization::CreateListDirect;
-using mobile::serialization::CreateDictDirect;
+using mobile::serialization::CreateList;
+using mobile::serialization::CreateDict;
 using mobile::serialization::CreateTensorMetadataDirect;
 using mobile::serialization::CreateArg;
 using mobile::serialization::CreateOperator;
+using mobile::serialization::CreateObject;
 using mobile::serialization::CreateFunctionDirect;
 using mobile::serialization::CreateDebugInfo;
 using mobile::serialization::CreateModule;
@@ -182,7 +183,7 @@ flatbuffers::Offset<jit::mobile::serialization::Schema> IValueFlatbufferSerializ
     arg_vec.emplace_back(CreateArg(
         fbb,
         fbb.CreateSharedString(arg.name()),
-        fbb.CreateSharedString(arg.type()->annotation_str()),
+        fbb.CreateSharedString(arg.type()->annotation_str(type_printer)),
         index));
   }
 
@@ -191,7 +192,7 @@ flatbuffers::Offset<jit::mobile::serialization::Schema> IValueFlatbufferSerializ
     return_vec.emplace_back(CreateArg(
         fbb,
         fbb.CreateSharedString(ret.name()),
-        fbb.CreateSharedString(ret.type()->annotation_str()),
+        fbb.CreateSharedString(ret.type()->annotation_str(type_printer)),
         index));
   }
   return CreateSchema(fbb, fbb.CreateVector(arg_vec), fbb.CreateVector(return_vec));
@@ -200,9 +201,10 @@ flatbuffers::Offset<jit::mobile::serialization::Schema> IValueFlatbufferSerializ
 flatbuffers::Offset<mobile::serialization::Function>
 IValueFlatbufferSerializer::functionToFB(
     FlatBufferBuilder& fbb,
+    const std::string& qn,
     const Function& func
 ) {
-  const auto qn = func.qualname().qualifiedName();
+  // const auto qn = func.qualname().qualifiedName();
   auto graph = func.graph()->copy();
   Inline(*graph);
 
@@ -324,7 +326,9 @@ IValueFlatbufferSerializer::serializeModule(
   std::vector<uint32_t> functions_index;
   functions_index.reserve(methods.size());
   for (const auto& method : methods) {
-    auto func_offset = storeFunctionAndGetIndex(fbb, method.function());
+    auto func_offset = storeFunctionAndGetIndex(
+      fbb, method.function().qualname().qualifiedName(),
+      method.function());
     functions_index.push_back(func_offset);
   }
 
@@ -340,18 +344,16 @@ IValueFlatbufferSerializer::serializeModule(
         fbb, fbb.CreateVector(reinterpret_cast<const uint8_t*>(writable_td.data()), writable_td.sizeInBytes()));
       storage_data.push_back(storage_offset);
     }
-    storage_data_offset= fbb.CreateVector(storage_data);
+    storage_data_offset = fbb.CreateVector(storage_data);
   }
 
   auto mod = CreateModule(fbb, functions_offset, ivalue_index,
       fbb.CreateVector(ivalue_types_), fbb.CreateVector(ivalue_offsets_),
-      tensor_data_.size());
+      tensor_data_.size(), storage_data_offset,
+      fbb.CreateVector(obj_types_offset_));
   fbb.Finish(mod);
   return fbb.Release();
 }
-
-
-
 
 
 flatbuffers::Offset<mobile::serialization::Tuple>
@@ -365,7 +367,7 @@ flatbuffers::Offset<mobile::serialization::List>
 IValueFlatbufferSerializer::listToFB(flatbuffers::FlatBufferBuilder& fbb, const IValue& list) {
     const auto& elements = list.toList();
     std::vector<uint32_t> items = storeIValuesAndGetIndexes(fbb, elements.begin(), elements.end());
-    return CreateListDirect(fbb, &items);
+    return CreateList(fbb, fbb.CreateVector(items), fbb.CreateSharedString(list.type()->annotation_str()));
 }
 
 flatbuffers::Offset<mobile::serialization::Dict>
@@ -381,7 +383,10 @@ IValueFlatbufferSerializer::dictToFB(flatbuffers::FlatBufferBuilder& fbb, const 
     int value_index = storeIValueAndGetIndex(fbb, entry.value());
     values.push_back(value_index);
   }
-  return CreateDictDirect(fbb, &keys, &keys);
+  return CreateDict(fbb,
+    fbb.CreateVector(keys),
+    fbb.CreateVector(values),
+    fbb.CreateSharedString(ivalue.type()->annotation_str()));
 }
 
 flatbuffers::Offset<mobile::serialization::ObjectType>
@@ -405,7 +410,6 @@ IValueFlatbufferSerializer::classTypeToFB(
     typetype = mobile::serialization::TypeType_CLASS_WITH_FIELD;
   } else {
     if (setstate->isGraphFunction()) {
-      state_index = storeFunctionAndGetIndex(fbb, *setstate);
       typetype = mobile::serialization::TypeType_CLASS_WITH_SETSTATE;
     } else {
       typetype = mobile::serialization::TypeType_CUSTOM_CLASS;
@@ -425,23 +429,20 @@ IValueFlatbufferSerializer::classTypeToFB(
   */
   auto name_offset = fbb.CreateString(type_name_uniquer_.getUniqueName(class_ptr).qualifiedName());
   std::cerr << "    classoffset is " << (uint64_t) name_offset.o << std::endl;
-  return CreateObjectType(
-    fbb, name_offset, typetype, names_offset,
-    0, state_index
-  );
-  // std::cerr << "classType offset is " << (uint64_t) xx.o << std::endl;
+  return CreateObjectType(fbb, name_offset, typetype, names_offset);
 }
 
-uint32_t IValueFlatbufferSerializer::storeFunctionAndGetIndex(flatbuffers::FlatBufferBuilder& fbb, const Function& function) {
-  const auto& qn_name = function.qualname().qualifiedName();
-  auto iter = qn_to_serialized_values_.find(function.qualname().qualifiedName());
+uint32_t IValueFlatbufferSerializer::storeFunctionAndGetIndex(
+  flatbuffers::FlatBufferBuilder& fbb, const std::string& qn, const Function& function) {
+
+  auto iter = qn_to_serialized_values_.find(qn);
   if (iter != qn_to_serialized_values_.end()) {
     return iter->second;
   }
 
   uint32_t index = insertIValue(mobile::serialization::IValue_Function,
-             functionToFB(fbb, function));
-  qn_to_serialized_values_[qn_name] = index;
+             functionToFB(fbb, qn, function).Union());
+  qn_to_serialized_values_[qn] = index;
   return index;
 }
 
@@ -454,7 +455,8 @@ uint32_t IValueFlatbufferSerializer::storeClassTypeAndGetIndex(FlatBufferBuilder
   }
 
   auto offset = classTypeToFB(fbb, class_ptr);
-  uint32_t res = insertIValue(mobile::serialization::IValue_ObjectType, offset);
+  uint32_t res = obj_types_offset_.size();
+  obj_types_offset_.push_back(offset);
   std::cerr << "      index is " << res << std::endl;
   qn_to_serialized_values_[type_str] = res;
   return res;
@@ -469,27 +471,34 @@ IValueFlatbufferSerializer::objectToFB(flatbuffers::FlatBufferBuilder& fbb, cons
 
   bool setstate = ValidSetGetState(type.get());
 
-  mobile::serialization::ObjectBuilder obj_builder(fbb);
-
   // save state as ivalue
-  std::vector<uint32_t>tuple_index;
+  flatbuffers::Offset<flatbuffers::Vector<uint32_t>> attrs = 0;
+  uint32_t state_index = 0;
+  uint32_t setstate_func_index = 0;
   if (setstate) {
     Function& getstate = type->getMethod("__getstate__");
     auto state = getstate({obj});
-    auto state_index = storeIValueAndGetIndex(fbb, state);
-    obj_builder.add_state(state_index);
+    state_index = storeIValueAndGetIndex(fbb, state);
+    Function& setstate = type->getMethod("__setstate__");
+    if (setstate.isGraphFunction()) {
+      const auto qn =
+          type_name_uniquer_.getUniqueName(type).qualifiedName() + "." +
+          setstate.name();
+      setstate_func_index = storeFunctionAndGetIndex(fbb, qn, setstate);
+    }
   } else {
     size_t num_attr = type->numAttributes();
+    std::vector<uint32_t>tuple_index;
     for (size_t i = 0; i < num_attr; ++i) {
       tuple_index.push_back(storeIValueAndGetIndex(fbb, obj->getSlot(i)));
     }
-    obj_builder.add_attrs(fbb.CreateVector(tuple_index));
+    attrs = fbb.CreateVector(tuple_index);
+    std::cerr << " num of attrs is " << num_attr << std::endl;
   }
 
   uint32_t type_index = storeClassTypeAndGetIndex(fbb, type);
-  obj_builder.add_type_index(type_index);
   std::cerr << "Serializing obj of type " << type->name()->qualifiedName() << " index is " << type_index << std::endl;
-  return obj_builder.Finish();
+  return CreateObject(fbb, type_index, state_index, attrs, setstate_func_index);
 }
 
 flatbuffers::Offset<mobile::serialization::TensorMetadata>
@@ -500,18 +509,22 @@ IValueFlatbufferSerializer::IValueFlatbufferSerializer::tensorToFB(flatbuffers::
 
   flatbuffers::Offset<mobile::serialization::QuantizedSchema> qschema_offset = 0;
   if (quantized) {
-    mobile::serialization::QuantizedSchemaBuilder builder(fbb);
-    builder.add_qscheme(static_cast<int8_t>(tensor.qscheme()));
+    double scale = 0;
+    int32_t zero_point = 0;
+    flatbuffers::Offset<mobile::serialization::TensorMetadata> scales = 0;
+    flatbuffers::Offset<mobile::serialization::TensorMetadata> zero_points = 0;
+    int32_t axis = 0;
+
     switch (tensor.qscheme()) {
       case at::kPerTensorAffine:
-        builder.add_scale(tensor.q_scale());
-        builder.add_zero_point(tensor.q_zero_point());
+        scale = tensor.q_scale();
+        zero_point = tensor.q_zero_point();
         break;
       case at::kPerChannelAffineFloatQParams:
       case at::kPerChannelAffine: {
-        builder.add_scales(tensorToFB(fbb, tensor.q_per_channel_scales()));
-        builder.add_zero_points(tensorToFB(fbb, tensor.q_per_channel_zero_points()));
-        builder.add_axis(tensor.q_per_channel_axis());
+        scales = tensorToFB(fbb, tensor.q_per_channel_scales());
+        zero_points = tensorToFB(fbb, tensor.q_per_channel_zero_points());
+        axis = tensor.q_per_channel_axis();
       } break;
       default:
         TORCH_CHECK(
@@ -520,7 +533,15 @@ IValueFlatbufferSerializer::IValueFlatbufferSerializer::tensorToFB(flatbuffers::
             toString(tensor.qscheme()));
         break;
     }
-    qschema_offset = builder.Finish();
+
+    qschema_offset = mobile::serialization::CreateQuantizedSchema(
+      fbb,
+      static_cast<int8_t>(tensor.qscheme()),
+      scale,
+      zero_point,
+      scales,
+      zero_points,
+      axis);
   }
 
   void* addr = storage.unsafeGetStorageImpl();
@@ -551,14 +572,27 @@ IValueFlatbufferSerializer::IValueFlatbufferSerializer::tensorToFB(flatbuffers::
 
 
 uint32_t IValueFlatbufferSerializer::storeIValueAndGetIndex(flatbuffers::FlatBufferBuilder& fbb, const IValue& ivalue) {
+  if (ivalue.isNone()) {
+    return 0;
+  }
+  if (ivalue.isBool()) {
+    return ivalue.toBool() ? 2 : 1;
+  }
+  bool is_hashable = IValue::hashable(ivalue);
+  if (is_hashable) {
+    auto iter = cached_ivalues_.find(ivalue);
+    if (iter != cached_ivalues_.end()) {
+      return iter->second;
+    }
+  }
   uint8_t type;
   flatbuffers::Offset<void> offset;
   std::tie(type, offset) = iValueToFB(fbb, ivalue);
-
-  uint32_t current_size = ivalue_offsets_.size();
-  ivalue_offsets_.emplace_back(offset);
-  ivalue_types_.emplace_back(type);
-  return current_size;
+  uint32_t index = insertIValue(type, offset);
+  if (is_hashable) {
+    cached_ivalues_[ivalue] = index;
+  }
+  return index;
 }
 
 std::tuple<

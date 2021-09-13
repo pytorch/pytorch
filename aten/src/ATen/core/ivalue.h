@@ -265,7 +265,7 @@ struct TORCH_API IValue final {
   // This is defined because `c10::hash` dispatches to a function of this
   // signature. See the member function `hash()`.
   static size_t hash(const IValue& iv);
-  static size_t hash2(const IValue& iv);
+  static bool hashable(const IValue& iv);
 
   /**
    * @private [doxygen private]

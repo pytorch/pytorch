@@ -118,7 +118,7 @@ class TORCH_API Module {
   }
 
   void set_delptr(void* ptr) {
-    delptr.reset((char*)ptr);
+    delptr.reset((char*)ptr, free);
   }
   void set_unmap_ptr(void* ptr, size_t size) {
     unmap_ptr = ptr;
