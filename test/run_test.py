@@ -32,14 +32,9 @@ try:
     from tools.testing.test_selections import (
         export_S3_test_times,
         get_shard_based_on_S3,
-        get_slow_tests_based_on_S3,
         get_specified_test_cases,
         get_reordered_tests,
         get_test_case_configs,
-    )
-    from tools.testing.modulefinder_determinator import (
-        should_run_test,
-        TARGET_DET_LIST,
     )
 
     HAVE_TEST_SELECTION_TOOLS = True
@@ -235,9 +230,6 @@ CORE_TEST_LIST = [
 
 # the JSON file to store the S3 test stats
 TEST_TIMES_FILE = ".pytorch-test-times.json"
-
-# if a test file takes longer than 5 min, we add it to TARGET_DET_LIST
-SLOW_TEST_THRESHOLD = 300
 
 DISTRIBUTED_TESTS_CONFIG = {}
 
@@ -700,7 +692,7 @@ def parse_args():
     )
     parser.add_argument(
         "--determine-from",
-        help="File of affected source filenames to determine which tests to run.",
+        help="(deprecated) this doesn't do anything",
     )
     parser.add_argument(
         "--continue-through-error",
@@ -952,31 +944,6 @@ def main():
 
     if options.coverage and not PYTORCH_COLLECT_COVERAGE:
         shell(["coverage", "erase"])
-
-    if options.determine_from is not None and os.path.exists(options.determine_from):
-        slow_tests = get_slow_tests_based_on_S3(
-            TESTS, TARGET_DET_LIST, SLOW_TEST_THRESHOLD
-        )
-        print_to_stderr(
-            "Added the following tests to target_det tests as calculated based on S3:"
-        )
-        print_to_stderr(slow_tests)
-        with open(options.determine_from, "r") as fh:
-            touched_files = [
-                os.path.normpath(name.strip())
-                for name in fh.read().split("\n")
-                if len(name.strip()) > 0
-            ]
-        # HACK: Ensure the 'test' paths can be traversed by Modulefinder
-        sys.path.append(test_directory)
-        selected_tests = [
-            test
-            for test in selected_tests
-            if should_run_test(
-                TARGET_DET_LIST + slow_tests, test, touched_files, options
-            )
-        ]
-        sys.path.remove(test_directory)
 
     if IS_IN_CI:
         selected_tests = get_reordered_tests(
