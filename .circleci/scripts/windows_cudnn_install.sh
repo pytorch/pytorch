@@ -14,8 +14,15 @@ fi
 
 cudnn_installer_link="https://ossci-windows.s3.amazonaws.com/${cudnn_installer_name}.zip"
 
-curl --retry 3 -O $cudnn_installer_link
-7z x ${cudnn_installer_name}.zip -ocudnn
-cp -r cudnn/cuda/* "C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v${CUDA_VERSION}/"
-rm -rf cudnn
-rm -f ${cudnn_installer_name}.zip
+if [[ -f "${cudnn_install_folder}/include/cudnn.h" ]]; then
+    echo "Existing cudnn installation found, skipping install..."
+else
+    tmp_dir=$(mktemp -d)
+    (
+        pushd "${tmp_dir}"
+        curl --retry 3 -O $cudnn_installer_link
+        7z x ${cudnn_installer_name}.zip -ocudnn
+        cp -r cudnn/cuda/* "C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v${CUDA_VERSION}/"
+    )
+    rm -rf "${tmp_dir}"
+fi
