@@ -1,4 +1,5 @@
-#include <THC/THCTensorTypeUtils.cuh>
+//#include <THC/THCTensorTypeUtils.cuh>
+#include <THC/THCTensor.hpp>
 #include <THC/THCTensorCopy.h>
 #include <THC/THCTensorCopy.hpp>
 
