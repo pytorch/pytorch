@@ -10,6 +10,9 @@ class PostLocalSGDState(object):
     r"""
     Stores the state for all-reducing gradients globally using ``process_group`` until step ``start_localSGD_iter``,
     and all-reducing gradients locally using ``subgroup`` afterwards.
+
+    If ``process_group`` is ``None``, the global process group will be used.
+    If ``subgroup`` is ``None``, the intra-node process group on each machine will be used.
     """
 
     __slots__ = [
@@ -40,7 +43,7 @@ class PostLocalSGDState(object):
     def maybe_increase_iter(self, bucket):
         # Since bucket 0 is the last bucket to allreduce in an iteration.
         # Only increase `iter` when bucket 0 is processed.
-        if bucket.is_the_last_bucket_to_allreduce():
+        if bucket.is_last():
             self.iter += 1
 
         if self.iter == self.start_localSGD_iter:
@@ -51,7 +54,7 @@ class PostLocalSGDState(object):
 
 def post_localSGD_hook(
     state: PostLocalSGDState, bucket: dist.GradBucket
-) -> torch.futures.Future:
+) -> torch.futures.Future[torch.Tensor]:
     """
     This DDP communication hook is used for running post-localSGD algorithm,
     by combining with a model averaging component (e.g.,
@@ -62,7 +65,7 @@ def post_localSGD_hook(
         state (PostLocalSGDState): State information to run post-localSGD.
             Users mainly need to tune ``start_localSGD_iter`` to determine when to start local SGD.
         bucket (dist.GradBucket): Bucket that stores a 1D flattened gradient tensor that batches multiple per-variable tensors.
-            Note that since DDP comm hook only supports single process single device mode at this time,
+            Note that since DDP comm hook only supports single process single device mode,
             only exactly one tensor is stored in this bucket.
 
     Returns:
@@ -81,7 +84,7 @@ def post_localSGD_hook(
     world_size = global_group_to_use.size()
 
     # The input tensor is a flattened 1D tensor.
-    input_tensor = bucket.get_tensor()
+    input_tensor = bucket.buffer()
 
     # Run allreduce using `global_group_to_use` in the first `start_localSGD_iter` iterations.
     if state.iter < state.start_localSGD_iter:
@@ -91,4 +94,6 @@ def post_localSGD_hook(
     # Run allreduce using `subgroup` after the first `start_localSGD_iter` iterations.
     # From this moment, model averaging should run after the optimizer step,
     # to globally allreduce all the parameters.
+    if state.subgroup is None:
+        state.subgroup, _ = dist.new_subgroups()
     return default._allreduce_fut(state.subgroup, input_tensor)

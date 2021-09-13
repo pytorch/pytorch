@@ -195,7 +195,8 @@ void max_pool3d_with_indices_out_cpu_template(
     pT, pH, pW,
     dilationT, dilationH, dilationW,
     itime, iheight, iwidth,
-    otime, oheight, owidth);
+    otime, oheight, owidth,
+    "max_pool3d_with_indices_out_cpu_template()");
 
   /* get contiguous input */
   Tensor input = input_.contiguous();
@@ -413,7 +414,8 @@ Tensor& max_pool3d_with_indices_backward_out_cpu_template(
     pT, pH, pW,
     dilationT, dilationH, dilationW,
     itime, iheight, iwidth,
-    otime, oheight, owidth);
+    otime, oheight, owidth,
+    "max_pool3d_with_indices_backward_out_cpu_template()");
 
   /* backprop */
   if (input.ndimension() == 4) /* non-batch mode*/

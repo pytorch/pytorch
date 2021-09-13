@@ -15,7 +15,7 @@ common_notes = {
 # also connects the torch.linalg Python namespace to the torch._C._linalg builtins.
 
 cholesky = _add_docstr(_linalg.linalg_cholesky, r"""
-linalg.cholesky(A, *, out=None) -> Tensor
+linalg.cholesky(A, *, upper=False, out=None) -> Tensor
 
 Computes the Cholesky decomposition of a complex Hermitian or real symmetric positive-definite matrix.
 
@@ -54,6 +54,9 @@ Args:
                 consisting of symmetric or Hermitian positive-definite matrices.
 
 Keyword args:
+    upper (bool, optional): whether to return an upper triangular matrix.
+        The tensor returned with upper=True is the conjugate transpose of the tensor
+        returned with upper=False.
     out (Tensor, optional): output tensor. Ignored if `None`. Default: `None`.
 
 Raises:
@@ -84,7 +87,7 @@ Examples::
 """)
 
 cholesky_ex = _add_docstr(_linalg.linalg_cholesky_ex, r"""
-linalg.cholesky_ex(A, *, check_errors=False, out=None) -> (Tensor, Tensor)
+linalg.cholesky_ex(A, *, upper=False, check_errors=False, out=None) -> (Tensor, Tensor)
 
 Computes the Cholesky decomposition of a complex Hermitian or real
 symmetric positive-definite matrix.
@@ -118,9 +121,12 @@ If ``check_errors=True`` and ``info`` contains positive integers, then a Runtime
 Args:
     A (Tensor): the Hermitian `n \times n` matrix or the batch of such matrices of size
                     `(*, n, n)` where `*` is one or more batch dimensions.
-    check_errors (bool, optional): controls whether to check the content of ``infos``. Default: `False`.
 
 Keyword args:
+    upper (bool, optional): whether to return an upper triangular matrix.
+        The tensor returned with upper=True is the conjugate transpose of the tensor
+        returned with upper=False.
+    check_errors (bool, optional): controls whether to check the content of ``infos``. Default: `False`.
     out (tuple, optional): tuple of two tensors to write the output to. Ignored if `None`. Default: `None`.
 
 Examples::
@@ -1276,6 +1282,12 @@ Examples::
     tensor([14.2829, 14.2829])
     >>> LA.matrix_norm(B, dim=(0, 2))
     tensor([ 3.1623, 10.0000, 17.2627])
+""")
+
+matmul = _add_docstr(_linalg.linalg_matmul, r"""
+linalg.matmul(input, other, *, out=None) -> Tensor
+
+Alias for :func:`torch.matmul`
 """)
 
 multi_dot = _add_docstr(_linalg.linalg_multi_dot, r"""

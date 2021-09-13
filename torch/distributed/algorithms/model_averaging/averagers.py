@@ -35,7 +35,6 @@ class PeriodicModelAverager(ModelAverager):
     using the subgroups created by :meth:`~torch.distributed.new_subgroups`.
 
     Args:
-        params (Iterator[torch.nn.Parameter]): The model parameters to be averaged.
         period (int): The number of steps per model averaging.
                       Usually the period should be greater than ``1`` to reduce the communication cost.
                       Otherwise, only DDP needs to be used.
@@ -68,7 +67,7 @@ class PeriodicModelAverager(ModelAverager):
         >>>  # In the first 100 steps, run global gradient averaging like normal DDP at every step.
         >>>  # After 100 steps, run model averaging every 4 steps.
         >>>  # Note that ``warmup_steps`` must be the same as ``start_localSGD_iter`` used in ``PostLocalSGDState``.
-        >>>  averager = averagers.PeriodicModelAverager(warmup_steps=100, period=4)
+        >>>  averager = averagers.PeriodicModelAverager(period=4, warmup_steps=100)
         >>>  for step in range(0, 20):
         >>>     optimizer.zero_grad()
         >>>     loss = loss_fn(output, labels)

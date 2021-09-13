@@ -79,7 +79,7 @@ std::tuple<Tensor, Tensor> _cudnn_ctc_loss(const Tensor& log_probs_t, const Tens
   checkContiguous(c, targets); // ?
   checkBackend(c, {*log_probs}, Backend::CUDA);
   checkBackend(c, {*targets}, Backend::CPU);
-  int64_t batch_size = log_probs->size(1);
+  const auto batch_size = log_probs->size(1);
   TORCH_CHECK(input_lengths_.size() == batch_size, "input_lengths needs to have size to match batch_size");
   TORCH_CHECK(target_lengths_.size() == batch_size, "target_lengths needs to have size to match batch_size");
 

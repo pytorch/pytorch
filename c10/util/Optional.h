@@ -1049,63 +1049,63 @@ constexpr bool operator>=(nullopt_t, const optional<T>& x) noexcept {
 }
 
 // 20.5.10, Comparison with T
-template <class T>
-constexpr bool operator==(const optional<T>& x, const T& v) {
+template <class T, class U>
+constexpr bool operator==(const optional<T>& x, const U& v) {
   return bool(x) ? *x == v : false;
 }
 
-template <class T>
-constexpr bool operator==(const T& v, const optional<T>& x) {
+template <class T, class U>
+constexpr bool operator==(const U& v, const optional<T>& x) {
   return bool(x) ? v == *x : false;
 }
 
-template <class T>
-constexpr bool operator!=(const optional<T>& x, const T& v) {
+template <class T, class U>
+constexpr bool operator!=(const optional<T>& x, const U& v) {
   return bool(x) ? *x != v : true;
 }
 
-template <class T>
-constexpr bool operator!=(const T& v, const optional<T>& x) {
+template <class T, class U>
+constexpr bool operator!=(const U& v, const optional<T>& x) {
   return bool(x) ? v != *x : true;
 }
 
-template <class T>
-constexpr bool operator<(const optional<T>& x, const T& v) {
+template <class T, class U>
+constexpr bool operator<(const optional<T>& x, const U& v) {
   return bool(x) ? *x < v : true;
 }
 
-template <class T>
-constexpr bool operator>(const T& v, const optional<T>& x) {
+template <class T, class U>
+constexpr bool operator>(const U& v, const optional<T>& x) {
   return bool(x) ? v > *x : true;
 }
 
-template <class T>
-constexpr bool operator>(const optional<T>& x, const T& v) {
+template <class T, class U>
+constexpr bool operator>(const optional<T>& x, const U& v) {
   return bool(x) ? *x > v : false;
 }
 
-template <class T>
-constexpr bool operator<(const T& v, const optional<T>& x) {
+template <class T, class U>
+constexpr bool operator<(const U& v, const optional<T>& x) {
   return bool(x) ? v < *x : false;
 }
 
-template <class T>
-constexpr bool operator>=(const optional<T>& x, const T& v) {
+template <class T, class U>
+constexpr bool operator>=(const optional<T>& x, const U& v) {
   return bool(x) ? *x >= v : false;
 }
 
-template <class T>
-constexpr bool operator<=(const T& v, const optional<T>& x) {
+template <class T, class U>
+constexpr bool operator<=(const U& v, const optional<T>& x) {
   return bool(x) ? v <= *x : false;
 }
 
-template <class T>
-constexpr bool operator<=(const optional<T>& x, const T& v) {
+template <class T, class U>
+constexpr bool operator<=(const optional<T>& x, const U& v) {
   return bool(x) ? *x <= v : true;
 }
 
-template <class T>
-constexpr bool operator>=(const T& v, const optional<T>& x) {
+template <class T, class U>
+constexpr bool operator>=(const U& v, const optional<T>& x) {
   return bool(x) ? v >= *x : true;
 }
 

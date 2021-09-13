@@ -11,7 +11,9 @@ from torch.quantization.fx._equalize import (
     _WeightEqualizationObserver,
     calculate_equalization_scale,
     default_equalization_qconfig,
-    _convert_equalization_ref
+    _convert_equalization_ref,
+    get_layer_sqnr_dict,
+    get_equalization_qconfig_dict,
 )
 
 from torch.testing._internal.common_quantization import (
@@ -49,7 +51,9 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 
-qconfig_dict = {
+default_qconfig_dict = {"": default_qconfig}
+
+specific_qconfig_dict = {
     "": None,
     "object_type": [(nn.Linear, default_qconfig),
                     (F.linear, default_qconfig),
@@ -189,8 +193,8 @@ class TestEqualizeFx(QuantizationTestCase):
 
         # Check the min/max weight rows are correct
         ref_min_weights_scaled, ref_max_weights_scaled = self.channel_minmax(ref_w_scaled)
-        self.assertEqual(weight_quant_obs.min_vals, torch.tensor(ref_min_weights_scaled, dtype=torch.float32))
-        self.assertEqual(weight_quant_obs.max_vals, torch.tensor(ref_max_weights_scaled, dtype=torch.float32))
+        self.assertEqual(weight_quant_obs.min_val, torch.tensor(ref_min_weights_scaled, dtype=torch.float32))
+        self.assertEqual(weight_quant_obs.max_val, torch.tensor(ref_max_weights_scaled, dtype=torch.float32))
 
         weight_qparams = weight_quant_obs.calculate_qparams()
 
@@ -213,10 +217,10 @@ class TestEqualizeFx(QuantizationTestCase):
             ref_zero_points = -128 if weight_qdtype is torch.qint8 else 0
             ref_zero_points = ref_zero_points - np.round(ref_min_weights_scaled / ref_scales)
 
-        self.assertTrue(torch.allclose(weight_qparams[0], torch.tensor(
-            ref_scales, dtype=weight_qparams[0].dtype), atol=0.0001))
-        self.assertTrue(torch.allclose(weight_qparams[1], torch.tensor(
-            ref_zero_points, dtype=weight_qparams[1].dtype), atol=1))
+        self.assertEqual(weight_qparams[0], torch.tensor(
+            ref_scales, dtype=weight_qparams[0].dtype), rtol=1e-5, atol=0.0001)
+        self.assertEqual(weight_qparams[1], torch.tensor(
+            ref_zero_points, dtype=weight_qparams[1].dtype), rtol=1e-5, atol=1)
 
     def test_input_weight_equalization_prepare(self):
         """ Tests that graphs created after prepare_fx is as expected
@@ -268,8 +272,60 @@ class TestEqualizeFx(QuantizationTestCase):
 
         for (M, node_occurrence) in tests:
             m = M().eval()
-            prepared = prepare_fx(m, qconfig_dict, equalization_qconfig_dict=default_equalization_qconfig_dict)
+            prepared = prepare_fx(m, specific_qconfig_dict, equalization_qconfig_dict=default_equalization_qconfig_dict)
             self.checkGraphModuleNodes(prepared, expected_node_occurrence=node_occurrence)
+
+    def test_input_weight_equalization_branching(self):
+        """ Tests that graphs containing branches are prepared correctly.
+        Specifically, equalization observers should not be inserted in front of
+        branches in which both initial layers in the branches plan to be
+        quantized.
+        """
+
+        # Tests that we do not add an equalization observer due to both initial
+        # nodes in the branch containing layers that need to be equalized.
+        # Note that this should print out 2 warning messages for not being able
+        # to equalize layers linear1 and linear1 because it is part of a branch
+        class TestBranchingWithoutEqualizationModel(nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear1 = nn.Linear(5, 5)
+                self.linear2 = nn.Linear(5, 5)
+
+            def forward(self, x):
+                y = self.linear1(x)
+                z = self.linear2(x)
+                return torch.add(y, z)
+
+        no_eq_branching_node_occurrence = {
+            ns.call_module(_InputEqualizationObserver): 0,
+            ns.call_module(MinMaxObserver): 3,
+        }
+
+        m = TestBranchingWithoutEqualizationModel().eval()
+        prepared = prepare_fx(m, specific_qconfig_dict, equalization_qconfig_dict=default_equalization_qconfig_dict)
+        self.checkGraphModuleNodes(prepared, expected_node_occurrence=no_eq_branching_node_occurrence)
+
+        # Tests that we will add an equalization observer because there is only
+        # one initial node in the branch that needs to be equalized
+        class TestBranchingWithEqualizationModel(nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear1 = nn.Linear(5, 5)
+
+            def forward(self, x):
+                y = self.linear1(x)
+                z = torch.add(x, 5)
+                return torch.add(y, z)
+
+        eq_branching_node_occurrence = {
+            ns.call_module(_InputEqualizationObserver): 1,
+            ns.call_module(MinMaxObserver): 2,
+        }
+
+        m = TestBranchingWithEqualizationModel().eval()
+        prepared = prepare_fx(m, specific_qconfig_dict, equalization_qconfig_dict=default_equalization_qconfig_dict)
+        self.checkGraphModuleNodes(prepared, expected_node_occurrence=eq_branching_node_occurrence)
 
     @skipIfNoFBGEMM
     def test_input_weight_equalization_convert(self):
@@ -295,13 +351,17 @@ class TestEqualizeFx(QuantizationTestCase):
             elif ndim == 4:
                 x = torch.rand((16, 3, 224, 224))
 
-            prepared = prepare_fx(copy.deepcopy(m), qconfig_dict, equalization_qconfig_dict=default_equalization_qconfig_dict)
+            prepared = prepare_fx(
+                copy.deepcopy(m),
+                specific_qconfig_dict,
+                equalization_qconfig_dict=default_equalization_qconfig_dict
+            )
             output = prepared(x)
 
             convert_ref = _convert_equalization_ref(prepared)
             convert_ref_output = convert_ref(x)
 
-            prepared = prepare_fx(m, qconfig_dict, equalization_qconfig_dict=default_equalization_qconfig_dict)
+            prepared = prepare_fx(m, specific_qconfig_dict, equalization_qconfig_dict=default_equalization_qconfig_dict)
             prepared(x)
             convert_fx(prepared)  # Check if compile
             self.assertEqual(output, convert_ref_output)
@@ -349,7 +409,7 @@ class TestEqualizeFx(QuantizationTestCase):
             m = M().eval()
             exp_eq_scales = self.get_expected_eq_scales(m, x.detach().numpy())
 
-            prepared = prepare_fx(m, qconfig_dict, equalization_qconfig_dict=default_equalization_qconfig_dict)
+            prepared = prepare_fx(m, specific_qconfig_dict, equalization_qconfig_dict=default_equalization_qconfig_dict)
             prepared(x)
             convert_ref = _convert_equalization_ref(prepared)
             convert_ref(x)
@@ -398,7 +458,7 @@ class TestEqualizeFx(QuantizationTestCase):
             exp_eq_scales = self.get_expected_eq_scales(m, x.detach().numpy())
             exp_weights, exp_bias = self.get_expected_weights_bias(m, x.detach().numpy(), exp_eq_scales)
 
-            prepared = prepare_fx(m, qconfig_dict, equalization_qconfig_dict=default_equalization_qconfig_dict)
+            prepared = prepare_fx(m, specific_qconfig_dict, equalization_qconfig_dict=default_equalization_qconfig_dict)
             prepared(x)
             convert_ref = _convert_equalization_ref(prepared)
             convert_ref(x)
@@ -454,7 +514,7 @@ class TestEqualizeFx(QuantizationTestCase):
             exp_inp_act_vals = self.get_expected_inp_act_vals(m, x, exp_eq_scales, exp_weights, exp_bias)
             exp_weight_act_vals = self.get_expected_weight_act_vals(exp_weights)
 
-            prepared = prepare_fx(m, qconfig_dict, equalization_qconfig_dict=default_equalization_qconfig_dict)
+            prepared = prepare_fx(m, specific_qconfig_dict, equalization_qconfig_dict=default_equalization_qconfig_dict)
             prepared(x)
             convert_ref = _convert_equalization_ref(prepared)
             convert_ref(x)
@@ -668,35 +728,28 @@ class TestEqualizeFx(QuantizationTestCase):
             ns.call_method('dequantize')
         ]
 
-        tests = [(SingleLayerLinearModel, 2, linear_node_list),
-                 (LinearAddModel, 2, linearAdd_node_list),
-                 (TwoLayerLinearModel, 2, linear2_node_list),
-                 (SingleLayerFunctionalLinearModel, 2, functionalLinear_node_list),
-                 (FunctionalLinearAddModel, 2, functionalLinearAdd_node_list),
-                 (TwoLayerFunctionalLinearModel, 2, functionalLinear2_node_list),
-                 (LinearReluModel, 2, linearRelu_node_list),
-                 (LinearReluLinearModel, 2, linearReluLinear_node_list),
-                 (FunctionalLinearReluModel, 2, functionalLinearRelu_node_list),
-                 (FunctionalLinearReluLinearModel, 2, functionalLinearReluLinear_node_list),
-                 (ConvModel, 4, conv_node_list),
-                 (TwoLayerConvModel, 4, conv2_node_list),
-                 (SingleLayerFunctionalConvModel, 4, functionalConv_node_list),
-                 (TwoLayerFunctionalConvModel, 4, functionalConv2_node_list),
-                 (ConvReluModel, 4, convRelu_node_list),
-                 (ConvReluConvModel, 4, convReluConv_node_list),
-                 (FunctionalConvReluModel, 4, functionalConvRelu_node_list),
-                 (FunctionalConvReluConvModel, 4, functionalConvReluConv_node_list)]
+        tests = [(SingleLayerLinearModel, linear_node_list),
+                 (LinearAddModel, linearAdd_node_list),
+                 (TwoLayerLinearModel, linear2_node_list),
+                 (SingleLayerFunctionalLinearModel, functionalLinear_node_list),
+                 (FunctionalLinearAddModel, functionalLinearAdd_node_list),
+                 (TwoLayerFunctionalLinearModel, functionalLinear2_node_list),
+                 (LinearReluModel, linearRelu_node_list),
+                 (LinearReluLinearModel, linearReluLinear_node_list),
+                 (FunctionalLinearReluModel, functionalLinearRelu_node_list),
+                 (FunctionalLinearReluLinearModel, functionalLinearReluLinear_node_list),
+                 (ConvModel, conv_node_list),
+                 (TwoLayerConvModel, conv2_node_list),
+                 (SingleLayerFunctionalConvModel, functionalConv_node_list),
+                 (TwoLayerFunctionalConvModel, functionalConv2_node_list),
+                 (ConvReluModel, convRelu_node_list),
+                 (ConvReluConvModel, convReluConv_node_list),
+                 (FunctionalConvReluModel, functionalConvRelu_node_list),
+                 (FunctionalConvReluConvModel, functionalConvReluConv_node_list)]
 
-        for (M, ndim, node_list) in tests:
+        for (M, node_list) in tests:
             m = M().eval()
-
-            if ndim == 2:
-                x = torch.rand((5, 5))
-            elif ndim == 4:
-                x = torch.rand((16, 3, 224, 224))
-
-            prepared = prepare_fx(m, qconfig_dict, equalization_qconfig_dict=default_equalization_qconfig_dict)
-            prepared(x)
+            prepared = prepare_fx(m, specific_qconfig_dict, equalization_qconfig_dict=default_equalization_qconfig_dict)
             equalized_quantized_model = convert_fx(prepared)
 
             # Check the order of nodes in the graph
@@ -716,14 +769,82 @@ class TestEqualizeFx(QuantizationTestCase):
             m = M().eval()
 
             # No equalization
-            prepared = prepare_fx(copy.deepcopy(m), qconfig_dict, equalization_qconfig_dict={})
+            prepared = prepare_fx(copy.deepcopy(m), specific_qconfig_dict, equalization_qconfig_dict={})
             prepared(x)
             quantized = convert_fx(prepared)  # Check if compile
             quantized_output = quantized(x)
 
             # With equalization
-            prepared = prepare_fx(copy.deepcopy(m), qconfig_dict, equalization_qconfig_dict=default_equalization_qconfig_dict)
+            prepared = prepare_fx(
+                copy.deepcopy(m),
+                specific_qconfig_dict,
+                equalization_qconfig_dict=default_equalization_qconfig_dict
+            )
             prepared(x)
             equalized_and_quantized = convert_fx(prepared)  # Check if compile
             equalized_and_quantized_output = equalized_and_quantized(x)
-            self.assertTrue(torch.allclose(quantized_output, equalized_and_quantized_output, atol=0.1))
+            self.assertEqual(quantized_output, equalized_and_quantized_output, rtol=1e-5, atol=0.1)
+
+    @skipIfNoFBGEMM
+    def test_selective_equalization(self):
+        """ Tests that we are able to run numeric suite on the equalized model
+        and construct a valid equalization_qconfig_dict equalizing only the top
+        4 layers with the highest quantization errors.
+        """
+
+        torch.manual_seed(1)
+
+        class M(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.bot = torch.nn.Sequential(torch.nn.Linear(5, 5))
+                self.top = torch.nn.Sequential(torch.nn.Linear(5, 5))
+
+            def forward(self, x):
+                x = self.bot(x)
+                x = torch.add(x, 5)
+                x = self.top(x)
+                return x
+
+        float_model = M().eval()
+        # Hard coded so that the top layer has a higher quantization error
+        x = torch.tensor([[0.0642, 0.7824, 0.4255, 0.7106, 0.5957],
+                          [0.8373, 0.8851, 0.8229, 0.0212, 0.8987],
+                          [0.9077, 0.7538, 0.4530, 0.5772, 0.1376],
+                          [0.0690, 0.9002, 0.7998, 0.2768, 0.8985],
+                          [0.0282, 0.5068, 0.6725, 0.1829, 0.5480]])
+
+        # Quantize the float model
+        prepared_model = prepare_fx(copy.deepcopy(float_model), specific_qconfig_dict)
+        prepared_model(x)
+        quantized_model = convert_fx(copy.deepcopy(prepared_model))
+
+        # Get the SQNR between the float and quantized model
+        layer_to_sqnr_dict = get_layer_sqnr_dict(copy.deepcopy(prepared_model), quantized_model, x)
+
+        # Construct the equalization_qconfig_dict equalizing layers with the highest
+        # quantization errors
+        selective_equalization_qconfig_dict = get_equalization_qconfig_dict(layer_to_sqnr_dict, 1)
+
+        # Create the selectively equalized model
+        prepared_model = prepare_fx(
+            copy.deepcopy(float_model),
+            specific_qconfig_dict,
+            equalization_qconfig_dict=selective_equalization_qconfig_dict,
+        )
+        prepared_model(x)
+        equalized_model = convert_fx(prepared_model)
+
+        node_list = [
+            ns.call_function(torch.quantize_per_tensor),
+            ns.call_module(nnq.Linear),
+            ns.call_method('dequantize'),
+            ns.call_function(torch.add),
+            ns.call_function(torch.mul),
+            ns.call_function(torch.quantize_per_tensor),
+            ns.call_module(nnq.Linear),
+            ns.call_method('dequantize')
+        ]
+
+        # Check the order of nodes in the graph
+        self.checkGraphModuleNodes(equalized_model, expected_node_list=node_list)

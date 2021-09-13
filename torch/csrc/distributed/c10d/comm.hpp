@@ -18,64 +18,67 @@ class TORCH_API GradBucket {
  public:
   explicit GradBucket(
       size_t index,
+      size_t bucket_count,
       const at::Tensor& tensor,
       const std::vector<size_t>& offsets,
       const std::vector<size_t>& lengths,
       const std::vector<c10::IntArrayRef>& sizes_vec,
-      const std::vector<at::Tensor>& model_params_for_bucket)
+      const std::vector<at::Tensor>& parameters)
       : index_(index),
-        tensor_(tensor),
+        bucket_count_(bucket_count),
+        buffer_(tensor),
         offsets_(offsets),
         lengths_(lengths),
         sizes_vec_(sizes_vec),
-        model_params_for_bucket_(model_params_for_bucket) {}
+        parameters_(parameters) {}
 
   // Returns the index of the bucket, which is unique across all the buckets.
   size_t getIndex() const {
     return index_;
   }
 
-  const at::Tensor& getTensor() const {
-    return tensor_;
+  const at::Tensor& getBuffer() const {
+    return buffer_;
   }
 
-  // Returns a mutable tensor compared with the above method.
-  at::Tensor& getTensorRef() {
-    return tensor_;
+  // Returns a mutable buffer compared with the above method.
+  at::Tensor& getBufferRef() {
+    return buffer_;
   }
 
-  // Overwrites the tensor at a specific index.
-  void setTensor(at::Tensor& tensor) {
-    tensor_ = tensor;
+  // Overwrites the buffer at a specific index.
+  void setBuffer(at::Tensor& buffer) {
+    buffer_ = buffer;
   }
 
-  // Each tensor in the list that getPerParameterTensors corresponds to a
+  // Each tensor in the list that getGradients corresponds to a
   // parameter.
-  std::vector<at::Tensor> getPerParameterTensors() const;
+  std::vector<at::Tensor> getGradients() const;
 
   // Returns model parameters belonging to this bucket. They are returned in the
-  // same order as gradient tensors via getPerParameterTensors(). For example,
-  // getModelParamsForBucket[i] will have its gradient stored in
-  // getPerParameterTensors[i]
-  const std::vector<at::Tensor> getModelParamsForBucket() const {
-    return model_params_for_bucket_;
+  // same order as gradient tensors via getGradients(). For example,
+  // getParameters[i] will have its gradient stored in
+  // getGradients[i]
+  const std::vector<at::Tensor> getParameters() const {
+    return parameters_;
   }
 
   // Returns whther this bucket is the last bucket to allreduce in an iteration.
-  bool isTheLastBucketToAllreduce() const {
-    return index_ == 0;
+  bool isLast() const {
+    return index_ == bucket_count_ - 1;
   }
 
  private:
   size_t index_;
-  at::Tensor tensor_;
+  size_t bucket_count_;
+  at::Tensor buffer_;
 
-  // Per-variable info in tensor_.
+  // Per-variable info in buffer_.
   std::vector<size_t> offsets_;
   std::vector<size_t> lengths_;
   std::vector<c10::IntArrayRef> sizes_vec_;
   // Model parameters for this bucket.
-  const std::vector<at::Tensor> model_params_for_bucket_;
+  const std::vector<at::Tensor> parameters_;
 };
 
 // Base class of both `PythonCommHook` and `CppCommHook`.

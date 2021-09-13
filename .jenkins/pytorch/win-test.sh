@@ -1,7 +1,7 @@
 #!/bin/bash
 set -ex
 # shellcheck disable=SC2034
-COMPACT_JOB_NAME=pytorch-win-ws2019-cuda10-cudnn7-py3-test
+COMPACT_JOB_NAME=pytorch-win-ws2019-cuda10.1-py3-test
 
 SCRIPT_PARENT_DIR=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
 # shellcheck source=./common.sh
@@ -73,7 +73,7 @@ run_tests() {
           "$SCRIPT_HELPERS_DIR"/test_libtorch.bat
         fi
     else
-        if [[ "${BUILD_ENVIRONMENT}" == "pytorch-win-vs2019-cpu-py3" ]]; then
+        if [[ "${BUILD_ENVIRONMENT}" == *win-vs2019-cpu-py3* ]]; then
           export PYTORCH_COLLECT_COVERAGE=1
           export COVERAGE_RCFILE=$PWD/.coveragerc # coverage config file needed for plug-ins and settings to work
         fi
@@ -102,7 +102,7 @@ run_tests
 assert_git_not_dirty
 echo "TEST PASSED"
 
-if [[ "${BUILD_ENVIRONMENT}" == "pytorch-win-vs2019-cpu-py3" ]]; then
+if [[ "${BUILD_ENVIRONMENT}" == *win-vs2019-cpu-py3* ]]; then
   pushd "$TEST_DIR"
   python -mpip install coverage==5.5
   python -mpip install -e "$PROJECT_DIR/tools/coverage_plugins_package"

@@ -167,6 +167,11 @@ if(HIP_FOUND)
   message("ROCM_VERSION_DEV_PATCH: ${ROCM_VERSION_DEV_PATCH}")
   message("ROCM_VERSION_DEV_INT:   ${ROCM_VERSION_DEV_INT}")
 
+  math(EXPR TORCH_HIP_VERSION "(${HIP_VERSION_MAJOR} * 100) + ${HIP_VERSION_MINOR}")
+  message("HIP_VERSION_MAJOR: ${HIP_VERSION_MAJOR}")
+  message("HIP_VERSION_MINOR: ${HIP_VERSION_MINOR}")
+  message("TORCH_HIP_VERSION: ${TORCH_HIP_VERSION}")
+
   message("\n***** Library versions from dpkg *****\n")
   execute_process(COMMAND dpkg -l COMMAND grep rocm-dev COMMAND awk "{print $2 \" VERSION: \" $3}")
   execute_process(COMMAND dpkg -l COMMAND grep rocm-libs COMMAND awk "{print $2 \" VERSION: \" $3}")

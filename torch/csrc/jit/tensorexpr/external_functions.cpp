@@ -5,6 +5,7 @@
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/native/xnnpack/OpContext.h>
 #include <c10/util/irange.h>
+#include <torch/csrc/jit/tensorexpr/exceptions.h>
 #include <torch/csrc/jit/tensorexpr/external_functions_registry.h>
 
 namespace torch {
@@ -65,7 +66,7 @@ void nnc_aten_conv2d(
   if (args_num > 0) {
     // Check that if the extra arguments are provided, then the bias tensor is
     // also present
-    TORCH_INTERNAL_ASSERT(args_num == 7 && bufs_num == 4);
+    TORCH_INTERNAL_ASSERT(args_num == 7 && bufs_num == 4, buildErrorMessage());
     const at::Tensor& b = tensors[3];
 
     int64_t strideH = extra_args[0];
@@ -208,7 +209,7 @@ void nnc_prepacked_linear_clamp_run(
       constructTensors(bufs_num - 1, buf_data, buf_ranks, buf_dims, buf_dtypes);
 
   const at::Tensor& x = tensors[1];
-  const auto context = reinterpret_cast<LinearOpContext*>(buf_data[2]);
+  auto context = reinterpret_cast<LinearOpContext*>(buf_data[2]);
   at::Tensor output = context->run(x);
   memcpy(
       buf_data[0], output.data_ptr(), output.element_size() * output.numel());
@@ -228,7 +229,7 @@ void nnc_prepacked_conv2d_clamp_run(
       constructTensors(bufs_num - 1, buf_data, buf_ranks, buf_dims, buf_dtypes);
 
   const at::Tensor& x = tensors[1];
-  const auto context = reinterpret_cast<Conv2dOpContext*>(buf_data[2]);
+  auto context = reinterpret_cast<Conv2dOpContext*>(buf_data[2]);
   at::Tensor output = context->run(x);
   memcpy(
       buf_data[0], output.data_ptr(), output.element_size() * output.numel());

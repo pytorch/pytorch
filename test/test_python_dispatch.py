@@ -5,6 +5,7 @@ from torch.utils._pytree import tree_map
 from typing import Iterator, List
 import logging
 import contextlib
+import itertools
 
 # TODO: move this into library proper
 @contextlib.contextmanager
@@ -22,6 +23,7 @@ def no_dispatch() -> Iterator[None]:
 # 3. Enter dispatcher, wind your way through Autograd
 # 4. Hit Python dispatch key, call __torch_dispatch__
 
+WRAPPER_DEVICE = "meta"
 # TODO: TensorBase should work
 class LoggingTensor(torch.Tensor):
     elem: torch.Tensor
@@ -33,7 +35,7 @@ class LoggingTensor(torch.Tensor):
         # The wrapping tensor (LoggingTensor) is just a meta tensor, so it
         # doesn't hold any memory (meta tensor is generally the preferred type
         # of tensor you want to make a subclass from)...
-        r = torch.Tensor._make_subclass(cls, elem.to('meta'), elem.requires_grad)
+        r = torch.Tensor._make_subclass(cls, elem.to(WRAPPER_DEVICE), elem.requires_grad)
         # ...the real tensor is held as an element on the tensor.
         r.elem = elem
         return r
@@ -49,10 +51,8 @@ class LoggingTensor(torch.Tensor):
         def wrap(e):
             return LoggingTensor(e) if isinstance(e, torch.Tensor) else e
 
-        # TODO: handle kwargs
-        assert not kwargs
-        rs = tree_map(wrap, func(*tree_map(unwrap, args)))
-        logging.getLogger("LoggingTensor").info(f"{func.__module__}.{func.__name__}", args, rs)
+        rs = tree_map(wrap, func(*tree_map(unwrap, args), **tree_map(unwrap, kwargs)))
+        logging.getLogger("LoggingTensor").info(f"{func.__module__}.{func.__name__}", args, kwargs, rs)
         return rs
 
 # https://stackoverflow.com/questions/36408496/python-logging-handler-to-append-to-list
@@ -77,13 +77,16 @@ class LoggingTensorHandler(logging.Handler):
         return f'${self._shortid(a)}' if isinstance(a, LoggingTensor) else repr(a)
 
     def emit(self, record):
-        fmt_args = "(" + ", ".join(self._fmt(a) for a in record.args[0]) + ")"
-        fmt_rets = ", ".join(self._fmt(a) for a in record.args[1]) \
-            if isinstance(record.args[1], (list, tuple)) else self._fmt(record.args[1])
-        self.log_list.append(f'{fmt_rets} = {record.msg}{fmt_args}')
+        fmt_args = ", ".join(itertools.chain(
+            (self._fmt(a) for a in record.args[0]),
+            (f"{k}={self._fmt(v)}" for k, v in record.args[1].items())
+        ))
+        fmt_rets = ", ".join(self._fmt(a) for a in record.args[2]) \
+            if isinstance(record.args[2], (list, tuple)) else self._fmt(record.args[2])
+        self.log_list.append(f'{fmt_rets} = {record.msg}({fmt_args})')
 
 def log_input(name: str, var: object):
-    logging.getLogger("LoggingTensor").info("input", (name,), (var,))
+    logging.getLogger("LoggingTensor").info("input", (name,), {}, (var,))
 
 @contextlib.contextmanager
 def capture_logs() -> Iterator[List[str]]:
@@ -92,6 +95,7 @@ def capture_logs() -> Iterator[List[str]]:
     handler = LoggingTensorHandler(log_list)
     logger.addHandler(handler)
     logger.setLevel(logging.INFO)
+    logger.propagate = False
     try:
         yield log_list
     finally:
@@ -138,7 +142,55 @@ $5 = torch._ops.aten.add($4, $3)''')
         self.assertExpectedInline('\n'.join(logs), '''\
 $0 = input('x')
 $1 = input('y')
-$2 = torch._ops.aten.abs($0, $1)''')
+$2 = torch._ops.aten.abs($0, out=$1)''')
+
+
+    def test_kwarg_only(self) -> None:
+        with capture_logs() as logs:
+            x = LoggingTensor(torch.ones(1))
+            y = LoggingTensor(torch.ones(1, 1))
+            z = LoggingTensor(torch.ones(1))
+            log_input("x", x)
+            log_input("y", y)
+            log_input("z", z)
+            torch.addmv(x, y, z)
+            torch.addmv(x, y, z, beta=1)
+            torch.addmv(x, y, z, beta=2)
+            torch.addmv(x, y, z, alpha=2)
+            torch.addmv(x, y, z, beta=2, alpha=2)
+
+        # The expectation is that beta/alpha don't show up when they're
+        # defaulted.  This is even if the user explicitly specified it.
+        self.assertExpectedInline('\n'.join(logs), '''\
+$0 = input('x')
+$1 = input('y')
+$2 = input('z')
+$3 = torch._ops.aten.addmv($0, $1, $2)
+$4 = torch._ops.aten.addmv($0, $1, $2)
+$5 = torch._ops.aten.addmv($0, $1, $2, beta=2)
+$6 = torch._ops.aten.addmv($0, $1, $2, alpha=2)
+$7 = torch._ops.aten.addmv($0, $1, $2, beta=2, alpha=2)''')
+
+    def test_kwarg_only_and_positional_default(self) -> None:
+        with capture_logs() as logs:
+            x = LoggingTensor(torch.ones(1))
+            y = LoggingTensor(torch.ones(1))
+            log_input("x", x)
+            log_input("y", y)
+            torch.ops.aten.kl_div(x, y)
+            torch.ops.aten.kl_div(x, y, 2)
+            torch.ops.aten.kl_div(x, y, log_target=True)
+            torch.ops.aten.kl_div(x, y, 2, log_target=True)
+
+        # What we are testing here is that we omit reduction
+        # if it is defaulted, even if a kwarg is set
+        self.assertExpectedInline('\n'.join(logs), '''\
+$0 = input('x')
+$1 = input('y')
+$2 = torch._ops.aten.kl_div($0, $1)
+$3 = torch._ops.aten.kl_div($0, $1, 2)
+$4 = torch._ops.aten.kl_div($0, $1, log_target=True)
+$5 = torch._ops.aten.kl_div($0, $1, 2, log_target=True)''')
 
     def test_list_ret(self) -> None:
         # test all sequence types are permissible returns
@@ -196,6 +248,39 @@ $2 = torch._ops.aten.abs($0, $1)''')
         x.data.add_(2)
         self.assertEqual(cur_vc, x._version)
 
+    def test_subclass_priority(self) -> None:
+        class ErrorA(RuntimeError):
+            pass
+
+        class ErrorB(RuntimeError):
+            pass
+
+        # The big tests for code coverage are test_precedence_semantics in
+        # test_overrides.py; this is just to make sure it is wired up at all
+        # correctly for __torch_dispatch__
+        class A(torch.Tensor):
+            @staticmethod
+            def __new__(cls, elem):
+                return torch.Tensor._make_subclass(cls, elem, elem.requires_grad)
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+                raise ErrorA
+
+        class B(A):
+            @staticmethod
+            def __new__(cls, elem):
+                return torch.Tensor._make_subclass(cls, elem, elem.requires_grad)
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+                raise ErrorB
+
+        self.assertRaises(ErrorA, lambda: torch.add(A(torch.empty(1)), A(torch.empty(1))))
+        self.assertRaises(ErrorB, lambda: torch.add(A(torch.empty(1)), B(torch.empty(1))))
+        self.assertRaises(ErrorB, lambda: torch.add(B(torch.empty(1)), A(torch.empty(1))))
+        self.assertRaises(ErrorB, lambda: torch.add(B(torch.empty(1)), B(torch.empty(1))))
+
     def test_format(self) -> None:
         x = LoggingTensor(torch.ones(1))
         s1 = str(x)
@@ -251,6 +336,38 @@ $3 = input('grad_output')
 $4 = torch._ops.aten.mul($3, tensor(2))
 $5 = torch._ops.aten.mul($4, $0)
 $6 = torch._ops.aten.add_($1, $5)''')
+
+    def test_subclass_creation(self):
+        # Make sure these statements runs without error
+        # In particular checking that when internal detach returns
+        # subclasses, these are cleanly overwritten.
+        class Foo(torch.Tensor):
+            pass
+
+        err_msg = "subclass Foo but.*already associated to a python object of type LoggingTensor"
+        with self.assertRaisesRegex(RuntimeError, err_msg):
+            a = torch.Tensor._make_subclass(Foo, LoggingTensor(torch.rand(2)))
+        with self.assertRaisesRegex(RuntimeError, err_msg):
+            b = LoggingTensor(torch.rand(2)).as_subclass(Foo)
+
+        # And in case where we don't know if the user wants this subclass
+        # overwritten, raise a nice error.
+        # The standard LoggingTensor will fail because it is not on the right device
+        with self.assertRaisesRegex(TypeError, "expected.*device=cpu.*device=meta"):
+            Foo(LoggingTensor(torch.rand(2)))
+
+        # And if we put it on the right device, we still get a nice error
+        try:
+            global WRAPPER_DEVICE
+            prev_device = WRAPPER_DEVICE
+            WRAPPER_DEVICE = "cpu"
+
+            err_msg = "Creating a new Tensor subclass Foo.*python object of type LoggingTensor"
+            with self.assertRaisesRegex(RuntimeError, err_msg):
+                Foo(LoggingTensor(torch.rand(2)))
+
+        finally:
+            WRAPPER_DEVICE = prev_device
 
 
 if __name__ == '__main__':

@@ -44,7 +44,7 @@ void THCStorage_resizeBytes(
       THCudaCheck(cudaMemcpyAsync(
           data.get(),
           self->data(),
-          THMin(self->nbytes(), size_bytes),
+          THMin(static_cast<int64_t>(self->nbytes()), size_bytes),
           cudaMemcpyDeviceToDevice,
           c10::cuda::getCurrentCUDAStream()));
     }

@@ -6,6 +6,7 @@
 #include <vector>
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/jit/tensorexpr/fwd_decls.h>
 
 namespace torch {
 namespace jit {
@@ -26,29 +27,29 @@ class TORCH_API LoopNest {
  public:
   // A constructor for building a LoopNest from a list of Tensors
   LoopNest(
-      const std::vector<Tensor*>& output_tensors,
-      const std::vector<Tensor*>& tensors_to_compute);
+      const std::vector<Tensor>& output_tensors,
+      const std::vector<Tensor>& tensors_to_compute);
 
   // A convenience constructor for the case when all tensors are output tensors
-  LoopNest(const std::vector<Tensor*>& output_tensors);
+  LoopNest(const std::vector<Tensor>& output_tensors);
 
   // A constructor for building a LoopNest from an Stmt and a list of output
   // buffers.
-  LoopNest(Stmt* stmt, std::unordered_set<const Buf*> output_bufs);
+  LoopNest(StmtPtr stmt, std::unordered_set<BufPtr> output_bufs);
 
   // A constructor for building a LoopNest from another loopnest. It clones the
   // other loopnest's stmt.
   LoopNest(const LoopNest& other);
 
-  Stmt* root_stmt() const {
+  StmtPtr root_stmt() const {
     return root_stmt_;
   }
 
-  std::vector<For*> getLoopStmtsFor(Tensor*) const;
-  std::vector<For*> getLoopStmtsFor(const Buf*) const;
-  std::vector<For*> getLoopStmtsFor(Stmt*) const;
-  Stmt* getLoopBodyFor(Tensor*) const;
-  Stmt* getLoopBodyFor(const Buf*) const;
+  std::vector<ForPtr> getLoopStmtsFor(Tensor) const;
+  std::vector<ForPtr> getLoopStmtsFor(BufPtr) const;
+  std::vector<ForPtr> getLoopStmtsFor(StmtPtr) const;
+  StmtPtr getLoopBodyFor(Tensor) const;
+  StmtPtr getLoopBodyFor(BufPtr) const;
 
   // Returns the For stmt indexed by 'indices' in the 'root' For stmt.
   //'indices' indicates the path to the returned loop from 'root' in AST, e.g.,
@@ -68,17 +69,17 @@ class TORCH_API LoopNest {
   // the path from 'root' to 'j_loop' is [0]
   // the path from 'root' to 'k1_loop' is [0, 0]
   // the path from 'root' to 'k2_loop' is [0, 2]
-  For* getLoopAt(For* root, const std::vector<int>& indices) const;
+  ForPtr getLoopAt(ForPtr root, const std::vector<int>& indices) const;
 
   // Returns the For stmt that is immediately enclosing the given stmt.
-  static For* getParentLoop(const Stmt* st);
+  static ForPtr getParentLoop(StmtPtr st);
 
   // Returns the list of For stmts corresponding to the loopnest that is
   // enclosing the given stmt.
-  static std::vector<For*> getEnclosingLoopNest(const Stmt* st);
+  static std::vector<ForPtr> getEnclosingLoopNest(StmtPtr st);
 
   // Returns a list of all Stmts that write to the given buf.
-  std::vector<const Stmt*> getAllWritesToBuf(const Buf*) const;
+  std::vector<StmtPtr> getAllWritesToBuf(BufPtr) const;
 
   // The following methods return the For loops that contain writes to
   // the given buf.
@@ -98,18 +99,18 @@ class TORCH_API LoopNest {
   // to buf.
   // For the above example:
   //   getAllInnermostLoopsWritingToBuf(a) => {j1, k2, j3}
-  std::vector<For*> getAllInnermostLoopsWritingToBuf(const Buf*) const;
+  std::vector<ForPtr> getAllInnermostLoopsWritingToBuf(BufPtr) const;
 
   // Returns a list of For loopnests which contain a Stmt that writes to
   // the given buf. Each loopnest here is a vector For loops.
   // For the above example:
   //   getAllLoopNestsWritingToBuf(a) => {{i1,j1}, {i2,j2,k2}, {i2,j3}}
-  std::vector<std::vector<For*>> getAllLoopNestsWritingToBuf(const Buf*) const;
+  std::vector<std::vector<ForPtr>> getAllLoopNestsWritingToBuf(BufPtr) const;
 
-  Stmt* simplify();
+  StmtPtr simplify();
 
-  bool computeInline(Stmt* s);
-  bool computeInline(const Buf* b);
+  bool computeInline(StmtPtr s);
+  bool computeInline(BufPtr b);
   void inlineIntermediateBufs(bool allow_duplicated_work);
 
   // Optimizes conditionals.
@@ -156,10 +157,10 @@ class TORCH_API LoopNest {
   // So, the pointer to the input loop should be valid after splitting and
   // will point to the outer loop. The `inner` and `tail` parameters will be
   // set to point to the inner and tail loops that are generated.
-  static void splitWithTail(For* f, int factor, For** inner, For** tail);
+  static void splitWithTail(ForPtr f, int factor, ForPtr* inner, ForPtr* tail);
   // A convenience wrapper when the caller does not need to access the
   // split loops.
-  static void splitWithTail(For* f, int factor);
+  static void splitWithTail(ForPtr f, int factor);
 
   // Splits the given loop into 2 nested loops with the given factor as the
   // inner loop bound. If the factor does not evenly divide the loop bound,
@@ -184,10 +185,10 @@ class TORCH_API LoopNest {
   // So, the pointer to the input loop should be valid after splitting and
   // will point to the outer loop. The `inner` parameter will be set to point
   // to the inner loop that is generated.
-  static void splitWithMask(For* f, int factor, For** inner);
+  static void splitWithMask(ForPtr f, int factor, ForPtr* inner);
   // A convenience wrapper when the caller does not need to access the
   // split loops.
-  static void splitWithMask(For* f, int factor);
+  static void splitWithMask(ForPtr f, int factor);
 
   // The following methods support loop distribution.
   // For example, consider the following code. This will be used to
@@ -220,9 +221,9 @@ class TORCH_API LoopNest {
   //   :    for i
   // S6:      for k
   // S7:        B[i] = B[i] +
-  static std::vector<For*> distributeLoop(
-      For* loop,
-      const std::unordered_set<Stmt*>& pivots);
+  static std::vector<ForPtr> distributeLoop(
+      ForPtr loop,
+      const std::unordered_set<StmtPtr>& pivots);
 
   // This method distributes the given loop over every stmt in its body.
   //
@@ -240,7 +241,7 @@ class TORCH_API LoopNest {
   //   :    for i
   // S6:      for k
   // S7:        B[i] = B[i] +
-  static std::vector<For*> distributeLoop(For* loop);
+  static std::vector<ForPtr> distributeLoop(ForPtr loop);
   // Same as above, but also distribute parent loops.
   // Returns the result of distributing the outermost loop.
   //
@@ -260,7 +261,7 @@ class TORCH_API LoopNest {
   //   :    for i
   // S6:      for k
   // S7:        B[i] = B[i] +
-  static std::vector<For*> distributeLoopAndParents(For* loop);
+  static std::vector<ForPtr> distributeLoopAndParents(ForPtr loop);
 
   // This method distributes the given loop over its body by splitting
   // after every For stmt in its body.
@@ -277,7 +278,7 @@ class TORCH_API LoopNest {
   // S5:      B[i] = A[i]
   // S6:      for k
   // S7:        B[i] = B[i] +
-  static std::vector<For*> distributeLoopOverInnerLoops(For* loop);
+  static std::vector<ForPtr> distributeLoopOverInnerLoops(ForPtr loop);
   // Same as above, but also distribute parent loops.
   // Returns the result of distributing the outermost loop.
   //
@@ -294,7 +295,8 @@ class TORCH_API LoopNest {
   // S5:      B[i] = A[i]
   // S6:      for k
   // S7:        B[i] = B[i] +
-  static std::vector<For*> distributeLoopAndParentsOverInnerLoops(For* loop);
+  static std::vector<ForPtr> distributeLoopAndParentsOverInnerLoops(
+      ForPtr loop);
 
   // This method performs loop fusion.
   // For example, consider the following code.
@@ -323,7 +325,7 @@ class TORCH_API LoopNest {
   // Below are the two requirements to apply unsafeFuseLoops:
   //  * All the loops have the same parent.
   //  * There are no statements between these loops in their parent body.
-  static bool unsafeFuseLoops(const std::vector<For*>& loops, For** fused);
+  static bool unsafeFuseLoops(const std::vector<ForPtr>& loops, ForPtr* fused);
 
   // Loop fusion is done only when all the conditions below are satisfied.
   //  * All the loops have the same parent.
@@ -331,9 +333,9 @@ class TORCH_API LoopNest {
   //  * The start bounds are the same for all loops.
   //  * The stop bounds are the same for all loops.
   //  * Fusing the loops does not violate or add any dependencies.
-  static bool fuseLoops(const std::vector<For*>& loops, For** fused);
+  static bool fuseLoops(const std::vector<ForPtr>& loops, ForPtr* fused);
 
-  static void reorderAxis(For* a, For* b);
+  static void reorderAxis(ForPtr a, ForPtr b);
 
   // Reorder the given list of loops according to the permutation specified.
   // Here `permutation[i]` represents the position of the loop in the input
@@ -353,8 +355,8 @@ class TORCH_API LoopNest {
   //        for p
   //          for q
   //            A[p,q,r,s] =
-  static std::vector<For*> reorder(
-      const std::vector<For*>& loops,
+  static std::vector<ForPtr> reorder(
+      const std::vector<ForPtr>& loops,
       const std::vector<size_t>& permutation);
 
   // Tile takes a 2d domain (x, y) and splits it into small rectangular blocks
@@ -395,24 +397,24 @@ class TORCH_API LoopNest {
   //         for k: (0, 32)
   //           A[i_outer * 4 + i_inner, 7 * 9 + j_tail] =
   //           B[i_outer * 4 + i_inner, k] + C[7 * 9 + j_tail, k]
-  For* tile(For* x, For* y, int x_factor, int y_factor);
+  ForPtr tile(ForPtr x, ForPtr y, int x_factor, int y_factor);
 
   // Returns true if the given loops are perfectly nested, i.e., every loop
   // (except the innermost) should have exactly one statement in its body
   // and that statement must be the next inner loop.
-  static bool areLoopsPerfectlyNested(const std::vector<For*>& loops);
+  static bool areLoopsPerfectlyNested(const std::vector<ForPtr>& loops);
 
   // Returns true if the given loop has a loop-carried dependence.
-  static bool hasLoopCarriedDependence(For* loop);
+  static bool hasLoopCarriedDependence(ForPtr loop);
 
-  static void unroll(For* f, Stmt** unrolled);
-  static void unroll(For* f);
+  static void unroll(ForPtr f, StmtPtr* unrolled);
+  static void unroll(ForPtr f);
 
-  static bool normalize(For* f);
-  static bool isNormalized(For* f);
+  static bool normalize(ForPtr f);
+  static bool isNormalized(ForPtr f);
 
-  static bool flatten(const std::vector<For*>& f, For** flattened);
-  static bool flatten(const std::vector<For*>& f);
+  static bool flatten(const std::vector<ForPtr>& f, ForPtr* flattened);
+  static bool flatten(const std::vector<ForPtr>& f);
 
   // Compresses the given buffer based on its use in the given Stmts.
   //
@@ -442,7 +444,7 @@ class TORCH_API LoopNest {
   //     B[i,j] = A[0,j] + A[0, j+1]
   //   }
   // }
-  static void compressBuffer(Buf* buf, Stmt* stmt);
+  static void compressBuffer(BufPtr buf, StmtPtr stmt);
 
   // Compresses all buffers in the given statement.
   //
@@ -451,32 +453,32 @@ class TORCH_API LoopNest {
   // kernel statement to avoid incorrect buffer compressions.
   //
   // TODO: Add an IR verifier check to detect invalidly compressed buffers.
-  static void compressAllBuffers(Stmt* stmt);
+  static void compressAllBuffers(StmtPtr stmt);
 
   // Get 'num' loops from the loopnest starting at 'f'.
-  static std::vector<For*> getLoopStmtsInLoopNest(For* f, size_t num);
+  static std::vector<ForPtr> getLoopStmtsInLoopNest(ForPtr f, size_t num);
 
   // LoopOptions are propagated to tail.
-  static void sliceHead(For* f, int factor, For** head, For** tail);
-  static void sliceHead(For* f, int factor);
+  static void sliceHead(ForPtr f, int factor, ForPtr* head, ForPtr* tail);
+  static void sliceHead(ForPtr f, int factor);
   // LoopOptions are propagated to head.
-  static void sliceTail(For* f, int factor, For** head, For** tail);
-  static void sliceTail(For* f, int factor);
+  static void sliceTail(ForPtr f, int factor, ForPtr* head, ForPtr* tail);
+  static void sliceTail(ForPtr f, int factor);
 
-  using AccessResult = std::pair<const Buf*, Stmt*>;
+  using AccessResult = std::pair<BufPtr, StmtPtr>;
   // Insert a cache for the consumer's usages of the buffer produced in
   // consumer, and redirect reads and writes in the consumer to that cache.
   // Returns a pair of the new cache buffer, and the new rewritten consumer.
   static AccessResult cacheAccesses(
-      const Buf* producer,
+      BufPtr producer,
       const std::string& name,
-      Stmt* consumer);
+      StmtPtr consumer);
 
   // Insert a temporary computation of statement S in the scope of loop AT.
   // S is assumed to be a Store or a Block containing a Store. Along with the
   // computation itself, this transformation inserts Alloc/Free statements for
   // the temporary buffer used in the computation.
-  static void computeAt(Stmt* s, For* at);
+  static void computeAt(StmtPtr s, ForPtr at);
 
   // Rfactor a reduction axis into a normal axis.
   //
@@ -520,56 +522,73 @@ class TORCH_API LoopNest {
   // S4:     for k           # reduction axis
   //           X_rfac[i,j] = ReduceOp(X_rfac[i,j] + Y[i,j,k], reduce_axis={k})
   //         X[i] = ReduceOp(X[i] + X_rfac[i,j], reduce_axis={j})
-  static bool rfactor(Stmt* s, For* outer_reduction_for);
-  static bool rfactor(Stmt* s, For* outer_reduction_for, Buf** rfac_buf_ptr);
+  static bool rfactor(StmtPtr s, ForPtr outer_reduction_for);
+  static bool rfactor(
+      StmtPtr s,
+      ForPtr outer_reduction_for,
+      BufPtr* rfac_buf_ptr);
 
   // Vectorize the given loop. This method requires that the given loop
   // does not perform a reduction.
   // It returns true if vectorization is successful and false otherwise.
-  static bool vectorize(For*);
+  static bool vectorize(ForPtr);
 
   // Find the inner-most loops and vectorize them. Currently, this only works
   // for the LLVM backend, when no reductions are involved.
   void vectorizeInnerLoops();
 
   void eliminateDeadStores();
-  void prepareForCodegen();
 
-  const std::unordered_set<const Buf*> getInputBufs() const;
-  const std::unordered_set<const Buf*> getOutputBufs() const {
+  // Make the stmt ready for codegen. The optional argument 'interm_bufs' allows
+  // users to specify intermediate buffers that need runtime allocation. In
+  // default, we will insert 'Alloc/Free' stmts to allocate all intermediate
+  // buffers at runtime but users may have pre-allocated some of them at compile
+  // time, and in that case the user can specify what buffers to insert
+  // 'Alloc/Free' stmts for using 'interm_bufs'.
+  // TODO: refactor function 'prepareForCodegen' to remove argument
+  // 'interm_bufs'.
+  void prepareForCodegen(
+      const c10::optional<std::unordered_set<BufPtr>>& interm_bufs =
+          c10::nullopt);
+
+  const std::unordered_set<BufPtr> getInputBufs() const;
+  const std::unordered_set<BufPtr> getOutputBufs() const {
     return output_bufs_;
   }
+  std::unordered_set<BufPtr> getIntermediateBufs() const;
 
  private:
   void initialize(
-      const std::vector<Tensor*>& output_tensors,
-      const std::vector<Tensor*>& tensors_to_compute);
-  Stmt* insertAllocFree(Stmt* stmt);
-  const std::unordered_set<const Buf*> getIntermediateBufs() const;
+      const std::vector<Tensor>& output_tensors,
+      const std::vector<Tensor>& tensors_to_compute);
+  StmtPtr insertAllocFree(
+      StmtPtr stmt,
+      const c10::optional<std::unordered_set<BufPtr>>& interm_bufs =
+          c10::nullopt);
 
-  Stmt* root_stmt_;
+  StmtPtr root_stmt_;
 
-  std::unordered_set<const Buf*> output_bufs_;
+  std::unordered_set<BufPtr> output_bufs_;
 };
 
-TORCH_API Stmt* FlattenIndexes(Stmt* s);
+TORCH_API StmtPtr FlattenIndexes(StmtPtr s);
 
 // TODO: Revisit this once we decide on how dependencies analysis should look
 // like. Maybe we would choose to use a different API and BufUse would be
 // removed, or if we decide to keep it we need to properly document its API.
 struct BufLoadOrStoreUse {
-  Stmt* s;
+  StmtPtr s;
   bool isStore;
 };
 
 /*
  * Returns a map ( Buf -> uses of this Buf), uses are represented as vectors of
- * BufUse elements, which are Stmt* and a bool isStore flag. The order of uses
+ * BufUse elements, which are StmtPtr and a bool isStore flag. The order of uses
  * in the vectors reflects the order in which the uses appear in the given
  * statement.
  */
-std::unordered_map<const Buf*, std::vector<BufLoadOrStoreUse>>
-findLoadOrStoreUses(Stmt* s);
+std::unordered_map<BufPtr, std::vector<BufLoadOrStoreUse>> findLoadOrStoreUses(
+    StmtPtr s);
 
 } // namespace tensorexpr
 } // namespace jit

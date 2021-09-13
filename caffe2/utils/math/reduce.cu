@@ -491,7 +491,8 @@ void MomentsCUDA(
       const T alpha,                                                   \
       const T* X,                                                      \
       T* Y,                                                            \
-      CUDAContext* context) {                                          \
+      CUDAContext* context,                                            \
+      bool) {                                                          \
     ReduceTensorCUDA<T, Reducer>(                                      \
         ndim, X_dims, Y_dims, Reducer(), kInit, alpha, X, Y, context); \
   }
@@ -550,7 +551,8 @@ DELEGATE_CUDA_REDUCE_FUNCTION(double, ReduceSum, cub::Sum, 0.0)
       const T alpha,                                  \
       const T* X,                                     \
       T* Y,                                           \
-      CUDAContext* context) {                         \
+      CUDAContext* context,                           \
+      bool) {                                         \
     int scale = 1;                                    \
     for (int i = 0; i < ndim; ++i) {                  \
       if (Y_dims[i] == 1) {                           \
@@ -580,7 +582,8 @@ CAFFE2_SPECIALIZED_CUDA_REDUCE_MEAN(float)
       const T* X,                                                \
       T* mean,                                                   \
       T* var,                                                    \
-      CUDAContext* context) {                                    \
+      CUDAContext* context,                                      \
+      bool) {                                                    \
     MomentsCUDA<T>(ndim, X_dims, Y_dims, X, mean, var, context); \
   }
 CAFFE2_SPECIALIZED_CUDA_MOMENTS(float)

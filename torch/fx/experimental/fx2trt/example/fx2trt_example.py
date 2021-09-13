@@ -25,14 +25,6 @@ from torch.fx.experimental.fx2trt.fx2trt import TRTInterpreter, InputTensorSpec,
 # fully on PyTorch Cuda.
 
 
-# Create ResNet18 `rn18` and inputs `x`
-rn18 = models.resnet18().eval().cuda()
-x = torch.randn(5, 3, 224, 224, device="cuda")
-
-# Trace the model with FX.
-traced_rn18 = torch.fx.symbolic_trace(rn18)
-
-
 def lower_mod_to_trt(mod: torch.fx.GraphModule, inputs: Tuple[torch.Tensor]):
     """
     Helper function that given a GraphModule `mod` and its `inputs`, build a
@@ -155,109 +147,118 @@ class TensorRTSplitter(splitter_base._SplitterBase):
 
         return reports
 
-# Create a splitter which takes in traced ResNet18.
-splitter = TensorRTSplitter(traced_rn18, (x,), OpSupport())
 
-# node_support_preview() shows the details of node supporting information based
-# on the DummyOpSupport we created.
-#
-# In the output, we have supported node types
-# and unsupported node types. Nodes in the model with supported types will be
-# split into accelerator submodules while nodes with unsupported types will be
-# split into cpu submodules.
-splitter.node_support_preview()
-"""
-output:
+if __name__ == "__main__":
+    # Create ResNet18 `rn18` and inputs `x`
+    rn18 = models.resnet18().eval().cuda()
+    x = torch.randn(5, 3, 224, 224, device="cuda")
 
-Supported node types in the model:
-torch.nn.modules.conv.Conv2d: ((torch.float32,), {})
-torch.nn.modules.batchnorm.BatchNorm2d: ((torch.float32,), {})
-torch.nn.modules.activation.ReLU: ((torch.float32,), {})
-torch.nn.modules.pooling.MaxPool2d: ((torch.float32,), {})
-_operator.add: ((torch.float32, torch.float32), {})
-torch.nn.modules.pooling.AdaptiveAvgPool2d: ((torch.float32,), {})
-torch.flatten: ((torch.float32,), {})
+    # Trace the model with FX.
+    traced_rn18 = torch.fx.symbolic_trace(rn18)
 
-Unsupported node types in the model:
-torch.nn.modules.linear.Linear: ((torch.float32,), {})
-"""
+    # Create a splitter which takes in traced ResNet18.
+    splitter = TensorRTSplitter(traced_rn18, (x,), OpSupport())
 
-# split_preview() shows the details of how the model looks like after split.
-# And for every accelerator module in the split model, it would run a check
-# by lowering and running the module. If any error is catched during the
-# checking process, it will try to find which nodes are causing the trouble
-# here with minimizer.
-#
-# Notice that after split, the model will have some submodules called either
-# `_run_on_acc_{}` or `_run_on_cpu_{}`. We have all the supported nodes in
-# `_run_on_acc_{}` modules and all other nodes in `_run_on_cpu_{}` modules.
-#
-# In the output, we can see it estimates the max qps based on PCIe bandwidth,
-# this is something we need to consider when lowering to acceleartors chips,
-# because the data will be flowing between cpu and accelerator which might not
-# matter in GPU case.
-splitter.split_preview()
-"""
-output:
+    # node_support_preview() shows the details of node supporting information based
+    # on the DummyOpSupport we created.
+    #
+    # In the output, we have supported node types
+    # and unsupported node types. Nodes in the model with supported types will be
+    # split into accelerator submodules while nodes with unsupported types will be
+    # split into cpu submodules.
+    splitter.node_support_preview()
+    """
+    output:
 
-Before removing small acc subgraphs, total 2 subgraphs are created: 1 acc subgraphs and 1 cpu subgraphs.
-After removing small acc subgraphs, total 2 subgraphs are created: 1 acc subgraphs and 1 cpu subgraphs.
-_run_on_acc_0: 68 node(s)
-_run_on_cpu_1: 1 node(s)
+    Supported node types in the model:
+    torch.nn.modules.conv.Conv2d: ((torch.float32,), {})
+    torch.nn.modules.batchnorm.BatchNorm2d: ((torch.float32,), {})
+    torch.nn.modules.activation.ReLU: ((torch.float32,), {})
+    torch.nn.modules.pooling.MaxPool2d: ((torch.float32,), {})
+    _operator.add: ((torch.float32, torch.float32), {})
+    torch.nn.modules.pooling.AdaptiveAvgPool2d: ((torch.float32,), {})
+    torch.flatten: ((torch.float32,), {})
 
-Processing acc submodule _run_on_acc_0
-Checking inputs...
-Checking outputs...
-Total input size in bytes is 3010560, total output size in bytes is 10240, theoretical max qps (bounds by PCIe bandwidth)
-for this submodule is 35665.85034013606.
-Lowering and running succeed!
+    Unsupported node types in the model:
+    torch.nn.modules.linear.Linear: ((torch.float32,), {})
+    """
 
-Theoretical max qps (bounds by PCIe bandwidth) for this model is 35665.85034013606, bottleneck is submodule _run_on_acc_0.
-"""
+    # split_preview() shows the details of how the model looks like after split.
+    # And for every accelerator module in the split model, it would run a check
+    # by lowering and running the module. If any error is catched during the
+    # checking process, it will try to find which nodes are causing the trouble
+    # here with minimizer.
+    #
+    # Notice that after split, the model will have some submodules called either
+    # `_run_on_acc_{}` or `_run_on_cpu_{}`. We have all the supported nodes in
+    # `_run_on_acc_{}` modules and all other nodes in `_run_on_cpu_{}` modules.
+    #
+    # In the output, we can see it estimates the max qps based on PCIe bandwidth,
+    # this is something we need to consider when lowering to acceleartors chips,
+    # because the data will be flowing between cpu and accelerator which might not
+    # matter in GPU case.
+    splitter.split_preview()
+    """
+    output:
 
-# After split we have two submodules, one is `_run_on_acc_0` and one is `_run_on_cpu_1`.
-# We have only one op in `_run_on_cpu_1` which is a linear layer while all other ops are
-# in `_run_on_acc_0`.
-split_mod = splitter()
-print(split_mod.graph)
-"""
-output:
+    Before removing small acc subgraphs, total 2 subgraphs are created: 1 acc subgraphs and 1 cpu subgraphs.
+    After removing small acc subgraphs, total 2 subgraphs are created: 1 acc subgraphs and 1 cpu subgraphs.
+    _run_on_acc_0: 68 node(s)
+    _run_on_cpu_1: 1 node(s)
 
-graph():
-    %x : torch.Tensor [#users=1] = placeholder[target=x]
-    %_run_on_acc_0 : [#users=1] = call_module[target=_run_on_acc_0](args = (%x,), kwargs = {})
-    %_run_on_cpu_1 : [#users=1] = call_module[target=_run_on_cpu_1](args = (%_run_on_acc_0,), kwargs = {})
-    return _run_on_cpu_1
-"""
+    Processing acc submodule _run_on_acc_0
+    Checking inputs...
+    Checking outputs...
+    Total input size in bytes is 3010560, total output size in bytes is 10240, theoretical max qps (bounds by PCIe bandwidth)
+    for this submodule is 35665.85034013606.
+    Lowering and running succeed!
 
-# We want to lower _run_on_acc_0 to TensorRT.
-split_mod._run_on_acc_0 = lower_mod_to_trt(split_mod._run_on_acc_0, (x,))  # type: ignore[arg-type]
+    Theoretical max qps (bounds by PCIe bandwidth) for this model is 35665.85034013606, bottleneck is submodule _run_on_acc_0.
+    """
 
-# Assert results are equal with the original model.
-rn18 = rn18.cuda()
-torch.testing.assert_allclose(split_mod(x), rn18(x))
+    # After split we have two submodules, one is `_run_on_acc_0` and one is `_run_on_cpu_1`.
+    # We have only one op in `_run_on_cpu_1` which is a linear layer while all other ops are
+    # in `_run_on_acc_0`.
+    split_mod = splitter()
+    print(split_mod.graph)
+    """
+    output:
 
-import time
-NITER = 100
+    graph():
+        %x : torch.Tensor [#users=1] = placeholder[target=x]
+        %_run_on_acc_0 : [#users=1] = call_module[target=_run_on_acc_0](args = (%x,), kwargs = {})
+        %_run_on_cpu_1 : [#users=1] = call_module[target=_run_on_cpu_1](args = (%_run_on_acc_0,), kwargs = {})
+        return _run_on_cpu_1
+    """
 
-s = time.time()
-for _ in range(NITER):
-    split_mod(x)
-    torch.cuda.synchronize()
-print('trt time (ms/iter)', (time.time() - s) / NITER * 1000)
-"""
-output:
+    # We want to lower _run_on_acc_0 to TensorRT.
+    split_mod._run_on_acc_0 = lower_mod_to_trt(split_mod._run_on_acc_0, (x,))  # type: ignore[arg-type]
 
-trt time (ms/iter) 1.978142261505127
-"""
+    # Assert results are equal with the original model.
+    rn18 = rn18.cuda()
+    torch.testing.assert_close(split_mod(x), rn18(x))
 
-s = time.time()
-for _ in range(NITER):
-    rn18(x)
-    torch.cuda.synchronize()
-print('stock PyTorch time (ms/iter)', (time.time() - s) / NITER * 1000)
-"""
-output:
+    import time
+    NITER = 100
 
-stock PyTorch time (ms/iter) 3.8208484649658203
-"""
+    s = time.time()
+    for _ in range(NITER):
+        split_mod(x)
+        torch.cuda.synchronize()
+    print('trt time (ms/iter)', (time.time() - s) / NITER * 1000)
+    """
+    output:
+
+    trt time (ms/iter) 1.978142261505127
+    """
+
+    s = time.time()
+    for _ in range(NITER):
+        rn18(x)
+        torch.cuda.synchronize()
+    print('stock PyTorch time (ms/iter)', (time.time() - s) / NITER * 1000)
+    """
+    output:
+
+    stock PyTorch time (ms/iter) 3.8208484649658203
+    """

@@ -26,7 +26,6 @@ namespace c10 {
   _(prim, BroadcastingChunk)         \
   _(prim, BroadcastSizes)            \
   _(prim, ReductionSizes)            \
-  _(prim, Concat)                    \
   _(prim, Constant)                  \
   _(prim, ChunkSizes)                \
   _(prim, ConstantMKLDNNTensor)      \
@@ -84,6 +83,8 @@ namespace c10 {
   _(prim, StringIndex)               \
   _(prim, NumToTensor)               \
   _(prim, Uninitialized)             \
+  _(prim, VarConcat)                 \
+  _(prim, VarStack)                  \
   _(prim, With)                      \
   _(prim, Enter)                     \
   _(prim, Exit)                      \
@@ -210,6 +211,8 @@ namespace c10 {
   _(aten, linalg_norm)               \
   _(aten, linalg_vector_norm)        \
   _(aten, linalg_matrix_norm)        \
+  _(aten, matmul)                    \
+  _(aten, linalg_matmul)             \
   _(aten, append)                    \
   _(aten, item)                      \
   _(aten, format)                    \
@@ -267,6 +270,7 @@ namespace c10 {
   _(aten, transpose_)                \
   _(aten, trapz)                     \
   _(aten, trapezoid)                 \
+  _(aten, cumulative_trapezoid)      \
   _(aten, unsqueeze_)                \
   _(aten, __getitem__)               \
   _(aten, _set_item)                 \
@@ -304,6 +308,9 @@ namespace c10 {
   _(aten, bin)                       \
   _(aten, pop)                       \
   _(aten, insert)                    \
+  _(aten, _cat)                      \
+  _(aten, cat)                       \
+  _(aten, concat)                    \
   _(aten, vstack)                    \
   _(aten, row_stack)                 \
   _(prim, unchecked_unwrap_optional) \
@@ -364,6 +371,12 @@ namespace c10 {
   _(aten, log_softmax)               \
   _(aten, special_log_softmax)       \
   _(aten, special_zeta)              \
+  _(aten, igamma)                    \
+  _(aten, igamma_)                   \
+  _(aten, special_gammainc)          \
+  _(aten, igammac)                   \
+  _(aten, igammac_)                  \
+  _(aten, special_gammaincc)         \
   _(aten, mvlgamma)                  \
   _(aten, special_multigammaln)      \
   _(aten, has_torch_function)        \
@@ -465,7 +478,8 @@ namespace c10 {
   _(attr, keepdims)                  \
   _(attr, cache_id)                  \
   _(attr, new_axis)                  \
-  _(attr, warn_id)
+  _(attr, warn_id)                   \
+  _(attr, allowzero)
 
 // 'prim' symbols are synthetic operators that occur only in the IR
 // and don't have corresponding implementations in ATen.

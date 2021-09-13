@@ -9,8 +9,25 @@
 #include <torch/csrc/jit/passes/freeze_module.h>
 #include <torch/csrc/jit/passes/inliner.h>
 
+#ifdef FBCODE_CAFFE2
+#include <folly/container/F14Map.h>
+#include <folly/container/F14Set.h>
+#endif
+
 namespace torch {
 namespace jit {
+
+#ifdef FBCODE_CAFFE2
+template <typename Key, typename Value>
+using FastMap = folly::F14FastMap<Key, Value>;
+template <typename Key>
+using FastSet = folly::F14FastSet<Key>;
+#else
+template <typename Key, typename Value>
+using FastMap = std::unordered_map<Key, Value>;
+template <typename Key>
+using FastSet = std::unordered_set<Key>;
+#endif
 
 TORCH_API bool canEnableStaticRuntime(
     const std::shared_ptr<torch::jit::Graph>& graph);
@@ -127,7 +144,7 @@ class TORCH_API StaticModule {
   size_t num_inputs() const;
   size_t num_outputs() const;
 
-  const std::unordered_map<int, std::vector<DefInfo>>& index_map() const {
+  const FastMap<int, std::vector<DefInfo>>& index_map() const {
     return node_inputs_ssa_def_map_;
   }
 
@@ -143,16 +160,21 @@ class TORCH_API StaticModule {
     return nodes_;
   }
 
+  bool is_optimizable_container_type(Node* n) const {
+    auto it = node_is_optimizable_container_type_.find(n);
+    return it != node_is_optimizable_container_type_.end();
+  }
+
   const c10::optional<c10::FunctionSchema>& schema() const {
     return schema_;
   }
 
-  const std::unordered_map<const Value*, std::vector<const Value*>>&
+  const FastMap<const Value*, std::vector<const Value*>>&
   values_share_same_storage() const {
     return value_to_same_storage_values_;
   }
 
-  const std::unordered_set<const Value*>& external_values() const {
+  const FastSet<const Value*>& external_values() const {
     return external_values_;
   }
 
@@ -178,15 +200,17 @@ class TORCH_API StaticModule {
   // a vector of ssa_defs corresponding to graph->outputs()
   std::vector<DefInfo> output_ssa_defs_;
   // map a node idx (in graph order) to a vector of ssa_defs for node inputs
-  std::unordered_map<int, std::vector<DefInfo>> node_inputs_ssa_def_map_;
+  FastMap<int, std::vector<DefInfo>> node_inputs_ssa_def_map_;
 
   // Bookkeeping for MemoryPlanner in StaticRuntime
   // values whose live-time exceeds that of running one inference (e.g., input,
   // output, prim::Constants, and their aliases)
-  std::unordered_set<const Value*> external_values_;
+  FastSet<const Value*> external_values_;
   // map a value to the set of values that may share the same storage with it
-  std::unordered_map<const Value*, std::vector<const Value*>>
+  FastMap<const Value*, std::vector<const Value*>>
       value_to_same_storage_values_;
+
+  FastSet<Node*> node_is_optimizable_container_type_;
 };
 
 class TORCH_API StaticRuntime {
@@ -209,7 +233,9 @@ class TORCH_API StaticRuntime {
       const std::vector<c10::IValue>& args,
       const std::unordered_map<std::string, c10::IValue>& kwargs,
       const int warmup_runs,
-      const int main_runs);
+      const int main_runs,
+      bool print_per_node_time = false,
+      bool generate_ai_pep_output = false);
 
   float benchmark_model(
       const std::vector<c10::IValue>& args,
@@ -222,6 +248,7 @@ class TORCH_API StaticRuntime {
     float memory_alloc_time{0.0};
     float memory_dealloc_time{0.0};
     float output_dealloc_time{0.0};
+    float first_iter_time{0.0};
     float total_time{0.0};
     size_t out_nodes_count{0};
     size_t total_nodes_count{0};
@@ -230,6 +257,7 @@ class TORCH_API StaticRuntime {
     std::unordered_map<std::string, float> percent_per_node_type;
     std::unordered_map<std::string, int> instances_per_node_type;
     std::unordered_set<std::string> out_nodes;
+    std::unordered_set<std::string> native_nodes;
   };
 
   IndividualMetrics benchmark_individual_ops(
@@ -267,6 +295,10 @@ class TORCH_API StaticRuntime {
   }
 
   void check_for_memory_leak(bool output_returned = true);
+
+  bool is_optimizable_container_type(Node* n) const {
+    return static_module_.is_optimizable_container_type(n);
+  }
 
  private:
   // helper method for copying input args/kwargs into inputs_
@@ -321,8 +353,8 @@ class MemoryPlanner {
  public:
   explicit MemoryPlanner(
       StaticRuntime* runtime,
-      const std::unordered_map<const Value*, std::vector<const Value*>>&,
-      const std::unordered_set<const Value*>& external_values,
+      const FastMap<const Value*, std::vector<const Value*>>&,
+      const FastSet<const Value*>& external_values,
       bool enable_out_variant,
       bool manage_graph_output_memory);
   // disable copying and moving
@@ -407,6 +439,10 @@ class TORCH_API ProcessedNode {
 
   bool has_out_variant() const {
     return static_cast<bool>(fn_);
+  }
+
+  bool has_native() const {
+    return static_cast<bool>(native_fn_);
   }
 
   bool verify_outputs_not_overlapping_with_immutable_inputs() const;

@@ -352,6 +352,7 @@ public:
   void build_unary_op(const Tensor& out, const Tensor& a);
   void build_unary_force_boolean_op(const Tensor& out, const Tensor& a);
   void build_comparison_op(const Tensor& out, const Tensor& a, const Tensor& b);
+  void build_ternary_op(const Tensor& out, const Tensor& a, const Tensor& b, const Tensor& c);
 
 #undef TORCH_DISALLOW_TEMPORARIES
 protected:

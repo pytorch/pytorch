@@ -46,10 +46,9 @@ TEST(BoundsInference, _1) {
   //   b[i] = a[i]
   // For this loop bounds inference should yield the following:
   // {{b, kStore, 0, 99}, {a, kLoad, 0, 99}}
-  KernelScope kernel_scope;
   ExprHandle n(100);
   Placeholder a(BufHandle("a", {n}, kFloat));
-  Tensor* b =
+  Tensor b =
       Compute("b", {{n, "i"}}, [&](const VarHandle& i) { return a.load(i); });
   LoopNest l({b});
   auto bounds_info = inferBounds(l.root_stmt());
@@ -60,9 +59,9 @@ TEST(BoundsInference, _1) {
   ASSERT_EQ(bounds_info.at(a.data())[0].kind, kLoad);
   verifyConstBounds(bounds_info.at(a.data())[0], {{0, 99}});
 
-  ASSERT_EQ(bounds_info.at(b->buf()).size(), 1);
-  ASSERT_EQ(bounds_info.at(b->buf())[0].kind, kStore);
-  verifyConstBounds(bounds_info.at(b->buf())[0], {{0, 99}});
+  ASSERT_EQ(bounds_info.at(b.buf()).size(), 1);
+  ASSERT_EQ(bounds_info.at(b.buf())[0].kind, kStore);
+  verifyConstBounds(bounds_info.at(b.buf())[0], {{0, 99}});
 }
 
 TEST(BoundsInference, _2) {
@@ -71,10 +70,9 @@ TEST(BoundsInference, _2) {
   //   b[i] = a[i]
   // For this loop bounds inference should yield the following:
   // {{b, kStore, 0, n-1}, {a, kLoad, 0, n-1}}
-  KernelScope kernel_scope;
   VarHandle n("n", kInt);
   Placeholder a(BufHandle("a", {n}, kFloat));
-  Tensor* b =
+  Tensor b =
       Compute("b", {{n, "i"}}, [&](const VarHandle& i) { return a.load(i); });
   LoopNest l({b});
   auto bounds_info = inferBounds(l.root_stmt());
@@ -85,9 +83,9 @@ TEST(BoundsInference, _2) {
   ASSERT_EQ(bounds_info.at(a.data())[0].kind, kLoad);
   verifyConstBounds(bounds_info.at(a.data())[0], {{0, -1}});
 
-  ASSERT_EQ(bounds_info.at(b->buf()).size(), 1);
-  ASSERT_EQ(bounds_info.at(b->buf())[0].kind, kStore);
-  verifyConstBounds(bounds_info.at(b->buf())[0], {{0, -1}});
+  ASSERT_EQ(bounds_info.at(b.buf()).size(), 1);
+  ASSERT_EQ(bounds_info.at(b.buf())[0].kind, kStore);
+  verifyConstBounds(bounds_info.at(b.buf())[0], {{0, -1}});
 }
 
 TEST(BoundsInference, _3) {
@@ -96,10 +94,9 @@ TEST(BoundsInference, _3) {
   //   b[i] = a[i] * a[i+10]
   // For this loop bounds inference should yield the following:
   // {{b, kStore, 0, 99}, {a, kLoad, 0, 109}}
-  KernelScope kernel_scope;
   ExprHandle n(100);
   Placeholder a(BufHandle("a", {n + 10}, kFloat));
-  Tensor* b = Compute("b", {{n, "i"}}, [&](const VarHandle& i) {
+  Tensor b = Compute("b", {{n, "i"}}, [&](const VarHandle& i) {
     return a.load(i) * a.load(i + 10);
   });
   LoopNest l({b});
@@ -111,9 +108,9 @@ TEST(BoundsInference, _3) {
   ASSERT_EQ(bounds_info.at(a.data())[0].kind, kLoad);
   verifyConstBounds(bounds_info.at(a.data())[0], {{0, 109}});
 
-  ASSERT_EQ(bounds_info.at(b->buf()).size(), 1);
-  ASSERT_EQ(bounds_info.at(b->buf())[0].kind, kStore);
-  verifyConstBounds(bounds_info.at(b->buf())[0], {{0, 99}});
+  ASSERT_EQ(bounds_info.at(b.buf()).size(), 1);
+  ASSERT_EQ(bounds_info.at(b.buf())[0].kind, kStore);
+  verifyConstBounds(bounds_info.at(b.buf())[0], {{0, 99}});
 }
 
 TEST(BoundsInference, _4) {
@@ -125,21 +122,20 @@ TEST(BoundsInference, _4) {
   // for y in 0..200:
   //   for x in 0..320:
   //     c[y,x] = a[y,x] * b[y,x]
-  KernelScope kernel_scope;
   ExprHandle W(320);
   ExprHandle H(200);
   Placeholder a(BufHandle("a", {H, W}, kFloat));
-  Tensor* b = Compute(
+  Tensor b = Compute(
       "b", {{H, "y"}, {W, "x"}}, [&](const VarHandle& y, const VarHandle& x) {
         return x * y;
       });
-  Tensor* c = Compute(
+  Tensor c = Compute(
       "c", {{H, "y"}, {W, "x"}}, [&](const VarHandle& y, const VarHandle& x) {
-        return a.load(y, x) * b->load(y, x);
+        return a.load(y, x) * b.load(y, x);
       });
   LoopNest l({c});
-  std::vector<For*> loops = l.getLoopStmtsFor(c);
-  Stmt* body = l.getLoopBodyFor(c);
+  std::vector<ForPtr> loops = l.getLoopStmtsFor(c);
+  StmtPtr body = l.getLoopBodyFor(c);
   {
     // Infer bounds on the top-level loop scope
     auto bounds_info = inferBounds(loops[0]);
@@ -149,13 +145,13 @@ TEST(BoundsInference, _4) {
     ASSERT_EQ(bounds_info.at(a.data())[0].kind, kLoad);
     verifyConstBounds(bounds_info.at(a.data())[0], {{0, 199}, {0, 319}});
 
-    ASSERT_EQ(bounds_info.at(b->buf()).size(), 1);
-    ASSERT_EQ(bounds_info.at(b->buf())[0].kind, kLoad);
-    verifyConstBounds(bounds_info.at(b->buf())[0], {{0, 199}, {0, 319}});
+    ASSERT_EQ(bounds_info.at(b.buf()).size(), 1);
+    ASSERT_EQ(bounds_info.at(b.buf())[0].kind, kLoad);
+    verifyConstBounds(bounds_info.at(b.buf())[0], {{0, 199}, {0, 319}});
 
-    ASSERT_EQ(bounds_info.at(c->buf()).size(), 1);
-    ASSERT_EQ(bounds_info.at(c->buf())[0].kind, kStore);
-    verifyConstBounds(bounds_info.at(c->buf())[0], {{0, 199}, {0, 319}});
+    ASSERT_EQ(bounds_info.at(c.buf()).size(), 1);
+    ASSERT_EQ(bounds_info.at(c.buf())[0].kind, kStore);
+    verifyConstBounds(bounds_info.at(c.buf())[0], {{0, 199}, {0, 319}});
   }
   {
     // Infer bounds on the inner loop scope
@@ -166,13 +162,13 @@ TEST(BoundsInference, _4) {
     ASSERT_EQ(bounds_info.at(a.data())[0].kind, kLoad);
     verifyConstBounds(bounds_info.at(a.data())[0], {{-1, -1}, {0, 319}});
 
-    ASSERT_EQ(bounds_info.at(b->buf()).size(), 1);
-    ASSERT_EQ(bounds_info.at(b->buf())[0].kind, kLoad);
-    verifyConstBounds(bounds_info.at(b->buf())[0], {{-1, -1}, {0, 319}});
+    ASSERT_EQ(bounds_info.at(b.buf()).size(), 1);
+    ASSERT_EQ(bounds_info.at(b.buf())[0].kind, kLoad);
+    verifyConstBounds(bounds_info.at(b.buf())[0], {{-1, -1}, {0, 319}});
 
-    ASSERT_EQ(bounds_info.at(c->buf()).size(), 1);
-    ASSERT_EQ(bounds_info.at(c->buf())[0].kind, kStore);
-    verifyConstBounds(bounds_info.at(c->buf())[0], {{-1, -1}, {0, 319}});
+    ASSERT_EQ(bounds_info.at(c.buf()).size(), 1);
+    ASSERT_EQ(bounds_info.at(c.buf())[0].kind, kStore);
+    verifyConstBounds(bounds_info.at(c.buf())[0], {{-1, -1}, {0, 319}});
   }
   {
     // Infer bounds on the inner loop body's scope
@@ -183,13 +179,13 @@ TEST(BoundsInference, _4) {
     ASSERT_EQ(bounds_info.at(a.data())[0].kind, kLoad);
     verifyConstBounds(bounds_info.at(a.data())[0], {{-1, -1}, {-1, -1}});
 
-    ASSERT_EQ(bounds_info.at(b->buf()).size(), 1);
-    ASSERT_EQ(bounds_info.at(b->buf())[0].kind, kLoad);
-    verifyConstBounds(bounds_info.at(b->buf())[0], {{-1, -1}, {-1, -1}});
+    ASSERT_EQ(bounds_info.at(b.buf()).size(), 1);
+    ASSERT_EQ(bounds_info.at(b.buf())[0].kind, kLoad);
+    verifyConstBounds(bounds_info.at(b.buf())[0], {{-1, -1}, {-1, -1}});
 
-    ASSERT_EQ(bounds_info.at(c->buf()).size(), 1);
-    ASSERT_EQ(bounds_info.at(c->buf())[0].kind, kStore);
-    verifyConstBounds(bounds_info.at(c->buf())[0], {{-1, -1}, {-1, -1}});
+    ASSERT_EQ(bounds_info.at(c.buf()).size(), 1);
+    ASSERT_EQ(bounds_info.at(c.buf())[0].kind, kStore);
+    verifyConstBounds(bounds_info.at(c.buf())[0], {{-1, -1}, {-1, -1}});
   }
 }
 
@@ -205,20 +201,19 @@ TEST(BoundsInference, _5) {
   //     b[i_outer * 16 + i_inner] = a[i_outer * 16 + i_inner]
   // for i_tail in 0..100%16:
   //   b[i_tail + (100/16)*16] = a[i_tail + (100/16)*16];
-  KernelScope kernel_scope;
   ExprHandle n(100);
   Placeholder a(BufHandle("a", {n}, kFloat));
-  Tensor* b =
+  Tensor b =
       Compute("b", {{n, "i"}}, [&](const VarHandle& i) { return a.load(i); });
   LoopNest l({b});
 
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  For* inner;
+  ForPtr inner;
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  For* tail;
-  std::vector<For*> loops = l.getLoopStmtsFor(b);
+  ForPtr tail;
+  std::vector<ForPtr> loops = l.getLoopStmtsFor(b);
   LoopNest::splitWithTail(loops[0], 16, &inner, &tail);
-  For* outer = loops[0];
+  ForPtr outer = loops[0];
 
   {
     // Verify inferred bounds for the outer loop
@@ -229,9 +224,9 @@ TEST(BoundsInference, _5) {
     ASSERT_EQ(bounds_info.at(a.data())[0].kind, kLoad);
     verifyConstBounds(bounds_info.at(a.data())[0], {{0, 95}});
 
-    ASSERT_EQ(bounds_info.at(b->buf()).size(), 1);
-    ASSERT_EQ(bounds_info.at(b->buf())[0].kind, kStore);
-    verifyConstBounds(bounds_info.at(b->buf())[0], {{0, 95}});
+    ASSERT_EQ(bounds_info.at(b.buf()).size(), 1);
+    ASSERT_EQ(bounds_info.at(b.buf())[0].kind, kStore);
+    verifyConstBounds(bounds_info.at(b.buf())[0], {{0, 95}});
   }
   {
     // Verify inferred bounds for the tail loop
@@ -242,9 +237,9 @@ TEST(BoundsInference, _5) {
     ASSERT_EQ(bounds_info.at(a.data())[0].kind, kLoad);
     verifyConstBounds(bounds_info.at(a.data())[0], {{96, 99}});
 
-    ASSERT_EQ(bounds_info.at(b->buf()).size(), 1);
-    ASSERT_EQ(bounds_info.at(b->buf())[0].kind, kStore);
-    verifyConstBounds(bounds_info.at(b->buf())[0], {{96, 99}});
+    ASSERT_EQ(bounds_info.at(b.buf()).size(), 1);
+    ASSERT_EQ(bounds_info.at(b.buf())[0].kind, kStore);
+    verifyConstBounds(bounds_info.at(b.buf())[0], {{96, 99}});
   }
 }
 
@@ -257,23 +252,22 @@ TEST(BoundsInference, _6) {
   // for y in 0..20:
   //   for x in 0..32:
   //     c[y,x] = a[y+100,x+100] * b[y*2,x*5]
-  KernelScope kernel_scope;
   ExprHandle W(320);
   ExprHandle H(200);
   ExprHandle CW(32);
   ExprHandle CH(20);
   Placeholder a(BufHandle("a", {H, W}, kFloat));
-  Tensor* b = Compute(
+  Tensor b = Compute(
       "b", {{H, "y"}, {W, "x"}}, [&](const VarHandle& y, const VarHandle& x) {
         return x * y;
       });
-  Tensor* c = Compute(
+  Tensor c = Compute(
       "c", {{CH, "y"}, {CW, "x"}}, [&](const VarHandle& y, const VarHandle& x) {
-        return a.load(y + 100, x + 100) * b->load(y * 2, x * 5);
+        return a.load(y + 100, x + 100) * b.load(y * 2, x * 5);
       });
   LoopNest l({c});
-  std::vector<For*> loops = l.getLoopStmtsFor(c);
-  Stmt* body = l.getLoopBodyFor(c);
+  std::vector<ForPtr> loops = l.getLoopStmtsFor(c);
+  StmtPtr body = l.getLoopBodyFor(c);
   {
     // Infer bounds on the top-level loop scope
     auto bounds_info = inferBounds(loops[0]);
@@ -283,13 +277,13 @@ TEST(BoundsInference, _6) {
     ASSERT_EQ(bounds_info.at(a.data())[0].kind, kLoad);
     verifyConstBounds(bounds_info.at(a.data())[0], {{100, 119}, {100, 131}});
 
-    ASSERT_EQ(bounds_info.at(b->buf()).size(), 1);
-    ASSERT_EQ(bounds_info.at(b->buf())[0].kind, kLoad);
-    verifyConstBounds(bounds_info.at(b->buf())[0], {{0, 38}, {0, 155}});
+    ASSERT_EQ(bounds_info.at(b.buf()).size(), 1);
+    ASSERT_EQ(bounds_info.at(b.buf())[0].kind, kLoad);
+    verifyConstBounds(bounds_info.at(b.buf())[0], {{0, 38}, {0, 155}});
 
-    ASSERT_EQ(bounds_info.at(c->buf()).size(), 1);
-    ASSERT_EQ(bounds_info.at(c->buf())[0].kind, kStore);
-    verifyConstBounds(bounds_info.at(c->buf())[0], {{0, 19}, {0, 31}});
+    ASSERT_EQ(bounds_info.at(c.buf()).size(), 1);
+    ASSERT_EQ(bounds_info.at(c.buf())[0].kind, kStore);
+    verifyConstBounds(bounds_info.at(c.buf())[0], {{0, 19}, {0, 31}});
   }
   {
     // Infer bounds on the inner loop scope
@@ -300,13 +294,13 @@ TEST(BoundsInference, _6) {
     ASSERT_EQ(bounds_info.at(a.data())[0].kind, kLoad);
     verifyConstBounds(bounds_info.at(a.data())[0], {{-1, -1}, {100, 131}});
 
-    ASSERT_EQ(bounds_info.at(b->buf()).size(), 1);
-    ASSERT_EQ(bounds_info.at(b->buf())[0].kind, kLoad);
-    verifyConstBounds(bounds_info.at(b->buf())[0], {{-1, -1}, {0, 155}});
+    ASSERT_EQ(bounds_info.at(b.buf()).size(), 1);
+    ASSERT_EQ(bounds_info.at(b.buf())[0].kind, kLoad);
+    verifyConstBounds(bounds_info.at(b.buf())[0], {{-1, -1}, {0, 155}});
 
-    ASSERT_EQ(bounds_info.at(c->buf()).size(), 1);
-    ASSERT_EQ(bounds_info.at(c->buf())[0].kind, kStore);
-    verifyConstBounds(bounds_info.at(c->buf())[0], {{-1, -1}, {0, 31}});
+    ASSERT_EQ(bounds_info.at(c.buf()).size(), 1);
+    ASSERT_EQ(bounds_info.at(c.buf())[0].kind, kStore);
+    verifyConstBounds(bounds_info.at(c.buf())[0], {{-1, -1}, {0, 31}});
   }
   {
     // Infer bounds on the inner loop body's scope
@@ -317,26 +311,25 @@ TEST(BoundsInference, _6) {
     ASSERT_EQ(bounds_info.at(a.data())[0].kind, kLoad);
     verifyConstBounds(bounds_info.at(a.data())[0], {{-1, -1}, {-1, -1}});
 
-    ASSERT_EQ(bounds_info.at(b->buf()).size(), 1);
-    ASSERT_EQ(bounds_info.at(b->buf())[0].kind, kLoad);
-    verifyConstBounds(bounds_info.at(b->buf())[0], {{-1, -1}, {-1, -1}});
+    ASSERT_EQ(bounds_info.at(b.buf()).size(), 1);
+    ASSERT_EQ(bounds_info.at(b.buf())[0].kind, kLoad);
+    verifyConstBounds(bounds_info.at(b.buf())[0], {{-1, -1}, {-1, -1}});
 
-    ASSERT_EQ(bounds_info.at(c->buf()).size(), 1);
-    ASSERT_EQ(bounds_info.at(c->buf())[0].kind, kStore);
-    verifyConstBounds(bounds_info.at(c->buf())[0], {{-1, -1}, {-1, -1}});
+    ASSERT_EQ(bounds_info.at(c.buf()).size(), 1);
+    ASSERT_EQ(bounds_info.at(c.buf())[0].kind, kStore);
+    verifyConstBounds(bounds_info.at(c.buf())[0], {{-1, -1}, {-1, -1}});
   }
 }
 
 TEST(BoundsInference, Adjacent) {
-  KernelScope kernel_scope;
   ExprHandle H(6);
   Placeholder a(BufHandle("a", {20}, kFloat));
-  Tensor* b =
+  Tensor b =
       Compute("b", {{H, "x"}}, [&](const VarHandle& x) { return a.load(x); });
-  Tensor* c = Compute(
+  Tensor c = Compute(
       "c", {{H, "x"}}, [&](const VarHandle& x) { return a.load(x + H); });
   LoopNest l({b, c});
-  std::vector<For*> loops = NodeFinder<For>::find(l.root_stmt());
+  std::vector<ForPtr> loops = NodeFinder<For>::find(l.root_stmt());
 
   {
     // Infer bounds on the top-level loop scope
@@ -348,9 +341,9 @@ TEST(BoundsInference, Adjacent) {
     ASSERT_EQ(bounds_info.at(a.data())[0].kind, kLoad);
     verifyConstBounds(bounds_info.at(a.data())[0], {{0, 5}});
 
-    ASSERT_EQ(bounds_info.at(b->buf()).size(), 1);
-    ASSERT_EQ(bounds_info.at(b->buf())[0].kind, kStore);
-    verifyConstBounds(bounds_info.at(b->buf())[0], {{0, 5}});
+    ASSERT_EQ(bounds_info.at(b.buf()).size(), 1);
+    ASSERT_EQ(bounds_info.at(b.buf())[0].kind, kStore);
+    verifyConstBounds(bounds_info.at(b.buf())[0], {{0, 5}});
   }
   {
     // Infer bounds on the inner loop scope
@@ -362,9 +355,9 @@ TEST(BoundsInference, Adjacent) {
     ASSERT_EQ(bounds_info.at(a.data())[0].kind, kLoad);
     verifyConstBounds(bounds_info.at(a.data())[0], {{6, 11}});
 
-    ASSERT_EQ(bounds_info.at(c->buf()).size(), 1);
-    ASSERT_EQ(bounds_info.at(c->buf())[0].kind, kStore);
-    verifyConstBounds(bounds_info.at(c->buf())[0], {{0, 5}});
+    ASSERT_EQ(bounds_info.at(c.buf()).size(), 1);
+    ASSERT_EQ(bounds_info.at(c.buf())[0].kind, kStore);
+    verifyConstBounds(bounds_info.at(c.buf())[0], {{0, 5}});
   }
   {
     // Infer bounds on the high level program.
@@ -377,24 +370,23 @@ TEST(BoundsInference, Adjacent) {
     ASSERT_EQ(bounds_info.at(a.data())[0].kind, kLoad);
     verifyConstBounds(bounds_info.at(a.data())[0], {{0, 11}});
 
-    ASSERT_EQ(bounds_info.at(b->buf()).size(), 1);
-    ASSERT_EQ(bounds_info.at(b->buf())[0].kind, kStore);
-    verifyConstBounds(bounds_info.at(b->buf())[0], {{0, 5}});
+    ASSERT_EQ(bounds_info.at(b.buf()).size(), 1);
+    ASSERT_EQ(bounds_info.at(b.buf())[0].kind, kStore);
+    verifyConstBounds(bounds_info.at(b.buf())[0], {{0, 5}});
 
-    ASSERT_EQ(bounds_info.at(c->buf()).size(), 1);
-    ASSERT_EQ(bounds_info.at(c->buf())[0].kind, kStore);
-    verifyConstBounds(bounds_info.at(c->buf())[0], {{0, 5}});
+    ASSERT_EQ(bounds_info.at(c.buf()).size(), 1);
+    ASSERT_EQ(bounds_info.at(c.buf())[0].kind, kStore);
+    verifyConstBounds(bounds_info.at(c.buf())[0], {{0, 5}});
   }
 }
 
 TEST(BoundsInference, MultipleTopLoopLoad) {
-  KernelScope kernel_scope;
   Placeholder a(BufHandle("a", {100}, kFloat));
-  Tensor* b =
+  Tensor b =
       Compute("b", {{64, "x"}}, [&](const VarHandle& x) { return a.load(x); });
-  Tensor* c = Compute(
+  Tensor c = Compute(
       "c", {{32, "x"}}, [&](const VarHandle& x) { return a.load(x + 10); });
-  Tensor* d = Compute(
+  Tensor d = Compute(
       "d", {{96, "x"}}, [&](const VarHandle& x) { return a.load(x + 2); });
   LoopNest l({b, c, d});
 
@@ -418,7 +410,7 @@ TEST(BoundsInference, MultipleTopLoopLoad) {
 
   // b, c, d only written.
   {
-    auto bounds = bounds_info[b->buf()];
+    auto bounds = bounds_info[b.buf()];
     ASSERT_EQ(bounds.size(), 1);
     auto bound = bounds[0];
     ASSERT_EQ(bound.kind, TensorAccessKind::kStore);
@@ -426,7 +418,7 @@ TEST(BoundsInference, MultipleTopLoopLoad) {
     verifyConstBounds(bound, {{0, 63}});
   }
   {
-    auto bounds = bounds_info[c->buf()];
+    auto bounds = bounds_info[c.buf()];
     ASSERT_EQ(bounds.size(), 1);
     auto bound = bounds[0];
     ASSERT_EQ(bound.kind, TensorAccessKind::kStore);
@@ -434,7 +426,7 @@ TEST(BoundsInference, MultipleTopLoopLoad) {
     verifyConstBounds(bound, {{0, 31}});
   }
   {
-    auto bounds = bounds_info[d->buf()];
+    auto bounds = bounds_info[d.buf()];
     ASSERT_EQ(bounds.size(), 1);
     auto bound = bounds[0];
     ASSERT_EQ(bound.kind, TensorAccessKind::kStore);
@@ -444,7 +436,6 @@ TEST(BoundsInference, MultipleTopLoopLoad) {
 }
 
 TEST(BoundsInference, MultipleTopLoopStore) {
-  KernelScope kernel_scope;
   BufHandle a("a", {100}, kFloat);
   BufHandle b("b", {100}, kFloat);
   BufHandle c("c", {100}, kFloat);
@@ -453,7 +444,7 @@ TEST(BoundsInference, MultipleTopLoopStore) {
 
   // Same as above but the offsets are on the Store now.
   // Can't do this through ComputeAPI without transforms we don't have yet.
-  Stmt* stmt = Block::make(
+  StmtPtr stmt = Block::make(
       {For::make(x, 0, 64, Store::make(b, {x}, Load::make(a, {x}))),
        For::make(x, 0, 32, Store::make(c, {x + 10}, Load::make(a, {x}))),
        For::make(x, 0, 96, Store::make(d, {x + 2}, Load::make(a, {x})))});
@@ -504,26 +495,24 @@ TEST(BoundsInference, MultipleTopLoopStore) {
 }
 
 TEST(BoundsInference, CacheReads) {
-  KernelScope kernel_scope;
-
-  Tensor* A = Compute(
+  Tensor A = Compute(
       "A", {{64, "i"}, {64, "j"}}, [](const VarHandle& i, const VarHandle& j) {
         return i * j;
       });
-  Tensor* B = Compute(
+  Tensor B = Compute(
       "B", {{20, "i"}, {10, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
-        return A->load(i + 30, j + 3);
+        return A.load(i + 30, j + 3);
       });
-  Tensor* C = Compute(
+  Tensor C = Compute(
       "C", {{20, "i"}, {10, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
-        return A->load(i + 10, j + 20) + A->load(i + 30, j + 40);
+        return A.load(i + 10, j + 20) + A.load(i + 30, j + 40);
       });
 
   LoopNest l({B, C});
   auto bounds_info_before = inferBounds(l.root_stmt());
 
-  Stmt* j_loop = l.getLoopStmtsFor(B)[1];
-  LoopNest::cacheAccesses(A->buf(), "A_local", j_loop);
+  StmtPtr j_loop = l.getLoopStmtsFor(B)[1];
+  LoopNest::cacheAccesses(A.buf(), "A_local", j_loop);
 
   auto bounds_info_after = inferBounds(l.root_stmt());
 
@@ -570,8 +559,7 @@ TEST(BoundsInference, CacheReads) {
 }
 
 TEST(BoundsInference, Flattened) {
-  KernelScope kernel_scope;
-  Tensor* b = Compute(
+  Tensor b = Compute(
       "b",
       {{3, "z"}, {4, "y"}, {5, "x"}},
       [&](const VarHandle& z, const VarHandle& y, const VarHandle& x) {
@@ -585,19 +573,18 @@ TEST(BoundsInference, Flattened) {
 
   // There's only one buffer.
   ASSERT_EQ(bounds_info.size(), 1);
-  auto& TABI = bounds_info[b->buf()][0];
+  auto& TABI = bounds_info[b.buf()][0];
   ASSERT_EQ(TABI.kind, TensorAccessKind::kStore);
   // Flattened bounds should have a single dimension.
   ASSERT_EQ(TABI.start.size(), 1);
   ASSERT_EQ(TABI.stop.size(), 1);
 
   // Bounds should be 0 -> (3*4*5)-1
-  ASSERT_TRUE(exprEquals(TABI.start[0], new IntImm(0)));
-  ASSERT_TRUE(exprEquals(TABI.stop[0], new IntImm(3 * 4 * 5 - 1)));
+  ASSERT_TRUE(exprEquals(TABI.start[0], alloc<IntImm>(0)));
+  ASSERT_TRUE(exprEquals(TABI.stop[0], alloc<IntImm>(3 * 4 * 5 - 1)));
 }
 
 TEST(BoundsInference, GetPotentialHazards) {
-  KernelScope kernel_scope;
   BufHandle a("A", {5}, kInt);
   BufHandle b("B", {5}, kInt);
   BufHandle c("C", {5}, kInt);
@@ -614,11 +601,11 @@ TEST(BoundsInference, GetPotentialHazards) {
      * C[0] = 5;
      */
 
-    Store* store1 = Store::make(a, {0}, Load::make(b, {0}));
-    Store* store2 = Store::make(b, {0}, 3);
-    Store* store3 = Store::make(a, {0}, Load::make(b, {0}));
-    Store* store4 = Store::make(c, {0}, 5);
-    Stmt* stmt = Block::make({store1, store2, store3, store4});
+    StorePtr store1 = Store::make(a, {0}, Load::make(b, {0}));
+    StorePtr store2 = Store::make(b, {0}, 3);
+    StorePtr store3 = Store::make(a, {0}, Load::make(b, {0}));
+    StorePtr store4 = Store::make(c, {0}, 5);
+    StmtPtr stmt = Block::make({store1, store2, store3, store4});
 
     MemDependencyChecker analyzer;
     stmt->accept(&analyzer);
@@ -649,13 +636,11 @@ TEST(BoundsInference, GetPotentialHazards) {
 }
 
 TEST(BoundsInference, GetPotentialHazardsLoopNoHazard) {
-  KernelScope kernel_scope;
-
-  Tensor* A = Compute(
+  Tensor A = Compute(
       "A", {{64, "i"}, {64, "j"}}, [](const VarHandle& i, const VarHandle& j) {
         return i * j;
       });
-  Tensor* B = Compute(
+  Tensor B = Compute(
       "B", {{64, "i"}, {64, "j"}}, [](const VarHandle& i, const VarHandle& j) {
         return (i + 1) * (j + 1);
       });
@@ -667,8 +652,8 @@ TEST(BoundsInference, GetPotentialHazardsLoopNoHazard) {
   MemDependencyChecker analyzer;
   l.root_stmt()->accept(&analyzer);
 
-  For* loopRootA = l.getLoopStmtsFor(A)[0];
-  For* loopRootB = l.getLoopStmtsFor(B)[0];
+  ForPtr loopRootA = l.getLoopStmtsFor(A)[0];
+  ForPtr loopRootB = l.getLoopStmtsFor(B)[0];
 
   // No dependencies between loops.
   ASSERT_EQ(
@@ -677,15 +662,13 @@ TEST(BoundsInference, GetPotentialHazardsLoopNoHazard) {
 }
 
 TEST(BoundsInference, GetPotentialHazardsLoopCall) {
-  KernelScope kernel_scope;
-
-  Tensor* A = Compute(
+  Tensor A = Compute(
       "A", {{64, "i"}, {64, "j"}}, [](const VarHandle& i, const VarHandle& j) {
         return i * j;
       });
-  Tensor* B = Compute(
+  Tensor B = Compute(
       "B", {{64, "i"}, {64, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
-        return A->load(i, j) + 5;
+        return A.load(i, j) + 5;
       });
 
   LoopNest l({A, B});
@@ -695,8 +678,8 @@ TEST(BoundsInference, GetPotentialHazardsLoopCall) {
   MemDependencyChecker analyzer;
   l.root_stmt()->accept(&analyzer);
 
-  For* loopRootA = l.getLoopStmtsFor(A)[0];
-  For* loopRootB = l.getLoopStmtsFor(B)[0];
+  ForPtr loopRootA = l.getLoopStmtsFor(A)[0];
+  ForPtr loopRootB = l.getLoopStmtsFor(B)[0];
 
   ASSERT_EQ(
       HazardKind::ReadAfterWrite,
@@ -704,20 +687,18 @@ TEST(BoundsInference, GetPotentialHazardsLoopCall) {
 }
 
 TEST(BoundsInference, GetPotentialHazardsLoopSplit) {
-  KernelScope kernel_scope;
-
-  Tensor* A = Compute(
+  Tensor A = Compute(
       "A", {{64, "i"}, {64, "j"}}, [](const VarHandle& i, const VarHandle& j) {
         return i * j;
       });
 
   LoopNest l({A});
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  For *inner, *tail;
+  ForPtr inner, tail;
 
   // Splitting with tail by something offset creates a tail which also writes to
   // A.
-  For* outer = l.getLoopStmtsFor(A)[0];
+  ForPtr outer = l.getLoopStmtsFor(A)[0];
   // `outer` loop get transformed to the outer loop after splitting.
   LoopNest::splitWithTail(outer, 5, &inner, &tail);
 
@@ -731,8 +712,6 @@ TEST(BoundsInference, GetPotentialHazardsLoopSplit) {
 }
 
 TEST(BoundsInference, HasConflictingOverlapSameBufferWithPartialOverlap) {
-  KernelScope kernel_scope;
-
   // Input IR:
   //   for (int j = 10; j < 100; j++) {
   //     A[j] = 10 * j;
@@ -755,8 +734,6 @@ TEST(BoundsInference, HasConflictingOverlapSameBufferWithPartialOverlap) {
 }
 
 TEST(BoundsInference, HasConflictingOverlapSameBufferWithFullOverlap) {
-  KernelScope kernel_scope;
-
   // Input IR:
   //   for (int j = 10; j < 100; j++) {
   //     A[j] = 10 * j;
@@ -778,8 +755,6 @@ TEST(BoundsInference, HasConflictingOverlapSameBufferWithFullOverlap) {
 }
 
 TEST(BoundsInference, HasConflictingOverlapSameBufferWithFullOverlapRAW) {
-  KernelScope kernel_scope;
-
   // Input IR:
   //   for (int j = 10; j < 100; j++) {
   //     A[j] = 10 * j;
@@ -803,8 +778,6 @@ TEST(BoundsInference, HasConflictingOverlapSameBufferWithFullOverlapRAW) {
 }
 
 TEST(BoundsInference, HasConflictingOverlapSameBufferNotOverlapping) {
-  KernelScope kernel_scope;
-
   // Input IR:
   //   for (int j = 10; j < 100; j++) {
   //     A[j] = 10 * j;
@@ -827,8 +800,6 @@ TEST(BoundsInference, HasConflictingOverlapSameBufferNotOverlapping) {
 }
 
 TEST(BoundsInference, HasConflictingOverlap2DBufferWithOverlap) {
-  KernelScope kernel_scope;
-
   // Input IR:
   //   for (int i = 0; i < 20; i++) {
   //     for (int j = 0; j < 100; j++) {
@@ -868,8 +839,6 @@ TEST(BoundsInference, HasConflictingOverlap2DBufferWithOverlap) {
 }
 
 TEST(BoundsInference, HasConflictingOverlap2DBufferWithNoOverlap) {
-  KernelScope kernel_scope;
-
   // Input IR:
   //   for (int i = 0; i < 20; i++) {
   //     for (int j = 0; j < 100; j++) {
@@ -909,8 +878,6 @@ TEST(BoundsInference, HasConflictingOverlap2DBufferWithNoOverlap) {
 }
 
 TEST(BoundsInference, HasConflictingOverlapDifferentBuffers) {
-  KernelScope kernel_scope;
-
   // Input IR:
   //   for (int i = 0; i < 20; i++) {
   //     for (int j = 0; j < 100; j++) {
@@ -949,8 +916,6 @@ TEST(BoundsInference, HasConflictingOverlapDifferentBuffers) {
 }
 
 TEST(BoundsInference, HasConflictingOverlapDueToRAWDependence) {
-  KernelScope kernel_scope;
-
   // Input IR:
   //   for (int j = 0; j < 100; j++) {
   //     A[j] = 10 * j;
@@ -978,8 +943,6 @@ TEST(BoundsInference, HasConflictingOverlapDueToRAWDependence) {
 }
 
 TEST(BoundsInference, HasConflictingOverlapDueToWARDependence) {
-  KernelScope kernel_scope;
-
   // Input IR:
   //   for (int k = 0; k < 100; k++) {
   //     B[k] = 20 * A[99-k];
@@ -1007,8 +970,6 @@ TEST(BoundsInference, HasConflictingOverlapDueToWARDependence) {
 }
 
 TEST(BoundsInference, HasConflictingOverlapWithLoads) {
-  KernelScope kernel_scope;
-
   // Input IR:
   //   for (int k = 10; k < 100; k++) {
   //     B[k] = 20 * A[99-k];
@@ -1041,8 +1002,6 @@ TEST(BoundsInference, HasConflictingOverlapWithLoads) {
 }
 
 TEST(BoundsInference, IsOverlapping) {
-  KernelScope kernel_scope;
-
   // Input IR:
   //   for (int i = 0; i < 100; i++) {
   //     A[i] = i * 10;               // storeA1
@@ -1066,10 +1025,8 @@ TEST(BoundsInference, IsOverlapping) {
       i, 0, 100, Block::make({storeA1, storeB, storeC, storeA2, storeA3}));
   tensorexpr::analysis::MemDependencyChecker analyzer;
   forI->accept(&analyzer);
-  ASSERT_TRUE(
-      isOverlapping(analyzer, storeA1, dynamic_cast<Load*>(loadA1.node())));
-  ASSERT_FALSE(
-      isOverlapping(analyzer, storeA1, dynamic_cast<Load*>(loadA2.node())));
+  ASSERT_TRUE(isOverlapping(analyzer, storeA1, to<Load>(loadA1.node())));
+  ASSERT_FALSE(isOverlapping(analyzer, storeA1, to<Load>(loadA2.node())));
   ASSERT_TRUE(isOverlapping(analyzer, storeA1, storeA2));
   ASSERT_FALSE(isOverlapping(analyzer, storeA1, storeA3));
 }

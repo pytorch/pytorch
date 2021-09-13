@@ -18,14 +18,15 @@ namespace torch {
 namespace jit {
 
 // The family of methods below to get bytecode version from a model
-TORCH_API int64_t _get_model_bytecode_version(std::istream& in);
+// Throws if not passed in a well formed model
+TORCH_API uint64_t _get_model_bytecode_version(std::istream& in);
 
-TORCH_API int64_t _get_model_bytecode_version(const std::string& filename);
+TORCH_API uint64_t _get_model_bytecode_version(const std::string& filename);
 
-TORCH_API int64_t _get_model_bytecode_version(
+TORCH_API uint64_t _get_model_bytecode_version(
     std::shared_ptr<caffe2::serialize::ReadAdapterInterface> rai);
 
-int64_t _get_model_bytecode_version(
+uint64_t _get_model_bytecode_version(
     const std::vector<c10::IValue>& bytecode_ivalues);
 
 std::vector<c10::IValue> get_bytecode_ivalues(
@@ -47,6 +48,33 @@ TORCH_API std::unordered_map<std::string, OperatorInfo> _get_model_ops_and_info(
 
 TORCH_API std::unordered_map<std::string, OperatorInfo> _get_model_ops_and_info(
     std::shared_ptr<caffe2::serialize::ReadAdapterInterface> rai);
+
+// The family of methods below return the compatibility information of a model
+struct ModelCompatibilityInfo {
+  uint64_t bytecode_version;
+  std::unordered_map<std::string, OperatorInfo> operator_info;
+
+  // Factory Methods
+  static TORCH_API ModelCompatibilityInfo get(std::istream& in);
+  static TORCH_API ModelCompatibilityInfo get(const std::string& filename);
+  static TORCH_API ModelCompatibilityInfo
+  get(std::shared_ptr<caffe2::serialize::ReadAdapterInterface> rai);
+};
+
+enum ModelCompatibilityStatus {
+  OK = 1,
+  ERROR = 2,
+};
+
+struct ModelCompatCheckResult {
+  ModelCompatibilityStatus status;
+  std::vector<std::string> errors;
+};
+// Takes in information about a runtime and a model and returns if the two are
+// compatible
+TORCH_API ModelCompatCheckResult is_compatible(
+    RuntimeCompatibilityInfo runtime_info,
+    ModelCompatibilityInfo model_info);
 
 } // namespace jit
 } // namespace torch

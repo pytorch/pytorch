@@ -439,6 +439,38 @@ PyObject * THCPModule_memorySnapshot(PyObject *_unused, PyObject *noargs)
   END_HANDLE_TH_ERRORS
 }
 
+PyObject * THCPModule_cudaSetSyncDebugMode(PyObject * _unused, PyObject * arg){
+  HANDLE_TH_ERRORS
+  TORCH_WARN_ONCE("Synchronization debug mode is a prototype feature and does not yet detect all " \
+  "synchronizing operations");
+  THPUtils_assert(THPUtils_checkLong(arg), "invalid argument to set_sync_debug_mode");
+  int64_t debug_mode = THPUtils_unpackLong(arg);
+  TORCH_CHECK(debug_mode >=0 && debug_mode <=2, "invalid value of debug_mode, expected one of 0,1,2");
+  c10::cuda::SyncDebugMode l;
+  switch (debug_mode) {
+    case 0: l = c10::cuda::SyncDebugMode::L_DISABLED; break;
+    case 1: l = c10::cuda::SyncDebugMode::L_WARN; break;
+    case 2: l = c10::cuda::SyncDebugMode::L_ERROR; break;
+    default: l = c10::cuda::SyncDebugMode::L_DISABLED; break; // can't happen
+  }
+  c10::cuda::warning_state().set_sync_debug_mode(l);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject * THCPModule_cudaGetSyncDebugMode(PyObject *self, PyObject *noargs){
+  HANDLE_TH_ERRORS
+  auto debug_mode = c10::cuda::warning_state().get_sync_debug_mode();
+  switch (debug_mode){
+    case c10::cuda::SyncDebugMode::L_DISABLED: return THPUtils_packInt32(0);
+    case c10::cuda::SyncDebugMode::L_WARN: return THPUtils_packInt32(1);
+    case c10::cuda::SyncDebugMode::L_ERROR: return THPUtils_packInt32(2);
+    default: return THPUtils_packInt32(-1); // can't happen
+  }
+  END_HANDLE_TH_ERRORS
+}
+
+
 ////////////////////////////////////////////////////////////////////////////////
 // Cuda module initialization
 ////////////////////////////////////////////////////////////////////////////////
@@ -575,6 +607,8 @@ static struct PyMethodDef _THCPModule_methods[] = {
   {"_cuda_sleep", THCPModule_cudaSleep, METH_O, nullptr},
   {"_cuda_lock_mutex",   THCPModule_cudaLockMutex,   METH_NOARGS,  nullptr},
   {"_cuda_unlock_mutex", THCPModule_cudaUnlockMutex, METH_NOARGS,  nullptr},
+  {"_cuda_set_sync_debug_mode", THCPModule_cudaSetSyncDebugMode, METH_O, nullptr},
+  {"_cuda_get_sync_debug_mode", THCPModule_cudaGetSyncDebugMode, METH_NOARGS, nullptr},
 #ifdef USE_NCCL
   {"_nccl_version", THCPModule_nccl_version, METH_NOARGS, nullptr},
   {"_nccl_unique_id", THCPModule_nccl_unique_id, METH_NOARGS, nullptr},

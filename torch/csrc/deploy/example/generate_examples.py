@@ -9,9 +9,9 @@ from torch.package import PackageExporter
 from torch.fx import symbolic_trace
 
 try:
-    from .examples import Simple, resnet18, MultiReturn, multi_return_metadata, load_library
+    from .examples import Simple, resnet18, MultiReturn, multi_return_metadata, load_library, BatchedModel
 except ImportError:
-    from examples import Simple, resnet18, MultiReturn, multi_return_metadata, load_library
+    from examples import Simple, resnet18, MultiReturn, multi_return_metadata, load_library, BatchedModel
 
 try:
     from .fx.examples import SimpleWithLeaf
@@ -29,17 +29,20 @@ def generate_fx_example():
     model_jit = torch.jit.script(model)
     model_jit.save(str(p / (name + "_jit")))
 
-def save(name, model, model_jit, eg, featurestore_meta=None):
+def save(name, model, model_jit=None, eg=None, featurestore_meta=None):
     with PackageExporter(str(p / name)) as e:
         e.mock("iopath.**")
         e.intern("**")
         e.save_pickle("model", "model.pkl", model)
-        e.save_pickle("model", "example.pkl", eg)
+        if eg:
+            e.save_pickle("model", "example.pkl", eg)
         if featurestore_meta:
             # TODO(whc) can this name come from buck somehow,
             # so it's consistent with predictor_config_constants::METADATA_FILE_NAME()?
             e.save_text("extra_files", "metadata.json", featurestore_meta)
-    model_jit.save(str(p / (name + "_jit")))
+
+    if model_jit:
+        model_jit.save(str(p / (name + "_jit")))
 
 
 parser = argparse.ArgumentParser(description="Generate Examples")
@@ -66,9 +69,16 @@ if __name__ == "__main__":
     multi_return = MultiReturn()
     save("multi_return", multi_return, torch.jit.script(multi_return), (torch.rand(10, 20),), multi_return_metadata)
 
+    # used for torch deploy/package tests in predictor
+    batched_model = BatchedModel()
+    save("batched_model", batched_model)
+
     with PackageExporter(str(p / "load_library")) as e:
         e.mock("iopath.**")
         e.intern("**")
         e.save_pickle("fn", "fn.pkl", load_library)
 
     generate_fx_example()
+
+    with PackageExporter(p / "uses_distributed") as e:
+        e.save_source_string("uses_distributed", "import torch.distributed; assert torch.distributed.is_available()")

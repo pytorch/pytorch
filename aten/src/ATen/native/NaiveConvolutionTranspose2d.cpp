@@ -199,10 +199,7 @@ TORCH_META_FUNC(slow_conv_transpose2d)
 
   Tensor input_ = input.contiguous();
 
-  bool is_batch = false;
   if (input_.dim() == 3) {
-    // Force batch
-    is_batch = true;
     input_.resize_({1, input_.size(0), input_.size(1), input_.size(2)});
   }
 
@@ -320,8 +317,8 @@ void slow_conv_transpose2d_out_cpu_template(
           // Do GEMM (note: this is a bit confusing because gemm assumes
           // column-major matrices)
           cpublas::gemm(
-              cpublas::NoTranspose,
-              cpublas::Transpose,
+              TransposeType::NoTranspose,
+              TransposeType::Transpose,
               n,
               m,
               k,
@@ -363,8 +360,8 @@ void slow_conv_transpose2d_out_cpu_template(
           // column-major matrices)
           if (bias.defined()) {
             cpublas::gemm(
-                cpublas::Transpose,
-                cpublas::NoTranspose,
+                TransposeType::Transpose,
+                TransposeType::NoTranspose,
                 n_,
                 m_,
                 k_,
@@ -539,8 +536,8 @@ static void slow_conv_transpose2d_backward_out_cpu_template(
               ? grad_columns.data_ptr<scalar_t>()
               : grad_output_n.data_ptr<scalar_t>();
           cpublas::gemm(
-              cpublas::NoTranspose,
-              cpublas::NoTranspose,
+              TransposeType::NoTranspose,
+              TransposeType::NoTranspose,
               n,
               m,
               k,
@@ -741,8 +738,8 @@ void slow_conv_transpose2d_acc_grad_parameters_cpu(
                 ? columns.data_ptr<scalar_t>()
                 : grad_output_n.data_ptr<scalar_t>();
             cpublas::gemm(
-                cpublas::Transpose,
-                cpublas::NoTranspose,
+                TransposeType::Transpose,
+                TransposeType::NoTranspose,
                 n,
                 m,
                 k,

@@ -279,7 +279,6 @@ InferredType tryToInferContainerType(py::handle input);
 
 // Try to infer the type of a Python object
 // The type cannot be inferred if:
-//   input is a None
 //   input is an empty container (list, dict)
 //   input is an list with element types that cannot be unified
 //   input is an dict with key or value types that cannot be unified
@@ -863,13 +862,28 @@ inline Stack createStackForSchema(
   Stack stack;
   stack.reserve(schema.arguments().size());
 
+  int64_t arg_idx = 0;
   if (self) {
     push(stack, std::move(*self));
+    arg_idx++;
   }
   // First push all positional args.
   for (const auto& arg : args) {
+    // ...but refuse to do it if the schema says that this was supposed
+    // to be keyword only
+    if (schema.arguments()[arg_idx].kwarg_only()) {
+      throw schema_match_error(c10::str(
+          schema.name(),
+          "() takes ",
+          arg_idx,
+          " positional argument(s) but ",
+          self ? 1 + args.size() : args.size(),
+          " was/were given.  Declaration: ",
+          schema));
+    }
     // Use the type information from the schema to convert the PyObject.
     push(stack, argumentToIValue(schema, stack.size(), arg));
+    arg_idx++;
   }
 
   // Now for every remaining non-positional argument in the schema, look for it
@@ -1137,7 +1151,7 @@ inline py::object invokeOperatorFromPython(
   Stack stack = std::get<1>(opWithStack);
   {
     pybind11::gil_scoped_release no_gil_guard;
-    found_op->getOperation()(&stack);
+    found_op->getOperation()(stack);
   }
 
   return createPyObjectForStack(std::move(stack));

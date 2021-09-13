@@ -17,30 +17,6 @@ if not dist.is_available():
 
 INIT_METHOD_TEMPLATE = FILE_SCHEMA + "{file_name}"
 
-
-def single_threaded_process_group_agent(f):
-    """
-    Forces ProcessGroupAgent to use only a single thread in the ThreadPool for
-    sending and processing requests.
-    """
-
-    @wraps(f)
-    def wrapper(self, *args, **kwargs):
-        backend_type = self.rpc_backend
-        if backend_type == rpc.backend_registry.BackendType["PROCESS_GROUP"]:
-            self.rpc_backend_options = (
-                rpc.backend_registry.construct_rpc_backend_options(
-                    self.rpc_backend,
-                    init_method=self.init_method,
-                    num_send_recv_threads=1,
-                )
-            )
-        return_value = f(self, *args, **kwargs)
-        return return_value
-
-    return wrapper
-
-
 def dist_init(
     old_test_method=None,
     setup_rpc: bool = True,
@@ -195,8 +171,6 @@ def wait_until_owners_and_forks_on_rank(
 
 def initialize_pg(init_method, rank: int, world_size: int) -> None:
     # This is for tests using `dist.barrier`.
-    # For `RpcAgent` other than `ProcessGroupAgent`,
-    # no `_default_pg` is initialized.
     if not dist.is_initialized():
         dist.init_process_group(
             backend="gloo",

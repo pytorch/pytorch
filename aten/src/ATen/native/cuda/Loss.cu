@@ -1,4 +1,5 @@
 #include <ATen/ATen.h>
+#include <ATen/AccumulateType.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/Dispatch.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
@@ -207,7 +208,7 @@ __global__ void nll_loss_forward_reduce_cuda_kernel_1d(
     bool size_average,
     int n_classes,
     int64_t ignore_index) {
-  CUDA_KERNEL_ASSERT(threadIdx.x == 0 && threadIdx.y == 0 & threadIdx.z == 0);
+  CUDA_KERNEL_ASSERT(threadIdx.x == 0 && threadIdx.y == 0 && threadIdx.z == 0);
 
   int t = static_cast<int>(*target);
   if (t != static_cast<int>(ignore_index)) {
@@ -263,7 +264,7 @@ __global__ void nll_loss_forward_reduce_cuda_kernel_2d(
     *total_weight = static_cast<scalar_t>(total_weight_acc);
     if (size_average && nframe == 0) {
       // Mean reduction on empty tensors produces NaN
-      *output = std::numeric_limits<double>::quiet_NaN();
+      *output = std::numeric_limits<scalar_t>::quiet_NaN();
     } else if (size_average && total_weight_acc != 0) {
       *output = static_cast<scalar_t>(output_acc / total_weight_acc);
     } else {
@@ -286,7 +287,7 @@ void nll_loss_forward_out_cuda_template(
 
   auto weight_ = weight.defined() ? weight.contiguous() : weight;
 
-  if (reduction == Reduction::None & n_dims == 2) {
+  if (reduction == Reduction::None && n_dims == 2) {
     output.resize_({batch_size});
     if (batch_size == 0) {
       // This guards from unnecessary operations and launching CUDA kernel with
@@ -365,7 +366,8 @@ void nll_loss_forward_out_cuda_template(
               target.scalar_type(),
               "nll_loss_forward_reduce_cuda_kernel_2d_index",
               [&] {
-                nll_loss_forward_reduce_cuda_kernel_2d<scalar_t, float, index_t>
+                using accscalar_t = at::acc_type<scalar_t, /*is_cuda*/true>;
+                nll_loss_forward_reduce_cuda_kernel_2d<scalar_t, accscalar_t, index_t>
                     <<<1,
                        NLL_LOSS_THREADS,
                        0,
@@ -457,40 +459,18 @@ __global__ void nll_loss_backward_reduce_cuda_kernel_2d(
 };
 
 void nll_loss_backward_out_cuda_template(
-    Tensor& grad_input,
+    const Tensor& grad_input,
     const Tensor& grad_output,
     const Tensor& input,
     const Tensor& target,
     const Tensor& total_weight,
-    const c10::optional<Tensor>& weight_opt,
+    const Tensor& weight,
     int64_t reduction,
     int64_t ignore_index) {
-  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
-  const Tensor& weight = *weight_maybe_owned;
-
-  TORCH_CHECK(
-      target.dim() == 1,
-      "1D target tensor expected, multi-target not supported");
   int64_t n_dims = input.dim();
-  TORCH_CHECK(
-      n_dims > 0 && n_dims <= 2, "input tensor should be 1D or 2D");
-
   int64_t n_classes = input.size(-1);
   int64_t batch_size = n_dims == 1 ? 1 : input.size(0);
-  int64_t num_targets = target.size(0);
 
-  TORCH_CHECK(
-      batch_size == num_targets,
-      "size mismatch (got input: ",
-      input.sizes(),
-      ", target: ",
-      target.sizes(),
-      ")")
-  TORCH_CHECK(
-      !weight.defined() || (weight.dim() == 1 && weight.numel() == n_classes),
-      "weight tensor should be defined either for all or no classes");
-
-  TORCH_CHECK(grad_input.is_contiguous(), "grad_input must be contiguous");
   auto weight_ = weight.defined() ? weight.contiguous() : weight;
 
   if (reduction == at::Reduction::None && n_dims == 2) {
@@ -602,16 +582,16 @@ TORCH_IMPL_FUNC(nll_loss_forward_out_cuda)
       output, total_weight, self, target, weight, reduction, ignore_index);
 }
 
-Tensor& nll_loss_backward_out_cuda(const Tensor& grad_output,
-    const Tensor& self,
-    const Tensor& target,
-    const c10::optional<Tensor>& weight_opt,
-    int64_t reduction,
-    int64_t ignore_index,
-    const Tensor& total_weight,
-    Tensor& grad_input) {
-
-  grad_input.resize_as_(self);
+TORCH_IMPL_FUNC(nll_loss_backward_out_cuda)
+(const Tensor& grad_output,
+ const Tensor& self,
+ const Tensor& target,
+ OptionalTensorRef weight_opt,
+ int64_t reduction,
+ int64_t ignore_index,
+ const Tensor& total_weight,
+ const Tensor& grad_input) {
+  const Tensor& weight = weight_opt.getTensorRef();
   grad_input.zero_();
   nll_loss_backward_out_cuda_template(
       grad_input,
@@ -619,31 +599,8 @@ Tensor& nll_loss_backward_out_cuda(const Tensor& grad_output,
       self,
       target,
       total_weight,
-      weight_opt,
+      weight,
       reduction,
       ignore_index);
-  return grad_input;
 }
-
-Tensor nll_loss_backward_cuda(
-    const Tensor& grad_output,
-    const Tensor& self,
-    const Tensor& target, const c10::optional<Tensor>& weight_opt,
-    int64_t reduction,
-    int64_t ignore_index,
-    const Tensor& total_weight) {
-
-  auto grad_input = at::zeros_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  nll_loss_backward_out_cuda_template(
-      grad_input,
-      grad_output,
-      self,
-      target,
-      total_weight,
-      weight_opt,
-      reduction,
-      ignore_index);
-  return grad_input;
-}
-
 }}  // namespace at::native

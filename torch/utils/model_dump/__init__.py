@@ -364,7 +364,7 @@ def burn_in_info(skeleton, info):
     # mess up our page.  Unconditionally escape fixes that.
     return skeleton.replace(
         "BURNED_IN_MODEL_INFO = null",
-        "BURNED_IN_MODEL_INFO = " + json.dumps(info).replace("/", "\\/"))
+        "BURNED_IN_MODEL_INFO = " + json.dumps(info, sort_keys=True).replace("/", "\\/"))
 
 
 def main(argv, *, stdout=None):
@@ -379,7 +379,7 @@ def main(argv, *, stdout=None):
     output = stdout or sys.stdout
 
     if args.style == "json":
-        output.write(json.dumps(info) + "\n")
+        output.write(json.dumps(info, sort_keys=True) + "\n")
     elif args.style == "html":
         skeleton = get_inline_skeleton()
         page = burn_in_info(skeleton, info)

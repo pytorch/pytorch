@@ -7,6 +7,7 @@
 #include <torch/csrc/jit/passes/clear_profiling.h>
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/passes/lower_tuples.h>
+#include <torch/csrc/jit/passes/remove_mutation.h>
 #include <torch/csrc/jit/runtime/graph_executor_impl.h>
 
 #include <stack>
@@ -89,7 +90,9 @@ class AttributePropagator {
     };
     auto applyOptimizations = [](std::shared_ptr<Graph>& subgraph) {
       runOptimization(
-          subgraph, /* unroll? */ false, /* const_prop_user_classes? */ false);
+          subgraph,
+          /* unroll_non_constant_loops? */ false,
+          /* const_prop_user_classes? */ false);
       LowerSimpleTuples(subgraph);
     };
 

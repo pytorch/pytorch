@@ -117,15 +117,15 @@ static void max_kernel_impl(Tensor& result, Tensor& indice, const Tensor& self, 
   });
 }
 
-static void _aminmax_kernel_impl(
-    Tensor& min_result,
-    Tensor& max_result,
+static void aminmax_kernel_impl(
     const Tensor& self,
     int64_t dim,
-    bool keepdim) {
-  at::TensorIterator iter = make_reduction("_aminmax", min_result,
+    bool keepdim,
+    Tensor& min_result,
+    Tensor& max_result) {
+  at::TensorIterator iter = make_reduction("aminmax_cuda", min_result,
     max_result, self, dim, keepdim, self.scalar_type());
-  AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBool, self.scalar_type(), "_aminmax_cuda", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND3(kBFloat16, kHalf, kBool, self.scalar_type(), "aminmax_cuda", [&]() {
     gpu_reduce_kernel<scalar_t, scalar_t>(
       iter,
       MinMaxOps<scalar_t, scalar_t, int32_t>{},
@@ -162,12 +162,12 @@ void _min_max_values_kernel_cuda_impl(TensorIterator& iter) {
   ));
 }
 
-void _aminmax_all_kernel_impl(Tensor& min_result, Tensor& max_result, const Tensor& input) {
+void aminmax_allreduce_kernel_impl(const Tensor& input, Tensor& min_result, Tensor& max_result) {
   auto dtype = input.scalar_type();
-  auto iter = make_reduction("_aminmax_all", min_result, max_result, input,
+  auto iter = make_reduction("aminmax_cuda", min_result, max_result, input,
                              std::vector<int64_t>{}, false, dtype);
   TORCH_CHECK(iter.numel() > 0, "min_max on a tensor with no elements is not defined.");
-  AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBool, dtype, "_aminmax_all_cuda", [&] {
+  AT_DISPATCH_ALL_TYPES_AND3(kBFloat16, kHalf, kBool, dtype, "aminmax_all_cuda", [&] {
     _min_max_values_kernel_cuda_impl<scalar_t>(iter);
   });
 }
@@ -178,9 +178,9 @@ REGISTER_DISPATCH(argmax_stub, &argmax_kernel_cuda);
 REGISTER_DISPATCH(argmin_stub, &argmin_kernel_cuda);
 REGISTER_DISPATCH(min_stub, &min_kernel_impl);
 REGISTER_DISPATCH(max_stub, &max_kernel_impl);
-REGISTER_DISPATCH(_aminmax_stub, &_aminmax_kernel_impl);
+REGISTER_DISPATCH(aminmax_stub, &aminmax_kernel_impl);
 REGISTER_DISPATCH(min_all_stub, &min_all_kernel_impl);
 REGISTER_DISPATCH(max_all_stub, &max_all_kernel_impl);
-REGISTER_DISPATCH(_aminmax_all_stub, &_aminmax_all_kernel_impl);
+REGISTER_DISPATCH(aminmax_allreduce_stub, &aminmax_allreduce_kernel_impl);
 
 }} // namespace at::native

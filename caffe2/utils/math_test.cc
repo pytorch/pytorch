@@ -456,18 +456,21 @@ class BroadcastTest : public testing::Test {
     ASSERT_EQ(X_data.size(), X_.numel());
     cpu_context_->CopyFromCPU<float>(
         X_data.size(), X_data.data(), X_.mutable_data<float>());
-    math::Broadcast<float, CPUContext>(
-        X_dims.size(),
-        X_dims.data(),
-        Y_dims.size(),
-        Y_dims.data(),
-        1.0f,
-        X_.data<float>(),
-        Y_.mutable_data<float>(),
-        cpu_context_.get());
-    ASSERT_EQ(Y_data.size(), Y_.numel());
-    for (const auto i : c10::irange(Y_data.size())) {
-      EXPECT_FLOAT_EQ(Y_data[i], Y_.data<float>()[i]);
+    for (bool allow_broadcast_fastpath : {false, true}) {
+      math::Broadcast<float, CPUContext>(
+          X_dims.size(),
+          X_dims.data(),
+          Y_dims.size(),
+          Y_dims.data(),
+          1.0f,
+          X_.data<float>(),
+          Y_.mutable_data<float>(),
+          cpu_context_.get(),
+          allow_broadcast_fastpath);
+      ASSERT_EQ(Y_data.size(), Y_.numel());
+      for (const auto i : c10::irange(Y_data.size())) {
+        EXPECT_FLOAT_EQ(Y_data[i], Y_.data<float>()[i]);
+      }
     }
   }
 
@@ -487,11 +490,17 @@ TEST_F(BroadcastTest, BroadcastFloatTest) {
   RunBroadcastTest({1}, {2}, {1.0f}, {1.0f, 1.0f});
   RunBroadcastTest({1}, {2, 2}, {1.0f}, {1.0f, 1.0f, 1.0f, 1.0f});
   RunBroadcastTest({2, 1}, {2, 2}, {1.0f, 2.0f}, {1.0f, 1.0f, 2.0f, 2.0f});
+  RunBroadcastTest({1, 2}, {2, 2}, {1.0f, 2.0f}, {1.0f, 2.0f, 1.0f, 2.0f});
   RunBroadcastTest(
       {2, 1},
       {2, 2, 2},
       {1.0f, 2.0f},
       {1.0f, 1.0f, 2.0f, 2.0f, 1.0f, 1.0f, 2.0f, 2.0f});
+  RunBroadcastTest(
+      {1, 2},
+      {2, 2, 2},
+      {1.0f, 2.0f},
+      {1.0f, 2.0f, 1.0f, 2.0f, 1.0f, 2.0f, 1.0f, 2.0f});
 }
 
 class RandFixedSumTest : public testing::Test {

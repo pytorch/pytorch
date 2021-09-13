@@ -1,3 +1,5 @@
+#include <ATen/native/quantized/cpu/qembeddingbag_prepack.h>
+
 #include <c10/core/ScalarType.h>
 #include <ATen/ATen.h>
 #include <ATen/Parallel.h>
@@ -122,7 +124,6 @@ c10::intrusive_ptr<EmbeddingPackedParamsBase> PackedEmbeddingBagWeight::prepack(
 
 namespace at {
 namespace native {
-namespace {
 
 // Note - This is a temporary pack function for embedding bag which quantizes
 // and packs the float weight tensor. In the next step it will be replaced by a
@@ -184,7 +185,7 @@ namespace {
 //
 //        [[50.        , 60.00000035],
 //         [70.        , 80.00000035]]])
-Tensor qembeddingbag_byte_prepack(const Tensor& weight) {
+Tensor& qembeddingbag_byte_prepack_out(Tensor& output, const Tensor& weight) {
   // The "last" dimension of an N-Dimensioned batch of embedding bags is
   // quantization channel. E.g. for a 2D embedding bag, this has
   // [ row, col ] dimensions, for batched of embedding bags, dimensions might be
@@ -208,17 +209,12 @@ Tensor qembeddingbag_byte_prepack(const Tensor& weight) {
   const int32_t embedding_cols = weight_sizes[cols_dim];
   // Add 8 bytes per column to store FP32 scale and zero_point per row.
   const int32_t output_columns = embedding_cols + 2 * sizeof(float);
-  Tensor weight_contig = weight.contiguous(weight.suggest_memory_format());
+  const auto weight_contig = weight.expect_contiguous(weight.suggest_memory_format());
 
   // Adjust output dimensions to account for FP32 scale and zero_points.
   std::vector<int64_t> output_shape = weight_sizes.vec();
   output_shape[cols_dim] = output_columns;
-
-  // Allocate output packed weights
-  auto output = at::empty(
-      output_shape,
-      weight_contig.options().dtype(at::kByte),
-      weight_contig.suggest_memory_format());
+  at::native::resize_(output, output_shape, c10::nullopt);
   auto* output_data = output.data_ptr<uint8_t>();
 
 #ifdef USE_FBGEMM
@@ -246,12 +242,11 @@ Tensor qembeddingbag_byte_prepack(const Tensor& weight) {
   }
 
 #else
-  const auto float_weight = weight_contig.scalar_type() == at::ScalarType::Half
-    ? weight_contig.to(at::ScalarType::Float)
-    : weight_contig;
-  const auto weight_data = float_weight.data_ptr<float>();
+  const auto weight_data = weight_contig->scalar_type() == at::ScalarType::Half
+    ? weight_contig->to(at::ScalarType::Float).data_ptr<float>()
+    : weight_contig->data_ptr<float>();
   constexpr float kEpsilon = 1e-8f;
-  for (std::size_t row = 0; row < embedding_rows; ++row) {
+  for (auto row: c10::irange(embedding_rows)) {
     const float* input_row = weight_data + row * embedding_cols;
     std::uint8_t* output_row = output_data + row * output_columns;
     float* output_row_scale_zp =
@@ -266,7 +261,7 @@ Tensor qembeddingbag_byte_prepack(const Tensor& weight) {
     output_row_scale_zp[0] = range / 255.0f;
     output_row_scale_zp[1] = minimum_element;
     const auto inverse_scale = 255.0f / (range + kEpsilon);
-    for (std::size_t col = 0; col < embedding_cols; ++col) {
+    for (auto col: c10::irange(embedding_cols)) {
       output_row[col] =
           lrintf((input_row[col] - minimum_element) * inverse_scale);
     } // embedding_cols
@@ -275,6 +270,21 @@ Tensor qembeddingbag_byte_prepack(const Tensor& weight) {
 
   return output;
 }
+
+Tensor qembeddingbag_byte_prepack(const Tensor& weight) {
+  const auto weight_contig = weight.expect_contiguous(weight.suggest_memory_format());
+  auto output = at::detail::empty_cpu(
+      {0},
+      at::kByte,
+      weight_contig->layout(),
+      weight_contig->device(),
+      c10::nullopt,
+      c10::nullopt);
+  qembeddingbag_byte_prepack_out(output, weight);
+  return output;
+}
+
+namespace {
 
 // TODO: Extend support to N-D batched embeddings, similar to qembeddingbag_byte_prepack
 Tensor _qembeddingbag_nbit_prepack_helper(

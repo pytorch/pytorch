@@ -302,7 +302,7 @@ constexpr uint32_t CUDA_THREADS_PER_BLOCK_FALLBACK = 256;
 #endif
 
 #ifdef __HIP_PLATFORM_HCC__
-#define C10_WARP_SIZE 64
+#define C10_WARP_SIZE warpSize // = 64 or 32 (Defined in hip_runtime.h)
 #else
 #define C10_WARP_SIZE 32
 #endif
@@ -352,7 +352,14 @@ __host__ __device__
         const char* assertion,
         const char* file,
         unsigned int line,
-        const char* function) throw();
+        const char* function) throw()
+// We match the declaration of __assert_fail exactly how it is in glibc in case
+// parts of the program are compiled with different NDEBUG settings. Otherwise
+// we might get 'ambiguous declaration' error.
+#ifdef __GNUC__
+        __attribute__((__noreturn__))
+#endif
+        ;
 #endif
 }
 #endif // NDEBUG

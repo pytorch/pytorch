@@ -37,6 +37,10 @@ class TORCH_API Logger {
   void set_parameter_stats();
   // Get size of each bucket (Bytes).
   std::vector<int> get_bucket_sizes();
+  // Get bucket size limits specified during DDP construction.
+  std::vector<int> get_bucket_size_limits();
+  // Get variable indices for each bucket.
+  std::vector<std::vector<size_t>> get_per_bucket_variable_indices();
   // Set comm. hook, if used
   void set_comm_hook(const std::string& hook);
   // Set running with uneven input detection (model.join() context manager)
@@ -53,6 +57,13 @@ class TORCH_API Logger {
       Timer& timer,
       Timer::Event start_event,
       Timer::Event end_event);
+
+  // Set the absolute time of the event that has been recorded in reducer.
+  void set_event_time(
+    int64_t& event_time,
+    Timer& timer,
+    Timer::Event event
+  );
   // Set stats that can be collected only during
   // training loop. It is called at the beginning of forward call
   // to record the run time stats of sampled iterations that previouly ran.

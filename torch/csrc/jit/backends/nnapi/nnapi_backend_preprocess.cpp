@@ -8,7 +8,7 @@ namespace py = pybind11;
 // Converts model to Android NNAPI backend and serializes it for mobile
 // Returns a dictionary with preprocessed items:
 //    "shape_compute_module": torch::jit::Module,
-//    "ser_model": torch::Tensor,
+//    "ser_model": at::Tensor,
 //    "weights": List[torch.Tensor],
 //    "inp_mem_fmts": List[int],
 //    "out_mem_fmts": List[int]
@@ -75,7 +75,7 @@ c10::IValue preprocess(
     nnapi_processed = pyMethod(wrapped_mod, inp.toTensor());
   } else {
     py::list pyInp;
-    for (torch::Tensor inpElem : inp.toTensorList()) {
+    for (at::Tensor inpElem : inp.toTensorList()) {
       pyInp.append(inpElem);
     }
     nnapi_processed = pyMethod(wrapped_mod, pyInp);
@@ -84,7 +84,7 @@ c10::IValue preprocess(
   // Cast and insert processed items into dict
   c10::Dict<c10::IValue, c10::IValue> dict(
       c10::StringType::get(), c10::AnyType::get());
-  dict.insert("ser_model", py::cast<torch::Tensor>(nnapi_processed[1]));
+  dict.insert("ser_model", py::cast<at::Tensor>(nnapi_processed[1]));
 
   // Serialize shape_compute_module for mobile
   auto shape_compute_module =
@@ -94,8 +94,11 @@ c10::IValue preprocess(
   dict.insert("shape_compute_module", ss.str());
 
   // transform Python lists to C++ c10::List
-  c10::List<torch::Tensor> weights(
-      py::cast<std::vector<torch::Tensor>>(nnapi_processed[2]));
+  c10::List<at::Tensor> weights(
+      py::cast<std::vector<at::Tensor>>(nnapi_processed[2]));
+  for (int i = 0; i < weights.size(); i++) {
+    weights.set(i, weights.get(i).contiguous());
+  }
   c10::List<int64_t> inp_mem_fmts(
       py::cast<std::vector<int64_t>>(nnapi_processed[3]));
   c10::List<int64_t> out_mem_fmts(

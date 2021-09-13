@@ -18,6 +18,7 @@
 #include <c10/core/ScalarType.h>
 
 #include <set>
+#include <unordered_set>
 
 struct DisableTorchDispatch {
   DisableTorchDispatch() : guard_(c10::DispatchKey::Python) {
@@ -73,7 +74,13 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
       .value("CUDA", ActivityType::CUDA);
 
   py::class_<ProfilerConfig>(m, "ProfilerConfig")
-      .def(py::init<ProfilerState, bool, bool, bool, bool>());
+      .def(py::init<ProfilerState,
+          bool, /* record_input_shapes */
+          bool, /* profile_memory */
+          bool, /* with_stac k*/
+          bool, /* with_flops */
+          bool  /* with_modules */
+          >());
 
   py::class_<LegacyEvent>(m, "ProfilerEvent")
       .def("kind", &LegacyEvent::kindStr)
@@ -107,7 +114,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
       .value("IDEEP", c10::DeviceType::IDEEP)
       .value("HIP", c10::DeviceType::HIP)
       .value("FPGA", c10::DeviceType::FPGA)
-      .value("MSNPU", c10::DeviceType::MSNPU)
+      .value("ORT", c10::DeviceType::ORT)
       .value("XLA", c10::DeviceType::XLA)
       .value("Lazy", c10::DeviceType::Lazy)
       .value("MLC", c10::DeviceType::MLC)
@@ -116,10 +123,11 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
       .value("Vulkan", c10::DeviceType::Vulkan)
       .value("Metal", c10::DeviceType::Metal);
 
-#ifdef USE_KINETO
   py::class_<KinetoEvent>(m, "_KinetoEvent")
       // name of the event
-      .def("name", &KinetoEvent::name)
+      .def("name", [](const KinetoEvent& e) {
+        return e.name();
+      })
       // PyTorch thread id of the start callback
       .def("start_thread_id", [](const KinetoEvent& e) {
         return e.startThreadId();
@@ -139,9 +147,13 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
         return e.sequenceNr();
       })
       // absolute start time (since unix epoch) in us
-      .def("start_us", &KinetoEvent::startUs)
+      .def("start_us", [](const KinetoEvent& e) {
+        return e.startUs();
+      })
       // duration in us
-      .def("duration_us", &KinetoEvent::durationUs)
+      .def("duration_us", [](const KinetoEvent& e) {
+        return e.durationUs();
+      })
       // used for correlation between high-level PyTorch events
       // and low-level device events
       .def("correlation_id", [](const KinetoEvent& e) {
@@ -180,13 +192,17 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
         return e.deviceIndex();
       })
       // for CUDA - stream id, for CPU - start thread id
-      .def("device_resource_id", &KinetoEvent::deviceResourceId)
+      .def("device_resource_id", [](const KinetoEvent& e) {
+        return e.deviceResourceId();
+      })
       // device type
       .def("device_type", [](const KinetoEvent& e) {
         return e.deviceType();
       })
       // correlation id of a linked event
-      .def("linked_correlation_id", &KinetoEvent::linkedCorrelationId)
+      .def("linked_correlation_id", [](const KinetoEvent& e) {
+        return e.linkedCorrelationId();
+      })
       // compute flops
       .def("flops", [](const KinetoEvent& e) {
         return e.flops();
@@ -203,12 +219,18 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
   py::class_<ProfilerResult>(m, "_ProfilerResult")
     .def("trace_start_us", &ProfilerResult::trace_start_us)
     .def("events", &ProfilerResult::events)
-    .def("save", &ProfilerResult::save);
+#ifdef USE_KINETO
+    .def("save", &ProfilerResult::save)
+#endif // USE_KINETO
+    ;
 
-  m.def("_enable_profiler", enableProfiler);
+  m.def("_enable_profiler",
+        &enableProfiler,
+        py::arg("config"),
+        py::arg("activities"),
+        py::arg("scopes") = std::unordered_set<at::RecordScope>());
   m.def("_disable_profiler", disableProfiler);
   m.def("_prepare_profiler", prepareProfiler);
-#endif
 
   m.def("_add_metadata_json", [](const std::string& key, const std::string& value) {
 #ifdef USE_KINETO
@@ -216,7 +238,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
 #else
       LOG(WARNING) << "Adding profiling metadata requires using "
                    << "torch.profiler with Kineto support (USE_KINETO=1)";
-#endif
+#endif // USE_KINETO
   });
 
   m.def("kineto_available", []() {
@@ -227,15 +249,12 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
 #endif
   });
 
-  m.def("_supported_kineto_activities", []() {
-    std::set<ActivityType> activities;
-#ifdef USE_KINETO
-    activities.insert(ActivityType::CPU);
-#ifndef LIBKINETO_NOCUPTI
+  m.def("_supported_activities", []() {
+    std::set<ActivityType> activities {ActivityType::CPU};
+#if defined(USE_KINETO) && !defined(LIBKINETO_NOCUPTI)
     if (at::getNumGPUs() > 0 && !at::hasHIP()) {
       activities.insert(ActivityType::CUDA);
     }
-#endif
 #endif
     return activities;
   });
@@ -264,10 +283,10 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
   m.def("_clear_callbacks", []() {
     at::clearCallbacks();
   });
-  m.def("_register_default_hooks", [](py::function &pack_hook, py::function &unpack_hook) {
+  m.def("_register_saved_tensors_default_hooks", [](py::function &pack_hook, py::function &unpack_hook) {
     torch::autograd::PyDefaultSavedVariableHooks::set_hooks(pack_hook, unpack_hook);
   });
-  m.def("_reset_default_hooks", []() {
+  m.def("_reset_saved_tensors_default_hooks", []() {
     torch::autograd::PyDefaultSavedVariableHooks::reset_hooks();
   });
 
@@ -331,6 +350,18 @@ static PyObject * is_autocast_cpu_enabled(PyObject* _unused, PyObject *arg) {
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject * set_autocast_gpu_dtype(PyObject* _unused, PyObject *arg) {
+  HANDLE_TH_ERRORS
+  if (!THPDtype_Check(arg)) {
+    throw TypeError(
+        "dtype must be a torch.dtype (got %s)", Py_TYPE(arg)->tp_name);
+  }
+  at::ScalarType targetType = reinterpret_cast<THPDtype*>(arg)->scalar_type;
+  at::autocast::set_autocast_gpu_dtype(targetType);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject * set_autocast_cpu_dtype(PyObject* _unused, PyObject *arg) {
   HANDLE_TH_ERRORS
   if (!THPDtype_Check(arg)) {
@@ -353,6 +384,13 @@ static const char* scalarTypeName(const at::ScalarType type) {
     default:
       throw std::runtime_error("unknown scalar type for autocast");
   }
+}
+
+static PyObject * get_autocast_gpu_dtype(PyObject* _unused, PyObject *arg){
+  HANDLE_TH_ERRORS
+  at::ScalarType current_dtype = at::autocast::get_autocast_gpu_dtype();
+  return THPDtype_New(current_dtype, scalarTypeName(current_dtype));
+  END_HANDLE_TH_ERRORS
 }
 
 static PyObject * get_autocast_cpu_dtype(PyObject* _unused, PyObject *arg){
@@ -378,6 +416,26 @@ static PyObject * autocast_increment_nesting(PyObject* _unused, PyObject *arg) {
 static PyObject * autocast_decrement_nesting(PyObject* _unused, PyObject *arg) {
   HANDLE_TH_ERRORS
   return THPUtils_packInt64(at::autocast::decrement_nesting());
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject * is_autocast_cache_enabled(PyObject* _unused, PyObject *arg) {
+  HANDLE_TH_ERRORS
+  if (at::autocast::is_autocast_cache_enabled()) {
+    Py_RETURN_TRUE;
+  } else {
+    Py_RETURN_FALSE;
+  }
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject * set_autocast_cache_enabled(PyObject* _unused, PyObject *arg) {
+  HANDLE_TH_ERRORS
+  if (!PyBool_Check(arg)) {
+    throw TypeError("enabled must be a bool (got %s)", Py_TYPE(arg)->tp_name);
+  }
+  at::autocast::set_autocast_cache_enabled(arg == Py_True);
+  Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
 
@@ -468,8 +526,12 @@ static PyMethodDef methods[] = { // NOLINT
   {"is_autocast_cpu_enabled", is_autocast_cpu_enabled, METH_NOARGS, nullptr},
   {"set_autocast_cpu_dtype", set_autocast_cpu_dtype, METH_O, nullptr},
   {"get_autocast_cpu_dtype", get_autocast_cpu_dtype, METH_NOARGS, nullptr},
+  {"set_autocast_gpu_dtype", set_autocast_gpu_dtype, METH_O, nullptr},
+  {"get_autocast_gpu_dtype", get_autocast_gpu_dtype, METH_NOARGS, nullptr},
   {"autocast_increment_nesting", autocast_increment_nesting, METH_NOARGS, nullptr},
   {"autocast_decrement_nesting", autocast_decrement_nesting, METH_NOARGS, nullptr},
+  {"is_autocast_cache_enabled", is_autocast_cache_enabled, METH_NOARGS, nullptr},
+  {"set_autocast_cache_enabled", set_autocast_cache_enabled, METH_O, nullptr},
   {"set_anomaly_enabled", set_anomaly_mode_enabled, METH_O, nullptr},
   {"is_anomaly_enabled", is_anomaly_mode_enabled, METH_NOARGS, nullptr},
   {"_enter_dual_level", python_enter_dual_level, METH_NOARGS, nullptr},

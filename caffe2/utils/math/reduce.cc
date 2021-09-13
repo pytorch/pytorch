@@ -18,6 +18,7 @@
 #include "caffe2/core/context.h"
 #include "caffe2/utils/eigen_utils.h"
 #include "caffe2/utils/math.h"
+#include "caffe2/utils/math/broadcast.h"
 #include "caffe2/utils/math/elementwise.h"
 #include "caffe2/utils/math/utils.h"
 
@@ -257,6 +258,23 @@ void BothEndsReduceL2(
 }
 
 template <typename T, class Reducer>
+void ReduceTensorImplFastpath(
+    const int X_size,
+    const int Y_size,
+    const Reducer& reducer,
+    const T* X,
+    T* Y) {
+  int Y_index = 0;
+  for (int X_index = 0; X_index < X_size; ++X_index) {
+    Y[Y_index] = reducer(Y[Y_index], X[X_index]);
+    Y_index++;
+    if (Y_index >= Y_size) {
+      Y_index = 0;
+    }
+  }
+}
+
+template <typename T, class Reducer>
 void ReduceTensorImpl(
     const int ndim,
     const int* X_dims,
@@ -265,10 +283,15 @@ void ReduceTensorImpl(
     const T init,
     const T* X,
     T* Y,
-    CPUContext* context) {
+    CPUContext* context,
+    bool allow_broadcast_fastpath) {
   const auto X_size = c10::multiply_integers(X_dims, X_dims + ndim);
   const auto Y_size = c10::multiply_integers(Y_dims, Y_dims + ndim);
   Set<T, CPUContext>(Y_size, init, Y, context);
+  if (allow_broadcast_fastpath && can_use_broadcast_fastpath(ndim, Y_dims)) {
+    ReduceTensorImplFastpath(X_size, Y_size, reducer, X, Y);
+    return;
+  }
   std::vector<int> index(ndim, 0);
   for (int X_index = 0; X_index < X_size; ++X_index) {
     const int Y_index = utils::GetIndexFromDims(ndim, Y_dims, index.data());
@@ -285,7 +308,8 @@ void ReduceMinImpl(
     const T alpha,
     const T* X,
     T* Y,
-    CPUContext* context) {
+    CPUContext* context,
+    bool allow_broadcast_fastpath) {
   ReduceTensorImpl(
       ndim,
       X_dims,
@@ -294,7 +318,8 @@ void ReduceMinImpl(
       std::numeric_limits<T>::max(),
       X,
       Y,
-      context);
+      context,
+      allow_broadcast_fastpath);
   const auto Y_size = c10::multiply_integers(Y_dims, Y_dims + ndim);
   Scale<T, T, CPUContext>(Y_size, alpha, Y, Y, context);
 }
@@ -307,7 +332,8 @@ void ReduceMaxImpl(
     const T alpha,
     const T* X,
     T* Y,
-    CPUContext* context) {
+    CPUContext* context,
+    bool allow_broadcast_fastpath) {
   ReduceTensorImpl(
       ndim,
       X_dims,
@@ -316,7 +342,8 @@ void ReduceMaxImpl(
       std::numeric_limits<T>::lowest(),
       X,
       Y,
-      context);
+      context,
+      allow_broadcast_fastpath);
   const auto Y_size = c10::multiply_integers(Y_dims, Y_dims + ndim);
   Scale<T, T, CPUContext>(Y_size, alpha, Y, Y, context);
 }
@@ -329,8 +356,9 @@ void ReduceSumImpl(
     const T alpha,
     const T* X,
     T* Y,
-    CPUContext* context) {
-  ReduceTensorImpl(ndim, X_dims, Y_dims, std::plus<T>(), T(0), X, Y, context);
+    CPUContext* context,
+    bool allow_broadcast_fastpath) {
+  ReduceTensorImpl(ndim, X_dims, Y_dims, std::plus<T>(), T(0), X, Y, context, allow_broadcast_fastpath);
   const auto Y_size = c10::multiply_integers(Y_dims, Y_dims + ndim);
   Scale<T, T, CPUContext>(Y_size, alpha, Y, Y, context);
 }
@@ -343,8 +371,9 @@ void ReduceMeanImpl(
     const T alpha,
     const T* X,
     T* Y,
-    CPUContext* context) {
-  ReduceTensorImpl(ndim, X_dims, Y_dims, std::plus<T>(), T(0), X, Y, context);
+    CPUContext* context,
+    bool allow_broadcast_fastpath) {
+  ReduceTensorImpl(ndim, X_dims, Y_dims, std::plus<T>(), T(0), X, Y, context, allow_broadcast_fastpath);
   const auto X_size = c10::multiply_integers(X_dims, X_dims + ndim);
   const auto Y_size = c10::multiply_integers(Y_dims, Y_dims + ndim);
   Scale<T, T, CPUContext>(
@@ -363,7 +392,8 @@ void ReduceL1Impl(
     const T alpha,
     const T* X,
     T* Y,
-    CPUContext* context) {
+    CPUContext* context,
+    bool allow_broadcast_fastpath) {
   ReduceTensorImpl(
       ndim,
       X_dims,
@@ -372,7 +402,8 @@ void ReduceL1Impl(
       T(0),
       X,
       Y,
-      context);
+      context,
+      allow_broadcast_fastpath);
   const auto Y_size = c10::multiply_integers(Y_dims, Y_dims + ndim);
   Scale<T, T, CPUContext>(Y_size, alpha, Y, Y, context);
 }
@@ -385,7 +416,8 @@ void ReduceL2Impl(
     const T alpha,
     const T* X,
     T* Y,
-    CPUContext* context) {
+    CPUContext* context,
+    bool allow_broadcast_fastpath) {
   ReduceTensorImpl(
       ndim,
       X_dims,
@@ -394,7 +426,8 @@ void ReduceL2Impl(
       T(0),
       X,
       Y,
-      context);
+      context,
+      allow_broadcast_fastpath);
   const auto Y_size = c10::multiply_integers(Y_dims, Y_dims + ndim);
   EigenVectorArrayMap<T> Y_arr(Y, Y_size);
   Y_arr = Y_arr.sqrt() * alpha;
@@ -471,7 +504,8 @@ void MomentsImpl(
     const T* X,
     T* mean,
     T* var,
-    CPUContext* /* context */) {
+    CPUContext* /* context */,
+    bool allow_broadcast_fastpath) {
   const auto X_size = c10::multiply_integers(X_dims, X_dims + ndim);
   const auto Y_size = c10::multiply_integers(Y_dims, Y_dims + ndim);
   if (X_size == 0) {
@@ -551,7 +585,8 @@ DELEGATE_GLOBAL_REDUCE_FUNCTION(std::int64_t, ReduceMax, maxCoeff)
       const T alpha,                                                       \
       const T* X,                                                          \
       T* Y,                                                                \
-      CPUContext* context) {                                               \
+      CPUContext* context,                                                 \
+      bool allow_broadcast_fastpath) {                                     \
     const int X_size =                                                     \
         std::accumulate(X_dims, X_dims + ndim, 1, std::multiplies<int>()); \
     const int Y_size =                                                     \
@@ -590,7 +625,8 @@ DELEGATE_GLOBAL_REDUCE_FUNCTION(std::int64_t, ReduceMax, maxCoeff)
       BothEnds##Func<T>(M, N, K, alpha, X, Y, context);                    \
       return;                                                              \
     }                                                                      \
-    Func##Impl<T>(ndim, X_dims, Y_dims, alpha, X, Y, context);             \
+    Func##Impl<T>(ndim, X_dims, Y_dims, alpha, X, Y,                       \
+                  context, allow_broadcast_fastpath);                      \
   }
 // NOLINTNEXTLINE(modernize-use-transparent-functors)
 DELEGATE_REDUCE_FUNCTION(
@@ -675,8 +711,10 @@ DELEGATE_REDUCE_FUNCTION(double, ReduceL2, 0.0, true)
       const T* X,                                                \
       T* mean,                                                   \
       T* var,                                                    \
-      CPUContext* context) {                                     \
-    MomentsImpl<T>(ndim, X_dims, Y_dims, X, mean, var, context); \
+      CPUContext* context,                                       \
+      bool allow_broadcast_fastpath) {                           \
+    MomentsImpl<T>(ndim, X_dims, Y_dims, X, mean, var,           \
+                   context, allow_broadcast_fastpath);           \
   }
 CAFFE2_SPECIALIZED_MOMENTS(float)
 CAFFE2_SPECIALIZED_MOMENTS(double)

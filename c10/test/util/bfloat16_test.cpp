@@ -1,4 +1,7 @@
+// clang-format off
 #include <c10/util/BFloat16.h>
+#include <c10/util/BFloat16-math.h>
+// clang-format on
 #include <gtest/gtest.h>
 
 namespace {
@@ -137,6 +140,22 @@ TEST(BFloat16Math, Subtraction) {
 
   float res = c10::detail::f32_from_bits(b.x);
   EXPECT_EQ(res, expected);
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(BFloat16Math, NextAfterZero) {
+  const c10::BFloat16 zero{0};
+
+  auto check_nextafter =
+      [](c10::BFloat16 from, c10::BFloat16 to, c10::BFloat16 expected) {
+        c10::BFloat16 actual = std::nextafter(from, to);
+        // Check for bitwise equality!
+        ASSERT_EQ(actual.x ^ expected.x, uint16_t{0});
+      };
+  check_nextafter(zero, zero, /*expected=*/zero);
+  check_nextafter(zero, -zero, /*expected=*/-zero);
+  check_nextafter(-zero, zero, /*expected=*/zero);
+  check_nextafter(-zero, -zero, /*expected=*/-zero);
 }
 
 float BinaryToFloat(uint32_t bytes) {
