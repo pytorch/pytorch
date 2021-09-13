@@ -205,11 +205,11 @@ class TestObserver(QuantizationTestCase):
             if reduce_range:
                 ref_scales = [s * 255 / 127 for s in ref_scales]
                 ref_zero_points = [math.floor(z / 2) for z in ref_zero_points]
-            self.assertTrue(torch.allclose(qparams[0], torch.tensor(ref_scales, dtype=qparams[0].dtype), atol=0.0001))
+            self.assertEqual(qparams[0], torch.tensor(ref_scales, dtype=qparams[0].dtype), rtol=1e-5, atol=0.0001)
             if qscheme == torch.per_channel_affine_float_qparams:
-                self.assertTrue(torch.allclose(qparams[1], torch.tensor(ref_zero_points, dtype=qparams[1].dtype), atol=1))
+                self.assertEqual(qparams[1], torch.tensor(ref_zero_points, dtype=qparams[1].dtype), rtol=1e-5, atol=1)
             else:
-                self.assertTrue(torch.allclose(qparams[1], torch.tensor(ref_zero_points, dtype=qparams[1].dtype)))
+                self.assertEqual(qparams[1], torch.tensor(ref_zero_points, dtype=qparams[1].dtype))
 
 
             # Test for serializability
@@ -1095,6 +1095,56 @@ class TestFusedObsFakeQuantModule(TestCase):
 
             torch.testing.assert_allclose(mod.state_dict()['activation_post_process.min_val'], running_min_op)
             torch.testing.assert_allclose(mod.state_dict()['activation_post_process.max_val'], running_max_op)
+
+    def test_fused_mod_reduce_range(self):
+        obs = FusedMovingAvgObsFakeQuantize(quant_min=0, quant_max=255, dtype=torch.quint8, reduce_range=True)
+
+        self.assertEqual(obs.quant_min, 0)
+        self.assertEqual(obs.quant_max, 127)
+
+    def test_default_fused_qat_config(self):
+        class Model(nn.Module):
+            def __init__(self):
+                super(Model, self).__init__()
+                self.linear = nn.Linear(2, 2)
+                self.relu = nn.ReLU()
+
+            def forward(self, x):
+                x = self.linear(x)
+                x = self.relu(x)
+                return x
+
+        for qengine in ["fbgemm", "qnnpack"]:
+            model = Model()
+            model.linear.weight = torch.nn.Parameter(torch.randn(2, 2))
+            sample_input = torch.randn(2, 2)
+            model.qconfig = torch.quantization.get_default_qat_qconfig(qengine, version=1)
+            ref_model = torch.quantization.QuantWrapper(model)
+            ref_model = torch.quantization.prepare_qat(ref_model)
+            ref_model(sample_input)
+            count_fake_quant = 0
+            for name, mod in ref_model.named_modules():
+                if name.endswith('weight_fake_quant'):
+                    count_fake_quant += 1
+                    self.assertEqual(type(mod), FusedMovingAvgObsFakeQuantize)
+
+                if name.count('activation_post_process') == 1 and 'weight_fake_quant' not in name:
+                    count_fake_quant += 1
+                    self.assertEqual(type(mod), FusedMovingAvgObsFakeQuantize)
+
+            self.assertEqual(count_fake_quant, 3)
+
+            if qengine == "fbgemm":
+                self.assertEqual(ref_model.quant.activation_post_process.quant_min, 0)
+                self.assertEqual(ref_model.quant.activation_post_process.quant_max, 127)
+                self.assertEqual(type(ref_model.module.linear.weight_fake_quant.activation_post_process),
+                                 MovingAveragePerChannelMinMaxObserver)
+            else:
+                self.assertEqual(ref_model.quant.activation_post_process.quant_min, 0)
+                self.assertEqual(ref_model.quant.activation_post_process.quant_max, 255)
+                self.assertEqual(type(ref_model.module.linear.weight_fake_quant.activation_post_process),
+                                 MovingAverageMinMaxObserver)
+
 
 if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"

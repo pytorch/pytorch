@@ -63,7 +63,7 @@ TEST(TorchpyTest, InitTwice) {
 TEST(TorchpyTest, DifferentInterps) {
   torch::deploy::InterpreterManager m(2);
   m.register_module_source("check_none", "check = id(None)\n");
-  int64_t id0, id1;
+  int64_t id0 = 0, id1 = 0;
   {
     auto I = m.all_instances()[0].acquire_session();
     id0 = I.global("check_none", "check").toIValue().toInt();
@@ -312,6 +312,7 @@ TEST(TorchpyTest, SharedLibraryLoad) {
       I.global("sys", "path").attr("append")({"torch/csrc/deploy"});
       I.global("test_deploy_python", "setup")({getenv("PATH")});
     } else {
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
       char buf[PATH_MAX];
       strncpy(buf, test_lib_path, PATH_MAX);
       dirname(buf);
@@ -365,3 +366,15 @@ TEST(TorchpyTest, SharedLibraryLoad) {
   }
 }
 #endif
+
+TEST(TorchpyTest, UsesDistributed) {
+  const auto model_filename = path(
+      "USES_DISTRIBUTED",
+      "torch/csrc/deploy/example/generated/uses_distributed");
+  torch::deploy::InterpreterManager m(1);
+  torch::deploy::Package p = m.load_package(model_filename);
+  {
+    auto I = p.acquire_session();
+    I.self.attr("import_module")({"uses_distributed"});
+  }
+}

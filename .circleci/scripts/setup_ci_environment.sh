@@ -43,9 +43,9 @@ if [ -n "${USE_CUDA_DOCKER_RUNTIME:-}" ]; then
   curl -s -L https://nvidia.github.io/nvidia-docker/gpgkey | sudo apt-key add -
   curl -s -L "https://nvidia.github.io/nvidia-docker/${distribution}/nvidia-docker.list" | sudo tee /etc/apt/sources.list.d/nvidia-docker.list
 
-  sudo apt-get update -qq
+  retry sudo apt-get update -qq
   # Necessary to get the `--gpus` flag to function within docker
-  sudo apt-get install -y nvidia-container-toolkit
+  retry sudo apt-get install -y nvidia-container-toolkit
   sudo systemctl restart docker
 else
   # Explicitly remove nvidia docker apt repositories if not building for cuda

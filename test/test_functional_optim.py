@@ -1,17 +1,9 @@
-import unittest
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.optim import SGD
-from torch.testing._internal.common_utils import TestCase, run_tests, IS_WINDOWS
-
-if not IS_WINDOWS:
-    from torch.distributed.optim.functional_sgd import _FunctionalSGD
-    _SUPPORTED_OPTIM_MAPPING = {
-        SGD: _FunctionalSGD,
-    }
-
+from torch.optim import SGD, Adam, AdamW
+from torch.testing._internal.common_utils import TestCase, run_tests
+from torch.distributed.optim import functional_optim_map
 
 class MyModule(torch.nn.Module):
     def __init__(self):
@@ -35,11 +27,11 @@ class TestFunctionalOptimParity(TestCase):
         optim_params = module_optim.parameters()
         functional_params = module_functional.parameters()
         optim = optim_cls(optim_params, *args, **kwargs)
-        functional_optim_cls = _SUPPORTED_OPTIM_MAPPING.get(optim_cls, None)
+        functional_optim_cls = functional_optim_map.get(optim_cls, None)
         if not functional_optim_cls:
             raise ValueError(f"Functional optimizer not implemented for {optim_cls}")
         optim_functional = functional_optim_cls(
-            [], *args, **kwargs, allow_empty_param_list=True
+            [], *args, **kwargs, _allow_empty_param_list=True
         )
         if not hasattr(optim_functional, "step_param"):
             raise ValueError(
@@ -86,12 +78,14 @@ class TestFunctionalOptimParity(TestCase):
                 self.assertNotEqual(old_module_optim_params[i], optim_param)
                 self.assertNotEqual(old_module_functional_params[i], functional_param)
 
-    @unittest.skipIf(
-        IS_WINDOWS,
-        "Functional optimizer not support on windows, see https://github.com/pytorch/pytorch/issues/62137",
-    )
-    def test_functional_optim_parity(self):
+    def test_functional_optim_parity_sgd(self):
         self._test_functional_optim_parity(SGD, 1e-2, momentum=0.9, weight_decay=0.01)
+
+    def test_functional_optim_parity_adam(self):
+        self._test_functional_optim_parity(Adam, 1e-2, betas=(0.9, 0.999), eps=1e-6)
+
+    def test_functional_optim_parity_adam_w(self):
+        self._test_functional_optim_parity(AdamW, 1e-2, betas=(0.9, 0.999), eps=1e-6)
 
 
 if __name__ == "__main__":

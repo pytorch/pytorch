@@ -48,13 +48,13 @@ class TestLiteScriptModule(TestCase):
         mobile_module = _load_for_lite_interpreter(buffer)
 
         mobile_module_result = mobile_module(input)
-        torch.testing.assert_allclose(script_module_result, mobile_module_result)
+        torch.testing.assert_close(script_module_result, mobile_module_result)
 
         mobile_module_forward_result = mobile_module.forward(input)
-        torch.testing.assert_allclose(script_module_result, mobile_module_forward_result)
+        torch.testing.assert_close(script_module_result, mobile_module_forward_result)
 
         mobile_module_run_method_result = mobile_module.run_method("forward", input)
-        torch.testing.assert_allclose(script_module_result, mobile_module_run_method_result)
+        torch.testing.assert_close(script_module_result, mobile_module_run_method_result)
 
     def test_save_mobile_module_with_debug_info_with_trace(self):
         class A(torch.nn.Module):
@@ -88,12 +88,12 @@ class TestLiteScriptModule(TestCase):
             assert(b"callstack_debug_map.pkl" in exported_module)
 
             mobile_module = _load_for_lite_interpreter(buffer)
-            with self.assertRaisesRegex(RuntimeError, r"Module hierarchy:top\(B\).A0\(A\)"):
+            with self.assertRaisesRegex(RuntimeError, r"Module hierarchy:top\(B\)::<unknown>.A0\(A\)::forward.aten::mul"):
                 x = torch.rand((2, 3))
                 y = torch.rand((8, 10))
                 z = torch.rand((8, 10))
                 mobile_module(x, y, z)
-            with self.assertRaisesRegex(RuntimeError, r"Module hierarchy:top\(B\).A1\(A\)"):
+            with self.assertRaisesRegex(RuntimeError, r"Module hierarchy:top\(B\)::<unknown>.A1\(A\)::forward.aten::mul"):
                 x = torch.rand((2, 3))
                 y = torch.rand((2, 3))
                 z = torch.rand((8, 10))
@@ -117,13 +117,13 @@ class TestLiteScriptModule(TestCase):
         mobile_module = _load_for_lite_interpreter(buffer)
 
         mobile_module_result = mobile_module(input)
-        torch.testing.assert_allclose(script_module_result, mobile_module_result)
+        torch.testing.assert_close(script_module_result, mobile_module_result)
 
         mobile_module_forward_result = mobile_module.forward(input)
-        torch.testing.assert_allclose(script_module_result, mobile_module_forward_result)
+        torch.testing.assert_close(script_module_result, mobile_module_forward_result)
 
         mobile_module_run_method_result = mobile_module.run_method("forward", input)
-        torch.testing.assert_allclose(script_module_result, mobile_module_run_method_result)
+        torch.testing.assert_close(script_module_result, mobile_module_run_method_result)
 
     def test_find_and_run_method(self):
         class MyTestModule(torch.nn.Module):
@@ -154,7 +154,7 @@ class TestLiteScriptModule(TestCase):
 
         bundled_inputs = mobile_module.run_method("get_all_bundled_inputs")
         mobile_module_result = mobile_module.forward(*bundled_inputs[0])
-        torch.testing.assert_allclose(script_module_result, mobile_module_result)
+        torch.testing.assert_close(script_module_result, mobile_module_result)
 
     def test_method_calls_with_optional_arg(self):
         class A(torch.nn.Module):
@@ -183,7 +183,7 @@ class TestLiteScriptModule(TestCase):
         input = torch.tensor([5])
         script_module_forward_result = script_module.forward(input)
         mobile_module_forward_result = mobile_module.forward(input)
-        torch.testing.assert_allclose(
+        torch.testing.assert_close(
             script_module_forward_result,
             mobile_module_forward_result
         )
@@ -198,7 +198,7 @@ class TestLiteScriptModule(TestCase):
 
         # now both match again
         mobile_module_forward_result = mobile_module.forward(input, 2)
-        torch.testing.assert_allclose(
+        torch.testing.assert_close(
             script_module_forward_result,
             mobile_module_forward_result
         )

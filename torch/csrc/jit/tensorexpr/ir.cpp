@@ -12,7 +12,7 @@ static Dtype ChooseDtype(const Dtype& buffer_dtype, const Dtype& index_dtype) {
   return Dtype(buffer_dtype, index_dtype.lanes());
 }
 
-static Dtype dtypeOfIndices(const std::vector<Expr*>& indices) {
+static Dtype dtypeOfIndices(const std::vector<ExprPtr>& indices) {
   if (!indices.size()) {
     // Return something so we can handle scalar buffers.
     return kInt;
@@ -20,7 +20,7 @@ static Dtype dtypeOfIndices(const std::vector<Expr*>& indices) {
   return indices.at(0)->dtype();
 }
 
-void castIndicesToInts(std::vector<Expr*>& indices) {
+void castIndicesToInts(std::vector<ExprPtr>& indices) {
   // Cast all indices to either Int or Long
   auto index_dtype = ScalarType::Int;
   for (auto& index : indices) {
@@ -35,17 +35,17 @@ void castIndicesToInts(std::vector<Expr*>& indices) {
     const Dtype& dt = index->dtype();
     if (c10::isIntegralType(dt.scalar_type(), true) &&
         dt.scalar_type() != index_dtype) {
-      index = new Cast(Dtype(index_dtype, dt.lanes()), index);
+      index = alloc<Cast>(Dtype(index_dtype, dt.lanes()), index);
     }
   }
 }
 
-Load::Load(Dtype dtype, Buf* buf, std::vector<Expr*> indices)
+Load::Load(Dtype dtype, BufPtr buf, std::vector<ExprPtr> indices)
     : ExprNodeBase(dtype), buf_(buf), indices_(std::move(indices)) {
   castIndicesToInts(indices_);
 }
 
-Load::Load(Buf* buf, const std::vector<Expr*>& indices)
+Load::Load(BufPtr buf, const std::vector<ExprPtr>& indices)
     : Load(ChooseDtype(buf->dtype(), dtypeOfIndices(indices)), buf, indices) {}
 
 ExprHandle Load::make(
@@ -53,7 +53,7 @@ ExprHandle Load::make(
     const BufHandle& buf,
     const std::vector<ExprHandle>& indices) {
   return ExprHandle(
-      new Load(dtype, buf.node(), ExprHandleVectorToExprVector(indices)));
+      alloc<Load>(dtype, buf.node(), ExprHandleVectorToExprVector(indices)));
 }
 
 ExprHandle Load::make(
@@ -62,22 +62,22 @@ ExprHandle Load::make(
   return Load::make(buf.dtype(), buf, indices);
 }
 
-Store::Store(Buf* buf, std::vector<Expr*> indices, Expr* value)
+Store::Store(BufPtr buf, std::vector<ExprPtr> indices, ExprPtr value)
     : buf_(buf), indices_(std::move(indices)), value_(value) {
   castIndicesToInts(indices_);
 }
 
-Store* Store::make(
+StorePtr Store::make(
     const BufHandle& buf,
     const std::vector<ExprHandle>& indices,
     const ExprHandle& value) {
-  return new Store(
+  return alloc<Store>(
       buf.node(), ExprHandleVectorToExprVector(indices), value.node());
 }
 
-Expr* flatten_index(
-    const std::vector<Expr*>& dims,
-    const std::vector<Expr*>& indices) {
+ExprPtr flatten_index(
+    const std::vector<ExprPtr>& dims,
+    const std::vector<ExprPtr>& indices) {
   // Handle already flattened indices first
   if (indices.size() == 1) {
     return indices[0];
@@ -88,19 +88,19 @@ Expr* flatten_index(
     throw malformed_input("dimensions mismatch in flatten_index");
   }
   if (ndim == 0) {
-    return new IntImm(0);
+    return alloc<LongImm>(0);
   }
-  std::vector<Expr*> strides(ndim);
+  std::vector<ExprPtr> strides(ndim);
   // stride[i] = stride[i+1]*dims[i+1], i < ndim-1
   // stride[i] = 1,                     i = ndim-1
-  strides[ndim - 1] = new IntImm(1);
+  strides[ndim - 1] = immLike(dims[ndim - 1], 1);
   for (size_t i = 1; i < ndim; i++) {
-    strides[ndim - 1 - i] = new Mul(strides[ndim - i], dims[ndim - i]);
+    strides[ndim - 1 - i] = alloc<Mul>(strides[ndim - i], dims[ndim - i]);
   }
 
-  Expr* total_index = new IntImm(0);
-  for (auto i : c10::irange(ndim)) {
-    total_index = new Add(total_index, new Mul(indices[i], strides[i]));
+  ExprPtr total_index = immLike(indices[0], 0);
+  for (const auto i : c10::irange(ndim)) {
+    total_index = alloc<Add>(total_index, alloc<Mul>(indices[i], strides[i]));
   }
   return total_index;
 }
@@ -120,7 +120,7 @@ Dtype Intrinsics::IntrinsicsDtype(IntrinsicsOp op_type, Dtype dt1, Dtype dt2) {
 
 Dtype Intrinsics::IntrinsicsDtype(
     IntrinsicsOp op_type,
-    const std::vector<Expr*>& params) {
+    const std::vector<ExprPtr>& params) {
   // TODO: check the op_type and make a real decision
   // Doesnt this fail with kRand?
   if (params.size() == 0) {
@@ -176,52 +176,64 @@ int Intrinsics::OpArgCount(IntrinsicsOp op_type) {
   }
 }
 
-ExternalCall* ExternalCall::make(
+ExternalCallPtr ExternalCall::make(
     BufHandle buf,
     const std::string& func_name,
     const std::vector<BufHandle>& buf_args,
     const std::vector<ExprHandle>& args) {
-  std::vector<Buf*> buf_arg_nodes;
+  std::vector<BufPtr> buf_arg_nodes;
   buf_arg_nodes.reserve(buf_args.size());
   for (const BufHandle& buf_arg : buf_args) {
     buf_arg_nodes.push_back(buf_arg.node());
   }
-  return new ExternalCall(
+  return alloc<ExternalCall>(
       buf.node(), func_name, buf_arg_nodes, ExprHandleVectorToExprVector(args));
 }
 
-std::vector<Expr*> ExprHandleVectorToExprVector(
+std::vector<ExprPtr> ExprHandleVectorToExprVector(
     const std::vector<ExprHandle>& v) {
-  std::vector<Expr*> result(v.size());
-  for (auto i : c10::irange(v.size())) {
+  std::vector<ExprPtr> result(v.size());
+  for (const auto i : c10::irange(v.size())) {
     result[i] = v[i].node();
   }
   return result;
 }
 
 std::vector<ExprHandle> ExprVectorToExprHandleVector(
-    const std::vector<Expr*>& v) {
+    const std::vector<ExprPtr>& v) {
   std::vector<ExprHandle> result(v.size());
-  for (auto i : c10::irange(v.size())) {
+  for (const auto i : c10::irange(v.size())) {
     result[i] = ExprHandle(v[i]);
   }
   return result;
 }
 
-std::vector<Var*> VarHandleVectorToVarVector(const std::vector<VarHandle>& v) {
-  std::vector<Var*> result(v.size());
-  for (auto i : c10::irange(v.size())) {
+std::vector<VarPtr> VarHandleVectorToVarVector(
+    const std::vector<VarHandle>& v) {
+  std::vector<VarPtr> result(v.size());
+  for (const auto i : c10::irange(v.size())) {
     result[i] = v[i].node();
   }
   return result;
 }
 
-std::vector<VarHandle> VarVectorToVarHandleVector(const std::vector<Var*>& v) {
+std::vector<VarHandle> VarVectorToVarHandleVector(
+    const std::vector<VarPtr>& v) {
   std::vector<VarHandle> result(v.size());
-  for (auto i : c10::irange(v.size())) {
+  for (const auto i : c10::irange(v.size())) {
     result[i] = VarHandle(v[i]);
   }
   return result;
+}
+
+bool immediateIsNegative(ExprPtr e) {
+#define TYPE_CASE(Type, Name)                \
+  if (Name##ImmPtr imm = to<Name##Imm>(e)) { \
+    return imm->value() < 0;                 \
+  }
+  AT_FORALL_SCALAR_TYPES_AND2(Half, BFloat16, TYPE_CASE);
+#undef TYPE_CASE
+  return false;
 }
 
 } // namespace tensorexpr

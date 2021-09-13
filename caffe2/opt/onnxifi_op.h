@@ -151,9 +151,8 @@ class OnnxifiOp final : public Operator<Context> {
           name_to_shape.emplace(output_qshape_tp.name(), details::TensorInfo{output_qshape_tp});
         }
 
-        // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-        for (output_idx = 0; output_idx < output_names_.size(); ++output_idx) {
-          auto it = name_to_shape.find(output_names_[output_idx]);
+        for (const auto& output : output_names_) {
+          auto it = name_to_shape.find(output);
           CAFFE_ENFORCE(it != name_to_shape.end());
           output_shapes_per_bs_[bs].push_back({});
           auto &output_shapes = output_shapes_per_bs_[bs].back();
@@ -269,8 +268,7 @@ class OnnxifiOp final : public Operator<Context> {
 
       // Release unused backend ids.
       for (size_t i = 0; i < num_backends; ++i) {
-        // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-        if (i == backend_index) {
+        if (i == static_cast<size_t>(backend_index)) {
           continue;
         }
         lib_->onnxReleaseBackendID(backend_ids[i]);

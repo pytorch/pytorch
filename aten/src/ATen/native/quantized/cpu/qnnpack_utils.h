@@ -75,6 +75,7 @@ struct PackedLinearWeightsQnnp : public LinearPackedParamsBase {
       c10::optional<at::Tensor> bias);
 
  private:
+  std::mutex qnnp_mutex_;
   template <bool ReluFused>
   at::Tensor apply_impl(
       at::Tensor input,
@@ -292,6 +293,7 @@ struct PackedConvWeightsQnnp : public ConvPackedParamsBase<kSpatialDim> {
   }
 
  private:
+  std::mutex qnnp_mutex_;
   template <bool ReluFused>
   at::Tensor apply_impl(
       const at::Tensor& input,
@@ -361,7 +363,7 @@ Tensor qnnpack_avg_pool2d(
 } // namespace at
 
 namespace {
-std::vector<float> generate_requantization_scales(
+C10_UNUSED std::vector<float> generate_requantization_scales(
     const at::Tensor& weight_scales,
     const float input_scale,
     const float output_scale,
@@ -385,7 +387,7 @@ std::vector<float> generate_requantization_scales(
   return requant_scales;
 }
 
-std::pair<std::vector<uint8_t>, at::Tensor> make_zero_points_and_scales_tensor(
+C10_UNUSED std::pair<std::vector<uint8_t>, at::Tensor> make_zero_points_and_scales_tensor(
     const at::Tensor& weight_contig,
     bool transpose = false,
     uint32_t groups = 1

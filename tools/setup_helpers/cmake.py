@@ -9,7 +9,7 @@ from subprocess import check_call, check_output, CalledProcessError
 import sys
 import sysconfig
 from setuptools import distutils  # type: ignore[import]
-from typing import IO, Any, Dict, List, Optional, Union
+from typing import IO, Any, Dict, List, Optional, Union, cast
 
 from . import which
 from .env import (BUILD_DIR, IS_64BIT, IS_DARWIN, IS_WINDOWS, check_negative_env_flag)
@@ -179,12 +179,6 @@ class CMake:
         if rerun and os.path.isfile(self._cmake_cache_file):
             os.remove(self._cmake_cache_file)
 
-        ninja_deps_file = os.path.join(self.build_dir, '.ninja_deps')
-        if IS_WINDOWS and USE_NINJA and os.path.exists(ninja_deps_file):
-            # Cannot rerun ninja on Windows due to a ninja bug.
-            # The workaround is to remove `.ninja_deps`.
-            os.remove(ninja_deps_file)
-
         ninja_build_file = os.path.join(self.build_dir, 'build.ninja')
         if os.path.exists(self._cmake_cache_file) and not (
                 USE_NINJA and not os.path.exists(ninja_build_file)):
@@ -230,10 +224,8 @@ class CMake:
         _mkdir_p(self.build_dir)
 
         # Store build options that are directly stored in environment variables
-        build_options: Dict[str, CMakeValue] = {
-            # The default value cannot be easily obtained in CMakeLists.txt. We set it here.
-            'CMAKE_PREFIX_PATH': sysconfig.get_path('purelib')
-        }
+        build_options: Dict[str, CMakeValue] = {}
+
         # Build options that do not start with "BUILD_", "USE_", or "CMAKE_" and are directly controlled by env vars.
         # This is a dict that maps environment variables to the corresponding variable name in CMake.
         additional_options = {
@@ -286,6 +278,16 @@ class CMake:
                 build_options[true_var] = val
             elif var.startswith(('BUILD_', 'USE_', 'CMAKE_')) or var.endswith(('EXITCODE', 'EXITCODE__TRYRUN_OUTPUT')):
                 build_options[var] = val
+
+        # The default value cannot be easily obtained in CMakeLists.txt. We set it here.
+        py_lib_path = sysconfig.get_path('purelib')
+        cmake_prefix_path = build_options.get('CMAKE_PREFIX_PATH', None)
+        if cmake_prefix_path:
+            build_options["CMAKE_PREFIX_PATH"] = (
+                cast(str, py_lib_path) + ";" + cast(str, cmake_prefix_path)
+            )
+        else:
+            build_options['CMAKE_PREFIX_PATH'] = py_lib_path
 
         # Some options must be post-processed. Ideally, this list will be shrunk to only one or two options in the
         # future, as CMake can detect many of these libraries pretty comfortably. We have them here for now before CMake

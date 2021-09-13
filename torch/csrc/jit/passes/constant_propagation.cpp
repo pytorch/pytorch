@@ -3,6 +3,7 @@
 #include <ATen/core/functional.h>
 #include <ATen/core/ivalue.h>
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/ir/constants.h>
@@ -77,7 +78,7 @@ c10::optional<std::vector<IValue>> runNodeIfInputsAreConstant(
 
       try {
         auto op = n->getOperation();
-        op(&stack);
+        op(stack);
       } catch (...) {
         return c10::nullopt;
       }
@@ -160,7 +161,7 @@ struct ConstantPropagator {
     }
     auto graph = n->owningGraph();
     WithInsertPoint guard(n);
-    for (size_t i = 0; i < outputs.size(); ++i) {
+    for (const auto i : c10::irange(outputs.size())) {
       auto new_output = tryInsertConstant(*graph, outputs[i]);
       if (new_output) {
         made_change_ = true;

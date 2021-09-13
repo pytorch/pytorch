@@ -20,8 +20,6 @@ namespace jit {
 using namespace torch::jit::tensorexpr;
 
 TEST(ExternalCall, Conv2d_float) {
-  KernelScope kernel_scope;
-
   Placeholder Input("Input", kFloat, {1, 3, 224, 224});
   Placeholder Weight("Weight", kFloat, {16, 3, 3, 3});
   Placeholder Bias("Bias", kFloat, {16});
@@ -31,7 +29,7 @@ TEST(ExternalCall, Conv2d_float) {
   int64_t dilation = 1;
   int64_t groups = 1;
 
-  Tensor* Result = new Tensor(
+  Tensor Result = Tensor(
       ResultBuf.node(),
       ExternalCall::make(
           ResultBuf,
@@ -84,7 +82,6 @@ TEST(ExternalCall, Conv2d_float) {
 
 TEST(ExternalCall, Conv2d_int) {
   // A similar test, but now using kInt tensors
-  KernelScope kernel_scope;
 
   Placeholder Input("Input", kInt, {1, 3, 224, 224});
   Placeholder Weight("Weight", kInt, {16, 3, 3, 3});
@@ -95,7 +92,7 @@ TEST(ExternalCall, Conv2d_int) {
   int64_t dilation = 1;
   int64_t groups = 1;
 
-  Tensor* Result = new Tensor(
+  Tensor Result = Tensor(
       ResultBuf.node(),
       ExternalCall::make(
           ResultBuf,
@@ -147,13 +144,11 @@ TEST(ExternalCall, Conv2d_int) {
 }
 
 TEST(ExternalCall, Conv2d_nobias_noargs) {
-  KernelScope kernel_scope;
-
   Placeholder Input("Input", kFloat, {1, 16, 112, 112});
   Placeholder Weight("Weight", kFloat, {16, 16, 1, 1});
   BufHandle ResultBuf("Result", {1, 16, 112, 112}, kFloat);
 
-  Tensor* Result = new Tensor(
+  Tensor Result = Tensor(
       ResultBuf.node(),
       ExternalCall::make(
           ResultBuf,
@@ -194,8 +189,6 @@ TEST(ExternalCall, Conv2d_nobias_noargs) {
 }
 
 TEST(ExternalCall, Addmm_float) {
-  KernelScope kernel_scope;
-
   Placeholder Input("Input", kFloat, {100, 300});
   Placeholder Mat1("Mat1", kFloat, {100, 200});
   Placeholder Mat2("Mat2", kFloat, {200, 300});
@@ -203,7 +196,7 @@ TEST(ExternalCall, Addmm_float) {
   int64_t beta = 2;
   int64_t alpha = 2;
 
-  Tensor* Result = new Tensor(
+  Tensor Result = Tensor(
       ResultBuf.node(),
       ExternalCall::make(
           ResultBuf,
@@ -252,8 +245,6 @@ TEST(ExternalCall, Addmm_float) {
 TEST(ExternalCall, Prepacked_Linear_float) {
   using namespace at::native::xnnpack;
 
-  KernelScope kernel_scope;
-
   Placeholder Input("Input", kFloat, {100, 200});
   BufHandle ResultBuf("Result", {100, 300}, kFloat);
 
@@ -283,7 +274,7 @@ TEST(ExternalCall, Prepacked_Linear_float) {
       weight, bias, c10::optional<at::Scalar>(), c10::optional<at::Scalar>());
 
   Placeholder DummyPrepacked("DummyPrepacked", kFloat, {1});
-  Tensor* Result = new Tensor(
+  Tensor Result = Tensor(
       ResultBuf.node(),
       ExternalCall::make(
           ResultBuf,
@@ -316,8 +307,6 @@ TEST(ExternalCall, Prepacked_Linear_float) {
 
 TEST(ExternalCall, Prepacked_Conv2d_float) {
   using namespace at::native::xnnpack;
-
-  KernelScope kernel_scope;
 
   Placeholder Input("Input", kFloat, {1, 3, 224, 224});
   BufHandle ResultBuf("Result", {1, 16, 112, 112}, kFloat);
@@ -370,7 +359,7 @@ TEST(ExternalCall, Prepacked_Conv2d_float) {
       c10::optional<at::Scalar>());
 
   Placeholder DummyPrepacked("DummyPrepacked", kFloat, {1});
-  Tensor* Result = new Tensor(
+  Tensor Result = Tensor(
       ResultBuf.node(),
       ExternalCall::make(
           ResultBuf,
@@ -404,7 +393,6 @@ TEST(ExternalCall, Prepacked_Conv2d_float) {
 #endif // USE_XNNPACK
 
 TEST(ExternalCall, BinaryFloat) {
-  KernelScope kernel_scope;
   using TensorFunc = std::function<at::Tensor(at::Tensor, at::Tensor)>;
   using Test = std::tuple<
       std::vector<int64_t>,
@@ -431,7 +419,7 @@ TEST(ExternalCall, BinaryFloat) {
     Placeholder B("", kFloat, toExprHandleVec(bShape));
     BufHandle ResultBuf("Result", toExprHandleVec(resShape), kFloat);
 
-    Tensor* Result = new Tensor(
+    Tensor Result = Tensor(
         ResultBuf.node(),
         ExternalCall::make(
             ResultBuf,
@@ -479,7 +467,6 @@ TEST(ExternalCall, BinaryFloat) {
 }
 
 TEST(ExternalCall, UnaryFloat) {
-  KernelScope kernel_scope;
   using TensorFunc = std::function<at::Tensor(at::Tensor)>;
   auto toExprHandleVec = [](std::vector<int64_t> v) {
     auto intV = std::vector<int>(v.begin(), v.end());
@@ -516,7 +503,7 @@ TEST(ExternalCall, UnaryFloat) {
     Placeholder A("A", kFloat, toExprHandleVec(aShape));
     BufHandle ResultBuf("Result", toExprHandleVec(resShape), kFloat);
 
-    Tensor* Result = new Tensor(
+    Tensor Result = Tensor(
         ResultBuf.node(),
         ExternalCall::make(
             ResultBuf, externCallName, {BufHandle(A.data())}, externCallArgs));
@@ -561,19 +548,18 @@ TEST(ExternalCall, UnaryFloat) {
 TEST(ExternalCall, ComputeInterop) {
   // This test verifies that Tensors using external calls can be used by and can
   // use Tensors built with Compute API.
-  KernelScope kernel_scope;
 
-  BufHandle ConvResultBuf("ConvResult", {1, 16, 112, 112}, kFloat);
-  BufHandle MatmulResultBuf("MatmulResult", {1, 16, 112, 112}, kFloat);
+  BufHandle ConvResultBuf("ConvResult", {1, 16, 32, 32}, kFloat);
+  BufHandle MatmulResultBuf("MatmulResult", {1, 16, 32, 32}, kFloat);
 
-  Tensor* Input = Compute(
+  Tensor Input = Compute(
       "Input",
-      {{1, "n"}, {16, "c"}, {112, "h"}, {112, "w"}},
+      {{1, "n"}, {16, "c"}, {32, "h"}, {32, "w"}},
       [&](const VarHandle& n,
           const VarHandle& c,
           const VarHandle& h,
           const VarHandle& w) { return FloatImm::make(5.0f); });
-  Tensor* Weight = Compute(
+  Tensor Weight = Compute(
       "Weight",
       {{16, "n"}, {16, "c"}, {1, "kh"}, {1, "kw"}},
       [&](const VarHandle& n,
@@ -581,28 +567,28 @@ TEST(ExternalCall, ComputeInterop) {
           const VarHandle& h,
           const VarHandle& w) { return FloatImm::make(6.0f); });
 
-  Tensor* ConvResult = new Tensor(
+  Tensor ConvResult = Tensor(
       ConvResultBuf.node(),
       ExternalCall::make(
           ConvResultBuf,
           "nnc_aten_conv2d",
-          {BufHandle(Input->buf()), BufHandle(Weight->buf())},
+          {BufHandle(Input.buf()), BufHandle(Weight.buf())},
           {}));
-  Tensor* MatmulResult = new Tensor(
+  Tensor MatmulResult = Tensor(
       MatmulResultBuf.node(),
       ExternalCall::make(
           MatmulResultBuf,
           "nnc_aten_matmul",
-          {BufHandle(ConvResult->buf()), BufHandle(ConvResult->buf())},
+          {BufHandle(ConvResult.buf()), BufHandle(ConvResult.buf())},
           {}));
-  Tensor* Result = Compute(
+  Tensor Result = Compute(
       "Result",
-      {{1, "n"}, {16, "c"}, {112, "h"}, {112, "w"}},
+      {{1, "n"}, {16, "c"}, {32, "h"}, {32, "w"}},
       [&](const VarHandle& n,
           const VarHandle& c,
           const VarHandle& h,
           const VarHandle& w) {
-        return ConvResult->load(n, c, h, w) + MatmulResult->load(n, c, h, w);
+        return ConvResult.load(n, c, h, w) + MatmulResult.load(n, c, h, w);
       });
 
   LoopNest l({Input, Weight, ConvResult, MatmulResult, Result});
@@ -619,18 +605,18 @@ TEST(ExternalCall, ComputeInterop) {
                      .layout(at::kStrided)
                      .device(at::kCPU)
                      .requires_grad(false);
-  at::Tensor input = at::ones({1, 16, 112, 112}, options) * 5.f;
+  at::Tensor input = at::ones({1, 16, 32, 32}, options) * 5.f;
   at::Tensor weight = at::ones({16, 16, 1, 1}, options) * 6.f;
   at::Tensor t = at::conv2d(input, weight);
   at::Tensor t2 = at::matmul(t, t);
   at::Tensor ref = t + t2;
 
   at::Tensor nnc_result;
-  std::vector<float> input_buf(1 * 16 * 112 * 112, 5.f);
+  std::vector<float> input_buf(1 * 16 * 32 * 32, 5.f);
   std::vector<float> weight_buf(16 * 16 * 1 * 1, 6.f);
-  std::vector<float> conv_result_buf(1 * 16 * 112 * 112, -1.f);
-  std::vector<float> matmul_result_buf(1 * 16 * 112 * 112, -1.f);
-  std::vector<float> result_buf(1 * 16 * 112 * 112, -1.f);
+  std::vector<float> conv_result_buf(1 * 16 * 32 * 32, -1.f);
+  std::vector<float> matmul_result_buf(1 * 16 * 32 * 32, -1.f);
+  std::vector<float> result_buf(1 * 16 * 32 * 32, -1.f);
 
 #ifdef TORCH_ENABLE_LLVM
   LLVMCodeGen llvm_codegen(
@@ -638,7 +624,7 @@ TEST(ExternalCall, ComputeInterop) {
 
   llvm_codegen.call(
       {input_buf, weight_buf, conv_result_buf, matmul_result_buf, result_buf});
-  nnc_result = at::from_blob(result_buf.data(), {1, 16, 112, 112}, options);
+  nnc_result = at::from_blob(result_buf.data(), {1, 16, 32, 32}, options);
   ASSERT_TRUE(at::allclose(nnc_result, ref));
 #endif
 
@@ -647,42 +633,41 @@ TEST(ExternalCall, ComputeInterop) {
 
   ir_eval.call(
       {input_buf, weight_buf, conv_result_buf, matmul_result_buf, result_buf});
-  nnc_result = at::from_blob(result_buf.data(), {1, 16, 112, 112}, options);
+  nnc_result = at::from_blob(result_buf.data(), {1, 16, 32, 32}, options);
   ASSERT_TRUE(at::allclose(nnc_result, ref));
 }
 
 TEST(ExternalCall, Inlining) {
   // This test verifies that Tensors using external calls can be used by and
   // can use Tensors built with Compute API.
-  KernelScope kernel_scope;
 
   BufHandle MatmulResultBuf("MatmulResult", {8, 8}, kFloat);
 
-  Tensor* A = Compute(
+  Tensor A = Compute(
       "A", {{8, "i"}, {8, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
         return FloatImm::make(5.0f);
       });
-  Tensor* B = Compute(
+  Tensor B = Compute(
       "B", {{8, "i"}, {8, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
         return FloatImm::make(4.0f);
       });
-  Tensor* MatmulResult = new Tensor(
+  Tensor MatmulResult = Tensor(
       MatmulResultBuf.node(),
       ExternalCall::make(
           MatmulResultBuf,
           "nnc_aten_matmul",
-          {BufHandle(A->buf()), BufHandle(B->buf())},
+          {BufHandle(A.buf()), BufHandle(B.buf())},
           {}));
-  Tensor* Result = Compute(
+  Tensor Result = Compute(
       "Result",
       {{8, "i"}, {8, "j"}},
       [&](const VarHandle& i, const VarHandle& j) {
-        return MatmulResult->load(i, j) + FloatImm::make(3.0f);
+        return MatmulResult.load(i, j) + FloatImm::make(3.0f);
       });
 
-  Stmt* root_stmt =
-      new Block({A->stmt(), B->stmt(), MatmulResult->stmt(), Result->stmt()});
-  LoopNest l(root_stmt, {Result->buf()});
+  StmtPtr root_stmt = alloc<Block>(std::vector<StmtPtr>(
+      {A.stmt(), B.stmt(), MatmulResult.stmt(), Result.stmt()}));
+  LoopNest l(root_stmt, {Result.buf()});
 
   // Inlining should not inline anything here since all Bufs are either
   // defined or used in ExternalCalls

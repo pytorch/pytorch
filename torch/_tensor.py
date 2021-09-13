@@ -1,4 +1,5 @@
 from collections import OrderedDict
+import enum
 import functools
 from numbers import Number
 from typing import Any, Dict, Optional, Tuple, Union
@@ -90,7 +91,7 @@ class Tensor(torch._C._TensorBase):
             # does accurate alias tracking; however, the code below
             # doesn't work because of
             # https://github.com/pytorch/pytorch/issues/47442
-            if self.is_sparse or self.device.type in ['xla', 'mlc', 'meta']:
+            if self.is_sparse or self.device.type in ['xla', 'mlc', 'ort', 'meta']:
                 new_tensor = self.clone()
             else:
                 new_storage = self.storage().__deepcopy__(memo)
@@ -153,28 +154,21 @@ class Tensor(torch._C._TensorBase):
         # See Note [Don't serialize hooks]
         torch.utils.hooks.warn_if_has_hooks(self)
         backward_hooks: Dict[Any, Any] = OrderedDict()
-        # Note: Numpy array is chosen to be the rebuild component for XLA Tensor.
+        # Note: Numpy array is chosen to be the rebuild component for XLA, ORT, MLC Tensors.
         # We considered a few options:
         # 1. CPU tensor can't be used here.
         #    Otherwise in torch.load CPU storage is reconstructed with randomly
-        #    initialized data, moved onto XLA device, and then storage is updated
-        #    to the serialized content. This works perfectly for CPU/CUDA but not XLA.
-        #    XLA tensor is disconnected with storage so it doesn't get the update.
+        #    initialized data, moved onto backend device, and then storage is updated
+        #    to the serialized content. This works perfectly for CPU/CUDA but not these backends;
+        #    their tensors are disconnected with storage so they don't get the update.
         # 2. Python list is not a good fit due to performance reason.
         #    `tolist()` converts every single element in the tensor into python objects
         #    and serialize them one by one.
-        if self.device.type == 'xla':
-            arg_xla = (self.cpu().numpy(),
-                       self.dtype,
-                       str(self.device),
-                       self.requires_grad)
-            return (torch._utils._rebuild_xla_tensor, arg_xla)
-        if self.device.type == 'mlc':
-            arg_mlc = (self.cpu().numpy(),
-                       self.dtype,
-                       str(self.device),
-                       self.requires_grad)
-            return (torch._utils._rebuild_mlc_tensor, arg_mlc)
+        if self.device.type in ['xla', 'ort', 'mlc']:
+            return (torch._utils._rebuild_device_tensor_from_numpy, (self.cpu().numpy(),
+                                                                     self.dtype,
+                                                                     str(self.device),
+                                                                     self.requires_grad))
         if self.device.type == 'meta':
             # NB: This implementation BREAKS storage sharing.  Current
             # hypothesis is that no one cares for meta tensors.
@@ -453,28 +447,6 @@ class Tensor(torch._C._TensorBase):
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor.lu, (self,), self, pivot=pivot, get_infos=get_infos)
 
-        if not torch._jit_internal.is_scripting():
-            if self.requires_grad:
-                if not (self.size(-2) == self.size(-1) and (self.dtype.is_floating_point) or self.is_complex):
-                    raise ValueError(
-                        'lu.backward works only with batches of squared full-rank matrices'
-                        ' of floating or complex types.'
-                    )
-
-                from torch._autograd_functions import _LU
-                LU, pivots, infos = _LU.apply(self, pivot, get_infos)
-                if get_infos:
-                    return LU, pivots, infos
-                else:
-                    return LU, pivots
-        else:
-            if self.requires_grad:
-                raise RuntimeError(
-                    'Script and require gradients is not supported at the moment.'
-                    'If you just want to do the forward, use .detach()'
-                    'on the input before calling the function.'
-                )
-
         LU, pivots, infos = torch._lu_with_info(self, pivot=pivot, check_errors=(not get_infos))
         if get_infos:
             return LU, pivots, infos
@@ -611,11 +583,21 @@ class Tensor(torch._C._TensorBase):
 
     @_wrap_type_error_to_not_implemented
     def __floordiv__(self, other):
-        return torch.floor_divide(self, other)
+        warnings.warn("__floordiv__ is deprecated, and its behavior will change in a future version of pytorch. "
+                      "It currently rounds toward 0 (like the 'trunc' function NOT 'floor'). "
+                      "This results in incorrect rounding for negative values. "
+                      "To keep the current behavior, use torch.div(a, b, rounding_mode='trunc'), "
+                      "or for actual floor division, use torch.div(a, b, rounding_mode='floor').", stacklevel=3)
+        return torch.div(self, other, rounding_mode='trunc')
 
     @_wrap_type_error_to_not_implemented
     def __rfloordiv__(self, other):
-        return torch.floor_divide(other, self)
+        warnings.warn("__rfloordiv__ is deprecated, and its behavior will change in a future version of pytorch. "
+                      "It currently rounds toward 0 (like the 'trunc' function NOT 'floor'). "
+                      "This results in incorrect rounding for negative values. "
+                      "To keep the current behavior, use torch.div(a, b, rounding_mode='trunc'), "
+                      "or for actual floor division, use torch.div(a, b, rounding_mode='floor').", stacklevel=3)
+        return torch.div(other, self, rounding_mode='trunc')
 
     @_wrap_type_error_to_not_implemented
     def __rlshift__(self, other):
@@ -993,8 +975,8 @@ class Tensor(torch._C._TensorBase):
             coalesced_self = self.coalesce()
             row_indices = coalesced_self.indices()[0]
             device = coalesced_self.values().device
-            arange = torch.arange(self.shape[0] + 1, dtype=row_indices.dtype, device=device)
-            crow_indices = torch.bucketize(arange, row_indices, out_int32=row_indices.dtype == torch.int32)
+            crow_indices = torch._convert_indices_from_coo_to_csr(
+                row_indices, self.shape[0], out_int32=row_indices.dtype == torch.int32)
             return torch.sparse_csr_tensor(crow_indices,
                                            coalesced_self.indices()[1].contiguous(),
                                            coalesced_self.values(),
@@ -1071,6 +1053,67 @@ class Tensor(torch._C._TensorBase):
                 return ret
             else:
                 return _convert(ret, cls)
+
+    def __dlpack__(self, stream=None):
+        """
+        Creates a DLpack `capsule https://data-apis.org/array-api/latest/design_topics/data_interchange.html#data-interchange`_
+        of the current tensor to be exported to other libraries.
+
+        This function will be called from the `from_dlpack` method
+        of the library that will consume the capsule. `from_dlpack` passes the current
+        stream to this method as part of the specification.
+
+        Args:
+            stream (integer or None): An optional Python integer representing a
+            pointer to a CUDA stream. The current stream is synchronized with
+            this stream before the capsule is created, and since the capsule
+            shares its storage with the tensor this make it safe to access from
+            both streams.  If None or -1 is passed then no synchronization is performed.
+        """
+        if has_torch_function_unary(self):
+            return handle_torch_function(Tensor.__dlpack__, (self,), self, stream)
+
+        # DLPack capsules can't capture all of PyTorch's semantics,
+        # so we prohibit exporting tensors that would lose their properties like
+        # requires_grad and having the conjugate bit set.
+        if self.requires_grad:
+            raise RuntimeError('Can\'t export tensors that require gradient, use tensor.detach()')
+        if self.is_conj():
+            raise RuntimeError('Can\'t export tensors with the conjugate bit set')
+        if self.layout != torch.strided:
+            raise RuntimeError('Can\'t export tensors with layout other than torch.strided')
+
+        if stream is not None and type(stream) is not int:
+            # Stream pointers in CUDA/ROCm are uniquely numbered and can
+            # be retrieved from their integer value.
+            raise TypeError('stream must be ``int`` or ``none``')
+        elif stream is not None and stream != -1:
+            if self.device.type == 'cuda':
+                stream = torch.cuda.streams.ExternalStream(stream)
+                # Only synchronize on different streams
+                if stream != torch.cuda.current_stream:
+                    event = torch.cuda.Event()
+                    event.record(torch.cuda.current_stream())
+                    stream.wait_event(event)
+        return torch.to_dlpack(self)
+
+    def __dlpack_device__(self) -> Tuple[enum.IntEnum, int]:
+        # Avoid circular import
+        from torch.utils.dlpack import DLDeviceType
+        if has_torch_function_unary(self):
+            return handle_torch_function(Tensor.__dlpack_device__, (self,), self)
+        idx = self.device.index if self.device.index is not None else 0
+        if self.device.type == 'cuda' and torch.version.hip is not None:
+            device_type = DLDeviceType.kDLROCM
+        elif self.device.type == 'cpu' and self.is_pinned():
+            device_type = DLDeviceType.kDLCPUPinned
+        elif self.device.type == 'cuda':
+            device_type = DLDeviceType.kDLGPU
+        elif self.device.type == 'cpu':
+            device_type = DLDeviceType.kDLCPU
+        else:
+            raise ValueError('Unknown device type {} for Dlpack'.format(self.device.type))
+        return (device_type, idx)
 
     __module__ = 'torch'
 

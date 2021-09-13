@@ -15,7 +15,7 @@ import platform
 import textwrap
 import ctypes
 import warnings
-
+from .autocast_mode import autocast
 if sys.version_info < (3,):
     raise Exception("Python 2 has reached end-of-life and is no longer supported by PyTorch.")
 
@@ -323,29 +323,44 @@ def set_default_tensor_type(t):
 
 
 def set_default_dtype(d):
-    r"""Sets the default floating point dtype to :attr:`d`.
-    This dtype is:
+    r"""
 
-    1. The inferred dtype for python floats in :func:`torch.tensor`.
-    2. Used to infer dtype for python complex numbers. The default complex dtype is set to
-       ``torch.complex128`` if default floating point dtype is ``torch.float64``,
-       otherwise it's set to ``torch.complex64``
+    Sets the default floating point dtype to :attr:`d`. Supports torch.float32
+    and torch.float64 as inputs. Other dtypes may be accepted without complaint
+    but are not supported and are unlikely to work as expected.
 
-    The default floating point dtype is initially ``torch.float32``.
+    When PyTorch is initialized its default floating point dtype is torch.float32,
+    and the intent of set_default_dtype(torch.float64) is to facilitate NumPy-like
+    type inference. The default floating point dtype is used to:
+
+    1. Implicitly determine the default complex dtype. When the default floating point
+       type is float32 the default complex dtype is complex64, and when the default
+       floating point type is float64 the default complex type is complex128.
+    2. Infer the dtype for tensors constructed using Python floats or complex Python
+       numbers. See examples below.
+    3. Determine the result of type promotion between bool and integer tensors and
+       Python floats and complex Python numbers.
 
     Args:
-        d (:class:`torch.dtype`): the floating point dtype to make the default
+        d (:class:`torch.dtype`): the floating point dtype to make the default.
+                                  Either torch.float32 or torch.float64.
 
     Example:
         >>> # initial default for floating point is torch.float32
+        >>> # Python floats are interpreted as float32
         >>> torch.tensor([1.2, 3]).dtype
         torch.float32
         >>> # initial default for floating point is torch.complex64
+        >>> # Complex Python numbers are interpreted as complex64
         >>> torch.tensor([1.2, 3j]).dtype
         torch.complex64
+
         >>> torch.set_default_dtype(torch.float64)
+
+        >>> # Python floats are now interpreted as float64
         >>> torch.tensor([1.2, 3]).dtype    # a new floating point tensor
         torch.float64
+        >>> # Complex Python numbers are now interpreted as complex128
         >>> torch.tensor([1.2, 3j]).dtype   # a new complex tensor
         torch.complex128
 
@@ -743,6 +758,8 @@ from ._vmap_internals import vmap as vmap
 # class usage. We add these lines here to preserve backward compatibility.
 quantized_lstm = torch.ops.aten.quantized_lstm
 quantized_gru = torch.ops.aten.quantized_gru
+
+from torch.utils.dlpack import from_dlpack, to_dlpack
 
 
 def _register_device_module(device_type, module):

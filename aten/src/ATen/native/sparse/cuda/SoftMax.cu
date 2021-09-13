@@ -1,4 +1,5 @@
 #include <ATen/ATen.h>
+#include <ATen/CUDAFunctions.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/SparseTensorUtils.h>
@@ -10,7 +11,7 @@
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/native/sparse/cuda/SparseCUDAApplyUtils.cuh>
-#include <ATen/native/sparse/cuda/SparseCUDABlas.cuh>
+#include <ATen/native/sparse/cuda/SparseCUDABlas.h>
 
 #include <THC/THCThrustAllocator.cuh>
 
@@ -380,10 +381,11 @@ void cuda_sparse_coo_softmax(
 
   if (dim >= sparse_dim) {
     if (LogSoftMax) {
-      auto new_values = log_softmax_cuda(values, dim - sparse_dim + 1, false);
+      auto new_values =
+          at::cuda::_log_softmax(values, dim - sparse_dim + 1, false);
       out_values.set_(new_values);
     } else {
-      auto new_values = softmax_cuda(values, dim - sparse_dim + 1, false);
+      auto new_values = at::cuda::_softmax(values, dim - sparse_dim + 1, false);
       out_values.set_(new_values);
     }
     return;
@@ -468,10 +470,11 @@ void cuda_sparse_coo_softmax_backward(
     if (at::native::cuda_equal(out_offsets, grad_offsets) == true) {
       Tensor unused = at::native::empty_like(grad_values);
       if (LogSoftMax) {
-        auto r = log_softmax_backward_cuda(grad_values, out_values, dim - sparse_dim + 1, unused);
+        auto r = at::cuda::_log_softmax_backward_data(
+            grad_values, out_values, dim - sparse_dim + 1, unused);
         values.set_(r);
       } else {
-        auto r = softmax_backward_cuda(grad_values, out_values, dim - sparse_dim + 1, unused);
+        auto r = at::cuda::_softmax_backward_data(grad_values, out_values, dim - sparse_dim + 1, unused);
         values.set_(r);
       }
     } else {
@@ -494,11 +497,11 @@ void cuda_sparse_coo_softmax_backward(
         */
         if (j < grad_nnz && out_offsets_accessor[i] == grad_offsets_accessor[j]) {
           if (LogSoftMax) {
-            auto r = log_softmax_backward_cuda(
+            auto r = at::cuda::_log_softmax_backward_data(
                 grad_values[j], out_values[i], dim - sparse_dim, unused);
             values[i].copy_(r);
           } else {
-            auto r = softmax_backward_cuda(
+            auto r = at::cuda::_softmax_backward_data(
                 grad_values[j], out_values[i], dim - sparse_dim, unused);
             values[i].copy_(r);
           }

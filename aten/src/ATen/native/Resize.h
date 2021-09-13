@@ -10,7 +10,10 @@
 namespace at { namespace native {
 
 // TODO: make all operations that resize given outputs use this function
-//   for consistency and maintainability
+//   for consistency and maintainability.
+//   Some operations like `cat` might not be able to make the use of
+//   resize_output directly. For more details to understand how it works in `cat`,
+//   see https://github.com/pytorch/pytorch/pull/62560#discussion_r687363362
 // Resizes outputs
 // Functions accepting output tensors, like with the "out" kwarg, should
 //   call this function to handle resizing their output tensor.
@@ -19,6 +22,11 @@ namespace at { namespace native {
 // NOTE: In the future the warning will become an error
 // Returns a bool saying whether or not the resize actually happened or not
 TORCH_API bool resize_output(const Tensor& output, IntArrayRef shape);
+
+// Utility for resize_output
+//  Returns a bool saying resize should happen or not and
+//  raises a warning if resizing for one or more elements
+TORCH_API bool resize_output_check(const Tensor& output, IntArrayRef shape);
 
 TORCH_API void resize_bytes_cpu(StorageImpl* storage, size_t size_bytes);
 

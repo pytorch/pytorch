@@ -47,7 +47,7 @@ std::unordered_map<std::string, OperatorInfo> _get_runtime_ops_and_info() {
   return result;
 }
 
-RuntimeCompatibilityInfo get_runtime_compatibility_info() {
+RuntimeCompatibilityInfo RuntimeCompatibilityInfo::get() {
   return RuntimeCompatibilityInfo{
       _get_runtime_bytecode_version(), _get_runtime_ops_and_info()};
 }

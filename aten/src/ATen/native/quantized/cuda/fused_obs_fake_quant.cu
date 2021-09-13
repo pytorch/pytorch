@@ -239,23 +239,44 @@ std::tuple<at::Tensor, at::Tensor> fused_moving_avg_obs_fake_quant_cuda(
   // Calculate the size of the dimension we need to quantize over,
   // For per-channel quant we default to axis 0, since it is only for
   // weight quantization currently.
-  int64_t size = per_row_fq ? x.size(0) : 1;
-  if (per_row_fq && running_min.numel() == 0) {
-    float inf = std::numeric_limits<float>::infinity();
-    running_min.resize_(size).fill_(inf);
-    running_max.resize_(size).fill_(-inf);
-    scale.resize_(size);
-    zero_point.resize_(size);
-  }
-  _calculate_moving_average(
-      x_contig,
-      observer_on,
-      running_min,
-      running_max,
-      averaging_const,
-      size,
-      per_row_fq);
+  int64_t size = 1;
+  if (per_row_fq) {
+    at::Tensor y = x;
+    if (x.dim() != 2) {
+      auto res = DimVector(x.sizes());
+      std::iota(res.begin(), res.end(), 0);
+      res[ch_axis] = 0;
+      res[0] = ch_axis;
 
+      y = x.permute(res);
+      y = y.flatten(1);
+    }
+    size = x.size(ch_axis);
+    if (running_min.numel() == 0) {
+      float inf = std::numeric_limits<float>::infinity();
+      running_min.resize_(size).fill_(inf);
+      running_max.resize_(size).fill_(-inf);
+      scale.resize_(size);
+      zero_point.resize_(size);
+    }
+    _calculate_moving_average(
+        y,
+        observer_on,
+        running_min,
+        running_max,
+        averaging_const,
+        size,
+        per_row_fq);
+  } else {
+    _calculate_moving_average(
+        x_contig,
+        observer_on,
+        running_min,
+        running_max,
+        averaging_const,
+        size,
+        per_row_fq);
+  }
 
   float* scale_ptr = scale.data_ptr<float>();
   int32_t* zp_ptr = zero_point.data_ptr<int32_t>();

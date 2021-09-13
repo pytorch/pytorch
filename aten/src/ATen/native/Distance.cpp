@@ -235,9 +235,12 @@ Tensor _pdist_backward(const Tensor& grad, const Tensor& self, const double p, c
 }
 
 Tensor cosine_similarity(const Tensor& x1, const Tensor& x2, int64_t dim, double eps) {
-  TORCH_CHECK(x1.sizes() == x2.sizes(), "cosine_similarity requires both inputs to have the same sizes, but x1 has ",
-              x1.sizes(), " and x2 has ", x2.sizes())
+  TORCH_CHECK(x1.ndimension() == x2.ndimension(), "cosine_similarity requires both inputs to have the same number of dimensions, but x1 has ",
+              x1.ndimension(), " and x2 has ", x2.ndimension());
+  TORCH_CHECK(x1.ndimension() == 0 || x1.size(dim) == x2.size(dim), "cosine_similarity requires both inputs to have the same size at dimension ", dim, "but x1 has ",
+  x1.size(dim), " and x2 has ", x2.size(dim));
   auto commonDtype = at::result_type(x1, x2);
+  TORCH_CHECK(at::isFloatingType(commonDtype), "expected common dtype to be floating point, yet common dtype is ", commonDtype);
   Tensor x1_ = x1.to(commonDtype);
   Tensor x2_ = x2.to(commonDtype);
   // Follow scipy impl to improve numerical precision
