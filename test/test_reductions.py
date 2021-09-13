@@ -9,8 +9,11 @@ from itertools import product, combinations, permutations
 import warnings
 
 from torch._six import inf, nan
-from torch.testing import (
-    integral_types_and, floating_and_complex_types_and, make_tensor)
+from torch.testing import make_tensor
+from torch.testing._internal.common_dtype import (
+    get_all_dtypes, get_all_math_dtypes, get_all_int_dtypes, get_all_complex_dtypes, get_all_fp_dtypes,
+    integral_types_and, floating_and_complex_types_and
+)
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, skipIfNoSciPy, slowTest, torch_to_numpy_dtype_dict,
     IS_WINDOWS)
@@ -295,6 +298,115 @@ class TestReductions(TestCase):
             args, kwargs = next(op.generate_args_kwargs(t, dim=dim))
             result = op(t, *args, dim=dim, **kwargs)
             self.assertEqual(result.shape, _reduced_shape(t.shape, dim))
+
+    def _test_noncontiguous(self, op: ReductionOpInfo, t: torch.Tensor, **reduction_kwargs):
+        """Helper method to test noncontiguous input tensors."""
+        assert not t.is_contiguous()
+
+        t_contig = t.contiguous()
+        for args, kwargs in op.generate_args_kwargs(t_contig, **reduction_kwargs):
+            kwargs.update(reduction_kwargs)
+            result = op(t, *args, **kwargs)
+            expected = op(t_contig, *args, **kwargs)
+            self.assertEqual(result, expected)
+
+    @ops(reduction_ops)
+    def test_noncontiguous_innermost(self, device, dtype, op: ReductionOpInfo):
+        """Tests reducing along noncontiguous innermost dimension."""
+        t = make_tensor((10, 10), device, dtype, low=-1, high=1)
+        self._test_noncontiguous(op, t[:, ::2], dim=1)
+
+    @ops(reduction_ops)
+    def test_noncontiguous_outermost(self, device, dtype, op: ReductionOpInfo):
+        """Tests reducing along noncontiguous outermost dimension."""
+        t = make_tensor((10, 10), device, dtype, low=-1, high=1)
+        self._test_noncontiguous(op, t[::2, :], dim=0)
+
+    @ops(reduction_ops)
+    def test_noncontiguous_all(self, device, dtype, op: ReductionOpInfo):
+        """Tests reducing all dimensions of a noncontiguous tensor."""
+        t = make_tensor((5, 5, 5), device, dtype, low=-1, high=1)
+        self._test_noncontiguous(op, t[::2, ::3, 1:-1:2])
+
+    @ops(reduction_ops)
+    def test_noncontiguous_transposed(self, device, dtype, op: ReductionOpInfo):
+        """Tests reducing a transposed tensor."""
+        t = make_tensor((5, 5), device, dtype, low=-1, high=1)
+        self._test_noncontiguous(op, t.T)
+
+    @ops(reduction_ops)
+    def test_noncontiguous_expanded(self, device, dtype, op: ReductionOpInfo):
+        """Tests reducing a tensor with expanded singleton dimensions."""
+        t = make_tensor((2, 3), device, dtype, low=-1, high=1)
+        self._test_noncontiguous(op, t.unsqueeze(1).expand(-1, 5, -1))
+
+    # NumPy does not support BFloat16 so we don't test that against reference
+    # implementations. We also don't compare dtypes or test for different
+    # keepdim because we already have other tests covering those.
+    # The test_reference_testing in test_ops.py only uses the samples from
+    # sample_inputs_func which do not test as exhaustively as these tests.
+
+    def _test_ref(self, op: ReductionOpInfo, t: torch.Tensor, **reduction_kwargs):
+        """Compares op against op.ref for the given input and reduction kwargs"""
+        for args, kwargs in op.generate_args_kwargs(t, **reduction_kwargs):
+            kwargs.update(reduction_kwargs)
+            result = op(t, *args, **kwargs)
+            expected = op.ref(t.detach().cpu().numpy(), *args, **kwargs)
+            self.assertEqual(result, expected, exact_dtype=False)
+
+    @ops(filter(lambda op: op.ref is not None, reduction_ops),
+         allowed_dtypes=get_all_dtypes(include_bfloat16=False))
+    def test_ref_scalar_input(self, device, dtype, op: ReductionOpInfo):
+        """Compares op against reference for scalar input tensors"""
+        self._test_ref(op, make_tensor([], device, dtype))
+
+    @ops(filter(lambda op: op.ref is not None, reduction_ops),
+         allowed_dtypes=get_all_dtypes(include_bfloat16=False))
+    def test_ref_small_input(self, device, dtype, op: ReductionOpInfo):
+        """Compares op against reference for small input tensors"""
+        t = make_tensor((5, 3, 4, 2), device, dtype, low=-2, high=2, exclude_zero=True)
+        self._test_ref(op, t)
+        for dim in [0, 1, 3] + ([[0, 2], [1, 3]] if op.supports_multiple_dims else []):
+            self._test_ref(op, t, dim=dim)
+
+    @ops(filter(lambda op: op.ref is not None, reduction_ops),
+         allowed_dtypes=[torch.float64])
+    def test_ref_large_input_1D(self, device, dtype, op: ReductionOpInfo):
+        """Compares op against reference for a large 1D input tensor to check stability"""
+        self._test_ref(op, make_tensor((2 ** 20,), device, dtype, low=-1, high=1, exclude_zero=True))
+
+    @ops(filter(lambda op: op.ref is not None, reduction_ops),
+         allowed_dtypes=[torch.float64])
+    def test_ref_large_input_2D(self, device, dtype, op: ReductionOpInfo):
+        """Compares op against reference for a large 2D input tensor to test parallelism"""
+        t = make_tensor((32, 2 ** 16), device, dtype, low=-1, high=1, exclude_zero=True)
+        self._test_ref(op, t, dim=1)
+
+    @ops(filter(lambda op: op.ref is not None, reduction_ops),
+         allowed_dtypes=[torch.float64])
+    def test_ref_large_input_64bit_indexing(self, device, dtype, op: ReductionOpInfo):
+        """Compares op against reference for a very large input tensor that requires 64 bit indexing"""
+        self._test_ref(op, make_tensor((275000000,), device, dtype, low=-1, high=1, exclude_zero=True))
+
+    @ops(filter(lambda op: op.ref is not None, reduction_ops),
+         allowed_dtypes=get_all_dtypes(include_bfloat16=False))
+    def test_ref_duplicate_values(self, device, dtype, op: ReductionOpInfo):
+        """Compares op against reference for input tensors with duplicate values"""
+        t = make_tensor((4, 4), device, dtype, low=-2, high=2, exclude_zero=True)
+        t[::2, ::2] = t[1::2, 1::2]
+        self._test_ref(op, t)
+        self._test_ref(op, t, dim=0)
+        self._test_ref(op, t, dim=1)
+
+    @ops(filter(lambda op: op.ref is not None, reduction_ops),
+         allowed_dtypes=[torch.float32, torch.complex64])
+    def test_ref_extremal_values(self, device, dtype, op: ReductionOpInfo):
+        """Compares op against reference for input tensors with extremal values"""
+        t = make_tensor((5,), device, dtype, exclude_zero=True)
+        extremals = [0, 1, nan, inf, -inf]
+        for extremal in extremals:
+            t[2] = extremal
+            self._test_ref(op, t)
 
     ###########################################################################
     # TODO: Legacy tests - port to ReductionOpInfo
@@ -625,7 +737,7 @@ class TestReductions(TestCase):
             # 'out' is favored over dtype, check error
             self.assertRaises(RuntimeError, lambda: fn(x, out=out, dtype=other_dtype))
 
-        for dtype in [dtype for dtype in torch.testing.get_all_math_dtypes('cpu') if dtype != torch.float16]:
+        for dtype in [dtype for dtype in get_all_math_dtypes('cpu') if dtype != torch.float16]:
             x = torch.ones(shape, dtype=dtype)
             expected_dtype = dtype if dtype.is_floating_point or dtype.is_complex else torch.int64
             self.assertIs(expected_dtype, fn(x).dtype)
@@ -1273,7 +1385,7 @@ class TestReductions(TestCase):
             test_dtype_bfloat16(False, True)
             test_dtype_bfloat16(True, True)
 
-    @dtypes(*torch.testing.get_all_dtypes(include_bool=False, include_complex=False))
+    @dtypes(*get_all_dtypes(include_bool=False, include_complex=False))
     def test_nansum(self, device, dtype):
         args = product(
             (True, False),  # noncontiguous
@@ -1326,15 +1438,15 @@ class TestReductions(TestCase):
                             self.compare_with_numpy(torch_func_partial, np_func_partial, x, device=None, dtype=None,
                                                     atol=atol, rtol=rtol, exact_dtype=exact_dtype)
 
-    @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes(include_bfloat16=False) +
-              torch.testing.get_all_complex_dtypes()))
+    @dtypes(*(get_all_int_dtypes() + get_all_fp_dtypes(include_bfloat16=False) +
+              get_all_complex_dtypes()))
     def test_count_nonzero(self, device, dtype):
         self._test_reduction_function_with_numpy(torch.count_nonzero, np.count_nonzero, device, dtype)
         self._test_reduction_function_with_numpy(torch.count_nonzero, np.count_nonzero, device, dtype, True)
 
     def _test_sum_reduction_vs_numpy(self, torch_fn, np_fn, device, dtype, with_keepdim=False, with_extremal=False):
         def is_integral(dtype):
-            return dtype in torch.testing.get_all_int_dtypes()
+            return dtype in get_all_int_dtypes()
 
         # On Windows CI, the current version of `numpy` promotes all lower integers
         # dtypes to int32 while `torch` promotes them to int64. Hence we skip on checking
@@ -1363,27 +1475,27 @@ class TestReductions(TestCase):
                                                      with_keepdim=with_keepdim, with_extremal=with_extremal)
 
     @onlyOnCPUAndCUDA
-    @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes(include_bfloat16=False)))
+    @dtypes(*(get_all_int_dtypes() + get_all_fp_dtypes(include_bfloat16=False)))
     def test_sum_vs_numpy(self, device, dtype):
         self._test_sum_reduction_vs_numpy(torch.sum, np.sum, device, dtype)
         self._test_sum_reduction_vs_numpy(torch.sum, np.sum, device, dtype, with_extremal=True)
         self._test_sum_reduction_vs_numpy(torch.sum, np.sum, device, dtype, with_keepdim=True)
 
     @onlyOnCPUAndCUDA
-    @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes(include_bfloat16=False)))
+    @dtypes(*(get_all_int_dtypes() + get_all_fp_dtypes(include_bfloat16=False)))
     def test_nansum_vs_numpy(self, device, dtype):
         self._test_sum_reduction_vs_numpy(torch.nansum, np.nansum, device, dtype)
         self._test_sum_reduction_vs_numpy(torch.nansum, np.nansum, device, dtype, with_extremal=True)
         self._test_sum_reduction_vs_numpy(torch.nansum, np.nansum, device, dtype, with_keepdim=True)
 
-    @dtypes(*(torch.testing.get_all_complex_dtypes()))
+    @dtypes(*(get_all_complex_dtypes()))
     def test_nansum_complex(self, device, dtype):
         x = torch.randn((3, 3, 3), device=device, dtype=dtype)
         with self.assertRaisesRegex(RuntimeError, "nansum does not support complex inputs"):
             torch.nansum(x)
 
     def test_nansum_out_dtype(self, device):
-        dtypes = list(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes(include_bfloat16=False))
+        dtypes = list(get_all_int_dtypes() + get_all_fp_dtypes(include_bfloat16=False))
         for inp_dtype, out_dtype in combinations(dtypes, 2):
             shape = _rand_shape(random.randint(2, 5), min_size=5, max_size=10)
             x = _generate_input(shape, inp_dtype, device, with_extremal=False)
@@ -1392,7 +1504,7 @@ class TestReductions(TestCase):
             np_fn = partial(np.nansum, dtype=np_out_dtype)
             self.compare_with_numpy(torch_fn, np_fn, x, device=None, dtype=None)
 
-    @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes(include_bfloat16=False)))
+    @dtypes(*(get_all_int_dtypes() + get_all_fp_dtypes(include_bfloat16=False)))
     def test_argminmax_multiple(self, device, dtype):
         # Case: All Ones
         t = torch.ones(3, 3, device=device, dtype=dtype)
@@ -1400,7 +1512,7 @@ class TestReductions(TestCase):
         self.compare_with_numpy(torch.argmin, np.argmin, t)
 
         # Case: With single `nan` present.
-        if dtype in torch.testing.get_all_fp_dtypes():
+        if dtype in get_all_fp_dtypes():
             t[2, 2] = float('nan')
             self.compare_with_numpy(torch.argmax, np.argmax, t)
             self.compare_with_numpy(torch.argmin, np.argmin, t)
@@ -1477,8 +1589,8 @@ class TestReductions(TestCase):
                           [0, 0]], device=device, dtype=dtype)
         verify_against_numpy(t)
 
-    @dtypes(*(torch.testing.get_all_dtypes(include_half=True, include_bfloat16=False,
-                                           include_bool=True, include_complex=True)))
+    @dtypes(*(get_all_dtypes(include_half=True, include_bfloat16=False,
+                             include_bool=True, include_complex=True)))
     def test_all_any_vs_numpy(self, device, dtype):
         # Note [all, any uint8 compatibility]: However for compatibility reason,
         # for `uint8`, they return Tensor of same dtype `uint8`.
@@ -1706,7 +1818,7 @@ class TestReductions(TestCase):
         with self.assertRaisesRegex(RuntimeError, rmsg):
             torch.min(x, dim=0, out=(illegal_values, illegal_indices))
 
-    @dtypes(*torch.testing.get_all_dtypes(include_bool=False, include_complex=False))
+    @dtypes(*get_all_dtypes(include_bool=False, include_complex=False))
     def test_dim_arg_reduction_scalar(self, device, dtype):
         example = 4.0
 
@@ -1724,7 +1836,7 @@ class TestReductions(TestCase):
 
 
     @precisionOverride({torch.float16: 1e-2, torch.bfloat16: 1e-2})
-    @dtypes(*(set(torch.testing.get_all_dtypes(include_bool=False, include_complex=False)) - {torch.uint8}))
+    @dtypes(*(set(get_all_dtypes(include_bool=False, include_complex=False)) - {torch.uint8}))
     def test_dim_reduction(self, device, dtype):
         example = [[-1, 2, 1], [5, 3, 6]]
 
@@ -2968,8 +3080,8 @@ class TestReductions(TestCase):
         shape = (2, 0, 4)
         x = torch.randn(shape, device=device)
 
-        for dtype in torch.testing.get_all_dtypes(include_half=True, include_bfloat16=False,
-                                                  include_bool=True, include_complex=True):
+        for dtype in get_all_dtypes(include_half=True, include_bfloat16=False,
+                                    include_bool=True, include_complex=True):
             # Refer: [all, any uint8 compatibility]
             if dtype == torch.uint8:
                 out_dtype = torch.uint8
