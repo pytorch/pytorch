@@ -15,7 +15,7 @@ import torch.nn.qat as nnqat
 
 from typing import Optional, Union, Dict, Set, Callable, Any
 
-from .stubs import QuantStub, DeQuantStub
+from torch.ao.quantization.stubs import QuantStub, DeQuantStub
 from .fake_quantize import (
     default_affine_fixed_qparams_fake_quant,
     default_symmetric_fixed_qparams_fake_quant,
