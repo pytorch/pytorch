@@ -1,12 +1,19 @@
-from typing import List, Dict, Any
 import yaml
 import fnmatch
+import sys
+import re
+
+from typing import List, Dict, Any
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
 # Manual Target Determination
 # See the source issue for discussion: https://github.com/pytorch/pytorch/issues/63781.
+def sprint(s: str) -> None:
+    lines = s.split("\n")
+    for line in lines:
+        print(f"[manual_determinator] {line}", file=sys.stderr)
 
 
 def any_glob_matches(name: str, globs: List[str]) -> bool:
@@ -23,7 +30,24 @@ def indent_list(items: List[str]) -> str:
     return "\n".join(items)
 
 
+def filenames_from_diff(diff_path: Path):
+    FILENAME_RE = re.compile(r"^diff --git a\/(.*) b\/(.*)$")
+    with open(diff_path) as f:
+        lines = f.readlines()
+
+    files = set()
+    for line in lines:
+        match = FILENAME_RE.match(line.strip())
+        if match is not None:
+            groups = match.groups()
+            files.add(groups[0])
+            files.add(groups[1])
+
+    return list(files)
+
+
 Rule = Dict[str, Any]
+
 
 def determine_for_files(changed_files: List[str], rules: List[Rule]) -> List[str]:
     """
@@ -44,11 +68,11 @@ def determine_for_files(changed_files: List[str], rules: List[Rule]) -> List[str
         )
         sources_info = indent_list(sources)
 
-        print(
+        sprint(
             f"Testing rule '{name}' with sources:\n{sources_info}\n"
             f"Got matches:\n{matches_info}"
         )
-        print("is_match", is_match)
+        sprint(f"is_match: {is_match}")
 
         if is_match:
             tests += rule["tests"]
@@ -56,25 +80,40 @@ def determine_for_files(changed_files: List[str], rules: List[Rule]) -> List[str
     return tests
 
 
-def determinate(diff_path: Path, rules_path: Path) -> List[str]:
+def nonexistent_tests(rules: List[Rule], all_tests: List[str]) -> bool:
+    bad_tests = []
+
+    rule_tests = set()
+    for rule in rules:
+        for test in rule["tests"]:
+            rule_tests.add(test)
+
+    for test in rule_tests:
+        if test not in all_tests:
+            bad_tests.append(test)
+
+    return bad_tests
+
+
+def determinate(
+    diff_path: Path, rules_path: Path, all_tests: List[str], core_tests: List[str]
+) -> List[str]:
     with open(rules_path) as f:
-        rules = yaml.safe_load(f)
+        rules = yaml.safe_load(f)["rules"]
 
-    # with open(diff_path) as f:
-    #     pass
+    bad_tests = nonexistent_tests(rules, all_tests)
+    if len(bad_tests) > 0:
+        raise RuntimeError(
+            f"These tests were specified in '{rules_path}' but "
+            f"are not present in the tests used for determination:\n{indent_list(bad_tests)}"
+        )
 
-    changed_files = ["README.md", "test.md"]
+    changed_files = filenames_from_diff(diff_path)
+    # changed_files = ["README.md", "test.cpp"]
 
-    determined_tests = determine_for_files(changed_files, rules["rules"])
-    core_tests = [
-        "test_autograd",
-        "test_modules",
-        "test_nn",
-        "test_ops",
-        "test_torch"
-    ]
+    determined_tests = determine_for_files(changed_files, rules)
 
-    print(
+    sprint(
         f"Running determined tests:\n{indent_list(determined_tests)}\n"
         f"With default core tests:\n{indent_list(core_tests)}"
     )
@@ -82,4 +121,12 @@ def determinate(diff_path: Path, rules_path: Path) -> List[str]:
     return determined_tests + core_tests
 
 
-print(determinate(Path("abc"), REPO_ROOT / "test" / "manual_determinations.yml"))
+if __name__ == "__main__":
+    print(
+        determinate(
+            REPO_ROOT / "test.diff",
+            REPO_ROOT / "test" / "manual_determinations.yml",
+            [],
+            ["abc"],
+        )
+    )

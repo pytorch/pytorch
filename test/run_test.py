@@ -42,7 +42,7 @@ try:
         TARGET_DET_LIST,
     )
 
-    import tools.testing.manual_determinator
+    import tools.testing.manual_determinator as manual_determinator
 
     HAVE_TEST_SELECTION_TOOLS = True
 except ImportError:
@@ -51,7 +51,6 @@ except ImportError:
         "Unable to import test_selections from tools/testing. Running without test selection stats..."
     )
 
-print(tools.testing.manual_determinator)
 
 def discover_tests(
         base_dir: Optional[pathlib.Path] = None,
@@ -987,6 +986,19 @@ def main():
         )
         # downloading test cases configuration to local environment
         get_test_case_configs(dirpath=test_directory)
+
+    determined_tests = manual_determinator.determinate(
+        1,
+        REPO_ROOT / "test" / "manual_determinations.yml",
+        selected_tests,
+        CORE_TEST_LIST,
+    )
+    print(
+        f"Target determinator filtered from:\n{manual_determinator.indent_list(selected_tests)}\n"
+        f"to:\n{manual_determinator.indent_list(determined_tests)}"
+    )
+    selected_tests = determined_tests
+    # exit(0)
 
     has_failed = False
     failure_messages = []

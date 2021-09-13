@@ -1,8 +1,10 @@
 # See tools/testing/manual_determinator.py for details
 rules:
   - name: Documentation changes
+  # TODO: Manually exclude sources with doctest directive
     sources:
       - "docs/*"
       - "*.rst"
       - "*.md"
+      - "-docs/source/jit_language_reference.rst"
     tests: []
