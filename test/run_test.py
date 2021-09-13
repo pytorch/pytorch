@@ -38,7 +38,6 @@ try:
         get_test_case_configs,
     )
     from tools.testing.modulefinder_determinator import (
-        should_run_test,
         TARGET_DET_LIST,
     )
 
@@ -967,16 +966,6 @@ def main():
                 for name in fh.read().split("\n")
                 if len(name.strip()) > 0
             ]
-        # HACK: Ensure the 'test' paths can be traversed by Modulefinder
-        sys.path.append(test_directory)
-        selected_tests = [
-            test
-            for test in selected_tests
-            if should_run_test(
-                TARGET_DET_LIST + slow_tests, test, touched_files, options
-            )
-        ]
-        sys.path.remove(test_directory)
 
     if IS_IN_CI:
         selected_tests = get_reordered_tests(
