@@ -89,18 +89,18 @@ cudnn_frontend::Tensor getTensorDescriptor(const Tensor &t, const int64_t id, co
 
 cudnn_frontend::ConvDesc_v8 getConvDescriptor(cudnnDataType_t dataType, IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, const at::ScalarType scalar_type) {
   uint64_t convDim = stride.size();
-  cudnn_frontend::ConvDescBuilder_v8& builder = cudnn_frontend::ConvDescBuilder()
+  if (scalar_type == kBFloat16 || scalar_type == kHalf) {
+    dataType = CUDNN_DATA_FLOAT;
+  }
+  return cudnn_frontend::ConvDescBuilder()
     .setDataType(dataType)
     .setMathMode(CUDNN_CROSS_CORRELATION)
     .setNDims(convDim)
     .setStrides(convDim, stride.data())
     .setPrePadding(convDim, padding.data())
     .setPostPadding(convDim, padding.data())
-    .setDilation(convDim, dilation.data());
-  if (scalar_type == kBFloat16 || scalar_type == kHalf) {
-    builder.setDataType(CUDNN_DATA_FLOAT);
-  }
-  return builder.build();
+    .setDilation(convDim, dilation.data())
+    .build();
 }
 
 void filterEngineConfigs(
