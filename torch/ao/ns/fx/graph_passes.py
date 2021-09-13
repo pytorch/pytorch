@@ -19,7 +19,7 @@ from .ns_types import (
     NSSubgraph,
     NSNodeTargetType,
 )
-from torch.quantization.ns.mappings import (
+from torch.ao.ns.fx.mappings import (
     get_node_type_to_io_type_map,
 )
 from torch.quantization.quantize import is_activation_post_process
