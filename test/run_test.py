@@ -38,10 +38,11 @@ try:
         get_reordered_tests,
         get_test_case_configs,
     )
-    from tools.testing.modulefinder_determinator import (
-        should_run_test,
-        TARGET_DET_LIST,
-    )
+    # NS: Disable target determination
+    # from tools.testing.modulefinder_determinator import (
+    #     should_run_test,
+    #     TARGET_DET_LIST,
+    # )
 
     HAVE_TEST_SELECTION_TOOLS = True
 except ImportError:
