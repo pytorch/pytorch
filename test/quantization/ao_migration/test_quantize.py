@@ -72,3 +72,25 @@ class TestAOMigrationQuantizePy(AOMigrationTestCase):
             'QuantWrapper',
         ]
         self._test_function_import('stubs', function_list)
+
+    def test_package_import_quantize_jit(self):
+        self._test_package_import('quantize_jit')
+
+    def test_function_import_quantize_jit(self):
+        function_list = [
+            '_check_is_script_module',
+            '_check_forward_method',
+            'script_qconfig',
+            'script_qconfig_dict',
+            'fuse_conv_bn_jit',
+            '_prepare_jit',
+            'prepare_jit',
+            'prepare_dynamic_jit',
+            '_convert_jit',
+            'convert_jit',
+            'convert_dynamic_jit',
+            '_quantize_jit',
+            'quantize_jit',
+            'quantize_dynamic_jit',
+        ]
+        self._test_function_import('quantize_jit', function_list)
