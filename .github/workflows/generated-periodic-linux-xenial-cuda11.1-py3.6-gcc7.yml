@@ -260,6 +260,7 @@ jobs:
           # Prune all of the docker images
           docker system prune -af
       - name: Chown workspace
+        if: always()
         env:
           ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
         run: |
@@ -509,6 +510,7 @@ jobs:
           # Prune all of the docker images
           docker system prune -af
       - name: Chown workspace
+        if: always()
         env:
           ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
         run: |
