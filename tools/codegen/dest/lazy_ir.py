@@ -188,6 +188,7 @@ class LazyIR:
 
         node_ctor_args = ", ".join([f"{i.cpp_type()} {i.name}" for i in all_types])
         scalar_initializers = ",\n        ".join([f"{t.name}_({t.name})" for t in scalar_types])
+        comma_if_scalar_initializers = ",\n" if len(scalar_initializers) else ""
         scalar_decls = "\n  ".join([f"{t.cpp_type()} {t.name}_;" for t in scalar_types])
         scalar_hashes = ", ".join([f.name for f in scalar_types])
         base_ctor_value_args = []
@@ -205,7 +206,8 @@ class LazyIR:
         # unless we clean up the OpList API to deal unambiguously with optionals.
         clone_impl_args = ",".join(
             [f"operands.at({i})" for i in range(len(value_types))] +
-            [f"{s.name}_" for s in scalar_types])
+            [f"{s.name}_" for s in scalar_types] +
+            ["out_dtype_", "out_shape_"])
         if any([isinstance(t.type, OptionalCType) for t in value_types]):
             scalar_args = ",".join([f"{s.name}_" for s in scalar_types])
             clone_impl = f"return Clone{class_name}(operands, {scalar_args});"
@@ -214,18 +216,28 @@ class LazyIR:
         else:
             clone_impl = f"ir::MakeNode<ir::ops::{ir_node_name(func)}>({clone_impl_args});"
             clone_handcoded_decl = ""
+        
+        shapefn = ""
+        # if class_name == "Mean":
+            # shapefn = "SetShapeDeferred([&]() { return compiler::NodeLowering::Get()->Infer(this); });"
 
         return [f"""\
 {clone_handcoded_decl}
 class {class_name} : public Node {{
  public:
-  {class_name}({node_ctor_args})
+  {class_name}({node_ctor_args}, at::ScalarType out_dtype, std::vector<int64_t> out_shape)
       : Node(ir::OpKind(at::aten::{func.name.name}),
-              {{{base_ctor_value_args}}},
+              {{{base_ctor_value_args}}}, 
+              /*shape=*/lazy_tensors::Shape(out_dtype, out_shape),
               /*num_outputs=*/{len(func.returns)},
               lazy_tensors::util::MHash({scalar_hashes})),
+        out_dtype_(out_dtype),
+        out_shape_(out_shape){comma_if_scalar_initializers}
         {scalar_initializers}
+        
   {{
+    {shapefn}
+
     //  throw std::runtime_error("need to hash scalars properly");
   }}
 
@@ -239,9 +251,10 @@ class {class_name} : public Node {{
   NodePtr Clone(OpList operands) const override {{
       {clone_impl}
   }}
- 
+  
+  c10::ScalarType out_dtype_;
+  std::vector<int64_t> out_shape_;
   {scalar_decls}
-
 }};
 
 """, ]

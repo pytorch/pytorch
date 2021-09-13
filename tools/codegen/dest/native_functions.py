@@ -86,14 +86,25 @@ def gen_unstructured_lazy_definition(f: NativeFunction, backend_index: BackendIn
     lazy_tensor_decls_str = lazy_tensor_decls(value_types)
     node_ctor_input_str = node_ctor_inputs(value_types, scalar_types)
 
+    # call the meta kernel if it exists, to compute output shape/dtype for our IR 
+    if metadata.kernel == "cos":
+        meta_args = ", ".join([f"{t.name}.to(c10::kMeta)" for t in value_types] + [t.name for t in scalar_types])
+        meta_str = f"""auto out_meta = at::meta::{metadata.kernel}({meta_args});
+        auto _out_shape = out_meta.sizes().vec();
+        auto _out_dtype = out_meta.scalar_type();"""
+    else:
+        meta_str = f"""auto _out_shape = self.sizes().vec();
+        auto _out_dtype = self.scalar_type();"""
+
     assert len(value_types) > 0, f"Only supporting tensor ops so far, none found in {sig}"
     first_tensor = value_types[0]
 
     return f"""\
 {sig.decl(name=f"{class_method_name}::{metadata.kernel}")} {{
     {lazy_tensor_decls_str}
+    {meta_str}
     return bridge::AtenFromLtcTensor(l_{first_tensor.name}.CreateFrom(
-        ir::MakeNode<ir::ops::{ir_node_name(f.func)}>({node_ctor_input_str})));
+        ir::MakeNode<ir::ops::{ir_node_name(f.func)}>({node_ctor_input_str}, _out_dtype, _out_shape)));
 }};
 """
 

@@ -42,6 +42,7 @@
 #include "lazy_tensor_core/csrc/ts_backend/ts_computation_client.h"
 #include "lazy_tensor_core/csrc/ts_backend/ts_lowering_context.h"
 #include "lazy_tensors/permutation_util.h"
+#include "lazy_tensor_core/csrc/ts_backend/LazyLazyIr.h"
 
 namespace torch_lazy_tensors {
 namespace compiler {
@@ -178,6 +179,16 @@ class TSNodeLowering : public NodeLowering {
       case at::aten::lt:
       case at::aten::ne: {
         return InferComparison(node);
+      }
+      case at::aten::mean: {
+        auto mean = ir::NodeCast<ir::ops::Mean>(
+            node, ir::OpKind(at::aten::mean));
+        const ir::Output& argument = node->operand(0);
+        const lazy_tensors::Shape& argument_shape = argument.shape();
+        lazy_tensors::PrimitiveType element_type =
+        mean->dtype_ ? torch_lazy_tensors::TensorTypeToLtcType(*mean->dtype_)
+                     : argument_shape.element_type();
+        return lazy_tensors::Shape(element_type, argument_shape.dimensions());
       }
       default:
         LTC_LOG(FATAL) << *node << "Not implemented yet.";

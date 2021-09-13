@@ -2,9 +2,9 @@ backend: Lazy
 cpp_namespace: torch_lazy_tensors
 codegen:
   - mean
-  # - conv2d
   - addcdiv
   - addcmul
+  - cos
 supported:
   - _log_softmax
   - _log_softmax_backward_data
