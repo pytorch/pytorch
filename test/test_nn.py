@@ -14459,12 +14459,13 @@ class TestNNDeviceType(NNTestCase):
                 in_t, size=(osize, ), recompute_scale_factor=False, mode="nearest"
             )
             # compute expected output as OpenCV
-            expected_out = torch.zeros(osize, dtype=torch.float, device=device).unsqueeze(0).unsqueeze(0)
+            expected_out = torch.zeros(osize, dtype=torch.float).unsqueeze(0).unsqueeze(0)
             scale = 1.0 * isize / osize
             for o in range(osize):
                 i_f32 = o * scale
                 i = int(i_f32)
                 expected_out[0, 0, o] = in_t[0, 0, i]
+            expected_out = expected_out.to(device=device)
             self.assertEqual(out_t, expected_out)
 
         helper(20, 11)
@@ -14504,12 +14505,13 @@ class TestNNDeviceType(NNTestCase):
                 in_t, size=(osize, ), recompute_scale_factor=False, mode="nearest-exact"
             )
             # compute expected output as scikit-image/scipy
-            expected_out = torch.zeros(osize, dtype=torch.float, device=device).unsqueeze(0).unsqueeze(0)
+            expected_out = torch.zeros(osize, dtype=torch.float).unsqueeze(0).unsqueeze(0)
             scale = 1.0 * isize / osize
             for o in range(osize):
                 i_f32 = (o + 0.5) * scale
                 i = int(i_f32)
                 expected_out[0, 0, o] = in_t[0, 0, i]
+            expected_out = expected_out.to(device=device)
             self.assertEqual(out_t, expected_out)
 
         helper(20, 11)
@@ -14587,7 +14589,7 @@ class TestNNDeviceType(NNTestCase):
                 in_t, size=(osize, osize), recompute_scale_factor=False, mode="nearest"
             )
             # compute expected output as OpenCV
-            expected_out = torch.zeros(1, 1, osize, osize, dtype=torch.float, device=device)
+            expected_out = torch.zeros(1, 1, osize, osize, dtype=torch.float)
             scale = 1.0 * isize / osize
             for o1 in range(osize):
                 i1_f32 = o1 * scale
@@ -14596,6 +14598,7 @@ class TestNNDeviceType(NNTestCase):
                     i2_f32 = o2 * scale
                     i2 = int(i2_f32)
                     expected_out[0, 0, o1, o2] = in_t[0, 0, i1, i2]
+            expected_out = expected_out.to(device=device)
             self.assertEqual(out_t, expected_out)
 
         helper(torch.contiguous_format, 20, 11)
@@ -14612,8 +14615,8 @@ class TestNNDeviceType(NNTestCase):
             out_t = F.interpolate(
                 in_t, size=(osize, osize), recompute_scale_factor=False, mode="nearest-exact"
             )
-            # compute expected output as OpenCV
-            expected_out = torch.zeros(1, 1, osize, osize, dtype=torch.float, device=device)
+            # compute expected output as Scikit-Image/Scipy
+            expected_out = torch.zeros(1, 1, osize, osize, dtype=torch.float)
             scale = 1.0 * isize / osize
             for o1 in range(osize):
                 i1_f32 = (o1 + 0.5) * scale
@@ -14622,6 +14625,7 @@ class TestNNDeviceType(NNTestCase):
                     i2_f32 = (o2 + 0.5) * scale
                     i2 = int(i2_f32)
                     expected_out[0, 0, o1, o2] = in_t[0, 0, i1, i2]
+            expected_out = expected_out.to(device=device)
             self.assertEqual(out_t, expected_out)
 
         helper(torch.contiguous_format, 20, 11)
@@ -14685,7 +14689,7 @@ class TestNNDeviceType(NNTestCase):
                 in_t, size=(osize, osize, osize), recompute_scale_factor=False, mode="nearest"
             )
             # compute expected output as OpenCV
-            expected_out = torch.zeros(1, 1, osize, osize, osize, dtype=torch.float, device=device)
+            expected_out = torch.zeros(1, 1, osize, osize, osize, dtype=torch.float)
             scale = 1.0 * isize / osize
             for o1 in range(osize):
                 i1_f32 = o1 * scale
@@ -14697,6 +14701,7 @@ class TestNNDeviceType(NNTestCase):
                         i3_f32 = o3 * scale
                         i3 = int(i3_f32)
                         expected_out[0, 0, o1, o2, o3] = in_t[0, 0, i1, i2, i3]
+            expected_out = expected_out.to(device=device)
             self.assertEqual(out_t, expected_out)
 
         helper(torch.contiguous_format, 20, 11)
@@ -14714,8 +14719,8 @@ class TestNNDeviceType(NNTestCase):
             out_t = F.interpolate(
                 in_t, size=(osize, osize, osize), recompute_scale_factor=False, mode="nearest-exact"
             )
-            # compute expected output as OpenCV
-            expected_out = torch.zeros(1, 1, osize, osize, osize, dtype=torch.float, device=device)
+            # compute expected output as Scikit-Image/Scipy
+            expected_out = torch.zeros(1, 1, osize, osize, osize, dtype=torch.float)
             scale = 1.0 * isize / osize
             for o1 in range(osize):
                 i1_f32 = (o1 + 0.5) * scale
@@ -14727,6 +14732,7 @@ class TestNNDeviceType(NNTestCase):
                         i3_f32 = (o3 + 0.5) * scale
                         i3 = int(i3_f32)
                         expected_out[0, 0, o1, o2, o3] = in_t[0, 0, i1, i2, i3]
+            expected_out = expected_out.to(device=device)
             self.assertEqual(out_t, expected_out)
 
         helper(torch.contiguous_format, 20, 11)
