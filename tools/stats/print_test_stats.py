@@ -698,7 +698,7 @@ def build_info() -> ReportMetaMeta:
         "build_sha1": os.environ.get("CIRCLE_SHA1", ""),
         "build_base_commit": get_base_commit(os.environ.get("CIRCLE_SHA1", "HEAD")),
         "build_branch": os.environ.get("CIRCLE_BRANCH", ""),
-        "build_job": os.environ.get("JOB_BASE_NAME", ""),
+        "build_job": os.environ.get("JOB_BASE_NAME", os.environ.get("CIRCLE_JOB", "")),
         "build_workflow_id": os.environ.get("CIRCLE_WORKFLOW_ID", ""),
         "build_start_time_epoch": str(int(os.path.getmtime(os.path.realpath(__file__)))),
     }
@@ -781,16 +781,21 @@ def assemble_s3_object(
 
 def send_report_to_s3(head_report: Version2Report) -> None:
     job = os.getenv('JOB_BASE_NAME', os.environ.get('CIRCLE_JOB'))
-    # SHARD_NUMBER is specific to GHA jobs, as the shard number would be included in CIRCLE_JOB already
-    shard = os.environ.get('SHARD_NUMBER', '')
     sha1 = os.environ.get('CIRCLE_SHA1')
     branch = os.environ.get('CIRCLE_BRANCH', '')
     now = datetime.datetime.utcnow().isoformat()
+
+    # SHARD_NUMBER and TEST_CONFIG are specific to GHA, as these details would be included in CIRCLE_JOB already
+    shard = os.environ.get('SHARD_NUMBER', '')
+    test_config = os.environ.get('TEST_CONFIG', '')
+
+    job_report_dirname = f'{job}{f"-{test_config}" if test_config else ""}{shard}'
+
     if branch not in ['master', 'nightly'] and not branch.startswith("release/"):
         pr = os.environ.get('CIRCLE_PR_NUMBER', 'unknown')
-        key = f'pr_test_time/{pr}/{sha1}/{job}{shard}/{now}Z.json.bz2'  # Z meaning UTC
+        key = f'pr_test_time/{pr}/{sha1}/{job_report_dirname}/{now}Z.json.bz2'  # Z meaning UTC
     else:
-        key = f'test_time/{sha1}/{job}{shard}/{now}Z.json.bz2'  # Z meaning UTC
+        key = f'test_time/{sha1}/{job_report_dirname}/{now}Z.json.bz2'  # Z meaning UTC
     obj = get_S3_object_from_bucket('ossci-metrics', key)
     # use bz2 because the results are smaller than gzip, and the
     # compression time penalty we pay is only about half a second for
