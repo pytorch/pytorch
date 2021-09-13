@@ -20,9 +20,13 @@ from torch.testing._internal.common_utils import (
 def path(script):
     return os.path.join(os.path.dirname(__file__), script)
 
+
 if TEST_WITH_DEV_DBG_ASAN:
-    print("Skip ASAN as torch + multiprocessing spawn have known issues", file=sys.stderr)
+    print(
+        "Skip ASAN as torch + multiprocessing spawn have known issues", file=sys.stderr
+    )
     sys.exit(0)
+
 
 class TestDistributedLaunch(TestCase):
     def test_launch_user_script(self):

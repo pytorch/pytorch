@@ -69,8 +69,8 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   }
 
   # Install PyTorch conda deps, as per https://github.com/pytorch/pytorch README
-  # DO NOT install cmake here as it would install a version newer than 3.5, but
-  # we want to pin to version 3.5.
+  # DO NOT install cmake here as it would install a version newer than 3.10, but
+  # we want to pin to version 3.10.
   SCIPY_VERSION=1.1.0
   if [ "$ANACONDA_PYTHON_VERSION" = "3.9" ]; then
     # Install llvm-8 as it is required to compile llvmlite-0.30.0 from source
