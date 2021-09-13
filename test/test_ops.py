@@ -1,6 +1,5 @@
 from collections.abc import Sequence
 from functools import partial, wraps
-import unittest
 import warnings
 
 import torch
@@ -685,7 +684,6 @@ class TestJit(JitCommonTestCase):
     #   and runtimes (eager, traced, scripted).
     # TODO WARNING: inplace x {traced, scripted} not currently tested
     @_variant_ops(op_db)
-    @unittest.skipIf(True, "Temporarily skipping while landing Union PR stack")
     def test_variant_consistency_jit(self, device, dtype, op):
         _requires_grad = op.supports_autograd and (dtype.is_floating_point or
                                                    op.supports_complex_autograd(torch.device(device).type))
