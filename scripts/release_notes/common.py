@@ -9,12 +9,12 @@ import json
 
 categories = [
     'Uncategorized',
-    'distributed',
+    'distributed', # done
     'mobile',
     'jit',
     'visualization',
-    'onnx',
-    'caffe2',
+    'onnx', # done
+    'caffe2', # done
     'quantization',
     'amd',
     'cuda',
@@ -24,9 +24,9 @@ categories = [
     'package',
     'dispatcher',
     'releng',
-    'fx',
+    'fx', # done
     'code_coverage',
-    'vulkan',
+    'vulkan', # done
     'skip',
     'cpp_frontend',
     'python_frontend',
@@ -35,8 +35,8 @@ categories = [
     'autograd_frontend',
     'build_frontend',
     'memory_format_frontend',
-    'foreach_frontend',
-    'dataloader_frontend'
+    'foreach_frontend', # done
+    'dataloader_frontend' # done
 ]
 
 topics = [
