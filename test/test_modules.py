@@ -206,6 +206,25 @@ class TestModule(TestCase):
             output_ip.backward(grad)
             self.assertEqual(input_args[0].grad, input_arg_copy[0].grad)
 
+    def _retain_grad(self, obj):
+        # gradients needs to be retained to check for grad. This is useful when
+        # non-leafs are present in the graph.
+        if isinstance(obj, dict):
+            for i in obj.values():
+                self._retain_grad(i)
+        elif isinstance(obj, (tuple, list)):
+            for i in obj:
+                self._retain_grad(i)
+        elif isinstance(obj, torch.Tensor) and obj.requires_grad:
+            obj.retain_grad()
+
+    def _get_grads(self, obj):
+        if isinstance(obj, (tuple, list)):
+            return tuple(self._get_grads(o) for o in obj)
+        elif isinstance(obj, dict):
+            return {name: self._get_grads(o) for name, o in obj.items()}
+        elif isinstance(obj, torch.Tensor) and obj.requires_grad:
+            return obj.grad
 
     @modules(module_db)
     def test_non_contiguous_tensors(self, device, dtype, module_info):
@@ -214,26 +233,6 @@ class TestModule(TestCase):
         module_cls = module_info.module_cls
         module_inputs = module_info.module_inputs_func(module_info, device=device, dtype=dtype,
                                                        requires_grad=True)
-
-        # gradients needs to be retained to check for grad. This is useful when
-        # non-leafs are present in the graph.
-        def _retain_grad(item):
-            if isinstance(item, dict):
-                for i in item.values():
-                    _retain_grad(i)
-            elif isinstance(item, (tuple, list)):
-                for i in item:
-                    _retain_grad(i)
-            elif isinstance(item, torch.Tensor) and item.requires_grad:
-                item.retain_grad()
-
-        def _get_grads(obj):
-            if isinstance(obj, (tuple, list)):
-                return type(obj)(_get_grads(o) for o in obj)
-            elif isinstance(obj, dict):
-                return {name: _get_grads(o) for name, o in obj.items()}
-            elif isinstance(obj, torch.Tensor) and obj.requires_grad:
-                return obj.grad
 
         def _zero_grad(obj):
             if isinstance(obj, (tuple, list)) or isgenerator(obj):
@@ -285,7 +284,7 @@ class TestModule(TestCase):
             m = module_cls(*args, **kwargs)
             m.to(device).to(dtype)
 
-            _retain_grad((input_args, input_kwargs))
+            self._retain_grad((input_args, input_kwargs))
 
             # === Forward with default input
             with freeze_rng_state():
@@ -293,7 +292,7 @@ class TestModule(TestCase):
                 grad_output = default_output.clone().detach_().normal_()
                 default_output.backward(grad_output, retain_graph=True)
 
-            default_input_args_grad, default_input_kwargs_grad = deepcopy(_get_grads((input_args, input_kwargs)))
+            default_input_args_grad, default_input_kwargs_grad = deepcopy(self._get_grads((input_args, input_kwargs)))
             default_param_grad = deepcopy([p.grad for p in m.parameters()])
 
             # === Construct non-contiguous tensors ===
@@ -313,7 +312,7 @@ class TestModule(TestCase):
                     out = m(*in_args, **in_kwargs)
                     out.backward(g_out_copy, retain_graph=True)
 
-                input_args_grad, input_kwargs_grad = deepcopy(_get_grads((in_args, in_kwargs)))
+                input_args_grad, input_kwargs_grad = self._get_grads((in_args, in_kwargs))
                 self.assertEqual(out, default_output)
                 self.assertEqual(input_args_grad, default_input_args_grad, atol=1e-4, rtol=0)
                 self.assertEqual(input_kwargs_grad, default_input_kwargs_grad, atol=1e-4, rtol=0)
