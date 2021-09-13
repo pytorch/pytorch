@@ -617,6 +617,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.max_pool1d_with_indices: (lambda input, kernel_size, stride=None, padding=0, dilation=1,
                                         return_indices=False, ceil_mode=False: -1),
         torch.mean: lambda input, dim=None: -1,
+        torch.nanmean: lambda input, dim=None, keepdim=False, dtype=None, out=None: -1,
         torch.median: lambda input, dim=None: -1,
         torch.nanmedian: lambda input, dim=None: -1,
         torch.meshgrid: lambda *tensors, **kwargs: -1,
