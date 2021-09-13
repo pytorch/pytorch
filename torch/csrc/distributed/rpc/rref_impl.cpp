@@ -126,7 +126,7 @@ const ForkId& UserRRef::forkId() const {
   return forkId_;
 }
 
-IValue UserRRef::toHere(const DeviceMap& deviceMap,
+IValue UserRRef::toHere(DeviceMap deviceMap,
                         const float timeoutSeconds) const {
   TORCH_CHECK(
       !getTimedOut(),
@@ -164,9 +164,9 @@ IValue UserRRef::toHere(const DeviceMap& deviceMap,
   c10::intrusive_ptr<Message> msgToSend;
 
   if (isPyObj()) {
-    msgToSend = PythonRRefFetchCall(ownerId_, rrefId()).toMessage();
+    msgToSend = PythonRRefFetchCall(ownerId_, rrefId(), std::move(deviceMap)).toMessage();
   } else {
-    msgToSend = ScriptRRefFetchCall(ownerId_, rrefId()).toMessage();
+    msgToSend = ScriptRRefFetchCall(ownerId_, rrefId(), std::move(deviceMap)).toMessage();
   }
 
   // toHere is profiled as a blocking call, and does not execute operations on

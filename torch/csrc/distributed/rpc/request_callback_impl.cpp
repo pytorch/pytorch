@@ -233,14 +233,14 @@ c10::intrusive_ptr<JitFuture> RequestCallbackImpl::processPythonRemoteCall(
 c10::intrusive_ptr<JitFuture> RequestCallbackImpl::processPythonRRefFetchCall(
     RpcCommandBase& rpc) const {
   auto& prf = static_cast<PythonRRefFetchCall&>(rpc);
-
+  DeviceMap dm = std::move(prf).moveDeviceMap();
   auto future = retrieveOwnerRRef(prf.rrefId());
 
   return future->then(
-      [](JitFuture& future) {
+      [dm = std::move(dm)](JitFuture& future) {
         SerializedPyObj result = serializePyObject(future.value());
         return withStorages(
-            PythonRRefFetchRet(std::move(result).toIValues()).toMessage());
+            PythonRRefFetchRet(std::move(result).toIValues(), std::move(dm)).toMessage());
       },
       c10::getCustomClassType<c10::intrusive_ptr<Message>>());
 }

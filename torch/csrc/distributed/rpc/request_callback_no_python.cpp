@@ -237,12 +237,12 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::retrieveOwnerRRef(
 c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::
     processScriptRRefFetchCall(RpcCommandBase& rpc) const {
   auto& srf = static_cast<ScriptRRefFetchCall&>(rpc);
-
+  DeviceMap dm = std::move(srf).moveDeviceMap();
   auto future = retrieveOwnerRRef(srf.rrefId());
 
   return future->then(
-      [](JitFuture& future) {
-        return withStorages(ScriptRRefFetchRet({future.value()}).toMessage());
+      [dm = std::move(dm)](JitFuture& future) {
+        return withStorages(ScriptRRefFetchRet({future.value()}, std::move(dm)).toMessage());
       },
       c10::getCustomClassType<c10::intrusive_ptr<Message>>());
 }

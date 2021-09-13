@@ -15,24 +15,28 @@ namespace rpc {
 // TODO: Remove all these messages and use rpc + registered functions instead.
 class TORCH_API RRefMessageBase : public RpcCommandBase {
  public:
-  RRefMessageBase(const RRefId& rrefId, MessageType type)
-      : rrefId_(rrefId), type_(type) {}
+  RRefMessageBase(const RRefId& rrefId, MessageType type, DeviceMap&& deviceMap)
+      : rrefId_(rrefId), type_(type), deviceMap_(deviceMap) {}
 
   ~RRefMessageBase() override = default;
 
   const RRefId& rrefId();
+
+  DeviceMap&& moveDeviceMap() &&;
 
  protected:
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   const RRefId rrefId_;
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   const MessageType type_;
+
+  DeviceMap deviceMap_;
 };
 
 class TORCH_API ForkMessageBase : public RRefMessageBase {
  public:
   ForkMessageBase(const RRefId& rrefId, const ForkId& forkId, MessageType type)
-      : RRefMessageBase(rrefId, type), forkId_(forkId) {}
+      : RRefMessageBase(rrefId, type, {}), forkId_(forkId) {}
 
   const ForkId& forkId();
 
@@ -49,8 +53,8 @@ class TORCH_API ForkMessageBase : public RRefMessageBase {
 // UserRRef uses this message to fetch the remote RRef value from the owner.
 class TORCH_API ScriptRRefFetchCall final : public RRefMessageBase {
  public:
-  ScriptRRefFetchCall(worker_id_t fromWorkerId, const RRefId& rrefId)
-      : RRefMessageBase(rrefId, MessageType::SCRIPT_RREF_FETCH_CALL),
+  ScriptRRefFetchCall(worker_id_t fromWorkerId, const RRefId& rrefId, DeviceMap&& deviceMap)
+      : RRefMessageBase(rrefId, MessageType::SCRIPT_RREF_FETCH_CALL, std::move(deviceMap)),
         fromWorkerId_(fromWorkerId) {}
 
   inline worker_id_t fromWorkerId() const {
@@ -67,8 +71,8 @@ class TORCH_API ScriptRRefFetchCall final : public RRefMessageBase {
 
 class TORCH_API PythonRRefFetchCall final : public RRefMessageBase {
  public:
-  PythonRRefFetchCall(worker_id_t fromWorkerId, const RRefId& rrefId)
-      : RRefMessageBase(rrefId, MessageType::PYTHON_RREF_FETCH_CALL),
+  PythonRRefFetchCall(worker_id_t fromWorkerId, const RRefId& rrefId, DeviceMap&& deviceMap)
+      : RRefMessageBase(rrefId, MessageType::PYTHON_RREF_FETCH_CALL, std::move(deviceMap)),
         fromWorkerId_(fromWorkerId) {}
 
   c10::intrusive_ptr<Message> toMessageImpl() && override;
@@ -82,31 +86,34 @@ class TORCH_API PythonRRefFetchCall final : public RRefMessageBase {
 // OwnerRRef uses this message to send the RRef value to a remote UserRRef
 class TORCH_API RRefFetchRet : public RpcCommandBase {
  public:
-  RRefFetchRet(std::vector<at::IValue> values, MessageType type)
-      : values_(std::move(values)), type_(type) {}
+  RRefFetchRet(std::vector<at::IValue> values, MessageType type, DeviceMap&& deviceMap)
+      : values_(std::move(values)), type_(type), deviceMap_(std::move(deviceMap)) {}
 
   const std::vector<at::IValue>& values();
   c10::intrusive_ptr<Message> toMessageImpl() && override;
 
- private:
+ protected:
   std::vector<at::IValue> values_;
   const MessageType type_;
+  DeviceMap deviceMap_;
 };
 
 class TORCH_API ScriptRRefFetchRet final : public RRefFetchRet {
  public:
-  explicit ScriptRRefFetchRet(std::vector<at::IValue> values)
-      : RRefFetchRet(std::move(values), MessageType::SCRIPT_RREF_FETCH_RET) {}
+  explicit ScriptRRefFetchRet(std::vector<at::IValue> values, DeviceMap deviceMap)
+      : RRefFetchRet(std::move(values), MessageType::SCRIPT_RREF_FETCH_RET, std::move(deviceMap)) {}
 
+  c10::intrusive_ptr<Message> toMessageImpl() && override;
   static std::unique_ptr<ScriptRRefFetchRet> fromMessage(
       const Message& message);
 };
 
 class TORCH_API PythonRRefFetchRet final : public RRefFetchRet {
  public:
-  explicit PythonRRefFetchRet(std::vector<at::IValue> values)
-      : RRefFetchRet(std::move(values), MessageType::PYTHON_RREF_FETCH_RET) {}
+  explicit PythonRRefFetchRet(std::vector<at::IValue> values, DeviceMap deviceMap)
+      : RRefFetchRet(std::move(values), MessageType::PYTHON_RREF_FETCH_RET, std::move(deviceMap)) {}
 
+  c10::intrusive_ptr<Message> toMessageImpl() && override;
   static std::unique_ptr<PythonRRefFetchRet> fromMessage(
       const Message& message);
 };

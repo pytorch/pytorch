@@ -89,6 +89,10 @@ DeviceMap& Message::getDeviceMap() {
   return deviceMap_;
 }
 
+void Message::setDeviceMap(DeviceMap&& deviceMap) {
+  deviceMap_ = deviceMap;
+}
+
 c10::intrusive_ptr<Message> createExceptionResponse(
     const std::exception& e,
     int64_t id) {

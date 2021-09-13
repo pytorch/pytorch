@@ -158,6 +158,7 @@ class TORCH_API Message final : public torch::CustomClassHolder {
   std::vector<c10::weak_intrusive_ptr<c10::StorageImpl>> getStorages() const;
 
   DeviceMap& getDeviceMap();
+  void setDeviceMap(DeviceMap&& deviceMap);
 
  private:
   std::vector<char> payload_;

@@ -57,10 +57,7 @@ std::unique_ptr<PythonCall> PythonCall::fromMessage(const Message& message) {
 
   auto c10DeviceMap = values.back().to<c10::Dict<std::string, std::string>>();
   // Convert to regular map.
-  std::unordered_map<c10::Device, c10::Device> deviceMap;
-  for (const auto& mapEntry : c10DeviceMap) {
-    deviceMap.insert({mapEntry.key(), mapEntry.value()});
-  }
+  std::unordered_map<c10::Device, c10::Device> deviceMap = c10DictToDeviceMap(c10DeviceMap);
   values.pop_back();
 
   bool isAsyncExecution = values.back().toBool();

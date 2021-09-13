@@ -594,9 +594,19 @@ void TensorPipeAgent::sendCompletedResponseMessage(
         futureResponseMessage.value().toCustomClass<Message>();
     responseMessage->setId(messageId);
 
+    auto deviceMap = responseMessage->getDeviceMap();
+    
     std::vector<c10::Device> devices;
     try {
-      devices = getDevicesForRemote(pipe->getRemoteName(), *responseMessage);
+      if (deviceMap.empty()) {
+        devices = getDevicesForRemote(pipe->getRemoteName(), *responseMessage);
+      } else {
+        // If deviceMap is specified, use that instead.
+        devices = getDevicesForTensors(
+            responseMessage->tensors(),
+            deviceMap,
+            pipe->getRemoteName());
+      }
     } catch (const std::exception& e) {
       responseMessage = createExceptionResponse(e.what(), messageId);
     }
