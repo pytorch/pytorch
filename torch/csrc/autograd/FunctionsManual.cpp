@@ -2419,6 +2419,11 @@ Tensor eigh_jvp_eigenvalues(
   // https://ora.ox.ac.uk/objects/uuid:8d0c0a29-c92b-4153-a1d2-38b276e93124
   // Section 3.1 Eigenvalues and eigenvectors
 
+  // TODO: gradcheck from test_ops.py hangs with complex inputs
+  TORCH_CHECK_NOT_IMPLEMENTED(
+      !input_tangent.is_complex(),
+      "the derivative for 'eigh' with complex inputs is not implemented.");
+
   // see the note in the implementation of eigh_backward that tangent should be Hermitian
   auto hermitian_tangent = 0.5*(input_tangent + input_tangent.transpose(-2, -1).conj());
 
@@ -2437,6 +2442,11 @@ Tensor eigh_jvp_eigenvectors(
   // An extended collection of matrix derivative results for forward and reverse mode automatic differentiation
   // https://ora.ox.ac.uk/objects/uuid:8d0c0a29-c92b-4153-a1d2-38b276e93124
   // Section 3.1 Eigenvalues and eigenvectors
+
+  TORCH_CHECK_NOT_IMPLEMENTED(
+      !input_tangent.is_complex(),
+      "the derivative for 'eigh' with complex inputs is not implemented.");
+
   auto E = eigenvalues.unsqueeze(-2) - eigenvalues.unsqueeze(-1);
   E.diagonal(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1).fill_(INFINITY);
 

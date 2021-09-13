@@ -6967,7 +6967,7 @@ op_db: List[OpInfo] = [
            gradcheck_wrapper=gradcheck_wrapper_hermitian_input,
            decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack],
            skips=(
-               # Gradcheck for complex hangs for this function
+               # Gradcheck for complex hangs for this function, therefore it raises NotImplementedError for now
                SkipInfo('TestGradients', 'test_forward_mode_AD', dtypes=complex_types()),),
            ),
     OpInfo('linalg.eigvalsh',
