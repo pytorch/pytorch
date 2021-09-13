@@ -95,6 +95,7 @@ def capture_logs() -> Iterator[List[str]]:
     handler = LoggingTensorHandler(log_list)
     logger.addHandler(handler)
     logger.setLevel(logging.INFO)
+    logger.propagate = False
     try:
         yield log_list
     finally:
