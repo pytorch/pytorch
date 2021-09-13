@@ -321,8 +321,7 @@ def diagonal(g, self, offset, dim1, dim2):
     dim2_size = size(g, self, dim=g.op("Constant", value_t=torch.LongTensor([dim2])))
 
     # Create appropriate mask
-    mask_shape = [dim1_size, dim2_size]
-    mask_shape = g.op("Concat", *mask_shape, axis_i=0)
+    mask_shape = g.op("Concat", dim1_size, dim2_size, axis_i=0)
     mask = zeros(g, mask_shape, None, None, None)
     mask = g.op("EyeLike", mask, k_i=offset)
 
@@ -358,7 +357,7 @@ def diagonal(g, self, offset, dim1, dim2):
         diag_size = g.op("Max", g.op("Min", g.op("Add", dim1_size, _offset), dim2_size),
                          g.op("Constant", value_t=torch.LongTensor([0])))
 
-    gather_indices = ones(g, g.op("Concat", *[diag_size], axis_i=0), 4, None, None)
+    gather_indices = ones(g, g.op("Concat", diag_size, axis_i=0), 4, None, None)
     gather_indices = g.op("CumSum", gather_indices, g.op("Constant", value_t=torch.LongTensor([0])))
     gather_indices = g.op("Add", gather_indices, g.op("Constant", value_t=torch.LongTensor([abs(offset) - 1])))
 

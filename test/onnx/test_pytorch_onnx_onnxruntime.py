@@ -5236,14 +5236,15 @@ class TestONNXRuntime(unittest.TestCase):
 
     @skipIfUnsupportedMinOpsetVersion(13)
     def test_diagonal(self):
-        class TensorFactory(torch.nn.Module):
+        class DiagonalModel(torch.nn.Module):
             def forward(self, x):
-                return torch.diagonal()
+                return torch.diagonal(x)
 
         x = torch.randn(2, 4, 5, 2)
         another_x = torch.randn(5, 6, 7, 8)
-        self.run_test(TensorFactory(), x, test_with_inputs=[another_x],
-                      input_names=["input_1"], dynamic_axes={"input_1": [0, 1, 2, 3]})
+        self.run_test(DiagonalModel(), x, test_with_inputs=[another_x],
+                      input_names=["input_1"], output_names=["outputs"],
+                      dynamic_axes={"input_1": [0, 1, 2, 3], "outputs": [0, 1, 2, 3]})
 
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_inplace_zero(self):
