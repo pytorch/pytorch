@@ -11,7 +11,8 @@ from functorch import vmap
 import torch.utils._pytree as pytree
 from functorch_lagging_op_db import functorch_lagging_op_db
 from functorch_additional_op_db import additional_op_db
-from torch.testing._internal.common_methods_invocations import SkipInfo
+from torch.testing._internal.common_methods_invocations import DecorateInfo
+import unittest
 import warnings
 import re
 
@@ -251,9 +252,9 @@ def skipOps(test_case_name, base_test_name, to_skip):
             assert len(matching_opinfos) >= 1, f"Couldn't find OpInfo for {xfail}"
         for opinfo in matching_opinfos:
             decorators = list(opinfo.decorators)
-            decorators.append(SkipInfo(test_case_name, base_test_name,
-                                       device_type=device_type, dtypes=dtypes,
-                                       expected_failure=True))
+            decorators.append(DecorateInfo(unittest.expectedFailure,
+                                           test_case_name, base_test_name,
+                                           device_type=device_type, dtypes=dtypes))
             opinfo.decorators = tuple(decorators)
 
     # This decorator doesn't modify fn in any way

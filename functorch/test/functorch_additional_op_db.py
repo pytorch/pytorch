@@ -6,6 +6,7 @@ import copy
 import operator
 import random
 import numbers
+import unittest
 
 import torch
 import numpy as np
@@ -36,7 +37,7 @@ from torch.testing._internal.common_utils import \
      GRADCHECK_NONDET_TOL,)
 import torch.testing._internal.opinfo_helper as opinfo_helper
 from torch.testing._internal.common_methods_invocations import (
-    OpInfo, SkipInfo, SampleInput, sample_inputs_hardshrink_hardtanh,
+    OpInfo, DecorateInfo, SampleInput, sample_inputs_hardshrink_hardtanh,
     sample_inputs_softmax_variant, S
 )
 
@@ -147,7 +148,7 @@ additional_op_db.extend([
            sample_inputs_func=partial(sample_inputs_interpolate, 'nearest'),
            skips=(
                # JIT alias info internal asserts here
-               SkipInfo('TestJit', 'test_variant_consistency_jit'),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
            ),
            supports_out=False),
     OpInfo('nn.functional.interpolate',
@@ -158,7 +159,7 @@ additional_op_db.extend([
            sample_inputs_func=partial(sample_inputs_interpolate, 'linear'),
            skips=(
                # JIT alias info internal asserts here
-               SkipInfo('TestJit', 'test_variant_consistency_jit'),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
            ),
            supports_out=False),
     OpInfo('nn.functional.interpolate',
@@ -170,7 +171,7 @@ additional_op_db.extend([
            sample_inputs_func=partial(sample_inputs_interpolate, 'bilinear'),
            skips=(
                # JIT alias info internal asserts here
-               SkipInfo('TestJit', 'test_variant_consistency_jit'),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
            ),
            supports_out=False),
     OpInfo('nn.functional.interpolate',
@@ -182,7 +183,7 @@ additional_op_db.extend([
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            skips=(
                # JIT alias info internal asserts here
-               SkipInfo('TestJit', 'test_variant_consistency_jit'),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
            ),
            supports_out=False),
     OpInfo('nn.functional.interpolate',
@@ -194,7 +195,7 @@ additional_op_db.extend([
            sample_inputs_func=partial(sample_inputs_interpolate, 'trilinear'),
            skips=(
                # JIT alias info internal asserts here
-               SkipInfo('TestJit', 'test_variant_consistency_jit'),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
            ),
            supports_out=False),
     OpInfo('nn.functional.interpolate',
@@ -206,7 +207,7 @@ additional_op_db.extend([
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            skips=(
                # JIT alias info internal asserts here
-               SkipInfo('TestJit', 'test_variant_consistency_jit'),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
            ),
            supports_out=False),
 ])
