@@ -42,14 +42,11 @@ model_path = File.expand_path("./model.ptl")
 if not File.exist?(model_path)
    raise "model.pt can't be found!"
 end
-config_path = File.expand_path("./config.json")
-if not File.exist?(config_path)
-    raise "config.json can't be found!"
- end
+
 group = project.main_group.find_subpath(File.join('TestApp'),true)
 group.set_source_tree('SOURCE_ROOT')
 group.files.each do |file|
-    if (file.name.to_s.end_with?(".pt") || file.name == "config.json")
+    if (file.name.to_s.end_with?(".pt"))
         group.remove_reference(file)
         targets.each do |target|
             target.resources_build_phase.remove_file_reference(file)
@@ -57,10 +54,8 @@ group.files.each do |file|
     end
 end
 model_file_ref = group.new_reference(model_path)
-config_file_ref = group.new_reference(config_path)
 targets.each do |target|
     target.resources_build_phase.add_file_reference(model_file_ref, true)
-    target.resources_build_phase.add_file_reference(config_file_ref, true)
 end
 puts "Linking static libraries..."
 libs = ['libc10.a', 'libclog.a', 'libpthreadpool.a', 'libXNNPACK.a', 'libeigen_blas.a', 'libcpuinfo.a', 'libpytorch_qnnpack.a', 'libtorch_cpu.a', 'libtorch.a']

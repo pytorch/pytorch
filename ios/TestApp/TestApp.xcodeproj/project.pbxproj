@@ -7,7 +7,6 @@
     objects = {
 
 /* Begin PBXBuildFile section */
-        A03C2960235EA3C1000B4408 /* Benchmark.mm in Sources */ = {isa = PBXBuildFile; fileRef = A03C295F235EA3C1000B4408 /* Benchmark.mm */; };
         A06D4CB5232F0DB200763E16 /* AppDelegate.m in Sources */ = {isa = PBXBuildFile; fileRef = A06D4CB4232F0DB200763E16 /* AppDelegate.m */; };
         A06D4CB8232F0DB200763E16 /* ViewController.mm in Sources */ = {isa = PBXBuildFile; fileRef = A06D4CB7232F0DB200763E16 /* ViewController.mm */; };
         A06D4CBB232F0DB200763E16 /* Main.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = A06D4CB9232F0DB200763E16 /* Main.storyboard */; };
@@ -28,8 +27,6 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
-        A03C295E235EA3C0000B4408 /* Benchmark.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = Benchmark.h; sourceTree = "<group>"; };
-        A03C295F235EA3C1000B4408 /* Benchmark.mm */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.objcpp; path = Benchmark.mm; sourceTree = "<group>"; };
         A06D4CB0232F0DB200763E16 /* TestApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = TestApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
         A06D4CB3232F0DB200763E16 /* AppDelegate.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = AppDelegate.h; sourceTree = "<group>"; };
         A06D4CB4232F0DB200763E16 /* AppDelegate.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = AppDelegate.m; sourceTree = "<group>"; };
@@ -84,8 +81,6 @@
         A06D4CB2232F0DB200763E16 /* TestApp */ = {
             isa = PBXGroup;
             children = (
-                A03C295E235EA3C0000B4408 /* Benchmark.h */,
-                A03C295F235EA3C1000B4408 /* Benchmark.mm */,
                 A06D4CB3232F0DB200763E16 /* AppDelegate.h */,
                 A06D4CB4232F0DB200763E16 /* AppDelegate.m */,
                 A06D4CB6232F0DB200763E16 /* ViewController.h */,
@@ -209,7 +204,6 @@
                 A06D4CB8232F0DB200763E16 /* ViewController.mm in Sources */,
                 A06D4CC3232F0DB200763E16 /* main.m in Sources */,
                 A06D4CB5232F0DB200763E16 /* AppDelegate.m in Sources */,
-                A03C2960235EA3C1000B4408 /* Benchmark.mm in Sources */,
             );
             runOnlyForDeploymentPostprocessing = 0;
         };
