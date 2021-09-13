@@ -141,7 +141,7 @@ findManagedAndUnmanagedAllocs(
       mem_events.begin(),
       mem_events.end(),
       [](const auto& evt1, const auto& evt2) {
-        return evt1.start_time < evt2.start_time;
+        return evt1.ts < evt2.ts;
       });
   std::sort(
       function_events.begin(),
