@@ -224,8 +224,8 @@ WINDOWS_WORKFLOWS = [
     ),
     CIWorkflow(
         arch="windows",
-        build_environment="win-vs2019-cuda10.1-py3",
-        cuda_version="10.1",
+        build_environment="win-vs2019-cuda10.2-py3",
+        cuda_version="10.2",
         test_runner_type=WINDOWS_CUDA_TEST_RUNNER,
         on_pull_request=True,
         only_run_smoke_tests_on_pull_request=True,
