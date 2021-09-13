@@ -9,7 +9,8 @@ using namespace torch::jit::tensorexpr;
 Tensor computeSoftmax(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
-    bool log_softmax) {
+    bool log_softmax,
+    const std::string name) {
   // Softmax is computed as follows:
   //    softmax(vi) = exp(vi) / sum(exp(vi))
   //
@@ -98,8 +99,10 @@ Tensor computeSoftmax(
     dtype = ToDtype(static_cast<ScalarType>(*d));
   }
 
+  const std::string output_name =
+      name.empty() ? (log_softmax ? "aten_log_softmax" : "aten_softmax") : name;
   auto max = Reduce(
-      "aten_softmax_max",
+      output_name + "_max",
       non_softmax_dims,
       Maximum(dtype.value()),
       [&](ParameterList& indices) {
@@ -108,13 +111,13 @@ Tensor computeSoftmax(
       },
       {output_dims[softmax_dim]});
   auto e =
-      Compute("aten_softmax_exp", output_dims, [&](ParameterList& indices) {
+      Compute(output_name + "_exp", output_dims, [&](ParameterList& indices) {
         auto inp = tensorOrConstant(
             inputs[0], convert_indices_to_expr_handle(indices));
         return exp(inp - max.load(remove_softmax_dim_index(indices)));
       });
   auto sum = Reduce(
-      "aten_softmax_sum",
+      output_name + "_sum",
       non_softmax_dims,
       Sum(),
       [&](ParameterList& indices) {
@@ -123,7 +126,7 @@ Tensor computeSoftmax(
       {output_dims[softmax_dim]});
   if (!log_softmax) {
     auto result =
-        Compute("aten_softmax", output_dims, [&](ParameterList& indices) {
+        Compute(output_name, output_dims, [&](ParameterList& indices) {
           return e.load(indices) / sum.load(remove_softmax_dim_index(indices));
         });
     return Tensor(
@@ -133,17 +136,16 @@ Tensor computeSoftmax(
   }
 
   auto log_sum = Compute(
-      "aten_softmax_log_sum", non_softmax_dims, [&](ParameterList& indices) {
+      output_name + "_sum", non_softmax_dims, [&](ParameterList& indices) {
         return log(sum.load(indices));
       });
-  auto result =
-      Compute("aten_log_softmax", output_dims, [&](ParameterList& indices) {
-        auto inp = tensorOrConstant(
-            inputs[0], convert_indices_to_expr_handle(indices));
-        auto non_softmax_indices = remove_softmax_dim_index(indices);
-        return inp - max.load(non_softmax_indices) -
-            log_sum.load(non_softmax_indices);
-      });
+  auto result = Compute(output_name, output_dims, [&](ParameterList& indices) {
+    auto inp =
+        tensorOrConstant(inputs[0], convert_indices_to_expr_handle(indices));
+    auto non_softmax_indices = remove_softmax_dim_index(indices);
+    return inp - max.load(non_softmax_indices) -
+        log_sum.load(non_softmax_indices);
+  });
   return Tensor(
       result.buf(),
       alloc<tensorexpr::Block>(std::vector<StmtPtr>(

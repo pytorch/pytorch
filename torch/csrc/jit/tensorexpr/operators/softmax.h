@@ -9,7 +9,8 @@ namespace tensorexpr {
 Tensor computeSoftmax(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
-    bool log_softmax);
+    bool log_softmax,
+    const std::string name = std::string());
 
 } // namespace tensorexpr
 } // namespace jit

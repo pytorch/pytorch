@@ -128,7 +128,8 @@ TORCH_API Tensor computeOperandValue(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
     const c10::optional<ScalarType>& outputType,
-    at::Device = at::kCPU);
+    at::Device = at::kCPU,
+    const std::string name = std::string());
 
 class TORCH_API TensorExprKernel {
   struct ConstantDescr {
