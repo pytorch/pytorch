@@ -109,3 +109,17 @@ concurrency:
           fetch-depth: 0
           submodules: !{{ submodules }}
 {%- endmacro -%}
+
+{%- macro render_test_results() -%}
+      - name: "* Click me for rendered test results (useful for finding failing tests) *"
+        if: always()
+        shell: bash
+        run: |
+          # only render test results if there are test results to render
+          if find test/ --name "*.xml" > /dev/null 2>/dev/null; then
+            python3 -m pip install rich junitparser
+            python3 tools/render_junit.py test/
+          else
+            echo "No test reports found, did tests actually run?"
+          fi
+{%- endmacro -%}

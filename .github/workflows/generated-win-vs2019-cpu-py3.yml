@@ -223,6 +223,17 @@ jobs:
               export RUN_SMOKE_TESTS_ONLY=1
             fi
             .jenkins/pytorch/win-test.sh
+      - name: "* Click me for rendered test results (useful for finding failing tests) *"
+        if: always()
+        shell: bash
+        run: |
+          # only render test results if there are test results to render
+          if find test/ --name "*.xml" > /dev/null 2>/dev/null; then
+            python3 -m pip install rich junitparser
+            python3 tools/render_junit.py test/
+          else
+            echo "No test reports found, did tests actually run?"
+          fi
       - name: Zip test reports for upload
         if: always()
         env:
