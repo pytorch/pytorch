@@ -50,6 +50,7 @@ jobs:
     timeout-minutes: 90
     outputs:
       docker_image: ${{ steps.calculate-tag.outputs.docker_image }}
+    name: linux-xenial-py3.6-gcc7-bazel-test-calculate-docker-image
     steps:
       - name: Display EC2 information
         shell: bash

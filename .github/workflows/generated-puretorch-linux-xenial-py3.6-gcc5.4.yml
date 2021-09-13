@@ -50,6 +50,7 @@ jobs:
     timeout-minutes: 90
     outputs:
       docker_image: ${{ steps.calculate-tag.outputs.docker_image }}
+    name: puretorch-linux-xenial-py3.6-gcc5.4-calculate-docker-image
     steps:
       - name: Display EC2 information
         shell: bash
@@ -145,6 +146,7 @@ jobs:
     env:
       DOCKER_IMAGE: ${{ needs.calculate-docker-image.outputs.docker_image }}
       JOB_BASE_NAME: puretorch-linux-xenial-py3.6-gcc5.4-build
+    name: puretorch-linux-xenial-py3.6-gcc5.4-build
     steps:
       - name: Display EC2 information
         shell: bash

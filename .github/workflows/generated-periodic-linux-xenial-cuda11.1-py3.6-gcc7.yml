@@ -48,6 +48,7 @@ jobs:
     timeout-minutes: 90
     outputs:
       docker_image: ${{ steps.calculate-tag.outputs.docker_image }}
+    name: periodic-linux-xenial-cuda11.1-py3.6-gcc7-calculate-docker-image
     steps:
       - name: Display EC2 information
         shell: bash
@@ -143,6 +144,7 @@ jobs:
     env:
       DOCKER_IMAGE: ${{ needs.calculate-docker-image.outputs.docker_image }}
       JOB_BASE_NAME: periodic-linux-xenial-cuda11.1-py3.6-gcc7-build
+    name: periodic-linux-xenial-cuda11.1-py3.6-gcc7-build
     steps:
       - name: Display EC2 information
         shell: bash
@@ -302,6 +304,7 @@ jobs:
       ignore-disabled-issues: ${{ steps.set-matrix.outputs.ignore-disabled-issues }}
     container:
       image: python:3.9
+    name: periodic-linux-xenial-cuda11.1-py3.6-gcc7-generate-test-matrix
     steps:
       - name: Install dependencies
         run: pip install typing-extensions==3.10
@@ -325,6 +328,7 @@ jobs:
       NUM_TEST_SHARDS: ${{ matrix.num_shards }}
       PYTORCH_IGNORE_DISABLED_ISSUES: ${{ needs.generate-test-matrix.outputs.ignore-disabled-issues }}
       CONTINUE_THROUGH_ERROR: ${{ github.repository_owner == 'pytorch' && (github.event_name == 'push' || github.event_name == 'schedule') }}
+    name: periodic-linux-xenial-cuda11.1-py3.6-gcc7-test-${{ matrix.config }}-shard${{ matrix.shard }}
     steps:
       - name: Display EC2 information
         shell: bash
