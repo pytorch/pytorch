@@ -787,9 +787,9 @@ def send_report_to_s3(head_report: Version2Report) -> None:
 
     # SHARD_NUMBER and TEST_CONFIG are specific to GHA, as these details would be included in CIRCLE_JOB already
     shard = os.environ.get('SHARD_NUMBER', '')
-    test_config = os.environ.get('TEST_CONFIG', '')
+    test_config = os.environ.get('TEST_CONFIG')
 
-    job_report_dirname = f'{job}{f"-{test_config}" if test_config else ""}{shard}'
+    job_report_dirname = f'{job}{f"-{test_config}" if test_config is not None else ""}{shard}'
 
     if branch not in ['master', 'nightly'] and not branch.startswith("release/"):
         pr = os.environ.get('CIRCLE_PR_NUMBER', 'unknown')
