@@ -47,3 +47,13 @@ class TestAOMigrationQuantization(AOMigrationTestCase):
             'get_fuser_method',
         ]
         self._test_function_import('fuse_modules', function_list)
+
+    def test_package_import_quant_type(self):
+        self._test_package_import('quant_type')
+
+    def test_function_import_quant_type(self):
+        function_list = [
+            'QuantType',
+            'quant_type_to_str',
+        ]
+        self._test_function_import('quant_type', function_list)
