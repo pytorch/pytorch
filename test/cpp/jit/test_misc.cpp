@@ -1493,11 +1493,11 @@ TEST(NoneSchemaMatchTest, Basic) {
   RegisterOperators reg({
       Operator(
           "prim::test_none() -> int?",
-          [](Stack* stack) { push(stack, IValue()); },
+          [](Stack& stack) { push(stack, IValue()); },
           aliasAnalysisFromSchema()),
       Operator(
           "prim::is_none(int? a) -> bool",
-          [](Stack* stack) {
+          [](Stack& stack) {
             IValue a = pop(stack);
             if (a.isNone()) {
               push(stack, true);
@@ -2683,6 +2683,13 @@ TEST(ComputeFlopsTest, Basic) {
   extra_args["mat_size"] = at::IValue(at::IntArrayRef(mat_sizes));
   flops = computeFlops(std::string("aten::mul"), extra_args);
   ASSERT_EQ(flops, 360);
+}
+
+TEST(TestConstant, TensorGrad) {
+  auto graph = std::make_shared<Graph>();
+  IValue ten = torch::randn({3, 5}).requires_grad_(true);
+  auto con = tryInsertConstant(*graph, ten);
+  ASSERT_TRUE(con == c10::nullopt);
 }
 
 TEST(TestMutation, Basic) {

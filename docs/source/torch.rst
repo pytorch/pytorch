@@ -88,6 +88,7 @@ Indexing, Slicing, Joining, Mutating Ops
     :nosignatures:
 
     cat
+    concat
     conj
     chunk
     dsplit

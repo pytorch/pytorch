@@ -10,7 +10,7 @@ from torch.fx.experimental.fx_acc.acc_normalizer import (
     register_acc_op_mapping,
     register_custom_acc_mapper_fn,
 )
-from torch.fx.passes.shape_prop import extract_tensor_metadata
+from torch.fx.passes.shape_prop import _extract_tensor_metadata
 
 this_arg_is_optional = True
 
@@ -93,6 +93,12 @@ def avg_pool2d(
     divisor_override,
 ):
     return nn.functional.avg_pool2d(**locals())
+
+
+@register_acc_op_mapping(op_and_target=("call_function", torch.sign))
+@register_acc_op
+def sign(*, input):
+    return torch.sign(input)
 
 
 @register_acc_op
@@ -523,7 +529,7 @@ def relu(*, input, inplace=False):
 )
 def torch_log1p_mapper(node: torch.fx.Node, _: torch.nn.Module) -> torch.fx.Node:
     with node.graph.inserting_before(node):
-        add_kwargs = {"input": node.kwargs["input"], "other": 1}
+        add_kwargs = {"input": node.kwargs["input"], "other": 1.0}
         add_node = node.graph.call_function(add, kwargs=add_kwargs)
         add_node.meta = node.meta.copy()
         log_kwargs = {"input": add_node}
@@ -757,6 +763,12 @@ def torch_argmin_mapper(node: torch.fx.Node, _: torch.nn.Module) -> torch.fx.Nod
     """
     return argmin_max_mapper_impl(node, largest=False)
 
+@register_acc_op_mapping(op_and_target=("call_function", torch.linalg.norm))
+@register_acc_op
+def linalg_norm(*, input, ord, dim, keepdim):
+    return torch.linalg.norm(**locals())
+
+
 @register_custom_acc_mapper_fn(
     op_and_target=("call_method", "split"),
     arg_replacement_tuples=[
@@ -885,7 +897,7 @@ def embedding_bag(
 def embedding_bag_byte_rowwise_offsets(
     *,
     weight,
-    input,
+    indices,
     offsets,
     scale_grad_by_freq,
     mode,
@@ -895,6 +907,27 @@ def embedding_bag_byte_rowwise_offsets(
     include_last_offset,
 ):
     return torch.ops.quantized.embedding_bag_byte_rowwise_offsets(**locals())
+
+@register_acc_op_mapping(
+    op_and_target=(
+        "call_function",
+        torch.ops.quantized.embedding_bag_4bit_rowwise_offsets,
+    )
+)
+@register_acc_op
+def embedding_bag_4bit_rowwise_offsets(
+    *,
+    weight,
+    indices,
+    offsets,
+    scale_grad_by_freq,
+    mode,
+    pruned_weights,
+    per_sample_weights,
+    compressed_indices_mapping,
+    include_last_offset,
+):
+    return torch.ops.quantized.embedding_bag_4bit_rowwise_offsets(**locals())
 
 
 @register_acc_op_mapping(op_and_target=("call_function", torch.sin))
@@ -1134,12 +1167,12 @@ def packed_quantized_linear_mapper(
     with node.graph.inserting_before(node):
         # Insert get_attr nodes for weight and bias
         get_weight = node.graph.get_attr(weight_name)
-        get_weight.meta["tensor_meta"] = extract_tensor_metadata(linear_module.weight())
+        get_weight.meta["tensor_meta"] = _extract_tensor_metadata(linear_module.weight())
 
         get_bias = None
         if linear_module.bias() is not None:
             get_bias = node.graph.get_attr(bias_name)
-            get_bias.meta["tensor_meta"] = extract_tensor_metadata(linear_module.bias())
+            get_bias.meta["tensor_meta"] = _extract_tensor_metadata(linear_module.bias())
 
         # Create kwargs for acc_op.quantized_linear
         kwargs = {
@@ -1182,12 +1215,12 @@ def packed_quantized_conv2d_mapper(
     with node.graph.inserting_before(node):
         # Insert get_attr nodes for weight and bias
         get_weight = node.graph.get_attr(weight_name)
-        get_weight.meta["tensor_meta"] = extract_tensor_metadata(conv_module.weight())
+        get_weight.meta["tensor_meta"] = _extract_tensor_metadata(conv_module.weight())
 
         get_bias = None
         if conv_module.bias() is not None:
             get_bias = node.graph.get_attr(bias_name)
-            get_bias.meta["tensor_meta"] = extract_tensor_metadata(conv_module.bias())
+            get_bias.meta["tensor_meta"] = _extract_tensor_metadata(conv_module.bias())
 
         # Create kwargs for acc_op.conv
         kwargs = {

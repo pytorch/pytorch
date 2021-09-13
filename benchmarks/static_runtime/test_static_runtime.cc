@@ -1,5 +1,7 @@
+#include <c10/core/ScalarType.h>
 #include <gtest/gtest.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
+#include <torch/csrc/jit/ir/irparser.h>
 #include <torch/csrc/jit/runtime/static/fusion.h>
 #include <torch/csrc/jit/runtime/static/impl.h>
 #include <torch/csrc/jit/runtime/static/passes.h>
@@ -1082,6 +1084,21 @@ TEST(StaticRuntime, IndividualOps_Argmin) {
   testStaticRuntime(argmin_with_keep_dim_script, args_a, args_b);
 }
 
+TEST(StaticRuntime, IndividualOps_Softmax) {
+  auto a = at::randn({2, 3});
+  auto b = at::randn({3, 3, 3});
+
+  testStaticRuntime(softmax_script, {a, 0});
+  testStaticRuntime(softmax_script, {a, 1});
+
+  testStaticRuntime(softmax_script, {b, 0});
+  testStaticRuntime(softmax_script, {b, 1});
+  testStaticRuntime(softmax_script, {b, 2});
+
+  testStaticRuntime(softmax_script_with_dtype, {a, 1, at::ScalarType::Float});
+  testStaticRuntime(softmax_script_with_dtype, {b, 1, at::ScalarType::Float});
+}
+
 TEST(StaticRuntime, IndividualOps_GetItem_Dict) {
   int int_key = 0;
   std::string str_key = "str";
@@ -1290,4 +1307,60 @@ TEST(StaticRuntime, IndividualOps_LinalgNorm_StringOrd) {
   auto b = at::randn({4, 5});
   std::vector<IValue> args1{b, "fro", dim, true, dtype};
   testStaticRuntime(linalg_norm_ord_str, args0, args1);
+}
+
+TEST(StaticRuntime, IndividualOps_Cat) {
+  auto graph = std::make_shared<Graph>();
+  std::unordered_map<std::string, Value*> vmap;
+  parseIR(cat_script, graph.get(), vmap);
+  torch::jit::StaticModule smodule(graph);
+  ASSERT_TRUE(getNodeWithKind(smodule, "aten::cat"));
+
+  auto a = at::randn({2, 4});
+  auto b = at::randn({3, 4});
+  std::vector<IValue> args0{a, b, 0};
+
+  testStaticRuntime(cat_script, args0);
+
+  auto c = at::randn({3, 4});
+  auto d = at::randn({3, 5});
+  std::vector<IValue> args1{c, d, 1};
+  testStaticRuntime(cat_script, args0, args1);
+}
+
+TEST(StaticRuntime, IndividualOps_Cumsum) {
+  auto a = at::randn({2, 3});
+  std::vector<IValue> args0{a, 0};
+  testStaticRuntime(cumsum_script, args0);
+
+  auto b = at::randn({4, 3});
+  std::vector<IValue> args1{b, 1};
+  testStaticRuntime(cumsum_script, args0, args1);
+}
+
+TEST(StaticRuntime, IndividualOps_CumsumDtype) {
+  auto a = at::randn({1, 2});
+  auto dtype = at::ScalarType::Float;
+  std::vector<IValue> args0{a, 0, dtype};
+  testStaticRuntime(cumsum_script_dtype, args0);
+
+  auto b = at::randn({3, 4});
+  std::vector<IValue> args1{b, 1, dtype};
+  testStaticRuntime(cumsum_script_dtype, args0, args1);
+}
+
+TEST(StaticRuntime, IndividualOps_Nonzero) {
+  auto a = at::randint(0, 2, {2, 3});
+  testStaticRuntime(nonzero_tensor, {a});
+
+  auto b = at::randint(0, 2, {4, 3, 2});
+  testStaticRuntime(nonzero_tensor, {a}, {b});
+}
+
+TEST(StaticRuntime, SignedLog1p) {
+  std::vector<IValue> args1 = {at::randn({2, 2})};
+  testStaticRuntime(signed_log1p_script, args1, {}, true);
+
+  std::vector<IValue> args2 = {at::randn({3, 3, 3})};
+  testStaticRuntime(signed_log1p_script, args1, args2, true);
 }

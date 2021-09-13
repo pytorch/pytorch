@@ -7,12 +7,15 @@ class LineReaderIterDataPipe(IterDataPipe[Tuple[str, str]]):
 
     Iterable DataPipe to load file name and stream as source IterDataPipe
     and yield filename and line(s).
+
+    Args:
+        datapipe: Iterable DataPipe providing file name and string file stream
     """
 
-    def __init__(self, source_datapipe):
-        self.source_datapipe = source_datapipe
+    def __init__(self, datapipe):
+        self.datapipe = datapipe
 
     def __iter__(self):
-        for file_name, stream in self.source_datapipe:
+        for file_name, stream in self.datapipe:
             for line in stream:
                 yield file_name, line

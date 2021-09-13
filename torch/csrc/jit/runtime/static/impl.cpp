@@ -19,6 +19,11 @@
 #include <torch/csrc/jit/runtime/vararg_functions.h>
 #include <stdexcept>
 
+#ifdef FBCODE_CAFFE2
+#include <folly/dynamic.h>
+#include <folly/json.h>
+#endif
+
 namespace torch {
 namespace jit {
 
@@ -873,12 +878,30 @@ c10::IValue StaticRuntime::operator()(
   return std::move(*outputs_[0]);
 }
 
+namespace {
+
+std::string generate_latency_json(const std::string& label, double millis) {
+#ifdef FBCODE_CAFFE2
+  folly::dynamic json = folly::dynamic::object();
+  json["type"] = label;
+  json["metric"] = "latency";
+  json["unit"] = "ms";
+  json["value"] = millis;
+  return "PyTorchObserver " + folly::toJson(json);
+#else
+  return "";
+#endif
+}
+
+} // namespace
+
 void StaticRuntime::benchmark(
     const std::vector<c10::IValue>& args,
     const std::unordered_map<std::string, c10::IValue>& kwargs,
     const int warmup_runs,
     const int main_runs,
-    bool print_per_node_time) {
+    bool print_per_node_time,
+    bool generate_ai_pep_output) {
   float time_per_iter = benchmark_model(args, kwargs, warmup_runs, main_runs);
   std::cout << "Static runtime ms per iter: " << time_per_iter
             << ". Iters per second: " << 1000.0 / time_per_iter << std::endl;
@@ -916,6 +939,14 @@ void StaticRuntime::benchmark(
     } else {
       std::cout << ")" << std::endl;
     }
+
+    if (generate_ai_pep_output) {
+      LOG(INFO) << generate_latency_json(kind, ms);
+    }
+  }
+  if (generate_ai_pep_output) {
+    LOG(INFO) << generate_latency_json(
+        "static_runtime_first_iter", results.first_iter_time);
   }
   std::cout << std::setw(15) << results.total_time << " ms. in Total"
             << std::endl;
@@ -927,6 +958,8 @@ void StaticRuntime::benchmark(
             << " ms" << std::endl;
   std::cout << "Outputs deallocation time: " << results.output_dealloc_time
             << " ms" << std::endl;
+  std::cout << "First iter time: " << results.first_iter_time << " ms"
+            << std::endl;
 
   if (planner_) {
     std::cout << "Total memory managed: " << planner_->total_managed()
@@ -1057,7 +1090,7 @@ StaticRuntime::IndividualMetrics StaticRuntime::benchmark_individual_ops(
     const std::unordered_map<std::string, c10::IValue>& kwargs,
     const int warmup_runs,
     const int main_runs) {
-  TORCH_CHECK(warmup_runs >= 0 && main_runs >= 1);
+  TORCH_CHECK(warmup_runs >= 1 && main_runs >= 1);
 
   // See comment on above use of InferenceMode for
   // explanation.
@@ -1073,8 +1106,15 @@ StaticRuntime::IndividualMetrics StaticRuntime::benchmark_individual_ops(
 
   results.setup_time = timer.MilliSeconds();
 
+  // The first iteration profiles each node's output Tensors' sizes and
+  // initializes the memory planner with the profile information. Folllowing
+  // iterations just use the already established memory planning.
+  timer.Start();
+  operator()(args, kwargs);
+  results.first_iter_time = timer.MilliSeconds();
+
   // warmup runs
-  for (const auto i : c10::irange(warmup_runs)) {
+  for (const auto i : c10::irange(warmup_runs - 1)) {
     (void)i; // Suppress unused variable warning
     operator()(args, kwargs);
   }
@@ -1440,7 +1480,7 @@ void ProcessedNode::run() {
     }
 
     DCHECK(op_);
-    op_->operator()(&stack);
+    op_->operator()(stack);
 
     DCHECK_EQ(stack.size(), node_->outputs().size());
     for (const auto i : c10::irange(node_->outputs().size())) {

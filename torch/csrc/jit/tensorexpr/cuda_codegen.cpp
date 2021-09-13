@@ -98,6 +98,8 @@ std::string CudaPrinter::dtypeToCppString(const Dtype& dtype) {
       return "bool";
     case ScalarType::Half:
       return "half";
+    case ScalarType::BFloat16:
+      return "__nv_bfloat16";
     case ScalarType::Char:
       return "char";
     case ScalarType::Byte:
@@ -251,20 +253,15 @@ void CudaPrinter::visit(ForPtr v) {
 }
 
 void CudaPrinter::visit(CastPtr v) {
-  if (v->dtype().scalar_type() == ScalarType::Half) {
-    os() << "__float2half(";
-    v->src_value()->accept(this);
-    os() << ")";
-    return;
-  } else if (v->src_value()->dtype().scalar_type() == ScalarType::Half) {
-    os() << "__half2float(";
-    v->src_value()->accept(this);
-    os() << ")";
-    return;
-  }
-
-  os() << "(" << dtypeToCppString(v->dtype()) << ")";
-  os() << "(";
+  std::string castFn = v->dtype().scalar_type() == ScalarType::Half
+      ? "__float2half"
+      : v->dtype().scalar_type() == ScalarType::BFloat16 ? "__float2bfloat16"
+      : v->src_value()->dtype().scalar_type() == ScalarType::Half
+      ? "__half2float"
+      : v->src_value()->dtype().scalar_type() == ScalarType::BFloat16
+      ? "__bfloat162float"
+      : ("(" + dtypeToCppString(v->dtype()) + ")");
+  os() << castFn << "(";
   v->src_value()->accept(this);
   os() << ")";
 }
@@ -320,7 +317,8 @@ void CudaPrinter::visit(LoadPtr v) {
     return;
   }
   if (v->dtype().scalar_type() == ScalarType::Bool ||
-      v->dtype().scalar_type() == ScalarType::Half) {
+      v->dtype().scalar_type() == ScalarType::Half ||
+      v->dtype().scalar_type() == ScalarType::BFloat16) {
     // There's no __ldg overload for bool or half.
     os() << *v->base_handle() << "[" << *v->flat_index() << "]";
     return;
@@ -823,7 +821,7 @@ StmtPtr GPUMetaVarRewriter::mutate(BlockPtr v) {
     bool need_sync = false;
     // We never mask loops, they'll mask their contents.
     if (!segment.mask()) {
-      TORCH_INTERNAL_ASSERT(segment.stmts().size() == 1);
+      TORCH_INTERNAL_ASSERT(segment.stmts().size() == 1, buildErrorMessage());
       stmts.push_back(segment.stmts()[0]);
       continue;
     }
@@ -943,6 +941,9 @@ void CudaCodeGen::Initialize() {
 
   if (halfChecker.hasHalf()) {
     os() << fuser::cuda::half_support_literal << std::endl;
+  }
+  if (halfChecker.hasBFloat16()) {
+    os() << fuser::cuda::bfloat16_support_literal << std::endl;
   }
 
   std::string func_name = GetUniqueFuncName(kernel_func_name());
