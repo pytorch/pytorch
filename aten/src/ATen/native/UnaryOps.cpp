@@ -442,6 +442,10 @@ Tensor& conj_physical_(Tensor& self) {
 // else returns a new negated tensor with neg bit set to 0
 Tensor resolve_neg(const Tensor& self) {
   if (!self.is_neg()) { return self; }
+  // currently a tensor should never have both conj and neg bit set
+  // the only way to get an imag bit is complex_tensor.conj().imag but there's
+  // no intended designed mechanism to enter the complex world with this imag bit
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!self.is_conj());
   // negation is materialized in `copy_()` that clone ultimately calls into
   return self.clone();
 }
@@ -450,6 +454,10 @@ Tensor resolve_neg(const Tensor& self) {
 // else returns a new negated tensor with neg bit set to 0
 Tensor resolve_conj(const Tensor& self) {
   if (!self.is_conj()) { return self; }
+  // currently a tensor should never have both conj and neg bit set
+  // the only way to get an imag bit is complex_tensor.conj().imag but there's
+  // no intended designed mechanism to enter the complex world with this imag bit
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!self.is_neg());
   // conjugation is materialized in `copy_()` that clone ultimately calls into
   return self.clone();
 }
