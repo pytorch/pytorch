@@ -1,4 +1,5 @@
-from inspect import signature
+from itertools import product
+from inspect import signature, isgenerator
 from copy import deepcopy
 import tempfile
 
@@ -204,6 +205,122 @@ class TestModule(TestCase):
             output_op.backward(grad)
             output_ip.backward(grad)
             self.assertEqual(input_args[0].grad, input_arg_copy[0].grad)
+
+
+    @modules(module_db)
+    def test_non_contiguous_tensors(self, device, dtype, module_info):
+        # Check modules work with non-contiguous tensors
+
+        module_cls = module_info.module_cls
+        module_inputs = module_info.module_inputs_func(module_info, device=device, dtype=dtype,
+                                                       requires_grad=True)
+        def _make_leafs(item):
+            if isinstance(item, dict):
+                for i in item.values():
+                    _make_leafs(i)
+            elif isinstance(item, tuple):
+                for i in item:
+                    _make_leafs(i)
+            else:
+                if not isinstance(item, torch.Tensor) or item.is_leaf:
+                    return
+                old_requires_grad = item.requires_grad
+                item.detach_().requires_grad_(old_requires_grad)
+
+        def _zero_grad(obj):
+            if isinstance(obj, tuple) or isgenerator(obj):
+                for o in obj:
+                    _zero_grad(o)
+            elif isinstance(obj, dict):
+                for o in obj.values():
+                    _zero_grad(o)
+            elif isinstance(obj, (torch.Tensor, torch.nn.Parameter)) and obj.grad is not None:
+                obj.grad.detach_()
+                obj.grad.zero_()
+
+        def _make_non_contiguous(obj):
+            if isinstance(obj, tuple):
+                return tuple(_make_non_contiguous(o) for o in obj)
+            elif isinstance(obj, dict):
+                return {name: _make_non_contiguous(o) for name, o in obj.items()}
+
+            # Scalar tensors can not be made contiguous
+            if not isinstance(obj, torch.Tensor) or obj.dim() == 0:
+                return obj
+
+            out = torch.repeat_interleave(obj, 2, dim=-1)
+            out = out[..., ::2].detach()
+            out.requires_grad = obj.requires_grad
+            return out
+
+
+        def _can_be_noncontiguous(obj):
+            if isinstance(obj, tuple):
+                return any(_can_be_noncontiguous(o) for o in obj)
+            elif isinstance(obj, dict):
+                return any(_can_be_noncontiguous(o) for o in obj.values())
+
+            if not isinstance(obj, torch.Tensor) or obj.dim() == 0:
+                return False
+            return True
+
+        def _get_grads(obj):
+           if isinstance(obj, tuple):
+               return tuple(_get_grads(o) for o in obj)
+           elif isinstance(obj, dict):
+               return {name: _get_grads(o) for name, o in obj.items()}
+           if not isinstance(obj, torch.Tensor) or obj.is_leaf:
+               return obj
+           return obj.grad if obj.grad is not None else None
+
+        for module_input in module_inputs:
+            if module_input.forward_input is None:
+                continue
+
+            input_args, input_kwargs = module_input.forward_input.args, module_input.forward_input.kwargs
+            if not (_can_be_noncontiguous(input_args) or _can_be_noncontiguous(input_kwargs)):
+                continue
+
+            # === Instantiate the module. ===
+            args, kwargs = module_input.constructor_input.args, module_input.constructor_input.kwargs
+            m = module_cls(*args, **kwargs)
+            m.to(device).to(dtype)
+
+            _make_leafs((input_args, input_kwargs))
+
+            # === Forward with default input
+            with freeze_rng_state():
+                default_output = m(*input_args, **input_kwargs)
+                grad_output = default_output.clone().detach_().normal_()
+                default_output.backward(grad_output, retain_graph=True)
+
+            default_input_args_grad, default_input_kwargs_grad = deepcopy(_get_grads((input_args, input_kwargs)))
+            default_param_grad = deepcopy([p.grad for p in m.parameters()])
+
+            # === Construct non-contiguous tensors ===
+            nc_input_args, nc_input_kwargs = _make_non_contiguous((input_args, input_kwargs))
+            nc_grad_output = _make_non_contiguous(grad_output)
+
+            # === Compare results with non-contiguous and contiguous tensors ===
+            inputs = [(input_args, input_kwargs), (nc_input_args, nc_input_kwargs)]
+            grads = [grad_output, nc_grad_output]
+
+            for (in_args, in_kwargs), g_out in product(inputs, grads):
+                g_out_copy = deepcopy(g_out)
+                _zero_grad((in_args, in_kwargs))
+                _zero_grad(m.parameters())
+
+                with freeze_rng_state():
+                    out = m(*in_args, **in_kwargs)
+                    out.backward(g_out_copy, retain_graph=True)
+
+                input_args_grad, input_kwargs_grad = deepcopy(_get_grads((in_args, in_kwargs)))
+                self.assertEqual(out, default_output)
+                self.assertEqual(input_args_grad, default_input_args_grad, atol=1e-4, rtol=0)
+                self.assertEqual(input_kwargs_grad, default_input_kwargs_grad, atol=1e-4, rtol=0)
+
+                param_grad = [p.grad for p in m.parameters()]
+                self.assertEqual(param_grad, default_param_grad)
 
 
 instantiate_device_type_tests(TestModule, globals())
