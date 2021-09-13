@@ -953,30 +953,31 @@ def main():
     if options.coverage and not PYTORCH_COLLECT_COVERAGE:
         shell(["coverage", "erase"])
 
-    if options.determine_from is not None and os.path.exists(options.determine_from):
-        slow_tests = get_slow_tests_based_on_S3(
-            TESTS, TARGET_DET_LIST, SLOW_TEST_THRESHOLD
-        )
-        print_to_stderr(
-            "Added the following tests to target_det tests as calculated based on S3:"
-        )
-        print_to_stderr(slow_tests)
-        with open(options.determine_from, "r") as fh:
-            touched_files = [
-                os.path.normpath(name.strip())
-                for name in fh.read().split("\n")
-                if len(name.strip()) > 0
-            ]
-        # HACK: Ensure the 'test' paths can be traversed by Modulefinder
-        sys.path.append(test_directory)
-        selected_tests = [
-            test
-            for test in selected_tests
-            if should_run_test(
-                TARGET_DET_LIST + slow_tests, test, touched_files, options
-            )
-        ]
-        sys.path.remove(test_directory)
+    # NS: Disable target determination until it can be made more reliable
+    # if options.determine_from is not None and os.path.exists(options.determine_from):
+    #     slow_tests = get_slow_tests_based_on_S3(
+    #         TESTS, TARGET_DET_LIST, SLOW_TEST_THRESHOLD
+    #     )
+    #     print_to_stderr(
+    #         "Added the following tests to target_det tests as calculated based on S3:"
+    #     )
+    #     print_to_stderr(slow_tests)
+    #     with open(options.determine_from, "r") as fh:
+    #         touched_files = [
+    #             os.path.normpath(name.strip())
+    #             for name in fh.read().split("\n")
+    #             if len(name.strip()) > 0
+    #         ]
+    #     # HACK: Ensure the 'test' paths can be traversed by Modulefinder
+    #     sys.path.append(test_directory)
+    #     selected_tests = [
+    #         test
+    #         for test in selected_tests
+    #         if should_run_test(
+    #             TARGET_DET_LIST + slow_tests, test, touched_files, options
+    #         )
+    #     ]
+    #     sys.path.remove(test_directory)
 
     if IS_IN_CI:
         selected_tests = get_reordered_tests(
