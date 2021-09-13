@@ -190,7 +190,8 @@ jobs:
           docker pull "${DOCKER_IMAGE}"
       - name: Build PyTorch
         run: |
-          docker run \
+          # detached container should get cleaned up by teardown_ec2_linux
+          container_name=$(docker run \
             -e BUILD_ENVIRONMENT \
             -e JOB_BASE_NAME \
             -e MAX_JOBS="$(nproc --ignore=2)" \
@@ -205,11 +206,13 @@ jobs:
             --security-opt seccomp=unconfined \
             --cap-add=SYS_PTRACE \
             --tty \
+            --detach \
             --user jenkins \
             -v "${GITHUB_WORKSPACE}:/var/lib/jenkins/workspace" \
             -w /var/lib/jenkins/workspace \
-            "${DOCKER_IMAGE}" \
-            sh -c 'sudo chown -R jenkins . && .jenkins/pytorch/build.sh'
+            "${DOCKER_IMAGE}"
+          )
+          docker exec -t "${container_name}" sh -c 'sudo chown -R jenkins . && .jenkins/pytorch/build.sh'
       - name: Parse ref
         id: parse-ref
         run: .github/scripts/parse_ref.py
@@ -246,6 +249,7 @@ jobs:
           # Prune all of the docker images
           docker system prune -af
       - name: Chown workspace
+        if: always()
         env:
           ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
         run: |
