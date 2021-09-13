@@ -198,7 +198,7 @@ struct cpu_scatter_gather_base_kernel {
     auto index_size = index.sizes();
     std::vector<int64_t> shape(src.dim());
 
-    for (auto i = 0; i < shape.size(); ++i) {
+    for (unsigned int i = 0; i < shape.size(); ++i) {
       shape[i] = std::min(src_size[i], index_size[i]);
     }
 
