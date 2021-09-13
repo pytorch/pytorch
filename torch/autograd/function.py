@@ -198,6 +198,10 @@ class BackwardCFunction(_C._FunctionBase, FunctionCtx, _HookMixin):
         user_fn = vjp_fn if vjp_fn is not Function.vjp else backward_fn
         return user_fn(self, *args)
 
+    def apply_jvp(self, *args):
+        # _forward_cls is defined by derived class
+        return self._forward_cls.jvp(self, *args)  # type: ignore[attr-defined]
+
 
 class FunctionMeta(type):
     """Function metaclass.
@@ -307,6 +311,26 @@ class Function(with_metaclass(FunctionMeta, _C._FunctionBase, FunctionCtx, _Hook
     # vjp and backward are alias of each other
     vjp = backward
 
+    @staticmethod
+    def jvp(ctx: Any, *grad_inputs: Any) -> Any:
+        r"""Defines a formula for differentiating the operation with forward mode
+        automatic differentiation.
+        This function is to be overridden by all subclasses.
+        It must accept a context :attr:`ctx` as the first argument, followed by
+        as many inputs as the :func:`forward` got (None will be passed in
+        for non tensor inputs of the forward function),
+        and it should return as many tensors as there were outputs to
+        :func:`forward`. Each argument is the gradient w.r.t the given input,
+        and each returned value should be the gradient w.r.t. the
+        corresponding output. If an output is not a Tensor or the function is not
+        differentiable with respect to that output, you can just pass None as a
+        gradient for that input.
+
+        You can use the :attr:`ctx` object to pass any value from the forward to this
+        functions.
+        """
+        raise NotImplementedError("You must implement the jvp function for custom "
+                                  "autograd.Function to use it with forward mode AD.")
 
 def once_differentiable(fn):
 

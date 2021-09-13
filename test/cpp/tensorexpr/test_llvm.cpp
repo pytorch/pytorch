@@ -149,6 +149,34 @@ TEST(LLVM, ByteToDoubleCastTest) {
   ASSERT_EQ(cg.value<double>(), 2);
 }
 
+TEST(LLVM, FloatToByteCastTest) {
+  auto a = FloatImm::make(254.0);
+  auto b = Cast::make(kByte, a);
+  LLVMExprEval cg(b);
+  ASSERT_EQ(cg.value<uint8_t>(), 254);
+}
+
+TEST(LLVM, FloatToCharCastTest) {
+  auto a = FloatImm::make(-2.0);
+  auto b = Cast::make(kChar, a);
+  LLVMExprEval cg(b);
+  ASSERT_EQ(cg.value<int8_t>(), -2);
+}
+
+TEST(LLVM, ByteToFloatCastTest) {
+  auto a = ByteImm::make(254);
+  auto b = Cast::make(kFloat, a);
+  LLVMExprEval cg(b);
+  ASSERT_EQ(cg.value<float>(), 254.0);
+}
+
+TEST(LLVM, CharToFloatCastTest) {
+  auto a = CharImm::make(-2);
+  auto b = Cast::make(kFloat, a);
+  LLVMExprEval cg(b);
+  ASSERT_EQ(cg.value<float>(), -2.0);
+}
+
 TEST(LLVM, BitCast) {
   constexpr int16_t ref16 = 1337;
   constexpr int32_t ref32 = 1337;
@@ -1501,42 +1529,54 @@ TEST(LLVM, RFactorVectorizedReduction) {
   ExpectAllNear(b_v, b_ref, 1e-5);
 }
 
-TEST(LLVM, SimpleParallel) {
-  for (int test_cfg = 0; test_cfg < 4; test_cfg++) {
-    // Compute a simple operation, and try all loop-axis combination to be
-    // parallel or sequential.
-    const int M = 4;
-    const int N = 6;
-    Tensor f = Compute(
-        "f", {{M, "m"}, {N, "n"}}, [](const VarHandle& m, const VarHandle& n) {
-          return cast<float>(m + n);
-        });
-    LoopNest loop_nest({f});
-    auto const& loops = loop_nest.getLoopStmtsFor(f);
-    ForPtr m = loops[0];
-    ForPtr n = loops[1];
-    if (test_cfg & 0x1) {
-      m->set_parallel();
-    }
-    if (test_cfg & 0x2) {
-      n->set_parallel();
-    }
-    loop_nest.prepareForCodegen();
-    StmtPtr stmt = loop_nest.root_stmt();
-    LLVMCodeGen cg(stmt, {f});
-
-    PaddedBuffer<float> f_v(M, N, "f_v");
-    std::vector<void*> args({f_v.data()});
-    int value = cg.value<int>(args);
-    ASSERT_EQ(value, 0);
-    PaddedBuffer<float> f_ref(M, N, "f_ref");
-    for (int m = 0; m < M; m++) {
-      for (int n = 0; n < N; n++) {
-        f_ref(m, n) = m + n;
-      }
-    }
-    ExpectAllNear(f_v, f_ref, 1e-5);
+template <bool outer, bool inner>
+static void testSimpleParallel() {
+  // Compute a simple operation, and try all loop-axis combination to be
+  // parallel or sequential.
+  const int M = 4;
+  const int N = 6;
+  Tensor f = Compute(
+      "f", {{M, "m"}, {N, "n"}}, [](const VarHandle& m, const VarHandle& n) {
+        return cast<float>(m + n);
+      });
+  LoopNest loop_nest({f});
+  auto const& loops = loop_nest.getLoopStmtsFor(f);
+  ForPtr m = loops[0];
+  ForPtr n = loops[1];
+  if (outer) {
+    m->set_parallel();
   }
+  if (inner) {
+    n->set_parallel();
+  }
+  loop_nest.prepareForCodegen();
+  StmtPtr stmt = loop_nest.root_stmt();
+  LLVMCodeGen cg(stmt, {f});
+
+  PaddedBuffer<float> f_v(M, N, "f_v");
+  std::vector<void*> args({f_v.data()});
+  int value = cg.value<int>(args);
+  ASSERT_EQ(value, 0);
+  PaddedBuffer<float> f_ref(M, N, "f_ref");
+  for (int m = 0; m < M; m++) {
+    for (int n = 0; n < N; n++) {
+      f_ref(m, n) = m + n;
+    }
+  }
+  ExpectAllNear(f_v, f_ref, 1e-5);
+}
+
+TEST(LLVM, SimpleParallelSS) {
+  testSimpleParallel<false, false>();
+}
+TEST(LLVM, SimpleParallelSP) {
+  testSimpleParallel<false, true>();
+}
+TEST(LLVM, SimpleParallelPS) {
+  testSimpleParallel<true, false>();
+}
+TEST(LLVM, SimpleParallelPP) {
+  testSimpleParallel<true, true>();
 }
 
 TEST(LLVM, CompositeParallel) {
