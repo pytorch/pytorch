@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.quantized as nnq
 
 import torch.quantization
-import torch.quantization._numeric_suite as ns
+import torch.ao.ns._numeric_suite as ns
 
 _supported_modules = {nn.Linear, nn.Conv2d}
 _supported_modules_quantized = {nnq.Linear, nnq.Conv2d}

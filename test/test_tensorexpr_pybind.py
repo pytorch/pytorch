@@ -166,7 +166,7 @@ graph(%a.1 : Float(requires_grad=0, device=cpu),
 
         graph_str = """
 graph(%a : Tensor, %b : Tensor):
-  %c : Float(4, 4, strides=[4, 1], requires_grad=0, device=cpu) = aten::mul(%a, %b)
+  %c : Tensor = aten::mul(%a, %b)
   return (%c)
         """
         graph = torch._C.parse_ir(graph_str)
@@ -184,10 +184,7 @@ graph(%a : Tensor, %b : Tensor):
         # Inject shape info and try compiling again
         example_inputs = [torch.rand(4, 4), torch.rand(4, 4)]
         torch._C._te.annotate_input_shapes(graph, example_inputs)
-
-        # TODO: once we have shape propagation as well we should erase type
-        # info for %c from the input IR and run shape propagation here - it
-        # should be able to reconstruct that info
+        torch._C._jit_pass_propagate_shapes_on_graph(graph)
 
         # Now compilation should pass
         kernel = torch._C._te.TensorExprKernel(graph)
@@ -197,7 +194,6 @@ graph(%a : Tensor, %b : Tensor):
         np.testing.assert_allclose(res.numpy(), correct.numpy(), atol=1e-5)
 
     @unittest.skipIf(not LLVM_ENABLED, "LLVM backend not enabled")
-    @unittest.skip("Does not work until shape propagation is implemented")
     def test_kernel_shape_prop_module(self):
         class TestModule(torch.nn.Module):
             def forward(self, x, y):
@@ -228,14 +224,11 @@ graph(%a : Tensor, %b : Tensor):
         assert exception_thrown
 
         # Remove 'self' argument and try annotating shapes one more time
-        graph = torch._C._te.remove_unused_self_argument(graph)
+        torch._C._te.remove_unused_self_argument(graph)
 
         # Inject shape info and try compiling again
         torch._C._te.annotate_input_shapes(graph, example_inputs)
-
-        # TODO: once we have shape propagation as well we should erase type
-        # info for %c from the input IR and run shape propagation here - it
-        # should be able to reconstruct that info
+        torch._C._jit_pass_propagate_shapes_on_graph(graph)
 
         # Now compilation should pass
         kernel = torch._C._te.TensorExprKernel(graph)
