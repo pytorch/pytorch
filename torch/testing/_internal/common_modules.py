@@ -180,10 +180,10 @@ def module_inputs_torch_nn_NLLLoss(module_info, device, dtype, requires_grad, **
 
     cases: List[Tuple[str, dict]] = [
         ('', {}),
-        ('ignore_index', {'ignore_index': 2}),
-        ('weights', {'weight': make_weight(10).abs()}),
-        ('weights_ignore_index', {'weight': make_weight(10).abs(), 'ignore_index': 2}),
-        ('weights_ignore_index_neg', {'weight': make_weight(10).abs(), 'ignore_index': -1})
+        # ('ignore_index', {'ignore_index': 2}),
+        # ('weights', {'weight': make_weight(10).abs()}),
+        # ('weights_ignore_index', {'weight': make_weight(10).abs(), 'ignore_index': 2}),
+        # ('weights_ignore_index_neg', {'weight': make_weight(10).abs(), 'ignore_index': -1})
     ]
     module_inputs = []
     for desc, constructor_kwargs in cases:

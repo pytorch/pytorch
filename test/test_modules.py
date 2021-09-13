@@ -168,6 +168,8 @@ class TestModule(TestCase):
         module_inputs_cpu = module_info.module_inputs_func(module_info, device="cpu", dtype=dtype,
                                                            requires_grad=True)
 
+        # gradients needs to be retained to check for grad. This is useful when
+        # non-leafs are present in the graph.
         def _retain_grad(item):
             if isinstance(item, dict):
                 for i in item.values():
@@ -175,12 +177,8 @@ class TestModule(TestCase):
             elif isinstance(item, (tuple, list)):
                 for i in item:
                     _retain_grad(i)
-            else:
-                if (not isinstance(item, torch.Tensor)
-                        or item.is_leaf
-                        or not item.requires_grad):
-                    return
-                item.retain_grad()
+            elif isinstance(item, torch.Tensor) and item.requires_grad:
+                    item.retain_grad()
 
         def _to_device(obj):
             if isinstance(obj, torch.Tensor):
@@ -214,10 +212,8 @@ class TestModule(TestCase):
                 gpu_p.data.copy_(cpu_p)
 
             # === Compare forward output between cpu and gpu ===
-            with freeze_rng_state():
-                cpu_output = cpu_module(*cpu_forward_args, **cpu_forward_kwargs)
-            with freeze_rng_state():
-                gpu_output = gpu_module(*gpu_forward_args, **gpu_forward_kwargs)
+            cpu_output = cpu_module(*cpu_forward_args, **cpu_forward_kwargs)
+            gpu_output = gpu_module(*gpu_forward_args, **gpu_forward_kwargs)
 
             self.assertEqual(cpu_output, gpu_output)
 
