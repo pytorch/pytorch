@@ -74,6 +74,13 @@ static inline bool is_contiguous(const Tensor& t) {
   return t.is_contiguous() || t.is_contiguous(at::MemoryFormat::ChannelsLast);
 }
 
+// For some ambiguous cases, it is possible a channels last contiguous Tensor has
+//   `suggest_memory_format` of Contiguous.
+// See https://github.com/pytorch/pytorch/issues/63224 for details.
+static inline MemoryFormat suggest_memory_format_contig(const Tensor& t) {
+  return t.is_contiguous() ? at::MemoryFormat::Contiguous : at::MemoryFormat::ChannelsLast;
+}
+
 template<typename scalar_t>
 std::tuple<Tensor,Tensor,Tensor> batch_norm_cpu_transform_input_template(
     const Tensor& input, const Tensor& weight, const Tensor& bias,
@@ -87,10 +94,9 @@ std::tuple<Tensor,Tensor,Tensor> batch_norm_cpu_transform_input_template(
       && running_mean.is_contiguous()
       && running_var.is_contiguous();
 
-  Tensor output = at::empty_like(input, input.suggest_memory_format());
-
   // inference contiguous path
   if (all_contiguous) {
+    Tensor output = at::empty_like(input, suggest_memory_format_contig(input));
     batch_norm_cpu_stub(kCPU, output, input, weight, bias,
         save_mean, save_invstd, running_mean, running_var, train, eps);
     return std::make_tuple(output, save_mean, save_invstd);
@@ -120,6 +126,7 @@ std::tuple<Tensor,Tensor,Tensor> batch_norm_cpu_transform_input_template(
   auto b = bias.defined() ? as_nd(bias) :
       at::detail::scalar_tensor_static(0, input.scalar_type(), kCPU);
 
+  Tensor output = at::empty_like(input, input.suggest_memory_format());
   auto iter = TensorIteratorConfig()
     .add_output(output)
     .add_input(input)
@@ -250,6 +257,9 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cpu_template(
       && input.suggest_memory_format() == grad_out_.suggest_memory_format();
 
   if (all_contiguous) {
+    if (grad_input_mask[0]) {
+      grad_input = at::empty_like(input, suggest_memory_format_contig(input));
+    }
     batch_norm_cpu_backward_stub(kCPU, grad_input, grad_weight, grad_bias,
         grad_out_, input, weight, running_mean, running_var, save_mean, save_invstd, train, eps);
     return std::make_tuple(grad_input, grad_weight, grad_bias);

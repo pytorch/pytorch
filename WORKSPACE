@@ -1,7 +1,7 @@
 workspace(name = "pytorch")
 
 load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
-load("//tools/rules:workspace.bzl", "new_patched_local_repository")
+load("//tools/rules:workspace.bzl", "new_patched_local_repository", "new_empty_repository")
 
 http_archive(
     name = "bazel_skylib",
@@ -170,3 +170,14 @@ protobuf_deps()
 load("@rules_python//python:repositories.bzl", "py_repositories")
 
 py_repositories()
+
+local_repository(
+    name = "local_config_cuda",
+    path = "third_party/tensorflow_cuda_bazel_build",
+)
+
+# Wrapper to expose local_config_cuda in an agnostic way
+new_empty_repository(
+    name = "cuda",
+    build_file = "//third_party:cuda.BUILD",
+)

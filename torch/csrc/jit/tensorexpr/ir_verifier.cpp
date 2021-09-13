@@ -119,7 +119,19 @@ void IRVerifier::visit(IfThenElsePtr v) {
 }
 
 void IRVerifier::visit(IntrinsicsPtr v) {
+  if (v->op_type() == kIsNan) {
+    if (v->dtype().scalar_type() != c10::kInt) {
+      throw malformed_ir("bad dtype in intrinsic arg");
+    }
+    IRVisitor::visit(v);
+    return;
+  }
   // TODO: add a check for OpArgCount and op_type
+  for (auto const& param : v->params()) {
+    if (param->dtype() != v->dtype()) {
+      throw malformed_ir("bad dtype in intrinsic arg");
+    }
+  }
   IRVisitor::visit(v);
 }
 
