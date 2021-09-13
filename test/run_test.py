@@ -32,7 +32,8 @@ try:
     from tools.testing.test_selections import (
         export_S3_test_times,
         get_shard_based_on_S3,
-        get_slow_tests_based_on_S3,
+        # NS: Disable target determination
+        # get_slow_tests_based_on_S3,
         get_specified_test_cases,
         get_reordered_tests,
         get_test_case_configs,
