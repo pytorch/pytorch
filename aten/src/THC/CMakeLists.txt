@@ -57,7 +57,6 @@ install(FILES
           THCGenerateComplexDoubleType.h
           THCIntegerDivider.cuh
           THCNumerics.cuh
-          THCTensorInfo.cuh
           THCThrustAllocator.cuh
           # See Note [TH abstraction violation]
           THCTensor.hpp
