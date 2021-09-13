@@ -11527,7 +11527,8 @@ dedent """
             out = torch.jit.annotate(int, [x for x in [1, 2, 3]])  # noqa: C416
             return out
 
-        with self.assertRaisesRegex(Exception, "Expected list type annotation"):
+        with self.assertRaisesRegex(Exception, "Expected an annotation"
+                                    " of type List"):
             torch.jit.script(bad_type_annotation)
 
     def test_list_comprehension_variable_write(self):
