@@ -32,7 +32,7 @@ __global__ void AffineChannelNCHWCUDAKernel<float>(
   const int w = blockIdx.x % M * CAFFE_CUDA_NUM_THREADS + threadIdx.x;
   if (w < HxW) {
     const int index = nc * HxW + w;
-#if __CUDA_ARCH__ >= 350 || defined(__HIP_PLATFORM_HCC__)
+#if __CUDA_ARCH__ >= 350 || defined(USE_ROCM)
     Y[index] = fmaf(__ldg(X + index), __ldg(scale + c), __ldg(bias + c));
 #else
     Y[index] = fmaf(X[index], scale[c], bias[c]);
@@ -58,7 +58,7 @@ __global__ void AffineChannelNHWCCUDAKernel<float>(
   const int c = blockIdx.y * CAFFE_CUDA_NUM_THREADS + threadIdx.x;
   if (c < C) {
     const int index = blockIdx.x * C + c;
-#if __CUDA_ARCH__ >= 350 || defined(__HIP_PLATFORM_HCC__)
+#if __CUDA_ARCH__ >= 350 || defined(USE_ROCM)
     Y[index] = fmaf(__ldg(X + index), __ldg(scale + c), __ldg(bias + c));
 #else
     Y[index] = fmaf(X[index], scale[c], bias[c]);

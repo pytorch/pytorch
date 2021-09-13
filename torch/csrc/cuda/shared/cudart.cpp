@@ -1,7 +1,7 @@
 #include <torch/csrc/utils/pybind.h>
 #include <cuda.h>
 #include <cuda_runtime.h>
-#ifndef __HIP_PLATFORM_HCC__
+#if !defined(USE_ROCM)
 #include <cuda_profiler_api.h>
 #else
 #include <hip/hip_runtime_api.h>
@@ -18,7 +18,7 @@ void initCudartBindings(PyObject* module) {
   // By splitting the names of these objects into two literals we prevent the
   // HIP rewrite rules from changing these names when building with HIP.
 
-#ifndef __HIP_PLATFORM_HCC__
+#if !defined(USE_ROCM)
   py::enum_<cudaOutputMode_t>(cudart, "cuda" "OutputMode")
       .value("KeyValuePair", cudaKeyValuePair)
       .value("CSV", cudaCSV);
@@ -42,7 +42,7 @@ void initCudartBindings(PyObject* module) {
   cudart.def("cuda" "StreamDestroy", [](uintptr_t ptr) -> cudaError_t {
     return cudaStreamDestroy((cudaStream_t)ptr);
   });
-#ifndef __HIP_PLATFORM_HCC__
+#if !defined(USE_ROCM)
   cudart.def("cuda" "ProfilerInitialize", cudaProfilerInitialize);
 #endif
   cudart.def("cuda" "MemGetInfo", [](int device) -> std::pair<size_t, size_t> {

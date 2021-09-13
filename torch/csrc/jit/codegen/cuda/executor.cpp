@@ -27,7 +27,7 @@ int FusionExecutor::fusion_id_counter_ = 0;
 std::string FusionExecutor::getStructuredCode(const std::string& kernel) {
   // generating cuda code;
   std::string code = "";
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
 #if ROCM_VERSION < 40200
   code += std::string("#include <hip/hip_runtime.h>\n") +
       std::string("#include <hip/hip_fp16.h>\n");

@@ -41,7 +41,7 @@ __device__ void applyOp3(
 // Assume both dense and values are contiguous.
 // Currently only used in add_out_dense_sparse_cuda: add(dense, sparse, scalar).
 template <typename Op, typename IndexType, typename Real>
-#if __CUDA_ARCH__ >= 350 || defined __HIP_PLATFORM_HCC__
+#if __CUDA_ARCH__ >= 350 || defined(USE_ROCM)
 C10_LAUNCH_BOUNDS_2(cuda::getApplyBlockSize(), cuda::getApplyBlocksPerSM())
 #endif
 __global__ void sparseElementwiseKernel(
@@ -71,7 +71,7 @@ __global__ void sparseElementwiseKernel(
 // Assume dense is contiguous.
 // Currently only used in add_out_dense_sparse_cuda: add(dense, sparse, scalar).
 template <typename Op, typename IndexType, typename Real>
-#if __CUDA_ARCH__ >= 350 || defined __HIP_PLATFORM_HCC__
+#if __CUDA_ARCH__ >= 350 || defined(USE_ROCM)
 C10_LAUNCH_BOUNDS_2(cuda::getApplyBlockSize(), cuda::getApplyBlocksPerSM())
 #endif
 __global__ void sparseElementwiseKernelScalar(
@@ -95,7 +95,7 @@ __global__ void sparseElementwiseKernelScalar(
 }
 
 template <typename OpBoth, typename OpLeft, typename OpRight, typename IndexType, typename Real>
-#if __CUDA_ARCH__ >= 350 || defined __HIP_PLATFORM_HCC__
+#if __CUDA_ARCH__ >= 350 || defined(USE_ROCM)
 C10_LAUNCH_BOUNDS_2(cuda::getApplyBlockSize(), cuda::getApplyBlocksPerSM())
 #endif
 __global__ void valueSparseUnionKernel(
@@ -142,7 +142,7 @@ __global__ void valueSparseUnionKernel(
 
 // TODO find a way to parallelize this...
 template <typename IndexType, typename Real>
-#if __CUDA_ARCH__ >= 350 || defined __HIP_PLATFORM_HCC__
+#if __CUDA_ARCH__ >= 350 || defined(USE_ROCM)
 C10_LAUNCH_BOUNDS_2(cuda::getApplyBlockSize(), cuda::getApplyBlocksPerSM())
 #endif
 __global__ void indexSparseUnionKernel(
@@ -192,7 +192,7 @@ __global__ void indexSparseUnionKernel(
 }
 
 template <typename Op, typename IndexType, typename Real>
-#if __CUDA_ARCH__ >= 350 || defined __HIP_PLATFORM_HCC__
+#if __CUDA_ARCH__ >= 350 || defined(USE_ROCM)
 C10_LAUNCH_BOUNDS_2(cuda::getApplyBlockSize(), cuda::getApplyBlocksPerSM())
 #endif
 __global__ void valueSparseIntersectionKernel(
@@ -231,7 +231,7 @@ __global__ void valueSparseIntersectionKernel(
 
 // TODO find a way to parallelize this...
 template <typename IndexType, typename Real>
-#if __CUDA_ARCH__ >= 350 || defined __HIP_PLATFORM_HCC__
+#if __CUDA_ARCH__ >= 350 || defined(USE_ROCM)
 C10_LAUNCH_BOUNDS_2(cuda::getApplyBlockSize(), cuda::getApplyBlocksPerSM())
 #endif
 __global__ void indexSparseIntersectionKernel(

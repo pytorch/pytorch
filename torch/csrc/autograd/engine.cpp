@@ -1252,7 +1252,7 @@ void GraphTask::stash_current_streams() {
   caller_current_streams_.resize(num_gpus);
   if (num_gpus > 0) {
     for (c10::DeviceIndex idx = 0; idx < num_gpus;  idx++) {
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
       // If the build targets ROCM, stash streams for all visible devices unconditionally, to work around
       // https://github.com/pytorch/pytorch/issues/59750.
       // TODO: Remove ROCM-specific behavior when https://github.com/pytorch/pytorch/issues/59750 is fixed.

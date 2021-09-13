@@ -29,7 +29,7 @@ namespace at { namespace cuda {
 // and edit ATen/cuda/detail/LazyNVRTC.cpp accordingly (e.g., via one of the stub
 // macros).
 
-#ifndef __HIP_PLATFORM_HCC__
+#if !defined(USE_ROCM)
 
 #define AT_FORALL_NVRTC_BASE(_)                  \
   _(nvrtcVersion)                                \
