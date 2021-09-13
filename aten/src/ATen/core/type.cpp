@@ -1323,9 +1323,14 @@ bool TupleType::isSubtypeOfExt(const TypePtr& rhs_, std::ostream* why_not) const
 bool ListType::isSubtypeOfExt(const TypePtr& rhs_, std::ostream* why_not) const {
   if (Type::isSubtypeOfExt(rhs_, why_not)) {
     return true;
-  }
-  if (rhs_->kind() == AnyListType::Kind) {
+  } else if (rhs_->kind() == AnyListType::Kind) {
     return true;
+  } else if (rhs_->kind() == ListType::Kind) {
+    const auto lhs_inner_type = this->getElementType();
+    const auto rhs_inner_type = rhs_->expect<ListType>()->getElementType();
+    if (rhs_inner_type->isUnionType() || rhs_inner_type->kind() == ListType::Kind) {
+      return lhs_inner_type->isSubtypeOfExt(rhs_inner_type, why_not);
+    }
   }
   return false;
 }

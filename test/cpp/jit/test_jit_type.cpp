@@ -60,5 +60,15 @@ TEST(JitTypeTest, UnifyTypes) {
   TORCH_INTERNAL_ASSERT(!dict_out);
 }
 
+// TEST(JitTypeTest, ListTypeVariance) {
+//  auto list_of_optional = ListType::ofOptionalTensors();
+//  auto list_of_tensor = ListType::ofTensors();
+//  auto list_of_none = ListType::create(NoneType::get());
+
+//  TORCH_INTERNAL_ASSERT(list_of_tensor->isSubtypeOf(list_of_optional));
+//  TORCH_INTERNAL_ASSERT(list_of_none->isSubtypeOf(list_of_optional));
+//  TORCH_INTERNAL_ASSERT(!list_of_optional->isSubtypeOf(list_of_none));
+//}
+
 } // namespace jit
 } // namespace torch
