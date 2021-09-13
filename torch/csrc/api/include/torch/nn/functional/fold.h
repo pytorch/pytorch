@@ -14,7 +14,7 @@ inline Tensor fold(const Tensor& input,
                    ExpandingArray<2> dilation,
                    ExpandingArray<2> padding,
                    ExpandingArray<2> stride) {
-  if (input.dim() == 3 or input.dim() == 2) {
+  if (input.dim() == 3 || input.dim() == 2) {
     return torch::col2im(
         input,
         output_size,
