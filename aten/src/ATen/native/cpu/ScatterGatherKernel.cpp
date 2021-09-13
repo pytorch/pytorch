@@ -204,13 +204,14 @@ struct cpu_scatter_gather_base_kernel {
 
     auto src_restrided = src.reshape(shape);
     auto index_restrided = index.reshape_as(src_restrided);
+    auto output = self.reshape_as(src_restrided);
 
     auto iter = TensorIteratorConfig()
       .check_all_same_dtype(false)
       .resize_outputs(false)
       // NOLINTNEXTLINE(bugprone-argument-comment)
       .declare_static_shape(index_restrided.sizes(), /*squash_dim=*/dim)
-      .add_output(self.reshape_as(src_restrided))
+      .add_output(output)
       .add_input(src_restrided)
       .add_input(index_restrided)
       .build();
