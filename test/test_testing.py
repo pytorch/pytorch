@@ -27,6 +27,8 @@ class TestTesting(TestCase):
     @dtypes(*(get_all_dtypes(include_half=True, include_bfloat16=False,
                              include_bool=True, include_complex=True)))
     def test_assertEqual_numpy(self, device, dtype):
+        # fail purposefully
+        self.assertEqual(1, 2)
         S = 10
         test_sizes = [
             (),
