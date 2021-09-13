@@ -209,10 +209,13 @@ def add_rref_to_value(rref, value):
 def run_nested_pickle(pickle_cls_instance, tensor):
     return pickle_cls_instance.t + tensor
 
-def build_sparse_tensor():
+def build_sparse_tensor(coalesce=False):
     i = [[0, 1, 1], [2, 0, 2]]
     v = [3, 4, 5]
-    return torch.sparse_coo_tensor(i, v, (2, 3))
+    tensor = torch.sparse_coo_tensor(i, v, (2, 3))
+    if coalesce:
+        tensor = tensor.coalesce()
+    return tensor
 
 def build_complex_tensors():
     a = torch.ones(3, 3)
@@ -237,6 +240,12 @@ def my_function(a, b, c):
 
 def my_tensor_function(a, b):
     return a + b
+
+def my_container_sum(a):
+    result = a[0]
+    for tensor in a[1:]:
+        result += tensor
+    return result
 
 
 def my_sleep_func(seconds=1):
@@ -275,6 +284,14 @@ def nested_rpc(dst):
     return rpc.rpc_sync(dst, torch.add, args=(torch.ones(2, 2), 1))
 
 
+def nested_rpc_sparse(dst):
+    return rpc.rpc_sync(
+        dst,
+        torch.add,
+        args=(build_sparse_tensor(), build_sparse_tensor())
+    )
+
+
 def multi_layer_nested_async_rpc(dst, world_size, ttl):
     # this method returns immediately without blocking the callee, but will
     # generate additional requests.
@@ -296,8 +313,27 @@ def nested_rref(dst):
     )
 
 
+def nested_rref_sparse(dst):
+    return (
+        rpc.remote(
+            dst,
+            torch.add,
+            args=(build_sparse_tensor(), build_sparse_tensor())
+        ),
+        rpc.remote(
+            dst,
+            torch.add,
+            args=(build_sparse_tensor(), build_sparse_tensor())
+        ),
+    )
+
+
 def nested_remote(dst):
     rref = rpc.remote(dst, torch.add, args=(torch.ones(2, 2), 3))
+    return rref.to_here()
+
+def nested_remote_sparse(dst):
+    rref = rpc.remote(dst, torch.add, args=(build_sparse_tensor(), build_sparse_tensor()))
     return rref.to_here()
 
 
@@ -327,6 +363,12 @@ def heavy_rpc(tensor):
         tensor /= i + 1
     return 0
 
+
+def heavy_rpc_sparse(tensor):
+    for i in range(1, 100):
+        tensor *= i
+        tensor = tensor / (i + 1)
+    return 0
 
 @torch.jit.script
 def heavy_rpc_torchscript(tensor):
@@ -600,6 +642,57 @@ class FooBackendOptions(rpc.RpcBackendOptions):
 load_tests = load_tests
 
 
+class MyEmbeddingBagModel(torch.nn.Module):
+    def __init__(self, sparse):
+        super().__init__()
+        self.eb = torch.nn.EmbeddingBag(
+            10,
+            10,
+            sparse=sparse
+        )
+
+    def forward(self, x):
+        return self.eb(x)
+
+
+class MyParameterServer:
+    def __init__(self, trainers):
+        self.lock = Lock()
+        self.trainers = trainers
+        self.iteration = 0
+        self.updates = 0
+        self.futures = []
+        self.total = None
+        self.gradient = None
+
+    @staticmethod
+    def get_gradient(rref):
+        return rref.local_value().gradient
+
+    @staticmethod
+    @rpc.functions.async_execution
+    def average(rref, riteration, tensor):
+        self = rref.local_value()
+        fut = torch.futures.Future()
+        with self.lock:
+            if riteration > self.iteration:
+                self.iteration = riteration
+                self.updates = 0
+                self.futures.clear()
+            self.futures.append(fut)
+            if self.total is None:
+                self.total = tensor
+            else:
+                self.total += tensor
+            self.updates += 1
+            if self.trainers == self.updates:
+                self.gradient = self.total / float(self.trainers)
+                for fut in self.futures:
+                    result = self.total / float(self.trainers)
+                    fut.set_result(result)
+        return fut
+
+
 class RpcTest(RpcAgentTestFixture):
     @dist_init
     def test_worker_id(self):
@@ -641,9 +734,25 @@ class RpcTest(RpcAgentTestFixture):
     def test_send_to_rank(self):
         dst_rank = (self.rank + 1) % self.world_size
 
+        # Test dense tensor
         for exec_mode in [RPCExecMode.SYNC, RPCExecMode.ASYNC, RPCExecMode.REMOTE]:
             ret = self._run_func_in_mode(dst_rank, torch.add, exec_mode, args=(torch.ones(2, 2), 1))
             self.assertEqual(ret, torch.ones(2, 2) + 1)
+
+        # Test sparse tensor
+        for exec_mode in [RPCExecMode.SYNC, RPCExecMode.ASYNC, RPCExecMode.REMOTE]:
+            x = build_sparse_tensor()
+            y = build_sparse_tensor()
+            expected_tensor = (x + y)
+            ret = self._run_func_in_mode(dst_rank, torch.add, exec_mode, args=(x, y))
+            self.assertEqual(expected_tensor, ret)
+
+        for exec_mode in [RPCExecMode.SYNC, RPCExecMode.ASYNC, RPCExecMode.REMOTE]:
+            x = build_sparse_tensor(coalesce=True)
+            y = build_sparse_tensor(coalesce=True)
+            expected_tensor = (x + y)
+            ret = self._run_func_in_mode(dst_rank, torch.add, exec_mode, args=(x, y))
+            self.assertEqual(expected_tensor, ret)
 
         # Test invalid ranks
         for exec_mode in [RPCExecMode.SYNC, RPCExecMode.ASYNC, RPCExecMode.REMOTE]:
@@ -662,41 +771,120 @@ class RpcTest(RpcAgentTestFixture):
             with self.assertRaises(ValueError):
                 self._run_func_in_mode(dst_rank - 0.5, torch.add, exec_mode, args=(torch.ones(2, 2), 1))
 
+    def _self_py_udf_remote(self, worker_info, x, y, z):
+        rref = rpc.remote(worker_info, my_function, args=(x, y, z))
+        self.assertEqual(rref.to_here(), x + y + z)
+
     @dist_init
     def test_self_py_udf_remote(self):
-        self_worker_info = rpc.get_worker_info()
-        rref = rpc.remote(self_worker_info, my_function, args=(torch.ones(2, 2), 1, 3))
-        self.assertEqual(rref.to_here(), torch.ones(2, 2) + 1 + 3)
+        self._self_py_udf_remote(
+            rpc.get_worker_info(),
+            torch.ones(2, 2),
+            1,
+            3
+        )
 
-    def _test_self_remote_rref_as_rpc_arg(self, dst):
+    @dist_init
+    def test_self_py_udf_remote_sparse(self):
+        self._self_py_udf_remote(
+            rpc.get_worker_info(),
+            build_sparse_tensor(),
+            build_sparse_tensor(),
+            build_sparse_tensor()
+        )
+
+
+    def _self_remote_rref_as_rpc_arg(self, dst, x, y, z):
         self_worker_info = rpc.get_worker_info()
-        rref = rpc.remote(self_worker_info, my_function, args=(torch.ones(2, 2), 1, 3))
-        fut = rpc.rpc_async(dst, add_rref_to_value, args=(rref, torch.ones(2, 2)))
-        ret = rpc.rpc_sync(dst, add_rref_to_value, args=(rref, torch.ones(2, 2) + 1))
-        self.assertEqual(ret, torch.ones(2, 2) + 1 + 3 + torch.ones(2, 2) + 1)
-        self.assertEqual(fut.wait(), torch.ones(2, 2) + 1 + 3 + torch.ones(2, 2))
+        rref = rpc.remote(self_worker_info, my_function, args=(x, y, z))
+        fut = rpc.rpc_async(dst, add_rref_to_value, args=(rref, x))
+        ret = rpc.rpc_sync(dst, add_rref_to_value, args=(rref, x + y))
+        self.assertEqual(ret, x + y + z + x + y)
+        self.assertEqual(fut.wait(), x + y + z + x)
 
     @dist_init
     def test_self_remote_rref_as_rpc_arg(self):
         dst = worker_name((self.rank + 1) % self.world_size)
-        self._test_self_remote_rref_as_rpc_arg(dst)
+        self._self_remote_rref_as_rpc_arg(
+            dst,
+            torch.ones(2, 2),
+            1,
+            3
+        )
+
+    @dist_init
+    def test_self_remote_rref_as_rpc_arg_sparse(self):
+        dst = worker_name((self.rank + 1) % self.world_size)
+        self._self_remote_rref_as_rpc_arg(
+            dst,
+            build_sparse_tensor(),
+            build_sparse_tensor(),
+            build_sparse_tensor()
+        )
 
     @dist_init
     def test_self_remote_rref_as_self_rpc_arg(self):
-        self._test_self_remote_rref_as_rpc_arg(rpc.get_worker_info())
+        self._self_remote_rref_as_rpc_arg(
+            rpc.get_worker_info(),
+            torch.ones(2, 2),
+            1,
+            3
+        )
 
-    def _test_self_remote_rref_as_remote_arg(self, dst):
+    @dist_init
+    def test_self_remote_rref_as_self_rpc_arg_sparse(self):
+        self._self_remote_rref_as_rpc_arg(
+            rpc.get_worker_info(),
+            build_sparse_tensor(),
+            build_sparse_tensor(),
+            build_sparse_tensor()
+        )
+
+    def _self_remote_rref_as_remote_arg(self, dst, x, y, z):
         self_worker_info = rpc.get_worker_info()
-        rref = rpc.remote(self_worker_info, my_function, args=(torch.ones(2, 2), 1, 3))
-        ret_rref = rpc.remote(dst, add_rref_to_value, args=(rref, torch.ones(2, 2)))
+        rref = rpc.remote(self_worker_info, my_function, args=(x, y, z))
+        ret_rref = rpc.remote(dst, add_rref_to_value, args=(rref, x))
         self.assertEqual(
-            ret_rref.to_here(), torch.ones(2, 2) + 1 + 3 + torch.ones(2, 2)
+            ret_rref.to_here(), x + y + z + x
         )
 
     @dist_init
     def test_self_remote_rref_as_remote_arg(self):
         dst = worker_name((self.rank + 1) % self.world_size)
-        self._test_self_remote_rref_as_remote_arg(dst)
+        self._self_remote_rref_as_remote_arg(
+            dst,
+            torch.ones(2, 2),
+            1,
+            3
+        )
+
+    @dist_init
+    def test_self_remote_rref_as_remote_arg_sparse(self):
+        dst = worker_name((self.rank + 1) % self.world_size)
+        self._self_remote_rref_as_remote_arg(
+            dst,
+            build_sparse_tensor(),
+            build_sparse_tensor(),
+            build_sparse_tensor()
+        )
+
+    @dist_init
+    def test_self_remote_rref_as_self_remote_arg(self):
+        self._self_remote_rref_as_remote_arg(
+            rpc.get_worker_info(),
+            torch.ones(2, 2),
+            1,
+            3
+        )
+
+    @dist_init
+    def test_self_remote_rref_as_self_remote_arg_sparse(self):
+        self._self_remote_rref_as_remote_arg(
+            rpc.get_worker_info(),
+            build_sparse_tensor(),
+            build_sparse_tensor(),
+            build_sparse_tensor()
+        )
 
     @dist_init
     def test_rref_proxy_non_exist(self):
@@ -816,10 +1004,6 @@ class RpcTest(RpcAgentTestFixture):
     def test_rref_proxy_class_self(self):
         self._test_rref_proxy_class(rpc.get_worker_info())
 
-    @dist_init
-    def test_self_remote_rref_as_self_remote_arg(self):
-        self._test_self_remote_rref_as_remote_arg(rpc.get_worker_info())
-
     @mock.patch.object(torch.distributed.autograd, "_init")
     @mock.patch.object(torch.distributed.rpc.api, "_set_and_start_rpc_agent")
     @dist_init(setup_rpc=False)
@@ -911,7 +1095,7 @@ class RpcTest(RpcAgentTestFixture):
             )
         rpc.shutdown()
 
-    def test_world_size_one(self):
+    def _world_size_one(self, a, b):
         if self.rank == 0:
             rpc.init_rpc(
                 name="me",
@@ -921,31 +1105,50 @@ class RpcTest(RpcAgentTestFixture):
                 rpc_backend_options=self.rpc_backend_options,
             )
 
-            expect = torch.ones(2, 2) * 2
-            result = rpc.rpc_sync(
-                "me",
-                my_tensor_function,
-                args=(torch.ones(2, 2), torch.ones(2, 2))
-            )
-            self.assertEqual(expect, result)
+            def _rpc_sync(x, y):
+                expect = x * 2
+                result = rpc.rpc_sync(
+                    "me",
+                    my_tensor_function,
+                    args=(x, y)
+                )
+                self.assertEqual(expect, result)
 
-            expect = torch.ones(3, 3) * 2
-            result = rpc.rpc_async(
-                "me",
-                my_tensor_function,
-                args=(torch.ones(3, 3), torch.ones(3, 3))
-            ).wait()
-            self.assertEqual(expect, result)
+            def _rpc_async(x, y):
+                expect = x * 2
+                result = rpc.rpc_async(
+                    "me",
+                    my_tensor_function,
+                    args=(x, y)
+                ).wait()
+                self.assertEqual(expect, result)
 
-            expect = torch.ones(4, 4) * 2
-            result = rpc.remote(
-                "me",
-                my_tensor_function,
-                args=(torch.ones(4, 4), torch.ones(4, 4))
-            ).to_here()
-            self.assertEqual(expect, result)
+            def _remote(x, y):
+                expect = x * 2
+                result = rpc.remote(
+                    "me",
+                    my_tensor_function,
+                    args=(x, y)
+                ).to_here()
+                self.assertEqual(expect, result)
+
+            _rpc_sync(a, b)
+            _rpc_async(a, b)
+            _remote(a, b)
 
             rpc.shutdown()
+
+    def test_world_size_one(self):
+        self._world_size_one(
+            torch.ones(2, 2),
+            torch.ones(2, 2)
+        )
+
+    def test_world_size_one_sparse(self):
+        self._world_size_one(
+            build_sparse_tensor(),
+            build_sparse_tensor()
+        )
 
     @dist_init(setup_rpc=False)
     def test_invalid_names(self):
@@ -1027,17 +1230,30 @@ class RpcTest(RpcAgentTestFixture):
         ret = rpc.rpc_sync(worker_name(dst_rank), torch.nonzero, args=(x,))
         self.assertEqual(ret, x.nonzero())
 
-    @dist_init
-    def test_multi_rpc(self):
+    def _multi_rpc(self, sparse):
         dst_rank = (self.rank + 1) % self.world_size
         for i in range(20):
             n = i + self.rank + 1
+            if sparse:
+                x = build_sparse_tensor() * n
+                y = build_sparse_tensor() * n
+            else:
+                x = torch.ones(2, 2)
+                y = torch.ones(2, 2)
             ret = rpc.rpc_sync(
                 worker_name(dst_rank),
                 torch.add,
-                args=(torch.ones(n, n), torch.ones(n, n)),
+                args=(x, y),
             )
-            self.assertEqual(ret, torch.ones(n, n) * 2)
+            self.assertEqual(ret, x * 2)
+
+    @dist_init
+    def test_multi_rpc(self):
+        self._multi_rpc(False)
+
+    @dist_init
+    def test_multi_rpc_sparse(self):
+        self._multi_rpc(True)
 
     @dist_init
     def test_future_wait_twice(self):
@@ -1053,7 +1269,7 @@ class RpcTest(RpcAgentTestFixture):
             with self.assertRaisesRegex(ValueError, "Expected error"):
                 fut.wait()
 
-    def _run_uneven_workload(self, num_repeat=30):
+    def _run_uneven_workload(self, f, x, num_repeat=30):
         # worker0 drives and waits for worker1 and worker2
         # throughout the test.
         if self.rank == 0:
@@ -1063,7 +1279,7 @@ class RpcTest(RpcAgentTestFixture):
             dst = "worker1"
             futs = []
             for _ in range(num_repeat):
-                fut = rpc.rpc_async(dst, heavy_rpc, args=(torch.ones(100, 100),))
+                fut = rpc.rpc_async(dst, f, args=(x,))
                 futs.append(fut)
 
             for fut in torch.futures.collect_all(futs).wait():
@@ -1075,13 +1291,13 @@ class RpcTest(RpcAgentTestFixture):
             dst = "worker2"
             futs = []
             for _ in range(num_repeat):
-                fut = rpc.rpc_async(dst, heavy_rpc, args=(torch.ones(100, 100),))
+                fut = rpc.rpc_async(dst, f, args=(x,))
                 futs.append(fut)
 
             for val in torch.futures.wait_all(futs):
                 self.assertEqual(val, 0)
 
-    def test_wait_all_workers(self):
+    def _wait_all_workers(self, f, x):
         initialize_pg(self.file_init_method, self.rank, self.world_size)
         rpc.init_rpc(
             name="worker%d" % self.rank,
@@ -1091,7 +1307,7 @@ class RpcTest(RpcAgentTestFixture):
             rpc_backend_options=self.rpc_backend_options,
         )
 
-        self._run_uneven_workload()
+        self._run_uneven_workload(f, x)
 
         # worker0 calls this at the end after waiting for RPC responses.
         # worker1/2 calls this immediately and has some works after it.
@@ -1103,7 +1319,13 @@ class RpcTest(RpcAgentTestFixture):
         dist.barrier()
         rpc.shutdown(graceful=False)
 
-    def test_wait_all_workers_twice(self):
+    def test_wait_all_workers_dense(self):
+        self._wait_all_workers(heavy_rpc, torch.ones(100, 100))
+
+    def test_wait_all_workers_sparse(self):
+        self._wait_all_workers(heavy_rpc_sparse, build_sparse_tensor())
+
+    def _wait_all_workers_twice(self, f, x):
         initialize_pg(self.file_init_method, self.rank, self.world_size)
         rpc.init_rpc(
             name="worker%d" % self.rank,
@@ -1113,7 +1335,7 @@ class RpcTest(RpcAgentTestFixture):
             rpc_backend_options=self.rpc_backend_options,
         )
 
-        self._run_uneven_workload()
+        self._run_uneven_workload(f, x)
 
         # worker0 calls this at the end after waiting for RPC responses.
         # worker1/2 calls this immediately and has some works after it.
@@ -1125,6 +1347,12 @@ class RpcTest(RpcAgentTestFixture):
         # it through to other workers.
         dist.barrier()
         rpc.shutdown(graceful=False)
+
+    def test_wait_all_workers_twice_dense(self):
+        self._wait_all_workers_twice(heavy_rpc, torch.ones(100, 100))
+
+    def test_wait_all_workers_twice_sparse(self):
+        self._wait_all_workers_twice(heavy_rpc_sparse, build_sparse_tensor())
 
     @dist_init
     def test_all_gather(self):
@@ -1211,7 +1439,7 @@ class RpcTest(RpcAgentTestFixture):
     @dist_init
     def test_graceful_shutdown_with_uneven_workload(self):
         """Test graceful termination."""
-        self._run_uneven_workload()
+        self._run_uneven_workload(heavy_rpc, torch.ones(100, 100))
 
     @dist_init(setup_rpc=False)
     def test_shutdown_followed_by_rpc(self):
@@ -2082,6 +2310,16 @@ class RpcTest(RpcAgentTestFixture):
         self.assertEqual(ret, my_complex_tensor_function(a, b, c))
 
     @dist_init
+    def test_py_sparse_tensors_in_container(self):
+        n = self.rank + 1
+        dst_rank = n % self.world_size
+        a = [build_sparse_tensor(), build_sparse_tensor()]
+        ret = rpc.rpc_sync(
+            worker_name(dst_rank), my_container_sum, args=(a,)
+        )
+        self.assertEqual(ret, my_container_sum(a))
+
+    @dist_init
     def test_py_nested_pickle(self):
         n = self.rank + 1
         dst_rank = n % self.world_size
@@ -2137,16 +2375,23 @@ class RpcTest(RpcAgentTestFixture):
         else:
             self.assertTrue(False, "expected raise_func_escape to raise ValueError.")
 
-    @dist_init
-    def test_nested_rpc(self):
+    def _nested_rpc(self, f, expected):
         n = self.rank + 1
         dst_rank = n % self.world_size
         ret = rpc.rpc_sync(
             worker_name(dst_rank),
-            nested_rpc,
+            f,
             args=(worker_name(self.rank),),
         )
-        self.assertEqual(ret, torch.ones(2, 2) + 1)
+        self.assertEqual(ret, expected)
+
+    @dist_init
+    def test_nested_rpc(self):
+        self._nested_rpc(nested_rpc, torch.ones(2, 2) + 1)
+
+    @dist_init
+    def test_nested_rpc_sparse(self):
+        self._nested_rpc(nested_rpc_sparse, build_sparse_tensor() * 2)
 
     def _stress_test_rpc(self, f, repeat=1000, args=()):
         n = self.rank + 1
@@ -2175,30 +2420,64 @@ class RpcTest(RpcAgentTestFixture):
         self._stress_test_rpc(heavy_rpc, repeat=20, args=(torch.ones(100, 100),))
 
     @dist_init
+    def test_stress_heavy_rpc_sparse(self):
+        self._stress_test_rpc(heavy_rpc_sparse, repeat=20, args=(build_sparse_tensor(),))
+
+    @dist_init
     def test_stress_heavy_rpc_torchscript(self):
         self._stress_test_rpc(heavy_rpc_torchscript, repeat=20, args=(torch.ones(100, 100),))
 
-    @dist_init
-    def test_builtin_remote_ret(self):
+    def _builtin_remote_ret(self, x, y, expected):
         n = self.rank + 1
         dst_rank = n % self.world_size
         rref = rpc.remote(
             worker_name(dst_rank),
             torch.add,
-            args=(torch.ones(n, n), torch.ones(n, n)),
+            args=(x, y),
         )
-        self.assertEqual(rref.to_here(), torch.ones(n, n) * 2)
+        self.assertEqual(rref.to_here(), expected)
 
     @dist_init
-    def test_builtin_remote_self(self):
+    def test_builtin_remote_ret(self):
+        self._builtin_remote_ret(
+            torch.ones(2, 2),
+            torch.ones(2, 2),
+            torch.ones(2, 2) * 2
+        )
+
+    @dist_init
+    def test_builtin_remote_ret_sparse(self):
+        self._builtin_remote_ret(
+            build_sparse_tensor(),
+            build_sparse_tensor(),
+            build_sparse_tensor() * 2
+        )
+
+    def _builtin_remote_self(self, x, y, expected):
         rref = rpc.remote(
             worker_name(self.rank),
             torch.add,
-            args=(torch.ones(2, 2), torch.ones(2, 2)),
+            args=(x, y),
         )
-        self.assertEqual(rref.local_value(), torch.ones(2, 2) * 2)
+        self.assertEqual(rref.local_value(), expected)
 
-    def _test_multi_remote_call(self, fn, args_fn=lambda x: (), kwargs_fn=lambda x: {}):
+    @dist_init
+    def test_builtin_remote_self(self):
+        self._builtin_remote_self(
+            torch.ones(2, 2),
+            torch.ones(2, 2),
+            torch.ones(2, 2) * 2
+        )
+
+    @dist_init
+    def test_builtin_remote_self_sparse(self):
+        self._builtin_remote_self(
+            build_sparse_tensor(),
+            build_sparse_tensor(),
+            build_sparse_tensor() * 2
+        )
+
+    def _test_multi_remote_call(self, fn, sparse, args_fn=lambda x, y: (), kwargs_fn=lambda x, y: {}):
         m = 10
         n = self.rank + 1
         dst_rank = n % self.world_size
@@ -2210,21 +2489,35 @@ class RpcTest(RpcAgentTestFixture):
                 rpc.remote(
                     worker_name(dst_rank),
                     fn,
-                    args=args_fn(n),
-                    kwargs=kwargs_fn(n),
+                    args=args_fn(n, sparse),
+                    kwargs=kwargs_fn(n, sparse),
                 )
             )
-            expected.append(fn(*args_fn(n), **kwargs_fn(n)))
+            expected.append(fn(*args_fn(n, sparse), **kwargs_fn(n, sparse)))
 
         for i in range(m):
             self.assertEqual(rrefs[i].to_here(), expected[i])
 
-    @dist_init
-    def test_multi_builtin_remote_ret(self):
-        def args_fn(n):
+    @staticmethod
+    def _multi_args_fn(n, sparse=False):
+        if sparse:
+            return (build_sparse_tensor(), build_sparse_tensor())
+        else:
             return (torch.ones(n, n), torch.ones(n, n))
 
-        self._test_multi_remote_call(torch.add, args_fn=args_fn)
+    @dist_init
+    def test_multi_builtin_remote_ret(self):
+        self._test_multi_remote_call(
+            torch.add, False,
+            args_fn=RpcTest._multi_args_fn
+        )
+
+    @dist_init
+    def test_multi_builtin_remote_ret_sparse(self):
+        self._test_multi_remote_call(
+            torch.add, True,
+            args_fn=RpcTest._multi_args_fn
+        )
 
     @dist_init
     def test_py_udf_remote(self):
@@ -2237,82 +2530,177 @@ class RpcTest(RpcAgentTestFixture):
         )
         self.assertEqual(rref.to_here(), my_function(n, n + 1, n + 2))
 
-    @dist_init
-    def test_multi_py_udf_remote(self):
-        def kwargs_fn(n):
+    @staticmethod
+    def _multi_kwargs_fn(n, sparse=False):
+        if sparse:
+            return {
+                "a": build_sparse_tensor(),
+                "b": build_sparse_tensor(),
+                "c": build_sparse_tensor()
+            }
+        else:
             return {"a": torch.ones(n, n), "b": torch.ones(n, n), "c": torch.ones(n, n)}
 
-        self._test_multi_remote_call(my_function, kwargs_fn=kwargs_fn)
+    @dist_init
+    def test_multi_py_udf_remote(self):
+        self._test_multi_remote_call(
+            my_function,
+            False,
+            kwargs_fn=RpcTest._multi_kwargs_fn
+        )
 
     @dist_init
-    def test_py_rref_args(self):
+    def test_multi_py_udf_remote_sparse(self):
+        self._test_multi_remote_call(
+            my_function,
+            True,
+            kwargs_fn=RpcTest._multi_kwargs_fn
+        )
+
+    def _py_rref_args(self, a, b, x, y, expected):
         n = self.rank + 1
         dst_rank = n % self.world_size
         rref_a = rpc.remote(
-            worker_name(dst_rank), torch.add, args=(torch.ones(n, n), 2)
+            worker_name(dst_rank), torch.add, args=(a, b)
         )
         rref_b = rpc.remote(
-            worker_name(dst_rank), torch.add, args=(torch.ones(n, n), 1)
+            worker_name(dst_rank), torch.add, args=(x, y)
         )
         rref_c = rpc.remote(
             worker_name(dst_rank), my_rref_function, args=(rref_a, rref_b)
         )
-        self.assertEqual(rref_c.to_here(), torch.ones(n, n) + 4)
+        self.assertEqual(rref_c.to_here(), expected)
 
     @dist_init
-    def test_py_rref_args_user_share(self):
+    def test_py_rref_args(self):
+        self._py_rref_args(
+            torch.ones(2, 2),
+            1,
+            torch.ones(2, 2),
+            2,
+            torch.ones(2, 2) * 2 + 3)
+
+    @dist_init
+    def test_py_rref_args_sparse(self):
+        self._py_rref_args(
+            build_sparse_tensor(),
+            build_sparse_tensor(),
+            build_sparse_tensor(),
+            build_sparse_tensor(),
+            build_sparse_tensor() * 4
+        )
+
+    def _py_rref_args_user_share(self, a, b, c, x, y, z, expected):
         n = self.rank + 1
         owner_rank = n % self.world_size
         user_rank = (n + 1) % self.world_size
         rref_a = rpc.remote(
-            worker_name(owner_rank), my_function, args=(torch.ones(n, n), 2, 0)
+            worker_name(owner_rank), my_function, args=(a, b, c)
         )
         rref_b = rpc.remote(
-            worker_name(owner_rank), my_function, args=(torch.ones(n, n), 1, 0)
+            worker_name(owner_rank), my_function, args=(x, y, z)
         )
         rref_c = rpc.remote(
             worker_name(user_rank), my_rref_function, args=(rref_a, rref_b)
         )
-        self.assertEqual(rref_c.to_here(), torch.ones(n, n) + 4)
+        self.assertEqual(rref_c.to_here(), expected)
 
     @dist_init
-    def test_py_rpc_rref_args(self):
+    def test_py_rref_args_user_share(self):
+        self._py_rref_args_user_share(
+            torch.ones(2, 2),
+            1,
+            2,
+            torch.ones(2, 2),
+            3,
+            4,
+            torch.ones(2, 2) * 2 + 10
+        )
+
+    @dist_init
+    def test_py_rref_args_user_share_sparse(self):
+        self._py_rref_args_user_share(
+            build_sparse_tensor(),
+            build_sparse_tensor(),
+            build_sparse_tensor(),
+            build_sparse_tensor(),
+            build_sparse_tensor(),
+            build_sparse_tensor(),
+            build_sparse_tensor() * 6
+        )
+
+    def _py_rpc_rref_args(self, a, b, c, x, y, z, expected):
         n = self.rank + 1
         dst_rank = n % self.world_size
         rref_a = rpc.remote(
-            worker_name(dst_rank), my_function, args=(torch.ones(n, n), 2, 0)
+            worker_name(dst_rank), my_function, args=(a, b, c)
         )
         rref_b = rpc.remote(
-            worker_name(dst_rank), my_function, args=(torch.ones(n, n), 1, 0)
+            worker_name(dst_rank), my_function, args=(x, y, z)
         )
 
         c = rpc.rpc_sync(
             worker_name(dst_rank), my_rref_function, args=(rref_a, rref_b)
         )
-
-        self.assertEqual(c, torch.ones(n, n) + 4)
+        self.assertEqual(c, expected)
 
     @dist_init
-    def test_nested_remote(self):
+    def test_py_rpc_rref_args(self):
+        self._py_rpc_rref_args(
+            torch.ones(2, 2),
+            1,
+            2,
+            torch.ones(2, 2),
+            3,
+            4,
+            torch.ones(2, 2) * 2 + 10
+        )
+
+    @dist_init
+    def test_py_rpc_rref_args_sparse(self):
+        self._py_rpc_rref_args(
+            build_sparse_tensor(),
+            build_sparse_tensor(),
+            build_sparse_tensor(),
+            build_sparse_tensor(),
+            build_sparse_tensor(),
+            build_sparse_tensor(),
+            build_sparse_tensor() * 6
+        )
+
+    def _nested_remote(self, f, expected):
         n = self.rank + 1
         dst_rank1 = n % self.world_size
         dst_rank2 = (n + 1) % self.world_size
 
         rref = rpc.remote(
             worker_name(dst_rank1),
-            nested_remote,
+            f,
             args=(worker_name(dst_rank2),),
         )
-        self.assertEqual(rref.to_here(), torch.ones(2, 2) + 3)
+        self.assertEqual(rref.to_here(), expected)
 
     @dist_init
-    def test_nested_rref(self):
+    def test_nested_remote(self):
+        self._nested_remote(
+            nested_remote,
+            torch.ones(2, 2) + 3
+        )
+
+    @dist_init
+    def test_nested_remote_sparse(self):
+        self._nested_remote(
+            nested_remote_sparse,
+            build_sparse_tensor() + build_sparse_tensor()
+        )
+
+    def _nested_rref(self, f, expected1, expected2):
         n = self.rank + 1
         dst_rank1 = n % self.world_size
         dst_rank2 = (n + 1) % self.world_size
         rref_of_rrefs = rpc.remote(
             worker_name(dst_rank1),
-            nested_rref,
+            f,
             args=(worker_name(dst_rank2),),
         )
 
@@ -2322,11 +2710,26 @@ class RpcTest(RpcAgentTestFixture):
         rrefs = rref_of_rrefs.to_here()
 
         self.assertEqual(len(rrefs), 2)
-        self.assertEqual(rrefs[0].to_here(), torch.ones(2, 2) + 1)
-        self.assertEqual(rrefs[1].to_here(), torch.ones(2, 2) + 2)
+        self.assertEqual(rrefs[0].to_here(), expected1)
+        self.assertEqual(rrefs[1].to_here(), expected2)
 
     @dist_init
-    def test_nested_rref_stress(self):
+    def test_nested_rref(self):
+        self._nested_rref(
+            nested_rref,
+            torch.ones(2, 2) + 1,
+            torch.ones(2, 2) + 2
+        )
+
+    @dist_init
+    def test_nested_rref_sparse(self):
+        self._nested_rref(
+            nested_rref_sparse,
+            build_sparse_tensor() * 2,
+            build_sparse_tensor() * 2
+        )
+
+    def _nested_rref_stress(self, f, expected1, expected2):
         n = self.rank + 1
         dst_rank1 = n % self.world_size
         dst_rank2 = (n + 1) % self.world_size
@@ -2335,7 +2738,7 @@ class RpcTest(RpcAgentTestFixture):
             all_rrefs.append(
                 rpc.remote(
                     worker_name(dst_rank1),
-                    nested_rref,
+                    f,
                     args=(worker_name(dst_rank2),),
                 )
             )
@@ -2344,8 +2747,24 @@ class RpcTest(RpcAgentTestFixture):
             rref_of_rrefs = all_rrefs[i]
             rrefs = rref_of_rrefs.to_here()
             self.assertEqual(len(rrefs), 2)
-            self.assertEqual(rrefs[0].to_here(), torch.ones(2, 2) + 1)
-            self.assertEqual(rrefs[1].to_here(), torch.ones(2, 2) + 2)
+            self.assertEqual(rrefs[0].to_here(), expected1)
+            self.assertEqual(rrefs[1].to_here(), expected2)
+
+    @dist_init
+    def test_nested_rref_stress(self):
+        self._nested_rref_stress(
+            nested_rref,
+            torch.ones(2, 2) + 1,
+            torch.ones(2, 2) + 2
+        )
+
+    @dist_init
+    def test_nested_rref_stress_sparse(self):
+        self._nested_rref_stress(
+            nested_rref_sparse,
+            build_sparse_tensor() * 2,
+            build_sparse_tensor() * 2
+        )
 
     @dist_init
     def test_multi_layer_nested_async_rpc(self):
@@ -2897,7 +3316,7 @@ class RpcTest(RpcAgentTestFixture):
         )
         rpc._set_rpc_timeout(10)
         # This barrier is needed to ensure that some workers do not exit before
-        # others have been brought up, for non ProcessGroupAgent backends.
+        # others have been brought up.
         initialize_pg(self.file_init_method, self.rank, self.world_size)
         dist.barrier()
         if self.rank == 1:
@@ -4109,6 +4528,46 @@ class RpcTest(RpcAgentTestFixture):
                 rpc.shutdown()
 
         dist.barrier()
+
+    def _trainer_func(self, rref, sparse):
+        m = MyEmbeddingBagModel(sparse=sparse)
+        loss_fn = nn.MSELoss()
+        for i in range(10):
+            outputs = m(torch.rand(10, 10).long())
+            loss_fn(outputs, torch.rand(10, 10)).backward()
+            gradient = list(m.parameters())[0].grad
+            fut = rref.rpc_async().average(rref, i, gradient)
+            gradient = fut.wait()
+            if gradient.is_sparse:
+                gradient = gradient.to_dense().double()
+            ps_gradient = rref.rpc_sync().get_gradient(rref)
+            if ps_gradient.is_sparse:
+                ps_gradient = ps_gradient.to_dense().double()
+            self.assertTrue(torch.equal(gradient, ps_gradient))
+
+    def _my_parameter_server(self, sparse):
+        ps_rref = RRef(MyParameterServer(self.world_size - 1))
+        futures = []
+        for index in range(1, self.world_size):
+            futures.append(
+                rpc.rpc_async(
+                    worker_name((self.rank + index) % self.world_size),
+                    self._trainer_func,
+                    args=(
+                        ps_rref,
+                        sparse
+                    ),
+                )
+            )
+        torch.futures.wait_all(futures)
+
+    @dist_init
+    def test_my_parameter_server(self):
+        self._my_parameter_server(False)
+
+    @dist_init
+    def test_my_parameter_server_sparse(self):
+        self._my_parameter_server(True)
 
 
 class CudaRpcTest(RpcAgentTestFixture):
