@@ -1,10 +1,10 @@
 #include <c10/util/Optional.h>
 #include <c10/util/irange.h>
+#include <torch/csrc/jit/mobile/promoted_prim_ops.h>
 #include <torch/csrc/jit/runtime/custom_operator.h>
 #include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/jit/runtime/register_ops_utils.h>
 #include <torch/csrc/jit/runtime/slice_indices_adjust.h>
-#include <torch/csrc/jit/mobile/promoted_prim_ops.h>
 #include <torch/library.h>
 
 #include <algorithm>

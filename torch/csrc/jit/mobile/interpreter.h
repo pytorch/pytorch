@@ -49,11 +49,14 @@ int64_t getInterpretersExceptionPC();
 
 class prim_ops {
   std::string prim_ops_name_;
+  std::string prim_ops_schema_;
 
  public:
-  prim_ops(const std::string& name, const std::function<void(Stack&)>& fn)
-      : prim_ops_name_(name) {
-    registerPrimOpsFunction(name, fn);
+  prim_ops(const std::string& name,
+           const std::string& schema,
+           const std::function<void(Stack&)>& fn)
+      : prim_ops_name_(name), prim_ops_schema_(schema) {
+    registerPrimOpsFunction(name, schema , fn);
   }
 };
 

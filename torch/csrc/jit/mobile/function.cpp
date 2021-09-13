@@ -63,27 +63,33 @@ bool Function::append_operator(
     // Fall back to creating one from scratch.
   }
 
-  auto jit_op = findOperatorFor(opname);
+  std::shared_ptr<Operator> jit_op;
   const std::vector<c10::Argument>* pArgs = nullptr;
   if (mobile::hasPrimOpsFn(name)) {
-    fn = mobile::getPrimOpsFn(name);
+    std::cout << "Using promoted prim ops for op: " << name << std::endl;
+    auto pair = mobile::getPrimOpsFn(name);
+    auto schema = pair.first;
+    fn = pair.second;
     Operator op =
-        Operator(name, fn, c10::AliasAnalysisKind::INTERNAL_SPECIAL_CASE);
+        Operator(schema, fn, c10::AliasAnalysisKind::INTERNAL_SPECIAL_CASE);
     pArgs = &op.schema().arguments();
-  } else if (jit_op) {
-    fn = [jit_op](Stack& stack) { jit_op->getOperation()(stack); };
-    pArgs = &jit_op->schema().arguments();
   } else {
-    auto op = c10::Dispatcher::singleton().findSchema(opname_c10);
-    if (op.has_value()) {
-      fn = [op](Stack& stack) { op->callBoxed(&stack); };
-      if (op->hasSchema()) {
-        pArgs = &op->schema().arguments();
-      } else {
-        TORCH_CHECK(false, "arguments are missing for operator ", opname);
-      }
+    jit_op = findOperatorFor(opname);
+    if (jit_op) {
+      fn = [jit_op](Stack& stack) { jit_op->getOperation()(stack); };
+      pArgs = &jit_op->schema().arguments();
     } else {
-      return false;
+      auto op = c10::Dispatcher::singleton().findSchema(opname_c10);
+      if (op.has_value()) {
+        fn = [op](Stack& stack) { op->callBoxed(&stack); };
+        if (op->hasSchema()) {
+          pArgs = &op->schema().arguments();
+        } else {
+          TORCH_CHECK(false, "arguments are missing for operator ", opname);
+        }
+      } else {
+        return false;
+      }
     }
   }
 

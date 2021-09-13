@@ -5,23 +5,26 @@ namespace torch {
 namespace jit {
 namespace mobile {
 
-std::unordered_map<std::string, std::function<void(Stack&)>>& primOpsFnTable() {
-  static std::unordered_map<std::string, std::function<void(Stack&)>>
+std::unordered_map<std::string,
+    std::pair<std::string, std::function<void(Stack&)>>>& primOpsFnTable() {
+  static std::unordered_map<std::string,
+                            std::pair<std::string, std::function<void(Stack&)>>>
       prim_ops_fn;
   return prim_ops_fn;
 }
 
 void registerPrimOpsFunction(
     const std::string& name,
+    const std::string& schema,
     const std::function<void(Stack&)>& fn) {
-  primOpsFnTable()[name] = fn;
+  primOpsFnTable()[name] = {schema, fn};
 }
 
 bool hasPrimOpsFn(const std::string& name) {
   return primOpsFnTable().count(name);
 }
 
-std::function<void(Stack&)>& getPrimOpsFn(const std::string& name) {
+std::pair<std::string, std::function<void(Stack&)>>& getPrimOpsFn(const std::string& name) {
   TORCH_CHECK(
       hasPrimOpsFn(name),
       "Prim Ops Function for ",
@@ -31,7 +34,7 @@ std::function<void(Stack&)>& getPrimOpsFn(const std::string& name) {
 }
 
 void add_functions() {
-  registerPrimOpsFunction("prim::TupleIndex", tupleIndex);
+  registerPrimOpsFunction("prim::TupleIndex","prim::TupleIndex(Any tup, int i) -> Any", tupleIndex);
 }
 
 } // namespace mobile

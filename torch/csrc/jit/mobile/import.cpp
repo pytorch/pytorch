@@ -351,6 +351,8 @@ void parseOperators(
     const uint64_t& module_load_options,
     mobile::Function* function,
     mobile::Function::OperatorCacheType& operator_cache) {
+  // TODO: (@pavithran) find right place to add prim ops
+  mobile::add_functions();
   std::unordered_set<std::string> unsupported_op_names =
       load_and_find_unsupported_operator_names(
           ops_list, function, model_version, operator_cache);
