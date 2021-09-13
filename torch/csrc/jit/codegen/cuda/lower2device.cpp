@@ -448,6 +448,10 @@ void GpuLower::lower() {
   // all IterDomains
   haloInfo().build(fusion_);
 
+  partialSplitMap().build(fusion_);
+
+  validatePartialSplit(fusion_);
+
   // Compute thread predicates
   thread_pred_map_.build(fusion_);
 

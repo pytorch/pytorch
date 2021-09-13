@@ -8,6 +8,7 @@
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
+#include <torch/csrc/jit/codegen/cuda/kernel_expr_evaluator.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir_builder.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir_printer.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
@@ -450,6 +451,89 @@ kir::Val* getProducerIndexWithGather(
       window_idx);
 
   return offset_producer_index;
+}
+
+// Adjusts a global consumer index when its root domain is partially
+// split. Note that non-global consumer indices don't need any
+// adjustment.
+kir::Val* getGlobalConsumerIndexWithPartialSplit(
+    kir::Val* index,
+    kir::IterDomain* root_id) {
+  const auto gpu_lower = GpuLower::current();
+  kir::IrBuilder ir_builder(gpu_lower->kernel());
+
+  auto offset = gpu_lower->partialSplitMap().getStartOffset(root_id);
+  if (offset == nullptr || offset->isZeroInt()) {
+    return index;
+  } else {
+    return ir_builder.addExpr(index, offset);
+  }
+}
+
+// Adjusts a global producer index when its root domain and
+// corresponding consumer root domain have non-matching split
+// offsets. Specifically, since producer_index is calcualted based on
+// the consumer, if the consumer has a non-zero offset,
+// it needs to be added to the index. Also, when the producer itself
+// also has a non-zero split offset, that needs to be subtracted from
+// the index.
+kir::Val* getProducerIndexWithPartialSplit(
+    kir::Val* producer_index,
+    IterDomain* producer_root_id,
+    const TensorView* producer_tv,
+    const TensorView* consumer_tv) {
+  const auto gpu_lower = GpuLower::current();
+  kir::IrBuilder ir_builder(gpu_lower->kernel());
+
+  auto p2c =
+      PairwiseRootDomainMap(producer_tv, consumer_tv)
+          .mapProducerToConsumer(producer_tv->domain(), consumer_tv->domain());
+
+  auto it = p2c.find(producer_root_id);
+  if (it == p2c.end()) {
+    return producer_index;
+  }
+
+  auto consumer_root_id = it->second;
+
+  auto consumer_offset =
+      gpu_lower->partialSplitMap().getStartOffset(consumer_root_id);
+  auto consumer_offset_kir = consumer_offset == nullptr
+      ? ir_builder.zeroVal()
+      : gpu_lower->lowerValue(consumer_offset);
+
+  auto producer_offset =
+      gpu_lower->partialSplitMap().getStartOffset(producer_root_id);
+  auto producer_offset_kir = producer_offset == nullptr
+      ? ir_builder.zeroVal()
+      : gpu_lower->lowerValue(producer_offset);
+
+  // If the producer is on global memory, it's always allocated
+  // without trimming the out-of-bounds region, so the consumer offset
+  // should be added to the index.
+  if (producer_tv->getMemoryType() == MemoryType::Global) {
+    if (consumer_offset_kir->isZeroInt()) {
+      return producer_index;
+    } else {
+      return ir_builder.addExpr(producer_index, consumer_offset_kir);
+    }
+  }
+
+  // Non-global case. Difference of the split offsets must be
+  // accounted.
+
+  auto diff = ir_builder.subExpr(consumer_offset_kir, producer_offset_kir);
+  kir::ExpressionEvaluator ee;
+  auto diff_eval = ee.evaluate(diff);
+  // We currently only allow constant offsetting
+  TORCH_INTERNAL_ASSERT(diff_eval.has_value(), "Invalid partial split");
+
+  if (diff_eval.value() == 0) {
+    return producer_index;
+  }
+
+  return ir_builder.addExpr(
+      producer_index, ir_builder.create<kir::Int>(diff_eval.value()));
 }
 
 } // namespace
@@ -1350,6 +1434,9 @@ std::vector<kir::Val*> Index::getGlobalProducerStridedIndices(
         ref_compute.indexMap(),
         reference_id_map);
 
+    root_ind = getProducerIndexWithPartialSplit(
+        root_ind, root_dom[i], producer_tv, consumer_tv);
+
     if (root_ind->isZeroInt()) {
       continue;
     } else {
@@ -1595,6 +1682,9 @@ std::vector<kir::Val*> Index::getNonGlobalProducerStridedIndices(
         ref_compute.indexMap(),
         reference_id_map);
 
+    root_ind_i = getProducerIndexWithPartialSplit(
+        root_ind_i, root_dom[i], producer_tv, consumer_tv);
+
     if (root_ind_i->isZeroInt()) {
       continue;
     }
@@ -1780,6 +1870,8 @@ std::vector<kir::Val*> Index::getGlobalConsumerStridedIndices(
         kir::toString(kir_root_dom_i));
 
     auto root_ind = consumer_indexing.indexMap().at(kir_root_dom_i);
+
+    root_ind = getGlobalConsumerIndexWithPartialSplit(root_ind, kir_root_dom_i);
 
     if (root_ind->isZeroInt()) {
       continue;
@@ -2154,7 +2246,9 @@ std::pair<std::vector<kir::Val*>, bool> Index::getConsumerRootPredIndices(
     }
     const auto it = consumer_indexing.indexMap().find(root_domain[i]);
     if (it != consumer_indexing.indexMap().end()) {
-      root_inds[i] = it->second;
+      auto index = it->second;
+      index = getGlobalConsumerIndexWithPartialSplit(index, root_domain[i]);
+      root_inds[i] = index;
     }
   }
 
@@ -2452,7 +2546,7 @@ std::pair<std::vector<Index::RootPredicateInfo>, ReferenceTensor> Index::
       if (!consumer_id->start()->isZeroInt()) {
         start = gpu_lower->lowerValue(consumer_id->start());
       }
-      if (consumer_id->stop() != consumer_id->extent()) {
+      if (!consumer_id->stopOffset()->isZeroInt()) {
         stop = gpu_lower->lowerValue(consumer_id->stop());
       }
     }
@@ -2465,12 +2559,21 @@ std::pair<std::vector<Index::RootPredicateInfo>, ReferenceTensor> Index::
       continue;
     }
 
+    auto index = it->second;
+
+    // If the consumer uses partial split,
+    if (ref_2_consumer.count(contig_id) != 0) {
+      auto consumer_id = gpu_lower->lowerValue(ref_2_consumer.at(contig_id))
+                             ->as<kir::IterDomain>();
+      index = getGlobalConsumerIndexWithPartialSplit(index, consumer_id);
+    }
+
     RootPredicateInfo info;
 
-    info.stop = ir_builder.ltExpr(it->second, stop)->as<kir::Bool>();
+    info.stop = ir_builder.ltExpr(index, stop)->as<kir::Bool>();
 
     if (!start->isZeroInt()) {
-      info.start = ir_builder.geExpr(it->second, start)->as<kir::Bool>();
+      info.start = ir_builder.geExpr(index, start)->as<kir::Bool>();
     }
 
     // Transform roots from reference to concrete roots (based on loop compute

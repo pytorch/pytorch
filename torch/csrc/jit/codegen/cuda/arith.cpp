@@ -93,16 +93,13 @@ TensorView* newOutputTV(const std::vector<Val*>& vals, DataType dtype) {
   std::vector<IterDomain*> out_domain(
       TensorDomain::noReductions(tvs[0]->getRootDomain()).size(), nullptr);
 
-  // For the start and stop vals, take the maximum and minimum of
-  // input axes, respectively.
+  // For the start and stop offsets, take the maximum of input axes.
   // For now, the offsets of both start and stop are always integer
   // constant, so we can statically compute them. It is unclear
   // whether we would need to support dynamic offsetting, e.g.,
   // shifting by a dynamic offset.
   std::vector<int64_t> start_offsets(out_domain.size(), 0);
   std::vector<int64_t> stop_offsets(out_domain.size(), 0);
-  std::vector<Val*> stop_vals(out_domain.size(), nullptr);
-  std::vector<bool> stop_val_static(out_domain.size(), true);
   std::vector<Val*> extent_vals(out_domain.size(), nullptr);
   std::vector<IterType> iter_types(out_domain.size(), IterType::Iteration);
 
@@ -123,53 +120,25 @@ TensorView* newOutputTV(const std::vector<Val*>& vals, DataType dtype) {
         iter_types[i] = dom[i]->getIterType();
       }
       auto start_offset = dom[i]->start()->as<Int>();
+      auto stop_offset = dom[i]->stopOffset()->as<Int>();
       // Currently, start is always constant
       TORCH_INTERNAL_ASSERT(
           start_offset->isConst(), "Invalid IterDomain start: ", start_offset);
+      TORCH_INTERNAL_ASSERT(
+          stop_offset->isConst(),
+          "Invalid IterDomain stop offset: ",
+          stop_offset);
       start_offsets[i] =
           std::max(start_offsets[i], start_offset->value().value());
-      // stop may not be statically analyzable. In most of the cases,
-      // it should be just equal to extent or "extent - N", where N is
-      // a constant integer. If all input axes are so, we can
-      // statically compute the minimum of them. Otherwise, we need to
-      // create a BinaryOpType::Min expression.
-
-      // Create the fallback dynamic min expression
-      if (stop_vals[i] == nullptr) {
-        stop_vals[i] = dom[i]->stop();
-      } else {
-        stop_vals[i] =
-            binaryOp(BinaryOpType::Min, stop_vals[i], dom[i]->stop());
-      }
-      // Attempt to compute the minimum statically if the input axes
-      // so far are also the case
-      if (stop_val_static[i]) {
-        auto stop_offset = getStopOffset(dom[i]);
-        if (stop_offset.has_value()) {
-          // This axis is statically analyzable. Take the maximum of the
-          // current known value and the new one.
-          stop_offsets[i] = std::max(stop_offsets[i], stop_offset.value());
-        } else {
-          // Not statically analyzable. Fall back to the dynamic min option.
-          stop_val_static[i] = false;
-        }
-      }
+      stop_offsets[i] = std::max(stop_offsets[i], stop_offset->value().value());
     }
   }
   for (const auto dim_i : c10::irange(out_domain.size())) {
     if (extent_vals[dim_i] != nullptr) {
-      Val* stop_val = nullptr;
-      if (stop_val_static[dim_i]) {
-        stop_val = (stop_offsets[dim_i] != 0)
-            ? sub(extent_vals[dim_i], new Int(stop_offsets[dim_i]))
-            : extent_vals[dim_i];
-      } else {
-        stop_val = stop_vals[dim_i];
-      }
       out_domain[dim_i] = new IterDomain(
           new Int(start_offsets[dim_i]),
           extent_vals[dim_i],
-          stop_val,
+          new Int(stop_offsets[dim_i]),
           ParallelType::Serial,
           iter_types[dim_i]);
     } else {
@@ -651,7 +620,7 @@ static TensorView* newForReduction(
     new_domain.push_back(new IterDomain(
         id->start(),
         id->extent(),
-        id->stop(),
+        id->stopOffset(),
         ParallelType::Serial,
         isReduction ? IterType::Reduction : id->getIterType()));
   }
@@ -1298,53 +1267,42 @@ TensorView* shift(TensorView* inp, const std::vector<int>& offsets, bool pad) {
         continue;
       }
 
-      Int* current_start = dynamic_cast<Int*>(inp_axis->start());
+      Int* current_start_offset = dynamic_cast<Int*>(inp_axis->start());
       TORCH_INTERNAL_ASSERT(
-          current_start != nullptr && current_start->isConst(),
+          current_start_offset != nullptr && current_start_offset->isConst(),
           "Invalid IterDomain start value:",
-          current_start);
+          current_start_offset);
 
-      const auto cur_start_offset = current_start->value().value();
-      const auto cur_stop_offset = getStopOffset(inp_axis);
+      Int* current_stop_offset = dynamic_cast<Int*>(inp_axis->stopOffset());
+      TORCH_INTERNAL_ASSERT(
+          current_stop_offset != nullptr && current_stop_offset->isConst(),
+          "Invalid IterDomain stop offset value:",
+          current_stop_offset);
 
-      Val* start = nullptr;
-      Val* stop = nullptr;
+      const auto cur_start_offset_value = current_start_offset->value().value();
+      const auto cur_stop_offset_value = current_stop_offset->value().value();
+
+      Val* out_start_offset = nullptr;
+      Val* out_stop_offset = nullptr;
 
       if (offset > 0) {
         // shift to right; extent remains the same, start and stop
         // positions are moved right
-        start = new Int(cur_start_offset + offset);
-        if (cur_stop_offset.has_value()) {
-          auto new_stop_offset =
-              std::max(cur_stop_offset.value() - offset, int64_t(0));
-          stop = new_stop_offset > 0
-              ? sub(inp_axis->extent(), new Int(new_stop_offset))
-              : inp_axis->extent();
-        } else {
-          // Not sure if this is really needed in practice
-          stop = binaryOp(
-              BinaryOpType::Min,
-              add(inp_axis->stop(), new Int(offset)),
-              inp_axis->extent());
-        }
+        out_start_offset = new Int(cur_start_offset_value + offset);
+        out_stop_offset =
+            new Int(std::max(cur_stop_offset_value - offset, int64_t(0)));
       } else {
         // shift to left; extent remains the same, start and stop
         // positions are moved left
-        auto new_start_offset = std::max(cur_start_offset + offset, int64_t(0));
-        start = new Int(new_start_offset);
-        auto cur_stop_offset = getStopOffset(inp_axis);
-        if (cur_stop_offset.has_value()) {
-          auto new_stop_offset = cur_stop_offset.value() - offset;
-          stop = sub(inp_axis->extent(), new Int(new_stop_offset));
-        } else {
-          stop = sub(inp_axis->stop(), new Int(-offset));
-        }
+        out_start_offset =
+            new Int(std::max(cur_start_offset_value + offset, int64_t(0)));
+        out_stop_offset = new Int(cur_stop_offset_value - offset);
       }
 
       out_dom.push_back(new IterDomain(
-          start,
+          out_start_offset,
           inp_axis->extent(),
-          stop,
+          out_stop_offset,
           ParallelType::Serial,
           inp_axis->getIterType()));
     }

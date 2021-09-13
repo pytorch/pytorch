@@ -384,6 +384,12 @@ std::vector<TensorView*> allTvs(Fusion* fusion) {
   return uniqueEntries({used_tvs.begin(), used_tvs.end()});
 }
 
+std::vector<Expr*> historyOf(TensorView* tv) {
+  return ExprSort::getExprs(
+      tv->fusion(),
+      {tv->domain()->domain().begin(), tv->domain()->domain().end()});
+}
+
 } // namespace ir_utils
 } // namespace cuda
 } // namespace fuser

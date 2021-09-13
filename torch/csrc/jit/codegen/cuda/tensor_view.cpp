@@ -245,7 +245,11 @@ TensorView* TensorView::computeWith(
   return this;
 }
 
-TensorView* TensorView::split(int axis_, Val* factor, bool inner_split) {
+TensorView* TensorView::split(
+    int axis_,
+    Val* factor,
+    bool inner_split,
+    bool trim_out_of_bounds) {
   // Only check things associated with axis, factor will be validated in
   // IterDomain
   TORCH_INTERNAL_ASSERT(nDims() > 0, "Tried to do split on a 0-dim TensorView");
@@ -277,12 +281,16 @@ TensorView* TensorView::split(int axis_, Val* factor, bool inner_split) {
       "Splitting an axis of non-Serial parallel type is not supported at this time."
       " Parallelization strategy must be set after calling split.");
 
-  domain()->split(axis_, factor, inner_split);
+  domain()->split(axis_, factor, inner_split, trim_out_of_bounds);
   return this;
 }
 
-TensorView* TensorView::split(int axis, unsigned int factor, bool inner_split) {
-  split(axis, new Int(factor), inner_split);
+TensorView* TensorView::split(
+    int axis,
+    unsigned int factor,
+    bool inner_split,
+    bool trim_out_of_bounds) {
+  split(axis, new Int(factor), inner_split, trim_out_of_bounds);
   return this;
 }
 

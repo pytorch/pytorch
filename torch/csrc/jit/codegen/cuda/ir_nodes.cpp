@@ -646,7 +646,7 @@ IterDomain::IterDomain(
     : IterDomain(
           start,
           extent,
-          extent,
+          nullptr,
           parallel_type,
           iter_type,
           is_rfactor_domain) {}
@@ -654,14 +654,14 @@ IterDomain::IterDomain(
 IterDomain::IterDomain(
     Val* start,
     Val* extent,
-    Val* stop,
+    Val* stop_offset,
     ParallelType parallel_type,
     IterType iter_type,
     bool is_rfactor_domain)
     : Val(ValType::IterDomain, DataType::Int, false),
       start_(start),
       extent_(extent),
-      stop_(stop),
+      stop_offset_(stop_offset == nullptr ? new Int(0) : stop_offset),
       parallel_type_(parallel_type),
       iter_type_(iter_type),
       is_rfactor_domain_(is_rfactor_domain) {
@@ -688,7 +688,7 @@ IterDomain::IterDomain(const IterDomain* src, IrCloner* ir_cloner)
     : Val(src, ir_cloner),
       start_(ir_cloner->clone(src->start_)),
       extent_(ir_cloner->clone(src->extent_)),
-      stop_(ir_cloner->clone(src->stop_)),
+      stop_offset_(ir_cloner->clone(src->stop_offset_)),
       parallel_type_(src->parallel_type_),
       iter_type_(src->iter_type_),
       is_rfactor_domain_(src->is_rfactor_domain_),
@@ -710,7 +710,8 @@ bool IterDomain::sameAs(const Statement* other) const {
       getParallelType() == other_id->getParallelType();
   is_same = is_same && ScalarCheck::sameAs(extent(), other_id->extent());
   is_same = is_same && ScalarCheck::sameAs(start(), other_id->start());
-  is_same = is_same && ScalarCheck::sameAs(stop(), other_id->stop());
+  is_same =
+      is_same && ScalarCheck::sameAs(stopOffset(), other_id->stopOffset());
 
   return is_same;
 }
@@ -785,7 +786,9 @@ IterDomain* IterDomain::merge(IterDomain* outer, IterDomain* inner) {
 std::pair<IterDomain*, IterDomain*> IterDomain::split(
     IterDomain* in,
     Val* factor,
-    bool inner_split) {
+    bool inner_split,
+    Val* start_offset,
+    Val* stop_offset) {
   TORCH_CHECK(
       !in->extent()->isZeroInt(),
       "Splitting IterDomains with ending values that are 0 is not supported at this time.");
@@ -807,7 +810,15 @@ std::pair<IterDomain*, IterDomain*> IterDomain::split(
   }
 
   // outer loop size
-  Val* remainder = ceilDiv(in->extent(), factor);
+  Val* remainder =
+      ceilDiv(Split::extent(in->extent(), start_offset, stop_offset), factor);
+
+  if ((start_offset != nullptr && !start_offset->isZeroInt()) ||
+      (stop_offset != nullptr && !stop_offset->isZeroInt())) {
+    TORCH_INTERNAL_ASSERT(
+        in->definition() == nullptr,
+        "Partial split is only allowed with root domains");
+  }
 
   // outer loop IterDomain
   IterDomain* ido = new IterDomain(
@@ -825,8 +836,18 @@ std::pair<IterDomain*, IterDomain*> IterDomain::split(
       in->getIterType(),
       in->isRFactorProduct());
 
-  new Split(ido, idi, in, factor, inner_split);
+  new Split(ido, idi, in, factor, inner_split, start_offset, stop_offset);
   return {ido, idi};
+}
+
+std::pair<IterDomain*, IterDomain*> IterDomain::split(
+    IterDomain* in,
+    Val* factor,
+    bool inner_split,
+    bool trim_out_of_bounds) {
+  auto start_offset = trim_out_of_bounds ? in->start() : nullptr;
+  auto stop_offset = trim_out_of_bounds ? in->stopOffset() : nullptr;
+  return IterDomain::split(in, factor, inner_split, start_offset, stop_offset);
 }
 
 // TODO: We should change parallelize interface to be on tensorview or at least
@@ -848,7 +869,19 @@ void IterDomain::parallelize(ParallelType t) {
 }
 
 bool IterDomain::maybePartial() const {
-  return !start()->isZeroInt() || !stop()->sameAs(extent());
+  return !start()->isZeroInt() || !stopOffset()->isZeroInt();
+}
+
+Val* IterDomain::stopOffset() const {
+  return stop_offset_;
+}
+
+Val* IterDomain::stop() const {
+  if (stopOffset()->isZeroInt()) {
+    return extent();
+  }
+
+  return sub(extent(), stopOffset());
 }
 
 TensorDomain::TensorDomain(
@@ -1104,7 +1137,11 @@ size_t TensorDomain::posOf(IterDomain* id) const {
   TORCH_CHECK(false, "Provided id is not part of this domain.");
 }
 
-void TensorDomain::split(int axis_, Val* factor, bool inner_split) {
+void TensorDomain::split(
+    int axis_,
+    Val* factor,
+    bool inner_split,
+    bool trim_out_of_bounds) {
   TORCH_INTERNAL_ASSERT(nDims() > 0, "Tried to do split on a 0-dim domain");
   if (axis_ < 0)
     axis_ += nDims();
@@ -1114,7 +1151,17 @@ void TensorDomain::split(int axis_, Val* factor, bool inner_split) {
       "Tried to split on axis outside TensorDomain's range.");
 
   IterDomain* id = axis(axis_);
-  auto split_ids = IterDomain::split(id, factor, inner_split);
+
+  // partial split is only allowed with root domains
+  if (trim_out_of_bounds) {
+    TORCH_INTERNAL_ASSERT(
+        std::find(getRootDomain().begin(), getRootDomain().end(), id) !=
+            getRootDomain().end(),
+        "Partial split is only allowed with root domains");
+  }
+
+  auto split_ids =
+      IterDomain::split(id, factor, inner_split, trim_out_of_bounds);
   domain_.erase(domain_.begin() + axis_);
   domain_.insert(domain_.begin() + axis_, split_ids.second);
   domain_.insert(domain_.begin() + axis_, split_ids.first);
@@ -1296,13 +1343,17 @@ Split::Split(
     IterDomain* inner,
     IterDomain* in,
     Val* factor,
-    bool inner_split)
+    bool inner_split,
+    Val* start_offset,
+    Val* stop_offset)
     : Expr(ExprType::Split),
       outer_{outer},
       inner_{inner},
       in_{in},
       factor_{factor},
-      inner_split_{inner_split} {
+      inner_split_{inner_split},
+      start_offset_{start_offset != nullptr ? start_offset : new Int(0)},
+      stop_offset_{stop_offset != nullptr ? stop_offset : new Int(0)} {
   TORCH_INTERNAL_ASSERT(
       factor_->isAnInt(),
       "Attempted to create a Split node with a non-integer factor.");
@@ -1320,7 +1371,23 @@ Split::Split(const Split* src, IrCloner* ir_cloner)
       inner_(ir_cloner->clone(src->inner_)),
       in_(ir_cloner->clone(src->in_)),
       factor_(ir_cloner->clone(src->factor_)),
-      inner_split_(src->inner_split_) {}
+      inner_split_(src->inner_split_),
+      start_offset_(ir_cloner->clone(src->start_offset_)),
+      stop_offset_(ir_cloner->clone(src->stop_offset_)) {}
+
+Val* Split::extent(Val* in_extent, Val* start_offset, Val* stop_offset) {
+  TORCH_INTERNAL_ASSERT(in_extent != nullptr);
+
+  if (start_offset != nullptr && !start_offset->isZeroInt()) {
+    in_extent = sub(in_extent, start_offset);
+  }
+
+  if (stop_offset != nullptr && !stop_offset->isZeroInt()) {
+    in_extent = sub(in_extent, stop_offset);
+  }
+
+  return in_extent;
+}
 
 bool Split::sameAs(const Statement* other) const {
   if (this == other) {
@@ -1331,7 +1398,9 @@ bool Split::sameAs(const Statement* other) const {
   }
   return Expr::sameAs(other) &&
       factor()->sameAs(other->as<Split>()->factor()) &&
-      innerSplit() == other->as<Split>()->innerSplit();
+      innerSplit() == other->as<Split>()->innerSplit() &&
+      startOffset()->sameAs(other->as<Split>()->startOffset()) &&
+      stopOffset()->sameAs(other->as<Split>()->stopOffset());
 }
 
 Merge::Merge(IterDomain* out, IterDomain* outer, IterDomain* inner)

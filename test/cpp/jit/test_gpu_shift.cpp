@@ -2194,14 +2194,16 @@ TEST(NVFuserTest, FusionHdiff_CUDA) {
   out->axis(0)->parallelize(ParallelType::BIDz);
   out->axis(1)->parallelize(ParallelType::BIDy);
   out->axis(2)->parallelize(ParallelType::BIDx);
-
   // Thread parallelization
-  for (auto tv : {out, flx0, fly0, lap}) {
-    tv->axis(3)->parallelize(ParallelType::TIDy);
-    tv->axis(4)->parallelize(ParallelType::TIDx);
-    if (tv != out) {
-      tv->setMemoryType(MemoryType::Shared);
-    }
+  out->axis(3)->parallelize(ParallelType::TIDy);
+  out->axis(4)->parallelize(ParallelType::TIDx);
+  // Apply the same parallelization to all other tensors
+  scheduler_utils::parallelizeAllLike(out, ir_utils::allTvs(&fusion));
+
+  // Store intermediate stencil results on smem so that they can be
+  // accessed by threads
+  for (auto tv : {flx0, fly0, lap}) {
+    tv->setMemoryType(MemoryType::Shared);
   }
 
   /////////////////////////////////
@@ -2211,6 +2213,185 @@ TEST(NVFuserTest, FusionHdiff_CUDA) {
   int numel_x = 101;
   int numel_y = 99;
   int numel_z = 10;
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor inp_at = at::randn({numel_z, numel_y, numel_x}, options);
+  at::Tensor coeff_at = at::randn({numel_z, numel_y, numel_x}, options);
+  std::vector<IValue> inputs = {inp_at, coeff_at};
+  auto fuser_output = fe.runFusion(inputs)[0];
+  // Trim the outer rim
+  std::vector<at::indexing::TensorIndex> indices{
+      at::indexing::Slice(0, at::indexing::None),
+      at::indexing::Slice(2, -2),
+      at::indexing::Slice(2, -2)};
+  fuser_output = fuser_output.index(indices);
+
+  {
+    at::Tensor zeros = at::zeros({numel_z, numel_y, numel_x}, options);
+    auto lap = inp_at * 4 -
+        (shift(inp_at, {0, 1, 0}) + shift(inp_at, {0, -1, 0}) +
+         shift(inp_at, {0, 0, 1}) + shift(inp_at, {0, 0, -1}));
+    auto flx = shift(lap, {0, 0, -1}) - lap;
+    auto flx_cond = (flx * (shift(inp_at, {0, 0, -1}) - inp_at)) > 0;
+    auto flx0 = at::where(flx_cond, zeros, flx);
+    auto fly = shift(lap, {0, -1, 0}) - lap;
+    auto fly_cond = (fly * (shift(inp_at, {0, -1, 0}) - inp_at)) > 0;
+    auto fly0 = at::where(fly_cond, zeros, fly);
+
+    auto ref = inp_at -
+        coeff_at *
+            ((flx0 - shift(flx0, {0, 0, 1})) + (fly0 - shift(fly0, {0, 1, 0})));
+    ref = ref.index(indices);
+
+    testValidate(&fusion, {fuser_output}, inputs, {ref}, __LINE__, __FILE__);
+  }
+}
+
+TEST(NVFuserTest, FusionHdiffPartialSplit_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto inp = makeSymbolicTensor(3);
+  fusion.addInput(inp);
+  auto coeff = makeSymbolicTensor(3);
+  fusion.addInput(coeff);
+
+  std::vector<std::vector<int>> offsets{
+      {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}};
+
+  // T2, T3, T4, T5
+  std::vector<TensorView*> inp_neighbors;
+  for (const auto& offset : offsets) {
+    inp_neighbors.push_back(shift(inp, offset, false));
+  }
+
+  // T8
+  TensorView* sum_of_neighbors = nullptr;
+  for (auto inp_neighbor : inp_neighbors) {
+    if (sum_of_neighbors == nullptr) {
+      sum_of_neighbors = inp_neighbor;
+    } else {
+      sum_of_neighbors = add(sum_of_neighbors, inp_neighbor);
+    }
+  }
+
+  // T9 = T0 * 4
+  // T10 = T9 - T8
+  auto lap = sub(mul(inp, new Double(4)), sum_of_neighbors);
+
+  // T11 = shift(T10)
+  // T12 = T11 - T10
+  auto flx = sub(shift(lap, {0, 0, -1}, false), lap);
+  // T14 = T13 - T0
+  // T15 = T12 * T14
+  // T16 = T15 > 0
+  // T17 = T16 ? 0 : T12
+  auto flx_cond =
+      gt(mul(flx, sub(shift(inp, {0, 0, -1}, false), inp)), new Double(0));
+  auto flx0 = where(flx_cond, new Double(0), flx);
+
+  // T18 = shift(T10)
+  // T19 = T18 - T10
+  auto fly = sub(shift(lap, {0, -1, 0}, false), lap);
+  // T20 = shift(T0)
+  // T21 = T20 - T0
+  // T22 = T19 * T21
+  // T23 = T22 > 0
+  auto fly_cond =
+      gt(mul(fly, sub(shift(inp, {0, -1, 0}, false), inp)), new Double(0));
+  // T24 = T23 ? 0 : T19
+  auto fly0 = where(fly_cond, new Double(0), fly);
+
+  // T25 = shift(flx0)
+  // T26 = T17 - T25
+  // T27 = shift(fly0)
+  // T28 = T24 - T27
+  // T29 = T26 + T28
+  // T30 = T1 * T29
+  // T31 = T0 - T30
+  auto out =
+      sub(inp,
+          mul(coeff,
+              add(sub(flx0, shift(flx0, {0, 0, 1}, false)),
+                  sub(fly0, shift(fly0, {0, 1, 0}, false)))));
+
+  fusion.addOutput(out);
+
+  /////////////////////////////////
+  // Scheduling
+  /////////////////////////////////
+
+  // Step 1: 2D Tiling
+
+  const int tile_x = 32;
+  const int tile_y = 8;
+
+  out->split(-1, tile_x, true, true);
+  out->split(-3, tile_y, true, true);
+  out->reorder({{-2, -3}});
+  inp->computeAt(out, -3);
+  coeff->computeAt(out, -3);
+
+  // Step 2: Inlining
+
+  // Inline inputs to lap
+  auto lap_vals = DependencyCheck::getAllValsBetween({inp}, {lap});
+  for (auto val : ir_utils::filterByType<TensorView>(lap_vals)) {
+    if (val != lap && val != inp) {
+      val->computeAt(lap, -1);
+    }
+  }
+
+  // Inline inputs to flx0
+  auto flx0_vals = DependencyCheck::getAllValsBetween({lap, inp}, {flx0});
+  for (auto val : ir_utils::filterByType<TensorView>(flx0_vals)) {
+    if (val != lap && val != flx0 && val != inp) {
+      val->computeAt(flx0, -1);
+    }
+  }
+
+  // Inline inputs to fly0
+  auto flxy_vals = DependencyCheck::getAllValsBetween({lap, inp}, {fly0});
+  for (auto val : ir_utils::filterByType<TensorView>(flxy_vals)) {
+    if (val != lap && val != fly0 && val != inp) {
+      val->computeAt(fly0, -1);
+    }
+  }
+
+  // Inline inputs to out
+  auto out_vals = DependencyCheck::getAllValsBetween({flx0, fly0}, {out});
+  for (auto val : ir_utils::filterByType<TensorView>(out_vals)) {
+    if (val != flx0 && val != fly0 && val != out) {
+      val->computeAt(out, -1);
+    }
+  }
+
+  // Step 3: Parallelization
+
+  // Block parallelization
+  out->axis(0)->parallelize(ParallelType::BIDz);
+  out->axis(1)->parallelize(ParallelType::BIDy);
+  out->axis(2)->parallelize(ParallelType::BIDx);
+  // Thread parallelization
+  out->axis(3)->parallelize(ParallelType::TIDy);
+  out->axis(4)->parallelize(ParallelType::TIDx);
+  // Apply the same parallelization to all other tensors
+  scheduler_utils::parallelizeAllLike(out, ir_utils::allTvs(&fusion));
+
+  // Store intermediate stencil results on smem so that they can be
+  // accessed by threads
+  for (auto tv : {flx0, fly0, lap}) {
+    tv->setMemoryType(MemoryType::Shared);
+  }
+
+  /////////////////////////////////
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+
+  const int halo_extent = 2;
+  const int numel_x = 64 + halo_extent * 2;
+  const int numel_y = 64 + halo_extent * 2;
+  const int numel_z = 3;
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::Tensor inp_at = at::randn({numel_z, numel_y, numel_x}, options);
@@ -3240,6 +3421,362 @@ TEST(NVFuserTest, FusionShiftNoPaddingRfactor_CUDA) {
   tv3->reorder({{1, 2}});
 
   ASSERT_ANY_THROW(tv3->rFactor({-2}));
+}
+
+TEST(NVFuserTest, FusionPartialSplit1_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(1);
+  // [I]
+  fusion.addInput(tv0);
+
+  auto tv1 = add(tv0, new Double(0));
+  // [I]
+  auto tv2 = shift(tv1, {1}, false);
+  // [1:I]
+  auto tv3 = shift(tv1, {-1}, false);
+  // [0:I-1]
+  auto tv4 = add(tv2, tv3);
+  // [1:I-1]
+  fusion.addOutput(tv4);
+
+  // Partial split of tv4. Split only the valid range, which is
+  // [1:-1].
+  tv4->split(0, 8, true, true);
+  // [(I-2)/8, 8]
+
+  // Propagates the partial split back to tv1. This means that all of
+  // the other tensors are also shaped as [(I-2)/8, 8], which appears
+  // to mean only the sub region of ((I-2)/8 * 8) is
+  // computed for tv1, tv2 and tv3. It's fine for the tv2 and tv3
+  // tensors as only that sub region is used by tv4. It's also fine
+  // for tv1 since it has halo of size one at each side, so the whole
+  // region is actually calculated for tv1.
+  tv1->computeAt(tv4, 1);
+
+  tv4->axis(-1)->parallelize(ParallelType::TIDx);
+  tv4->axis(-2)->parallelize(ParallelType::BIDx);
+  scheduler_utils::parallelizeAllLike(tv4, {tv1, tv2, tv3});
+
+  tv1->setMemoryType(MemoryType::Shared);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+
+  // gridDim.x is ceilDiv(numel_x - 2, 8), not ceilDiv(numel_x, 8),
+  // so it's going to be just 2 rather than 3.
+  const int numel_x = 18;
+
+  ExpressionEvaluator evaluator(&fusion);
+  std::cerr << tv4->axis(0)->extent() << std::endl;
+  auto root_extent = tv4->getRootDomain()[0]->extent();
+  evaluator.bind(root_extent, numel_x);
+  auto extent_eval = evaluator.evaluate(tv4->axis(0)->extent());
+  TORCH_CHECK(
+      extent_eval.has_value(),
+      "Invalid evaluation of outer domain extent of partial split");
+  TORCH_CHECK(
+      extent_eval.value() == (numel_x - 2) / 8,
+      "Invalid extent of outer domain of partial split");
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  auto options_int = at::TensorOptions().dtype(at::kLong).device(at::kCUDA, 0);
+  at::manual_seed(0);
+  at::Tensor t0 = at::randn({numel_x}, options);
+  std::vector<IValue> inputs = {t0};
+  auto outputs = fe.runFusion(inputs);
+
+  std::vector<at::indexing::TensorIndex> indices{at::indexing::Slice(1, -1)};
+
+  outputs[0] = outputs[0].index(indices);
+
+  auto ref = (shift(t0, {1}) + shift(t0, {-1})).index(indices);
+
+  testValidate(&fusion, outputs, inputs, {ref}, __LINE__, __FILE__);
+}
+
+TEST(NVFuserTest, FusionPartialSplit2_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(1);
+  fusion.addInput(tv0);
+
+  auto tv1 = add(tv0, new Double(0));
+  auto tv2 = shift(tv1, {1}, false);
+  auto tv3 = shift(tv1, {-1}, false);
+  auto tv4 = add(tv2, tv3);
+  fusion.addOutput(tv4);
+
+  auto tv5 = add(tv1, new Double(1));
+  auto tv6 = add(tv5, new Double(1));
+  fusion.addOutput(tv6);
+
+  tv4->split(0, 4, true, true);
+
+  // This causes tv5 and tv6 also to be split with the same partial
+  // offsets, however, since they need to be calculated entirely, the
+  // resulting code would be invalid. It should be detected as part of
+  // initial fusion validation during lowering.
+  tv1->computeAt(tv4, 1);
+
+  // Validation should throw an error due to tv5 and tv6.
+  ASSERT_ANY_THROW(fusion.printKernel());
+}
+
+// 2D version of PartialSplit1
+TEST(NVFuserTest, FusionPartialSplit3_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(2);
+  fusion.addInput(tv0);
+
+  auto tv1 = add(tv0, new Double(0));
+  auto tv2 = shift(tv1, {1, 2}, false);
+  auto tv3 = shift(tv1, {-2, -1}, false);
+  auto tv4 = add(tv2, tv3);
+  fusion.addOutput(tv4);
+
+  tv4->split(1, 8, true, true);
+  tv4->split(0, 4, true, true);
+  tv4->reorder({{1, 2}, {2, 1}});
+
+  tv1->computeAt(tv4, 2);
+
+  tv4->axis(0)->parallelize(ParallelType::BIDy);
+  tv4->axis(1)->parallelize(ParallelType::BIDx);
+  tv4->axis(2)->parallelize(ParallelType::TIDy);
+  tv4->axis(3)->parallelize(ParallelType::TIDx);
+  scheduler_utils::parallelizeAllLike(tv4, {tv1, tv2, tv3});
+
+  tv1->setMemoryType(MemoryType::Shared);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+
+  const int numel_x = 32 + 3;
+  const int numel_y = 32 + 3;
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  auto options_int = at::TensorOptions().dtype(at::kLong).device(at::kCUDA, 0);
+  at::manual_seed(0);
+  at::Tensor t0 = at::randn({numel_x, numel_y}, options);
+  std::vector<IValue> inputs = {t0};
+  auto outputs = fe.runFusion(inputs);
+
+  std::vector<at::indexing::TensorIndex> indices{
+      at::indexing::Slice(1, -2), at::indexing::Slice(2, -1)};
+
+  outputs[0] = outputs[0].index(indices);
+
+  auto ref = (shift(t0, {1, 2}) + shift(t0, {-2, -1})).index(indices);
+
+  testValidate(&fusion, outputs, inputs, {ref}, __LINE__, __FILE__);
+}
+
+// Almost same fusion with Shift5ptStencilChain but non-padded shift
+// and partial split.
+TEST(NVFuserTest, FusionPartialSplit4_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(2);
+  fusion.addInput(tv0);
+
+  std::vector<std::vector<int>> offsets = {{-1, 0}, {1, 0}, {0, -1}, {0, 1}};
+
+  // First stencil: 5pt stencil
+  // stencil1 = (tv0 + tv0[+1][0] + tv0[-1][0] + tv0[0][+1] + tv0[0][-1]) / 5
+  std::vector<TensorView*> tv_stencil1_shifts;
+  for (const auto& offset : offsets) {
+    tv_stencil1_shifts.push_back(shift(tv0, offset, false));
+  }
+
+  auto tv_stencil1 = tv0;
+  for (auto tv : tv_stencil1_shifts) {
+    tv_stencil1 = add(tv_stencil1, tv);
+  }
+
+  tv_stencil1 = div(tv_stencil1, new Double(tv_stencil1_shifts.size() + 1));
+
+  // Second stencil: Same 5pt stencil
+  std::vector<TensorView*> tv_stencil2_shifts;
+  for (const auto& offset : offsets) {
+    tv_stencil2_shifts.push_back(shift(tv_stencil1, offset, false));
+  }
+
+  auto tv_stencil2 = tv_stencil1;
+  for (auto tv : tv_stencil2_shifts) {
+    tv_stencil2 = add(tv_stencil2, tv);
+  }
+
+  tv_stencil2 = div(tv_stencil2, new Double(tv_stencil2_shifts.size() + 1));
+
+  auto tv_out = tv_stencil2;
+
+  fusion.addOutput(tv_out);
+
+  auto tv0_cache = tv0->cache_after();
+
+  std::vector<int> split_factor({16, 16});
+
+  tv_out->split(-1, split_factor[1], true, true);
+  tv_out->split(0, split_factor[0], true, true);
+  tv_out->reorder({{1, 2}, {2, 1}});
+
+  tv0->computeAt(tv_out, 2);
+
+  // Inline completely all inputs to the first stencil output, except for the
+  // tv0 cache
+  for (auto tv : tv_stencil1_shifts) {
+    tv->computeAt(tv_stencil1, -1);
+  }
+
+  // Inline completely all inputs to the second stencil output, except
+  // for the first stencil output
+  for (auto tv : tv_stencil2_shifts) {
+    tv->computeAt(tv_stencil2, -1);
+  }
+
+  tv_out->axis(0)->parallelize(ParallelType::BIDy);
+  tv_out->axis(1)->parallelize(ParallelType::BIDx);
+  tv_out->axis(2)->parallelize(ParallelType::TIDy);
+  tv_out->axis(3)->parallelize(ParallelType::TIDx);
+
+  auto all_values = DependencyCheck::getAllValsBetween(
+      {fusion.inputs().begin(), fusion.inputs().end()}, fusion.outputs());
+  for (auto tv : ir_utils::filterByType<TensorView>(all_values)) {
+    scheduler_utils::parallelizeAllLike(tv_out, {tv});
+  }
+
+  tv0_cache->setMemoryType(MemoryType::Shared);
+  tv_stencil1->setMemoryType(MemoryType::Shared);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+
+  // Input matrix size is 68x68, and the output is 64x64. Both
+  // gridDim.x and gridim.y should be ceilDiv(numel - 4,
+  // split_factor), which is 4. If full split is used, the grid
+  // dimension would be 5.
+  const int numel_x = 64 + 4;
+  const int numel_y = 64 + 4;
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({numel_x, numel_y}, options);
+  std::vector<IValue> inputs = {t0};
+  auto outputs = fe.runFusion(inputs);
+
+  std::vector<at::indexing::TensorIndex> indices{
+      at::indexing::Slice(2, -2), at::indexing::Slice(2, -2)};
+
+  outputs[0] = outputs[0].index(indices);
+
+  auto stencil1 = t0;
+  for (const auto& offset : offsets) {
+    stencil1 = stencil1 + shift(t0, offset);
+  }
+  stencil1 = stencil1 / int(offsets.size() + 1);
+  auto stencil2 = stencil1;
+  for (const auto& offset : offsets) {
+    stencil2 = stencil2 + shift(stencil1, offset);
+  }
+  stencil2 = stencil2 / int(offsets.size() + 1);
+  auto ref = stencil2.index(indices);
+
+  testValidate(&fusion, outputs, inputs, {ref}, __LINE__, __FILE__);
+}
+
+TEST(NVFuserTest, FusionPartialSplit5_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  const int numel_x = 10;
+  const int numel_y = 11;
+
+  // auto tv0 = makeSymbolicTensor(2);
+  auto tv0 = makeConcreteTensor({numel_x, numel_y});
+  fusion.addInput(tv0);
+
+  auto tv1 = shift(tv0, {0, 1}, false);
+  auto tv2 = add(tv1, new Double(1));
+
+  fusion.addOutput(tv2);
+
+  // Partially split tv2 but not tv1. Producer indexing with tv2 as a consumer
+  // requires adjustment of the index to account for the difference of split
+  // offsets.
+  tv2->split(1, 4, true, true);
+  tv1->split(1, 4);
+
+  tv1->computeAt(tv2, 1);
+
+  tv2->axis(1)->parallelize(ParallelType::TIDx);
+  tv1->axis(1)->parallelize(ParallelType::TIDx);
+
+  tv1->setMemoryType(MemoryType::Shared);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({numel_x, numel_y}, options);
+  std::vector<IValue> inputs = {t0};
+  auto outputs = fe.runFusion(inputs);
+
+  std::vector<at::indexing::TensorIndex> indices{
+      at::indexing::Slice(0, at::indexing::None),
+      at::indexing::Slice(1, at::indexing::None)};
+
+  outputs[0] = outputs[0].index(indices);
+
+  auto ref = (shift(t0, {0, 1}) + 1).index(indices);
+
+  testValidate(&fusion, outputs, {t0}, {ref}, __LINE__, __FILE__);
+}
+
+TEST(NVFuserTest, FusionPartialSplit6_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  const int numel_x = 9;
+
+  auto tv0 = makeConcreteTensor({numel_x});
+  fusion.addInput(tv0);
+
+  auto tv1 = add(tv0, new Double(1));
+  auto tv2 = shift(tv1, {1}, false);
+  auto tv3 = add(tv2, new Double(1));
+
+  fusion.addOutput(tv3);
+
+  // Another mix of partial and non-partial split
+  tv1->split(0, 4);
+  tv2->split(0, 4, true, true);
+  tv3->split(0, 4);
+
+  // Just make it easier for compute-sanitizer to flag invalid memory accesses
+  tv1->setMemoryType(MemoryType::Shared);
+  tv2->setMemoryType(MemoryType::Shared);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({numel_x}, options);
+  std::vector<IValue> inputs = {t0};
+  auto outputs = fe.runFusion(inputs);
+
+  std::vector<at::indexing::TensorIndex> indices{
+      at::indexing::Slice(1, at::indexing::None)};
+
+  outputs[0] = outputs[0].index(indices);
+
+  auto ref = (shift(t0 + 1, {1}) + 1).index(indices);
+
+  testValidate(&fusion, outputs, {t0}, {ref}, __LINE__, __FILE__);
 }
 
 } // namespace jit

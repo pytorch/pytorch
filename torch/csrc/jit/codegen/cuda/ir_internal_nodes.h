@@ -410,7 +410,7 @@ class TORCH_CUDA_CU_API IterDomain : public Val {
   IterDomain(
       Val* start,
       Val* extent,
-      Val* stop,
+      Val* stop_offset,
       ParallelType parallel_type = ParallelType::Serial,
       IterType iter_type = IterType::Iteration,
       bool is_rfactor_domain = false);
@@ -425,7 +425,7 @@ class TORCH_CUDA_CU_API IterDomain : public Val {
     auto cloned = new IterDomain(
         start(),
         extent(),
-        stop(),
+        stopOffset(),
         getParallelType(),
         getIterType(),
         isRFactorProduct());
@@ -510,9 +510,9 @@ class TORCH_CUDA_CU_API IterDomain : public Val {
     return start_;
   }
 
-  Val* stop() const {
-    return stop_;
-  }
+  Val* stop() const;
+
+  Val* stopOffset() const;
 
   Val* extent() const {
     TORCH_INTERNAL_ASSERT(extent_ != nullptr);
@@ -583,16 +583,33 @@ class TORCH_CUDA_CU_API IterDomain : public Val {
   friend ReplayTransformations;
   friend IndexReferenceReplay;
 
+  //! start_offset and stop_offset defines partial split. Only root
+  //! domains are allowed to have non-zero start and stop offsets.
   static std::pair<IterDomain*, IterDomain*> split(
       IterDomain* in,
       Val* factor,
-      bool inner_split);
+      bool inner_split,
+      Val* start_offset = nullptr,
+      Val* stop_offset = nullptr);
+
+  //! trim_out_of_bounds controls how the values outside start and stop
+  //! positions are treated. The option is only valid with root
+  //! domains as non-root domains do not have valid start and stop
+  //! positions.
+  //!
+  //! \param trim_out_of_bounds Trims [0, start_] and [-stop_offset_, extent_]
+  static std::pair<IterDomain*, IterDomain*> split(
+      IterDomain* in,
+      Val* factor,
+      bool inner_split,
+      bool trim_out_of_bounds);
 
  private:
-  //! Valid range is defined as [start_, stop_)
+  //! Valid range is defined as [start:-stop_offset]
   Val* const start_ = nullptr;
   Val* const extent_ = nullptr;
-  Val* const stop_ = nullptr;
+  //! Distance of stop from the end
+  Val* const stop_offset_ = nullptr;
   ParallelType parallel_type_ = ParallelType::Serial;
   IterType iter_type_ = IterType::Iteration;
   bool is_rfactor_domain_ = false;
@@ -715,7 +732,11 @@ class TORCH_CUDA_CU_API TensorDomain : public Val {
   //! tv[id{extent}] -> tv[id{ceilDiv(extent, factor)}, id{factor}]
   //! e.g. split(0, 4, inner_split = false) will result in:
   //! tv[id{extent}] -> tv[id{factor}, id{ceilDiv(extent, factor)}]
-  void split(int axis_, Val* factor, bool inner_split);
+  void split(
+      int axis_,
+      Val* factor,
+      bool inner_split,
+      bool trim_out_of_bounds = false);
 
   // Merge axis_o and axis_i. axis_i is the fast changing dimension. Resulting
   // axis is by default placed at original position axis_o
@@ -753,12 +774,19 @@ class TORCH_CUDA_CU_API TensorDomain : public Val {
 //! remainer or outside.
 class TORCH_CUDA_CU_API Split : public Expr {
  public:
+  // start_offset and stop_offset are used to express partial
+  // split. Only the partial domain from start_offset to stop_offset
+  // is split and the outer sub-regions are ignored. Note that both
+  // start_offset and stop_offset are distance from the left end and
+  // right ends, respectively.
   Split(
       IterDomain* outer,
       IterDomain* inner,
       IterDomain* in,
       Val* factor,
-      bool inner_split = true);
+      bool inner_split = true,
+      Val* start_offset = nullptr,
+      Val* stop_offset = nullptr);
 
   Split(const Split* src, IrCloner* ir_cloner);
 
@@ -779,6 +807,19 @@ class TORCH_CUDA_CU_API Split : public Expr {
     return inner_split_;
   }
 
+  Val* startOffset() const {
+    TORCH_INTERNAL_ASSERT(start_offset_ != nullptr);
+    return start_offset_;
+  }
+
+  Val* stopOffset() const {
+    TORCH_INTERNAL_ASSERT(stop_offset_ != nullptr);
+    return stop_offset_;
+  }
+
+  //! Utility function to compute the split extent.
+  static Val* extent(Val* in_extent, Val* start_offset, Val* stop_offset);
+
   bool sameAs(const Statement* other) const override;
 
  private:
@@ -787,6 +828,12 @@ class TORCH_CUDA_CU_API Split : public Expr {
   IterDomain* const in_ = nullptr;
   Val* const factor_ = nullptr;
   bool inner_split_ = true;
+  //! Start position of the input domain. Non-zero means partial
+  //! split. Elements until this offset are ignored.
+  Val* const start_offset_ = nullptr;
+  //! Offset from extent of the input domain. Non-zero means partial
+  //! split. Elements after this offset are ignored.
+  Val* const stop_offset_ = nullptr;
 };
 
 //! Merge the IterDomains outer and inner into one domain, outer and inner

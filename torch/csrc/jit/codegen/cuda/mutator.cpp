@@ -15,16 +15,16 @@ namespace cuda {
 Statement* OptOutMutator::mutate(IterDomain* id) {
   Val* start = mutateAsVal(id->start())->asVal();
   Val* extent = mutateAsVal(id->extent())->asVal();
-  Val* stop = mutateAsVal(id->stop())->asVal();
+  Val* stop_offset = mutateAsVal(id->stopOffset())->asVal();
   if (start->sameAs(id->start()) && extent->sameAs(id->extent()) &&
-      stop->sameAs(id->stop())) {
+      stop_offset->sameAs(id->stopOffset())) {
     return id;
   }
 
   Val* mutated_val = new IterDomain(
       start,
       extent,
-      stop,
+      stop_offset,
       id->getParallelType(),
       id->getIterType(),
       id->isRFactorProduct());

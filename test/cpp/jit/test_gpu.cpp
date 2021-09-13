@@ -1168,31 +1168,31 @@ TEST(NVFuserTest, FusionParser_CUDA) {
   const std::string expected_kernel = R"(
 __global__ void CUDAGeneratedKernel(Tensor<float, 1> T0, Tensor<float, 1> T1, Tensor<float, 1> T3) {
   if ((((((((((nvfuser_index_t)blockIdx.x) * 1) + (1 - 1)) * 1) + (1 - 1)) * 128) + ((nvfuser_index_t)threadIdx.x)) < T0.size[0])) {
-    constexpr nvfuser_index_t ki171 = 0;
+    constexpr nvfuser_index_t ki173 = 0;
     float T5[1];
-    constexpr nvfuser_index_t ki205 = 0;
-    T5[ki205] = 0;
-    constexpr nvfuser_index_t ki196 = 0;
-    T5[ki196]
-       = T1[(((((((((nvfuser_index_t)blockIdx.x) * 1) + ki171) * 1) + ki196) * 128) + ((nvfuser_index_t)threadIdx.x)) * 1)];
+    constexpr nvfuser_index_t ki207 = 0;
+    T5[ki207] = 0;
+    constexpr nvfuser_index_t ki198 = 0;
+    T5[ki198]
+       = T1[(((((((((nvfuser_index_t)blockIdx.x) * 1) + ki173) * 1) + ki198) * 128) + ((nvfuser_index_t)threadIdx.x)) * 1)];
     float T4[1];
-    constexpr nvfuser_index_t ki211 = 0;
-    T4[ki211] = 0;
-    constexpr nvfuser_index_t ki191 = 0;
-    T4[ki191]
-       = T0[(((((((((nvfuser_index_t)blockIdx.x) * 1) + ki171) * 1) + ki191) * 128) + ((nvfuser_index_t)threadIdx.x)) * 1)];
+    constexpr nvfuser_index_t ki213 = 0;
+    T4[ki213] = 0;
+    constexpr nvfuser_index_t ki193 = 0;
+    T4[ki193]
+       = T0[(((((((((nvfuser_index_t)blockIdx.x) * 1) + ki173) * 1) + ki193) * 128) + ((nvfuser_index_t)threadIdx.x)) * 1)];
     float T6[1];
-    constexpr nvfuser_index_t ki180 = 0;
+    constexpr nvfuser_index_t ki182 = 0;
     float T2[1];
     T2[0]
-      = T4[ki180]
-      * T5[ki180];
-    T6[ki180]
+      = T4[ki182]
+      * T5[ki182];
+    T6[ki182]
       = T2[0]
-      * T4[ki180];
-    constexpr nvfuser_index_t ki173 = 0;
-    T3[(((((((((nvfuser_index_t)blockIdx.x) * 1) + ki171) * 1) + ki173) * 128) + ((nvfuser_index_t)threadIdx.x)) * 1)]
-       = T6[ki173];
+      * T4[ki182];
+    constexpr nvfuser_index_t ki175 = 0;
+    T3[(((((((((nvfuser_index_t)blockIdx.x) * 1) + ki173) * 1) + ki175) * 128) + ((nvfuser_index_t)threadIdx.x)) * 1)]
+       = T6[ki175];
   }
 }
 )";

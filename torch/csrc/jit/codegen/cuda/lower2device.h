@@ -12,6 +12,7 @@
 #include <torch/csrc/jit/codegen/cuda/lower_trivial_reductions.h>
 #include <torch/csrc/jit/codegen/cuda/lower_warp_reduce.h>
 #include <torch/csrc/jit/codegen/cuda/parallel_dimension_map.h>
+#include <torch/csrc/jit/codegen/cuda/partial_split_map.h>
 #include <torch/csrc/jit/codegen/cuda/root_domain_map.h>
 
 #include <memory>
@@ -102,6 +103,14 @@ class TORCH_CUDA_CU_API GpuLower {
     return warp_pad_info_;
   }
 
+  PartialSplitMap& partialSplitMap() {
+    return partial_split_map_;
+  }
+
+  const PartialSplitMap& partialSplitMap() const {
+    return partial_split_map_;
+  }
+
  private:
   void lower();
 
@@ -137,6 +146,7 @@ class TORCH_CUDA_CU_API GpuLower {
   LocalAllocationInfoMap local_allocation_info_map_;
   WarpPaddedParallelInfo warp_pad_info_;
   ParallelDimensionMap parallel_dimension_map_;
+  PartialSplitMap partial_split_map_;
 
   Fusion* fusion_ = nullptr;
 };

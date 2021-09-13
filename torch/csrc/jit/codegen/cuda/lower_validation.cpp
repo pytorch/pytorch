@@ -5,10 +5,13 @@
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
+#include <torch/csrc/jit/codegen/cuda/kernel_ir_printer.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
 #include <torch/csrc/jit/codegen/cuda/lower_utils.h>
 #include <torch/csrc/jit/codegen/cuda/transform_replay.h>
 #include <torch/csrc/jit/codegen/cuda/type.h>
+
+#include <limits>
 
 namespace torch {
 namespace jit {
@@ -577,6 +580,187 @@ void validateParallelize(Fusion* fusion) {
               stringifyThread(consumer_ptype),
               ".");
         }
+      }
+    }
+  }
+}
+
+namespace {
+
+// Backward propagation of partial ranges from outputs to
+// inputs. Necessary to determine required ranges to compute.
+//
+// Example:
+//  tv0: [0:N]
+//  tv1: shift(tv0, {1}) -> [1:N]
+//  tv2: shift(tv0, {-1}) -> [0:N-1]
+//  tv3: tv1 + tv2 -> [1:N-1]
+//
+// In this case, the valid range of tv3 starts at 1 and ends at
+// N-1. This means that not all of the values of tv1 and tv2 are
+// actually necessary. Specifically, tv1[0] and tv2[N-1] aren't used
+// for tv3. This function calculates the required minimum range of
+// each tensor that needs to be computed.
+std::unordered_map<IterDomain*, std::pair<int64_t, int64_t>> getLiveRangeOffsets(
+    Fusion* fusion) {
+  auto exprs = ExprSort::getExprs(fusion);
+
+  std::unordered_map<IterDomain*, std::pair<int64_t, int64_t>> map;
+
+  ExpressionEvaluator ee(fusion);
+
+  for (auto it = exprs.rbegin(); it != exprs.rend(); ++it) {
+    auto expr = *it;
+    for (auto consumer : ir_utils::filterByType<TensorView>(expr->outputs())) {
+      for (auto consumer_root : consumer->getRootDomain()) {
+        auto consumer_start_offset = ee.evaluate(consumer_root->start());
+        auto consumer_stop_offset = ee.evaluate(consumer_root->stopOffset());
+        TORCH_INTERNAL_ASSERT(
+            consumer_start_offset.has_value(),
+            "Can't evaluate start value of ",
+            consumer_root->start());
+        TORCH_INTERNAL_ASSERT(
+            consumer_stop_offset.has_value(),
+            "Can't evaluate stop value of ",
+            consumer_root->stopOffset());
+        auto it = map.find(consumer_root);
+        if (it == map.end() || consumer->isFusionOutput()) {
+          // No range set for this root domain, which means this
+          // consumer_tensor is an output tensor or the consumer_root
+          // domain is a reduction domain. In either case, the
+          // required range is simply defined by the start and stop
+          // offsets of the root domain.
+          // Also, when consumer is an output, even if it's not
+          // terminating, the range to compute must not be affected by
+          // how it's used by its consumers because an output tensor
+          // is visible to outside of the fusion.
+          map.insert(
+              {consumer_root,
+               {consumer_start_offset.value(), consumer_stop_offset.value()}});
+        } else {
+          // When the range of this root domain is already set, it
+          // must be set by its consumers. Make sure the required
+          // range by the consumers is covered by the defined range of
+          // this root domain.
+          auto& consumer_range = it->second;
+          TORCH_INTERNAL_ASSERT(
+              consumer_start_offset.value() <= consumer_range.first);
+          TORCH_INTERNAL_ASSERT(
+              consumer_stop_offset.value() <= consumer_range.second);
+        }
+      }
+
+      // Propagate the range information from consumers to the
+      // produces. Note that the effect on the range by shift and
+      // gather is not considered here but taken care by halo regions.
+      for (auto producer : ir_utils::filterByType<TensorView>(expr->inputs())) {
+        auto c2p =
+            PairwiseRootDomainMap(producer, consumer)
+                .mapConsumerToProducer(consumer->domain(), producer->domain());
+        for (auto consumer_root : consumer->getRootDomain()) {
+          auto producer_it = c2p.find(consumer_root);
+          if (producer_it == c2p.end()) {
+            continue;
+          }
+          auto producer_root = producer_it->second;
+          auto& consumer_range = map.at(consumer_root);
+          const std::pair<int64_t, int64_t> init_range{
+              std::numeric_limits<int64_t>::max(),
+              std::numeric_limits<int64_t>::max()};
+          auto& producer_range =
+              map.insert({producer_root, init_range}).first->second;
+          producer_range.first =
+              std::min(producer_range.first, consumer_range.first);
+          producer_range.second =
+              std::min(producer_range.second, consumer_range.second);
+        }
+      }
+    }
+  }
+
+  return map;
+}
+
+// Make sure that a partial split with split_offset does not violate
+// the required range defined by domain_offset. Suppose checking the
+// start side of a root domain. Only positions at split_offset or
+// larger are going to be computed, and all positions starting at
+// domain_offset must be computed, thus split_offset must be smaller
+// or equal to domain_offset. The same condition must hold for the end
+// side of the domain.
+//
+// In order to validate this condition, the split offset is assumed to
+// be a statically known constant value. This is not a hard
+// requirement, but otherwise a runtime check would be needed.
+void validateSplit(
+    Val* split_offset,
+    int64_t domain_offset,
+    const std::string& err_msg_prefix) {
+  ExpressionEvaluator ee(split_offset->fusion());
+
+  TORCH_INTERNAL_ASSERT(split_offset->isA<Int>());
+  auto split_offset_value = ee.evaluate(split_offset);
+  TORCH_INTERNAL_ASSERT(
+      split_offset_value.has_value(),
+      err_msg_prefix,
+      ": Unknown offset of split: ",
+      split_offset);
+
+  TORCH_INTERNAL_ASSERT(
+      split_offset_value.value() <= domain_offset,
+      err_msg_prefix,
+      ": Split offset is larger than the domain offset.",
+      " Split offset: ",
+      split_offset_value.value(),
+      ". Domain offset: ",
+      domain_offset);
+}
+
+} // namespace
+
+void validatePartialSplit(Fusion* fusion) {
+  FUSER_PERF_SCOPE("GpuLower::Lower::validatePartialSplit");
+  FusionGuard fg(fusion);
+
+  // If a root domain is partially split, only the sub range defined
+  // by the start and stop offsets of the partial split is
+  // computed. That sub range must cover the required range of the
+  // domain. So, the first thing to do is to determine the required
+  // minimum range of each root domain. Then, check if any partial
+  // split could result in a smaller range than the required range.
+
+  // Compute the required range of each root domain
+  auto range_info = getLiveRangeOffsets(fusion);
+
+  for (auto tv : ir_utils::allTvs(fusion)) {
+    auto exprs = ir_utils::historyOf(tv);
+    for (auto split : ir_utils::filterByType<Split>(exprs)) {
+      // When the start and stop offsets are not zero, make sure the
+      // range defined by the split includes the required range to
+      // compute. If both of the split offsets are zero, this
+      // condition is obviously true. Also, this validation only needs
+      // to be done with root domains. Since the start and stop
+      // offsets of non-root domains must be just zero, they are
+      // skipped at this point.
+      if (split->startOffset()->isZeroInt() &&
+          split->stopOffset()->isZeroInt()) {
+        continue;
+      }
+      auto root_domain = split->in();
+      std::stringstream err_msg_prefix;
+      err_msg_prefix << "Error with " << root_domain << " in T" << tv->name();
+      TORCH_INTERNAL_ASSERT(range_info.find(root_domain) != range_info.end());
+      const auto& valid_range = range_info.at(root_domain);
+      // Check the start offset. If it's zero, no validation regarding
+      // the required range can occur.
+      if (!split->startOffset()->isZeroInt()) {
+        validateSplit(
+            split->startOffset(), valid_range.first, err_msg_prefix.str());
+      }
+      // Same for the stop offset.
+      if (!split->stopOffset()->isZeroInt()) {
+        validateSplit(
+            split->stopOffset(), valid_range.second, err_msg_prefix.str());
       }
     }
   }

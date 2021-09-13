@@ -403,6 +403,14 @@ void IrPrinter::handle(const Split* s) {
   handle(s->outer());
   os_ << ", ";
   handle(s->inner());
+  if (s->startOffset()) {
+    os_ << ", start offset: ";
+    handle(s->startOffset());
+  }
+  if (s->stopOffset()) {
+    os_ << ", stop offset: ";
+    handle(s->stopOffset());
+  }
   os_ << "\n";
 }
 

@@ -45,7 +45,8 @@ void ReplayTransformations::handle(Split* s) {
       "Transform traversal failed, modified a node but it was not a leaf node.");
 
   // Replay the split onto mapped
-  auto outs = IterDomain::split(mapped, s->factor(), s->innerSplit());
+  auto outs = IterDomain::split(
+      mapped, s->factor(), s->innerSplit(), s->startOffset(), s->stopOffset());
   // Remove mapped from the leaf IDs
   leaf_ids_.erase(mapped);
 
@@ -423,7 +424,9 @@ BestEffortReplay::BestEffortReplay(
       auto r_split = replay_expr->as<Split>();
       auto t_split = target_expr->as<Split>();
       if (!r_split->factor()->sameAs(t_split->factor()) ||
-          r_split->innerSplit() != t_split->innerSplit()) {
+          r_split->innerSplit() != t_split->innerSplit() ||
+          !r_split->startOffset()->sameAs(t_split->startOffset()) ||
+          !r_split->stopOffset()->sameAs(t_split->stopOffset())) {
         TORCH_INTERNAL_ASSERT(!replay_has_rfactor_inp, err_str);
         continue;
       }

@@ -70,7 +70,14 @@ void IndexReferenceReplay::handle(Split* split) {
   }
 
   // Replay the provided split operation and add it to the reference DAG
-  new Split(ref_outer, ref_inner, ref_in, split->factor(), split->innerSplit());
+  new Split(
+      ref_outer,
+      ref_inner,
+      ref_in,
+      split->factor(),
+      split->innerSplit(),
+      split->startOffset(),
+      split->stopOffset());
 
   // Mark producers and consumers
   ref_id_consumed_.emplace(ref_in);

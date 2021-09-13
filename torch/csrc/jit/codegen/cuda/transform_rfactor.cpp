@@ -241,7 +241,7 @@ TensorDomain* TransformRFactor::runReplay(
         new_root[i] = new IterDomain(
             id->start(),
             id->extent(),
-            id->stop(),
+            id->stopOffset(),
             id->getParallelType(),
             IterType::Reduction,
             true);
@@ -251,7 +251,7 @@ TensorDomain* TransformRFactor::runReplay(
         new_root[i] = new IterDomain(
             id->start(),
             id->extent(),
-            id->stop(),
+            id->stopOffset(),
             id->getParallelType(),
             IterType::Iteration,
             false);
