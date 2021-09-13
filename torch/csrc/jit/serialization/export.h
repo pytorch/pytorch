@@ -229,5 +229,8 @@ struct TORCH_API BytecodeEmitModeGuard {
   bool prev_default_args_before_out_args;
 };
 
+TORCH_API IValue to_tuple(std::vector<IValue> ivalues);
+TORCH_API IValue
+Table(const std::vector<std::pair<std::string, IValue>>& entries);
 } // namespace jit
 } // namespace torch
