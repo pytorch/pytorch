@@ -20,7 +20,7 @@ from .fake_quantize import (
     default_affine_fixed_qparams_fake_quant,
     default_symmetric_fixed_qparams_fake_quant,
 )
-from .utils import get_combined_dict
+from torch.ao.quantization.utils import get_combined_dict
 
 # Default map for swapping float module to reference quantized modules
 DEFAULT_REFERENCE_STATIC_QUANT_MODULE_MAPPINGS : Dict[Callable, Any] = {
