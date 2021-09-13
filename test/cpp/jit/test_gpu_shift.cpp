@@ -3469,7 +3469,6 @@ TEST(NVFuserTest, FusionPartialSplit1_CUDA) {
   const int numel_x = 18;
 
   ExpressionEvaluator evaluator(&fusion);
-  std::cerr << tv4->axis(0)->extent() << std::endl;
   auto root_extent = tv4->getRootDomain()[0]->extent();
   evaluator.bind(root_extent, numel_x);
   auto extent_eval = evaluator.evaluate(tv4->axis(0)->extent());
