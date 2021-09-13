@@ -138,3 +138,7 @@
 [submodule "third_party/breakpad"]
 	path = third_party/breakpad
 	url = https://github.com/driazati/breakpad.git
+[submodule "third_party/ideep"]
+	path = third_party/ideep
+	url = https://github.com/jianan-gu/ideep
+	branch = pytorch_dlrm
