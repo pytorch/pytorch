@@ -4,7 +4,6 @@
 #include <torch/csrc/jit/mobile/interpreter.h>
 #include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/csrc/jit/runtime/operator.h>
-#include <torch/custom_class_detail.h>
 
 namespace torch {
 namespace jit {

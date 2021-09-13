@@ -14,8 +14,8 @@ struct Code;
 
 class Function {
  public:
-  Function(c10::QualifiedName name);
-  bool run(Stack& stack) const;
+  TORCH_API Function(c10::QualifiedName name);
+  TORCH_API bool run(Stack& stack) const;
   c10::IValue operator()(Stack& stack) const;
   const std::string& name() const;
   TORCH_API const c10::QualifiedName& qualname() const;
