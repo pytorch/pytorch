@@ -1316,86 +1316,104 @@ struct to_ir {
     return emitIfExpr(expr.range(), cond_value, true_expr, false_expr);
   }
 
- template<class F1, class F2>
- void refineAndSetTypeHintOrPopulateCandidatesVector(const TypePtr& type_hint, TypePtr* refined_type_hint_ptr, std::vector<TypePtr>* all_candidates, const TypeKind& kind_to_match, const std::string& match_repr, const Expr& src, const F1& fn_if_match, const F2& fn_if_anytype) {
+  template <class F1, class F2, class F3>
+  void refineAndSetTypeHintOrPopulateCandidatesVector(
+      const TypePtr& type_hint,
+      TypePtr* refined_type_hint_ptr,
+      std::vector<TypePtr>* all_candidates,
+      const std::string& match_repr,
+      const Expr& src,
+      const F1& type_match,
+      const F2& do_if_match,
+      const F3& do_if_anytype) {
     if (auto union_type_hint = (*refined_type_hint_ptr)->cast<UnionType>()) {
-        std::vector<TypePtr> candidate_types;
-        std::copy_if(
-            union_type_hint->containedTypes().begin(),
-            union_type_hint->containedTypes().end(),
-            std::back_inserter(candidate_types),
-            [&](TypePtr type_ptr) {
-                return type_ptr->kind() == kind_to_match;
-            });
-        if (candidate_types.empty()) {
-            throw ErrorReport(src) << "Expected an Union type annotation "
-                                  << "with an inner " << match_repr
-                                  << " type, but got "
-                                  << (*refined_type_hint_ptr)->repr_str();
-        } else if (candidate_types.size() == 1) {
-            (*refined_type_hint_ptr) = candidate_types[0];
-        } else {
-            all_candidates = &candidate_types;
-        }
+      std::vector<TypePtr> candidate_types;
+      std::copy_if(
+          union_type_hint->containedTypes().begin(),
+          union_type_hint->containedTypes().end(),
+          std::back_inserter(candidate_types),
+          [&](TypePtr type_ptr) { return type_match(type_ptr); });
+      if (candidate_types.empty()) {
+        throw ErrorReport(src)
+            << "Expected an Union type annotation "
+            << "with an inner " << match_repr << " type, but got "
+            << (*refined_type_hint_ptr)->repr_str();
+      } else if (candidate_types.size() == 1) {
+        (*refined_type_hint_ptr) = candidate_types[0];
+      } else {
+        all_candidates = &candidate_types;
+      }
     } else if (
-        auto optional_type_hint = (*refined_type_hint_ptr)->cast<OptionalType>()) {
-        (*refined_type_hint_ptr) = optional_type_hint->getElementType();
+        auto optional_type_hint =
+            (*refined_type_hint_ptr)->cast<OptionalType>()) {
+      (*refined_type_hint_ptr) = optional_type_hint->getElementType();
     }
 
     // If we had any annotation OTHER THAN a Union that can hold more
     // than one type of List
     if (all_candidates->empty()) {
-        if ((*refined_type_hint_ptr)->kind() == kind_to_match) {
-          fn_if_match();
-        } else if ((*refined_type_hint_ptr)->kind() == AnyType::Kind) {
-          fn_if_anytype();
-        } else {
-            throw ErrorReport(src) << "Expected an annotation of type "
-                                << match_repr << " but got " << type_hint->repr_str();
-        }
+      if (type_match(*refined_type_hint_ptr)) {
+        do_if_match();
+      } else if ((*refined_type_hint_ptr)->kind() == AnyType::Kind) {
+        do_if_anytype();
+      } else {
+        throw ErrorReport(src)
+            << "Expected an annotation of type " << match_repr << " but got "
+            << type_hint->repr_str();
+      }
     }
   }
 
-  void refineAndSetListTypeHintFromCandidatesVector(const std::vector<TypePtr>& all_candidates, const TypePtr& type_hint, TypePtr* refined_type_hint_ptr, const TypePtr& unified_elem_type, const Expr& src) {
+  void refineAndSetListTypeHintFromCandidatesVector(
+      const std::vector<TypePtr>& all_candidates,
+      const TypePtr& type_hint,
+      TypePtr* refined_type_hint_ptr,
+      const TypePtr& unified_elem_type,
+      const Expr& src) {
     TypePtr greatest_elem_type = nullptr;
     std::for_each(
-        all_candidates.begin(),
-        all_candidates.end(),
-        [&](TypePtr candidate) {
-            auto candidate_elem_type =
-                candidate->expect<ListType>()->getElementType();
-            if (unified_elem_type->isSubtypeOf(candidate_elem_type)) {
-                if (!greatest_elem_type) {
-                    greatest_elem_type = candidate_elem_type;
-                } else {
-                    greatest_elem_type =
-                        *(unifyTypes(greatest_elem_type, candidate_elem_type));
-                }
+        all_candidates.begin(), all_candidates.end(), [&](TypePtr candidate) {
+          auto candidate_elem_type =
+              candidate->expect<ListType>()->getElementType();
+          if (unified_elem_type->isSubtypeOf(candidate_elem_type)) {
+            if (!greatest_elem_type) {
+              greatest_elem_type = candidate_elem_type;
+            } else {
+              greatest_elem_type =
+                  *(unifyTypes(greatest_elem_type, candidate_elem_type));
             }
+          }
         });
     if (!greatest_elem_type) {
-        std::stringstream vector_repr;
-        for (size_t i = 0; i < all_candidates.size(); ++i) {
+      std::stringstream vector_repr;
+      for (size_t i = 0; i < all_candidates.size(); ++i) {
         if (i > 0 && all_candidates.size() > 2) {
-            vector_repr << ", ";
+          vector_repr << ", ";
         }
         if (i != 0 && i == all_candidates.size() - 1) {
-            vector_repr << " or ";
+          vector_repr << " or ";
         }
         vector_repr << all_candidates[i]->repr_str();
-        }
-        throw ErrorReport(src)
-            << "Union type annotation `" << type_hint->repr_str()
-            << "` can hold " << vector_repr.str() << ", but none of "
-            << "those types match the types of the given list "
-            << "elements, which were unified to "
-            << unified_elem_type->repr_str();
+      }
+      throw ErrorReport(src)
+          << "Union type annotation `" << type_hint->repr_str() << "` can hold "
+          << vector_repr.str() << ", but none of "
+          << "those types match the types of the given list "
+          << "elements, which were unified to "
+          << unified_elem_type->repr_str();
     } else {
-        (*refined_type_hint_ptr) = ListType::create(greatest_elem_type);;
+      (*refined_type_hint_ptr) = ListType::create(greatest_elem_type);
+      ;
     }
   }
 
-  void refineAndSetDictTypeHintFromCandidatesVector(const std::vector<TypePtr>& all_candidates, const TypePtr& type_hint, TypePtr* refined_type_hint_ptr, const TypePtr& known_key_type, const TypePtr& known_value_type, const Expr& src) {
+  void refineAndSetDictTypeHintFromCandidatesVector(
+      const std::vector<TypePtr>& all_candidates,
+      const TypePtr& type_hint,
+      TypePtr* refined_type_hint_ptr,
+      const TypePtr& known_key_type,
+      const TypePtr& known_value_type,
+      const Expr& src) {
     TypePtr candidate_key_type = nullptr;
     TypePtr candidate_value_type = nullptr;
     TypePtr candidate = nullptr;
@@ -1409,7 +1427,7 @@ struct to_ir {
           known_value_type->isSubtypeOf(current_value_type)) {
         if (!candidate ||
             (candidate_key_type->isSubtypeOf(current_key_type) &&
-              candidate_value_type->isSubtypeOf(current_value_type))) {
+             candidate_value_type->isSubtypeOf(current_value_type))) {
           candidate_key_type = current_key_type;
           candidate_value_type = current_value_type;
           candidate = current_candidate;
@@ -1429,8 +1447,8 @@ struct to_ir {
         vector_repr << all_candidates[i]->repr_str();
       }
       throw ErrorReport(src)
-          << "Union type annotation `" << type_hint->repr_str()
-          << "` can hold " << vector_repr.str() << ", but none of "
+          << "Union type annotation `" << type_hint->repr_str() << "` can hold "
+          << vector_repr.str() << ", but none of "
           << "those list types can hold the types of the given dict"
           << " elements, which were unified to " << candidate->repr_str();
     } else {
@@ -1453,8 +1471,19 @@ struct to_ir {
     std::vector<TypePtr> all_candidates = {};
 
     if (refined_type_hint) {
-      auto fn = [&](){ list_value->setType(refined_type_hint); };
-      refineAndSetTypeHintOrPopulateCandidatesVector(type_hint, &refined_type_hint, &all_candidates, ListType::Kind, "List", lc, fn, fn);
+      auto do_if_type_match = [&]() { list_value->setType(refined_type_hint); };
+      auto type_match = [&](const TypePtr& t) {
+        return t->isSubtypeOf(AnyListType::get());
+      };
+      refineAndSetTypeHintOrPopulateCandidatesVector(
+          type_hint,
+          &refined_type_hint,
+          &all_candidates,
+          "List",
+          lc,
+          type_match,
+          do_if_type_match,
+          do_if_type_match);
     }
 
     bool seen_first_elem = false;
@@ -1528,7 +1557,12 @@ struct to_ir {
       if (!all_candidates.empty()) {
         // If we had a Union type annotation that could hold more than
         // one different type of `List`
-        refined_type_hint = refineAndSetListTypeHintFromCandidatesVector(all_candidates, type_hint, &refined_type_hint, *unified_elem_type, lc);
+        refineAndSetListTypeHintFromCandidatesVector(
+            all_candidates,
+            type_hint,
+            &refined_type_hint,
+            *unified_elem_type,
+            lc);
       } else if (!refined_type_hint) {
         list_value->setType(ListType::create(*unified_elem_type));
       }
@@ -1560,16 +1594,17 @@ struct to_ir {
     std::vector<TypePtr> all_candidates = {};
 
     if (refined_type_hint) {
-      auto fn = [&](){ dict_value->setType(refined_type_hint); };
+      auto fn = [&]() { dict_value->setType(refined_type_hint); };
 
-      refineAndSetTypeHintOrPopulateCandidatesVector(type_hint,
-                                                     &refined_type_hint,
-                                                     &all_candidates,
-                                                     DictType::Kind,
-                                                     "Dict",
-                                                     dc,
-                                                     fn,
-                                                     fn);
+      refineAndSetTypeHintOrPopulateCandidatesVector(
+          type_hint,
+          &refined_type_hint,
+          &all_candidates,
+          DictType::Kind,
+          "Dict",
+          dc,
+          fn,
+          fn);
     }
 
     TypePtr first_generated_key_type = nullptr;
@@ -1675,12 +1710,13 @@ struct to_ir {
       }
 
       if (type_hint && !all_candidates.empty()) {
-         refineAndSetDictTypeHintFromCandidatesVector(all_candidates,
-                                                      type_hint,
-                                                      &refined_type_hint,
-                                                      k->type(),
-                                                      *unified_value_type,
-                                                      dc);
+        refineAndSetDictTypeHintFromCandidatesVector(
+            all_candidates,
+            type_hint,
+            &refined_type_hint,
+            k->type(),
+            *unified_value_type,
+            dc);
       }
 
       if (!refined_type_hint) {
@@ -4012,25 +4048,29 @@ struct to_ir {
     std::vector<TypePtr> all_candidates = {};
 
     if (refined_type_hint) {
-      auto fn = [&]() {
+      auto do_if_type_match = [&]() {
         auto list_type_hint = refined_type_hint->cast<ListType>();
         inferred_elem_type = list_type_hint->getElementType();
       };
 
-      refineAndSetTypeHintOrPopulateCandidatesVector(type_hint,
-                                                     &refined_type_hint,
-                                                     &all_candidates,
-                                                     ListType::Kind,
-                                                     "List",
-                                                     ll,
-                                                     fn,
-                                                     fn);
+      auto type_match = [&](const TypePtr& t) {
+        return t->isSubtypeOf(AnyListType::get());
+      };
+
+      refineAndSetTypeHintOrPopulateCandidatesVector(
+          type_hint,
+          &refined_type_hint,
+          &all_candidates,
+          "List",
+          ll,
+          type_match,
+          do_if_type_match,
+          do_if_type_match);
 
       if (!all_candidates.empty() && values.empty()) {
         throw ErrorReport(ll)
             << "Cannot assign an empty list to a "
-            << "variable annotated to be type "
-            << refined_type_hint->repr_str()
+            << "variable annotated to be type " << refined_type_hint->repr_str()
             << " because there are multiple possible List "
             << "type candidates in the Union annotation";
       }
@@ -4074,12 +4114,14 @@ struct to_ir {
       }
 
       if (!all_candidates.empty()) {
-        refineAndSetListTypeHintFromCandidatesVector(all_candidates,
-                                                     type_hint,
-                                                     &refined_type_hint,
-                                                     *unified_elem_type,
-                                                     ll);
-       inferred_elem_type = refined_type_hint->expect<ListType>()->getElementType();
+        refineAndSetListTypeHintFromCandidatesVector(
+            all_candidates,
+            type_hint,
+            &refined_type_hint,
+            *unified_elem_type,
+            ll);
+        inferred_elem_type =
+            refined_type_hint->expect<ListType>()->getElementType();
       }
 
       // We only want to set `elem_type` if we don't have a type hint
@@ -4114,11 +4156,11 @@ struct to_ir {
       keys.push_back(emitExpr(Expr(key_trees[i])));
       values.push_back(emitExpr(Expr(value_trees[i])));
 
-      if (i != 0 && keys[i-1]->type()->kind() != keys[i]->type()->kind()) {
+      if (i != 0 && keys[i - 1]->type()->kind() != keys[i]->type()->kind()) {
         throw ErrorReport(key_trees[i])
             << "Dict keys must contain "
             << "only a single type. Expected: "
-            << keys[i-1]->type()->repr_str() << " but found "
+            << keys[i - 1]->type()->repr_str() << " but found "
             << keys[i]->type()->repr_str() << " instead";
       }
     }
@@ -4151,14 +4193,15 @@ struct to_ir {
         }
       };
 
-      refineAndSetTypeHintOrPopulateCandidatesVector(type_hint,
-                                                     &refined_type_hint,
-                                                     &all_candidates,
-                                                     DictType::Kind,
-                                                     "Dict",
-                                                     dl,
-                                                     fn_if_match,
-                                                     fn_if_anytype);
+      refineAndSetTypeHintOrPopulateCandidatesVector(
+          type_hint,
+          &refined_type_hint,
+          &all_candidates,
+          DictType::Kind,
+          "Dict",
+          dl,
+          fn_if_match,
+          fn_if_anytype);
 
       if (!all_candidates.empty() && values.empty()) {
         throw ErrorReport(dl)
@@ -4182,8 +4225,7 @@ struct to_ir {
         (key_type != nullptr && value_type != nullptr));
 
     if (!values.empty()) {
-      auto value_types =
-          fmap(values, [](const Value* v) { return v->type(); });
+      auto value_types = fmap(values, [](const Value* v) { return v->type(); });
 
       std::stringstream nowhere; // never used
 
@@ -4196,13 +4238,13 @@ struct to_ir {
       if (refined_type_hint && !all_candidates.empty()) {
         key_type = refined_type_hint->expect<DictType>()->getKeyType();
         value_type = refined_type_hint->expect<DictType>()->getValueType();
-        refineAndSetDictTypeHintFromCandidatesVector(all_candidates,
-                                                     type_hint,
-                                                     &refined_type_hint,
-                                                     keys[0]->type(),
-                                                     *unified_value_type,
-                                                     dl);
-
+        refineAndSetDictTypeHintFromCandidatesVector(
+            all_candidates,
+            type_hint,
+            &refined_type_hint,
+            keys[0]->type(),
+            *unified_value_type,
+            dl);
       }
 
       if (refined_type_hint) {
