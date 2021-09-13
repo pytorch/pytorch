@@ -8,7 +8,7 @@ from typing import Dict, Any, List, Union
 _lambda_client = None
 
 
-def sprint(*args):
+def sprint(*args: Any) -> None:
     print("[scribe]", *args)
 
 
@@ -76,12 +76,7 @@ def register_rds_schema(table_name: str, schema: Dict[str, str]) -> None:
     }
 
     event = [
-        {
-            "create_table": {
-                "table_name": table_name,
-                "fields": {**schema, **base},
-            }
-        }
+        {"create_table": {"table_name": table_name, "fields": {**schema, **base},}}
     ]
 
     invoke_rds(event)
@@ -119,13 +114,7 @@ def rds_saved_query(query_names: Union[str, List[str]]) -> Any:
 
     events = []
     for name in query_names:
-        events.append(
-            {
-                "read": {
-                    "saved_query_name": name,
-                }
-            }
-        )
+        events.append({"read": {"saved_query_name": name,}})
 
     return invoke_rds(events)
 
@@ -148,19 +137,8 @@ def rds_write(
     events = []
     for values in values_list:
         events.append(
-            {
-                "write": {
-                    "table_name": table_name,
-                    "values": {**values, **base},
-                }
-            }
+            {"write": {"table_name": table_name, "values": {**values, **base},}}
         )
 
     print("Wrote stats for", table_name)
     invoke_rds(events)
-
-
-if __name__ == "__main__":
-    # Test read
-    print(rds_saved_query(["sample"]))
-    print(rds_query([{"table_name": "workflow_run", "fields": ["name"], "limit": 10}]))
