@@ -274,6 +274,7 @@ jobs:
         id: parse-ref
         run: .github/scripts/parse_ref.py
       - name: Display and upload test statistics (Click Me)
+        if: always()
         # temporary hack: set CIRCLE_* vars, until we update
         # tools/stats/print_test_stats.py to natively support GitHub Actions
         env:
