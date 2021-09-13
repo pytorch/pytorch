@@ -7,7 +7,6 @@ import operator
 import random
 import numbers
 import unittest
-import os
 
 import torch
 import numpy as np
