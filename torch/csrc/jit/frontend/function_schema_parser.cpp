@@ -39,8 +39,8 @@ struct SchemaParser {
       return make_left<OperatorName, FunctionSchema>(std::move(name));
     }
 
-    c10::ArgumentVector arguments;
-    c10::ArgumentVector returns;
+    std::vector<Argument> arguments;
+    std::vector<Argument> returns;
     bool kwarg_only = false;
     bool is_vararg = false;
     bool is_varret = false;
@@ -120,13 +120,6 @@ struct SchemaParser {
     } while (L.nextIf(TK_NEWLINE));
     L.expect(TK_EOF);
     return results;
-  }
-
-  either<OperatorName, FunctionSchema> parseExactlyOneDeclaration() {
-    auto result = parseDeclaration();
-    L.nextIf(TK_NEWLINE);
-    L.expect(TK_EOF);
-    return result;
   }
 
   Argument parseArgument(size_t idx, bool is_return, bool kwarg_only) {
@@ -326,7 +319,7 @@ struct SchemaParser {
 
 C10_EXPORT either<OperatorName, FunctionSchema> parseSchemaOrName(
     const std::string& schemaOrName) {
-  return SchemaParser(schemaOrName).parseExactlyOneDeclaration();
+  return SchemaParser(schemaOrName).parseDeclarations().at(0);
 }
 
 C10_EXPORT FunctionSchema parseSchema(const std::string& schema) {

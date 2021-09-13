@@ -260,7 +260,7 @@ FunctionSchema getSchemaWithNameAndDefaults(
     const FunctionSchema& schema,
     const at::optional<std::string>& new_name,
     const FunctionDefaults& default_args) {
-  at::ArgumentVector new_args;
+  std::vector<Argument> new_args;
   for (auto& arg : schema.arguments()) {
     auto it = default_args.find(arg.name());
     if (it != default_args.end()) {

@@ -139,18 +139,12 @@ class SmallVectorTemplateCommon : public SmallVectorBase {
     return (iterator)this->BeginX;
   }
   const_iterator begin() const {
-    return cbegin();
-  }
-  const_iterator cbegin() const {
     return (const_iterator)this->BeginX;
   }
   iterator end() {
     return (iterator)this->EndX;
   }
   const_iterator end() const {
-    return cend();
-  }
-  const_iterator cend() const {
     return (const_iterator)this->EndX;
   }
 
