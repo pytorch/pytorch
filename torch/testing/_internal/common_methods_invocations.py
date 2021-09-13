@@ -2746,6 +2746,28 @@ def sample_inputs_max_min_reduction_no_dim(op_info, device, dtype, requires_grad
                                           requires_grad=requires_grad),))
     return inputs
 
+def _generate_nan_reduction_inputs(device, dtype, requires_grad):
+    yield from _generate_reduction_inputs(device, dtype, requires_grad)
+    yield torch.tensor([2, torch.nan, -1], device=device, dtype=dtype, requires_grad=requires_grad)
+    yield torch.tensor([[torch.nan, 2], [0, 1]], device=device, dtype=dtype, requires_grad=requires_grad)
+
+def sample_inputs_nan_reduction(supports_multiple_dims):
+    # Generates sample inputs for reduction ops that contain the input tensor
+    # and dim and keepdim kwargs. If a reduction op needs to test additional
+    # args/kwargs then create a separate sample_inputs function
+    def fn(op_info, device, dtype, requires_grad):
+        inputs = []
+
+        for t in _generate_nan_reduction_inputs(device, dtype, requires_grad):
+            # Add case without dim and keepdim kwargs
+            inputs.append(SampleInput(t))
+            for kwargs in _generate_reduction_kwargs(t.ndim, supports_multiple_dims):
+                inputs.append(SampleInput(t, kwargs=kwargs))
+
+        return inputs
+
+    return fn
+
 def sample_inputs_reduction_quantile(op_info, device, dtype, requires_grad):
     test_quantiles = (0.5, make_tensor((2,), device, dtype, low=0, high=1))
     test_interpolations = ['linear', 'midpoint']
@@ -9485,6 +9507,32 @@ op_db: List[OpInfo] = [
                      dtypes=[torch.float16]),
             SkipInfo('TestReductions', 'test_ref_small_input',
                      dtypes=[torch.float16]),
+            SkipInfo('TestReductions', 'test_ref_extremal_values',
+                     device_type='cuda', dtypes=[torch.complex64]),
+        ),
+    ),
+    ReductionOpInfo(
+        'nanmean',
+        nan_policy='omit',
+        assert_autodiffed=True,
+        promotes_int_to_float=True,
+        dtypes=floating_types_and(torch.float16, torch.bfloat16),
+        sample_inputs_func=sample_inputs_nan_reduction(supports_multiple_dims=True),
+        ref=reference_reduction_numpy(np.nanmean),
+        skips=(
+            # RuntimeError: deepEquals(input.iValue, deepCopiedInput)INTERNAL ASSERT FAILED at
+            # "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":142, please report a bug to PyTorch.
+            SkipInfo('TestJit', 'test_variant_consistency_jit'),
+            # FIXME: prod reduces all dimensions when dim=[]
+            SkipInfo('TestReductions', 'test_dim_empty'),
+            SkipInfo('TestReductions', 'test_dim_empty_keepdim'),
+            # FIXME: improve precision
+            SkipInfo('TestReductions', 'test_noncontiguous_all',
+                     dtypes=[torch.float16]),
+            SkipInfo('TestReductions', 'test_ref_small_input',
+                     dtypes=[torch.float16]),
+            SkipInfo('TestReductions', 'test_ref_duplicate_values',
+                     device_type='cuda', dtypes=[torch.float16]),
             SkipInfo('TestReductions', 'test_ref_extremal_values',
                      device_type='cuda', dtypes=[torch.complex64]),
         ),
