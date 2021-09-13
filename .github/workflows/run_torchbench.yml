@@ -32,12 +32,21 @@ jobs:
           # shellcheck disable=SC1091
           . "${HOME}"/anaconda3/etc/profile.d/conda.sh
           conda activate pr-ci
-          conda install -y numpy=1.17 requests=2.22 ninja pyyaml mkl mkl-include setuptools cmake cffi typing_extensions future six dataclasses pillow pytest tabulate
+          conda install -y numpy=1.17 requests=2.22 ninja pyyaml mkl mkl-include setuptools cmake cffi typing_extensions future six dataclasses pillow pytest tabulate gitpython
+          conda install -y -c pytorch-nightly torchtext torchvision
       - name: Update self-hosted PyTorch
         run: |
           pushd "${HOME}"/pytorch
+          git remote prune origin
           git fetch
           popd
+      - name: Install TorchBench dependencies
+        run: |
+          # shellcheck disable=SC1091
+          . "${HOME}"/anaconda3/etc/profile.d/conda.sh
+          conda activate pr-ci
+          pushd "${PWD}"/benchmark
+          python install.py
       - name: Run TorchBench
         run: |
           pushd "${HOME}"/pytorch

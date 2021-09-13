@@ -877,7 +877,7 @@ TEST(CustomAutogradTest, BackwardWithCreateGraphWarns) {
  *   but when no inputs require grad, we should not create this node
  * - check_inplace logic
  * - view ops
- * - TODO: Tests for NDEBUG checks? Don't need for now because CI doesn't test NDEBUG builds.
+ * - TODO: Tests for debug-only checks? Don't need for now because CI doesn't test non-NDEBUG builds.
  * - tensorlist input and output
  * - multiple outputs / non-tensor output
  * - rebase_history vs set_history

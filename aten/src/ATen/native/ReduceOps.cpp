@@ -1169,6 +1169,36 @@ Tensor& mean_out(const Tensor& self, DimnameList dim,
   return at::mean_out(result, self, dimnames_to_positions(self, dim), keepdim, opt_dtype);
 }
 
+// TODO(@heitorschueroff) implement custom kernels for nanmean
+Tensor& nanmean_out(
+    const Tensor& self,
+    IntArrayRef dim,
+    bool keepdim,
+    c10::optional<ScalarType> opt_dtype,
+    Tensor& result) {
+  TORCH_CHECK(
+      self.is_floating_point(),
+      "nanmean(): expected input to have floating point dtype but got ",
+      self.scalar_type());
+  const auto factor = at::native::isnan(self).logical_not_().sum(dim, keepdim);
+  at::native::nansum_out(self, dim, keepdim, opt_dtype, result).div_(factor);
+  return result;
+}
+
+Tensor nanmean(
+    const Tensor& self,
+    IntArrayRef dim,
+    bool keepdim,
+    optional<ScalarType> opt_dtype) {
+  TORCH_CHECK(
+      self.is_floating_point(),
+      "nanmean(): expected input to have floating point dtype but got ",
+      self.scalar_type());
+  const auto factor =
+      at::native::isnan(self.detach()).logical_not_().sum(dim, keepdim);
+  return at::nansum(self, dim, keepdim, opt_dtype).div_(factor);
+}
+
 static Tensor squeeze_multiple(const Tensor& self, IntArrayRef dims) {
   int ndims = self.sizes().size();
   auto dims_to_squeeze = at::dim_list_to_bitset(dims, ndims);
