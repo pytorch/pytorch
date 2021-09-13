@@ -21,8 +21,7 @@ typedef struct TORCH_API MemoryEvent {
     return out;
   }
 
-  int64_t start_time{};
-  int64_t end_time{};
+  int64_t ts{};
   c10::optional<std::string> stack_trace{};
   intptr_t addr{};
   int64_t size{};
@@ -31,15 +30,13 @@ typedef struct TORCH_API MemoryEvent {
 
   MemoryEvent() = default;
   MemoryEvent(
-      int64_t start_time,
-      int64_t end_time,
+      int64_t ts,
       c10::optional<std::string> stack_trace,
       intptr_t addr,
       int64_t s,
       EventType e,
       c10::optional<FrameNodeId> frame_nodeid = c10::nullopt)
-      : start_time(start_time),
-        end_time(end_time),
+      : ts(ts),
         stack_trace(std::move(stack_trace)),
         addr(addr),
         size(s),
@@ -47,7 +44,7 @@ typedef struct TORCH_API MemoryEvent {
         frame_node_id(frame_nodeid) {}
 
   friend std::ostream& operator<<(std::ostream& out, const MemoryEvent& rhs) {
-    out << "MEMORY_EVENT: type: " << rhs.type << ", ts: " << rhs.start_time
+    out << "MEMORY_EVENT: type: " << rhs.type << ", ts: " << rhs.ts
         << ", size: " << rhs.size << ", addr: " << rhs.addr << "\n";
     return out;
   }
