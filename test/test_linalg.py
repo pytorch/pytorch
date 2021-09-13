@@ -1050,7 +1050,7 @@ class TestLinalg(TestCase):
         from torch.testing._internal.common_utils import random_hermitian_matrix
 
         def run_test(dims, uplo):
-            x = random_hermitian_matrix(dims[-1], *dims[:-2]).requires_grad_()
+            x = random_hermitian_matrix(dims[-1], *dims[:-2], device=device, dtype=dtype).requires_grad_()
             w, v = torch.linalg.eigh(x)
             (w.sum() + abs(v).sum()).backward()
             self.assertEqual(x.grad, x.grad.conj().transpose(-1, -2))  # Check the gradient is Hermitian
@@ -1335,6 +1335,9 @@ class TestLinalg(TestCase):
         for keepdim in [True, False]:
             for input_size, ord_settings in test_cases:
                 for ord in ord_settings:
+                    if not torch._C.has_lapack and ord in [2, -2, 'nuc']:
+                        continue
+
                     dtypes = [torch.float, torch.double, torch.cfloat, torch.cdouble]
                     for from_dtype, to_dtype in itertools.product(dtypes, dtypes):
                         if from_dtype.is_complex and not to_dtype.is_complex:
@@ -1569,6 +1572,8 @@ class TestLinalg(TestCase):
             for input_size, ord_settings, dim in test_cases:
                 input = torch.randn(*input_size, dtype=dtype, device=device)
                 for ord in ord_settings:
+                    if not torch._C.has_lapack and ord in [2, -2, 'nuc']:
+                        continue
                     run_test_case(input, ord, dim, keepdim)
 
 
@@ -2573,6 +2578,7 @@ class TestLinalg(TestCase):
                     self.assertEqual(a_norm_fro, a_norm_2)
 
     @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
     def test_nuclear_norm_axes_small_brute_force_old(self, device):
         def check_single_nuclear_norm(x, axes):
             if self.device_type != 'cpu' and randrange(100) < 95:
@@ -2734,6 +2740,7 @@ class TestLinalg(TestCase):
             self.assertEqual(s_expect, s_actual, msg="Singular values don't match")
 
     @skipCUDAIfNoMagmaAndNoCusolver
+    @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.double)
     def test_svd_lowrank(self, device, dtype):
@@ -2817,6 +2824,10 @@ class TestLinalg(TestCase):
         self.assertEqual(t, t2)
 
     def _test_svd_helper(self, shape, some, col_maj, device, dtype):
+        # test implementation below uses cpu unconditionally
+        if not torch._C.has_lapack:
+            reason = "PyTorch compiled without Lapack"
+            raise unittest.SkipTest(reason)
         # To have accurate tests and less false positives on different CPUs and GPUs,
         # we use double or complex double accuracy for CPU reference.
         cpu_dtype = torch.complex128 if dtype.is_complex else torch.float64
@@ -3220,7 +3231,7 @@ class TestLinalg(TestCase):
                 [[], [0], [2], [2, 1]],
                 [0, 5]
             ):
-                matrices = random_fullrank_matrix_distinct_singular_value(n, *batches, dtype=dtype).to(device)
+                matrices = random_fullrank_matrix_distinct_singular_value(n, *batches, dtype=dtype, device=device)
                 run_test(torch_inverse, matrices, batches, n)
 
                 # test non-contiguous input
@@ -3228,7 +3239,7 @@ class TestLinalg(TestCase):
                 if n > 0:
                     run_test(
                         torch_inverse,
-                        random_fullrank_matrix_distinct_singular_value(n * 2, *batches, dtype=dtype).to(device)
+                        random_fullrank_matrix_distinct_singular_value(n * 2, *batches, dtype=dtype, device=device)
                         .view(-1, n * 2, n * 2)[:, ::2, ::2].view(*batches, n, n),
                         batches, n
                     )
@@ -3278,7 +3289,7 @@ class TestLinalg(TestCase):
         from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
 
         def test_inverse_many_batches_helper(torch_inverse, b, n):
-            matrices = random_fullrank_matrix_distinct_singular_value(b, n, n, dtype=dtype).to(device)
+            matrices = random_fullrank_matrix_distinct_singular_value(b, n, n, dtype=dtype, device=device)
             matrices_inverse = torch_inverse(matrices)
 
             # Compare against NumPy output
@@ -3488,7 +3499,7 @@ class TestLinalg(TestCase):
         from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
 
         b = torch.randn(*b_dims, dtype=dtype, device=device)
-        A = random_fullrank_matrix_distinct_singular_value(*A_dims, dtype=dtype).to(device)
+        A = random_fullrank_matrix_distinct_singular_value(*A_dims, dtype=dtype, device=device)
         return b, A
 
     @skipCUDAIfNoMagma
@@ -3544,7 +3555,7 @@ class TestLinalg(TestCase):
     @precisionOverride({torch.float32: 1e-3, torch.complex64: 1e-3})
     def test_solve_batched_non_contiguous(self, device, dtype):
         from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
-        A = random_fullrank_matrix_distinct_singular_value(2, 2, dtype=dtype).to(device).permute(1, 0, 2)
+        A = random_fullrank_matrix_distinct_singular_value(2, 2, dtype=dtype, device=device).permute(1, 0, 2)
         b = torch.randn(2, 2, 2, dtype=dtype, device=device).permute(2, 1, 0)
         self.assertFalse(A.is_contiguous())
         self.assertFalse(b.is_contiguous())
@@ -3651,7 +3662,7 @@ class TestLinalg(TestCase):
     def test_old_solve_batched_non_contiguous(self, device, dtype):
         from numpy.linalg import solve
         from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
-        A = random_fullrank_matrix_distinct_singular_value(2, 2, dtype=dtype).to(device).permute(1, 0, 2)
+        A = random_fullrank_matrix_distinct_singular_value(2, 2, dtype=dtype, device=device).permute(1, 0, 2)
         b = torch.randn(2, 2, 2, dtype=dtype, device=device).permute(2, 1, 0)
         x, _ = torch.solve(b, A)
         x_exp = solve(A.cpu().numpy(), b.cpu().numpy())
@@ -5488,7 +5499,7 @@ class TestLinalg(TestCase):
                 else:
                     rows, columns = matrix_size
                 if a is None:
-                    a = random_matrix(rows, columns, *batches, **dict(singular=singular, dtype=dtype)).to(device)
+                    a = random_matrix(rows, columns, *batches, **dict(singular=singular, dtype=dtype, device=device))
                 a_LU_info, pivots_info, info_ = a.lu(pivot=pivot, get_infos=True)
                 self.assertEqual(a_LU_info.size(), torch.Size(batches + (rows, columns)))
                 self.assertEqual(pivots_info.size(), torch.Size(batches + (min(rows, columns),)))
@@ -7435,14 +7446,13 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     @skipCPUIfNoLapack
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_lu_solve_batched_non_contiguous(self, device, dtype):
-        from numpy.linalg import solve
         from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
 
-        A = random_fullrank_matrix_distinct_singular_value(2, 2, dtype=dtype, device='cpu')
-        b = torch.randn(2, 2, 2, dtype=dtype, device='cpu')
-        x_exp = torch.as_tensor(solve(A.permute(0, 2, 1).numpy(), b.permute(2, 1, 0).numpy())).to(device)
-        A = A.to(device).permute(0, 2, 1)
-        b = b.to(device).permute(2, 1, 0)
+        A = random_fullrank_matrix_distinct_singular_value(2, 2, dtype=dtype, device=device)
+        b = torch.randn(2, 2, 2, dtype=dtype, device=device)
+        x_exp = np.linalg.solve(A.cpu().permute(0, 2, 1).numpy(), b.cpu().permute(2, 1, 0).numpy())
+        A = A.permute(0, 2, 1)
+        b = b.permute(2, 1, 0)
         assert not A.is_contiguous() and not b.is_contiguous(), "contiguous inputs"
         LU_data, LU_pivots = torch.lu(A)
         x = torch.lu_solve(b, LU_data, LU_pivots)
@@ -7452,7 +7462,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
 
         b = torch.randn(*b_dims, dtype=dtype, device=device)
-        A = random_fullrank_matrix_distinct_singular_value(*A_dims, dtype=dtype).to(device)
+        A = random_fullrank_matrix_distinct_singular_value(*A_dims, dtype=dtype, device=device)
         LU_data, LU_pivots, info = torch.lu(A, get_infos=True, pivot=pivot)
         self.assertEqual(info, torch.zeros_like(info))
         return b, A, LU_data, LU_pivots
@@ -7522,15 +7532,14 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     @skipCPUIfNoLapack
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_lu_solve_batched_broadcasting(self, device, dtype):
-        from numpy.linalg import solve
         from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
 
         def run_test(A_dims, b_dims, pivot=True):
             A_matrix_size = A_dims[-1]
             A_batch_dims = A_dims[:-2]
-            A = random_fullrank_matrix_distinct_singular_value(A_matrix_size, *A_batch_dims, dtype=dtype)
+            A = random_fullrank_matrix_distinct_singular_value(A_matrix_size, *A_batch_dims, dtype=dtype, device=device)
             b = torch.randn(*b_dims, dtype=dtype)
-            x_exp = torch.as_tensor(solve(A.numpy(), b.numpy())).to(dtype=dtype, device=device)
+            x_exp = np.linalg.solve(A.numpy(), b.numpy())
             A, b = A.to(device), b.to(device)
             LU_data, LU_pivots = torch.lu(A, pivot=pivot)
             x = torch.lu_solve(b, LU_data, LU_pivots)
