@@ -131,7 +131,24 @@ on:
         run: |
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      !{{ common.upload_test_reports(name='bazel') }}
+      - name: Zip test reports for upload
+        if: always()
+        env:
+          COMMIT_SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
+          WORKFLOW_ID: '${{ github.run_id }}_${{ github.run_number }}'
+        run: |
+          # Remove any previous test reports if they exist
+          rm -f test-reports-*.zip
+          zip -r "test-reports-${COMMIT_SHA1}-${WORKFLOW_ID}.zip" test -i '*.xml'
+      - uses: actions/upload-artifact@v2
+        name: Store PyTorch Test Reports
+        if: always()
+        with:
+          name: test-reports
+          retention-days: 14
+          if-no-files-found: error
+          path:
+            test-reports-*.zip
       !{{ common.upload_test_statistics(build_environment) }}
       !{{ common.teardown_ec2_linux() }}
 {%- endblock %}

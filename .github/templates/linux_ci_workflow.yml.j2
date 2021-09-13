@@ -348,7 +348,33 @@ jobs:
           python3 -mpip install codecov==2.1.12
           python3 -mcodecov
       {%- endif %}
-      !{{ common.upload_test_reports(name='linux') }}
+      - name: Zip test reports for upload
+        if: always()
+        env:
+          COMMIT_SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
+          WORKFLOW_ID: '${{ github.run_id }}_${{ github.run_number }}'
+        run: |
+          # Remove any previous test reports if they exist
+          rm -f test-reports-*.zip
+          zip -r "test-reports-${COMMIT_SHA1}-${WORKFLOW_ID}.zip" test -i '*.xml'
+      - uses: actions/upload-artifact@v2
+        name: Store PyTorch Test Reports
+        if: always()
+        with:
+          name: test-reports-${{ matrix.config }}
+          retention-days: 14
+          if-no-files-found: error
+          path:
+            test-reports-*.zip
+      - uses: !{{ common.upload_artifact_s3_action }}
+        name: Store PyTorch Test Reports on S3
+        if: always()
+        with:
+          name: test-reports-${{ matrix.config }}
+          retention-days: 14
+          if-no-files-found: error
+          path:
+            test-reports-*.zip
       !{{ common.parse_ref() }}
       !{{ common.upload_test_statistics(build_environment) }}
       !{{ common.teardown_ec2_linux() }}
