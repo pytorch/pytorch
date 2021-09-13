@@ -2454,8 +2454,7 @@ Tensor eigh_jvp_eigenvectors(
   auto hermitian_tangent = 0.5*(input_tangent + input_tangent.transpose(-2, -1).conj());
 
   auto tmp = at::matmul(at::matmul(eigenvectors.transpose(-2, -1).conj(), hermitian_tangent), eigenvectors);
-  auto eigenvectors_tangent = at::matmul(eigenvectors, tmp.div(E));
-  return eigenvectors_tangent;
+  return at::matmul(eigenvectors, tmp.div(E));
 }
 
 Tensor eigh_backward(const std::vector<torch::autograd::Variable> &grads, const Tensor& self,
