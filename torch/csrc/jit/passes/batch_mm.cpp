@@ -13,7 +13,6 @@
 #include <ATen/ATen.h>
 #include <algorithm>
 #include <unordered_map>
-#include <iostream>
 
 namespace torch {
 namespace jit {
@@ -259,8 +258,9 @@ void BatchMMTreeReduce(Block* block, AliasDb& alias_db) {
     if (node->matches("aten::mm(Tensor self, Tensor mat2) -> Tensor") &&
         !alias_db.hasWriters(node)) {
       tokens[node] = TreeToken::mm(node);
-    } else if (node->matches("aten::t(Tensor self) -> Tensor") &&
-               !alias_db.hasWriters(node)) {
+    } else if (
+        node->matches("aten::t(Tensor self) -> Tensor") &&
+        !alias_db.hasWriters(node)) {
       auto input_it = tokens.find(node->input()->node());
       if (input_it != tokens.end()) {
         tokens[node] = TreeToken::transpose(node, input_it->second);
