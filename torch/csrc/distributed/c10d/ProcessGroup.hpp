@@ -205,8 +205,8 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   virtual const std::string getBackendName() const = 0;
 
   virtual c10::intrusive_ptr<ProcessGroup::Work> broadcast(
-      std::vector<at::Tensor>& data,
-      const BroadcastOptions& opts = BroadcastOptions()) {
+      std::vector<at::Tensor>& /* tensors */,
+      const BroadcastOptions& /* opts */ = BroadcastOptions()) {
     TORCH_CHECK(
         false,
         c10::str(
@@ -214,8 +214,8 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   }
 
   virtual c10::intrusive_ptr<ProcessGroup::Work> allreduce(
-      std::vector<at::Tensor>& data,
-      const AllreduceOptions& opts = AllreduceOptions()) {
+      std::vector<at::Tensor>& /* tensors */,
+      const AllreduceOptions& /* opts */ = AllreduceOptions()) {
     TORCH_CHECK(
         false,
         c10::str(
@@ -225,8 +225,8 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   // This will be moved out of ProcessGroup, do not add dependencies on this
   // function.
   virtual c10::intrusive_ptr<ProcessGroup::Work> allreduce_coalesced(
-      std::vector<at::Tensor>& tensors,
-      const AllreduceCoalescedOptions& opts = AllreduceCoalescedOptions()) {
+      std::vector<at::Tensor>& /* tensors */,
+      const AllreduceCoalescedOptions& /* opts */ = AllreduceCoalescedOptions()) {
     TORCH_CHECK(
         false,
         c10::str(
@@ -236,17 +236,17 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   }
 
   virtual c10::intrusive_ptr<ProcessGroup::Work> reduce(
-      std::vector<at::Tensor>& tensors,
-      const ReduceOptions& opts = ReduceOptions()) {
+      std::vector<at::Tensor>& /* tensors */,
+      const ReduceOptions& /* opts */ = ReduceOptions()) {
     TORCH_CHECK(
         false,
         c10::str("ProcessGroup ", getBackendName(), "does not support reduce"));
   }
 
   virtual c10::intrusive_ptr<ProcessGroup::Work> allgather(
-      std::vector<std::vector<at::Tensor>>& outputTensors,
-      std::vector<at::Tensor>& inputTensors,
-      const AllgatherOptions& opts = AllgatherOptions()) {
+      std::vector<std::vector<at::Tensor>>& /* outputTensors */,
+      std::vector<at::Tensor>& /* inputTensors */,
+      const AllgatherOptions& /* opts */ = AllgatherOptions()) {
     TORCH_CHECK(
         false,
         c10::str(
@@ -258,9 +258,9 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   // For implementers of ProcessGroup API and advanced users only.
   // Note: this function will be deprecated in near future.
   virtual c10::intrusive_ptr<ProcessGroup::Work> _allgather_base(
-      at::Tensor& outputBuffer,
-      at::Tensor& inputBuffer,
-      const AllgatherOptions& opts = AllgatherOptions()) {
+      at::Tensor& /* outputBuffer */,
+      at::Tensor& /* inputBuffer */,
+      const AllgatherOptions& /* opts */ = AllgatherOptions()) {
     TORCH_CHECK(
         false,
         c10::str(
@@ -274,9 +274,9 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   // * do not implement it in your ProcessGroup, implement _allgather_base
   //   instead.
   virtual c10::intrusive_ptr<ProcessGroup::Work> allgather_coalesced(
-      std::vector<std::vector<at::Tensor>>& outputTensorLists,
-      std::vector<at::Tensor>& inputTensors,
-      const AllgatherOptions& opts = AllgatherOptions()) {
+      std::vector<std::vector<at::Tensor>>& /* outputTensorLists */,
+      std::vector<at::Tensor>& /* inputTensors */,
+      const AllgatherOptions& /* opts */ = AllgatherOptions()) {
     TORCH_CHECK(
         false,
         c10::str(
@@ -286,18 +286,18 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   }
 
   virtual c10::intrusive_ptr<ProcessGroup::Work> gather(
-      std::vector<std::vector<at::Tensor>>& outputTensors,
-      std::vector<at::Tensor>& inputTensors,
-      const GatherOptions& opts = GatherOptions()) {
+      std::vector<std::vector<at::Tensor>>& /* outputTensors */,
+      std::vector<at::Tensor>& /* inputTensors */,
+      const GatherOptions& /* opts */ = GatherOptions()) {
     TORCH_CHECK(
         false,
         c10::str("ProcessGroup ", getBackendName(), "does not support gather"));
   }
 
   virtual c10::intrusive_ptr<ProcessGroup::Work> scatter(
-      std::vector<at::Tensor>& outputTensors,
-      std::vector<std::vector<at::Tensor>>& inputTensors,
-      const ScatterOptions& opts = ScatterOptions()) {
+      std::vector<at::Tensor>& /* outputTensors */,
+      std::vector<std::vector<at::Tensor>>& i/* nputTensors */,
+      const ScatterOptions& /* opts */ = ScatterOptions()) {
     TORCH_CHECK(
         false,
         c10::str(
@@ -305,9 +305,9 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   }
 
   virtual c10::intrusive_ptr<ProcessGroup::Work> reduce_scatter(
-      std::vector<at::Tensor>& outputTensors,
-      std::vector<std::vector<at::Tensor>>& inputTensors,
-      const ReduceScatterOptions& opts = ReduceScatterOptions()) {
+      std::vector<at::Tensor>& /* outputTensors */,
+      std::vector<std::vector<at::Tensor>>& /* inputTensors */,
+      const ReduceScatterOptions& /* opts */ = ReduceScatterOptions()) {
     TORCH_CHECK(
         false,
         c10::str(
@@ -317,9 +317,9 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   }
 
   virtual c10::intrusive_ptr<ProcessGroup::Work> _reduce_scatter_base(
-      at::Tensor&,
-      at::Tensor&,
-      const ReduceScatterOptions& opts = ReduceScatterOptions()) {
+      at::Tensor& /* outputBuffer */,
+      at::Tensor& /* inputBuffer */,
+      const ReduceScatterOptions& /* opts */ = ReduceScatterOptions()) {
     TORCH_CHECK(
         false,
         c10::str(
@@ -329,11 +329,11 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   }
 
   virtual c10::intrusive_ptr<ProcessGroup::Work> alltoall_base(
-      at::Tensor& outputTensor,
-      at::Tensor& inputTensor,
-      std::vector<int64_t>& outputSplitSizes,
-      std::vector<int64_t>& inputSplitSizes,
-      const AllToAllOptions& opts = AllToAllOptions()) {
+      at::Tensor& /* outputBuffer */,
+      at::Tensor& /* inputBuffer */,
+      std::vector<int64_t>& /* outputSplitSizes */,
+      std::vector<int64_t>& /* inputSplitSizes */,
+      const AllToAllOptions& /* opts */ = AllToAllOptions()) {
     TORCH_CHECK(
         false,
         c10::str(
@@ -343,8 +343,8 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   }
 
   virtual c10::intrusive_ptr<ProcessGroup::Work> alltoall(
-      std::vector<at::Tensor>& outputTensors,
-      std::vector<at::Tensor>& inputTensors,
+      std::vector<at::Tensor>& /* outputTensors */,
+      std::vector<at::Tensor>& /* inputTensors */,
       const AllToAllOptions& opts = AllToAllOptions()) {
     TORCH_CHECK(
         false,
@@ -391,26 +391,26 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   }
 
   virtual c10::intrusive_ptr<ProcessGroup::Work> send(
-      std::vector<at::Tensor>& tensors,
-      int dstRank,
-      int tag) {
+      std::vector<at::Tensor>& /* tensors */,
+      int /* dstRank */,
+      int /* tag */) {
     TORCH_CHECK(
         false,
         c10::str("ProcessGroup ", getBackendName(), "does not support send"));
   }
 
   virtual c10::intrusive_ptr<ProcessGroup::Work> recv(
-      std::vector<at::Tensor>& tensors,
-      int srcRank,
-      int tag) {
+      std::vector<at::Tensor>& /* tensors */,
+      int /* srcRank */,
+      int /* tag */) {
     TORCH_CHECK(
         false,
         c10::str("ProcessGroup ", getBackendName(), "does not support recv"));
   }
 
   virtual c10::intrusive_ptr<ProcessGroup::Work> recvAnysource(
-      std::vector<at::Tensor>& tensors,
-      int tag) {
+      std::vector<at::Tensor>& /* tensors */,
+      int /* tag */) {
     TORCH_CHECK(
         false,
         c10::str(
@@ -420,7 +420,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   }
 
   virtual c10::intrusive_ptr<ProcessGroup::Work> barrier(
-      const BarrierOptions& opts = BarrierOptions()) {
+      const BarrierOptions& /* opts */ = BarrierOptions()) {
     TORCH_CHECK(
         false,
         c10::str(
