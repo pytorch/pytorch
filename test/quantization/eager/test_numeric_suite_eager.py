@@ -10,7 +10,7 @@ from torch.quantization import (
     quantize,
     quantize_dynamic,
 )
-from torch.quantization._numeric_suite import (
+from torch.ao.ns._numeric_suite import (
     OutputLogger,
     Shadow,
     ShadowLogger,

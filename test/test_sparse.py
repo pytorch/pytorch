@@ -20,6 +20,9 @@ from torch.testing._internal.common_device_type import \
      deviceCountAtLeast)
 from torch.testing._internal.common_methods_invocations import \
     (sparse_unary_ufuncs)
+from torch.testing._internal.common_dtype import (
+    floating_and_complex_types, floating_and_complex_types_and, get_all_dtypes, get_all_int_dtypes,
+)
 
 if TEST_SCIPY:
     import scipy.sparse
@@ -290,7 +293,7 @@ class TestSparse(TestCase):
             RuntimeError,
             lambda: self.sparse_tensor(indices, values, torch.Size([2, 4, 2, 1])))
 
-    @dtypes(*torch.testing.floating_and_complex_types_and(torch.float16))
+    @dtypes(*floating_and_complex_types_and(torch.float16))
     def test_to_dense(self, device, dtype):
         def test_tensor(x, res):
             x.to_dense()  # Tests triple to_dense for memory corruption
@@ -1947,7 +1950,7 @@ class TestSparse(TestCase):
 
     def _test_log1p_tensor(self, sparse_tensor, coalesced):
         def is_integral(dtype):
-            return dtype in torch.testing.get_all_int_dtypes()
+            return dtype in get_all_int_dtypes()
 
         dense_tensor = sparse_tensor.to_dense()
         expected_output = dense_tensor.log1p()
@@ -1981,8 +1984,8 @@ class TestSparse(TestCase):
                 sparse_tensor.requires_grad_()
 
     @coalescedonoff
-    @dtypes(*torch.testing.get_all_dtypes(include_bool=False, include_half=False,
-                                          include_bfloat16=False, include_complex=False))
+    @dtypes(*get_all_dtypes(include_bool=False, include_half=False,
+                            include_bfloat16=False, include_complex=False))
     def test_log1p(self, device, dtype, coalesced):
         if coalesced:
             input_coalesced = torch.sparse_coo_tensor(
@@ -2090,7 +2093,7 @@ class TestSparse(TestCase):
 
     def _test_asin_arcsin(self, sparse_tensor, coalesced):
         def is_integral(dtype):
-            return dtype in torch.testing.get_all_int_dtypes()
+            return dtype in get_all_int_dtypes()
         is_integral_dtype = is_integral(sparse_tensor.dtype)
 
         dense_tensor = sparse_tensor.to_dense()
@@ -2129,8 +2132,8 @@ class TestSparse(TestCase):
                     op(sparse_tensor)
 
     @coalescedonoff
-    @dtypes(*torch.testing.get_all_dtypes(include_bool=False, include_half=False,
-                                          include_bfloat16=False, include_complex=False))
+    @dtypes(*get_all_dtypes(include_bool=False, include_half=False,
+                            include_bfloat16=False, include_complex=False))
     def test_asin_arcsin(self, device, dtype, coalesced):
         if coalesced:
             input_coalesced = torch.sparse_coo_tensor(
@@ -2200,7 +2203,7 @@ class TestSparse(TestCase):
             y, _, _ = self._gen_sparse(2, 20, [10, 100], dtype, device, coalesced)
             res = x.mv(y)
 
-    @dtypes(*torch.testing.floating_and_complex_types())
+    @dtypes(*floating_and_complex_types())
     def test_sparse_add_coalesce(self, device, dtype):
         i = self.index_tensor([[1, 2, 1]], device=device)
         v = torch.tensor([3, 4, 5], dtype=dtype, device=device)
@@ -2617,14 +2620,14 @@ class TestSparse(TestCase):
 
     @onlyCPU  # not really, but we only really want to run this once
     def test_dtypes(self, device):
-        all_sparse_dtypes = torch.testing.get_all_dtypes(include_complex=True)
+        all_sparse_dtypes = get_all_dtypes(include_complex=True)
         do_test_dtypes(self, all_sparse_dtypes, torch.sparse_coo, torch.device('cpu'))
         if torch.cuda.is_available():
             do_test_dtypes(self, all_sparse_dtypes, torch.sparse_coo, torch.device('cuda:0'))
 
     @onlyCPU  # not really, but we only really want to run this once
     def test_empty_full(self, device):
-        all_sparse_dtypes = torch.testing.get_all_dtypes(include_complex=True)
+        all_sparse_dtypes = get_all_dtypes(include_complex=True)
         do_test_empty_full(self, all_sparse_dtypes, torch.sparse_coo, torch.device('cpu'))
         if torch.cuda.device_count() > 0:
             do_test_empty_full(self, all_sparse_dtypes, torch.sparse_coo, None)
