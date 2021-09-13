@@ -1,8 +1,11 @@
 #pragma once
-#include <ATen/core/ivalue.h>
-#include <ATen/core/operator_name.h>
-#include <torch/csrc/jit/runtime/instruction.h>
+
 #include <vector>
+
+#include <ATen/core/operator_name.h>
+#include <torch/csrc/jit/mobile/frame.h>
+#include <torch/csrc/jit/runtime/instruction.h>
+#include <ATen/core/ivalue.h>
 
 namespace torch {
 namespace jit {
@@ -29,13 +32,16 @@ struct Code {
 };
 
 struct InterpreterState {
-  TORCH_API explicit InterpreterState(std::shared_ptr<Code> code);
+  TORCH_API explicit InterpreterState(const Code& code);
   TORCH_API bool run(Stack& stack);
 
  private:
-  std::shared_ptr<Code> code_;
+  void enterFrame(const Code&);
+  void leaveFrame();
+
   c10::IValue& reg(size_t reg);
   std::vector<c10::IValue> registers_;
+  std::vector<Frame> frames_;
 };
 
 // Interpreter executes instruction in a loop one by one

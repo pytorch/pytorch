@@ -77,6 +77,19 @@ std::string normalizeAttrName(c10::string_view field) {
   return std::string{field};
 }
 
+void findAllNodes(Block& block, Symbol kind, bool recurse, std::vector<Node*>& ret) {
+  for (Node* n : block.nodes()) {
+    if (n->kind() == kind) {
+      ret.push_back(n);
+    }
+    if (recurse) {
+      for (auto b : n->blocks()) {
+        findAllNodes(*b, kind, recurse, ret);
+      }
+    }
+  }
+}
+
 } // namespace
 
 // NB: This overload will become ambiguous with the one Caffe2 provides in its
@@ -2178,6 +2191,22 @@ std::vector<Value*> unpackOutputs(const std::vector<Value*>& outputs) {
     tup->node()->destroy();
   }
   return new_outputs;
+}
+
+std::vector<Node*> findAllNodes(
+    Block& block,
+    Symbol kind,
+    bool recurse) {
+  std::vector<Node*> ret;
+  findAllNodes(block, kind, recurse, ret);
+  return ret;
+}
+
+std::vector<Node*> findAllNodes(
+    Graph& g,
+    Symbol kind,
+    bool recurse) {
+  return findAllNodes(*g.block(), kind, recurse);
 }
 
 std::vector<Value*> insertGraph(

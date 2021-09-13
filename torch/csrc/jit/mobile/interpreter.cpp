@@ -8,19 +8,18 @@
 #include <torch/csrc/jit/runtime/vararg_functions.h>
 
 #include <ATen/record_function.h>
+#include <c10/util/Exception.h>
 #include <c10/util/irange.h>
-#include <torch/csrc/jit/mobile/observer.h>
-
 #include <torch/csrc/jit/backends/backend_exception.h>
+#include <torch/csrc/jit/mobile/observer.h>
 
 namespace torch {
 namespace jit {
 char const* toString(OpCode op);
 std::ostream& operator<<(std::ostream& out, Instruction inst);
 namespace mobile {
-InterpreterState::InterpreterState(std::shared_ptr<Code> code)
-    : code_(std::move(code)) {
-  registers_.resize(code_->register_size_);
+InterpreterState::InterpreterState(const Code& code) {
+  enterFrame(code);
 }
 
 namespace {
@@ -50,11 +49,23 @@ int64_t getInterpretersExceptionPC() {
   return exception_pc_;
 }
 
+void InterpreterState::enterFrame(const Code& code) {
+  frames_.emplace_back(code);
+  registers_.resize(registers_.size() + code.register_size_);
+}
+
+void InterpreterState::leaveFrame() {
+  registers_.resize(registers_.size() - frames_.back().getCode().register_size_);
+  frames_.pop_back();
+}
+
 bool InterpreterState::run(Stack& stack) {
-  size_t pc = 0;
   while (true) {
     try {
-      auto inst_with_handle = code_->instructions_with_handles_.at(pc);
+      auto& frame = frames_.back();
+      const auto& code = frame.getCode();
+      const auto pc = frame.getPC();
+      auto inst_with_handle = code.instructions_with_handles_.at(pc);
       Instruction inst = inst_with_handle.instruction;
       DebugHandle debug_handle = inst_with_handle.debug_handle;
       // If no valid debug handle found then just log pc.
@@ -92,63 +103,69 @@ bool InterpreterState::run(Stack& stack) {
           }
 
           RECORD_EDGE_SCOPE_WITH_DEBUG_HANDLE_AND_INPUTS(
-              code_->op_names_[inst.X].name, debug_handle, stack);
-          code_->operators_[inst.X](stack);
-          ++pc;
+              code.op_names_[inst.X].name, debug_handle, stack);
+          code.operators_[inst.X](stack);
+          frame.step();
         } break;
         case OPN: {
           stack.push_back(inst.N);
           RECORD_EDGE_SCOPE_WITH_DEBUG_HANDLE_AND_INPUTS(
-              code_->op_names_[inst.X].name, debug_handle, stack);
-          code_->operators_[inst.X](stack);
-          ++pc;
+              code.op_names_[inst.X].name, debug_handle, stack);
+          code.operators_[inst.X](stack);
+          frame.step();
         } break;
         case INTERFACE_CALL: {
           torch::jit::Function& method =
               peek(stack, 0, inst.N)
                   .toObject()
                   ->type()
-                  ->getMethod(code_->constants_[inst.X].toStringRef());
+                  ->getMethod(code.constants_[inst.X].toStringRef());
           RECORD_EDGE_SCOPE_WITH_DEBUG_HANDLE_AND_INPUTS(
               method.name(), debug_handle, stack);
+          if (auto f = dynamic_cast<BytecodeFunction*>(&method)) {
+            frame.step();
+            enterFrame(f->getCode());
+            continue;
+          }
+
           method.run(stack);
-          ++pc;
+          frame.step();
         } break;
         case LOAD:
           stack.emplace_back(reg(inst.X));
-          ++pc;
+          frame.step();
           break;
         case MOVE:
           stack.emplace_back(std::move(reg(inst.X)));
-          ++pc;
+          frame.step();
           break;
         case STORE:
           reg(inst.X) = pop(stack);
-          ++pc;
+          frame.step();
           break;
         case STOREN:
           for (size_t i = inst.N; i > 0; --i) {
             reg(inst.X + i - 1) = pop(stack);
           }
-          ++pc;
+          frame.step();
           break;
         case DROP:
           pop(stack);
-          ++pc;
+          frame.step();
           break;
         case DROPR:
           reg(inst.X) = IValue();
-          ++pc;
+          frame.step();
           break;
         case LOADC:
-          stack.emplace_back(code_->constants_[inst.X]);
-          ++pc;
+          stack.emplace_back(code.constants_[inst.X]);
+          frame.step();
           break;
         case GET_ATTR: {
           auto userObj = pop(stack).toObject();
           auto value = userObj->getSlot(inst.X);
           push(stack, std::move(value));
-          ++pc;
+          frame.step();
         } break;
         case SET_ATTR: {
           auto v = pop(stack);
@@ -162,72 +179,76 @@ bool InterpreterState::run(Stack& stack) {
             userObj->type()->addAttribute(ss.str(), c10::NoneType::get());
           }
           userObj->setSlot(inst.X, std::move(v));
-          ++pc;
+          frame.step();
         } break;
         case JF:
-          pc += (pop(stack).toBool()) ? 1 : inst.X;
+          frame.jump(pop(stack).toBool() ? 1 : inst.X);
           break;
         case JMP:
-          pc += inst.X;
+          frame.jump(inst.X);
           break;
         case LOOP: {
           // stack: iteration_count, max_iter, cond, loop_carried_deps...
-          auto frame = stack.end() - (inst.N + 1);
-          int64_t trip_count = frame[0].toInt();
-          int64_t max_trip_count = frame[1].toInt();
-          bool cond = frame[2].toBool();
+          auto sframe = stack.end() - (inst.N + 1);
+          int64_t trip_count = sframe[0].toInt();
+          int64_t max_trip_count = sframe[1].toInt();
+          bool cond = sframe[2].toBool();
           if (trip_count < max_trip_count && cond) {
-            frame[2] = trip_count;
-            frame[0] = trip_count + 1;
-            ++pc;
+            sframe[2] = trip_count;
+            sframe[0] = trip_count + 1;
+            frame.step();
           } else {
             size_t n_loop_carried = inst.N - 2;
             for (const auto i : c10::irange(n_loop_carried)) {
-              frame[i] = std::move(frame[i + 3]);
+              sframe[i] = std::move(sframe[i + 3]);
             }
             drop(stack, 3); // iteration_count, max_iter, cond
-            pc += inst.X;
+            frame.jump(inst.X);
           }
         } break;
         case RET:
+          leaveFrame();
+          if (frames_.size() > 0) {
+            continue;
+          }
           return false;
         case LIST_CONSTRUCT: {
-          const auto& type = code_->types_[inst.X]->expectRef<at::ListType>();
+          const auto& type = code.types_[inst.X]->expectRef<at::ListType>();
           listConstruct(stack, type, inst.N);
-          ++pc;
+          frame.step();
         } break;
         case LIST_UNPACK: {
           listUnpack(stack, inst.X);
-          ++pc;
+          frame.step();
         } break;
         case TUPLE_CONSTRUCT: {
           tupleConstruct(stack, inst.X);
-          ++pc;
+          frame.step();
         } break;
         case TUPLE_SLICE: {
           tupleSlice(stack, inst.X, inst.X + inst.N);
-          ++pc;
+          frame.step();
         } break;
         case DICT_CONSTRUCT: {
-          const auto& type = code_->types_[inst.X]->expectRef<at::DictType>();
+          const auto& type = code.types_[inst.X]->expectRef<at::DictType>();
           dictConstruct(stack, type, inst.N);
-          ++pc;
+          frame.step();
         } break;
         case NAMED_TUPLE_CONSTRUCT: {
           namedTupleConstruct(
-              stack, code_->types_[inst.X]->expect<at::TupleType>(), inst.N);
-          ++pc;
+              stack, code.types_[inst.X]->expect<at::TupleType>(), inst.N);
+          frame.step();
         } break;
         case CREATE_OBJECT: {
-          auto type = code_->types_[inst.X]->expect<c10::ClassType>();
+          auto type = code.types_[inst.X]->expect<c10::ClassType>();
           createObject(stack, type);
-          ++pc;
+          frame.step();
         } break;
         case ISINSTANCE: {
           at::ArrayRef<TypePtr> types(
-              &(code_->types_[inst.X]), &(code_->types_[inst.X + inst.N]));
+              &(code.types_[inst.X]), &(code.types_[inst.X + inst.N]));
           isinstance(stack, types);
-          ++pc;
+          frame.step();
         } break;
         case WARN: {
           drop(stack, 1);
@@ -239,7 +260,7 @@ bool InterpreterState::run(Stack& stack) {
           const auto& sref = stack.back().toStringRef();
           TORCH_WARN(sref);
           stack.pop_back();
-          ++pc;
+          frame.step();
         } break;
         default:
           AT_ERROR(toString(inst.op), " is invalid.");
@@ -250,15 +271,15 @@ bool InterpreterState::run(Stack& stack) {
       }
       // This exception must be caught first as it derived from c10::Error
     } catch (c10::BackendRuntimeException& e) {
-      exception_pc_ = pc;
+      exception_pc_ = 0; // FIXME zhxchen17
       TORCH_RETHROW(e);
     } catch (c10::Error& error) {
       // Reason for catching and rethrowing the error is so that we can
       // set the exception pc that is queried later
-      exception_pc_ = pc;
+      exception_pc_ = 0; // FIXME zhxchen17
       TORCH_RETHROW(error);
     } catch (...) {
-      exception_pc_ = pc;
+      exception_pc_ = 0; // FIXME zhxchen17
       throw;
     }
     //  for (auto val : stack) {
