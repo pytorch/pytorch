@@ -2422,7 +2422,7 @@ See :func:`torch.argmax`
 """)
 
 add_docstr_all('mean', r"""
-mean(dim=None, keepdim=False) -> Tensor
+mean(dim=None, keepdim=False, *, dtype=None) -> Tensor
 
 See :func:`torch.mean`
 """)

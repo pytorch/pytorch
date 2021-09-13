@@ -5873,12 +5873,15 @@ Example::
 """.format(**single_dim_common))
 
 add_docstr(torch.mean, r"""
-mean(input) -> Tensor
+mean(input, *, dtype=None) -> Tensor
 
 Returns the mean value of all elements in the :attr:`input` tensor.
 
 Args:
     {input}
+
+Keyword args:
+    {dtype}
 
 Example::
 
