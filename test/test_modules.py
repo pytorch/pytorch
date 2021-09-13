@@ -178,7 +178,7 @@ class TestModule(TestCase):
                 for i in item:
                     _retain_grad(i)
             elif isinstance(item, torch.Tensor) and item.requires_grad:
-                    item.retain_grad()
+                item.retain_grad()
 
         def _to_device(obj):
             if isinstance(obj, torch.Tensor):
