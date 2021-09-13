@@ -103,7 +103,13 @@ void check_result_is_bytebool(const char* name, const Tensor& self, const Tensor
   }
 }
 
-void allany_meta(
+// Note [all, any : uint8 compatibility]:
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// For NumPy comptability, `all` and `any` return
+// Tensor of dtype `bool`. However for compatibility reason,
+// for `uint8`, they return Tensor of same dtype `uint8`.
+// Reference: https://github.com/pytorch/pytorch/pull/47878#issuecomment-747108561
+static void allany_meta(
     impl::MetaBase& meta,
     const char* name,
     const Tensor& self,
@@ -1303,24 +1309,6 @@ Tensor norm(const Tensor& self, const Scalar& p) {
   return at::norm(self, p, IntArrayRef{}, false);
 }
 
-// Note [all, any : uint8 compatibility]:
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-// For NumPy comptability, `all` and `any` return
-// Tensor of dtype `bool`. However for compatibility reason,
-// for `uint8`, they return Tensor of same dtype `uint8`.
-// Reference: https://github.com/pytorch/pytorch/pull/47878#issuecomment-747108561
-inline const Tensor & _all(const Tensor & self, const Tensor & result, TensorIterator & iter) {
-  if (iter.numel() == 0) {
-    result.fill_(1);
-  } else if (iter.numel() == 1) {
-    result.fill_(self.item());
-  } else {
-    and_stub(iter.device_type(), iter);
-  }
-
-  return result;
-}
-
 inline TensorIterator get_allany_iter(
     const Tensor& self,
     const Tensor& result,
@@ -1337,41 +1325,39 @@ inline TensorIterator get_allany_iter(
       self, result, dims, keepdim, result.scalar_type());
 }
 
+template <int identity, typename Stub>
+inline void allany_impl(
+    const Tensor& self,
+    const Tensor& result,
+    IntArrayRef dims,
+    bool keepdim,
+    Stub& stub) {
+  if (self.numel() == 0) {
+    result.fill_(identity);
+  } else if (self.numel() == 1) {
+    result.fill_(self.item().toBool());
+  } else {
+    auto iter = get_allany_iter(self, result, dims, keepdim);
+    stub(iter.device_type(), iter);
+  }
+}
+
 TORCH_IMPL_FUNC(all_out)
 (const Tensor& self, int64_t dim, bool keepdim, const Tensor& result) {
-  auto iter = get_allany_iter(self, result, dim, keepdim);
-  _all(self, result, iter);
+  allany_impl<1>(self, result, dim, keepdim, and_stub);
 }
 
 TORCH_IMPL_FUNC(all_all_out)(const Tensor& self, const Tensor& result) {
-  auto iter = get_allany_iter(self, result, {}, false);
-  _all(self, result, iter);
-}
-
-inline const Tensor & _any(const Tensor & self, const Tensor & result, TensorIterator & iter) {
-  if (iter.numel() == 0) {
-    result.fill_(0);
-  } else if (iter.numel() == 1) {
-    result.fill_(self.item());
-  } else {
-    or_stub(iter.device_type(), iter);
-  }
-
-  return result;
+  allany_impl<1>(self, result, {}, false, and_stub);
 }
 
 TORCH_IMPL_FUNC(any_out)
-(const Tensor& self,
- int64_t dim,
- bool keepdim,
- const Tensor& result) {
-  auto iter = get_allany_iter(self, result, dim, keepdim);
-  _any(self, result, iter);
+(const Tensor& self, int64_t dim, bool keepdim, const Tensor& result) {
+  allany_impl<0>(self, result, dim, keepdim, or_stub);
 }
 
 TORCH_IMPL_FUNC(any_all_out)(const Tensor& self, const Tensor& result) {
-  auto iter = get_allany_iter(self, result, {}, false);
-  _any(self, result, iter);
+  allany_impl<0>(self, result, {}, false, or_stub);
 }
 
 Tensor &amin_out(const Tensor& self, IntArrayRef dim, bool keepdim, Tensor& result) {
