@@ -5,6 +5,7 @@
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
+#include <array>
 #include <cstdint>
 #include <iostream>
 #include <string>
@@ -187,6 +188,14 @@ enum class ParallelType {
   Unswitch,
   Serial
 };
+
+static constexpr std::array<ParallelType, 6> kParallelTypeThreads = {
+    ParallelType::BIDx,
+    ParallelType::BIDy,
+    ParallelType::BIDz,
+    ParallelType::TIDx,
+    ParallelType::TIDy,
+    ParallelType::TIDz};
 
 enum class MemoryType { Local, Shared, Global };
 

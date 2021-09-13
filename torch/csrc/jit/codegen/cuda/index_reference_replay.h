@@ -6,6 +6,7 @@
 #include <torch/csrc/jit/codegen/cuda/index_compute.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
+#include <torch/csrc/jit/codegen/cuda/reference_tensor.h>
 
 #include <vector>
 
@@ -13,14 +14,6 @@ namespace torch {
 namespace jit {
 namespace fuser {
 namespace cuda {
-
-struct ReferenceTensor {
-  TensorDomain* domain = nullptr;
-
-  // Map from concrete iteration domains in ComputeAtMaps to iter domains
-  // including those used to construct domain.
-  std::unordered_map<IterDomain*, IterDomain*> concrete_to_id;
-};
 
 class IndexReferenceReplay : public OptInDispatch {
  private:
@@ -85,6 +78,7 @@ class IndexReferenceReplay : public OptInDispatch {
     ReferenceTensor ref;
     ref.domain = replay.computeReplay();
     ref.concrete_to_id = replay.concrete_to_ref_id_;
+    ref.id_to_concrete = replay.ref_id_to_concrete_;
     return ref;
   }
 };

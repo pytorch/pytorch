@@ -54,6 +54,102 @@ bool isOutputLocal(const kir::Expr* expr) {
 
 } // namespace
 
+UnswitchPredicateKey::UnswitchPredicateKey()
+    : predicated_concrete_id_(nullptr) {
+  for (auto pt : kParallelTypeThreads) {
+    parallel_concrete_ids_.insert({pt, nullptr});
+  }
+}
+
+// For a predicated concrete domain, id, find which thread parallel
+// types are used. For each used parallel type, find the concrete
+// domain that the paralllel type is associated with. The parallelized
+// concrete domains are used to uniquely collect all necessary
+// unswitch predicates.
+UnswitchPredicateKey::UnswitchPredicateKey(
+    IterDomain* predicated_concrete_id,
+    const ReferenceTensor& reference)
+    : predicated_concrete_id_(predicated_concrete_id) {
+  // Initialize the parallelized domain map
+  for (auto pt : kParallelTypeThreads) {
+    parallel_concrete_ids_.insert({pt, nullptr});
+  }
+
+  // The id parameter is a concrete domain. Needs to find the
+  // corresponding reference domain to find leaf domains that are
+  // parallelized.
+  IterDomain* predicated_ref_id =
+      reference.concrete_to_id.at(predicated_concrete_id_);
+  TensorDomain* ref_td = reference.domain;
+
+  std::vector<Val*> all_parallelized_ref_leaf_ids;
+  std::copy_if(
+      ref_td->domain().begin(),
+      ref_td->domain().end(),
+      std::back_inserter(all_parallelized_ref_leaf_ids),
+      [](IterDomain* x) { return isParallelTypeThread(x->getParallelType()); });
+
+  // If the reference is not parallelized at all, no need to
+  // differentiate keys based on how the predicated id is parallelized
+  if (all_parallelized_ref_leaf_ids.empty()) {
+    return;
+  }
+
+  // All domains that are parallelized descendants of predicated_ref_id
+  auto all_parallelized_ref_ids = DependencyCheck::getAllValsBetween(
+      {predicated_ref_id}, all_parallelized_ref_leaf_ids);
+  // Just pick leaf domains
+  std::vector<IterDomain*> parallelized_ref_leaf_ids;
+  std::copy_if(
+      ref_td->domain().begin(),
+      ref_td->domain().end(),
+      std::back_inserter(parallelized_ref_leaf_ids),
+      [&](IterDomain* x) {
+        return std::find(
+                   all_parallelized_ref_ids.begin(),
+                   all_parallelized_ref_ids.end(),
+                   x) != all_parallelized_ref_ids.end();
+      });
+
+  if (parallelized_ref_leaf_ids.empty()) {
+    // None of the parallelized leaf domains are derived from predicated_ref_id
+    return;
+  }
+
+  // Find the corresponding concrete id for each parallel type
+  for (auto ref_leaf : parallelized_ref_leaf_ids) {
+    auto pt = ref_leaf->getParallelType();
+    auto it = reference.id_to_concrete.find(ref_leaf);
+    TORCH_INTERNAL_ASSERT(it != reference.id_to_concrete.end());
+    auto concrete_leaf = it->second;
+    parallel_concrete_ids_.at(pt) = concrete_leaf;
+  }
+}
+
+std::string UnswitchPredicateKey::toString() const {
+  std::stringstream ss;
+  ss << "Predicated domain: " << predicatedId();
+  for (auto pt : kParallelTypeThreads) {
+    auto pid = parallelId(pt);
+    ss << ", " << pt << ": ";
+    if (pid) {
+      ss << pid;
+    } else {
+      ss << "null";
+    }
+  }
+  return ss.str();
+}
+
+std::size_t UnswitchPredicateKeyHash::operator()(
+    const UnswitchPredicateKey& key) const {
+  auto h = std::hash<const IterDomain*>{}(key.predicatedId());
+  for (auto pt : kParallelTypeThreads) {
+    h = h ^ std::hash<const IterDomain*>{}(key.parallelId(pt));
+  }
+  return h;
+};
+
 kir::Bool* PredicateCompute::getInlinePredicate(
     const kir::Expr* expr,
     const std::vector<kir::ForLoop*>& loops,
@@ -80,7 +176,7 @@ kir::Bool* PredicateCompute::getInlinePredicate(
     return thread_pred;
   }
 
-  auto pred_info_vec = Index::getReferenceRootPredicates(out_tv, loops);
+  auto pred_info_vec = Index::getReferenceRootPredicates(out_tv, loops).first;
 
   std::vector<kir::Bool*> preds;
 
@@ -200,10 +296,11 @@ void UnswitchPredicate::predicateOn(kir::Expr* tv_expr) {
 
   auto out_tv = firstTensorViewOutput(tv_expr);
 
-  auto pred_info_vec =
+  auto ref_pred_info =
       Index::getReferenceRootPredicates(out_tv, for_loops_, true);
+  ReferenceTensor& reference = ref_pred_info.second;
 
-  for (const auto& pred_info : pred_info_vec) {
+  for (const auto& pred_info : ref_pred_info.first) {
     auto pred = pred_info.stop;
     if (pred->isConst() && pred->value()) {
       continue;
@@ -220,12 +317,11 @@ void UnswitchPredicate::predicateOn(kir::Expr* tv_expr) {
         continue;
       }
 
-      if (std::find(
-              predicated_iter_dom_.begin(),
-              predicated_iter_dom_.end(),
-              kir_root_id) == predicated_iter_dom_.end()) {
+      UnswitchPredicateKey key(root_id, reference);
+
+      if (predicated_keys_.find(key) == predicated_keys_.end()) {
         add_pred = true;
-        predicated_iter_dom_.push_back(kir_root_id);
+        predicated_keys_.insert(key);
       }
     }
     if (add_pred) {

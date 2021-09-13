@@ -2254,10 +2254,11 @@ std::vector<PredicateContigInfo> getPredicateContigIds(
 } // namespace
 
 // Returns predicates and the concrete (by loop map) root domains they cover
-std::vector<Index::RootPredicateInfo> Index::getReferenceRootPredicates(
-    const kir::TensorView* kir_consumer_tv,
-    const std::vector<kir::ForLoop*>& loops,
-    bool unswitch) {
+std::pair<std::vector<Index::RootPredicateInfo>, ReferenceTensor> Index::
+    getReferenceRootPredicates(
+        const kir::TensorView* kir_consumer_tv,
+        const std::vector<kir::ForLoop*>& loops,
+        bool unswitch) {
   FUSER_PERF_SCOPE("GpuLower::Lower::Index::getReferenceRootPredicates");
 
   const auto gpu_lower = GpuLower::current();
@@ -2484,7 +2485,7 @@ std::vector<Index::RootPredicateInfo> Index::getReferenceRootPredicates(
     pred_info_vec.emplace_back(info);
   }
 
-  return pred_info_vec;
+  return {pred_info_vec, reference};
 }
 
 bool Index::protectWithMagicZero(

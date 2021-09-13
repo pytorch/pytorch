@@ -1,6 +1,7 @@
 #pragma once
 
 #include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
+#include <torch/csrc/jit/codegen/cuda/reference_tensor.h>
 #include <torch/csrc/jit/codegen/cuda/root_domain_map.h>
 
 #include <unordered_map>
@@ -265,7 +266,8 @@ class Index {
   //! However if we had TV.size[0] = 16 at "compile time" then we wouldn't need
   //! the predicate. This will be caught by canOmitPredicate in the predicate
   //! lowering
-  static std::vector<RootPredicateInfo> getReferenceRootPredicates(
+  static std::pair<std::vector<RootPredicateInfo>, ReferenceTensor>
+  getReferenceRootPredicates(
       const kir::TensorView* kir_consumer_tv,
       const std::vector<kir::ForLoop*>& loops,
       bool unswitch = false);
