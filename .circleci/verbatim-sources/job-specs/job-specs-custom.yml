@@ -453,7 +453,7 @@
   pytorch_ios_build:
     <<: *pytorch_ios_params
     macos:
-      xcode: "12.0"
+      xcode: "12.5.1"
     steps:
       - checkout
       - run_brew_for_ios_build

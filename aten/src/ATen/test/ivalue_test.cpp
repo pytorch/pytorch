@@ -749,6 +749,7 @@ using ivalue::TupleElements;
 
 namespace {
 void validateTupleElements(TupleElements& te, c10::ArrayRef<IValue> contents) {
+  EXPECT_EQ(te.empty(), contents.empty());
   EXPECT_EQ(te.size(), contents.size());
   for (const auto idx: c10::irange(contents.size())) {
     EXPECT_IVALUE_EQ(te[idx], contents[idx]);

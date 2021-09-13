@@ -387,6 +387,10 @@ struct TORCH_API TupleElements {
     }
   }
 
+  C10_NODISCARD bool empty() const {
+    return inlineSize_ ? false : elementsVector_.empty();
+  }
+
   C10_NODISCARD size_t size() const {
     return inlineSize_ ? inlineSize_ : elementsVector_.size();
   }
