@@ -1,0 +1,8 @@
+# See tools/testing/manual_determinator.py for details
+rules:
+  - name: Documentation changes
+    sources:
+      - "docs/*"
+      - "*.rst"
+      - "*.md"
+    tests: []

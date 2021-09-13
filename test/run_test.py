@@ -42,6 +42,8 @@ try:
         TARGET_DET_LIST,
     )
 
+    import tools.testing.manual_determinator
+
     HAVE_TEST_SELECTION_TOOLS = True
 except ImportError:
     HAVE_TEST_SELECTION_TOOLS = False
@@ -49,6 +51,7 @@ except ImportError:
         "Unable to import test_selections from tools/testing. Running without test selection stats..."
     )
 
+print(tools.testing.manual_determinator)
 
 def discover_tests(
         base_dir: Optional[pathlib.Path] = None,
