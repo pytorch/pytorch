@@ -62,6 +62,8 @@ def to_expr(x):
 def get_nnc_type(dtype):
     if dtype == torch.float:
         return te.Dtype.Float
+    elif dtype == torch.int32:
+        return te.Dtype.Int
     elif dtype == torch.long:
         return te.Dtype.Long
     elif dtype == torch.float64:
@@ -258,7 +260,6 @@ def map_node_meta(f, node_meta):
 
 def lower_function(node, op, nnc_args, args):
     inp_shapes = fx.node.map_aggregate(args, lambda arg: (process_shape(arg.meta['tensor_meta'].shape), arg.meta['tensor_meta'].dtype) if isinstance(arg, fx.Node) and 'tensor_meta' in arg.meta else None)
-    nnc_args = [x.data() if isinstance(x, te.Placeholder) else x for x in nnc_args]
     out_shape = map_node_meta(lambda x: process_shape(x.shape), node.meta['tensor_meta'])
     if op in lowering_functions:
         out = lowering_functions[op](node.name, out_shape, inp_shapes, nnc_args)
@@ -323,6 +324,7 @@ def nnc_compile(fx_model: fx.GraphModule, example_inputs, get_loopnest = False) 
     module_attrs = []
     attr_bufs = []
     compute_stmts = []
+    inputs_or_attrs = set()
     for node in fx_model.graph.nodes:
         if node.op == 'placeholder':
             # We simply map the input placeholder to a `te.Placeholder`, which
@@ -330,9 +332,10 @@ def nnc_compile(fx_model: fx.GraphModule, example_inputs, get_loopnest = False) 
             if 'tensor_meta' not in node.meta:
                 continue
             shapes = get_te_shapes(node.meta['tensor_meta'].shape)
-            placeholder = te.Placeholder(node.name, get_te_type(node), shapes)
+            placeholder = te.BufHandle(node.name, shapes, get_te_type(node))
             env[node.name] = placeholder
             inputs.append(placeholder)
+            inputs_or_attrs.add(placeholder)
         elif node.op == 'call_function':
             if node.target == operator.getitem:
                 iterable = lookup_env(node.args)[0]
@@ -363,9 +366,10 @@ def nnc_compile(fx_model: fx.GraphModule, example_inputs, get_loopnest = False) 
             # attributes and pass them in as inputs to NNC.
             module_attrs.append(node)
             shapes = get_te_shapes(process_shape(node.meta['tensor_meta'].shape))
-            placeholder = te.Placeholder(node.name, get_te_type(node), shapes)
+            placeholder = te.BufHandle(node.name, shapes,  get_te_type(node))
             env[node.name] = placeholder
             attr_bufs.append(placeholder)
+            inputs_or_attrs.add(placeholder)
         else:
             print(node.op, node.target)
             raise RuntimeError("not yet implemented")
@@ -376,7 +380,7 @@ def nnc_compile(fx_model: fx.GraphModule, example_inputs, get_loopnest = False) 
 
     outs = [list(i) for i in zip(*list(outs))]
 
-    buf_outs = [i.data() if isinstance(i, te.Placeholder) else i for i, _ in outs]
+    buf_outs = [i for i, _ in outs]
     loopnest = te.LoopNest(te.Stmt(compute_stmts), buf_outs)
     if get_loopnest:
         return loopnest
@@ -390,14 +394,13 @@ def nnc_compile(fx_model: fx.GraphModule, example_inputs, get_loopnest = False) 
 
     ph_to_inp_map = {}
     for idx, _ in enumerate(outs):
-        if isinstance(outs[idx][0], te.Placeholder):
-            if outs[idx][0] in inputs:
-                ph_to_inp_map[outs[idx][0]] = len(module_attrs) + inputs.index(outs[idx][0])
-            else:
-                ph_to_inp_map[outs[idx][0]] = attr_bufs.index(outs[idx][0])
+        if outs[idx][0] in inputs:
+            ph_to_inp_map[outs[idx][0]] = len(module_attrs) + inputs.index(outs[idx][0])
+        elif outs[idx][0] in attr_bufs:
+            ph_to_inp_map[outs[idx][0]] = attr_bufs.index(outs[idx][0])
 
     def get_outs(inps):
-        return [inps[ph_to_inp_map[buf]] if isinstance(buf, te.Placeholder) else torch.empty(shape, dtype=dtype) for buf, (shape,dtype) in outs]
+        return [inps[ph_to_inp_map[buf]] if buf in inputs_or_attrs else torch.empty(shape, dtype=dtype) for buf, (shape,dtype) in outs]
 
     def f(*inps):
         inps = fx_model.graph.flatten_inps(*inps)
