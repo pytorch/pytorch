@@ -474,14 +474,10 @@ getManagedLiveRangesFromMemoryEvents(
       TORCH_INTERNAL_ASSERT(
           alloc.size == mem_event.size, " ", alloc.size, " ", mem_event.size);
       TORCH_INTERNAL_ASSERT(
-          alloc.start_time < mem_event.start_time,
-          " ",
-          alloc.start_time,
-          " ",
-          mem_event.start_time);
+          alloc.ts < mem_event.ts, " ", alloc.ts, " ", mem_event.ts);
 
       auto lvr = UniqueLiveRange{
-          {alloc.start_time, mem_event.start_time},
+          {alloc.ts, mem_event.ts},
           std::to_string(trace_hasher(mem_event.stack_trace.value()))};
       managed_live_ranges.insert({lvr, alloc.size});
 

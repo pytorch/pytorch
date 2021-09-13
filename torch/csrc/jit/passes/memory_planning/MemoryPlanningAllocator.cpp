@@ -49,10 +49,9 @@ at::DataPtr MemoryTracingAllocator::allocate(size_t nbytes) const {
   auto orig_ptr = orig_allocator_.raw_allocate(nbytes);
   auto bt = c10::get_backtrace(0, 200, true);
   auto frame_node_id = torch::jit::currentFrameId();
-  auto time = torch::jit::timeSinceEpoch();
+  auto ts = torch::jit::timeSinceEpoch();
   allocation_traces_.emplace_back(MemoryEvent{
-      time,
-      time,
+      ts,
       bt,
       reinterpret_cast<intptr_t>(orig_ptr),
       (int64_t)nbytes,
@@ -63,10 +62,9 @@ at::DataPtr MemoryTracingAllocator::allocate(size_t nbytes) const {
   auto deleter = [this, nbytes = nbytes](void* ptr) {
     auto bt = c10::get_backtrace(0, 200, true);
     auto frame_node_id = torch::jit::currentFrameId();
-    auto time = torch::jit::timeSinceEpoch();
+    auto ts = torch::jit::timeSinceEpoch();
     allocation_traces_.emplace_back(MemoryEvent{
-      time,
-      time,
+      ts,
       bt,
       reinterpret_cast<intptr_t>(ptr),
       (int64_t)nbytes,
