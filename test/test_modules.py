@@ -226,6 +226,17 @@ class TestModule(TestCase):
         elif isinstance(obj, torch.Tensor) and obj.requires_grad:
             return obj.grad
 
+    def _zero_grad(self, obj):
+        if isinstance(obj, (tuple, list)) or isgenerator(obj):
+            for o in obj:
+                self._zero_grad(o)
+        elif isinstance(obj, dict):
+            for o in obj.values():
+                self._zero_grad(o)
+        elif isinstance(obj, (torch.Tensor, torch.nn.Parameter)) and obj.grad is not None:
+            obj.grad.detach_()
+            obj.grad.zero_()
+
     @modules(module_db)
     def test_non_contiguous_tensors(self, device, dtype, module_info):
         # Check modules work with non-contiguous tensors
@@ -233,17 +244,6 @@ class TestModule(TestCase):
         module_cls = module_info.module_cls
         module_inputs = module_info.module_inputs_func(module_info, device=device, dtype=dtype,
                                                        requires_grad=True)
-
-        def _zero_grad(obj):
-            if isinstance(obj, (tuple, list)) or isgenerator(obj):
-                for o in obj:
-                    _zero_grad(o)
-            elif isinstance(obj, dict):
-                for o in obj.values():
-                    _zero_grad(o)
-            elif isinstance(obj, (torch.Tensor, torch.nn.Parameter)) and obj.grad is not None:
-                obj.grad.detach_()
-                obj.grad.zero_()
 
         def _make_non_contiguous(obj):
             if isinstance(obj, (tuple, list)):
@@ -305,8 +305,8 @@ class TestModule(TestCase):
 
             for (in_args, in_kwargs), g_out in product(inputs, grads):
                 g_out_copy = deepcopy(g_out)
-                _zero_grad((in_args, in_kwargs))
-                _zero_grad(m.parameters())
+                self._zero_grad((in_args, in_kwargs))
+                self._zero_grad(m.parameters())
 
                 with freeze_rng_state():
                     out = m(*in_args, **in_kwargs)
