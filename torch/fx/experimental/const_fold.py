@@ -1,9 +1,9 @@
 import operator
+import re
 from typing import Dict, Set, List, Optional, Union
 
 import torch.fx
 from torch.fx.passes.split_module import split_module
-import re
 
 
 def _make_tuple(x):
@@ -197,8 +197,8 @@ def split_const_subgraphs(
     for node in split.submod_1.graph.nodes:
         if node.op != "placeholder":
             continue
-        is_folded_attr = ph_idx in submod_1_input_idx_to_folded_attr_name.keys()
-        is_unfolded_attr = ph_idx in submod_1_input_idx_to_unfolded_attr_name.keys()
+        is_folded_attr = ph_idx in submod_1_input_idx_to_folded_attr_name
+        is_unfolded_attr = ph_idx in submod_1_input_idx_to_unfolded_attr_name
         if not is_folded_attr and not is_unfolded_attr:
             ph_idx += 1
             continue
@@ -208,6 +208,7 @@ def split_const_subgraphs(
             if is_folded_attr
             else submod_1_input_idx_to_unfolded_attr_name[ph_idx]
         )
+
         if is_folded_attr:
             assert not hasattr(mod_traced, const_output_name)
             # Use a dummy param, which will be overwritten when we run const folding.
@@ -217,7 +218,9 @@ def split_const_subgraphs(
                 torch.nn.Parameter(torch.randn(1)),
             )
         with split.submod_1.graph.inserting_before(node):
-            node.replace_all_uses_with(split.submod_1.graph.get_attr(const_output_name))
+            new_node = split.submod_1.graph.get_attr(const_output_name)
+            new_node.meta = node.meta.copy()
+            node.replace_all_uses_with(new_node)
         split.submod_1.graph.erase_node(node)
         ph_idx += 1
 
