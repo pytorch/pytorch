@@ -246,12 +246,8 @@ jobs:
         shell: bash
         run: |
           # only render test results if there are test results to render
-          if find test/ --name "*.xml" > /dev/null 2>/dev/null; then
-            python3 -m pip install junitparser==2.1.1 rich==10.9.0
-            python3 tools/render_junit.py test/
-          else
-            echo "No test reports found, did tests actually run?"
-          fi
+          python3 -m pip install junitparser==2.1.1 rich==10.9.0
+          python3 tools/render_junit.py test/
       - name: Zip test reports for upload
         if: always()
         env:
