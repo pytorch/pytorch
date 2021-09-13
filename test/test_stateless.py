@@ -1,4 +1,5 @@
-import pytest
+import unittest
+
 import torch
 
 import torch.nn.utils._stateless as _stateless
@@ -24,28 +25,29 @@ class TestStatelessFunctionalAPI(TestCase):
         x = torch.rand((1, 1)).to(device)
         weight = torch.nn.Parameter(torch.tensor([[1.0]])).to(device)
         bias = torch.nn.Parameter(torch.tensor([0.0])).to(device)
-        parameters = {f'{prefix}.l1.weight': weight,
-                      f'{prefix}.l1.bias': bias}
-        prev_weight = getattr(module, f'{prefix}.l1.weight', module)
+        parameters = {f'{prefix}l1.weight': weight,
+                      f'{prefix}l1.bias': bias}
+        prev_weight = getattr(module, f'{prefix}l1.weight', module)
         res = _stateless.functional_call(module, parameters, x)
         self.assertEqual(x, res.reshape((1, 1)))
         # check that the weight remain unmodified
-        cur_weight = getattr(module, f'{prefix}.l1.weight', module)
+        cur_weight = getattr(module, f'{prefix}l1.weight', module)
         self.assertEqual(cur_weight, prev_weight)
 
-    @pytest.mark.xfail
     def test_functional_call_with_jit(self):
         module = MockModule()
         jit_module = torch.jit.script(module)
-        # RuntimeError: cannot delete methods or parameters of a script module
-        self._run_call_with_module(jit_module)
+        self.assertRaisesRegex(
+            RuntimeError,
+            r'delete methods or parameters',
+            lambda: self._run_call_with_module(jit_module))
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_functional_call_with_data_parallel(self):
         module = MockModule()
         module.cuda()
         dp_module = torch.nn.DataParallel(module, [0, 1])
-        self._run_call_with_module(dp_module, device='cuda', prefix='module')
+        self._run_call_with_module(dp_module, device='cuda', prefix='module.')
 
 
 if __name__ == '__main__':
