@@ -901,8 +901,8 @@ class TestFunctionalIterDataPipe(TestCase):
         with self.assertRaises(TypeError):
             _helper(None, fn_n1, 1)
         # Replacing with multiple input columns and default output column (the left-most input column)
-        _helper(lambda data: (data[0], data[1], data[2] + data[0]), fn_n1, [2, 0])
-        _helper(lambda data: (data[0], data[1], (-data[2], -data[1], data[2] + data[1])), fn_nn, [2, 1])
+        _helper(lambda data: (data[1], data[2] + data[0]), fn_n1, [2, 0])
+        _helper(lambda data: (data[0], (-data[2], -data[1], data[2] + data[1])), fn_nn, [2, 1])
 
         # output_col can only be specified when input_col is not None
         with self.assertRaises(ValueError):
@@ -942,9 +942,12 @@ class TestFunctionalIterDataPipe(TestCase):
             return -d0, -d1, d0 + d1
 
         # Prevent modification in-place to support resetting
-        def _dict_update(data, newdata):
+        def _dict_update(data, newdata, remove_idx=None):
             _data = dict(data)
             _data.update(newdata)
+            if remove_idx:
+                for idx in remove_idx:
+                    del _data[idx]
             return _data
 
         def _helper(ref_fn, fn, input_col=None, output_col=None):
@@ -967,8 +970,8 @@ class TestFunctionalIterDataPipe(TestCase):
         with self.assertRaises(TypeError):
             _helper(None, fn_n1, "y")
         # Replacing with multiple input columns and default output column (the left-most input column)
-        _helper(lambda data: _dict_update(data, {"z": data["x"] + data["z"]}), fn_n1, ["z", "x"])
-        _helper(lambda data: _dict_update(data, {"z": (-data["z"], -data["y"], data["y"] + data["z"])}), fn_nn, ["z", "y"])
+        _helper(lambda data: _dict_update(data, {"z": data["x"] + data["z"]}, ["x"]), fn_n1, ["z", "x"])
+        _helper(lambda data: _dict_update(data, {"z": (-data["z"], -data["y"], data["y"] + data["z"])}, ["y"]), fn_nn, ["z", "y"])
 
         # output_col can only be specified when input_col is not None
         with self.assertRaises(ValueError):

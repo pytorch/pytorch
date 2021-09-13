@@ -33,10 +33,10 @@ class MapperIterDataPipe(IterDataPipe[T_co]):
             - None as default to apply `fn` to the data directly.
             - Integer(s) is used for list/tuple.
             - Key(s) is used for dict.
-        output_col: Index of data where result of `fn` is placed. Can be specified only when `input_col` is not None
+        output_col: Index of data where result of `fn` is placed. `output_col` can be specified only when `input_col` is not None
             - None as default to replace the index that `input_col` specified;
-              For multiple indices of `input_col`, the left-most one is used.
-            - Integer is used for list/tuple. -1 represents to appending result at the end.
+              For `input_col` with multiple indices, the left-most one is used, and other indices will be removed.
+            - Integer is used for list/tuple. -1 represents to append result at the end.
             - Key is used for dict. New key is acceptable.
         fn_args: Positional arguments for `fn`
         fn_kwargs: Keyword arguments for `fn`
@@ -105,6 +105,8 @@ class MapperIterDataPipe(IterDataPipe[T_co]):
         if self.output_col is None:
             if isinstance(self.input_col, (list, tuple)):
                 data[self.input_col[0]] = res
+                for idx in sorted(self.input_col[1:], reverse=True):
+                    del data[idx]
             else:
                 data[self.input_col] = res
         else:
