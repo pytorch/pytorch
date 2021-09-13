@@ -53,23 +53,19 @@ CONFIG_TREE_DATA = [
         ("clang", [
             ("9", [
                 ("3.6", [
-                    ("noarch", [XImportant(True)]),
-                ]),
-            ]),
-            ("9", [
-                ("3.6", [
                     ("xla", [XImportant(True)]),
                     ("vulkan", [XImportant(True)]),
                 ]),
             ]),
         ]),
-        ("rocm", [
-            ("3.9", [
-                ("3.6", [
-                    ('build_only', [XImportant(True)]),
-                ]),
-            ]),
-        ]),
+        # @jithunnair-amd believes Jenkins builds are sufficient
+        # ("rocm", [
+        #     ("3.9", [
+        #         ("3.6", [
+        #             ('build_only', [XImportant(True)]),
+        #         ]),
+        #     ]),
+        # ]),
     ]),
 ]
 

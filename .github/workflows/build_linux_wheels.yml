@@ -109,5 +109,5 @@ jobs:
           python3 -m tools.stats.upload_binary_size_to_scuba || exit 0
 
 concurrency:
-  group: build-linux-wheels-${{ github.event.pull_request.number || github.sha }}
+  group: build-linux-wheels-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true

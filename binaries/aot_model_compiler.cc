@@ -18,13 +18,11 @@ C10_DEFINE_string(model_version, "", "The version of the model.");
 C10_DEFINE_string(
     input_dims,
     "",
-    "Alternate to input_files, if all inputs are simple "
-    "float TensorCPUs, specify the dimension using comma "
-    "separated numbers. If multiple input needed, use "
-    "semicolon to separate the dimension of different "
-    "tensors.");
+    "For input float TensorCPUs, specify the dimension using comma "
+    "separated numbers. If multiple inputs needed, use semicolon "
+    "to separate the dimension of different tensors.");
 C10_DEFINE_string(
-    output_asm,
+    output_llvm,
     "",
     "Name of the output llvm assembly to be saved.");
 C10_DEFINE_string(output_model, "", "Name of the output model to be saved.");
@@ -46,7 +44,7 @@ std::vector<std::string> split(
   return pieces;
 }
 
-std::vector<std::vector<int64_t>> parse_input_shapes() {
+std::vector<std::vector<int64_t>> parseInputShapes() {
   CAFFE_ENFORCE_GE(FLAGS_input_dims.size(), 0, "Input dims must be specified.");
   std::vector<std::string> input_dims_list = split(';', FLAGS_input_dims);
   std::vector<std::vector<int64_t>> inputs;
@@ -62,12 +60,12 @@ std::vector<std::vector<int64_t>> parse_input_shapes() {
   return inputs;
 }
 
-c10::Dict<c10::IValue, c10::IValue> create_compile_spec() {
+c10::Dict<c10::IValue, c10::IValue> createCompileSpec() {
   c10::Dict<c10::IValue, c10::IValue> compile_spec(
       c10::StringType::get(), c10::AnyType::get());
   c10::Dict<c10::IValue, c10::IValue> method_spec(
       c10::StringType::get(), c10::AnyType::get());
-  auto input_shapes = parse_input_shapes();
+  auto input_shapes = parseInputShapes();
   TORCH_CHECK(
       input_shapes.size() == 1,
       "Wrong # of input shapes: ",
@@ -77,7 +75,7 @@ c10::Dict<c10::IValue, c10::IValue> create_compile_spec() {
   return compile_spec;
 }
 
-std::vector<int64_t> get_input_sizes_for_method(
+std::vector<int64_t> getInputSizesForMethod(
     const c10::Dict<c10::IValue, c10::IValue>& method_compile_spec,
     const std::string& method_name) {
   return method_compile_spec.at(method_name)
@@ -86,21 +84,21 @@ std::vector<int64_t> get_input_sizes_for_method(
       .toIntVector();
 }
 
-std::string get_nnc_kernel_id(const std::string& method_name) {
+std::string getNncKernelId(const std::string& method_name) {
   // TODO: calculate the version_token.
   const std::string version_token = "VERTOKEN";
   return FLAGS_model_name + ":" + FLAGS_model_version + ":" + method_name +
       ":" + version_token;
 }
 
-void write_output_assembly(const std::string& asm_code) {
-  std::string output_asm_name = FLAGS_output_asm;
-  if (output_asm_name.empty()) {
-    output_asm_name =
+void writeOutputLlvmAssembly(const std::string& asm_code) {
+  std::string output_llvm_file_name = FLAGS_output_llvm;
+  if (output_llvm_file_name.empty()) {
+    output_llvm_file_name =
         FLAGS_model.substr(0, FLAGS_model.find('.')) + ".compiled.ll";
   }
 
-  std::ofstream output(output_asm_name);
+  std::ofstream output(output_llvm_file_name);
   output << asm_code;
 }
 
@@ -111,14 +109,14 @@ c10::IValue preprocess(
   const std::string& method_name = "forward";
   auto method = mod.get_method(method_name);
   auto graph = method.function().graph()->copy();
-  auto sizes = get_input_sizes_for_method(method_compile_spec, method_name);
+  auto sizes = getInputSizesForMethod(method_compile_spec, method_name);
 
-  std::string asmCode;
+  std::string llvm_asm_code;
   auto func =
-      torch::jit::mobile::nnc::aot_compile(method_name, graph, sizes, &asmCode);
-  write_output_assembly(asmCode);
+      torch::jit::mobile::nnc::aotCompile(method_name, graph, sizes, &llvm_asm_code);
+  writeOutputLlvmAssembly(llvm_asm_code);
 
-  func->set_nnc_kernel_id(get_nnc_kernel_id(method_name));
+  func->set_nnc_kernel_id(getNncKernelId(method_name));
 
   torch::jit::mobile::nnc::CompilationUnit cu;
   cu.register_function(std::move(func));
@@ -137,7 +135,7 @@ int main(int argc, char** argv) {
       " --model_name=<model name>"
       " --model_version=<model version>"
       " --input_dims='1,3,224,224'"
-      " [--output_asm=<llvm assembly output file path>]"
+      " [--output_llvm=<llvm assembly output file path>]"
       " [--output_model=<output model file path>]");
 
   if (!c10::ParseCommandLineFlags(&argc, &argv)) {
@@ -160,7 +158,7 @@ int main(int argc, char** argv) {
   auto graph = frozen_m.get_method("forward").graph();
   torch::jit::OptimizeFrozenGraph(graph, true);
 
-  auto compile_spec = create_compile_spec();
+  auto compile_spec = createCompileSpec();
   auto any_dict_ty =
       c10::DictType::create(c10::StringType::get(), c10::AnyType::get());
   auto compiled_module = torch::jit::detail::codegen_backend_module(
