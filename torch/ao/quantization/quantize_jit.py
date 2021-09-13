@@ -1,7 +1,7 @@
 
 import torch
-from .qconfig import QConfig
-from .quant_type import QuantType
+from torch.quantization.qconfig import QConfig
+from torch.quantization.quant_type import QuantType
 from torch.jit._recursive import wrap_cpp_module
 
 def _check_is_script_module(model):
