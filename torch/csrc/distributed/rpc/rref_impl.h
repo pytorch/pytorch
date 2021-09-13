@@ -312,8 +312,8 @@ class TORCH_API UserRRef final : public RRef {
   // Get of copy of the value from the ``OwnerRRef``. If the value is not ready
   // yet, this call will block.
   IValue toHere(
-      const float timeoutSeconds =
-          torch::distributed::rpc::kUnsetRpcTimeout) const;
+      const DeviceMap& deviceMap = {},
+      const float timeoutSeconds = kUnsetRpcTimeout) const;
 
   void tryDel() override;
 

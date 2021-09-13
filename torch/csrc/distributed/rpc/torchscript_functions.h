@@ -25,6 +25,7 @@ c10::intrusive_ptr<c10::ivalue::Future> TORCH_API rpcTorchscript(
     const c10::QualifiedName& qualifiedName,
     const c10::FunctionSchema& functionSchema,
     std::vector<c10::IValue>& stack,
+    DeviceMap& deviceMap,
     const float rpcTimeoutSeconds = torch::distributed::rpc::kUnsetRpcTimeout,
     const bool isAsyncExecution = false);
 
@@ -33,6 +34,7 @@ c10::intrusive_ptr<RRef> TORCH_API remoteTorchscript(
     const c10::QualifiedName& qualifiedName,
     const c10::FunctionSchema& functionSchema,
     std::vector<c10::IValue>& stack,
+    DeviceMap& deviceMap,
     const float rpcTimeoutSeconds = torch::distributed::rpc::kUnsetRpcTimeout,
     const bool isAsyncExecution = false);
 

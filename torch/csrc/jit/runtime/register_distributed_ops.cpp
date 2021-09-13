@@ -43,11 +43,13 @@ void prepare_and_call_rpc_op(
   auto& argsTupleIValue = num_inputs >= 3 ? *stackIter++ : emptyTuple;
   // `kwargs = kwargs if kwargs is not None else {}`.
   auto& kwargsDictIValue = num_inputs >= 4 ? *stackIter++ : emptyDict;
+  // `device_map = device_map if device_map is not None else {}`.
+  auto& deviceMapDictIValue = num_inputs >= 5 ? *stackIter++ : emptyDict;
 
   // IValue corresponding to placeholder for RPC timeout. Used if no
   // rpc timeout is specified by user.
   IValue noTimeout(torch::distributed::rpc::kUnsetRpcTimeout);
-  const auto rpcMaxInputs = 5;
+  const auto rpcMaxInputs = 6;
   auto& timeoutIValue = num_inputs >= rpcMaxInputs ? *stackIter++ : noTimeout;
   TORCH_INTERNAL_ASSERT(
       dstWorkerIValue.isString() ||
@@ -56,6 +58,7 @@ void prepare_and_call_rpc_op(
   TORCH_INTERNAL_ASSERT(qualifiedNameIValue.isString());
   TORCH_INTERNAL_ASSERT(argsTupleIValue.isTuple());
   TORCH_INTERNAL_ASSERT(kwargsDictIValue.isGenericDict());
+  TORCH_INTERNAL_ASSERT(deviceMapDictIValue.isGenericDict());
   TORCH_INTERNAL_ASSERT(timeoutIValue.isDouble());
 
   // Get FunctionSchema for qualifiedName.
@@ -114,6 +117,11 @@ void prepare_and_call_rpc_op(
     throw std::runtime_error(functionSchema.findErrorInKwargs(names));
   }
 
+  dist_rpc::DeviceMap deviceMap;
+  for (const auto& pair : deviceMapDictIValue.toGenericDict()) {
+    deviceMap.insert({pair.key().toDevice(), pair.value().toDevice()});
+  }
+
   // Get destination WorkerName.
   std::string dstWorkerNameStr;
   if (dstWorkerIValue.isString()) {
@@ -134,6 +142,7 @@ void prepare_and_call_rpc_op(
         qualifiedName,
         functionSchema,
         userCallableStack,
+        deviceMap,
         rpcTimeout);
     // Push output to the stack.
     drop(stack, num_inputs);
@@ -145,6 +154,7 @@ void prepare_and_call_rpc_op(
         qualifiedName,
         functionSchema,
         userCallableStack,
+        deviceMap,
         rpcTimeout);
     futureIValuePtr->wait();
     if (futureIValuePtr->hasError()) {
@@ -162,6 +172,7 @@ void prepare_and_call_rpc_op(
         qualifiedName,
         functionSchema,
         userCallableStack,
+        deviceMap,
         rpcTimeout);
     // Push output to the stack.
     drop(stack, num_inputs);
@@ -188,7 +199,7 @@ RegisterOperators reg_rpc_ops(
                      ->getValue();
            } else {
              res = c10::dynamic_intrusive_pointer_cast<dist_rpc::UserRRef>(rref)
-                       ->toHere(timeout);
+                       ->toHere({}, timeout); // TODO(pbelevich) how to add deviceMap?
            }
            push(stack, std::move(res));
          },
@@ -249,7 +260,7 @@ RegisterOperators reg_rpc_ops(
          },
          aliasAnalysisConservative()),
      Operator(
-         prim::rpc_sync,
+         prim::rpc_sync, // 156???
          [](const Node* node) -> Operation {
            int num_inputs = node->inputs().size();
            return [num_inputs](Stack& stack) {

@@ -61,10 +61,7 @@ c10::intrusive_ptr<Message> RpcWithAutograd::toMessageImpl() && {
   TORCH_INTERNAL_ASSERT(!payload.empty());
 
   // Convert deviceMap to c10::Dict for serialization.
-  c10::Dict<std::string, std::string> deviceMap;
-  for (const auto& mapEntry : deviceMap_) {
-    deviceMap.insert(mapEntry.first.str(), mapEntry.second.str());
-  }
+  c10::Dict<std::string, std::string> deviceMap = rpc::deviceMapToC10Dict(deviceMap_);
 
   std::vector<at::IValue> ivalues{wrappedMessageType,
                                   autogradMetadata_.autogradContextId,
@@ -112,10 +109,7 @@ std::unique_ptr<RpcWithAutograd> RpcWithAutograd::fromMessage(
   auto c10DeviceMap = tupleElements[4].to<c10::Dict<std::string, std::string>>();
 
   // Convert to regular map.
-  rpc::DeviceMap deviceMap;
-  for (const auto& mapEntry : c10DeviceMap) {
-    deviceMap.insert({mapEntry.key(), mapEntry.value()});
-  }
+  rpc::DeviceMap deviceMap = rpc::c10DictToDeviceMap(c10DeviceMap);
 
   // Create new message type and build wrapped RPC.
   auto wrappedMessage = c10::make_intrusive<Message>(

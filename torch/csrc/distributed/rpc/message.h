@@ -2,6 +2,7 @@
 
 #include <torch/types.h>
 #include <vector>
+#include <torch/csrc/distributed/rpc/types.h>
 
 namespace torch {
 namespace distributed {
@@ -117,13 +118,15 @@ class TORCH_API Message final : public torch::CustomClassHolder {
   Message(
       std::vector<char>&& payload,
       std::vector<torch::Tensor>&& tensors,
-      MessageType type);
+      MessageType type,
+      DeviceMap&& deviceMap_ = {});
 
   Message(
       std::vector<char>&& payload,
       std::vector<torch::Tensor>&& tensors,
       MessageType type,
-      int64_t id);
+      int64_t id,
+      DeviceMap&& deviceMap_ = {});
 
   friend c10::intrusive_ptr<Message>;
 
@@ -135,7 +138,6 @@ class TORCH_API Message final : public torch::CustomClassHolder {
 
   // Destructively retrieves the payload.
   std::vector<char>&& movePayload() &&;
-  std::vector<torch::Tensor>&& moveTensors() &&;
 
   std::vector<char>& payload();
   const std::vector<char>& payload() const;
@@ -155,10 +157,13 @@ class TORCH_API Message final : public torch::CustomClassHolder {
 
   std::vector<c10::weak_intrusive_ptr<c10::StorageImpl>> getStorages() const;
 
+  DeviceMap& getDeviceMap();
+
  private:
   std::vector<char> payload_;
   std::vector<torch::Tensor> tensors_;
   MessageType type_ = MessageType::UNKNOWN;
+  DeviceMap deviceMap_;
   int64_t id_ = -1;
 };
 

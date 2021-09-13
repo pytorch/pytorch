@@ -25,8 +25,8 @@ class PYBIND11_EXPORT PyRRef {
   WorkerInfo owner() const;
   std::string ownerName() const;
   py::object toHere(
-      const float timeoutSeconds =
-          torch::distributed::rpc::kUnsetRpcTimeout) const;
+      const DeviceMap& deviceMap = {},
+      const float timeoutSeconds = kUnsetRpcTimeout) const;
   py::object localValue() const;
   std::string str() const;
   py::tuple pickle() const;
@@ -48,13 +48,13 @@ class PYBIND11_EXPORT PyRRef {
   // of this RRef to run functions on the object referenced by this RRef.
   py::object createRRefProxy(
       const RRefProxyType& mode,
-      float timeoutSeconds = rpc::kUnsetRpcTimeout) const;
+      float timeoutSeconds = kUnsetRpcTimeout) const;
 
   // get the type of the data object referenced by this RRef. Timeout argument
   // is only used in the first invocation of this function as an argument to the
   // RPC to the owner node of the RRef.
   py::object getRRefType(
-      float timeout = rpc::kUnsetRpcTimeout,
+      float timeout = kUnsetRpcTimeout,
       bool blocking = true);
 
   // Run the backward pass with the RRef as the root.

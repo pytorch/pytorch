@@ -54,8 +54,8 @@ variable_list RecvRpcBackward::apply(variable_list&& grads) {
   auto jitFuture = rpcAgent->send(
       rpcAgent->getWorkerInfo(fromWorkerId_),
       std::move(gradCall).toMessage(),
-      rpc::kUnsetRpcTimeout,
-      deviceMap_);
+      deviceMap_,
+      rpc::kUnsetRpcTimeout);
 
   // Record the future in the context.
   sharedContext->addOutstandingRpc(jitFuture);

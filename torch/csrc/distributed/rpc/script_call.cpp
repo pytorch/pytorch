@@ -11,16 +11,22 @@ const std::string ScriptCall::ATEN_PREFIX_("aten::");
 
 ScriptCall::ScriptCall(
     std::shared_ptr<Operator> op,
-    std::vector<at::IValue>&& stack)
-    : op_(std::move(op)), stack_(stack), isAsyncExecution_(false) {}
+    std::vector<at::IValue>&& stack,
+    DeviceMap&& deviceMap)
+    : op_(std::move(op)),
+      stack_(stack),
+      isAsyncExecution_(false),
+      deviceMap_(deviceMap) {}
 
 ScriptCall::ScriptCall(
     const c10::QualifiedName& qualifiedName,
     std::vector<at::IValue>&& stack,
+    DeviceMap&& deviceMap,
     const bool isAsyncExecution)
     : qualifiedName_(qualifiedName),
       stack_(stack),
-      isAsyncExecution_(isAsyncExecution) {}
+      isAsyncExecution_(isAsyncExecution),
+      deviceMap_(deviceMap) {}
 
 bool ScriptCall::hasOp() const {
   return op_ ? true : false;
@@ -50,6 +56,8 @@ void ScriptCall::toIValues(std::vector<at::IValue>& ivalues) const {
   for (auto& value : stack_) {
     ivalues.push_back(value);
   }
+
+  ivalues.emplace_back(deviceMapToC10Dict(deviceMap_));
 
   if (hasOp()) {
     TORCH_CHECK(
@@ -88,22 +96,35 @@ std::unique_ptr<ScriptCall> ScriptCall::fromIValues(
   // If the qualifiedName is not a builtin operator name, then treat it
   // as TorchScript function name
   const std::string& qualifiedName = ivalues.back().toStringRef();
-
+  ivalues.pop_back();
   if (qualifiedName.rfind(BUILTIN_OP_NAMESPACE_) == 0) {
-    ivalues.pop_back();
     const std::string& str_schema = ivalues.back().toStringRef();
     auto op = matchOperator(str_schema);
+    ivalues.pop_back();
 
-    ivalues.pop_back();
     // remove str_schema from ivalues
-    return std::make_unique<ScriptCall>(op, std::move(ivalues));
-  } else {
+    auto c10DeviceMap = ivalues.back().to<c10::Dict<std::string, std::string>>();
     ivalues.pop_back();
+    // Convert to regular map.
+    DeviceMap deviceMap = c10DictToDeviceMap(c10DeviceMap);
+
+    return std::make_unique<ScriptCall>(
+        op,
+        std::move(ivalues),
+        std::move(deviceMap));
+  } else {
     bool isAsyncExecution = ivalues.back().toBool();
     ivalues.pop_back();
+
+    auto c10DeviceMap = ivalues.back().to<c10::Dict<std::string, std::string>>();
+    ivalues.pop_back();
+    // Convert to regular map.
+    DeviceMap deviceMap = c10DictToDeviceMap(c10DeviceMap);
+
     return std::make_unique<ScriptCall>(
         c10::QualifiedName(qualifiedName),
         std::move(ivalues),
+        std::move(deviceMap),
         isAsyncExecution);
   }
 }
@@ -117,7 +138,7 @@ c10::intrusive_ptr<Message> ScriptCall::toMessageImpl() && {
       c10::ivalue::Tuple::create(std::move(ivalues)), &tensor_table);
 
   return c10::make_intrusive<Message>(
-      std::move(payload), std::move(tensor_table), MessageType::SCRIPT_CALL);
+      std::move(payload), std::move(tensor_table), MessageType::SCRIPT_CALL, std::move(deviceMap_));
 }
 
 std::unique_ptr<ScriptCall> ScriptCall::fromMessage(const Message& message) {

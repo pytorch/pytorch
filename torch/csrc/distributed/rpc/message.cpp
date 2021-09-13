@@ -9,18 +9,24 @@ Message::Message() = default;
 Message::Message(
     std::vector<char>&& payload,
     std::vector<torch::Tensor>&& tensors,
-    MessageType type)
-    : payload_(std::move(payload)), tensors_(std::move(tensors)), type_(type) {}
+    MessageType type,
+    DeviceMap&& deviceMap)
+    : payload_(std::move(payload)),
+      tensors_(std::move(tensors)),
+      type_(type),
+      deviceMap_(deviceMap) {}
 
 Message::Message(
     std::vector<char>&& payload,
     std::vector<torch::Tensor>&& tensors,
     MessageType type,
-    int64_t id)
+    int64_t id,
+    DeviceMap&& deviceMap)
     : payload_(std::move(payload)),
       tensors_(std::move(tensors)),
       type_(type),
-      id_(id) {}
+      id_(id),
+      deviceMap_(deviceMap) {}
 
 std::vector<char>&& Message::movePayload() && {
   return std::move(payload_);
@@ -32,10 +38,6 @@ std::vector<char>& Message::payload() {
 
 const std::vector<char>& Message::payload() const {
   return payload_;
-}
-
-std::vector<torch::Tensor>&& Message::moveTensors() && {
-  return std::move(tensors_);
 }
 
 std::vector<torch::Tensor>& Message::tensors() {
@@ -81,6 +83,10 @@ std::vector<c10::weak_intrusive_ptr<c10::StorageImpl>> Message::getStorages()
     }
   }
   return storages;
+}
+
+DeviceMap& Message::getDeviceMap() {
+  return deviceMap_;
 }
 
 c10::intrusive_ptr<Message> createExceptionResponse(

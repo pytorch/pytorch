@@ -61,6 +61,8 @@ struct TORCH_API SerializedPyObj final {
   std::vector<at::Tensor> tensors_;
 };
 
+using DeviceMap = std::unordered_map<c10::Device, c10::Device>;
+
 } // namespace rpc
 } // namespace distributed
 } // namespace torch

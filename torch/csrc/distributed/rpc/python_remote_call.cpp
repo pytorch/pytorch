@@ -10,10 +10,12 @@ PythonRemoteCall::PythonRemoteCall(
     SerializedPyObj&& serializedPyObj,
     at::IValue retRRefId,
     at::IValue retForkId,
+    DeviceMap&& deviceMap,
     const bool isAsyncExecution)
     : serializedPyObj_(std::move(serializedPyObj)),
       retRRefId_(std::move(retRRefId)),
       retForkId_(std::move(retForkId)),
+      deviceMap_(deviceMap),
       isAsyncExecution_(isAsyncExecution) {}
 
 c10::intrusive_ptr<Message> PythonRemoteCall::toMessageImpl() && {
@@ -21,6 +23,7 @@ c10::intrusive_ptr<Message> PythonRemoteCall::toMessageImpl() && {
   ivalues.emplace_back(retRRefId_);
   ivalues.emplace_back(retForkId_);
   ivalues.emplace_back(isAsyncExecution_);
+  ivalues.emplace_back(deviceMapToC10Dict(deviceMap_));
 
   std::vector<torch::Tensor> tensor_table;
   auto payload =
@@ -29,7 +32,8 @@ c10::intrusive_ptr<Message> PythonRemoteCall::toMessageImpl() && {
   return c10::make_intrusive<Message>(
       std::move(payload),
       std::move(tensor_table),
-      MessageType::PYTHON_REMOTE_CALL);
+      MessageType::PYTHON_REMOTE_CALL,
+      std::move(deviceMap_));
 }
 
 std::unique_ptr<PythonRemoteCall> PythonRemoteCall::fromMessage(
@@ -49,6 +53,11 @@ std::unique_ptr<PythonRemoteCall> PythonRemoteCall::fromMessage(
       values.size() >= 3,
       "Expect at least 3 elements in the unpickled values, but got ",
       values.size());
+
+  auto c10DeviceMap = values.back().to<c10::Dict<std::string, std::string>>();
+  std::unordered_map<c10::Device, c10::Device> deviceMap = c10DictToDeviceMap(c10DeviceMap);
+  values.pop_back();
+
   bool isAsyncExecution = values.back().toBool();
   values.pop_back();
   auto retForkId = std::move(values.back());
@@ -61,6 +70,7 @@ std::unique_ptr<PythonRemoteCall> PythonRemoteCall::fromMessage(
       std::move(serializedPyObj),
       std::move(retRRefId),
       std::move(retForkId),
+      std::move(deviceMap),
       isAsyncExecution);
 }
 

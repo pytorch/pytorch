@@ -180,14 +180,14 @@ std::string PyRRef::ownerName() const {
   return rref_->ownerName();
 }
 
-py::object PyRRef::toHere(const float timeoutSeconds) const {
+py::object PyRRef::toHere(const DeviceMap& deviceMap, const float timeoutSeconds) const {
   if (rref_->isOwner()) {
     return localValue();
   } else {
     // toHere() calls python_rpc_handler which acquires GIL when UserRRef holds
     // a python object
     IValue value = c10::static_intrusive_pointer_cast<UserRRef>(rref_)->toHere(
-        timeoutSeconds);
+        deviceMap, timeoutSeconds);
 
     if (rref_->isPyObj()) {
       // python_rpc_handler deserialization will acquires GIL.

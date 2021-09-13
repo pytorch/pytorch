@@ -126,7 +126,8 @@ const ForkId& UserRRef::forkId() const {
   return forkId_;
 }
 
-IValue UserRRef::toHere(const float timeoutSeconds) const {
+IValue UserRRef::toHere(const DeviceMap& deviceMap,
+                        const float timeoutSeconds) const {
   TORCH_CHECK(
       !getTimedOut(),
       "RRef creation via rpc.remote() timed out, and it "

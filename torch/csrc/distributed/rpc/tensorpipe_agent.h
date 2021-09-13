@@ -179,8 +179,8 @@ class TORCH_API TensorPipeAgent : public RpcAgent {
   c10::intrusive_ptr<JitFuture> send(
       const WorkerInfo& to,
       c10::intrusive_ptr<Message> message,
-      const float rpcTimeoutSeconds = kUnsetRpcTimeout,
-      const DeviceMap& deviceMap = {}) override;
+      const DeviceMap& deviceMap = {},
+      const float rpcTimeoutSeconds = kUnsetRpcTimeout) override;
 
   // join() and sync() would be deprecated -
   // https://github.com/pytorch/pytorch/issues/27647

@@ -22,6 +22,22 @@ class RpcCommandBase {
 
 inline RpcCommandBase::~RpcCommandBase() = default;
 
+inline c10::Dict<std::string, std::string> deviceMapToC10Dict(const DeviceMap& deviceMap) {
+  c10::Dict<std::string, std::string> c10dict;
+  for (const auto& mapEntry : deviceMap) {
+    c10dict.insert(mapEntry.first.str(), mapEntry.second.str());
+  }
+  return c10dict;
+}
+
+inline DeviceMap c10DictToDeviceMap(const c10::Dict<std::string, std::string>& c10DeviceMap) {
+  DeviceMap deviceMap;
+  for (const auto& mapEntry : c10DeviceMap) {
+    deviceMap.insert({mapEntry.key(), mapEntry.value()});
+  }
+  return deviceMap;
+}
+
 } // namespace rpc
 } // namespace distributed
 } // namespace torch
