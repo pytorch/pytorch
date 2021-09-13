@@ -12,7 +12,6 @@
 #include <torch/csrc/jit/mobile/observer.h>
 
 #include <torch/csrc/jit/backends/backend_exception.h>
-#include <torch/csrc/jit/mobile/prim_ops_registery.h>
 
 namespace torch {
 namespace jit {
@@ -84,7 +83,6 @@ bool InterpreterState::run(Stack& stack) {
       }
       switch (inst.op) {
         case OP: {
-          std::string op_name = code_->op_names_[inst.X].name;
           if (at::hasGlobalCallbacks()) {
             if (auto* mobile_debug_info = static_cast<MobileDebugInfo*>(
                     c10::ThreadLocalDebugInfo::get(
@@ -94,7 +92,7 @@ bool InterpreterState::run(Stack& stack) {
           }
 
           RECORD_EDGE_SCOPE_WITH_DEBUG_HANDLE_AND_INPUTS(
-              op_name, debug_handle, stack);
+              code_->op_names_[inst.X].name, debug_handle, stack);
           code_->operators_[inst.X](stack);
           ++pc;
         } break;

@@ -67,10 +67,10 @@ bool Function::append_operator(
   const std::vector<c10::Argument>* pArgs = nullptr;
   if (mobile::hasPrimOpsFn(name)) {
     fn = mobile::getPrimOpsFn(name);
-    Operator op = Operator(name, fn, c10::AliasAnalysisKind::INTERNAL_SPECIAL_CASE);
+    Operator op =
+        Operator(name, fn, c10::AliasAnalysisKind::INTERNAL_SPECIAL_CASE);
     pArgs = &op.schema().arguments();
-  }
-  else if (jit_op) {
+  } else if (jit_op) {
     fn = [jit_op](Stack& stack) { jit_op->getOperation()(stack); };
     pArgs = &jit_op->schema().arguments();
   } else {

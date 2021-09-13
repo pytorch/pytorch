@@ -1,9 +1,4 @@
-#pragma once
-#include <ATen/core/List.h>
-#include <ATen/core/functional.h>
-#include <ATen/core/ivalue.h>
-#include <ATen/core/jit_type.h>
-#include <ATen/core/stack.h>
+#include <torch/csrc/jit/runtime/register_ops_utils.h>
 
 namespace torch {
 namespace jit {
