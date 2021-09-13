@@ -223,12 +223,18 @@ jobs:
               export RUN_SMOKE_TESTS_ONLY=1
             fi
             .jenkins/pytorch/win-test.sh
-      - name: "* Click me for rendered test results (useful for finding failing tests) *"
+      - name: Install render_test_results dependencies
         if: always()
         shell: bash
         run: |
-          # only render test results if there are test results to render
           python3 -m pip install junitparser==2.1.1 rich==10.9.0
+      - name: "[[ Click me for rendered test results (useful for finding failing tests) ]]"
+        if: always()
+        shell: bash
+        # Encoding is weird on windows, just try to default to utf-8 if possible
+        env:
+          PYTHONIOENCODING: "utf-8"
+        run: |
           python3 tools/render_junit.py test/
       - name: Zip test reports for upload
         if: always()
