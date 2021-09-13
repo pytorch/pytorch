@@ -158,6 +158,26 @@ class TestModule(TestCase):
                     output_from_copy = m_copy(*args, **kwargs)
                     self.assertEqual(output, output_from_copy)
 
+    def _retain_grad(self, obj):
+        # gradients needs to be retained to check for grad. This is useful when
+        # non-leafs are present in the graph.
+        if isinstance(obj, dict):
+            for i in obj.values():
+                self._retain_grad(i)
+        elif isinstance(obj, (tuple, list)):
+            for i in obj:
+                self._retain_grad(i)
+        elif isinstance(obj, torch.Tensor) and obj.requires_grad:
+            obj.retain_grad()
+
+    def _get_grads(self, obj):
+        if isinstance(obj, (tuple, list)):
+            return tuple(self._get_grads(o) for o in obj)
+        elif isinstance(obj, dict):
+            return {name: self._get_grads(o) for name, o in obj.items()}
+        elif isinstance(obj, torch.Tensor) and obj.requires_grad:
+            return obj.grad
+
     @onlyCUDA
     @toleranceOverride({torch.float32: tol(5e-2, 0),
                         torch.float64: tol(4e-4, 0)})
@@ -167,18 +187,6 @@ class TestModule(TestCase):
         module_cls = module_info.module_cls
         module_inputs_cpu = module_info.module_inputs_func(module_info, device="cpu", dtype=dtype,
                                                            requires_grad=True)
-
-        # gradients needs to be retained to check for grad. This is useful when
-        # non-leafs are present in the graph.
-        def _retain_grad(item):
-            if isinstance(item, dict):
-                for i in item.values():
-                    _retain_grad(i)
-            elif isinstance(item, (tuple, list)):
-                for i in item:
-                    _retain_grad(i)
-            elif isinstance(item, torch.Tensor) and item.requires_grad:
-                item.retain_grad()
 
         def _to_device(obj):
             if isinstance(obj, torch.Tensor):
@@ -200,7 +208,7 @@ class TestModule(TestCase):
 
             gpu_forward_args, gpu_forward_kwargs = _to_device((cpu_forward_args, cpu_forward_kwargs))
 
-            _retain_grad((cpu_forward_args, cpu_forward_kwargs, gpu_forward_args, gpu_forward_kwargs))
+            self._retain_grad((cpu_forward_args, cpu_forward_kwargs, gpu_forward_args, gpu_forward_kwargs))
 
             # === Construct module on cpu and gpu ===
             args, kwargs = module_input.constructor_input.args, module_input.constructor_input.kwargs
@@ -225,21 +233,15 @@ class TestModule(TestCase):
                 cpu_output.backward(cpu_grad_output, retain_graph=True)
                 gpu_output.backward(gpu_grad_output, retain_graph=True)
 
-                cpu_grad_input = tuple(i.grad.data if i.grad is not None else None for i in cpu_forward_args
-                                       if isinstance(i, torch.Tensor))
-                gpu_grad_input = tuple(i.grad.data if i.grad is not None else None for i in gpu_forward_args
-                                       if isinstance(i, torch.Tensor))
+                cpu_grad_input = self._get_grads(cpu_forward_args)
+                gpu_grad_input = self._get_grads(gpu_forward_args)
                 self.assertEqual(cpu_grad_input, gpu_grad_input)
 
                 for cpu_p, gpu_p in zip(cpu_module.parameters(), gpu_module.parameters()):
                     self.assertEqual(cpu_p.grad, gpu_p.grad)
 
-                cpu_grad_kwarg_input = {name: i.grad.data if i.grad is not None else None
-                                        for name, i in cpu_forward_kwargs.items()
-                                        if isinstance(i, torch.Tensor)}
-                gpu_grad_kwarg_input = {name: i.grad.data if i.grad is not None else None
-                                        for name, i in gpu_forward_kwargs.items()
-                                        if isinstance(i, torch.Tensor)}
+                cpu_grad_kwarg_input = self._get_grads(cpu_forward_kwargs)
+                gpu_grad_kwarg_input = self._get_grads(gpu_forward_kwargs)
                 self.assertEqual(cpu_grad_kwarg_input, gpu_grad_kwarg_input)
 
 
