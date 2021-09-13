@@ -2005,6 +2005,26 @@ def sample_inputs_trace(self, device, dtype, requires_grad, **kwargs):
                                      requires_grad=requires_grad))),)
 
 
+def sample_inputs_linalg_trace(self, device, dtype, requires_grad, **kwargs):
+    inputs = (
+        ((S, S), 0),
+        ((S, L, M), 0),
+        ((S, M, L), 0),
+        ((S, S), 1),
+        ((S, S), -2),
+        ((S, L, M), 1),
+        ((S, L, M), -1),
+    )
+    samples = []
+
+    for shape, offset in inputs:
+        tensor = make_tensor(shape, device, dtype, low=None, high=None,
+                             requires_grad=requires_grad)
+        samples.append(SampleInput(tensor, args=(offset,)))
+
+    return samples
+
+
 def sample_inputs_renorm(self, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
     cases = (((S, S, S), (2, 1, 0.5)),
@@ -7307,6 +7327,12 @@ op_db: List[OpInfo] = [
            dtypes=floating_and_complex_types(),
            sample_inputs_func=sample_inputs_linalg_slogdet,
            decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack]),
+    OpInfo('linalg.trace',
+           aten_name='linalg_trace',
+           supports_out=False,
+           op=torch.linalg.trace,
+           dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16),
+           sample_inputs_func=sample_inputs_linalg_trace),
     OpInfo('linalg.vector_norm',
            op=torch.linalg.vector_norm,
            dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),

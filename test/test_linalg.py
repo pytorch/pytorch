@@ -8006,6 +8006,26 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         an = torch.from_numpy(np.tensordot(np.zeros((), dtype=np.float32), np.zeros((), dtype=np.float32), 0))
         self.assertEqual(a, an)
 
+    def test_linalg_trace(self, device):
+        shapes = [(1, 1), (10, 1), (1, 10), (2, 3, 4), (4, 3, 2)]
+        offsets = [0, 1, -1, 2, -2, 10, -10]
+
+        for shape in shapes:
+            size = np.prod(shape)
+            x = torch.arange(size, device=device).reshape(*shape)
+            y = torch.linalg.trace(x)
+            xn = np.array(x.cpu().numpy()).reshape(shape)
+            yn = np.trace(xn, axis1=-2, axis2=-1)
+            yn = torch.from_numpy(np.asarray(yn))
+            self.assertEqual(y, yn)
+
+            for offset in offsets:
+                y = torch.linalg.trace(x, offset)
+                xn = x.cpu().numpy()
+                yn = np.trace(xn, offset, axis1=-2, axis2=-1)
+                yn = torch.from_numpy(np.asarray(yn))
+                self.assertEqual(y, yn)
+
 
 instantiate_device_type_tests(TestLinalg, globals())
 
