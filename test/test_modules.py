@@ -228,8 +228,8 @@ class TestModule(TestCase):
                 item.retain_grad()
 
         def _get_grads(obj):
-            if isinstance(obj, tuple):
-                return tuple(_get_grads(o) for o in obj)
+            if isinstance(obj, (tuple, list)):
+                return type(obj)(_get_grads(o) for o in obj)
             elif isinstance(obj, dict):
                 return {name: _get_grads(o) for name, o in obj.items()}
             elif isinstance(obj, torch.Tensor) and obj.requires_grad:
