@@ -39,7 +39,7 @@ void normalize_last_dims(
     *ldc = m;
   }
 
-  if(transa != NoTranspose) {
+  if(transa != TransposeType::NoTranspose) {
     if (m == 1) {
       *lda = k;
     }
@@ -47,7 +47,7 @@ void normalize_last_dims(
     *lda = m;
   }
 
-  if(transb != NoTranspose) {
+  if(transb != TransposeType::NoTranspose) {
     if (k == 1) {
       *ldb = n;
     }
@@ -63,8 +63,8 @@ bool use_blas_gemm(
     TransposeType transa, TransposeType transb,
     int64_t m, int64_t n, int64_t k,
     int64_t &lda, int64_t &ldb, int64_t &ldc) {
-  const bool transa_ = transa != NoTranspose;
-  const bool transb_ = transb != NoTranspose;
+  const bool transa_ = transa != TransposeType::NoTranspose;
+  const bool transb_ = transb != TransposeType::NoTranspose;
   return (
       (m <= INT_MAX) && (n <= INT_MAX) && (k <= INT_MAX) &&
       (lda <= INT_MAX) && (ldb <= INT_MAX) && (ldc <= INT_MAX) &&
@@ -73,23 +73,12 @@ bool use_blas_gemm(
       (ldc >= std::max(int64_t{1}, m)));
 }
 
-#if AT_BUILD_WITH_BLAS()
-char to_blas(TransposeType trans) {
-  switch (trans) {
-  case Transpose: return 't';
-  case NoTranspose: return 'n';
-  // case ConjTranspose: return 'c';
-  }
-  TORCH_INTERNAL_ASSERT(false, "Invalid transpose type");
-}
-#endif  // AT_BUILD_WITH_BLAS
-
 #ifdef USE_FBGEMM
 fbgemm::matrix_op_t to_fbgemm(TransposeType trans) {
   switch (trans) {
-  case Transpose: return fbgemm::matrix_op_t::Transpose;
-  case NoTranspose: return fbgemm::matrix_op_t::NoTranspose;
-  // case ConjTranspose: return fbgemm::matrix_op_t::Transpose;
+    case TransposeType::Transpose: return fbgemm::matrix_op_t::Transpose;
+    case TransposeType::NoTranspose: return fbgemm::matrix_op_t::NoTranspose;
+    case TransposeType::ConjTranspose: TORCH_INTERNAL_ASSERT(false, "ConjTranspose type is not supported in fbgemm");
   }
   TORCH_INTERNAL_ASSERT(false, "Invalid transpose type");
 }

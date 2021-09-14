@@ -6,7 +6,6 @@
 #include <c10/util/ThreadLocalDebugInfo.h>
 
 #include <ATen/record_function.h>
-#include <ATen/PythonModeTLS.h>
 
 namespace at {
 
@@ -40,8 +39,6 @@ class TORCH_API ThreadLocalState {
 
   // TLS for AutogradModes
   AutogradState autograd_tls_;
-
-  std::shared_ptr<TorchDispatchTypeObject> python_mode_state_;
 
   // TLS for saved tensors default hooks
   std::pair<PyObject*, PyObject*> saved_tensors_default_hooks_;

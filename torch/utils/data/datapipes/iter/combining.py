@@ -1,7 +1,7 @@
 import warnings
 
 from torch.utils.data import IterDataPipe, functional_datapipe
-from typing import Any, Callable, Iterator, List, Optional, Sized, Tuple, TypeVar, Deque
+from typing import Any, Callable, Iterator, List, Optional, Set, Sized, Tuple, TypeVar, Deque
 from collections import deque
 
 T_co = TypeVar('T_co', covariant=True)
@@ -261,24 +261,41 @@ class _DemultiplexerIterDataPipe(IterDataPipe):
 
 @functional_datapipe('mux')
 class MultiplexerIterDataPipe(IterDataPipe):
+    r""" :class:`MultiplexerIterDataPipe`.
 
+        Iterable DataPipe that yields one element at a time from each input Iterable DataPipe
+        (i.e. one element from the 1st input DataPipe, then one element from the 2nd DataPipe in the next iteration,
+        and so on). It skips over DataPipes that are exhausted, and ends when all input DataPipes are exhausted.
+
+        Args:
+            datapipes: Iterable DataPipes that will take turn to yield their elements, until they are all exhausted
+    """
     def __init__(self, *datapipes):
         self.datapipes = datapipes
+        self.length: Optional[int] = None
 
     def __iter__(self):
         iterators = [iter(x) for x in self.datapipes]
-        finished = {}
-        had_more = True
-        while had_more:
-            had_more = False
+        finished: Set[int] = set()
+        while len(finished) < len(iterators):
             for i in range(len(iterators)):
                 if i not in finished:
                     try:
-                        value = iterators[i].__next__()
-                        had_more = True
+                        value = next(iterators[i])
                         yield value
                     except StopIteration:
-                        finished[i] = 1
+                        finished.add(i)
+
+    def __len__(self):
+        if self.length is not None:
+            if self.length == -1:
+                raise TypeError("{} instance doesn't have valid length".format(type(self).__name__))
+            return self.length
+        if all(isinstance(dp, Sized) for dp in self.datapipes):
+            self.length = sum(len(dp) for dp in self.datapipes)
+        else:
+            self.length = -1
+        return len(self)
 
 
 @functional_datapipe('zip')
