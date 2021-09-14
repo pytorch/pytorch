@@ -1169,6 +1169,13 @@ diagonal(offset=0, dim1=0, dim2=1) -> Tensor
 See :func:`torch.diagonal`
 """)
 
+add_docstr_all('diagonal_scatter',
+               r"""
+diagonal(src, offset=0, dim1=0, dim2=1) -> Tensor
+
+See :func:`torch.diagonal_scatter`
+""")
+
 add_docstr_all('fill_diagonal_',
                r"""
 fill_diagonal_(fill_value, wrap=False) -> Tensor
@@ -2421,11 +2428,16 @@ argmax(dim=None, keepdim=False) -> LongTensor
 See :func:`torch.argmax`
 """)
 
-add_docstr_all('mean',
-               r"""
-mean(dim=None, keepdim=False) -> Tensor or (Tensor, Tensor)
+add_docstr_all('mean', r"""
+mean(dim=None, keepdim=False, *, dtype=None) -> Tensor
 
 See :func:`torch.mean`
+""")
+
+add_docstr_all('nanmean', r"""
+nanmean(dim=None, keepdim=False, *, dtype=None) -> Tensor
+
+See :func:`torch.nanmean`
 """)
 
 add_docstr_all('median',
@@ -3346,18 +3358,21 @@ add_docstr_all('select',
                r"""
 select(dim, index) -> Tensor
 
-Slices the :attr:`self` tensor along the selected dimension at the given index.
-This function returns a view of the original tensor with the given dimension removed.
+See :func:`torch.select`
+""")
 
-Args:
-    dim (int): the dimension to slice
-    index (int): the index to select with
+add_docstr_all('select_scatter',
+               r"""
+select_scatter(src, dim, index) -> Tensor
 
-.. note::
+See :func:`torch.select_scatter`
+""")
 
-    :meth:`select` is equivalent to slicing. For example,
-    ``tensor.select(0, index)`` is equivalent to ``tensor[index]`` and
-    ``tensor.select(2, index)`` is equivalent to ``tensor[:,:,index]``.
+add_docstr_all('slice_scatter',
+               r"""
+slice_scatter(src, dim=0, start=None, end=None, step=1) -> Tensor
+
+See :func:`torch.slice_scatter`
 """)
 
 add_docstr_all('set_',

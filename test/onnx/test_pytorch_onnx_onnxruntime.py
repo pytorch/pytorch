@@ -1506,7 +1506,7 @@ class TestONNXRuntime(unittest.TestCase):
 
         class Min(torch.nn.Module):
             def forward(self, x):
-                boxes = [x, x, x]
+                boxes = [x for _ in range(3)]
                 return list_append(boxes)
 
         x = torch.rand(5, 5)
