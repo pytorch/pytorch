@@ -203,9 +203,8 @@ void initJITBindings(PyObject* module) {
       .def(
           "_jit_pass_onnx_eval_peephole",
           [](std::shared_ptr<Graph>& graph,
-             std::map<std::string, IValue>& paramsDict,
-             bool isAllowedToAdjustGraphInputs) {
-            EvalPeepholeONNX(graph, paramsDict, isAllowedToAdjustGraphInputs);
+             std::map<std::string, IValue>& paramsDict) {
+            EvalPeepholeONNX(graph, paramsDict);
             return paramsDict;
           },
           pybind11::return_value_policy::move)
@@ -1281,11 +1280,15 @@ void initJITBindings(PyObject* module) {
           [](const FunctionSchema& self, const FunctionSchema& other) {
             return self == other;
           })
-      .def("__str__", [](FunctionSchema& self) {
-        std::stringstream ss;
-        ss << self;
-        return ss.str();
-      });
+      .def(
+          "__str__",
+          [](FunctionSchema& self) {
+            std::stringstream ss;
+            ss << self;
+            return ss.str();
+          })
+      .def_property_readonly(
+          "is_mutable", [](FunctionSchema& self) { return self.is_mutable(); });
   py::class_<Argument>(m, "Argument")
       .def_property_readonly("name", [](Argument& self) { return self.name(); })
       .def_property_readonly("type", [](Argument& self) { return self.type(); })

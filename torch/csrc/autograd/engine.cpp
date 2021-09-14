@@ -411,7 +411,6 @@ auto Engine::thread_main(const std::shared_ptr<GraphTask>& graph_task) -> void {
         // NB: The ThreadLocalStateGuard doesn't set the grad_mode because GraphTask
         // always saves ThreadLocalState without grad_mode.
         at::ThreadLocalStateGuard tls_guard(local_graph_task->thread_locals_);
-        AutoGradMode grad_mode(local_graph_task->grad_mode_);
 
         try {
           // The guard sets the thread_local current_graph_task on construction
@@ -420,7 +419,18 @@ auto Engine::thread_main(const std::shared_ptr<GraphTask>& graph_task) -> void {
           // callbacks.
           GraphTaskGuard guard(local_graph_task);
           NodeGuard ndguard(task.fn_);
-          evaluate_function(local_graph_task, task.fn_.get(), task.inputs_, local_graph_task->cpu_ready_queue_);
+          {
+            RECORD_FUNCTION(
+                c10::str(
+                    "autograd::engine::evaluate_function: ",
+                    task.fn_.get()->name()),
+                std::vector<c10::IValue>());
+            evaluate_function(
+                local_graph_task,
+                task.fn_.get(),
+                task.inputs_,
+                local_graph_task->cpu_ready_queue_);
+          }
         } catch (std::exception& e) {
           thread_on_exception(local_graph_task, task.fn_, e);
         }
@@ -580,7 +590,6 @@ void GraphTask::exec_post_processing() {
     // NB: The ThreadLocalStateGuard doesn't set the grad_mode because GraphTask
     // always saves ThreadLocalState without grad_mode.
     at::ThreadLocalStateGuard tls_guard(this->thread_locals_);
-    AutoGradMode grad_mode(this->grad_mode_);
 
     // WARNING: Don't use a range-for loop here because more callbacks may be
     // added in between callback calls, so iterators may become invalidated.

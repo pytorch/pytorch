@@ -7,16 +7,18 @@ class StreamReaderIterDataPipe(IterDataPipe[Tuple[str, bytes]]):
 
     Iterable DataPipe to load IO stream with label name,
     and to yield bytes with label name in a tuple
-    args:
-        chunk : bytes to read from stream on each iteration.
-                If None, stream reads to the EOF.
+
+    Args:
+        datapipe: Iterable DataPipe provides url and byte stream
+        chunk: Number of bytes to be read from stream per iteration.
+            If None, all bytes will be read util the EOF.
     """
-    def __init__(self, source_datapipe, chunk=None):
-        self.source_datapipe = source_datapipe
+    def __init__(self, datapipe, chunk=None):
+        self.datapipe = datapipe
         self.chunk = chunk
 
     def __iter__(self):
-        for (furl, stream) in self.source_datapipe:
+        for furl, stream in self.datapipe:
             while True:
                 d = stream.read(self.chunk)
                 if not d:

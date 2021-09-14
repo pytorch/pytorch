@@ -2,11 +2,8 @@ import torch
 import torch.nn as nn
 import torch.nn.intrinsic as nni
 import torch.nn.intrinsic.quantized as nniq
-import torch.nn.intrinsic.quantized._reference as nniqr
 import torch.nn.quantized as nnq
-import torch.nn.quantized._reference as nnqr
 import torch.nn.quantized.dynamic as nnqd
-import torch.nn.functional as F
 import torch.quantization
 
 from torch.quantization import (
@@ -70,24 +67,21 @@ class TestStaticQuantizedModule(QuantizationTestCase):
             [4, 8],
             [True, False],
             [True, False],
-            [True, False],
             [True, False])
         for (batch_size, in_features, out_features, use_bias,
-             use_fused, per_channel, is_reference) in options:
+             use_fused, per_channel) in options:
             self._test_linear_api_impl(
                 batch_size, in_features, out_features, use_bias, use_fused,
-                per_channel, is_reference)
+                per_channel)
 
-    def _test_linear_api_impl(self, batch_size, in_features, out_features, use_bias, use_fused, per_channel, is_reference):
+    def _test_linear_api_impl(self, batch_size, in_features, out_features, use_bias, use_fused, per_channel):
         if torch.backends.quantized.engine == 'qnnpack':
             per_channel = False
 
-        # (use_fused, is_reference) -> quantized class
+        # use_fused -> quantized class
         class_map = {
-            (True, True) : nniqr.LinearReLU,
-            (True, False) : nniq.LinearReLU,
-            (False, True) : nnqr.Linear,
-            (False, False) : nnq.Linear,
+            True: nniq.LinearReLU,
+            False: nnq.Linear,
         }
 
         W = torch.rand(out_features, in_features).float()
@@ -107,10 +101,9 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         B = torch.rand(out_features).float() if use_bias else None
         scale = 0.5
         zero_point = 3
-        qlinear = class_map[(use_fused, is_reference)](in_features, out_features)
+        qlinear = class_map[use_fused](in_features, out_features)
 
-        qlinear_copy = qlinear  # deepcopy does not work right now
-        # qlinear_copy = copy.deepcopy(qlinear)
+        qlinear_copy = copy.deepcopy(qlinear)
         self.checkScriptable(qlinear_copy, [[X_q]], check_save_load=True)
         # Run module with default-initialized parameters.
         # This tests that the constructor is correct.
@@ -127,21 +120,11 @@ class TestStaticQuantizedModule(QuantizationTestCase):
 
         # Check if the module implementation matches calling the
         # ops directly
-        if is_reference:
-            weight = qlinear._qweight
-            bias = qlinear._bias
-            weight_dequant = weight.dequantize()
-            X_q_dq = X_q.dequantize()
-            Z_ref = F.linear(X_q_dq, weight_dequant, bias)
-            if use_fused:
-                Z_ref = F.relu(Z_ref, inplace=True)
-            Z_ref = torch.quantize_per_tensor(Z_ref, scale, zero_point, torch.quint8)
+        W_pack = qlinear._packed_params._packed_params
+        if use_fused:
+            Z_ref = torch.ops.quantized.linear_relu(X_q, W_pack, scale, zero_point)
         else:
-            W_pack = qlinear._packed_params._packed_params
-            if use_fused:
-                Z_ref = torch.ops.quantized.linear_relu(X_q, W_pack, scale, zero_point)
-            else:
-                Z_ref = torch.ops.quantized.linear(X_q, W_pack, scale, zero_point)
+            Z_ref = torch.ops.quantized.linear(X_q, W_pack, scale, zero_point)
 
         self.assertEqual(Z_ref, Z_q)
         self.assertTrue(
@@ -163,28 +146,24 @@ class TestStaticQuantizedModule(QuantizationTestCase):
             else:
                 self.assertEqual(model_dict[key], loaded_dict[key])
 
-        loaded_qlinear = class_map[(use_fused, is_reference)](
+        loaded_qlinear = class_map[use_fused](
             in_features, out_features)
         loaded_qlinear.load_state_dict(loaded_dict)
-        if is_reference:
-            self.assertEqual(qlinear._qweight, loaded_qlinear._qweight)
-            self.assertEqual(qlinear._bias, loaded_qlinear._bias)
-        else:
-            linear_unpack = torch.ops.quantized.linear_unpack
-            self.assertEqual(linear_unpack(qlinear._packed_params._packed_params),
-                             linear_unpack(loaded_qlinear._packed_params._packed_params))
+        linear_unpack = torch.ops.quantized.linear_unpack
+        self.assertEqual(linear_unpack(qlinear._packed_params._packed_params),
+                         linear_unpack(loaded_qlinear._packed_params._packed_params))
         self.assertEqual(qlinear.scale, loaded_qlinear.scale)
         self.assertEqual(qlinear.zero_point, loaded_qlinear.zero_point)
-        # make sure loaded_qlinear has the same dir as qlinear since
-        # scripting the module will add __overloads__ to __dict__
-        self.checkScriptable(loaded_qlinear, [[X_q]], check_save_load=True)
+        # scripting will add __overloads__ to __dict__, which is why we script a copy
+        # to be able to do the check in the next line
+        self.checkScriptable(copy.deepcopy(loaded_qlinear), [[X_q]], check_save_load=True)
         self.assertTrue(dir(qlinear) == dir(loaded_qlinear))
         self.assertEqual(qlinear._weight_bias(), loaded_qlinear._weight_bias())
-        if not is_reference:
-            self.assertEqual(qlinear._weight_bias(), torch.ops.quantized.linear_unpack(qlinear._packed_params._packed_params))
+        self.assertEqual(qlinear._weight_bias(), torch.ops.quantized.linear_unpack(qlinear._packed_params._packed_params))
         Z_q2 = loaded_qlinear(X_q)
         self.assertEqual(Z_q, Z_q2)
 
+        # Test serialization
         b = io.BytesIO()
         torch.save(qlinear, b)
         b.seek(0)
@@ -192,6 +171,25 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         self.assertEqual(qlinear.weight(), loaded.weight())
         self.assertEqual(qlinear.scale, loaded.scale)
         self.assertEqual(qlinear.zero_point, loaded.zero_point)
+
+        # Test copy and deepcopy
+        copied_linear = copy.copy(qlinear)
+        self.assertEqual(copied_linear.bias(), qlinear.bias())
+        self.assertEqual(copied_linear.scale, qlinear.scale)
+        self.assertEqual(copied_linear.zero_point,
+                         qlinear.zero_point)
+        Y_copied = copied_linear(X_q)
+        np.testing.assert_array_almost_equal(
+            Z_q.int_repr().numpy(), Y_copied.int_repr().numpy(), decimal=0)
+
+        deepcopied_linear = copy.deepcopy(qlinear)
+        self.assertEqual(deepcopied_linear.bias(), qlinear.bias())
+        self.assertEqual(deepcopied_linear.scale, qlinear.scale)
+        self.assertEqual(deepcopied_linear.zero_point,
+                         qlinear.zero_point)
+        Y_deepcopied = copied_linear(X_q)
+        np.testing.assert_array_almost_equal(
+            Z_q.int_repr().numpy(), Y_deepcopied.int_repr().numpy(), decimal=0)
 
         # Test JIT
         self.checkScriptable(qlinear, [[X_q]], check_save_load=True)
@@ -230,12 +228,11 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         self.assertEqual(rqr, rqr2)
 
     def _test_conv_api_impl(
-        self, module_name, qconv_module, conv_module, batch_size,
-        in_channels_per_group, input_feature_map_size, out_channels_per_group,
-        groups, kernel_size, stride, padding, padding_mode, dilation,
-        X_scale, X_zero_point, W_scale, W_zero_point, Y_scale, Y_zero_point,
-        use_bias, use_fused, use_channelwise, is_reference
-    ):
+            self, module_name, qconv_module, conv_module, batch_size,
+            in_channels_per_group, input_feature_map_size, out_channels_per_group,
+            groups, kernel_size, stride, padding, padding_mode, dilation,
+            X_scale, X_zero_point, W_scale, W_zero_point, Y_scale, Y_zero_point,
+            use_bias, use_fused, use_channelwise):
         for i in range(len(kernel_size)):
             assume(input_feature_map_size[i] + 2 * padding[i]
                    >= dilation[i] * (kernel_size[i] - 1) + 1)
@@ -264,8 +261,7 @@ class TestStaticQuantizedModule(QuantizationTestCase):
 
         # Test members
         self.assertTrue(module_name == qconv_module._get_name(), module_name + " " + qconv_module._get_name())
-        if not is_reference:
-            self.assertTrue(hasattr(qconv_module, '_packed_params'))
+        self.assertTrue(hasattr(qconv_module, '_packed_params'))
         self.assertTrue(hasattr(qconv_module, 'scale'))
         self.assertTrue(hasattr(qconv_module, 'zero_point'))
 
@@ -294,9 +290,8 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         # For example, the result of round(2.5) + 1 is 3 while round(2.5 + 1) is
         # 4 assuming the rounding mode is round-to-nearest, ties-to-even.
         # skip numerics checking for reference module
-        if not is_reference:
-            np.testing.assert_array_almost_equal(
-                Y_exp.int_repr().numpy(), Y_act.int_repr().numpy(), decimal=0)
+        np.testing.assert_array_almost_equal(
+            Y_exp.int_repr().numpy(), Y_act.int_repr().numpy(), decimal=0)
 
         # Test serialization of quantized Conv Module using state_dict
         model_dict = qconv_module.state_dict()
@@ -316,8 +311,7 @@ class TestStaticQuantizedModule(QuantizationTestCase):
 
         self.assertTrue(dir(loaded_qconv_module) == dir(qconv_module))
         self.assertTrue(module_name == loaded_qconv_module._get_name())
-        if not is_reference:
-            self.assertTrue(hasattr(loaded_qconv_module, '_packed_params'))
+        self.assertTrue(hasattr(loaded_qconv_module, '_packed_params'))
         self.assertTrue(hasattr(loaded_qconv_module, '_weight_bias'))
 
         self.assertEqual(qconv_module.weight(), loaded_qconv_module.weight())
@@ -327,9 +321,8 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         self.assertEqual(qconv_module.zero_point,
                          loaded_qconv_module.zero_point)
         Y_loaded = loaded_qconv_module(X_q)
-        if not is_reference:
-            np.testing.assert_array_almost_equal(
-                Y_exp.int_repr().numpy(), Y_loaded.int_repr().numpy(), decimal=0)
+        np.testing.assert_array_almost_equal(
+            Y_exp.int_repr().numpy(), Y_loaded.int_repr().numpy(), decimal=0)
 
         # Test serialization
         b = io.BytesIO()
@@ -349,9 +342,8 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         self.assertEqual(copied_conv.zero_point,
                          qconv_module.zero_point)
         Y_copied = copied_conv(X_q)
-        if not is_reference:
-            np.testing.assert_array_almost_equal(
-                Y_exp.int_repr().numpy(), Y_copied.int_repr().numpy(), decimal=0)
+        np.testing.assert_array_almost_equal(
+            Y_exp.int_repr().numpy(), Y_copied.int_repr().numpy(), decimal=0)
 
         deepcopied_conv = copy.deepcopy(qconv_module)
         self.assertEqual(deepcopied_conv.bias(), qconv_module.bias())
@@ -359,9 +351,8 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         self.assertEqual(deepcopied_conv.zero_point,
                          qconv_module.zero_point)
         Y_deepcopied = copied_conv(X_q)
-        if not is_reference:
-            np.testing.assert_array_almost_equal(
-                Y_exp.int_repr().numpy(), Y_deepcopied.int_repr().numpy(), decimal=0)
+        np.testing.assert_array_almost_equal(
+            Y_exp.int_repr().numpy(), Y_deepcopied.int_repr().numpy(), decimal=0)
 
         # JIT testing
         self.checkScriptable(
@@ -396,9 +387,8 @@ class TestStaticQuantizedModule(QuantizationTestCase):
             [True, False],  # use_bias
             [True, False],  # use_fused
             [True, False],  # use_channelwise
-            [True, False]  # is_reference
         )
-        for pad_mode, use_bias, use_fused, use_channelwise, is_reference in options:
+        for pad_mode, use_bias, use_fused, use_channelwise in options:
             if torch.backends.quantized.engine == "qnnpack":
                 use_channelwise = False
             batch_size = 2
@@ -426,15 +416,13 @@ class TestStaticQuantizedModule(QuantizationTestCase):
             Y_zero_point = 4
             if torch.backends.quantized.engine == 'qnnpack':
                 use_channelwise = False
-            # (use_fused, is_reference) -> quantized class
+            # use_fused -> quantized class
             class_map = {
-                (True, True): (nniqr.ConvReLU1d, "QuantizedConvReLU1d(Reference)"),
-                (True, False): (nniq.ConvReLU1d, "QuantizedConvReLU1d"),
-                (False, True): (nnqr.Conv1d, "QuantizedConv1d(Reference)"),
-                (False, False): (nnq.Conv1d, "QuantizedConv1d")
+                True: (nniq.ConvReLU1d, "QuantizedConvReLU1d"),
+                False: (nnq.Conv1d, "QuantizedConv1d")
             }
 
-            qconv_cls, module_name = class_map[(use_fused, is_reference)]
+            qconv_cls, module_name = class_map[use_fused]
             qconv_module = qconv_cls(
                 in_channels, out_channels, kernel, stride, pad,
                 dilation, groups, use_bias, padding_mode=pad_mode
@@ -453,7 +441,7 @@ class TestStaticQuantizedModule(QuantizationTestCase):
                 in_channels_per_group, input_feature_map_size,
                 out_channels_per_group, groups, kernel_size, stride, pad, pad_mode,
                 dilation, X_scale, X_zero_point, W_scale, W_zero_point, Y_scale,
-                Y_zero_point, use_bias, use_fused, use_channelwise, is_reference)
+                Y_zero_point, use_bias, use_fused, use_channelwise)
 
     @override_qengines
     def test_conv2d_api(self):
@@ -462,9 +450,8 @@ class TestStaticQuantizedModule(QuantizationTestCase):
             [True, False],  # use_bias
             [True, False],  # use_fused
             [True, False],  # use_channelwise
-            [True, False]  # is_reference
         )
-        for pad_mode, use_bias, use_fused, use_channelwise, is_reference in options:
+        for pad_mode, use_bias, use_fused, use_channelwise in options:
             if torch.backends.quantized.engine == "qnnpack":
                 use_channelwise = False
             batch_size = 2
@@ -494,15 +481,13 @@ class TestStaticQuantizedModule(QuantizationTestCase):
             W_zero_point = [3]
             Y_scale = 5.0
             Y_zero_point = 4
-            # (use_fused, is_reference) -> quantized class
+            # use_fused -> quantized class
             class_map = {
-                (True, True): (nniqr.ConvReLU2d, "QuantizedConvReLU2d(Reference)"),
-                (True, False): (nniq.ConvReLU2d, "QuantizedConvReLU2d"),
-                (False, True): (nnqr.Conv2d, "QuantizedConv2d(Reference)"),
-                (False, False): (nnq.Conv2d, "QuantizedConv2d")
+                True: (nniq.ConvReLU2d, "QuantizedConvReLU2d"),
+                False: (nnq.Conv2d, "QuantizedConv2d")
             }
 
-            qconv_cls, module_name = class_map[(use_fused, is_reference)]
+            qconv_cls, module_name = class_map[use_fused]
             qconv_module = qconv_cls(
                 in_channels, out_channels, kernel_size, stride, padding,
                 dilation, groups, use_bias, padding_mode=pad_mode
@@ -521,7 +506,7 @@ class TestStaticQuantizedModule(QuantizationTestCase):
                 in_channels_per_group, input_feature_map_size,
                 out_channels_per_group, groups, kernel_size, stride, padding,
                 pad_mode, dilation, X_scale, X_zero_point, W_scale, W_zero_point,
-                Y_scale, Y_zero_point, use_bias, use_fused, use_channelwise, is_reference)
+                Y_scale, Y_zero_point, use_bias, use_fused, use_channelwise)
 
     @skipIfNoFBGEMM
     def test_conv3d_api(self):
@@ -529,9 +514,8 @@ class TestStaticQuantizedModule(QuantizationTestCase):
             [True, False],  # use_bias
             [True, False],  # use_fused
             [True, False],  # use_channelwise
-            [True, False]  # is_reference
         )
-        for use_bias, use_fused, use_channelwise, is_reference in options:
+        for use_bias, use_fused, use_channelwise in options:
             if torch.backends.quantized.engine == "qnnpack":
                 use_channelwise = False
             batch_size = 2
@@ -566,16 +550,14 @@ class TestStaticQuantizedModule(QuantizationTestCase):
             W_zero_point = [3]
             Y_scale = 5.0
             Y_zero_point = 4
-            # (use_fused, is_reference) -> quantized class
+            # use_fused -> quantized class
             class_map = {
-                (True, True): (nniqr.ConvReLU3d, "QuantizedConvReLU3d(Reference)"),
-                (True, False): (nniq.ConvReLU3d, "QuantizedConvReLU3d"),
-                (False, True): (nnqr.Conv3d, "QuantizedConv3d(Reference)"),
-                (False, False): (nnq.Conv3d, "QuantizedConv3d")
+                True: (nniq.ConvReLU3d, "QuantizedConvReLU3d"),
+                False: (nnq.Conv3d, "QuantizedConv3d")
             }
 
             with override_quantized_engine('fbgemm'):
-                qconv_cls, module_name = class_map[(use_fused, is_reference)]
+                qconv_cls, module_name = class_map[use_fused]
                 qconv_module = qconv_cls(
                     in_channels, out_channels, kernel_size, stride, padding,
                     dilation, groups, use_bias, padding_mode=pad_mode
@@ -595,7 +577,7 @@ class TestStaticQuantizedModule(QuantizationTestCase):
                     out_channels_per_group, groups, kernel_size, stride, padding,
                     pad_mode, dilation, X_scale, X_zero_point, W_scale,
                     W_zero_point, Y_scale, Y_zero_point, use_bias, use_fused,
-                    use_channelwise, is_reference)
+                    use_channelwise)
 
     def test_pool_api(self):
         """Tests the correctness of the pool module.
