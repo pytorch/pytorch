@@ -1,16 +1,27 @@
-from typing import Dict
+import typing as t
 
 import torch
 import torch.fx
 
 from .tools_common import get_node_target, CALLABLE_NODE_OPS
 
+# fx.Node.target typename, as returned by `get_node_target()`
+TargetTypeName = str
+
+# supported dtype for a given node, see `OperatorSupport`
+DTypes = t.Optional[
+    t.Tuple[
+        t.Sequence[torch.dtype],
+        t.Dict[str, torch.dtype],
+    ]
+]
+
 
 class OperatorSupport:
     """
-    `_support_dict` maps node.target to supported inputs dtypes.
+    `_support_dict` maps node.target typename to supported inputs dtypes.
 
-    node.target is retrived using helper function `get_node_target()`
+    node.target typename is retrieved using helper function `get_node_target()`
 
     If supported inputs dtypes is None, it means any dtype is supported, else
     we should see a tuple like (([dtypes], ...), {"name":[dtypes], ...}).
@@ -25,10 +36,10 @@ class OperatorSupport:
     be checked.
     """
 
-    _support_dict: Dict = {}
+    _support_dict: t.Mapping[TargetTypeName, DTypes] = {}
 
     def is_node_supported(
-        self, submodules: Dict[str, torch.nn.Module], node: torch.fx.Node
+        self, submodules: t.Dict[str, torch.nn.Module], node: torch.fx.Node
     ) -> bool:
         """
         Args:
