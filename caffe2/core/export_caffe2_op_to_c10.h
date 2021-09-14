@@ -119,7 +119,7 @@ inline FunctionSchema make_function_schema_for_c10(const char* schema_str) {
       "We don't support registering c10 ops on mobile yet because the function schema parser isn't present in the mobile build.");
 #else
   c10::FunctionSchema parsed_schema = torch::jit::parseSchema(schema_str);
-  std::vector<c10::Argument> arguments = parsed_schema.arguments();
+  ArgumentVector arguments = parsed_schema.arguments();
   arguments.emplace_back(
       PREALLOCATED_OUTPUT_ARGNAME,
       c10::OptionalType::create(c10::ListType::ofTensors()),

@@ -51,7 +51,7 @@ inline std::ostream& operator<<(std::ostream& out, const FunctionSchema& schema)
   return out;
 }
 
-inline size_t findFirstOutArg(const std::vector<Argument>& args) {
+inline size_t findFirstOutArg(const ArgumentVector& args) {
   // find the start of out args in the schema
   for (size_t out_start_idx = 0; out_start_idx < args.size(); out_start_idx++) {
     if (args.at(out_start_idx).is_out()) {
@@ -271,8 +271,8 @@ inline void FunctionSchema::checkAndNormalizeInputs(
 
 inline FunctionSchema FunctionSchema::cloneWithRemappedTypes(
     const std::function<TypePtr(TypePtr)> type_map) const {
-  auto update_args = [&](const std::vector<Argument>& args) {
-    std::vector<Argument> new_args;
+  auto update_args = [&](const ArgumentVector& args) {
+    ArgumentVector new_args;
     new_args.reserve(args.size());
     for(const Argument& arg : args) {
       new_args.emplace_back(arg.cloneWithType(type_map(arg.type())));

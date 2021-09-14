@@ -64,7 +64,7 @@ bool Function::append_operator(
   }
 
   auto jit_op = findOperatorFor(opname);
-  const std::vector<c10::Argument>* pArgs = nullptr;
+  const c10::ArgumentVector* pArgs = nullptr;
   if (jit_op) {
     fn = [jit_op](Stack& stack) { jit_op->getOperation()(stack); };
     pArgs = &jit_op->schema().arguments();
