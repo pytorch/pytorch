@@ -34,7 +34,7 @@ try:
         prepare_qat_fx,
         convert_fx,
     )
-    from torch.quantization.ns.ns_types import NSSingleResultValuesType, NSSubgraph
+    from torch.ao.ns.fx.ns_types import NSSingleResultValuesType, NSSubgraph
     from torch.fx.graph import Node
     from torch.fx import GraphModule
     HAS_FX = True
