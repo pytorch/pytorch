@@ -296,7 +296,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
 
   virtual c10::intrusive_ptr<ProcessGroup::Work> scatter(
       std::vector<at::Tensor>& /* outputTensors */,
-      std::vector<std::vector<at::Tensor>>& i/* nputTensors */,
+      std::vector<std::vector<at::Tensor>>& /* inputTensors */,
       const ScatterOptions& /* opts */ = ScatterOptions()) {
     TORCH_CHECK(
         false,
