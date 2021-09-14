@@ -6953,7 +6953,7 @@ op_db: List[OpInfo] = [
            decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack],
            skips=(
                # Gradcheck for complex hangs for this function, therefore it raises NotImplementedError for now
-               SkipInfo('TestGradients', 'test_forward_mode_AD', dtypes=complex_types()),),
+               DecorateInfo(unittest.skip("Skipped", 'TestGradients', 'test_forward_mode_AD', dtypes=complex_types()),),
            ),
     OpInfo('linalg.eigvalsh',
            aten_name='linalg_eigvalsh',
@@ -6964,7 +6964,7 @@ op_db: List[OpInfo] = [
            decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack],
            skips=(
                # Gradcheck hangs for this function
-               SkipInfo('TestGradients', 'test_forward_mode_AD'),),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_forward_mode_AD'),),
            ),
     OpInfo('linalg.householder_product',
            aten_name='linalg_householder_product',
@@ -8419,7 +8419,7 @@ op_db: List[OpInfo] = [
            decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack],
            skips=(
                # Gradcheck hangs for this function
-               SkipInfo('TestGradients', 'test_forward_mode_AD'),),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_forward_mode_AD'),),
            ),
     OpInfo('eig',
            op=torch.eig,
