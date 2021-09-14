@@ -974,6 +974,15 @@
 
 - func: cat.names_out(Tensor[] tensors, Dimname dim, *, Tensor(a!) out) -> Tensor(a!)
 
+# alias for torch.cat
+- func: concat(Tensor[] tensors, int dim=0) -> Tensor
+
+- func: concat.out(Tensor[] tensors, int dim=0, *, Tensor(a!) out) -> Tensor(a!)
+
+- func: concat.names(Tensor[] tensors, Dimname dim) -> Tensor
+
+- func: concat.names_out(Tensor[] tensors, Dimname dim, *, Tensor(a!) out) -> Tensor(a!)
+
 - func: block_diag(Tensor[] tensors) -> Tensor
   variants: function
 
@@ -2416,6 +2425,9 @@
 - func: linear(Tensor input, Tensor weight, Tensor? bias=None) -> Tensor
   python_module: nn
 
+- func: linear.out(Tensor input, Tensor weight, Tensor? bias=None, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: nn
+
 - func: mkldnn_linear(Tensor self, Tensor weight, Tensor? bias=None) -> Tensor
   python_module: nn
   dispatch:
@@ -2838,6 +2850,13 @@
 
 - func: mean.names_out(Tensor self, Dimname[1] dim, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
+
+- func: nanmean(Tensor self, int[1] dim=[], bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
+  device_check: NoCheck   # Composite
+  variants: function, method
+
+- func: nanmean.out(Tensor self, int[1] dim=[], bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck   # Composite
 
 - func: median(Tensor self) -> Tensor
   variants: function, method
@@ -3847,21 +3866,21 @@
   dispatch:
     CompositeExplicitAutograd: slice
 
-- func: slice_scatter(Tensor self, Tensor mutated_view, int dim=0, int? start=None, int? end=None, int step=1) -> Tensor
+- func: slice_scatter(Tensor self, Tensor src, int dim=0, int? start=None, int? end=None, int step=1) -> Tensor
   variants: function, method
   device_check: NoCheck
   device_guard: False
   dispatch:
     CPU, CUDA: slice_scatter
 
-- func: select_scatter(Tensor self, Tensor mutated_view, int dim, int index) -> Tensor
+- func: select_scatter(Tensor self, Tensor src, int dim, int index) -> Tensor
   variants: function, method
   device_check: NoCheck
   device_guard: False
   dispatch:
     CPU, CUDA: select_scatter
 
-- func: diagonal_scatter(Tensor self, Tensor mutated_view, int offset=0, int dim1=0, int dim2=1) -> Tensor
+- func: diagonal_scatter(Tensor self, Tensor src, int offset=0, int dim1=0, int dim2=1) -> Tensor
   variants: function, method
   device_check: NoCheck
   device_guard: False
@@ -10066,6 +10085,22 @@
   python_module: special
   variants: function
 
+- func: special_gammainc.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: special
+  variants: function
+
+- func: special_gammainc(Tensor self, Tensor other) -> Tensor
+  python_module: special
+  variants: function
+
+- func: special_gammaincc.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: special
+  variants: function
+
+- func: special_gammaincc(Tensor self, Tensor other) -> Tensor
+  python_module: special
+  variants: function
+
 - func: special_multigammaln(Tensor self, int p) -> Tensor
   python_module: special
   variants: function
@@ -10283,6 +10318,14 @@
   variants: function
   dispatch:
     CPU, CUDA: linalg_lstsq_out
+
+# torch.linalg.matmul, alias for torch.matmul
+- func: linalg_matmul(Tensor self, Tensor other) -> Tensor
+  python_module: linalg
+  variants: function
+
+- func: linalg_matmul.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: linalg
 
 - func: linalg_slogdet(Tensor self) -> (Tensor sign, Tensor logabsdet)
   python_module: linalg
