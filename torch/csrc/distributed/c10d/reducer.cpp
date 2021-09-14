@@ -472,6 +472,7 @@ std::vector<c10d::GradBucket> Reducer::get_grad_buckets(
     auto variables_for_bucket = get_variables_for_bucket(i, bucket);
     gradBuckets.emplace_back(
         i,
+        buckets_.size(),
         return_zero_tensors ? at::zeros_like(bucket.replicas[0].contents)
                             : bucket.replicas[0].contents,
         bucket.replicas[0].offsets,
@@ -888,6 +889,7 @@ void Reducer::all_reduce_bucket(Bucket& bucket) {
   auto variables_for_bucket = get_variables_for_bucket(next_bucket_, bucket);
   GradBucket grad_bucket(
       next_bucket_,
+      buckets_.size(),
       tensors[0],
       // Since we only support single-process single-device
       // mode, there is always only one replica in the bucket.

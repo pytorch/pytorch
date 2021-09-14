@@ -721,9 +721,11 @@ struct MobileCodeImpl : CodeImpl {
       const std::shared_ptr<Graph>& graph,
       std::string function_name,
       bool emit_default_input_instructions,
+      bool support_default_args_before_out,
       size_t remaining_bailout_depth)
       : CodeImpl(graph, function_name, remaining_bailout_depth, false),
-        emit_default_input_instructions_(emit_default_input_instructions) {
+        emit_default_input_instructions_(emit_default_input_instructions),
+        support_default_args_before_out_(support_default_args_before_out) {
     // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
     run();
   }
@@ -746,11 +748,12 @@ struct MobileCodeImpl : CodeImpl {
         // skip if schema has vararg
         if (!op_schema.is_vararg()) {
           auto specifiedArgs = CalculateNecessaryArgs(
-              op_schema.arguments(), node->inputs(), false);
-          // preserving the old behavior
-          auto numInclude = specifiedArgs.first;
-          // TODO uncomment this
-          // auto numInclude = specifiedArgs.first + specifiedArgs.second;
+              op_schema.arguments(),
+              node->inputs(),
+              support_default_args_before_out_);
+
+          size_t numInclude = specifiedArgs.first +
+              (support_default_args_before_out_ ? specifiedArgs.second : 0);
           auto unique_name = op_schema.overload_name() != ""
               ? op_schema.name() + "." + op_schema.overload_name()
               : op_schema.name();
@@ -782,21 +785,27 @@ struct MobileCodeImpl : CodeImpl {
         if (it != op_to_num_specified_args_.end()) {
           num_include = it->second;
         }
-        emitLoadInputs(node->inputs(), num_include);
-        // TODO: uncomment this
-        // auto num_out = op_to_num_out_args_.find(unique_op_name)->second;
-        // auto num_specified_before_out = num_include - num_out;
-        // emitLoadInputs(node->inputs(), 0, num_specified_before_out);
-        // emitLoadInputs(node->inputs(), node->inputs().size() - num_out,
-        // node->inputs().size());
-
+        if (support_default_args_before_out_) {
+          auto num_out = op_to_num_out_args_.find(unique_op_name)->second;
+          auto num_specified_before_out = num_include - num_out;
+          emitLoadInputs(node->inputs(), 0, num_specified_before_out);
+          emitLoadInputs(
+              node->inputs(),
+              node->inputs().size() - num_out,
+              node->inputs().size());
+        } else {
+          emitLoadInputs(node->inputs(), num_include);
+        }
         insertInstruction(OP, operator_table_.size());
       }
       operator_table_.emplace_back(op.getOperation(node));
     }
   }
 
+  // To support forward compatibility for bytecode version bump from v5 to v6
   bool emit_default_input_instructions_;
+  // To support forward compatibility for bytecode version bump from v6 to v7
+  bool support_default_args_before_out_;
 };
 
 } // namespace interpreter

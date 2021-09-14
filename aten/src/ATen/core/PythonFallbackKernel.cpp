@@ -1,18 +1,9 @@
 #include <torch/library.h>
 #include <ATen/core/dispatch/Dispatcher.h>
-#include <ATen/PythonModeTLS.h>
 
 namespace {
 
 void pythonFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
-  // If Python Mode is active, use its PyInterpreter for dispatch
-  const auto& maybe_python_mode_state = at::impl::PythonModeTLS::get_state();
-  if (maybe_python_mode_state) {
-    maybe_python_mode_state->pyinterpreter()->dispatch(op, stack, maybe_python_mode_state);
-    return;
-  }
-
-  // Otherwise, find a PyInterpreter on a Tensor
   const auto& schema = op.schema();
   const auto num_arguments = schema.arguments().size();
   // It is safe to dispatch on the very first Tensor with a pyobj_interpreter
@@ -24,7 +15,7 @@ void pythonFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
     if (ivalue.isTensor()) {
       auto* interpreter = ivalue.unsafeToTensorImpl()->pyobj_interpreter();
       if (interpreter) {
-        interpreter->dispatch(op, stack, nullptr);
+        interpreter->dispatch(op, stack);
         return;
       }
     } else if (ivalue.isTensorList()) {
@@ -33,7 +24,7 @@ void pythonFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
       for (const auto& nv : ivalue.toListRef()) {
         auto* interpreter = nv.unsafeToTensorImpl()->pyobj_interpreter();
         if (interpreter) {
-          interpreter->dispatch(op, stack, nullptr);
+          interpreter->dispatch(op, stack);
           return;
         }
       }
