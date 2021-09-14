@@ -21,6 +21,7 @@ import torch.distributed.algorithms.model_averaging.averagers as averagers
 import torch.distributed.algorithms.model_averaging.utils as model_averaging_utils
 import torch.nn as nn
 import torch.nn.functional as F
+import torch.nn.utils._stateless as _stateless
 from torch._utils_internal import TEST_MASTER_ADDR as MASTER_ADDR
 from torch._utils_internal import TEST_MASTER_PORT as MASTER_PORT
 from torch.cuda.amp import GradScaler, autocast
@@ -8088,3 +8089,53 @@ class DistributedTest:
                 rank_0_buf = bufs[0]
                 for buf in bufs[1:]:
                     self.assertEqual(rank_0_buf, buf)
+
+        @skip_if_lt_x_gpu(2)
+        @sandcastle_skip_if(
+            BACKEND != "nccl" and BACKEND != "gloo",
+            "Only Nccl & Gloo backend support DistributedDataParallel",
+        )
+        def test_stateless_api_with_ddp(self):
+            class MockModule(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.l1 = torch.nn.Linear(1, 1)
+                    buffer = torch.ones(1)
+                    self.register_buffer('buffer', buffer)
+
+                def forward(self, x):
+                    return self.l1(x) + self.buffer
+
+            device = self.rank
+            module = MockModule().to(device)
+            module = torch.nn.parallel.DistributedDataParallel(
+                module,
+                device_ids=[device]
+            )
+            x = torch.rand((1, 1)).to(device)
+            weight = torch.nn.Parameter(torch.tensor([[1.0]])).to(device)
+            bias = torch.nn.Parameter(torch.tensor([0.0])).to(device)
+            weight.retain_grad()
+            bias.retain_grad()
+            buffer = torch.tensor([0.0]).to(device)
+            parameters = {'module.l1.weight': weight,
+                          'module.l1.bias': bias,
+                          'module.buffer': buffer}
+            prev_weight = getattr(module, 'module.l1.weight', module)
+            prev_buffer = getattr(module, 'module.buffer', module)
+            res = _stateless.functional_call(module, parameters, x)
+            self.assertEqual(x, res.reshape((1, 1)))
+            # check that the weight remain unmodified
+            cur_weight = getattr(module, 'module.l1.weight', module)
+            cur_buffer = getattr(module, 'module.buffer', module)
+            self.assertEqual(cur_weight, prev_weight)
+            self.assertEqual(cur_buffer, prev_buffer)
+            # run a backward pass and check the gradients
+            res.backward()
+            assert weight.grad is not None
+            assert bias.grad is not None
+            # Gradient was not calculated for the module stated and buffers
+            assert buffer.grad is None
+            assert module.module.l1.weight.grad is None
+            assert module.module.l1.bias.grad is None
+            assert module.module.buffer.grad is None
