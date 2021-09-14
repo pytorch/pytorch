@@ -2868,18 +2868,18 @@ Tensor TensorExprKernel::bindInput(const torch::jit::Value* input) {
         throw malformed_input(msg);
       }
       if (isContiguous(input)) {
-        Placeholder inBuffer(
+        BufHandle inBuffer(
             "t" + input_name_map_[input],
-            ToDtype(static_cast<ScalarType>(*tt->scalarType())),
-            toExprHandles(*tt->sizes().concrete_sizes()));
-        bufs_.emplace(input, inBuffer.data());
+            toExprHandles(*tt->sizes().concrete_sizes()),
+            ToDtype(static_cast<ScalarType>(*tt->scalarType())));
+        bufs_.emplace(input, inBuffer.node());
         bufferArgs_.emplace_back(inBuffer);
         break;
       }
-      Placeholder inBuffer(
+      BufHandle inBuffer(
           "t" + input_name_map_[input],
-          ToDtype(static_cast<ScalarType>(*tt->scalarType())),
-          {0});
+          {0},
+          ToDtype(static_cast<ScalarType>(*tt->scalarType())));
       std::vector<DimArg> inputTensorDims;
       for (size_t i = 0; i < *tt->sizes().size(); i++) {
         auto const size = *tt->sizes()[i];
