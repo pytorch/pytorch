@@ -103,12 +103,11 @@ TORCH_META_FUNC(gather)
   }
 
   at::native::gather_shape_check(self, wrapped_dim, index);
-  if (index.numel() != 0) {
-    TORCH_CHECK(
-      index.scalar_type() == at::ScalarType::Long,
-      "gather", "(): Expected dtype int64 for index"
-    );
-  }
+  if (index.numel() == 0) return;
+  TORCH_CHECK(
+    index.scalar_type() == at::ScalarType::Long,
+    "gather", "(): Expected dtype int64 for index"
+  );
 }
 
 template <typename Meta>
