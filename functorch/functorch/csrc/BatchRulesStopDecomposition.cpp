@@ -704,9 +704,6 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   STOP_DECOMPOSE(masked_select_backward);
   STOP_DECOMPOSE(matrix_exp_backward);
   STOP_DECOMPOSE(trace_backward);
-  STOP_DECOMPOSE(slice_backward);
-  STOP_DECOMPOSE(select_backward);
-  STOP_DECOMPOSE(diagonal_backward);
   STOP_DECOMPOSE(cummaxmin_backward);
   STOP_DECOMPOSE(cumprod_backward);
   STOP_DECOMPOSE(diag_backward);
