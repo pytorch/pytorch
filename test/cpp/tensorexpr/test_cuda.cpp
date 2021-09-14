@@ -31,8 +31,8 @@ static void testCudaTestVectorAdd01_impl() {
   const int block_count = 16;
   const int block_size = 128;
   Dtype dtype = ToDtype<ctype>();
-  Placeholder a_buf("a", dtype, {num_iter, block_count, block_size});
-  Placeholder b_buf("b", dtype, {num_iter, block_count, block_size});
+  BufHandle a_buf("a", {num_iter, block_count, block_size}, dtype);
+  BufHandle b_buf("b", {num_iter, block_count, block_size}, dtype);
   Tensor c = Compute(
       "c",
       {
@@ -96,7 +96,7 @@ TEST(Cuda, Sigmoid_CUDA) {
   const int block_count = 16;
   const int block_size = 128;
   Dtype dtype = ToDtype<float>();
-  Placeholder a_buf("a", dtype, {num_iter, block_count, block_size});
+  BufHandle a_buf("a", {num_iter, block_count, block_size}, dtype);
   Tensor c = Compute(
       "c",
       {
@@ -160,8 +160,8 @@ TEST(Cuda, TestVectorAdd01_CUDA) {
 }
 
 static void testCudaTestVectorAdd02_impl(int N, int block_size) {
-  Placeholder a_buf("a", kFloat, {N});
-  Placeholder b_buf("b", kFloat, {N});
+  BufHandle a_buf("a", {N}, kFloat);
+  BufHandle b_buf("b", {N}, kFloat);
   Tensor c = Compute(
       "c",
       {
@@ -220,7 +220,7 @@ TEST(Cuda, TestVectorAdd02_CUDA) {
 
 TEST(Cuda, HalfCast_CUDA) {
   auto half = ToDtype<at::Half>();
-  Placeholder a("a", half, {4});
+  BufHandle a("a", {4}, half);
   Tensor b = Compute("b", {{4, "n"}}, [&](const VarHandle& i) {
     return Cast::make(kFloat, a.load(i));
   });
@@ -260,8 +260,8 @@ TEST(Cuda, DynamicShape2D_CUDA) {
   auto testWithSize = [](int32_t M, int32_t N) {
     VarHandle m("m", kInt);
     VarHandle n("n", kInt);
-    Placeholder a(BufHandle("a", {m, n}, kFloat));
-    Placeholder b(BufHandle("b", {m, n}, kFloat));
+    BufHandle a("a", {m, n}, kFloat);
+    BufHandle b("b", {m, n}, kFloat);
     Tensor c = Compute(
         "c", {{m, "m"}, {n, "n"}}, [&](const VarHandle& i, const VarHandle& j) {
           return a.load(i, j) + b.load(i, j);
@@ -379,7 +379,7 @@ TEST(Cuda, TestRand01_CUDA) {
 TEST(Cuda, DynamicShapeSplit_CUDA) {
   constexpr int N = 4096;
   VarHandle n("n", kInt);
-  Placeholder a(BufHandle("a", {n}, kFloat));
+  BufHandle a("a", {n}, kFloat);
   Tensor b = Compute(
       "b", {{n, "n"}}, [&](const VarHandle& i) { return a.load(i) * 2.0f; });
   LoopNest l({b});
@@ -427,8 +427,8 @@ TEST(Cuda, DynamicShapeSplit_CUDA) {
 
 TEST(Cuda, OneBlockOneThreadGlobalReduce1_CUDA) {
   const static int N = 1024;
-  Placeholder data_buf("data", kFloat, {N});
-  Placeholder output_buf("output", kFloat, {1});
+  BufHandle data_buf("data", {N}, kFloat);
+  BufHandle output_buf("output", {1}, kFloat);
 
   // The test adds the following code for trivial reduction:
   // for (int bidx = 0; bidx < 1; bidx++) { // blockIdx.x
@@ -442,8 +442,8 @@ TEST(Cuda, OneBlockOneThreadGlobalReduce1_CUDA) {
 
   StorePtr init_store = output_buf.store({0}, 0.f);
   VarHandle i1("i1", kInt);
-  ExprHandle load_data = Load::make(BufHandle(data_buf.data()), {i1});
-  ExprHandle load_output = Load::make(BufHandle(output_buf.data()), {0});
+  ExprHandle load_data = Load::make(data_buf, {i1});
+  ExprHandle load_output = Load::make(output_buf, {0});
   ExprHandle add_value = load_output + load_data;
   StorePtr store_output = output_buf.store({0}, add_value);
   ForPtr for_output = For::make(i1, 0, N, store_output);
@@ -505,8 +505,8 @@ TEST(Cuda, OneBlockMultiThreadGlobalReduce1_CUDA) {
   //      b[0] = b[0] + a[t] // implied atomic
   // clang-format on
 
-  Placeholder a_buf("a", kFloat, {N});
-  Placeholder b_buf("b", kFloat, {1});
+  BufHandle a_buf("a", {N}, kFloat);
+  BufHandle b_buf("b", {1}, kFloat);
 
   StorePtr init_store = b_buf.store({0}, 0.f);
   VarHandle t("t", kInt);
@@ -524,8 +524,8 @@ TEST(Cuda, OneBlockMultiThreadGlobalReduce1_CUDA) {
 
   //  for t in 0..1024: // thread-idx
   //    b[0] = b[0] + a[t] // implied atomic
-  ExprHandle load_a = Load::make(BufHandle(a_buf.data()), {t});
-  ExprHandle load_b = Load::make(BufHandle(b_buf.data()), {0});
+  ExprHandle load_a = Load::make(a_buf, {t});
+  ExprHandle load_b = Load::make(b_buf, {0});
   ExprHandle add_value = load_b + load_a;
   StorePtr store_b = b_buf.store({0}, add_value);
   ForPtr for_b = For::make(t, 0, N, store_b, thread_idx_options);
@@ -585,8 +585,8 @@ TEST(Cuda, NoThreadIdxWrite_1_CUDA) {
   //  covered by its own thread-idx
 
   const static int N = 1024;
-  Placeholder a_buf("a", kFloat, {2});
-  Placeholder b_buf("b", kFloat, {N});
+  BufHandle a_buf("a", {2}, kFloat);
+  BufHandle b_buf("b", {N}, kFloat);
 
   VarHandle k("k", kInt);
   VarHandle l("l", kInt);
@@ -597,7 +597,7 @@ TEST(Cuda, NoThreadIdxWrite_1_CUDA) {
   //   for n in 0..2:
   //     a[0] = a[0] + n
   StorePtr store_a0_0 = a_buf.store({0}, 0.f);
-  ExprHandle load_a0 = Load::make(BufHandle(a_buf.data()), {0});
+  ExprHandle load_a0 = Load::make(a_buf, {0});
   ExprHandle v1 = load_a0 + n;
   StorePtr store_a0_v1 = a_buf.store({0}, v1);
   ForPtr loop_a_0 = For::make(n, 0, 2, store_a0_v1);
@@ -686,8 +686,8 @@ TEST(Cuda, SharedMemReduce_1_CUDA) {
   LoopOptions block_idx_opt;
   block_idx_opt.set_gpu_block_index(0);
 
-  Placeholder a("a", kFloat, {1, M, N});
-  Placeholder b("b", kFloat, {1});
+  BufHandle a("a", {1, M, N}, kFloat);
+  BufHandle b("b", {1}, kFloat);
   VarHandle k("k", kInt);
   VarHandle m("m", kInt);
   VarHandle n("n", kInt);
@@ -715,8 +715,7 @@ TEST(Cuda, SharedMemReduce_1_CUDA) {
     //    for n in 0..64:  // thread_idx
     //      c(n) = c(n) + a(k, m, n)
     ExprHandle load_cn = Load::make(kFloat, c, {n});
-    ExprHandle a_kmn =
-        Load::make(BufHandle(a.data()), {k * (M * N) + m * N + n});
+    ExprHandle a_kmn = Load::make(a, {k * (M * N) + m * N + n});
     ExprHandle v_add = load_cn + a_kmn;
     StorePtr store_cn_v = Store::make(c, {n}, v_add);
     ForPtr loop_n2 = For::make(n, 0, N, store_cn_v, thread_idx_opt);
@@ -821,8 +820,8 @@ TEST(Cuda, LocalMemReduce_1_CUDA) {
   LoopOptions block_idx_opt;
   block_idx_opt.set_gpu_block_index(0);
 
-  Placeholder a("a", kFloat, {1, M, N});
-  Placeholder b("b", kFloat, {1});
+  BufHandle a("a", {1, M, N}, kFloat);
+  BufHandle b("b", {1}, kFloat);
   VarHandle k("k", kInt);
   VarHandle m("m", kInt);
   VarHandle n("n", kInt);
@@ -913,7 +912,7 @@ TEST(Cuda, LocalMemReduce_1_CUDA) {
 
 TEST(Cuda, HalfSupport_CUDA) {
   auto half = ToDtype<at::Half>();
-  Placeholder a("a", half, {4});
+  BufHandle a("a", {4}, half);
   Tensor b = Compute("b", {{4, "n"}}, [&](const VarHandle& i) {
     return Cast::make(half, ExprHandle(2.0f) * a.load(i));
   });
@@ -970,7 +969,7 @@ TEST(Cuda, HalfSupport_CUDA) {
 
 TEST(Cuda, HalfPropagation_CUDA) {
   auto half = ToDtype<at::Half>();
-  Placeholder a("a", half, {4});
+  BufHandle a("a", {4}, half);
   Tensor relu = Compute("relu", {{4, "n"}}, [&](const VarHandle& i) {
     return Max::make(a.load(i), ExprHandle(alloc<HalfImm>(0)), true);
   });
@@ -1017,9 +1016,9 @@ TEST(Cuda, HalfPropagation_CUDA) {
 }
 
 TEST(Cuda, UnusedHalfArgument_CUDA) {
-  Placeholder a("a", kFloat, {4});
+  BufHandle a("a", {4}, kFloat);
   auto half = ToDtype<at::Half>();
-  Placeholder b("b", half, {4});
+  BufHandle b("b", {4}, half);
   Tensor relu = Compute("relu", {{4, "n"}}, [&](const VarHandle& i) {
     return Max::make(a.load(i), ExprHandle(alloc<FloatImm>(0)), true);
   });
@@ -1073,9 +1072,9 @@ TEST(Cuda, UnusedHalfArgument_CUDA) {
 }
 
 TEST(Cuda, PrioritizeDependents_CUDA) {
-  Placeholder a("a", kFloat, {10});
-  Placeholder b("b", kFloat, {12});
-  Placeholder c("c", kFloat, {12});
+  BufHandle a("a", {10}, kFloat);
+  BufHandle b("b", {12}, kFloat);
+  BufHandle c("c", {12}, kFloat);
 
   LoopOptions block_idx_opt;
   block_idx_opt.set_gpu_block_index(0);
@@ -1088,8 +1087,8 @@ TEST(Cuda, PrioritizeDependents_CUDA) {
    *   c[i] = (i < 10 ? a[i] + b[i] : b[i]);
    * }
    */
-  ExprHandle load_a = Load::make(BufHandle(a.data()), {i});
-  ExprHandle load_b = Load::make(BufHandle(b.data()), {i});
+  ExprHandle load_a = a.load({i});
+  ExprHandle load_b = b.load({i});
   ExprHandle cmp = CompareSelect::make(i, 10, CompareSelectOperation::kLT);
   ExprHandle ite = IfThenElse::make(cmp, Add::make(load_a, load_b), load_b);
 
@@ -1148,8 +1147,8 @@ TEST(Cuda, PrioritizeDependents_CUDA) {
 TEST(Cuda, MaskBlockDim_CUDA) {
   int A_SIZE = 100;
   int B_SIZE = 50;
-  Placeholder a_buf("a", kFloat, {A_SIZE});
-  Placeholder b_buf("b", kFloat, {B_SIZE});
+  BufHandle a_buf("a", {A_SIZE}, kFloat);
+  BufHandle b_buf("b", {B_SIZE}, kFloat);
   Tensor c = Compute("c", {{A_SIZE, "i"}}, [&](const VarHandle& i) {
     return a_buf.load(i) + 10;
   });
@@ -1240,8 +1239,8 @@ TEST(Cuda, MaskBlockDim_CUDA) {
 TEST(Cuda, MaskThreadDim_CUDA) {
   int A_SIZE = 50;
   int B_SIZE = 100;
-  Placeholder a_buf("a", kFloat, {A_SIZE});
-  Placeholder b_buf("b", kFloat, {B_SIZE});
+  BufHandle a_buf("a", {A_SIZE}, kFloat);
+  BufHandle b_buf("b", {B_SIZE}, kFloat);
   Tensor c = Compute("c", {{A_SIZE, "i"}}, [&](const VarHandle& i) {
     return a_buf.load(i) + 10;
   });
@@ -1334,8 +1333,8 @@ TEST(Cuda, MaskThreadDim_CUDA) {
 TEST(Cuda, MaskMultiBlockDim_CUDA) {
   int A_SIZE = 100;
   int B_SIZE = 50;
-  Placeholder a_buf("a", kFloat, {A_SIZE});
-  Placeholder b_buf("b", kFloat, {B_SIZE});
+  BufHandle a_buf("a", {A_SIZE}, kFloat);
+  BufHandle b_buf("b", {B_SIZE}, kFloat);
   Tensor c = Compute("c", {{A_SIZE, "i"}}, [&](const VarHandle& i) {
     return a_buf.load(i) + 10;
   });
@@ -1427,8 +1426,8 @@ TEST(Cuda, MaskMultiBlockDim_CUDA) {
 TEST(Cuda, MaskBlockAndThreadDim_CUDA) {
   int A_SIZE = 100;
   int B_SIZE = 50;
-  Placeholder a_buf("a", kFloat, {A_SIZE});
-  Placeholder b_buf("b", kFloat, {B_SIZE});
+  BufHandle a_buf("a", {A_SIZE}, kFloat);
+  BufHandle b_buf("b", {B_SIZE}, kFloat);
   Tensor c = Compute("c", {{A_SIZE, "i"}}, [&](const VarHandle& i) {
     return a_buf.load(i) + 10;
   });
@@ -1519,8 +1518,8 @@ TEST(Cuda, MaskMultiDim_CUDA) {
   int OUTER_SIZE = 10;
   int A_SIZE = 100;
   int B_SIZE = 50;
-  Placeholder a_buf("a", kFloat, {OUTER_SIZE, A_SIZE});
-  Placeholder b_buf("b", kFloat, {OUTER_SIZE, B_SIZE});
+  BufHandle a_buf("a", {OUTER_SIZE, A_SIZE}, kFloat);
+  BufHandle b_buf("b", {OUTER_SIZE, B_SIZE}, kFloat);
   Tensor c = Compute(
       "C",
       {{OUTER_SIZE, "i"}, {A_SIZE, "j"}},
@@ -1648,8 +1647,8 @@ TEST(Cuda, MaskMultiDimSymbolic_CUDA) {
   VarHandle OUTER_SIZE("OUTER_SIZE", kInt);
   VarHandle A_SIZE("A_SIZE", kInt);
   VarHandle B_SIZE("B_SIZE", kInt);
-  Placeholder a_buf("a", kFloat, {OUTER_SIZE, A_SIZE});
-  Placeholder b_buf("b", kFloat, {OUTER_SIZE, B_SIZE});
+  BufHandle a_buf("a", {OUTER_SIZE, A_SIZE}, kFloat);
+  BufHandle b_buf("b", {OUTER_SIZE, B_SIZE}, kFloat);
   Tensor c = Compute(
       "C",
       {{OUTER_SIZE, "i"}, {A_SIZE, "j"}},
@@ -1783,10 +1782,10 @@ TEST(Cuda, MaskCompoundInnerLoop_CUDA) {
   int OUTER_SIZE = 10;
   int A_SIZE = 100;
   int B_SIZE = 50;
-  Placeholder a_buf("a", kFloat, {OUTER_SIZE, A_SIZE});
-  Placeholder b_buf("b", kFloat, {OUTER_SIZE, B_SIZE});
-  Placeholder c_buf("c", kFloat, {OUTER_SIZE, A_SIZE});
-  Placeholder d_buf("d", kFloat, {OUTER_SIZE, B_SIZE});
+  BufHandle a_buf("a", {OUTER_SIZE, A_SIZE}, kFloat);
+  BufHandle b_buf("b", {OUTER_SIZE, B_SIZE}, kFloat);
+  BufHandle c_buf("c", {OUTER_SIZE, A_SIZE}, kFloat);
+  BufHandle d_buf("d", {OUTER_SIZE, B_SIZE}, kFloat);
 
   // Can't build this using Compute and transforms yet.
   LoopOptions blockBound;
@@ -1921,10 +1920,10 @@ TEST(Cuda, MaskInnerLoopOneBlock_CUDA) {
   int OUTER_SIZE = 10;
   int A_SIZE = 100;
   int B_SIZE = 50;
-  Placeholder a_buf("a", kFloat, {OUTER_SIZE, A_SIZE});
-  Placeholder b_buf("b", kFloat, {OUTER_SIZE, B_SIZE});
-  Placeholder c_buf("c", kFloat, {OUTER_SIZE, A_SIZE});
-  Placeholder d_buf("d", kFloat, {OUTER_SIZE, B_SIZE});
+  BufHandle a_buf("a", {OUTER_SIZE, A_SIZE}, kFloat);
+  BufHandle b_buf("b", {OUTER_SIZE, B_SIZE}, kFloat);
+  BufHandle c_buf("c", {OUTER_SIZE, A_SIZE}, kFloat);
+  BufHandle d_buf("d", {OUTER_SIZE, B_SIZE}, kFloat);
 
   // Can't build this using Compute and transforms yet.
   LoopOptions blockBound;
@@ -2059,8 +2058,8 @@ TEST(Cuda, MaskMultiDimMultiAxis_CUDA) {
   int OUTER_SIZE = 10;
   int A_SIZE = 30;
   int B_SIZE = 15;
-  Placeholder a_buf("a", kFloat, {OUTER_SIZE, A_SIZE});
-  Placeholder b_buf("b", kFloat, {OUTER_SIZE, B_SIZE});
+  BufHandle a_buf("a", {OUTER_SIZE, A_SIZE}, kFloat);
+  BufHandle b_buf("b", {OUTER_SIZE, B_SIZE}, kFloat);
   Tensor c = Compute(
       "C",
       {{OUTER_SIZE, "i"}, {A_SIZE, "j"}},
@@ -2189,8 +2188,8 @@ TEST(Cuda, MaskMultiDimMultiLevel_CUDA) {
   int OUTER_B_SIZE = 5;
   int A_SIZE = 30;
   int B_SIZE = 15;
-  Placeholder a_buf("a", kFloat, {OUTER_A_SIZE, A_SIZE});
-  Placeholder b_buf("b", kFloat, {OUTER_B_SIZE, B_SIZE});
+  BufHandle a_buf("a", {OUTER_A_SIZE, A_SIZE}, kFloat);
+  BufHandle b_buf("b", {OUTER_B_SIZE, B_SIZE}, kFloat);
   Tensor c = Compute(
       "C",
       {{OUTER_A_SIZE, "i"}, {A_SIZE, "j"}},
