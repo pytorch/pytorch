@@ -213,7 +213,8 @@ jobs:
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Build PyTorch
         run: |
-          docker run \
+          # detached container should get cleaned up by teardown_ec2_linux
+          container_name=$(docker run \
             -e BUILD_ENVIRONMENT \
             -e JOB_BASE_NAME \
             -e MAX_JOBS="$(nproc --ignore=2)" \
@@ -227,11 +228,13 @@ jobs:
             --security-opt seccomp=unconfined \
             --cap-add=SYS_PTRACE \
             --tty \
+            --detach \
             --user jenkins \
             -v "${GITHUB_WORKSPACE}:/var/lib/jenkins/workspace" \
             -w /var/lib/jenkins/workspace \
-            "${DOCKER_IMAGE}" \
-            sh -c 'sudo chown -R jenkins . && sudo chown -R jenkins /dev && .jenkins/pytorch/build.sh'
+            "${DOCKER_IMAGE}"
+          )
+          docker exec -t "${container_name}" sh -c 'sudo chown -R jenkins . && sudo chown -R jenkins /dev && .jenkins/pytorch/build.sh'
       - name: Parse ref
         id: parse-ref
         run: .github/scripts/parse_ref.py
@@ -249,18 +252,16 @@ jobs:
         run: |
           COMMIT_TIME=$(git log --max-count=1 --format=%ct || echo 0)
           export COMMIT_TIME
-          pip3 install requests
+          pip3 install requests==2.26
           python3 -m tools.stats.upload_binary_size_to_scuba || exit 0
       - name: Test PyTorch
         run: |
+          # detached container should get cleaned up by teardown_ec2_linux
           export SHARD_NUMBER=0
           # TODO: Stop building test binaries as part of the build phase
-          # Used for GPU_FLAG since that doesn't play nice
-          # shellcheck disable=SC2086
           # Make sure we copy test results from bazel-testlogs symlink to
           # a regular directory ./test/test-reports
-          docker run \
-            ${GPU_FLAG:-} \
+          container_name=$(docker run \
             -e BUILD_ENVIRONMENT \
             -e CUSTOM_TEST_ARTIFACT_BUILD_DIR \
             -e GITHUB_ACTIONS \
@@ -277,11 +278,13 @@ jobs:
             --cap-add=SYS_PTRACE \
             --shm-size="${SHM_SIZE}" \
             --tty \
+            --detach \
             --user jenkins \
             -v "${GITHUB_WORKSPACE}:/var/lib/jenkins/workspace" \
             -w /var/lib/jenkins/workspace \
-            "${DOCKER_IMAGE}" \
-            sh -c 'sudo chown -R jenkins . && sudo chown -R jenkins /dev && .jenkins/pytorch/test.sh && cp -Lr ./bazel-testlogs ./test/test-reports'
+            "${DOCKER_IMAGE}"
+          )
+          docker exec -t "${container_name}" sh -c 'sudo chown -R jenkins . && sudo chown -R jenkins /dev && .jenkins/pytorch/test.sh && cp -Lr ./bazel-testlogs ./test/test-reports'
       - name: Chown workspace
         if: always()
         run: |
@@ -290,22 +293,30 @@ jobs:
       - name: Zip test reports for upload
         if: always()
         env:
-          COMMIT_SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
-          WORKFLOW_ID: '${{ github.run_id }}_${{ github.run_number }}'
+          FILE_SUFFIX: 'bazel-${{ github.job }}'
         run: |
           # Remove any previous test reports if they exist
           rm -f test-reports-*.zip
-          zip -r "test-reports-${COMMIT_SHA1}-${WORKFLOW_ID}.zip" test -i '*.xml'
+          zip -r "test-reports-${FILE_SUFFIX}.zip" test -i '*.xml'
       - uses: actions/upload-artifact@v2
-        name: Store PyTorch Test Reports
+        name: Store Test Reports
         if: always()
         with:
-          name: test-reports
+          name: test-reports-bazel
+          retention-days: 14
+          if-no-files-found: error
+          path:
+            test-reports-*.zip
+      - uses: seemethere/upload-artifact-s3@v3
+        name: Store Test Reports on S3
+        if: always()
+        with:
           retention-days: 14
           if-no-files-found: error
           path:
             test-reports-*.zip
       - name: Display and upload test statistics (Click Me)
+        if: always()
         # temporary hack: set CIRCLE_* vars, until we update
         # tools/stats/print_test_stats.py to natively support GitHub Actions
         env:
@@ -334,6 +345,7 @@ jobs:
           # Prune all of the docker images
           docker system prune -af
       - name: Chown workspace
+        if: always()
         env:
           ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
         run: |

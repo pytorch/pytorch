@@ -11,6 +11,9 @@ from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, onlyCUDA, skipCUDAIfRocm, skipMeta, ops)
 from torch.testing._internal.common_methods_invocations import \
     (foreach_unary_op_db, foreach_binary_op_db, foreach_pointwise_op_db, foreach_minmax_op_db)
+from torch.testing._internal.common_dtype import (
+    get_all_dtypes, get_all_int_dtypes, get_all_complex_dtypes, get_all_fp_dtypes,
+)
 
 # Includes some values such that N * N won't be a multiple of 4,
 # which should ensure we test the vectorized and non-vectorized
@@ -133,7 +136,7 @@ class TestForeach(TestCase):
         self._binary_test(dtype, inplace_op, inplace_ref, inputs, is_fastpath, is_inplace=True)
         if opinfo.supports_alpha_param:
             alpha = None
-            if dtype in torch.testing.get_all_int_dtypes():
+            if dtype in get_all_int_dtypes():
                 alpha = 3
             elif dtype.is_complex:
                 alpha = complex(3, 3)
@@ -170,7 +173,7 @@ class TestForeach(TestCase):
     @ops(foreach_binary_op_db)
     def test_binary_op_tensorlists_fastpath(self, device, dtype, op):
         for N in N_values:
-            disable_fastpath = op.ref == torch.div and dtype in torch.testing.get_all_int_dtypes() + [torch.bool]
+            disable_fastpath = op.ref == torch.div and dtype in get_all_int_dtypes() + [torch.bool]
             if op.ref == torch.add and dtype == torch.bool:
                 disable_fastpath = True
             self._test_binary_op_tensorlists(device, dtype, op, N, True, disable_fastpath)
@@ -192,17 +195,17 @@ class TestForeach(TestCase):
     @ops(foreach_binary_op_db)
     def test_binary_op_scalar_fastpath(self, device, dtype, op):
         for N, scalar in itertools.product(N_values, Scalars):
-            disable_fastpath = op.ref == torch.div and dtype in torch.testing.get_all_int_dtypes() + [torch.bool]
+            disable_fastpath = op.ref == torch.div and dtype in get_all_int_dtypes() + [torch.bool]
             if isinstance(scalar, int):
                 disable_fastpath |= dtype == torch.bool
             if isinstance(scalar, float):
-                disable_fastpath |= dtype in torch.testing.get_all_int_dtypes() + [torch.bool]
+                disable_fastpath |= dtype in get_all_int_dtypes() + [torch.bool]
             if isinstance(scalar, bool):
                 disable_fastpath |= dtype == torch.bool
                 if op.ref in (torch.add, torch.mul):
                     disable_fastpath = False
             if isinstance(scalar, complex):
-                disable_fastpath |= dtype not in torch.testing.get_all_complex_dtypes()
+                disable_fastpath |= dtype not in get_all_complex_dtypes()
             self._test_binary_op_scalar(device, dtype, op, N, scalar, True, disable_fastpath)
 
     @ops(foreach_binary_op_db)
@@ -232,16 +235,16 @@ class TestForeach(TestCase):
     def test_binary_op_scalarlist_fastpath(self, device, dtype, op):
         for N in N_values:
             for type_str, scalarlist in getScalarLists(N):
-                bool_int_div = op.ref == torch.div and dtype in torch.testing.get_all_int_dtypes() + [torch.bool]
+                bool_int_div = op.ref == torch.div and dtype in get_all_int_dtypes() + [torch.bool]
                 disable_fastpath = bool_int_div
                 if type_str == "int":
                     disable_fastpath |= dtype == torch.bool
                 if type_str == "float":
-                    disable_fastpath |= dtype in torch.testing.get_all_int_dtypes() + [torch.bool]
+                    disable_fastpath |= dtype in get_all_int_dtypes() + [torch.bool]
                 if type_str == "complex":
-                    disable_fastpath |= dtype not in torch.testing.get_all_complex_dtypes()
+                    disable_fastpath |= dtype not in get_all_complex_dtypes()
                 if type_str == "mixed":
-                    disable_fastpath |= True and dtype not in torch.testing.get_all_complex_dtypes()
+                    disable_fastpath |= True and dtype not in get_all_complex_dtypes()
                 self._test_binary_op_scalarlist(device, dtype, op, N, scalarlist, True, disable_fastpath)
 
     @ops(foreach_binary_op_db)
@@ -298,7 +301,7 @@ class TestForeach(TestCase):
     @skipMeta
     @ops(foreach_pointwise_op_db)
     def test_pointwise_op_fastpath(self, device, dtype, op):
-        disable_fastpath = dtype in torch.testing.get_all_int_dtypes() + [torch.bool]
+        disable_fastpath = dtype in get_all_int_dtypes() + [torch.bool]
         # for N, scalar in itertools.product(N_values, Scalars):
         for N in N_values:
             self._test_pointwise_op(device, dtype, op, N, True, disable_fastpath)
@@ -356,7 +359,7 @@ class TestForeach(TestCase):
         op, ref, inplace_op, inplace_ref = self._get_funcs(opinfo, 1)
         inputs = opinfo.sample_inputs(device, dtype, N, noncontiguous=not is_fastpath),
         # note(mkozuki): Complex inputs for `_foreach_abs` go through slowpath.
-        if opinfo.name == "_foreach_abs" and dtype in torch.testing.get_all_complex_dtypes():
+        if opinfo.name == "_foreach_abs" and dtype in get_all_complex_dtypes():
             is_fastpath = False
         self._regular_unary_test(dtype, op, ref, inputs, is_fastpath)
         self._inplace_unary_test(dtype, inplace_op, inplace_ref, inputs, is_fastpath)
@@ -367,7 +370,7 @@ class TestForeach(TestCase):
         for N in N_values:
             self._test_unary(device, dtype, op, N, is_fastpath=True)
 
-    @dtypes(*torch.testing.get_all_dtypes())
+    @dtypes(*get_all_dtypes())
     @ops(foreach_unary_op_db)
     def test_unary_slowpath(self, device, dtype, op):
         for N in N_values:
@@ -378,14 +381,14 @@ class TestForeach(TestCase):
         self.assertEqual(ref(inputs), op(inputs, self.is_cuda, is_fastpath))
 
     # note(mkozuki): in-place of foreach_minimum and foreach_maximum aren't implemented.
-    # @dtypes(*torch.testing.get_all_dtypes(include_bfloat16=False, include_complex=False))
+    # @dtypes(*get_all_dtypes(include_bfloat16=False, include_complex=False))
     @ops(foreach_minmax_op_db)
     def test_minmax_fastpath(self, device, dtype, op):
         for N in N_values:
             inputs = tuple(op.sample_inputs(device, dtype, N) for _ in range(2))
             self._minmax_test(op, inputs, True, N if dtype == torch.bool else 1)
 
-    @dtypes(*torch.testing.get_all_dtypes(include_half=True, include_bfloat16=True, include_complex=False))
+    @dtypes(*get_all_dtypes(include_half=True, include_bfloat16=True, include_complex=False))
     @ops(foreach_minmax_op_db)
     def test_minmax_slowpath(self, device, dtype, op):
         for N in N_values:
@@ -394,7 +397,7 @@ class TestForeach(TestCase):
 
     # note(mkozuki): ForeachFuncInfo's of both `_foreach_maximum` and `_foreach_minimum` include integer types.
     # so, manually limit dtypes to fp types for inf&nan tests.
-    @dtypes(*torch.testing.get_all_fp_dtypes(include_bfloat16=True, include_half=True))
+    @dtypes(*get_all_fp_dtypes(include_bfloat16=True, include_half=True))
     @ops(foreach_minmax_op_db)
     def test_minmax_float_inf_nan(self, device, dtype, op):
         inputs = (
@@ -413,7 +416,7 @@ class TestForeach(TestCase):
         )
         self._minmax_test(op, inputs, True, 1)
 
-    @dtypes(*torch.testing.get_all_dtypes())
+    @dtypes(*get_all_dtypes())
     def test_add_scalar_with_empty_list_and_empty_tensor(self, device, dtype):
         # TODO: enable empty list case
         for tensors in [[torch.randn([0])]]:
@@ -423,7 +426,7 @@ class TestForeach(TestCase):
             torch._foreach_add_(tensors, 1)
             self.assertEqual(res, tensors)
 
-    @dtypes(*torch.testing.get_all_dtypes())
+    @dtypes(*get_all_dtypes())
     @ops(foreach_binary_op_db)
     def test_binary_op_scalar_with_overlapping_tensors(self, device, dtype, op):
         foreach_op, ref = op.method_variant, op.ref
@@ -457,7 +460,7 @@ class TestForeach(TestCase):
             runtime_error = e
         self.assertIsNone(runtime_error)
 
-    @dtypes(*torch.testing.get_all_dtypes())
+    @dtypes(*get_all_dtypes())
     @ops(foreach_binary_op_db)
     def test_binary_op_list_error_cases(self, device, dtype, op):
         foreach_op, foreach_op_, ref, ref_ = op.method_variant, op.inplace_variant, op.ref, op.ref_inplace
@@ -513,7 +516,7 @@ class TestForeach(TestCase):
                 return
             with self.assertRaisesRegex(RuntimeError, "Expected all tensors to be on the same device"):
                 foreach_op([tensor1], [tensor2])
-            if dtype in torch.testing.get_all_int_dtypes() + [torch.bool] and foreach_op == torch._foreach_div:
+            if dtype in get_all_int_dtypes() + [torch.bool] and foreach_op == torch._foreach_div:
                 with self.assertRaisesRegex(RuntimeError, "result type"):
                     foreach_op_([tensor1], [tensor2])
             else:
@@ -522,7 +525,7 @@ class TestForeach(TestCase):
 
     @skipMeta
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not found")
-    @dtypes(*torch.testing.get_all_dtypes())
+    @dtypes(*get_all_dtypes())
     @ops(foreach_binary_op_db)
     def test_binary_op_list_slow_path(self, device, dtype, op):
         # note(mkozuki): why `n_expected_cudaLaunchKernels=0`?
@@ -615,7 +618,7 @@ class TestForeach(TestCase):
             self.assertEqual(actual, tensors1)
 
     @onlyCUDA
-    @dtypes(*torch.testing.get_all_fp_dtypes(include_half=False, include_bfloat16=False))
+    @dtypes(*get_all_fp_dtypes(include_half=False, include_bfloat16=False))
     @ops(foreach_pointwise_op_db)
     def test_pointwise_op_tensors_on_different_devices(self, device, dtype, op):
         # tensors1: ['cuda', 'cpu]
