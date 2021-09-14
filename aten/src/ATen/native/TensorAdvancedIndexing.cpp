@@ -65,6 +65,7 @@
 #include <c10/util/irange.h>
 #include <c10/util/Unroll.h>
 
+#include <iostream>
 #include <algorithm>
 #include <functional>
 #include <numeric>
@@ -85,8 +86,6 @@ native::SCATTER_GATHER_OP get_operator_enum(const c10::string_view reduce) {
 
 TORCH_META_FUNC(gather)
 (const Tensor & self, int64_t dim, const Tensor & index, bool sparse_grad) {
-  if (index.numel() == 0) return;
-
   const Tensor& result = maybe_get_output(0);
   int64_t wrapped_dim = at::maybe_wrap_dim(dim, self.dim());
 
@@ -102,12 +101,14 @@ TORCH_META_FUNC(gather)
     at::assert_no_overlap(result, self);
     at::assert_no_partial_overlap(result, index);
   }
-
-  TORCH_CHECK(
-    index.scalar_type() == at::ScalarType::Long,
-    "gather", "(): Expected dtype int64 for index"
-  );
+ 
   at::native::gather_shape_check(self, wrapped_dim, index);
+  if (index.numel() != 0) {
+    TORCH_CHECK(
+      index.scalar_type() == at::ScalarType::Long,
+      "gather", "(): Expected dtype int64 for index"
+    );
+  }
 }
 
 template <typename Meta>
@@ -1142,6 +1143,7 @@ Tensor index_fill(const Tensor & self, int64_t dim, const Tensor & index, const 
 // gather_out_cpu_cuda
 TORCH_IMPL_FUNC(gather_out)
 (const Tensor& self, int64_t dim, const Tensor& index, bool sparse_grad, const Tensor& result) {
+  if (index.numel() == 0) return;
   dim = at::maybe_wrap_dim(dim, self.dim());
   gather_stub(result.device().type(), result, self, dim, index);
 }
