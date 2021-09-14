@@ -918,15 +918,15 @@ separate private pool for each capture. If you capture multiple graphs,
 this conservative approach ensures graph replays never corrupt each other's values,
 but sometimes needlessly wastes memory.
 
+Sharing memory across captures with torch.cuda.graph
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
 To economize the memory stashed in private pools, :class:`torch.cuda.graph`
 and :func:`torch.cuda.make_graphed_callables` optionally allow different
 captures to share the same private pool.
 It's safe for a set of graphs to share a private pool if you know they'll always
 be replayed in the same order they were captured,
 and never be replayed concurrently.
-
-Sharing memory across captures with torch.cuda.graph
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 :class:`torch.cuda.graph`'s ``pool`` argument is a hint to use a particular private pool,
 and can be used to share memory across graphs as shown::
