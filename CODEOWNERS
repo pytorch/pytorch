@@ -42,7 +42,7 @@
 # Github Actions
 # This list is for people wanting to be notified every time there's a change
 # related to Github Actions
-/.github/ @seemethere @janeyx99 @zhouzhuojie @driazati
+/.github/ @pytorch/pytorch-dev-infra
 
 # Parametrizations
 /torch/nn/utils/parametriz*.py @lezcano
@@ -54,3 +54,9 @@
 /aten/src/ATen/native/**/*LinearAlgebra* @lezcano @nikitaved @IvanYashchuk
 # tests
 /test/test_linalg.py @lezcano @nikitaved @IvanYashchuk
+
+# run_test.py / testing framework
+/test/run_test.py @pytorch/pytorch-dev-infra
+
+# CI scripts
+/.jenkins/pytorch/ @pytorch/pytorch-dev-infra
