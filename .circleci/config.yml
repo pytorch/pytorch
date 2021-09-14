@@ -1108,7 +1108,7 @@ jobs:
   binary_ios_build:
     <<: *pytorch_ios_params
     macos:
-      xcode: "12.0"
+      xcode: "12.5.1"
     steps:
     - attach_workspace:
         at: ~/workspace
@@ -1135,7 +1135,7 @@ jobs:
   binary_ios_upload:
     <<: *pytorch_ios_params
     macos:
-      xcode: "12.0"
+      xcode: "12.5.1"
     steps:
     - attach_workspace:
         at: ~/workspace
@@ -1716,7 +1716,7 @@ jobs:
   pytorch_ios_build:
     <<: *pytorch_ios_params
     macos:
-      xcode: "12.0"
+      xcode: "12.5.1"
     steps:
       - checkout
       - run_brew_for_ios_build
@@ -1797,10 +1797,6 @@ jobs:
           no_output_timeout: "30m"
           command: |
             set -e
-            if [ ${BUILD_LITE_INTERPRETER} == 0 ]; then
-              echo "Run Build Test is not for full jit, skipping."
-              exit 0
-            fi
             PROJ_ROOT=/Users/distiller/project
             PROFILE=PyTorch_CI_2021
             # run the ruby build script
@@ -1826,21 +1822,28 @@ jobs:
             if [ ${IOS_PLATFORM} != "SIMULATOR" ]; then
               echo "not SIMULATOR build, skip it."
               exit 0
-            elif [ ${BUILD_LITE_INTERPRETER} == 0 ]; then
-              echo "Run Simulator Tests is not for full jit, skipping."
-              exit 0
             fi
             WORKSPACE=/Users/distiller/workspace
             PROJ_ROOT=/Users/distiller/project
             source ~/anaconda/bin/activate
-            pip install torch torchvision --progress-bar off
-            #run unit test
+            # use the pytorch nightly build to generate models
+            conda install pytorch torchvision -c pytorch-nightly --yes
+            # generate models for differnet backends
             cd ${PROJ_ROOT}/ios/TestApp/benchmark
+            mkdir -p ../models
             python trace_model.py
-            ruby setup.rb
+            if [ ${BUILD_LITE_INTERPRETER} == 1 ]; then
+              ruby setup.rb --lite 1
+            else
+              ruby setup.rb
+            fi
             cd ${PROJ_ROOT}/ios/TestApp
             instruments -s -devices
-            fastlane scan
+            if [ ${BUILD_LITE_INTERPRETER} == 1 ]; then
+              fastlane scan --only_testing TestAppTests/TestAppTests/testLiteInterpreter
+            else
+              fastlane scan --only_testing TestAppTests/TestAppTests/testFullJIT
+            fi
   pytorch_linux_bazel_build:
     <<: *pytorch_params
     machine:
@@ -7455,46 +7458,46 @@ workflows:
             - pytorch_linux_xenial_py3_clang5_android_ndk_r19c_arm_v7a_build
             - pytorch_linux_xenial_py3_clang5_android_ndk_r19c_arm_v8a_build
       - pytorch_ios_build:
-          build_environment: pytorch-ios-12.0.0-x86_64_build
+          build_environment: pytorch-ios-12.5.1-x86_64_build
           ios_arch: x86_64
           ios_platform: SIMULATOR
           lite_interpreter: "1"
-          name: pytorch_ios_12_0_0_x86_64_build
+          name: pytorch_ios_12_5_1_x86_64_build
       - pytorch_ios_build:
-          build_environment: pytorch-ios-12.0.0-x86_64_full_jit_build
+          build_environment: pytorch-ios-12.5.1-x86_64_full_jit_build
           ios_arch: x86_64
           ios_platform: SIMULATOR
           lite_interpreter: "0"
-          name: pytorch_ios_12_0_0_x86_64_full_jit_build
+          name: pytorch_ios_12_5_1_x86_64_full_jit_build
       - pytorch_ios_build:
-          build_environment: pytorch-ios-12.0.0-arm64_build
+          build_environment: pytorch-ios-12.5.1-arm64_build
           context: org-member
           ios_arch: arm64
           ios_platform: OS
           lite_interpreter: "1"
-          name: pytorch_ios_12_0_0_arm64_build
+          name: pytorch_ios_12_5_1_arm64_build
       - pytorch_ios_build:
-          build_environment: pytorch-ios-12.0.0-arm64_metal_build
+          build_environment: pytorch-ios-12.5.1-arm64_metal_build
           context: org-member
           ios_arch: arm64
           ios_platform: OS
           lite_interpreter: "1"
-          name: pytorch_ios_12_0_0_arm64_metal_build
+          name: pytorch_ios_12_5_1_arm64_metal_build
           use_metal: "1"
       - pytorch_ios_build:
-          build_environment: pytorch-ios-12.0.0-arm64_full_jit_build
+          build_environment: pytorch-ios-12.5.1-arm64_full_jit_build
           context: org-member
           ios_arch: arm64
           ios_platform: OS
           lite_interpreter: "0"
-          name: pytorch_ios_12_0_0_arm64_full_jit_build
+          name: pytorch_ios_12_5_1_arm64_full_jit_build
       - pytorch_ios_build:
-          build_environment: pytorch-ios-12.0.0-arm64_custom_build
+          build_environment: pytorch-ios-12.5.1-arm64_custom_build
           context: org-member
           ios_arch: arm64
           ios_platform: OS
           lite_interpreter: "1"
-          name: pytorch_ios_12_0_0_arm64_custom_build
+          name: pytorch_ios_12_5_1_arm64_custom_build
           op_list: mobilenetv2.yaml
       - pytorch_linux_build:
           build_environment: pytorch-linux-xenial-py3-clang5-mobile-build
@@ -7685,34 +7688,34 @@ workflows:
           requires:
             - binary_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_shared-with-deps_build
       - binary_ios_build:
-          build_environment: libtorch-ios-12.0.0-nightly-x86_64-build
+          build_environment: libtorch-ios-12.5.1-nightly-x86_64-build
           context: org-member
           filters:
             branches:
               only: nightly
           ios_arch: x86_64
           ios_platform: SIMULATOR
-          name: pytorch_ios_12_0_0_nightly_x86_64_build
+          name: pytorch_ios_12_5_1_nightly_x86_64_build
           use_metal: "1"
       - binary_ios_build:
-          build_environment: libtorch-ios-12.0.0-nightly-arm64-build
+          build_environment: libtorch-ios-12.5.1-nightly-arm64-build
           context: org-member
           filters:
             branches:
               only: nightly
           ios_arch: arm64
           ios_platform: OS
-          name: pytorch_ios_12_0_0_nightly_arm64_build
+          name: pytorch_ios_12_5_1_nightly_arm64_build
           use_metal: "1"
       - binary_ios_upload:
-          build_environment: libtorch-ios-12.0.0-nightly-binary-build-upload
+          build_environment: libtorch-ios-12.5.1-nightly-binary-build-upload
           context: org-member
           filters:
             branches:
               only: nightly
           requires:
-            - pytorch_ios_12_0_0_nightly_x86_64_build
-            - pytorch_ios_12_0_0_nightly_arm64_build
+            - pytorch_ios_12_5_1_nightly_x86_64_build
+            - pytorch_ios_12_5_1_nightly_arm64_build
       - pytorch_linux_build:
           build_environment: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-x86_32
           docker_image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c

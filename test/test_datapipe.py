@@ -65,6 +65,13 @@ except ImportError:
     HAS_DILL = False
 skipIfNoDill = skipIf(not HAS_DILL, "no dill")
 
+try:
+    import pandas  # type: ignore[import] # noqa: F401 F403
+    HAS_PANDAS = True
+except ImportError:
+    HAS_PANDAS = False
+skipIfNoDataFrames = skipIf(not HAS_PANDAS, "no dataframes (pandas)")
+
 T_co = TypeVar("T_co", covariant=True)
 
 
@@ -99,6 +106,17 @@ def create_temp_dir_and_files():
 
     return [(temp_dir, temp_file1_name, temp_file2_name, temp_file3_name),
             (temp_sub_dir, temp_sub_file1_name, temp_sub_file2_name)]
+
+# Given a DataPipe and integer n, iterate the DataPipe for n elements and store the elements into a list
+# Then, reset the DataPipe and return a tuple of two lists
+# 1. A list of elements yielded before the reset
+# 2. A list of all elements of the DataPipe after the reset
+def reset_after_n_next_calls(datapipe: IterDataPipe[T_co], n: int) -> Tuple[List[T_co], List[T_co]]:
+    it = iter(datapipe)
+    res_before_reset = []
+    for _ in range(n):
+        res_before_reset.append(next(it))
+    return res_before_reset, list(datapipe)
 
 
 class TestDataChunk(TestCase):
@@ -231,7 +249,7 @@ class TestIterableDataPipeBasic(TestCase):
                 self.assertEqual(data_ref[1].read(), f.read())
             data_ref[1].close()
 
-    # TODO(VitalyFedyunin): Generates unclosed buffer warning, need to investigate
+
     def test_readfilesfromzip_iterable_datapipe(self):
         temp_dir = self.temp_dir.name
         temp_zipfile_pathname = os.path.join(temp_dir, "test_zip.zip")
@@ -240,23 +258,41 @@ class TestIterableDataPipeBasic(TestCase):
             myzip.write(self.temp_files[1])
             myzip.write(self.temp_files[2])
         datapipe1 = dp.iter.FileLister(temp_dir, '*.zip')
-        datapipe2 = dp.iter.FileLoader(datapipe1)
-        datapipe3 = dp.iter.ZipArchiveReader(datapipe2)
-        # read extracted files before reaching the end of the zipfile
-        for rec, temp_file in itertools.zip_longest(datapipe3, self.temp_files):
+        datapipe2 = dp.iter.ZipArchiveReader(datapipe1)
+
+        # Test Case: read extracted files before reaching the end of the zipfile
+        for rec, temp_file in itertools.zip_longest(datapipe2, self.temp_files):
             self.assertTrue(rec is not None and temp_file is not None)
             self.assertEqual(os.path.basename(rec[0]), os.path.basename(temp_file))
             with open(temp_file, 'rb') as f:
                 self.assertEqual(rec[1].read(), f.read())
             rec[1].close()
-        # read extracted files before reaching the end of the zipile
-        data_refs = list(datapipe3)
+        # Test Case: read extracted files after reaching the end of the zipile
+        data_refs = list(datapipe2)
         self.assertEqual(len(data_refs), len(self.temp_files))
         for data_ref, temp_file in zip(data_refs, self.temp_files):
             self.assertEqual(os.path.basename(data_ref[0]), os.path.basename(temp_file))
             with open(temp_file, 'rb') as f:
                 self.assertEqual(data_ref[1].read(), f.read())
             data_ref[1].close()
+
+        # Test Case: reset the DataPipe after reading part of it
+        n_elements_before_reset = 1
+        res_before_reset, res_after_reset = reset_after_n_next_calls(datapipe2, n_elements_before_reset)
+        # Check the results accumulated before reset
+        self.assertEqual(len(res_before_reset), n_elements_before_reset)
+        for ele_before_reset, temp_file in zip(res_before_reset, self.temp_files):
+            self.assertEqual(os.path.basename(ele_before_reset[0]), os.path.basename(temp_file))
+            with open(temp_file, 'rb') as f:
+                self.assertEqual(ele_before_reset[1].read(), f.read())
+            ele_before_reset[1].close()
+        # Check the results accumulated after reset
+        self.assertEqual(len(res_after_reset), len(self.temp_files))
+        for ele_after_reset, temp_file in zip(res_after_reset, self.temp_files):
+            self.assertEqual(os.path.basename(ele_after_reset[0]), os.path.basename(temp_file))
+            with open(temp_file, 'rb') as f:
+                self.assertEqual(ele_after_reset[1].read(), f.read())
+            ele_after_reset[1].close()
 
     def test_routeddecoder_iterable_datapipe(self):
         temp_dir = self.temp_dir.name
@@ -363,6 +399,64 @@ class TestIterableDataPipeBasic(TestCase):
         n = n1.mux(n2)
         self.assertEqual(source_numbers, list(n))
 
+
+class TestDataFramesPipes(TestCase):
+    """
+        Most of test will fail if pandas instaled, but no dill available.
+        Need to rework them to avoid multiple skips.
+    """
+    def _get_datapipe(self, range=10, dataframe_size=7):
+        return NumbersDataset(range) \
+            .map(lambda i: (i, i % 3))
+
+    def _get_dataframes_pipe(self, range=10, dataframe_size=7):
+        return NumbersDataset(range) \
+            .map(lambda i: (i, i % 3)) \
+            ._to_dataframes_pipe(
+                columns=['i', 'j'],
+                dataframe_size=dataframe_size)
+
+    @skipIfNoDataFrames
+    @skipIfNoDill  # TODO(VitalyFedyunin): Decouple tests from dill by avoiding lambdas in map
+    def test_capture(self):
+        dp_numbers = self._get_datapipe().map(lambda x: (x[0], x[1], x[1] + 3 * x[0]))
+        df_numbers = self._get_dataframes_pipe()
+        df_numbers['k'] = df_numbers['j'] + df_numbers.i * 3
+        self.assertEqual(list(dp_numbers), list(df_numbers))
+
+    @skipIfNoDataFrames
+    @skipIfNoDill
+    def test_shuffle(self):
+        #  With non-zero (but extremely low) probability (when shuffle do nothing),
+        #  this test fails, so feel free to restart
+        df_numbers = self._get_dataframes_pipe(range=1000).shuffle()
+        dp_numbers = self._get_datapipe(range=1000)
+        df_result = [tuple(item) for item in df_numbers]
+        self.assertNotEqual(list(dp_numbers), df_result)
+        self.assertEqual(list(dp_numbers), sorted(df_result))
+
+    @skipIfNoDataFrames
+    @skipIfNoDill
+    def test_batch(self):
+        df_numbers = self._get_dataframes_pipe(range=100).batch(8)
+        df_numbers_list = list(df_numbers)
+        last_batch = df_numbers_list[-1]
+        self.assertEqual(4, len(last_batch))
+        unpacked_batch = [tuple(row) for row in last_batch]
+        self.assertEqual([(96, 0), (97, 1), (98, 2), (99, 0)], unpacked_batch)
+
+    @skipIfNoDataFrames
+    @skipIfNoDill
+    def test_unbatch(self):
+        df_numbers = self._get_dataframes_pipe(range=100).batch(8).batch(3)
+        dp_numbers = self._get_datapipe(range=100)
+        self.assertEqual(list(dp_numbers), list(df_numbers.unbatch(2)))
+
+    @skipIfNoDataFrames
+    @skipIfNoDill
+    def test_filter(self):
+        df_numbers = self._get_dataframes_pipe(range=10).filter(lambda x: x.i > 5)
+        self.assertEqual([(6, 0), (7, 1), (8, 2), (9, 0)], list(df_numbers))
 
 class FileLoggerSimpleHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
     def __init__(self, *args, logfile=None, **kwargs):
@@ -606,8 +700,7 @@ class TestFunctionalIterDataPipe(TestCase):
 
         # Test Case: making sure all child DataPipe shares the same reference
         dp1, dp2, dp3 = input_dp.fork(num_instances=3)
-        self.assertTrue(all(n1 is n2 for n1, n2 in zip(dp1, dp2)))
-        self.assertTrue(all(n1 is n3 for n1, n3 in zip(dp1, dp3)))
+        self.assertTrue(all(n1 is n2 and n1 is n3 for n1, n2, n3 in zip(dp1, dp2, dp3)))
 
         # Test Case: one child DataPipe yields all value at a time
         output1, output2, output3 = list(dp1), list(dp2), list(dp3)
@@ -680,7 +773,6 @@ class TestFunctionalIterDataPipe(TestCase):
         output1, output2 = list(dp1), list(dp2)
         self.assertEqual(list(range(10)), output1)
         self.assertEqual(list(range(10)), output2)
-        output1, output2 = list(dp1), list(dp2)
         with warnings.catch_warnings(record=True) as wa:
             self.assertEqual(list(range(10)), list(dp1))  # Resets even though dp3 has not been read
             self.assertEqual(len(wa), 1)
