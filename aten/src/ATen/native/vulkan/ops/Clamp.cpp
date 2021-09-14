@@ -277,7 +277,7 @@ Tensor hardswish(const Tensor& self) {
   return ops::activation(self, VK_KERNEL(hardswish));
 }
 
-Tensor& hardswish_(Tensor& self) {
+const Tensor& hardswish_(const Tensor& self) {
   return ops::activation_(self, VK_KERNEL(hardswish_));
 }
 

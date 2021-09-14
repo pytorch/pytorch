@@ -15,7 +15,7 @@ namespace metal {
 
 using MetalTensorImpl = at::MetalTensorImpl<MetalTensorImplStorage>;
 
-Tensor& hardswish_(Tensor& input) {
+const Tensor& hardswish_(const Tensor& input) {
   MPSImage* X = imageFromTensor(input);
   MetalCommandBuffer* commandBuffer = getCommandBuffer(input);
   IntArrayRef outputSize = input.sizes();
