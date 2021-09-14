@@ -382,18 +382,27 @@ class DeviceTypeTestBase(TestCase):
 
         # Handles tests that need parametrization (e.g. those that run across a set of
         # ops / modules using the @ops or @modules decorators).
-        if hasattr(test, 'parametrize_fn'):
-            for (test, test_name, param_kwargs) in test.parametrize_fn(test, generic_cls, cls):
-                full_name = '{}_{}'.format(name, test_name)
+
+        def default_parametrize_fn(test, generic_cls, cls):
+            # By default, parametrize only over device.
+            test_suffix = cls.device_type
+            yield (test, test_suffix, {})
+
+        parametrize_fn = test.parametrize_fn if hasattr(test, 'parametrize_fn') else default_parametrize_fn
+        for (test, test_suffix, param_kwargs) in parametrize_fn(test, generic_cls, cls):
+            if hasattr(test, 'handles_dtypes') and test.handles_dtypes:
+                full_name = '{}_{}'.format(name, test_suffix)
                 instantiate_test_helper(cls=cls, name=full_name, test=test, param_kwargs=param_kwargs)
-        else:
-            dtypes = cls._get_dtypes(test)
-            dtypes = tuple(dtypes) if dtypes is not None else (None,)
-            for dtype in dtypes:
-                param_kwargs = {}
-                _update_param_kwargs(param_kwargs, 'dtype', dtype)
-                full_name = '{}_{}{}'.format(name, cls.device_type, _dtype_test_suffix(dtype))
-                instantiate_test_helper(cls=cls, name=full_name, test=test, param_kwargs=param_kwargs)
+            else:
+                # The parametrize_fn doesn't handle dtypes internally; handle them here instead by generating
+                # a test per dtype.
+                dtypes = cls._get_dtypes(test)
+                dtypes = tuple(dtypes) if dtypes is not None else (None,)
+                for dtype in dtypes:
+                    all_param_kwargs = dict(param_kwargs)
+                    _update_param_kwargs(all_param_kwargs, 'dtype', dtype)
+                    full_name = '{}_{}{}'.format(name, test_suffix, _dtype_test_suffix(dtype))
+                    instantiate_test_helper(cls=cls, name=full_name, test=test, param_kwargs=all_param_kwargs)
 
     def run(self, result=None):
         super().run(result=result)
@@ -671,6 +680,7 @@ class OpDTypes(Enum):
 class ops(_TestParametrizer):
     def __init__(self, op_list, *, dtypes: OpDTypes = OpDTypes.basic,
                  allowed_dtypes: Optional[Sequence[torch.dtype]] = None):
+        super().__init__(handles_dtypes=True)
         self.op_list = op_list
         self.opinfo_dtypes = dtypes
         self.allowed_dtypes = set(allowed_dtypes) if allowed_dtypes is not None else None

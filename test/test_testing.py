@@ -1536,6 +1536,31 @@ class TestTestParametrization(TestCase):
 
 
 class TestTestParametrizationDeviceType(TestCase):
+    def test_unparametrized_names(self, device):
+        # This test exists to protect against regressions in device / dtype test naming
+        # due to parametrization logic.
+
+        device = self.device_type
+
+        class TestParametrized(TestCase):
+            def test_device_specific(self, device):
+                pass
+
+            @dtypes(torch.float32, torch.float64)
+            def test_device_dtype_specific(self, device, dtype):
+                pass
+
+        instantiate_device_type_tests(TestParametrized, locals(), only_for=device)
+
+        device_cls = locals()['TestParametrized{}'.format(device.upper())]
+        expected_test_names = [name.format(device_cls.__name__, device) for name in (
+            '{}.test_device_dtype_specific_{}_float32',
+            '{}.test_device_dtype_specific_{}_float64',
+            '{}.test_device_specific_{}')
+        ]
+        test_names = _get_test_names_for_test_class(device_cls)
+        self.assertEqual(expected_test_names, test_names)
+
     def test_default_names(self, device):
         device = self.device_type
 
@@ -1667,6 +1692,30 @@ class TestTestParametrizationDeviceType(TestCase):
         test_names = _get_test_names_for_test_class(device_cls)
         self.assertEqual(sorted(expected_test_names), sorted(test_names))
 
+    def test_dtypes_composition_names(self, device):
+        # Test checks that @parametrize and @dtypes compose as expected.
+
+        device = self.device_type
+
+        class TestParametrized(TestCase):
+            @dtypes(torch.float32, torch.float64)
+            @parametrize("x", range(3))
+            def test_parametrized(self, x, dtype):
+                pass
+
+        instantiate_device_type_tests(TestParametrized, locals(), only_for=device)
+
+        device_cls = locals()['TestParametrized{}'.format(device.upper())]
+        expected_test_names = [name.format(device_cls.__name__, device) for name in (
+            '{}.test_parametrized_x_0_{}_float32',
+            '{}.test_parametrized_x_0_{}_float64',
+            '{}.test_parametrized_x_1_{}_float32',
+            '{}.test_parametrized_x_1_{}_float64',
+            '{}.test_parametrized_x_2_{}_float32',
+            '{}.test_parametrized_x_2_{}_float64')
+        ]
+        test_names = _get_test_names_for_test_class(device_cls)
+        self.assertEqual(sorted(expected_test_names), sorted(test_names))
 
     @parametrize("x", [1, subtest(2, decorators=[unittest.expectedFailure]), 3])
     def test_subtest_expected_failure(self, device, x):

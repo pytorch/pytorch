@@ -49,6 +49,7 @@ class modules(_TestParametrizer):
     """ PROTOTYPE: Decorator for specifying a list of modules over which to run a test. """
 
     def __init__(self, module_info_list):
+        super().__init__(handles_dtypes=True)
         self.module_info_list = module_info_list
 
     def _parametrize_test(self, test, generic_cls, device_cls):
