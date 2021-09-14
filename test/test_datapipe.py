@@ -760,6 +760,12 @@ class TestFunctionalIterDataPipe(TestCase):
         self.assertEqual(list(range(5, 10)), output1)
         self.assertEqual(list(range(0, 5)), output2)
 
+        # Test Case: values of the same classification are lumped together, and unlimited buffer
+        dp1, dp2 = input_dp.demux(num_instances=2, classifier_fn=lambda x: 0 if x >= 5 else 1, buffer_size=-1)
+        output1, output2 = list(dp1), list(dp2)
+        self.assertEqual(list(range(5, 10)), output1)
+        self.assertEqual(list(range(0, 5)), output2)
+
         # Test Case: classifer returns a value outside of [0, num_instance - 1]
         dp = input_dp.demux(num_instances=1, classifier_fn=lambda x: x % 2)
         it = iter(dp[0])
