@@ -158,6 +158,15 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   python tools/amd_build/build_amd.py
   python setup.py install
 
+  # No particular reasons why this environment, just restrict lazy tensor to one to limit potential breakages.
+  if [[ "$BUILD_ENVIRONMENT" == *linux-xenial-cuda11.1* ]]; then
+    pushd
+    cd lazy_tensor_core/
+    ./scripts/apply_patches.sh
+    python setup.py install
+    popd
+  fi
+
   # remove sccache wrappers post-build; runtime compilation of MIOpen kernels does not yet fully support them
   sudo rm -f /opt/cache/bin/cc
   sudo rm -f /opt/cache/bin/c++
