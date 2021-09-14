@@ -362,7 +362,7 @@ class TRTInterpreter(torch.fx.Interpreter):
             for optimization_profile in self.optimization_profiles:
                 builder_config.add_optimization_profile(optimization_profile)
 
-        engine = self.builder.build_engine(self.network, builder_config)
+        engine = self.builder.build_serialized_network(self.network, builder_config)
         assert engine
         return engine, self._input_names, self._output_names
 
