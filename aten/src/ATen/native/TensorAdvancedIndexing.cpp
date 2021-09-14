@@ -101,7 +101,7 @@ TORCH_META_FUNC(gather)
     at::assert_no_overlap(result, self);
     at::assert_no_partial_overlap(result, index);
   }
- 
+
   at::native::gather_shape_check(self, wrapped_dim, index);
   if (index.numel() != 0) {
     TORCH_CHECK(
