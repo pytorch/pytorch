@@ -154,8 +154,8 @@ REGISTER_AVX2_DISPATCH(fft_fill_with_conjugate_symmetry_stub, &_fft_fill_with_co
 REGISTER_AVX512_DISPATCH(fft_fill_with_conjugate_symmetry_stub, &_fft_fill_with_conjugate_symmetry_cpu_)
 
 // _out variants can be shared between PocketFFT and MKL
-Tensor& _fft_r2c_mkl_out(const Tensor& self, IntArrayRef dim, int64_t normalization,
-                         bool onesided, Tensor& out) {
+const Tensor& _fft_r2c_mkl_out(const Tensor& self, IntArrayRef dim, int64_t normalization,
+                               bool onesided, const Tensor& out) {
   auto result = _fft_r2c_mkl(self, dim, normalization, /*onesided=*/true);
   if (onesided) {
     resize_output(out, result.sizes());
@@ -172,15 +172,15 @@ Tensor& _fft_r2c_mkl_out(const Tensor& self, IntArrayRef dim, int64_t normalizat
   return out;
 }
 
-Tensor& _fft_c2r_mkl_out(const Tensor& self, IntArrayRef dim, int64_t normalization,
-                         int64_t last_dim_size, Tensor& out) {
+const Tensor& _fft_c2r_mkl_out(const Tensor& self, IntArrayRef dim, int64_t normalization,
+                               int64_t last_dim_size, const Tensor& out) {
   auto result = _fft_c2r_mkl(self, dim, normalization, last_dim_size);
   resize_output(out, result.sizes());
   return out.copy_(result);
 }
 
-Tensor& _fft_c2c_mkl_out(const Tensor& self, IntArrayRef dim, int64_t normalization,
-                         bool forward, Tensor& out) {
+const Tensor& _fft_c2c_mkl_out(const Tensor& self, IntArrayRef dim, int64_t normalization,
+                         bool forward, const Tensor& out) {
   auto result = _fft_c2c_mkl(self, dim, normalization, forward);
   resize_output(out, result.sizes());
   return out.copy_(result);

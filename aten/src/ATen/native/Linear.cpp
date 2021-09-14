@@ -41,6 +41,24 @@ Tensor linear(const Tensor& input, const Tensor& weight, const c10::optional<Ten
   return output;
 }
 
+const Tensor& linear_out(const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias_opt, const Tensor& output) {
+  TORCH_CHECK(!input.is_mkldnn(), "linear doesn't support out for MKLDNN tensors");
+  // See [Note: hacky wrapper removal for optional tensor]
+  auto bias = bias_opt.has_value()
+              ? c10::MaybeOwned<Tensor>::borrowed(*bias_opt)
+              : c10::MaybeOwned<Tensor>::owned(c10::in_place);
+
+  if (input.dim() == 2 && bias->defined()) {
+    // Fused op is marginally faster.
+    return at::addmm_out(output, *bias, input, weight.t());
+  }
+  at::matmul_out(output, input, weight.t());
+  if (bias->defined()) {
+    output.add_(*bias);
+  }
+  return output;
+}
+
 // sumproduct_pair computes `(left*right).sum(sumdims)` by means of permutation and
 // batch matrix multiplication
 // its main purpose is to provide a pairwise reduction for einsum

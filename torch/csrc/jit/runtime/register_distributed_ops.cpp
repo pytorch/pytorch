@@ -29,11 +29,11 @@ static auto workerInfo =
 
 // prepare the rpc input arguments and call the C++ impls
 void prepare_and_call_rpc_op(
-    Stack* stack,
+    Stack& stack,
     int num_inputs,
     const std::string& rpc_op) {
   // Get inputs from the stack.
-  auto stackIter = stack->end() - num_inputs;
+  auto stackIter = stack.end() - num_inputs;
   auto& dstWorkerIValue = *stackIter++;
   auto& qualifiedNameIValue = *stackIter++;
   IValue emptyTuple(c10::ivalue::Tuple::create({}));
@@ -137,7 +137,7 @@ void prepare_and_call_rpc_op(
         rpcTimeout);
     // Push output to the stack.
     drop(stack, num_inputs);
-    stack->emplace_back(std::move(futureIValuePtr));
+    stack.emplace_back(std::move(futureIValuePtr));
   } else if (rpc_op == "rpc_sync") {
     // Send RPC request.
     auto futureIValuePtr = dist_rpc::rpcTorchscript(
@@ -154,7 +154,7 @@ void prepare_and_call_rpc_op(
       auto res = futureIValuePtr->value();
       // Push output to the stack.
       drop(stack, num_inputs);
-      stack->emplace_back(std::move(res));
+      stack.emplace_back(std::move(res));
     }
   } else if (rpc_op == "rpc_remote") {
     auto rrefPtr = dist_rpc::remoteTorchscript(
@@ -165,7 +165,7 @@ void prepare_and_call_rpc_op(
         rpcTimeout);
     // Push output to the stack.
     drop(stack, num_inputs);
-    stack->emplace_back(
+    stack.emplace_back(
         c10::static_intrusive_pointer_cast<c10::RRefInterface>(rrefPtr));
   } else {
     throw std::runtime_error(
@@ -178,7 +178,7 @@ RegisterOperators reg_rpc_ops(
          fmt::format(
              "aten::to_here(RRef(t) self, float timeout = {}) -> t(*)",
              torch::distributed::rpc::kDefaultRpcTimeoutSeconds),
-         [](Stack* stack) {
+         [](Stack& stack) {
            auto timeout = pop(stack).toDouble();
            auto rref = pop(stack).toRRef();
            IValue res;
@@ -195,7 +195,7 @@ RegisterOperators reg_rpc_ops(
          aliasAnalysisFromSchema()),
      Operator(
          "aten::local_value(RRef(t) self) -> t(*)",
-         [](Stack* stack) {
+         [](Stack& stack) {
            auto rref = pop(stack).toRRef();
            TORCH_CHECK(
                rref->isOwner(),
@@ -208,14 +208,14 @@ RegisterOperators reg_rpc_ops(
          aliasAnalysisFromSchema()),
      Operator(
          "aten::is_owner(RRef(t) self) -> bool",
-         [](Stack* stack) {
+         [](Stack& stack) {
            auto rref = pop(stack).toRRef();
            push(stack, rref->isOwner());
          },
          aliasAnalysisFromSchema()),
      Operator(
          "aten::owner(RRef(t) self) -> __torch__.torch.classes.dist_rpc.WorkerInfo",
-         [](Stack* stack) {
+         [](Stack& stack) {
            auto rref = pop(stack).toRRef();
            push(
                stack,
@@ -225,21 +225,21 @@ RegisterOperators reg_rpc_ops(
          aliasAnalysisFromSchema()),
      Operator(
          "aten::owner_name(RRef(t) self) -> str",
-         [](Stack* stack) {
+         [](Stack& stack) {
            auto rref = pop(stack).toRRef();
            push(stack, rref->ownerName());
          },
          aliasAnalysisFromSchema()),
      Operator(
          "aten::confirmed_by_owner(RRef(t) self) -> bool",
-         [](Stack* stack) {
+         [](Stack& stack) {
            auto rref = pop(stack).toRRef();
            push(stack, rref->confirmedByOwner());
          },
          aliasAnalysisFromSchema()),
      Operator(
          "aten::dist_backward(int context_id, Tensor[] roots, bool retain_graph=False) -> ()",
-         [](Stack* stack) {
+         [](Stack& stack) {
            bool retain_graph = pop(stack).toBool();
            auto roots_list = pop(stack).toTensorList();
            int64_t context_id = pop(stack).toInt();
@@ -252,7 +252,7 @@ RegisterOperators reg_rpc_ops(
          prim::rpc_sync,
          [](const Node* node) -> Operation {
            int num_inputs = node->inputs().size();
-           return [num_inputs](Stack* stack) {
+           return [num_inputs](Stack& stack) {
              prepare_and_call_rpc_op(stack, num_inputs, "rpc_sync");
            };
          },
@@ -261,7 +261,7 @@ RegisterOperators reg_rpc_ops(
          prim::rpc_remote,
          [](const Node* node) -> Operation {
            int num_inputs = node->inputs().size();
-           return [num_inputs](Stack* stack) {
+           return [num_inputs](Stack& stack) {
              prepare_and_call_rpc_op(stack, num_inputs, "rpc_remote");
            };
          },
@@ -270,7 +270,7 @@ RegisterOperators reg_rpc_ops(
          prim::rpc_async,
          [](const Node* node) -> Operation {
            int num_inputs = node->inputs().size();
-           return [num_inputs](Stack* stack) {
+           return [num_inputs](Stack& stack) {
              prepare_and_call_rpc_op(stack, num_inputs, "rpc_async");
            };
          },

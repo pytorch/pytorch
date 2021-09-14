@@ -1408,6 +1408,19 @@ class DistributedDataParallel(Module, Joinable):
                 "Communication hook: return annotation should be torch.futures.Future[torch.Tensor].",
             )
 
+        if (
+            hook.__name__ in ["bf16_compress_hook", "bf16_compress_wrapper_hook"]
+            and
+            (
+                torch.version.cuda is None
+                or int(torch.version.cuda.split('.')[0]) < 11
+                or not dist.is_available()
+                or not dist.is_nccl_available()
+                or torch.cuda.nccl.version() < (2, 9, 7)
+            )
+        ):
+            self._log_and_throw(TypeError, "BF16 all reduce communication hook required CUDA 11+ and NCCL 2.9.7+.")
+
     @property
     def _distributed_rank(self):
         return dist.get_rank(self.process_group)

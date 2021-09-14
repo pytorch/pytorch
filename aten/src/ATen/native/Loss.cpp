@@ -30,13 +30,32 @@ DEFINE_DISPATCH(mse_stub);
 DEFINE_DISPATCH(mse_backward_stub);
 
 Tensor cosine_embedding_loss(const Tensor& input1, const Tensor& input2, const Tensor& target, double margin, int64_t reduction) {
+  auto targ_dim = target.dim();
   TORCH_CHECK(
-      target.dim() == 1,
-      "1D target tensor expected, multi-target not supported");
+      targ_dim == 1 || targ_dim == 0,
+      "0D or 1D target tensor expected, multi-target not supported");
 
-  auto prod_sum = (input1 * input2).sum(1);
-  auto mag_square1 = (input1 * input1).sum(1) + EPSILON;
-  auto mag_square2 = (input2 * input2).sum(1) + EPSILON;
+  if (targ_dim == 1) {
+    TORCH_CHECK(
+        input1.dim() == 2,
+        "1D target tensor expects 2D input tensors, but found inputs with sizes ",
+        input1.sizes(),
+        " and ",
+        input2.sizes(),
+        ".");
+  } else {
+    TORCH_CHECK(
+        input1.dim() == 1,
+        "0D target tensor expects 1D input tensors, but found inputs with sizes ",
+        input1.sizes(),
+        " and ",
+        input2.sizes(),
+        ".");
+  }
+
+  auto prod_sum = (input1 * input2).sum(targ_dim);
+  auto mag_square1 = (input1 * input1).sum(targ_dim) + EPSILON;
+  auto mag_square2 = (input2 * input2).sum(targ_dim) + EPSILON;
   auto denom = (mag_square1 * mag_square2).sqrt_();
   auto cos = prod_sum / denom;
 
