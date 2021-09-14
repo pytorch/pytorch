@@ -65,6 +65,13 @@ except ImportError:
     HAS_DILL = False
 skipIfNoDill = skipIf(not HAS_DILL, "no dill")
 
+try:
+    import pandas  # type: ignore[import] # noqa: F401 F403
+    HAS_PANDAS = True
+except ImportError:
+    HAS_PANDAS = False
+skipIfNoDataFrames = skipIf(not HAS_PANDAS, "no dataframes (pandas)")
+
 T_co = TypeVar("T_co", covariant=True)
 
 
@@ -392,6 +399,64 @@ class TestIterableDataPipeBasic(TestCase):
         n = n1.mux(n2)
         self.assertEqual(source_numbers, list(n))
 
+
+class TestDataFramesPipes(TestCase):
+    """
+        Most of test will fail if pandas instaled, but no dill available.
+        Need to rework them to avoid multiple skips.
+    """
+    def _get_datapipe(self, range=10, dataframe_size=7):
+        return NumbersDataset(range) \
+            .map(lambda i: (i, i % 3))
+
+    def _get_dataframes_pipe(self, range=10, dataframe_size=7):
+        return NumbersDataset(range) \
+            .map(lambda i: (i, i % 3)) \
+            ._to_dataframes_pipe(
+                columns=['i', 'j'],
+                dataframe_size=dataframe_size)
+
+    @skipIfNoDataFrames
+    @skipIfNoDill  # TODO(VitalyFedyunin): Decouple tests from dill by avoiding lambdas in map
+    def test_capture(self):
+        dp_numbers = self._get_datapipe().map(lambda x: (x[0], x[1], x[1] + 3 * x[0]))
+        df_numbers = self._get_dataframes_pipe()
+        df_numbers['k'] = df_numbers['j'] + df_numbers.i * 3
+        self.assertEqual(list(dp_numbers), list(df_numbers))
+
+    @skipIfNoDataFrames
+    @skipIfNoDill
+    def test_shuffle(self):
+        #  With non-zero (but extremely low) probability (when shuffle do nothing),
+        #  this test fails, so feel free to restart
+        df_numbers = self._get_dataframes_pipe(range=1000).shuffle()
+        dp_numbers = self._get_datapipe(range=1000)
+        df_result = [tuple(item) for item in df_numbers]
+        self.assertNotEqual(list(dp_numbers), df_result)
+        self.assertEqual(list(dp_numbers), sorted(df_result))
+
+    @skipIfNoDataFrames
+    @skipIfNoDill
+    def test_batch(self):
+        df_numbers = self._get_dataframes_pipe(range=100).batch(8)
+        df_numbers_list = list(df_numbers)
+        last_batch = df_numbers_list[-1]
+        self.assertEqual(4, len(last_batch))
+        unpacked_batch = [tuple(row) for row in last_batch]
+        self.assertEqual([(96, 0), (97, 1), (98, 2), (99, 0)], unpacked_batch)
+
+    @skipIfNoDataFrames
+    @skipIfNoDill
+    def test_unbatch(self):
+        df_numbers = self._get_dataframes_pipe(range=100).batch(8).batch(3)
+        dp_numbers = self._get_datapipe(range=100)
+        self.assertEqual(list(dp_numbers), list(df_numbers.unbatch(2)))
+
+    @skipIfNoDataFrames
+    @skipIfNoDill
+    def test_filter(self):
+        df_numbers = self._get_dataframes_pipe(range=10).filter(lambda x: x.i > 5)
+        self.assertEqual([(6, 0), (7, 1), (8, 2), (9, 0)], list(df_numbers))
 
 class FileLoggerSimpleHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
     def __init__(self, *args, logfile=None, **kwargs):
