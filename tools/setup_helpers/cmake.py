@@ -120,13 +120,13 @@ class CMake:
             return cmake_command
         cmake3 = which('cmake3')
         cmake = which('cmake')
-        if cmake3 is not None and CMake._get_version(cmake3) >= distutils.version.LooseVersion("3.5.0"):
+        if cmake3 is not None and CMake._get_version(cmake3) >= distutils.version.LooseVersion("3.10.0"):
             cmake_command = 'cmake3'
             return cmake_command
-        elif cmake is not None and CMake._get_version(cmake) >= distutils.version.LooseVersion("3.5.0"):
+        elif cmake is not None and CMake._get_version(cmake) >= distutils.version.LooseVersion("3.10.0"):
             return cmake_command
         else:
-            raise RuntimeError('no cmake or cmake3 with version >= 3.5.0 found')
+            raise RuntimeError('no cmake or cmake3 with version >= 3.10.0 found')
 
     @staticmethod
     def _get_version(cmd: str) -> Any:
