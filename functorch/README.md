@@ -174,7 +174,7 @@ When composed with `vmap`, `grad` can be used to compute per-sample-gradients:
 >>> outputs, vjp_fn = vjp(func, inputs); vjps = vjp_fn(*cotangents)
 ```
 The `vjp` transform applies `func` to `inputs` and returns a new function that
-computes vjps given some `contangents` Tensors.
+computes vjps given some `cotangents` Tensors.
 
 ```py
 >>> from functorch import jacrev
