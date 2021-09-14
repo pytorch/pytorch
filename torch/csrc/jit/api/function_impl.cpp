@@ -11,8 +11,8 @@ namespace torch {
 namespace jit {
 namespace {
 c10::FunctionSchema defaultSchemaFor(const Function& function) {
-  c10::ArgumentVector args;
-  c10::ArgumentVector returns;
+  std::vector<c10::Argument> args;
+  std::vector<c10::Argument> returns;
   Graph& g = *function.graph();
   size_t num_inputs = function.num_inputs();
   for (const auto i : c10::irange(num_inputs)) {
