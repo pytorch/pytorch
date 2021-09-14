@@ -45,41 +45,6 @@ Val* newScalar(ValType vtype, DataType dtype) {
       " in newScalar.");
 }
 
-// Take the offset of stop from extent if possible.
-c10::optional<int64_t> getStopOffset(IterDomain* id) {
-  TORCH_INTERNAL_ASSERT(id->stop()->isA<Int>());
-
-  auto stop_val = id->stop()->as<Int>();
-  auto stop_def = stop_val->definition();
-
-  if (stop_def == nullptr) {
-    TORCH_INTERNAL_ASSERT(
-        stop_val->sameAs(id->extent()),
-        "Invalid stop: ",
-        stop_val,
-        ", axis: ",
-        id);
-    return c10::optional<int64_t>(0);
-  }
-
-  if (stop_val->sameAs(id->extent())) {
-    return c10::optional<int64_t>(0);
-  }
-
-  // Check if the definition looks like: Extent - N. Return N if yes.
-  if (auto stop_def_binop = dynamic_cast<BinaryOp*>(stop_def)) {
-    if (stop_def_binop->getBinaryOpType() == BinaryOpType::Sub) {
-      auto lhs = stop_def_binop->inputs()[0];
-      auto rhs = stop_def_binop->inputs()[1];
-      if (lhs->sameAs(id->extent()) && rhs->isAnInt()) {
-        return rhs->getInt();
-      }
-    }
-  }
-
-  return c10::optional<int64_t>();
-}
-
 TensorView* newOutputTV(const std::vector<Val*>& vals, DataType dtype) {
   std::vector<TensorView*> tvs;
   for (auto val : vals)
