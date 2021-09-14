@@ -1,10 +1,15 @@
 #pragma once
 
 #include <torch/csrc/autograd/profiler_legacy.h>
+#include <vector>
 
 #ifdef USE_KINETO
 // skip Kineto dependency on mobile
-#ifdef C10_MOBILE
+// unless explicitly asked for.
+// When is it explicitly asked for?
+// KinetoEdgeCPUProfiler uses KinetoProfiler for cpu
+// event profiling. This has dependency on cpu only libkineto
+#if defined(C10_MOBILE) && !defined(EDGE_PROFILER_USE_KINETO)
 #undef USE_KINETO
 #endif
 #endif
@@ -38,10 +43,12 @@ struct KinetoObserverContext : public at::ObserverContext {
   uint64_t fwdThreadId;
   uint8_t recFunScope;
   c10::optional<std::vector<std::string>> stack;
+  c10::optional<std::vector<std::string>> module_hierarchy;
   // Extra arguments for computing op flops
   c10::optional<std::unordered_map<std::string, c10::IValue>> extraArgs;
   CUDAEventStub cuda_event_start_ = nullptr;
   CUDAEventStub cuda_event_end_ = nullptr;
+  int64_t debug_handle;
 };
 
 struct TORCH_API KinetoEvent {
@@ -147,6 +154,28 @@ struct TORCH_API KinetoEvent {
     return *this;
   }
 
+  bool hasModuleHierarchy() const {
+    return module_hierarchy_ != c10::nullopt;
+  }
+
+  const std::vector<std::string>& moduleHierarchy() const {
+    return *module_hierarchy_;
+  }
+
+  KinetoEvent& moduleHierarchy(const std::vector<std::string>& module_hierarchy) {
+    module_hierarchy_ = module_hierarchy;
+    return *this;
+  }
+
+  KinetoEvent& debugHandle(int64_t debug_handle) {
+    debug_handle_ = debug_handle;
+    return *this;
+  }
+
+  int64_t debugHandle() const {
+    return debug_handle_;
+  }
+
   std::string name() const {
     return name_;
   }
@@ -248,6 +277,7 @@ struct TORCH_API KinetoEvent {
   uint8_t activity_type_ = 0;
   c10::optional<std::vector<std::vector<int64_t>>> shapes_;
   c10::optional<std::vector<std::string>> stack_;
+  c10::optional<std::vector<std::string>> module_hierarchy_;
   c10::optional<std::vector<std::string>> dtypes_;
   uint64_t flops_ = 0;
 
@@ -261,6 +291,7 @@ struct TORCH_API KinetoEvent {
   int64_t device_resource_id_ = 0;
   int64_t nbytes_ = 0;
   bool is_async_{false};
+  int64_t debug_handle_{-1};
 
   CUDAEventStub cuda_event_start_ = nullptr;
   CUDAEventStub cuda_event_end_ = nullptr;
@@ -304,7 +335,30 @@ struct TORCH_API ProfilerResult {
 
 TORCH_API void enableProfiler(
     const ProfilerConfig& config,
-    const std::set<ActivityType>& activities);
+    const std::set<ActivityType>& activities,
+    const std::unordered_set<at::RecordScope>& scopes = {});
+
+/*
+ * Same as enableProfiler but with callback to do post-processing of
+ * KinetoEvents.
+ * enableProfilerWithEventPostProcess enables profiler to capture
+ * specified activities, with specified RecordFunction scope, if any.
+ * Additionally, it takes a functor that does in-place post processing of
+ * events, e.g. populate stack trace or module hierarchy information lazily
+ * using debug_handle.
+ * Example usage is with lite interpreter that has recording scope of LITE_INTERPRETER.
+ * In this case lite interpreter runtime, records debug handles in RecordFunction, along
+ * with other information. Debug handles are eventually passed down to KinetoEvent and
+ * recorded as part of the event. KinetoEdgeCPUProfiler,
+ * in torch/csrc/jit/mobile/profiler_edge.cpp, enables profiler using post-processing
+ * callback, via enableProfilerWithEventPostProcess, that takes these debug handles
+ * and generates stack trace and module hierarchy information, once profiling is done.
+ */
+TORCH_API void enableProfilerWithEventPostProcess(
+    const ProfilerConfig& config,
+    const std::set<ActivityType>& activities,
+    std::function<void(std::vector<KinetoEvent>&)>&& cb,
+    const std::unordered_set<at::RecordScope>& scopes = {});
 
 TORCH_API std::unique_ptr<ProfilerResult> disableProfiler();
 

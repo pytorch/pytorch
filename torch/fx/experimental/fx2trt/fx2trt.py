@@ -1,16 +1,15 @@
-import copy
 import warnings
-from typing import List, NamedTuple, Iterable, Any, Optional, Tuple
+from typing import List, NamedTuple, Iterable, Any, Optional, Tuple, Sequence
 
+import tensorrt as trt
 import torch
 import torch.fx
-import tensorrt as trt
-from torch.fx.experimental.normalize import NormalizeArgs
+from torch.fx.node import _get_qualified_name
 
 
 # Borrowed from torch2trt
 def torch_dtype_to_trt(dtype):
-    if trt.__version__ >= '7.0' and dtype == torch.bool:
+    if trt.__version__ >= "7.0" and dtype == torch.bool:
         return trt.bool
     elif dtype == torch.int8:
         return trt.int8
@@ -27,7 +26,7 @@ def torch_dtype_to_trt(dtype):
 def torch_dtype_from_trt(dtype):
     if dtype == trt.int8:
         return torch.int8
-    elif trt.__version__ >= '7.0' and dtype == trt.bool:
+    elif trt.__version__ >= "7.0" and dtype == trt.bool:
         return torch.bool
     elif dtype == trt.int32:
         return torch.int32
@@ -40,7 +39,9 @@ def torch_dtype_from_trt(dtype):
 
 
 class TRTModule(torch.nn.Module):
-    def __init__(self, engine=None, input_names=None, output_names=None, fp16_output=False):
+    def __init__(
+        self, engine=None, input_names=None, output_names=None, fp16_output=False
+    ):
         super(TRTModule, self).__init__()
         self._register_state_dict_hook(TRTModule._on_state_dict)
         self.engine = engine
@@ -51,6 +52,12 @@ class TRTModule(torch.nn.Module):
 
         # Indicate output is in fp16
         self.fp16_output = fp16_output
+
+        # Indices of outputs into the CUDA engine bindings, in the order as they are
+        # in the fx graph's `output` node.
+        self.output_indices_in_order: Sequence[int] = [
+            self.engine.get_binding_index(name) for name in self.output_names
+        ]
 
     def _on_state_dict(self, state_dict, prefix, local_metadata):
         state_dict[prefix + "engine"] = bytearray(self.engine.serialize())
@@ -78,12 +85,15 @@ class TRTModule(torch.nn.Module):
         self.output_names = state_dict[prefix + "output_names"]
 
     def forward(self, *inputs):
-        assert len(inputs) == len(self.input_names), f"Wrong number of inputs, expect {len(self.input_names)} get {len(inputs)}."
+        assert len(inputs) == len(
+            self.input_names
+        ), f"Wrong number of inputs, expect {len(self.input_names)} get {len(inputs)}."
         batch_size = inputs[0].shape[0]
         contiguous_inputs: List[torch.Tensor] = [i.contiguous() for i in inputs]
         bindings: List[Any] = [None] * (len(self.input_names) + len(self.output_names))
 
         for i, input_name in enumerate(self.input_names):
+            assert inputs[i].is_cuda, f"{i}th input is not on cuda device."
             idx = self.engine.get_binding_index(input_name)
             bindings[idx] = contiguous_inputs[i].data_ptr()
 
@@ -92,7 +102,7 @@ class TRTModule(torch.nn.Module):
 
         # create output tensors
         outputs: List[torch.Tensor] = []
-        for idx in range(len(inputs), len(inputs) + len(self.output_names)):
+        for idx in self.output_indices_in_order:
             dtype = torch_dtype_from_trt(self.engine.get_binding_dtype(idx))
 
             if self.engine.has_implicit_batch_dimension:
@@ -119,8 +129,10 @@ class TRTModule(torch.nn.Module):
         return tuple(outputs)
 
     def enable_profiling(self):
-        raise RuntimeError("Profiling is not supported right now because it requires calling"
-                           " execute() instead of execute_async().")
+        raise RuntimeError(
+            "Profiling is not supported right now because it requires calling"
+            " execute() instead of execute_async()."
+        )
         if not self.context.profiler:
             self.context.profiler = trt.Profiler()
 
@@ -132,6 +144,7 @@ def tensorrt_converter(key):
     def register_converter(converter):
         CONVERTERS[key] = converter
         return converter
+
     return register_converter
 
 
@@ -157,11 +170,12 @@ class InputTensorSpec(NamedTuple):
     has_batch_dim: Whether the shape includes batch dimension. Batch dimension has to be provided
         if the engine want to run with dynamic shape.
     """
-    shape : torch.Size
-    dtype : torch.dtype
-    device : torch.device = torch.device("cpu")
-    shape_ranges : List[Tuple[Tuple[int, ...], Tuple[int, ...], Tuple[int, ...]]] = []
-    has_batch_dim : bool = True
+
+    shape: torch.Size
+    dtype: torch.dtype
+    device: torch.device = torch.device("cpu")
+    shape_ranges: List[Tuple[Tuple[int, ...], Tuple[int, ...], Tuple[int, ...]]] = []
+    has_batch_dim: bool = True
 
     @classmethod
     def from_tensor(cls, tensor: torch.Tensor):
@@ -182,26 +196,56 @@ def get_dynamic_dims(shape):
     return dynamic_dims
 
 
-class BaseTRTInterpreter(torch.fx.Interpreter):
+def create_inputs_from_specs(input_specs):
+    inputs = []
+
+    for shape, dtype, device, shape_ranges, has_batch_dim in input_specs:
+        if len(get_dynamic_dims(shape)):
+            shape = shape_ranges[0][1]
+        elif not has_batch_dim:
+            shape = (1,) + tuple(shape)
+
+        inputs.append(
+            torch.randn(shape).to(dtype=dtype, device=device)
+        )
+
+    return inputs
+
+
+class TRTInterpreter(torch.fx.Interpreter):
     def __init__(
         self,
-        module : torch.fx.GraphModule,
-        input_specs : List[InputTensorSpec],
-        explicit_batch_dimension : bool = False,
-        logger_level=trt.Logger.WARNING
+        module: torch.fx.GraphModule,
+        input_specs: List[InputTensorSpec],
+        explicit_batch_dimension: bool = False,
+        explicit_precision: bool = False,
+        logger_level=trt.Logger.WARNING,
     ):
         super().__init__(module)
 
         self.logger = trt.Logger(logger_level)
         self.builder = trt.Builder(self.logger)
 
+        flag = 0
         if explicit_batch_dimension:
-            EXPLICIT_BATCH = 1 << (int)(trt.NetworkDefinitionCreationFlag.EXPLICIT_BATCH)
-            self.network = self.builder.create_network(EXPLICIT_BATCH)
-        else:
-            self.network = self.builder.create_network()
+            EXPLICIT_BATCH = 1 << (int)(
+                trt.NetworkDefinitionCreationFlag.EXPLICIT_BATCH
+            )
+            flag |= EXPLICIT_BATCH
 
-        self.optimization_profiles : Optional[List] = None
+        if explicit_precision:
+            EXPLICIT_PRECISION = 1 << (int)(
+                trt.NetworkDefinitionCreationFlag.EXPLICIT_PRECISION
+            )
+            flag |= EXPLICIT_PRECISION
+        self.network = self.builder.create_network(flag)
+
+        missing_ops = self.validate_conversion()
+        if missing_ops:
+            warnings.warn("Interpretation will fail due to missing operations \n"
+                          + "\n".join(f"{i}" for i in missing_ops))
+
+        self.optimization_profiles: Optional[List] = None
         self.input_specs = input_specs
         self.input_specs_iter = 0
         self.validate_input_specs()
@@ -212,35 +256,75 @@ class BaseTRTInterpreter(torch.fx.Interpreter):
     def validate_input_specs(self):
         for shape, dtpe, _, shape_ranges, has_batch_dim in self.input_specs:
             if not self.network.has_implicit_batch_dimension:
-                assert has_batch_dim, "It's required to specify batch dimension when it's explicit in TensorRT network."
+                assert (
+                    has_batch_dim
+                ), "It's required to specify batch dimension when it's explicit in TensorRT network."
 
             dynamic_dims = get_dynamic_dims(shape)
             if len(dynamic_dims):
-                assert not self.network.has_implicit_batch_dimension, "Can't have dynamic dim when " \
+                assert not self.network.has_implicit_batch_dimension, (
+                    "Can't have dynamic dim when "
                     f"batch dim is implicit, got {shape}."
-                assert len(shape_ranges), "shape_ranges must be provided when shape has dynamic dim."
+                )
+                assert len(
+                    shape_ranges
+                ), "shape_ranges must be provided when shape has dynamic dim."
 
                 if self.optimization_profiles:
-                    assert len(shape_ranges) == len(self.optimization_profiles), "Number of optimization " \
-                        f"profiles {len(self.optimization_profiles)} doesn't match with the number of shape_range" \
+                    assert len(shape_ranges) == len(self.optimization_profiles), (
+                        "Number of optimization "
+                        f"profiles {len(self.optimization_profiles)} doesn't match with the number of shape_range"
                         f" {len(shape_ranges)} provided."
+                    )
                 else:
-                    self.optimization_profiles = [self.builder.create_optimization_profile() for _ in range(len(shape_ranges))]
+                    self.optimization_profiles = [
+                        self.builder.create_optimization_profile()
+                        for _ in range(len(shape_ranges))
+                    ]
 
                 for shape_range in shape_ranges:
-                    assert len(shape_range) == 3, f"Expect three elements in shape_range, got {len(shape_range)}"
-                    assert all(len(s) == len(shape) for s in shape_range), "Expect elements in shape_range" \
+                    assert (
+                        len(shape_range) == 3
+                    ), f"Expect three elements in shape_range, got {len(shape_range)}"
+                    assert all(len(s) == len(shape) for s in shape_range), (
+                        "Expect elements in shape_range"
                         f" {shape_range} have the same number of dimension as the provided shape {len(shape)}"
+                    )
 
                     for i in range(len(shape)):
                         if i in dynamic_dims:
-                            assert all(shape_range[j][i] <= shape_range[j + 1][i] for j in range(2)), "Expect dynamic dim" \
+                            assert all(
+                                shape_range[j][i] <= shape_range[j + 1][i]
+                                for j in range(2)
+                            ), (
+                                "Expect dynamic dim"
                                 f" {i} to have incremental value for shapes in shape_range {shape_range}."
+                            )
                         else:
-                            assert all(s[i] == shape[i] for s in shape_range), f"Expect non dynamic dim {i} to be the same" \
+                            assert all(s[i] == shape[i] for s in shape_range), (
+                                f"Expect non dynamic dim {i} to be the same"
                                 f" for all shapes in shape_range {shape_range}."
+                            )
             else:
-                assert len(shape_ranges) == 0, "shape_ranges are provided for input that doesn't have dynamic dim."
+                assert (
+                    len(shape_ranges) == 0
+                ), "shape_ranges are provided for input that doesn't have dynamic dim."
+
+    def validate_conversion(self):
+        missing_converter = set()
+
+        for node in self.module.graph.nodes:
+            if node.op == "call_function" and not CONVERTERS.get(node.target):
+                missing_converter.add(f"{node.op} {_get_qualified_name(node.target)}")
+            elif node.op == "call_method" and not CONVERTERS.get(node.target):
+                missing_converter.add(f"{node.op} torch.Tensor.{node.target}")
+            elif node.op == "call_module":
+                submod = self.fetch_attr(node.target)
+                submod_type = getattr(submod, "_base_class_origin", type(submod))
+                if not CONVERTERS.get(submod_type):
+                    missing_converter.add(f"{node.op} {torch.typename(submod_type)}")
+
+        return missing_converter
 
     def run(
         self,
@@ -248,7 +332,7 @@ class BaseTRTInterpreter(torch.fx.Interpreter):
         max_workspace_size=1 << 25,
         fp16_mode=True,
         int8_mode=False,
-        strict_type_constraints=True
+        strict_type_constraints=True,
     ):
         # TODO hack, should check contents of args and remove fp16_mode probably
         self.fp16_mode = fp16_mode
@@ -279,7 +363,7 @@ class BaseTRTInterpreter(torch.fx.Interpreter):
                 builder_config.add_optimization_profile(optimization_profile)
 
         engine = self.builder.build_engine(self.network, builder_config)
-        assert(engine)
+        assert engine
         return engine, self._input_names, self._output_names
 
     def run_node(self, n):
@@ -288,7 +372,9 @@ class BaseTRTInterpreter(torch.fx.Interpreter):
 
     def placeholder(self, target, args, kwargs):
         self._input_names.append(target)
-        shape, dtype, _, shape_ranges, has_batch_dim = self.input_specs[self.input_specs_iter]
+        shape, dtype, _, shape_ranges, has_batch_dim = self.input_specs[
+            self.input_specs_iter
+        ]
         self.input_specs_iter += 1
 
         if self.network.has_implicit_batch_dimension:
@@ -299,15 +385,18 @@ class BaseTRTInterpreter(torch.fx.Interpreter):
                 assert self.optimization_profiles
                 self.optimization_profiles[i].set_shape(target, *shape_range)
 
-        return self.network.add_input(name=target, shape=tuple(shape), dtype=torch_dtype_to_trt(dtype))
+        return self.network.add_input(
+            name=target, shape=tuple(shape), dtype=torch_dtype_to_trt(dtype)
+        )
 
     def call_module(self, target, args, kwargs):
         assert isinstance(target, str)
         submod = self.fetch_attr(target)
-        converter = CONVERTERS.get(type(submod))
+        submod_type = getattr(submod, "_base_class_origin", type(submod))
+        converter = CONVERTERS.get(submod_type)
 
         if not converter:
-            raise RuntimeError(f'Conversion of module of type {type(submod)} not currently supported!')
+            raise RuntimeError(f'Conversion of module of type {submod_type} not currently supported!')
 
         return converter(self.network, submod, args, kwargs, self._cur_node_name)
 
@@ -315,7 +404,9 @@ class BaseTRTInterpreter(torch.fx.Interpreter):
         converter = CONVERTERS.get(target)
 
         if not converter:
-            raise RuntimeError(f'Conversion of function {torch.typename(target)} not currently supported!')
+            raise RuntimeError(
+                f"Conversion of function {torch.typename(target)} not currently supported!"
+            )
 
         return converter(self.network, target, args, kwargs, self._cur_node_name)
 
@@ -324,7 +415,9 @@ class BaseTRTInterpreter(torch.fx.Interpreter):
         converter = CONVERTERS.get(target)
 
         if not converter:
-            raise RuntimeError(f'Conversion of method {target} not currently supported!')
+            raise RuntimeError(
+                f"Conversion of method {target} not currently supported!"
+            )
 
         return converter(self.network, target, args, kwargs, self._cur_node_name)
 
@@ -333,29 +426,12 @@ class BaseTRTInterpreter(torch.fx.Interpreter):
         outputs = args[0] if isinstance(args[0], tuple) else (args[0],)
 
         if not all(isinstance(output, trt.tensorrt.ITensor) for output in outputs):
-            raise RuntimeError('TensorRT requires all outputs to be Tensor!')
+            raise RuntimeError("TensorRT requires all outputs to be Tensor!")
 
         for i, output in enumerate(outputs):
-            name = f'output{i}'
+            name = f"output{i}"
             output.name = name
             self.network.mark_output(output)
-            if self.fp16_mode:
+            if self.fp16_mode and output.dtype == trt.float32:
                 output.dtype = trt.float16
-            else:
-                output.dtype = trt.float32
             self._output_names.append(name)
-
-
-class TRTInterpreter(BaseTRTInterpreter):
-    """
-    Use this for general case where there're PyTorch vanilla ops in the FX mdoule.
-    """
-    def __init__(self, module : torch.nn.Module, input_specs : List[InputTensorSpec], logger_level=trt.Logger.WARNING):
-        # Preprocess the model
-        if not isinstance(module, torch.fx.GraphModule):
-            module = torch.fx.symbolic_trace(module)
-        else:
-            module = copy.deepcopy(module)
-        module = module.cpu().float()
-        module = NormalizeArgs(module).transform()
-        super().__init__(module, input_specs, logger_level=logger_level)

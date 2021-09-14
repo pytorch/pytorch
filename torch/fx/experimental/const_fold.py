@@ -1,9 +1,9 @@
 import operator
-from typing import Dict, Set, List, Optional
+import re
+from typing import Dict, Set, List, Optional, Union
 
 import torch.fx
 from torch.fx.passes.split_module import split_module
-import re
 
 
 def _make_tuple(x):
@@ -67,7 +67,7 @@ class FoldedGraphModule(torch.fx.GraphModule):
 
 
 def split_const_subgraphs(
-    module: torch.nn.Module,
+    module: Union[torch.nn.Module, torch.fx.GraphModule]
 ) -> FoldedGraphModule:
     """
     Looks through `module` for any nodes that have all constant attribute inputs
@@ -76,7 +76,10 @@ def split_const_subgraphs(
     attributes on the module prior to running the non-constant portion of the
     graph.
     """
-    mod_traced = torch.fx.symbolic_trace(module)
+    if not isinstance(module, torch.fx.GraphModule):
+        mod_traced = torch.fx.symbolic_trace(module)
+    else:
+        mod_traced = module
 
     # Build up a list of const_nodes, defined as nodes that are themselves
     # get_attrs, or have all get_attr or other constant node inputs.
@@ -105,6 +108,13 @@ def split_const_subgraphs(
         return 0 if node in const_nodes else 1
 
     split = split_module(mod_traced, module, mod_partition)
+
+    # The module that a call_module node refers to gets copied to submodules during split.
+    # The path to the module also gets inlined, i.e. mod.a.b -> mod_a_b. Here we need to
+    # attach inlined modules to `mod_traced` as it's the owning module now.
+    for node in split.submod_1.graph.nodes:
+        if node.op == "call_module":
+            setattr(mod_traced, node.target, getattr(split.submod_1, node.target))
 
     # Gather all names that are output from the const folding subgraph, which we
     # will need to set dummy params on the module.
@@ -191,11 +201,12 @@ def split_const_subgraphs(
     # Now we have a mapping from const output names to the index they are passed
     # into submod_1, so swap in getattrs for placeholders.
     ph_idx = 0
+
     for node in split.submod_1.graph.nodes:
         if node.op != "placeholder":
             continue
-        is_folded_attr = ph_idx in submod_1_input_idx_to_folded_attr_name.keys()
-        is_unfolded_attr = ph_idx in submod_1_input_idx_to_unfolded_attr_name.keys()
+        is_folded_attr = ph_idx in submod_1_input_idx_to_folded_attr_name
+        is_unfolded_attr = ph_idx in submod_1_input_idx_to_unfolded_attr_name
         if not is_folded_attr and not is_unfolded_attr:
             ph_idx += 1
             continue
@@ -205,6 +216,7 @@ def split_const_subgraphs(
             if is_folded_attr
             else submod_1_input_idx_to_unfolded_attr_name[ph_idx]
         )
+
         if is_folded_attr:
             assert not hasattr(mod_traced, const_output_name)
             # Use a dummy param, which will be overwritten when we run const folding.
@@ -214,7 +226,9 @@ def split_const_subgraphs(
                 torch.nn.Parameter(torch.randn(1)),
             )
         with split.submod_1.graph.inserting_before(node):
-            node.replace_all_uses_with(split.submod_1.graph.get_attr(const_output_name))
+            new_node = split.submod_1.graph.get_attr(const_output_name)
+            new_node.meta = node.meta.copy()
+            node.replace_all_uses_with(new_node)
         split.submod_1.graph.erase_node(node)
         ph_idx += 1
 
@@ -255,15 +269,19 @@ def split_const_subgraphs(
     # somehow a priori knowing the attrs that should be passed as args. We can
     # unconditionally do this for all placeholders because we know all
     # placeholders to submod_0 must be constants accessible via get_attr.
-    for node in split.submod_0.graph.nodes:
+    # Note that here we set the split.submod_0.graph into a new root_submod_0 with split
+    # as the root module, because we are fetching attributes directly from the root
+    # module, instead of fetching them from split.submod_0.
+    root_submod_0 = torch.fx.GraphModule(split, split.submod_0.graph)
+    for node in root_submod_0.graph.nodes:
         if node.op != "placeholder":
             continue
         in_node = next(n for n in call_submod_0_args if n.name == node.target)
         assert in_node.op == "get_attr"
-        with split.submod_0.graph.inserting_before(node):
-            node.replace_all_uses_with(split.submod_0.graph.get_attr(in_node.target))
-        split.submod_0.graph.erase_node(node)
+        with root_submod_0.graph.inserting_before(node):
+            node.replace_all_uses_with(root_submod_0.graph.get_attr(in_node.target))
+        root_submod_0.graph.erase_node(node)
 
     return FoldedGraphModule(
-        mod_traced, split.submod_1.graph, split.submod_0.graph, const_output_names
+        mod_traced, split.submod_1.graph, root_submod_0.graph, const_output_names
     )

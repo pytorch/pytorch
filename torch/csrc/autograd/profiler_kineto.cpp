@@ -43,7 +43,7 @@ inline int64_t getTimeUs() {
 }
 
 std::string shapesToStr(const std::vector<std::vector<int64_t>>& shapes);
-std::string stacksToStr(const std::vector<std::string>& stacks);
+std::string stacksToStr(const std::vector<std::string>& stacks, const char* delim);
 std::string dtypesToStr(const std::vector<std::string>& types);
 std::vector<std::string> inputTypes(const at::RecordFunction& fn);
 
@@ -100,7 +100,8 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalState {
           .sequenceNr(ctx->sequenceNr)
           .fwdThreadId(ctx->fwdThreadId)
           .scope(ctx->recFunScope)
-          .setAsync(fn.isAsync());
+          .setAsync(fn.isAsync())
+          .debugHandle(ctx->debug_handle);
       if (ctx->shapes && !ctx->shapes->empty()) {
         kineto_events_.back().shapes(*ctx->shapes);
       }
@@ -109,6 +110,9 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalState {
       }
       if (ctx->stack && !ctx->stack->empty()) {
         kineto_events_.back().stack(*ctx->stack);
+      }
+      if (ctx->module_hierarchy) {
+        kineto_events_.back().moduleHierarchy(*ctx->module_hierarchy);
       }
       if (ctx->extraArgs && !ctx->extraArgs->empty()) {
         kineto_events_.back().flops(computeFlops(std::string(fn.name().str()), *ctx->extraArgs));
@@ -150,10 +154,10 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalState {
             "Addr", std::to_string(reinterpret_cast<intptr_t>(ptr)));
         act.addMetadata("Bytes", std::to_string(alloc_size));
         if (total_allocated >= 0) {
-          act.addMetadata("Allocated Bytes", std::to_string(total_allocated));
+          act.addMetadata("Total Allocated", std::to_string(total_allocated));
         }
         if (total_reserved >= 0) {
-          act.addMetadata("Reserved Bytes", std::to_string(total_reserved));
+          act.addMetadata("Total Reserved", std::to_string(total_reserved));
         }
 #endif // USE_KINETO
 
@@ -166,6 +170,14 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalState {
           .nBytes(alloc_size)
           .startThreadId(at::RecordFunction::currentThreadId());
     }
+  }
+
+  const std::function<void(std::vector<KinetoEvent>&)>& getEventPostProcessingCallback() const {
+    return event_post_process_cb_;
+  }
+
+  void setEventPostProcessingCallback(std::function<void(std::vector<KinetoEvent>&)>&& cb) {
+    event_post_process_cb_ = std::move(cb);
   }
 
 #ifdef USE_KINETO
@@ -228,7 +240,10 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalState {
         activity.addMetadata("Input Dims", shapesToStr(kineto_event.shapes()));
       }
       if (kineto_event.hasStack()) {
-        activity.addMetadata("Call stack", stacksToStr(kineto_event.stack()));
+        activity.addMetadata("Call stack", stacksToStr(kineto_event.stack(), ";"));
+      }
+      if (kineto_event.hasModuleHierarchy()) {
+        activity.addMetadata("Module Hierarchy", stacksToStr(kineto_event.moduleHierarchy(), "."));
       }
       if (kineto_event.hasTypes()) {
         activity.addMetadata("Input type", dtypesToStr(kineto_event.dtypes()));
@@ -251,6 +266,8 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalState {
 #endif // USE_KINETO
   uint64_t start_time_;
   std::vector<KinetoEvent> kineto_events_;
+  // Optional, if event post-processing is enabled.
+  std::function<void(std::vector<KinetoEvent>&)> event_post_process_cb_;
 };
 
 std::vector<std::string> inputTypes(const at::RecordFunction& fn) {
@@ -280,7 +297,7 @@ KinetoThreadLocalState* getProfilerTLSState() {
   return static_cast<KinetoThreadLocalState*>(state);
 }
 
-void pushProfilingCallbacks() {
+void pushProfilingCallbacks(const std::unordered_set<at::RecordScope>& scopes) {
   auto state_ptr = getProfilerTLSState();
   TORCH_INTERNAL_ASSERT(state_ptr, "Expected profiler state set");
   auto handle = at::addThreadLocalCallback(at::RecordFunctionCallback(
@@ -298,9 +315,9 @@ void pushProfilingCallbacks() {
 #endif // USE_KINETO
 
           auto ctx_ptr = std::make_unique<KinetoObserverContext>();
-          ctx_ptr->startUs = getTimeUs();
           ctx_ptr->correlationId = corr_id;
           ctx_ptr->startThreadId = at::RecordFunction::currentThreadId();
+          ctx_ptr->debug_handle = fn.debugHandle();
 
           if (config.report_input_shapes) {
             ctx_ptr->shapes = inputSizes(fn);
@@ -326,7 +343,12 @@ void pushProfilingCallbacks() {
             }
             ctx_ptr->stack = callstackStr(cs);
           }
+          if (config.with_modules &&
+              fn.scope() != at::RecordScope::BACKWARD_FUNCTION) {
+            ctx_ptr->module_hierarchy = jit::currentModuleHierarchy();
+          }
   #endif
+          ctx_ptr->startUs = getTimeUs();
           if (config.state == ProfilerState::KINETO_GPU_FALLBACK) {
             try {
               cudaStubs()->record(nullptr, &ctx_ptr->cuda_event_start_, nullptr);
@@ -376,7 +398,8 @@ void pushProfilingCallbacks() {
         }
       })
     .needsInputs(state_ptr->config().report_input_shapes)
-    .needsIds(true));
+    .needsIds(true)
+    .scopes(scopes));
   state_ptr->setCallbackHandle(handle);
 }
 
@@ -416,12 +439,12 @@ std::string dtypesToStr(const std::vector<std::string>& types) {
   }
 }
 
-std::string stacksToStr(const std::vector<std::string>& stacks) {
+std::string stacksToStr(const std::vector<std::string>& stacks, const char* delim) {
   std::ostringstream oss;
   std::transform(
       stacks.begin(),
       stacks.end(),
-      std::ostream_iterator<std::string>(oss, ";"),
+      std::ostream_iterator<std::string>(oss, delim),
       [](std::string s) -> std::string {
 #ifdef _WIN32
         // replace the windows backslash with forward slash
@@ -430,7 +453,6 @@ std::string stacksToStr(const std::vector<std::string>& stacks) {
         return s;
       });
   auto rc = oss.str();
-  rc.pop_back();
   return "\"" + rc + "\"";
 }
 
@@ -484,9 +506,20 @@ void prepareProfiler(
 #endif // USE_KINETO
 }
 
+void enableProfilerWithEventPostProcess(
+    const ProfilerConfig& config,
+    const std::set<ActivityType>& activities,
+    std::function<void(std::vector<KinetoEvent>&)>&& cb,
+    const std::unordered_set<at::RecordScope>& scopes) {
+  enableProfiler(config, activities, scopes);
+  auto state_ptr = getProfilerTLSState();
+  state_ptr->setEventPostProcessingCallback(std::move(cb));
+}
+
 void enableProfiler(
     const ProfilerConfig& config,
-    const std::set<ActivityType>& activities) {
+    const std::set<ActivityType>& activities,
+    const std::unordered_set<at::RecordScope>& scopes) {
   if (config.state != ProfilerState::NVTX) {
     TORCH_CHECK(
         config.state == ProfilerState::KINETO ||
@@ -503,7 +536,7 @@ void enableProfiler(
   c10::ThreadLocalDebugInfo::_push(c10::DebugInfoKind::PROFILER_STATE, state);
 
   if (activities.count(ActivityType::CPU) || config.state == ProfilerState::NVTX) {
-    pushProfilingCallbacks();
+    pushProfilingCallbacks(scopes);
   }
 
 #ifdef USE_KINETO
@@ -535,6 +568,11 @@ std::unique_ptr<ProfilerResult> disableProfiler() {
 
 #ifdef USE_KINETO
   state_ptr->cpu_trace->span.endTime = getTimeUs();
+
+  // Call events post processing callback before finalizing trace, if there is one.
+  if (state_ptr->getEventPostProcessingCallback()) {
+    state_ptr->getEventPostProcessingCallback()(state_ptr->kineto_events_);
+  }
   state_ptr->finalizeCPUTrace();
   libkineto::api().activityProfiler().transferCpuTrace(std::move(state_ptr->cpu_trace));
 

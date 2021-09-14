@@ -442,10 +442,10 @@ def fractional_max_pool2d_with_indices(
     .. _Fractional MaxPooling:
         http://arxiv.org/abs/1412.6071
     """
-    if has_torch_function_unary(input):
+    if has_torch_function_variadic(input, _random_samples):
         return handle_torch_function(
             fractional_max_pool2d_with_indices,
-            (input,),
+            (input, _random_samples),
             input,
             kernel_size,
             output_size=output_size,
@@ -458,10 +458,11 @@ def fractional_max_pool2d_with_indices(
     if output_size is None:
         assert output_ratio is not None
         _output_ratio = _pair(output_ratio)
-        output_size = [int(input.size(2) * _output_ratio[0]), int(input.size(3) * _output_ratio[1])]
+        output_size = [int(input.size(-2) * _output_ratio[0]), int(input.size(-1) * _output_ratio[1])]
 
     if _random_samples is None:
-        _random_samples = torch.rand(input.size(0), input.size(1), 2, dtype=input.dtype, device=input.device)
+        n_batch = 1 if input.dim() == 3 else input.size(0)
+        _random_samples = torch.rand(n_batch, input.size(-3), 2, dtype=input.dtype, device=input.device)
     return torch._C._nn.fractional_max_pool2d(input, kernel_size, output_size, _random_samples)
 
 
@@ -472,10 +473,10 @@ def _fractional_max_pool2d(
     return_indices: bool = False,
     _random_samples: Optional[Tensor] = None
 ) -> Tensor:
-    if has_torch_function_unary(input):
+    if has_torch_function_variadic(input, _random_samples):
         return handle_torch_function(
             fractional_max_pool2d,
-            (input,),
+            (input, _random_samples),
             input,
             kernel_size,
             output_size=output_size,
@@ -536,10 +537,10 @@ def fractional_max_pool3d_with_indices(
     .. _Fractional MaxPooling:
         http://arxiv.org/abs/1412.6071
     """
-    if has_torch_function_unary(input):
+    if has_torch_function_variadic(input, _random_samples):
         return handle_torch_function(
             fractional_max_pool3d_with_indices,
-            (input,),
+            (input, _random_samples),
             input,
             kernel_size,
             output_size=output_size,
@@ -570,10 +571,10 @@ def _fractional_max_pool3d(
     return_indices: bool = False,
     _random_samples: Optional[Tensor] = None
 ) -> Tensor:
-    if has_torch_function_unary(input):
+    if has_torch_function_variadic(input, _random_samples):
         return handle_torch_function(
             fractional_max_pool3d,
-            (input,),
+            (input, _random_samples),
             input,
             kernel_size,
             output_size=output_size,
@@ -1842,8 +1843,8 @@ def linear(input: Tensor, weight: Tensor, bias: Optional[Tensor] = None) -> Tens
         - Bias: :math:`(out\_features)`
         - Output: :math:`(N, *, out\_features)`
     """
-    if has_torch_function_variadic(input, weight):
-        return handle_torch_function(linear, (input, weight), input, weight, bias=bias)
+    if has_torch_function_variadic(input, weight, bias):
+        return handle_torch_function(linear, (input, weight, bias), input, weight, bias=bias)
     return torch._C._nn.linear(input, weight, bias)
 
 
@@ -1864,10 +1865,10 @@ def bilinear(input1: Tensor, input2: Tensor, weight: Tensor, bias: Optional[Tens
         - output: :math:`(N, *, H_{out})` where :math:`H_{out}=\text{out\_features}`
           and all but the last dimension are the same shape as the input.
     """
-    if has_torch_function_variadic(input1, input2, weight):
+    if has_torch_function_variadic(input1, input2, weight, bias):
         return handle_torch_function(
             bilinear,
-            (input1, input2, weight),
+            (input1, input2, weight, bias),
             input1, input2, weight,
             bias=bias
         )
@@ -2134,10 +2135,10 @@ def embedding_bag(
         tensor([[ 0.0000,  0.0000,  0.0000],
                 [-0.7082,  3.2145, -2.6251]])
     """
-    if has_torch_function_variadic(input, weight):
+    if has_torch_function_variadic(input, weight, offsets, per_sample_weights):
         return handle_torch_function(
             embedding_bag,
-            (input, weight),
+            (input, weight, offsets, per_sample_weights),
             input,
             weight,
             offsets=offsets,
@@ -2262,10 +2263,10 @@ def batch_norm(
     See :class:`~torch.nn.BatchNorm1d`, :class:`~torch.nn.BatchNorm2d`,
     :class:`~torch.nn.BatchNorm3d` for details.
     """
-    if has_torch_function_unary(input):
+    if has_torch_function_variadic(input, running_mean, running_var, weight, bias):
         return handle_torch_function(
             batch_norm,
-            (input,),
+            (input, running_mean, running_var, weight, bias),
             input,
             running_mean,
             running_var,
@@ -2308,10 +2309,10 @@ def instance_norm(
     See :class:`~torch.nn.InstanceNorm1d`, :class:`~torch.nn.InstanceNorm2d`,
     :class:`~torch.nn.InstanceNorm3d` for details.
     """
-    if has_torch_function_unary(input):
+    if has_torch_function_variadic(input, running_mean, running_var, weight, bias):
         return handle_torch_function(
             instance_norm,
-            (input,),
+            (input, running_mean, running_var, weight, bias),
             input,
             running_mean=running_mean,
             running_var=running_var,
@@ -2339,9 +2340,9 @@ def layer_norm(
 
     See :class:`~torch.nn.LayerNorm` for details.
     """
-    if has_torch_function_unary(input):
+    if has_torch_function_variadic(input, weight, bias):
         return handle_torch_function(
-            layer_norm, (input,), input, normalized_shape, weight=weight, bias=bias, eps=eps
+            layer_norm, (input, weight, bias), input, normalized_shape, weight=weight, bias=bias, eps=eps
         )
     return torch.layer_norm(input, normalized_shape, weight, bias, eps, torch.backends.cudnn.enabled)
 
@@ -2353,8 +2354,8 @@ def group_norm(
 
     See :class:`~torch.nn.GroupNorm` for details.
     """
-    if has_torch_function_unary(input):
-        return handle_torch_function(group_norm, (input,), input, num_groups, weight=weight, bias=bias, eps=eps)
+    if has_torch_function_variadic(input, weight, bias):
+        return handle_torch_function(group_norm, (input, weight, bias,), input, num_groups, weight=weight, bias=bias, eps=eps)
     _verify_batch_size([input.size(0) * input.size(1) // num_groups, num_groups] + list(input.size()[2:]))
     return torch.group_norm(input, num_groups, weight, bias, eps, torch.backends.cudnn.enabled)
 
@@ -2514,10 +2515,10 @@ def nll_loss(
         >>> output = F.nll_loss(F.log_softmax(input), target)
         >>> output.backward()
     """
-    if has_torch_function_variadic(input, target):
+    if has_torch_function_variadic(input, target, weight):
         return handle_torch_function(
             nll_loss,
-            (input, target),
+            (input, target, weight),
             input,
             target,
             weight=weight,
@@ -2771,6 +2772,7 @@ def cross_entropy(
     ignore_index: int = -100,
     reduce: Optional[bool] = None,
     reduction: str = "mean",
+    label_smoothing: float = 0.0,
 ) -> Tensor:
     r"""This criterion computes the cross entropy loss between input and target.
 
@@ -2807,6 +2809,10 @@ def cross_entropy(
             elements in the output, ``'sum'``: the output will be summed. Note: :attr:`size_average`
             and :attr:`reduce` are in the process of being deprecated, and in the meantime,
             specifying either of those two args will override :attr:`reduction`. Default: ``'mean'``
+        label_smoothing (float, optional): A float in [0.0, 1.0]. Specifies the amount
+            of smoothing when computing the loss, where 0.0 means no smoothing. The targets
+            become a mixture of the original ground truth and a uniform distribution as described in
+            `Rethinking the Inception Architecture for Computer Vision <https://arxiv.org/abs/1512.00567>`__. Default: :math:`0.0`.
 
     Examples::
 
@@ -2822,10 +2828,10 @@ def cross_entropy(
         >>> loss = F.cross_entropy(input, target)
         >>> loss.backward()
     """
-    if has_torch_function_variadic(input, target):
+    if has_torch_function_variadic(input, target, weight):
         return handle_torch_function(
             cross_entropy,
-            (input, target),
+            (input, target, weight),
             input,
             target,
             weight=weight,
@@ -2833,10 +2839,11 @@ def cross_entropy(
             ignore_index=ignore_index,
             reduce=reduce,
             reduction=reduction,
+            label_smoothing=label_smoothing,
         )
     if size_average is not None or reduce is not None:
         reduction = _Reduction.legacy_get_string(size_average, reduce)
-    return torch._C._nn.cross_entropy_loss(input, target, weight, _Reduction.get_enum(reduction), ignore_index)
+    return torch._C._nn.cross_entropy_loss(input, target, weight, _Reduction.get_enum(reduction), ignore_index, label_smoothing)
 
 
 def binary_cross_entropy(
@@ -2880,10 +2887,10 @@ def binary_cross_entropy(
         >>> loss = F.binary_cross_entropy(F.sigmoid(input), target)
         >>> loss.backward()
     """
-    if has_torch_function_variadic(input, target):
+    if has_torch_function_variadic(input, target, weight):
         return handle_torch_function(
             binary_cross_entropy,
-            (input, target),
+            (input, target, weight),
             input,
             target,
             weight=weight,
@@ -2952,10 +2959,10 @@ def binary_cross_entropy_with_logits(
          >>> loss = F.binary_cross_entropy_with_logits(input, target)
          >>> loss.backward()
     """
-    if has_torch_function_variadic(input, target):
+    if has_torch_function_variadic(input, target, weight, pos_weight):
         return handle_torch_function(
             binary_cross_entropy_with_logits,
-            (input, target),
+            (input, target, weight, pos_weight),
             input,
             target,
             weight=weight,
@@ -3236,10 +3243,10 @@ def multilabel_soft_margin_loss(
 
     See :class:`~torch.nn.MultiLabelSoftMarginLoss` for details.
     """
-    if has_torch_function_variadic(input, target):
+    if has_torch_function_variadic(input, target, weight):
         return handle_torch_function(
             multilabel_soft_margin_loss,
-            (input, target),
+            (input, target, weight),
             input,
             target,
             weight=weight,
@@ -3316,10 +3323,10 @@ def multi_margin_loss(
 
     See :class:`~torch.nn.MultiMarginLoss` for details.
     """
-    if has_torch_function_variadic(input, target):
+    if has_torch_function_variadic(input, target, weight):
         return handle_torch_function(
             multi_margin_loss,
-            (input, target),
+            (input, target, weight),
             input,
             target,
             p=p,
@@ -4436,8 +4443,8 @@ def normalize(input: Tensor, p: float = 2.0, dim: int = 1, eps: float = 1e-12, o
         out (Tensor, optional): the output tensor. If :attr:`out` is used, this
                                 operation won't be differentiable.
     """
-    if has_torch_function_unary(input):
-        return handle_torch_function(normalize, (input,), input, p=p, dim=dim, eps=eps, out=out)
+    if has_torch_function_variadic(input, out):
+        return handle_torch_function(normalize, (input, out), input, p=p, dim=dim, eps=eps, out=out)
     if out is None:
         denom = input.norm(p, dim, keepdim=True).clamp_min(eps).expand_as(input)
         return input / denom
@@ -5036,7 +5043,7 @@ def multi_head_attention_forward(
     #
     q = q.contiguous().view(tgt_len, bsz * num_heads, head_dim).transpose(0, 1)
     if static_k is None:
-        k = k.contiguous().view(-1, bsz * num_heads, head_dim).transpose(0, 1)
+        k = k.contiguous().view(k.shape[0], bsz * num_heads, head_dim).transpose(0, 1)
     else:
         # TODO finish disentangling control flow so we don't do in-projections when statics are passed
         assert static_k.size(0) == bsz * num_heads, \
@@ -5045,7 +5052,7 @@ def multi_head_attention_forward(
             f"expecting static_k.size(2) of {head_dim}, but got {static_k.size(2)}"
         k = static_k
     if static_v is None:
-        v = v.contiguous().view(-1, bsz * num_heads, head_dim).transpose(0, 1)
+        v = v.contiguous().view(v.shape[0], bsz * num_heads, head_dim).transpose(0, 1)
     else:
         # TODO finish disentangling control flow so we don't do in-projections when statics are passed
         assert static_v.size(0) == bsz * num_heads, \

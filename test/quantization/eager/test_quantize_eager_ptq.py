@@ -42,6 +42,7 @@ from torch.testing._internal.common_quantization import (
     EmbeddingBagModule,
     EmbeddingModule,
     EmbeddingWithLinear,
+    LinearReluLinearModel,
 )
 
 # annotated models
@@ -993,6 +994,23 @@ class TestPostTrainingDynamic(QuantizationTestCase):
         checkQuantized(model)
         # test one line API
         model = quantize_dynamic(NestedModel().eval(), qconfig_dict)
+        checkQuantized(model)
+
+    def test_linear_relu_fusion(self):
+        dtype = torch.qint8
+        model = LinearReluLinearModel().eval()
+        qconfig = default_dynamic_qconfig
+        qconfig_dict = {'' : qconfig}
+        torch.quantization.fuse_modules(model, [['fc1', 'relu']], inplace=True)
+        prepare_dynamic(model, qconfig_dict)
+        convert_dynamic(model)
+
+        def checkQuantized(model):
+            self.checkDynamicQuantizedLinearRelu(model.fc1, dtype)
+            self.checkDynamicQuantizedLinear(model.fc2, dtype)
+            self.checkScriptable(model, self.calib_data, check_save_load=True)
+            self.checkNoQconfig(model)
+
         checkQuantized(model)
 
     @given(qconfig=st.sampled_from([per_channel_dynamic_qconfig, default_dynamic_qconfig]),

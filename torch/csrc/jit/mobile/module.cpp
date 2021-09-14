@@ -122,13 +122,30 @@ const std::map<std::string, at::Tensor> Module::named_parameters() const {
   return params;
 }
 
+std::string Module::getModuleHierarchy(const int64_t debug_handle) const {
+#if defined(SYMBOLICATE_MOBILE_DEBUG_HANDLE)
+  return getDebugTable().getModuleHierarchyInfo(
+      debug_handle, getTopModuleTypeName(*this));
+#else
+  return "";
+#endif
+}
+
+std::string Module::getCallStack(const int64_t debug_handle) const {
+#if defined(SYMBOLICATE_MOBILE_DEBUG_HANDLE)
+  return getDebugTable().getSourceDebugString(
+      debug_handle, getTopModuleTypeName(*this));
+#else
+  return "";
+#endif
+}
+
 // We will continue to support this API for now as this is being relied upon
 // for profiling.
 // We really need to change this part, so in the next step for profiling support
 // for delegates, the first thing will be to rewrite how profiling is done
 // for lite interpreter.
-std::string Module::get_forward_method_debug_info(size_t pc) const {
-  auto debug_handle = find_method("forward")->get_debug_handle(pc);
+std::string Module::get_forward_method_debug_info(int64_t debug_handle) const {
 #if defined(SYMBOLICATE_MOBILE_DEBUG_HANDLE)
   return getDebugTable().getModuleHierarchyInfo(
       debug_handle, getTopModuleTypeName(*this));

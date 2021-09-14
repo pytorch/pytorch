@@ -25,6 +25,7 @@
 #include <torch/csrc/jit/runtime/profiling_record.h>
 #include <torch/csrc/jit/runtime/script_profile.h>
 #include <torch/csrc/jit/runtime/vararg_functions.h>
+#include <string>
 
 #ifdef USE_RPC
 #include <torch/csrc/distributed/autograd/context/container.h>
@@ -42,6 +43,11 @@ using torch::distributed::autograd::DistAutogradContainer;
 #include <unordered_set>
 #include <utility>
 #include <vector>
+
+C10_DEFINE_bool(
+    torch_jit_enable_rethrow_caught_exception,
+    false,
+    "enable rethrowing caught exception");
 
 namespace torch {
 namespace jit {
@@ -291,13 +297,13 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
           }
           case INST(OP): {
             INST_GUARD;
-            frame.function->operator_table_[inst.X](&stack);
+            frame.function->operator_table_[inst.X](stack);
           }
             INST_NEXT;
           case INST(OPN): {
             INST_GUARD;
             stack.push_back(inst.N);
-            frame.function->operator_table_[inst.X](&stack);
+            frame.function->operator_table_[inst.X](stack);
           }
             INST_NEXT;
           case INST(LOAD): {
@@ -708,12 +714,16 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
         push(stack, IValue());
         try {
           f.run(stack);
-        } catch (std::exception& e) {
-          std::ostringstream ss;
-          ss << "The following operation failed in the TorchScript interpreter.\n";
-          formatStackTrace(ss);
-          ss << "RuntimeError: " << ExceptionMessage(e) << "\n";
+        } catch (std::exception& _) {
+          // TODO(T98048876): Handle `_` correctly.
         }
+      }
+      if (FLAGS_torch_jit_enable_rethrow_caught_exception) {
+        if (future_) {
+          future_->setError(std::current_exception());
+          return false;
+        }
+        throw;
       }
       bool is_jit_exception = dynamic_cast<JITException*>(&e);
       // Janky af.  See https://github.com/pytorch/pytorch/issues/54612
@@ -776,6 +786,105 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
   }
 
  public:
+  // One way to avoid overhead of forming string would be to return
+  // a vector of frame.function, i.e. CodeImpl*
+  // This is not exactly clean as it will expose, internal details of
+  // interpreter. But this way we hold onto graph/node and Function and
+  // we can create module hierarchy string for each event in autograd
+  // profiler at the end, when consolidating events.
+  // At the moment overhead does not seem exhorbitantly large.
+  // Another option would be return vector of (string, InlinedCallstackPtrs)
+  // string would contain function name and typename of self
+  // Format of the returned vector of strings:
+  // For each frame, the corresponding module name, type and function name
+  // are in following format:
+  // <module-instance-name>(module type)::<function-name>
+  // Special keys for module-instance-name:
+  //   - TOP: for top level module
+  //   - SELF: When method/function of the frame is associated with
+  //           previous frame's module instance
+  //   - INSTANCE_NAME_UNKNOWN: instance name cannot be figured out
+  //   - CALL_FUNCTION: call to free function
+  std::vector<std::string> moduleHierarchy() const {
+    std::vector<std::string> module_function_list;
+    std::string module_hierarchy("TOP");
+    for (size_t i = 0; i < frames.size(); ++i) {
+      const Frame& frame = frames[i];
+      std::string fn_name = frame.function->function_name_;
+      // For each frame, type of the class with which the function is
+      // associated, is queried here. And the type name is added to
+      // module hierarchy.
+      const auto& g = frame.function->graph_;
+      std::string g_self_type;
+      if (g && g->inputs().size() > 0) {
+        const auto& g_self_type_ptr =
+            g->inputs()[0]->type()->cast<c10::ClassType>();
+        if (g_self_type_ptr) {
+          g_self_type = g_self_type_ptr->name()->qualifiedName();
+          g_self_type = g_self_type.substr(g_self_type.find_last_of('.') + 1);
+        }
+      }
+      module_hierarchy.append("(")
+          .append(g_self_type)
+          .append(")::")
+          .append(fn_name);
+      module_function_list.emplace_back(std::move(module_hierarchy));
+
+      size_t pc = frame.pc;
+      // CALL nodes have already advanced the pc, so
+      // undo that to report the call node
+      if (i + 1 < frames.size()) {
+        --pc;
+      }
+
+      Node* node = frame.function->instructions_source_[pc];
+      if (node->callstack()) {
+        for (const auto& p : (*node->callstack())->vec()) {
+          fn_name = std::get<0>(p)->name();
+          const auto& opt_module_info = std::get<2>(p);
+          if (opt_module_info.has_value()) {
+            const auto& module_instance_info = opt_module_info.value();
+            module_hierarchy = utils::get_module_info(module_instance_info);
+            module_hierarchy.append("::").append(fn_name);
+          } else {
+            // This is likely a call to free function, not associated with
+            // any class
+            module_hierarchy = "::";
+            module_hierarchy.append(fn_name);
+          }
+          module_function_list.emplace_back(std::move(module_hierarchy));
+        }
+      }
+
+      module_hierarchy = std::string();
+      // If this node is of type callMethod then the following frame
+      // will contain the op being executed.
+      // For such callMethod node, we add the object instance name
+      // associated with it, since the following frame will not have it.
+      if (node->kind() == prim::CallMethod) {
+        std::string class_instance_name;
+        if (node->input(0)->node()->kind() == prim::GetAttr) {
+          class_instance_name = node->input(0)->node()->s(attr::name);
+        } else if (
+            node->owningGraph()->inputs().size() > 0 &&
+            node->input(0) == node->owningGraph()->inputs()[0]) {
+          class_instance_name = "SELF";
+        } else {
+          class_instance_name = "INSTANCE_NAME_UNKNOWN";
+        }
+        module_hierarchy = std::move(class_instance_name);
+      } else if (node->kind() == prim::CallFunction) {
+        auto function_constant = node->input(0)->node();
+        auto fun_type =
+            function_constant->output()->type()->expect<FunctionType>();
+        auto fun_name = fun_type->function()->name();
+        module_hierarchy = "CALL_FUNCTION::";
+        module_hierarchy.append(fun_name);
+      }
+    }
+    return module_function_list;
+  }
+
   std::vector<StackEntry> callstack() const {
     std::vector<StackEntry> entries;
     for (const auto i : c10::irange(frames.size())) {
@@ -840,6 +949,13 @@ std::vector<StackEntry> currentCallstack() {
   return std::vector<StackEntry>();
 }
 
+std::vector<std::string> currentModuleHierarchy() {
+  if (tls_int_state_ptr_) {
+    return tls_int_state_ptr_->moduleHierarchy();
+  }
+  return std::vector<std::string>();
+}
+
 std::ostream& operator<<(std::ostream& out, const Code& code) {
   out << *code.pImpl->graph_ << "\n";
   code.pImpl->dump(out);
@@ -862,11 +978,13 @@ MobileCode::MobileCode(
     const std::shared_ptr<Graph>& graph,
     std::string function_name,
     bool emit_default_input_instructions,
+    bool support_default_args_before_out,
     size_t remaining_bailout_depth)
     : Code(new interpreter::MobileCodeImpl(
           graph,
           std::move(function_name),
           emit_default_input_instructions,
+          support_default_args_before_out,
           remaining_bailout_depth)) {}
 
 MobileCode::~MobileCode() = default;

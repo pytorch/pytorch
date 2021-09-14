@@ -4,11 +4,11 @@ namespace torch {
 
 const std::vector<std::string>& IMethod::getArgumentNames() const
 {
-  // TODO(jwtan): Deal with empty parameter list.
-  if (!argumentNames_.empty()) {
+  if (isArgumentNamesInitialized_) {
     return argumentNames_;
   }
 
+  isArgumentNamesInitialized_ = true;
   setArgumentNames(argumentNames_);
   return argumentNames_;
 }

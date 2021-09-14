@@ -13,15 +13,15 @@ namespace torch {
 namespace jit {
 namespace tensorexpr {
 
-using VarMapping = std::vector<std::pair<Var*, Expr*>>;
+using VarMapping = std::vector<std::pair<VarPtr, ExprPtr>>;
 
 class VarSubMutator : public IRMutator {
  public:
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   VarSubMutator(const VarMapping& var_mapping) {
     for (auto& entry : var_mapping) {
-      Var* key_var = entry.first;
-      Expr* value = entry.second;
+      VarPtr key_var = entry.first;
+      ExprPtr value = entry.second;
       if (!key_var) {
         throw malformed_input("missing key in VarSubMutator");
       }
@@ -29,7 +29,7 @@ class VarSubMutator : public IRMutator {
     }
   }
 
-  Expr* mutate(Var* var) override {
+  ExprPtr mutate(VarPtr var) override {
     auto iter = var_mapping_.find(var);
     if (iter == var_mapping_.end()) {
       return var;
@@ -37,14 +37,14 @@ class VarSubMutator : public IRMutator {
     return iter->second;
   }
 
-  Expr* mutate(ReduceOp* var) override {
+  ExprPtr mutate(ReduceOpPtr var) override {
     auto body = var->body()->accept_mutator(this);
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    std::vector<Var*> new_inner;
+    std::vector<VarPtr> new_inner;
 
-    for (auto* v : var->reduce_args()) {
-      Expr* e = v->accept_mutator(this);
-      if (Var* new_var = dynamic_cast<Var*>(e)) {
+    for (auto v : var->reduce_args()) {
+      ExprPtr e = v->accept_mutator(this);
+      if (VarPtr new_var = to<Var>(e)) {
         new_inner.push_back(new_var);
       } else {
         VarFinder varFinder;
@@ -54,11 +54,11 @@ class VarSubMutator : public IRMutator {
       }
     }
 
-    return new ReduceOp(body, new_inner, var->reducer());
+    return alloc<ReduceOp>(body, new_inner, var->reducer());
   }
 
  private:
-  std::unordered_map<Var*, Expr*> var_mapping_;
+  std::unordered_map<VarPtr, ExprPtr> var_mapping_;
 };
 
 } // namespace tensorexpr

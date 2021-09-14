@@ -5,6 +5,7 @@ checking quantization api and properties of resulting modules.
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torch.nn.intrinsic.quantized.dynamic as nniqd
 import torch.nn.quantized as nnq
 import torch.nn.quantized.dynamic as nnqd
 from torch.nn.intrinsic import _FusedModule
@@ -32,7 +33,7 @@ try:
         prepare_qat_fx,
         convert_fx,
     )
-    from torch.quantization.ns.ns_types import NSSingleResultValuesType, NSSubgraph
+    from torch.ao.ns.fx.ns_types import NSSingleResultValuesType, NSSubgraph
     from torch.fx.graph import Node
     from torch.fx import GraphModule
     HAS_FX = True
@@ -420,6 +421,13 @@ class QuantizationTestCase(TestCase):
             module, the bias is float.
         """
         self.assertEqual(type(mod), nnqd.Linear)
+        self.assertEqual(mod._packed_params.dtype, dtype)
+
+    def checkDynamicQuantizedLinearRelu(self, mod, dtype):
+        r"""Checks that mod has been swapped for an nnqd.Linear
+            module, the bias is float.
+        """
+        self.assertEqual(type(mod), nniqd.LinearReLU)
         self.assertEqual(mod._packed_params.dtype, dtype)
 
     def check_eager_serialization(self, ref_model, loaded_model, x):
@@ -975,12 +983,12 @@ class QuantizationLiteTestCase(QuantizationTestCase):
 
                     mobile_module_result = mobile_module(input)
 
-                    torch.testing.assert_allclose(script_module_result, mobile_module_result)
+                    torch.testing.assert_close(script_module_result, mobile_module_result)
                     mobile_module_forward_result = mobile_module.forward(input)
-                    torch.testing.assert_allclose(script_module_result, mobile_module_forward_result)
+                    torch.testing.assert_close(script_module_result, mobile_module_forward_result)
 
                     mobile_module_run_method_result = mobile_module.run_method("forward", input)
-                    torch.testing.assert_allclose(script_module_result, mobile_module_run_method_result)
+                    torch.testing.assert_close(script_module_result, mobile_module_run_method_result)
                 except AssertionError as e:
                     if retry == max_retry:
                         raise e

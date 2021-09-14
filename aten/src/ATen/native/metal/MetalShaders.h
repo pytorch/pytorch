@@ -367,60 +367,58 @@ kernel void append_features_off(texture2d<half, access::read> in_tex[[texture(0)
     out.write(outtex, gid_, outz);
 }
 
-kernel void clamp_half4(texture2d_array<half, access::read> in[[texture(0)]],
-                 texture2d_array<half, access::write> out[[texture(1)]],
-                 constant half* clamp_buf[[buffer(0)]],
+constant bool clamp_is_arr = (ushort_arg_1 > 1 || ushort_arg_0 > 4);
+constant bool clamp_is_tex = !clamp_is_arr;
+kernel void clamp(texture2d_array<half, access::read> in_arr[[texture(0), function_constant(clamp_is_arr)]],
+                  texture2d<half, access::read> in_tex[[texture(0), function_constant(clamp_is_tex)]],
+                  texture2d_array<half, access::write> out_arr[[texture(1), function_constant(clamp_is_arr)]],
+                  texture2d<half, access::write> out_tex[[texture(1), function_constant(clamp_is_tex)]],
                  ushort3 gid[[thread_position_in_grid]]) {
-    if (gid.x >= out.get_width() || gid.y >= out.get_height()) {
+    const ushort w = clamp_is_arr? out_arr.get_width() : out_tex.get_width();
+    const ushort h = clamp_is_arr? out_arr.get_height() : out_tex.get_height();
+    if (gid.x >= w || gid.y >= h) {
         return;
     }
-    const half4 min_(clamp_buf[0], clamp_buf[0], clamp_buf[0], clamp_buf[0]);
-    const half4 max_(clamp_buf[1], clamp_buf[1], clamp_buf[1], clamp_buf[1]);
+    const float4 min_(float_arg_0, float_arg_0, float_arg_0, float_arg_0);
+    const float4 max_(float_arg_1, float_arg_1, float_arg_1, float_arg_1);
     ushort2 gid_ = gid.xy;
-    half4 value = in.read(gid_, gid.z);
-    half4 clamped = clamp(value, min_, max_);
-    out.write(clamped, gid_, gid.z);
-}
-
-kernel void clamp_half4_nonarray(texture2d<half, access::read> in[[texture(0)]],
-                          texture2d<half, access::write> out[[texture(1)]],
-                          constant half* clamp_buf[[buffer(0)]],
-                          ushort2 gid[[thread_position_in_grid]]) {
-    if (gid.x >= out.get_width() || gid.y >= out.get_height()) {
-        return;
+    if(clamp_is_arr){
+        float4 value = (float4)in_arr.read(gid_, gid.z);
+        half4 clamped = (half4)clamp(value, min_, max_);
+        out_arr.write(clamped, gid_, gid.z);
+    } else {
+        float4 value = (float4)in_tex.read(gid_);
+        half4 clamped = (half4)clamp(value, min_, max_);
+        out_tex.write(clamped, gid_);
     }
-    const half4 min_(clamp_buf[0], clamp_buf[0], clamp_buf[0], clamp_buf[0]);
-    const half4 max_(clamp_buf[1], clamp_buf[1], clamp_buf[1], clamp_buf[1]);
-    half4 value = in.read(gid);
-    half4 clamped = clamp(value, min_, max_);
-    out.write(clamped, gid);
 }
 
-kernel void hardswish(texture2d_array<half, access::read> in[[texture(0)]],
-                      texture2d_array<half, access::write> out[[texture(1)]],
+constant bool hardswish_is_arr = (ushort_arg_0 > 1 || ushort_arg_1 > 4);
+constant bool hardswish_is_tex = !hardswish_is_arr;
+kernel void hardswish(texture2d_array<half, access::read> in_arr[[texture(0), function_constant(hardswish_is_arr)]],
+                      texture2d<half, access::read> in_tex[[texture(0), function_constant(hardswish_is_tex)]],
+                      texture2d_array<half, access::write> out_arr[[texture(1), function_constant(hardswish_is_arr)]],
+                      texture2d<half, access::write> out_tex[[texture(1), function_constant(hardswish_is_tex)]],
                       ushort3 gid[[thread_position_in_grid]]) {
-    if (gid.x >= out.get_width() || gid.y >= out.get_height()) {
+    const ushort oH = ushort_arg_2;
+    const ushort oW = ushort_arg_3;
+    if (gid.x >= oW || gid.y >= oH) {
         return;
     }
     ushort2 gid_ = gid.xy;
-    half4 value = in.read(gid_, gid.z);
-    half4 mask1 = half4(value < 3.0);
-    half4 mask2 = half4(value > -3.0);
-    half4 outval = mask2*(mask1*(value*(value + 3.0)/6.0) + (1 - mask1)*value);
-    out.write(outval, gid_, gid.z);
-}
-
-kernel void hardswish_nonarray(texture2d<half, access::read> in[[texture(0)]],
-                               texture2d<half, access::write> out[[texture(1)]],
-                               ushort2 gid[[thread_position_in_grid]]) {
-    if (gid.x >= out.get_width() || gid.y >= out.get_height()) {
-        return;
+    if (hardswish_is_arr) {
+      half4 value = in_arr.read(gid_, gid.z);
+      half4 mask1 = half4(value < 3.0);
+      half4 mask2 = half4(value > -3.0);
+      half4 outval = mask2*(mask1*(value*(value + 3.0)/6.0) + (1 - mask1)*value);
+      out_arr.write(outval, gid_, gid.z);
+    } else {
+      half4 value = in_tex.read(gid_);
+      half4 mask1 = half4(value < 3);
+      half4 mask2 = half4(value > -3.0);
+      half4 outval = mask2*(mask1*(value*(value + 3.0)/6.0) + (1 - mask1)*value);
+      out_tex.write(outval, gid_);
     }
-    half4 value = in.read(gid);
-    half4 mask1 = half4(value < 3);
-    half4 mask2 = half4(value > -3.0);
-    half4 outval = mask2*(mask1*(value*(value + 3.0)/6.0) + (1 - mask1)*value);
-    out.write(outval, gid);
 }
 
 constant bool out_is_arr = (ushort_arg_3 > 1 || ushort_arg_2 > 4);
