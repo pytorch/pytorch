@@ -20,6 +20,19 @@ bool normalizeOpAliases(graph_node_list_iterator& iter) {
   return false;
 }
 
+// Normalize rsub such that `rsub(x,y) = sub(x,y)`
+bool normalizeRSub(graph_node_list_iterator& iter) {
+  ArrayRef<Value*> args = iter->inputs();
+  if (iter->kind() == aten::rsub) {
+    iter->replaceWithNewSymbol(aten::sub);
+    iter->replaceInput(0, args[1]);
+    iter->replaceInput(1, args[0]);
+    iter.destroyCurrent();
+    return true;
+  }
+  return false;
+}
+
 // Normalizes a `__is__` comparison with a bool to `eq` (and same with
 // `__isnot__`)
 bool normalizeIsBool(graph_node_list_iterator& iter) {
@@ -54,6 +67,11 @@ void NormalizeOps(Block* block) {
     if (normalizeIsBool(it)) {
       continue;
     }
+
+    if (normalizeRSub(it)) {
+      continue;
+    }
+
     it++;
   }
 }
