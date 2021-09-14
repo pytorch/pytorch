@@ -146,10 +146,8 @@ struct cpu_scatter_gather_base_kernel {
           auto* index_data_bytes = data[INDEX_ITER_STRIDE_IDX];
           // we change the order of TensorIterator-dim loop
           // vs dim-TensorIterator loop order depending on
-          // whether dim is the last dimension and/or
-          // whether `n` is smaller than `index_dim_size`
-
-          if ((dim== self.dim() - 1) || (n < index_dim_size)) {
+          // whether dim is the last dimension
+          if (dim== self.dim() - 1) {
             for (int64_t nelem = 0; nelem < n; ++nelem) {
               // dim loop is a separate code block
               // for better performance
@@ -231,7 +229,7 @@ struct cpu_scatter_gather_base_kernel {
           // we change the order of TensorIterator-dim loop
           // vs dim-TensorIterator loop order depending on
           // whether dim is the last dimension
-          if ((dim== self.dim() - 1)) {
+          if (dim== self.dim() - 1) {
             for (int64_t nelem = 0; nelem < n; ++nelem) {
               // dim loop is a separate code block
               // for better performance
