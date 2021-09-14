@@ -65,8 +65,6 @@ inline int getPrecedence(IRNodeType ty) {
   }
 }
 
-class Placeholder;
-
 class TORCH_API Cast : public ExprNode<Cast> {
  public:
   ExprPtr src_value() const {
@@ -901,11 +899,6 @@ class TORCH_API Intrinsics : public ExprNode<Intrinsics> {
   std::vector<ExprPtr> params_;
   IntrinsicsOp op_type_;
 };
-
-class Polynomial;
-class Term;
-class MaxTerm;
-class MinTerm;
 
 TORCH_API std::vector<ExprPtr> ExprHandleVectorToExprVector(
     const std::vector<ExprHandle>&);
