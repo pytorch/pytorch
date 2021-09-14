@@ -281,7 +281,7 @@ class JitCommonTestCase(TestCase):
         self.assertEqual(should_autodiff_node,
                          found_all_nonfusible_nodes and found_all_fusible_nodes, err_msg)
 
-    def checkShapeAnalysis(self, out_size, traced_graph, assert_propagation):
+    def checkShapeAnalysis(self, out_size, traced_graph, assert_propagation, constant_prop=True):
         # repropagte input shapes provided by tracing,
         prev_symbolic_shapes_test_enabled = torch._C._jit_symbolic_shapes_test_mode_enabled()
         for enable_test_mode in [True, False]:
@@ -289,7 +289,8 @@ class JitCommonTestCase(TestCase):
             # disallowing constants helps stress test partial eval and substitution pipeline
             torch._C._jit_set_symbolic_shapes_test_mode(enable_test_mode)
             torch._C._jit_erase_non_input_shape_information(traced_graph)
-            torch._C._jit_pass_constant_propagation(traced_graph)
+            if constant_prop:
+                torch._C._jit_pass_constant_propagation(traced_graph)
             torch._C._jit_pass_propagate_shapes_on_graph(traced_graph)
             # Add sizes to default tensor type to avoid checking something out of scope
             # and difficulties with tracer leaving in other parts of tensor type
