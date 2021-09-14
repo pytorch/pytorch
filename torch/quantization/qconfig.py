@@ -5,10 +5,16 @@ from .observer import (HistogramObserver, MovingAverageMinMaxObserver,
                        default_float_qparams_observer, default_observer,
                        default_per_channel_weight_observer,
                        default_placeholder_observer, default_weight_observer)
-from .fake_quantize import (FakeQuantize, default_fake_quant,
-                            default_per_channel_weight_fake_quant,
-                            default_weight_fake_quant, default_fused_act_fake_quant, default_fused_wt_fake_quant,
-                            FusedMovingAvgObsFakeQuantize, default_fused_per_channel_wt_fake_quant)
+from torch.ao.quantization.fake_quantize import (
+    FakeQuantize,
+    default_fake_quant,
+    default_per_channel_weight_fake_quant,
+    default_weight_fake_quant,
+    default_fused_act_fake_quant,
+    default_fused_wt_fake_quant,
+    FusedMovingAvgObsFakeQuantize,
+    default_fused_per_channel_wt_fake_quant,
+)
 import torch
 import torch.nn as nn
 

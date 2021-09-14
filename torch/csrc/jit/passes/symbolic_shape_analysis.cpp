@@ -31,7 +31,7 @@ XXX: this is still in prototype phase and has much work left to do, including
 but not limited to:
 - Refactor APIs
 - Add decent coverage of common ops
-- Add shape analysis pass on Graph that handles Ifs and Loops
+- Add shape analysis pass on Graph that handles Loops
 - Allow concurrent reads to the operator map
 - Successive applications of same inputs to same shape function (e.g. series of
 pointwise ops)
@@ -42,6 +42,88 @@ static bool symbolic_shape_analysis_test_mode = false;
 
 namespace torch {
 namespace jit {
+
+// This is similar to c10::SymbolicShape, but instead of either having
+// a concrete dimension or a symbolic dimension, an argument may be:
+// - A Symbolic Dimension
+// - A Constant Integer
+// - Neither of the above. The third case can occur due to inputs to
+// ops like view that accept negative values. Maintaining the distinction
+// between an unknown symbolic dimension and an unknown integer allows
+// us to optimize out comparisons to values < 0 (symbolic shapes are always >=
+// 0) For example, a call like graph(%y: Tensor(SS(-1), 10, 10), %inp: int):
+//   %five: int = prim::Constant[value=5]()
+//   %zero: int = prim::Constant[value=0]()
+//   %1 : int = aten::size(%y, %zero)
+//   %2 : int[] = prim::ListConstruct(%five, %1, %inp)
+//   %y.2: Tensor(5, SS(-1), (New Symbolic Shape)) = aten::view(%y, %2)
+//
+// x.view([5, y.size(0), inp])
+// will have inputs equal to [5, SS(-1), c10::nullopt]
+
+struct ShapeArg
+    : public std::
+          pair<c10::optional<c10::ShapeSymbol>, c10::optional<int64_t>> {
+  using pair::pair;
+
+  static ShapeArg unknownInteger() {
+    return ShapeArg();
+  }
+
+  ShapeArg(int64_t int_value) {
+    this->first = c10::nullopt;
+    this->second = int_value;
+  }
+
+  ShapeArg(c10::ShapeSymbol ss) {
+    if (ss.is_static()) {
+      this->first = c10::nullopt;
+      this->second = ss.value();
+    } else {
+      this->first = ss;
+      this->second = c10::nullopt;
+    }
+  }
+
+  c10::optional<int64_t> asConstantInt() {
+    return this->second;
+  }
+
+  c10::optional<c10::ShapeSymbol> asShapeSymbol() {
+    return this->first;
+  }
+
+ private:
+  ShapeArg() {
+    this->first = c10::nullopt;
+    this->second = c10::nullopt;
+  }
+};
+
+struct ShapeArguments {
+  ShapeArguments(const c10::SymbolicShape& ss) {
+    TORCH_INTERNAL_ASSERT(ss.rank())
+    for (size_t i = 0; i < *ss.rank(); ++i) {
+      maybe_shape_symbols_.push_back(ShapeArg(ss.at(i)));
+    }
+  }
+
+  ShapeArguments(std::vector<ShapeArg> ss) {
+    maybe_shape_symbols_ = std::move(ss);
+  }
+
+  int64_t len() {
+    return maybe_shape_symbols_.size();
+  }
+
+  ShapeArg at(size_t i) {
+    return maybe_shape_symbols_.at(i);
+  }
+
+ private:
+  std::vector<ShapeArg> maybe_shape_symbols_;
+  ;
+};
 
 bool setSymbolicShapeAnalysisTestMode(bool value) {
   bool old_value = symbolic_shape_analysis_test_mode;
@@ -128,7 +210,7 @@ struct SymbolicShapeAnalyzer {
 
         // we can't optimize a tensor without fixed rank
         if (symbolic_shapes.rank()) {
-          node_symbolic_input_indices.emplace_back(i, symbolic_shapes);
+          node_symbolic_input_indices_.emplace_back(i, symbolic_shapes);
         }
       } else if (
           type->cast<ListType>() &&
@@ -150,38 +232,38 @@ struct SymbolicShapeAnalyzer {
           // or concrete sizes with the integer list inputs that have a
           // constructor taken from constants or y.size() or y.size(0)
           auto list_construct = node_->input(i)->node();
-          std::vector<c10::optional<int64_t>> shape;
+          std::vector<ShapeArg> shape;
           for (Value* v : list_construct->inputs()) {
             if (auto constant = constant_as<int64_t>(v)) {
               shape.emplace_back(*constant);
-            } else if (
-                v->node()->kind() == aten::size &&
-                v->node()->input(1)->node()->kind() == prim::Constant) {
+            } else if (v->node()->kind() == aten::size) {
+              auto const_index = constant_as<int64_t>(v->node()->input(1));
               auto tt = v->node()->input(0)->type()->expect<TensorType>();
               auto ss = tt->symbolic_sizes();
-              if (!ss.rank()) {
-                shape.emplace_back(c10::nullopt);
+              if (!ss.rank() || !const_index) {
+                // if we are getting a size of a tensor, it is an unknown
+                // symbolic dimension instead of an unknown integer (must be
+                // >=0)
+                shape.emplace_back(at::ShapeSymbol::newSymbol());
                 continue;
               }
-              auto norm_index = normIndex(
-                  *constant_as<int64_t>(v->node()->input(1)), *ss.rank());
+              auto norm_index = normIndex(*const_index, *ss.rank());
               if (!norm_index) {
-                shape.emplace_back(c10::nullopt);
+                shape.emplace_back(at::ShapeSymbol::newSymbol());
                 continue;
               }
-              shape.emplace_back(ss[*norm_index].value());
+              shape.emplace_back(ss[*norm_index]);
             } else {
-              shape.emplace_back(c10::nullopt);
+              shape.emplace_back(ShapeArg::unknownInteger());
             }
           }
-          node_symbolic_input_indices.emplace_back(
-              i, c10::SymbolicShape(shape));
+          node_symbolic_input_indices_.emplace_back(i, std::move(shape));
         } else if (
             node_->input(i)->node()->kind() == aten::size &&
-            node_->input(i)->uses().size() == 1) {
+            !db.hasWriters(node_->input(i))) {
           auto ten_inp = node_->input(i)->node()->input();
           auto ss = ten_inp->type()->expect<TensorType>()->symbolic_sizes();
-          node_symbolic_input_indices.emplace_back(i, ss);
+          node_symbolic_input_indices_.emplace_back(i, ss);
         }
       }
     }
@@ -245,16 +327,15 @@ struct SymbolicShapeAnalyzer {
 
     std::unordered_map<int64_t, std::vector<Value*>> symbolic_shape_map;
 
-    for (const auto& index_symbolic_shape : node_symbolic_input_indices) {
+    for (const auto& index_symbolic_shape : node_symbolic_input_indices_) {
       auto index = index_symbolic_shape.first;
-      auto tensor_shape = index_symbolic_shape.second;
-      TORCH_INTERNAL_ASSERT(tensor_shape.rank().has_value());
+      auto shape_arguments = index_symbolic_shape.second;
 
       for (const auto& use : graph_->inputs().at(index)->uses()) {
         // TODO: either decompose composite ops like slice or add handling here
         switch (use.user->kind()) {
           case aten::len: {
-            size_t len = tensor_shape.rank().value();
+            size_t len = shape_arguments.len();
             replaceWithIValue(use.user->output(), static_cast<int64_t>(len));
           } break;
           case aten::__getitem__: {
@@ -262,19 +343,69 @@ struct SymbolicShapeAnalyzer {
             if (!index) {
               continue;
             }
-            auto norm_index = normIndex(*index, *tensor_shape.rank());
+            auto norm_index = normIndex(*index, shape_arguments.len());
             if (!norm_index) {
               continue;
             }
-            if (tensor_shape[*norm_index].is_static()) {
-              replaceWithIValue(
-                  use.user->output(), tensor_shape[*norm_index].value());
-            } else if (symbolic_shape_values) {
+            auto shape_arg = shape_arguments.at(*norm_index);
+            if (auto const_int = shape_arg.asConstantInt()) {
+              replaceWithIValue(use.user->output(), const_int);
+              continue;
+            }
+            auto maybe_shape_symbol = shape_arg.asShapeSymbol();
+            if (!maybe_shape_symbol) {
+              continue;
+            }
+            auto shape_symbol = *maybe_shape_symbol;
+            if (symbolic_shape_values) {
               symbolic_shape_values->emplace(
-                  use.user->output(), tensor_shape[*norm_index].value());
+                  use.user->output(), shape_symbol.value());
             } else {
-              int64_t symbolic_index = tensor_shape[*norm_index].value();
+              int64_t symbolic_index = shape_symbol.value();
               symbolic_shape_map[symbolic_index].push_back(use.user->output());
+            }
+            for (const auto& sym_uses : use.user->output()->uses()) {
+              auto k = sym_uses.user->kind();
+              if (k != aten::ge && k != aten::le && k != aten::ne &&
+                  k != aten::eq && k != aten::lt && k != aten::gt) {
+                break;
+              }
+              auto other_index = 1 - sym_uses.offset;
+              auto other_value =
+                  constant_as<int64_t>(sym_uses.user->input(other_index));
+              if (!other_value) {
+                continue;
+              }
+
+              // check for dim >= 0, 0 <= dim
+              // dim >= 0
+              if (k == aten::ge && *other_value == 0 && other_index == 1) {
+                replaceWithIValue(sym_uses.user->output(), true);
+                continue;
+              }
+              // 0 <= dim
+              if (k == aten::le && *other_value == 0 && other_index == 0) {
+                replaceWithIValue(sym_uses.user->output(), true);
+                continue;
+              }
+
+              // check for dim comparisons to negative number
+              if (*other_value >= 0) {
+                continue;
+              }
+              if (k == aten::eq || k == aten::ne) {
+                // True if:
+                // -2 != {Positive}
+                replaceWithIValue(sym_uses.user->output(), k == aten::ne);
+              } else {
+                // True if:
+                // -2 <= / < {Positive}
+                // {Positive} >= / > {-2}
+                bool true_val =
+                    ((other_index == 0 && (k == aten::le || k == aten::lt)) ||
+                     (other_index == 1 && (k == aten::ge || k == aten::gt)));
+                replaceWithIValue(sym_uses.user->output(), true_val);
+              }
             }
           }
         }
@@ -358,8 +489,7 @@ struct SymbolicShapeAnalyzer {
   // and non-fixed dimensions we cannot reason about at all
   // TODO: might be cleaner to store as a pair of index -> symbolic shape
   // but there were weird lifetime issues
-  std::vector<std::pair<int64_t, c10::SymbolicShape>>
-      node_symbolic_input_indices;
+  std::vector<std::pair<int64_t, ShapeArguments>> node_symbolic_input_indices_;
   std::shared_ptr<Graph> graph_;
   Node* node_;
 };
