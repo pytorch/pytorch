@@ -17,9 +17,8 @@ install_magma() {
     else
       amdgpu_targets=`rocm_agent_enumerator | grep -v gfx000 | sort -u | xargs`
     fi
-    echo "GPU_TARGET =" >> make.inc
     for arch in $amdgpu_targets; do
-      echo "GPU_TARGET += --amdgpu-target=$arch" >> make.inc
+      echo "DEVCCFLAGS += --amdgpu-target=$arch" >> make.inc
     done
     # hipcc with openmp flag may cause isnan() on __device__ not to be found; depending on context, compiler may attempt to match with host definition
     sed -i 's/^FOPENMP/#FOPENMP/g' make.inc
