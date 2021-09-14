@@ -1255,6 +1255,7 @@ class TestTEFuser(JitTestCase):
             F.hardtanh,
             F.hardsigmoid,
             F.hardswish,
+            F.softplus,
             torch.sqrt,
             torch.rsqrt,
             F.gelu,
@@ -2015,6 +2016,7 @@ works_list = [
     'nn.functional.hardshrink',
     'nn.functional.hardsigmoid',
     'nn.functional.hardswish',
+    'nn.functional.softplus',
     'nn.functional.hardtanh',
     'nn.functional.leaky_relu',
     'nn.functional.relu',
@@ -2028,6 +2030,7 @@ works_list = [
     'round',
     'rsqrt',
     'sigmoid',
+    'sign',
     'sin',
     'sinh',
     'sqrt',
@@ -2055,6 +2058,8 @@ skip_ops = [
     # Reference: https://github.com/pytorch/pytorch/pull/59442/checks?check_run_id=2746156896
     't',
     'conj'
+    'view',
+    'reshape',
 ]
 
 def get_name(op):
@@ -2066,7 +2071,7 @@ def get_name(op):
 class TestNNCOpInfo(TestCase):
     def te_compile(self, device, dtype, op):
         # If adding new OpInfo tests cause this test to fail, add it into here
-        skip_ops = []
+        skip_ops = ['view', 'reshape']
         if op.name in skip_ops:
             return
         sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)
