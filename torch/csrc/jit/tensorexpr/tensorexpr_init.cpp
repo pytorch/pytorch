@@ -19,9 +19,7 @@ namespace jit {
 using namespace torch::jit::tensorexpr;
 
 ArgValue convertPyToArgValue(py::handle inp) {
-  if (py::isinstance<Placeholder>(inp)) {
-    return py::cast<Placeholder>(inp).handle();
-  } else if (py::isinstance<BufHandle>(inp)) {
+  if (py::isinstance<BufHandle>(inp)) {
     return py::cast<BufHandle>(inp);
   } else if (py::isinstance<VarHandle>(inp)) {
     return py::cast<VarHandle>(inp);
@@ -204,24 +202,6 @@ void initTensorExprBindings(PyObject* module) {
              const std::vector<ExprHandle>& args,
              const ExprHandle& val) { return Store::make(self, args, val); });
 
-  py::class_<Placeholder>(te, "Placeholder")
-      .def(py::init<
-           const std::string&,
-           const Dtype&,
-           const std::vector<ExprHandle>&>())
-      .def(py::init<const std::vector<ExprHandle>&, const Dtype&>())
-      .def(py::init<const std::vector<ExprHandle>&>())
-      .def(
-          "load",
-          [](Placeholder& self, const std::vector<ExprHandle>& v) {
-            return self.load(v);
-          })
-      .def(
-          "store",
-          [](Placeholder& self,
-             const std::vector<ExprHandle>& args,
-             const ExprHandle& val) { return self.store(args, val); })
-      .def("data", [](Placeholder& self) { return BufHandle(self.data()); });
   py::class_<Tensor>(te, "Tensor")
       .def(
           py::init([](BufHandle& b, StmtPtr s) { return Tensor(b.node(), s); }))
@@ -314,16 +294,6 @@ void initTensorExprBindings(PyObject* module) {
          const std::vector<DimArg>& dim_args,
          const Reducer& reducer,
          Tensor buffer,
-         const std::vector<DimArg>& reduce_args) {
-        return Reduce(func_name, dim_args, reducer, buffer, reduce_args);
-      },
-      py::return_value_policy::reference);
-  te.def(
-      "Reduce",
-      [](const std::string& func_name,
-         const std::vector<DimArg>& dim_args,
-         const Reducer& reducer,
-         const Placeholder& buffer,
          const std::vector<DimArg>& reduce_args) {
         return Reduce(func_name, dim_args, reducer, buffer, reduce_args);
       },
@@ -813,12 +783,10 @@ void initTensorExprBindings(PyObject* module) {
 #endif
 
   py::class_<CodeGen::BufferArg>(te, "BufferArg")
-      .def(py::init<const Placeholder&>())
       .def(py::init<Tensor>())
       .def(py::init<const VarHandle&>())
       .def(py::init<const BufHandle&>());
 
-  py::implicitly_convertible<Placeholder, CodeGen::BufferArg>();
   py::implicitly_convertible<Tensor, CodeGen::BufferArg>();
   py::implicitly_convertible<VarHandle, CodeGen::BufferArg>();
   py::implicitly_convertible<BufHandle, CodeGen::BufferArg>();
