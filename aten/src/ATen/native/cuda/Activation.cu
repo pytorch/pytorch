@@ -182,7 +182,7 @@ void launch_prelu_cuda_kernel_multi_weights(
 
   if (input_ndim > 1) {
     channel_size = input.size(1); // channel is the 2nd dim of input
-    auto strides = input.sizes();
+    auto strides = input.strides();
     input_stride0 = strides[0];
     input_stride1 = strides[1];
   }
