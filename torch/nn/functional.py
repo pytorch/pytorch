@@ -3697,13 +3697,15 @@ def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optiona
         # The C++ code will recompute it based on the (integer) output size.
         if not torch.jit.is_scripting() and torch._C._get_tracing_state():
             # make scale_factor a tensor in tracing so constant doesn't get baked in
+            # we perform round (i.e. floor(0.5 + x)) to match opencv, scipy, scikit-image output size
             output_size = [
-                (torch.floor((input.size(i + 2).float() * torch.tensor(scale_factors[i], dtype=torch.float32)).float()))
+                (torch.floor(0.5 + (input.size(i + 2).float() * torch.tensor(scale_factors[i], dtype=torch.float32)).float()))
                 for i in range(dim)
             ]
         else:
             assert scale_factors is not None
-            output_size = [int(math.floor(float(input.size(i + 2)) * scale_factors[i])) for i in range(dim)]
+            # we perform round (i.e. floor(0.5 + x)) to match opencv, scipy, scikit-image output size
+            output_size = [int(math.floor(0.5 + float(input.size(i + 2)) * scale_factors[i])) for i in range(dim)]
         scale_factors = None
 
     if input.dim() == 3 and mode == "nearest":

@@ -21,7 +21,8 @@ TORCH_API c10::SmallVector<int64_t, 3> compute_output_size(
     TORCH_CHECK(static_cast<int64_t>(scale_factors->size()) == spatial_dimensions);
     c10::SmallVector<int64_t, 3> ret;
     for (int i = 0; i < spatial_dimensions; ++i) {
-      ret.push_back(static_cast<double>(input_size[i+2]) * scale_factors.value()[i]);
+      // we perform round (i.e. int(0.5 + x)) to match opencv, scipy, scikit-image output size
+      ret.push_back(0.5 + static_cast<double>(input_size[i+2]) * scale_factors.value()[i]);
     }
     return ret;
   }

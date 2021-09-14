@@ -10444,6 +10444,18 @@ class TestNN(NNTestCase):
         input = torch.randn(1, 1, 2, requires_grad=True)
         gradcheck(lambda x: F.interpolate(x, 4, mode='nearest'), [input])
 
+        # Check https://github.com/pytorch/pytorch/issues/62396
+        test_scales = [0.1234, 0.9999, 1.8]
+        isize = 32
+        expected_out_sizes = [int(0.5 + s * isize) for s in test_scales]
+        t_in = torch.randint(0, 256, size=(1, 1, isize), dtype=torch.float)
+        for r in [True, False]:
+            for s, expected_osize in zip(test_scales, expected_out_sizes):
+                t_out = F.interpolate(
+                    t_in, scale_factor=s, recompute_scale_factor=r, mode="nearest"
+                )
+                self.assertEqual(t_out.shape[-1], expected_osize)
+
     def test_upsamplingLinear1d(self):
         for align_corners in [True, False]:
             kwargs = dict(mode='linear', align_corners=align_corners)
@@ -10507,17 +10519,20 @@ class TestNN(NNTestCase):
 
     def test_upsampling_not_recompute_scale_factor(self):
         # test output against known input: result must match opencv
+        # opencv gives output of shape (5, 5, 2)
         in_t = torch.arange(8.).view(1, 2, 2, 2)
         expected_out_t = torch.tensor(
-            [[[[-0.32725, -0.08843, 0.37933, 0.79744],
-              [0.15039, 0.38921, 0.85697, 1.27508],
-              [1.08591, 1.32473, 1.79249, 2.21060],
-              [1.92213, 2.16095, 2.62871, 3.04682]],
+            [[[[-0.32725, -0.08843, 0.37933, 0.79744, 0.88296],
+              [0.15039, 0.38921, 0.85697, 1.27508, 1.3606],
+              [1.08591, 1.32473, 1.79249, 2.21060, 2.29613],
+              [1.92213, 2.16095, 2.62871, 3.04682, 3.13234],
+              [2.09318, 2.33200, 2.79976, 3.21787, 3.30340]],
 
-             [[3.67275, 3.91157, 4.37933, 4.79744],
-              [4.15039, 4.38921, 4.85697, 5.27508],
-              [5.08591, 5.32473, 5.79249, 6.21060],
-              [5.92213, 6.16095, 6.62871, 7.04682]]]])
+             [[3.67275, 3.91157, 4.37933, 4.79744, 4.88296],
+              [4.15039, 4.38921, 4.85697, 5.27508, 5.36060],
+              [5.08591, 5.32473, 5.79249, 6.21060, 6.29613],
+              [5.92213, 6.16095, 6.62871, 7.04682, 7.13234],
+              [6.09318, 6.33200, 6.79976, 7.21787, 7.30340]]]])
         if IS_PPC:
             # Both OpenCV and PyTorch give a slightly different result on PPC
             expected_out_t = torch.tensor(
@@ -10532,7 +10547,10 @@ class TestNN(NNTestCase):
                   [5.92212, 6.16094, 6.62870, 7.04680]]]])
         out_t = F.interpolate(in_t, scale_factor=2.3, mode='bicubic', align_corners=False, recompute_scale_factor=False)
         torch.set_printoptions(precision=5)
-        self.assertEqual(out_t, expected_out_t, atol=1e-4, rtol=0)
+        if IS_PPC:
+            self.assertEqual(out_t[..., :3, :3], expected_out_t[..., :3, :3], atol=1e-4, rtol=0)
+        else:
+            self.assertEqual(out_t, expected_out_t, atol=1e-4, rtol=0)
 
         device_list = ['cpu']
         if TEST_CUDA:
@@ -10545,7 +10563,7 @@ class TestNN(NNTestCase):
                 for scale_factor in [0.6, 1.6, 2.3]:
                     in_t = torch.ones(2, 2, 2, 2).to(device)
                     out_t = F.interpolate(in_t, scale_factor=scale_factor, **kwargs)
-                    out_size = int(math.floor(in_t.shape[-1] * scale_factor))
+                    out_size = int(math.floor(0.5 + in_t.shape[-1] * scale_factor))
                     self.assertEqual(torch.ones(2, 2, out_size, out_size), out_t.data, atol=1e-5, rtol=0)
 
                     input = torch.randn(2, 2, 2, 2, requires_grad=True)
