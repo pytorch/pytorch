@@ -164,5 +164,5 @@ def converted_func_needs_scale_zp(op: Callable, seen_op: SeenOp) -> bool:
     elif op in (torch.cat,):
         return True
     # TODO: add more ops
-    print('op', op)
+    # print('op', op)
     return False

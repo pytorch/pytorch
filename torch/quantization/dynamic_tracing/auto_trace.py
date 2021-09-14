@@ -17,6 +17,10 @@ logger = logging.getLogger('auto_trace')
 # logging.basicConfig(level=logging.DEBUG)
 # logging.basicConfig(level=logging.INFO)
 
+# enabling this tanks performance, make sure to disable for benchmarking
+# TODO(future PR): clean this up
+enable_logging = False
+
 
 def add_auto_observation(
     model : torch.nn.Module,
@@ -64,7 +68,8 @@ def add_auto_observation(
             # to prevent printing things from going into an infinite loop
             if func == torch.Tensor.__repr__:
                 return super().__torch_function__(func, types, args, kwargs)
-            logger.debug(f'__torch_function__ {str(func)}')
+            if enable_logging:
+                logger.debug(f'__torch_function__ {str(func)}')
 
             nonlocal qtensor_id
             kwargs = kwargs if kwargs else {}
@@ -152,7 +157,8 @@ def add_auto_observation(
                 if isinstance(self, AutoQuantizationState):
                     return args[0]
 
-                logger.debug(f"record_module: {type(self)}")
+                if enable_logging:
+                    logger.debug(f"record_module: {type(self)}")
 
                 nonlocal cur_module
                 old_module = cur_module
@@ -304,11 +310,12 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
                 cur_module._auto_quant_state.cur_op_needs_hooks(func)
             needs_arg_dequants = can_have_op_hooks and not needs_op_hooks
 
-            with torch._C.DisableTorchFunction():
-                logger.debug(f"__torch_function__ {func} " +
-                    f"op_hooks {needs_op_hooks} " +
-                    f"arg_types {[type(arg) for arg in args]}) " +
-                    f"arg_dtypes {[arg.dtype if isinstance(arg, torch.Tensor) else None for arg in args]}")
+            if enable_logging:
+                with torch._C.DisableTorchFunction():
+                    logger.debug(f"__torch_function__ {func} " +
+                        f"op_hooks {needs_op_hooks} " +
+                        f"arg_types {[type(arg) for arg in args]}) " +
+                        f"arg_dtypes {[arg.dtype if isinstance(arg, torch.Tensor) else None for arg in args]}")
 
             if needs_op_hooks:
                 assert cur_module is not None
@@ -365,7 +372,8 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
                         QuantizationDispatchProxy)
                 assert output is not NotImplemented
 
-            logger.debug(f"__torch_function__ {func} out {type(output)} end")
+            if enable_logging:
+                logger.debug(f"__torch_function__ {func} out {type(output)} end")
 
             return output
 
@@ -422,8 +430,9 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
                 if isinstance(self, AutoQuantizationState):
                     return args[0]
 
-                fqn = module_id_to_fqn.get(id(self), None)
-                logger.debug(f"starting fqn {fqn}")
+                if enable_logging:
+                    fqn = module_id_to_fqn.get(id(self), None)
+                    logger.debug(f"starting fqn {fqn}")
 
                 nonlocal cur_module
                 old_module = cur_module
@@ -442,10 +451,11 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
                         (not needs_op_hooks)
                     )
                     needs_arg_dequants = can_have_op_hooks and not needs_op_hooks
-                    logger.debug(f"record_module {type(self)} " +
-                      f"arg_types {[type(arg) for arg in args]} " +
-                      f"arg_dtypes {[arg.dtype if isinstance(arg, torch.Tensor) else None for arg in args]} " +
-                      f"op_hooks {needs_op_hooks} io_hooks {needs_io_hooks}")
+                    if enable_logging:
+                        logger.debug(f"record_module {type(self)} " +
+                          f"arg_types {[type(arg) for arg in args]} " +
+                          f"arg_dtypes {[arg.dtype if isinstance(arg, torch.Tensor) else None for arg in args]} " +
+                          f"op_hooks {needs_op_hooks} io_hooks {needs_io_hooks}")
 
                     if needs_op_hooks:
                         # before hooks
@@ -490,11 +500,12 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
                     else:
                         output = orig_module_call(self, *args, **kwargs)
 
-                    logger.debug(f"record_module {type(self)} " +
-                        f"out {type(output)} " +
-                        f"dtype {output.dtype if isinstance(output, torch.Tensor) else None} " +
-                        f"end")
-                    logger.debug(f"ending fqn {fqn}")
+                    if enable_logging:
+                        logger.debug(f"record_module {type(self)} " +
+                            f"out {type(output)} " +
+                            f"dtype {output.dtype if isinstance(output, torch.Tensor) else None} " +
+                            f"end")
+                        logger.debug(f"ending fqn {fqn}")
                     return output
                 finally:
                     module_stack.pop()

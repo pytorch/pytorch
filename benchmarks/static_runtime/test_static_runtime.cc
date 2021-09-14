@@ -1356,3 +1356,11 @@ TEST(StaticRuntime, IndividualOps_Nonzero) {
   auto b = at::randint(0, 2, {4, 3, 2});
   testStaticRuntime(nonzero_tensor, {a}, {b});
 }
+
+TEST(StaticRuntime, SignedLog1p) {
+  std::vector<IValue> args1 = {at::randn({2, 2})};
+  testStaticRuntime(signed_log1p_script, args1, {}, true);
+
+  std::vector<IValue> args2 = {at::randn({3, 3, 3})};
+  testStaticRuntime(signed_log1p_script, args1, args2, true);
+}
