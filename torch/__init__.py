@@ -765,6 +765,8 @@ from ._vmap_internals import vmap as vmap
 quantized_lstm = torch.ops.aten.quantized_lstm
 quantized_gru = torch.ops.aten.quantized_gru
 
+from torch.utils.dlpack import from_dlpack, to_dlpack
+
 
 def _register_device_module(device_type, module):
     r"""Register an external runtime module of the specific :attr:`device_type`
