@@ -40,15 +40,11 @@ MPSImage* createStaticImage(const float* src, IntArrayRef sizes) {
   memcpy(buff.contents, src, size_bytes);
   MPSImage* output = createStaticImage(sizes);
   id<MTLComputePipelineState> state = [[MetalContext sharedInstance]
-      specializedPipelineState:metal::mpscnn::kernelFor(
-                                   output,
-                                   "copy_nchw_to_metal",
-                                   "copy_nchw_to_metal_nonarray")
-                     Constants:@[
-                       @(output.featureChannels),
-                       @(output.height),
-                       @(output.width)
-                     ]];
+                                       specializedPipelineState:"copy_nchw_to_metal"
+                                       Constants:@[@(output.numberOfImages),
+                                                   @(output.featureChannels),
+                                                   @(output.height),
+                                                   @(output.width)]];
   MetalCommandBuffer* cb = [MetalCommandBuffer newBuffer];
   id<MTLComputeCommandEncoder> encoder = [cb.buffer computeCommandEncoder];
   [encoder setComputePipelineState:state];
@@ -126,15 +122,11 @@ MPSTemporaryImage* createTemporaryImage(
                  options:MTLResourceStorageModeShared];
   MPSTemporaryImage* output = createTemporaryImage(buffer, sizes);
   id<MTLComputePipelineState> state = [[MetalContext sharedInstance]
-      specializedPipelineState:metal::mpscnn::kernelFor(
-                                   output,
-                                   "copy_nchw_to_metal",
-                                   "copy_nchw_to_metal_nonarray")
-                     Constants:@[
-                       @(output.featureChannels),
-                       @(output.height),
-                       @(output.width)
-                     ]];
+                                       specializedPipelineState:"copy_nchw_to_metal"
+                                       Constants:@[@(output.numberOfImages),
+                                                   @(output.featureChannels),
+                                                   @(output.height),
+                                                   @(output.width)]];
   id<MTLComputeCommandEncoder> encoder = [buffer.buffer computeCommandEncoder];
   [encoder setComputePipelineState:state];
   [encoder setBuffer:buff offset:0 atIndex:0];
@@ -177,15 +169,11 @@ void copyImageToFloatBuffer(float* dst, MPSImage* image) {
       [MetalContext sharedInstance].commandQueue.commandBuffer;
   id<MTLComputeCommandEncoder> encoder = [cb computeCommandEncoder];
   id<MTLComputePipelineState> state = [[MetalContext sharedInstance]
-      specializedPipelineState:metal::mpscnn::kernelFor(
-                                   image,
-                                   "copy_metal_to_nchw",
-                                   "copy_metal_to_nchw_nonarray")
-                     Constants:@[
-                       @(image.featureChannels),
-                       @(image.height),
-                       @(image.width)
-                     ]];
+                                       specializedPipelineState:"copy_metal_to_nchw"
+                                       Constants:@[@(image.numberOfImages),
+                                                   @(image.featureChannels),
+                                                   @(image.height),
+                                                   @(image.width)]];
 
   [encoder setComputePipelineState:state];
   [encoder setBuffer:buffer offset:0 atIndex:0];
@@ -209,15 +197,11 @@ void copyImageToMetalBuffer(
   id<MTLComputeCommandEncoder> encoder =
       [cmdBuffer.buffer computeCommandEncoder];
   id<MTLComputePipelineState> state = [[MetalContext sharedInstance]
-      specializedPipelineState:metal::mpscnn::kernelFor(
-                                   image,
-                                   "copy_metal_to_nchw",
-                                   "copy_metal_to_nchw_nonarray")
-                     Constants:@[
-                       @(image.featureChannels),
-                       @(image.height),
-                       @(image.width)
-                     ]];
+                                       specializedPipelineState:"copy_metal_to_nchw"
+                                       Constants:@[@(image.numberOfImages),
+                                                   @(image.featureChannels),
+                                                   @(image.height),
+                                                   @(image.width)]];
 
   [encoder setComputePipelineState:state];
   [encoder setBuffer:dst offset:0 atIndex:0];

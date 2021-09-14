@@ -356,12 +356,8 @@ class CopyToMPSCNNOp final : public Operator<CPUContext> {
       id<MTLComputeCommandEncoder> encoder =
           [commandBuffer computeCommandEncoder];
       id<MTLComputePipelineState> state =
-          getMPSCNNContext().getSpecializedPipelineState(
-              kernelFor(
-                  output,
-                  @"copy_nchw_to_metal",
-                  @"copy_nchw_to_metal_nonarray"),
-              {{ushort(channels), ushort(height), ushort(width)}});
+      getMPSCNNContext().getSpecializedPipelineState(@"copy_nchw_to_metal",
+                                                     {{ushort(n), ushort(channels), ushort(height), ushort(width)}});
       [encoder setComputePipelineState:state];
       [encoder setBuffer:inputBuffers_[i] offset:0 atIndex:0];
       [encoder setTexture:[output texture] atIndex:0];
@@ -416,13 +412,8 @@ class CopyFromMPSCNNOp final : public Operator<CPUContext> {
       }
       id<MTLComputeCommandEncoder> encoder = [cb0 computeCommandEncoder];
       id<MTLComputePipelineState> state =
-          getMPSCNNContext().getSpecializedPipelineState(
-              kernelFor(
-                  Xi, @"copy_metal_to_nchw", @"copy_metal_to_nchw_nonarray"),
-              {{ushort(Xi.featureChannels),
-                ushort(Xi.height),
-                ushort(Xi.width)}});
-
+      getMPSCNNContext().getSpecializedPipelineState(@"copy_metal_to_nchw",
+                                                     {{ushort(Xi.numberOfImages), ushort(Xi.featureChannels), ushort(Xi.height), ushort(Xi.width)}});
       [encoder setComputePipelineState:state];
       [encoder setBuffer:outputBuffers_[i] offset:0 atIndex:0];
       [encoder setTexture:[Xi texture] atIndex:0];

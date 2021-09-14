@@ -136,15 +136,19 @@ kernel void elementwise_div(texture2d_array<half, access::read> in0[[texture(0)]
     elementwise_broadcast(in0, in1, out, gid, Div);
 }
 
+constant bool copy_nchw_to_metal_is_arr = (ushort_arg_0 > 1 || ushort_arg_1 > 4);
+constant bool copy_nchw_to_metal_is_tex = !copy_nchw_to_metal_is_arr;
 kernel void copy_nchw_to_metal(constant float* in[[buffer(0)]],
-                               texture2d_array<half, access::write> out[[texture(0)]],
+                               texture2d_array<half, access::write> out_arr[[texture(0), function_constant(copy_nchw_to_metal_is_arr)]],
+                               texture2d<half, access::write> out_tex[[texture(0), function_constant(copy_nchw_to_metal_is_tex)]],
                                ushort3 gid[[thread_position_in_grid]]) {
-    const ushort C = ushort_arg_0;
-    const ushort H = ushort_arg_1;
-    const ushort W = ushort_arg_2;
-    if (gid.x >= W || gid.y >= H) {
-        return;
-    }
+  const ushort C = ushort_arg_1;
+  const ushort H = ushort_arg_2;
+  const ushort W = ushort_arg_3;
+  if (gid.x >= W || gid.y >= H) {
+    return;
+  }
+  if (copy_nchw_to_metal_is_arr) {
     const ushort n = gid.z / divRoundUp(C, 4);
     const ushort c = gid.z - n * divRoundUp(C, 4);
 #define CHW_TO_CHWP4(idx, n, c_, h, w)                                     \
@@ -159,18 +163,8 @@ trns[idx] = 0.0h;                                                      \
     CHW_TO_CHWP4(2, n, c * 4 + 2, gid.y, gid.x);
     CHW_TO_CHWP4(3, n, c * 4 + 3, gid.y, gid.x);
 #undef CHW_TO_CHWP4
-    out.write(trns, gid.xy, gid.z);
-}
-
-kernel void copy_nchw_to_metal_nonarray(constant float* in[[buffer(0)]],
-                                        texture2d<half, access::write> out[[texture(0)]],
-                                        ushort2 gid[[thread_position_in_grid]]) {
-    const ushort C = ushort_arg_0;
-    const ushort H = ushort_arg_1;
-    const ushort W = ushort_arg_2;
-    if (gid.x >= W || gid.y >= H) {
-        return;
-    }
+    out_arr.write(trns, gid.xy, gid.z);
+  } else {
     half4 trns;
 #define CHW_TO_CHWP4(idx, c, h, w)                        \
 if ((c) < C) {                                          \
@@ -183,21 +177,26 @@ trns[idx] = 0.0h;                                     \
     CHW_TO_CHWP4(2, 2, gid.y, gid.x);
     CHW_TO_CHWP4(3, 3, gid.y, gid.x);
 #undef CHW_TO_CHWP4
-    out.write(trns, gid.xy);
+    out_tex.write(trns, gid.xy);
+  }
 }
 
-kernel void copy_metal_to_nchw(texture2d_array<half, access::read> in[[texture(0)]],
+constant bool copy_metal_to_nchw_is_arr = (ushort_arg_0 > 1 || ushort_arg_1 > 4);
+constant bool copy_metal_to_nchw_is_tex = !copy_metal_to_nchw_is_arr;
+kernel void copy_metal_to_nchw(texture2d_array<half, access::read> in_arr[[texture(0), function_constant(copy_metal_to_nchw_is_arr)]],
+                               texture2d<half, access::read> in_tex[[texture(0), function_constant(copy_metal_to_nchw_is_tex)]],
                                device float* out[[buffer(0)]],
                                ushort3 gid[[thread_position_in_grid]]) {
-    const ushort C = ushort_arg_0;
-    const ushort H = ushort_arg_1;
-    const ushort W = ushort_arg_2;
-    if (gid.x >= W || gid.y >= H) {
-        return;
-    }
+  const ushort C = ushort_arg_1;
+  const ushort H = ushort_arg_2;
+  const ushort W = ushort_arg_3;
+  if (gid.x >= W || gid.y >= H) {
+      return;
+  }
+  if (copy_metal_to_nchw_is_arr) {
     const ushort n = gid.z / divRoundUp(C, 4);
     const ushort c = gid.z - n * divRoundUp(C, 4);
-    half4 cs = in.read(gid.xy, gid.z);
+    half4 cs = in_arr.read(gid.xy, gid.z);
 #define CHWP4_TO_CHW(idx, n, c_, h, w)                                    \
 if ((c_) < C) {                                                         \
 out[n * H * W * C + int(c_) * H * W + int(h) * W + int(w)] = cs[idx]; \
@@ -207,18 +206,8 @@ out[n * H * W * C + int(c_) * H * W + int(h) * W + int(w)] = cs[idx]; \
     CHWP4_TO_CHW(2, n, c * 4 + 2, gid.y, gid.x);
     CHWP4_TO_CHW(3, n, c * 4 + 3, gid.y, gid.x);
 #undef CHWP4_TO_CHW
-}
-
-kernel void copy_metal_to_nchw_nonarray(texture2d<half, access::read> in[[texture(0)]],
-                                        device float* out[[buffer(0)]],
-                                        ushort2 gid[[thread_position_in_grid]]) {
-    const ushort C = ushort_arg_0;
-    const ushort H = ushort_arg_1;
-    const ushort W = ushort_arg_2;
-    if (gid.x >= W || gid.y >= H) {
-        return;
-    }
-    half4 cs = in.read(gid.xy);
+  } else {
+    half4 cs = in_tex.read(gid.xy);
 #define CHWP4_TO_CHW(idx, c, h, w)                       \
 if ((c) < C) {                                         \
 out[int(c) * H * W + int(h) * W + int(w)] = cs[idx]; \
@@ -228,6 +217,7 @@ out[int(c) * H * W + int(h) * W + int(w)] = cs[idx]; \
     CHWP4_TO_CHW(2, 2, gid.y, gid.x);
     CHWP4_TO_CHW(3, 3, gid.y, gid.x);
 #undef CHWP4_TO_CHW
+  }
 }
 
 kernel void copy(texture2d_array<half, access::read> in[[texture(0)]],
