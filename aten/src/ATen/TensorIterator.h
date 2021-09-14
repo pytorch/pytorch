@@ -482,7 +482,7 @@ struct TORCH_API TensorIterator final : public TensorIteratorBase {
   static TensorIterator borrowing_binary_op(const Tensor& out, const Tensor& a, const Tensor& b);
   TORCH_DISALLOW_TEMPORARIES(borrowing_binary_op)
   static TensorIterator comparison_op(const Tensor& out, const Tensor& a, const Tensor& b);
-  static TensorIterator unary_op(Tensor& out, const Tensor& a);
+  static TensorIterator unary_op(const Tensor& out, const Tensor& a);
   static TensorIterator unary_float_op(Tensor& out, const Tensor& a);
   static TensorIterator nullary_op(Tensor& out);
   static TensorIterator unary_force_boolean_op(const Tensor& out, const Tensor& a);

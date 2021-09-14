@@ -262,7 +262,7 @@ inline static void _apply_single_inverse_helper(scalar_t* self_ptr, scalar_t* se
 }
 
 template <typename scalar_t>
-static void apply_batched_inverse_lib(Tensor& self, Tensor& self_inv, Tensor& infos_getrf, Tensor& infos_getrs) {
+static void apply_batched_inverse_lib(const Tensor& self, const Tensor& self_inv, const Tensor& infos_getrf, const Tensor& infos_getrs) {
   const int batch_size = cuda_int_cast(batchCount(self), "batchCount");
   const int n = cuda_int_cast(self.size(-2), "self.size(-2)");
   const int lda = std::max<int>(1, n);
@@ -313,7 +313,7 @@ static void apply_batched_inverse_lib(Tensor& self, Tensor& self_inv, Tensor& in
 }
 
 template <typename scalar_t>
-static void apply_single_inverse_lib(const Tensor& self, Tensor& self_inv, Tensor& infos_getrf, Tensor& infos_getrs) {
+static void apply_single_inverse_lib(const Tensor& self, const Tensor& self_inv, const Tensor& infos_getrf, const Tensor& infos_getrs) {
   int n = cuda_int_cast(self.size(-2), "self.size(-2)");
   int lda = std::max<int>(1, n);
 
@@ -324,7 +324,7 @@ static void apply_single_inverse_lib(const Tensor& self, Tensor& self_inv, Tenso
 }
 
 // This is a type dispatching helper function for 'apply_batched_inverse_lib' and 'apply_single_inverse_lib'
-Tensor& _linalg_inv_out_helper_cuda_lib(Tensor& result, Tensor& infos_getrf, Tensor& infos_getrs) {
+const Tensor& _linalg_inv_out_helper_cuda_lib(const Tensor& result, const Tensor& infos_getrf, const Tensor& infos_getrs) {
   // assuming result is in column major order and contains the matrices to invert
   Tensor input_working_copy = cloneBatchedColumnMajor(result);
 

@@ -1337,7 +1337,7 @@ Computes the inverse of n-by-n matrix 'self', it is saved to 'self_inv'.
 For more information see MAGMA's documentation for GETRI and GETRF routines.
 */
 template <typename scalar_t>
-static void apply_batched_inverse(Tensor& self, Tensor& self_inv, Tensor& infos_lu, Tensor& infos_getri) {
+static void apply_batched_inverse(const Tensor& self, const Tensor& self_inv, const Tensor& infos_lu, const Tensor& infos_getri) {
 #ifndef USE_MAGMA
 AT_ERROR("inverse: MAGMA library not found in "
     "compilation. Please rebuild with MAGMA.");
@@ -1411,7 +1411,7 @@ AT_ERROR("inverse: MAGMA library not found in "
 }
 
 template <typename scalar_t>
-static void apply_single_inverse(Tensor& self, Tensor& info_lu, Tensor& info_getri) {
+static void apply_single_inverse(const Tensor& self, const Tensor& info_lu, const Tensor& info_getri) {
 #ifndef USE_MAGMA
 AT_ERROR("inverse: MAGMA library not found in "
     "compilation. Please rebuild with MAGMA.");
@@ -1474,7 +1474,7 @@ Tensor _inverse_helper_cuda(const Tensor& self) {
 }
 
 // This is a type dispatching helper function for 'apply_batched_inverse' and 'singleCheckErrors'
-Tensor& _linalg_inv_out_helper_cuda_legacy(Tensor& result, Tensor& infos_lu, Tensor& infos_getri) {
+const Tensor& _linalg_inv_out_helper_cuda_legacy(const Tensor& result, const Tensor& infos_lu, const Tensor& infos_getri) {
   // assuming result is in column major order and contains the matrices to invert
   if (result.dim() > 2) {
     auto input_working_copy = cloneBatchedColumnMajor(result);
@@ -1491,7 +1491,7 @@ Tensor& _linalg_inv_out_helper_cuda_legacy(Tensor& result, Tensor& infos_lu, Ten
 }
 
 // This is a MAGMA/cuSOLVER dispatching helper function
-Tensor& _linalg_inv_out_helper_cuda(Tensor &result, Tensor& infos_lu, Tensor& infos_getri) {
+const Tensor& _linalg_inv_out_helper_cuda(const Tensor &result, const Tensor& infos_lu, const Tensor& infos_getri) {
   // This function calculates the inverse matrix in-place
   // result should be in column major order and contain matrices to invert
 #ifdef USE_CUSOLVER

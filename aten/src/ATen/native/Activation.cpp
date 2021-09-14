@@ -403,7 +403,7 @@ Tensor& hardswish_out(const Tensor& self, Tensor& result) {
   return result;
 }
 
-Tensor& hardswish_(Tensor& self) {
+const Tensor& hardswish_(const Tensor& self) {
   #if defined(C10_MOBILE) && defined(USE_XNNPACK)
   if (xnnpack::use_hardswish(self)) {
     xnnpack::hardswish_(self);
