@@ -121,6 +121,7 @@ static void fuseConvBatchNorm(Block* b, ValueToParamPairMap& valsToParamsMap) {
       newConv->copyAttributes(*oldConv);
       newConv->insertBefore(bnNode);
       newConv->addInput(oldConv->inputs().at(0));
+      newConv->copyMetadata(oldConv);
 
       auto newConvW = b->owningGraph()->addInput();
       valsToParamsMap.insert(

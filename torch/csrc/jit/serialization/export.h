@@ -30,6 +30,11 @@ using RawDataExportMap = std::unordered_map<std::string, at::Tensor>;
 
 using SymbolDimMap = std::map<c10::ShapeSymbol, std::string>;
 
+// Used for modularized export settling function and node attributes.
+using ValAttrNameMap = std::unordered_map<const Value*, std::string>;
+using NodeAttrNameMap = std::
+    unordered_map<const Node*, std::unordered_map<std::string, std::string>>;
+
 TORCH_API std::tuple<
     std::shared_ptr<::ONNX_NAMESPACE::ModelProto>,
     RawDataExportMap,
@@ -50,7 +55,9 @@ export_onnx(
     const std::map<std::string, int>& custom_opsets = {},
     bool add_node_names = true,
     bool use_external_data_format = false,
-    const std::string& onnx_file_path = std::string());
+    const std::string& onnx_file_path = std::string(),
+    const ValAttrNameMap& val_attr_to_name = {},
+    const NodeAttrNameMap& node_attr_to_name = {});
 
 TORCH_API std::string serialize_model_proto_to_string(
     const std::shared_ptr<::ONNX_NAMESPACE::ModelProto>& model_proto);

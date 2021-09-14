@@ -33,6 +33,7 @@ void functionCallSubstitution(Block* block) {
               cur->outputs().size());
           interpolate_node->output()->copyMetadata(cur->output());
           interpolate_node->insertAfter(cur);
+          interpolate_node->copyMetadata(cur);
           cur->replaceAllUsesWith(interpolate_node);
           cur->removeAllInputs();
           cur->destroy();
