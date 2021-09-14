@@ -3950,7 +3950,7 @@ new_module_tests = [
     dict(
         module_name='PairwiseDistance',
         constructor_args=(1.5, 1e-05, True),
-        cpp_constructor_args='torch::nn::PairwiseDistanceOptions.p(1.5).eps(1e-05).keepdim(true)',
+        cpp_constructor_args='torch::nn::PairwiseDistanceOptions().p(1.5).eps(1e-05).keepdim(true)',
         input_fn=lambda: (torch.randn(10, 8), torch.randn(10, 8)),
         desc='with_non_default_args',
     ),
