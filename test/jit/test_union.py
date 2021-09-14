@@ -713,8 +713,8 @@ class TestUnion(JitTestCase):
         self._assert_raises(template,
                             "Union[List[str], List[torch.Tensor]]",
                             lhs["list_literal_of_mixed"],
-                            "none of those list types can hold the "
-                            "types of the given list elements")
+                            "none of those types match the types of the"
+                            " given list elements")
 
         self._assert_passes(template,
                             "Union[List[str], List[torch.Tensor]]",

@@ -1339,7 +1339,7 @@ struct to_ir {
       } else if (candidate_types.size() == 1) {
         (*refined_type_hint_ptr) = candidate_types[0];
       } else {
-        all_candidates = &candidate_types;
+        (*all_candidates) = std::move(candidate_types);
       }
     } else if (
         auto optional_type_hint =
