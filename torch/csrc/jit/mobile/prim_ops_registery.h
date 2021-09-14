@@ -17,7 +17,8 @@ void registerPrimOpsFunction(
 
 bool hasPrimOpsFn(const std::string& name);
 
-std::pair<std::string, std::function<void(Stack&)>>& getPrimOpsFn(const std::string& name);
+std::pair<std::string, std::function<void(Stack&)>>& getPrimOpsFn(
+    const std::string& name);
 
 void add_functions();
 

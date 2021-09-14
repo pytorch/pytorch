@@ -755,12 +755,6 @@ private:
   TensorBase __dispatch_contiguous(c10::MemoryFormat) const;
 };
 
-// For "multiple ... operators specified" warnings, closing brace of class
-// declaration must be included between pragma push & pop
-#ifdef _MSC_VER
-#pragma warning( pop )
-#endif
-
 inline int64_t get_device(const TensorBase& self) {
   return self.get_device();
 }
