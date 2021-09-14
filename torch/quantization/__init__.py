@@ -1,6 +1,6 @@
 from .quantize import *  # noqa: F403
-from .observer import *  # noqa: F403
-from .qconfig import *  # noqa: F403
+from torch.ao.quantization.observer import *  # noqa: F403
+from torch.ao.quantization.qconfig import *  # noqa: F403
 from .fake_quantize import *  # noqa: F403
 from .fuse_modules import fuse_modules
 from .stubs import *  # noqa: F403
