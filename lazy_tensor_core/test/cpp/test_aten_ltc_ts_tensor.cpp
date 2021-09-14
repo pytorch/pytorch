@@ -3302,7 +3302,7 @@ TEST_F(AtenLtcTsTensorTest, TestLinear) {
   });
 }
 
-TEST_F(AtenLtcTsTensorTest, TestPinverse) {
+TEST_F(AtenLtcTsTensorTest, DISABLED_TestPinverse) {
   torch::Tensor input =
       torch::rand({4, 6}, torch::TensorOptions(torch::kFloat));
   torch::Tensor result = torch::pinverse(input);
@@ -4058,7 +4058,7 @@ TEST_F(AtenLtcTsTensorTest, TestIndexSelectRank0) {
   }
 }
 
-TEST_F(AtenLtcTsTensorTest, TestInverse) {
+TEST_F(AtenLtcTsTensorTest, DISABLED_TestInverse) {
   torch::Tensor a = torch::randn({5, 5}, torch::TensorOptions(torch::kFloat));
   torch::Tensor b = torch::inverse(a);
   ForEachDevice([&](const torch::Device& device) {
