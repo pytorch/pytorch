@@ -569,16 +569,15 @@ TEST(SchemaParserTest, BeforeAfterSets) {
       " -> (Tensor(b|c)[](a!))");
 
   // The list itself is annotated with `a`
-  const AliasInfo* aliasInfo = *s.arguments().at(0).alias_info();
-  ASSERT_NE(aliasInfo, nullptr);
+  const auto& aliasInfo = *s.arguments().at(0).alias_info();
   ASSERT_TRUE(
-      aliasInfo->beforeSets() ==
+      aliasInfo.beforeSets() ==
       std::unordered_set<Symbol>{Symbol::fromQualString("alias::a")});
-  ASSERT_TRUE(aliasInfo->isWrite());
+  ASSERT_TRUE(aliasInfo.isWrite());
 
   // Check the contained types
-  ASSERT_TRUE(!aliasInfo->containedTypes().empty());
-  const auto& containedAliasInfo = aliasInfo->containedTypes()[0];
+  ASSERT_TRUE(!aliasInfo.containedTypes().empty());
+  const auto& containedAliasInfo = aliasInfo.containedTypes()[0];
   const auto expected = std::unordered_set<Symbol>{
       Symbol::fromQualString("alias::b"),
       Symbol::fromQualString("alias::c"),
@@ -594,20 +593,19 @@ TEST(SchemaParserTest, BeforeAfterSets2) {
       " -> (Tensor(b|c)[](a!))");
 
   // The list itself is annotated with `a`
-  const AliasInfo* aliasInfo = *s.arguments().at(0).alias_info();
-  ASSERT_NE(aliasInfo, nullptr);
+  const auto& aliasInfo = *s.arguments().at(0).alias_info();
   ASSERT_EQ(
-      aliasInfo->beforeSets(),
+      aliasInfo.beforeSets(),
       std::unordered_set<Symbol>{Symbol::fromQualString("alias::a")});
   ASSERT_EQ(
-      aliasInfo->afterSets(),
+      aliasInfo.afterSets(),
       std::unordered_set<Symbol>{Symbol::fromQualString("alias::a")});
-  ASSERT_TRUE(aliasInfo->isWrite());
-  ASSERT_EQ(aliasInfo->containedTypes().size(), 1);
+  ASSERT_TRUE(aliasInfo.isWrite());
+  ASSERT_EQ(aliasInfo.containedTypes().size(), 1);
 
   // Check the contained types
-  ASSERT_TRUE(!aliasInfo->containedTypes().empty());
-  const auto& containedAliasInfo = aliasInfo->containedTypes()[0];
+  ASSERT_TRUE(!aliasInfo.containedTypes().empty());
+  const auto& containedAliasInfo = aliasInfo.containedTypes()[0];
   const auto expectedBefore = std::unordered_set<Symbol>{
       Symbol::fromQualString("alias::b"),
   };
