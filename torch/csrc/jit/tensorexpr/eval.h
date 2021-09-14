@@ -157,17 +157,14 @@ class ExprEval {
       : dtype_(expr.dtype()) {
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     std::vector<BufferArg> buffer_args_extended = buffer_args;
-    Placeholder ret_buf("ret_val", dtype_, {1});
+    BufHandle ret_buf("ret_val", {1}, dtype_);
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    std::vector<ExprPtr> indices;
-    ExprPtr zero = alloc<IntImm>(0);
-    for (size_t i = 0; i < ret_buf.data()->ndim(); i++) {
+    std::vector<ExprHandle> indices;
+    ExprHandle zero = IntImm::make(0);
+    for (size_t i = 0; i < ret_buf.ndim(); i++) {
       indices.push_back(zero);
     }
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    StmtPtr store_stmt =
-        // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
-        alloc<Store>(ret_buf.data(), indices, expr.node());
+    StmtPtr store_stmt = Store::make(ret_buf, indices, expr);
     buffer_args_extended.emplace_back(ret_buf);
     codegen_.reset(new CodeGenType(store_stmt, buffer_args_extended));
   }
