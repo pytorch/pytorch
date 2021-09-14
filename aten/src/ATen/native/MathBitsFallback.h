@@ -49,8 +49,8 @@ struct MathOpFallback {
       // 1. alias_info has no value --> out-of-place operation
       // 2. alias_info does have a value, alias_info->is_write=True --> in-place or out= operation
       // 3. alias_info does have a value, alias_info->is_write=False --> view operation
-      const AliasInfo* alias_info = arguments[i].alias_info();
-      if (alias_info != nullptr) {
+      const auto& alias_info = arguments[i].alias_info();
+      if (alias_info.has_value()) {
         if (is_write.has_value()) {
           TORCH_CHECK(*is_write == alias_info->isWrite(),
             "Unsupported operator for ", op_name, " fallback: ", op.schema().name(),

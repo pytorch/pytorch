@@ -84,10 +84,10 @@ bool deepEquals(const IValue& lhs, const IValue& rhs) {
 }
 
 struct AliasAndIValue {
-  AliasAndIValue(const at::AliasInfo* aliasInfo, IValue iValue)
-      : aliasInfo(aliasInfo), iValue(std::move(iValue)) {}
+  AliasAndIValue(c10::optional<at::AliasInfo> aliasInfo, IValue iValue)
+      : aliasInfo(std::move(aliasInfo)), iValue(std::move(iValue)) {}
 
-  const at::AliasInfo* aliasInfo;
+  const c10::optional<at::AliasInfo> aliasInfo;
   const IValue iValue;
 };
 
@@ -113,8 +113,8 @@ void checkAliases(
     // if this output aliases any input, make sure that they share an alias set
     for (const auto& input : inputs) {
       if (output.iValue.isAliasOf(input.iValue)) {
-        const auto* inputSet = input.aliasInfo;
-        const auto* outputSet = output.aliasInfo;
+        const auto inputSet = input.aliasInfo;
+        const auto outputSet = output.aliasInfo;
         AT_ASSERT(inputSet && outputSet);
         bool found = false;
         for (const auto& set : inputSet->beforeSets()) {
