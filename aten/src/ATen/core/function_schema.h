@@ -1,5 +1,6 @@
 #pragma once
 
+#include <c10/util/SmallVector.h>
 #include <c10/util/StringUtil.h>
 #include <c10/util/string_view.h>
 #include <ATen/core/jit_type.h>
@@ -129,6 +130,11 @@ struct Argument {
   bool is_out_;
 };
 
+// The capacity of this SmallVector was not rigorously tuned across a
+// variety of workloads. If you think it might make sense to go up or
+// down, feel free!
+using ArgumentVector = c10::SmallVector<Argument, 3>;
+
 inline bool operator==(const Argument& lhs, const Argument& rhs) {
   return lhs.name() == rhs.name()
           && *lhs.type() == *rhs.type()
@@ -144,8 +150,8 @@ struct FunctionSchema {
   FunctionSchema(
       std::string name,
       std::string overload_name,
-      std::vector<Argument> arguments,
-      std::vector<Argument> returns,
+      ArgumentVector arguments,
+      ArgumentVector returns,
       bool is_vararg = false,
       bool is_varret = false)
       : name_({std::move(name), std::move(overload_name)}),
@@ -159,8 +165,8 @@ struct FunctionSchema {
   FunctionSchema(
       Symbol name,
       std::string overload_name,
-      std::vector<Argument> arguments,
-      std::vector<Argument> returns,
+      ArgumentVector arguments,
+      ArgumentVector returns,
       bool is_vararg = false,
       bool is_varret = false)
       : FunctionSchema(
@@ -202,8 +208,8 @@ struct FunctionSchema {
 
  private:
   OperatorName name_;
-  std::vector<Argument> arguments_;
-  std::vector<Argument> returns_;
+  ArgumentVector arguments_;
+  ArgumentVector returns_;
   // if true then this schema takes an arbitrary number of additional arguments
   // after the argument specified in arguments
   // currently this is used primarily to represent 'primitive' operators whose
@@ -253,10 +259,10 @@ struct FunctionSchema {
   const std::string& overload_name() const {
     return name_.overload_name;
   }
-  const std::vector<Argument>& arguments() const {
+  const ArgumentVector& arguments() const {
     return arguments_;
   }
-  const std::vector<Argument>& returns() const {
+  const ArgumentVector& returns() const {
     return returns_;
   }
   bool is_vararg() const {
@@ -290,7 +296,7 @@ struct FunctionSchema {
         is_varret()
         );
   }
-  FunctionSchema cloneWithArguments(std::vector<Argument> new_arguments) const {
+  FunctionSchema cloneWithArguments(ArgumentVector new_arguments) const {
     return FunctionSchema(
         name(),
         overload_name(),
@@ -299,7 +305,7 @@ struct FunctionSchema {
         is_vararg(),
         is_varret());
   }
-  FunctionSchema cloneWithReturns(std::vector<Argument> new_returns) const {
+  FunctionSchema cloneWithReturns(ArgumentVector new_returns) const {
     return FunctionSchema(
         name(),
         overload_name(),

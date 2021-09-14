@@ -124,7 +124,6 @@ def broadcast(network, a, b, a_name, b_name, preset_diff=0):
 
     return a, b
 
-
 def add_binary_elementwise_layer(network, lhs_val, rhs_val, op_type, name):
     lhs_val = get_trt_tensor(network, lhs_val, f"{name}_lhs")
     rhs_val = get_trt_tensor(network, rhs_val, f"{name}_rhs")
@@ -691,6 +690,104 @@ def acc_ops_sum(network, target, args, kwargs, name):
     return layer.get_output(0)
 
 
+def add_acc_ops_full_reduce(network, target, args, kwargs, name, reduce_op):
+    input_val = kwargs["input"]
+    if not isinstance(input_val, trt.tensorrt.ITensor):
+        raise RuntimeError(
+            f"max received input {input_val} that is not part "
+            "of the TensorRT region!"
+        )
+    assert (
+        not network.has_implicit_batch_dimension
+    ), "Do not support max over all the elements for implicit batch."
+
+    dim = range(len(input_val.shape))
+
+    layer = network.add_reduce(
+        input_val,
+        reduce_op,
+        get_axes_for_reduce_op(dim, network.has_implicit_batch_dimension),
+        False,
+    )
+    layer.name = name
+    return layer.get_output(0)
+
+def add_acc_ops_dim_reduce(network, target, args, kwargs, name, reduce_op):
+    new_kwargs = kwargs.copy()
+    new_kwargs['k'] = 1
+
+
+    if reduce_op == trt.ReduceOperation.MAX:
+        new_kwargs['largest'] = True
+    elif reduce_op == trt.ReduceOperation.MIN:
+        new_kwargs['largest'] = False
+    new_kwargs['sorted'] = False
+
+
+    (topk_out0, topk_out1) = acc_ops_topk(network, target, args, new_kwargs, name + "_topk")
+
+    topk_out0.name = f"{name}_topk0"
+    topk_out1.name = f"{name}_topk1"
+
+    if 'keepdim' in new_kwargs and new_kwargs['keepdim']:
+        return (topk_out0, topk_out1)
+
+    dim = new_kwargs['dim']
+    if network.has_implicit_batch_dimension:
+        assert dim != 0, "can't reduce on dim == 0 when network has implicit batch dimension"
+        # we remove the first dim in the shape tuple when it is implicit
+        dim -= 1
+    input_val = topk_out0
+    shape = input_val.shape
+
+    output_shape = []
+    for i, s in enumerate(shape):
+        if i == dim and s == 1:
+            continue
+        output_shape.append(s)
+
+    shuffle_layer0 = network.add_shuffle(input_val)
+    shuffle_layer0.reshape_dims = tuple(output_shape)
+    shuffle_layer0.name = name + '_shuffle0'
+
+    input_val = topk_out1
+    shape = input_val.shape
+
+    shuffle_layer1 = network.add_shuffle(input_val)
+    shuffle_layer1.reshape_dims = tuple(output_shape)
+    shuffle_layer1.name = name + '_shuffle1'
+
+
+    return (shuffle_layer0.get_output(0), shuffle_layer1.get_output(0))
+
+@tensorrt_converter(acc_ops.max_full_reduce)
+def acc_ops_max_full_reduce(network, target, args, kwargs, name):
+    return add_acc_ops_full_reduce(network, target, args, kwargs, name, trt.ReduceOperation.MAX)
+
+@tensorrt_converter(acc_ops.min_full_reduce)
+def acc_ops_min_full_reduce(network, target, args, kwargs, name):
+    return add_acc_ops_full_reduce(network, target, args, kwargs, name, trt.ReduceOperation.MIN)
+
+@tensorrt_converter(acc_ops.max_dim_reduce)
+def acc_ops_max_dim_reduce(network, target, args, kwargs, name):
+    return add_acc_ops_dim_reduce(network, target, args, kwargs, name, trt.ReduceOperation.MAX)
+
+@tensorrt_converter(acc_ops.min_dim_reduce)
+def acc_ops_min_dim_reduce(network, target, args, kwargs, name):
+    return add_acc_ops_dim_reduce(network, target, args, kwargs, name, trt.ReduceOperation.MIN)
+
+@tensorrt_converter(acc_ops.maximum)
+def acc_ops_maximum(network, target, args, kwargs, name):
+    return add_binary_elementwise_layer(
+        network, kwargs["input"], kwargs["other"], trt.ElementWiseOperation.MAX, name
+    )
+
+@tensorrt_converter(acc_ops.minimum)
+def acc_ops_minimum(network, target, args, kwargs, name):
+    return add_binary_elementwise_layer(
+        network, kwargs["input"], kwargs["other"], trt.ElementWiseOperation.MIN, name
+    )
+
 @tensorrt_converter(acc_ops.max_pool2d)
 def acc_ops_max_pool2d(network, target, args, kwargs, name):
     input_val = kwargs["input"]
@@ -793,13 +890,6 @@ def acc_ops_pow(network, target, args, kwargs, name):
     return add_binary_elementwise_layer(
         network, kwargs["input"], kwargs["exponent"], trt.ElementWiseOperation.POW, name
     )
-
-@tensorrt_converter(acc_ops.min_two_tensors_input)
-def acc_ops_min_two_tensors_input(network, target, args, kwargs, name):
-    return add_binary_elementwise_layer(
-        network, kwargs["input"], kwargs["other"], trt.ElementWiseOperation.MIN, name
-    )
-
 
 @tensorrt_converter(acc_ops.unsqueeze)
 def acc_ops_unsqueeze(network, target, args, kwargs, name):
