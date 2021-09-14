@@ -979,7 +979,7 @@ Tensor tril_indices_cpu(
   //
   // 3. sequential RAM + transpose: create an n X 2 Tensor, fill the Tensor
   //    sequentially, and then transpose it.
-  AT_DISPATCH_ALL_TYPES(result.scalar_type(), "tril_indices", [&]() -> void {
+  AT_DISPATCH_ALL_TYPES_AND(kBFloat16, result.scalar_type(), "tril_indices", [&]() -> void {
     // fill the Tensor with correct values
     scalar_t* result_data = result.data_ptr<scalar_t>();
     int64_t i = 0;
@@ -1017,7 +1017,7 @@ Tensor triu_indices_cpu(
   // create an empty Tensor with correct size
   auto result = at::native::empty_cpu({2, triu_size}, dtype_opt, layout_opt, device_opt, pin_memory_opt);
 
-  AT_DISPATCH_ALL_TYPES(result.scalar_type(), "triu_indices", [&]() -> void {
+  AT_DISPATCH_ALL_TYPES_AND(kBFloat16, result.scalar_type(), "triu_indices", [&]() -> void {
     // fill the Tensor with correct values
     scalar_t* result_data = result.data_ptr<scalar_t>();
     int64_t i = 0;
@@ -1411,17 +1411,18 @@ Tensor from_file(c10::string_view filename, c10::optional<bool> shared, c10::opt
 Tensor clone(const Tensor& src, c10::optional<c10::MemoryFormat> optional_memory_format) {
   auto memory_format =
       optional_memory_format.value_or(MemoryFormat::Preserve);
+  Tensor self;
   if (memory_format == MemoryFormat::Preserve) {
     if (src.is_non_overlapping_and_dense()) {
-      // Copy all strides
-      auto self = at::empty_strided(src.sizes(), src.strides(), src.options());
-      self.copy_(src);
-      return self;
+      // Copy all strides, this is marginally faster than calling empty_like
+      self = at::empty_strided(src.sizes(), src.strides(), src.options());
     } else {
-      memory_format = src.suggest_memory_format();
+      self = at::empty_like(src);
     }
+  } else {
+    self = at::empty_like(src, src.options(), memory_format);
   }
-  auto self = at::empty_like(src, src.options(), memory_format);
+
   self.copy_(src);
   return self;
 }

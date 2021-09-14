@@ -2,7 +2,6 @@
 #include <ATen/native/ReduceOps.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/cuda/Loops.cuh>
-#include <ATen/native/cuda/Reduce.cuh>
 #include <ATen/native/cuda/Resize.cuh>
 #include <ATen/native/cuda/Normalization.cuh>
 #include <c10/cuda/CUDAMathCompat.h>
@@ -648,7 +647,9 @@ Tensor batch_norm_backward_elemt_cuda(const Tensor& self, const Tensor& input, c
   c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
   const Tensor& weight = *weight_maybe_owned;
 
-  if (at::cuda::detail::canUse32BitIndexMath(self) && batch_norm_use_channels_last_kernels(self)){
+  if (at::cuda::detail::canUse32BitIndexMath(self) &&
+      batch_norm_use_channels_last_kernels(self) &&
+      batch_norm_use_channels_last_kernels(input))  {
     return batch_norm_backward_elemt_channels_last_cuda_template(self, input, mean, invstd, weight, sum_dy, sum_dy_xmu, count);
   }
 

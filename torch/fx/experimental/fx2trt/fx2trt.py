@@ -1,9 +1,10 @@
 import warnings
-from typing import List, NamedTuple, Iterable, Any, Optional, Tuple
+from typing import List, NamedTuple, Iterable, Any, Optional, Tuple, Sequence
 
 import tensorrt as trt
 import torch
 import torch.fx
+from torch.fx.node import _get_qualified_name
 
 
 # Borrowed from torch2trt
@@ -52,6 +53,12 @@ class TRTModule(torch.nn.Module):
         # Indicate output is in fp16
         self.fp16_output = fp16_output
 
+        # Indices of outputs into the CUDA engine bindings, in the order as they are
+        # in the fx graph's `output` node.
+        self.output_indices_in_order: Sequence[int] = [
+            self.engine.get_binding_index(name) for name in self.output_names
+        ]
+
     def _on_state_dict(self, state_dict, prefix, local_metadata):
         state_dict[prefix + "engine"] = bytearray(self.engine.serialize())
         state_dict[prefix + "input_names"] = self.input_names
@@ -95,7 +102,7 @@ class TRTModule(torch.nn.Module):
 
         # create output tensors
         outputs: List[torch.Tensor] = []
-        for idx in range(len(inputs), len(inputs) + len(self.output_names)):
+        for idx in self.output_indices_in_order:
             dtype = torch_dtype_from_trt(self.engine.get_binding_dtype(idx))
 
             if self.engine.has_implicit_batch_dimension:
@@ -211,6 +218,7 @@ class TRTInterpreter(torch.fx.Interpreter):
         module: torch.fx.GraphModule,
         input_specs: List[InputTensorSpec],
         explicit_batch_dimension: bool = False,
+        explicit_precision: bool = False,
         logger_level=trt.Logger.WARNING,
     ):
         super().__init__(module)
@@ -218,22 +226,29 @@ class TRTInterpreter(torch.fx.Interpreter):
         self.logger = trt.Logger(logger_level)
         self.builder = trt.Builder(self.logger)
 
+        flag = 0
         if explicit_batch_dimension:
             EXPLICIT_BATCH = 1 << (int)(
                 trt.NetworkDefinitionCreationFlag.EXPLICIT_BATCH
             )
-            self.network = self.builder.create_network(EXPLICIT_BATCH)
-        else:
-            self.network = self.builder.create_network()
+            flag |= EXPLICIT_BATCH
+
+        if explicit_precision:
+            EXPLICIT_PRECISION = 1 << (int)(
+                trt.NetworkDefinitionCreationFlag.EXPLICIT_PRECISION
+            )
+            flag |= EXPLICIT_PRECISION
+        self.network = self.builder.create_network(flag)
+
+        missing_ops = self.validate_conversion()
+        if missing_ops:
+            warnings.warn("Interpretation will fail due to missing operations \n"
+                          + "\n".join(f"{i}" for i in missing_ops))
 
         self.optimization_profiles: Optional[List] = None
         self.input_specs = input_specs
         self.input_specs_iter = 0
         self.validate_input_specs()
-        missing_ops = self.validate_conversion
-        if not missing_ops:
-            warnings.warn("Interpretation may fail due to missing operations \n"
-                          + "\n".join(f"{i}" for i in missing_ops))
         self._cur_node_name: Optional[str] = None
         self._input_names: List[str] = []
         self._output_names: List[str] = []
@@ -299,13 +314,15 @@ class TRTInterpreter(torch.fx.Interpreter):
         missing_converter = set()
 
         for node in self.module.graph.nodes:
-            if node.op in ["call_function", "call_method"] and not CONVERTERS.get(node.target):
-                missing_converter.add(f"{node.op} {node.target}")
+            if node.op == "call_function" and not CONVERTERS.get(node.target):
+                missing_converter.add(f"{node.op} {_get_qualified_name(node.target)}")
+            elif node.op == "call_method" and not CONVERTERS.get(node.target):
+                missing_converter.add(f"{node.op} torch.Tensor.{node.target}")
             elif node.op == "call_module":
                 submod = self.fetch_attr(node.target)
                 submod_type = getattr(submod, "_base_class_origin", type(submod))
                 if not CONVERTERS.get(submod_type):
-                    missing_converter.add(f"{node.op} {submod_type}")
+                    missing_converter.add(f"{node.op} {torch.typename(submod_type)}")
 
         return missing_converter
 

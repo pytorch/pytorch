@@ -2476,6 +2476,13 @@ class TestQuantizedOps(TestCase):
                         msg=(f"Error is too high: SNR(dB): {power}, "
                              f"Signal: {signal}, MSE: {mse}"))
 
+                # Trace
+                jit_qmodule = torch.jit.trace(lstm_quantized, qx)
+
+                # Script
+                # TODO: Fix the scripting in the torch/nn/quantizable/modules/rnn.py
+                # jit_qmodule = torch.jit.script(lstm_quantized)
+
     @override_qengines
     def test_custom_module_multi_head_attention(self):
         class MultiheadAttentionModel(torch.nn.Module):
@@ -2606,7 +2613,6 @@ class TestDynamicQuantizedLinear(TestCase):
     def test_qlinear(self, batch_size, input_channels, output_channels,
                      use_bias, use_relu, use_multi_dim_input, use_channelwise, reduce_range):
         if torch.backends.quantized.engine == 'qnnpack':
-            use_relu = False
             reduce_range = False
 
         qlinear_prepack = torch.ops.quantized.linear_prepack
@@ -2783,6 +2789,38 @@ class TestDynamicQuantizedLinear(TestCase):
         self.assertEqual(Y_fp32, Y_fp32_ref,
                          msg="torch.ops.quantized.fbgemm_linear_dynamic results are off")
 
+    @skipIfNoFBGEMM
+    def test_qlinear_dynamic_fp16(self):
+
+        options = itertools.product(
+            (2, 4),         # batch_size
+            (4, 5, 12),     # input_channels
+            (4, 7, 8),      # output_channels
+            (True, False),  # use_bias
+            (True, False),  # use_relu
+        )
+        for batch_size, input_channels, output_channels, use_bias, use_relu in options:
+            qlinear_prepack = torch.ops.quantized.linear_prepack_fp16
+            if use_relu:
+                qlinear_dynamic = torch.ops.quantized.linear_relu_dynamic_fp16
+            else:
+                qlinear_dynamic = torch.ops.quantized.linear_dynamic_fp16
+
+            x = torch.randn(batch_size, input_channels)
+            w = torch.randn(output_channels, input_channels)
+            bias = torch.randn(output_channels) if use_bias else None
+
+            w_packed = qlinear_prepack(w, bias)
+            out = qlinear_dynamic(x, w_packed)
+
+            # qlinear_dynamic_fp16 uses FP32 activation tensors and FP16 weight tensors
+            # output is FP32
+            w_fp16 = w.to(torch.float16).to(torch.float32)
+            ref = F.linear(x, w_fp16, bias)
+            if use_relu:
+                ref.relu_()
+
+            self.assertEqual(out, ref)
 
 class TestDynamicQuantizedRNNOp(TestCase):
     """Tests the correctness of the dynamic quantized lstm/gru."""

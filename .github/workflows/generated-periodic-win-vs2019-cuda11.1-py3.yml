@@ -1,5 +1,4 @@
 # @generated DO NOT EDIT MANUALLY
-
 # Template is at:    .github/templates/windows_ci_workflow.yml.j2
 # Generation script: .github/scripts/generate_ci_workflows.py
 name: periodic-win-vs2019-cuda11.1-py3
@@ -18,6 +17,7 @@ env:
   IN_CI: 1
   INSTALL_WINDOWS_SDK: 1
   PYTHON_VERSION: "3.8"
+  PR_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
   SCCACHE_BUCKET: "ossci-compiler-cache"
   VC_PRODUCT: "BuildTools"
   VC_VERSION: ""
@@ -29,7 +29,7 @@ env:
   USE_CUDA: 1
 
 concurrency:
-  group: periodic-win-vs2019-cuda11.1-py3-${{ github.event.pull_request.number || github.sha }}
+  group: periodic-win-vs2019-cuda11.1-py3-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true
 
 jobs:
@@ -56,7 +56,7 @@ jobs:
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Checkout PyTorch
-        uses: actions/checkout@v2
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
           submodules: recursive
           path: pytorch-${{ github.run_id }}
@@ -65,7 +65,16 @@ jobs:
       - name: Display EC2 information
         shell: bash
         run: |
-          .github/scripts/display_ec2_information.sh
+          set -euo pipefail
+          function get_ec2_metadata() {
+            # Pulled from instance metadata endpoint for EC2
+            # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
+            category=$1
+            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
+          }
+          echo "ami-id: $(get_ec2_metadata ami-id)"
+          echo "instance-id: $(get_ec2_metadata instance-id)"
+          echo "instance-type: $(get_ec2_metadata instance-type)"
       - name: Install Visual Studio 2019 toolchain
         shell: powershell
         run: |
@@ -97,7 +106,7 @@ jobs:
           path: C:\${{ github.run_id }}\build-results
       - name: Upload artifacts to s3
         if: always()
-        uses: seemethere/upload-artifact-s3@9d7ceb0ab39c2c88d93ef7792b27425b27d59162
+        uses: seemethere/upload-artifact-s3@v3
         with:
           retention-days: 14
           if-no-files-found: error
@@ -141,9 +150,9 @@ jobs:
       image: python:3.9
     steps:
       - name: Install dependencies
-        run: pip install typing-extensions
+        run: pip install typing-extensions==3.10
       - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
       - name: Generating test matrix
         id: set-matrix
         run: .github/scripts/generate_pytorch_test_matrix.py
@@ -169,7 +178,7 @@ jobs:
         working-directory: pytorch-${{ github.run_id }}
     steps:
       - name: Checkout PyTorch
-        uses: actions/checkout@v2
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
           submodules: recursive
           path: pytorch-${{ github.run_id }}
@@ -178,7 +187,16 @@ jobs:
       - name: Display EC2 information
         shell: bash
         run: |
-          .github/scripts/display_ec2_information.sh
+          set -euo pipefail
+          function get_ec2_metadata() {
+            # Pulled from instance metadata endpoint for EC2
+            # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
+            category=$1
+            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
+          }
+          echo "ami-id: $(get_ec2_metadata ami-id)"
+          echo "instance-id: $(get_ec2_metadata instance-id)"
+          echo "instance-type: $(get_ec2_metadata instance-type)"
       - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
         uses: seemethere/add-github-ssh-key@v1
         with:
@@ -224,17 +242,24 @@ jobs:
       - name: Zip test reports for upload
         if: always()
         env:
-          COMMIT_SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
-          WORKFLOW_ID: '${{ github.run_id }}_${{ github.run_number }}'
+          FILE_SUFFIX: '${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}'
         shell: powershell
         run: |
           # -ir => recursive include all files in pattern
-          7z a "test-reports-$Env:COMMIT_SHA1-$Env:WORKFLOW_ID.zip" -ir'!test\*.xml'
+          7z a "test-reports-$Env:FILE_SUFFIX.zip" -ir'!test\*.xml'
       - uses: actions/upload-artifact@v2
-        name: Store PyTorch Test Reports
+        name: Store Test Reports
         if: always()
         with:
           name: test-reports-${{ matrix.config }}
+          retention-days: 14
+          if-no-files-found: error
+          path:
+            pytorch-${{ github.run_id }}/test-reports-*.zip
+      - uses: seemethere/upload-artifact-s3@v3
+        name: Store Test Reports on S3
+        if: always()
+        with:
           retention-days: 14
           if-no-files-found: error
           path:
@@ -254,6 +279,7 @@ jobs:
         id: parse-ref
         run: .github/scripts/parse_ref.py
       - name: Display and upload test statistics (Click Me)
+        if: always()
         # temporary hack: set CIRCLE_* vars, until we update
         # tools/stats/print_test_stats.py to natively support GitHub Actions
         env:
