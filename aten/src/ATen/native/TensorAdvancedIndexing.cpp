@@ -85,6 +85,8 @@ native::SCATTER_GATHER_OP get_operator_enum(const c10::string_view reduce) {
 
 TORCH_META_FUNC(gather)
 (const Tensor & self, int64_t dim, const Tensor & index, bool sparse_grad) {
+  if (index.numel() == 0) return;
+
   const Tensor& result = maybe_get_output(0);
   int64_t wrapped_dim = at::maybe_wrap_dim(dim, self.dim());
 
@@ -1140,7 +1142,6 @@ Tensor index_fill(const Tensor & self, int64_t dim, const Tensor & index, const 
 // gather_out_cpu_cuda
 TORCH_IMPL_FUNC(gather_out)
 (const Tensor& self, int64_t dim, const Tensor& index, bool sparse_grad, const Tensor& result) {
-  if (index.numel() == 0) return;
   dim = at::maybe_wrap_dim(dim, self.dim());
   gather_stub(result.device().type(), result, self, dim, index);
 }
