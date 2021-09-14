@@ -7,6 +7,7 @@ from typing import Dict, Set
 import jinja2
 import json
 import os
+import sys
 from typing_extensions import Literal
 
 YamlShellBool = Literal["''", 1]
@@ -202,7 +203,11 @@ class CIWorkflow:
         with open(output_file_path, "w") as output_file:
             GENERATED = "generated"  # Note that please keep the variable GENERATED otherwise phabricator will hide the whole file
             output_file.writelines([f"# @{GENERATED} DO NOT EDIT MANUALLY\n"])
-            content = workflow_template.render(asdict(self))
+            try:
+                content = workflow_template.render(asdict(self))
+            except Exception as e:
+                print(f"Failed on template: {workflow_template}", file=sys.stderr)
+                raise e
             output_file.write(content)
             if content[-1] != "\n":
                 output_file.write("\n")
