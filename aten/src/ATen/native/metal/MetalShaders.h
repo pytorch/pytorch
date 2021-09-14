@@ -249,26 +249,22 @@ kernel void copy_nonarray(texture2d<half, access::read> in[[texture(0)]],
     out.write(in.read(gid), gid);
 }
 
-kernel void copy_offset(texture2d_array<half, access::read> in[[texture(0)]],
+constant bool copy_offset_is_arr = (ushort_arg_0 > 1 || ushort_arg_1 > 4);
+constant bool copy_offset_is_tex = !copy_offset_is_arr;
+kernel void copy_offset(texture2d_array<half, access::read> in_arr[[texture(0), function_constant(copy_offset_is_arr)]],
+                        texture2d<half, access::read> in_tex[[texture(0), function_constant(copy_offset_is_tex)]],
                         texture2d_array<half, access::write> out[[texture(1)]],
                         constant ushort* offset_buf[[buffer(0)]],
                         ushort3 gid[[thread_position_in_grid]]) {
-    if (gid.x >= out.get_width() || gid.y >= out.get_height()) {
-        return;
-    }
-    ushort2 gid_ = gid.xy;
-    out.write(in.read(gid_, gid.z), gid_, gid.z + offset_buf[0]);
-}
-
-kernel void copy_offset_nonarray(texture2d<half, access::read> in[[texture(0)]],
-                                 texture2d_array<half, access::write> out[[texture(1)]],
-                                 constant ushort* offset_buf[[buffer(0)]],
-                                 ushort3 gid[[thread_position_in_grid]]) {
-    if (gid.x >= out.get_width() || gid.y >= out.get_height()) {
-        return;
-    }
-    ushort2 gid_ = gid.xy;
-    out.write(in.read(gid_), gid_, gid.z + offset_buf[0]);
+  if (gid.x >= out.get_width() || gid.y >= out.get_height()) {
+      return;
+  }
+  ushort2 gid_ = gid.xy;
+  if (copy_offset_is_arr) {
+    out.write(in_arr.read(gid_, gid.z), gid_, gid.z + offset_buf[0]);
+  } else {
+    out.write(in_tex.read(gid_), gid_, gid.z + offset_buf[0]);
+  }
 }
 
 constant bool store_features_out_is_arr = (ushort_arg_3 > 1 || ushort_arg_2 > 4);

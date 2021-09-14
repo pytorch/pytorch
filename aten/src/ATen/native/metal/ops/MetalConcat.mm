@@ -31,8 +31,9 @@ Tensor cat_batch(const TensorList tensors, MetalTensorImplStorage& mt) {
     id<MTLComputeCommandEncoder> encoder =
         [commandBuffer.buffer computeCommandEncoder];
     id<MTLComputePipelineState> state = [[MetalContext sharedInstance]
-        pipelineState:mpscnn::kernelFor(
-                          X, "copy_offset", "copy_offset_nonarray")];
+                                         specializedPipelineState:"copy_offset"
+                                         Constants:@[@(X.numberOfImages),
+                                                     @(X.featureChannels)]];
     id<MTLBuffer> offsetBuffer = [[MetalContext sharedInstance].device
         newBufferWithLength:1 * sizeof(ushort)
                     options:MTLResourceOptionCPUCacheModeWriteCombined];
