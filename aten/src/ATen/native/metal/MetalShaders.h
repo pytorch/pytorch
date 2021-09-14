@@ -29,111 +29,91 @@ enum broadcastOp {
     Div,
 };
 
-void elementwise_broadcast_nonarray(texture2d<half, access::read> in0,
-                                   texture2d<half, access::read> in1,
-                                   texture2d<half, access::write> out,
-                                   ushort2 gid,
-                                   broadcastOp op) {
-    if (gid.x >= out.get_width() || gid.y >= out.get_height()) {
+constant bool elementwise_broadcast_is_arr = (ushort_arg_0 > 1 || ushort_arg_1 > 4);
+constant bool elementwise_broadcast_is_tex = !elementwise_broadcast_is_arr;
+void elementwise_broadcast(texture2d_array<half, access::read> in0_arr[[function_constant(elementwise_broadcast_is_arr)]],
+                          texture2d<half, access::read> in0_tex[[function_constant(elementwise_broadcast_is_tex)]],
+                          texture2d_array<half, access::read> in1_arr[[function_constant(elementwise_broadcast_is_arr)]],
+                          texture2d<half, access::read> in1_tex[[function_constant(elementwise_broadcast_is_tex)]],
+                          texture2d_array<half, access::write> out_arr[[function_constant(elementwise_broadcast_is_arr)]],
+                          texture2d<half, access::write> out_tex[[function_constant(elementwise_broadcast_is_tex)]],
+                          ushort3 gid,
+                          broadcastOp op) {
+  if (elementwise_broadcast_is_arr) {
+    if (gid.x >= out_arr.get_width() || gid.y >= out_arr.get_height()) {
         return;
     }
-    ushort2 in0_stride = ushort2(in0.get_width() > 1, in0.get_height() > 1);
-    ushort2 in1_stride = ushort2(in1.get_width() > 1, in1.get_height() > 1);
-
+    ushort2 in0_stride = ushort2(in0_arr.get_width() > 1, in0_arr.get_height() > 1);
+    ushort2 in1_stride = ushort2(in1_arr.get_width() > 1, in1_arr.get_height() > 1);
     ushort2 gid0 = gid.xy * in0_stride;
     ushort2 gid1 = gid.xy * in1_stride;
-
     if(op == Add) {
-        out.write(in0.read(gid0) + in1.read(gid1), gid);
+        out_arr.write(in0_arr.read(gid0, gid.z) + in1_arr.read(gid1, gid.z), gid.xy, gid.z);
     } else if(op == Sub) {
-        out.write(in0.read(gid0) - in1.read(gid1), gid);
+        out_arr.write(in0_arr.read(gid0, gid.z) - in1_arr.read(gid1, gid.z), gid.xy, gid.z);
     } else if(op == Mul) {
-        out.write(in0.read(gid0) * in1.read(gid1), gid);
+        out_arr.write(in0_arr.read(gid0, gid.z) * in1_arr.read(gid1, gid.z), gid.xy, gid.z);
     } else if(op == Div) {
-        out.write(in0.read(gid0) / in1.read(gid1), gid);
+        out_arr.write(in0_arr.read(gid0, gid.z) / in1_arr.read(gid1, gid.z), gid.xy, gid.z);
     }
-}
-
-void elementwise_broadcast(texture2d_array<half, access::read> in0,
-                           texture2d_array<half, access::read> in1,
-                           texture2d_array<half, access::write> out,
-                           ushort3 gid,
-                           broadcastOp op) {
-    if (gid.x >= out.get_width() || gid.y >= out.get_height()) {
+  } else {
+    if (gid.x >= out_tex.get_width() || gid.y >= out_tex.get_height()) {
         return;
     }
-
-    ushort2 in0_stride = ushort2(in0.get_width() > 1, in0.get_height() > 1);
-    ushort2 in1_stride = ushort2(in1.get_width() > 1, in1.get_height() > 1);
-
+    ushort2 in0_stride = ushort2(in0_tex.get_width() > 1, in0_tex.get_height() > 1);
+    ushort2 in1_stride = ushort2(in1_tex.get_width() > 1, in1_tex.get_height() > 1);
     ushort2 gid0 = gid.xy * in0_stride;
     ushort2 gid1 = gid.xy * in1_stride;
-
     if(op == Add) {
-        out.write(in0.read(gid0, gid.z) + in1.read(gid1, gid.z), gid.xy, gid.z);
+        out_tex.write(in0_tex.read(gid0) + in1_tex.read(gid1), gid.xy);
     } else if(op == Sub) {
-        out.write(in0.read(gid0, gid.z) - in1.read(gid1, gid.z), gid.xy, gid.z);
+        out_tex.write(in0_tex.read(gid0) - in1_tex.read(gid1), gid.xy);
     } else if(op == Mul) {
-        out.write(in0.read(gid0, gid.z) * in1.read(gid1, gid.z), gid.xy, gid.z);
+        out_tex.write(in0_tex.read(gid0) * in1_tex.read(gid1), gid.xy);
     } else if(op == Div) {
-        out.write(in0.read(gid0, gid.z) / in1.read(gid1, gid.z), gid.xy, gid.z);
+        out_tex.write(in0_tex.read(gid0) / in1_tex.read(gid1), gid.xy);
     }
+  }
 }
 
-kernel void elementwise_add_nonarray(texture2d<half, access::read> in0[[texture(0)]],
-                                     texture2d<half, access::read> in1[[texture(1)]],
-                                     texture2d<half, access::write> out[[texture(2)]],
-                                     ushort2 gid[[thread_position_in_grid]]) {
-    elementwise_broadcast_nonarray(in0, in1, out, gid, Add);
+kernel void elementwise_add(texture2d_array<half, access::read> in0_arr[[texture(0), function_constant(elementwise_broadcast_is_arr)]],
+                          texture2d<half, access::read> in0_tex[[texture(0), function_constant(elementwise_broadcast_is_tex)]],
+                          texture2d_array<half, access::read> in1_arr[[texture(1), function_constant(elementwise_broadcast_is_arr)]],
+                          texture2d<half, access::read> in1_tex[[texture(1), function_constant(elementwise_broadcast_is_tex)]],
+                          texture2d_array<half, access::write> out_arr[[texture(2), function_constant(elementwise_broadcast_is_arr)]],
+                          texture2d<half, access::write> out_tex[[texture(2), function_constant(elementwise_broadcast_is_tex)]],
+                          ushort3 gid[[thread_position_in_grid]]) {
+  elementwise_broadcast(in0_arr, in0_tex, in1_arr, in1_tex, out_arr, out_tex, gid, Add);
 }
 
-kernel void elementwise_add(texture2d_array<half, access::read> in0[[texture(0)]],
-                            texture2d_array<half, access::read> in1[[texture(1)]],
-                            texture2d_array<half, access::write> out[[texture(2)]],
-                            ushort3 gid[[thread_position_in_grid]]) {
-    elementwise_broadcast(in0, in1, out, gid, Add);
+kernel void elementwise_sub(texture2d_array<half, access::read> in0_arr[[texture(0), function_constant(elementwise_broadcast_is_arr)]],
+                          texture2d<half, access::read> in0_tex[[texture(0), function_constant(elementwise_broadcast_is_tex)]],
+                          texture2d_array<half, access::read> in1_arr[[texture(1), function_constant(elementwise_broadcast_is_arr)]],
+                          texture2d<half, access::read> in1_tex[[texture(1), function_constant(elementwise_broadcast_is_tex)]],
+                          texture2d_array<half, access::write> out_arr[[texture(2), function_constant(elementwise_broadcast_is_arr)]],
+                          texture2d<half, access::write> out_tex[[texture(2), function_constant(elementwise_broadcast_is_tex)]],
+                          ushort3 gid[[thread_position_in_grid]]) {
+  elementwise_broadcast(in0_arr, in0_tex, in1_arr, in1_tex, out_arr, out_tex, gid, Sub);
 }
 
-kernel void elementwise_sub_nonarray(texture2d<half, access::read> in0[[texture(0)]],
-                                     texture2d<half, access::read> in1[[texture(1)]],
-                                     texture2d<half, access::write> out[[texture(2)]],
-                                     ushort2 gid[[thread_position_in_grid]]) {
-    elementwise_broadcast_nonarray(in0, in1, out, gid, Sub);
+kernel void elementwise_mul(texture2d_array<half, access::read> in0_arr[[texture(0), function_constant(elementwise_broadcast_is_arr)]],
+                          texture2d<half, access::read> in0_tex[[texture(0), function_constant(elementwise_broadcast_is_tex)]],
+                          texture2d_array<half, access::read> in1_arr[[texture(1), function_constant(elementwise_broadcast_is_arr)]],
+                          texture2d<half, access::read> in1_tex[[texture(1), function_constant(elementwise_broadcast_is_tex)]],
+                          texture2d_array<half, access::write> out_arr[[texture(2), function_constant(elementwise_broadcast_is_arr)]],
+                          texture2d<half, access::write> out_tex[[texture(2), function_constant(elementwise_broadcast_is_tex)]],
+                          ushort3 gid[[thread_position_in_grid]]) {
+  elementwise_broadcast(in0_arr, in0_tex, in1_arr, in1_tex, out_arr, out_tex, gid, Mul);
 }
 
-kernel void elementwise_sub(texture2d_array<half, access::read> in0[[texture(0)]],
-                            texture2d_array<half, access::read> in1[[texture(1)]],
-                            texture2d_array<half, access::write> out[[texture(2)]],
-                            ushort3 gid[[thread_position_in_grid]]) {
-    elementwise_broadcast(in0, in1, out, gid, Sub);
-}
-
-kernel void elementwise_mul_nonarray(texture2d<half, access::read> in0[[texture(0)]],
-                                     texture2d<half, access::read> in1[[texture(1)]],
-                                     texture2d<half, access::write> out[[texture(2)]],
-                                     ushort2 gid[[thread_position_in_grid]]) {
-    elementwise_broadcast_nonarray(in0, in1, out, gid, Mul);
-}
-
-kernel void elementwise_mul(texture2d_array<half, access::read> in0[[texture(0)]],
-                            texture2d_array<half, access::read> in1[[texture(1)]],
-                            texture2d_array<half, access::write> out[[texture(2)]],
-                            ushort3 gid[[thread_position_in_grid]]) {
-    elementwise_broadcast(in0, in1, out, gid, Mul);
-}
-
-kernel void elementwise_div_nonarray(texture2d<half, access::read> in0[[texture(0)]],
-                                     texture2d<half, access::read> in1[[texture(1)]],
-                                     texture2d<half, access::write> out[[texture(2)]],
-                                     ushort2 gid[[thread_position_in_grid]]) {
-    elementwise_broadcast_nonarray(in0, in1, out, gid, Div);
-}
-
-kernel void elementwise_div(texture2d_array<half, access::read> in0[[texture(0)]],
-                            texture2d_array<half, access::read> in1[[texture(1)]],
-                            texture2d_array<half, access::write> out[[texture(2)]],
-                            ushort3 gid[[thread_position_in_grid]]) {
-    elementwise_broadcast(in0, in1, out, gid, Div);
+kernel void elementwise_div(texture2d_array<half, access::read> in0_arr[[texture(0), function_constant(elementwise_broadcast_is_arr)]],
+                          texture2d<half, access::read> in0_tex[[texture(0), function_constant(elementwise_broadcast_is_tex)]],
+                          texture2d_array<half, access::read> in1_arr[[texture(1), function_constant(elementwise_broadcast_is_arr)]],
+                          texture2d<half, access::read> in1_tex[[texture(1), function_constant(elementwise_broadcast_is_tex)]],
+                          texture2d_array<half, access::write> out_arr[[texture(2), function_constant(elementwise_broadcast_is_arr)]],
+                          texture2d<half, access::write> out_tex[[texture(2), function_constant(elementwise_broadcast_is_tex)]],
+                          ushort3 gid[[thread_position_in_grid]]) {
+  elementwise_broadcast(in0_arr, in0_tex, in1_arr, in1_tex, out_arr, out_tex, gid, Div);
 }
 
 kernel void copy_nchw_to_metal(constant float* in[[buffer(0)]],

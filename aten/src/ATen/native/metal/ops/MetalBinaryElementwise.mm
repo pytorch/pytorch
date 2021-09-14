@@ -61,8 +61,7 @@ static inline void checkInputs(const Tensor& input1, const Tensor& input2) {
 Tensor binaryElementwiseShaderKernel(
     const Tensor& input1,
     const Tensor& input2,
-    const std::string& arrayKernel,
-    const std::string& nonarrayKernel) {
+    const std::string& kernel) {
   checkInputs(input1, input2);
   MPSImage* X1 = imageFromTensor(input1);
   MPSImage* X2 = imageFromTensor(input2);
@@ -83,7 +82,10 @@ Tensor binaryElementwiseShaderKernel(
   mt.texture()->allocateTemporaryStorage(outputSize, cb1);
   MPSImage* Y = mt.texture()->image();
   id<MTLComputePipelineState> state = [[MetalContext sharedInstance]
-      pipelineState:mpscnn::kernelFor(X1, arrayKernel, nonarrayKernel)];
+                                       specializedPipelineState:kernel
+                                       Constants:@[
+                                         @(X1.numberOfImages),
+                                         @(X1.featureChannels)]];
   id<MTLComputeCommandEncoder> encoder = [cb1.buffer computeCommandEncoder];
   [encoder setComputePipelineState:state];
   [encoder setTexture:[X1 texture] atIndex:0];
@@ -101,8 +103,7 @@ Tensor binaryElementwiseShaderKernel(
 Tensor& binaryElementwiseShaderKernel_(
     Tensor& input1,
     const Tensor& input2,
-    const std::string& arrayKernel,
-    const std::string& nonarrayKernel) {
+    const std::string& kernel) {
   checkInputs(input1, input2);
   MPSImage* X1 = imageFromTensor(input1);
   MPSImage* X2 = imageFromTensor(input2);
@@ -121,7 +122,10 @@ Tensor& binaryElementwiseShaderKernel_(
       [cb1 isEqual:cb2], @"inputs have different Metal command buffers");
   MPSImage* Y = createTemporaryImage(cb1, outputSize.vec());
   id<MTLComputePipelineState> state = [[MetalContext sharedInstance]
-      pipelineState:mpscnn::kernelFor(X1, arrayKernel, nonarrayKernel)];
+                                       specializedPipelineState:kernel
+                                       Constants:@[
+                                         @(X1.numberOfImages),
+                                         @(X1.featureChannels)]];
   id<MTLComputeCommandEncoder> encoder = [cb1.buffer computeCommandEncoder];
   [encoder setComputePipelineState:state];
   [encoder setTexture:[X1 texture] atIndex:0];
@@ -214,8 +218,7 @@ Tensor add_Tensor(const Tensor& input1, const Tensor& input2, const Scalar& alph
   if (@available(iOS 11.3, *)) {
     return binaryElementwiseMPSCNNKernel<MPSCNNAdd>(input1, input2_);
   } else {
-    return binaryElementwiseShaderKernel(
-        input1, input2_, "elementwise_add", "elementwise_add_nonarray");
+    return binaryElementwiseShaderKernel(input1, input2_, "elementwise_add");
   }
 }
 
@@ -225,8 +228,7 @@ Tensor& add__Tensor(Tensor& input1, const Tensor& input2, const Scalar& alpha) {
   if (@available(iOS 11.3, *)) {
     return binaryElementwiseMPSCNNKernel_<MPSCNNAdd>(input1, input2_);
   } else {
-    return binaryElementwiseShaderKernel_(
-        input1, input2_, "elementwise_add", "elementwise_add_nonarray");
+    return binaryElementwiseShaderKernel_(input1, input2_, "elementwise_add");
   }
 }
 
@@ -236,8 +238,7 @@ Tensor sub_Tensor(const Tensor& input1, const Tensor& input2, const Scalar& alph
   if (@available(iOS 11.3, *)) {
     return binaryElementwiseMPSCNNKernel<MPSCNNSubtract>(input1, input2_);
   } else {
-    return binaryElementwiseShaderKernel(
-        input1, input2_, "elementwise_sub", "elementwise_sub_nonarray");
+    return binaryElementwiseShaderKernel(input1, input2_, "elementwise_sub");
   }
 }
 
@@ -247,8 +248,7 @@ Tensor& sub__Tensor(Tensor& input1, const Tensor& input2, const Scalar& alpha) {
   if (@available(iOS 11.3, *)) {
     return binaryElementwiseMPSCNNKernel_<MPSCNNSubtract>(input1, input2_);
   } else {
-    return binaryElementwiseShaderKernel_(
-        input1, input2_, "elementwise_sub", "elementwise_sub_nonarray");
+    return binaryElementwiseShaderKernel_(input1, input2_, "elementwise_sub");
   }
 }
 
@@ -258,8 +258,7 @@ Tensor mul_Tensor(const Tensor& input1, const Tensor& input2) {
   if (@available(iOS 11.3, *)) {
     return binaryElementwiseMPSCNNKernel<MPSCNNMultiply>(input1, input2_);
   } else {
-    return binaryElementwiseShaderKernel(
-        input1, input2_, "elementwise_mul", "elementwise_mul_nonarray");
+    return binaryElementwiseShaderKernel(input1, input2_, "elementwise_mul");
   }
 }
 
@@ -269,8 +268,7 @@ Tensor& mul__Tensor(Tensor& input1, const Tensor& input2) {
   if (@available(iOS 11.3, *)) {
     return binaryElementwiseMPSCNNKernel_<MPSCNNMultiply>(input1, input2_);
   } else {
-    return binaryElementwiseShaderKernel_(
-        input1, input2_, "elementwise_mul", "elementwise_mul_nonarray");
+    return binaryElementwiseShaderKernel_(input1, input2_, "elementwise_mul");
   }
 }
 
@@ -280,8 +278,7 @@ Tensor div_Tensor(const Tensor& input1, const Tensor& input2) {
   if (@available(iOS 11.3, *)) {
     return binaryElementwiseMPSCNNKernel<MPSCNNDivide>(input1, input2_);
   } else {
-    return binaryElementwiseShaderKernel(
-        input1, input2_, "elementwise_div", "elementwise_div_nonarray");
+    return binaryElementwiseShaderKernel(input1, input2_, "elementwise_div");
   }
 }
 
@@ -291,8 +288,7 @@ Tensor& div__Tensor(Tensor& input1, const Tensor& input2) {
   if (@available(iOS 11.3, *)) {
     return binaryElementwiseMPSCNNKernel_<MPSCNNDivide>(input1, input2_);
   } else {
-    return binaryElementwiseShaderKernel_(
-        input1, input2_, "elementwise_div", "elementwise_div_nonarray");
+    return binaryElementwiseShaderKernel_(input1, input2_, "elementwise_div");
   }
 }
 
