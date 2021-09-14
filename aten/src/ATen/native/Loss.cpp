@@ -91,14 +91,10 @@ Tensor triplet_margin_loss(const Tensor& anchor, const Tensor& positive, const T
       "D and ",
       n_dim,
       "D inputs.")
-  auto pairwise_distance = [p, eps](const Tensor& x1, const Tensor& x2) {
-    auto innermost_dim = x1.dim() - 1;
-    return at::norm(x1 - x2 + eps, p, innermost_dim, false);
-  };
-  auto dist_pos = pairwise_distance(anchor, positive);
-  auto dist_neg = pairwise_distance(anchor, negative);
+  auto dist_pos = at::pairwise_distance(anchor, positive, p, eps);
+  auto dist_neg = at::pairwise_distance(anchor, negative, p, eps);
   if (swap) {
-    auto dist_swap = pairwise_distance(positive, negative);
+    auto dist_swap = at::pairwise_distance(positive, negative, p, eps);
     dist_neg = at::min(dist_neg, dist_swap);
   }
   auto output = at::clamp_min(margin + dist_pos - dist_neg, 0);
