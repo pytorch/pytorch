@@ -260,7 +260,7 @@ private:
   // Returns true if kernel_ has entry for a particular key.
   bool hasKernelForDispatchKey(DispatchKey k) const;
   // Retrieves a pointer to AnnotatedKernel at kernels_.at(dispatch_key).front().
-  c10::optional<const AnnotatedKernel*> getKernelForDispatchKey(DispatchKey dispatch_key) const;
+  const AnnotatedKernel* getKernelForDispatchKey(DispatchKey dispatch_key) const;
 };
 
 } // namespace impl
