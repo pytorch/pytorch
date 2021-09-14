@@ -52,5 +52,8 @@ def functional_call(module, parameters_and_buffers, args, kwargs=None):
     if kwargs is None:
         kwargs = {}
     with reparametrize_module(module, parameters_and_buffers):
-        out = module(*args, **kwargs)
+        if isinstance(args, tuple):
+            out = module(*args, **kwargs)
+        else:
+            out = module(args, **kwargs)
     return out
