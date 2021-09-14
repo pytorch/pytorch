@@ -24,7 +24,7 @@ from ..utils import (
     get_qparam_dict,
 )
 
-from ..quantize import (
+from torch.ao.quantization.quantize import (
     is_activation_post_process,
 )
 
@@ -190,6 +190,7 @@ class QuantizeHandler(ABC):
 # tuple (activation_dtype, weight_dtype, compute_dtype)
 # these are supported types for common binary ops like add/mul etc.
 all_dtypes = [
+    (torch.qint8, torch.qint8, None),
     (torch.quint8, torch.qint8, None),
     (torch.float16, torch.float16, None),
 ]
@@ -197,6 +198,7 @@ fp16_dtypes = [
     (torch.float16, torch.float16, None)
 ]
 int8_dtypes = [
+    (torch.qint8, torch.qint8, None),
     (torch.quint8, torch.qint8, None),
 ]
 binary_op_supported_dtypes : Dict[Union[Callable, str], List[Tuple[torch.dtype, torch.dtype, None]]] = {
@@ -356,6 +358,9 @@ class BinaryOpQuantizeHandler(QuantizeHandler):
         the pattern matched to this QuantizeHandler instance during the
         prepare step.
         """
+        dtypes = get_qconfig_dtypes(qconfig)
+        if not (self.binary_op in binary_op_supported_dtypes and dtypes in binary_op_supported_dtypes[self.binary_op]):
+            return False
         if self.num_tensor_args == 1:
             return True
         elif self.all_node_args_are_tensors and self.input_output_observed():
@@ -396,7 +401,9 @@ class BinaryOpQuantizeHandler(QuantizeHandler):
 
         if is_reference:
             act_dtype = activation_dtype(qconfig)
-            if act_dtype == torch.float:
+            dtypes = get_qconfig_dtypes(qconfig)
+            if act_dtype == torch.float or \
+               not (self.binary_op in binary_op_supported_dtypes and dtypes in binary_op_supported_dtypes[self.binary_op]):
                 return quantized_graph.node_copy(node, load_arg(quantized=torch.float))
             else:
                 if self.num_tensor_args == 2:
