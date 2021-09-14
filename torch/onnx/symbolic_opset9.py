@@ -1087,7 +1087,7 @@ def __interpolate(g, input, size, scale_factor, mode , align_corners, recompute_
 
 def bitwise_not(g, inp):
     if inp.type().scalarType() != "Bool":
-        raise NotImplementedError("ONNX export does NOT support exporting bitwise Not " +
+        raise NotImplementedError("ONNX export does NOT support exporting bitwise Not "
                                   "for non-boolean input values")
     return g.op("Not", inp)
 
@@ -1118,7 +1118,7 @@ def wrap_logical_op_with_negation(func):
 
 def __not_(g, self):
     if self.type().scalarType() != "Bool":
-        raise NotImplementedError("ONNX export does NOT support exporting bitwise Not " +
+        raise NotImplementedError("ONNX export does NOT support exporting bitwise Not "
                                   "for non-boolean input values")
     return g.op("Not", self)
 
@@ -1171,7 +1171,7 @@ def __and_(g, input, other):
             other.type().scalarType() == "Bool":
         return g.op("And", input, other)
     else:
-        raise NotImplementedError("ONNX export does NOT support exporting bitwise AND " +
+        raise NotImplementedError("ONNX export does NOT support exporting bitwise AND "
                                   "for non-boolean input values")
 
 
@@ -1180,7 +1180,7 @@ def __or_(g, input, other):
             other.type().scalarType() == "Bool":
         return g.op("Or", input, other)
     else:
-        raise NotImplementedError("ONNX export does NOT support exporting bitwise OR " +
+        raise NotImplementedError("ONNX export does NOT support exporting bitwise OR "
                                   "for non-boolean input values")
 
 
@@ -1189,7 +1189,7 @@ def __xor_(g, input, other):
             other.type().scalarType() == "Bool":
         return g.op("Xor", input, other)
     else:
-        raise NotImplementedError("ONNX export does NOT support exporting bitwise XOR " +
+        raise NotImplementedError("ONNX export does NOT support exporting bitwise XOR "
                                   "for non-boolean input values")
 
 
