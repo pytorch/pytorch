@@ -1,8 +1,8 @@
 #pragma once
 
+#include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/mobile/nnc/context.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
 
 namespace torch {
 namespace jit {
