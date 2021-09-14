@@ -184,14 +184,14 @@ bool OperatorEntry::hasKernelForDispatchKey(DispatchKey k) const {
   return false;
 }
 
-c10::optional<const AnnotatedKernel*> OperatorEntry::getKernelForDispatchKey(DispatchKey dispatch_key) const{
+const AnnotatedKernel* OperatorEntry::getKernelForDispatchKey(DispatchKey dispatch_key) const{
   auto kern_it = kernels_.find(dispatch_key);
   if (kern_it != kernels_.end()) {
-    TORCH_INTERNAL_ASSERT(!kernels_.at(dispatch_key).empty());
-    TORCH_INTERNAL_ASSERT(kernels_.at(dispatch_key).front().kernel.isValid());
-    return c10::make_optional(&kernels_.at(dispatch_key).front());
+    TORCH_INTERNAL_ASSERT(!kern_it->second.empty());
+    TORCH_INTERNAL_ASSERT(kern_it->second.front().kernel.isValid());
+    return &kern_it->second.front();
   }
-  return c10::nullopt;
+  return nullptr;
 }
 
 std::pair<const AnnotatedKernel&, const char*> OperatorEntry::computeDispatchTableEntryWithDebug(const c10::Dispatcher& dispatcher, DispatchKey dispatch_key) const {
@@ -227,14 +227,14 @@ std::pair<const AnnotatedKernel&, const char*> OperatorEntry::computeDispatchTab
 
   // 1. Operator registration
   if (auto direct_registration = getKernelForDispatchKey(dispatch_key)) {
-    return {*direct_registration.value(), "kernel"};
+    return {*direct_registration, "kernel"};
   }
 
   // 2.1 Use CompositeExplicitAutograd kernel if available.
   //     See Note [Undefined in dispatchTable_] for the special handling for Undefined.
   if (dispatch_key == DispatchKey::Undefined || isIncludedInAlias(dispatch_key, DispatchKey::CompositeExplicitAutograd)) {
     if (auto default_backend_registration = getKernelForDispatchKey(DispatchKey::CompositeExplicitAutograd)) {
-      return {*default_backend_registration.value(), "default backend kernel"};
+      return {*default_backend_registration, "default backend kernel"};
     }
   }
 
@@ -256,7 +256,7 @@ std::pair<const AnnotatedKernel&, const char*> OperatorEntry::computeDispatchTab
           && hasKernelForAnyDispatchKey(c10::autogradother_backends)) {
         return {ambiguousAutogradOtherKernel(), "ambiguous autogradother"};
       } else if (!has_backend_kernel) {
-        return {*math_registration.value(), "math kernel"};
+        return {*math_registration, "math kernel"};
       }
     }
   }
@@ -264,7 +264,7 @@ std::pair<const AnnotatedKernel&, const char*> OperatorEntry::computeDispatchTab
   // 2.3. For autograd backend keys, use kernel from DispatchKey::Autograd if available
   if (isIncludedInAlias(dispatch_key, DispatchKey::Autograd)) {
     if (auto autograd_registration = getKernelForDispatchKey(DispatchKey::Autograd)) {
-      return {*autograd_registration.value(), "autograd kernel"};
+      return {*autograd_registration, "autograd kernel"};
     }
   }
 
