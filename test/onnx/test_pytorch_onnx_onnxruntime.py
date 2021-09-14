@@ -496,35 +496,20 @@ class TestONNXRuntime(unittest.TestCase):
         # Only support CPU version, since tracer is not working in GPU RNN.
         self.run_test(model, (x, model.hidden))
 
-    def get_image_from_url(self, url, size=(300, 200)):
+    def get_image(self, rel_path: str, size: Tuple[int, int]) -> torch.Tensor:
         import os
-        from urllib.parse import urlsplit
-        from urllib import request
         from PIL import Image
         from torchvision import transforms
-        from torch._utils_internal import get_writable_path
 
-        filename = os.path.basename(urlsplit(url)[2])
-        data_dir = get_writable_path(os.path.join(os.path.dirname(__file__)))
-        path = os.path.join(data_dir, filename)
-        data = request.urlopen(url, timeout=15).read()
-        with open(path, "wb") as f:
-            f.write(data)
-        image = Image.open(path).convert("RGB")
+        data_dir = os.path.join(os.path.dirname(__file__), "assets")
+        path = os.path.join(data_dir, *rel_path.split("/"))
+        image = Image.open(path).convert("RGB").resize(size, Image.BILINEAR)
 
-        image = image.resize(size, Image.BILINEAR)
+        return transforms.ToTensor()(image)
 
-        to_tensor = transforms.ToTensor()
-        return to_tensor(image)
-
-    def get_test_images(self):
-        image_url = "http://farm3.staticflickr.com/2469/3915380994_2e611b1779_z.jpg"
-        image = self.get_image_from_url(url=image_url, size=(100, 320))
-
-        image_url2 = "https://pytorch.org/tutorials/_static/img/tv_tutorial/tv_image05.png"
-        image2 = self.get_image_from_url(url=image_url2, size=(250, 380))
-
-        return [image], [image2]
+    def get_test_images(self) -> Tuple[List[torch.Tensor], List[torch.Tensor]]:
+        return ([self.get_image("grace_hopper_517x606.jpg", (100, 320))],
+                [self.get_image("rgb_pytorch.png", (250, 380))])
 
     @skipIfUnsupportedMinOpsetVersion(11)
     @disableScriptTest()  # Faster RCNN model is not scriptable
@@ -546,10 +531,6 @@ class TestONNXRuntime(unittest.TestCase):
                       dynamic_axes={"images_tensors": [0, 1, 2], "outputs": [0, 1, 2]}, rtol=1e-3, atol=1e-5)
 
     def test_paste_mask_in_image(self):
-        # disable profiling
-        torch._C._jit_set_profiling_executor(False)
-        torch._C._jit_set_profiling_mode(False)
-
         masks = torch.rand(10, 1, 26, 26)
         boxes = torch.rand(10, 4)
         boxes[:, 2:] += torch.rand(10, 2)
@@ -597,10 +578,6 @@ class TestONNXRuntime(unittest.TestCase):
                                     "scores": [0], "masks": [0, 1, 2]}, rtol=1e-3, atol=1e-5)
 
     def test_heatmaps_to_keypoints(self):
-        # disable profiling
-        torch._C._jit_set_profiling_executor(False)
-        torch._C._jit_set_profiling_mode(False)
-
         maps = torch.rand(10, 1, 26, 26)
         rois = torch.rand(10, 4)
         from torchvision.models.detection.roi_heads import heatmaps_to_keypoints
@@ -1529,7 +1506,7 @@ class TestONNXRuntime(unittest.TestCase):
 
         class Min(torch.nn.Module):
             def forward(self, x):
-                boxes = [x, x, x]
+                boxes = [x for _ in range(3)]
                 return list_append(boxes)
 
         x = torch.rand(5, 5)
@@ -4323,7 +4300,7 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.tensor([[1, 2], [3, 4]])
         self.run_test(RepeatsDimsModel2(), (x,))
 
-    @skipIfUnsupportedMinOpsetVersion(11)
+    @skipIfUnsupportedMinOpsetVersion(13)
     def test_dynamic_repeat_interleave(self):
         class SingleDynamicModel(torch.nn.Module):
             def forward(self, x):
@@ -4345,25 +4322,62 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(NegDynamicModel(), x, test_with_inputs=[another_x],
                       input_names=["input_1"], dynamic_axes={"input_1" : {1 : "w"}})
 
-        class SingleDynamicModel2(torch.nn.Module):
+        class SingleDynamicModelFloat(torch.nn.Module):
             def forward(self, x):
                 repeats = torch.tensor([4])
                 return torch.repeat_interleave(x, repeats, dim=0)
 
-        x = torch.tensor([[1, 2], [3, 4]])
-        another_x = torch.tensor([[7, 8], [5, 6]])
-        self.run_test(SingleDynamicModel2(), x, test_with_inputs=[another_x],
+        x = torch.tensor([[1.1, 2.1], [3.1, 4.1]])
+        another_x = torch.tensor([[7.1, 8.1], [5.1, 6.1]])
+        self.run_test(SingleDynamicModelFloat(), x, test_with_inputs=[another_x],
                       input_names=["input_1"], dynamic_axes={"input_1" : {0 : "h"}})
 
-        class AllDynamicModel(torch.nn.Module):
-            def forward(self, x):
-                repeats = torch.tensor([4])
+        class DynamicRepeatsModel(torch.nn.Module):
+            def forward(self, x, repeats):
+                return torch.repeat_interleave(x, repeats, dim=1)
+
+        x = torch.tensor([[1, 2, 4], [3, 4, 7]])
+        another_x = torch.tensor([[7, 8], [5, 6]])
+        repeats = torch.tensor([2])
+        another_repeats = torch.tensor([4])
+        self.run_test(DynamicRepeatsModel(), (x, repeats), test_with_inputs=[(another_x, another_repeats)],
+                      input_names=["input_1", "repeats_1"],
+                      dynamic_axes={"input_1" : {1 : "w"}, "repeats_1" : {0 : "r"}})
+
+        class DynamicRepeatsModel2(torch.nn.Module):
+            def forward(self, x, repeats):
+                return torch.repeat_interleave(x, repeats, dim=1)
+
+        x = torch.tensor([[1, 2, 4], [3, 4, 7]])
+        repeats = torch.tensor([2])
+        another_repeats = torch.tensor([4])
+        self.run_test(DynamicRepeatsModel2(), (x, repeats), test_with_inputs=[(x, another_repeats)],
+                      input_names=["input_1", "repeats_1"],
+                      dynamic_axes={"repeats_1" : {0 : "r"}})
+
+    @skipIfUnsupportedMinOpsetVersion(13)
+    def test_multiple_dynamic_repeat_interleave(self):
+        class DynamicRepeatsModel(torch.nn.Module):
+            def forward(self, x, repeats):
+                return torch.repeat_interleave(x, repeats, dim=1)
+
+        x = torch.tensor([[1, 2, 4], [3, 4, 7]])
+        repeats = torch.tensor([2, 3, 4])
+        another_repeats = torch.tensor([4, 3, 2])
+        self.run_test(DynamicRepeatsModel(), (x, repeats), test_with_inputs=[(x, another_repeats)],
+                      input_names=["input_1", "repeats_1"],
+                      dynamic_axes={"repeats_1" : {0 : "r"}})
+
+        class DynamicRepeatsModel2(torch.nn.Module):
+            def forward(self, x, repeats):
                 return torch.repeat_interleave(x, repeats, dim=0)
 
-        x = torch.tensor([[1, 2, 4, 16], [3, 9, 27, 81], [2, 3, 5, 7]])
-        another_x = torch.tensor([[7, 8], [5, 6]])
-        self.run_test(AllDynamicModel(), x, test_with_inputs=[another_x],
-                      input_names=["input_1"], dynamic_axes={"input_1" : {0 : "h", 1 : "w"}})
+        x = torch.tensor([[1, 2, 4], [3, 4, 7]])
+        repeats = torch.tensor([2, 3])
+        another_repeats = torch.tensor([4, 3])
+        self.run_test(DynamicRepeatsModel2(), (x, repeats), test_with_inputs=[(x, another_repeats)],
+                      input_names=["input_1", "repeats_1"],
+                      dynamic_axes={"repeats_1" : {0 : "r"}})
 
     def test_view(self):
         class ViewModel(torch.nn.Module):
@@ -5684,6 +5698,27 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randint(10, (4, 5))
         y = torch.randint(10, (5, ))
         self.run_test(MatmulModel(), (x, y))
+
+    @skipIfUnsupportedMinOpsetVersion(9)  # MatMul long inputs is added in ONNX opset 9.
+    def test_dot(self):
+        class MatmulModel(torch.nn.Module):
+            def forward(self, input, other):
+                return torch.dot(input, other)
+
+        x = torch.randn(5, requires_grad=True)
+        y = torch.randn(5, requires_grad=True)
+        self.run_test(MatmulModel(), (x, y))
+
+        x = torch.randint(10, (5, ))
+        y = torch.randint(10, (5, ))
+        self.run_test(MatmulModel(), (x, y))
+
+    @disableScriptTest()  # SpectralNorm not TorchScript compatible.
+    def test_spectral_norm(self):
+        m = torch.nn.utils.spectral_norm(torch.nn.Linear(2, 4))
+
+        x = torch.randn(6, 2)
+        self.run_test(m, (x, ))
 
     def test_prelu(self):
         class PReluModel(torch.nn.Module):

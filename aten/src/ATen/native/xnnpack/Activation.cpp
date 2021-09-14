@@ -18,7 +18,7 @@ bool use_hardswish(
            true;
 }
 
-Tensor& hardswish_impl(Tensor& input, Tensor& output) {
+const Tensor& hardswish_impl(const Tensor& input, const Tensor& output) {
   using namespace internal;
 
   xnn_operator_t hardswish_op{};
@@ -71,7 +71,7 @@ Tensor hardswish(const Tensor& input) {
   return output.contiguous(input.suggest_memory_format());
 }
 
-Tensor& hardswish_(Tensor& input) {
+const Tensor& hardswish_(const Tensor& input) {
   Tensor padded_input = mobile::allocate_padded_contiguous_if_needed(
     input, input.suggest_memory_format());
 

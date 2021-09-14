@@ -28,7 +28,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
-#include <iostream>
 #include <type_traits>
 
 #if AT_MKL_ENABLED() && !defined(__APPLE__)

@@ -191,7 +191,6 @@ TORCH_IMPL_FUNC(polygamma_out)
 }
 
 TORCH_IMPL_FUNC(signbit_out) (const Tensor& self, const Tensor& result) {
-  at::native::resize_output(result, self.sizes());
   if (self.dtype() == at::kBool) {
     result.fill_(false);
   } else {
@@ -448,6 +447,10 @@ Tensor& conj_physical_(Tensor& self) {
 // else returns a new negated tensor with neg bit set to 0
 Tensor resolve_neg(const Tensor& self) {
   if (!self.is_neg()) { return self; }
+  // currently a tensor should never have both conj and neg bit set
+  // the only way to get an imag bit is complex_tensor.conj().imag but there's
+  // no intended designed mechanism to enter the complex world with this imag bit
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!self.is_conj());
   // negation is materialized in `copy_()` that clone ultimately calls into
   return self.clone();
 }
@@ -456,6 +459,10 @@ Tensor resolve_neg(const Tensor& self) {
 // else returns a new negated tensor with neg bit set to 0
 Tensor resolve_conj(const Tensor& self) {
   if (!self.is_conj()) { return self; }
+  // currently a tensor should never have both conj and neg bit set
+  // the only way to get an imag bit is complex_tensor.conj().imag but there's
+  // no intended designed mechanism to enter the complex world with this imag bit
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!self.is_neg());
   // conjugation is materialized in `copy_()` that clone ultimately calls into
   return self.clone();
 }
@@ -730,7 +737,7 @@ const Tensor& mvlgamma_(const Tensor& self, int64_t p) {
   return self.copy_(args.lgamma_().sum(-1).add_(p2_sub_p * std::log(c10::pi<double>) * QUARTER));
 }
 
-Tensor& mvlgamma_out(const Tensor& self, int64_t p, Tensor& result) {
+const Tensor& mvlgamma_out(const Tensor& self, int64_t p, const Tensor& result) {
   auto out = self.mvlgamma(p);
   TORCH_CHECK(
       at::can_cast(out.scalar_type(), result.scalar_type()),
@@ -746,7 +753,7 @@ Tensor special_multigammaln(const Tensor& self, int64_t p) {
   return self.mvlgamma(p);
 };
 
-Tensor& special_multigammaln_out(const Tensor& self, int64_t p, Tensor& result) {
+const Tensor& special_multigammaln_out(const Tensor& self, int64_t p, const Tensor& result) {
   return at::mvlgamma_out(result, self, p);
 };
 

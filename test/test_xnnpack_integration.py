@@ -34,7 +34,7 @@ class TestXNNPACKOps(TestCase):
         ref_result = F.linear(input_data, weight, bias)
         packed_weight_bias = torch.ops.prepacked.linear_clamp_prepack(weight, bias)
         output_linearprepacked = torch.ops.prepacked.linear_clamp_run(input_data, packed_weight_bias)
-        torch.testing.assert_allclose(ref_result, output_linearprepacked, rtol=1e-2, atol=1e-3)
+        torch.testing.assert_close(ref_result, output_linearprepacked, rtol=1e-2, atol=1e-3)
 
     @given(input_size=st.integers(2, 32),
            weight_output_dim=st.integers(2, 64),
@@ -49,7 +49,7 @@ class TestXNNPACKOps(TestCase):
         ref_result = F.linear(input_data, weight, bias)
         packed_weight_bias = torch.ops.prepacked.linear_clamp_prepack(weight, bias)
         output_linearprepacked = torch.ops.prepacked.linear_clamp_run(input_data, packed_weight_bias)
-        torch.testing.assert_allclose(ref_result, output_linearprepacked, rtol=1e-2, atol=1e-3)
+        torch.testing.assert_close(ref_result, output_linearprepacked, rtol=1e-2, atol=1e-3)
 
 
     @given(batch_size=st.integers(0, 3),
@@ -107,7 +107,7 @@ class TestXNNPACKOps(TestCase):
         packed_weight_bias = torch.ops.prepacked.conv2d_clamp_prepack(weight, bias,
                                                                       strides, paddings, dilations, groups)
         xnnpack_result = torch.ops.prepacked.conv2d_clamp_run(input_data, packed_weight_bias)
-        torch.testing.assert_allclose(ref_result, xnnpack_result, rtol=1e-2, atol=1e-3)
+        torch.testing.assert_close(ref_result, xnnpack_result, rtol=1e-2, atol=1e-3)
 
     @given(batch_size=st.integers(1, 3),
            input_channels_per_group=st.integers(1, 32),
@@ -174,7 +174,7 @@ class TestXNNPACKOps(TestCase):
                                                                                 output_paddings, dilations,
                                                                                 groups)
         xnnpack_result = torch.ops.prepacked.conv2d_transpose_clamp_run(input_data, packed_weight_bias)
-        torch.testing.assert_allclose(ref_result.contiguous(), xnnpack_result.contiguous(), rtol=1e-2, atol=1e-3)
+        torch.testing.assert_close(ref_result.contiguous(), xnnpack_result.contiguous(), rtol=1e-2, atol=1e-3)
 
 @unittest.skipUnless(torch.backends.xnnpack.enabled,
                      " XNNPACK must be enabled for these tests."
@@ -214,7 +214,7 @@ class TestXNNPACKSerDes(TestCase):
         input_data = torch.rand(data_shape)
         ref_result = scripted_linear(input_data)
         output_linearprepacked = scripted_linear_clamp_prepacked(input_data)
-        torch.testing.assert_allclose(ref_result, output_linearprepacked, rtol=1e-2, atol=1e-3)
+        torch.testing.assert_close(ref_result, output_linearprepacked, rtol=1e-2, atol=1e-3)
 
         # Serialize the modules and then deserialize
         input_data = torch.rand(data_shape)
@@ -228,7 +228,7 @@ class TestXNNPACKSerDes(TestCase):
         deserialized_linear_clamp_prepacked = torch.jit.load(buffer)
         ref_result = deserialized_linear(input_data)
         output_linearprepacked = deserialized_linear_clamp_prepacked(input_data)
-        torch.testing.assert_allclose(ref_result, output_linearprepacked, rtol=1e-2, atol=1e-3)
+        torch.testing.assert_close(ref_result, output_linearprepacked, rtol=1e-2, atol=1e-3)
 
     @given(batch_size=st.integers(0, 3),
            input_channels_per_group=st.integers(1, 32),
@@ -309,7 +309,7 @@ class TestXNNPACKSerDes(TestCase):
             weight, bias, strides, paddings, dilations, groups))
         ref_result = scripted_conv2d(input_data)
         xnnpack_result = scripted_conv2d_clamp_prepacked(input_data)
-        torch.testing.assert_allclose(ref_result, xnnpack_result, rtol=1e-2, atol=1e-3)
+        torch.testing.assert_close(ref_result, xnnpack_result, rtol=1e-2, atol=1e-3)
 
         # Serialize the modules and then deserialize
         input_data = torch.rand((batch_size, input_channels, height, width))
@@ -325,7 +325,7 @@ class TestXNNPACKSerDes(TestCase):
         deserialized_conv2d_clamp_prepacked = torch.jit.load(buffer)
         ref_result = deserialized_conv2d(input_data)
         xnnpack_result = deserialized_conv2d_clamp_prepacked(input_data)
-        torch.testing.assert_allclose(ref_result, xnnpack_result, rtol=1e-2, atol=1e-3)
+        torch.testing.assert_close(ref_result, xnnpack_result, rtol=1e-2, atol=1e-3)
 
     @given(batch_size=st.integers(0, 3),
            input_channels_per_group=st.integers(1, 32),
@@ -417,7 +417,7 @@ class TestXNNPACKSerDes(TestCase):
             weight, bias, strides, paddings, output_paddings, dilations, groups))
         ref_result = scripted_conv2d(input_data)
         xnnpack_result = scripted_conv2d_clamp_prepacked(input_data)
-        torch.testing.assert_allclose(ref_result, xnnpack_result, rtol=1e-2, atol=1e-3)
+        torch.testing.assert_close(ref_result, xnnpack_result, rtol=1e-2, atol=1e-3)
 
         # Serialize the modules and then deserialize
         input_data = torch.rand((batch_size, input_channels, height, width))
@@ -433,7 +433,7 @@ class TestXNNPACKSerDes(TestCase):
         deserialized_conv2d_clamp_prepacked = torch.jit.load(buffer)
         ref_result = deserialized_conv2d(input_data)
         xnnpack_result = deserialized_conv2d_clamp_prepacked(input_data)
-        torch.testing.assert_allclose(ref_result, xnnpack_result, rtol=1e-2, atol=1e-3)
+        torch.testing.assert_close(ref_result, xnnpack_result, rtol=1e-2, atol=1e-3)
 
     @given(batch_size=st.integers(0, 3),
            input_channels_per_group=st.integers(1, 32),
@@ -549,7 +549,7 @@ class TestXNNPACKSerDes(TestCase):
                 groups))
         ref_result = scripted_m(input_data)
         xnnpack_result = scripted_m_prepacked(input_data)
-        torch.testing.assert_allclose(ref_result, xnnpack_result, rtol=1e-2, atol=1e-3)
+        torch.testing.assert_close(ref_result, xnnpack_result, rtol=1e-2, atol=1e-3)
 
         # Serialize the modules and then deserialize
         input_data = torch.rand((batch_size, input_channels, height, width))
@@ -564,7 +564,7 @@ class TestXNNPACKSerDes(TestCase):
         deserialized_m_prepacked = torch.jit.load(buffer)
         ref_result = deserialized_m(input_data)
         xnnpack_result = deserialized_m_prepacked(input_data)
-        torch.testing.assert_allclose(ref_result, xnnpack_result, rtol=1e-2, atol=1e-3)
+        torch.testing.assert_close(ref_result, xnnpack_result, rtol=1e-2, atol=1e-3)
 
 
 @unittest.skipUnless(torch.backends.xnnpack.enabled,
@@ -610,7 +610,7 @@ class TestXNNPACKRewritePass(TestCase):
                 else:
                     FileCheck().check_count(pattern, v, exactly=True).run(deserialized_scripted_model.graph)
             xnnpack_result = deserialized_scripted_model(input_data)
-            torch.testing.assert_allclose(ref_result, xnnpack_result, rtol=1e-2, atol=1e-3)
+            torch.testing.assert_close(ref_result, xnnpack_result, rtol=1e-2, atol=1e-3)
 
     def test_linear(self):
         data_shape = [2, 3, 32]
@@ -965,7 +965,7 @@ class TestXNNPACKConv1dTransformPass(TestCase):
                 else:
                     FileCheck().check_count(pattern, v, exactly=True).run(deserialized_scripted_model.graph)
             transformed_result = deserialized_scripted_model(input_data)
-            torch.testing.assert_allclose(ref_result, transformed_result, rtol=1e-2, atol=1e-3)
+            torch.testing.assert_close(ref_result, transformed_result, rtol=1e-2, atol=1e-3)
 
             optimized_buffer = io.BytesIO()
             torch.jit.save(optimized_scripted_model, optimized_buffer)
@@ -980,7 +980,7 @@ class TestXNNPACKConv1dTransformPass(TestCase):
                 else:
                     FileCheck().check_count(pattern, v, exactly=True).run(deserialized_optimized_scripted_model.graph)
             xnnpack_result = deserialized_optimized_scripted_model(input_data)
-            torch.testing.assert_allclose(ref_result, xnnpack_result, rtol=1e-2, atol=1e-3)
+            torch.testing.assert_close(ref_result, xnnpack_result, rtol=1e-2, atol=1e-3)
 
 
     def test_conv1d_basic(self):
