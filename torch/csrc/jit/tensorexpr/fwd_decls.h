@@ -1,26 +1,27 @@
 #pragma once
 #include <c10/core/ScalarType.h>
+#include <memory>
 
 namespace torch {
 namespace jit {
 namespace tensorexpr {
 
 template <typename Node>
-using NodePtr = Node*;
+using NodePtr = std::shared_ptr<Node>;
 
 template <typename To, typename From>
 NodePtr<To> to(NodePtr<From> x) {
-  return dynamic_cast<NodePtr<To>>(x);
+  return std::dynamic_pointer_cast<To>(x);
 }
 
 template <typename To, typename From>
 NodePtr<To> static_to(NodePtr<From> x) {
-  return static_cast<NodePtr<To>>(x);
+  return std::static_pointer_cast<To>(x);
 }
 
 template <typename Node, typename... Args>
 NodePtr<Node> alloc(Args&&... args) {
-  return new Node(std::forward<Args>(args)...);
+  return std::make_shared<Node>(std::forward<Args>(args)...);
 }
 
 class Buf;
@@ -34,6 +35,8 @@ using StmtPtr = NodePtr<Stmt>;
 using VarPtr = NodePtr<Var>;
 
 class ExprHandle;
+class VarHandle;
+class BufHandle;
 
 class Add;
 class And;
@@ -112,7 +115,7 @@ using SyncThreadsPtr = NodePtr<SyncThreads>;
 #define IMM_DECLARE(Type, Name) \
   class Name##Imm;              \
   using Name##ImmPtr = NodePtr<Name##Imm>;
-AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, IMM_DECLARE);
+AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, IMM_DECLARE);
 #undef IMM_DECLARE
 
 } // namespace tensorexpr

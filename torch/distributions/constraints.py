@@ -545,6 +545,7 @@ integer_interval = _IntegerInterval
 real = _Real()
 real_vector = independent(real, 1)
 positive = _GreaterThan(0.)
+nonnegative = _GreaterThanEq(0.)
 greater_than = _GreaterThan
 greater_than_eq = _GreaterThanEq
 less_than = _LessThan

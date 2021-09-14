@@ -35,8 +35,8 @@ from torch.distributed.elastic.multiprocessing.errors.error_handler import _writ
 from torch.testing._internal.common_utils import (
     NO_MULTIPROCESSING_SPAWN,
     TEST_WITH_ASAN,
-    TEST_WITH_DEV_DBG_ASAN,
     TEST_WITH_TSAN,
+    TEST_WITH_DEV_DBG_ASAN,
     IS_IN_CI,
     IS_WINDOWS,
     IS_MACOS,
@@ -223,15 +223,11 @@ def start_processes_zombie_test(
 
 
 # tests incompatible with tsan or asan
-if not (TEST_WITH_DEV_DBG_ASAN or TEST_WITH_TSAN or IS_WINDOWS or IS_MACOS):
+if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS):
     class StartProcessesTest(unittest.TestCase):
         def setUp(self):
             self.test_dir = tempfile.mkdtemp(prefix=f"{self.__class__.__name__}_")
-
-            if NO_MULTIPROCESSING_SPAWN:  # python 2.7 doesn't have spawn
-                self._start_methods = ["fork"]
-            else:
-                self._start_methods = ["fork", "spawn"]
+            self._start_methods = ["spawn"]
 
         def tearDown(self):
             shutil.rmtree(self.test_dir)
@@ -317,7 +313,7 @@ if not (TEST_WITH_DEV_DBG_ASAN or TEST_WITH_TSAN or IS_WINDOWS or IS_MACOS):
                 args={0: (1,)},
                 envs={0: {}},
                 log_dir=self.log_dir(),
-                start_method="fork",
+                start_method="spawn",
             )
 
             self.assertIsNone(pc.wait(timeout=0.1, period=0.01))
@@ -332,7 +328,7 @@ if not (TEST_WITH_DEV_DBG_ASAN or TEST_WITH_TSAN or IS_WINDOWS or IS_MACOS):
                 args={0: (1,)},
                 envs={0: {}},
                 log_dir=self.log_dir(),
-                start_method="fork",
+                start_method="spawn",
             )
 
             pids = pc.pids()
@@ -387,7 +383,7 @@ if not (TEST_WITH_DEV_DBG_ASAN or TEST_WITH_TSAN or IS_WINDOWS or IS_MACOS):
                     self.assertEqual({0: None, 1: None}, results.return_values)
 
         @sandcastle_skip_if(
-            TEST_WITH_DEV_DBG_ASAN or TEST_WITH_TSAN, "tests incompatible with tsan or asan"
+            TEST_WITH_DEV_DBG_ASAN, "tests incompatible with asan"
         )
         def test_function_large_ret_val(self):
             # python multiprocessing.queue module uses pipes and actually PipedQueues
@@ -549,7 +545,7 @@ if not (TEST_WITH_DEV_DBG_ASAN or TEST_WITH_TSAN or IS_WINDOWS or IS_MACOS):
 
 
 # tests incompatible with tsan or asan, the redirect functionality does not work on macos or windows
-if not (TEST_WITH_DEV_DBG_ASAN or TEST_WITH_TSAN or IS_WINDOWS or IS_MACOS):
+if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS):
     class StartProcessesListTest(StartProcessesTest):
         ########################################
         # start_processes as binary tests
@@ -630,7 +626,7 @@ if not (TEST_WITH_DEV_DBG_ASAN or TEST_WITH_TSAN or IS_WINDOWS or IS_MACOS):
                 args={0: ("hello",), 1: ("world",)},
                 envs={0: {"RANK": "0"}, 1: {"RANK": "1"}},
                 log_dir=self.log_dir(),
-                start_method="fork",
+                start_method="spawn",
                 redirects={0: Std.ERR, 1: Std.NONE},
                 tee={0: Std.OUT, 1: Std.ERR},
             )
@@ -647,7 +643,7 @@ if not (TEST_WITH_DEV_DBG_ASAN or TEST_WITH_TSAN or IS_WINDOWS or IS_MACOS):
 
 
 # tests incompatible with tsan or asan, the redirect functionality does not work on macos or windows
-if not (TEST_WITH_DEV_DBG_ASAN or TEST_WITH_TSAN or IS_WINDOWS or IS_MACOS or IS_IN_CI):
+if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS or IS_IN_CI):
     class StartProcessesNotCITest(StartProcessesTest):
         def test_wrap_bad(self):
             none = ""
@@ -697,8 +693,8 @@ if not (TEST_WITH_DEV_DBG_ASAN or TEST_WITH_TSAN or IS_WINDOWS or IS_MACOS or IS
 
             failure = results.failures[0]
             self.assertNotEqual(signal.SIGSEGV, failure.exitcode)
-            if TEST_WITH_ASAN:
-                # ASAN exit code is 1.
+            if TEST_WITH_ASAN or TEST_WITH_TSAN:
+                # ASAN/TSAN exit code is 1.
                 self.assertEqual("<N/A>", failure.signal_name())
             else:
                 self.assertEqual("SIGSEGV", failure.signal_name())
@@ -714,7 +710,7 @@ if not (TEST_WITH_DEV_DBG_ASAN or TEST_WITH_TSAN or IS_WINDOWS or IS_MACOS or IS
                         args={0: ("hello",), 1: ("world",)},
                         envs={0: {"RANK": "0"}, 1: {"RANK": "1"}},
                         log_dir=log_dir,
-                        start_method="fork",
+                        start_method="spawn",
                         redirects={0: Std.ERR, 1: Std.NONE},
                         tee={0: Std.OUT, 1: Std.ERR},
                     )

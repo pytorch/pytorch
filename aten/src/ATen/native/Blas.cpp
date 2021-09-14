@@ -133,8 +133,19 @@ inline void dot_check(const Tensor& self, const Tensor& other) {
 }
 
 Tensor dot(const Tensor &self, const Tensor &other){
-  at::NoNamesGuard guard;
+  if (self.is_complex()) {
+    if (self.is_conj()) {
+      if (other.is_conj()) {
+        return (at::native::dot(self.conj(), other.conj())).conj();
+       } else {
+         return at::native::vdot(self.conj(), other);
+       }
+    } else if (other.is_conj()) {
+      return at::native::vdot(other.conj(), self);
+    }
+  }
 
+  at::NoNamesGuard guard;
   dot_check(self, other);
 
   return AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(at::ScalarType::Half, self.scalar_type(), "dot", [&] {
@@ -145,15 +156,25 @@ Tensor dot(const Tensor &self, const Tensor &other){
 }
 
 Tensor vdot(const Tensor &self, const Tensor &other){
-  at::NoNamesGuard guard;
-
   // Dispatch to `dot` for real dtypes.
   if (!self.is_complex()){
     return at::dot(self, other);
   }
 
+  if (self.is_conj()) {
+    if (other.is_conj()) {
+      return at::native::vdot(other.conj(), self.conj());
+    } else {
+      return at::native::dot(self.conj(), other);
+    }
+  } else if (other.is_conj()) {
+    return (at::native::dot(self, other.conj())).conj();
+  }
+
+  at::NoNamesGuard guard;
   // For complex dtypes.
   dot_check(self, other);
+
   return AT_DISPATCH_COMPLEX_TYPES(self.scalar_type(), "vdot", [&] {
     Tensor result = at::empty({}, self.options());
     result.fill_(vdot_impl<scalar_t>(self.numel(), self.data_ptr<scalar_t>(), self.stride(0), other.data_ptr<scalar_t>(), other.stride(0)));

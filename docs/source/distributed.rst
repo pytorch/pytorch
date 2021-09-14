@@ -180,6 +180,8 @@ joined.
 
 .. autofunction:: is_nccl_available
 
+.. autofunction:: is_torchelastic_launched
+
 --------------------------------------------------------------------------------
 
 Currently three initialization methods are supported:
