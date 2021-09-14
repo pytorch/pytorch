@@ -35,7 +35,7 @@ from torch.nn.parameter import UninitializedParameter, UninitializedBuffer
 from torch.nn.parallel._functions import Broadcast
 from torch.testing._internal.common_dtype import integral_types, get_all_fp_dtypes, get_all_math_dtypes
 from torch.testing._internal.common_utils import freeze_rng_state, run_tests, TestCase, skipIfNoLapack, skipIfRocm, \
-    TEST_NUMPY, TEST_SCIPY, TEST_WITH_ROCM, download_file, \
+    skipIfRocmVersionLessThan, skipIfNotMiopenSuggestNHWC, TEST_NUMPY, TEST_SCIPY, TEST_WITH_ROCM, download_file, \
     get_function_arglist, load_tests, repeat_test_for_types, ALL_TENSORTYPES, \
     ALL_TENSORTYPES2, suppress_warnings, TemporaryFileName, TEST_WITH_UBSAN, IS_PPC
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, TEST_CUDNN_VERSION
@@ -44,8 +44,8 @@ from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, Criteri
     ctcloss_reference, new_module_tests, single_batch_reference_fn
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, dtypes, \
     dtypesIfCUDA, precisionOverride, skipCUDAIfNoCudnn, skipCUDAIfCudnnVersionLessThan, onlyCUDA, onlyCPU, \
-    skipCUDAIfRocm, skipCUDAIf, skipCUDAIfNotRocm, onlyOnCPUAndCUDA, \
-    deviceCountAtLeast, largeTensorTest, expectedFailureMeta, skipMeta
+    skipCUDAIfRocm, skipCUDAIf, skipCUDAIfNotRocm, skipCUDAIfRocmVersionLessThan, skipCUDAIfNotMiopenSuggestNHWC, \
+    onlyOnCPUAndCUDA, deviceCountAtLeast, largeTensorTest, expectedFailureMeta, skipMeta
 from torch.nn import MultiheadAttention
 
 from hypothesis import given
@@ -9480,13 +9480,19 @@ class TestNN(NNTestCase):
                          loss_reference_fns['CosineEmbeddingLoss'](input1, input2, target,
                                                                    margin=0.5, reduction='none'))
 
-    def test_cosine_embedding_loss_invalid_target_shape(self):
+    def test_cosine_embedding_loss_invalid_shape(self):
         input1 = torch.randn(15, 10)
         input2 = torch.randn(15, 10)
         target = torch.randn(15, 1).sign()
 
         with self.assertRaisesRegex(RuntimeError, "1D target tensor expected"):
             F.cosine_embedding_loss(input1, input2, target)
+
+        with self.assertRaisesRegex(RuntimeError, "1D target tensor expects 2D input tensors"):
+            F.cosine_embedding_loss(torch.randn(10), torch.randn(10), torch.randn(10))
+
+        with self.assertRaisesRegex(RuntimeError, "0D target tensor expects 1D input tensors"):
+            F.cosine_embedding_loss(torch.randn(2, 5), torch.randn(2, 5), torch.randn(()))
 
     def test_margin_ranking_loss_no_reduce(self):
         input1 = torch.randn(15).mul_(10).requires_grad_()
@@ -10835,14 +10841,15 @@ class TestNN(NNTestCase):
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
-    @skipIfRocm
+    @skipIfRocmVersionLessThan((4, 3))
+    @skipIfNotMiopenSuggestNHWC
     def test_grouped_conv_cudnn_nhwc_support(self):
         # in order to catch the hols in grouped convolution in nhwc support for earlier cudnn version
         input = torch.randn((16, 16, 8, 8), dtype=torch.float16, device="cuda").to(memory_format=torch.channels_last)
         weight = torch.randn((8, 4, 3, 3), dtype=torch.float16, device="cuda").to(memory_format=torch.channels_last)
-        out = torch.cudnn_convolution(input, weight, None, (1, 1), (1, 1), (1, 1), 4, False, False)
+        out = torch.convolution(input, weight, None, (1, 1), (1, 1), (1, 1), False, (0, 0), 4)
         input = torch.randn((16, 8, 8, 8), dtype=torch.float16, device="cuda").to(memory_format=torch.channels_last)
-        out = torch.cudnn_convolution_transpose(input, weight, None, (1, 1), (0, 0), (1, 1), (1, 1), 4, False, False)
+        out_transpose = torch.convolution(input, weight, None, (1, 1), (1, 1), (1, 1), True, (0, 0), 4)
 
     @unittest.expectedFailure
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
@@ -13762,6 +13769,40 @@ class TestNNDeviceType(NNTestCase):
         with self.assertRaisesRegex(RuntimeError, "Expected"):
             inp = torch.ones(1, 0, 50, 44, 31, device=device)
             mod(inp)
+
+    @onlyOnCPUAndCUDA
+    def test_MaxUnpool_zero_batch_dim(self, device):
+        pool = torch.nn.MaxPool1d(2, stride=2, return_indices=True).to(device)
+        unpool = torch.nn.MaxUnpool1d(2, stride=2).to(device)
+        inp = torch.randn(0, 10, 10, requires_grad=True, device=device)
+        output, indices = pool(inp)
+        output.requires_grad_(True)
+        unpool_out = unpool(output, indices)
+        unpool_out.sum().backward()
+
+        self.assertEqual(inp.grad, torch.zeros_like(inp))
+        self.assertEqual(unpool_out, torch.zeros_like(unpool_out))
+
+        pool = torch.nn.MaxPool2d(2, stride=2, return_indices=True).to(device)
+        unpool = torch.nn.MaxUnpool2d(2, stride=2).to(device)
+        inp = torch.randn(0, 10, 10, 10, requires_grad=True, device=device)
+        output, indices = pool(inp)
+        unpool_out = unpool(output, indices)
+        unpool_out.sum().backward()
+
+        self.assertEqual(inp.grad, torch.zeros_like(inp))
+        self.assertEqual(unpool_out, torch.zeros_like(unpool_out))
+
+        pool = torch.nn.MaxPool3d(2, stride=2, return_indices=True).to(device)
+        unpool = torch.nn.MaxUnpool3d(2, stride=2).to(device)
+        inp = torch.randn(0, 10, 10, 10, 10, requires_grad=True, device=device)
+        output, indices = pool(inp)
+        output.requires_grad_(True)
+        unpool_out = unpool(output, indices)
+        unpool_out.sum().backward()
+
+        self.assertEqual(inp.grad, torch.zeros_like(inp))
+        self.assertEqual(unpool_out, torch.zeros_like(unpool_out))
 
     @onlyOnCPUAndCUDA
     def test_AdaptiveMaxPool_zero_batch_dim(self, device):
@@ -16930,7 +16971,8 @@ class TestNNDeviceType(NNTestCase):
             self._test_bfloat16_ops(torch.nn.Softmax(dim=dim), device, inp_dims=(16, 33, 15, 16), prec=0.05, scale_factor=1000.0)
 
     @onlyCUDA
-    @skipCUDAIfRocm
+    @skipCUDAIfRocmVersionLessThan((4, 3))
+    @skipCUDAIfNotMiopenSuggestNHWC
     @skipCUDAIfCudnnVersionLessThan(7603)
     @dtypes(torch.half, torch.float)
     def test_conv_cudnn_nhwc(self, device, dtype):
@@ -17073,7 +17115,8 @@ class TestNNDeviceType(NNTestCase):
                                    ref_out, input_format, w_f, g_f, output_format)
 
     @onlyCUDA
-    @skipCUDAIfRocm
+    @skipCUDAIfRocmVersionLessThan((4, 3))
+    @skipCUDAIfNotMiopenSuggestNHWC
     @skipCUDAIfCudnnVersionLessThan(7603)
     @tf32_on_and_off(0.05)
     def test_conv_cudnn_mismatch_memory_format(self, device):
