@@ -48,19 +48,17 @@ class TestQuantizeFxTRT(QuantizationTestCase):
             ),
             weight=torch.quantization.default_weight_observer
         )
-        m = prepare_fx(m, {"": qconfig}, backend_config_dict=get_tensorrt_backend_config_dict())
-        print(m)
+        prepared = prepare_fx(m, {"": qconfig}, backend_config_dict=get_tensorrt_backend_config_dict())
         # calibration
-        m(conv2d_input)
-        m = convert_fx(m, is_reference=True)
-        print(m)
+        prepared(conv2d_input)
+        quantized = convert_fx(prepared, is_reference=True)
         node_occurrence = {
             ns.call_function(torch.quantize_per_tensor): 1,
             ns.call_method("dequantize"): 1
         }
-        self.checkGraphModuleNodes(m, expected_node_occurrence=node_occurrence)
+        self.checkGraphModuleNodes(quantized, expected_node_occurrence=node_occurrence)
         # lower to trt
-        trt_mod = lower_to_trt(m, conv2d_input, [((1, 3, 224, 224), (5, 3, 224, 224), (10, 3, 224, 224))])
+        trt_mod = lower_to_trt(quantized, conv2d_input, [((1, 3, 224, 224), (5, 3, 224, 224), (10, 3, 224, 224))])
         # make sure it runs
         trt_mod(conv2d_input.cuda())
 
@@ -82,20 +80,18 @@ class TestQuantizeFxTRT(QuantizationTestCase):
             ),
             weight=torch.quantization.default_weight_observer
         )
-        m = prepare_fx(m, {"": qconfig}, backend_config_dict=get_tensorrt_backend_config_dict())
-        print(m)
+        prepared = prepare_fx(m, {"": qconfig}, backend_config_dict=get_tensorrt_backend_config_dict())
         # calibration
-        m(linear_module_input)
-        m = convert_fx(m, is_reference=True)
+        prepared(linear_module_input)
+        quantized = convert_fx(prepared, is_reference=True)
         node_occurrence = {
             ns.call_function(torch.quantize_per_tensor): 1,
             ns.call_method("dequantize"): 1
         }
-        self.checkGraphModuleNodes(m, expected_node_occurrence=node_occurrence)
-        print(m)
+        self.checkGraphModuleNodes(quantized, expected_node_occurrence=node_occurrence)
         # lower to trt
         trt_mod = lower_to_trt(
-            m,
+            quantized,
             linear_module_input,
             [((1, *linear_module_input.shape[1:]),
               (5, *linear_module_input.shape[1:]),

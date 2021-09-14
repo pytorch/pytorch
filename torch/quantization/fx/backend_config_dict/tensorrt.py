@@ -1,5 +1,5 @@
 import torch
-from ..quantization_patterns import *
+from ..quantization_patterns import ConvReLUQuantizeHandlerNew, LinearReLUQuantizeHandlerNew
 
 def get_tensorrt_backend_config_dict():
     """ Get the backend config dictionary for tensorrt backend
