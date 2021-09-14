@@ -1341,7 +1341,7 @@ struct to_ir {
       } else if (candidate_types.size() == 1) {
         (*refined_type_hint_ptr) = candidate_types[0];
       } else {
-        all_candidates = &candidate_types;
+        (*all_candidates) = std::move(candidate_types);
       }
     } else if (
         auto optional_type_hint =
@@ -1449,8 +1449,9 @@ struct to_ir {
       throw ErrorReport(src)
           << "Union type annotation `" << type_hint->repr_str() << "` can hold "
           << vector_repr.str() << ", but none of "
-          << "those list types can hold the types of the given dict"
-          << " elements, which were unified to " << candidate->repr_str();
+          << "those dict types can hold the types of the given"
+          << " keys and values, which were unified to Dict["
+          << known_key_type->repr_str() << ", " << known_value_type->repr_str();
     } else {
       (*refined_type_hint_ptr) = candidate;
     }
@@ -1594,17 +1595,21 @@ struct to_ir {
     std::vector<TypePtr> all_candidates = {};
 
     if (refined_type_hint) {
-      auto fn = [&]() { dict_value->setType(refined_type_hint); };
+      auto type_match = [&](const TypePtr& t) {
+        return t->kind() == DictType::Kind;
+      };
+
+      auto do_if_match = [&]() { dict_value->setType(refined_type_hint); };
 
       refineAndSetTypeHintOrPopulateCandidatesVector(
           type_hint,
           &refined_type_hint,
           &all_candidates,
-          DictType::Kind,
           "Dict",
           dc,
-          fn,
-          fn);
+          type_match,
+          do_if_match,
+          do_if_match);
     }
 
     TypePtr first_generated_key_type = nullptr;
@@ -4176,14 +4181,18 @@ struct to_ir {
 
     std::vector<TypePtr> all_candidates = {};
 
-    if (refined_type_hint) {
-      auto fn_if_match = [&]() {
+    if (type_hint) {
+      auto type_match = [&](const TypePtr& t) {
+        return t->kind() == DictType::Kind;
+      };
+
+      auto do_if_match = [&]() {
         auto dict_type = refined_type_hint->expect<DictType>();
         key_type = dict_type->getKeyType();
         value_type = dict_type->getValueType();
       };
 
-      auto fn_if_anytype = [&]() {
+      auto do_if_anytype = [&]() {
         if (keys.empty()) {
           key_type = StringType::get();
           value_type = TensorType::get();
@@ -4197,11 +4206,11 @@ struct to_ir {
           type_hint,
           &refined_type_hint,
           &all_candidates,
-          DictType::Kind,
           "Dict",
           dl,
-          fn_if_match,
-          fn_if_anytype);
+          type_match,
+          do_if_match,
+          do_if_anytype);
 
       if (!all_candidates.empty() && values.empty()) {
         throw ErrorReport(dl)
@@ -4236,8 +4245,6 @@ struct to_ir {
           value_type);
 
       if (refined_type_hint && !all_candidates.empty()) {
-        key_type = refined_type_hint->expect<DictType>()->getKeyType();
-        value_type = refined_type_hint->expect<DictType>()->getValueType();
         refineAndSetDictTypeHintFromCandidatesVector(
             all_candidates,
             type_hint,
@@ -4247,34 +4254,25 @@ struct to_ir {
             dl);
       }
 
-      if (refined_type_hint) {
-        TypePtr value_type_hint =
-            refined_type_hint->expect<DictType>()->getValueType();
-        for (const auto i : c10::irange(value_types.size())) {
-          TORCH_CHECK(
-              value_types[i]->isSubtypeOf(value_type_hint),
-              "Type "
-              "hint for dict was ",
-              refined_type_hint->repr_str(),
-              ", but the value ",
-              "at index ",
-              i,
-              " has type ",
-              value_types[i]->repr_str(),
-              ", which is not a valid"
-              " subtype of ",
-              value_type_hint->repr_str());
-        }
-      } else {
-        if (!(*unified_value_type)->isUnionType()) {
-          TORCH_WARN(
-              "Dict values consist of heterogeneous types, which "
-              "means that they have been typed as `Any`. To use "
-              "any of the values in the Dist, it will be "
-              "necessary to add an `assert isinstance` statement "
-              "before first use to trigger type refinement. \n",
-              dl.range().str());
-        }
+      key_type = refined_type_hint->expect<DictType>()->getKeyType();
+      value_type = refined_type_hint->expect<DictType>()->getValueType();
+
+      TypePtr value_type_hint =
+          refined_type_hint->expect<DictType>()->getValueType();
+      for (const auto i : c10::irange(value_types.size())) {
+        TORCH_CHECK(
+            value_types[i]->isSubtypeOf(value_type_hint),
+            "Type "
+            "hint for dict was ",
+            refined_type_hint->repr_str(),
+            ", but the value ",
+            "at index ",
+            i,
+            " has type ",
+            value_types[i]->repr_str(),
+            ", which is not a valid"
+            " subtype of ",
+            value_type_hint->repr_str());
       }
 
       // We only want to set `value_type` if we don't have a type
