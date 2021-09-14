@@ -6583,6 +6583,7 @@ op_db: List[OpInfo] = [
     OpInfo('diagonal',
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
            supports_out=False,
+           supports_forward_ad=True,
            sample_inputs_func=sample_inputs_diagonal_diag_embed),
     OpInfo('eq',
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
@@ -6969,16 +6970,25 @@ op_db: List[OpInfo] = [
            aten_name='linalg_eigh',
            dtypes=floating_and_complex_types(),
            check_batched_gradgrad=False,
+           supports_forward_ad=True,
            sample_inputs_func=sample_inputs_linalg_eigh,
            gradcheck_wrapper=gradcheck_wrapper_hermitian_input,
-           decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack]),
+           decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack],
+           skips=(
+               # Gradcheck for complex hangs for this function, therefore it raises NotImplementedError for now
+               SkipInfo('TestGradients', 'test_forward_mode_AD', dtypes=complex_types()),),
+           ),
     OpInfo('linalg.eigvalsh',
            aten_name='linalg_eigvalsh',
            dtypes=floating_and_complex_types(),
            check_batched_gradgrad=False,
            sample_inputs_func=sample_inputs_linalg_eigh,
            gradcheck_wrapper=gradcheck_wrapper_hermitian_input,
-           decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack],),
+           decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack],
+           skips=(
+               # Gradcheck hangs for this function
+               SkipInfo('TestGradients', 'test_forward_mode_AD'),),
+           ),
     OpInfo('linalg.householder_product',
            aten_name='linalg_householder_product',
            op=torch.linalg.householder_product,
@@ -8429,7 +8439,11 @@ op_db: List[OpInfo] = [
            check_batched_gradgrad=False,
            sample_inputs_func=sample_inputs_linalg_pinv_hermitian,
            gradcheck_wrapper=gradcheck_wrapper_hermitian_input,
-           decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack]),
+           decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack],
+           skips=(
+               # Gradcheck hangs for this function
+               SkipInfo('TestGradients', 'test_forward_mode_AD'),),
+           ),
     OpInfo('eig',
            op=torch.eig,
            dtypes=floating_and_complex_types(),
@@ -8448,6 +8462,7 @@ op_db: List[OpInfo] = [
            backward_dtypesIfCUDA=floating_and_complex_types_and(torch.half,
                                                                 *[torch.bfloat16] if (SM60OrLater and CUDA11OrLater) else []),
            supports_out=False,
+           supports_forward_ad=True,
            sample_inputs_func=sample_inputs_einsum,
            skips=(
                # test does not work with passing lambda for op
@@ -8877,6 +8892,7 @@ op_db: List[OpInfo] = [
            op=lambda x, scalar: torch.fill_(x.clone(), scalar),
            method_variant=None,
            inplace_variant=torch.Tensor.fill_,
+           supports_forward_ad=True,
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            supports_out=False,
            skips=(
