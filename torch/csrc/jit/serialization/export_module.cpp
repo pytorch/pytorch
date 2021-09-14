@@ -232,7 +232,7 @@ std::pair<IValue, IValue> getFunctionTuple(
   TORCH_CHECK(
       !schema.is_varret(),
       "A variable number of return values is not supported in mobile modules.");
-  auto makeArgTuple = [&](const c10::ArgumentVector& args) {
+  auto makeArgTuple = [&](const std::vector<Argument>& args) {
     std::vector<IValue> argTables;
     for (auto&& arg : args) {
       TORCH_CHECK(
