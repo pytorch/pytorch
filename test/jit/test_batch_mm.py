@@ -29,9 +29,11 @@ class TestBatchMM(JitTestCase):
                 + torch.mm(T7, T8)
             )
 
-        FileCheck().check_count("aten::mm", 4, True).run(str(test_batch_mm.graph))
+        FileCheck().check_count("aten::mm", 4, exactly=True).run(test_batch_mm.graph)
         self.run_pass("batch_mm", test_batch_mm.graph)
-        FileCheck().check("prim::MMTreeReduce").run(str(test_batch_mm.graph))
+        FileCheck().check_count("prim::MMTreeReduce", 1, exactly=True).run(
+            test_batch_mm.graph
+        )
 
     def test_batch_mm_permitted_mutation(self):
         @torch.jit.script
@@ -54,11 +56,11 @@ class TestBatchMM(JitTestCase):
             result["constant"] = torch.tensor([42.0])
             return result
 
-        print(str(test_batch_mm))
-
-        FileCheck().check_count("aten::mm", 4, True).run(str(test_batch_mm.graph))
+        FileCheck().check_count("aten::mm", 4, exactly=True).run(test_batch_mm.graph)
         self.run_pass("batch_mm", test_batch_mm.graph)
-        FileCheck().check("prim::MMTreeReduce").run(str(test_batch_mm.graph))
+        FileCheck().check_count("prim::MMTreeReduce", 1, exactly=True).run(
+            test_batch_mm.graph
+        )
 
     def test_batch_mm_prohibited_mutation(self):
         @torch.jit.script
@@ -80,10 +82,11 @@ class TestBatchMM(JitTestCase):
             )
             return result
 
-        FileCheck().check_count("aten::mm", 4, False).run(str(test_batch_mm.graph))
+        FileCheck().check_count("aten::mm", 4, exactly=True).run(test_batch_mm.graph)
         self.run_pass("batch_mm", test_batch_mm.graph)
-        FileCheck().check_count("aten::mm", 4, False).run(str(test_batch_mm.graph))
-        FileCheck().check_not("prim::MMTreeReduce").run(str(test_batch_mm.graph))
+        FileCheck().check_count("aten::mm", 4, exactly=True).check_not(
+            "prim::MMTreeReduce"
+        ).run(test_batch_mm.graph)
 
     def test_batch_mm_prohibited_mutation_multiple_adds(self):
         @torch.jit.script
@@ -116,8 +119,9 @@ class TestBatchMM(JitTestCase):
             return result
 
         self.run_pass("batch_mm", test_batch_mm.graph)
-        FileCheck().check("prim::MMTreeReduce").run(str(test_batch_mm.graph))
-        FileCheck().check_count("aten::mm", 4).run(str(test_batch_mm.graph))
+        FileCheck().check_count("prim::MMTreeReduce", 1, exactly=True).check_count(
+            "aten::mm", 5, exactly=True
+        ).run(test_batch_mm.graph)
 
     def test_batch_mm_prohibited_mutation_if_node(self):
         @torch.jit.script
@@ -150,8 +154,9 @@ class TestBatchMM(JitTestCase):
                 )
 
         self.run_pass("batch_mm", test_batch_mm.graph)
-        FileCheck().check("prim::MMTreeReduce").run(str(test_batch_mm.graph))
-        FileCheck().check_count("aten::mm", 4).run(str(test_batch_mm.graph))
+        FileCheck().check_count("aten::mm", 5, exactly=True).check_count(
+            "prim::MMTreeReduce", 1, exactly=True
+        ).run(test_batch_mm.graph)
 
     def test_batch_mm_side_permitted_mutation(self):
         @torch.jit.script
@@ -176,9 +181,11 @@ class TestBatchMM(JitTestCase):
             result["T8"] = torch.mm(A, T8)
             return result
 
-        FileCheck().check_count("aten::mm", 8, True).run(str(test_batch_mm.graph))
+        FileCheck().check_count("aten::mm", 8, exactly=True).run(test_batch_mm.graph)
         self.run_pass("batch_mm", test_batch_mm.graph)
-        FileCheck().check("prim::MMBatchSide").run(str(test_batch_mm.graph))
+        FileCheck().check_count("prim::MMBatchSide", 1, exactly=True).check_not(
+            "aten::mm"
+        ).run(test_batch_mm.graph)
 
     def test_batch_mm_side_prohibited_mutation_uncommon_side(self):
         @torch.jit.script
@@ -208,12 +215,13 @@ class TestBatchMM(JitTestCase):
             result["T10"] = torch.mm(A, T10)
             return result
 
-        FileCheck().check_count("aten::mm", 10, True).run(str(test_batch_mm.graph))
+        FileCheck().check_count("aten::mm", 10, exactly=True).run(test_batch_mm.graph)
         self.run_pass("batch_mm", test_batch_mm.graph)
 
-        FileCheck().check_count("aten::mm", 1, True).run(str(test_batch_mm.graph))
-        FileCheck().check("prim::MMBatchSide").run(str(test_batch_mm.graph))
-
+        FileCheck().check_count("aten::mm", 1, exactly=True).run(test_batch_mm.graph)
+        FileCheck().check_count("prim::MMBatchSide", 1, exactly=True).run(
+            test_batch_mm.graph
+        )
 
     def test_batch_mm_side_prohibited_mutation_common_side(self):
         @torch.jit.script
@@ -243,7 +251,8 @@ class TestBatchMM(JitTestCase):
             result["T10"] = torch.mm(A, T10)
             return result
 
-        FileCheck().check_count("aten::mm", 10, True).run(str(test_batch_mm.graph))
+        FileCheck().check_count("aten::mm", 10, exactly=True).run(test_batch_mm.graph)
         self.run_pass("batch_mm", test_batch_mm.graph)
-        FileCheck().check_count("aten::mm", 10, True).run(str(test_batch_mm.graph))
-        FileCheck().check_not("prim::MMBatchSide").run(str(test_batch_mm.graph))
+        FileCheck().check_count("aten::mm", 10, exactly=True).check_not(
+            "prim::MMBatchSide"
+        ).run(test_batch_mm.graph)

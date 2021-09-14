@@ -93,6 +93,7 @@ concurrency:
           # Prune all of the docker images
           docker system prune -af
       - name: Chown workspace
+        if: always()
         env:
           ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
         run: |
@@ -107,4 +108,72 @@ concurrency:
           # deep clone, to allow use of git merge-base
           fetch-depth: 0
           submodules: !{{ submodules }}
+{%- endmacro -%}
+
+
+{%- macro upload_test_reports(name) -%}
+      - name: Zip test reports for upload
+        if: always()
+        env:
+{%- if name == 'linux' or name == 'windows' %}
+          FILE_SUFFIX: '${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}'
+{%- else %}
+          FILE_SUFFIX: '!{{ name }}-${{ github.job }}'
+{%- endif %}
+{%- if name == 'windows' %}
+        shell: powershell
+        run: |
+          # -ir => recursive include all files in pattern
+          7z a "test-reports-$Env:FILE_SUFFIX.zip" -ir'!test\*.xml'
+{%- else %}
+        run: |
+          # Remove any previous test reports if they exist
+          rm -f test-reports-*.zip
+          zip -r "test-reports-${FILE_SUFFIX}.zip" test -i '*.xml'
+{%- endif %}
+      - uses: actions/upload-artifact@v2
+        name: Store Test Reports
+        if: always()
+        with:
+{%- if name == 'linux' or name == 'windows' %}
+          name: test-reports-${{ matrix.config }}
+{%- else %}
+          name: test-reports-!{{ name }}
+{%- endif %}
+          retention-days: 14
+          if-no-files-found: error
+          path:
+{%- if name == 'windows' %}
+            pytorch-${{ github.run_id }}/test-reports-*.zip
+{%- else %}
+            test-reports-*.zip
+{%- endif %}
+      - uses: !{{ upload_artifact_s3_action }}
+        name: Store Test Reports on S3
+        if: always()
+        with:
+          retention-days: 14
+          if-no-files-found: error
+          path:
+{%- if name == 'windows' %}
+            pytorch-${{ github.run_id }}/test-reports-*.zip
+{%- else %}
+            test-reports-*.zip
+{%- endif %}
+{%- endmacro -%}
+
+{%- macro render_test_results() -%}
+      - name: Install render_test_results dependencies
+        if: always()
+        shell: bash
+        run: |
+          python3 -m pip install junitparser==2.1.1 rich==10.9.0
+      - name: "[[ Click me for rendered test results (useful for finding failing tests) ]]"
+        if: always()
+        shell: bash
+        # Encoding is weird on windows, just try to default to utf-8 if possible
+        env:
+          PYTHONIOENCODING: "utf-8"
+        run: |
+          python3 tools/render_junit.py test/
 {%- endmacro -%}

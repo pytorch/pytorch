@@ -9,6 +9,7 @@
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/peephole.h>
 #include <torch/csrc/jit/runtime/custom_operator.h>
+#include <torch/csrc/jit/runtime/graph_iterator.h>
 
 #include <ATen/ATen.h>
 #include <algorithm>
@@ -471,22 +472,19 @@ bool hasMutableOperators(Block* block) {
   return false;
 }
 
-bool hasMMOperators(Block* block) {
-  for (auto n : block->nodes()) {
+bool hasMMOperators(std::shared_ptr<Graph>& graph) {
+  DepthFirstGraphNodeIterator it(graph);
+  Node* n = nullptr;
+  while ((n = it.next()) != nullptr) {
     if (n->matches("aten::mm(Tensor self, Tensor mat2) -> Tensor")) {
       return true;
-    }
-    for (auto b : n->blocks()) {
-      if (hasMMOperators(b)) {
-        return true;
-      }
     }
   }
   return false;
 }
 
 void BatchMM(std::shared_ptr<Graph>& graph) {
-  if (!hasMMOperators(graph->block())) {
+  if (!hasMMOperators(graph)) {
     return;
   }
   AliasDb alias_db(graph);
