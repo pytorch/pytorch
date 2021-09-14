@@ -1,6 +1,5 @@
 #pragma once
 
-#include <c10/util/SmallVector.h>
 #include <c10/util/StringUtil.h>
 #include <c10/util/string_view.h>
 #include <ATen/core/jit_type.h>
@@ -34,39 +33,12 @@ struct Argument {
         type_(type ? std::move(type) : TensorType::get()),
         N_(std::move(N)),
         default_value_(std::move(default_value)),
-        alias_info_(alias_info ? std::make_unique<AliasInfo>(std::move(*alias_info)) : nullptr),
+        alias_info_(std::move(alias_info)),
         kwarg_only_(kwarg_only) {
     // this is an softly-enforced invariant for out arguments.
-    bool is_alias = alias_info_ != nullptr && alias_info_->isWrite();
+    bool is_alias = alias_info_.has_value() && alias_info_.value().isWrite();
     is_out_ = kwarg_only_ && is_alias;
   }
-
-  Argument(Argument&& rhs) noexcept = default;
-
-  Argument(const Argument& rhs)
-      : name_(rhs.name_),
-        type_(rhs.type_),
-        N_(rhs.N_),
-        default_value_(rhs.default_value_),
-        alias_info_(rhs.alias_info_ ? std::make_unique<AliasInfo>(*rhs.alias_info_) : nullptr),
-        kwarg_only_(rhs.kwarg_only_),
-        is_out_(rhs.is_out_) {}
-
-  Argument& operator=(Argument&& rhs) noexcept = default;
-
-  Argument& operator=(const Argument& rhs) {
-    if (this != &rhs) {
-      name_ = rhs.name_;
-      type_ = rhs.type_;
-      N_ = rhs.N_;
-      default_value_ = rhs.default_value_;
-      alias_info_ = rhs.alias_info_ ? std::make_unique<AliasInfo>(*rhs.alias_info_) : nullptr;
-      kwarg_only_ = rhs.kwarg_only_;
-      is_out_ = rhs.is_out_;
-    }
-    return *this;
-  }
-
   const std::string& name() const {
     return name_;
   }
@@ -87,8 +59,8 @@ struct Argument {
     return is_out_;
   }
 
-  const AliasInfo* alias_info() const {
-    return alias_info_.get();
+  const c10::optional<AliasInfo>& alias_info() const {
+    return alias_info_;
   }
   bool is_inferred_type() const {
     bool is_inferred_type = false;
@@ -128,7 +100,7 @@ struct Argument {
         N_,
         default_value_,
         kwarg_only_,
-        *alias_info_);
+        alias_info_);
   }
 
   // this function checks whether this Argument is backward compatible with
@@ -150,20 +122,12 @@ struct Argument {
   c10::optional<int32_t> N_;
 
   c10::optional<IValue> default_value_;
-  // AliasInfo is huge, so let's only allocate memory for it if
-  // necessary (which it isn't during schema parsing on startup, to
-  // give a pertinent example).
-  std::unique_ptr<AliasInfo> alias_info_;
+  c10::optional<AliasInfo> alias_info_;
   // is this only specifiable as a keyword argument?
   bool kwarg_only_;
   // marks if the argument is out variant of the schema
   bool is_out_;
 };
-
-// The capacity of this SmallVector was not rigorously tuned across a
-// variety of workloads. If you think it might make sense to go up or
-// down, feel free!
-using ArgumentVector = c10::SmallVector<Argument, 3>;
 
 inline bool operator==(const Argument& lhs, const Argument& rhs) {
   return lhs.name() == rhs.name()
@@ -171,9 +135,7 @@ inline bool operator==(const Argument& lhs, const Argument& rhs) {
           && lhs.N() == rhs.N()
           && lhs.default_value() == rhs.default_value()
           && lhs.kwarg_only() == rhs.kwarg_only()
-          && (lhs.alias_info() == rhs.alias_info()
-              || (lhs.alias_info() != nullptr && rhs.alias_info() != nullptr
-                   && *lhs.alias_info() == *rhs.alias_info()));
+          && lhs.alias_info() == rhs.alias_info();
 }
 
 bool operator==(const FunctionSchema& lhs, const FunctionSchema& rhs);
@@ -182,8 +144,8 @@ struct FunctionSchema {
   FunctionSchema(
       std::string name,
       std::string overload_name,
-      ArgumentVector arguments,
-      ArgumentVector returns,
+      std::vector<Argument> arguments,
+      std::vector<Argument> returns,
       bool is_vararg = false,
       bool is_varret = false)
       : name_({std::move(name), std::move(overload_name)}),
@@ -197,8 +159,8 @@ struct FunctionSchema {
   FunctionSchema(
       Symbol name,
       std::string overload_name,
-      ArgumentVector arguments,
-      ArgumentVector returns,
+      std::vector<Argument> arguments,
+      std::vector<Argument> returns,
       bool is_vararg = false,
       bool is_varret = false)
       : FunctionSchema(
@@ -240,8 +202,8 @@ struct FunctionSchema {
 
  private:
   OperatorName name_;
-  ArgumentVector arguments_;
-  ArgumentVector returns_;
+  std::vector<Argument> arguments_;
+  std::vector<Argument> returns_;
   // if true then this schema takes an arbitrary number of additional arguments
   // after the argument specified in arguments
   // currently this is used primarily to represent 'primitive' operators whose
@@ -291,10 +253,10 @@ struct FunctionSchema {
   const std::string& overload_name() const {
     return name_.overload_name;
   }
-  const ArgumentVector& arguments() const {
+  const std::vector<Argument>& arguments() const {
     return arguments_;
   }
-  const ArgumentVector& returns() const {
+  const std::vector<Argument>& returns() const {
     return returns_;
   }
   bool is_vararg() const {
@@ -306,8 +268,8 @@ struct FunctionSchema {
   bool is_mutable() const {
     return std::any_of(
         arguments_.cbegin(), arguments_.cend(), [](const Argument& arg) {
-          const AliasInfo* aliasInfo = arg.alias_info();
-          return aliasInfo && aliasInfo->isWrite();
+          const auto& aliasInfo = arg.alias_info();
+          return aliasInfo && aliasInfo.value().isWrite();
         });
   }
 
@@ -328,7 +290,7 @@ struct FunctionSchema {
         is_varret()
         );
   }
-  FunctionSchema cloneWithArguments(ArgumentVector new_arguments) const {
+  FunctionSchema cloneWithArguments(std::vector<Argument> new_arguments) const {
     return FunctionSchema(
         name(),
         overload_name(),
@@ -337,7 +299,7 @@ struct FunctionSchema {
         is_vararg(),
         is_varret());
   }
-  FunctionSchema cloneWithReturns(ArgumentVector new_returns) const {
+  FunctionSchema cloneWithReturns(std::vector<Argument> new_returns) const {
     return FunctionSchema(
         name(),
         overload_name(),
@@ -367,12 +329,12 @@ struct FunctionSchema {
 
   bool hasAnyAliasInfo() const {
     for (const auto& arg : arguments_) {
-      if (arg.alias_info() != nullptr) {
+      if (arg.alias_info().has_value()) {
         return true;
       }
     }
     for (const auto& ret : returns_) {
-      if (ret.alias_info() != nullptr) {
+      if (ret.alias_info().has_value()) {
         return true;
       }
     }
@@ -442,7 +404,7 @@ inline std::ostream& operator<<(std::ostream& out, const Argument& arg) {
   }
 
   if (arg.alias_info()) {
-    out << *arg.alias_info();
+    out << arg.alias_info().value();
   }
 
   if (is_opt) {
