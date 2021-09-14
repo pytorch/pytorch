@@ -918,8 +918,8 @@ separate private pool for each capture. If you capture multiple graphs,
 this conservative approach ensures graph replays never corrupt each other's values,
 but sometimes needlessly wastes memory.
 
-Sharing memory across captures with torch.cuda.graph
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Sharing memory across captures
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 To economize the memory stashed in private pools, :class:`torch.cuda.graph`
 and :func:`torch.cuda.make_graphed_callables` optionally allow different
@@ -948,9 +948,6 @@ and can be used to share memory across graphs as shown::
     static_in_2.copy_(real_data_2)
     g1.replay()
     g2.replay()
-
-Sharing memory across captures with torch.cuda.make_graphed_callables
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 With :func:`torch.cuda.make_graphed_callables`, if you want to graph several
 callables and you know they'll always run in the same order (and never concurrently)
