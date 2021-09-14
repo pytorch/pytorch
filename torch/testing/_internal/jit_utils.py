@@ -408,19 +408,12 @@ class JitTestCase(JitCommonTestCase):
                     cu = torch.jit.CompilationUnit(source, _frames_up=frames_up)
                     string_frontend = getattr(cu, script.__name__)
 
-                with self.assertRaisesRegex(exception, regex):
-                    string_frontend(*inputs)
-                # optimized run
                 string_frontend(*inputs)
 
             # Python AST frontend
             if not isinstance(script, str):
                 with self.assertRaisesRegex(exception, regex):
                     ge = torch.jit.script(python_fn)
-                    # profiling run
-                    with self.assertRaisesRegex(exception, regex):
-                        ge(*inputs)
-                    # optimized run
                     ge(*inputs)
 
     def checkBailouts(self, model, inputs, expected):

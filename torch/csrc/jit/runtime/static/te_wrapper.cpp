@@ -2,6 +2,7 @@
 
 #include <ATen/CPUFunctions.h>
 #include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/runtime/static/impl.h>
 
 namespace torch {
 namespace jit {
@@ -79,8 +80,8 @@ std::mutex& getNNCCacheMutex() {
   return nncCacheMutex;
 }
 
-std::unordered_map<NodeKind, std::shared_ptr<TEWrapper>>& getNNCCache() {
-  static std::unordered_map<NodeKind, std::shared_ptr<TEWrapper>> nncCache;
+FastMap<NodeKind, std::shared_ptr<TEWrapper>>& getNNCCache() {
+  static FastMap<NodeKind, std::shared_ptr<TEWrapper>> nncCache;
   return nncCache;
 }
 
@@ -108,7 +109,7 @@ std::shared_ptr<TEWrapper> createLogit() {
   wrap = std::make_shared<TEWrapper>();
   auto N = VarHandle("N", kInt);
   auto C = VarHandle("C", kFloat);
-  Placeholder A("A", kFloat, {N});
+  BufHandle A("A", {N}, kFloat);
   Tensor B = Compute("B", {N}, [&](const VarHandle& i) {
     auto A_elem = [&]() {
       auto elem = A.load(i);
@@ -132,7 +133,7 @@ std::shared_ptr<TEWrapper> createRelu() {
   }
   wrap = std::make_shared<TEWrapper>();
   auto N = VarHandle("N", kInt);
-  Placeholder A("A", kFloat, {N});
+  BufHandle A("A", {N}, kFloat);
   Tensor B = Compute("B", {N}, [&](const VarHandle& i) {
     auto zero = FloatImm::make(0.f);
     auto a = A.load(i);
@@ -150,7 +151,7 @@ std::shared_ptr<TEWrapper> createTanh() {
   }
   wrap = std::make_shared<TEWrapper>();
   auto N = VarHandle("N", kInt);
-  Placeholder A("A", kFloat, {N});
+  BufHandle A("A", {N}, kFloat);
   Tensor B = Compute("B", {N}, [&](const VarHandle& i) {
     auto a = A.load(i);
     return fast_tanh(a);
@@ -167,7 +168,7 @@ std::shared_ptr<TEWrapper> createSigmoid() {
   }
   wrap = std::make_shared<TEWrapper>();
   auto N = VarHandle("N", kInt);
-  Placeholder A("A", kFloat, {N});
+  BufHandle A("A", {N}, kFloat);
   Tensor B =
       Compute("B", {N}, [&](const VarHandle& i) { return sigmoid(A.load(i)); });
   // NNC uses sleef for vectorizing sigmoid, which comes in an 8-wide flavor

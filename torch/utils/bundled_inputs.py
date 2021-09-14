@@ -127,6 +127,7 @@ def augment_model_with_bundled_inputs(
         inputs: Optional[Sequence[Tuple[Any, ...]]] = None,
         _receive_inflate_expr: Optional[List[str]] = None,  # For debugging.
         info: Optional[List[str]] = None,  # Optional argument to provide info about forward or its inputs
+        skip_size_check=False,
 ) -> None:
     """ Add bundled sample inputs to a model for the forward function.
 
@@ -172,6 +173,7 @@ def augment_model_with_bundled_inputs(
         inputs={forward : inputs},
         _receive_inflate_expr=_receive_inflate_expr,
         info={forward : info} if info else None,
+        skip_size_check=skip_size_check,
     )
 
 
@@ -180,6 +182,7 @@ def augment_many_model_functions_with_bundled_inputs(
         inputs: Dict[Callable, Optional[Sequence[Tuple[Any, ...]]]],
         _receive_inflate_expr: Optional[List[str]] = None,  # For debugging.
         info: Optional[Dict[Callable, List[str]]] = None,  # Optional argument to provide info about the function or its inputs
+        skip_size_check=False,
 ) -> None:
     """Add bundled sample inputs to a model for an arbitrary list of public functions.
 
@@ -289,6 +292,7 @@ def augment_many_model_functions_with_bundled_inputs(
                         arg,
                         f"deflated[{inp_idx}][{arg_idx}]",
                         inflate_helper_fn_name,
+                        skip_size_check=skip_size_check,
                     )
                     deflated_args.append(deflated)
                     parts.append(f"    {inflater},")
@@ -354,7 +358,7 @@ def augment_many_model_functions_with_bundled_inputs(
         """.format(template=get_bundled_inputs_functions_and_info_template)))
 
 def _inflate_expr(
-    arg: T, ref: str, inflate_helper_fn_name: str
+    arg: T, ref: str, inflate_helper_fn_name: str, skip_size_check: bool = False
 ) -> Tuple[Union[T, torch.Tensor], str, Optional[str]]:
     # Allow custom inflation expressions any object.
     # For example, calling custom image-decoding ops.
@@ -379,7 +383,7 @@ def _inflate_expr(
 
     if isinstance(arg, torch.Tensor):
         # Small-storage tensors can just be saved directly.
-        if arg.storage().size() <= MAX_RAW_TENSOR_SIZE:
+        if arg.storage().size() <= MAX_RAW_TENSOR_SIZE or skip_size_check:
             return arg, ref, None
         # Small contiguous tensors can be cloned to have small storage.
         # TODO: Should we do this even for non-contiguous tensors?
