@@ -2312,10 +2312,7 @@ Tensor diag_backward(const Tensor& grad, IntArrayRef input_sizes, int64_t diagon
   }
 
   // Input was a matrix but was not square
-  auto grad_input = at::zeros(input_sizes, grad.options());
-  auto diag = grad_input.diagonal(diagonal);
-  diag.copy_(grad);
-  return grad_input;
+  return at::diagonal_backward(grad, input_sizes, diagonal, 0, 1);
 }
 
 Tensor diagonal_backward(const Tensor & grad, IntArrayRef input_sizes, int64_t offset, int64_t dim1, int64_t dim2) {
