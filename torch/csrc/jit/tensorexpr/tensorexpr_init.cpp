@@ -75,6 +75,13 @@ void initTensorExprBindings(PyObject* module) {
 
   auto expr_handle_class =
       py::class_<ExprHandle>(te, "ExprHandle")
+          .def(
+              "__str__",
+              [](const ExprHandle& self) {
+                std::stringstream ss;
+                ss << self;
+                return ss.str();
+              })
           .def(py::self + py::self)
           .def(py::self * py::self)
           .def(py::self - py::self)
@@ -124,7 +131,23 @@ void initTensorExprBindings(PyObject* module) {
           .def("trunc", [](const ExprHandle& self) { return trunc(self); })
           .def("frac", [](const ExprHandle& self) { return frac(self); })
           .def("lgamma", [](const ExprHandle& self) { return lgamma(self); })
-          .def("isnan", [](const ExprHandle& self) { return isnan(self); });
+          .def("isnan", [](const ExprHandle& self) { return isnan(self); })
+          .def(
+              "cast",
+              [](const ExprHandle& self, const Dtype& dt) {
+                return Cast::make(dt, self);
+              })
+#define EXPRHANDLE_INIT(ctype, name) \
+  .def(py::init([](ctype val) { return name##Imm::make(val); }))
+              AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, EXPRHANDLE_INIT)
+#undef EXPRHANDLE_INIT
+      ;
+
+#define EXPRHANDLE_IMPL_CONV(ctype, name) \
+  py::implicitly_convertible<ctype, ExprHandle>();
+  AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, EXPRHANDLE_IMPL_CONV)
+#undef EXPRHANDLE_IMPL_CONV
+
   te.def(
       "ifThenElse",
       [](const ExprHandle& c, const ExprHandle& t, const ExprHandle& f) {
@@ -149,6 +172,13 @@ void initTensorExprBindings(PyObject* module) {
 #undef EXPRHANDLE_CTOR
 
   py::class_<VarHandle, ExprHandle>(te, "VarHandle")
+      .def(
+          "__str__",
+          [](const ExprHandle& self) {
+            std::stringstream ss;
+            ss << self;
+            return ss.str();
+          })
       .def(py::init<Dtype>())
       .def(py::init<const std::string&, Dtype>());
   py::class_<BufHandle, ExprHandle>( // NOLINT
@@ -163,9 +193,16 @@ void initTensorExprBindings(PyObject* module) {
           [](BufHandle& self, const std::vector<ExprHandle>& v) {
             return Load::make(self, v);
           })
-      .def("load", [](BufHandle& self, const ExprHandle& v) {
-        return Load::make(self, {v});
-      });
+      .def(
+          "load",
+          [](BufHandle& self, const ExprHandle& v) {
+            return Load::make(self, {v});
+          })
+      .def(
+          "store",
+          [](BufHandle& self,
+             const std::vector<ExprHandle>& args,
+             const ExprHandle& val) { return Store::make(self, args, val); });
 
   py::class_<Placeholder>(te, "Placeholder")
       .def(py::init<
@@ -196,12 +233,20 @@ void initTensorExprBindings(PyObject* module) {
       .def("buf", [](Tensor& self) { return BufHandle(self.buf()); })
       .def("stmt", &Tensor::stmt);
   py::class_<Cast, std::shared_ptr<Cast>>(te, "Cast")
-      .def_static("make", &Cast::make);
+      .def_static("make", &Cast::make)
+      .def(
+          "src_value",
+          [](CastPtr& self) { return ExprHandle(self->src_value()); })
+      .def("set_src_value", [](CastPtr& self, const ExprHandle& value) {
+        self->set_src_value(value.node());
+      });
 
   py::class_<DimArg>(te, "DimArg")
       .def(py::init<const ExprHandle&>())
       .def(py::init<const ExprHandle&, const std::string&>());
   py::implicitly_convertible<ExprHandle, DimArg>();
+  py::implicitly_convertible<int32_t, DimArg>();
+  py::implicitly_convertible<int64_t, DimArg>();
 
   te.def(
       "Compute",
@@ -584,7 +629,7 @@ void initTensorExprBindings(PyObject* module) {
           py::return_value_policy::reference)
       .def(
           "flatten",
-          [](const std::vector<ForPtr>& loops) {
+          [](LoopNest& self, const std::vector<ForPtr>& loops) {
             ForPtr flattened = nullptr;
             LoopNest::flatten(loops, &flattened);
             return flattened;
