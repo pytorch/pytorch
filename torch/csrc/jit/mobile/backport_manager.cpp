@@ -141,9 +141,7 @@ void write_archive_current(
     WriteableTensorData writable_td = getWriteableTensorData(td);
     std::string fname = tensor_dir + tensor_names[i++];
     if (use_storage_context &&
-        std::find(
-            pre_serialized_files.begin(), pre_serialized_files.end(), fname) !=
-            pre_serialized_files.end()) {
+        pre_serialized_files.find(fname) != pre_serialized_files.end()) {
       // storage has been serialzed already, skip
       continue;
     }
