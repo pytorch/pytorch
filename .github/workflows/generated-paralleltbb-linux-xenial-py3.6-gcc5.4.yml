@@ -262,6 +262,7 @@ jobs:
           # Prune all of the docker images
           docker system prune -af
       - name: Chown workspace
+        if: always()
         env:
           ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
         run: |
@@ -451,17 +452,29 @@ jobs:
         run: |
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - name: Install render_test_results dependencies
+        if: always()
+        shell: bash
+        run: |
+          python3 -m pip install junitparser==2.1.1 rich==10.9.0
+      - name: "[[ Click me for rendered test results (useful for finding failing tests) ]]"
+        if: always()
+        shell: bash
+        # Encoding is weird on windows, just try to default to utf-8 if possible
+        env:
+          PYTHONIOENCODING: "utf-8"
+        run: |
+          python3 tools/render_junit.py test/
       - name: Zip test reports for upload
         if: always()
         env:
-          COMMIT_SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
-          WORKFLOW_ID: '${{ github.run_id }}_${{ github.run_number }}'
+          FILE_SUFFIX: '${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}'
         run: |
           # Remove any previous test reports if they exist
           rm -f test-reports-*.zip
-          zip -r "test-reports-${COMMIT_SHA1}-${WORKFLOW_ID}.zip" test -i '*.xml'
+          zip -r "test-reports-${FILE_SUFFIX}.zip" test -i '*.xml'
       - uses: actions/upload-artifact@v2
-        name: Store PyTorch Test Reports
+        name: Store Test Reports
         if: always()
         with:
           name: test-reports-${{ matrix.config }}
@@ -470,10 +483,9 @@ jobs:
           path:
             test-reports-*.zip
       - uses: seemethere/upload-artifact-s3@v3
-        name: Store PyTorch Test Reports on S3
+        name: Store Test Reports on S3
         if: always()
         with:
-          name: test-reports-${{ matrix.config }}
           retention-days: 14
           if-no-files-found: error
           path:
@@ -511,6 +523,7 @@ jobs:
           # Prune all of the docker images
           docker system prune -af
       - name: Chown workspace
+        if: always()
         env:
           ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
         run: |
