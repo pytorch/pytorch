@@ -23,7 +23,7 @@ namespace nnc {
 
 std::vector<int64_t> getConstSizes(const BufPtr b) {
   std::vector<int64_t> r;
-  for (auto dim : b->dims()) {
+  for (const auto dim : b->dims()) {
     LongImmPtr imm_dim = to<LongImm>(dim);
     // TODO: assert it's actually immediate
     int64_t s = imm_dim->value();
