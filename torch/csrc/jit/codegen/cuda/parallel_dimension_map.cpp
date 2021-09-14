@@ -130,9 +130,9 @@ void ParallelDimensionMap::populateDimensionMapWithMultipleCASet(
   kir::IrBuilder ir_builder(gpu_lower->kernel());
 
   bool all_equal = true;
-  kir::Val* known_dimension =
-      gpu_lower->lowerValue((*dom_set.begin())->extent());
-  // Set it -1 to signal it's not initialied yet
+  // Use nullptr to signal it's not initialied yet
+  kir::Val* known_dimension = nullptr;
+  // Use -1 to signal it's not initialied yet
   int64_t known_const = -1;
 
   // Check all of concrete domains to see if they match all together.
@@ -169,10 +169,15 @@ void ParallelDimensionMap::populateDimensionMapWithMultipleCASet(
     // At this point, it still remains undetermined whether this id
     // matches with those previously looked at. Constant check failed,
     // but symbolic matching may succeed.
-    if (!equalDim(
-            known_dimension, gpu_lower->lowerValue(concrete_id->extent()))) {
-      all_equal = false;
-      break;
+    auto this_dimension = gpu_lower->lowerValue(concrete_id->extent());
+    if (known_dimension == nullptr) {
+      // No previous dimension found yet
+      known_dimension = this_dimension;
+    } else {
+      if (!equalDim(known_dimension, this_dimension)) {
+        all_equal = false;
+        break;
+      }
     }
   }
 

@@ -7993,6 +7993,10 @@ TEST(NVFuserTest, FusionSmemBlockGemm_CUDA) {
   tv6->axis(-3)->parallelize(ParallelType::TIDy);
   tv6->axis(-2)->parallelize(ParallelType::TIDx);
 
+  // Make sure BIDx is makred as exact (see issue #1119)
+  GpuLower gpulw(&fusion);
+  TORCH_CHECK(gpulw.parallelDimensionMap().isExact(ParallelType::BIDx));
+
   constexpr int M = 154, K = 45, N = 1524;
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
