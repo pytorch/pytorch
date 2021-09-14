@@ -108,7 +108,16 @@ def gen_unstructured_lazy_definition(f: NativeFunction, backend_index: BackendIn
     {lazy_tensor_decls_str}
     {meta_str}
     return bridge::AtenFromLtcTensor(l_{first_tensor.name}.CreateFrom(
-        ir::MakeNode<ir::ops::{ir_node_name(f.func)}>({node_ctor_input_str}, _out_dtype, _out_shape)));
+        ir::MakeNode<ir::ops::{ir_node_name(f.func)}>({node_ctor_input_str}, _out_dtype, _out_shape),
+
+        // (whc): experiment on dtype
+        // try always overriding output dtype to match the one ATen says our op should produce.
+        // this diverges from most of the handwritten methods, which often do not override and 
+        // rely on other behavior in the lowering or copy process to make this correct.
+        // (1) evaluate design goal: to always pick the IR's dtype in one place (here)
+        // (2) rationalize this with Google's design, it may be a problem
+        // (3) evaluate perf impact: make sure we're not actually doing casts becuase of this override
+        _out_dtype));
 }};
 """
 
