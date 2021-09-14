@@ -442,7 +442,7 @@ void BytecodeDeserializer::parseMethods(
     }
 
     parseInstructions(
-        function_name, ins_list, debug_handles_m_tuple, function.get());
+        function_name, std::move(ins_list), debug_handles_m_tuple, function.get());
 
     parseOperators(
         std::move(ops_list),
