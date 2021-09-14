@@ -118,12 +118,6 @@ void validateGraph(
     const std::shared_ptr<Graph>& graph,
     onnx_torch::OperatorExportTypes operator_export_type) {
   validateBlock(graph->block(), operator_export_type);
-  // this is run on an onnx graph which doesn't have side effects.
-  // ignore side effects in dead code elimination.
-  EliminateDeadCode(
-      graph->block(),
-      true,
-      DCESideEffectPolicy::ALLOW_DELETING_NODES_WITH_SIDE_EFFECTS);
 }
 
 std::string GetFileRootPath(const std::string& rootPath) {
@@ -172,11 +166,25 @@ void CreateExternalFile(
   fwrite(tensor.data_ptr(), tensor.element_size(), tensor.numel(), fp.get());
 } // fclose() called here through CloseFile(), if FILE* is not a null pointer.
 
-class EncoderBase {
+class GraphEncoder {
  public:
-  EncoderBase(
+  GraphEncoder(
+      const std::shared_ptr<Graph>& graph,
+      int64_t onnx_opset_version,
       onnx_torch::OperatorExportTypes operator_export_type,
-      bool strip_doc);
+      const std::map<std::string, at::Tensor>& initializers,
+      const std::unordered_map<
+          std::string,
+          std::unordered_map<int64_t, std::string>>& dynamic_axes,
+      bool defer_weight_export,
+      bool strip_doc,
+      bool keep_initializers_as_inputs,
+      const std::map<std::string, int>& custom_opsets,
+      bool add_node_names,
+      bool use_external_data_format,
+      const std::string& onnx_file_path,
+      const ValAttrNameMap& val_attr_to_name = {},
+      const NodeAttrNameMap& node_attr_to_name = {});
 
   onnx::ModelProto get_model_proto() {
     return model_proto_;
@@ -186,7 +194,15 @@ class EncoderBase {
     return symbol_dim_map_;
   }
 
- protected:
+  RawDataExportMap get_raw_data_export_map() {
+    return raw_data_export_map_;
+  }
+
+  bool get_use_external_data_format() {
+    return use_external_data_format_;
+  }
+
+ private:
   // Using std::map instead of std::unordered_map for initializers
   // in EncodeGraph constructor so that the order in which initializers
   // get written to the ONNX graph is always the deterministic and
@@ -237,18 +253,39 @@ class EncoderBase {
       const std::map<std::string, at::Tensor>& initializers =
           std::map<std::string, at::Tensor>());
 
-  virtual void EncodeTensor(
+  void EncodeNode(
+      onnx::GraphProto* graph_proto,
+      onnx::NodeProto* node_proto,
+      const Node* node,
+      bool add_node_names = true,
+      bool use_external_data_format = false,
+      const std::string& onnx_file_path = std::string());
+
+  void EncodeLocalFunctionOpsetImport(
+      onnx::FunctionProto* func_proto,
+      const Node* n,
+      std::unordered_set<std::string>& custom_domains);
+
+  void EncodeLocalFunction(
+      onnx::GraphProto* graph_proto,
+      onnx::FunctionProto* func_proto,
+      const Node* n,
+      bool add_node_names = true,
+      bool use_external_data_format = false,
+      const std::string& onnx_file_path = std::string());
+
+  void EncodeTensor(
       onnx::TensorProto* tensor_proto,
       const at::Tensor& tensor,
       const c10::optional<std::string> external_ref = {},
       const bool use_external_data_format = false,
-      const std::string& onnx_file_path = std::string()) = 0;
+      const std::string& onnx_file_path = std::string());
 
-  virtual void EncodeIntermediateValueInfo(
+  void EncodeIntermediateValueInfo(
       onnx::GraphProto* graph_proto,
-      const Value* n) {}
+      const Value* n);
 
-  virtual void EncodeValueInfo(
+  void EncodeValueInfo(
       onnx::GraphProto* graph_proto,
       onnx::ValueInfoProto* v,
       const Value* n,
@@ -268,34 +305,39 @@ class EncoderBase {
 
   void AddAttribute(
       onnx::NodeProto* node_proto,
+      const jit::Symbol name,
+      const std::string& ref_attr_name);
+
+  void AddAttribute(
+      onnx::NodeProto* node_proto,
       const jit::Node* node,
       const jit::Symbol name,
       const bool use_external_data_format = false,
       const std::string& onnx_file_path = std::string());
 
-  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
-  SymbolDimMap symbol_dim_map_;
-  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
-  onnx::ModelProto model_proto_;
-  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
-  size_t num_blocks_;
-  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
-  size_t num_op_nodes_;
-  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
-  size_t num_external_data_;
-  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
-  onnx_torch::OperatorExportTypes operator_export_type_;
-  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
-  bool strip_doc_;
-  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
-  std::set<std::string> domains_;
+  void AddAttribute(onnx::FunctionProto* func_proto, const std::string& name);
 
+  SymbolDimMap symbol_dim_map_;
+  onnx::ModelProto model_proto_;
+  size_t num_blocks_;
+  size_t num_op_nodes_;
+  size_t num_external_data_;
+  onnx_torch::OperatorExportTypes operator_export_type_;
+  bool strip_doc_;
+  std::set<std::string> domains_;
+  RawDataExportMap raw_data_export_map_;
+  bool defer_weight_export_;
+  bool use_external_data_format_;
+  int64_t onnx_opset_version_;
+  std::map<std::string, int> custom_opsets_;
+  std::shared_ptr<Graph> graph_;
+  ValAttrNameMap val_attr_to_name_;
+  NodeAttrNameMap node_attr_to_name_;
   // For large models, the parameters can be stored in separate binary files.
   // This parameter sets a threshold on the number of elements in the parameter
   // tensor, beyond which the parameter is stored in a separate file (if API
   // argument use_external_data_format is set to True). This threshold is in
   // place so as not to create too many external files.
-  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   const size_t ParamSizeThresholdForExternalStorage = 1024;
 };
 
@@ -330,14 +372,35 @@ onnx::TensorProto_DataType ATenTypeToOnnxType(at::ScalarType at_type) {
   }
 }
 
-EncoderBase::EncoderBase(
+GraphEncoder::GraphEncoder(
+    const std::shared_ptr<Graph>& graph,
+    int64_t onnx_opset_version,
     onnx_torch::OperatorExportTypes operator_export_type,
-    bool strip_doc)
+    const std::map<std::string, at::Tensor>& initializers,
+    const std::unordered_map<
+        std::string,
+        std::unordered_map<int64_t, std::string>>& dynamic_axes,
+    bool defer_weight_export,
+    bool strip_doc,
+    bool keep_initializers_as_inputs,
+    const std::map<std::string, int>& custom_opsets,
+    bool add_node_names,
+    bool use_external_data_format,
+    const std::string& onnx_file_path,
+    const ValAttrNameMap& val_attr_to_name,
+    const NodeAttrNameMap& node_attr_to_name)
     : num_blocks_(0),
       num_op_nodes_(0),
       num_external_data_(0),
       operator_export_type_(operator_export_type),
-      strip_doc_(strip_doc) {
+      strip_doc_(strip_doc),
+      defer_weight_export_(defer_weight_export),
+      use_external_data_format_(use_external_data_format),
+      onnx_opset_version_(onnx_opset_version),
+      custom_opsets_(custom_opsets),
+      graph_(graph),
+      val_attr_to_name_(val_attr_to_name),
+      node_attr_to_name_(node_attr_to_name) {
   model_proto_.set_producer_name("pytorch");
   // we pin IR version to version 6 (12/11/2019) instead of using
   // onnx::IR_VERSION. with this change, the test_operators.py will be more
@@ -345,9 +408,67 @@ EncoderBase::EncoderBase(
   model_proto_.set_ir_version(onnx_torch::IR_VERSION);
   // TODO: set the producer version using appropriate function call
   model_proto_.set_producer_version(onnx_torch::PRODUCER_VERSION);
+
+  validateGraph(graph, operator_export_type);
+
+  // If graph proto size exceed maximum protobuf size of 2GB, set
+  // use_external_data_format to true.
+  if (!use_external_data_format && !onnx_file_path.empty() &&
+      GetGraphProtoSize(model_proto_.mutable_graph(), graph, initializers) >
+          INT_MAX) {
+    GRAPH_DEBUG(
+        "Exporting model exceed maximum protobuf size of 2GB. Storing model parameters in external data files");
+    use_external_data_format = true;
+    // use_external_data_format_ is one of graph_encoder private variable set
+    // for return `use_external_data_format` value.
+    use_external_data_format_ = use_external_data_format;
+  }
+
+  if (use_external_data_format) {
+    TORCH_CHECK(
+        !onnx_file_path.empty(),
+        "For large model export, f in torch.onnx.export must be a non-empty string "
+        "specifying the location of the model.");
+  }
+
+  auto* imp = model_proto_.add_opset_import();
+  // This is the version of ONNX operator set we are targeting
+  imp->set_version(onnx_opset_version);
+
+  EncodeGraph(
+      model_proto_.mutable_graph(),
+      graph,
+      initializers,
+      dynamic_axes,
+      keep_initializers_as_inputs,
+      add_node_names,
+      use_external_data_format,
+      onnx_file_path);
+
+  for (const std::string& domain : domains_) {
+    auto* opset = model_proto_.add_opset_import();
+    opset->set_domain(domain);
+    //  Check if domain version is registered. If not, set to version 1
+    auto it = custom_opsets.find(domain);
+    if (it == custom_opsets.end())
+      opset->set_version(1);
+    else {
+      opset->set_version(it->second);
+    }
+  }
+
+  for (auto const& custom_opset : custom_opsets) {
+    if (!std::count(domains_.begin(), domains_.end(), custom_opset.first)) {
+      TORCH_WARN(
+          "Custom opset domain: '",
+          custom_opset.first,
+          "' provided is not used in the model. ",
+          "Please verify custom opset domain names.");
+    }
+  }
 }
 
-void EncoderBase::EncodeValueInfoType(
+void GraphEncoder::EncodeValueInfoType(
     onnx::TypeProto* onnx_type,
     const TypePtr node_type,
     const Value* n,
@@ -416,7 +537,7 @@ void EncoderBase::EncodeValueInfoType(
   }
 }
 
-void EncoderBase::EncodeValueInfo(
+void GraphEncoder::EncodeValueInfo(
     onnx::GraphProto* graph_proto,
     onnx::ValueInfoProto* v,
     const Value* n,
@@ -428,7 +549,7 @@ void EncoderBase::EncodeValueInfo(
   EncodeValueInfoType(v->mutable_type(), n->type(), n, dynamic_axes);
 }
 
-void EncoderBase::EncodeGraph(
+void GraphEncoder::EncodeGraph(
     onnx::GraphProto* graph_proto,
     const std::shared_ptr<Graph>& graph,
     const std::map<std::string, at::Tensor>& initializers,
@@ -450,7 +571,7 @@ void EncoderBase::EncodeGraph(
       onnx_file_path);
 }
 
-void EncoderBase::EncodeBlock(
+void GraphEncoder::EncodeBlock(
     onnx::GraphProto* graph_proto,
     const Block* block,
     const std::map<std::string, at::Tensor>& initializers,
@@ -504,91 +625,25 @@ void EncoderBase::EncodeBlock(
       // Undefined node, and pass its output as that input.
       continue;
     }
-    auto p_n = graph_proto->add_node();
-    if (!strip_doc_) {
-      p_n->set_doc_string(node->sourceRange().str());
-    }
-    for (auto input : node->inputs()) {
-      if (input->node()->mustBeNone()) {
-        p_n->add_input("");
-      } else {
-        p_n->add_input(input->debugName());
-      }
-    }
-    for (auto output : node->outputs()) {
-      p_n->add_output(output->debugName());
-      EncodeIntermediateValueInfo(graph_proto, output);
-    }
-    if (!node->kind().is_onnx()) {
-      std::string domain;
-      if (node->kind().is_aten() || node->kind().is_caffe2()) {
-        domain = node->kind().domainString();
-      } else { //  Custom namespace and domain
-        domain = node->kind().ns().toUnqualString();
-      }
-      domains_.insert(domain);
-      p_n->set_domain(domain);
-    }
-    if (operator_export_type_ == onnx_torch::OperatorExportTypes::ONNX) {
-      AT_ASSERT(!node->kind().is_aten() && !node->kind().is_attr());
-    }
-    p_n->set_op_type(node->kind().toUnqualString());
-    if (add_node_names) {
-      p_n->set_name(p_n->op_type() + "_" + std::to_string(num_op_nodes_));
-      num_op_nodes_++;
-    }
-    for (auto attr_name : node->attributeNames()) {
-      AddAttribute(
-          p_n, node, attr_name, use_external_data_format, onnx_file_path);
-    }
-    if (node->kind() == ::c10::onnx::Loop) {
-      AT_ASSERT(node->blocks().size() == 1);
-
-      auto body = p_n->add_attribute();
-      body->set_name("body");
-      body->set_type(onnx::AttributeProto_AttributeType_GRAPH);
-      auto g = body->mutable_g();
-      EncodeBlock(
-          g,
-          node->blocks()[0],
-          {},
-          {},
-          true,
-          true,
+    if (node->kind() == ::c10::Symbol::onnx("LocalFunctionDef")) {
+      auto* func_proto = model_proto_.add_functions();
+      EncodeLocalFunction(
+          graph_proto,
+          func_proto,
+          node,
+          add_node_names,
           use_external_data_format,
           onnx_file_path);
+      continue;
     }
-    if (node->kind() == ::c10::onnx::If) {
-      AT_ASSERT(node->blocks().size() == 2);
-
-      auto then_branch = p_n->add_attribute();
-      then_branch->set_name("then_branch");
-      then_branch->set_type(onnx::AttributeProto_AttributeType_GRAPH);
-      auto true_g = then_branch->mutable_g();
-      EncodeBlock(
-          true_g,
-          node->blocks()[0],
-          {},
-          {},
-          true,
-          true,
-          use_external_data_format,
-          onnx_file_path);
-
-      auto else_branch = p_n->add_attribute();
-      else_branch->set_name("else_branch");
-      else_branch->set_type(onnx::AttributeProto_AttributeType_GRAPH);
-      auto false_g = else_branch->mutable_g();
-      EncodeBlock(
-          false_g,
-          node->blocks()[1],
-          {},
-          {},
-          true,
-          true,
-          use_external_data_format,
-          onnx_file_path);
-    }
+    auto* n_proto = graph_proto->add_node();
+    EncodeNode(
+        graph_proto,
+        n_proto,
+        node,
+        add_node_names,
+        use_external_data_format,
+        onnx_file_path);
   }
   AddInitializersIntoGraphProto(
       graph_proto,
@@ -598,7 +653,7 @@ void EncoderBase::EncodeBlock(
       onnx_file_path);
 }
 
-void EncoderBase::AddInitializersIntoGraphProto(
+void GraphEncoder::AddInitializersIntoGraphProto(
     onnx::GraphProto* graph_proto,
     const Block* block,
     const std::map<std::string, at::Tensor>& initializers,
@@ -621,7 +676,7 @@ void EncoderBase::AddInitializersIntoGraphProto(
   }
 }
 
-unsigned long long int EncoderBase::GetGraphProtoSize(
+unsigned long long int GraphEncoder::GetGraphProtoSize(
     onnx::GraphProto* graph_proto,
     const std::shared_ptr<Graph>& graph,
     const std::map<std::string, at::Tensor>& initializers) {
@@ -653,7 +708,127 @@ unsigned long long int EncoderBase::GetGraphProtoSize(
   return sizes;
 }
 
-void EncoderBase::AddAttribute(
+void GraphEncoder::EncodeNode(
+    onnx::GraphProto* graph_proto,
+    onnx::NodeProto* node_proto,
+    const Node* node,
+    bool add_node_names,
+    bool use_external_data_format,
+    const std::string& onnx_file_path) {
+  if (!strip_doc_) {
+    node_proto->set_doc_string(node->sourceRange().str());
+  }
+  for (auto input : node->inputs()) {
+    if (input->node()->mustBeNone()) {
+      node_proto->add_input("");
+    } else {
+      auto attr_it = val_attr_to_name_.find(input);
+      if (attr_it != val_attr_to_name_.end()) {
+        node_proto->add_input(attr_it->second);
+      } else {
+        node_proto->add_input(input->debugName());
+      }
+    }
+  }
+  for (auto output : node->outputs()) {
+    node_proto->add_output(output->debugName());
+    EncodeIntermediateValueInfo(graph_proto, output);
+  }
+  if (!node->kind().is_onnx()) {
+    std::string domain;
+    if (node->kind().is_aten() || node->kind().is_caffe2()) {
+      domain = node->kind().domainString();
+    } else { //  Custom namespace and domain
+      domain = node->kind().ns().toUnqualString();
+    }
+    // TODO: set correct domain for function proto.
+    domains_.insert(domain);
+    node_proto->set_domain(domain);
+  }
+  if (operator_export_type_ == onnx_torch::OperatorExportTypes::ONNX) {
+    AT_ASSERT(
+        !node->kind().is_aten() && !node->kind().is_prim() &&
+        !node->kind().is_attr());
+  }
+  node_proto->set_op_type(node->kind().toUnqualString());
+  if (add_node_names) {
+    node_proto->set_name(
+        node_proto->op_type() + "_" + std::to_string(num_op_nodes_));
+    num_op_nodes_++;
+  }
+  auto attrs_it = node_attr_to_name_.find(node);
+  for (auto attr_name : node->attributeNames()) {
+    if (attrs_it != node_attr_to_name_.end()) {
+      auto attr_it = attrs_it->second.find(attr_name.toUnqualString());
+      if (attr_it != attrs_it->second.end()) {
+        AddAttribute(node_proto, attr_name, attr_it->second);
+        continue;
+      }
+    }
+    AddAttribute(
+        node_proto, node, attr_name, use_external_data_format, onnx_file_path);
+  }
+  if (node->kind() == ::c10::onnx::Loop) {
+    AT_ASSERT(node->blocks().size() == 1);
+
+    auto body = node_proto->add_attribute();
+    body->set_name("body");
+    body->set_type(onnx::AttributeProto_AttributeType_GRAPH);
+    auto g = body->mutable_g();
+    EncodeBlock(
+        g,
+        node->blocks()[0],
+        {},
+        {},
+        true,
+        true,
+        use_external_data_format,
+        onnx_file_path);
+  }
+  if (node->kind() == ::c10::onnx::If) {
+    AT_ASSERT(node->blocks().size() == 2);
+
+    auto then_branch = node_proto->add_attribute();
+    then_branch->set_name("then_branch");
+    then_branch->set_type(onnx::AttributeProto_AttributeType_GRAPH);
+    auto true_g = then_branch->mutable_g();
+    EncodeBlock(
+        true_g,
+        node->blocks()[0],
+        {},
+        {},
+        true,
+        true,
+        use_external_data_format,
+        onnx_file_path);
+
+    auto else_branch = node_proto->add_attribute();
+    else_branch->set_name("else_branch");
+    else_branch->set_type(onnx::AttributeProto_AttributeType_GRAPH);
+    auto false_g = else_branch->mutable_g();
+    EncodeBlock(
+        false_g,
+        node->blocks()[1],
+        {},
+        {},
+        true,
+        true,
+        use_external_data_format,
+        onnx_file_path);
+  }
+}
+
+void GraphEncoder::AddAttribute(
+    onnx::NodeProto* node_proto,
+    const jit::Symbol name,
+    const std::string& ref_attr_name) {
+  auto attr = node_proto->add_attribute();
+  AT_ASSERT(name.is_attr());
+  attr->set_name(name.toUnqualString());
+  attr->set_ref_attr_name(ref_attr_name);
+}
+
+void GraphEncoder::AddAttribute(
     onnx::NodeProto* node_proto,
     const jit::Node* node,
     const jit::Symbol name,
@@ -759,118 +934,98 @@ void EncoderBase::AddAttribute(
   }
 }
 
-class GraphEncoder : public EncoderBase {
- public:
-  GraphEncoder(
-      const std::shared_ptr<Graph>& graph,
-      int64_t onnx_opset_version,
-      onnx_torch::OperatorExportTypes operator_export_type,
-      const std::map<std::string, at::Tensor>& initializers,
-      const std::unordered_map<
-          std::string,
-          std::unordered_map<int64_t, std::string>>& dynamic_axes,
-      bool defer_weight_export,
-      bool strip_doc,
-      bool keep_initializers_as_inputs,
-      const std::map<std::string, int>& custom_opsets,
-      bool add_node_names,
-      bool use_external_data_format,
-      const std::string& onnx_file_path);
+void GraphEncoder::AddAttribute(
+    onnx::FunctionProto* func_proto,
+    const std::string& name) {
+  TORCH_INTERNAL_ASSERT(nullptr != func_proto);
+  func_proto->add_attribute(name);
+}
 
-  RawDataExportMap get_raw_data_export_map() {
-    return raw_data_export_map_;
+void GraphEncoder::EncodeLocalFunctionOpsetImport(
+    onnx::FunctionProto* func_proto,
+    const Node* n,
+    std::unordered_set<std::string>& custom_domains) {
+  if (!n->kind().is_onnx()) {
+    std::string domain;
+    if (n->kind().is_aten() || n->kind().is_caffe2()) {
+      domain = n->kind().domainString();
+    } else { //  Custom namespace and domain
+      domain = n->kind().ns().toUnqualString();
+    }
+    domains_.insert(domain);
+
+    if (custom_domains.find(domain) == custom_domains.end()) {
+      custom_domains.insert(domain);
+
+      auto* custom_imp = func_proto->add_opset_import();
+      custom_imp->set_domain(domain);
+      //  Check if domain version is registered. If not, set to version 1
+      auto it = custom_opsets_.find(domain);
+      if (it == custom_opsets_.end())
+        custom_imp->set_version(1);
+      else {
+        custom_imp->set_version(it->second);
+      }
+    }
   }
 
-  bool get_use_external_data_format() {
-    return use_external_data_format_;
+  for (auto* b : n->blocks()) {
+    for (auto* sub_n : b->nodes()) {
+      EncodeLocalFunctionOpsetImport(func_proto, sub_n, custom_domains);
+    }
   }
+}
 
- private:
-  void EncodeTensor(
-      onnx::TensorProto* tensor_proto,
-      const at::Tensor& tensor,
-      const c10::optional<std::string> external_ref = {},
-      const bool use_external_data_format = false,
-      const std::string& onnx_file_path = std::string()) override;
-
-  RawDataExportMap raw_data_export_map_;
-  bool defer_weight_export_;
-  bool use_external_data_format_;
-};
-
-GraphEncoder::GraphEncoder(
-    const std::shared_ptr<Graph>& graph,
-    int64_t onnx_opset_version,
-    onnx_torch::OperatorExportTypes operator_export_type,
-    const std::map<std::string, at::Tensor>& initializers,
-    const std::unordered_map<
-        std::string,
-        std::unordered_map<int64_t, std::string>>& dynamic_axes,
-    bool defer_weight_export,
-    bool strip_doc,
-    bool keep_initializers_as_inputs,
-    const std::map<std::string, int>& custom_opsets,
+void GraphEncoder::EncodeLocalFunction(
+    onnx::GraphProto* graph_proto,
+    onnx::FunctionProto* func_proto,
+    const Node* n,
     bool add_node_names,
     bool use_external_data_format,
-    const std::string& onnx_file_path)
-    : EncoderBase(operator_export_type, strip_doc),
-      defer_weight_export_(defer_weight_export),
-      use_external_data_format_(use_external_data_format) {
-  validateGraph(graph, operator_export_type);
-  // If graph proto size exceed maximum protobuf size of 2GB, set
-  // use_external_data_format to true.
-  if (!use_external_data_format && !onnx_file_path.empty() &&
-      GetGraphProtoSize(model_proto_.mutable_graph(), graph, initializers) >
-          INT_MAX) {
-    GRAPH_DEBUG(
-        "Exporting model exceed maximum protobuf size of 2GB. Storing model parameters in external data files");
-    use_external_data_format = true;
-    // use_external_data_format_ is one of graph_encoder private variable set
-    // for return `use_external_data_format` value.
-    use_external_data_format_ = use_external_data_format;
+    const std::string& onnx_file_path) {
+  const auto fsub_g = n->g(Symbol::attr("graph"));
+  func_proto->set_name(n->s(::c10::attr::name));
+
+  for (auto input : fsub_g->inputs()) {
+    func_proto->add_input(input->debugName());
+  }
+  for (auto output : fsub_g->outputs()) {
+    func_proto->add_output(output->debugName());
   }
 
-  if (use_external_data_format) {
-    TORCH_CHECK(
-        !onnx_file_path.empty(),
-        "For large model export, f in torch.onnx.export must be a non-empty string "
-        "specifying the location of the model.");
+  // encode attributes names
+  if (n->hasAttribute(Symbol::attr("attributes"))) {
+    for (auto attr_name : n->ss(Symbol::attr("attributes"))) {
+      AddAttribute(func_proto, attr_name);
+    }
   }
 
-  auto* imp = model_proto_.add_opset_import();
+  auto* imp = func_proto->add_opset_import();
   // This is the version of ONNX operator set we are targeting
-  imp->set_version(onnx_opset_version);
+  imp->set_version(onnx_opset_version_);
 
-  EncodeGraph(
-      model_proto_.mutable_graph(),
-      graph,
-      initializers,
-      dynamic_axes,
-      keep_initializers_as_inputs,
-      add_node_names,
-      use_external_data_format,
-      onnx_file_path);
+  // add for custom domain as well.
+  const auto& domain = n->s(Symbol::attr("domain"));
+  func_proto->set_domain(domain);
+  domains_.insert(domain);
+  std::unordered_set<std::string> custom_domains;
 
-  for (const std::string& domain : domains_) {
-    auto* opset = model_proto_.add_opset_import();
-    opset->set_domain(domain);
-    //  Check if domain version is registered. If not, set to version 1
-    auto it = custom_opsets.find(domain);
-    if (it == custom_opsets.end())
-      opset->set_version(1);
-    else {
-      opset->set_version(it->second);
+  for (auto* fsub_n : fsub_g->nodes()) {
+    if (fsub_n->mustBeNone()) {
+      // None nodes are used to implement optional inputs. One
+      // way to "not provide" an optional input is to create an
+      // Undefined node, and pass its output as that input.
+      continue;
     }
-  }
-
-  for (auto const& custom_opset : custom_opsets) {
-    if (!std::count(domains_.begin(), domains_.end(), custom_opset.first)) {
-      TORCH_WARN(
-          "Custom opset domain: '",
-          custom_opset.first,
-          "' provided is not used in the model. ",
-          "Please verify custom opset domain names.");
-    }
+    auto* n_proto = func_proto->add_node();
+    EncodeNode(
+        graph_proto,
+        n_proto,
+        fsub_n,
+        add_node_names,
+        use_external_data_format,
+        onnx_file_path);
+    EncodeLocalFunctionOpsetImport(func_proto, fsub_n, custom_domains);
   }
 }
 
@@ -932,6 +1087,29 @@ void GraphEncoder::EncodeTensor(
   }
 }
 
+void GraphEncoder::EncodeIntermediateValueInfo(
+    onnx::GraphProto* graph_proto,
+    const Value* v) {
+  // Motivation is to encode ValueInfo for onnx local function nodes.
+  auto n = v->node();
+  if (n->kind().is_onnx()) {
+    // Encode value info only for non-onnx nodes.
+    return;
+  }
+  if (n->owningGraph() != graph_.get()) {
+    // Encode value info only for node in main graph.
+    return;
+  }
+  for (const auto* o : graph_->outputs()) {
+    // Do not encode value info for graph outputs.
+    if (o == v) {
+      return;
+    }
+  }
+  auto v_info_p = graph_proto->add_value_info();
+  EncodeValueInfo(graph_proto, v_info_p, v);
+}
+
 } // namespace
 
 std::string pretty_print_onnx(
@@ -984,7 +1162,9 @@ export_onnx(
     const std::map<std::string, int>& custom_opsets,
     bool add_node_names,
     bool use_external_data_format,
-    const std::string& onnx_file_path) {
+    const std::string& onnx_file_path,
+    const ValAttrNameMap& val_attr_to_name,
+    const NodeAttrNameMap& node_attr_to_name) {
   auto graph_encoder = GraphEncoder(
       graph,
       onnx_opset_version,
@@ -997,7 +1177,10 @@ export_onnx(
       custom_opsets,
       add_node_names,
       use_external_data_format,
-      onnx_file_path);
+      onnx_file_path,
+      // module_names_to_function,
+      val_attr_to_name,
+      node_attr_to_name);
   GRAPH_DEBUG("onnx proto:", prettyPrint(graph_encoder.get_model_proto()));
   return std::make_tuple(
       std::make_shared<::ONNX_NAMESPACE::ModelProto>(
