@@ -837,7 +837,8 @@ def softmax(g, input, dim, dtype=None):
 @parse_args("v", "t", "v")
 def softplus(g, self, beta, threshold):
     if beta != 1:
-        return _unimplemented("beta", "has to be 1")
+        beta = g.op("Constant", value_t=torch.LongTensor([beta]))
+        return g.op("Div", g.op("Softplus", g.op("Mul", self, beta)), beta)
     return g.op("Softplus", self)
 
 
