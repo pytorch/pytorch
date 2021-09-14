@@ -51,7 +51,7 @@ inline std::ostream& operator<<(std::ostream& out, const FunctionSchema& schema)
   return out;
 }
 
-inline size_t findFirstOutArg(const ArgumentVector& args) {
+inline size_t findFirstOutArg(const std::vector<Argument>& args) {
   // find the start of out args in the schema
   for (size_t out_start_idx = 0; out_start_idx < args.size(); out_start_idx++) {
     if (args.at(out_start_idx).is_out()) {
@@ -68,9 +68,7 @@ inline bool Argument::isBackwardCompatibleWith(
     const Argument* rhs = &old;
     if (!(lhs->name() == rhs->name()
         && lhs->N() == rhs->N()
-          && (lhs->alias_info() == rhs->alias_info()
-              || (lhs->alias_info() != nullptr && rhs->alias_info() != nullptr
-                  && *lhs->alias_info() == *rhs->alias_info())))) {
+        && lhs->alias_info() == rhs->alias_info())) {
       return false;
     }
     if (lhs->kwarg_only() && !rhs->kwarg_only()) {
@@ -273,8 +271,8 @@ inline void FunctionSchema::checkAndNormalizeInputs(
 
 inline FunctionSchema FunctionSchema::cloneWithRemappedTypes(
     const std::function<TypePtr(TypePtr)> type_map) const {
-  auto update_args = [&](const ArgumentVector& args) {
-    ArgumentVector new_args;
+  auto update_args = [&](const std::vector<Argument>& args) {
+    std::vector<Argument> new_args;
     new_args.reserve(args.size());
     for(const Argument& arg : args) {
       new_args.emplace_back(arg.cloneWithType(type_map(arg.type())));

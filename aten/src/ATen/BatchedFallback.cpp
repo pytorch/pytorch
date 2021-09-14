@@ -50,20 +50,20 @@ static bool isInplaceOp(const c10::FunctionSchema& schema) {
     return false;
   }
   // Check that the first argument is being written to
-  const AliasInfo* first_arg_alias_info = schema.arguments().begin()->alias_info();
-  if (!first_arg_alias_info || !first_arg_alias_info->isWrite()) {
+  const auto& first_arg_alias_info = schema.arguments().begin()->alias_info();
+  if (!first_arg_alias_info || !first_arg_alias_info.value().isWrite()) {
     return false;
   }
   // Check that none of the other args are being aliased
   for (auto it = schema.arguments().begin() + 1; it != schema.arguments().end(); ++it) {
-    const AliasInfo* alias_info = it->alias_info();
+    const auto& alias_info = it->alias_info();
     if (alias_info) {
       return false;
     }
   }
   // Check that the first tensor is being returned (i.e., output has a (a!))
-  const AliasInfo* return_alias_info = schema.returns()[0].alias_info();
-  return return_alias_info && return_alias_info->isWrite();
+  const auto& return_alias_info = schema.returns()[0].alias_info();
+  return return_alias_info && return_alias_info.value().isWrite();
 }
 
 static void warnFallback(const c10::FunctionSchema& schema, bool is_inplace) {

@@ -2,16 +2,13 @@
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/jit/frontend/schema_matching.h>
-
-#include <ATen/core/function_schema.h>
-
 #include <cstddef>
 
 namespace torch {
 namespace jit {
 
 inline std::pair<size_t, size_t> CalculateNecessaryArgs(
-    const c10::ArgumentVector& schema_args,
+    const std::vector<Argument>& schema_args,
     at::ArrayRef<Value*> actual_inputs,
     bool allow_trailing_out_args) {
   if (schema_args.size() == 0) {
