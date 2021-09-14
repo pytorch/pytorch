@@ -94,7 +94,7 @@ void Logger::set_parameter_stats() {
   // Parameters' data types, there may be multiple data
   // types for mixed precision training.
   std::set<std::string> unique_dtypes;
-  for (auto t : reducer_->params_) {
+  for (const auto& t : reducer_->params_) {
     ddp_logging_data_->ints_map["total_parameter_size_bytes"] +=
         t.numel() * t.element_size();
     unique_dtypes.insert(std::string(t.dtype().name()));
