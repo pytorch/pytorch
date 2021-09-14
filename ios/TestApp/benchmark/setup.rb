@@ -8,7 +8,12 @@ option_parser = OptionParser.new do |opts|
  opts.on('-t', '--team_id ', 'development team ID') { |value|
     options[:team_id] = value
  }
+ opts.on('-l', '--lite ', 'use lite interpreter') { |value|
+    options[:lite] = value
+ }
 end.parse!
+puts options.inspect
+
 puts "Current directory: #{Dir.pwd}"
 install_path = File.expand_path("../../../build_ios/install")
 if not Dir.exist? (install_path)
@@ -37,26 +42,55 @@ targets.each do |target|
         end
     end
 end
-puts "Installing the testing model..."
-model_path = File.expand_path("./model.ptl")
-if not File.exist?(model_path)
-   raise "model.pt can't be found!"
-end
 
 group = project.main_group.find_subpath(File.join('TestApp'),true)
 group.set_source_tree('SOURCE_ROOT')
 group.files.each do |file|
-    if (file.name.to_s.end_with?(".pt"))
+    if (file.name.to_s.end_with?(".pt") ||
+        file.name.to_s.end_with?(".ptl"))
         group.remove_reference(file)
         targets.each do |target|
             target.resources_build_phase.remove_file_reference(file)
         end
     end
 end
-model_file_ref = group.new_reference(model_path)
-targets.each do |target|
-    target.resources_build_phase.add_file_reference(model_file_ref, true)
+
+file_refs = []
+# collect models
+puts "Installing models..."
+models_dir = File.expand_path("../models")
+Dir.foreach(models_dir) do |model|
+    if(model.end_with?(".pt") || model.end_with?(".ptl"))
+      model_path = models_dir + "/" + model
+      file_refs.push(group.new_reference(model_path))
+    end
 end
+
+targets.each do |target|
+    file_refs.each do |ref|
+        target.resources_build_phase.add_file_reference(ref, true)
+    end
+end
+
+# add test files
+puts "Adding test files..."
+testTarget = targets[1]
+testFilePath = File.expand_path('../TestAppTests/')
+group = project.main_group.find_subpath(File.join('TestAppTests'),true)
+group.files.each do |file|
+    if (file.path.end_with?(".mm"))
+        file.remove_from_project
+    end
+end
+
+if(options[:lite])
+    file = group.new_file("TestLiteInterpreter.mm")
+    testTarget.add_file_references([file])
+else
+    file = group.new_file("TestFullJIT.mm")
+    testTarget.add_file_references([file])
+end
+
 puts "Linking static libraries..."
 libs = ['libc10.a', 'libclog.a', 'libpthreadpool.a', 'libXNNPACK.a', 'libeigen_blas.a', 'libcpuinfo.a', 'libpytorch_qnnpack.a', 'libtorch_cpu.a', 'libtorch.a']
 targets.each do |target|
