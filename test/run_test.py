@@ -32,15 +32,17 @@ try:
     from tools.testing.test_selections import (
         export_S3_test_times,
         get_shard_based_on_S3,
-        get_slow_tests_based_on_S3,
+        # NS: Disable target determination
+        # get_slow_tests_based_on_S3,
         get_specified_test_cases,
         get_reordered_tests,
         get_test_case_configs,
     )
-    from tools.testing.modulefinder_determinator import (
-        should_run_test,
-        TARGET_DET_LIST,
-    )
+    # NS: Disable target determination
+    # from tools.testing.modulefinder_determinator import (
+    #     should_run_test,
+    #     TARGET_DET_LIST,
+    # )
 
     HAVE_TEST_SELECTION_TOOLS = True
 except ImportError:
@@ -94,6 +96,7 @@ TESTS += discover_tests(
     blocklisted_tests=[
         'test_bundled_images',
         'test_cpp_extensions_aot',
+        'test_determination',
         'test_gen_backend_stubs',
         'test_jit_fuser',
         'test_jit_simple',
@@ -954,30 +957,31 @@ def main():
     if options.coverage and not PYTORCH_COLLECT_COVERAGE:
         shell(["coverage", "erase"])
 
-    if options.determine_from is not None and os.path.exists(options.determine_from):
-        slow_tests = get_slow_tests_based_on_S3(
-            TESTS, TARGET_DET_LIST, SLOW_TEST_THRESHOLD
-        )
-        print_to_stderr(
-            "Added the following tests to target_det tests as calculated based on S3:"
-        )
-        print_to_stderr(slow_tests)
-        with open(options.determine_from, "r") as fh:
-            touched_files = [
-                os.path.normpath(name.strip())
-                for name in fh.read().split("\n")
-                if len(name.strip()) > 0
-            ]
-        # HACK: Ensure the 'test' paths can be traversed by Modulefinder
-        sys.path.append(test_directory)
-        selected_tests = [
-            test
-            for test in selected_tests
-            if should_run_test(
-                TARGET_DET_LIST + slow_tests, test, touched_files, options
-            )
-        ]
-        sys.path.remove(test_directory)
+    # NS: Disable target determination until it can be made more reliable
+    # if options.determine_from is not None and os.path.exists(options.determine_from):
+    #     slow_tests = get_slow_tests_based_on_S3(
+    #         TESTS, TARGET_DET_LIST, SLOW_TEST_THRESHOLD
+    #     )
+    #     print_to_stderr(
+    #         "Added the following tests to target_det tests as calculated based on S3:"
+    #     )
+    #     print_to_stderr(slow_tests)
+    #     with open(options.determine_from, "r") as fh:
+    #         touched_files = [
+    #             os.path.normpath(name.strip())
+    #             for name in fh.read().split("\n")
+    #             if len(name.strip()) > 0
+    #         ]
+    #     # HACK: Ensure the 'test' paths can be traversed by Modulefinder
+    #     sys.path.append(test_directory)
+    #     selected_tests = [
+    #         test
+    #         for test in selected_tests
+    #         if should_run_test(
+    #             TARGET_DET_LIST + slow_tests, test, touched_files, options
+    #         )
+    #     ]
+    #     sys.path.remove(test_directory)
 
     if IS_IN_CI:
         selected_tests = get_reordered_tests(

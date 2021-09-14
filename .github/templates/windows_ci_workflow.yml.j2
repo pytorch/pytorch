@@ -252,6 +252,7 @@ jobs:
               export RUN_SMOKE_TESTS_ONLY=1
             fi
             .jenkins/pytorch/win-test.sh
+      !{{ common.upload_test_reports(name='windows') }}
       !{{ common.render_test_results() }}
       - name: Zip test reports for upload
         if: always()

@@ -241,6 +241,31 @@ jobs:
               export RUN_SMOKE_TESTS_ONLY=1
             fi
             .jenkins/pytorch/win-test.sh
+      - name: Zip test reports for upload
+        if: always()
+        env:
+          FILE_SUFFIX: '${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}'
+        shell: powershell
+        run: |
+          # -ir => recursive include all files in pattern
+          7z a "test-reports-$Env:FILE_SUFFIX.zip" -ir'!test\*.xml'
+      - uses: actions/upload-artifact@v2
+        name: Store Test Reports
+        if: always()
+        with:
+          name: test-reports-${{ matrix.config }}
+          retention-days: 14
+          if-no-files-found: error
+          path:
+            pytorch-${{ github.run_id }}/test-reports-*.zip
+      - uses: seemethere/upload-artifact-s3@v3
+        name: Store Test Reports on S3
+        if: always()
+        with:
+          retention-days: 14
+          if-no-files-found: error
+          path:
+            pytorch-${{ github.run_id }}/test-reports-*.zip
       - name: Install render_test_results dependencies
         if: always()
         shell: bash
