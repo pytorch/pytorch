@@ -257,7 +257,7 @@ jobs:
           retention-days: 14
           if-no-files-found: error
           path:
-            test-reports-*.zip
+            pytorch-${{ github.run_id }}/test-reports-*.zip
       - uses: seemethere/upload-artifact-s3@v3
         name: Store Test Reports on S3
         if: always()
@@ -265,7 +265,7 @@ jobs:
           retention-days: 14
           if-no-files-found: error
           path:
-            test-reports-*.zip
+            pytorch-${{ github.run_id }}/test-reports-*.zip
       - name: Wait until all sessions have drained
         shell: powershell
         if: always()
