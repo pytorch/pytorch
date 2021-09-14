@@ -254,24 +254,6 @@ jobs:
             .jenkins/pytorch/win-test.sh
       !{{ common.upload_test_reports(name='windows') }}
       !{{ common.render_test_results() }}
-      - name: Zip test reports for upload
-        if: always()
-        env:
-          COMMIT_SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
-          WORKFLOW_ID: '${{ github.run_id }}_${{ github.run_number }}'
-        shell: powershell
-        run: |
-          # -ir => recursive include all files in pattern
-          7z a "test-reports-$Env:COMMIT_SHA1-$Env:WORKFLOW_ID.zip" -ir'!test\*.xml'
-      - uses: actions/upload-artifact@v2
-        name: Store PyTorch Test Reports
-        if: always()
-        with:
-          name: test-reports-${{ matrix.config }}
-          retention-days: 14
-          if-no-files-found: error
-          path:
-            pytorch-${{ github.run_id }}/test-reports-*.zip
       !{{ wait_and_kill_ssh() }}
       !{{ common.parse_ref() }}
       !{{ common.upload_test_statistics(build_environment) }}
