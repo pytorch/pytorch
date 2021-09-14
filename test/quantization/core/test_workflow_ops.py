@@ -1039,6 +1039,26 @@ class TestFusedObsFakeQuant(TestCase):
             self.assertEqual(in_running_max_ref, in_running_max_op)
             torch.testing.assert_allclose(out, x_in)
 
+        # Test empty input works
+        x = torch.empty(0, 5, device=device)
+        out = pt_op(
+            x,
+            torch.tensor(1, device=device),
+            torch.tensor(1, device=device),
+            in_running_min_op,
+            in_running_max_op,
+            scale,
+            zero_point,
+            avg_const,
+            0,
+            255,
+            0,
+            False,
+            symmetric_quant,
+        )
+        output_shape = (0, 5)
+        self.assertEqual(out.shape, output_shape)
+
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
            symmetric_quant=st.booleans())
     @settings(deadline=None)
