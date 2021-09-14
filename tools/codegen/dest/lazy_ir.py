@@ -31,7 +31,6 @@ valueListT = BaseCppType('at', 'ValueList')  # TODO, not sure this type exists
 valueT = BaseCppType('ir', 'Value')
 intArrayT = BaseCppType('std', 'vector<int64_t>')  # TODO this should probably be different
 
-
 def process_ir_type(typ: BaseTy, mutable: bool, binds: str) -> NamedCType:
     """
     This function takes a type from NativeFunctions and converts it for use with
@@ -217,9 +216,6 @@ class LazyIR:
             clone_impl = f"ir::MakeNode<ir::ops::{ir_node_name(func)}>({clone_impl_args});"
             clone_handcoded_decl = ""
         
-        shapefn = ""
-        # if class_name == "Mean":
-            # shapefn = "SetShapeDeferred([&]() { return compiler::NodeLowering::Get()->Infer(this); });"
 
         return [f"""\
 {clone_handcoded_decl}
@@ -236,8 +232,6 @@ class {class_name} : public Node {{
         {scalar_initializers}
         
   {{
-    {shapefn}
-
     //  throw std::runtime_error("need to hash scalars properly");
   }}
 

@@ -278,7 +278,7 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
             })
 
         # generate native function impls that build IR nodes
-        for dispatch_key in [backend_dispatch_key]:  # , autograd_dispatch_key
+        for dispatch_key in [backend_dispatch_key]:
             fm.write_with_template(f'{dispatch_key}NativeFunctions.cpp', 'NativeFunctions.cpp', lambda: {
                 'generated_comment': '',
                 'includes': [f'#include "{path}"' for path in [
@@ -286,6 +286,7 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
                     "lazy_tensor_core/csrc/aten_ltc_bridge.h",
                     f"{output_dir}/{backend_key}NativeFunctions.h",
                     f"{output_dir}/{backend_key}LazyIr.h",
+                    f"{output_dir}/{backend_key}ShapeDtype.h",
                     "ATen/MetaFunctions.h",
                 ]],
                 'native_functions_include': '',
@@ -297,6 +298,27 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
                         backend_indices[dispatch_key],
                         codegen,
                         class_method_name=f'{backend_dispatch_key}NativeFunctions'),
+                    grouped_native_functions
+                )),
+            })
+
+        # and generate headers for shape/dtype funcs for non-meta kernels
+        for dispatch_key in [backend_dispatch_key]:  # , autograd_dispatch_key
+            fm.write_with_template(f'{dispatch_key}ShapeDtype.h', 'ShapeDtype.h', lambda: {
+                'lazy_ir_sysinc': [f'#include <{path}>' for path in [
+                    "c10/core/ScalarType.h",
+                    "c10/util/Optional.h",
+                    "vector",
+                ]],
+                'lazy_ir_inc': [f'#include "{path}"' for path in [
+                    "lazy_tensor_core/csrc/ir.h",
+                    "lazy_tensors/types.h",
+                    "lazy_tensor_core/csrc/compiler/node_lowering.h"
+                ]],
+                'DispatchKey': dispatch_key,
+                'dispatch_namespace': dispatch_key.lower(),
+                'func_declarations': list(concatMap(
+                    lambda f: dest.compute_lazy_shape_dtype_decl(f, backend_indices[dispatch_key], codegen),
                     grouped_native_functions
                 )),
             })
