@@ -7,8 +7,8 @@ from .stubs import *  # noqa: F403
 from .quant_type import *  # noqa: F403
 from .quantize_jit import *  # noqa: F403
 # from .quantize_fx import *
-from .quantization_mappings import *  # noqa: F403
-from .fuser_method_mappings import *  # noqa: F403
+from torch.ao.quantization.quantization_mappings import *  # noqa: F403
+from torch.ao.quantization.fuser_method_mappings import *  # noqa: F403
 
 def default_eval_fn(model, calib_data):
     r"""
