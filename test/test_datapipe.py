@@ -658,6 +658,11 @@ class TestFunctionalIterDataPipe(TestCase):
         with self.assertRaises(BufferError):
             next(it1)
 
+        # Test Case: one child DataPipe yields all value first with unlimited buffer
+        dp1, dp2 = input_dp.fork(num_instances=2, buffer_size=-1)
+        _ = list(dp1)
+        _ = list(dp2)
+
         # Test Case: two child DataPipes yield value together with buffer size 1
         dp1, dp2 = input_dp.fork(num_instances=2, buffer_size=1)
         output = []
