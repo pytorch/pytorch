@@ -3,18 +3,11 @@
 #include <chrono>
 #include <cstdint>
 
-#if defined(NCCL_MAJOR) && ((NCCL_MAJOR > 2) || \
-                            (NCCL_MAJOR == 2) && (NCCL_MINOR >= 10))
-#define NCCL_HAS_AVG 1
-#endif
-
 namespace c10d {
 
 enum class ReduceOp : std::uint8_t {
   SUM = 0,
-#ifdef NCCL_HAS_AVG
   AVG,
-#endif
   PRODUCT,
   MIN,
   MAX,

@@ -48,6 +48,11 @@ struct AutoNcclGroup {
   }
 };
 
+#if defined(NCCL_MAJOR) && ((NCCL_MAJOR > 2) || \
+                            (NCCL_MAJOR == 2) && (NCCL_MINOR >= 10))
+#define NCCL_HAS_AVG 1
+#endif
+
 // NCCL op mapping
 const std::map<ReduceOp, ncclRedOp_t> ncclOp = {
     {ReduceOp::MIN, ncclMin},
@@ -102,6 +107,11 @@ ncclRedOp_t getNcclReduceOp(const ReduceOp reduceOp, at::Tensor& input) {
     return ncclOp.at(reduceOp);
   } catch (const std::out_of_range& e) {
     switch (reduceOp) {
+      case ReduceOp::AVG:
+        TORCH_CHECK(false,
+                    "AVG requires NCCL 2.10+. The current version is ",
+                    NCCL_MAJOR, ".", NCCL_MINOR);
+        break;
       case ReduceOp::BAND:
         TORCH_CHECK(false, "Cannot use ReduceOp.BAND with NCCL");
         break;
