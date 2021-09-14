@@ -38,6 +38,7 @@ class TestQconfigPyImport(TestCase):
             "assert_valid_qconfig",
             "QConfigAny",
             "add_module_to_qconfig_obs_ctr",
+            "qconfig_equals"
         ]
         import torch.ao.quantization.qconfig as new_location
         import torch.quantization.qconfig as old_location
