@@ -1730,6 +1730,8 @@ class ConvReLUQuantizeHandlerNew(QuantizeHandler):
         assert is_reference, "ConvReLUQuantizeHandlerNew only works for the case when is_reference=True"
         activation_int8_quantized = activation_is_int8_quantized(qconfig)
         if self.conv_node.op == 'call_module':
+            output_activation_post_process = \
+                self._maybe_get_last_node_only_observer(modules)
             # note that relu should already be fused into conv module in the fusion step
             assert self.relu_node is None, 'conv module and relu fusion is not executed, ' \
                 'please make sure to run fusion before prepare'
@@ -1795,15 +1797,15 @@ class ConvReLUQuantizeHandlerNew(QuantizeHandler):
                 args, {})
             # disabling quantize node for output for now, this will be controlled by the
             # backend_config_dict in the final design
-            # if output_activation_post_process:
-            #     op_out = quantize_node(
-            #         op_out,
-            #         output_activation_post_process,
-            #         node,
-            #         modules,
-            #         quantized_graph,
-            #         node_name_to_scope,
-            #         is_input=False)
+            if output_activation_post_process:
+                op_out = quantize_node(
+                    op_out,
+                    output_activation_post_process,
+                    node,
+                    modules,
+                    quantized_graph,
+                    node_name_to_scope,
+                    is_input=False)
             return op_out
         else:
             assert self.conv_node.op == "call_function"
@@ -1888,8 +1890,8 @@ class LinearReLUQuantizeHandlerNew(QuantizeHandler):
         weight_dtype = dtypes[1]
         if self.linear_node.op == 'call_module':
 
-            # output_activation_post_process = \
-            #     self._maybe_get_last_node_only_observer(modules)
+            output_activation_post_process = \
+                self._maybe_get_last_node_only_observer(modules)
 
             # note that relu should already be fused into linear modul in the fusion step
             assert self.relu_node is None, 'linear module and relu fusion is not executed, ' \
@@ -1943,15 +1945,15 @@ class LinearReLUQuantizeHandlerNew(QuantizeHandler):
                 'call_module',
                 self.linear_node.target,
                 args, {})
-            # if output_activation_post_process:
-            #     op_out = quantize_node(
-            #         op_out,
-            #         output_activation_post_process,
-            #         node,
-            #         modules,
-            #         quantized_graph,
-            #         node_name_to_scope,
-            #         is_input=False)
+            if output_activation_post_process:
+                op_out = quantize_node(
+                    op_out,
+                    output_activation_post_process,
+                    node,
+                    modules,
+                    quantized_graph,
+                    node_name_to_scope,
+                    is_input=False)
             return op_out
         else:  # call_function
             assert self.linear_node.op == 'call_function'

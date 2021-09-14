@@ -49,9 +49,11 @@ class TestQuantizeFxTRT(QuantizationTestCase):
             weight=torch.quantization.default_weight_observer
         )
         m = prepare_fx(m, {"": qconfig}, backend_config_dict=get_tensorrt_backend_config_dict())
+        print(m)
         # calibration
         m(conv2d_input)
         m = convert_fx(m, is_reference=True)
+        print(m)
         node_occurrence = {
             ns.call_function(torch.quantize_per_tensor): 1,
             ns.call_method("dequantize"): 1

@@ -1145,8 +1145,6 @@ def prepare(
     if backend_config_dict is None:
         backend_config_dict = get_fbgemm_backend_config_dict()
 
-    print("backend config dict:", backend_config_dict)
-
     validate_backend_config_dict(backend_config_dict)
 
     additional_quant_patterns = \
