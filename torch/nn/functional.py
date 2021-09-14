@@ -3141,10 +3141,10 @@ def margin_ranking_loss(
         reduction_enum = _Reduction.legacy_get_enum(size_average, reduce)
     else:
         reduction_enum = _Reduction.get_enum(reduction)
-    if input1.dim() == 0 or input2.dim() == 0 or target.dim() == 0:
+    if (input1.dim() != input2.dim() or input1.dim() != target.dim()):
         raise RuntimeError(
             (
-                "margin_ranking_loss does not support scalars, got sizes: "
+                "margin_ranking_loss : All input tensors should have same dimension but got sizes: "
                 "input1: {}, input2: {}, target: {} ".format(input1.size(), input2.size(), target.size())
             )
         )
