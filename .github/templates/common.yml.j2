@@ -143,7 +143,11 @@ concurrency:
           retention-days: 14
           if-no-files-found: error
           path:
+{%- if name == 'windows' %}
+            pytorch-${{ github.run_id }}/test-reports-*.zip
+{%- else %}
             test-reports-*.zip
+{%- endif %}
       - uses: !{{ upload_artifact_s3_action }}
         name: Store Test Reports on S3
         if: always()
@@ -151,5 +155,9 @@ concurrency:
           retention-days: 14
           if-no-files-found: error
           path:
+{%- if name == 'windows' %}
+            pytorch-${{ github.run_id }}/test-reports-*.zip
+{%- else %}
             test-reports-*.zip
+{%- endif %}
 {%- endmacro -%}
