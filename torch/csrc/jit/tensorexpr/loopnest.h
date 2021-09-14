@@ -27,11 +27,11 @@ class TORCH_API LoopNest {
  public:
   // A constructor for building a LoopNest from a list of Tensors
   LoopNest(
-      const std::vector<Tensor*>& output_tensors,
-      const std::vector<Tensor*>& tensors_to_compute);
+      const std::vector<Tensor>& output_tensors,
+      const std::vector<Tensor>& tensors_to_compute);
 
   // A convenience constructor for the case when all tensors are output tensors
-  LoopNest(const std::vector<Tensor*>& output_tensors);
+  LoopNest(const std::vector<Tensor>& output_tensors);
 
   // A constructor for building a LoopNest from an Stmt and a list of output
   // buffers.
@@ -45,10 +45,10 @@ class TORCH_API LoopNest {
     return root_stmt_;
   }
 
-  std::vector<ForPtr> getLoopStmtsFor(Tensor*) const;
+  std::vector<ForPtr> getLoopStmtsFor(Tensor) const;
   std::vector<ForPtr> getLoopStmtsFor(BufPtr) const;
   std::vector<ForPtr> getLoopStmtsFor(StmtPtr) const;
-  StmtPtr getLoopBodyFor(Tensor*) const;
+  StmtPtr getLoopBodyFor(Tensor) const;
   StmtPtr getLoopBodyFor(BufPtr) const;
 
   // Returns the For stmt indexed by 'indices' in the 'root' For stmt.
@@ -538,19 +538,33 @@ class TORCH_API LoopNest {
   void vectorizeInnerLoops();
 
   void eliminateDeadStores();
-  void prepareForCodegen();
+
+  // Make the stmt ready for codegen. The optional argument 'interm_bufs' allows
+  // users to specify intermediate buffers that need runtime allocation. In
+  // default, we will insert 'Alloc/Free' stmts to allocate all intermediate
+  // buffers at runtime but users may have pre-allocated some of them at compile
+  // time, and in that case the user can specify what buffers to insert
+  // 'Alloc/Free' stmts for using 'interm_bufs'.
+  // TODO: refactor function 'prepareForCodegen' to remove argument
+  // 'interm_bufs'.
+  void prepareForCodegen(
+      const c10::optional<std::unordered_set<BufPtr>>& interm_bufs =
+          c10::nullopt);
 
   const std::unordered_set<BufPtr> getInputBufs() const;
   const std::unordered_set<BufPtr> getOutputBufs() const {
     return output_bufs_;
   }
+  std::unordered_set<BufPtr> getIntermediateBufs() const;
 
  private:
   void initialize(
-      const std::vector<Tensor*>& output_tensors,
-      const std::vector<Tensor*>& tensors_to_compute);
-  StmtPtr insertAllocFree(StmtPtr stmt);
-  const std::unordered_set<BufPtr> getIntermediateBufs() const;
+      const std::vector<Tensor>& output_tensors,
+      const std::vector<Tensor>& tensors_to_compute);
+  StmtPtr insertAllocFree(
+      StmtPtr stmt,
+      const c10::optional<std::unordered_set<BufPtr>>& interm_bufs =
+          c10::nullopt);
 
   StmtPtr root_stmt_;
 

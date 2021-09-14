@@ -10,7 +10,7 @@ from torch.fx.experimental.fx_acc.acc_normalizer import (
     register_acc_op_mapping,
     register_custom_acc_mapper_fn,
 )
-from torch.fx.passes.shape_prop import extract_tensor_metadata
+from torch.fx.passes.shape_prop import _extract_tensor_metadata
 
 this_arg_is_optional = True
 
@@ -95,6 +95,12 @@ def avg_pool2d(
     return nn.functional.avg_pool2d(**locals())
 
 
+@register_acc_op_mapping(op_and_target=("call_function", torch.sign))
+@register_acc_op
+def sign(*, input):
+    return torch.sign(input)
+
+
 @register_acc_op
 def size(*, input):
     return input.size()
@@ -162,6 +168,7 @@ def add(*, input, other):
     return input + other
 
 
+@register_acc_op_mapping(op_and_target=("call_method", "unsqueeze"))
 @register_acc_op_mapping(op_and_target=("call_function", torch.unsqueeze))
 @register_acc_op
 def unsqueeze(*, input, dim):
@@ -220,6 +227,12 @@ def transpose(*, input, dim0, dim1):
     if input.dim() < 2:
         return input
     return torch.transpose(**locals())
+
+
+@register_acc_op_mapping(op_and_target=("call_method", "contiguous"))
+@register_acc_op
+def contiguous(*, input):
+    return input.contiguous()
 
 
 @register_acc_op_mapping(op_and_target=("call_function", torch.nn.functional.softmax))
@@ -342,52 +355,6 @@ def matmul(*, input, other):
     return torch.matmul(**locals())
 
 
-@register_custom_acc_mapper_fn(
-    op_and_target=("call_function", torch.min),
-    arg_replacement_tuples=[
-        ("input", "input"),
-        ("other", "other", this_arg_is_optional),
-        ("dim", "dim", this_arg_is_optional),
-        ("keepdim", "keepdim", this_arg_is_optional),
-    ],
-)
-def custom_torch_min_mapper(node: torch.fx.Node, mod: nn.Module) -> torch.fx.Node:
-    """
-    Add custom mapping for torch.min because torch.min has three input types, where each yields a different output type:
-        1. torch.min(input); Output: tensor wih the minimum number
-        2. torch.min(input, other); Output: tensor with coordinate-wise min value
-        3[Not Supported] torch.min(input, dim, keepdim); Output:(min_values，and min_indices)
-    """
-    with node.graph.inserting_before(node):
-        # If dim is in kwargs, assert "Not Supported"
-        assert "dim" not in node.kwargs, "Currently not support dim in torch.min"
-
-        if "other" in node.kwargs and node.kwargs["other"] is not None:
-            # If kwargs[other] is a valid tensor, call min_two_tensors_input,
-            op_func = min_two_tensors_input
-        else:
-            # Otherwise, call min_single_tensor_input
-            op_func = min_single_tensor_input
-
-        new_node = node.graph.create_node(
-            "call_function",
-            op_func,
-            kwargs=node.kwargs,
-            name=node.name,
-        )
-        new_node.meta = node.meta
-        return new_node
-
-
-@register_acc_op
-def min_single_tensor_input(*, input):
-    return torch.min(input)
-
-
-@register_acc_op
-def min_two_tensors_input(*, input, other):
-    return torch.min(input, other)
-
 
 @register_acc_op_mapping(
     op_and_target=("call_function", torch.ops.quantized.add),
@@ -489,6 +456,12 @@ def div(*, input, other):
     return input / other
 
 
+@register_acc_op_mapping(op_and_target=("call_function", torch.pow))
+@register_acc_op
+def pow(*, input, exponent):
+    return torch.pow(input, exponent)
+
+
 @register_acc_op_mapping(op_and_target=("call_function", nn.functional.relu))
 @register_acc_op_mapping(
     op_and_target=("call_function", torch.relu),
@@ -502,6 +475,21 @@ def div(*, input, other):
 def relu(*, input, inplace=False):
     return nn.functional.relu(**locals())
 
+@register_custom_acc_mapper_fn(
+    op_and_target=("call_function", torch.log1p),
+    arg_replacement_tuples=[
+        ("input", "input"),
+    ],
+)
+def torch_log1p_mapper(node: torch.fx.Node, _: torch.nn.Module) -> torch.fx.Node:
+    with node.graph.inserting_before(node):
+        add_kwargs = {"input": node.kwargs["input"], "other": 1.0}
+        add_node = node.graph.call_function(add, kwargs=add_kwargs)
+        add_node.meta = node.meta.copy()
+        log_kwargs = {"input": add_node}
+        log_node = node.graph.call_function(log, kwargs=log_kwargs)
+        log_node.meta = node.meta.copy()
+        return log_node
 
 @register_custom_acc_mapper_fn(
     op_and_target=("call_method", "sum"),
@@ -533,10 +521,116 @@ def add_sum_mapper(node: torch.fx.Node, mod: torch.fx.GraphModule) -> torch.fx.N
 
 @register_acc_op
 def sum(*, input, dim=None, keepdim=False, dtype=None):
-    if dim:
+    if dim is not None:
         return torch.sum(**locals())
     else:
         return input.sum(dtype=dtype)
+
+
+
+
+@register_custom_acc_mapper_fn(
+    op_and_target=("call_method", "max"),
+    arg_replacement_tuples=[
+        ("input", "input"),
+        (("dim", "other"), "dim_or_other", this_arg_is_optional),
+        ("keepdim", "keepdim", this_arg_is_optional),
+    ],
+)
+@register_custom_acc_mapper_fn(
+    op_and_target=("call_function", torch.max),
+    arg_replacement_tuples=[
+        ("input", "input"),
+        (("dim", "other"), "dim_or_other", this_arg_is_optional),
+        ("keepdim", "keepdim", this_arg_is_optional),
+    ],
+)
+@register_custom_acc_mapper_fn(
+    op_and_target=("call_method", "min"),
+    arg_replacement_tuples=[
+        ("input", "input"),
+        (("dim", "other"), "dim_or_other", this_arg_is_optional),
+        ("keepdim", "keepdim", this_arg_is_optional),
+    ],
+)
+@register_custom_acc_mapper_fn(
+    op_and_target=("call_function", torch.min),
+    arg_replacement_tuples=[
+        ("input", "input"),
+        (("dim", "other"), "dim_or_other", this_arg_is_optional),
+        ("keepdim", "keepdim", this_arg_is_optional),
+    ],
+)
+def add_maximum_minimum_mapper(node: torch.fx.Node, mod: torch.fx.GraphModule) -> torch.fx.Node:
+    # there are effectively three versions of torch.max / torch.min
+    # full reduce: torch.max(input) -> Tensor
+    # dimensional reduce: torch.max(input, dim, keepdim=False, *, out=None) -> (Tensor, LongTensor)
+    # elementwise: torch.max(input, other, *, out=None) -> Tensor
+
+    # the mapper function is remapping for both min and max situations
+    # this helper function makes the choices available clearer and provides an easier way
+    # to lookup the right function
+    def target_map(op, target):
+        if (op, target) in (("call_method", "max"), ("call_function", torch.max)):
+            return dict(full_reduce=max_full_reduce,
+                        dim_reduce=max_dim_reduce,
+                        elementwise=maximum)
+        elif (op, target) in (("call_method", "min"), ("call_function", torch.min)):
+            return dict(full_reduce=min_full_reduce,
+                        dim_reduce=min_dim_reduce,
+                        elementwise=minimum)
+
+    with node.graph.inserting_before(node):
+        new_targets = target_map(node.op, node.target)
+        max_kwargs = dict()
+        max_kwargs['input'] = node.kwargs['input']
+        if ("dim_or_other" not in node.kwargs) or (node.kwargs['dim_or_other'] is None):
+            nt = new_targets["full_reduce"]
+            max_node = node.graph.call_function(nt, kwargs=max_kwargs)
+        elif isinstance(node.kwargs['dim_or_other'], int):
+            nt = new_targets["dim_reduce"]
+            dim = node.kwargs["dim_or_other"]
+            max_kwargs['dim'] = dim
+            max_kwargs['keepdim'] = node.kwargs.get('keepdim', False)
+            max_node = node.graph.call_function(nt, kwargs=max_kwargs)
+        else:
+            other = node.kwargs["dim_or_other"]
+            assert isinstance(other, torch.fx.Node)
+            # Lowering path for when provided "other", where we do elem-wise max
+            nt = new_targets["elementwise"]
+            max_kwargs['other'] = other
+            max_node = node.graph.call_function(nt, kwargs=max_kwargs)
+        max_node.meta = node.meta.copy()
+        return max_node
+
+
+@register_acc_op
+def max_full_reduce(*, input):
+    return torch.max(**locals())
+
+@register_acc_op
+def max_dim_reduce(*, input, dim=None, keepdim=False):
+    return torch.max(**locals())
+
+@register_acc_op_mapping(op_and_target=("call_function", torch.maximum))
+@register_acc_op_mapping(op_and_target=("call_method", "maximum"))
+@register_acc_op
+def maximum(*, input, other):
+    return torch.maximum(**locals())
+
+@register_acc_op
+def min_full_reduce(*, input):
+    return torch.min(input)
+
+@register_acc_op
+def min_dim_reduce(*, input, dim=None, keepdim=False):
+    return torch.min(input, dim=dim, keepdim=keepdim)
+
+@register_acc_op_mapping(op_and_target=("call_function", torch.minimum))
+@register_acc_op_mapping(op_and_target=("call_method", "minimum"))
+@register_acc_op
+def minimum(*, input, other):
+    return torch.minimum(**locals())
 
 
 @register_acc_op_mapping(op_and_target=("call_function", torch.sigmoid))
@@ -677,6 +771,63 @@ def batch_norm(
 def layer_norm(*, input, normalized_shape, weight, bias, eps):
     return nn.functional.layer_norm(**locals())
 
+def argmin_max_mapper_impl(node: torch.fx.Node, largest: bool) -> torch.fx.Node:
+    """
+    Map torch.argmin or torch.argmax to acc_ops.flatten (depend on dim) + acc_ops.topk
+    + acc_ops.getitem + acc_ops.squeeze (depends on keepdim).
+    """
+    input_node = node.kwargs["input"]
+    dim = node.kwargs["dim"]
+    keepdim = node.kwargs["keepdim"]
+
+    if dim is None and keepdim:
+        raise RuntimeError("We currently don't support argmin/argmax with dim=None and keepdim=True")
+
+    with node.graph.inserting_before(node):
+        if dim is None:
+            flatten_kwargs = {"input": node.kwargs["input"], "start_dim": 0, "end_dim": -1}
+            flatten_node = node.graph.call_function(flatten, kwargs=flatten_kwargs)
+            flatten_node.meta["type"] = torch.Tensor
+            input_node = flatten_node
+            dim = -1
+
+        topk_kwargs = {"input": input_node, "k": 1, "dim": dim, "largest": largest, "sorted": False}
+        topk_node = node.graph.call_function(topk, kwargs=topk_kwargs)
+        # It's actually more like NamedTuple but tuple here should be fine.
+        topk_node.meta["type"] = tuple
+
+        getitem_kwargs = {"input": topk_node, "idx": 1}
+        getitem_node = node.graph.call_function(getitem, kwargs=getitem_kwargs)
+        getitem_node.meta["type"] = torch.Tensor
+        output_node = getitem_node
+
+        if not keepdim:
+            squeeze_kwargs = {"input": getitem_node, "dim": dim}
+            output_node = node.graph.call_function(squeeze, kwargs=squeeze_kwargs)
+
+        output_node.meta = node.meta.copy()
+        return output_node
+
+@register_custom_acc_mapper_fn(
+    op_and_target=("call_function", torch.argmin),
+    arg_replacement_tuples=[
+        ("input", "input"),
+        ("dim", "dim"),
+        ("keepdim", "keepdim"),
+    ],
+)
+def torch_argmin_mapper(node: torch.fx.Node, _: torch.nn.Module) -> torch.fx.Node:
+    """
+    Map torch.argmin to acc_ops.flatten (depend on dim) + acc_ops.topk + acc_ops.getitem
+    + acc_ops.squeeze (depends on keepdim).
+    """
+    return argmin_max_mapper_impl(node, largest=False)
+
+@register_acc_op_mapping(op_and_target=("call_function", torch.linalg.norm))
+@register_acc_op
+def linalg_norm(*, input, ord, dim, keepdim):
+    return torch.linalg.norm(**locals())
+
 
 @register_custom_acc_mapper_fn(
     op_and_target=("call_method", "split"),
@@ -806,7 +957,7 @@ def embedding_bag(
 def embedding_bag_byte_rowwise_offsets(
     *,
     weight,
-    input,
+    indices,
     offsets,
     scale_grad_by_freq,
     mode,
@@ -816,6 +967,27 @@ def embedding_bag_byte_rowwise_offsets(
     include_last_offset,
 ):
     return torch.ops.quantized.embedding_bag_byte_rowwise_offsets(**locals())
+
+@register_acc_op_mapping(
+    op_and_target=(
+        "call_function",
+        torch.ops.quantized.embedding_bag_4bit_rowwise_offsets,
+    )
+)
+@register_acc_op
+def embedding_bag_4bit_rowwise_offsets(
+    *,
+    weight,
+    indices,
+    offsets,
+    scale_grad_by_freq,
+    mode,
+    pruned_weights,
+    per_sample_weights,
+    compressed_indices_mapping,
+    include_last_offset,
+):
+    return torch.ops.quantized.embedding_bag_4bit_rowwise_offsets(**locals())
 
 
 @register_acc_op_mapping(op_and_target=("call_function", torch.sin))
@@ -866,6 +1038,15 @@ def slice_tensor(*, input, dims, starts, stops, steps):
 
 @register_custom_acc_mapper_fn(
     op_and_target=("call_function", torch.narrow),
+    arg_replacement_tuples=[
+        ("input", "input"),
+        ("dim", "dim"),
+        ("start", "start"),
+        ("length", "length"),
+    ],
+)
+@register_custom_acc_mapper_fn(
+    op_and_target=("call_method", "narrow"),
     arg_replacement_tuples=[
         ("input", "input"),
         ("dim", "dim"),
@@ -1046,12 +1227,12 @@ def packed_quantized_linear_mapper(
     with node.graph.inserting_before(node):
         # Insert get_attr nodes for weight and bias
         get_weight = node.graph.get_attr(weight_name)
-        get_weight.meta["tensor_meta"] = extract_tensor_metadata(linear_module.weight())
+        get_weight.meta["tensor_meta"] = _extract_tensor_metadata(linear_module.weight())
 
         get_bias = None
         if linear_module.bias() is not None:
             get_bias = node.graph.get_attr(bias_name)
-            get_bias.meta["tensor_meta"] = extract_tensor_metadata(linear_module.bias())
+            get_bias.meta["tensor_meta"] = _extract_tensor_metadata(linear_module.bias())
 
         # Create kwargs for acc_op.quantized_linear
         kwargs = {
@@ -1094,12 +1275,12 @@ def packed_quantized_conv2d_mapper(
     with node.graph.inserting_before(node):
         # Insert get_attr nodes for weight and bias
         get_weight = node.graph.get_attr(weight_name)
-        get_weight.meta["tensor_meta"] = extract_tensor_metadata(conv_module.weight())
+        get_weight.meta["tensor_meta"] = _extract_tensor_metadata(conv_module.weight())
 
         get_bias = None
         if conv_module.bias() is not None:
             get_bias = node.graph.get_attr(bias_name)
-            get_bias.meta["tensor_meta"] = extract_tensor_metadata(conv_module.bias())
+            get_bias.meta["tensor_meta"] = _extract_tensor_metadata(conv_module.bias())
 
         # Create kwargs for acc_op.conv
         kwargs = {

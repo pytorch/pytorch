@@ -5,10 +5,16 @@ from .observer import (HistogramObserver, MovingAverageMinMaxObserver,
                        default_float_qparams_observer, default_observer,
                        default_per_channel_weight_observer,
                        default_placeholder_observer, default_weight_observer)
-from .fake_quantize import (FakeQuantize, default_fake_quant,
-                            default_per_channel_weight_fake_quant,
-                            default_weight_fake_quant, default_fused_act_fake_quant, default_fused_wt_fake_quant,
-                            FusedMovingAvgObsFakeQuantize, default_fused_per_channel_wt_fake_quant)
+from torch.ao.quantization.fake_quantize import (
+    FakeQuantize,
+    default_fake_quant,
+    default_per_channel_weight_fake_quant,
+    default_weight_fake_quant,
+    default_fused_act_fake_quant,
+    default_fused_wt_fake_quant,
+    FusedMovingAvgObsFakeQuantize,
+    default_fused_per_channel_wt_fake_quant,
+)
 import torch
 import torch.nn as nn
 
@@ -211,9 +217,9 @@ def add_module_to_qconfig_obs_ctr(
         return QConfigDynamic(activation, weight)
 
 
-def qconfig_function_equality(q1: QConfigAny, q2: QConfigAny):
+def qconfig_equals(q1: QConfigAny, q2: QConfigAny):
     # functools.partial has no __eq__ operator defined so '==' defaults to 'is'
-    def compare_partial(p1, p2):
+    def partial_equals(p1, p2):
         same = p1.func == p2.func
         same = same and p1.args == p2.args
         return same and p1.keywords == p2.keywords
@@ -223,6 +229,6 @@ def qconfig_function_equality(q1: QConfigAny, q2: QConfigAny):
     else:
         assert q1 is not None and q2 is not None
         try:
-            return compare_partial(q1.activation.p, q2.activation.p) and compare_partial(q1.weight.p, q2.weight.p)
+            return partial_equals(q1.activation.p, q2.activation.p) and partial_equals(q1.weight.p, q2.weight.p)
         except AttributeError:
             return q1 == q2

@@ -16,7 +16,12 @@
 
 #if SUPPORTS_BACKTRACE
 #include <cxxabi.h>
+#ifdef C10_ANDROID
+#include <dlfcn.h>
+#include <unwind.h>
+#else
 #include <execinfo.h>
+#endif
 #endif
 
 #ifdef FBCODE_CAFFE2
@@ -24,6 +29,59 @@
 #endif
 
 namespace c10 {
+
+#if SUPPORTS_BACKTRACE && defined(C10_ANDROID)
+
+struct AndroidBacktraceState {
+  std::vector<void*> buffer;
+};
+
+_Unwind_Reason_Code android_unwind_callback(
+    struct _Unwind_Context* context,
+    void* arg) {
+  AndroidBacktraceState* state = (AndroidBacktraceState*)arg;
+  uintptr_t pc = _Unwind_GetIP(context);
+  if (pc) {
+    state->buffer.emplace_back(reinterpret_cast<void*>(pc));
+  }
+  return _URC_NO_REASON;
+}
+
+void dump_stack(
+    std::ostream& os,
+    size_t frames_to_skip,
+    size_t maximum_number_of_frames) {
+  AndroidBacktraceState state;
+
+  _Unwind_Backtrace(android_unwind_callback, &state);
+
+  int idx = 0;
+  char* demangled = nullptr;
+  size_t length = 0;
+
+  for (const void* addr : state.buffer) {
+    const char* symbol = "";
+
+    Dl_info info;
+    if (dladdr(addr, &info) && info.dli_sname) {
+      symbol = info.dli_sname;
+    }
+
+    int status = 0;
+    demangled = __cxxabiv1::__cxa_demangle(
+        /*mangled_name*/ symbol,
+        /*output_buffer*/ demangled,
+        /*length*/ &length,
+        /*status*/ &status);
+
+    os << " frame #" << idx++ << "\t"
+       << ((demangled != NULL && status == 0) ? demangled : symbol) << "["
+       << addr << "]\t" << std::endl;
+  }
+  free(demangled);
+}
+
+#endif /* SUPPORTS_BACKTRACE && defined(C10_ANDROID) */
 
 #if SUPPORTS_BACKTRACE
 namespace {
@@ -42,6 +100,7 @@ struct FrameInformation {
   std::string object_file;
 };
 
+#ifndef C10_ANDROID
 bool is_python_frame(const FrameInformation& frame) {
   return frame.object_file == "python" || frame.object_file == "python3" ||
       (frame.object_file.find("libpython") != std::string::npos);
@@ -113,6 +172,7 @@ c10::optional<FrameInformation> parse_frame_information(
   frame.function_name = demangle(mangled_function_name.c_str());
   return frame;
 }
+#endif /* !defined(C10_ANDROID) */
 } // anonymous namespace
 #elif defined(_MSC_VER)
 namespace {
@@ -178,7 +238,7 @@ std::string get_backtrace(
   facebook::process::StackTrace st;
   return st.toString();
 
-#elif SUPPORTS_BACKTRACE
+#elif SUPPORTS_BACKTRACE && !defined(C10_ANDROID)
 
   // We always skip this frame (backtrace).
   frames_to_skip += 1;
@@ -249,6 +309,13 @@ std::string get_backtrace(
   }
 
   return stream.str();
+
+#elif SUPPORTS_BACKTRACE && defined(C10_ANDROID)
+
+  std::ostringstream oss;
+  dump_stack(oss, frames_to_skip, maximum_number_of_frames);
+  return oss.str().c_str();
+
 #elif defined(_MSC_VER) // !SUPPORTS_BACKTRACE
   // This backtrace retrieval is implemented on Windows via the Windows
   // API using `CaptureStackBackTrace`, `SymFromAddr` and

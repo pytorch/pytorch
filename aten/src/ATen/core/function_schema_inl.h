@@ -51,6 +51,16 @@ inline std::ostream& operator<<(std::ostream& out, const FunctionSchema& schema)
   return out;
 }
 
+inline size_t findFirstOutArg(const std::vector<Argument>& args) {
+  // find the start of out args in the schema
+  for (size_t out_start_idx = 0; out_start_idx < args.size(); out_start_idx++) {
+    if (args.at(out_start_idx).is_out()) {
+      return out_start_idx;
+    }
+  }
+  return args.size();
+}
+
 inline bool Argument::isBackwardCompatibleWith(
       const Argument& old,
       std::ostream* why_not) const {
@@ -121,17 +131,20 @@ inline bool FunctionSchema::isBackwardCompatibleWith(
     }
   }
 
-  // Make sure that all the old arguments have their corresponding backward
-  // compatible arguments in this schema.
-  for (size_t i = 0; i < old.arguments().size(); ++i) {
+  // we want to test both out and default args seperately
+  size_t old_out_start_idx = findFirstOutArg(old.arguments());
+  size_t new_out_start_idx = findFirstOutArg(arguments());
+
+  // make sure among the default args, they are backward compatible
+  for (size_t i = 0; i < old_out_start_idx; i++) {
     if (!arguments().at(i).isBackwardCompatibleWith(
           old.arguments().at(i), why_not)) {
       return false;
     }
   }
 
-  // Validate that all new arguments provided a default value.
-  for (size_t i = old.arguments().size(); i < arguments().size(); ++i) {
+  // // Validate that all new arguments provided has a default value
+  for (size_t i = old_out_start_idx; i < new_out_start_idx; ++i) {
     if (!arguments().at(i).default_value()) {
       if (why_not) {
         *why_not
@@ -140,6 +153,15 @@ inline bool FunctionSchema::isBackwardCompatibleWith(
             << arguments().at(i).type()->str()
             << " did not provide a default value.";
       }
+      return false;
+    }
+  }
+
+  // now compare the out args
+  for (size_t i = old_out_start_idx; i < old.arguments().size(); i++) {
+    if (!arguments()
+             .at(i - old_out_start_idx + new_out_start_idx)
+             .isBackwardCompatibleWith(old.arguments().at(i), why_not)) {
       return false;
     }
   }
