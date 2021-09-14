@@ -921,7 +921,7 @@ TensorIterator TensorIterator::comparison_op(const Tensor& out, const Tensor& a,
   return iter;
 }
 
-TensorIterator TensorIterator::unary_op(Tensor& out, const Tensor& a) {
+TensorIterator TensorIterator::unary_op(const Tensor& out, const Tensor& a) {
   TensorIterator iter;
   iter.build_unary_op(out, a);
   return iter;
