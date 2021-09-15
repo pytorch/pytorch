@@ -21,6 +21,18 @@ def linear(*, input, weight, bias):
     return nn.functional.linear(**locals())
 
 
+@register_acc_op
+def quantized_linear(*, input, weight, bias, acc_out_ty=None):
+    assert acc_out_ty is not None
+    return nn.quantized.functional.linear(
+        input,
+        weight,
+        bias,
+        acc_utils.get_field_from_acc_out_ty(acc_out_ty, "q_scale"),
+        acc_utils.get_field_from_acc_out_ty(acc_out_ty, "q_zero_point"),
+    )
+
+
 @register_acc_op_mapping(
     op_and_target=("call_method", "flatten"),
     arg_replacement_tuples=[
@@ -389,6 +401,55 @@ def min_single_tensor_input(*, input):
 def min_two_tensors_input(*, input, other):
     return torch.min(input, other)
 
+
+@register_acc_op_mapping(
+    op_and_target=("call_function", torch.ops.quantized.add),
+    arg_replacement_tuples=[
+        ("qa", "input"),
+        ("qb", "other"),
+        ("scale", "scale"),
+        ("zero_point", "zero_point"),
+    ],
+    kwargs_to_move_to_acc_out_ty=[
+        ("scale", "q_scale"),
+        ("zero_point", "q_zero_point"),
+    ],
+)
+@register_acc_op
+def quantized_add(*, input, other, acc_out_ty=None):
+    assert acc_out_ty is not None
+    return torch.ops.quantized.add(
+        input,
+        other,
+        acc_utils.get_field_from_acc_out_ty(acc_out_ty, "q_scale"),
+        acc_utils.get_field_from_acc_out_ty(acc_out_ty, "q_zero_point"),
+    )
+
+
+@register_acc_op_mapping(
+    op_and_target=("call_function", torch.ops.quantized.mul),
+    arg_replacement_tuples=[
+        ("qa", "input"),
+        ("qb", "other"),
+        ("scale", "scale"),
+        ("zero_point", "zero_point"),
+    ],
+    kwargs_to_move_to_acc_out_ty=[
+        ("scale", "q_scale"),
+        ("zero_point", "q_zero_point"),
+    ],
+)
+@register_acc_op
+def quantized_mul(*, input, other, acc_out_ty=None):
+    assert acc_out_ty is not None
+    return torch.ops.quantized.mul(
+        input,
+        other,
+        acc_utils.get_field_from_acc_out_ty(acc_out_ty, "q_scale"),
+        acc_utils.get_field_from_acc_out_ty(acc_out_ty, "q_zero_point"),
+    )
+
+
 @register_acc_op_mapping(
     op_and_target=("call_function", torch.quantize_per_tensor),
     arg_replacement_tuples=[
@@ -506,7 +567,7 @@ def add_sum_mapper(node: torch.fx.Node, mod: torch.fx.GraphModule) -> torch.fx.N
 
 @register_acc_op
 def sum(*, input, dim=None, keepdim=False, dtype=None):
-    if dim:
+    if dim is not None:
         return torch.sum(**locals())
     else:
         return input.sum(dtype=dtype)
@@ -773,6 +834,40 @@ def split(*, input, split_size, dim):
 def tuple_construct(*, tensors):
     return tuple(tensors)
 
+
+@register_acc_op_mapping(
+    op_and_target=("call_function", torch.ops.quantized.batch_norm2d),
+    arg_replacement_tuples=[
+        ("input", "input"),
+        ("weight", "weight"),
+        ("bias", "bias"),
+        ("running_mean", "running_mean"),
+        ("running_var", "running_var"),
+        ("eps", "eps"),
+        ("scale", "scale"),
+        ("zero_point", "zero_point"),
+    ],
+    kwargs_to_move_to_acc_out_ty=[
+        ("scale", "q_scale"),
+        ("zero_point", "q_zero_point"),
+    ],
+)
+@register_acc_op
+def quantized_batch_norm2d(
+    *, input, running_mean, running_var, weight, bias, eps, acc_out_ty
+):
+    return torch.ops.quantized.batch_norm2d(
+        input,
+        weight,
+        bias,
+        running_mean,
+        running_var,
+        eps,
+        acc_utils.get_field_from_acc_out_ty(acc_out_ty, "q_scale"),
+        acc_utils.get_field_from_acc_out_ty(acc_out_ty, "q_zero_point"),
+    )
+
+
 @register_acc_op_mapping(op_and_target=("call_function", nn.functional.embedding_bag))
 @register_acc_op
 def embedding_bag(
@@ -790,6 +885,50 @@ def embedding_bag(
     padding_idx,
 ):
     return nn.functional.embedding_bag(**locals())
+
+
+@register_acc_op_mapping(
+    op_and_target=(
+        "call_function",
+        torch.ops.quantized.embedding_bag_byte_rowwise_offsets,
+    )
+)
+@register_acc_op
+def embedding_bag_byte_rowwise_offsets(
+    *,
+    weight,
+    indices,
+    offsets,
+    scale_grad_by_freq,
+    mode,
+    pruned_weights,
+    per_sample_weights,
+    compressed_indices_mapping,
+    include_last_offset,
+):
+    return torch.ops.quantized.embedding_bag_byte_rowwise_offsets(**locals())
+
+@register_acc_op_mapping(
+    op_and_target=(
+        "call_function",
+        torch.ops.quantized.embedding_bag_4bit_rowwise_offsets,
+    )
+)
+@register_acc_op
+def embedding_bag_4bit_rowwise_offsets(
+    *,
+    weight,
+    indices,
+    offsets,
+    scale_grad_by_freq,
+    mode,
+    pruned_weights,
+    per_sample_weights,
+    compressed_indices_mapping,
+    include_last_offset,
+):
+    return torch.ops.quantized.embedding_bag_4bit_rowwise_offsets(**locals())
+
 
 @register_acc_op_mapping(op_and_target=("call_function", torch.sin))
 @register_acc_op
@@ -1000,6 +1139,164 @@ def custom_torch_add_mapper(node: torch.fx.Node, mod: nn.Module) -> torch.fx.Nod
         )
         new_node.meta = node.meta
         return new_node
+
+
+@register_custom_acc_mapper_fn(
+    op_and_target=("call_module", nn.quantized.Linear),
+    arg_replacement_tuples=[
+        ("input", "input"),
+    ],
+)
+def packed_quantized_linear_mapper(
+    node: torch.fx.Node, mod: nn.Module
+) -> torch.fx.Node:
+    """
+    Mapping from quantized_linear module to acc_op.linear. We unpack weight and bias
+    in this mapper and pass them directly to linear node.
+    """
+    linear_module = dict(mod.named_modules())[node.target]
+    prefix = node.target.replace(".", "_")
+    weight_name = f"{prefix}_weight"
+    bias_name = f"{prefix}_bias"
+
+    # Store weight and bias in the main module
+    mod.register_buffer(weight_name, linear_module.weight())
+    if linear_module.bias() is not None:
+        mod.register_buffer(bias_name, linear_module.bias())
+
+    with node.graph.inserting_before(node):
+        # Insert get_attr nodes for weight and bias
+        get_weight = node.graph.get_attr(weight_name)
+        get_weight.meta["tensor_meta"] = _extract_tensor_metadata(linear_module.weight())
+
+        get_bias = None
+        if linear_module.bias() is not None:
+            get_bias = node.graph.get_attr(bias_name)
+            get_bias.meta["tensor_meta"] = _extract_tensor_metadata(linear_module.bias())
+
+        # Create kwargs for acc_op.quantized_linear
+        kwargs = {
+            "input": node.kwargs["input"],
+            "weight": get_weight,
+            "bias": get_bias,
+            "acc_out_ty": acc_utils.build_raw_tensor_meta(
+                q_scale=linear_module.scale, q_zero_point=linear_module.zero_point
+            ),
+        }
+
+        new_node = node.graph.call_function(quantized_linear, kwargs=kwargs)
+        new_node.meta = node.meta
+        return new_node
+
+
+@register_custom_acc_mapper_fn(
+    op_and_target=("call_module", nn.quantized.Conv2d),
+    arg_replacement_tuples=[
+        ("input", "input"),
+    ],
+)
+def packed_quantized_conv2d_mapper(
+    node: torch.fx.Node, mod: nn.Module
+) -> torch.fx.Node:
+    """
+    Mapping from quantzed Conv2d module to acc_op.conv. We unpack all the parameters
+    in this mapper and pass them directly to conv2d node.
+    """
+    conv_module = dict(mod.named_modules())[node.target]
+    prefix = node.target.replace(".", "_")
+    weight_name = f"{prefix}_weight"
+    bias_name = f"{prefix}_bias"
+
+    # Store weight and bias in the main module
+    mod.register_buffer(weight_name, conv_module.weight())
+    if conv_module.bias() is not None:
+        mod.register_buffer(bias_name, conv_module.bias())
+
+    with node.graph.inserting_before(node):
+        # Insert get_attr nodes for weight and bias
+        get_weight = node.graph.get_attr(weight_name)
+        get_weight.meta["tensor_meta"] = _extract_tensor_metadata(conv_module.weight())
+
+        get_bias = None
+        if conv_module.bias() is not None:
+            get_bias = node.graph.get_attr(bias_name)
+            get_bias.meta["tensor_meta"] = _extract_tensor_metadata(conv_module.bias())
+
+        # Create kwargs for acc_op.conv
+        kwargs = {
+            "input": node.kwargs["input"],
+            "weight": get_weight,
+            "bias": get_bias,
+            "stride": conv_module.stride,
+            "padding": conv_module.padding,
+            "dilation": conv_module.dilation,
+            "groups": conv_module.groups,
+            "padding_mode": conv_module.padding_mode,
+            "acc_out_ty": acc_utils.build_raw_tensor_meta(
+                q_scale=conv_module.scale, q_zero_point=conv_module.zero_point
+            ),
+        }
+
+        new_node = node.graph.call_function(quantized_conv2d, kwargs=kwargs)
+        new_node.meta = node.meta
+        return new_node
+
+
+@register_custom_acc_mapper_fn(
+    op_and_target=("call_function", torch.ops.quantized.add_relu),
+    arg_replacement_tuples=[
+        ("input", "input"),
+        ("other", "other"),
+        ("scale", "scale"),
+        ("zero_point", "zero_point"),
+    ],
+)
+def add_relu_unfuse_mapper(
+    node: torch.fx.Node, mod: torch.fx.GraphModule
+) -> torch.fx.Node:
+    with node.graph.inserting_before(node):
+        add_kwargs = {
+            "input": node.kwargs["input"],
+            "other": node.kwargs["other"],
+            "acc_out_ty": acc_utils.build_raw_tensor_meta(
+                q_scale=node.kwargs["scale"],
+                q_zero_point=node.kwargs["zero_point"],
+            ),
+        }
+        add_node = node.graph.call_function(quantized_add, kwargs=add_kwargs)
+        add_node.meta = node.meta.copy()
+
+        relu_node = node.graph.call_function(
+            relu, kwargs={"input": add_node, "inplace": False}
+        )
+        relu_node.meta = node.meta
+        return relu_node
+
+
+@register_custom_acc_mapper_fn(
+    op_and_target=("call_module", nn.intrinsic.quantized.ConvReLU2d),
+    arg_replacement_tuples=[
+        ("input", "input"),
+    ],
+)
+def packed_quantized_convrelu2d_mapper(
+    node: torch.fx.Node, mod: nn.Module
+) -> torch.fx.Node:
+    """
+    Mapping from quantized ConvReLU2d module to acc_op.relu. We use packed_quantized_conv2d_mapper to unpack all the parameters
+    in this mapper and pass the returned conv2d node directly to relu node.
+    """
+
+    with node.graph.inserting_before(node):
+        # conv2d op
+        conv2d_node = packed_quantized_conv2d_mapper(node, mod)
+
+        # relu op
+        relu_node = node.graph.call_function(
+            relu, kwargs={"input": conv2d_node, "inplace": False}
+        )
+        relu_node.meta = node.meta
+        return relu_node
 
 @register_custom_acc_mapper_fn(
     op_and_target=("call_function", torch.dequantize),
