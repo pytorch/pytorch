@@ -1151,7 +1151,7 @@ inline py::object invokeOperatorFromPython(
   Stack stack = std::get<1>(opWithStack);
   {
     pybind11::gil_scoped_release no_gil_guard;
-    found_op->getOperation()(&stack);
+    found_op->getOperation()(stack);
   }
 
   return createPyObjectForStack(std::move(stack));

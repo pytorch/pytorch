@@ -117,6 +117,11 @@ PyObject *THPVariableClass = nullptr;
 
 PyObject *ParameterClass = nullptr;
 
+static PyObject* THPVariable_NewWithVar(
+    PyTypeObject* type,
+    Variable _var,
+    c10::impl::PyInterpreterStatus status);
+
 // clang-tidy gets confused by static const
 static const char* VOLATILE_WARNING =
     "volatile was removed and now has no effect. Use "
@@ -131,34 +136,8 @@ static bool check_has_torch_dispatch(PyObject *obj) {
   );
 }
 
-// Creates a new Python object for a Variable.  The status parameter
-// specifies what the interpreter tag status on the object is; for
-// example, if you ran check_pyobj, the return optional of this object
-// tells you if the tensor was already tagged or not so you can pass
-// TAGGED_BY_US or MAYBE_UNINITIALIZED; in other cases, you know where
-// var came from and can directly assert that it's DEFINITELY_UNINITIALIZED.
-// It's ALWAYS safe (albeit slower) to call this with MAYBE_UNINITIALIZED.
-static PyObject* THPVariable_NewWithVar(
-    PyTypeObject* type,
-    Variable _var,
-    c10::impl::PyInterpreterStatus status) {
-  PyObject* obj = type->tp_alloc(type, 0);
-  if (obj) {
-    auto v = (THPVariable*) obj;
-    // TODO: named constructor to avoid default initialization
-    new (&v->cdata) MaybeOwned<Variable>();
-    v->cdata = MaybeOwned<Variable>::owned(std::move(_var));
-    const auto& var = THPVariable_Unpack(v);
-    var.unsafeGetTensorImpl()->init_pyobj(self_interpreter.get(), obj, status);
-    if (check_has_torch_dispatch(obj)) {
-      var.unsafeGetTensorImpl()->set_python_dispatch(true);
-    }
-  }
-  return obj;
-}
-
 // TODO: Make this take Variable by const reference
-PyObject * THPVariable_Wrap(Variable var)
+PyObject * THPVariable_Wrap(at::TensorBase var)
 {
   if (!var.defined()) {
     Py_RETURN_NONE;
@@ -497,6 +476,8 @@ int THPVariable_set_grad(THPVariable *self, PyObject *py_grad, void *unused)
     return 0;
   }
 
+  TORCH_CHECK_TYPE(THPVariable_Check(py_grad),
+      "assigned grad expected to be a Tensor or None but got grad of type", THPUtils_typename(py_grad));
   THPUtils_assertRet(-1, self != (THPVariable*)py_grad,
       "can't assign Variable as its own grad");
 
@@ -834,6 +815,17 @@ PyObject *THPVariable_is_mlc(THPVariable *self, void *unused)
   END_HANDLE_TH_ERRORS
 }
 
+PyObject *THPVariable_is_ort(THPVariable *self, void *unused)
+{
+  HANDLE_TH_ERRORS
+  if (check_has_torch_function((PyObject *)self)) {
+    return handle_torch_function_getter(self, "is_ort");
+  }
+  auto& self_ = THPVariable_Unpack(self);
+  return torch::autograd::utils::wrap(self_.is_ort());
+  END_HANDLE_TH_ERRORS
+}
+
 PyObject *THPVariable_is_vulkan(THPVariable *self, void *unused)
 {
   HANDLE_TH_ERRORS
@@ -980,6 +972,7 @@ static struct PyGetSetDef THPVariable_properties[] = {
   {"is_sparse_csr", (getter)THPVariable_is_sparse_csr, nullptr, nullptr, nullptr},
   {"is_mkldnn", (getter)THPVariable_is_mkldnn, nullptr, nullptr, nullptr},
   {"is_mlc", (getter)THPVariable_is_mlc, nullptr, nullptr, nullptr},
+  {"is_ort", (getter)THPVariable_is_ort, nullptr, nullptr, nullptr},
   {"is_vulkan", (getter)THPVariable_is_vulkan, nullptr, nullptr, nullptr},
   {"is_complex", (getter)THPVariable_is_complex, nullptr, nullptr, nullptr},
   {"is_quantized", (getter)THPVariable_is_quantized, nullptr, nullptr, nullptr},
@@ -1248,6 +1241,43 @@ void THPVariable_subclass_dealloc(PyObject* self) {
   // Python defined subclasses should always be on the heap
   TORCH_INTERNAL_ASSERT(type->tp_flags & Py_TPFLAGS_HEAPTYPE);
   Py_DECREF(type);
+}
+
+// Creates a new Python object for a Variable.  The status parameter
+// specifies what the interpreter tag status on the object is; for
+// example, if you ran check_pyobj, the return optional of this object
+// tells you if the tensor was already tagged or not so you can pass
+// TAGGED_BY_US or MAYBE_UNINITIALIZED; in other cases, you know where
+// var came from and can directly assert that it's DEFINITELY_UNINITIALIZED.
+// It's ALWAYS safe (albeit slower) to call this with MAYBE_UNINITIALIZED.
+static PyObject* THPVariable_NewWithVar(
+    PyTypeObject* type,
+    Variable _var,
+    c10::impl::PyInterpreterStatus status) {
+  // This function overwrite the Tensor's pyobj field without extra checks
+  // Make sure it is not set otherwise we would leak memory
+  auto mb_obj = _var.unsafeGetTensorImpl()->check_pyobj(self_interpreter.get());
+  TORCH_CHECK(!mb_obj.has_value() || !mb_obj.value(), "Creating a new Tensor subclass ",
+    type->tp_name, " but the raw Tensor object is already associated to a python object ",
+    "of type ", mb_obj.value()->ob_type->tp_name);
+
+  // Make sure that the reinterpret into a THPVariable* will be valid
+  TORCH_CHECK(PyType_IsSubtype(type, &THPVariableType), "Creating a Tensor subclass from a class ",
+    "that does not inherit from Tensor is not possible. Make sure your class inherits from Tensor.");
+
+  PyObject* obj = type->tp_alloc(type, 0);
+  if (obj) {
+    auto v = (THPVariable*) obj;
+    // TODO: named constructor to avoid default initialization
+    new (&v->cdata) MaybeOwned<Variable>();
+    v->cdata = MaybeOwned<Variable>::owned(std::move(_var));
+    const auto& var = THPVariable_Unpack(v);
+    var.unsafeGetTensorImpl()->init_pyobj(self_interpreter.get(), obj, status);
+    if (check_has_torch_dispatch(obj)) {
+      var.unsafeGetTensorImpl()->set_python_dispatch(true);
+    }
+  }
+  return obj;
 }
 
 /// NOTE [ PyObject Traversal ]
@@ -1562,7 +1592,7 @@ void concrete_dispatch_fn(const c10::impl::PyInterpreter*, const c10::OperatorHa
     if (ivalue.isTensor()) {
       const auto& tensor = ivalue.toTensor();
       if (isPythonTensor(tensor)) {
-        overloaded_args.emplace_back(py::cast(tensor));
+        append_overloaded_arg(&overloaded_args, py::cast(tensor).ptr());
       }
     } else if (ivalue.isList()) {
       const auto& list = ivalue.toListRef();
@@ -1571,7 +1601,7 @@ void concrete_dispatch_fn(const c10::impl::PyInterpreter*, const c10::OperatorHa
         if (nv.isTensor()) {
           const auto& tensor = nv.toTensor();
           if (isPythonTensor(tensor)) {
-            overloaded_args.emplace_back(py::cast(tensor));
+            append_overloaded_arg(&overloaded_args, py::cast(tensor).ptr());
           }
         }
       }
@@ -1620,7 +1650,8 @@ c10::intrusive_ptr<TensorImpl> concrete_detach_fn(const c10::impl::PyInterpreter
   // TODO: fix the constness of target
   Tensor self_t = Tensor(c10::intrusive_ptr<c10::TensorImpl, c10::UndefinedTensorImpl>::unsafe_reclaim_from_nonowning(const_cast<c10::TensorImpl*>(self)));
   auto self_p = py::reinterpret_steal<py::object>(THPVariable_Wrap(self_t));
-  overloaded_args.emplace_back(self_p);
+  TORCH_INTERNAL_ASSERT(isPythonTensor(self_t));
+  append_overloaded_arg(&overloaded_args, self_p.ptr());
   auto args = py::reinterpret_steal<py::object>(PyTuple_New(1));
   PyTuple_SET_ITEM(args.ptr(), 0, self_p.release().ptr());
 

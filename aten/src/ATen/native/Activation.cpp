@@ -524,7 +524,7 @@ Tensor& rrelu_with_noise_out_cpu(const Tensor& self,
     c10::optional<Generator> generator,
     Tensor& output) {
   if (training) {
-    AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "rrelu_with_noise_out_cpu", [&] {
+    AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, self.scalar_type(), "rrelu_with_noise_out_cpu", [&] {
       _rrelu_with_noise_train<scalar_t>(output, self.contiguous(), noise, lower, upper, generator);
     });
     return output;

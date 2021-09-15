@@ -37,6 +37,8 @@ TORCH_LIB_PATH = os.path.join(_TORCH_PATH, 'lib')
 BUILD_SPLIT_CUDA = os.getenv('BUILD_SPLIT_CUDA') or (os.path.exists(os.path.join(
     TORCH_LIB_PATH, f'{CLIB_PREFIX}torch_cuda_cu{CLIB_EXT}')) and os.path.exists(os.path.join(TORCH_LIB_PATH, f'{CLIB_PREFIX}torch_cuda_cpp{CLIB_EXT}')))
 
+SUBPROCESS_DECODE_ARGS = ('oem',) if IS_WINDOWS else ()
+
 # Taken directly from python stdlib < 3.9
 # See https://github.com/pytorch/pytorch/issues/48617
 def _nt_quote_args(args: Optional[List[str]]) -> List[str]:
@@ -60,7 +62,7 @@ def _find_cuda_home() -> Optional[str]:
             which = 'where' if IS_WINDOWS else 'which'
             with open(os.devnull, 'w') as devnull:
                 nvcc = subprocess.check_output([which, 'nvcc'],
-                                               stderr=devnull).decode().rstrip('\r\n')
+                                               stderr=devnull).decode(*SUBPROCESS_DECODE_ARGS).rstrip('\r\n')
                 cuda_home = os.path.dirname(os.path.dirname(nvcc))
         except Exception:
             # Guess #3
@@ -90,7 +92,7 @@ def _find_rocm_home() -> Optional[str]:
                 ["which hipcc | xargs readlink -f"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
             hipcc, _ = pipe_hipcc.communicate()
             # this will be either <ROCM_HOME>/hip/bin/hipcc or <ROCM_HOME>/bin/hipcc
-            rocm_home = os.path.dirname(os.path.dirname(hipcc.decode().rstrip('\r\n')))
+            rocm_home = os.path.dirname(os.path.dirname(hipcc.decode(*SUBPROCESS_DECODE_ARGS).rstrip('\r\n')))
             if os.path.basename(rocm_home) == 'hip':
                 rocm_home = os.path.dirname(rocm_home)
         except Exception:
@@ -251,12 +253,12 @@ def check_compiler_ok_for_platform(compiler: str) -> bool:
         return True
     which = subprocess.check_output(['which', compiler], stderr=subprocess.STDOUT)
     # Use os.path.realpath to resolve any symlinks, in particular from 'c++' to e.g. 'g++'.
-    compiler_path = os.path.realpath(which.decode().strip())
+    compiler_path = os.path.realpath(which.decode(*SUBPROCESS_DECODE_ARGS).strip())
     # Check the compiler name
     if any(name in compiler_path for name in _accepted_compilers_for_platform()):
         return True
     # If ccache is used the compiler path is /usr/bin/ccache. Check by -v flag.
-    version_string = subprocess.check_output([compiler, '-v'], stderr=subprocess.STDOUT).decode()
+    version_string = subprocess.check_output([compiler, '-v'], stderr=subprocess.STDOUT).decode(*SUBPROCESS_DECODE_ARGS)
     if sys.platform.startswith('linux'):
         # Check for 'gcc' or 'g++'
         pattern = re.compile("^COLLECT_GCC=(.*)$", re.MULTILINE)
@@ -303,11 +305,11 @@ def check_compiler_abi_compatibility(compiler) -> bool:
         if sys.platform.startswith('linux'):
             minimum_required_version = MINIMUM_GCC_VERSION
             versionstr = subprocess.check_output([compiler, '-dumpfullversion', '-dumpversion'])
-            version = versionstr.decode().strip().split('.')
+            version = versionstr.decode(*SUBPROCESS_DECODE_ARGS).strip().split('.')
         else:
             minimum_required_version = MINIMUM_MSVC_VERSION
             compiler_info = subprocess.check_output(compiler, stderr=subprocess.STDOUT)
-            match = re.search(r'(\d+)\.(\d+)\.(\d+)', compiler_info.decode().strip())
+            match = re.search(r'(\d+)\.(\d+)\.(\d+)', compiler_info.decode(*SUBPROCESS_DECODE_ARGS).strip())
             version = (0, 0, 0) if match is None else match.groups()
     except Exception:
         _, error, _ = sys.exc_info()
@@ -767,7 +769,7 @@ class BuildExtension(build_ext, object):
     def _check_cuda_version(self):
         if CUDA_HOME:
             nvcc = os.path.join(CUDA_HOME, 'bin', 'nvcc')
-            cuda_version_str = subprocess.check_output([nvcc, '--version']).strip().decode()
+            cuda_version_str = subprocess.check_output([nvcc, '--version']).strip().decode(*SUBPROCESS_DECODE_ARGS)
             cuda_version = re.search(r'release (\d+[.]\d+)', cuda_version_str)
             if cuda_version is not None:
                 cuda_str_version = cuda_version.group(1)
@@ -1727,7 +1729,7 @@ def _run_ninja_build(build_directory: str, verbose: bool, error_prefix: str) -> 
         # `error` is a CalledProcessError (which has an `ouput`) attribute, but
         # mypy thinks it's Optional[BaseException] and doesn't narrow
         if hasattr(error, 'output') and error.output:  # type: ignore[union-attr]
-            message += f": {error.output.decode()}"  # type: ignore[union-attr]
+            message += f": {error.output.decode(*SUBPROCESS_DECODE_ARGS)}"  # type: ignore[union-attr]
         raise RuntimeError(message) from e
 
 
@@ -1996,7 +1998,7 @@ def _write_ninja_file(path,
         link_rule = ['rule link']
         if IS_WINDOWS:
             cl_paths = subprocess.check_output(['where',
-                                                'cl']).decode().split('\r\n')
+                                                'cl']).decode(*SUBPROCESS_DECODE_ARGS).split('\r\n')
             if len(cl_paths) >= 1:
                 cl_path = os.path.dirname(cl_paths[0]).replace(':', '$:')
             else:

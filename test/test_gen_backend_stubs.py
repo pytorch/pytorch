@@ -138,11 +138,11 @@ supported:
         self.assertExpectedInline(output_error, '''Found an invalid operator name: abs_BAD''')
 
     # The backend is valid, but doesn't have a valid autograd key. They can't override autograd kernels in that case.
-    # Only using MSNPU here because it has a valid backend key but not an autograd key- if this changes we can update the test.
+    # Only using Vulkan here because it has a valid backend key but not an autograd key- if this changes we can update the test.
     def test_backend_has_no_autograd_key_but_provides_entries(self):
         yaml_str = '''\
-backend: MSNPU
-cpp_namespace: torch_msnpu
+backend: Vulkan
+cpp_namespace: torch_vulkan
 supported:
 - add
 autograd:
@@ -155,7 +155,7 @@ autograd:
     def test_backend_autograd_kernel_mismatch_out_functional(self):
         yaml_str = '''\
 backend: XLA
-cpp_namespace: torch_msnpu
+cpp_namespace: torch_xla
 supported:
 - add.Tensor
 autograd:
@@ -168,7 +168,7 @@ autograd:
     def test_backend_autograd_kernel_mismatch_functional_inplace(self):
         yaml_str = '''\
 backend: XLA
-cpp_namespace: torch_msnpu
+cpp_namespace: torch_xla
 supported:
 - add.Tensor
 autograd:
@@ -182,7 +182,7 @@ autograd:
     def test_op_appears_in_supported_and_autograd_lists(self):
         yaml_str = '''\
 backend: XLA
-cpp_namespace: torch_msnpu
+cpp_namespace: torch_xla
 supported:
 - add.Tensor
 autograd:

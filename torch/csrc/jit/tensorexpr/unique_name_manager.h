@@ -5,6 +5,7 @@
 #include <unordered_set>
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/jit/tensorexpr/fwd_decls.h>
 
 namespace torch {
 namespace jit {
@@ -13,7 +14,7 @@ namespace tensorexpr {
 class VarHandle;
 class Var;
 
-using VarNameMap = std::unordered_map<Var*, std::string>;
+using VarNameMap = std::unordered_map<VarPtr, std::string>;
 
 // A manager to get unique names from vars.
 // It starts with the name hints of the var and append "_" + $counter until it
@@ -23,7 +24,7 @@ class TORCH_API UniqueNameManager {
  public:
   const std::string& get_unique_name(const VarHandle& v);
 
-  const std::string& get_unique_name(Var* v);
+  const std::string& get_unique_name(VarPtr v);
 
  private:
   friend class ScopedVarName;

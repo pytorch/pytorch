@@ -3,7 +3,7 @@
 #include <c10/macros/Macros.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Exception.h>
-#include <iostream>
+#include <ostream>
 #include <string>
 #include <vector>
 
@@ -59,8 +59,15 @@ enum class DispatchKey : uint8_t {
   // CUDA]
   FPGA, // Xilinx support lives out of tree at
   // https://gitlab.com/pytorch-complex/vitis_kernels
-  MSNPU, // unused externally, but tested at
-  // test/cpp_extensions/msnpu_extension.cpp
+
+  // ONNX Runtime, lives out of tree at https://github.com/pytorch/ort and
+  // https://github.com/microsoft/onnxruntime, and is also used to test general
+  // backend/extension machinery in the core. cf:
+  // - test/cpp_extensions/ort_extension.cpp
+  // - test/test_torch.py
+  // - aten/src/ATen/test/extension_backend_test.cpp
+  ORT,
+
   XLA, // lives out of tree at https://github.com/pytorch/xla
   MLC, // lives out of tree at https://github.com/pytorch/MLCompute
   Vulkan,
@@ -114,7 +121,7 @@ enum class DispatchKey : uint8_t {
 
   // Here are reserved backends for user-defined backends, see Note [Private use
   // DispatchKey]
-  // To see some example about how to use this, check out MSNPU
+  // To see some example about how to use this, check out ORT
   PrivateUse1,
   PrivateUse2,
   PrivateUse3,
