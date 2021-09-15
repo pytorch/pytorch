@@ -39,6 +39,8 @@ void ParallelDimensionMap::build(Fusion* fusion) {
       populateDimensionMapWithMultipleCASet(pt, concrete_dom_set);
     }
   }
+
+  adjustMappingsForWarpPadding();
 }
 
 void ParallelDimensionMap::registerConstantExtent(IterDomain* id) {
@@ -194,18 +196,50 @@ void ParallelDimensionMap::populateDimensionMapWithMultipleCASet(
   }
 }
 
-kir::Val* ParallelDimensionMap::get(ParallelType pt) const {
-  TORCH_INTERNAL_ASSERT(isParallelTypeThread(pt), "Invalid ParallelType: ", pt);
-  // Disable simplification of warp padded dimensions at
-  //  query time for now. Could extend this map to support
-  //  padded dimensions.
-  bool has_active_lower = GpuLower::current() != nullptr;
-  if (has_active_lower) {
-    auto& warp_info = GpuLower::current()->getWarpPaddedParallelInfo();
-    if (pt == ParallelType::TIDx && warp_info.is_tidx_padded) {
-      return kir::NamedScalar::getParallelDim(pt);
+void ParallelDimensionMap::adjustMappingsForWarpPadding() {
+  const auto gpu_lower = GpuLower::current();
+  kir::IrBuilder ir_builder(gpu_lower->kernel());
+
+  // If TIDx is padded to a multiple of the warp size, mark it as
+  // non-exact.
+
+  auto& warp_info = gpu_lower->getWarpPaddedParallelInfo();
+  if (!warp_info.is_tidx_padded) {
+    return;
+  }
+
+  const auto tidx_pt = ParallelType::TIDx;
+
+  // If the dimension of TIDx is actually a multple of the warp size
+  // before padding, it can be left as exact
+  if (isExact(tidx_pt)) {
+    auto tidx_dim = dynamic_cast<kir::Int*>(get(tidx_pt));
+    if (tidx_dim && tidx_dim->isConst()) {
+      auto tidx_dim_val = tidx_dim->value().value();
+      if (tidx_dim_val % C10_WARP_SIZE == 0) {
+        // Dimension of TIDx is a multiple of the warp size
+        return;
+      }
     }
   }
+
+  // TIDx is padded to a multiple of warp. If it's known to be a
+  // single warp, use the constant warp size as the dimension of
+  // TIDx. Otherwise, jsut use blockDim.x.
+  if (warp_info.is_tidx_single_warp) {
+    dim_map_.at(ParallelType::TIDx) =
+        ir_builder.create<kir::Int>(C10_WARP_SIZE);
+  } else {
+    dim_map_.at(ParallelType::TIDx) =
+        kir::NamedScalar::getParallelDim(ParallelType::TIDx);
+  }
+
+  // TIDx is no longer exact
+  exact_types_.erase(ParallelType::TIDx);
+}
+
+kir::Val* ParallelDimensionMap::get(ParallelType pt) const {
+  TORCH_INTERNAL_ASSERT(isParallelTypeThread(pt), "Invalid ParallelType: ", pt);
   auto it = dim_map_.find(pt);
   if (it == dim_map_.end()) {
     return nullptr;
