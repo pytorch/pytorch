@@ -394,6 +394,18 @@ else()
   set(TORCH_VERSION_DEBUG 0)
 endif()
 
+# Set env variables for gen_torch_version
+if(USE_ROCM)
+  set(GPU_ARCH_TYPE "rocm")
+  set(GPU_ARCH_VERSION HIP_VERSION)
+elseif (USE_CUDA)
+  set(GPU_ARCH_TYPE "cuda")
+  set(GPU_ARCH_VERSION CUDA_VERSION)
+else()
+  set(GPU_ARCH_TYPE "cpu")
+  set(GPU_ARCH_VERSION "")
+endif()
+
 add_custom_command(
   OUTPUT ${TORCH_SRC_DIR}/version.py
   COMMAND

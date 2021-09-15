@@ -35,7 +35,7 @@ def get_tag() -> str:
     tag = ""
     if am_on_tag:
         dirty_tag = subprocess.check_output(
-            ['git', 'describe'],
+            ['git', 'describe', '--tags', '--exact'],
             cwd=root
         ).decode('ascii').strip()
         # Strip leading v that we typically do when we tag branches
