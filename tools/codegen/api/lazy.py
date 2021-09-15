@@ -28,7 +28,7 @@ from tools.codegen.selective_build.selector import SelectiveBuilder
 
 valueT = BaseCppType('ir', 'Value')
 
-def process_ir_type(typ: Type) -> Union[BaseCType, OptionalCType, ListCType]:
+def process_ir_type(typ: Type) -> Union[BaseCType, VectorCType, OptionalCType, ListCType]:
     """
     This function takes a type from NativeFunctions and converts it for use with
     lazy tensor codegen.  Currently its output is used in several places, and so far
@@ -62,12 +62,12 @@ def process_ir_type(typ: Type) -> Union[BaseCType, OptionalCType, ListCType]:
             raise AssertionError(f"TODO add support for type {repr(typ)}")
     elif isinstance(typ, ListType):
         if str(typ.elem) == 'Tensor':
-            return BaseCType(VectorCType(BaseCType(valueT)))
+            return VectorCType(BaseCType(valueT))
         elif str(typ.elem) == 'Tensor?':
             # TODO(whc) is this actually correct? or should it use a Vector like above
             return ListCType(OptionalCType(BaseCType(valueT)))
         elif str(typ.elem) == 'int':
-            return BaseCType(VectorCType(BaseCType(intT)))
+            return VectorCType(BaseCType(intT))
         else:
             raise AssertionError(f"TODO add support for type {repr(typ)}")
     else:
