@@ -3870,33 +3870,32 @@
     CompositeExplicitAutograd: slice
 
 - func: slice_backward(Tensor grad_output, int[] input_sizes, int dim, int start, int end, int step) -> Tensor
+  variants: function
+  device_check: NoCheck
+  device_guard: False
+  dispatch:
+    CompositeExplicitAutograd: slice_backward
 
 - func: slice_scatter(Tensor self, Tensor src, int dim=0, int? start=None, int? end=None, int step=1) -> Tensor
   variants: function, method
   device_check: NoCheck
   device_guard: False
   dispatch:
-    CPU, CUDA: slice_scatter
+    CompositeExplicitAutograd: slice_scatter
 
 - func: select_scatter(Tensor self, Tensor src, int dim, int index) -> Tensor
   variants: function, method
   device_check: NoCheck
   device_guard: False
   dispatch:
-    CPU, CUDA: select_scatter
+    CompositeExplicitAutograd: select_scatter
 
 - func: diagonal_scatter(Tensor self, Tensor src, int offset=0, int dim1=0, int dim2=1) -> Tensor
   variants: function, method
   device_check: NoCheck
   device_guard: False
   dispatch:
-    CPU, CUDA: diagonal_scatter
-
-  variants: function
-  device_check: NoCheck
-  device_guard: False
-  dispatch:
-    CompositeExplicitAutograd: slice_backward
+    CompositeExplicitAutograd: diagonal_scatter
 
 - func: slogdet(Tensor self) -> (Tensor sign, Tensor logabsdet)
   variants: function, method
