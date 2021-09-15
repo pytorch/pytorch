@@ -1468,6 +1468,7 @@ class TestNormalizeOperators(JitTestCase):
             "igamma",
             "igammac",
             "index_put",
+            "nn.functional.dropout",
             "polygamma",
             "special.polygamma",
             "repeat",
