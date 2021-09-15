@@ -445,7 +445,7 @@ class TORCH_API ProcessedNode {
     return static_cast<bool>(native_fn_);
   }
 
-  bool verify_outputs_not_overlapping_with_immutable_inputs() const;
+  bool verify_no_memory_overlap() const;
 
  private:
   Node* node_;
