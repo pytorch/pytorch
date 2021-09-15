@@ -332,6 +332,9 @@ pytorch_ios_params: &pytorch_ios_params
     lite_interpreter:
       type: string
       default: "1"
+    use_coreml:
+      type: string
+      default: "0"
   environment:
     BUILD_ENVIRONMENT: << parameters.build_environment >>
     IOS_ARCH: << parameters.ios_arch >>
@@ -339,6 +342,7 @@ pytorch_ios_params: &pytorch_ios_params
     SELECTED_OP_LIST: << parameters.op_list >>
     USE_PYTORCH_METAL: << parameters.use_metal >>
     BUILD_LITE_INTERPRETER: << parameters.lite_interpreter >>
+    USE_COREML_DELEGATE: << parameters.use_coreml >>
 
 pytorch_windows_params: &pytorch_windows_params
   parameters:
