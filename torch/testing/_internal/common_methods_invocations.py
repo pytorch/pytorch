@@ -504,7 +504,7 @@ class OpInfo(object):
                  safe_casts_outputs=False,  # whether op allows safe casting when writing to out arguments
 
                  # the following metadata relates to autograd support
-                 supports_autograd=True,  # whether the operation supports gradient computations
+                 supports_autograd=True,  # whether the operation supports backward mode AD
                                           # if true, gradient correctness is tested in test_ops.py
                                           # using the op's sample inputs
                  supports_gradgrad=True,  # whether the op supports second order gradients
