@@ -7538,6 +7538,11 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=floating_types_and(torch.float16, *[torch.bfloat16] if CUDA11OrLater else []),
            sample_inputs_func=partial(sample_inputs_conv2d),
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL if CUDA11OrLater else 0.,
+           skips=(
+               # RuntimeError: !lhs.isAliasOf(rhs)INTERNAL ASSERT FAILED at
+               # "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":103, please report a bug to PyTorch.
+               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+           ),
            supports_out=False,),
     # Run CUDA tests with cudnn disabled.
     OpInfo('nn.functional.conv2d',
@@ -7551,10 +7556,13 @@ op_db: List[OpInfo] = [
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL if CUDA11OrLater else 0.,
            skips=(
                # Skip all CPU tests
-               SkipInfo('TestCommon', device_type='cpu'),
-               SkipInfo('TestJit', device_type='cpu'),
-               SkipInfo('TestMathBits', device_type='cpu'),
-               SkipInfo('TestGradients', device_type='cpu'),
+               DecorateInfo(unittest.skip('Redundant Test'), 'TestCommon', device_type='cpu'),
+               DecorateInfo(unittest.skip('Redundant Test'), 'TestJit', device_type='cpu'),
+               DecorateInfo(unittest.skip('Redundant Test'), 'TestMathBits', device_type='cpu'),
+               DecorateInfo(unittest.skip('Redundant Test'), 'TestGradients', device_type='cpu'),
+               # RuntimeError: !lhs.isAliasOf(rhs)INTERNAL ASSERT FAILED at
+               # "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":103, please report a bug to PyTorch.
+               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
            ),
            supports_out=False,),
     OpInfo('nn.functional.layer_norm',
