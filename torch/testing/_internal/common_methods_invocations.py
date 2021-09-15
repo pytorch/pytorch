@@ -2043,6 +2043,26 @@ def sample_inputs_broadcast_to(op_info, device, dtype, requires_grad, **kwargs):
             make_tensor(size, device, dtype, low=None, high=None, requires_grad=requires_grad),
             args=(shape,)) for size, shape in test_cases)
 
+def sample_inputs_broadcast_tensors(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
+    test_cases: Tuple[tuple] = (((3,), (1, 2, 1), (1, 1), (5, 1, 1),),)
+
+    samples: List[SampleInput] = []
+    for shape, *other_shapes in test_cases:
+        samples.append(SampleInput(make_arg(shape), args=tuple(make_arg(s) for s in other_shapes)))
+
+    return samples
+
+def sample_inputs_block_diag(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
+    test_cases: Tuple[tuple] = (((1, S), (2, S), (3, S),),)
+
+    samples: List[SampleInput] = []
+    for shape, *other_shapes in test_cases:
+        samples.append(SampleInput(make_arg(shape), args=tuple(make_arg(s) for s in other_shapes)))
+
+    return samples
+
 def sample_inputs_bitwise_shift(op_info, device, dtype, requires_grad, **kwargs):
     test_cases = (
         (S, S, S),
@@ -2563,6 +2583,40 @@ def sample_inputs_adaptive_avg_pool2d(op_info, device, dtype, requires_grad, **k
     def generator():
         for input_shape, output_size in cases:
             yield SampleInput(make_arg(input_shape), args=(output_size,))
+
+    return list(generator())
+
+def sample_inputs_max_pool2d(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    kerneli = [[3, 2], 3]
+    stridei = [[2, 2]]
+    Ni = [1, 4, None]
+    Ci = [32]
+    Hi = [8, 16]
+    Wi = [8, 16]
+    ceil_modei = [True, False]
+    paddingi = [0, 1]
+    dilationi = [1, (1, 2)]
+    return_indicesi = [True, False]
+
+    products = product(kerneli, stridei, Ni, Ci, Hi, Wi, ceil_modei, paddingi, dilationi, return_indicesi)
+
+    def generator():
+        for kernel, stride, N, C, H, W, ceil_mode, padding, dilation, return_indices in products:
+            max_pool = torch.nn.MaxPool2d(kernel, stride, ceil_mode=ceil_mode, padding=padding,
+                                          dilation=dilation, return_indices=return_indices)
+            kwargs = {
+                "kernel_size": max_pool.kernel_size,
+                "stride": max_pool.stride,
+                "padding": max_pool.padding,
+                "dilation": max_pool.dilation,
+                "ceil_mode": max_pool.ceil_mode,
+                "return_indices": max_pool.return_indices,
+            }
+            sample_input = make_arg((N, C, H, W)) if N is not None else (make_arg((C, H, W)))
+
+            yield SampleInput(sample_input, kwargs=kwargs)
 
     return list(generator())
 
@@ -6221,6 +6275,24 @@ op_db: List[OpInfo] = [
            supports_out=False,
            supports_forward_ad=True,
            sample_inputs_func=sample_inputs_broadcast_to),
+    OpInfo('broadcast_tensors',
+           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+           supports_out=False,
+           supports_forward_ad=True,
+           skips=(
+               # JIT does not support variadic tensors.
+               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit', dtypes=[torch.float32]),
+           ),
+           sample_inputs_func=sample_inputs_broadcast_tensors),
+    OpInfo('block_diag',
+           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+           supports_out=False,
+           supports_forward_ad=True,
+           skips=(
+               # JIT does not support variadic tensors.
+               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit', dtypes=[torch.float32]),
+           ),
+           sample_inputs_func=sample_inputs_block_diag),
     OpInfo('bitwise_and',
            dtypes=integral_types_and(torch.bool),
            supports_autograd=False,
@@ -7650,6 +7722,15 @@ op_db: List[OpInfo] = [
            dtypesIfCPU=floating_types_and(torch.int64),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_avgpool2d),
+    OpInfo('nn.functional.max_pool2d',
+           aten_name='max_pool2d',
+           supports_autograd=True,
+           supports_out=False,
+           assert_jit_shape_analysis=True,
+           dtypesIfCPU=floating_types(),
+           dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           supports_scripting=False,  # TODO: fix aliasing test
+           sample_inputs_func=sample_inputs_max_pool2d),
     UnaryUfuncInfo(
         'nn.functional.logsigmoid',
         aten_name="log_sigmoid",
