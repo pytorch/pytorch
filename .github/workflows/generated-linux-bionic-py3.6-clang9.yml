@@ -192,7 +192,8 @@ jobs:
           docker pull "${DOCKER_IMAGE}"
       - name: Build PyTorch
         run: |
-          docker run \
+          # detached container should get cleaned up by teardown_ec2_linux
+          container_name=$(docker run \
             -e BUILD_ENVIRONMENT \
             -e JOB_BASE_NAME \
             -e MAX_JOBS="$(nproc --ignore=2)" \
@@ -207,11 +208,13 @@ jobs:
             --security-opt seccomp=unconfined \
             --cap-add=SYS_PTRACE \
             --tty \
+            --detach \
             --user jenkins \
             -v "${GITHUB_WORKSPACE}:/var/lib/jenkins/workspace" \
             -w /var/lib/jenkins/workspace \
-            "${DOCKER_IMAGE}" \
-            sh -c 'sudo chown -R jenkins . && .jenkins/pytorch/build.sh'
+            "${DOCKER_IMAGE}"
+          )
+          docker exec -t "${container_name}" sh -c 'sudo chown -R jenkins . && .jenkins/pytorch/build.sh'
       - name: Parse ref
         id: parse-ref
         run: .github/scripts/parse_ref.py
@@ -220,6 +223,7 @@ jobs:
         # tools/stats/print_test_stats.py to natively support GitHub Actions
         env:
           AWS_DEFAULT_REGION: us-east-1
+          IS_GHA: 1
           SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.SCRIBE_GRAPHQL_ACCESS_TOKEN }}
           CIRCLE_BRANCH: ${{ steps.parse-ref.outputs.branch }}
           CIRCLE_PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -229,7 +233,7 @@ jobs:
         run: |
           COMMIT_TIME=$(git log --max-count=1 --format=%ct || echo 0)
           export COMMIT_TIME
-          pip3 install requests
+          pip3 install requests==2.26 boto3==1.16.34
           python3 -m tools.stats.upload_binary_size_to_scuba || exit 0
       - name: Chown workspace
         run: |
@@ -259,6 +263,7 @@ jobs:
           # Prune all of the docker images
           docker system prune -af
       - name: Chown workspace
+        if: always()
         env:
           ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
         run: |
@@ -302,7 +307,7 @@ jobs:
       image: python:3.9
     steps:
       - name: Install dependencies
-        run: pip install typing-extensions
+        run: pip install typing-extensions==3.10
       - name: Clone pytorch/pytorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
       - name: Generating test matrix
@@ -407,10 +412,11 @@ jobs:
           if [[ $NUM_TEST_SHARDS -ne 2 ]]; then
             export SHARD_NUMBER=0
           fi
+          # detached container should get cleaned up by teardown_ec2_linux
           # TODO: Stop building test binaries as part of the build phase
           # Used for GPU_FLAG since that doesn't play nice
           # shellcheck disable=SC2086
-          docker run \
+          container_name=$(docker run \
             ${GPU_FLAG:-} \
             -e BUILD_ENVIRONMENT \
             -e PR_NUMBER \
@@ -434,11 +440,14 @@ jobs:
             --cap-add=SYS_PTRACE \
             --shm-size="${SHM_SIZE}" \
             --tty \
+            --detach \
+            --name="${container_name}" \
             --user jenkins \
             -v "${GITHUB_WORKSPACE}:/var/lib/jenkins/workspace" \
             -w /var/lib/jenkins/workspace \
-            "${DOCKER_IMAGE}" \
-            sh -c 'sudo chown -R jenkins . && pip install dist/*.whl && '$TEST_COMMAND
+            "${DOCKER_IMAGE}"
+          )
+          docker exec -t "${container_name}" sh -c "sudo chown -R jenkins . && pip install dist/*.whl && ${TEST_COMMAND}"
       - name: Chown workspace
         if: always()
         run: |
@@ -475,6 +484,7 @@ jobs:
         id: parse-ref
         run: .github/scripts/parse_ref.py
       - name: Display and upload test statistics (Click Me)
+        if: always()
         # temporary hack: set CIRCLE_* vars, until we update
         # tools/stats/print_test_stats.py to natively support GitHub Actions
         env:
@@ -503,6 +513,7 @@ jobs:
           # Prune all of the docker images
           docker system prune -af
       - name: Chown workspace
+        if: always()
         env:
           ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
         run: |
