@@ -65,6 +65,9 @@ jobs:
           echo "instance-id: $(get_ec2_metadata instance-id)"
           echo "instance-type: $(get_ec2_metadata instance-type)"
       - name: Log in to ECR
+        env:
+          AWS_RETRY_MODE: standard
+          AWS_MAX_ATTEMPTS: 5
         run: |
           aws ecr get-login --no-include-email --region us-east-1 > /tmp/ecr-login.sh
           bash /tmp/ecr-login.sh
@@ -163,6 +166,9 @@ jobs:
           echo "instance-id: $(get_ec2_metadata instance-id)"
           echo "instance-type: $(get_ec2_metadata instance-type)"
       - name: Log in to ECR
+        env:
+          AWS_RETRY_MODE: standard
+          AWS_MAX_ATTEMPTS: 5
         run: |
           aws ecr get-login --no-include-email --region us-east-1 > /tmp/ecr-login.sh
           bash /tmp/ecr-login.sh
@@ -293,17 +299,24 @@ jobs:
       - name: Zip test reports for upload
         if: always()
         env:
-          COMMIT_SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
-          WORKFLOW_ID: '${{ github.run_id }}_${{ github.run_number }}'
+          FILE_SUFFIX: 'bazel-${{ github.job }}'
         run: |
           # Remove any previous test reports if they exist
           rm -f test-reports-*.zip
-          zip -r "test-reports-${COMMIT_SHA1}-${WORKFLOW_ID}.zip" test -i '*.xml'
+          zip -r "test-reports-${FILE_SUFFIX}.zip" test -i '*.xml'
       - uses: actions/upload-artifact@v2
-        name: Store PyTorch Test Reports
+        name: Store Test Reports
         if: always()
         with:
-          name: test-reports
+          name: test-reports-bazel
+          retention-days: 14
+          if-no-files-found: error
+          path:
+            test-reports-*.zip
+      - uses: seemethere/upload-artifact-s3@v3
+        name: Store Test Reports on S3
+        if: always()
+        with:
           retention-days: 14
           if-no-files-found: error
           path:
