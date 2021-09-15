@@ -3072,7 +3072,9 @@ class TestOperatorSignatures(JitTestCase):
     @ops(op_db, allowed_dtypes=(torch.float,))
     def test_get_torch_func_signature_exhaustive(self, device, dtype, op):
         # Sorted and one entry on each line to minimize merge conflicts.
-        known_no_schema = {'cdist',
+        known_no_schema = {'block_diag',
+                           'broadcast_tensors',
+                           'cdist',
                            'contiguous',
                            'dstack',
                            'einsum',

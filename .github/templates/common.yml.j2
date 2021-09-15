@@ -161,3 +161,19 @@ concurrency:
             test-reports-*.zip
 {%- endif %}
 {%- endmacro -%}
+
+{%- macro render_test_results() -%}
+      - name: Install render_test_results dependencies
+        if: always()
+        shell: bash
+        run: |
+          python3 -m pip install junitparser==2.1.1 rich==10.9.0
+      - name: "[[ Click me for rendered test results (useful for finding failing tests) ]]"
+        if: always()
+        shell: bash
+        # Encoding is weird on windows, just try to default to utf-8 if possible
+        env:
+          PYTHONIOENCODING: "utf-8"
+        run: |
+          python3 tools/render_junit.py test/
+{%- endmacro -%}

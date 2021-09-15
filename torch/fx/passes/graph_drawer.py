@@ -3,7 +3,7 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 import hashlib
 import torch
 import torch.fx
-from typing import Dict, Any
+from typing import Dict, Any, TYPE_CHECKING
 from torch.fx.node import _get_qualified_name
 from torch.fx.passes.shape_prop import TensorMetadata
 from torch.fx._compatibility import compatibility
@@ -48,13 +48,7 @@ _WEIGHT_TEMPLATE = {
     "fontcolor": "#000000",
 }
 
-if not HAS_PYDOT:
-    @compatibility(is_backward_compatible=False)
-    class FxGraphDrawer:
-        def __init__(self, graph_module: torch.fx.GraphModule, name: str, ignore_getattr: bool = False):
-            raise RuntimeError('FXGraphDrawer requires the pydot package to be installed. Please install '
-                               'pydot through your favorite Python package manager.')
-else:
+if HAS_PYDOT:
     @compatibility(is_backward_compatible=False)
     class FxGraphDrawer:
         """
@@ -243,3 +237,11 @@ else:
                     dot_graph.add_edge(pydot.Edge(node.name, user.name))
 
             return dot_graph
+
+else:
+    if not TYPE_CHECKING:
+        @compatibility(is_backward_compatible=False)
+        class FxGraphDrawer:
+            def __init__(self, graph_module: torch.fx.GraphModule, name: str, ignore_getattr: bool = False):
+                raise RuntimeError('FXGraphDrawer requires the pydot package to be installed. Please install '
+                                   'pydot through your favorite Python package manager.')
