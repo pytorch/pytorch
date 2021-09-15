@@ -210,10 +210,14 @@ struct SymbolicShapeAnalyzer {
           continue;
         }
         // TODO: remove, all constant tensors should have typed sizes
-        if (toIValue(node_->input(i)) && !symbolic_shape_analysis_test_mode) {
-          replaceWithIValue(
-              graph_->inputs().at(i),
-              constant_as<at::Tensor>(node_->input(i))->sizes());
+        if (toIValue(node_->input(i))) {
+          auto size = constant_as<at::Tensor>(node_->input(i))->sizes();
+          if (!symbolic_shape_analysis_test_mode) {
+            replaceWithIValue(graph_->inputs().at(i), size);
+          } else {
+            node_symbolic_input_indices_.emplace_back(
+                i, c10::SymbolicShape(size));
+          }
           continue;
         }
 

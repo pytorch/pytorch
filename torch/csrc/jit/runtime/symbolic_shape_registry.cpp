@@ -55,19 +55,22 @@ const std::string shape_compute_functions =
             out.append(elem)
           return out
 
-        def unary_five_unused_inputs(self: List[int], inp0: Any, inp1: Any, inp2: Any, inp3: Any, inp4: Any):
-          return _copy(self)
-
-        def unary_two_unused_inputs(self: List[int], inp0: Any, inp1: Any):
+        def unary(self: List[int]):
           return _copy(self)
 
         def unary_one_unused_input(self: List[int], inp0: Any):
           return _copy(self)
 
+        def unary_two_unused_inputs(self: List[int], inp0: Any, inp1: Any):
+          return _copy(self)
+
+        def unary_three_unused_input(self: List[int], inp0: Any, inp1: Any, inp2: Any):
+          return _copy(self)
+
         def unary_four_unused_inputs(self: List[int], inp0: Any, inp1: Any, inp2: Any, inp3: Any):
           return _copy(self)
 
-        def unary(self: List[int]):
+        def unary_five_unused_inputs(self: List[int], inp0: Any, inp1: Any, inp2: Any, inp3: Any, inp4: Any):
           return _copy(self)
 
         def expand(self: List[int], sizes: List[int]):
@@ -266,6 +269,14 @@ const std::string shape_compute_functions =
             else:
               result_size.append(self[i])
           return result_size
+
+        def embedding(weight: List[int], indices: List[int], padding_idx:int = -1, scale_grad_by_freq:bool=False, sparse: bool=False):
+          assert len(weight) == 2
+          if len(indices) == 1:
+            return index_select(weight, 0, indices)
+          size = _copy(indices)
+          size.append(weight[1])
+          return size
 
         def max_int():
           return 9223372036854775807
@@ -534,7 +545,7 @@ const std::string shape_compute_functions =
           return linear(input, weight, bias)
     )"
 #endif
-;
+    ;
 
 // mapping function schema to shape compute graphs allows multiple functions to
 // share the same shape compute graph, which is memory efficient and also will
@@ -586,6 +597,9 @@ static const OperatorMap<std::string>& get_schema_to_function_graph() {
       {"aten::layer_norm(Tensor input, int[] normalized_shape, Tensor? weight=None, Tensor? bias=None, "
        "float eps=1e-05, bool cudnn_enable=True) -> Tensor", "unary_five_unused_inputs"},
       {"aten::softmax.int(Tensor self, int dim, ScalarType? dtype=None) -> Tensor", "unary_two_unused_inputs"},
+      {"aten::_no_grad_embedding_renorm_(Tensor weight, Tensor input, float max_norm, float norm_type) -> Tensor", "unary_three_unused_input"},
+      {"aten::embedding_renorm_(Tensor(a!) self, Tensor indices, float max_norm, float norm_type) -> Tensor(a!)", "unary_three_unused_input"},
+      {"aten::embedding(Tensor weight, Tensor indices, int padding_idx=-1, bool scale_grad_by_freq=False, bool sparse=False) -> Tensor", "embedding"},
       {"aten::mm(Tensor self, Tensor mat2) -> Tensor", "mm"},
       {"aten::dot(Tensor self, Tensor tensor) -> Tensor", "dot"},
       {"aten::mv(Tensor self, Tensor vec) -> Tensor", "mv"},
