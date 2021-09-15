@@ -4,7 +4,6 @@
 #include <torch/csrc/jit/mobile/interpreter.h>
 #include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/csrc/jit/runtime/operator.h>
-#include <torch/custom_class_detail.h>
 
 namespace torch {
 namespace jit {
@@ -35,34 +34,14 @@ bool Function::append_operator(
     const std::string& name,
     const std::string& overload_name,
     const c10::optional<int>& num_specified_args,
-    int64_t model_version, /* TODO: T90339189 deprecate all v3 when v3 models
-                              are removed */
-    OperatorCacheType& operator_cache) {
-  // TODO: The c10::OperatorName class contains 2 std::string members, one
-  // for the operator name, and one for the overload name. Creating a new
-  // object of type c10::OperatorName creates these 2 strings, which cause
-  // a heap memory allocation for each element element in code->opnames_.
-  // This can be a significant perf. overhead for models that have a very
-  // large list of operators.
-
+    int64_t model_version) { /* TODO: T90339189 deprecate all v3 when v3 models
+                                are removed */
   // Keep the original opname in code_
   code_->op_names_.emplace_back(name, overload_name);
-  const auto& opname = code_->op_names_.back();
+  auto opname = code_->op_names_.back();
 
   const auto& opname_c10 = opname;
   std::function<void(Stack&)> fn;
-
-  auto it = operator_cache.find(opname);
-  if (it != operator_cache.end()) {
-    // Operator (with fully qualified name) was found in the cache.
-    if (it->second.has_same_arg_num(num_specified_args)) {
-      // And it has the same number (or unspecified number) or arguments.
-      code_->operators_.emplace_back(it->second.fn);
-      return true;
-    }
-    // Operator found, but different argument list or specified/unspecified.
-    // Fall back to creating one from scratch.
-  }
 
   auto jit_op = findOperatorFor(opname);
   const std::vector<c10::Argument>* pArgs = nullptr;
@@ -135,12 +114,6 @@ bool Function::append_operator(
     }
   }
   code_->operators_.emplace_back(fn);
-  if (it == operator_cache.end()) {
-    // We came here because the operator name wasn't found in the cache,
-    // not because there was a schema mismatch. Do add into the cache.
-    operator_cache.insert(std::make_pair(
-        opname, OperatorFunctionWithSchema{fn, num_specified_args}));
-  }
   return true;
 }
 
