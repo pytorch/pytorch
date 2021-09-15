@@ -90,6 +90,18 @@ TEST(IValueTest, Basic) {
   ASSERT_EQ(complex_tuple.toTuple()->elements()[1], foo1);
 }
 
+TEST(IValueTest, BasicStorage) {
+  at::Storage emptyStorage;
+  at::Storage nonemptyStorage(at::rand({3, 4}).storage());
+  IValue ivEmpty(emptyStorage);
+  IValue ivNonempty(nonemptyStorage);
+
+  ASSERT_TRUE(ivEmpty.isStorage());
+  ASSERT_TRUE(ivNonempty.isStorage());
+  ASSERT_EQ(emptyStorage.unsafeGetStorageImpl(), ivEmpty.toStorage().unsafeGetStorageImpl());
+  ASSERT_EQ(nonemptyStorage.unsafeGetStorageImpl(), ivNonempty.toStorage().unsafeGetStorageImpl());
+}
+
 TEST(IValueTest, ComplexDict) {
   typedef c10::complex<double> c_type;
   c10::Dict<c_type, c_type> m;
@@ -102,21 +114,70 @@ TEST(IValueTest, ComplexDict) {
   ASSERT_EQ(m_.at(num1), 2 * num1);
   ASSERT_EQ(m_.at(num2), 2 * num2);
 }
-static std::array<IValue, 5> makeSampleIValues() {
-  return { at::rand({3, 4}), "hello", 42, true, 1.5 };
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+static std::array<IValue, 16> makeSampleIValues() {
+  return {
+    IValue(),
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+    at::rand({3, 4}),
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+    at::rand({3, 4}).storage(),
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+    1.5,
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+    c10::complex<double>(2.5, -0.5),
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+    42,
+    true,
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+    std::make_tuple(23, "hello"),
+    "hello",
+    c10::make_intrusive<caffe2::Blob>(),
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+    c10::List<int64_t>({1, 2, 3}),
+    c10::Dict<std::string, std::string>(),
+    c10::make_intrusive<ivalue::Future>(FloatType::get()),
+    c10::Device(c10::DeviceType::CPU, 0),
+    c10::Stream(c10::Stream::DEFAULT, c10::Device(c10::DeviceType::CPU, 0)),
+    c10::make_intrusive<ivalue::Object>(c10::StrongTypePtr(nullptr, ClassType::create("class1", {})), 1),
+  };
 }
 
-static std::array<IValue, 5> makeMoreSampleIValues() {
-  return { at::rand({3, 4}), "goodbye", 23, false, 0.5 };
-}
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+static std::array<IValue, 16> makeMoreSampleIValues() {
+  return {
+    IValue(),
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+    at::rand({3, 4}),
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+    at::rand({3, 4}).storage(),
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+    2.5,
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+    c10::complex<double>(2.7, -0.3),
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+    43,
+    false,
+    std::make_tuple(1, "goodbye"),
+    "goodbye",
+    c10::make_intrusive<caffe2::Blob>(),
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+    c10::List<int64_t>({4, 5, 6}),
+    c10::Dict<std::string, std::string>(),
+    c10::make_intrusive<ivalue::Future>(IntType::get()),
+    c10::Device(c10::DeviceType::CUDA, 2),
+    c10::Stream(c10::Stream::DEFAULT, c10::Device(c10::DeviceType::CUDA, 1)),
+    c10::make_intrusive<ivalue::Object>(c10::StrongTypePtr(nullptr, ClassType::create("class2", {})), 2),
+  };}
 
 // IValue::operator== doesn't seem to work on Tensors.
 #define EXPECT_IVALUE_EQ(a, b)                          \
   EXPECT_EQ((a).isTensor(), (b).isTensor());            \
   if ((a).isTensor()) {                                 \
-    EXPECT_TRUE(a.toTensor().equal(b.toTensor()));      \
+    EXPECT_TRUE((a).toTensor().equal((b).toTensor()));  \
   } else {                                              \
-    EXPECT_EQ(a, b);                                    \
+    EXPECT_EQ((a), (b));                                \
   }
 
 TEST(IValueTest, Swap) {
@@ -580,13 +641,31 @@ TEST(IValueTest, IdentityComparisonAndHashing) {
 
   ASSERT_EQ(sampleIValues.size(), moreSampleIValues.size());
   for (int ii = 0; ii < sampleIValues.size(); ++ii) {
-    // Constant strings will have the same pointer value.
-    if (sampleIValues[ii].isPtrType() && !sampleIValues[ii].isString()) {
-      EXPECT_NE(sampleIValues[ii].hash(), sampleIValues2[ii].hash());
-    } else {
-      EXPECT_EQ(sampleIValues[ii].hash(), sampleIValues2[ii].hash());
+    if (sampleIValues[ii].isComplexDouble() ||
+        sampleIValues[ii].isBlob() ||
+        sampleIValues[ii].isList() ||
+        sampleIValues[ii].isFuture() ||
+        sampleIValues[ii].isStream() ||
+        sampleIValues[ii].isObject() ||
+        sampleIValues[ii].isGenericDict()) {
+      // Not hashable.
+      continue;
     }
-    EXPECT_NE(sampleIValues[ii].hash(), moreSampleIValues[ii].hash());
+    // Tuples may or may not have the same hash across instantiations.
+    if (!sampleIValues[ii].isTuple()) {
+      // Constant strings will have the same pointer value.
+      if (sampleIValues[ii].isPtrType() && !sampleIValues[ii].isString()) {
+        EXPECT_NE(sampleIValues[ii].hash(), sampleIValues2[ii].hash())
+          << " at index " << ii;
+      } else {
+        EXPECT_EQ(sampleIValues[ii].hash(), sampleIValues2[ii].hash())
+          << " at index " << ii;
+      }
+    }
+    if (!sampleIValues[ii].isNone() && !moreSampleIValues[ii].isNone()) {
+      EXPECT_NE(sampleIValues[ii].hash(), moreSampleIValues[ii].hash())
+        << " at index " << ii;
+    }
   }
 }
 
@@ -654,6 +733,14 @@ TEST(IValueTest, ScalarBool) {
   Scalar actual = v.toScalar();
   EXPECT_TRUE(actual.isBoolean());
   EXPECT_TRUE(actual.toBool());
+}
+
+TEST(IValueTest, ToWeakAndBack) {
+  auto sampleInputs = makeSampleIValues();
+  for (const auto& sample: sampleInputs) {
+    WeakIValue weak(sample);
+    EXPECT_IVALUE_EQ(sample, weak.lock());
+  }
 }
 
 // TODO(gmagogsfm): Add type conversion test?

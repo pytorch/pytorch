@@ -23,44 +23,45 @@ namespace tensorexpr {
 class CudaAnalysis : public IRVisitor {
  public:
   CudaAnalysis() {
-    gpu_block_extents_ = {new IntImm(1), new IntImm(1), new IntImm(1)};
-    gpu_thread_extents_ = {new IntImm(1), new IntImm(1), new IntImm(1)};
+    gpu_block_extents_ = {alloc<IntImm>(1), alloc<IntImm>(1), alloc<IntImm>(1)};
+    gpu_thread_extents_ = {
+        alloc<IntImm>(1), alloc<IntImm>(1), alloc<IntImm>(1)};
   }
-  bool is_buf_store_target(Buf* buf) const {
+  bool is_buf_store_target(BufPtr buf) const {
     return store_targets_.count(buf) > 0;
   }
 
-  const std::unordered_set<Var*>& thread_local_bufs() const {
+  const std::unordered_set<VarPtr>& thread_local_bufs() const {
     return thread_local_bufs_;
   }
 
-  const std::unordered_set<Var*>& cross_block_bufs() const {
+  const std::unordered_set<VarPtr>& cross_block_bufs() const {
     return cross_block_bufs_;
   }
 
-  const std::vector<Expr*>& gpu_block_extents() const {
+  const std::vector<ExprPtr>& gpu_block_extents() const {
     return gpu_block_extents_;
   }
 
-  const std::vector<Expr*>& gpu_thread_extents() const {
+  const std::vector<ExprPtr>& gpu_thread_extents() const {
     return gpu_thread_extents_;
   }
 
  private:
-  void visit(Store* v) override {
+  void visit(StorePtr v) override {
     store_targets_.insert(v->buf());
   }
 
-  void visit(Allocate* v) override;
-  void visit(Free* v) override;
-  void visit(For* v) override;
+  void visit(AllocatePtr v) override;
+  void visit(FreePtr v) override;
+  void visit(ForPtr v) override;
 
-  std::unordered_set<Buf*> store_targets_;
-  std::unordered_set<Var*> thread_local_bufs_;
-  std::unordered_set<Var*> cross_block_bufs_;
+  std::unordered_set<BufPtr> store_targets_;
+  std::unordered_set<VarPtr> thread_local_bufs_;
+  std::unordered_set<VarPtr> cross_block_bufs_;
 
-  std::vector<Expr*> gpu_block_extents_;
-  std::vector<Expr*> gpu_thread_extents_;
+  std::vector<ExprPtr> gpu_block_extents_;
+  std::vector<ExprPtr> gpu_thread_extents_;
 };
 
 // An IRMutator that replaces binding loop options with Cuda metavars, and masks
@@ -75,34 +76,36 @@ class GPUMetaVarRewriter : public IRMutator {
   explicit GPUMetaVarRewriter(const CudaAnalysis* cuda_analysis)
       : cuda_analysis_(cuda_analysis) {
     gpu_block_vars_ = {
-        new Var("blockIdx.x", kInt),
-        new Var("blockIdx.y", kInt),
-        new Var("blockIdx.z", kInt)};
+        alloc<Var>("blockIdx.x", kInt),
+        alloc<Var>("blockIdx.y", kInt),
+        alloc<Var>("blockIdx.z", kInt)};
     gpu_thread_vars_ = {
-        new Var("threadIdx.x", kInt),
-        new Var("threadIdx.y", kInt),
-        new Var("threadIdx.z", kInt)};
+        alloc<Var>("threadIdx.x", kInt),
+        alloc<Var>("threadIdx.y", kInt),
+        alloc<Var>("threadIdx.z", kInt)};
 
-    current_block_reach_ = {new IntImm(1), new IntImm(1), new IntImm(1)};
-    current_thread_reach_ = {new IntImm(1), new IntImm(1), new IntImm(1)};
+    current_block_reach_ = {
+        alloc<IntImm>(1), alloc<IntImm>(1), alloc<IntImm>(1)};
+    current_thread_reach_ = {
+        alloc<IntImm>(1), alloc<IntImm>(1), alloc<IntImm>(1)};
   }
 
-  Stmt* mutate(For* v) override;
-  Stmt* mutate(Block* v) override;
+  StmtPtr mutate(ForPtr v) override;
+  StmtPtr mutate(BlockPtr v) override;
 
-  const std::vector<Var*>& gpu_block_vars() const {
+  const std::vector<VarPtr>& gpu_block_vars() const {
     return gpu_block_vars_;
   }
 
-  const std::vector<Var*>& gpu_thread_vars() const {
+  const std::vector<VarPtr>& gpu_thread_vars() const {
     return gpu_thread_vars_;
   }
 
-  const std::vector<Expr*>& gpu_block_extents() const {
+  const std::vector<ExprPtr>& gpu_block_extents() const {
     return cuda_analysis_->gpu_block_extents();
   }
 
-  const std::vector<Expr*>& gpu_thread_extents() const {
+  const std::vector<ExprPtr>& gpu_thread_extents() const {
     return cuda_analysis_->gpu_thread_extents();
   }
 
@@ -120,7 +123,7 @@ class GPUMetaVarRewriter : public IRMutator {
       return stmts_.empty();
     }
 
-    std::vector<Stmt*>& stmts() {
+    std::vector<StmtPtr>& stmts() {
       return stmts_;
     }
     bool mask() {
@@ -128,7 +131,7 @@ class GPUMetaVarRewriter : public IRMutator {
     }
 
    private:
-    std::vector<Stmt*> stmts_;
+    std::vector<StmtPtr> stmts_;
     bool mask_{true};
   };
 
@@ -136,11 +139,11 @@ class GPUMetaVarRewriter : public IRMutator {
   // parameters.
   bool isFullExtent();
 
-  std::vector<Var*> gpu_block_vars_;
-  std::vector<Var*> gpu_thread_vars_;
+  std::vector<VarPtr> gpu_block_vars_;
+  std::vector<VarPtr> gpu_thread_vars_;
 
-  std::vector<Expr*> current_block_reach_;
-  std::vector<Expr*> current_thread_reach_;
+  std::vector<ExprPtr> current_block_reach_;
+  std::vector<ExprPtr> current_thread_reach_;
 
   const CudaAnalysis* cuda_analysis_;
 };
@@ -154,28 +157,28 @@ class CudaPrinter : public IRPrinter {
       bool has_random)
       : IRPrinter(*os), cuda_analysis_(cuda_analysis) {
     if (has_random) {
-      rand_func_ = new Var("rand", kHandle);
+      rand_func_ = alloc<Var>("rand", kHandle);
     }
   }
 
-  void visit(Cast* v) override;
-  void visit(Intrinsics* v) override;
-  void visit(For* v) override;
+  void visit(CastPtr v) override;
+  void visit(IntrinsicsPtr v) override;
+  void visit(ForPtr v) override;
 
-  void visit(Load* v) override;
-  void visit(Store* v) override;
-  void visit(AtomicAdd* v) override;
-  void visit(Max* v) override;
-  void visit(Min* v) override;
-  void visit(IfThenElse* v) override;
-  void visit(Block* v) override;
-  void visit(Allocate* v) override;
-  void visit(Free* v) override;
-  void visit(Let* v) override;
+  void visit(LoadPtr v) override;
+  void visit(StorePtr v) override;
+  void visit(AtomicAddPtr v) override;
+  void visit(MaxPtr v) override;
+  void visit(MinPtr v) override;
+  void visit(IfThenElsePtr v) override;
+  void visit(BlockPtr v) override;
+  void visit(AllocatePtr v) override;
+  void visit(FreePtr v) override;
+  void visit(LetPtr v) override;
 
-  void visit(ExternalCall* v) override;
+  void visit(ExternalCallPtr v) override;
 
-  Var* rand_func() const {
+  VarPtr rand_func() const {
     return rand_func_;
   }
 
@@ -185,10 +188,10 @@ class CudaPrinter : public IRPrinter {
   using IRPrinter::visit;
 
  private:
-  Var* rand_func_;
+  VarPtr rand_func_;
   const CudaAnalysis* cuda_analysis_;
 
-  void print_flat_alloc(Allocate* alloc);
+  void print_flat_alloc(AllocatePtr alloc);
 };
 
 // Construct Cuda C from the buffer and tensor input, and invoke the kernel
@@ -197,7 +200,7 @@ class TORCH_CUDA_CU_API CudaCodeGen : public CodeGen {
  public:
   template <typename... Ts>
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-  CudaCodeGen(Stmt* stmt, Ts... ts)
+  CudaCodeGen(StmtPtr stmt, Ts... ts)
       : CodeGen(
             stmt,
             std::vector<BufferArg>({BufferArg(ts)...}),
@@ -207,7 +210,7 @@ class TORCH_CUDA_CU_API CudaCodeGen : public CodeGen {
 
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   CudaCodeGen(
-      Stmt* stmt,
+      StmtPtr stmt,
       const std::vector<BufferArg>& buffer_args,
       at::Device device = at::Device(at::kCUDA, at::cuda::current_device()),
       const std::string& kernel_func_name = "func")
@@ -233,11 +236,11 @@ class TORCH_CUDA_CU_API CudaCodeGen : public CodeGen {
       c10::optional<c10::Device> device_opt,
       c10::optional<bool> pin_memory_opt) override;
 
-  const std::vector<Expr*>& gpu_block_extents() const {
+  const std::vector<ExprPtr>& gpu_block_extents() const {
     return cuda_analysis_->gpu_block_extents();
   }
 
-  const std::vector<Expr*>& gpu_thread_extents() const {
+  const std::vector<ExprPtr>& gpu_thread_extents() const {
     return cuda_analysis_->gpu_thread_extents();
   }
 

@@ -30,8 +30,9 @@ class _PartialWrapper(object):
         return _with_args(self, **kwargs)
 
     def with_callable_args(self, **kwargs):
-        self.callable_args = {**self.callable_args, **kwargs}
-        return self
+        result = _PartialWrapper(p=self.p)
+        result.callable_args = {**self.callable_args, **kwargs}
+        return result
 
 
 def _with_args(cls_or_self, **kwargs):

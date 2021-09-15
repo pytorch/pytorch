@@ -31,19 +31,8 @@ class NnapiBackend : public PyTorchBackendInterface {
   c10::impl::GenericDict compile(
       c10::IValue processed,
       c10::impl::GenericDict method_compile_spec) override {
-    auto dict = processed.toGenericDict();
-
-    // Prepare weights
-    auto weights = dict.at("weights").toTensorList();
-    for (int i = 0; i < weights.size(); i++) {
-      weights.set(i, weights.get(i).contiguous());
-    }
-    dict.insert("weights", weights);
-
-    // Save ser_model to member variable
-    ser_model_ = dict.at("ser_model").toTensor();
-
     // Wrap procesed in dictionary: {"forward": processed}
+    auto dict = processed.toGenericDict();
     c10::Dict<c10::IValue, c10::IValue> handles(
         c10::StringType::get(), c10::AnyType::get());
     handles.insert("forward", dict);
@@ -86,8 +75,7 @@ class NnapiBackend : public PyTorchBackendInterface {
         fixed_inputs.push_back(
             tensorInp.get(i).permute({0, 2, 3, 1}).contiguous());
       } else {
-        throw std::exception();
-        std::cerr << "Invalid mem_fmt" << std::endl;
+        TORCH_CHECK(false, "Invalid mem_fmt");
       }
     }
 
@@ -103,9 +91,8 @@ class NnapiBackend : public PyTorchBackendInterface {
       // TODO: See if it's possible to use those directly.
       if (fmt == 1) {
         outputs.set(i, outputs.get(i).permute({0, 3, 1, 2}));
-      } else if (fmt != 0) {
-        throw std::exception();
-        std::cerr << "Invalid mem_fmt" << std::endl;
+      } else {
+        TORCH_CHECK(fmt == 0, "Invalid mem_fmt");
       }
     }
 
@@ -117,8 +104,6 @@ class NnapiBackend : public PyTorchBackendInterface {
   // and cannot be passed through the handles dictionary
   std::unique_ptr<torch::nnapi::bind::NnapiCompilation> comp_;
   c10::List<at::Tensor> out_templates_;
-  at::Tensor ser_model_;
-  mobile::Module shape_compute_module_;
 
   // Runs once per model initialization
   // Cannot be moved to compile(), because init() requires actual inputs
@@ -126,19 +111,21 @@ class NnapiBackend : public PyTorchBackendInterface {
     TORCH_CHECK(comp_ == nullptr);
     auto dict = handle.toGenericDict();
 
+    // Get ser_model
+    auto ser_model = dict.at("ser_model").toTensor();
     // Load shape computation module
     std::stringstream ss;
     auto shape_ptr = dict.at("shape_compute_module").toString();
     ss.str(*shape_ptr);
-    shape_compute_module_ = _load_for_mobile(ss);
+    auto shape_compute_module = _load_for_mobile(ss);
     out_templates_ =
-        shape_compute_module_.run_method("prepare", ser_model_, inputs)
+        shape_compute_module.run_method("prepare", ser_model, inputs)
             .toTensorList();
 
     // Create and initialize NnapiComilation object
     comp_ = std::make_unique<torch::nnapi::bind::NnapiCompilation>();
     auto weights = dict.at("weights").toTensorVector();
-    comp_->init(ser_model_, weights);
+    comp_->init(ser_model, weights);
   }
 };
 
