@@ -28,8 +28,8 @@ def build_int8_trt(rn18):
         activation=torch.quantization.observer.HistogramObserver.with_args(
             qscheme=torch.per_tensor_symmetric, dtype=torch.qint8
         ),
-        # weight=torch.quantization.default_weight_observer
-        weight=torch.quantization.default_per_channel_weight_observer
+        weight=torch.quantization.default_weight_observer
+        # weight=torch.quantization.default_per_channel_weight_observer
     )
     prepared = prepare_fx(rn18, {"": qconfig})
     for _ in range(10):

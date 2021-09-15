@@ -1339,7 +1339,7 @@ def acc_ops_quantize_per_tensor(network, target, args, kwargs, name):
         raise RuntimeError(f"{name} received input {input_val} that is not part "
                            "of the TensorRT region!")
 
-    qparams = kwargs["qparams"]
+    qparams = acc_utils.get_field_from_acc_out_ty(kwargs["acc_out_ty"], "qparams")
     q_scale = qparams["scale"]
     q_zero_point = qparams["zero_point"]
     dtype = qparams["dtype"]
@@ -1369,7 +1369,7 @@ def acc_ops_quantize_per_channel(network, target, args, kwargs, name):
         raise RuntimeError(f"{name} received input {input_val} that is not part "
                            "of the TensorRT region!")
 
-    qparams = kwargs["qparams"]
+    qparams = acc_utils.get_field_from_acc_out_ty(kwargs["acc_out_ty"], "qparams")
     q_per_channel_scales = qparams["scale"]
     q_per_channel_zero_points = qparams["zero_point"]
     q_per_channel_axis = qparams["axis"]
