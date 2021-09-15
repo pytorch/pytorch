@@ -33,7 +33,7 @@ def node_ctor_inputs(func: LazyIrSchema) -> str:
     """
     node_ctor_values = []
     node_ctor_scalars = []
-    for arg in func.filtered_args():
+    for arg in func.filtered_types():
         if isValueType(arg.type):
             if isinstance(arg.type, BaseCType):
                 node_ctor_values.append(f"l_{arg.name}.GetIrValue()")
@@ -46,7 +46,7 @@ def node_ctor_inputs(func: LazyIrSchema) -> str:
             if isinstance(arg.type, BaseCType) and arg.type.type.name == "vector<int64_t>":
                 node_ctor_scalars.append(f"std::vector<int64_t>({arg.name}.begin(), {arg.name}.end())")
             else:
-                node_ctor_scalars.append(arg.name)
+                node_ctor_scalars.append(f"{arg.name}")
 
     node_ctor_inputs_str = ",\n                              ".join(node_ctor_values + node_ctor_scalars)
     return node_ctor_inputs_str
@@ -82,15 +82,15 @@ class LazyIR:
         comma_if_scalar_initializers = ",\n" if len(scalar_initializers) else ""
         scalar_decls = "\n  ".join([f"{t.cpp_type()} {t.name}_;" for t in scalar_types])
         scalar_hashes = ", ".join([f"{f.name}" for f in scalar_types])
-        base_ctor_value_args = []
+        base_ctor_value_args_list = []
         for t in value_types:
             if isinstance(t.type, BaseCType):
-                base_ctor_value_args.append(f"{t.name}")
+                base_ctor_value_args_list.append(f"{t.name}")
             elif isinstance(t.type, OptionalCType):
-                base_ctor_value_args.append(f"{t.name}.has_value() ? {t.name}.value() : kNullValue")
+                base_ctor_value_args_list.append(f"{t.name}.has_value() ? {t.name}.value() : kNullValue")
             else:
                 assert False, ""
-        base_ctor_value_args = ", ".join(base_ctor_value_args)
+        base_ctor_value_args = ", ".join(base_ctor_value_args_list)
         members_to_string = "\n    ".join([f'lazy_tensors::ToString("{t.name}", {t.name}_, ss);' for t in scalar_types])
 
         # clone needs hand-overrides for cases where there are optional Tensor? args,
@@ -146,7 +146,7 @@ class {schema.node_name} : public Node {{
 """, ]
 
 
-def lazy_tensor_decls(value_types: List[NamedCType]) -> List[str]:
+def lazy_tensor_decls(value_types: List[NamedCType]) -> str:
     lazy_tensor_decls: List[str] = []
     for t in value_types:
         if isinstance(t.type, BaseCType):
@@ -156,8 +156,7 @@ def lazy_tensor_decls(value_types: List[NamedCType]) -> List[str]:
                 f"c10::optional<LazyTensor> l_{t.name} =  {t.name}.has_value() ? c10::make_optional(bridge::GetLtcTensor({t.name}.value())) : c10::nullopt;")
         else:
             assert False, ""
-    lazy_tensor_decls = "\n    ".join(lazy_tensor_decls)
-    return lazy_tensor_decls
+    return "\n    ".join(lazy_tensor_decls)
 
 
 def gen_unstructured_lazy_definition(f: NativeFunction, backend_index: BackendIndex, codegen: List[OperatorName], class_method_name: str) -> Optional[str]:
