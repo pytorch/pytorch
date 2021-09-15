@@ -35,10 +35,10 @@ class AOMigrationTestCase(TestCase):
 
 
 class TestAOMigrationQuantizePy(AOMigrationTestCase):
-    def test_package_import(self):
+    def test_package_import_quantize(self):
         self._test_package_import('quantize')
 
-    def test_function_import(self):
+    def test_function_import_quantize(self):
         function_list = [
             '_convert',
             '_observer_forward_hook',
@@ -94,3 +94,32 @@ class TestAOMigrationQuantizePy(AOMigrationTestCase):
             'quantize_dynamic_jit',
         ]
         self._test_function_import('quantize_jit', function_list)
+
+    def test_package_import_fake_quantize(self):
+        self._test_package_import('fake_quantize')
+
+    def test_function_import_fake_quantize(self):
+        function_list = [
+            '_is_per_channel',
+            '_is_per_tensor',
+            '_is_symmetric_quant',
+            'FakeQuantizeBase',
+            'FakeQuantize',
+            'FixedQParamsFakeQuantize',
+            'FusedMovingAvgObsFakeQuantize',
+            'default_fake_quant',
+            'default_weight_fake_quant',
+            'default_symmetric_fixed_qparams_fake_quant',
+            'default_affine_fixed_qparams_fake_quant',
+            'default_per_channel_weight_fake_quant',
+            'default_histogram_fake_quant',
+            'default_fused_act_fake_quant',
+            'default_fused_wt_fake_quant',
+            'default_fused_per_channel_wt_fake_quant',
+            '_is_fake_quant_script_module',
+            'disable_fake_quant',
+            'enable_fake_quant',
+            'disable_observer',
+            'enable_observer',
+        ]
+        self._test_function_import('fake_quantize', function_list)
