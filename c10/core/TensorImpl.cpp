@@ -370,7 +370,8 @@ void TensorImpl::release_resources() {
   if (owns_pyobj_) {
     TORCH_INTERNAL_ASSERT(pyobj_interpreter_ != nullptr);
     TORCH_INTERNAL_ASSERT(pyobj_ != nullptr);
-    pyobj_interpreter_.load(std::memory_order_acquire)->decref(pyobj_, /*is_tensor*/true);
+    pyobj_interpreter_.load(std::memory_order_acquire)
+        ->decref(pyobj_, /*is_tensor*/ true);
     // NB: this destructor can only be entered when there are no
     // references to this C++ object (obviously), NOR any references
     // to the PyObject (if there are references to the PyObject,
@@ -616,7 +617,7 @@ TorchDispatchTypeObject::TorchDispatchTypeObject(
     : data_(type_object), pyinterpreter_(pyinterpreter) {}
 
 TorchDispatchTypeObject::~TorchDispatchTypeObject() {
-  pyinterpreter_->decref(data_, /*is_tensor*/false);
+  pyinterpreter_->decref(data_, /*is_tensor*/ false);
 }
 
 c10::impl::PyInterpreter* TorchDispatchTypeObject::pyinterpreter() const {
