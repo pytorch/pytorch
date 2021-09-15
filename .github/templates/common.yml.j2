@@ -71,7 +71,8 @@ concurrency:
               "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
           }
           # Ensure the working directory gets chowned back to the current user
-          retry docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+          retry docker pull "${ALPINE_IMAGE}"
+          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
       - name: Clean workspace
         run: |
           rm -rf "${GITHUB_WORKSPACE:?}/*"
@@ -107,7 +108,8 @@ concurrency:
               "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
           }
           # Ensure the working directory gets chowned back to the current user
-          retry docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+          retry docker pull "${ALPINE_IMAGE}"
+          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
 {%- endmacro -%}
 
 {%- macro checkout_pytorch(submodules) -%}
