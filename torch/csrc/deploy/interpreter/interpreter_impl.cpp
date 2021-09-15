@@ -351,6 +351,11 @@ struct __attribute__((visibility("hidden"))) ConcreteInterpreterImpl
     int r = PyRun_SimpleString(startup);
     TORCH_INTERNAL_ASSERT(r == 0);
 
+    // _Py_PackageContext acts as a "hook" that CPython uses to intercept the
+    // process of assigning a module their name.  See: https://git.io/J3qPH.
+    // For a builtin module we need to emulate normal extension module loading
+    // to set a correct fully qualified name. After that we can clean up the
+    // reference created by PyImport_ImportModule().
     if (PyInit_tensorrt) {
       _Py_PackageContext = "tensorrt.tensorrt";
       PyObject* pmodule = PyImport_ImportModule("tensorrt.tensorrt");
