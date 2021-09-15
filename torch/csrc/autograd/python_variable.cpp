@@ -476,6 +476,8 @@ int THPVariable_set_grad(THPVariable *self, PyObject *py_grad, void *unused)
     return 0;
   }
 
+  TORCH_CHECK_TYPE(THPVariable_Check(py_grad),
+      "assigned grad expected to be a Tensor or None but got grad of type", THPUtils_typename(py_grad));
   THPUtils_assertRet(-1, self != (THPVariable*)py_grad,
       "can't assign Variable as its own grad");
 
