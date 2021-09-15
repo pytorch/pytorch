@@ -34,29 +34,29 @@ from torch.quantization.quantization_mappings import (
 from torch.testing._internal.common_quantization import NodeSpec as ns
 from torch.quantization.fx.pattern_utils import get_default_quant_patterns
 import torch.quantization.fx.quantization_patterns as qp
-from torch.quantization.ns.pattern_utils import (
+from torch.ao.ns.fx.pattern_utils import (
     get_type_a_related_to_b,
 )
-from torch.quantization.ns.graph_matcher import (
+from torch.ao.ns.fx.graph_matcher import (
     get_matching_subgraph_pairs,
     GraphMatchingException,
 )
-from torch.quantization.ns.utils import (
+from torch.ao.ns.fx.utils import (
     compute_sqnr,
     compute_normalized_l2_error,
     compute_cosine_similarity,
 )
-from torch.quantization.ns.mappings import (
+from torch.ao.ns.fx.mappings import (
     get_node_type_to_io_type_map,
     get_unmatchable_types_map,
     get_base_name_to_sets_of_related_ops,
     get_base_name_for_op,
     add_op_to_sets_of_related_ops,
 )
-from torch.quantization.ns.weight_utils import (
+from torch.ao.ns.fx.weight_utils import (
     get_op_to_type_to_weight_extraction_fn,
 )
-from torch.quantization._numeric_suite_fx import (
+from torch.ao.ns._numeric_suite_fx import (
     extract_weights,
     _extract_weights_impl,
     add_loggers,
@@ -1634,7 +1634,7 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
         op_to_type_to_weight_extraction_fn = \
             get_op_to_type_to_weight_extraction_fn()
         op_to_type_to_weight_extraction_fn['call_function'][_wrapped_linear] = \
-            torch.quantization.ns.weight_utils.get_linear_fun_weight
+            torch.ao.ns.fx.weight_utils.get_linear_fun_weight
 
         # test compare weights
         results = extract_weights(
