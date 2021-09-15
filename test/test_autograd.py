@@ -8377,6 +8377,10 @@ class TestAutogradDeviceType(TestCase):
     def test_grad_assignment(self, devices):
         x = torch.randn(5, 5, device=devices[0])
 
+        # Tests that the wrong type raises
+        with self.assertRaisesRegex(TypeError, "expected to be a Tensor or None"):
+            x.grad = 0
+
         # Tests that the wrong shape raises
         with self.assertRaises(RuntimeError):
             x.grad = torch.randn(2, 2, device=devices[0])
