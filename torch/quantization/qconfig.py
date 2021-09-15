@@ -1,10 +1,8 @@
 from collections import namedtuple
-from .observer import (HistogramObserver, MovingAverageMinMaxObserver,
-                       PlaceholderObserver, default_debug_observer,
-                       default_dynamic_quant_observer,
-                       default_float_qparams_observer, default_observer,
-                       default_per_channel_weight_observer,
-                       default_placeholder_observer, default_weight_observer)
+from typing import Union, Optional, Any
+
+import torch
+import torch.nn as nn
 from torch.ao.quantization.fake_quantize import (
     FakeQuantize,
     default_fake_quant,
@@ -15,10 +13,19 @@ from torch.ao.quantization.fake_quantize import (
     FusedMovingAvgObsFakeQuantize,
     default_fused_per_channel_wt_fake_quant,
 )
-import torch
-import torch.nn as nn
 
-from typing import Union, Optional, Any
+from .observer import (
+    HistogramObserver,
+    MovingAverageMinMaxObserver,
+    PlaceholderObserver,
+    default_debug_observer,
+    default_dynamic_quant_observer,
+    default_float_qparams_observer,
+    default_observer,
+    default_per_channel_weight_observer,
+    default_placeholder_observer,
+    default_weight_observer,
+)
 
 class QConfig(namedtuple('QConfig', ['activation', 'weight'])):
     """
