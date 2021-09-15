@@ -1937,6 +1937,37 @@ def scatter_object_list(
     scatter_object_output_list[0] = _tensor_to_object(output_tensor, obj_tensor_size)
 
 
+def _all_gather_chunked(tensor_list, tensor, group=None, async_op=False, chunks=4):
+    """
+    Prototype implementation of all_gather_chunked, which chunks tensors into
+    N partitions, all_gathers them, and reconstructs the resulting tensor.
+    """
+    n = chunks
+    # Split input tensor
+    input_split_tensor = list(torch.split(tensor, n))
+    # Split output tensors
+    split_tensors = [
+        list(torch.split(t, n)) for t in tensor_list
+    ]
+    # Split input tensors. `sublists` will contain world_size lists. Each of the
+    # lists will contain appropriately split tensors.
+    sublists = [
+        [split_tensors[k][i] for k in range(len(tensor_list))]
+        for i in range(len(split_tensors[0]))
+    ]
+    pg = group if group is not None else _get_default_group()
+    # Conduct num_chunk allreduces in parallel.
+    futs = [
+        pg.allgather([s], [input_split_tensor[i]]).get_future()
+        for i, s in enumerate(sublists)
+    ]
+    # Future corresponding to when all parallel all_gathers are done.
+    uber_fut = torch.futures.collect_all(futs)
+    if async_op:
+        return uber_fut
+    else:
+        uber_fut.wait()
+
 def all_gather(tensor_list, tensor, group=None, async_op=False):
     """
     Gathers tensors from the whole group in a list.

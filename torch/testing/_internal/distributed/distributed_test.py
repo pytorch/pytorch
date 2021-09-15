@@ -2795,6 +2795,21 @@ class DistributedTest:
             self._barrier()
 
         @sandcastle_skip_if(BACKEND == "nccl", "Nccl does not support CPU tensors")
+        def test_all_gather_chunked(self):
+            group, group_id, rank = self._init_global_test()
+            for shape in [20, 23, (1, 2, 3, 4), (16, 64, 3, 2)]:
+                tensor = torch.ones(shape) * (rank + 1)
+                tensor_list = [torch.empty_like(tensor) for _ in range(dist.get_world_size())]
+                dist.all_gather_chunked(tensor_list, tensor)
+                # print(f"got tensor {tensor_list}")
+                dist.barrier()
+                tensor = torch.ones(shape) * (rank + 1)
+                tensor_list_ag = [torch.empty_like(tensor) for _ in range(dist.get_world_size())]
+                dist.all_gather(tensor_list_ag, tensor)
+                # print(f"got tensor_ag {tensor_list_ag}")
+                self.assertEqual(tensor_list, tensor_list_ag)
+
+        @sandcastle_skip_if(BACKEND == "nccl", "Nccl does not support CPU tensors")
         def test_all_gather(self):
             group, group_id, rank = self._init_global_test()
             self._test_all_gather_helper(group, group_id, rank)
