@@ -809,9 +809,9 @@ class TestFakeQuantizeOps(TestCase):
         quant_min = torch.iinfo(torch_type).min
         quant_max = torch.iinfo(torch_type).max
         if device == 'cpu':
-          zero_point_types = (torch.int, torch.float, torch.float16)
+            zero_point_types = (torch.int, torch.float, torch.float16)
         else:
-          zero_point_types = (torch.int,)
+            zero_point_types = (torch.int,)
 
         for zero_point_type in zero_point_types:
             X = to_tensor(X, device)
@@ -952,16 +952,16 @@ class TestFakeQuantizeOps(TestCase):
         torch_types = [torch.qint8, torch.quint8]
         float_types = [torch.float, torch.float16, torch.float64]
         if test_type == "per_channel":
-          zero_types = [torch.int, torch.float, torch.float16]
+            zero_types = [torch.int, torch.float, torch.float16]
         else:
-          zero_types = [torch.int]
+            zero_types = [torch.int]
         devices = [torch.device('cpu'), torch.device('cuda')] if torch.cuda.is_available() else [torch.device('cpu')]
         axis = 1
         for i in range(20):
             for torch_type, float_type, device, zero_type in itertools.product(torch_types, float_types, devices, zero_types):
                 # TODO(future PR): Support float zero_points for CUDA.
-                if device == 'cuda' and zero_type != torch.int:
-                  continue
+                if device.type == 'cuda' and zero_type != torch.int32:
+                    continue
 
                 X = torch.randn(3, 3, device=device).to(float_type)
                 scales = (10 * torch.randn(3, device=device)).abs()
