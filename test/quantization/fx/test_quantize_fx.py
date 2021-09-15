@@ -3028,14 +3028,16 @@ class TestQuantizeFx(QuantizationTestCase):
             def forward(self, x):
                 x = x + 1
                 x = x - 1
+                x = x + 3
+                x = x - 4
                 return x
 
         m = M().eval()
         m = prepare_fx(m, {"": default_qconfig})
         m = convert_fx(m)
         occurrence = {
-            ns.call_function(torch.quantize_per_tensor): 1,
-            ns.call_method("dequantize"): 1
+            ns.call_function(torch.quantize_per_tensor): 2,
+            ns.call_method("dequantize"): 2
         }
         self.checkGraphModuleNodes(m, expected_node_occurrence=occurrence)
 
@@ -4969,7 +4971,6 @@ class TestQuantizeFxOps(QuantizationTestCase):
         m = convert_fx(m)
         m(data)
         # make sure everything runs
-
 
 class TestQuantizeFxModels(QuantizationTestCase):
     @skipIfNoFBGEMM
