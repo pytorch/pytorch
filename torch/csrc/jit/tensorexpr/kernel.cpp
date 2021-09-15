@@ -2497,7 +2497,10 @@ Tensor TensorExprKernel::computeValue(const torch::jit::Value* v) {
   }
   Tensor tensor =
       computeOperandValue(op, argInputs, outputShape, outputType, device_);
-  tensor.buf()->set_name_hint(sanitizeName(v->debugName()));
+  std::string tensor_name = sanitizeName(v->debugName());
+  if (!tensor_name.empty()) {
+    tensor.buf()->set_name_hint(tensor_name);
+  }
   return tensor;
 }
 
