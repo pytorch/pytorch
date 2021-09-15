@@ -1351,19 +1351,18 @@ def acc_ops_quantize_per_tensor(network, target, args, kwargs, name):
         raise RuntimeError(f"Only support zero_point == 0, get {q_zero_point}")
 
     scale_layer = network.add_constant((1,), trt.Weights(np.ascontiguousarray([float(q_scale)], dtype=np.float32)))
-    scale_layer.name = input_val.name + ".quant.scale"
+    scale_layer.name = input_val.name + ".per_tensor_quant.scale"
     scale = scale_layer.get_output(0)
     # assert trt.__version__ > "8.0", "Explicit quantize op is only supported in "
     # "TensorRT 8.0 or above, current TensorRT version:" + trt.__version__
     layer = network.add_quantize(input=input_val, scale=scale)
     layer.axis = 0
-    layer.name = input_val.name + ".quant"
+    layer.name = input_val.name + ".per_tensor_quant"
     return layer.get_output(0)
 
 @tensorrt_converter(acc_ops.quantize_per_channel)
 def acc_ops_quantize_per_channel(network, target, args, kwargs, name):
     input_val = get_trt_tensor(network, kwargs["input"], f"{name}_input")
-
 
     if not isinstance(input_val, trt.tensorrt.ITensor):
         raise RuntimeError(f"{name} received input {input_val} that is not part "
@@ -1378,7 +1377,7 @@ def acc_ops_quantize_per_channel(network, target, args, kwargs, name):
         raise RuntimeError("Only support (torch.quint8, torch.qint8, torch.qint32) "
                            f"quantized type in quantize_per_tensor, get {dtype}.")
 
-    # make sure zero_points are all 0 because only symmetric quantization
+    # Make sure zero_points are all 0 because only symmetric quantization
     # is supported in TensorRT
     if not torch.equal(
             q_per_channel_zero_points,
@@ -1391,13 +1390,13 @@ def acc_ops_quantize_per_channel(network, target, args, kwargs, name):
     scale_layer = network.add_constant(
         q_per_channel_scales.shape,
         trt.Weights(np.ascontiguousarray(q_per_channel_scales, dtype=np.float32)))
-    scale_layer.name = input_val.name + ".quant.scale"
+    scale_layer.name = input_val.name + ".per_channel_quant.scale"
     scale = scale_layer.get_output(0)
     # assert trt.__version__ > "8.0", "Explicit quantize op is only supported in "
     # "TensorRT 8.0 or above, current TensorRT version:" + trt.__version__
     layer = network.add_quantize(input=input_val, scale=scale)
     layer.axis = q_per_channel_axis
-    layer.name = input_val.name + ".quant"
+    layer.name = input_val.name + ".per_channel_quant"
     return layer.get_output(0)
 
 @tensorrt_converter(acc_ops.dequantize)
