@@ -63,6 +63,9 @@ jobs:
           echo "instance-id: $(get_ec2_metadata instance-id)"
           echo "instance-type: $(get_ec2_metadata instance-type)"
       - name: Log in to ECR
+        env:
+          AWS_RETRY_MODE: standard
+          AWS_MAX_ATTEMPTS: 5
         run: |
           aws ecr get-login --no-include-email --region us-east-1 > /tmp/ecr-login.sh
           bash /tmp/ecr-login.sh
@@ -158,6 +161,9 @@ jobs:
           echo "instance-id: $(get_ec2_metadata instance-id)"
           echo "instance-type: $(get_ec2_metadata instance-type)"
       - name: Log in to ECR
+        env:
+          AWS_RETRY_MODE: standard
+          AWS_MAX_ATTEMPTS: 5
         run: |
           aws ecr get-login --no-include-email --region us-east-1 > /tmp/ecr-login.sh
           bash /tmp/ecr-login.sh
