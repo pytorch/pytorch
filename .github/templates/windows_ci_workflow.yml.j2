@@ -253,6 +253,7 @@ jobs:
             fi
             .jenkins/pytorch/win-test.sh
       !{{ common.upload_test_reports(name='windows') }}
+      !{{ common.render_test_results() }}
       !{{ wait_and_kill_ssh() }}
       !{{ common.parse_ref() }}
       !{{ common.upload_test_statistics(build_environment) }}
