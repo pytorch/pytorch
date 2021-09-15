@@ -22,11 +22,12 @@ bool normalizeOpAliases(graph_node_list_iterator& iter) {
 
 // Normalize rsub such that `rsub(x,y) = sub(x,y)`
 bool normalizeRSub(graph_node_list_iterator& iter) {
-  ArrayRef<Value*> args = iter->inputs();
-  if (iter->kind() == aten::rsub) {
-    iter->replaceWithNewSymbol(aten::sub);
-    iter->replaceInput(0, args[1]);
-    iter->replaceInput(1, args[0]);
+  if (iter->matches(
+          "rsub.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor")) {
+    ArrayRef<Value*> args = iter->inputs();
+    Node* newSub = iter->replaceWithNewSymbol(aten::sub);
+    newSub->replaceInput(0, args[1]);
+    newSub->replaceInput(1, args[0]);
     iter.destroyCurrent();
     return true;
   }
