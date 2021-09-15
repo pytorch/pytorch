@@ -1,9 +1,9 @@
 import operator
+import re
 from typing import Dict, Set, List, Optional, Union
 
 import torch.fx
 from torch.fx.passes.split_module import split_module
-import re
 
 
 def _make_tuple(x):
@@ -109,6 +109,13 @@ def split_const_subgraphs(
 
     split = split_module(mod_traced, module, mod_partition)
 
+    # The module that a call_module node refers to gets copied to submodules during split.
+    # The path to the module also gets inlined, i.e. mod.a.b -> mod_a_b. Here we need to
+    # attach inlined modules to `mod_traced` as it's the owning module now.
+    for node in split.submod_1.graph.nodes:
+        if node.op == "call_module":
+            setattr(mod_traced, node.target, getattr(split.submod_1, node.target))
+
     # Gather all names that are output from the const folding subgraph, which we
     # will need to set dummy params on the module.
     const_output_names: List[str] = []
@@ -194,6 +201,7 @@ def split_const_subgraphs(
     # Now we have a mapping from const output names to the index they are passed
     # into submod_1, so swap in getattrs for placeholders.
     ph_idx = 0
+
     for node in split.submod_1.graph.nodes:
         if node.op != "placeholder":
             continue
@@ -218,7 +226,9 @@ def split_const_subgraphs(
                 torch.nn.Parameter(torch.randn(1)),
             )
         with split.submod_1.graph.inserting_before(node):
-            node.replace_all_uses_with(split.submod_1.graph.get_attr(const_output_name))
+            new_node = split.submod_1.graph.get_attr(const_output_name)
+            new_node.meta = node.meta.copy()
+            node.replace_all_uses_with(new_node)
         split.submod_1.graph.erase_node(node)
         ph_idx += 1
 
