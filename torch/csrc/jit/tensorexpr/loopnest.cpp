@@ -549,16 +549,15 @@ class FunctionInliner : public IRMutator {
       if (auto index_var = to<Var>(i)) {
         index_vars_.insert(index_var);
         producer_index_vars_.push_back(index_var);
-      } else if (intValue(i)) {
+      } else {
         // If the index can be a constant, then that dimension must have size 1
         // (since we don't support in-place writes). Resolves issue 52581.
-        if (*intValue(i) != 0) {
+        auto index_val = evalInt(i);
+        if (!index_val || *index_val != 0) {
           success_ = false;
+          break;
         }
         producer_index_vars_.push_back(nullptr);
-      } else {
-        // Cannot inline Buf with compound indices
-        success_ = false;
       }
     }
   }
