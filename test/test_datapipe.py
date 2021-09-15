@@ -38,7 +38,7 @@ import torch.utils.data.backward_compatibility
 import torch.utils.data.datapipes as dp
 import torch.utils.data.graph
 import torch.utils.data.sharding
-from torch.testing._internal.common_utils import TestCase, run_tests
+from torch.testing._internal.common_utils import TestCase, run_tests, suppress_warnings
 from torch.utils.data import (
     DataLoader,
     DataChunk,
@@ -64,6 +64,13 @@ try:
 except ImportError:
     HAS_DILL = False
 skipIfNoDill = skipIf(not HAS_DILL, "no dill")
+
+try:
+    import pandas  # type: ignore[import] # noqa: F401 F403
+    HAS_PANDAS = True
+except ImportError:
+    HAS_PANDAS = False
+skipIfNoDataFrames = skipIf(not HAS_PANDAS, "no dataframes (pandas)")
 
 T_co = TypeVar("T_co", covariant=True)
 
@@ -393,6 +400,64 @@ class TestIterableDataPipeBasic(TestCase):
         self.assertEqual(source_numbers, list(n))
 
 
+class TestDataFramesPipes(TestCase):
+    """
+        Most of test will fail if pandas instaled, but no dill available.
+        Need to rework them to avoid multiple skips.
+    """
+    def _get_datapipe(self, range=10, dataframe_size=7):
+        return NumbersDataset(range) \
+            .map(lambda i: (i, i % 3))
+
+    def _get_dataframes_pipe(self, range=10, dataframe_size=7):
+        return NumbersDataset(range) \
+            .map(lambda i: (i, i % 3)) \
+            ._to_dataframes_pipe(
+                columns=['i', 'j'],
+                dataframe_size=dataframe_size)
+
+    @skipIfNoDataFrames
+    @skipIfNoDill  # TODO(VitalyFedyunin): Decouple tests from dill by avoiding lambdas in map
+    def test_capture(self):
+        dp_numbers = self._get_datapipe().map(lambda x: (x[0], x[1], x[1] + 3 * x[0]))
+        df_numbers = self._get_dataframes_pipe()
+        df_numbers['k'] = df_numbers['j'] + df_numbers.i * 3
+        self.assertEqual(list(dp_numbers), list(df_numbers))
+
+    @skipIfNoDataFrames
+    @skipIfNoDill
+    def test_shuffle(self):
+        #  With non-zero (but extremely low) probability (when shuffle do nothing),
+        #  this test fails, so feel free to restart
+        df_numbers = self._get_dataframes_pipe(range=1000).shuffle()
+        dp_numbers = self._get_datapipe(range=1000)
+        df_result = [tuple(item) for item in df_numbers]
+        self.assertNotEqual(list(dp_numbers), df_result)
+        self.assertEqual(list(dp_numbers), sorted(df_result))
+
+    @skipIfNoDataFrames
+    @skipIfNoDill
+    def test_batch(self):
+        df_numbers = self._get_dataframes_pipe(range=100).batch(8)
+        df_numbers_list = list(df_numbers)
+        last_batch = df_numbers_list[-1]
+        self.assertEqual(4, len(last_batch))
+        unpacked_batch = [tuple(row) for row in last_batch]
+        self.assertEqual([(96, 0), (97, 1), (98, 2), (99, 0)], unpacked_batch)
+
+    @skipIfNoDataFrames
+    @skipIfNoDill
+    def test_unbatch(self):
+        df_numbers = self._get_dataframes_pipe(range=100).batch(8).batch(3)
+        dp_numbers = self._get_datapipe(range=100)
+        self.assertEqual(list(dp_numbers), list(df_numbers.unbatch(2)))
+
+    @skipIfNoDataFrames
+    @skipIfNoDill
+    def test_filter(self):
+        df_numbers = self._get_dataframes_pipe(range=10).filter(lambda x: x.i > 5)
+        self.assertEqual([(6, 0), (7, 1), (8, 2), (9, 0)], list(df_numbers))
+
 class FileLoggerSimpleHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
     def __init__(self, *args, logfile=None, **kwargs):
         self.__loggerHandle = None
@@ -633,6 +698,12 @@ class TestFunctionalIterDataPipe(TestCase):
     def test_fork_datapipe(self):
         input_dp = IDP(range(10))
 
+        with self.assertRaises(ValueError):
+            input_dp.fork(num_instances=0)
+
+        dp1 = input_dp.fork(num_instances=1)
+        self.assertEqual(dp1, input_dp)
+
         # Test Case: making sure all child DataPipe shares the same reference
         dp1, dp2, dp3 = input_dp.fork(num_instances=3)
         self.assertTrue(all(n1 is n2 and n1 is n3 for n1, n2, n3 in zip(dp1, dp2, dp3)))
@@ -661,7 +732,10 @@ class TestFunctionalIterDataPipe(TestCase):
             list(dp2)
 
         # Test Case: one child DataPipe yields all value first with unlimited buffer
-        dp1, dp2 = input_dp.fork(num_instances=2, buffer_size=-1)
+        with warnings.catch_warnings(record=True) as wa:
+            dp1, dp2 = input_dp.fork(num_instances=2, buffer_size=-1)
+            self.assertEqual(len(wa), 1)
+            self.assertRegex(str(wa[0].message), r"Unlimited buffer size is set")
         l1, l2 = list(dp1), list(dp2)
         for d1, d2 in zip(l1, l2):
             self.assertEqual(d1, d2)
@@ -739,9 +813,11 @@ class TestFunctionalIterDataPipe(TestCase):
         self.assertEqual(len(input_dp), len(dp2))
         self.assertEqual(len(input_dp), len(dp3))
 
-
     def test_demux_datapipe(self):
         input_dp = IDP(range(10))
+
+        with self.assertRaises(ValueError):
+            input_dp.demux(num_instances=0, classifier_fn=lambda x: 0)
 
         # Test Case: split into 2 DataPipes and output them one at a time
         dp1, dp2 = input_dp.demux(num_instances=2, classifier_fn=lambda x: x % 2)
@@ -771,7 +847,14 @@ class TestFunctionalIterDataPipe(TestCase):
         self.assertEqual(list(range(0, 5)), output2)
 
         # Test Case: values of the same classification are lumped together, and unlimited buffer
-        dp1, dp2 = input_dp.demux(num_instances=2, classifier_fn=lambda x: 0 if x >= 5 else 1, buffer_size=-1)
+        with warnings.catch_warnings(record=True) as wa:
+            dp1, dp2 = input_dp.demux(
+                num_instances=2,
+                classifier_fn=lambda x: 0 if x >= 5 else 1,
+                buffer_size=-1
+            )
+            self.assertEqual(len(wa), 1)
+            self.assertRegex(str(wa[0].message), r"Unlimited buffer size is set")
         output1, output2 = list(dp1), list(dp2)
         self.assertEqual(list(range(5, 10)), output1)
         self.assertEqual(list(range(0, 5)), output2)
@@ -853,7 +936,7 @@ class TestFunctionalIterDataPipe(TestCase):
         with self.assertRaises(TypeError):
             len(dp2)
 
-
+    @suppress_warnings  # Suppress warning for lambda fn
     def test_map_datapipe(self):
         input_dp = IDP(range(10))
 
@@ -878,11 +961,136 @@ class TestFunctionalIterDataPipe(TestCase):
             self.assertEqual(x, torch.tensor(y, dtype=torch.int).sum())
 
         input_dp_nl = IDP_NoLen(range(10))
-        map_dp_nl = input_dp_nl.map()
+        map_dp_nl = input_dp_nl.map(lambda x: x)
         with self.assertRaisesRegex(TypeError, r"instance doesn't have valid length$"):
             len(map_dp_nl)
         for x, y in zip(map_dp_nl, input_dp_nl):
             self.assertEqual(x, torch.tensor(y, dtype=torch.float))
+
+    @suppress_warnings  # Suppress warning for lambda fn
+    def test_map_tuple_list_with_col_datapipe(self):
+        def fn_11(d):
+            return -d
+
+        def fn_1n(d):
+            return -d, d
+
+        def fn_n1(d0, d1):
+            return d0 + d1
+
+        def fn_nn(d0, d1):
+            return -d0, -d1, d0 + d1
+
+        def _helper(ref_fn, fn, input_col=None, output_col=None):
+            for constr in (list, tuple):
+                datapipe = IDP([constr((0, 1, 2)), constr((3, 4, 5)), constr((6, 7, 8))])
+                res_dp = datapipe.map(fn, input_col, output_col)
+                ref_dp = datapipe.map(ref_fn)
+                self.assertEqual(list(res_dp), list(ref_dp))
+                # Reset
+                self.assertEqual(list(res_dp), list(ref_dp))
+
+        # Replacing with one input column and default output column
+        _helper(lambda data: (data[0], -data[1], data[2]), fn_11, 1)
+        _helper(lambda data: (data[0], (-data[1], data[1]), data[2]), fn_1n, 1)
+        # The index of input column is out of range
+        with self.assertRaises(IndexError):
+            _helper(None, fn_1n, 3)
+        # Unmatched input columns with fn arguments
+        with self.assertRaises(TypeError):
+            _helper(None, fn_n1, 1)
+        # Replacing with multiple input columns and default output column (the left-most input column)
+        _helper(lambda data: (data[1], data[2] + data[0]), fn_n1, [2, 0])
+        _helper(lambda data: (data[0], (-data[2], -data[1], data[2] + data[1])), fn_nn, [2, 1])
+
+        # output_col can only be specified when input_col is not None
+        with self.assertRaises(ValueError):
+            _helper(None, fn_n1, None, 1)
+        # output_col can only be single-element list or tuple
+        with self.assertRaises(ValueError):
+            _helper(None, fn_n1, None, [0, 1])
+        # Single-element list as output_col
+        _helper(lambda data: (-data[1], data[1], data[2]), fn_11, 1, [0])
+        # Replacing with one input column and single specified output column
+        _helper(lambda data: (-data[1], data[1], data[2]), fn_11, 1, 0)
+        _helper(lambda data: (data[0], data[1], (-data[1], data[1])), fn_1n, 1, 2)
+        # The index of output column is out of range
+        with self.assertRaises(IndexError):
+            _helper(None, fn_1n, 1, 3)
+        _helper(lambda data: (data[0], data[0] + data[2], data[2]), fn_n1, [0, 2], 1)
+        _helper(lambda data: ((-data[1], -data[2], data[1] + data[2]), data[1], data[2]), fn_nn, [1, 2], 0)
+
+        # Appending the output at the end
+        _helper(lambda data: (*data, -data[1]), fn_11, 1, -1)
+        _helper(lambda data: (*data, (-data[1], data[1])), fn_1n, 1, -1)
+        _helper(lambda data: (*data, data[0] + data[2]), fn_n1, [0, 2], -1)
+        _helper(lambda data: (*data, (-data[1], -data[2], data[1] + data[2])), fn_nn, [1, 2], -1)
+
+    @suppress_warnings  # Suppress warning for lambda fn
+    def test_map_dict_with_col_datapipe(self):
+        def fn_11(d):
+            return -d
+
+        def fn_1n(d):
+            return -d, d
+
+        def fn_n1(d0, d1):
+            return d0 + d1
+
+        def fn_nn(d0, d1):
+            return -d0, -d1, d0 + d1
+
+        # Prevent modification in-place to support resetting
+        def _dict_update(data, newdata, remove_idx=None):
+            _data = dict(data)
+            _data.update(newdata)
+            if remove_idx:
+                for idx in remove_idx:
+                    del _data[idx]
+            return _data
+
+        def _helper(ref_fn, fn, input_col=None, output_col=None):
+            datapipe = IDP([{"x": 0, "y": 1, "z": 2},
+                            {"x": 3, "y": 4, "z": 5},
+                            {"x": 6, "y": 7, "z": 8}])
+            res_dp = datapipe.map(fn, input_col, output_col)
+            ref_dp = datapipe.map(ref_fn)
+            self.assertEqual(list(res_dp), list(ref_dp))
+            # Reset
+            self.assertEqual(list(res_dp), list(ref_dp))
+
+        # Replacing with one input column and default output column
+        _helper(lambda data: _dict_update(data, {"y": -data["y"]}), fn_11, "y")
+        _helper(lambda data: _dict_update(data, {"y": (-data["y"], data["y"])}), fn_1n, "y")
+        # The key of input column is not in dict
+        with self.assertRaises(KeyError):
+            _helper(None, fn_1n, "a")
+        # Unmatched input columns with fn arguments
+        with self.assertRaises(TypeError):
+            _helper(None, fn_n1, "y")
+        # Replacing with multiple input columns and default output column (the left-most input column)
+        _helper(lambda data: _dict_update(data, {"z": data["x"] + data["z"]}, ["x"]), fn_n1, ["z", "x"])
+        _helper(lambda data: _dict_update(data, {"z": (-data["z"], -data["y"], data["y"] + data["z"])}, ["y"]), fn_nn, ["z", "y"])
+
+        # output_col can only be specified when input_col is not None
+        with self.assertRaises(ValueError):
+            _helper(None, fn_n1, None, "x")
+        # output_col can only be single-element list or tuple
+        with self.assertRaises(ValueError):
+            _helper(None, fn_n1, None, ["x", "y"])
+        # Single-element list as output_col
+        _helper(lambda data: _dict_update(data, {"x": -data["y"]}), fn_11, "y", ["x"])
+        # Replacing with one input column and single specified output column
+        _helper(lambda data: _dict_update(data, {"x": -data["y"]}), fn_11, "y", "x")
+        _helper(lambda data: _dict_update(data, {"z": (-data["y"], data["y"])}), fn_1n, "y", "z")
+        _helper(lambda data: _dict_update(data, {"y": data["x"] + data["z"]}), fn_n1, ["x", "z"], "y")
+        _helper(lambda data: _dict_update(data, {"x": (-data["y"], -data["z"], data["y"] + data["z"])}), fn_nn, ["y", "z"], "x")
+
+        # Adding new key to dict for the output
+        _helper(lambda data: _dict_update(data, {"a": -data["y"]}), fn_11, "y", "a")
+        _helper(lambda data: _dict_update(data, {"a": (-data["y"], data["y"])}), fn_1n, "y", "a")
+        _helper(lambda data: _dict_update(data, {"a": data["x"] + data["z"]}), fn_n1, ["x", "z"], "a")
+        _helper(lambda data: _dict_update(data, {"a": (-data["y"], -data["z"], data["y"] + data["z"])}), fn_nn, ["y", "z"], "a")
 
     # TODO(VitalyFedyunin): If dill installed this test fails
     def _test_map_datapipe_nested_level(self):
