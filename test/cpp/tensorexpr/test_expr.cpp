@@ -60,8 +60,8 @@ TEST(Expr, LetTest02) {
 }
 
 TEST(Expr, LetStmtTest01) {
-  Placeholder a_buf("a", kFloat, {1});
-  Placeholder b_buf("b", kFloat, {1});
+  BufHandle a_buf("a", {1}, kFloat);
+  BufHandle b_buf("b", {1}, kFloat);
 
   ExprHandle load_a = a_buf.load(0);
   VarHandle var = VarHandle("v", kFloat);
@@ -157,9 +157,9 @@ TEST(Expr, VectorAdd01) {
   const int kVectorCount = 128;
   const int kTotalSize = kVectorSize * kVectorCount;
 
-  Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
-  Placeholder b_buf(BufHandle("B", {ExprHandle(kTotalSize)}, kFloat));
-  Placeholder c_buf(BufHandle("C", {ExprHandle(kTotalSize)}, kFloat));
+  BufHandle a_buf("A", {kTotalSize}, kFloat);
+  BufHandle b_buf("B", {kTotalSize}, kFloat);
+  BufHandle c_buf("C", {kTotalSize}, kFloat);
 
   /*
   Build the following:
@@ -199,9 +199,9 @@ TEST(Expr, VectorAdd01) {
 
 TEST(Expr, CompareSelectEQ) {
   constexpr int N = 1024;
-  Placeholder a(BufHandle("A", {N}, kInt));
-  Placeholder b(BufHandle("B", {N}, kInt));
-  Placeholder c(BufHandle("C", {N}, kInt));
+  BufHandle a("A", {N}, kInt);
+  BufHandle b("B", {N}, kInt);
+  BufHandle c("C", {N}, kInt);
   std::vector<int> a_buffer(N, 1);
   std::vector<int> b_buffer(N, 1);
   std::vector<int> c_buffer(N, 0);
@@ -237,9 +237,9 @@ TEST(Expr, CompareSelectDtypes) {
   // different from the output dtype and verifies that it works correctly:
   //   result = ((int)lhs == (int)rhs) ? (float)retval1 : (float)retval2
   constexpr int N = 1024;
-  Placeholder a(BufHandle("A", {N}, kInt));
-  Placeholder b(BufHandle("B", {N}, kInt));
-  Placeholder c(BufHandle("C", {N}, kFloat));
+  BufHandle a("A", {N}, kInt);
+  BufHandle b("B", {N}, kInt);
+  BufHandle c("C", {N}, kFloat);
   std::vector<int> a_buffer(N, 1);
   std::vector<int> b_buffer(N, 1);
   std::vector<float> c_buffer(N, 0.0f);
@@ -275,8 +275,8 @@ TEST(Expr, CompareSelectDtypes) {
 
 TEST(Expr, IntrinsicsDtypes) {
   constexpr int N = 256;
-  Placeholder a(BufHandle("A", {N}, kDouble));
-  Placeholder b(BufHandle("B", {N}, kDouble));
+  BufHandle a("A", {N}, kDouble);
+  BufHandle b("B", {N}, kDouble);
   std::vector<double> a_buffer(N, -10.0);
   std::vector<double> b_buffer(N, 0.0);
   std::vector<double> b_ref(N, 10.0);
@@ -539,9 +539,9 @@ TEST(Expr, BitwiseOps) {
 TEST(Expr, DynamicShapeAdd) {
   auto testWithSize = [](int32_t size) {
     VarHandle n("n", kInt);
-    Placeholder a(BufHandle("a", {n}, kFloat));
-    Placeholder b(BufHandle("b", {n}, kFloat));
-    Placeholder c(BufHandle("c", {n}, kFloat));
+    BufHandle a("a", {n}, kFloat);
+    BufHandle b("b", {n}, kFloat);
+    BufHandle c("c", {n}, kFloat);
     VarHandle i("i", kInt);
     StmtPtr s = For::make(i, 0, n, c.store({i}, a.load(i) + b.load(i)));
     std::vector<float> aData(size, 1.0f);
@@ -558,7 +558,7 @@ TEST(Expr, DynamicShapeAdd) {
 void testCond01() {
   const int N = 16;
   PaddedBuffer<float> a_v(N);
-  Placeholder a_buf("a", kFloat, {N});
+  BufHandle a_buf("a", {N}, kFloat);
   VarHandle index = VarHandle("index", kInt);
   StmtPtr assign_x2 = a_buf.store({index}, cast<float>(index) * 2);
   StmtPtr assign_x3 = a_buf.store({index}, cast<float>(index) * 3);
@@ -615,7 +615,7 @@ void testIfThenElse03() {
 void testStmtClone() {
   const int N = 16;
 
-  Placeholder a_buf("a", kInt, {N});
+  BufHandle a_buf("a", {N}, kInt);
   VarHandle index = VarHandle("index", kInt);
   StmtPtr body = a_buf.store({index}, 5);
   StmtPtr loop = For::make(index, 0, N, body);
