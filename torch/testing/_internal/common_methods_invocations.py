@@ -758,6 +758,12 @@ class OpInfo(object):
         return (supported if self._default_test_dtypes is None
                 else supported.intersection(self._default_test_dtypes))
 
+    @property
+    def formatted_name(self):
+        """Returns a formatted full name for this OpInfo that can be used in test names."""
+        variant = '_' + self.variant_test_name if self.variant_test_name else ''
+        return '{}{}'.format(self.name.replace('.', '_'), variant)
+
 
 def _generate_reduction_inputs(device, dtype, requires_grad):
     """Generates input tensors for testing reduction operators"""
