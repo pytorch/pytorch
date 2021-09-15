@@ -266,7 +266,7 @@ class CreateBufferMap : public IRVisitor {
       auto add_node = to<Add>(v->value());
       auto mul_node = to<Mul>(v->value());
       // This means for now, v->value() can be Add or Mul
-      TORCH_INTERNAL_ASSERT((add_node || mul_node));
+      TORCH_INTERNAL_ASSERT(add_node || mul_node, buildErrorMessage());
       map_input_to_tensor_bufs_.emplace(v->buf()->name_hint(), v->buf());
     }
     v->value()->accept(this);
