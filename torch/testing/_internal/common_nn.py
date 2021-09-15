@@ -1314,7 +1314,7 @@ def single_batch_reference_fn(input, parameters, module):
     with freeze_rng_state():
         if isinstance(single_batch_input, torch.Tensor):
             return module(single_batch_input).squeeze(0)
-        else: # if multiple inputs (list or tuple)
+        elif isinstance(single_batch_input, (list, tuple)):
             return module(*single_batch_input).squeeze(0)
 
 
