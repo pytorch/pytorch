@@ -63,7 +63,7 @@ def build_int8_trt_implicit_quant(rn18):
     prepared = prepare_fx(rn18, {"": qconfig})
     for _ in range(10):
         prepared(data)
-    quantized_rn18 = convert_fx(prepared, is_reference=True)
+    quantized_rn18 = convert_fx(prepared)
     ref_res = quantized_rn18(data)
 
     # Build trt int8 model
@@ -74,7 +74,7 @@ def build_int8_trt_implicit_quant(rn18):
     engine, input_names, output_names = interp.run(fp16_mode=False, int8_mode=True, strict_type_constraints=True)
     trt_mod = TRTModule(engine, input_names, output_names)
     trt_res = trt_mod(data.cuda())
-    print("result equal?", torch.equal(ref_res, trt_res))
+    print("result equal?", torch.equal(ref_res, trt_res.cpu()))
     return trt_mod
 
 class M(torch.nn.Module):
@@ -95,7 +95,7 @@ class M(torch.nn.Module):
 # rn18 = M().eval()
 # rn18 = rn18.layer1
 int8_trt = build_int8_trt(rn18)
-# implicit_int8_trt = build_int8_trt_implicit_quant(rn18)
+implicit_int8_trt = build_int8_trt_implicit_quant(rn18)
 fp16_trt = build_fp16_trt(rn18)
 x = torch.randn(5, 3, 224, 224, device="cuda")
 # x = torch.randn(1, 32, device="cuda")
@@ -118,12 +118,12 @@ for _ in range(NITER):
     torch.cuda.synchronize()
 print('trt int8 time (ms/iter)', (time.time() - s) / NITER * 1000)
 
-# torch.cuda.synchronize()
-# s = time.time()
-# for _ in range(NITER):
-#     implicit_int8_trt(x)
-#     torch.cuda.synchronize()
-# print('trt implicit int8 time (ms/iter)', (time.time() - s) / NITER * 1000)
+torch.cuda.synchronize()
+s = time.time()
+for _ in range(NITER):
+    implicit_int8_trt(x)
+    torch.cuda.synchronize()
+print('trt implicit int8 time (ms/iter)', (time.time() - s) / NITER * 1000)
 
 torch.cuda.synchronize()
 s = time.time()
