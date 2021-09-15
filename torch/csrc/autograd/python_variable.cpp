@@ -64,6 +64,17 @@ void concrete_decref_fn(const c10::impl::PyInterpreter* self, PyObject* pyobj) {
     return;
 
   pybind11::gil_scoped_acquire gil;
+
+  // Uncommenting out the following line makes the error go away.
+  // The implication that a Python error was set BEFORE PyObject_IsInstance
+  // was called, so there is bug somewhere before this function
+  // (concrete_decref_fn) gets called.
+  // PyErr_PrintEx(0);
+
+  // The following assert fails
+  auto is_tensor = PyObject_IsInstance(pyobj, THPVariableClass);
+  TORCH_INTERNAL_ASSERT(is_tensor == 0 || is_tensor == 1);
+
   if (Py_REFCNT(pyobj) > 1) {
     // It's still alive!  This can happen if a weak ref resurrected
     // the PyObject without flipping ownership.  At this point it is
