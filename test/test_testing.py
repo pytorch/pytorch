@@ -19,12 +19,13 @@ from torch.testing._internal.common_device_type import \
      deviceCountAtLeast)
 from torch.testing._internal.common_methods_invocations import op_db
 import torch.testing._internal.opinfo_helper as opinfo_helper
+from torch.testing._internal.common_dtype import get_all_dtypes
 
 # For testing TestCase methods and torch.testing functions
 class TestTesting(TestCase):
     # Ensure that assertEqual handles numpy arrays properly
-    @dtypes(*(torch.testing.get_all_dtypes(include_half=True, include_bfloat16=False,
-                                           include_bool=True, include_complex=True)))
+    @dtypes(*(get_all_dtypes(include_half=True, include_bfloat16=False,
+                             include_bool=True, include_complex=True)))
     def test_assertEqual_numpy(self, device, dtype):
         S = 10
         test_sizes = [
