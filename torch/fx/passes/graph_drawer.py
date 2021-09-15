@@ -7,6 +7,7 @@ import pydot
 from typing import Dict, Any
 from torch.fx.node import _get_qualified_name
 from torch.fx.passes.shape_prop import TensorMetadata
+from torch.fx._compatibility import compatibility
 
 _COLOR_MAP = {
     "placeholder": '"AliceBlue"',
@@ -43,6 +44,7 @@ _WEIGHT_TEMPLATE = {
 }
 
 
+@compatibility(is_backward_compatible=False)
 class FxGraphDrawer:
     """
     Visualize a torch.fx.Graph with graphviz
