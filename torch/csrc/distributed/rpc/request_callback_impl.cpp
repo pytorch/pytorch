@@ -48,7 +48,7 @@ std::unique_ptr<RpcCommandBase> deserializePythonRpcCommandReference(
     case MessageType::PYTHON_CALL: {
       auto& pc = static_cast<PythonCall&>(rpc);
       return std::make_unique<UnpickledPythonCall>(
-          pc.serializedPyObj(), pc.deviceMap(), pc.isAsyncExecution());
+          pc.serializedPyObj(), std::move(pc).moveDeviceMap(), pc.isAsyncExecution());
     }
     case MessageType::PYTHON_REMOTE_CALL: {
       auto& prc = static_cast<PythonRemoteCall&>(rpc);
@@ -56,7 +56,7 @@ std::unique_ptr<RpcCommandBase> deserializePythonRpcCommandReference(
           prc.serializedPyObj(),
           prc.retRRefId(),
           prc.retForkId(),
-          prc.deviceMap(),
+          std::move(prc).moveDeviceMap(),
           prc.isAsyncExecution());
     }
     case MessageType::FORWARD_AUTOGRAD_REQ: {

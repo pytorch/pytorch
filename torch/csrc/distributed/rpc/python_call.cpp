@@ -70,10 +70,6 @@ const SerializedPyObj& PythonCall::serializedPyObj() const {
   return serializedPyObj_;
 }
 
-const DeviceMap& PythonCall::deviceMap() const {
-  return deviceMap_;
-}
-
 } // namespace rpc
 } // namespace distributed
 } // namespace torch

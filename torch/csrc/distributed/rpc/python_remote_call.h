@@ -35,8 +35,8 @@ class TORCH_API PythonRemoteCall : public RpcCommandBase {
     return isAsyncExecution_;
   }
 
-  inline const DeviceMap& deviceMap() const {
-    return deviceMap_;
+  DeviceMap&& moveDeviceMap() && {
+    return std::move(deviceMap_);
   }
 
   c10::intrusive_ptr<Message> toMessageImpl() && override;

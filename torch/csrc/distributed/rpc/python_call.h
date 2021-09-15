@@ -22,7 +22,9 @@ class TORCH_API PythonCall final : public RpcCommandBase {
     return isAsyncExecution_;
   }
 
-  const DeviceMap& deviceMap() const;
+  DeviceMap&& moveDeviceMap() && {
+    return std::move(deviceMap_);
+  }
 
  private:
   SerializedPyObj serializedPyObj_;

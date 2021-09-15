@@ -266,7 +266,7 @@ RegisterOperators reg_rpc_ops(
          },
          aliasAnalysisConservative()),
      Operator(
-         prim::rpc_sync, // 156???
+         prim::rpc_sync,
          [](const Node* node) -> Operation {
            int num_inputs = node->inputs().size();
            return [num_inputs](Stack& stack) {

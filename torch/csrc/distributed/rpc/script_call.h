@@ -69,7 +69,7 @@ class TORCH_API ScriptCall : public RpcCommandBase {
   c10::optional<const c10::QualifiedName> qualifiedName_;
   std::vector<at::IValue> stack_;
   const bool isAsyncExecution_;
-protected:
+ protected:
   DeviceMap deviceMap_;
 };
 
