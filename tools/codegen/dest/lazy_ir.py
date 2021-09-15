@@ -19,6 +19,7 @@ from tools.codegen.api.types import (BaseTy, BaseCppType, BaseCType, OptionalCTy
                                      Expr, MutRefCType, kernel_signature,
                                      DispatcherSignature, VectorCType, intT, ListCType,
                                      scalarT, scalarTypeT)
+import tools.codegen.api.dispatcher as dispatcher
 import tools.codegen.api.meta as meta
 import tools.codegen.api.cpp as cpp
 import tools.codegen.api.structured as structured
@@ -351,8 +352,8 @@ def gen_lazy_shape_dtype_decl(f: NativeFunction, backend_index: BackendIndex, co
     # Only generate shape/dtype fn for non-structured kernels,
     # since we just use the meta function for structured kernels
     if not f.structured and f.structured_delegate is None:
-        return "\n".join([f"std::vector<int64_t> compute_shape_{metadata.kernel}({', '.join([a.decl() for a in shapeFn.arguments()])});",
-                f"c10::ScalarType compute_dtype_{metadata.kernel}({', '.join([a.decl() for a in dtypeFn.arguments()])});"])
+        return "\n".join([f"std::vector<int64_t> compute_shape_{metadata.kernel}({', '.join([a.decl() for a in dispatcher.arguments(f.func)])});",
+                f"c10::ScalarType compute_dtype_{metadata.kernel}({', '.join([a.decl() for a in dispatcher.arguments(f.func)])});"])
     else:
         return None
 

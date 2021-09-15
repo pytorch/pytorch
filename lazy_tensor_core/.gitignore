@@ -19,7 +19,7 @@ lazy_tensor_core/csrc/ts_backend/LazyNativeFunctions.h
 lazy_tensor_core/csrc/ts_backend/LazyShapeDtype.h
 lazy_tensor_core/csrc/ts_backend/RegisterAutogradLazy.cpp
 lazy_tensor_core/csrc/ts_backend/RegisterLazy.cpp
-lazy_tensor_core/csrc/ts_backend/TSLowering.cpp
+lazy_tensor_core/csrc/ts_backend/LazyTsLowering.cpp
 
 
 # BEGIN NOT-CLEAN-FILES (setup.py handles this marker. Do not change.)

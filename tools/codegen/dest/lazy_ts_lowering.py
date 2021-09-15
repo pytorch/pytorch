@@ -40,7 +40,7 @@ def separate_args_kwargs_types(func: FunctionSchema) -> Tuple[List[NamedCType], 
     return types, positional_values, positional_scalars, kw_values, kw_scalars
 
 @dataclass(frozen=True)
-class TsLowering:
+class LazyTsLowering:
     backend_index: BackendIndex
 
     # Names of operators we want to codegen for, a subset of backend_index
@@ -69,13 +69,13 @@ class TsLowering:
         # and we use the functional version not out/inplace.
         func = f.functional.func if isinstance(f, NativeFunctionsGroup) else f.func
 
-        if self.target == TsLowering.TsLoweringTarget.DISPATCH:
+        if self.target == LazyTsLowering.TsLoweringTarget.DISPATCH:
             return [f"""\
 case at::aten::{func.name}:
     return Lower{ir_node_name(func)}(function, loctx, ir::NodeCast<ir::ops::{ir_node_name(func)}>(node, ir::OpKind(at::aten::{func.name})));
 """, ]
 
-        elif self.target == TsLowering.TsLoweringTarget.LOWERING:
+        elif self.target == LazyTsLowering.TsLoweringTarget.LOWERING:
             schema = update_schema_for_lazy_ir(func)
             types, positional_values, positional_scalars, kw_values, kw_scalars = separate_args_kwargs_types(schema)
             emplace_arg_values = [f'loctx->GetOutputOp(node->operand({i}))' for i in range(len(positional_values))]

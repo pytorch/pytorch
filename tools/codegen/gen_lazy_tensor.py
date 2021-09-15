@@ -349,7 +349,7 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
         if gen_ts_lowerings:
             # and TorchScript Lowerings for the IR nodes
             for dispatch_key in [backend_dispatch_key]:  # , autograd_dispatch_key
-                fm.write_with_template(f'TSLowering.cpp', 'TSLowering.cpp', lambda: {
+                fm.write_with_template(f'LazyTsLowering.cpp', 'LazyTsLowering.cpp', lambda: {
                     'ts_lowering_sysinc': [f'#include <{path}>' for path in [
                         "vector",
                     ]],
@@ -362,17 +362,17 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
                     ]],
                     'backend_namespace': dispatch_key.lower(),  # TODO this is not designed yet
                     'lowering_dispatches': list(concatMap(
-                        dest.TsLowering(
+                        dest.LazyTsLowering(
                             backend_indices[dispatch_key],
                             codegen,
-                            dest.TsLowering.TsLoweringTarget.DISPATCH),
+                            dest.LazyTsLowering.TsLoweringTarget.DISPATCH),
                         grouped_native_functions
                     )),
                     'lowering_definitions': list(concatMap(
-                        dest.TsLowering(
+                        dest.LazyTsLowering(
                             backend_indices[dispatch_key],
                             codegen,
-                            dest.TsLowering.TsLoweringTarget.LOWERING),
+                            dest.LazyTsLowering.TsLoweringTarget.LOWERING),
                         grouped_native_functions
                     )),
                 })
