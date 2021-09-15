@@ -217,7 +217,7 @@ def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=Fa
     return graph
 
 
-# We accept dictionnaries and strings as ONNX inputs,
+# We accept dictionaries and strings as ONNX inputs,
 # but they should be only for configuration use.
 # we detect here if these inputs are modified, and if so
 # we warn the user that the changes won't take effect in the
@@ -226,7 +226,7 @@ def warn_on_static_input_change(input_states):
     for input, traced_input in zip(input_states[0], input_states[1]):
         if isinstance(input, dict):
             if list(input.keys()) != list(traced_input.keys()):
-                warning = "We detected that you are modifying a dictionnary that is an input to your " \
+                warning = "We detected that you are modifying a dictionary that is an input to your " \
                           "model. " \
                           "Note that dictionaries are allowed as inputs in ONNX but they should be " \
                           "handled with care. " \
@@ -439,8 +439,7 @@ def _model_to_graph(model, args, verbose=False,
                     example_outputs=None,
                     _retain_param_name=False, do_constant_folding=True,
                     _disable_torch_constant_prop=False, fixed_batch_size=False,
-                    training=None, dynamic_axes=None, export_params=True,
-                    keep_initializers_as_inputs=False):
+                    training=None, dynamic_axes=None):
     r"""Converts model into an ONNX graph.
 
     Returns:
@@ -499,12 +498,10 @@ def _model_to_graph(model, args, verbose=False,
 
     params_dict = _get_named_param_dict(graph, params)
 
-    allow_adjust_graph_inputs = (export_params and not keep_initializers_as_inputs)
-    if (training is None or training == TrainingMode.EVAL):
-        params_dict = torch._C._jit_pass_onnx_eval_peephole(graph, params_dict, allow_adjust_graph_inputs)
+    if training is None or training == TrainingMode.EVAL:
+        params_dict = torch._C._jit_pass_onnx_eval_peephole(graph, params_dict)
 
-    if do_constant_folding and allow_adjust_graph_inputs and \
-            _export_onnx_opset_version in torch.onnx.constant_folding_opset_versions:
+    if do_constant_folding and _export_onnx_opset_version in torch.onnx.constant_folding_opset_versions:
         params_dict = torch._C._jit_pass_onnx_constant_fold(graph, params_dict,
                                                             _export_onnx_opset_version)
         torch._C._jit_pass_dce_allow_deleting_nodes_with_side_effects(graph)
@@ -572,9 +569,7 @@ def _export_to_pretty_string(model, args, f, export_params=True, verbose=False, 
                                                         output_names, operator_export_type,
                                                         example_outputs, _retain_param_name,
                                                         val_do_constant_folding, fixed_batch_size=fixed_batch_size,
-                                                        training=training,
-                                                        export_params=export_params,
-                                                        keep_initializers_as_inputs=val_keep_init_as_ip)
+                                                        training=training)
 
         return graph._pretty_print_onnx(params_dict, opset_version, False,
                                         operator_export_type, google_printer,
@@ -690,9 +685,7 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
                                 val_do_constant_folding,
                                 fixed_batch_size=fixed_batch_size,
                                 training=training,
-                                dynamic_axes=dynamic_axes,
-                                export_params=export_params,
-                                keep_initializers_as_inputs=val_keep_init_as_ip)
+                                dynamic_axes=dynamic_axes)
 
             # TODO: Don't allocate a in-memory string for the protobuf
             defer_weight_export = export_type is not ExportTypes.PROTOBUF_FILE

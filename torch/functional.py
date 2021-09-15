@@ -569,7 +569,8 @@ def istft(input: Tensor, n_fft: int, hop_length: Optional[int] = None,
 
     Since :func:`~torch.stft` discards elements at the end of the signal if they do not fit in a frame,
     ``istft`` may return a shorter signal than the original signal (can occur if :attr:`center` is False
-    since the signal isn't padded).
+    since the signal isn't padded). If `length` is given in the arguments and is longer than expected,
+    ``istft`` will pad zeros to the end of the returned signal.
 
     If :attr:`center` is ``True``, then there will be padding e.g. ``'constant'``, ``'reflect'``, etc.
     Left padding can be trimmed off exactly because they can be calculated but right padding cannot be
@@ -626,9 +627,6 @@ def istft(input: Tensor, n_fft: int, hop_length: Optional[int] = None,
 
     return _VF.istft(input, n_fft, hop_length, win_length, window, center,  # type: ignore[attr-defined]
                      normalized, onesided, length, return_complex)
-
-
-del torch.unique_dim
 
 
 if TYPE_CHECKING:

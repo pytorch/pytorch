@@ -231,7 +231,7 @@ class LLVMCodeGenImpl : public IRVisitor {
   void visit(CompareSelectPtr v) override;
 
 #define IMM_VISIT_DECLARE(_1, Name) void visit(Name##ImmPtr v) override;
-  AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, IMM_VISIT_DECLARE);
+  AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, IMM_VISIT_DECLARE);
 #undef IMM_VISIT_DECLARE
 
   void visit(CastPtr v) override;
@@ -275,17 +275,17 @@ class LLVMCodeGenImpl : public IRVisitor {
 };
 
 extern "C" {
-typedef void (*ParallelCallee)(int index, int8_t* packed_data);
+typedef void (*ParallelCallee)(int64_t index, int8_t* packed_data);
 void DispatchParallel(
     int8_t* func,
-    int start,
-    int stop,
+    int64_t start,
+    int64_t stop,
     int8_t* packed_data) noexcept {
   // TODO: preserve the func type.
   try {
     ParallelCallee callee = reinterpret_cast<ParallelCallee>(func);
     at::parallel_for(start, stop, 1, [&](int64_t f_begin, int64_t f_end) {
-      for (int index = f_begin; index < f_end; index++) {
+      for (int64_t index = f_begin; index < f_end; index++) {
         callee(index, packed_data);
       }
     });
@@ -537,10 +537,6 @@ void LLVMCodeGenImpl::emitKernel(
 
   irb_.CreateRet(value_);
 
-  if (llvm::verifyFunction(*fn_, &llvm::outs())) {
-    throw std::runtime_error("Function verification failed");
-  }
-
   // print graph debug info before optimization
   llvm::SmallVector<char, 0> asmBuffer;
   llvm::raw_svector_ostream asmStream(asmBuffer);
@@ -549,6 +545,10 @@ void LLVMCodeGenImpl::emitKernel(
   }
   GRAPH_DEBUG(
       "\nLLVM module before optimizations\n\n", asmStream.str().str(), "\n");
+
+  if (llvm::verifyFunction(*fn_, &llvm::outs())) {
+    throw std::runtime_error("Function verification failed");
+  }
 
   optimize(*module_);
 
@@ -902,6 +902,12 @@ void LLVMCodeGenImpl::visit(HalfImmPtr v) {
   value_ = llvm::ConstantFP::get(HalfTy_, v->value());
 }
 
+void LLVMCodeGenImpl::visit(BFloat16ImmPtr v) {
+  TORCH_INTERNAL_ASSERT(
+      false,
+      buildErrorMessage("Fuser's LLVM codegen does not support bfloat16"));
+}
+
 void LLVMCodeGenImpl::visit(BoolImmPtr v) {
   value_ = llvm::ConstantInt::get(BoolTy_, v->value());
 }
@@ -928,6 +934,9 @@ void LLVMCodeGenImpl::visit(CastPtr v) {
 
   bool destUnsigned = v->dtype().scalar_type() == ScalarType::Byte ||
       v->dtype().scalar_type() == ScalarType::Bool;
+  bool srcUnsigned =
+      v->src_value()->dtype().scalar_type() == ScalarType::Byte ||
+      v->src_value()->dtype().scalar_type() == ScalarType::Bool;
 
   // Scalar casts
   if (srcType->isFPOrFPVectorTy()) {
@@ -967,7 +976,7 @@ void LLVMCodeGenImpl::visit(CastPtr v) {
     throw unimplemented_lowering(v);
   }
   if (dstType->isFPOrFPVectorTy()) {
-    if (destUnsigned) {
+    if (srcUnsigned) {
       value_ = irb_.CreateUIToFP(value_, dstType);
     } else {
       value_ = irb_.CreateSIToFP(value_, dstType);
@@ -1144,8 +1153,8 @@ void LLVMCodeGenImpl::visit(LoadPtr v) {
   // Handle the case where the load is contiguous and unmasked efficiently
   auto idx_ramp = to<Ramp>(v->flat_index());
   if (idx_ramp) {
-    auto stride_imm = to<IntImm>(idx_ramp->stride());
-    if (stride_imm && stride_imm->value() == 1) {
+    auto stride_imm = intValue(idx_ramp->stride());
+    if (stride_imm && *stride_imm == 1) {
       v->base_handle()->accept(this);
       auto base = this->value_;
       idx_ramp->base()->accept(this);
@@ -1256,7 +1265,7 @@ void LLVMCodeGenImpl::processParallelFor(ForPtr v) {
 
   // Create the new body closure code.
   auto func_type =
-      llvm::FunctionType::get(VoidTy_, {IntTy_, Int8PtrTy_}, false);
+      llvm::FunctionType::get(VoidTy_, {LongTy_, Int8PtrTy_}, false);
   llvm::Function* func = llvm::Function::Create(
       func_type, llvm::Function::PrivateLinkage, "func", module_.get());
   auto func_body = llvm::BasicBlock::Create(getContext(), "func_body", func);
@@ -1268,6 +1277,10 @@ void LLVMCodeGenImpl::processParallelFor(ForPtr v) {
       packed_func_args_raw, packed_caller_args->getType());
 
   // Unpack the arguments from the opaque buffer.
+  if (v->var()->dtype().scalar_type() != c10::kLong) {
+    index = irb_.CreateIntCast(
+        index, dtypeToLLVM(v->var()->dtype()), v->var()->dtype().is_signed());
+  }
   body_closure_args = unpackFuncArgs(packed_func_args, body_arg_vars.size());
   // Set the codegen to the new func.
   // TODO: this should be replaced by RAII wrappers.
@@ -1290,12 +1303,14 @@ void LLVMCodeGenImpl::processParallelFor(ForPtr v) {
       irb_.CreatePointerCast(packed_caller_args, Int8PtrTy_);
   llvm::Value* func_value = irb_.CreatePointerCast(func, Int8PtrTy_);
   llvm::FunctionType* dispatcher_fntype = llvm::FunctionType::get(
-      VoidTy_, {Int8PtrTy_, IntTy_, IntTy_, Int8PtrTy_}, false);
+      VoidTy_, {Int8PtrTy_, LongTy_, LongTy_, Int8PtrTy_}, false);
   FunctionCallee dispatcher_callee =
       module_->getOrInsertFunction("DispatchParallel", dispatcher_fntype);
   llvm::Function* dispatcher =
       llvm::cast<llvm::Function>(dispatcher_callee.getCallee());
   dispatcher->addFnAttr(llvm::Attribute::NoUnwind);
+  start = irb_.CreateIntCast(start, LongTy_, true);
+  stop = irb_.CreateIntCast(stop, LongTy_, true);
   irb_.CreateCall(
       dispatcher, {func_value, start, stop, packed_caller_args_ptr});
   value_ = llvm::ConstantInt::get(IntTy_, 0);
@@ -1320,7 +1335,7 @@ void LLVMCodeGenImpl::visit(ForPtr v) {
   irb_.SetInsertPoint(condBlock);
 
   // Set up phi node for index variable.
-  auto idx = irb_.CreatePHI(IntTy_, 2);
+  auto idx = irb_.CreatePHI(start->getType(), 2);
   idx->addIncoming(start, preheader);
   if (!varToVal_.count(v->var())) {
     varToVal_.emplace(v->var(), idx);
@@ -1345,7 +1360,8 @@ void LLVMCodeGenImpl::visit(ForPtr v) {
   body = irb_.GetInsertBlock();
 
   // Increment the index variable and branch back to loop test.
-  auto inc = irb_.CreateAdd(idx, llvm::ConstantInt::getSigned(IntTy_, 1));
+  auto inc =
+      irb_.CreateAdd(idx, llvm::ConstantInt::getSigned(start->getType(), 1));
   irb_.CreateBr(condBlock);
   idx->addIncoming(inc, body);
 
@@ -1430,8 +1446,8 @@ void LLVMCodeGenImpl::visit(StorePtr v) {
   // Handle the case where the store is contiguous and unmasked efficiently
   auto idx_ramp = to<Ramp>(v->flat_index());
   if (idx_ramp) {
-    auto stride_imm = to<IntImm>(idx_ramp->stride());
-    if (stride_imm && stride_imm->value() == 1) {
+    auto stride_imm = intValue(idx_ramp->stride());
+    if (stride_imm && *stride_imm == 1) {
       idx_ramp->base()->accept(this);
       auto first_idx = value_;
 
@@ -1524,7 +1540,10 @@ void LLVMCodeGenImpl::emitIsNan(IntrinsicsPtr v) {
   if (!v->param(0)->dtype().is_floating_point()) {
     value_ = toVec(llvm::ConstantInt::get(dstType, 0), v->dtype().lanes());
   } else {
-    TORCH_INTERNAL_ASSERT(v->dtype().scalar_type() == ScalarType::Int);
+    TORCH_INTERNAL_ASSERT(
+        v->dtype().scalar_type() == ScalarType::Int,
+        buildErrorMessage(
+            "Unexpected non-Int dtype of Intrinsics' result value in the fuser."));
     auto is_nan = irb_.CreateFCmpUNO(
         value_, llvm::ConstantFP::get(value_->getType(), 0.));
     if (v->dtype().lanes() > 1) {
@@ -1751,11 +1770,11 @@ void LLVMCodeGenImpl::visit(IntrinsicsPtr v) {
   } else {
     TORCH_INTERNAL_ASSERT(
         false,
-        v,
-        "Unimplemented lowering:",
-        v->op_type(),
-        " for input of dtype",
-        v->dtype().scalar_dtype());
+        buildErrorMessage(
+            std::string("Unimplemented lowering for intrinsic '") +
+            std::to_string(v->op_type()) + "' for input of dtype " +
+            std::to_string(v->dtype().scalar_dtype()) +
+            " in LLVM codegen of the fuser."));
   }
 
   std::vector<llvm::Value*> params;

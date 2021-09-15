@@ -792,6 +792,20 @@ TEST_F(FunctionalTest, CrossEntropy) {
 
   ASSERT_TRUE(output.allclose(expected, 1e-04));
   ASSERT_TRUE(F::cross_entropy(input, target).allclose(expected, 1e-04));
+
+  // label smoothing with class indices
+  input = torch::tensor({{3., 1.}, {1., 2.}}, torch::kFloat);
+  output = F::cross_entropy(
+      input, target, F::CrossEntropyFuncOptions().label_smoothing(0.15).reduction(torch::kMean));
+  expected = torch::tensor(0.3326, torch::kFloat);
+  ASSERT_TRUE(output.allclose(expected, 1e-04));
+
+  // label smoothing with target probabilities
+  target = torch::tensor({{0.8, 0.2}, {0.1, 0.9}}, torch::kFloat);
+  output = F::cross_entropy(
+      input, target, F::CrossEntropyFuncOptions().label_smoothing(0.2).reduction(torch::kMean));
+  expected = torch::tensor(0.5701, torch::kFloat);
+  ASSERT_TRUE(output.allclose(expected, 1e-04));
 }
 
 TEST_F(FunctionalTest, MaxUnpool1d) {

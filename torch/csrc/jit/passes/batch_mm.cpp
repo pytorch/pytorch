@@ -109,11 +109,11 @@ bool shape_is_fast_for_reduce(const at::Tensor& lhs, const at::Tensor& rhs) {
 
 RegisterOperators mm_tree_reduction_reg({Operator(
     "prim::MMTreeReduce(...) -> Tensor",
-    [](Stack* stack) {
+    [](Stack& stack) {
       auto num_inputs = pop(stack).toInt();
       std::vector<at::Tensor> inputs;
       inputs.reserve(num_inputs);
-      for (auto it = stack->end() - num_inputs; it != stack->end(); ++it) {
+      for (auto it = stack.end() - num_inputs; it != stack.end(); ++it) {
         inputs.push_back(std::move(*it).toTensor());
       }
       drop(stack, num_inputs);
@@ -320,11 +320,11 @@ RegisterOperators mm_batch_side_reg({Operator(
     [](const Node* node) -> Operation {
       size_t num_other_side_inputs = node->inputs().size() - 1;
       Side single_side = static_cast<Side>(node->i(Symbol::attr("side")));
-      return [num_other_side_inputs, single_side](Stack* stack) {
+      return [num_other_side_inputs, single_side](Stack& stack) {
         at::Tensor side_input;
         std::vector<at::Tensor> other_side_inputs;
         other_side_inputs.reserve(num_other_side_inputs);
-        for (auto it = stack->end() - num_other_side_inputs; it != stack->end();
+        for (auto it = stack.end() - num_other_side_inputs; it != stack.end();
              ++it) {
           other_side_inputs.push_back(std::move(*it).toTensor());
         }
@@ -343,18 +343,18 @@ RegisterOperators mm_batch_side_reg({Operator(
               mm_out,
               num_other_side_inputs,
               /*dim=*/single_side == Side::LHS ? 1 : 0);
-          stack->insert(
-              stack->end(),
+          stack.insert(
+              stack.end(),
               std::make_move_iterator(outputs.begin()),
               std::make_move_iterator(outputs.end()));
         } else {
           if (single_side == Side::LHS) {
             for (at::Tensor& other : other_side_inputs) {
-              stack->emplace_back(side_input.mm(other));
+              stack.emplace_back(side_input.mm(other));
             }
           } else {
             for (at::Tensor& other : other_side_inputs) {
-              stack->emplace_back(other.mm(side_input));
+              stack.emplace_back(other.mm(side_input));
             }
           }
         }
