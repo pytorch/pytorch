@@ -78,12 +78,6 @@ VkDevice create_device(
   VK_CHECK(vkCreateDevice(physical_device, &device_create_info, nullptr, &device));
   TORCH_CHECK(device, "Invalid Vulkan device!");
 
-#ifdef USE_VULKAN_WRAPPER
-#ifdef USE_VULKAN_VOLK
-  volkLoadDevice(device);
-#endif
-#endif
-
   return device;
 }
 
