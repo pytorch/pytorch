@@ -3941,7 +3941,7 @@ std::tuple<Tensor, Tensor> linalg_lstsq_backward(
 
   A_grad = at::zeros_like(A);
   if (B.requires_grad()) {
-    B_grad = std::get<0>(at::linalg_lstsq(A.transpose(-1, -2), grad, rcond, driver));
+    B_grad = std::get<0>(at::linalg_lstsq(A.transpose(-1, -2).conj(), grad, rcond, driver));
   }
 
   return std::make_tuple(A_grad, B_grad);
