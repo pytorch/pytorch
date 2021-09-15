@@ -38,6 +38,7 @@ try:
         get_reordered_tests,
         get_test_case_configs,
     )
+
     # NS: Disable target determination
     # from tools.testing.modulefinder_determinator import (
     #     should_run_test,
@@ -55,13 +56,15 @@ except ImportError:
 
 
 def discover_tests(
-        base_dir: Optional[pathlib.Path] = None,
-        blocklisted_patterns: Optional[List[str]] = None,
-        blocklisted_tests: Optional[List[str]] = None,
-        extra_tests: Optional[List[str]] = None) -> List[str]:
+    base_dir: Optional[pathlib.Path] = None,
+    blocklisted_patterns: Optional[List[str]] = None,
+    blocklisted_tests: Optional[List[str]] = None,
+    extra_tests: Optional[List[str]] = None,
+) -> List[str]:
     """
     Searches for all python files starting with test_ excluding one specified by patterns
     """
+
     def skip_test_p(name: str) -> bool:
         rc = False
         if blocklisted_patterns is not None:
@@ -69,12 +72,13 @@ def discover_tests(
         if blocklisted_tests is not None:
             rc |= name in blocklisted_tests
         return rc
+
     cwd = pathlib.Path(__file__).resolve().parent if base_dir is None else base_dir
-    all_py_files = list(cwd.glob('**/test_*.py'))
+    all_py_files = list(cwd.glob("**/test_*.py"))
     rc = [str(fname.relative_to(cwd))[:-3] for fname in all_py_files]
     # Invert slashes on Windows
     if sys.platform == "win32":
-        rc = [name.replace('\\', '/') for name in rc]
+        rc = [name.replace("\\", "/") for name in rc]
     rc = [test for test in rc if not skip_test_p(test)]
     if extra_tests is not None:
         rc += extra_tests
@@ -83,33 +87,33 @@ def discover_tests(
 
 TESTS = discover_tests(
     blocklisted_patterns=[
-        'ao',
-        'bottleneck_test',
-        'custom_backend',
-        'custom_operator',
-        'fx',        # executed by test_fx.py
-        'jit',      # executed by test_jit.py
-        'mobile',
-        'onnx',
-        'package',  # executed by test_package.py
-        'quantization',  # executed by test_quantization.py
+        "ao",
+        "bottleneck_test",
+        "custom_backend",
+        "custom_operator",
+        "fx",  # executed by test_fx.py
+        "jit",  # executed by test_jit.py
+        "mobile",
+        "onnx",
+        "package",  # executed by test_package.py
+        "quantization",  # executed by test_quantization.py
     ],
     blocklisted_tests=[
-        'test_bundled_images',
-        'test_cpp_extensions_aot',
-        'test_determination',
-        'test_gen_backend_stubs',
-        'test_jit_fuser',
-        'test_jit_simple',
-        'test_jit_string',
-        'test_kernel_launch_checks',
-        'test_metal',
-        'test_nnapi',
-        'test_python_dispatch',
-        'test_segment_reductions',
-        'test_static_runtime',
-        'test_throughput_benchmark',
-        'test_typing',
+        "test_bundled_images",
+        "test_cpp_extensions_aot",
+        "test_determination",
+        "test_gen_backend_stubs",
+        "test_jit_fuser",
+        "test_jit_simple",
+        "test_jit_string",
+        "test_kernel_launch_checks",
+        "test_metal",
+        "test_nnapi",
+        "test_python_dispatch",
+        "test_segment_reductions",
+        "test_static_runtime",
+        "test_throughput_benchmark",
+        "test_typing",
         "distributed/algorithms/ddp_comm_hooks/test_ddp_hooks",
         "distributed/algorithms/quantization/test_quantization",
         "distributed/bin/test_script",
@@ -119,8 +123,8 @@ TESTS = discover_tests(
         "distributed/launcher/bin/test_script_is_torchelastic_launched",
         "distributed/launcher/bin/test_script_local_rank",
         "distributed/test_c10d_spawn",
-        'distributions/test_transforms',
-        'distributions/test_utils',
+        "distributions/test_transforms",
+        "distributions/test_utils",
     ],
     extra_tests=[
         "test_cpp_extensions_aot_ninja",
@@ -134,7 +138,7 @@ TESTS = discover_tests(
         "distributed/elastic/utils/util_test",
         "distributed/elastic/utils/distributed_test",
         "distributed/elastic/multiprocessing/api_test",
-    ]
+    ],
 )
 
 # Tests need to be run with pytest.
@@ -230,13 +234,7 @@ RUN_PARALLEL_BLOCKLIST = [
 WINDOWS_COVERAGE_BLOCKLIST = []
 
 # A subset of our TEST list that validates PyTorch's ops, modules, and autograd function as expected
-CORE_TEST_LIST = [
-    "test_autograd",
-    "test_modules",
-    "test_nn",
-    "test_ops",
-    "test_torch"
-]
+CORE_TEST_LIST = ["test_autograd", "test_modules", "test_nn", "test_ops", "test_torch"]
 
 # the JSON file to store the S3 test stats
 TEST_TIMES_FILE = ".pytorch-test-times.json"
@@ -638,7 +636,7 @@ def parse_args():
         "--core",
         action="store_true",
         help="Only run core tests, or tests that validate PyTorch's ops, modules,"
-        "and autograd. They are defined by CORE_TEST_LIST."
+        "and autograd. They are defined by CORE_TEST_LIST.",
     )
     parser.add_argument(
         "-pt",
@@ -994,8 +992,10 @@ def main():
         get_test_case_configs(dirpath=test_directory)
 
     print("DETERMINATING")
+    diff_path = REPO_ROOT / "pr.diff"
+    print(diff_path.exists())
     determined_tests = manual_determinator.determinate(
-        1,
+        diff_path,
         REPO_ROOT / "test" / "manual_determinations.yml",
         selected_tests,
         CORE_TEST_LIST,
@@ -1006,6 +1006,7 @@ def main():
     )
     print("DONE")
     selected_tests = determined_tests
+    exit(0)
     # exit(0)
 
     has_failed = False

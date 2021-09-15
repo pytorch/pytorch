@@ -406,6 +406,13 @@ jobs:
       - name: Output disk space left
         run: |
           sudo df -H
+      - name: Fetch Diff
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          if [[ -z $PR_NUMBER ]]; then
+            wget -O pr.diff "https://patch-diff.githubusercontent.com/raw/pytorch/pytorch/pull/$PR_NUMBER.diff"
+          fi
       - name: Test PyTorch
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -418,6 +425,7 @@ jobs:
           if [[ $NUM_TEST_SHARDS -ne 2 ]]; then
             export SHARD_NUMBER=0
           fi
+
           # detached container should get cleaned up by teardown_ec2_linux
           # TODO: Stop building test binaries as part of the build phase
           # Used for GPU_FLAG since that doesn't play nice
