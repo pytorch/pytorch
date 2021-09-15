@@ -10,6 +10,7 @@
 #include <torch/csrc/jit/passes/remove_mutation.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
 #include <torch/csrc/jit/passes/symbolic_shape_analysis.h>
+#include <torch/csrc/jit/tensorexpr/graph_opt.h>
 #include <torch/csrc/jit/tensorexpr/ir.h>
 #include <torch/csrc/jit/tensorexpr/kernel.h>
 
@@ -23,7 +24,7 @@ namespace nnc {
 
 std::vector<int64_t> getConstSizes(const BufPtr b) {
   std::vector<int64_t> r;
-  for (const auto dim : b->dims()) {
+  for (const auto& dim : b->dims()) {
     LongImmPtr imm_dim = to<LongImm>(dim);
     // TODO: assert it's actually immediate
     int64_t s = imm_dim->value();
@@ -38,7 +39,7 @@ void getCompiledFunction(
   std::vector<at::Tensor> parameters;
 
   auto const_descriptors = kernel->getConstantDescriptors();
-  for (auto cd : const_descriptors) {
+  for (const auto& cd : const_descriptors) {
     auto sizes = getConstSizes(cd.buf);
     at::Tensor const_tensor = at::from_blob(cd.ptr, sizes).clone();
     parameters.push_back(const_tensor);

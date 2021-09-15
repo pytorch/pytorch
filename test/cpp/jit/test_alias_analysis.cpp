@@ -660,6 +660,31 @@ TEST(ContainerAliasingTest, PrimitveValuesDontAliasContainers) {
   }
 }
 
+TEST(ContainerAliasingTest, UnionAliasing) {
+  auto graph = std::make_shared<Graph>();
+  parseIR(
+      R"IR(
+  graph(%a : Dict(str, Tensor),
+        %b : Tensor[],
+        %c : Union(Dict(str, Tensor), Tensor[])):
+    return (%a, %b, %c)
+    )IR",
+      &*graph);
+
+  AliasDb aliasDb(graph);
+  auto a = graph->outputs().at(0);
+  auto b = graph->outputs().at(1);
+  auto c = graph->outputs().at(2);
+
+  EXPECT_TRUE(aliasDb.mayAlias(a, c));
+  EXPECT_TRUE(aliasDb.mayAlias(b, c));
+  EXPECT_TRUE(aliasDb.mayAlias(c, c));
+  EXPECT_FALSE(aliasDb.mayAlias(a, b));
+  EXPECT_TRUE(aliasDb.mayContainAlias(a, b));
+  EXPECT_TRUE(aliasDb.mayContainAlias(a, c));
+  EXPECT_TRUE(aliasDb.mayContainAlias(b, c));
+}
+
 TEST(ContainerAliasingTest, InputsCanAliasOutputs) {
   // Test input aliasing
   auto graph = std::make_shared<Graph>();

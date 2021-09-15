@@ -529,7 +529,7 @@ def relu(*, input, inplace=False):
 )
 def torch_log1p_mapper(node: torch.fx.Node, _: torch.nn.Module) -> torch.fx.Node:
     with node.graph.inserting_before(node):
-        add_kwargs = {"input": node.kwargs["input"], "other": 1}
+        add_kwargs = {"input": node.kwargs["input"], "other": 1.0}
         add_node = node.graph.call_function(add, kwargs=add_kwargs)
         add_node.meta = node.meta.copy()
         log_kwargs = {"input": add_node}
@@ -567,7 +567,7 @@ def add_sum_mapper(node: torch.fx.Node, mod: torch.fx.GraphModule) -> torch.fx.N
 
 @register_acc_op
 def sum(*, input, dim=None, keepdim=False, dtype=None):
-    if dim:
+    if dim is not None:
         return torch.sum(**locals())
     else:
         return input.sum(dtype=dtype)
@@ -763,6 +763,12 @@ def torch_argmin_mapper(node: torch.fx.Node, _: torch.nn.Module) -> torch.fx.Nod
     """
     return argmin_max_mapper_impl(node, largest=False)
 
+@register_acc_op_mapping(op_and_target=("call_function", torch.linalg.norm))
+@register_acc_op
+def linalg_norm(*, input, ord, dim, keepdim):
+    return torch.linalg.norm(**locals())
+
+
 @register_custom_acc_mapper_fn(
     op_and_target=("call_method", "split"),
     arg_replacement_tuples=[
@@ -891,7 +897,7 @@ def embedding_bag(
 def embedding_bag_byte_rowwise_offsets(
     *,
     weight,
-    input,
+    indices,
     offsets,
     scale_grad_by_freq,
     mode,
@@ -901,6 +907,27 @@ def embedding_bag_byte_rowwise_offsets(
     include_last_offset,
 ):
     return torch.ops.quantized.embedding_bag_byte_rowwise_offsets(**locals())
+
+@register_acc_op_mapping(
+    op_and_target=(
+        "call_function",
+        torch.ops.quantized.embedding_bag_4bit_rowwise_offsets,
+    )
+)
+@register_acc_op
+def embedding_bag_4bit_rowwise_offsets(
+    *,
+    weight,
+    indices,
+    offsets,
+    scale_grad_by_freq,
+    mode,
+    pruned_weights,
+    per_sample_weights,
+    compressed_indices_mapping,
+    include_last_offset,
+):
+    return torch.ops.quantized.embedding_bag_4bit_rowwise_offsets(**locals())
 
 
 @register_acc_op_mapping(op_and_target=("call_function", torch.sin))
