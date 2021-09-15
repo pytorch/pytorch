@@ -72,15 +72,13 @@ class ArrayRef final {
   constexpr ArrayRef(const T& OneElt) : Data(&OneElt), Length(1) {}
 
   /// Construct an ArrayRef from a pointer and length.
-  /// CUDA 9.2 fails to compile constexpr of host-only function on device
-  C10_HOST_CONSTEXPR_EXCEPT_CUDA92 ArrayRef(const T* data, size_t length)
+  C10_HOST_CONSTEXPR ArrayRef(const T* data, size_t length)
       : Data(data), Length(length) {
     debugCheckNullptrInvariant();
   }
 
   /// Construct an ArrayRef from a range.
-  /// CUDA 9.2 fails to compile constexpr of host-only function on device
-  C10_HOST_CONSTEXPR_EXCEPT_CUDA92 ArrayRef(const T* begin, const T* end)
+  C10_HOST_CONSTEXPR ArrayRef(const T* begin, const T* end)
       : Data(begin), Length(end - begin) {
     debugCheckNullptrInvariant();
   }

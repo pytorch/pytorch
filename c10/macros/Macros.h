@@ -407,19 +407,15 @@ __host__ __device__
 // being called from device functions. Not sure if the latter works, but
 // even if not, it not being constexpr anymore should be enough to stop
 // it from being called from device code.
-// TODO This occurred in CUDA 9 (9.0 to 9.2). Test if this is fixed in CUDA 10.
+// I tried removing the following 7 lines when removing 9.2 references, but
+// got error C2131: expression did not evaluate to a constant for windows
+// w/ 11.3, so they remain still
 #if defined(__CUDA_ARCH__)
 #define C10_HOST_CONSTEXPR __host__
 #define C10_HOST_CONSTEXPR_VAR
 #else
 #define C10_HOST_CONSTEXPR constexpr
 #define C10_HOST_CONSTEXPR_VAR constexpr
-#endif
-
-#if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ <= 9200)
-#define C10_HOST_CONSTEXPR_EXCEPT_CUDA92
-#else
-#define C10_HOST_CONSTEXPR_EXCEPT_CUDA92 constexpr
 #endif
 
 #if !defined(__clang__) && !defined(_MSC_VER) && defined(__GNUC__) && \
