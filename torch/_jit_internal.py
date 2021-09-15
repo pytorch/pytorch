@@ -409,7 +409,27 @@ def boolean_dispatch(arg_name, arg_index, default, if_true, if_false, module_nam
     In TorchScript, the boolean argument must be constant so that the correct
     function to use can be determined at compile time.
     """
-    def extract_attribute(if_true_obj, if_false_obj, attr, *, sentinel=None, sentinel_if_unequal=False):
+    def extract_attribute(
+            if_true_obj, if_false_obj, attr, *, sentinel=None, sentinel_if_unequal=False, cross_set=False
+    ):
+        """Extracts an attribute from two similar objects, where none, one, or both of them have it defined.
+
+        Args:
+            if_true_obj: Object 1.
+            if_false_obj: Object 2.
+            attr: Attribute to be extracted.
+            sentinel: Value that indicates that the attribute is not defined.
+            sentinel_if_unequal: In case both objects define the attribute with unequal values, return ``sentinel``
+                instead.
+            cross_set: If only one object defines the attribute, set it on the other object.
+
+        Raises:
+            RuntimeError: If both objects define the attribute with unequal values and ``sentinel_if_unequal`` is not
+                set.
+
+        Returns:
+            Extracted attribute value or ``sentinel``.
+        """
         if_true_val = getattr(if_true_obj, attr, sentinel)
         if_false_val = getattr(if_false_obj, attr, sentinel)
 
@@ -418,9 +438,13 @@ def boolean_dispatch(arg_name, arg_index, default, if_true, if_false, module_nam
             return sentinel
         # attribute is only defined on if_false
         elif if_true_val is sentinel:
+            if cross_set:
+                setattr(if_true_obj, attr, if_false_val)
             return if_false_val
         # attribute is only defined on if_true
         elif if_false_val is sentinel:
+            if cross_set:
+                setattr(if_false_obj, attr, if_true_val)
             return if_true_val
         # attribute is defined on both
         else:
@@ -453,28 +477,10 @@ def boolean_dispatch(arg_name, arg_index, default, if_true, if_false, module_nam
     if if_true_signature.parameters == if_false_signature.parameters:
         parameters = list(if_true_signature.parameters.values())
     else:
-        if len(if_true_signature.parameters) != len(if_false_signature.parameters):
-            raise RuntimeError(
-                f"The number of parameters in signature of {getattr(if_true, '__name__', repr(if_true))} and "
-                f"{getattr(if_false, '__name__', repr(if_false))} mismatch: "
-                f"{len(if_true_signature.parameters)} != {len(if_false_signature.parameters)}."
-            )
-
-        parameters = [
-            inspect.Parameter(
-                name=extract_attribute(if_true_parameter, if_false_parameter, "name"),
-                kind=extract_attribute(if_true_parameter, if_false_parameter, "kind"),
-                default=extract_attribute(
-                    if_true_parameter, if_false_parameter, "default", sentinel=inspect.Parameter.empty
-                ),
-                annotation=extract_attribute(
-                    if_true_parameter, if_false_parameter, "annotation", sentinel=inspect.Parameter.empty
-                ),
-            )
-            for if_true_parameter, if_false_parameter in zip(
-                if_true_signature.parameters.values(), if_false_signature.parameters.values()
-            )
-        ]
+        raise RuntimeError(
+            f"The parameters of {getattr(if_true, '__name__', repr(if_true))} and "
+            f"{getattr(if_false, '__name__', repr(if_false))} mismatch."
+        )
     return_annotation = extract_attribute(
         if_true_signature,
         if_false_signature,
@@ -484,7 +490,7 @@ def boolean_dispatch(arg_name, arg_index, default, if_true, if_false, module_nam
     )
     fn.__signature__ = inspect.Signature(parameters, return_annotation=return_annotation)  # type: ignore[attr-defined]
 
-    fn.__doc__ = extract_attribute(if_true, if_false, "__doc__")
+    fn.__doc__ = extract_attribute(if_true, if_false, "__doc__", cross_set=True)
 
     if module_name is not None:
         fn.__module__ = module_name
