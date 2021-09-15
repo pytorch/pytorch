@@ -3486,7 +3486,8 @@ def sample_inputs_linalg_lstsq(op_info, device, dtype, requires_grad=False, **kw
         # NOTE: inputs are not marked with `requires_grad` since
         # linalg_lstsq is not differentiable
         a = random_well_conditioned_matrix(*shape, dtype=dtype, device=device)
-        b = make_tensor(shape, device, dtype, low=None, high=None)
+        a.requires_grad_(requires_grad)
+        b = make_tensor(shape, device, dtype, low=None, high=None, requires_grad=requires_grad)
         out.append(SampleInput(a, args=(b,)))
     return out
 
@@ -6987,7 +6988,8 @@ op_db: List[OpInfo] = [
            dtypes=floating_and_complex_types(),
            supports_out=True,
            sample_inputs_func=sample_inputs_linalg_lstsq,
-           supports_autograd=False,
+           supports_autograd=True,
+           supports_forward_ad=True,
            decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
            skips=(
                SkipInfo('TestJit', 'test_variant_consistency_jit'),
