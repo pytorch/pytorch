@@ -758,6 +758,12 @@ class OpInfo(object):
         return (supported if self._default_test_dtypes is None
                 else supported.intersection(self._default_test_dtypes))
 
+    @property
+    def formatted_name(self):
+        """Returns a formatted full name for this OpInfo that can be used in test names."""
+        variant = '_' + self.variant_test_name if self.variant_test_name else ''
+        return '{}{}'.format(self.name.replace('.', '_'), variant)
+
 
 def _generate_reduction_inputs(device, dtype, requires_grad):
     """Generates input tensors for testing reduction operators"""
@@ -5325,6 +5331,16 @@ def sample_inputs_kthvalue(op_info, device, dtype, requires_grad, **kwargs):
 
     return [SampleInput(tensor, args=args) for tensor, args in test_cases]
 
+def sample_inputs_dropout(op_info, device, dtype, requires_grad, **kwargs):
+    input = make_tensor((S,), device=device, dtype=dtype, requires_grad=requires_grad)
+
+    return [
+        SampleInput(input),
+        SampleInput(input, kwargs=dict(p=0.0)),
+        SampleInput(input, kwargs=dict(p=1.0)),
+        SampleInput(input, kwargs=dict(training=False)),
+    ]
+
 def sample_inputs_one_hot(op_info, device, dtype, requires_grad, **kwargs):
     def make_input(shape, *, low, high):
         return make_tensor(shape, device=device, dtype=dtype, low=low, high=high, requires_grad=requires_grad)
@@ -5727,6 +5743,14 @@ def reference_mse_loss(input, target, reduction="mean"):
         return np.sum(se)
     else:  # reduction == "none"
         return se
+
+
+def wrapper_set_seed(op, input, *args, **kwargs):
+    """Wrapper to set seed manually for some functions like dropout
+    See: https://github.com/pytorch/pytorch/pull/62315#issuecomment-896143189 for more details.
+    """
+    torch.manual_seed(42)
+    return op(input, *args, **kwargs)
 
 
 def reference_layer_norm(inp: np.ndarray, normalized_shape: Tuple[int], weight=None, bias=None, eps=1e-5):
@@ -9311,6 +9335,30 @@ op_db: List[OpInfo] = [
                    decorators=(toleranceOverride({torch.float32: tol(atol=0, rtol=4e-6), }),),
                    dtypes=all_types_and(torch.bool),
                    safe_casts_outputs=True),
+    OpInfo(
+        "nn.functional.dropout",
+        op=lambda input, *args, **kwargs:
+            wrapper_set_seed(torch.nn.functional.dropout, input, *args, **kwargs),
+        ref=_NOTHING,
+        dtypes=floating_types_and(torch.bfloat16),
+        dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+        skips=(
+            # Probably because we have used lambda for the op here
+            # AssertionError: JIT Test does not execute any logic
+            DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+            # inplace variant dispatches to dropout kernel, while on CUDA
+            # the op dispatches to _fused_dropout (with a few more conditions)
+            # hence, different values and this skip here
+            DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_neg_view', device_type='cuda'),
+            # On CUDA, the op is dispatched (and a few more conditions) to
+            # _fused_dropout, which doesn't support forward AD
+            DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_forward_mode_AD', device_type='cuda'),),
+        gradcheck_wrapper=wrapper_set_seed,
+        supports_forward_ad=True,
+        supports_out=False,
+        sample_inputs_func=sample_inputs_dropout,
+        inplace_variant=lambda input, *args, **kwargs:
+            wrapper_set_seed(torch.nn.functional.dropout, input, *args, **kwargs, inplace=True)),
     OpInfo(
         "nn.functional.one_hot",
         ref=reference_one_hot,
