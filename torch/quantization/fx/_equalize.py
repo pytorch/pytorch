@@ -742,8 +742,8 @@ def get_layer_sqnr_dict(model_a: nn.Module, model_b: nn.Module, x: torch.Tensor)
         model_b: A quantized model
         x: Inputs to use during calibration
     """
-    import torch.quantization._numeric_suite_fx as ns
-    from torch.quantization.ns.mappings import get_unmatchable_types_map
+    import torch.ao.ns._numeric_suite_fx as ns
+    from torch.ao.ns.fx.mappings import get_unmatchable_types_map
 
     unmatchable_types_map = get_unmatchable_types_map()
     unmatchable_types_map["funs_unmatchable"].add(torch.mul)
@@ -766,7 +766,7 @@ def get_layer_sqnr_dict(model_a: nn.Module, model_b: nn.Module, x: torch.Tensor)
     ns.extend_logger_results_with_comparison(
         activation_comparison_dict,
         'fp32', 'int8',
-        torch.quantization.ns.utils.compute_sqnr, 'sqnr'
+        torch.ao.ns.fx.utils.compute_sqnr, 'sqnr'
     )
 
     # Construct a dictionary mapping layer names to the SQNR values

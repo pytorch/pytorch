@@ -401,41 +401,80 @@ void hardswish_backward_kernel(TensorIterator& iter) {
 }
 
 static void leaky_relu_kernel(TensorIteratorBase& iter, const Scalar& negval_) {
-  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "leaky_relu_cpu", [&] {
-    using Vec = Vectorized<scalar_t>;
-    auto zero_vec = Vec((scalar_t)(0));
-    auto one_vec = Vec((scalar_t)(1));
-    scalar_t negval = negval_.to<scalar_t>();
-    Vec negval_v = Vec(negval);
+  if (iter.common_dtype() == kBFloat16) {
+    auto zero_vec = Vectorized<float>((float)(0));
+    auto one_vec = Vectorized<float>((float)(1));
+    float negval = negval_.to<float>();
+    Vectorized<float> negval_v = Vectorized<float>(negval);
     cpu_kernel_vec(
         iter,
-        [&](scalar_t a) -> scalar_t {
-          return a > scalar_t(0) ? a : a * negval;
+        [&](BFloat16 a) -> BFloat16 {
+          return float(a) > float(0) ? float(a) : float(a) * negval;
         },
-        [&](Vec a) -> Vec {
-          auto r = Vec::blendv(negval_v, one_vec, a > zero_vec);
-          return a * r;
+        [&](Vectorized<BFloat16> a) -> Vectorized<BFloat16> {
+          Vectorized<float> a0, a1;
+          std::tie(a0, a1) = convert_bfloat16_float(a);
+          auto res0 = a0 * (Vectorized<float>::blendv(negval_v, one_vec, a0 > zero_vec));
+          auto res1 = a1 * (Vectorized<float>::blendv(negval_v, one_vec, a1 > zero_vec));
+          return convert_float_bfloat16(res0, res1);
         });
-  });
+  } else {
+    AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "leaky_relu_cpu", [&] {
+      using Vec = Vectorized<scalar_t>;
+      auto zero_vec = Vec((scalar_t)(0));
+      auto one_vec = Vec((scalar_t)(1));
+      scalar_t negval = negval_.to<scalar_t>();
+      Vec negval_v = Vec(negval);
+      cpu_kernel_vec(
+          iter,
+          [&](scalar_t a) -> scalar_t {
+            return a > scalar_t(0) ? a : a * negval;
+          },
+          [&](Vec a) -> Vec {
+            auto r = Vec::blendv(negval_v, one_vec, a > zero_vec);
+            return a * r;
+          });
+    });
+  }
 }
 
 static void leaky_relu_backward_kernel(TensorIteratorBase& iter, const Scalar& negval_) {
-  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "leaky_relu_backward_cpu", [&] {
-    using Vec = Vectorized<scalar_t>;
-    auto zero_vec = Vec((scalar_t)(0));
-    auto one_vec = Vec((scalar_t)(1));
-    scalar_t negval = negval_.to<scalar_t>();
-    Vec negval_v = Vec(negval);
+  if (iter.common_dtype() == kBFloat16) {
+    auto zero_vec = Vectorized<float>((float)(0));
+    auto one_vec = Vectorized<float>((float)(1));
+    float negval = negval_.to<float>();
+    Vectorized<float> negval_v = Vectorized<float>(negval);
     cpu_kernel_vec(
-        iter,
-        [&](scalar_t a, scalar_t b) -> scalar_t {
-          return a > scalar_t(0) ? b : b * negval;
-        },
-        [&](Vec a, Vec b) -> Vec {
-          auto r = Vec::blendv(negval_v, one_vec, a > zero_vec);
-          return b * r;
-        });
-  });
+      iter,
+      [&](BFloat16 a, BFloat16 b) -> BFloat16 {
+        return float(a) > float(0) ? float(b) : float(b) * negval;
+      },
+      [&](Vectorized<BFloat16> a, Vectorized<BFloat16> b) -> Vectorized<BFloat16> {
+        Vectorized<float> a0, a1, b0, b1;
+        std::tie(a0, a1) = convert_bfloat16_float(a);
+        std::tie(b0, b1) = convert_bfloat16_float(b);
+        auto res0 = b0 * (Vectorized<float>::blendv(negval_v, one_vec, a0 > zero_vec));
+        auto res1 = b1 * (Vectorized<float>::blendv(negval_v, one_vec, a1 > zero_vec));
+        return convert_float_bfloat16(res0, res1);
+      });
+  } else {
+    AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "leaky_relu_backward_cpu", [&] {
+      using Vec = Vectorized<scalar_t>;
+      auto zero_vec = Vec((scalar_t)(0));
+      auto one_vec = Vec((scalar_t)(1));
+      scalar_t negval = negval_.to<scalar_t>();
+      Vec negval_v = Vec(negval);
+      cpu_kernel_vec(
+          iter,
+          [&](scalar_t a, scalar_t b) -> scalar_t {
+            return a > scalar_t(0) ? b : b * negval;
+          },
+          [&](Vec a, Vec b) -> Vec {
+            auto r = Vec::blendv(negval_v, one_vec, a > zero_vec);
+            return b * r;
+          });
+    });
+  }
 }
 
 void softplus_kernel(TensorIteratorBase& iter, const Scalar& beta_, const Scalar& threshold_) {
@@ -480,7 +519,7 @@ void softplus_backward_kernel(TensorIteratorBase& iter, const Scalar& beta_, con
   });
 }
 
-void glu_kernel(TensorIterator& iter) {
+void glu_kernel(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "glu_cpu", [&] {
     using Vec = Vectorized<scalar_t>;
     const scalar_t one_val(1);

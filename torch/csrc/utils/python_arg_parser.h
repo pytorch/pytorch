@@ -810,4 +810,14 @@ bool is_tensor_and_append_overloaded(PyObject* obj, std::vector<py::handle>* ove
  */
 bool is_tensor_list_and_append_overloaded(PyObject* obj, std::vector<py::handle>* overloaded_args, int argnum, bool throw_error);
 
+/* Given an argument that is definitely a tensor and is definitely overloaded,
+ * append it to the overloaded arguments list.  Use this instead of
+ * is_tensor_and_append_overloaded in situations where you have a PyObject
+ * and you know it definitely is a Tensor and it is definitely overloaded.
+ *
+ * 'overloaded_args': the vector to append the overloaded args
+ * 'obj': the input tensor that is overloaded
+ */
+void append_overloaded_arg(std::vector<py::handle>* overloaded_args, PyObject* obj);
+
 } // namespace torch

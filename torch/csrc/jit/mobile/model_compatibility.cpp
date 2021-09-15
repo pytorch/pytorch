@@ -210,8 +210,12 @@ SupportedType _get_type_table(std::vector<IValue> bytecode_ivalues) {
         type_name = type_definition.toString()->string();
       } else if (type_definition.isTuple()) {
         // For all custom types
-        type_name =
-            type_definition.toTuple()->elements()[0].toString()->string();
+        type_name = type_definition.toTuple()
+                        ->elements()[1]
+                        .toTuple()
+                        ->elements()[0]
+                        .toString()
+                        ->string();
       }
       if (all_type_names.find(type_name) == all_type_names.end()) {
         all_type_names.insert(type_name);
