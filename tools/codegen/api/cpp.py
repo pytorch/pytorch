@@ -306,3 +306,10 @@ def arguments(
             has_tensor_options=arguments.tensor_options is not None,
             cpp_no_default_args=cpp_no_default_args)
     ]
+
+# Translate a JIT argument into its C++ type,
+# but replaces any instances of reference C++ types with corresponding value types.
+# See Note [translation from C++ reference to value types]
+def argument_to_value_type(a: Argument) -> NamedCType:
+    output_ctype = argument_type(a, binds=a.name)
+    return NamedCType(output_ctype.name, output_ctype.type.ref_to_value_type())
