@@ -7,8 +7,7 @@ namespace tensorexpr {
 Tensor computeBatchNorm(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
-    const c10::optional<ScalarType>& outputType,
-    const std::string name) {
+    const c10::optional<ScalarType>& outputType) {
   bool hasWeight = true;
   bool hasBias = true;
 
@@ -20,9 +19,8 @@ Tensor computeBatchNorm(
     hasBias = false;
   }
 
-  const std::string output_name = name.empty() ? "aten_batch_norm" : name;
   return Compute(
-      output_name,
+      "aten_batch_norm",
       c10::fmap<DimArg>(outputShape),
       [&](const std::vector<VarHandle>& axes) {
         TORCH_INTERNAL_ASSERT(axes.size() >= 2);

@@ -1161,6 +1161,8 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         Tensor.view: lambda self, shape: -1,
         Tensor.view_as: lambda self, other: -1,
         Tensor.zero_: lambda self: -1,
+        Tensor.__dlpack__: lambda self, stream=None: -1,
+        Tensor.__dlpack_device__: lambda self: -1,
         torch.linalg.lstsq: lambda self, b, cond=None, driver=None: -1,
     }
 
@@ -1270,7 +1272,11 @@ def _get_overloaded_args(relevant_args: Iterable[Any]) -> List[Any]:
         # We only collect arguments if they have a unique type, which ensures
         # reasonable performance even with a long list of possibly overloaded
         # arguments.
-        if (arg_type not in overloaded_types and hasattr(arg_type, '__torch_function__')):
+        #
+        # NB: Important to exclude _disabled_torch_function_impl, otherwise
+        # https://github.com/pytorch/pytorch/issues/64687
+        if (arg_type not in overloaded_types and hasattr(arg_type, '__torch_function__') and
+                arg_type.__torch_function__ != torch._C._disabled_torch_function_impl):
             # Create lists explicitly for the first type (usually the only one
             # done) to avoid setting up the iterator for overloaded_args.
             if overloaded_types:
