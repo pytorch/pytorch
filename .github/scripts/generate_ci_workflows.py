@@ -276,6 +276,7 @@ LINUX_WORKFLOWS = [
         docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-py3.6-gcc5.4",
         test_runner_type=LINUX_CPU_TEST_RUNNER,
         on_pull_request=True,
+        enable_jit_legacy_test=1,
         enable_doc_jobs=True,
         enable_docs_test=1,
         enable_backwards_compat_test=1,
