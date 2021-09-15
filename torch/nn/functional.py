@@ -407,12 +407,55 @@ Args:
 
 
 def fractional_max_pool2d_with_indices(
-    input: Tensor, kernel_size: BroadcastingList2[int],
+    input: Tensor,
+    kernel_size: BroadcastingList2[int],
     output_size: Optional[BroadcastingList2[int]] = None,
     output_ratio: Optional[BroadcastingList2[float]] = None,
     return_indices: bool = False,
-    _random_samples: Optional[Tensor] = None
+    _random_samples: Optional[Tensor] = None,
 ) -> Tuple[Tensor, Tensor]:
+    if has_torch_function_variadic(input, _random_samples):
+        return handle_torch_function(
+            fractional_max_pool2d_with_indices,
+            (input, _random_samples),
+            input,
+            kernel_size,
+            output_size=output_size,
+            output_ratio=output_ratio,
+            return_indices=return_indices,
+            _random_samples=_random_samples,
+        )
+    if output_size is None and output_ratio is None:
+        raise ValueError(
+            "fractional_max_pool2d requires specifying either "
+            "an output_size or an output_ratio"
+        )
+    if output_size is None:
+        assert output_ratio is not None
+        _output_ratio = _pair(output_ratio)
+        output_size = [
+            int(input.size(-2) * _output_ratio[0]),
+            int(input.size(-1) * _output_ratio[1]),
+        ]
+
+    if _random_samples is None:
+        n_batch = 1 if input.dim() == 3 else input.size(0)
+        _random_samples = torch.rand(
+            n_batch, input.size(-3), 2, dtype=input.dtype, device=input.device
+        )
+    return torch._C._nn.fractional_max_pool2d(
+        input, kernel_size, output_size, _random_samples
+    )
+
+
+def fractional_max_pool2d(
+    input: Tensor,
+    kernel_size: BroadcastingList2[int],
+    output_size: Optional[BroadcastingList2[int]] = None,
+    output_ratio: Optional[BroadcastingList2[float]] = None,
+    return_indices: bool = False,
+    _random_samples: Optional[Tensor] = None,
+) -> Union[Tensor, Tuple[Tensor, Tensor]]:
     r"""Applies 2D fractional max pooling over an input signal composed of several input planes.
 
     Fractional MaxPooling is described in detail in the paper `Fractional MaxPooling`_ by Ben Graham
@@ -442,62 +485,13 @@ def fractional_max_pool2d_with_indices(
     .. _Fractional MaxPooling:
         http://arxiv.org/abs/1412.6071
     """
-    if has_torch_function_variadic(input, _random_samples):
-        return handle_torch_function(
-            fractional_max_pool2d_with_indices,
-            (input, _random_samples),
-            input,
-            kernel_size,
-            output_size=output_size,
-            output_ratio=output_ratio,
-            return_indices=return_indices,
-            _random_samples=_random_samples,
-        )
-    if output_size is None and output_ratio is None:
-        raise ValueError("fractional_max_pool2d requires specifying either " "an output_size or an output_ratio")
-    if output_size is None:
-        assert output_ratio is not None
-        _output_ratio = _pair(output_ratio)
-        output_size = [int(input.size(-2) * _output_ratio[0]), int(input.size(-1) * _output_ratio[1])]
-
-    if _random_samples is None:
-        n_batch = 1 if input.dim() == 3 else input.size(0)
-        _random_samples = torch.rand(n_batch, input.size(-3), 2, dtype=input.dtype, device=input.device)
-    return torch._C._nn.fractional_max_pool2d(input, kernel_size, output_size, _random_samples)
-
-
-def _fractional_max_pool2d(
-    input: Tensor, kernel_size: BroadcastingList2[int],
-    output_size: Optional[BroadcastingList2[int]] = None,
-    output_ratio: Optional[BroadcastingList2[float]] = None,
-    return_indices: bool = False,
-    _random_samples: Optional[Tensor] = None
-) -> Tensor:
-    if has_torch_function_variadic(input, _random_samples):
-        return handle_torch_function(
-            fractional_max_pool2d,
-            (input, _random_samples),
-            input,
-            kernel_size,
-            output_size=output_size,
-            output_ratio=output_ratio,
-            return_indices=return_indices,
-            _random_samples=_random_samples,
-        )
-    return fractional_max_pool2d_with_indices(
+    res = fractional_max_pool2d_with_indices(
         input, kernel_size, output_size, output_ratio, return_indices, _random_samples
-    )[0]
-
-
-fractional_max_pool2d = boolean_dispatch(
-    arg_name="return_indices",
-    arg_index=4,
-    default=False,
-    if_true=fractional_max_pool2d_with_indices,
-    if_false=_fractional_max_pool2d,
-    module_name=__name__,
-    func_name="fractional_max_pool2d",
-)
+    )
+    if return_indices:
+        return res
+    else:
+        return res[0]
 
 
 def fractional_max_pool3d_with_indices(
