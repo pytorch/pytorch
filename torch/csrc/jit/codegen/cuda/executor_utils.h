@@ -46,6 +46,8 @@ struct NvrtcFunction {
   CUfunction function = CUfunction();
 };
 
+void initializeCudaContext();
+
 NvrtcFunction nvrtcCompile(
     const std::string& code,
     const std::string& func_name,

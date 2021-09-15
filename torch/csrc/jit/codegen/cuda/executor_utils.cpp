@@ -261,12 +261,7 @@ StatefulExpressionEvaluator statefulBindInputs(
   return evaluator;
 }
 
-NvrtcFunction nvrtcCompile(
-    const std::string& code,
-    const std::string& func_name,
-    int id) {
-  FUSER_PERF_SCOPE("NVRTC");
-
+void initializeCudaContext() {
   // lazily construct context if non-existing yet;
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   CUcontext pctx = nullptr;
@@ -276,6 +271,14 @@ NvrtcFunction nvrtcCompile(
         *(c10::cuda::CUDACachingAllocator::getFreeMutex()));
     cudaFree(nullptr);
   }
+}
+
+NvrtcFunction nvrtcCompile(
+    const std::string& code,
+    const std::string& func_name,
+    int id) {
+  FUSER_PERF_SCOPE("NVRTC");
+  initializeCudaContext();
 
   const auto prop = at::cuda::getCurrentDeviceProperties();
 

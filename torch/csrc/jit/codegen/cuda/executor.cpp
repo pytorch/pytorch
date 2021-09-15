@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/codegen/cuda/codegen.h>
 #include <torch/csrc/jit/codegen/cuda/executor_kernel_arg.h>
+#include <torch/csrc/jit/codegen/cuda/executor_utils.h>
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
@@ -408,6 +409,7 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
   FusionGuard fg(&fusion_);
   c10::DeviceGuard dg(options_.device);
   auto stream = at::cuda::getCurrentCUDAStream();
+  executor_utils::initializeCudaContext();
 
   LaunchParams launch_params;
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
