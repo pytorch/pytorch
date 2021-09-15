@@ -22,6 +22,8 @@ class TORCH_API PythonCall final : public RpcCommandBase {
     return isAsyncExecution_;
   }
 
+  const DeviceMap& deviceMap() const;
+
  private:
   SerializedPyObj serializedPyObj_;
   DeviceMap deviceMap_;

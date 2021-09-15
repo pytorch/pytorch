@@ -22,6 +22,7 @@ class TORCH_API UnpickledPythonRemoteCall final : public UnpickledPythonCall {
       const SerializedPyObj& serializedPyObj,
       const at::IValue& retRRefId,
       const at::IValue& retForkId,
+      const DeviceMap& deviceMap,
       const bool isAsyncExecution);
 
   const RRefId& rrefId() const;

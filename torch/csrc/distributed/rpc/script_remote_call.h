@@ -43,6 +43,10 @@ class TORCH_API ScriptRemoteCall final : public ScriptCall {
     return retForkId_;
   }
 
+  DeviceMap&& moveDeviceMap() && {
+    return std::move(deviceMap_);
+  }
+
   static std::unique_ptr<ScriptRemoteCall> fromIValues(
       std::vector<at::IValue>& ivalues);
 

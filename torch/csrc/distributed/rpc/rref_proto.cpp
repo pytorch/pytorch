@@ -1,44 +1,12 @@
-#include <torch/csrc/distributed/rpc/rpc_agent.h>
 #include <torch/csrc/distributed/rpc/rref_proto.h>
-#include <torch/csrc/jit/serialization/pickle.h>
+
+#include <torch/csrc/distributed/rpc/utils.h>
 
 #include <limits>
 
 namespace torch {
 namespace distributed {
 namespace rpc {
-
-namespace {
-
-std::vector<IValue> toIValues(const Message& message, MessageType type) {
-  TORCH_INTERNAL_ASSERT(
-      type == message.type(),
-      "Expecting message of type ",
-      type,
-      ", but got ",
-      message.type());
-  auto payload = static_cast<const char*>(message.payload().data());
-  auto payload_size = message.payload().size();
-
-  auto value = jit::unpickle(
-      payload,
-      payload_size,
-      *RpcAgent::getCurrentRpcAgent()->getTypeResolver(),
-      message.tensors());
-  return value.toTuple()->elements();
-}
-
-c10::intrusive_ptr<Message> fromIValues(
-    std::vector<IValue> ivalues,
-    MessageType type) {
-  std::vector<torch::Tensor> tensor_table;
-  auto payload = jit::pickle(
-      c10::ivalue::Tuple::create(std::move(ivalues)), &tensor_table);
-  return c10::make_intrusive<Message>(
-      std::move(payload), std::move(tensor_table), type);
-}
-
-} // namespace
 
 /////////////////////////// RRefMessageBase //////////////////////////////////
 
@@ -148,12 +116,6 @@ std::unique_ptr<ScriptRRefFetchRet> ScriptRRefFetchRet::fromMessage(
 
 c10::intrusive_ptr<Message> PythonRRefFetchRet::toMessageImpl() && {
   auto res = fromIValues(values_, type_);
-  // // ================================================================
-  // std::cout << "PythonRRefFetchRet::toMessageImpl: deviceMap_.size() = " << deviceMap_ << std::endl;
-  // for (const auto& entry : deviceMap_) {
-  //   std::cout << 
-  // }
-  // // ================================================================
   res->setDeviceMap(std::move(deviceMap_));
   return res;
 }

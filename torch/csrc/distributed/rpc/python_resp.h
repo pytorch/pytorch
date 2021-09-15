@@ -10,7 +10,7 @@ namespace rpc {
 // RPC call representing the response of a Python UDF over RPC.
 class TORCH_API PythonResp final : public RpcCommandBase {
  public:
-  explicit PythonResp(SerializedPyObj&& serializedPyObj);
+  explicit PythonResp(SerializedPyObj&& serializedPyObj, DeviceMap deviceMap);
 
   c10::intrusive_ptr<Message> toMessageImpl() && override;
 
@@ -20,6 +20,7 @@ class TORCH_API PythonResp final : public RpcCommandBase {
 
  private:
   SerializedPyObj serializedPyObj_;
+  DeviceMap deviceMap_;
 };
 
 } // namespace rpc

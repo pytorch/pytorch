@@ -89,6 +89,14 @@ TORCH_API void populateRemoteProfiledEvents(
     const std::vector<std::vector<torch::autograd::profiler::LegacyEvent>>&
         eventLists);
 
+c10::Dict<std::string, std::string> deviceMapToC10Dict(const DeviceMap& deviceMap);
+
+DeviceMap c10DictToDeviceMap(const c10::Dict<std::string, std::string>& c10DeviceMap);
+
+std::vector<IValue> toIValues(const Message& message, MessageType type);
+
+c10::intrusive_ptr<Message> fromIValues(std::vector<IValue> ivalues, MessageType type);
+
 } // namespace rpc
 } // namespace distributed
 } // namespace torch

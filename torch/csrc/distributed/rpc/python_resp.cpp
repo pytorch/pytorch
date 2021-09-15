@@ -1,28 +1,24 @@
 #include <torch/csrc/distributed/rpc/python_resp.h>
 
+#include <torch/csrc/distributed/rpc/utils.h>
+
 #include <c10/util/C++17.h>
 
 namespace torch {
 namespace distributed {
 namespace rpc {
 
-PythonResp::PythonResp(SerializedPyObj&& serializedPyObj)
-    : serializedPyObj_(std::move(serializedPyObj)) {}
+PythonResp::PythonResp(SerializedPyObj&& serializedPyObj, DeviceMap deviceMap)
+    : serializedPyObj_(std::move(serializedPyObj)), deviceMap_(std::move(deviceMap)) {}
 
 c10::intrusive_ptr<Message> PythonResp::toMessageImpl() && {
-  auto payload = std::vector<char>(
-      serializedPyObj_.payload_.begin(), serializedPyObj_.payload_.end());
-  return c10::make_intrusive<Message>(
-      std::move(payload),
-      std::move(serializedPyObj_.tensors_),
-      MessageType::PYTHON_RET);
+  auto res = fromIValues(std::move(serializedPyObj_).toIValues(), MessageType::PYTHON_RET);
+  res->setDeviceMap(std::move(deviceMap_));
+  return res;
 }
 
 std::unique_ptr<PythonResp> PythonResp::fromMessage(const Message& message) {
-  std::string payload(message.payload().begin(), message.payload().end());
-  std::vector<Tensor> tensors = message.tensors();
-  SerializedPyObj serializedPyObj(std::move(payload), std::move(tensors));
-  return std::make_unique<PythonResp>(std::move(serializedPyObj));
+  return std::make_unique<PythonResp>(std::move(SerializedPyObj::fromIValues(toIValues(message, MessageType::PYTHON_RET))), DeviceMap());
 }
 
 const SerializedPyObj& PythonResp::serializedPyObj() const {

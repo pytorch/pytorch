@@ -11,8 +11,9 @@ UnpickledPythonRemoteCall::UnpickledPythonRemoteCall(
     const SerializedPyObj& serializedPyObj,
     const at::IValue& rrefId,
     const at::IValue& forkId,
+    const DeviceMap& deviceMap,
     bool isAsyncExecution)
-    : UnpickledPythonCall(serializedPyObj, isAsyncExecution),
+    : UnpickledPythonCall(serializedPyObj, deviceMap, isAsyncExecution),
       rrefId_(RRefId::fromIValue(rrefId)),
       forkId_(ForkId::fromIValue(forkId)) {}
 

@@ -11,7 +11,7 @@ namespace rpc {
 // Return value of a builtin operator or a TorchScript function.
 class TORCH_API ScriptResp final : public RpcCommandBase {
  public:
-  explicit ScriptResp(at::IValue&& values);
+  explicit ScriptResp(at::IValue&& values, DeviceMap deviceMap);
 
   const at::IValue& value();
   c10::intrusive_ptr<Message> toMessageImpl() && override;
@@ -19,6 +19,7 @@ class TORCH_API ScriptResp final : public RpcCommandBase {
 
  private:
   const at::IValue value_;
+  DeviceMap deviceMap_;
 };
 
 } // namespace rpc

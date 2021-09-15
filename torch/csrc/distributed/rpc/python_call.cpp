@@ -1,6 +1,7 @@
 #include <torch/csrc/distributed/rpc/python_call.h>
 
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
+#include <torch/csrc/distributed/rpc/utils.h>
 #include <torch/csrc/jit/serialization/pickle.h>
 
 #include <c10/util/C++17.h>
@@ -19,12 +20,9 @@ c10::intrusive_ptr<Message> PythonCall::toMessageImpl() && {
   ivalues.emplace_back(isAsyncExecution_);
 
   // Convert deviceMap to c10::Dict for serialization.
-  c10::Dict<std::string, std::string> deviceMap;
-  for (const auto& mapEntry : deviceMap_) {
-    deviceMap.insert(mapEntry.first.str(), mapEntry.second.str());
-  }
-  ivalues.emplace_back(deviceMap);
+  ivalues.emplace_back(deviceMapToC10Dict(deviceMap_));
 
+  // TODO(pbelevich): replace with fromIValues
   std::vector<torch::Tensor> tensor_table;
   auto payload =
       jit::pickle(c10::ivalue::Tuple::create(ivalues), &tensor_table);
@@ -33,7 +31,7 @@ c10::intrusive_ptr<Message> PythonCall::toMessageImpl() && {
       std::move(payload),
       std::move(tensor_table),
       MessageType::PYTHON_CALL,
-      std::move(deviceMap_));
+      std::move(deviceMap_)); 
 }
 
 std::unique_ptr<PythonCall> PythonCall::fromMessage(const Message& message) {
@@ -70,6 +68,10 @@ std::unique_ptr<PythonCall> PythonCall::fromMessage(const Message& message) {
 
 const SerializedPyObj& PythonCall::serializedPyObj() const {
   return serializedPyObj_;
+}
+
+const DeviceMap& PythonCall::deviceMap() const {
+  return deviceMap_;
 }
 
 } // namespace rpc

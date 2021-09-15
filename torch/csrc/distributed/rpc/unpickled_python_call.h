@@ -19,6 +19,7 @@ class TORCH_API UnpickledPythonCall : public RpcCommandBase {
  public:
   UnpickledPythonCall(
       const SerializedPyObj& serializedPyObj,
+      const DeviceMap& deviceMap,
       bool isAsyncExecution);
   ~UnpickledPythonCall() override;
 
@@ -31,8 +32,13 @@ class TORCH_API UnpickledPythonCall : public RpcCommandBase {
     return isAsyncExecution_;
   }
 
+  DeviceMap&& moveDeviceMap() && {
+    return std::move(deviceMap_);
+  }
+
  private:
   py::object pythonUdf_;
+  DeviceMap deviceMap_;
   const bool isAsyncExecution_;
 };
 

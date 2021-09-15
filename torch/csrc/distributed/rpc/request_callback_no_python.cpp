@@ -138,15 +138,15 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::processScriptCall(
     RpcCommandBase& rpc,
     std::vector<c10::Stream> streams) const {
   auto& scriptCall = static_cast<ScriptCall&>(rpc);
-
+  DeviceMap dm = std::move(scriptCall).moveDeviceMap();
   TORCH_CHECK(
       scriptCall.hasOp(), "Only supports the case where ScriptCall has an op");
   auto future = runJitOperator(
       *scriptCall.op(), scriptCall.stackRef(), std::move(streams));
 
   return future->then(
-      [](JitFuture& future) {
-        return withStorages(ScriptResp(future.value()).toMessage());
+      [dm = std::move(dm)](JitFuture& future) {
+        return withStorages(ScriptResp(future.value(), std::move(dm)).toMessage());
       },
       c10::getCustomClassType<c10::intrusive_ptr<Message>>());
 }

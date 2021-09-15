@@ -16,7 +16,7 @@ namespace rpc {
 class TORCH_API RRefMessageBase : public RpcCommandBase {
  public:
   RRefMessageBase(const RRefId& rrefId, MessageType type, DeviceMap&& deviceMap)
-      : rrefId_(rrefId), type_(type), deviceMap_(deviceMap) {}
+      : rrefId_(rrefId), type_(type), deviceMap_(std::move(deviceMap)) {}
 
   ~RRefMessageBase() override = default;
 
