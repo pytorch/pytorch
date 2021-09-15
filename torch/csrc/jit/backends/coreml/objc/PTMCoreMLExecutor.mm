@@ -130,7 +130,6 @@
         error.localizedDescription.UTF8String);
     return outputFeature;
   } else {
-    // Fallback on earlier versions
     TORCH_CHECK("Core ML is available on iOS 11.0 and above");
     return nil;
   }
@@ -159,7 +158,7 @@
     // https://developers.google.com/protocol-buffers/docs/pythontutorial#parsing-and-serialization
     NSData* data = [NSData dataWithBytes:spec.c_str() length:spec.length()];
     BOOL ret = [data writeToFile:modelPath atomically:YES];
-    TORCH_CHECK(ret, "Save MLModel failed!");
+    TORCH_CHECK(ret, "Save MLModel failed!", modelPath.UTF8String);
   }
   return modelPath;
 }
