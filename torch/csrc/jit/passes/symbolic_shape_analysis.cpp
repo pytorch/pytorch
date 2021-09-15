@@ -135,6 +135,13 @@ bool symbolicShapeAnalysisTestModeEnabled() {
   return symbolic_shape_analysis_test_mode;
 }
 
+namespace {
+
+bool isListOfInts(const TypePtr& type) {
+  return type->cast<ListType>() &&
+      type->cast<ListType>()->getElementType()->cast<IntType>();
+}
+
 c10::optional<size_t> normIndex(int64_t index, size_t len) {
   if (index < 0) {
     index = index + len;
@@ -150,6 +157,8 @@ void replaceWithIValue(Value* v, IValue val) {
   WithInsertPoint guard(*v->node()->owningBlock()->nodes().begin());
   v->replaceAllUsesWith(v->owningGraph()->insertConstant(val));
 }
+
+} // namespace
 
 // Symbolic Shape Analysis works through iteratively partially evaluating
 // a TorchScript shape compute graph by inputing properties from input
@@ -269,7 +278,7 @@ struct SymbolicShapeAnalyzer {
     }
   }
 
-  c10::SymbolicShape run() {
+  void run() {
     bool made_change = true;
     constexpr size_t MAX_ATTEMPTS = 8;
     size_t curr_attempt = 0;
@@ -294,7 +303,7 @@ struct SymbolicShapeAnalyzer {
     substituteInputTensorProperties(&symbolic_shape_values);
     GRAPH_DUMP("Done with partial evaluation", graph_);
 
-    return extractOutputShape(symbolic_shape_values);
+    extractOutputShape(symbolic_shape_values);
   }
 
  private:
@@ -449,28 +458,21 @@ struct SymbolicShapeAnalyzer {
     }
   }
 
-  c10::SymbolicShape extractOutputShape(
-      std::unordered_map<Value*, int64_t>& symbolic_shape_values) {
-    TORCH_INTERNAL_ASSERT(graph_->outputs().size() == 1);
-    auto output = graph_->outputs().at(0);
-    TORCH_INTERNAL_ASSERT(
-        output->type()->cast<ListType>() &&
-        output->type()->cast<ListType>()->getElementType()->cast<IntType>());
-    if (output->node()->kind() == prim::Constant) {
-      auto int_list = toIValue(output)->toIntVector();
+  c10::SymbolicShape extractListShape(
+      Value* list,
+      std::unordered_map<Value*, int64_t>& symbolic_shape_values,
+      const AliasDb& db) {
+    if (list->node()->kind() == prim::Constant) {
+      auto int_list = toIValue(list)->toIntVector();
       return c10::SymbolicShape(int_list);
     }
-    // TODO: would be nice if there were easy facility to look at uses and see
-    // if they are all pure instead of instanting db.
-    AliasDb db(graph_);
-    // If it is not a single list construct or constant, bail,
-    // otherwise we cannot analyze its output and it might be modified
-    if (output->node()->kind() != prim::ListConstruct ||
-        db.hasWriters(output)) {
+    // We need a list construct or a constant output
+    // that is not written to in order to analyze the output shape
+    if (list->node()->kind() != prim::ListConstruct || db.hasWriters(list)) {
       GRAPH_DEBUG("Could not extract shape ", getHeader(node_));
       return c10::SymbolicShape();
     }
-    Node* list_construct = output->node();
+    Node* list_construct = list->node();
     std::vector<c10::optional<int64_t>> output_shape;
     for (Value* input : list_construct->inputs()) {
       if (symbolic_shape_values.count(input)) {
@@ -480,6 +482,23 @@ struct SymbolicShapeAnalyzer {
       }
     }
     return c10::SymbolicShape(output_shape);
+  }
+
+  void extractOutputShape(
+      std::unordered_map<Value*, int64_t>& symbolic_shape_values) {
+    TORCH_INTERNAL_ASSERT(graph_->outputs().size() == node_->outputs().size());
+    // TODO: would be nice if there were easy facility to look at uses and see
+    // if they are all pure instead of instanting db.
+    AliasDb db(graph_);
+    for (size_t i = 0; i < graph_->outputs().size(); ++i) {
+      auto output = graph_->outputs().at(i);
+      auto type = output->type();
+      TORCH_INTERNAL_ASSERT(isListOfInts(type));
+      auto ss = extractListShape(output, symbolic_shape_values, db);
+      node_->output(i)->setType(
+          node_->output(i)->type()->expect<TensorType>()->withSymbolicShapes(
+              ss));
+    }
   }
 
   // node input indices that are TensorType and we need to iteratively
@@ -498,10 +517,7 @@ void PropagateShapesWithShapeFunction(
     Node* n,
     std::shared_ptr<Graph>& shape_compute_graph,
     const AliasDb& db) {
-  c10::SymbolicShape out =
-      SymbolicShapeAnalyzer(n, shape_compute_graph, db).run();
-  n->output()->setType(
-      n->output()->type()->expect<TensorType>()->withSymbolicShapes(out));
+  SymbolicShapeAnalyzer(n, shape_compute_graph, db).run();
 }
 
 void PropagateShapesOnBlock(Block* b, const AliasDb& db) {
@@ -516,6 +532,11 @@ void PropagateShapesOnBlock(Block* b, const AliasDb& db) {
       if (auto maybe_graph = shapeComputeGraphForSchema(n->schema())) {
         PropagateShapesWithShapeFunction(n, *maybe_graph, db);
       }
+    } else if (n->kind() == prim::TupleConstruct) {
+      auto orig_type = n->output()->type()->expect<TupleType>();
+      auto new_types = fmap(n->inputs(), [](Value* v) { return v->type(); });
+      n->output()->setType(
+          orig_type->createWithContained(std::move(new_types)));
     }
   }
 }

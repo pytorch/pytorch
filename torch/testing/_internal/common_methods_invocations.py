@@ -2598,11 +2598,14 @@ def sample_inputs_max_pool2d(op_info, device, dtype, requires_grad, **kwargs):
     ceil_modei = [True, False]
     paddingi = [0, 1]
     dilationi = [1, (1, 2)]
-    products = product(kerneli, stridei, Ni, Ci, Hi, Wi, ceil_modei, paddingi, dilationi)
+    return_indicesi = [True, False]
+
+    products = product(kerneli, stridei, Ni, Ci, Hi, Wi, ceil_modei, paddingi, dilationi, return_indicesi)
 
     def generator():
-        for kernel, stride, N, C, H, W, ceil_mode, padding, dilation in products:
-            max_pool = torch.nn.MaxPool2d(kernel, stride, ceil_mode=ceil_mode, padding=padding, dilation=dilation)
+        for kernel, stride, N, C, H, W, ceil_mode, padding, dilation, return_indices in products:
+            max_pool = torch.nn.MaxPool2d(kernel, stride, ceil_mode=ceil_mode, padding=padding,
+                                          dilation=dilation, return_indices=return_indices)
             kwargs = {
                 "kernel_size": max_pool.kernel_size,
                 "stride": max_pool.stride,
