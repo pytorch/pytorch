@@ -264,6 +264,21 @@ Setting the argument :attr:`num_workers` as a positive integer will
 turn on multi-process data loading with the specified number of loader worker
 processes.
 
+.. warning::
+   After several iterations, the loader worker processes will consume
+   the same amount of CPU memory as the parent process for all Python
+   objects in the parent process which are accessed from the worker
+   processes.  This can be problematic if the Dataset contains a lot of
+   data (e.g., you are loading a very large list of filenames at Dataset
+   construction time) and/or you are using a lot of workers (overall
+   memory usage is ``number of workers * size of parent process``).  The
+   simplest workaround is to replace Python objects with non-refcounted
+   representations such as Pandas, Numpy or PyArrow objects.  Check out
+   `issue #13246
+   <https://github.com/pytorch/pytorch/issues/13246#issuecomment-905703662>`_
+   for more details on why this occurs and example code for how to
+   workaround these problems.
+
 In this mode, each time an iterator of a :class:`~torch.utils.data.DataLoader`
 is created (e.g., when you call ``enumerate(dataloader)``), :attr:`num_workers`
 worker processes are created. At this point, the :attr:`dataset`,

@@ -10,7 +10,9 @@ namespace torch {
 namespace jit {
 
 bool insertableTensor(const at::Tensor& ten) {
-  return !ten.requires_grad();
+  // bail if tensor has no storage i.e. opaque tensor used in MKLdnn.
+  // or gradients because we have no way of serializing them & are mutable
+  return !ten.requires_grad() && ten.has_storage();
 }
 
 bool insertableIValue(const IValue& ivalue) {
@@ -65,8 +67,7 @@ c10::optional<Value*> tryInsertConstant(
   Node* n = g.create(prim::Constant);
   if (val.isTensor()) {
     at::Tensor ref = val.toTensor();
-    if (!ref.has_storage()) {
-      // bail if tensor has no storage i.e. opaque tensor used in MKLdnn.
+    if (!insertableTensor(val.toTensor())) {
       n->destroy();
       return c10::nullopt;
     }

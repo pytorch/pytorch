@@ -99,6 +99,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     'linalg_solve', 'sqrt', 'stack', 'gather', 'index_select', 'index_add_', 'linalg_inv', 'linalg_inv_ex',
     'l1_loss_backward', 'baddbmm', 'addbmm', 'addmm', 'addmv', 'addr', 'linalg_householder_product',
     'constant_pad_nd', 'reflection_pad1d', 'reflection_pad2d', 'reflection_pad3d', 'linalg_cholesky_ex', 'linalg_eig',
+    'select_backward', 'diagonal_backward', 'slice_backward',
     'reflection_pad1d_backward', 'reflection_pad2d_backward', 'reflection_pad3d_backward', 'symeig', '_sparse_sparse_matmul',
     'replication_pad1d', 'replication_pad2d', 'replication_pad3d', 'take', 'put_', '_to_copy',
     'replication_pad1d_backward', 'replication_pad2d_backward', 'replication_pad3d_backward',
@@ -374,7 +375,7 @@ def gen_variable_type(
     """
     fm = FileManager(install_dir=out, template_dir=template_path, dry_run=False)
     fm.write('VariableType.h', lambda: {
-        'generated_comment': f'@generated from {template_path}/VariableType.h'
+        'generated_comment': "@" f'generated from {template_path}/VariableType.h'
     })
 
     # NOTE: see Note [Sharded File] at the top of the VariableType.cpp
@@ -385,7 +386,7 @@ def gen_variable_type(
         key_fn=lambda fn: cpp.name(fn.func.func),
         base_env={
             'generated_comment':
-            f'@generated from {template_path}/VariableType.cpp',
+            "@" f'generated from {template_path}/VariableType.cpp',
         },
         env_callable=gen_variable_type_func,
         num_shards=5,
