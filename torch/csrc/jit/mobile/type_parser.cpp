@@ -45,6 +45,17 @@ class TypeParser {
   TypePtr parseNonSimple(const std::string& token) {
     if (token == "List") {
       return CreateSingleElementType<ListType>();
+    } else if (token == "Union") {
+      std::vector<TypePtr> types;
+      expect("[");
+      while (cur() != "]") {
+        types.emplace_back(parse());
+        if (cur() != "]") {
+          expect(",");
+        }
+      }
+      expect("]");
+      return UnionType::create(types);
     } else if (token == "Optional") {
       return CreateSingleElementType<OptionalType>();
     } else if (token == "Future") {

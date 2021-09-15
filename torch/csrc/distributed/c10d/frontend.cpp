@@ -3,10 +3,11 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/Functions.h>
 #include <c10/util/Exception.h>
-#include <c10d/PrefixStore.hpp>
 #include <c10d/FileStore.hpp>
 #include <c10d/TCPStore.hpp>
 #include <c10d/Utils.hpp>
+#include <torch/csrc/distributed/c10d/quantization/quantization.h>
+#include <torch/library.h>
 
 #include <chrono>
 #include <sstream>
@@ -17,10 +18,6 @@
 #include <c10d/ProcessGroupGloo.hpp>
 #endif
 
-#ifdef USE_C10D_NCCL
-#include <c10d/ProcessGroupNCCL.hpp>
-#endif
-
 #ifdef USE_C10D_MPI
 #include <c10d/ProcessGroupMPI.hpp>
 #endif
@@ -28,6 +25,20 @@
 namespace c10d {
 
 namespace {
+
+// Constant initialization, so it is guaranteed to be initialized before
+// static initialization calls which may invoke registerNCCLProcessGroupProvider
+const NCCLProcessGroupProvider stubProvider;
+constexpr const NCCLProcessGroupProvider* defaultStubProviderAddr =
+    &stubProvider;
+inline const NCCLProcessGroupProvider*& getNCCLProcessGroupProviderAddress() {
+  static const NCCLProcessGroupProvider* stubs_ = defaultStubProviderAddr;
+  return stubs_;
+}
+
+const NCCLProcessGroupProvider* GetNCCLProcessGroupProvider() {
+  return getNCCLProcessGroupProviderAddress();
+}
 
 void maybePreprocessComplexTensor(at::Tensor& tensor) {
   if(!tensor.is_complex()) {
@@ -62,6 +73,11 @@ void assertReduceOpSupportsComplexTensor(ReduceOp op) {
 }
 
 }  // namespace anonymous
+
+void registerNCCLProcessGroupProvider(NCCLProcessGroupProvider* provider) {
+  getNCCLProcessGroupProviderAddress() = provider;
+}
+
 
 std::string Backend::get(const std::string& backend_type) {
   return backend_type;
@@ -207,17 +223,7 @@ c10::intrusive_ptr<ProcessGroup> DistributedC10d::newProcessGroupHelper(
           "Attempting to create GLOO-based process group while GLOO is either not enabled or built");
 #endif // USE_C10D_GLOO
     } else if (backend == "nccl") {
-#ifdef USE_C10D_NCCL
-      auto options = ProcessGroupNCCL::Options::create();
-
-      options->is_high_priority_stream = false;
-      options->timeout = timeout;
-      pg = c10::make_intrusive<ProcessGroupNCCL>(
-          prefix_store, rank, world_size, options);
-#else
-      AT_ERROR(
-          "Attempting to create NCCL-based process group while NCCL is either not enabled or built");
-#endif // USE_C10D_NCCL
+      pg = GetNCCLProcessGroupProvider()->get(prefix_store, rank, world_size, timeout);
     } else {
       // TODO: discuss to figure out how to extend this to third party backends?
       AT_ERROR("Unsupported backend type: ", backend);
@@ -1008,7 +1014,7 @@ void initCustomClassBindings() {
           .def(
               "broadcast",
               [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
-                 std::vector<at::Tensor> data) { return self->broadcast(data);
+                  std::vector<at::Tensor> data) { return self->broadcast(data);
           })
           */
           .def(
@@ -1045,14 +1051,14 @@ void initCustomClassBindings() {
           .def(
               "allreduce",
               [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
-                 at::Tensor& tensor,
-                 c10::intrusive_ptr<::c10d::ReduceOp> op) {
+                  at::Tensor& tensor,
+                  c10::intrusive_ptr<::c10d::ReduceOp> op) {
                       ::c10d::AllreduceOptions opts;
                       opts.reduceOp = *op;
                       std::vector<at::Tensor> tensors = {tensor};
                       return self->allreduce(tensors, opts);
-                 }
-           )
+                  }
+            )
           */
           // TODO: make AllreduceCoalescedOptions compatible with TorchBind to
           // provide the full API in python.
@@ -1098,8 +1104,8 @@ void initCustomClassBindings() {
           .def(
               "allgather",
               [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
-                 std::vector<at::Tensor> output,
-                 at::Tensor input) {
+                  std::vector<at::Tensor> output,
+                  at::Tensor input) {
                 std::vector<std::vector<at::Tensor>> outputs = {
                     std::move(output)};
                 std::vector<at::Tensor> inputs = {std::move(input)};
@@ -1121,8 +1127,8 @@ void initCustomClassBindings() {
           .def(
               "gather",
               [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
-                 std::vector<std::vector<at::Tensor>> output_tensors,
-                 std::vector<at::Tensor> input_tensors) {
+                  std::vector<std::vector<at::Tensor>> output_tensors,
+                  std::vector<at::Tensor> input_tensors) {
                 ::c10d::GatherOptions opts;
                 return self->gather(output_tensors, input_tensors, opts);
               })
@@ -1145,8 +1151,8 @@ void initCustomClassBindings() {
           .def(
               "scatter",
               [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
-                 std::vector<at::Tensor> outputTensors,
-                 std::vector<std::vector<at::Tensor>> inputTensors) {
+                  std::vector<at::Tensor> outputTensors,
+                  std::vector<std::vector<at::Tensor>> inputTensors) {
                 ::c10d::ScatterOptions opts;
                 self->scatter(outputTensors, inputTensors, opts);
               })
@@ -1169,8 +1175,8 @@ void initCustomClassBindings() {
           // TODO: Enable this method when TorchBind supports
           ReduceScatterOptions. .def( "reduce_scatter",
               [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
-                 std::vector<at::Tensor> outputTensors,
-                 std::vector<std::vector<at::Tensor>> inputTensors) {
+                  std::vector<at::Tensor> outputTensors,
+                  std::vector<std::vector<at::Tensor>> inputTensors) {
                 ::c10d::ReduceScatterOptions opts;
                 return self->reduce_scatter(outputTensors, inputTensors, opts);
               })
@@ -1241,95 +1247,6 @@ void initCustomClassBindings() {
                 return self->barrier(opts);
               });
 
-#ifdef USE_C10D_NCCL
-  // XXX: Ideally the Options of ProcessGroupNCCL should be
-  // bound using `def_readwrite` like in pybind11, but we
-  // didn't do that because: 1. no milisecond support yet
-  // 2. no def_readwrite or property support yet.
-  // TODO: make this binding the same as pybind11
-  static const auto ProcessGroupNCCLOptionsTorchBind =
-      torch::class_<::c10d::ProcessGroupNCCL::Options>(
-          "dist_c10d", "ProcessGroupNCCLOptions")
-          .def(torch::init([](int64_t timeout, bool isHighPriorityStream) {
-            auto opTimeout = std::chrono::milliseconds(timeout);
-            auto opts =
-                ::c10d::ProcessGroupNCCL::Options::create(isHighPriorityStream);
-            opts->timeout = opTimeout;
-            return opts;
-          }));
-
-  static const auto ProcessGroupNCCLTorchBind =
-      torch::class_<::c10d::ProcessGroupNCCL>("dist_c10d", "ProcessGroupNCCL")
-          .def_pickle(
-              [](const c10::intrusive_ptr<::c10d::ProcessGroupNCCL>& self) {
-                auto base_process_group =
-                    ::c10::static_intrusive_pointer_cast<::c10d::ProcessGroup>(self);
-                auto name =
-                    ::c10d::DistributedC10d::get()->getNameOfProcessGroup(self);
-                return std::vector<std::string>{name};
-              },
-              [](std::vector<std::string> state) {
-                TORCH_CHECK(
-                    state.size() == 1,
-                    "Expecting exactly 1 state when restoring ProcessGroupNCCL, got: ",
-                    state.size());
-                const auto& process_group_name = state.front();
-                auto base_process_group =
-                    ::c10d::DistributedC10d::get()->getProcessGroupByName(
-                        process_group_name);
-                TORCH_CHECK(
-                    base_process_group.defined(),
-                    "Needed process group not found, ",
-                    "please create a process group with name: ",
-                    process_group_name);
-                c10::intrusive_ptr<::c10d::ProcessGroupNCCL>
-                    process_group_nccl = ::c10::dynamic_intrusive_pointer_cast<
-                        ::c10d::ProcessGroupNCCL>(base_process_group);
-                TORCH_CHECK(
-                    process_group_nccl.defined(),
-                    "Process group ",
-                    process_group_name,
-                    " isn't configured for NCCL backend");
-                return process_group_nccl;
-              })
-          .def(torch::init(
-              [](const c10::intrusive_ptr<::c10d::Store>& store,
-                 int64_t rank,
-                 int64_t size,
-                 c10::intrusive_ptr<::c10d::ProcessGroupNCCL::Options> options,
-                 const std::string& name) {
-                auto pg = c10::make_intrusive<::c10d::ProcessGroupNCCL>(
-                    store, rank, size, options);
-                ::c10d::DistributedC10d::get()->registerProcessGroupName(
-                    pg, name);
-                return pg;
-              }))
-          .def(
-              "alltoall_base",
-              [](const c10::intrusive_ptr<::c10d::ProcessGroupNCCL>& self,
-                 at::Tensor output,
-                 at::Tensor input,
-                 std::vector<int64_t> outputSplitSizes,
-                 std::vector<int64_t> inputSplitSizes) {
-                return self->alltoall_base(
-                    output,
-                    input,
-                    outputSplitSizes,
-                    inputSplitSizes,
-                    ::c10d::AllToAllOptions());
-              })
-          .def(
-              "size",
-              [](const c10::intrusive_ptr<::c10d::ProcessGroupNCCL>& self) {
-                return (int64_t)self->getSize();
-              })
-          .def(
-              "rank",
-              [](const c10::intrusive_ptr<::c10d::ProcessGroupNCCL>& self) {
-                return (int64_t)self->getRank();
-              });
-#endif
-
   static const auto DistributedC10dFrontendTorchBind =
       torch::class_<::c10d::DistributedC10d>("dist_c10d", "frontend")
           .def(torch::init([]() { return ::c10d::DistributedC10d::get(); }))
@@ -1344,4 +1261,12 @@ void initCustomClassBindings() {
               &::c10d::DistributedC10d::getNameOfProcessGroup);
 }
 
+TORCH_LIBRARY(q, m) {
+    m.def("_Bfloat16QuantizedToFloat(Tensor input) -> Tensor");
+    m.def("_FloatToBfloat16Quantized(Tensor input) -> Tensor");
+}
+TORCH_LIBRARY_IMPL(q, CPU, m) {
+    m.impl("_Bfloat16QuantizedToFloat", ::torch::distributed::c10d::quantization::_bfloat16_to_float_cpu);
+    m.impl("_FloatToBfloat16Quantized", ::torch::distributed::c10d::quantization::_float_to_bfloat16_cpu);
+}
 } // namespace c10d
