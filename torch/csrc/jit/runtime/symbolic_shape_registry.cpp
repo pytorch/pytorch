@@ -204,8 +204,13 @@ const std::string shape_compute_functions =
             return [nInputPlane, outputHeight, outputWidth]
           else:
             return [nbatch, nInputPlane, outputHeight, outputWidth]
+
+        def max_pool2d_with_indices(input: List[int], kernel_size: List[int], stride: List[int], padding: List[int], dilation: List[int], ceil_mode: bool):
+          out = max_pool2d(input, kernel_size, stride, padding, dilation, ceil_mode)
+          return (out, out)
     )"
     R"(
+
         def mm(self: List[int] , mat2: List[int]):
           assert len(self) == 2, "self must be a matrix"
           assert len(mat2) == 2, "mat2 must be a matrix"
@@ -587,6 +592,7 @@ static const OperatorMap<std::string>& get_schema_to_function_graph() {
       {"aten::matmul(Tensor self, Tensor other) -> Tensor", "matmul"},
       {"aten::linear(Tensor input, Tensor weight, Tensor? bias=None) -> Tensor", "linear"},
       {"aten::max_pool2d(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, int[2] dilation=1, bool ceil_mode=False) -> Tensor", "max_pool2d"},
+      {"aten::max_pool2d_with_indices(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, int[2] dilation=1, bool ceil_mode=False) -> (Tensor, Tensor)", "max_pool2d_with_indices"},
       {"aten::t(Tensor(a) self) -> Tensor(a)", "t"},
       {"aten::transpose.int(Tensor(a) self, int dim0, int dim1) -> Tensor(a)", "transpose"},
       {"aten::conv1d(Tensor input, Tensor weight, Tensor? bias=None, int[1] stride=1, int[1] padding=0, int[1] dilation=1, int groups=1) -> Tensor", "conv1d"},
@@ -633,6 +639,22 @@ void loadModule(const CompilationUnit& module) {
         module.get_function(shape_compute_function_name);
     std::shared_ptr<Graph> graph = shape_compute_function.graph();
     Inline(*graph);
+
+    // ATEN operators can return multiple unboxed values, this in contrast to
+    // functions defined in TorchScript or User-Registered Operators
+    // Which must use a Tuple
+    // Here, modify the shape graph of aten operators with multiple outputs
+    // so that they correspond to each other
+    if (pair.first->schema().returns().size() > 1) {
+      TORCH_INTERNAL_ASSERT(
+          graph->outputs().size() == 1 &&
+          graph->outputs().at(0)->node()->kind() == prim::TupleConstruct);
+      auto tuple_node = graph->outputs().at(0)->node();
+      graph->eraseOutput(0);
+      for (Value* v : tuple_node->inputs()) {
+        graph->registerOutput(v);
+      }
+    }
 
     cached_schema_to_graph[schema_string] = graph;
     reused_functions[shape_compute_function_name] = graph;
