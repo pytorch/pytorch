@@ -277,7 +277,7 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
 
         # generate native function impls that build IR nodes
         for dispatch_key in [backend_dispatch_key]:
-            fm.write_with_template(f'{dispatch_key}NativeFunctions.cpp', 'NativeFunctions.cpp', lambda: {
+            fm.write_with_template(f'{dispatch_key}NativeFunctions.cpp', 'DispatchKeyNativeFunctions.cpp', lambda: {
                 'generated_comment': '',
                 'includes': [f'#include "{path}"' for path in [
                     "lazy_tensor_core/csrc/tensor.h",
