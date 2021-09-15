@@ -68,7 +68,7 @@ class OpCodeCache {
 
 void parseInstructions(
     const std::string& function_name,
-    const c10::ivalue::TupleElements& ins_list,
+    c10::ivalue::TupleElements&& ins_list,
     c10::ivalue::TupleElements& debug_handles_m_tuple,
     mobile::Function* function) {
   c10::List<int64_t> debug_handles_list;

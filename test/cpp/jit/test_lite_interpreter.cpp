@@ -486,7 +486,7 @@ TEST(LiteInterpreterTest, GetByteCodeVersion) {
 namespace {
 
 void compareModelOutput(
-    const std::vector<IValue>& actual_result_list,
+    c10::ArrayRef<IValue> actual_result_list,
     const std::vector<Tensor>& expect_result_list) {
   AT_ASSERT(actual_result_list.size() == expect_result_list.size());
   AT_ASSERT(actual_result_list[0].toTensor().equal(expect_result_list[0]));
@@ -508,7 +508,7 @@ void runAndCheckTorchScriptModel(
   Module m_mobile = load(input_model_stream);
 
   auto actual_result = m_mobile.forward(input_data);
-  std::vector<IValue> actual_result_list = actual_result.toTuple()->elements();
+  const auto& actual_result_list = actual_result.toTuple()->elements();
   compareModelOutput(actual_result_list, expect_result_list);
 }
 
@@ -525,7 +525,7 @@ void runAndCheckBytecodeModel(
   Module m_mobile = load(input_model_stream);
 
   auto actual_result = m_mobile.forward(input_data);
-  std::vector<IValue> actual_result_list = actual_result.toTuple()->elements();
+  const auto& actual_result_list = actual_result.toTuple()->elements();
 
   compareModelOutput(actual_result_list, expect_result_list);
 }
@@ -932,10 +932,10 @@ TEST(RunTimeTest, ParseBytecode) {
   std::string function_name("test_function");
   auto function = std::unique_ptr<mobile::Function>(
       new mobile::Function(c10::QualifiedName(function_name)));
-  std::vector<IValue> debug_handles_m_tuple;
+  c10::ivalue::TupleElements debug_handles_m_tuple;
   parseInstructions(
-      function_name, instructions, debug_handles_m_tuple, function.get());
-  parseTypes(types, function.get());
+      function_name, std::move(*c10::ivalue::Tuple::create(instructions)).elements(), debug_handles_m_tuple, function.get());
+  parseTypes(c10::ivalue::Tuple::create(types)->elements(), function.get());
   const size_t rsize = 5;
   parseRegisterSize(rsize, function.get());
 
