@@ -1,6 +1,7 @@
 from tools.codegen.api import cpp
 from tools.codegen.api import dispatcher
 from tools.codegen.api.types import DispatcherSignature, CppSignatureGroup
+from tools.codegen.api.translate import translate
 from tools.codegen.context import method_with_native_function
 from tools.codegen.model import (
     Argument, NativeFunction, NativeFunctionsGroup, Return, SchemaKind, BackendIndex, DispatchKey
@@ -28,18 +29,6 @@ def return_names_str(f: NativeFunction) -> str:
     if f.func.arguments.self_arg is not None:
         return f.func.arguments.self_arg.argument.name
     raise AssertionError("Unable to handle functionalization for op={str(f.func.name)}")
-
-def view_lambda_capture_arg_str(a: Argument) -> str:
-    # Assumption: all view op schemas consist of "self", followed by a bunch of non-tensorlike args.
-    assert not a.type.is_tensor_like()
-
-    a_ctype = dispatcher.argument_type(a, binds=a.name)
-    if a_ctype.type.is_ref_type():
-        capture_str = f'{a.name} = {a_ctype.type.copy_ref_type(a.name)}'
-    else:
-        capture_str = a.name
-
-    return capture_str
 
 def is_multi_output(rets: Tuple[Return, ...]) -> bool:
     return len(rets) > 1 or rets[0].type.is_list_like() is not None
@@ -75,7 +64,10 @@ def emit_view_functionalization_body(f: NativeFunction, g: Optional[NativeFuncti
         # when we call the at::meta:: API, all tensor args need to be converted to the meta device.
         assert not a.type.is_tensor_like()
 
-    captured_view_args_str = ', '.join(view_lambda_capture_arg_str(a) for a in non_self_args)
+    non_self_bindings = [dispatcher.argument(a) for a in non_self_args]
+    non_self_value_ctypes = [cpp.argument_to_value_type(a) for a in non_self_args]
+    non_self_capture_exprs = translate(non_self_bindings, non_self_value_ctypes, method=False)
+    captured_view_args_str = ', '.join(f'{arg.name} = {val.expr}' for arg, val in zip(non_self_args, non_self_capture_exprs))
 
     multi_output = is_multi_output(f.func.returns)
 
