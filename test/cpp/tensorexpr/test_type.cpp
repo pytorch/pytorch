@@ -9,7 +9,6 @@ namespace jit {
 using namespace torch::jit::tensorexpr;
 
 TEST(Type, Test01) {
-  KernelScope kernel_scope;
   {
     Dtype dt1 = kInt;
     ASSERT_EQ(dt1, kInt);
@@ -45,28 +44,24 @@ TEST(Type, Test01) {
 
 TEST(Type, BitCasting) {
   {
-    KernelScope kernel_scope;
     VarHandle x("x", kFloat);
     ExprHandle y = bitcast<int32_t>(x);
     // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
     ASSERT_EQ(y.dtype(), kInt);
   }
   {
-    KernelScope kernel_scope;
     VarHandle x("x", kInt);
     ExprHandle y = bitcast<float>(x);
     // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
     ASSERT_EQ(y.dtype(), kFloat);
   }
   {
-    KernelScope kernel_scope;
     VarHandle x("x", kShort);
     ExprHandle y = bitcast<at::Half>(x);
     // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
     ASSERT_EQ(y.dtype(), kHalf);
   }
   {
-    KernelScope kernel_scope;
     VarHandle x("x", kHalf);
     ExprHandle y = bitcast<int16_t>(x);
     // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
@@ -82,7 +77,6 @@ TEST(Type, BitCasting) {
   using SimpleIRExprEval = ExprEval<SimpleIREvaluator>;
   // this is broken
   /*{
-    KernelScope kernel_scope;
     at::Half k_;
     at::Half* k = &k_;
     *reinterpret_cast<int16_t*>(k) = ref16;
@@ -93,7 +87,6 @@ TEST(Type, BitCasting) {
   }*/
 
   {
-    KernelScope kernel_scope;
     float k = raw_bitcast<float>(ref32);
     auto a = FloatImm::make(k);
     auto b = BitCast::make(kInt, a);
@@ -102,7 +95,6 @@ TEST(Type, BitCasting) {
   }
 
   {
-    KernelScope kernel_scope;
     double k = raw_bitcast<double>(ref64);
     auto a = DoubleImm::make(k);
     auto b = BitCast::make(kLong, a);
@@ -111,7 +103,6 @@ TEST(Type, BitCasting) {
   }
 
   {
-    KernelScope kernel_scope;
     int64_t k = raw_bitcast<int64_t>(reff64);
     auto a = LongImm::make(k);
     auto b = BitCast::make(kDouble, a);
@@ -120,7 +111,6 @@ TEST(Type, BitCasting) {
   }
 
   {
-    KernelScope kernel_scope;
     int32_t k = raw_bitcast<int32_t>(reff32);
     auto a = IntImm::make(k);
     auto b = BitCast::make(kFloat, a);
@@ -130,27 +120,22 @@ TEST(Type, BitCasting) {
 
   // This segfaults :(
   /*{
-    KernelScope kernel_scope;
     VarHandle x("x", kDouble);
     ASSERT_ANY_THROW(ExprHandle y = bitcast<int32_t>(x));
   }
   {
-    KernelScope kernel_scope;
     VarHandle x("x", kFloat);
     ASSERT_ANY_THROW(ExprHandle y = bitcast<int64_t>(x));
   }
   {
-    KernelScope kernel_scope;
     VarHandle x("x", kLong);
     ASSERT_ANY_THROW(ExprHandle y = bitcast<float>(x));
   }
   {
-    KernelScope kernel_scope;
     VarHandle x("x", kShort);
     ASSERT_ANY_THROW(ExprHandle y = bitcast<float>(x));
   }
   {
-    KernelScope kernel_scope;
     VarHandle x("x", kInt);
     ASSERT_ANY_THROW(ExprHandle y = bitcast<at::Half>(x));
   }*/
@@ -159,7 +144,6 @@ TEST(Type, BitCasting) {
 TEST(Type, Propagation) {
   // Same types:
   {
-    KernelScope kernel_scope;
     VarHandle x("x", kFloat);
     VarHandle y("y", kFloat);
     ExprHandle body = FloatImm::make(2.f) +
@@ -168,7 +152,6 @@ TEST(Type, Propagation) {
   }
   // Int to bigger int:
   {
-    KernelScope kernel_scope;
     VarHandle x("x", kShort);
     VarHandle y("y", kLong);
     ExprHandle body =
@@ -177,7 +160,6 @@ TEST(Type, Propagation) {
   }
   // Float to bigger float:
   {
-    KernelScope kernel_scope;
     VarHandle x("x", kHalf);
     VarHandle y("y", kDouble);
     ExprHandle body =
@@ -186,7 +168,6 @@ TEST(Type, Propagation) {
   }
   // Int to Float:
   {
-    KernelScope kernel_scope;
     VarHandle x("x", kFloat);
     VarHandle y("y", kInt);
     ExprHandle body =
@@ -195,7 +176,6 @@ TEST(Type, Propagation) {
   }
   // Smaller float, bigger Int:
   {
-    KernelScope kernel_scope;
     VarHandle x("x", kHalf);
     VarHandle y("y", kLong);
     ExprHandle body =
@@ -204,7 +184,6 @@ TEST(Type, Propagation) {
   }
   // Bigger float, smaller Int:
   {
-    KernelScope kernel_scope;
     VarHandle x("x", kChar);
     VarHandle y("y", kDouble);
     ExprHandle body =
@@ -213,7 +192,6 @@ TEST(Type, Propagation) {
   }
   // Sign change char/byte upgrades to short:
   {
-    KernelScope kernel_scope;
     VarHandle x("x", kChar);
     VarHandle y("y", kByte);
     ExprHandle body =

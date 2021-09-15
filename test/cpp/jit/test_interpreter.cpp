@@ -175,6 +175,15 @@ TEST(InterpreterTest, IgnorableArgsInSchema) {
   ASSERT_TRUE(op_to_specified_args_non_const["aten::conv2d"] == 6);
 }
 
+TEST(InterpreterTest, IgnorableArgsInSchemaWithOut) {
+  auto graph = build_mobile_export_with_out();
+  MobileCode function(graph, "");
+  auto op_to_specified_args = function.op_to_num_specified_args();
+  ASSERT_TRUE(op_to_specified_args.size() == 1);
+  // this should be 3 when the add_out flag is set to True
+  ASSERT_TRUE(op_to_specified_args["aten::add.out"] == 4);
+}
+
 TEST(InterpreterTest, runAsyncBasicTest) {
   /*
   TODO: there are some problem with C++ parsing script program involving
@@ -265,6 +274,21 @@ graph(%0 : Tensor,
         "The size of tensor a (2) must match the size of tensor b (3) at non-singleton dimension 1");
   }
   EXPECT_TRUE(exception_handled);
+
+  FLAGS_torch_jit_enable_rethrow_caught_exception = true;
+  c10::intrusive_ptr<Future> future = interp.runAsync(stack);
+  future->wait();
+  ASSERT_TRUE(future->completed());
+  ASSERT_TRUE(future->hasError());
+  try {
+    std::rethrow_exception(future->exception_ptr());
+  } catch (c10::Error& e) {
+    std::string exception_msg = e.what_without_backtrace();
+    EXPECT_STREQ(
+        exception_msg.c_str(),
+        "The size of tensor a (2) must match the size of tensor b (3) at non-singleton dimension 1");
+  }
+
   FLAGS_torch_jit_enable_rethrow_caught_exception = original_flag_value;
 }
 

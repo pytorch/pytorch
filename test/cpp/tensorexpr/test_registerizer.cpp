@@ -13,10 +13,9 @@ using namespace torch::jit::tensorexpr;
 
 // Can replace a simple scalar access with a local variable.
 TEST(Registerizer, RegisterizerSimple) {
-  KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   VarHandle x("x", kInt);
-  Stmt* stmt = Block::make(
+  StmtPtr stmt = Block::make(
       {Store::make(a, {0}, 0),
        For::make(
            x,
@@ -58,10 +57,9 @@ TEST(Registerizer, RegisterizerSimple) {
 
 // Won't do replacement of a loop access.
 TEST(Registerizer, RegisterizerLoop) {
-  KernelScope kernel_scope;
   BufHandle a("A", {10}, kInt);
   VarHandle x("x", kInt);
-  Stmt* stmt = Block::make(
+  StmtPtr stmt = Block::make(
       {Store::make(a, {0}, 0),
        For::make(
            x,
@@ -105,10 +103,9 @@ TEST(Registerizer, RegisterizerLoop) {
 // Won't replace even if the load is a fixed scalar, since the store could
 // invalidate it.
 TEST(Registerizer, RegisterizerLoopFixedLoad) {
-  KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   VarHandle x("x", kInt);
-  Stmt* stmt = Block::make(
+  StmtPtr stmt = Block::make(
       {Store::make(a, {0}, 0),
        For::make(
            x,
@@ -152,10 +149,9 @@ TEST(Registerizer, RegisterizerLoopFixedLoad) {
 // We can registerize accesses that occur entirely within inner scopes, even if
 // they depend on the loop var.
 TEST(Registerizer, RegisterizerLoopInternal) {
-  KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   VarHandle x("x", kInt);
-  Stmt* stmt = Block::make({For::make(
+  StmtPtr stmt = Block::make({For::make(
       x,
       0,
       10,
@@ -192,8 +188,8 @@ TEST(Registerizer, RegisterizerLoopInternal) {
       R"IR(
 # CHECK: for (int x = 0; x < 10; x++)
 # CHECK: int A_1 = A[x];
-# CHECK:   A_1 = x + A_1;
-# CHECK:   A_1 = x + A_1;
+# CHECK:   A_1 = A_1 + x;
+# CHECK:   A_1 = A_1 + x;
 # CHECK:   A[x] = A_1;
 # CHECK: })IR";
 
@@ -203,13 +199,12 @@ TEST(Registerizer, RegisterizerLoopInternal) {
 // An access can be overlapped by another read in the same Expr. In this case
 // B[z] and B[y] overlap and prevent registerization of both accesses.
 TEST(Registerizer, RegisterizerLoopInternalLoadOverlap) {
-  KernelScope kernel_scope;
   BufHandle a("A", {10}, kInt);
   BufHandle b("B", {10}, kInt);
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
   VarHandle z("z", kInt);
-  Stmt* stmt = Block::make({For::make(
+  StmtPtr stmt = Block::make({For::make(
       x,
       0,
       10,
@@ -235,10 +230,9 @@ TEST(Registerizer, RegisterizerLoopInternalLoadOverlap) {
 }
 
 TEST(Registerizer, RegisterizerLoopInternalRepeated) {
-  KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   VarHandle x("x", kInt);
-  Stmt* stmt = Block::make(
+  StmtPtr stmt = Block::make(
       {For::make(
            x,
            0,
@@ -273,12 +267,12 @@ TEST(Registerizer, RegisterizerLoopInternalRepeated) {
    * int A_1 = A[1];
    * int A_2 = A[0];
    * for (int x = 0; x < 10; x++) {
-   *   A_2 = x + A_1;
-   *   A_2 = x + A_1;
+   *   A_2 = A_1 + x;
+   *   A_2 = A_1 + x;
    * }
    * for (int x = 0; x < 10; x++) {
-   *   A_2 = x + A_1;
-   *   A_2 = x + A_1;
+   *   A_2 = A_1 + x;
+   *   A_2 = A_1 + x;
    * }
    * A[0] = A_2;
    */
@@ -291,12 +285,12 @@ TEST(Registerizer, RegisterizerLoopInternalRepeated) {
 # CHECK: int A_1 = A[1];
 # CHECK: int A_2 = A[0];
 # CHECK: for (int x = 0; x < 10; x++)
-# CHECK:   A_2 = x + A_1;
-# CHECK:   A_2 = x + A_1;
+# CHECK:   A_2 = A_1 + x;
+# CHECK:   A_2 = A_1 + x;
 # CHECK: }
 # CHECK: for (int x = 0; x < 10; x++)
-# CHECK:   A_2 = x + A_1;
-# CHECK:   A_2 = x + A_1;
+# CHECK:   A_2 = A_1 + x;
+# CHECK:   A_2 = A_1 + x;
 # CHECK: }
 # CHECK-NOT: A[1]
 # CHECK: A[0] = A_2;
@@ -307,10 +301,9 @@ TEST(Registerizer, RegisterizerLoopInternalRepeated) {
 }
 
 TEST(Registerizer, RegisterizerLoopInternalRepeatedOverlapLoopVar) {
-  KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   VarHandle x("x", kInt);
-  Stmt* stmt = Block::make(
+  StmtPtr stmt = Block::make(
       {For::make(
            x,
            0,
@@ -353,11 +346,10 @@ TEST(Registerizer, RegisterizerLoopInternalRepeatedOverlapLoopVar) {
 }
 
 TEST(Registerizer, RegisterizerLoopInternalRepeatedOverlapOther) {
-  KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
-  Stmt* stmt = Block::make(
+  StmtPtr stmt = IRSimplifier::simplify(Block::make(
       {For::make(
            x,
            0,
@@ -373,7 +365,7 @@ TEST(Registerizer, RegisterizerLoopInternalRepeatedOverlapOther) {
                {Store::make(a, {0}, Add::make(x, Load::make(a, {y}))),
                 Store::make(a, {0}, Add::make(x, Load::make(a, {y})))}))
 
-      });
+      }));
 
   /*
    * for (int x = 0; x < 10; x++) {
@@ -400,10 +392,9 @@ TEST(Registerizer, RegisterizerLoopInternalRepeatedOverlapOther) {
 
 // Will registerize multiple accesses of different items of the same buffer.
 TEST(Registerizer, RegisterizerMultiVar) {
-  KernelScope kernel_scope;
   BufHandle a("A", {2}, kInt);
   VarHandle x("x", kInt);
-  Stmt* stmt = Block::make({
+  StmtPtr stmt = Block::make({
       Store::make(a, {0}, 0),
       Store::make(a, {1}, 0),
       For::make(
@@ -456,12 +447,11 @@ TEST(Registerizer, RegisterizerMultiVar) {
 
 // Will registerize the valid accesses while skipping invalid replacements.
 TEST(Registerizer, RegisterizerVariableLoad) {
-  KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   BufHandle b("B", {10}, kInt);
   VarHandle x("x", kInt);
   VarHandle x2("x", kInt);
-  Stmt* stmt = Block::make(
+  StmtPtr stmt = Block::make(
       {Store::make(a, {0}, 0),
        For::make(x, 0, 10, Store::make(b, {x}, x)),
        For::make(
@@ -512,12 +502,11 @@ TEST(Registerizer, RegisterizerVariableLoad) {
 
 // Can registerize variable accesses so long as the variable does not change.
 TEST(Registerizer, RegisterizerSymbolicIndices) {
-  KernelScope kernel_scope;
   VarHandle i("i", kInt);
   VarHandle N("N", kInt);
   BufHandle a("A", {N}, kInt);
   VarHandle x("x", kInt);
-  Stmt* stmt = Block::make(
+  StmtPtr stmt = Block::make(
       {Store::make(a, {i}, 0),
        For::make(
            x,
@@ -559,11 +548,10 @@ TEST(Registerizer, RegisterizerSymbolicIndices) {
 
 // Can registerize accesses dependent on multiple loop vars.
 TEST(Registerizer, RegisterizerMultiLoop) {
-  KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
-  Stmt* stmt = Block::make(
+  StmtPtr stmt = Block::make(
       {Store::make(a, {0}, 0),
        For::make(
            x,
@@ -616,10 +604,9 @@ TEST(Registerizer, RegisterizerMultiLoop) {
 
 // Can registerize correctly if scalars already exist in the program.
 TEST(Registerizer, RegisterizerRepeated) {
-  KernelScope kernel_scope;
   BufHandle a("A", {2}, kInt);
   VarHandle x("x", kInt);
-  Stmt* stmt = Block::make({
+  StmtPtr stmt = Block::make({
       Store::make(a, {0}, 0),
       Store::make(a, {1}, 0),
       For::make(
@@ -673,10 +660,9 @@ TEST(Registerizer, RegisterizerRepeated) {
 
 // Can registerize the load of A.
 TEST(Registerizer, RegisterizerNoLoads) {
-  KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   VarHandle x("x", kInt);
-  Stmt* stmt = Block::make(
+  StmtPtr stmt = Block::make(
       {Store::make(a, {0}, 0),
        For::make(
            x, 0, 10, Block::make({Store::make(a, {0}, Add::make(x, 1))}))});
@@ -714,11 +700,10 @@ TEST(Registerizer, RegisterizerNoLoads) {
 
 // Can registerize the load of A but not the store of B.
 TEST(Registerizer, RegisterizerNoRepeatedStores) {
-  KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   BufHandle b("B", {10}, kInt);
   VarHandle x("x", kInt);
-  Stmt* stmt = Block::make(
+  StmtPtr stmt = Block::make(
       {Store::make(a, {0}, 0),
        For::make(
            x,
@@ -763,10 +748,9 @@ TEST(Registerizer, RegisterizerNoRepeatedStores) {
 
 // Won't registerize if there are multiple accesses which may overlap.
 TEST(Registerizer, RegisterizerMultiVarOverlap) {
-  KernelScope kernel_scope;
   BufHandle a("A", {2}, kInt);
   VarHandle x("x", kInt);
-  Stmt* stmt = Block::make({
+  StmtPtr stmt = Block::make({
       Store::make(a, {0}, 0),
       Store::make(a, {1}, 0),
       For::make(
@@ -792,15 +776,13 @@ TEST(Registerizer, RegisterizerMultiVarOverlap) {
 }
 
 TEST(Registerizer, RegisterizerAllocs) {
-  KernelScope kernel_scope;
-
   BufHandle a("A", {2}, kInt);
   BufHandle c("C", {1}, kInt);
   VarHandle x("x", kInt);
 
   BufHandle b("B", {Load::make(c, {0})}, kInt);
 
-  Stmt* stmt = Block::make(
+  StmtPtr stmt = Block::make(
       {Allocate::make(b),
        Store::make(a, {0}, Load::make(c, {0})),
        Store::make(b, {0}, 0),
@@ -860,10 +842,9 @@ TEST(Registerizer, RegisterizerAllocs) {
 }
 
 TEST(Registerizer, RegisterizerNoInitializer) {
-  KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   VarHandle x("x", kInt);
-  Stmt* stmt = Block::make({For::make(
+  StmtPtr stmt = Block::make({For::make(
       x,
       0,
       10,
@@ -900,10 +881,9 @@ TEST(Registerizer, RegisterizerNoInitializer) {
 }
 
 TEST(Registerizer, RegisterizerNoInitializerLoopVar) {
-  KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   VarHandle x("x", kInt);
-  Stmt* stmt = Block::make({For::make(
+  StmtPtr stmt = Block::make({For::make(
       x,
       0,
       10,
@@ -929,11 +909,10 @@ TEST(Registerizer, RegisterizerNoInitializerLoopVar) {
 }
 
 TEST(Registerizer, RegisterizerLoadThenStore) {
-  KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   BufHandle b("B", {1}, kInt);
   VarHandle x("x", kInt);
-  Stmt* stmt = Block::make({For::make(
+  StmtPtr stmt = Block::make({For::make(
       x,
       0,
       10,
@@ -980,12 +959,11 @@ TEST(Registerizer, RegisterizerLoadThenStore) {
 }
 
 TEST(Registerizer, RegisterizerParallelized) {
-  KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   VarHandle x("x", kInt);
   LoopOptions loopOpts;
   loopOpts.set_gpu_block_index(0);
-  Stmt* stmt = Block::make(
+  StmtPtr stmt = Block::make(
       {Store::make(a, {0}, 0),
        For::make(
            x,
@@ -1009,13 +987,12 @@ TEST(Registerizer, RegisterizerParallelized) {
 // Should be able to registerize this since the scalar would exist before the
 // branch.
 TEST(Registerizer, RegisterizerConditionAfter) {
-  KernelScope kernel_scope;
   BufHandle a("A", {5}, kInt);
   BufHandle b("B", {5}, kInt);
   BufHandle c("C", {5}, kInt);
   VarHandle x("x", kInt);
 
-  Stmt* stmt = Block::make(
+  StmtPtr stmt = Block::make(
       {Store::make(a, {x}, Load::make(b, {x})),
        Store::make(c, {x}, Load::make(a, {x})),
        Cond::make(
@@ -1059,13 +1036,12 @@ TEST(Registerizer, RegisterizerConditionAfter) {
 // Should be able to registerize this since the scalar exists in the same form
 // after the branch and there is no overlap.
 TEST(Registerizer, RegisterizerConditionBefore) {
-  KernelScope kernel_scope;
   BufHandle a("A", {5}, kInt);
   BufHandle b("B", {5}, kInt);
   BufHandle c("C", {5}, kInt);
   VarHandle x("x", kInt);
 
-  Stmt* stmt = Block::make(
+  StmtPtr stmt = Block::make(
       {Cond::make(
            CompareSelect::make(x, 5, CompareSelectOperation::kLT),
            Store::make(a, {x}, Add::make(Load::make(a, {x}), 1)),
@@ -1111,13 +1087,12 @@ TEST(Registerizer, RegisterizerConditionBefore) {
 
 // Should be able to registerize this as the combination of the two above rules.
 TEST(Registerizer, RegisterizerConditionInside) {
-  KernelScope kernel_scope;
   BufHandle a("A", {5}, kInt);
   BufHandle b("B", {5}, kInt);
   BufHandle c("C", {5}, kInt);
   VarHandle x("x", kInt);
 
-  Stmt* stmt = Block::make(
+  StmtPtr stmt = Block::make(
       {Store::make(a, {x}, Load::make(b, {x})),
        Store::make(c, {x}, Load::make(a, {x})),
        Cond::make(
@@ -1171,14 +1146,13 @@ TEST(Registerizer, RegisterizerConditionInside) {
 // condition, and both sides are large enough to be registerized but cannot be
 // because there is no safe place to put the initializer or finalizer.
 TEST(Registerizer, RegisterizerConditionInsideOverlap1) {
-  KernelScope kernel_scope;
   BufHandle a("A", {5}, kInt);
   BufHandle b("B", {5}, kInt);
   BufHandle c("C", {5}, kInt);
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
 
-  Stmt* stmt = Block::make(
+  StmtPtr stmt = Block::make(
       // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
       {Store::make(a, {x}, Load::make(b, {x})),
        Store::make(c, {x}, Load::make(a, {x})),
@@ -1231,14 +1205,13 @@ TEST(Registerizer, RegisterizerConditionInsideOverlap1) {
 // the condition, and the first group must be finalized before the Cond, the
 // second initialized after it.
 TEST(Registerizer, RegisterizerConditionInsideOverlap2) {
-  KernelScope kernel_scope;
   BufHandle a("A", {5}, kInt);
   BufHandle b("B", {5}, kInt);
   BufHandle c("C", {5}, kInt);
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
 
-  Stmt* stmt = Block::make(
+  StmtPtr stmt = Block::make(
       // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
       {Store::make(a, {x}, Load::make(b, {x})),
        Store::make(a, {x}, Load::make(b, {x + 1})),
@@ -1317,13 +1290,12 @@ TEST(Registerizer, RegisterizerConditionInsideOverlap2) {
 // the accesses in it don't need to be valid (think size checks on the index).
 // In this case the accesses cannot be registerized.
 TEST(Registerizer, RegisterizerConditionHidden) {
-  KernelScope kernel_scope;
   BufHandle a("A", {5}, kInt);
   BufHandle b("B", {5}, kInt);
   BufHandle c("C", {5}, kInt);
   VarHandle x("x", kInt);
 
-  Stmt* stmt = Block::make(
+  StmtPtr stmt = Block::make(
       {Cond::make(
            CompareSelect::make(x, 5, CompareSelectOperation::kLT),
            Store::make(a, {x}, Add::make(Load::make(a, {x}), 1)),
@@ -1359,13 +1331,12 @@ TEST(Registerizer, RegisterizerConditionHidden) {
 // the user's fault). It "unhides" the conditional accesses, allowing
 // registerization to occur.
 TEST(Registerizer, RegisterizerConditionUnhidden) {
-  KernelScope kernel_scope;
   BufHandle a("A", {5}, kInt);
   BufHandle b("B", {5}, kInt);
   BufHandle c("C", {5}, kInt);
   VarHandle x("x", kInt);
 
-  Stmt* stmt = Block::make(
+  StmtPtr stmt = Block::make(
       {Cond::make(
            CompareSelect::make(x, 5, CompareSelectOperation::kLT),
            Store::make(a, {x}, Add::make(Load::make(a, {x}), 1)),
@@ -1420,13 +1391,12 @@ TEST(Registerizer, RegisterizerConditionUnhidden) {
 
 // Can registerize a load that occurs in the condition of a Cond.
 TEST(Registerizer, RegisterizerCondCondition) {
-  KernelScope kernel_scope;
   BufHandle a("A", {5}, kInt);
   BufHandle b("B", {5}, kInt);
   BufHandle c("C", {5}, kInt);
   VarHandle x("x", kInt);
 
-  Stmt* stmt = Block::make(
+  StmtPtr stmt = Block::make(
       {Store::make(a, {x}, Load::make(b, {x})),
        Store::make(c, {x}, Load::make(a, {x})),
        Cond::make(
@@ -1471,13 +1441,12 @@ TEST(Registerizer, RegisterizerCondCondition) {
 // Appearing in the condition of a Cond makes it visible to the enclosing scope,
 // and so we can registerize internal usages.
 TEST(Registerizer, RegisterizerCondConditionUnhidden) {
-  KernelScope kernel_scope;
   BufHandle a("A", {5}, kInt);
   BufHandle b("B", {5}, kInt);
   BufHandle c("C", {5}, kInt);
   VarHandle x("x", kInt);
 
-  Stmt* stmt = Block::make({Cond::make(
+  StmtPtr stmt = Block::make({Cond::make(
       CompareSelect::make(Load::make(a, {x}), 5, CompareSelectOperation::kLT),
       Store::make(a, {x}, Add::make(Load::make(a, {x}), 1)),
       Store::make(a, {x}, Add::make(Load::make(a, {x}), 10)))});
@@ -1520,14 +1489,13 @@ TEST(Registerizer, RegisterizerCondConditionUnhidden) {
 
 // Conditional hiding also works for IfThenElse exprs.
 TEST(Registerizer, RegisterizerIfThenElseHidden) {
-  KernelScope kernel_scope;
   BufHandle a("A", {5}, kInt);
   BufHandle b("B", {5}, kInt);
   BufHandle c("C", {5}, kInt);
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
 
-  Stmt* stmt = Block::make(
+  StmtPtr stmt = Block::make(
       {Store::make(
            b,
            {y},
@@ -1562,14 +1530,13 @@ TEST(Registerizer, RegisterizerIfThenElseHidden) {
 
 // Conditional unhiding also works for IfThenElse exprs.
 TEST(Registerizer, RegisterizerIfThenElseUnhidden) {
-  KernelScope kernel_scope;
   BufHandle a("A", {5}, kInt);
   BufHandle b("B", {5}, kInt);
   BufHandle c("C", {5}, kInt);
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
 
-  Stmt* stmt = Block::make({
+  StmtPtr stmt = Block::make({
       Store::make(a, {x}, 0),
       Store::make(
           b,
@@ -1617,14 +1584,13 @@ TEST(Registerizer, RegisterizerIfThenElseUnhidden) {
 
 // Nested IfThenElse exprs can't promote to higher level scopes.
 TEST(Registerizer, RegisterizerIfThenElseNested) {
-  KernelScope kernel_scope;
   BufHandle a("A", {5}, kInt);
   BufHandle b("B", {5}, kInt);
   BufHandle c("C", {5}, kInt);
   BufHandle d("D", {5}, kInt);
   VarHandle x("x", kInt);
 
-  Stmt* stmt = Block::make({Store::make(
+  StmtPtr stmt = Block::make({Store::make(
       a,
       {x},
       IfThenElse::make(
@@ -1661,13 +1627,12 @@ TEST(Registerizer, RegisterizerIfThenElseNested) {
 // to check that we don't promote the initializer/finalizer to the enclosing
 // Block.
 TEST(Registerizer, RegisterizerIfThenElseInternal) {
-  KernelScope kernel_scope;
   // Making these floats so they don't get simplified to a single access.
   BufHandle a("A", {5}, kFloat);
   BufHandle b("B", {5}, kFloat);
   VarHandle x("x", kInt);
 
-  Stmt* stmt = Block::make({Store::make(
+  StmtPtr stmt = Block::make({Store::make(
       a,
       {x},
       IfThenElse::make(
@@ -1740,13 +1705,12 @@ TEST(Registerizer, RegisterizerIfThenElseInternal) {
 
 // Can registerize a load that occurs in the condition of an IfThenElse;
 TEST(Registerizer, RegisterizerIfThenElseCondition) {
-  KernelScope kernel_scope;
   BufHandle a("A", {5}, kInt);
   BufHandle b("B", {5}, kInt);
   BufHandle c("C", {5}, kInt);
   VarHandle x("x", kInt);
 
-  Stmt* stmt = Block::make(
+  StmtPtr stmt = Block::make(
       {Store::make(a, {x}, Load::make(a, {x})),
        Store::make(
            a,
@@ -1786,13 +1750,12 @@ TEST(Registerizer, RegisterizerIfThenElseCondition) {
 // Appearing in the condition of a Cond makes it visible to the enclosing scope,
 // and so we can registerize internal usages.
 TEST(Registerizer, RegisterizerIfThenElseConditionUnhidden) {
-  KernelScope kernel_scope;
   BufHandle a("A", {5}, kInt);
   BufHandle b("B", {5}, kInt);
   BufHandle c("C", {5}, kInt);
   VarHandle x("x", kInt);
 
-  Stmt* stmt = Block::make({Store::make(
+  StmtPtr stmt = Block::make({Store::make(
       b,
       {x},
       IfThenElse::make(
@@ -1826,10 +1789,9 @@ TEST(Registerizer, RegisterizerIfThenElseConditionUnhidden) {
 // Cannot promote accesses internal to IfThenElse branches even if the enclosing
 // scope if conditional.
 TEST(Registerizer, RegisterizerConditionBranchOnly) {
-  KernelScope kernel_scope;
   BufHandle a("A", {5}, kInt);
   VarHandle x("x", kInt);
-  Stmt* stmt = Block::make({For::make(
+  StmtPtr stmt = Block::make({For::make(
       x,
       0,
       10,
@@ -1877,13 +1839,12 @@ TEST(Registerizer, RegisterizerConditionBranchOnly) {
 // We can registerize an IfThenElse that appears in the condition branch of a
 // Cond. This is a weird but valid thing to do.
 TEST(Registerizer, RegisterizerCondIfThenElse) {
-  KernelScope kernel_scope;
   BufHandle a("A", {5}, kInt);
   BufHandle b("B", {5}, kInt);
   BufHandle c("C", {5}, kInt);
   VarHandle x("x", kInt);
 
-  Stmt* stmt = Block::make({Cond::make(
+  StmtPtr stmt = Block::make({Cond::make(
       CompareSelect::make(
           IfThenElse::make(
               CompareSelect::make(
@@ -1927,13 +1888,12 @@ TEST(Registerizer, RegisterizerCondIfThenElse) {
 // Can registerize a conditional access in the RHS of a store unhidden by it's
 // LHS, and hoist it out of a loop.
 TEST(Registerizer, RegisterizerIfThenElseLoop) {
-  KernelScope kernel_scope;
   BufHandle a("A", {5}, kInt);
   BufHandle b("B", {5}, kInt);
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
 
-  Stmt* stmt = For::make(
+  StmtPtr stmt = For::make(
       y,
       0,
       10,
@@ -1977,13 +1937,12 @@ TEST(Registerizer, RegisterizerIfThenElseLoop) {
 
 // Cannot registerize if the RHS overlaps the access creating visibility.
 TEST(Registerizer, RegisterizerIfThenElseLoopCut) {
-  KernelScope kernel_scope;
   BufHandle a("A", {5}, kInt);
   BufHandle b("B", {5}, kInt);
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
 
-  Stmt* stmt = Block::make({For::make(
+  StmtPtr stmt = Block::make({For::make(
       y,
       0,
       10,
@@ -2016,10 +1975,9 @@ TEST(Registerizer, RegisterizerIfThenElseLoopCut) {
 // Simple case where an access is cut by an overlapping access later in the
 // program, we can registerize up until the overlap.
 TEST(Registerizer, RegisterizerPartialAfter) {
-  KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   VarHandle x("x", kInt);
-  Stmt* stmt = Block::make(
+  StmtPtr stmt = Block::make(
       {Store::make(a, {0}, 0),
        For::make(
            x,
@@ -2044,7 +2002,7 @@ TEST(Registerizer, RegisterizerPartialAfter) {
   /*
    * int A_1 = 0;
    * for (int x = 0; x < 10; x++) {
-   *   A_1 = x + A_1;
+   *   A_1 = A_1 + x;
    * }
    * A[0] = A_1;
    * for (int x = 1; x < 10; x++) {
@@ -2059,7 +2017,7 @@ TEST(Registerizer, RegisterizerPartialAfter) {
       R"IR(
 # CHECK: int A_1 = 0;
 # CHECK: for (
-# CHECK:   A_1 = x + A_1;
+# CHECK:   A_1 = A_1 + x;
 # CHECK: }
 # CHECK: A[0] = A_1;
 # CHECK: for (
@@ -2073,10 +2031,9 @@ TEST(Registerizer, RegisterizerPartialAfter) {
 // We can registerize an access which overlaps a previous access, the
 // initializer must be inserted after the previous access.
 TEST(Registerizer, RegisterizerPartialBefore) {
-  KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   VarHandle x("x", kInt);
-  Stmt* stmt = Block::make(
+  StmtPtr stmt = Block::make(
       {For::make(x, 1, 10, Store::make(a, {x}, Load::make(a, {x - 1}))),
        Store::make(a, {0}, 0),
        For::make(
@@ -2104,7 +2061,7 @@ TEST(Registerizer, RegisterizerPartialBefore) {
    * }
    * int A_1 = 0;
    * for (int x = 0; x < 10; x++) {
-   *   A_1 = x + A_1;
+   *   A_1 = A_1 + x;
    * }
    * A[0] = A_1;
    */
@@ -2120,7 +2077,7 @@ TEST(Registerizer, RegisterizerPartialBefore) {
 # CHECK: }
 # CHECK: int A_1 = 0;
 # CHECK: for (
-# CHECK:   A_1 = x + A_1;
+# CHECK:   A_1 = A_1 + x;
 # CHECK: }
 # CHECK: A[0] = A_1;)IR";
 
@@ -2130,12 +2087,11 @@ TEST(Registerizer, RegisterizerPartialBefore) {
 // The combination of the previous two tests, an access is cut by an overlapping
 // access in both directions.
 TEST(Registerizer, RegisterizerPartialInside) {
-  KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   VarHandle x1("x1", kInt);
   VarHandle x2("x2", kInt);
   VarHandle x3("x3", kInt);
-  Stmt* stmt = Block::make(
+  StmtPtr stmt = Block::make(
       {Store::make(a, {0}, 2),
        For::make(
            x1, 0, 10, Store::make(a, {0}, Add::make(Load::make(a, {0}), x1))),
@@ -2161,7 +2117,7 @@ TEST(Registerizer, RegisterizerPartialInside) {
   /*
    * int A_1 = 2;
    * for (int x1 = 0; x1 < 10; x1++) {
-   *   A_1 = x1 + A_1;
+   *   A_1 = A_1 + x1;
    * }
    * A[0] = A_1;
    * for (int x2 = 1; x2 < 10; x2++) {
@@ -2169,7 +2125,7 @@ TEST(Registerizer, RegisterizerPartialInside) {
    * }
    * int A_2 = A[0];
    * for (int x3 = 0; x3 < 10; x3++) {
-   *   A_2 = x3 + A_2;
+   *   A_2 = A_2 + x3;
    * }
    * A[0] = A_2;
    */
@@ -2181,7 +2137,7 @@ TEST(Registerizer, RegisterizerPartialInside) {
       R"IR(
 # CHECK: int A_1 = 2;
 # CHECK: for (
-# CHECK:   A_1 = x1 + A_1;
+# CHECK:   A_1 = A_1 + x1;
 # CHECK: }
 # CHECK: A[0] = A_1;
 # CHECK: for (
@@ -2189,7 +2145,7 @@ TEST(Registerizer, RegisterizerPartialInside) {
 # CHECK: }
 # CHECK: int A_2 = A[0];
 # CHECK: for (
-# CHECK:   A_2 = x3 + A_2;
+# CHECK:   A_2 = A_2 + x3;
 # CHECK: }
 # CHECK: A[0] = A_2;)IR";
 
@@ -2200,10 +2156,9 @@ TEST(Registerizer, RegisterizerPartialInside) {
 // access, we should break this into two scalars and write back to the buffer
 // before the condition.
 TEST(Registerizer, RegisterizerPartialCondition) {
-  KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   VarHandle x("x", kInt);
-  Stmt* stmt = Block::make(
+  StmtPtr stmt = Block::make(
       {Store::make(a, {0}, 2),
        For::make(
            x, 0, 10, Store::make(a, {0}, Add::make(Load::make(a, {0}), x))),
@@ -2232,7 +2187,7 @@ TEST(Registerizer, RegisterizerPartialCondition) {
   /*
    * int A_1 = 2;
    * for (int x = 0; x < 10; x++) {
-   *   A_1 = x + A_1;
+   *   A_1 = A_1 + x;
    * }
    * A[0] = A_1;
    * if (x<5 ? 1 : 0) {
@@ -2240,7 +2195,7 @@ TEST(Registerizer, RegisterizerPartialCondition) {
    * }
    * int A_2 = A[0];
    * for (int x = 0; x < 10; x++) {
-   *   A_2 = x + A_2;
+   *   A_2 = A_2 + x;
    * }
    * A[0] = A_2;
    */
@@ -2252,7 +2207,7 @@ TEST(Registerizer, RegisterizerPartialCondition) {
       R"IR(
 # CHECK: int A_1 = 2;
 # CHECK: for (
-# CHECK:   A_1 = x + A_1;
+# CHECK:   A_1 = A_1 + x;
 # CHECK: }
 # CHECK: A[0] = A_1;
 # CHECK: if (
@@ -2260,7 +2215,7 @@ TEST(Registerizer, RegisterizerPartialCondition) {
 # CHECK: }
 # CHECK: int A_2 = A[0];
 # CHECK: for (
-# CHECK:   A_2 = x + A_2;
+# CHECK:   A_2 = A_2 + x;
 # CHECK: }
 # CHECK: A[0] = A_2;)IR";
 
@@ -2270,10 +2225,9 @@ TEST(Registerizer, RegisterizerPartialCondition) {
 // Tests case where an access is cut by an internal conditional access which
 // itself is registerized.
 TEST(Registerizer, RegisterizerPartialConditionInternalCut) {
-  KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   VarHandle x("x", kInt);
-  Stmt* stmt = Block::make(
+  StmtPtr stmt = Block::make(
       {Store::make(a, {0}, 1),
        Store::make(a, {0}, 3),
        Cond::make(
@@ -2333,10 +2287,9 @@ TEST(Registerizer, RegisterizerPartialConditionInternalCut) {
 // First statment in condition closes outer access, but can be registerized with
 // later statements.
 TEST(Registerizer, RegisterizerPartialConditionInternalStart) {
-  KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   VarHandle x("x", kInt);
-  Stmt* stmt = Block::make(
+  StmtPtr stmt = Block::make(
       {Store::make(a, {0}, 1),
        Store::make(a, {0}, 3),
        Cond::make(
@@ -2397,10 +2350,9 @@ TEST(Registerizer, RegisterizerPartialConditionInternalStart) {
 
 // An access cuts two open overlaps and creates four scalar variables.
 TEST(Registerizer, RegisterizerPartialOverlapsTwo) {
-  KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   VarHandle x("x", kInt);
-  Stmt* stmt = Block::make(
+  StmtPtr stmt = Block::make(
       {Store::make(a, {1}, Load::make(a, {0})),
        Store::make(a, {0}, Load::make(a, {1})),
        Store::make(a, {0}, Load::make(a, {1})),
@@ -2468,10 +2420,9 @@ TEST(Registerizer, RegisterizerPartialOverlapsTwo) {
 // Nested blocks will automatically be flattened and do not provent
 // registerization of enclosed accesses.
 TEST(Registerizer, RegisterizerNestedBlocks) {
-  KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   VarHandle x("x", kInt);
-  Stmt* stmt = Block::make(
+  StmtPtr stmt = Block::make(
       // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
       {Store::make(a, {0}, Add::make(Load::make(a, {0}), 1)),
        Block::make({Store::make(a, {0}, Add::make(Load::make(a, {0}), 2))}),
@@ -2522,10 +2473,9 @@ TEST(Registerizer, RegisterizerNestedBlocks) {
 // The access can be registerized internally to a condition, but must ensure
 // that both initializer and finalizer are within the same condition.
 TEST(Registerizer, RegisterizerNestedConditions) {
-  KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   VarHandle x("x", kInt);
-  Stmt* stmt = Block::make({Cond::make(
+  StmtPtr stmt = Block::make({Cond::make(
       CompareSelect::make(x, 5, CompareSelectOperation::kLT),
       Block::make(
           {Store::make(a, {0}, Add::make(Load::make(a, {0}), 1)),
@@ -2578,10 +2528,9 @@ TEST(Registerizer, RegisterizerNestedConditions) {
 // If an access exists outside the scope of the condition then we can lift
 // nested conditional usages into the same scalar.
 TEST(Registerizer, RegisterizerNestedConditionsUnhidden) {
-  KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   VarHandle x("x", kInt);
-  Stmt* stmt = Block::make(
+  StmtPtr stmt = Block::make(
       {Store::make(a, {0}, Add::make(Load::make(a, {0}), 1)),
        Cond::make(
            CompareSelect::make(x, 5, CompareSelectOperation::kLT),
@@ -2634,10 +2583,9 @@ TEST(Registerizer, RegisterizerNestedConditionsUnhidden) {
 }
 
 TEST(Registerizer, RegisterizerNestedConditionsHiddenFirst) {
-  KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   VarHandle x("x", kInt);
-  Stmt* stmt = Block::make(
+  StmtPtr stmt = Block::make(
       {Cond::make(
            CompareSelect::make(x, 2, CompareSelectOperation::kEQ),
            Store::make(a, {0}, Add::make(Load::make(a, {0}), 1)),
@@ -2677,10 +2625,9 @@ TEST(Registerizer, RegisterizerNestedConditionsHiddenFirst) {
 }
 
 TEST(Registerizer, RegisterizerNestedConditionsHiddenSecond) {
-  KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   VarHandle x("x", kInt);
-  Stmt* stmt = Block::make(
+  StmtPtr stmt = Block::make(
       {Cond::make(
            CompareSelect::make(x, 5, CompareSelectOperation::kLT),
            Block::make({Cond::make(
@@ -2722,10 +2669,9 @@ TEST(Registerizer, RegisterizerNestedConditionsHiddenSecond) {
 // If an access is cut by another access internal to a condition block, it still
 // cuts the access.
 TEST(Registerizer, RegisterizerNestedConditionsCut) {
-  KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   VarHandle x("x", kInt);
-  Stmt* stmt = Block::make(
+  StmtPtr stmt = Block::make(
       {Store::make(a, {0}, Add::make(Load::make(a, {0}), 1)),
        Cond::make(
            CompareSelect::make(x, 5, CompareSelectOperation::kLT),
@@ -2761,11 +2707,10 @@ TEST(Registerizer, RegisterizerNestedConditionsCut) {
 }
 
 TEST(Registerizer, RegisterizerNestedConditionLoopHidden) {
-  KernelScope kernel_scope;
   BufHandle a("A", {10}, kInt);
   BufHandle b("B", {10}, kInt);
   VarHandle x("x", kInt);
-  Stmt* stmt = Block::make(
+  StmtPtr stmt = Block::make(
       {Cond::make(
            CompareSelect::make(x, 2, CompareSelectOperation::kEQ),
            Store::make(a, {0}, Add::make(Load::make(a, {0}), 1)),
@@ -2808,11 +2753,10 @@ TEST(Registerizer, RegisterizerNestedConditionLoopHidden) {
 // Three loops and four element regions, three of which should be registerized
 // at different levels of the IR.
 TEST(Registerizer, RegisterizerNestedConditionThreeDeep) {
-  KernelScope kernel_scope;
   BufHandle a("A", {10}, kInt);
   BufHandle b("B", {10}, kInt);
   VarHandle x("x", kInt);
-  Stmt* stmt = Block::make(
+  StmtPtr stmt = Block::make(
       {Store::make(a, {4}, 0),
        Cond::make(
            CompareSelect::make(x, 2, CompareSelectOperation::kGT),
@@ -2908,11 +2852,10 @@ TEST(Registerizer, RegisterizerNestedConditionThreeDeep) {
 // Can replace a simple scalar access with a local variable even when that
 // variable is an outer loop var.
 TEST(Registerizer, RegisterizerNestedLoopSimple) {
-  KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
-  Stmt* stmt = Block::make({For::make(
+  StmtPtr stmt = Block::make({For::make(
       y,
       0,
       10,
@@ -2937,7 +2880,7 @@ TEST(Registerizer, RegisterizerNestedLoopSimple) {
    * for (int y = 0; y < 10; y++) {
    *   int A_1 = A[y];
    *   for (int x = 0; x < 10; x++) {
-   *     A_1 = x + A_1;
+   *     A_1 = A_1 + x;
    *   }
    * A[y] = A_1;
    * }
@@ -2951,7 +2894,7 @@ TEST(Registerizer, RegisterizerNestedLoopSimple) {
 # CHECK: for (int y
 # CHECK:   int A_1 = A[y];
 # CHECK:   for (int x
-# CHECK:     A_1 = x + A_1;
+# CHECK:     A_1 = A_1 + x;
 # CHECK:   }
 # CHECK:   A[y] = A_1;
 # CHECK: })IR";
@@ -2963,12 +2906,11 @@ TEST(Registerizer, RegisterizerNestedLoopSimple) {
 // conditional access can be hoisted up through a loop to match an existing
 // access in a higher scope and the two can be registerized.
 TEST(Registerizer, RegisterizerHiddenAccessYes) {
-  KernelScope kernel_scope;
   BufHandle a("A", {10}, kInt);
   BufHandle b("B", {10}, kInt);
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
-  Stmt* stmt = Block::make({Cond::make(
+  StmtPtr stmt = Block::make({Cond::make(
       CompareSelect::make(x, 2, CompareSelectOperation::kEQ),
       Block::make(
           {Store::make(a, {0}, 0),
@@ -3046,12 +2988,11 @@ TEST(Registerizer, RegisterizerHiddenAccessYes) {
 // never unhidden at a higher scope and registerization occurs at the lower
 // scope.
 TEST(Registerizer, RegisterizerHiddenAccessNo) {
-  KernelScope kernel_scope;
   BufHandle a("A", {10}, kInt);
   BufHandle b("B", {10}, kInt);
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
-  Stmt* stmt = Block::make({Cond::make(
+  StmtPtr stmt = Block::make({Cond::make(
       CompareSelect::make(x, 2, CompareSelectOperation::kEQ),
       Block::make({For::make(
           x,
@@ -3126,12 +3067,11 @@ TEST(Registerizer, RegisterizerHiddenAccessNo) {
 // two accesses here one is unhidden and the other isnt. A[0] can be
 // registerized but B[0] cannot.
 TEST(Registerizer, RegisterizerHiddenAccessMultiLoop) {
-  KernelScope kernel_scope;
   BufHandle a("A", {10}, kInt);
   BufHandle b("B", {10}, kInt);
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
-  Stmt* stmt = Block::make({Cond::make(
+  StmtPtr stmt = Block::make({Cond::make(
       CompareSelect::make(x, 2, CompareSelectOperation::kEQ),
       Block::make(
           {Store::make(a, {0}, 0),
@@ -3208,10 +3148,9 @@ TEST(Registerizer, RegisterizerHiddenAccessMultiLoop) {
 // Accesses are registerized inside two conditions, but the immeidate parent is
 // not a condition.
 TEST(Registerizer, RegisterizerTwoConditionalLoops) {
-  KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   VarHandle x("x", kInt);
-  Stmt* stmt = Block::make(
+  StmtPtr stmt = Block::make(
       {Cond::make(
            CompareSelect::make(x, 5, CompareSelectOperation::kLT),
            For::make(
@@ -3280,10 +3219,9 @@ TEST(Registerizer, RegisterizerTwoConditionalLoops) {
 
 // Accesses are registerized inside two conditions, cut in the middle.
 TEST(Registerizer, RegisterizerTwoConditionalLoopsCut) {
-  KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   VarHandle x("x", kInt);
-  Stmt* stmt = Block::make(
+  StmtPtr stmt = Block::make(
       {Cond::make(
            CompareSelect::make(x, 5, CompareSelectOperation::kLT),
            For::make(
@@ -3362,17 +3300,16 @@ TEST(Registerizer, RegisterizerTwoConditionalLoopsCut) {
 // references a Let var in a local scope which cannot be hoisted out of the
 // loop.
 TEST(Registerizer, RegisterizerLoopLetVar) {
-  KernelScope kernel_scope;
   BufHandle a("A", {10}, kInt);
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
-  Stmt* stmt = Block::make({For::make(
+  StmtPtr stmt = IRSimplifier::simplify(Block::make({For::make(
       x,
       0,
       10,
       Block::make(
           {Let::make(y, 30),
-           Store::make(a, {y}, Add::make(x, Load::make(a, {y})))}))});
+           Store::make(a, {y}, Add::make(x, Load::make(a, {y})))}))}));
 
   /*
    * for (int x = 0; x < 10; x++) {
@@ -3396,11 +3333,10 @@ TEST(Registerizer, RegisterizerLoopLetVar) {
 // references a Let var in an outer scope that does not prevent hoisting the
 // initializer.
 TEST(Registerizer, RegisterizerLoopLetVarOuter) {
-  KernelScope kernel_scope;
   BufHandle a("A", {10}, kInt);
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
-  Stmt* stmt = Block::make(
+  StmtPtr stmt = Block::make(
       {Let::make(y, 30),
        For::make(
            x,
@@ -3422,7 +3358,7 @@ TEST(Registerizer, RegisterizerLoopLetVarOuter) {
    * int y = 30;
    * int A_1 = A[y];
    * for (int x = 0; x < 10; x++) {
-   *   A_1 = x + A_1;
+   *   A_1 = A_1 + x;
    * }
    * A[y] = A_1;
    */
@@ -3435,7 +3371,7 @@ TEST(Registerizer, RegisterizerLoopLetVarOuter) {
 # CHECK: int y = 30;
 # CHECK: int A_1 = A[y];
 # CHECK: for (int x
-# CHECK:   A_1 = x + A_1;
+# CHECK:   A_1 = A_1 + x;
 # CHECK: A[y] = A_1;)IR";
 
   torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
@@ -3444,10 +3380,9 @@ TEST(Registerizer, RegisterizerLoopLetVarOuter) {
 // Okay so the registerizer generally goes after index flattening, but just in
 // case. Test multi index registerization.
 TEST(Registerizer, RegisterizerMultiDim) {
-  KernelScope kernel_scope;
   BufHandle a("A", {3, 4, 5}, kInt);
   VarHandle x("x", kInt);
-  Stmt* stmt = Block::make(
+  StmtPtr stmt = Block::make(
       {Store::make(a, {0, 1, 2}, 0),
        For::make(
            x,
@@ -3490,10 +3425,9 @@ TEST(Registerizer, RegisterizerMultiDim) {
 // Wont registerize if only some dims match, but will still registerize distinct
 // elements.
 TEST(Registerizer, RegisterizerMultiDimPartial) {
-  KernelScope kernel_scope;
   BufHandle a("A", {3, 4, 5}, kInt);
   VarHandle x("x", kInt);
-  Stmt* stmt = Block::make(
+  StmtPtr stmt = Block::make(
       {Store::make(a, {0, 1, 2}, 0),
        For::make(
            x,
@@ -3516,7 +3450,7 @@ TEST(Registerizer, RegisterizerMultiDimPartial) {
    * int A_1 = A[0, 1, 4];
    * int A_2 = A[0, 2, 2];
    * for (int x = 0; x < 10; x++) {
-   *   A_2 = x + A_1;
+   *   A_2 = A_1 + x;
    * }
    * A[0, 2, 2] = A_2;
    */
@@ -3530,7 +3464,7 @@ TEST(Registerizer, RegisterizerMultiDimPartial) {
 # CHECK: int A_1 = A[0, 1, 4];
 # CHECK: int A_2 = A[0, 2, 2];
 # CHECK: for (
-# CHECK:   A_2 = x + A_1;
+# CHECK:   A_2 = A_1 + x;
 # CHECK: A[0, 2, 2] = A_2;)IR";
 
   torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
@@ -3538,11 +3472,10 @@ TEST(Registerizer, RegisterizerMultiDimPartial) {
 
 // If they could overlap across all dimensions we cannot registerize.
 TEST(Registerizer, RegisterizerMultiDimOverlap) {
-  KernelScope kernel_scope;
   BufHandle a("A", {3, 4, 5}, kInt);
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
-  Stmt* stmt = Block::make(
+  StmtPtr stmt = Block::make(
       {Store::make(a, {0, 1, 2}, 0),
        For::make(
            x,
@@ -3573,11 +3506,10 @@ TEST(Registerizer, RegisterizerMultiDimOverlap) {
 
 // But, if one dimension is known to be distinct they do not overlap.
 TEST(Registerizer, RegisterizerMultiDimPartialOverlap) {
-  KernelScope kernel_scope;
   BufHandle a("A", {3, 4, 5}, kInt);
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
-  Stmt* stmt = Block::make(
+  StmtPtr stmt = Block::make(
       {Store::make(a, {0, 1, 2}, 0),
        For::make(
            x,
@@ -3599,7 +3531,7 @@ TEST(Registerizer, RegisterizerMultiDimPartialOverlap) {
    * A[0, 1, 2] = 0;
    * int A_1 = A[y, 2, 4];
    * for (int x = 0; x < 10; x++) {
-   *   A[0, x, 2] = x + A_1;
+   *   A[0, x, 2] = A_1 + x;
    * }
    */
 
@@ -3611,7 +3543,7 @@ TEST(Registerizer, RegisterizerMultiDimPartialOverlap) {
 # CHECK: A[0, 1, 2] = 0;
 # CHECK: int A_1 = A[y, 2, 4];
 # CHECK: for (
-# CHECK:   A[0, x, 2] = x + A_1;
+# CHECK:   A[0, x, 2] = A_1 + x;
 # CHECK: })IR";
 
   torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
@@ -3619,14 +3551,13 @@ TEST(Registerizer, RegisterizerMultiDimPartialOverlap) {
 
 // A 3D reduction with different input dimensionality.
 TEST(Registerizer, RegisterizerMultiDim3DReduction1) {
-  KernelScope kernel_scope;
   BufHandle a("A", {10}, kInt);
   BufHandle b("B", {10, 10}, kInt);
   BufHandle c("C", {10, 10, 10}, kInt);
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
   VarHandle z("z", kInt);
-  Stmt* stmt = For::make(
+  StmtPtr stmt = For::make(
       x,
       0,
       10,
@@ -3691,14 +3622,13 @@ TEST(Registerizer, RegisterizerMultiDim3DReduction1) {
 // A 3D reduction with the same smaller dimensionality using different loop
 // vars.
 TEST(Registerizer, RegisterizerMultiDim3DReduction2) {
-  KernelScope kernel_scope;
   BufHandle a("A", {10}, kInt);
   BufHandle b("B", {10}, kInt);
   BufHandle c("C", {10}, kInt);
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
   VarHandle z("z", kInt);
-  Stmt* stmt = For::make(
+  StmtPtr stmt = For::make(
       x,
       0,
       10,
@@ -3736,12 +3666,12 @@ TEST(Registerizer, RegisterizerMultiDim3DReduction2) {
 
   /*
    * for (int x = 0; x < 10; x++) {
-   *   int C_1 = C[x];
    *   int A_1 = A[x];
+   *   int C_1 = C[x];
    *   for (int y = 0; y < 10; y++) {
    *     int B_1 = B[y];
    *     for (int z = 0; z < 10; z++) {
-   *       C_1 = C_1 + A_1 * B_1;
+   *       C_1 = A_1 * B_1 + C_1;
    *     }
    *   }
    *   C[x] = C_1;
@@ -3754,12 +3684,12 @@ TEST(Registerizer, RegisterizerMultiDim3DReduction2) {
   const std::string& verification_pattern =
       R"IR(
 # CHECK: for (int x
-# CHECK:   int C_1 = C[x];
 # CHECK:   int A_1 = A[x];
+# CHECK:   int C_1 = C[x];
 # CHECK:   for (int y
 # CHECK:     int B_1 = B[y];
 # CHECK:       for (int z
-# CHECK:         C_1 = C_1 + A_1 * B_1;
+# CHECK:         C_1 = A_1 * B_1 + C_1;
 # CHECK:       }
 # CHECK:     }
 # CHECK:   C[x] = C_1;

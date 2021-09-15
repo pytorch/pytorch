@@ -8,29 +8,11 @@ import torch
 from torch import nn
 from torch.nn.utils import parametrize
 
-from .utils import FakeSparsity
+from .utils import FakeSparsity, module_to_fqn, fqn_to_module
 
 SUPPORTED_MODULES = {
     nn.Linear
 }
-
-def _module_to_fqn(model, layer, prefix=''):
-    for name, child in model.named_children():
-        new_name = prefix + '.' + name
-        if child is layer:
-            return new_name
-        child_path = _module_to_fqn(child, layer, prefix=new_name)
-        if child_path is not None:
-            return child_path
-    return None
-
-def _fqn_to_module(model, path):
-    path = path.split('.')
-    for name in path:
-        model = getattr(model, name, None)
-        if model is None:
-            return None
-    return model
 
 
 class BaseSparsifier(abc.ABC):
@@ -136,7 +118,7 @@ class BaseSparsifier(abc.ABC):
         module_groups = copy.deepcopy(state_dict['module_groups'])
         states = state_dict['state']
         for fqn, s in states.items():
-            layer = _fqn_to_module(self.model, fqn)
+            layer = fqn_to_module(self.model, fqn)
             if strict and layer is None:
                 raise RuntimeError(f'Error loading {fqn} into the model')
 
@@ -186,7 +168,7 @@ class BaseSparsifier(abc.ABC):
             local_args = copy.deepcopy(self.defaults)
             local_args.update(module_config)
             module = local_args['module']
-            module_fqn = _module_to_fqn(model, module)
+            module_fqn = module_to_fqn(model, module)
             if module_fqn and module_fqn[0] == '.':
                 module_fqn = module_fqn[1:]
             local_args['fqn'] = module_fqn

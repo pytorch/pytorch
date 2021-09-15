@@ -65,6 +65,8 @@ if(MSVC)
     endforeach(flag_var)
   endif(MSVC_Z7_OVERRIDE)
   foreach(flag_var
+      CMAKE_SHARED_LINKER_FLAGS_RELWITHDEBINFO CMAKE_STATIC_LINKER_FLAGS_RELWITHDEBINFO
+      CMAKE_EXE_LINKER_FLAGS_RELWITHDEBINFO CMAKE_MODULE_LINKER_FLAGS_RELWITHDEBINFO
       CMAKE_SHARED_LINKER_FLAGS_DEBUG CMAKE_STATIC_LINKER_FLAGS_DEBUG
       CMAKE_EXE_LINKER_FLAGS_DEBUG CMAKE_MODULE_LINKER_FLAGS_DEBUG)
     if(${flag_var} MATCHES "/INCREMENTAL" AND NOT ${flag_var} MATCHES "/INCREMENTAL:NO")
@@ -242,13 +244,15 @@ endif()
 
 # --- [ PocketFFT
 set(AT_POCKETFFT_ENABLED 0)
-if(NOT MKL_FOUND)
-  find_path(POCKETFFT_INCLUDE_DIR NAMES pocketfft_hdronly.h
-            PATHS /usr/local/include
-            PATHS $ENV{POCKETFFT_HOME}
+if(NOT AT_MKL_ENABLED)
+  find_path(POCKETFFT_INCLUDE_DIR NAMES pocketfft_hdronly.h PATHS
+            /usr/local/include
+            ENV POCKETFFT_HOME
+            "${PROJECT_SOURCE_DIR}/third_party/pocketfft"
            )
   if(POCKETFFT_INCLUDE_DIR)
     set(AT_POCKETFFT_ENABLED 1)
+    message(STATUS "Using pocketfft in directory: ${POCKETFFT_INCLUDE_DIR}")
   endif()
 endif()
 
@@ -1879,6 +1883,10 @@ set_target_properties(fmt-header-only PROPERTIES INTERFACE_COMPILE_FEATURES "")
 
 list(APPEND Caffe2_DEPENDENCY_LIBS fmt::fmt-header-only)
 set(BUILD_SHARED_LIBS ${TEMP_BUILD_SHARED_LIBS} CACHE BOOL "Build shared libs" FORCE)
+
+if(USE_BREAKPAD)
+  add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/breakpad)
+endif()
 
 # ---[ Kineto
 # edge profiler depends on KinetoProfiler but it only does cpu

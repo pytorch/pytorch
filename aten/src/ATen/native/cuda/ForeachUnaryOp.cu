@@ -15,7 +15,7 @@ template <typename scalar_t, template<class> class Op> std::vector<Tensor> forea
     tensor_lists.emplace_back(tensors.vec());
     tensor_lists.emplace_back(std::move(vec_res));
 
-    using opmath_t = typename get_opmath_t<scalar_t>::opmath_t;
+    using opmath_t = typename at::opmath_type<scalar_t>;
     multi_tensor_apply<2>(tensor_lists,
                           UnaryOpFunctor<scalar_t,
                                          /* depth */ 2,
@@ -29,7 +29,7 @@ template <typename scalar_t, template<class> class Op> std::vector<Tensor> forea
 template <typename scalar_t, template<class> class Op> void foreach_unary_op_(TensorList tensors) {
     std::vector<std::vector<at::Tensor>> tensor_lists;
     tensor_lists.emplace_back(tensors.vec());
-    using opmath_t = typename get_opmath_t<scalar_t>::opmath_t;
+    using opmath_t = typename at::opmath_type<scalar_t>;
     multi_tensor_apply<1>(tensor_lists,
                           UnaryOpFunctor<scalar_t,
                                          /* depth */ 1,

@@ -83,9 +83,9 @@ class PytorchJni : public facebook::jni::HybridClass<PytorchJni> {
     }
     deviceType_ = deviceJniCodeToDeviceType(device);
     module_ = torch::jit::_load_for_mobile(
-        std::move(modelPath->toStdString()), deviceType_, extra_files);
+        std::move(modelPath->toStdString()), c10::nullopt, extra_files);
     torch::jit::_load_extra_only_for_mobile(
-        std::move(modelPath->toStdString()), deviceType_, extra_files);
+        std::move(modelPath->toStdString()), c10::nullopt, extra_files);
     if (has_extra) {
       static auto putMethod =
           facebook::jni::JMap<facebook::jni::JString, facebook::jni::JString>::

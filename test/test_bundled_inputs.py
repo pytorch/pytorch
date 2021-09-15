@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 import io
 import textwrap
-from typing import List
+from typing import List, Optional, Dict
 
 import torch
 import torch.utils.bundled_inputs
@@ -323,6 +323,119 @@ class TestBundledInputs(TestCase):
             inputs=[(torch.ones(2),)]
         )
         self.assertEqual(bundled_model2.get_all_bundled_inputs(), [(torch.ones(2),)])
+
+
+    def test_dict_args(self):
+        class MyModel(torch.nn.Module):
+            def forward(
+                self,
+                arg1: Optional[Dict[str, torch.Tensor]],
+                arg2: Optional[List[torch.Tensor]],
+                arg3: torch.Tensor,
+            ):
+                if arg1 is None:
+                    return arg3
+                elif arg2 is None:
+                    return arg1["a"] + arg1["b"]
+                else:
+                    return arg1["a"] + arg1["b"] + arg2[0]
+
+        small_sample = dict(
+            a=torch.zeros([10, 20]),
+            b=torch.zeros([1, 1]),
+            c=torch.zeros([10, 20]),
+        )
+        small_list = [torch.zeros([10, 20])]
+
+        big_sample = dict(
+            a=torch.zeros([1 << 5, 1 << 8, 1 << 10]),
+            b=torch.zeros([1 << 5, 1 << 8, 1 << 10]),
+            c=torch.zeros([1 << 5, 1 << 8, 1 << 10]),
+        )
+        big_list = [torch.zeros([1 << 5, 1 << 8, 1 << 10])]
+
+        def condensed(t):
+            ret = torch.empty_like(t).flatten()[0].clone().expand(t.shape)
+            assert ret.storage().size() == 1
+            # ret.storage()[0] = 0
+            return ret
+
+        def bundle_optional_dict_of_randn(template):
+            return torch.utils.bundled_inputs.InflatableArg(
+                value=(
+                    None
+                    if template is None
+                    else {k: condensed(v) for (k, v) in template.items()}
+                ),
+                fmt="{}",
+                fmt_fn="""
+                def {}(self, value: Optional[Dict[str, Tensor]]):
+                    if value is None:
+                        return None
+                    output = {{}}
+                    for k, v in value.items():
+                        output[k] = torch.randn_like(v)
+                    return output
+                """,
+            )
+
+        def bundle_optional_list_of_randn(template):
+            return torch.utils.bundled_inputs.InflatableArg(
+                value=(None if template is None else [condensed(v) for v in template]),
+                fmt="{}",
+                fmt_fn="""
+                def {}(self, value: Optional[List[Tensor]]):
+                    if value is None:
+                        return None
+                    output = []
+                    for v in value:
+                        output.append(torch.randn_like(v))
+                    return output
+                """,
+            )
+
+        out : List[str] = []
+        sm = torch.jit.script(MyModel())
+        original_size = model_size(sm)
+        small_inputs = (
+            bundle_optional_dict_of_randn(small_sample),
+            bundle_optional_list_of_randn(small_list),
+            torch.zeros([3, 4]),
+        )
+        big_inputs = (
+            bundle_optional_dict_of_randn(big_sample),
+            bundle_optional_list_of_randn(big_list),
+            torch.zeros([1 << 5, 1 << 8, 1 << 10]),
+        )
+
+        torch.utils.bundled_inputs.augment_model_with_bundled_inputs(
+            sm,
+            [
+                big_inputs,
+                small_inputs,
+            ],
+            _receive_inflate_expr=out,
+        )
+        augmented_size = model_size(sm)
+        # assert the size has not increased more than 8KB
+        self.assertLess(augmented_size, original_size + (1 << 13))
+
+        loaded = save_and_load(sm)
+        inflated = loaded.get_all_bundled_inputs()
+        self.assertEqual(len(inflated[0]), len(small_inputs))
+
+        methods, _ = torch.utils.bundled_inputs._get_bundled_inputs_attributes_and_methods(
+            loaded
+        )
+
+        # One Function (forward)
+        # two bundled inputs (big_inputs and small_inputs)
+        # two args which have InflatableArg with fmt_fn
+        # 1 * 2 * 2 = 4
+        self.assertEqual(
+            sum([method.startswith("_inflate_helper") for method in methods]), 4
+        )
+
 
 if __name__ == '__main__':
     run_tests()

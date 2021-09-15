@@ -19,7 +19,7 @@ namespace torch {
 namespace jit {
 namespace tensorexpr {
 
-Tensor* computeSum(
+Tensor computeSum(
     const std::vector<ArgValue>& inputs,
     const c10::optional<ScalarType>& outputType) {
   std::vector<size_t> axes;
@@ -100,7 +100,7 @@ Tensor* computeSum(
       reductionDims);
 }
 
-Tensor* computeMean(
+Tensor computeMean(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
     const c10::optional<ScalarType>& outputType) {
@@ -120,13 +120,13 @@ Tensor* computeMean(
       mean_dims_expr.emplace_back(idx);
     }
   }
-  return new Tensor(
+  return Tensor(
       ResultBuf.node(),
       ExternalCall::make(
           ResultBuf, "nnc_aten_mean", {InputBuf}, mean_dims_expr));
 }
 
-Tensor* computeAdaptiveAvgPool2d(
+Tensor computeAdaptiveAvgPool2d(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
     const c10::optional<ScalarType>& outputType) {
@@ -137,7 +137,7 @@ Tensor* computeAdaptiveAvgPool2d(
   BufHandle ResultBuf("adaptive_avgpool2d", outputShape, dtype);
   // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
   auto out_size_param = c10::get<IntList>(inputs[1]);
-  return new Tensor(
+  return Tensor(
       ResultBuf.node(),
       ExternalCall::make(
           ResultBuf,
