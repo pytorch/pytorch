@@ -1156,7 +1156,7 @@ TORCH_IMPL_FUNC(mean_out)
   }
 }
 
-Tensor mean_cpu_gpu(const Tensor &self, optional<ScalarType> dtype) {
+Tensor mean(const Tensor &self, optional<ScalarType> dtype) {
   return at::mean(self, IntArrayRef{}, false, dtype);
 }
 
