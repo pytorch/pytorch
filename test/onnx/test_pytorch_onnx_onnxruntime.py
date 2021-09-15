@@ -3776,6 +3776,19 @@ class TestONNXRuntime(unittest.TestCase):
     def test_reduced_prod(self):
         return self._test_reduced_ops(op=torch.prod)
 
+    def test_reduced_sum_dtypes(self):
+        class NoDimModel(torch.nn.Module):
+            def forward(self, input):
+                return input.sum(dtype=torch.float)
+
+        class DimModel(torch.nn.Module):
+            def forward(self, input):
+                return input.sum(dim=-1, dtype=torch.float)
+
+        input = torch.randn((4, 4), dtype=torch.half)
+        self.run_test(NoDimModel(), input)
+        self.run_test(DimModel(), input)
+
     def test_reduced_min_max(self):
         class ReducedMinMaxModule(torch.nn.Module):
             def forward(self, input):
