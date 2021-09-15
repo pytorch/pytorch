@@ -264,7 +264,7 @@ class Proxy:
         args = args if args else ()
         kwargs = kwargs if kwargs else {}
 
-        tracers : Dict[torch.fx.TracerBase, None] = {}
+        tracers : Dict[Any, None] = {}
 
         def find_tracer(a):
             if isinstance(a, cls):
