@@ -77,7 +77,7 @@ jobs:
           ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
         run: |
           retry () {
-              $*  || (sleep 1 && $*) || (sleep 2 && $*)
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
           }
           # Ensure the working directory gets chowned back to the current user
           retry docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
@@ -178,7 +178,7 @@ jobs:
           ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
         run: |
           retry () {
-              $*  || (sleep 1 && $*) || (sleep 2 && $*)
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
           }
           # Ensure the working directory gets chowned back to the current user
           retry docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
@@ -250,7 +250,7 @@ jobs:
       - name: Chown workspace
         run: |
           retry () {
-              $*  || (sleep 1 && $*) || (sleep 2 && $*)
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
           }
           # Ensure the working directory gets chowned back to the current user
           retry docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
@@ -272,7 +272,7 @@ jobs:
           ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
         run: |
           retry () {
-              $*  || (sleep 1 && $*) || (sleep 2 && $*)
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
           }
           # Ensure the working directory gets chowned back to the current user
           retry docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
