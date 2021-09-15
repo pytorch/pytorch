@@ -629,6 +629,9 @@ def istft(input: Tensor, n_fft: int, hop_length: Optional[int] = None,
                      normalized, onesided, length, return_complex)
 
 
+del torch.unique_dim
+
+
 if TYPE_CHECKING:
     # These _impl functions return a variable number of tensors as output with
     # __torch_function__; tuple unpacking is done already rather than being
