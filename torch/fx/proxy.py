@@ -273,7 +273,7 @@ class Proxy:
         torch.fx.node.map_aggregate(kwargs, find_tracer)
 
         if len(tracers) > 1:
-            raise RuntimeError(f'Found multiple different tracers {list(tracers.keys)} while '
+            raise RuntimeError(f'Found multiple different tracers {list(tracers.keys())} while '
                                'trying to trace operations {orig_method}')
         tracer = next(iter(tracers.keys()))
 
