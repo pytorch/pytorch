@@ -857,7 +857,7 @@
   A: not_implemented("lstsq")
 
 - name: linalg_lstsq(Tensor self, Tensor b, float? rcond=None, *, str? driver=None) -> (Tensor solution, Tensor residuals, Tensor rank, Tensor singular_values)
-  self, b: linalg_lstsq_backward(grad, self, b, rcond)
+  self, b: linalg_lstsq_backward(grad, self, b, rcond, driver)
   output_differentiability: [True, True]
 
 - name: lt_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
