@@ -158,15 +158,6 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   python tools/amd_build/build_amd.py
   python setup.py install
 
-  # No particular reasons why this environment, just restrict lazy tensor to one to limit potential breakages.
-  if [[ "$BUILD_ENVIRONMENT" == *linux-xenial-cuda11.1* ]]; then
-    pushd
-    cd lazy_tensor_core/
-    ./scripts/apply_patches.sh
-    python setup.py install
-    popd
-  fi
-
   # remove sccache wrappers post-build; runtime compilation of MIOpen kernels does not yet fully support them
   sudo rm -f /opt/cache/bin/cc
   sudo rm -f /opt/cache/bin/c++
@@ -330,4 +321,19 @@ if [[ "$BUILD_ENVIRONMENT" != *libtorch* && "$BUILD_ENVIRONMENT" != *bazel* ]]; 
   # export test times so that potential sharded tests that'll branch off this build will use consistent data
   # don't do this for libtorch as libtorch is C++ only and thus won't have python tests run on its build
   python test/run_test.py --export-past-test-times
+fi
+
+# Test Lazy Tensor Core
+# No particular reasons why this environment, just restrict lazy tensor to one to limit potential breakages.
+if [[ "$BUILD_ENVIRONMENT" == *linux-xenial-cuda11.1* ]]; then
+  pushd lazy_tensor_core/
+  ./scripts/apply_patches.sh
+  python setup.py install
+
+  rm -f lazy_tensor_core/csrc/ts_backend/LazyNativeFunctions.h
+  rm -f lazy_tensor_core/csrc/ts_backend/RegisterAutogradLazy.cpp
+  rm -f lazy_tensor_core/csrc/ts_backend/RegisterLazy.cpp
+  rm -rf lazy_tensors/computation_client/
+  assert_git_not_dirty
+  popd
 fi
