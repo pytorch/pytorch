@@ -16,7 +16,7 @@ import tools.codegen.api.dispatcher as dispatcher
 from tools.codegen.api.types import DispatcherSignature
 
 # Parses the external backend's yaml, and adds a new BackendIndex for the backend's dispatch key.
-# Returns a Tuple of (backend_key, autograd_key, cpp_namespace, updated BackendIndex mapping)
+# Returns a Tuple of (backend_key, autograd_key, cpp_namespace, updated BackendIndex mapping, codegen)
 ParsedExternalYaml = namedtuple('ParsedExternalYaml', [
     'backend_key', 'autograd_key', 'cpp_namespace', 'backend_indices', 'codegen'])
 
@@ -170,7 +170,7 @@ but expected {expected_overload_count} kernel(s). The expected function schemas 
     assert missing_kernels_err_msg == "", missing_kernels_err_msg
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description='Generate backend stub files')
+    parser = argparse.ArgumentParser(description='Generate Lazy Tensor backend files')
     parser.add_argument(
         '-s',
         '--source_yaml',
@@ -181,11 +181,13 @@ def main() -> None:
         '--dry_run', type=bool, default=False, help='output directory')
     parser.add_argument(
         '--impl_path', type=str, default=None, help='path to the source C++ file containing kernel definitions')
+    parser.add_argument(
+        '--gen_ts_lowerings', action="store_true", help='Generate TorchScript lowerings in addition to Lazy IR and NativeFunctions')
     options = parser.parse_args()
 
-    run(options.source_yaml, options.output_dir, options.dry_run, options.impl_path)
+    run(options.source_yaml, options.output_dir, options.dry_run, options.impl_path, options.gen_ts_lowerings)
 
-def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[str]) -> None:
+def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[str], gen_ts_lowerings: bool) -> None:
 
     # Assumes that this file lives at PYTORCH_ROOT/tools/codegen/gen_backend_stubs.py
     pytorch_root = pathlib.Path(__file__).parent.parent.parent.absolute()
@@ -344,35 +346,36 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
                 )),
             })
 
-        # and TorchScript Lowerings for the IR nodes
-        for dispatch_key in [backend_dispatch_key]:  # , autograd_dispatch_key
-            fm.write_with_template(f'TSLowering.cpp', 'TSLowering.cpp', lambda: {
-                'ts_lowering_sysinc': [f'#include <{path}>' for path in [
-                    "vector",
-                ]],
-                'ts_lowering_inc': [f'#include "{path}"' for path in [
-                    "lazy_tensor_core/csrc/ir.h",
-                    "torch/csrc/jit/ir/named_value.h",
-                    "torch/csrc/jit/frontend/sugared_value.h",
-                    "lazy_tensor_core/csrc/ts_backend/ts_lowering_context.h",
-                    f"{output_dir}/{backend_key}LazyIr.h",
-                ]],
-                'backend_namespace': dispatch_key.lower(),  # TODO this is not designed yet
-                'lowering_dispatches': list(concatMap(
-                    dest.TsLowering(
-                        backend_indices[dispatch_key],
-                        codegen,
-                        dest.TsLowering.TsLoweringTarget.DISPATCH),
-                    grouped_native_functions
-                )),
-                'lowering_definitions': list(concatMap(
-                    dest.TsLowering(
-                        backend_indices[dispatch_key],
-                        codegen,
-                        dest.TsLowering.TsLoweringTarget.LOWERING),
-                    grouped_native_functions
-                )),
-            })
+        if gen_ts_lowerings:
+            # and TorchScript Lowerings for the IR nodes
+            for dispatch_key in [backend_dispatch_key]:  # , autograd_dispatch_key
+                fm.write_with_template(f'TSLowering.cpp', 'TSLowering.cpp', lambda: {
+                    'ts_lowering_sysinc': [f'#include <{path}>' for path in [
+                        "vector",
+                    ]],
+                    'ts_lowering_inc': [f'#include "{path}"' for path in [
+                        "lazy_tensor_core/csrc/ir.h",
+                        "torch/csrc/jit/ir/named_value.h",
+                        "torch/csrc/jit/frontend/sugared_value.h",
+                        "lazy_tensor_core/csrc/ts_backend/ts_lowering_context.h",
+                        f"{output_dir}/{backend_key}LazyIr.h",
+                    ]],
+                    'backend_namespace': dispatch_key.lower(),  # TODO this is not designed yet
+                    'lowering_dispatches': list(concatMap(
+                        dest.TsLowering(
+                            backend_indices[dispatch_key],
+                            codegen,
+                            dest.TsLowering.TsLoweringTarget.DISPATCH),
+                        grouped_native_functions
+                    )),
+                    'lowering_definitions': list(concatMap(
+                        dest.TsLowering(
+                            backend_indices[dispatch_key],
+                            codegen,
+                            dest.TsLowering.TsLoweringTarget.LOWERING),
+                        grouped_native_functions
+                    )),
+                })
 
 
 if __name__ == '__main__':

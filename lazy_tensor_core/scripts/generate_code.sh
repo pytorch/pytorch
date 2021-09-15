@@ -13,5 +13,6 @@ python -m tools.codegen.gen_lazy_tensor \
   --output_dir="$XDIR/lazy_tensor_core/csrc/ts_backend" \
   --source_yaml="$XDIR/ts_native_functions.yaml"\
   --impl_path="$XDIR/lazy_tensor_core/csrc/ts_backend/aten_ltc_ts_type.cpp"\
+  --gen_ts_lowerings \
 
 popd
