@@ -99,13 +99,6 @@ class TestAOMigrationQuantization(AOMigrationTestCase):
 
     def test_function_import_quantization_mappings(self):
         function_list = [
-            "DEFAULT_REFERENCE_STATIC_QUANT_MODULE_MAPPINGS",
-            "DEFAULT_STATIC_QUANT_MODULE_MAPPINGS",
-            "DEFAULT_QAT_MODULE_MAPPINGS",
-            "DEFAULT_DYNAMIC_QUANT_MODULE_MAPPINGS",
-            "_INCLUDE_QCONFIG_PROPAGATE_LIST",
-            "DEFAULT_FLOAT_TO_QUANTIZED_OPERATOR_MAPPINGS",
-            "DEFAULT_MODULE_TO_ACT_POST_PROCESS",
             "no_observer_set",
             "get_default_static_quant_module_mappings",
             "get_static_quant_module_class",
@@ -129,7 +122,6 @@ class TestAOMigrationQuantization(AOMigrationTestCase):
             "fuse_conv_bn",
             "fuse_conv_bn_relu",
             "fuse_linear_bn",
-            "DEFAULT_OP_LIST_TO_FUSER_METHOD",
             "get_fuser_method",
         ]
         self._test_function_import('fuser_method_mappings', function_list)
