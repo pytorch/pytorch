@@ -740,6 +740,7 @@ class ChainedScheduler(_LRScheduler):
 
     def state_dict(self):
         """Returns the state of the scheduler as a :class:`dict`.
+
         It contains an entry for every variable in self.__dict__ which
         is not the optimizer.
         The wrapped scheduler states will also be saved.
@@ -754,6 +755,7 @@ class ChainedScheduler(_LRScheduler):
 
     def load_state_dict(self, state_dict):
         """Loads the schedulers state.
+
         Args:
             state_dict (dict): scheduler state. Should be an object returned
                 from a call to :meth:`state_dict`.
