@@ -657,11 +657,14 @@ class TestFunctionalIterDataPipe(TestCase):
             next(it1)
         with self.assertRaises(BufferError):
             next(it1)
+        with self.assertRaises(BufferError):
+            list(dp2)
 
         # Test Case: one child DataPipe yields all value first with unlimited buffer
         dp1, dp2 = input_dp.fork(num_instances=2, buffer_size=-1)
-        _ = list(dp1)
-        _ = list(dp2)
+        l1, l2 = list(dp1), list(dp2)
+        for d1, d2 in zip(l1, l2):
+            self.assertEqual(d1, d2)
 
         # Test Case: two child DataPipes yield value together with buffer size 1
         dp1, dp2 = input_dp.fork(num_instances=2, buffer_size=1)
@@ -758,6 +761,8 @@ class TestFunctionalIterDataPipe(TestCase):
         it1 = iter(dp1)
         with self.assertRaises(BufferError):
             next(it1)  # Buffer raises because first 5 elements all belong to the a different child
+        with self.assertRaises(BufferError):
+            list(dp2)
 
         # Test Case: values of the same classification are lumped together, and buffer_size = 5 is just enough
         dp1, dp2 = input_dp.demux(num_instances=2, classifier_fn=lambda x: 0 if x >= 5 else 1, buffer_size=5)
