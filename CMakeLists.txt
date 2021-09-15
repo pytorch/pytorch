@@ -195,6 +195,9 @@ cmake_dependent_option(
     USE_STATIC_CUDNN "Use cuDNN static libraries" OFF
     "USE_CUDNN" OFF)
 cmake_dependent_option(
+    BUILD_NVFUSER_BENCHMARK "Build C++ binaries for nvfuser benchmarks" ON
+    "USE_CUDA;BUILD_TEST" OFF)
+cmake_dependent_option(
   USE_WHOLE_CUDNN "Use whole-library linking for cuDNN" OFF
     "USE_STATIC_CUDNN" OFF)
 cmake_dependent_option(
@@ -491,9 +494,11 @@ if(MSVC)
   endforeach(flag_var)
 
   foreach(flag_var
+      CMAKE_SHARED_LINKER_FLAGS_RELWITHDEBINFO CMAKE_STATIC_LINKER_FLAGS_RELWITHDEBINFO
+      CMAKE_EXE_LINKER_FLAGS_RELWITHDEBINFO CMAKE_MODULE_LINKER_FLAGS_RELWITHDEBINFO
       CMAKE_SHARED_LINKER_FLAGS_DEBUG CMAKE_STATIC_LINKER_FLAGS_DEBUG
       CMAKE_EXE_LINKER_FLAGS_DEBUG CMAKE_MODULE_LINKER_FLAGS_DEBUG)
-    # Switch off incremental linking in debug builds
+    # Switch off incremental linking in debug/relwithdebinfo builds
     if(${flag_var} MATCHES "/INCREMENTAL" AND NOT ${flag_var} MATCHES "/INCREMENTAL:NO")
       string(REGEX REPLACE "/INCREMENTAL" "/INCREMENTAL:NO" ${flag_var} "${${flag_var}}")
     endif()
