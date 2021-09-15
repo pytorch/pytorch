@@ -351,19 +351,6 @@ def gen_lazy_shape_dtype_decl(f: NativeFunction, backend_index: BackendIndex, co
     # Only generate shape/dtype fn for non-structured kernels,
     # since we just use the meta function for structured kernels
     if not f.structured and f.structured_delegate is None:
-        shapeFn = DispatcherSignature.from_schema(FunctionSchema(f.func.name,
-                                                                 f.func.arguments,
-                                                                 returns=(Return(name=None,
-                                                                                 type=intArrayT,
-                                                                                 annotation=None),)),
-                                                  prefix='compute_shape_')
-        dtypeFn = DispatcherSignature.from_schema(FunctionSchema(f.func.name,
-                                                                 f.func.arguments,
-                                                                 returns=(Return(name=None,
-                                                                                 type=scalarTypeT,
-                                                                                 annotation=None),)),
-                                                  prefix='compute_dtype_')
-
         return "\n".join([f"std::vector<int64_t> compute_shape_{metadata.kernel}({', '.join([a.decl() for a in shapeFn.arguments()])});",
                 f"c10::ScalarType compute_dtype_{metadata.kernel}({', '.join([a.decl() for a in dtypeFn.arguments()])});"])
     else:
