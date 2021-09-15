@@ -6,14 +6,14 @@ import textwrap
 from tools.codegen import local
 from tools.codegen.context import method_with_native_function, native_function_manager
 from tools.codegen.utils import Target, mapMaybe
-from tools.codegen.model import (BaseType, OptionalType, DispatchKey, NativeFunction,
+from tools.codegen.model import (Type, BaseTy, BaseType, OptionalType, DispatchKey, NativeFunction,
                                  NativeFunctionsGroup, SchemaKind, FunctionSchema,
                                  TensorOptionsArguments, ListType,
                                  DeviceCheckType, Argument, assert_never,
                                  is_cuda_dispatch_key, BackendIndex,
                                  gets_generated_out_inplace_wrapper, OperatorName,
                                  Arguments, SelfArgument, Return)
-from tools.codegen.api.types import (BaseTy, BaseCppType, BaseCType, OptionalCType,
+from tools.codegen.api.types import (BaseCppType, BaseCType, OptionalCType,
                                      Binding, ConstRefCType, NamedCType,
                                      CppSignature, CppSignatureGroup,
                                      Expr, MutRefCType, kernel_signature,
@@ -30,7 +30,7 @@ valueListT = BaseCppType('std', 'vector<ir::Value>')
 valueT = BaseCppType('ir', 'Value')
 intArrayT = BaseCppType('std', 'vector<int64_t>')
 
-def process_ir_type(typ: BaseTy, mutable: bool, binds: str) -> NamedCType:
+def process_ir_type(typ: Type, mutable: bool, binds: str) -> NamedCType:
     """
     This function takes a type from NativeFunctions and converts it for use with
     lazy tensor codegen.  Currently its output is used in several places, and so far
