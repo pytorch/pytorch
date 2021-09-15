@@ -7253,7 +7253,7 @@ op_db: List[OpInfo] = [
            skips=(
                # RuntimeError: deepEquals(input.iValue, deepCopiedInput) INTERNAL ASSERT FAILED at
                # "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":142, please report a bug to PyTorch
-               SkipInfo('TestJit', 'test_variant_consistency_jit'),
+               DecorateInfo(unittest.skipped("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
            ),
            sample_inputs_func=sample_inputs_batch_norm),
     # This variant tests batch_norm with cuDNN disabled on only CUDA devices
