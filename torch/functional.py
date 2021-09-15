@@ -786,8 +786,13 @@ def _unique_consecutive_impl(input: Tensor, return_inverse: bool = False,
     return output, inverse_indices, counts
 
 
-def _return_counts(input, sorted=True, return_inverse=False, return_counts=False, dim=None):
-    # type: (Tensor, bool, bool, bool, Optional[int]) -> Tuple[Tensor, Tensor]
+def _return_counts(
+    input: Tensor,
+    sorted: bool = True,
+    return_inverse: bool = False,
+    return_counts: bool = False,
+    dim: Optional[int] = None
+) -> Tuple[Tensor, Tensor]:
 
     if has_torch_function_unary(input):
         return _unique_impl(input, sorted, return_inverse, return_counts, dim)
@@ -796,8 +801,13 @@ def _return_counts(input, sorted=True, return_inverse=False, return_counts=False
     return output, counts
 
 
-def _return_output(input, sorted=True, return_inverse=False, return_counts=False, dim=None):
-    # type: (Tensor, bool, bool, bool, Optional[int]) -> Tensor
+def _return_output(
+    input: Tensor,
+    sorted: bool = True,
+    return_inverse: bool = False,
+    return_counts: bool = False,
+    dim: Optional[int] = None
+) -> Tensor:
 
     if has_torch_function_unary(input):
         return _unique_impl(input, sorted, return_inverse, return_counts, dim)
@@ -806,8 +816,13 @@ def _return_output(input, sorted=True, return_inverse=False, return_counts=False
     return output
 
 
-def _return_inverse(input, sorted=True, return_inverse=False, return_counts=False, dim=None):
-    # type: (Tensor, bool, bool, bool, Optional[int]) -> Tuple[Tensor, Tensor]
+def _return_inverse(
+    input: Tensor,
+    sorted: bool = True,
+    return_inverse: bool = False,
+    return_counts: bool = False,
+    dim: Optional[int] = None
+) -> Tuple[Tensor, Tensor]:
 
     if has_torch_function_unary(input):
         return _unique_impl(input, sorted, return_inverse, return_counts, dim)
@@ -848,8 +863,9 @@ unique = boolean_dispatch(
 unique.__doc__ = _unique_impl.__doc__
 
 
-def _consecutive_return_counts(input, return_inverse=False, return_counts=False, dim=None):
-    # type: (Tensor, bool, bool, Optional[int]) -> Tuple[Tensor, Tensor]
+def _consecutive_return_counts(
+        input: Tensor, return_inverse: bool = False, return_counts: bool = False, dim: Optional[int] = None
+) -> Tuple[Tensor, Tensor]:
 
     if has_torch_function_unary(input):
         return _unique_consecutive_impl(input, return_inverse, return_counts, dim)
@@ -858,8 +874,9 @@ def _consecutive_return_counts(input, return_inverse=False, return_counts=False,
     return output, counts
 
 
-def _consecutive_return_output(input, return_inverse=False, return_counts=False, dim=None):
-    # type: (Tensor, bool, bool, Optional[int]) -> Tensor
+def _consecutive_return_output(
+        input: Tensor, return_inverse: bool = False, return_counts: bool = False, dim: Optional[int] = None
+) -> Tensor:
 
     if has_torch_function_unary(input):
         return _unique_consecutive_impl(input, return_inverse, return_counts, dim)
@@ -868,8 +885,9 @@ def _consecutive_return_output(input, return_inverse=False, return_counts=False,
     return output
 
 
-def _consecutive_return_inverse(input, return_inverse=False, return_counts=False, dim=None):
-    # type: (Tensor, bool, bool, Optional[int]) -> Tuple[Tensor, Tensor]
+def _consecutive_return_inverse(
+        input: Tensor, return_inverse: bool = False, return_counts: bool = False, dim: Optional[int] = None
+) -> Tuple[Tensor, Tensor]:
 
     if has_torch_function_unary(input):
         return _unique_consecutive_impl(input, return_inverse, return_counts, dim)
