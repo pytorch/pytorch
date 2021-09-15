@@ -122,17 +122,9 @@ torch.exp2(torch.tensor([0, math.log2(2.), 3, 4]))
 torch.expm1(torch.tensor([0, math.log(2.)]))
 
 # fake_quantize_per_channel_affine
-x = torch.randn(2, 2, 2).to(torch.float)
+x = torch.randn(2, 2, 2)
 scales = (torch.randn(2) + 1) * 0.05
-zero_points = torch.zeros(2).to(torch.int)
-torch.fake_quantize_per_channel_affine(x, scales, zero_points, 1, 0, 255)
-
-# fake_quantize_per_channel_affine float zero_point
-zero_points = torch.zeros(2).to(torch.float)
-torch.fake_quantize_per_channel_affine(x, scales, zero_points, 1, 0, 255)
-
-# fake_quantize_per_channel_affine fp16 zero_point
-zero_points = torch.zeros(2).to(torch.half)
+zero_points = torch.zeros(2).to(torch.long)
 torch.fake_quantize_per_channel_affine(x, scales, zero_points, 1, 0, 255)
 
 # fake_quantize_per_tensor_affine
