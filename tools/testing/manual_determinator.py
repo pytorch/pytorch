@@ -98,9 +98,11 @@ def nonexistent_tests(rules: List[Rule], all_tests: List[str]) -> bool:
 def determinate(
     diff_path: Path, rules_path: Path, all_tests: List[str], core_tests: List[str]
 ) -> List[str]:
+    print("opening")
     with open(rules_path) as f:
         rules = yaml.safe_load(f)["rules"]
 
+    print("checking non tests")
     bad_tests = nonexistent_tests(rules, all_tests)
     if len(bad_tests) > 0:
         raise RuntimeError(
@@ -108,9 +110,11 @@ def determinate(
             f"are not present in the tests used for determination:\n{indent_list(bad_tests)}"
         )
 
+    print("filenames_from_diff")
     changed_files = filenames_from_diff(diff_path)
     # changed_files = ["README.md", "test.cpp"]
 
+    print("determine_for_files")
     determined_tests = determine_for_files(changed_files, rules)
 
     sprint(
