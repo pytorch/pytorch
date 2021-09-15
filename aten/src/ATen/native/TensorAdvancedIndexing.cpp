@@ -101,12 +101,12 @@ TORCH_META_FUNC(gather)
     at::assert_no_partial_overlap(result, index);
   }
 
-  at::native::gather_shape_check(self, wrapped_dim, index);
   if (index.numel() == 0) return;
   TORCH_CHECK(
     index.scalar_type() == at::ScalarType::Long,
     "gather", "(): Expected dtype int64 for index"
   );
+  at::native::gather_shape_check(self, wrapped_dim, index);
 }
 
 template <typename Meta>
