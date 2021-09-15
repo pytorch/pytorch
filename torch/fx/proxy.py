@@ -3,7 +3,6 @@ import torch
 import inspect
 import operator
 import traceback
-import collections
 
 from .graph import magic_methods, reflectable_magic_methods, Graph
 from typing import Tuple, Dict, Optional, Iterable, Any, Iterator, Callable
@@ -265,15 +264,16 @@ class Proxy:
         args = args if args else ()
         kwargs = kwargs if kwargs else {}
 
-        # Find an instance of this class in the arguments to get a tracer
-        args_of_this_cls = []
-        for a in args:
+        tracers : Dict[torch.fx.Tracer, None] = {}
+        def find_tracer(a):
             if isinstance(a, cls):
-                args_of_this_cls.append(a)
-            elif isinstance(a, collections.Sequence):
-                args_of_this_cls.extend(el for el in a if isinstance(el, cls))
-        assert len(args_of_this_cls) > 0
-        tracer = args_of_this_cls[0].tracer
+                tracers[a.tracer] = None
+        torch.fx.node.map_aggregate(args, find_tracer)
+        torch.fx.node.map_aggregate(kwargs, find_tracer)
+
+        if len(tracers) > 1:
+            raise RuntimeError(f'Found multiple different tracers {list(tracers.keys)} while trying to trace operations {orig_method}')
+        tracer = next(iter(tracers.keys()))
 
         if isinstance(orig_method, torch._C.ScriptMethod):
             args = (orig_method.owner,) + args
@@ -282,7 +282,7 @@ class Proxy:
             return tracer.create_proxy('call_method', orig_method.__name__, args, kwargs)
         else:
             return tracer.create_proxy('call_function', orig_method, args, kwargs,
-                                            name=tracer.graph._target_to_str(orig_method.__name__))
+                                       name=tracer.graph._target_to_str(orig_method.__name__))
 
 @compatibility(is_backward_compatible=True)
 class Attribute(Proxy):
