@@ -1462,7 +1462,7 @@ ProcessedNode::ProcessedNode(
 }
 
 void ProcessedNode::run() {
-  DCHECK(verify_outputs_not_overlapping_with_immutable_inputs());
+  DCHECK(verify_no_memory_overlap());
   if (fn_) {
     fn_(this);
   } else if (native_fn_) {
@@ -1489,8 +1489,35 @@ void ProcessedNode::run() {
   }
 }
 
-bool ProcessedNode::verify_outputs_not_overlapping_with_immutable_inputs()
-    const {
+static bool checkNoMemoryOverlap(const at::Tensor& a, const at::Tensor& b) {
+  at::MemOverlapStatus status = at::get_overlap_status(a, b);
+  if (status == at::MemOverlapStatus::FULL ||
+      status == at::MemOverlapStatus::PARTIAL) {
+    return false;
+  }
+  if (status == at::MemOverlapStatus::TOO_HARD) {
+    LOG(WARNING) << "Detected TOO_HARD memory overlap status";
+  }
+  return true;
+}
+
+bool ProcessedNode::verify_no_memory_overlap() const {
+  for (size_t i = 0; i < outputs_.size(); ++i) {
+    if (!outputs_[i].isTensor()) {
+      continue;
+    }
+    const auto& out0_t = outputs_[i].toTensor();
+    for (size_t j = i + 1; j < outputs_.size(); ++j) {
+      if (!outputs_[j].isTensor()) {
+        continue;
+      }
+      const auto& out1_t = outputs_[j].toTensor();
+      if (!checkNoMemoryOverlap(out0_t, out1_t)) {
+        return false;
+      }
+    }
+  }
+
   auto schema = node()->maybeSchema();
   if (!schema || schema->is_mutable()) {
     return true;
@@ -1505,8 +1532,7 @@ bool ProcessedNode::verify_outputs_not_overlapping_with_immutable_inputs()
         continue;
       }
       const auto& out_t = out.toTensor();
-      at::MemOverlapStatus status = at::get_overlap_status(in_t, out_t);
-      if (status != at::MemOverlapStatus::NO) {
+      if (!checkNoMemoryOverlap(in_t, out_t)) {
         return false;
       }
     }
