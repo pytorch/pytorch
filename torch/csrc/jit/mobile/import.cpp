@@ -241,18 +241,11 @@ BytecodeDeserializer::BytecodeDeserializer(
  * Loads operators by looking them up in the Dispatcher and returns
  * the set of operator names (with overload) that are not supported
  * by the current runtime.
- *
- * Accepts an operator_cache, which allows you to cache operator
- * functions for the entire model. This is keyed on
- * c10::OperatorName. The value may not be what you're looking for
- * even if the key is the same. You need to call has_same_arg_num()
- * on the value to ensure that the number of arguments are the same.
  */
 std::unordered_set<std::string> load_and_find_unsupported_operator_names(
     c10::ivalue::TupleElements&& ops_list,
     mobile::Function* function,
-    int64_t model_version,
-    mobile::Function::OperatorCacheType& operator_cache) {
+    int64_t model_version) {
   std::unordered_set<std::string> unsupported_op_names;
   // ops_list is the list of operator names that were read in from
   // bytecode.plk for the method that is currently being processed.
@@ -271,8 +264,7 @@ std::unordered_set<std::string> load_and_find_unsupported_operator_names(
         op_item[0].toString()->string(),
         op_item[1].toString()->string(),
         num_args,
-        model_version,
-        operator_cache);
+        model_version);
     if (!op_found) {
       unsupported_op_names.emplace(operator_str(
           op_item[0].toString()->string(), op_item[1].toString()->string()));
@@ -349,11 +341,10 @@ void parseOperators(
     c10::ivalue::TupleElements&& ops_list,
     const int64_t& model_version,
     const uint64_t& module_load_options,
-    mobile::Function* function,
-    mobile::Function::OperatorCacheType& operator_cache) {
+    mobile::Function* function) {
   std::unordered_set<std::string> unsupported_op_names =
       load_and_find_unsupported_operator_names(
-          std::move(ops_list), function, model_version, operator_cache);
+          std::move(ops_list), function, model_version);
   if ((module_load_options & MobileModuleLoadOptions::OPERATOR_CHECK) &&
       !unsupported_op_names.empty()) {
     print_unsupported_ops_and_throw(unsupported_op_names);
@@ -392,9 +383,6 @@ void BytecodeDeserializer::parseMethods(
         debug_handles->size() == vals.size(),
         "The numbers of bytecode values and debug info values do not match.");
   }
-
-  // A Global Cache for Operator functions across all methods in the model.
-  mobile::Function::OperatorCacheType operator_cache;
 
   // Process all methods in this mobile module.
   for (const auto i : c10::irange(method_i_start, vals.size())) {
@@ -445,11 +433,7 @@ void BytecodeDeserializer::parseMethods(
         function_name, std::move(ins_list), debug_handles_m_tuple, function.get());
 
     parseOperators(
-        std::move(ops_list),
-        model_version,
-        module_load_options_,
-        function.get(),
-        operator_cache);
+        std::move(ops_list), model_version, module_load_options_, function.get());
 
     parseConstants(consts_list, function.get());
 
