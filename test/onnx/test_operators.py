@@ -681,7 +681,7 @@ class TestOperators(TestCase):
 
     def test_dropout_opset12(self):
         x = torch.randn(3, 4, requires_grad=True)
-        self.assertONNX(lambda x: torch.max(functional.dropout(x)), x, opset_version=12)
+        self.assertONNX(lambda x: torch.max(functional.dropout(x, training=False)), x, opset_version=12)
 
     def test_dropout_training_opset12(self):
         x = torch.randn(3, 4, requires_grad=True)

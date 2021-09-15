@@ -232,6 +232,9 @@ void __printTensor(std::ostream& stream, Tensor& self, int64_t linesize)
   }
 }
 
+void print(const Tensor & t, int64_t linesize) {
+  print(std::cout,t,linesize);
+}
 std::ostream& print(std::ostream& stream, const Tensor & tensor_, int64_t linesize) {
   FormatGuard guard(stream);
   if(!tensor_.defined()) {

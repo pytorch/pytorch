@@ -31,7 +31,7 @@ TEST(CustomOperatorTest, InferredSchema) {
 
   Stack stack;
   push(stack, 2.0f, at::ones(5));
-  op->getOperation()(&stack);
+  op->getOperation()(stack);
   at::Tensor output;
   pop(stack, output);
 
@@ -61,7 +61,7 @@ TEST(CustomOperatorTest, ExplicitSchema) {
 
   Stack stack;
   push(stack, 2.0f, at::ones(5));
-  op->getOperation()(&stack);
+  op->getOperation()(stack);
   at::Tensor output;
   pop(stack, output);
 
@@ -109,7 +109,7 @@ TEST(CustomOperatorTest, ListParameters) {
       c10::List<c10::complex<double>>(
           {c10::complex<double>(2.4, -5.5), c10::complex<double>(-1.3, 2)}));
   push(stack, c10::List<at::Tensor>({at::ones(5)}));
-  op->getOperation()(&stack);
+  op->getOperation()(stack);
   c10::List<double> output;
   pop(stack, output);
 
@@ -140,7 +140,7 @@ TEST(CustomOperatorTest, ListParameters2) {
 
   Stack stack;
   push(stack, c10::List<at::Tensor>({at::ones(5)}));
-  op->getOperation()(&stack);
+  op->getOperation()(stack);
   c10::List<at::Tensor> output;
   pop(stack, output);
 
@@ -204,7 +204,7 @@ TEST(TestCustomOperator, OperatorGeneratorUndeclared) {
   torch::jit::RegisterOperators reg({OperatorGenerator(
       TORCH_SELECTIVE_NAME_IN_SCHEMA(
           op_list, "foofoo::not_exist(float a, Tensor b) -> Tensor"),
-      [](Stack* stack) {
+      [](Stack& stack) {
         // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         double a;
         at::Tensor b;
@@ -223,7 +223,7 @@ TEST(TestCustomOperator, OperatorGeneratorBasic) {
   torch::jit::RegisterOperators reg({OperatorGenerator(
       TORCH_SELECTIVE_NAME_IN_SCHEMA(
           op_list, "foofoo::bar.template(float a, Tensor b) -> Tensor"),
-      [](Stack* stack) {
+      [](Stack& stack) {
         // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         double a;
         at::Tensor b;
@@ -249,7 +249,7 @@ TEST(TestCustomOperator, OperatorGeneratorBasic) {
 
   Stack stack;
   push(stack, 2.0f, at::ones(5));
-  op->getOperation()(&stack);
+  op->getOperation()(stack);
   at::Tensor output;
   pop(stack, output);
 

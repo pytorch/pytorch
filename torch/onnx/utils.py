@@ -71,15 +71,12 @@ def select_model_mode_for_export(model, mode):
 
 
 def export(model, args, f, export_params=True, verbose=False, training=None,
-           input_names=None, output_names=None, aten=False,
-           operator_export_type=None, opset_version=None, _retain_param_name=True,
-           do_constant_folding=True, example_outputs=None, strip_doc_string=True,
-           dynamic_axes=None, keep_initializers_as_inputs=None, custom_opsets=None,
+           input_names=None, output_names=None, operator_export_type=None,
+           opset_version=None, _retain_param_name=True, do_constant_folding=True,
+           example_outputs=None, strip_doc_string=True, dynamic_axes=None,
+           keep_initializers_as_inputs=None, custom_opsets=None,
            enable_onnx_checker=True, use_external_data_format=False):
-    if aten:
-        assert operator_export_type is None
-        operator_export_type = OperatorExportTypes.ONNX_ATEN
-    elif operator_export_type is None:
+    if operator_export_type is None:
         if torch.onnx.PYTORCH_ONNX_CAFFE2_BUNDLE:
             operator_export_type = OperatorExportTypes.ONNX_ATEN_FALLBACK
         else:
@@ -220,7 +217,7 @@ def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=Fa
     return graph
 
 
-# We accept dictionnaries and strings as ONNX inputs,
+# We accept dictionaries and strings as ONNX inputs,
 # but they should be only for configuration use.
 # we detect here if these inputs are modified, and if so
 # we warn the user that the changes won't take effect in the
@@ -229,7 +226,7 @@ def warn_on_static_input_change(input_states):
     for input, traced_input in zip(input_states[0], input_states[1]):
         if isinstance(input, dict):
             if list(input.keys()) != list(traced_input.keys()):
-                warning = "We detected that you are modifying a dictionnary that is an input to your " \
+                warning = "We detected that you are modifying a dictionary that is an input to your " \
                           "model. " \
                           "Note that dictionaries are allowed as inputs in ONNX but they should be " \
                           "handled with care. " \
@@ -529,18 +526,11 @@ def _model_to_graph(model, args, verbose=False,
 
 
 def export_to_pretty_string(model, args, f, export_params=True, verbose=False, training=None,
-                            input_names=None, output_names=None, aten=False,
-                            operator_export_type=None, export_type=ExportTypes.PROTOBUF_FILE,
-                            example_outputs=None, google_printer=False,
-                            opset_version=None, _retain_param_name=True,
+                            input_names=None, output_names=None, operator_export_type=OperatorExportTypes.ONNX,
+                            export_type=ExportTypes.PROTOBUF_FILE, example_outputs=None,
+                            google_printer=False, opset_version=None, _retain_param_name=True,
                             keep_initializers_as_inputs=None, custom_opsets=None, add_node_names=True,
                             do_constant_folding=True):
-    if aten:
-        assert operator_export_type is None
-        assert aten
-        operator_export_type = OperatorExportTypes.ONNX_ATEN
-    elif operator_export_type is None:
-        operator_export_type = OperatorExportTypes.ONNX
     return _export_to_pretty_string(model, args, f, export_params, verbose, training,
                                     input_names, output_names, operator_export_type,
                                     export_type, example_outputs, google_printer,
