@@ -169,7 +169,6 @@ but expected {expected_overload_count} kernel(s). The expected function schemas 
 """
     assert missing_kernels_err_msg == "", missing_kernels_err_msg
 
-
 def main() -> None:
     parser = argparse.ArgumentParser(description='Generate backend stub files')
     parser.add_argument(
@@ -185,7 +184,6 @@ def main() -> None:
     options = parser.parse_args()
 
     run(options.source_yaml, options.output_dir, options.dry_run, options.impl_path)
-
 
 def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[str]) -> None:
 

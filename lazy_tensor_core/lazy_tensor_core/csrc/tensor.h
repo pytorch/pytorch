@@ -269,15 +269,8 @@ class LazyTensor {
       const LazyTensor& input, const at::Scalar& other, const at::Scalar& alpha,
       c10::optional<at::ScalarType> logical_element_type = c10::nullopt);
 
-  static LazyTensor addcdiv(const LazyTensor& input, const at::Scalar& value,
-                            const LazyTensor& tensor1,
-                            const LazyTensor& tensor2);
   static void addcdiv_(LazyTensor& input, const at::Scalar& value,
                        const LazyTensor& tensor1, const LazyTensor& tensor2);
-
-  static LazyTensor addcmul(const LazyTensor& input, const at::Scalar& value,
-                            const LazyTensor& tensor1,
-                            const LazyTensor& tensor2);
 
   static LazyTensor addmm(const LazyTensor& input, const LazyTensor& weight,
                           const LazyTensor& bias);
@@ -451,8 +444,6 @@ class LazyTensor {
       std::vector<lazy_tensors::int64> dilation, bool transposed,
       std::vector<lazy_tensors::int64> output_padding,
       lazy_tensors::int64 groups);
-
-  static LazyTensor cos(const LazyTensor& input);
 
   static LazyTensor cosh(const LazyTensor& input);
 

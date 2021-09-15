@@ -116,7 +116,6 @@ at::Tensor LazyNativeFunctions::add(const at::Tensor& self,
                     });
 }
 
-
 at::Tensor& LazyNativeFunctions::addcdiv_(at::Tensor& self,
                                          const at::Tensor& tensor1,
                                          const at::Tensor& tensor2,
@@ -127,7 +126,6 @@ at::Tensor& LazyNativeFunctions::addcdiv_(at::Tensor& self,
                       bridge::GetLtcTensor(tensor2));
   return self;
 }
-
 
 at::Tensor LazyNativeFunctions::addmm(const at::Tensor& self,
                                       const at::Tensor& mat1,

@@ -530,15 +530,6 @@ LazyTensor LazyTensor::add(const LazyTensor& input, const at::Scalar& other,
                           logical_element_type);
 }
 
-LazyTensor LazyTensor::addcdiv(const LazyTensor& input, const at::Scalar& value,
-                               const LazyTensor& tensor1,
-                               const LazyTensor& tensor2) {
-  ir::Value constant = GetIrValueForScalar(
-      value, tensor1.shape().get().element_type(), input.GetDevice());
-  ir::Value div = tensor1.GetIrValue() / tensor2.GetIrValue();
-  return input.CreateFrom(input.GetIrValue() + div * constant);
-}
-
 void LazyTensor::addcdiv_(LazyTensor& input, const at::Scalar& value,
                           const LazyTensor& tensor1,
                           const LazyTensor& tensor2) {
@@ -546,15 +537,6 @@ void LazyTensor::addcdiv_(LazyTensor& input, const at::Scalar& value,
       value, tensor1.shape().get().element_type(), input.GetDevice());
   ir::Value div = tensor1.GetIrValue() / tensor2.GetIrValue();
   input.SetInPlaceIrValue(input.GetIrValue() + div * constant);
-}
-
-LazyTensor LazyTensor::addcmul(const LazyTensor& input, const at::Scalar& value,
-                               const LazyTensor& tensor1,
-                               const LazyTensor& tensor2) {
-  ir::Value constant = GetIrValueForScalar(
-      value, tensor1.shape().get().element_type(), input.GetDevice());
-  ir::Value mul = tensor1.GetIrValue() * tensor2.GetIrValue();
-  return input.CreateFrom(input.GetIrValue() + mul * constant);
 }
 
 LazyTensor LazyTensor::addmm(const LazyTensor& input, const LazyTensor& weight,
@@ -990,10 +972,6 @@ LazyTensor::convolution_backward_overrideable(
   LazyTensor grad_bias = out_backprop.CreateFrom(ir::Value(node, 2));
   return std::make_tuple(std::move(grad_input), std::move(grad_weight),
                          std::move(grad_bias));
-}
-
-LazyTensor LazyTensor::cos(const LazyTensor& input) {
-  return input.CreateFrom(ir::ops::Cos(input.GetIrValue()));
 }
 
 LazyTensor LazyTensor::cosh(const LazyTensor& input) {

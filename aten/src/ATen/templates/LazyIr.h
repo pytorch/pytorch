@@ -11,8 +11,11 @@ namespace torch_lazy_tensors{
 namespace ir {
 namespace ops {
 
-// Used as a hacky way to pass a same-valued null value in place of missing optional Values
-// TODO - design this properly
+// kNullValue is used to contribute a static hash value any time
+// a node has an Optional<Value> input that is nullopt.  It is important
+// to differentiate between HASH(nullopt, something) and HASH(something, nullopt),
+// and using kNullValue in the hash function in the order of arguments
+//  serves this purpose.
 static const ir::Value kNullValue = ir::Value();
 ${ir_declarations}
 
