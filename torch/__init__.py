@@ -624,14 +624,8 @@ if TYPE_CHECKING:
     # PR #43339 for details.
     from torch._C._VariableFunctions import *  # type: ignore[misc] # noqa: F403
 
-# Ops not to be exposed in `torch` namespace,
-# mostly helper ops.
-PRIVATE_OPS = (
-    'unique_dim',
-)
-
 for name in dir(_C._VariableFunctions):
-    if name.startswith('__') or name in PRIVATE_OPS:
+    if name.startswith('__'):
         continue
     globals()[name] = getattr(_C._VariableFunctions, name)
     __all__.append(name)
