@@ -324,8 +324,8 @@ if [[ "$BUILD_ENVIRONMENT" != *libtorch* && "$BUILD_ENVIRONMENT" != *bazel* ]]; 
 fi
 
 # Test Lazy Tensor Core. Don't merge to master.
-# No particular reasons why this environment, just restrict lazy tensor to one to limit potential breakages.
-if [[ "$BUILD_ENVIRONMENT" == *linux-xenial-cuda11.1* ]]; then
+# Restrict lazy tensor to cuda environment to limit potential breakages for the feature branch.
+if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
   pushd lazy_tensor_core/
   ./scripts/apply_patches.sh
   python setup.py install
