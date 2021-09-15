@@ -240,12 +240,11 @@ WINDOWS_WORKFLOWS = [
         cuda_version="10.2",
         test_runner_type=WINDOWS_CUDA_TEST_RUNNER,
         on_pull_request=True,
-        only_run_smoke_tests_on_pull_request=True,
         num_test_shards=2,
         ciflow_config=CIFlowConfig(
             enabled=True,
-            run_on_canary=True,
-            labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_CUDA, LABEL_CIFLOW_WIN}
+            trigger_action_only=True,
+            labels={LABEL_CIFLOW_CUDA, LABEL_CIFLOW_WIN}
         ),
     ),
     CIWorkflow(
@@ -255,10 +254,11 @@ WINDOWS_WORKFLOWS = [
         test_runner_type=WINDOWS_CUDA_TEST_RUNNER,
         num_test_shards=2,
         on_pull_request=True,
+        only_run_smoke_tests_on_pull_request=True,
         ciflow_config=CIFlowConfig(
             enabled=True,
-            trigger_action_only=True,
-            labels={LABEL_CIFLOW_CUDA, LABEL_CIFLOW_WIN}
+            run_on_canary=True,
+            labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_CUDA, LABEL_CIFLOW_WIN}
         ),
     ),
     CIWorkflow(
