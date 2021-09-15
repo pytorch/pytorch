@@ -1423,6 +1423,8 @@ def acc_ops_dequantize(network, target, args, kwargs, name):
         scale_shape = q_scale.shape
         if not torch.equal(q_zero_point, torch.zeros(q_zero_point.shape, dtype=q_zero_point.dtype)):
             raise RuntimeError(f"Only support zero_point == 0, get {q_zero_point}")
+    else:
+        raise RuntimeError("Unsupported qscheme in dequantize: {qscheme}")
 
     dtype = qparams["dtype"]
 
