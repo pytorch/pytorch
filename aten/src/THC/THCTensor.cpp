@@ -16,8 +16,6 @@
 #include <THC/generic/THCTensor.cpp>
 #include <THC/THCGenerateBFloat16Type.h>
 
-#include <THC/THCTensorInfo.cuh>
-
 #include <ATen/native/cuda/Resize.cuh>
 
 int THCTensor_nDimension(THCState *state, const THCTensor *self) {
@@ -325,52 +323,4 @@ int compareSizeAndStride(const void* a, const void* b) {
   return 1;
 }
 
-}
-
-/* Returns false if there is no possibility that the tensor    */
-/* has "overlapping" indices and true otherwise.               */
-/* "Overlapping" indices are two+ valid indices that specify   */
-/* the same offset within the tensor.                          */
-/* The function does this by checking for a sufficient but not */
-/* necessary condition of no overlap. In particular, that      */
-/* that there exists an ordering of the tensor's dimensions    */
-/* that is nicely "nested," with each dimension contained      */
-/* within the next one.                                        */
-bool THCTensor_maybeOverlappingIndices(THCState* state, const THCTensor* t) {
-  /* Extract size/stride arrays; only consider size >1 dims. */
-  SizeAndStride info[MAX_CUTORCH_DIMS];
-
-  int dims = THCTensor_nDimensionLegacyAll(state, t);
-  int nonSize1Dims = 0;
-  for (int i = 0; i < dims; ++i) {
-    int64_t size = THCTensor_sizeLegacyNoScalars(state, t, i);
-
-    if (size > 1) {
-      info[nonSize1Dims].size = size;
-      info[nonSize1Dims].stride =
-        THCTensor_stride(state, t, i);
-
-      if (info[nonSize1Dims].stride < 1) {
-        return true;
-      }
-
-      ++nonSize1Dims;
-    }
-  }
-
-  /* Short-circuits if tensor is a single element.             */
-  if (nonSize1Dims == 0) {
-    return false;
-  }
-
-  /* Ascending order (innermost dimension in sorted view is at [0]) */
-  qsort(info, nonSize1Dims, sizeof(SizeAndStride), compareSizeAndStride);
-
-  for (int i = 0; i < (nonSize1Dims - 1); ++i) {
-    if (((info[i].size - 1) * info[i].stride) >= info[i + 1].stride) {
-      return true;
-    }
-  }
-
-  return false;
 }
