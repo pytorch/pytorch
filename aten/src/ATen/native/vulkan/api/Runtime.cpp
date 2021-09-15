@@ -126,12 +126,6 @@ VkInstance create_instance(const Runtime::Type type) {
   VK_CHECK(vkCreateInstance(&instance_create_info, nullptr, &instance));
   TORCH_CHECK(instance, "Invalid Vulkan instance!");
 
-#ifdef USE_VULKAN_WRAPPER
-#ifdef USE_VULKAN_VOLK
-  volkLoadInstance(instance);
-#endif
-#endif
-
   return instance;
 }
 
@@ -314,18 +308,11 @@ Adapter Runtime::select(const Selector& selector) {
 Runtime* runtime() {
   static const std::unique_ptr<Runtime> runtime([]() -> Runtime* {
 #ifdef USE_VULKAN_WRAPPER
-#ifdef USE_VULKAN_VOLK
-    if (VK_SUCCESS != volkInitialize()) {
-      TORCH_WARN("Vulkan: Failed to initialize Volk!");
-      return nullptr;
-    }
-#else
- if (!InitVulkan()) {
+    if (!InitVulkan()) {
       TORCH_WARN("Vulkan: Failed to initialize Vulkan Wrapper!");
       return nullptr;
     }
-#endif /* USE_VULKAN_VOLK */
-#endif /* USE_VULKAN_WRAPPER */
+#endif
 
     try {
       return new Runtime(Configuration::kRuntime);
