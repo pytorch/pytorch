@@ -276,15 +276,9 @@ struct TORCH_API Tuple : c10::intrusive_ptr_target {
   const std::vector<IValue>& elements() const& {
     return elements_;
   }
-  operator const std::vector<IValue>&() const {
-    return elements();
-  }
 
   std::vector<IValue>& elements() & {
     return elements_;
-  }
-  operator std::vector<IValue>&() {
-    return elements();
   }
 
   std::vector<IValue>&& elements() && {
