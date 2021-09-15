@@ -1663,6 +1663,47 @@ TEST(LoopNest, ScheduleInlineOutputTensors) {
 # CHECK:       y[m2, n2, k2] = (k2 * m2) * n2 + m2;)IR");
 }
 
+TEST(LoopNest, ScheduleInlineWithCompoundIndices) {
+  // Input IR:
+  //     for (int64_t i = 0; i < 100; i++) {
+  //       A[i*2,i] = i * 500ll;
+  //     }
+  //     for (int64_t j = 0; j < 100; j++) {
+  //       B[0ll,j] = A[0, j] + j * 100ll;
+  //     }
+  BufHandle a_buf("A", {20, 100}, kLong);
+  BufHandle b_buf("B", {20, 100}, kLong);
+  VarHandle i("i", kLong);
+  VarHandle j("j", kLong);
+  auto forI = For::make(
+      i,
+      0,
+      100,
+      Store::make(a_buf, {i * 2, i}, Mul::make(i, static_cast<int64_t>(500))));
+  auto forJ = For::make(
+      j,
+      0,
+      100,
+      Store::make(
+          b_buf,
+          {static_cast<int64_t>(0), j},
+          Add::make(
+              Load::make(a_buf, {static_cast<int64_t>(0), j}),
+              Mul::make(j, static_cast<int64_t>(100)))));
+  auto par = Block::make({forI, forJ});
+
+  LoopNest l(par, {b_buf.node()});
+  // Inlining should fail since the producer has compound expr as index.
+  ASSERT_FALSE(l.computeInline(a_buf.node()));
+
+  // The input statement must remain as is.
+  checkIR(l.root_stmt(), R"IR(
+    # CHECK: for (int64_t i = 0;
+    # CHECK-NEXT:   A[
+    # CHECK: for (int64_t j = 0;
+    # CHECK-NEXT:   B[)IR");
+}
+
 TEST(LoopNest, ScheduleInlineBufferIndicesWithCast) {
   // Input IR:
   //     for (int64_t i = 0; i < 100; i++) {

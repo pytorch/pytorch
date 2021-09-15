@@ -544,6 +544,7 @@ class FunctionInliner : public IRMutator {
       : buf_(producer->buf()),
         producer_(producer),
         outputs_(std::move(outputs)) {
+    success_ = true;
     for (auto i : producer->indices()) {
       if (auto index_var = to<Var>(i)) {
         index_vars_.insert(index_var);
@@ -628,6 +629,9 @@ class FunctionInliner : public IRMutator {
   }
 
   ExprPtr mutate(LoadPtr v) override {
+    if (!success()) {
+      return v;
+    }
     BufPtr buf = v->buf();
     if (buf != buf_) {
       return IRMutator::mutate(v);
@@ -649,6 +653,9 @@ class FunctionInliner : public IRMutator {
 
   // Replace the target variable with the caller expressions.
   ExprPtr mutate(VarPtr v) override {
+    if (!success()) {
+      return v;
+    }
     auto iter = inline_mapping_.find(v);
     if (iter == inline_mapping_.end()) {
       return v;
@@ -661,6 +668,9 @@ class FunctionInliner : public IRMutator {
 
   // Handle random intrinsics which should be cached.
   ExprPtr mutate(IntrinsicsPtr v) override {
+    if (!success()) {
+      return v;
+    }
     if (!in_producer_ || v->op_type() != kRand) {
       return IRMutator::mutate(v);
     }
@@ -678,6 +688,9 @@ class FunctionInliner : public IRMutator {
 
   // Remove the buffer write from the inlined function.
   StmtPtr mutate(StorePtr v) override {
+    if (!success()) {
+      return v;
+    }
     // If the buf_ is in the outputs set, keep its statement intact. Otherwise,
     // remove it.
     if (v == producer_ && !outputs_.count(buf_)) {
@@ -697,6 +710,9 @@ class FunctionInliner : public IRMutator {
 
   // Any Random Instrinsics that were turned into vars must be inserted here.
   StmtPtr mutate(BlockPtr v) override {
+    if (!success()) {
+      return v;
+    }
     std::vector<StmtPtr> stmts;
     for (StmtPtr stmt : *v) {
       StmtPtr stmt_new = stmt->accept_mutator(this);
@@ -715,6 +731,9 @@ class FunctionInliner : public IRMutator {
   }
 
   StmtPtr mutate(ForPtr v) override {
+    if (!success()) {
+      return v;
+    }
     ForPtr res = to<For>(IRMutator::mutate(v));
     if (!res) {
       return nullptr;
