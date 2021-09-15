@@ -58,21 +58,6 @@ const std::string shape_compute_functions =
         def unary(self: List[int]):
           return _copy(self)
 
-        def unary_one_unused_input(self: List[int], inp0: Any):
-          return _copy(self)
-
-        def unary_two_unused_inputs(self: List[int], inp0: Any, inp1: Any):
-          return _copy(self)
-
-        def unary_three_unused_input(self: List[int], inp0: Any, inp1: Any, inp2: Any):
-          return _copy(self)
-
-        def unary_four_unused_inputs(self: List[int], inp0: Any, inp1: Any, inp2: Any, inp3: Any):
-          return _copy(self)
-
-        def unary_five_unused_inputs(self: List[int], inp0: Any, inp1: Any, inp2: Any, inp3: Any, inp4: Any):
-          return _copy(self)
-
         def expand(self: List[int], sizes: List[int]):
           assert len(sizes) >= len(self)
           ndim = len(sizes)
@@ -138,9 +123,6 @@ const std::string shape_compute_functions =
             else:
               out.append(self[idx])
           return out
-
-        def broadcast_one_unused_input(self: List[int], other: List[int], unused: Any):
-          return broadcast(self, other)
 
         # note: python already rounds down towards negative infinity on integer division, special arithmetic not needed
         def div_rtn(x: int, y: int):
@@ -565,16 +547,16 @@ static const OperatorMap<std::string>& get_schema_to_function_graph() {
   // clang-format off
   static const OperatorMap<std::string> schema_to_function_graph{
       {"aten::mul.Tensor(Tensor self, Tensor other) -> Tensor", "broadcast"},
-      {"aten::mul.Scalar(Tensor self, Scalar other) -> Tensor", "unary_one_unused_input"},
+      {"aten::mul.Scalar(Tensor self, Scalar other) -> Tensor", "unary"},
       {"aten::div.Tensor(Tensor self, Tensor other) -> Tensor", "broadcast"},
-      {"aten::div.Scalar(Tensor self, Scalar other) -> Tensor", "unary_one_unused_input"},
-      {"aten::contiguous(Tensor(a) self, *, MemoryFormat memory_format=contiguous_format) -> Tensor(a)", "unary_one_unused_input"},
+      {"aten::div.Scalar(Tensor self, Scalar other) -> Tensor", "unary"},
+      {"aten::contiguous(Tensor(a) self, *, MemoryFormat memory_format=contiguous_format) -> Tensor(a)", "unary"},
       {"aten::gt.Tensor(Tensor self, Tensor other) -> Tensor", "broadcast"},
-      {"aten::rsub.Tensor(Tensor self, Scalar other, Scalar alpha=1) -> Tensor", "unary_two_unused_inputs"},
-      {"aten::add.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor", "broadcast_one_unused_input"},
-      {"aten::add_.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor", "broadcast_one_unused_input"},
-      {"aten::add.Scalar(Tensor self, Scalar other, Scalar alpha=1) -> Tensor", "unary_two_unused_inputs"},
-      {"aten::hardtanh(Tensor self, Scalar min_val=-1, Scalar max_val=1) -> Tensor", "unary_two_unused_inputs"},
+      {"aten::rsub.Tensor(Tensor self, Scalar other, Scalar alpha=1) -> Tensor", "unary"},
+      {"aten::add.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor", "broadcast"},
+      {"aten::add_.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor", "broadcast"},
+      {"aten::add.Scalar(Tensor self, Scalar other, Scalar alpha=1) -> Tensor", "unary"},
+      {"aten::hardtanh(Tensor self, Scalar min_val=-1, Scalar max_val=1) -> Tensor", "unary"},
       {"aten::hardswish_(Tensor self) -> Tensor", "unary"},
       {"aten::hardsigmoid_(Tensor self) -> Tensor", "unary"},
       {"aten::adaptive_avg_pool2d(Tensor self, int[2] output_size) -> Tensor", "adaptive_avg_pool2d"},
@@ -583,8 +565,8 @@ static const OperatorMap<std::string>& get_schema_to_function_graph() {
       {"aten::erf(Tensor self) -> (Tensor)", "unary"},
       {"prim::NumToTensor.Scalar(Scalar a) -> Tensor", "zero_dim_tensor"},
       {"prim::NumToTensor.bool(bool a) -> Tensor", "zero_dim_tensor"},
-      {"aten::zeros(int[] size, *, int? dtype=None, int? layout=None, Device? device=None, bool? pin_memory=None) -> (Tensor)", "unary_four_unused_inputs"},
-      {"aten::to.dtype(Tensor(a) self, int dtype, bool non_blocking=False, bool copy=False, int? memory_format=None) -> (Tensor(a))", "unary_four_unused_inputs"},
+      {"aten::zeros(int[] size, *, int? dtype=None, int? layout=None, Device? device=None, bool? pin_memory=None) -> (Tensor)", "unary"},
+      {"aten::to.dtype(Tensor(a) self, int dtype, bool non_blocking=False, bool copy=False, int? memory_format=None) -> (Tensor(a))", "unary"},
       {"aten::arange(Scalar end, *, int? dtype=None, int? layout=None, Device? device=None, bool? pin_memory=None) -> (Tensor)", "arange_end"},
       {"aten::arange.start(Scalar start, Scalar end, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor", "arange_start"},
       {"aten::arange.start_step(Scalar start, Scalar end, Scalar step, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor", "arange_start_step"},
@@ -595,10 +577,10 @@ static const OperatorMap<std::string>& get_schema_to_function_graph() {
       {"aten::select.int(Tensor(a) self, int dim, int index) -> Tensor(a)", "select"},
       {"aten::index_select(Tensor self, int dim, Tensor index) -> Tensor", "index_select"},
       {"aten::layer_norm(Tensor input, int[] normalized_shape, Tensor? weight=None, Tensor? bias=None, "
-       "float eps=1e-05, bool cudnn_enable=True) -> Tensor", "unary_five_unused_inputs"},
-      {"aten::softmax.int(Tensor self, int dim, ScalarType? dtype=None) -> Tensor", "unary_two_unused_inputs"},
-      {"aten::_no_grad_embedding_renorm_(Tensor weight, Tensor input, float max_norm, float norm_type) -> Tensor", "unary_three_unused_input"},
-      {"aten::embedding_renorm_(Tensor(a!) self, Tensor indices, float max_norm, float norm_type) -> Tensor(a!)", "unary_three_unused_input"},
+       "float eps=1e-05, bool cudnn_enable=True) -> Tensor", "unary"},
+      {"aten::softmax.int(Tensor self, int dim, ScalarType? dtype=None) -> Tensor", "unary"},
+      {"aten::_no_grad_embedding_renorm_(Tensor weight, Tensor input, float max_norm, float norm_type) -> Tensor", "unary"},
+      {"aten::embedding_renorm_(Tensor(a!) self, Tensor indices, float max_norm, float norm_type) -> Tensor(a!)", "unary"},
       {"aten::embedding(Tensor weight, Tensor indices, int padding_idx=-1, bool scale_grad_by_freq=False, bool sparse=False) -> Tensor", "embedding"},
       {"aten::mm(Tensor self, Tensor mat2) -> Tensor", "mm"},
       {"aten::dot(Tensor self, Tensor tensor) -> Tensor", "dot"},
@@ -669,6 +651,9 @@ void loadModule(const CompilationUnit& module) {
         graph->registerOutput(v);
       }
     }
+
+    // allow extra unused arguments to map multiple functions to e.g. unary
+    TORCH_INTERNAL_ASSERT(graph->inputs().size() <= pair.first->schema().arguments().size());
 
     cached_schema_to_graph[schema_string] = graph;
     reused_functions[shape_compute_function_name] = graph;
