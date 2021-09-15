@@ -74,7 +74,7 @@ class C10_API TypeIdentifier final
    * is generated during run-time. Do NOT serialize the id for storage.
    */
   template <typename T>
-  static C10_HOST_CONSTEXPR TypeIdentifier Get() noexcept {
+  static constexpr TypeIdentifier Get() noexcept {
     return TypeIdentifier(c10::util::get_type_index<T>());
   }
 
@@ -428,7 +428,7 @@ class C10_API TypeMeta final {
   // Below are static functions that can be called by passing a specific type.
 
   template <class T>
-  static C10_HOST_CONSTEXPR TypeIdentifier Id() noexcept {
+  static constexpr TypeIdentifier Id() noexcept {
     return TypeIdentifier::Get<T>();
   }
 
