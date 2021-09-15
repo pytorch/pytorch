@@ -26,11 +26,11 @@ TEST(Conv, DepthwiseConv2D) {
   constexpr int kPad = 1, kStride = 2, kGroups = C;
   constexpr int CperG = C / kGroups;
 
-  te::Placeholder input("input", te::kFloat, {N, C, H, W});
-  te::Placeholder weight("weight", te::kFloat, {K, CperG, R, S});
-  te::Placeholder bias("bias", te::kFloat, {K});
-  te::Tensor output = te::conv2d_depthwise(
-      input.handle(), weight.handle(), bias.handle(), kStride, kPad, kGroups);
+  te::BufHandle input("input", {N, C, H, W}, te::kFloat);
+  te::BufHandle weight("weight", {K, CperG, R, S}, te::kFloat);
+  te::BufHandle bias("bias", {K}, te::kFloat);
+  te::Tensor output =
+      te::conv2d_depthwise(input, weight, bias, kStride, kPad, kGroups);
 
   te::LoopNest loop({output});
   loop.simplify();
@@ -57,10 +57,10 @@ TEST(Conv, DepthwiseConv2DNoBias) {
   constexpr int kPad = 1, kStride = 2, kGroups = C;
   constexpr int CperG = C / kGroups;
 
-  te::Placeholder input("input", te::kFloat, {N, C, H, W});
-  te::Placeholder weight("weight", te::kFloat, {K, CperG, R, S});
-  te::Tensor output = te::conv2d_depthwise(
-      input.handle(), weight.handle(), kStride, kPad, kGroups);
+  te::BufHandle input("input", {N, C, H, W}, te::kFloat);
+  te::BufHandle weight("weight", {K, CperG, R, S}, te::kFloat);
+  te::Tensor output =
+      te::conv2d_depthwise(input, weight, kStride, kPad, kGroups);
 
   te::LoopNest loop({output});
   loop.simplify();
@@ -90,12 +90,11 @@ TEST(Conv, DepthwiseConv2DDynamicShapes) {
   te::VarHandle kStride_var("kStride", te::kInt);
   te::VarHandle kGroups_var("kGroups", te::kInt);
 
-  te::Placeholder input("input", te::kFloat, {N_var, C_var, H_var, W_var});
-  te::Placeholder weight(
-      "weight", te::kFloat, {K_var, CperG_var, R_var, S_var});
+  te::BufHandle input("input", {N_var, C_var, H_var, W_var}, te::kFloat);
+  te::BufHandle weight("weight", {K_var, CperG_var, R_var, S_var}, te::kFloat);
   te::Tensor output = te::conv2d_depthwise(
-      input.handle(),
-      weight.handle(),
+      input,
+      weight,
       N_var,
       C_var,
       H_var,
@@ -187,8 +186,8 @@ TEST(Conv, Conv2D) {
   ASSERT_EQ(ref.size(2), OH);
   ASSERT_EQ(ref.size(3), OW);
 
-  te::Placeholder inputB(te::BufHandle("input", {N, C, H, W}, te::kFloat));
-  te::Placeholder filterB(te::BufHandle("filter", {K, C, R, S}, te::kFloat));
+  te::BufHandle inputB("input", {N, C, H, W}, te::kFloat);
+  te::BufHandle filterB("filter", {K, C, R, S}, te::kFloat);
 
   te::Tensor conv = te::Reduce(
       "conv",

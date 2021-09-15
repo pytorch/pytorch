@@ -60,6 +60,7 @@ class BatcherIterDataPipe(IterDataPipe[DataChunk]):
                  batch_size: int,
                  drop_last: bool = False,
                  unbatch_level: int = 0,
+                 wrapper_class=DataChunk,
                  ) -> None:
         assert batch_size > 0, "Batch size is required to be larger than 0!"
         super().__init__()
@@ -71,7 +72,7 @@ class BatcherIterDataPipe(IterDataPipe[DataChunk]):
         self.batch_size = batch_size
         self.drop_last = drop_last
         self.length = None
-        self.wrapper_class = DataChunk
+        self.wrapper_class = wrapper_class
 
     def __iter__(self) -> Iterator[DataChunk]:
         batch: List = []

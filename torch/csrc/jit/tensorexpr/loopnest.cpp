@@ -754,38 +754,35 @@ class FunctionInliner : public IRMutator {
   bool success_ = true;
 };
 
-bool LoopNest::computeInline(StmtPtr s) {
-  auto s_store = to<Store>(s);
-  if (s_store == nullptr) {
-    // Could not find buffer producer to inline
-    return false;
-  }
-  return computeInline(s_store->buf());
-}
-
-bool LoopNest::computeInline(BufPtr b) {
+StmtPtr computeInlineImpl(
+    BufPtr b,
+    StmtPtr stmt,
+    const std::unordered_set<BufPtr>& output_bufs) {
   // If buf is used or defined in an ExternalCall, we cannot inline it
-  auto buf_load_store_uses = findLoadOrStoreUses(root_stmt_);
+  auto buf_load_store_uses = findLoadOrStoreUses(stmt);
+  if (!buf_load_store_uses.count(b)) {
+    return nullptr;
+  }
   for (auto& use : buf_load_store_uses.at(b)) {
     StmtPtr s = use.s;
     if (to<ExternalCall>(s)) {
-      return false;
+      return nullptr;
     }
   }
 
   // Find producers.
   StorePtr relevant_store{nullptr};
-  auto stores = NodeFinder<Store>::find(root_stmt_);
+  auto stores = NodeFinder<Store>::find(stmt);
   for (auto s : stores) {
     if (s->buf() == b) {
       auto reductions = NodeFinder<ReduceOp>::find(s);
       if (!reductions.empty()) {
         // Cannot inline a reduction computation
-        return false;
+        return nullptr;
       }
       if (relevant_store != nullptr) {
         // Cannot inline Buf with multiple Tensors
-        return false;
+        return nullptr;
       }
       relevant_store = s;
     }
@@ -793,16 +790,41 @@ bool LoopNest::computeInline(BufPtr b) {
 
   if (!relevant_store) {
     // Cannot find a relevant store to inline a buf in the fuser
-    return false;
+    return nullptr;
   }
 
   GRAPH_DEBUG("ComputeInline: Def: ", std::to_string(relevant_store));
-  FunctionInliner inliner(relevant_store, output_bufs_);
-  auto result = root_stmt_->accept_mutator(&inliner);
+  FunctionInliner inliner(relevant_store, output_bufs);
+  auto result = stmt->accept_mutator(&inliner);
   if (inliner.success()) {
-    root_stmt_ = result;
+    return result;
   }
-  return inliner.success();
+  return nullptr;
+}
+
+bool LoopNest::computeInline(BufPtr b) {
+  // Inlining may not always be successful. Since all mutations now happen
+  // in-place, an unsuccessful inlining transformation might leave the IR
+  // in an invalid state. To get around this problem, we clone the root stmt,
+  // try inlining on the clone, and if it succeeds, we proceed to perform
+  // inlining on the actual root stmt. This way the root stmt will always be
+  // in a valid state.
+  auto stmt_copy = Stmt::clone(root_stmt_);
+  auto try_inline = computeInlineImpl(b, stmt_copy, output_bufs_);
+  if (!try_inline) {
+    return false;
+  }
+  root_stmt_ = computeInlineImpl(b, root_stmt_, output_bufs_);
+  return true;
+}
+
+bool LoopNest::computeInline(StmtPtr s) {
+  auto s_store = to<Store>(s);
+  if (s_store == nullptr) {
+    // Could not find buffer producer to inline
+    return false;
+  }
+  return computeInline(s_store->buf());
 }
 
 // inlining buffers with multiple uses can create duplicated work, which can

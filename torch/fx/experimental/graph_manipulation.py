@@ -319,6 +319,15 @@ def serialize_module(fx_module: GraphModule, weights: Dict, name_prefix="") -> D
                 node_rep["q_scale"] = tensor_meta.q_scale
                 node_rep["q_zero_point"] = tensor_meta.q_zero_point
 
+        # Add all extra lowering_info that was provided in node.meta.
+        lowering_info = node.meta.get("lowering_info")
+        if lowering_info is not None:
+            overlapping_keys = node_rep.keys() & lowering_info.keys()
+            assert (
+                len(overlapping_keys) == 0
+            ), f"Overlap found between lowering_info and node_rep: {overlapping_keys}"
+            node_rep.update(lowering_info)
+
         return node_rep
 
     # Note: lift_lowering_attrs_to_nodes is only used to support leaf modules
@@ -370,9 +379,9 @@ def serialize_module(fx_module: GraphModule, weights: Dict, name_prefix="") -> D
                 # For quantized embedding tables we need to update the shape/type,
                 # so we check if the users of this get_attr is a quantized EB and this is the weight for the EB.
                 user_targets = {
-                    _get_qualified_name(
-                        n.target
-                    ).replace("torch.fx.experimental.fx_acc.", "").replace("glow.fb.fx.", ""): n
+                    _get_qualified_name(n.target)
+                    .replace("torch.fx.experimental.fx_acc.", "")
+                    .replace("glow.fb.fx.", ""): n
                     for n in node.users.keys()
                 }
                 if (
