@@ -771,7 +771,7 @@ class Graph:
         return op
 
     @compatibility(is_backward_compatible=True)
-    def python_code(self, root_module: str) -> PythonCode:
+    def python_code(self, root_module: str, pdb: bool = False) -> PythonCode:
         """
         Turn this ``Graph`` into valid Python code.
 
@@ -830,9 +830,9 @@ class Graph:
                     node._repr_fn = orig_repr_fns[node]
 
         with override_node_repr(self):
-            return self._python_code(root_module, namespace)
+            return self._python_code(root_module, namespace, pdb)
 
-    def _python_code(self, root_module: str, namespace: _Namespace) -> PythonCode:
+    def _python_code(self, root_module: str, namespace: _Namespace, pdb:bool = False) -> PythonCode:
         free_vars: List[str] = []
         body: List[str] = []
         globals_: Dict[str, Any] = {}
@@ -1008,6 +1008,8 @@ class Graph:
         else:
             wrap_stmts = ''
 
+        if pdb:
+            body.insert(0, "import pdb; pdb.set_trace()\n")
         # If the original function didn't have self as its first argument, we
         # would have added it.
         if len(orig_args) == 0 or orig_args[0] != 'self':
