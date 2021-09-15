@@ -3,10 +3,9 @@ r"""
 This file is in the process of migration to `torch/ao/quantization`, and
 is kept here for compatibility while the migration process is ongoing.
 If you are adding a new entry/functionality, please, add it to the
-`torch/ao/quantization/MY_FILE.py`, while adding an import statement
+`torch/ao/quantization/quantization_mappings.py`, while adding an import statement
 here.
 """
-import torch
 from torch.ao.quantization.quantization_mappings import (
     DEFAULT_REFERENCE_STATIC_QUANT_MODULE_MAPPINGS,
     DEFAULT_STATIC_QUANT_MODULE_MAPPINGS,
