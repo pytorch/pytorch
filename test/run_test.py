@@ -165,6 +165,20 @@ USE_PYTEST_LIST = [
     "test_typing",
     "distributed/elastic/events/lib_test",
     "distributed/elastic/agent/server/test/api_test",
+    "distributed/fsdp/test_utils",
+    "distributed/fsdp/test_reduce_scatter_bucketer",
+    "distributed/fsdp/test_fsdp_uneven",
+    "distributed/fsdp/test_fsdp",
+    "distributed/fsdp/test_fsdp_summon_full_params",
+    "distributed/fsdp/test_fsdp_state_dict",
+    "distributed/fsdp/test_fsdp_overlap",
+    "distributed/fsdp/test_fsdp_multiple_wrapping",
+    "distributed/fsdp/test_fsdp_multiple_forward",
+    "distributed/fsdp/test_fsdp_memory",
+    "distributed/fsdp/test_fsdp_input",
+    "distributed/fsdp/test_fsdp_freezing_weights",
+    "distributed/fsdp/test_fsdp_apply",
+    "distributed/fsdp/test_flatten_params_wrapper",
 ]
 
 WINDOWS_BLOCKLIST = [
@@ -197,6 +211,20 @@ WINDOWS_BLOCKLIST = [
     "distributed/elastic/agent/server/test/api_test",
     "distributed/elastic/multiprocessing/api_test",
     "distributed/_sharded_tensor/test_sharded_tensor",
+    "distributed/fsdp/test_utils",
+    "distributed/fsdp/test_reduce_scatter_bucketer",
+    "distributed/fsdp/test_fsdp_uneven",
+    "distributed/fsdp/test_fsdp",
+    "distributed/fsdp/test_fsdp_summon_full_params",
+    "distributed/fsdp/test_fsdp_state_dict",
+    "distributed/fsdp/test_fsdp_overlap",
+    "distributed/fsdp/test_fsdp_multiple_wrapping",
+    "distributed/fsdp/test_fsdp_multiple_forward",
+    "distributed/fsdp/test_fsdp_memory",
+    "distributed/fsdp/test_fsdp_input",
+    "distributed/fsdp/test_fsdp_freezing_weights",
+    "distributed/fsdp/test_fsdp_apply",
+    "distributed/fsdp/test_flatten_params_wrapper",
 ]
 
 ROCM_BLOCKLIST = [
@@ -210,6 +238,20 @@ ROCM_BLOCKLIST = [
     "test_jit_legacy",
     "test_type_hints",
     "test_openmp",
+    "distributed/fsdp/test_utils.py",
+    "distributed/fsdp/test_reduce_scatter_bucketer.py",
+    "distributed/fsdp/test_fsdp_uneven.py",
+    "distributed/fsdp/test_fsdp.py",
+    "distributed/fsdp/test_fsdp_summon_full_params.py",
+    "distributed/fsdp/test_fsdp_state_dict.py",
+    "distributed/fsdp/test_fsdp_overlap.py",
+    "distributed/fsdp/test_fsdp_multiple_wrapping.py",
+    "distributed/fsdp/test_fsdp_multiple_forward.py",
+    "distributed/fsdp/test_fsdp_memory.py",
+    "distributed/fsdp/test_fsdp_input.py",
+    "distributed/fsdp/test_fsdp_freezing_weights.py",
+    "distributed/fsdp/test_fsdp_apply.py",
+    "distributed/fsdp/test_flatten_params_wrapper.py",
 ]
 
 RUN_PARALLEL_BLOCKLIST = [
