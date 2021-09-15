@@ -235,6 +235,30 @@ class TestSaveLoad(PackageTestCase):
         pe = make_exporter()
         pe.save_pickle("obj", "obj.pkl", loaded1)
 
+    def test_saving_imported_module(self):
+        """Saving a module that came from another PackageImporter should work."""
+        import package_a.subpackage
+
+        obj = package_a.subpackage.PackageASubpackageObject()
+        obj2 = package_a.PackageAObject(obj)
+
+        buffer = BytesIO()
+        with PackageExporter(buffer) as exporter:
+            exporter.intern("**")
+            exporter.save_pickle("model", "model.pkl", obj2)
+
+        buffer.seek(0)
+
+        importer = PackageImporter(buffer)
+        imported_obj2 = importer.load_pickle("model", "model.pkl")
+        imported_obj2_module = imported_obj2.__class__.__module__
+
+        # Should export without error.
+        buffer2 = BytesIO()
+        with PackageExporter(buffer2, importer=(importer, sys_importer)) as exporter:
+            exporter.intern("**")
+            exporter.save_module(imported_obj2_module)
+
 
 if __name__ == "__main__":
     run_tests()
