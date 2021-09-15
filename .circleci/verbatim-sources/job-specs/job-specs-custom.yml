@@ -517,6 +517,7 @@
             echo "IOS_PLATFORM: ${IOS_PLATFORM}"
             echo "USE_PYTORCH_METAL": "${USE_METAL}"
             echo "BUILD_LITE_INTERPRETER": "${BUILD_LITE_INTERPRETER}"
+            echo "USE_COREML": "${USE_COREML_DELEGATE}"
 
             #check the custom build flag
             echo "SELECTED_OP_LIST: ${SELECTED_OP_LIST}"
@@ -525,6 +526,7 @@
             fi
             export IOS_ARCH=${IOS_ARCH}
             export IOS_PLATFORM=${IOS_PLATFORM}
+            export USE_COREML_DELEGATE=${USE_COREML_DELEGATE}
             if [ ${IOS_PLATFORM} != "SIMULATOR" ]; then
               export USE_PYTORCH_METAL=${USE_METAL}
             fi
@@ -568,7 +570,12 @@
             # generate models for differnet backends
             cd ${PROJ_ROOT}/ios/TestApp/benchmark
             mkdir -p ../models
-            python trace_model.py
+            if [ ${USE_COREML_DELEGATE} == 1 ]; then
+              conda install coremltools --yes
+              python coreml_backend.py
+            else
+              python trace_model.py
+            fi
             if [ ${BUILD_LITE_INTERPRETER} == 1 ]; then
               ruby setup.rb --lite 1
             else
@@ -577,7 +584,10 @@
             cd ${PROJ_ROOT}/ios/TestApp
             instruments -s -devices
             if [ ${BUILD_LITE_INTERPRETER} == 1 ]; then
-              fastlane scan --only_testing TestAppTests/TestAppTests/testLiteInterpreter
+              if [ ${USE_COREML_DELEGATE} == 1 ]; then
+                fastlane scan --only_testing TestAppTests/TestAppTests/testCoreML
+              else 
+                fastlane scan --only_testing TestAppTests/TestAppTests/testLiteInterpreter
             else
               fastlane scan --only_testing TestAppTests/TestAppTests/testFullJIT
             fi
