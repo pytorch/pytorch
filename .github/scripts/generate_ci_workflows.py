@@ -161,6 +161,7 @@ class CIWorkflow:
     enable_backwards_compat_test: YamlShellBool = "''"
     enable_xla_test: YamlShellBool = "''"
     enable_noarch_test: YamlShellBool = "''"
+    enable_force_on_cpu_test: YamlShellBool = "''"
 
     def __post_init__(self) -> None:
         if self.is_libtorch:
@@ -241,6 +242,7 @@ WINDOWS_WORKFLOWS = [
         test_runner_type=WINDOWS_CUDA_TEST_RUNNER,
         on_pull_request=True,
         num_test_shards=2,
+        enable_force_on_cpu_test=1,
         ciflow_config=CIFlowConfig(
             enabled=True,
             trigger_action_only=True,
