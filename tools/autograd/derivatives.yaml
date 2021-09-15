@@ -1395,6 +1395,10 @@
   self: tanh_backward(grad, result)
   result: auto_element_wise
 
+- name: _test_forward_only(Tensor self) -> Tensor
+  self: not_implemented("_test_forward_only")
+  result: self_t
+
 - name: topk(Tensor self, int k, int dim=-1, bool largest=True, bool sorted=True) -> (Tensor values, Tensor indices)
   self: value_selecting_reduction_backward(grad, dim, indices, self.sizes(), true)
   output_differentiability: [True, False]

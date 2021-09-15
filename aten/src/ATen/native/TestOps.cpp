@@ -27,6 +27,10 @@ Tensor _test_optional_intlist(
   return output;
 }
 
+Tensor _test_forward_only(const Tensor& self) {
+  return self.clone();
+}
+
 /// If addends is nullopt, return values.
 /// Else, return a new tensor containing the elementwise sums.
 Tensor _test_optional_floatlist(

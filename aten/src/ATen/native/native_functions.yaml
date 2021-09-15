@@ -5561,6 +5561,11 @@
   dispatch:
     CPU, CUDA: set_tensor_
 
+- func: _test_forward_only(Tensor self) -> Tensor
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: _test_forward_only
+
 - func: set_(Tensor(a!) self) -> Tensor(a!)
   variants: method
   dispatch:
