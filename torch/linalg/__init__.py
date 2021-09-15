@@ -1284,6 +1284,12 @@ Examples::
     tensor([ 3.1623, 10.0000, 17.2627])
 """)
 
+matmul = _add_docstr(_linalg.linalg_matmul, r"""
+linalg.matmul(input, other, *, out=None) -> Tensor
+
+Alias for :func:`torch.matmul`
+""")
+
 multi_dot = _add_docstr(_linalg.linalg_multi_dot, r"""
 linalg.multi_dot(tensors, *, out=None)
 
