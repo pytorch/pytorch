@@ -37,7 +37,8 @@ def process_ir_type(typ: Type) -> Union[BaseCType, OptionalCType, ListCType]:
 
     Type conversion for lazy currently consists of
      (1) changing Tensor-like things into Value-like things
-     (2) wrapping everythign in a BaseCType
+     (2) wrapping everything in a BaseCType
+     (3) making reference types into values (e.g. vector instead of IntArrayRef)
 
     (1) converts Tensors to Values since Values are how Lazy IR represents tensors.  There
     is special handling for Optional[Tensor] or List[Tensor], etc- hence 'tensor-like'
@@ -79,55 +80,90 @@ def isValueType(typ: Union[Type, BaseCType, OptionalCType, ConstRefCType, MutRef
     being Tensor-like, but assumes the type has already been transformed.
     """
     if isinstance(typ, BaseCType):
-        return typ.type.ns == valueT.ns and typ.type.name == valueT.name
-    elif isinstance(typ, OptionalCType):
-        return isValueType(typ.elem)
-    elif isinstance(typ, ListCType):
+        return typ.type == valueT
+    elif isinstance(typ, (OptionalCType, ListCType, VectorCType)):
         return isValueType(typ.elem)
     else:
         return False
 
+# Inspired by a FunctionSchema object, a LazyIrSchema holds the schema of a Lazy IR node.
+# Unlike a FunctionSchema, it has no round-trippable string form (relating to the YAML),
+# but carries type information from a native FunctionSchema modified for use with IR nodes,
+# and preserving original argument names.
+class LazyIrSchema:
+    # The name of the operator this function schema describes.
+    name: 'OperatorName'
 
-def update_schema_for_lazy_ir(func: FunctionSchema) -> FunctionSchema:
-    """
-    We handle Tensor arguments specially as 'IR Values'.
+    arguments: 'Arguments'
 
-    This function mainly deals with the lists of types buried in named fields of `Arguments`,
-    delegating the actual type conversion to `process_ir_types`
-    """
-    new_args_fields = {}
-    for arg_field in ["pre_self_positional",
-                      "self_arg",
-                      "post_self_positional",
-                      "pre_tensor_options_kwarg_only",
-                      "tensor_options",
-                      "post_tensor_options_kwarg_only",
-                      "out"]:
-        if arg_field == "self_arg" and getattr(func.arguments, "self_arg") is not None:
-            arg = getattr(func.arguments, "self_arg").argument
-            new_args_fields[arg_field] = SelfArgument(Argument(arg.name, process_ir_type(
-                arg.type), arg.default, arg.annotation))
-        elif getattr(func.arguments, arg_field) is not None:
-            new_args_fields[arg_field] = [
-                Argument(
-                    arg.name,
-                    process_ir_type(arg.type), arg.default, arg.annotation) for arg in getattr(func.arguments, arg_field)]
-        else:
-            new_args_fields[arg_field] = None
-    new_args = Arguments(**new_args_fields)
-    return FunctionSchema(func.name, new_args, func.returns)
+    # TODO: Need to handle collisions with argument names at some point
+    returns: Tuple['Return', ...]
 
+    def __init__(self, func: FunctionSchema):
+        new_args_fields = {}
+        for arg_field in ["pre_self_positional",
+                        "self_arg",
+                        "post_self_positional",
+                        "pre_tensor_options_kwarg_only",
+                        "tensor_options",
+                        "post_tensor_options_kwarg_only",
+                        "out"]:
+            if arg_field == "self_arg" and getattr(func.arguments, "self_arg") is not None:
+                arg = getattr(func.arguments, "self_arg").argument
+                new_args_fields[arg_field] = SelfArgument(Argument(arg.name, process_ir_type(
+                    arg.type), arg.default, arg.annotation))
+            elif getattr(func.arguments, arg_field) is not None:
+                new_args_fields[arg_field] = [
+                    Argument(
+                        arg.name,
+                        process_ir_type(arg.type), arg.default, arg.annotation) for arg in getattr(func.arguments, arg_field)]
+            else:
+                new_args_fields[arg_field] = None
+        self.name = func.name 
+        self.arguments = Arguments(**new_args_fields)
+        self.returns = func.returns
 
-def separate_value_scalar_types(func: FunctionSchema) -> Tuple[List[NamedCType], List[NamedCType], List[NamedCType]]:
-    """
-    Since there are significant differences in how Values and 'everything else' are handled in the IR node class,
-    it's useful to have a way to get a list of just the values, just the scalars, or all of them.
-    """
-    types = [NamedCType(arg.name, arg.type) for arg in func.schema_order_arguments()]
-    value_types = [NamedCType(arg.name, arg.type) for arg in func.schema_order_arguments() if isValueType(arg.type)]
-    scalar_types = [NamedCType(arg.name, arg.type) for arg in func.schema_order_arguments() if not isValueType(arg.type)]
-    return types, value_types, scalar_types
+    def filtered_args(self, positional=True, keyword=True, values=True, scalars=True) -> List[Argument]:
+        args = []
+        if positional:
+            args.extend(self.arguments.flat_positional)
+        if keyword:
+            args.extend(self.arguments.flat_kwarg_only)
+            args.extend(self.arguments.out)
 
+        if values and scalars:
+            return args
+        
+        if values:
+            return [arg for arg in args if isValueType(arg.type)]
+        elif scalars:
+            return [arg for arg in args if not isValueType(arg.type)]
 
-def ir_node_name(func: FunctionSchema) -> str:
-    return str(func.name).lower().capitalize()
+        return []
+    @property
+    def node_name(self) -> str:
+        return str(self.name).lower().capitalize()
+    
+    @property 
+    def aten_name(self) -> str:
+        return self.name
+
+    def filtered_types(self, positional=True, keyword=True, values=True, scalars=True) -> List[NamedCType]:
+        args = self.filtered_args(positional, keyword, values, scalars)
+        return [NamedCType(arg.name, arg.type) for arg in args]
+
+    @property
+    def positional_values(self) -> List[NamedCType]:
+        return self.filtered_types(positional=True, keyword=False, values=True, scalars=False)
+    
+    @property
+    def positional_scalars(self) -> List[NamedCType]:
+        return self.filtered_types(positional=True, keyword=False, values=False, scalars=True)
+    
+    @property
+    def keyword_values(self) -> List[NamedCType]:
+        return self.filtered_types(positional=False, keyword=True, values=True, scalars=False)
+
+    @property
+    def keyword_scalars(self) -> List[NamedCType]:
+        return self.filtered_types(positional=False, keyword=True, values=False, scalars=True)

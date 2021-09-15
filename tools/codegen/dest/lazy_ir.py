@@ -25,15 +25,15 @@ import tools.codegen.api.cpp as cpp
 import tools.codegen.api.structured as structured
 from tools.codegen.api.translate import translate
 from tools.codegen.selective_build.selector import SelectiveBuilder
-from tools.codegen.api.lazy import ir_node_name, valueT, update_schema_for_lazy_ir, isValueType, separate_value_scalar_types
+from tools.codegen.api.lazy import LazyIrSchema, valueT, isValueType
 
-def node_ctor_inputs(func: FunctionSchema) -> str:
+def node_ctor_inputs(func: LazyIrSchema) -> str:
     """
     Produce a formatted string with the arguments as passed into the constructor of a node class.
     """
     node_ctor_values = []
     node_ctor_scalars = []
-    for arg in func.schema_order_arguments():
+    for arg in func.filtered_args():
         if isValueType(arg.type):
             if isinstance(arg.type, BaseCType):
                 node_ctor_values.append(f"l_{arg.name}.GetIrValue()")
@@ -72,10 +72,10 @@ class LazyIR:
         # for now, we just want one IR class decl and soon after also the method defs
         # and we use the functional version not out/inplace.
         func = f.functional.func if isinstance(f, NativeFunctionsGroup) else f.func
-        class_name = ir_node_name(func)
-
-        schema = update_schema_for_lazy_ir(func)
-        all_types, value_types, scalar_types = separate_value_scalar_types(schema)
+        schema = LazyIrSchema(func)
+        all_types = schema.filtered_types()
+        value_types = schema.filtered_types(values=True, scalars=False)
+        scalar_types = schema.filtered_types(values=False, scalars=True)
 
         node_ctor_args = ", ".join([f"{i.cpp_type()} {i.name}" for i in all_types])
         scalar_initializers = ",\n        ".join([f"{t.name}_({t.name})" for t in scalar_types])
@@ -101,19 +101,19 @@ class LazyIR:
             ["out_dtype_", "out_shape_"])
         if any([isinstance(t.type, OptionalCType) for t in value_types]):
             scalar_args = ",".join([f"{s.name}_" for s in scalar_types])
-            clone_impl = f"return Clone{class_name}(operands, {scalar_args});"
+            clone_impl = f"return Clone{schema.node_name}(operands, {scalar_args});"
             clone_decl_args = ", ".join([f"{i.cpp_type()} {i.name}" for i in scalar_types])
-            clone_handcoded_decl = f"NodePtr Clone{class_name}(OpList operands, {clone_decl_args});"
+            clone_handcoded_decl = f"NodePtr Clone{schema.node_name}(OpList operands, {clone_decl_args});"
         else:
-            clone_impl = f"ir::MakeNode<ir::ops::{ir_node_name(func)}>({clone_impl_args});"
+            clone_impl = f"ir::MakeNode<ir::ops::{schema.node_name}>({clone_impl_args});"
             clone_handcoded_decl = ""
         
 
         return [f"""\
 {clone_handcoded_decl}
-class {class_name} : public Node {{
+class {schema.node_name} : public Node {{
  public:
-  {class_name}({node_ctor_args}, at::ScalarType out_dtype, std::vector<int64_t> out_shape)
+  {schema.node_name}({node_ctor_args}, at::ScalarType out_dtype, std::vector<int64_t> out_shape)
       : Node(ir::OpKind(at::aten::{func.name.name}),
               {{{base_ctor_value_args}}}, 
               /*shape=*/lazy_tensors::Shape(out_dtype, out_shape),
@@ -146,7 +146,7 @@ class {class_name} : public Node {{
 """, ]
 
 
-def lazy_tensor_decls(value_types) -> List[str]:
+def lazy_tensor_decls(value_types: List[NamedCType]) -> List[str]:
     lazy_tensor_decls: List[str] = []
     for t in value_types:
         if isinstance(t.type, BaseCType):
@@ -171,20 +171,22 @@ def gen_unstructured_lazy_definition(f: NativeFunction, backend_index: BackendIn
         return None
 
     # Lazy IR stuff
-    schema = update_schema_for_lazy_ir(f.func)
-    all_types, value_types, scalar_types = separate_value_scalar_types(schema)
+    schema = LazyIrSchema(f.func)
+    all_types = schema.filtered_types()
+    value_types = schema.filtered_types(values=True, scalars=False)
+    scalar_types = schema.filtered_types(values=False, scalars=True)
     lazy_tensor_decls_str = lazy_tensor_decls(value_types)
     node_ctor_input_str = node_ctor_inputs(schema)
 
     # call the meta kernel if it exists, to compute output shape/dtype for our IR
     if f.structured or f.structured_delegate != None:
         meta_args = ", ".join([f"{t.name}.to(c10::kMeta)" for t in value_types] + [f"{t.name}" for t in scalar_types])
-        meta_str = f"""auto out_meta = at::meta::{metadata.kernel}({meta_args});
+        meta_str = f"""auto out_meta = at::meta::{schema.aten_name}({meta_args});
     auto _out_shape = out_meta.sizes().vec();
     auto _out_dtype = out_meta.scalar_type();"""
     else:
-        meta_str = f"""auto _out_shape = torch_lazy_tensors::ir::ops::compute_shape_{metadata.kernel}({", ".join([f"{t.name}" for t in all_types])});
-    auto _out_dtype = torch_lazy_tensors::ir::ops::compute_dtype_{metadata.kernel}({", ".join([f"{t.name}" for t in all_types])});"""
+        meta_str = f"""auto _out_shape = torch_lazy_tensors::ir::ops::compute_shape_{schema.aten_name}({", ".join([f"{t.name}" for t in all_types])});
+    auto _out_dtype = torch_lazy_tensors::ir::ops::compute_dtype_{schema.aten_name}({", ".join([f"{t.name}" for t in all_types])});"""
 
     assert len(value_types) > 0, f"Only supporting tensor ops so far, none found in {sig}"
     first_tensor = value_types[0]
@@ -194,7 +196,7 @@ def gen_unstructured_lazy_definition(f: NativeFunction, backend_index: BackendIn
     {lazy_tensor_decls_str}
     {meta_str}
     return bridge::AtenFromLtcTensor(l_{first_tensor.name}.CreateFrom(
-        ir::MakeNode<ir::ops::{ir_node_name(f.func)}>({node_ctor_input_str}, _out_dtype, _out_shape),
+        ir::MakeNode<ir::ops::{schema.node_name}>({node_ctor_input_str}, _out_dtype, _out_shape),
 
         // (whc): experiment on dtype
         // try always overriding output dtype to match the one ATen says our op should produce.
@@ -237,16 +239,16 @@ def gen_lazy_shape_dtype_decl(f: NativeFunction, backend_index: BackendIndex, co
         return None
 
     # Lazy IR stuff
-    schema = update_schema_for_lazy_ir(f.func)
-    all_types, value_types, scalar_types = separate_value_scalar_types(schema)
+    schema = LazyIrSchema(f.func)
+    value_types = schema.filtered_types(values=True, scalars=False)
     lazy_tensor_decls_str = lazy_tensor_decls(value_types)
     node_ctor_input_str = node_ctor_inputs(schema)
 
     # Only generate shape/dtype fn for non-structured kernels,
     # since we just use the meta function for structured kernels
     if not f.structured and f.structured_delegate is None:
-        return "\n".join([f"std::vector<int64_t> compute_shape_{metadata.kernel}({', '.join([a.decl() for a in dispatcher.arguments(f.func)])});",
-                f"c10::ScalarType compute_dtype_{metadata.kernel}({', '.join([a.decl() for a in dispatcher.arguments(f.func)])});"])
+        return "\n".join([f"std::vector<int64_t> compute_shape_{schema.aten_name}({', '.join([a.decl() for a in dispatcher.arguments(f.func)])});",
+                f"c10::ScalarType compute_dtype_{schema.aten_name}({', '.join([a.decl() for a in dispatcher.arguments(f.func)])});"])
     else:
         return None
 
