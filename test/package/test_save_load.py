@@ -166,31 +166,6 @@ class TestSaveLoad(PackageTestCase):
         IS_FBCODE or IS_SANDCASTLE,
         "Tests that use temporary files are disabled in fbcode",
     )
-    def test_save_imported_module_fails(self):
-        """
-        Directly saving/requiring an PackageImported module should raise a specific error message.
-        """
-        import package_a.subpackage
-
-        obj = package_a.subpackage.PackageASubpackageObject()
-        obj2 = package_a.PackageAObject(obj)
-        f1 = self.temp()
-        with PackageExporter(f1) as pe:
-            pe.intern("**")
-            pe.save_pickle("obj", "obj.pkl", obj)
-
-        importer1 = PackageImporter(f1)
-        loaded1 = importer1.load_pickle("obj", "obj.pkl")
-
-        f2 = self.temp()
-        pe = PackageExporter(f2, importer=(importer1, sys_importer))
-        with self.assertRaisesRegex(ModuleNotFoundError, "torch.package"):
-            pe.save_module(loaded1.__module__)
-
-    @skipIf(
-        IS_FBCODE or IS_SANDCASTLE,
-        "Tests that use temporary files are disabled in fbcode",
-    )
     def test_exporting_mismatched_code(self):
         """
         If an object with the same qualified name is loaded from different
@@ -235,7 +210,7 @@ class TestSaveLoad(PackageTestCase):
         pe = make_exporter()
         pe.save_pickle("obj", "obj.pkl", loaded1)
 
-    def test_saving_imported_module(self):
+    def test_save_imported_module(self):
         """Saving a module that came from another PackageImporter should work."""
         import package_a.subpackage
 
