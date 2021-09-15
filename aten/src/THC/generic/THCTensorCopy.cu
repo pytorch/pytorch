@@ -44,22 +44,4 @@ void THCTensor_freeCopyTo<scalar_t>(THCState *state, THCTensor *self, THCTensor 
   THCTensor_free(state, self);
 }
 
-template <>
-void THCTensor_copyIgnoringOverlaps<scalar_t>(THCState* state, THCTensor* dst, THCTensor* src) {
-  // Called when we are copying into an overlapping index `dst`, but
-  // we don't care which writer wins. Hacky but it works.
-  // This is itself invoked by pointwiseApply2 / THCTensor_copy in
-  // case that there are write overlaps.
-  // FIXME: really, overlapping writes should be illegal/an error in Torch
-  THC_pointwiseApply2<scalar_t, scalar_t>(
-    state, dst, src,
-    CopyOp<scalar_t>(),
-    ReadOnly, /* ignore overwrites */
-    ReadOnly);
-}
-
-void THCTensor_(copyIgnoringOverlaps)(THCState* state, THCTensor* dst, THCTensor* src) {
-  THCTensor_copyIgnoringOverlaps<scalar_t>(state, dst, src);
-}
-
 #endif
