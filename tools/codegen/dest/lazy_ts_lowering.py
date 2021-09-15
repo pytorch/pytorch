@@ -24,7 +24,7 @@ import tools.codegen.api.cpp as cpp
 import tools.codegen.api.structured as structured
 from tools.codegen.api.translate import translate
 from tools.codegen.selective_build.selector import SelectiveBuilder
-from .lazy_ir import ir_node_name, valueT, valueListT, update_schema_for_lazy_ir, isValueType
+from tools.codegen.api.lazy import ir_node_name, valueT, update_schema_for_lazy_ir, isValueType
 
 def separate_args_kwargs_types(func: FunctionSchema) -> Tuple[List[NamedCType], List[NamedCType], List[NamedCType], List[NamedCType], List[NamedCType]]:
     """
