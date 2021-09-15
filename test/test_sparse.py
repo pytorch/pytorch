@@ -3,11 +3,10 @@ import itertools
 import functools
 import operator
 import random
-from collections import defaultdict
 import unittest
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import TestCase, run_tests, skipIfRocm, do_test_dtypes, \
-    do_test_empty_full, load_tests, TEST_NUMPY, TEST_SCIPY, IS_WINDOWS, gradcheck, coalescedonoff, \
+    do_test_empty_full, load_tests, TEST_NUMPY, IS_WINDOWS, gradcheck, coalescedonoff, \
     DeterministicGuard
 from torch.testing._internal.common_cuda import TEST_CUDA, _get_torch_cuda_version
 from numbers import Number
@@ -25,9 +24,6 @@ from torch.testing._internal.common_dtype import (
     floating_and_complex_types, floating_and_complex_types_and, get_all_dtypes, get_all_int_dtypes,
 )
 
-if TEST_SCIPY:
-    import scipy.sparse
-
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests
@@ -35,7 +31,9 @@ load_tests = load_tests
 # batched grad doesn't support sparse
 gradcheck = functools.partial(gradcheck, check_batched_grad=False)
 
-CUSPARSE_SPMM_COMPLEX128_SUPPORTED = (IS_WINDOWS and LooseVersion(torch.version.cuda) > "11.2") or (not IS_WINDOWS and CUDA11OrLater)
+CUSPARSE_SPMM_COMPLEX128_SUPPORTED = (
+    IS_WINDOWS and torch.version.cuda and LooseVersion(torch.version.cuda) > "11.2"
+) or (not IS_WINDOWS and CUDA11OrLater)
 
 class TestSparse(TestCase):
 
