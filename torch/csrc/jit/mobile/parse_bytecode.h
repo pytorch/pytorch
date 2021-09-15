@@ -7,7 +7,7 @@ namespace mobile {
 using c10::IValue;
 TORCH_API void parseInstructions(
     const std::string& function_name,
-    const c10::ivalue::TupleElements& ins_list,
+    c10::ivalue::TupleElements&& ins_list,
     c10::ivalue::TupleElements& debug_handles_m_tuple,
     mobile::Function* function);
 TORCH_API void parseConstants(
