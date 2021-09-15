@@ -95,7 +95,7 @@ class TestAOMigrationQuantization(AOMigrationTestCase):
         self._test_function_import('fake_quantize', function_list)
 
     def test_package_import_observer(self):
-        self._test_package_import('observers')
+        self._test_package_import('observer')
 
     def test_function_import_observer(self):
         function_list = [
