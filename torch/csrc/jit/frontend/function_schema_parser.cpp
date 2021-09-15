@@ -122,6 +122,13 @@ struct SchemaParser {
     return results;
   }
 
+  either<OperatorName, FunctionSchema> parseExactlyOneDeclaration() {
+    auto result = parseDeclaration();
+    L.nextIf(TK_NEWLINE);
+    L.expect(TK_EOF);
+    return result;
+  }
+
   Argument parseArgument(size_t idx, bool is_return, bool kwarg_only) {
     auto p = type_parser.parseType();
     auto type = std::move(p.first);
@@ -325,7 +332,7 @@ struct SchemaParser {
 
 C10_EXPORT either<OperatorName, FunctionSchema> parseSchemaOrName(
     const std::string& schemaOrName) {
-  return SchemaParser(schemaOrName).parseDeclarations().at(0);
+  return SchemaParser(schemaOrName).parseExactlyOneDeclaration();
 }
 
 C10_EXPORT FunctionSchema parseSchema(const std::string& schema) {
