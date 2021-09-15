@@ -653,7 +653,8 @@ void loadModule(const CompilationUnit& module) {
     }
 
     // allow extra unused arguments to map multiple functions to e.g. unary
-    TORCH_INTERNAL_ASSERT(graph->inputs().size() <= pair.first->schema().arguments().size());
+    TORCH_INTERNAL_ASSERT(
+        graph->inputs().size() <= pair.first->schema().arguments().size());
 
     cached_schema_to_graph[schema_string] = graph;
     reused_functions[shape_compute_function_name] = graph;
