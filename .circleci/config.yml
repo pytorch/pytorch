@@ -7791,12 +7791,6 @@ workflows:
       - pytorch_windows_build:
           build_environment: pytorch-win-vs2019-cuda10.2-py3
           cuda_version: "10.2"
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
-                - /release\/.*/
           name: pytorch_windows_vs2019_py38_cuda10.2_build
           python_version: "3.8"
           use_cuda: "1"
@@ -7807,12 +7801,6 @@ workflows:
       - pytorch_windows_test:
           build_environment: pytorch-win-vs2019-cuda10.2-py3
           cuda_version: "10.2"
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
-                - /release\/.*/
           name: pytorch_windows_vs2019_py38_cuda10.2_on_cpu_test1
           python_version: "3.8"
           requires:
@@ -9405,29 +9393,6 @@ workflows:
           name: binary_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_shared-with-deps_test
           requires:
             - binary_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_shared-with-deps_build
-      - pytorch_windows_build:
-          build_environment: pytorch-win-vs2019-cuda10.2-py3
-          cuda_version: "10.2"
-          name: pytorch_windows_vs2019_py38_cuda10.2_build
-          python_version: "3.8"
-          use_cuda: "1"
-          vc_product: BuildTools
-          vc_version: ""
-          vc_year: "2019"
-          vs_version: "16.8.6"
-      - pytorch_windows_test:
-          build_environment: pytorch-win-vs2019-cuda10.2-py3
-          cuda_version: "10.2"
-          name: pytorch_windows_vs2019_py38_cuda10.2_on_cpu_test1
-          python_version: "3.8"
-          requires:
-            - pytorch_windows_vs2019_py38_cuda10.2_build
-          test_name: pytorch-windows-test1
-          use_cuda: "0"
-          vc_product: BuildTools
-          vc_version: ""
-          vc_year: "2019"
-          vs_version: "16.8.6"
     when: << pipeline.parameters.run_master_build >>
   slow_gradcheck_build:
     jobs:
