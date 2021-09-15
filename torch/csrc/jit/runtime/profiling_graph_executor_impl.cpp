@@ -668,7 +668,7 @@ const ExecutionPlan& ProfilingGraphExecutorImpl::getOptimizedPlanFor(
     // before any other pass that could insert `prim::iprofile_value` node on
     // `aten::_grad_sum_to_size` input.
     InsertProfileNodesForSpecializeAutogradZero(pr_.get());
-#ifndef !C10_MOBILE
+#ifndef C10_MOBILE
     // `InsertProfileNodesForCUDAFuser` inserts profile node for non-tensor
     // value
     if (RegisterCudaFuseGraph::isRegistered()) {
