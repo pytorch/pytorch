@@ -6,6 +6,7 @@
 
 import torch
 from functools import partial, wraps
+import contextlib
 import collections
 import torch.nn as nn
 import torch.nn.functional as F
@@ -183,6 +184,12 @@ def _argnums_partial(f, args, argnums):
     wrapper_args = wrapper_args if isinstance(wrapper_args, tuple) else (wrapper_args, )
     return (f_wrapper, wrapper_args)
 
+JVP_NESTING = 0
+
+@contextlib.contextmanager
+def noop():
+    yield
+
 def jvp(f, primals, tangents):
     level = _grad_increment_nesting()
     try:
@@ -190,7 +197,10 @@ def jvp(f, primals, tangents):
         # 1. Can't nested jvp of jvp due to forwardAD restrictions
         # 2. Seems like we can indeed vmap over this, given some more batch rules
         # 3. PyTorch doesn't have a lot of jvp rules implemented right now.
-        with fwAD.dual_level():
+        global JVP_NESTING
+        JVP_NESTING += 1
+        ctx = fwAD.dual_level if JVP_NESTING == 1 else noop
+        with ctx():
             # TODO: extend this to any number of primals
             assert len(primals) == 1 and len(tangents) == 1
             duals = tuple(fwAD.make_dual(p, t) for p, t in zip(primals, tangents))
@@ -203,6 +213,7 @@ def jvp(f, primals, tangents):
             return primals_out, tangents_out
     finally:
         _grad_decrement_nesting()
+        JVP_NESTING -= 1
 
 def jacfwd(f):
     # TODO: This should take more than just a single primal...
