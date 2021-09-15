@@ -456,6 +456,9 @@ TEST_SKIP_CUDA_MEM_LEAK_CHECK = os.getenv('PYTORCH_TEST_SKIP_CUDA_MEM_LEAK_CHECK
 # Disables tests for when on Github Actions
 ON_GHA = os.getenv('GITHUB_ACTIONS', '0') == '1'
 
+# True if CI is running TBB-enabled Pytorch
+IS_TBB = "tbb" in os.getenv("BUILD_ENVIRONMENT", "")
+
 # Dict of NumPy dtype -> torch dtype (when the correspondence exists)
 numpy_to_torch_dtype_dict = {
     np.bool_      : torch.bool,
@@ -690,6 +693,18 @@ def skipIfOnGHA(fn):
         else:
             fn(*args, **kwargs)
     return wrapper
+
+
+def skipIfTBB(message="This test makes TBB sad"):
+    def dec_fn(fn):
+        @wraps(fn)
+        def wrapper(*args, **kwargs):
+            if IS_TBB:
+                raise unittest.SkipTest(message)
+            else:
+                fn(*args, **kwargs)
+        return wrapper
+    return dec_fn
 
 
 def slowTest(fn):
