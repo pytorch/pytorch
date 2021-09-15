@@ -276,6 +276,13 @@ Tensor _det_lu_based_helper_backward(
   const Tensor& pivs
 );
 
+std::tuple<Tensor, Tensor> linalg_lstsq_backward(
+  const Tensor& grad,
+  const Tensor& A,
+  const Tensor& B,
+  c10::optional<double> rcond
+);
+
 Tensor lu_backward_base(
   const variable_list& grads,
   const Tensor& self,

@@ -3927,6 +3927,25 @@ Tensor gather_with_keepdimed_indices(const Tensor& input, int64_t dim, const Ten
   return out_fw_grad;
 }
 
+std::tuple<Tensor, Tensor> linalg_lstsq_backward(
+  const Tensor& grad,
+  const Tensor& A,
+  const Tensor& B,
+  c10::optional<double> rcond
+) {
+  Tensor A_grad, B_grad;
+  if (!grad.defined()) {
+    return std::make_tuple(A_grad, B_grad);
+  }
+
+  A_grad = at::zeros_like(A);
+  if (B.requires_grad()) {
+    B_grad = std::get<0>(at::linalg_lstsq(A.transpose(-1, -2), grad, rcond));
+  }
+
+  return std::make_tuple(A_grad, B_grad);
+}
+
 // Let X in \C^{m \times n}, then its pivoted LU decomposition is
 // X = P L U, where P is a permutation matrix.
 //

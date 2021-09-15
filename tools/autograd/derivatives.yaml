@@ -857,10 +857,8 @@
   A: not_implemented("lstsq")
 
 - name: linalg_lstsq(Tensor self, Tensor b, float? rcond=None, *, str? driver=None) -> (Tensor solution, Tensor residuals, Tensor rank, Tensor singular_values)
-  #self: "at::zeros_like(self, grad.options())"
-  #b: "std::get<0>(at::linalg_lstsq(self.transpose(-1, -2), grad, rcond, driver))"
-  self: not_implemented("lstsq")
-  b: not_implemented("lstsq")
+  self: "at::zeros_like(self, grad.options())"
+  b: "grad.defined() ? std::get<0>(at::linalg_lstsq(self.transpose(-1, -2), grad, rcond, driver)) : Tensor()"
   output_differentiability: [True, True]
 
 - name: lt_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
