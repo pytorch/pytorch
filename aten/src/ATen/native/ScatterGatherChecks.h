@@ -16,11 +16,12 @@ static void scatter_gather_dtype_check(
   const Tensor& index,
   const c10::optional<Tensor>& src_opt = c10::nullopt
 ) {
-  if (index.numel() == 0) return;
-  TORCH_CHECK(
-    index.scalar_type() == at::ScalarType::Long,
-    method_name, "(): Expected dtype int64 for index"
-  );
+  if (index.numel() != 0) {
+    TORCH_CHECK(
+      index.scalar_type() == at::ScalarType::Long,
+      method_name, "(): Expected dtype int64 for index"
+    );
+  }
 
   if (src_opt.has_value()) {
     auto src = src_opt.value();
@@ -66,6 +67,7 @@ static C10_UNUSED void scatter_shape_check(
   const Tensor& self, int64_t dim, const Tensor& index,
   const c10::optional<Tensor>& src_opt = c10::nullopt
 ) {
+  if (index.numel() == 0) return;
   TORCH_CHECK(
     ensure_nonempty_dim(self.dim()) == ensure_nonempty_dim(index.dim()),
     "Index tensor must have the same number of dimensions as self tensor"
