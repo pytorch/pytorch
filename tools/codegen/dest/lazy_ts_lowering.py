@@ -7,14 +7,14 @@ import textwrap
 from tools.codegen import local
 from tools.codegen.context import method_with_native_function, native_function_manager
 from tools.codegen.utils import Target, mapMaybe
-from tools.codegen.model import (BaseType, OptionalType, DispatchKey, NativeFunction,
+from tools.codegen.model import (BaseTy, BaseType, OptionalType, DispatchKey, NativeFunction,
                                  NativeFunctionsGroup, SchemaKind, FunctionSchema,
                                  TensorOptionsArguments, ListType,
                                  DeviceCheckType, Argument, assert_never,
                                  is_cuda_dispatch_key, BackendIndex,
                                  gets_generated_out_inplace_wrapper, OperatorName,
                                  SelfArgument, Arguments)
-from tools.codegen.api.types import (BaseTy, BaseCppType, BaseCType, OptionalCType,
+from tools.codegen.api.types import (BaseCppType, BaseCType, OptionalCType,
                                      Binding, ConstRefCType, NamedCType,
                                      CppSignature, CppSignatureGroup,
                                      Expr, MutRefCType, kernel_signature,
@@ -32,11 +32,12 @@ def separate_args_kwargs_types(func: FunctionSchema) -> Tuple[List[NamedCType], 
     it's useful to have a way to get a list of just the values, just the scalars, or all of them.
     """
     args = func.arguments
-    types = [arg.type for arg in func.schema_order_arguments()]
-    positional_values = [t.type for t in args.flat_positional if isValueType(t.type)]
-    positional_scalars = [t.type for t in args.flat_positional if not isValueType(t.type)]
-    kw_values = [t.type for t in args.flat_kwarg_only if isValueType(t.type)]
-    kw_scalars = [t.type for t in args.flat_kwarg_only if not isValueType(t.type)]
+    types = [NamedCType(arg.name, arg.type) for arg in func.schema_order_arguments()]
+    positional_values = [NamedCType(arg.name, arg.type) for arg in args.flat_positional if isValueType(arg.type)]
+    positional_scalars = [NamedCType(arg.name, arg.type) for arg in args.flat_positional if not isValueType(arg.type)]
+    kw_values = [NamedCType(arg.name, arg.type) for arg in args.flat_kwarg_only if isValueType(arg.type)]
+    kw_scalars = [NamedCType(arg.name, arg.type) for arg in args.flat_kwarg_only if not isValueType(arg.type)]
+    
     return types, positional_values, positional_scalars, kw_values, kw_scalars
 
 @dataclass(frozen=True)
