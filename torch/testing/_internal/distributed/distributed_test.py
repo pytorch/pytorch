@@ -1165,9 +1165,7 @@ class DistributedTest:
                 ):
                     send_tensor = _build_tensor(rank + 1)
                     send_op = dist.P2POp(dist.isend, send_tensor, 1)
-                    reqs = dist.batch_isend_irecv([send_op])
-                    for req in reqs:
-                        req.wait()
+                    dist.batch_isend_irecv([send_op])
 
         # NCCL Batch SEND RECV Op Error
         @sandcastle_skip_if(BACKEND != "nccl", "NCCL Batch Send Recv Only")
@@ -1181,9 +1179,7 @@ class DistributedTest:
                 with self.assertRaisesRegex(RuntimeError, "^Invalid ``op``"):
                     send_tensor = _build_tensor(rank + 1, device_id=device_id)
                     send_op = dist.P2POp(dist.broadcast, send_tensor, 1)
-                    reqs = dist.batch_isend_irecv([send_op])
-                    for req in reqs:
-                        req.wait()
+                    dist.batch_isend_irecv([send_op])
 
         # NCCL Batch SEND RECV p2p_op_list Error
         @sandcastle_skip_if(BACKEND != "nccl", "NCCL Batch Send Recv Only")
@@ -1193,9 +1189,7 @@ class DistributedTest:
             rank = dist.get_rank()
             if rank == 0:
                 with self.assertRaisesRegex(RuntimeError, "^Invalid ``p2p_op_list``"):
-                    reqs = dist.batch_isend_irecv([1, 2])
-                    for req in reqs:
-                        req.wait()
+                    dist.batch_isend_irecv([1, 2])
 
         # NCCL Batch SEND RECV Mixed Backend Error
         @sandcastle_skip_if(BACKEND != "nccl", "NCCL Batch Send Recv Only")
@@ -1214,9 +1208,7 @@ class DistributedTest:
                     send_tensor = _build_tensor(rank + 1)
                     send_op_gloo = dist.P2POp(dist.isend, send_tensor, 1, group_gloo)
                     send_op_nccl = dist.P2POp(dist.isend, send_tensor, 1, group_nccl)
-                    reqs = dist.batch_isend_irecv([send_op_gloo, send_op_nccl])
-                    for req in reqs:
-                        req.wait()
+                    dist.batch_isend_irecv([send_op_gloo, send_op_nccl])
 
         # NCCL SEND RECV
         @skip_if_no_gpu
