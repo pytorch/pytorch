@@ -323,7 +323,7 @@ if [[ "$BUILD_ENVIRONMENT" != *libtorch* && "$BUILD_ENVIRONMENT" != *bazel* ]]; 
   python test/run_test.py --export-past-test-times
 fi
 
-# Test Lazy Tensor Core
+# Test Lazy Tensor Core. Don't merge to master.
 # No particular reasons why this environment, just restrict lazy tensor to one to limit potential breakages.
 if [[ "$BUILD_ENVIRONMENT" == *linux-xenial-cuda11.1* ]]; then
   pushd lazy_tensor_core/
