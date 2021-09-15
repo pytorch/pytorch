@@ -7078,17 +7078,14 @@ workflows:
           name: "docker-pytorch-linux-xenial-py3.6-gcc7"
           image_name: "pytorch-linux-xenial-py3.6-gcc7"
       - docker_build_job:
-          name: "docker-pytorch-linux-bionic-rocm3.9-py3.6"
-          image_name: "pytorch-linux-bionic-rocm3.9-py3.6"
-      - docker_build_job:
-          name: "docker-pytorch-linux-bionic-rocm4.0.1-py3.6"
-          image_name: "pytorch-linux-bionic-rocm4.0.1-py3.6"
-      - docker_build_job:
           name: "docker-pytorch-linux-bionic-rocm4.1-py3.6"
           image_name: "pytorch-linux-bionic-rocm4.1-py3.6"
       - docker_build_job:
           name: "docker-pytorch-linux-bionic-rocm4.2-py3.6"
           image_name: "pytorch-linux-bionic-rocm4.2-py3.6"
+      - docker_build_job:
+          name: "docker-pytorch-linux-bionic-rocm4.3.1-py3.6"
+          image_name: "pytorch-linux-bionic-rocm4.3.1-py3.6"
       - pytorch_linux_build:
           name: pytorch_linux_xenial_py3_6_gcc5_4_build
           requires:
