@@ -1465,8 +1465,11 @@ class TestNormalizeOperators(JitTestCase):
             "expand_as",
             "fill_",
             "gradient",
+            "igamma",
+            "igammac",
             "index_put",
             "nn.functional.conv2d",
+            "nn.functional.dropout",
             "polygamma",
             "special.polygamma",
             "repeat",
@@ -1498,7 +1501,7 @@ class TestNormalizeOperators(JitTestCase):
             return
 
         # These ops currently don't trace in FX for various reasons (i.e. they take a list of tensors)
-        fx_fail = {"stack", "hstack", "vstack", "dstack", "linalg.multi_dot"}
+        fx_fail = {"cat", "stack", "hstack", "vstack", "dstack", "linalg.multi_dot"}
         sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)
         for sample_input in sample_inputs_itr:
             unsupported_arg_type = False
