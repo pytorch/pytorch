@@ -57,6 +57,8 @@ LABEL_CIFLOW_NOARCH = "ciflow/noarch"
 @dataclass
 class CIFlowConfig:
     enabled: bool = False
+    # For use to enable workflows to run on pytorch/pytorch-canary
+    run_on_canary: bool = False
     labels: Set[str] = field(default_factory=set)
     trigger_action: str = 'unassigned'
     trigger_actor: str = 'pytorchbot'
@@ -76,9 +78,13 @@ class CIFlowConfig:
         #      REMOVE   github.event.action !='{self.trigger_action}'
         label_conditions = [
             f"contains(github.event.pull_request.labels.*.name, '{label}')" for label in sorted(self.labels)]
-        self.root_job_condition = f"(github.event_name != 'pull_request') || " \
+        if self.run_on_canary:
+            self.root_job_condition = "(github.repository_owner == 'pytorch') && "
+        else:
+            self.root_job_condition = "(github.repository == 'pytorch/pytorch') && "
+        self.root_job_condition += f"((github.event_name != 'pull_request') || " \
             f"(github.event.action !='{self.trigger_action}') || " \
-            f"({' || '.join(label_conditions)})"
+            f"({' || '.join(label_conditions)}))"
 
     def reset_root_job(self) -> None:
         self.root_job_name = ''
@@ -224,6 +230,7 @@ WINDOWS_WORKFLOWS = [
         num_test_shards=2,
         ciflow_config=CIFlowConfig(
             enabled=True,
+            run_on_canary=True,
             labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_CPU, LABEL_CIFLOW_WIN}
         ),
     ),
@@ -250,6 +257,7 @@ WINDOWS_WORKFLOWS = [
         only_run_smoke_tests_on_pull_request=True,
         ciflow_config=CIFlowConfig(
             enabled=True,
+            run_on_canary=True,
             labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_CUDA, LABEL_CIFLOW_WIN}
         ),
     ),
@@ -283,6 +291,7 @@ LINUX_WORKFLOWS = [
         num_test_shards=2,
         ciflow_config=CIFlowConfig(
             enabled=True,
+            run_on_canary=True,
             labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CPU}
         ),
     ),
@@ -354,6 +363,7 @@ LINUX_WORKFLOWS = [
         on_pull_request=True,
         ciflow_config=CIFlowConfig(
             enabled=True,
+            run_on_canary=True,
             trigger_action_only=True,
             labels={LABEL_CIFLOW_SLOW, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CUDA}
         ),
