@@ -1,7 +1,6 @@
 import torch
 import numpy as np
 
-import os
 import sys
 import math
 import warnings
@@ -12,8 +11,8 @@ import random
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, do_test_empty_full, TEST_WITH_ROCM, suppress_warnings,
-    torch_to_numpy_dtype_dict, slowTest, TEST_SCIPY, IS_MACOS, IS_PPC,
-    IS_WINDOWS)
+    torch_to_numpy_dtype_dict, skipIfTBB, slowTest,
+    TEST_SCIPY, IS_MACOS, IS_PPC, IS_WINDOWS)
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests, deviceCountAtLeast, onlyOnCPUAndCUDA,
     onlyCPU, largeTensorTest, precisionOverride, dtypes,
@@ -311,6 +310,21 @@ class TestTensorCreation(TestCase):
         dtypes = [dtype for dtype in get_all_dtypes() if dtype != torch.bfloat16]
         for s, d, dtype in product(shapes, diagonals, dtypes):
             run_test(s, device, d, dtype)
+
+    @onlyCPU
+    def test_triu_tril_bfloat16(self, device):
+        op_funcs = [torch.tril, torch.triu]
+        for op_fun in op_funcs:
+            input = torch.randn(3, 3, dtype=torch.float32, device=device).bfloat16().requires_grad_(True)
+            input2 = input.detach().clone().float().requires_grad_(True)
+            out = op_fun(input)
+            out.sum().backward()
+            out2 = op_fun(input2)
+            out2.sum().backward()
+            self.assertEqual(out.dtype, torch.bfloat16)
+            self.assertEqual(input.grad.dtype, torch.bfloat16)
+            self.assertEqual(out, out2.bfloat16())
+            self.assertEqual(input.grad, input2.grad.bfloat16(), atol=0.01, rtol=0)
 
     def test_diagflat(self, device):
         dtype = torch.float32
@@ -1191,8 +1205,7 @@ class TestTensorCreation(TestCase):
         self.assertRaises(RuntimeError, lambda: torch.zeros((2, 3), device=device, dtype=torch.float32, out=d))
 
     # TODO: update to work on CUDA, too
-    @unittest.skipIf("tbb" in os.getenv("BUILD_ENVIRONMENT", ""),
-                     "This test makes TBB sad, see https://github.com/pytorch/pytorch/issues/64571")
+    @skipIfTBB("This test makes TBB sad, see https://github.com/pytorch/pytorch/issues/64571")
     @onlyCPU
     def test_trilu_indices(self, device):
         for test_args in tri_tests_args:
@@ -1214,6 +1227,15 @@ class TestTensorCreation(TestCase):
         b = x.clone().expand(3, 3, 3, 3)
         self.assertEqual(b.triu(2), output)
         self.assertRaises(RuntimeError, lambda: b.triu_(2))
+
+    @onlyCPU
+    def test_triu_tril_indices_bfloat16(self, device):
+        op_funcs = [torch.tril_indices, torch.triu_indices]
+        for op_fun in op_funcs:
+            out = op_fun(4, 3, 1, dtype=torch.bfloat16)
+            out2 = op_fun(4, 3, 1, dtype=torch.float)
+            self.assertEqual(out.dtype, torch.bfloat16)
+            self.assertEqual(out, out2.bfloat16())
 
     # TODO: update to work on CUDA, too
     @onlyCPU
