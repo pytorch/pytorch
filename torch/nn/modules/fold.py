@@ -98,8 +98,7 @@ class Fold(Module):
         other (up to constant divisor).
 
     .. warning::
-        Currently, only 3-D (without batch dim) or 4-D (with batch dim) output tensors (image-like tensors) are
-        supported.
+        Currently, only unbatched (3D) or batched (4D) image-like output tensors are supported.
 
     Shape:
         - Input: :math:`(N, C \times \prod(\text{kernel\_size}), L)` or :math:`(C \times \prod(\text{kernel\_size}), L)`

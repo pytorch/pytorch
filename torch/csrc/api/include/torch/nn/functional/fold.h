@@ -25,7 +25,7 @@ inline Tensor fold(const Tensor& input,
   } else {
     TORCH_CHECK(
         false,
-        "Input Error: Only batched or unbatched 3D input Tensors are supported "
+        "Input Error: Only unbatched (2D) or batched (3D) input Tensors are supported "
         "(got ", input.dim(), "D)");
   }
 }

@@ -4506,8 +4506,7 @@ def fold(
     tensor.
 
     .. warning::
-        Currently, only 3-D (without batch dim) or 4-D (with batch dim) output tensors (unfolded image-like tensors) are
-        supported.
+        Currently, only unbatched (3D) or batched (4D) image-like output tensors are supported.
 
     See :class:`torch.nn.Fold` for details
     """
@@ -4527,7 +4526,8 @@ def fold(
             input, _pair(output_size), _pair(kernel_size), _pair(dilation), _pair(padding), _pair(stride)
         )
     else:
-        raise NotImplementedError(f"Input Error: Only 3D input Tensors are supported (got {input.dim()}D)")
+        raise NotImplementedError("Input Error: Only unbatched (2D) or batched (3D) input Tensors"
+                                  f"are supported (got {input.dim()}D)")
 
 
 def _pad_circular(input: Tensor, padding: List[int]) -> Tensor:
