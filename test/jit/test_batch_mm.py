@@ -11,17 +11,26 @@ if __name__ == "__main__":
 
 
 class TestBatchMM(JitTestCase):
+    @staticmethod
+    def _get_test_tensors(n: int):
+        return [
+            torch.tensor([[1 + x, 2 + x, 3 + x], [4 + x, 5 + x, 6 + x]])
+            if x % 2 == 0
+            else torch.tensor([[1 + x, 2 + x], [3 + x, 4 + x], [5 + x, 6 + x]])
+            for x in range(n)
+        ]
+
     def test_batch_mm_no_mutation(self):
-        @torch.jit.script
-        def test_batch_mm(n: int):
-            T1 = torch.zeros((n, n))
-            T2 = torch.zeros((n, n))
-            T3 = torch.zeros((n, n))
-            T4 = torch.zeros((n, n))
-            T5 = torch.zeros((n, n))
-            T6 = torch.zeros((n, n))
-            T7 = torch.zeros((n, n))
-            T8 = torch.zeros((n, n))
+        def test_batch_mm(
+            T1: torch.Tensor,
+            T2: torch.Tensor,
+            T3: torch.Tensor,
+            T4: torch.Tensor,
+            T5: torch.Tensor,
+            T6: torch.Tensor,
+            T7: torch.Tensor,
+            T8: torch.Tensor,
+        ):
             return (
                 torch.mm(T1, T2)
                 + torch.mm(T3, T4)
@@ -29,23 +38,34 @@ class TestBatchMM(JitTestCase):
                 + torch.mm(T7, T8)
             )
 
-        FileCheck().check_count("aten::mm", 4, exactly=True).run(test_batch_mm.graph)
-        self.run_pass("batch_mm", test_batch_mm.graph)
+        test_batch_mm_scripted = torch.jit.script(test_batch_mm)
+
+        tensors = TestBatchMM._get_test_tensors(8)
+        expected = test_batch_mm(*tensors)
+
+        FileCheck().check_count("aten::mm", 4, exactly=True).run(
+            test_batch_mm_scripted.graph
+        )
+        self.run_pass("batch_mm", test_batch_mm_scripted.graph)
         FileCheck().check_count("prim::MMTreeReduce", 1, exactly=True).run(
-            test_batch_mm.graph
+            test_batch_mm_scripted.graph
         )
 
+        actual = test_batch_mm_scripted(*tensors)
+        self.assertEqual(expected, actual, atol=1e-9, rtol=1e-9)
+
+
     def test_batch_mm_permitted_mutation(self):
-        @torch.jit.script
-        def test_batch_mm(n: int):
-            T1 = torch.zeros((n, n))
-            T2 = torch.zeros((n, n))
-            T3 = torch.zeros((n, n))
-            T4 = torch.zeros((n, n))
-            T5 = torch.zeros((n, n))
-            T6 = torch.zeros((n, n))
-            T7 = torch.zeros((n, n))
-            T8 = torch.zeros((n, n))
+        def test_batch_mm(
+            T1: torch.Tensor,
+            T2: torch.Tensor,
+            T3: torch.Tensor,
+            T4: torch.Tensor,
+            T5: torch.Tensor,
+            T6: torch.Tensor,
+            T7: torch.Tensor,
+            T8: torch.Tensor,
+        ):
             result = {}
             result["product"] = (
                 torch.mm(T1, T2)
@@ -56,11 +76,21 @@ class TestBatchMM(JitTestCase):
             result["constant"] = torch.tensor([42.0])
             return result
 
-        FileCheck().check_count("aten::mm", 4, exactly=True).run(test_batch_mm.graph)
-        self.run_pass("batch_mm", test_batch_mm.graph)
-        FileCheck().check_count("prim::MMTreeReduce", 1, exactly=True).run(
-            test_batch_mm.graph
+        test_batch_mm_scripted = torch.jit.script(test_batch_mm)
+
+        tensors = TestBatchMM._get_test_tensors(8)
+        expected = test_batch_mm(*tensors)
+
+        FileCheck().check_count("aten::mm", 4, exactly=True).run(
+            test_batch_mm_scripted.graph
         )
+        self.run_pass("batch_mm", test_batch_mm_scripted.graph)
+        FileCheck().check_count("prim::MMTreeReduce", 1, exactly=True).run(
+            test_batch_mm_scripted.graph
+        )
+
+        actual = test_batch_mm_scripted(*tensors)
+        self.assertEqual(expected, actual, atol=1e-9, rtol=1e-9)
 
     def test_batch_mm_prohibited_mutation(self):
         @torch.jit.script
