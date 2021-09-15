@@ -79,29 +79,6 @@ class DecorateInfo(object):
         )
 
 
-class SkipInfo(DecorateInfo):
-    """Describes which test, or type of tests, should be skipped when testing
-       an operator. Any test that matches all provided arguments will be skipped.
-       The skip will only be checked if the active_if argument is True."""
-
-    def __init__(
-            self, cls_name=None, test_name=None, *, device_type=None, dtypes=None, active_if=True,
-            expected_failure=False):
-        """
-        Args:
-            cls_name: the name of the test class to skip
-            test_name: the name of the test within the test class to skip
-            device_type: the devices for which to skip the tests
-            dtypes: the dtypes for which to skip the tests
-            active_if: whether tests matching the above arguments should be skipped
-            expected_failure: whether to assert that skipped tests fail
-        """
-        decorator = unittest.expectedFailure if expected_failure else unittest.skip("Skipped!")
-        super().__init__(decorators=decorator, cls_name=cls_name, test_name=test_name,
-                         device_type=device_type, dtypes=dtypes, active_if=active_if)
-
-
-
 class SampleInput(object):
     """Represents sample inputs to a function."""
 
@@ -6437,6 +6414,7 @@ op_db: List[OpInfo] = [
            skips=(DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),)),
     OpInfo('cross',
            dtypes=all_types_and_complex(),
+           dtypesIfCPU=all_types_and_complex_and(torch.bfloat16),
            dtypesIfCUDA=all_types_and_complex_and(torch.half),
            sample_inputs_func=sample_inputs_cross,
            supports_forward_ad=True,
@@ -6582,6 +6560,7 @@ op_db: List[OpInfo] = [
     OpInfo('diagonal',
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
            supports_out=False,
+           supports_forward_ad=True,
            sample_inputs_func=sample_inputs_diagonal_diag_embed),
     OpInfo('eq',
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
@@ -6968,16 +6947,25 @@ op_db: List[OpInfo] = [
            aten_name='linalg_eigh',
            dtypes=floating_and_complex_types(),
            check_batched_gradgrad=False,
+           supports_forward_ad=True,
            sample_inputs_func=sample_inputs_linalg_eigh,
            gradcheck_wrapper=gradcheck_wrapper_hermitian_input,
-           decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack]),
+           decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack],
+           skips=(
+               # Gradcheck for complex hangs for this function, therefore it raises NotImplementedError for now
+               DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_forward_mode_AD', dtypes=complex_types()),),
+           ),
     OpInfo('linalg.eigvalsh',
            aten_name='linalg_eigvalsh',
            dtypes=floating_and_complex_types(),
            check_batched_gradgrad=False,
            sample_inputs_func=sample_inputs_linalg_eigh,
            gradcheck_wrapper=gradcheck_wrapper_hermitian_input,
-           decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack],),
+           decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack],
+           skips=(
+               # Gradcheck hangs for this function
+               DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_forward_mode_AD'),),
+           ),
     OpInfo('linalg.householder_product',
            aten_name='linalg_householder_product',
            op=torch.linalg.householder_product,
@@ -8428,7 +8416,11 @@ op_db: List[OpInfo] = [
            check_batched_gradgrad=False,
            sample_inputs_func=sample_inputs_linalg_pinv_hermitian,
            gradcheck_wrapper=gradcheck_wrapper_hermitian_input,
-           decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack]),
+           decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack],
+           skips=(
+               # Gradcheck hangs for this function
+               DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_forward_mode_AD'),),
+           ),
     OpInfo('eig',
            op=torch.eig,
            dtypes=floating_and_complex_types(),
@@ -8447,6 +8439,7 @@ op_db: List[OpInfo] = [
            backward_dtypesIfCUDA=floating_and_complex_types_and(torch.half,
                                                                 *[torch.bfloat16] if (SM60OrLater and CUDA11OrLater) else []),
            supports_out=False,
+           supports_forward_ad=True,
            sample_inputs_func=sample_inputs_einsum,
            skips=(
                # test does not work with passing lambda for op
@@ -8876,6 +8869,7 @@ op_db: List[OpInfo] = [
            op=lambda x, scalar: torch.fill_(x.clone(), scalar),
            method_variant=None,
            inplace_variant=torch.Tensor.fill_,
+           supports_forward_ad=True,
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            supports_out=False,
            skips=(
@@ -9012,10 +9006,12 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            sample_inputs_func=sample_inputs_transpose_swapdims),
     OpInfo('tril',
+           dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            dtypes=all_types_and_complex_and(torch.bool, torch.half),
            supports_forward_ad=True,
            sample_inputs_func=sample_inputs_tril_triu),
     OpInfo('triu',
+           dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            dtypes=all_types_and_complex_and(torch.bool, torch.half),
            supports_forward_ad=True,
            sample_inputs_func=sample_inputs_tril_triu),
