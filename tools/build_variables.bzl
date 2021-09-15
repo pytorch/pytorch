@@ -110,6 +110,7 @@ core_sources_common = [
     "torch/csrc/jit/runtime/register_ops_utils.cpp",
     "torch/csrc/jit/runtime/vararg_functions.cpp",
     "torch/csrc/jit/mobile/promoted_prim_ops.cpp",
+    "torch/csrc/jit/mobile/prim_ops_registery.cpp",
     "torch/csrc/jit/serialization/import_read.cpp",
     "torch/csrc/jit/serialization/unpickler.cpp",
 ]
@@ -415,7 +416,6 @@ jit_sources_full = [
     "torch/csrc/jit/passes/lower_graph.cpp",
     "torch/csrc/jit/runtime/register_c10_ops.cpp",
     "torch/csrc/jit/runtime/register_prim_ops.cpp",
-    "torch/csrc/jit/mobile/prim_ops_registery.cpp",
     "torch/csrc/jit/runtime/register_prim_ops_fulljit.cpp",
     "torch/csrc/jit/runtime/register_special_ops.cpp",
     "torch/csrc/jit/passes/remove_inplace_ops.cpp",
@@ -438,7 +438,6 @@ torch_mobile_core = [
     "torch/csrc/jit/mobile/observer.cpp",
     "torch/csrc/jit/mobile/parse_bytecode.cpp",
     "torch/csrc/jit/runtime/register_prim_ops.cpp",
-    "torch/csrc/jit/mobile/prim_ops_registery.cpp",
     "torch/csrc/jit/runtime/register_special_ops.cpp",
 ]
 
