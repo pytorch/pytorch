@@ -1255,7 +1255,12 @@ def gradcheck(
     Returns:
         True if all differences satisfy allclose condition
     """
-    assert check_forward_ad or check_backward_ad
+    assert check_forward_ad or check_backward_ad, \
+        "Expected at least one of check_forward_ad or check_backward_ad to be True"
+    assert not (check_undefined_grad and not check_backward_ad), \
+        "Setting check_undefined_grad=True requires check_backward_ad to be True"
+    assert not (check_batched_grad and not check_backward_ad), \
+        "Setting check_batched_grad=True requires check_backward_ad to be True"
     # This is just a wrapper that handles the raise_exception logic
     args = locals().copy()
     args.pop("raise_exception")

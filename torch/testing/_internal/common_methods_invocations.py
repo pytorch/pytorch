@@ -596,19 +596,24 @@ class OpInfo(object):
         else:
             self.autodiff_nonfusible_nodes = autodiff_nonfusible_nodes
 
-        # autograd support
+        # Autograd support
+
+        # Autograd flags that don't depend on backward AD
+        self.supports_forward_ad = supports_forward_ad
+        self.gradcheck_fast_mode = gradcheck_fast_mode
+        self.gradcheck_wrapper = gradcheck_wrapper
+
+        # Autograd flags that depend on backward AD only
         self.supports_autograd = supports_autograd
+        self.supports_gradgrad = supports_autograd and supports_gradgrad
+        self.check_batched_grad = supports_autograd and check_batched_grad
+        self.check_batched_gradgrad = self.supports_gradgrad and check_batched_gradgrad
+        self.gradcheck_nondet_tol = supports_autograd and gradcheck_nondet_tol
+
+        # Autograd flags that depend on both forward AD and backward AD
         self.supports_inplace_autograd = supports_inplace_autograd
         if self.supports_inplace_autograd is None:
-            self.supports_inplace_autograd = supports_autograd
-
-        self.gradcheck_wrapper = gradcheck_wrapper
-        self.supports_gradgrad = supports_gradgrad
-        self.supports_forward_ad = supports_forward_ad
-        self.check_batched_grad = check_batched_grad
-        self.check_batched_gradgrad = check_batched_gradgrad
-        self.gradcheck_nondet_tol = gradcheck_nondet_tol
-        self.gradcheck_fast_mode = gradcheck_fast_mode
+            self.supports_inplace_autograd = supports_autograd or supports_forward_ad
 
         self.supports_sparse = supports_sparse
 
