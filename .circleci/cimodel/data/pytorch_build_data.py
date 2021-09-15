@@ -7,9 +7,6 @@ CONFIG_TREE_DATA = [
             ("5.4", [  # All this subtree rebases to master and then build
                 ("3.6", [
                     ("important", [X(True)]),
-                    ("parallel_tbb", [X(True)]),
-                    ("parallel_native", [X(True)]),
-                    ("pure_torch", [X(True)]),
                 ]),
             ]),
             # TODO: bring back libtorch test

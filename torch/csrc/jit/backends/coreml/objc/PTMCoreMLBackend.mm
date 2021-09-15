@@ -19,22 +19,21 @@ enum TensorType {
   Undefined,
 };
 
-#define DEFINE_SCALAR_TYPES(_) \
-  _(Float)                     \
-  _(Double)                    \
-  _(Int)                       \
-  _(Long)                      \
-  _(Undefined)
-
 static inline c10::ScalarType scalarType(TensorType type) {
   switch (type) {
-#define DEFINE_CASE(x) \
-  case x:              \
-    return c10::ScalarType::x;
-    DEFINE_SCALAR_TYPES(DEFINE_CASE)
-#undef DEFINE_CASE
+    case TensorType::Float:
+      return c10::ScalarType::Float;
+    case TensorType::Double:
+      return c10::ScalarType::Double;
+    case TensorType::Int:
+      return c10::ScalarType::Int;
+    case TensorType::Long:
+      return c10::ScalarType::Long;
+    case TensorType::Undefined:
+      return c10::ScalarType::Undefined;
+    default:
+      return c10::ScalarType::Undefined;
   }
-  return c10::ScalarType::Undefined;
 }
 
 static id parse(NSString* jsonStr) {
@@ -52,7 +51,7 @@ static id parse(NSString* jsonStr) {
 
 struct TensorSpec {
  public:
-  TensorSpec() = default;
+  TensorSpec() = delete;
   TensorSpec(NSArray<NSString*>* spec) {
     TORCH_CHECK(spec.count == 3);
     name_ = spec[0];
@@ -84,7 +83,7 @@ struct TensorSpec {
 
 struct CoreMLConfig {
  public:
-  CoreMLConfig() = default;
+  CoreMLConfig() = delete;
   CoreMLConfig(NSDictionary* dict)
       : coreMLVersion_([dict[@"spec_ver"] intValue]),
         backend_([dict[@"backend"] lowercaseString]),
@@ -111,7 +110,6 @@ struct CoreMLConfig {
 
 struct MetaData {
  public:
-  MetaData() = default;
   MetaData(NSDictionary* dict)
       : torchVer_(dict[@"torch_ver"]),
         coremltoolVer_(dict[@"coremltool_ver"]) {}
@@ -127,8 +125,9 @@ struct MetaData {
   NSString* coremltoolVer_ = @"";
 };
 
-// We wrapper the Objective-C class to be able to pack into IValue
-struct CoreMLExecutorWrapper : public CustomClassHolder {
+// Wrap the Objective-C executor into a C++ to be able to pack into IValue
+struct API_AVAILABLE(ios(11.0), macos(10.13)) CoreMLExecutorWrapper
+    : public CustomClassHolder {
  public:
   CoreMLExecutorWrapper(
       PTMCoreMLExecutor* executor,
@@ -139,7 +138,7 @@ struct CoreMLExecutorWrapper : public CustomClassHolder {
         inputs_(inputs),
         outputs_(outputs),
         config_(config) {}
-  c10::List<torch::Tensor> forward(c10::impl::GenericList inputs) {
+  c10::List<torch::Tensor> execute(c10::impl::GenericList inputs) {
     std::vector<PTMCoreMLFeatureSpecs> inputSpecs;
     std::vector<PTMCoreMLFeatureSpecs> outputSpecs;
     int inputSpecIndex = 0;
@@ -215,14 +214,12 @@ class API_AVAILABLE(ios(11.0), macos(10.13)) CoreMLBackend
     for (NSArray* output in outputs) {
       outputSpecs.emplace_back(TensorSpec(output));
     }
-    metaData_ = MetaData(dict[@"metadata"]);
     auto config = CoreMLConfig(dict[@"config"]);
-
     const std::string& model = modelDict.at("model").toStringRef();
     const std::string& sha256 = modelDict.at("hash").toStringRef();
     PTMCoreMLExecutor* executor = [PTMCoreMLExecutor new];
     bool result = [executor compileMLModel:model identifier:sha256];
-    TORCH_CHECK(result, "Compiling Core ML model failed!");
+    TORCH_CHECK(result, "Compiling MLModel failed!");
     auto executorWrapper = c10::make_intrusive<CoreMLExecutorWrapper>(
         executor, inputSpecs, outputSpecs, config);
     auto handle = IValue::make_capsule(executorWrapper);
@@ -236,7 +233,7 @@ class API_AVAILABLE(ios(11.0), macos(10.13)) CoreMLBackend
       c10::impl::GenericList inputs) override {
     auto executor = c10::static_intrusive_pointer_cast<CoreMLExecutorWrapper>(
         handle.toCapsule());
-    auto outputs = executor->forward(inputs);
+    auto outputs = executor->execute(inputs);
     return c10::impl::toList(outputs);
   }
   bool is_available() override {
@@ -250,9 +247,6 @@ class API_AVAILABLE(ios(11.0), macos(10.13)) CoreMLBackend
     }
 #endif
   }
-
- private:
-  MetaData metaData_;
 };
 
 API_AVAILABLE(ios(11.0), macos(10.13))
