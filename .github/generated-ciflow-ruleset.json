@@ -56,7 +56,7 @@
       "linux-xenial-py3.6-gcc5.4",
       "linux-xenial-py3.6-gcc7-bazel-test",
       "win-vs2019-cpu-py3",
-      "win-vs2019-cuda10.2-py3"
+      "win-vs2019-cuda11.3-py3"
     ],
     "ciflow/libtorch": [
       "libtorch-linux-xenial-cuda10.2-py3.6-gcc7",

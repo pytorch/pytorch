@@ -281,7 +281,8 @@ class JitCommonTestCase(TestCase):
         self.assertEqual(should_autodiff_node,
                          found_all_nonfusible_nodes and found_all_fusible_nodes, err_msg)
 
-    def checkShapeAnalysis(self, out_size, traced_graph, assert_propagation, constant_prop=True):
+    def checkShapeAnalysis(self, out_sizes: Union[List[int], List[List[int]]],
+                           traced_graph, assert_propagation, constant_prop=True):
         # repropagte input shapes provided by tracing,
         prev_symbolic_shapes_test_enabled = torch._C._jit_symbolic_shapes_test_mode_enabled()
         for enable_test_mode in [True, False]:
@@ -294,16 +295,26 @@ class JitCommonTestCase(TestCase):
             torch._C._jit_pass_propagate_shapes_on_graph(traced_graph)
             # Add sizes to default tensor type to avoid checking something out of scope
             # and difficulties with tracer leaving in other parts of tensor type
-            sizes = next(traced_graph.outputs()).type().symbolic_sizes()
-            out_type = TensorType.get().with_sizes(sizes)
-            actual_type = TensorType.get().with_sizes(out_size)
+            output = next(traced_graph.outputs()).type()
 
-            # always check actual shape is a subtype of the output
-            self.assertTrue(actual_type.isSubtypeOf(out_type))
+            def test_type(type, actual_size):
+                sizes = type.symbolic_sizes()
+                out_type = TensorType.get().with_sizes(sizes)
+                actual_type = TensorType.get().with_sizes(actual_size)
 
-            # and then if assertion flag is provided, check shape analysis
-            # is successful
-            if assert_propagation:
-                self.assertEqual(out_type.sizes(), out_size)
+                # always check actual shape is a subtype of the output
+                self.assertTrue(actual_type.isSubtypeOf(out_type))
+
+                # and then if assertion flag is provided, check shape analysis
+                # is successful
+                if assert_propagation:
+                    self.assertEqual(out_type.sizes(), actual_size)
+
+            if output.isSubtypeOf(torch._C.TensorType.get()):
+                test_type(output, out_sizes)
+            else:
+                tuple_elements = output.elements()
+                for i in range(len(tuple_elements)):
+                    test_type(tuple_elements[i], out_sizes[i])
 
         torch._C._jit_set_symbolic_shapes_test_mode(prev_symbolic_shapes_test_enabled)
