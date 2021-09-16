@@ -8,7 +8,7 @@ import tools.codegen.model
 
 class TestCreateDerivative(unittest.TestCase):
 
-    def test_named_grads(self):
+    def test_named_grads(self) -> None:
         schema = tools.codegen.model.FunctionSchema.parse(
             'func(Tensor a, Tensor b) -> (Tensor x, Tensor y)')
         native_function = dataclasses.replace(DEFAULT_NATIVE_FUNCTION,
@@ -21,7 +21,7 @@ class TestCreateDerivative(unittest.TestCase):
             available_named_gradients=['grad_x', 'grad_y'])
         self.assertSetEqual(derivative.named_gradients, {'grad_x', 'grad_y'})
 
-    def test_non_differentiable_output(self):
+    def test_non_differentiable_output(self) -> None:
         specification = 'func(Tensor a, Tensor b) -> (Tensor x, bool y, Tensor z)'
         schema = tools.codegen.model.FunctionSchema.parse(specification)
         native_function = dataclasses.replace(DEFAULT_NATIVE_FUNCTION,
@@ -37,12 +37,12 @@ class TestCreateDerivative(unittest.TestCase):
             op_counter=typing.Counter[str](),
         )
 
-        self.assertListEqual(differentiability_info.available_named_gradients,
-                             # grad_y is not present because y is a
-                             # bool and thus not differentiable.
-                             ['grad_x', 'grad_z'])
+        self.assertSequenceEqual(differentiability_info.available_named_gradients,
+                                 # grad_y is not present because y is a
+                                 # bool and thus not differentiable.
+                                 ['grad_x', 'grad_z'])
 
-    def test_indexed_grads(self):
+    def test_indexed_grads(self) -> None:
         schema = tools.codegen.model.FunctionSchema.parse(
             'func(Tensor a, Tensor b) -> (Tensor x, Tensor y)')
         native_function = dataclasses.replace(DEFAULT_NATIVE_FUNCTION,
@@ -55,7 +55,7 @@ class TestCreateDerivative(unittest.TestCase):
             available_named_gradients=['grad_x', 'grad_y'])
         self.assertSetEqual(derivative.named_gradients, set())
 
-    def test_named_grads_and_indexed_grads(self):
+    def test_named_grads_and_indexed_grads(self) -> None:
         specification = 'func(Tensor a, Tensor b) -> (Tensor x, Tensor y)'
         schema = tools.codegen.model.FunctionSchema.parse(specification)
         native_function = dataclasses.replace(DEFAULT_NATIVE_FUNCTION,
@@ -77,7 +77,7 @@ class TestCreateDerivative(unittest.TestCase):
 
 
 class TestGenAutogradFunctions(unittest.TestCase):
-    def test_non_differentiable_output_invalid_type(self):
+    def test_non_differentiable_output_invalid_type(self) -> None:
         specification = 'func(Tensor a, Tensor b) -> (Tensor x, bool y, Tensor z)'
         schema = tools.codegen.model.FunctionSchema.parse(specification)
         native_function = dataclasses.replace(DEFAULT_NATIVE_FUNCTION,
@@ -101,7 +101,7 @@ class TestGenAutogradFunctions(unittest.TestCase):
         assert 'grad_z = grads[1]' in definition
 
 
-    def test_non_differentiable_output_output_differentiability(self):
+    def test_non_differentiable_output_output_differentiability(self) -> None:
         specification = 'func(Tensor a, Tensor b) -> (Tensor x, Tensor y, Tensor z)'
         schema = tools.codegen.model.FunctionSchema.parse(specification)
         native_function = dataclasses.replace(DEFAULT_NATIVE_FUNCTION,
