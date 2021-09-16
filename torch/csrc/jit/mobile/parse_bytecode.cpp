@@ -12,7 +12,7 @@ OpCode parseOpCode(const char* str);
 using c10::IValue;
 
 IValue expect_field(
-    c10::ivalue::TupleElements& elements,
+    std::vector<IValue>& elements,
     const std::string& expected_name,
     size_t entry) {
   auto row = std::move(elements.at(entry)).toTuple();
@@ -68,8 +68,8 @@ class OpCodeCache {
 
 void parseInstructions(
     const std::string& function_name,
-    c10::ivalue::TupleElements&& ins_list,
-    c10::ivalue::TupleElements& debug_handles_m_tuple,
+    const std::vector<IValue>& ins_list,
+    std::vector<IValue>& debug_handles_m_tuple,
     mobile::Function* function) {
   c10::List<int64_t> debug_handles_list;
   if (!debug_handles_m_tuple.empty()) {
@@ -79,15 +79,15 @@ void parseInstructions(
         debug_info_function_name == function_name,
         "The function names in the bytecode table and the debug info table do not match.");
     IValue& debug_handles_table = debug_handles_m_tuple[1];
-    auto debugHandlesTableElements = std::move(*std::move(debug_handles_table).toTuple()).elements();
-    debug_handles_list =
-        (expect_field(
-            debugHandlesTableElements,
-             "function_debug_handles",
-             BYTECODE_INDEX_MODULE_DEBUG_HANDLES)
-             .toTuple()
-             ->elements())[0]
-            .toIntList();
+    auto debugHandlesElements =
+        std::move(*std::move(debug_handles_table).toTuple()).elements();
+    debug_handles_list = (expect_field(
+                              debugHandlesElements,
+                              "function_debug_handles",
+                              BYTECODE_INDEX_MODULE_DEBUG_HANDLES)
+                              .toTuple()
+                              ->elements())[0]
+                             .toIntList();
     TORCH_CHECK(
         debug_handles_list.size() == ins_list.size(),
         "The numbers of instructions and debug handles strings do not match.");
@@ -99,8 +99,8 @@ void parseInstructions(
   // becomes an important use case.
   OpCodeCache opCodeCache;
   for (const auto j : c10::irange(ins_list.size())) {
-    auto ins_tuple = std::move(ins_list[j]).toTuple();
-    c10::ArrayRef<IValue> ins_item = ins_tuple->elements();
+    std::vector<IValue> ins_item =
+        std::move(*std::move(ins_list[j]).toTuple()).elements();
     TORCH_CHECK(
         ins_item.size() == 3,
         "There should be three parts in an instruction. The function name is ",
@@ -118,7 +118,7 @@ void parseInstructions(
 }
 
 void parseConstants(
-    const c10::ivalue::TupleElements& consts_list,
+    const std::vector<IValue>& consts_list,
     mobile::Function* function) {
   for (const auto& constant : consts_list) {
     function->append_constant(constant);
@@ -126,7 +126,7 @@ void parseConstants(
 }
 
 void parseTypes(
-    const c10::ivalue::TupleElements& types_list,
+    const std::vector<IValue>& types_list,
     mobile::Function* function) {
   static const c10::QualifiedName classPrefix = "__torch__.torch.classes";
   for (const auto& t : types_list) {

@@ -130,7 +130,7 @@ TEST(SerializationTest, TestJitStream_CUDA) {
   model = torch::jit::load("saved_stream_model.pt");
 
   auto output = model.forward(inputs);
-  const auto& list_of_elements = output.toTuple()->elements();
+  auto list_of_elements = output.toTuple()->elements();
   auto is_stream_s = list_of_elements[0].toBool();
 
   // a,b: These are the two input tensors

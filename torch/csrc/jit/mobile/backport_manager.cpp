@@ -164,7 +164,7 @@ std::stringstream backport_v5_to_v4(std::stringstream& input_model_stream) {
   // 1) read from archive `bytecode` archive
   PyTorchStreamReader reader(&input_model_stream);
   std::vector<IValue> bytecode_values = get_bytecode_ivalues(reader);
-  auto constants_values =
+  std::vector<IValue> constants_values =
       std::move(*readArchive(kArchiveNameConstants, reader).toTuple())
           .elements();
 
@@ -269,7 +269,7 @@ std::stringstream backport_v6_to_v5(std::stringstream& input_model_stream) {
   std::shared_ptr<IStreamAdapter> rai =
       std::make_shared<IStreamAdapter>(&input_model_stream);
   auto reader = std::make_shared<PyTorchStreamReader>(rai);
-  auto constants_values =
+  std::vector<IValue> constants_values =
       std::move(*readArchive(kArchiveNameConstants, *reader.get()).toTuple())
           .elements();
 
@@ -334,7 +334,7 @@ std::stringstream backport_v6_to_v5(std::stringstream& input_model_stream) {
   SerializationStorageContext storage_context;
   writeArchiveV5(
       writer_bytecode,
-      c10::ivalue::Tuple::create(std::move(constants_values)),
+      c10::ivalue::Tuple::create(constants_values),
       /*archive_name=*/"constants",
       /*archive_dir=*/"",
       /*tensor_dir=*/"constants/",

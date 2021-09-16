@@ -131,8 +131,7 @@ Module ScriptModuleDeserializer::LEGACY_deserialize() {
   } else if (proto_version >= 3) {
     LEGACY_pickled_ivalues_ =
         std::move(*LEGACY_loadPickleArchive("attributes.pkl").toTuple())
-            .elements()
-            .vec();
+            .elements();
   }
   LEGACY_moduleStack_.emplace_back("__torch__");
   const auto& module_def = model_def.main_module();
