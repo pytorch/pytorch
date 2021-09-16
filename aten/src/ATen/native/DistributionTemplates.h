@@ -24,7 +24,7 @@ namespace templates {
 //
 // If random's uint64_t arithmetics produces 65503 as a random value after casting to torch::half it becomes 65504
 // and violates the requirement that random value must be less than `to`. To resolve this issue `update_from` and `update_to`
-// moves `from` to the left and `to` to the right to the next closest value that won't go outside [from, to) after casting to
+// moves `from` to the right and `to` to the left to the next closest value that won't go outside [from, to) after casting to
 // the target dtype. For `to` = 65504 it moves left for (1 << (log2(to) - 11 + 1)) = 32 and becomes 65472, which is previous
 // available number for torch::half dtype.
 template<typename scalar_t>

@@ -379,3 +379,8 @@ def register_custom_op_symbolic(symbolic_name, symbolic_fn, opset_version):
     """
     from torch.onnx import utils
     utils.register_custom_op_symbolic(symbolic_name, symbolic_fn, opset_version)
+
+
+def unregister_custom_op_symbolic(symbolic_name, opset_version):
+    from torch.onnx import utils
+    utils.unregister_custom_op_symbolic(symbolic_name, opset_version)
