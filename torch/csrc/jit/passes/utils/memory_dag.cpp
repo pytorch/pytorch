@@ -74,6 +74,20 @@ void MemoryDAG::collectAllContainedMemoryLocations(
   if (cont.test(compIdx)) {
     return;
   }
+
+  if (C10_UNLIKELY(!elem->cachedAllContainedMemoryLocations_.has_value())) {
+    MemoryLocations cache;
+    collectAllContainedMemoryLocationsImpl(elem, cache);
+    elem->cachedAllContainedMemoryLocations_ = std::move(cache);
+  }
+  cont |= *elem->cachedAllContainedMemoryLocations_;
+}
+
+void MemoryDAG::collectAllContainedMemoryLocationsImpl(
+    const Element* elem,
+    MemoryLocations& cont) const {
+  unsigned compIdx = elem->index;
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!cont.test(compIdx));
   cont.set(compIdx);
 
   for (const auto& mem_loc : getMemoryLocations(elem)) {
@@ -189,6 +203,7 @@ void MemoryDAG::setWildcards(
   // For every element, if the cache contains `MemoryLocationFoo`, then we must
   // add `WildcardBar` to it.
   for (const std::unique_ptr<Element>& e : this->indexToElementMap_) {
+    e->cachedAllContainedMemoryLocations_.reset();
     if (e->values.empty()) {
       // This element is a wildcard element, we can skip it.
       continue;
