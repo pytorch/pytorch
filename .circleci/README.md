@@ -343,7 +343,6 @@ All linux builds occur in docker images. The docker images are
     * Has ALL CUDA versions installed. The script pytorch/builder/conda/switch_cuda_version.sh sets /usr/local/cuda to a symlink to e.g. /usr/local/cuda-10.0 to enable different CUDA builds
     * Also used for cpu builds
 * pytorch/manylinux-cuda90
-* pytorch/manylinux-cuda92
 * pytorch/manylinux-cuda100
     * Also used for cpu builds
 

@@ -4625,10 +4625,12 @@ class DistributedTest:
                 gradient_as_bucket_view=grad_is_view,
             )
             post_localSGD_opt = post_localSGD_optimizer.PostLocalSGDOptimizer(
-                optim=torch.optim.SGD(post_localSGD_net.parameters(), lr=learning_rate),
+                params=post_localSGD_net.parameters(),
+                optimizer_class=torch.optim.SGD,
                 averager=averagers.PeriodicModelAverager(
                     period=period, warmup_steps=warmup_steps
-                )
+                ),
+                lr=learning_rate,
             )
 
             input = torch.randn(dist.get_world_size() * 2, 2).cuda()
