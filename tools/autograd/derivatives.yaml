@@ -2303,3 +2303,6 @@
 
 - name: _pin_memory(Tensor self, Device? device=None) -> Tensor
   self: grad
+
+- name: new_empty(Tensor self, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+  output_differentiability: [False]
