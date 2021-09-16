@@ -57,7 +57,7 @@ class TestImportTime(TestCase):
                 ),
                 "time_ms": int(parse_time(r"User time \(seconds\): ([0-9.]+)") * 1000),
             }
-        
+
         data = profile("import torch", "pytorch")
         rds_write("import_stats", data, only_on_master=False)  # TODO: remove only_on_master arg
         baseline = profile("import sys", "baseline")
@@ -69,7 +69,7 @@ if __name__ == "__main__":
         register_rds_schema(
             "import_stats",
             {
-                "test_name": "str",
+                "test_name": "string",
                 "peak_memory_bytes": "int",
                 "time_ms": "int",
             },
