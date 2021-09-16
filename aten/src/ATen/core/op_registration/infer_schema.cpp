@@ -15,7 +15,7 @@ std::string fastToString(size_t x) {
     result.push_back('0' + x);
     return result;
   }
-  return c10::guts::to_string(x);
+  return "_" + c10::guts::to_string(x);
 }
 
 ArgumentVector createArgumentVector(c10::ArrayRef<ArgumentDef> args) {

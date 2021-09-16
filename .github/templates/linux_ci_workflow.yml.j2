@@ -61,7 +61,6 @@ jobs:
         run: echo "${LABELS}"
 {%- endif %}
   calculate-docker-image:
-    if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: linux.2xlarge
     {%- if ciflow_config.enabled %}
     needs: [!{{ ciflow_config.root_job_name }}]
@@ -207,7 +206,6 @@ jobs:
 {%- if not exclude_test %}
 {% block test +%}
   generate-test-matrix:
-    if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: ubuntu-18.04
     {%- if ciflow_config.enabled %}
     needs: [!{{ ciflow_config.root_job_name }}]
@@ -256,7 +254,7 @@ jobs:
       SHARD_NUMBER: ${{ matrix.shard }}
       NUM_TEST_SHARDS: ${{ matrix.num_shards }}
       PYTORCH_IGNORE_DISABLED_ISSUES: ${{ needs.generate-test-matrix.outputs.ignore-disabled-issues }}
-      CONTINUE_THROUGH_ERROR: ${{ github.repository_owner == 'pytorch' && (github.event_name == 'push' || github.event_name == 'schedule') }}
+      CONTINUE_THROUGH_ERROR: ${{ github.repository == 'pytorch/pytorch' && (github.event_name == 'push' || github.event_name == 'schedule') }}
     steps:
       !{{ common.setup_ec2_linux() }}
       !{{ common.checkout_pytorch("recursive") }}
@@ -343,6 +341,7 @@ jobs:
         run: |
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      !{{ common.render_test_results() }}
       {%- if is_coverage %}
       - name: Report coverage
         run: |
