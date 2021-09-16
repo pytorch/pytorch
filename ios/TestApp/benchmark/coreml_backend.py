@@ -4,7 +4,7 @@ import torchvision
 from torch.backends._coreml.preprocess import (
     CompileSpec,
     TensorSpec,
-    CoreMLBackend,
+    CoreMLComputeUnit,
 )
 
 def mobilenetv2_spec():
@@ -20,7 +20,7 @@ def mobilenetv2_spec():
                     shape=[1, 1000],
                 ),
             ),
-            backend=CoreMLBackend.CPU,
+            backend=CoreMLComputeUnit.CPU,
             allow_low_precision=True,
         ),
     }
