@@ -21,15 +21,37 @@ std::tuple<Tensor,optional<int64_t>> index_batch_rule(
   auto self_ = moveBatchDimToFront(self, self_bdim);
   TORCH_INTERNAL_ASSERT(indices.size() == indices_bdims.size());
   std::vector<optional<Tensor>> indices_;
-  for (size_t idx=0; idx < indices.size(); idx++) {
-      if (indices_bdims[idx].has_value()) {
-          indices_.push_back(moveBatchDimToFront(*indices[idx], indices_bdims[idx]));
-      } else {
-          indices_.push_back(indices[idx]);
+  int64_t mxDim = 0;
+  for (size_t i = 0; i < indices.size(); i++) {
+    auto index = indices[i];
+    if (index.has_value()) {
+      indices_.push_back(moveBatchDimToFront(index.value(), indices_bdims[i]));
+      mxDim = std::max(mxDim, index.value().dim());
+      if (index.value().dtype() == kBool && indices_bdims[i].has_value()) {
+        throw std::runtime_error("vmap: We do not support batching operators that can support dynamic shape. Attempting to batch over indexing with a boolean mask.");
       }
+    } else {
+      indices_.push_back(index);
+    }
   }
-  auto result = at::index(self_, List<optional<Tensor>>(indices_));
-  return std::make_tuple(result, 0);
+  bool indices_batched = false;
+  for (auto idx : indices_bdims) {
+    indices_batched = indices_batched || idx.has_value();
+  }
+  if (self_bdim.has_value() && !indices_batched) {
+    indices_.insert(indices_.begin(), nullopt);
+    auto result = at::index(self_, List<optional<Tensor>>(indices_));
+    return std::make_tuple(result, 0);
+  } else if (!self_bdim.has_value() && indices_batched) {
+    return std::make_tuple(at::index(self_, List<optional<Tensor>>(indices_)), 0);
+  } else {
+    auto arange_index = at::arange(0, self_.size(0));
+    while (arange_index.dim() < mxDim) {
+      arange_index = arange_index.unsqueeze(-1);
+    }
+    indices_.insert(indices_.begin(), arange_index);
+    return std::make_tuple(at::index(self_, List<optional<Tensor>>(indices_)), 0);
+  }
 }
 
 Tensor index_plumbing(const Tensor & self, const List<optional<Tensor>> & indices
@@ -231,7 +253,7 @@ std::tuple<Tensor,optional<int64_t>> gather_backward_batch_rule(
 }
 
 TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
-    // m.impl("index.Tensor", index_plumbing);
+  m.impl("index.Tensor", index_plumbing);
   VMAP_SUPPORT("gather", gather_batch_rule);
   VMAP_SUPPORT("gather_backward", gather_backward_batch_rule);
   VMAP_SUPPORT("scatter.value", scatter_value_batch_rule);
