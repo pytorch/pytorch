@@ -520,13 +520,14 @@ void schedulePointwise(Fusion* fusion, const PointwiseParams& params) {
     }
   }
 
-  // Right (inner merged) dimension is at inner most position, left (outer
-  // merged) dimension is at lhs_i. Order as [lhs_i, rhs_i, unmerged...]
-  reference_tv->reorder({{lhs_i, 0}, {-1, 1}});
 
   if (params.break_point) {
     // 2D parallelization scheme
     TORCH_INTERNAL_ASSERT(rhs_i >= 0 && lhs_i >= 0);
+
+    // Right (inner merged) dimension is at inner most position, left (outer
+    // merged) dimension is at lhs_i. Order as [lhs_i, rhs_i, unmerged...]
+    reference_tv->reorder({{lhs_i, 0}, {-1, 1}});
 
     if (params.vectorize) {
       reference_tv->split(1, params.inner_factor);
@@ -581,8 +582,9 @@ void schedulePointwise(Fusion* fusion, const PointwiseParams& params) {
   } else {
     // 1D Scheduler
     TORCH_INTERNAL_ASSERT(rhs_i >= 0 && lhs_i == -1);
+
     // right hand side exists and is the only axis we care to schedule, move it
-    // from the inner most position to left most.
+    // from the inner most position to left most. Order as [rhs_i, unmerged...]
     reference_tv->reorder({{-1, 0}});
 
     if (params.vectorize) {

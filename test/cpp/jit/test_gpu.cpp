@@ -17014,6 +17014,42 @@ TEST(NVFuserTest, FusionIssue1052_CUDA) {
       &fusion, outputs, aten_inputs, {ref_t2, ref_t3}, __LINE__, __FILE__);
 }
 
+// Repro of issue #1115
+TEST(NVFuserTest, FusionPointwiseBroadcast_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  std::vector<int64_t> input_shape{3, 17, 80};
+  std::vector<int64_t> output_shape{3, 17, 1, 80};
+
+  TensorView* x = makeSymbolicTensor(input_shape.size());
+  TensorView* bias = makeSymbolicTensor(input_shape.size());
+  fusion.addInput(x);
+  fusion.addInput(bias);
+
+  auto x_add_bias = add(x, bias);
+  auto x_bcast = broadcast(x_add_bias, {false, false, true, false});
+  auto y = unaryOp(UnaryOpType::Gelu, x_bcast);
+  fusion.addOutput(y);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor at_x = at::randn(input_shape, options);
+  at::Tensor at_bias = at::randn(input_shape, options);
+  std::vector<IValue> aten_inputs = {at_x, at_bias};
+
+  schedulePointwise(&fusion, aten_inputs);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  auto outputs = fe.runFusion(aten_inputs);
+
+  auto at_x_add_bias = at_x + at_bias;
+  auto at_x_view = at::native::view(at_x_add_bias, output_shape);
+  auto aten_y = at::gelu(at_x_view, false);
+
+  testValidate(&fusion, outputs, aten_inputs, {aten_y}, __LINE__, __FILE__);
+}
+
 } // namespace jit
 } // namespace torch
 #endif // #if defined(USE_CUDA)
