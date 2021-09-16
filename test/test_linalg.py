@@ -7538,9 +7538,8 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             A_matrix_size = A_dims[-1]
             A_batch_dims = A_dims[:-2]
             A = random_fullrank_matrix_distinct_singular_value(A_matrix_size, *A_batch_dims, dtype=dtype, device=device)
-            b = torch.randn(*b_dims, dtype=dtype)
-            x_exp = np.linalg.solve(A.numpy(), b.numpy())
-            A, b = A.to(device), b.to(device)
+            b = make_tensor(b_dims, dtype=dtype, device=device)
+            x_exp = np.linalg.solve(A.cpu(), b.cpu())
             LU_data, LU_pivots = torch.lu(A, pivot=pivot)
             x = torch.lu_solve(b, LU_data, LU_pivots)
             self.assertEqual(x, x_exp)
