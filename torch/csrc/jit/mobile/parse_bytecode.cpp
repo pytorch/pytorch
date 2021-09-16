@@ -79,15 +79,15 @@ void parseInstructions(
         debug_info_function_name == function_name,
         "The function names in the bytecode table and the debug info table do not match.");
     IValue& debug_handles_table = debug_handles_m_tuple[1];
-    auto debugHandlesElements = std::move(*std::move(debug_handles_table).toTuple()).elements();
-    debug_handles_list =
-        (expect_field(
-            debugHandlesElements,
-             "function_debug_handles",
-             BYTECODE_INDEX_MODULE_DEBUG_HANDLES)
-             .toTuple()
-             ->elements())[0]
-            .toIntList();
+    auto debugHandlesElements =
+        std::move(*std::move(debug_handles_table).toTuple()).elements();
+    debug_handles_list = (expect_field(
+                              debugHandlesElements,
+                              "function_debug_handles",
+                              BYTECODE_INDEX_MODULE_DEBUG_HANDLES)
+                              .toTuple()
+                              ->elements())[0]
+                             .toIntList();
     TORCH_CHECK(
         debug_handles_list.size() == ins_list.size(),
         "The numbers of instructions and debug handles strings do not match.");
