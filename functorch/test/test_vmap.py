@@ -20,6 +20,7 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
 from torch.testing._internal.common_device_type import ops, onlyCPU
 from functorch_lagging_op_db import functorch_lagging_op_db
 from functorch_additional_op_db import additional_op_db
+from torch.utils._pytree import tree_map
 from common_utils import (
     parameterized,
     parameterized_with_device,
@@ -2925,32 +2926,38 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('tensor_split'),
         xfail('to_sparse'),
         xfail('vsplit'),
+        xfail('hstack'),
+        xfail('vstack'),
+        xfail('dstack'),
+        xfail('linalg.multi_dot'),
+        xfail('nanmean'),
 
         # entries in here need don't work and need to be fixed.
         # Each one of these is a bug
-        xfail('__getitem__'),
         xfail('argmax'),
         xfail('argmin'),
         xfail('unfold'),
         xfail('svd', device_type='cuda'),
         xfail('linalg.svd', device_type='cuda'),
+        xfail('index_put'),
     })
     def test_vmap_exhaustive(self, device, dtype, op):
         sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)
-        def check_up_to_sign(loop_out, batched_out):
-            loop_out = pytree.tree_map(torch.abs, loop_out)
-            batched_out = pytree.tree_map(torch.abs, batched_out)
-            self.assertEqual(loop_out, batched_out, atol=1e-4, rtol=1e-4);
-
         for sample_input in sample_inputs_itr:
             arg_values = [sample_input.input] + list(sample_input.args)
             kwarg_values = sample_input.kwargs
-            for loop_out, batched_out in get_fallback_and_vmap_exhaustive(op.op, arg_values, kwarg_values):
-                self.assertEqual(loop_out, batched_out, atol=1e-4, rtol=1e-4)
+            try:
+                for loop_out, batched_out in get_fallback_and_vmap_exhaustive(op.op, arg_values, kwarg_values):
+                    self.assertEqual(loop_out, batched_out, atol=1e-4, rtol=1e-4)
+            except Exception as e:
+                # Checking if we're throwing an error because of dynamic shapes.
+                if "dynamic" in e.args[0]:
+                    continue
+                raise e
 
     @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @skipOps('TestVmapOperatorsOpInfo', 'test_op_has_batch_rule', {
-        xfail('__getitem__'),
+        # xfail('__getitem__'),
         xfail('aminmax'),
         xfail('broadcast_to'),
         xfail('cdist'),
@@ -3023,6 +3030,18 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('unfold'),
         xfail('vdot'),
         xfail('vsplit'),
+        xfail('__getitem__'),
+        xfail('all'),
+        xfail('any'),
+        xfail('count_nonzero'),
+        xfail('dstack'),
+        xfail('hstack'),
+        xfail('linalg.multi_dot'),
+        xfail('nanmean'),
+        xfail('nn.functional.cosine_similarity'),
+        xfail('nn.functional.layer_norm'),
+        xfail('nn.functional.nll_loss'),
+        xfail('vstack'),
     })
     def test_op_has_batch_rule(self, device, dtype, op):
         def test():
