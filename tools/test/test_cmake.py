@@ -20,10 +20,10 @@ class TestCMake(unittest.TestCase):
         mock_cpu_count.return_value = 13
         cases = [
             # MAX_JOBS, USE_NINJA, IS_WINDOWS,         want
-            ((     '8',      True,     False),          ['-j', '8']),
-            ((    None,      True,     False),                 None),
-            ((    None,      True,      True),                 None),
-            ((    None,     False,      True), ['/p:CL_MPCount=13']),
+            ((     '8',      True,     False),          ['-j', '8']),  # noqa: E201,E241
+            ((    None,      True,     False),                 None),  # noqa: E201,E241
+            ((    None,      True,      True),                 None),  # noqa: E201,E241
+            ((    None,     False,      True), ['/p:CL_MPCount=13']),  # noqa: E201,E241
         ]
         for (max_jobs, use_ninja, is_windows), want in cases:
             with self.subTest(MAX_JOBS=max_jobs, USE_NINJA=use_ninja, IS_WINDOWS=is_windows):
@@ -50,7 +50,7 @@ class TestCMake(unittest.TestCase):
     def assert_contains_sequence(sequence: Sequence[T], subsequence: Sequence[T]) -> None:
         """Raises an assertion if the subsequence is not contained in the sequence."""
         if len(subsequence) == 0:
-            return True  # all sequences contain the empty subsequence
+            return  # all sequences contain the empty subsequence
 
         # Iterate over all windows of len(subsequence). Stop if the
         # window matches.
