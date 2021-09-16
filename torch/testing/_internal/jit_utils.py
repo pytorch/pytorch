@@ -289,25 +289,8 @@ class JitTestCase(JitCommonTestCase):
         result.apply(lambda s: s._unpack() if s._c._has_method('_unpack') else None)
         return result
 
-    def assertGraphContains(self, graph, kind, consider_subgraphs=False):
-
-        if consider_subgraphs:
-            strgraph = str(graph)
-            count = strgraph.count(kind) - strgraph.count('with {}'.format(kind))
-            self.assertTrue(count > 0)
-            return
-
-        def nodes(block):
-            out = []
-            for node in block.nodes():
-                if node.kind() == kind:
-                    out.append(node)
-                for block in node.blocks():
-                    out += nodes(block)
-            return out
-
-        out_nodes = nodes(graph)
-        self.assertTrue(len(out_nodes) > 0)
+    def assertGraphContains(self, graph, kind):
+        self.assertTrue(any(n.kind() == kind for n in graph.nodes()))
 
     def assertGraphContainsExactly(self, graph, kind, num_kind_nodes, consider_subgraphs=False):
         def perform_assert(graph, kind, actual, expected, consider_subgraphs):
