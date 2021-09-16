@@ -195,6 +195,9 @@ cmake_dependent_option(
     USE_STATIC_CUDNN "Use cuDNN static libraries" OFF
     "USE_CUDNN" OFF)
 cmake_dependent_option(
+    BUILD_NVFUSER_BENCHMARK "Build C++ binaries for nvfuser benchmarks" ON
+    "USE_CUDA;BUILD_TEST" OFF)
+cmake_dependent_option(
   USE_WHOLE_CUDNN "Use whole-library linking for cuDNN" OFF
     "USE_STATIC_CUDNN" OFF)
 cmake_dependent_option(
