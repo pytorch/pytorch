@@ -281,10 +281,6 @@ TORCH_IMPL_FUNC(baddbmm_out_cuda)(const Tensor& self, const Tensor& batch1, cons
     at::NoNamesGuard guard;
     baddbmm_out_cuda_impl(result, *self_, batch1, batch2, beta, alpha);
   }
-  namedinference::propagate_names_if_nonempty(
-    result,
-    namedinference::compute_baddbmm_outnames(const_cast<Tensor&>(result), batch1, batch2, self)
-  );
 }
 
 TORCH_IMPL_FUNC(bmm_out_cuda)(const Tensor& batch1, const Tensor& batch2, const Tensor &result) {
@@ -294,9 +290,6 @@ TORCH_IMPL_FUNC(bmm_out_cuda)(const Tensor& batch1, const Tensor& batch2, const 
     NoNamesGuard guard;
     baddbmm_out_cuda_impl(result, result, batch1, batch2, beta, alpha);
   }
-  namedinference::propagate_names_if_nonempty(
-      result,
-      namedinference::compute_bmm_outnames(const_cast<Tensor&>(result), batch1, batch2));
 }
 
 namespace {

@@ -113,6 +113,10 @@ TORCH_META_FUNC(baddbmm)(const Tensor& self, const Tensor& batch1, const Tensor&
     } 
   }
   common_checks_baddbmm_bmm(*this, batch1, batch2, beta, alpha, false, result);
+  namedinference::propagate_names_if_nonempty(
+    result,
+    namedinference::compute_bmm_outnames(const_cast<Tensor&>(result), batch1, batch2)
+  );
 }
 
 } // namespace meta
