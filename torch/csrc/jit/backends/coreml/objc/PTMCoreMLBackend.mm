@@ -42,10 +42,13 @@ static id parse(NSString* jsonStr) {
   id result = [NSJSONSerialization JSONObjectWithData:data
                                               options:0
                                                 error:&error];
-  TORCH_CHECK(
-      !error,
-      "parsing JSON string failed!",
-      error.localizedDescription.UTF8String);
+  if (error || !result) {
+    TORCH_CHECK(
+        false,
+        "parsing JSON string failed!",
+        error.localizedDescription.UTF8String);
+  }
+
   return result;
 }
 
