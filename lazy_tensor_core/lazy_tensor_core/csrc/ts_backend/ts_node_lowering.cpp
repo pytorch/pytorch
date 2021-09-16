@@ -53,7 +53,7 @@ namespace compiler {
 
 // Forward decl of method that is codegenned and has no header
 TSOpVector LowerToTSCodegen(std::shared_ptr<torch::jit::GraphFunction> function,
-                            ts_backend::TSLoweringContext* loctx, 
+                            ts_backend::TSLoweringContext* loctx,
                             const ir::Node* node);
 
 class TSNodeLowering : public NodeLowering {
@@ -206,7 +206,7 @@ class TSNodeLowering : public NodeLowering {
 
 
   TSOpVector LowerToTS(const ir::Node* node) {
-    // Desirable to have a way to do some ops via codegen and others by hand, 
+    // Desirable to have a way to do some ops via codegen and others by hand,
     // at least for now
     auto codegen_lowering = LowerToTSCodegen(function_, loctx(), node);
     if (codegen_lowering.size() > 0){
