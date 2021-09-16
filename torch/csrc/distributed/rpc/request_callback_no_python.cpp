@@ -20,6 +20,17 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
+// TODO(pbelevich)
+namespace {
+  DeviceMap reverse(const DeviceMap& deviceMap) {
+    DeviceMap reversed;
+    for (const auto& entry : deviceMap) {
+      reversed.insert({entry.second, entry.first});
+    }
+    return reversed;
+  }
+}
+
 using namespace torch::distributed::autograd;
 using namespace torch::autograd::profiler;
 
@@ -138,15 +149,15 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::processScriptCall(
     RpcCommandBase& rpc,
     std::vector<c10::Stream> streams) const {
   auto& scriptCall = static_cast<ScriptCall&>(rpc);
-  DeviceMap dm = std::move(scriptCall).moveDeviceMap();
+  DeviceMap reversed_dm = reverse(std::move(scriptCall).moveDeviceMap()); // TODO(pbelevich): replace with getDeviceMap
   TORCH_CHECK(
       scriptCall.hasOp(), "Only supports the case where ScriptCall has an op");
   auto future = runJitOperator(
       *scriptCall.op(), scriptCall.stackRef(), std::move(streams));
 
   return future->then(
-      [dm = std::move(dm)](JitFuture& future) {
-        return withStorages(ScriptResp(future.value(), std::move(dm)).toMessage());
+      [reversed_dm = std::move(reversed_dm)](JitFuture& future) {
+        return withStorages(ScriptResp(future.value(), std::move(reversed_dm)).toMessage());
       },
       c10::getCustomClassType<c10::intrusive_ptr<Message>>());
 }
@@ -237,12 +248,12 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::retrieveOwnerRRef(
 c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::
     processScriptRRefFetchCall(RpcCommandBase& rpc) const {
   auto& srf = static_cast<ScriptRRefFetchCall&>(rpc);
-  DeviceMap dm = std::move(srf).moveDeviceMap();
+  DeviceMap reversed_dm = reverse(std::move(srf).moveDeviceMap()); // TODO(pbelevich): replace with getDeviceMap
   auto future = retrieveOwnerRRef(srf.rrefId());
 
   return future->then(
-      [dm = std::move(dm)](JitFuture& future) {
-        return withStorages(ScriptRRefFetchRet({future.value()}, std::move(dm)).toMessage());
+      [reversed_dm = std::move(reversed_dm)](JitFuture& future) {
+        return withStorages(ScriptRRefFetchRet({future.value()}, std::move(reversed_dm)).toMessage());
       },
       c10::getCustomClassType<c10::intrusive_ptr<Message>>());
 }

@@ -103,6 +103,15 @@ SerializedPyObj serializePyObject(IValue value) {
   }
 }
 
+// TODO(pbelevich)
+DeviceMap reverse(const DeviceMap& deviceMap) {
+  DeviceMap reversed;
+  for (const auto& entry : deviceMap) {
+    reversed.insert({entry.second, entry.first});
+  }
+  return reversed;
+}
+
 } // anonymous namespace
 
 c10::intrusive_ptr<JitFuture> RequestCallbackImpl::runPythonFunction(
@@ -161,7 +170,7 @@ c10::intrusive_ptr<JitFuture> RequestCallbackImpl::processScriptCall(
     RpcCommandBase& rpc,
     std::vector<c10::Stream> streams) const {
   auto& scriptCall = static_cast<ScriptCall&>(rpc);
-  DeviceMap dm = std::move(scriptCall).moveDeviceMap();
+  DeviceMap reversed_dm = reverse(std::move(scriptCall).moveDeviceMap()); // TODO(pbelevich): replace with getDeviceMap
   c10::intrusive_ptr<JitFuture> future;
   if (scriptCall.hasOp()) {
     future = runJitOperator(
@@ -175,8 +184,8 @@ c10::intrusive_ptr<JitFuture> RequestCallbackImpl::processScriptCall(
   }
 
   return future->then(
-      [dm = std::move(dm)](JitFuture& jitFuture) {
-        return withStorages(ScriptResp(jitFuture.value(), std::move(dm)).toMessage());
+      [reversed_dm = std::move(reversed_dm)](JitFuture& jitFuture) {
+        return withStorages(ScriptResp(jitFuture.value(), std::move(reversed_dm)).toMessage());
       },
       c10::getCustomClassType<c10::intrusive_ptr<Message>>());
 }
@@ -185,14 +194,14 @@ c10::intrusive_ptr<JitFuture> RequestCallbackImpl::processPythonCall(
     RpcCommandBase& rpc,
     std::vector<c10::Stream> streams) const {
   auto& upc = static_cast<UnpickledPythonCall&>(rpc);
-  DeviceMap dm = std::move(upc).moveDeviceMap();
+  DeviceMap reversed_dm = reverse(std::move(upc).moveDeviceMap()); // TODO(pbelevich): replace with getDeviceMap
   auto future = runPythonFunction(
       upc.pythonUdf(), std::move(streams), upc.isAsyncExecution());
 
   return future->then(
-      [dm = std::move(dm)](JitFuture& future) {
+      [reversed_dm = std::move(reversed_dm)](JitFuture& future) {
         return withStorages(
-            PythonResp(serializePyObject(future.value()), std::move(dm)).toMessage());
+            PythonResp(serializePyObject(future.value()), std::move(reversed_dm)).toMessage());
       },
       c10::getCustomClassType<c10::intrusive_ptr<Message>>());
 }
@@ -235,14 +244,14 @@ c10::intrusive_ptr<JitFuture> RequestCallbackImpl::processPythonRemoteCall(
 c10::intrusive_ptr<JitFuture> RequestCallbackImpl::processPythonRRefFetchCall(
     RpcCommandBase& rpc) const {
   auto& prf = static_cast<PythonRRefFetchCall&>(rpc);
-  DeviceMap dm = std::move(prf).moveDeviceMap();
+  DeviceMap reversed_dm = reverse(std::move(prf).moveDeviceMap()); // TODO(pbelevich): replace with getDeviceMap
   auto future = retrieveOwnerRRef(prf.rrefId());
 
   return future->then(
-      [dm = std::move(dm)](JitFuture& future) {
+      [reversed_dm = std::move(reversed_dm)](JitFuture& future) {
         SerializedPyObj result = serializePyObject(future.value());
         return withStorages(
-            PythonRRefFetchRet(std::move(result).toIValues(), std::move(dm)).toMessage());
+            PythonRRefFetchRet(std::move(result).toIValues(), std::move(reversed_dm)).toMessage());
       },
       c10::getCustomClassType<c10::intrusive_ptr<Message>>());
 }

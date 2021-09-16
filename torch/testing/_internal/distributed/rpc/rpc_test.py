@@ -903,6 +903,29 @@ def _rpc_async_test_caller_device_jit_jit(dst: str, device_map: Dict[torch.devic
     ).wait().device
 
 
+def _rref_async_test_callee_device_py_py(dst: str, device_map: Dict[torch.device, torch.device],
+                          original_device: torch.device, expected_device: torch.device):
+    model = rpc.remote(dst, nn.Linear, args=(10, 10))
+    model = model.remote().to(expected_device)
+    y = model.rpc_async(device_map={original_device:expected_device}).forward(torch.randn(10, device=original_device)).wait()
+    return y.device == original_device
+
+def _rref_sync_test_callee_device_py_py(dst: str, device_map: Dict[torch.device, torch.device],
+                          original_device: torch.device, expected_device: torch.device):
+    model = rpc.remote(dst, nn.Linear, args=(10, 10))
+    model = model.remote().to(expected_device)
+    y = model.rpc_sync(device_map={original_device:expected_device}).forward(torch.randn(10, device=original_device))
+    return y.device == original_device
+
+def _rref_remote_test_callee_device_py_py(dst: str, device_map: Dict[torch.device, torch.device],
+                          original_device: torch.device, expected_device: torch.device):
+    model = rpc.remote(dst, nn.Linear, args=(10, 10))
+    model = model.remote().to(expected_device)
+    y = model.remote(device_map={original_device:expected_device}).forward(torch.randn(10, device=original_device)).to_here(device_map={original_device:expected_device})
+    return y.device == original_device
+
+
+
 class RpcTest(RpcAgentTestFixture):
     @dist_init
     def test_worker_id(self):
@@ -6752,7 +6775,7 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture):
                 torch.device("cuda:0")
             )
             self.assertEqual(
-                create_fn(dst, {torch.device(1): torch.device(2)}, "cuda:1"),
+                create_fn(dst, {torch.device(2): torch.device(1)}, "cuda:1"),
                 torch.device("cuda:2")
             )
 
@@ -6809,3 +6832,18 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture):
     @skip_if_lt_x_gpu(3)
     def test_my_device_map_rpc_async_caller_device_jit_jit(self):
         self._test_device_on_caller(_rpc_async_test_caller_device_jit_jit)
+
+
+
+    @skip_if_lt_x_gpu(3)
+    def test_my_device_map_rref_async_callee_device_py_py(self):
+        self._test_device_on_callee(_rref_async_test_callee_device_py_py)
+        
+    @skip_if_lt_x_gpu(3)
+    def test_my_device_map_rref_sync_callee_device_py_py(self):
+        self._test_device_on_callee(_rref_sync_test_callee_device_py_py)
+    
+    @skip_if_lt_x_gpu(3)
+    def test_my_device_map_rref_remote_callee_device_py_py(self):
+        self._test_device_on_callee(_rref_remote_test_callee_device_py_py)
+    

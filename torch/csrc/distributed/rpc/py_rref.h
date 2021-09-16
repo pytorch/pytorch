@@ -48,6 +48,7 @@ class PYBIND11_EXPORT PyRRef {
   // of this RRef to run functions on the object referenced by this RRef.
   py::object createRRefProxy(
       const RRefProxyType& mode,
+      DeviceMap& deviceMap,
       float timeoutSeconds = kUnsetRpcTimeout) const;
 
   // get the type of the data object referenced by this RRef. Timeout argument

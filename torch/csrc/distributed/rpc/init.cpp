@@ -275,10 +275,11 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
               )")
           .def(
               "rpc_sync",
-              [](const PyRRef& self, float timeoutSeconds) {
+              [](const PyRRef& self, DeviceMap& deviceMap, float timeoutSeconds) {
                 return self.createRRefProxy(
-                    RRefProxyType::RPC_SYNC, timeoutSeconds);
+                    RRefProxyType::RPC_SYNC, deviceMap, timeoutSeconds);
               },
+              py::arg("device_map") = DeviceMap(),
               py::arg("timeout") = kUnsetRpcTimeout,
               py::call_guard<py::gil_scoped_release>(),
               R"(
@@ -307,10 +308,11 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
               )")
           .def(
               "rpc_async",
-              [](const PyRRef& self, float timeoutSeconds) {
+              [](const PyRRef& self, DeviceMap& deviceMap, float timeoutSeconds) {
                 return self.createRRefProxy(
-                    RRefProxyType::RPC_ASYNC, timeoutSeconds);
+                    RRefProxyType::RPC_ASYNC, deviceMap, timeoutSeconds);
               },
+              py::arg("device_map") = DeviceMap(),
               py::arg("timeout") = kUnsetRpcTimeout,
               py::call_guard<py::gil_scoped_release>(),
               R"(
@@ -339,10 +341,11 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
               )")
           .def(
               "remote",
-              [](const PyRRef& self, float timeoutSeconds) {
+              [](const PyRRef& self, DeviceMap& deviceMap, float timeoutSeconds) {
                 return self.createRRefProxy(
-                    RRefProxyType::REMOTE, timeoutSeconds);
+                    RRefProxyType::REMOTE, deviceMap, timeoutSeconds);
               },
+              py::arg("device_map") = DeviceMap(),
               py::arg("timeout") = kUnsetRpcTimeout,
               py::call_guard<py::gil_scoped_release>(),
               R"(

@@ -12,7 +12,7 @@ def _local_invoke(rref, func_name, args, kwargs):
 def _local_invoke_async_execution(rref, func_name, args, kwargs):
     return getattr(rref.local_value(), func_name)(*args, **kwargs)
 
-def _invoke_rpc(rref, rpc_api, func_name, timeout, *args, **kwargs):
+def _invoke_rpc(rref, rpc_api, func_name, device_map, timeout, *args, **kwargs):
     # Since rref._get_type can potentially issue an RPC, it should respect the
     # passed in timeout here.
     rref_type = rref._get_type(timeout=timeout)
@@ -31,16 +31,18 @@ def _invoke_rpc(rref, rpc_api, func_name, timeout, *args, **kwargs):
         rref.owner(),
         _invoke_func,
         args=(rref, func_name, args, kwargs),
+        device_map=device_map,
         timeout=timeout
     )
 
 # This class manages proxied RPC API calls for RRefs. It is entirely used from
 # C++ (see python_rpc_handler.cpp).
 class RRefProxy:
-    def __init__(self, rref, rpc_api, timeout=UNSET_RPC_TIMEOUT):
+    def __init__(self, rref, rpc_api, device_map, timeout=UNSET_RPC_TIMEOUT):
         self.rref = rref
         self.rpc_api = rpc_api
+        self.device_map = device_map
         self.rpc_timeout = timeout
 
     def __getattr__(self, func_name):
-        return partial(_invoke_rpc, self.rref, self.rpc_api, func_name, self.rpc_timeout)
+        return partial(_invoke_rpc, self.rref, self.rpc_api, func_name, self.device_map, self.rpc_timeout)
