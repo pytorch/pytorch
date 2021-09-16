@@ -24,28 +24,30 @@ void ExpressionEvaluator::bind(
 }
 
 c10::optional<Int::ScalarType> ExpressionEvaluator::evaluate(const Val* value) {
-  FUSER_PERF_SCOPE("kir::ExpressionEvaluator::evaluate");
-
-  TORCH_CHECK(value->isScalar());
-  TORCH_CHECK(value->dtype() == DataType::Int);
-
-  // Const scalar?
-  if (value->isScalar() && value->isConst()) {
+  if (precomputed_integers_ && precomputed_integers_->ready()) {
+    return precomputed_integers_->getMaybeValueFor(value);
+  } else if (value->isScalar() && value->isConst()) {
     return value->as<Int>()->value();
+  } else {
+    FUSER_PERF_SCOPE("kir::ExpressionEvaluator::evaluate");
+
+    TORCH_CHECK(value->isScalar());
+    TORCH_CHECK(value->dtype() == DataType::Int);
+
+    // Is the value known (either explicit binding or memoized)?
+    const auto pre_eval_it = known_values_.find(value);
+    if (pre_eval_it != known_values_.end()) {
+      return pre_eval_it->second;
+    }
+
+    value->accept(this);
+
+    const auto post_eval_it = known_values_.find(value);
+    return post_eval_it != known_values_.end()
+        ? c10::optional<Int::ScalarType>(post_eval_it->second)
+        : c10::nullopt;
   }
-
-  // Is the value known (either explicit binding or memoized)?
-  const auto pre_eval_it = known_values_.find(value);
-  if (pre_eval_it != known_values_.end()) {
-    return pre_eval_it->second;
-  }
-
-  value->accept(this);
-
-  const auto post_eval_it = known_values_.find(value);
-  return post_eval_it != known_values_.end()
-      ? c10::optional<Int::ScalarType>(post_eval_it->second)
-      : c10::nullopt;
+  return c10::nullopt;
 }
 
 bool ExpressionEvaluator::isConst(const Val* value) {

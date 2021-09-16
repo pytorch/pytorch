@@ -53,7 +53,8 @@ bool canVectorize(
 //! Bind kernel input values to runtime values
 kir::ExpressionEvaluator bindKernelInputs(
     const at::ArrayRef<IValue>& aten_inputs,
-    kir::Kernel* kernel);
+    kir::Kernel* kernel,
+    bool check_consistency = true);
 
 //! Bind fusion input values to runtime values
 TORCH_CUDA_CU_API ExpressionEvaluator

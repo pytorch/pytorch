@@ -1492,6 +1492,7 @@ class FusionSegmentGuard : public NonCopyable {
         old_outputs_(fusion->outputs()),
         new_inputs_(std::move(inputs)),
         new_outputs_(std::move(outputs)) {
+    FUSER_PERF_SCOPE("Segmenter::FusionSegmentGuard");
     TORCH_INTERNAL_ASSERT(fusion_ != nullptr);
     for (auto old_inp : old_inputs_) {
       fusion_->removeInput(old_inp);

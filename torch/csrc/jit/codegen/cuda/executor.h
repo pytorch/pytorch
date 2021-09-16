@@ -214,6 +214,10 @@ class TORCH_CUDA_CU_API FusionExecutor : public NonCopyable {
   //  without shape information so that each shape inference call will
   //  not need to re-compute them.
   ExecutorCompileTimeInfoCache compile_time_info_cache_;
+
+  // Cached expr eval
+  std::unique_ptr<KernelPrecomputedIntegers> evaluator_precomputed_integers_ =
+      nullptr;
 };
 
 } // namespace cuda

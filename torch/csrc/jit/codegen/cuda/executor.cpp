@@ -370,6 +370,14 @@ LaunchParams FusionExecutor::computeLaunchParams(
   auto& warp_padded_constant =
       warp_padded_parallel_entry.get().warp_padded_constant;
 
+  // TODO: Need to redesign this part a bit to
+  //   find the right place to trigger evaluate
+  if (expr_eval.precomputedIntegers()) {
+    expr_eval.precomputedIntegers()->bindParallelExtents(
+        parallel_iter_extents, launch_constraints);
+    expr_eval.precomputedIntegers()->evaluate();
+  }
+
   // If any dimension was set in launch constraints we need to run through
   // IterDomains that have been parallelized, and bind those values. Or make
   // sure if they could be inferred the inference matches what was set.
@@ -389,9 +397,11 @@ LaunchParams FusionExecutor::computeLaunchParams(
                 "Cannot validate parallelization scheme, "
                 "this may be due to mixed broadcast axes that are parallelized.");
           }
-        } else {
-          // Bind the launch constraint into our evaluation context
+        } else if (!expr_eval.precomputedIntegers()) {
           expr_eval.bind(extent, launch_constraints.getDim(p_type));
+        }
+        if (!launch_params.hasDim(p_type)) {
+          // Bind the launch constraint into our evaluation context
           launch_params.bind(launch_constraints.getDim(p_type), p_type);
         }
       }
@@ -400,6 +410,7 @@ LaunchParams FusionExecutor::computeLaunchParams(
 
   // Run through the rest of the parallel IterDomains and infer their size
   for (auto& entry : parallel_iter_extents) {
+    FUSER_PERF_SCOPE("FusionExecutor::ParallelBindingResolution");
     auto p_type = entry.first;
     auto parallel_extents = entry.second;
     // Select the maxmimum value out of all the parallel extents
@@ -626,7 +637,14 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
 
     const auto kernel = lowered_.kernel();
 
-    auto expr_eval = executor_utils::bindKernelInputs(inputs, kernel);
+    if (!evaluator_precomputed_integers_) {
+      evaluator_precomputed_integers_ =
+          std::make_unique<KernelPrecomputedIntegers>(&fusion_, lowered_);
+    }
+
+    kir::ExpressionEvaluator expr_eval;
+    evaluator_precomputed_integers_->bindKernelInputs(inputs);
+    expr_eval.precomputedIntegers() = evaluator_precomputed_integers_.get();
 
     launch_params = computeLaunchParams(launch_constraints, expr_eval);
 

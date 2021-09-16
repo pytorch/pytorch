@@ -1,5 +1,6 @@
 #pragma once
 
+#include <torch/csrc/jit/codegen/cuda/evaluator_common.h>
 #include <torch/csrc/jit/codegen/cuda/executor.h>
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/fusion_segmenter.h>
@@ -172,6 +173,9 @@ class TORCH_CUDA_CU_API FusionKernelRuntime {
   //! Graph traversal datacache for the single kernel fusion
   //!  TODO: unify the segmented and un-segmented code-path
   std::unique_ptr<HeuristicSummary> single_kernel_fusion_data_cache_ = nullptr;
+
+  //! Utility to speed up integer evaluation at runtime
+  std::unique_ptr<FusionPrecomputedIntegers> precomputed_integers_;
 
   // States for profiling support
   bool profiling_ = false;

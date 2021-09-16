@@ -459,7 +459,8 @@ void validateVectorizedTensors(
 
 kir::ExpressionEvaluator bindKernelInputs(
     const at::ArrayRef<IValue>& aten_inputs,
-    kir::Kernel* kernel) {
+    kir::Kernel* kernel,
+    bool check_consistency) {
   FUSER_PERF_SCOPE("executor_utils::BindKernelInputs");
 
   TORCH_INTERNAL_ASSERT(
@@ -487,17 +488,22 @@ kir::ExpressionEvaluator bindKernelInputs(
       for (size_t dim = 0; dim < root_domain.size(); dim++) {
         const auto extent = root_domain[dim]->extent();
         const auto value = aten_tensor.sizes()[dim];
-        const auto prev_value = expr_eval.evaluate(extent);
-        if (prev_value.has_value()) {
-          TORCH_CHECK(
-              *prev_value == value,
-              "Attempting to bind ",
-              kir::toString(extent),
-              " to ",
-              value,
-              "but it's already set to ",
-              *prev_value);
-        } else {
+        bool should_bind = true;
+        if (check_consistency) {
+          const auto prev_value = expr_eval.evaluate(extent);
+          if (prev_value.has_value()) {
+            TORCH_CHECK(
+                *prev_value == value,
+                "Attempting to bind ",
+                kir::toString(extent),
+                " to ",
+                value,
+                "but it's already set to ",
+                *prev_value);
+            should_bind = false;
+          }
+        }
+        if (should_bind && !extent->isConst()) {
           expr_eval.bind(extent, value);
         }
       }

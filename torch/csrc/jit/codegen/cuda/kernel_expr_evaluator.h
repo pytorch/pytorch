@@ -2,6 +2,7 @@
 #pragma once
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/jit/codegen/cuda/evaluator_common.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir.h>
 
 #include <c10/util/Optional.h>
@@ -12,6 +13,9 @@ namespace torch {
 namespace jit {
 namespace fuser {
 namespace cuda {
+
+class GpuLower;
+
 namespace kir {
 
 //! Calculate Kernel IR expressions
@@ -44,6 +48,10 @@ class TORCH_CUDA_CU_API ExpressionEvaluator : private IrVisitor {
   //! Debugging helper, prints all the currently known values
   void print() const;
 
+  auto& precomputedIntegers() {
+    return precomputed_integers_;
+  }
+
  private:
   void unhandled(const void*) final;
   void visit(const Int* value) final;
@@ -53,6 +61,7 @@ class TORCH_CUDA_CU_API ExpressionEvaluator : private IrVisitor {
 
  private:
   std::unordered_map<const Val*, Int::ScalarType> known_values_;
+  KernelPrecomputedIntegers* precomputed_integers_ = nullptr;
 };
 
 } // namespace kir

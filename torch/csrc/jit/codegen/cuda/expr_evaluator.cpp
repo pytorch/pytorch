@@ -1,4 +1,5 @@
 
+#include <torch/csrc/jit/codegen/cuda/evaluator_common.h>
 #include <torch/csrc/jit/codegen/cuda/expr_evaluator.h>
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
@@ -26,15 +27,20 @@ void ExpressionEvaluator::bind(Val* value, Int::ScalarType concrete_value) {
 }
 
 c10::optional<Int::ScalarType> ExpressionEvaluator::evaluate(Val* value) {
-  FUSER_PERF_SCOPE("ExpressionEvaluator::evaluate");
-  auto maybe_concrete_value = getValue(value);
-  if (!maybe_concrete_value.has_value()) {
-    if (value->definition() != nullptr) {
-      OptOutDispatch::handle(value->definition());
-      maybe_concrete_value = getValue(value);
+  if (evaluator_precomputed_integers_ != nullptr) {
+    return evaluator_precomputed_integers_->getMaybeValueFor(value);
+  } else {
+    FUSER_PERF_SCOPE("ExpressionEvaluator::evaluate");
+    auto maybe_concrete_value = getValue(value);
+    if (!maybe_concrete_value.has_value()) {
+      if (value->definition() != nullptr) {
+        OptOutDispatch::handle(value->definition());
+        maybe_concrete_value = getValue(value);
+      }
     }
+    return maybe_concrete_value;
   }
-  return maybe_concrete_value;
+  return c10::nullopt;
 }
 
 void ExpressionEvaluator::print() const {

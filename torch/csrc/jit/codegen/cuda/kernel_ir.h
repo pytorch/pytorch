@@ -316,6 +316,15 @@ class TORCH_CUDA_CU_API Val : public Node {
     return false;
   }
 
+  void setEvaluatorIndex(int to) {
+    TORCH_INTERNAL_ASSERT(evaluator_index_ == -1);
+    evaluator_index_ = to;
+  }
+
+  int evaluatorIndex() const {
+    return evaluator_index_;
+  }
+
  private:
   const DataType dtype_;
 
@@ -327,6 +336,9 @@ class TORCH_CUDA_CU_API Val : public Node {
 
   // All Kernel IR values have IDs (unique within the same Kernel)
   ValueId id_ = -1;
+
+  // Expr evaluator idx;
+  int evaluator_index_ = -1;
 };
 
 //! Base class for expressions and statements

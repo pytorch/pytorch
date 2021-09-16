@@ -342,6 +342,8 @@ SchedulerRuntimeInfo::SchedulerRuntimeInfo(
     bool create_expr_evaluator)
     : complete_fusion_(complete_fusion) {
   collectVectorizationInfo(inputs);
+  expression_evaluator_ =
+      std::make_unique<ExpressionEvaluator>(complete_fusion_);
   if (create_expr_evaluator) {
     initializeExpressionEvaluator(inputs);
   }
@@ -370,8 +372,6 @@ void SchedulerRuntimeInfo::initializeExpressionEvaluator(
     const at::ArrayRef<IValue>& inputs) {
   // TODO: refactor bindFusionInputs to better support this
   //  use case, i.e. support construct and bind input.
-  expression_evaluator_ =
-      std::make_unique<ExpressionEvaluator>(complete_fusion_);
   *expression_evaluator_ =
       executor_utils::bindFusionInputs(inputs, complete_fusion_);
 }

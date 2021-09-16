@@ -380,6 +380,10 @@ FusionKernelRuntime::FusionKernelRuntime(
   // Run segmentation on the copied fusion
   SchedulerRuntimeInfo runtime_info(fusion_copy.get(), inputs, true);
 
+  // Initialize the evaluator simplifer
+  precomputed_integers_ =
+      std::make_unique<FusionPrecomputedIntegers>(fusion_copy.get());
+
   //! Try to schedule the complete fusion
   const auto maybe_complete_fusion_heuristic =
       SchedulerEntry::proposeHeuristics(fusion_copy.get(), runtime_info);
@@ -652,7 +656,11 @@ c10::optional<FusionKernelRuntime::HeuristicsPtr> FusionKernelRuntime::
   FUSER_PERF_SCOPE("FusionKernelRuntime::getMaybeHeuristicsFor");
   auto complete_fusion = is_segmented_ ? segmented_fusion_->completeFusion()
                                        : single_kernel_fusion_.get();
-  SchedulerRuntimeInfo runtime_info(complete_fusion, inputs, true);
+  SchedulerRuntimeInfo runtime_info(complete_fusion, inputs);
+  precomputed_integers_->bindFusionInputs(inputs);
+  precomputed_integers_->evaluate();
+  runtime_info.expressionEvaluator().bindPrecomputedIntegers(
+      precomputed_integers_.get());
 
   c10::optional<FusionKernelRuntime::HeuristicsPtr> ret;
   // Segmented case, need to iterate over all segmented groups
