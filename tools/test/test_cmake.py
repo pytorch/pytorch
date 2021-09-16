@@ -4,6 +4,7 @@ from typing import Iterator, List, Optional
 import unittest
 import unittest.mock
 
+import tools.setup_helpers.env as unused_but_resolving_circular_import
 import tools.setup_helpers.cmake
 
 
@@ -16,16 +17,17 @@ class TestCMake(unittest.TestCase):
         self.assertListEqual(build_args[-3:], ['--', '-j', '8'])
 
     def test_build_with_ninja(self) -> None:
-        build_args = self._cmake_build_and_get_args()
+        with unittest.mock.patch.object(tools.setup_helpers.cmake, 'USE_NINJA', True):
+            build_args = self._cmake_build_and_get_args()
 
         self.assertNotIn('--', build_args)
         self.assertNotIn('-j', build_args)
 
-    @unittest.mock.patch('tools.setup_helpers.cmake.USE_NINJA', new_callable=lambda: False)
-    @unittest.mock.patch('multiprocessing.cpu_count')
-    def test_build_no_ninja(self, mock_cpu_count, mock_use_ninja) -> None:
-        mock_cpu_count.return_value = 13
-        build_args = self._cmake_build_and_get_args()
+    def test_build_no_ninja(self) -> None:
+        with (unittest.mock.patch.object(tools.setup_helpers.cmake, 'USE_NINJA', False),
+              unittest.mock.patch('multiprocessing.cpu_count') as mock_cpu_count):
+            mock_cpu_count.return_value = 13
+            build_args = self._cmake_build_and_get_args()
 
         self.assertListEqual(build_args[-3:], ['--', '-j', '13'])
 
