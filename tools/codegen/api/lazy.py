@@ -1,30 +1,12 @@
-from typing import List, Optional, Union, Tuple
-import itertools
-from typing_extensions import Literal
-from dataclasses import dataclass
-import textwrap
-from tools.codegen import local
-from tools.codegen.context import method_with_native_function, native_function_manager
-from tools.codegen.utils import Target, mapMaybe
-from tools.codegen.model import (Type, BaseTy, BaseType, OptionalType, DispatchKey, NativeFunction,
-                                 NativeFunctionsGroup, SchemaKind, FunctionSchema,
-                                 TensorOptionsArguments, ListType,
-                                 DeviceCheckType, Argument, assert_never,
-                                 is_cuda_dispatch_key, BackendIndex,
-                                 gets_generated_out_inplace_wrapper, OperatorName,
-                                 Arguments, SelfArgument, Return)
+from typing import List, Union, Tuple
+from tools.codegen.model import (Type, BaseTy, BaseType, OptionalType,
+                                 ListType, OperatorName, FunctionSchema,
+                                 Return)
 from tools.codegen.api.types import (BaseCppType, BaseCType, OptionalCType,
-                                     Binding, ConstRefCType, NamedCType,
-                                     CppSignature, CppSignatureGroup,
-                                     Expr, MutRefCType, kernel_signature,
-                                     DispatcherSignature, VectorCType, intT, ListCType,
+                                     ConstRefCType, NamedCType,
+                                     MutRefCType,
+                                     VectorCType, intT, ListCType,
                                      scalarT, scalarTypeT, ArrayRefCType, ArrayCType, TupleCType)
-import tools.codegen.api.dispatcher as dispatcher
-import tools.codegen.api.meta as meta
-import tools.codegen.api.cpp as cpp
-import tools.codegen.api.structured as structured
-from tools.codegen.api.translate import translate
-from tools.codegen.selective_build.selector import SelectiveBuilder
 
 valueT = BaseCppType('ir', 'Value')
 
@@ -141,7 +123,7 @@ class LazyIrSchema:
     def aten_name(self) -> str:
         return f"{self.name}"
 
-    def filtered_types(self, positional: bool=True, keyword: bool=True, values: bool=True, scalars: bool=True) -> List[NamedCType]:
+    def filtered_types(self, positional: bool = True, keyword: bool = True, values: bool = True, scalars: bool = True) -> List[NamedCType]:
         types: List[NamedCType] = []
         if positional:
             types.extend(self.positional_arg_types)

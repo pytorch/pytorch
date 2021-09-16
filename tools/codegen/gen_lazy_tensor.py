@@ -4,7 +4,7 @@ import os
 import yaml
 import re
 from collections import namedtuple, Counter, defaultdict
-from typing import List, Dict, Union, Sequence, Optional, Callable, TypeVar, Iterable, Iterator
+from typing import List, Dict, Union, Sequence, Optional, Callable, Iterable, Iterator
 from tools.codegen.gen import FileManager, get_grouped_native_functions, parse_native_yaml
 from tools.codegen.model import (BackendIndex, BackendMetadata, DispatchKey,
                                  NativeFunction, NativeFunctionsGroup, OperatorName)
@@ -354,7 +354,7 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
 
         if gen_ts_lowerings:
             # Generate TorchScript Lowerings for the IR nodes
-            fm.write_with_template(f'LazyTsLowering.cpp', 'LazyTsLowering.cpp', lambda: {
+            fm.write_with_template('LazyTsLowering.cpp', 'LazyTsLowering.cpp', lambda: {
                 'ts_lowering_sysinc': [f'#include <{path}>' for path in [
                     "vector",
                 ]],

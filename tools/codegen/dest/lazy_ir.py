@@ -1,31 +1,13 @@
-from typing import List, Optional, Union, Tuple
-import itertools
-from typing_extensions import Literal
+from typing import List, Union
 from dataclasses import dataclass
-import textwrap
-from tools.codegen import local
-from tools.codegen.context import method_with_native_function, native_function_manager
-from tools.codegen.utils import Target, mapMaybe
-from tools.codegen.model import (Type, BaseTy, BaseType, OptionalType, DispatchKey, NativeFunction,
-                                 NativeFunctionsGroup, SchemaKind, FunctionSchema,
-                                 TensorOptionsArguments, ListType,
-                                 DeviceCheckType, Argument, assert_never,
-                                 is_cuda_dispatch_key, BackendIndex,
-                                 gets_generated_out_inplace_wrapper, OperatorName,
-                                 Arguments, SelfArgument, Return)
-from tools.codegen.api.types import (BaseCppType, BaseCType, OptionalCType,
-                                     Binding, ConstRefCType, NamedCType,
-                                     CppSignature, CppSignatureGroup,
-                                     Expr, MutRefCType, kernel_signature,
-                                     DispatcherSignature, VectorCType, intT, ListCType,
-                                     scalarT, scalarTypeT, ArrayRefCType, ArrayCType, TupleCType)
+from tools.codegen.context import method_with_native_function
+from tools.codegen.model import (BackendIndex, NativeFunction,
+                                 NativeFunctionsGroup)
+from tools.codegen.api.types import (BaseCType, OptionalCType,
+                                     NamedCType, kernel_signature)
 import tools.codegen.api.dispatcher as dispatcher
-import tools.codegen.api.meta as meta
-import tools.codegen.api.cpp as cpp
-import tools.codegen.api.structured as structured
-from tools.codegen.api.translate import translate
-from tools.codegen.selective_build.selector import SelectiveBuilder
-from tools.codegen.api.lazy import LazyIrSchema, valueT, isValueType
+from tools.codegen.api.lazy import LazyIrSchema, isValueType
+
 
 def node_ctor_inputs(func: LazyIrSchema) -> str:
     """
@@ -50,7 +32,6 @@ def node_ctor_inputs(func: LazyIrSchema) -> str:
 
     node_ctor_inputs_str = ",\n                              ".join(node_ctor_values + node_ctor_scalars)
     return node_ctor_inputs_str
-
 
 
 @dataclass(frozen=True)
@@ -101,7 +82,6 @@ class LazyIR:
         else:
             clone_impl = f"ir::MakeNode<ir::ops::{schema.node_name}>({clone_impl_args});"
             clone_handcoded_decl = ""
-
 
         return [f"""\
 {clone_handcoded_decl}
@@ -165,7 +145,7 @@ def gen_lazy_nativefunc_definition(f: NativeFunction, backend_index: BackendInde
     node_ctor_input_str = node_ctor_inputs(schema)
 
     # call the meta kernel if it exists, to compute output shape/dtype for our IR
-    if f.structured or f.structured_delegate != None:
+    if f.structured or f.structured_delegate is not None:
         meta_args = ", ".join([f"{t.name}.to(c10::kMeta)" for t in value_types] + [f"{t.name}" for t in scalar_types])
         meta_str = f"""auto out_meta = at::meta::{schema.aten_name}({meta_args});
     auto _out_shape = out_meta.sizes().vec();
@@ -194,6 +174,7 @@ def gen_lazy_nativefunc_definition(f: NativeFunction, backend_index: BackendInde
         _out_dtype));
 }};
 """]
+
 
 def gen_lazy_shape_dtype_decl(f: NativeFunction, backend_index: BackendIndex) -> List[str]:
     sig = kernel_signature(f, backend_index)

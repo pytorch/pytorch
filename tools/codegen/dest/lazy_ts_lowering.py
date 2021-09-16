@@ -1,29 +1,10 @@
-from typing import List, Optional, Union, Tuple
-import itertools
+from typing import List, Union
 from typing_extensions import Literal
 from dataclasses import dataclass
 from enum import Enum
-import textwrap
-from tools.codegen import local
-from tools.codegen.context import method_with_native_function, native_function_manager
-from tools.codegen.utils import Target, mapMaybe
-from tools.codegen.model import (BaseTy, BaseType, OptionalType, DispatchKey, NativeFunction,
-                                 NativeFunctionsGroup, SchemaKind, FunctionSchema,
-                                 TensorOptionsArguments, ListType,
-                                 DeviceCheckType, Argument, assert_never,
-                                 is_cuda_dispatch_key, BackendIndex,
-                                 gets_generated_out_inplace_wrapper, OperatorName,
-                                 SelfArgument, Arguments)
-from tools.codegen.api.types import (BaseCppType, BaseCType, OptionalCType,
-                                     Binding, ConstRefCType, NamedCType,
-                                     CppSignature, CppSignatureGroup,
-                                     Expr, MutRefCType, kernel_signature,
-                                     DispatcherSignature, ListCType)
-import tools.codegen.api.meta as meta
-import tools.codegen.api.cpp as cpp
-import tools.codegen.api.structured as structured
-from tools.codegen.api.translate import translate
-from tools.codegen.selective_build.selector import SelectiveBuilder
+from tools.codegen.context import method_with_native_function
+from tools.codegen.model import (NativeFunction, NativeFunctionsGroup,
+                                 BackendIndex)
 from tools.codegen.api.lazy import LazyIrSchema
 
 
