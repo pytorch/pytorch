@@ -11,6 +11,7 @@ on:
 
 jobs:
   release:
+    if: ${{ github.repository == 'pytorch/pytorch' }}
     name: Create Release
     runs-on: ubuntu-latest
     steps:
@@ -48,5 +49,5 @@ jobs:
           files: ${{env.PT_RELEASE_FILE}}
 
 concurrency:
-  group: create-release-${{ github.event.pull_request.number || github.sha }}
+  group: create-release-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true

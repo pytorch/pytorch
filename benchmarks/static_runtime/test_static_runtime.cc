@@ -939,7 +939,7 @@ TEST(StaticRuntime, FusionPass) {
 
 TEST(
     ProcessedNode,
-    VerifyOutputsNotOverlappingWithImmutableInputsWithImmutableArguments) {
+    VerifyNoMemoryOverlapWithImmutableInputsWithImmutableArguments) {
   script::Module module("module");
   // Not using out= variant.
   module.define(sigmoid_script);
@@ -951,15 +951,15 @@ TEST(
   ProcessedNode pnode(sigmoid_node, std::move(ivalue_inputs), true);
 
   pnode.Output(0) = b;
-  EXPECT_TRUE(pnode.verify_outputs_not_overlapping_with_immutable_inputs());
+  EXPECT_TRUE(pnode.verify_no_memory_overlap());
 
   pnode.Output(0) = a;
-  EXPECT_FALSE(pnode.verify_outputs_not_overlapping_with_immutable_inputs());
+  EXPECT_FALSE(pnode.verify_no_memory_overlap());
 }
 
 TEST(
     ProcessedNode,
-    VerifyOutputsNotOverlappingWithImmutableInputsWithMutableArguments) {
+    VerifyNoMemoryOverlapWithImmutableInputsWithMutableArguments) {
   script::Module module("module");
   // Using out= variant.
   module.define(sigmoid_inplace_script);
@@ -971,10 +971,40 @@ TEST(
   ProcessedNode pnode(sigmoid_node, std::move(ivalue_inputs), true);
 
   pnode.Output(0) = b;
-  EXPECT_TRUE(pnode.verify_outputs_not_overlapping_with_immutable_inputs());
+  EXPECT_TRUE(pnode.verify_no_memory_overlap());
 
   pnode.Output(0) = a;
-  EXPECT_TRUE(pnode.verify_outputs_not_overlapping_with_immutable_inputs());
+  EXPECT_TRUE(pnode.verify_no_memory_overlap());
+}
+
+TEST(ProcessedNode, VerifyNoMemoryOverlapWithOverlappingOutputs) {
+  auto g = std::make_shared<torch::jit::Graph>();
+  torch::jit::parseIR(
+      R"IR(
+    graph(%0):
+      %1 : Tensor, %2 : Tensor = prim::ListUnpack(%0)
+      return (%1, %2))IR",
+      g.get());
+  torch::jit::StaticModule smodule(g);
+  Node* list_unpack_node = getNodeWithKind(smodule, "prim::ListUnpack");
+  {
+    auto a = at::randn({2, 3});
+    IValue ivalue(a);
+    std::vector<const IValue*> inputs{&ivalue};
+    ProcessedNode list_unpack_pnode(list_unpack_node, std::move(inputs), /*enable_out_variant=*/true);
+    ASSERT_EQ(list_unpack_pnode.outputs().size(), 2);
+    EXPECT_TRUE(list_unpack_pnode.verify_no_memory_overlap());
+  }
+  {
+    auto a = at::randn({2, 3});
+    IValue ivalue(a);
+    std::vector<const IValue*> inputs{&ivalue};
+    ProcessedNode list_unpack_pnode(list_unpack_node, std::move(inputs), /*enable_out_variant=*/true);
+    auto b = at::randn({2, 3});
+    list_unpack_pnode.Output(0) = b;
+    list_unpack_pnode.Output(1) = b;
+    EXPECT_FALSE(list_unpack_pnode.verify_no_memory_overlap());
+  }
 }
 
 TEST(StaticRuntime, IndividualOps_isinstance) {
@@ -1355,4 +1385,12 @@ TEST(StaticRuntime, IndividualOps_Nonzero) {
 
   auto b = at::randint(0, 2, {4, 3, 2});
   testStaticRuntime(nonzero_tensor, {a}, {b});
+}
+
+TEST(StaticRuntime, SignedLog1p) {
+  std::vector<IValue> args1 = {at::randn({2, 2})};
+  testStaticRuntime(signed_log1p_script, args1, {}, true);
+
+  std::vector<IValue> args2 = {at::randn({3, 3, 3})};
+  testStaticRuntime(signed_log1p_script, args1, args2, true);
 }
