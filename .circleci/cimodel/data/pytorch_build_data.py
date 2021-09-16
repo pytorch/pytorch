@@ -27,7 +27,8 @@ CONFIG_TREE_DATA = [
         ("cuda", [
             ("10.2", [
                 ("3.6", [
-                    ("shard_test", [X(True)]),
+                    # Build are needed for slow_gradcheck
+                    ('build_only', [X(True)]),
                     ("slow_gradcheck", [
                         # If you update this slow gradcheck, you should
                         # also update docker_definitions.py to make sure
