@@ -45,9 +45,7 @@ env:
   ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
   PR_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
 
-concurrency:
-  group: !{{ build_environment }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
-  cancel-in-progress: true
+!{{ common.concurrency(build_environment) }}
 
 jobs:
 {%- if ciflow_config.enabled %}
@@ -63,7 +61,6 @@ jobs:
         run: echo "${LABELS}"
 {%- endif %}
   calculate-docker-image:
-    if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: linux.2xlarge
     {%- if ciflow_config.enabled %}
     needs: [!{{ ciflow_config.root_job_name }}]
@@ -137,7 +134,8 @@ jobs:
           docker pull "${DOCKER_IMAGE}"
       - name: Build PyTorch
         run: |
-          docker run \
+          # detached container should get cleaned up by teardown_ec2_linux
+          container_name=$(docker run \
             -e BUILD_ENVIRONMENT \
             -e JOB_BASE_NAME \
             -e MAX_JOBS="$(nproc --ignore=2)" \
@@ -152,17 +150,20 @@ jobs:
             --security-opt seccomp=unconfined \
             --cap-add=SYS_PTRACE \
             --tty \
+            --detach \
             --user jenkins \
             -v "${GITHUB_WORKSPACE}:/var/lib/jenkins/workspace" \
             -w /var/lib/jenkins/workspace \
-            "${DOCKER_IMAGE}" \
-            sh -c 'sudo chown -R jenkins . && .jenkins/pytorch/build.sh'
+            "${DOCKER_IMAGE}"
+          )
+          docker exec -t "${container_name}" sh -c 'sudo chown -R jenkins . && .jenkins/pytorch/build.sh'
       !{{ common.parse_ref() }}
       - name: Display and upload binary build size statistics (Click Me)
         # temporary hack: set CIRCLE_* vars, until we update
         # tools/stats/print_test_stats.py to natively support GitHub Actions
         env:
           AWS_DEFAULT_REGION: us-east-1
+          IS_GHA: 1
           SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.SCRIBE_GRAPHQL_ACCESS_TOKEN }}
           CIRCLE_BRANCH: ${{ steps.parse-ref.outputs.branch }}
           CIRCLE_PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -172,7 +173,7 @@ jobs:
         run: |
           COMMIT_TIME=$(git log --max-count=1 --format=%ct || echo 0)
           export COMMIT_TIME
-          pip3 install requests
+          pip3 install requests==2.26 boto3==1.16.34
           python3 -m tools.stats.upload_binary_size_to_scuba || exit 0
       - name: Chown workspace
         run: |
@@ -205,7 +206,6 @@ jobs:
 {%- if not exclude_test %}
 {% block test +%}
   generate-test-matrix:
-    if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: ubuntu-18.04
     {%- if ciflow_config.enabled %}
     needs: [!{{ ciflow_config.root_job_name }}]
@@ -234,7 +234,7 @@ jobs:
       image: python:3.9
     steps:
       - name: Install dependencies
-        run: pip install typing-extensions
+        run: pip install typing-extensions==3.10
       - name: Clone pytorch/pytorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
       - name: Generating test matrix
@@ -254,7 +254,7 @@ jobs:
       SHARD_NUMBER: ${{ matrix.shard }}
       NUM_TEST_SHARDS: ${{ matrix.num_shards }}
       PYTORCH_IGNORE_DISABLED_ISSUES: ${{ needs.generate-test-matrix.outputs.ignore-disabled-issues }}
-      CONTINUE_THROUGH_ERROR: ${{ github.repository_owner == 'pytorch' && (github.event_name == 'push' || github.event_name == 'schedule') }}
+      CONTINUE_THROUGH_ERROR: ${{ github.repository == 'pytorch/pytorch' && (github.event_name == 'push' || github.event_name == 'schedule') }}
     steps:
       !{{ common.setup_ec2_linux() }}
       !{{ common.checkout_pytorch("recursive") }}
@@ -300,10 +300,11 @@ jobs:
           if [[ $NUM_TEST_SHARDS -ne 2 ]]; then
             export SHARD_NUMBER=0
           fi
+          # detached container should get cleaned up by teardown_ec2_linux
           # TODO: Stop building test binaries as part of the build phase
           # Used for GPU_FLAG since that doesn't play nice
           # shellcheck disable=SC2086
-          docker run \
+          container_name=$(docker run \
             ${GPU_FLAG:-} \
             -e BUILD_ENVIRONMENT \
             -e PR_NUMBER \
@@ -327,56 +328,34 @@ jobs:
             --cap-add=SYS_PTRACE \
             --shm-size="${SHM_SIZE}" \
             --tty \
+            --detach \
+            --name="${container_name}" \
             --user jenkins \
             -v "${GITHUB_WORKSPACE}:/var/lib/jenkins/workspace" \
             -w /var/lib/jenkins/workspace \
-            "${DOCKER_IMAGE}" \
-            sh -c 'sudo chown -R jenkins . && pip install dist/*.whl && '$TEST_COMMAND
+            "${DOCKER_IMAGE}"
+          )
+          docker exec -t "${container_name}" sh -c "sudo chown -R jenkins . && pip install dist/*.whl && ${TEST_COMMAND}"
       - name: Chown workspace
         if: always()
         run: |
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      !{{ common.render_test_results() }}
       {%- if is_coverage %}
       - name: Report coverage
         run: |
-          python3 -mpip install codecov
+          python3 -mpip install codecov==2.1.12
           python3 -mcodecov
       {%- endif %}
-      - name: Zip test reports for upload
-        if: always()
-        env:
-          COMMIT_SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
-          WORKFLOW_ID: '${{ github.run_id }}_${{ github.run_number }}'
-        run: |
-          # Remove any previous test reports if they exist
-          rm -f test-reports-*.zip
-          zip -r "test-reports-${COMMIT_SHA1}-${WORKFLOW_ID}.zip" test -i '*.xml'
-      - uses: actions/upload-artifact@v2
-        name: Store PyTorch Test Reports
-        if: always()
-        with:
-          name: test-reports-${{ matrix.config }}
-          retention-days: 14
-          if-no-files-found: error
-          path:
-            test-reports-*.zip
-      - uses: !{{ common.upload_artifact_s3_action }}
-        name: Store PyTorch Test Reports on S3
-        if: always()
-        with:
-          name: test-reports-${{ matrix.config }}
-          retention-days: 14
-          if-no-files-found: error
-          path:
-            test-reports-*.zip
+      !{{ common.upload_test_reports(name='linux') }}
       !{{ common.parse_ref() }}
       !{{ common.upload_test_statistics(build_environment) }}
       !{{ common.teardown_ec2_linux() }}
 {% endblock %}
 {%- endif -%}
 {%- if enable_doc_jobs %}
-  pytorch_doc_build:
+  build-docs:
     runs-on: linux.2xlarge
     strategy:
       matrix:
@@ -405,7 +384,8 @@ jobs:
           echo "${GITHUB_REF}"
           ref=${GITHUB_REF##*/}
           target=${ref//v}
-          docker run \
+          # detached container should get cleaned up by teardown_ec2_linux
+          container_name=$(docker run \
             -e BUILD_ENVIRONMENT \
             -e CUSTOM_TEST_ARTIFACT_BUILD_DIR \
             -e IN_CI \
@@ -417,13 +397,14 @@ jobs:
             --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
             --security-opt seccomp=unconfined \
             --cap-add=SYS_PTRACE \
-            --name="$GITHUB_SHA" \
             --tty \
+            --detach \
             --user jenkins \
             -v "${GITHUB_WORKSPACE}:/var/lib/jenkins/workspace" \
             -w /var/lib/jenkins/workspace \
-            "${DOCKER_IMAGE}" \
-            bash -c "sudo chown -R jenkins . && pip install dist/*.whl && ./.circleci/scripts/${DOCS_TYPE}_doc_push_script.sh"
+            "${DOCKER_IMAGE}"
+          )
+          docker exec -t "${container_name}" bash -c "sudo chown -R jenkins . && pip install dist/*.whl && ./.circleci/scripts/${DOCS_TYPE}_doc_push_script.sh"
       - name: Chown workspace
         run: |
           # Ensure the working directory gets chowned back to the current user
@@ -433,17 +414,19 @@ jobs:
         if: ${{ github.event_name == 'pull_request' && matrix.docs_type == 'python' }}
         with:
           retention-days: 14
+          s3-bucket: doc-previews
           if-no-files-found: error
           path: pytorch.github.io/docs/merge/
-          s3-prefix: ${{ github.repository }}/pr-previews/pr/${{ github.event.pull_request.number }}
+          s3-prefix: pytorch/${{ github.event.pull_request.number }}
       - uses: !{{ common.upload_artifact_s3_action }}
         name: Upload C++ Docs Preview
-        if: ${{ github.event_name == 'pull_request' && matrix.docs_type == 'cppdocs' }}
+        if: ${{ github.event_name == 'pull_request' && matrix.docs_type == 'cpp' }}
         with:
           retention-days: 14
           if-no-files-found: error
+          s3-bucket: doc-previews
           path: cppdocs/
-          s3-prefix: ${{ github.repository }}/pr-previews/pr/${{ github.event.pull_request.number }}/cppdocs
+          s3-prefix: pytorch/${{ github.event.pull_request.number }}/cppdocs
       - name: Archive artifacts into zip
         run: |
           zip -r "docs_${DOCS_TYPE}.zip" "${GITHUB_WORKSPACE}/pytorch.github.io" "${GITHUB_WORKSPACE}/cppdocs"
