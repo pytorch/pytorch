@@ -180,7 +180,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
       scalar_t* mat1_ptr = mat1_->data_ptr<scalar_t>();
       scalar_t* mat2_ptr = mat2_->data_ptr<scalar_t>();
       scalar_t* result_ptr = result_->data_ptr<scalar_t>();
-      at::cuda::blas::gemm<scalar_t>(
+      at::cuda::blas::integer_gemm<scalar_t>(
         transpose_mat1 ? 't' : 'n',
         transpose_mat2 ? 't' : 'n',
         m, n, k,
@@ -305,7 +305,18 @@ Tensor& baddbmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& 
 
     AT_DISPATCH_INDEX_TYPES(self.scalar_type(), "baddmm_cuda_int", [&] {
       using scalar_t = index_t;
-      at::cuda::blas::batched_integer_gemm<scalar_t>(iter, transpose_batch1, transpose_batch2);
+
+      scalar_t alpha_val = alpha.to<scalar_t>();
+      scalar_t beta_val = beta.to<scalar_t>();
+      at::cuda::blas::batched_integer_gemm<scalar_t>(iter,
+                                                     transpose_batch1 ? 't' : 'n',
+                                                     transpose_batch2 ? 't' : 'n',
+                                                     m, n, k,
+                                                     alpha_val,
+                                                     batch1_,
+                                                     batch2_,
+                                                     beta_val,
+                                                     result_);
     });
   }
   else {

@@ -31,7 +31,7 @@ namespace blas {
           product += a[k + row * lda] * b[col  + k * ldb];
         }
       }
-      c[row + col * ldc] = product;
+      c[row + col * ldc] = beta * c[row + col * ldc] + alpha * product;
     }
   }
 
@@ -63,22 +63,22 @@ namespace blas {
   }
 
   template <>
-  void gemm<int32_t>(CUDABLAS_GEMM_ARGTYPES(int32_t)) {
+  void integer_gemm<int32_t>(CUDABLAS_GEMM_ARGTYPES(int32_t)) {
     launch_gemm_kernel(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
   }
 
   template <>
-  void gemm<int64_t>(CUDABLAS_GEMM_ARGTYPES(int64_t)) {
+  void integer_gemm<int64_t>(CUDABLAS_GEMM_ARGTYPES(int64_t)) {
     launch_gemm_kernel(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
   }
 
   template <>
-  void batched_integer_gemm<int32_t>(TensorIterator& iter, char transa, char transb) {
+  void batched_integer_gemm<int32_t>(CUDABLAS_BATCHED_INTEGER_GEMM_ARGTYPES(int32_t)) {
     // gpu_kernel()
   }
 
   template <>
-  void batched_integer_gemm<int64_t>(TensorIterator& iter, char transa, char transb) {
+  void batched_integer_gemm<int64_t>(CUDABLAS_BATCHED_INTEGER_GEMM_ARGTYPES(int64_t)) {
   }
 
 }
