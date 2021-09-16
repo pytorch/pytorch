@@ -394,27 +394,6 @@ __host__ __device__
 #define C10_IS_TRIVIALLY_COPYABLE(T) std::is_trivially_copyable<T>::value
 #endif
 
-// We need --expt-relaxed-constexpr in CUDA because of Eigen. This flag allows
-// device code in CUDA to call host constexpr functions. Unfortunately,
-// the CUDA compiler (at least for CUDA 9.0, 9.1 and 9.2) isn't compatible
-// with many of the constexpr things we'd like to do and the device code
-// compiler crashes when it sees one of these host-only functions.
-// It works when nvcc builds host code, but not when it builds device code
-// and notices it can call these constexpr functions from device code.
-// As a workaround, we use C10_HOST_CONSTEXPR instead of constexpr for these
-// functions. This enables constexpr when compiled on the host and applies
-// __host__ when it is compiled on the device in an attempt to stop it from
-// being called from device functions. Not sure if the latter works, but
-// even if not, it not being constexpr anymore should be enough to stop
-// it from being called from device code.
-// TODO Eliminating the following 5 lines caused build errors in all windows
-// CUDA builds, even beyond CUDA version 9.2.
-#if defined(__CUDA_ARCH__)
-#define C10_HOST_CONSTEXPR __host__
-#else
-#define C10_HOST_CONSTEXPR constexpr
-#endif
-
 #if !defined(__clang__) && !defined(_MSC_VER) && defined(__GNUC__) && \
     __GNUC__ < 6
 #define CONSTEXPR_EXCEPT_GCC5
