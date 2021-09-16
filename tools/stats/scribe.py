@@ -141,7 +141,7 @@ def rds_write(
         "ref": os.getenv("CIRCLE_SHA1"),
         "branch": os.getenv("CIRCLE_BRANCH"),
         "workflow_id": os.getenv("GITHUB_WORKFLOW_RUN_ID"),
-        "build_environment": os.getenv("BUILD_ENVIRONMENT"),
+        "build_environment": os.environ.get("BUILD_ENVIRONMENT", "").split()[0],
     }
 
     events = []

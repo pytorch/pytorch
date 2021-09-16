@@ -29,11 +29,7 @@ def get_size(file_dir: str) -> int:
 
 
 def base_data() -> Dict[str, Any]:
-    build_env_split = os.environ.get("BUILD_ENVIRONMENT", "").split()
-    build_environment = build_env_split[0]
-
     return {
-        "build_environment": build_environment,
         "run_duration_seconds": int(
             time.time() - os.path.getmtime(os.path.realpath(__file__))
         ),
