@@ -8,6 +8,7 @@
 #include "lazy_tensor_core/csrc/helpers.h"
 #include "lazy_tensor_core/csrc/ops/as_strided.h"
 #include "lazy_tensor_core/csrc/tensor_impl.h"
+#include "lazy_tensor_core/csrc/tensor_util.h"
 #include "lazy_tensor_core/csrc/torch_util.h"
 #include "lazy_tensor_core/csrc/ts_backend/LazyNativeFunctions.h"
 #include "lazy_tensor_core/csrc/ts_backend/aten_autograd_ops_ts.h"
@@ -740,6 +741,39 @@ at::Tensor LazyNativeFunctions::ne(const at::Tensor& self,
       LazyTensor::ne(bridge::GetLtcTensor(self), bridge::GetLtcTensor(other)));
 }
 
+at::Tensor LazyNativeFunctions::nll_loss_backward(const at::Tensor& grad_output,
+    const at::Tensor& self, const at::Tensor& target,
+    const c10::optional<at::Tensor>& weight, int64_t reduction,
+    int64_t ignore_index, const at::Tensor& total_weight)
+{
+  LTC_FN_COUNTER("lazy::");
+
+  auto selfTensor = bridge::GetLtcTensor(self);
+  return bridge::AtenFromLtcTensor(
+      LazyTensor::nll_loss_backward(bridge::GetLtcTensor(grad_output), selfTensor,
+          bridge::GetLtcTensor(target), bridge::GetOrCreateLtcTensor(weight,
+              selfTensor.GetDevice()),
+          reduction, ignore_index, bridge::GetLtcTensor(total_weight)));
+}
+
+std::tuple<at::Tensor,at::Tensor>
+LazyNativeFunctions::nll_loss_forward(const at::Tensor& self,
+    const at::Tensor& target, const c10::optional<at::Tensor>& weight,
+    int64_t reduction, int64_t ignore_index)
+{
+  LTC_FN_COUNTER("lazy::");
+
+  auto selfTensor = bridge::GetLtcTensor(self);
+  auto lazyOutputs = LazyTensor::nll_loss_forward(
+      selfTensor, bridge::GetLtcTensor(target),
+      bridge::GetOrCreateLtcTensor(weight, selfTensor.GetDevice()),
+      reduction, ignore_index);
+
+  return std::make_tuple(
+      bridge::AtenFromLtcTensor(std::get<0>(lazyOutputs)),
+      bridge::AtenFromLtcTensor(std::get<1>(lazyOutputs)));
+}
+
 // We need to explicitly override max pooling operators and just call the
 // fallback for them because we've customized the autograd function for them
 // (backward needs saved indices from forward).
@@ -800,6 +834,20 @@ at::Tensor LazyNativeFunctions::permute(const at::Tensor& self,
   LazyTensor self_tensor = bridge::GetLtcTensor(self);
   return bridge::AtenFromLtcTensor(
       LazyTensor::permute(self_tensor, Helpers::I64List(dims)));
+}
+
+at::Tensor& LazyNativeFunctions::random_(at::Tensor& self,
+    c10::optional<at::Generator> generator) {
+  LTC_FN_COUNTER("lazy::");
+
+  if (generator && generator->defined()) {
+    return at::native::call_fallback_fn<&ltc_eager_fallback,
+        ATEN_OP(random_)>::call(self, generator);
+  }
+
+  auto selfTensor = bridge::GetLtcTensor(self);
+  LazyTensor::random_(selfTensor);
+  return self;
 }
 
 at::Tensor LazyNativeFunctions::relu(const at::Tensor& self) {
@@ -949,6 +997,22 @@ at::Tensor LazyNativeFunctions::tanh_backward(const at::Tensor& grad_output,
       bridge::GetLtcTensor(grad_output), bridge::GetLtcTensor(output)));
 }
 
+at::Tensor LazyNativeFunctions::threshold(const at::Tensor& self,
+                                          const at::Scalar& threshold,
+                                          const at::Scalar& value) {
+  LTC_FN_COUNTER("lazy::");
+  return bridge::AtenFromLtcTensor(LazyTensor::threshold(
+      bridge::GetLtcTensor(self), threshold.to<double>(), value.to<double>()));
+}
+
+at::Tensor LazyNativeFunctions::threshold_backward(const at::Tensor& grad_output,
+    const at::Tensor& self, const at::Scalar& threshold)
+{
+  LTC_FN_COUNTER("lazy::");
+  return bridge::AtenFromLtcTensor(LazyTensor::threshold_backward(
+      bridge::GetLtcTensor(grad_output), bridge::GetLtcTensor(self), threshold.to<double>()));
+}
+
 at::Tensor LazyNativeFunctions::transpose(const at::Tensor& self, int64_t dim0,
                                           int64_t dim1) {
   LTC_FN_COUNTER("lazy::");
@@ -983,6 +1047,13 @@ at::Tensor LazyNativeFunctions::view(const at::Tensor& self,
   LazyTensor self_tensor = bridge::GetLtcTensor(self);
   return bridge::AtenFromLtcTensor(
       LazyTensor::view(self_tensor, Helpers::I64List(size)));
+}
+
+at::Tensor& LazyNativeFunctions::zero_(at::Tensor& self) {
+  LTC_FN_COUNTER("lazy::");
+  auto selfTensor = bridge::GetLtcTensor(self);
+  LazyTensor::zero_(selfTensor);
+  return self;
 }
 
 void InitializeAtenBindings() {}

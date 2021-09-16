@@ -64,7 +64,7 @@ lowering in the accelerator plugin.
 In addition, to manually inspecting the above metrics we provide ways to automatically analyze the above metrics report and provide a summary. Simply run your workload with `PT_XLA_DEBUG=1`.
 
 To profile your workload in depth to undertand bottlenecks please check the following resources:
-* [Official tutorial](https://cloud.google.com/tpu/docs/pytorch-xla-performance-profiling) 
+* [Official tutorial](https://cloud.google.com/tpu/docs/pytorch-xla-performance-profiling)
 * [Colab notebook](https://colab.research.google.com/github/pytorch/xla/blob/master/contrib/colab/pytorch-xla-profiling-colab.ipynb)
 * [Sample MNIST training script with profiling](https://github.com/pytorch/xla/blob/master/test/test_profile_mp_mnist.py)
 
@@ -212,7 +212,7 @@ only be enabled for debugging.
 
 * ```LTC_USE_32BIT_LONG```: If set to 1, maps _PyTorch_ _Long_ types to 32bit type.
   On some accelerators, 64-bit integer computations are expensive, so setting
-  this flag might help. It should be verified by the user that truncating to 32-bit 
+  this flag might help. It should be verified by the user that truncating to 32-bit
   values is a valid operation according to the use of _PyTorch_ _Long_ values in it.
 
 ### Retrieving Stack Traces
@@ -237,3 +237,13 @@ The, given the PID, it is possible to grab the stack traces with the following c
 ```Shell
 ./scripts/dump_stacks.py PID > /tmp/stack-traces.log
 ```
+
+### Logging
+To enable logging from your python code, try adding the following to your code:
+```
+from caffe2.python import workspace
+workspace.GlobalInit(['caffe2', '--caffe2_log_level=-4'])
+```
+
+To be noted, it is '-4' not '4' because of [logging_is_not_google_glog.h](https://github.com/pytorch/pytorch/blob/0c3904d18061ea31c9fe1bded5893ffb07f0a4b5/c10/util/logging_is_not_google_glog.h#L106).
+For internal FB users, you can search caffe2_common_gflags to learn more.

@@ -40,7 +40,6 @@
 #include "lazy_tensor_core/csrc/ops/cumsum.h"
 #include "lazy_tensor_core/csrc/ops/device_data.h"
 #include "lazy_tensor_core/csrc/ops/diagonal.h"
-#include "lazy_tensor_core/csrc/ops/discrete_uniform.h"
 #include "lazy_tensor_core/csrc/ops/expand.h"
 #include "lazy_tensor_core/csrc/ops/exponential.h"
 #include "lazy_tensor_core/csrc/ops/flip.h"
@@ -73,10 +72,10 @@
 #include "lazy_tensor_core/csrc/ops/mse_loss_backward.h"
 #include "lazy_tensor_core/csrc/ops/native_batch_norm_backward.h"
 #include "lazy_tensor_core/csrc/ops/native_batch_norm_forward.h"
-#include "lazy_tensor_core/csrc/ops/nll_loss.h"
 #include "lazy_tensor_core/csrc/ops/nll_loss2d.h"
 #include "lazy_tensor_core/csrc/ops/nll_loss2d_backward.h"
 #include "lazy_tensor_core/csrc/ops/nll_loss_backward.h"
+#include "lazy_tensor_core/csrc/ops/nll_loss_forward.h"
 #include "lazy_tensor_core/csrc/ops/nms.h"
 #include "lazy_tensor_core/csrc/ops/nonzero.h"
 #include "lazy_tensor_core/csrc/ops/normal.h"
@@ -86,6 +85,7 @@
 #include "lazy_tensor_core/csrc/ops/prod.h"
 #include "lazy_tensor_core/csrc/ops/put.h"
 #include "lazy_tensor_core/csrc/ops/qr.h"
+#include "lazy_tensor_core/csrc/ops/random.h"
 #include "lazy_tensor_core/csrc/ops/reflection_pad2d.h"
 #include "lazy_tensor_core/csrc/ops/reflection_pad2d_backward.h"
 #include "lazy_tensor_core/csrc/ops/repeat.h"
@@ -1929,14 +1929,14 @@ LazyTensor LazyTensor::neg(const LazyTensor& input) {
   return input.CreateFrom(ir::ops::Neg(input.GetIrValue()));
 }
 
-LazyTensor LazyTensor::nll_loss(const LazyTensor& input,
-                                const LazyTensor& target,
-                                const LazyTensor& weight,
-                                lazy_tensors::int64 reduction,
-                                int ignore_index) {
-  return input.CreateFrom(ir::MakeNode<ir::ops::NllLoss>(
-      input.GetIrValue(), target.GetIrValue(), GetOptionalIrValue(weight),
-      GetReductionMode(reduction), ignore_index));
+std::tuple<LazyTensor, LazyTensor>
+LazyTensor::nll_loss_forward(const LazyTensor& input, const LazyTensor& target,
+    const LazyTensor& weight, lazy_tensors::int64 reduction, int ignore_index) {
+  auto node = ir::MakeNode<ir::ops::NllLossForward>(input.GetIrValue(),
+      target.GetIrValue(), GetOptionalIrValue(weight),
+      GetReductionMode(reduction), ignore_index);
+  return std::make_tuple(input.CreateFrom(ir::Value(node, 0)),
+      input.CreateFrom(ir::Value(node, 1)));
 }
 
 LazyTensor LazyTensor::nll_loss2d(const LazyTensor& input,
@@ -2097,15 +2097,9 @@ std::tuple<LazyTensor, LazyTensor> LazyTensor::qr(const LazyTensor& input,
                          input.CreateFrom(ir::Value(node, 1)));
 }
 
-void LazyTensor::random_(LazyTensor& input, int64_t from, int64_t to) {
-  LTC_CHECK_LE(from, to);
-  auto input_shape = input.shape();
-  input.SetInPlaceIrValue(ir::MakeNode<ir::ops::DiscreteUniform>(
-      GetIrValueForScalar(from, lazy_tensors::PrimitiveType::S64,
-                          input.GetDevice()),
-      GetIrValueForScalar(to, lazy_tensors::PrimitiveType::S64,
-                          input.GetDevice()),
-      GetRngSeed(input.GetDevice()), input_shape));
+void LazyTensor::random_(LazyTensor& input) {
+  input.SetInPlaceIrValue(
+      ir::MakeNode<ir::ops::Random>(input.GetIrValue()));
 }
 
 LazyTensor LazyTensor::reciprocal(const LazyTensor& input) {

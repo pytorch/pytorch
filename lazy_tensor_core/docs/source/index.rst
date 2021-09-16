@@ -32,19 +32,19 @@ lazy_model
 .. autofunction:: all_reduce
 .. autofunction:: all_gather
 .. autofunction:: nms
-		
+
 distributed
 ----------------------------------
 
 .. automodule:: lazy_tensor_core.core.distributed.parallel_loader
 .. autoclass:: ParallelLoader
-	       :members: per_device_loader
+         :members: per_device_loader
 
 .. autofunction:: spawn
 .. autoclass:: MpModelWrapper
-	       :members: to
+         :members: to
 .. autoclass:: MpSerialExecutor
-	       :members: run
+         :members: run
 
 utils
 ----------------------------------
@@ -55,7 +55,7 @@ utils
 .. autofunction:: metric_names
 .. autofunction:: metric_data
 .. autofunction:: metrics_report
-  
+
 .. automodule:: lazy_tensor_core.core.utils.tf_record_reader
 .. autoclass:: TfRecordReader
 

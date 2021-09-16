@@ -36,6 +36,8 @@ supported:
   - mul.Scalar
   - native_batch_norm
   - native_batch_norm_backward
+  - nll_loss_backward
+  - nll_loss_forward
   - gelu
   - gelu_backward
   - max_pool2d_with_indices
@@ -43,6 +45,7 @@ supported:
   - max_pool3d_with_indices
   - max_pool3d_with_indices_backward
   - permute
+  - random_
   - relu
   - relu_
   - repeat
@@ -61,6 +64,8 @@ supported:
   - t
   - t_
   - tanh
+  - threshold
+  - threshold_backward
   - transpose.int
   - transpose_
   - unsqueeze
@@ -84,6 +89,7 @@ supported:
   - index_select
   - alias
   - tanh_backward
+  - zero_
 autograd:
   - max_pool2d
   - max_pool3d

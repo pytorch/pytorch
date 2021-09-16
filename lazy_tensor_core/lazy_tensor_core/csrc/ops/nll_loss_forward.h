@@ -9,9 +9,9 @@ namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-class NllLoss : public Node {
+class NllLossForward : public Node {
  public:
-  NllLoss(const Value& logits, const Value& labels,
+  NllLossForward(const Value& logits, const Value& labels,
           const c10::optional<Value>& weight, ReductionMode reduction,
           int ignore_index);
 

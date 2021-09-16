@@ -61,7 +61,7 @@ set(TGT_OPTS
   -Wno-return-type
 )
 
-if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
+if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
   # The -fsized-deallocation is required for Clang to prevent an error on
   # pytorch pybind11 about the operator delete being called inappropriately.
   list(APPEND TGT_OPTS

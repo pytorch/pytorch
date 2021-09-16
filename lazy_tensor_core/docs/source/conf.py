@@ -4,7 +4,9 @@
 # PyTorch documentation build configuration file.
 # This script is run by Sphinx when building the documentation.
 
-import torch
+from sphinx import addnodes
+from sphinx.util.docfields import TypedField
+from docutils import nodes
 import lazy_tensor_core
 import pytorch_sphinx_theme
 
@@ -108,10 +110,6 @@ htmlhelp_basename = 'PyTorchdoc'
 
 # -- A patch that prevents Sphinx from cross-referencing ivar tags -------
 # See http://stackoverflow.com/a/41184353/3343043
-
-from docutils import nodes
-from sphinx.util.docfields import TypedField
-from sphinx import addnodes
 
 
 def patched_make_field(self, types, domain, items, **kw):

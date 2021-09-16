@@ -1719,6 +1719,19 @@ TEST_F(AtenLtcTsTensorTest, TestRandomInPlaceDefaultFrom) {
   }
 }
 
+TEST_F(AtenLtcTsTensorTest, TestRandomInPlaceDefault) {
+  for (auto dtype : {torch::kFloat, torch::kDouble, torch::kByte, torch::kChar,
+                     torch::kShort, torch::kInt, torch::kLong}) {
+    auto input = torch::zeros({10}, torch::TensorOptions(dtype));
+    ForEachDevice([&](const torch::Device& device) {
+      auto lazyInput = CopyToDevice(input, device);
+      lazyInput.random_();
+      auto output = ToCpuTensor(lazyInput);
+      EXPECT_TRUE(torch::all(output.ne(input)).item<bool>());
+    });
+  }
+}
+
 TEST_F(AtenLtcTsTensorTest, TestNormGeneral) {
   torch::Tensor a =
       torch::randn({4, 3, 4}, torch::TensorOptions(torch::kFloat));
@@ -2855,6 +2868,17 @@ TEST_F(AtenLtcTsTensorTest, TestEmpty) {
     torch::Tensor xla_a = torch::empty(
         {2, 2}, torch::TensorOptions(torch::kFloat).device(device));
     EXPECT_EQ(a.sizes(), xla_a.sizes());
+  });
+}
+
+TEST_F(AtenLtcTsTensorTest, TestZeroInPlace) {
+  torch::Tensor input = torch::ones({2, 2}, torch::TensorOptions(torch::kFloat));
+
+  ForEachDevice([&](const torch::Device& device) {
+    torch::Tensor lazyInput = CopyToDevice(input, device);
+    auto& output = torch::zero_(input);
+    auto& lazyOutput = torch::zero_(lazyInput);
+    AllClose(output, lazyOutput);
   });
 }
 
@@ -5640,6 +5664,21 @@ TEST_F(AtenLtcTsTensorTest, TestThreshold) {
     torch::Tensor xla_input = CopyToDevice(input, device);
     torch::Tensor xla_output = torch::threshold(xla_input, threshold, value);
     AllClose(output, xla_output);
+  });
+}
+
+TEST_F(AtenLtcTsTensorTest, TestThresholdBackward) {
+  float threshold = 0.4;
+  float value = 20;
+
+  auto testFunction = [&](const std::vector<torch::Tensor>& inputs) -> torch::Tensor {
+    return torch::threshold(inputs[0], threshold, value);
+  };
+
+  ForEachDevice([&](const torch::Device& device) {
+    TestBackward({torch::rand({2, 1, 4, 6},
+        torch::TensorOptions(torch::kFloat).requires_grad(true))},
+        device, testFunction);
   });
 }
 

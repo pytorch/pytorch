@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 #
 # The following command is needed (as root) in order to enable GDB to attach
 # existing user processes:
@@ -14,23 +14,23 @@ import subprocess
 
 
 def get_stacks(pid):
-  return subprocess.check_output([
-      'gdb', '-p',
-      str(pid), '-batch', '-ex', 'thread apply all bt', '-ex', 'quit'
-  ]).decode('utf-8')
+    return subprocess.check_output([
+        'gdb', '-p',
+        str(pid), '-batch', '-ex', 'thread apply all bt', '-ex', 'quit'
+    ]).decode('utf-8')
 
 
 def dump_stacks(args):
-  stacks = get_stacks(args.pid)
-  stp.process_stack_lines(stacks.splitlines(True), args)
+    stacks = get_stacks(args.pid)
+    stp.process_stack_lines(stacks.splitlines(True), args)
 
 
 if __name__ == '__main__':
-  arg_parser = argparse.ArgumentParser()
-  arg_parser.add_argument(
-      'pid',
-      type=int,
-      metavar='PID',
-      help='The process ID whose stacks need to be dumped')
-  args, files = arg_parser.parse_known_args()
-  dump_stacks(args)
+    arg_parser = argparse.ArgumentParser()
+    arg_parser.add_argument(
+        'pid',
+        type=int,
+        metavar='PID',
+        help='The process ID whose stacks need to be dumped')
+    args, files = arg_parser.parse_known_args()
+    dump_stacks(args)
