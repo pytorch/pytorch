@@ -54,7 +54,6 @@ def get_file_binaries_from_pathnames(pathnames: Iterable, mode: str):
                             .format(type(pathname)))
         yield (pathname, open(pathname, mode))
 
-
 def validate_pathname_binary_tuple(data):
     if not isinstance(data, tuple):
         raise TypeError("pathname binary data should be tuple type, but got {}".format(type(data)))
