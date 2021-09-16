@@ -41,6 +41,8 @@ namespace c10 {
   _(prim, FusionGroup)               \
   _(prim, CudaFusionGroup)           \
   _(prim, CudaFusionGuard)           \
+  _(prim, LlgaFusionGroup)           \
+  _(prim, LlgaFusionGuard)           \
   _(prim, FunctionalGraph)           \
   _(prim, DifferentiableGraph)       \
   _(prim, TensorExprGroup)           \
@@ -483,6 +485,7 @@ namespace c10 {
   _(attr, cache_id)                  \
   _(attr, new_axis)                  \
   _(attr, warn_id)                   \
+  _(attr, output_layouts)            \
   _(attr, allowzero)
 
 // 'prim' symbols are synthetic operators that occur only in the IR
