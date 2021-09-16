@@ -1325,20 +1325,30 @@ struct to_ir {
       const F1& type_match,
       const F2& do_if_match) {
     if (auto union_type_hint = (*refined_type_hint_ptr)->cast<UnionType>()) {
+      // `candidate_types` holds all List types that were in the Union
+      // annotation
       std::vector<TypePtr> candidate_types;
+
       std::copy_if(
           union_type_hint->containedTypes().begin(),
           union_type_hint->containedTypes().end(),
           std::back_inserter(candidate_types),
           [&](TypePtr type_ptr) { return type_match(type_ptr); });
+
       if (candidate_types.empty()) {
         throw ErrorReport(src)
             << "Expected an Union type annotation "
             << "with an inner " << match_repr << " type, but got "
             << (*refined_type_hint_ptr)->repr_str();
       } else if (candidate_types.size() == 1) {
+        // The Union only had a single type of the container we want to
+        // match, so we can unconditionally refine it to that type
         (*refined_type_hint_ptr) = candidate_types[0];
       } else {
+        // We can't refine the Union yet, since it contains multiple
+        // types of the container we want to match, but we do at least
+        // have a list of possiblee types (e.g. `Union[List[int],
+        // List[str], float, str]` -> candidates={List[int], List[str]})
         (*all_candidates) = std::move(candidate_types);
       }
     } else if (
@@ -1347,8 +1357,8 @@ struct to_ir {
       (*refined_type_hint_ptr) = optional_type_hint->getElementType();
     }
 
-    // If we had any annotation OTHER THAN a Union that can hold more
-    // than one type of List
+    // If we had any annotation that was NOT a Union that can hold more
+    // than one type of the container we want to match
     if (all_candidates->empty()) {
       if (type_match(*refined_type_hint_ptr)) {
         do_if_match();
@@ -1419,9 +1429,11 @@ struct to_ir {
 
     if (refined_type_hint) {
       auto do_if_type_match = [&]() { list_value->setType(refined_type_hint); };
+
       auto type_match = [&](const TypePtr& t) {
         return t->isSubtypeOf(AnyListType::get());
       };
+
       refineAndSetTypeHintOrPopulateCandidatesVector(
           type_hint,
           &refined_type_hint,
@@ -1510,8 +1522,11 @@ struct to_ir {
             *unified_elem_type,
             lc);
       } else if (!refined_type_hint) {
-        list_value->setType(ListType::create(*unified_elem_type));
+        refined_type_hint = ListType::create(*unified_elem_type);
       }
+
+      list_value->setType(refined_type_hint);
+      out->setType(refined_type_hint->expect<ListType>()->getElementType());
 
       NamedValue self = NamedValue(loc, "self", list_value);
       NamedValue input = NamedValue(loc, "", out);
@@ -4037,8 +4052,8 @@ struct to_ir {
 
     TypePtr refined_type_hint = type_hint;
 
-    // If `type_hint` is a Union, we're going to change it to be
-    // the type of the rhs List, so we need to store the original
+    // If `type_hint` is a Union/Optional, we're going to change it to
+    // be the type of the rhs List, so we need to store the original
     // UnionType for later. `nullptr` means that we don't need to emit
     // an `unchecked_cast` node (either because we don't have a type
     // hint or because the type hint wasn't a Union)
