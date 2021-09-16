@@ -87,9 +87,10 @@ struct Argument {
     return is_out_;
   }
 
-  const AliasInfo* alias_info() const {
+  C10_NODISCARD const AliasInfo* alias_info() const {
     return alias_info_.get();
   }
+
   bool is_inferred_type() const {
     bool is_inferred_type = false;
     TORCH_INTERNAL_ASSERT(type_);
