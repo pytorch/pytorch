@@ -194,23 +194,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
 }
 
 const Tensor& baddbmm_out_cuda_impl(const Tensor& result, const Tensor& self, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha) {
-  TORCH_CHECK(self.dim() == 3, "self must be a 3D tensor");
-
   IntArrayRef batch1_sizes = batch1.sizes();
-  IntArrayRef batch2_sizes = batch2.sizes();
-  IntArrayRef self_sizes = self.sizes();
-
-  TORCH_CHECK(self_sizes[0] == batch1_sizes[0], "self dim 0 must match batch1 dim 0");
-  TORCH_CHECK(self_sizes[0] == batch2_sizes[0], "self dim 0 must match batch2 dim 0");
-  TORCH_CHECK(self_sizes[1] == batch1_sizes[1], "self dim 1 must match batch1 dim 1");
-  TORCH_CHECK(self_sizes[2] == batch2_sizes[2], "self dim 2 must match batch2 dim 2");
-
-  if (!result.is_same(self)) {
-    result.resize_as_(self);
-    if (beta.to<c10::complex<double>>() != 0.0) {
-      result.copy_(self);
-    }
-  }
 
   // handle pathological cases that blas may not like
   if (result.numel() == 0) {
