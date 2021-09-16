@@ -309,14 +309,40 @@ Tensor& baddbmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& 
       scalar_t alpha_val = alpha.to<scalar_t>();
       scalar_t beta_val = beta.to<scalar_t>();
       at::cuda::blas::batched_integer_gemm<scalar_t>(iter,
-                                                     transpose_batch1 ? 't' : 'n',
-                                                     transpose_batch2 ? 't' : 'n',
-                                                     m, n, k,
-                                                     alpha_val,
-                                                     batch1_,
-                                                     batch2_,
-                                                     beta_val,
-                                                     result_);
+        transpose_batch1 ? 't' : 'n',
+        transpose_batch1 ? 't' : 'n',
+        m, n, k,
+        alpha_val, batch1_,
+        batch2_, beta_val,
+        result_
+      );
+      // iter.for_each([&] (char **data, const int64_t* strides, int64_t nbatches) {
+      //   auto *result_batch_idx_ptr = data[0];
+      //   auto *input_batch_idx_ptr = data[1];
+
+      //   for (int64_t batch = 0; batch < nbatches; ++batch) {
+      //     auto result_batch_idx = *reinterpret_cast<int64_t*>(result_batch_idx_ptr);
+      //     auto input_batch_idx = *reinterpret_cast<int64_t*>(input_batch_idx_ptr);
+
+      //     auto* batch1_working_ptr = batch1_->select(0, input_batch_idx).data_ptr<scalar_t>();
+      //     auto* batch2_working_ptr = batch2_->select(0, input_batch_idx).data_ptr<scalar_t>();
+      //     auto* result_working_ptr = result_->select(0, result_batch_idx).data_ptr<scalar_t>();
+
+      //     at::cuda::blas::integer_gemm<scalar_t>(
+      //       transpose_batch1 ? 't' : 'n',
+      //       transpose_batch1 ? 't' : 'n',
+      //       m, n, k,
+      //       alpha_val,
+      //       batch1_working_ptr, batch1_->strides()[0],
+      //       batch2_working_ptr, batch2_->strides()[0],
+      //       beta_val,
+      //       result_working_ptr, result_->strides()[0]
+      //     );
+
+      //     result_batch_idx_ptr += strides[0];
+      //     input_batch_idx_ptr += strides[1];
+      //   }
+      // });
     });
   }
   else {

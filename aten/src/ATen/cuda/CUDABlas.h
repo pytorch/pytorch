@@ -85,7 +85,7 @@ template <>
 void integer_gemm<int64_t>(CUDABLAS_GEMM_ARGTYPES(int64_t));
 
 #define CUDABLAS_BATCHED_INTEGER_GEMM_ARGTYPES(Dtype)                   \
-  TensorIterator& iter, char transA, char transB, int64_t m, int64_t n, int64_t k, \
+  TensorIteratorBase& iter, char transA, char transB, int64_t m, int64_t n, int64_t k, \
     Dtype alpha, c10::MaybeOwned<Tensor>& batch1_, c10::MaybeOwned<Tensor>& batch2_, \
     Dtype beta, c10::MaybeOwned<Tensor>& result_
 

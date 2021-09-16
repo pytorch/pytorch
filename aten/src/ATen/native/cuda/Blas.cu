@@ -1,5 +1,7 @@
 #include <ATen/cuda/CUDABlas.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
+#include <ATen/cuda/detail/KernelUtils.h>
+#include <ATen/native/cuda/Loops.cuh>
 #include <c10/macros/Macros.h>
 
 #include <iostream>
@@ -74,7 +76,9 @@ namespace blas {
 
   template <>
   void batched_integer_gemm<int32_t>(CUDABLAS_BATCHED_INTEGER_GEMM_ARGTYPES(int32_t)) {
-    // gpu_kernel()
+    // gpu_kernel(iter, [] GPU_LAMBDA (int64_t result_batch_idx, int64_t input_batch_idx) {
+    //     int a = 2;
+    // });
   }
 
   template <>
