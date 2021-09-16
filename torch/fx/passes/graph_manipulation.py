@@ -1,7 +1,7 @@
 from typing import Dict, List, NamedTuple, Any, Optional, Tuple
 
 import torch
-from torch.fx.experimental.param_fetch import lift_lowering_attrs_to_nodes
+from torch.fx.passes.param_fetch import lift_lowering_attrs_to_nodes
 from torch.fx.graph import Graph
 from torch.fx.graph_module import GraphModule
 from torch.fx.node import Node, Target, Argument, map_arg, map_aggregate
