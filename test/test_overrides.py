@@ -1030,6 +1030,25 @@ class TestDisabledTorchFunction(TestCase):
         self.assertEqual(torch.nn.functional.linear(inp, t1, t2), "called")
         self.assertEqual(torch.nn.functional.linear(inp, t2, t1), "called")
 
+class TestTorchFunctionWarning(TestCase):
+    def test_warn_on_invalid_torch_function(self):
+        class Bad1():
+            def __torch_function__(*args, **kwargs):
+                pass
+
+        class Bad2(torch.Tensor):
+            def __torch_function__(*args, **kwargs):
+                pass
+
+        a = Bad1()
+        with self.assertWarnsRegex(DeprecationWarning, "as a plain method is deprecated"):
+            # This needs to be a function that handle torch_function on the python side
+            torch.split(a, (2))
+
+        a = Bad2()
+        with self.assertWarnsRegex(DeprecationWarning, "as a plain method is deprecated"):
+            # This needs to be a function that handle torch_function on the python side
+            torch.split(a, (2))
 
 if __name__ == '__main__':
     run_tests()
