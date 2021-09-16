@@ -43,6 +43,7 @@
 #include <torch/csrc/jit/passes/lower_tuples.h>
 #include <torch/csrc/jit/passes/metal_rewrite.h>
 #include <torch/csrc/jit/passes/normalize_ops.h>
+#include <torch/csrc/jit/passes/onednn_graph_fuser.h>
 #include <torch/csrc/jit/passes/onnx.h>
 #include <torch/csrc/jit/passes/onnx/cast_all_constant_to_floating.h>
 #include <torch/csrc/jit/passes/onnx/constant_fold.h>
@@ -689,6 +690,8 @@ void initJITBindings(PyObject* module) {
             return oldState;
           })
       .def("_jit_nvfuser_enabled", &RegisterCudaFuseGraph::isRegistered)
+      .def("_jit_set_llga_enabled", &RegisterLlgaFuseGraph::setEnabled)
+      .def("_jit_llga_enabled", &RegisterLlgaFuseGraph::isEnabled)
       .def(
           "_jit_set_profiling_mode",
           [](bool profiling_flag) {
