@@ -57,16 +57,10 @@ def node_ctor_inputs(func: LazyIrSchema) -> str:
 class LazyIR:
     backend_index: BackendIndex
 
-    # Names of operators we want to codegen for, a subset of backend_index
-    codegen: List[OperatorName]
-
     @method_with_native_function
     def __call__(self, f: Union[NativeFunctionsGroup, NativeFunction]) -> List[str]:
         func = f.functional.func if isinstance(f, NativeFunctionsGroup) else f.func
-        if func.name in self.codegen:
-            return self.gen(f)
-        else:
-            return []
+        return self.gen(f)
 
     def gen(self, f: Union[NativeFunctionsGroup, NativeFunction]) -> List[str]:
         # for now, we just want one IR class decl and soon after also the method defs
@@ -159,15 +153,8 @@ def lazy_tensor_decls(value_types: List[NamedCType]) -> str:
     return "\n    ".join(lazy_tensor_decls)
 
 
-def gen_unstructured_lazy_definition(f: NativeFunction, backend_index: BackendIndex, codegen: List[OperatorName], class_method_name: str) -> Optional[str]:
+def gen_lazy_nativefunc_definition(f: NativeFunction, backend_index: BackendIndex, class_method_name: str) -> List[str]:
     sig = kernel_signature(f, backend_index)
-    metadata = backend_index.get_kernel(f)
-    if f.func.name not in codegen:
-        return None
-    if metadata is None:
-        return None
-    if "legacy::" in metadata.kernel:
-        return None
 
     # Lazy IR stuff
     schema = LazyIrSchema(f.func)
@@ -190,8 +177,8 @@ def gen_unstructured_lazy_definition(f: NativeFunction, backend_index: BackendIn
     assert len(value_types) > 0, f"Only supporting tensor ops so far, none found in {sig}"
     first_tensor = value_types[0]
 
-    return f"""\
-{sig.decl(name=f"{class_method_name}::{metadata.kernel}")} {{
+    return [f"""\
+{sig.decl(name=f"{class_method_name}::{schema.aten_name}")} {{
     {lazy_tensor_decls_str}
     {meta_str}
     return bridge::AtenFromLtcTensor(l_{first_tensor.name}.CreateFrom(
@@ -206,36 +193,10 @@ def gen_unstructured_lazy_definition(f: NativeFunction, backend_index: BackendIn
         // (3) evaluate perf impact: make sure we're not actually doing casts becuase of this override
         _out_dtype));
 }};
-"""
+"""]
 
-
-def compute_lazy_native_function_definition(
-        g: Union[NativeFunctionsGroup, NativeFunction],
-        backend_index: BackendIndex,
-        codegen: List[OperatorName],
-        class_method_name: str,
-) -> List[str]:
-
-    metadata = backend_index.get_kernel(g)
-    if isinstance(g, NativeFunctionsGroup):
-        if metadata is not None and metadata.structured:
-            raise AssertionError("Structured lazy functions are not implemented yet.")
-        else:
-            return list(mapMaybe(lambda f: gen_unstructured_lazy_definition(f, backend_index, codegen, class_method_name), g.functions()))
-    else:
-        x = gen_unstructured_lazy_definition(g, backend_index, codegen, class_method_name)
-        return [] if x is None else [x]
-
-
-def gen_lazy_shape_dtype_decl(f: NativeFunction, backend_index: BackendIndex, codegen: List[OperatorName]) -> Optional[str]:
+def gen_lazy_shape_dtype_decl(f: NativeFunction, backend_index: BackendIndex) -> List[str]:
     sig = kernel_signature(f, backend_index)
-    metadata = backend_index.get_kernel(f)
-    if f.func.name not in codegen:
-        return None
-    if metadata is None:
-        return None
-    if "legacy::" in metadata.kernel:
-        return None
 
     # Lazy IR stuff
     schema = LazyIrSchema(f.func)
@@ -246,24 +207,7 @@ def gen_lazy_shape_dtype_decl(f: NativeFunction, backend_index: BackendIndex, co
     # Only generate shape/dtype fn for non-structured kernels,
     # since we just use the meta function for structured kernels
     if not f.structured and f.structured_delegate is None:
-        return "\n".join([f"std::vector<int64_t> compute_shape_{schema.aten_name}({', '.join([a.decl() for a in dispatcher.arguments(f.func)])});",
-                f"c10::ScalarType compute_dtype_{schema.aten_name}({', '.join([a.decl() for a in dispatcher.arguments(f.func)])});"])
+        return ["\n".join([f"std::vector<int64_t> compute_shape_{schema.aten_name}({', '.join([a.decl() for a in dispatcher.arguments(f.func)])});",
+                f"c10::ScalarType compute_dtype_{schema.aten_name}({', '.join([a.decl() for a in dispatcher.arguments(f.func)])});"])]
     else:
-        return None
-
-
-def compute_lazy_shape_dtype_decl(
-        g: Union[NativeFunctionsGroup, NativeFunction],
-        backend_index: BackendIndex,
-        codegen: List[OperatorName]
-) -> List[str]:
-
-    metadata = backend_index.get_kernel(g)
-    if isinstance(g, NativeFunctionsGroup):
-        if metadata is not None and metadata.structured:
-            raise AssertionError("Structured lazy functions are not implemented yet.")
-        else:
-            return list(mapMaybe(lambda f: gen_lazy_shape_dtype_decl(f, backend_index, codegen), g.functions()))
-    else:
-        x = gen_lazy_shape_dtype_decl(g, backend_index, codegen)
-        return [] if x is None else [x]
+        return []

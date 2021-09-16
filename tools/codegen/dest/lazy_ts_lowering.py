@@ -31,9 +31,6 @@ from tools.codegen.api.lazy import LazyIrSchema
 class LazyTsLowering:
     backend_index: BackendIndex
 
-    # Names of operators we want to codegen for, a subset of backend_index
-    codegen: List[OperatorName]
-
     TsLoweringTarget = Enum('TsLoweringTarget', (
         'DISPATCH',  # an entry in the top-level Lower func that dispatches to impls
         'LOWERING',  # an impl of a particular lowering
@@ -46,11 +43,7 @@ class LazyTsLowering:
 
     @method_with_native_function
     def __call__(self, f: Union[NativeFunctionsGroup, NativeFunction]) -> List[str]:
-        func = f.functional.func if isinstance(f, NativeFunctionsGroup) else f.func
-        if func.name in self.codegen:
-            return self.gen(f)
-        else:
-            return []
+        return self.gen(f)
 
     def gen(self, f: Union[NativeFunctionsGroup, NativeFunction]) -> List[str]:
         # for now, we just want one IR class decl and soon after also the method defs

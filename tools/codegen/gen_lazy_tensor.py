@@ -4,7 +4,7 @@ import os
 import yaml
 import re
 from collections import namedtuple, Counter, defaultdict
-from typing import List, Dict, Union, Sequence, Optional
+from typing import List, Dict, Union, Sequence, Optional, Callable, TypeVar, Iterable, Iterator
 from tools.codegen.gen import FileManager, get_grouped_native_functions, parse_native_yaml
 from tools.codegen.model import (BackendIndex, BackendMetadata, DispatchKey,
                                  NativeFunction, NativeFunctionsGroup, OperatorName)
@@ -209,6 +209,14 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
     backend_indices = parsed_backend_yaml.backend_indices
     codegen = parsed_backend_yaml.codegen
 
+    T = Union[NativeFunctionsGroup, NativeFunction]
+    def concatMapCodegen(func: Callable[[T], Sequence[str]], xs: Iterable[T]) -> Iterator[str]:
+        for x in xs:
+            f = x.functional if isinstance(x, NativeFunctionsGroup) else x
+            if f.func.name in codegen:
+                for r in func(f):
+                    yield r
+
     selector = SelectiveBuilder.get_nop_selector()
 
     # TODO: handle cases when yaml contains zero ops properly in a later PR.
@@ -292,11 +300,10 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
                 'native_functions_include': '',
                 'backend_namespace': 'torch_lazy_tensors',  # this is wrong
                 'native_function_definitions':
-                list(concatMap(
-                    lambda f: dest.compute_lazy_native_function_definition(
+                list(concatMapCodegen(
+                    lambda f: dest.gen_lazy_nativefunc_definition(
                         f,
                         backend_indices[dispatch_key],
-                        codegen,
                         class_method_name=f'{backend_dispatch_key}NativeFunctions'),
                     grouped_native_functions
                 )),
@@ -317,8 +324,8 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
                 ]],
                 'DispatchKey': dispatch_key,
                 'dispatch_namespace': dispatch_key.lower(),
-                'func_declarations': list(concatMap(
-                    lambda f: dest.compute_lazy_shape_dtype_decl(f, backend_indices[dispatch_key], codegen),
+                'func_declarations': list(concatMapCodegen(
+                    lambda f: dest.gen_lazy_shape_dtype_decl(f, backend_indices[dispatch_key]),
                     grouped_native_functions
                 )),
             })
@@ -340,8 +347,8 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
                 'namespaced_headers': '',
                 'DispatchKey': dispatch_key,
                 'dispatch_namespace': dispatch_key.lower(),
-                'ir_declarations': list(concatMap(
-                    dest.LazyIR(backend_indices[dispatch_key], codegen),
+                'ir_declarations': list(concatMapCodegen(
+                    dest.LazyIR(backend_indices[dispatch_key]),
                     grouped_native_functions
                 )),
             })
@@ -361,17 +368,15 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
                         f"{output_dir}/{backend_key}LazyIr.h",
                     ]],
                     'backend_namespace': dispatch_key.lower(),  # TODO this is not designed yet
-                    'lowering_dispatches': list(concatMap(
+                    'lowering_dispatches': list(concatMapCodegen(
                         dest.LazyTsLowering(
                             backend_indices[dispatch_key],
-                            codegen,
                             dest.LazyTsLowering.TsLoweringTarget.DISPATCH),
-                        grouped_native_functions
+                        grouped_native_functions,
                     )),
-                    'lowering_definitions': list(concatMap(
+                    'lowering_definitions': list(concatMapCodegen(
                         dest.LazyTsLowering(
                             backend_indices[dispatch_key],
-                            codegen,
                             dest.LazyTsLowering.TsLoweringTarget.LOWERING),
                         grouped_native_functions
                     )),
