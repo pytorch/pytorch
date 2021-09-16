@@ -106,6 +106,8 @@ class TORCH_API StaticModule {
       bool is_frozen = false,
       const StaticModuleOptions& opts = StaticModuleOptions());
 
+  C10_DISABLE_COPY_AND_ASSIGN(StaticModule);
+
   typedef enum {
     CONSTANT_VALUE = -2, // VALUE nodes defined by prim::Constant
     INPUT_VALUE = -1, // VALUE nodes representing graph inputs
@@ -216,6 +218,8 @@ class TORCH_API StaticModule {
 class TORCH_API StaticRuntime {
  public:
   explicit StaticRuntime(const StaticModule& sm);
+
+  C10_DISABLE_COPY_AND_ASSIGN(StaticRuntime);
 
   std::vector<at::Tensor> operator()(const std::vector<at::Tensor>& inps);
 
