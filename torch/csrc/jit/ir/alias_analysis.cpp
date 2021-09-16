@@ -1195,10 +1195,10 @@ bool AliasDb::mayAlias(const ValueSet& a, const ValueSet& b) const {
 }
 
 bool AliasDb::mayContainAlias(Value* a, Value* b) const {
-  const std::vector<Value*> a_vec = {a};
-  const std::vector<Value*> b_vec = {b};
-
-  return mayContainAlias(a_vec, b_vec);
+  if (!isMutableTypeInternal(a) || !isMutableTypeInternal(b)) {
+    return false;
+  }
+  return memoryDAG_->mayContainAlias(elementMap_.at(a), elementMap_.at(b));
 }
 
 std::vector<Element*> AliasDb::getElements(at::ArrayRef<Value*> vs) const {
