@@ -1,5 +1,6 @@
 from torch.utils.data import IterDataPipe
-from typing import Iterable, Iterator, Tuple
+from torch.utils.data.datapipes.utils.common import validate_pathname_binary_tuple
+from typing import Iterable, Iterator, Tuple, IO, cast
 from io import BufferedIOBase
 
 import os
@@ -10,32 +11,34 @@ import warnings
 class ZipArchiveReaderIterDataPipe(IterDataPipe[Tuple[str, BufferedIOBase]]):
     r""" :class:`ZipArchiveReaderIterDataPipe`.
 
-    Iterable data pipe to extract zip binary streams from input iterable which contains
-    pathnames, yields a tuple of pathname and extracted binary stream.
+    Iterable data pipe to extract zip binary streams from input iterable which contains a tuple of pathname and
+    zip binary stream. This yields a tuple of pathname and extracted binary stream.
 
     Args:
-        datapipe: Iterable datapipe that provides pathnames
+        datapipe: Iterable datapipe that provides tuples of pathname and zip binary stream
         length: Nominal length of the datapipe
 
     Note:
         The opened file handles will be closed automatically if the default DecoderDataPipe
         is attached. Otherwise, user should be responsible to close file handles explicitly
-        or let Python's GC close them periodly.
+        or let Python's GC close them periodically. Due to how zipfiles implements its open() method,
+        the data_stream variable below cannot be closed within the scope of this function.
     """
     def __init__(
             self,
-            datapipe: Iterable[str],
+            datapipe: Iterable[Tuple[str, BufferedIOBase]],
             length: int = -1):
         super().__init__()
-        self.datapipe: Iterable[str] = datapipe
+        self.datapipe: Iterable[Tuple[str, BufferedIOBase]] = datapipe
         self.length: int = length
 
     def __iter__(self) -> Iterator[Tuple[str, BufferedIOBase]]:
-        for pathname in self.datapipe:
-            if not isinstance(pathname, str):
-                raise TypeError(f"pathname should be of string type, but is type {type(pathname)}")
+        for data in self.datapipe:
+            validate_pathname_binary_tuple(data)
+            pathname, data_stream = data
             try:
-                zips = zipfile.ZipFile(pathname)
+                # typing.cast is used here to silence mypy's type checker
+                zips = zipfile.ZipFile(cast(IO[bytes], data_stream))
                 for zipinfo in zips.infolist():
                     # major version should always be 3 here.
                     if sys.version_info[1] >= 6:
@@ -50,6 +53,7 @@ class ZipArchiveReaderIterDataPipe(IterDataPipe[Tuple[str, BufferedIOBase]]):
                 warnings.warn(
                     f"Unable to extract files from corrupted zipfile stream {pathname} due to: {e}, abort!")
                 raise e
+            # We are unable to close 'data_stream' here, because it needs to be available to use later
 
     def __len__(self):
         if self.length == -1:
