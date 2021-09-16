@@ -16,7 +16,7 @@ namespace cuda {
 namespace inst {
 
 Trace::Trace() {
-  const char* trace_filename = getenv("PYTORCH_NVFUSER_TRACE");
+  const char* trace_filename = getenv("PYTORCH_CUDA_FUSER_TRACE");
   if (trace_filename != nullptr) {
     log_file_ = fopen(trace_filename, "w");
     TORCH_CHECK(log_file_ != nullptr, "Can't open trace file");
