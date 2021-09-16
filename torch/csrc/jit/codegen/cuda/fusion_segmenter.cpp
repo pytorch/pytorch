@@ -2549,11 +2549,80 @@ void SegmentCandidateFinder::findSegments() {
     }
   }
 
+  // Find all expresions that are simply unary ops from inputs. Don't segment
+  // these as they're easy targets for recomputation. Only go until the first
+  // expression that has multiple uses. We could continue, but the logic of
+  // hacking the fusion "inputs" logic gets a bit more complicated.
+
+  // Expressions to exclude from segmentation because they're just derived from
+  // unary ops on inputs to the complete fusion
+  std::unordered_set<Expr*> excluded_inp_unary_exprs;
+
+  // "Terminating" outputs from the excluded input unary exprs, these will be
+  // treated as complete fusion inputs.
+  std::unordered_set<Val*> forwarded_inputs;
+  {
+    std::deque<Expr*> to_visit;
+    for (auto inp : completeFusion()->inputs()) {
+      if (std::all_of(inp->uses().begin(), inp->uses().end(), [](Expr* expr) {
+            return expr->getExprType().value() == ExprType::UnaryOp;
+          })) {
+        to_visit.insert(to_visit.end(), inp->uses().begin(), inp->uses().end());
+      }
+    }
+
+    while (!to_visit.empty()) {
+      auto expr = to_visit.front();
+      to_visit.pop_front();
+      if (expr->getExprType().value() != ExprType::UnaryOp) {
+        continue;
+      }
+
+      if (expr->output(0)->uses().size() > 1) {
+        excluded_inp_unary_exprs.emplace(expr);
+        forwarded_inputs.emplace(expr->output(0));
+        continue;
+      }
+
+      to_visit.emplace_back(expr->output(0)->uses()[0]);
+    }
+  }
+
+  auto excluded_fusion_inputs = IterVisitor::getInputsTo(
+      {forwarded_inputs.begin(), forwarded_inputs.end()});
+
+  // List of vals to treat as complete fusion inputs for segmentation
+  auto forwarded_fusion_inputs = completeFusion()->inputs();
+
+  forwarded_fusion_inputs.erase(
+      std::remove_if(
+          forwarded_fusion_inputs.begin(),
+          forwarded_fusion_inputs.end(),
+          [&excluded_fusion_inputs](Val* inp) {
+            return std::find(
+                       excluded_fusion_inputs.begin(),
+                       excluded_fusion_inputs.end(),
+                       inp) != excluded_fusion_inputs.end();
+          }),
+      forwarded_fusion_inputs.end());
+
+  forwarded_fusion_inputs.insert(
+      forwarded_fusion_inputs.end(),
+      forwarded_inputs.begin(),
+      forwarded_inputs.end());
+
+  auto isFusionInput = [&forwarded_fusion_inputs](Val* val) -> bool {
+    return std::find(
+               forwarded_fusion_inputs.begin(),
+               forwarded_fusion_inputs.end(),
+               val) != forwarded_fusion_inputs.end();
+  };
+
   // Insert auxiliary groups to use group dependency on inputs as well
   // TODO: these groups should never merged into any other groups, but are
   //       just there to support the dependency analysis. Later re-factor should
   //       avoid introducing them explicitly on the segmented fusion.
-  for (auto input : completeFusion()->inputs()) {
+  for (auto input : forwarded_fusion_inputs) {
     // These groups are used to represent input as a common
     //  producer in horizontal merges, and should never be
     //  seen as a candidate for vertical merge
@@ -2568,9 +2637,13 @@ void SegmentCandidateFinder::findSegments() {
       continue;
     }
 
+    if (excluded_inp_unary_exprs.count(expr)) {
+      continue;
+    }
+
     auto expr_group = expr2group.at(expr);
     for (auto inp : expr->inputs()) {
-      if (inp->isFusionInput()) {
+      if (isFusionInput(inp)) {
         expr_group->input_vals.push_back(inp);
         auto aux_group = input2group.at(inp);
         auto new_edge = segmented_fusion_->newEdge(aux_group, expr_group, inp);
@@ -2627,7 +2700,7 @@ void SegmentCandidateFinder::findSegments() {
   //  we can remove the input auxiliary groups. Should make the vertical
   //  merges avoid auxiliary group once we start general horizontal merges
   std::unordered_set<SegmentedGroup*> input_groups;
-  for (auto input : completeFusion()->inputs()) {
+  for (auto input : forwarded_fusion_inputs) {
     input_groups.insert(input2group.at(input));
   }
   eraseGroups(input_groups);
@@ -2815,6 +2888,28 @@ void SegmentCandidateFinder::resolveScalarsInGroup(SegmentedGroup* group) {
   }
 }
 
+void SegmentCandidateFinder::resolveInputsInGroup(SegmentedGroup* group) {
+  std::vector<Val*> to_visit;
+  std::unordered_set<Val*> visited;
+
+  // Collect all inputs to group that are not inputs of fusion
+  for (auto input : group->inputs()) {
+    if (!input->isFusionInput()) {
+      to_visit.push_back(input);
+    }
+  }
+
+  // Reset group inputs to real inputs
+  group->input_vals = IterVisitor::getInputsTo(group->inputs());
+
+  // Grab all expressions needed to produce to_visit
+  auto input_exprs = ExprSort::getExprs(completeFusion(), to_visit);
+
+  // Insert those expressions at the beginning of the group
+  group->exprs_.insert(
+      group->exprs_.begin(), input_exprs.begin(), input_exprs.end());
+}
+
 void SegmentCandidateFinder::removeScalarEdges() {
   // Remove all scalar edges between groups
   //  They may have been created by welford
@@ -2864,6 +2959,11 @@ void SegmentCandidateFinder::finalize() {
   // Resolve all the scalar expressions needed in each group
   for (auto group : segmented_fusion_->groups()) {
     resolveScalarsInGroup(group);
+  }
+
+  // Resolve all the scalar expressions needed in each group
+  for (auto group : segmented_fusion_->groups()) {
+    resolveInputsInGroup(group);
   }
 
   // Finalize each group, fill in the missing inputs, i.e. tensor dims.

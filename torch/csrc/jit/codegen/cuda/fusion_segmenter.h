@@ -312,16 +312,6 @@ class TORCH_CUDA_CU_API SegmentedFusion {
   //! API for adding edges
   SegmentedEdge* newEdge(SegmentedGroup* from, SegmentedGroup* to, Val* val);
 
-  //! Returns the set of potential intermediate tensors that
-  //!  will be cast to fp16 when written to global mem.
-  //!  These are not actual intermediate tensors,
-  //!  just the ones that will need to cast to fp16 if
-  //!  they end up being an intermediate tensor between
-  //!  segmented groups.
-  const auto& getForceToFP16Set() {
-    return force_fp16_tv_set_;
-  }
-
   HeuristicSummary* getCachedHeuristicDataFor(SegmentedGroup* group);
 
  private:
@@ -522,6 +512,18 @@ class TORCH_CUDA_CU_API SegmentCandidateFinder {
   //! Duplicate and add all exprs producing the used
   //!  scalar values in group
   void resolveScalarsInGroup(SegmentedGroup* group);
+
+  //! Duplicate and add all exprs from "inputs" in the group, to complete
+  //! inputs. These expressions are simply unary ops of inputs that we want to
+  //! recompute for each segment, instead of computing and producing a segmented
+  //! val. For example if we have:
+  //! tv1 = tv0 * 2;
+  //! tv3 = tv1 + tv2;
+  //! tv4 = tv1 + tv4
+  //! If we segmented on tv1, we would be producing an output for tv1 for 2
+  //! groups that have tv3 or tv4, instead we could easily recompute tv1 from
+  //! tv0.
+  void resolveInputsInGroup(SegmentedGroup* group);
 
   //! Remove all scalar edges in group
   //!  (TODO: need structure better so we don't have to do this)
