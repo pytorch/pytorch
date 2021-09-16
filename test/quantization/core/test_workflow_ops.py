@@ -843,7 +843,7 @@ class TestFakeQuantizeOps(TestCase):
             obs(X * 0.75)
             scale, zero_point = obs.calculate_qparams()
             # TODO(future PR): fix the wrong dtype in obs.calculate_qparams and remove the cast
-            zero_point = zero_point.to(torch.int)
+            zero_point = zero_point.to(zero_point_type)
             quant_min, quant_max = obs.quant_min, obs.quant_max
             X.requires_grad_()
             Y_prime = torch.fake_quantize_per_channel_affine(
