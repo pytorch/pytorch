@@ -91,7 +91,7 @@ TORCH_META_FUNC(bmm)(const Tensor& self, const Tensor& mat2) {
 
         set_output({self.sizes()[0], self.sizes()[1], mat2.sizes()[2]}, self.options());
     } else {
-        common_checks_baddbmm_bmm(*this, self.resolve_conj(), mat2.resolve_conj(), Scalar(0.0), Scalar(1.0), true);
+        common_checks_baddbmm_bmm(*this, self, mat2, Scalar(0.0), Scalar(1.0), true);
     }
     auto& result = maybe_get_output(0);
     namedinference::propagate_names_if_nonempty(
