@@ -151,8 +151,14 @@ def normal_(tensor: Tensor, mean: float = 0., std: float = 1., generator: torch.
     """
     return _no_grad_normal_(tensor, mean, std, generator=generator)
 
-def trunc_normal_(tensor: Tensor, mean: float = 0., std: float = 1., a: float = -2., b: float = 2.,
-                    generator: torch.Generator = None) -> Tensor:
+def trunc_normal_(
+    tensor: Tensor,
+    mean: float = 0.,
+    std: float = 1.,
+    a: float = -2.,
+    b: float = 2.,
+    generator: torch.Generator = None
+) -> Tensor:
     r"""Fills the input Tensor with values drawn from a truncated
     normal distribution. The values are effectively drawn from the
     normal distribution :math:`\mathcal{N}(\text{mean}, \text{std}^2)`
