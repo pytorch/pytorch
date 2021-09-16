@@ -1,5 +1,6 @@
+import contextlib
 import os
-from typing import List, Optional
+from typing import Iterator, List, Optional
 import unittest
 import unittest.mock
 
@@ -9,7 +10,7 @@ import tools.setup_helpers.cmake
 class TestCMake(unittest.TestCase):
 
     def test_build_max_jobs(self) -> None:
-        with EnvVar('MAX_JOBS', '8'):
+        with env_var('MAX_JOBS', '8'):
             build_args = self._cmake_build_and_get_args()
 
         self.assertListEqual(build_args[-3:], ['--', '-j', '8'])
@@ -31,30 +32,27 @@ class TestCMake(unittest.TestCase):
     def _cmake_build_and_get_args(self) -> List[str]:
         """Runs CMake.build() but then returns the arguments."""
         cmake = tools.setup_helpers.cmake.CMake()
-        cmake.run = unittest.mock.MagicMock(name='run')
 
-        cmake.build({})
+        with unittest.mock.patch.object(cmake, 'run') as cmake_run:
+            cmake.build({})
 
-        cmake.run.assert_called_once()
-        call, = cmake.run.mock_calls
+        cmake_run.assert_called_once()
+        call, = cmake_run.mock_calls
         build_args, _ = call.args
         return build_args
 
 
-class EnvVar:
+@contextlib.contextmanager
+def env_var(key: str, value: Optional[str]) -> Iterator[None]:
     """Sets/clears an environment variable within a Python context."""
-    def __init__(self, key: str, value: Optional[str]):
-        self.key = key
-        self.value = value
-
-    def __enter__(self):
-        """Sets the environment variable, remembering the previous value, if any."""
-        self.previous_value = os.environ.get(self.key)
-        set_env_var(self.key, self.value)
-
-    def __exit__(self, type, value, traceback):
-        """Restores the environment to the previous state."""
-        set_env_var(self.key, self.previous_value)
+    # Get the previous value and then override it.
+    previous_value = os.environ.get(key)
+    set_env_var(key, value)
+    try:
+        yield
+    finally:
+        # Restore to previous value.
+        set_env_var(key, previous_value)
 
 
 def set_env_var(key: str, value: Optional[str]) -> None:
