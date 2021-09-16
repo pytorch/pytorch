@@ -52,8 +52,8 @@ bool MemoryDAG::mayAlias(const Element* a, const Element* b) const {
 }
 
 bool MemoryDAG::mayAliasImpl(const Element* a, const Element* b) const {
-  const auto aMemLoc = getMemoryLocations(a);
-  const auto bMemLoc = getMemoryLocations(b);
+  const auto& aMemLoc = getMemoryLocations(a);
+  const auto& bMemLoc = getMemoryLocations(b);
 
   return aMemLoc.intersects(bMemLoc);
 }
