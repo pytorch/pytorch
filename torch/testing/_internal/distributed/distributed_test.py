@@ -8113,29 +8113,27 @@ class DistributedTest:
                 device_ids=[device]
             )
             x = torch.rand((1, 1)).to(device)
-            weight = torch.nn.Parameter(torch.tensor([[1.0]])).to(device)
-            bias = torch.nn.Parameter(torch.tensor([0.0])).to(device)
-            weight.retain_grad()
-            bias.retain_grad()
-            buffer = torch.tensor([0.0]).to(device)
+            weight = torch.tensor([[1.0]], device=device, requires_grad=True)
+            bias = torch.tensor([0.0], device=device, requires_grad=True)
+            buffer = torch.tensor([0.0], device=device)
             parameters = {'module.l1.weight': weight,
                           'module.l1.bias': bias,
                           'module.buffer': buffer}
-            prev_weight = getattr(module, 'module.l1.weight', module)
-            prev_buffer = getattr(module, 'module.buffer', module)
+            prev_weight = getattr(module.module.l1, 'weight').clone()
+            prev_buffer = getattr(module.module, 'buffer').clone()
             res = _stateless.functional_call(module, parameters, x)
-            self.assertEqual(x, res.reshape((1, 1)))
+            self.assertEqual(x, res)
             # check that the weight remain unmodified
-            cur_weight = getattr(module, 'module.l1.weight', module)
-            cur_buffer = getattr(module, 'module.buffer', module)
+            cur_weight = getattr(module.module.l1, 'weight')
+            cur_buffer = getattr(module.module, 'buffer')
             self.assertEqual(cur_weight, prev_weight)
             self.assertEqual(cur_buffer, prev_buffer)
             # run a backward pass and check the gradients
             res.backward()
-            assert weight.grad is not None
-            assert bias.grad is not None
+            self.assertIsNotNone(weight.grad)
+            self.assertIsNotNone(bias.grad)
             # Gradient was not calculated for the module stated and buffers
-            assert buffer.grad is None
-            assert module.module.l1.weight.grad is None
-            assert module.module.l1.bias.grad is None
-            assert module.module.buffer.grad is None
+            self.assertIsNone(buffer.grad)
+            self.assertIsNone(module.module.l1.weight.grad)
+            self.assertIsNone(module.module.l1.bias.grad)
+            self.assertIsNone(module.module.buffer.grad)

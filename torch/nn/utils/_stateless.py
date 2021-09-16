@@ -3,18 +3,6 @@ import contextlib
 import torch
 
 
-def _get_module_parameters_and_buffers(module):
-    """Helper function that returns a dictionary
-    with only parameters and buffers, we don't use state_dict as it might
-    be polluted with module attributes.
-    """
-    parameters_and_buffers = dict(module.named_parameters())
-    parameters_and_buffers.update(dict(module.named_buffers))
-    # TODO: clean entries that are already parameterized?
-    # params with weight norm/spectral norm applied
-    return parameters_and_buffers
-
-
 @contextlib.contextmanager
 def reparametrize_module(module, parameters_and_buffers):
     # Parametrization does not support to change submodules directly
@@ -40,8 +28,6 @@ class _ReparametrizedTensor(torch.nn.Module):
 
 def _apply_func_submodules(func, module, path, args):
     if len(path) == 1:
-        # We should be careful as the current API does not allow to reparametrize
-        # already reparametrized parameters
         func(module, path[0], *args)
     else:
         _apply_func_submodules(func, getattr(module, path[0]), path[1:], args)
