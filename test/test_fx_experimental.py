@@ -1459,6 +1459,9 @@ class TestNormalizeOperators(JitTestCase):
     def test_normalize_operator_exhaustive(self, device, dtype, op):
         # Sorted and one entry on each line to minimize merge conflicts.
         op_skip = {
+            # See: https://github.com/pytorch/pytorch/issues/64997
+            "block_diag",
+            "broadcast_tensors",
             "contiguous",
             "einsum",
             "expand",
@@ -1468,6 +1471,7 @@ class TestNormalizeOperators(JitTestCase):
             "igamma",
             "igammac",
             "index_put",
+            "nn.functional.dropout",
             "polygamma",
             "special.polygamma",
             "repeat",
