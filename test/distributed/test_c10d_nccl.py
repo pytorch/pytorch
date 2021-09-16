@@ -295,7 +295,7 @@ class ProcessGroupNCCLTest(TestCase):
 
         # Avg (only available for NCCL 2.10+)
         if torch.cuda.nccl.version() >= (2, 10, 0):
-            tensors = [torch.tensor([i + 1]).cuda(i) for i in range(self.num_gpus)]
+            tensors = [torch.tensor([i + 1.]).cuda(i) for i in range(self.num_gpus)]
 
             allreduce(tensors, c10d.ReduceOp.AVG)
 
