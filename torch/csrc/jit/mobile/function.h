@@ -2,7 +2,6 @@
 
 #include <ATen/core/function_schema.h>
 #include <ATen/core/ivalue.h>
-#include <torch/csrc/jit/mobile/prim_ops_registery.h>
 #include <vector>
 
 namespace torch {

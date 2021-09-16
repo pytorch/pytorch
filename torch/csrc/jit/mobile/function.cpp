@@ -2,6 +2,7 @@
 
 #include <caffe2/serialize/inline_container.h>
 #include <torch/csrc/jit/mobile/interpreter.h>
+#include <torch/csrc/jit/mobile/prim_ops_registery.h>
 #include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/csrc/jit/runtime/operator.h>
 
@@ -45,7 +46,6 @@ bool Function::append_operator(
   const std::vector<c10::Argument>* pArgs = nullptr;
   bool promoted_op = mobile::hasPrimOpsFn(name);
   if (promoted_op) {
-    std::cout << "Using promoted prim ops for op: " << name << std::endl;
     fn = mobile::getPrimOpsFn(name);
   } else {
     std::shared_ptr<Operator> jit_op = findOperatorFor(opname);

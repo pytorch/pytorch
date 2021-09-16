@@ -93,3 +93,91 @@ class TestAOMigrationQuantization(AOMigrationTestCase):
             'enable_observer',
         ]
         self._test_function_import('fake_quantize', function_list)
+
+    def test_package_import_fuse_modules(self):
+        self._test_package_import('fuse_modules')
+
+    def test_function_import_fuse_modules(self):
+        function_list = [
+            '_fuse_modules',
+            '_get_module',
+            '_set_module',
+            'fuse_conv_bn',
+            'fuse_conv_bn_relu',
+            'fuse_known_modules',
+            'fuse_modules',
+            'get_fuser_method',
+        ]
+        self._test_function_import('fuse_modules', function_list)
+
+    def test_package_import_quant_type(self):
+        self._test_package_import('quant_type')
+
+    def test_function_import_quant_type(self):
+        function_list = [
+            'QuantType',
+            'quant_type_to_str',
+        ]
+        self._test_function_import('quant_type', function_list)
+
+    def test_package_import_observer(self):
+        self._test_package_import('observer')
+
+    def test_function_import_observer(self):
+        function_list = [
+            "_PartialWrapper",
+            "_with_args",
+            "_with_callable_args",
+            "ABC",
+            "ObserverBase",
+            "_ObserverBase",
+            "MinMaxObserver",
+            "MovingAverageMinMaxObserver",
+            "PerChannelMinMaxObserver",
+            "MovingAveragePerChannelMinMaxObserver",
+            "HistogramObserver",
+            "PlaceholderObserver",
+            "RecordingObserver",
+            "NoopObserver",
+            "_is_activation_post_process",
+            "_is_per_channel_script_obs_instance",
+            "get_observer_state_dict",
+            "load_observer_state_dict",
+            "default_observer",
+            "default_placeholder_observer",
+            "default_debug_observer",
+            "default_weight_observer",
+            "default_histogram_observer",
+            "default_per_channel_weight_observer",
+            "default_dynamic_quant_observer",
+            "default_float_qparams_observer",
+        ]
+        self._test_function_import('observer', function_list)
+
+    def test_package_import_qconfig(self):
+        self._test_package_import('qconfig')
+
+    def test_function_import_qconfig(self):
+        function_list = [
+            "QConfig",
+            "default_qconfig",
+            "default_debug_qconfig",
+            "default_per_channel_qconfig",
+            "QConfigDynamic",
+            "default_dynamic_qconfig",
+            "float16_dynamic_qconfig",
+            "float16_static_qconfig",
+            "per_channel_dynamic_qconfig",
+            "float_qparams_weight_only_qconfig",
+            "default_qat_qconfig",
+            "default_weight_only_qconfig",
+            "default_activation_only_qconfig",
+            "default_qat_qconfig_v2",
+            "get_default_qconfig",
+            "get_default_qat_qconfig",
+            "assert_valid_qconfig",
+            "QConfigAny",
+            "add_module_to_qconfig_obs_ctr",
+            "qconfig_equals"
+        ]
+        self._test_function_import('qconfig', function_list)

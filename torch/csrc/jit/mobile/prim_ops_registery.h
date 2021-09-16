@@ -19,13 +19,10 @@ bool hasPrimOpsFn(const std::string& name);
 std::function<void(Stack&)>& getPrimOpsFn(const std::string& name);
 
 class prim_op_fn_register {
-  std::string prim_ops_name_;
-
  public:
   prim_op_fn_register(
       const std::string& name,
-      const std::function<void(Stack&)>& fn)
-      : prim_ops_name_(name) {
+      const std::function<void(Stack&)>& fn) {
     registerPrimOpsFunction(name, fn);
   }
 };

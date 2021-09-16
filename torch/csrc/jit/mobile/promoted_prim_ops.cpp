@@ -166,7 +166,7 @@ void numToTensorBool(Stack& stack) {
   push(stack, at::scalar_to_tensor(b));
 }
 
-static const mobile::prim_op_fn_register op_regs[] = {
+static const std::array<mobile::prim_op_fn_register, 14> op_reg = {
     mobile::prim_op_fn_register("prim::TupleIndex", tupleIndex),
     mobile::prim_op_fn_register("aten::Bool.Tensor", boolTensor),
     mobile::prim_op_fn_register("aten::format", aten_format),
