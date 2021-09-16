@@ -81,9 +81,23 @@ void mkldnn_matmul(
   Tensor mat1_ = is_mkldnn_optimized_format(mat1_unsqueezed) ? mat1_unsqueezed : mat1_unsqueezed.contiguous();
   Tensor mat2_ = is_mkldnn_optimized_format(mat2_unsqueezed) ? mat2_unsqueezed : mat2_unsqueezed.contiguous();
 
+  Tensor mat1_reshaped = mat1_;
+  Tensor mat2_reshaped = mat2_;
+  if (result.dim() == 2 && mat1_.dim() == 3 && mat2_.dim() == 3){
+    // addbmm(batch1*batch2) [b,n,m] * [b,m,p] = [n,p] can be treated as:
+    // [n, b*m] * [b*m, p] = [n, p]
+    // For batch1: reorder from [b, n, m] to [n, b, m], reshape to [n, b * m]
+    // For batch2: reshape from [b, m, p] to [b * m, p]
+    auto mat1_size = mat1_.sizes();
+    auto mat2_size = mat2_.sizes();
+    mat1_ = mat1_size[0] > 1 ? mat1_.transpose(0, 1) : mat1_;
+    mat1_reshaped = mat1_.reshape({mat1_size[1], mat1_size[0] * mat1_size[2]});
+    mat2_reshaped = mat2_.reshape({mat2_size[0] * mat2_size[1], mat2_size[2]});
+ }
+
   // mkldnn_matmul only proceed CPU tensor
-  const ideep::tensor x = itensor_view_from_dense(mat1_);
-  const ideep::tensor w = itensor_view_from_dense(mat2_);
+  const ideep::tensor x = itensor_view_from_dense(mat1_reshaped);
+  const ideep::tensor w = itensor_view_from_dense(mat2_reshaped);
   ideep::tensor y = itensor_view_from_dense(result_unsqueezed);
   ideep::matmul_forward::compute(x, w, y, alpha, beta,
       ideep::scale_t(), ideep::scale_t(), ideep::scale_t(), op_attr);
@@ -106,7 +120,7 @@ inline bool checksize(const Tensor& mat1, const Tensor& mat2){
   // if dim = 2, mat1's size = (m * n), mat2's size = (n * k)
   // else if dim = 3, mat1's size = (b * m * n), mat2's size = (b * n * k)
   // else called from aten::mv, mat1.size = (m * n), mat2.size = (n)
-  // only m * n * k(if exist) are large enough we can get benefit from mkldnn optimized gemm kernel
+  // only m * n * b * k(if exist) are large enough we can get benefit from mkldnn optimized gemm kernel
   static const int64_t mkldnn_gemm_min_size = 16 * 16 * 16;
   if (mat1.dim() == 1 && mat2.dim() == 1) {
     // aten::dot
@@ -118,8 +132,8 @@ inline bool checksize(const Tensor& mat1, const Tensor& mat2){
     // aten::addmm
     return mat1.size(0) * mat1.size(1) * mat2.size(1) > mkldnn_gemm_min_size;
   } else {
-    // aten::bmm, aten::baddbmm
-    return mat1.size(1) * mat1.size(2) * mat2.size(2) > mkldnn_gemm_min_size;
+    // aten::addbmm, aten::bmm, aten::baddbmm
+    return mat1.size(0) * mat1.size(1) * mat1.size(2) * mat2.size(2) > mkldnn_gemm_min_size;
   }
 }
 

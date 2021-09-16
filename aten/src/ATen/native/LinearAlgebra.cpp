@@ -984,6 +984,11 @@ static void addmm_impl_cpu_(
     result.copy_(self);
   }
 
+  if (use_mkldnn_bf16_matmul(m1, m2, result)){
+    mkldnn_matmul(m1, m2, result, beta.to<float>(), alpha.to<float>());
+    return;
+  }
+
   bool transpose_c = false;
   Tensor c;
 
@@ -1050,19 +1055,6 @@ static void addmm_impl_cpu_(
   // Always ensure the conjugation for c is resolved since there's no way to specify c's conjugation in the gemm call
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!c.is_conj());
 
-  if (use_mkldnn_bf16_matmul(a, b, c)){
-    if (transpose_c){
-      // m1, m2 are swapped
-      mkldnn_matmul(b, a, c, beta.to<float>(), alpha.to<float>());
-    } else {
-      mkldnn_matmul(a, b, c, beta.to<float>(), alpha.to<float>());
-    }
-    if (!c.is_same(result)) {
-      result.copy_(c);
-    }
-    return;
-  }
-
   // Apply BLAS routine
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kHalf, kBFloat16,
       result.scalar_type(), "addmm_impl_cpu_",
@@ -1114,6 +1106,12 @@ static void addbmm_impl_(
     } else {
       result.zero_();
     }
+    return;
+  }
+
+  bool on_cpu = batch1.is_cpu() && batch2.is_cpu() && result.is_cpu();
+  if (on_cpu && use_mkldnn_bf16_matmul(batch1, batch2, result)){
+    mkldnn_matmul(batch1, batch2, result, beta.to<float>(), alpha.to<float>());
     return;
   }
 
