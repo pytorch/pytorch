@@ -385,29 +385,48 @@ def shard_parameter(
 
     Keyword args:
         src_rank (int, optional): The source rank which is used as the ground truth of
-            the data that would be sharded and scattered across the rest of the ranks.
+            the data for the parameter that would be sharded and scattered
+            across the rest of the ranks.
             Default: 0.
         process_group (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used.
+
+    .. warning::
+        Only :class:`torch.distributed._sharding_spec.ShardingSpec` is
+        currently supported as the ``sharding_spec``.
     """
     # Perform some validation first.
     if not isinstance(sharding_spec, ChunkShardingSpec):
         raise ValueError('Only ChunkShardingspec is supported.')
 
     if not hasattr(module, param_name):
-        raise ValueError(f'module: {module}, does not have parameter with name: {param_name}')
+        raise ValueError(f'module: {module} does not have parameter with name: {param_name}')
 
     tensor = getattr(module, param_name)
     if not isinstance(tensor, torch.Tensor):
-        raise ValueError(f'param_name: {param_name} of module: {module}, is not a Tensor')
+        raise ValueError(f'Expected {type(module).__name__}.{param_name} to be a Tensor, but found {type(tensor).__name__}')
 
     if not tensor.is_contiguous():
         raise ValueError(f'param: {param_name} is not a contiguous Tensor')
 
-    # Chunk the tensor for individual shards.
     pg = process_group if process_group is not None else distributed_c10d._get_default_group()
     world_size = dist.get_world_size(pg)
     rank = dist.get_rank(pg)
+
+    # Validate src_rank and sharding_spec are same across all ranks.
+    gathered_list = [None] * world_size
+    with torch.cuda.device(tensor.device):
+        dist.all_gather_object(gathered_list, (src_rank, sharding_spec), group=pg)
+
+    for idx, entry in enumerate(gathered_list):
+        if src_rank != entry[0]:
+            raise ValueError(
+                f'src_rank={src_rank} on rank: {rank} does not '
+                f'match with src_rank={entry[0]} on rank: {idx}')
+        if sharding_spec != entry[1]:
+            raise ValueError(
+                f'sharding_spec={sharding_spec} on rank: {rank} does not '
+                f'match with sharding_spec={entry[1]} on rank: {idx}')
 
     # Rearrange chunks according to placement.
     local_metadata = None
@@ -437,7 +456,7 @@ def shard_parameter(
     dist.broadcast(tensor, src=src_rank, group=pg)
 
     # Reshape to get shard for this rank.
-    output = tensor.narrow(
+    local_shard = tensor.narrow(
         sharding_spec.dim,  # type: ignore[arg-type]
         local_metadata.shard_offsets[sharding_spec.dim],  # type: ignore[union-attr, arg-type, index]
         local_metadata.shard_lengths[sharding_spec.dim],  # type: ignore[union-attr, index]
@@ -446,7 +465,7 @@ def shard_parameter(
     # Create ShardedTensor based on local shards.
     local_shards = [
         Shard(
-            tensor=output,
+            tensor=local_shard,
             metadata=local_metadata,  # type: ignore[arg-type]
         )
     ]
@@ -454,11 +473,11 @@ def shard_parameter(
         shards_metadata=shards_metadata,
         size=tensor.size(),
         tensor_properties=TensorProperties(
-            dtype=output.dtype,
-            layout=output.layout,
-            requires_grad=output.requires_grad,
+            dtype=local_shard.dtype,
+            layout=local_shard.layout,
+            requires_grad=local_shard.requires_grad,
             memory_format=torch.contiguous_format,
-            pin_memory=output.is_pinned(),
+            pin_memory=local_shard.is_pinned(),
         )
     )
 

@@ -1,4 +1,3 @@
-from functools import partial, wraps
 import math
 import io
 import itertools
@@ -29,13 +28,16 @@ from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
     requires_nccl,
     skip_if_lt_x_gpu,
-    TEST_SKIPS,
 )
 from torch.testing._internal.common_utils import (
     TestCase,
     TEST_WITH_DEV_DBG_ASAN,
     run_tests,
     sandcastle_skip_if,
+)
+from torch.testing._internal.distributed._sharded_tensor import (
+    ShardedTensorTestBase,
+    with_comms,
 )
 
 if TEST_WITH_DEV_DBG_ASAN:
@@ -61,79 +63,6 @@ class MyShardedModel1(torch.nn.Module):
             self.sharded_tensor1 = None
         self.random_tensor1 = torch.nn.Parameter(torch.rand(2, 2))
         self.submodule = MyShardedModel2(spec, group)
-
-class ShardedTensorTestBase(object):
-
-    @property
-    def world_size(self):
-        return 4
-
-    def init_pg(self):
-        dist.init_process_group(
-            backend="nccl",
-            world_size=self.world_size,
-            rank=self.rank,
-            init_method=f"file://{self.file_name}",
-        )
-
-    def init_rpc(self):
-        rpc_backend_options = rpc.TensorPipeRpcBackendOptions()
-        rpc_backend_options.init_method = f"file://{self.file_name}"
-        for rank in range(self.world_size):
-            rpc_backend_options.set_device_map(f'worker{rank}', {rank : self.rank, self.rank : rank})
-
-        rpc.init_rpc(
-            name="worker%d" % self.rank,
-            rank=self.rank,
-            world_size=self.world_size,
-            rpc_backend_options=rpc_backend_options,
-        )
-
-    def init_comms(self, init_rpc=True):
-        if init_rpc:
-            self.init_rpc()
-        self.init_pg()
-
-    def destroy_comms(self, destroy_rpc=True):
-        # Wait for all ranks to reach here before starting shutdown.
-        dist.barrier()
-
-        if destroy_rpc:
-            rpc.shutdown()
-        dist.destroy_process_group()
-
-    def setUp(self) -> None:
-        super().setUp()
-        self._spawn_processes()
-
-    def verify_sharded_tensor(self, st1, st2):
-        st1_local_shards = st1.local_shards()
-        st2_local_shards = st2.local_shards()
-        self.assertEqual(len(st1_local_shards), len(st2_local_shards))
-        for i, st1_local_shard in enumerate(st1_local_shards):
-            self.assertEqual(st1_local_shard.tensor, st2_local_shards[i].tensor)
-            self.assertEqual(st1_local_shard.metadata, st2_local_shards[i].metadata)
-
-        self.assertEqual(st1.metadata(), st2.metadata())
-        self.assertEqual(st1.sharding_spec(), st2.sharding_spec())
-        self.assertEqual(len(st1.remote_shards()), len(st2.remote_shards()))
-
-
-def with_comms(func=None, init_rpc=True):
-    if func is None:
-        return partial(
-            with_comms,
-            init_rpc=init_rpc,
-        )
-
-    @wraps(func)
-    def wrapper(self, *args, **kwargs):
-        if torch.cuda.device_count() < self.world_size:
-            sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
-        self.init_comms(init_rpc)
-        func(self)
-        self.destroy_comms(init_rpc)
-    return wrapper
 
 class TestShardedTensorMetadata(TestCase):
     def test_serialize_and_deserialize(self):
@@ -310,36 +239,11 @@ class TestCreateTensorFromParams(TestCase):
         self.assertEqual(expected_tensor, local_tensor)
 
 
-class TestShardedTensorOps(ShardedTensorTestBase, MultiProcessTestCase):
-    def _run_sharded_linear(self, spec, input_size, linear_size, sharded_dim):
-        # Use same seed.
-        torch.manual_seed(0)
-        local_linear = torch.nn.Linear(*linear_size).cuda(self.rank)
-
-        sharded_linear = torch.nn.Linear(*linear_size)
-
-        # Copy the weights and bias from local linear
-        sharded_linear.weight = local_linear.weight
-        sharded_linear.bias = local_linear.bias
-
-        # Shard the parameter.
-        shard_parameter(sharded_linear, 'weight', spec)
-
-        # Run sharded computation
-        torch.manual_seed(self.rank)  # inputs different on each rank
-        inp = torch.rand(*input_size).cuda(self.rank)
-        sharded_output = sharded_linear(inp)
-
-        # Run local computation
-        local_output = local_linear(inp)
-
-        # Verify
-        self.assertEqual(local_output, sharded_output)
-
+class TestShardParameter(ShardedTensorTestBase, MultiProcessTestCase):
     @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(4)
     @requires_nccl()
-    def test_sharded_linear_colwise(self):
+    def test_shard_parameter(self):
         spec = ChunkShardingSpec(
             dim=0,
             placements=[
@@ -350,34 +254,21 @@ class TestShardedTensorOps(ShardedTensorTestBase, MultiProcessTestCase):
             ],
         )
 
-        self._run_sharded_linear(spec, [5, 17], [17, 12], 0)
-        self._run_sharded_linear(spec, [5, 21], [21, 11], 0)
-        self._run_sharded_linear(spec, [5, 23], [23, 13], 0)
-        self._run_sharded_linear(spec, [5, 15], [15, 14], 0)
+        fc = torch.nn.Linear(12, 12).cuda(self.rank)
+        shard_parameter(fc, 'weight', spec)
 
-        # Test different ordering.
-        spec = ChunkShardingSpec(
-            dim=0,
-            placements=[
-                "rank:1/cuda:1",
-                "rank:0/cuda:0",
-                "rank:3/cuda:3",
-                "rank:2/cuda:2",
-            ],
-        )
-
-        self._run_sharded_linear(spec, [5, 17], [17, 12], 0)
-        self._run_sharded_linear(spec, [5, 21], [21, 11], 0)
-        self._run_sharded_linear(spec, [5, 23], [23, 13], 0)
-        self._run_sharded_linear(spec, [5, 15], [15, 14], 0)
-
+        # Verify.
+        self.assertTrue(isinstance(fc.weight, _sharded_tensor.ShardedTensor))
+        local_shards = fc.weight.local_shards()
+        self.assertEqual(1, len(local_shards))
+        self.assertEqual(torch.Size([3, 12]), local_shards[0].tensor.size())
 
     @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(4)
     @requires_nccl()
-    def test_sharded_linear_rowwise(self):
+    def test_shard_parameter_errors(self):
         spec = ChunkShardingSpec(
-            dim=1,
+            dim=0,
             placements=[
                 "rank:0/cuda:0",
                 "rank:1/cuda:1",
@@ -386,26 +277,48 @@ class TestShardedTensorOps(ShardedTensorTestBase, MultiProcessTestCase):
             ],
         )
 
-        # Test even split.
-        self._run_sharded_linear(spec, [5, 16], [16, 11], 1)
+        fc = torch.nn.Linear(12, 12).cuda(self.rank)
+        with self.assertRaisesRegex(ValueError, 'does not match with src_rank'):
+            shard_parameter(fc, 'weight', spec, src_rank=self.rank)
 
-        # Test uneven split.
-        self._run_sharded_linear(spec, [5, 19], [19, 11], 1)
-        self._run_sharded_linear(spec, [5, 21], [21, 11], 1)
+        with self.assertRaisesRegex(ValueError, 'does not have parameter'):
+            shard_parameter(fc, 'foo', spec)
 
-        # Test different ordering.
+        with self.assertRaisesRegex(ValueError, 'Expected Linear.bias to be a Tensor, but found str'):
+            del fc.bias
+            fc.bias = "foo"
+            shard_parameter(fc, 'bias', spec)
+
+        with self.assertRaisesRegex(ValueError, 'not a contiguous Tensor'):
+            fc.bias = torch.rand(10, 10).cuda(self.rank).t()
+            shard_parameter(fc, 'bias', spec)
+
         spec = ChunkShardingSpec(
-            dim=1,
+            dim=0,
             placements=[
+                f"rank:{self.rank}/cuda:0",
+                "rank:1/cuda:1",
                 "rank:2/cuda:2",
                 "rank:3/cuda:3",
-                "rank:0/cuda:0",
-                "rank:1/cuda:1",
             ],
         )
-        self._run_sharded_linear(spec, [5, 16], [16, 11], 1)
-        self._run_sharded_linear(spec, [5, 19], [19, 11], 1)
-        self._run_sharded_linear(spec, [5, 21], [21, 11], 1)
+        with self.assertRaisesRegex(ValueError, 'does not match with sharding_spec'):
+            shard_parameter(fc, 'weight', spec)
+
+        spec = EnumerableShardingSpec([
+            ShardMetadata(
+                shard_offsets=[0, 0],
+                shard_lengths=[5, 5],
+                placement="rank:0/cuda:0",
+            ),
+            ShardMetadata(
+                shard_offsets=[5, 0],
+                shard_lengths=[5, 5],
+                placement="rank:1/cuda:1",
+            ),
+        ])
+        with self.assertRaisesRegex(ValueError, 'Only ChunkShardingspec is supported.'):
+            shard_parameter(fc, 'weight', spec)
 
 
 class TestShardedTensorChunked(ShardedTensorTestBase, MultiProcessTestCase):

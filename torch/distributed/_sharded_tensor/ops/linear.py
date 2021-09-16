@@ -28,7 +28,7 @@ def sharded_linear(types, args, kwargs, pg):
 
     The overall algorithm can be best explained with an example. Let's assume
     the dims for x are (13 x 16) and A are (17 x 16) and A is sharded across
-    4 GPUs creating shards of (17 x 4). The algoritm is as follows:
+    4 GPUs creating shards of (17 x 4). The algorithm is as follows:
 
     1. First the input is split on the column dimension to create shards of
        (13 x 4) and communicated to all other ranks. Since we are running in
@@ -53,7 +53,7 @@ def sharded_linear(types, args, kwargs, pg):
 
     The overall algorithm can be best explained with an example. Let's assume
     the dims for x are (13 x 17) and A are (16 x 17) and A is sharded across
-    4 GPUs creating shards of (4 x 17). The algoritm is as follows:
+    4 GPUs creating shards of (4 x 17). The algorithm is as follows:
 
     1. First the input is broadcasted to all ranks, since this is SPMD we
        actually do an all_gather for all the inputs resulting in 4 (13 x 17)
