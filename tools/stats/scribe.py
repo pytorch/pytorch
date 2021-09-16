@@ -128,7 +128,7 @@ def rds_write(
 ) -> None:
     sprint("Writing for", os.getenv("CIRCLE_PR_NUMBER"))
     is_master = os.getenv("CIRCLE_PR_NUMBER", "").strip() == ""
-    if not only_on_master and not is_master:
+    if only_on_master and not is_master:
         sprint("Skipping RDS write on PR")
         return
 
