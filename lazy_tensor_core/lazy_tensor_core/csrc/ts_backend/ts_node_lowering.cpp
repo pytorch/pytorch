@@ -3,7 +3,6 @@
 #include <ATen/core/Reduction.h>
 #include <torch/csrc/jit/frontend/sugared_value.h>
 #include <torch/jit.h>
-#include <torch/torch.h>
 
 #include "lazy_tensor_core/csrc/compiler/node_lowering.h"
 #include "lazy_tensor_core/csrc/data_ops.h"
