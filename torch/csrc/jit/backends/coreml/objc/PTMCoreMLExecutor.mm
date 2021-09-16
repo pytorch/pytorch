@@ -102,8 +102,11 @@
   } else {
     _mlModel = [MLModel modelWithContentsOfURL:compiledModelPath error:&error];
   }
-  TORCH_CHECK(
-      !error, "Error loading MLModel", error.localizedDescription.UTF8String);
+  if (error || !_mlModel) {
+    TORCH_CHECK(
+        false, "Error loading MLModel", error.localizedDescription.UTF8String);
+  }
+
   _compiledModelPath = compiledModelPath.path;
   return YES;
 }
@@ -124,10 +127,13 @@
         [_mlModel predictionFromFeatures:inputFeature
                                  options:options
                                    error:&error];
-    TORCH_CHECK(
-        !error,
-        "Error running the prediction",
-        error.localizedDescription.UTF8String);
+    if (error || !outputFeature) {
+      TORCH_CHECK(
+          false,
+          "Error running the prediction",
+          error.localizedDescription.UTF8String);
+    }
+
     return outputFeature;
   } else {
     TORCH_CHECK("Core ML is available on iOS 11.0 and above");
