@@ -73,9 +73,7 @@ void common_checks_baddbmm_bmm(Meta& meta, const Tensor& batch1, const Tensor& b
 
   TORCH_CHECK(batch2_sizes[0] == bs && batch2_sizes[1] == contraction_size);
 
-  if (is_bmm) {
-    meta.set_output({bs, res_rows, res_cols}, batch1.options());
-  } else {
+  if (!is_bmm) {
     if (self_or_result.has_value()) {
       TORCH_CHECK(self_or_result.value().dim() == 3, "self must be a 3D tensor");
       const auto self_sizes = self_or_result.value().sizes();
@@ -85,14 +83,8 @@ void common_checks_baddbmm_bmm(Meta& meta, const Tensor& batch1, const Tensor& b
 }
 
 TORCH_META_FUNC(bmm)(const Tensor& self, const Tensor& mat2) {
-    if (self.is_cuda()) {
-        TORCH_CHECK(self.dim() == 3, "batch1 must be a 3D tensor");
-        TORCH_CHECK(mat2.dim() == 3, "batch2 must be a 3D tensor");
-
-        set_output({self.sizes()[0], self.sizes()[1], mat2.sizes()[2]}, self.options());
-    } else {
-        common_checks_baddbmm_bmm(*this, self, mat2, Scalar(0.0), Scalar(1.0), true);
-    }
+    set_output({self.sizes()[0], self.sizes()[1], mat2.sizes()[2]}, self.options());
+    common_checks_baddbmm_bmm(*this, self, mat2, Scalar(0.0), Scalar(1.0), true);
     auto& result = maybe_get_output(0);
     namedinference::propagate_names_if_nonempty(
       result,
