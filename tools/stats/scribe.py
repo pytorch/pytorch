@@ -148,5 +148,5 @@ def rds_write(
             {"write": {"table_name": table_name, "values": {**values, **base}}}
         )
 
-    print("Wrote stats for", table_name)
+    sprint("Wrote stats for", table_name)
     invoke_rds(events)
