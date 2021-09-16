@@ -79,11 +79,14 @@ std::pair<IValue, IValue> getFunctionTuple(
   std::vector<c10::OperatorName> opnames;
   std::vector<std::string> method_names;
   std::vector<int64_t> op_debug_handles;
+  int next_new_op_index = 0;
   for (size_t i = 0; i < instructions_copy.size(); ++i) {
     Instruction ins = instructions_copy[i];
-    if (ins.op == OP || ins.op == OPN) {
+    if ((ins.op == OP || ins.op == OPN) && ins.X == next_new_op_index) {
+      // Found a new op (assumes new operators ordered by ascending ins.X)
       auto node = code->instructions_source()[i];
       opnames.emplace_back(node->schema().operator_name());
+      next_new_op_index++;
     }
     // CALL nodes at this point represent built-in (i.e. non-Graph)
     // functions that were not inlined. Here we convert the CALL
