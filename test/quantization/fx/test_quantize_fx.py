@@ -24,12 +24,15 @@ from torch.quantization.fx.match_utils import (
     MatchAllNode,
 )
 
-from torch.quantization import (
+from torch.ao.quantization import (
     QuantType,
+    quant_type_to_str,
+)
+
+from torch.quantization import (
     QuantStub,
     DeQuantStub,
     QuantWrapper,
-    quant_type_to_str,
     default_qconfig,
     default_dynamic_qconfig,
     default_qat_qconfig,
