@@ -16,7 +16,6 @@ class DeterminationTest(unittest.TestCase):
         "test_jit_profiling",
         "test_jit",
         "test_torch",
-        "distributed/test_distributed_spawn",
         "test_cpp_extensions_aot_ninja",
         "test_cpp_extensions_aot_no_ninja",
         "test_utils",
