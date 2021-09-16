@@ -144,7 +144,7 @@ def normal_(tensor: Tensor, mean: float = 0., std: float = 1., generator: torch.
         tensor: an n-dimensional `torch.Tensor`
         mean: the mean of the normal distribution
         std: the standard deviation of the normal distribution
-        generator: `torch.Generator` object to set random state for sampling. `None` (default)
+        
 
     Examples:
         >>> w = torch.empty(3, 5)
