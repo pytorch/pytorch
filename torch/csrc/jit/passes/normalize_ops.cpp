@@ -23,7 +23,7 @@ bool normalizeOpAliases(graph_node_list_iterator& iter) {
 // Normalize rsub such that `rsub(x,y) = sub(x,y)`
 bool normalizeRSub(graph_node_list_iterator& iter) {
   if (iter->matches(
-          "rsub.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor")) {
+          "aten::rsub.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor")) {
     ArrayRef<Value*> args = iter->inputs();
     Node* newSub = iter->replaceWithNewSymbol(aten::sub);
     newSub->replaceInput(0, args[1]);
