@@ -44,7 +44,7 @@ def set_printoptions(
             None (default) is specified, the value is defined by
             `torch._tensor_str._Formatter`. This value is automatically chosen
             by the framework.
-        show_shape: Print shape of the tensor. (default = True)
+        show_shape: Whether to print the shape of strided, non-meta tensors. (default = False)
     """
     if profile is not None:
         if profile == "default":
@@ -297,7 +297,12 @@ def _str_intern(inp):
     # within this function.
     # TODO(albanD) This needs to be updated when more than one level is supported
     self, tangent = torch.autograd.forward_ad.unpack_dual(inp)
-    # print shape of the tensor
+    # Print shape for strided, non-meta tensors
+    # Note :
+    # For other tensor types (sparse, quantized, meta), size=() is already included
+    # in their default repr and carries same meaning as that of shape=().
+    # Although the name "size" is bit ambiguous, we are avoiding renaming to circumvent
+    # BC-breaking change in the code.
     if PRINT_OPTS.show_shape\
             and not self.is_sparse\
             and not self.is_sparse_csr\
