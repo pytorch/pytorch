@@ -5,7 +5,7 @@ from typing import Any, Tuple, Callable, Union, Dict
 
 import torch
 import torch.fx
-from torch.fx.experimental.graph_manipulation import (
+from torch.fx.passes.graph_manipulation import (
     serialize_module,
 )
 from torch.fx.graph_module import GraphModule
