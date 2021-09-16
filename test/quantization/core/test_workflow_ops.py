@@ -8,7 +8,7 @@ from torch.quantization import (
     default_affine_fixed_qparams_fake_quant,
 )
 
-from torch.quantization._learnable_fake_quantize import _LearnableFakeQuantize
+from torch.ao.quantization._learnable_fake_quantize import _LearnableFakeQuantize
 from torch.testing._internal.common_quantized import (
     _fake_quantize_per_channel_affine_reference,
     _fake_quantize_per_channel_affine_grad_reference,
