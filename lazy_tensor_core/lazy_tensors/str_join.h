@@ -1,6 +1,7 @@
 #pragma once
 
 #include <c10/util/string_view.h>
+#include <c10/util/StringUtil.h>
 #include <c10/util/Optional.h>
 #include <c10/core/Scalar.h>
 
@@ -12,7 +13,7 @@
 
 namespace lazy_tensors {
 
-
+// TODO(whc) replace all uses of this with c10::Join
 template <typename Range>
 std::string StrJoin(const Range& range, c10::string_view separator) {
   auto b = std::begin(range);
@@ -44,7 +45,7 @@ void ToString(std::string name, const c10::Scalar& val, std::ostream& ss);
 
 template <typename T>
 void ToString(std::string name, std::vector<T> val, std::ostream& ss){
-  ss << std::string(", ") << name << std::string("=(") << StrJoin(val, ", ") << std::string(")");
+  ss << std::string(", ") << name << std::string("=(") << c10::Join(", ", val) << std::string(")");
 }
 
 template <typename T>
