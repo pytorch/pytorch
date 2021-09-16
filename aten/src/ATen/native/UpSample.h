@@ -69,6 +69,7 @@ using upsampling_nearest2d = void(*)(const Tensor& output, const Tensor& input, 
 using upsampling_nearest3d = void(*)(const Tensor& output, const Tensor& input, scale_t scales_d, scale_t scales_h, scale_t scales_w);
 using upsampling_linear1d = void(*)(const Tensor& output, const Tensor& input, bool align_corners, scale_t scales_w);
 using upsampling_bilinear2d = void(*)(const Tensor& output, const Tensor& input, bool align_corners, scale_t scales_h, scale_t scales_w);
+using upsampling_bilinear2d_aa = void(*)(const Tensor& output, const Tensor& input, bool align_corners, scale_t scales_h, scale_t scales_w);
 using upsampling_trilinear3d = void(*)(const Tensor& output, const Tensor& input, bool align_corners, scale_t scales_d, scale_t scales_h, scale_t scales_w);
 using upsampling_bicubic2d = void(*)(const Tensor& output, const Tensor& input, bool align_corners, scale_t scales_h, scale_t scales_w);
 DECLARE_DISPATCH(upsampling_nearest1d, upsample_nearest1d_kernel);
@@ -79,9 +80,11 @@ DECLARE_DISPATCH(upsampling_nearest2d, upsample_nearest2d_backward_kernel);
 DECLARE_DISPATCH(upsampling_nearest3d, upsample_nearest3d_backward_kernel);
 DECLARE_DISPATCH(upsampling_linear1d, upsample_linear1d_kernel);
 DECLARE_DISPATCH(upsampling_bilinear2d, upsample_bilinear2d_kernel);
+DECLARE_DISPATCH(upsampling_bilinear2d_aa, upsample_bilinear2d_aa_kernel);
 DECLARE_DISPATCH(upsampling_trilinear3d, upsample_trilinear3d_kernel);
 DECLARE_DISPATCH(upsampling_linear1d, upsample_linear1d_backward_kernel);
 DECLARE_DISPATCH(upsampling_bilinear2d, upsample_bilinear2d_backward_kernel);
+DECLARE_DISPATCH(upsampling_bilinear2d_aa, upsample_bilinear2d_aa_backward_kernel);
 DECLARE_DISPATCH(upsampling_trilinear3d, upsample_trilinear3d_backward_kernel);
 DECLARE_DISPATCH(upsampling_bicubic2d, upsample_bicubic2d_kernel);
 

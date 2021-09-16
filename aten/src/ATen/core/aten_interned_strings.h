@@ -734,6 +734,9 @@ _(aten, unsqueeze) \
 _(aten, upsample_bilinear2d) \
 _(aten, upsample_bilinear2d_backward) \
 _(aten, upsample_bilinear2d_forward) \
+_(aten, upsample_bilinear2d_aa) \
+_(aten, upsample_bilinear2d_aa_backward) \
+_(aten, upsample_bilinear2d_aa_forward) \
 _(aten, upsample_bicubic2d) \
 _(aten, upsample_bicubic2d_backward) \
 _(aten, upsample_bicubic2d_forward) \

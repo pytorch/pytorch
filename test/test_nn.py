@@ -14527,45 +14527,66 @@ class TestNNDeviceType(NNTestCase):
                     self.assertEqual(a_cuda.grad, a_cpu.grad)
 
     def test_upsamplingBilinear2d(self, device):
-        for align_corners in [True, False]:
-            kwargs = dict(mode='bilinear', align_corners=align_corners)
-            for memory_format in [torch.contiguous_format, torch.channels_last]:
-                # test float scale factor up & downsampling
-                for scale_factor in [0.5, 1.5, 2]:
-                    in_t = torch.ones(1, 2, 2, 2, device=device).contiguous(memory_format=memory_format).requires_grad_()
-                    out_size = int(math.floor(in_t.shape[-1] * scale_factor))
-                    with warnings.catch_warnings(record=True) as w:
-                        out_t = F.interpolate(in_t, scale_factor=scale_factor, **kwargs)
-                    self.assertEqual(torch.ones(1, 2, out_size, out_size, device=device), out_t.data)
-                    # Assert that memory format is carried through to the output
-                    self.assertTrue(out_t.is_contiguous(memory_format=memory_format))
-                    out_t.backward(torch.randn_like(out_t))
-                    self.assertTrue(in_t.grad.is_contiguous(memory_format=memory_format))
+        for antialias in [True, False]:
+            # temporarily disabled on CUDA:
+            if antialias and torch.device(device).type == 'cuda':
+                continue
+            for align_corners in [True, False]:
+                kwargs = dict(mode='bilinear', align_corners=align_corners, antialias=antialias)
+                for memory_format in [torch.contiguous_format, torch.channels_last]:
+                    # test float scale factor up & downsampling
+                    for scale_factor in [0.5, 1.5, 2]:
+                        in_t = torch.ones(1, 2, 2, 2, device=device).contiguous(memory_format=memory_format).requires_grad_()
+                        out_size = int(math.floor(in_t.shape[-1] * scale_factor))
+                        with warnings.catch_warnings(record=True) as w:
+                            out_t = F.interpolate(in_t, scale_factor=scale_factor, **kwargs)
+                        self.assertEqual(torch.ones(1, 2, out_size, out_size, device=device), out_t.data)
+                        # Assert that memory format is carried through to the output
+                        self.assertTrue(out_t.is_contiguous(memory_format=memory_format))
+                        out_t.backward(torch.randn_like(out_t))
+                        self.assertTrue(in_t.grad.is_contiguous(memory_format=memory_format))
 
-                    input = torch.randn(1, 2, 2, 2, device=device).contiguous(memory_format=memory_format).requires_grad_()
-                    gradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [input])
+                        input = torch.randn(1, 2, 2, 2, device=device).contiguous(memory_format=memory_format).requires_grad_()
+                        gradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [input])
 
-                    # Assert that cpu and cuda give same results
-                    if torch.device(device).type == 'cuda':
-                        for shapes in [
-                            (2, 2, 3, 4), (2, 3, 4, 5), (3, 1, 2, 2), (1, 5, 3, 2)
-                        ]:
-                            a_cuda = torch.randn(*shapes, device=device).contiguous(memory_format=memory_format).requires_grad_()
-                            a_cpu = a_cuda.detach().cpu().requires_grad_()
+                        # Assert that cpu and cuda give same results
+                        if torch.device(device).type == 'cuda':
+                            for shapes in [
+                                (2, 2, 3, 4), (2, 3, 4, 5), (3, 1, 2, 2), (1, 5, 3, 2)
+                            ]:
+                                a_cuda = torch.randn(
+                                    *shapes, device=device
+                                ).contiguous(memory_format=memory_format).requires_grad_()
+                                a_cpu = a_cuda.detach().cpu().requires_grad_()
 
-                            with warnings.catch_warnings(record=True):
-                                out_cuda = F.interpolate(a_cuda, scale_factor=scale_factor, **kwargs)
-                                out_cpu = F.interpolate(a_cpu, scale_factor=scale_factor, **kwargs)
+                                with warnings.catch_warnings(record=True):
+                                    out_cuda = F.interpolate(a_cuda, scale_factor=scale_factor, **kwargs)
+                                    out_cpu = F.interpolate(a_cpu, scale_factor=scale_factor, **kwargs)
 
-                            self.assertEqual(out_cpu.cuda(), out_cuda)
+                                self.assertEqual(out_cpu.cuda(), out_cuda)
 
-                            g_cuda = torch.randn_like(out_cuda)
-                            g_cpu = g_cuda.cpu()
+                                g_cuda = torch.randn_like(out_cuda)
+                                g_cpu = g_cuda.cpu()
 
-                            out_cuda.backward(g_cuda)
-                            out_cpu.backward(g_cpu)
+                                out_cuda.backward(g_cuda)
+                                out_cpu.backward(g_cpu)
 
-                            self.assertEqual(a_cuda.grad, a_cpu.grad)
+                                self.assertEqual(a_cuda.grad, a_cpu.grad)
+
+    @onlyCPU  # temporarily disabled on CUDA
+    def test_upsamplingBilinear2d_aa_correctness(self, device):
+        t_in = torch.arange(30, dtype=torch.float, device=device).reshape(1, 1, 1, -1)
+        # This expected result is obtain using PIL.Image.resize
+        # a_in = t_in.numpy()[0, 0, ...]
+        # pil_in = Image.fromarray(a_in)
+        # pil_out = pil_in.resize((8, 1), resample=Image.LINEAR)
+        expected_out = torch.tensor(
+            [1.7244898, 5.1061945, 8.8938055, 12.642858,
+             16.357143, 20.106195, 23.893805, 27.27551],
+            device=device, dtype=torch.float
+        ).reshape(1, 1, 1, 8)
+        t_out = F.interpolate(t_in, size=(1, 8), mode="bilinear", align_corners=False, antialias=True)
+        self.assertEqual(expected_out, t_out)
 
     @onlyCPU
     @dtypes(torch.float, torch.double)
