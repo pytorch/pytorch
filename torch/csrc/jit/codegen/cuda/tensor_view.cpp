@@ -24,19 +24,8 @@ DataType aten_opt_type_map(const c10::optional<at::ScalarType>& scalar_type) {
 }
 } // namespace
 
-TensorView::TensorView(TensorDomain* domain, DataType dtype, MemoryType mtype)
-    : Val(ValType::TensorView, dtype), domain_(domain), memory_type_(mtype) {
-  // Don't do this after transforms
-  if (domain_->domain() == domain_->getRootDomain()) {
-    // Mark the size-1 axes as broadcast to support implicit broadcast semantic
-    for (auto* id : domain_->domain()) {
-      if (!id->isBroadcast() && !id->isReduction() && !id->isGather() &&
-          id->extent()->isOneInt()) {
-        id->convertToBroadcast();
-      }
-    }
-  }
-}
+TensorView::TensorView(TensorDomain* _domain, DataType dtype, MemoryType mtype)
+    : Val(ValType::TensorView, dtype), domain_(_domain), memory_type_(mtype) {}
 
 TensorView::TensorView(const std::shared_ptr<c10::TensorType>& tensor_type)
     : Val(ValType::TensorView,
@@ -99,18 +88,10 @@ TensorView::TensorView(const std::shared_ptr<c10::TensorType>& tensor_type)
 TensorView::TensorView(const TensorView* src, IrCloner* ir_cloner)
     : Val(src, ir_cloner),
       domain_(ir_cloner->clone(src->domain_)),
-      compute_at_pos_(src->compute_at_pos_),
-      max_producer_pos_(src->max_producer_pos_),
-      memory_type_(src->memory_type_),
-      swizzle_type_(src->swizzle_type_) {
-  for (const auto id : src->axesToSwizzle()) {
-    axes_to_swizzle_.push_back(ir_cloner->clone(id));
-  }
-}
-
-bool TensorView::hasAnyReduction() const {
-  return domain()->noReductions().size() != domain()->domain().size();
-}
+      compute_at_view_(ir_cloner->clone(src->compute_at_view_)),
+      relative_compute_at_axis_(src->relative_compute_at_axis_),
+      this_compute_at_axis_(src->this_compute_at_axis_),
+      memory_type_(src->memory_type_) {}
 
 bool TensorView::hasReduction() const {
   return domain()->hasReduction();
@@ -122,6 +103,10 @@ bool TensorView::hasBlockReduction() const {
 
 bool TensorView::hasGridReduction() const {
   return domain()->hasGridReduction();
+}
+
+bool TensorView::hasBlockBroadcast() const {
+  return domain()->hasBlockBroadcast();
 }
 
 bool TensorView::hasBroadcast() const {
@@ -166,162 +151,184 @@ IterDomain* TensorView::axis(int pos) const {
   return domain()->axis(pos);
 }
 
-void TensorView::setComputeAt(unsigned int pos, bool decrease) {
-  if (pos <= compute_at_pos_ && !decrease) {
+TensorView* TensorView::unsafeClone() const {
+  TensorView* new_view = new TensorView(domain_, getDataType().value());
+  new_view->compute_at_view_ = compute_at_view_;
+  new_view->relative_compute_at_axis_ = relative_compute_at_axis_;
+  new_view->this_compute_at_axis_ = this_compute_at_axis_;
+  new_view->memory_type_ = memory_type_;
+  new_view->name_ = name();
+  return new_view;
+}
+
+void TensorView::setComputeAt(TensorView* computeAtView, int axis) {
+  compute_at_view_ = computeAtView;
+  relative_compute_at_axis_ = axis;
+  setThisComputeAtAxis();
+
+  TORCH_INTERNAL_ASSERT(
+      getThisComputeAtAxis() >= 0 &&
+          (unsigned int)getThisComputeAtAxis() <= nDims(),
+      "Invalid computeAt on ",
+      this,
+      " tried to set to local axis ",
+      getThisComputeAtAxis());
+
+  TORCH_INTERNAL_ASSERT(
+      std::none_of(
+          domain()->domain().begin(),
+          domain()->domain().begin() + getThisComputeAtAxis(),
+          [](IterDomain* id) { return id->isReduction(); }),
+      "Invalid computeAt, reduction domain inside computeAt axis.");
+}
+
+void TensorView::setComputeAt(
+    TensorView* computeAtView,
+    int thisPos,
+    int relPos) {
+  compute_at_view_ = computeAtView;
+  relative_compute_at_axis_ = relPos;
+  this_compute_at_axis_ = thisPos;
+  TORCH_INTERNAL_ASSERT(
+      this_compute_at_axis_ <= nDims(), "Manually set an invalid computeAt.");
+}
+
+// Where in compute_at_view does this->axis(pos) match up?
+// TODO: This doesn't seem like the safest function as a fusion output can ref
+// another fusion output,  we may want to check that there is a direct
+// consumer/producer relationship between this and compute_at view before using
+// this function, and creating another pass to handle relative outputs.
+int TensorView::getComputeAtRelPos(int pos) {
+  if (!hasComputeAt()) {
+    return pos;
+  }
+
+  if (!compute_at_view_->hasBroadcast()) {
+    return pos;
+  }
+
+  size_t pos_cav = 0, pos_this = 0;
+
+  // We could be in an instance where pos == 0, but consumer[0] is bcast and
+  // this[0] is not
+
+  while (compute_at_view_->axis(pos_cav)->isBroadcast() &&
+         !(axis(pos_this)->isBroadcast())) {
+    pos_cav++;
+  }
+
+  while ((int)pos_this < pos) {
+    TORCH_INTERNAL_ASSERT(
+        pos_cav < compute_at_view_->nDims(),
+        "Error computing relative position in computeAt.");
+
+    if (compute_at_view_->axis(pos_cav)->isBroadcast() &&
+        !(axis(pos_this)->isBroadcast())) {
+      pos_cav++;
+    } else {
+      pos_cav++;
+      pos_this++;
+    }
+  }
+
+  return pos_cav;
+}
+
+void TensorView::setThisComputeAtAxis() {
+  if (compute_at_view_ == nullptr) {
+    relative_compute_at_axis_ = 0;
+    this_compute_at_axis_ = 0;
     return;
   }
 
-  TORCH_INTERNAL_ASSERT(
-      (unsigned)pos <= nDims(),
-      "Invalid this computeAt position for T",
-      name(),
-      ": ",
-      pos);
+  // this[is{i1}, is{i2},] -> compute at compute_at_view[bS{i0}, iS{i1}, iS{i2}]
+  // axis = 2 this compute at axis = 1
 
-  compute_at_pos_ = pos;
-}
-
-void TensorView::setMaxProducer(unsigned int pos, bool decrease) {
-  if (pos <= max_producer_pos_ && !decrease) {
-    return;
+  // pos in compute at view
+  size_t pos_cav = 0, pos_this = 0;
+  while (pos_cav < relative_compute_at_axis_ && pos_this < nDims()) {
+    if (compute_at_view_->axis(pos_cav)->isBroadcast() &&
+        !(axis(pos_this)->isBroadcast())) {
+      pos_cav++;
+    } else {
+      pos_cav++;
+      pos_this++;
+    }
   }
 
   TORCH_INTERNAL_ASSERT(
-      (unsigned)pos <= nDims(),
-      "Invalid max producer position for T",
-      name(),
-      ": ",
-      pos);
+      pos_cav == relative_compute_at_axis_ ||
+          (pos_cav < compute_at_view_->nDims() &&
+           compute_at_view_->axis(pos_cav)->isBroadcast()),
+      "Error seting up relative position between this and what we view into.");
 
-  max_producer_pos_ = pos;
+  this_compute_at_axis_ = pos_this;
 }
 
-TensorView* TensorView::computeAt(
-    TensorView* consumer,
-    int position,
-    ComputeAtMode mode) {
+TensorView* TensorView::computeAt(TensorView* consumer, int axis) {
   // Make sure this and consumer are not the same tensor, that's illegal
   TORCH_CHECK(!sameAs(consumer), "Cannot call this->computeAt(this, ...)");
 
   // We support negative axes, so increment it by consumer->nDims() + 1 and make
   // sure the result is within consumer->nDims() + 1. being at consumer->nDims()
   // means producer will be computed inline with consumer, hence the +1.
-  if (position < 0)
-    position += int(consumer->nDims()) + 1;
-
+  if (axis < 0)
+    axis += int(consumer->nDims()) + 1;
   TORCH_CHECK(
-      (position >= 0 && (unsigned int)position < consumer->nDims() + 1) ||
-          mode == ComputeAtMode::BestEffort,
-      "Compute at called on an position outside valid range.");
+      axis >= 0 && (unsigned int)axis < consumer->nDims() + 1,
+      "Compute at called on an axis outside valid range.");
 
-  if (mode == ComputeAtMode::BestEffort) {
-    position = std::max(-1, position);
-    position = std::min((int)consumer->nDims(), position);
-  }
-
-  ComputeAt::runAt(this, consumer, (unsigned int)position, mode);
+  ComputeAt::run(this, consumer, (unsigned int)axis);
 
   return this;
 }
 
-TensorView* TensorView::computeWith(
-    TensorView* consumer,
-    int position,
-    ComputeAtMode mode) {
-  // Make sure this and consumer are not the same tensor, that's illegal
-  TORCH_CHECK(!sameAs(consumer), "Cannot call this->computeAt(this, ...)");
-
-  // We support negative axes, so increment it by this->nDims() + 1 and make
-  // sure the result is within this->nDims() + 1. being at this->nDims()
-  // means producer will be computed inline with this, hence the +1.
-  if (position < 0)
-    position += int(this->nDims()) + 1;
-  TORCH_CHECK(
-      position >= 0 && (unsigned int)position < this->nDims() + 1,
-      "Compute at called on an position outside valid range.");
-
-  ComputeAt::runWith(this, consumer, (unsigned int)position, mode);
-
-  return this;
-}
-
-TensorView* TensorView::split(int axis_, Val* factor, bool inner_split) {
+TensorView* TensorView::split(int axis, Val* factor) {
   // Only check things associated with axis, factor will be validated in
   // IterDomain
   TORCH_INTERNAL_ASSERT(nDims() > 0, "Tried to do split on a 0-dim TensorView");
 
-  if (axis_ < 0)
-    axis_ += domain()->nDims();
+  if (axis < 0)
+    axis += domain()->nDims();
 
-  TORCH_INTERNAL_ASSERT(
-      axis_ >= 0,
-      "Split axis is less than 0 even after adjusting for nDims: ",
-      axis_);
+  if (getComputeAtView() != nullptr)
+    if (axis < (int)getThisComputeAtAxis())
+      TORCH_CHECK(
+          false,
+          "Cannot split axis within compute at range. Axis = ",
+          axis,
+          " thisComputeAtAxis = ",
+          getThisComputeAtAxis());
 
-  TORCH_CHECK(
-      axis_ >= (int)getComputeAtPosition(),
-      "Cannot split axis within compute at position. Axis = ",
-      axis_,
-      " computeAtPosition = ",
-      getComputeAtPosition());
-
-  TORCH_CHECK(
-      axis_ >= (int)getMaxProducerPosition(),
-      "Cannot split axis within max producer position. Axis = ",
-      axis_,
-      " maxProducerPosition = ",
-      getMaxProducerPosition());
-
-  TORCH_CHECK(
-      axis(axis_)->getParallelType() == ParallelType::Serial,
-      "Splitting an axis of non-Serial parallel type is not supported at this time."
-      " Parallelization strategy must be set after calling split.");
-
-  domain()->split(axis_, factor, inner_split);
+  domain()->split(axis, factor);
   return this;
 }
 
-TensorView* TensorView::split(int axis, unsigned int factor, bool inner_split) {
-  split(axis, new Int(factor), inner_split);
+TensorView* TensorView::split(int axis, unsigned int factor) {
+  domain()->split(axis, new Int(factor));
   return this;
 }
 
 // Merge "axis" and "axis+1" into 1 dimension
 TensorView* TensorView::merge(int axis_o, int axis_i) {
   TORCH_INTERNAL_ASSERT(nDims() > 0, "Tried to do merge on a 0-dim TensorView");
-
   if (axis_o < 0)
     axis_o += domain()->nDims();
 
   if (axis_i < 0)
     axis_i += domain()->nDims();
 
-  TORCH_CHECK(
-      axis_o >= (int)getComputeAtPosition() &&
-          axis_i >= (int)getComputeAtPosition(),
-      false,
-      "Cannot merge axes within compute at position. Either axis ",
-      axis_o,
-      " or ",
-      axis_i,
-      " are within computeAtPosition = ",
-      getComputeAtPosition());
-
-  TORCH_CHECK(
-      axis_o >= (int)getMaxProducerPosition() &&
-          axis_i >= (int)getMaxProducerPosition(),
-      "Cannot merge axes within max producer position. Either axis ",
-      axis_o,
-      " or ",
-      axis_i,
-      " are within maxProducerPosition = ",
-      getMaxProducerPosition());
-
-  TORCH_CHECK(
-      axis(axis_o)->getParallelType() == ParallelType::Serial ||
-          axis(axis_i)->getParallelType() == ParallelType::Serial,
-      "Merging axes of non-Serial parallel type is not supported at this time."
-      " Parallelization strategy must be set after calling split.");
+  if (getComputeAtView() != nullptr)
+    if (axis_o + 1 < (int)getThisComputeAtAxis() ||
+        axis_i + 1 < (int)getThisComputeAtAxis())
+      TORCH_CHECK(
+          false,
+          "Cannot merge axis within compute at range. Either axis ",
+          axis_o,
+          " or ",
+          axis_i,
+          " are within thisComputeAtAxis = ",
+          getThisComputeAtAxis());
 
   domain()->merge(axis_o, axis_i);
   return this;
@@ -331,119 +338,24 @@ TensorView* TensorView::reorder(const std::unordered_map<int, int>& old2new_) {
   TORCH_INTERNAL_ASSERT(
       !(nDims() == 0 && old2new_.size() > 0),
       "Tried to reorder a 0-dim TensorView");
-
-  for (auto entry : old2new_) {
-    auto old_pos = entry.first < 0 ? entry.first + (int)nDims() : entry.first;
-    auto new_pos =
-        entry.second < 0 ? entry.second + (int)nDims() : entry.second;
-    if (old_pos == new_pos) {
-      continue;
-    }
-    TORCH_INTERNAL_ASSERT(
-        old_pos >= 0,
-        "Found \"old\" position that's less than 0 even though already adjusted by nDims: ",
-        old_pos);
-    TORCH_INTERNAL_ASSERT(
-        new_pos >= 0,
-        "Found \"new\" position that's less than 0 even though already adjusted by nDims: ",
-        new_pos);
-    TORCH_CHECK(
-        old_pos >= (int)getComputeAtPosition() &&
-            new_pos >= (int)getComputeAtPosition(),
-        "Cannot reorder axes within compute at position. Either axis ",
-        old_pos,
-        " or ",
-        new_pos,
-        " are within computeAtPosition = ",
-        getComputeAtPosition());
-
-    TORCH_CHECK(
-        old_pos >= (int)getMaxProducerPosition() &&
-            new_pos >= (int)getMaxProducerPosition(),
-        "Cannot reorder axes within max producer position. Either axis ",
-        old_pos,
-        " or ",
-        new_pos,
-        " are within maxProducerPosition = ",
-        getMaxProducerPosition());
-  }
-
   domain()->reorder(old2new_);
   return this;
 }
 
-TensorView* TensorView::swizzle(
-    SwizzleType type,
-    const std::vector<int>& axes) {
-  swizzle_type_ = type;
-
-  // Clear previously set swizzle axes if any
-  if (axes_to_swizzle_.size()) {
-    axes_to_swizzle_.clear();
-  }
-
-  if (swizzle_type_ == SwizzleType::Transpose) {
-    TORCH_CHECK(
-        axes.size() == 2,
-        "Invalid axis list: ",
-        axes,
-        ". Number of axes must be two.");
-    TORCH_CHECK(
-        axes[0] != axes[1],
-        "Invalid axis list: ",
-        axes,
-        ". Two distinctive axes must be given.");
-    TORCH_CHECK(
-        getMemoryType() == MemoryType::Shared,
-        "Transpose swizzle is meant for tensors on shared memory.");
-    for (auto pos : axes) {
-      if (pos < 0) {
-        pos += nDims();
-      }
-      TORCH_CHECK(pos >= 0 && pos < (int)nDims(), "Invalid axis: ", pos);
-      TORCH_CHECK(
-          pos >= (int)getComputeAtPosition(),
-          "Invalid axis: ",
-          pos,
-          ". Axis outside computeAt position is not allocated.");
-      TORCH_CHECK(
-          !axis(pos)->isReduction(),
-          "Invalid axis: ",
-          pos,
-          ". Swizzling a reduction axis is not supported");
-      TORCH_CHECK(
-          !axis(pos)->isBroadcast(),
-          "Invalid axis: ",
-          pos,
-          ". Swizzling a broadcast axis is not supported");
-      axes_to_swizzle_.push_back(axis(pos));
-    }
-  }
-
-  return this;
-}
-
 TensorView* TensorView::rFactor(const std::vector<int>& axes) {
-  // TODO: I think we should do this but
-  // NVFuserTest.FusionSmemBlockGemmCache_CUDA prevents it from going in at the
-  // moment.
-
-  // TORCH_INTERNAL_ASSERT(
-  //     !hasComputeAt(), "Cannot rfactor tensors after compute at has been
-  //     set.");
   TORCH_INTERNAL_ASSERT(nDims() > 0, "Tried to rFactor a 0-dim TensorView");
-  TORCH_INTERNAL_ASSERT(definition()->isA<ReductionOp>());
   FusionGuard fg(fusion());
+  Expr* origin_expr = fusion()->origin(this);
   TORCH_CHECK(
-      definition() != nullptr &&
-          definition()->getExprType() == ExprType::ReductionOp,
+      origin_expr != nullptr &&
+          origin_expr->getExprType() == ExprType::ReductionOp,
       "Error rfactoring ",
       this,
-      " its definition is either a nullptr or not a reduction.");
+      " its origin is either a nullptr or not a reduction.");
   TORCH_CHECK(
       !domain()->hasRFactor(), "Cannot call rfactor on the same view twice.");
 
-  ReductionOp* this_definition = definition()->as<ReductionOp>();
+  ReductionOp* this_origin = origin_expr->as<ReductionOp>();
 
   // Split tensor view into 2 parts
   auto domain_pair = domain()->rFactor(axes);
@@ -461,278 +373,106 @@ TensorView* TensorView::rFactor(const std::vector<int>& axes) {
   TensorView* consumer = this;
 
   // Setup dependency chain, inserting producer before this op.
-  // Expr* producer_definition =
+  // Expr* producer_origin =
   new ReductionOp(
-      this_definition->getReductionOpType(),
-      this_definition->init(),
+      this_origin->getReductionOpType(),
+      this_origin->init(),
       producer,
-      this_definition->in());
+      this_origin->in());
 
-  // Expr* consumer_definition =
+  // Expr* consumer_origin =
   new ReductionOp(
-      this_definition->getReductionOpType(),
-      this_definition->init(),
+      this_origin->getReductionOpType(),
+      this_origin->init(),
       consumer,
       producer);
 
   return producer;
 }
 
-TensorView* TensorView::welfordRfactorHelper(
-    TensorView* tv,
-    const std::vector<int>& axes) {
-  // Hack:
-  // Semantically we should always keep the outputs of welfordOp scheduled
-  // the same but the user end cannot guarantee that.
-  // In order to guarantee that the rFactor is defined meaningfully the
-  // scheduling of the output TV that got the rfactor call is force replayed
-  // towards the other two
-
-  if (!sameAs(tv)) {
-    auto root = tv->getRootDomain();
-    auto this_root = getRootDomain();
-
-    // construct a trivial root domain map
-    std::unordered_map<IterDomain*, IterDomain*> id_map;
-    for (size_t i = 0; i < root.size(); i++) {
-      id_map[this_root[i]] = root[i];
-    }
-
-    // replay on the target tv
-    ReplayTransformations replay(domain()->domain(), id_map);
-
-    // construct the new tensor domain
-    std::vector<IterDomain*> new_id;
-    for (auto id : domain()->domain()) {
-      TORCH_INTERNAL_ASSERT(
-          replay.getReplay().count(id), "Welford Replay Failed");
-      new_id.push_back(replay.getReplay().at(id));
-    }
-
-    std::vector<bool> new_contig(
-        tv->domain()->contiguity().begin(), tv->domain()->contiguity().end());
-    // replace tensor domain of target tv
-    tv->setDomain(new TensorDomain(tv->getRootDomain(), new_id, new_contig));
-  }
-
-  // Split tensor view into 2 parts
-  auto domain_pair = tv->domain()->rFactor(axes);
-  // Producer in the pair
-  auto producer_domain = domain_pair.first;
-  // Consumer in the pair
-  auto consumer_domain = domain_pair.second;
-
-  // This domain will be the consumer, so create the producer
-  TensorView* producer =
-      new TensorView(producer_domain, tv->getDataType().value());
-
-  // Set domain of consumer
-  tv->setDomain(consumer_domain);
-
-  return producer;
-}
-
-WelfordResult TensorView::rFactor(
-    const std::vector<int>& axes,
-    TensorView* avg,
-    TensorView* var,
-    TensorView* n) {
-  TORCH_INTERNAL_ASSERT(nDims() > 0, "Tried to rFactor a 0-dim TensorView");
-  FusionGuard fg(fusion());
-  TORCH_CHECK(
-      definition() != nullptr &&
-          definition()->getExprType() == ExprType::WelfordOp,
-      "Error rfactoring welford ",
-      this,
-      " its definition is either a nullptr or not a welford.");
-  TORCH_CHECK(
-      !domain()->hasRFactor(), "Cannot call rfactor on the same view twice.");
-
-  WelfordOp* wop = definition()->as<WelfordOp>();
-
-  TORCH_INTERNAL_ASSERT(
-      avg->sameAs(wop->outAvg()), "Welford rfactor not used correctly");
-  TORCH_INTERNAL_ASSERT(
-      var->sameAs(wop->outVar()), "Welford rfactor not used correctly");
-  TORCH_INTERNAL_ASSERT(
-      n->sameAs(wop->outN()), "Welford rfactor not used correctly");
-
-  std::vector<std::pair<TensorView*, TensorView*>> tv2rf{
-      {avg, nullptr}, {var, nullptr}, {n, nullptr}};
-
-  // Make sure this gets rfactored last so everybody gets
-  //  replayed correctly
-  for (auto& it : tv2rf) {
-    if (!sameAs(it.first)) {
-      it.second = welfordRfactorHelper(it.first, axes);
-    }
-  }
-
-  for (auto& it : tv2rf) {
-    if (sameAs(it.first)) {
-      it.second = welfordRfactorHelper(it.first, axes);
-    }
-  }
-
-  TensorView* producer_avg = tv2rf[0].second;
-  TensorView* producer_var = tv2rf[1].second;
-  TensorView* producer_n = tv2rf[2].second;
-
-  // Setup dependency chain, inserting producer before this op.
-  // Expr* producer_definition =
-  new WelfordOp(
-      producer_avg,
-      producer_var,
-      producer_n, /*out var/avg/count */
-      wop->initAvg(),
-      wop->initVar(),
-      wop->initN(), /*init var/avg/count */
-      wop->inAvg(),
-      wop->inVar(),
-      wop->inN());
-
-  // Expr* consumer_definition =
-  new WelfordOp(
-      avg,
-      var,
-      n,
-      wop->initAvg(),
-      wop->initVar(),
-      wop->initN(),
-      producer_avg,
-      producer_var,
-      producer_n);
-
-  return WelfordResult(producer_avg, producer_var, producer_n);
-}
-
 TensorView* TensorView::cache_before() {
   FusionGuard fg(fusion());
 
+  Expr* origin_expr = fusion()->origin(this);
   TORCH_CHECK(
-      definition() != nullptr && !isFusionInput(),
+      origin_expr != nullptr && !fusion()->hasInput(this),
       "Error adding cache_before ",
       this,
-      " its definition is a nullptr and we restrict using cache_before on an input.");
+      " its origin is a nullptr and we restrict using cache_before on an input.");
 
   TORCH_CHECK(
-      isFusionOutput() ||
-          definition()->getExprType() != ExprType::ReductionOp ||
-          definition()->getExprType() != ExprType::WelfordOp,
+      fusion()->hasOutput(this) ||
+          origin_expr->getExprType() != ExprType::ReductionOp,
       "Error adding cache_before ",
       this,
-      " its definition is a reduction and it is not an output, instead please use cache_after.");
-
-  // Previously, caching computed-at tensors was allowed but was never
-  // really robust. Make it an error unless it is really needed.
-  TORCH_CHECK(
-      !hasComputeAt(),
-      "Caching computed-at tensors is not allowed. Apply caching before computeAt");
-
-  // It also did additional transformation when a producer tensor has computeAt.
-  // Make sure we no longer rely on that behavior.
-  if (definition() != nullptr) {
-    for (TensorView* producer_of_producer :
-         ir_utils::filterByType<TensorView>(definition()->inputs())) {
-      TORCH_CHECK(
-          !producer_of_producer->hasComputeAt(),
-          "Potentially invalid computeAt and caching detected. Apply caching before computeAt.");
-    }
-  }
+      " its origin is a reduction and it is not an output, instead please use cache_after.");
 
   // Create Producer Domain
-  // This domain will be the consumer which needs a new domain, so replace the
-  // producers domain with this domain.
+  // This domain will be the consumer, so create the producer
   auto root_domain = getRootDomain();
-
   TensorView* producer = new TensorView(
       new TensorDomain(
-          domain()->getRootDomain(),
-          domain()->domain(),
-          domain()->contiguity()),
+          root_domain, std::vector<bool>(root_domain.size(), true)),
       getDataType().value());
 
   // Set domain of consumer
   TensorView* consumer = this;
 
-  size_t i = 0;
-  auto no_reduction_root_domain = TensorDomain::noReductions(getRootDomain());
-  std::vector<IterDomain*> new_root_domain(no_reduction_root_domain.size());
-  for (const auto& dom : no_reduction_root_domain) {
-    new_root_domain[i++] = dom->clone();
+  // this TV is an output and its origin is a reduction
+  // remove reduction axis from this tv
+  if (origin_expr->getExprType() == ExprType::ReductionOp) {
+    size_t i = 0;
+    auto no_reduction_root_domain = TensorDomain::noReductions(getRootDomain());
+    std::vector<IterDomain*> new_root_domain(no_reduction_root_domain.size());
+    for (const auto& dom : no_reduction_root_domain) {
+      new_root_domain[i++] = dom->clone();
+    }
+    consumer->setDomain(new TensorDomain(
+        new_root_domain, std::vector<bool>(new_root_domain.size(), true)));
   }
 
-  consumer->setDomain(new TensorDomain(
-      new_root_domain, std::vector<bool>(new_root_domain.size(), true)));
-
   // Insert producer - Cache_Before (CB) - before this TV.
-  // Before: Prev TV -> [Definition Op] -> This TV
-  // After:  Prev TV -> [Definition Op] -> New CB TV -> [Set Op] -> This TV
+  // Before: Prev TV -> [Origin Op] -> This TV
+  // After:  Prev TV -> [Origin Op] -> New CB TV -> [Set Op] -> This TV
 
   // Get inputs for origin expression
-  auto expr_inputs = definition()->inputs();
-  // Expr* producer_definition =
-  ir_utils::replaceValInExpr(definition(), this, producer);
+  auto expr_inputs = origin_expr->inputs();
+
+  // Expr* producer_origin =
+  createExprConsumer(origin_expr, producer);
 
   // Expr* producer_uses =
   new UnaryOp(UnaryOpType::Set, consumer, producer);
 
-  // definition_ is no longer valid
-  // setDefinition(nullptr);
+  // Before: This TV -> Next TV
+  // After:  New TV (CB) -> This TV -> Next TV
+  if (hasComputeAt()) {
+    TransformReplay::replayPasC(producer, consumer, -1);
+    auto this_ca_pos = getThisComputeAtAxis();
+    producer->computeAt(consumer, this_ca_pos);
+  } else {
+    // Before: Prev TV -> This TV
+    // After:  Prev TV -> New TV (CB) -> This TV
+    // Iterate over origin expression inputs for cache_before on outputs
+    for (TensorView* origin_input :
+         ir_utils::filterByType<TensorView>(expr_inputs)) {
+      if (origin_input->hasComputeAt() &&
+          origin_input->getComputeAtView() == this) {
+        TransformReplay::replayPasC(producer, consumer, -1);
 
-  auto replayed_consumer_pair =
-      TransformReplay::replayCasP(consumer, producer, -1);
-  consumer->setDomain(replayed_consumer_pair.first);
+        auto origin_ca_pos = origin_input->getThisComputeAtAxis();
+        auto origin_rel_ca_pos = origin_input->getRelativeComputeAtAxis();
+        origin_input->computeAt(producer, origin_ca_pos);
+        producer->setComputeAt(consumer, origin_rel_ca_pos);
+      }
+    }
+  }
 
   return producer;
 }
 
-TensorView* TensorView::cache_fork() {
-  FusionGuard fg(fusion());
-
-  // Before: [Expr] -> This TV (Global Output) -> [Usage Expr]
-  // After:  [Expr] -> This TV (Local) -> [Usage Expr] > Next TV
-  //                            (Fork) -> [Set Expr]   -> New TV (Global Output)
-
-  TORCH_CHECK(
-      fusion()->hasOutput(this) && !this->uses().empty(),
-      "Error adding cache_fork ",
-      this,
-      " this TensorView must be an output with subsequent uses");
-
-  // Previously, caching computed-at tensors was allowed but was never
-  // really robust. Make it an error unless it is really needed.
-  TORCH_CHECK(
-      !hasComputeAt(),
-      "Caching computed-at tensors is not allowed. Apply caching before computeAt");
-
-  // This domain will be the producer, so create the consumer
-  auto root_domain = TensorDomain::noReductions(getRootDomain());
-  TensorView* new_output = new TensorView(
-      new TensorDomain(
-          IterDomain::clone(root_domain),
-          std::vector<bool>(root_domain.size(), true)),
-      getDataType().value());
-
-  // Create write operation from this TV to new output
-  new UnaryOp(UnaryOpType::Set, new_output, this);
-
-  // The new TV becomes an output.
-  // New TV has global memory type.
-  // This TV has local memory type.
-  fusion()->replaceOutput(this, new_output);
-
-  // Transform new output according to this TV
-  auto replayed_output_pair = TransformReplay::replayCasP(new_output, this, -1);
-  new_output->setDomain(replayed_output_pair.first);
-
-  return new_output;
-}
-
 TensorView* TensorView::cache_after() {
   FusionGuard fg(fusion());
-
-  const bool kIsFusionInput = fusion()->hasInput(this);
 
   // Get all the uses for this Tensorview
   TORCH_CHECK(
@@ -740,26 +480,6 @@ TensorView* TensorView::cache_after() {
       "Error adding cache_after ",
       this,
       " we restrict using cache_after on an output.");
-
-  // Previously, caching computed-at tensors was allowed but was never
-  // really robust. Make it an error unless it is really needed.
-  TORCH_CHECK(
-      !hasComputeAt(),
-      "Caching computed-at tensors is not allowed. Apply caching before computeAt.");
-
-  // It also did additional transformation when this tensor is an
-  // input and the outputs of its consumers have computeAt. Make sure
-  // we no longer rely on that behavior.
-  if (kIsFusionInput) {
-    for (const auto& expr : uses()) {
-      for (TensorView* output :
-           ir_utils::filterByType<TensorView>(expr->outputs())) {
-        TORCH_CHECK(
-            !output->hasComputeAt(),
-            "Potentially invalid computeAt and caching detected. Apply caching before computeAt.");
-      }
-    }
-  }
 
   // Create Consumer Domain
   // Keep Broadcast Axis (Permanent)
@@ -786,11 +506,36 @@ TensorView* TensorView::cache_after() {
 
   // Expr* consumer_uses =
   for (auto expr : fusion()->unordered_uses(this)) {
-    ir_utils::replaceValInExpr(expr, this, consumer);
+    createExprProducer(expr, this, consumer);
   }
 
-  // Expr* consumer_definition =
+  // Expr* consumer_origin =
   new UnaryOp(UnaryOpType::Set, consumer, producer);
+
+  // Before: This TV -> Next TV
+  // After:  This TV -> New TV (After) -> Next TV
+  if (hasComputeAt()) {
+    TransformReplay::replayCasP(consumer, producer, -1);
+
+    auto rel_ca_pos = getRelativeComputeAtAxis();
+    auto this_ca_pos = getThisComputeAtAxis();
+    auto this_ca_view = getComputeAtView();
+
+    computeAt(consumer, this_ca_pos);
+    consumer->setComputeAt(this_ca_view, rel_ca_pos);
+  } else {
+    // Check users of this TV for computeAt for cache_after on inputs
+    for (const auto& expr : fusion()->unordered_uses(consumer)) {
+      for (TensorView* output :
+           ir_utils::filterByType<TensorView>(expr->outputs())) {
+        if (output->hasComputeAt()) {
+          TransformReplay::replayPasC(consumer, output, -1);
+          auto output_ca_pos = output->getThisComputeAtAxis();
+          consumer->setComputeAt(output, output_ca_pos);
+        }
+      }
+    }
+  }
 
   return consumer;
 }
@@ -804,76 +549,157 @@ void TensorView::setMemoryType(MemoryType mt) {
   }
 }
 
-void TensorView::clearReductionIterDomains() {
-  TORCH_INTERNAL_ASSERT(
-      !domain()->hasRFactor(),
-      "should not call clearReductionIterDomains on rfactor tv");
+namespace {
 
-  TORCH_INTERNAL_ASSERT(
-      domain()->domain() == getRootDomain(),
-      "should not call clearReductionIterDomains on already transformed TensorDomains");
-
-  std::vector<IterDomain*> new_root;
-  std::vector<bool> new_contig;
-  for (size_t i = 0; i < getRootDomain().size(); i++) {
-    if (!getRootDomain()[i]->isReduction()) {
-      new_root.push_back(getRootDomain()[i]);
-      new_contig.push_back(domain()->contiguity()[i]);
-    }
+// Create New Expr given consumer - [output of the expression]
+struct CreateExprConsumer : public OptInDispatch {
+ public:
+  static void create(Expr* expr, TensorView* consumer) {
+    CreateExprConsumer cec(consumer);
+    cec.handle(expr);
   }
 
-  setDomain(new TensorDomain(new_root, new_contig));
-}
+ private:
+  explicit CreateExprConsumer(TensorView* consumer) : consumer_(consumer) {}
 
-TensorViewBuilder& TensorViewBuilder::ndims(size_t ndims) {
-  TORCH_CHECK(shape_.empty() || shape_.size() == ndims);
-  TORCH_CHECK(contiguity_.empty() || contiguity_.size() == ndims);
-  ndims_ = ndims;
-  return *this;
-}
-
-TensorViewBuilder& TensorViewBuilder::dtype(DataType dtype) {
-  dtype_ = dtype;
-  return *this;
-}
-
-TensorViewBuilder& TensorViewBuilder::contiguity(std::vector<bool> contiguity) {
-  TORCH_CHECK(contiguity_.empty(), "Attempting to reset contiguity");
-  if (!contiguity.empty()) {
-    TORCH_CHECK(ndims_ == 0 || ndims_ == contiguity.size());
-    ndims_ = contiguity.size();
+  void handle(Expr* expr) final {
+    OptInDispatch::handle(expr);
   }
-  contiguity_ = std::move(contiguity);
-  return *this;
-}
 
-TensorViewBuilder& TensorViewBuilder::shape(std::vector<int64_t> shape) {
-  TORCH_CHECK(shape_.empty(), "Attempting to reset shape");
-  if (!shape.empty()) {
-    TORCH_CHECK(ndims_ == 0 || ndims_ == shape.size());
-    ndims_ = shape.size();
+  void handle(UnaryOp* unary_expr) final {
+    new UnaryOp(unary_expr->getUnaryOpType(), consumer_, unary_expr->in());
   }
-  shape_ = std::move(shape);
-  return *this;
-}
 
-TensorView* TensorViewBuilder::build() const {
-  // Build the domain
-  std::vector<IterDomain*> domain(ndims_, nullptr);
-  for (size_t i = 0; i < ndims_; i++) {
-    if (shape_.empty() || shape_[i] == -1) {
-      domain[i] = new IterDomain(new Int(0), new Int());
+  void handle(BinaryOp* binary_expr) final {
+    new BinaryOp(
+        binary_expr->getBinaryOpType(),
+        consumer_,
+        binary_expr->lhs(),
+        binary_expr->rhs());
+  }
+
+  void handle(TernaryOp* ternary_expr) final {
+    new TernaryOp(
+        ternary_expr->getTernaryOpType(),
+        consumer_,
+        ternary_expr->in1(),
+        ternary_expr->in2(),
+        ternary_expr->in3());
+  }
+
+  void handle(ReductionOp* reduction_expr) final {
+    new ReductionOp(
+        reduction_expr->getReductionOpType(),
+        reduction_expr->init(),
+        consumer_,
+        reduction_expr->in());
+  }
+
+  void handle(BroadcastOp* broadcast_expr) final {
+    new BroadcastOp(consumer_, broadcast_expr->in());
+  }
+
+ private:
+  TensorView* consumer_ = nullptr;
+};
+
+// Create New Expr given producer - [an input for the expression]
+struct CreateExprProducer : public OptInDispatch {
+ public:
+  static void create(Expr* expr, TensorView* current, TensorView* producer) {
+    CreateExprProducer cep(current, producer);
+    cep.handle(expr);
+  }
+
+ private:
+  explicit CreateExprProducer(TensorView* current, TensorView* producer)
+      : current_(current), producer_(producer) {}
+
+  void handle(Expr* expr) final {
+    OptInDispatch::handle(expr);
+  }
+
+  void handle(UnaryOp* unary_expr) final {
+    new UnaryOp(unary_expr->getUnaryOpType(), unary_expr->out(), producer_);
+  }
+
+  void handle(BinaryOp* binary_expr) final {
+    if (binary_expr->lhs()->sameAs(current_)) {
+      new BinaryOp(
+          binary_expr->getBinaryOpType(),
+          binary_expr->out(),
+          producer_,
+          binary_expr->rhs());
     } else {
-      TORCH_CHECK(
-          shape_[i] >= 0,
-          "Invalid extent value. ",
-          "For a tensor representing a single scalar use ndims = 0 with no sizes set.");
-      domain[i] = new IterDomain(new Int(0), new Int(shape_[i]));
+      new BinaryOp(
+          binary_expr->getBinaryOpType(),
+          binary_expr->out(),
+          binary_expr->lhs(),
+          producer_);
     }
   }
 
-  // Create the final TensorView
-  return new TensorView(new TensorDomain(domain, contiguity_), dtype_);
+  void handle(TernaryOp* ternary_expr) final {
+    if (ternary_expr->in1()->sameAs(current_)) {
+      new TernaryOp(
+          ternary_expr->getTernaryOpType(),
+          ternary_expr->out(),
+          producer_,
+          ternary_expr->in2(),
+          ternary_expr->in3());
+    } else if (ternary_expr->in2()->sameAs(current_)) {
+      new TernaryOp(
+          ternary_expr->getTernaryOpType(),
+          ternary_expr->out(),
+          ternary_expr->in1(),
+          producer_,
+          ternary_expr->in3());
+    } else {
+      new TernaryOp(
+          ternary_expr->getTernaryOpType(),
+          ternary_expr->out(),
+          ternary_expr->in1(),
+          ternary_expr->in2(),
+          producer_);
+    }
+  }
+
+  void handle(ReductionOp* reduction_expr) final {
+    new ReductionOp(
+        reduction_expr->getReductionOpType(),
+        reduction_expr->init(),
+        reduction_expr->out(),
+        producer_);
+  }
+
+  void handle(BroadcastOp* broadcast_expr) final {
+    new BroadcastOp(broadcast_expr->out(), producer_);
+  }
+
+ private:
+  TensorView* current_ = nullptr;
+  TensorView* producer_ = nullptr;
+};
+
+} // namespace
+
+// In Cache Before, for the origin expr of the original tensor,
+// we create a new operation where the original tensor is replaced
+// with the new cache tensor. This function creates a new expr
+// given the consumer, the output of the expression.
+void TensorView::createExprConsumer(Expr* expr, TensorView* consumer) {
+  CreateExprConsumer::create(expr, consumer);
+}
+
+// In Cache After, for all the uses of the original tensor, we create
+// a new operation where the original tensor is replaced with the new
+// cache tensor. This function creates a new expr given a producer,
+// an input for the expression.
+void TensorView::createExprProducer(
+    Expr* expr,
+    TensorView* current,
+    TensorView* producer) {
+  CreateExprProducer::create(expr, current, producer);
 }
 
 } // namespace cuda

@@ -1,4 +1,3 @@
-
 namespace broadcast {
 
 template <bool X_THREAD, bool Y_THREAD, bool Z_THREAD>
@@ -24,28 +23,19 @@ __host__ __device__ unsigned offset_of_source(
 // out: Per-thread output location
 //
 template <bool X_THREAD, bool Y_THREAD, bool Z_THREAD, typename T>
-__device__ void blockBroadcast(
-    T& out,
-    const T& inp_val,
-    T* shared_mem,
-    bool read_write_pred) {
+__device__ void blockBroadcast(T& out, T inp_val, T* shared_mem) {
   const bool has_valid_data = (!X_THREAD || threadIdx.x == 0) &&
       (!Y_THREAD || threadIdx.y == 0) && (!Z_THREAD || threadIdx.z == 0);
 
   const auto shared_offset =
       offset_of_source<X_THREAD, Y_THREAD, Z_THREAD>(blockDim, threadIdx);
 
-  if (has_valid_data && read_write_pred) {
+  if (has_valid_data)
     shared_mem[shared_offset] = inp_val;
-  }
 
-  block_sync::sync();
+  __syncthreads();
 
-  if (read_write_pred) {
-    out = shared_mem[shared_offset];
-  }
-
-  block_sync::sync();
+  out = shared_mem[shared_offset];
 }
 
 } // namespace broadcast
