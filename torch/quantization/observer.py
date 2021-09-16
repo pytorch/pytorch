@@ -1272,16 +1272,16 @@ def _is_activation_post_process(module):
     return (
         isinstance(module, torch.quantization.ObserverBase)
         or isinstance(module, torch.quantization.FakeQuantize)
-        or _is_observer_script_module(module, "torch.quantization.observer")
+        or _is_observer_script_module(module, "quantization.observer")
     )
 
 
 def _is_per_channel_script_obs_instance(module):
     if isinstance(module, torch.jit.RecursiveScriptModule):
         return _is_observer_script_module(
-            module, "torch.quantization.observer.PerChannelMinMaxObserver"
+            module, "quantization.observer.PerChannelMinMaxObserver"
         ) or _is_observer_script_module(
-            module, "torch.quantization.observer.MovingAveragePerChannelMinMaxObserver"
+            module, "quantization.observer.MovingAveragePerChannelMinMaxObserver"
         )
     return False
 

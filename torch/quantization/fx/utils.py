@@ -1,7 +1,7 @@
 import re
 import torch
 import torch.nn as nn
-from torch.ao.quantization.utils import is_per_tensor, is_per_channel
+from ..utils import is_per_tensor, is_per_channel
 from torch.ao.quantization.quantize import is_activation_post_process
 
 from torch.fx import GraphModule, map_arg
