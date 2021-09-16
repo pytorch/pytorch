@@ -523,7 +523,7 @@ class TestProfiler(TestCase):
 
         dummy_function_found = False
         for e in p.function_events:
-            if "DummyFunction" in e.name:
+            if "DummyFunction" == e.name:
                 dummy_function_found = True
                 self.assertTrue(e.input_shapes == [[3, 4, 5]])
         self.assertTrue(dummy_function_found)
