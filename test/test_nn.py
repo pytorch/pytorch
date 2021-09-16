@@ -11811,6 +11811,18 @@ class TestNNInit(TestCase):
                 assert self._is_uniform(input_tensor, -bounds, bounds)
 
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found.")
+    def test_xavier_uniform_reproducibility(self):
+        # testing multiple scenarios
+        gen1 = torch.Generator().manual_seed(123)
+        gen2 = torch.Generator().manual_seed(123)
+        for dims in [2, 4]:
+            input_tensor1 = self._create_random_nd_tensor(dims, size_min=20, size_max=20)
+            input_tensor2 = self._create_random_nd_tensor(dims, size_min=20, size_max=20)
+            init.xavier_uniform_(input_tensor1, generator=gen1)
+            init.xavier_uniform_(input_tensor2, generator=gen2)
+            assert torch.eq(input_tensor1, input_tensor2)
+
+    @unittest.skipIf(not TEST_SCIPY, "Scipy not found.")
     def test_xavier_normal(self):
         for use_gain in [True, False]:
             for dims in [2, 4]:
@@ -11831,6 +11843,18 @@ class TestNNInit(TestCase):
 
                 expected_std = gain * math.sqrt(2.0 / (fan_in + fan_out))
                 assert self._is_normal(input_tensor, 0, expected_std)
+
+    @unittest.skipIf(not TEST_SCIPY, "Scipy not found.")
+    def test_xavier_normal_reproducibility(self):
+        # testing multiple scenarios
+        gen1 = torch.Generator().manual_seed(123)
+        gen2 = torch.Generator().manual_seed(123)
+        for dims in [2, 4]:
+            input_tensor1 = self._create_random_nd_tensor(dims, size_min=20, size_max=20)
+            input_tensor2 = self._create_random_nd_tensor(dims, size_min=20, size_max=20)
+            init.xavier_normal_(input_tensor1, generator=gen1)
+            init.xavier_normal_(input_tensor2, generator=gen2)
+            assert torch.eq(input_tensor1, input_tensor2)
 
     def test_kaiming_uniform_errors_on_inputs_smaller_than_2d(self):
         for dims in [0, 1]:
@@ -11881,6 +11905,18 @@ class TestNNInit(TestCase):
                     expected_std = math.sqrt(2.0 / ((1 + a**2) * n))
                     bounds = expected_std * math.sqrt(3.0)
                     assert self._is_uniform(input_tensor, -bounds, bounds)
+    
+    @unittest.skipIf(not TEST_SCIPY, "Scipy not found.")
+    def test_kaiming_uniform_reproducibility(self):
+        # testing multiple scenarios
+        gen1 = torch.Generator().manual_seed(123)
+        gen2 = torch.Generator().manual_seed(123)
+        for dims in [2, 4]:
+            input_tensor1 = self._create_random_nd_tensor(dims, size_min=20, size_max=20)
+            input_tensor2 = self._create_random_nd_tensor(dims, size_min=20, size_max=20)
+            init.kaiming_uniform_(input_tensor1, generator=gen1)
+            init.kaiming_uniform_(input_tensor2, generator=gen2)
+            assert torch.eq(input_tensor1, input_tensor2)
 
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found.")
     def test_kaiming_normal(self):
@@ -11908,6 +11944,18 @@ class TestNNInit(TestCase):
 
                     expected_std = math.sqrt(2.0 / ((1 + a**2) * n))
                     assert self._is_normal(input_tensor, 0, expected_std)
+
+    @unittest.skipIf(not TEST_SCIPY, "Scipy not found.")
+    def test_kaiming_normal_reproducibility(self):
+        # testing multiple scenarios
+        gen1 = torch.Generator().manual_seed(123)
+        gen2 = torch.Generator().manual_seed(123)
+        for dims in [2, 4]:
+            input_tensor1 = self._create_random_nd_tensor(dims, size_min=20, size_max=20)
+            input_tensor2 = self._create_random_nd_tensor(dims, size_min=20, size_max=20)
+            init.kaiming_normal_(input_tensor1, generator=gen1)
+            init.kaiming_normal_(input_tensor2, generator=gen2)
+            assert torch.eq(input_tensor1, input_tensor2)
 
     def test_sparse_only_works_on_2d_inputs(self):
         for dims in [1, 3]:
