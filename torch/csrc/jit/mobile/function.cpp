@@ -40,26 +40,20 @@ bool Function::append_operator(
   code_->op_names_.emplace_back(name, overload_name);
   const auto& opname = code_->op_names_.back();
 
-  const auto& opname_c10 = opname;
   std::function<void(Stack&)> fn;
 
-  std::shared_ptr<Operator> jit_op;
   const std::vector<c10::Argument>* pArgs = nullptr;
   bool promoted_op = mobile::hasPrimOpsFn(name);
   if (promoted_op) {
     std::cout << "Using promoted prim ops for op: " << name << std::endl;
     fn = mobile::getPrimOpsFn(name);
-    //    Operator op =
-    //        Operator(schema, fn,
-    //        c10::AliasAnalysisKind::INTERNAL_SPECIAL_CASE);
-    //    pArgs = &op.schema().arguments();
   } else {
-    jit_op = findOperatorFor(opname);
+    std::shared_ptr<Operator> jit_op = findOperatorFor(opname);
     if (jit_op) {
       fn = [jit_op](Stack& stack) { jit_op->getOperation()(stack); };
       pArgs = &jit_op->schema().arguments();
     } else {
-      auto op = c10::Dispatcher::singleton().findSchema(opname_c10);
+      auto op = c10::Dispatcher::singleton().findSchema(opname);
       if (op.has_value()) {
         fn = [op](Stack& stack) { op->callBoxed(&stack); };
         if (op->hasSchema()) {

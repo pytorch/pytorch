@@ -18,7 +18,17 @@ bool hasPrimOpsFn(const std::string& name);
 
 std::function<void(Stack&)>& getPrimOpsFn(const std::string& name);
 
-void add_functions();
+class prim_op_fn_register {
+  std::string prim_ops_name_;
+
+ public:
+  prim_op_fn_register(
+      const std::string& name,
+      const std::function<void(Stack&)>& fn)
+      : prim_ops_name_(name) {
+    registerPrimOpsFunction(name, fn);
+  }
+};
 
 } // namespace mobile
 } // namespace jit
