@@ -11822,7 +11822,7 @@ class TestNNInit(TestCase):
             input_tensor2 = self._create_random_nd_tensor(dims, size_min=20, size_max=20)
             init.xavier_uniform_(input_tensor1, generator=gen1)
             init.xavier_uniform_(input_tensor2, generator=gen2)
-            assert self.assertEqual(input_tensor1, input_tensor2, rtol=rtol, atol=atol)
+            self.assertEqual(input_tensor1, input_tensor2, rtol=rtol, atol=atol)
 
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found.")
     def test_xavier_normal(self):
@@ -11858,7 +11858,7 @@ class TestNNInit(TestCase):
             input_tensor2 = self._create_random_nd_tensor(dims, size_min=20, size_max=20)
             init.xavier_normal_(input_tensor1, generator=gen1)
             init.xavier_normal_(input_tensor2, generator=gen2)
-            assert self.assertEqual(input_tensor1, input_tensor2, rtol=rtol, atol=atol)
+            self.assertEqual(input_tensor1, input_tensor2, rtol=rtol, atol=atol)
 
     def test_kaiming_uniform_errors_on_inputs_smaller_than_2d(self):
         for dims in [0, 1]:
@@ -11922,7 +11922,7 @@ class TestNNInit(TestCase):
             input_tensor2 = self._create_random_nd_tensor(dims, size_min=20, size_max=20)
             init.kaiming_uniform_(input_tensor1, generator=gen1)
             init.kaiming_uniform_(input_tensor2, generator=gen2)
-            assert self.assertEqual(input_tensor1, input_tensor2, rtol=rtol, atol=atol)
+            self.assertEqual(input_tensor1, input_tensor2, rtol=rtol, atol=atol)
 
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found.")
     def test_kaiming_normal(self):
@@ -11963,7 +11963,7 @@ class TestNNInit(TestCase):
             input_tensor2 = self._create_random_nd_tensor(dims, size_min=20, size_max=20)
             init.kaiming_normal_(input_tensor1, generator=gen1)
             init.kaiming_normal_(input_tensor2, generator=gen2)
-            assert self.assertEqual(input_tensor1, input_tensor2, rtol=rtol, atol=atol)
+            self.assertEqual(input_tensor1, input_tensor2, rtol=rtol, atol=atol)
 
     def test_sparse_only_works_on_2d_inputs(self):
         for dims in [1, 3]:
