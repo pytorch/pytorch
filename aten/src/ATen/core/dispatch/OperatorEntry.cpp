@@ -77,7 +77,7 @@ void OperatorEntry::deregisterSchema() {
   dispatchKeyExtractor_.deregisterSchema();
 }
 
-std::list<AnnotatedKernel>::iterator OperatorEntry::registerKernel(
+OperatorEntry::AnnotatedKernelContainerIterator OperatorEntry::registerKernel(
   const c10::Dispatcher& dispatcher,
   c10::optional<DispatchKey> dispatch_key,
   KernelFunction kernel,
@@ -119,7 +119,11 @@ std::list<AnnotatedKernel>::iterator OperatorEntry::registerKernel(
   // Redirect catchAll registrations to CompositeImplicitAutograd.
   auto& k = dispatch_key.has_value() ? kernels_[*dispatch_key] : kernels_[DispatchKey::CompositeImplicitAutograd];
 
+#ifdef C10_DISPATCHER_ONE_KERNEL_PER_DISPATCH_KEY
+  if (k[0].kernel.isValid()) {
+#else
   if (k.size() > 0) {
+#endif
     TORCH_WARN("Overriding a previously registered kernel for the same operator and the same dispatch key\n",
                "  operator: ", (schema_.has_value() ? toString(schema_->schema) : toString(name_)), "\n",
                "    ", (this->schema_.has_value() ? this->schema_->debug : "no debug info"), "\n",
@@ -129,8 +133,14 @@ std::list<AnnotatedKernel>::iterator OperatorEntry::registerKernel(
     );
   }
 
+#ifdef C10_DISPATCHER_ONE_KERNEL_PER_DISPATCH_KEY
+  k[0].kernel = std::move(kernel);
+  k[0].inferred_function_schema = std::move(inferred_function_schema);
+  k[0].debug = std::move(debug);
+#else
   k.emplace_front(std::move(kernel), std::move(inferred_function_schema), std::move(debug));
-  std::list<AnnotatedKernel>::iterator inserted = k.begin();
+#endif
+  AnnotatedKernelContainerIterator inserted = k.begin();
   // update the dispatch table, i.e. re-establish the invariant
   // that the dispatch table points to the newest kernel
   if (dispatch_key.has_value()) {
@@ -144,14 +154,18 @@ std::list<AnnotatedKernel>::iterator OperatorEntry::registerKernel(
 void OperatorEntry::deregisterKernel_(
   const c10::Dispatcher& dispatcher,
   c10::optional<DispatchKey> dispatch_key,
-  std::list<AnnotatedKernel>::iterator kernel
+  AnnotatedKernelContainerIterator kernel
 ) {
   // Redirect catchAll deregistrations to CompositeImplicitAutograd.
   DispatchKey dk = dispatch_key.has_value() ? *dispatch_key : DispatchKey::CompositeImplicitAutograd;
   auto found = kernels_.find(dk);
   TORCH_INTERNAL_ASSERT(found != kernels_.end(), "Tried to deregister a kernel for dispatch key ", toString(dispatch_key), " but there are no kernels registered for this dispatch key. The operator is ", toString(name_));
   auto& k = found->second;
+#ifdef C10_DISPATCHER_ONE_KERNEL_PER_DISPATCH_KEY
+  // We are about to remove the array from the map, no need to do anything.
+#else
   k.erase(kernel);
+#endif
   if (k.empty()) {
     // the invariant says we don't want empty lists but instead remove the list from the map
     kernels_.erase(found);
@@ -455,7 +469,7 @@ std::string OperatorEntry::dumpState() const {
     oss << "schema: (none)\n";
   }
 
-  auto print_kernel = [&](const char* k_desc, const std::list<AnnotatedKernel>& jts, bool is_alias_key=false) {
+  auto print_kernel = [&](const char* k_desc, const AnnotatedKernelContainer& jts, bool is_alias_key=false) {
     int64_t i = 0;
     for (const auto& jt : jts) {
       oss << k_desc
