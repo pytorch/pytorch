@@ -1327,20 +1327,30 @@ struct to_ir {
       const F2& do_if_match,
       const F3& do_if_anytype) {
     if (auto union_type_hint = (*refined_type_hint_ptr)->cast<UnionType>()) {
+      // `candidate_types` holds all List types that were in the Union
+      // annotation
       std::vector<TypePtr> candidate_types;
+
       std::copy_if(
           union_type_hint->containedTypes().begin(),
           union_type_hint->containedTypes().end(),
           std::back_inserter(candidate_types),
           [&](TypePtr type_ptr) { return type_match(type_ptr); });
+
       if (candidate_types.empty()) {
         throw ErrorReport(src)
             << "Expected an Union type annotation "
             << "with an inner " << match_repr << " type, but got "
             << (*refined_type_hint_ptr)->repr_str();
       } else if (candidate_types.size() == 1) {
+        // The Union only had a single type of the container we want to
+        // match, so we can unconditionally refine it to that type
         (*refined_type_hint_ptr) = candidate_types[0];
       } else {
+        // We can't refine the Union yet, since it contains multiple
+        // types of the container we want to match, but we do at least
+        // have a list of possiblee types (e.g. `Union[List[int],
+        // List[str], float, str]` -> candidates={List[int], List[str]})
         (*all_candidates) = std::move(candidate_types);
       }
     } else if (
@@ -1349,8 +1359,8 @@ struct to_ir {
       (*refined_type_hint_ptr) = optional_type_hint->getElementType();
     }
 
-    // If we had any annotation OTHER THAN a Union that can hold more
-    // than one type of List
+    // If we had any annotation that was NOT a Union that can hold more
+    // than one type of the container we want to match
     if (all_candidates->empty()) {
       if (type_match(*refined_type_hint_ptr)) {
         do_if_match();
@@ -1473,9 +1483,11 @@ struct to_ir {
 
     if (refined_type_hint) {
       auto do_if_type_match = [&]() { list_value->setType(refined_type_hint); };
+
       auto type_match = [&](const TypePtr& t) {
         return t->isSubtypeOf(AnyListType::get());
       };
+
       refineAndSetTypeHintOrPopulateCandidatesVector(
           type_hint,
           &refined_type_hint,
@@ -1565,8 +1577,11 @@ struct to_ir {
             *unified_elem_type,
             lc);
       } else if (!refined_type_hint) {
-        list_value->setType(ListType::create(*unified_elem_type));
+        refined_type_hint = ListType::create(*unified_elem_type);
       }
+
+      list_value->setType(refined_type_hint);
+      out->setType(refined_type_hint->expect<ListType>()->getElementType());
 
       NamedValue self = NamedValue(loc, "self", list_value);
       NamedValue input = NamedValue(loc, "", out);
@@ -1660,7 +1675,7 @@ struct to_ir {
         bool is_key_subtype =
             k->type()->isSubtypeOfExt(dict_type_hint->getKeyType(), &ss);
 
-        if (!is_key_subtype) {
+        if (!k->type()->isSubtypeOfExt(dict_type_hint->getKeyType(), &ss)) {
           err << "Dict type annotation `" << dict_type_hint->repr_str()
               << "` did not match the "
               << "type of an actual key type `" << k->type()->repr_str()
@@ -1714,20 +1729,27 @@ struct to_ir {
             dc.range().str());
       }
 
-      if (type_hint && !all_candidates.empty()) {
-        refineAndSetDictTypeHintFromCandidatesVector(
-            all_candidates,
-            type_hint,
-            &refined_type_hint,
-            k->type(),
-            *unified_value_type,
-            dc);
-      }
-
-      if (!refined_type_hint) {
-        dict_value->setType(DictType::create(k->type(), *unified_value_type));
+      if (type_hint) {
+        if (type_hint->kind() == DictType::Kind) {
+          dict_value->setType(type_hint);
+          k->setType(type_hint->expect<DictType>()->getKeyType());
+          v->setType(type_hint->expect<DictType>()->getValueType());
+        } else {
+          if (!all_candidates.empty()) {
+            refineAndSetDictTypeHintFromCandidatesVector(
+                all_candidates,
+                type_hint,
+                &refined_type_hint,
+                k->type(),
+                *unified_value_type,
+                dc);
+          }
+          dict_value->setType(refined_type_hint);
+          k->setType(refined_type_hint->expect<DictType>()->getKeyType());
+          v->setType(refined_type_hint->expect<DictType>()->getValueType());
+        }
       } else {
-        dict_value->setType(type_hint);
+        dict_value->setType(DictType::create(k->type(), *unified_value_type));
       }
 
       NamedValue self = NamedValue(loc, "self", dict_value);
@@ -4038,8 +4060,8 @@ struct to_ir {
 
     TypePtr refined_type_hint = type_hint;
 
-    // If `type_hint` is a Union, we're going to change it to be
-    // the type of the rhs List, so we need to store the original
+    // If `type_hint` is a Union/Optional, we're going to change it to
+    // be the type of the rhs List, so we need to store the original
     // UnionType for later. `nullptr` means that we don't need to emit
     // an `unchecked_cast` node (either because we don't have a type
     // hint or because the type hint wasn't a Union)
