@@ -302,7 +302,7 @@ def _str_intern(inp):
     # For other tensor types (sparse, quantized, meta), size=() is already included
     # in their default repr and carries same meaning as that of shape=().
     # Although the name "size" is bit ambiguous, we are avoiding renaming to circumvent
-    # BC-breaking change in the code. 
+    # BC-breaking change in the code.
     if PRINT_OPTS.show_shape\
             and not self.is_sparse\
             and not self.is_sparse_csr\
