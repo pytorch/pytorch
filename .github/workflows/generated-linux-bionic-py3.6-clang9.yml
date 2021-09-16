@@ -33,7 +33,7 @@ concurrency:
 jobs:
   ciflow_should_run:
     runs-on: ubuntu-18.04
-    if: ${{ (github.event_name != 'pull_request') || (github.event.action !='unassigned') || (contains(github.event.pull_request.labels.*.name, 'ciflow/all') || contains(github.event.pull_request.labels.*.name, 'ciflow/cpu') || contains(github.event.pull_request.labels.*.name, 'ciflow/default') || contains(github.event.pull_request.labels.*.name, 'ciflow/linux') || contains(github.event.pull_request.labels.*.name, 'ciflow/noarch') || contains(github.event.pull_request.labels.*.name, 'ciflow/xla')) }}
+    if: ${{ (github.repository == 'pytorch/pytorch') && ((github.event_name != 'pull_request') || (github.event.action !='unassigned') || (contains(github.event.pull_request.labels.*.name, 'ciflow/all') || contains(github.event.pull_request.labels.*.name, 'ciflow/cpu') || contains(github.event.pull_request.labels.*.name, 'ciflow/default') || contains(github.event.pull_request.labels.*.name, 'ciflow/linux') || contains(github.event.pull_request.labels.*.name, 'ciflow/noarch') || contains(github.event.pull_request.labels.*.name, 'ciflow/xla'))) }}
     env:
       LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
     steps:
@@ -42,7 +42,6 @@ jobs:
       - name: print labels
         run: echo "${LABELS}"
   calculate-docker-image:
-    if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: linux.2xlarge
     needs: [ciflow_should_run]
     env:
@@ -65,6 +64,9 @@ jobs:
           echo "instance-id: $(get_ec2_metadata instance-id)"
           echo "instance-type: $(get_ec2_metadata instance-type)"
       - name: Log in to ECR
+        env:
+          AWS_RETRY_MODE: standard
+          AWS_MAX_ATTEMPTS: 5
         run: |
           aws ecr get-login --no-include-email --region us-east-1 > /tmp/ecr-login.sh
           bash /tmp/ecr-login.sh
@@ -160,6 +162,9 @@ jobs:
           echo "instance-id: $(get_ec2_metadata instance-id)"
           echo "instance-type: $(get_ec2_metadata instance-type)"
       - name: Log in to ECR
+        env:
+          AWS_RETRY_MODE: standard
+          AWS_MAX_ATTEMPTS: 5
         run: |
           aws ecr get-login --no-include-email --region us-east-1 > /tmp/ecr-login.sh
           bash /tmp/ecr-login.sh
@@ -223,6 +228,7 @@ jobs:
         # tools/stats/print_test_stats.py to natively support GitHub Actions
         env:
           AWS_DEFAULT_REGION: us-east-1
+          IS_GHA: 1
           SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.SCRIBE_GRAPHQL_ACCESS_TOKEN }}
           CIRCLE_BRANCH: ${{ steps.parse-ref.outputs.branch }}
           CIRCLE_PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -232,7 +238,7 @@ jobs:
         run: |
           COMMIT_TIME=$(git log --max-count=1 --format=%ct || echo 0)
           export COMMIT_TIME
-          pip3 install requests==2.26
+          pip3 install requests==2.26 boto3==1.16.34
           python3 -m tools.stats.upload_binary_size_to_scuba || exit 0
       - name: Chown workspace
         run: |
@@ -279,7 +285,6 @@ jobs:
           docker system prune -af
 
   generate-test-matrix:
-    if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: ubuntu-18.04
     needs: [ciflow_should_run]
     env:
@@ -326,7 +331,7 @@ jobs:
       SHARD_NUMBER: ${{ matrix.shard }}
       NUM_TEST_SHARDS: ${{ matrix.num_shards }}
       PYTORCH_IGNORE_DISABLED_ISSUES: ${{ needs.generate-test-matrix.outputs.ignore-disabled-issues }}
-      CONTINUE_THROUGH_ERROR: ${{ github.repository_owner == 'pytorch' && (github.event_name == 'push' || github.event_name == 'schedule') }}
+      CONTINUE_THROUGH_ERROR: ${{ github.repository == 'pytorch/pytorch' && (github.event_name == 'push' || github.event_name == 'schedule') }}
     steps:
       - name: Display EC2 information
         shell: bash
@@ -342,6 +347,9 @@ jobs:
           echo "instance-id: $(get_ec2_metadata instance-id)"
           echo "instance-type: $(get_ec2_metadata instance-type)"
       - name: Log in to ECR
+        env:
+          AWS_RETRY_MODE: standard
+          AWS_MAX_ATTEMPTS: 5
         run: |
           aws ecr get-login --no-include-email --region us-east-1 > /tmp/ecr-login.sh
           bash /tmp/ecr-login.sh
