@@ -3,9 +3,9 @@
 
 namespace at {
 
-#define DEFINE_CAST(T, name)                                        \
+#define DEFINE_CAST(T, name)                                         \
    template <>                                                       \
-   TORCH_API T* Tensor::data_ptr() const {                           \
+   TORCH_API T* TensorBase::data_ptr() const {                       \
      TORCH_CHECK(                                                    \
          scalar_type() == ScalarType::name,                          \
          "expected scalar type "                                     \

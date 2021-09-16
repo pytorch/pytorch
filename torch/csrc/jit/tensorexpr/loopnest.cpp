@@ -59,7 +59,7 @@ LoopNest::LoopNest(const std::vector<Tensor>& output_tensors) {
   verify(root_stmt_);
 }
 
-const std::unordered_set<BufPtr> LoopNest::getIntermediateBufs() const {
+std::unordered_set<BufPtr> LoopNest::getIntermediateBufs() const {
   std::unordered_set<BufPtr> result;
   auto input_bufs = getInputBufs();
   auto bufs = NodeFinder<Buf>::find(root_stmt_);
@@ -118,6 +118,112 @@ class IndexFlattener : public IRMutator {
     return v;
   }
 };
+
+static bool isValidIdentifierChar(char c, size_t pos) {
+  return islower(c) || isupper(c) || c == '_' || (pos > 0 && isdigit(c));
+}
+
+// replaces all invalid characters with underscore
+std::string sanitizeName(const std::string& input_name) {
+  std::stringstream sanitized_name;
+  for (size_t i = 0; i < input_name.size(); ++i) {
+    if (isValidIdentifierChar(input_name[i], i)) {
+      sanitized_name << input_name[i];
+    } else {
+      if (i == 0) {
+        // Don't start names with underscore
+        sanitized_name << "v";
+      }
+      sanitized_name << "_";
+    }
+  }
+  return sanitized_name.str();
+}
+
+class VarNameSanitizer : public IRMutator {
+ public:
+  ExprPtr mutate(BufPtr v) override {
+    if (seen_bufs_.count(v)) {
+      return v;
+    }
+    const std::string& name = v->name_hint();
+    auto new_name = sanitizeName(name);
+    if (taken_names_.count(new_name)) {
+      new_name = getNextAvailableName(new_name);
+    }
+    v->set_name_hint(new_name);
+    taken_names_.insert(new_name);
+    seen_bufs_.insert(v);
+    return v;
+  }
+
+  ExprPtr mutate(VarPtr v) override {
+    if (seen_vars_.count(v)) {
+      return v;
+    }
+    const std::string& name = v->name_hint();
+    auto new_name = sanitizeName(name);
+    if (taken_names_.count(new_name)) {
+      new_name = getNextAvailableName(new_name);
+    }
+    v->set_name_hint(new_name);
+    taken_names_.insert(new_name);
+    seen_vars_.insert(v);
+    return v;
+  }
+
+  StmtPtr mutate(ForPtr v) override {
+    auto new_name = getNextAvailableName(getIndexVarNameAtLevel(level_));
+    if (seen_index_vars_.count(v->var())) {
+      auto new_var = alloc<Var>("", v->var()->dtype());
+      Substitute(v, {{v->var(), new_var}});
+    }
+    v->var()->set_name_hint(new_name);
+    seen_index_vars_.insert(v->var());
+    seen_vars_.insert(v->var());
+    taken_names_.insert(new_name);
+    level_++;
+    v->body()->accept_mutator(this);
+    level_--;
+    v->start()->accept_mutator(this);
+    v->stop()->accept_mutator(this);
+    return v;
+  }
+
+  std::string getIndexVarNameAtLevel(int level_) {
+    int names_num = index_var_names_.size();
+    int counter = level_ / names_num;
+    if (counter == 0) {
+      return index_var_names_[level_ % names_num];
+    } else {
+      return index_var_names_[level_ % names_num] + std::to_string(counter);
+    }
+  }
+  std::string getNextAvailableName(const std::string& base_name) {
+    std::string name = base_name;
+    int counter = 0;
+    while (taken_names_.count(name)) {
+      counter++;
+      name = base_name + "_" + std::to_string(counter);
+    }
+    return name;
+  }
+
+ private:
+  std::vector<std::string> index_var_names_ =
+      {"i", "j", "k", "l", "m", "n", "o", "p"};
+  std::unordered_set<std::string> taken_names_;
+  std::unordered_set<VarPtr> seen_index_vars_;
+  std::unordered_set<VarPtr> seen_vars_;
+  std::unordered_set<BufPtr> seen_bufs_;
+  int level_ = 0;
+};
+
+StmtPtr LoopNest::sanitizeNames(StmtPtr s) {
+  VarNameSanitizer r;
+  s->accept_mutator(&r);
+  return s;
+}
 
 class Vectorizer : public IRMutator {
  public:
@@ -573,14 +679,13 @@ class FunctionInliner : public IRMutator {
       VarPtr func_callee_arg = producer_index_vars_.at(i);
       ExprPtr func_caller_param = dims.at(i);
       if (func_callee_arg == nullptr) {
+        auto param_val = evalInt(func_caller_param);
         TORCH_INTERNAL_ASSERT(
-            intValue(func_caller_param) && *intValue(func_caller_param) == 0,
+            param_val && *param_val == 0,
             buildErrorMessage(
                 "We are implicitly assuming that if you have an index of 0, that must also be inlined into an index of 0"));
         continue;
       }
-      if (func_callee_arg == nullptr)
-        continue;
       auto iter = inline_mapping_.find(func_callee_arg);
       if (iter != inline_mapping_.end()) {
         throw std::logic_error(
@@ -748,6 +853,9 @@ bool LoopNest::computeInline(StmtPtr s) {
 bool LoopNest::computeInline(BufPtr b) {
   // If buf is used or defined in an ExternalCall, we cannot inline it
   auto buf_load_store_uses = findLoadOrStoreUses(root_stmt_);
+  if (!buf_load_store_uses.count(b)) {
+    return false;
+  }
   for (auto& use : buf_load_store_uses.at(b)) {
     StmtPtr s = use.s;
     if (to<ExternalCall>(s)) {
@@ -963,8 +1071,17 @@ BlockPtr findLowestContainingBlock(const std::vector<BufLoadOrStoreUse>& uses) {
   return b;
 }
 
-StmtPtr LoopNest::insertAllocFree(StmtPtr stmt) {
-  auto intermediate_bufs = getIntermediateBufs();
+StmtPtr LoopNest::insertAllocFree(
+    StmtPtr stmt,
+    const c10::optional<std::unordered_set<BufPtr>>&
+        interm_bufs /* = c10::nullopt*/) {
+  std::unordered_set<BufPtr> intermediate_bufs;
+  if (interm_bufs) {
+    intermediate_bufs = *interm_bufs;
+  } else {
+    intermediate_bufs = getIntermediateBufs();
+  }
+
   if (intermediate_bufs.size() == 0ULL) {
     return stmt;
   }
@@ -1041,7 +1158,9 @@ void LoopNest::eliminateDeadStores() {
   root_stmt_ = root_stmt_->accept_mutator(&deleter);
 }
 
-void LoopNest::prepareForCodegen() {
+void LoopNest::prepareForCodegen(
+    const c10::optional<std::unordered_set<BufPtr>>&
+        interm_bufs /*= c10::nullopt*/) {
   // Expand reduction ops.
   ReductionExpander reduceExpander;
   root_stmt_ = reduceExpander.expand(root_stmt_);
@@ -1049,7 +1168,7 @@ void LoopNest::prepareForCodegen() {
   root_stmt_ = FlattenIndexes(root_stmt_);
 
   // Add allocs and frees for intermediate buffers at the global level.
-  root_stmt_ = insertAllocFree(root_stmt_);
+  root_stmt_ = insertAllocFree(root_stmt_, interm_bufs);
 }
 
 namespace {

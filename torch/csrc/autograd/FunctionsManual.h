@@ -157,6 +157,8 @@ Tensor slice_backward_wrapper(
     int64_t step);
 Tensor linalg_eig_backward(const std::vector<torch::autograd::Variable> &grads, const Tensor& self,
                            const Tensor& L, const Tensor& V);
+Tensor eigh_jvp_eigenvectors(const Tensor& input_tangent, const Tensor& eigenvalues, const Tensor& eigenvectors);
+Tensor eigh_jvp_eigenvalues(const Tensor& input_tangent, const Tensor& eigenvalues, const Tensor& eigenvectors);
 Tensor eigh_backward(const std::vector<torch::autograd::Variable> &grads, const Tensor& self,
                     bool eigenvectors, const Tensor& L, const Tensor& V);
 std::tuple<Tensor, Tensor> triangular_solve_backward(
@@ -253,6 +255,13 @@ std::tuple<Tensor, Tensor> lu_solve_backward(
   const Tensor& LU_data,
   const Tensor& LU_pivots
 );
+Tensor lu_solve_forward_AD(
+  const Tensor& B_t,
+  const Tensor& LU_data_t,
+  const Tensor& LU_data,
+  const Tensor& LU_pivots,
+  const Tensor& X
+);
 Tensor lu_unpack_backward(
   const variable_list& grads,
   const Tensor& LU_data,
@@ -277,6 +286,11 @@ Tensor lu_backward_base(
 Tensor _lu_with_info_backward(
   const Tensor& grad,
   const Tensor& self,
+  const Tensor& LU,
+  const Tensor& pivs
+);
+Tensor _lu_with_info_jvp(
+  const Tensor& dX,
   const Tensor& LU,
   const Tensor& pivs
 );
