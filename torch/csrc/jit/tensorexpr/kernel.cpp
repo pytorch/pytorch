@@ -2623,6 +2623,7 @@ static void parallelizeOuterLoops(LoopNest& l, Bufs&& bufs) {
 
 StmtPtr TensorExprKernel::transformLoops(BackendType backendType, StmtPtr st) {
   torch::jit::tensorexpr::LoopNest l(st, bufOutputs_);
+  LoopNest::sanitizeNames(l.root_stmt());
   GRAPH_DEBUG("Original Stmt:\n", std::to_string(l.root_stmt()), "\n");
 
   bool hasReduction = NodeFinder<ReduceOp>::find(l.root_stmt()).size() != 0;
@@ -2809,23 +2810,6 @@ TensorExprKernel::BackendType TensorExprKernel::inferBackendTypeFromDevice(
     throw std::runtime_error("Invalid device type");
   }
   return backendType;
-}
-
-static bool isValidIdentifierChar(char c, size_t pos) {
-  return islower(c) || isupper(c) || c == '_' || (pos > 0 && isdigit(c));
-}
-
-// replaces all invalid characters with underscore
-std::string sanitizeName(const std::string& input_name) {
-  std::stringstream sanitized_name;
-  for (size_t i = 0; i < input_name.size(); ++i) {
-    if (isValidIdentifierChar(input_name[i], i)) {
-      sanitized_name << input_name[i];
-    } else {
-      sanitized_name << "_";
-    }
-  }
-  return sanitized_name.str();
 }
 
 // we use the debug names in printing cuda code, they need to be removed

@@ -121,6 +121,9 @@ class AbstractTestCases:
         def test_dir(self):
             dir(torch)
 
+        def test_wildcard_import(self):
+            exec('from torch import *')
+
         @wrapDeterministicFlagAPITest
         def test_deterministic_flag(self):
             for deterministic in [True, False]:

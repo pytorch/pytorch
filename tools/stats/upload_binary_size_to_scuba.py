@@ -147,15 +147,16 @@ if __name__ == "__main__":
     if len(sys.argv) == 2:
         file_dir = sys.argv[1]
 
-    sample_lib = {
-        "library": "abcd",
-        "size": 1234,
-    }
-    sample_data = {
-        **base_data(),
-        **sample_lib,
-    }
-    register_rds_schema("binary_size", schema_from_sample(sample_data))
+    if os.getenv("IS_GHA", "0") == "1":
+        sample_lib = {
+            "library": "abcd",
+            "size": 1234,
+        }
+        sample_data = {
+            **base_data(),
+            **sample_lib,
+        }
+        register_rds_schema("binary_size", schema_from_sample(sample_data))
 
     if "-android" in os.environ.get("BUILD_ENVIRONMENT", ""):
         report_android_sizes(file_dir)
