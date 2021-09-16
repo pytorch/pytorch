@@ -16977,6 +16977,43 @@ TEST(NVFuserTest, FusionUnswitchPredicate_CUDA) {
   testValidate(&fusion, outputs, aten_inputs, {ref}, __LINE__, __FILE__);
 }
 
+TEST(NVFuserTest, FusionIssue1052_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(1);
+  fusion.addInput(tv0);
+  auto tv1 = makeSymbolicTensor(1);
+  fusion.addInput(tv1);
+
+  auto tv2 = add(tv0, new Double(1));
+  fusion.addOutput(tv2);
+
+  auto tv3 = add(tv1, new Double(1));
+  fusion.addOutput(tv3);
+
+  tv2->axis(-1)->parallelize(ParallelType::TIDx);
+  tv3->axis(-1)->parallelize(ParallelType::TIDx);
+
+  scheduler_utils::parallelizeAllLike(tv2, {tv0});
+  scheduler_utils::parallelizeAllLike(tv3, {tv1});
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({10}, options);
+  at::Tensor t1 = at::randn({100}, options);
+  std::vector<IValue> aten_inputs = {t0, t1};
+  auto outputs = fe.runFusion(aten_inputs);
+
+  auto ref_t2 = t0 + 1;
+  auto ref_t3 = t1 + 1;
+
+  testValidate(
+      &fusion, outputs, aten_inputs, {ref_t2, ref_t3}, __LINE__, __FILE__);
+}
+
 } // namespace jit
 } // namespace torch
 #endif // #if defined(USE_CUDA)

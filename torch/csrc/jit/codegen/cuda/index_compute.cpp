@@ -2553,9 +2553,13 @@ std::pair<std::vector<Index::RootPredicateInfo>, ReferenceTensor> Index::
 
     // If the index definition is "simple" and the extent is "simple" then our
     // for loop goes exactly across the iteration domain extent so no predicate
-    // needed.
+    // needed. If parallelized, the parallel dimension must not be
+    // larger than the domain extent, i.e., it must be exact.
     if (it->second->definition() == nullptr && stop->definition() == nullptr &&
-        start->isZeroInt()) {
+        start->isZeroInt() &&
+        (!isParallelTypeThread(contig_id->getParallelType()) ||
+         gpu_lower->parallelDimensionMap().isExact(
+             contig_id->getParallelType()))) {
       continue;
     }
 
