@@ -222,7 +222,6 @@ class TestIterableDataPipeBasic(TestCase):
                 rec[1].close()
         self.assertEqual(count, len(self.temp_files))
 
-    # TODO(VitalyFedyunin): Generates unclosed buffer warning, need to investigate
     def test_readfilesfromtar_iterable_datapipe(self):
         temp_dir = self.temp_dir.name
         temp_tarfile_pathname = os.path.join(temp_dir, "test_tar.tar")
@@ -233,42 +232,18 @@ class TestIterableDataPipeBasic(TestCase):
         datapipe1 = dp.iter.FileLister(temp_dir, '*.tar')
         datapipe2 = dp.iter.FileLoader(datapipe1)
         datapipe3 = dp.iter.TarArchiveReader(datapipe2)
-        # read extracted files before reaching the end of the tarfile
+
+        # Test Case: Read extracted files before reaching the end of the tarfile
         for rec, temp_file in itertools.zip_longest(datapipe3, self.temp_files):
             self.assertTrue(rec is not None and temp_file is not None)
             self.assertEqual(os.path.basename(rec[0]), os.path.basename(temp_file))
             with open(temp_file, 'rb') as f:
                 self.assertEqual(rec[1].read(), f.read())
             rec[1].close()
-        # read extracted files after reaching the end of the tarfile
+
+
+        # Test Case: Read extracted files after reaching the end of the tarfile
         data_refs = list(datapipe3)
-        self.assertEqual(len(data_refs), len(self.temp_files))
-        for data_ref, temp_file in zip(data_refs, self.temp_files):
-            self.assertEqual(os.path.basename(data_ref[0]), os.path.basename(temp_file))
-            with open(temp_file, 'rb') as f:
-                self.assertEqual(data_ref[1].read(), f.read())
-            data_ref[1].close()
-
-
-    def test_readfilesfromzip_iterable_datapipe(self):
-        temp_dir = self.temp_dir.name
-        temp_zipfile_pathname = os.path.join(temp_dir, "test_zip.zip")
-        with zipfile.ZipFile(temp_zipfile_pathname, 'w') as myzip:
-            myzip.write(self.temp_files[0])
-            myzip.write(self.temp_files[1])
-            myzip.write(self.temp_files[2])
-        datapipe1 = dp.iter.FileLister(temp_dir, '*.zip')
-        datapipe2 = dp.iter.ZipArchiveReader(datapipe1)
-
-        # Test Case: read extracted files before reaching the end of the zipfile
-        for rec, temp_file in itertools.zip_longest(datapipe2, self.temp_files):
-            self.assertTrue(rec is not None and temp_file is not None)
-            self.assertEqual(os.path.basename(rec[0]), os.path.basename(temp_file))
-            with open(temp_file, 'rb') as f:
-                self.assertEqual(rec[1].read(), f.read())
-            rec[1].close()
-        # Test Case: read extracted files after reaching the end of the zipile
-        data_refs = list(datapipe2)
         self.assertEqual(len(data_refs), len(self.temp_files))
         for data_ref, temp_file in zip(data_refs, self.temp_files):
             self.assertEqual(os.path.basename(data_ref[0]), os.path.basename(temp_file))
@@ -278,7 +253,54 @@ class TestIterableDataPipeBasic(TestCase):
 
         # Test Case: reset the DataPipe after reading part of it
         n_elements_before_reset = 1
-        res_before_reset, res_after_reset = reset_after_n_next_calls(datapipe2, n_elements_before_reset)
+        res_before_reset, res_after_reset = reset_after_n_next_calls(datapipe3, n_elements_before_reset)
+        # Check result accumulated before reset
+        self.assertEqual(len(res_before_reset), n_elements_before_reset)
+        for ele_before_reset, temp_file in zip(res_before_reset, self.temp_files):
+            self.assertEqual(os.path.basename(ele_before_reset[0]), os.path.basename(temp_file))
+            with open(temp_file, 'rb') as f:
+                self.assertEqual(ele_before_reset[1].read(), f.read())
+            ele_before_reset[1].close()
+        # Check result accumulated after reset
+        self.assertEqual(len(res_after_reset), len(self.temp_files))
+        for ele_after_reset, temp_file in zip(res_after_reset, self.temp_files):
+            self.assertEqual(os.path.basename(ele_after_reset[0]), os.path.basename(temp_file))
+            with open(temp_file, 'rb') as f:
+                self.assertEqual(ele_after_reset[1].read(), f.read())
+            ele_after_reset[1].close()
+
+    # This test throws a warning because data_stream in side ZipArchiveReader cannot be closed
+    # due to the way zipfiles.open() is implemented
+    def test_readfilesfromzip_iterable_datapipe(self):
+        temp_dir = self.temp_dir.name
+        temp_zipfile_pathname = os.path.join(temp_dir, "test_zip.zip")
+        with zipfile.ZipFile(temp_zipfile_pathname, 'w') as myzip:
+            myzip.write(self.temp_files[0])
+            myzip.write(self.temp_files[1])
+            myzip.write(self.temp_files[2])
+        datapipe1 = dp.iter.FileLister(temp_dir, '*.zip')
+        datapipe2 = dp.iter.FileLoader(datapipe1)
+        datapipe3 = dp.iter.ZipArchiveReader(datapipe2)
+
+        # Test Case: read extracted files before reaching the end of the zipfile
+        for rec, temp_file in itertools.zip_longest(datapipe3, self.temp_files):
+            self.assertTrue(rec is not None and temp_file is not None)
+            self.assertEqual(os.path.basename(rec[0]), os.path.basename(temp_file))
+            with open(temp_file, 'rb') as f:
+                self.assertEqual(rec[1].read(), f.read())
+            rec[1].close()
+        # Test Case: read extracted files after reaching the end of the zipile
+        data_refs = list(datapipe3)
+        self.assertEqual(len(data_refs), len(self.temp_files))
+        for data_ref, temp_file in zip(data_refs, self.temp_files):
+            self.assertEqual(os.path.basename(data_ref[0]), os.path.basename(temp_file))
+            with open(temp_file, 'rb') as f:
+                self.assertEqual(data_ref[1].read(), f.read())
+            data_ref[1].close()
+
+        # Test Case: reset the DataPipe after reading part of it
+        n_elements_before_reset = 1
+        res_before_reset, res_after_reset = reset_after_n_next_calls(datapipe3, n_elements_before_reset)
         # Check the results accumulated before reset
         self.assertEqual(len(res_before_reset), n_elements_before_reset)
         for ele_before_reset, temp_file in zip(res_before_reset, self.temp_files):
@@ -334,7 +356,7 @@ class TestIterableDataPipeBasic(TestCase):
         datapipe4.add_handler(_png_decoder)
         _helper(cached, datapipe4, channel_first=True)
 
-    # TODO(VitalyFedyunin): Generates unclosed buffer warning, need to investigate
+
     def test_groupby_iterable_datapipe(self):
         temp_dir = self.temp_dir.name
         temp_tarfile_pathname = os.path.join(temp_dir, "test_tar.tar")

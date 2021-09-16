@@ -1324,7 +1324,8 @@ inline const ivalue::Object& IValue::toObjectRef() const {
   }                                                        \
   template <>                                              \
   inline c10::detail::ivalue_to_const_ref_overload_return<T>::type IValue::to<T>() const& { \
-    return this->method_name();            \
+    typedef c10::detail::ivalue_to_const_ref_overload_return<T>::type return_type;          \
+    return static_cast<return_type>(this->method_name());                                   \
   }
 
 DEFINE_TO(at::Tensor, toTensor)
