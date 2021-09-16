@@ -5,7 +5,7 @@ from typing import Iterator, List, Optional
 import unittest
 import unittest.mock
 
-import tools.setup_helpers.env as unused_but_resolving_circular_import
+import tools.setup_helpers.env  # noqa: F401 unused but resolves circular import
 import tools.setup_helpers.cmake
 
 
