@@ -7,6 +7,9 @@ import torch.fx
 from torch.fx.node import _get_qualified_name
 
 
+TRTInterpreterResult = Tuple[Any, Sequence[str], Sequence[str]]
+
+
 # Borrowed from torch2trt
 def torch_dtype_to_trt(dtype):
     if trt.__version__ >= "7.0" and dtype == torch.bool:
@@ -336,7 +339,7 @@ class TRTInterpreter(torch.fx.Interpreter):
         fp16_mode=True,
         int8_mode=False,
         strict_type_constraints=True,
-    ):
+    ) -> TRTInterpreterResult:
         # TODO hack, should check contents of args and remove fp16_mode probably
         self.fp16_mode = fp16_mode
 
