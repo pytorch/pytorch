@@ -78,6 +78,7 @@ def register_rds_schema(table_name: str, schema: Dict[str, str]) -> None:
         "ref": "string",
         "branch": "string",
         "workflow_id": "string",
+        "build_environment": "string",
     }
 
     event = [{"create_table": {"table_name": table_name, "fields": {**schema, **base}}}]
@@ -125,7 +126,7 @@ def rds_saved_query(query_names: Union[str, List[str]]) -> Any:
 def rds_write(
     table_name: str, values_list: List[Dict[str, Any]], only_on_master: bool = True
 ) -> None:
-    sprint("Writing for ", os.getenv("CIRCLE_PR_NUMBER"))
+    sprint("Writing for", os.getenv("CIRCLE_PR_NUMBER"))
     is_master = os.getenv("CIRCLE_PR_NUMBER", "").strip() == ""
     if not only_on_master and not is_master:
         sprint("Skipping RDS write on PR")
@@ -140,6 +141,7 @@ def rds_write(
         "ref": os.getenv("CIRCLE_SHA1"),
         "branch": os.getenv("CIRCLE_BRANCH"),
         "workflow_id": os.getenv("GITHUB_WORKFLOW_RUN_ID"),
+        "build_environment": os.getenv("BUILD_ENVIRONMENT"),
     }
 
     events = []
