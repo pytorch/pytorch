@@ -14,7 +14,6 @@
 
 #include <THC/THCDeviceUtils.cuh>
 #include <THC/THCGeneral.h>
-#include <THC/THCTensorInfo.cuh>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/cub.cuh>
 #include <c10/util/irange.h>
@@ -479,9 +478,9 @@ Tensor& index_add_cuda_(Tensor & self, int64_t dim, const Tensor & index, const 
   Tensor self_ = (self.dim() == 0) ? self.view(1) : self;
   Tensor source_ = (source.dim() == 0) ? source.view(1) : source;
 
-  TORCH_CHECK(self.dim() <= MAX_CUTORCH_DIMS, CUTORCH_DIM_WARNING);
-  TORCH_CHECK(source.dim() <= MAX_CUTORCH_DIMS, CUTORCH_DIM_WARNING);
-  TORCH_CHECK(index.dim() <= MAX_CUTORCH_DIMS, CUTORCH_DIM_WARNING);
+  TORCH_CHECK(self.dim() <= MAX_TENSORINFO_DIMS, "tensor has too many (>", MAX_TENSORINFO_DIMS, ") dims");
+  TORCH_CHECK(source.dim() <= MAX_TENSORINFO_DIMS, "tensor has too many (>", MAX_TENSORINFO_DIMS, ") dims" );
+  TORCH_CHECK(index.dim() <= MAX_TENSORINFO_DIMS, "tensor has too many (>", MAX_TENSORINFO_DIMS, ") dims");
 
   at::assert_no_internal_overlap(self);
   at::assert_no_partial_overlap(self, index);
