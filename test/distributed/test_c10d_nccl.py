@@ -293,21 +293,19 @@ class ProcessGroupNCCLTest(TestCase):
                 tensors[i],
             )
 
-        # if hasattr(c10d.ReduceOp, "AVG"):
         # Avg (only available for NCCL 2.10+)
-        # Some check here would be nice, should we wait for
-        # https://github.com/pytorch/pytorch/pull/63155?
-        tensors = [torch.tensor([i + 1]).cuda(i) for i in range(self.num_gpus)]
+        if torch.cuda.nccl.version() >= (2, 10, 0):
+            tensors = [torch.tensor([i + 1]).cuda(i) for i in range(self.num_gpus)]
 
-        allreduce(tensors, c10d.ReduceOp.AVG)
+            allreduce(tensors, c10d.ReduceOp.AVG)
 
-        for i in range(self.num_gpus):
-            # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-            ndev = float(self.num_gpus)
-            self.assertEqualIgnoreType(
-                torch.tensor([ndev * (ndev + 1.) / (2. * ndev)]),
-                tensors[i],
-            )
+            for i in range(self.num_gpus):
+                # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
+                ndev = float(self.num_gpus)
+                self.assertEqualIgnoreType(
+                    torch.tensor([ndev * (ndev + 1.) / (2. * ndev)]),
+                    tensors[i],
+                )
 
         # Product
         tensors = []
