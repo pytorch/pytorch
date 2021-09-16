@@ -1033,11 +1033,11 @@ class TestDisabledTorchFunction(TestCase):
 class TestTorchFunctionWarning(TestCase):
     def test_warn_on_invalid_torch_function(self):
         class Bad1():
-            def __torch_function__(*args, **kwargs):
+            def __torch_function__(self, *args, **kwargs):
                 pass
 
         class Bad2(torch.Tensor):
-            def __torch_function__(*args, **kwargs):
+            def __torch_function__(self, *args, **kwargs):
                 pass
 
         a = Bad1()
