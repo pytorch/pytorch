@@ -25,7 +25,7 @@ TEST(BackendTest, ToBackend) {
   std::vector<IValue> inputs;
   inputs.emplace_back(2.0 * torch::ones({}));
   inputs.emplace_back(1.0 * torch::ones({}));
-  const auto& ref = m.forward(inputs).toTuple()->elements();
+  auto ref = m.forward(inputs).toTuple()->elements();
 
   c10::Dict<IValue, IValue> compile_spec(StringType::get(), AnyType::get());
   c10::Dict<IValue, IValue> fake_dict(StringType::get(), AnyType::get());
@@ -75,7 +75,7 @@ TEST(BackendTest, ToBackend) {
         return (_10, _12)
 
    */
-  const auto& res = lm.forward(inputs).toTuple()->elements();
+  auto res = lm.forward(inputs).toTuple()->elements();
   AT_ASSERT(res[0].toTensor().equal(ref[0].toTensor()));
   AT_ASSERT(res[1].toTensor().equal(ref[1].toTensor()));
 }
@@ -96,7 +96,7 @@ TEST(BackendTest, ToBackendNotAvailable) {
   std::vector<IValue> inputs;
   inputs.emplace_back(2.0 * torch::ones({}));
   inputs.emplace_back(1.0 * torch::ones({}));
-  const auto& ref = m.forward(inputs).toTuple()->elements();
+  auto ref = m.forward(inputs).toTuple()->elements();
 
   c10::Dict<IValue, IValue> compile_spec(StringType::get(), AnyType::get());
   c10::Dict<IValue, IValue> fake_dict(StringType::get(), AnyType::get());

@@ -6,7 +6,7 @@ namespace torch {
 namespace jit {
 using c10::IValue;
 IValue expect_field(
-    c10::ivalue::TupleElements& elements,
+    std::vector<IValue>& elements,
     const std::string& expected_name,
     size_t entry);
 std::string operator_str(
