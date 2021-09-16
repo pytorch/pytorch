@@ -387,7 +387,7 @@ class Module:
             raise KeyError("module name can't be empty string \"\"")
         self._modules[name] = module
 
-    register_module: Callable[[str, Optional['Module']], None] = add_module
+    register_module: Callable[['Module', str, Optional['Module']], None] = add_module
 
     def get_submodule(self, target: str) -> "Module":
         """
