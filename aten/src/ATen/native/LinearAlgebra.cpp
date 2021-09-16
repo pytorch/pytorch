@@ -1109,12 +1109,6 @@ static void addbmm_impl_(
     return;
   }
 
-  bool on_cpu = batch1.is_cpu() && batch2.is_cpu() && result.is_cpu();
-  if (on_cpu && use_mkldnn_bf16_matmul(batch1, batch2, result)){
-    mkldnn_matmul(batch1, batch2, result, beta.to<float>(), alpha.to<float>());
-    return;
-  }
-
   auto adjusted_beta(beta);
   for (int64_t batch = 0; batch < num_batches; ++batch) {
     result.addmm_(batch1[batch], batch2[batch], adjusted_beta, alpha);

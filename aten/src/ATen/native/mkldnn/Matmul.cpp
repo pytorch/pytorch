@@ -81,23 +81,9 @@ void mkldnn_matmul(
   Tensor mat1_ = is_mkldnn_optimized_format(mat1_unsqueezed) ? mat1_unsqueezed : mat1_unsqueezed.contiguous();
   Tensor mat2_ = is_mkldnn_optimized_format(mat2_unsqueezed) ? mat2_unsqueezed : mat2_unsqueezed.contiguous();
 
-  Tensor mat1_reshaped = mat1_;
-  Tensor mat2_reshaped = mat2_;
-  if (result.dim() == 2 && mat1_.dim() == 3 && mat2_.dim() == 3){
-    // addbmm(batch1*batch2) [b,n,m] * [b,m,p] = [n,p] can be treated as:
-    // [n, b*m] * [b*m, p] = [n, p]
-    // For batch1: reorder from [b, n, m] to [n, b, m], reshape to [n, b * m]
-    // For batch2: reshape from [b, m, p] to [b * m, p]
-    auto mat1_size = mat1_.sizes();
-    auto mat2_size = mat2_.sizes();
-    mat1_ = mat1_size[0] > 1 ? mat1_.transpose(0, 1) : mat1_;
-    mat1_reshaped = mat1_.reshape({mat1_size[1], mat1_size[0] * mat1_size[2]});
-    mat2_reshaped = mat2_.reshape({mat2_size[0] * mat2_size[1], mat2_size[2]});
- }
-
   // mkldnn_matmul only proceed CPU tensor
-  const ideep::tensor x = itensor_view_from_dense(mat1_reshaped);
-  const ideep::tensor w = itensor_view_from_dense(mat2_reshaped);
+  const ideep::tensor x = itensor_view_from_dense(mat1_);
+  const ideep::tensor w = itensor_view_from_dense(mat2_);
   ideep::tensor y = itensor_view_from_dense(result_unsqueezed);
   ideep::matmul_forward::compute(x, w, y, alpha, beta,
       ideep::scale_t(), ideep::scale_t(), ideep::scale_t(), op_attr);
@@ -132,7 +118,7 @@ inline bool checksize(const Tensor& mat1, const Tensor& mat2){
     // aten::addmm
     return mat1.size(0) * mat1.size(1) * mat2.size(1) > mkldnn_gemm_min_size;
   } else {
-    // aten::addbmm, aten::bmm, aten::baddbmm
+    // aten::bmm, aten::baddbmm
     return mat1.size(0) * mat1.size(1) * mat1.size(2) * mat2.size(2) > mkldnn_gemm_min_size;
   }
 }
