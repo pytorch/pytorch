@@ -5,7 +5,7 @@ name: win-vs2019-cuda11.3-py3
 
 on:
   pull_request:
-    types: [unassigned]
+    types: [opened, synchronize, reopened, unassigned]
   push:
     branches:
       - master
@@ -37,12 +37,11 @@ concurrency:
 jobs:
   ciflow_should_run:
     runs-on: ubuntu-18.04
-    if: ${{ (github.event_name != 'pull_request') || (github.event.action !='unassigned') || (contains(github.event.pull_request.labels.*.name, 'ciflow/all') || contains(github.event.pull_request.labels.*.name, 'ciflow/cuda') || contains(github.event.pull_request.labels.*.name, 'ciflow/win')) }}
+    if: ${{ (github.repository_owner == 'pytorch') && ((github.event_name != 'pull_request') || (github.event.action !='unassigned') || (contains(github.event.pull_request.labels.*.name, 'ciflow/all') || contains(github.event.pull_request.labels.*.name, 'ciflow/cuda') || contains(github.event.pull_request.labels.*.name, 'ciflow/default') || contains(github.event.pull_request.labels.*.name, 'ciflow/win'))) }}
     steps:
       - name: noop
         run: echo running ciflow_should_run
   build:
-    if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: "windows.4xlarge"
     defaults:
       run:
@@ -136,13 +135,12 @@ jobs:
           rm -rf ./*
 
   generate-test-matrix:
-    if: ${{ github.repository_owner == 'pytorch' }}
     needs: [ciflow_should_run]
     runs-on: ubuntu-18.04
     env:
       TEST_RUNNER_TYPE: windows.8xlarge.nvidia.gpu
       NUM_TEST_SHARDS: 2
-      NUM_TEST_SHARDS_ON_PULL_REQUEST: 2
+      NUM_TEST_SHARDS_ON_PULL_REQUEST: 1
       PR_BODY: ${{ github.event.pull_request.body }}
     outputs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
@@ -167,9 +165,9 @@ jobs:
       TEST_CONFIG: ${{ matrix.config }}
       http_proxy: "http://internal-tf-lb-20210727220640487900000002-835786077.us-east-1.elb.amazonaws.com:3128"
       https_proxy: "http://internal-tf-lb-20210727220640487900000002-835786077.us-east-1.elb.amazonaws.com:3128"
-      RUN_SMOKE_TESTS_ONLY_ON_PR: False
+      RUN_SMOKE_TESTS_ONLY_ON_PR: True
       PYTORCH_IGNORE_DISABLED_ISSUES: ${{ needs.generate-test-matrix.outputs.ignore-disabled-issues }}
-      CONTINUE_THROUGH_ERROR: ${{ github.repository_owner == 'pytorch' && (github.event_name == 'push' || github.event_name == 'schedule') }}
+      CONTINUE_THROUGH_ERROR: ${{ github.repository == 'pytorch/pytorch' && (github.event_name == 'push' || github.event_name == 'schedule') }}
     needs: [build, generate-test-matrix, ciflow_should_run]
     strategy:
       matrix: ${{ fromJson(needs.generate-test-matrix.outputs.matrix) }}
