@@ -308,7 +308,7 @@ LINUX_WORKFLOWS = [
     #        trigger_action_only=True,
     #        labels={LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CPU},
     #    ),
-    #),
+    # ),
     CIWorkflow(
         arch="linux",
         build_environment="parallelnative-linux-xenial-py3.6-gcc5.4",
