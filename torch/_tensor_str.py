@@ -44,7 +44,7 @@ def set_printoptions(
             None (default) is specified, the value is defined by
             `torch._tensor_str._Formatter`. This value is automatically chosen
             by the framework.
-        show_shape: Print shape of the tensor. (default = True)
+        show_shape: Whether to print the shape of strided, non-meta tensors. (default = False)
     """
     if profile is not None:
         if profile == "default":
