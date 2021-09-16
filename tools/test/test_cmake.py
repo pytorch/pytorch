@@ -1,7 +1,7 @@
 import contextlib
 import os
 import typing
-from typing import Iterator, List, Optional
+from typing import Iterator, Optional, Sequence
 import unittest
 import unittest.mock
 
@@ -9,42 +9,57 @@ import tools.setup_helpers.env  # noqa: F401 unused but resolves circular import
 import tools.setup_helpers.cmake
 
 
+T = typing.TypeVar('T')
+
+
 class TestCMake(unittest.TestCase):
 
-    def test_build_max_jobs(self) -> None:
-        with env_var('MAX_JOBS', '8'):
-            build_args = self._cmake_build_and_get_args()
+    @unittest.mock.patch('multiprocessing.cpu_count')
+    def test_build_jobs(self, mock_cpu_count: unittest.mock.MagicMock) -> None:
+        """Tests that the number of build jobs comes out correctly."""
+        mock_cpu_count.return_value = 13
+        cases = [
+            # MAX_JOBS, USE_NINJA, IS_WINDOWS,         want
+            ((     '8',      True,     False),          ['-j', '8']),
+            ((    None,      True,     False),                 None),
+            ((    None,      True,      True),                 None),
+            ((    None,     False,      True), ['/p:CL_MPCount=13']),
+        ]
+        for (max_jobs, use_ninja, is_windows), want in cases:
+            with self.subTest(MAX_JOBS=max_jobs, USE_NINJA=use_ninja, IS_WINDOWS=is_windows):
+                with contextlib.ExitStack() as stack:
+                    stack.enter_context(env_var('MAX_JOBS', max_jobs))
+                    stack.enter_context(unittest.mock.patch.object(tools.setup_helpers.cmake, 'USE_NINJA', use_ninja))
+                    stack.enter_context(unittest.mock.patch.object(tools.setup_helpers.cmake, 'IS_WINDOWS', is_windows))
 
-        self.assertListEqual(build_args[-3:], ['--', '-j', '8'])
+                    cmake = tools.setup_helpers.cmake.CMake()
 
-    def test_build_with_ninja(self) -> None:
-        with unittest.mock.patch.object(tools.setup_helpers.cmake, 'USE_NINJA', True):
-            build_args = self._cmake_build_and_get_args()
+                    with unittest.mock.patch.object(cmake, 'run') as cmake_run:
+                        cmake.build({})
 
-        self.assertNotIn('--', build_args)
-        self.assertNotIn('-j', build_args)
+                    cmake_run.assert_called_once()
+                    call, = cmake_run.mock_calls
+                    build_args, _ = call.args
 
-    def test_build_no_ninja(self) -> None:
-        with unittest.mock.patch.object(tools.setup_helpers.cmake, 'USE_NINJA', False):
-            with unittest.mock.patch('multiprocessing.cpu_count') as mock_cpu_count:
-                mock_cpu_count.return_value = 13
-                build_args = self._cmake_build_and_get_args()
+                if want is None:
+                    self.assertNotIn('-j', build_args)
+                else:
+                    self.assert_contains_sequence(build_args, want)
 
-        self.assertListEqual(build_args[-3:], ['--', '-j', '13'])
+    @staticmethod
+    def assert_contains_sequence(sequence: Sequence[T], subsequence: Sequence[T]) -> None:
+        """Raises an assertion if the subsequence is not contained in the sequence."""
+        if len(subsequence) == 0:
+            return True  # all sequences contain the empty subsequence
 
-    def _cmake_build_and_get_args(self) -> List[str]:
-        """Runs CMake.build() but then returns the arguments."""
-        cmake = tools.setup_helpers.cmake.CMake()
-
-        with unittest.mock.patch.object(cmake, 'run') as cmake_run:
-            cmake.build({})
-
-        cmake_run.assert_called_once()
-        call, = cmake_run.mock_calls
-        build_args, _ = call.args
-        assert isinstance(build_args, list), build_args
-        assert all(isinstance(x, str) for x in build_args), build_args
-        return typing.cast(List[str], build_args)
+        # Iterate over all windows of len(subsequence). Stop if the
+        # window matches.
+        for i in range(len(sequence) - len(subsequence) + 1):
+            candidate = sequence[i : i + len(subsequence)]
+            assert len(candidate) == len(subsequence)  # sanity check
+            if candidate == subsequence:
+                return  # found it
+        raise AssertionError(f'{subsequence} not found in {sequence}')
 
 
 @contextlib.contextmanager
