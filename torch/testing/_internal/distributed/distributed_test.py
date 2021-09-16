@@ -8119,13 +8119,13 @@ class DistributedTest:
             parameters = {'module.l1.weight': weight,
                           'module.l1.bias': bias,
                           'module.buffer': buffer}
-            prev_weight = getattr(module.module.l1, 'weight').clone()
-            prev_buffer = getattr(module.module, 'buffer').clone()
+            prev_weight = module.module.l1.weight.clone()
+            prev_buffer = module.module.buffer.clone()
             res = _stateless.functional_call(module, parameters, x)
             self.assertEqual(x, res)
             # check that the weight remain unmodified
-            cur_weight = getattr(module.module.l1, 'weight')
-            cur_buffer = getattr(module.module, 'buffer')
+            cur_weight = module.module.l1.weight
+            cur_buffer = module.module.buffer
             self.assertEqual(cur_weight, prev_weight)
             self.assertEqual(cur_buffer, prev_buffer)
             # run a backward pass and check the gradients

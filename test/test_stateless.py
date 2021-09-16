@@ -28,22 +28,22 @@ class TestStatelessFunctionalAPI(TestCase):
                           f'{prefix}.l1.bias': bias,
                           f'{prefix}.buffer': buffer}
         else:
-            parameters = {f'l1.weight': weight,
-                          f'l1.bias': bias,
-                          f'buffer': buffer}
+            parameters = {'l1.weight': weight,
+                          'l1.bias': bias,
+                          'buffer': buffer}
         to_check = module
         if prefix != '':
             to_check = getattr(module, prefix)
-        prev_weight = getattr(to_check.l1, 'weight').clone()
-        prev_buffer = getattr(to_check, 'buffer').clone()
+        prev_weight = to_check.l1.weight.clone()
+        prev_buffer = to_check.buffer.clone()
         # the parameters represent an identity function contrary to the
         # existing params in module. So here we expect the result to be the
         # same as the input if the weight swapping went well.
         res = _stateless.functional_call(module, parameters, x)
         self.assertEqual(x, res)
         # check that the weight remain unmodified
-        cur_weight = getattr(to_check.l1, 'weight')
-        cur_buffer = getattr(to_check, 'buffer')
+        cur_weight = to_check.l1.weight
+        cur_buffer = to_check.buffer
         self.assertEqual(cur_weight, prev_weight)
         self.assertEqual(cur_buffer, prev_buffer)
 
@@ -115,13 +115,13 @@ class TestStatelessFunctionalAPI(TestCase):
         parameters = {'l1.m.l1.weight': weight,
                       'l1.bias': bias,
                       'l1.m.buffer': buffer}
-        prev_weight = getattr(module.l1, 'weight').clone()
-        prev_buffer = getattr(module, 'buffer').clone()
+        prev_weight = module.l1.weight.clone()
+        prev_buffer = module.buffer.clone()
         res = _stateless.functional_call(module, parameters, x)
         self.assertEqual(x, res)
         # check that the weights remain unmodified and were correctly accesed
-        cur_weight = getattr(module.l1, 'weight')
-        cur_buffer = getattr(module, 'buffer')
+        cur_weight = module.l1.weight
+        cur_buffer = module.buffer
         self.assertEqual(cur_weight, prev_weight)
         self.assertEqual(cur_buffer, prev_buffer)
 
