@@ -59,7 +59,7 @@ TORCH_META_FUNC(mm)(const Tensor & self, const Tensor & mat2) {
 }
 
 template <typename Meta>
-void common_checks_baddbmm_bmm(Meta& meta, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha, bool is_bmm, const c10::optional<Tensor>& self_or_result=nullopt) { 
+void common_checks_baddbmm_bmm(Meta& meta, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha, bool is_bmm, const c10::optional<Tensor>& self_or_result=nullopt) {
   TORCH_CHECK(batch1.dim() == 3, "batch1 must be a 3D tensor");
   TORCH_CHECK(batch2.dim() == 3, "batch2 must be a 3D tensor");
 
@@ -104,13 +104,12 @@ TORCH_META_FUNC(baddbmm)(const Tensor& self, const Tensor& batch1, const Tensor&
   auto& result = maybe_get_output(0);
   if (!result.defined()) {
     set_output({0}, batch1.options());
-  } 
+  }
   if (!result.is_same(self)) {
-    auto self_ = expand_size(self, {batch1.size(0), batch1.size(1), batch2.size(2)}, "baddbmm");
-    result.resize_(self_->sizes());
+    set_output({batch1.size(0), batch1.size(1), batch2.size(2)}, self.options());
     if (beta.to<c10::complex<double>>() != 0.0) {
-      result.copy_(*self_);
-    } 
+      result.copy_(self);
+    }
   }
   common_checks_baddbmm_bmm(*this, batch1, batch2, beta, alpha, false, result);
   namedinference::propagate_names_if_nonempty(
@@ -1397,10 +1396,6 @@ void conjugate_mutable_input_if_needed(const Tensor& self, bool conjugate) {
 
 TORCH_IMPL_FUNC(baddbmm_out_cpu)
 (const Tensor & self, const Tensor & batch1, const Tensor & batch2, const Scalar& beta, const Scalar& alpha, const Tensor& result) {
-    const Tensor& self_or_result = result;
-    if (result.is_same(self)) {
-      self_or_result.copy_(self);
-    }
     bool self_is_conj = result.is_conj();
     conjugate_mutable_input_if_needed(result, self_is_conj);
     bmm_out_or_baddbmm_(const_cast<Tensor&>(result), batch1.resolve_conj(), batch2.resolve_conj(), beta, alpha, false);
