@@ -430,6 +430,8 @@ class TORCH_API ProcessGroupNCCL : public ProcessGroup {
   void abortTimedOutCollectives(
       std::unordered_set<std::string>& abortedCommIds);
 
+  void destroyNCCLComms(const std::string& devNCCLCommMapKey);
+
   void workCleanupLoop();
 
  protected:

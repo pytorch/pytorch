@@ -1,4 +1,5 @@
 #include <c10d/ProcessGroupNCCL.hpp>
+#include "c10/core/DeviceType.h"
 #include <sstream>
 
 #ifdef USE_C10D_NCCL
@@ -137,6 +138,11 @@ std::vector<at::Device> getDeviceList(const std::vector<at::Tensor>& tensors) {
     res.push_back(tensor.device());
   }
   return res;
+}
+
+// Return CUDA device with ordinal given by input rank.
+at::Device getDeviceForRank(int rank) {
+  return at::Device(at::DeviceType::CUDA, rank);
 }
 
 // [Sync Streams] Helper that lets the input ncclStreams to wait for the current
@@ -481,6 +487,20 @@ ProcessGroupNCCL::ProcessGroupNCCL(
               << "Only NCCL_BLOCKING_WAIT is being used in this process.";
     asyncErrorHandling_ = false;
   }
+
+  // Perform health check by initializing dummy communicators and destroying
+  // them. This will help indicate any NCCL-related issues prior to the first
+  // collective.
+  {
+    std::vector<at::Device> rankDevice = {getDeviceForRank(rank_)};
+    const auto key = getKeyFromDevices(rankDevice);
+    // OpType does not matter, only need to set to not go through send/recv path.
+    auto& ncclComms = getNCCLComm(key, rankDevice, OpType::ALLREDUCE);
+    // Now destroy the communicators and remove them from cache so we don't use
+    // destroyed communicators.
+    destroyNCCLComms(key);
+  }
+
 
 #ifdef ENABLE_NCCL_ERROR_CHECKING
   ncclCommWatchdogThread_ =
@@ -852,6 +872,28 @@ void ProcessGroupNCCL::broadcastUniqueNCCLID(
     TORCH_CHECK(vec.size() == NCCL_UNIQUE_ID_BYTES);
     std::memcpy(ncclID, vec.data(), vec.size());
   }
+}
+
+void ProcessGroupNCCL::destroyNCCLComms(const std::string& devNCCLCommMapKey) {
+  if (devNCCLCommMap_.find(devNCCLCommMapKey) == devNCCLCommMap_.end()) {
+    TORCH_INTERNAL_ASSERT(
+        false,
+        "Expected to find key ",
+        devNCCLCommMapKey,
+        " in NCCL communicator map.");
+  }
+  std::vector<std::shared_ptr<NCCLComm>>& ncclComms =
+      devNCCLCommMap_[devNCCLCommMapKey];
+  // Loop through communicators and call ncclCommDestroy. We call
+  // ncclCommDestroy instead of ncclCommAbort since there are no ops we
+  // expect to abort as part of health check.
+  for (const auto& comm : ncclComms) {
+    // ncclCommDestroy(comm->getNcclComm()) results in segfault when PG is being
+    // destroyed, so using ncclCommAbort here.
+    comm->ncclCommAbort();
+  }
+  // Remove communicators from the cache.
+  devNCCLCommMap_.erase(devNCCLCommMapKey);
 }
 
 std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
