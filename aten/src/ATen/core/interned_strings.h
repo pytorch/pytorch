@@ -42,7 +42,6 @@ namespace c10 {
   _(prim, CudaFusionGroup)           \
   _(prim, CudaFusionGuard)           \
   _(prim, FunctionalGraph)           \
-  _(prim, add_optional)              \
   _(prim, DifferentiableGraph)       \
   _(prim, TensorExprGroup)           \
   _(prim, StaticSubgraph)            \

@@ -60,7 +60,7 @@ bool isDifferentiable(const Node* n) {
 
   if (n->kind() == prim::Constant || n->kind() == prim::AutogradZero ||
       n->kind() == prim::AutogradAdd || n->kind() == prim::ConstantChunk ||
-      n->kind() == prim::profile || n->kind() == prim::profile_ivalue)
+      n->kind() == prim::profile)
     return true;
 
   if (n->isMemberOf(differentiable_ops))
