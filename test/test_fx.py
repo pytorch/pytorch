@@ -260,6 +260,24 @@ class TestFX(JitTestCase):
 
         self.checkGraphModule(m, (input_dict,))
 
+    def test_matmul_tracing(self):
+        const = torch.randn(3)
+
+        def matmul_f(x):
+            return x @ const
+
+        mod = symbolic_trace(matmul_f)
+        inp = torch.randn(3)
+        self.assertEqual(mod(inp), matmul_f(inp))
+
+        def rmatmul_f(x):
+            return const @ x
+
+        mod = symbolic_trace(rmatmul_f)
+        inp = torch.randn(3)
+        self.assertEqual(mod(inp), rmatmul_f(inp))
+
+
     def test_disallow_override(self):
         # Custom delegate to disallow in-place tensor operations
         class NoMutableCallTracer(Tracer):
@@ -3054,7 +3072,9 @@ class TestOperatorSignatures(JitTestCase):
     @ops(op_db, allowed_dtypes=(torch.float,))
     def test_get_torch_func_signature_exhaustive(self, device, dtype, op):
         # Sorted and one entry on each line to minimize merge conflicts.
-        known_no_schema = {'cdist',
+        known_no_schema = {'block_diag',
+                           'broadcast_tensors',
+                           'cdist',
                            'contiguous',
                            'dstack',
                            'einsum',
@@ -3062,6 +3082,8 @@ class TestOperatorSignatures(JitTestCase):
                            'expand_as',
                            'fill_',
                            'hstack',
+                           'igamma',
+                           'igammac',
                            'linalg.multi_dot',
                            'lu',
                            'norm',

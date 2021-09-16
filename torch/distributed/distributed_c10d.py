@@ -1355,7 +1355,7 @@ def all_reduce_coalesced(tensors, op=ReduceOp.SUM, group=None, async_op=False):
         work = group.allreduce_coalesced(tensors, opts)
 
     if async_op:
-        return work
+        return work.get_future()
     else:
         work.wait()
 
@@ -2157,7 +2157,7 @@ def all_gather_coalesced(
         work = group.allgather_coalesced(output_tensor_lists, input_tensor_list)
 
     if async_op:
-        return work
+        return work.get_future()
     else:
         work.wait()
 
