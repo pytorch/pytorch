@@ -1,33 +1,9 @@
 #include <torch/csrc/jit/codegen/cuda/executor_launch_params.h>
 
-#include <ATen/cuda/CUDAContext.h>
-
 namespace torch {
 namespace jit {
 namespace fuser {
 namespace cuda {
-
-void LaunchParams::assertValid() {
-  TORCH_INTERNAL_ASSERT(
-      bdimx() * bdimz() * bdimz() > 0 &&
-          bdimx() * bdimz() * bdimz() <=
-              (int64_t)at::cuda::getCurrentDeviceProperties()
-                  ->maxThreadsPerMultiProcessor,
-      "Selected invalid number of threads for cuda: ",
-      bdimx() * bdimz() * bdimz());
-  TORCH_INTERNAL_ASSERT(
-      gdimx() > 0 && gdimx() < (std::int64_t(1) << 32) - 1,
-      "Invalid number of blocks in x direction: ",
-      gdimx());
-  TORCH_INTERNAL_ASSERT(
-      gdimy() > 0 && gdimy() <= 65535,
-      "Invalid number of blocks in y direction: ",
-      gdimy());
-  TORCH_INTERNAL_ASSERT(
-      gdimz() > 0 && gdimz() <= 65535,
-      "Invalid number of blocks in z direction: ",
-      gdimz());
-}
 
 void LaunchParams::bind(int64_t val, ParallelType p_type) {
   switch (p_type) {
@@ -55,7 +31,6 @@ void LaunchParams::bind(int64_t val, ParallelType p_type) {
           "Tried to bind invalid parallel type in launch config: ",
           p_type);
   }
-  assertValid();
 }
 
 int64_t LaunchParams::getDim(ParallelType p_type) const {
@@ -109,23 +84,6 @@ const int64_t& LaunchParams::getRawVal(ParallelType p_type) const {
 bool LaunchParams::operator==(const LaunchParams& other) const {
   return gdimx_ == other.gdimx_ && gdimy_ == other.gdimy_ &&
       bdimx_ == other.bdimx_ && bdimy_ == other.bdimy_ && smem_ == other.smem_;
-}
-
-void LaunchParams::print() const {
-  std::cout << toString();
-}
-
-std::string LaunchParams::toString() const {
-  std::stringstream ss;
-  ss << "Launch Parameters \n"
-     << "BlockDim.x = " << bdimx() << "\n"
-     << "BlockDim.y = " << bdimy() << "\n"
-     << "BlockDim.z = " << bdimz() << "\n"
-     << "GridDim.x = " << gdimx() << "\n"
-     << "GridDim.y = " << gdimy() << "\n"
-     << "GridDim.z = " << gdimz() << "\n"
-     << "Smem Size = " << smem() << "\n";
-  return ss.str();
 }
 
 } // namespace cuda
