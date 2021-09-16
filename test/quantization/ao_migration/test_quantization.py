@@ -93,3 +93,19 @@ class TestAOMigrationQuantization(AOMigrationTestCase):
             'enable_observer',
         ]
         self._test_function_import('fake_quantize', function_list)
+
+    def test_package_import_fuse_modules(self):
+        self._test_package_import('fuse_modules')
+
+    def test_function_import_fuse_modules(self):
+        function_list = [
+            '_fuse_modules',
+            '_get_module',
+            '_set_module',
+            'fuse_conv_bn',
+            'fuse_conv_bn_relu',
+            'fuse_known_modules',
+            'fuse_modules',
+            'get_fuser_method',
+        ]
+        self._test_function_import('fuse_modules', function_list)
