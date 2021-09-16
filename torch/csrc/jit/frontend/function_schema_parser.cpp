@@ -2,6 +2,7 @@
 
 #include <ATen/core/Reduction.h>
 #include <c10/util/string_utils.h>
+#include <c10/util/string_view.h>
 #include <torch/csrc/jit/frontend/lexer.h>
 #include <torch/csrc/jit/frontend/parse_string_literal.h>
 #include <torch/csrc/jit/frontend/schema_type_parser.h>
@@ -27,8 +28,27 @@ namespace jit {
 namespace {
 struct SchemaParser {
   SchemaParser(const std::string& str)
-      : L(std::make_shared<Source>(str)),
-        type_parser(L, /*parse_complete_tensor_types*/ false) {}
+      : L(str),
+        strView(str),
+        type_parser(L, /*parse_complete_tensor_types*/ false) {
+    type_parser.setStringView(strView);
+  }
+  static std::shared_ptr<Source> newSource(c10::string_view v) {
+    return std::make_shared<Source>(std::string(v.begin(), v.end()));
+  }
+
+  Token withSource(Token t) {
+    auto result = std::move(t);
+    result.range = SourceRange(
+        newSource(strView), result.range.start(), result.range.end());
+    return result;
+  }
+
+  // We can't use Token::text() because we've caused the lexer to not
+  // set up Source for our tokens
+  c10::string_view textForToken(const Token& t) {
+    return strView.substr(t.range.start(), t.range.end() - t.range.start());
+  }
 
   either<OperatorName, FunctionSchema> parseDeclaration() {
     OperatorName name = parseName();
@@ -47,7 +67,7 @@ struct SchemaParser {
     size_t idx = 0;
     parseList('(', ',', ')', [&] {
       if (is_vararg)
-        throw ErrorReport(L.cur())
+        throw ErrorReport(withSource(L.cur()))
             << "... must be the last element of the argument list";
       if (L.nextIf('*')) {
         kwarg_only = true;
@@ -63,7 +83,7 @@ struct SchemaParser {
     if (is_vararg) {
       for (const auto& arg : arguments) {
         if (arg.default_value().has_value()) {
-          throw ErrorReport(L.cur())
+          throw ErrorReport(withSource(L.cur()))
               << "schemas with vararg (...) can't have default value args";
         }
       }
@@ -76,7 +96,7 @@ struct SchemaParser {
     } else if (L.cur().kind == '(') {
       parseList('(', ',', ')', [&] {
         if (is_varret) {
-          throw ErrorReport(L.cur())
+          throw ErrorReport(withSource(L.cur()))
               << "... must be the last element of the return list";
         }
         if (L.nextIf(TK_DOTS)) {
@@ -101,14 +121,20 @@ struct SchemaParser {
   }
 
   c10::OperatorName parseName() {
-    std::string name = L.expect(TK_IDENT).text();
+    auto name_view = textForToken(L.expect(TK_IDENT));
+    std::string name(name_view.begin(), name_view.end());
     if (L.nextIf(':')) {
       L.expect(':');
-      name = name + "::" + L.expect(TK_IDENT).text();
+      const auto ident = textForToken(L.expect(TK_IDENT));
+      name.reserve(name.size() + 2 + ident.size());
+      name.push_back(':');
+      name.push_back(':');
+      name.append(ident.begin(), ident.end());
     }
     std::string overload_name = "";
     if (L.nextIf('.')) {
-      overload_name = L.expect(TK_IDENT).text();
+      const auto text = textForToken(L.expect(TK_IDENT));
+      overload_name.append(text.begin(), text.end());
     }
     return {name, overload_name};
   }
@@ -140,7 +166,8 @@ struct SchemaParser {
     if (L.nextIf('[')) {
       // note: an array with a size hint can only occur at the Argument level
       type = ListType::create(type);
-      N = c10::stoll(L.expect(TK_NUMBER).text());
+      const auto num_view = textForToken(L.expect(TK_NUMBER));
+      N = c10::stoll(std::string(num_view.begin(), num_view.end()));
       L.expect(']');
       auto container = type_parser.parseAliasAnnotation();
       if (container && alias_info) {
@@ -154,12 +181,14 @@ struct SchemaParser {
     if (is_return) {
       // optionally field names in return values
       if (L.cur().kind == TK_IDENT) {
-        name = L.next().text();
+        const auto tok = textForToken(L.next());
+        name.append(tok.begin(), tok.end());
       } else {
         name = "";
       }
     } else {
-      name = L.expect(TK_IDENT).text();
+      const auto tok = textForToken(L.expect(TK_IDENT));
+      name.append(tok.begin(), tok.end());
       if (L.nextIf('=')) {
         default_value = parseDefaultValue(type, N);
       }
@@ -185,11 +214,11 @@ struct SchemaParser {
         return IValue();
       case TK_STRINGLITERAL: {
         auto token = L.next();
-        return parseStringLiteral(token.range, token.text());
+        return parseStringLiteral(token.range, textForToken(token));
       }
       case TK_IDENT: {
         auto tok = L.next();
-        auto text = tok.text();
+        auto text = textForToken(tok);
         if ("float" == text) {
           return static_cast<int64_t>(at::kFloat);
         } else if ("complex" == text) {
@@ -203,15 +232,21 @@ struct SchemaParser {
         } else if ("contiguous_format" == text) {
           return static_cast<int64_t>(c10::MemoryFormat::Contiguous);
         } else {
-          throw ErrorReport(L.cur().range) << "invalid numeric default value";
+          throw ErrorReport(withSource(L.cur()).range)
+              << "invalid numeric default value";
         }
       }
       default:
         std::string n;
-        if (L.nextIf('-'))
-          n = "-" + L.expect(TK_NUMBER).text();
-        else
-          n = L.expect(TK_NUMBER).text();
+        if (L.nextIf('-')) {
+          const auto num = textForToken(L.expect(TK_NUMBER));
+          n.reserve(1 + num.size());
+          n.push_back('-');
+          n.append(num.begin(), num.end());
+        } else {
+          const auto num = textForToken(L.expect(TK_NUMBER));
+          n.append(num.begin(), num.end());
+        }
 
         if (kind == TypeKind::ComplexType || n.find('j') != std::string::npos) {
           auto imag = c10::stod(n.substr(0, n.size() - 1));
@@ -240,6 +275,8 @@ struct SchemaParser {
       case TypeKind::BoolType:
         return fmap(vs, [](const IValue& v) { return v.toBool(); });
       default:
+        // throw ErrorReport(SourceRange(newSource(strView), range.start(),
+        // range.end()))
         throw ErrorReport(range)
             << "lists are only supported for float, int and complex types";
     }
@@ -281,7 +318,7 @@ struct SchemaParser {
         break;
       case TypeKind::DeviceObjType: {
         auto device_text =
-            parseStringLiteral(range, L.expect(TK_STRINGLITERAL).text());
+            parseStringLiteral(range, textForToken(L.expect(TK_STRINGLITERAL)));
         return c10::Device(device_text);
         break;
       }
@@ -298,6 +335,8 @@ struct SchemaParser {
         }
       } break;
       default:
+        // throw ErrorReport(SourceRange(newSource(strView), range.start(),
+        // range.end()))
         throw ErrorReport(range) << "unexpected type, file a bug report";
     }
     return IValue(); // silence warnings
@@ -320,6 +359,7 @@ struct SchemaParser {
       L.expect(end);
   }
   Lexer L;
+  c10::string_view strView;
   SchemaTypeParser type_parser;
 };
 } // namespace

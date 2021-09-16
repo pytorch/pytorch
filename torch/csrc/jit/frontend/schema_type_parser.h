@@ -3,6 +3,7 @@
 #include <ATen/core/Macros.h>
 #include <ATen/core/alias_info.h>
 #include <ATen/core/jit_type.h>
+#include <c10/util/string_view.h>
 #include <torch/csrc/jit/frontend/lexer.h>
 
 namespace torch {
@@ -21,7 +22,28 @@ struct TORCH_API SchemaTypeParser {
     complete_tensor_types = parse_complete_tensor_types;
   }
 
+  void setStringView(c10::string_view text) {
+    strView = text;
+  }
+
+  c10::string_view textForToken(const Token& t) {
+    AT_ASSERT(!strView.empty()); // XXX breaks other use cases but should work
+                                 // for our prototype
+    return strView.substr(t.range.start(), t.range.end() - t.range.start());
+  }
+
  private:
+  static std::shared_ptr<Source> newSource(c10::string_view v) {
+    return std::make_shared<Source>(std::string(v.begin(), v.end()));
+  }
+
+  Token withSource(Token t) {
+    auto result = std::move(t);
+    result.range = SourceRange(
+        newSource(strView), result.range.start(), result.range.end());
+    return result;
+  }
+
   c10::optional<bool> tryToParseRequiresGrad();
   c10::optional<c10::Device> tryToParseDeviceType();
   void parseList(
@@ -33,6 +55,7 @@ struct TORCH_API SchemaTypeParser {
   bool complete_tensor_types;
   Lexer& L;
   size_t next_id = 0;
+  c10::string_view strView;
 };
 } // namespace jit
 } // namespace torch

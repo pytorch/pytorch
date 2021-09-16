@@ -133,7 +133,7 @@ enum TokenKind {
 };
 
 TORCH_API std::string kindToString(int kind);
-TORCH_API int stringToKind(const std::string& str);
+TORCH_API int stringToKind(c10::string_view str);
 
 // nested hash tables that indicate char-by-char what is a valid token.
 struct TokenTrie;
@@ -185,7 +185,7 @@ struct TORCH_API SharedParserData {
   // 1. skip whitespace
   // 2. handle comment or newline
   //
-  bool isNumber(const std::string& str, size_t start, size_t* len) {
+  bool isNumber(c10::string_view str, size_t start, size_t* len) {
     char first = str[start];
     // strtod allows numbers to start with + or - or nan or inf
     // http://en.cppreference.com/w/cpp/string/byte/strtof
@@ -193,7 +193,7 @@ struct TORCH_API SharedParserData {
     // adjacent numbers in the lexer
     if (first == '-' || first == '+' || isalpha(first))
       return false;
-    const char* startptr = str.c_str() + start;
+    const char* startptr = str.data() + start;
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     char* endptr;
     torch::jit::strtod_c(startptr, &endptr);
@@ -206,7 +206,7 @@ struct TORCH_API SharedParserData {
     return *len > 0;
   }
 
-  bool isCharCount(char c, const std::string& str, size_t start, int len) {
+  bool isCharCount(char c, c10::string_view str, size_t start, int len) {
     // count checks from [start, start + len)
     return start + len <= str.size() &&
         std::count(str.begin() + start, str.begin() + start + len, c) == len;
@@ -216,7 +216,7 @@ struct TORCH_API SharedParserData {
   // strings can be enclosed with 1 or 3 single or double quotes
   // if enclosed with 3 quotes newlines are valid
   // as elsewhere, backslash and new line should be ignored
-  bool isString(const std::string& str, size_t start, size_t* len) {
+  bool isString(c10::string_view str, size_t start, size_t* len) {
     char quote = str[start];
     if (quote != '\"' && quote != '\'')
       return false;
@@ -248,7 +248,7 @@ struct TORCH_API SharedParserData {
     return isspace(n) && n != '\n';
   }
   // Make an exception ignoring comments for type annotation comments
-  bool isTypeComment(const std::string& str, size_t pos) {
+  bool isTypeComment(c10::string_view str, size_t pos) {
     const std::string type_string = "# type:";
     if (str.size() < pos + type_string.length()) {
       return false;
@@ -259,7 +259,7 @@ struct TORCH_API SharedParserData {
   // find the longest match of str.substring(pos) against a token, return true
   // if successful filling in kind, start,and len
   bool match(
-      const std::string& str,
+      c10::string_view str,
       size_t pos,
       bool continuation, // are we inside a scope where newlines don't count
                          // (e.g. inside parens)
@@ -387,8 +387,10 @@ struct Token {
 };
 
 struct Lexer {
-  explicit Lexer(std::shared_ptr<Source> source)
+ private:
+  explicit Lexer(std::shared_ptr<Source> source, c10::string_view text)
       : source(std::move(source)),
+        sourceText(this->source ? this->source->text() : text),
         pos(0),
         nesting(0),
         indent_stack(),
@@ -398,6 +400,12 @@ struct Lexer {
     indent_stack.push_back(first_indent.range.size());
     lex();
   }
+
+ public:
+  explicit Lexer(std::shared_ptr<Source> source)
+      : Lexer(std::move(source), "") {}
+
+  explicit Lexer(c10::string_view text) : Lexer(nullptr, text) {}
   // Return the current token, and then move to the next one
   Token next() {
     if (next_tokens.size() == 0)
@@ -417,23 +425,41 @@ struct Lexer {
     return true;
   }
 
-  [[noreturn]] void reportError(const std::string& what) {
+  [[noreturn]] void reportError(c10::string_view what) {
     reportError(what, cur());
   }
-  [[noreturn]] void reportError(const std::string& what, const Token& t) {
+  [[noreturn]] void reportError(c10::string_view what, const Token& t) {
     std::stringstream ss;
     ss << what << ":\n";
-    t.range.highlight(ss);
+    Token t2 = t;
+    if (!t2.range.source()) {
+      t2.range = SourceRange(
+          std::make_shared<Source>(
+              std::string(sourceText.begin(), sourceText.end())),
+          t2.range.start(),
+          t2.range.end());
+    }
+    t2.range.highlight(ss);
+    ;
     throw std::runtime_error(ss.str());
   }
-  [[noreturn]] void expected(const std::string& what, const Token& t) {
+  [[noreturn]] void expected(c10::string_view what, const Token& t) {
     std::stringstream ss;
     ss << "expected " << what << " but found '" << t.kindString()
        << "' here:\n";
-    t.range.highlight(ss);
+    Token t2 = t;
+    if (!t2.range.source()) {
+      t2.range = SourceRange(
+          std::make_shared<Source>(
+              std::string(sourceText.begin(), sourceText.end())),
+          t2.range.start(),
+          t2.range.end());
+    }
+    t2.range.highlight(ss);
+    ;
     throw std::runtime_error(ss.str());
   }
-  [[noreturn]] void expected(const std::string& what) {
+  [[noreturn]] void expected(c10::string_view what) {
     expected(what, cur());
   }
   // Check that the current token has a given kind, return the current token,
@@ -509,9 +535,9 @@ struct Lexer {
     size_t start;
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     size_t length;
-    AT_ASSERT(source);
+    AT_ASSERT(!sourceText.empty());
     if (!shared.match(
-            source->text(),
+            sourceText,
             pos,
             nesting > 0,
             whitespace_token,
@@ -520,8 +546,7 @@ struct Lexer {
             &length)) {
       expected(
           "a valid token",
-          Token(
-              (source->text())[start], SourceRange(source, start, start + 1)));
+          Token(sourceText[start], SourceRange(source, start, start + 1)));
     }
     auto t = Token(kind, SourceRange(source, start, start + length));
     pos = start + length;
@@ -529,6 +554,7 @@ struct Lexer {
   }
 
   std::shared_ptr<Source> source;
+  c10::string_view sourceText;
   size_t pos;
   size_t nesting; // depth of ( [ { nesting...
   std::vector<int> indent_stack; // stack of indentation level of blocks

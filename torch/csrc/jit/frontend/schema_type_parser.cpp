@@ -71,16 +71,16 @@ TypePtr SchemaTypeParser::parseBaseType() {
   if (!L.nextIf(TK_NONE) && !L.nextIf(TK_NONE_TYPE)) {
     L.expect(TK_IDENT);
   }
-  std::string text = tok.text();
+  const c10::string_view text = textForToken(tok);
 
-  auto it = type_map.find(text);
+  auto it = type_map.find(std::string(text.begin(), text.end()));
   if (it == type_map.end()) {
     if (text.size() > 0 && islower(text[0])) {
       // lower case identifiers that are not otherwise valid types
       // are treated as type variables
-      return VarType::create(text);
+      return VarType::create(std::string(text.begin(), text.end()));
     }
-    throw ErrorReport(tok.range) << "unknown type specifier";
+    throw ErrorReport(withSource(tok).range) << "unknown type specifier";
   }
   return it->second;
 }
@@ -102,8 +102,12 @@ c10::optional<AliasInfo> SchemaTypeParser::parseAliasAnnotation() {
 
         // If we found a wildcard, ignore all subsequent annotations
       } else if (!alias_info.isWildcardBefore()) {
-        alias_info.addBeforeSet(
-            Symbol::fromQualString("alias::" + L.expect(TK_IDENT).text()));
+        const auto ident = textForToken(L.expect(TK_IDENT));
+        std::string qual;
+        qual.reserve(strlen("alias::") + ident.size());
+        qual.append("alias::");
+        qual.append(ident.begin(), ident.end());
+        alias_info.addBeforeSet(Symbol::fromQualString(qual));
       }
     });
     if (L.nextIf('!')) {
@@ -117,8 +121,13 @@ c10::optional<AliasInfo> SchemaTypeParser::parseAliasAnnotation() {
 
           // If we found a wildcard, ignore all subsequent annotations
         } else if (!alias_info.isWildcardAfter()) {
-          alias_info.addAfterSet(
-              Symbol::fromQualString("alias::" + L.expect(TK_IDENT).text()));
+          // TODO consolidate
+          const auto ident = textForToken(L.expect(TK_IDENT));
+          std::string qual;
+          qual.reserve(strlen("alias::") + ident.size());
+          qual.append("alias::");
+          qual.append(ident.begin(), ident.end());
+          alias_info.addAfterSet(Symbol::fromQualString(qual));
         }
       });
     } else {
@@ -157,7 +166,7 @@ c10::optional<at::ScalarType> SchemaTypeParser::parseTensorDType(
 
 c10::optional<c10::Device> SchemaTypeParser::tryToParseDeviceType() {
   L.expect('=');
-  const std::string& dev = L.expect(TK_IDENT).text();
+  c10::string_view dev = textForToken(L.expect(TK_IDENT));
 
   if (dev == "cpu") {
     return c10::Device(at::kCPU);
@@ -167,27 +176,29 @@ c10::optional<c10::Device> SchemaTypeParser::tryToParseDeviceType() {
     c10::DeviceIndex device_idx = -1;
     if (L.cur().kind == ':') {
       L.expect(':');
-      const std::string& num = L.expect(TK_NUMBER).text();
+      const c10::string_view num = textForToken(L.expect(TK_NUMBER));
       // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       std::string::size_type num_len;
-      device_idx = c10::stoi(num, &num_len);
+      device_idx = c10::stoi(std::string(num.begin(), num.end()), &num_len);
     }
     return c10::Device(at::kCUDA, device_idx);
   }
 
-  throw ErrorReport(L.cur()) << "cannot parse device type '" << dev << "'\n";
+  throw ErrorReport(withSource(L.cur()))
+      << "cannot parse device type '" << dev << "'\n";
 }
 
 c10::optional<bool> SchemaTypeParser::tryToParseRequiresGrad() {
   L.expect('=');
-  const std::string& num = L.expect(TK_NUMBER).text();
+  const c10::string_view num = textForToken(L.expect(TK_NUMBER));
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   std::string::size_type num_len;
-  return (bool)c10::stoi(num, &num_len);
+  return (bool)c10::stoi(std::string(num.begin(), num.end()), &num_len);
 }
 
 TypePtr SchemaTypeParser::parseRefinedTensor() {
-  auto maybe_dtype = parseTensorDType(L.expect(TK_IDENT).text());
+  const auto ident = textForToken(L.expect(TK_IDENT));
+  auto maybe_dtype = parseTensorDType(std::string(ident.begin(), ident.end()));
   AT_ASSERT(maybe_dtype);
   at::ScalarType dtype = *maybe_dtype;
   TypePtr ptr;
@@ -208,12 +219,13 @@ TypePtr SchemaTypeParser::parseRefinedTensor() {
   parseList(TK_NOTHING, ',', ')', [&] {
     // Extra handling for options like 'device' and 'requires_grad'
     if (L.cur().kind == TK_IDENT) {
-      const std::string& field = L.expect(TK_IDENT).text();
+      const c10::string_view field = textForToken(L.expect(TK_IDENT));
       if (field == "device") {
         auto parsed_device = tryToParseDeviceType();
         if (parsed_device.has_value()) {
           if (device.has_value()) {
-            throw ErrorReport(L.cur()) << "'device' is specified twice";
+            throw ErrorReport(withSource(L.cur()))
+                << "'device' is specified twice";
           }
           device = parsed_device;
         }
@@ -223,7 +235,8 @@ TypePtr SchemaTypeParser::parseRefinedTensor() {
         auto parsed_requires_grad = tryToParseRequiresGrad();
         if (parsed_requires_grad.has_value()) {
           if (requires_grad.has_value()) {
-            throw ErrorReport(L.cur()) << "'requires_grad' is specified twice";
+            throw ErrorReport(withSource(L.cur()))
+                << "'requires_grad' is specified twice";
           }
           requires_grad = parsed_requires_grad;
         }
@@ -233,18 +246,20 @@ TypePtr SchemaTypeParser::parseRefinedTensor() {
         seen_strides = true;
         L.expect('=');
         parseList('[', ',', ']', [&] {
-          const std::string& num = L.expect(TK_NUMBER).text();
+          const c10::string_view num = textForToken(L.expect(TK_NUMBER));
           // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
           std::string::size_type num_len;
-          auto stride = c10::stoll(num, &num_len);
+          auto stride =
+              c10::stoll(std::string(num.begin(), num.end()), &num_len);
           strides.push_back(stride);
         });
         return;
       }
-      throw ErrorReport(L.cur()) << "Unexpected specifier '" << field << "'";
+      throw ErrorReport(withSource(L.cur()))
+          << "Unexpected specifier '" << field << "'";
     }
     if (device.has_value() || requires_grad.has_value()) {
-      throw ErrorReport(L.cur())
+      throw ErrorReport(withSource(L.cur()))
           << "'device' and 'requires_grad' should come after dimensions in the type specification";
     }
 
@@ -254,14 +269,15 @@ TypePtr SchemaTypeParser::parseRefinedTensor() {
       dims.emplace_back(c10::nullopt);
       L.next();
       if (L.cur().kind == ':') {
-        throw ErrorReport(L.cur()) << "Strides for unsized ranks not supported";
+        throw ErrorReport(withSource(L.cur()))
+            << "Strides for unsized ranks not supported";
       }
       return;
     }
-    const std::string& num = L.expect(TK_NUMBER).text();
+    const c10::string_view num = L.expect(TK_NUMBER).text();
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     std::string::size_type num_len;
-    auto dim = c10::stoll(num, &num_len);
+    auto dim = c10::stoll(std::string(num.begin(), num.end()), &num_len);
     dims.emplace_back(dim);
   });
   if (seen_strides) {
@@ -269,7 +285,7 @@ TypePtr SchemaTypeParser::parseRefinedTensor() {
     if (strides.size() != dims.size()) {
       // note: mixing unsized ranks and ranks with strides will always trigger
       // this
-      throw ErrorReport(L.cur())
+      throw ErrorReport(withSource(L.cur()))
           << "Strides info is specified for some but not for all dimensions";
     }
     ptr = at::TensorType::create(
@@ -303,7 +319,7 @@ std::pair<TypePtr, c10::optional<AliasInfo>> SchemaTypeParser::parseType() {
       }
     });
     value = TupleType::create(std::move(types));
-  } else if (L.cur().kind == TK_IDENT && L.cur().text() == "Future") {
+  } else if (L.cur().kind == TK_IDENT && textForToken(L.cur()) == "Future") {
     L.next(); // Future
     L.expect('(');
     auto p = parseType();
@@ -311,7 +327,7 @@ std::pair<TypePtr, c10::optional<AliasInfo>> SchemaTypeParser::parseType() {
     auto subalias = std::move(p.second);
     L.expect(')');
     value = FutureType::create(subtype);
-  } else if (L.cur().kind == TK_IDENT && L.cur().text() == "RRef") {
+  } else if (L.cur().kind == TK_IDENT && textForToken(L.cur()) == "RRef") {
     L.next(); // RRef
     L.expect('(');
     auto p = parseType();
@@ -319,11 +335,11 @@ std::pair<TypePtr, c10::optional<AliasInfo>> SchemaTypeParser::parseType() {
     auto subalias = std::move(p.second);
     L.expect(')');
     value = RRefType::create(subtype);
-  } else if (L.cur().kind == TK_IDENT && L.cur().text() == "Tensor") {
+  } else if (L.cur().kind == TK_IDENT && textForToken(L.cur()) == "Tensor") {
     L.next();
     value = TensorType::get();
     alias_info = parseAliasAnnotation();
-  } else if (L.cur().kind == TK_IDENT && L.cur().text() == "Dict") {
+  } else if (L.cur().kind == TK_IDENT && textForToken(L.cur()) == "Dict") {
     L.next();
     L.expect('(');
     auto key_type = parseType().first;
@@ -332,7 +348,7 @@ std::pair<TypePtr, c10::optional<AliasInfo>> SchemaTypeParser::parseType() {
     L.expect(')');
     alias_info = parseAliasAnnotation();
     value = DictType::create(key_type, value_type);
-  } else if (L.cur().kind == TK_IDENT && L.cur().text() == "Union") {
+  } else if (L.cur().kind == TK_IDENT && textForToken(L.cur()) == "Union") {
     L.next();
     L.expect('(');
     std::vector<TypePtr> types;
@@ -346,35 +362,43 @@ std::pair<TypePtr, c10::optional<AliasInfo>> SchemaTypeParser::parseType() {
     value = UnionType::create(types);
   } else if (
       complete_tensor_types && L.cur().kind == TK_IDENT &&
-      parseTensorDType(L.cur().text())) {
+      parseTensorDType(std::string(
+          textForToken(L.cur()).begin(), textForToken(L.cur()).end()))) {
     value = parseRefinedTensor();
     alias_info = parseAliasAnnotation();
-  } else if (L.cur().kind == TK_IDENT && L.cur().text() == "__torch__") {
+  } else if (L.cur().kind == TK_IDENT && textForToken(L.cur()) == "__torch__") {
     L.next();
     L.expect('.');
     auto torch_tok = L.expect(TK_IDENT);
-    if (torch_tok.text() != "torch") {
-      throw ErrorReport(torch_tok.range)
+    if (textForToken(torch_tok) != "torch") {
+      throw ErrorReport(withSource(torch_tok).range)
           << "Expected classes namespace but got " << torch_tok.text();
     }
     L.expect('.');
     auto classes_tok = L.expect(TK_IDENT);
-    if (classes_tok.text() != "classes") {
-      throw ErrorReport(classes_tok.range)
+    if (textForToken(classes_tok) != "classes") {
+      throw ErrorReport(withSource(classes_tok).range)
           << "Expected classes namespace but got " << classes_tok.text();
     }
     L.expect('.');
     auto ns_tok = L.expect(TK_IDENT);
+    const auto ns_tok_text = textForToken(ns_tok);
     L.expect('.');
     auto class_tok = L.expect(TK_IDENT);
-    value = getCustomClass(
-        std::string("__torch__.torch.classes.") + ns_tok.text() + "." +
-        class_tok.text());
+    const auto class_tok_text = textForToken(class_tok);
+    std::string customClassName;
+    customClassName.reserve(
+        strlen("__torch__.torch.classes.") + ns_tok_text.size() + 1 +
+        class_tok_text.size());
+    customClassName.append("__torch__.torch.classes.");
+    customClassName.append(ns_tok_text.begin(), ns_tok_text.end());
+    customClassName.push_back('.');
+    customClassName.append(class_tok_text.begin(), class_tok_text.end());
+    value = getCustomClass(customClassName);
     if (!value) {
-      throw ErrorReport(class_tok.range)
-          << "Unknown custom class type "
-          << ns_tok.text() + "." + class_tok.text()
-          << ". Please ensure it is registered.";
+      throw ErrorReport(withSource(class_tok).range)
+          << "Unknown custom class type " << textForToken(ns_tok) << "."
+          << textForToken(class_tok) << ". Please ensure it is registered.";
     }
   } else {
     value = parseBaseType();

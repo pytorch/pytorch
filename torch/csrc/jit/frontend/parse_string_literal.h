@@ -6,7 +6,7 @@
 namespace torch {
 namespace jit {
 
-inline bool isCharCount(char c, const std::string& str, size_t start, int len) {
+inline bool isCharCount(char c, c10::string_view str, size_t start, int len) {
   // count checks from [start, start + len)
   return start + len <= str.size() &&
       std::count(str.begin() + start, str.begin() + start + len, c) == len;
@@ -31,9 +31,9 @@ inline c10::optional<char> parseOctal(const std::string& str, size_t pos) {
 
 inline std::string parseStringLiteral(
     const SourceRange& range,
-    const std::string& str) {
+    c10::string_view str) {
   int quote_len = isCharCount(str[0], str, 0, 3) ? 3 : 1;
-  auto ret_str = str.substr(quote_len, str.size() - quote_len * 2);
+  std::string ret_str(str.data() + quote_len, str.size() - quote_len * 2);
   size_t pos = ret_str.find('\\');
   while (pos != std::string::npos) {
     // invariant: pos has to escape a character because it is a valid string
