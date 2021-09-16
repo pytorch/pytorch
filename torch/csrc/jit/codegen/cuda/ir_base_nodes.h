@@ -49,6 +49,8 @@ class BinaryOp;
 class IterDomain;
 class IrCloner;
 
+TORCH_CUDA_CU_API void swap(Fusion& a, Fusion& b) noexcept;
+
 //! Statement is the highest level node representation. Everything that is
 //! considered "IR" will be derived from this class at some point. Both Values
 //! and Expr's are a Statement. If there will ever be any more fundamental
