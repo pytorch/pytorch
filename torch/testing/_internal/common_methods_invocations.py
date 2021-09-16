@@ -2613,15 +2613,6 @@ def sample_inputs_conv_transpose2d(op_info, device, dtype, requires_grad, **kwar
     return list(generator())
 
 
-def wrapper_cudnn_disabled(op):
-
-    def wrapped(*args, **kwargs):
-        with torch.backends.cudnn.flags(enabled=True):
-            return op(*args, **kwargs)
-
-    return wrapped
-
-
 def sample_inputs_conv2d(op_info, device, dtype, requires_grad, jit_fail_sample=False, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
@@ -7540,27 +7531,6 @@ op_db: List[OpInfo] = [
            sample_inputs_func=partial(sample_inputs_conv2d),
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL if CUDA11OrLater else 0.,
            skips=(
-               # RuntimeError: !lhs.isAliasOf(rhs)INTERNAL ASSERT FAILED at
-               # "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":103, please report a bug to PyTorch.
-               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
-           ),
-           supports_out=False,),
-    # Run CUDA tests with cudnn disabled.
-    OpInfo('nn.functional.conv2d',
-           aliases=('conv2d',),
-           aten_name='conv2d',
-           variant_test_name='cudnn_disabled',
-           op=wrapper_cudnn_disabled(torch.conv2d),
-           dtypes=floating_types_and(torch.int64),
-           dtypesIfCUDA=floating_types_and(torch.float16, *[torch.bfloat16] if CUDA11OrLater else []),
-           sample_inputs_func=partial(sample_inputs_conv2d),
-           gradcheck_nondet_tol=GRADCHECK_NONDET_TOL if CUDA11OrLater else 0.,
-           skips=(
-               # Skip all CPU tests
-               DecorateInfo(unittest.skip('Redundant Test'), 'TestCommon', device_type='cpu'),
-               DecorateInfo(unittest.skip('Redundant Test'), 'TestJit', device_type='cpu'),
-               DecorateInfo(unittest.skip('Redundant Test'), 'TestMathBits', device_type='cpu'),
-               DecorateInfo(unittest.skip('Redundant Test'), 'TestGradients', device_type='cpu'),
                # RuntimeError: !lhs.isAliasOf(rhs)INTERNAL ASSERT FAILED at
                # "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":103, please report a bug to PyTorch.
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
