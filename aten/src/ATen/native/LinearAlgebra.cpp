@@ -59,7 +59,7 @@ TORCH_META_FUNC(mm)(const Tensor & self, const Tensor & mat2) {
 }
 
 template <typename Meta>
-void common_checks_baddbmm_bmm(Meta& meta, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha, bool is_bmm, const c10::optional<Tensor>& self_or_result=nullopt) {
+void common_checks_baddbmm_bmm(Meta& meta, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha, bool is_bmm, const Tensor& self_or_result) {
   TORCH_CHECK(batch1.dim() == 3, "batch1 must be a 3D tensor");
   TORCH_CHECK(batch2.dim() == 3, "batch2 must be a 3D tensor");
 
@@ -74,22 +74,21 @@ void common_checks_baddbmm_bmm(Meta& meta, const Tensor& batch1, const Tensor& b
   TORCH_CHECK(batch2_sizes[0] == bs && batch2_sizes[1] == contraction_size);
 
   if (!is_bmm) {
-    if (self_or_result.has_value()) {
-      TORCH_CHECK(self_or_result.value().dim() == 3, "self must be a 3D tensor");
-      const auto self_sizes = self_or_result.value().sizes();
-      TORCH_CHECK(self_sizes[0] == bs && self_sizes[1] == res_rows && self_sizes[2] == res_cols);
-    }
+    TORCH_CHECK(self_or_result.dim() == 3, "self must be a 3D tensor");
+    const auto self_sizes = self_or_result.sizes();
+    TORCH_CHECK(self_sizes[0] == bs && self_sizes[1] == res_rows && self_sizes[2] == res_cols);
   }
+
+  namedinference::propagate_names_if_nonempty(
+    self_or_result,
+    namedinference::compute_bmm_outnames(const_cast<Tensor&>(self_or_result), batch1, batch2)
+  );
 }
 
 TORCH_META_FUNC(bmm)(const Tensor& self, const Tensor& mat2) {
     set_output({self.sizes()[0], self.sizes()[1], mat2.sizes()[2]}, self.options());
-    common_checks_baddbmm_bmm(*this, self, mat2, Scalar(0.0), Scalar(1.0), true);
     auto& result = maybe_get_output(0);
-    namedinference::propagate_names_if_nonempty(
-      result,
-      namedinference::compute_bmm_outnames(const_cast<Tensor&>(result), self, mat2)
-    );
+    common_checks_baddbmm_bmm(*this, self, mat2, Scalar(0.0), Scalar(1.0), true, result);
 }
 
 TORCH_META_FUNC(baddbmm)(const Tensor& self, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha) {
@@ -104,10 +103,6 @@ TORCH_META_FUNC(baddbmm)(const Tensor& self, const Tensor& batch1, const Tensor&
     }
   }
   common_checks_baddbmm_bmm(*this, batch1, batch2, beta, alpha, false, result);
-  namedinference::propagate_names_if_nonempty(
-    result,
-    namedinference::compute_bmm_outnames(const_cast<Tensor&>(result), batch1, batch2)
-  );
 }
 
 } // namespace meta
