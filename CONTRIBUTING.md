@@ -107,45 +107,7 @@ git submodule update --init --recursive --jobs 0
 
 If you want to have no-op incremental rebuilds (which are fast), see the section below titled "Make no-op build fast."
 
-3. Install Dependencies
-
-Common
-```bash
-conda install astunparse numpy ninja pyyaml mkl mkl-include setuptools cmake cffi typing_extensions future six requests dataclasses
-```
-
-On Linux
-```bash
-# CUDA only: Add LAPACK support for the GPU if needed
-conda install -c pytorch magma-cuda110  # or the magma-cuda* that matches your CUDA version from https://anaconda.org/pytorch/repo
-```
-
-On MacOS
-```bash
-# Add these packages if torch.distributed is needed
-conda install pkg-config libuv
-```
-
-On Windows
-```bash
-# Add these packages if torch.distributed is needed.
-# Distributed package support on Windows is a prototype feature and is subject to changes.
-conda install -c conda-forge libuv=1.39
-```
-
-4. Install PyTorch in `develop` mode:
-
-The change you have to make is to replace
-
-```bash
-python setup.py install
-```
-
-with
-
-```bash
-python setup.py develop
-```
+3. Build PyTorch [from source](https://github.com/pytorch/pytorch/#from-source) and replace `python setup.py install` with `python setup.py develop`
 
 This mode will symlink the Python files from the current local source
 tree into the Python install.  Hence, if you modify a Python file, you
