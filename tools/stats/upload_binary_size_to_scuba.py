@@ -172,6 +172,7 @@ if __name__ == "__main__":
                 }
                 data.append({**base_data(), **library_data})
             rds_write("binary_size", data)
+            print(json.dumps(data, indent=2))
         else:
             print("checking dir: " + file_dir)
             size = get_size(file_dir)
