@@ -1335,7 +1335,7 @@ class TestLinalg(TestCase):
         for keepdim in [True, False]:
             for input_size, ord_settings in test_cases:
                 for ord in ord_settings:
-                    if not torch._C.has_lapack and ord in [2, -2, 'nuc']:
+                    if self.device_type == 'cpu' and not torch._C.has_lapack and ord in [2, -2, 'nuc']:
                         continue
 
                     dtypes = [torch.float, torch.double, torch.cfloat, torch.cdouble]
@@ -1572,7 +1572,7 @@ class TestLinalg(TestCase):
             for input_size, ord_settings, dim in test_cases:
                 input = torch.randn(*input_size, dtype=dtype, device=device)
                 for ord in ord_settings:
-                    if not torch._C.has_lapack and ord in [2, -2, 'nuc']:
+                    if self.device_type == 'cpu' and not torch._C.has_lapack and ord in [2, -2, 'nuc']:
                         continue
                     run_test_case(input, ord, dim, keepdim)
 
