@@ -2,10 +2,6 @@
 
 #include <torch/csrc/jit/codegen/cuda/utils.h>
 
-#include <nvToolsExt.h>
-
-// NOLINTNEXTLINE(modernize-deprecated-headers)
-#include <stdio.h>
 #include <chrono>
 #include <cstdio>
 
@@ -20,7 +16,7 @@ namespace inst {
 //! This class is not intended to be used directly. Instead, the operations
 //! to be traced are marked (for example using the FUSER_PERF_SCOPE macro)
 //!
-//! In order to enable tracing, the `PYTORCH_NVFUSER_TRACE` environment
+//! In order to enable tracing, the `PYTORCH_CUDA_FUSER_TRACE` environment
 //! variable is set to point to a trace file (ex `test.trace`). The file name
 //! may be a relative or an absolute path.
 //!
@@ -45,11 +41,9 @@ class Trace : public NonCopyable {
     if (log_file_ != nullptr) {
       logEvent('B', name);
     }
-    nvtxRangePushA(name);
   }
 
   void endEvent(const char* name) {
-    nvtxRangePop();
     if (log_file_ != nullptr) {
       logEvent('E', name);
     }

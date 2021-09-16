@@ -5,14 +5,10 @@
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/clear_profiling.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
-#include <torch/csrc/jit/passes/cuda_graph_fuser.h>
 #include <torch/csrc/jit/passes/tensorexpr_fuser.h>
 #include <torch/csrc/jit/runtime/autodiff.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
-
-#include <torch/csrc/jit/codegen/cuda/interface.h>
-#include <torch/csrc/jit/ir/ir.h>
 
 namespace torch {
 namespace jit {
@@ -205,13 +201,7 @@ void ProfilingRecord::insertShapeProfile(Node* n, size_t offset) {
 }
 
 bool needsProfiledInputs(Node* n) {
-  if (tensorexpr::isSupported(n) ||
-#ifndef C10_MOBILE
-      (RegisterCudaFuseGraph::isRegistered() && fuser::cuda::canFuseNode(n))
-#else
-      false
-#endif
-  ) {
+  if (tensorexpr::isSupported(n)) {
     return true;
   }
 
@@ -242,13 +232,7 @@ bool needsProfiledInputs(Node* n) {
 }
 
 bool needsProfiledOutput(Node* n) {
-  if (tensorexpr::isSupported(n) ||
-#ifndef C10_MOBILE
-      (RegisterCudaFuseGraph::isRegistered() && fuser::cuda::canFuseNode(n))
-#else
-      false
-#endif
-  ) {
+  if (tensorexpr::isSupported(n)) {
     return true;
   }
 
