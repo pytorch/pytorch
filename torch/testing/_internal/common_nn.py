@@ -1311,11 +1311,9 @@ def single_batch_reference_fn(input, parameters, module):
         return inp.unsqueeze(0)
 
     single_batch_input = unsqueeze_inp(input)
+    single_batch_input = [single_batch_input] if isinstance(single_batch_input, torch.Tensor) else single_batch_input
     with freeze_rng_state():
-        if isinstance(single_batch_input, torch.Tensor):
-            return module(single_batch_input).squeeze(0)
-        else:  # if multiple inputs (list or tuple)
-            return module(*single_batch_input).squeeze(0)
+        return module(*single_batch_input).squeeze(0)
 
 
 new_module_tests = [
@@ -3946,6 +3944,16 @@ new_module_tests = [
     dict(
         module_name='PairwiseDistance',
         input_fn=lambda: (torch.randn(10, 8), torch.randn(10, 8)),
+    ),
+    dict(
+        module_name='PairwiseDistance',
+        input_fn=lambda: (torch.randn(10, 1), torch.randn(10, 8)),
+        desc='broadcast_lhs'
+    ),
+    dict(
+        module_name='PairwiseDistance',
+        input_fn=lambda: (torch.randn(10, 8), torch.randn(1, 8)),
+        desc='broadcast_rhs'
     ),
     dict(
         module_name='PairwiseDistance',
