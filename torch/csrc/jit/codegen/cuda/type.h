@@ -14,8 +14,6 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
-enum class KernelIndexMode { INT32, INT64 };
-
 // https://stackoverflow.com/questions/18837857/cant-use-enum-class-as-unordered-map-key
 struct TypeHash {
   template <typename T>
@@ -31,32 +29,17 @@ enum class ValType {
   TensorView,
   Scalar,
   NamedScalar,
+
+  // Temporary: Kernel IR nodes
+  TensorIndex,
+  KirNamedScalar,
+  KirScalar,
+  KirTensorDomain,
+  KirIterDomain,
+  KirTensorView,
 };
 
-// Manual - The user provides the Bool value. Predicate generation is bypassed.
-// Inline corresponds with PredicateCompute::getInlinePredicate
-// Unswitch corresponds with UnswitchPredicate::get
-// Misaligned - PredicateCompute::getInlinePredicate + Misaligned flag
-// Shift - ShiftPredicateInserter::getShiftPredicate
-// Padding - ShiftPredicateInserter::getPaddingPredicate
-// ReductionWrite - Same as Inline but without reduction axes
-enum class PredicateType {
-  Manual,
-  Inline,
-  Unswitch,
-  Vectorize,
-  Misaligned,
-  Shift,
-  Padding,
-  ReductionWrite
-};
-
-enum class DataType { Double, Float, Half, Int, Int32, Bool, Null };
-
-// Returns if the datatype is a floating point type
-bool isFloatingPointType(DataType dtype);
-// Returns if the datatype is an integer type
-bool isIntegralType(DataType dtype);
+enum class DataType { Bool, Float, Half, Int, Null };
 
 enum class ExprType {
   Invalid,
@@ -65,18 +48,25 @@ enum class ExprType {
   TernaryOp,
   ReductionOp,
   BroadcastOp,
-  WelfordOp,
-  TransposeOp,
-  ShiftOp,
-  GatherOp,
   Split,
   Merge,
+
+  // Temporary: Kernel IR nodes
+  GridReduction,
+  ForLoop,
+  IfThenElse,
+  Allocate,
+  Sync,
+  KirUnaryOp,
+  KirBinaryOp,
+  KirTernaryOp,
+  KirReductionOp,
+  KirBroadcastOp,
 };
 
 enum class UnaryOpType {
   Abs,
   Acos,
-  Address,
   Asin,
   Atan,
   Atanh,
@@ -91,7 +81,6 @@ enum class UnaryOpType {
   Floor,
   Frac,
   Gelu,
-  Silu,
   Lgamma,
   Log,
   Log10,
@@ -110,14 +99,8 @@ enum class UnaryOpType {
   Sqrt,
   Tan,
   Tanh,
-  Trunc,
-
-  // Might be a bitwise operator or boolean operator.
-  Not
+  Trunc
 };
-
-// Primarily for Not, which could be Not a boolean, or a bitwise not.
-bool alsoBooleanOperator(const UnaryOpType uopt);
 
 // TODO: Order of this list is important as it affects type promotion. it's not
 // in the right order now.
@@ -135,42 +118,18 @@ enum class BinaryOpType {
   Sub,
   // TypeAs,
 
-  // Integer output ops. If changing modify isIntegerOp
+  // Logical Ops
+  // Int operations, leave position of Mod we depend on its location of first
   Mod,
   CeilDiv,
-  Lshift,
-  Rshift,
-
-  // Logical Ops
-  // Int operations, leave position of Mod as first logical op see
-  // isLogicalOp(BinaryOpType bopt)
+  And,
   Eq,
   GE,
   GT,
   LE,
   LT,
-  NE,
-
-  // Maybe bitwise or boolean op, leave position of and as first bool/int
-  // op. These are ops that have different operators based on output type. See
-  // is boolean op. These ops also don't work on floating point inputs.
-  And,
-  Or,
-  Xor
+  NE
 };
-
-// Return if output of operator should be a boolean
-bool isIntegerOp(const BinaryOpType bopt);
-
-// Return if output of operator should be a boolean
-bool isLogicalOp(const BinaryOpType bopt);
-
-// Operations that could be a bitwise operation or a boolean operation depending
-// on input, for example bitwise_and is also used for boolean and in the jit
-bool alsoBooleanOperator(const BinaryOpType bopt);
-
-//! Operations that have tricky behaviors with all integer inputs
-bool noFullIntegerSupport(const BinaryOpType bopt);
 
 enum class TernaryOpType { Clamp, Threshold, Where };
 
@@ -182,9 +141,7 @@ enum class ParallelType {
   TIDy,
   TIDx,
   Vectorize,
-  MisalignedVectorize,
   Unroll,
-  Unswitch,
   Serial
 };
 
@@ -202,24 +159,15 @@ enum class IterType {
   Iteration,
   Reduction,
   BroadcastWithStride,
-  BroadcastWithoutStride,
-  Gather
+  BroadcastWithoutStride
 };
-
-enum class SwizzleType { NoSwizzle, Transpose };
-
-// Returns if function needs an f suffix on the operator when operating on a
-// float value i.e. sin->sinf
-bool needFloatSuffix(UnaryOpType t);
-bool needFloatSuffix(BinaryOpType t);
 
 ValType promote_type(const ValType& t1, const ValType& t2);
 DataType promote_type(const DataType& t1, const DataType& t2);
+bool is_logical_op(const BinaryOpType& bot);
 
-// If type cannot be found (i.e. codegen does not support provided type) returns
-// DataType::Null
-TORCH_CUDA_CU_API DataType aten_to_data_type(const at::ScalarType& scalar_type);
-TORCH_CUDA_CU_API at::ScalarType data_type_to_aten(const DataType& data_type);
+DataType aten_to_data_type(const at::ScalarType& scalar_type);
+at::ScalarType data_type_to_aten(const DataType& data_type);
 
 TORCH_CUDA_CU_API std::ostream& operator<<(std::ostream&, const ValType);
 TORCH_CUDA_CU_API std::ostream& operator<<(std::ostream&, const DataType);
@@ -231,28 +179,16 @@ TORCH_CUDA_CU_API std::ostream& operator<<(std::ostream&, const ParallelType);
 TORCH_CUDA_CU_API std::ostream& operator<<(std::ostream&, const MemoryType);
 TORCH_CUDA_CU_API std::ostream& operator<<(std::ostream&, const IterType);
 
-std::string stringifyBooleanOp(const UnaryOpType);
-std::string stringifyBooleanOp(const BinaryOpType);
-
 std::string stringifyThreadSize(const ParallelType);
 std::string stringifyThread(const ParallelType);
-std::string typePrefix(const DataType);
-
-// TODO: ThreadDim should be BlockDim and BlockDim should be GridDim
-TORCH_CUDA_CU_API bool isParallelTypeThreadDim(ParallelType);
-TORCH_CUDA_CU_API bool isParallelTypeBlockDim(ParallelType);
-TORCH_CUDA_CU_API bool isParallelTypeThread(ParallelType);
-
-TORCH_CUDA_CU_API bool isParallelTypeVectorize(ParallelType);
 
 TORCH_CUDA_CU_API c10::optional<std::string> inline_op_str(const UnaryOpType);
 TORCH_CUDA_CU_API c10::optional<std::string> inline_op_str(const BinaryOpType);
-TORCH_CUDA_CU_API c10::optional<std::string> integer_op_str(const BinaryOpType);
 
 TORCH_CUDA_CU_API c10::optional<std::string> cast_func_str(
     const std::pair<DataType, DataType>&);
 
-TORCH_CUDA_CU_API size_t dataTypeSize(DataType type);
+size_t dataTypeSize(DataType type);
 
 enum class LaunchConfigType {
   Compatible,
