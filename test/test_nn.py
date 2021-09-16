@@ -11629,6 +11629,21 @@ class TestNNInit(TestCase):
             assert self._is_uniform(input_tensor, a, b)
 
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found.")
+    def test_uniform_reproducibility(self):
+        atol = 1e-5
+        rtol = 1e-3
+        gen1 = torch.Generator().manual_seed(123)
+        gen2 = torch.Generator().manual_seed(123)
+        for dims in [1, 2, 4]:
+            input_tensor1 = self._create_random_nd_tensor(dims, size_min=30, size_max=30)
+            input_tensor2 = self._create_random_nd_tensor(dims, size_min=30, size_max=30)
+            a = self._random_float(-3, 3)
+            b = a + self._random_float(1, 5)
+            init.uniform_(input_tensor1, a=a, b=b, generator=gen1)
+            init.uniform_(input_tensor2, a=a, b=b, generator=gen2)
+            self.assertEqual(input_tensor1, input_tensor2, rtol=rtol, atol=atol)
+
+    @unittest.skipIf(not TEST_SCIPY, "Scipy not found.")
     def test_normal(self):
         for dims in [1, 2, 4]:
             input_tensor = self._create_random_nd_tensor(dims, size_min=30, size_max=50)
@@ -11637,6 +11652,21 @@ class TestNNInit(TestCase):
             init.normal_(input_tensor, mean=mean, std=std)
 
             assert self._is_normal(input_tensor, mean, std)
+
+    @unittest.skipIf(not TEST_SCIPY, "Scipy not found.")
+    def test_normal_reproducibility(self):
+        atol = 1e-5
+        rtol = 1e-3
+        gen1 = torch.Generator().manual_seed(123)
+        gen2 = torch.Generator().manual_seed(123)
+        for dims in [1, 2, 4]:
+            input_tensor1 = self._create_random_nd_tensor(dims, size_min=30, size_max=30)
+            input_tensor2 = self._create_random_nd_tensor(dims, size_min=30, size_max=30)
+            mean = self._random_float(-3, 3)
+            std = self._random_float(1, 5)
+            init.normal_(input_tensor1, mean=mean, std=std, generator=gen1)
+            init.normal_(input_tensor2, mean=mean, std=std, generator=gen2)
+            self.assertEqual(input_tensor1, input_tensor2, rtol=rtol, atol=atol)
 
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found.")
     def test_trunc_normal(self):
@@ -11649,6 +11679,23 @@ class TestNNInit(TestCase):
             init.trunc_normal_(input_tensor, mean=mean, std=std, a=a, b=b)
 
             assert self._is_trunc_normal(input_tensor, mean, std, a, b)
+
+    @unittest.skipIf(not TEST_SCIPY, "Scipy not found.")
+    def test_trunc_normal_reproducibility(self):
+        atol = 1e-5
+        rtol = 1e-3
+        gen1 = torch.Generator().manual_seed(123)
+        gen2 = torch.Generator().manual_seed(123)
+        for dims in [1, 2, 4]:
+            input_tensor1 = self._create_random_nd_tensor(dims, size_min=30, size_max=30)
+            input_tensor2 = self._create_random_nd_tensor(dims, size_min=30, size_max=30)
+            mean = self._random_float(-3, 3)
+            std = self._random_float(.01, 1)
+            a = self._random_float(mean - 2 * std, mean)
+            b = self._random_float(mean, mean + 2 * std)
+            init.trunc_normal_(input_tensor1, mean=mean, std=std, a=a, b=b, generator=gen1)
+            init.trunc_normal_(input_tensor2, mean=mean, std=std, a=a, b=b, generator=gen2)
+            self.assertEqual(input_tensor1, input_tensor2, rtol=rtol, atol=atol)
 
     def test_constant(self):
         for dims in [1, 2, 4]:
