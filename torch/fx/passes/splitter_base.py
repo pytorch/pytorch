@@ -5,7 +5,7 @@ from typing import List, Dict, Optional, Tuple
 import logging
 
 import torch
-from torch.fx.experimental.graph_manipulation import get_size_of_node
+from torch.fx.passes.graph_manipulation import get_size_of_node
 from torch.fx.node import map_arg
 
 from .operator_support import (

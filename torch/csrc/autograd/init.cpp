@@ -14,6 +14,7 @@
 #include <torch/csrc/autograd/python_saved_variable_hooks.h>
 #include <torch/csrc/autograd/utils/wrap_outputs.h>
 #include <torch/csrc/autograd/utils/python_arg_parsing.h>
+#include <torch/csrc/autograd/python_mode.h>
 #include <torch/csrc/utils/pycfunction_helpers.h>
 #include <c10/core/ScalarType.h>
 
@@ -514,6 +515,20 @@ static PyObject * python_exit_dual_level(PyObject* _unused, PyObject* args, PyOb
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject * enter_python_mode(PyObject* _unused, PyObject* arg) {
+  HANDLE_TH_ERRORS
+  PythonMode::enter(arg);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject * exit_python_mode(PyObject* _unused, PyObject* arg) {
+  HANDLE_TH_ERRORS
+  PythonMode::exit();
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 // autograd methods on torch._C
 static PyMethodDef methods[] = { // NOLINT
   {"_set_grad_enabled", set_grad_enabled, METH_O, nullptr},
@@ -536,6 +551,8 @@ static PyMethodDef methods[] = { // NOLINT
   {"is_anomaly_enabled", is_anomaly_mode_enabled, METH_NOARGS, nullptr},
   {"_enter_dual_level", python_enter_dual_level, METH_NOARGS, nullptr},
   {"_exit_dual_level", castPyCFunctionWithKeywords(python_exit_dual_level), METH_VARARGS | METH_KEYWORDS, nullptr},
+  {"_enter_python_mode", enter_python_mode, METH_O, nullptr},
+  {"_exit_python_mode", exit_python_mode, METH_NOARGS, nullptr},
   {nullptr, nullptr, 0, nullptr}
 };
 
