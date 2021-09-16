@@ -7,4 +7,3 @@ namespace ${backend_namespace} {
 ${native_function_definitions}
 
 } // namespace ${backend_namespace}
-
