@@ -6075,8 +6075,9 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     @onlyCUDA
     @dtypes(torch.int32, torch.int64)
     def test_matmul_integer_tensor(self, device, dtype):
-        m = 256
-        n = 128
+        torch.set_printoptions(linewidth=1000)
+        m = 20
+        n = 30
 
         mat1 = torch.randint(0, 100, (m, n), device=device, dtype=dtype)
         mat2 = torch.randint(100, 1000, (n, m), device=device, dtype=dtype)
@@ -6089,8 +6090,8 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         mat1 = torch.randint(0, 100, (m, m), device=device, dtype=dtype)
         mat2 = torch.randint(100, 1000, (m, m), device=device, dtype=dtype)
 
-        for transpose_mat1 in [True, False]:
-            for transpose_mat2 in [True, False]:
+        for transpose_mat1 in [False, True]:
+            for transpose_mat2 in [False, True]:
                 tmat1 = mat1.t() if transpose_mat1 else mat1
                 tmat2 = mat2.t() if transpose_mat2 else mat2
 

@@ -5,6 +5,8 @@
 #include <c10/util/MaybeOwned.h>
 #include <ATen/native/LinearAlgebraUtils.h>
 
+#include <iostream>
+
 namespace at { namespace native {
 
 namespace {
@@ -178,11 +180,6 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
       scalar_t* mat1_ptr = mat1_->data_ptr<scalar_t>();
       scalar_t* mat2_ptr = mat2_->data_ptr<scalar_t>();
       scalar_t* result_ptr = result_->data_ptr<scalar_t>();
-
-      // TensorIteratorConfig iter_config;
-      // iter_config
-      //   .add_input();
-
       at::cuda::blas::gemm<scalar_t>(
         transpose_mat1 ? 't' : 'n',
         transpose_mat2 ? 't' : 'n',
@@ -293,12 +290,11 @@ Tensor& baddbmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& 
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!result_->is_conj());
 
   if (isIntegralType(self.scalar_type(), false)) {
+    c10::IntArrayRef input_batch_sizes(batch1_->sizes().data(), batch1_->dim() - 2);
+    c10::IntArrayRef result_batch_sizes(result_->sizes().data(), result_->dim() - 2);
 
-    c10::IntArrayRef input_batch_sizes(batch1.sizes().data(), batch1.dim() - 2);
-    c10::IntArrayRef result_batch_sizes(result.sizes().data(), result.dim() - 2);
-
-    auto input_batch_idx = at::arange(batchCount(batch1)).view(input_batch_sizes);
-    auto result_batch_idx = at::arange(batchCount(result)).view(result_batch_sizes);
+    auto input_batch_idx = at::arange(num_batches).view(input_batch_sizes);
+    auto result_batch_idx = at::arange(num_batches).view(result_batch_sizes);
 
     at::TensorIteratorConfig iter_config;
     auto iter = iter_config
