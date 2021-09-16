@@ -409,9 +409,15 @@ All autograd ``Function``s are emitted in the TorchScript graph as ``prim::Pytho
 In order to differentiate between different ``Function`` subclasses, the
 symbolic function should use the ``name`` kwarg which gets set to the name of the class.
 
-:func:`register_custom_op_symbolic` does does not allow registration for ops in
+:func:`register_custom_op_symbolic` does not allow registration for ops in
 the ``prim`` namespace, so for this use case, there's a back door: register the
 symbolic for ``"::prim_PythonOp"``.
+
+Please also consider adding shape inference logic when you regiester a custom symbolic function
+via setType API. This can help the exporter to obtain correct shape inference.
+An example of setType is test_aten_embedding_2 in test_operators.py.
+Although it is not required to add shape inference logic,
+the exporter emits a warning message if it is not added.
 
 The example below shows how you can access ``requires_grad`` via the ``Node`` object::
 

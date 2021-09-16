@@ -276,15 +276,9 @@ struct TORCH_API Tuple : c10::intrusive_ptr_target {
   const std::vector<IValue>& elements() const& {
     return elements_;
   }
-  operator const std::vector<IValue>&() const {
-    return elements();
-  }
 
   std::vector<IValue>& elements() & {
     return elements_;
-  }
-  operator std::vector<IValue>&() {
-    return elements();
   }
 
   std::vector<IValue>&& elements() && {
@@ -1046,7 +1040,8 @@ inline const ivalue::Object& IValue::toObjectRef() const {
   }                                                        \
   template <>                                              \
   inline c10::detail::ivalue_to_const_ref_overload_return<T>::type IValue::to<T>() const& { \
-    return this->method_name();            \
+    typedef c10::detail::ivalue_to_const_ref_overload_return<T>::type return_type;          \
+    return static_cast<return_type>(this->method_name());                                   \
   }
 
 DEFINE_TO(at::Tensor, toTensor)
