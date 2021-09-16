@@ -155,9 +155,12 @@ def loop(op, in_dims, out_dim, batch_size, *batched_args, **kwarg_values):
     for idx in range(batch_size):
         idx_args = []
         idx_kwargs = {}
-        for a, in_dim in zip(batched_args, in_dims):
-            idx_args.append(a.select(in_dim, idx) if in_dim is not None else a)
-        out = op(*idx_args, **kwarg_values)
+        flat_args, args_spec = pytree.tree_flatten(batched_args)
+        flat_dims, dims_spec = pytree.tree_flatten(in_dims)
+        # print(flat_args)
+        assert(args_spec == dims_spec)
+        new_args = [a.select(in_dim, idx) if in_dim is not None else a for a, in_dim in zip(flat_args, flat_dims)]
+        out = op(*pytree.tree_unflatten(new_args, args_spec), **kwarg_values)
         outs.append(out)
     loop_out = []
     if isinstance(outs[0], torch.Tensor):
@@ -178,12 +181,16 @@ def get_exhaustive_batched_inputs(arg_values, kwarg_values, batch_size=3):
             return (arg, None)
 
     batch_choices = []
-    for a in arg_values:
+    def add_batch_choices(a):
         if isinstance(a, torch.Tensor):
             batched_val = add_batch_dim(a, 0, batch_size)
             batch_choices.append((batched_val, (a, None)))
         else:
             batch_choices.append(((a, None),))
+
+    flat_args, arg_spec = pytree.tree_flatten(tuple(arg_values))
+    for arg in flat_args:
+        add_batch_choices(arg)
 
     for batched_values in itertools.product(*batch_choices):
         batched_args, in_dims = zip(*batched_values)
@@ -191,7 +198,7 @@ def get_exhaustive_batched_inputs(arg_values, kwarg_values, batch_size=3):
         if all([i is None for i in in_dims]):
             continue
 
-        yield batched_args, in_dims, kwarg_values
+        yield pytree.tree_unflatten(batched_args, arg_spec), pytree.tree_unflatten(in_dims, arg_spec), kwarg_values
 
 
 def get_fallback_and_vmap_exhaustive(op, arg_values, kwarg_values, compute_loop_out=True):
@@ -208,7 +215,6 @@ def get_fallback_and_vmap_exhaustive(op, arg_values, kwarg_values, compute_loop_
         # def f(a):
         #     return op(a)
         # t = make_fx(vmap(f, in_dims=in_dims, out_dims=out_dim))(*batched_args, **kwarg_values)
-        # import pdb; pdb.set_trace()
         batched_out = vmap(op, in_dims=in_dims, out_dims=out_dim)(*batched_args, **kwarg_values)
         yield (loop_out, batched_out)
 
