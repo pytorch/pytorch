@@ -16,3 +16,14 @@ set_property(
 set_property(
   TARGET caffe2::mkldnn PROPERTY INTERFACE_LINK_LIBRARIES
   ${MKLDNN_LIBRARIES})
+
+if(NOT TARGET caffe2::dnnl_graph_static)
+  add_library(caffe2::dnnl_graph_static INTERFACE IMPORTED)
+endif()
+
+set_property(
+  TARGET caffe2::dnnl_graph_static PROPERTY INTERFACE_INCLUDE_DIRECTORIES
+  ${MKLDNN_INCLUDE_DIR})
+set_property(
+  TARGET caffe2::dnnl_graph_static PROPERTY INTERFACE_LINK_LIBRARIES
+  "dnnl_graph_static")
