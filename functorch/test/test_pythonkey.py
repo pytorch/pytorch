@@ -230,7 +230,6 @@ class TestEagerFusionOpInfo(TestCase):
         xfail('fmod', ''),
         xfail('remainder', ''),
         xfail('linalg.cholesky'),
-        xfail('linalg.cond'),
         xfail('linalg.det'),
         xfail('linalg.inv'),
         xfail('matmul'),
@@ -255,6 +254,8 @@ class TestEagerFusionOpInfo(TestCase):
         xfail('min', 'reduction_no_dim'),
         xfail('trapezoid'),
         xfail('trapz'),
+        xfail('igamma', 'grad_other'),
+        xfail('igammac', 'grad_other'),
     })
     def test_eager_compilation_exhaustive(self, device, dtype, op):
 
