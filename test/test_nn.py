@@ -11905,7 +11905,7 @@ class TestNNInit(TestCase):
                     expected_std = math.sqrt(2.0 / ((1 + a**2) * n))
                     bounds = expected_std * math.sqrt(3.0)
                     assert self._is_uniform(input_tensor, -bounds, bounds)
-    
+
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found.")
     def test_kaiming_uniform_reproducibility(self):
         # testing multiple scenarios

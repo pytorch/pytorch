@@ -127,7 +127,7 @@ def uniform_(tensor: Tensor, a: float = 0., b: float = 1., generator: torch.Gene
         tensor: an n-dimensional `torch.Tensor`
         a: the lower bound of the uniform distribution
         b: the upper bound of the uniform distribution
-        generator: `torch.Generator` object to set random state for sampling. `None` (default) 
+        generator: `torch.Generator` object to set random state for sampling. `None` (default)
 
     Examples:
         >>> w = torch.empty(3, 5)
@@ -151,7 +151,8 @@ def normal_(tensor: Tensor, mean: float = 0., std: float = 1., generator: torch.
     """
     return _no_grad_normal_(tensor, mean, std, generator=generator)
 
-def trunc_normal_(tensor: Tensor, mean: float = 0., std: float = 1., a: float = -2., b: float = 2., generator: torch.Generator = None) -> Tensor:
+def trunc_normal_(tensor: Tensor, mean: float = 0., std: float = 1., a: float = -2., b: float = 2., 
+                    generator: torch.Generator = None) -> Tensor:
     r"""Fills the input Tensor with values drawn from a truncated
     normal distribution. The values are effectively drawn from the
     normal distribution :math:`\mathcal{N}(\text{mean}, \text{std}^2)`
@@ -165,7 +166,7 @@ def trunc_normal_(tensor: Tensor, mean: float = 0., std: float = 1., a: float = 
         std: the standard deviation of the normal distribution
         a: the minimum cutoff value
         b: the maximum cutoff value
-        generator: `torch.Generator` object to set random state for sampling. `None` (default) 
+        generator: `torch.Generator` object to set random state for sampling. `None` (default)
 
     Examples:
         >>> w = torch.empty(3, 5)
@@ -311,7 +312,7 @@ def xavier_uniform_(tensor: Tensor, gain: float = 1., generator: torch.Generator
     Args:
         tensor: an n-dimensional `torch.Tensor`
         gain: an optional scaling factor
-        generator: `torch.Generator` object to set random state for sampling. `None` (default) 
+        generator: `torch.Generator` object to set random state for sampling. `None` (default)
 
     Examples:
         >>> w = torch.empty(3, 5)
@@ -339,7 +340,7 @@ def xavier_normal_(tensor: Tensor, gain: float = 1., generator: torch.Generator 
     Args:
         tensor: an n-dimensional `torch.Tensor`
         gain: an optional scaling factor
-        generator: `torch.Generator` object to set random state for sampling. `None` (default) 
+        generator: `torch.Generator` object to set random state for sampling. `None` (default)
 
     Examples:
         >>> w = torch.empty(3, 5)
@@ -383,7 +384,7 @@ def kaiming_uniform_(tensor, a=0, mode='fan_in', nonlinearity='leaky_relu', gene
             backwards pass.
         nonlinearity: the non-linear function (`nn.functional` name),
             recommended to use only with ``'relu'`` or ``'leaky_relu'`` (default).
-        generator: `torch.Generator` object to set random state for sampling. `None` (default) 
+        generator: `torch.Generator` object to set random state for sampling. `None` (default)
 
     Examples:
         >>> w = torch.empty(3, 5)
@@ -422,7 +423,7 @@ def kaiming_normal_(tensor, a=0, mode='fan_in', nonlinearity='leaky_relu', gener
             backwards pass.
         nonlinearity: the non-linear function (`nn.functional` name),
             recommended to use only with ``'relu'`` or ``'leaky_relu'`` (default).
-        generator: `torch.Generator` object to set random state for sampling. `None` (default) 
+        generator: `torch.Generator` object to set random state for sampling. `None` (default)
 
     Examples:
         >>> w = torch.empty(3, 5)
