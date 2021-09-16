@@ -1,11 +1,11 @@
 #pragma once
 #include <torch/csrc/jit/codegen/cuda/executor_launch_params.h>
 #include <torch/csrc/jit/codegen/cuda/executor_utils.h>
+#include <torch/csrc/jit/codegen/cuda/expr_evaluator.h>
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/ir_cloner.h>
 #include <torch/csrc/jit/codegen/cuda/ir_printer.h>
-#include <torch/csrc/jit/codegen/cuda/kernel_expr_evaluator.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
 #include <torch/csrc/jit/codegen/cuda/utils.h>
 
@@ -19,7 +19,6 @@ namespace cuda {
 // TODO: Should this actually be in launch params?
 struct TORCH_CUDA_CU_API CompileOptions {
   c10::Device device = c10::Device(c10::DeviceType::CUDA, 0);
-  KernelIndexMode index_mode = KernelIndexMode::INT64;
 };
 
 class TORCH_CUDA_CU_API FusionExecutor : public NonCopyable {
@@ -33,11 +32,7 @@ class TORCH_CUDA_CU_API FusionExecutor : public NonCopyable {
       int id,
       CompileOptions options = CompileOptions());
 
-  void compileFusion(
-      Fusion* fusion,
-      CompileOptions options = CompileOptions(),
-      const at::ArrayRef<IValue>& inputs = {},
-      const LaunchParams& launch_constraints = LaunchParams());
+  void compileFusion(Fusion* fusion, CompileOptions options = CompileOptions());
 
   std::vector<at::Tensor> runFusion(
       const at::ArrayRef<IValue>& inputs,
@@ -62,66 +57,32 @@ class TORCH_CUDA_CU_API FusionExecutor : public NonCopyable {
     executor_entry_lookup_.erase(cache_id);
   }
 
-  // struct used to hold necessary information to launch compiled kernel on a
-  // given input set.
-  //
   // TODO: strides would also be important when we handle permutations in
   //       codegen.
-  //
+  // struct used to hold necessary information to launch compiled kernel on a
+  // given input set.
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   struct ExecutorEntry {
     bool init = false;
     LaunchParams launch_params;
-    std::vector<std::pair<int, int>> io_alias_indices;
     std::vector<std::vector<int64_t>> output_sizes;
     std::vector<at::ScalarType> output_types;
-    std::vector<std::vector<int64_t>> buffer_sizes;
-    std::vector<at::ScalarType> buffer_types;
-    std::vector<bool> buffer_zero_init;
+    std::vector<std::vector<int64_t>> empty_buffer_sizes;
+    std::vector<at::ScalarType> empty_buffer_types;
+    std::vector<std::vector<int64_t>> zero_buffer_sizes;
+    std::vector<at::ScalarType> zero_buffer_types;
     uint64_t rand_offset;
   };
 
-  kir::Kernel* kernel() const {
+  Kernel* kernel() const {
     return lowered_.kernel();
   }
-
-  //! Internal knob used for debugging/profiling only
-  void setExecuteKernelFlag(bool execute_kernel) {
-    execute_kernel_ = execute_kernel;
-  }
-
-  //! Internal knob used for debugging/profiling only
-  void setMeasureKernelTimeFlag(bool measure_kernel_time) {
-    measure_kernel_time_ = measure_kernel_time;
-  }
-
-  //! Returns the last kernel execution time, in milliseconds
-  //!
-  //! \note The kernel time is only tracked if enabled by calling
-  //!    setMeasureKernelTimeFlag(true)
-  //!
-  float kernelTimeMs() const {
-    return measure_kernel_time_ ? kernel_time_ms_ : 0;
-  }
-
-  //! Internal tests only. Compiles CUDA code with NVRTC directly from
-  //! string. This util provides a path to test runtime code, i.e. the resource
-  //! strings.
-  void compileRtc(
-      const std::string& code,
-      const std::string& name,
-      bool structured = false);
-
-  //! Internal tests only. Runs the compiled CUDA kernel from compileRtc.
-  void runRtc(
-      const LaunchParams& launch_params,
-      const std::vector<at::Tensor>& args);
 
  private:
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   struct GlobalBuffers {
-    std::vector<at::Tensor> buffers;
-    std::vector<bool> zero_init;
+    std::vector<at::Tensor> empty_buffers;
+    std::vector<at::Tensor> zero_buffers;
   };
 
   std::string kernelName() const {
@@ -139,24 +100,19 @@ class TORCH_CUDA_CU_API FusionExecutor : public NonCopyable {
 
   LaunchParams computeLaunchParams(
       const LaunchParams& launch_constraints,
-      kir::ExpressionEvaluator& expr_eval);
+      StatefulExpressionEvaluator& see);
 
   uint64_t computeSharedMemory(
-      kir::ExpressionEvaluator& expr_eval,
-      const std::vector<const kir::Allocate*>& buffers,
+      StatefulExpressionEvaluator& see,
+      const std::vector<kir::Allocate*>& buffers,
       bool align_padding = false,
       uint64_t total = 0);
 
   // return a pair of vector of tensors, where tensors in the first vector are
   // not initialized, while the second vector contains zero-initiliazed tensors
-  GlobalBuffers allocGlobalVals(kir::ExpressionEvaluator& expr_eval);
+  GlobalBuffers allocGlobalVals(StatefulExpressionEvaluator& see);
 
-  // alias_index: index of outputs that are aliases to inputs, hence we should
-  // skip allocating real storage for those, but still maintain its spot to
-  // maintain the indexing from output aliases to inputs
-  std::vector<at::Tensor> allocOutputs(
-      kir::ExpressionEvaluator& expr_eval,
-      const std::unordered_set<int>& alias_indices = {});
+  std::vector<at::Tensor> allocOutputs(StatefulExpressionEvaluator& see);
 
   void setUsedTVs();
 
@@ -166,6 +122,11 @@ class TORCH_CUDA_CU_API FusionExecutor : public NonCopyable {
 
  private:
   Fusion fusion_;
+
+  // TODO(kir): caching the values here is no longer needed
+  bool has_block_reductions = false;
+  bool has_grid_reductions = false;
+  bool has_block_broadcasts = false;
 
   CompileOptions options_;
   size_t max_device_smem = std::numeric_limits<size_t>().max();
@@ -183,16 +144,6 @@ class TORCH_CUDA_CU_API FusionExecutor : public NonCopyable {
   // lookup table to take short cut to retrieve recorded information in order to
   // launch kernels without re-inference parameters.
   std::unordered_map<size_t, ExecutorEntry> executor_entry_lookup_;
-
-  // Profiling support: knob to control wheter we actually execute the
-  // kernel on the GPU or not
-  bool execute_kernel_ = true;
-
-  // Profiling support: knob to enable measuring kernel execution time
-  bool measure_kernel_time_ = false;
-
-  // The last kernel execution time, if measure_kernel_time_ is true
-  float kernel_time_ms_ = 0;
 };
 
 } // namespace cuda
