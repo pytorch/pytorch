@@ -15,6 +15,9 @@ def torch_dtype_to_trt(dtype):
         return trt.int8
     elif dtype == torch.int32:
         return trt.int32
+    elif dtype == torch.int64:
+        # TRT does not support int64
+        return trt.int32
     elif dtype == torch.float16:
         return trt.float16
     elif dtype == torch.float32:
