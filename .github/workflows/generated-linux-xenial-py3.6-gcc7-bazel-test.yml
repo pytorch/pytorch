@@ -33,7 +33,7 @@ concurrency:
 jobs:
   ciflow_should_run:
     runs-on: ubuntu-18.04
-    if: ${{ (github.event_name != 'pull_request') || (github.event.action !='unassigned') || (contains(github.event.pull_request.labels.*.name, 'ciflow/all') || contains(github.event.pull_request.labels.*.name, 'ciflow/bazel') || contains(github.event.pull_request.labels.*.name, 'ciflow/cpu') || contains(github.event.pull_request.labels.*.name, 'ciflow/default') || contains(github.event.pull_request.labels.*.name, 'ciflow/linux')) }}
+    if: ${{ (github.repository == 'pytorch/pytorch') && ((github.event_name != 'pull_request') || (github.event.action !='unassigned') || (contains(github.event.pull_request.labels.*.name, 'ciflow/all') || contains(github.event.pull_request.labels.*.name, 'ciflow/bazel') || contains(github.event.pull_request.labels.*.name, 'ciflow/cpu') || contains(github.event.pull_request.labels.*.name, 'ciflow/default') || contains(github.event.pull_request.labels.*.name, 'ciflow/linux'))) }}
     env:
       LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
     steps:
@@ -42,7 +42,6 @@ jobs:
       - name: print labels
         run: echo "${LABELS}"
   calculate-docker-image:
-    if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: linux.2xlarge
     needs: [ciflow_should_run]
     env:
@@ -65,6 +64,9 @@ jobs:
           echo "instance-id: $(get_ec2_metadata instance-id)"
           echo "instance-type: $(get_ec2_metadata instance-type)"
       - name: Log in to ECR
+        env:
+          AWS_RETRY_MODE: standard
+          AWS_MAX_ATTEMPTS: 5
         run: |
           aws ecr get-login --no-include-email --region us-east-1 > /tmp/ecr-login.sh
           bash /tmp/ecr-login.sh
@@ -147,7 +149,7 @@ jobs:
       DOCKER_IMAGE: ${{ needs.calculate-docker-image.outputs.docker_image }}
       JOB_BASE_NAME: linux-xenial-py3.6-gcc7-bazel-test-build-and-test
       NUM_TEST_SHARDS: 1
-      CONTINUE_THROUGH_ERROR: ${{ github.repository_owner == 'pytorch' && (github.event_name == 'push' || github.event_name == 'schedule') }}
+      CONTINUE_THROUGH_ERROR: ${{ github.repository == 'pytorch/pytorch' && (github.event_name == 'push' || github.event_name == 'schedule') }}
     steps:
       - name: Display EC2 information
         shell: bash
@@ -163,6 +165,9 @@ jobs:
           echo "instance-id: $(get_ec2_metadata instance-id)"
           echo "instance-type: $(get_ec2_metadata instance-type)"
       - name: Log in to ECR
+        env:
+          AWS_RETRY_MODE: standard
+          AWS_MAX_ATTEMPTS: 5
         run: |
           aws ecr get-login --no-include-email --region us-east-1 > /tmp/ecr-login.sh
           bash /tmp/ecr-login.sh
