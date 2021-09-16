@@ -668,7 +668,6 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   STOP_DECOMPOSE(new_empty_strided);
   STOP_DECOMPOSE(index_fill.int_Scalar);
   STOP_DECOMPOSE(index_fill.int_Tensor);
-  STOP_DECOMPOSE(index_put);
   STOP_DECOMPOSE(linalg_eigvals);
   STOP_DECOMPOSE(linalg_eigvalsh);
   STOP_DECOMPOSE(linalg_matrix_norm);
