@@ -12,6 +12,10 @@ namespace fuser {
 namespace cuda {
 namespace kir {
 
+// Simple classification helpers
+bool isLoweredScalar(const Val* val);
+bool isLoweredVal(const Val* val);
+
 //! Kernel IR builder interface
 //!
 //! The only way to create new Kernel IR nodes is through the
@@ -35,7 +39,7 @@ namespace kir {
 //!   auto new_node = ir_builder.create<kir::Int>(1));
 //!   auto result = ir_builder.mulExpr(lhs, rhs);
 //!
-class TORCH_CUDA_CU_API IrBuilder {
+class IrBuilder {
  public:
   explicit IrBuilder(Kernel* kernel) : kernel_(kernel) {}
 
@@ -43,60 +47,32 @@ class TORCH_CUDA_CU_API IrBuilder {
   //! to the appropriate constructor
   template <class T, class... Args>
   T* create(Args&&... args) {
-    const kir::Passkey passkey(kernel_);
-    const auto node = new T(passkey, std::forward<Args>(args)...);
-    kernel_->registerIrNode(passkey, std::unique_ptr<T>(node));
-    return node;
+    // TODO(kir): switch this to Kernel registration
+    return new T(kir::Passkey(), std::forward<Args>(args)...);
   }
 
-  // Unary operations
-  Val* negExpr(Val* val);
-  Val* setExprNamedScalar(const std::string& name, Val* val);
-  Val* addressExprNamedScalar(const std::string& name, Val* val);
-
-  // Binary operations
+  // Binary expressions
   Val* andExpr(Val* lhs, Val* rhs);
   Val* eqExpr(Val* lhs, Val* rhs);
-  Val* gtExpr(Val* lhs, Val* rhs);
   Val* ltExpr(Val* lhs, Val* rhs);
-  Val* leExpr(Val* lhs, Val* rhs);
-  Val* geExpr(Val* lhs, Val* rhs);
   Val* addExpr(Val* lhs, Val* rhs);
   Val* subExpr(Val* lhs, Val* rhs);
   Val* mulExpr(Val* lhs, Val* rhs);
   Val* divExpr(Val* lhs, Val* rhs);
   Val* ceilDivExpr(Val* lhs, Val* rhs);
   Val* modExpr(Val* lhs, Val* rhs);
-  Val* maxExpr(Val* lhs, Val* rhs);
-  Val* minExpr(Val* lhs, Val* rhs);
-
-  // Ternary operations
-  Val* whereExpr(Val* pred, Val* lhs, Val* rhs);
-
-  // Shortcuts for frequently used vals
-  Int* zeroVal();
-  Int* oneVal();
-  Bool* falseVal();
-  Bool* trueVal();
-
-  NamedScalar* magicZeroVal();
 
  private:
-  Val* newResult(DataType dtype);
+  Val* newResult(const Val* lhs, const Val* rhs);
   Val* newArithmeticExpr(BinaryOpType op_type, Val* lhs, Val* rhs);
   Val* newLogicExpr(BinaryOpType op_type, Val* lhs, Val* rhs);
 
  private:
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wunused-private-field"
   // Non-owning pointer to the kernel to be modified
   Kernel* kernel_ = nullptr;
-  // Frequently used constant vals
-  Int* zero_ = nullptr;
-  Int* one_ = nullptr;
-  Bool* false_ = nullptr;
-  Bool* true_ = nullptr;
-
-  // Magic zero corresponds to runtime/helpers.cu magic_zero
-  NamedScalar* magic_zero_ = nullptr;
+#pragma clang diagnostic pop
 };
 
 } // namespace kir
