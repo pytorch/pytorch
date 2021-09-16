@@ -1,8 +1,8 @@
-#include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/kernel.h>
-#include <torch/csrc/jit/codegen/cuda/kernel_expr_evaluator.h>
+
+#include <torch/csrc/jit/codegen/cuda/dispatch.h>
+#include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir_printer.h>
-#include <torch/csrc/jit/codegen/cuda/lower2device.h>
 
 #include <iostream>
 #include <unordered_set>
@@ -11,244 +11,148 @@ namespace torch {
 namespace jit {
 namespace fuser {
 namespace cuda {
-namespace kir {
 
 namespace {
 
 //! Scan all primary expressions in the Kernel IR and build
-//! lists of specialized nodes and other interesting information
-class KernelIrScanner : private kir::IrVisitor {
+//! list of specialized nodes
+//!
+//! \note primary expressions are expressions which are not subexpressions
+//!   in a larger expression (things like ForLoop or IfThenElse are not
+//!   real expressions)
+//!
+class KernelIrScanner : private OptOutDispatch {
  public:
-  explicit KernelIrScanner(const Kernel* kernel) {
-    for (const auto& ir_node : kernel->irNodes()) {
-      ir_node->accept(this);
+  // Use expression count to uniquely identify each expression
+  size_t all_expression_count = 0;
+
+  // Map expression id to war hazard sync
+  std::unordered_map<size_t, kir::Sync*> war_hazard_syncs;
+
+  std::vector<kir::Allocate*> global_allocations;
+  std::vector<kir::Allocate*> dynamic_allocations;
+  std::vector<kir::Allocate*> static_allocations;
+  std::unordered_set<Expr*> primary_expressions;
+
+ public:
+  explicit KernelIrScanner(const std::vector<Expr*>& exprs) {
+    TORCH_INTERNAL_ASSERT(!exprs.empty());
+    for (auto expr : exprs) {
+      handle(expr);
     }
   }
 
-  const auto& summary() const {
-    return summary_;
+ private:
+  void handle(Expr* expr) final {
+    TORCH_CHECK(primary_expressions.insert(expr).second);
+    ++all_expression_count;
+    OptOutDispatch::handle(expr);
   }
 
- private:
-  void visit(const kir::Sync* sync) final {
+  void handle(kir::Sync* sync) final {
     // TODO: Move to a dedicated validation pass
     // which is not on the common execution/compilation path
     if (sync->isWarHazardSync()) {
-      ++summary_.war_hazard_syncs_count;
+      war_hazard_syncs[all_expression_count] = sync;
     }
   }
 
-  void visit(const kir::Allocate* allocate) final {
-    switch (allocate->memoryType()) {
+  void handle(kir::ForLoop* fl) final {
+    for (auto expr : fl->body().exprs()) {
+      handle(expr);
+    }
+  }
+
+  void handle(kir::IfThenElse* ite) final {
+    for (auto expr : ite->thenBody().exprs()) {
+      handle(expr);
+    }
+    for (auto expr : ite->elseBody().exprs()) {
+      handle(expr);
+    }
+  }
+
+  void handle(kir::Allocate* a) final {
+    switch (a->getMemoryType()) {
       case MemoryType::Global:
-        summary_.global_allocations.push_back(allocate);
+        global_allocations.push_back(a);
         break;
       case MemoryType::Shared:
-        if (ExpressionEvaluator::isConst(allocate->size())) {
-          summary_.static_smem_allocations.push_back(allocate);
+        if (a->size()->isConstScalar()) {
+          static_allocations.push_back(a);
         } else {
-          summary_.dynamic_smem_allocations.push_back(allocate);
+          dynamic_allocations.push_back(a);
         }
         break;
       case MemoryType::Local:
-        if (!ExpressionEvaluator::isConst(allocate->size())) {
-          summary_.has_dynamic_local_memory_allocations = true;
-          summary_.dynamic_lmem_allocations.emplace_back(allocate);
-        }
         break;
     }
   }
-
-  void visit(const kir::UnaryOp* unary_op) final {
-    if (unary_op->operation() == UnaryOpType::RandLike) {
-      // This kernel is using random numbers
-      summary_.is_stochastic = true;
-    }
-  }
-
-  void visit(const kir::TensorIndex* tensor_index) final {
-    const auto tv = tensor_index->view();
-    const auto domain = tv->domain();
-
-    // Do we have any reductions?
-    summary_.has_block_reductions =
-        summary_.has_block_reductions || domain->hasBlockReduction();
-
-    // Do we have block broadcasts?
-    summary_.has_block_broadcasts =
-        summary_.has_block_broadcasts || domain->hasBlockBroadcast();
-
-    // Update the largest smem data type
-    if (domain->hasBlockReduction() || domain->hasGridReduction() ||
-        tv->memoryType() == MemoryType::Shared) {
-      const auto data_type = tv->dtype();
-      const size_t type_size = dataTypeSize(data_type);
-      if (type_size > max_smem_type_size_) {
-        max_smem_type_size_ = type_size;
-        summary_.largest_smem_data_type = data_type;
-      }
-    }
-
-    // Update Welford
-    if (tensor_index->definition() != nullptr &&
-        tensor_index->definition()->isA<kir::WelfordOp>()) {
-      summary_.has_welford = true;
-      summary_.has_block_welford =
-          summary_.has_block_welford || domain->hasBlockReduction();
-      summary_.has_grid_welford =
-          summary_.has_grid_welford || domain->hasGridReduction();
-    }
-  }
-
-  void visit(const kir::GridWelford* grid_welford) final {
-    const auto dom = grid_welford->welford_op()
-                         ->out()
-                         ->as<kir::TensorIndex>()
-                         ->view()
-                         ->domain();
-    updateGridReductionInLoop(dom);
-  }
-
-  void visit(const kir::GridReduction* grid_reduction) final {
-    const auto dom = grid_reduction->reduction_op()
-                         ->out()
-                         ->as<kir::TensorIndex>()
-                         ->view()
-                         ->domain();
-    updateGridReductionInLoop(dom);
-  }
-
- private:
-  size_t max_smem_type_size_ = 0;
-  KernelSummary summary_;
-
- private:
-  void updateGridReductionInLoop(TensorDomain* dom) {
-    ++summary_.number_of_grid_reductions;
-
-    const auto gpu_lower = GpuLower::current();
-    for (size_t i = 0; i < dom->nDims(); ++i) {
-      const auto id =
-          gpu_lower->caParallelMap().getConcreteMappedID(dom->domain()[i]);
-      summary_.has_grid_reduction_in_loop =
-          summary_.has_grid_reduction_in_loop ||
-          !(id->isThread() || id->extent()->isOneInt());
-    }
-  }
-};
-
-//! Make sure tensors have valid allocations even when parallelized
-//! loops potentially have larger iteration counts than the number of
-//! threads.
-//!
-//! When an IterDomain of a tensor is parallelized, the IterDomain
-//! may not contribute to the allocation of the tensor. For example,
-//! it is assumed that an allocation of a local-memory tensor does not
-//! need to be accounted for an parallelied IterDomain. This is true
-//! when it is guaranteed that each thread only needs to execute the
-//! loop body once. However, if not, the allocation is invalid as it
-//! only has a space for one value per thread.
-//!
-//! ValidateAllocation checks all tensor allocations and sees if any
-//! tensor may have a parallelized loop whose iteration count may
-//! be larger than the number of threads. If so, an error is thrown if
-//! the tensor is not allocated on thread-shared memories. Note that
-//! when allocated on a shared memory (i.e., MemoryType::Shared or
-//! MemoryType::Global for tensors parallelized with threadIdx, or
-//! MemoryType::Global for tensors parallelized with blockIdx), it is
-//! assumed that allocation is properly extended for the iteration
-//! count.
-class ValidateAllocation : private kir::IrVisitor {
- public:
-  static void validate(const Kernel* kernel) {
-    ValidateAllocation validate_allocation(kernel);
-  }
-
- private:
-  explicit ValidateAllocation(const Kernel* kernel) {
-    live_allocations_.emplace_back(std::vector<const Allocate*>());
-    for (const auto& ir_node : kernel->topLevelExprs()) {
-      ir_node->accept(this);
-    }
-    live_allocations_.pop_back();
-    TORCH_INTERNAL_ASSERT(live_allocations_.empty());
-  }
-
-  void visit(const kir::Allocate* allocate) final {
-    TORCH_INTERNAL_ASSERT(!live_allocations_.empty());
-    live_allocations_.back().push_back(allocate);
-  }
-
-  // for_loop is parallelized and its stop value is not guaranteed to
-  // be <= the number of threads, which breaks an assumption made
-  // during in the allocation lowering if it's thread-parallel and not
-  // allocated on shared or global memories, or if it's block-parallel
-  // ando not allocated on global memory.
-  void validate(const kir::ForLoop* for_loop) {
-    const auto loop_id = for_loop->iter_domain();
-    const auto gpu_lower = GpuLower::current();
-    for (const auto& allocations : live_allocations_) {
-      for (const auto& allocate : allocations) {
-        const auto tv = allocate->buffer()->as<kir::TensorView>();
-        for (const auto& axis : tv->domain()->domain()) {
-          if (!gpu_lower->caParallelMap().areMapped(loop_id, axis)) {
-            continue;
-          }
-          if (isParallelTypeThreadDim(loop_id->parallelType())) {
-            TORCH_INTERNAL_ASSERT(
-                tv->memoryType() == MemoryType::Shared ||
-                tv->memoryType() == MemoryType::Global);
-          } else if (isParallelTypeBlockDim(loop_id->parallelType())) {
-            TORCH_INTERNAL_ASSERT(tv->memoryType() == MemoryType::Global);
-          }
-        }
-      }
-    }
-  }
-
-  void visit(const kir::ForLoop* for_loop) final {
-    if (for_loop->stop() != for_loop->iter_domain()->extent() &&
-        isParallelTypeThread(for_loop->iter_domain()->parallelType())) {
-      validate(for_loop);
-    }
-
-    live_allocations_.emplace_back(std::vector<const Allocate*>());
-    for (const auto& expr : for_loop->body().exprs()) {
-      expr->accept(this);
-    }
-    live_allocations_.pop_back();
-  }
-
-  void visit(const kir::IfThenElse* ite) final {
-    for (const auto& expr : ite->thenBody().exprs()) {
-      expr->accept(this);
-    }
-    for (const auto& expr : ite->elseBody().exprs()) {
-      expr->accept(this);
-    }
-  }
-
- private:
-  std::vector<std::vector<const Allocate*>> live_allocations_;
 };
 
 } // namespace
 
 // TODO(kir): Kernel IR validation
-void Kernel::finalize(std::vector<kir::Expr*> top_level_exprs) {
+void Kernel::finalize(
+    std::vector<Expr*> top_level_exprs,
+    ThreadPredicateMap predicate_map) {
   TORCH_CHECK(top_level_exprs_.empty());
+  TORCH_CHECK(!predicate_map_);
   top_level_exprs_ = std::move(top_level_exprs);
-  predicate_map_ = std::make_unique<ThreadPredicateMap>(
-      GpuLower::current()->threadPredMap());
-  ValidateAllocation::validate(this);
+  predicate_map_ =
+      std::make_unique<ThreadPredicateMap>(std::move(predicate_map));
   analyze();
 }
 
 void Kernel::analyze() {
   FUSER_PERF_SCOPE("Kernel::analyze");
 
-  const KernelIrScanner ir_scanner(this);
-  summary_ = ir_scanner.summary();
+  const KernelIrScanner ir_scanner(top_level_exprs_);
+
+  // Cache the list of buffers used within the kernel
+  summary_.war_hazard_syncs = ir_scanner.war_hazard_syncs;
+  summary_.global_allocations = ir_scanner.global_allocations;
+  summary_.dynamic_smem_allocations = ir_scanner.dynamic_allocations;
+  summary_.static_smem_allocations = ir_scanner.static_allocations;
+
+  // Figure out if the kernel uses random numbers
+  for (auto expr : ir_scanner.primary_expressions) {
+    if (expr->getExprType() == ExprType::KirUnaryOp) {
+      if (expr->as<kir::UnaryOp>()->getUnaryOpType() == UnaryOpType::RandLike) {
+        summary_.is_stochastic = true;
+        break;
+      }
+    }
+  }
+
+  // Look for reductions and shared memory buffers
+  size_t max_smem_type_size = 0;
+  for (auto expr : ir_scanner.primary_expressions) {
+    for (auto out : expr->outputs()) {
+      if (out->getValType() == ValType::TensorIndex) {
+        const auto tv = out->as<kir::TensorIndex>()->view();
+        const auto domain = tv->domain();
+
+        // Do we have any reductions?
+        summary_.has_block_reductions |= domain->hasBlockReduction();
+        summary_.has_grid_reductions |= domain->hasGridReduction();
+
+        // Do we have block broadcasts?
+        summary_.has_block_broadcasts |= domain->hasBlockBroadcast();
+
+        // Update the largest smem data type
+        if (domain->hasBlockReduction() || domain->hasGridReduction() ||
+            tv->memoryType() == MemoryType::Shared) {
+          const auto data_type = tv->getDataType().value();
+          const size_t type_size = dataTypeSize(data_type);
+          if (type_size > max_smem_type_size) {
+            max_smem_type_size = type_size;
+            summary_.largest_smem_data_type = data_type;
+          }
+        }
+      }
+    }
+  }
 }
 
 void Kernel::print() const {
@@ -256,7 +160,6 @@ void Kernel::print() const {
   ir_printer.printKernel(this);
 }
 
-} // namespace kir
 } // namespace cuda
 } // namespace fuser
 } // namespace jit

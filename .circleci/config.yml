@@ -7442,21 +7442,6 @@ workflows:
           name: pytorch_linux_xenial_py3_clang5_mobile_code_analysis
           requires:
             - docker-pytorch-linux-xenial-py3-clang5-android-ndk-r19c
-      - pytorch_linux_test:
-          build_environment: pytorch-linux-xenial-py3.6-gcc5.4-jit_legacy-test
-          docker_image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc5.4
-          name: pytorch_linux_xenial_py3_6_gcc5_4_jit_legacy_test
-          requires:
-            - pytorch_linux_xenial_py3_6_gcc5_4_build
-          resource_class: large
-      - pytorch_linux_test:
-          build_environment: pytorch-linux-xenial-cuda10.2-cudnn7-py3-jit_legacy-test
-          docker_image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7
-          name: pytorch_linux_xenial_cuda10_2_cudnn7_py3_jit_legacy_test
-          requires:
-            - pytorch_linux_xenial_cuda10_2_cudnn7_py3_gcc7_build
-          resource_class: gpu.medium
-          use_cuda_docker_runtime: "1"
       - binary_linux_build:
           build_environment: manywheel 3.7m cu102 devtoolset7
           docker_image: pytorch/manylinux-cuda102
@@ -7698,15 +7683,15 @@ workflows:
               only:
                 - postnightly
       - pytorch_windows_build:
-          build_environment: pytorch-win-vs2019-cuda10.1-py3
-          cuda_version: "10.1"
+          build_environment: pytorch-win-vs2019-cuda10.2-py3
+          cuda_version: "10.2"
           filters:
             branches:
               only:
                 - master
                 - /ci-all\/.*/
                 - /release\/.*/
-          name: pytorch_windows_vs2019_py38_cuda10.1_build
+          name: pytorch_windows_vs2019_py38_cuda10.2_build
           python_version: "3.8"
           use_cuda: "1"
           vc_product: BuildTools
@@ -7714,18 +7699,18 @@ workflows:
           vc_year: "2019"
           vs_version: "16.8.6"
       - pytorch_windows_test:
-          build_environment: pytorch-win-vs2019-cuda10.1-py3
-          cuda_version: "10.1"
+          build_environment: pytorch-win-vs2019-cuda10.2-py3
+          cuda_version: "10.2"
           filters:
             branches:
               only:
                 - master
                 - /ci-all\/.*/
                 - /release\/.*/
-          name: pytorch_windows_vs2019_py38_cuda10.1_on_cpu_test1
+          name: pytorch_windows_vs2019_py38_cuda10.2_on_cpu_test1
           python_version: "3.8"
           requires:
-            - pytorch_windows_vs2019_py38_cuda10.1_build
+            - pytorch_windows_vs2019_py38_cuda10.2_build
           test_name: pytorch-windows-test1
           use_cuda: "0"
           vc_product: BuildTools
@@ -9270,9 +9255,9 @@ workflows:
           requires:
             - binary_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_shared-with-deps_build
       - pytorch_windows_build:
-          build_environment: pytorch-win-vs2019-cuda10.1-py3
-          cuda_version: "10.1"
-          name: pytorch_windows_vs2019_py38_cuda10.1_build
+          build_environment: pytorch-win-vs2019-cuda10.2-py3
+          cuda_version: "10.2"
+          name: pytorch_windows_vs2019_py38_cuda10.2_build
           python_version: "3.8"
           use_cuda: "1"
           vc_product: BuildTools
@@ -9280,12 +9265,12 @@ workflows:
           vc_year: "2019"
           vs_version: "16.8.6"
       - pytorch_windows_test:
-          build_environment: pytorch-win-vs2019-cuda10.1-py3
-          cuda_version: "10.1"
-          name: pytorch_windows_vs2019_py38_cuda10.1_on_cpu_test1
+          build_environment: pytorch-win-vs2019-cuda10.2-py3
+          cuda_version: "10.2"
+          name: pytorch_windows_vs2019_py38_cuda10.2_on_cpu_test1
           python_version: "3.8"
           requires:
-            - pytorch_windows_vs2019_py38_cuda10.1_build
+            - pytorch_windows_vs2019_py38_cuda10.2_build
           test_name: pytorch-windows-test1
           use_cuda: "0"
           vc_product: BuildTools
