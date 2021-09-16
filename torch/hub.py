@@ -132,10 +132,12 @@ def _validate_branch(repo_owner, repo_name, branch):
     # https://github.com/NicolasHug/vision/commit/8949c7011facf7801fdf077cc3e4ecd8f0940c7e
     # So we want avoid downloading code that can come from a potentionally malicious fork.
 
-    allowed_hash_chars = string.hexdigits.lower()
-    if any(c.lower() not in allowed_hash_chars for c in branch):
+    try:
         # The above issue only exists for commit hashes. So if we know that ``branch``
-        # isn't a commit hash, we can return early. This should avoid many GitHub API calls
+        # isn't a commit hash, we can return early. This should avoid many GitHub API calls.
+        # If we can't convert branch to a hex int we know for sure it's not a commit hash
+        int(branch, 16)
+    except ValueError:
         return
     # Note: here it's still possible that the branch param corresponds to a branch name
     # or a tag name, so we need to check for those as well.
@@ -144,7 +146,9 @@ def _validate_branch(repo_owner, repo_name, branch):
         # Return True if either:
         # - branch corresponds to a branch name in the repo
         # - branch corresponds to a tag name in the repo
-        # - branch corresponds to a commit that has an associated tag in the repo
+        # - branch corresponds to a commit that has an associated tag in the repo. Technically,
+        #   this is an undocumented feature: we explicitly tell users that they should not pass
+        #   commit hashes.
 
         def find_in_refs(ref_kind):
             # We limit the search to 5k branches / tags, which should be more than enough
@@ -157,6 +161,12 @@ def _validate_branch(repo_owner, repo_name, branch):
                 for br in response:
                     if br['name'] == branch or br['commit']['sha'].startswith(branch):
                         return True
+
+            # Note: this should never be executed, unless a repo really has 5k+ branches/tags
+            warnings.warn(
+                f"Torchhub tried to validate {branch} and looked at 5000 {ref_kind}, "
+                "but couldn't find a match."
+            )
             return False
 
         headers = {'Accept': 'application/vnd.github.v3+json'}
