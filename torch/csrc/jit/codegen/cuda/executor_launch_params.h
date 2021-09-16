@@ -22,11 +22,7 @@ class TORCH_CUDA_CU_API LaunchParams {
         gdimz_(gdimz),
         bdimx_(bdimx),
         bdimy_(bdimy),
-        bdimz_(bdimz) {
-    assertValid();
-  }
-
-  void assertValid();
+        bdimz_(bdimz) {}
 
   void setSmem(int64_t smem) {
     smem_ = smem;
@@ -37,11 +33,11 @@ class TORCH_CUDA_CU_API LaunchParams {
   }
 
   int64_t nBlocks() const {
-    return std::abs(gdimx_ * gdimy_ * gdimz_);
+    return gdimx_ * gdimy_ * gdimz_;
   }
 
   int64_t nThreads() const {
-    return std::abs(bdimx_ * bdimy_ * bdimz_);
+    return bdimx_ * bdimy_ * bdimz_;
   }
 
   int64_t bdimx() const {
@@ -92,7 +88,6 @@ class TORCH_CUDA_CU_API LaunchParams {
     if (class_val == UNINITIALIZED_VAL) {
       class_val = incoming_val;
     }
-    assertValid();
   }
 
   // Binds dim assocaited with p_type to val
@@ -108,10 +103,6 @@ class TORCH_CUDA_CU_API LaunchParams {
   bool hasDim(ParallelType p_type) const;
 
   bool operator==(const LaunchParams& other) const;
-
-  void print() const;
-
-  std::string toString() const;
 
  private:
   // Spell them out because I want signed ints to know if they were initialized
@@ -129,7 +120,6 @@ class TORCH_CUDA_CU_API LaunchParams {
   // TODO: Fill in output sizes
   std::vector<std::vector<int64_t>> output_sizes;
 };
-
 } // namespace cuda
 } // namespace fuser
 } // namespace jit
