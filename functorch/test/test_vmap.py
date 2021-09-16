@@ -3107,6 +3107,22 @@ class TestVmapOperatorsOpInfo(TestCase):
         bias = torch.randn(B, C)
         test(self, op, (x, 4, weight, bias), in_dims=(0, None, 0, 0))
 
+    def test_index_put(self, device):
+        test = functools.partial(_vmap_test, check_propagates_grad=False)
+
+        x = torch.arange(3*4*5).reshape(3,4,5)
+        def f(x, y, z):
+            x[y] = z
+            return x
+        x = torch.randn(3, 4, 5)
+        y = torch.zeros((3, 2)).long()
+        z = torch.randn(3, 2, 5)
+        base = f(x[0], y[0], z[0])
+        self.assertEqual(vmap(f, in_dims=(0,0,0))(x, y, z)[0], base)
+        self.assertEqual(vmap(f, in_dims=(0,None,None))(x, y[0], z[0])[0], base)
+        self.assertEqual(vmap(f, in_dims=(0,None,0))(x, y[0], z)[0], base)
+        self.assertEqual(vmap(f, in_dims=(0,0,None))(x, y, z[0])[0], base)
+
     @parameterized_with_device('training', {'train': True, 'eval': False})
     @parameterized_with_device('track_running_stats', {'running_stats1': True, 'running_stats0': False})
     @parameterized_with_device('affine', {'affine1': True, 'affine0': False})

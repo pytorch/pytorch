@@ -393,7 +393,6 @@ class TestOperators(TestCase):
         xfail('index_add'),
         xfail('index_copy'),
         xfail('index_fill'),
-        xfail('index_put'),
         xfail('index_select'),
         xfail('kthvalue'),
         xfail('linalg.cholesky'),
