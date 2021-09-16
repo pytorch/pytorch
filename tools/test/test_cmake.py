@@ -1,5 +1,6 @@
 import contextlib
 import os
+import typing
 from typing import Iterator, List, Optional
 import unittest
 import unittest.mock
@@ -41,7 +42,9 @@ class TestCMake(unittest.TestCase):
         cmake_run.assert_called_once()
         call, = cmake_run.mock_calls
         build_args, _ = call.args
-        return build_args
+        assert isinstance(build_args, list), build_args
+        assert all(isinstance(x, str) for x in build_args), build_args
+        return typing.cast(List[str], build_args)
 
 
 @contextlib.contextmanager
