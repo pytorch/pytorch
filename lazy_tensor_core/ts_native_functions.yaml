@@ -1,6 +1,6 @@
 backend: Lazy
 cpp_namespace: torch_lazy_tensors
-codegen:
+full_codegen:
   - mean
   - addcdiv
   - addcmul

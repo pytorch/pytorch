@@ -16,9 +16,9 @@ import tools.codegen.api.dispatcher as dispatcher
 from tools.codegen.api.types import DispatcherSignature
 
 # Parses the external backend's yaml, and adds a new BackendIndex for the backend's dispatch key.
-# Returns a Tuple of (backend_key, autograd_key, cpp_namespace, updated BackendIndex mapping, codegen)
+# Returns a Tuple of (backend_key, autograd_key, cpp_namespace, updated BackendIndex mapping, full_codegen)
 ParsedExternalYaml = namedtuple('ParsedExternalYaml', [
-    'backend_key', 'autograd_key', 'cpp_namespace', 'backend_indices', 'codegen'])
+    'backend_key', 'autograd_key', 'cpp_namespace', 'backend_indices', 'full_codegen'])
 
 
 def parse_backend_yaml(
@@ -36,7 +36,7 @@ def parse_backend_yaml(
         yaml_values = yaml.load(f, Loader=YamlLoader)
     assert isinstance(yaml_values, dict)
 
-    valid_keys = ['backend', 'cpp_namespace', 'extra_headers', 'supported', 'autograd', 'codegen']
+    valid_keys = ['backend', 'cpp_namespace', 'extra_headers', 'supported', 'autograd', 'full_codegen']
 
     backend = yaml_values.pop('backend', None)
     assert backend is not None, 'You must provide a value for "backend"'
@@ -53,10 +53,10 @@ def parse_backend_yaml(
     supported_autograd = yaml_values.pop('autograd', [])
     assert isinstance(supported, list), f'expected "autograd" to be a list, but got: {supported_autograd}'
 
-    codegen = yaml_values.pop('codegen', [])
-    assert isinstance(codegen, list), f'expected "codegen" to be a list, but got: {codegen}'
-    supported.extend(codegen)
-    codegen = [OperatorName.parse(name) for name in codegen]
+    full_codegen = yaml_values.pop('full_codegen', [])
+    assert isinstance(full_codegen, list), f'expected "full_codegen" to be a list, but got: {full_codegen}'
+    supported.extend(full_codegen)
+    full_codegen = [OperatorName.parse(name) for name in full_codegen]
 
     assert len(yaml_values.keys()) == 0, \
         f'{backend_yaml_path} contains unexpected keys: {", ".join(yaml_values.keys())}. \
@@ -120,7 +120,7 @@ the behavior of autograd for some operators on your backend. However "Autograd{b
 autograd key. They cannot be mix and matched. If this is something you need, feel free to create an issue! \
 {forward_kernels[0].kernel} is listed under "supported", but {backward_kernels[0].kernel} is listed under "autograd".'
 
-    return ParsedExternalYaml(backend_key, autograd_key, cpp_namespace, backend_indices, codegen)
+    return ParsedExternalYaml(backend_key, autograd_key, cpp_namespace, backend_indices, full_codegen)
 
 
 def error_on_missing_kernels(
@@ -128,7 +128,7 @@ def error_on_missing_kernels(
         backend_indices: Dict[DispatchKey, BackendIndex],
         backend_key: DispatchKey,
         autograd_key: DispatchKey,
-        codegen: List[OperatorName],
+        full_codegen: List[OperatorName],
         kernel_defn_file_path: str,
 ) -> None:
     try:
@@ -143,7 +143,7 @@ def error_on_missing_kernels(
     expected_backend_op_names: List[OperatorName] = \
         list(backend_indices[backend_key].index.keys()) + list(backend_indices[autograd_key].index.keys())
     expected_backend_native_funcs: List[NativeFunction] = [
-        f for f in native_functions if f.func.name in expected_backend_op_names and f.func.name not in codegen]
+        f for f in native_functions if f.func.name in expected_backend_op_names and f.func.name not in full_codegen]
 
     expected_backend_kernel_name_counts: Dict[str, List[NativeFunction]] = defaultdict(list)
     for native_f in expected_backend_native_funcs:
@@ -207,12 +207,12 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
     autograd_key = parsed_backend_yaml.autograd_key
     cpp_namespace = parsed_backend_yaml.cpp_namespace
     backend_indices = parsed_backend_yaml.backend_indices
-    codegen = parsed_backend_yaml.codegen
+    full_codegen = parsed_backend_yaml.full_codegen
 
     def concatMapCodegen(func: Callable[[NativeFunction], Sequence[str]], xs: Iterable[Union[NativeFunctionsGroup, NativeFunction]]) -> Iterator[str]:
         for x in xs:
             f = x.functional if isinstance(x, NativeFunctionsGroup) else x
-            if f.func.name in codegen:
+            if f.func.name in full_codegen:
                 for r in func(f):
                     yield r
 
@@ -225,7 +225,7 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
         class_name = backend_indices[backend_dispatch_key].native_function_class_name()
 
         if impl_path is not None:
-            error_on_missing_kernels(native_functions, backend_indices, backend_key, autograd_key, codegen, impl_path)
+            error_on_missing_kernels(native_functions, backend_indices, backend_key, autograd_key, full_codegen, impl_path)
 
         assert class_name is not None
 
