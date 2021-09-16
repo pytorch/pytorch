@@ -6099,6 +6099,23 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
 
                 self.assertEqual(int_prod, fp_prod)
 
+    @onlyCUDA
+    @dtypes(torch.int32, torch.int64)
+    def test_matmul_batched_integer_tensor(self, device, dtype):
+        for batch_size in [1, 100, 500]:
+            m = 64
+            n = 100
+            k = 50
+
+            mat1 = torch.randint(0, 100, (batch_size, m, k), device=device, dtype=dtype)
+            mat2 = torch.randint(1000, 1000, (batch_size, k, n), device=device,dtype=dtype)
+
+            int_prod = mat1 @ mat2
+            fp_prod = (mat1.to(torch.double) @ mat2.to(torch.double)).to(dtype)
+
+            self.assertEqual(int_prod, fp_prod)
+
+
     @slowTest
     @onlyOnCPUAndCUDA
     @dtypes(torch.float32, torch.float64, torch.bfloat16, torch.int32, torch.int64, torch.cfloat, torch.cdouble)

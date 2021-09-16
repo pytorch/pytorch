@@ -39,6 +39,15 @@ namespace blas {
   void gemm<int64_t>(CUDABLAS_GEMM_ARGTYPES(int64_t)) {
     launch_gemm_kernel(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
   }
+
+  template <>
+  void batched_integer_gemm<int32_t>(TensorIterator& iter, char transa, char transb) {
+  }
+
+  template <>
+  void batched_integer_gemm<int64_t>(TensorIterator& iter, char transa, char transb) {
+  }
+
 }
 }
 }

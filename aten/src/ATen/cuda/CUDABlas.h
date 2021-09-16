@@ -14,6 +14,7 @@
  */
 
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/native/TensorIterator.h>
 
 namespace at {
 namespace cuda {
@@ -72,6 +73,16 @@ void gemm<at::Half>(CUDABLAS_GEMM_ARGTYPES(at::Half));
 template <>
 void gemm<at::BFloat16>(CUDABLAS_GEMM_ARGTYPES(at::BFloat16));
 #endif
+
+template <typename Dtype>
+inline void batched_integer_gemm(TensorIterator& iter, char transa, char transb) {
+  AT_ERROR("at::cuda::blas::bgemm: not implemented for ", typeid(Dtype).name());
+}
+
+template<>
+void batched_integer_gemm<int32_t>(TensorIterator& iter, char transa, char transb);
+template<>
+void batched_integer_gemm<int64_t>(TensorIterator& iter, char transa, char transb);
 
 #define CUDABLAS_BGEMM_ARGTYPES(Dtype)                                       \
   char transa, char transb, int64_t m, int64_t n, int64_t k, Dtype alpha,   \

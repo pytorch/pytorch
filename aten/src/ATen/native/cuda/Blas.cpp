@@ -3,6 +3,7 @@
 #include <ATen/cuda/CUDABlas.h>
 #include <ATen/native/Resize.h>
 #include <c10/util/MaybeOwned.h>
+#include <ATen/native/LinearAlgebraUtils.h>
 
 namespace at { namespace native {
 
@@ -178,6 +179,10 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
       scalar_t* mat2_ptr = mat2_->data_ptr<scalar_t>();
       scalar_t* result_ptr = result_->data_ptr<scalar_t>();
 
+      // TensorIteratorConfig iter_config;
+      // iter_config
+      //   .add_input();
+
       at::cuda::blas::gemm<scalar_t>(
         transpose_mat1 ? 't' : 'n',
         transpose_mat2 ? 't' : 'n',
@@ -287,24 +292,47 @@ Tensor& baddbmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& 
 
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!result_->is_conj());
 
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, self.scalar_type(), "baddbmm_cuda", [&] {
-    scalar_t alpha_val = alpha.to<scalar_t>();
-    scalar_t beta_val = beta.to<scalar_t>();
-    scalar_t* batch1_ptr = batch1_->data_ptr<scalar_t>();
-    scalar_t* batch2_ptr = batch2_->data_ptr<scalar_t>();
-    scalar_t* result_ptr = result_->data_ptr<scalar_t>();
-    at::cuda::blas::bgemm<scalar_t>(
-      transpose_batch1 ? batch1_->is_conj() ? 'c' : 't' : 'n',
-      transpose_batch2 ? batch2_->is_conj() ? 'c' : 't' : 'n',
-      m, n, k,
-      alpha_val,
-      batch1_ptr, lda, batch1_->strides()[0],
-      batch2_ptr, ldb, batch2_->strides()[0],
-      beta_val,
-      result_ptr, ldc, result_->strides()[0],
-      num_batches
-    );
-  });
+  if (isIntegralType(self.scalar_type(), false)) {
+
+    c10::IntArrayRef input_batch_sizes(batch1.sizes().data(), batch1.dim() - 2);
+    c10::IntArrayRef result_batch_sizes(result.sizes().data(), result.dim() - 2);
+
+    auto input_batch_idx = at::arange(batchCount(batch1)).view(input_batch_sizes);
+    auto result_batch_idx = at::arange(batchCount(result)).view(result_batch_sizes);
+
+    at::TensorIteratorConfig iter_config;
+    auto iter = iter_config
+      .add_output(result_batch_idx)
+      .add_input(input_batch_idx)
+      .resize_outputs(false)      // call if output already allocated.
+      .build();
+
+    AT_DISPATCH_INDEX_TYPES(self.scalar_type(), "baddmm_cuda_int", [&] {
+      using scalar_t = index_t;
+      at::cuda::blas::batched_integer_gemm<scalar_t>(iter, transpose_batch1, transpose_batch2);
+    });
+  }
+  else {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, self.scalar_type(), "baddbmm_cuda", [&] {
+      scalar_t alpha_val = alpha.to<scalar_t>();
+      scalar_t beta_val = beta.to<scalar_t>();
+      scalar_t* batch1_ptr = batch1_->data_ptr<scalar_t>();
+      scalar_t* batch2_ptr = batch2_->data_ptr<scalar_t>();
+      scalar_t* result_ptr = result_->data_ptr<scalar_t>();
+      at::cuda::blas::bgemm<scalar_t>(
+        transpose_batch1 ? batch1_->is_conj() ? 'c' : 't' : 'n',
+        transpose_batch2 ? batch2_->is_conj() ? 'c' : 't' : 'n',
+        m, n, k,
+        alpha_val,
+        batch1_ptr, lda, batch1_->strides()[0],
+        batch2_ptr, ldb, batch2_->strides()[0],
+        beta_val,
+        result_ptr, ldc, result_->strides()[0],
+        num_batches
+      );
+    });
+  }
+
   if (!result.is_same(*result_)) {
     result.copy_(*result_);
   }
