@@ -6109,7 +6109,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             k = 50
 
             mat1 = torch.randint(0, 100, (batch_size, m, k), device=device, dtype=dtype)
-            mat2 = torch.randint(1000, 1000, (batch_size, k, n), device=device,dtype=dtype)
+            mat2 = torch.randint(100, 1000, (batch_size, k, n), device=device,dtype=dtype)
 
             int_prod = mat1 @ mat2
             fp_prod = (mat1.to(torch.double) @ mat2.to(torch.double)).to(dtype)
