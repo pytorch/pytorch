@@ -21,6 +21,8 @@ lazy_tensor_core/csrc/ts_backend/RegisterAutogradLazy.cpp
 lazy_tensor_core/csrc/ts_backend/RegisterLazy.cpp
 lazy_tensor_core/csrc/ts_backend/LazyTsLowering.cpp
 
+# files copied from thirdparty by build script
+lazy_tensors/computation_client/
 
 # BEGIN NOT-CLEAN-FILES (setup.py handles this marker. Do not change.)
 #
