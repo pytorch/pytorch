@@ -25,10 +25,10 @@ class TestCMake(unittest.TestCase):
         self.assertNotIn('-j', build_args)
 
     def test_build_no_ninja(self) -> None:
-        with (unittest.mock.patch.object(tools.setup_helpers.cmake, 'USE_NINJA', False),
-              unittest.mock.patch('multiprocessing.cpu_count') as mock_cpu_count):
-            mock_cpu_count.return_value = 13
-            build_args = self._cmake_build_and_get_args()
+        with unittest.mock.patch.object(tools.setup_helpers.cmake, 'USE_NINJA', False):
+            with unittest.mock.patch('multiprocessing.cpu_count') as mock_cpu_count:
+                mock_cpu_count.return_value = 13
+                build_args = self._cmake_build_and_get_args()
 
         self.assertListEqual(build_args[-3:], ['--', '-j', '13'])
 
