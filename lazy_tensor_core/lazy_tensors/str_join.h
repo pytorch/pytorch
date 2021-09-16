@@ -34,7 +34,7 @@ std::string StrJoin(const Range& range, c10::string_view separator) {
 }
 
 // TODO - is is_scalar the right thing here?
-// I mainly wanted to make sure it wasn't ambiguous for vector<T> 
+// I mainly wanted to make sure it wasn't ambiguous for vector<T>
 template <typename T, typename std::enable_if<
                           std::is_scalar<T>::value>::type* = nullptr>
 void ToString(std::string name, T val, std::ostream& ss){

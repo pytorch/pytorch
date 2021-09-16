@@ -117,8 +117,8 @@ class LazyIrSchema:
                     NamedCType(
                         arg.name,
                         process_ir_type(arg.type)) for arg in getattr(func.arguments, arg_field)])
-        self.positional_arg_types = tuple(positional_arg_types) 
-        
+        self.positional_arg_types = tuple(positional_arg_types)
+
         keyword_arg_types = []
         for arg_field in ["pre_tensor_options_kwarg_only",
                           "tensor_options",

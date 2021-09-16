@@ -77,7 +77,7 @@ TSOpVector Lower{schema.node_name}(std::shared_ptr<torch::jit::GraphFunction> fu
     {emplace_kwarguments}
     TSOpVector {schema.aten_name}_out = LowerBuiltin(function, node, arguments, kwarguments);
     LTC_CHECK_EQ({schema.aten_name}_out.size(), {len(func.returns)});
-    
+
     // TODO: need to call GenerateClone sometimes? Or else return LowerBuiltIn() directly
     return {schema.aten_name}_out;
 }}

@@ -101,7 +101,7 @@ class LazyIR:
         else:
             clone_impl = f"ir::MakeNode<ir::ops::{schema.node_name}>({clone_impl_args});"
             clone_handcoded_decl = ""
-        
+
 
         return [f"""\
 {clone_handcoded_decl}
@@ -109,14 +109,14 @@ class {schema.node_name} : public Node {{
  public:
   {schema.node_name}({node_ctor_args}, at::ScalarType out_dtype, std::vector<int64_t> out_shape)
       : Node(ir::OpKind(at::aten::{func.name.name}),
-              {{{base_ctor_value_args}}}, 
+              {{{base_ctor_value_args}}},
               /*shape=*/lazy_tensors::Shape(out_dtype, out_shape),
               /*num_outputs=*/{len(func.returns)},
               lazy_tensors::util::MHash({scalar_hashes})),
         out_dtype_(out_dtype),
         out_shape_(out_shape){comma_if_scalar_initializers}
         {scalar_initializers}
-        
+
   {{
     //  throw std::runtime_error("need to hash scalars properly");
   }}
@@ -131,7 +131,7 @@ class {schema.node_name} : public Node {{
   NodePtr Clone(OpList operands) const override {{
       {clone_impl}
   }}
-  
+
   c10::ScalarType out_dtype_;
   std::vector<int64_t> out_shape_;
   {scalar_decls}
@@ -186,7 +186,7 @@ def gen_lazy_nativefunc_definition(f: NativeFunction, backend_index: BackendInde
 
         // (whc): experiment on dtype
         // try always overriding output dtype to match the one ATen says our op should produce.
-        // this diverges from most of the handwritten methods, which often do not override and 
+        // this diverges from most of the handwritten methods, which often do not override and
         // rely on other behavior in the lowering or copy process to make this correct.
         // (1) evaluate design goal: to always pick the IR's dtype in one place (here)
         // (2) rationalize this with Google's design, it may be a problem
