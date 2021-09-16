@@ -355,7 +355,6 @@ def maybe_insert_input_observer_for_arg_or_kwarg(
 
         arg_dtype = node_name_to_target_dtype[arg.name]
         node_dtype = node_name_to_target_dtype[node.name]
-        print("node:", node.name, arg_dtype, node_dtype)
         dtype_changes_and_second_dtype_not_float = (
             # if the dtypes are different, we need an observer
             (arg_dtype != node_dtype) and
@@ -560,7 +559,6 @@ def maybe_insert_output_observer_for_node(
         isinstance(qhandler, StandaloneModuleQuantizeHandler)
 
     dtype = node_name_to_target_dtype[node.name]
-    print("node:", node.format_node(), "dtype:", dtype)
     should_insert_observer = \
         qhandler.should_insert_observer_for_output(
             qconfig, model.training) and dtype not in (torch.bool, None, torch.float)
