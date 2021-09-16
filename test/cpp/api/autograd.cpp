@@ -969,6 +969,8 @@ void assertBasicChecks(F op) {
 
 } // namespace
 
+#if !defined(_MSC_VER)
+
 TEST(TestAutogradNotImplementedFallback, RetSingleNonTensor) {
   REGISTER_TEST_OP("ret_single_non_tensor", "_test::ret_single_non_tensor(Tensor self, Tensor other) -> int", ret_single_non_tensor);
   auto opHandle = c10::Dispatcher::singleton().findSchemaOrThrow("_test::ret_single_non_tensor", "");
@@ -1124,6 +1126,8 @@ TEST(TestAutogradNotImplementedFallback, TensorlistOp) {
 
   ASSERT_TRUE(at::allclose(op(a, vec), tensorlist_op(a, vec)));
 }
+
+#endif
 
 
 // TODO add these tests if needed
