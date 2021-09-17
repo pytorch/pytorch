@@ -937,7 +937,7 @@ def _avg_pool(name, tuple_fn):
                          value_f=0.)
             padding = (0,) * len(padding)
         if ceil_mode:
-            padding = padding + tuple(a + b for (a,b) in zip(padding_ceil, padding))
+            padding = padding + tuple(a + b for (a, b) in zip(padding_ceil, padding))
         else:
             padding = padding * 2
         output = g.op("AveragePool", input,
