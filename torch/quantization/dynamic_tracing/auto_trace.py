@@ -14,12 +14,13 @@ from .utils import (
 from . import auto_trace_rewrite
 
 logger = logging.getLogger('auto_trace')
-# logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.DEBUG)
 # logging.basicConfig(level=logging.INFO)
 
 # enabling this tanks performance, make sure to disable for benchmarking
 # TODO(future PR): clean this up
 enable_logging = False
+enable_logging = True
 
 
 def add_auto_observation(
@@ -89,7 +90,7 @@ def add_auto_observation(
                 output = super().__torch_function__(func, types, args, kwargs)
                 # run "after" hook
                 output = qstate.op_prepare_after_hook(
-                    func, output, args, first_call, qtensor_id)
+                    func, output, args, first_call, qtensor_id, cur_module)
                 qstate.mark_cur_op_complete(func)
             else:
                 output = super().__torch_function__(func, types, args, kwargs)
@@ -196,7 +197,8 @@ def add_auto_observation(
 
                         # after hooks
                         output = parent_qstate.op_prepare_after_hook(
-                            cur_module, output, args, first_call, qtensor_id)
+                            cur_module, output, args, first_call, qtensor_id,
+                            cur_module)
                         parent_qstate.mark_cur_op_complete(cur_module)
 
                     elif needs_io_hooks:
@@ -314,7 +316,7 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
                 with torch._C.DisableTorchFunction():
                     logger.debug(f"__torch_function__ {func} " +
                         f"op_hooks {needs_op_hooks} " +
-                        f"arg_types {[type(arg) for arg in args]}) " +
+                        # f"arg_types {[type(arg) for arg in args]}) " +
                         f"arg_dtypes {[arg.dtype if isinstance(arg, torch.Tensor) else None for arg in args]}")
 
             if needs_op_hooks:
@@ -373,7 +375,10 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
                 assert output is not NotImplemented
 
             if enable_logging:
-                logger.debug(f"__torch_function__ {func} out {type(output)} end")
+                out_dtype = None
+                if isinstance(output, torch.Tensor):
+                    out_dtype = output.dtype
+                logger.debug(f"__torch_function__ {func} out {out_dtype} end")
 
             return output
 
@@ -432,7 +437,7 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
 
                 if enable_logging:
                     fqn = module_id_to_fqn.get(id(self), None)
-                    logger.debug(f"starting fqn {fqn}")
+                    logger.debug(f"\nstarting fqn {fqn}")
 
                 nonlocal cur_module
                 old_module = cur_module
@@ -453,7 +458,7 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
                     needs_arg_dequants = can_have_op_hooks and not needs_op_hooks
                     if enable_logging:
                         logger.debug(f"record_module {type(self)} " +
-                          f"arg_types {[type(arg) for arg in args]} " +
+                          # f"arg_types {[type(arg) for arg in args]} " +
                           f"arg_dtypes {[arg.dtype if isinstance(arg, torch.Tensor) else None for arg in args]} " +
                           f"op_hooks {needs_op_hooks} io_hooks {needs_io_hooks}")
 
@@ -502,10 +507,10 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
 
                     if enable_logging:
                         logger.debug(f"record_module {type(self)} " +
-                            f"out {type(output)} " +
+                            # f"out {type(output)} " +
                             f"dtype {output.dtype if isinstance(output, torch.Tensor) else None} " +
                             f"end")
-                        logger.debug(f"ending fqn {fqn}")
+                        logger.debug(f"ending fqn {fqn}\n")
                     return output
                 finally:
                     module_stack.pop()

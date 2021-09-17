@@ -8,6 +8,8 @@ from .mappings import (
     functions_supported_by_quantization,
     module_types_supported_by_quantization,
     q_mod_to_float_mod_mapping,
+    module_types_supported_by_quantization_preserves_dtype,
+    functions_supported_by_quantization_preserves_dtype,
 )
 
 from torch.quantization import (
@@ -101,7 +103,12 @@ def unwrap_observers_from_placeholders(module: torch.nn.Module) -> None:
     """
     Restores observers back to their original state.
     """
-    for name, child in module.named_children():
+    # Note: we cannot use module.named_children() because we can
+    # have two different names refer to the same module, for example
+    # when we are reusing observers for torch.add scalar version.
+    for name, child in module._modules.items():
+        if child is None:
+            continue
         if isinstance(child, ObserverWrapper):
             unwrapped = child.child
             setattr(module, name, unwrapped)
@@ -145,7 +152,7 @@ def get_func_output_obs_type(
     if isinstance(op, torch.nn.Module):
         return FuncOutputObsType.NONE
     if (
-        op in (torch.add, torch.Tensor.add, torch.mul, torch.Tensor.mul) and
+        op in (torch.add, torch.Tensor.add, torch.Tensor.add_, torch.mul, torch.Tensor.mul) and
         len(args) > 1 and
         (not isinstance(args[1], torch.Tensor))
     ):
@@ -155,7 +162,7 @@ def get_func_output_obs_type(
 def converted_func_needs_scale_zp(op: Callable, seen_op: SeenOp) -> bool:
     if isinstance(op, torch.nn.Module):
         return False
-    if op in (torch.add, torch.Tensor.add, torch.mul, torch.Tensor.mul):
+    if op in (torch.add, torch.Tensor.add, torch.Tensor.add_, torch.mul, torch.Tensor.mul):
         # check if both arguments are tensors
         inputs = seen_op.input_tensor_infos
         both_args_tensors = len(inputs) == 2 and inputs[0] is not None and \
@@ -166,3 +173,22 @@ def converted_func_needs_scale_zp(op: Callable, seen_op: SeenOp) -> bool:
     # TODO: add more ops
     # print('op', op)
     return False
+
+class FuncOutputDTypeType(enum.Enum):
+    # for ops which are quantizeable and are configured by the qconfig,
+    # for example F.conv2d
+    DTYPE_DEPENDS_ON_QCONFIG = 0
+    # for ops which are quantizeable and take the dtype of the previous
+    # op, for example nn.Dropout
+    DTYPE_EQUALS_INPUT_DTYPE = 1
+
+def get_func_output_dtype_type(
+    op: Callable,
+) -> FuncOutputDTypeType:
+    if isinstance(op, torch.nn.Module):
+        for target_mod_cls in module_types_supported_by_quantization_preserves_dtype:
+            if isinstance(op, target_mod_cls):
+                return FuncOutputDTypeType.DTYPE_EQUALS_INPUT_DTYPE
+    elif op in functions_supported_by_quantization_preserves_dtype:
+        return FuncOutputDTypeType.DTYPE_EQUALS_INPUT_DTYPE
+    return FuncOutputDTypeType.DTYPE_DEPENDS_ON_QCONFIG

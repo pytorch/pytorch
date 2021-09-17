@@ -64,7 +64,7 @@ class AutoTracingTestCase(QuantizationTestCase):
             out_m_copy_p = m_copy_p(*example_args)
             # print(m_copy_p)
             m_copy_q = convert_fx(m_copy_p)
-            print(m_copy_q)
+            # print(m_copy_q)
             out_q_fx = m_copy_q(*example_args)
             self.assertTrue(_allclose(out_p, out_m_copy_p))
             # print(out_q)
@@ -189,6 +189,24 @@ class TestAutoTracing(AutoTracingTestCase):
         qconfig = torch.quantization.default_qconfig
         self._test_auto_tracing(m, qconfig, (torch.randn(1, 1, 2, 2),))
 
+    @skipIfNoFBGEMM
+    def test_dropout_conv(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.dropout = nn.Dropout()
+                self.conv = torch.nn.Conv2d(1, 1, 1)
+
+            def forward(self, x):
+                # this can be sometimes inplace
+                x1 = self.dropout(x)
+                x1 = self.conv(x)
+                return x1
+
+        m = M().eval()
+        qconfig = torch.quantization.default_qconfig
+        self._test_auto_tracing(m, qconfig, (torch.randn(1, 1, 2, 2),))
+
     # TODO(future PR): implement observer sharing to match FX
     @skipIfNoFBGEMM
     def test_cat(self):
@@ -251,6 +269,23 @@ class TestAutoTracing(AutoTracingTestCase):
         self._test_auto_tracing(m, qconfig, (torch.randn(1, 1, 2, 2),))
 
     @skipIfNoFBGEMM
+    def test_conv_scalar_add(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(1, 1, 1)
+
+            def forward(self, x):
+                x = self.conv(x)
+                x = x + 1.0
+                return x
+
+        model_fp32 = M().eval()
+        qconfig = torch.quantization.default_qconfig
+        self._test_auto_tracing(model_fp32, qconfig, (torch.randn(1, 1, 2, 2),))
+
+
+    @skipIfNoFBGEMM
     def test_conv_relu_add(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -311,11 +346,29 @@ class TestAutoTracing(AutoTracingTestCase):
             def forward(self, x):
                 x = x + x
                 x = x + 1.0
+                x = 1.0 + x
                 return x
 
         model_fp32 = M().eval()
         qconfig = torch.quantization.default_qconfig
         self._test_auto_tracing(model_fp32, qconfig, (torch.randn(1, 1, 2, 2),))
+
+    @skipIfNoFBGEMM
+    def test_module_then_add(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(1, 1)
+
+            def forward(self, x):
+                x = self.linear(x)
+                x = x + 1.0
+                x = x + 1.0
+                return x
+
+        model_fp32 = M().eval()
+        qconfig = torch.quantization.default_qconfig
+        self._test_auto_tracing(model_fp32, qconfig, (torch.randn(1, 1, 1, 1),))
 
     @skipIfNoFBGEMM
     def test_sub(self):
@@ -341,12 +394,39 @@ class TestAutoTracing(AutoTracingTestCase):
         qconfig = torch.quantization.default_qconfig
         self._test_auto_tracing(model_fp32, qconfig, (torch.randn(1, 1, 2, 2),))
 
+    @unittest.skip("TODO next")
+    @skipIfNoFBGEMM
+    def test_mul_int32(self):
+        # TODO: make all the math functions work correctly for integer types
+        class M(torch.nn.Module):
+            def forward(self, x):
+                x = x * x
+                return x
+
+        model_fp32 = M().eval()
+        qconfig = torch.quantization.default_qconfig
+        self._test_auto_tracing(
+            model_fp32, qconfig, (torch.ones(1, 1, 2, 2, dtype=torch.int32),))
+
     @skipIfNoFBGEMM
     def test_div(self):
         class M(torch.nn.Module):
             def forward(self, x):
                 x = x / x
                 x = x / 1.0
+                return x
+
+        model_fp32 = M().eval()
+        qconfig = torch.quantization.default_qconfig
+        self._test_auto_tracing(model_fp32, qconfig, (torch.randn(1, 1, 2, 2),))
+
+    @skipIfNoFBGEMM
+    def test_method(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                x = x + x
+                x = torch.relu(x)
+                # x = x.relu()
                 return x
 
         model_fp32 = M().eval()
@@ -481,9 +561,6 @@ class TestAutoTracing(AutoTracingTestCase):
             fuse_modules=False)
 
         # test regular embedding
-        # TODO(next): fix this to unblock BERT models, need to specify
-        # qconfig per module type
-
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -495,6 +572,27 @@ class TestAutoTracing(AutoTracingTestCase):
 
         model_fp32 = M().eval()
         qconfig = torch.quantization.default_dynamic_qconfig
+        self._test_auto_tracing(
+            model_fp32, qconfig, (torch.LongTensor([[0]]),),
+            fuse_modules=False)
+
+    @skipIfNoFBGEMM
+    def test_inplace_add(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.embedding1 = nn.Embedding(1, 1)
+                self.embedding2 = nn.Embedding(1, 1)
+                self.layernorm = nn.LayerNorm(1)
+
+            def forward(self, x):
+                x1 = self.embedding1(x)
+                x1 += self.embedding2(x)
+                x2 = self.layernorm(x1)
+                return x
+
+        model_fp32 = M().eval()
+        qconfig = torch.quantization.default_qconfig
         self._test_auto_tracing(
             model_fp32, qconfig, (torch.LongTensor([[0]]),),
             fuse_modules=False)

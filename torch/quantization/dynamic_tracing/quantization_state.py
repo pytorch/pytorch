@@ -1,5 +1,6 @@
-import torch
 from typing import Callable, List, Tuple, Any, Optional, Dict
+
+import torch
 
 from .mappings import (
     fp32_to_int8_fun_mapping,
@@ -15,6 +16,8 @@ from .utils import (
     FuncOutputObsType,
     get_func_output_obs_type,
     converted_func_needs_scale_zp,
+    FuncOutputDTypeType,
+    get_func_output_dtype_type,
 )
 
 # TODO(future PR): maybe better name
@@ -117,6 +120,8 @@ class AutoQuantizationState(torch.nn.Module):
               (cur_op == expected_op) or
               (cur_op is torch.add and expected_op is torch.Tensor.add) or
               (cur_op is torch.Tensor.add and expected_op is torch.add) or
+              # TODO: add other flavors of add to complete this
+              (cur_op is torch.add and expected_op is torch.Tensor.add_) or
               (cur_op is torch.mul and expected_op is torch.Tensor.mul) or
               (cur_op is torch.Tensor.mul and expected_op is torch.mul)
             )
@@ -139,6 +144,7 @@ class AutoQuantizationState(torch.nn.Module):
     ) -> torch.Tensor:
         if first_call:
             if not hasattr(output, '_qtensor_info'):
+                # TODO: use actual dtype instead of defaulting to float
                 output._qtensor_info = QTensorInfo(qtensor_id[0], torch.float)  # type: ignore[attr-defined]
                 qtensor_id[0] += 1
             self.output_qtensor_infos.append(output._qtensor_info)  # type: ignore[attr-defined]
@@ -227,7 +233,7 @@ class AutoQuantizationState(torch.nn.Module):
         # If a tensor does not have an ID, add it. This allows
         # us to track inputs shared by multiple quantizeable modules.
         if not hasattr(arg, '_qtensor_info'):
-            arg._qtensor_info = QTensorInfo(qtensor_id[0], torch.float)  # type: ignore[attr-defined]
+            arg._qtensor_info = QTensorInfo(qtensor_id[0], arg.dtype)  # type: ignore[attr-defined]
             qtensor_id[0] += 1
         arg_tensor_infos.append(arg._qtensor_info)  # type: ignore[attr-defined]
 
@@ -313,6 +319,7 @@ class AutoQuantizationState(torch.nn.Module):
         args: Tuple[Any, ...],
         first_call: bool,
         qtensor_id: List[int],
+        root_module: torch.nn.Module,
     ) -> Any:
         """
         This function is called after an op call on a prepared model.
@@ -334,14 +341,53 @@ class AutoQuantizationState(torch.nn.Module):
             elif func_output_obs_type == FuncOutputObsType.REUSES_FIRST_INPUT_OBS:
                 seen_op = self._get_cur_seen_op()
                 first_input_tensor_id = seen_op.input_tensor_infos[0].id
-                first_input_obs = \
-                    self.tensor_id_to_observer[str(first_input_tensor_id)]
+
+                first_input_obs = None
+                if str(first_input_tensor_id) in self.tensor_id_to_observer:
+                    first_input_obs = \
+                        self.tensor_id_to_observer[str(first_input_tensor_id)]
+                else:
+                    # This observer may be in a module (handled by eager
+                    # convert), in which case it's not in our map. For now,
+                    # copy it from the module. In the future, we could look
+                    # into having a soft link.
+                    # TODO: make this handle more cases
+                    # TODO: handle module -> add_scalar -> add_scalar
+                    # TODO: this needs to look up by tensor_id, not idx,
+                    # current code may be wrong for some subgraphs
+                    prev_op = self.idx_to_seen_ops[str(self.idx - 1)]
+                    # TODO: the following line needs to only check fqn
+                    # for modules, not for functions
+                    fqn_last_part = prev_op.fqn.split('.')[-1]
+                    if hasattr(root_module, fqn_last_part):
+                        first_input_mod = getattr(root_module, fqn_last_part)
+                    else:
+                        first_input_mod = None
+                    # Currently, both tracing for module fusion and tracing for
+                    # quantization go through this code path. When tracing
+                    # for module fusion, quantizeable modules do not have
+                    # observers yet. For this path to not crash, we create one.
+                    # When tracing for quantization, this will be ignored.
+                    # TODO(future PR): refactor to avoid this.
+                    if first_input_mod and hasattr(first_input_mod, 'activation_post_process'):
+                        first_input_obs = getattr(
+                            first_input_mod, 'activation_post_process')
+                    else:
+                        first_input_obs = self.qconfig.activation()
+
                 self.tensor_id_to_observer[str(qtensor_id[0])] = first_input_obs
 
             # TODO(future PR): check if _qtensor_id needs to become an actual
             # attribute of Tensor
             # TODO(future PR): handle non-tensor outputs
-            output._qtensor_info = QTensorInfo(qtensor_id[0], torch.quint8)
+
+            func_output_dtype_type = get_func_output_dtype_type(op)
+            if func_output_dtype_type == FuncOutputDTypeType.DTYPE_DEPENDS_ON_QCONFIG:
+                dtype_to_use = torch.quint8
+            else:
+                first_arg_dtype = args[0]._qtensor_info.inf_dtype
+                dtype_to_use = first_arg_dtype
+            output._qtensor_info = QTensorInfo(qtensor_id[0], dtype_to_use)
             self.idx_to_seen_ops[str(self.idx)].output_tensor_infos.append(
                 output._qtensor_info)
             qtensor_id[0] += 1
@@ -489,11 +535,15 @@ class AutoQuantizationState(torch.nn.Module):
         assert self.cur_op_needs_hooks(cur_op)
         seen_op = self._get_cur_seen_op()
         quant_infos: List[Optional[Tuple[float, int]]] = []
+
+        # determine the expected output dtype
+        output_dtype = seen_op.output_tensor_infos[0].inf_dtype
+
         for input_arg_idx, input_arg in enumerate(seen_op.input_tensor_infos):
             if input_arg is not None:
                 tensor_id = input_arg.id
                 if str(tensor_id) in self.tensor_id_to_observer and \
-                        input_arg.inf_dtype == torch.float:
+                        input_arg.inf_dtype != output_dtype:
                     observer = self.tensor_id_to_observer[str(tensor_id)]
                     # TODO: return this to the caller
                     scale, zp = observer.calculate_qparams()

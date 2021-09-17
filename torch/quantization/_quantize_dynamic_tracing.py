@@ -29,6 +29,17 @@ def prepare(model, example_inputs, inplace=False, allow_list=None,
         del model._auto_quant_state
         model.__class__ = old_class
 
+    # Automatically assign qconfigs for modules where the defaults do not
+    # work.
+    # TODO(future PR): clean this up and align with other APIs
+    for name, child in model.named_modules():
+        if isinstance(child, torch.nn.Embedding):
+            pass
+            child.qconfig = torch.quantization.float_qparams_weight_only_qconfig
+            # uncomment below to unbreak attention_is_all_you_need
+            # TODO write up issue, maybe fix
+            # child.qconfig = None
+
     model = torch.quantization.prepare(
         model, inplace, allow_list, observer_non_leaf_module_list,
         prepare_custom_config_dict)

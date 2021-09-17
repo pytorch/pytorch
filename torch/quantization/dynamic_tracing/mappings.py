@@ -12,8 +12,10 @@ import operator
 
 fp32_to_int8_fun_mapping = {
     torch.Tensor.add: torch.ops.quantized.add,
+    torch.Tensor.add_: torch.ops.quantized.add,
     torch.add: torch.ops.quantized.add,
     operator.add: torch.ops.quantized.add,
+    operator.iadd: torch.ops.quantized.add,
     torch.Tensor.mul: torch.ops.quantized.mul,
     torch.mul: torch.ops.quantized.mul,
     operator.mul: torch.ops.quantized.mul,
@@ -24,6 +26,7 @@ fp32_to_int8_fun_mapping = {
 # in functions_supported_by_quantization
 functions_supported_by_quantization = set([
     torch.Tensor.add,
+    torch.Tensor.add_,
     torch.Tensor.mul,
     torch.add,
     torch.mul,
@@ -35,6 +38,7 @@ functions_supported_by_quantization = set([
     toq.mul,
     toq.cat,
     F.conv2d,
+    F.dropout,
 ])
 
 module_types_supported_by_quantization = set([
@@ -51,6 +55,19 @@ module_types_supported_by_quantization = set([
     nn.Dropout,
     nn.Identity,
     nn.LeakyReLU,
+    nn.LayerNorm,
+    nnq.LayerNorm,
+])
+
+# These can work in either fp32 or quint8, without the need for observation
+# TODO: better name
+module_types_supported_by_quantization_preserves_dtype = set([
+    nn.Identity,
+    nn.Dropout,
+])
+
+functions_supported_by_quantization_preserves_dtype = set([
+    F.dropout,
 ])
 
 # TODO(future PR): reuse existing mapping
@@ -60,4 +77,15 @@ q_mod_to_float_mod_mapping = {
     nnq.ReLU6: nn.ReLU6,
     nnq.Linear: nn.Linear,
     nnq.LeakyReLU: nn.LeakyReLU,
+    nnq.LayerNorm: nn.LayerNorm,
 }
+
+# validity checks
+# TODO: move these out
+for m in module_types_supported_by_quantization_preserves_dtype:
+    assert m in module_types_supported_by_quantization, \
+        f"{m} needs to be added to module_types_supported_by_quantization"
+
+for f in functions_supported_by_quantization_preserves_dtype:
+    assert f in functions_supported_by_quantization, \
+        f"{f} needs to be added to functions_supported_by_quantization"
