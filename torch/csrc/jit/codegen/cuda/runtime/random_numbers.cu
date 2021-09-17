@@ -98,14 +98,7 @@ class Philox {
   unsigned int STATE = 0;
 };
 
-__device__ float uniformf(unsigned int x) {
+__device__ float uniform(unsigned int x) {
   constexpr float kRanInvM32 = 2.3283064e-10f; // Inverse of 2^32.
   return x * kRanInvM32;
-}
-
-__device__ double uniform(unsigned int x, unsigned int y) {
-  constexpr double kRan2Pow53Inv = 1.1102230246251565e-16;
-  const unsigned long long z =
-      (unsigned long long)x ^ ((unsigned long long)y << (53 - 32));
-  return z * kRan2Pow53Inv + (kRan2Pow53Inv / 2.0);
 }
