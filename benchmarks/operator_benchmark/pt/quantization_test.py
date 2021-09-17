@@ -59,11 +59,11 @@ class QuantizePerTensorBenchmark(op_bench.TorchBenchmarkBase):
     def forward(self, input):
         return self.op(input)
 
-
+'''
 op_bench.generate_pt_test(
     quantize_per_tensor_configs_short + quantize_per_tensor_configs_long,
     QuantizePerTensorBenchmark)
-
+'''
 # === Per Channel quantization ===
 
 quantize_per_channel_configs_short = op_bench.config_list(
@@ -115,17 +115,17 @@ class QuantizePerChannelBenchmark(op_bench.TorchBenchmarkBase):
     def forward(self, input, scales, zero_points, axis: int, dtype: int):
         return self.op(input, scales=scales, zero_points=zero_points, axis=axis, dtype=dtype)
 
-
+'''
 op_bench.generate_pt_test(
     quantize_per_channel_configs_short + quantize_per_channel_configs_long,
     QuantizePerChannelBenchmark)
-
+'''
 # === Fake Quantization ===
 
 fake_quantize_configs_short_dict = {
-    'attr_names': ['N', 'C', 'H', 'W'],
+    'attr_names': ['N', 'C', 'H', 'W', 'zero_point_dtype'],
     'attrs': [
-        [1, 3, 512, 512],
+        [1, 3, 512, 512, torch.int32],
     ],
     'tags': ['short']
 }
@@ -135,6 +135,7 @@ fake_quantize_configs_long_dict = {
     'C': [1, 3, 8, 32],
     'H': [256, 1024],
     'W': [256, 1024],
+    'zero_point_dtype': [torch.int32],
     'tags': ['long']
 }
 
@@ -153,7 +154,7 @@ fake_quantize_configs_long = op_bench.cross_product_configs(
 
 class FakeQuantizeBenchmark(op_bench.TorchBenchmarkBase):
     r"""Benchmarks fake quantization with default parameters."""
-    def init(self, N, C, H, W, device):
+    def init(self, N, C, H, W, zero_point_dtype, device):
         self.inputs = {
             "input": torch.rand(N, C, H, W).to(device)
         }
@@ -163,11 +164,11 @@ class FakeQuantizeBenchmark(op_bench.TorchBenchmarkBase):
     def forward(self, input):
         return self.op(input)
 
-
+'''
 op_bench.generate_pt_test(
     fake_quantize_configs_short + fake_quantize_configs_long,
     FakeQuantizeBenchmark)
-
+'''
 
 # op_type is used to describe the type of operator used in benchmarking:
 # learnable_kernel represents the c++ kernel that can backpropagate on
@@ -208,15 +209,30 @@ fake_quantize_operator_configs_long = op_bench.cross_product_configs(
     **fake_quantize_configs_long_dict
 )
 
+# TODO(future PR) Combine config for floating point zero_point with other configs, once it is
+# fully supported in all fakeQuant operators and devices for
+# https://github.com/pytorch/pytorch/issues/61866.
+fake_quantize_configs_long_dict_float_zero_point = fake_quantize_configs_long_dict.copy()
+fake_quantize_configs_long_dict_float_zero_point['zero_point_dtype'] = [torch.float32, torch.half]
+
+fake_quantize_operator_configs_long_float_zero_point = op_bench.cross_product_configs(
+    nbits=(8,),
+    device=('cpu', ),
+    **fake_quantize_configs_long_dict_float_zero_point
+)
+
 class FakeQuantizePerTensorBaseOpBenchmark(op_bench.TorchBenchmarkBase):
     r"""Benchmarks 3 different fake quantize per tensor operators."""
-    def init(self, N, C, H, W, nbits, device, op_func):
+    def init(self, N, C, H, W, zero_point_dtype, nbits, device, op_func):
         self.quant_min = 0
         self.quant_max = 2 ** nbits - 1
         self.quant_range = 2 ** nbits
         self.input = nn.Parameter(torch.rand(N, C, H, W, dtype=torch.float, device=device), requires_grad=self.auto_set())
         self.scale = nn.Parameter(torch.tensor([1.]).to(device), requires_grad=self.auto_set())
-        self.zero_point = nn.Parameter(torch.tensor([0.]).to(device), requires_grad=self.auto_set())
+        if op_func.__name__ == 'fakeQuantizePerChannelOriginalKernel':
+            self.zero_point = nn.Parameter(torch.tensor([0.]).to(device).to(zero_point_dtype), requires_grad=self.auto_set())
+        else:
+            self.zero_point = nn.Parameter(torch.tensor([0.]).to(device), requires_grad=self.auto_set())
 
         self.inputs = {
             "input": self.input,
@@ -238,6 +254,7 @@ op_bench.generate_pt_tests_from_op_list(
     fake_quantize_operator_configs_short + fake_quantize_operator_configs_long,
     FakeQuantizePerTensorBaseOpBenchmark
 )
+
 op_bench.generate_pt_gradient_tests_from_op_list(
     fake_quantize_per_tensor_ops,
     fake_quantize_operator_configs_short + fake_quantize_operator_configs_long,
@@ -264,9 +281,16 @@ fake_quantize_per_channel_ops = op_bench.op_list(
     attr_names=('op_name', 'op_func'),
 )
 
+fake_quantize_per_channel_float_zero_point_ops = op_bench.op_list(
+    attrs=(
+        ('original_kernel', fakeQuantizePerChannelOriginalKernel),
+    ),
+    attr_names=('op_name', 'op_func'),
+)
+
 class FakeQuantizePerChannelOpBenchmark(op_bench.TorchBenchmarkBase):
     r"""Benchmarks 3 different fake quantize per channel operators."""
-    def init(self, N, C, H, W, nbits, device, op_func):
+    def init(self, N, C, H, W, zero_point_dtype, nbits, device, op_func):
         self.quant_min = 0
         self.quant_max = 2 ** nbits - 1
         self.quant_range = 2 ** nbits
@@ -276,7 +300,7 @@ class FakeQuantizePerChannelOpBenchmark(op_bench.TorchBenchmarkBase):
 
         if op_func.__name__ == 'fakeQuantizePerChannelOriginalKernel':
             self.scale = torch.ones(C, device=device, dtype=torch.float32, requires_grad=False)
-            self.zero_point = torch.zeros(C, device=device, dtype=torch.int32, requires_grad=False)
+            self.zero_point = torch.zeros(C, device=device, dtype=zero_point_dtype, requires_grad=False)
         else:
             self.scale = nn.Parameter(torch.ones(C, device=device, dtype=torch.float32), requires_grad=self.auto_set())
             self.zero_point = nn.Parameter(torch.zeros(C, device=device, dtype=torch.float32), requires_grad=self.auto_set())
@@ -301,6 +325,12 @@ class FakeQuantizePerChannelOpBenchmark(op_bench.TorchBenchmarkBase):
 op_bench.generate_pt_tests_from_op_list(
     fake_quantize_per_channel_ops,
     fake_quantize_operator_configs_short + fake_quantize_operator_configs_long,
+    FakeQuantizePerChannelOpBenchmark
+)
+
+op_bench.generate_pt_tests_from_op_list(
+    fake_quantize_per_channel_float_zero_point_ops,
+    fake_quantize_operator_configs_long_float_zero_point,
     FakeQuantizePerChannelOpBenchmark
 )
 
