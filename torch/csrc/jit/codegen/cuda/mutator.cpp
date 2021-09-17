@@ -142,7 +142,7 @@ Statement* OptOutMutator::mutate(ReductionOp* rop) {
 }
 
 namespace {
-__inline__ bool compareOptional(Val* a, Val* b) {
+inline bool compareOptional(Val* a, Val* b) {
   if (!a || !b) {
     return (!a && !b);
   }
