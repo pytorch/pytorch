@@ -1667,10 +1667,10 @@ Example::
             tensors.append(x)
         else:
             raise TypeError(f"result_type(): cannot interpret '{x}' as a data type")
-    if dtypes:
+    if len(dtypes) > 0:
         dtype = _VF._result_type_dtypes(dtypes)
         tensors.append(torch.tensor([], dtype=dtype))
-    if scalars:
+    if len(scalars) > 0:
         scalar_dtype = _VF._result_type_scalars(scalars)  # type: ignore[arg-type]
         if tensors:
             tensor_dtype = _VF.result_type(tensors)  # type: ignore[attr-defined]
