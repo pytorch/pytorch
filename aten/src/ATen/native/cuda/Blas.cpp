@@ -287,7 +287,7 @@ Tensor& baddbmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& 
 
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!result_->is_conj());
 
-  if (scalar_type == ScalarType::Long || scalar_type == ScalarType::Int) {
+  if (self.scalar_type() == ScalarType::Long || self.scalar_type() == ScalarType::Int) {
     AT_DISPATCH_INDEX_TYPES(self.scalar_type(), "baddmm_cuda_int", [&] {
       using scalar_t = index_t;
 
