@@ -1,4 +1,3 @@
-# type: ignore[attr-defined]
 import math
 import operator
 
