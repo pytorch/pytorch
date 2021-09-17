@@ -2028,6 +2028,7 @@ works_list = [
     'remainder.autodiffed',
     'reshape',
     'round',
+    'rsub',
     'rsqrt',
     'sigmoid',
     'sign',
