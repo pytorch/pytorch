@@ -195,9 +195,6 @@ cmake_dependent_option(
     USE_STATIC_CUDNN "Use cuDNN static libraries" OFF
     "USE_CUDNN" OFF)
 cmake_dependent_option(
-    BUILD_NVFUSER_BENCHMARK "Build C++ binaries for nvfuser benchmarks" ON
-    "USE_CUDA;BUILD_TEST" OFF)
-cmake_dependent_option(
   USE_WHOLE_CUDNN "Use whole-library linking for cuDNN" OFF
     "USE_STATIC_CUDNN" OFF)
 cmake_dependent_option(
@@ -312,7 +309,7 @@ cmake_dependent_option(
 cmake_dependent_option(
     USE_TENSORPIPE "Use TensorPipe. Only available if USE_DISTRIBUTED is on." ON
     "USE_DISTRIBUTED" OFF)
-option(USE_TBB "Use TBB" OFF)
+option(USE_TBB "Use TBB (Deprecated)" OFF)
 cmake_dependent_option(
     USE_SYSTEM_TBB "Use system-provided Intel TBB." OFF "USE_TBB" OFF)
 option(ONNX_ML "Enable traditional ONNX ML API." ON)
