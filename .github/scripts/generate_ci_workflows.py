@@ -125,9 +125,28 @@ class CIFlowRuleset:
             json.dump(output, outfile, indent=2, sort_keys=True)
             outfile.write('\n')
 
+@dataclass
+class SimpleWorkflow:
+    build_environment: str
+
+    def generate_workflow_file(self, workflow_template: jinja2.Template) -> None:
+        output_file_path = GITHUB_DIR / f"workflows/generated-{self.build_environment}.yml"
+        with open(output_file_path, "w") as output_file:
+            GENERATED = "generated"  # Note that please keep the variable GENERATED otherwise phabricator will hide the whole file
+            output_file.writelines([f"# @{GENERATED} DO NOT EDIT MANUALLY\n"])
+            try:
+                content = workflow_template.render(asdict(self))
+            except Exception as e:
+                print(f"Failed on template: {workflow_template}", file=sys.stderr)
+                raise e
+            output_file.write(content)
+            if content[-1] != "\n":
+                output_file.write("\n")
+        print(output_file_path)
+
 
 @dataclass
-class CIWorkflow:
+class CIWorkflow(SimpleWorkflow):
     # Required fields
     arch: Arch
     build_environment: str
@@ -203,21 +222,6 @@ class CIWorkflow:
                 assert LABEL_CIFLOW_CUDA in self.ciflow_config.labels
             if self.test_runner_type in CPU_RUNNERS:
                 assert LABEL_CIFLOW_CPU in self.ciflow_config.labels
-
-    def generate_workflow_file(self, workflow_template: jinja2.Template) -> None:
-        output_file_path = GITHUB_DIR / f"workflows/generated-{self.build_environment}.yml"
-        with open(output_file_path, "w") as output_file:
-            GENERATED = "generated"  # Note that please keep the variable GENERATED otherwise phabricator will hide the whole file
-            output_file.writelines([f"# @{GENERATED} DO NOT EDIT MANUALLY\n"])
-            try:
-                content = workflow_template.render(asdict(self))
-            except Exception as e:
-                print(f"Failed on template: {workflow_template}", file=sys.stderr)
-                raise e
-            output_file.write(content)
-            if content[-1] != "\n":
-                output_file.write("\n")
-        print(output_file_path)
 
 
 WINDOWS_WORKFLOWS = [
@@ -551,6 +555,7 @@ BAZEL_WORKFLOWS = [
     ),
 ]
 
+
 if __name__ == "__main__":
     jinja_env = jinja2.Environment(
         variable_start_string="!{{",
@@ -561,6 +566,7 @@ if __name__ == "__main__":
         (jinja_env.get_template("linux_ci_workflow.yml.j2"), LINUX_WORKFLOWS),
         (jinja_env.get_template("windows_ci_workflow.yml.j2"), WINDOWS_WORKFLOWS),
         (jinja_env.get_template("bazel_ci_workflow.yml.j2"), BAZEL_WORKFLOWS),
+        (jinja_env.get_template("auto_formatter.yml.j2"), [SimpleWorkflow("periodic-auto-formatter")]),
     ]
     # Delete the existing generated files first, this should align with .gitattributes file description.
     existing_workflows = GITHUB_DIR.glob("workflows/generated-*")
@@ -575,12 +581,13 @@ if __name__ == "__main__":
         for workflow in workflows:
             workflow.generate_workflow_file(workflow_template=template)
 
-            if workflow.ciflow_config.enabled:
-                ciflow_ruleset.add_label_rule(workflow.ciflow_config.labels, workflow.build_environment)
-            elif workflow.on_pull_request:
-                # If ciflow is disabled but still on_pull_request, we can denote
-                # it as a special label LABEL_CIFLOW_DEFAULT in the ruleset, which will be later
-                # turned into an actual LABEL_CIFLOW_DEFAULT label in the workflow.
-                # During the rollout phase, it has the same effect as LABEL_CIFLOW_DEFAULT
-                ciflow_ruleset.add_label_rule({LABEL_CIFLOW_DEFAULT}, workflow.build_environment)
+            if hasattr(workflow, "ciflow_config"):
+                if workflow.ciflow_config.enabled:
+                    ciflow_ruleset.add_label_rule(workflow.ciflow_config.labels, workflow.build_environment)
+                elif workflow.on_pull_request:
+                    # If ciflow is disabled but still on_pull_request, we can denote
+                    # it as a special label LABEL_CIFLOW_DEFAULT in the ruleset, which will be later
+                    # turned into an actual LABEL_CIFLOW_DEFAULT label in the workflow.
+                    # During the rollout phase, it has the same effect as LABEL_CIFLOW_DEFAULT
+                    ciflow_ruleset.add_label_rule({LABEL_CIFLOW_DEFAULT}, workflow.build_environment)
     ciflow_ruleset.generate_json()

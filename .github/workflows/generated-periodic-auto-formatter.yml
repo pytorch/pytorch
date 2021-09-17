@@ -1,0 +1,34 @@
+# @generated DO NOT EDIT MANUALLY
+
+
+name: autoformatter
+
+on:
+  schedule:
+    - cron: 0 4 * * SAT
+  workflow_dispatch:
+
+concurrency:
+  group: autoformatter-${{ github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true
+
+jobs:
+  python:
+    runs-on: ubuntu-18.04
+    steps:
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+        with:
+          # deep clone, to allow use of git merge-base
+          fetch-depth: 0
+          submodules: false
+      - name: Install Dependencies
+        run: |
+          pip install black==21.9b0
+      - name: Run black
+        run: |
+          black tools/testing/*
+      - name: Push results
+        run: |
+          git status
+          git diff
