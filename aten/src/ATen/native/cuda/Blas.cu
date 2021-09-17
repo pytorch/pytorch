@@ -35,6 +35,7 @@ namespace blas {
       }
       c[row + col * ldc] = beta * c[row + col * ldc] + alpha * product;
     }
+
   }
 
   template <typename scalar_t>
@@ -42,7 +43,7 @@ namespace blas {
     uint32_t thread_block_dim = std::sqrt(at::cuda::getApplyBlockSize());
     const dim3 thread_block(thread_block_dim, thread_block_dim, 1);
     const auto stream = at::cuda::getCurrentCUDAStream();
-    const dim3 grid(std::ceil(double(m)/thread_block_dim), std::ceil(double(n)/thread_block_dim), 1);
+    const dim3 grid(std::ceil(double(m)/double(thread_block_dim)) + 1, std::ceil(double(n)/double(thread_block_dim)) + 1, 1);
 
     // if-else here to avoid putting it in the critical path in the kernel.
     if (transa == 'n' && transb == 'n') {
@@ -73,18 +74,6 @@ namespace blas {
   void integer_gemm<int64_t>(CUDABLAS_GEMM_ARGTYPES(int64_t)) {
     launch_gemm_kernel(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
   }
-
-  template <>
-  void batched_integer_gemm<int32_t>(CUDABLAS_BATCHED_INTEGER_GEMM_ARGTYPES(int32_t)) {
-    // gpu_kernel(iter, [] GPU_LAMBDA (int64_t result_batch_idx, int64_t input_batch_idx) {
-    //     int a = 2;
-    // });
-  }
-
-  template <>
-  void batched_integer_gemm<int64_t>(CUDABLAS_BATCHED_INTEGER_GEMM_ARGTYPES(int64_t)) {
-  }
-
 }
 }
 }

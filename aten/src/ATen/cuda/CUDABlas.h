@@ -84,21 +84,6 @@ void integer_gemm<int32_t>(CUDABLAS_GEMM_ARGTYPES(int32_t));
 template <>
 void integer_gemm<int64_t>(CUDABLAS_GEMM_ARGTYPES(int64_t));
 
-#define CUDABLAS_BATCHED_INTEGER_GEMM_ARGTYPES(Dtype)                   \
-  TensorIteratorBase& iter, char transA, char transB, int64_t m, int64_t n, int64_t k, \
-    Dtype alpha, c10::MaybeOwned<Tensor>& batch1_, c10::MaybeOwned<Tensor>& batch2_, \
-    Dtype beta, c10::MaybeOwned<Tensor>& result_
-
-template <typename Dtype>
-inline void batched_integer_gemm(CUDABLAS_BATCHED_INTEGER_GEMM_ARGTYPES(Dtype)) {
-  AT_ERROR("at::cuda::blas::bgemm: not implemented for ", typeid(Dtype).name());
-}
-
-template<>
-void batched_integer_gemm<int32_t>(CUDABLAS_BATCHED_INTEGER_GEMM_ARGTYPES(int32_t));
-template<>
-void batched_integer_gemm<int64_t>(CUDABLAS_BATCHED_INTEGER_GEMM_ARGTYPES(int64_t));
-
 #define CUDABLAS_BGEMM_ARGTYPES(Dtype)                                       \
   char transa, char transb, int64_t m, int64_t n, int64_t k, Dtype alpha,   \
       const Dtype *a, int64_t lda, int64_t stridea, \

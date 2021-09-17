@@ -290,59 +290,34 @@ Tensor& baddbmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& 
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!result_->is_conj());
 
   if (isIntegralType(self.scalar_type(), false)) {
-    c10::IntArrayRef input_batch_sizes(batch1_->sizes().data(), batch1_->dim() - 2);
-    c10::IntArrayRef result_batch_sizes(result_->sizes().data(), result_->dim() - 2);
-
-    auto input_batch_idx = at::arange(num_batches).view(input_batch_sizes);
-    auto result_batch_idx = at::arange(num_batches).view(result_batch_sizes);
-
-    at::TensorIteratorConfig iter_config;
-    auto iter = iter_config
-      .add_output(result_batch_idx)
-      .add_input(input_batch_idx)
-      .resize_outputs(false)      // call if output already allocated.
-      .build();
-
     AT_DISPATCH_INDEX_TYPES(self.scalar_type(), "baddmm_cuda_int", [&] {
       using scalar_t = index_t;
 
       scalar_t alpha_val = alpha.to<scalar_t>();
       scalar_t beta_val = beta.to<scalar_t>();
-      at::cuda::blas::batched_integer_gemm<scalar_t>(iter,
-        transpose_batch1 ? 't' : 'n',
-        transpose_batch1 ? 't' : 'n',
-        m, n, k,
-        alpha_val, batch1_,
-        batch2_, beta_val,
-        result_
-      );
-      // iter.for_each([&] (char **data, const int64_t* strides, int64_t nbatches) {
-      //   auto *result_batch_idx_ptr = data[0];
-      //   auto *input_batch_idx_ptr = data[1];
 
-      //   for (int64_t batch = 0; batch < nbatches; ++batch) {
-      //     auto result_batch_idx = *reinterpret_cast<int64_t*>(result_batch_idx_ptr);
-      //     auto input_batch_idx = *reinterpret_cast<int64_t*>(input_batch_idx_ptr);
+      auto batch1_stride = batch1_->strides()[0];
+      auto batch2_stride = batch2_->strides()[0];
+      auto result_stride = result_->strides()[0];
 
-      //     auto* batch1_working_ptr = batch1_->select(0, input_batch_idx).data_ptr<scalar_t>();
-      //     auto* batch2_working_ptr = batch2_->select(0, input_batch_idx).data_ptr<scalar_t>();
-      //     auto* result_working_ptr = result_->select(0, result_batch_idx).data_ptr<scalar_t>();
+      auto batch1_data = batch1_->data_ptr<scalar_t>();
+      auto batch2_data = batch2_->data_ptr<scalar_t>();
+      auto result_data = result_->data_ptr<scalar_t>();
 
-      //     at::cuda::blas::integer_gemm<scalar_t>(
-      //       transpose_batch1 ? 't' : 'n',
-      //       transpose_batch1 ? 't' : 'n',
-      //       m, n, k,
-      //       alpha_val,
-      //       batch1_working_ptr, batch1_->strides()[0],
-      //       batch2_working_ptr, batch2_->strides()[0],
-      //       beta_val,
-      //       result_working_ptr, result_->strides()[0]
-      //     );
-
-      //     result_batch_idx_ptr += strides[0];
-      //     input_batch_idx_ptr += strides[1];
-      //   }
-      // });
+      for (int64_t batch = 0; batch < num_batches; ++batch) {
+        scalar_t * batch1_working_ptr = &batch1_data[batch * batch1_stride];
+        scalar_t * batch2_working_ptr = &batch2_data[batch * batch2_stride];
+        scalar_t * result_working_ptr = &result_data[batch * result_stride];
+          at::cuda::blas::integer_gemm<scalar_t>(
+            transpose_batch1 ? 't' : 'n',
+            transpose_batch1 ? 't' : 'n',
+            m, n, k, alpha_val,
+            batch1_working_ptr, lda,
+            batch2_working_ptr, ldb,
+            beta_val,
+            result_working_ptr, ldc
+          );
+      }
     });
   }
   else {

@@ -6075,10 +6075,9 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     @onlyCUDA
     @dtypes(torch.int32, torch.int64)
     def test_matmul_integer_tensor(self, device, dtype):
-        torch.set_printoptions(linewidth=1000)
         m = 20
         n = 30
-        k = 100
+        k = 10
 
         mat1 = torch.randint(0, 100, (m, k), device=device, dtype=dtype)
         mat2 = torch.randint(100, 1000, (k, m), device=device, dtype=dtype)
@@ -6105,15 +6104,14 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     @dtypes(torch.int32, torch.int64)
     def test_matmul_batched_integer_tensor(self, device, dtype):
         for batch_size in [1, 100, 500]:
-            m = 64
-            n = 100
-            k = 50
+            m = 20
+            n = 30
+            k = 10
 
             mat1 = torch.randint(0, 100, (batch_size, m, k), device=device, dtype=dtype)
             mat2 = torch.randint(100, 1000, (batch_size, k, n), device=device,dtype=dtype)
 
             int_prod = mat1 @ mat2
-            print(int_prod)
             fp_prod = (mat1.to(torch.double) @ mat2.to(torch.double)).to(dtype)
 
             self.assertEqual(int_prod, fp_prod)
