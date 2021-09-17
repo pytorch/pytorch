@@ -503,8 +503,7 @@ void testReduceScatter(const std::string& path, int rank, int size) {
   }
 }
 
-
-void testProcessGroupNCCLHealthCheckFail(const std::string& path, int /* unused */, int /* unused */) {
+void testProcessGroupNCCLHealthCheckFailHelper(const std::string& path, bool timeout) {
   // simulate world_size > 1 here via threads.
   const int worldSize = 4;
   std::mutex m;
@@ -514,10 +513,13 @@ void testProcessGroupNCCLHealthCheckFail(const std::string& path, int /* unused 
     // Catch error relating to health check failure
     bool error_caught = false;
     try {
-      test.initialize(0, worldSize);
+      test.initialize(timeout ? 0 : -1, worldSize);
     } catch (const std::exception &e) {
       std::string errMsg = e.what();
-      bool cond = errMsg.find("Failed to initialize NCCL communicator on rank") != std::string::npos;
+      const std::string kTimeoutErr = "Failed to initialize NCCL communicator on rank";
+      const std::string kInvalidRankErr = "Invalid rank";
+      std::string expectedSubstr = timeout ? kTimeoutErr : kInvalidRankErr;
+      bool cond = errMsg.find(expectedSubstr) != std::string::npos;
       EXPECT_TRUE(cond);
       error_caught = true;
     }
@@ -531,6 +533,14 @@ void testProcessGroupNCCLHealthCheckFail(const std::string& path, int /* unused 
   for (auto& t : threads) {
     t.join();
   }
+}
+
+void testProcessGroupNCCLHealthCheckFailException(const std::string& path, int /* unused */, int /* unused */) {
+  testProcessGroupNCCLHealthCheckFailHelper(path, /* timeout */ false);
+}
+
+void testProcessGroupNCCLHealthCheckFailTimeout(const std::string& path, int /* unused */, int /* unused */) {
+  testProcessGroupNCCLHealthCheckFailHelper(path, /* timeout */ true);
 }
 
 void testSequenceNumInit(const std::string& path, int /* unused */, int /* unused */) {
@@ -661,13 +671,23 @@ TEST_F(ProcessGroupNCCLTest, testSequenceNumInit) {
   }
 }
 
-TEST_F(ProcessGroupNCCLTest, testProcessGroupNCCLHealthCheckFail) {
+TEST_F(ProcessGroupNCCLTest, testProcessGroupNCCLHealthCheckFailTimeout) {
     if (skipTest()) {
         return;
     }
     {
         TemporaryFile file;
-        testProcessGroupNCCLHealthCheckFail(file.path, rank_, size_);
+        testProcessGroupNCCLHealthCheckFailTimeout(file.path, rank_, size_);
+    }
+}
+
+TEST_F(ProcessGroupNCCLTest, testProcessGroupNCCLHealthCheckFailException) {
+    if (skipTest()) {
+        return;
+    }
+    {
+        TemporaryFile file;
+        testProcessGroupNCCLHealthCheckFailException(file.path, rank_, size_);
     }
 }
 
