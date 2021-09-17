@@ -48,13 +48,12 @@ class TestImportTime(TestCase):
 
         data = profile("torch", "pytorch")
         rds_write(
-            "import_stats", data, only_on_master=False
+            "import_stats", [data], only_on_master=False
         )  # TODO: remove only_on_master arg
         baseline = profile("sys", "baseline")
         rds_write(
-            "import_stats", baseline, only_on_master=False
+            "import_stats", [baseline], only_on_master=False
         )  # TODO: remove only_on_master arg
-        print(data, baseline)
 
 
 if __name__ == "__main__":
