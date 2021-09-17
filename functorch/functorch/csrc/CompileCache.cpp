@@ -245,4 +245,167 @@ struct SpecializationKey {
 };
 #pragma pack(pop)
 
+/// Metaprogramming struct containing the number of arguments to a
+/// kernel.  Counts input, outputs that need to be allocated, and
+/// outputs that are provided by the caller.
+template <int NumIn, int NumOutAllocated, int NumOutGiven>
+struct ArgCounts {
+  static constexpr int numIn = NumIn;
+  static constexpr int numOutAllocated = NumOutAllocated;
+  static constexpr int numOutGiven = NumOutGiven;
+  static constexpr int numOut = NumOutAllocated + NumOutGiven;
+  static constexpr int numKeys = NumIn + NumOutGiven;
+  static constexpr int numBuffers = NumIn + NumOutAllocated + NumOutGiven;
+};
+
+/// Template container for a compiled kernel, specialized on the count
+/// of arguments (from specializing ArgCounts) and the maximum number
+/// of tensor dimensions.
+template <typename Counts, int MAX_DIMS>
+struct CompileResult {
+  /// Set contained code to cg.
+  void setCode(CodeGen* cg) {
+    cg_ = cg;
+  }
+
+  /// Set vector of (arg, dim) pairs that indicate from which argument/dimension
+  /// to extract the output size.
+  void setShapeFrom(const std::vector<std::pair<int, int>>& indices) {
+    assert(indices.shape() <= MAX_DIMS);
+    shapeFrom_ = indices;
+  }
+
+  /// Set vector of (arg, dim) pairs that indicate from which argument/dimension
+  /// to extract the output stride.
+  void setStrideArgsFrom(const std::vector<std::pair<int, int>>& indices) {
+    strideArgsFrom_ = indices;
+  }
+
+  /// Add an output for this kernel with the associated options and storage
+  /// order.
+  void addAllocatedOutput(
+      int optionsFrom,
+      const std::vector<int>& storageOrder) {
+    if (allocatedOutputs_.size() > 0) {
+      throw std::runtime_error("TODO: support more than one output");
+    }
+    allocatedOutputs_.emplace_back(std::make_pair(optionsFrom, storageOrder));
+  }
+
+  /// Add a shape-checking constraint on the inputs.
+  void addShapeCheck(const std::tuple<int, int, int, int>& indices) {
+    shapeChecks_.emplace_back(indices);
+  }
+
+  /// Call the cached kernel with the provided args.
+  void call(at::Tensor* args) {
+    for (const auto& ck : shapeChecks_) {
+      if (args[std::get<0>(ck)].size(std::get<1>(ck)) !=
+          args[std::get<2>(ck)].size(std::get<3>(ck))) {
+        // TODO(jansel): make this error message match aten
+        throw std::runtime_error(
+            "The size of tensor A must match the size of tensor B at non-singleton dimension X");
+      }
+    }
+
+    // NOLINTNEXTLINE: C-style arrays
+    void* callArgs[Counts::numBuffers + (Counts::numKeys + 1) * MAX_DIMS];
+    constexpr int allocatedArgsOffset = Counts::numKeys;
+    for (int i = 0; i < allocatedArgsOffset; ++i) {
+      callArgs[i] = args[i].data_ptr();
+    }
+
+    constexpr int strideArgsOffset =
+        allocatedArgsOffset + Counts::numOutAllocated;
+    for (int i : c10::irange(strideArgsFrom_.size())) {
+      auto& item = strideArgsFrom_[i];
+      callArgs[strideArgsOffset + i] =
+          // NOLINTNEXTLINE: const_cast
+          const_cast<int64_t*>(&args[item.first].strides()[item.second]);
+    }
+
+    int shapeArgsOffset = strideArgsOffset + strideArgsFrom_.size();
+    size_t numel = 1;
+    // NOLINTNEXTLINE: C-style arrays
+    int64_t shapes[MAX_DIMS];
+    int ndims = shapeFrom_.size();
+    for (int i = 0; i < ndims; ++i) {
+      shapes[i] = args[shapeFrom_[i].first].size(shapeFrom_[i].second);
+      numel *= shapes[i];
+      callArgs[shapeArgsOffset + i] = &shapes[i];
+    }
+
+    for (int i = 0; i < Counts::numOutAllocated; ++i) {
+      int optionsFrom = allocatedOutputs_[i].first;
+      auto& outputOrder = allocatedOutputs_[i].second;
+      // NOLINTNEXTLINE: C-style arrays
+      int64_t strides[MAX_DIMS];
+      int64_t nextStride = 1;
+      for (int j : outputOrder) {
+        strides[j] = nextStride;
+        nextStride *= shapes[j];
+      }
+      args[allocatedArgsOffset + i] = at::empty_strided(
+          c10::IntArrayRef(shapes, shapes + ndims),
+          c10::IntArrayRef(strides, strides + ndims),
+          args[optionsFrom].options());
+      callArgs[allocatedArgsOffset + i] =
+          args[allocatedArgsOffset + i].data_ptr();
+    }
+
+    if (numel < 128) {
+      // don't bother releasing GIL for tiny tensors
+      // TODO(jansel): should we also skip this on GPU?
+      cg_->call_with_numel(callArgs, numel);
+    } else {
+      cg_->call_with_numel(callArgs, numel);
+    }
+  }
+
+  /// Check error conditions, e.g. mismatched input sizes.
+  void errorChecks() {
+    TORCH_CHECK(cg_ != nullptr);
+    TORCH_CHECK(shapeFrom_.size() <= MAX_DIMS);
+    TORCH_CHECK(allocatedOutputs_.size() == Counts::numOutAllocated);
+    TORCH_CHECK(
+        strideArgsFrom_.size() + shapeFrom_.size() <=
+        Counts::numKeys * MAX_DIMS + MAX_DIMS);
+    for (auto& item : shapeFrom_) {
+      TORCH_CHECK(item.first < Counts::numKeys);
+      TORCH_CHECK(item.second < MAX_DIMS);
+    }
+    for (auto& item : strideArgsFrom_) {
+      TORCH_CHECK(item.first < Counts::numKeys);
+      TORCH_CHECK(item.second < MAX_DIMS);
+    }
+    for (auto& item : shapeChecks_) {
+      TORCH_CHECK(std::get<0>(item) < Counts::numKeys);
+      TORCH_CHECK(std::get<1>(item) < MAX_DIMS);
+      TORCH_CHECK(std::get<2>(item) < Counts::numKeys);
+      TORCH_CHECK(std::get<3>(item) < MAX_DIMS);
+    }
+    for (auto& item : allocatedOutputs_) {
+      TORCH_CHECK(item.first < Counts::numKeys);
+      TORCH_CHECK(item.second.size() <= MAX_DIMS);
+    }
+  }
+
+ private:
+  /// Cached generated code.
+  CodeGen* cg_ = nullptr;
+
+  /// Vector of pairs (arg, dim) indicating from which argument and
+  /// dimension to retrieve the shape for the output of this kernel.
+  std::vector<std::pair<int, int>> shapeFrom_;
+
+  /// Similar to shapeFrom_, but for strides.
+  std::vector<std::pair<int, int>> strideArgsFrom_;
+
+  /// Dimensions that need to be checked at runtime.
+  std::vector<std::tuple<int, int, int, int>> shapeChecks_;
+
+  /// Outputs to allocate.
+  std::vector<std::pair<int, std::vector<int>>> allocatedOutputs_;
+};
+
 } // namespace
