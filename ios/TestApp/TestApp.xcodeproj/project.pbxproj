@@ -1,465 +1,773 @@
 // !$*UTF8*$!
 {
-    archiveVersion = 1;
-    classes = {
-    };
-    objectVersion = 50;
-    objects = {
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 50;
+	objects = {
 
 /* Begin PBXBuildFile section */
-        A06D4CB5232F0DB200763E16 /* AppDelegate.m in Sources */ = {isa = PBXBuildFile; fileRef = A06D4CB4232F0DB200763E16 /* AppDelegate.m */; };
-        A06D4CB8232F0DB200763E16 /* ViewController.mm in Sources */ = {isa = PBXBuildFile; fileRef = A06D4CB7232F0DB200763E16 /* ViewController.mm */; };
-        A06D4CBB232F0DB200763E16 /* Main.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = A06D4CB9232F0DB200763E16 /* Main.storyboard */; };
-        A06D4CBD232F0DB200763E16 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A06D4CBC232F0DB200763E16 /* Assets.xcassets */; };
-        A06D4CC0232F0DB200763E16 /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = A06D4CBE232F0DB200763E16 /* LaunchScreen.storyboard */; };
-        A06D4CC3232F0DB200763E16 /* main.m in Sources */ = {isa = PBXBuildFile; fileRef = A06D4CC2232F0DB200763E16 /* main.m */; };
+		0A1D6528EEA84EA0F71580E7 /* (null) in Sources */ = {isa = PBXBuildFile; };
+		0E13C55D1621FDE1ACC2F9DB /* (null) in Sources */ = {isa = PBXBuildFile; };
+		1A2547A03D78018D5FD59E03 /* (null) in Sources */ = {isa = PBXBuildFile; };
+		366019837692DAC081C0035E /* libtorch_cpu.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 806BB68C274D50D347D14116 /* libtorch_cpu.a */; };
+		3A3755E18595796151FF8E79 /* libpytorch_qnnpack.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 446A370178B9CC3997915D51 /* libpytorch_qnnpack.a */; };
+		3E9D32590D6A6D161DE99A0F /* libpytorch_qnnpack.a in Frameworks */ = {isa = PBXBuildFile; fileRef = B3A70C431EB95FDEDF604DC0 /* libpytorch_qnnpack.a */; };
+		3F359EDDFECCA14A6BD07007 /* libeigen_blas.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 2F2BF9BDC71C96072F75BF82 /* libeigen_blas.a */; };
+		44FB7A40CC3A65565D7F4D5B /* (null) in Sources */ = {isa = PBXBuildFile; };
+		4D5B3D50B54EB7F21174EA17 /* libclog.a in Frameworks */ = {isa = PBXBuildFile; fileRef = A97C15EA739EC4F2CD6E2FDE /* libclog.a */; };
+		4E8B97799562368CDE988CF5 /* model_metal.ptl in Resources */ = {isa = PBXBuildFile; fileRef = D50FA7C24515C6E9464412FC /* model_metal.ptl */; };
+		5D45753949B0C3F53BAA75DC /* model_lite.ptl in Resources */ = {isa = PBXBuildFile; fileRef = 37BCDAAE0ED155A89098411F /* model_lite.ptl */; };
+		647D25363147ADD0B35528A8 /* (null) in Sources */ = {isa = PBXBuildFile; };
+		766BF1B536BA6AE09F462A2C /* model.pt in Resources */ = {isa = PBXBuildFile; fileRef = B57A01AA08ABBBF2C8C5FE07 /* model.pt */; };
+		7AB5EFCABF59268B1B7DEFFF /* libpthreadpool.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 687711285D14B31AD5E84D0F /* libpthreadpool.a */; };
+		9235565BEF3F75BA0FC183F7 /* libeigen_blas.a in Frameworks */ = {isa = PBXBuildFile; fileRef = ECE5BFE4920211F7AF0100AB /* libeigen_blas.a */; };
+		95C2AE69E624277CCC4AF2F1 /* libXNNPACK.a in Frameworks */ = {isa = PBXBuildFile; fileRef = D43390BDE180551FB52A426C /* libXNNPACK.a */; };
+		97B99A2890B9A30D3A5AF7B8 /* model.pt in Resources */ = {isa = PBXBuildFile; fileRef = B57A01AA08ABBBF2C8C5FE07 /* model.pt */; };
+		A04D8C2B26F52E2B0068CB9D /* model.pt in Resources */ = {isa = PBXBuildFile; fileRef = A04D8C2726F52E2B0068CB9D /* model.pt */; };
+		A04D8C2C26F52E2B0068CB9D /* model_metal.ptl in Resources */ = {isa = PBXBuildFile; fileRef = A04D8C2826F52E2B0068CB9D /* model_metal.ptl */; };
+		A04D8C2D26F52E2B0068CB9D /* mobilenetv2_oss_coreml.ptl in Resources */ = {isa = PBXBuildFile; fileRef = A04D8C2926F52E2B0068CB9D /* mobilenetv2_oss_coreml.ptl */; };
+		A04D8C2E26F52E2B0068CB9D /* model_lite.ptl in Resources */ = {isa = PBXBuildFile; fileRef = A04D8C2A26F52E2B0068CB9D /* model_lite.ptl */; };
+		A068242D26F5510F001BC1D3 /* CoreML.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A04D8C3E26F54AA60068CB9D /* CoreML.framework */; };
+		A06D4CB5232F0DB200763E16 /* AppDelegate.m in Sources */ = {isa = PBXBuildFile; fileRef = A06D4CB4232F0DB200763E16 /* AppDelegate.m */; };
+		A06D4CB8232F0DB200763E16 /* ViewController.mm in Sources */ = {isa = PBXBuildFile; fileRef = A06D4CB7232F0DB200763E16 /* ViewController.mm */; };
+		A06D4CBB232F0DB200763E16 /* Main.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = A06D4CB9232F0DB200763E16 /* Main.storyboard */; };
+		A06D4CBD232F0DB200763E16 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A06D4CBC232F0DB200763E16 /* Assets.xcassets */; };
+		A06D4CC0232F0DB200763E16 /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = A06D4CBE232F0DB200763E16 /* LaunchScreen.storyboard */; };
+		A06D4CC3232F0DB200763E16 /* main.m in Sources */ = {isa = PBXBuildFile; fileRef = A06D4CC2232F0DB200763E16 /* main.m */; };
+		A55D3E6FD2C2E21BC74A87B3 /* libcpuinfo.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 373055AD0467FC05C5E30FE8 /* libcpuinfo.a */; };
+		A58F9449F5E7E7E7343DB1DD /* model_metal.ptl in Resources */ = {isa = PBXBuildFile; fileRef = D50FA7C24515C6E9464412FC /* model_metal.ptl */; };
+		AFEA2ED4A75717EAB554402B /* (null) in Sources */ = {isa = PBXBuildFile; };
+		B3FD45DDF29A8889819CD32D /* libc10.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 1FA0A69F73B57C7DCFFCE44E /* libc10.a */; };
+		B568ED4028C1681B3388EF41 /* libtorch_cpu.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 546C2E522086A207717139B8 /* libtorch_cpu.a */; };
+		B7F5B39BDAB221ABC83CBC5F /* model_lite.ptl in Resources */ = {isa = PBXBuildFile; fileRef = 37BCDAAE0ED155A89098411F /* model_lite.ptl */; };
+		BD1DAEB1393C43C38A4E78B0 /* mobilenetv2_oss_coreml.ptl in Resources */ = {isa = PBXBuildFile; fileRef = 45AAE1CCA591CE3FAC4A702B /* mobilenetv2_oss_coreml.ptl */; };
+		C138678B773DF86F721B2DCF /* libXNNPACK.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 3791C93FDDE367DD9CF54EB4 /* libXNNPACK.a */; };
+		C3583BA57EF94AC56AAF10BE /* libc10.a in Frameworks */ = {isa = PBXBuildFile; fileRef = C093D28B40F736275855ACE9 /* libc10.a */; };
+		C443E28725B77B34B4DB714E /* libtorch.a in Frameworks */ = {isa = PBXBuildFile; fileRef = BDCA97FBBF08CC34DACDEBA3 /* libtorch.a */; };
+		C4B63441AFB57BF97DBA8FDD /* TestLiteInterpreter.mm in Sources */ = {isa = PBXBuildFile; fileRef = 393651D061B9D8F1B1902E1F /* TestLiteInterpreter.mm */; };
+		C59A3C6BD6CA126EAA2AA2B9 /* libtorch.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 13BD6EF890AAACBA56DDFEBD /* libtorch.a */; };
+		C7A759188600CE63155B4B7E /* (null) in Sources */ = {isa = PBXBuildFile; };
+		CA749870989AB26B05C44031 /* mobilenetv2_oss_coreml.ptl in Resources */ = {isa = PBXBuildFile; fileRef = 45AAE1CCA591CE3FAC4A702B /* mobilenetv2_oss_coreml.ptl */; };
+		E7625C8A41B88DC28EFB8BDB /* libclog.a in Frameworks */ = {isa = PBXBuildFile; fileRef = D5C6A349310B999683BCF669 /* libclog.a */; };
+		EC51437B655BDDCB47B21EA4 /* libpthreadpool.a in Frameworks */ = {isa = PBXBuildFile; fileRef = CEDDD70C2953EF7D51D8895B /* libpthreadpool.a */; };
+		FFF3D0FB54A4FCB34E1412BF /* libcpuinfo.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 99CEA8009CD6E3C1308B9C6A /* libcpuinfo.a */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
-        A0EA3B04237FCB08007CEA34 /* PBXContainerItemProxy */ = {
-            isa = PBXContainerItemProxy;
-            containerPortal = A06D4CA8232F0DB200763E16 /* Project object */;
-            proxyType = 1;
-            remoteGlobalIDString = A06D4CAF232F0DB200763E16;
-            remoteInfo = TestApp;
-        };
+		A0EA3B04237FCB08007CEA34 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = A06D4CA8232F0DB200763E16 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = A06D4CAF232F0DB200763E16;
+			remoteInfo = TestApp;
+		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
-        A06D4CB0232F0DB200763E16 /* TestApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = TestApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
-        A06D4CB3232F0DB200763E16 /* AppDelegate.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = AppDelegate.h; sourceTree = "<group>"; };
-        A06D4CB4232F0DB200763E16 /* AppDelegate.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = AppDelegate.m; sourceTree = "<group>"; };
-        A06D4CB6232F0DB200763E16 /* ViewController.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ViewController.h; sourceTree = "<group>"; };
-        A06D4CB7232F0DB200763E16 /* ViewController.mm */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.objcpp; path = ViewController.mm; sourceTree = "<group>"; };
-        A06D4CBA232F0DB200763E16 /* Base */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; name = Base; path = Base.lproj/Main.storyboard; sourceTree = "<group>"; };
-        A06D4CBC232F0DB200763E16 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
-        A06D4CBF232F0DB200763E16 /* Base */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; name = Base; path = Base.lproj/LaunchScreen.storyboard; sourceTree = "<group>"; };
-        A06D4CC1232F0DB200763E16 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
-        A06D4CC2232F0DB200763E16 /* main.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = main.m; sourceTree = "<group>"; };
-        A0EA3AFF237FCB08007CEA34 /* TestAppTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = TestAppTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-        A0EA3B03237FCB08007CEA34 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		015BC7196AB87BE1DB47C3AF /* libclog.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libclog.a; path = ../../build_ios/install/lib/libclog.a; sourceTree = "<group>"; };
+		052E50FA12250FC0CCD0CC4E /* libpytorch_qnnpack.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libpytorch_qnnpack.a; path = ../../build_ios/install/lib/libpytorch_qnnpack.a; sourceTree = "<group>"; };
+		06EC17E4F716D397A4701A32 /* libpthreadpool.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libpthreadpool.a; path = ../../build_ios/install/lib/libpthreadpool.a; sourceTree = "<group>"; };
+		0A08318652566FCB72C8CC6C /* libtorch_cpu.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libtorch_cpu.a; path = ../../build_ios/install/lib/libtorch_cpu.a; sourceTree = "<group>"; };
+		0C932BDCC926448B131D308F /* libcpuinfo.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libcpuinfo.a; path = ../../build_ios/install/lib/libcpuinfo.a; sourceTree = "<group>"; };
+		0CDCD6C9FF48B28A040D6316 /* libpytorch_qnnpack.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libpytorch_qnnpack.a; path = ../../build_ios/install/lib/libpytorch_qnnpack.a; sourceTree = "<group>"; };
+		13BD6EF890AAACBA56DDFEBD /* libtorch.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libtorch.a; path = ../../build_ios/install/lib/libtorch.a; sourceTree = "<group>"; };
+		1C0C04A591ABB7794A6F6E3F /* libpytorch_qnnpack.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libpytorch_qnnpack.a; path = ../../build_ios/install/lib/libpytorch_qnnpack.a; sourceTree = "<group>"; };
+		1D691A575EA05E4C1255B08A /* libtorch.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libtorch.a; path = ../../build_ios/install/lib/libtorch.a; sourceTree = "<group>"; };
+		1FA0A69F73B57C7DCFFCE44E /* libc10.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libc10.a; path = ../../build_ios/install/lib/libc10.a; sourceTree = "<group>"; };
+		2F2BF9BDC71C96072F75BF82 /* libeigen_blas.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libeigen_blas.a; path = ../../build_ios/install/lib/libeigen_blas.a; sourceTree = "<group>"; };
+		36943CC4D1528980787E55ED /* libpthreadpool.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libpthreadpool.a; path = ../../build_ios/install/lib/libpthreadpool.a; sourceTree = "<group>"; };
+		373055AD0467FC05C5E30FE8 /* libcpuinfo.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libcpuinfo.a; path = ../../build_ios/install/lib/libcpuinfo.a; sourceTree = "<group>"; };
+		3791C93FDDE367DD9CF54EB4 /* libXNNPACK.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libXNNPACK.a; path = ../../build_ios/install/lib/libXNNPACK.a; sourceTree = "<group>"; };
+		37BCDAAE0ED155A89098411F /* model_lite.ptl */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = file; name = model_lite.ptl; path = ../models/model_lite.ptl; sourceTree = "<group>"; };
+		393651D061B9D8F1B1902E1F /* TestLiteInterpreter.mm */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.cpp.objcpp; path = TestLiteInterpreter.mm; sourceTree = "<group>"; };
+		3F778848F2D8CD4E6ADD1E17 /* libc10.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libc10.a; path = ../../build_ios/install/lib/libc10.a; sourceTree = "<group>"; };
+		444130B284CA016448E10369 /* libclog.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libclog.a; path = ../../build_ios/install/lib/libclog.a; sourceTree = "<group>"; };
+		446A370178B9CC3997915D51 /* libpytorch_qnnpack.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libpytorch_qnnpack.a; path = ../../build_ios/install/lib/libpytorch_qnnpack.a; sourceTree = "<group>"; };
+		45AAE1CCA591CE3FAC4A702B /* mobilenetv2_oss_coreml.ptl */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = file; name = mobilenetv2_oss_coreml.ptl; path = ../models/mobilenetv2_oss_coreml.ptl; sourceTree = "<group>"; };
+		46CB7B20C66BDAC4A8D21288 /* libc10.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libc10.a; path = ../../build_ios/install/lib/libc10.a; sourceTree = "<group>"; };
+		4B6C8AF403344477FAAA9EF7 /* libeigen_blas.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libeigen_blas.a; path = ../../build_ios/install/lib/libeigen_blas.a; sourceTree = "<group>"; };
+		52F42D19CD1E6934544AA11C /* libtorch_cpu.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libtorch_cpu.a; path = ../../build_ios/install/lib/libtorch_cpu.a; sourceTree = "<group>"; };
+		546C2E522086A207717139B8 /* libtorch_cpu.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libtorch_cpu.a; path = ../../build_ios/install/lib/libtorch_cpu.a; sourceTree = "<group>"; };
+		562F846A1907A18A7633D431 /* libpytorch_qnnpack.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libpytorch_qnnpack.a; path = ../../build_ios/install/lib/libpytorch_qnnpack.a; sourceTree = "<group>"; };
+		5B97A6F0F1C565CB84C23D29 /* libtorch.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libtorch.a; path = ../../build_ios/install/lib/libtorch.a; sourceTree = "<group>"; };
+		64B6FFBF0EDBEFFF4AFA1AF8 /* libXNNPACK.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libXNNPACK.a; path = ../../build_ios/install/lib/libXNNPACK.a; sourceTree = "<group>"; };
+		687711285D14B31AD5E84D0F /* libpthreadpool.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libpthreadpool.a; path = ../../build_ios/install/lib/libpthreadpool.a; sourceTree = "<group>"; };
+		714B0469A545376606D9F7D5 /* libtorch_cpu.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libtorch_cpu.a; path = ../../build_ios/install/lib/libtorch_cpu.a; sourceTree = "<group>"; };
+		7F5955718C54F33CBEC01C12 /* libclog.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libclog.a; path = ../../build_ios/install/lib/libclog.a; sourceTree = "<group>"; };
+		803D9A8C0413E5C219A73499 /* libcpuinfo.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libcpuinfo.a; path = ../../build_ios/install/lib/libcpuinfo.a; sourceTree = "<group>"; };
+		806BB68C274D50D347D14116 /* libtorch_cpu.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libtorch_cpu.a; path = ../../build_ios/install/lib/libtorch_cpu.a; sourceTree = "<group>"; };
+		8317B444349A2524F18730AD /* libtorch_cpu.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libtorch_cpu.a; path = ../../build_ios/install/lib/libtorch_cpu.a; sourceTree = "<group>"; };
+		88F5619D4CB0D28E2C178FAD /* libtorch_cpu.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libtorch_cpu.a; path = ../../build_ios/install/lib/libtorch_cpu.a; sourceTree = "<group>"; };
+		950A124C4B96C382B1D122E0 /* libcpuinfo.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libcpuinfo.a; path = ../../build_ios/install/lib/libcpuinfo.a; sourceTree = "<group>"; };
+		963350FB9E6EC1C23B5EBBCA /* libeigen_blas.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libeigen_blas.a; path = ../../build_ios/install/lib/libeigen_blas.a; sourceTree = "<group>"; };
+		967B9828524A4A787580AEFB /* libcpuinfo.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libcpuinfo.a; path = ../../build_ios/install/lib/libcpuinfo.a; sourceTree = "<group>"; };
+		96C7580AF4CB428962747C13 /* libpytorch_qnnpack.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libpytorch_qnnpack.a; path = ../../build_ios/install/lib/libpytorch_qnnpack.a; sourceTree = "<group>"; };
+		99CEA8009CD6E3C1308B9C6A /* libcpuinfo.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libcpuinfo.a; path = ../../build_ios/install/lib/libcpuinfo.a; sourceTree = "<group>"; };
+		9DA848284DCB17291335DDA2 /* libclog.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libclog.a; path = ../../build_ios/install/lib/libclog.a; sourceTree = "<group>"; };
+		A04D8C2726F52E2B0068CB9D /* model.pt */ = {isa = PBXFileReference; lastKnownFileType = file; path = model.pt; sourceTree = "<group>"; };
+		A04D8C2826F52E2B0068CB9D /* model_metal.ptl */ = {isa = PBXFileReference; lastKnownFileType = file; path = model_metal.ptl; sourceTree = "<group>"; };
+		A04D8C2926F52E2B0068CB9D /* mobilenetv2_oss_coreml.ptl */ = {isa = PBXFileReference; lastKnownFileType = file; path = mobilenetv2_oss_coreml.ptl; sourceTree = "<group>"; };
+		A04D8C2A26F52E2B0068CB9D /* model_lite.ptl */ = {isa = PBXFileReference; lastKnownFileType = file; path = model_lite.ptl; sourceTree = "<group>"; };
+		A04D8C3E26F54AA60068CB9D /* CoreML.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreML.framework; path = System/Library/Frameworks/CoreML.framework; sourceTree = SDKROOT; };
+		A06D4CB0232F0DB200763E16 /* TestApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = TestApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A06D4CB3232F0DB200763E16 /* AppDelegate.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = AppDelegate.h; sourceTree = "<group>"; };
+		A06D4CB4232F0DB200763E16 /* AppDelegate.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = AppDelegate.m; sourceTree = "<group>"; };
+		A06D4CB6232F0DB200763E16 /* ViewController.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ViewController.h; sourceTree = "<group>"; };
+		A06D4CB7232F0DB200763E16 /* ViewController.mm */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.objcpp; path = ViewController.mm; sourceTree = "<group>"; };
+		A06D4CBA232F0DB200763E16 /* Base */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; name = Base; path = Base.lproj/Main.storyboard; sourceTree = "<group>"; };
+		A06D4CBC232F0DB200763E16 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		A06D4CBF232F0DB200763E16 /* Base */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; name = Base; path = Base.lproj/LaunchScreen.storyboard; sourceTree = "<group>"; };
+		A06D4CC1232F0DB200763E16 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		A06D4CC2232F0DB200763E16 /* main.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = main.m; sourceTree = "<group>"; };
+		A0EA3AFF237FCB08007CEA34 /* TestAppTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = TestAppTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		A0EA3B03237FCB08007CEA34 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		A33A4CE02642EAE5CB45FB44 /* libcpuinfo.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libcpuinfo.a; path = ../../build_ios/install/lib/libcpuinfo.a; sourceTree = "<group>"; };
+		A97C15EA739EC4F2CD6E2FDE /* libclog.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libclog.a; path = ../../build_ios/install/lib/libclog.a; sourceTree = "<group>"; };
+		AD2B800D03F387DFF8385529 /* libpthreadpool.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libpthreadpool.a; path = ../../build_ios/install/lib/libpthreadpool.a; sourceTree = "<group>"; };
+		AE57457114D88784DB2A4AEA /* libeigen_blas.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libeigen_blas.a; path = ../../build_ios/install/lib/libeigen_blas.a; sourceTree = "<group>"; };
+		B3A70C431EB95FDEDF604DC0 /* libpytorch_qnnpack.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libpytorch_qnnpack.a; path = ../../build_ios/install/lib/libpytorch_qnnpack.a; sourceTree = "<group>"; };
+		B57A01AA08ABBBF2C8C5FE07 /* model.pt */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = file; name = model.pt; path = ../models/model.pt; sourceTree = "<group>"; };
+		B9C1F8C60D2DF3623DBB4E38 /* libpthreadpool.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libpthreadpool.a; path = ../../build_ios/install/lib/libpthreadpool.a; sourceTree = "<group>"; };
+		BDCA97FBBF08CC34DACDEBA3 /* libtorch.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libtorch.a; path = ../../build_ios/install/lib/libtorch.a; sourceTree = "<group>"; };
+		C093D28B40F736275855ACE9 /* libc10.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libc10.a; path = ../../build_ios/install/lib/libc10.a; sourceTree = "<group>"; };
+		C29448A96D1C0B7732868AA3 /* libtorch_cpu.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libtorch_cpu.a; path = ../../build_ios/install/lib/libtorch_cpu.a; sourceTree = "<group>"; };
+		C51FEF6F8D7706E50B4BAB1B /* libtorch.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libtorch.a; path = ../../build_ios/install/lib/libtorch.a; sourceTree = "<group>"; };
+		C7D830170C325ACDF3B3E5DA /* libtorch.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libtorch.a; path = ../../build_ios/install/lib/libtorch.a; sourceTree = "<group>"; };
+		CBC99B1C8A3E1ABE080EC73C /* libc10.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libc10.a; path = ../../build_ios/install/lib/libc10.a; sourceTree = "<group>"; };
+		CEDDD70C2953EF7D51D8895B /* libpthreadpool.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libpthreadpool.a; path = ../../build_ios/install/lib/libpthreadpool.a; sourceTree = "<group>"; };
+		D01FA71E2DE1394788737CAD /* libc10.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libc10.a; path = ../../build_ios/install/lib/libc10.a; sourceTree = "<group>"; };
+		D15921FD4D747FE5141F07F3 /* libeigen_blas.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libeigen_blas.a; path = ../../build_ios/install/lib/libeigen_blas.a; sourceTree = "<group>"; };
+		D21CF617A32DC92CADAAF37A /* libXNNPACK.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libXNNPACK.a; path = ../../build_ios/install/lib/libXNNPACK.a; sourceTree = "<group>"; };
+		D349C753683FBDD9501A383D /* libpthreadpool.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libpthreadpool.a; path = ../../build_ios/install/lib/libpthreadpool.a; sourceTree = "<group>"; };
+		D43390BDE180551FB52A426C /* libXNNPACK.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libXNNPACK.a; path = ../../build_ios/install/lib/libXNNPACK.a; sourceTree = "<group>"; };
+		D4B4C8CB7433105364C0B1B8 /* libtorch.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libtorch.a; path = ../../build_ios/install/lib/libtorch.a; sourceTree = "<group>"; };
+		D50FA7C24515C6E9464412FC /* model_metal.ptl */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = file; name = model_metal.ptl; path = ../models/model_metal.ptl; sourceTree = "<group>"; };
+		D5C6A349310B999683BCF669 /* libclog.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libclog.a; path = ../../build_ios/install/lib/libclog.a; sourceTree = "<group>"; };
+		DB09E46BC387DFF1D2733FAD /* libpytorch_qnnpack.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libpytorch_qnnpack.a; path = ../../build_ios/install/lib/libpytorch_qnnpack.a; sourceTree = "<group>"; };
+		DDD35791549499D09C16176F /* libcpuinfo.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libcpuinfo.a; path = ../../build_ios/install/lib/libcpuinfo.a; sourceTree = "<group>"; };
+		E035AA41AF59A0CBE6A5261F /* libXNNPACK.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libXNNPACK.a; path = ../../build_ios/install/lib/libXNNPACK.a; sourceTree = "<group>"; };
+		E103C150CC43BCFC4FA68589 /* libc10.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libc10.a; path = ../../build_ios/install/lib/libc10.a; sourceTree = "<group>"; };
+		E2B166B5F151B3D369B3BD4D /* libclog.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libclog.a; path = ../../build_ios/install/lib/libclog.a; sourceTree = "<group>"; };
+		E4F0C2C38CEF7DFF2AD75C4E /* libtorch.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libtorch.a; path = ../../build_ios/install/lib/libtorch.a; sourceTree = "<group>"; };
+		E61754ADC9678E416D1EB402 /* libXNNPACK.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libXNNPACK.a; path = ../../build_ios/install/lib/libXNNPACK.a; sourceTree = "<group>"; };
+		E95F7C3A16FB2312EAF098F6 /* libeigen_blas.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libeigen_blas.a; path = ../../build_ios/install/lib/libeigen_blas.a; sourceTree = "<group>"; };
+		EBA01079FB1EAB04D8390C59 /* libeigen_blas.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libeigen_blas.a; path = ../../build_ios/install/lib/libeigen_blas.a; sourceTree = "<group>"; };
+		ECE5BFE4920211F7AF0100AB /* libeigen_blas.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libeigen_blas.a; path = ../../build_ios/install/lib/libeigen_blas.a; sourceTree = "<group>"; };
+		ED3949DCCF93DD388CD98189 /* libclog.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libclog.a; path = ../../build_ios/install/lib/libclog.a; sourceTree = "<group>"; };
+		EEEE5E1E93519C0E4BB5FEF5 /* libXNNPACK.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libXNNPACK.a; path = ../../build_ios/install/lib/libXNNPACK.a; sourceTree = "<group>"; };
+		F0FC727AD172D5577DB75924 /* libXNNPACK.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libXNNPACK.a; path = ../../build_ios/install/lib/libXNNPACK.a; sourceTree = "<group>"; };
+		F3E52252345CC205CE24184B /* libc10.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libc10.a; path = ../../build_ios/install/lib/libc10.a; sourceTree = "<group>"; };
+		F8DC79CC1CB1B5714D66C7AB /* libpthreadpool.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libpthreadpool.a; path = ../../build_ios/install/lib/libpthreadpool.a; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
-        A06D4CAD232F0DB200763E16 /* Frameworks */ = {
-            isa = PBXFrameworksBuildPhase;
-            buildActionMask = 2147483647;
-            files = (
-            );
-            runOnlyForDeploymentPostprocessing = 0;
-        };
-        A0EA3AFC237FCB08007CEA34 /* Frameworks */ = {
-            isa = PBXFrameworksBuildPhase;
-            buildActionMask = 2147483647;
-            files = (
-            );
-            runOnlyForDeploymentPostprocessing = 0;
-        };
+		A06D4CAD232F0DB200763E16 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A068242D26F5510F001BC1D3 /* CoreML.framework in Frameworks */,
+				C3583BA57EF94AC56AAF10BE /* libc10.a in Frameworks */,
+				4D5B3D50B54EB7F21174EA17 /* libclog.a in Frameworks */,
+				EC51437B655BDDCB47B21EA4 /* libpthreadpool.a in Frameworks */,
+				C138678B773DF86F721B2DCF /* libXNNPACK.a in Frameworks */,
+				9235565BEF3F75BA0FC183F7 /* libeigen_blas.a in Frameworks */,
+				A55D3E6FD2C2E21BC74A87B3 /* libcpuinfo.a in Frameworks */,
+				3E9D32590D6A6D161DE99A0F /* libpytorch_qnnpack.a in Frameworks */,
+				366019837692DAC081C0035E /* libtorch_cpu.a in Frameworks */,
+				C59A3C6BD6CA126EAA2AA2B9 /* libtorch.a in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A0EA3AFC237FCB08007CEA34 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B3FD45DDF29A8889819CD32D /* libc10.a in Frameworks */,
+				E7625C8A41B88DC28EFB8BDB /* libclog.a in Frameworks */,
+				7AB5EFCABF59268B1B7DEFFF /* libpthreadpool.a in Frameworks */,
+				95C2AE69E624277CCC4AF2F1 /* libXNNPACK.a in Frameworks */,
+				3F359EDDFECCA14A6BD07007 /* libeigen_blas.a in Frameworks */,
+				FFF3D0FB54A4FCB34E1412BF /* libcpuinfo.a in Frameworks */,
+				3A3755E18595796151FF8E79 /* libpytorch_qnnpack.a in Frameworks */,
+				B568ED4028C1681B3388EF41 /* libtorch_cpu.a in Frameworks */,
+				C443E28725B77B34B4DB714E /* libtorch.a in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
-        A06D4CA7232F0DB200763E16 = {
-            isa = PBXGroup;
-            children = (
-                A06D4CB2232F0DB200763E16 /* TestApp */,
-                A0EA3B00237FCB08007CEA34 /* TestAppTests */,
-                A06D4CB1232F0DB200763E16 /* Products */,
-            );
-            sourceTree = "<group>";
-        };
-        A06D4CB1232F0DB200763E16 /* Products */ = {
-            isa = PBXGroup;
-            children = (
-                A06D4CB0232F0DB200763E16 /* TestApp.app */,
-                A0EA3AFF237FCB08007CEA34 /* TestAppTests.xctest */,
-            );
-            name = Products;
-            sourceTree = "<group>";
-        };
-        A06D4CB2232F0DB200763E16 /* TestApp */ = {
-            isa = PBXGroup;
-            children = (
-                A06D4CB3232F0DB200763E16 /* AppDelegate.h */,
-                A06D4CB4232F0DB200763E16 /* AppDelegate.m */,
-                A06D4CB6232F0DB200763E16 /* ViewController.h */,
-                A06D4CB7232F0DB200763E16 /* ViewController.mm */,
-                A06D4CB9232F0DB200763E16 /* Main.storyboard */,
-                A06D4CBC232F0DB200763E16 /* Assets.xcassets */,
-                A06D4CBE232F0DB200763E16 /* LaunchScreen.storyboard */,
-                A06D4CC1232F0DB200763E16 /* Info.plist */,
-                A06D4CC2232F0DB200763E16 /* main.m */,
-            );
-            path = TestApp;
-            sourceTree = "<group>";
-        };
-        A0EA3B00237FCB08007CEA34 /* TestAppTests */ = {
-            isa = PBXGroup;
-            children = (
-                A0EA3B03237FCB08007CEA34 /* Info.plist */,
-            );
-            path = TestAppTests;
-            sourceTree = "<group>";
-        };
+		1C29F9403C0228E6D5A06ED7 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				A04D8C3E26F54AA60068CB9D /* CoreML.framework */,
+				E103C150CC43BCFC4FA68589 /* libc10.a */,
+				ED3949DCCF93DD388CD98189 /* libclog.a */,
+				F8DC79CC1CB1B5714D66C7AB /* libpthreadpool.a */,
+				64B6FFBF0EDBEFFF4AFA1AF8 /* libXNNPACK.a */,
+				963350FB9E6EC1C23B5EBBCA /* libeigen_blas.a */,
+				803D9A8C0413E5C219A73499 /* libcpuinfo.a */,
+				0CDCD6C9FF48B28A040D6316 /* libpytorch_qnnpack.a */,
+				88F5619D4CB0D28E2C178FAD /* libtorch_cpu.a */,
+				C51FEF6F8D7706E50B4BAB1B /* libtorch.a */,
+				46CB7B20C66BDAC4A8D21288 /* libc10.a */,
+				015BC7196AB87BE1DB47C3AF /* libclog.a */,
+				AD2B800D03F387DFF8385529 /* libpthreadpool.a */,
+				E035AA41AF59A0CBE6A5261F /* libXNNPACK.a */,
+				EBA01079FB1EAB04D8390C59 /* libeigen_blas.a */,
+				A33A4CE02642EAE5CB45FB44 /* libcpuinfo.a */,
+				96C7580AF4CB428962747C13 /* libpytorch_qnnpack.a */,
+				52F42D19CD1E6934544AA11C /* libtorch_cpu.a */,
+				5B97A6F0F1C565CB84C23D29 /* libtorch.a */,
+				F3E52252345CC205CE24184B /* libc10.a */,
+				444130B284CA016448E10369 /* libclog.a */,
+				B9C1F8C60D2DF3623DBB4E38 /* libpthreadpool.a */,
+				EEEE5E1E93519C0E4BB5FEF5 /* libXNNPACK.a */,
+				E95F7C3A16FB2312EAF098F6 /* libeigen_blas.a */,
+				950A124C4B96C382B1D122E0 /* libcpuinfo.a */,
+				562F846A1907A18A7633D431 /* libpytorch_qnnpack.a */,
+				714B0469A545376606D9F7D5 /* libtorch_cpu.a */,
+				D4B4C8CB7433105364C0B1B8 /* libtorch.a */,
+				D01FA71E2DE1394788737CAD /* libc10.a */,
+				9DA848284DCB17291335DDA2 /* libclog.a */,
+				06EC17E4F716D397A4701A32 /* libpthreadpool.a */,
+				E61754ADC9678E416D1EB402 /* libXNNPACK.a */,
+				AE57457114D88784DB2A4AEA /* libeigen_blas.a */,
+				967B9828524A4A787580AEFB /* libcpuinfo.a */,
+				1C0C04A591ABB7794A6F6E3F /* libpytorch_qnnpack.a */,
+				0A08318652566FCB72C8CC6C /* libtorch_cpu.a */,
+				E4F0C2C38CEF7DFF2AD75C4E /* libtorch.a */,
+				3F778848F2D8CD4E6ADD1E17 /* libc10.a */,
+				7F5955718C54F33CBEC01C12 /* libclog.a */,
+				D349C753683FBDD9501A383D /* libpthreadpool.a */,
+				D21CF617A32DC92CADAAF37A /* libXNNPACK.a */,
+				4B6C8AF403344477FAAA9EF7 /* libeigen_blas.a */,
+				0C932BDCC926448B131D308F /* libcpuinfo.a */,
+				DB09E46BC387DFF1D2733FAD /* libpytorch_qnnpack.a */,
+				C29448A96D1C0B7732868AA3 /* libtorch_cpu.a */,
+				1D691A575EA05E4C1255B08A /* libtorch.a */,
+				CBC99B1C8A3E1ABE080EC73C /* libc10.a */,
+				E2B166B5F151B3D369B3BD4D /* libclog.a */,
+				36943CC4D1528980787E55ED /* libpthreadpool.a */,
+				F0FC727AD172D5577DB75924 /* libXNNPACK.a */,
+				D15921FD4D747FE5141F07F3 /* libeigen_blas.a */,
+				DDD35791549499D09C16176F /* libcpuinfo.a */,
+				052E50FA12250FC0CCD0CC4E /* libpytorch_qnnpack.a */,
+				8317B444349A2524F18730AD /* libtorch_cpu.a */,
+				C7D830170C325ACDF3B3E5DA /* libtorch.a */,
+				C093D28B40F736275855ACE9 /* libc10.a */,
+				A97C15EA739EC4F2CD6E2FDE /* libclog.a */,
+				CEDDD70C2953EF7D51D8895B /* libpthreadpool.a */,
+				3791C93FDDE367DD9CF54EB4 /* libXNNPACK.a */,
+				ECE5BFE4920211F7AF0100AB /* libeigen_blas.a */,
+				373055AD0467FC05C5E30FE8 /* libcpuinfo.a */,
+				B3A70C431EB95FDEDF604DC0 /* libpytorch_qnnpack.a */,
+				806BB68C274D50D347D14116 /* libtorch_cpu.a */,
+				13BD6EF890AAACBA56DDFEBD /* libtorch.a */,
+				1FA0A69F73B57C7DCFFCE44E /* libc10.a */,
+				D5C6A349310B999683BCF669 /* libclog.a */,
+				687711285D14B31AD5E84D0F /* libpthreadpool.a */,
+				D43390BDE180551FB52A426C /* libXNNPACK.a */,
+				2F2BF9BDC71C96072F75BF82 /* libeigen_blas.a */,
+				99CEA8009CD6E3C1308B9C6A /* libcpuinfo.a */,
+				446A370178B9CC3997915D51 /* libpytorch_qnnpack.a */,
+				546C2E522086A207717139B8 /* libtorch_cpu.a */,
+				BDCA97FBBF08CC34DACDEBA3 /* libtorch.a */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
+		A04D8C2626F52E2B0068CB9D /* models */ = {
+			isa = PBXGroup;
+			children = (
+				A04D8C2726F52E2B0068CB9D /* model.pt */,
+				A04D8C2826F52E2B0068CB9D /* model_metal.ptl */,
+				A04D8C2926F52E2B0068CB9D /* mobilenetv2_oss_coreml.ptl */,
+				A04D8C2A26F52E2B0068CB9D /* model_lite.ptl */,
+			);
+			path = models;
+			sourceTree = SOURCE_ROOT;
+		};
+		A06D4CA7232F0DB200763E16 = {
+			isa = PBXGroup;
+			children = (
+				A06D4CB2232F0DB200763E16 /* TestApp */,
+				A0EA3B00237FCB08007CEA34 /* TestAppTests */,
+				A06D4CB1232F0DB200763E16 /* Products */,
+				1C29F9403C0228E6D5A06ED7 /* Frameworks */,
+			);
+			sourceTree = "<group>";
+		};
+		A06D4CB1232F0DB200763E16 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				A06D4CB0232F0DB200763E16 /* TestApp.app */,
+				A0EA3AFF237FCB08007CEA34 /* TestAppTests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		A06D4CB2232F0DB200763E16 /* TestApp */ = {
+			isa = PBXGroup;
+			children = (
+				A04D8C2626F52E2B0068CB9D /* models */,
+				A06D4CB3232F0DB200763E16 /* AppDelegate.h */,
+				A06D4CB4232F0DB200763E16 /* AppDelegate.m */,
+				A06D4CB6232F0DB200763E16 /* ViewController.h */,
+				A06D4CB7232F0DB200763E16 /* ViewController.mm */,
+				A06D4CB9232F0DB200763E16 /* Main.storyboard */,
+				A06D4CBC232F0DB200763E16 /* Assets.xcassets */,
+				A06D4CBE232F0DB200763E16 /* LaunchScreen.storyboard */,
+				A06D4CC1232F0DB200763E16 /* Info.plist */,
+				A06D4CC2232F0DB200763E16 /* main.m */,
+				B57A01AA08ABBBF2C8C5FE07 /* model.pt */,
+				D50FA7C24515C6E9464412FC /* model_metal.ptl */,
+				45AAE1CCA591CE3FAC4A702B /* mobilenetv2_oss_coreml.ptl */,
+				37BCDAAE0ED155A89098411F /* model_lite.ptl */,
+			);
+			path = TestApp;
+			sourceTree = SOURCE_ROOT;
+		};
+		A0EA3B00237FCB08007CEA34 /* TestAppTests */ = {
+			isa = PBXGroup;
+			children = (
+				A0EA3B03237FCB08007CEA34 /* Info.plist */,
+				393651D061B9D8F1B1902E1F /* TestLiteInterpreter.mm */,
+			);
+			path = TestAppTests;
+			sourceTree = "<group>";
+		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-        A06D4CAF232F0DB200763E16 /* TestApp */ = {
-            isa = PBXNativeTarget;
-            buildConfigurationList = A06D4CC6232F0DB200763E16 /* Build configuration list for PBXNativeTarget "TestApp" */;
-            buildPhases = (
-                A06D4CAC232F0DB200763E16 /* Sources */,
-                A06D4CAD232F0DB200763E16 /* Frameworks */,
-                A06D4CAE232F0DB200763E16 /* Resources */,
-            );
-            buildRules = (
-            );
-            dependencies = (
-            );
-            name = TestApp;
-            productName = TestApp;
-            productReference = A06D4CB0232F0DB200763E16 /* TestApp.app */;
-            productType = "com.apple.product-type.application";
-        };
-        A0EA3AFE237FCB08007CEA34 /* TestAppTests */ = {
-            isa = PBXNativeTarget;
-            buildConfigurationList = A0EA3B08237FCB08007CEA34 /* Build configuration list for PBXNativeTarget "TestAppTests" */;
-            buildPhases = (
-                A0EA3AFB237FCB08007CEA34 /* Sources */,
-                A0EA3AFC237FCB08007CEA34 /* Frameworks */,
-                A0EA3AFD237FCB08007CEA34 /* Resources */,
-            );
-            buildRules = (
-            );
-            dependencies = (
-                A0EA3B05237FCB08007CEA34 /* PBXTargetDependency */,
-            );
-            name = TestAppTests;
-            productName = TestAppTests;
-            productReference = A0EA3AFF237FCB08007CEA34 /* TestAppTests.xctest */;
-            productType = "com.apple.product-type.bundle.unit-test";
-        };
+		A06D4CAF232F0DB200763E16 /* TestApp */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A06D4CC6232F0DB200763E16 /* Build configuration list for PBXNativeTarget "TestApp" */;
+			buildPhases = (
+				A06D4CAC232F0DB200763E16 /* Sources */,
+				A06D4CAD232F0DB200763E16 /* Frameworks */,
+				A06D4CAE232F0DB200763E16 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = TestApp;
+			productName = TestApp;
+			productReference = A06D4CB0232F0DB200763E16 /* TestApp.app */;
+			productType = "com.apple.product-type.application";
+		};
+		A0EA3AFE237FCB08007CEA34 /* TestAppTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A0EA3B08237FCB08007CEA34 /* Build configuration list for PBXNativeTarget "TestAppTests" */;
+			buildPhases = (
+				A0EA3AFB237FCB08007CEA34 /* Sources */,
+				A0EA3AFC237FCB08007CEA34 /* Frameworks */,
+				A0EA3AFD237FCB08007CEA34 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				A0EA3B05237FCB08007CEA34 /* PBXTargetDependency */,
+			);
+			name = TestAppTests;
+			productName = TestAppTests;
+			productReference = A0EA3AFF237FCB08007CEA34 /* TestAppTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
-        A06D4CA8232F0DB200763E16 /* Project object */ = {
-            isa = PBXProject;
-            attributes = {
-                LastUpgradeCheck = 1030;
-                TargetAttributes = {
-                    A06D4CAF232F0DB200763E16 = {
-                        CreatedOnToolsVersion = 10.3;
-                    };
-                    A0EA3AFE237FCB08007CEA34 = {
-                        CreatedOnToolsVersion = 11.2.1;
-                    };
-                };
-            };
-            buildConfigurationList = A06D4CAB232F0DB200763E16 /* Build configuration list for PBXProject "TestApp" */;
-            compatibilityVersion = "Xcode 9.3";
-            developmentRegion = en;
-            hasScannedForEncodings = 0;
-            knownRegions = (
-                en,
-                Base,
-            );
-            mainGroup = A06D4CA7232F0DB200763E16;
-            productRefGroup = A06D4CB1232F0DB200763E16 /* Products */;
-            projectDirPath = "";
-            projectRoot = "";
-            targets = (
-                A06D4CAF232F0DB200763E16 /* TestApp */,
-                A0EA3AFE237FCB08007CEA34 /* TestAppTests */,
-            );
-        };
+		A06D4CA8232F0DB200763E16 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				LastUpgradeCheck = 1030;
+				TargetAttributes = {
+					A06D4CAF232F0DB200763E16 = {
+						CreatedOnToolsVersion = 10.3;
+					};
+					A0EA3AFE237FCB08007CEA34 = {
+						CreatedOnToolsVersion = 11.2.1;
+					};
+				};
+			};
+			buildConfigurationList = A06D4CAB232F0DB200763E16 /* Build configuration list for PBXProject "TestApp" */;
+			compatibilityVersion = "Xcode 9.3";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = A06D4CA7232F0DB200763E16;
+			productRefGroup = A06D4CB1232F0DB200763E16 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				A06D4CAF232F0DB200763E16 /* TestApp */,
+				A0EA3AFE237FCB08007CEA34 /* TestAppTests */,
+			);
+		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
-        A06D4CAE232F0DB200763E16 /* Resources */ = {
-            isa = PBXResourcesBuildPhase;
-            buildActionMask = 2147483647;
-            files = (
-                A06D4CC0232F0DB200763E16 /* LaunchScreen.storyboard in Resources */,
-                A06D4CBD232F0DB200763E16 /* Assets.xcassets in Resources */,
-                A06D4CBB232F0DB200763E16 /* Main.storyboard in Resources */,
-            );
-            runOnlyForDeploymentPostprocessing = 0;
-        };
-        A0EA3AFD237FCB08007CEA34 /* Resources */ = {
-            isa = PBXResourcesBuildPhase;
-            buildActionMask = 2147483647;
-            files = (
-            );
-            runOnlyForDeploymentPostprocessing = 0;
-        };
+		A06D4CAE232F0DB200763E16 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A04D8C2C26F52E2B0068CB9D /* model_metal.ptl in Resources */,
+				A06D4CC0232F0DB200763E16 /* LaunchScreen.storyboard in Resources */,
+				A06D4CBD232F0DB200763E16 /* Assets.xcassets in Resources */,
+				A04D8C2B26F52E2B0068CB9D /* model.pt in Resources */,
+				A06D4CBB232F0DB200763E16 /* Main.storyboard in Resources */,
+				A04D8C2D26F52E2B0068CB9D /* mobilenetv2_oss_coreml.ptl in Resources */,
+				A04D8C2E26F52E2B0068CB9D /* model_lite.ptl in Resources */,
+				766BF1B536BA6AE09F462A2C /* model.pt in Resources */,
+				A58F9449F5E7E7E7343DB1DD /* model_metal.ptl in Resources */,
+				BD1DAEB1393C43C38A4E78B0 /* mobilenetv2_oss_coreml.ptl in Resources */,
+				5D45753949B0C3F53BAA75DC /* model_lite.ptl in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A0EA3AFD237FCB08007CEA34 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				97B99A2890B9A30D3A5AF7B8 /* model.pt in Resources */,
+				4E8B97799562368CDE988CF5 /* model_metal.ptl in Resources */,
+				CA749870989AB26B05C44031 /* mobilenetv2_oss_coreml.ptl in Resources */,
+				B7F5B39BDAB221ABC83CBC5F /* model_lite.ptl in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
-        A06D4CAC232F0DB200763E16 /* Sources */ = {
-            isa = PBXSourcesBuildPhase;
-            buildActionMask = 2147483647;
-            files = (
-                A06D4CB8232F0DB200763E16 /* ViewController.mm in Sources */,
-                A06D4CC3232F0DB200763E16 /* main.m in Sources */,
-                A06D4CB5232F0DB200763E16 /* AppDelegate.m in Sources */,
-            );
-            runOnlyForDeploymentPostprocessing = 0;
-        };
-        A0EA3AFB237FCB08007CEA34 /* Sources */ = {
-            isa = PBXSourcesBuildPhase;
-            buildActionMask = 2147483647;
-            files = (
-            );
-            runOnlyForDeploymentPostprocessing = 0;
-        };
+		A06D4CAC232F0DB200763E16 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A06D4CB8232F0DB200763E16 /* ViewController.mm in Sources */,
+				A06D4CC3232F0DB200763E16 /* main.m in Sources */,
+				A06D4CB5232F0DB200763E16 /* AppDelegate.m in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A0EA3AFB237FCB08007CEA34 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				1A2547A03D78018D5FD59E03 /* (null) in Sources */,
+				0A1D6528EEA84EA0F71580E7 /* (null) in Sources */,
+				44FB7A40CC3A65565D7F4D5B /* (null) in Sources */,
+				AFEA2ED4A75717EAB554402B /* (null) in Sources */,
+				647D25363147ADD0B35528A8 /* (null) in Sources */,
+				0E13C55D1621FDE1ACC2F9DB /* (null) in Sources */,
+				C7A759188600CE63155B4B7E /* (null) in Sources */,
+				C4B63441AFB57BF97DBA8FDD /* TestLiteInterpreter.mm in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
-        A0EA3B05237FCB08007CEA34 /* PBXTargetDependency */ = {
-            isa = PBXTargetDependency;
-            target = A06D4CAF232F0DB200763E16 /* TestApp */;
-            targetProxy = A0EA3B04237FCB08007CEA34 /* PBXContainerItemProxy */;
-        };
+		A0EA3B05237FCB08007CEA34 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = A06D4CAF232F0DB200763E16 /* TestApp */;
+			targetProxy = A0EA3B04237FCB08007CEA34 /* PBXContainerItemProxy */;
+		};
 /* End PBXTargetDependency section */
 
 /* Begin PBXVariantGroup section */
-        A06D4CB9232F0DB200763E16 /* Main.storyboard */ = {
-            isa = PBXVariantGroup;
-            children = (
-                A06D4CBA232F0DB200763E16 /* Base */,
-            );
-            name = Main.storyboard;
-            sourceTree = "<group>";
-        };
-        A06D4CBE232F0DB200763E16 /* LaunchScreen.storyboard */ = {
-            isa = PBXVariantGroup;
-            children = (
-                A06D4CBF232F0DB200763E16 /* Base */,
-            );
-            name = LaunchScreen.storyboard;
-            sourceTree = "<group>";
-        };
+		A06D4CB9232F0DB200763E16 /* Main.storyboard */ = {
+			isa = PBXVariantGroup;
+			children = (
+				A06D4CBA232F0DB200763E16 /* Base */,
+			);
+			name = Main.storyboard;
+			sourceTree = "<group>";
+		};
+		A06D4CBE232F0DB200763E16 /* LaunchScreen.storyboard */ = {
+			isa = PBXVariantGroup;
+			children = (
+				A06D4CBF232F0DB200763E16 /* Base */,
+			);
+			name = LaunchScreen.storyboard;
+			sourceTree = "<group>";
+		};
 /* End PBXVariantGroup section */
 
 /* Begin XCBuildConfiguration section */
-        A06D4CC4232F0DB200763E16 /* Debug */ = {
-            isa = XCBuildConfiguration;
-            buildSettings = {
-                ALWAYS_SEARCH_USER_PATHS = NO;
-                CLANG_ANALYZER_NONNULL = YES;
-                CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
-                CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
-                CLANG_CXX_LIBRARY = "libc++";
-                CLANG_ENABLE_MODULES = YES;
-                CLANG_ENABLE_OBJC_ARC = YES;
-                CLANG_ENABLE_OBJC_WEAK = YES;
-                CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
-                CLANG_WARN_BOOL_CONVERSION = YES;
-                CLANG_WARN_COMMA = YES;
-                CLANG_WARN_CONSTANT_CONVERSION = YES;
-                CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
-                CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
-                CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
-                CLANG_WARN_EMPTY_BODY = YES;
-                CLANG_WARN_ENUM_CONVERSION = YES;
-                CLANG_WARN_INFINITE_RECURSION = YES;
-                CLANG_WARN_INT_CONVERSION = YES;
-                CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
-                CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
-                CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
-                CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
-                CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
-                CLANG_WARN_STRICT_PROTOTYPES = YES;
-                CLANG_WARN_SUSPICIOUS_MOVE = YES;
-                CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
-                CLANG_WARN_UNREACHABLE_CODE = YES;
-                CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
-                CODE_SIGN_IDENTITY = "iPhone Developer";
-                COPY_PHASE_STRIP = NO;
-                DEBUG_INFORMATION_FORMAT = dwarf;
-                ENABLE_STRICT_OBJC_MSGSEND = YES;
-                ENABLE_TESTABILITY = YES;
-                GCC_C_LANGUAGE_STANDARD = gnu11;
-                GCC_DYNAMIC_NO_PIC = NO;
-                GCC_NO_COMMON_BLOCKS = YES;
-                GCC_OPTIMIZATION_LEVEL = 0;
-                GCC_PREPROCESSOR_DEFINITIONS = (
-                    "DEBUG=1",
-                    "$(inherited)",
-                );
-                GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
-                GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
-                GCC_WARN_UNDECLARED_SELECTOR = YES;
-                GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
-                GCC_WARN_UNUSED_FUNCTION = YES;
-                GCC_WARN_UNUSED_VARIABLE = YES;
-                IPHONEOS_DEPLOYMENT_TARGET = 12.4;
-                MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
-                MTL_FAST_MATH = YES;
-                ONLY_ACTIVE_ARCH = YES;
-                SDKROOT = iphoneos;
-            };
-            name = Debug;
-        };
-        A06D4CC5232F0DB200763E16 /* Release */ = {
-            isa = XCBuildConfiguration;
-            buildSettings = {
-                ALWAYS_SEARCH_USER_PATHS = NO;
-                CLANG_ANALYZER_NONNULL = YES;
-                CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
-                CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
-                CLANG_CXX_LIBRARY = "libc++";
-                CLANG_ENABLE_MODULES = YES;
-                CLANG_ENABLE_OBJC_ARC = YES;
-                CLANG_ENABLE_OBJC_WEAK = YES;
-                CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
-                CLANG_WARN_BOOL_CONVERSION = YES;
-                CLANG_WARN_COMMA = YES;
-                CLANG_WARN_CONSTANT_CONVERSION = YES;
-                CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
-                CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
-                CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
-                CLANG_WARN_EMPTY_BODY = YES;
-                CLANG_WARN_ENUM_CONVERSION = YES;
-                CLANG_WARN_INFINITE_RECURSION = YES;
-                CLANG_WARN_INT_CONVERSION = YES;
-                CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
-                CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
-                CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
-                CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
-                CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
-                CLANG_WARN_STRICT_PROTOTYPES = YES;
-                CLANG_WARN_SUSPICIOUS_MOVE = YES;
-                CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
-                CLANG_WARN_UNREACHABLE_CODE = YES;
-                CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
-                CODE_SIGN_IDENTITY = "iPhone Developer";
-                COPY_PHASE_STRIP = NO;
-                DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
-                ENABLE_NS_ASSERTIONS = NO;
-                ENABLE_STRICT_OBJC_MSGSEND = YES;
-                GCC_C_LANGUAGE_STANDARD = gnu11;
-                GCC_NO_COMMON_BLOCKS = YES;
-                GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
-                GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
-                GCC_WARN_UNDECLARED_SELECTOR = YES;
-                GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
-                GCC_WARN_UNUSED_FUNCTION = YES;
-                GCC_WARN_UNUSED_VARIABLE = YES;
-                IPHONEOS_DEPLOYMENT_TARGET = 12.4;
-                MTL_ENABLE_DEBUG_INFO = NO;
-                MTL_FAST_MATH = YES;
-                SDKROOT = iphoneos;
-                VALIDATE_PRODUCT = YES;
-            };
-            name = Release;
-        };
-        A06D4CC7232F0DB200763E16 /* Debug */ = {
-            isa = XCBuildConfiguration;
-            buildSettings = {
-                ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-                CODE_SIGN_STYLE = Manual;
-                DEVELOPMENT_TEAM = "";
-                ENABLE_BITCODE = NO;
-                INFOPLIST_FILE = TestApp/Info.plist;
-                LD_RUNPATH_SEARCH_PATHS = (
-                    "$(inherited)",
-                    "@executable_path/Frameworks",
-                );
-                PRODUCT_BUNDLE_IDENTIFIER = com.pytorch.ios.TestApp;
-                PRODUCT_NAME = "$(TARGET_NAME)";
-                PROVISIONING_PROFILE_SPECIFIER = "";
-                TARGETED_DEVICE_FAMILY = "1,2";
-            };
-            name = Debug;
-        };
-        A06D4CC8232F0DB200763E16 /* Release */ = {
-            isa = XCBuildConfiguration;
-            buildSettings = {
-                ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-                CODE_SIGN_STYLE = Manual;
-                DEVELOPMENT_TEAM = "";
-                ENABLE_BITCODE = NO;
-                INFOPLIST_FILE = TestApp/Info.plist;
-                LD_RUNPATH_SEARCH_PATHS = (
-                    "$(inherited)",
-                    "@executable_path/Frameworks",
-                );
-                PRODUCT_BUNDLE_IDENTIFIER = com.pytorch.ios.TestApp;
-                PRODUCT_NAME = "$(TARGET_NAME)";
-                PROVISIONING_PROFILE_SPECIFIER = "";
-                TARGETED_DEVICE_FAMILY = "1,2";
-            };
-            name = Release;
-        };
-        A0EA3B06237FCB08007CEA34 /* Debug */ = {
-            isa = XCBuildConfiguration;
-            buildSettings = {
-                CODE_SIGN_IDENTITY = "iPhone Developer";
-                CODE_SIGN_STYLE = Manual;
-                DEVELOPMENT_TEAM = "";
-                INFOPLIST_FILE = TestAppTests/Info.plist;
-                IPHONEOS_DEPLOYMENT_TARGET = 12.4;
-                LD_RUNPATH_SEARCH_PATHS = (
-                    "$(inherited)",
-                    "@executable_path/Frameworks",
-                    "@loader_path/Frameworks",
-                );
-                PRODUCT_BUNDLE_IDENTIFIER = com.pytorch.ios.TestAppTests;
-                PRODUCT_NAME = "$(TARGET_NAME)";
-                PROVISIONING_PROFILE_SPECIFIER = "";
-                "PROVISIONING_PROFILE_SPECIFIER[sdk=macosx*]" = "";
-                TARGETED_DEVICE_FAMILY = "1,2";
-            };
-            name = Debug;
-        };
-        A0EA3B07237FCB08007CEA34 /* Release */ = {
-            isa = XCBuildConfiguration;
-            buildSettings = {
-                CODE_SIGN_STYLE = Automatic;
-                INFOPLIST_FILE = TestAppTests/Info.plist;
-                IPHONEOS_DEPLOYMENT_TARGET = 12.4;
-                LD_RUNPATH_SEARCH_PATHS = (
-                    "$(inherited)",
-                    "@executable_path/Frameworks",
-                    "@loader_path/Frameworks",
-                );
-                PRODUCT_BUNDLE_IDENTIFIER = com.pytorch.ios.TestAppTests;
-                PRODUCT_NAME = "$(TARGET_NAME)";
-                TARGETED_DEVICE_FAMILY = "1,2";
-            };
-            name = Release;
-        };
+		A06D4CC4232F0DB200763E16 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 12.4;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = iphoneos;
+			};
+			name = Debug;
+		};
+		A06D4CC5232F0DB200763E16 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 12.4;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				SDKROOT = iphoneos;
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		A06D4CC7232F0DB200763E16 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_STYLE = Manual;
+				DEVELOPMENT_TEAM = "";
+				ENABLE_BITCODE = No;
+				HEADER_SEARCH_PATHS = (
+					"$(inherited)",
+					/Users/taox/Projects/pytorch/build_ios/install/include,
+				);
+				INFOPLIST_FILE = TestApp/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				LIBRARY_SEARCH_PATHS = (
+					"$(inherited)",
+					/Users/taox/Projects/pytorch/build_ios/install/lib,
+				);
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-all_load",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.pytorch.ios.TestApp;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		A06D4CC8232F0DB200763E16 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_STYLE = Manual;
+				DEVELOPMENT_TEAM = "";
+				ENABLE_BITCODE = No;
+				HEADER_SEARCH_PATHS = (
+					"$(inherited)",
+					/Users/taox/Projects/pytorch/build_ios/install/include,
+				);
+				INFOPLIST_FILE = TestApp/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				LIBRARY_SEARCH_PATHS = (
+					"$(inherited)",
+					/Users/taox/Projects/pytorch/build_ios/install/lib,
+				);
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-all_load",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.pytorch.ios.TestApp;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		A0EA3B06237FCB08007CEA34 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_STYLE = Manual;
+				DEVELOPMENT_TEAM = "";
+				ENABLE_BITCODE = No;
+				HEADER_SEARCH_PATHS = (
+					"$(inherited)",
+					/Users/taox/Projects/pytorch/build_ios/install/include,
+				);
+				INFOPLIST_FILE = TestAppTests/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 12.4;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				LIBRARY_SEARCH_PATHS = (
+					"$(inherited)",
+					/Users/taox/Projects/pytorch/build_ios/install/lib,
+				);
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-all_load",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.pytorch.ios.TestAppTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
+				"PROVISIONING_PROFILE_SPECIFIER[sdk=macosx*]" = "";
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		A0EA3B07237FCB08007CEA34 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				ENABLE_BITCODE = No;
+				HEADER_SEARCH_PATHS = (
+					"$(inherited)",
+					/Users/taox/Projects/pytorch/build_ios/install/include,
+				);
+				INFOPLIST_FILE = TestAppTests/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 12.4;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				LIBRARY_SEARCH_PATHS = (
+					"$(inherited)",
+					/Users/taox/Projects/pytorch/build_ios/install/lib,
+				);
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-all_load",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.pytorch.ios.TestAppTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-        A06D4CAB232F0DB200763E16 /* Build configuration list for PBXProject "TestApp" */ = {
-            isa = XCConfigurationList;
-            buildConfigurations = (
-                A06D4CC4232F0DB200763E16 /* Debug */,
-                A06D4CC5232F0DB200763E16 /* Release */,
-            );
-            defaultConfigurationIsVisible = 0;
-            defaultConfigurationName = Release;
-        };
-        A06D4CC6232F0DB200763E16 /* Build configuration list for PBXNativeTarget "TestApp" */ = {
-            isa = XCConfigurationList;
-            buildConfigurations = (
-                A06D4CC7232F0DB200763E16 /* Debug */,
-                A06D4CC8232F0DB200763E16 /* Release */,
-            );
-            defaultConfigurationIsVisible = 0;
-            defaultConfigurationName = Release;
-        };
-        A0EA3B08237FCB08007CEA34 /* Build configuration list for PBXNativeTarget "TestAppTests" */ = {
-            isa = XCConfigurationList;
-            buildConfigurations = (
-                A0EA3B06237FCB08007CEA34 /* Debug */,
-                A0EA3B07237FCB08007CEA34 /* Release */,
-            );
-            defaultConfigurationIsVisible = 0;
-            defaultConfigurationName = Release;
-        };
+		A06D4CAB232F0DB200763E16 /* Build configuration list for PBXProject "TestApp" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A06D4CC4232F0DB200763E16 /* Debug */,
+				A06D4CC5232F0DB200763E16 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		A06D4CC6232F0DB200763E16 /* Build configuration list for PBXNativeTarget "TestApp" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A06D4CC7232F0DB200763E16 /* Debug */,
+				A06D4CC8232F0DB200763E16 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		A0EA3B08237FCB08007CEA34 /* Build configuration list for PBXNativeTarget "TestAppTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A0EA3B06237FCB08007CEA34 /* Debug */,
+				A0EA3B07237FCB08007CEA34 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 /* End XCConfigurationList section */
-    };
-    rootObject = A06D4CA8232F0DB200763E16 /* Project object */;
+	};
+	rootObject = A06D4CA8232F0DB200763E16 /* Project object */;
 }

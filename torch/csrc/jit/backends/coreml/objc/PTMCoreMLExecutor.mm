@@ -127,12 +127,12 @@
         [_mlModel predictionFromFeatures:inputFeature
                                  options:options
                                    error:&error];
-    if (error || !outputFeature) {
-      TORCH_CHECK(
-          false,
-          "Error running the prediction",
-          error.localizedDescription.UTF8String);
-    }
+    // if (error || !outputFeature) {
+    //   TORCH_CHECK(
+    //       false,
+    //       "Error running the prediction",
+    //       error.localizedDescription.UTF8String);
+    // }
 
     return outputFeature;
   } else {
