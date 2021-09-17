@@ -187,14 +187,16 @@ void prepare_and_call_rpc_op(
 RegisterOperators reg_rpc_ops(
     {Operator(
          fmt::format(
-             "aten::to_here(RRef(t) self, float timeout = {}, Dict(Device, Device) device_map = None) -> t(*)", // TODO(pbelevich): what to do with default value?
+             "aten::to_here(RRef(t) self, float timeout = {}, Dict(Device, Device)? device_map = None) -> t(*)",
              torch::distributed::rpc::kDefaultRpcTimeoutSeconds),
          [](Stack& stack) {
            auto deviceMapDictIValue = pop(stack);
-           TORCH_INTERNAL_ASSERT(deviceMapDictIValue.isGenericDict());
            dist_rpc::DeviceMap deviceMap;
-           for (const auto& pair : deviceMapDictIValue.toGenericDict()) {
-             deviceMap.insert({pair.key().toDevice(), pair.value().toDevice()});
+           if (!deviceMapDictIValue.isNone()) {
+             TORCH_INTERNAL_ASSERT(deviceMapDictIValue.isGenericDict());
+             for (const auto& pair : deviceMapDictIValue.toGenericDict()) {
+               deviceMap.insert({pair.key().toDevice(), pair.value().toDevice()});
+             }
            }
            auto timeout = pop(stack).toDouble();
            auto rref = pop(stack).toRRef();

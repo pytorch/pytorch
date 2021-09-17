@@ -297,12 +297,6 @@ struct SchemaParser {
           return parseConstantList(elem_kind->kind());
         }
       } break;
-      // TODO(pbelevich): this is temporary solution
-      case TypeKind::DictType: { 
-        parseSingleConstant(arg_type->kind());
-        return c10::impl::GenericDict(c10::DeviceObjType::get(), c10::DeviceObjType::get());
-        break;
-      }
       default:
         throw ErrorReport(range) << "unexpected type, file a bug report";
     }
