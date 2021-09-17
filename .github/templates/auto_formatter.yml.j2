@@ -1,5 +1,11 @@
 {% import 'common.yml.j2' as common %}
 
+{%- block name -%}
+# Template is at:    .github/templates/auto_formatter.yml.j2
+# Generation script: .github/scripts/generate_ci_workflows.py
+name: !{{ build_environment }}
+{%- endblock %}
+
 name: autoformatter
 
 on:
@@ -9,7 +15,7 @@ on:
   pull_request:  # TODO: remove this before landing!
 
 concurrency:
-  group: autoformatter-${{ github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  group: periodic-auto-formatter-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true
 
 jobs:

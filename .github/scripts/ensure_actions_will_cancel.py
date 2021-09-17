@@ -48,7 +48,8 @@ if __name__ == "__main__":
         }
         if data.get("concurrency", None) != expected:
             print(
-                f"'concurrency' incorrect or not found in '{filename.relative_to(REPO_ROOT)}'",
+                f"'concurrency' incorrect or not found in '{filename.relative_to(REPO_ROOT)}',"
+                f" expected '{expected}'",
                 file=sys.stderr,
             )
             errors_found = True

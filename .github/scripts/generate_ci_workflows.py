@@ -2,7 +2,7 @@
 
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Dict, Set
+from typing import Dict, Set, List, Any, Tuple
 
 import jinja2
 import json
@@ -562,7 +562,6 @@ if __name__ == "__main__":
         loader=jinja2.FileSystemLoader(str(GITHUB_DIR.joinpath("templates"))),
         undefined=jinja2.StrictUndefined,
     )
-    from typing import *
     template_and_workflows: List[Tuple[Any, Any]] = [
         (jinja_env.get_template("linux_ci_workflow.yml.j2"), LINUX_WORKFLOWS),
         (jinja_env.get_template("windows_ci_workflow.yml.j2"), WINDOWS_WORKFLOWS),
