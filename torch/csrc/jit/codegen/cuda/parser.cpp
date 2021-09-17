@@ -761,10 +761,11 @@ class IrParser {
                   eps_ptr);
 
               if (node->kind() ==
-                  c10::Symbol::fromQualString("aten::native_batch_norm") ||
+                      c10::Symbol::fromQualString("aten::native_batch_norm") ||
 
                   node->kind() ==
-                  c10::Symbol::fromQualString("aten::_batch_norm_impl_index")) {
+                      c10::Symbol::fromQualString(
+                          "aten::_batch_norm_impl_index")) {
                 // TODO: output 3 & 4 are not created for _batch_norm_impl_index
                 //       we are not creating these outputs because codegen
                 //       currently lacks the support.

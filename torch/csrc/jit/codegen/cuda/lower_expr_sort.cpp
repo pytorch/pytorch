@@ -951,7 +951,8 @@ bool canReducePA(ExprGroup* group) {
 
     // If any compute at positions of producers directly map to the last produce
     // at position it can't be lowered.
-    for (int producer_pos_i = static_cast<int>(producer_tv->getComputeAtPosition());
+    for (int producer_pos_i =
+             static_cast<int>(producer_tv->getComputeAtPosition());
          producer_pos_i > 0;
          producer_pos_i--) {
       if (GpuLower::current()->caLoopMap().areMapped(
