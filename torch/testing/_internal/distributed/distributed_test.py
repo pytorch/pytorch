@@ -7952,15 +7952,14 @@ class DistributedTest:
                 device_ids=[self.rank],
             )
             inp = torch.randn(2, 10, device=rank)
-            for i in range(6):
+            for i in range(2):
                 if rank == 0:
                     model_ddp.module.buffer = model_ddp.module.buffer + 1
                 loss = model_ddp(inp).sum()
                 loss.backward()
                 # Ensure all buffers are synchronized.
-                bufs = [None for _ in range(dist.get_world_size())]
-                dist.all_gather_object(bufs, model_ddp.module.buffer)
-                bufs = [b.cpu() for b in bufs]
+                bufs = [torch.empty_like(model_ddp.module.buffer) for _ in range(dist.get_world_size())]
+                dist.all_gather(bufs, model_ddp.module.buffer)
                 rank_0_buf = bufs[0]
                 for buf in bufs[1:]:
                     self.assertEqual(rank_0_buf, buf)
