@@ -342,12 +342,11 @@ FusionKernelRuntime* FusionExecutorCache::getKernelRuntimeFor(
       kernel_runtimes.begin(),
       kernel_runtimes.end(),
       [&inputs, &new_heuristics](auto& kernel_runtime) {
-        auto maybe_heuristics = kernel_runtime->getMaybeHeuristicsFor(inputs);
-        if (!maybe_heuristics.has_value()) {
-          return false;
+        if (auto maybe_heuristics = kernel_runtime->getMaybeHeuristicsFor(inputs)) {
+          new_heuristics = std::move(maybe_heuristics);
+          return true;
         }
-        new_heuristics = std::move(maybe_heuristics.value());
-        return true;
+        return false;
       });
 
   FusionKernelRuntime* kernel_runtime;
@@ -647,14 +646,14 @@ void FusionKernelRuntime::updateHeuristicsLaunchParams(
   }
 }
 
-c10::optional<FusionKernelRuntime::HeuristicsPtr> FusionKernelRuntime::
+std::unique_ptr<FusionHeuristics> FusionKernelRuntime::
     getMaybeHeuristicsFor(const at::ArrayRef<IValue>& inputs) {
   FUSER_PERF_SCOPE("FusionKernelRuntime::getMaybeHeuristicsFor");
   auto complete_fusion = is_segmented_ ? segmented_fusion_->completeFusion()
                                        : single_kernel_fusion_.get();
   SchedulerRuntimeInfo runtime_info(complete_fusion, inputs, true);
 
-  c10::optional<FusionKernelRuntime::HeuristicsPtr> ret;
+  std::unique_ptr<FusionHeuristics> ret;
   // Segmented case, need to iterate over all segmented groups
   if (is_segmented_) {
     ret = std::make_unique<FusionHeuristics>();
@@ -664,14 +663,14 @@ c10::optional<FusionKernelRuntime::HeuristicsPtr> FusionKernelRuntime::
 
       auto maybe_scheduler_entry = group->getMaybeSchedulerEntry(runtime_info);
       if (!maybe_scheduler_entry.has_value()) {
-        return c10::nullopt;
+        return nullptr;
       }
       auto scheduler_entry = std::move(maybe_scheduler_entry.value());
       if (!scheduler_entry->sameAs(
               heuristics_->heuristicsList()[group_index].get())) {
-        return c10::nullopt;
+        return nullptr;
       }
-      ret.value()->emplaceBack(std::move(scheduler_entry));
+      ret->emplaceBack(std::move(scheduler_entry));
     }
 
     return ret;
@@ -685,7 +684,7 @@ c10::optional<FusionKernelRuntime::HeuristicsPtr> FusionKernelRuntime::
           complete_fusion,
           runtime_info,
           single_kernel_fusion_data_cache_.get())) {
-    return c10::nullopt;
+    return nullptr;
   }
 
   ret = std::make_unique<FusionHeuristics>(
@@ -693,8 +692,8 @@ c10::optional<FusionKernelRuntime::HeuristicsPtr> FusionKernelRuntime::
       runtime_info,
       single_kernel_fusion_data_cache_.get());
   if (!complete_fusion_scheduler->sameAs(
-          ret.value()->heuristicsList()[0].get())) {
-    return c10::nullopt;
+          ret->heuristicsList()[0].get())) {
+    return nullptr;
   }
 
   return ret;

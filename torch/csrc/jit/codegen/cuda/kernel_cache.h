@@ -108,8 +108,7 @@ class TORCH_CUDA_CU_API FusionKernelRuntime {
   // Try to compute heuristics based on the SegmentedFusion managed
   //  in this kernel runtime, and will return a nullopt if either
   //  any segment cannot be scheduled or the parameters don't match
-  using HeuristicsPtr = std::unique_ptr<FusionHeuristics>;
-  c10::optional<HeuristicsPtr> getMaybeHeuristicsFor(
+  std::unique_ptr<FusionHeuristics> getMaybeHeuristicsFor(
       const at::ArrayRef<IValue>& inputs);
 
   //! Copy the launch params given in the parameter heuristics to prepare

@@ -112,7 +112,7 @@ static void LayerNormBackward_HeuristicLookup(
   auto runtime = getLayerBackwardNormRuntime(
       std::move(fusion_ptr), fec, aten_inputs, shape, norm_shape);
   TORCH_INTERNAL_ASSERT(
-      runtime->getMaybeHeuristicsFor(aten_inputs).has_value());
+      runtime->getMaybeHeuristicsFor(aten_inputs));
 
   for (auto _ : benchmark_state) {
     // Setup (not included in the measurement)
@@ -165,7 +165,7 @@ static void LayerNormForward_HeuristicLookup(
   auto runtime = getLayerForwardNormRuntime(
       std::move(fusion_ptr), fec, aten_inputs, shape, norm_shape);
   TORCH_INTERNAL_ASSERT(
-      runtime->getMaybeHeuristicsFor(aten_inputs).has_value());
+      runtime->getMaybeHeuristicsFor(aten_inputs));
 
   for (auto _ : benchmark_state) {
     // Setup (not included in the measurement)
