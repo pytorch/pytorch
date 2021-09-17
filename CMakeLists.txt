@@ -309,7 +309,7 @@ cmake_dependent_option(
 cmake_dependent_option(
     USE_TENSORPIPE "Use TensorPipe. Only available if USE_DISTRIBUTED is on." ON
     "USE_DISTRIBUTED" OFF)
-option(USE_TBB "Use TBB" OFF)
+option(USE_TBB "Use TBB (Deprecated)" OFF)
 cmake_dependent_option(
     USE_SYSTEM_TBB "Use system-provided Intel TBB." OFF "USE_TBB" OFF)
 option(ONNX_ML "Enable traditional ONNX ML API." ON)
