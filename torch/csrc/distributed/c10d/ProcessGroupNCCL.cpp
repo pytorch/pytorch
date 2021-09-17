@@ -908,9 +908,7 @@ void ProcessGroupNCCL::destroyNCCLComms(const std::string& devNCCLCommMapKey) {
   }
   std::vector<std::shared_ptr<NCCLComm>>& ncclComms =
       devNCCLCommMap_[devNCCLCommMapKey];
-  // Loop through communicators and call ncclCommDestroy. We call
-  // ncclCommDestroy instead of ncclCommAbort since there are no ops we
-  // expect to abort as part of health check.
+  // Loop through communicators and call ncclCommAbort.
   for (const auto& comm : ncclComms) {
     // ncclCommDestroy(comm->getNcclComm()) results in segfault when PG is being
     // destroyed, so using ncclCommAbort here.
