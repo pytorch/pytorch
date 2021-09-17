@@ -5,8 +5,6 @@
 #include <c10/util/MaybeOwned.h>
 #include <ATen/native/LinearAlgebraUtils.h>
 
-#include <iostream>
-
 namespace at { namespace native {
 
 namespace {

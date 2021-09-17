@@ -4,8 +4,6 @@
 #include <ATen/native/cuda/Loops.cuh>
 #include <c10/macros/Macros.h>
 
-#include <iostream>
-
 namespace at {
 namespace cuda {
 namespace blas {
