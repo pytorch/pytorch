@@ -146,7 +146,7 @@ at::Device getDeviceForRank(int rank) {
   TORCH_CHECK(rank >= 0, "Invalid rank ", rank);
   auto numGPUs = at::cuda::getNumGPUs();
   int16_t deviceIdx = static_cast<int16_t>(rank % numGPUs);
-  return at::Device(at::DeviceType::CUDA, rank);
+  return at::Device(at::DeviceType::CUDA, deviceIdx);
 }
 
 // [Sync Streams] Helper that lets the input ncclStreams to wait for the current
