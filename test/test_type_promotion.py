@@ -421,7 +421,8 @@ class TestTypePromotion(TestCase):
             10,  # int scalar
             10.0,  # float scalar
             10j,  # complex scalar
-            *[torch.tensor([1, 2, 3], dtype=dtype) for dtype in dtypes],  # tensors
+            *[torch.tensor([1, 2, 3], dtype=dtype, device=device) for dtype in dtypes],  # tensors
+            *[torch.tensor([1, 2, 3], dtype=dtype) for dtype in dtypes],  # cpu tensors
             *dtypes,  # tensors
         ]
 
@@ -436,9 +437,9 @@ class TestTypePromotion(TestCase):
                     tensor = tensor + torch.tensor([1], dtype=arg)
                 elif isinstance(arg, torch.Tensor):
                     if arg.ndim == 0:
-                        tensor_0dim = tensor_0dim + arg
+                        tensor_0dim = tensor_0dim.cpu() + arg
                     else:
-                        tensor = tensor + arg
+                        tensor = tensor + arg.cpu()
                 elif isinstance(arg, Number):
                     scalar = (scalar + torch.tensor(arg)).item()
                 else:
