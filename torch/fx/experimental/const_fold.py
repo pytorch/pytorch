@@ -110,8 +110,11 @@ def split_const_subgraphs(
     split = split_module(mod_traced, module, mod_partition)
 
     # Later we are creating get_attr nodes from main module get_attr nodes and we use the
-    # same node.target. If we don't set the owning_module here, we won't be able to find
-    # the targets of get_attr nodes.
+    # same node.target. If there's a get_attr that refers to an attributes in a module and
+    # this module is not included in submod_1 then we would have a trouble when creating
+    # get_attr ndoes because it will try to find the module that owns the attribute first.
+    # Setting owning_module here makes the owning_module of submod_1.graph to None then
+    # the check when creating get_attr nodes will get skipped.
     split.submod_1.graph.owning_module = mod_traced
 
     # The module that a call_module node refers to gets copied to submodules during split.
@@ -230,6 +233,7 @@ def split_const_subgraphs(
                 const_output_name,
                 torch.nn.Parameter(torch.randn(1)),
             )
+
         with split.submod_1.graph.inserting_before(node):
             new_node = split.submod_1.graph.get_attr(const_output_name)
             new_node.meta = node.meta.copy()
