@@ -109,6 +109,18 @@ def split_const_subgraphs(
 
     split = split_module(mod_traced, module, mod_partition)
 
+    # Later we are creating get_attr nodes from main module get_attr nodes and we use the
+    # same node.target. If we don't set the owning_module here, we won't be able to find
+    # the targets of get_attr nodes.
+    split.submod_1.graph.owning_module = mod_traced
+
+    # The module that a call_module node refers to gets copied to submodules during split.
+    # The path to the module also gets inlined, i.e. mod.a.b -> mod_a_b. Here we need to
+    # attach inlined modules to `mod_traced` as it's the owning module now.
+    for node in split.submod_1.graph.nodes:
+        if node.op == "call_module":
+            setattr(mod_traced, node.target, getattr(split.submod_1, node.target))
+
     # Gather all names that are output from the const folding subgraph, which we
     # will need to set dummy params on the module.
     const_output_names: List[str] = []
@@ -194,6 +206,7 @@ def split_const_subgraphs(
     # Now we have a mapping from const output names to the index they are passed
     # into submod_1, so swap in getattrs for placeholders.
     ph_idx = 0
+
     for node in split.submod_1.graph.nodes:
         if node.op != "placeholder":
             continue
