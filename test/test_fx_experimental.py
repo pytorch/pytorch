@@ -32,7 +32,7 @@ from torch.fx.operator_schemas import (
     type_matches,
     create_type_hint,
 )
-from torch.fx.passes.shape_prop import extract_tensor_metadata, ShapeProp
+from torch.fx.passes.shape_prop import _extract_tensor_metadata, ShapeProp
 from torch.fx.passes.split_module import split_module
 from torch.testing._internal.common_device_type import (
     ops,
@@ -96,13 +96,13 @@ class TestFXExperimental(JitTestCase):
         # Fix for now to add type/shape to output
         for node in traced.graph.nodes:
             if node.op == "output":
-                node.meta["tensor_meta"] = extract_tensor_metadata(a)
+                node.meta["tensor_meta"] = _extract_tensor_metadata(a)
         for mod in module_with_submodules.modules():
             if isinstance(mod, GraphModule):
                 for node in mod.graph.nodes:
-                    node.meta["tensor_meta"] = extract_tensor_metadata(a)
+                    node.meta["tensor_meta"] = _extract_tensor_metadata(a)
         for node in module_with_submodules.graph.nodes:
-            node.meta["tensor_meta"] = extract_tensor_metadata(a)
+            node.meta["tensor_meta"] = _extract_tensor_metadata(a)
 
         weights1 = {}
         weights2 = {}
@@ -1459,13 +1459,20 @@ class TestNormalizeOperators(JitTestCase):
     def test_normalize_operator_exhaustive(self, device, dtype, op):
         # Sorted and one entry on each line to minimize merge conflicts.
         op_skip = {
+            # See: https://github.com/pytorch/pytorch/issues/64997
+            "block_diag",
+            "broadcast_tensors",
             "contiguous",
             "einsum",
             "expand",
             "expand_as",
             "fill_",
             "gradient",
+            "igamma",
+            "igammac",
             "index_put",
+            "nn.functional.conv2d",
+            "nn.functional.dropout",
             "polygamma",
             "special.polygamma",
             "repeat",
@@ -1497,7 +1504,7 @@ class TestNormalizeOperators(JitTestCase):
             return
 
         # These ops currently don't trace in FX for various reasons (i.e. they take a list of tensors)
-        fx_fail = {"stack", "hstack", "vstack", "dstack", "linalg.multi_dot"}
+        fx_fail = {"cat", "stack", "hstack", "vstack", "dstack", "linalg.multi_dot"}
         sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)
         for sample_input in sample_inputs_itr:
             unsupported_arg_type = False

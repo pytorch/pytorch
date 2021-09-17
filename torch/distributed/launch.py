@@ -4,7 +4,7 @@ training processes on each of the training nodes.
 
 .. warning::
 
-    This module is going to be deprecated in favor of :ref:`torch.distributed.run <launcher-api>`.
+    This module is going to be deprecated in favor of :ref:`torchrun <launcher-api>`.
 
 The utility can be used for single-node distributed training, in which one or
 more processes per node will be spawned. The utility can be used for either
@@ -177,8 +177,8 @@ def launch(args):
 def main(args=None):
     warnings.warn(
         "The module torch.distributed.launch is deprecated\n"
-        "and will be removed in future. Use torch.distributed.run.\n"
-        "Note that --use_env is set by default in torch.distributed.run.\n"
+        "and will be removed in future. Use torchrun.\n"
+        "Note that --use_env is set by default in torchrun.\n"
         "If your script expects `--local_rank` argument to be set, please\n"
         "change it to read from `os.environ['LOCAL_RANK']` instead. See \n"
         "https://pytorch.org/docs/stable/distributed.html#launch-utility for \n"

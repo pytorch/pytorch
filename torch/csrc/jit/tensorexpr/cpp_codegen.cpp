@@ -149,7 +149,7 @@ void dispatch_binary_op(std::ostream& os, const BinaryOpNode<Op>* v) {
   case ScalarType::Name:                                           \
     visit_binary_op<Type>(os, v->lhs(), v->rhs(), v->expr_type()); \
     break;
-    AT_FORALL_SCALAR_TYPES_AND2(Half, Bool, TYPE_CASE);
+    AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TYPE_CASE);
 #undef TYPE_CASE
     default:
       throw unsupported_dtype();

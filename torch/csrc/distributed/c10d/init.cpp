@@ -17,7 +17,7 @@
 
 #ifdef USE_C10D_NCCL
 #include <c10d/ProcessGroupNCCL.hpp>
-#include <torch/csrc/distributed/c10d/quantization/quantization_gpu.h>
+#include <torch/csrc/distributed/c10d/frontend_cuda.hpp>
 #endif
 
 #ifdef USE_C10D_MPI
@@ -35,7 +35,6 @@
 
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/distributed/c10d/python_comm_hook.h>
-#include <torch/csrc/distributed/c10d/quantization/quantization.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/utils/object_ptr.h>
 #include <torch/csrc/utils/pybind.h>
@@ -233,6 +232,9 @@ void _register_builtin_comm_hook(
 PyObject* c10d_init(PyObject* _unused, PyObject* noargs) {
   C10_LOG_API_USAGE_ONCE("c10d.python.import");
   ::c10d::initCustomClassBindings();
+#ifdef USE_C10D_NCCL
+  ::c10d::initCustomClassBindingsNccl();
+#endif
 
   auto c10d_module = THPObjectPtr(PyImport_ImportModule("torch.distributed"));
   if (!c10d_module) {
@@ -1542,18 +1544,40 @@ Example::
 
   module.def(
       "_compute_bucket_assignment_by_size",
-      &::c10d::compute_bucket_assignment_by_size,
+      [](const std::vector<at::Tensor>& tensors,
+            const std::vector<size_t>& bucket_size_limits,
+            const std::vector<bool>& expect_sparse_gradient,
+            const std::vector<int64_t>& tensor_indices,
+            const c10::optional<std::shared_ptr<::c10d::Logger>>& logger) {
+             if (logger.has_value()) {
+                std::weak_ptr<::c10d::Logger> logger_weakref = logger.value();
+                return ::c10d::compute_bucket_assignment_by_size(tensors, bucket_size_limits, expect_sparse_gradient, tensor_indices, {logger_weakref});
+             } else {
+                return ::c10d::compute_bucket_assignment_by_size(tensors, bucket_size_limits, expect_sparse_gradient, tensor_indices, {});
+             }
+      },
       py::arg("tensors"),
       py::arg("bucket_size"),
       py::arg("expect_sparse_gradient") = std::vector<bool>(),
       py::arg("tensor_indices") = std::vector<int64_t>(),
+      py::arg("logger") = c10::optional<std::shared_ptr<::c10d::Logger>>{},
       py::call_guard<py::gil_scoped_release>());
 
   module.def(
       "_verify_model_across_ranks",
-      &::c10d::verify_replica0_across_processes,
+      [](const c10::intrusive_ptr<::c10d::ProcessGroup>& process_group,
+         const std::vector<std::vector<at::Tensor>>& model_replicas,
+         const c10::optional<std::shared_ptr<::c10d::Logger>>& logger) {
+             if (logger.has_value()) {
+                std::weak_ptr<::c10d::Logger> logger_weakref = logger.value();
+                verify_replica0_across_processes(process_group, model_replicas, {logger_weakref});
+             } else {
+                verify_replica0_across_processes(process_group, model_replicas, {});
+             }
+      },
       py::arg("process_group"),
       py::arg("replicas"),
+      py::arg("logger") = c10::optional<std::shared_ptr<::c10d::Logger>>{},
       py::call_guard<py::gil_scoped_release>());
 
   module.def(
@@ -1646,28 +1670,6 @@ static PyMethodDef methods[] = { // NOLINT
 PyMethodDef* python_functions() {
   return methods;
 }
-
-namespace quantization {
-TORCH_LIBRARY(q, m) {
-    m.def("_Bfloat16QuantizedToFloat(Tensor input) -> Tensor");
-    m.def("_FloatToBfloat16Quantized(Tensor input) -> Tensor");
-}
-    TORCH_LIBRARY_IMPL(q, CPU, m) {
-        m.impl("_Bfloat16QuantizedToFloat", _bfloat16_to_float_cpu);
-        m.impl("_FloatToBfloat16Quantized", _float_to_bfloat16_cpu);
-    }
-
-#ifdef USE_C10D_NCCL
-    #define DISPATCH_TO_CUDA(name, function) \
-        m.impl(name, torch::dispatch(c10::DispatchKey::CUDA, TORCH_FN(function)))
-    TORCH_LIBRARY_IMPL(q, CUDA, m) {
-        DISPATCH_TO_CUDA("_Bfloat16QuantizedToFloat", _bfloat16_to_float_cuda);
-        DISPATCH_TO_CUDA("_FloatToBfloat16Quantized", _float_to_bfloat16_cuda);
-    }
-#endif
-
-} // namespace quantization
-
 } // namespace c10d
 } // namespace distributed
 } // namespace torch

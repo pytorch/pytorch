@@ -107,7 +107,6 @@ class TORCH_API CodeGen {
 
 class CodeGen::BufferArg {
  public:
-  BufferArg(const Placeholder& buffer) : buf_(buffer.data()) {}
   BufferArg(Tensor tensor) : buf_(tensor.buf()) {}
   BufferArg(const VarHandle& var) : var_(var.node()), isVar_(true) {}
   BufferArg(const BufHandle& buf) : buf_(buf.node()) {}
@@ -153,7 +152,7 @@ class CodeGen::CallArg {
     memcpy(&data_, &v, sizeof(Type)); \
   }
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-  AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, ARG_TYPE_CTOR);
+  AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, ARG_TYPE_CTOR);
 #undef ARG_TYPE_CTOR
 
   void* data() const {
@@ -165,7 +164,7 @@ class CodeGen::CallArg {
     return (Type*)&data_;          \
   }
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-  AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, ARG_PTR_DEFINE);
+  AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, ARG_PTR_DEFINE);
 #undef ARG_PTR_DEFINE
 
  private:
