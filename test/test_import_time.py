@@ -1,8 +1,6 @@
 import subprocess
-import re
 import sys
 import unittest
-import shutil
 import pathlib
 
 from torch.testing._internal.common_utils import TestCase, run_tests, IS_LINUX, IS_IN_CI
@@ -33,47 +31,30 @@ class TestImportTime(TestCase):
         )
 
     @unittest.skipIf(not IS_LINUX, "Memory test is only implemented for Linux")
-    # @unittest.skipIf(not IS_IN_CI, "Memory test only runs in CI")
+    @unittest.skipIf(not IS_IN_CI, "Memory test only runs in CI")
     def test_peak_memory(self):
-        def profile(command, name):
-            time_executable = shutil.which("time")
-            if time_executable is None:
-                raise RuntimeError(
-                    "No 'time' executable found, cannot measure memory usage"
-                )
+        def profile(module, name):
+            command = f"import {module}; import resource; print(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)"
             result = subprocess.run(
-                [time_executable, "-v", sys.executable, "-c", command],
-                stderr=subprocess.PIPE,
+                [sys.executable, "-c", command],
+                stdout=subprocess.PIPE,
             )
-            lines = result.stderr.decode().split("\n")
-
-            def parse_time(pattern):
-                search_re = re.compile(pattern)
-                for line in lines:
-                    match = search_re.search(line)
-                    if match:
-                        return float(match.groups()[0])
-
-                raise RuntimeError(
-                    f"Unable to find '{pattern}' in /usr/bin/time -v output"
-                )
+            max_rss = int(result.stdout.decode().strip())
 
             return {
                 "test_name": name,
-                "peak_memory_bytes": int(
-                    parse_time(r"Maximum resident set size \(kbytes\): (\d+)")
-                ),
-                "time_ms": int(parse_time(r"User time \(seconds\): ([0-9.]+)") * 1000),
+                "peak_memory_bytes": max_rss,
             }
 
-        data = profile("import torch", "pytorch")
+        data = profile("torch", "pytorch")
         rds_write(
             "import_stats", data, only_on_master=False
         )  # TODO: remove only_on_master arg
-        baseline = profile("import sys", "baseline")
+        baseline = profile("sys", "baseline")
         rds_write(
             "import_stats", baseline, only_on_master=False
         )  # TODO: remove only_on_master arg
+        print(data, baseline)
 
 
 if __name__ == "__main__":
