@@ -1424,6 +1424,8 @@ class DistributedDataParallel(Module, Joinable):
                 self.broadcast_buffers and len(self.modules_buffers) > 0
             ) and (
                 not buffer_hook_registered
+                # If the buffer comm. hooks is registered, only return true if
+                # the comm hook location specifies matches the passed in one.
                 or self.buffer_hook.buffer_comm_hook_location == buffer_comm_hook_location
             )
         )
