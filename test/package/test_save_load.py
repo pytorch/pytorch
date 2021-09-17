@@ -237,7 +237,7 @@ class TestSaveLoad(PackageTestCase):
     def test_save_imported_module_using_package_importer(self):
         """Exercise a corner case: re-packaging a module that uses `torch_package_importer`
         """
-        import package_a.use_torch_package_importer
+        import package_a.use_torch_package_importer  # noqa: F401
 
         buffer = BytesIO()
         with PackageExporter(buffer) as exporter:
