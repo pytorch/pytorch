@@ -450,50 +450,11 @@ $6 = torch._ops.aten.add_($1, $5)''')
                     pass
     
     def test_enable_python_mode_subclass_autograd_device_check(self) -> None:
-        class LinearOperator(torch.Tensor):
-            @staticmethod
-            def __new__(cls, tensor):
-                return torch.Tensor._make_subclass(cls, tensor, tensor.requires_grad)
-
-            def __repr__(self):
-                return super().__repr__().replace("tensor", self.__class__.__name__)
-
-            __torch_function__ = torch._C._disabled_torch_function_impl
-
-        class DiagLO(torch.Tensor):
-            @staticmethod
-            def __new__(cls, tensor):
-                t = torch.empty(tensor.shape + tensor.shape[-1:], dtype=tensor.dtype, layout=tensor.layout, device='meta')
-                return torch.Tensor._make_subclass(cls, t, tensor.requires_grad)
-
-            def __init__(self, wrapped_tensor):
-                self.wrapped_tensor = wrapped_tensor
-            
-            @classmethod
-            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
-                if func == torch.ops.aten.mm:
-                    return mm(args, kwargs)
-                else:
-                    return NotImplemented
-
-        def mm(args, kwargs):
-            assert len(args) == 2
-            t1, t2 = args
-            if isinstance(t1, DiagLO) and isinstance(t2, torch.Tensor):
-                return LinearOperator(t1.wrapped_tensor.unsqueeze(-1) * t2)
-            else:
-                return NotImplemented  
-
-        a = DiagLO(torch.randn(3, requires_grad=True))
-        a_ = torch.randn(3, requires_grad=True)
-        b = torch.randn(3, 3)
-
-        c = a.mm(b)
-        d = c.sum()
-        # should return a LinearOperator 
-        assert isinstance(c, LinearOperator)
-        assert isinstance(d, LinearOperator)
-        d.backward()      
+        x = LoggingTensor(torch.tensor([3.0, 4.0], requires_grad=True))
+        y = torch.randn(2)
+        z = x * y
+        assert isinstance(z, LoggingTensor)
+        z.sum().backward(torch.tensor(1.))
 
 if __name__ == '__main__':
     run_tests()

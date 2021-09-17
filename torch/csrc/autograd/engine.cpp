@@ -709,7 +709,7 @@ void validate_outputs(
     }
 
     if (grad.device() != metadata.device()) {
-      // quick hack but should be removed
+      // quick hack for: https://github.com/pytorch/pytorch/issues/65016 but should be eventually removed
       if (!metadata.is_tensor_subclass()) {
         if (grad.dim() == 0) {
           grad = grad.to(metadata.device());
