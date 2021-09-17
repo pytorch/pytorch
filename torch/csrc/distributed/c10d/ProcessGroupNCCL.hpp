@@ -430,6 +430,8 @@ class TORCH_API ProcessGroupNCCL : public ProcessGroup {
   void abortTimedOutCollectives(
       std::unordered_set<std::string>& abortedCommIds);
 
+  // Destroys initialized NCCL communicators in devNCCLComMap_ given by input
+  // key. Throws if there are no communicators to destroy.
   void destroyNCCLComms(const std::string& devNCCLCommMapKey);
 
   void workCleanupLoop();

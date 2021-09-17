@@ -1,5 +1,4 @@
 #include <c10d/ProcessGroupNCCL.hpp>
-#include "c10/core/DeviceType.h"
 #include <sstream>
 
 #ifdef USE_C10D_NCCL
@@ -14,6 +13,7 @@
 
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDAGraphsC10Utils.h>
+#include <c10/core/DeviceType.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/util/irange.h>
 #include <c10/util/Logging.h>
@@ -491,16 +491,39 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   // Perform health check by initializing dummy communicators and destroying
   // them. This will help indicate any NCCL-related issues prior to the first
   // collective.
-  {
+  // Run it in a separate thread and wait on CV to handle timeouts, since
+  // majority of getNCCLComm failures are hangs.
+  std::mutex healthCheckMutex;
+  std::condition_variable healthCheckCv;
+  bool healthCheckSuccess = false;
+  auto t = std::thread([&healthCheckMutex, &healthCheckCv, &healthCheckSuccess, this]() {
     std::vector<at::Device> rankDevice = {getDeviceForRank(rank_)};
     const auto key = getKeyFromDevices(rankDevice);
-    // OpType does not matter, only need to set to not go through send/recv path.
+    // OpType does not matter, only need to set to not go through send/recv
+    // path.
     auto& ncclComms = getNCCLComm(key, rankDevice, OpType::ALLREDUCE);
     // Now destroy the communicators and remove them from cache so we don't use
     // destroyed communicators.
     destroyNCCLComms(key);
-  }
+    // Notify main thread the health check is complete.
+    {
+      std::lock_guard<std::mutex> lk(healthCheckMutex);
+      healthCheckSuccess = true;
+    }
+    healthCheckCv.notify_one();
+  });
+  // We don't need to join the thread, just need to verify health check via the
+  // CV. Hence we detach the thread here.
+  t.detach();
+  std::unique_lock<std::mutex> lock(healthCheckMutex);
+  LOG(INFO) << "Rank: " << rank_ << " will wait for: " << options->timeout.count() << " ms for NCCL health check to complete.";
+  healthCheckCv.wait_for(
+      lock, options->timeout, [&healthCheckSuccess]() { return healthCheckSuccess; });
 
+  if (!healthCheckSuccess) {
+    LOG(INFO) << "Detected health check failure.";
+    TORCH_CHECK(false, "ProcessGroupNCCL: Health check falure: Failed to initialize NCCL communicator on rank ", rank_);
+  }
 
 #ifdef ENABLE_NCCL_ERROR_CHECKING
   ncclCommWatchdogThread_ =
@@ -873,6 +896,7 @@ void ProcessGroupNCCL::broadcastUniqueNCCLID(
     std::memcpy(ncclID, vec.data(), vec.size());
   }
 }
+
 
 void ProcessGroupNCCL::destroyNCCLComms(const std::string& devNCCLCommMapKey) {
   if (devNCCLCommMap_.find(devNCCLCommMapKey) == devNCCLCommMap_.end()) {
