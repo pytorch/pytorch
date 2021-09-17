@@ -14,12 +14,12 @@ concurrency:
 
 jobs:
   python:
-    runs-on: ubuntu-18.04
+    runs-on: ubuntu-20.04
     steps:
       !{{ common.checkout_pytorch("false") }}
       - name: Install Dependencies
         run: |
-          pip install black==21.9b0
+          pip install black==21.8b0
       - name: Run black
         run: |
           black tools/testing/*

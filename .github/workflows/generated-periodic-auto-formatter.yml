@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   python:
-    runs-on: ubuntu-18.04
+    runs-on: ubuntu-20.04
     steps:
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
@@ -25,7 +25,7 @@ jobs:
           submodules: false
       - name: Install Dependencies
         run: |
-          pip install black==21.9b0
+          pip install black==21.8b0
       - name: Run black
         run: |
           black tools/testing/*
