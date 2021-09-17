@@ -217,8 +217,8 @@ class TORCH_CUDA_CU_API FusionHeuristics {
     is_segmented_ = false;
   }
 
-  FusionHeuristics(const FusionHeuristics&) = default;
-  FusionHeuristics& operator=(const FusionHeuristics&) = default;
+  FusionHeuristics(const FusionHeuristics&) = delete;
+  FusionHeuristics& operator=(const FusionHeuristics&) = delete;
 
   //! Place a scheduler entry on the list. Applies to segmented fusion only.
   void emplaceBack(SchedulerEntryOwningPtr&& pt) {
