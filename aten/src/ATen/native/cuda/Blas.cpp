@@ -170,7 +170,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
   }
 
   // TODO: is it possible to combine the dispatch code?
-  if (isIntegralType(scalar_type, false)) {
+  if (scalar_type == ScalarType::Long || scalar_type == ScalarType::Int) {
     AT_DISPATCH_INDEX_TYPES(scalar_type, "addmm_cuda_int", [&] {
       using scalar_t = index_t;
       scalar_t alpha_val = alpha.to<scalar_t>();
@@ -287,7 +287,7 @@ Tensor& baddbmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& 
 
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!result_->is_conj());
 
-  if (isIntegralType(self.scalar_type(), false)) {
+  if (scalar_type == ScalarType::Long || scalar_type == ScalarType::Int) {
     AT_DISPATCH_INDEX_TYPES(self.scalar_type(), "baddmm_cuda_int", [&] {
       using scalar_t = index_t;
 

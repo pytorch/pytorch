@@ -414,7 +414,7 @@ filegroup(
         "aten/src/ATen/cuda/detail/IndexUtils.cu.cc",
         "aten/src/ATen/cuda/detail/CUDAGraphsUtils.cu.cc",
         "aten/src/ATen/native/cuda/Activation.cu.cc",
-        "aten/src/ATen/native/cuda/Blas.cu.cc",
+        "aten/src/ATen/native/cuda/IntegerMatmul.cu.cc",
         "aten/src/ATen/native/cuda/AdaptiveAveragePooling.cu.cc",
         "aten/src/ATen/native/cuda/AdaptiveAveragePooling3d.cu.cc",
         "aten/src/ATen/native/cuda/AdaptiveMaxPooling2d.cu.cc",

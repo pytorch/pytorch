@@ -14,7 +14,6 @@
  */
 
 #include <ATen/cuda/CUDAContext.h>
-#include <ATen/native/TensorIterator.h>
 
 namespace at {
 namespace cuda {
