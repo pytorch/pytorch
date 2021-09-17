@@ -702,8 +702,8 @@ class TestHub(TestCase):
     def test_load_commit_from_forked_repo(self):
         with self.assertRaisesRegex(
                 ValueError,
-                'Torchhub tried to look for 4e2c216'):
-            torch.hub.load('pytorch/vision:4e2c216', 'resnet18', force_reload=True)
+                'If it\'s a commit from a forked repo'):
+            model = torch.hub.load('pytorch/vision:4e2c216', 'resnet18', force_reload=True)
 
 class TestHipify(TestCase):
     def test_import_hipify(self):
