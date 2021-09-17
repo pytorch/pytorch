@@ -143,6 +143,27 @@ TEST(BackendTest, TestCompiler) {
   AT_ASSERT(mres.toTensor().equal(ref.toTensor()));
 }
 
+TEST(BackendTest, TestConsistentSerialize) {
+  Module m_add("m_add");
+  m_add.define(R"(
+    def forward(self, x, y):
+      return x + y
+  )");
+
+  std::stringstream ss1, ss2;
+  const ExtraFilesMap& extraFiles = {{"producer_info.json", ""}};
+  m_add.save(ss1, extraFiles);
+  m_add.save(ss2, extraFiles);
+  ASSERT_TRUE(ss1.str().size() == ss2.str().size());
+  ASSERT_TRUE(ss1.str() == ss2.str());
+
+  std::stringstream mss1, mss2;
+  m_add._save_for_mobile(mss1, extraFiles);
+  m_add._save_for_mobile(mss2, extraFiles);
+  ASSERT_TRUE(mss1.str().size() == mss2.str().size());
+  ASSERT_TRUE(mss1.str() == mss2.str());
+}
+
 TEST(BackendTest, TestComposite) {
   c10::Dict<IValue, IValue> compile_spec(StringType::get(), AnyType::get());
   c10::Dict<IValue, IValue> fake_dict(StringType::get(), AnyType::get());
