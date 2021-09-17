@@ -29,6 +29,7 @@
 #include <ATen/core/jit_type.h>
 #include <ATen/core/qualified_name.h>
 #include <string>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
@@ -62,7 +63,8 @@ std::pair<IValue, IValue> getFunctionTuple(
     const Function& func,
     BackendDebugInfoRecorder& debug_info_recorder,
     const std::basic_string<char>& qn,
-    TypeNameUniquer& type_name_uniquer_) {
+    TypeNameUniquer& type_name_uniquer_,
+    bool isInterface = false) {
   auto graph = func.graph()->copy();
 
   Inline(*graph);
@@ -266,6 +268,7 @@ std::pair<IValue, IValue> getFunctionTuple(
   auto schemaTable = Table({
       {"arguments", makeArgTuple(schema.arguments())},
       {"returns", makeArgTuple(schema.returns())},
+      {"is_interface", isInterface},
   });
 
   // function tuple
@@ -399,6 +402,47 @@ SourceRangeRecords getBackendSourceRanges(const Module& m) {
   return sr_records;
 }
 
+std::unordered_set<InterfaceType*> getModuleInterfaces(const Module& module) {
+  std::unordered_set<InterfaceType*> ret;
+  for (const auto& m : module.get_methods()) {
+    auto nodes = findAllNodes(*m.graph(), c10::prim::CallMethod, true);
+    for (Node* node : nodes) {
+      if (auto iface = node->input(0)->type()->castRaw<InterfaceType>()) {
+        ret.insert(iface);
+      }
+    }
+  }
+  for (const auto& c : module.children()) {
+    auto types = getModuleInterfaces(c);
+    ret.insert(types.begin(), types.end());
+  }
+  return ret;
+}
+
+void getModuleInterfaceDefs(
+    const Module& module,
+    const std::unordered_set<InterfaceType*>& interfaces,
+    BackendDebugInfoRecorder& recorder,
+    TypeNameUniquer& uniquer,
+    std::unordered_map<std::string, Function*>& ret) {
+  for (const auto& m : module.get_methods()) {
+    for (auto interface : interfaces) {
+      if (interface->getMethod(m.name())) {
+        auto qn = m.function().qualname().qualifiedName();
+        ret.emplace(qn, &m.function());
+      }
+    }
+  }
+  for (const auto& c : module.children()) {
+    getModuleInterfaceDefs(c, interfaces, recorder, uniquer, ret);
+  }
+}
+
+std::unordered_map<std::string, Function*> getModuleInterfaceDefs(const Module& module, BackendDebugInfoRecorder& recorder, TypeNameUniquer& uniquer) {
+  std::unordered_map<std::string, Function*> ret;
+  getModuleInterfaceDefs(module, getModuleInterfaces(module), recorder, uniquer, ret);
+  return ret;
+}
 } // namespace
 
 void moduleMethodsTuple(
@@ -406,7 +450,8 @@ void moduleMethodsTuple(
     std::vector<c10::IValue>& elements, // note: appended to in-place
     std::vector<c10::IValue>& debug_info_elements,
     BackendDebugInfoRecorder& debug_info_recorder,
-    TypeNameUniquer& type_name_uniquer_) {
+    TypeNameUniquer& type_name_uniquer_,
+    std::unordered_map<std::string, Function*>& interface_defs) {
   auto methods = module.get_methods();
   std::unordered_set<std::string> qn_cache;
   // top level methods
@@ -415,8 +460,13 @@ void moduleMethodsTuple(
     if (qn_cache.find(qn) != qn_cache.end()) {
       continue;
     }
+    auto it = interface_defs.find(qn);
+    bool isInterface = it != interface_defs.end();
+    if (isInterface) {
+      interface_defs.erase(it);
+    }
     auto func_tuple = getFunctionTuple(
-        module, method.function(), debug_info_recorder, qn, type_name_uniquer_);
+        module, method.function(), debug_info_recorder, qn, type_name_uniquer_, isInterface);
     elements.push_back(func_tuple.first);
     qn_cache.emplace(qn);
     debug_info_elements.push_back(func_tuple.second);
@@ -645,12 +695,27 @@ void ScriptModuleSerializer::writeByteCode(
   // Always save debug handles
   debug_info_elements.emplace_back(static_cast<int64_t>(version_to_write));
 
+  auto interface_defs = getModuleInterfaceDefs(module, debug_info_recorder, type_name_uniquer_);
+
   moduleMethodsTuple(
       module,
       elements,
       debug_info_elements,
       debug_info_recorder,
-      type_name_uniquer_);
+      type_name_uniquer_,
+      interface_defs);
+
+  for (const auto& p : interface_defs) {
+    auto t = getFunctionTuple(
+        module,
+        *p.second,
+        debug_info_recorder,
+        p.first,
+        type_name_uniquer_,
+        true);
+    elements.push_back(std::move(t.first));
+    debug_info_elements.push_back(std::move(t.second));
+  }
   auto telements = to_tuple(std::move(elements));
   writeArchive(
       telements,
@@ -835,7 +900,8 @@ void export_opnames(const script::Module& m, std::set<std::string>& opnames) {
   std::vector<c10::IValue> debug_info_elements;
   BackendDebugInfoRecorder dummy;
   TypeNameUniquer dummy_uniquer = TypeNameUniquer();
-  moduleMethodsTuple(m, elements, debug_info_elements, dummy, dummy_uniquer);
+  std::unordered_map<std::string, Function*> dummy_i;
+  moduleMethodsTuple(m, elements, debug_info_elements, dummy, dummy_uniquer, dummy_i);
   for (const auto& element : elements) {
     auto table = element.toTuple()->elements()[1];
     auto row =
