@@ -411,14 +411,13 @@ void cpu_sparse_coo_softmax_backward(const Tensor& grad_input, const Tensor& gra
   auto grad_offsets = get_offsets(grad_indices, sizes, -1);
 
   if (dim >= sparse_dim) {
-    Tensor unused;
     if (out_offsets == grad_offsets) {
       if (LogSoftMax) {
         auto r = at::cpu::_log_softmax_backward_data(
-            grad_values, out_values, dim - sparse_dim + 1, unused);
+            grad_values, out_values, dim - sparse_dim + 1);
         values.set_(r);
       } else {
-        auto r = at::cpu::_softmax_backward_data(grad_values, out_values, dim - sparse_dim + 1, unused);
+        auto r = at::cpu::_softmax_backward_data(grad_values, out_values, dim - sparse_dim + 1);
         values.set_(r);
       }
     } else {
@@ -428,10 +427,10 @@ void cpu_sparse_coo_softmax_backward(const Tensor& grad_input, const Tensor& gra
         if (j < grad_nnz && out_offsets[i] == grad_offsets[j]) {
           if (LogSoftMax) {
             auto r = at::cpu::_log_softmax_backward_data(
-                grad_values[j], out_values[i], dim - sparse_dim, unused);
+                grad_values[j], out_values[i], dim - sparse_dim);
             values[i].copy_(r);
           } else {
-            auto r = at::cpu::_softmax_backward_data(grad_values[j], out_values[i], dim - sparse_dim, unused);
+            auto r = at::cpu::_softmax_backward_data(grad_values[j], out_values[i], dim - sparse_dim);
             values[i].copy_(r);
           }
         }

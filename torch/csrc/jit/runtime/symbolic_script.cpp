@@ -1222,7 +1222,7 @@ const std::vector<std::string> functions = {
         def softmax(self, dim: int, dtype: Optional[int]):
             result = torch.softmax(self, dim, dtype)
             def backward(grad_output):
-                grad_self = torch._softmax_backward_data(grad_output, result, dim, self)
+                grad_self = torch._softmax_backward_data(grad_output, result, dim)
                 return grad_self, None, None
 
             return result, backward

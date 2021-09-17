@@ -463,13 +463,12 @@ void cuda_sparse_coo_softmax_backward(
   /* when dim >= sparse_dim the dense backward is used */
   if (dim >= sparse_dim) {
     if (at::native::cuda_equal(out_offsets, grad_offsets) == true) {
-      Tensor unused = at::native::empty_like(grad_values);
       if (LogSoftMax) {
         auto r = at::cuda::_log_softmax_backward_data(
-            grad_values, out_values, dim - sparse_dim + 1, unused);
+            grad_values, out_values, dim - sparse_dim + 1);
         values.set_(r);
       } else {
-        auto r = at::cuda::_softmax_backward_data(grad_values, out_values, dim - sparse_dim + 1, unused);
+        auto r = at::cuda::_softmax_backward_data(grad_values, out_values, dim - sparse_dim + 1);
         values.set_(r);
       }
     } else {
@@ -480,7 +479,6 @@ void cuda_sparse_coo_softmax_backward(
       auto out_offsets_accessor = host_out_offsets.data_ptr<int64_t>();
       auto grad_offsets_accessor = host_grad_offsets.data_ptr<int64_t>();
       for (int64_t i = 0; i < out_nnz; i++) {
-        Tensor unused = at::native::empty_like(grad_values);
         auto low = thrust::lower_bound(
             grad_offsets_accessor,
             grad_offsets_accessor + grad_offsets.size(0),
@@ -493,11 +491,11 @@ void cuda_sparse_coo_softmax_backward(
         if (j < grad_nnz && out_offsets_accessor[i] == grad_offsets_accessor[j]) {
           if (LogSoftMax) {
             auto r = at::cuda::_log_softmax_backward_data(
-                grad_values[j], out_values[i], dim - sparse_dim, unused);
+                grad_values[j], out_values[i], dim - sparse_dim);
             values[i].copy_(r);
           } else {
             auto r = at::cuda::_softmax_backward_data(
-                grad_values[j], out_values[i], dim - sparse_dim, unused);
+                grad_values[j], out_values[i], dim - sparse_dim);
             values[i].copy_(r);
           }
         }
