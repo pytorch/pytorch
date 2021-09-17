@@ -421,12 +421,12 @@ def shard_parameter(
     for idx, entry in enumerate(gathered_list):
         if src_rank != entry[0]:  # type: ignore[index]
             raise ValueError(
-                f'src_rank={src_rank} on rank: {rank} does not '
-                f'match with src_rank={entry[0]} on rank: {idx}')  # type: ignore[index]
+                f'src_rank={src_rank} on rank: {rank} does not '  # type: ignore[index]
+                f'match with src_rank={entry[0]} on rank: {idx}')
         if sharding_spec != entry[1]:  # type: ignore[index]
             raise ValueError(
-                f'sharding_spec={sharding_spec} on rank: {rank} does not '
-                f'match with sharding_spec={entry[1]} on rank: {idx}')  # type: ignore[index]
+                f'sharding_spec={sharding_spec} on rank: {rank} does not '  # type: ignore[index]
+                f'match with sharding_spec={entry[1]} on rank: {idx}')
 
     # Rearrange chunks according to placement.
     local_metadata = None
