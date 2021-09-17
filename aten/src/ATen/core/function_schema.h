@@ -30,7 +30,7 @@ struct Argument {
       bool kwarg_only = false,
       c10::optional<AliasInfo> alias_info = c10::nullopt)
       : name_(std::move(name)),
-        type_(type ? type : TensorType::get()),
+        type_(type ? std::move(type) : TensorType::get()),
         N_(std::move(N)),
         default_value_(std::move(default_value)),
         alias_info_(std::move(alias_info)),
