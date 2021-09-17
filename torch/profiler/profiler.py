@@ -26,7 +26,7 @@ def supported_activities():
     return torch.autograd._supported_activities()
 
 
-class profiler(object):
+class kineto_profiler(object):
     """Low-level profiler wrap the autograd profile
 
     Args:
@@ -252,7 +252,7 @@ def tensorboard_trace_handler(dir_name: str, worker_name: Optional[str] = None, 
     return handler_fn
 
 
-class profile(profiler):
+class profile(kineto_profiler):
     """Profiler context manager.
 
     Args:
