@@ -775,7 +775,7 @@ class TestJit(JitCommonTestCase):
                     #   so running it on all dtypes is would be excessive
                     if dtype == torch.float32:
                         # TODO: no reason why we cant run this with tracing graph
-                        if support_script:
+                        if support_script and op.name != "rsub":
                             check_alias_annotation(name, (get_sample(),) + sample.args, sample.kwargs,
                                                    func_type=func_type, aten_name=op.aten_name)
 
