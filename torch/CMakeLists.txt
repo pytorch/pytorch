@@ -423,3 +423,9 @@ if(NOT ${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
   # Pybind11 requires explicit linking of the torch_python library
   target_link_libraries(nnapi_backend torch torch_python)
 endif()
+
+if(BUILD_BINARY)
+  add_library(aot_compiler SHARED
+          ${TORCH_SRC_DIR}/csrc/jit/mobile/nnc/aot_compiler.cpp
+          )
+endif()
