@@ -6,7 +6,7 @@
 
 stages:
 - stage: 'Build'
-  displayName: 'Build'
+  displayName: 'Build PyTorch'
   jobs:
   - template: job_templates/build-verify-publish-template-unix.yml
     parameters:
