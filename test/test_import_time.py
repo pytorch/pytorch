@@ -2,6 +2,7 @@ import subprocess
 import re
 import sys
 import unittest
+import shutil
 import pathlib
 
 from torch.testing._internal.common_utils import TestCase, run_tests, IS_LINUX, IS_IN_CI
@@ -35,8 +36,13 @@ class TestImportTime(TestCase):
     # @unittest.skipIf(not IS_IN_CI, "Memory test only runs in CI")
     def test_peak_memory(self):
         def profile(command, name):
+            time_executable = shutil.which("time")
+            if time_executable is None:
+                raise RuntimeError(
+                    "No 'time' executable found, cannot measure memory usage"
+                )
             result = subprocess.run(
-                ["/usr/bin/time", "-v", sys.executable, "-c", command],
+                [time_executable, "-v", sys.executable, "-c", command],
                 stderr=subprocess.PIPE,
             )
             lines = result.stderr.decode().split("\n")
@@ -48,7 +54,9 @@ class TestImportTime(TestCase):
                     if match:
                         return float(match.groups()[0])
 
-                raise RuntimeError(f"Unable to find '{pattern}' in /usr/bin/time -v output")
+                raise RuntimeError(
+                    f"Unable to find '{pattern}' in /usr/bin/time -v output"
+                )
 
             return {
                 "test_name": name,
@@ -59,9 +67,13 @@ class TestImportTime(TestCase):
             }
 
         data = profile("import torch", "pytorch")
-        rds_write("import_stats", data, only_on_master=False)  # TODO: remove only_on_master arg
+        rds_write(
+            "import_stats", data, only_on_master=False
+        )  # TODO: remove only_on_master arg
         baseline = profile("import sys", "baseline")
-        rds_write("import_stats", baseline, only_on_master=False)  # TODO: remove only_on_master arg
+        rds_write(
+            "import_stats", baseline, only_on_master=False
+        )  # TODO: remove only_on_master arg
 
 
 if __name__ == "__main__":
