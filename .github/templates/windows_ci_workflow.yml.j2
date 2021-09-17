@@ -246,12 +246,6 @@ jobs:
             if [[ $NUM_TEST_SHARDS -ne 2 ]]; then
               export SHARD_NUMBER=0
             fi
-            if [[ "$TEST_CONFIG" = "force_on_cpu" ]]; then
-              # run the full test suite for force_on_cpu test
-              export USE_CUDA=0
-            elif [[ -n $GITHUB_HEAD_REF && "$RUN_SMOKE_TESTS_ONLY_ON_PR" == "true" ]]; then
-              export RUN_SMOKE_TESTS_ONLY=1
-            fi
             .jenkins/pytorch/win-test.sh
       !{{ common.upload_test_reports(name='windows') }}
       !{{ common.render_test_results() }}
