@@ -607,8 +607,8 @@ compute_bucket_assignment_by_size(
 
 // Verify models across all processes are the same as model on rank 0 with
 // respect to no. of params and matching dtype/size/layout.
-TORCH_API void verify_replica0_across_processes(
+TORCH_API void verify_params_across_processes(
     const c10::intrusive_ptr<c10d::ProcessGroup>& process_group,
-    const std::vecto<at::Tensor>& params,
+    const std::vector<at::Tensor>& params,
     const c10::optional<std::weak_ptr<c10d::Logger>>& logger);
 } // namespace c10d

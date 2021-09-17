@@ -109,6 +109,8 @@ core_sources_common = [
     "torch/csrc/jit/runtime/slice_indices_adjust.cpp",
     "torch/csrc/jit/runtime/register_ops_utils.cpp",
     "torch/csrc/jit/runtime/vararg_functions.cpp",
+    "torch/csrc/jit/mobile/promoted_prim_ops.cpp",
+    "torch/csrc/jit/mobile/prim_ops_registery.cpp",
     "torch/csrc/jit/serialization/import_read.cpp",
     "torch/csrc/jit/serialization/unpickler.cpp",
 ]
@@ -871,6 +873,7 @@ aten_cpu_source_non_codegen_list = [
     "aten/src/ATen/native/mkldnn/TensorShape.cpp",
     "aten/src/ATen/native/mkldnn/UnaryOps.cpp",
     "aten/src/ATen/native/mkldnn/Utils.cpp",
+    "aten/src/ATen/native/mkldnn/Matmul.cpp",
     "aten/src/ATen/native/quantized/cpu/init_qnnpack.cpp",
     "aten/src/ATen/record_function.cpp",
     "aten/src/ATen/SavedTensorHooks.cpp",

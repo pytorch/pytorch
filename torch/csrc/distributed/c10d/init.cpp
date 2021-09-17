@@ -1570,9 +1570,9 @@ Example::
          const c10::optional<std::shared_ptr<::c10d::Logger>>& logger) {
              if (logger.has_value()) {
                 std::weak_ptr<::c10d::Logger> logger_weakref = logger.value();
-                verify_replica0_across_processes(process_group, params, {logger_weakref});
+                verify_params_across_processes(process_group, params, {logger_weakref});
              } else {
-                verify_replica0_across_processes(process_group, params, {});
+                verify_params_across_processes(process_group, params, {});
              }
       },
       py::arg("process_group"),
@@ -1585,6 +1585,7 @@ Example::
       &::c10d::verify_params_across_processes,
       py::arg("process_group"),
       py::arg("params"),
+      py::arg("logger") = c10::optional<std::shared_ptr<::c10d::Logger>>{},
       py::call_guard<py::gil_scoped_release>());
 
   module.def(
