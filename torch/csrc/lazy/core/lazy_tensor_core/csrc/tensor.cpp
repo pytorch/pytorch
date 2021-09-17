@@ -25,7 +25,7 @@
 #include "lazy_tensor_core/csrc/ops/view.h"
 #include "lazy_tensor_core/csrc/tensor_util.h"
 #include "lazy_tensor_core/csrc/torch_util.h"
-#include "lazy_tensor_core/csrc/ts_backend/ts_computation_client.h"
+// #include "lazy_tensor_core/csrc/ts_backend/ts_computation_client.h"
 #include "lazy_tensors/computation_client/cache.h"
 #include "lazy_tensors/computation_client/debug_macros.h"
 #include "lazy_tensors/computation_client/ltc_util.h"

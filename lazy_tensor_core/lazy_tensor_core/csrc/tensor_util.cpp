@@ -9,7 +9,7 @@
 
 #include "lazy_tensor_core/csrc/helpers.h"
 #include "lazy_tensor_core/csrc/layout_manager.h"
-#include "lazy_tensor_core/csrc/ts_backend/ts_computation_client.h"
+// #include "lazy_tensor_core/csrc/ts_backend/ts_computation_client.h"
 #include "lazy_tensors/computation_client/debug_macros.h"
 #include "lazy_tensors/computation_client/ltc_logging.h"
 #include "lazy_tensors/computation_client/multi_wait.h"

@@ -313,6 +313,10 @@ option(BUILD_LIBTORCH_CPU_WITH_DEBUG "Enable RelWithDebInfo for libtorch_cpu tar
 cmake_dependent_option(
     USE_DEPLOY "Build embedded torch::deploy interpreter.  See torch/csrc/deploy/README.md for more info." OFF
     "BUILD_PYTHON" OFF)
+option(BUILD_LTC "Build Lazy Tensor Core" ON)
+cmake_dependent_option(
+    BUILD_LTC_TS "Build Lazy TorchScript backend." ON
+    "BUILD_LTC;BUILD_PYTHON" OFF)
 cmake_dependent_option(USE_CCACHE "Attempt using CCache to wrap the compilation" ON "UNIX" OFF)
 option(WERROR "Build with -Werror supported by the compiler" OFF)
 
@@ -1051,4 +1055,16 @@ caffe2_print_configuration_summary()
 # ---[ Torch Deploy
 if(USE_DEPLOY)
   add_subdirectory(torch/csrc/deploy)
+endif()
+
+# ---[ Lazy Tensor Torchscript Backend
+if(BUILD_LTC)
+  # TODO(whc) do we need to have a separate LTC and LTC_TS option?
+  # not sure yet, but assuming there are some non-header parts of core
+  # that are needed by external backends, we should keep them separate
+  add_subdirectory(torch/csrc/lazy/core)
+endif()
+
+if(BUILD_LTC_TS)
+  add_subdirectory(torch/csrc/lazy/ts_backend)
 endif()

@@ -1,0 +1,8 @@
+# Lazy Tensor TS Backend Generated Code
+ts_backend/lazy_tensor_core/csrc/ts_backend/LazyNativeFunctions.h
+ts_backend/lazy_tensor_core/csrc/ts_backend/RegisterAutogradLazy.cpp
+ts_backend/lazy_tensor_core/csrc/ts_backend/RegisterLazy.cpp
+ts_backend/lazy_tensor_core/csrc/ts_backend/LazyLazyIr.h
+ts_backend/lazy_tensor_core/csrc/ts_backend/LazyNativeFunctions.cpp
+ts_backend/lazy_tensor_core/csrc/ts_backend/LazyShapeDtype.h
+ts_backend/lazy_tensor_core/csrc/ts_backend/LazyTsLowering.cpp
