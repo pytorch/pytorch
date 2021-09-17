@@ -3,43 +3,14 @@ import torch
 
 
 class TestTRTModule(torch.nn.Module):
-    def __init__(self, trt, engine=None, input_names=None, output_names=None, fp16_output=False):
+    def __init__(self, engine, input_names=None, output_names=None, fp16_output=False):
         super(TestTRTModule, self).__init__()
-        self.trt = trt
-        self._register_state_dict_hook(TestTRTModule._on_state_dict)
         self.engine = engine
-        if self.engine is not None:
-            self.context = self.engine.create_execution_context()
         self.input_names = input_names
         self.output_names = output_names
 
         # Indicate output is in fp16
         self.fp16_output = fp16_output
-
-    def _on_state_dict(self, state_dict, prefix, local_metadata):
-        state_dict[prefix + "engine"] = bytearray(self.engine.serialize())
-        state_dict[prefix + "input_names"] = self.input_names
-        state_dict[prefix + "output_names"] = self.output_names
-        state_dict[prefix + "fp16_output"] = self.fp16_output
-
-    def _load_from_state_dict(
-        self,
-        state_dict,
-        prefix,
-        local_metadata,
-        strict,
-        missing_keys,
-        unexpected_keys,
-        error_msgs,
-    ):
-        engine_bytes = state_dict[prefix + "engine"]
-
-        with self.trt.Logger() as logger, self.trt.Runtime(logger) as runtime:
-            self.engine = runtime.deserialize_cuda_engine(engine_bytes)
-            self.context = self.engine.create_execution_context()
-
-        self.input_names = state_dict[prefix + "input_names"]
-        self.output_names = state_dict[prefix + "output_names"]
 
     def forward(self, *inputs):
         batch_size = inputs[0].shape[0]
@@ -59,7 +30,8 @@ class TestTRTModule(torch.nn.Module):
             idx = self.engine.get_binding_index(input_name)
             bindings[idx] = contiguous_inputs[i].data_ptr()
 
-        self.context.execute_async(
+        context = self.engine.create_execution_context()
+        context.execute_async(
             batch_size, bindings, torch.cuda.current_stream().cuda_stream
         )
 
@@ -68,7 +40,7 @@ class TestTRTModule(torch.nn.Module):
 
         return tuple(outputs)
 
-def tensorrt_example(tensor):
+def make_tensorrt_module():
     import tensorrt as trt
     logger = trt.Logger(trt.Logger.WARNING)
     builder = trt.Builder(logger)
@@ -86,6 +58,5 @@ def tensorrt_example(tensor):
     builder_config = builder.create_builder_config()
     builder_config.max_workspace_size = 1 << 25
     engine = builder.build_engine(network, builder_config)
-
-    mod = TestTRTModule(trt, engine, ["x"], ["output"])
-    return mod(tensor)
+    print(type(engine))
+    return TestTRTModule(engine, ["x"], ["output"])

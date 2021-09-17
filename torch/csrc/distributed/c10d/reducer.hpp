@@ -602,11 +602,13 @@ compute_bucket_assignment_by_size(
     const std::vector<at::Tensor>& tensors,
     const std::vector<size_t>& bucket_size,
     const std::vector<bool>& expect_sparse_gradient = {},
-    const std::vector<int64_t>& tensor_indices = {});
+    const std::vector<int64_t>& tensor_indices = {},
+    const c10::optional<std::weak_ptr<c10d::Logger>>& logger = {});
 
 // Verify models across all processes are the same as model on rank 0 with
 // respect to no. of params and matching dtype/size/layout.
 TORCH_API void verify_replica0_across_processes(
-    c10::intrusive_ptr<c10d::ProcessGroup> process_group,
-    std::vector<std::vector<at::Tensor>> model_replicas);
+    const c10::intrusive_ptr<c10d::ProcessGroup>& process_group,
+    const std::vector<std::vector<at::Tensor>>& model_replicas,
+    const c10::optional<std::weak_ptr<c10d::Logger>>& logger);
 } // namespace c10d

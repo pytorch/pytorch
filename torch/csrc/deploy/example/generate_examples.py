@@ -19,9 +19,9 @@ except ImportError:
     from fx.examples import SimpleWithLeaf
 
 try:
-    from .tensorrt_example import tensorrt_example
+    from .tensorrt_example import make_tensorrt_module
 except ImportError:
-    from tensorrt_example import tensorrt_example
+    from tensorrt_example import make_tensorrt_module
 
 def generate_fx_example():
     name = 'simple_leaf'
@@ -88,9 +88,19 @@ if __name__ == "__main__":
     with PackageExporter(p / "uses_distributed") as e:
         e.save_source_string("uses_distributed", "import torch.distributed; assert torch.distributed.is_available()")
 
-    with PackageExporter(str(p / "tensorrt_import")) as e:
+    with PackageExporter(str(p / "tensorrt_build")) as e:
         e.extern("tensorrt")
         e.add_dependency("tensorrt")
         e.mock("iopath.**")
         e.intern("**")
-        e.save_pickle("tensorrt_example", "model.pkl", tensorrt_example)
+        e.save_pickle("tensorrt_build", "model.pkl", make_tensorrt_module)
+
+    with PackageExporter(str(p / "tensorrt_load")) as e:
+        if torch.cuda.is_available():
+            module = make_tensorrt_module()
+        else:
+            module = None
+        e.extern("tensorrt.**")
+        e.mock("iopath.**")
+        e.intern("**")
+        e.save_pickle("tensorrt_load", "model.pkl", module)

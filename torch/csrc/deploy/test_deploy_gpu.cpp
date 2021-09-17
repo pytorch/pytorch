@@ -66,15 +66,34 @@ TEST(TorchDeployGPUTest, UsesDistributed) {
   }
 }
 
-TEST(TorchDeployGPUTest, TensorrtModel) {
+TEST(TorchDeployGPUTest, TensorrtBuild) {
   if (!torch::cuda::is_available()) {
     GTEST_SKIP();
   }
   auto packagePath = path(
-      "TENSORRT_IMPORT", "torch/csrc/deploy/example/generated/tensorrt_import");
+      "TENSORRT_BUILD", "torch/csrc/deploy/example/generated/tensorrt_build");
   torch::deploy::InterpreterManager m(1);
   torch::deploy::Package p = m.load_package(packagePath);
-  auto model = p.load_pickle("tensorrt_example", "model.pkl");
+  auto makeModel = p.load_pickle("tensorrt_build", "model.pkl");
+  {
+    auto I = makeModel.acquire_session();
+    auto model = I.self(at::ArrayRef<at::IValue>{});
+    auto input = at::ones({1, 2, 3}).cuda();
+    auto output = input * 2;
+    ASSERT_TRUE(
+        output.allclose(model(at::IValue{input}).toIValue().toTensor()));
+  }
+}
+
+TEST(TorchDeployGPUTest, TensorrtLoad) {
+  if (!torch::cuda::is_available()) {
+    GTEST_SKIP();
+  }
+  auto packagePath = path(
+      "TENSORRT_LOAD", "torch/csrc/deploy/example/generated/tensorrt_load");
+  torch::deploy::InterpreterManager m(1);
+  torch::deploy::Package p = m.load_package(packagePath);
+  auto model = p.load_pickle("tensorrt_load", "model.pkl");
   auto input = at::ones({1, 2, 3}).cuda();
   auto output = input * 2;
   ASSERT_TRUE(output.allclose(model(at::IValue{input}).toTensor()));
