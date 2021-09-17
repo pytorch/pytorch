@@ -28,39 +28,47 @@ esac
 if [[ -f "/c/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v${CUDA_VERSION}/bin/nvcc.exe" ]]; then
     echo "Existing CUDA v${CUDA_VERSION} installation found, skipping install"
 else
-    cuda_installer_link="https://ossci-windows.s3.amazonaws.com/${cuda_installer_name}.exe"
+    tmp_dir=$(mktemp -d)
+    (
+        # no need to popd after, the subshell shouldn't affect the parent shell
+        pushd "${tmp_dir}"
+        cuda_installer_link="https://ossci-windows.s3.amazonaws.com/${cuda_installer_name}.exe"
 
-    curl --retry 3 -kLO $cuda_installer_link
-    7z x ${cuda_installer_name}.exe -o${cuda_installer_name}
-    cd ${cuda_installer_name}
-    mkdir cuda_install_logs
+        curl --retry 3 -kLO $cuda_installer_link
+        7z x ${cuda_installer_name}.exe -o${cuda_installer_name}
+        pushd ${cuda_installer_name}
+        mkdir cuda_install_logs
 
-    set +e
+        set +e
 
-    # This breaks for some reason if you quote cuda_install_packages
-    # shellcheck disable=SC2086
-    ./setup.exe -s ${cuda_install_packages} -loglevel:6 -log:"$(pwd -W)/cuda_install_logs"
+        # This breaks for some reason if you quote cuda_install_packages
+        # shellcheck disable=SC2086
+        ./setup.exe -s ${cuda_install_packages} -loglevel:6 -log:"$(pwd -W)/cuda_install_logs"
 
-    set -e
+        set -e
 
-    if [[ ! -f "/c/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v${CUDA_VERSION}/bin/nvcc.exe" ]]; then
-        echo "CUDA installation failed"
-        mkdir -p /c/w/build-results
-        7z a "c:\\w\\build-results\\cuda_install_logs.7z" cuda_install_logs
-        exit 1
-    fi
-
-    cd ..
-    rm -rf ./${cuda_installer_name}
-    rm -f ./${cuda_installer_name}.exe
+        if [[ ! -f "/c/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v${CUDA_VERSION}/bin/nvcc.exe" ]]; then
+            echo "CUDA installation failed"
+            mkdir -p /c/w/build-results
+            7z a "c:\\w\\build-results\\cuda_install_logs.7z" cuda_install_logs
+            exit 1
+        fi
+    )
+    rm -rf "${tmp_dir}"
 fi
 
 if [[ -f "/c/Program Files/NVIDIA Corporation/NvToolsExt/bin/x64/nvToolsExt64_1.dll" ]]; then
     echo "Existing nvtools installation found, skipping install"
 else
-    curl --retry 3 -kLO https://ossci-windows.s3.amazonaws.com/NvToolsExt.7z
-    7z x NvToolsExt.7z -oNvToolsExt
-    mkdir -p "C:/Program Files/NVIDIA Corporation/NvToolsExt"
-    cp -r NvToolsExt/* "C:/Program Files/NVIDIA Corporation/NvToolsExt/"
-    export NVTOOLSEXT_PATH="C:\\Program Files\\NVIDIA Corporation\\NvToolsExt\\"
+    # create tmp dir for download
+    tmp_dir=$(mktemp -d)
+    (
+        # no need to popd after, the subshell shouldn't affect the parent shell
+        pushd "${tmp_dir}"
+        curl --retry 3 -kLO https://ossci-windows.s3.amazonaws.com/NvToolsExt.7z
+        7z x NvToolsExt.7z -oNvToolsExt
+        mkdir -p "C:/Program Files/NVIDIA Corporation/NvToolsExt"
+        cp -r NvToolsExt/* "C:/Program Files/NVIDIA Corporation/NvToolsExt/"
+    )
+    rm -rf "${tmp_dir}"
 fi
