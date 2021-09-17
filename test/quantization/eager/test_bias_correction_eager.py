@@ -7,7 +7,7 @@ from torch.quantization import default_qconfig
 from torch.quantization import QuantWrapper
 import torch.ao.ns._numeric_suite as ns
 
-from torch.quantization._correct_bias import (
+from torch.ao.quantization._correct_bias import (
     _supported_modules,
     _supported_modules_quantized,
     bias_correction,
