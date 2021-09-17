@@ -1132,6 +1132,18 @@ class TestFX(JitTestCase):
         self.assertEqual(traced_out.left, ref_out.left)
         self.assertEqual(traced_out.right, ref_out.right)
 
+    def test_default_tensor_val(self):
+        default_param = torch.LongTensor([])
+
+        class M(torch.nn.Module):
+            def forward(self, x, extra=default_param):
+                out = torch.cat([x, default_param])
+                return out
+
+        m = M()
+
+        torch.fx.symbolic_trace(m)
+
     def test_custom_proxy_input_dependent_control_flow(self):
         class ZeroTensor(metaclass=torch.fx.ProxyableClassMeta):
             def __init__(self, inp):

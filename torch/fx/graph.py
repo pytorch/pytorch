@@ -14,6 +14,12 @@ import builtins
 import math
 import warnings
 
+# Sentinel for a default tensor value on function arguments. Since tensor
+# values are interned as attributes on the module, references to that attribute
+# cannot be referenced from the default value slot on the function signature.
+# Use this sentinel value instead and emit a statement in the function body
+# to multiplex either the default value or the actual passed-in value
+DefaultTensorSentinel = object()
 
 if TYPE_CHECKING:
     from .graph_module import GraphModule  # noqa: F401
@@ -927,9 +933,24 @@ class Graph:
             maybe_type_annotation = '' if node.type is None else f' : {type_repr(node.type)}'
             if node.op == 'placeholder':
                 assert isinstance(node.target, str)
-                maybe_default_arg = '' if not node.args else f' = {repr(node.args[0])}'
+                is_tensor_default = False
+                if node.args:
+                    if isinstance(node.args[0], torch.fx.Node):
+                        # Tensor constants are interned as attributes on the graph
+                        # Set the default instead to a None value and emit code
+                        # later that checks if the value is
+                        sentinel_name = add_global('DefaultTensorSentinel', torch.fx.graph.DefaultTensorSentinel)
+                        maybe_default_arg = f' = {sentinel_name}'
+                        is_tensor_default = True
+                    else:
+                        maybe_default_arg = f' = {repr(node.args[0])}'
+                else:
+                    maybe_default_arg = ''
+                # maybe_default_arg = '' if not node.args else f' = {repr(node.args[0])}'
                 free_vars.append(f'{node.target}{maybe_type_annotation}{maybe_default_arg}')
                 raw_name = node.target.replace('*', '')
+                if is_tensor_default:
+                    body.append(f'{raw_name} = {raw_name} if {raw_name} is not {sentinel_name} else {repr(node.args[0])}\n')
                 if raw_name != repr(node):
                     body.append(f'{repr(node)} = {raw_name}\n')
                 return
