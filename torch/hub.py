@@ -120,6 +120,39 @@ def _read_url(url):
     with urlopen(url) as r:
         return r.read().decode(r.headers.get_content_charset('utf-8'))
 
+def _branch_belongs_to_repo(repo_owner, repo_name, branch):
+    # Return True if either:
+    # - branch corresponds to a branch name in the repo
+    # - branch corresponds to a tag name in the repo
+    # - branch corresponds to a commit that has an associated tag in the repo. Technically,
+    #   this is an undocumented feature: we explicitly tell users that they should not pass
+    #   commit hashes.
+
+    def find_in_refs(ref_kind):
+        # We limit the search to 5k branches / tags, which should be more than enough
+        for page in range(1, 50):
+            url = f'https://api.github.com/repos/{repo_owner}/{repo_name}/{ref_kind}?per_page=100&page={page}'
+            response = json.loads(_read_url(Request(url, headers=headers)))
+            # Empty response means no more data to process
+            if not response:
+                return False
+            for br in response:
+                if br['name'] == branch or br['commit']['sha'].startswith(branch):
+                    return True
+
+        # Note: this should never be executed, unless a repo really has 5k+ branches/tags
+        warnings.warn(
+            f"Torchhub tried to validate {branch} and looked at 5000 {ref_kind}, "
+            "but couldn't find a match."
+        )
+        return False
+
+    headers = {'Accept': 'application/vnd.github.v3+json'}
+    token = os.environ.get(ENV_GITHUB_TOKEN)
+    if token is not None:
+        headers['Authorization'] = f'token {token}'
+    return any(find_in_refs(ref_kind) for ref_kind in ('branches', 'tags'))
+
 
 def _validate_branch(repo_owner, repo_name, branch):
     # Here we try to make sure that the branch isn't a potentially malicious commit.
@@ -142,41 +175,8 @@ def _validate_branch(repo_owner, repo_name, branch):
     # Note: here it's still possible that the branch param corresponds to a branch name
     # or a tag name, so we need to check for those as well.
 
-    def branch_belongs_to_repo():
-        # Return True if either:
-        # - branch corresponds to a branch name in the repo
-        # - branch corresponds to a tag name in the repo
-        # - branch corresponds to a commit that has an associated tag in the repo. Technically,
-        #   this is an undocumented feature: we explicitly tell users that they should not pass
-        #   commit hashes.
-
-        def find_in_refs(ref_kind):
-            # We limit the search to 5k branches / tags, which should be more than enough
-            for page in range(1, 50):
-                url = f'https://api.github.com/repos/{repo_owner}/{repo_name}/{ref_kind}?per_page=100&page={page}'
-                response = json.loads(_read_url(Request(url, headers=headers)))
-                # Empty response means no more data to process
-                if not response:
-                    return False
-                for br in response:
-                    if br['name'] == branch or br['commit']['sha'].startswith(branch):
-                        return True
-
-            # Note: this should never be executed, unless a repo really has 5k+ branches/tags
-            warnings.warn(
-                f"Torchhub tried to validate {branch} and looked at 5000 {ref_kind}, "
-                "but couldn't find a match."
-            )
-            return False
-
-        headers = {'Accept': 'application/vnd.github.v3+json'}
-        token = os.environ.get(ENV_GITHUB_TOKEN)
-        if token is not None:
-            headers['Authorization'] = f'token {token}'
-        return any(find_in_refs(ref_kind) for ref_kind in ('branches', 'tags'))
-
     try:
-        branch_found = branch_belongs_to_repo()
+        branch_found = _branch_belongs_to_repo(repo_owner, repo_name, branch)
     except HTTPError as e:
         if e.code == 403 and "rate limit exceeded" in str(e):
             raise ValueError(
@@ -185,7 +185,7 @@ def _validate_branch(repo_owner, repo_name, branch):
                 "to a GitHub token that has more API credits. "
                 "If you're absolutely sure about what you are doing, you can bypass this security check by setting "
                 "skip_validation=True."
-            )
+            ) from e
         else:
             raise
 
@@ -193,7 +193,7 @@ def _validate_branch(repo_owner, repo_name, branch):
         raise ValueError(
             f"Torchhub tried to look for {branch} in the {repo_owner}/{repo_name} repo, but couldn't find it. "
             "We error now to avoid downloading and executing code that is potentially malicious. "
-            "Perhaps you specified the wrong repo owner, or a wrong commit hash? If you're absolutely "
+            "Perhaps you specified the wrong repo owner, or a wrong branch / tag? If you're absolutely "
             "sure about what you are doing, you can bypass this security check by setting "
             "skip_validation=True."
         )
