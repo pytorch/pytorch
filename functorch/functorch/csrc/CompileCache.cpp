@@ -593,4 +593,41 @@ struct ArgAndDimSpecializedCache {
   py::object compileFn_;
 };
 
+/// Class template for kernel cache specialized on the number of args
+/// to the kernel, as given by a template parameter of type ArgCounts.
+template <typename Counts>
+struct ArgSpecializedCache {
+  /// Construct the cache with compilation function compileFn.
+  ArgSpecializedCache(const py::object& compileFn)
+      : cache2(compileFn), cache4(compileFn), cache8(compileFn) {}
+
+  /// Call the cached kernel with args.
+  void call(at::Tensor* args) {
+    // Fan out and and specialize on number of dimension buckets.
+    int64_t ndims = 0;
+    for (int i : c10::irange(Counts::numIn + Counts::numOutGiven)) {
+      ndims = std::max(args[i].dim(), ndims);
+    }
+    if (ndims <= 2) {
+      cache2.call(args);
+    } else if (ndims <= 4) {
+      cache4.call(args);
+    } else if (ndims <= 8) {
+      cache8.call(args);
+    } else {
+      throw std::runtime_error("TODO: handle more dims");
+    }
+  }
+
+ private:
+  /// Cache kernels with tensors having a max of 2 dims.
+  ArgAndDimSpecializedCache<Counts, 2> cache2;
+
+  /// Cache kernels with tensors having a max of 4 dims.
+  ArgAndDimSpecializedCache<Counts, 4> cache4;
+
+  /// Cache kernels with tensors having a max of 8 dims.
+  ArgAndDimSpecializedCache<Counts, 8> cache8;
+};
+
 } // namespace
