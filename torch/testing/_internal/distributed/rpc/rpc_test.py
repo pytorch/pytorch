@@ -6846,4 +6846,27 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture):
     @skip_if_lt_x_gpu(3)
     def test_my_device_map_rref_remote_callee_device_py_py(self):
         self._test_device_on_callee(_rref_remote_test_callee_device_py_py)
-    
+
+    def test_my_device_map_rref_backward(self):
+        dst = worker_name((self.rank + 1) % self.world_size)
+        options = self.rpc_backend_options
+        if self.rank == 0:
+            options.set_device_map(dst, {"cuda:0": "cuda:1"})
+        elif self.rank == 1:
+            options.set_devices(["cuda:1", "cuda:2"])
+        rpc.init_rpc(
+            name=worker_name(self.rank),
+            backend=self.rpc_backend,
+            rank=self.rank,
+            world_size=self.world_size,
+            rpc_backend_options=options,
+        )
+
+        if self.rank == 0:
+            model = rpc.remote(dst, nn.Linear, args=(10, 1))
+            model = model.remote().to(2)
+            with dist_autograd.context() as context_id:
+                y = model.remote(device_map={torch.device(0):torch.device(2)}).forward(torch.randn(10, device=0))
+                y.backward(context_id)
+
+        rpc.shutdown()
