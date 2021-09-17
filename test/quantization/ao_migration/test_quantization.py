@@ -181,3 +181,49 @@ class TestAOMigrationQuantization(AOMigrationTestCase):
             "qconfig_equals"
         ]
         self._test_function_import('qconfig', function_list)
+
+    def test_package_import_quantization_mappings(self):
+        self._test_package_import('quantization_mappings')
+
+    def test_function_import_quantization_mappings(self):
+        function_list = [
+            "no_observer_set",
+            "get_default_static_quant_module_mappings",
+            "get_static_quant_module_class",
+            "get_dynamic_quant_module_class",
+            "get_default_qat_module_mappings",
+            "get_default_dynamic_quant_module_mappings",
+            "get_default_qconfig_propagation_list",
+            "get_default_compare_output_module_list",
+            "get_default_float_to_quantized_operator_mappings",
+            "get_quantized_operator",
+            "_get_special_act_post_process",
+            "_has_special_act_post_process",
+        ]
+        dict_list = [
+            "DEFAULT_REFERENCE_STATIC_QUANT_MODULE_MAPPINGS",
+            "DEFAULT_STATIC_QUANT_MODULE_MAPPINGS",
+            "DEFAULT_QAT_MODULE_MAPPINGS",
+            "DEFAULT_DYNAMIC_QUANT_MODULE_MAPPINGS",
+            # "_INCLUDE_QCONFIG_PROPAGATE_LIST",
+            "DEFAULT_FLOAT_TO_QUANTIZED_OPERATOR_MAPPINGS",
+            "DEFAULT_MODULE_TO_ACT_POST_PROCESS",
+        ]
+        self._test_function_import('quantization_mappings', function_list)
+        self._test_dict_import('quantization_mappings', dict_list)
+
+    def test_package_import_fuser_method_mappings(self):
+        self._test_package_import('fuser_method_mappings')
+
+    def test_function_import_fuser_method_mappings(self):
+        function_list = [
+            "fuse_conv_bn",
+            "fuse_conv_bn_relu",
+            "fuse_linear_bn",
+            "get_fuser_method",
+        ]
+        dict_list = [
+            "DEFAULT_OP_LIST_TO_FUSER_METHOD"
+        ]
+        self._test_function_import('fuser_method_mappings', function_list)
+        self._test_dict_import('fuser_method_mappings', dict_list)
