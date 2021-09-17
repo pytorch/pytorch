@@ -1704,7 +1704,7 @@ TEST(LoopNest, ScheduleInlineWithCompoundIndices) {
     # CHECK-NEXT:   B[)IR");
 }
 
-TEST(LoopNest, ScheduleInlineBufferIndicesWithCast) {
+TEST(LoopNest, ScheduleInlineConsumerIndicesWithCast) {
   // Input IR:
   //     for (int64_t i = 0; i < 100; i++) {
   //       A[0ll,i] = i * 500ll;
@@ -1737,7 +1737,45 @@ TEST(LoopNest, ScheduleInlineBufferIndicesWithCast) {
   auto par = Block::make({forI, forJ});
 
   LoopNest l(par, {b_buf.node()});
-  l.computeInline(a_buf.node());
+  ASSERT_TRUE(l.computeInline(a_buf.node()));
+
+  checkIR(l.root_stmt(), R"IR(
+    # CHECK: for (int64_t j = 0; j < 100; j++) {
+    # CHECK:   B[0ll, j] = j * 500ll + j * 100ll;
+    # CHECK: })IR");
+}
+
+TEST(LoopNest, ScheduleInlineProducerIndicesWithCast) {
+  // Input IR:
+  //     for (int64_t i = 0; i < 100; i++) {
+  //       A[(int64_t)0,i] = i * 500ll;
+  //     }
+  //     for (int64_t j = 0; j < 100; j++) {
+  //       B[0ll,j] = A[0ll, j] + j * 100ll;
+  //     }
+  BufHandle a_buf("A", {20, 100}, kLong);
+  BufHandle b_buf("B", {20, 100}, kLong);
+  VarHandle i("i", kLong);
+  VarHandle j("j", kLong);
+  auto forI = For::make(
+      i,
+      0,
+      100,
+      Store::make(a_buf, {0, i}, Mul::make(i, static_cast<int64_t>(500))));
+  auto forJ = For::make(
+      j,
+      0,
+      100,
+      Store::make(
+          b_buf,
+          {static_cast<int64_t>(0), j},
+          Add::make(
+              Load::make(a_buf, {static_cast<int64_t>(0), j}),
+              Mul::make(j, static_cast<int64_t>(100)))));
+  auto par = Block::make({forI, forJ});
+
+  LoopNest l(par, {b_buf.node()});
+  ASSERT_TRUE(l.computeInline(a_buf.node()));
 
   checkIR(l.root_stmt(), R"IR(
     # CHECK: for (int64_t j = 0; j < 100; j++) {
