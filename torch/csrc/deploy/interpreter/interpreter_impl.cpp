@@ -106,8 +106,12 @@ FOREACH_LIBRARY(DECLARE_LIBRARY_INIT)
 #undef DECLARE_LIBRARY_INIT
 
 extern "C" PyObject* initModule(void);
+extern "C" __attribute__((__weak__)) PyObject* PyInit_tensorrt(void);
+
 extern "C" struct _frozen _PyImport_FrozenModules[];
 extern "C" struct _frozen _PyImport_FrozenModules_torch[];
+extern "C"
+    __attribute__((__weak__)) struct _frozen _PyImport_FrozenModules_tensorrt[];
 
 const char* startup = R"RAW(
 import _ssl # must come before _hashlib otherwise ssl's locks will be set to a Python that might no longer exist...
@@ -128,6 +132,8 @@ class F:
             # Load this module using `BuiltinImporter`, but set `path` to None
             # in order to trick it into loading our module.
             return sys.meta_path[1].find_spec('torch._C', path=None, target=None)
+        elif fullname == 'tensorrt.tensorrt':
+            return sys.meta_path[1].find_spec('tensorrt.tensorrt', path=None, target=None)
         return None
 sys.meta_path.insert(0, F())
 
@@ -190,9 +196,10 @@ static const size_t NUM_FROZEN_PY_STDLIB_MODULES = 680;
 // `PyImport_ExtendInittab`.
 int extendFrozenModules(
     struct _frozen* frozenpython,
-    struct _frozen* frozentorch) {
+    struct _frozen* frozentorch,
+    struct _frozen* frozentensorrt) {
   struct _frozen* p = nullptr;
-  size_t a = 0, b = 0, c = 0;
+  size_t a = 0, b = 0, c = 0, d = 0;
   int res = 0;
 
   /* Count the number of entries in both tables */
@@ -207,6 +214,13 @@ int extendFrozenModules(
   for (c = 0; PyImport_FrozenModules[c].name != nullptr; c++) {
     // std::cout << "oldfrozen[" << c << "]: " << PyImport_FrozenModules[c].name
     // << std::endl;
+  }
+  if (frozentensorrt) {
+    for (d = 0; frozentensorrt[d].name != nullptr; d++) {
+      // std::cout << "oldfrozen[" << d << "]: " <<
+      // PyImport_FrozenModules[d].name
+      // << std::endl;
+    }
   }
 
   // Num frozen builtins shouldn't change (unless modifying the underlying
@@ -223,8 +237,8 @@ int extendFrozenModules(
       "Missing frozen python stdlib or torch modules");
 
   /* Allocate new memory for the combined table */
-  if (a + b + c <= SIZE_MAX / sizeof(struct _frozen) - 1) {
-    size_t size = sizeof(struct _frozen) * (a + b + c + 1);
+  if (a + b + c + d <= SIZE_MAX / sizeof(struct _frozen) - 1) {
+    size_t size = sizeof(struct _frozen) * (a + b + c + d + 1);
     p = (_frozen*)PyMem_Realloc(p, size);
   }
   if (p == nullptr) {
@@ -235,6 +249,9 @@ int extendFrozenModules(
   memcpy(p, PyImport_FrozenModules, (c + 1) * sizeof(struct _frozen));
   memcpy(p + c, frozenpython, (a + 1) * sizeof(struct _frozen));
   memcpy(p + a + c, frozentorch, (b + 1) * sizeof(struct _frozen));
+  if (frozentensorrt) {
+    memcpy(p + a + c + b, frozentensorrt, (d + 1) * sizeof(struct _frozen));
+  }
   PyImport_FrozenModules = p;
   return res;
 }
@@ -291,9 +308,14 @@ struct __attribute__((visibility("hidden"))) ConcreteInterpreterImpl
     FOREACH_LIBRARY(APPEND_INIT)
 #undef APPEND_INIT
     PyImport_AppendInittab("torch._C", initModule);
+    if (PyInit_tensorrt) {
+      PyImport_AppendInittab("tensorrt.tensorrt", PyInit_tensorrt);
+    }
 
     int ret = extendFrozenModules(
-        _PyImport_FrozenModules, _PyImport_FrozenModules_torch);
+        _PyImport_FrozenModules,
+        _PyImport_FrozenModules_torch,
+        _PyImport_FrozenModules_tensorrt);
     TORCH_INTERNAL_ASSERT(ret == 0);
 
     PyPreConfig preconfig;
@@ -328,6 +350,24 @@ struct __attribute__((visibility("hidden"))) ConcreteInterpreterImpl
 
     int r = PyRun_SimpleString(startup);
     TORCH_INTERNAL_ASSERT(r == 0);
+
+    // _Py_PackageContext acts as a "hook" that CPython uses to intercept the
+    // process of assigning a module their name.  See: https://git.io/J3qPH.
+    // For a builtin module we need to emulate normal extension module loading
+    // to set a correct fully qualified name. After that we can clean up the
+    // reference created by PyImport_ImportModule().
+    if (PyInit_tensorrt) {
+      _Py_PackageContext = "tensorrt.tensorrt";
+      PyObject* pmodule = PyImport_ImportModule("tensorrt.tensorrt");
+      if (pmodule) {
+        Py_DECREF(pmodule);
+      } else {
+        PyErr_Print();
+        fprintf(
+            stderr, "Error: could not import module 'tensorrt.tensorrt'.\n");
+      }
+      _Py_PackageContext = nullptr;
+    }
 
     // we cache these so we don't have to repeat the conversion of strings into
     // Python and hash table lookups to get to these object
