@@ -6,6 +6,7 @@ on:
   schedule:
     - cron: 0 4 * * SAT
   workflow_dispatch:
+  pull_request:  # TODO: remove this before landing!
 
 concurrency:
   group: autoformatter-${{ github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
