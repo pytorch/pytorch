@@ -638,7 +638,7 @@ jobs:
             echo "Skipping for ${BUILD_ENVIRONMENT}"
           fi
     - run:
-        name: Run tests
+        name: Test
         no_output_timeout: "90m"
         command: |
           set -e
