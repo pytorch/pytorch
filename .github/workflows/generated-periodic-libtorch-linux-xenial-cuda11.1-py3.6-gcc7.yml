@@ -202,7 +202,7 @@ jobs:
       - name: Pull docker image
         run: |
           docker pull "${DOCKER_IMAGE}"
-      - name: Build PyTorch
+      - name: Build
         run: |
           # detached container should get cleaned up by teardown_ec2_linux
           container_name=$(docker run \
