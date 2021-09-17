@@ -20,9 +20,9 @@ class TestCMake(unittest.TestCase):
         mock_cpu_count.return_value = 13
         cases = [
             # MAX_JOBS, USE_NINJA, IS_WINDOWS,         want
-            ((     '8',      True,     False),         ['-j',  '8']),  # noqa: E201,E241
-            ((    None,      True,     False),         ['-j', '13']),  # noqa: E201,E241
-            ((    None,      True,      True),         ['-j', '13']),  # noqa: E201,E241
+            ((     '8',      True,     False),          ['-j', '8']),  # noqa: E201,E241
+            ((    None,      True,     False),                 None),  # noqa: E201,E241
+            ((    None,      True,      True),                 None),  # noqa: E201,E241
             ((    None,     False,      True), ['/p:CL_MPCount=13']),  # noqa: E201,E241
         ]
         for (max_jobs, use_ninja, is_windows), want in cases:
@@ -41,7 +41,10 @@ class TestCMake(unittest.TestCase):
                     call, = cmake_run.mock_calls
                     build_args, _ = call.args
 
-                self.assert_contains_sequence(build_args, want)
+                if want is None:
+                    self.assertNotIn('-j', build_args)
+                else:
+                    self.assert_contains_sequence(build_args, want)
 
     @staticmethod
     def assert_contains_sequence(sequence: Sequence[T], subsequence: Sequence[T]) -> None:
