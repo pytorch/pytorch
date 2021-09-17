@@ -11,8 +11,23 @@ namespace jit {
 
 char const* toString(OpCode op);
 namespace mobile {
+
+const c10::QualifiedName& BytecodeFunction::qualname() const {
+  return function_.qualname();
+}
+
+const std::string& BytecodeFunction::name() const {
+  return function_.name();
+}
+
+const Code& BytecodeFunction::getCode() const {
+  return *function_.get_code().get();
+}
+
 Function::Function(c10::QualifiedName name)
-    : name_(std::move(name)), code_(std::make_shared<Code>()) {}
+    : name_(std::move(name)),
+      code_(std::make_shared<Code>()),
+      bytecodeFunction_(*this) {}
 
 const c10::QualifiedName& Function::qualname() const {
   return name_;
@@ -159,7 +174,7 @@ bool Function::run(Stack& stack) const {
     schema->checkAndNormalizeInputs(
         stack, std::unordered_map<std::string, IValue>{} /*kwargs*/);
   }
-  InterpreterState interp_state(code_);
+  InterpreterState interp_state(*code_.get());
   return interp_state.run(stack);
 }
 
@@ -173,12 +188,7 @@ const std::shared_ptr<Code> Function::get_code() const {
 }
 
 int64_t Function::getExceptionDebugHandle() const {
-  size_t pc = getInterpretersExceptionPC();
-  // we dont do bounds check given that pc is obtained
-  // via internal method of getInterpretersExceptionPC
-  // which returns the PC of where the interpreter is.
-  // Although .at will do bounds check anyway.
-  return code_->instructions_with_handles_.at(pc).debug_handle;
+  return getInterpretersExceptionDebugHandle();
 }
 
 } // namespace mobile

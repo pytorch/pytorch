@@ -1,8 +1,13 @@
 #pragma once
 
+#include <unordered_map>
+#include <vector>
+
 #include <ATen/core/function_schema.h>
 #include <ATen/core/ivalue.h>
-#include <vector>
+#include <ATen/core/operator_name.h>
+#include <ATen/core/function.h>
+#include <c10/util/Exception.h>
 
 namespace torch {
 namespace jit {
@@ -11,6 +16,86 @@ enum OpCode : uint8_t;
 
 namespace mobile {
 struct Code;
+
+class Function;
+class BytecodeFunction : public torch::jit::Function {
+ public:
+  BytecodeFunction(mobile::Function& function): function_(function) {}
+
+  bool isGraphFunction() const override {
+    return false;
+  }
+
+  void run(Stack& stack) override {
+    throw c10::NotImplementedError("", "");
+  }
+
+  void run(Stack&& stack) override {
+    throw c10::NotImplementedError("", "");
+  }
+
+  c10::intrusive_ptr<c10::ivalue::Future> runAsync(
+      Stack& stack,
+      TaskLauncher taskLauncher = at::launch) override {
+    throw c10::NotImplementedError("", "");
+  }
+
+  at::IValue operator()(
+      std::vector<at::IValue> stack,
+      const Kwargs& kwargs = Kwargs()) override {
+    throw c10::NotImplementedError("", "");
+  }
+
+  const c10::QualifiedName& qualname() const override;
+
+  const std::string& name() const override;
+
+  // if this isn't yet defined, run its method_creator function
+  void ensure_defined() override {
+    throw c10::NotImplementedError("", "");
+  }
+
+  std::shared_ptr<Graph> graph() const override {
+    throw c10::NotImplementedError("", "");
+  }
+
+  std::shared_ptr<Graph> optimized_graph() const override {
+    throw c10::NotImplementedError("", "");
+  }
+
+  void clear_execution_info() override {
+    throw c10::NotImplementedError("", "");
+  }
+
+  GraphExecutor& get_executor() override {
+    throw c10::NotImplementedError("", "");
+  }
+
+  const c10::FunctionSchema& getSchema() const override {
+    throw c10::NotImplementedError("", "");
+  }
+
+  size_t num_inputs() const override {
+    throw c10::NotImplementedError("", "");
+  }
+
+  void check_single_output() override {
+    throw c10::NotImplementedError("", "");
+  }
+
+  std::string pretty_print_schema() const override {
+    throw c10::NotImplementedError("", "");
+  }
+
+  Function& setSchema(c10::FunctionSchema schema) override {
+    throw c10::NotImplementedError("", "");
+  }
+
+  const Code& getCode() const;
+
+ private:
+  mobile::Function& function_;
+};
 
 class Function {
  public:
@@ -42,10 +127,14 @@ class Function {
   // If no corresponding debug handle is found then -1 is returned.
   int64_t getExceptionDebugHandle() const;
 
+  BytecodeFunction& getBytecodeFunction() {
+    return bytecodeFunction_;
+  }
  private:
   c10::QualifiedName name_;
   std::shared_ptr<Code> code_;
   at::optional<c10::FunctionSchema> schema_; // (byte-code version 4+)
+  BytecodeFunction bytecodeFunction_;
 };
 
 } // namespace mobile
