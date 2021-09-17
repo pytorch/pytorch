@@ -281,7 +281,6 @@ class TypedStorage:
                     return False
                 return True
 
-
             if len(args) == 0:
                 self._storage = eval(self.__module__).ByteStorage()
 
@@ -328,7 +327,7 @@ class TypedStorage:
             return TypedStorage(wrap_storage=byte_storage, dtype=self.dtype)
         else:
             # NOTE: We need to use the module of byte_storage in case self's
-            # module is different. e.g. if self is on CPU and byte_storage
+            # module is different, e.g. if self is on CPU and byte_storage
             # is on CUDA, and vice versa
             return getattr(module, type(self).__name__)(wrap_storage=byte_storage)
 
@@ -360,19 +359,35 @@ class TypedStorage:
                         f'index {idx} out of range for storage of size {self.size()}')
                 return idx % self.size()
 
-
     def __setitem__(self, idx, value):
-        # TODO: Need to type check `value`
-
-        # TODO: Need to fix quantized types
+        if not isinstance(idx, (int, slice)):
+            raise RuntimeError(f"can't index a {type(self)} with {type(idx)}")
         if self.dtype in [torch.quint8, torch.quint4x2, torch.qint32, torch.qint8]:
-            return NotImplemented
-        tmp_tensor = torch.tensor([], dtype=self.dtype, device=self.device).set_(self)
+            # TODO: Need to properly test this
+            interpret_dtypes = {
+                torch.quint8: torch.uint8,
+                torch.quint4x2: torch.uint8,
+                torch.qint32: torch.int32,
+                torch.qint8: torch.int8
+            }
+            tmp_dtype = interpret_dtypes[self.dtype]
+            tmp_tensor = torch.tensor([], dtype=tmp_dtype, device=self.device).set_(TypedStorage(
+                wrap_storage=self._storage,
+                dtype=tmp_dtype))
+        else:
+            tmp_tensor = torch.tensor([], dtype=self.dtype, device=self.device).set_(self)
+
         tmp_tensor[idx] = value
 
     def __getitem__(self, idx):
+        # NOTE: Before TypedStorage existed, indexing with a slice used to be
+        # possible for <type>Storage objects. However, it would return
+        # a storage view, which would be a hassle to implement in TypedStorage,
+        # so it was disabled
         if isinstance(idx, slice):
             raise RuntimeError('slices are only supported in ByteStorage.__getitem__')
+        elif not isinstance(idx, int):
+            raise RuntimeError(f"can't index a {type(self)} with {type(idx)}")
 
         if self.dtype in [torch.quint8, torch.quint4x2, torch.qint32, torch.qint8]:
             # TODO: Need to properly test this
@@ -382,7 +397,6 @@ class TypedStorage:
                 torch.qint32: torch.int32,
                 torch.qint8: torch.int8
             }
-
             return TypedStorage(
                 wrap_storage=self._storage,
                 dtype=interpret_dtypes[self.dtype])[idx]

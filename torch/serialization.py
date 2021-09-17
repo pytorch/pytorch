@@ -764,7 +764,7 @@ def _legacy_load(f, map_location, pickle_module, **pickle_load_args):
                 for i in range(num_storages):
                     args = pickle_module.load(f, **pickle_load_args)
                     key, location, storage_type = args
-                    dtype = torch.storage._get_dtype_from_pickle_storage_type(storage_type.__name__)
+                    dtype = storage_type.dtype
                     obj = cast(Storage, torch.ByteStorage)._new_with_file(f, torch._utils._element_size(dtype))
                     obj = restore_location(obj, location)
                     # TODO: Once we decide to break serialization FC, we can

@@ -689,8 +689,14 @@ if TYPE_CHECKING:
     # PR #43339 for details.
     from torch._C._VariableFunctions import *  # type: ignore[misc] # noqa: F403
 
+# Ops not to be exposed in `torch` namespace,
+# mostly helper ops.
+PRIVATE_OPS = (
+    'unique_dim',
+)
+
 for name in dir(_C._VariableFunctions):
-    if name.startswith('__'):
+    if name.startswith('__') or name in PRIVATE_OPS:
         continue
     globals()[name] = getattr(_C._VariableFunctions, name)
     __all__.append(name)
@@ -811,6 +817,8 @@ from ._vmap_internals import vmap as vmap
 # class usage. We add these lines here to preserve backward compatibility.
 quantized_lstm = torch.ops.aten.quantized_lstm
 quantized_gru = torch.ops.aten.quantized_gru
+
+from torch.utils.dlpack import from_dlpack, to_dlpack
 
 
 def _register_device_module(device_type, module):

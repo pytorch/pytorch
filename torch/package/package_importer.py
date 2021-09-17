@@ -196,7 +196,7 @@ class PackageImporter(Importer):
 
             if typename == "storage":
                 storage_type, key, location, size = data
-                dtype = torch.storage._get_dtype_from_pickle_storage_type(storage_type.__name__)
+                dtype = storage_type.dtype
 
                 if key not in loaded_storages:
                     load_tensor(

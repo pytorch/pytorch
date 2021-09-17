@@ -7,6 +7,9 @@ import torch.fx
 from torch.fx.node import _get_qualified_name
 
 
+TRTInterpreterResult = Tuple[Any, Sequence[str], Sequence[str]]
+
+
 # Borrowed from torch2trt
 def torch_dtype_to_trt(dtype):
     if trt.__version__ >= "7.0" and dtype == torch.bool:
@@ -218,6 +221,7 @@ class TRTInterpreter(torch.fx.Interpreter):
         module: torch.fx.GraphModule,
         input_specs: List[InputTensorSpec],
         explicit_batch_dimension: bool = False,
+        explicit_precision: bool = False,
         logger_level=trt.Logger.WARNING,
     ):
         super().__init__(module)
@@ -225,13 +229,19 @@ class TRTInterpreter(torch.fx.Interpreter):
         self.logger = trt.Logger(logger_level)
         self.builder = trt.Builder(self.logger)
 
+        flag = 0
         if explicit_batch_dimension:
             EXPLICIT_BATCH = 1 << (int)(
                 trt.NetworkDefinitionCreationFlag.EXPLICIT_BATCH
             )
-            self.network = self.builder.create_network(EXPLICIT_BATCH)
-        else:
-            self.network = self.builder.create_network()
+            flag |= EXPLICIT_BATCH
+
+        if explicit_precision:
+            EXPLICIT_PRECISION = 1 << (int)(
+                trt.NetworkDefinitionCreationFlag.EXPLICIT_PRECISION
+            )
+            flag |= EXPLICIT_PRECISION
+        self.network = self.builder.create_network(flag)
 
         missing_ops = self.validate_conversion()
         if missing_ops:
@@ -326,7 +336,7 @@ class TRTInterpreter(torch.fx.Interpreter):
         fp16_mode=True,
         int8_mode=False,
         strict_type_constraints=True,
-    ):
+    ) -> TRTInterpreterResult:
         # TODO hack, should check contents of args and remove fp16_mode probably
         self.fp16_mode = fp16_mode
 
