@@ -151,6 +151,7 @@ jobs:
     env:
       DOCKER_IMAGE: ${{ needs.calculate-docker-image.outputs.docker_image }}
       JOB_BASE_NAME: linux-xenial-py3.6-gcc5.4-build
+      IS_GHA: "1"
     steps:
       - name: Display EC2 information
         shell: bash
@@ -208,6 +209,7 @@ jobs:
           # detached container should get cleaned up by teardown_ec2_linux
           container_name=$(docker run \
             -e BUILD_ENVIRONMENT \
+            -e IS_GHA \
             -e JOB_BASE_NAME \
             -e MAX_JOBS="$(nproc --ignore=2)" \
             -e SCCACHE_BUCKET \
