@@ -11,8 +11,6 @@ namespace torch {
 namespace jit {
 namespace tensorexpr {
 
-class Placeholder;
-
 // The common base between all statement node.
 class TORCH_API Stmt : public std::enable_shared_from_this<Stmt> {
  public:

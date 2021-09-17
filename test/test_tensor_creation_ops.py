@@ -1,7 +1,6 @@
 import torch
 import numpy as np
 
-import os
 import sys
 import math
 import warnings
@@ -12,8 +11,8 @@ import random
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, do_test_empty_full, TEST_WITH_ROCM, suppress_warnings,
-    torch_to_numpy_dtype_dict, slowTest, TEST_SCIPY, IS_MACOS, IS_PPC,
-    IS_WINDOWS)
+    torch_to_numpy_dtype_dict, skipIfTBB, slowTest,
+    TEST_SCIPY, IS_MACOS, IS_PPC, IS_WINDOWS)
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests, deviceCountAtLeast, onlyOnCPUAndCUDA,
     onlyCPU, largeTensorTest, precisionOverride, dtypes,
@@ -311,6 +310,21 @@ class TestTensorCreation(TestCase):
         dtypes = [dtype for dtype in get_all_dtypes() if dtype != torch.bfloat16]
         for s, d, dtype in product(shapes, diagonals, dtypes):
             run_test(s, device, d, dtype)
+
+    @onlyCPU
+    def test_triu_tril_bfloat16(self, device):
+        op_funcs = [torch.tril, torch.triu]
+        for op_fun in op_funcs:
+            input = torch.randn(3, 3, dtype=torch.float32, device=device).bfloat16().requires_grad_(True)
+            input2 = input.detach().clone().float().requires_grad_(True)
+            out = op_fun(input)
+            out.sum().backward()
+            out2 = op_fun(input2)
+            out2.sum().backward()
+            self.assertEqual(out.dtype, torch.bfloat16)
+            self.assertEqual(input.grad.dtype, torch.bfloat16)
+            self.assertEqual(out, out2.bfloat16())
+            self.assertEqual(input.grad, input2.grad.bfloat16(), atol=0.01, rtol=0)
 
     def test_diagflat(self, device):
         dtype = torch.float32
@@ -1191,8 +1205,7 @@ class TestTensorCreation(TestCase):
         self.assertRaises(RuntimeError, lambda: torch.zeros((2, 3), device=device, dtype=torch.float32, out=d))
 
     # TODO: update to work on CUDA, too
-    @unittest.skipIf("tbb" in os.getenv("BUILD_ENVIRONMENT", ""),
-                     "This test makes TBB sad, see https://github.com/pytorch/pytorch/issues/64571")
+    @skipIfTBB("This test makes TBB sad, see https://github.com/pytorch/pytorch/issues/64571")
     @onlyCPU
     def test_trilu_indices(self, device):
         for test_args in tri_tests_args:
@@ -1214,6 +1227,15 @@ class TestTensorCreation(TestCase):
         b = x.clone().expand(3, 3, 3, 3)
         self.assertEqual(b.triu(2), output)
         self.assertRaises(RuntimeError, lambda: b.triu_(2))
+
+    @onlyCPU
+    def test_triu_tril_indices_bfloat16(self, device):
+        op_funcs = [torch.tril_indices, torch.triu_indices]
+        for op_fun in op_funcs:
+            out = op_fun(4, 3, 1, dtype=torch.bfloat16)
+            out2 = op_fun(4, 3, 1, dtype=torch.float)
+            self.assertEqual(out.dtype, torch.bfloat16)
+            self.assertEqual(out, out2.bfloat16())
 
     # TODO: update to work on CUDA, too
     @onlyCPU
@@ -1380,7 +1402,39 @@ class TestTensorCreation(TestCase):
         y = x[2:]
         self.assertEqual(int(y), 3)
 
-    def test_meshgrid(self, device):
+    def test_meshgrid_empty(self):
+        with self.assertRaisesRegex(RuntimeError,
+                                    'expects a non-empty TensorList'):
+            torch.meshgrid()
+
+    def test_meshgrid_unsupported_indexing(self):
+        with self.assertRaisesRegex(RuntimeError,
+                                    'only "ij" indexing is supported'):
+            torch.meshgrid(torch.tensor([1, 2]), indexing='')
+
+    def test_meshgrid_non_1d_tensor(self):
+        with self.assertRaisesRegex(RuntimeError,
+                                    'Expected scalar or 1D tensor'):
+            torch.meshgrid(torch.tensor([[1, 2], [3, 4]]))
+
+    def test_meshgrid_inconsistent_dtype(self):
+        with self.assertRaisesRegex(
+                RuntimeError, 'expects all tensors to have the same dtype'):
+            torch.meshgrid(torch.tensor([1], dtype=torch.int),
+                           torch.tensor([2], dtype=torch.float))
+
+    def test_meshgrid_inconsistent_device(self):
+        with self.assertRaisesRegex(
+                RuntimeError, 'expects all tensors to have the same device'):
+            torch.meshgrid(torch.tensor([1], device='cpu'),
+                           torch.tensor([2], device='meta'))
+
+    def test_meshgrid_warns_if_no_indexing(self):
+        with self.assertWarnsOnceRegex(
+                UserWarning, '.*will be required to pass the indexing arg.*'):
+            torch.meshgrid(torch.tensor([1, 2]))
+
+    def test_meshgrid_default_indexing(self, device):
         a = torch.tensor(1, device=device)
         b = torch.tensor([1, 2, 3], device=device)
         c = torch.tensor([1, 2], device=device)
@@ -1405,6 +1459,81 @@ class TestTensorCreation(TestCase):
         self.assertTrue(grid_a2.equal(expected_grid_a))
         self.assertTrue(grid_b2.equal(expected_grid_b))
         self.assertTrue(grid_c2.equal(expected_grid_c))
+
+    def test_meshgrid_ij_indexing(self, device):
+        a = torch.tensor(1, device=device)
+        b = torch.tensor([1, 2, 3], device=device)
+        c = torch.tensor([1, 2], device=device)
+        grid_a, grid_b, grid_c = torch.meshgrid([a, b, c], indexing='ij')
+        self.assertEqual(grid_a.shape, torch.Size([1, 3, 2]))
+        self.assertEqual(grid_b.shape, torch.Size([1, 3, 2]))
+        self.assertEqual(grid_c.shape, torch.Size([1, 3, 2]))
+        grid_a2, grid_b2, grid_c2 = torch.meshgrid(a, b, c, indexing='ij')
+        self.assertEqual(grid_a2.shape, torch.Size([1, 3, 2]))
+        self.assertEqual(grid_b2.shape, torch.Size([1, 3, 2]))
+        self.assertEqual(grid_c2.shape, torch.Size([1, 3, 2]))
+        expected_grid_a = torch.ones(1, 3, 2, dtype=torch.int64, device=device)
+        expected_grid_b = torch.tensor([[[1, 1],
+                                         [2, 2],
+                                         [3, 3]]], device=device)
+        expected_grid_c = torch.tensor([[[1, 2],
+                                         [1, 2],
+                                         [1, 2]]], device=device)
+        self.assertTrue(grid_a.equal(expected_grid_a))
+        self.assertTrue(grid_b.equal(expected_grid_b))
+        self.assertTrue(grid_c.equal(expected_grid_c))
+        self.assertTrue(grid_a2.equal(expected_grid_a))
+        self.assertTrue(grid_b2.equal(expected_grid_b))
+        self.assertTrue(grid_c2.equal(expected_grid_c))
+
+    def test_meshgrid_ij_indexing_is_default(self, device):
+        a = torch.tensor(1, device=device)
+        b = torch.tensor([1, 2, 3], device=device)
+        c = torch.tensor([1, 2], device=device)
+        grid_a, grid_b, grid_c = torch.meshgrid(a, b, c, indexing='ij')
+        grid_a2, grid_b2, grid_c2 = torch.meshgrid(a, b, c)
+        self.assertTrue(grid_a.equal(grid_a2))
+        self.assertTrue(grid_b.equal(grid_b2))
+        self.assertTrue(grid_c.equal(grid_c2))
+
+    @skipMeta
+    def test_meshgrid_vs_numpy(self, device):
+        # Shapes to the random tensors. Each line is a test case, and
+        # each list within that line is the shape of a single
+        # tensor. The shapes are restricted to 0D (represented by [])
+        # and 1D tensors.
+        cases = [
+            [[]],
+            [[1], [1], [1]],
+            [[], [], []],
+            [[3], [5], [7]],
+            [[3], [], [7]],
+            [[11], [13]],
+            [[15]],
+        ]
+
+        # We also need to test the different indexing modes. We can't
+        # just enumerate them because we don't presently support the
+        # same modes as numpy.meshgrid, nor does our default
+        # correspond to their default.
+        #
+        # TODO Eliminate this and replace it with a list of all
+        # supported indexing modes when we have full compatibility.
+        indexing_correspondence = [
+            # No indexing in PyTorch corresponds to "ij" indexing in
+            # NumPy.
+            ({}, {'indexing': 'ij'}),
+            # "ij" is implemented identically in both.
+            ({'indexing': 'ij'}, {'indexing': 'ij'}),
+            # TODO Test "xy" when it is supported in PyTorch.
+        ]
+        for shapes, (torch_kwargs, numpy_kwargs) in product(cases, indexing_correspondence):
+            with self.subTest(shapes=shapes, torch_kwargs=torch_kwargs, numpy_kwargs=numpy_kwargs):
+                tensors = [make_tensor(shape, device=device, dtype=torch.int) for shape in shapes]
+                torch_grids = torch.meshgrid(*tensors, **torch_kwargs)
+                numpy_grids = np.meshgrid(*(tensor.cpu().numpy() for tensor in tensors), **numpy_kwargs)
+                self.assertEqual(torch_grids, numpy_grids)
+
 
     def test_cartesian_prod(self, device):
         a = torch.tensor([1], device=device)
