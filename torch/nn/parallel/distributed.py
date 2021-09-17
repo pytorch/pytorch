@@ -894,7 +894,11 @@ class DistributedDataParallel(Module, Joinable):
             # sync params according to location (before/after forward) user
             # specified as part of hook, if hook was specified.
             buffer_hook_registered = hasattr(self, 'buffer_hook')
-            if self.require_forward_param_sync and (not buffer_hook_registered or self.buffer_hook.buffer_comm_hook_location == _BufferCommHookLocation.PRE_FORWARD):
+            if self.require_forward_param_sync and (
+                not buffer_hook_registered
+                or self.buffer_hook.buffer_comm_hook_location
+                == _BufferCommHookLocation.PRE_FORWARD
+            ):
                 self._sync_params()
 
             if self._join_config.enable:
@@ -909,7 +913,12 @@ class DistributedDataParallel(Module, Joinable):
 
             # sync params according to location (before/after forward) user
             # specified as part of hook, if hook was specified.
-            if self.require_forward_param_sync and buffer_hook_registered and self.buffer_hook.buffer_comm_hook_location == _BufferCommHookLocation.POST_FORWARD:
+            if (
+                self.require_forward_param_sync
+                and buffer_hook_registered
+                and self.buffer_hook.buffer_comm_hook_location
+                == _BufferCommHookLocation.POST_FORWARD
+            ):
                 self._sync_params()
 
             if torch.is_grad_enabled() and self.require_backward_grad_sync:
@@ -1250,6 +1259,7 @@ class DistributedDataParallel(Module, Joinable):
         hook: callable,
         comm_hook_location=_BufferCommHookLocation.PRE_FORWARD
     ):
+
         assert callable(hook)
         self.buffer_hook = _BufferCommHook(
             buffer_comm_hook=hook,
@@ -1424,11 +1434,8 @@ class DistributedDataParallel(Module, Joinable):
             hook(state, self.named_module_buffers)
 
     def _default_broadcast_coalesced(
-        self,
-        bufs=None,
-        bucket_size=None,
-        authoritative_rank=0
-        ):
+        self, bufs=None, bucket_size=None, authoritative_rank=0
+    ):
         """
         Broadcasts buffers from rank 0 to rest of workers. If bufs, bucket_size
         are None, default values self.modules_buffers and
