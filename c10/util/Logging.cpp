@@ -209,7 +209,9 @@ bool InitCaffeLogging(int* argc, char** argv) {
     ::google::InitGoogleLogging(argv[0]);
 #if !defined(_MSC_VER)
     // This is never defined on Windows
+#if !defined(__XROS__)
     ::google::InstallFailureSignalHandler();
+#endif
 #endif
   }
   UpdateLoggingLevelsFromFlags();
