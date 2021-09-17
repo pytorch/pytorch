@@ -35,6 +35,16 @@ class ConstantValueMap {
   static std::vector<int64_t> GetValueInto1DInt64Vector(
       const std::string& value_name);
 
+  static void SetTypeReliable(const std::string& tensorName, bool reliable);
+  static bool HasTypeReliable(const std::string& tensorName);
+  static c10::optional<bool> GetTypeReliable(const std::string& tensorName);
+
+  static void SetUseInferredType(
+      const std::string& tensorName,
+      bool useInferredType);
+  static bool HasUseInferredType(const std::string& tensorName);
+  static c10::optional<bool> GetUseInferredType(const std::string& tensorName);
+
   static void PrintMaps();
   static void ClearMaps();
   ~ConstantValueMap() = default;
@@ -47,6 +57,11 @@ class ConstantValueMap {
   std::unordered_map<std::string, size_t> rankMap;
   std::unordered_map<std::string, c10::SymbolicShape> shapeMap;
   std::unordered_map<std::string, at::Tensor> tensorValueMap;
+  // This map indicates whether the current type is reliably estimated or not.
+  std::unordered_map<std::string, bool> typeReliableMap;
+  // This map indicates whether the current type is estimated through inference
+  // or tracer.
+  std::unordered_map<std::string, bool> useInferredTypeMap;
 };
 
 } // namespace jit
