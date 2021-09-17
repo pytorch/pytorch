@@ -1,3 +1,4 @@
+import copy
 import http.server
 import itertools
 import os
@@ -399,6 +400,23 @@ class TestIterableDataPipeBasic(TestCase):
         n = n1.mux(n2)
         self.assertEqual(source_numbers, list(n))
 
+    @suppress_warnings  # Suppress warning for lambda fn
+    def test_map_with_col_file_handle_datapipe(self):
+        temp_dir = self.temp_dir.name
+        datapipe1 = dp.iter.FileLister(temp_dir, '')
+        datapipe2 = dp.iter.FileLoader(datapipe1)
+
+        def _helper(datapipe):
+            dp1 = datapipe.map(lambda x: x.read(), input_col=1)
+            dp2 = datapipe.map(lambda x: (x[0], x[1].read()))
+            self.assertEqual(list(dp1), list(dp2))
+
+        # tuple
+        _helper(datapipe2)
+        # list
+        datapipe3 = datapipe2.map(lambda x: list(x))
+        _helper(datapipe3)
+
 
 class TestDataFramesPipes(TestCase):
     """
@@ -597,8 +615,10 @@ class IDP_NoLen(IterDataPipe):
         super().__init__()
         self.input_dp = input_dp
 
+    # Prevent in-place modification
     def __iter__(self):
-        for i in self.input_dp:
+        input_dp = self.input_dp if isinstance(self.input_dp, IterDataPipe) else copy.deepcopy(self.input_dp)
+        for i in input_dp:
             yield i
 
 
@@ -608,8 +628,10 @@ class IDP(IterDataPipe):
         self.input_dp = input_dp
         self.length = len(input_dp)
 
+    # Prevent in-place modification
     def __iter__(self):
-        for i in self.input_dp:
+        input_dp = self.input_dp if isinstance(self.input_dp, IterDataPipe) else copy.deepcopy(self.input_dp)
+        for i in input_dp:
             yield i
 
     def __len__(self):
