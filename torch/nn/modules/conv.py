@@ -138,6 +138,9 @@ class _ConvNd(Module):
         self.reset_parameters()
 
     def reset_parameters(self) -> None:
+        # Setting a=sqrt(5) in kaiming_uniform is the same as initializing with
+        # uniform(-1/sqrt(k), 1/sqrt(k)), where k = weight.size(1) * prod(*kernel_size)
+        # For more details see: https://github.com/pytorch/pytorch/issues/15314#issuecomment-477448573
         init.kaiming_uniform_(self.weight, a=math.sqrt(5))
         if self.bias is not None:
             fan_in, _ = init._calculate_fan_in_and_fan_out(self.weight)
@@ -650,7 +653,9 @@ class ConvTranspose1d(_ConvTransposeNd):
 
     This module can be seen as the gradient of Conv1d with respect to its input.
     It is also known as a fractionally-strided convolution or
-    a deconvolution (although it is not an actual deconvolution operation).
+    a deconvolution (although it is not an actual deconvolution operation as it does
+    not compute a true inverse of convolution). For more information, see the visualizations
+    `here`_ and the `Deconvolutional Networks`_ paper.
 
     This module supports :ref:`TensorFloat32<tf32_on_ampere>`.
 
@@ -664,7 +669,7 @@ class ConvTranspose1d(_ConvTransposeNd):
       of the output shape. See note below for details.
 
     * :attr:`dilation` controls the spacing between the kernel points; also known as the à trous algorithm.
-      It is harder to describe, but this `link`_ has a nice visualization of what :attr:`dilation` does.
+      It is harder to describe, but the link `here`_ has a nice visualization of what :attr:`dilation` does.
 
     {groups_note}
 
@@ -723,11 +728,11 @@ class ConvTranspose1d(_ConvTransposeNd):
                          sampled from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
                          :math:`k = \frac{groups}{C_\text{out} * \text{kernel\_size}}`
 
-    .. _cross-correlation:
-        https://en.wikipedia.org/wiki/Cross-correlation
-
-    .. _link:
+    .. _`here`:
         https://github.com/vdumoulin/conv_arithmetic/blob/master/README.md
+
+    .. _`Deconvolutional Networks`:
+        https://www.matthewzeiler.com/mattzeiler/deconvolutionalnetworks.pdf
     """
 
     def __init__(
@@ -775,7 +780,9 @@ class ConvTranspose2d(_ConvTransposeNd):
 
     This module can be seen as the gradient of Conv2d with respect to its input.
     It is also known as a fractionally-strided convolution or
-    a deconvolution (although it is not an actual deconvolution operation).
+    a deconvolution (although it is not an actual deconvolution operation as it does
+    not compute a true inverse of convolution). For more information, see the visualizations
+    `here`_ and the `Deconvolutional Networks`_ paper.
 
     This module supports :ref:`TensorFloat32<tf32_on_ampere>`.
 
@@ -789,7 +796,7 @@ class ConvTranspose2d(_ConvTransposeNd):
       of the output shape. See note below for details.
 
     * :attr:`dilation` controls the spacing between the kernel points; also known as the à trous algorithm.
-      It is harder to describe, but this `link`_ has a nice visualization of what :attr:`dilation` does.
+      It is harder to describe, but the link `here`_ has a nice visualization of what :attr:`dilation` does.
 
     {groups_note}
 
@@ -871,11 +878,11 @@ class ConvTranspose2d(_ConvTransposeNd):
         >>> output.size()
         torch.Size([1, 16, 12, 12])
 
-    .. _cross-correlation:
-        https://en.wikipedia.org/wiki/Cross-correlation
-
-    .. _link:
+    .. _`here`:
         https://github.com/vdumoulin/conv_arithmetic/blob/master/README.md
+
+    .. _`Deconvolutional Networks`:
+        https://www.matthewzeiler.com/mattzeiler/deconvolutionalnetworks.pdf
     """
 
     def __init__(
@@ -926,7 +933,9 @@ class ConvTranspose3d(_ConvTransposeNd):
 
     This module can be seen as the gradient of Conv3d with respect to its input.
     It is also known as a fractionally-strided convolution or
-    a deconvolution (although it is not an actual deconvolution operation).
+    a deconvolution (although it is not an actual deconvolution operation as it does
+    not compute a true inverse of convolution). For more information, see the visualizations
+    `here`_ and the `Deconvolutional Networks`_ paper.
 
     This module supports :ref:`TensorFloat32<tf32_on_ampere>`.
 
@@ -940,7 +949,7 @@ class ConvTranspose3d(_ConvTransposeNd):
       of the output shape. See note below for details.
 
     * :attr:`dilation` controls the spacing between the kernel points; also known as the à trous algorithm.
-      It is harder to describe, but this `link`_ has a nice visualization of what :attr:`dilation` does.
+      It is harder to describe, but the link `here`_ has a nice visualization of what :attr:`dilation` does.
 
     {groups_note}
 
@@ -1016,11 +1025,11 @@ class ConvTranspose3d(_ConvTransposeNd):
         >>> input = torch.randn(20, 16, 10, 50, 100)
         >>> output = m(input)
 
-    .. _cross-correlation:
-        https://en.wikipedia.org/wiki/Cross-correlation
-
-    .. _link:
+    .. _`here`:
         https://github.com/vdumoulin/conv_arithmetic/blob/master/README.md
+
+    .. _`Deconvolutional Networks`:
+        https://www.matthewzeiler.com/mattzeiler/deconvolutionalnetworks.pdf
     """
 
     def __init__(

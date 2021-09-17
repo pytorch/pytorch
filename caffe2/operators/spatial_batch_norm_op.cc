@@ -24,16 +24,11 @@ OpSchema::Cost CostInferenceForSpatialBN(
 
 } // namespace
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(SpatialBN, SpatialBNOp<CPUContext>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SpatialBN)
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     .NumInputs({5, 7})
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     .NumOutputs({1, 5})
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     .AllowInplace({{0, 0}, {5, 3}, {6, 4}})
     .EnforceInplace({{3, 1}, {4, 2}})
     .CostInferenceFunction(CostInferenceForSpatialBN)
@@ -119,12 +114,10 @@ Github Links:
         "var",
         "The running variance (training) or the estimated variance (testing) as a 1-dimensional tensor of size $C$.")
     .Input(
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         5,
         "sums",
         "*(optional)* Per-channel sums of elements to be used to determine the mean and variance for this batch.")
     .Input(
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         6,
         "sumsq",
         "*(optional)* Per-channel sum of elements squared per channel to be used to determine the variance for this batch.")

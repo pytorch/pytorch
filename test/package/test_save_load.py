@@ -20,10 +20,28 @@ packaging_directory = Path(__file__).parent
 class TestSaveLoad(PackageTestCase):
     """Core save_* and loading API tests."""
 
-    @skipIf(IS_FBCODE or IS_SANDCASTLE, "Tests that use temporary files are disabled in fbcode")
+    @skipIf(
+        IS_FBCODE or IS_SANDCASTLE,
+        "Tests that use temporary files are disabled in fbcode",
+    )
+    def test_saving_source(self):
+        filename = self.temp()
+        with PackageExporter(filename) as he:
+            he.save_source_file("foo", str(packaging_directory / "module_a.py"))
+            he.save_source_file("foodir", str(packaging_directory / "package_a"))
+        hi = PackageImporter(filename)
+        foo = hi.import_module("foo")
+        s = hi.import_module("foodir.subpackage")
+        self.assertEqual(foo.result, "module_a")
+        self.assertEqual(s.result, "package_a.subpackage")
+
+    @skipIf(
+        IS_FBCODE or IS_SANDCASTLE,
+        "Tests that use temporary files are disabled in fbcode",
+    )
     def test_saving_string(self):
         filename = self.temp()
-        with PackageExporter(filename, verbose=False) as he:
+        with PackageExporter(filename) as he:
             src = dedent(
                 """\
                 import math
@@ -39,10 +57,13 @@ class TestSaveLoad(PackageTestCase):
         my_mod = hi.import_module("my_mod")
         self.assertIs(my_mod.math, math)
 
-    @skipIf(IS_FBCODE or IS_SANDCASTLE, "Tests that use temporary files are disabled in fbcode")
+    @skipIf(
+        IS_FBCODE or IS_SANDCASTLE,
+        "Tests that use temporary files are disabled in fbcode",
+    )
     def test_save_module(self):
         filename = self.temp()
-        with PackageExporter(filename, verbose=False) as he:
+        with PackageExporter(filename) as he:
             import module_a
             import package_a
 
@@ -56,29 +77,13 @@ class TestSaveLoad(PackageTestCase):
         self.assertEqual(package_a_i.result, "package_a")
         self.assertIsNot(package_a_i, package_a)
 
-    def test_save_module_with_module_object(self):
-        """
-        Test that save_module works with a module object
-        instead of a module name.
-        """
-        buffer = BytesIO()
-
-        with PackageExporter(buffer, verbose=False) as he:
-            import module_a
-
-            he.save_module(module_a)
-
-        buffer.seek(0)
-        hi = PackageImporter(buffer)
-        module_a_i = hi.import_module("module_a")
-        self.assertEqual(module_a_i.result, "module_a")
-        self.assertIsNot(module_a, module_a_i)
-
     def test_dunder_imports(self):
         buffer = BytesIO()
-        with PackageExporter(buffer, verbose=False) as he:
+        with PackageExporter(buffer) as he:
             import package_b
+
             obj = package_b.PackageBObject
+            he.intern("**")
             he.save_pickle("res", "obj.pkl", obj)
 
         buffer.seek(0)
@@ -103,9 +108,17 @@ class TestSaveLoad(PackageTestCase):
         subsubpackage_0 = hi.import_module("package_b.subpackage_0.subsubpackage_0")
         self.assertEqual(subsubpackage_0.result, "subsubpackage_0")
 
+    def test_bad_dunder_imports(self):
+        """Test to ensure bad __imports__ don't cause PackageExporter to fail."""
+        buffer = BytesIO()
+        with PackageExporter(buffer) as e:
+            e.save_source_string(
+                "m", '__import__(these, unresolvable, "things", wont, crash, me)'
+            )
+
     def test_save_module_binary(self):
         f = BytesIO()
-        with PackageExporter(f, verbose=False) as he:
+        with PackageExporter(f) as he:
             import module_a
             import package_a
 
@@ -120,7 +133,10 @@ class TestSaveLoad(PackageTestCase):
         self.assertEqual(package_a_i.result, "package_a")
         self.assertIsNot(package_a_i, package_a)
 
-    @skipIf(IS_FBCODE or IS_SANDCASTLE, "Tests that use temporary files are disabled in fbcode")
+    @skipIf(
+        IS_FBCODE or IS_SANDCASTLE,
+        "Tests that use temporary files are disabled in fbcode",
+    )
     def test_pickle(self):
         import package_a.subpackage
 
@@ -128,7 +144,8 @@ class TestSaveLoad(PackageTestCase):
         obj2 = package_a.PackageAObject(obj)
 
         filename = self.temp()
-        with PackageExporter(filename, verbose=False) as he:
+        with PackageExporter(filename) as he:
+            he.intern("**")
             he.save_pickle("obj", "obj.pkl", obj2)
         hi = PackageImporter(filename)
 
@@ -145,7 +162,10 @@ class TestSaveLoad(PackageTestCase):
             package_a.subpackage.PackageASubpackageObject, sp.PackageASubpackageObject
         )
 
-    @skipIf(IS_FBCODE or IS_SANDCASTLE, "Tests that use temporary files are disabled in fbcode")
+    @skipIf(
+        IS_FBCODE or IS_SANDCASTLE,
+        "Tests that use temporary files are disabled in fbcode",
+    )
     def test_save_imported_module_fails(self):
         """
         Directly saving/requiring an PackageImported module should raise a specific error message.
@@ -155,20 +175,22 @@ class TestSaveLoad(PackageTestCase):
         obj = package_a.subpackage.PackageASubpackageObject()
         obj2 = package_a.PackageAObject(obj)
         f1 = self.temp()
-        with PackageExporter(f1, verbose=False) as pe:
+        with PackageExporter(f1) as pe:
+            pe.intern("**")
             pe.save_pickle("obj", "obj.pkl", obj)
 
         importer1 = PackageImporter(f1)
         loaded1 = importer1.load_pickle("obj", "obj.pkl")
 
         f2 = self.temp()
-        pe = PackageExporter(f2, verbose=False, importer=(importer1, sys_importer))
-        with self.assertRaisesRegex(ModuleNotFoundError, "torch.package"):
-            pe.require_module(loaded1.__module__)
+        pe = PackageExporter(f2, importer=(importer1, sys_importer))
         with self.assertRaisesRegex(ModuleNotFoundError, "torch.package"):
             pe.save_module(loaded1.__module__)
 
-    @skipIf(IS_FBCODE or IS_SANDCASTLE, "Tests that use temporary files are disabled in fbcode")
+    @skipIf(
+        IS_FBCODE or IS_SANDCASTLE,
+        "Tests that use temporary files are disabled in fbcode",
+    )
     def test_exporting_mismatched_code(self):
         """
         If an object with the same qualified name is loaded from different
@@ -180,7 +202,8 @@ class TestSaveLoad(PackageTestCase):
         obj = package_a.subpackage.PackageASubpackageObject()
         obj2 = package_a.PackageAObject(obj)
         f1 = self.temp()
-        with PackageExporter(f1, verbose=False) as pe:
+        with PackageExporter(f1) as pe:
+            pe.intern("**")
             pe.save_pickle("obj", "obj.pkl", obj2)
 
         importer1 = PackageImporter(f1)
@@ -191,7 +214,7 @@ class TestSaveLoad(PackageTestCase):
         f2 = self.temp()
 
         def make_exporter():
-            pe = PackageExporter(f2, verbose=False, importer=[importer1, sys_importer])
+            pe = PackageExporter(f2, importer=[importer1, sys_importer])
             # Ensure that the importer finds the 'PackageAObject' defined in 'importer1' first.
             return pe
 

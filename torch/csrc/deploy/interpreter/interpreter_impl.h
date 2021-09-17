@@ -4,6 +4,47 @@
 #include <ATen/core/ivalue.h>
 #include <caffe2/serialize/inline_container.h>
 
+/* Torch Deploy intentionally embeds multiple copies of c++ libraries
+   providing python bindings necessary for torch::deploy users in the same
+   process space in order to provide a multi-python environment.  As a result,
+   any exception types defined by these duplicated libraries can't be safely
+   caught or handled outside of the originating dynamic library (.so).
+
+   In practice this means that you must either
+   catch these exceptions inside the torch::deploy API boundary or risk crashing
+   the client application.
+
+   It is safe to throw exception types that are defined once in
+   the context of the client application, such as c10::Error, which is defined
+   in libtorch, which isn't duplicated in torch::deploy interpreters.
+
+   ==> Use TORCH_DEPLOY_TRY, _SAFE_CATCH_RETHROW around _ALL_ torch::deploy APIs
+
+   For more information, see
+    https://gcc.gnu.org/wiki/Visibility (section on c++ exceptions)
+    or https://stackoverflow.com/a/14364055
+    or
+   https://stackoverflow.com/questions/14268736/symbol-visibility-exceptions-runtime-error
+    note- this may be only a serious problem on versions of gcc prior to 4.0,
+   but still seems worth sealing off.
+
+*/
+#define TORCH_DEPLOY_TRY try {
+#define TORCH_DEPLOY_SAFE_CATCH_RETHROW                                        \
+  }                                                                            \
+  catch (std::exception & err) {                                               \
+    throw c10::Error(                                                          \
+        std::string(                                                           \
+            "Exception Caught inside torch::deploy embedded library: \n") +    \
+            err.what(),                                                        \
+        "");                                                                   \
+  }                                                                            \
+  catch (...) {                                                                \
+    throw c10::Error(                                                          \
+        std::string(                                                           \
+            "Unknown Exception Caught inside torch::deploy embedded library"), \
+        "");                                                                   \
+  }
 namespace torch {
 namespace deploy {
 
@@ -33,7 +74,11 @@ struct Obj {
   at::IValue toIValue() const;
   Obj operator()(at::ArrayRef<Obj> args);
   Obj operator()(at::ArrayRef<at::IValue> args);
-  Obj call_kwargs(std::vector<std::tuple<std::string, at::IValue>> kwargs);
+  Obj call_kwargs(
+      std::vector<at::IValue> args,
+      std::unordered_map<std::string, c10::IValue> kwargs);
+  Obj call_kwargs(std::unordered_map<std::string, c10::IValue> kwargs);
+  bool hasattr(const char* attr);
   Obj attr(const char* attr);
 
  private:
@@ -56,7 +101,6 @@ struct InterpreterSessionImpl {
   virtual Obj create_or_get_package_importer_from_container_file(
       const std::shared_ptr<caffe2::serialize::PyTorchStreamReader>&
           container_file_) = 0;
-
   virtual PickledObject pickle(Obj container, Obj obj) = 0;
   virtual Obj unpickle_or_get(int64_t id, const PickledObject& obj) = 0;
   virtual void unload(int64_t id) = 0;
@@ -67,8 +111,13 @@ struct InterpreterSessionImpl {
   virtual Obj call(Obj obj, at::ArrayRef<at::IValue> args) = 0;
   virtual Obj call_kwargs(
       Obj obj,
-      std::vector<std::tuple<std::string, at::IValue>> kwargs) = 0;
+      std::vector<at::IValue> args,
+      std::unordered_map<std::string, c10::IValue> kwargs) = 0;
+  virtual Obj call_kwargs(
+      Obj obj,
+      std::unordered_map<std::string, c10::IValue> kwargs) = 0;
   virtual Obj attr(Obj obj, const char* attr) = 0;
+  virtual bool hasattr(Obj obj, const char* attr) = 0;
 
  protected:
   int64_t ID(Obj obj) const {
@@ -78,6 +127,9 @@ struct InterpreterSessionImpl {
 
 struct InterpreterImpl {
   virtual InterpreterSessionImpl* acquire_session() = 0;
+  virtual void set_find_module(
+      std::function<at::optional<std::string>(const std::string&)>
+          find_module) = 0;
   virtual ~InterpreterImpl() = default; // this will uninitialize python
 };
 
@@ -85,23 +137,46 @@ struct InterpreterImpl {
 // source file that would need to exist it both the libinterpreter.so and then
 // the libtorchpy library.
 inline at::IValue Obj::toIValue() const {
+  TORCH_DEPLOY_TRY
   return interaction_->toIValue(*this);
+  TORCH_DEPLOY_SAFE_CATCH_RETHROW
 }
 
 inline Obj Obj::operator()(at::ArrayRef<Obj> args) {
+  TORCH_DEPLOY_TRY
   return interaction_->call(*this, args);
+  TORCH_DEPLOY_SAFE_CATCH_RETHROW
 }
 
 inline Obj Obj::operator()(at::ArrayRef<at::IValue> args) {
+  TORCH_DEPLOY_TRY
   return interaction_->call(*this, args);
+  TORCH_DEPLOY_SAFE_CATCH_RETHROW
 }
 
 inline Obj Obj::call_kwargs(
-    std::vector<std::tuple<std::string, at::IValue>> kwargs) {
-  return interaction_->call_kwargs(*this, std::move(kwargs));
+    std::vector<at::IValue> args,
+    std::unordered_map<std::string, c10::IValue> kwargs) {
+  TORCH_DEPLOY_TRY
+  return interaction_->call_kwargs(*this, std::move(args), std::move(kwargs));
+  TORCH_DEPLOY_SAFE_CATCH_RETHROW
 }
+inline Obj Obj::call_kwargs(
+    std::unordered_map<std::string, c10::IValue> kwargs) {
+  TORCH_DEPLOY_TRY
+  return interaction_->call_kwargs(*this, std::move(kwargs));
+  TORCH_DEPLOY_SAFE_CATCH_RETHROW
+}
+inline bool Obj::hasattr(const char* attr) {
+  TORCH_DEPLOY_TRY
+  return interaction_->hasattr(*this, attr);
+  TORCH_DEPLOY_SAFE_CATCH_RETHROW
+}
+
 inline Obj Obj::attr(const char* attr) {
+  TORCH_DEPLOY_TRY
   return interaction_->attr(*this, attr);
+  TORCH_DEPLOY_SAFE_CATCH_RETHROW
 }
 
 } // namespace deploy

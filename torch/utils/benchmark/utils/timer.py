@@ -4,7 +4,6 @@ import timeit
 import textwrap
 from typing import overload, Any, Callable, Dict, List, NoReturn, Optional, Tuple, Type, Union
 
-import numpy as np
 import torch
 from torch.utils.benchmark.utils import common, cpp_jit
 from torch.utils.benchmark.utils._stubs import TimerClass, TimeitModuleType
@@ -259,7 +258,7 @@ class Timer(object):
         """
         with common.set_torch_threads(self._task_spec.num_threads):
             # Warmup
-            self._timer.timeit(number=max(int(number // 100), 1))
+            self._timer.timeit(number=max(int(number // 100), 2))
 
             return common.Measurement(
                 number_per_run=number,
@@ -301,7 +300,7 @@ class Timer(object):
         with common.set_torch_threads(self._task_spec.num_threads):
             # Estimate the block size needed for measurement to be negligible
             # compared to the inner loop. This also serves as a warmup.
-            overhead = np.median([self._timer.timeit(0) for _ in range(5)])
+            overhead = torch.tensor([self._timer.timeit(0) for _ in range(5)]).median().item()
             number = 1
             while True:
                 time_taken = self._timer.timeit(number)
@@ -443,7 +442,7 @@ class Timer(object):
         jitter from the Python interpreter.) This makes them ideal for detailed
         performance analysis. This method runs `stmt` in a separate process
         so that Valgrind can instrument the program. Performance is severely
-        degraded due to the instrumentation, howevever this is ameliorated by
+        degraded due to the instrumentation, however this is ameliorated by
         the fact that a small number of iterations is generally sufficient to
         obtain good measurements.
 

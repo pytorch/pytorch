@@ -14,15 +14,16 @@ struct Code;
 
 class Function {
  public:
-  Function(c10::QualifiedName name);
-  bool run(Stack& stack) const;
+  TORCH_API Function(c10::QualifiedName name);
+  TORCH_API bool run(Stack& stack) const;
   c10::IValue operator()(Stack& stack) const;
   const std::string& name() const;
-  const c10::QualifiedName& qualname() const;
+  TORCH_API const c10::QualifiedName& qualname() const;
   void append_instruction(OpCode op, int X, int N, int64_t dbg_handle = -1);
   bool append_operator(
       const std::string& name,
-      const std::string& overload_name);
+      const std::string& overload_name,
+      const c10::optional<int>& num_specified_args);
   void append_constant(const c10::IValue& constant);
   void append_type(const c10::TypePtr& type);
 

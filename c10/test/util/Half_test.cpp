@@ -6,40 +6,29 @@
 namespace {
 namespace half_legacy_impl {
 float halfbits2float(unsigned short h) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   unsigned sign = ((h >> 15) & 1);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   unsigned exponent = ((h >> 10) & 0x1f);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   unsigned mantissa = ((h & 0x3ff) << 13);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   if (exponent == 0x1f) { /* NaN or Inf */
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     mantissa = (mantissa ? (sign = 0, 0x7fffff) : 0);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     exponent = 0xff;
   } else if (!exponent) { /* Denorm or Zero */
     if (mantissa) {
       // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       unsigned int msb;
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       exponent = 0x71;
       do {
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         msb = (mantissa & 0x400000);
         mantissa <<= 1; /* normalize */
         --exponent;
       } while (!msb);
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       mantissa &= 0x7fffff; /* 1.mantissa is implicit */
     }
   } else {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     exponent += 0x70;
   }
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   unsigned result_bit = (sign << 31) | (exponent << 23) | mantissa;
 
   // Reinterpret the result bit pattern as a float
@@ -61,42 +50,29 @@ unsigned short float2halfbits(float src) {
   unsigned sign, exponent, mantissa;
 
   // Get rid of +NaN/-NaN case first.
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   if (u > 0x7f800000) {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     return 0x7fffU;
   }
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   sign = ((x >> 16) & 0x8000);
 
   // Get rid of +Inf/-Inf, +0/-0.
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   if (u > 0x477fefff) {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     return sign | 0x7c00U;
   }
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   if (u < 0x33000001) {
     return (sign | 0x0000);
   }
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   exponent = ((u >> 23) & 0xff);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   mantissa = (u & 0x7fffff);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   if (exponent > 0x70) {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     shift = 13;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     exponent -= 0x70;
   } else {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     shift = 0x7e - exponent;
     exponent = 0;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     mantissa |= 0x800000;
   }
   lsb = (1 << shift);
@@ -108,26 +84,20 @@ unsigned short float2halfbits(float src) {
   mantissa >>= shift;
   if (remainder > lsb_s1 || (remainder == lsb_s1 && (mantissa & 0x1))) {
     ++mantissa;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     if (!(mantissa & 0x3ff)) {
       ++exponent;
       mantissa = 0;
     }
   }
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   return (sign | (exponent << 10) | mantissa);
 };
 } // namespace half_legacy_impl
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(HalfDoubleConversionTest, Half2Double) {
   std::vector<uint16_t> inputs = {
       0,
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       0xfbff, // 1111 1011 1111 1111
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       (1 << 15 | 1),
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       0x7bff // 0111 1011 1111 1111
   };
   for (auto x : inputs) {

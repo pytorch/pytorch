@@ -9,6 +9,12 @@
 
 namespace torch {
 namespace jit {
+struct ModuleInstanceInfo;
+constexpr size_t kModuleInstanceInfo = 2;
+
+namespace utils {
+std::string get_module_info(const ModuleInstanceInfo& module_instance_info);
+} // namespace utils
 
 // Scope is a node of a trie that represents the tree of nested scopes.
 // Individual scopes are pushed and popped from Graph, which holds a
@@ -120,6 +126,15 @@ struct TORCH_API InlinedCallStack : public c10::intrusive_ptr_target {
  private:
   c10::optional<InlinedCallStackPtr> callee_;
   Function* fn_;
+  // Reason for fn_name_ even though we have fn_
+  // Serialized callstack is used in circustmances where InlinedCallstack
+  // cannot be constructed during runtime, e.g. mobile runtime or
+  // delegated backends.
+  // Since in those cases we do not have Function* we store function name
+  // fn_name does not give you access to the same information that Function*
+  // does, however in mobile/delegated backend runtime we use InlindedCallStack
+  // for exception stack and for that purpose fn_name_ suffices.
+  std::string fn_name_;
   SourceRange source_range_;
   InlinedCallStackPtr intrusive_from_this();
   c10::optional<ModuleInstanceInfo> module_instance_info_;
@@ -155,6 +170,12 @@ struct TORCH_API InlinedCallStack : public c10::intrusive_ptr_target {
   // Returns the source range of the node
   SourceRange source_range() const;
 
+  Function* function() const;
+
+  void set_function_name(std::string fn_name);
+
+  std::string function_name() const;
+
   // Return callstack as a vector of [Function, SourceRange] pairs.
   std::vector<InlinedCallStackEntry> vec();
 
@@ -175,6 +196,13 @@ struct TORCH_API InlinedCallStack : public c10::intrusive_ptr_target {
   }
 };
 
-using DebugInfoPair = std::pair<SourceRange, InlinedCallStackPtr>;
+// {source range, node name, InlinedCallStack}
+// We store node name because same debug infor will be used for
+// profiling as well, so we need to know op names as well.
+using DebugInfoTuple =
+    std::tuple<SourceRange, std::string, InlinedCallStackPtr>;
+constexpr size_t kDebugInfoTupleSourceRangeIndex{0};
+constexpr size_t kDebugInfoTupleNodeNameIndex{1};
+constexpr size_t kDebugInfoTupleInlinedCSIndex{2};
 } // namespace jit
 } // namespace torch

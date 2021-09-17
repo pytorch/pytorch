@@ -22,9 +22,7 @@ struct adagrad_update_prefetch_inlined {
   }
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SparseAdagradFusedWithSparseLengthsSumGradient)
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     .NumInputs(6)
     .NumOutputs(2)
     .EnforceOneToOneInplace()
@@ -49,7 +47,6 @@ SparseLengthsIndicesInGradientSumGradient operator.
     .Input(3, "grad", "Gradient computed")
     .Input(4, "lr", "learning rate")
     .Input(
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         5,
         "lengths",
         "Non negative vector with sum of elements equal to indices length")
@@ -57,7 +54,6 @@ SparseLengthsIndicesInGradientSumGradient operator.
     .Output(1, "output_moment", "Updated moment")
     .Arg("epsilon", "Default 1e-5");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     SparseAdagradFusedWithSparseLengthsSumGradient,
     SparseAdagradFusedWithSparseLengthsSumGradientOp<
@@ -69,9 +65,7 @@ REGISTER_CPU_OPERATOR(
 
 // Match the GPU Approx op, here Approx and Exact are the same for
 // SparseAdagradFusedWithSparseLengthsSumGradient op
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SparseAdagradFusedWithSparseLengthsSumGradientApprox)
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     .NumInputs(6)
     .NumOutputs(2)
     .EnforceOneToOneInplace()
@@ -96,7 +90,6 @@ SparseLengthsIndicesInGradientSumGradient operator.
     .Input(3, "grad", "Gradient computed")
     .Input(4, "lr", "learning rate")
     .Input(
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         5,
         "lengths",
         "Non negative vector with sum of elements equal to indices length")
@@ -104,7 +97,6 @@ SparseLengthsIndicesInGradientSumGradient operator.
     .Output(1, "output_moment", "Updated moment")
     .Arg("epsilon", "Default 1e-5");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     SparseAdagradFusedWithSparseLengthsSumGradientApprox,
     SparseAdagradFusedWithSparseLengthsSumGradientOp<
@@ -114,9 +106,7 @@ REGISTER_CPU_OPERATOR(
         adagrad_update_prefetch_inlined,
         /*is_mean=*/false>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SparseAdagradFusedWithSparseLengthsMeanGradient)
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     .NumInputs(6)
     .NumOutputs(2)
     .EnforceOneToOneInplace()
@@ -141,7 +131,6 @@ SparseLengthsIndicesInGradientMeanGradient operator.
     .Input(3, "grad", "Gradient computed")
     .Input(4, "lr", "learning rate")
     .Input(
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         5,
         "lengths",
         "Non negative vector with sum of elements equal to indices length")
@@ -149,7 +138,6 @@ SparseLengthsIndicesInGradientMeanGradient operator.
     .Output(1, "output_moment", "Updated moment")
     .Arg("epsilon", "Default 1e-5");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     SparseAdagradFusedWithSparseLengthsMeanGradient,
     SparseAdagradFusedWithSparseLengthsSumGradientOp<
@@ -161,9 +149,7 @@ REGISTER_CPU_OPERATOR(
 
 // Match the GPU Approx op, here Approx and Exact are the same for
 // SparseAdagradFusedWithSparseLengthsMeanGradient op
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SparseAdagradFusedWithSparseLengthsMeanGradientApprox)
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     .NumInputs(6)
     .NumOutputs(2)
     .EnforceOneToOneInplace()
@@ -188,7 +174,6 @@ SparseLengthsIndicesInGradientMeanGradient operator.
     .Input(3, "grad", "Gradient computed")
     .Input(4, "lr", "learning rate")
     .Input(
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         5,
         "lengths",
         "Non negative vector with sum of elements equal to indices length")
@@ -196,7 +181,6 @@ SparseLengthsIndicesInGradientMeanGradient operator.
     .Output(1, "output_moment", "Updated moment")
     .Arg("epsilon", "Default 1e-5");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     SparseAdagradFusedWithSparseLengthsMeanGradientApprox,
     SparseAdagradFusedWithSparseLengthsSumGradientOp<
@@ -206,9 +190,7 @@ REGISTER_CPU_OPERATOR(
         adagrad_update_prefetch_inlined,
         /*is_mean=*/true>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SparseAdagradFusedWithSparseLengthsWeightedSumGradient)
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     .NumInputs(7)
     .NumOutputs(3)
     .EnforceInplace({{0, 0}, {1, 1}})
@@ -235,10 +217,8 @@ SparseLengthsIndicesInGradientWeightedSumWithMainInputGradient operator.
         "indices",
         "Integer vector containing indices of the first dimension of param for the slices that are being updated")
     .Input(4, "grad", "Gradient computed")
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     .Input(5, "lr", "learning rate")
     .Input(
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         6,
         "lengths",
         "Non negative vector with sum of elements equal to indices length")
@@ -247,7 +227,6 @@ SparseLengthsIndicesInGradientWeightedSumWithMainInputGradient operator.
     .Output(2, "aux_grad", "Auxiliary gradient")
     .Arg("epsilon", "Default 1e-5");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     SparseAdagradFusedWithSparseLengthsWeightedSumGradient,
     SparseAdagradFusedWithSparseLengthsWeightedSumGradientOp<
@@ -256,9 +235,7 @@ REGISTER_CPU_OPERATOR(
         int,
         adagrad_update_prefetch_inlined>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SparseAdagradFusedWithSparseLengthsWeightedSumGradientApprox)
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     .NumInputs(7)
     .NumOutputs(3)
     .EnforceInplace({{0, 0}, {1, 1}})
@@ -288,10 +265,8 @@ SparseLengthsIndicesInGradientWeightedSumWithMainInputGradient operator.
         "indices",
         "Integer vector containing indices of the first dimension of param for the slices that are being updated")
     .Input(4, "grad", "Gradient computed")
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     .Input(5, "lr", "learning rate")
     .Input(
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         6,
         "lengths",
         "Non negative vector with sum of elements equal to indices length")
@@ -300,7 +275,6 @@ SparseLengthsIndicesInGradientWeightedSumWithMainInputGradient operator.
     .Output(2, "aux_grad", "Auxiliary gradients")
     .Arg("epsilon", "Default 1e-5");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     SparseAdagradFusedWithSparseLengthsWeightedSumGradientApprox,
     SparseAdagradFusedWithSparseLengthsWeightedSumGradientApproxOp<

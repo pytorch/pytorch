@@ -668,7 +668,7 @@ class RandomStructured(BasePruningMethod):
 
 class LnStructured(BasePruningMethod):
     r"""Prune entire (currently unpruned) channels in a tensor based on their
-    Ln-norm.
+    L\ ``n``-norm.
 
     Args:
         amount (int or float): quantity of channels to prune.
@@ -695,7 +695,7 @@ class LnStructured(BasePruningMethod):
         Starting from a base ``default_mask`` (which should be a mask of ones
         if the tensor has not been pruned yet), generate a mask to apply on
         top of the ``default_mask`` by zeroing out the channels along the
-        specified dim with the lowest Ln-norm.
+        specified dim with the lowest L\ ``n``-norm.
 
         Args:
             t (torch.Tensor): tensor representing the parameter to prune
@@ -824,11 +824,12 @@ def identity(module, name):
     parameter called ``name`` in ``module`` without actually pruning any
     units. Modifies module in place (and also return the modified module)
     by:
+
     1) adding a named buffer called ``name+'_mask'`` corresponding to the
-    binary mask applied to the parameter ``name`` by the pruning method.
+       binary mask applied to the parameter ``name`` by the pruning method.
     2) replacing the parameter ``name`` by its pruned version, while the
-    original (unpruned) parameter is stored in a new parameter named
-    ``name+'_orig'``.
+       original (unpruned) parameter is stored in a new parameter named
+       ``name+'_orig'``.
 
     Note:
         The mask is a tensor of ones.
@@ -855,11 +856,12 @@ def random_unstructured(module, name, amount):
     by removing the specified ``amount`` of (currently unpruned) units
     selected at random.
     Modifies module in place (and also return the modified module) by:
+
     1) adding a named buffer called ``name+'_mask'`` corresponding to the
-    binary mask applied to the parameter `name` by the pruning method.
+       binary mask applied to the parameter ``name`` by the pruning method.
     2) replacing the parameter ``name`` by its pruned version, while the
-    original (unpruned) parameter is stored in a new parameter named
-    ``name+'_orig'``.
+       original (unpruned) parameter is stored in a new parameter named
+       ``name+'_orig'``.
 
     Args:
         module (nn.Module): module containing the tensor to prune
@@ -889,11 +891,12 @@ def l1_unstructured(module, name, amount, importance_scores=None):
     lowest L1-norm.
     Modifies module in place (and also return the modified module)
     by:
+
     1) adding a named buffer called ``name+'_mask'`` corresponding to the
-    binary mask applied to the parameter ``name`` by the pruning method.
+       binary mask applied to the parameter ``name`` by the pruning method.
     2) replacing the parameter ``name`` by its pruned version, while the
-    original (unpruned) parameter is stored in a new parameter named
-    ``name+'_orig'``.
+       original (unpruned) parameter is stored in a new parameter named
+       ``name+'_orig'``.
 
     Args:
         module (nn.Module): module containing the tensor to prune
@@ -929,11 +932,12 @@ def random_structured(module, name, amount, dim):
     along the specified ``dim`` selected at random.
     Modifies module in place (and also return the modified module)
     by:
+
     1) adding a named buffer called ``name+'_mask'`` corresponding to the
-    binary mask applied to the parameter ``name`` by the pruning method.
+       binary mask applied to the parameter ``name`` by the pruning method.
     2) replacing the parameter ``name`` by its pruned version, while the
-    original (unpruned) parameter is stored in a new parameter named
-    ``name+'_orig'``.
+       original (unpruned) parameter is stored in a new parameter named
+       ``name+'_orig'``.
 
     Args:
         module (nn.Module): module containing the tensor to prune
@@ -963,14 +967,15 @@ def random_structured(module, name, amount, dim):
 def ln_structured(module, name, amount, n, dim, importance_scores=None):
     r"""Prunes tensor corresponding to parameter called ``name`` in ``module``
     by removing the specified ``amount`` of (currently unpruned) channels
-    along the specified ``dim`` with the lowest L``n``-norm.
+    along the specified ``dim`` with the lowest L\ ``n``-norm.
     Modifies module in place (and also return the modified module)
     by:
+
     1) adding a named buffer called ``name+'_mask'`` corresponding to the
-    binary mask applied to the parameter ``name`` by the pruning method.
+       binary mask applied to the parameter ``name`` by the pruning method.
     2) replacing the parameter ``name`` by its pruned version, while the
-    original (unpruned) parameter is stored in a new parameter named
-    ``name+'_orig'``.
+       original (unpruned) parameter is stored in a new parameter named
+       ``name+'_orig'``.
 
     Args:
         module (nn.Module): module containing the tensor to prune
@@ -1008,11 +1013,12 @@ def global_unstructured(parameters, pruning_method, importance_scores=None, **kw
     Globally prunes tensors corresponding to all parameters in ``parameters``
     by applying the specified ``pruning_method``.
     Modifies modules in place by:
+
     1) adding a named buffer called ``name+'_mask'`` corresponding to the
-    binary mask applied to the parameter ``name`` by the pruning method.
+       binary mask applied to the parameter ``name`` by the pruning method.
     2) replacing the parameter ``name`` by its pruned version, while the
-    original (unpruned) parameter is stored in a new parameter named
-    ``name+'_orig'``.
+       original (unpruned) parameter is stored in a new parameter named
+       ``name+'_orig'``.
 
     Args:
         parameters (Iterable of (module, name) tuples): parameters of
@@ -1127,11 +1133,12 @@ def custom_from_mask(module, name, mask):
     by applying the pre-computed mask in ``mask``.
     Modifies module in place (and also return the modified module)
     by:
+
     1) adding a named buffer called ``name+'_mask'`` corresponding to the
-    binary mask applied to the parameter ``name`` by the pruning method.
+       binary mask applied to the parameter ``name`` by the pruning method.
     2) replacing the parameter ``name`` by its pruned version, while the
-    original (unpruned) parameter is stored in a new parameter named
-    ``name+'_orig'``.
+       original (unpruned) parameter is stored in a new parameter named
+       ``name+'_orig'``.
 
     Args:
         module (nn.Module): module containing the tensor to prune

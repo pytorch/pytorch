@@ -13,7 +13,6 @@
 #include "fbgemm_pack_op.h"
 #include "mmio.h"
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_bool(
     caffe2_dnnlowp_enforce_default_operators,
     false,
@@ -21,9 +20,7 @@ C10_DEFINE_bool(
     "instead of using its own implementation that uses AVX2 instructions"
     "(currently only honored by FC)");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DECLARE_bool(caffe2_dnnlowp_dump_tensors);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DECLARE_bool(caffe2_dnnlowp_force_slow_path);
 
 namespace caffe2 {
@@ -72,7 +69,6 @@ bool FullyConnectedDNNLowPOp<T, ReluFused>::RunOnDevice() {
       dequantize_output_) {
     if (!GetCpuId().avx2()) {
       static int log_occurences = 0;
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       if (log_occurences < 32) {
         ++log_occurences;
         LOG(WARNING)
@@ -81,7 +77,6 @@ bool FullyConnectedDNNLowPOp<T, ReluFused>::RunOnDevice() {
       }
     } else {
       static int log_occurences = 0;
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       if (log_occurences < 32) {
         ++log_occurences;
         LOG(WARNING) << "Falling back to the default Caffe2 operator because "
@@ -809,7 +804,6 @@ bool FullyConnectedDNNLowPOp<T, ReluFused>::GetQuantizationParameters_() {
               std::abs(
                   bias_qparams.scale -
                   in_qparams_[0].scale * filter_qparams_[0].scale),
-              // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
               1e-4);
         }
         CAFFE_ENFORCE_EQ(bias_qparams.zero_point, 0);
@@ -818,7 +812,8 @@ bool FullyConnectedDNNLowPOp<T, ReluFused>::GetQuantizationParameters_() {
           b_dequantized_.resize(N);
           for (int j = 0; j < N; ++j) {
             b_dequantized_[j] = fbgemm::Dequantize<int32_t>(
-                b_quantized_data_[j], in_qparams_[2]);
+                b_quantized_data_[j],
+                filter_qparams_[quantize_channelwise_ ? j : 0]);
           }
           b_dequantized_data_ = b_dequantized_.data();
         }
@@ -830,8 +825,8 @@ bool FullyConnectedDNNLowPOp<T, ReluFused>::GetQuantizationParameters_() {
             (*b_quantized_)[j] = fbgemm::Quantize<int32_t>(
                 b_dequantized_data_[j],
                 0,
-                in_qparams_[0].scale * filter_qparams_[0].scale,
-                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+                in_qparams_[0].scale *
+                    filter_qparams_[quantize_channelwise_ ? j : 0].scale,
                 32);
           }
           b_quantized_data_ = b_quantized_->data();
@@ -947,53 +942,44 @@ bool FullyConnectedDNNLowPOp<T, ReluFused>::GetQuantizationParameters_() {
 
 template class FullyConnectedDNNLowPOp<uint8_t>;
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     FC,
     DNNLOWP,
     FullyConnectedDNNLowPOp<uint8_t>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     FC,
     DNNLOWP_16,
     FullyConnectedDNNLowPOp<uint16_t>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     Int8FC,
     DNNLOWP,
     FullyConnectedDNNLowPOp<uint8_t>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     FC,
     DNNLOWP_ROWWISE,
     FullyConnectedDNNLowPOp<uint8_t>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     FC,
     DNNLOWP_ROWWISE_16,
     FullyConnectedDNNLowPOp<uint16_t>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     Int8FC,
     DNNLOWP_ROWWISE,
     FullyConnectedDNNLowPOp<uint8_t>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     Int8FCRelu,
     DNNLOWP,
     FullyConnectedDNNLowPOp<uint8_t, true>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     Int8FCRelu,
     DNNLOWP_ROWWISE,
     FullyConnectedDNNLowPOp<uint8_t, true>);
 
 using namespace std::placeholders;
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Int8FCRelu)
     .NumInputs(3, 4)
     .NumOutputs(1)

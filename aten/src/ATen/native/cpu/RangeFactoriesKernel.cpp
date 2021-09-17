@@ -4,7 +4,7 @@
 #include <ATen/native/DispatchStub.h>
 
 #include <ATen/AccumulateType.h>
-#include <ATen/cpu/vec256/vec256.h>
+#include <ATen/cpu/vec/vec.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/Parallel.h>
 #include <ATen/native/cpu/Loops.h>
@@ -13,10 +13,10 @@
 namespace at { namespace native {
 namespace {
 
-using namespace vec256;
+using namespace vec;
 
 static void arange_kernel(TensorIterator& iter, const Scalar& scalar_start, const Scalar& scalar_steps, const Scalar& scalar_step) {
-  AT_DISPATCH_ALL_TYPES(iter.dtype(), "arange_cpu", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND(kBFloat16, iter.dtype(), "arange_cpu", [&]() {
     using accscalar_t = at::acc_type<scalar_t, false>;
     auto start = scalar_start.to<accscalar_t>();
     auto steps = scalar_steps.to<accscalar_t>();
@@ -29,10 +29,10 @@ static void arange_kernel(TensorIterator& iter, const Scalar& scalar_start, cons
           [start, step, &idx]() -> scalar_t {
             return start + step * (idx++);
           },
-          [start, step, &idx]() -> Vec256<scalar_t> {
-            Vec256<scalar_t> res;
-            res = Vec256<scalar_t>::arange(start + step * idx, step);
-            idx += Vec256<scalar_t>::size();
+          [start, step, &idx]() -> Vectorized<scalar_t> {
+            Vectorized<scalar_t> res;
+            res = Vectorized<scalar_t>::arange(start + step * idx, step);
+            idx += Vectorized<scalar_t>::size();
             return res;
           }, {p_begin, p_end});
     });
@@ -60,15 +60,15 @@ static void linspace_kernel(TensorIterator& iter, const Scalar& scalar_start, co
               return end - step * (steps - (idx++) - 1);
             }
           },
-          [start, end, step, halfway, steps, &idx]() -> Vec256<scalar_t> {
-            Vec256<scalar_t> res;
+          [start, end, step, halfway, steps, &idx]() -> Vectorized<scalar_t> {
+            Vectorized<scalar_t> res;
             if (idx < halfway) {
-              res = Vec256<scalar_t>::arange(start + step * idx, step);
+              res = Vectorized<scalar_t>::arange(start + step * idx, step);
             } else {
-              res = Vec256<scalar_t>::arange(
+              res = Vectorized<scalar_t>::arange(
                   end - step * (steps - idx - 1), step);
             }
-            idx += Vec256<scalar_t>::size();
+            idx += Vectorized<scalar_t>::size();
             return res;
           }, {p_begin, p_end});
     });
@@ -77,9 +77,7 @@ static void linspace_kernel(TensorIterator& iter, const Scalar& scalar_start, co
 
 } // anonymous namespace
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(arange_stub, &arange_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(linspace_stub, &linspace_kernel);
 
 }} // namespace at::native

@@ -1,4 +1,5 @@
 #include <ATen/native/TensorAdvancedIndexing.h>
+#include <ATen/native/TensorTransformations.h> // flip
 
 #include <type_traits>
 #include <ATen/ATen.h>
@@ -7,6 +8,7 @@
 #include <ATen/core/Array.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/cub.cuh>
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
 #include <ATen/ExpandUtils.h>
@@ -14,12 +16,6 @@
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/cuda/KernelUtils.cuh>
 #include <c10/util/MaybeOwned.h>
-#include <THC/THCTensorInfo.cuh>
-#include <THC/THCThrustAllocator.cuh>
-
-#include <thrust/execution_policy.h>
-#include <thrust/device_ptr.h>
-#include <thrust/scan.h>
 
 namespace at { namespace native {
 
@@ -72,9 +68,9 @@ void gpu_index_kernel(TensorIterator& iter, IntArrayRef index_size, IntArrayRef 
     return;
   }
 
-  auto sizes = at::detail::Array<int64_t, 25>(0);
-  auto strides = at::detail::Array<int64_t, 25>(0);
-  auto index_ptrs = at::detail::Array<char*, 25>(nullptr);
+  auto sizes = at::detail::Array<int64_t, MAX_DIMS>(0);
+  auto strides = at::detail::Array<int64_t, MAX_DIMS>(0);
+  auto index_ptrs = at::detail::Array<char*, MAX_DIMS>(nullptr);
   for (int i = 0; i < num_indices; i++) {
     sizes[i] = index_size[i];
     strides[i] = index_stride[i];
@@ -227,7 +223,7 @@ static void index_copy_kernel(
   int64_t self_dim_stride) {
   // See note [Writing Nondeterministic Operations]
   // Nondeterministic when index contains duplicate entries
-  at::globalContext().alertNotDeterministic("index_copy_cuda");
+  // this kernel will not be called when torch.use_deterministic_algorithms(True)
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
     at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16,
     iter.dtype(), "index_copy_cuda", [&] {
@@ -333,9 +329,9 @@ void put_kernel(TensorIterator& iter, const Tensor& output, const bool accumulat
     // Cannot use `OpaqueType`, as we need the actual type for `fastSpecializedgpuAtomicAdd`
     AT_DISPATCH_INDEX_TYPES(cuda::detail::canUse32BitIndexMath(output) ? ScalarType::Int : ScalarType::Long,
         "put_cuda_index", [&] {
-           auto* __restrict__ indexed_ptr = output.template data<scalar_t>();
+           auto* __restrict__ indexed_ptr = output.template data_ptr<scalar_t>();
            if (accumulate) {
-             const auto numel = output.numel();
+             index_t numel = output.numel();
              cuda_take_put_kernel<scalar_t, index_t>(iter, output,
                  [numel, indexed_ptr] __device__(scalar_t& iterated, const index_t offset) {
                    fastSpecializedAtomicAdd(indexed_ptr, offset, numel, iterated);
@@ -358,7 +354,7 @@ void take_kernel(
     // Cannot use `OpaqueType`, as Tensor::data_ptr<OpaqueType<N>> is not implemented
     AT_DISPATCH_INDEX_TYPES(cuda::detail::canUse32BitIndexMath(input) ? ScalarType::Int : ScalarType::Long,
       "take_cuda_index", [&] {
-         const auto* __restrict__ indexed_ptr = input.template data<scalar_t>();
+         const auto* __restrict__ indexed_ptr = input.template data_ptr<scalar_t>();
          cuda_take_put_kernel<scalar_t, index_t>(iter, input,
             [indexed_ptr] __device__(scalar_t& iterated, const index_t offset) {
                iterated = indexed_ptr[offset];
@@ -369,36 +365,36 @@ void take_kernel(
 
 namespace {
 
+__global__ void masked_scatter_size_check(int64_t *totalElements, int64_t srcSize) {
+  CUDA_KERNEL_ASSERT(*totalElements <= srcSize);
+}
+
 template <typename mask_t>
 void masked_scatter_cuda_impl(Tensor& self, const Tensor& mask, const Tensor& source){
   auto srcSize = source.numel();
 
-  // Determine our output size
-  auto totalElements = mask.sum().item<int64_t>();
-
-  // The number of `1` elements present in the mask must be <= the
-  // number of elements available in `src`
-  TORCH_CHECK(totalElements <= srcSize, "source nElements must be == mask `1` elements");
+  if (self.numel() == 0) {
+    return;
+  }
 
   auto mask_cont = mask.contiguous();
 
   // Use a prefix sum to determine the output locations of the masked elements
-  auto maskPrefixSum = at::empty_like(mask, mask.options().dtype(kLong));
+  auto maskPrefixSum = at::empty_like(mask_cont, mask.options().dtype(kLong));
 
-  auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
+  at::cuda::cub::exclusive_scan(
+    mask_cont.data_ptr<mask_t>(), maskPrefixSum.data_ptr<int64_t>(),
+    []__device__(int64_t a, int64_t b) { return a + b; }, int64_t(0),
+    mask_cont.numel());
 
-  thrust::device_ptr<mask_t> maskData(mask_cont.data_ptr<mask_t>());
-  thrust::device_ptr<int64_t> maskPrefixSumData(
-      maskPrefixSum.data_ptr<int64_t>());
+  // Determine our output size
+  auto totalElements = (at::_unsafe_view(maskPrefixSum, -1)[-1] + at::_unsafe_view(mask_cont, -1)[-1]);
 
-  // Reference for using static_cast on `init_value`:
-  // https://github.com/NVIDIA/thrust/issues/1379
-  thrust::exclusive_scan(
-      thrust::cuda::par(allocator).on(c10::cuda::getCurrentCUDAStream()),
-      maskData,
-      maskData + mask_cont.numel(),
-      maskPrefixSumData,
-      static_cast<int64_t>(0));
+  // Asynchronously check that the number of `1` elements present in the mask
+  // must be <= the number of elements available in `src`.
+  masked_scatter_size_check<<<1, 1, 0, at::cuda::getCurrentCUDAStream()>>>(
+      totalElements.data_ptr<int64_t>(), srcSize);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   // We are getting elements from `src` based on an offset from
   // `maskPrefixSum`, so that should be made contiguous too
@@ -444,11 +440,6 @@ Tensor & masked_scatter__cuda(Tensor& self, const Tensor& mask, const Tensor& so
       " and ",
       source.scalar_type());
 
-  TensorArg self_arg{self, "self", 1};
-  TensorArg mask_arg{mask, "mask", 2};
-  TensorArg source_arg{source, "source", 3};
-  checkAllSameGPU("masked_scatter_", {self_arg, mask_arg, source_arg});
-
   c10::MaybeOwned<Tensor> b_mask = expand_inplace(self, mask, "masked_scatter_");
 
   if (b_mask->dtype() == ScalarType::Byte) {
@@ -466,11 +457,54 @@ Tensor & masked_scatter__cuda(Tensor& self, const Tensor& mask, const Tensor& so
   return self;
 }
 
+template <typename scalar_t>
+void flip_kernel_impl(TensorIterator& iter) {
+  if (!iter.can_use_32bit_indexing()) {
+    for (auto& sub_iter : iter.with_32bit_indexing()) {
+      flip_kernel_impl<scalar_t>(sub_iter);
+    }
+    return;
+  }
+
+  char* const __restrict__ out_ptr = reinterpret_cast<char*>(iter.data_ptr(0));
+  const char* const __restrict__ in_ptr = reinterpret_cast<const char*>(iter.data_ptr(1));
+
+  const auto offset_calc = make_offset_calculator<2, /*signed_strides=*/true>(iter);
+
+  auto loop = [=]C10_DEVICE(const int i) {
+    const auto offsets = offset_calc.get(i);
+    // offsets can be negative here, but it's fine
+    scalar_t* const __restrict__ out_data = reinterpret_cast<scalar_t*>(out_ptr + offsets[0]);
+    const scalar_t* const __restrict__ in_data = reinterpret_cast<const scalar_t*>(in_ptr + offsets[1]);
+    *out_data = *in_data;
+  };
+  launch_kernel<launch_size_nd, launch_bound2>(iter.numel(), loop);
+}
+
+void flip_kernel(TensorIterator& iter, const bool quantized) {
+  if (quantized) {
+    AT_DISPATCH_QINT_AND_SUB_BYTE_TYPES(iter.dtype(), "flip_quantized_cuda",
+    [&] {
+      using dtype = OpaqueType<sizeof(scalar_t)>;
+      flip_kernel_impl<dtype>(iter);
+    });
+  } else {
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16,
+                                           iter.dtype(), "flip_cuda",
+    [&] {
+      using dtype = OpaqueType<sizeof(scalar_t)>;
+      flip_kernel_impl<dtype>(iter);
+    });
+  }
+}
+
+
 REGISTER_DISPATCH(index_stub, &index_kernel);
 REGISTER_DISPATCH(index_fill_stub, &index_fill_kernel);
 REGISTER_DISPATCH(index_copy_stub, &index_copy_kernel);
 REGISTER_DISPATCH(index_put_stub, &index_put_kernel);
 REGISTER_DISPATCH(put_stub, &put_kernel);
 REGISTER_DISPATCH(take_stub, &take_kernel);
+REGISTER_DISPATCH(flip_stub, &flip_kernel);
 
 }} // namespace at::native

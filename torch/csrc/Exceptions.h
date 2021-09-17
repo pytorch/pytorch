@@ -126,7 +126,6 @@ static inline void PyErr_SetString(PyObject* type, const std::string& message) {
 
 #define END_HANDLE_TH_ERRORS END_HANDLE_TH_ERRORS_RET(nullptr)
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 extern PyObject *THPException_FatalError;
 
 // Throwing this exception means that the python error flags have been already
@@ -164,8 +163,7 @@ struct python_error : public std::exception {
     }
   }
 
-  // NOLINTNEXTLINE(modernize-use-override,cppcoreguidelines-explicit-virtual-functions)
-  virtual const char* what() const noexcept override {
+   const char* what() const noexcept override {
     return message.c_str();
   }
 
@@ -294,8 +292,7 @@ struct ValueError : public PyTorchError {
 
 // Translates to Python NotImplementedError
 struct NotImplementedError : public PyTorchError {
-  // NOLINTNEXTLINE(modernize-use-equals-default)
-  NotImplementedError() {}
+  NotImplementedError() = default;
   PyObject* python_type() override {
     return PyExc_NotImplementedError;
   }

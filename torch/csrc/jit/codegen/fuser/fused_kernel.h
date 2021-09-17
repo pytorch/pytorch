@@ -16,6 +16,7 @@ namespace fuser {
 struct FusedKernel {
   TH_DISALLOW_COPY_AND_ASSIGN(FusedKernel);
 
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   FusedKernel(
       std::string name,
       std::string code,

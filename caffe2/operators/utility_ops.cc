@@ -1,5 +1,7 @@
 #include "caffe2/operators/utility_ops.h"
 #include <cmath>
+#include <iostream>
+#include "caffe2/core/types.h"
 #include "caffe2/utils/eigen_utils.h"
 
 namespace caffe2 {
@@ -33,72 +35,47 @@ OpSchema::Cost CostInferenceForWeightedSum(
   const auto& nElem = nElemFromDim(X0);
   const auto& nInputs = in.size();
   c.flops = (nInputs - 1) * nElem;
-  c.bytes_read = (nInputs / 2) * (nElem + 1) * sizeof(X0.data_type());
-  c.bytes_written = nElem * sizeof(X0.data_type());
-  c.params_bytes = (nInputs / 2) * sizeof(X0.data_type());
+  auto const& X0_element_size_byte =
+      DataTypeToTypeMeta(X0.data_type()).itemsize();
+  c.bytes_read = (nInputs / 2) * (nElem + 1) * X0_element_size_byte;
+  c.bytes_written = nElem * X0_element_size_byte;
+  c.params_bytes = (nInputs / 2) * X0_element_size_byte;
   return c;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(WallClockTime, WallClockTimeOp<CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(Print, PrintOp<CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(FlattenToVec, FlattenToVecOp<CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(Alias, AliasOp<CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(ResizeLike, ResizeLikeOp<CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(SumInt, SumOp<CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(WeightedSum, WeightedSumOp<CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(WeightedSumGradient, WeightedSumGradientOp<CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-REGISTER_CPU_OPERATOR(
-    ScatterWeightedSum,
-    ScatterWeightedSumOp<float, CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+REGISTER_CPU_OPERATOR(ScatterWeightedSum, ScatterWeightedSumOp<CPUContext>);
 REGISTER_CPU_OPERATOR(ScatterAssign, ScatterAssignOp<CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(Scatter, ScatterOp<CPUContext>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(LengthsToShape, LengthsToShapeOp<CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(HasElements, HasElementsOp<CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(GatherRanges, GatherRangesOp<CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(LengthsGather, LengthsGatherOp<CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(LengthsToSegmentIds, LengthsToSegmentIdsOp<CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(LengthsToRanges, LengthsToRangesOp<CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(LengthsToOffsets, LengthsToOffsetsOp<CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(SegmentIdsToLengths, SegmentIdsToLengthsOp<CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(SegmentIdsToRanges, SegmentIdsToRangesOp<CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(LengthsToWeights, LengthsToWeightsOp<CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(EnsureDense, EnsureDenseOp<CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     AccumulateHistogram,
     AccumulateHistogramOp<float, CPUContext>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(WallClockTime)
     .NumInputs(0)
     .NumOutputs(1)
     .SetDoc("Time since epoch in nanoseconds.")
     .Output(0, "time", "The time in nanoseconds.");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Print)
     .NumInputs(1)
     .NumOutputs(0)
@@ -115,7 +92,6 @@ OPERATOR_SCHEMA(Print)
     .Arg("every_n", "(int, default 1) Print tensor every `every_n` runs")
     .Input(0, "tensor", "The tensor to print.");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(LengthsToShape)
     .NumInputs(1)
     .NumOutputs(1)
@@ -181,7 +157,6 @@ Y:
         0,
         "Y",
         "Vector of length 2 describing the dimensions of the data if the $N$ vectors from the input were combined to a single matrix.");
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(FlattenToVec)
     .NumInputs(1)
     .NumOutputs(1)
@@ -253,7 +228,6 @@ output:
         "output",
         "A tensor of rank 1 (vector) with the contents of the input tensor.");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Alias)
     .NumInputs(1)
     .NumOutputs(1)
@@ -274,7 +248,6 @@ similar to multi-thread computation before you use it explicitly.
     .Input(0, "input", "Input tensor whose storage will be shared.")
     .Output(0, "output", "Tensor of same shape as input, sharing its storage.");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(ResizeLike)
     .NumInputs(2)
     .NumOutputs(1)
@@ -292,7 +265,6 @@ Produces tensor containing data of first input and shape of second input.
     .Input(1, "shape_tensor", "Tensor whose shape will be applied to output.")
     .Output(0, "output", "Tensor with data of input 0 and shape of input 1.");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SumInt)
     .NumInputs(1, INT_MAX)
     .NumOutputs(1)
@@ -306,7 +278,6 @@ OPERATOR_SCHEMA(SumInt)
     })
     .AllowInplace({{0, 0}});
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(WeightedSum)
     .NumInputs([](int n) { return (n > 0 && n % 2 == 0); })
     .NumOutputs(1)
@@ -325,12 +296,10 @@ only be done with X_0 also as the output, but not other X_i.
     .Input(0, "weight_0", "Weight of the first input in the sum.")
     .Output(0, "output", "Result containing weighted elem-wise sum of inputs.");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(WeightedSumGradient)
     .NumInputs([](int n) { return (n > 0 && n % 2 == 1); })
     .NumOutputs(1, INT_MAX);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(ScatterWeightedSum)
     .NumInputs([](int n) { return (n > 3 && (n - 3) % 2 == 0); })
     .NumOutputs(1)
@@ -375,7 +344,6 @@ Currently only works on CPU because of access to INDICES.
     .Output(0, "X_0", "Has to be exactly the same tensor as the input 0")
     .EnforceInplace({{0, 0}});
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(ScatterAssign)
     .NumInputs(3)
     .NumOutputs(1)
@@ -412,7 +380,6 @@ Currently only works on CPU because of access to INDICES.
         "Update slices, with shape len(INDICES) + shape(X_0)[1:]")
     .Output(0, "DATA", "Has to be exactly the same tensor as the input 0");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Scatter)
     .NumInputs(3)
     .NumOutputs(1)
@@ -444,7 +411,6 @@ Currently only works on CPU because of access to INDICES.
     .Output(0, "OUTPUT", "The updated output.")
     .Arg("axis", "*(type: int; default: 1)* Which dimension to scatter on.");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(HasElements)
     .NumInputs(1, INT_MAX)
     .NumOutputs(1)
@@ -516,7 +482,6 @@ has_elements:  False
         "has_elements",
         "Output scalar boolean tensor. True if input has size > 0.");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(GatherRanges)
     .NumInputs(2)
     .NumOutputs(2)
@@ -575,7 +540,6 @@ Example:
           return out;
         }));
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(LengthsGather)
     .NumInputs(3)
     .NumOutputs(1)
@@ -598,7 +562,6 @@ Example:
     .Input(2, "INDICES", "indices into LENGTHS where items should be gathered")
     .Output(0, "OUTPUT", "1-D tensor containing gathered items");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(LengthsToSegmentIds)
     .NumInputs(1)
     .NumOutputs(1)
@@ -653,7 +616,6 @@ segment_ids:
     .Input(0, "lengths", "1D tensor of int32 or int64 segment lengths.")
     .Output(0, "segment_ids", "1D tensor of length *sum(lengths)*");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(LengthsToRanges)
     .NumInputs(1)
     .NumOutputs(1)
@@ -677,7 +639,6 @@ For example, `[1, 3, 0, 2]` transforms into `[[0, 1], [1, 3], [4, 0], [4, 2]]`.
         "ranges",
         "2D tensor of shape len(lengths) X 2 and the same type as `lengths`");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(LengthsToOffsets)
     .NumInputs(1)
     .NumOutputs(1)
@@ -702,7 +663,6 @@ For example, `[1, 3, 0, 2]` transforms into `[0, 1, 4, 4]`.
           CreateTensorShape(out_shape, in[0].data_type())};
     });
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SegmentIdsToLengths)
     .NumInputs(1, 2)
     .NumOutputs(1)
@@ -725,7 +685,6 @@ cannot represent empty segments at the end (if the second input is absent).
         "if provided, number of segments = the size of its first dimension")
     .Output(0, "lengths", "1-D int64_t tensor of segment lengths");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SegmentIdsToRanges)
     .NumInputs(1, 2)
     .NumOutputs(1)
@@ -744,7 +703,6 @@ index in the first input vector + 1.
         "if provided, number of segments = the size of its first dimension")
     .Output(0, "lengths", "1-D int64_t tensor of segment lengths");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(LengthsToWeights)
     .NumInputs(1)
     .NumOutputs(1)
@@ -756,10 +714,8 @@ weights derived by lengths. i.e 1/pow(length, power)
     .Input(0, "lengths", "1-D int32_t or int64_t tensor of lengths")
     .Output(0, "a vector of weights", "1-D float tensor of weights by length");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(WallClockTime);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(EnsureDense)
     .NumInputs(1)
     .NumOutputs(1)
@@ -778,7 +734,6 @@ The operator's behaviors:
     .Input(0, "input", "Input tensors.")
     .Output(0, "output", "Output tensor. Same dimension as inputs.");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(AccumulateHistogram)
     .NumInputs(1)
     .NumOutputs(2)
@@ -820,16 +775,11 @@ class GetEnsureDenseGradient : public GradientMakerBase {
     }
   }
 };
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(EnsureDense, GetEnsureDenseGradient);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(Print);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(HasElements);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(IsEmpty);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(LengthsToShape);
 
 class GetAliasGradient : public GradientMakerBase {
@@ -841,10 +791,8 @@ class GetAliasGradient : public GradientMakerBase {
     return vector<OperatorDef>();
   }
 };
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(Alias, GetAliasGradient);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(ResizeLike);
 
 class GetSumGradient : public GradientMakerBase {
@@ -856,14 +804,10 @@ class GetSumGradient : public GradientMakerBase {
     return vector<OperatorDef>();
   }
 };
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(Sum, GetSumGradient);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(ScatterWeightedSum);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(ScatterAssign);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(Scatter);
 
 class GetWeightedSumGradient : public GradientMakerBase {
@@ -890,7 +834,6 @@ class GetWeightedSumGradient : public GradientMakerBase {
     return SingleGradientDef("WeightedSumGradient", "", inputs, outputs);
   }
 };
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(WeightedSum, GetWeightedSumGradient);
 
 struct GetFlattenToVecGradient : public GradientMakerBase {
@@ -900,22 +843,14 @@ struct GetFlattenToVecGradient : public GradientMakerBase {
         "ResizeLike", "", vector<string>{GO(0), I(0)}, vector<string>{GI(0)});
   }
 };
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(FlattenToVec, GetFlattenToVecGradient);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(LengthsToSegmentIds);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(SegmentIdsToLengths);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(SegmentIdsToRanges);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(SegmentIdsToLengthWeights);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(GatherRangesOp);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(LengthsGather);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(AccumulateHistogram);
 
 template <>
@@ -954,12 +889,9 @@ bool NanCheckOp<CPUContext>::RunOnDevice() {
   }
   return true;
 }
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(NanCheck, NanCheckOp<CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(NanCheck, GetNanCheckGradient);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(NanCheck)
     .NumInputs(1, INT_MAX)
     .NumOutputs(1)
@@ -973,10 +905,8 @@ OPERATOR_SCHEMA(NanCheck)
         "Tensor to copy input into if no NaNs or inf."
         " Can be in-place");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(IsNaN, IsNanOp<CPUContext>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(IsNaN)
     .NumInputs(1)
     .NumOutputs(1)
@@ -988,7 +918,6 @@ OPERATOR_SCHEMA(IsNaN)
         "output",
         "Tensor containing a 1 at each location of NaN elements.");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Size)
     .NumInputs(1)
     .NumOutputs(1)
@@ -1061,9 +990,7 @@ size: 24
         "*(type: Tensor)* 1D tensor of type int64 that contains the number of "
         "elements in the input tensor *X*.");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(Size, SizeOp<CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 NO_GRADIENT(Size);
 
 template <>
@@ -1079,7 +1006,6 @@ bool RangeOp<CPUContext>::DoRunOnDevice(
   return true;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Range)
     .NumInputs(1, 3)
     .NumOutputs(1)
@@ -1151,37 +1077,23 @@ output: [ 4  6  8 10 12 14 16]
         "output",
         "(*Tensor*): 1D tensor of same type as inputs that contains the sequence");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(Range, RangeOp<CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 NO_GRADIENT(Range);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(ThrowException, ThrowExceptionOp);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(ThrowException).NumInputs(0).NumOutputs(0);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(ThrowException);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(ThrowChildThreadException, ThrowChildThreadExceptionOp);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(ThrowChildThreadException).NumInputs(0).NumOutputs(0);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(ThrowChildThreadException);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(LogFatal, LogFatalOp);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(LogFatal).NumInputs(0).NumOutputs(0);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(LogFatal);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(Fail, FailOp);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Fail).NumInputs(0).NumOutputs(0);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(Fail);
 
 } // namespace caffe2

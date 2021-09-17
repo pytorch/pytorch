@@ -5,9 +5,11 @@
 #include <c10/macros/Export.h>
 #include <c10/util/Optional.h>
 #include <c10/util/SmallVector.h>
-#include <memory>
 
+#include <array>
+#include <atomic>
 #include <functional>
+#include <memory>
 
 namespace c10 {
 class TORCH_API OperatorHandle;
@@ -25,6 +27,8 @@ enum class C10_API_ENUM RecordScope : uint8_t {
   TORCHSCRIPT_FUNCTION,
   // Kernel Function dtype Tag
   KERNEL_FUNCTION_DTYPE,
+  // Kernel Function dtype Tag
+  LITE_INTERPRETER,
   // User defined scope (e.g. with record_function())
   USER_SCOPE,
   NUM_SCOPES, // must be the last in the list
@@ -263,6 +267,16 @@ struct TORCH_API RecordFunction {
     return state_->needs_outputs;
   }
 
+  int64_t debugHandle() const {
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(state_, "Called debugHandle() on inactive RecordFunction");
+    return state_->debug_handle_;
+  }
+
+  void setDebugHandle(int64_t debug_handle) {
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(state_, "Called setDebugHandle() on inactive RecordFunction");
+    state_->debug_handle_ = debug_handle;
+  }
+
  private:
 
   // Allows the modification of some internal states for callbacks.
@@ -324,6 +338,12 @@ struct TORCH_API RecordFunction {
     // events can complete in different threads or follow a future-like pattern
     // of use.
     bool is_async_{false};
+
+    // Debug handles are used for lazy annotation of module hierarchy
+    // and callstack.
+    // This is specifically is useful for mobile runtime, where generated
+    // debug handles can be lazily symbolicated using debug information
+    int64_t debug_handle_{-1};
   };
 
   std::unique_ptr<State> state_;
@@ -400,12 +420,6 @@ class TORCH_API RecordFunctionCallback {
     return *this;
   }
 
-  RecordFunctionCallback& setShouldRun(
-      bool(*should_run)(const RecordFunctionCallback&)) {
-    should_run_ = should_run;
-    return *this;
-  }
-
   bool needsInputs() const {
     return needs_inputs_;
   }
@@ -438,7 +452,6 @@ class TORCH_API RecordFunctionCallback {
   friend class CallbackManager;
   StartCallback start_;
   EndCallback end_;
-  bool(*should_run_)(const RecordFunctionCallback&) = nullptr;
   double sampling_prob_ = 1.0;
   std::array<bool, static_cast<size_t>(RecordScope::NUM_SCOPES)> scopes_ = {};
   bool needs_inputs_ = false;
@@ -477,6 +490,26 @@ class TORCH_API RecordFunctionCallback {
   RECORD_FUNCTION_WITH_SCOPE( \
     at::RecordScope::USER_SCOPE, fn, inputs)
 
+// Helper macro to pass in debug handle that is used to
+// post process events
+#define RECORD_WITH_SCOPE_DEBUG_HANDLE_AND_INPUTS(  \
+    scope, fn, debug_handle, inputs, ...)           \
+    at::RecordFunction guard(scope);                \
+    if (guard.isActive()) {                         \
+      guard.setDebugHandle(debug_handle);           \
+      if (guard.needsInputs()) {                    \
+        guard.before(fn, inputs, ##__VA_ARGS__);    \
+      } else {                                      \
+        guard.before(fn, ##__VA_ARGS__);            \
+      }                                             \
+    }
+
+// Helper macros to record LITE INTERPETER scope events with debug handles
+#define RECORD_EDGE_SCOPE_WITH_DEBUG_HANDLE_AND_INPUTS(             \
+    fn, debug_handle, inputs)                                       \
+    RECORD_WITH_SCOPE_DEBUG_HANDLE_AND_INPUTS(                      \
+        at::RecordScope::LITE_INTERPRETER, fn, debug_handle, inputs)
+
 // Notes:
 //  - two types of callbacks are provided: thread local and global
 //     - thread local callbacks are added/removed only for the given thread
@@ -502,9 +535,97 @@ class TORCH_API RecordFunctionCallback {
 
 typedef uint64_t CallbackHandle;
 
+
+struct GlobalRecordFunctionCallbacksEntry {
+  RecordFunctionCallback callback;
+ private:
+  std::atomic<bool> enabled;
+ public:
+  CallbackHandle handle;
+
+  GlobalRecordFunctionCallbacksEntry(RecordFunctionCallback&& cb, CallbackHandle h)
+      : callback(std::move(cb)), enabled(true), handle(h) {}
+
+  // Copying is fine despite std::atomic<bool> not being supposed to
+  // have a copy/move constructor: adding & removing callbacks is
+  // already not thread-safe.
+  GlobalRecordFunctionCallbacksEntry(
+      const GlobalRecordFunctionCallbacksEntry& rhs)
+      : callback(rhs.callback), enabled(rhs.enabled.load()), handle(rhs.handle) {}
+
+  GlobalRecordFunctionCallbacksEntry& operator=(const GlobalRecordFunctionCallbacksEntry& rhs) {
+    callback = rhs.callback;
+    enabled = rhs.enabled.load();
+    handle = rhs.handle;
+    return *this;
+  }
+
+  GlobalRecordFunctionCallbacksEntry(
+      GlobalRecordFunctionCallbacksEntry&& rhs) noexcept
+      : callback(std::move(rhs.callback)), enabled(rhs.enabled.load()), handle(rhs.handle) {}
+
+  GlobalRecordFunctionCallbacksEntry& operator=(GlobalRecordFunctionCallbacksEntry&& rhs) noexcept {
+    callback = std::move(rhs.callback);
+    enabled = rhs.enabled.load();
+    handle = rhs.handle;
+    return *this;
+  }
+
+  // Returns true if the status changed, false otherwise.
+  bool disable() {
+    bool expected = true;
+    // NOTE: we use sequentially consistent access here and in
+    // enable() because updating further atomic flags depends on this
+    // operation.
+    return enabled.compare_exchange_strong(expected, false);
+  }
+
+  // Returns true if the status changed, false otherwise.
+  bool enable() {
+    bool expected = false;
+    return enabled.compare_exchange_strong(expected, true);
+  }
+
+  // Read the flag. Note that it is neither necessary nor correct to
+  // check this before calling enable() or disable().
+  bool isEnabled() const {
+    return enabled.load(std::memory_order_relaxed);
+  }
+};
+
+// It is unnecessary to use atomic operations for enabling
+// thread-local function callbacks. Moreover, it prevents saving to
+// ThreadLocalState because std::atomic is non-copyable.
+struct ThreadLocalRecordFunctionCallbacksEntry {
+  RecordFunctionCallback callback;
+  bool enabled = true;
+  CallbackHandle handle;
+
+  ThreadLocalRecordFunctionCallbacksEntry(RecordFunctionCallback&& cb, CallbackHandle h)
+      : callback(std::move(cb)), handle(h) {}
+
+  bool disable() {
+    auto old = enabled;
+    enabled = false;
+    return old != enabled;
+  }
+
+  bool enable() {
+    auto old = enabled;
+    enabled = true;
+    return old != enabled;
+  }
+
+  bool isEnabled() const {
+    return enabled;
+  }
+};
+
 // Holds pairs (callbacks, unique_id)
-typedef std::vector<std::pair<RecordFunctionCallback, CallbackHandle>>
-    RecordFunctionCallbacks;
+using GlobalRecordFunctionCallbacks =
+  std::vector<GlobalRecordFunctionCallbacksEntry>;
+using ThreadLocalRecordFunctionCallbacks =
+  std::vector<ThreadLocalRecordFunctionCallbacksEntry>;
 
 /**
  * addThreadLocalCallback adds a thread local callback to run with RecordFunction,
@@ -541,6 +662,18 @@ TORCH_API CallbackHandle addGlobalCallback(
  * no other code can run simultaneously
  */
 TORCH_API void removeCallback(CallbackHandle handle);
+
+/**
+ * Prevent the given callback from executing. If handle is invalid,
+ * does nothing.
+ */
+TORCH_API void disableCallback(CallbackHandle handle);
+
+/**
+ * Allow the given callback, previously disabled with disableCallback, to
+ * execute again. If handle is invalid, does nothing.
+ */
+TORCH_API void reenableCallback(CallbackHandle handle);
 
 /**
  * hasGlobalCallbacks returns whether there're global callbacks
@@ -590,14 +723,10 @@ class TORCH_API DisableRecordFunctionGuard : public RecordFunctionGuard {
   virtual ~DisableRecordFunctionGuard() {}
 };
 
-// Internal, used in ThreadLocalState to propagate TLS callbacks across threads
-TORCH_API RecordFunctionCallbacks _getTLSCallbacks();
-TORCH_API void _setTLSCallbacks(const RecordFunctionCallbacks& callbacks);
-
 struct TORCH_API RecordFunctionTLS {
   // Thread local vector of callbacks, holds pairs (callbacks, unique_id);
   // must be sorted in increasing handles order
-  RecordFunctionCallbacks sorted_tls_callbacks_;
+  ThreadLocalRecordFunctionCallbacks sorted_tls_callbacks_;
 
   bool tls_record_function_enabled_ = true;
 

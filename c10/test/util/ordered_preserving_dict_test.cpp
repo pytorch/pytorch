@@ -15,7 +15,6 @@ using dict_int_int =
     ska_ordered::order_preserving_flat_hash_map<int64_t, int64_t>;
 
 dict_int_int test_dict(dict_int_int& dict) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (int64_t i = 0; i < 100; ++i) {
     dict[i] = i + 1;
   }
@@ -27,7 +26,6 @@ dict_int_int test_dict(dict_int_int& dict) {
   }
 
   // erase a few entries by themselves
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::unordered_set<int64_t> erase_set = {0, 2, 9, 71};
   for (auto erase : erase_set) {
     dict.erase(erase);
@@ -35,12 +33,10 @@ dict_int_int test_dict(dict_int_int& dict) {
 
   // erase via iterators
   auto begin = dict.begin();
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (size_t i = 0; i < 20; ++i)
     begin++;
 
   auto end = begin;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (size_t i = 0; i < 20; ++i) {
     erase_set.insert(end->first);
     end++;
@@ -48,7 +44,6 @@ dict_int_int test_dict(dict_int_int& dict) {
   dict.erase(begin, end);
 
   std::vector<size_t> order;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (size_t i = 0; i < 100; ++i) {
     if (!erase_set.count(i)) {
       order.push_back(i);
@@ -66,7 +61,6 @@ dict_int_int test_dict(dict_int_int& dict) {
   return dict;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OrderedPreservingDictTest, InsertAndDeleteBasic) {
   dict_int_int dict;
   test_dict(dict);
@@ -74,7 +68,6 @@ TEST(OrderedPreservingDictTest, InsertAndDeleteBasic) {
   test_dict(dict);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OrderedPreservingDictTest, InsertExistingDoesntAffectOrder) {
   dict_int_int dict;
   dict[0] = 1;
@@ -90,7 +83,6 @@ TEST(OrderedPreservingDictTest, InsertExistingDoesntAffectOrder) {
   TORCH_INTERNAL_ASSERT(dict.begin()->first == 1);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OrderedPreservingDictTest, testRefType) {
   std::shared_ptr<int64_t> t;
   using dict_references = ska_ordered::
@@ -109,7 +101,6 @@ TEST(OrderedPreservingDictTest, testRefType) {
   TORCH_INTERNAL_ASSERT(ptr.use_count() == 1);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OrderedPreservingDictTest, DictCollisions) {
   struct BadHash {
     size_t operator()(const int64_t input) {
@@ -133,7 +124,6 @@ TEST(OrderedPreservingDictTest, DictCollisions) {
     }
 
     // erase a few entries;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     std::unordered_set<int64_t> erase_set = {0, 2, 9};
     for (auto erase : erase_set) {
       dict.erase(erase);
@@ -141,12 +131,10 @@ TEST(OrderedPreservingDictTest, DictCollisions) {
 
     // erase a few entries via iterator
     auto begin = dict.begin();
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     for (size_t i = 0; i < 10; ++i) {
       begin++;
     }
     auto end = begin;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     for (size_t i = 0; i < 7; ++i) {
       erase_set.insert(end->first);
       end++;
@@ -174,7 +162,6 @@ TEST(OrderedPreservingDictTest, DictCollisions) {
 // Tests taken from
 // https://github.com/Tessil/ordered-map/blob/master/tests/ordered_map_tests.cpp
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OrderedPreservingDictTest, test_range_insert) {
   // insert x values in vector, range insert x-15 values from vector to map,
   // check values
@@ -186,7 +173,6 @@ TEST(OrderedPreservingDictTest, test_range_insert) {
   }
 
   dict_int_int map = {{-1, 0}, {-2, 0}};
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   map.insert(values.begin() + 10, values.end() - 5);
 
   TORCH_INTERNAL_ASSERT(map.size(), 987);
@@ -195,13 +181,11 @@ TEST(OrderedPreservingDictTest, test_range_insert) {
 
   ASSERT_EQUAL_PRIM(map.at(-2), 0);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (int i = 10, j = 2; i < nb_values - 5; i++, j++) {
     ASSERT_EQUAL_PRIM(map.at(i), i + 1);
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OrderedPreservingDictTest, test_range_erase_all) {
   // insert x values, delete all
   const std::size_t nb_values = 1000;
@@ -214,7 +198,6 @@ TEST(OrderedPreservingDictTest, test_range_erase_all) {
   ASSERT_TRUE(map.empty());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OrderedPreservingDictTest, test_range_erase) {
   // insert x values, delete all with iterators except 10 first and 780 last
   // values
@@ -231,9 +214,7 @@ TEST(OrderedPreservingDictTest, test_range_erase) {
     }
   }
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto it_first = std::next(map.begin(), 10);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto it_last = std::next(map.begin(), 220);
 
   auto it = map.erase(it_first, it_last);
@@ -248,7 +229,6 @@ TEST(OrderedPreservingDictTest, test_range_erase) {
   // Check order
   it = map.begin();
   for (std::size_t i = 0; i < nb_values; i++) {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     if (i >= 10 && i < 220) {
       continue;
     }
@@ -259,7 +239,6 @@ TEST(OrderedPreservingDictTest, test_range_erase) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OrderedPreservingDictTest, test_move_constructor_empty) {
   ska_ordered::order_preserving_flat_hash_map<std::string, int64_t> map(0);
   ska_ordered::order_preserving_flat_hash_map<std::string, int64_t> map_move(
@@ -274,7 +253,6 @@ TEST(OrderedPreservingDictTest, test_move_constructor_empty) {
   TORCH_INTERNAL_ASSERT(map_move.find("") == map_move.end());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OrderedPreservingDictTest, test_move_operator_empty) {
   ska_ordered::order_preserving_flat_hash_map<std::string, int64_t> map(0);
   ska_ordered::order_preserving_flat_hash_map<std::string, int64_t> map_move;
@@ -289,7 +267,6 @@ TEST(OrderedPreservingDictTest, test_move_operator_empty) {
   TORCH_INTERNAL_ASSERT(map_move.find("") == map_move.end());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OrderedPreservingDictTest, test_reassign_moved_object_move_constructor) {
   using HMap =
       ska_ordered::order_preserving_flat_hash_map<std::string, std::string>;
@@ -306,7 +283,6 @@ TEST(OrderedPreservingDictTest, test_reassign_moved_object_move_constructor) {
       map == (HMap({{"Key4", "Value4"}, {"Key5", "Value5"}})));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OrderedPreservingDictTest, test_reassign_moved_object_move_operator) {
   using HMap =
       ska_ordered::order_preserving_flat_hash_map<std::string, std::string>;
@@ -323,7 +299,6 @@ TEST(OrderedPreservingDictTest, test_reassign_moved_object_move_operator) {
       map == (HMap({{"Key4", "Value4"}, {"Key5", "Value5"}})));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OrderedPreservingDictTest, test_copy_constructor_and_operator) {
   using HMap =
       ska_ordered::order_preserving_flat_hash_map<std::string, std::string>;
@@ -348,7 +323,6 @@ TEST(OrderedPreservingDictTest, test_copy_constructor_and_operator) {
   TORCH_INTERNAL_ASSERT(map_copy == map_copy3);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OrderedPreservingDictTest, test_copy_constructor_empty) {
   ska_ordered::order_preserving_flat_hash_map<std::string, int> map(0);
   ska_ordered::order_preserving_flat_hash_map<std::string, int> map_copy(map);
@@ -360,10 +334,8 @@ TEST(OrderedPreservingDictTest, test_copy_constructor_empty) {
   TORCH_INTERNAL_ASSERT(map_copy.find("") == map_copy.end());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OrderedPreservingDictTest, test_copy_operator_empty) {
   ska_ordered::order_preserving_flat_hash_map<std::string, int> map(0);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ska_ordered::order_preserving_flat_hash_map<std::string, int> map_copy(16);
   map_copy = map;
 
@@ -377,7 +349,6 @@ TEST(OrderedPreservingDictTest, test_copy_operator_empty) {
 /**
  * at
  */
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OrderedPreservingDictTest, test_at) {
   // insert x values, use at for known and unknown values.
   const ska_ordered::order_preserving_flat_hash_map<std::int64_t, std::int64_t>
@@ -397,9 +368,7 @@ TEST(OrderedPreservingDictTest, test_at) {
 /**
  * equal_range
  */
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OrderedPreservingDictTest, test_equal_range) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ska_ordered::order_preserving_flat_hash_map<std::int64_t, std::int64_t> map =
       {{0, 10}, {-2, 20}};
 
@@ -415,10 +384,8 @@ TEST(OrderedPreservingDictTest, test_equal_range) {
 /**
  * operator[]
  */
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OrderedPreservingDictTest, test_access_operator) {
   // insert x values, use at for known and unknown values.
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ska_ordered::order_preserving_flat_hash_map<std::int64_t, std::int64_t> map =
       {{0, 10}, {-2, 20}};
 
@@ -432,12 +399,9 @@ TEST(OrderedPreservingDictTest, test_access_operator) {
 /**
  * swap
  */
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OrderedPreservingDictTest, test_swap) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ska_ordered::order_preserving_flat_hash_map<std::int64_t, std::int64_t> map =
       {{1, 10}, {8, 80}, {3, 30}};
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ska_ordered::order_preserving_flat_hash_map<std::int64_t, std::int64_t> map2 =
       {{4, 40}, {5, 50}};
 
@@ -453,9 +417,7 @@ TEST(OrderedPreservingDictTest, test_swap) {
       (ska_ordered::order_preserving_flat_hash_map<std::int64_t, std::int64_t>{
           {1, 10}, {8, 80}, {3, 30}}));
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   map.insert({6, 60});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   map2.insert({4, 40});
 
   TORCH_INTERNAL_ASSERT(
@@ -468,9 +430,7 @@ TEST(OrderedPreservingDictTest, test_swap) {
           {1, 10}, {8, 80}, {3, 30}, {4, 40}}));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OrderedPreservingDictTest, test_swap_empty) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ska_ordered::order_preserving_flat_hash_map<std::int64_t, std::int64_t> map =
       {{1, 10}, {8, 80}, {3, 30}};
   ska_ordered::order_preserving_flat_hash_map<std::int64_t, std::int64_t> map2;
@@ -487,9 +447,7 @@ TEST(OrderedPreservingDictTest, test_swap_empty) {
       (ska_ordered::order_preserving_flat_hash_map<std::int64_t, std::int64_t>{
           {1, 10}, {8, 80}, {3, 30}}));
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   map.insert({6, 60});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   map2.insert({4, 40});
 
   TORCH_INTERNAL_ASSERT(

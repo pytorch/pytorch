@@ -1,4 +1,5 @@
 #include <ATen/ATen.h>
+#include <c10/util/irange.h>
 #include <torch/custom_class.h>
 
 #include <ATen/cpp_custom_type_hack.h>
@@ -27,11 +28,9 @@ void calc_col_offsets_transpose(
     int32_t* B_zero_point,
     int32_t* col_offsets,
     c10::QScheme qtype) {
-  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-  for (size_t i = 0; i < N; ++i) {
+  for (const auto i : c10::irange(N)) {
     int32_t sum = 0;
-    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-    for (size_t j = 0; j < K; ++j) {
+    for (const auto j : c10::irange(K)) {
       sum += Bint8[i * K + j];
     }
     if (qtype == c10::kPerTensorAffine) {
@@ -64,7 +63,7 @@ c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeight::
     weight_zero_points_int32[0] = weight.q_zero_point();
   } else if (qtype == c10::kPerChannelAffine) {
     weight_zero_points_int32.resize(N, 0);
-    for (int i = 0; i < N; ++i) {
+    for (const auto i : c10::irange(N)) {
       weight_zero_points_int32[i] =
           weight.q_per_channel_zero_points()[i].item<int32_t>();
     }
@@ -80,7 +79,7 @@ c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeight::
     weight_scales_float[0] = weight.q_scale();
   } else if (qtype == c10::kPerChannelAffine) {
     weight_scales_float.resize(N, 0.0);
-    for (int i = 0; i < N; ++i) {
+    for (const auto i : c10::irange(N)) {
       weight_scales_float[i] = weight.q_per_channel_scales()[i].item<float>();
     }
   }
@@ -185,8 +184,7 @@ PackedLinearWeightQnnp::PackedLinearWeightQnnp(
   auto wt_numel = weight_contig.numel();
   int8_t* w_data =
       reinterpret_cast<int8_t*>(weight_contig.data_ptr<c10::qint8>());
-  for (int i = 0; i < wt_numel; ++i) {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  for (const auto i : c10::irange(wt_numel)) {
     qnnp_w_data[i] = static_cast<c10::quint8>(w_data[i] + 128);
   }
   bcsr_matrix_ = qnnpack::generateBlockCSRMatrix(

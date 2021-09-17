@@ -258,7 +258,6 @@ class GetInstanceNormGradient : public GradientMakerBase {
 
 } // namespace
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     InstanceNormGradient,
     InstanceNormGradientOp<float, CPUContext>);
@@ -266,7 +265,6 @@ REGISTER_CPU_OPERATOR(
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,cppcoreguidelines-avoid-magic-numbers)
 OPERATOR_SCHEMA(InstanceNormGradient).NumInputs(4, 6).NumOutputs(3);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(InstanceNorm, GetInstanceNormGradient);
 
 } // namespace caffe2

@@ -2,12 +2,16 @@
 
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
+#include <ATen/core/dispatch/Dispatcher.h>
+#include <ATen/native/xnnpack/OpContext.h>
 #include <c10/util/irange.h>
+#include <torch/csrc/jit/tensorexpr/exceptions.h>
 #include <torch/csrc/jit/tensorexpr/external_functions_registry.h>
 
-namespace {
+namespace torch {
+namespace jit {
+namespace tensorexpr {
 
-// A helper function to construct a vector of tensors from raw buffer arguments
 std::vector<at::Tensor> constructTensors(
     int64_t bufs_num,
     void** buf_data,
@@ -29,7 +33,7 @@ std::vector<at::Tensor> constructTensors(
   }
 
   std::vector<at::Tensor> tensors;
-  for (size_t i = 0; i < buf_data_vec.size(); i++) {
+  for (const auto i : c10::irange(buf_data_vec.size())) {
     auto options = at::TensorOptions()
                        .dtype(buf_dtypes_vec[i])
                        .layout(at::kStrided)
@@ -40,12 +44,6 @@ std::vector<at::Tensor> constructTensors(
   }
   return tensors;
 }
-
-} // namespace
-
-namespace torch {
-namespace jit {
-namespace tensorexpr {
 
 #ifdef C10_MOBILE
 extern "C" {
@@ -76,9 +74,7 @@ void nnc_aten_conv2d(
     int64_t paddingH = extra_args[2];
     int64_t paddingW = extra_args[3];
     int64_t dilationH = extra_args[4];
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     int64_t dilationW = extra_args[5];
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     int64_t groups = extra_args[6];
 
     try {
@@ -103,66 +99,6 @@ void nnc_aten_conv2d(
   memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
 }
 
-void nnc_aten_matmul(
-    int64_t bufs_num,
-    void** buf_data,
-    int64_t* buf_ranks,
-    int64_t* buf_dims,
-    int8_t* buf_dtypes,
-    int64_t args_num,
-    int64_t* extra_args) {
-  std::vector<at::Tensor> tensors =
-      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
-
-  at::Tensor& r = tensors[0];
-  const at::Tensor& x = tensors[1];
-  const at::Tensor& w = tensors[2];
-  try {
-    at::matmul_out(r, x, w);
-  } catch (...) {
-  }
-}
-
-void nnc_aten_mv(
-    int64_t bufs_num,
-    void** buf_data,
-    int64_t* buf_ranks,
-    int64_t* buf_dims,
-    int8_t* buf_dtypes,
-    int64_t args_num,
-    int64_t* extra_args) {
-  std::vector<at::Tensor> tensors =
-      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
-
-  at::Tensor& r = tensors[0];
-  const at::Tensor& x = tensors[1];
-  const at::Tensor& w = tensors[2];
-  try {
-    at::mv_out(r, x, w);
-  } catch (...) {
-  }
-}
-
-void nnc_aten_mm(
-    int64_t bufs_num,
-    void** buf_data,
-    int64_t* buf_ranks,
-    int64_t* buf_dims,
-    int8_t* buf_dtypes,
-    int64_t args_num,
-    int64_t* extra_args) {
-  std::vector<at::Tensor> tensors =
-      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
-
-  at::Tensor& r = tensors[0];
-  const at::Tensor& x = tensors[1];
-  const at::Tensor& w = tensors[2];
-  try {
-    at::mm_out(r, x, w);
-  } catch (...) {
-  }
-}
-
 void nnc_aten_adaptive_avg_pool2d(
     int64_t bufs_num,
     void** buf_data,
@@ -177,7 +113,10 @@ void nnc_aten_adaptive_avg_pool2d(
   at::Tensor& r = tensors[0];
   const at::Tensor& x = tensors[1];
   int64_t H = extra_args[0];
-  int64_t W = extra_args[1];
+  int64_t W = H;
+  if (args_num > 1) {
+    W = extra_args[1];
+  }
   try {
     at::adaptive_avg_pool2d_out(r, x, {H, W});
   } catch (...) {
@@ -197,9 +136,12 @@ void nnc_aten_mean(
 
   at::Tensor& r = tensors[0];
   const at::Tensor& x = tensors[1];
-  int64_t dim = extra_args[0];
+  std::vector<int64_t> mean_dims(args_num);
+  if (args_num > 0) {
+    memcpy(mean_dims.data(), extra_args, sizeof(int64_t) * args_num);
+  }
   try {
-    at::mean_out(r, x, {dim});
+    at::mean_out(r, x, mean_dims);
   } catch (...) {
   }
 }
@@ -219,22 +161,87 @@ void nnc_aten_addmm(
   const at::Tensor& x = tensors[1];
   const at::Tensor& y = tensors[2];
   const at::Tensor& z = tensors[3];
+  // TODO: handle other alpha and beta dtypes, e.g. alpha=0.6, beta=0.2
+  int64_t alpha = extra_args[0], beta = extra_args[1];
+
   try {
-    at::addmm_out(r, x, y, z, extra_args[0], extra_args[1]);
+    at::addmm_out(r, x, y, z, alpha, beta);
   } catch (...) {
   }
 }
+
+// Only provides first output, the second output is just a copy of one of the
+// inputs
+void nnc_aten_triangular_solve(
+    int64_t bufs_num,
+    void** buf_data,
+    int64_t* buf_ranks,
+    int64_t* buf_dims,
+    int8_t* buf_dtypes,
+    int64_t args_num,
+    int64_t* extra_args) {
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
+  at::Tensor& r = tensors[0];
+  at::Tensor r2 = tensors[2].clone();
+  const at::Tensor& input = tensors[1];
+  const at::Tensor& A = tensors[2];
+  try {
+    at::triangular_solve_out(
+        r, r2, input, A, extra_args[0], extra_args[2], extra_args[3]);
+  } catch (...) {
+  }
+}
+
+#ifdef USE_XNNPACK
+
+void nnc_prepacked_linear_clamp_run(
+    int64_t bufs_num,
+    void** buf_data,
+    int64_t* buf_ranks,
+    int64_t* buf_dims,
+    int8_t* buf_dtypes,
+    int64_t args_num,
+    int64_t* extra_args) {
+  using namespace at::native::xnnpack;
+
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num - 1, buf_data, buf_ranks, buf_dims, buf_dtypes);
+
+  const at::Tensor& x = tensors[1];
+  auto context = reinterpret_cast<LinearOpContext*>(buf_data[2]);
+  at::Tensor output = context->run(x);
+  memcpy(
+      buf_data[0], output.data_ptr(), output.element_size() * output.numel());
+}
+
+void nnc_prepacked_conv2d_clamp_run(
+    int64_t bufs_num,
+    void** buf_data,
+    int64_t* buf_ranks,
+    int64_t* buf_dims,
+    int8_t* buf_dtypes,
+    int64_t args_num,
+    int64_t* extra_args) {
+  using namespace at::native::xnnpack;
+
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num - 1, buf_data, buf_ranks, buf_dims, buf_dtypes);
+
+  const at::Tensor& x = tensors[1];
+  auto context = reinterpret_cast<Conv2dOpContext*>(buf_data[2]);
+  at::Tensor output = context->run(x);
+  memcpy(
+      buf_data[0], output.data_ptr(), output.element_size() * output.numel());
+}
+
+#endif // USE_XNNPACK
 
 #ifndef C10_MOBILE
 
 const static RegisterNNCExternalFunction nnc_conv2d(
     "nnc_aten_conv2d",
     nnc_aten_conv2d);
-const static RegisterNNCExternalFunction nnc_matmul(
-    "nnc_aten_matmul",
-    nnc_aten_matmul);
-const static RegisterNNCExternalFunction nnc_mv("nnc_aten_mv", nnc_aten_mv);
-const static RegisterNNCExternalFunction nnc_mm("nnc_aten_mm", nnc_aten_mm);
 const static RegisterNNCExternalFunction nnc_adaptive_avg_pool2d(
     "nnc_aten_adaptive_avg_pool2d",
     nnc_aten_adaptive_avg_pool2d);
@@ -245,7 +252,20 @@ const static RegisterNNCExternalFunction nnc_addmm(
     "nnc_aten_addmm",
     nnc_aten_addmm);
 
-#endif
+const static RegisterNNCExternalFunction nnc_triangular_solve(
+    "nnc_aten_triangular_solve",
+    nnc_aten_triangular_solve);
+
+#ifdef USE_XNNPACK
+const static RegisterNNCExternalFunction reg_nnc_prepacked_linear_clamp_run(
+    "nnc_prepacked_linear_clamp_run",
+    nnc_prepacked_linear_clamp_run);
+const static RegisterNNCExternalFunction reg_nnc_prepacked_conv2d_clamp_run(
+    "nnc_prepacked_conv2d_clamp_run",
+    nnc_prepacked_conv2d_clamp_run);
+#endif // USE_XNNPACK
+
+#endif // C10_MOBILE
 
 #ifdef C10_MOBILE
 } // extern "C"

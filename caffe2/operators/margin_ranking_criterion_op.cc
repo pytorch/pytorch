@@ -63,16 +63,13 @@ bool MarginRankingCriterionGradientOp<CPUContext>::RunOnDevice() {
   return true;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     MarginRankingCriterion,
     MarginRankingCriterionOp<CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     MarginRankingCriterionGradient,
     MarginRankingCriterionGradientOp<CPUContext>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(MarginRankingCriterion)
     .NumInputs(3)
     .NumOutputs(1)
@@ -93,7 +90,6 @@ y == -1.
     .Input(2, "Y", "The label as a 1-dim TensorCPU with int value of 1 or -1.")
     .Output(0, "loss", "The output loss with the same dimensionality as X1.");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(MarginRankingCriterionGradient)
     .NumInputs(4)
     .NumOutputs(2)
@@ -113,7 +109,6 @@ class GetMarginRankingCriterionGradient : public GradientMakerBase {
         vector<string>{GI(0), GI(1)});
   }
 };
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(MarginRankingCriterion, GetMarginRankingCriterionGradient);
 
 } // namespace caffe2

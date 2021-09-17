@@ -20,10 +20,8 @@ using namespace torch::optim;
 namespace {
 Sequential xor_model() {
   return Sequential(
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       Linear(2, 8),
       Functional(at::sigmoid),
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       Linear(8, 1),
       Functional(at::sigmoid));
 }
@@ -67,11 +65,8 @@ void is_optimizer_state_equal(
 template <typename OptimizerClass, typename DerivedOptimizerOptions, typename DerivedOptimizerParamState>
 void test_serialize_optimizer(DerivedOptimizerOptions options, bool only_has_global_state = false) {
   torch::manual_seed(0);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto model1 = Linear(5, 2);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto model2 = Linear(5, 2);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto model3 = Linear(5, 2);
 
   // Models 1, 2, 3 will have the same parameters.
@@ -99,14 +94,12 @@ void test_serialize_optimizer(DerivedOptimizerOptions options, bool only_has_glo
   auto optim3_2 = OptimizerClass(
       model3->parameters(), options);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto x = torch::ones({10, 5});
 
   auto step = [&x](torch::optim::Optimizer& optimizer, Linear model) {
     optimizer.zero_grad();
     auto y = model->forward(x).sum();
     y.backward();
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto closure = []() { return torch::tensor({10}); };
     optimizer.step(closure);
   };
@@ -207,7 +200,6 @@ void write_step_buffers(
         count_substr_occurrences(warnings.str(), "old serialization"), 1);   \
   }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SerializeTest, KeysFunc) {
   auto tempfile = c10::make_tempfile();
   torch::serialize::OutputArchive output_archive;
@@ -224,7 +216,6 @@ TEST(SerializeTest, KeysFunc) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SerializeTest, TryReadFunc) {
   auto tempfile = c10::make_tempfile();
   torch::serialize::OutputArchive output_archive;
@@ -240,11 +231,9 @@ TEST(SerializeTest, TryReadFunc) {
   ASSERT_EQ(ivalue.toInt(), 1);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SerializeTest, Basic) {
   torch::manual_seed(0);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto x = torch::randn({5, 5});
   auto y = save_and_load(x);
 
@@ -253,11 +242,9 @@ TEST(SerializeTest, Basic) {
   ASSERT_TRUE(x.allclose(y));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SerializeTest, BasicToFile) {
   torch::manual_seed(0);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto x = torch::randn({5, 5});
 
   auto tempfile = c10::make_tempfile();
@@ -271,11 +258,9 @@ TEST(SerializeTest, BasicToFile) {
   ASSERT_TRUE(x.allclose(y));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SerializeTest, BasicViaFunc) {
   torch::manual_seed(0);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto x = torch::randn({5, 5});
 
   std::string serialized;
@@ -304,13 +289,10 @@ TEST(SerializeTest, BasicViaFunc) {
   ASSERT_TRUE(x.allclose(z));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SerializeTest, Resized) {
   torch::manual_seed(0);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto x = torch::randn({11, 5});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   x.resize_({5, 5});
   auto y = save_and_load(x);
 
@@ -319,13 +301,10 @@ TEST(SerializeTest, Resized) {
   ASSERT_TRUE(x.allclose(y));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SerializeTest, Sliced) {
   torch::manual_seed(0);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto x = torch::randn({11, 5});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   x = x.slice(0, 1, 5);
   auto y = save_and_load(x);
 
@@ -334,11 +313,9 @@ TEST(SerializeTest, Sliced) {
   ASSERT_TRUE(x.allclose(y));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SerializeTest, NonContiguous) {
   torch::manual_seed(0);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto x = torch::randn({11, 5});
   x = x.slice(1, 1, 4);
   auto y = save_and_load(x);
@@ -348,11 +325,9 @@ TEST(SerializeTest, NonContiguous) {
   ASSERT_TRUE(x.allclose(y));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SerializeTest, ErrorOnMissingKey) {
   struct B : torch::nn::Module {
     B(const std::string& name_c) {
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       register_buffer(name_c, torch::ones(5, torch::kFloat));
     }
   };
@@ -383,7 +358,6 @@ TEST(SerializeTest, ErrorOnMissingKey) {
       torch::load(model3, stream), "No such serialized submodule: 'a.x'");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SerializeTest, XOR) {
   // We better be able to save and load an XOR model!
   auto getLoss = [](Sequential model, uint32_t batch_size) {
@@ -402,14 +376,11 @@ TEST(SerializeTest, XOR) {
   auto model3 = xor_model();
   auto optimizer = torch::optim::SGD(
       model->parameters(),
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       torch::optim::SGDOptions(1e-1).momentum(0.9).nesterov(true).weight_decay(
-          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           1e-6));
 
   float running_loss = 1;
   int epoch = 0;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   while (running_loss > 0.1) {
     torch::Tensor loss = getLoss(model, 4);
     optimizer.zero_grad();
@@ -426,18 +397,13 @@ TEST(SerializeTest, XOR) {
   torch::save(model, tempfile.name);
   torch::load(model2, tempfile.name);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto loss = getLoss(model2, 100);
   ASSERT_LT(loss.item<float>(), 0.1);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SerializeTest, Optim) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto model1 = Linear(5, 2);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto model2 = Linear(5, 2);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto model3 = Linear(5, 2);
 
   // Models 1, 2, 3 will have the same parameters.
@@ -456,22 +422,16 @@ TEST(SerializeTest, Optim) {
 
   // Make some optimizers with momentum (and thus state)
   auto optim1 = torch::optim::SGD(
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       model1->parameters(), torch::optim::SGDOptions(1e-1).momentum(0.9));
   auto optim2 = torch::optim::SGD(
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       model2->parameters(), torch::optim::SGDOptions(1e-1).momentum(0.9));
   auto optim2_2 = torch::optim::SGD(
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       model2->parameters(), torch::optim::SGDOptions(1e-1).momentum(0.9));
   auto optim3 = torch::optim::SGD(
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       model3->parameters(), torch::optim::SGDOptions(1e-1).momentum(0.9));
   auto optim3_2 = torch::optim::SGD(
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       model3->parameters(), torch::optim::SGDOptions(1e-1).momentum(0.9));
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto x = torch::ones({10, 5});
 
   auto step = [&x](torch::optim::Optimizer& optimizer, Linear model) {
@@ -510,19 +470,14 @@ TEST(SerializeTest, Optim) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SerializeTest, Optim_Adagrad) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   test_serialize_optimizer<Adagrad, AdagradOptions, AdagradParamState>(AdagradOptions(1e-1));
 
   // bc compatibility check
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto model1 = Linear(5, 2);
   auto optim1 = torch::optim::Adagrad(
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       model1->parameters(), torch::optim::AdagradOptions(1e-1));
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto x = torch::ones({10, 5});
   auto step = [&x](torch::optim::Optimizer& optimizer, Linear model) {
     optimizer.zero_grad();
@@ -531,7 +486,6 @@ TEST(SerializeTest, Optim_Adagrad) {
     optimizer.step();
   };
   step(optim1, model1);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto optim1_2 = Adagrad(model1->parameters(), torch::optim::AdagradOptions(1e-1));
 
   // fill up with optim1 sum_buffers
@@ -556,21 +510,16 @@ TEST(SerializeTest, Optim_Adagrad) {
   is_optimizer_state_equal<AdagradParamState>(optim1.state(), optim1_2.state());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SerializeTest, Optim_SGD) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   test_serialize_optimizer<SGD, SGDOptions, SGDParamState>(SGDOptions(1e-1).momentum(0.9));
 
   // bc compatibility check
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto model1 = Linear(5, 2);
   auto model1_params = model1->parameters();
   // added a tensor for lazy init check - when all params do not have a momentum buffer entry
   model1_params.emplace_back(torch::randn({2,3}));
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto optim1 = torch::optim::SGD(model1_params, torch::optim::SGDOptions(0.01).momentum(0.9));
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto x = torch::ones({10, 5});
   auto step = [&x](torch::optim::Optimizer& optimizer, Linear model) {
     optimizer.zero_grad();
@@ -598,27 +547,21 @@ TEST(SerializeTest, Optim_SGD) {
   write_tensors_to_archive(output_archive, "momentum_buffers", momentum_buffers);
   write_int_value(output_archive, "iteration_", iteration_);
   output_archive.save_to(optim_tempfile_old_format.name);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto optim1_2 = SGD(model1_params, torch::optim::SGDOptions(1e-1).momentum(0.9));
   OLD_SERIALIZATION_LOGIC_WARNING_CHECK(torch::load, optim1_2, optim_tempfile_old_format.name);
   is_optimizer_state_equal<SGDParamState>(optim1.state(), optim1_2.state());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SerializeTest, Optim_Adam) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   test_serialize_optimizer<Adam, AdamOptions, AdamParamState>(AdamOptions().lr(0.99999).amsgrad(true).weight_decay(0.5));
 
   // bc compatibility check
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto model1 = Linear(5, 2);
   auto model1_params = model1->parameters();
   // added a tensor for lazy init check - when all params do not have entry in buffers
   model1_params.emplace_back(torch::randn({2,3}));
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto optim1 = torch::optim::Adam(model1_params, torch::optim::AdamOptions().weight_decay(0.5));
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto x = torch::ones({10, 5});
   auto step = [&x](torch::optim::Optimizer& optimizer, Linear model) {
     optimizer.zero_grad();
@@ -659,21 +602,16 @@ TEST(SerializeTest, Optim_Adam) {
   is_optimizer_state_equal<AdamParamState>(optim1.state(), optim1_2.state());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SerializeTest, Optim_AdamW) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   test_serialize_optimizer<AdamW, AdamWOptions, AdamWParamState>(AdamWOptions().lr(0.99999).amsgrad(true).betas(std::make_tuple(0.999, 0.1)));
 
   // bc compatibility check
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto model1 = Linear(5, 2);
   auto model1_params = model1->parameters();
   // added a tensor for lazy init check - when all params do not have entry in buffers
   model1_params.emplace_back(torch::randn({2,3}));
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto optim1 = torch::optim::AdamW(model1_params, torch::optim::AdamWOptions().weight_decay(0.5));
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto x = torch::ones({10, 5});
   auto step = [&x](torch::optim::Optimizer& optimizer, Linear model) {
     optimizer.zero_grad();
@@ -714,14 +652,11 @@ TEST(SerializeTest, Optim_AdamW) {
   is_optimizer_state_equal<AdamWParamState>(optim1.state(), optim1_2.state());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SerializeTest, Optim_RMSprop) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto options = RMSpropOptions(0.1).momentum(0.9).centered(true);
   test_serialize_optimizer<RMSprop, RMSpropOptions, RMSpropParamState>(options);
 
   // bc compatibility check
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto model1 = Linear(5, 2);
   auto model1_params = model1->parameters();
 
@@ -729,7 +664,6 @@ TEST(SerializeTest, Optim_RMSprop) {
   model1_params.emplace_back(torch::randn({2,3}));
   auto optim1 = torch::optim::RMSprop(model1_params, options);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto x = torch::ones({10, 5});
   auto step = [&x](torch::optim::Optimizer& optimizer, Linear model) {
     optimizer.zero_grad();
@@ -781,24 +715,20 @@ TEST(SerializeTest, Optim_RMSprop) {
   is_optimizer_state_equal<RMSpropParamState>(optim1.state(), optim1_2.state());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SerializeTest, Optim_LBFGS) {
   test_serialize_optimizer<LBFGS, LBFGSOptions, LBFGSParamState>(LBFGSOptions(), true);
   // bc compatibility check
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto model1 = Linear(5, 2);
   auto model1_params = model1->parameters();
   // added a tensor for lazy init check - when all params do not have entry in buffers
   model1_params.emplace_back(torch::randn({2,3}));
   auto optim1 = torch::optim::LBFGS(model1_params, torch::optim::LBFGSOptions());
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto x = torch::ones({10, 5});
   auto step = [&x](torch::optim::Optimizer& optimizer, Linear model) {
     optimizer.zero_grad();
     auto y = model->forward(x).sum();
     y.backward();
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto closure = []() { return torch::tensor({10}); };
     optimizer.step(closure);
   };
@@ -846,7 +776,6 @@ TEST(SerializeTest, Optim_LBFGS) {
   is_optimizer_state_equal<LBFGSParamState>(optim1.state(), optim1_2.state());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SerializeTest, XOR_CUDA) {
   torch::manual_seed(0);
   // We better be able to save and load a XOR model!
@@ -872,14 +801,11 @@ TEST(SerializeTest, XOR_CUDA) {
   auto model3 = xor_model();
   auto optimizer = torch::optim::SGD(
       model->parameters(),
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       torch::optim::SGDOptions(1e-1).momentum(0.9).nesterov(true).weight_decay(
-          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           1e-6));
 
   float running_loss = 1;
   int epoch = 0;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   while (running_loss > 0.1) {
     torch::Tensor loss = getLoss(model, 4);
     optimizer.zero_grad();
@@ -896,12 +822,10 @@ TEST(SerializeTest, XOR_CUDA) {
   torch::save(model, tempfile.name);
   torch::load(model2, tempfile.name);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto loss = getLoss(model2, 100);
   ASSERT_LT(loss.item<float>(), 0.1);
 
   model2->to(torch::kCUDA);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   loss = getLoss(model2, 100, true);
   ASSERT_LT(loss.item<float>(), 0.1);
 
@@ -909,18 +833,15 @@ TEST(SerializeTest, XOR_CUDA) {
   torch::save(model2, tempfile2.name);
   torch::load(model3, tempfile2.name);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   loss = getLoss(model3, 100, true);
   ASSERT_LT(loss.item<float>(), 0.1);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     SerializeTest,
     CanSerializeModulesWithIntermediateModulesWithoutParametersOrBuffers) {
   struct C : torch::nn::Module {
     C() {
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       register_buffer("foo", torch::ones(5, torch::kInt32));
     }
   };
@@ -947,7 +868,6 @@ TEST(
   ASSERT_EQ(output, 5);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SerializeTest, VectorOfTensors) {
   torch::manual_seed(0);
 
@@ -968,7 +888,6 @@ TEST(SerializeTest, VectorOfTensors) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SerializeTest, IValue) {
   c10::IValue ivalue(1);
   auto tempfile = c10::make_tempfile();
@@ -987,7 +906,6 @@ TEST(SerializeTest, IValue) {
 
 // NOTE: if a `Module` contains unserializable submodules (e.g. `nn::Functional`),
 // we expect those submodules to be skipped when the `Module` is being serialized.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SerializeTest, UnserializableSubmoduleIsSkippedWhenSavingModule) {
   struct A : torch::nn::Module {
     A() {
@@ -1011,12 +929,10 @@ TEST(SerializeTest, UnserializableSubmoduleIsSkippedWhenSavingModule) {
 // NOTE: If a `Module` contains unserializable submodules (e.g. `nn::Functional`),
 // we don't check the existence of those submodules in the `InputArchive` when
 // deserializing.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SerializeTest, UnserializableSubmoduleIsIgnoredWhenLoadingModule) {
   struct B : torch::nn::Module {
     B() {
       register_module("relu1", torch::nn::Functional(torch::relu));
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       register_buffer("foo", torch::zeros(5, torch::kInt32));
     }
   };

@@ -102,14 +102,12 @@ bool MaxReducer<CPUContext>::Backward(
   return true;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     ReduceMin,
     ReduceOp<
         TensorTypes<std::int32_t, std::int64_t, float, double>,
         CPUContext,
         MinReducer<CPUContext>>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     ReduceMinGradient,
     ReduceGradientOp<
@@ -117,7 +115,6 @@ REGISTER_CPU_OPERATOR(
         CPUContext,
         MinReducer<CPUContext>>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(ReduceMin)
     .NumInputs(1)
     .NumOutputs(1)
@@ -135,17 +132,14 @@ OPERATOR_SCHEMA(ReduceMin)
     .Input(0, "data", "An input tensor.")
     .Output(0, "reduced", "Reduced output tensor.");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(ReduceMinGradient).NumInputs(3).NumOutputs(1);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     ReduceMax,
     ReduceOp<
         TensorTypes<std::int32_t, std::int64_t, float, double>,
         CPUContext,
         MaxReducer<CPUContext>>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     ReduceMaxGradient,
     ReduceGradientOp<
@@ -153,7 +147,6 @@ REGISTER_CPU_OPERATOR(
         CPUContext,
         MaxReducer<CPUContext>>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(ReduceMax)
     .NumInputs(1)
     .NumOutputs(1)
@@ -171,17 +164,14 @@ OPERATOR_SCHEMA(ReduceMax)
     .Input(0, "data", "An input tensor.")
     .Output(0, "reduced", "Reduced output tensor.");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(ReduceMaxGradient).NumInputs(3).NumOutputs(1);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     ReduceSum,
     ReduceOp<
         TensorTypes<std::int32_t, std::int64_t, float, double>,
         CPUContext,
         SumReducer<CPUContext>>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     ReduceSumGradient,
     ReduceGradientOp<
@@ -189,7 +179,6 @@ REGISTER_CPU_OPERATOR(
         CPUContext,
         SumReducer<CPUContext>>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(ReduceSum)
     .NumInputs(1)
     .NumOutputs(1)
@@ -260,19 +249,15 @@ Y:
     .Input(0, "X", "(*Tensor`<float>`*): input tensor")
     .Output(0, "Y", "(*Tensor`<float>`*): reduced tensor");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(ReduceSumGradient).NumInputs(3).NumOutputs(1);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     ReduceMean,
     ReduceOp<TensorTypes<float>, CPUContext, MeanReducer<CPUContext>>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     ReduceMeanGradient,
     ReduceGradientOp<TensorTypes<float>, CPUContext, MeanReducer<CPUContext>>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(ReduceMean)
     .NumInputs(1)
     .NumOutputs(1)
@@ -344,7 +329,6 @@ Y:
     .Input(0, "X", "(*Tensor`<float>`*): input tensor")
     .Output(0, "Y", "(*Tensor`<float>`*): reduced tensor");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(ReduceMeanGradient).NumInputs(3).NumOutputs(1);
 
 template <>
@@ -405,16 +389,13 @@ bool L2Reducer<CPUContext>::Backward(
   return true;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     ReduceL1,
     ReduceOp<TensorTypes<float>, CPUContext, L1Reducer<CPUContext>>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     ReduceL1Gradient,
     ReduceGradientOp<TensorTypes<float>, CPUContext, L1Reducer<CPUContext>>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(ReduceL1)
     .NumInputs(1)
     .NumOutputs(1)
@@ -486,19 +467,15 @@ Y:
     .Input(0, "X", "(*Tensor`<float>`*): input tensor")
     .Output(0, "Y", "(*Tensor`<float>`*): reduced tensor");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(ReduceL1Gradient).NumInputs(3).NumOutputs(1);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     ReduceL2,
     ReduceOp<TensorTypes<float>, CPUContext, L2Reducer<CPUContext>>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     ReduceL2Gradient,
     ReduceGradientOp<TensorTypes<float>, CPUContext, L2Reducer<CPUContext>>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(ReduceL2)
     .NumInputs(1)
     .NumOutputs(1)
@@ -571,7 +548,6 @@ Y:
     .Output(0, "Y", "(*Tensor`<float>`*): reduced tensor")
     .InheritOnnxSchema("ReduceMean");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(ReduceL2Gradient).NumInputs(3).NumOutputs(1);
 
 namespace {
@@ -590,17 +566,11 @@ class GetReduceGradient final : public GradientMakerBase {
 
 } // namespace
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(ReduceMin, GetReduceGradient);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(ReduceMax, GetReduceGradient);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(ReduceSum, GetReduceGradient);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(ReduceMean, GetReduceGradient);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(ReduceL1, GetReduceGradient);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(ReduceL2, GetReduceGradient);
 
 } // namespace caffe2

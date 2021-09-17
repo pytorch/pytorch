@@ -19,7 +19,7 @@ class C10_CUDA_API CUDAOutOfMemoryError : public c10::Error {
 // block inside of already allocated area.
 class C10_CUDA_API FreeMemoryCallback {
  public:
-  virtual ~FreeMemoryCallback(){};
+  virtual ~FreeMemoryCallback() = default;
   virtual bool Execute() = 0;
 };
 
@@ -87,6 +87,15 @@ struct DeviceStats {
 
   // COUNT: total number of OOMs (i.e. failed calls to CUDA after cache flush)
   int64_t num_ooms = 0;
+
+  // COUNT: total number of oversize blocks allocated from pool
+  Stat oversize_allocations;
+
+  // COUNT: total number of oversize blocks requiring malloc
+  Stat oversize_segments;
+
+  // SIZE: maximum block size that is allowed to be split.
+  int64_t max_split_size = 0;
 };
 
 // Struct containing info of an allocation block (i.e. a fractional part of a

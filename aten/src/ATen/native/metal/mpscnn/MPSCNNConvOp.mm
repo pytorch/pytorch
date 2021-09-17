@@ -1,5 +1,5 @@
 #import <ATen/native/metal/mpscnn/MPSCNNUtils.h>
-#import <ATen/native/metal/mpscnn/MPSCNNContext.h>
+#import <ATen/native/metal/MetalContext.h>
 #import <ATen/native/metal/mpscnn/MPSCNNConvOp.h>
 #import <ATen/native/metal/mpscnn/MPSCNNNeuronOp.h>
 
@@ -120,14 +120,14 @@
   MPSCNNConvolution* conv = nil;
   if (@available(iOS 11.0, *)) {
     conv = [[MPSCNNConvolution alloc]
-        initWithDevice:[MPSCNNContext sharedInstance].device
+        initWithDevice:[MetalContext sharedInstance].device
                weights:dataSource];
 
   } else {
 #if TARGET_OS_IPHONE
     // Fallback on earlier versions
     conv = [[MPSCNNConvolution alloc]
-               initWithDevice:[MPSCNNContext sharedInstance].device
+               initWithDevice:[MetalContext sharedInstance].device
         convolutionDescriptor:desc
                 kernelWeights:w
                     biasTerms:b

@@ -10,12 +10,11 @@ class TypeMetaTestFoo {};
 class TypeMetaTestBar {};
 } // namespace
 
-CAFFE_KNOWN_TYPE(TypeMetaTestFoo);
-CAFFE_KNOWN_TYPE(TypeMetaTestBar);
+CAFFE_KNOWN_TYPE_NOEXPORT(TypeMetaTestFoo);
+CAFFE_KNOWN_TYPE_NOEXPORT(TypeMetaTestBar);
 
 namespace {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TypeMetaTest, TypeMetaStatic) {
   EXPECT_EQ(TypeMeta::ItemSize<int>(), sizeof(int));
   EXPECT_EQ(TypeMeta::ItemSize<float>(), sizeof(float));
@@ -28,7 +27,6 @@ TEST(TypeMetaTest, TypeMetaStatic) {
   EXPECT_EQ(TypeMeta::Id<TypeMetaTestFoo>(), TypeMeta::Id<TypeMetaTestFoo>());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TypeMetaTest, Names) {
   TypeMeta null_meta;
   EXPECT_EQ("nullptr (uninitialized)", null_meta.name());
@@ -38,7 +36,6 @@ TEST(TypeMetaTest, Names) {
   EXPECT_TRUE(c10::string_view::npos != string_meta.name().find("string"));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TypeMetaTest, TypeMeta) {
   TypeMeta int_meta = TypeMeta::Make<int>();
   TypeMeta float_meta = TypeMeta::Make<float>();
@@ -75,17 +72,14 @@ TEST(TypeMetaTest, TypeMeta) {
 
 class ClassAllowAssignment {
  public:
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ClassAllowAssignment() : x(42) {}
-  // NOLINTNEXTLINE(modernize-use-equals-default)
-  ClassAllowAssignment(const ClassAllowAssignment& src) : x(src.x) {}
+  ClassAllowAssignment(const ClassAllowAssignment& src) = default;
   ClassAllowAssignment& operator=(const ClassAllowAssignment& src) = default;
   int x;
 };
 
 class ClassNoAssignment {
  public:
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ClassNoAssignment() : x(42) {}
   ClassNoAssignment(const ClassNoAssignment& src) = delete;
   ClassNoAssignment& operator=(const ClassNoAssignment& src) = delete;
@@ -93,12 +87,11 @@ class ClassNoAssignment {
 };
 } // namespace
 
-CAFFE_KNOWN_TYPE(ClassAllowAssignment);
-CAFFE_KNOWN_TYPE(ClassNoAssignment);
+CAFFE_KNOWN_TYPE_NOEXPORT(ClassAllowAssignment);
+CAFFE_KNOWN_TYPE_NOEXPORT(ClassNoAssignment);
 
 namespace {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TypeMetaTest, CtorDtorAndCopy) {
   TypeMeta fundamental_meta = TypeMeta::Make<int>();
   EXPECT_EQ(fundamental_meta.placementNew(), nullptr);
@@ -110,7 +103,6 @@ TEST(TypeMetaTest, CtorDtorAndCopy) {
   EXPECT_TRUE(meta_a.placementDelete() != nullptr);
   EXPECT_TRUE(meta_a.copy() != nullptr);
   ClassAllowAssignment src;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   src.x = 10;
   ClassAllowAssignment dst;
   EXPECT_EQ(dst.x, 42);
@@ -129,7 +121,6 @@ TEST(TypeMetaTest, CtorDtorAndCopy) {
 #endif
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TypeMetaTest, Float16IsNotUint16) {
   EXPECT_NE(TypeMeta::Id<uint16_t>(), TypeMeta::Id<at::Half>());
 }

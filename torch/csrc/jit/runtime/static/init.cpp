@@ -25,7 +25,14 @@ void initStaticModuleBindings(PyObject* module) {
       .def_readonly(
           "output_dealloc_time",
           &StaticRuntime::IndividualMetrics::output_dealloc_time)
+      .def_readonly(
+          "first_iter_time", &StaticRuntime::IndividualMetrics::first_iter_time)
       .def_readonly("total_time", &StaticRuntime::IndividualMetrics::total_time)
+      .def_readonly(
+          "out_nodes_count", &StaticRuntime::IndividualMetrics::out_nodes_count)
+      .def_readonly(
+          "total_nodes_count",
+          &StaticRuntime::IndividualMetrics::total_nodes_count)
       .def_readonly(
           "time_per_node", &StaticRuntime::IndividualMetrics::time_per_node)
       .def_readonly(
@@ -36,7 +43,8 @@ void initStaticModuleBindings(PyObject* module) {
           &StaticRuntime::IndividualMetrics::percent_per_node_type)
       .def_readonly(
           "instances_per_node_type",
-          &StaticRuntime::IndividualMetrics::instances_per_node_type);
+          &StaticRuntime::IndividualMetrics::instances_per_node_type)
+      .def_readonly("out_nodes", &StaticRuntime::IndividualMetrics::out_nodes);
   static_module
       .def(
           "__call__",

@@ -10,7 +10,6 @@ namespace at {
 DLDataType getDLDataType(const Tensor& t) {
   DLDataType dtype;
   dtype.lanes = 1;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   dtype.bits = t.element_size() * 8;
   switch (t.scalar_type()) {
     case ScalarType::Byte:
@@ -40,7 +39,7 @@ DLDataType getDLDataType(const Tensor& t) {
       dtype.code = DLDataTypeCode::kDLFloat;
       break;
     case ScalarType::Bool:
-      dtype.code = DLDataTypeCode::kDLUInt;
+      TORCH_CHECK(false, "Bool type is not supported by dlpack");
       break;
     case ScalarType::ComplexHalf:
       dtype.code = DLDataTypeCode::kDLComplex;
@@ -126,7 +125,6 @@ ScalarType toScalarType(const DLDataType& dtype) {
   switch (dtype.code) {
     case DLDataTypeCode::kDLUInt:
       switch (dtype.bits) {
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         case 8:
           stype = ScalarType::Byte;
           break;
@@ -137,19 +135,15 @@ ScalarType toScalarType(const DLDataType& dtype) {
       break;
     case DLDataTypeCode::kDLInt:
       switch (dtype.bits) {
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         case 8:
           stype = ScalarType::Char;
           break;
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         case 16:
           stype = ScalarType::Short;
           break;
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         case 32:
           stype = ScalarType::Int;
           break;
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         case 64:
           stype = ScalarType::Long;
           break;
@@ -160,15 +154,12 @@ ScalarType toScalarType(const DLDataType& dtype) {
       break;
     case DLDataTypeCode::kDLFloat:
       switch (dtype.bits) {
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         case 16:
           stype = ScalarType::Half;
           break;
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         case 32:
           stype = ScalarType::Float;
           break;
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         case 64:
           stype = ScalarType::Double;
           break;

@@ -17,7 +17,6 @@ REGISTER_TEMPLATED_STAT_PUT_OP(
     AveragePutStat,
     CAFFE_AVG_EXPORTED_STAT)
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(AveragePut)
     .NumInputs(1)
     .NumOutputs(0)
@@ -51,7 +50,6 @@ REGISTER_TEMPLATED_STAT_PUT_OP(
     IncrementPutStat,
     CAFFE_EXPORTED_STAT)
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(IncrementPut)
     .NumInputs(1)
     .NumOutputs(0)
@@ -85,7 +83,6 @@ REGISTER_TEMPLATED_STAT_PUT_OP(
     StdDevPutStat,
     CAFFE_STDDEV_EXPORTED_STAT)
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(StdDevPut)
     .NumInputs(1)
     .NumOutputs(0)

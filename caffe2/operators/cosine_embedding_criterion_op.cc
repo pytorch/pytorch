@@ -45,16 +45,13 @@ bool CosineEmbeddingCriterionGradientOp<CPUContext>::RunOnDevice() {
   return true;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     CosineEmbeddingCriterion,
     CosineEmbeddingCriterionOp<CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     CosineEmbeddingCriterionGradient,
     CosineEmbeddingCriterionGradientOp<CPUContext>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(CosineEmbeddingCriterion)
     .NumInputs(2)
     .NumOutputs(1)
@@ -69,7 +66,6 @@ the label, and computes the elementwise criterion output as
     .Input(1, "Y", "The label as a 1-dim TensorCPU with int value of 1 or -1.")
     .Output(0, "loss", "The output loss with the same dimensionality as S.");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(CosineEmbeddingCriterionGradient).NumInputs(3).NumOutputs(1);
 
 class GetCosineEmbeddingCriterionGradient : public GradientMakerBase {
@@ -82,7 +78,6 @@ class GetCosineEmbeddingCriterionGradient : public GradientMakerBase {
         vector<string>{GI(0)});
   }
 };
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(
     CosineEmbeddingCriterion,
     GetCosineEmbeddingCriterionGradient);

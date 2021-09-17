@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 '''
 Verify that it is possible to round-trip native_functions.yaml via ruamel under some
 configuration.  Keeping native_functions.yaml consistent in this way allows us to
@@ -14,19 +14,19 @@ is simply to make sure that there is *some* configuration of ruamel that can rou
 the YAML, not to be prescriptive about it.
 '''
 
-import ruamel.yaml
+import ruamel.yaml  # type: ignore[import]
 import difflib
 import sys
 from pathlib import Path
 from io import StringIO
 
-def fn(base):
+def fn(base: str) -> str:
     return str(base / Path("aten/src/ATen/native/native_functions.yaml"))
 
 with open(Path(__file__).parent.parent.parent / fn('.'), "r") as f:
     contents = f.read()
 
-yaml = ruamel.yaml.YAML()
+yaml = ruamel.yaml.YAML()  # type: ignore[attr-defined]
 yaml.preserve_quotes = True
 yaml.width = 1000
 yaml.boolean_representation = ['False', 'True']

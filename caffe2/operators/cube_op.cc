@@ -24,11 +24,9 @@ bool CubeGradientFunctor<CPUContext>::Forward(
   return true;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     Cube,
     UnaryElementwiseOp<NumericTypes, CPUContext, CubeFunctor<CPUContext>>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     CubeGradient,
     BinaryElementwiseOp<
@@ -36,7 +34,6 @@ REGISTER_CPU_OPERATOR(
         CPUContext,
         CubeGradientFunctor<CPUContext>>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Cube)
     .NumInputs(1)
     .NumOutputs(1)
@@ -47,7 +44,6 @@ OPERATOR_SCHEMA(Cube)
         "Y",
         "*(type: Tensor`<float>`)* Output tensor calculated as the cube of the input tensor, element-wise.");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(CubeGradient)
     .NumInputs(2)
     .NumOutputs(1)
@@ -68,7 +64,6 @@ class GetCubeGradient : public GradientMakerBase {
 
 } // namespace
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(Cube, GetCubeGradient);
 
 } // namespace caffe2

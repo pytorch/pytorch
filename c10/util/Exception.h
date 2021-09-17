@@ -166,6 +166,17 @@ C10_API WarningHandler* get_warning_handler() noexcept(true);
 C10_API void set_warnAlways(bool) noexcept(true);
 C10_API bool get_warnAlways(void) noexcept(true);
 
+// A RAII guard that sets warn_always (not thread-local) on
+// construction, and sets it back to the original value upon destruction.
+struct C10_API WarnAlways {
+ public:
+  explicit WarnAlways(bool setting = true);
+  ~WarnAlways();
+
+ private:
+  bool prev_setting;
+};
+
 } // namespace Warning
 
 // Used in ATen for out-of-bound indices that can reasonably only be detected

@@ -1,11 +1,10 @@
+#include <c10/util/ThreadLocal.h>
 #include <c10/util/ThreadLocalDebugInfo.h>
 
 namespace c10 {
 
-namespace {
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-thread_local std::shared_ptr<ThreadLocalDebugInfo> debug_info = nullptr;
-} // namespace
+C10_DEFINE_TLS_static(std::shared_ptr<ThreadLocalDebugInfo>, tls_debug_info);
+#define debug_info (tls_debug_info.get())
 
 /* static */
 DebugInfoBase* ThreadLocalDebugInfo::get(DebugInfoKind kind) {

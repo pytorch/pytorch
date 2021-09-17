@@ -196,8 +196,7 @@ class TORCH_API RRef : public RRefInterface {
   explicit RRef(RRef&& other) = delete;
   RRef& operator=(RRef&& other) = delete;
 
-  // NOLINTNEXTLINE(modernize-use-override)
-  virtual ~RRef() = default;
+  ~RRef() override = default;
 
   // returns the worker id of the owner
   inline worker_id_t owner() const override {
@@ -230,12 +229,12 @@ class TORCH_API RRef : public RRefInterface {
   // node. Note that this is only set when processing requests invoked with
   // rpc.remote. This is only used to get the future corresponding to the rref
   // for profiling use cases.
-  inline void registerOwnerCreationFuture(std::shared_ptr<JitFuture> fut) {
+  inline void registerOwnerCreationFuture(c10::intrusive_ptr<JitFuture> fut) {
     ownerCreationFuture_ = std::move(fut);
   }
 
   // Get the future corresponding to the creation of this rref.
-  inline std::shared_ptr<JitFuture> getOwnerCreationFuture() const {
+  inline c10::intrusive_ptr<JitFuture> getOwnerCreationFuture() const {
     return ownerCreationFuture_;
   }
 
@@ -279,7 +278,7 @@ class TORCH_API RRef : public RRefInterface {
   const TypePtr type_;
   // Future corresponding to request to create RRef on remote node.
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
-  std::shared_ptr<JitFuture> ownerCreationFuture_;
+  c10::intrusive_ptr<JitFuture> ownerCreationFuture_;
 };
 
 // ``UserRRef`` represents a user of an RRef. Besides the ``RRefId``, each user
@@ -326,8 +325,7 @@ class TORCH_API UserRRef final : public RRef {
   // https://github.com/pytorch/pytorch/blob/9116f02bebf3a5260feef5732d36c54ecb3b4033/c10/util/intrusive_ptr.h#L204
   // This is called on destructing the wrapping intrusive_ptr_target instance
   // and it's data members. We don't need to implement anything here.
-  // NOLINTNEXTLINE(modernize-use-override)
-  ~UserRRef() = default;
+  ~UserRRef() override = default;
 
  private:
   friend class RRefContext;
@@ -395,25 +393,12 @@ class TORCH_API OwnerRRef final : public RRef {
   // Has a value or error been set?
   bool hasValue() const;
   // Gets a future that is satisfied when the value or error is set.
-  std::shared_ptr<JitFuture> getFuture();
+  c10::intrusive_ptr<JitFuture> getFuture();
 
  private:
   friend class RRefContext;
 
-  std::shared_ptr<JitFuture> future_;
-
- public:
-  // Records an event per each stream in the context and stores them in
-  // the current OwnerRRef instance.
-  void recordAllStreams(const std::shared_ptr<LazyStreamContext>& ctx);
-
-  // Blocks all streams in the context on all events previously stored in
-  // the current OwnerRRef instance.
-  void blockAllStreams(std::shared_ptr<LazyStreamContext>& ctx);
-
- private:
-  // a storage for device events for synchronization.
-  std::vector<c10::Event> events_;
+  c10::intrusive_ptr<JitFuture> future_;
 };
 
 TORCH_API std::ostream& operator<<(std::ostream& os, const RRef& rref);

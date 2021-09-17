@@ -16,7 +16,7 @@ void assert_dims_constant(const BufHandle& buf) {
 
 using InitFunc = std::function<ExprHandle(const std::vector<VarHandle>&)>;
 
-Tensor* conv2d_depthwise_static(
+Tensor conv2d_depthwise_static(
     BufHandle input,
     BufHandle weight,
     const InitFunc& init_func,
@@ -45,7 +45,7 @@ Tensor* conv2d_depthwise_static(
   auto OH = (H - R + 2 * pad) / stride + 1;
   auto OW = (W - S + 2 * pad) / stride + 1;
 
-  Tensor* conv = Reduce(
+  Tensor conv = Reduce(
       "conv2d_depthwise",
       {{N, "n"}, {K, "k"}, {OH, "oh"}, {OW, "ow"}},
       Sum(),
@@ -56,9 +56,7 @@ Tensor* conv2d_depthwise_static(
         auto const& oh = v[2];
         auto const& ow = v[3];
         auto const& c = v[4];
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         auto const& r = v[5];
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         auto const& s = v[6];
         auto cond = CompareSelect::make(oh * stride - pad + r, 0, 1, 0, kLT);
         cond = CompareSelect::make(ow * stride - pad + s, 0, 1, cond, kLT);
@@ -77,15 +75,15 @@ Tensor* conv2d_depthwise_static(
   constexpr int kLoopH = 2, kLoopW = 3;
   if (R == 3 && stride == 2 && pad == 1) {
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    For *head, *tail;
+    ForPtr head, tail;
     auto loops = nest.getLoopStmtsFor(conv);
     nest.sliceHead(loops[kLoopW], 2, &head, &tail);
     loops = nest.getLoopStmtsFor(conv);
     nest.sliceHead(loops[kLoopH], 2, &head, &tail);
   } else if (R == 3 && stride == 1 && pad == 1) {
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    For *main, *peeled;
-    auto loops = nest.getAllLoopNestsWritingToBuf(conv->buf());
+    ForPtr main, peeled;
+    auto loops = nest.getAllLoopNestsWritingToBuf(conv.buf());
     main = loops[1][kLoopW];
     nest.sliceHead(main, 1, &peeled, &main);
     nest.sliceTail(main, 1, &main, &peeled);
@@ -94,10 +92,10 @@ Tensor* conv2d_depthwise_static(
     nest.sliceTail(main, 1, &main, &peeled);
   }
 
-  return new Tensor(conv->buf(), nest.root_stmt());
+  return Tensor(conv.buf(), nest.root_stmt());
 }
 
-Tensor* conv2d_depthwise_dynamic(
+Tensor conv2d_depthwise_dynamic(
     BufHandle input,
     BufHandle weight,
     const InitFunc& init_func,
@@ -146,7 +144,7 @@ Tensor* conv2d_depthwise_dynamic(
 
 } // namespace
 
-Tensor* conv2d_depthwise(
+Tensor conv2d_depthwise(
     BufHandle input,
     BufHandle weight,
     BufHandle bias,
@@ -160,7 +158,7 @@ Tensor* conv2d_depthwise(
   return conv2d_depthwise_static(input, weight, init_func, stride, pad, groups);
 }
 
-Tensor* conv2d_depthwise(
+Tensor conv2d_depthwise(
     BufHandle input,
     BufHandle weight,
     int stride,
@@ -172,7 +170,7 @@ Tensor* conv2d_depthwise(
   return conv2d_depthwise_static(input, weight, init_func, stride, pad, groups);
 }
 
-Tensor* conv2d_depthwise(
+Tensor conv2d_depthwise(
     BufHandle input,
     BufHandle weight,
     BufHandle bias,
@@ -208,7 +206,7 @@ Tensor* conv2d_depthwise(
       groups);
 }
 
-Tensor* conv2d_depthwise(
+Tensor conv2d_depthwise(
     BufHandle input,
     BufHandle weight,
     ExprHandle N,

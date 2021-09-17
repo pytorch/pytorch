@@ -6,65 +6,67 @@
 
 #include <unordered_set>
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_bool(onnxifi_debug_mode, false, "Enable onnxifi debug mode.");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_bool(
     onnxifi_adjust_batch,
     true,
     "Attach AdjustBatch ops at input/outputs of the Onnxifi ops");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_bool(
     enforce_fp32_inputs_into_fp16,
     false,
     "Whether to enforce fp32 to fp16 conversion for external inputs.");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_bool(
     merge_fp32_inputs_into_fp16,
     false,
     "Merge all the fp32 input tensors into one, convert it to fp16 and split it back");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+C10_DEFINE_bool(
+    verify_only_single_subnet,
+    false,
+    "Check that only one subnet is created during Onnxifi."
+)
+
 C10_DEFINE_int32(
     onnxifi_min_ops,
     1,
     "Minimum number of ops for a subgraph to be lowered to backend");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_int32(
     onnxifi_timeout_ms,
     0,
     "Timeout limit for onnxifi inference in milliseconds. 0 means no timeout");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_string(
     onnxifi_shape_hints,
     "",
     "Shape hints in the form of Name:d0,d1:d2;");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_string(
     onnxifi_blacklist,
     "",
     "A list of net positions whose corresponding op will be ignored "
     "to onnxifi. Example 0-50,61,62-70");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_string(
     onnxifi_blacklist_ops,
     "",
     "A list of operator types that will be ignored "
     "to onnxifi. Example Tanh,Mul");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_string(
     onnxifi_input_output_observe_list,
     "",
     "A list of net positions whose corresponding op's inputs and outputs will be"
     " observed. ");
+
+C10_DEFINE_bool(
+    use_onnxifi_batch_size,
+    true,
+    "If true then instead of nominal batch blob for determining current batch "
+    "size we would use batch size provided as part of Glow request data.");
 
 namespace caffe2 {
 namespace glow {
@@ -127,7 +129,8 @@ void onnxifi(
     const std::unordered_map<int, ShapeInfoMap> &shape_hints_per_bs,
     const c10::optional<std::string> &blacklist_ops,
     const c10::optional<size_t> &min_ops,
-    const std::unordered_set<std::string> &blocklist_blobs) {
+    const std::unordered_set<std::string> &blocklist_blobs,
+    const c10::optional<bool> &verify_only_single_subnet) {
   // Split SparseLengthsSumSparse so that we can lower the SparseLengthsSum part
   splitSparseLengthsSumSparse(net, *ws);
 
@@ -155,9 +158,11 @@ void onnxifi(
   opts.load_model_by_blob = load_model_by_blob;
   opts.enforce_fp32_inputs_into_fp16 = FLAGS_enforce_fp32_inputs_into_fp16;
   opts.merge_fp32_inputs_into_fp16 = FLAGS_merge_fp32_inputs_into_fp16;
+  opts.verify_only_single_subnet = verify_only_single_subnet.value_or(FLAGS_verify_only_single_subnet);
   opts.predictor_net_ssa_rewritten = predictor_net_ssa_rewritten;
   opts.timeout = FLAGS_onnxifi_timeout_ms;
   opts.shape_hints_per_bs = shape_hints_per_bs;
+  opts.use_onnxifi_batch_size = FLAGS_use_onnxifi_batch_size;
 
   ShapeInfoMap more_shape_hints = shape_hints_max_bs;
   if (!FLAGS_onnxifi_shape_hints.empty()) {

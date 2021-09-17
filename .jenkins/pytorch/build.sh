@@ -12,7 +12,7 @@ COMPACT_JOB_NAME="${BUILD_ENVIRONMENT}"
 # shellcheck source=./common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
-if [[ "$BUILD_ENVIRONMENT" == *-linux-xenial-py3-clang5-asan* ]]; then
+if [[ "$BUILD_ENVIRONMENT" == *-linux-xenial-py3-clang7-asan* ]]; then
   exec "$(dirname "${BASH_SOURCE[0]}")/build-asan.sh" "$@"
 fi
 
@@ -24,7 +24,7 @@ if [[ "$BUILD_ENVIRONMENT" == *-mobile-code-analysis* ]]; then
   exec "$(dirname "${BASH_SOURCE[0]}")/build-mobile-code-analysis.sh" "$@"
 fi
 
-if [[ "$BUILD_ENVIRONMENT" == pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7* ]]; then
+if [[ "$BUILD_ENVIRONMENT" == *linux-xenial-cuda11.1* ]]; then
   # Enabling DEPLOY build (embedded torch python interpreter, experimental)
   # only on one config for now, can expand later
   export USE_DEPLOY=ON
@@ -59,7 +59,7 @@ if [[ "$BUILD_ENVIRONMENT" == *cuda11* ]]; then
   export BUILD_SPLIT_CUDA=ON
 fi
 
-if [[ ${BUILD_ENVIRONMENT} == *"pure_torch"* ]]; then
+if [[ ${BUILD_ENVIRONMENT} == *"pure_torch"* || ${BUILD_ENVIRONMENT} == *"puretorch"* ]]; then
   export BUILD_CAFFE2=OFF
 fi
 
@@ -82,12 +82,14 @@ if ! which conda; then
   # In ROCm CIs, we are doing cross compilation on build machines with
   # intel cpu and later run tests on machines with amd cpu.
   # Also leave out two builds to make sure non-mkldnn builds still work.
-  if [[ "$BUILD_ENVIRONMENT" != *rocm* && "$BUILD_ENVIRONMENT" != *-trusty-py3.5-* && "$BUILD_ENVIRONMENT" != *-xenial-cuda10.1-cudnn7-py3-* ]]; then
+  if [[ "$BUILD_ENVIRONMENT" != *rocm* && "$BUILD_ENVIRONMENT" != *-trusty-py3.5-* ]]; then
     pip_install mkl mkl-devel
     export USE_MKLDNN=1
   else
     export USE_MKLDNN=0
   fi
+else
+  export CMAKE_PREFIX_PATH=/opt/conda
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *libtorch* ]]; then
@@ -130,6 +132,7 @@ if [[ "${BUILD_ENVIRONMENT}" == *-android* ]]; then
   if [[ "${BUILD_ENVIRONMENT}" == *vulkan* ]]; then
     build_args+=("-DUSE_VULKAN=ON")
   fi
+  build_args+=("-DUSE_LITE_INTERPRETER_PROFILER=OFF")
   exec ./scripts/build_android.sh "${build_args[@]}" "$@"
 fi
 
@@ -148,8 +151,8 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
     export MAX_JOBS=$(($(nproc) - 1))
   fi
 
-  if [[ -n "$IN_CI" ]]; then
-      # Set ROCM_ARCH to gfx900 and gfx906 for CI builds
+  if [[ -n "$IN_CI" && -z "$PYTORCH_ROCM_ARCH" ]]; then
+      # Set ROCM_ARCH to gfx900 and gfx906 for CI builds, if user doesn't override.
       echo "Limiting PYTORCH_ROCM_ARCH to gfx90[06] for CI builds"
       export PYTORCH_ROCM_ARCH="gfx900;gfx906"
   fi
@@ -185,7 +188,7 @@ fi
 export TORCH_CUDA_ARCH_LIST="5.2"
 
 # Add sm_75 support for the Linux CUDA 11.1 cuDNN 8 CircleCI build
-if [[ "$BUILD_ENVIRONMENT" == *xenial-cuda11.1-cudnn8*build ]]; then
+if [[ "$BUILD_ENVIRONMENT" == *xenial-cuda11.1*build ]]; then
   export TORCH_CUDA_ARCH_LIST=$TORCH_CUDA_ARCH_LIST";7.5"
 fi
 
@@ -200,8 +203,20 @@ fi
 
 # Patch required to build xla
 if [[ "${BUILD_ENVIRONMENT}" == *xla* ]]; then
-  git clone --recursive https://github.com/pytorch/xla.git
-  ./xla/scripts/apply_patches.sh
+  clone_pytorch_xla
+  # shellcheck disable=SC1091
+  source "xla/.circleci/common.sh"
+  apply_patches
+fi
+
+if [[ "${BUILD_ENVIRONMENT}" == *linux-xenial-py3.6-gcc7-build* || "${BUILD_ENVIRONMENT}" == *linux-xenial-py3.6-gcc5.4-build* ]]; then
+  export USE_GLOO_WITH_OPENSSL=ON
+fi
+
+if [[ "${BUILD_ENVIRONMENT}" == pytorch-linux-xenial-py3* ]]; then
+  if [[ "${BUILD_ENVIRONMENT}" != *android* && "${BUILD_ENVIRONMENT}" != *cuda* ]]; then
+    export BUILD_STATIC_RUNTIME_BENCHMARK=ON
+  fi
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *-bazel-* ]]; then
@@ -209,7 +224,11 @@ if [[ "$BUILD_ENVIRONMENT" == *-bazel-* ]]; then
 
   get_bazel
 
-  tools/bazel build :torch
+  # first build the whole torch for CPU-only
+  tools/bazel build --config=no-tty :torch
+  # then build selected set of targets with GPU-support.
+  # TODO: eventually this should converge to building the whole :torch with GPU-support
+  tools/bazel build --config=no-tty --config=gpu :c10
 else
   # check that setup.py would fail with bad arguments
   echo "The next three invocations are expected to fail with invalid command error messages."
@@ -283,16 +302,6 @@ else
     popd
     assert_git_not_dirty
   else
-    # Test standalone c10 build
-    if [[ "$BUILD_ENVIRONMENT" == *xenial-cuda10.1-cudnn7-py3* ]]; then
-      mkdir -p c10/build
-      pushd c10/build
-      cmake ..
-      make -j
-      popd
-      assert_git_not_dirty
-    fi
-
     # Test no-Python build
     echo "Building libtorch"
     # NB: Install outside of source directory (at the same level as the root
@@ -307,36 +316,10 @@ fi
 
 # Test XLA build
 if [[ "${BUILD_ENVIRONMENT}" == *xla* ]]; then
-  # TODO: Move this to Dockerfile.
-
-  pip_install lark-parser
-  pip_install cloud-tpu-client
-
-  sudo apt-get -qq update
-  sudo apt-get -qq install npm nodejs
-
-  # XLA build requires Bazel
-  # We use bazelisk to avoid updating Bazel version manually.
-  sudo npm install -g @bazel/bazelisk
-  sudo ln -s "$(command -v bazelisk)" /usr/bin/bazel
-
-  # Install bazels3cache for cloud cache
-  sudo npm install -g bazels3cache
-  BAZELS3CACHE="$(which bazels3cache)"
-  if [ -z "${BAZELS3CACHE}" ]; then
-    echo "Unable to find bazels3cache..."
-    exit 1
-  fi
-
-  bazels3cache --bucket="${XLA_CLANG_CACHE_S3_BUCKET_NAME}" --maxEntrySizeBytes=0
-  pushd xla
-  export CC=clang-9 CXX=clang++-9
-  # Use cloud cache to build when available.
-  # shellcheck disable=SC1003
-  sed -i '/bazel build/ a --remote_http_cache=http://localhost:7777 \\' build_torch_xla_libs.sh
-
-  python setup.py install
-  popd
+  XLA_DIR=xla
+  # These functions are defined in .circleci/common.sh in pytorch/xla repo
+  install_deps_pytorch_xla $XLA_DIR
+  build_torch_xla $XLA_DIR
   assert_git_not_dirty
 fi
 

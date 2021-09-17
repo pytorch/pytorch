@@ -23,15 +23,17 @@ class API_AVAILABLE(ios(10.0), macos(10.13)) MPSImageWrapper {
   MetalCommandBuffer* commandBuffer() const;
   void setImage(MPSImage* image);
   MPSImage* image() const;
+  id<MTLBuffer> buffer() const;
   void synchronize();
   void prepare();
   void release();
 
  private:
   std::vector<int64_t> _imageSizes;
-  MPSImage* _image = nullptr;
-  __weak MetalCommandBuffer* _commandBuffer;
-  id<PTMetalCommandBuffer> _delegate;
+  MPSImage* _image = nil;
+  id<MTLBuffer> _buffer = nil;
+  MetalCommandBuffer* _commandBuffer = nil;
+  id<PTMetalCommandBuffer> _delegate = nil;
 };
 
 } // namespace metal

@@ -15,7 +15,6 @@ struct THPMemoryFormat {
   char name[MEMORY_FORMAT_NAME_LEN + 1];
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 extern PyTypeObject THPMemoryFormatType;
 
 inline bool THPMemoryFormat_Check(PyObject *obj) {

@@ -54,6 +54,7 @@ using OperationCreator = Operation (*)(const Node*);
 // the concrete operator nature.
 struct TORCH_API Operator {
  private:
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   struct C10Operator final {
     c10::OperatorHandle handle_;
     Operation op_;
@@ -62,6 +63,7 @@ struct TORCH_API Operator {
     std::string schema_string_;
     mutable c10::optional<c10::AliasAnalysisKind> alias_analysis_;
   };
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   struct JitOnlyOperator final {
     // The only valid transition for schema_ is from right->left, i.e.
     // when the schema gets parsed.
@@ -218,11 +220,22 @@ TORCH_API bool aliasAnalysisHasSpecialCaseFor(c10::Symbol sym);
 // string.
 template <typename Func>
 c10::optional<Operator> OperatorGenerator(
-    torch::detail::SelectiveStr<true> schema_str,
+    const char* schema_str,
     Func&& op,
     AliasAnalysisKind alias_analysis) {
   return c10::optional<Operator>(Operator(
       std::string(schema_str), std::forward<Func>(op), alias_analysis));
+}
+
+template <typename Func>
+c10::optional<Operator> OperatorGenerator(
+    torch::detail::SelectiveStr<true> schema_str,
+    Func&& op,
+    AliasAnalysisKind alias_analysis) {
+  return OperatorGenerator(
+      static_cast<const char*>(schema_str),
+      std::forward<Func>(op),
+      alias_analysis);
 }
 
 template <typename Func>

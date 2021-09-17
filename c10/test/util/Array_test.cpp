@@ -88,9 +88,7 @@ static_assert(array<int, 1>{{3}} == prepend(3, array<int, 0>{{}}), "");
 namespace test_to_std_array {
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
 constexpr int obj2[3] = {3, 5, 6};
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
 static_assert(array<int, 3>{{3, 5, 6}} == to_array(obj2), "");
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
 static_assert(array<int, 3>{{3, 5, 6}} == to_array<int, 3>({3, 5, 6}), "");
 } // namespace test_to_std_array
 

@@ -7,10 +7,12 @@
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/functions/basic_ops.h>
 #include <torch/csrc/autograd/python_anomaly_mode.h>
+#include <torch/csrc/autograd/python_saved_variable_hooks.h>
 #include <torch/csrc/autograd/python_function.h>
 #include <torch/csrc/utils/pycfunction_helpers.h>
 #include <ATen/BatchedTensorImpl.h>
 #include <ATen/VmapMode.h>
+#include <c10/util/irange.h>
 #include <pybind11/pybind11.h>
 
 #ifndef _WIN32
@@ -26,7 +28,6 @@ struct THPEngine {
     PyObject_HEAD
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static bool _reinitialize_engine = false;
 
 namespace torch { namespace autograd { namespace python {
@@ -66,7 +67,7 @@ void PythonEngine::thread_init(int device, const std::shared_ptr<ReadyQueue>& re
   // Create a PyThreadState, but release the GIL. This lets pybind11::gil_scoped_acquire calls
   // inside thread_main acquire the GIL without having to create a new
   // PyThreadState each time.
-#ifdef IS_PYTHON_3_9_PLUS
+#if defined(IS_PYTHON_3_9_PLUS) || defined(USE_DEPLOY)
   auto gil = std::make_unique<pybind11::gil_scoped_acquire>();
 #else
   pybind11::gil_scoped_acquire gil;
@@ -79,11 +80,12 @@ void PythonEngine::thread_init(int device, const std::shared_ptr<ReadyQueue>& re
     decrement_non_reentrant_thread_count();
   }
 
-#ifdef IS_PYTHON_3_9_PLUS
+#if defined(IS_PYTHON_3_9_PLUS) || defined(USE_DEPLOY)
   // Do not call PyEval_RestoreThread, PyThreadState_[Clear|DeleteCurrent] if runtime is finalizing
   if (!Py_IsInitialized()) {
     no_gil.disarm();
     // TODO: call disarm rather than leak gil_scoped_acquired once PyThreadState_Clear can safely be called from finalize
+    // NOTE: deploy.cpp calls `PyInterpreterState_Delete` to destruct PyThreadState, so avoid use-after-free here.
     gil.release();
   }
 #endif
@@ -102,6 +104,10 @@ void PythonEngine::thread_on_exception(
 
 std::unique_ptr<AnomalyMetadata> PythonEngine::make_anomaly_metadata() {
   return std::unique_ptr<AnomalyMetadata>(new PyAnomalyMetadata());
+}
+
+std::unique_ptr<SavedVariableHooks> PythonEngine::get_default_saved_variable_hooks() {
+  return PyDefaultSavedVariableHooks::get_hooks();
 }
 
 variable_list PythonEngine::execute(
@@ -123,7 +129,7 @@ variable_list PythonEngine::execute(
   }
 }
 
-std::shared_ptr<at::ivalue::Future> PythonEngine::execute_with_graph_task(
+c10::intrusive_ptr<at::ivalue::Future> PythonEngine::execute_with_graph_task(
     const std::shared_ptr<GraphTask>& graph_task,
     std::shared_ptr<Node> graph_root,
     InputBuffer&& input_buffer) {
@@ -140,7 +146,6 @@ std::shared_ptr<at::ivalue::Future> PythonEngine::execute_with_graph_task(
 }
 }}} // namespace torch::autograd::python
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 PyObject *THPEngineClass = nullptr;
 
 // Implementation of torch._C._EngineBase.run_backward
@@ -182,7 +187,7 @@ PyObject *THPEngine_run_backward(PyObject *self, PyObject *args, PyObject *kwarg
   roots.reserve(num_tensors);
   variable_list grads;
   grads.reserve(num_tensors);
-  for (int i = 0; i < num_tensors; i++) {
+  for(const auto i : c10::irange(num_tensors)) {
     PyObject *_tensor = PyTuple_GET_ITEM(tensors, i);
     THPUtils_assert(THPVariable_Check(_tensor), "element %d of tensors "
         "tuple is not a Tensor", i);
@@ -221,7 +226,7 @@ PyObject *THPEngine_run_backward(PyObject *self, PyObject *args, PyObject *kwarg
   if (inputs != nullptr) {
     int num_inputs = PyTuple_GET_SIZE(inputs);
     output_edges.reserve(num_inputs);
-    for (int i = 0; i < num_inputs; ++i) {
+    for (const auto i : c10::irange(num_inputs)) {
       PyObject *input = PyTuple_GET_ITEM(inputs, i);
       THPUtils_assert(THPVariable_Check(input),
           "all inputs have to be Tensors, but got %s", THPUtils_typename(input));
@@ -238,8 +243,7 @@ PyObject *THPEngine_run_backward(PyObject *self, PyObject *args, PyObject *kwarg
         grad_fn = torch::autograd::impl::try_get_grad_accumulator(tensor);
       }
       if (accumulate_grad) {
-        THPUtils_assert(tensor.is_leaf(),
-          "One of the differentiated Tensors given as 'inputs' to backward is not a leaf Tensor");
+        tensor.retain_grad();
       }
       THPUtils_assert(tensor.requires_grad(),
           "One of the differentiated Tensors does not require grad");
@@ -267,7 +271,7 @@ PyObject *THPEngine_run_backward(PyObject *self, PyObject *args, PyObject *kwarg
     int num_inputs = PyTuple_GET_SIZE(inputs);
     THPObjectPtr py_outputs {PyTuple_New(num_inputs)};
     if (!py_outputs) return nullptr;
-    for (int i = 0; i < num_inputs; i++) {
+    for(const auto i : c10::irange(num_inputs)) {
       THPUtils_assert(allow_unreachable || outputs[i].defined(), "One of the "
                       "differentiated Tensors appears to not have been used "
                       "in the graph. Set allow_unused=True if this is the "
@@ -322,14 +326,12 @@ static struct PyMethodDef THPEngine_methods[] = {
 };
 
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 PyTypeObject THPEngineType = {
   PyVarObject_HEAD_INIT(nullptr, 0)
   "torch._C._EngineBase",                      /* tp_name */
   sizeof(THPEngine),                           /* tp_basicsize */
   0,                                           /* tp_itemsize */
   nullptr,                                     /* tp_dealloc */
-  // NOLINTNEXTLINE(modernize-use-nullptr)
   0,                                           /* tp_vectorcall_offset */
   nullptr,                                     /* tp_getattr */
   nullptr,                                     /* tp_setattr */

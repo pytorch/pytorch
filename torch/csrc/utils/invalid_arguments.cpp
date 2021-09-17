@@ -1,8 +1,9 @@
 #include <torch/csrc/utils/invalid_arguments.h>
 
+#include <torch/csrc/utils/memory.h>
 #include <torch/csrc/utils/python_strings.h>
 
-#include <torch/csrc/utils/memory.h>
+#include <c10/util/irange.h>
 
 #include <algorithm>
 #include <unordered_map>
@@ -61,7 +62,7 @@ struct TupleType: public Type {
     if (!PyTuple_Check(object)) return false;
     auto num_elements = PyTuple_GET_SIZE(object);
     if (num_elements != (long)types.size()) return false;
-    for (int i = 0; i < num_elements; i++) {
+    for(const auto i : c10::irange(num_elements)) {
       if (!types[i]->is_matching(PyTuple_GET_ITEM(object, i)))
         return false;
     }
@@ -78,7 +79,7 @@ struct SequenceType: public Type {
   bool is_matching(PyObject *object) override {
     if (!PySequence_Check(object)) return false;
     auto num_elements = PySequence_Length(object);
-    for (int i = 0; i < num_elements; i++) {
+    for(const auto i : c10::irange(num_elements)) {
       if (!type->is_matching(PySequence_GetItem(object, i)))
         return false;
     }
@@ -131,7 +132,6 @@ std::unique_ptr<Type> _buildType(std::string type_name, bool is_nullable) {
   } else if (type_name == "int") {
     result = torch::make_unique<MultiType>(MultiType{"int", "long"});
   } else if (type_name.find("tuple[") == 0) {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto type_list = type_name.substr(6);
     type_list.pop_back();
     std::vector<std::unique_ptr<Type>> types;
@@ -139,7 +139,6 @@ std::unique_ptr<Type> _buildType(std::string type_name, bool is_nullable) {
       types.emplace_back(_buildType(type, false));
     result = torch::make_unique<TupleType>(std::move(types));
   } else if (type_name.find("sequence[") == 0) {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto subtype = type_name.substr(9);
     subtype.pop_back();
     result = torch::make_unique<SequenceType>(_buildType(subtype, false));
@@ -252,7 +251,7 @@ std::string _formattedArgDesc(
 
   auto num_args = arguments.size() + kwargs.size();
   std::string result = "(";
-  for (size_t i = 0; i < num_args; i++) {
+  for(const auto i : c10::irange(num_args)) {
     bool is_kwarg = i >= arguments.size();
     PyObject *arg = is_kwarg ? kwargs.at(option.arguments[i].name) : arguments[i];
 
@@ -299,7 +298,7 @@ std::vector<std::string> _tryMatchKwargs(const Option& option,
     const std::unordered_map<std::string, PyObject*>& kwargs) {
   std::vector<std::string> unmatched;
   // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
-  int start_idx = option.arguments.size() - kwargs.size();
+  int64_t start_idx = option.arguments.size() - kwargs.size();
   if (option.has_out && kwargs.count("out") == 0)
     start_idx--;
   if (start_idx < 0)
@@ -327,13 +326,12 @@ std::string format_invalid_args(
   std::vector<PyObject *> args;
   std::unordered_map<std::string, PyObject *> kwargs;
   std::string error_msg;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   error_msg.reserve(2000);
   error_msg += function_name;
   error_msg += " received an invalid combination of arguments - ";
 
   Py_ssize_t num_args = PyTuple_Size(given_args);
-  for (int i = 0; i < num_args; i++) {
+  for(const auto i : c10::irange(num_args)) {
     PyObject *arg = PyTuple_GET_ITEM(given_args, i);
     args.push_back(arg);
   }

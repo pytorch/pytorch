@@ -746,7 +746,7 @@ Tensor grid_sampler_2d_cpu(const Tensor& input, const Tensor& grid,
     //       or only for strided access to the grid tensor
     auto max_gather_offset = std::max(
       (sizes[2] - 1) * strides[2] + (sizes[3] - 1) * strides[3],
-      grid_sW * (vec256::Vec256<float>::size() - 1));
+      grid_sW * (vec::Vectorized<float>::size() - 1));
 
     if (max_gather_offset > std::numeric_limits<int32_t>::max()) {
       return native::_grid_sampler_2d_cpu_fallback(
@@ -758,7 +758,6 @@ Tensor grid_sampler_2d_cpu(const Tensor& input, const Tensor& grid,
     kCPU, input, grid, interpolation_mode, padding_mode, align_corners);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(grid_sampler_2d_cpu_kernel);
 
 
@@ -793,7 +792,7 @@ grid_sampler_2d_backward_cpu(const Tensor& grad_output, const Tensor& input, con
       std::max(
         (isizes[2] - 1) * istrides[2] + (isizes[3] - 1) * istrides[3],
         (gsizes[2] - 1) * gstrides[2] + (gsizes[3] - 1) * gstrides[3]),
-      grid_sW * (vec256::Vec256<float>::size() - 1));
+      grid_sW * (vec::Vectorized<float>::size() - 1));
 
     if (max_gather_offset > std::numeric_limits<int32_t>::max()) {
       return native::_grid_sampler_2d_cpu_fallback_backward(
@@ -805,7 +804,6 @@ grid_sampler_2d_backward_cpu(const Tensor& grad_output, const Tensor& input, con
     kCPU, grad_output, input, grid, interpolation_mode, padding_mode, align_corners);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(grid_sampler_2d_backward_cpu_kernel);
 
 // No shape checking needed here. See # NOTE [ grid_sampler Native Functions ].
@@ -873,7 +871,6 @@ Tensor grid_sampler(const Tensor& input, const Tensor& grid,
       static_cast<GridSamplerPadding>(padding_mode) == GridSamplerPadding::Zeros &&
       align_corners &&
       input.dim() == 4 &&
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       input.size(1) <= 1024) {
     return cudnn_grid_sampler(input, grid);
   }

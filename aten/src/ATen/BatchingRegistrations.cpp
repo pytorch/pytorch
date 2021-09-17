@@ -146,20 +146,17 @@ Tensor expand_batching_rule(const Tensor& self, IntArrayRef size, bool implicit)
   auto size_physical = self_physical.getPhysicalShape(size);
   auto self_physical_dim = self_physical.tensor().dim();
 
-  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-  TORCH_CHECK(self_physical_dim <= size_physical.size(),
+  TORCH_CHECK(self_physical_dim <= static_cast<int64_t>(size_physical.size()),
        "expand: the number of sizes provided (", /*logical*/size.size(), ") ",
        "must be greater or equal to the number of dimensions in the tensor (",
        /*logical dim*/self.dim(), ")");
 
-  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-  if (self_physical_dim == size_physical.size()) {
+  if (self_physical_dim == static_cast<int64_t>(size_physical.size())) {
     auto result = self_physical.tensor().expand(size_physical, implicit);
     return self_physical.getPhysicalToLogicalMap().apply(result);
   }
 
-  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-  TORCH_INTERNAL_ASSERT(self_physical_dim < size_physical.size());
+  TORCH_INTERNAL_ASSERT(self_physical_dim < static_cast<int64_t>(size_physical.size()));
   // Here, we know we are expanding a (logical) tensor to a larger number
   // of dimensions. We have to be careful because we can't call expand directly
   // due to the presence of batch dimensions.
@@ -1031,7 +1028,6 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
 
   m.impl("sum.dim_IntList", sum_batching_rule);
   m.impl("is_complex", native::is_complex);
-  m.impl("conj", native::conj);
 
   // inplace operations
   m.impl("fill_.Scalar", fill_inplace_scalar_batching_rule);
@@ -1085,7 +1081,7 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   UNARY_POINTWISE(ceil);
   UNARY_POINTWISE(cos);
   UNARY_POINTWISE(cosh);
-  UNARY_POINTWISE(_conj);
+  UNARY_POINTWISE(conj_physical);
   UNARY_POINTWISE(digamma);
   UNARY_POINTWISE(exp);
   UNARY_POINTWISE(expm1);
@@ -1144,10 +1140,10 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   BINARY_POINTWISE(mul);
   BINARY_POINTWISE(div);
   {
-    using Binop = Tensor (*)(const Tensor&, const Tensor&, c10::optional<std::string>);
-    using Unop = Tensor (*)(const Tensor&, const Scalar&, c10::optional<std::string>);
-    m.impl("div.Tensor_mode", binary_pointwise_batching_rule<Binop, at::div, c10::optional<std::string>>);
-    m.impl("div.Scalar_mode", unwrap_and_call<Unop, at::div, const Scalar&, c10::optional<std::string>>);
+    using Binop = Tensor (*)(const Tensor&, const Tensor&, c10::optional<c10::string_view>);
+    using Unop = Tensor (*)(const Tensor&, const Scalar&, c10::optional<c10::string_view>);
+    m.impl("div.Tensor_mode", binary_pointwise_batching_rule<Binop, at::div, c10::optional<c10::string_view>>);
+    m.impl("div.Scalar_mode", unwrap_and_call<Unop, at::div, const Scalar&, c10::optional<c10::string_view>>);
   }
 
   // at::pow has three out-of-place overloads
@@ -1181,6 +1177,10 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   TRIVIAL_OP(imag)
   TRIVIAL_OP(real);
   TRIVIAL_OP(view_as_real);
+  TRIVIAL_OP(conj);
+  TRIVIAL_OP(_conj);
+  TRIVIAL_OP(resolve_conj);
+  TRIVIAL_OP(resolve_neg);
   m.impl("view_as_complex", view_as_complex_batching_rule);
 #undef TRIVIAL
 

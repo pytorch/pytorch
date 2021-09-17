@@ -12,7 +12,6 @@ import torch.nn.intrinsic.qat as nniqat
 from torch._ops import ops
 from torch.nn.common_types import _size_1_t
 from torch.nn.modules.utils import _single, _pair, _triple
-from torch.nn.quantized.modules.utils import _pair_from_first
 from torch.nn.quantized.modules.utils import _quantize_weight
 from torch.nn.utils import fuse_conv_bn_weights
 
@@ -201,7 +200,7 @@ class _ConvNd(nn.Module):
             'Weight observer must have a dtype of qint8'
         qweight = _quantize_weight(mod.weight.float(), weight_post_process)
         # the __init__ call used is the one from derived classes and not the one from _ConvNd
-        qconv = cls(mod.in_channels, mod.out_channels, mod.kernel_size,  # type: ignore[call-arg]
+        qconv = cls(mod.in_channels, mod.out_channels, mod.kernel_size,
                     mod.stride, mod.padding, mod.dilation, mod.groups,
                     mod.bias is not None, mod.padding_mode)
         qconv.set_weight_bias(qweight, mod.bias)
@@ -284,10 +283,10 @@ class Conv1d(_ConvNd):
                  device=None,
                  dtype=None):
         factory_kwargs = {'device': device, 'dtype': dtype}
-        kernel_size = _pair_from_first(kernel_size)
-        stride = _pair_from_first(stride)
-        padding = _pair_from_first(padding)
-        dilation = _pair_from_first(dilation)
+        kernel_size = _single(kernel_size)
+        stride = _single(stride)
+        padding = padding if isinstance(padding, str) else _single(padding)
+        dilation = _single(dilation)
 
         # Subclasses of _ConvNd needs to call _init rather than __init__. See
         # discussion on PR #49702

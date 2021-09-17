@@ -73,9 +73,12 @@ using std::vector;
 #define NOMINMAX
 #endif
 
-#if defined(__has_cpp_attribute) && __has_cpp_attribute(nodiscard)
+#if defined(__has_cpp_attribute)
+#if __has_cpp_attribute(nodiscard)
 #define CAFFE2_NODISCARD [[nodiscard]]
-#else
+#endif
+#endif
+#if !defined(CAFFE2_NODISCARD)
 #define CAFFE2_NODISCARD
 #endif
 

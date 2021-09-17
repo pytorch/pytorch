@@ -23,7 +23,6 @@ namespace jit {
 namespace fuser {
 
 // Template for computing the offset into the tensor to access a value
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static auto dim_calc = CodeTemplate(R"(
 //printf("tensor ${tensor} sizes[${d}] = %d, strides[${d}] = %d\n", ${tensor}.sizes[${d}],${tensor}.strides[${d}]);
 size_t ${tensor}_dimIndex${d} = ${tensor}_linearIndex ${mod_sizes};
@@ -56,7 +55,6 @@ static std::string scalarValue(const double v) {
       out << "POS_INFINITY";
     }
   } else {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     out << std::setprecision(16) << v;
   }
   return out.str();
@@ -675,6 +673,9 @@ std::string generateKernel(
 #include <hip/hip_runtime.h>
 )");
   }
+#else
+  // Still need the key defined, but empty.
+  env.s("RuntimeHeader", R"()");
 #endif
 #endif
   // clang-format on

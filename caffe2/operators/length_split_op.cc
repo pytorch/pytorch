@@ -2,10 +2,8 @@
 
 namespace caffe2 {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(LengthsSplit, LengthsSplitOp<CPUContext>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(LengthsSplit)
     .NumInputs(1, 2)
     .NumOutputs(1)
@@ -34,7 +32,6 @@ e.g. LENGTHS = [2, 1, 2]
     .Output(0, "Y", "(M*n_split)x1 Output vector denoting split lengths");
 
 // TODO: Write gradient for this when needed
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 GRADIENT_NOT_IMPLEMENTED_YET(LengthsSplit);
 
 } // namespace caffe2

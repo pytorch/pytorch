@@ -63,16 +63,14 @@ c10::intrusive_ptr<JitFuture> rpcTorchscript(
   // Create a JIT future and pass it to futMessage's callback to set state
   // of the JIT future.
   auto futPtr = jitFuture->createInstance(returnType);
-  std::weak_ptr<JitFuture> wp = jitFuture;
-  jitFuture->addCallback(at::wrapPropagateTLSState<void>([futPtr, wp]() {
-    auto future = wp.lock();
-    if (future->hasError()) {
-      futPtr->setError(future->exception_ptr());
+  jitFuture->addCallback(at::wrapPropagateTLSState([futPtr](JitFuture& future) {
+    if (future.hasError()) {
+      futPtr->setError(future.exception_ptr());
     } else {
       futPtr->markCompleted(
           deserializeRespToIValue(
-              *future->constValue().toCustomClass<Message>()),
-          future->dataPtrs());
+              *future.constValue().toCustomClass<Message>()),
+          future.storages());
     }
   }));
   if (shouldProfile) {
@@ -123,10 +121,9 @@ c10::intrusive_ptr<RRef> remoteTorchscript(
 
     userRRefPtr->registerOwnerCreationFuture(jitFuture);
     ctx.addPendingUser(userRRefPtr->forkId(), userRRefPtr);
-    std::weak_ptr<JitFuture> wp = jitFuture;
-    jitFuture->addCallback(
-        at::wrapPropagateTLSState<void>([wp, forkId{userRRefPtr->forkId()}]() {
-          callback::confirmPendingUser(*wp.lock(), forkId);
+    jitFuture->addCallback(at::wrapPropagateTLSState(
+        [forkId{userRRefPtr->forkId()}](JitFuture& future) {
+          callback::confirmPendingUser(future, forkId);
         }));
 
     return userRRefPtr;
@@ -150,10 +147,9 @@ c10::intrusive_ptr<RRef> remoteTorchscript(
         rpcTimeoutSeconds /* timeout */);
 
     ownerRRefPtr->registerOwnerCreationFuture(jitFuture);
-    std::weak_ptr<JitFuture> wp = jitFuture;
-    jitFuture->addCallback(at::wrapPropagateTLSState<void>(
-        [wp, ownerRRefId = ownerRRefPtr->rrefId()]() {
-          callback::finishCreatingOwnerRRef(*wp.lock(), ownerRRefId);
+    jitFuture->addCallback(at::wrapPropagateTLSState(
+        [ownerRRefId = ownerRRefPtr->rrefId()](JitFuture& future) {
+          callback::finishCreatingOwnerRRef(future, ownerRRefId);
         }));
     return ownerRRefPtr;
   }

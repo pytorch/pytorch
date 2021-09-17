@@ -1,7 +1,7 @@
 #!/bin/bash
 set -ex
 # shellcheck disable=SC2034
-COMPACT_JOB_NAME=pytorch-win-ws2019-cuda10-cudnn7-py3-test
+COMPACT_JOB_NAME=pytorch-win-ws2019-cuda10.1-py3-test
 
 SCRIPT_PARENT_DIR=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
 # shellcheck source=./common.sh
@@ -23,7 +23,7 @@ export PROJECT_DIR_WIN
 export TEST_DIR="${PWD}/test"
 TEST_DIR_WIN=$(cygpath -w "${TEST_DIR}")
 export TEST_DIR_WIN
-export PYTORCH_FINAL_PACKAGE_DIR="/c/users/circleci/workspace/build-results"
+export PYTORCH_FINAL_PACKAGE_DIR="${PYTORCH_FINAL_PACKAGE_DIR:-/c/users/circleci/workspace/build-results}"
 PYTORCH_FINAL_PACKAGE_DIR_WIN=$(cygpath -w "${PYTORCH_FINAL_PACKAGE_DIR}")
 export PYTORCH_FINAL_PACKAGE_DIR_WIN
 export PYTORCH_TEST_SKIP_NOARCH=1
@@ -42,10 +42,10 @@ fi
 
 export SCRIPT_HELPERS_DIR=$SCRIPT_PARENT_DIR/win-test-helpers
 
-# Try to pull value from CIRCLE_PULL_REQUEST first then GITHUB_HEAD_REF second
-# CIRCLE_PULL_REQUEST comes from CircleCI
-# GITHUB_HEAD_REF comes from Github Actions
-IN_PULL_REQUEST=${CIRCLE_PULL_REQUEST:-${GITHUB_HEAD_REF:-}}
+# Try to pull value from CIRCLE_PULL_REQUEST
+# NOTE: file_diff_from_base is currently bugged for GHA due to an issue finding a merge base for ghstack PRs
+#       see https://github.com/pytorch/pytorch/issues/60111
+IN_PULL_REQUEST=${CIRCLE_PULL_REQUEST:-}
 if [ -n "$IN_PULL_REQUEST" ]; then
   DETERMINE_FROM="${TMP_DIR}/determine_from"
   file_diff_from_base "$DETERMINE_FROM"
@@ -57,33 +57,43 @@ fi
 
 run_tests() {
     # Run nvidia-smi if available
-    for path in  /c/Program Files/NVIDIA Corporation/NVSMI/nvidia-smi.exe /c/Windows/System32/nvidia-smi.exe; do
-        if [ -x $path ]; then
-            $path;
+    for path in '/c/Program Files/NVIDIA Corporation/NVSMI/nvidia-smi.exe' /c/Windows/System32/nvidia-smi.exe; do
+        if [[ -x "$path" ]]; then
+            "$path" || echo "true";
             break
         fi
     done
 
-    if [ -z "${JOB_BASE_NAME}" ] || [[ "${JOB_BASE_NAME}" == *-test ]]; then
+    if [[ ( -z "${JOB_BASE_NAME}" || "${JOB_BASE_NAME}" == *-test ) && $NUM_TEST_SHARDS -eq 1 ]]; then
         "$SCRIPT_HELPERS_DIR"/test_python.bat "$DETERMINE_FROM"
-        "$SCRIPT_HELPERS_DIR"/test_custom_script_ops.bat
-        "$SCRIPT_HELPERS_DIR"/test_custom_backend.bat
-        "$SCRIPT_HELPERS_DIR"/test_libtorch.bat
+
+        if [[ -z ${RUN_SMOKE_TESTS_ONLY} ]]; then
+          "$SCRIPT_HELPERS_DIR"/test_custom_script_ops.bat
+          "$SCRIPT_HELPERS_DIR"/test_custom_backend.bat
+          "$SCRIPT_HELPERS_DIR"/test_libtorch.bat
+        fi
     else
-        if [[ "${BUILD_ENVIRONMENT}" == "pytorch-win-vs2019-cpu-py3" ]]; then
+        if [[ "${BUILD_ENVIRONMENT}" == *win-vs2019-cpu-py3* ]]; then
           export PYTORCH_COLLECT_COVERAGE=1
           export COVERAGE_RCFILE=$PWD/.coveragerc # coverage config file needed for plug-ins and settings to work
         fi
-        if [[ "${JOB_BASE_NAME}" == *-test1 ]]; then
+        if [[ "${JOB_BASE_NAME}" == *-test1 || "${SHARD_NUMBER}" == 1 ]]; then
             "$SCRIPT_HELPERS_DIR"/test_python_first_shard.bat "$DETERMINE_FROM"
-            "$SCRIPT_HELPERS_DIR"/test_libtorch.bat
-            if [[ "${USE_CUDA}" == "1" ]]; then
-              "$SCRIPT_HELPERS_DIR"/test_python_jit_legacy.bat "$DETERMINE_FROM"
+
+            if [[ -z ${RUN_SMOKE_TESTS_ONLY} ]]; then
+              "$SCRIPT_HELPERS_DIR"/test_libtorch.bat
+              if [[ "${USE_CUDA}" == "1" ]]; then
+                "$SCRIPT_HELPERS_DIR"/test_python_jit_legacy.bat "$DETERMINE_FROM"
+              fi
             fi
-        elif [[ "${JOB_BASE_NAME}" == *-test2 ]]; then
+
+        elif [[ "${JOB_BASE_NAME}" == *-test2 || "${SHARD_NUMBER}" == 2 ]]; then
             "$SCRIPT_HELPERS_DIR"/test_python_second_shard.bat "$DETERMINE_FROM"
-            "$SCRIPT_HELPERS_DIR"/test_custom_backend.bat
-            "$SCRIPT_HELPERS_DIR"/test_custom_script_ops.bat
+
+            if [[ -z ${RUN_SMOKE_TESTS_ONLY} ]]; then
+              "$SCRIPT_HELPERS_DIR"/test_custom_backend.bat
+              "$SCRIPT_HELPERS_DIR"/test_custom_script_ops.bat
+            fi
         fi
     fi
 }
@@ -92,7 +102,7 @@ run_tests
 assert_git_not_dirty
 echo "TEST PASSED"
 
-if [[ "${BUILD_ENVIRONMENT}" == "pytorch-win-vs2019-cpu-py3" ]]; then
+if [[ "${BUILD_ENVIRONMENT}" == *win-vs2019-cpu-py3* ]]; then
   pushd "$TEST_DIR"
   python -mpip install coverage==5.5
   python -mpip install -e "$PROJECT_DIR/tools/coverage_plugins_package"

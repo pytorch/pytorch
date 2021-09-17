@@ -9,26 +9,22 @@ using c10::Dict;
 
 #define ASSERT_EQUAL(t1, t2) ASSERT_TRUE(t1.equal(t2));
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DictTest, givenEmptyDict_whenCallingEmpty_thenReturnsTrue) {
     Dict<int64_t, string> dict;
     EXPECT_TRUE(dict.empty());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DictTest, givenNonemptyDict_whenCallingEmpty_thenReturnsFalse) {
     Dict<int64_t, string> dict;
     dict.insert(3, "value");
     EXPECT_FALSE(dict.empty());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DictTest, givenEmptyDict_whenCallingSize_thenReturnsZero) {
     Dict<int64_t, string> dict;
     EXPECT_EQ(0, dict.size());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DictTest, givenNonemptyDict_whenCallingSize_thenReturnsNumberOfElements) {
     Dict<int64_t, string> dict;
     dict.insert(3, "value");
@@ -36,7 +32,6 @@ TEST(DictTest, givenNonemptyDict_whenCallingSize_thenReturnsNumberOfElements) {
     EXPECT_EQ(2, dict.size());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DictTest, givenNonemptyDict_whenCallingClear_thenIsEmpty) {
   Dict<int64_t, string> dict;
   dict.insert(3, "value");
@@ -45,7 +40,6 @@ TEST(DictTest, givenNonemptyDict_whenCallingClear_thenIsEmpty) {
   EXPECT_TRUE(dict.empty());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DictTest, whenInsertingNewKey_thenReturnsTrueAndIteratorToNewElement) {
   Dict<int64_t, string> dict;
   std::pair<Dict<int64_t, string>::iterator, bool> result = dict.insert(3, "value");
@@ -54,7 +48,6 @@ TEST(DictTest, whenInsertingNewKey_thenReturnsTrueAndIteratorToNewElement) {
   EXPECT_EQ("value", result.first->value());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DictTest, whenInsertingExistingKey_thenReturnsFalseAndIteratorToExistingElement) {
   Dict<int64_t, string> dict;
   dict.insert(3, "old_value");
@@ -64,7 +57,6 @@ TEST(DictTest, whenInsertingExistingKey_thenReturnsFalseAndIteratorToExistingEle
   EXPECT_EQ("old_value", result.first->value());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DictTest, whenInsertingExistingKey_thenDoesNotModifyDict) {
   Dict<int64_t, string> dict;
   dict.insert(3, "old_value");
@@ -74,7 +66,6 @@ TEST(DictTest, whenInsertingExistingKey_thenDoesNotModifyDict) {
   EXPECT_EQ("old_value", dict.begin()->value());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DictTest, whenInsertOrAssigningNewKey_thenReturnsTrueAndIteratorToNewElement) {
   Dict<int64_t, string> dict;
   std::pair<Dict<int64_t, string>::iterator, bool> result = dict.insert_or_assign(3, "value");
@@ -83,7 +74,6 @@ TEST(DictTest, whenInsertOrAssigningNewKey_thenReturnsTrueAndIteratorToNewElemen
   EXPECT_EQ("value", result.first->value());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DictTest, whenInsertOrAssigningExistingKey_thenReturnsFalseAndIteratorToChangedElement) {
   Dict<int64_t, string> dict;
   dict.insert(3, "old_value");
@@ -93,7 +83,6 @@ TEST(DictTest, whenInsertOrAssigningExistingKey_thenReturnsFalseAndIteratorToCha
   EXPECT_EQ("new_value", result.first->value());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DictTest, whenInsertOrAssigningExistingKey_thenDoesModifyDict) {
   Dict<int64_t, string> dict;
   dict.insert(3, "old_value");
@@ -103,17 +92,14 @@ TEST(DictTest, whenInsertOrAssigningExistingKey_thenDoesModifyDict) {
   EXPECT_EQ("new_value", dict.begin()->value());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DictTest, givenEmptyDict_whenIterating_thenBeginIsEnd) {
   Dict<int64_t, string> dict;
   EXPECT_EQ(dict.begin(), dict.end());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DictTest, givenMutableDict_whenIterating_thenFindsElements) {
   Dict<int64_t, string> dict;
   dict.insert(3, "3");
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   dict.insert(5, "5");
   bool found_first = false;
   bool found_second = false;
@@ -122,7 +108,6 @@ TEST(DictTest, givenMutableDict_whenIterating_thenFindsElements) {
       EXPECT_EQ("3", iter->value());
       EXPECT_FALSE(found_first);
       found_first = true;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     } else if (iter->key() == 5) {
       EXPECT_EQ("5", iter->value());
       EXPECT_FALSE(found_second);
@@ -135,11 +120,9 @@ TEST(DictTest, givenMutableDict_whenIterating_thenFindsElements) {
   EXPECT_TRUE(found_second);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DictTest, givenMutableDict_whenIteratingWithForeach_thenFindsElements) {
   Dict<int64_t, string> dict;
   dict.insert(3, "3");
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   dict.insert(5, "5");
   bool found_first = false;
   bool found_second = false;
@@ -148,7 +131,6 @@ TEST(DictTest, givenMutableDict_whenIteratingWithForeach_thenFindsElements) {
       EXPECT_EQ("3", elem.value());
       EXPECT_FALSE(found_first);
       found_first = true;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     } else if (elem.key() == 5) {
       EXPECT_EQ("5", elem.value());
       EXPECT_FALSE(found_second);
@@ -161,11 +143,9 @@ TEST(DictTest, givenMutableDict_whenIteratingWithForeach_thenFindsElements) {
   EXPECT_TRUE(found_second);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DictTest, givenConstDict_whenIterating_thenFindsElements) {
   Dict<int64_t, string> dict_;
   dict_.insert(3, "3");
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   dict_.insert(5, "5");
   const Dict<int64_t, string>& dict = dict_;
   bool found_first = false;
@@ -175,7 +155,6 @@ TEST(DictTest, givenConstDict_whenIterating_thenFindsElements) {
       EXPECT_EQ("3", iter->value());
       EXPECT_FALSE(found_first);
       found_first = true;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     } else if (iter->key() == 5) {
       EXPECT_EQ("5", iter->value());
       EXPECT_FALSE(found_second);
@@ -188,11 +167,9 @@ TEST(DictTest, givenConstDict_whenIterating_thenFindsElements) {
   EXPECT_TRUE(found_second);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DictTest, givenConstDict_whenIteratingWithForeach_thenFindsElements) {
   Dict<int64_t, string> dict_;
   dict_.insert(3, "3");
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   dict_.insert(5, "5");
   const Dict<int64_t, string>& dict = dict_;
   bool found_first = false;
@@ -202,7 +179,6 @@ TEST(DictTest, givenConstDict_whenIteratingWithForeach_thenFindsElements) {
       EXPECT_EQ("3", elem.value());
       EXPECT_FALSE(found_first);
       found_first = true;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     } else if (elem.key() == 5) {
       EXPECT_EQ("5", elem.value());
       EXPECT_FALSE(found_second);
@@ -215,7 +191,6 @@ TEST(DictTest, givenConstDict_whenIteratingWithForeach_thenFindsElements) {
   EXPECT_TRUE(found_second);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DictTest, givenIterator_thenCanModifyValue) {
   Dict<int64_t, string> dict;
   dict.insert(3, "old_value");
@@ -223,7 +198,6 @@ TEST(DictTest, givenIterator_thenCanModifyValue) {
   EXPECT_EQ("new_value", dict.begin()->value());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DictTest, givenOneElementDict_whenErasingByIterator_thenDictIsEmpty) {
   Dict<int64_t, string> dict;
   dict.insert(3, "3");
@@ -231,7 +205,6 @@ TEST(DictTest, givenOneElementDict_whenErasingByIterator_thenDictIsEmpty) {
   EXPECT_TRUE(dict.empty());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DictTest, givenOneElementDict_whenErasingByKey_thenReturnsOneAndDictIsEmpty) {
   Dict<int64_t, string> dict;
   dict.insert(3, "3");
@@ -240,7 +213,6 @@ TEST(DictTest, givenOneElementDict_whenErasingByKey_thenReturnsOneAndDictIsEmpty
   EXPECT_TRUE(dict.empty());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DictTest, givenOneElementDict_whenErasingByNonexistingKey_thenReturnsZeroAndDictIsUnchanged) {
   Dict<int64_t, string> dict;
   dict.insert(3, "3");
@@ -249,7 +221,6 @@ TEST(DictTest, givenOneElementDict_whenErasingByNonexistingKey_thenReturnsZeroAn
   EXPECT_EQ(1, dict.size());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DictTest, whenCallingAtWithExistingKey_thenReturnsCorrectElement) {
   Dict<int64_t, string> dict;
   dict.insert(3, "3");
@@ -257,7 +228,6 @@ TEST(DictTest, whenCallingAtWithExistingKey_thenReturnsCorrectElement) {
   EXPECT_EQ("4", dict.at(4));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DictTest, whenCallingAtWithNonExistingKey_thenReturnsCorrectElement) {
   Dict<int64_t, string> dict;
   dict.insert(3, "3");
@@ -266,7 +236,6 @@ TEST(DictTest, whenCallingAtWithNonExistingKey_thenReturnsCorrectElement) {
   EXPECT_THROW(dict.at(5), std::out_of_range);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DictTest, givenMutableDict_whenCallingFindOnExistingKey_thenFindsCorrectElement) {
   Dict<int64_t, string> dict;
   dict.insert(3, "3");
@@ -276,17 +245,14 @@ TEST(DictTest, givenMutableDict_whenCallingFindOnExistingKey_thenFindsCorrectEle
   EXPECT_EQ("3", found->value());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DictTest, givenMutableDict_whenCallingFindOnNonExistingKey_thenReturnsEnd) {
   Dict<int64_t, string> dict;
   dict.insert(3, "3");
   dict.insert(4, "4");
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Dict<int64_t, string>::iterator found = dict.find(5);
   EXPECT_EQ(dict.end(), found);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DictTest, givenConstDict_whenCallingFindOnExistingKey_thenFindsCorrectElement) {
   Dict<int64_t, string> dict_;
   dict_.insert(3, "3");
@@ -297,18 +263,15 @@ TEST(DictTest, givenConstDict_whenCallingFindOnExistingKey_thenFindsCorrectEleme
   EXPECT_EQ("3", found->value());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DictTest, givenConstDict_whenCallingFindOnNonExistingKey_thenReturnsEnd) {
   Dict<int64_t, string> dict_;
   dict_.insert(3, "3");
   dict_.insert(4, "4");
   const Dict<int64_t, string>& dict = dict_;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Dict<int64_t, string>::iterator found = dict.find(5);
   EXPECT_EQ(dict.end(), found);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DictTest, whenCallingContainsWithExistingKey_thenReturnsTrue) {
   Dict<int64_t, string> dict;
   dict.insert(3, "3");
@@ -316,7 +279,6 @@ TEST(DictTest, whenCallingContainsWithExistingKey_thenReturnsTrue) {
   EXPECT_TRUE(dict.contains(3));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DictTest, whenCallingContainsWithNonExistingKey_thenReturnsFalse) {
   Dict<int64_t, string> dict;
   dict.insert(3, "3");
@@ -324,14 +286,11 @@ TEST(DictTest, whenCallingContainsWithNonExistingKey_thenReturnsFalse) {
   EXPECT_FALSE(dict.contains(5));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DictTest, whenCallingReserve_thenDoesntCrash) {
   Dict<int64_t, string> dict;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   dict.reserve(100);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DictTest, whenCopyConstructingDict_thenAreEqual) {
   Dict<int64_t, string> dict1;
   dict1.insert(3, "3");
@@ -345,7 +304,6 @@ TEST(DictTest, whenCopyConstructingDict_thenAreEqual) {
   EXPECT_EQ("4", dict2.at(4));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DictTest, whenCopyAssigningDict_thenAreEqual) {
   Dict<int64_t, string> dict1;
   dict1.insert(3, "3");
@@ -359,7 +317,6 @@ TEST(DictTest, whenCopyAssigningDict_thenAreEqual) {
   EXPECT_EQ("4", dict2.at(4));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DictTest, whenCopyingDict_thenAreEqual) {
   Dict<int64_t, string> dict1;
   dict1.insert(3, "3");
@@ -372,7 +329,6 @@ TEST(DictTest, whenCopyingDict_thenAreEqual) {
   EXPECT_EQ("4", dict2.at(4));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DictTest, whenMoveConstructingDict_thenNewIsCorrect) {
   Dict<int64_t, string> dict1;
   dict1.insert(3, "3");
@@ -385,7 +341,6 @@ TEST(DictTest, whenMoveConstructingDict_thenNewIsCorrect) {
   EXPECT_EQ("4", dict2.at(4));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DictTest, whenMoveAssigningDict_thenNewIsCorrect) {
   Dict<int64_t, string> dict1;
   dict1.insert(3, "3");
@@ -399,7 +354,6 @@ TEST(DictTest, whenMoveAssigningDict_thenNewIsCorrect) {
   EXPECT_EQ("4", dict2.at(4));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DictTest, whenMoveConstructingDict_thenOldIsEmpty) {
   Dict<int64_t, string> dict1;
   dict1.insert(3, "3");
@@ -410,7 +364,6 @@ TEST(DictTest, whenMoveConstructingDict_thenOldIsEmpty) {
   EXPECT_TRUE(dict1.empty());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DictTest, whenMoveAssigningDict_thenOldIsEmpty) {
   Dict<int64_t, string> dict1;
   dict1.insert(3, "3");
@@ -422,7 +375,6 @@ TEST(DictTest, whenMoveAssigningDict_thenOldIsEmpty) {
   EXPECT_TRUE(dict1.empty());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DictTest, givenIterator_whenPostfixIncrementing_thenMovesToNextAndReturnsOldPosition) {
   Dict<int64_t, string> dict;
   dict.insert(3, "3");
@@ -434,7 +386,6 @@ TEST(DictTest, givenIterator_whenPostfixIncrementing_thenMovesToNextAndReturnsOl
   EXPECT_EQ(dict.begin()->key(), iter2->key());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DictTest, givenIterator_whenPrefixIncrementing_thenMovesToNextAndReturnsNewPosition) {
   Dict<int64_t, string> dict;
   dict.insert(3, "3");
@@ -446,7 +397,6 @@ TEST(DictTest, givenIterator_whenPrefixIncrementing_thenMovesToNextAndReturnsNew
   EXPECT_NE(dict.begin()->key(), iter2->key());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DictTest, givenEqualIterators_thenAreEqual) {
   Dict<int64_t, string> dict;
   dict.insert(3, "3");
@@ -458,7 +408,6 @@ TEST(DictTest, givenEqualIterators_thenAreEqual) {
   EXPECT_FALSE(iter1 != iter2);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DictTest, givenDifferentIterators_thenAreNotEqual) {
   Dict<int64_t, string> dict;
   dict.insert(3, "3");
@@ -472,7 +421,6 @@ TEST(DictTest, givenDifferentIterators_thenAreNotEqual) {
   EXPECT_TRUE(iter1 != iter2);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DictTest, givenIterator_whenDereferencing_thenPointsToCorrectElement) {
   Dict<int64_t, string> dict;
   dict.insert(3, "3");
@@ -484,7 +432,6 @@ TEST(DictTest, givenIterator_whenDereferencing_thenPointsToCorrectElement) {
   EXPECT_EQ("3", iter->value());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DictTest, givenIterator_whenWritingToValue_thenChangesValue) {
   Dict<int64_t, string> dict;
   dict.insert(3, "3");
@@ -498,23 +445,19 @@ TEST(DictTest, givenIterator_whenWritingToValue_thenChangesValue) {
   EXPECT_EQ("new_value_2", dict.begin()->value());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ListTest_IValueBasedList, givenIterator_whenWritingToValueFromIterator_thenChangesValue) {
   Dict<int64_t, string> dict;
   dict.insert(3, "3");
   dict.insert(4, "4");
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   dict.insert(5, "5");
 
   (*dict.find(3)).setValue(dict.find(4)->value());
   EXPECT_EQ("4", dict.find(3)->value());
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   dict.find(3)->setValue(dict.find(5)->value());
   EXPECT_EQ("5", dict.find(3)->value());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DictTest, isReferenceType) {
   Dict<int64_t, string> dict1;
   // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
@@ -528,7 +471,6 @@ TEST(DictTest, isReferenceType) {
   EXPECT_EQ(1, dict3.size());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DictTest, copyHasSeparateStorage) {
   Dict<int64_t, string> dict1;
   Dict<int64_t, string> dict2(dict1.copy());
@@ -541,7 +483,6 @@ TEST(DictTest, copyHasSeparateStorage) {
   EXPECT_EQ(0, dict3.size());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DictTest, dictTensorAsKey) {
   Dict<at::Tensor, string> dict;
   at::Tensor key1 = at::tensor(3);
@@ -556,13 +497,11 @@ TEST(DictTest, dictTensorAsKey) {
   EXPECT_EQ("three", found_key1->value());
 
   Dict<at::Tensor, string>::iterator found_nokey1 = dict.find(at::tensor(3));
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Dict<at::Tensor, string>::iterator found_nokey2 = dict.find(at::tensor(5));
   EXPECT_EQ(dict.end(), found_nokey1);
   EXPECT_EQ(dict.end(), found_nokey2);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DictTest, dictEquality) {
   Dict<string, int64_t> dict;
   dict.insert("one", 1);

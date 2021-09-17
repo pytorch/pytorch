@@ -5,7 +5,7 @@ This module contains utility method for mobile model optimization and lint.
 import torch
 from enum import Enum
 from torch._C import MobileOptimizerType
-from typing import Set, List, AnyStr
+from typing import Optional, Set, List, AnyStr
 
 class LintCode(Enum):
     BUNDLED_INPUT = 1
@@ -14,10 +14,10 @@ class LintCode(Enum):
     BATCHNORM = 4
 
 def optimize_for_mobile(
-        script_module,
-        optimization_blocklist: Set[MobileOptimizerType] = None,
-        preserved_methods: List[AnyStr] = None,
-        backend: str = 'CPU'):
+        script_module: torch.jit.ScriptModule,
+        optimization_blocklist: Optional[Set[MobileOptimizerType]] = None,
+        preserved_methods: Optional[List[AnyStr]] = None,
+        backend: str = 'CPU') -> torch.jit.RecursiveScriptModule:
     """
     Args:
         script_module: An instance of torch script module with type of ScriptModule.
@@ -117,7 +117,6 @@ def _get_bundled_inputs_preserved_attributes(script_module: torch.jit.ScriptModu
     if hasattr(script_module, 'get_all_bundled_inputs'):
         bundled_inputs_attributes.append('get_all_bundled_inputs')
         bundled_inputs_attributes.append('get_num_bundled_inputs')
-        bundled_inputs_attributes.append('run_on_bundled_input')
 
     # Bundled inputs in module after the change that introduced bundled inputs for multiple functions
     if hasattr(script_module, 'get_bundled_inputs_functions_and_info'):

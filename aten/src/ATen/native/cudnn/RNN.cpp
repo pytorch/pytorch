@@ -726,7 +726,8 @@ namespace {
                 (tensors.seq_length >=20 && bsize <=96) ||
                 (tensors.seq_length >=10 && bsize <=32));
       }
-    } else if (prop->major >= 8) {
+    } else if (prop->major >= 8 && prop->multiProcessorCount >= 98) {
+      // SM count check excludes A30 (similar issue to A40)
       if (prop->minor == 6) {
         // Excludes sm_86 GPU devices from using persistent rnn.
         // This is because there are some edge cases that will throw exceptions with cudnn 8.0.5 on Nvidia A40 GPU.

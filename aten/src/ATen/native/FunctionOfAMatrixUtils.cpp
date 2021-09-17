@@ -2,7 +2,6 @@
 
 namespace at { namespace native {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(_compute_linear_combination_stub);
 
 // If `coefficients` is a [m, n] Tensor and
@@ -16,8 +15,6 @@ DEFINE_DISPATCH(_compute_linear_combination_stub);
 // This is relevant when scalar_t<T> == complex<T>.
 Tensor _compute_linear_combination(const Tensor& input, const Tensor& coefficients) {
   auto output_first_dim_size = coefficients.size(0);
-  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores,clang-diagnostic-unused-variable)
-  auto input_first_dim_size = coefficients.size(1);
 
   auto output_sizes = input.sizes().vec();
   output_sizes[0] = output_first_dim_size;

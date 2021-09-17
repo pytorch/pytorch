@@ -18,11 +18,11 @@ jobs:
     timeout-minutes: 720
     steps:
       - name: Checkout PyTorch
-        uses: actions/checkout@v2
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
           path: pytorch
       - name: Checkout TorchBench
-        uses: actions/checkout@v2
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
           repository: pytorch/benchmark
           path: benchmark
@@ -32,12 +32,21 @@ jobs:
           # shellcheck disable=SC1091
           . "${HOME}"/anaconda3/etc/profile.d/conda.sh
           conda activate pr-ci
-          conda install -y numpy=1.17 requests=2.22 ninja pyyaml mkl mkl-include setuptools cmake cffi typing_extensions future six dataclasses pillow pytest tabulate
+          conda install -y numpy=1.17 requests=2.22 ninja pyyaml mkl mkl-include setuptools cmake cffi typing_extensions future six dataclasses pillow pytest tabulate gitpython
+          conda install -y -c pytorch-nightly torchtext torchvision
       - name: Update self-hosted PyTorch
         run: |
           pushd "${HOME}"/pytorch
+          git remote prune origin
           git fetch
           popd
+      - name: Install TorchBench dependencies
+        run: |
+          # shellcheck disable=SC1091
+          . "${HOME}"/anaconda3/etc/profile.d/conda.sh
+          conda activate pr-ci
+          pushd "${PWD}"/benchmark
+          python install.py
       - name: Run TorchBench
         run: |
           pushd "${HOME}"/pytorch
@@ -64,3 +73,7 @@ jobs:
         with:
           name: TorchBench result
           path: ~/.torchbench/bisection/pr${{ github.event.number }}
+
+concurrency:
+  group: run-torchbench-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true

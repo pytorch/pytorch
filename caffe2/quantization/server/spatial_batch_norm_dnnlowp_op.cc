@@ -9,7 +9,6 @@ SpatialBNDNNLowPOp<T, ReluFused>::SpatialBNDNNLowPOp(
     const OperatorDef& operator_def,
     Workspace* ws)
     : DNNLowPOp<T, SpatialBNOp<CPUContext>>(operator_def, ws),
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       OP_SINGLE_ARG(double, "epsilon", epsilon_, 1e-5),
       order_(StringToStorageOrder(
           this->template GetSingleArgument<std::string>("order", "NCHW"))) {
@@ -126,7 +125,6 @@ bool SpatialBNDNNLowPOp<T, ReluFused>::RunOnDevice() {
                 std::max<long>(quantized_down, out_qparams_.zero_point);
           }
           Y_data[(i * C + c) * HxW + j] =
-              // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
               fbgemm::clamp<long, T>(quantized_down, 8);
         }
       }
@@ -155,7 +153,6 @@ bool SpatialBNDNNLowPOp<T, ReluFused>::RunOnDevice() {
             quantized_down =
                 std::max<long>(quantized_down, out_qparams_.zero_point);
           }
-          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           Y_data[i * C + c] = fbgemm::clamp<long, T>(quantized_down, 8);
         }
       }
@@ -167,19 +164,16 @@ bool SpatialBNDNNLowPOp<T, ReluFused>::RunOnDevice() {
   return true;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     SpatialBN,
     DNNLOWP,
     SpatialBNDNNLowPOp<uint8_t>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     Int8SpatialBN,
     DNNLOWP,
     SpatialBNDNNLowPOp<uint8_t>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     Int8SpatialBNRelu,
     DNNLOWP,

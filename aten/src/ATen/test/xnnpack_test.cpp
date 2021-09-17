@@ -3,6 +3,8 @@
 #include <torch/types.h>
 #include <torch/utils.h>
 
+#include <c10/core/CPUAllocator.h>
+#include <c10/core/MemoryFormat.h>
 #include <ATen/native/xnnpack/Engine.h>
 #include <ATen/native/xnnpack/Common.h>
 #include <ATen/native/xnnpack/Pooling.h>
@@ -29,6 +31,7 @@ void test_hardswish(const at::Tensor& input, const at::Tensor& expected) {
   auto result = at::native::xnnpack::hardswish(input);
   auto check = almostEqual(expected, result);
   ASSERT_TRUE(check);
+  ASSERT_TRUE(expected.suggest_memory_format() == input.suggest_memory_format());
 }
 
 void test_hardswish_(at::Tensor input, const at::Tensor& expected) {
@@ -36,6 +39,7 @@ void test_hardswish_(at::Tensor input, const at::Tensor& expected) {
   at::native::xnnpack::hardswish_(input);
   auto check = almostEqual(expected, input);
   ASSERT_TRUE(check);
+  ASSERT_TRUE(expected.suggest_memory_format() == input.suggest_memory_format());
 }
 
 void test_global_average_pool(at::Tensor input, const at::Tensor& expected) {
@@ -50,6 +54,9 @@ void test_global_average_pool(at::Tensor input, const at::Tensor& expected) {
 // Instead we precompute regular results and compare with XNNPACK path here
 TEST(TestXNNPackOps, TestHardSwish) {
   // input, expected_result pair
+  auto in = torch::tensor({{1, 1}, {1, 1}}, {torch::kFloat32});
+  auto in_slice = in.index({"...", 0});
+
   std::vector<std::pair<at::Tensor, at::Tensor>> input_result_pairs = {
     {
       torch::tensor({1, 2, 3, 4, 5}, {torch::kFloat32}),
@@ -69,6 +76,30 @@ TEST(TestXNNPackOps, TestHardSwish) {
         {0.0401, 0.4609, 0.0404}
       })
     },
+    {
+      in_slice,
+      torch::tensor({0.6667, 0.6667}, {torch::kFloat32})
+    },
+    {
+      torch::tensor(
+        {{{{0.4993, 0.3835},
+        {0.3163, 0.2348}},
+        {{0.4705, 0.4129},
+        {0.9314, 0.0631}}},
+        {{{0.0030, 0.5656},
+        {0.1413, 0.1943}},
+        {{0.1380, 0.1985},
+        {0.2746, 0.8109}}}}).contiguous(at::MemoryFormat::ChannelsLast),
+        torch::tensor(
+          {{{{0.2912, 0.2163},
+          {0.1748, 0.1266}},
+          {{0.2722, 0.2349},
+          {0.6103, 0.0322}}},
+          {{{0.0015, 0.3361},
+          {0.0740, 0.1034}},
+          {{0.0722, 0.1058},
+          {0.1499, 0.5150}}}}).contiguous(at::MemoryFormat::ChannelsLast)
+    }
   };
 
   for (const auto& input_result : input_result_pairs) {
@@ -120,5 +151,12 @@ TEST(TestXNNPackOps, TestGlobal) {
   for (const auto& input_result : input_result_pairs) {
     test_global_average_pool(input_result.first, input_result.second);
   }
+}
+
+int main(int argc, char* argv[]) {
+  // Setting default allocator as mobile to test copy / no copy cases
+  c10::SetCPUAllocator(c10::GetDefaultMobileCPUAllocator(), /*priority*/ 100);
+  ::testing::InitGoogleTest(&argc, argv);
+  return RUN_ALL_TESTS();
 }
 #endif

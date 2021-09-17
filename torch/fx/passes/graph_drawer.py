@@ -1,20 +1,39 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
+import hashlib
 import torch
 import torch.fx
 import pydot
 from typing import Dict, Any
 from torch.fx.node import _get_qualified_name
+from torch.fx.passes.shape_prop import TensorMetadata
 
 _COLOR_MAP = {
     "placeholder": '"AliceBlue"',
     "call_module": "LemonChiffon1",
-    "call_function": "PeachPuff1",
     "get_param": "Yellow2",
     "get_attr": "LightGrey",
-    "call_method": "LavenderBlush1",
     "output": "PowderBlue",
 }
+
+_HASH_COLOR_MAP = [
+    "CadetBlue1",
+    "Coral",
+    "DarkOliveGreen1",
+    "DarkSeaGreen1",
+    "GhostWhite",
+    "Khaki1",
+    "LavenderBlush1",
+    "LightSkyBlue",
+    "MistyRose1",
+    "MistyRose2",
+    "PaleTurquoise2",
+    "PeachPuff1",
+    "Salmon",
+    "Thistle1",
+    "Thistle3",
+    "Wheat1",
+]
 
 _WEIGHT_TEMPLATE = {
     "shape": "record",
@@ -64,7 +83,13 @@ class FxGraphDrawer:
             "style": '"filled,rounded"',
             "fontcolor": "#000000",
         }
-        template["fillcolor"] = _COLOR_MAP[node.op]
+        if node.op in _COLOR_MAP:
+            template["fillcolor"] = _COLOR_MAP[node.op]
+        else:
+            # Use a random color for each node; based on its name so it's stable.
+            target_name = node._pretty_print_target(node.target)
+            target_hash = int(hashlib.md5(target_name.encode()).hexdigest()[:8], 16)
+            template["fillcolor"] = _HASH_COLOR_MAP[target_hash % len(_HASH_COLOR_MAP)]
         return template
 
     def _get_leaf_node(
@@ -106,18 +131,50 @@ class FxGraphDrawer:
             label += "|" + self._typename(node.target) + r"\l"
 
         tensor_meta = node.meta.get('tensor_meta')
-        if tensor_meta:
-            dtype_ = tensor_meta.dtype
-            shape_ = tensor_meta.shape
-            stride_ = tensor_meta.stride
-            if dtype_:
-                label += "|" + "dtype" + "=" + str(dtype_) + r"\l"
-            if shape_:
-                label += "|" + "shape" + "=" + str(shape_) + r"\l"
-            if stride_:
-                label += "|" + "stride" + "=" + str(stride_) + r"\l"
+        label += self._tensor_meta_to_label(tensor_meta)
 
         return label + "}"
+
+    def _tensor_meta_to_label(self, tm) -> str:
+        if tm is None:
+            return ""
+        elif isinstance(tm, TensorMetadata):
+            return self._stringify_tensor_meta(tm)
+        elif isinstance(tm, list):
+            result = ""
+            for item in tm:
+                result += self._tensor_meta_to_label(item)
+            return result
+        elif isinstance(tm, dict):
+            result = ""
+            for k, v in tm.items():
+                result += self._tensor_meta_to_label(v)
+            return result
+        elif isinstance(tm, tuple):
+            result = ""
+            for item in tm:
+                result += self._tensor_meta_to_label(item)
+            return result
+        else:
+            raise RuntimeError(f"Unsupported tensor meta type {type(tm)}")
+
+    def _stringify_tensor_meta(self, tm: TensorMetadata) -> str:
+        result = ""
+        if not hasattr(tm, "dtype"):
+            print("tm", tm)
+        result += "|" + "dtype" + "=" + str(tm.dtype) + r"\l"
+        result += "|" + "shape" + "=" + str(tuple(tm.shape)) + r"\l"
+        result += "|" + "requires_grad" + "=" + str(tm.requires_grad) + r"\l"
+        result += "|" + "stride" + "=" + str(tm.stride) + r"\l"
+        if tm.is_quantized:
+            if tm.qscheme in {
+                    torch.per_tensor_affine,
+                    torch.per_tensor_symmetric,
+            }:
+                result += "|" + "q_scale" + "=" + str(tm.q_scale) + r"\l"
+                result += "|" + "q_zero_point" + "=" + str(tm.q_zero_point) + r"\l"
+            result += "|" + "qscheme" + "=" + str(tm.qscheme) + r"\l"
+        return result
 
     def _get_tensor_label(self, t: torch.Tensor) -> str:
         return str(t.dtype) + str(list(t.shape)) + r"\l"

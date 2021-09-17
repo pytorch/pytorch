@@ -38,7 +38,6 @@ class IDEEPInt8DequantizeOp final : public IDEEPOperator {
   iformat Y_fmt_ {iformat::undef};
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR_WITH_ENGINE(Int8Dequantize, DNNLOWP, IDEEPInt8DequantizeOp);
 
 } // namespace

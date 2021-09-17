@@ -62,7 +62,6 @@ namespace {
 int64_t sample_poisson(double lambda, at::CPUGeneratorImpl* generator) {
   TORCH_CHECK(lambda >= 0, "invalid Poisson rate, expected rate to be non-negative");
   at::uniform_real_distribution<double> standard_uniform(0.0, 1.0);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   if (lambda >= 10) {
     // transformed rejection method, (Hoermann, 1993)
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
@@ -72,29 +71,20 @@ int64_t sample_poisson(double lambda, at::CPUGeneratorImpl* generator) {
 
     double slam = std::sqrt(lambda);
     double loglam = std::log(lambda);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     b = 0.931 + 2.53 * slam;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     a = -0.059 + 0.02483 * b;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     invalpha = 1.1239 + 1.1328 / (b - 3.4);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     vr = 0.9277 - 3.6224 / (b - 2);
 
     // NOLINTNEXTLINE(modernize-use-bool-literals)
     while (1) {
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       U = standard_uniform(generator) - 0.5;
       V = standard_uniform(generator);
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       us = 0.5 - std::fabs(U);
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       k = (int64_t)std::floor((2 * a / us + b) * U + lambda + 0.43);
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       if ((us >= 0.07) && (V <= vr)) {
         return k;
       }
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       if ((k < 0) || ((us < 0.013) && (V > us))) {
         continue;
       }
@@ -132,29 +122,17 @@ int64_t sample_poisson(double lambda, at::CPUGeneratorImpl* generator) {
 namespace at {
 namespace native {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(bernoulli_tensor_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(bernoulli_scalar_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(cauchy_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(exponential_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(multinomial_with_replacement_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(geometric_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(log_normal_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(uniform_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(normal_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(random_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(random_from_to_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(random_full_64_bits_range_stub);
 
 // ==================================================== Bernoulli =====================================================

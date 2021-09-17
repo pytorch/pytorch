@@ -30,7 +30,6 @@ void CompareDivMod(int32_t v, int32_t divisor) {
 
 } // namespace
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(FixedDivisorTest, FixedDivisorInt32Test) {
   constexpr int32_t kMax = std::numeric_limits<int32_t>::max();
 
@@ -49,11 +48,8 @@ TEST(FixedDivisorTest, FixedDivisorInt32Test) {
   std::uniform_int_distribution<int32_t> v_dist(0, kMax);
   std::uniform_int_distribution<int32_t> q_dist(1, kMax);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::uniform_int_distribution<int32_t> v_small_dist(0, 1000);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::uniform_int_distribution<int32_t> q_small_dist(1, 1000);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (int i = 0; i < 10000; ++i) {
     auto q = q_dist(rd);
     auto v = v_dist(rd);

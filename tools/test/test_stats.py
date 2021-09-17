@@ -1,24 +1,39 @@
 # -*- coding: utf-8 -*-
 import unittest
-from tools import print_test_stats
+from typing import Dict, List
+
+from tools.stats import print_test_stats
+from tools.stats.s3_stat_parser import (Commit, Report, ReportMetaMeta,
+                                        Status, Version1Case,
+                                        Version1Report, Version2Case,
+                                        Version2Report)
 
 
-def fakehash(char):
+def fakehash(char: str) -> str:
     return char * 40
 
 
-def dummy_meta_meta() -> print_test_stats.ReportMetaMeta:
+def dummy_meta_meta() -> ReportMetaMeta:
     return {
         'build_pr': '',
         'build_tag': '',
         'build_sha1': '',
+        'build_base_commit': '',
         'build_branch': '',
         'build_job': '',
         'build_workflow_id': '',
+        'build_start_time_epoch': '',
     }
 
 
-def makecase(name, seconds, *, errored=False, failed=False, skipped=False):
+def makecase(
+    name: str,
+    seconds: float,
+    *,
+    errored: bool = False,
+    failed: bool = False,
+    skipped: bool = False,
+) -> Version1Case:
     return {
         'name': name,
         'seconds': seconds,
@@ -28,7 +43,7 @@ def makecase(name, seconds, *, errored=False, failed=False, skipped=False):
     }
 
 
-def make_report_v1(tests) -> print_test_stats.Version1Report:
+def make_report_v1(tests: Dict[str, List[Version1Case]]) -> Version1Report:
     suites = {
         suite_name: {
             'total_seconds': sum(case['seconds'] for case in cases),
@@ -37,20 +52,20 @@ def make_report_v1(tests) -> print_test_stats.Version1Report:
         for suite_name, cases in tests.items()
     }
     return {
-        **dummy_meta_meta(),
+        **dummy_meta_meta(),  # type: ignore[misc]
         'total_seconds': sum(s['total_seconds'] for s in suites.values()),
         'suites': suites,
     }
 
 
-def make_case_v2(seconds, status=None) -> print_test_stats.Version2Case:
+def make_case_v2(seconds: float, status: Status = None) -> Version2Case:
     return {
         'seconds': seconds,
         'status': status,
     }
 
 
-def make_report_v2(tests) -> print_test_stats.Version2Report:
+def make_report_v2(tests: Dict[str, Dict[str, Dict[str, Version2Case]]]) -> Version2Report:
     files = {}
     for file_name, file_suites in tests.items():
         suites = {
@@ -65,7 +80,7 @@ def make_report_v2(tests) -> print_test_stats.Version2Report:
             'total_seconds': sum(suite['total_seconds'] for suite in suites.values()),
         }
     return {
-        **dummy_meta_meta(),
+        **dummy_meta_meta(),  # type: ignore[misc]
         'format_version': 2,
         'total_seconds': sum(s['total_seconds'] for s in files.values()),
         'files': files,
@@ -73,7 +88,7 @@ def make_report_v2(tests) -> print_test_stats.Version2Report:
 maxDiff = None
 
 class TestPrintTestStats(unittest.TestCase):
-    version1_report: print_test_stats.Version1Report = make_report_v1({
+    version1_report: Version1Report = make_report_v1({
         # input ordering of the suites is ignored
         'Grault': [
             # not printed: status same and time similar
@@ -112,7 +127,7 @@ class TestPrintTestStats(unittest.TestCase):
         ],
     })
 
-    version2_report: print_test_stats.Version2Report = make_report_v2(
+    version2_report: Version2Report = make_report_v2(
         {
             'test_a': {
                 'Grault': {
@@ -149,7 +164,7 @@ class TestPrintTestStats(unittest.TestCase):
             }
         })
 
-    def test_simplify(self):
+    def test_simplify(self) -> None:
         self.assertEqual(
             {
                 '': {
@@ -222,10 +237,10 @@ class TestPrintTestStats(unittest.TestCase):
             print_test_stats.simplify(self.version2_report),
         )
 
-    def test_analysis(self):
+    def test_analysis(self) -> None:
         head_report = self.version1_report
 
-        base_reports = {
+        base_reports: Dict[Commit, List[Report]] = {
             # bbbb has no reports, so base is cccc instead
             fakehash('b'): [],
             fakehash('c'): [
@@ -391,7 +406,7 @@ class TestPrintTestStats(unittest.TestCase):
             print_test_stats.anomalies(analysis),
         )
 
-    def test_graph(self):
+    def test_graph(self) -> None:
         # HEAD is on master
         self.assertEqual(
             '''\
@@ -534,7 +549,7 @@ Commit graph (base is most recent master ancestor with at least one S3 report):
             )
         )
 
-    def test_regression_info(self):
+    def test_regression_info(self) -> None:
         self.assertEqual(
             '''\
 ----- Historic stats comparison result ------
@@ -588,7 +603,7 @@ Added    (across    1 suite)      1 test,  totaling +   3.00s
             )
         )
 
-    def test_regression_info_new_job(self):
+    def test_regression_info_new_job(self) -> None:
         self.assertEqual(
             '''\
 ----- Historic stats comparison result ------

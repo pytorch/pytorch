@@ -2,6 +2,7 @@
 
 #include <ATen/Parallel.h>
 #include <c10/core/Event.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/autograd/functions/accumulate_grad.h>
 #include <torch/csrc/autograd/input_buffer.h>
 #include <torch/csrc/distributed/autograd/context/container.h>
@@ -97,7 +98,7 @@ void DistEngine::globalCpuThread(
                 variables =
                     InputBuffer::variables(std::move(task.inputs_))]() mutable {
       InputBuffer inputs(variables.size());
-      for (size_t i = 0; i < variables.size(); i++) {
+      for(const auto i : c10::irange(variables.size())) {
         inputs.add(i, std::move(variables[i]), c10::nullopt, c10::nullopt);
       }
       execute_graph_task_until_ready_queue_empty(
@@ -211,12 +212,19 @@ void DistEngine::computeDependencies(
     queue.push(mapEntry.second.get());
   }
 
+  bool might_use_cuda = at::globalContext().hasCUDA();
+  bool will_use_cuda = false;
+
   edge_list recvBackwardEdges;
   // Traverse the graph.
   auto& dependencies = graphTask->dependencies_;
   while (!queue.empty()) {
     auto fn = queue.front();
     queue.pop();
+
+    if (might_use_cuda && !will_use_cuda) {
+      will_use_cuda = fn->stream(c10::DeviceType::CUDA).has_value();
+    }
 
     for (const auto& edge : fn->next_edges()) {
       if (auto nextFn = edge.function.get()) {
@@ -252,6 +260,12 @@ void DistEngine::computeDependencies(
         }
       }
     }
+  }
+
+  if (will_use_cuda) {
+    // Collects current streams for devices where this process has a context,
+    // so graphTask::exec_post_processing can sync them with leaf_streams.
+    graphTask->stash_current_streams();
   }
 
   // Now lets compute which functions need to be executed. The algorithm is as
@@ -308,6 +322,10 @@ void DistEngine::computeDependencies(
     }
   }
 
+  // Set graph task owner in a single thread since concurrent access to
+  // 'owner_' field is not permitted.
+  graphTask->owner_ = torch::autograd::CPU_DEVICE;
+
   // Let autograd context take ownership of the GraphTask.
   autogradContext->setGraphTask(std::move(graphTask));
 }
@@ -330,7 +348,6 @@ void DistEngine::execute_graph_task_until_ready_queue_empty(
   cpu_ready_queue->push(std::move(node_task), incrementOutstandingTasks);
 
   torch::autograd::set_device(torch::autograd::CPU_DEVICE);
-  graph_task->owner_ = torch::autograd::CPU_DEVICE;
   while (!cpu_ready_queue->empty()) {
     std::shared_ptr<GraphTask> local_graph_task;
     {
@@ -342,7 +359,7 @@ void DistEngine::execute_graph_task_until_ready_queue_empty(
         continue;
       }
       if (task.fn_ && !local_graph_task->has_error_.load()) {
-        AutoGradMode grad_mode(local_graph_task->grad_mode_);
+        at::ThreadLocalStateGuard tls_guard(local_graph_task->thread_locals_);
         try {
           GraphTaskGuard guard(local_graph_task);
           engine_.evaluate_function(
@@ -369,7 +386,7 @@ void DistEngine::execute_graph_task_until_ready_queue_empty(
   }
 }
 
-std::shared_ptr<c10::ivalue::Future> DistEngine::
+c10::intrusive_ptr<c10::ivalue::Future> DistEngine::
     runEngineAndAccumulateGradients(
         const ContextPtr& autogradContext,
         const std::shared_ptr<Node>& graphRoot,
@@ -392,11 +409,11 @@ std::shared_ptr<c10::ivalue::Future> DistEngine::
   // execute after the original future is completed). This ensures we return a
   // future that waits for all gradient accumulation to finish.
   auto accumulateGradFuture =
-      std::make_shared<c10::ivalue::Future>(c10::NoneType::get());
+      c10::make_intrusive<c10::ivalue::Future>(c10::NoneType::get());
 
   futureGrads->addCallback(
-      [autogradContext, outputEdges, accumulateGradFuture, &futureGrads]() {
-        if (futureGrads->hasError()) {
+      [autogradContext, outputEdges, accumulateGradFuture](c10::ivalue::Future& futureGrads) {
+        if (futureGrads.hasError()) {
           // Don't accumulate gradients if we receive an error.
           // We must add the node information here since DistEngine::execute
           // waits on accumulateGradFuture and will throw an exception once we
@@ -405,7 +422,7 @@ std::shared_ptr<c10::ivalue::Future> DistEngine::
               "Error on Node ",
               DistAutogradContainer::getInstance().getWorkerId(),
               ": ",
-              futureGrads->tryRetrieveErrorMessage());
+              futureGrads.tryRetrieveErrorMessage());
           accumulateGradFuture->setError(std::make_exception_ptr(
               c10::ivalue::Future::FutureError(std::move(errorMsg))));
           return;
@@ -413,7 +430,7 @@ std::shared_ptr<c10::ivalue::Future> DistEngine::
 
         try {
           const variable_list& grads =
-              futureGrads->constValue().toTensorVector();
+              futureGrads.constValue().toTensorVector();
           TORCH_INTERNAL_ASSERT(grads.size() == outputEdges.size());
           accumulateGradFuture->markCompleted(c10::IValue());
         } catch (std::exception& e) {
@@ -424,7 +441,7 @@ std::shared_ptr<c10::ivalue::Future> DistEngine::
   return accumulateGradFuture;
 }
 
-std::shared_ptr<c10::ivalue::Future> DistEngine::executeSendFunctionAsync(
+c10::intrusive_ptr<c10::ivalue::Future> DistEngine::executeSendFunctionAsync(
     const ContextPtr& autogradContext,
     const std::shared_ptr<SendRpcBackward>& sendFunction,
     bool retainGraph) {
@@ -471,25 +488,24 @@ std::shared_ptr<c10::ivalue::Future> DistEngine::executeSendFunctionAsync(
 
     // Build the 'uber' future that waits for everything.
     auto callbackFuture =
-        std::make_shared<c10::ivalue::Future>(c10::NoneType::get());
+        c10::make_intrusive<c10::ivalue::Future>(c10::NoneType::get());
 
     accumulateGradFuture->addCallback([autogradContext,
-                                       callbackFuture,
-                                       accumulateGradFuture]() {
+                                       callbackFuture](c10::ivalue::Future& accumulateGradFuture) {
       try {
-        if (accumulateGradFuture->hasError()) {
+        if (accumulateGradFuture.hasError()) {
           // Perform cleanup at the end of the backward pass (before we mark
           // the future as completed).
           DistEngine::getInstance().cleanupBackwardPass(autogradContext);
 
           // Skip any further processing on errors.
-          callbackFuture->setError(accumulateGradFuture->exception_ptr());
+          callbackFuture->setError(accumulateGradFuture.exception_ptr());
           return;
         }
 
         // Wait for all RPCs after the autograd engine is done.
         auto rpcFuture = autogradContext->clearAndWaitForOutstandingRpcsAsync();
-        rpcFuture->addCallback([callbackFuture, autogradContext, rpcFuture]() {
+        rpcFuture->addCallback([callbackFuture, autogradContext](c10::ivalue::Future& rpcFuture) {
           try {
             // Perform cleanup at the end of the backward pass (before
             // we mark the future as completed).
@@ -500,10 +516,10 @@ std::shared_ptr<c10::ivalue::Future> DistEngine::executeSendFunctionAsync(
           }
 
           // Finally mark the 'uber' future as completed.
-          if (!rpcFuture->hasError()) {
+          if (!rpcFuture.hasError()) {
             callbackFuture->markCompleted(c10::IValue());
           } else {
-            callbackFuture->setError(rpcFuture->exception_ptr());
+            callbackFuture->setError(rpcFuture.exception_ptr());
           }
         });
       } catch (std::exception& e) {
@@ -521,7 +537,7 @@ std::shared_ptr<c10::ivalue::Future> DistEngine::executeSendFunctionAsync(
           /*node_task*/ NodeTask(graphTask, sendFunction, InputBuffer(0)),
           /*incrementOutstandingTasks*/ false);
     });
-    auto fut = std::make_shared<c10::ivalue::Future>(c10::NoneType::get());
+    auto fut = c10::make_intrusive<c10::ivalue::Future>(c10::NoneType::get());
     fut->markCompleted(c10::IValue());
     return fut;
   }
@@ -603,8 +619,6 @@ size_t DistEngine::numBackwardPasses() const {
 
 std::unordered_map<std::string, int> DistEngine::getDebugInfo() const {
   std::unordered_map<std::string, int> debugInfo;
-  // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
-  auto& DistAutogradContainer = DistAutogradContainer::getInstance();
   debugInfo[kNumBackwardPasses] = numBackwardPasses();
   debugInfo[kNumAutogradContexts] =
       DistAutogradContainer::getInstance().numAutogradContexts();

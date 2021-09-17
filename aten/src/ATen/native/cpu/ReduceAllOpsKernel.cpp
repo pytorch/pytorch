@@ -1,3 +1,4 @@
+#include<ATen/native/ReduceOps.h>
 #include<ATen/native/ReduceAllOps.h>
 
 #include <ATen/Dispatch.h>
@@ -8,13 +9,13 @@
 
 #include <ATen/native/cpu/Loops.h>
 #include <ATen/native/cpu/zmath.h>
-#include <ATen/cpu/vec256/functional.h>
-#include <ATen/cpu/vec256/vec256.h>
+#include <ATen/cpu/vec/functional.h>
+#include <ATen/cpu/vec/vec.h>
 
 namespace at { namespace native {
 namespace {
 
-using namespace vec256;
+using namespace vec;
 
 template <typename scalar_t, typename func_t, typename vec_func_t>
 inline void reduce_all_impl_vec(
@@ -23,13 +24,13 @@ inline void reduce_all_impl_vec(
     const scalar_t ident_v,
     func_t op,
     vec_func_t vop) {
-  using Vec = Vec256<scalar_t>;
+  using Vec = Vectorized<vec_scalar_t<scalar_t>>;
   const int64_t input_numel = input.numel();
   auto input_data = input.data_ptr<scalar_t>();
   // NOTE: parallel_reduce not support bool type
   scalar_t result = at::parallel_reduce(0, input_numel, internal::GRAIN_SIZE, ident_v,
     [&](int64_t start, int64_t end, const scalar_t ident) -> scalar_t {
-      scalar_t partial_out = vec256::reduce_all<scalar_t>(
+      scalar_t partial_out = vec::reduce_all<scalar_t>(
         [=](Vec x, Vec y) { return vop(x, y); },
         input_data + start,
         end - start);
@@ -75,7 +76,7 @@ static void min_all_kernel_impl(Tensor& result, const Tensor& input) {
       [=](int64_t a, int64_t b) -> int64_t { return min_impl(a, b); });
   } else {
     AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16, input.scalar_type(), "min_all", [&] {
-      using Vec = vec256::Vec256<scalar_t>;
+      using Vec = Vectorized<vec_scalar_t<scalar_t>>;
       reduce_all_impl_vec<scalar_t>(result, input, upper_bound<scalar_t>(),
         [=] (scalar_t a , scalar_t b) -> scalar_t { return min_impl(a, b); },
         [=](Vec a, Vec b) -> Vec { return minimum(a, b); });
@@ -100,7 +101,7 @@ static void max_all_kernel_impl(Tensor& result, const Tensor& input) {
       [=](int64_t a, int64_t b) -> int64_t { return max_impl(a, b); });
   } else {
     AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16, input.scalar_type(), "max_all", [&] {
-      using Vec = vec256::Vec256<scalar_t>;
+      using Vec = Vectorized<vec_scalar_t<scalar_t>>;
       reduce_all_impl_vec<scalar_t>(result, input, lower_bound<scalar_t>(),
         [=] (scalar_t a , scalar_t b) -> scalar_t { return max_impl(a, b); },
         [=](Vec a, Vec b) -> Vec { return maximum(a, b); });
@@ -143,14 +144,14 @@ inline void reduce_all_impl_vec_two_outputs(
     func_t reduce_acc_func,
     vec_func_t1 reduce_chunk_func1,
     vec_func_t2 reduce_chunk_func2) {
-  using Vec = Vec256<scalar_t>;
+  using Vec = Vectorized<vec_scalar_t<scalar_t>>;
   using scalar_t_pair = std::pair<scalar_t, scalar_t>;
   const int64_t input_numel = input.numel();
   auto input_data = input.data_ptr<scalar_t>();
   // NOTE: parallel_reduce not support bool type
   std::pair<scalar_t, scalar_t> result = at::parallel_reduce(0, input_numel, internal::GRAIN_SIZE, ident_v,
     [&](int64_t start, int64_t end, const scalar_t_pair& /* ident */) -> scalar_t_pair {
-    scalar_t_pair partial_out = vec256::reduce2_all<scalar_t>(
+    scalar_t_pair partial_out = vec::reduce2_all<scalar_t>(
         [=](Vec x, Vec y) { return reduce_chunk_func1(x, y); },
         [=](Vec x, Vec y) { return reduce_chunk_func2(x, y); },
         input_data + start,
@@ -163,8 +164,10 @@ inline void reduce_all_impl_vec_two_outputs(
   output2.fill_(result.second);
 }
 
-static void _aminmax_all_kernel_impl(Tensor& min_result, Tensor& max_result,
-    const Tensor& input) {
+static void aminmax_allreduce_kernel(
+    const Tensor& input,
+    Tensor& min_result,
+    Tensor& max_result) {
   if (input.scalar_type() == ScalarType::Bool) {
     TensorIterator iter = TensorIteratorConfig()
       .add_input(input)
@@ -193,8 +196,8 @@ static void _aminmax_all_kernel_impl(Tensor& min_result, Tensor& max_result,
       }
     );
   } else {
-    AT_DISPATCH_ALL_TYPES(input.scalar_type(), "_aminmax_all_all", [&] {
-      using Vec = vec256::Vec256<scalar_t>;
+    AT_DISPATCH_ALL_TYPES_AND(kBFloat16, input.scalar_type(), "aminmax_cpu", [&] {
+      using Vec = Vectorized<vec_scalar_t<scalar_t>>;
       using scalar_t_pair = std::pair<scalar_t, scalar_t>;
       reduce_all_impl_vec_two_outputs<scalar_t>(
         min_result,
@@ -214,11 +217,8 @@ static void _aminmax_all_kernel_impl(Tensor& min_result, Tensor& max_result,
 
 } // namespace
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(min_all_stub, &min_all_kernel_impl);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(max_all_stub, &max_all_kernel_impl);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-REGISTER_DISPATCH(_aminmax_all_stub, &_aminmax_all_kernel_impl);
+REGISTER_DISPATCH(aminmax_allreduce_stub, &aminmax_allreduce_kernel);
 
 }}

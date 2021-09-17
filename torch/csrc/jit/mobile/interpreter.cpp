@@ -8,7 +8,10 @@
 #include <torch/csrc/jit/runtime/vararg_functions.h>
 
 #include <ATen/record_function.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/mobile/observer.h>
+
+#include <torch/csrc/jit/backends/backend_exception.h>
 
 namespace torch {
 namespace jit {
@@ -21,7 +24,6 @@ InterpreterState::InterpreterState(std::shared_ptr<Code> code)
 }
 
 namespace {
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static thread_local int64_t exception_pc_{-1};
 void createObject(Stack& stack, const at::ClassTypePtr& type) {
   auto userObj = c10::ivalue::Object::create(
@@ -52,16 +54,33 @@ bool InterpreterState::run(Stack& stack) {
   size_t pc = 0;
   while (true) {
     try {
-      Instruction inst = code_->instructions_[pc];
+      auto inst_with_handle = code_->instructions_with_handles_.at(pc);
+      Instruction inst = inst_with_handle.instruction;
+      DebugHandle debug_handle = inst_with_handle.debug_handle;
+      // If no valid debug handle found then just log pc.
+      // This is possible when we did not save debug handles
+      debug_handle = debug_handle == -1 ? pc : debug_handle;
 
-      //    std::cout << "RUNNING " << pc << " " << code_->instructions_[pc];
-      //    if (inst.op == OP) {
-      //      std::cout << ", " << code_->op_names_[inst.X].name;
-      //      if (!code_->op_names_[inst.X].overload_name.empty()) {
-      //        std::cout << "." << code_->op_names_[inst.X].overload_name;
-      //      }
-      //    }
-      //    std::cout << std::endl;
+      // std::cout << "RUNNING " << pc << " "
+      //           << code_->instructions_with_handles_[pc].instruction;
+      // if (inst.op == OP) {
+      //   std::cout << ", " << code_->op_names_[inst.X].name;
+      //   if (!code_->op_names_[inst.X].overload_name.empty()) {
+      //     std::cout << "." << code_->op_names_[inst.X].overload_name;
+      //   }
+      // }
+      // std::cout << std::endl;
+
+      // TODO(iliacher): remove the workaround after RecordFunction is in
+      // Dispatcher
+      // Check with iliacher if has been done.
+      // Plus this is not safe as if you throw exception record function will be
+      // left enabled. That is a TODO
+      bool prev_value = isRecordFunctionEnabled();
+      if (!prev_value) {
+        // enable only for the RecordFunction
+        enableRecordFunction(true);
+      }
       switch (inst.op) {
         case OP: {
           if (at::hasGlobalCallbacks()) {
@@ -72,22 +91,15 @@ bool InterpreterState::run(Stack& stack) {
             }
           }
 
-          // TODO(iliacher): remove the workaround after RecordFunction is in
-          // Dispatcher
-          bool prev_value = isRecordFunctionEnabled();
-          if (!prev_value) {
-            // enable only for the RecordFunction
-            enableRecordFunction(true);
-          }
-          RECORD_USER_SCOPE_WITH_INPUTS(code_->op_names_[inst.X].name, stack);
-          if (!prev_value) {
-            enableRecordFunction(false);
-          }
+          RECORD_EDGE_SCOPE_WITH_DEBUG_HANDLE_AND_INPUTS(
+              code_->op_names_[inst.X].name, debug_handle, stack);
           code_->operators_[inst.X](stack);
           ++pc;
         } break;
         case OPN: {
           stack.push_back(inst.N);
+          RECORD_EDGE_SCOPE_WITH_DEBUG_HANDLE_AND_INPUTS(
+              code_->op_names_[inst.X].name, debug_handle, stack);
           code_->operators_[inst.X](stack);
           ++pc;
         } break;
@@ -97,6 +109,8 @@ bool InterpreterState::run(Stack& stack) {
                   .toObject()
                   ->type()
                   ->getMethod(code_->constants_[inst.X].toStringRef());
+          RECORD_EDGE_SCOPE_WITH_DEBUG_HANDLE_AND_INPUTS(
+              method.name(), debug_handle, stack);
           method.run(stack);
           ++pc;
         } break;
@@ -168,7 +182,7 @@ bool InterpreterState::run(Stack& stack) {
             ++pc;
           } else {
             size_t n_loop_carried = inst.N - 2;
-            for (size_t i = 0; i < n_loop_carried; ++i) {
+            for (const auto i : c10::irange(n_loop_carried)) {
               frame[i] = std::move(frame[i + 3]);
             }
             drop(stack, 3); // iteration_count, max_iter, cond
@@ -230,6 +244,14 @@ bool InterpreterState::run(Stack& stack) {
         default:
           AT_ERROR(toString(inst.op), " is invalid.");
       }
+
+      if (!prev_value) {
+        enableRecordFunction(false);
+      }
+      // This exception must be caught first as it derived from c10::Error
+    } catch (c10::BackendRuntimeException& e) {
+      exception_pc_ = pc;
+      TORCH_RETHROW(e);
     } catch (c10::Error& error) {
       // Reason for catching and rethrowing the error is so that we can
       // set the exception pc that is queried later

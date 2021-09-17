@@ -6,11 +6,14 @@ namespace jit {
 
 IValue readArchiveAndTensors(
     const std::string& archive_name,
+    const std::string& pickle_prefix,
+    const std::string& tensor_prefix,
     c10::optional<TypeResolver> type_resolver,
     c10::optional<ObjLoader> obj_loader,
     c10::optional<at::Device> device,
-    caffe2::serialize::PyTorchStreamReader& stream_reader) {
-  std::string picklename = archive_name + ".pkl";
+    caffe2::serialize::PyTorchStreamReader& stream_reader,
+    std::shared_ptr<DeserializationStorageContext> storage_context) {
+  std::string picklename = pickle_prefix + archive_name + ".pkl";
   at::DataPtr pickle_ptr;
   size_t pickle_size = 0;
   std::tie(pickle_ptr, pickle_size) = stream_reader.getRecord(picklename);
@@ -29,9 +32,11 @@ IValue readArchiveAndTensors(
     return len;
   };
 
-  std::string archive_name_plus_slash = archive_name + "/";
+  std::string tensor_dir_path =
+      (tensor_prefix.compare("") != 0) ? tensor_prefix : archive_name + "/";
+
   auto read_record = [&](const std::string& name) {
-    std::string ss = archive_name_plus_slash + name;
+    std::string ss = tensor_dir_path + name;
     return std::get<0>(stream_reader.getRecord(ss));
   };
 
@@ -40,7 +45,9 @@ IValue readArchiveAndTensors(
       type_resolver ? std::move(*type_resolver) : nullptr,
       obj_loader ? std::move(*obj_loader) : nullptr,
       std::move(read_record),
-      device);
+      device,
+      false,
+      storage_context);
   unpickler.set_version(stream_reader.version());
   return unpickler.parse_ivalue();
 }

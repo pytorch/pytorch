@@ -80,14 +80,21 @@ struct WelfordData {
   scalar_t m2;
   index_t n;
   combine_t nf;
-  C10_HOST_DEVICE WelfordData() : mean(0), m2(0), n(0), nf(0)  {}
-  C10_DEVICE WelfordData(scalar_t mean, scalar_t m2, index_t n, combine_t nf) : mean(mean), m2(m2), n(n), nf(nf) {}
+
+  C10_HOST_DEVICE WelfordData() : mean(0), m2(0), n(0), nf(0) {}
+
+  C10_HOST_DEVICE WelfordData(
+      scalar_t mean,
+      scalar_t m2,
+      index_t n,
+      combine_t nf)
+      : mean(mean), m2(m2), n(n), nf(nf) {}
 };
 
 
 template <typename scalar_t, typename acc_scalar_t, typename index_t, typename combine_t, typename res_t>
 struct WelfordOps {
-  bool unbiased;
+  index_t correction;
   bool take_sqrt;
  public:
   using acc_t = WelfordData<acc_scalar_t, index_t, combine_t>;
@@ -123,13 +130,12 @@ struct WelfordOps {
       new_count
     };
   }
-  inline C10_DEVICE res_t project(acc_t acc) const {
-    auto mean = acc.mean;
-    combine_t divisor = unbiased ? (acc.nf - 1) : acc.nf;
-    auto ret = (divisor > 0) ?
-      (take_sqrt ? device_sqrt(acc.m2 / divisor) : (acc.m2 / divisor))
-      : NAN;
-    return res_t(ret, mean);
+  inline C10_DEVICE res_t project(acc_t acc) const __ubsan_ignore_float_divide_by_zero__ {
+    const auto mean = static_cast<scalar_t>(acc.mean);
+    const combine_t divisor = acc.nf > correction ? acc.nf - correction : 0;
+    const auto var = acc.m2 / divisor;
+    res_t results(take_sqrt ? device_sqrt(var) : var, mean);
+    return results;
   }
 
   static C10_DEVICE acc_t translate_idx(acc_t acc, int64_t /*base_idx*/) {
@@ -146,9 +152,8 @@ struct WelfordOps {
     };
   }
 #endif
-  WelfordOps(bool unbiased, bool take_sqrt)
-    : unbiased(unbiased), take_sqrt(take_sqrt) {
-  }
+  C10_HOST_DEVICE WelfordOps(index_t correction, bool take_sqrt)
+      : correction(correction), take_sqrt(take_sqrt) {}
 };
 
 template <typename acc_t, typename factor_t>

@@ -16,7 +16,6 @@
 
 namespace caffe2 {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TextFileReaderUtilsTest, TokenizeTest) {
   TokenizedString tokenized;
   std::string ch =
@@ -75,7 +74,6 @@ TEST(TextFileReaderUtilsTest, TokenizeTest) {
         range.start = nullptr;
         range.end = nullptr;
       } else {
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         size_t endIdx = std::min(charIdx + 10, ch.size());
         range.start = &ch.front() + charIdx;
         range.end = &ch.front() + endIdx;
@@ -109,7 +107,6 @@ TEST(TextFileReaderUtilsTest, TokenizeTest) {
   outFile << ch;
   outFile.close();
   for (int numPasses = 1; numPasses <= 2; ++numPasses) {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     FileReader fr(tmpname, 5);
     BufferedTokenizer fileTokenizer(tokenizer, &fr, numPasses);
     // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)

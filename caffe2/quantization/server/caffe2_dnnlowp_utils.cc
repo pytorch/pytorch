@@ -8,27 +8,16 @@
 #include <omp.h>
 #endif
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DECLARE_int32(caffe2_dnnlowp_activation_quantization_precision);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DECLARE_int32(caffe2_dnnlowp_weight_quantization_precision);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DECLARE_int32(caffe2_dnnlowp_requantization_multiplier_precision);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DECLARE_int32(caffe2_dnnlowp_eltwise_quantization_precision);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DECLARE_bool(caffe2_dnnlowp_force_scale_power_of_two);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DECLARE_bool(caffe2_dnnlowp_preserve_activation_sparsity);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DECLARE_bool(caffe2_dnnlowp_preserve_weight_sparsity);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DECLARE_string(caffe2_dnnlowp_activation_quantization_kind);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DECLARE_string(caffe2_dnnlowp_weight_quantization_kind);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DECLARE_double(caffe2_dnnlowp_weight_p99_threshold);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DECLARE_double(caffe2_dnnlowp_activation_p99_threshold);
 
 namespace dnnlowp {
@@ -498,12 +487,10 @@ NetDef AddScaleZeroOffsetArgumentsWithHistogram(
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   float min, max;
   ist >> op_index >> op_type >> i >> tensor_name >> min >> max >> nbins;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   if (nwords_first_line != nbins + 7) {
     ist.str(first_line);
     ist.clear();
     ist >> op_index >> i >> tensor_name >> min >> max >> nbins;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     if (nwords_first_line == nbins + 6) {
       new_format = false;
     } else {

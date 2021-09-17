@@ -13,12 +13,10 @@ using namespace torch::test;
 
 struct SequentialTest : torch::test::SeedingFixture {};
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(SequentialTest, CanContainThings) {
   Sequential sequential(Linear(3, 4), ReLU(), BatchNorm1d(3));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(SequentialTest, ConstructsFromSharedPointer) {
   struct M : torch::nn::Module {
     explicit M(int value_) : value(value_) {}
@@ -39,7 +37,6 @@ TEST_F(SequentialTest, ConstructsFromSharedPointer) {
   ASSERT_EQ(sequential->size(), 3);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(SequentialTest, ConstructsFromConcreteType) {
   static int copy_count;
 
@@ -73,7 +70,6 @@ TEST_F(SequentialTest, ConstructsFromConcreteType) {
   ASSERT_EQ(copy_count, 3);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(SequentialTest, ConstructsFromModuleHolder) {
   struct MImpl : torch::nn::Module {
     explicit MImpl(int value_) : value(value_) {}
@@ -99,7 +95,6 @@ TEST_F(SequentialTest, ConstructsFromModuleHolder) {
   ASSERT_EQ(sequential->size(), 3);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(SequentialTest, PushBackAddsAnElement) {
   struct M : torch::nn::Module {
     explicit M(int value_) : value(value_) {}
@@ -159,7 +154,6 @@ TEST_F(SequentialTest, PushBackAddsAnElement) {
   ASSERT_EQ(sequential_any->named_children()[1].key(), "fc");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(SequentialTest, AccessWithAt) {
   struct M : torch::nn::Module {
     explicit M(int value_) : value(value_) {}
@@ -189,7 +183,6 @@ TEST_F(SequentialTest, AccessWithAt) {
       sequential->at<M>(modules.size() + 1000000), "Index out of range");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(SequentialTest, AccessWithPtr) {
   struct M : torch::nn::Module {
     explicit M(int value_) : value(value_) {}
@@ -220,14 +213,12 @@ TEST_F(SequentialTest, AccessWithPtr) {
       sequential->ptr(modules.size() + 1000000), "Index out of range");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(SequentialTest, CallingForwardOnEmptySequentialIsDisallowed) {
   Sequential empty;
   ASSERT_THROWS_WITH(
       empty->forward<int>(), "Cannot call forward() on an empty Sequential");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(SequentialTest, CallingForwardChainsCorrectly) {
   struct MockModule : torch::nn::Module {
     explicit MockModule(int value) : expected(value) {}
@@ -243,11 +234,9 @@ TEST_F(SequentialTest, CallingForwardChainsCorrectly) {
   ASSERT_EQ(sequential->forward<int>(1), 4);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(SequentialTest, CallingForwardWithTheWrongReturnTypeThrows) {
   struct M : public torch::nn::Module {
     int forward() {
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       return 5;
     }
   };
@@ -259,7 +248,6 @@ TEST_F(SequentialTest, CallingForwardWithTheWrongReturnTypeThrows) {
       "The type of the return value is int, but you asked for type float");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(SequentialTest, TheReturnTypeOfForwardDefaultsToTensor) {
   struct M : public torch::nn::Module {
     torch::Tensor forward(torch::Tensor v) {
@@ -272,13 +260,10 @@ TEST_F(SequentialTest, TheReturnTypeOfForwardDefaultsToTensor) {
   ASSERT_TRUE(sequential->forward(variable).equal(variable));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(SequentialTest, ForwardReturnsTheLastValue) {
   torch::manual_seed(0);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Sequential sequential(Linear(10, 3), Linear(3, 5), Linear(5, 100));
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto x = torch::randn({1000, 10}, torch::requires_grad());
   auto y = sequential->forward(x);
   ASSERT_EQ(y.ndimension(), 2);
@@ -286,23 +271,16 @@ TEST_F(SequentialTest, ForwardReturnsTheLastValue) {
   ASSERT_EQ(y.size(1), 100);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(SequentialTest, SanityCheckForHoldingStandardModules) {
   Sequential sequential(
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       Linear(10, 3),
       Conv2d(1, 2, 3),
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       Dropout(0.5),
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       BatchNorm2d(5),
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       Embedding(4, 10),
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       LSTM(4, 5));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(SequentialTest, ExtendPushesModulesFromOtherSequential) {
   struct A : torch::nn::Module {
     int forward(int x) {
@@ -349,9 +327,7 @@ TEST_F(SequentialTest, ExtendPushesModulesFromOtherSequential) {
   ASSERT_TRUE(b[3]->as<A>());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(SequentialTest, HasReferenceSemantics) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Sequential first(Linear(2, 3), Linear(4, 4), Linear(4, 5));
   Sequential second(first);
 
@@ -366,7 +342,6 @@ TEST_F(SequentialTest, HasReferenceSemantics) {
       }));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(SequentialTest, IsCloneable) {
   Sequential sequential(Linear(3, 4), Functional(torch::relu), BatchNorm1d(3));
   Sequential clone =
@@ -398,9 +373,7 @@ TEST_F(SequentialTest, IsCloneable) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(SequentialTest, RegistersElementsAsSubmodules) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Sequential sequential(Linear(10, 3), Conv2d(1, 2, 3), Dropout2d(0.5));
 
   auto modules = sequential->children();
@@ -409,7 +382,6 @@ TEST_F(SequentialTest, RegistersElementsAsSubmodules) {
   ASSERT_TRUE(modules[2]->as<Dropout2d>());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(SequentialTest, CloneToDevice_CUDA) {
   Sequential sequential(Linear(3, 4), Functional(torch::relu), BatchNorm1d(3));
   torch::Device device(torch::kCUDA, 0);
@@ -423,19 +395,13 @@ TEST_F(SequentialTest, CloneToDevice_CUDA) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(SequentialTest, PrettyPrintSequential) {
   Sequential sequential(
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       Linear(10, 3),
       Conv2d(1, 2, 3),
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       Dropout(0.5),
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       BatchNorm2d(5),
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       Embedding(4, 10),
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       LSTM(4, 5));
   ASSERT_EQ(
       c10::str(sequential),
@@ -449,16 +415,11 @@ TEST_F(SequentialTest, PrettyPrintSequential) {
       ")");
 
   Sequential sequential_named({
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {"linear", Linear(10, 3)},
       {"conv2d", Conv2d(1, 2, 3)},
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {"dropout", Dropout(0.5)},
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {"batchnorm2d", BatchNorm2d(5)},
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {"embedding", Embedding(4, 10)},
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {"lstm", LSTM(4, 5)}
   });
   ASSERT_EQ(
@@ -473,124 +434,77 @@ TEST_F(SequentialTest, PrettyPrintSequential) {
       ")");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(SequentialTest, ModuleForwardMethodOptionalArg) {
   {
     Sequential sequential(Identity(), ConvTranspose1d(ConvTranspose1dOptions(3, 2, 3).stride(1).bias(false)));
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     std::dynamic_pointer_cast<ConvTranspose1dImpl>(sequential[1])->weight.set_data(torch::arange(18.).reshape({3, 2, 3}));
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto x = torch::arange(30.).reshape({2, 3, 5});
     auto y = sequential->forward(x);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto expected = torch::tensor({{{ 150.,  333.,  552.,  615.,  678.,  501.,  276.},
-                                    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                     { 195.,  432.,  714.,  804.,  894.,  654.,  357.}},
-                                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                    {{ 420.,  918., 1497., 1560., 1623., 1176.,  636.},
-                                    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                     { 600., 1287., 2064., 2154., 2244., 1599.,  852.}}});
     ASSERT_TRUE(torch::allclose(y, expected));
   }
   {
     Sequential sequential(Identity(), ConvTranspose2d(ConvTranspose2dOptions(3, 2, 3).stride(1).bias(false)));
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     std::dynamic_pointer_cast<ConvTranspose2dImpl>(sequential[1])->weight.set_data(torch::arange(54.).reshape({3, 2, 3, 3}));
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto x = torch::arange(75.).reshape({1, 3, 5, 5});
     auto y = sequential->forward(x);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto expected = torch::tensor({{{{ 2250.,  4629.,  7140.,  7311.,  7482.,  5133.,  2640.},
-                                     // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                      { 4995., 10272., 15837., 16206., 16575., 11364.,  5841.},
-                                     // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                      { 8280., 17019., 26226., 26820., 27414., 18783.,  9648.},
-                                     // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                      { 9225., 18954., 29196., 29790., 30384., 20808., 10683.},
-                                     // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                      {10170., 20889., 32166., 32760., 33354., 22833., 11718.},
-                                     // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                      { 7515., 15420., 23721., 24144., 24567., 16800.,  8613.},
-                                     // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                      { 4140.,  8487., 13044., 13269., 13494.,  9219.,  4722.}},
-                                    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                     {{ 2925.,  6006.,  9246.,  9498.,  9750.,  6672.,  3423.},
-                                     // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                      { 6480., 13296., 20454., 20985., 21516., 14712.,  7542.},
-                                     // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                      {10710., 21960., 33759., 34596., 35433., 24210., 12402.},
-                                     // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                      {12060., 24705., 37944., 38781., 39618., 27045., 13842.},
-                                     // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                      {13410., 27450., 42129., 42966., 43803., 29880., 15282.},
-                                     // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                      { 9810., 20064., 30768., 31353., 31938., 21768., 11124.},
-                                     // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                      { 5355., 10944., 16770., 17076., 17382., 11838.,  6045.}}}});
     ASSERT_TRUE(torch::allclose(y, expected));
   }
   {
     Sequential sequential(Identity(), ConvTranspose3d(ConvTranspose3dOptions(2, 2, 2).stride(1).bias(false)));
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     std::dynamic_pointer_cast<ConvTranspose3dImpl>(sequential[1])->weight.set_data(torch::arange(32.).reshape({2, 2, 2, 2, 2}));
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto x = torch::arange(16.).reshape({1, 2, 2, 2, 2});
     auto y = sequential->forward(x);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto expected = torch::tensor({{{{{ 128.,  280.,  154.},
-                                      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                       { 304.,  664.,  364.},
-                                      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                       { 184.,  400.,  218.}},
-                                     // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                      {{ 352.,  768.,  420.},
-                                      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                       { 832., 1808.,  984.},
-                                      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                       { 496., 1072.,  580.}},
-                                     // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                      {{ 256.,  552.,  298.},
-                                      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                       { 592., 1272.,  684.},
-                                      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                       { 344.,  736.,  394.}}},
-                                    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                     {{{ 192.,  424.,  234.},
-                                      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                       { 464., 1016.,  556.},
-                                      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                       { 280.,  608.,  330.}},
-                                     // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                      {{ 544., 1184.,  644.},
-                                      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                       {1280., 2768., 1496.},
-                                      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                       { 752., 1616.,  868.}},
-                                     // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                      {{ 384.,  824.,  442.},
-                                      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                       { 880., 1880., 1004.},
-                                      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                       { 504., 1072.,  570.}}}}});
     ASSERT_TRUE(torch::allclose(y, expected));
   }
   {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto weight = torch::tensor({{1., 2.3, 3.}, {4., 5.1, 6.3}});
     Sequential sequential(Identity(), EmbeddingBag::from_pretrained(weight));
     auto x = torch::tensor({{1, 0}}, torch::kLong);
     auto y = sequential->forward(x);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto expected = torch::tensor({2.5000, 3.7000, 4.6500});
     ASSERT_TRUE(torch::allclose(y, expected));
   }
   {
     torch::manual_seed(0);
 
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     int64_t embed_dim = 8;
     int64_t num_heads = 4;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     int64_t batch_size = 8;
     int64_t src_len = 3;
     int64_t tgt_len = 1;
@@ -605,106 +519,68 @@ TEST_F(SequentialTest, ModuleForwardMethodOptionalArg) {
 
     auto attn_output = std::get<0>(output);
     auto attn_output_expected = torch::tensor(
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     {{{0.0674, -0.0056, 0.1324, 0.0922, 0.0160, -0.0934, -0.1700, 0.1663},
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {0.0674, -0.0056, 0.1324, 0.0922, 0.0160, -0.0934, -0.1700, 0.1663},
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {0.0674, -0.0056, 0.1324, 0.0922, 0.0160, -0.0934, -0.1700, 0.1663},
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {0.0674, -0.0056, 0.1324, 0.0922, 0.0160, -0.0934, -0.1700, 0.1663},
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {0.0674, -0.0056, 0.1324, 0.0922, 0.0160, -0.0934, -0.1700, 0.1663},
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {0.0674, -0.0056, 0.1324, 0.0922, 0.0160, -0.0934, -0.1700, 0.1663},
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {0.0674, -0.0056, 0.1324, 0.0922, 0.0160, -0.0934, -0.1700, 0.1663},
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {0.0674, -0.0056, 0.1324, 0.0922, 0.0160, -0.0934, -0.1700, 0.1663}}});
     ASSERT_TRUE(torch::allclose(attn_output, attn_output_expected, 1e-05, 2e-04));
 
     auto attn_output_weights = std::get<1>(output);
     auto attn_output_weights_expected = torch::tensor(
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     {{{0.3333, 0.3333, 0.3333}},
-     // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
      {{0.3333, 0.3333, 0.3333}},
-     // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
      {{0.3333, 0.3333, 0.3333}},
-     // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
      {{0.3333, 0.3333, 0.3333}},
-     // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
      {{0.3333, 0.3333, 0.3333}},
-     // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
      {{0.3333, 0.3333, 0.3333}},
-     // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
      {{0.3333, 0.3333, 0.3333}},
-     // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
      {{0.3333, 0.3333, 0.3333}}});
     ASSERT_TRUE(torch::allclose(attn_output_weights, attn_output_weights_expected, 1e-05, 2e-04));
   }
   {
     auto indices = torch::tensor({{{1, 3, 4}}}, torch::kLong);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto x = torch::tensor({{{2, 4, 5}}}, torch::dtype(torch::kFloat));
     Sequential sequential(MaxUnpool1d(3));
     auto y = sequential->forward(x, indices);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto expected = torch::tensor({{{0, 2, 0, 4, 5, 0, 0, 0, 0}}}, torch::kFloat);
     ASSERT_TRUE(torch::allclose(y, expected));
   }
   {
     auto indices = torch::tensor(
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     {{{{ 6,  8,  9},
-       // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
        {16, 18, 19},
-       // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
        {21, 23, 24}}},
-     // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
      {{{ 6,  8,  9},
-       // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
        {16, 18, 19},
-       // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
        {21, 23, 24}}}}, torch::kLong);
     auto x = torch::tensor(
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     {{{{ 6,  8,  9},
-       // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
        {16, 18, 19},
-       // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
        {21, 23, 24}}},
-     // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
      {{{31, 33, 34},
-       // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
        {41, 43, 44},
-       // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
        {46, 48, 49}}}}, torch::dtype(torch::kFloat));
     Sequential sequential(MaxUnpool2d(MaxUnpool2dOptions(3).stride(2).padding(1)));
     auto y = sequential->forward(x, indices);
     auto expected = torch::tensor(
     {{{{ 0,  0,  0,  0,  0},
-       // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
        { 0,  6,  0,  8,  9},
        { 0,  0,  0,  0,  0},
-       // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
        { 0, 16,  0, 18, 19},
-       // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
        { 0, 21,  0, 23, 24}}},
      {{{ 0,  0,  0,  0,  0},
-       // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
        { 0, 31,  0, 33, 34},
        { 0,  0,  0,  0,  0},
-       // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
        { 0, 41,  0, 43, 44},
-       // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
        { 0, 46,  0, 48, 49}}}} , torch::kFloat);
     ASSERT_TRUE(torch::allclose(y, expected));
   }
   {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto indices = torch::tensor({{{{{26}}}}}, torch::kLong);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto x = torch::tensor({{{{{26}}}}}, torch::dtype(torch::kFloat).requires_grad(true));
     Sequential sequential(MaxUnpool3d(3));
     auto y = sequential->forward(x, indices);
@@ -717,7 +593,6 @@ TEST_F(SequentialTest, ModuleForwardMethodOptionalArg) {
         { 0,  0,  0}},
        {{ 0,  0,  0},
         { 0,  0,  0},
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         { 0,  0, 26}}}}}, torch::kFloat);
     ASSERT_TRUE(torch::allclose(y, expected));
   }
@@ -727,17 +602,11 @@ TEST_F(SequentialTest, ModuleForwardMethodOptionalArg) {
     auto x = torch::ones({2, 3, 2});
     auto rnn_output = sequential->forward<std::tuple<torch::Tensor, torch::Tensor>>(x);
     auto expected_output = torch::tensor(
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     {{{-0.0645, -0.7274,  0.4531},
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {-0.0645, -0.7274,  0.4531},
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {-0.0645, -0.7274,  0.4531}},
-     // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
      {{-0.3970, -0.6950,  0.6009},
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {-0.3970, -0.6950,  0.6009},
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {-0.3970, -0.6950,  0.6009}}});
     ASSERT_TRUE(torch::allclose(std::get<0>(rnn_output), expected_output, 1e-05, 2e-04));
   }
@@ -747,17 +616,11 @@ TEST_F(SequentialTest, ModuleForwardMethodOptionalArg) {
     auto x = torch::ones({2, 3, 2});
     auto rnn_output = sequential->forward<std::tuple<torch::Tensor, std::tuple<torch::Tensor, torch::Tensor>>>(x);
     auto expected_output = torch::tensor(
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     {{{-0.2693, -0.1240,  0.0744},
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {-0.2693, -0.1240,  0.0744},
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {-0.2693, -0.1240,  0.0744}},
-     // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
      {{-0.3889, -0.1919,  0.1183},
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {-0.3889, -0.1919,  0.1183},
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {-0.3889, -0.1919,  0.1183}}});
     ASSERT_TRUE(torch::allclose(std::get<0>(rnn_output), expected_output, 1e-05, 2e-04));
   }
@@ -767,17 +630,11 @@ TEST_F(SequentialTest, ModuleForwardMethodOptionalArg) {
     auto x = torch::ones({2, 3, 2});
     auto rnn_output = sequential->forward<std::tuple<torch::Tensor, torch::Tensor>>(x);
     auto expected_output = torch::tensor(
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     {{{-0.1134,  0.0467,  0.2336},
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {-0.1134,  0.0467,  0.2336},
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {-0.1134,  0.0467,  0.2336}},
-     // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
      {{-0.1189,  0.0502,  0.2960},
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {-0.1189,  0.0502,  0.2960},
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {-0.1189,  0.0502,  0.2960}}});
     ASSERT_TRUE(torch::allclose(std::get<0>(rnn_output), expected_output, 1e-05, 2e-04));
   }
@@ -787,9 +644,7 @@ TEST_F(SequentialTest, ModuleForwardMethodOptionalArg) {
     auto x = torch::ones({2, 2});
     auto rnn_output = sequential->forward<torch::Tensor>(x);
     auto expected_output = torch::tensor(
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     {{-0.0645, -0.7274,  0.4531},
-     // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
      {-0.0645, -0.7274,  0.4531}});
     ASSERT_TRUE(torch::allclose(rnn_output, expected_output, 1e-05, 2e-04));
   }
@@ -799,9 +654,7 @@ TEST_F(SequentialTest, ModuleForwardMethodOptionalArg) {
     auto x = torch::ones({2, 2});
     auto rnn_output = sequential->forward<std::tuple<torch::Tensor, torch::Tensor>>(x);
     auto expected_output = torch::tensor(
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     {{-0.2693, -0.1240,  0.0744},
-     // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
      {-0.2693, -0.1240,  0.0744}});
     ASSERT_TRUE(torch::allclose(std::get<0>(rnn_output), expected_output, 1e-05, 2e-04));
   }
@@ -811,9 +664,7 @@ TEST_F(SequentialTest, ModuleForwardMethodOptionalArg) {
     auto x = torch::ones({2, 2});
     auto rnn_output = sequential->forward<torch::Tensor>(x);
     auto expected_output = torch::tensor(
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     {{-0.1134,  0.0467,  0.2336},
-     // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
      {-0.1134,  0.0467,  0.2336}});
     ASSERT_TRUE(torch::allclose(rnn_output, expected_output, 1e-05, 2e-04));
   }

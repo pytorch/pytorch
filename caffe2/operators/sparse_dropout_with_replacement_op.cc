@@ -31,7 +31,6 @@ bool SparseDropoutWithReplacementOp<CPUContext>::RunOnDevice() {
   int32_t total_output_length = 0;
   vector<bool> selected(Lengths.numel(), true);
   for (int i = 0; i < Lengths.numel(); ++i) {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     if (dist(gen) > 0.5) {
       output_lengths_data[i] = input_lengths_data[i];
     } else {
@@ -61,12 +60,10 @@ bool SparseDropoutWithReplacementOp<CPUContext>::RunOnDevice() {
   return true;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     SparseDropoutWithReplacement,
     SparseDropoutWithReplacementOp<CPUContext>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SparseDropoutWithReplacement)
     .NumInputs(2)
     .SameNumberOfOutput()
@@ -130,6 +127,5 @@ OutputLengths: [2, 1]
     .Output(0, "Y", "*(type: Tensor`<int64_t>`)* Output tensor.")
     .Output(1, "OutputLengths", "*(type: Tensor`<int32_t>`)* Output tensor.");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 NO_GRADIENT(SparseDropoutWithReplacement);
 } // namespace caffe2

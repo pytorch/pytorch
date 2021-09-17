@@ -6,6 +6,7 @@
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
 #include <c10/util/accumulate.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/autograd/symbolic.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
@@ -27,6 +28,7 @@
 #include <set>
 #include <string>
 #include <vector>
+
 namespace torch {
 namespace jit {
 
@@ -347,7 +349,7 @@ void EncoderBase::EncodeValueInfo(
     if (t->dim()) {
       onnx::TensorShapeProto* shape = tensor_type->mutable_shape();
       auto sizes = t->symbolic_sizes().sizes().value();
-      for (size_t i = 0; i < sizes.size(); i++) {
+      for (const auto i : c10::irange(sizes.size())) {
         shape->add_dim();
         if ((dynamic_axes.find(name) != dynamic_axes.end()) &&
             (dynamic_axes.at(name).find(i) != dynamic_axes.at(name).end())) {
@@ -445,7 +447,7 @@ void EncoderBase::EncodeBlock(
   // be a subset of graph inputs. We use keep_initializers_as_inputs
   // argument to determine whether to add initializers
   // as inputs or not. If keep_initializers_as_inputs=false,
-  // we only add non-parameter inputs as inputs to ONNX graph, and.
+  // we only add non-parameter inputs as inputs to ONNX graph, and
   // not the initializers (parameters). If keep_initializers_as_inputs
   // =true, we add initializers as inputs too. Setting
   // keep_initializers_as_inputs=false allows better
@@ -470,9 +472,7 @@ void EncoderBase::EncodeBlock(
     EncodeValueInfo(graph_proto, v, output, dynamic_axes);
   }
   for (auto node : block->nodes()) {
-    bool is_raw_export =
-        operator_export_type_ == onnx_torch::OperatorExportTypes::RAW;
-    if (node->mustBeNone() && !is_raw_export) {
+    if (node->mustBeNone()) {
       // None nodes are used to implement optional inputs. One
       // way to "not provide" an optional input is to create an
       // Undefined node, and pass its output as that input.
@@ -483,7 +483,7 @@ void EncoderBase::EncodeBlock(
       p_n->set_doc_string(node->sourceRange().str());
     }
     for (auto input : node->inputs()) {
-      if (input->node()->mustBeNone() && !is_raw_export) {
+      if (input->node()->mustBeNone()) {
         p_n->add_input("");
       } else {
         p_n->add_input(input->debugName());
@@ -503,9 +503,7 @@ void EncoderBase::EncodeBlock(
       domains_.insert(domain);
       p_n->set_domain(domain);
     }
-    if (is_raw_export) {
-      AT_ASSERT(!node->kind().is_onnx());
-    } else if (operator_export_type_ == onnx_torch::OperatorExportTypes::ONNX) {
+    if (operator_export_type_ == onnx_torch::OperatorExportTypes::ONNX) {
       AT_ASSERT(
           !node->kind().is_aten() && !node->kind().is_prim() &&
           !node->kind().is_attr());
@@ -518,15 +516,6 @@ void EncoderBase::EncodeBlock(
     for (auto attr_name : node->attributeNames()) {
       AddAttribute(
           p_n, node, attr_name, use_external_data_format, onnx_file_path);
-    }
-    if (is_raw_export && node->blocks().size() > 0) {
-      auto blocks = p_n->add_attribute();
-      blocks->set_name("_blocks");
-      blocks->set_type(onnx::AttributeProto_AttributeType_GRAPHS);
-      for (auto block : node->blocks()) {
-        auto graph = blocks->add_graphs();
-        EncodeBlock(graph, block, initializers);
-      }
     }
     if (node->kind() == ::c10::onnx::Loop) {
       AT_ASSERT(node->blocks().size() == 1);
@@ -548,10 +537,10 @@ void EncoderBase::EncodeBlock(
     if (node->kind() == ::c10::onnx::If) {
       AT_ASSERT(node->blocks().size() == 2);
 
-      auto true_branch = p_n->add_attribute();
-      true_branch->set_name("then_branch");
-      true_branch->set_type(onnx::AttributeProto_AttributeType_GRAPH);
-      auto true_g = true_branch->mutable_g();
+      auto then_branch = p_n->add_attribute();
+      then_branch->set_name("then_branch");
+      then_branch->set_type(onnx::AttributeProto_AttributeType_GRAPH);
+      auto true_g = then_branch->mutable_g();
       EncodeBlock(
           true_g,
           node->blocks()[0],
@@ -562,10 +551,10 @@ void EncoderBase::EncodeBlock(
           use_external_data_format,
           onnx_file_path);
 
-      auto false_branch = p_n->add_attribute();
-      false_branch->set_name("else_branch");
-      false_branch->set_type(onnx::AttributeProto_AttributeType_GRAPH);
-      auto false_g = false_branch->mutable_g();
+      auto else_branch = p_n->add_attribute();
+      else_branch->set_name("else_branch");
+      else_branch->set_type(onnx::AttributeProto_AttributeType_GRAPH);
+      auto false_g = else_branch->mutable_g();
       EncodeBlock(
           false_g,
           node->blocks()[1],
@@ -708,7 +697,10 @@ void EncoderBase::AddAttribute(
       }
       break;
     default:
-      throw std::runtime_error("unexpected attribute kind");
+      std::ostringstream err_msg;
+      err_msg << "attribute \"" << name.toDisplayString()
+              << "\" has unexpected kind: " << toString(node->kindOf(name));
+      throw std::runtime_error(err_msg.str());
   }
 }
 
@@ -763,9 +755,7 @@ GraphEncoder::GraphEncoder(
     const std::string& onnx_file_path)
     : EncoderBase(operator_export_type, strip_doc),
       defer_weight_export_(defer_weight_export) {
-  if (operator_export_type != onnx_torch::OperatorExportTypes::RAW) {
-    validateGraph(graph, operator_export_type);
-  }
+  validateGraph(graph, operator_export_type);
 
   if (use_external_data_format) {
     TORCH_CHECK(
@@ -902,11 +892,6 @@ std::string pretty_print_onnx(
   return prettyPrint(graph_encoder.get_model_proto());
 }
 
-// export_raw_ir will export IR ops without turning them into ONNX ops.
-// The output will use the ONNX protobuf format, but the ops will not
-// conform to the ONNX op specification. Thus, the output will not
-// be interpretable by a ONNX-compatible framework. However, PyTorch or
-// libtorch will be able to import the IR and play it back.
 std::tuple<
     std::shared_ptr<::ONNX_NAMESPACE::ModelProto>,
     RawDataExportMap,
@@ -939,11 +924,6 @@ export_onnx(
       add_node_names,
       use_external_data_format,
       onnx_file_path);
-  const size_t proto_size = graph_encoder.get_model_proto().ByteSizeLong();
-  TORCH_CHECK(
-      proto_size <= INT_MAX,
-      "Exporting model exceed maximum protobuf size of 2GB. "
-      "Please call torch.onnx.export with use_external_data_format=True.");
   GRAPH_DEBUG("onnx proto:", prettyPrint(graph_encoder.get_model_proto()));
   return std::make_tuple(
       std::make_shared<::ONNX_NAMESPACE::ModelProto>(
@@ -954,6 +934,11 @@ export_onnx(
 
 std::string serialize_model_proto_to_string(
     const std::shared_ptr<::ONNX_NAMESPACE::ModelProto>& model_proto) {
+  const size_t proto_size = model_proto->ByteSizeLong();
+  TORCH_CHECK(
+      proto_size <= INT_MAX,
+      "Exporting model exceed maximum protobuf size of 2GB. "
+      "Please call torch.onnx.export with use_external_data_format=True.");
   return model_proto->SerializeAsString();
 }
 

@@ -88,7 +88,6 @@ Tensor mkldnn_reorder_conv2d_weight(
   // [o, i, h, w]. Ideally we should reorder the weight back in serialization.
   // For backward compatibility, we squash the first two dims (g * o/g) back to
   // its original form.
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   if (w.ndims() == 5) {
     auto wdims = w.get_dims();
     w.reshape({wdims[0] * wdims[1], wdims[2], wdims[3], wdims[4]});

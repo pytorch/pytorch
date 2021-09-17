@@ -13,7 +13,6 @@ from torch.distributed.elastic.multiprocessing.errors import (
     record,
 )
 from torch.distributed.elastic.multiprocessing.errors.error_handler import _write_error
-from torch.testing._internal.common_utils import TEST_WITH_TSAN
 
 
 class SentinelError(Exception):
@@ -45,7 +44,6 @@ def read_resource_file(resource_file: str) -> str:
         return "".join(fp.readlines())
 
 
-@unittest.skipIf(TEST_WITH_TSAN, "test incompatible with tsan")
 class ApiTest(unittest.TestCase):
     def setUp(self):
         self.test_dir = tempfile.mkdtemp(prefix=self.__class__.__name__)
@@ -76,6 +74,16 @@ class ApiTest(unittest.TestCase):
 
     def test_process_failure_new_format(self):
         error_data = {"message": "test error message", "timestamp": 10}
+        with open(self.test_error_file, "w") as fp:
+            json.dump(error_data, fp)
+        pf = ProcessFailure(
+            local_rank=0, pid=997, exitcode=1, error_file=self.test_error_file
+        )
+        self.assertEqual("test error message", pf.message)
+        self.assertEqual(10, pf.timestamp)
+
+    def test_process_mast_error_format(self):
+        error_data = {"message": "test error message", "timestamp": "10"}
         with open(self.test_error_file, "w") as fp:
             json.dump(error_data, fp)
         pf = ProcessFailure(

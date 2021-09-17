@@ -1,8 +1,11 @@
 """
 Utils shared by different modes of quantization (eager/graph)
 """
+import warnings
+import functools
 import torch
-from .quant_type import QuantType, quant_type_to_str
+from torch.ao.quantization.quant_type import QuantType, quant_type_to_str
+from typing import Tuple, Any
 
 def get_combined_dict(default_dict, additional_dict):
     d = default_dict.copy()
@@ -17,6 +20,41 @@ def is_per_channel(qscheme):
     return qscheme in [torch.per_channel_affine,
                        torch.per_channel_affine_float_qparams,
                        torch.per_channel_symmetric]
+
+def getattr_from_fqn(obj: Any, fqn: str) -> Any:
+    """
+    Given an obj and a fqn such as "foo.bar.baz", returns gm.foo.bar.baz.
+    """
+    return functools.reduce(getattr, fqn.split("."), obj)
+
+def get_qparam_dict(observer_or_fake_quant):
+    qscheme = observer_or_fake_quant.qscheme if hasattr(observer_or_fake_quant, "qscheme") else None
+    dtype = observer_or_fake_quant.dtype
+    qparams = {"qscheme": qscheme, "dtype": dtype}
+
+    if not qscheme:
+        return qparams
+
+    if is_per_tensor(qscheme):
+        qscheme = torch.per_tensor_affine
+    elif is_per_channel(qscheme):
+        # change symmetric to affine since we do not have symmetric
+        # quantized Tensor
+        if qscheme == torch.per_channel_symmetric:
+            qscheme = torch.per_channel_affine
+        qparams["axis"] = observer_or_fake_quant.ch_axis
+    else:
+        raise RuntimeError(f"Unrecognized qscheme: {qscheme}")
+    # update qscheme, since we don't have symmetric quant qscheme
+    # in quantized Tensor
+    qparams["qscheme"] = qscheme
+
+    scale, zero_point = observer_or_fake_quant.calculate_qparams()
+    qparams["scale"] = scale
+    qparams["zero_point"] = zero_point
+
+    return qparams
+
 
 def get_swapped_custom_module_class(custom_module, custom_module_class_mapping, qconfig):
     """ Get the observed/quantized custom module class that we need
@@ -101,3 +139,79 @@ def get_quant_type(qconfig):
 
     raise Exception("Unrecognized dtype combination in get_quant_type: activation({}),"
                     "weight({})".format(activation.dtype, weight.dtype))
+
+def check_min_max_valid(min_val: torch.Tensor, max_val: torch.Tensor) -> bool:
+    """ Checks if the given minimum and maximum values are valid, meaning that
+    they exist and the min value is less than the max value.
+    """
+    if min_val.numel() == 0 or max_val.numel() == 0:
+        warnings.warn(
+            "must run observer before calling calculate_qparams. " +
+            "Returning default values."
+        )
+        return False
+
+    if min_val.dim() == 0 or max_val.dim() == 0:
+        if min_val == float("inf") and max_val == float("-inf"):
+            warnings.warn(
+                "must run observer before calling calculate_qparams. " +
+                "Returning default values."
+            )
+
+            return False
+
+        assert min_val <= max_val, "min {} should be less than max {}".format(
+            min_val, max_val
+        )
+    else:
+        assert torch.all(
+            min_val <= max_val
+        ), "min {} should be less than max {}".format(min_val, max_val)
+
+    return True
+
+
+def calculate_qmin_qmax(quant_min: int, quant_max: int, has_customized_qrange: bool, dtype: torch.dtype,
+                        reduce_range: bool) -> Tuple[int, int]:
+    r"""Calculates actual qmin and qmax based on the quantization range,
+    observer datatype and if range is reduced.
+    """
+    if has_customized_qrange:
+        # This initialization here is to be resolve TorchScript compilation issues and allow
+        # using of refinement to decouple initial_qmin and initial_qmax from quantization range.
+        # The actual values of initial_qmin and initial_qmax will be reset below.
+        initial_quant_min, initial_quant_max = 0, 255
+        # The following assignment of self.qmin and self.qmax to the local variables and the if check refine the
+        # attribute from Optional valid integers for use, based on TorchScript's requirements.
+        custom_quant_min, custom_quant_max = quant_min, quant_max
+        if custom_quant_min is not None and custom_quant_max is not None:
+            initial_quant_min, initial_quant_max = (
+                custom_quant_min,
+                custom_quant_max,
+            )
+
+        qrange_len = initial_quant_max - initial_quant_min + 1
+        assert (
+            0 < qrange_len <= 256
+        ), "quantization range should be positive and not exceed the maximum bit range (=256)."
+        if dtype == torch.qint8:
+            quant_min, quant_max = -qrange_len // 2, qrange_len // 2 - 1
+        else:
+            quant_min, quant_max = 0, qrange_len - 1
+        if reduce_range:
+            quant_min, quant_max = quant_min // 2, quant_max // 2
+    else:
+        # Fallback onto default 8-bit qmin and qmax calculation if dynamic range is not used.
+        if dtype == torch.qint8:
+            if reduce_range:
+                quant_min, quant_max = -64, 63
+            else:
+                quant_min, quant_max = -128, 127
+        elif dtype == torch.quint8:
+            if reduce_range:
+                quant_min, quant_max = 0, 127
+            else:
+                quant_min, quant_max = 0, 255
+        else:
+            quant_min, quant_max = 0, 15
+    return quant_min, quant_max

@@ -1,5 +1,3 @@
-#include <c10/util/irange.h>
-
 #include <torch/csrc/jit/codegen/cuda/arith.h>
 #include <torch/csrc/jit/codegen/cuda/ir_cloner.h>
 #include <torch/csrc/jit/codegen/cuda/ir_interface_nodes.h>
@@ -8,6 +6,8 @@
 #include <torch/csrc/jit/codegen/cuda/kernel_ir.h>
 #include <torch/csrc/jit/codegen/cuda/transform_iter.h>
 #include <torch/csrc/jit/codegen/cuda/transform_rfactor.h>
+
+#include <c10/util/irange.h>
 
 #include <sstream>
 
@@ -1239,7 +1239,7 @@ void ConcretizeDomain::concretizePwOp(Expr* e) {
         TensorDomain::noReductions(i->getMaybeRFactorDomain());
     TORCH_INTERNAL_ASSERT(ii.size() == io.size());
 
-    for (size_t it = 0; it < ii.size(); it++) {
+    for (const auto it : c10::irange(ii.size())) {
       if (!canConcretize(io[it]))
         continue;
 
@@ -1338,7 +1338,7 @@ class ProveValEqual : private IterVisitor {
       std::vector<IterDomain*> ii =
           TensorDomain::noReductions(i->getMaybeRFactorDomain());
 
-      for (size_t it = 0; it < ii.size(); it++)
+      for (const auto it : c10::irange(ii.size()))
         if (cd_.canConcretize(ii[it]) && cd_.canConcretize(io[it]))
           proveId(cd_.concretized(ii[it]), cd_.concretized(io[it]));
     }

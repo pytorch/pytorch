@@ -16,10 +16,8 @@ float L2MinimizationKernelAVX2(
     int start_bin) {
   float norm = 0;
   constexpr int VLEN = 8;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   float norm_delta_default = dst_bin_width * dst_bin_width * dst_bin_width / 12;
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   __m256i identity_v = _mm256_set_epi32(7, 6, 5, 4, 3, 2, 1, 0);
   __m256 bin_width_v = _mm256_set1_ps(bin_width);
   __m256 bin_width_inverse_v = _mm256_set1_ps(1.0f / bin_width);

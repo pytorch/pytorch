@@ -94,11 +94,16 @@ __host__ __forceinline__ static accscalar_t area_pixel_compute_scale(
     int output_size,
     bool align_corners,
     const c10::optional<double> scale) {
-  if (output_size > 1) {
-    return align_corners ? (accscalar_t)(input_size - 1) / (output_size - 1)
-                         :  compute_scales_value<accscalar_t>(scale, input_size, output_size);
-  } else {
-    return static_cast<accscalar_t>(0);
+  if(align_corners) {
+    if(output_size > 1) {
+      return (accscalar_t)(input_size - 1) / (output_size - 1);
+    }
+    else {
+      return static_cast<accscalar_t>(0);
+    }
+  }
+  else{
+    return compute_scales_value<accscalar_t>(scale, input_size, output_size);
   }
 }
 
@@ -171,7 +176,7 @@ __device__ __forceinline__ static void upsample_increment_value_bounded(
   /* TODO: result here is truncated to scalar_t,
      check: https://github.com/pytorch/pytorch/pull/19630#discussion_r281426912
    */
-  gpuAtomicAdd(
+  gpuAtomicAddNoReturn(
       &data[batch][channel][access_y][access_x], static_cast<scalar_t>(value));
 }
 

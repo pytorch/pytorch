@@ -9,8 +9,8 @@
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/jit/frontend/source_range.h>
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DECLARE_bool(torch_jit_disable_warning_prints);
+C10_DECLARE_bool(torch_jit_enable_rethrow_caught_exception);
 
 namespace at {
 class Tensor;
@@ -27,10 +27,12 @@ namespace jit {
 // The interpreter run Graphs with Tensor inputs and Tensor outputs
 // a separate component in the autograd handles unwrapping and wrapping
 // variable objects for use in the interpreter.
+namespace interpreter {
+struct CodeImpl;
+}
 
 struct Node;
 struct GraphExecutor;
-struct CodeImpl;
 struct InterpreterStateImpl;
 struct Graph;
 struct Node;
@@ -40,8 +42,8 @@ using c10::ivalue::Future;
 using TaskLauncher = std::function<void(std::function<void()>)>;
 
 struct TORCH_API Code {
-  Code() : pImpl(nullptr) {}
-  explicit Code(CodeImpl* pImpl);
+  Code() = default;
+  explicit Code(interpreter::CodeImpl* pImpl);
   // remaining_bailout_depth is irrelevant in a `Code` object unless the `Code`
   // is directly created by `GraphExecutor` in which case it's likely to contain
   // `prim::BailOut`s to control the maximum depth of bailout chains
@@ -63,13 +65,14 @@ struct TORCH_API Code {
   const std::vector<c10::IValue>& constant_table() const;
   const std::vector<c10::TypePtr>& type_table() const;
   const std::vector<Instruction>& instructions() const;
-  const std::unordered_map<std::string, int>& op_to_num_specified_args() const;
+  const std::unordered_map<std::string, size_t>& op_to_num_specified_args()
+      const;
   const std::vector<Node*>& instructions_source() const;
   void request_bailout(size_t index);
   size_t register_size() const;
 
  private:
-  std::shared_ptr<CodeImpl> pImpl;
+  std::shared_ptr<interpreter::CodeImpl> pImpl;
   friend struct InterpreterStateImpl;
   friend std::ostream& operator<<(std::ostream& out, const Code& code);
 };
@@ -78,6 +81,8 @@ struct TORCH_API MobileCode : Code {
   explicit MobileCode(
       const std::shared_ptr<Graph>& graph,
       std::string function_name,
+      bool emit_default_input_instructions = true,
+      bool support_default_args_before_out = false,
       size_t remaining_bailout_depth = 0);
   ~MobileCode();
 };
@@ -106,6 +111,7 @@ struct Suspend : public std::exception {
     return "Suspend";
   }
 
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   explicit Suspend(c10::intrusive_ptr<Future> future_)
       : future(std::move(future_)) {}
 
@@ -116,6 +122,7 @@ struct Suspend : public std::exception {
 // through (and only through) the forward pass manually, other
 // thread local settings are propagated with ThreadLocalState
 struct InterpreterContinuation {
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   InterpreterContinuation(
       const InterpreterState& state_,
       Stack stack_,
@@ -148,6 +155,7 @@ TORCH_API at::TensorTypePtr tensorTypeInCurrentExecutionContext(
 
 // current (TLS) TorchScript interpreter callstack
 TORCH_API std::vector<StackEntry> currentCallstack();
+TORCH_API std::vector<std::string> currentModuleHierarchy();
 
 } // namespace jit
 } // namespace torch

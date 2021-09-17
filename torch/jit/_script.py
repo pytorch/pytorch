@@ -13,13 +13,13 @@ import inspect
 import copy
 import pickle
 import warnings
-from typing import Any, Dict, List, Tuple, Optional
+from typing import Any, Dict, List, Tuple, Union, Callable
 
 
 import torch
 import torch._jit_internal as _jit_internal
 from torch.utils import set_module
-from torch.jit._recursive import ScriptMethodStub, wrap_cpp_module, infer_methods_to_compile
+from torch.jit._recursive import ScriptMethodStub, wrap_cpp_module, infer_methods_to_compile, _compile_and_register_class
 from torch.nn import Module
 from torch.jit._state import _enabled
 from torch.jit._builtins import _register_builtin
@@ -35,12 +35,15 @@ from torch.jit._state import (
 )
 from torch.overrides import (
     has_torch_function, has_torch_function_unary, has_torch_function_variadic)
+from torch.package import PackageExporter, PackageImporter
+from ._serialization import validate_map_location
 
 from torch.jit._monkeytype_config import (
     monkeytype_trace,
     JitTypeTraceConfig ,
     JitTypeTraceStore
 )
+from torch._classes import classes
 
 type_trace_db = JitTypeTraceStore()  # DB to hold all call traces from MonkeyType
 
@@ -70,9 +73,10 @@ Attribute.__doc__ = """
 
     Though TorchScript can infer correct type for most Python expressions, there are some cases where
     type inference can be wrong, including:
-    - Empty containers like `[]` and `{}`, which TorchScript assumes to be container of `Tensor`s
+
+    - Empty containers like `[]` and `{}`, which TorchScript assumes to be container of `Tensor`
     - Optional types like `Optional[T]` but assigned a valid value of type `T`, TorchScript would assume
-    it is type `T` rather than `Optional[T]`
+      it is type `T` rather than `Optional[T]`
 
     In eager mode, it is simply a pass-through function that returns `value`
     without other implications.
@@ -128,14 +132,6 @@ def _get_function_from_type(cls, name):
 def _is_new_style_class(cls):
     if hasattr(cls, "__class__"):
         return "__dict__" in dir(cls) or hasattr(cls, "__slots__")
-
-
-def _compile_and_register_class(obj, rcb, qualified_name):
-    ast = get_jit_class_def(obj, obj.__name__)
-    defaults = torch.jit.frontend.get_default_args_for_class(obj)
-    script_class = torch._C._jit_script_class_compile(qualified_name, ast, defaults, rcb)
-    torch.jit._state._add_script_class(obj, script_class)
-    return script_class
 
 
 # These OrderedDictWrapper classes replace the actual OrderedDicts in
@@ -294,7 +290,7 @@ class ScriptMeta(type):
                     delattr(self, name)
 
         cls.__init__ = init_then_script  # type: ignore[misc]
-        return super(ScriptMeta, cls).__init__(name, bases, attrs)
+        super(ScriptMeta, cls).__init__(name, bases, attrs)
 
 
 class _CachedForward(object):
@@ -334,9 +330,126 @@ class ConstMap:
         return self.const_mapping[attr]
 
 
+def unpackage_script_module(importer: PackageImporter, script_module_id: str) -> torch.nn.Module:
+    """
+    Called by ``torch.package.PackageImporter``'s Pickler's ``persistent_load`` function.
+    Performs work of loading and returning a ScriptModule from a ``torch.package`` archive.
+    """
+    if not isinstance(importer.zip_reader, torch._C.PyTorchFileReader):
+        raise RuntimeError(
+            "Loading ScriptObjects from a PackageImporter created from a "
+            "directory is not supported. Use a package archive file instead."
+        )
+    cu = torch._C.CompilationUnit()
+    cpp_module = torch._C._import_ir_module_from_package(
+        cu,
+        importer.zip_reader,
+        importer.storage_context,
+        validate_map_location(importer.last_map_location),
+        script_module_id,
+    )
+    return wrap_cpp_module(cpp_module)
+
+
 if _enabled:
+    _magic_methods = [
+        "__iter__",
+        "__len__",
+        "__neg__",
+        "__mul__",
+        "__contains__",
+        "__add__",
+        "__sub__",
+        "__pow__",
+        "__truediv__",
+        "__mod__",
+        "__ne__",
+        "__eq__",
+        "__lt__",
+        "__gt__",
+        "__le__",
+        "__ge__",
+        "__and__",
+        "__or__",
+        "__xor__",
+        "__getitem__",
+        "__setitem__",
+        "__call__",
+        "__int__",
+        "__float__",
+        "__bool__",
+        "__str__",
+        "__enter__",
+        "__exit__",
+    ]
+
+    class RecursiveScriptClass(object):
+        """
+        An analogue of RecursiveScriptModule for regular objects that are not modules.
+        This class is a wrapper around a torch._C.ScriptObject that represents an instance
+        of a TorchScript class and allows it to be used in Python.
+
+        Attributes:
+            _c [torch._C.ScriptObject]: The C++ object to which attribute lookups and method
+                calls are forwarded.
+            _props [Dict[str, property]]: A dictionary of properties fetched from self._c and
+                exposed on this wrppaer.
+        """
+        def __init__(self, cpp_class):
+            super(RecursiveScriptClass, self).__init__()
+            self.__dict__["_initializing"] = True
+            self._c = cpp_class
+
+            # Add wrapped object's properties to this class instance.
+            self._props = {prop.name: property(prop.getter, prop.setter) for prop in self._c._properties()}
+
+            self.__dict__["_initializing"] = False
+
+        def __getattr__(self, attr):
+            if "_initializing" in self.__dict__ and self.__dict__["_initializing"]:
+                return super(RecursiveScriptClass, self).__getattr__(attr)  # type: ignore[misc]
+
+            if attr in self._props:
+                return self._props[attr].fget()
+
+            return getattr(self._c, attr)
+
+        def __setattr__(self, attr, value):
+            if "_initializing" in self.__dict__ and self.__dict__["_initializing"]:
+                return super(RecursiveScriptClass, self).__setattr__(attr, value)
+
+            if attr in self._props:
+                return self._props[attr].fset(value)
+
+            setattr(self._c, attr, value)
+
+        # Delegate calls to magic methods like __len__ to the C++ module backing the
+        # RecursiveScriptClass.
+        def forward_magic_method(self, method_name, *args, **kwargs):
+            if not self._c._has_method(method_name):
+                raise TypeError()
+
+            self_method = self.__getattr__(method_name)
+            return self_method(*args, **kwargs)
+
+        def __getstate__(self):
+            raise pickle.PickleError("ScriptClasses cannot be pickled")
+
+        def __iadd__(self, other):
+            if self._c._has_method("__iadd__"):
+                return self.forward_magic_method("__iadd__", other)
+            else:
+                return self.forward_magic_method("__add__", other)
+
+
+    for method_name in _magic_methods:
+        def method_template(self, *args, **kwargs):
+            return self.forward_magic_method(method_name, *args, **kwargs)
+
+        setattr(RecursiveScriptClass, method_name, method_template)
+
     # this is a Python 'non-data descriptor' that causes the first access
-    # to ScriptModule's forward to lookup the forward method and stash
+    # to ScriptModule's forward to look up the forward method and stash
     # it in the objects dict. Due to the standard rules for attribute lookup,
     # subsequent lookups will just directly return the previously looked up method.
     # This is necessary because nn.Module defines forward as a method. If we
@@ -405,6 +518,19 @@ if _enabled:
 
         def _replicate_for_data_parallel(self):
             return self._actual_script_module._replicate_for_data_parallel()
+
+        def __reduce_package__(self, exporter: PackageExporter):
+            """
+            Called by ``torch.package.PackageExporter``'s Pickler's ``persistent_id`` when
+            saving TorchScript objects. Performs act of saving a ScriptModule inside of
+            a ``torch.package`` archive.
+
+            Returns method to load the ScriptModule from a ``torch.package.PackageImporter``'s
+            Pickler's ``persistent_load`` function.
+            """
+            script_module_id = exporter.get_unique_id()
+            exporter.script_module_serializer.serialize(self._c, int(script_module_id))
+            return (unpackage_script_module, (script_module_id,))
 
     class RecursiveScriptModule(ScriptModule):
         # XXX: RecursiveScriptModule inherits from ScriptModule for the sole
@@ -659,13 +785,6 @@ if _enabled:
                 # It's fairly trivial to save enough info to warn in this case.
                 return super(RecursiveScriptModule, self).__setattr__(attr, value)
 
-        def __getstate__(self):
-            raise pickle.PickleError(
-                "ScriptModules cannot be deepcopied using copy.deepcopy or saved using torch.save. "
-                + "Mixed serialization of script and non-script modules is not supported. "
-                + "For purely script modules use my_script_module.save(<filename>) instead."
-            )
-
         def __copy__(self):
             return torch.jit._recursive.wrap_cpp_module(copy.copy(self._c))
 
@@ -786,6 +905,8 @@ if _enabled:
         "_tracing_name",
         "eval",
         "train",
+        "get_extra_state",
+        "set_extra_state"
     }
 
     def _make_fail(name):
@@ -806,6 +927,10 @@ if _enabled:
 
 else:
     # TODO MAKE SURE THAT DISABLING WORKS
+    class RecursiveScriptClass(object):  # type: ignore[no-redef]
+        def __init__(self):
+            super().__init__()
+
     class ScriptModule(torch.nn.Module):  # type: ignore[no-redef]
         def __init__(self, arg=None):
             super().__init__()
@@ -847,45 +972,43 @@ def call_prepare_scriptable_func_impl(obj, memo):
 
     return obj
 
+
 def call_prepare_scriptable_func(obj):
     memo: Dict[int, torch.nn.Module] = {}
     return call_prepare_scriptable_func_impl(obj, memo)
 
-def _script_pdt(obj, optimize=None, _frames_up=0, _rcb=None, example_inputs: Optional[List[Tuple]] = None):
-    # This is a private API, intended for internal use only. Usage of this API is only for experimental
-    # purposes only and is highly discouraged.
-    global type_trace_db
-    if not _enabled:
-        return obj
+def create_script_dict(obj):
+    """
+    Create a ``torch._C.ScriptDict`` instance with the data from ``obj``.
 
-    if optimize is not None:
-        warnings.warn(
-            "`optimize` is deprecated and has no effect. Use `with torch.jit.optimized_execution() instead"
-        )
+    Args:
+        obj (dict): The Python dictionary that is used to initialize the ``ScriptDict``
+                    returned by this function.
 
-    # No-op for modules and functions that are already scripted
-    if isinstance(obj, ScriptModule):
-        return obj
-    if isinstance(obj, ScriptFunction):
-        return obj
+    Returns:
+        An instance of ``torch._C.ScriptDict`` that has the same data as ``obj``
+        and can be passed between Python and TorchScript with reference semantics and
+        zero copy overhead.
+    """
+    return torch._C.ScriptDict(obj)  # type: ignore[attr-defined]
 
-    # If MonkeyType is installed, enable profile directed type annotation
-    # Check if example_inputs are defined and generate call traces
-    # for the method by running eager mode version of the method with
-    # the provide example inputs. This logs all the traces in type_trace_db
-    type_trace_db = JitTypeTraceStore()
-    if monkeytype_trace:
-        monkeytype_config = JitTypeTraceConfig(type_trace_db)
-        with monkeytype_trace(monkeytype_config):
-            for example_input in example_inputs:  # type: ignore[union-attr]
-                obj(*example_input)
-    else:
-        warnings.warn("Warning: monkeytype is not installed. Please install https://github.com/Instagram/MonkeyType "
-                      "to enable Profile-Directed Typing in TorchScript. Refer to "
-                      "https://github.com/Instagram/MonkeyType/blob/master/README.rst to install MonkeyType. ")
-    return script(obj, optimize, _frames_up, _rcb)
 
-def script(obj, optimize=None, _frames_up=0, _rcb=None):
+def create_script_list(obj, type_hint=None):
+    """
+    Create a ``torch._C.ScriptList`` instance with the data from ``obj``.
+    Args:
+        obj (dict): The Python list that is used to initialize the ``ScriptList``
+                    returned by this function.
+    Returns:
+        An instance of ``torch._C.ScriptList`` that has the same data as ``obj``
+        and can be passed between Python and TorchScript with reference semantics and
+        zero copy overhead.
+    """
+    return torch._C.ScriptList(obj)  # type: ignore[attr-defined]
+
+
+def script(obj, optimize=None, _frames_up=0, _rcb=None,
+           example_inputs: Union[List[Tuple], Dict[Callable, List[Tuple]], None] = None):
     r"""
     Scripting a function or ``nn.Module`` will inspect the source code, compile
     it as TorchScript code using the TorchScript compiler, and return a :class:`ScriptModule` or
@@ -894,19 +1017,26 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
     tensors and do control-dependent operations. For a complete guide, see the
     :ref:`language-reference`.
 
-    ``torch.jit.script`` can be used as a function for modules and functions, and as a decorator
-    ``@torch.jit.script`` for :ref:`torchscript-classes` and functions.
+    Scripting a dictionary or list copies the data inside it into a TorchScript instance than can be
+    subsequently passed by reference between Python and TorchScript with zero copy overhead.
+
+    ``torch.jit.script`` can be used as a function for modules, functions, dictionaries and lists
+     and as a decorator ``@torch.jit.script`` for :ref:`torchscript-classes` and functions.
 
     Args:
-        obj (callable, class, or ``nn.Module``):  The ``nn.Module``, function, or class type to
-                                                  compile.
+        obj (callable, class, or ``nn.Module``):  The ``nn.Module``, function, class type,
+                                                  dictionary, or list to compile.
+        example_inputs (Union[List[Tuple], Dict[Callable, List[Tuple]], None]): Provide example inputs
+            to annotate the arguments for a function or ``nn.Module``.
 
     Returns:
         If ``obj`` is ``nn.Module``, ``script`` returns
         a :class:`ScriptModule` object. The returned :class:`ScriptModule` will
         have the same set of sub-modules and parameters as the
         original ``nn.Module``. If ``obj`` is a standalone function,
-        a :class:`ScriptFunction` will be returned.
+        a :class:`ScriptFunction` will be returned. If ``obj`` is a ``dict``, then
+        ``script`` returns an instance of `torch._C.ScriptDict`. If ``obj`` is a ``list``,
+        then ``script`` returns an instance of `torch._C.ScriptList`.
 
     **Scripting a function**
         The ``@torch.jit.script`` decorator will construct a :class:`ScriptFunction`
@@ -933,6 +1063,34 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
 
             # Call the function using the TorchScript interpreter
             foo(torch.ones(2, 2), torch.ones(2, 2))
+
+        .. testoutput::
+            :hide:
+
+            ...
+
+    ****Scripting a function using example_inputs**
+        Example inputs can be used to annotate a function arguments.
+
+        Example (annotating a function before scripting):
+
+        .. testcode::
+
+            import torch
+
+            def test_sum(a, b):
+                return a + b
+
+            # Annotate the arguments to be int
+            scripted_fn = torch.jit.script(test_sum, example_inputs=[(3, 4)])
+
+            print(type(scripted_fn))  # torch.jit.ScriptFunction
+
+            # See the compiled graph as Python code
+            print(scripted_fn.code)
+
+            # Call the function using the TorchScript interpreter
+            scripted_fn(20, 100)
 
         .. testoutput::
             :hide:
@@ -1025,7 +1183,30 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
             scripted_module = torch.jit.script(MyModule())
             print(scripted_module.some_entry_point(torch.randn(2, 2)))
             print(scripted_module(torch.randn(2, 2)))
+
+        Example ( Annotating forward of nn.Module using example_inputs)::
+
+            import torch
+            import torch.nn as nn
+            from typing import NamedTuple
+
+            class MyModule(NamedTuple):
+            result: List[int]
+
+            class TestNNModule(torch.nn.Module):
+                def forward(self, a) -> MyModule:
+                    result = MyModule(result=a)
+                    return result
+
+            pdt_model = TestNNModule()
+
+            # Runs the pdt_model in eager model with the inputs provided and annotates the arguments of forward
+            scripted_model = torch.jit.script(pdt_model, example_inputs={pdt_model: [([10, 20, ], ), ], })
+
+            # Run the scripted_model with actual inputs
+            print(scripted_model([20]))
     """
+    global type_trace_db
     if not _enabled:
         return obj
 
@@ -1034,11 +1215,42 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
             "`optimize` is deprecated and has no effect. Use `with torch.jit.optimized_execution() instead"
         )
 
-    # No-op for modules and functions that are already scripted
+    # No-op for modules, functions, class instances that are already scripted
+    if isinstance(obj, RecursiveScriptClass):
+        return obj
     if isinstance(obj, ScriptModule):
         return obj
     if isinstance(obj, ScriptFunction):
         return obj
+
+    if example_inputs:
+        # If MonkeyType is installed, enable profile directed type annotation
+        # Check if example_inputs are defined and generate call traces
+        # for the method by running eager mode version of the method with
+        # the provide example inputs. This logs all the traces in type_trace_db
+        type_trace_db = JitTypeTraceStore()
+        if monkeytype_trace:
+            monkeytype_config = JitTypeTraceConfig(type_trace_db)
+            with monkeytype_trace(monkeytype_config):
+                if isinstance(example_inputs, Dict):
+                    # If the obj is an nn.Module or a class, then each method is
+                    # executed with the arguments provided in the example inputs.
+                    # example inputs here will be of type Dict(class.method, (arguments))
+                    # This is used to infer type annotations for those methods
+                    # which are not called directly under the hood of monkeytype.
+                    for module, example_input in example_inputs.items():
+                        for example in example_input:
+                            module(*example)
+                elif isinstance(example_inputs, List):
+                    for examples in example_inputs:
+                        obj(*examples)
+                else:
+                    raise ValueError("Error: Unable to infer types. Please format the inputs to type `List[Tuple]`"
+                                     " or `Dict[Callable, List[Tuple]]` to be run with MonkeyType.")
+        else:
+            warnings.warn("Warning: monkeytype is not installed. Please install https://github.com/Instagram/MonkeyType "
+                          "to enable Profile-Directed Typing in TorchScript. Refer to "
+                          "https://github.com/Instagram/MonkeyType/blob/master/README.rst to install MonkeyType. ")
 
     if isinstance(obj, torch.nn.Module):
         obj = call_prepare_scriptable_func(obj)
@@ -1046,8 +1258,13 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
             obj, torch.jit._recursive.infer_methods_to_compile
         )
 
-    qualified_name = _qualified_name(obj)
+    if isinstance(obj, dict):
+        return create_script_dict(obj)
+    if isinstance(obj, list):
+        return create_script_list(obj)
+
     if inspect.isclass(obj):
+        qualified_name = _qualified_name(obj)
         # If this type is a `nn.Module` subclass, they probably meant to pass
         # an instance instead of a Module
         if issubclass(obj, torch.nn.Module):
@@ -1076,7 +1293,8 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
             _rcb = _jit_internal.createResolutionCallbackFromFrame(_frames_up + 1)
         _compile_and_register_class(obj, _rcb, qualified_name)
         return obj
-    else:
+    elif inspect.isfunction(obj) or inspect.ismethod(obj):
+        qualified_name = _qualified_name(obj)
         # this is a decorated fn, and we need to the underlying fn and its rcb
         if hasattr(obj, "__script_if_tracing_wrapper"):
             obj = obj.__original_fn
@@ -1096,6 +1314,8 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
         fn.__doc__ = obj.__doc__
         _set_jit_function_cache(obj, fn)
         return fn
+    else:
+        return torch.jit._recursive.create_script_class(obj)
 
 
 # overloads are registered in _jit_internal and compiled here so that _overload
@@ -1143,6 +1363,10 @@ def _get_overloads(obj):
     uncompiled_overloads = _jit_internal._get_fn_overloads(qual_name)
     if uncompiled_overloads is None:
         return existing_compiled_fns
+
+    if obj in uncompiled_overloads:
+        raise RuntimeError(_jit_internal.get_overload_no_implementation_error_message(
+            'function', obj))
 
     compiled_fns = []
     for overload_fn in uncompiled_overloads:
@@ -1210,6 +1434,111 @@ def _recursive_compile_class(obj, loc):
 
 CompilationUnit = torch._C.CompilationUnit
 set_module(CompilationUnit, "torch.jit")
+
+
+def pad(s: str, padding: int, offset: int = 0, char: str = ' '):
+    if padding >= len(s):
+        padding -= len(s)
+    return ''.join([char for _ in range(padding + offset)]) + s
+
+
+class _ScriptProfileColumn:
+    def __init__(self, header: str, alignment: int = 4, offset: int = 0):
+        self.header = header
+        self.alignment = alignment
+        self.offset = offset
+        self.rows: Dict[int, Any] = {}
+
+    def add_row(self, lineno: int, value: Any):
+        self.rows[lineno] = value
+
+    def materialize(self):
+        max_length = len(self.header)
+        rows: List[Tuple[int, str]] = []
+        for (key, value) in self.rows.items():
+            cell = str(value)
+            rows.append((key, cell))
+            max_length = max(len(cell), max_length)
+
+        if self.alignment > 0:
+            padding = max_length + self.alignment
+            padding -= padding % self.alignment
+        else:
+            padding = 0
+
+        rows = [(key, pad(cell, padding, self.offset)) for key, cell in rows]
+        return pad(self.header, padding, self.offset), rows
+
+
+class _ScriptProfileTable:
+    def __init__(self, cols: List[_ScriptProfileColumn], source_range: List[int]):
+        self.cols = cols
+        self.source_range = source_range
+
+    def dump_string(self):
+        outputs: List[str] = []
+        cells: List[Tuple[str, Dict[int, str]]] = []
+        header_buffer = ''
+        for col in self.cols:
+            header, rows = col.materialize()
+            header_buffer += header
+            cells.append((header, dict(rows)))
+
+        outputs.append(header_buffer)
+        outputs.append(pad('', len(header_buffer), 0, '='))
+        for line in self.source_range:
+            row_buffer = ''
+            for header, rows in cells:
+                cell = rows.get(line)
+                if cell is None:
+                    row_buffer += pad('', len(header))
+                else:
+                    row_buffer += cell
+            outputs.append(row_buffer)
+        return '\n'.join(outputs)
+
+
+class _ScriptProfile:
+    def __init__(self):
+        self.profile = classes.profiling._ScriptProfile()
+
+    def enable(self):
+        self.profile.enable()
+
+    def disable(self):
+        self.profile.disable()
+
+    def dump_string(self) -> str:
+        outputs: List[str] = []
+        for source_stats in self.profile._dump_stats():
+            source_ref = source_stats.source()
+            source_lines = source_ref.text().splitlines()
+            dedent = min([len(line) - len(line.lstrip(' ')) for line in source_lines])
+            source_lines = [line[dedent:] for line in source_lines]
+
+            start_line = source_ref.starting_lineno()
+            end_line = start_line + len(source_lines)
+            source_range = range(start_line, end_line)
+            lineno = _ScriptProfileColumn("Line #")
+            hits = _ScriptProfileColumn("Hits")
+            time_ns = _ScriptProfileColumn("Time (ns)")
+            line_contents = _ScriptProfileColumn("Line Contents", 0, 1)
+            stats = source_stats.line_map()
+            for line in source_range:
+                lineno.add_row(line, line)
+                line_contents.add_row(line, source_lines[line - start_line])
+                stat = stats.get(line)
+                if stat is not None:
+                    hits.add_row(line, stat.count())
+                    time_ns.add_row(line, stat.duration_ns())
+
+            table = _ScriptProfileTable([lineno, hits, time_ns, line_contents], list(source_range))
+            outputs.append(table.dump_string())
+        return '\n\n'.join(outputs)
+
+    def dump(self):
+        print(self.dump_string())
+
 
 def _unwrap_optional(x):
     assert x is not None, "Unwrapping null optional"

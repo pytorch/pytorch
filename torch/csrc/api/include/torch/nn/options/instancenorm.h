@@ -16,11 +16,9 @@ struct TORCH_API InstanceNormOptions {
   TORCH_ARG(int64_t, num_features);
 
   /// The epsilon value added for numerical stability.
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   TORCH_ARG(double, eps) = 1e-5;
 
   /// A momentum multiplier for the mean and variance.
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   TORCH_ARG(double, momentum) = 0.1;
 
   /// Whether to learn a scale and bias that are applied in an affine
@@ -76,10 +74,8 @@ struct TORCH_API InstanceNormFuncOptions {
 
   TORCH_ARG(bool, use_input_stats) = true;
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   TORCH_ARG(double, momentum) = 0.1;
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   TORCH_ARG(double, eps) = 1e-5;
 };
 

@@ -12,7 +12,6 @@ CAFFE_KNOWN_TYPE(db::Cursor);
 
 namespace db {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_REGISTRY(Caffe2DBRegistry, DB, const string&, Mode);
 
 // Below, we provide a bare minimum database "minidb" as a reference
@@ -104,7 +103,7 @@ class MiniDBTransaction : public Transaction {
     Commit();
   }
 
-  void Put(const string& key, const string& value) override {
+  void Put(const string& key, string&& value) override {
     int key_len = key.size();
     int value_len = value.size();
     CAFFE_ENFORCE_EQ(fwrite(&key_len, sizeof(int), 1, file_), 1);
@@ -176,9 +175,7 @@ class MiniDB : public DB {
   std::mutex file_access_mutex_;
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CAFFE2_DB(MiniDB, MiniDB);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CAFFE2_DB(minidb, MiniDB);
 
 void DBReaderSerializer::Serialize(
@@ -212,9 +209,7 @@ void DBReaderDeserializer::Deserialize(const BlobProto& proto, Blob* blob) {
 
 namespace {
 // Serialize TensorCPU.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_BLOB_SERIALIZER((TypeMeta::Id<DBReader>()), DBReaderSerializer);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_BLOB_DESERIALIZER(DBReader, DBReaderDeserializer);
 } // namespace
 

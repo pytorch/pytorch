@@ -3,7 +3,7 @@
 #include <ATen/Dispatch.h>
 #include <ATen/native/AdaptivePooling.h>
 #include <ATen/Parallel.h>
-#include <ATen/cpu/vec256/vec256.h>
+#include <ATen/cpu/vec/vec.h>
 #include <ATen/native/cpu/utils.h>
 
 namespace at { namespace native {
@@ -82,7 +82,7 @@ void cpu_adaptive_avg_pool_channels_last(
   int64_t output_height = output_size[0];
   int64_t output_width = output_size[1];
 
-  using Vec = vec256::Vec256<scalar_t>;
+  using Vec = vec::Vectorized<scalar_t>;
   // parallel on dim N, H, W
   at::parallel_for(0, nbatch * output_height * output_width, 0, [&](int64_t begin, int64_t end) {
     int64_t n = 0;
@@ -217,7 +217,7 @@ void cpu_adaptive_avg_pool_backward_channels_last(
   int64_t output_height = grad_output.size(2);
   int64_t output_width = grad_output.size(3);
 
-  using Vec = vec256::Vec256<scalar_t>;
+  using Vec = vec::Vectorized<scalar_t>;
   // parallel on dim N
   at::parallel_for(0, nbatch, 0, [&](int64_t begin, int64_t end) {
     for (int64_t n = begin; n < end; n++) {
@@ -305,9 +305,7 @@ void adapative_avg_pool2d_backward_kernel_impl(
 
 } // anonymous namespace
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(adaptive_avg_pool2d_kernel, &adaptive_avg_pool2d_kernel_impl);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(adaptive_avg_pool2d_backward_kernel, &adapative_avg_pool2d_backward_kernel_impl);
 
 }} // at::native

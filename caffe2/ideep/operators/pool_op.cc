@@ -25,10 +25,8 @@ class IDEEPPoolOp final : public IDEEPConvPoolOpBase {
     pk_ = training_mode ? iprop::forward_training : iprop::forward_inference;
 
     // Figure out the pooling descriptor.
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     if (operator_def.type().substr(0, 7) == "MaxPool") {
       algo_ = ialgo::pooling_max;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     } else if (operator_def.type().substr(0, 11) == "AveragePool") {
       algo_ = ialgo::pooling_avg;
     } else {
@@ -81,10 +79,8 @@ class IDEEPPoolGradientOp final : public IDEEPConvPoolOpBase {
           "Pad should be smaller than kernel.");
     }
     // Figure out the pooling descriptor.
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     if (operator_def.type().substr(0, 15) == "MaxPoolGradient") {
       algo_ = ialgo::pooling_max;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     } else if (operator_def.type().substr(0, 19) == "AveragePoolGradient") {
       algo_ = ialgo::pooling_avg;
     } else {
@@ -115,14 +111,10 @@ class IDEEPPoolGradientOp final : public IDEEPConvPoolOpBase {
   OUTPUT_TAGS(INPUT_GRAD);
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(MaxPool, IDEEPPoolOp);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(MaxPoolGradient, IDEEPPoolGradientOp);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(AveragePool, IDEEPPoolOp);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(AveragePoolGradient, IDEEPPoolGradientOp);
 
 } // namespace

@@ -26,7 +26,6 @@ bool SparseLpRegularizerOp<float, CPUContext>::DoRunWithType() {
   // embedding length, e.g. 32, 64, 128
   auto block_size = Input(PARAM).size_from_dim(1);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   if (p_ == 2.0) { // L2 regularization
 #ifdef LOG_FIRST_N
     LOG_FIRST_N(INFO, 3)
@@ -80,11 +79,9 @@ bool SparseLpRegularizerOp<float, CPUContext>::DoRunWithType() {
   return true;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     SparseLpRegularizer,
     SparseLpRegularizerOp<float, CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SparseLpRegularizer)
     .NumInputs(2, 3)
     .NumOutputs(1)
@@ -104,7 +101,6 @@ OPERATOR_SCHEMA(SparseLpRegularizer)
 Given a sparse matrix, apply Lp regularization.  Currently only L1 and L2 are implemented.
 )DOC");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(SparseLpNorm);
 
 } // namespace caffe2

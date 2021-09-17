@@ -35,9 +35,7 @@ void cpu_upsample_linear_backward(
 
   // treat nbatch and channels as one dimension
   int64_t channels = input_sizes[0] * input_sizes[1];
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   int64_t input_depth = (ndim == 5) ? input_sizes[2] : 1;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   int64_t output_depth = (ndim == 5) ? output_sizes[2] : 1;
   int64_t input_height = (ndim >= 4) ? input_sizes[ndim - 2] : 1;
   int64_t output_height = (ndim >= 4) ? output_sizes[ndim - 2] : 1;
@@ -149,7 +147,6 @@ void cpu_upsample_linear_backward(
   } else {
     // upsample trilinear 3d
     TORCH_INTERNAL_ASSERT(ndim == 5);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     at::parallel_for(0, channels, at::internal::GRAIN_SIZE / output_slice_size / 8, loop3d);
   }
 
@@ -193,11 +190,8 @@ void upsample_trilinear3d_backward_kernel_impl(
 
 } // anonymous namespace
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(upsample_linear1d_backward_kernel, &upsample_linear1d_backward_kernel_impl);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(upsample_bilinear2d_backward_kernel, &upsample_bilinear2d_backward_kernel_impl);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(upsample_trilinear3d_backward_kernel, &upsample_trilinear3d_backward_kernel_impl);
 
 } // namespace native

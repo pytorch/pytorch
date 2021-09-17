@@ -11,7 +11,7 @@ import warnings
 from contextlib import closing, contextmanager
 from ._utils import _import_dotted_name
 from ._six import string_classes as _string_classes
-from torch._utils_internal import get_source_lines_and_file
+from torch._sources import get_source_lines_and_file
 from torch.types import Storage
 from typing import Any, BinaryIO, cast, Dict, Optional, Type, Tuple, Union, IO
 import copyreg
@@ -456,6 +456,7 @@ def _legacy_save(obj, f, pickle_module, pickle_protocol) -> None:
 
 def _save(obj, zip_file, pickle_module, pickle_protocol):
     serialized_storages = {}
+    id_map: Dict[int, str] = {}
 
     def persistent_id(obj):
         # FIXME: the docs say that persistent_id should only return a string
@@ -465,7 +466,7 @@ def _save(obj, zip_file, pickle_module, pickle_protocol):
         # https://github.com/python/cpython/blob/master/Lib/pickle.py#L527-L537
         if torch.is_storage(obj):
             storage_type = normalize_storage_type(type(obj))
-            obj_key = str(obj._cdata)
+            obj_key = id_map.setdefault(obj._cdata, str(len(id_map)))
             location = location_tag(obj)
             serialized_storages[obj_key] = obj
 

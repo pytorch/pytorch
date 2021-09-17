@@ -1,5 +1,8 @@
 #pragma once
 
+#include <thrust/tuple.h>
+
+#include <ATen/native/SharedReduceOps.h>
 #include <ATen/cuda/DeviceUtils.cuh>
 
 namespace at {
@@ -7,6 +10,11 @@ namespace native {
 namespace cuda_utils {
 
 constexpr int kCUDABlockReduceNumThreads = 512;
+// Algorithmic limitation: BlockReduce does two WarpReduce calls, each
+// of which reduces C10_WARP_SIZE elements. So, at most
+// C10_WARP_SIZE**2 elements can be reduced at a time.
+// NOTE: This is >= the max block size on current hardware anyway (1024).
+constexpr int kCUDABlockReduceMaxThreads = C10_WARP_SIZE * C10_WARP_SIZE;
 
 // Sums `val` accross all threads in a warp.
 //
@@ -38,9 +46,37 @@ __inline__ __device__ T BlockReduceSum(T val, T* shared) {
     shared[wid] = val;
   }
   __syncthreads();
-  val = (threadIdx.x < blockDim.x / C10_WARP_SIZE) ? shared[lid] : 0;
+  val = (threadIdx.x < blockDim.x / C10_WARP_SIZE) ? shared[lid] : T(0);
   if (wid == 0) {
     val = WarpReduceSum(val);
+  }
+  return val;
+}
+
+template <typename T, class ReduceOp>
+__inline__ __device__ T WarpReduce(T val, const ReduceOp& op) {
+#pragma unroll
+  for (int offset = (C10_WARP_SIZE >> 1); offset > 0; offset >>= 1) {
+    val = op.combine(val, op.warp_shfl_down(val, offset));
+  }
+  return val;
+}
+
+template <typename T, class ReduceOp>
+__inline__ __device__ T
+BlockReduce(T val, const ReduceOp& op, const T& identity_element, T* shared) {
+  const int lid = threadIdx.x % C10_WARP_SIZE;
+  const int wid = threadIdx.x / C10_WARP_SIZE;
+  val = WarpReduce(val, op);
+  __syncthreads();
+  if (lid == 0) {
+    shared[wid] = val;
+  }
+  __syncthreads();
+  val = (threadIdx.x < blockDim.x / C10_WARP_SIZE) ? shared[lid]
+                                                   : identity_element;
+  if (wid == 0) {
+    val = WarpReduce(val, op);
   }
   return val;
 }

@@ -1,5 +1,6 @@
 from __future__ import print_function
 
+# Unlike the rest of the PyTorch this file must be python2 compliant.
 # This script outputs relevant system environment info
 # Run it with `python collect_env.py`.
 import datetime
@@ -26,7 +27,9 @@ SystemEnv = namedtuple('SystemEnv', [
     'clang_version',
     'cmake_version',
     'os',
+    'libc_version',
     'python_version',
+    'python_platform',
     'is_cuda_available',
     'cuda_runtime_version',
     'nvidia_driver_version',
@@ -38,6 +41,7 @@ SystemEnv = namedtuple('SystemEnv', [
     'hip_compiled_version',
     'hip_runtime_version',
     'miopen_runtime_version',
+    'caching_allocator_config',
 ])
 
 
@@ -74,14 +78,21 @@ def run_and_parse_first_match(run_lambda, command, regex):
         return None
     return match.group(1)
 
+def run_and_return_first_line(run_lambda, command):
+    """Runs command using run_lambda and returns first line if output is not empty"""
+    rc, out, _ = run_lambda(command)
+    if rc != 0:
+        return None
+    return out.split('\n')[0]
+
 
 def get_conda_packages(run_lambda):
     if get_platform() == 'win32':
         system_root = os.environ.get('SYSTEMROOT', 'C:\\Windows')
         findstr_cmd = os.path.join(system_root, 'System32', 'findstr')
-        grep_cmd = r'{} /R "torch numpy cudatoolkit soumith mkl magma"'.format(findstr_cmd)
+        grep_cmd = r'{} /R "torch numpy cudatoolkit soumith mkl magma mypy"'.format(findstr_cmd)
     else:
-        grep_cmd = r'grep "torch\|numpy\|cudatoolkit\|soumith\|mkl\|magma"'
+        grep_cmd = r'grep "torch\|numpy\|cudatoolkit\|soumith\|mkl\|magma\|mypy"'
     conda = os.environ.get('CONDA_EXE', 'conda')
     out = run_and_read_all(run_lambda, conda + ' list | ' + grep_cmd)
     if out is None:
@@ -245,35 +256,41 @@ def get_os(run_lambda):
     return platform
 
 
+def get_python_platform():
+    import platform
+    return platform.platform()
+
+
+def get_libc_version():
+    import platform
+    if get_platform() != 'linux':
+        return 'N/A'
+    return '-'.join(platform.libc_ver())
+
+
 def get_pip_packages(run_lambda):
     """Returns `pip list` output. Note: will also find conda-installed pytorch
     and numpy packages."""
     # People generally have `pip` as `pip` or `pip3`
+    # But here it is incoved as `python -mpip`
     def run_with_pip(pip):
         if get_platform() == 'win32':
             system_root = os.environ.get('SYSTEMROOT', 'C:\\Windows')
             findstr_cmd = os.path.join(system_root, 'System32', 'findstr')
-            grep_cmd = r'{} /R "numpy torch"'.format(findstr_cmd)
+            grep_cmd = r'{} /R "numpy torch mypy"'.format(findstr_cmd)
         else:
-            grep_cmd = r'grep "torch\|numpy"'
+            grep_cmd = r'grep "torch\|numpy\|mypy"'
         return run_and_read_all(run_lambda, pip + ' list --format=freeze | ' + grep_cmd)
 
-    # Try to figure out if the user is running pip or pip3.
-    out2 = run_with_pip('pip')
-    out3 = run_with_pip('pip3')
+    pip_version = 'pip3' if sys.version[0] == '3' else 'pip'
+    out = run_with_pip(sys.executable + ' -mpip')
 
-    num_pips = len([x for x in [out2, out3] if x is not None])
-    if num_pips == 0:
-        return 'pip', out2
+    return pip_version, out
 
-    if num_pips == 1:
-        if out2 is not None:
-            return 'pip', out2
-        return 'pip3', out3
 
-    # num_pips is 2. Return pip3 by default b/c that most likely
-    # is the one associated with Python 3
-    return 'pip3', out3
+def get_cachingallocator_config():
+    ca_config = os.environ.get('PYTORCH_CUDA_ALLOC_CONF', '')
+    return ca_config
 
 
 def get_env_info():
@@ -297,10 +314,13 @@ def get_env_info():
         version_str = debug_mode_str = cuda_available_str = cuda_version_str = 'N/A'
         hip_compiled_version = hip_runtime_version = miopen_runtime_version = 'N/A'
 
+    sys_version = sys.version.replace("\n", " ")
+
     return SystemEnv(
         torch_version=version_str,
         is_debug_build=debug_mode_str,
-        python_version='{}.{} ({}-bit runtime)'.format(sys.version_info[0], sys.version_info[1], sys.maxsize.bit_length() + 1),
+        python_version='{} ({}-bit runtime)'.format(sys_version, sys.maxsize.bit_length() + 1),
+        python_platform=get_python_platform(),
         is_cuda_available=cuda_available_str,
         cuda_compiled_version=cuda_version_str,
         cuda_runtime_version=get_running_cuda_version(run_lambda),
@@ -314,9 +334,11 @@ def get_env_info():
         pip_packages=pip_list_output,
         conda_packages=get_conda_packages(run_lambda),
         os=get_os(run_lambda),
+        libc_version=get_libc_version(),
         gcc_version=get_gcc_version(run_lambda),
         clang_version=get_clang_version(run_lambda),
         cmake_version=get_cmake_version(run_lambda),
+        caching_allocator_config=get_cachingallocator_config(),
     )
 
 env_info_fmt = """
@@ -329,8 +351,10 @@ OS: {os}
 GCC version: {gcc_version}
 Clang version: {clang_version}
 CMake version: {cmake_version}
+Libc version: {libc_version}
 
 Python version: {python_version}
+Python platform: {python_platform}
 Is CUDA available: {is_cuda_available}
 CUDA runtime version: {cuda_runtime_version}
 GPU models and configuration: {nvidia_gpu_models}

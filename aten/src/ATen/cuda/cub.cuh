@@ -1,6 +1,9 @@
 #pragma once
 
 #include <cstddef>
+#include <type_traits>
+#include <iterator>
+#include <limits>
 
 // include cub in a safe manner, see:
 // https://github.com/pytorch/pytorch/pull/55292
@@ -40,7 +43,8 @@ namespace cub = at::cuda::detail::cub;
 
 namespace at {
 namespace cuda {
-namespace cub {
+
+namespace detail {
 
 template<typename T>
 struct cuda_type {
@@ -50,6 +54,44 @@ template<>
 struct cuda_type<c10::Half> {
   using type = __half;
 };
+
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 11050
+// cub sort support for __nv_bfloat16 is added to cub 1.13 in
+// https://github.com/NVIDIA/cub/pull/306 and according to
+// https://github.com/NVIDIA/cub#releases, 1.13 is included in
+// CUDA Toolkit 11.5
+
+// waiting for https://github.com/NVIDIA/cub/pull/306 to land on CUDA
+template<>
+struct cuda_type<c10::BFloat16> {
+  using type = __nv_bfloat16;
+};
+
+#elif !defined(__HIP_PLATFORM_HCC__)
+
+// backport https://github.com/NVIDIA/cub/pull/306 for c10::BFloat16
+
+template <>
+struct cub::FpLimits<c10::BFloat16>
+{
+    static __host__ __device__ __forceinline__ c10::BFloat16 Max() {
+        unsigned short max_word = 0x7F7F;
+        return reinterpret_cast<c10::BFloat16&>(max_word);
+    }
+
+    static __host__ __device__ __forceinline__ c10::BFloat16 Lowest() {
+        unsigned short lowest_word = 0xFF7F;
+        return reinterpret_cast<c10::BFloat16&>(lowest_word);
+    }
+};
+
+template <> struct cub::NumericTraits<c10::BFloat16>: cub::BaseTraits<cub::FLOATING_POINT, true, false, unsigned short, c10::BFloat16> {};
+
+#endif
+
+}  // namespace detail
+
+namespace cub {
 
 inline int get_num_bits(uint64_t max_key) {
   int num_bits = 1;
@@ -65,7 +107,9 @@ static inline void sort_keys(
     const key_t *keys_in, key_t *keys_out,
     int64_t n, bool descending=false, int64_t begin_bit=0, int64_t end_bit=sizeof(key_t)*8
 ) {
-  using key_t_ = typename cuda_type<key_t>::type;
+  TORCH_CHECK(n <= std::numeric_limits<int>::max(),
+    "cub sort does not support sorting more than INT_MAX elements");
+  using key_t_ = typename detail::cuda_type<key_t>::type;
 
   const key_t_ *keys_in_ = reinterpret_cast<const key_t_*>(keys_in);
   key_t_ *keys_out_ = reinterpret_cast<key_t_*>(keys_out);
@@ -87,8 +131,9 @@ static inline void sort_pairs(
     const value_t *values_in, value_t *values_out,
     int64_t n, bool descending=false, int64_t begin_bit=0, int64_t end_bit=sizeof(key_t)*8
 ) {
-  using key_t_ = typename cuda_type<key_t>::type;
-  using value_t_ = typename cuda_type<value_t>::type;
+  TORCH_CHECK(n <= std::numeric_limits<int>::max(),
+    "cub sort does not support sorting more than INT_MAX elements");
+  using key_t_ = typename detail::cuda_type<key_t>::type;
 
   auto allocator = c10::cuda::CUDACachingAllocator::get();
   c10::DataPtr keys_out_owner;
@@ -100,16 +145,14 @@ static inline void sort_pairs(
 
   const key_t_ *keys_in_ = reinterpret_cast<const key_t_*>(keys_in);
   key_t_ *keys_out_ = reinterpret_cast<key_t_*>(keys_out);
-  const value_t_ *values_in_ = reinterpret_cast<const value_t_*>(values_in);
-  value_t_ *values_out_ = reinterpret_cast<value_t_*>(values_out);
 
   if (descending) {
     CUB_WRAPPER(NO_ROCM(detail)::cub::DeviceRadixSort::SortPairsDescending,
-      keys_in_, keys_out_, values_in_, values_out_, n,
+      keys_in_, keys_out_, values_in, values_out, n,
       begin_bit, end_bit, c10::cuda::getCurrentCUDAStream());
   } else {
     CUB_WRAPPER(NO_ROCM(detail)::cub::DeviceRadixSort::SortPairs,
-      keys_in_, keys_out_, values_in_, values_out_, n,
+      keys_in_, keys_out_, values_in, values_out, n,
       begin_bit, end_bit, c10::cuda::getCurrentCUDAStream());
   }
 }
@@ -122,8 +165,11 @@ static inline void segmented_sort_pairs(
     OffsetIteratorT begin_offsets, OffsetIteratorT end_offsets,
     bool descending=false, int64_t begin_bit=0, int64_t end_bit=sizeof(key_t)*8
 ) {
-  using key_t_ = typename cuda_type<key_t>::type;
-  using value_t_ = typename cuda_type<value_t>::type;
+  TORCH_CHECK(num_elements <= std::numeric_limits<int>::max(),
+    "cub sort does not support sorting more than INT_MAX elements");
+  TORCH_CHECK(num_segments <= std::numeric_limits<int>::max(),
+    "cub sort does not support sorting more than INT_MAX elements");
+  using key_t_ = typename detail::cuda_type<key_t>::type;
 
   auto allocator = c10::cuda::CUDACachingAllocator::get();
   c10::DataPtr keys_out_owner;
@@ -135,20 +181,149 @@ static inline void segmented_sort_pairs(
 
   const key_t_ *keys_in_ = reinterpret_cast<const key_t_*>(keys_in);
   key_t_ *keys_out_ = reinterpret_cast<key_t_*>(keys_out);
-  const value_t_ *values_in_ = reinterpret_cast<const value_t_*>(values_in);
-  value_t_ *values_out_ = reinterpret_cast<value_t_*>(values_out);
 
   if (descending) {
     CUB_WRAPPER(NO_ROCM(detail)::cub::DeviceSegmentedRadixSort::SortPairsDescending,
-      keys_in_, keys_out_, values_in_, values_out_,
+      keys_in_, keys_out_, values_in, values_out,
       num_elements, num_segments, begin_offsets, end_offsets,
       begin_bit, end_bit, c10::cuda::getCurrentCUDAStream());
   } else {
     CUB_WRAPPER(NO_ROCM(detail)::cub::DeviceSegmentedRadixSort::SortPairs,
-      keys_in_, keys_out_, values_in_, values_out_,
+      keys_in_, keys_out_, values_in, values_out,
       num_elements, num_segments, begin_offsets, end_offsets,
       begin_bit, end_bit, c10::cuda::getCurrentCUDAStream());
   }
 }
 
-}}}
+namespace impl {
+
+template<typename InputIteratorT1, typename InputIteratorT2, typename OutputIteratorT, class ScanOpT>
+C10_LAUNCH_BOUNDS_1(1)
+__global__ void transform_vals(InputIteratorT1 a, InputIteratorT2 b, OutputIteratorT out, ScanOpT scan_op){
+  *out = scan_op(*a, *b);
+}
+
+template<typename ValueT, typename InputIteratorT>
+struct chained_iterator {
+  using iterator_category = std::random_access_iterator_tag;
+  using difference_type   = std::ptrdiff_t;
+  using value_type        = ValueT;
+  using pointer           = ValueT*;
+  using reference         = ValueT&;
+
+  InputIteratorT iter;
+  ValueT *first;
+  difference_type offset = 0;
+
+  __device__ ValueT operator[](difference_type i) {
+    i +=  offset;
+    if (i == 0) {
+      return *first;
+    } else {
+      return ValueT(iter[i - 1]);
+    }
+  }
+  __device__ chained_iterator operator+(difference_type i) {
+    return chained_iterator{iter, first, i};
+  }
+  __device__ ValueT operator*() {
+    return (*this)[0];
+  }
+};
+
+}
+
+template<typename InputIteratorT, typename OutputIteratorT, typename ScanOpT>
+inline void inclusive_scan(InputIteratorT input, OutputIteratorT output, ScanOpT scan_op, int64_t num_items) {
+  // non synchronizing cub call
+  // even though cub is supposed to support tensors with int_max elements, in reality it doesn't,
+  // so split at int_max/2
+  constexpr int max_cub_size = std::numeric_limits<int>::max() / 2 + 1; // 2**30
+  int size_cub = std::min<int64_t>(num_items, max_cub_size);
+  CUB_WRAPPER(NO_ROCM(detail)::cub::DeviceScan::InclusiveScan,
+      input,
+      output,
+      scan_op,
+      size_cub,
+      at::cuda::getCurrentCUDAStream());
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+  using input_t = std::remove_reference_t<decltype(*input)>;
+  for (int64_t i = max_cub_size; i < num_items; i += max_cub_size) {
+    auto allocator = c10::cuda::CUDACachingAllocator::get();
+    c10::DataPtr first_elem = allocator->allocate(sizeof(input_t));
+    auto first_elem_ptr = reinterpret_cast<input_t *>(first_elem.get());
+
+    size_cub = std::min<int64_t>(num_items - i, max_cub_size);
+    impl::transform_vals<<<1, 1, 0, at::cuda::getCurrentCUDAStream()>>>(
+        output + i - 1,
+        input + i,
+        first_elem_ptr,
+        scan_op);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
+    using ArgIndexInputIterator = NO_ROCM(detail)::cub::ArgIndexInputIterator<InputIteratorT>;
+    using tuple = typename ArgIndexInputIterator::value_type;
+    auto input_iter_transform = [=] __device__ (const tuple &x)->input_t  {
+      if (x.key == 0) {
+        return *first_elem_ptr;
+      } else {
+        return x.value;
+      }
+    };
+    auto input_ = NO_ROCM(detail)::cub::TransformInputIterator<input_t, decltype(input_iter_transform), ArgIndexInputIterator>(
+      ArgIndexInputIterator(input + i), input_iter_transform);
+    CUB_WRAPPER(NO_ROCM(detail)::cub::DeviceScan::InclusiveScan,
+        input_,
+        output + i,
+        scan_op,
+        size_cub,
+        at::cuda::getCurrentCUDAStream());
+  }
+}
+
+template<typename InputIteratorT, typename OutputIteratorT, typename ScanOpT, typename InitValueT>
+inline void exclusive_scan(InputIteratorT input, OutputIteratorT output, ScanOpT scan_op, InitValueT init_value, int64_t num_items) {
+  // non synchronizing cub call
+  // even though cub is supposed to support tensors with int_max elements, in reality it doesn't,
+  // so split at int_max/2
+  constexpr int max_cub_size = std::numeric_limits<int>::max() / 2 + 1; // 2**30
+  int size_cub = std::min<int64_t>(num_items, max_cub_size);
+  CUB_WRAPPER(NO_ROCM(detail)::cub::DeviceScan::ExclusiveScan,
+      input,
+      output,
+      scan_op,
+      init_value,
+      size_cub,
+      at::cuda::getCurrentCUDAStream());
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+  for (int64_t i = max_cub_size; i < num_items; i += max_cub_size) {
+    auto allocator = c10::cuda::CUDACachingAllocator::get();
+    c10::DataPtr first_elem = allocator->allocate(sizeof(InitValueT));
+    auto first_elem_ptr = reinterpret_cast<InitValueT *>(first_elem.get());
+
+    size_cub = std::min<int64_t>(num_items - i, max_cub_size);
+    impl::transform_vals<<<1, 1, 0, at::cuda::getCurrentCUDAStream()>>>(
+        output + i - 1,
+        input + i - 1,
+        first_elem_ptr,
+        scan_op);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
+    auto input_ = impl::chained_iterator<InitValueT, InputIteratorT>{
+      input + i, first_elem_ptr};
+    CUB_WRAPPER(NO_ROCM(detail)::cub::DeviceScan::InclusiveScan,
+        input_,
+        output + i,
+        scan_op,
+        size_cub,
+        at::cuda::getCurrentCUDAStream());
+  }
+}
+
+template<typename InputIteratorT , typename OutputIteratorT , typename NumSelectedIteratorT >
+inline void unique(InputIteratorT input, OutputIteratorT output, NumSelectedIteratorT num_selected_out, int64_t num_items) {
+  TORCH_CHECK(num_items <= std::numeric_limits<int>::max(),
+    "cub unique does not support more than INT_MAX elements");
+  CUB_WRAPPER(NO_ROCM(detail)::cub::DeviceSelect::Unique,
+    input, output, num_selected_out, num_items, at::cuda::getCurrentCUDAStream());
+}
+
+}}}  // namespace at::cuda::cub

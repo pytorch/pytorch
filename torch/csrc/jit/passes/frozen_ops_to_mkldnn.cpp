@@ -1,8 +1,11 @@
 #include <ATen/Config.h>
 #include <ATen/Utils.h>
 #include <ATen/core/interned_strings.h>
+#include <ATen/native/layer_norm.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
+
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/ir/constants.h>
 #include <torch/csrc/jit/ir/ir.h>
@@ -32,6 +35,7 @@
 #if AT_MKLDNN_ENABLED()
 #include <ATen/CPUFunctions.h>
 #include <dnnl_types.h>
+#include <ATen/native/mkldnn/Utils.h>
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 #include <ideep.hpp>
 #endif
@@ -84,8 +88,7 @@ void assertNonTensorTypeDoesNotContainTensors(TypePtr type) {
   if (type->cast<TensorType>()) {
     return;
   }
-  // NOLINTNEXTLINE(performance-for-range-copy)
-  for (auto t : type->containedTypes()) {
+  for (const auto& t : type->containedTypes()) {
     TORCH_INTERNAL_ASSERT(!t->cast<TensorType>());
   }
 }
@@ -147,9 +150,7 @@ void InplaceMKLDNNSubgraph(std::shared_ptr<Graph> graph) {
       continue;
     }
     Node* last = nullptr;
-    // NOLINTNEXTLINE(modernize-loop-convert)
-    for (auto it = set.second->begin(); it != set.second->end(); it++) {
-      Value* v = *it;
+    for (const auto& v : *set.second) {
       auto k = v->node()->kind();
       if (k == prim::Constant || k == prim::ConstantMKLDNNTensor ||
           k == prim::Param) {
@@ -184,7 +185,8 @@ void InplaceMKLDNNSubgraph(std::shared_ptr<Graph> graph) {
     if (k == aten::relu || k == aten::sigmoid || k == aten::dropout ||
         k == prim::MKLDNNHardSwish || k == prim::MKLDNNHardSigmoid ||
         k == prim::MKLDNNHardTanh || k == aten::tanh ||
-        k == prim::MKLDNNClamp) {
+        k == prim::MKLDNNClamp || k == Symbol::prim("MKLDNNScalarMul") ||
+        k == Symbol::prim("MKLDNNLayerNorm")) {
       if (set_liveness[alias_mapping[node->inputs().at(0)]]->isAfter(node)) {
         continue;
       }
@@ -193,7 +195,7 @@ void InplaceMKLDNNSubgraph(std::shared_ptr<Graph> graph) {
       // the binary operators (add/mul) are commutative and only take tensor
       // inputs, so we can inplace either the first or second input
       int64_t reusable_value_index = -1;
-      for (size_t i = 0; i < 2; i++) {
+      for (const auto i : c10::irange(2)) {
         TORCH_INTERNAL_ASSERT(node->inputs().at(i)->type()->cast<TensorType>());
         if (!set_liveness[alias_mapping[node->inputs().at(i)]]->isAfter(node)) {
           reusable_value_index = i;
@@ -233,7 +235,7 @@ void InplaceMKLDNNSubgraph(std::shared_ptr<Graph> graph) {
 Operation createUnaryOp(
     std::function<void(at::Tensor output, at::Tensor input)> aten_op,
     bool inplace = false) {
-  return [aten_op, inplace](Stack* stack) {
+  return [aten_op, inplace](Stack& stack) {
     auto a = pop(stack).toTensor();
     c10::impl::ExcludeDispatchKeyGuard edkg(c10::autograd_dispatch_keyset);
     // we cast `a` to an `ideep::tensor`, so we can get at its descriptor
@@ -273,8 +275,35 @@ Operation createUnaryOp(
   };
 }
 
+void MKLDNNLayerNormOp(Stack& stack, bool inplace) {
+  c10::impl::ExcludeDispatchKeyGuard edkg(c10::autograd_dispatch_keyset);
+
+  // enable_cudnn not used
+  pop(stack);
+  auto eps = pop(stack).toDouble();
+
+  Tensor bias{};
+  Tensor weight{};
+  auto bias_ival = pop(stack);
+  TORCH_INTERNAL_ASSERT(bias_ival.isTensor());
+  bias = bias_ival.toTensor();
+
+  auto weight_ival = pop(stack);
+  TORCH_INTERNAL_ASSERT(weight_ival.isTensor());
+  weight = weight_ival.toTensor();
+
+  auto shape = pop(stack).toIntVector();
+  auto input = pop(stack).toTensor();
+
+  at::Tensor dst, mean, rstd;
+  std::tie(dst, mean, rstd) =
+      at::native::mkldnn_layer_norm_last_index_weight_bias_f32(
+          input, shape, weight, bias, eps, inplace);
+  push(stack, dst);
+};
+
 Operation BroadOp(const Node* node) {
-  return [](Stack* stack) {
+  return [](Stack& stack) {
     auto b = pop(stack).toTensor();
     auto a = pop(stack).toTensor();
     auto b_size = b.sizes();
@@ -439,12 +468,35 @@ const RegisterOperators BroadOpReg({
         AliasAnalysisKind::INTERNAL_SPECIAL_CASE),
 });
 
+const RegisterOperators MKLDNNLayerNormOpReg({
+    torch::jit::Operator(
+        "prim::MKLDNNLayerNorm(Tensor input, int[] normalized_shape, Tensor? weight=None, Tensor? bias=None, float eps=1e-05, bool cudnn_enable=True) -> Tensor",
+        [](Stack& stack) { MKLDNNLayerNormOp(stack, false); },
+        AliasAnalysisKind::FROM_SCHEMA),
+    torch::jit::Operator(
+        "prim::MKLDNNLayerNorm_(Tensor(a!) input, int[] normalized_shape, Tensor? weight=None, Tensor? bias=None, float eps=1e-05, bool cudnn_enable=True) -> Tensor(a!)",
+        [](Stack& stack) { MKLDNNLayerNormOp(stack, true); },
+        AliasAnalysisKind::FROM_SCHEMA),
+});
+
 Operation ConstantMKLDNNTensorOp(const Node* node) {
   const auto& t = node->t(attr::value);
-  return [t](Stack* stack) {
+  return [t](Stack& stack) {
     push(stack, t);
     return 0;
   };
+}
+
+Tensor mkldnn_tensor_scalar_mul(Tensor& tensor, Tensor& out, float scalar) {
+  ideep::tensor& x = at::native::itensor_from_mkldnn(tensor);
+  ideep::tensor& z = at::native::itensor_from_mkldnn(out);
+  ideep::eltwise_forward::compute(
+      x,
+      z,
+      ideep::algorithm::eltwise_linear,
+      ideep::prop_kind::forward_inference,
+      /*alpha*/ scalar);
+  return out;
 }
 
 // aten::convolution does a lot of precomputation and dispatching before
@@ -452,13 +504,12 @@ Operation ConstantMKLDNNTensorOp(const Node* node) {
 // and avoid overhead. avoiding dispatch overhead for other operators - relu,
 // add, etc - did not benchmark as speeding up models noticeably. the additional
 // overhead of `convolution` warrants the custom operator.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 jit::RegisterOperators reg_fut_ops({
     jit::Operator(
         // XXX: this follows the schema convention of conv2d/conv3d, not
         // aten::mkldnn_convolution, which is different for some reason!
         "prim::mkldnn_convolution(Tensor input, Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, int groups) -> Tensor",
-        [](jit::Stack* stack) {
+        [](jit::Stack& stack) {
           int64_t groups = pop(stack).toInt();
           auto dilation = pop(stack).toIntVector();
           auto padding = pop(stack).toIntVector();
@@ -501,6 +552,37 @@ jit::RegisterOperators reg_fut_ops({
               stack,
               at::native::mkldnn_convolution(
                   input, weight, bias, padding, stride, dilation, groups));
+        },
+        aliasAnalysisFromSchema()),
+    // registering as custom operators avoids Scalar->Tensor->Scalar conversion
+    // in default bindings
+    jit::Operator(
+        "prim::MKLDNNScalarMul(Tensor self, Scalar other) -> Tensor",
+        [](jit::Stack& stack) {
+          c10::impl::ExcludeDispatchKeyGuard edkg(
+              c10::autograd_dispatch_keyset);
+          float other = pop(stack).toScalar().toFloat();
+          Tensor self = pop(stack).toTensor();
+          auto out = at::native::empty_mkldnn(
+              self.sizes(),
+              optTypeMetaToScalarType(self.options().dtype_opt()),
+              self.options().layout_opt(),
+              self.options().device_opt(),
+              self.options().pinned_memory_opt());
+
+          mkldnn_tensor_scalar_mul(self, out, other);
+          push(stack, out);
+        },
+        aliasAnalysisFromSchema()),
+    jit::Operator(
+        "prim::MKLDNNScalarMul_(Tensor(a!) self, Scalar other) -> Tensor(a!)",
+        [](jit::Stack& stack) {
+          c10::impl::ExcludeDispatchKeyGuard edkg(
+              c10::autograd_dispatch_keyset);
+          float other = pop(stack).toScalar().toFloat();
+          Tensor self = pop(stack).toTensor();
+          mkldnn_tensor_scalar_mul(self, self, other);
+          push(stack, self);
         },
         aliasAnalysisFromSchema()),
 });
@@ -661,7 +743,9 @@ void ComputeSubgraphInMKLDNN(Node* subgraph_node) {
 
     moveWeightsToMKLDNN(body_node);
 
-    if (body_node->kind() == aten::add || body_node->kind() == aten::mul) {
+    if (body_node->kind() == aten::add ||
+        (body_node->kind() == aten::mul &&
+         body_node->input(1)->type()->cast<TensorType>())) {
       auto node = body_node->owningGraph()->create(
           Symbol::prim("BroadcastMKLDNNTensors"),
           {body_node->inputs().at(0), body_node->inputs().at(1)},
@@ -669,6 +753,19 @@ void ComputeSubgraphInMKLDNN(Node* subgraph_node) {
       node->insertBefore(body_node);
       body_node->replaceInput(0, node->outputs().at(0));
       body_node->replaceInput(1, node->outputs().at(1));
+    }
+    if (body_node->kind() == aten::mul &&
+        body_node->input(1)->type()->isSubtypeOf(NumberType::get())) {
+      body_node->replaceWithNewSymbol(Symbol::prim("MKLDNNScalarMul"));
+      body_node->destroy();
+      continue;
+    }
+
+    if (body_node->matches(
+            "aten::layer_norm(Tensor input, int[] normalized_shape, Tensor? weight=None, Tensor? bias=None, float eps=1e-05, bool cudnn_enable=True) -> Tensor")) {
+      body_node->replaceWithNewSymbol(Symbol::prim("MKLDNNLayerNorm"));
+      body_node->destroy();
+      continue;
     }
 
     if (body_node->kind() == aten::hardswish) {
@@ -684,7 +781,6 @@ void ComputeSubgraphInMKLDNN(Node* subgraph_node) {
     }
 
     if (body_node->kind() == aten::relu6) {
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       clamp_node_creator(body_node, prim::MKLDNNHardTanh, 0., 6.);
       continue;
     }
@@ -870,6 +966,16 @@ class MKLDNNSubgraphSlicer {
         return false;
       }
     }
+
+    if (n->matches(
+            "aten::layer_norm(Tensor input, int[] normalized_shape, Tensor? weight=None, Tensor? bias=None, float eps=1e-05, bool cudnn_enable=True) -> Tensor") &&
+        n->namedInput("weight")->type() != NoneType::get() &&
+        n->namedInput("bias")->type() != NoneType::get()) {
+      auto norm_shape =
+          constant_as<std::vector<int64_t>>(n->namedInput("normalized_shape"));
+      return norm_shape.has_value() && norm_shape->size() == 1;
+    }
+
     // unary ops we dont need to prove anything else than
     // the input is mkldnn supported
     switch (n->kind()) {
@@ -881,9 +987,6 @@ class MKLDNNSubgraphSlicer {
       case aten::hardswish:
       case aten::tanh:
       case aten::batch_norm:
-      // TODO: max_pool on mkldnn can be slower than in eager. ideally, we'd
-      // only fuse it if we knew including max_pool lead to fewer layout
-      // conversions. from initial testing including it speeds up models
       case aten::max_pool2d:
       case aten::max_pool3d:
       case aten::avg_pool2d:
@@ -907,16 +1010,21 @@ class MKLDNNSubgraphSlicer {
       }
     }
 
-    if (n->kind() == aten::add || n->kind() == aten::mul) {
+    if (n->kind() == aten::add) {
       // mkldnn doesn't currently support Tensor-Scalar add
-      for (size_t i = 0; i < 2; i++) {
+      for (const auto i : c10::irange(2)) {
         if (!n->inputs().at(i)->type()->cast<TensorType>()) {
           return false;
         }
       }
       return true;
     }
-    // TODO: dropout removal. mkldnn doesnt support train=True
+    if (n->kind() == aten::mul) {
+      return n->input(0)->type()->cast<TensorType>() &&
+          (n->input(1)->type()->cast<TensorType>() ||
+           n->input(1)->type()->isSubtypeOf(NumberType::get()));
+    }
+
     if (n->kind() == aten::dropout) {
       auto train = constant_as<bool>(n->namedInput("train")).value();
       return train == false;

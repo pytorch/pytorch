@@ -185,7 +185,7 @@ __global__ void atomicadaptivemaxgradinput(
       int argmax = (*ptr_ind);
 
       // atomic add since different threads could update same variable
-      gpuAtomicAdd(&(gradInput[argmax]), z);
+      gpuAtomicAddNoReturn(&(gradInput[argmax]), z);
     }
   }
 }
@@ -203,7 +203,10 @@ const Tensor& indices) {
   TensorArg input_arg{input, "input", 3};
 
   checkAllSameGPU(
-      "adaptive_max_pool2d_cuda", {output_arg, indices_arg, input_arg});
+      __func__, {output_arg, indices_arg, input_arg});
+  if (input.numel() == 0) {
+    return;
+  }
 
   int64_t osizeH = output_size[0];
   int64_t osizeW = output_size[1];
@@ -309,8 +312,12 @@ TORCH_IMPL_FUNC(adaptive_max_pool2d_backward_out_cuda)
   TensorArg indices_arg{indices, "indices", 4};
 
   checkAllSameGPU(
-      "adaptive_max_pool2d_backward_cuda",
+      __func__,
       {grad_input_arg, grad_output_arg, input_arg, indices_arg});
+
+  if (gradOutput.numel() == 0) {
+    return;
+  }
 
   bool atomic =
       true; // suboptimal, but without atomic it doesn't pass the tests

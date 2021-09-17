@@ -2,7 +2,9 @@ import torch
 import torch.fx
 from torch.fx.node import Node, map_aggregate
 from typing import Any, Tuple, NamedTuple, Optional
+from torch.fx._compatibility import compatibility
 
+@compatibility(is_backward_compatible=True)
 class TensorMetadata(NamedTuple):
     # TensorMetadata is a structure containing pertinent information
     # about a tensor within a PyTorch program.
@@ -10,6 +12,7 @@ class TensorMetadata(NamedTuple):
     # General Tensor metadata
     shape : torch.Size
     dtype : torch.dtype
+    requires_grad : bool
     stride : Tuple[int]
     memory_format : Optional[torch.memory_format]
 
@@ -19,12 +22,13 @@ class TensorMetadata(NamedTuple):
     q_scale : Optional[float]
     q_zero_point : Optional[int]
 
-def extract_tensor_metadata(result : torch.Tensor) -> TensorMetadata:
+def _extract_tensor_metadata(result : torch.Tensor) -> TensorMetadata:
     """
     Extract a TensorMetadata NamedTuple describing `result`.
     """
     shape = result.shape
     dtype = result.dtype
+    requires_grad = result.requires_grad
     stride = result.stride()
 
     memory_formats = {
@@ -54,8 +58,9 @@ def extract_tensor_metadata(result : torch.Tensor) -> TensorMetadata:
 
 
     return TensorMetadata(
-        shape, dtype, stride, memory_format, is_quantized, qscheme, q_scale, q_zero_point)
+        shape, dtype, requires_grad, stride, memory_format, is_quantized, qscheme, q_scale, q_zero_point)
 
+@compatibility(is_backward_compatible=True)
 class ShapeProp(torch.fx.Interpreter):
     """
     Execute an FX graph Node-by-Node and
@@ -86,7 +91,8 @@ class ShapeProp(torch.fx.Interpreter):
         ShapeProp(gm).propagate(sample_input)
 
         for node in gm.graph.nodes:
-            print(node.name, node.dtype, node.shape)
+            print(node.name, node.meta['tensor_meta'].dtype,
+                node.meta['tensor_meta'].shape)
 
         The output of this code is:
 
@@ -109,7 +115,7 @@ class ShapeProp(torch.fx.Interpreter):
             if isinstance(obj, torch.Tensor):
                 nonlocal found_tensor
                 found_tensor = True
-                return extract_tensor_metadata(obj)
+                return _extract_tensor_metadata(obj)
             else:
                 return obj
 

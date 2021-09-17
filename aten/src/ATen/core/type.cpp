@@ -33,12 +33,15 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
 
       out << "(";
       size_t i = 0;
+      bool symbolic = type_verbosity() == TypeVerbosity::Symbolic;
       for (i = 0; i < *ndim; ++i) {
         if (i > 0) {
           out << ", ";
         }
         if (auto s = value->sizes()[i]) {
           out << *s;
+        } else if (symbolic) {
+          out << value->symbolic_sizes().at(i);
         } else {
           out << "*";
         }
@@ -110,9 +113,16 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
       if(i > 0)
         out << ", ";
       if (tup->schema()) {
-        out << tup->schema()->arguments()[i].name() << " : ";
+        auto arg = tup->schema()->arguments()[i];
+        out << arg.name() << " : ";
+        out << *(tup->elements()[i]);
+        if (arg.default_value()) {
+          out << " = " << *arg.default_value();
+        }
       }
-      out << *(tup->elements()[i]);
+      else {
+        out << *(tup->elements()[i]);
+      }
     }
     out << ")";
   } else if (t.kind() == TypeKind::FunctionType) {
@@ -210,6 +220,10 @@ ListTypePtr ListType::ofTensors() {
   static auto value = ListType::create(TensorType::get());
   return value;
 }
+ListTypePtr ListType::ofOptionalTensors() {
+  static auto value = ListType::create(OptionalType::ofTensor());
+  return value;
+}
 ListTypePtr ListType::ofInts() {
   static auto value = ListType::create(IntType::get());
   return value;
@@ -251,7 +265,7 @@ AnyEnumTypePtr AnyEnumType::get() {
   return value;
 }
 
-c10::optional<TypePtr> unifyTypesImpl(const TypePtr& t1, const TypePtr& t2) {
+c10::optional<TypePtr> unifyTypesImpl(const TypePtr& t1, const TypePtr& t2, bool default_to_union=false, TypePtr type_hint=nullptr) {
   // check direct subtyping relation
   if (t1->isSubtypeOf(t2)) {
     return t2;
@@ -294,7 +308,7 @@ c10::optional<TypePtr> unifyTypesImpl(const TypePtr& t1, const TypePtr& t2) {
     }
     std::vector<TypePtr> elements;
     for (size_t i = 0; i < tuple1->elements().size(); i++) {
-      if (auto elem = unifyTypes(tuple1->elements().at(i), tuple2->elements().at(i))) {
+      if (auto elem = unifyTypes(tuple1->elements().at(i), tuple2->elements().at(i), default_to_union)) {
         elements.push_back(*elem);
       } else {
         return c10::nullopt;
@@ -323,14 +337,21 @@ c10::optional<TypePtr> unifyTypesImpl(const TypePtr& t1, const TypePtr& t2) {
     return t1_unshaped;
   }
 
+  // Check whether or not `type_hint` is a common parent. This case
+  // could occur if we had two class types that had been annotated with
+  // a common interface
+  if (type_hint && t1->isSubtypeOf(type_hint) && t2->isSubtypeOf(type_hint)) {
+    return type_hint;
+  }
+
   return c10::nullopt;
 }
 
-c10::optional<TypePtr> unifyTypes(const TypePtr& t1, const TypePtr& t2, bool default_to_any) {
-  auto unified = unifyTypesImpl(t1, t2);
+c10::optional<TypePtr> unifyTypes(const TypePtr& t1, const TypePtr& t2, bool default_to_union, TypePtr type_hint) {
+  auto unified = unifyTypesImpl(t1, t2, default_to_union, type_hint);
 
-  if (default_to_any && !unified) {
-    return AnyType::get();
+  if (default_to_union && !unified) {
+    return UnionType::create({t1, t2});
   }
 
   return unified;
@@ -338,7 +359,9 @@ c10::optional<TypePtr> unifyTypes(const TypePtr& t1, const TypePtr& t2, bool def
 
 c10::optional<TypePtr> unifyTypeList(
     at::ArrayRef<TypePtr> elements,
-    std::ostream& why_not) {
+    std::ostream& why_not,
+    bool default_to_union,
+    TypePtr type_hint) {
   if (elements.size() == 0) {
     why_not << "Cannot get unified type from empty list";
     return c10::nullopt;
@@ -346,7 +369,7 @@ c10::optional<TypePtr> unifyTypeList(
 
   TypePtr ret_type = elements.at(0);
   for (size_t i = 1; i < elements.size() && ret_type; ++i) {
-    auto maybe_unified = unifyTypes(ret_type, elements.at(i));
+    c10::optional<TypePtr> maybe_unified = unifyTypes(ret_type, elements.at(i), default_to_union, type_hint);
     if (!maybe_unified) {
       why_not << "Could not unify type list since element " << i << " of type "
               << elements.at(i)->repr_str()
@@ -354,7 +377,7 @@ c10::optional<TypePtr> unifyTypeList(
               << ret_type->repr_str() << ")";
       return c10::nullopt;
     }
-    ret_type = maybe_unified.value();
+    ret_type = *maybe_unified;
   }
 
   return ret_type;
@@ -524,8 +547,9 @@ TORCH_API TypePtr tryEvalTypeVariables(TypePtr type, std::unordered_map<std::str
 }
 
 TORCH_API bool elementTypeCanBeInferredFromMembers(const TypePtr& elem_type) {
-  if (elem_type->kind() == OptionalType::Kind ||
-      elem_type->kind() == NumberType::Kind) {
+  if (elem_type->kind() == UnionType::Kind
+      || elem_type->kind() == OptionalType::Kind
+      || elem_type->kind() == NumberType::Kind) {
     // Builtin Union types
     return false;
   }
@@ -554,8 +578,16 @@ bool Type::isSubtypeOfExt(const TypePtr& rhs, std::ostream* why_not) const {
   if (rhs->kind() == TypeKind::AnyType || *this == *rhs) {
     return true;
   }
-  if(auto rhs_ = rhs->cast<OptionalType>()) {
-    return this->isSubtypeOfExt(rhs_->getElementType(), why_not);
+  if (auto opt_rhs = rhs->cast<OptionalType>()) {
+    return this->isSubtypeOfExt(opt_rhs->getElementType(), why_not);
+  }
+  if (auto union_rhs = rhs->cast<UnionType>()) {
+    // Check if `this` is a subtype of any of the types within the Union
+    return std::any_of(union_rhs->containedTypes().begin(),
+                       union_rhs->containedTypes().end(),
+                       [&](TypePtr inner) {
+                         return this->isSubtypeOfExt(inner, why_not);
+                       });
   }
   return false;
 }
@@ -710,7 +742,11 @@ std::ostream& operator<<(
 }
 
 std::ostream& operator<<(std::ostream& os, const ShapeSymbol& s) {
-  os << "SS(" << s.value_ << ')';
+  if (s.value_ >= 0) {
+    os << s.value_;
+  } else {
+    os << "SS(" << s.value_ << ')';
+  }
   return os;
 }
 
@@ -735,22 +771,497 @@ TupleTypePtr TupleType::createNamed(
     const c10::optional<c10::QualifiedName>& qualName,
     const std::vector<std::string>& field_names,
     const std::vector<TypePtr>& field_types) {
+      std::vector<IValue> empty_defaults;
+      return TupleType::createNamed(qualName, field_names, field_types, empty_defaults);
+    }
+
+
+TupleTypePtr TupleType::createNamed(const c10::optional<c10::QualifiedName>& qualName,
+    const std::vector<std::string>& field_names,
+    const std::vector<TypePtr>& field_types,
+    std::vector<IValue>& field_defaults) {
   TORCH_INTERNAL_ASSERT(field_names.size() == field_types.size());
+
   std::vector<Argument> arguments;
+  arguments.reserve(field_names.size());
+  auto min_default_idx = field_names.size() - field_defaults.size();
   for (size_t i = 0; i < field_names.size(); ++i) {
-    arguments.emplace_back(
-        /*name=*/field_names[i],
-        /*type=*/field_types[i],
-        /*N=*/i);
+    if (i < min_default_idx) {
+      Argument arg{
+          /*name=*/field_names[i],
+          /*type=*/field_types[i],
+          /*N=*/i};
+      arguments.emplace_back(std::move(arg));
+    }
+    else {
+      size_t j = i - min_default_idx;
+      TORCH_CHECK(field_defaults[j].tagKind() != "Tensor", "Tensors are "
+                  "not supported as default NamedTuple fields. Their "
+                  "mutability could lead to potential memory aliasing "
+                  "problems");
+      Argument arg{
+          /*name=*/field_names[i],
+          /*type=*/field_types[i],
+          /*N=*/i,
+          /*default_value=*/field_defaults[j]};
+      arguments.emplace_back(std::move(arg));
+    }
   }
 
   auto schema = std::make_shared<FunctionSchema>(
       /*name=*/qualName.value_or(c10::QualifiedName()).name(),
       /*overload_name=*/std::string(""),
-      /*arguments=*/arguments,
+      /*arguments=*/std::move(arguments),
       /*returns=*/std::vector<Argument>{});
   return std::shared_ptr<TupleType>(new TupleType(
       field_types, qualName, schema)); // NOLINT(modernize-make-shared)
+}
+
+bool NoneType::isSubtypeOfExt(const TypePtr& rhs, std::ostream *why_not) const {
+  if (rhs->kind() == OptionalType::Kind) {
+    return true;
+  }
+  return Type::isSubtypeOfExt(rhs, why_not);
+}
+
+// Remove nested Optionals/Unions during the instantiation of a Union or
+// an Optional. This populates `types` with all the types found during
+// flattening. At the end of `flattenUnion`, `types` may have
+// duplicates, but it will not have nested Optionals/Unions
+void flattenUnion(TypePtr& type, std::vector<TypePtr>* to_fill) {
+  if (auto union_type = type->cast<UnionType>()) {
+    for (auto inner : union_type->containedTypes()) {
+      flattenUnion(inner, to_fill);
+    }
+  } else if (auto opt_type = type->cast<OptionalType>()) {
+    auto inner = opt_type->getElementType();
+    flattenUnion(inner, to_fill);
+    to_fill->emplace_back(NoneType::get());
+  } else if (type->kind() == NumberType::Kind) {
+    to_fill->emplace_back(IntType::get());
+    to_fill->emplace_back(FloatType::get());
+    to_fill->emplace_back(ComplexType::get());
+  } else {
+    to_fill->emplace_back(type);
+  }
+}
+
+// Helper function for `standardizeUnion`
+//
+// NB: If we have types `T1`, `T2`, `T3`, and `PARENT_T` such that `T1`,
+// `T2`, and `T2` are children of `PARENT_T`, then `unifyTypes(T1, T2)`
+// will return `PARENT_T`. This could be a problem if we didn't want our
+// Union to also be able to take `T3 `. In our current type hierarchy,
+// this isn't an issue--most types SHOULD be unified even if the parent
+// type wasn't in the original vector. However, later additions to the
+// type system might necessitate reworking `get_supertype`
+void filterDuplicateSubtypes(std::vector<TypePtr>* types) {
+  if (types->empty()) {
+    return;
+  }
+  auto get_supertype = [](const TypePtr t1, const TypePtr t2) -> c10::optional<TypePtr> {
+    // We don't want nested Optionals. Also, prematurely unifying to
+    // `Optional` could prevent us from coalescing other types
+    if ((t1->isSubtypeOf(NoneType::get()) && !t2->isSubtypeOf(NoneType::get()))
+        || (!t1->isSubtypeOf(NoneType::get()) && t2->isSubtypeOf(NoneType::get()))) {
+          return c10::nullopt;
+    } else {
+      return unifyTypes(t1, t2, /*default_to_union=*/false);
+    }
+  };
+
+  // Coalesce types and delete all duplicates. Moving from right to left
+  // through the vector, we try to unify the current element (`i`) with
+  // each element (`j`) before the "new" end of the vector (`end`).
+  // If we're able to unify the types at `types[i]` and `types[j]`, we
+  // decrement `end`, swap `types[j]` with the unified type, and
+  // break. Otherwise, we keep `end` where it is to signify that the
+  // new end of the vector hasn't shifted
+  size_t end_idx = types->size()-1;
+  for (size_t i = types->size()-1; i > 0; --i) {
+    for (size_t j = std::min(i-1, end_idx); ; --j) {
+      c10::optional<TypePtr> unified;
+      unified = get_supertype((*types)[i], (*types)[j]);
+      if (unified) {
+        (*types)[j] = *unified;
+        (*types)[i] = (*types)[end_idx];
+        --end_idx;
+        break;
+      }
+      // Break condition here so we don't get `j = 0; j = j-1` and end
+      // up with MAX_INT
+      if (j == 0) {
+        break;
+      }
+    }
+  }
+  // Cut off the vector's tail so that `end` is the real last element
+  types->erase(types->begin() + end_idx + 1, types->end());
+
+}
+
+void sortUnion(std::vector<TypePtr>* types) {
+  // We want the elements to be sorted so we can easily compare two
+  // UnionType objects for equality in the future. Note that this order
+  // is guaranteed to be stable since we've already coalesced any
+  // possible types
+  std::sort(types->begin(), types->end(),
+          [](const TypePtr a, const TypePtr b) -> bool {
+            if (a->kind() != b->kind()) {
+              return a->kind() < b->kind();
+            }
+            return a->str() < b->str();
+          });
+}
+
+void standardizeVectorForUnion(std::vector<TypePtr>& reference, std::vector<TypePtr>* to_fill) {
+  for (auto type : reference) {
+    flattenUnion(type, to_fill);
+  }
+  filterDuplicateSubtypes(to_fill);
+  sortUnion(to_fill);
+}
+
+void standardizeVectorForUnion(std::vector<TypePtr>* to_flatten) {
+  TORCH_INTERNAL_ASSERT(to_flatten, "`standardizeVectorForUnion` was ",
+                        "passed a `nullptr`");
+  std::vector<TypePtr> to_fill;
+  standardizeVectorForUnion(*to_flatten, &to_fill);
+  *to_flatten = to_fill;
+}
+
+UnionType::UnionType(std::vector<TypePtr> reference, TypeKind kind) : Type(kind) {
+  TORCH_INTERNAL_ASSERT(!reference.empty(), "Cannot create an empty Union");
+
+  standardizeVectorForUnion(reference, &types_);
+
+  // Gate the assert in a regular conditional so that we don't create
+  // this long error message unnecessarily
+  if (types_.size() == 1) {
+    std::stringstream msg;
+    msg << "After type unification was performed, the Union with the "
+        << "original types {";
+    for (auto i = 0; i < reference.size(); ++i) {
+      msg << reference[i]->repr_str();
+      if (i > 0) {
+        msg << ",";
+      }
+      msg << " ";
+    }
+    msg << "} has the single type " << types_[0]->repr_str()
+         << ". Use the common supertype instead of creating a Union"
+         << "type";
+    TORCH_INTERNAL_ASSERT(false, msg.str());
+  }
+
+  can_hold_none_ = false;
+  has_free_variables_ = false;
+
+  for (const TypePtr& type : types_) {
+    if (type->kind() == NoneType::Kind) {
+      can_hold_none_ = true;
+    }
+    if (type->hasFreeVariables()) {
+      has_free_variables_ = true;
+    }
+  }
+
+}
+
+UnionTypePtr UnionType::create(std::vector<TypePtr> reference) {
+  auto union_type = new UnionType(std::move(reference));
+
+  // Some very special-cased logic for `Optional`. This will be deleted
+  // in a later PR
+  bool int_found = false;
+  bool float_found = false;
+  bool complex_found = false;
+  bool nonetype_found = false;
+
+  auto update_is_opt_flags = [&](TypePtr t) {
+    if (t == IntType::get()) {
+      int_found = true;
+    } else if (t == FloatType::get()) {
+      float_found  = true;
+    } else if (t == ComplexType::get()) {
+      complex_found = true;
+    } else if (t == NoneType::get()) {
+      nonetype_found = true;
+    }
+  };
+
+  for (const auto& t : union_type->containedTypes()) {
+    update_is_opt_flags(t);
+  }
+
+  bool numbertype_found = int_found && float_found && complex_found;
+
+  if (nonetype_found) {
+    if (union_type->containedTypes().size() == 4 && numbertype_found) {
+      return OptionalType::create(NumberType::get());
+    }
+    if (union_type->containedTypes().size() == 2) {
+      auto not_none = union_type->containedTypes()[0] != NoneType::get()
+                      ? union_type->containedTypes()[0]
+                      : union_type->containedTypes()[1];
+      return OptionalType::create(not_none);
+    }
+  }
+
+  return UnionTypePtr(union_type);
+}
+
+bool UnionType::operator==(const Type& rhs) const {
+  if (auto union_rhs = rhs.cast<UnionType>()) {
+    // We can't compare the type vectors for equality using `operator=`,
+    // because the vectors hold `TypePtr`s and we want to compare `Type`
+    // equality
+    if (union_rhs->containedTypes().size() != this->containedTypes().size()) {
+      return false;
+    }
+    // Check that all the types in `this->types_` are also in
+    // `union_rhs->types_`
+    return std::all_of(this->containedTypes().begin(), this->containedTypes().end(),
+                       [&](TypePtr lhs_type) {
+                         return std::any_of(union_rhs->containedTypes().begin(),
+                                            union_rhs->containedTypes().end(),
+                                            [&](TypePtr rhs_type) {
+                                              return *lhs_type == *rhs_type;
+                                            });
+                       });
+  } else if (auto optional_rhs = rhs.cast<OptionalType>()) {
+    if (optional_rhs->getElementType() == NumberType::get()) {
+      return this->containedTypes().size() == 4
+             && this->can_hold_none_
+             && this->canHoldType(NumberType::get());
+    }
+    auto optional_lhs = this->toOptional();
+    return optional_lhs && *optional_rhs == *((optional_lhs.value())->expect<OptionalType>());
+  } else if (rhs.kind() == NumberType::Kind) {
+    return this->containedTypes().size() == 3 && canHoldType(NumberType::get());
+  } else {
+    return false;
+  }
+}
+
+bool UnionType::isSubtypeOfExt(const TypePtr& rhs, std::ostream* why_not) const {
+  std::vector<TypePtr> rhs_types;
+  if (const auto union_rhs = rhs->cast<UnionType>()) {
+    // Fast path
+    if (this->containedTypes() == rhs->containedTypes()) {
+      return true;
+    }
+    rhs_types = rhs->containedTypes().vec();
+  } else if (const auto optional_rhs = rhs->cast<OptionalType>()) {
+    rhs_types.push_back(NoneType::get());
+    if (optional_rhs->getElementType() == NumberType::get()) {
+      std::vector<TypePtr> number_types{IntType::get(), FloatType::get(), ComplexType::get()};
+      rhs_types.insert(rhs_types.end(), number_types.begin(), number_types.end());
+    } else {
+      rhs_types.push_back(optional_rhs->getElementType());
+    }
+  } else if (const auto number_rhs = rhs->cast<NumberType>()) {
+    std::vector<TypePtr> number_types{IntType::get(), FloatType::get(), ComplexType::get()};
+    rhs_types.insert(rhs_types.end(), number_types.begin(), number_types.end());
+  } else {
+    rhs_types.push_back(rhs);
+  }
+  return std::all_of(this->containedTypes().begin(), this->containedTypes().end(),
+                     [&](TypePtr lhs_type) -> bool {
+                      return std::any_of(rhs_types.begin(),
+                                         rhs_types.end(),
+                                         [&](TypePtr rhs_type) -> bool {
+                                           return lhs_type->isSubtypeOfExt(rhs_type, why_not);
+                                         });
+  });
+}
+
+
+std::string UnionType::unionStr(TypePrinter printer, bool is_annotation_str) const {
+  std::stringstream ss;
+
+  bool can_hold_numbertype = this->canHoldType(NumberType::get());
+
+  std::vector<TypePtr> number_types{IntType::get(), FloatType::get(), ComplexType::get()};
+
+  auto is_numbertype = [&](TypePtr lhs) {
+    for (const auto& rhs : number_types) {
+      if (*lhs == *rhs) {
+        return true;
+      }
+    }
+    return false;
+  };
+
+  ss << "Union[";
+  bool printed = false;
+  for (size_t i = 0; i < types_.size(); ++i) {
+    if (!can_hold_numbertype || !is_numbertype(types_[i])) {
+      if (i > 0) {
+        ss << ", ";
+        printed = true;
+      }
+      if (is_annotation_str) {
+        ss << this->containedTypes()[i]->annotation_str(printer);
+      } else {
+        ss << this->containedTypes()[i]->str();
+      }
+    }
+  }
+  if (can_hold_numbertype) {
+    if (printed) {
+      ss << ", ";
+    }
+    if (is_annotation_str) {
+      ss << NumberType::get()->annotation_str(printer);
+    } else {
+      ss << NumberType::get()->str();
+    }
+  }
+  ss << "]";
+  return ss.str();
+}
+
+std::string UnionType::str() const {
+  return this->unionStr(nullptr, /*is_annotation_str=*/false);
+}
+
+std::string UnionType::annotation_str_impl(TypePrinter printer) const {
+  return this->unionStr(printer, /*is_annotation_str=*/true);
+}
+
+bool UnionType::canHoldType(TypePtr type) const {
+  if (type == NumberType::get()) {
+    return canHoldType(IntType::get())
+           && canHoldType(FloatType::get())
+           && canHoldType(ComplexType::get());
+  } else {
+    return std::any_of(this->containedTypes().begin(), this->containedTypes().end(),
+                    [&](TypePtr inner) {
+                      return type->isSubtypeOf(inner);
+                    });
+  }
+}
+
+c10::optional<TypePtr> UnionType::toOptional() const {
+  if (!canHoldType(NoneType::get())) {
+      return c10::nullopt;
+  }
+
+  std::vector<TypePtr> copied_types = this->containedTypes().vec();
+
+  auto maybe_opt = UnionType::create(std::move(copied_types));
+
+  if (maybe_opt->kind() == UnionType::Kind) {
+    return c10::nullopt;
+  } else {
+    return maybe_opt;
+  }
+}
+
+c10::optional<TypePtr> UnionType::subtractTypeSet(std::vector<TypePtr>& to_subtract) const {
+  std::vector<TypePtr> types;
+
+  // Given a TypePtr `lhs`, this function says whether or not `lhs` (or
+  // one of its parent types) is in the `to_subtract` vector
+  auto should_subtract = [&](TypePtr lhs) -> bool {
+    return std::any_of(to_subtract.begin(), to_subtract.end(),
+                        [&](TypePtr rhs) {
+                          return lhs->isSubtypeOf(rhs);
+                        });
+  };
+
+  // Copy all the elements that should NOT be subtracted to the `types`
+  // vector
+  std::copy_if(this->containedTypes().begin(), this->containedTypes().end(),
+              std::back_inserter(types),
+              [&](const TypePtr t) {
+                return !should_subtract(t);
+              });
+
+  if (types.size() == 0) {
+    return c10::nullopt;
+  } else if (types.size() == 1) {
+    return types[0];
+  } else {
+    return UnionType::create(std::move(types));
+  }
+}
+
+OptionalType::OptionalType(TypePtr contained)
+                           : UnionType({contained, NoneType::get()}, TypeKind::OptionalType) {
+  bool is_numbertype = false;
+  if (auto as_union = contained->cast<UnionType>()) {
+    is_numbertype = as_union->containedTypes().size() == 3 &&
+                    as_union->canHoldType(NumberType::get());
+  }
+  if (UnionType::containedTypes().size() == 2) {
+    contained_ = UnionType::containedTypes()[0]->kind()!= NoneType::Kind
+                 ? UnionType::containedTypes()[0]
+                 : UnionType::containedTypes()[1];
+  } else if (contained == NumberType::get() || is_numbertype) {
+    contained_ = NumberType::get();
+    types_.clear();
+    types_.push_back(NumberType::get());
+    types_.push_back(NoneType::get());
+  } else {
+    std::vector<TypePtr> to_subtract{NoneType::get()};
+    auto without_none = this->subtractTypeSet(to_subtract);
+    contained_ = UnionType::create({*without_none});
+  }
+  has_free_variables_ = contained_->hasFreeVariables();
+}
+
+bool OptionalType::operator==(const Type& rhs) const {
+  if (auto union_rhs = rhs.cast<UnionType>()) {
+    auto optional_rhs = union_rhs->toOptional();
+    // `**optional_rhs` = `*` to get value of `c10::optional<TypePtr>`,
+    // then `*` to dereference the pointer
+    return optional_rhs && *this == **optional_rhs;
+  } else if (auto optional_rhs = rhs.cast<OptionalType>()) {
+    return *this->getElementType() == *optional_rhs->getElementType();
+  } else {
+    return false;
+  }
+}
+
+bool OptionalType::isSubtypeOfExt(const TypePtr& rhs, std::ostream* why_not) const {
+  if (OptionalTypePtr optional_rhs = rhs->cast<OptionalType>()) {
+    return getElementType()->isSubtypeOfExt(optional_rhs->getElementType(), why_not);
+  } else if (UnionTypePtr union_rhs = rhs->cast<UnionType>()) {
+    if (!union_rhs->canHoldType(NoneType::get())) {
+      if (why_not) {
+        *why_not << rhs->repr_str() << " cannot hold None";
+      }
+      return false;
+    } else if (!union_rhs->canHoldType(this->getElementType())) {
+      if (why_not) {
+        *why_not << rhs->repr_str() << " cannot hold " << this->getElementType();
+      }
+      return false;
+    } else {
+      return true;
+    }
+  } else {
+    // NOLINTNEXTLINE(bugprone-argument-comment)
+    return Type::isSubtypeOfExt(rhs, why_not);
+  }
+}
+
+bool NumberType::operator==(const Type& rhs) const {
+  if (auto union_type = rhs.cast<UnionType>()) {
+    return union_type->containedTypes().size() == 3 && union_type->canHoldType(NumberType::get());
+  } else {
+    return rhs.kind() == this->kind();
+  }
+}
+
+bool NumberType::isSubtypeOfExt(const TypePtr& rhs, std::ostream* why_not) const {
+  if (auto union_type = rhs->cast<UnionType>()) {
+    return union_type->canHoldType(NumberType::get());
+  } else {
+    return Type::isSubtypeOfExt(rhs, why_not);
+  }
 }
 
 TupleType::TupleType(
@@ -875,20 +1386,6 @@ std::string TupleType::annotation_str_impl(TypePrinter printer) const {
   return ss.str();
 }
 
-// NOLINTNEXTLINE(clang-diagnostic-unused-function)
-static std::vector<bool> findContiguous(
-    const at::IntArrayRef& sizes,
-    const at::IntArrayRef& strides) {
-  AT_ASSERT(sizes.size() == strides.size());
-  std::vector<bool> cont(sizes.size());
-  for (size_t i = 0; i < sizes.size(); ++i) {
-    const auto expected_stride =
-        (i + 1 < sizes.size()) ? sizes[i + 1] * strides[i + 1] : 1;
-    cont[i] = (strides[i] == expected_stride);
-  }
-  return cont;
-}
-
 VaryingShape<int64_t> TensorType::strides() const {
   if (!strides_.size().has_value()) {
     return VaryingShape<int64_t>();
@@ -947,7 +1444,6 @@ VaryingShape<Stride> TensorType::computeStrideProps(
   return VaryingShape<Stride>{stride_properties};
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::atomic<size_t> ShapeSymbol::num_symbols{1};
 
 template struct VaryingShape<c10::ShapeSymbol>;
@@ -1641,10 +2137,9 @@ void ClassType::checkNotExist(const std::string& name, const std::string& what) 
   }
 
   // Check no overlap with existing attributes
-  // NOLINTNEXTLINE(modernize-loop-convert)
-  for (size_t i = 0; i < attributes_.size(); ++i) {
+  for (const auto & attribute : attributes_) {
     TORCH_CHECK(
-        name != attributes_[i].getName(),
+        name != attribute.getName(),
         "attempting to add ",
         what,
         " '",
@@ -1652,7 +2147,7 @@ void ClassType::checkNotExist(const std::string& name, const std::string& what) 
         "' to ",
         repr_str(),
         " but an attribute field of the same name already exists with type ",
-        attributes_[i].getType()->repr_str());
+        attribute.getType()->repr_str());
   }
 }
 
@@ -1693,8 +2188,10 @@ size_t ClassType::addAttribute(
     TORCH_CHECK(
         (type->kind() == TensorType::Kind) ||
             (type->kind() == OptionalType::Kind &&
-            type->expectRef<OptionalType>().getElementType()->kind() ==
+            type->expect<OptionalType>()->getElementType()->kind() ==
                 TensorType::Kind) ||
+            (type->kind() == UnionType::Kind &&
+            TensorType::get()->isSubtypeOf(type->expect<UnionType>())) ||
             (type->kind() == NoneType::Kind),
         "Expecting parameter or buffer to have either None, Tensor or Optional[Tensor] type, but got: ",
         toString(type));
@@ -1835,9 +2332,15 @@ SymbolicShape SymbolicShape::merge(const SymbolicShape& other) const {
   return SymbolicShape(std::move(dims));
 }
 
+void SymbolicShape::dump() const {
+  std::cout << *this << "\n";
+}
+
 bool EnumType::isSubtypeOfExt(const TypePtr& rhs, std::ostream* why_not) const {
   return rhs->kind() == TypeKind::AnyType ||
-      rhs->kind() == TypeKind::AnyEnumType || *this == *rhs;
+      rhs->kind() == TypeKind::AnyEnumType ||
+      *this == *rhs ||
+      Type::isSubtypeOfExt(rhs, why_not);
 }
 
 } // namespace c10

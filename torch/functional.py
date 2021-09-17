@@ -4,14 +4,12 @@ from typing import (
 
 import torch
 import torch.nn.functional as F
-from torch.types import _size
 from ._lowrank import svd_lowrank, pca_lowrank
 from .overrides import (
     has_torch_function, has_torch_function_unary, has_torch_function_variadic,
     handle_torch_function)
 from ._jit_internal import boolean_dispatch, List
 from ._jit_internal import _overload as overload
-from torch._autograd_functions import _LU
 
 Tensor = torch.Tensor
 from torch import _VF
@@ -30,7 +28,6 @@ __all__ = [
     'einsum',
     'istft',
     'lu',
-    'lu_unpack',
     'norm',
     'meshgrid',
     'pca_lowrank',
@@ -69,6 +66,7 @@ def broadcast_tensors(*tensors):
         tensor([[0, 1, 2],
                 [0, 1, 2]])
     """
+    # This wrapper exists to support variadic args.
     if has_torch_function(tensors):
         return handle_torch_function(broadcast_tensors, tensors, *tensors)
     return _VF.broadcast_tensors(tensors)  # type: ignore[attr-defined]
@@ -99,6 +97,7 @@ def broadcast_shapes(*shapes):
     Raises:
         RuntimeError: If shapes are incompatible.
     """
+    # This wrapper exists to support variadic args.
     # TODO Movie this to C++ once the jit has better support for torch.Size.
     with torch.no_grad():
         scalar = torch.zeros((), device="cpu")
@@ -157,143 +156,7 @@ def split(tensor, split_size_or_sections, dim=0):
     return tensor.split(split_size_or_sections, dim)
 
 
-if TYPE_CHECKING:
-    _Indices = _size
-else:
-    _Indices = List[int]
-
-
-# equivalent to itertools.product(indices)
-def _indices_product(indices: _Indices) -> List[List[int]]:
-    empty_list = torch.jit.annotate(List[int], [])
-    result = [empty_list]
-    for idx in indices:
-        result_temp = torch.jit.annotate(List[List[int]], [])
-        for res in result:
-            for i in range(idx):
-                result_temp.append(res + [i])
-        result = result_temp
-    return result
-
-
-def _index_tensor_with_indices_list(tensor, indices):
-    # type: (Tensor, List[int]) -> Tensor
-    out = tensor
-    for index in indices:
-        out = out[index]
-    return out
-
-
-def lu_unpack(LU_data, LU_pivots, unpack_data=True, unpack_pivots=True):
-    # type: (Tensor, Tensor, bool, bool) ->  (Tuple[Optional[Tensor], Optional[Tensor], Optional[Tensor]])
-    r"""Unpacks the data and pivots from a LU factorization of a tensor.
-
-    Returns a tuple of tensors as ``(the pivots, the L tensor, the U tensor)``.
-
-    Args:
-        LU_data (Tensor): the packed LU factorization data
-        LU_pivots (Tensor): the packed LU factorization pivots
-        unpack_data (bool): flag indicating if the data should be unpacked
-        unpack_pivots (bool): flag indicating if the pivots should be unpacked
-
-    Examples::
-
-        >>> A = torch.randn(2, 3, 3)
-        >>> A_LU, pivots = A.lu()
-        >>> P, A_L, A_U = torch.lu_unpack(A_LU, pivots)
-        >>>
-        >>> # can recover A from factorization
-        >>> A_ = torch.bmm(P, torch.bmm(A_L, A_U))
-
-        >>> # LU factorization of a rectangular matrix:
-        >>> A = torch.randn(2, 3, 2)
-        >>> A_LU, pivots = A.lu()
-        >>> P, A_L, A_U = torch.lu_unpack(A_LU, pivots)
-        >>> P
-        tensor([[[1., 0., 0.],
-                 [0., 1., 0.],
-                 [0., 0., 1.]],
-
-                [[0., 0., 1.],
-                 [0., 1., 0.],
-                 [1., 0., 0.]]])
-        >>> A_L
-        tensor([[[ 1.0000,  0.0000],
-                 [ 0.4763,  1.0000],
-                 [ 0.3683,  0.1135]],
-
-                [[ 1.0000,  0.0000],
-                 [ 0.2957,  1.0000],
-                 [-0.9668, -0.3335]]])
-        >>> A_U
-        tensor([[[ 2.1962,  1.0881],
-                 [ 0.0000, -0.8681]],
-
-                [[-1.0947,  0.3736],
-                 [ 0.0000,  0.5718]]])
-        >>> A_ = torch.bmm(P, torch.bmm(A_L, A_U))
-        >>> torch.norm(A_ - A)
-        tensor(2.9802e-08)
-    """
-    if has_torch_function_variadic(LU_data, LU_pivots):
-        return handle_torch_function(
-            lu_unpack, (LU_data, LU_pivots), LU_data, LU_pivots,
-            unpack_data=unpack_data,
-            unpack_pivots=unpack_pivots)
-    shape = LU_data.shape
-    # In generalized LU factorization, the following shape relations hold:
-    #   A.shape[-2:] == (m, n)
-    #   P.shape[-2:] == (m, m)
-    #   L.shape[-2:] == (m, k)
-    #   U.shape[-2:] == (k, n)
-    # where k = min(m, n)
-    m, n = shape[-2:]
-    k = min(m, n)
-    if unpack_data:
-        U: Optional[Tensor] = LU_data.triu()
-        assert U is not None
-        if m != k:
-            U = U.narrow(-2, 0, k)
-        L: Optional[Tensor] = LU_data.tril()
-        assert L is not None
-        if k != n:
-            L = L.narrow(-1, 0, k)
-        L.diagonal(dim1=-2, dim2=-1).fill_(1)
-    else:
-        L = U = None
-
-    if unpack_pivots:
-        LU_pivots_zero_idx = LU_pivots - 1
-        if LU_data.dim() > 2:
-            P: Optional[Tensor] = torch.eye(m, device=LU_data.device,
-                                            dtype=LU_data.dtype) \
-                .expand(shape[:-1] + (m,)) \
-                .clone(memory_format=torch.contiguous_format)
-            assert P is not None
-
-            # TODO: rewrite when TorchScript supports product and map as
-            # product(*map(lambda x: list(range(x)), shape[:-2])) when issue 33781 is fixed
-            indices = _indices_product(shape[:-2])
-            for idx in indices:
-                final_order = list(range(m))
-                for k, j in enumerate(_index_tensor_with_indices_list(LU_pivots_zero_idx, idx)):
-                    final_order[k], final_order[j] = final_order[j], final_order[k]
-                # TODO: remove _index_tensor_with_indices_list when TorchScript supports indexing Tensor with list
-                p_idx = _index_tensor_with_indices_list(P, idx)
-                p_idx.copy_(p_idx.index_select(1, torch.as_tensor(final_order, device=LU_pivots.device)))
-        else:
-            P = torch.eye(m, device=LU_data.device, dtype=LU_data.dtype)
-            final_order = list(range(m))
-            for k, j, in enumerate(LU_pivots_zero_idx):
-                final_order[k], final_order[j] = final_order[j], final_order[k]
-            P = P.index_select(1, torch.as_tensor(final_order, device=LU_pivots.device))
-    else:
-        P = None
-
-    return P, L, U
-
-
-def einsum(equation, *operands):
+def einsum(*args):
     r"""einsum(equation, *operands) -> Tensor
 
     Sums the product of the elements of the input :attr:`operands` along dimensions specified using a notation
@@ -309,7 +172,7 @@ def einsum(equation, *operands):
 
     Equation:
 
-        The :attr:`equation` string specifies the subscripts (lower case letters `['a', 'z']`) for each dimension of
+        The :attr:`equation` string specifies the subscripts (letters in `[a-zA-Z]`) for each dimension of
         the input :attr:`operands` in the same order as the dimensions, separating subcripts for each operand by a
         comma (','), e.g. `'ij,jk'` specify subscripts for two 2D operands. The dimensions labeled with the same subscript
         must be broadcastable, that is, their size must either match or be `1`. The exception is if a subscript is
@@ -347,9 +210,17 @@ def einsum(equation, *operands):
         run faster or consume less memory. Projects like opt_einsum (https://optimized-einsum.readthedocs.io/en/stable/)
         can optimize the formula for you.
 
+    .. note::
+
+        As of PyTorch 1.10 :func:`torch.einsum` also supports the sublist format (see examples below). In this format,
+        subscripts for each operand are specified by sublists, list of integers in the range [0, 52). These sublists
+        follow their operands, and an extra sublist can appear at the end of the input to specify the output's
+        subscripts., e.g. `torch.einsum(op1, sublist1, op2, sublist2, ..., [subslist_out])`. Python's `Ellipsis` object
+        may be provided in a sublist to enable broadcasting as described in the Equation section above.
+
     Args:
         equation (string): The subscripts for the Einstein summation.
-        operands (Tensor): The operands to compute the Einstein sum of.
+        operands (List[Tensor]): The tensors to compute the Einstein summation of.
 
     Examples::
 
@@ -384,6 +255,17 @@ def einsum(equation, *operands):
                 [[ 2.8153,  1.8787, -4.3839, -1.2112],
                 [ 0.3728, -2.1131,  0.0921,  0.8305]]])
 
+        # with sublist format and ellipsis
+        >>> torch.einsum(As, [..., 0, 1], Bs, [..., 1, 2], [..., 0, 2])
+        tensor([[[-1.0564, -1.5904,  3.2023,  3.1271],
+                [-1.6706, -0.8097, -0.8025, -2.1183]],
+
+                [[ 4.2239,  0.3107, -0.5756, -0.2354],
+                [-1.4558, -0.3460,  1.5087, -0.8530]],
+
+                [[ 2.8153,  1.8787, -4.3839, -1.2112],
+                [ 0.3728, -2.1131,  0.0921,  0.8305]]])
+
         # batch permute
         >>> A = torch.randn(2, 3, 4, 5)
         >>> torch.einsum('...ij->...ji', A).shape
@@ -397,8 +279,44 @@ def einsum(equation, *operands):
         tensor([[-0.3430, -5.2405,  0.4494],
                 [ 0.3311,  5.5201, -3.0356]])
     """
+    # This wrapper exists to support variadic args.
+    if len(args) < 2:
+        raise ValueError('einsum(): must specify the equation string and at least one operand, '
+                         'or at least one operand and its subscripts list')
+
+    equation = None
+    operands = None
+
+    if isinstance(args[0], torch.Tensor):
+        # Convert the subscript list format which is an interleaving of operand and its subscripts
+        # list with an optional output subscripts list at the end (see documentation for more details on this)
+        # to the equation string format by creating the equation string from the subscripts list and grouping the
+        # input operands into a tensorlist (List[Tensor]).
+        def parse_subscript(n: int) -> str:
+            if n == Ellipsis:
+                return '...'
+            if n >= 0 and n < 26:
+                return chr(ord('A') + n)
+            if n >= 26 and n < 52:
+                return chr(ord('a') + n - 26)
+            raise ValueError('einsum(): subscript in subscript list is not within the valid range [0, 52)')
+
+        # Parse subscripts for input operands
+        equation = ','.join(''.join(parse_subscript(s) for s in l) for l in args[1::2])
+
+        # Parse optional output subscripts (provided when the number of arguments is odd)
+        if len(args) % 2 == 1:
+            equation += '->' + ''.join(parse_subscript(s) for s in args[-1])
+            operands = args[:-1:2]
+        else:
+            operands = args[::2]
+    else:
+        equation = args[0]
+        operands = args[1:]
+
     if has_torch_function(operands):
         return handle_torch_function(einsum, operands, equation, *operands)
+
     if len(operands) == 1 and isinstance(operands[0], (list, tuple)):
         # the old interface of passing the operands as one list argument
         _operands = operands[0]
@@ -409,30 +327,68 @@ def einsum(equation, *operands):
     return _VF.einsum(equation, operands)  # type: ignore[attr-defined]
 
 
+# This wrapper exists to support variadic args.
 if TYPE_CHECKING:
     # The JIT doesn't understand Union, so only add type annotation for mypy
-    def meshgrid(*tensors: Union[Tensor, List[Tensor]]) -> Tuple[Tensor, ...]:
-        return _meshgrid(*tensors)
+    def meshgrid(*tensors: Union[Tensor, List[Tensor]],
+                 indexing: Optional[str] = None) -> Tuple[Tensor, ...]:
+        return _meshgrid(*tensors, indexing=indexing)
 else:
-    def meshgrid(*tensors):
-        r"""Take :math:`N` tensors, each of which can be either scalar or 1-dimensional
-        vector, and create :math:`N` N-dimensional grids, where the :math:`i` :sup:`th` grid is defined by
-        expanding the :math:`i` :sup:`th` input over dimensions defined by other inputs.
+    def meshgrid(*tensors, indexing: Optional[str] = None) -> Tuple[Tensor, ...]:
+        r"""Creates grids of coordinates specified by the 1D inputs in `attr`:tensors.
+
+        This is helpful when you want to visualize data over some
+        range of inputs. See below for a plotting example.
+
+        Given :math:`N` 1D tensors :math:`T_0 \ldots T_{N-1}` as
+        inputs with corresponding sizes :math:`S_0 \ldots S_{N-1}`,
+        this creates :math:`N` N-dimensional tensors :math:`G_0 \ldots
+        G_{N-1}`, each with shape :math:`(S_0, ..., S_{N-1})` where
+        the output :math:`G_i` is constructed by expanding :math:`T_i`
+        to the result shape.
+
+        .. note::
+            0D inputs are treated equivalently to 1D inputs of a
+            single element.
+
+        .. warning::
+            `torch.meshgrid(*tensors)` currently has the same behavior
+            as calling `numpy.meshgrid(*arrays, indexing='ij')`.
+
+            In the future `torch.meshgrid` will support the
+            `indexing='xy'` and eventually transition to that as the
+            default.
+
+            https://github.com/pytorch/pytorch/issues/50276 tracks
+            this issue with the goal of migrating to NumPy's behavior.
+
+        .. seealso::
+
+            :func:`torch.cartesian_prod` has the same effect but it
+            collects the data in a tensor of vectors.
 
         Args:
             tensors (list of Tensor): list of scalars or 1 dimensional tensors. Scalars will be
                 treated as tensors of size :math:`(1,)` automatically
 
+            indexing: (str, optional): the indexing mode requested.
+                Only "ij" is currently supported.
+
         Returns:
-            seq (sequence of Tensors): If the input has :math:`k` tensors of size
-            :math:`(N_1,), (N_2,), \ldots , (N_k,)`, then the output would also have :math:`k` tensors,
-            where all tensors are of size :math:`(N_1, N_2, \ldots , N_k)`.
+            seq (sequence of Tensors): If the input has :math:`N`
+            tensors of size :math:`S_0 \ldots S_{N-1}``, then the
+            output will also have :math:`N` tensors, where each tensor
+            is of shape :math:`(S_0, ..., S_{N-1})`.
 
         Example::
 
             >>> x = torch.tensor([1, 2, 3])
             >>> y = torch.tensor([4, 5, 6])
-            >>> grid_x, grid_y = torch.meshgrid(x, y)
+
+            Observe the element-wise pairings across the grid, (1, 4),
+            (1, 5), ..., (3, 6). This is the same thing as the
+            cartesian product.
+            >>> grid_x, grid_y = torch.meshgrid(x, y, indexing='ij')
             >>> grid_x
             tensor([[1, 1, 1],
                     [2, 2, 2],
@@ -441,17 +397,45 @@ else:
             tensor([[4, 5, 6],
                     [4, 5, 6],
                     [4, 5, 6]])
+
+            This correspondence can be seen when these grids are
+            stacked properly.
+            >>> torch.equal(torch.cat(tuple(torch.dstack([grid_x, grid_y]))),
+            ...             torch.cartesian_prod(x, y))
+            True
+
+            `torch.meshgrid` is commonly used to produce a grid for
+            plotting.
+            >>> import matplotlib.pyplot as plt
+            >>> xs = torch.linspace(-5, 5, steps=100)
+            >>> ys = torch.linspace(-5, 5, steps=100)
+            >>> x, y = torch.meshgrid(xs, ys)
+            >>> z = torch.sin(torch.sqrt(x * x + y * y))
+            >>> ax = plt.axes(projection='3d')
+            >>> ax.plot_surface(x.numpy(), y.numpy(), z.numpy())
+            <mpl_toolkits.mplot3d.art3d.Poly3DCollection object at 0x7f8f30d40100>
+            >>> plt.show()
+
+        .. image:: ../_static/img/meshgrid.png
+            :width: 512
+
         """
-        return _meshgrid(*tensors)
+        return _meshgrid(*tensors, indexing=indexing)
 
 
-def _meshgrid(*tensors):
+def _meshgrid(*tensors, indexing: Optional[str]):
     if has_torch_function(tensors):
-        return handle_torch_function(meshgrid, tensors, *tensors)
+        return handle_torch_function(meshgrid, tensors, *tensors, indexing=indexing)
     if len(tensors) == 1 and isinstance(tensors[0], (list, tuple)):
         # the old interface of passing the operands as one list argument
         tensors = tensors[0]  # type: ignore[assignment]
-    return _VF.meshgrid(tensors)  # type: ignore[attr-defined]
+
+    # Continue allowing call of old method that takes no indexing
+    # kwarg for forward compatibility reasons.
+    #
+    # Remove this two weeks after landing.
+    kwargs = {} if indexing is None else {'indexing': indexing}
+    return _VF.meshgrid(tensors, **kwargs)  # type: ignore[attr-defined]
 
 
 def stft(input: Tensor, n_fft: int, hop_length: Optional[int] = None,
@@ -597,7 +581,8 @@ def istft(input: Tensor, n_fft: int, hop_length: Optional[int] = None,
 
     Since :func:`~torch.stft` discards elements at the end of the signal if they do not fit in a frame,
     ``istft`` may return a shorter signal than the original signal (can occur if :attr:`center` is False
-    since the signal isn't padded).
+    since the signal isn't padded). If `length` is given in the arguments and is longer than expected,
+    ``istft`` will pad zeros to the end of the returned signal.
 
     If :attr:`center` is ``True``, then there will be padding e.g. ``'constant'``, ``'reflect'``, etc.
     Left padding can be trimmed off exactly because they can be calculated but right padding cannot be
@@ -654,9 +639,6 @@ def istft(input: Tensor, n_fft: int, hop_length: Optional[int] = None,
 
     return _VF.istft(input, n_fft, hop_length, win_length, window, center,  # type: ignore[attr-defined]
                      normalized, onesided, length, return_complex)
-
-
-del torch.unique_dim
 
 
 if TYPE_CHECKING:
@@ -1010,6 +992,12 @@ def tensordot(a, b, dims=2, out: Optional[torch.Tensor] = None):  # noqa: F811
     if has_torch_function_variadic(a, b):
         return handle_torch_function(tensordot, (a, b), a, b, dims=dims)
 
+    if not isinstance(dims, (tuple, list, torch.Tensor, int)):
+        raise RuntimeError("tensordot expects dims to be int or "
+                           + "Tuple[List[int], List[int]] or "
+                           + "List[List[int]] containing two lists, but got "
+                           + f"dims={dims}")
+
     dims_a: List[int] = []
     dims_b: List[int] = []
 
@@ -1034,9 +1022,6 @@ def tensordot(a, b, dims=2, out: Optional[torch.Tensor] = None):  # noqa: F811
             raise RuntimeError(f"tensordot expects dims >= 0, but got dims={dims}")
         dims_a = list(range(-dims, 0))
         dims_b = list(range(dims))
-
-    if len(dims_a) == 0 or len(dims_b) == 0:
-        raise RuntimeError(f"unsupported input to tensordot, got dims={dims}")
 
     if out is None:
         return _VF.tensordot(a, b, dims_a, dims_b)  # type: ignore[attr-defined]
@@ -1071,6 +1056,7 @@ def cartesian_prod(*tensors):
                 [3, 4],
                 [3, 5]])
     """
+    # This wrapper exists to support variadic args.
     if has_torch_function(tensors):
         return handle_torch_function(cartesian_prod, tensors, *tensors)
     return _VF.cartesian_prod(tensors)  # type: ignore[attr-defined]
@@ -1105,6 +1091,7 @@ def block_diag(*tensors):
                 [0, 0, 0, 0, 0, 0, 0, 0, 0, 5],
                 [0, 0, 0, 0, 0, 0, 0, 0, 0, 6]])
     """
+    # This wrapper exists to support variadic args.
     if has_torch_function(tensors):
         return handle_torch_function(block_diag, tensors, *tensors)
     return torch._C._VariableFunctions.block_diag(tensors)  # type: ignore[attr-defined]
@@ -1192,6 +1179,7 @@ def atleast_1d(*tensors):
         >>> torch.atleast_1d((x,y))
         (tensor([0.5000]), tensor([1.]))
     """
+    # This wrapper exists to support variadic args.
     if has_torch_function(tensors):
         return handle_torch_function(atleast_1d, tensors, *tensors)
     if len(tensors) == 1:
@@ -1228,6 +1216,7 @@ def atleast_2d(*tensors):
         >>> torch.atleast_2d((x,y))
         (tensor([[0.5000]]), tensor([[1.]]))
     """
+    # This wrapper exists to support variadic args.
     if has_torch_function(tensors):
         return handle_torch_function(atleast_2d, tensors, *tensors)
     if len(tensors) == 1:
@@ -1272,6 +1261,7 @@ def atleast_3d(*tensors):
         >>> torch.atleast_3d((x,y))
         (tensor([[[0.5000]]]), tensor([[[1.]]]))
     """
+    # This wrapper exists to support variadic args.
     if has_torch_function(tensors):
         return handle_torch_function(atleast_3d, tensors, *tensors)
     if len(tensors) == 1:
@@ -1321,9 +1311,13 @@ def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa
     .. warning::
 
         torch.norm is deprecated and may be removed in a future PyTorch release.
-        Use :func:`torch.linalg.norm` instead, but note that :func:`torch.linalg.norm`
-        has a different signature and slightly different behavior that is
-        more consistent with NumPy's numpy.linalg.norm.
+        Its documentation and behavior may be incorrect, and it is no longer
+        actively maintained.
+
+        Use :func:`torch.linalg.norm`, instead, or :func:`torch.linalg.vector_norm`
+        when computing vector norms and :func:`torch.linalg.matrix_norm` when
+        computing matrix norms. Note, however, the signature for these functions
+        is slightly different than the signature for torch.norm.
 
     Args:
         input (Tensor): The input tensor. Its data type must be either a floating
@@ -1368,7 +1362,7 @@ def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa
             :attr:`dim` = ``None`` and :attr:`out` = ``None``.
         dtype (:class:`torch.dtype`, optional): the desired data type of
             returned tensor. If specified, the input tensor is casted to
-            :attr:'dtype' while performing the operation. Default: None.
+            :attr:`dtype` while performing the operation. Default: None.
 
     .. note::
         Even though ``p='fro'`` supports any number of dimensions, the true
@@ -1478,7 +1472,10 @@ def chain_matmul(*matrices, out=None):
     If :math:`N` is 1, then this is a no-op - the original matrix is returned as is.
 
     .. warning::
-        :func:`torch.chain_matmul` is deprecated, use :func:`torch.linalg.multi_dot` instead.
+
+        :func:`torch.chain_matmul` is deprecated and will be removed in a future PyTorch release.
+        Use :func:`torch.linalg.multi_dot` instead, which accepts a list of two or more tensors
+        rather than multiple arguments.
 
     Args:
         matrices (Tensors...): a sequence of 2 or more 2-D tensors whose product is to be determined.
@@ -1501,9 +1498,14 @@ def chain_matmul(*matrices, out=None):
 
     .. _`[CLRS]`: https://mitpress.mit.edu/books/introduction-algorithms-third-edition
     """
+    # This wrapper exists to support variadic args.
     if has_torch_function(matrices):
         return handle_torch_function(chain_matmul, matrices, *matrices)
-    return _VF.chain_matmul(matrices)  # type: ignore[attr-defined]
+
+    if out is None:
+        return _VF.chain_matmul(matrices)  # type: ignore[attr-defined]
+    else:
+        return _VF.chain_matmul(matrices, out=out)  # type: ignore[attr-defined]
 
 
 def _lu_impl(A, pivot=True, get_infos=False, out=None):
@@ -1514,31 +1516,27 @@ def _lu_impl(A, pivot=True, get_infos=False, out=None):
     ``True``.
 
     .. note::
-        The pivots returned by the function are 1-indexed. If :attr:`pivot` is ``False``,
-        then the returned pivots is a tensor filled with zeros of the appropriate size.
-
-    .. note::
-        LU factorization with :attr:`pivot` = ``False`` is not available for CPU, and attempting
-        to do so will throw an error. However, LU factorization with :attr:`pivot` = ``False`` is
-        available for CUDA.
-
-    .. note::
-        This function does not check if the factorization was successful or not if
-        :attr:`get_infos` is ``True`` since the status of the factorization is present in the
-        third element of the return tuple.
-
-    .. note::
-        In the case of batches of square matrices with size less or
-        equal to 32 on a CUDA device, the LU factorization is repeated
-        for singular matrices due to the bug in the MAGMA library (see
-        magma issue 13).
-
-    .. note::
-       ``L``, ``U``, and ``P`` can be derived using :func:`torch.lu_unpack`.
+        * The pivots returned by the function are 1-indexed. If :attr:`pivot`
+          is ``False``, then the returned pivots is a tensor filled with
+          zeros of the appropriate size.
+        * LU factorization with :attr:`pivot` = ``False`` is not available
+          for CPU, and attempting to do so will throw an error. However,
+          LU factorization with :attr:`pivot` = ``False`` is available for
+          CUDA.
+        * This function does not check if the factorization was successful
+          or not if :attr:`get_infos` is ``True`` since the status of the
+          factorization is present in the third element of the return tuple.
+        * In the case of batches of square matrices with size less or equal
+          to 32 on a CUDA device, the LU factorization is repeated for
+          singular matrices due to the bug in the MAGMA library
+          (see magma issue 13).
+        * ``L``, ``U``, and ``P`` can be derived using :func:`torch.lu_unpack`.
 
     .. warning::
-        The LU factorization does have backward support,
-        but only for square inputs of full rank.
+        The gradients of this function will only be finite when :attr:`A` is full rank.
+        This is because the LU decomposition is just differentiable at full rank matrices.
+        Furthermore, if :attr:`A` is close to not being full rank,
+        the gradient will be numerically unstable as it depends on the computation of :math:`L^{-1}` and :math:`U^{-1}`.
 
     Args:
         A (Tensor): the tensor to factor of size :math:`(*, m, n)`
@@ -1586,23 +1584,6 @@ def _lu_impl(A, pivot=True, get_infos=False, out=None):
         ...   print('LU factorization succeeded for all samples!')
         LU factorization succeeded for all samples!
     """
-    if not torch._jit_internal.is_scripting():
-        if A.requires_grad:
-            if not (A.size(-2) == A.size(-1) and (A.dtype.is_floating_point or A.is_complex)):
-                raise ValueError(
-                    'lu.backward works only with batches of squared full-rank matrices'
-                    ' of floating or complex types.'
-                )
-
-            return _LU.apply(A, pivot, get_infos)
-    else:
-        if A.requires_grad:
-            raise RuntimeError(
-                'Script and require gradients is not supported at the moment.'
-                'If you just want to do the forward, use .detach()'
-                'on the input before calling the function.'
-            )
-
     # If get_infos is True, then we don't need to check for errors and vice versa
     return torch._lu_with_info(A, pivot=pivot, check_errors=(not get_infos))
 

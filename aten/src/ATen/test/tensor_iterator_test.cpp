@@ -9,11 +9,9 @@ using namespace at;
 
 // An operation with a CUDA tensor and CPU scalar should keep the scalar
 // on the CPU (and lift it to a parameter).
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorIteratorTest, CPUScalar) {
   if (!at::hasCUDA()) return;
   Tensor out;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto x = at::randn({5, 5}, kCUDA);
   auto y = at::ones(1, kCPU).squeeze();
   auto iter = TensorIterator::binary_op(out, x, y);
@@ -23,10 +21,8 @@ TEST(TensorIteratorTest, CPUScalar) {
 }
 
 // Verifies multiple zero-dim CPU inputs are not coerced to CUDA
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorIteratorTest, CPUScalarInputs) {
   if (!at::hasCUDA()) return;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Tensor out = at::empty({5, 5}, kCUDA);
   auto x = at::ones(1, kCPU).squeeze();
   auto y = at::ones(1, kCPU).squeeze();
@@ -35,13 +31,10 @@ TEST(TensorIteratorTest, CPUScalarInputs) {
 }
 
 // Mixing CPU and CUDA tensors should raise an exception (if the CPU tensor isn't zero-dim)
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorIteratorTest, MixedDevices) {
   if (!at::hasCUDA()) return;
   Tensor out;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto x = at::randn({5, 5}, kCUDA);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto y = at::ones({5}, kCPU);
   // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   ASSERT_ANY_THROW(TensorIterator::binary_op(out, x, y));
@@ -49,13 +42,10 @@ TEST(TensorIteratorTest, MixedDevices) {
 
 Tensor random_tensor_for_type(at::ScalarType scalar_type) {
   if (at::isFloatingType(scalar_type)) {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     return at::randn({5, 5}, at::device(kCPU).dtype(scalar_type));
   } else if (scalar_type == kBool) {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     return at::randint(0, 2, {5, 5}, at::device(kCPU).dtype(scalar_type));
   } else {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     return at::randint(1, 10, {5, 5}, at::device(kCPU).dtype(scalar_type));
   }
 }
@@ -74,7 +64,7 @@ TEST(TensorIteratorTest, SerialLoopUnary_##name) {                              
 TEST(TensorIteratorTest, SerialLoopUnaryNoOutput_##name) {                     \
   auto in = random_tensor_for_type(k##name);                                   \
   auto iter = at::TensorIteratorConfig()                                       \
-      .add_input(in)                                                           \
+      .add_owned_input(in)                                                           \
       .build();                                                                \
   int64_t acc = 0;                                                             \
   at::native::cpu_serial_kernel(iter, [&](ctype a) -> void { acc++; }); \
@@ -97,8 +87,8 @@ TEST(TensorIteratorTest, SerialLoopBinaryNoOutput_##name) {                     
   auto in1 = random_tensor_for_type(k##name);                                    \
   auto in2 = random_tensor_for_type(k##name);                                    \
   auto iter = at::TensorIteratorConfig()                                         \
-      .add_input(in1)                                                            \
-      .add_input(in2)                                                            \
+      .add_owned_input(in1)                                                            \
+      .add_owned_input(in2)                                                            \
       .build();                                                                  \
   int64_t acc = 0;                                                               \
   at::native::cpu_serial_kernel(iter, [&](ctype a, ctype b) -> void { acc++; }); \
@@ -114,9 +104,9 @@ TEST(TensorIteratorTest, SerialLoopPointwise_##name) {                          
   auto expected = in1.add(in2).add(in3);                                                              \
   auto iter = at::TensorIteratorConfig()                                                              \
       .add_output(out)                                                                                \
-      .add_input(in1)                                                                                 \
-      .add_input(in2)                                                                                 \
-      .add_input(in3)                                                                                 \
+      .add_owned_input(in1)                                                                                 \
+      .add_owned_input(in2)                                                                                 \
+      .add_owned_input(in3)                                                                                 \
       .build();                                                                                       \
   at::native::cpu_serial_kernel(iter, [=](ctype a, ctype b, ctype c) -> ctype { return a + b + c; }); \
   ASSERT_ANY_THROW(out.equal(expected));                                                              \
@@ -128,9 +118,9 @@ TEST(TensorIteratorTest, SerialLoopPoinwiseNoOutput_##name) {                   
   auto in2 = random_tensor_for_type(k##name);                                             \
   auto in3 = random_tensor_for_type(k##name);                                             \
   auto iter = at::TensorIteratorConfig()                                                  \
-      .add_input(in1)                                                                     \
-      .add_input(in2)                                                                     \
-      .add_input(in3)                                                                     \
+      .add_owned_input(in1)                                                                     \
+      .add_owned_input(in2)                                                                     \
+      .add_owned_input(in3)                                                                     \
       .build();                                                                           \
   int64_t acc = 0;                                                                        \
   at::native::cpu_serial_kernel(iter, [&](ctype a, ctype b, ctype c) -> void { acc++; }); \
@@ -163,20 +153,14 @@ AT_FORALL_SCALAR_TYPES(UNARY_TEST_ITER_FOR_TYPE)
 AT_FORALL_SCALAR_TYPES(BINARY_TEST_ITER_FOR_TYPE)
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
 AT_FORALL_SCALAR_TYPES(POINTWISE_TEST_ITER_FOR_TYPE)
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 AT_FORALL_SCALAR_TYPES(NO_OUTPUT_UNARY_TEST_ITER_FOR_TYPE)
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 AT_FORALL_SCALAR_TYPES(NO_OUTPUT_BINARY_TEST_ITER_FOR_TYPE)
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 AT_FORALL_SCALAR_TYPES(NO_OUTPUT_POINTWISE_TEST_ITER_FOR_TYPE)
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 AT_FORALL_SCALAR_TYPES_AND(Bool, COMPARISON_TEST_ITER_FOR_TYPE)
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorIteratorTest, SerialLoopSingleThread) {
   std::thread::id thread_id = std::this_thread::get_id();
   Tensor out;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto x = at::zeros({50000}, at::TensorOptions(kCPU).dtype(kInt));
   auto iter = TensorIterator::unary_op(out, x);
   at::native::cpu_serial_kernel(iter, [=](int a) -> int {
@@ -186,25 +170,23 @@ TEST(TensorIteratorTest, SerialLoopSingleThread) {
   });
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorIteratorTest, InputDType) {
   auto iter = at::TensorIteratorConfig()
       .check_all_same_dtype(false)
-      .add_output(at::ones({1, 1}, at::dtype(at::kBool)))
-      .add_input(at::ones({1, 1}, at::dtype(at::kFloat)))
-      .add_input(at::ones({1, 1}, at::dtype(at::kDouble)))
+      .add_owned_output(at::ones({1, 1}, at::dtype(at::kBool)))
+      .add_owned_input(at::ones({1, 1}, at::dtype(at::kFloat)))
+      .add_owned_input(at::ones({1, 1}, at::dtype(at::kDouble)))
       .build();
   EXPECT_TRUE(iter.input_dtype() == at::kFloat);
   EXPECT_TRUE(iter.input_dtype(0) == at::kFloat);
   EXPECT_TRUE(iter.input_dtype(1) == at::kDouble);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorIteratorTest, ComputeCommonDTypeInputOnly) {
   auto iter = at::TensorIteratorConfig()
-      .add_output(at::ones({1, 1}, at::dtype(at::kBool)))
-      .add_input(at::ones({1, 1}, at::dtype(at::kFloat)))
-      .add_input(at::ones({1, 1}, at::dtype(at::kDouble)))
+      .add_owned_output(at::ones({1, 1}, at::dtype(at::kBool)))
+      .add_owned_input(at::ones({1, 1}, at::dtype(at::kFloat)))
+      .add_owned_input(at::ones({1, 1}, at::dtype(at::kDouble)))
       .promote_inputs_to_common_dtype(true)
       .build();
   EXPECT_TRUE(iter.dtype(0) == at::kBool);
@@ -213,26 +195,24 @@ TEST(TensorIteratorTest, ComputeCommonDTypeInputOnly) {
   EXPECT_TRUE(iter.common_dtype() == at::kDouble);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorIteratorTest, DoNotComputeCommonDTypeInputOnly) {
   auto iter = at::TensorIteratorConfig()
       .check_all_same_dtype(false)
-      .add_output(at::ones({1, 1}, at::dtype(at::kLong)))
-      .add_input(at::ones({1, 1}, at::dtype(at::kFloat)))
-      .add_input(at::ones({1, 1}, at::dtype(at::kDouble)))
+      .add_owned_output(at::ones({1, 1}, at::dtype(at::kLong)))
+      .add_owned_input(at::ones({1, 1}, at::dtype(at::kFloat)))
+      .add_owned_input(at::ones({1, 1}, at::dtype(at::kDouble)))
       .build();
   EXPECT_TRUE(iter.dtype(0) == at::kLong);
   EXPECT_TRUE(iter.dtype(1) == at::kFloat);
   EXPECT_TRUE(iter.dtype(2) == at::kDouble);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorIteratorTest, FailNonPromotingBinaryOp) {
   Tensor out;
   at::TensorIteratorConfig config;
   config.add_output(out);
-  config.add_input(at::ones({1,1}, at::dtype(at::kDouble)));
-  config.add_input(at::ones({1,1}, at::dtype(at::kInt)));
+  config.add_owned_input(at::ones({1,1}, at::dtype(at::kDouble)));
+  config.add_owned_input(at::ones({1,1}, at::dtype(at::kInt)));
   // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   ASSERT_ANY_THROW(config.build());
 }
@@ -248,8 +228,8 @@ TEST(TensorIteratorTest, CpuKernelMultipleOutputs_##name) {                     
   auto iter = at::TensorIteratorConfig()                                                            \
     .add_output(out1)                                                                               \
     .add_output(out2)                                                                               \
-    .add_input(in1)                                                                                 \
-    .add_input(in2)                                                                                 \
+    .add_owned_input(in1)                                                                                 \
+    .add_owned_input(in2)                                                                                 \
     .build();                                                                                       \
   at::native::cpu_kernel_multiple_outputs(iter, [=](ctype a, ctype b) -> std::tuple<ctype, ctype> { \
     ctype add = a + b;                                                                              \
@@ -259,5 +239,4 @@ TEST(TensorIteratorTest, CpuKernelMultipleOutputs_##name) {                     
   EXPECT_TRUE(out1.equal(expected1));                                                               \
   EXPECT_TRUE(out2.equal(expected2));                                                               \
 }
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 AT_FORALL_SCALAR_TYPES(MULTIPLE_OUTPUTS_TEST_ITER_FOR_TYPE)

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 import io
 import textwrap
-from typing import List
+from typing import List, Optional, Dict
 
 import torch
 import torch.utils.bundled_inputs
@@ -61,7 +61,7 @@ class TestBundledInputs(TestCase):
         inflated = loaded.get_all_bundled_inputs()
         self.assertEqual(loaded.get_num_bundled_inputs(), len(samples))
         self.assertEqual(len(inflated), len(samples))
-        self.assertTrue(loaded.run_on_bundled_input(0) is inflated[0][0])
+        self.assertTrue(loaded(*inflated[0]) is inflated[0][0])
 
         for idx, inp in enumerate(inflated):
             self.assertIsInstance(inp, tuple)
@@ -135,7 +135,7 @@ class TestBundledInputs(TestCase):
         loaded = save_and_load(sm)
         inflated = loaded.get_all_bundled_inputs()
         self.assertEqual(inflated, samples)
-        self.assertTrue(loaded.run_on_bundled_input(0) == "first 1")
+        self.assertTrue(loaded(*inflated[0]) == "first 1")
 
     def test_multiple_methods_with_inputs(self):
         class MultipleMethodModel(torch.nn.Module):
@@ -187,7 +187,7 @@ class TestBundledInputs(TestCase):
         self.assertEqual(inflated, loaded.get_all_bundled_inputs_for_foo())
 
         # Check running and size helpers
-        self.assertTrue(loaded.run_on_bundled_input(0) is inflated[0][0])
+        self.assertTrue(loaded(*inflated[0]) is inflated[0][0])
         self.assertEqual(loaded.get_num_bundled_inputs(), len(samples))
 
         # Check helper that work on all functions
@@ -204,7 +204,7 @@ class TestBundledInputs(TestCase):
             func_to_run = getattr(loaded, input_func_name)
             self.assertEqual(func_to_run(), samples)
 
-    def test_multiple_methods_with_inputs_failures(self):
+    def test_multiple_methods_with_inputs_both_defined_failure(self):
         class MultipleMethodModel(torch.nn.Module):
             def forward(self, arg):
                 return arg
@@ -215,25 +215,37 @@ class TestBundledInputs(TestCase):
 
         samples = [(torch.tensor([1]),)]
 
-        # Test Failure Case both defined
+        # inputs defined 2 ways so should fail
         with self.assertRaises(Exception):
-            nn = torch.jit.script(MultipleMethodModel())
+            mm = torch.jit.script(MultipleMethodModel())
             definition = textwrap.dedent("""
                 def _generate_bundled_inputs_for_forward(self):
                     return []
                 """)
-            nn.define(definition)
+            mm.define(definition)
             torch.utils.bundled_inputs.augment_many_model_functions_with_bundled_inputs(
-                nn,
+                mm,
                 inputs={
-                    nn.forward : samples,
-                    nn.foo : samples,
+                    mm.forward : samples,
+                    mm.foo : samples,
                 },
             )
 
-        # Test Failure Case neither defined
+    def test_multiple_methods_with_inputs_neither_defined_failure(self):
+        class MultipleMethodModel(torch.nn.Module):
+            def forward(self, arg):
+                return arg
+
+            @torch.jit.export
+            def foo(self, arg):
+                return arg
+
+        samples = [(torch.tensor([1]),)]
+
+        # inputs not defined so should fail
         with self.assertRaises(Exception):
             mm = torch.jit.script(MultipleMethodModel())
+            mm._generate_bundled_inputs_for_forward()
             torch.utils.bundled_inputs.augment_many_model_functions_with_bundled_inputs(
                 mm,
                 inputs={
@@ -263,7 +275,7 @@ class TestBundledInputs(TestCase):
                 inputs=[torch.ones(1, 2), ]  # type: ignore[list-item]
             )
 
-    def test_double_augment(self):
+    def test_double_augment_fail(self):
         class SingleTensorModel(torch.nn.Module):
             def forward(self, arg):
                 return arg
@@ -278,6 +290,152 @@ class TestBundledInputs(TestCase):
                 m,
                 inputs=[(torch.ones(1),)]
             )
+
+    def test_double_augment_non_mutator(self):
+        class SingleTensorModel(torch.nn.Module):
+            def forward(self, arg):
+                return arg
+
+        m = torch.jit.script(SingleTensorModel())
+        bundled_model = torch.utils.bundled_inputs.bundle_inputs(
+            m,
+            inputs=[(torch.ones(1),)]
+        )
+        with self.assertRaises(AttributeError):
+            m.get_all_bundled_inputs()
+        self.assertEqual(bundled_model.get_all_bundled_inputs(), [(torch.ones(1),)])
+        self.assertEqual(bundled_model.forward(torch.ones(1)), torch.ones(1))
+
+    def test_double_augment_success(self):
+        class SingleTensorModel(torch.nn.Module):
+            def forward(self, arg):
+                return arg
+
+        m = torch.jit.script(SingleTensorModel())
+        bundled_model = torch.utils.bundled_inputs.bundle_inputs(
+            m,
+            inputs={m.forward : [(torch.ones(1),)]}
+        )
+        self.assertEqual(bundled_model.get_all_bundled_inputs(), [(torch.ones(1),)])
+
+        bundled_model2 = torch.utils.bundled_inputs.bundle_inputs(
+            bundled_model,
+            inputs=[(torch.ones(2),)]
+        )
+        self.assertEqual(bundled_model2.get_all_bundled_inputs(), [(torch.ones(2),)])
+
+
+    def test_dict_args(self):
+        class MyModel(torch.nn.Module):
+            def forward(
+                self,
+                arg1: Optional[Dict[str, torch.Tensor]],
+                arg2: Optional[List[torch.Tensor]],
+                arg3: torch.Tensor,
+            ):
+                if arg1 is None:
+                    return arg3
+                elif arg2 is None:
+                    return arg1["a"] + arg1["b"]
+                else:
+                    return arg1["a"] + arg1["b"] + arg2[0]
+
+        small_sample = dict(
+            a=torch.zeros([10, 20]),
+            b=torch.zeros([1, 1]),
+            c=torch.zeros([10, 20]),
+        )
+        small_list = [torch.zeros([10, 20])]
+
+        big_sample = dict(
+            a=torch.zeros([1 << 5, 1 << 8, 1 << 10]),
+            b=torch.zeros([1 << 5, 1 << 8, 1 << 10]),
+            c=torch.zeros([1 << 5, 1 << 8, 1 << 10]),
+        )
+        big_list = [torch.zeros([1 << 5, 1 << 8, 1 << 10])]
+
+        def condensed(t):
+            ret = torch.empty_like(t).flatten()[0].clone().expand(t.shape)
+            assert ret.storage().size() == 1
+            # ret.storage()[0] = 0
+            return ret
+
+        def bundle_optional_dict_of_randn(template):
+            return torch.utils.bundled_inputs.InflatableArg(
+                value=(
+                    None
+                    if template is None
+                    else {k: condensed(v) for (k, v) in template.items()}
+                ),
+                fmt="{}",
+                fmt_fn="""
+                def {}(self, value: Optional[Dict[str, Tensor]]):
+                    if value is None:
+                        return None
+                    output = {{}}
+                    for k, v in value.items():
+                        output[k] = torch.randn_like(v)
+                    return output
+                """,
+            )
+
+        def bundle_optional_list_of_randn(template):
+            return torch.utils.bundled_inputs.InflatableArg(
+                value=(None if template is None else [condensed(v) for v in template]),
+                fmt="{}",
+                fmt_fn="""
+                def {}(self, value: Optional[List[Tensor]]):
+                    if value is None:
+                        return None
+                    output = []
+                    for v in value:
+                        output.append(torch.randn_like(v))
+                    return output
+                """,
+            )
+
+        out : List[str] = []
+        sm = torch.jit.script(MyModel())
+        original_size = model_size(sm)
+        small_inputs = (
+            bundle_optional_dict_of_randn(small_sample),
+            bundle_optional_list_of_randn(small_list),
+            torch.zeros([3, 4]),
+        )
+        big_inputs = (
+            bundle_optional_dict_of_randn(big_sample),
+            bundle_optional_list_of_randn(big_list),
+            torch.zeros([1 << 5, 1 << 8, 1 << 10]),
+        )
+
+        torch.utils.bundled_inputs.augment_model_with_bundled_inputs(
+            sm,
+            [
+                big_inputs,
+                small_inputs,
+            ],
+            _receive_inflate_expr=out,
+        )
+        augmented_size = model_size(sm)
+        # assert the size has not increased more than 8KB
+        self.assertLess(augmented_size, original_size + (1 << 13))
+
+        loaded = save_and_load(sm)
+        inflated = loaded.get_all_bundled_inputs()
+        self.assertEqual(len(inflated[0]), len(small_inputs))
+
+        methods, _ = torch.utils.bundled_inputs._get_bundled_inputs_attributes_and_methods(
+            loaded
+        )
+
+        # One Function (forward)
+        # two bundled inputs (big_inputs and small_inputs)
+        # two args which have InflatableArg with fmt_fn
+        # 1 * 2 * 2 = 4
+        self.assertEqual(
+            sum([method.startswith("_inflate_helper") for method in methods]), 4
+        )
+
 
 if __name__ == '__main__':
     run_tests()

@@ -5,7 +5,8 @@
 // Android NDK platform < 21 with libstdc++ has spotty C++11 support.
 // Various hacks in this header allow the rest of the codebase to use
 // standard APIs.
-#if defined(__ANDROID__) && __ANDROID_API__ < 21 && defined(__GLIBCXX__)
+#if (defined(__ANDROID__) && __ANDROID_API__ < 21 && defined(__GLIBCXX__)) || \
+    defined(__NEWLIB__)
 #include <stdexcept>
 
 namespace std {
@@ -84,6 +85,7 @@ inline double nexttoward(double x, long double y) {
   throw std::runtime_error("std::nexttoward is not present on older Android");
 }
 
+#if !defined(__NEWLIB__)
 // TODO: this function needs to be implemented and tested. Currently just throw
 // an error.
 inline float hypot(float x, float y) {
@@ -92,6 +94,11 @@ inline float hypot(float x, float y) {
 inline double hypot(double x, double y) {
   throw std::runtime_error("std::hypot is not implemented on older Android");
 }
+#else
+inline float hypot(float x, float y) {
+  return hypot((double)x, (double)y);
+}
+#endif
 
 // TODO: this function needs to be implemented and tested. Currently just throw
 // an error.
@@ -108,6 +115,7 @@ inline double igammac(double x, double y) {
   throw std::runtime_error("igammac is not implemented on older Android");
 }
 
+#if !defined(__NEWLIB__)
 // TODO: this function needs to be implemented and tested. Currently just throw
 // an error.
 inline float nextafter(float x, float y) {
@@ -118,7 +126,13 @@ inline double nextafter(double x, double y) {
   throw std::runtime_error(
       "std::nextafter is not implemented on older Android");
 }
+#else
+inline float nextafter(float x, float y) {
+  return nextafter((double)x, (double)y);
+}
+#endif
 
+#if !defined(__NEWLIB__)
 // TODO: this function needs to be implemented and tested. Currently just throw
 // an error.
 inline float exp2(float x) {
@@ -127,6 +141,11 @@ inline float exp2(float x) {
 inline double exp2(double x) {
   throw std::runtime_error("std::exp2 is not implemented on older Android");
 }
+#else
+inline float exp2(float x) {
+  return exp2((double)x);
+}
+#endif
 
 // Define integral versions the same way as more recent libstdc++
 template <typename T>
@@ -208,9 +227,11 @@ typename __gnu_cxx::__promote_2<T, U>::__type remainder(T x, U y) {
 inline float log2(float arg) {
   return ::log(arg) / ::log(2.0);
 }
+#if !defined(__NEWLIB__)
 inline double log2(double arg) {
   return ::log(arg) / ::log(2.0);
 }
+#endif
 inline long double log2(long double arg) {
   return ::log(arg) / ::log(2.0);
 }

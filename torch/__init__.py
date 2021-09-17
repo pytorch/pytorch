@@ -15,7 +15,7 @@ import platform
 import textwrap
 import ctypes
 import warnings
-
+from .autocast_mode import autocast
 if sys.version_info < (3,):
     raise Exception("Python 2 has reached end-of-life and is no longer supported by PyTorch.")
 
@@ -26,7 +26,8 @@ from ._utils_internal import get_file_path, prepare_multiprocessing_environment,
 if sys.executable == 'torch_deploy':
     __version__ = "torch-deploy-1.8"
 else:
-    from .version import __version__ as __version__
+    from .torch_version import __version__ as __version__
+
 from ._six import string_classes as _string_classes
 
 from typing import Set, Type, TYPE_CHECKING
@@ -35,13 +36,13 @@ __all__ = [
     'typename', 'is_tensor', 'is_storage', 'set_default_tensor_type',
     'set_rng_state', 'get_rng_state', 'manual_seed', 'initial_seed', 'seed',
     'save', 'load', 'set_printoptions', 'chunk', 'split', 'stack', 'matmul',
-    'no_grad', 'enable_grad', 'rand', 'randn',
+    'no_grad', 'enable_grad', 'rand', 'randn', 'inference_mode',
     'DoubleStorage', 'FloatStorage', 'LongStorage', 'IntStorage',
     'ShortStorage', 'CharStorage', 'ByteStorage', 'BoolStorage',
     'DoubleTensor', 'FloatTensor', 'LongTensor', 'IntTensor',
     'ShortTensor', 'CharTensor', 'ByteTensor', 'BoolTensor', 'Tensor',
-    'lobpcg', 'use_deterministic_algorithms', 'set_deterministic',
-    'are_deterministic_algorithms_enabled', 'is_deterministic',
+    'lobpcg', 'use_deterministic_algorithms',
+    'are_deterministic_algorithms_enabled',
     'set_warn_always', 'is_warn_always_enabled',
 ]
 
@@ -322,29 +323,44 @@ def set_default_tensor_type(t):
 
 
 def set_default_dtype(d):
-    r"""Sets the default floating point dtype to :attr:`d`.
-    This dtype is:
+    r"""
 
-    1. The inferred dtype for python floats in :func:`torch.tensor`.
-    2. Used to infer dtype for python complex numbers. The default complex dtype is set to
-       ``torch.complex128`` if default floating point dtype is ``torch.float64``,
-       otherwise it's set to ``torch.complex64``
+    Sets the default floating point dtype to :attr:`d`. Supports torch.float32
+    and torch.float64 as inputs. Other dtypes may be accepted without complaint
+    but are not supported and are unlikely to work as expected.
 
-    The default floating point dtype is initially ``torch.float32``.
+    When PyTorch is initialized its default floating point dtype is torch.float32,
+    and the intent of set_default_dtype(torch.float64) is to facilitate NumPy-like
+    type inference. The default floating point dtype is used to:
+
+    1. Implicitly determine the default complex dtype. When the default floating point
+       type is float32 the default complex dtype is complex64, and when the default
+       floating point type is float64 the default complex type is complex128.
+    2. Infer the dtype for tensors constructed using Python floats or complex Python
+       numbers. See examples below.
+    3. Determine the result of type promotion between bool and integer tensors and
+       Python floats and complex Python numbers.
 
     Args:
-        d (:class:`torch.dtype`): the floating point dtype to make the default
+        d (:class:`torch.dtype`): the floating point dtype to make the default.
+                                  Either torch.float32 or torch.float64.
 
     Example:
         >>> # initial default for floating point is torch.float32
+        >>> # Python floats are interpreted as float32
         >>> torch.tensor([1.2, 3]).dtype
         torch.float32
         >>> # initial default for floating point is torch.complex64
+        >>> # Complex Python numbers are interpreted as complex64
         >>> torch.tensor([1.2, 3j]).dtype
         torch.complex64
+
         >>> torch.set_default_dtype(torch.float64)
+
+        >>> # Python floats are now interpreted as float64
         >>> torch.tensor([1.2, 3]).dtype    # a new floating point tensor
         torch.float64
+        >>> # Complex Python numbers are now interpreted as complex128
         >>> torch.tensor([1.2, 3j]).dtype   # a new complex tensor
         torch.complex128
 
@@ -359,10 +375,6 @@ def use_deterministic_algorithms(mode):
     and if only nondeterministic algorithms are available they will throw a
     :class:`RuntimeError` when called.
 
-    .. warning::
-        This feature is in beta, and its design and implementation may change
-        in the future.
-
     The following normally-nondeterministic operations will act
     deterministically when ``mode=True``:
 
@@ -375,16 +387,19 @@ def use_deterministic_algorithms(mode):
         * :func:`torch.bmm` when called on sparse-dense CUDA tensors
         * :func:`torch.Tensor.__getitem__` when attempting to differentiate a CPU tensor
           and the index is a list of tensors
+        * :func:`torch.Tensor.index_put` with ``accumulate=False``
         * :func:`torch.Tensor.index_put` with ``accumulate=True`` when called on a CPU
           tensor
         * :func:`torch.Tensor.put_` with ``accumulate=True`` when called on a CPU
           tensor
+        * :func:`torch.Tensor.scatter_add_` when ``input`` dimension is one and called
+          on a CUDA tensor
         * :func:`torch.gather` when ``input`` dimension is one and called
           on a CUDA tensor that requires grad
         * :func:`torch.index_add` when called on CUDA tensor
         * :func:`torch.index_select` when attempting to differentiate a CUDA tensor
         * :func:`torch.repeat_interleave` when attempting to differentiate a CUDA tensor
-        * :func:`torch.Tensor.index_copy` when called on a CPU tensor
+        * :func:`torch.Tensor.index_copy` when called on a CPU or CUDA tensor
 
     The following normally-nondeterministic operations will throw a
     :class:`RuntimeError` when ``mode=True``:
@@ -406,6 +421,7 @@ def use_deterministic_algorithms(mode):
 
         * :class:`torch.nn.ReflectionPad1d` when attempting to differentiate a CUDA tensor
         * :class:`torch.nn.ReflectionPad2d` when attempting to differentiate a CUDA tensor
+        * :class:`torch.nn.ReflectionPad3d` when attempting to differentiate a CUDA tensor
         * :class:`torch.nn.ReplicationPad1d` when attempting to differentiate a CUDA tensor
         * :class:`torch.nn.ReplicationPad2d` when attempting to differentiate a CUDA tensor
         * :class:`torch.nn.ReplicationPad3d` when attempting to differentiate a CUDA tensor
@@ -413,17 +429,16 @@ def use_deterministic_algorithms(mode):
         * :class:`torch.nn.CTCLoss` when attempting to differentiate a CUDA tensor
         * :class:`torch.nn.EmbeddingBag` when attempting to differentiate a CUDA tensor when
           ``mode='max'``
-        * :func:`torch.Tensor.scatter_add_` when called on a CUDA tensor
-        * :func:`torch.Tensor.index_copy` when called on a CUDA tensor
-        * :func:`torch.Tensor.index_put_` when ``accumulate=False``
+        * :func:`torch.Tensor.scatter_add_` when ``input`` dimension is larger than one
+          and called on a CUDA tensor
+        * :func:`torch.gather` when ``input`` dimension is larger than one
+          and called on a CUDA tensor that requires grad
         * :func:`torch.Tensor.put_` when ``accumulate=False``
         * :func:`torch.Tensor.put_` when ``accumulate=True`` and called on a CUDA tensor
         * :func:`torch.histc` when called on a CUDA tensor
         * :func:`torch.bincount` when called on a CUDA tensor
         * :func:`torch.kthvalue` with called on a CUDA tensor
         * :func:`torch.median` with indices output when called on a CUDA tensor
-        * :func:`torch.gather` when ``input`` dimension is larger than one
-          and called on a CUDA tensor that requires grad
         * :func:`torch.nn.functional.grid_sample` when attempting to differentiate a CUDA tensor
 
     A handful of CUDA operations are nondeterministic if the CUDA version is
@@ -469,31 +484,11 @@ def use_deterministic_algorithms(mode):
     """
     _C._set_deterministic_algorithms(mode)
 
-def set_deterministic(d):
-    r"""This function is deprecated and will be removed in a future release.
-    Please use :func:`torch.use_deterministic_algorithms` instead.
-    """
-    warnings.warn((
-        "torch.set_deterministic is deprecated and will be removed in a future "
-        "release. Please use torch.use_deterministic_algorithms instead"))
-
-    use_deterministic_algorithms(d)
-
 def are_deterministic_algorithms_enabled():
     r"""Returns True if the global deterministic flag is turned on. Refer to
     :func:`torch.use_deterministic_algorithms` documentation for more details.
     """
     return _C._get_deterministic_algorithms()
-
-def is_deterministic():
-    r"""This function is deprecated and will be removed in a future release.
-    Please use :func:`torch.are_deterministic_algorithms_enabled` instead.
-    """
-    warnings.warn((
-        "torch.is_deterministic is deprecated and will be removed in a future "
-        "release. Please use torch.are_deterministic_algorithms_enabled instead"))
-    return are_deterministic_algorithms_enabled()
-
 
 def set_warn_always(b):
     r"""When this flag is False (default) then some PyTorch warnings may only
@@ -512,6 +507,15 @@ def is_warn_always_enabled():
     :func:`torch.set_warn_always` documentation for more details.
     """
     return _C._get_warnAlways()
+
+################################################################################
+# Define numeric constants
+################################################################################
+
+# For Python Array API (https://data-apis.org/array-api/latest/API_specification/constants.html) and
+# NumPy consistency (https://numpy.org/devdocs/reference/constants.html)
+from math import e , nan , inf , pi
+__all__.extend(['e', 'pi', 'nan', 'inf'])
 
 ################################################################################
 # Define Storage and Tensor classes
@@ -620,8 +624,14 @@ if TYPE_CHECKING:
     # PR #43339 for details.
     from torch._C._VariableFunctions import *  # type: ignore[misc] # noqa: F403
 
+# Ops not to be exposed in `torch` namespace,
+# mostly helper ops.
+PRIVATE_OPS = (
+    'unique_dim',
+)
+
 for name in dir(_C._VariableFunctions):
-    if name.startswith('__'):
+    if name.startswith('__') or name in PRIVATE_OPS:
         continue
     globals()[name] = getattr(_C._VariableFunctions, name)
     __all__.append(name)
@@ -673,13 +683,14 @@ def _assert(condition, message):
 # Use the redundant form so that type checkers know that these are a part of
 # the public API. The "regular" import lines are there solely for the runtime
 # side effect of adding to the imported module's members for other users.
-
 from torch import cuda as cuda
+from torch import cpu as cpu
 from torch import autograd as autograd
 from torch.autograd import (
     no_grad as no_grad,
     enable_grad as enable_grad,
     set_grad_enabled as set_grad_enabled,
+    inference_mode as inference_mode,
 )
 from torch import fft as fft
 from torch import futures as futures
@@ -687,6 +698,8 @@ from torch import nn as nn
 import torch.nn.intrinsic
 import torch.nn.quantizable
 import torch.nn.quantized
+# AO depends on nn, as well as quantized stuff -- so should be after those.
+from torch import ao as ao
 from torch import optim as optim
 import torch.optim._multi_tensor
 from torch import multiprocessing as multiprocessing
@@ -751,3 +764,21 @@ from ._vmap_internals import vmap as vmap
 # class usage. We add these lines here to preserve backward compatibility.
 quantized_lstm = torch.ops.aten.quantized_lstm
 quantized_gru = torch.ops.aten.quantized_gru
+
+from torch.utils.dlpack import from_dlpack, to_dlpack
+
+
+def _register_device_module(device_type, module):
+    r"""Register an external runtime module of the specific :attr:`device_type`
+    supported by torch.
+
+    After the :attr:`module` is registered correctly, the user can refer
+    the external runtime module as part of torch with attribute torch.xxx.
+    """
+    # Make sure the device_type represent a supported device type for torch.
+    device_type = torch.device(device_type).type
+    m = sys.modules[__name__]
+    if hasattr(m, device_type):
+        raise RuntimeError("The runtime module of '{}' has already "
+                           "been registered with '{}'".format(device_type, getattr(m, device_type)))
+    setattr(m, device_type, module)

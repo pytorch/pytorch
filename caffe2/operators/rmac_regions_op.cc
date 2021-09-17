@@ -11,7 +11,6 @@ bool RMACRegionsOp<CPUContext>::RunOnDevice() {
                             // RoIs
   auto* output = Output(
       0,
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {0, 5},
       at::dtype<float>()); // [batch_id x1 y1 x2 y2] format of ROIPoolOp
 
@@ -28,7 +27,6 @@ bool RMACRegionsOp<CPUContext>::RunOnDevice() {
   int step = 0;
   if (W != H) {
     int min_step = 1;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     int max_step = 6;
     float cur_min = FLT_MAX;
     for (int idx = min_step; idx <= max_step; ++idx) {
@@ -65,9 +63,7 @@ bool RMACRegionsOp<CPUContext>::RunOnDevice() {
         (l + Hd - 1 > 0) ? ((H - region_size) / (1.0 * (l + Hd - 1))) : 0;
 
     int cur_rows = output->dim32(0);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     output->Extend((l + Wd) * (l + Hd), 50);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto* outputData = output->template mutable_data<float>() + cur_rows * 5;
 
     for (int i = 0; i < l + Wd; ++i) {
@@ -99,16 +95,13 @@ bool RMACRegionsOp<CPUContext>::RunOnDevice() {
 
   // Replicate regions for all items in batch
   int num_rois = output->dim32(0);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   output->Extend((batch_size - 1) * num_rois, 50);
   auto* outputData = output->template mutable_data<float>();
   for (int b = 1; b < batch_size; ++b) {
     // Copy all rois
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     std::copy_n(outputData, num_rois * 5, outputData + b * num_rois * 5);
     // Override batch index
     for (int r = 0; r < num_rois; ++r) {
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       outputData[(b * num_rois + r) * 5] = b;
     }
   }
@@ -116,10 +109,8 @@ bool RMACRegionsOp<CPUContext>::RunOnDevice() {
   return true;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(RMACRegions, RMACRegionsOp<CPUContext>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(RMACRegions)
     .NumInputs(1)
     .NumOutputs(1)
@@ -139,7 +130,6 @@ as described in https://arxiv.org/abs/1511.05879.
         "co-ordinates. Each region is repeated N times corresponding to each "
         "item in the batch.");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(RMACRegions);
 
 } // namespace caffe2

@@ -78,7 +78,6 @@ class PackedInt8BGRANHWCToNCHWCStylizerPreprocessOp
 
     auto* noiseBlob = ws_->CreateBlob("__CAFFE2_STYLIZER_NOISE__");
     auto defaultNoiseSize = OperatorBase::GetSingleArgument<int>(
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         "noise_size", 491 /* prime to avoid artifacts */);
 
     if (!BlobIsTensorType(*noiseBlob, CPU)) {
@@ -126,7 +125,6 @@ class PackedInt8BGRANHWCToNCHWCStylizerPreprocessOp
     math::RandGaussian<float, CPUContext>(
         size,
         0.0,
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         OperatorBase::GetSingleArgument<float>("noise_std", 10.0),
         noise->template mutable_data<float>(),
         &context_);
@@ -573,29 +571,23 @@ class BRGNCHWCToPackedInt8BGRAStylizerDeprocessOp
 
 namespace {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     PackedInt8BGRANHWCToNCHWCStylizerPreprocess,
     PackedInt8BGRANHWCToNCHWCStylizerPreprocessOp);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(PackedInt8BGRANHWCToNCHWCStylizerPreprocess)
     .NumInputs(2)
     .NumOutputs(1);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     BRGNCHWCToPackedInt8BGRAStylizerDeprocess,
     BRGNCHWCToPackedInt8BGRAStylizerDeprocessOp);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(BRGNCHWCToPackedInt8BGRAStylizerDeprocess)
     .NumInputs(2)
     .NumOutputs(1);
 
 #ifdef CAFFE2_USE_MKLDNN
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(
     BRGNCHWCToPackedInt8BGRAStylizerDeprocess,
     IDEEPFallbackOp<BRGNCHWCToPackedInt8BGRAStylizerDeprocessOp, SkipIndices<0>>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(
     PackedInt8BGRANHWCToNCHWCStylizerPreprocess,
     IDEEPFallbackOp<PackedInt8BGRANHWCToNCHWCStylizerPreprocessOp>);

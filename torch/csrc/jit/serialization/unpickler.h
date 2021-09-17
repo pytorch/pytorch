@@ -15,6 +15,8 @@ using TypeResolver =
 using ObjLoader = std::function<
     c10::intrusive_ptr<c10::ivalue::Object>(at::StrongTypePtr, IValue)>;
 
+class DeserializationStorageContext;
+
 // [unpickler refactor] there is some cruft around PickleOpCode::BUILD,
 // PickleOpCode::NEWOBJ, and the last_opcode_ member below that should be
 // deleted at some point, the Pickler doesn't produce it and it's only around to
@@ -48,7 +50,8 @@ class TORCH_API Unpickler {
       ObjLoader obj_loader,
       std::function<at::DataPtr(const std::string&)> read_record,
       c10::optional<at::Device> device,
-      bool use_storage_device = false)
+      bool use_storage_device = false,
+      std::shared_ptr<DeserializationStorageContext> storage_context = nullptr)
       : reader_(std::move(reader)),
         tensor_table_(),
         type_resolver_(std::move(type_resolver)),
@@ -57,6 +60,7 @@ class TORCH_API Unpickler {
         // NOLINTNEXTLINE(performance-move-const-arg)
         device_(std::move(device)),
         use_storage_device_(use_storage_device),
+        storage_context_(std::move(storage_context)),
         version_(caffe2::serialize::kProducedFileFormatVersion) {}
 
   // consume the pickle stream, producing an IValue from the contents.
@@ -104,6 +108,7 @@ class TORCH_API Unpickler {
       const std::string& module_name,
       const std::string& class_name);
   void rebuildTensor(bool quantized);
+  void rebuildSparseTensor();
 #ifdef USE_DISTRIBUTED
   void rebuildRRef();
 #endif
@@ -120,7 +125,6 @@ class TORCH_API Unpickler {
   // remember the position. Don't call reader_ directly.
   std::function<size_t(char*, size_t)> reader_;
   // Small buffer to avoid calling reader_ on a per-byte basis.
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::array<char, 256> buffer_;
   size_t buffer_pos_{0};
   size_t buffer_remaining_{0};
@@ -151,6 +155,10 @@ class TORCH_API Unpickler {
   // device of the DataPtr returned by the read_record_ function. The default
   // value of this flag is false.
   const bool use_storage_device_;
+
+  // Used for torch.package to enable sharing of storages across
+  // ScriptModules and eager modules
+  std::shared_ptr<DeserializationStorageContext> storage_context_;
 
   // See [type tag serialization]
   uint64_t version_;

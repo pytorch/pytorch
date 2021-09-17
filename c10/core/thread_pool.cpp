@@ -43,6 +43,7 @@ size_t ThreadPool::size() const {
 }
 
 size_t ThreadPool::numAvailable() const {
+  std::unique_lock<std::mutex> lock(mutex_);
   return available_;
 }
 
@@ -138,7 +139,6 @@ void ThreadPool::main_loop(std::size_t index) {
   } // while running_
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_SHARED_REGISTRY(
     ThreadPoolRegistry,
     TaskThreadPoolBase,

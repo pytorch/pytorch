@@ -12,12 +12,14 @@ import os
 import warnings
 from typing import Optional
 
+from torch.distributed.elastic.utils.log_level import get_log_level
+
 
 def get_logger(name: Optional[str] = None):
     """
     Util function to set up a simple logger that writes
     into stderr. The loglevel is fetched from the LOGLEVEL
-    env. variable or INFO as default. The function will use the
+    env. variable or WARNING as default. The function will use the
     module name of the caller if no name is provided.
 
     Args:
@@ -32,7 +34,7 @@ def get_logger(name: Optional[str] = None):
 
 def _setup_logger(name: Optional[str] = None):
     log = logging.getLogger(name)
-    log.setLevel(os.environ.get("LOGLEVEL", "INFO"))
+    log.setLevel(os.environ.get("LOGLEVEL", get_log_level()))
     return log
 
 

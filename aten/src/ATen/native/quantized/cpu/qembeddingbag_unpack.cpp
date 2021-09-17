@@ -10,18 +10,15 @@ at::Tensor PackedEmbeddingBagWeight::unpack() {
   auto packed_weight = packed_w;
   at::Tensor weight_origin;
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   if (bit_rate_ == 8 || bit_rate_ == 4) {
     const auto input_rows = packed_weight.size(0);
     const auto input_columns = packed_weight.size(1);
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     int scale_bias_bytes;
     const auto num_elem_per_byte = 8 / bit_rate_;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     if (bit_rate_ == 8) {
       // The last 2 values are used to store the FP32 scale and zero_point
       // values per row.
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       scale_bias_bytes = 8;
     } else {
       scale_bias_bytes = 4;
@@ -45,7 +42,6 @@ at::Tensor PackedEmbeddingBagWeight::unpack() {
     uint8_t* output_data;
 
     // Allocate output weight tensor based on the bit_width
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     if (bit_rate_ == 8) {
       weight_origin = at::_empty_per_channel_affine_quantized(
           output_shape,
@@ -76,11 +72,10 @@ at::Tensor PackedEmbeddingBagWeight::unpack() {
         uint8_t* output_row =
             output_data + row * output_columns / num_elem_per_byte;
 
-        // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-        for (std::size_t col = 0; col < output_columns / num_elem_per_byte;
-             ++col) {
+        // output_columns
+        for (const auto col : c10::irange(output_columns / num_elem_per_byte)) {
           output_row[col] = input_row[col];
-        } // output_columns
+        }
       }
     });
 
@@ -132,7 +127,7 @@ Tensor qembeddingbag_byte_unpack(const Tensor& packed_weight) {
     at::parallel_for(
       0, input_rows, 1, [&](int32_t start_idx, int32_t end_idx) {
         for (int64_t row = start_idx; row < end_idx; ++row) {
-          fbgemm::Fused8BitRowwiseQuantizedSBFloatToFloat(
+          fbgemm::Fused8BitRowwiseQuantizedSBFloatToFloatOrHalf<float>(
             input_data + row * input_columns,
             1,
             input_columns,
@@ -140,13 +135,13 @@ Tensor qembeddingbag_byte_unpack(const Tensor& packed_weight) {
         }
       });
 #else
-  for (std::size_t row = 0; row < input_rows; ++row) {
+  for (auto row: c10::irange(input_rows)) {
     const std::uint8_t* input_row = input_data + row * input_columns;
     const float* input_row_scale_zp =
         reinterpret_cast<const float*>(input_row + output_columns);
     float* output_row = output_data + row * output_columns;
 
-    for (std::size_t col = 0; col < output_columns; ++col) {
+    for(auto col: c10::irange(output_columns)) {
       output_row[col] =
           input_row[col] * input_row_scale_zp[0] + input_row_scale_zp[1];
     } // output_columns
@@ -161,7 +156,6 @@ Tensor _qembeddingbag_nbit_unpack_helper(
   const auto input_rows = packed_weight.size(0);
   const auto input_columns = packed_weight.size(1);
   const auto* input_data = packed_weight.data_ptr<uint8_t>();
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   int NUM_ELEM_PER_BYTE = 8 / BIT_RATE;
 
   // The last 4 bytes per row are two fp16 scale and zero_point.
@@ -180,7 +174,7 @@ Tensor _qembeddingbag_nbit_unpack_helper(
     at::parallel_for(
       0, input_rows, 1, [&](int32_t start_idx, int32_t end_idx) {
         for (int64_t row = start_idx; row < end_idx; ++row) {
-          fbgemm::FusedNBitRowwiseQuantizedSBHalfToFloat(BIT_RATE,
+          fbgemm::FusedNBitRowwiseQuantizedSBHalfToFloatOrHalf<float>(BIT_RATE,
             input_data + row * input_columns,
             1,
             input_columns,
@@ -189,7 +183,7 @@ Tensor _qembeddingbag_nbit_unpack_helper(
       });
 #else
   auto output_columns = output_dimensions[1];
-  for (size_t row = 0; row < input_rows; ++row) {
+  for (auto row: c10::irange(input_rows)) {
     float* output_row = output_data + row * output_columns;
     const std::uint8_t* input_row = input_data + row * input_columns;
     const at::Half* input_row_scale_zp = reinterpret_cast<const at::Half*>(

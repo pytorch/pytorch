@@ -362,9 +362,7 @@ struct TORCH_API TripletMarginLossOptions {
   /// reach in order to incur zero loss. Default: 1
   TORCH_ARG(double, margin) = 1.0;
   /// Specifies the norm degree for pairwise distance. Default: 2
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   TORCH_ARG(double, p) = 2.0;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   TORCH_ARG(double, eps) = 1e-6;
   /// The distance swap is described in detail in the paper Learning shallow
   /// convolutional feature descriptors with triplet losses by V. Balntas,
@@ -559,7 +557,6 @@ struct TORCH_API PoissonNLLLossOptions {
   TORCH_ARG(bool, full) = false;
   /// Small value to avoid evaluation of `log(0)` when `log_input = false`.
   /// Default: 1e-8
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   TORCH_ARG(double, eps) = 1e-8;
   /// Specifies the reduction to apply to the output. Default: Mean
   TORCH_ARG(reduction_t, reduction) = torch::kMean;
@@ -627,7 +624,6 @@ struct TORCH_API NLLLossOptions {
   TORCH_ARG(Tensor, weight) = {};
   /// Specifies a target value that is ignored
   /// and does not contribute to the input gradient.
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   TORCH_ARG(int64_t, ignore_index) = -100;
   /// Specifies the reduction to apply to the output. Default: Mean
   TORCH_ARG(reduction_t, reduction) = torch::kMean;
@@ -663,10 +659,11 @@ struct TORCH_API CrossEntropyLossOptions {
   TORCH_ARG(Tensor, weight) = {};
   /// Specifies a target value that is ignored
   /// and does not contribute to the input gradient.
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   TORCH_ARG(int64_t, ignore_index) = -100;
   /// Specifies the reduction to apply to the output. Default: Mean
   TORCH_ARG(reduction_t, reduction) = torch::kMean;
+  /// Specifies the amount of smoothing when computing the loss. Default: 0.0
+  TORCH_ARG(double, label_smoothing) = 0.0;
 };
 
 namespace functional {

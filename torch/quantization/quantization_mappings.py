@@ -6,19 +6,29 @@ from torch import nn
 import torch.nn.functional as F
 import torch.nn.intrinsic as nni
 import torch.nn.intrinsic.quantized as nniq
+import torch.nn.intrinsic.quantized.dynamic as nniqd
 import torch.nn.intrinsic.qat as nniqat
 import torch.nn.quantized as nnq
+import torch.nn.quantized._reference as nnqr
 import torch.nn.quantized.dynamic as nnqd
 import torch.nn.qat as nnqat
 
 from typing import Optional, Union, Dict, Set, Callable, Any
 
-from .stubs import QuantStub, DeQuantStub
-from .fake_quantize import (
+from torch.ao.quantization.stubs import QuantStub, DeQuantStub
+from torch.ao.quantization.fake_quantize import (
     default_affine_fixed_qparams_fake_quant,
     default_symmetric_fixed_qparams_fake_quant,
 )
 from .utils import get_combined_dict
+
+# Default map for swapping float module to reference quantized modules
+DEFAULT_REFERENCE_STATIC_QUANT_MODULE_MAPPINGS : Dict[Callable, Any] = {
+    nn.Linear: nnqr.Linear,
+    nn.Conv1d: nnqr.Conv1d,
+    nn.Conv2d: nnqr.Conv2d,
+    nn.Conv3d: nnqr.Conv3d,
+}
 
 # Default map for swapping float module to quantized ones
 DEFAULT_STATIC_QUANT_MODULE_MAPPINGS : Dict[Callable, Any] = {
@@ -41,7 +51,7 @@ DEFAULT_STATIC_QUANT_MODULE_MAPPINGS : Dict[Callable, Any] = {
     nn.InstanceNorm3d: nnq.InstanceNorm3d,
     nn.LayerNorm: nnq.LayerNorm,
     nn.LeakyReLU: nnq.LeakyReLU,
-    nn.modules.linear._LinearWithBias: nnq.Linear,
+    nn.modules.linear.NonDynamicallyQuantizableLinear: nnq.Linear,
     nn.Linear: nnq.Linear,
     nn.ReLU6: nnq.ReLU6,
     # Wrapper Modules:
@@ -73,7 +83,7 @@ DEFAULT_QAT_MODULE_MAPPINGS : Dict[Callable, Any] = {
     nn.Conv2d: nnqat.Conv2d,
     nn.Conv3d: nnqat.Conv3d,
     nn.Linear: nnqat.Linear,
-    nn.modules.linear._LinearWithBias: nnqat.Linear,
+    nn.modules.linear.NonDynamicallyQuantizableLinear: nnqat.Linear,
     # Intrinsic modules:
     nni.ConvBn1d: nniqat.ConvBn1d,
     nni.ConvBn2d: nniqat.ConvBn2d,
@@ -90,11 +100,12 @@ DEFAULT_QAT_MODULE_MAPPINGS : Dict[Callable, Any] = {
 DEFAULT_DYNAMIC_QUANT_MODULE_MAPPINGS : Dict[Callable, Any] = {
     nn.GRUCell: nnqd.GRUCell,
     nn.Linear: nnqd.Linear,
-    nn.modules.linear._LinearWithBias: nnqd.Linear,
+    nn.modules.linear.NonDynamicallyQuantizableLinear: nnqd.Linear,
     nn.LSTM: nnqd.LSTM,
     nn.GRU: nnqd.GRU,
     nn.LSTMCell: nnqd.LSTMCell,
     nn.RNNCell: nnqd.RNNCell,
+    nni.LinearReLU: nniqd.LinearReLU,
 }
 
 # Allowlist for propagating the qconfig
@@ -134,13 +145,16 @@ def get_default_static_quant_module_mappings() -> Dict[Callable, Any]:
 
 def get_static_quant_module_class(
         float_module_class: Callable,
-        additional_static_quant_mapping: Optional[Dict[Callable, Any]] = None) -> Any:
+        additional_static_quant_mapping: Optional[Dict[Callable, Any]] = None,
+        is_reference: bool = False) -> Any:
     r"""n Get the statically quantized module class corresponding to
     the floating point module class
     """
     if additional_static_quant_mapping is None:
         additional_static_quant_mapping = {}
-    all_mappings = get_combined_dict(DEFAULT_STATIC_QUANT_MODULE_MAPPINGS, additional_static_quant_mapping)
+    all_mappings = get_combined_dict(
+        DEFAULT_REFERENCE_STATIC_QUANT_MODULE_MAPPINGS if is_reference
+        else DEFAULT_STATIC_QUANT_MODULE_MAPPINGS, additional_static_quant_mapping)
     static_quant_module_class = all_mappings.get(float_module_class, None)
     assert static_quant_module_class is not None, \
         "Floating point module class {}".format(str(float_module_class)) + \

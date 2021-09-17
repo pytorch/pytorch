@@ -1416,6 +1416,35 @@ class TestFreezing(JitTestCase):
         self.assertEqual(model(inp), script_model(inp))
         FileCheck().check_not("GetAttr").run(script_model.graph)
 
+    def test_freeze_module_with_tupleoutput_submodule(self):
+        class SubModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                return (x + 1, x + 2)
+
+        class TestModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.sub = SubModule()
+
+            def forward(self, x):
+                y1, y2 = self.sub(x)
+                return y1 + y2
+
+        m = torch.jit.script(TestModule())
+        m = m.eval()
+        mf = torch.jit.freeze(m)
+        inp = torch.randn(2, 2)
+        expected = m.forward(inp)
+        output = mf.forward(inp)
+        # Check if prim::TupleConstruct and prim::TupleUnpack
+        # Don't exist in frozen graph
+        FileCheck().check_not("prim::TupleConstruct").run(mf.graph)
+        FileCheck().check_not("prim::TupleUnpack").run(mf.graph)
+        self.assertEqual(output, expected)
+
 class TestFrozenOptimizations(JitTestCase):
     def setUp(self):
         self.default_dtype = torch.get_default_dtype()
@@ -1561,14 +1590,14 @@ class TestFrozenOptimizations(JitTestCase):
         conv = torch.nn.Conv2d(in_channels, out_channels, kernel_size=3, stride=2, bias=True)
         bn = torch.nn.BatchNorm2d(out_channels, eps=.001)
         mod = torch.nn.Sequential(conv, bn)
-        # set optimize to False here, by default freezing runs optimize_frozen_module
+        # set optimize to False here, by default freezing runs run_frozen_optimizations
         frozen_mod = torch.jit.freeze(torch.jit.script(mod.eval()), optimize_numerics=False)
         # inspect frozen mod
         FileCheck().check("batch_norm").run(frozen_mod.graph)
-        torch.jit.optimize_frozen_module(frozen_mod)
+        torch.jit.run_frozen_optimizations(frozen_mod)
         FileCheck().check_not("batch_norm").run(frozen_mod.graph)
 
-        # optimize_frozen_module should be run
+        # run_frozen_optimizations should be run
         frozen_mod = torch.jit.freeze(torch.jit.script(mod.eval()))
         FileCheck().check_not("batch_norm").run(frozen_mod.graph)
 
@@ -1820,7 +1849,7 @@ class TestFrozenOptimizations(JitTestCase):
             else:
                 scripted_mod = torch.jit.script(mod_eager)
 
-            frozen_mod = torch.jit.freeze(scripted_mod)
+            frozen_mod = torch.jit.optimize_for_inference(scripted_mod)
             if add_z:
                 FileCheck().check("aten::cudnn_convolution_add_relu").run(frozen_mod.graph)
             else:
@@ -1848,7 +1877,7 @@ class TestFrozenOptimizations(JitTestCase):
             N, C, H, W, = 10, 3, 224, 224
             inp = torch.randn(N, C, H, W)
             self.run_pass("convert_frozen_ops_to_mkldnn", mod.graph)
-            self.assertTrue(torch.allclose(model(inp), mod(inp)))
+            self.assertEqual(model(inp), mod(inp))
 
     @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
     def test_pool2d_batchnorm(self):
@@ -1872,7 +1901,7 @@ class TestFrozenOptimizations(JitTestCase):
                 self.run_pass('dce', mod.graph)
                 self.run_pass("convert_frozen_ops_to_mkldnn", mod.graph)
                 FileCheck().check("aten::to_dense").check_next("return").run(mod.graph)
-                self.assertTrue(torch.allclose(sub_model(inp), mod(inp)))
+                self.assertEqual(sub_model(inp), mod(inp))
 
     @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
     def test_pool3d_batchnorm(self):
@@ -1896,7 +1925,46 @@ class TestFrozenOptimizations(JitTestCase):
                 self.run_pass('dce', mod.graph)
                 self.run_pass("convert_frozen_ops_to_mkldnn", mod.graph)
                 FileCheck().check("aten::to_dense").check_next("return").run(mod.graph)
-                self.assertTrue(torch.allclose(sub_model(inp), mod(inp)))
+                self.assertEqual(sub_model(inp), mod(inp))
+
+    @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
+    @skipIfNoTorchVision
+    def test_layernorm(self):
+        with set_default_dtype(torch.float):
+
+            class ResidualLayernorm(torch.nn.Module):
+                def __init__(self, op, layernorm, **kwargs):
+                    super(ResidualLayernorm, self).__init__()
+                    self.op = op
+                    self.layernorm = layernorm
+
+                def forward(self, x):
+                    y = self.op(x)
+                    return self.layernorm(y) + y
+
+            model = torchvision.models.resnet18()
+            N, C, H, W, = 10, 3, 224, 224
+            for param in ((model.conv1, [W // 2], torch.randn(N, C, H, W)),
+                          (model.conv1, [H // 2, W // 2], torch.randn(N, C, H, W)),
+                          (torch.nn.Linear(H, W), [W], torch.randn(N, C, W)),):
+
+                for layernorm in (torch.nn.LayerNorm(param[1]),
+                                  torch.nn.LayerNorm(param[1], elementwise_affine=False)):
+                    # to generate non inplace tests we extend the use of layernorm's input
+                    for inplace in (True, False):
+                        sub_model = torch.nn.Sequential(param[0], layernorm) if inplace else ResidualLayernorm(param[0], layernorm)
+                        sub_model.eval()
+                        mod = torch.jit.freeze(torch.jit.script(sub_model))
+                        self.run_pass("convert_frozen_ops_to_mkldnn", mod.graph)
+                        # if weight and bias are present and shape is the last dimension
+                        # we should convert `aten::layer_norm` to `prim::MKLDNNLayerNorm`
+                        if layernorm.elementwise_affine and len(param[1]) == 1:
+                            inplace_suffix = "_" if inplace else ""
+                            (FileCheck().check("prim::MKLDNNLayerNorm" + inplace_suffix).
+                                check_count("aten::to_dense", 1, exactly=True).run(mod.graph))
+                        else:
+                            FileCheck().check_count("aten::to_dense", 1, exactly=True).check("aten::layer_norm").run(mod.graph)
+                        self.assertEqual(sub_model(param[2]), mod(param[2]), rtol=1e-04, atol=1e-04)
 
     @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
     @skipIfNoTorchVision
@@ -1911,6 +1979,7 @@ class TestFrozenOptimizations(JitTestCase):
                 def forward(self, x):
                     return torch.clamp(x, self.min_val, self.max_val)
 
+            N, C, H, W, = 10, 3, 224, 224
             activations = [
                 torch.nn.Hardswish(),
                 torch.nn.Hardsigmoid(),
@@ -1931,11 +2000,10 @@ class TestFrozenOptimizations(JitTestCase):
                 sub_model = torch.nn.Sequential(model.conv1, activation)
                 sub_model.eval()
                 mod = torch.jit.freeze(torch.jit.script(sub_model))
-                N, C, H, W, = 10, 3, 224, 224
                 inp = torch.randn(N, C, H, W)
                 self.run_pass("convert_frozen_ops_to_mkldnn", mod.graph)
                 FileCheck().check_count("aten::to_dense", 1, exactly=True).run(mod.graph)
-                self.assertTrue(torch.allclose(sub_model(inp), mod(inp)))
+                self.assertEqual(sub_model(inp), mod(inp))
 
     @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
     def test_hardswish_hardsigmoid(self):
@@ -1962,7 +2030,41 @@ class TestFrozenOptimizations(JitTestCase):
                         x = torch.rand(size)
                         # `inplace=False` is intentional, otherwise we modify the input
                         # and we aren't testing aten impls anyways
-                        self.assertTrue(torch.allclose(aten_op(x, inplace=False), m(x).to_dense()))
+                        self.assertEqual(aten_op(x, inplace=False), m(x).to_dense())
+
+    @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
+    def test_scalar_mul(self):
+        with set_default_dtype(torch.float):
+            class Mod(nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.mod = nn.Linear(20, 20)
+
+                def forward(self, x):
+                    a1 = self.mod(x) * 4
+                    return a1 * 4 + a1 * 5.
+
+            mod = Mod().eval()
+            scripted = torch.jit.freeze(torch.jit.script(mod))
+            optimized = torch.jit.optimize_for_inference(scripted)
+            inp = torch.rand([20, 20])
+            print(optimized.graph)
+            # a1 cant be inplaced for first use, can for second
+            FileCheck().check("ScalarMul_").check("ScalarMul(").check("ScalarMul_").run(optimized.graph)
+            self.assertEqual(optimized(inp), mod(inp))
+
+    @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
+    def test_optimize_for_inference(self):
+        with set_default_dtype(torch.float):
+            mod = nn.Linear(20, 30).eval()
+            scripted_mod = torch.jit.script(mod)
+
+            optimized = torch.jit.optimize_for_inference(scripted_mod)
+            FileCheck().check("to_mkldnn").run(optimized.graph)
+
+            frozen_mod = torch.jit.freeze(torch.jit.script(mod.eval()))
+            optimized = torch.jit.optimize_for_inference(scripted_mod)
+            FileCheck().check("to_mkldnn").run(optimized.graph)
 
 @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
 class TestMKLDNNReinplacing(JitTestCase):

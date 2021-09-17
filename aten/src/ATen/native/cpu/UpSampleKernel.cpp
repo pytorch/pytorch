@@ -3,7 +3,7 @@
 #include <ATen/Dispatch.h>
 #include <ATen/native/UpSample.h>
 #include <ATen/Parallel.h>
-#include <ATen/cpu/vec256/vec256.h>
+#include <ATen/cpu/vec/vec.h>
 #include <ATen/native/cpu/utils.h>
 
 namespace at {
@@ -269,9 +269,7 @@ void cpu_upsample_nearest_channels_last(
 
   int64_t num_batches =  input_sizes[0];
   int64_t channels =  input_sizes[1];
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   int64_t input_depth = (ndim == 5) ? input_sizes[2] : 1;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   int64_t output_depth = (ndim == 5) ? output_sizes[2] : 1;
   int64_t input_height = (ndim >= 4) ? input_sizes[ndim - 2] : 1;
   int64_t output_height = (ndim >= 4) ? output_sizes[ndim - 2] : 1;
@@ -281,7 +279,7 @@ void cpu_upsample_nearest_channels_last(
 
   TORCH_CHECK(channels > 0, "expected input and output channels greater than 0 but got ", channels);
 
-  using Vec = vec256::Vec256<scalar_t>;
+  using Vec = vec::Vectorized<scalar_t>;
   auto copy = [](scalar_t* out, scalar_t* in, int64_t size) {
     int64_t d = 0;
     for (; d < size - (size % Vec::size()); d += Vec::size()) {
@@ -367,9 +365,7 @@ void cpu_upsample_linear_channels_last(
 
   int64_t num_batches =  input_sizes[0];
   int64_t channels =  input_sizes[1];
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   int64_t input_depth = (ndim == 5) ? input_sizes[2] : 1;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   int64_t output_depth = (ndim == 5) ? output_sizes[2] : 1;
   int64_t input_height = (ndim >= 4) ? input_sizes[ndim - 2] : 1;
   int64_t output_height = (ndim >= 4) ? output_sizes[ndim - 2] : 1;
@@ -379,7 +375,7 @@ void cpu_upsample_linear_channels_last(
   TORCH_CHECK(channels > 0, "expected input and output channels greater than 0 but got ", channels);
   int64_t output_slice_size = output_depth * output_height * output_width * channels;
 
-  using Vec = vec256::Vec256<scalar_t>;
+  using Vec = vec::Vectorized<scalar_t>;
   auto loop2d = [&](int64_t begin, int64_t end) {
     const scalar_t height_scale = area_pixel_compute_scale<scalar_t>(
         input_height, output_height, align_corners, scales[0]);
@@ -508,7 +504,6 @@ void cpu_upsample_linear_channels_last(
   } else {
     // upsample nearest 3d
     TORCH_INTERNAL_ASSERT(ndim == 5);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     at::parallel_for(0, num_batches, at::internal::GRAIN_SIZE / output_slice_size / 8, loop3d);
   }
 
@@ -903,9 +898,7 @@ void cpu_upsample_nearest_backward(
 
   // treat nbatch and channels as one dimension
   int64_t channels = input_sizes[0] * input_sizes[1];
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   int64_t input_depth = (ndim == 5) ? input_sizes[2] : 1;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   int64_t output_depth = (ndim == 5) ? output_sizes[2] : 1;
   int64_t input_height = (ndim >= 4) ? input_sizes[ndim - 2] : 1;
   int64_t output_height = (ndim >= 4) ? output_sizes[ndim - 2] : 1;
@@ -1008,27 +1001,17 @@ void upsample_nearest3d_backward_kernel_impl(
 
 } // anonymous namespace
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(upsample_nearest1d_kernel, &upsample_nearest1d_kernel_impl);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(upsample_nearest2d_kernel, &upsample_nearest2d_kernel_impl);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(upsample_nearest3d_kernel, &upsample_nearest3d_kernel_impl);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(upsample_nearest1d_backward_kernel, &upsample_nearest1d_backward_kernel_impl);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(upsample_nearest2d_backward_kernel, &upsample_nearest2d_backward_kernel_impl);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(upsample_nearest3d_backward_kernel, &upsample_nearest3d_backward_kernel_impl);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(upsample_linear1d_kernel, &upsample_linear1d_kernel_impl);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(upsample_bilinear2d_kernel, &upsample_bilinear2d_kernel_impl);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(upsample_trilinear3d_kernel, &upsample_trilinear3d_kernel_impl);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(upsample_bicubic2d_kernel, &upsample_bicubic2d_kernel_impl);
 } // namespace native
 } // namespace at

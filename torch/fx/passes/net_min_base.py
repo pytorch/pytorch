@@ -1,5 +1,6 @@
 import argparse
-from typing import Any, Callable, Tuple, Dict, Optional, List
+from typing import Any, Callable, Tuple, Dict, Optional
+import logging
 
 import torch
 import torch.fx
@@ -14,7 +15,10 @@ from .tools_common import (
     NodeSet,
     CALLABLE_NODE_OPS,
     FxNetAccFusionsFinder,
+    Names
 )
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class FxNetMinimizerBadModuleError(Exception):
@@ -55,7 +59,7 @@ class _MinimizerSettingBase:
         parser.add_argument(
             "--traverse_method",
             default="sequential",
-            choices=["sequential", "binary"],
+            choices=["sequential", "binary", "accumulate"],
             help="Determine the way of traverse the nodes in FX module.",
         )
         parser.add_argument(
@@ -106,7 +110,7 @@ class _MinimizerBase:
         self,
         module: torch.fx.GraphModule,
         sample_input: Tensors,
-        compare_fn: Callable[[TensorOrTensors, TensorOrTensors], Tuple[float, bool]],
+        compare_fn: Callable[[TensorOrTensors, TensorOrTensors, Names], Tuple[float, bool]],
         settings: _MinimizerSettingBase,
     ):
         assert isinstance(module, torch.fx.GraphModule)
@@ -248,19 +252,20 @@ class _MinimizerBase:
                 with "minimize", all preceding nodes with "main_0" and all following
                 nodes with "main_1".
         """
-        preceding = True
-
         for node in self.module.graph.nodes:
             if node.op not in CALLABLE_NODE_OPS:
                 continue
 
             if node in selected_nodes:
                 node.tag = "minimize"
-                preceding = False
-            elif preceding:
-                node.tag = "main_0"
-            else:
+            elif any(
+                n.tag in {"minimize", "main_1"}
+                for n in node.all_input_nodes
+                if n.op in CALLABLE_NODE_OPS
+            ):
                 node.tag = "main_1"
+            else:
+                node.tag = "main_0"
 
     def _build_submodule(self, nodes: NodeSet) -> Tuple[torch.fx.GraphModule, str]:
         """
@@ -304,7 +309,7 @@ class _MinimizerBase:
         self,
         split_module: torch.fx.GraphModule,
         submod_name: str,
-        output_names: Optional[List[str]] = None,
+        output_names: Names
     ):
         """
         Run the submodule in `split_module` that has name `submod_name`
@@ -344,7 +349,10 @@ class _MinimizerBase:
         self._store_outputs(a_result, b_result, submodule)
 
         # Compare results
-        numeric_result, bool_result = self.compare_fn(a_result, b_result)
+        names: Names = output_names
+        if output_names is None:
+            names = [str(v) for v in result_key]
+        numeric_result, bool_result = self.compare_fn(a_result, b_result, names)
         self.results[result_key] = numeric_result
         if not bool_result:
             raise FxNetMinimizerResultMismatchError(f"Result mismatch for {result_key}")
@@ -363,6 +371,7 @@ class _MinimizerBase:
             self._run_and_compare(
                 split_module,
                 submod_name,
+                []
             )
         except (FxNetMinimizerRunFuncError, FxNetMinimizerResultMismatchError):
             if len(nodes) == 1:
@@ -397,6 +406,7 @@ class _MinimizerBase:
         culprits: NodeSet = set()
 
         for node in nodes:
+            _LOGGER.info(f"Visit node: {node.name}")
             cur_nodes: NodeSet = {node}
 
             if node in self.fusions:
@@ -405,7 +415,7 @@ class _MinimizerBase:
             try:
                 split_module, submod_name = self._build_submodule(cur_nodes)
                 self._run_and_compare(
-                    split_module, submod_name, output_names=[node.name]
+                    split_module, submod_name, [node.name]
                 )
             except (FxNetMinimizerResultMismatchError):
                 culprits.add(node)
@@ -415,6 +425,34 @@ class _MinimizerBase:
                 culprits.update(cur_nodes)
                 if not self.settings.find_all:
                     return culprits
+
+        return culprits
+
+    def _accumulate_traverse(self, nodes: NodeList) -> NodeSet:
+        culprits: NodeSet = set()
+        nodes_to_run: NodeSet = set()
+
+        # find_all is not supported for accumulate traversal because all the
+        # ops run on NNPI. So we return after the first op that raises error.
+        if self.settings.find_all:
+            print("'Find All' mode is not supported in accumulate traversal.")
+            return culprits
+
+        for node in nodes:
+            nodes_to_run.add(node)
+
+            node_name = node.name
+            if node_name is not None and isinstance(node_name, tuple):
+                node_name = node_name[0]
+            assert node_name is not None and isinstance(node_name, str), f"minimize: node_name: {node_name}"
+
+            try:
+                split_module, submod_name = self._build_submodule(nodes_to_run)
+                self._run_and_compare(split_module, submod_name, [node_name])
+            except (FxNetMinimizerResultMismatchError,
+                    FxNetMinimizerRunFuncError):
+                culprits.add(node)
+                return culprits
 
         return culprits
 
@@ -462,8 +500,7 @@ class _MinimizerBase:
             if node in self.fusions:
                 cur_nodes.update(self.fusions[node])
 
-        output_names = None
-
+        output_names = []
         if self.settings.return_intermediate:
             output_names = [node.name for node in nodes]
 
@@ -494,6 +531,7 @@ class _MinimizerBase:
         """
 
         print(self.settings)
+        print(self.module.graph)
         nodes = self._collect_nodes(start, end)
 
         if self.settings.traverse_method == "sequential":
@@ -501,5 +539,8 @@ class _MinimizerBase:
 
         if self.settings.traverse_method == "binary":
             return self._binary_traverse(nodes)
+
+        if self.settings.traverse_method == "accumulate":
+            return self._accumulate_traverse(nodes)
 
         raise RuntimeError(f"Unknow traverse method {self.settings.traverse_method}!")

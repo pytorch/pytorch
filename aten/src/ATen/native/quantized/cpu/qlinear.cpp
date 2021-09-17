@@ -17,10 +17,11 @@ torch::class_<LinearPackedParamsBase> register_linear_params();
 
 #ifdef USE_FBGEMM
 template <bool ReluFused>
-at::Tensor PackedLinearWeight::apply_impl(
-    at::Tensor input,
+at::Tensor& PackedLinearWeight::apply_impl(
+    const at::Tensor& input,
     double output_scale,
-    int64_t output_zero_point) {
+    int64_t output_zero_point,
+    at::Tensor& output) {
   // uint8 * int8 -> uint8 (no quantization/dequantization)
 
   // We make a strong guarantee that models using these operators will have
@@ -30,9 +31,9 @@ at::Tensor PackedLinearWeight::apply_impl(
       fbgemm::fbgemmSupportedCPU(), "Your CPU does not support FBGEMM.");
 
   // TODO: contiguous is called for further jit optimizations.
-  auto input_contig = input.contiguous();
+  auto input_contig = input.expect_contiguous();
   const auto* input_ptr =
-      reinterpret_cast<uint8_t*>(input_contig.data_ptr<c10::quint8>());
+      reinterpret_cast<uint8_t*>(input_contig->data_ptr<c10::quint8>());
 
   TORCH_CHECK(
       input.dim() >= 2,
@@ -45,7 +46,7 @@ at::Tensor PackedLinearWeight::apply_impl(
   auto packB = w.get();
 
   int64_t N = static_cast<int64_t>(packB->numCols());
-  int64_t K = input.size(input.dim() - 1);
+  int64_t K = input.sizes()[input.dim() - 1];
   TORCH_CHECK(
       K == static_cast<int64_t>(packB->numRows()),
       "The number of rows in the packB should be equal to K: " +
@@ -78,29 +79,26 @@ at::Tensor PackedLinearWeight::apply_impl(
   int32_t output_zero_point_int32 = static_cast<int32_t>(output_zero_point);
 
   const float* bias_ptr = nullptr;
-  at::Tensor bias;
+  c10::MaybeOwned<at::Tensor> bias_contig;
   if (this->bias_.has_value()) {
-    bias = this->bias_.value();
-    bias = bias.contiguous();
-    TORCH_CHECK(bias.dim() == 1, "bias should be a vector (1D Tensor)");
+    auto& bias = this->bias_.value();
+    bias_contig = bias.expect_contiguous();
+    TORCH_CHECK(bias_contig->dim() == 1, "bias should be a vector (1D Tensor)");
     TORCH_CHECK(
-        bias.size(0) == N, "bias should have N elements: " + std::to_string(N));
-    bias_ptr = reinterpret_cast<float*>(bias.data_ptr<float>());
+        bias_contig->sizes()[0] == N, "bias should have N elements: " + std::to_string(N));
+    bias_ptr = reinterpret_cast<float*>(bias_contig->data_ptr<float>());
   }
 
   // The resulting matrix here is 2-D, let's view it with the original
   // left hand dimensions of the input. Here are two examples:
   // 1. If the input tensor is {M, K}, the output tensor is {M, N}.
   // 2. If the input tensor is {b, M, K}, the output tensor is {b, M, N}.
-  std::vector<int64_t> out_sizes = input.sizes().vec();
+  at::DimVector out_sizes(input.sizes());
   out_sizes.back() = N;
-  // Allocate output Tensor and a buffer for fbgemmPacked to use
-  auto output = at::_empty_affine_quantized(
-      out_sizes,
-      at::device(c10::kCPU).dtype(c10::kQUInt8),
-      output_scale,
-      output_zero_point);
+  // Resize output Tensor
+  output.resize_(out_sizes);
 
+  // Allocate a buffer for fbgemmPacked to use
   auto buffer = at::empty(out_sizes, output.options().dtype(at::kInt));
 
   int num_tasks = at::get_num_threads();
@@ -217,14 +215,51 @@ at::Tensor PackedLinearWeight::apply(
     at::Tensor input,
     double output_scale,
     int64_t output_zero_point) {
-  return apply_impl<false>(std::move(input), output_scale, output_zero_point);
+  // Allocate output Tensor
+  auto output = at::_empty_affine_quantized(
+      {0},
+      at::device(c10::kCPU).dtype(c10::kQUInt8),
+      output_scale,
+      output_zero_point);
+  apply_impl<false>(input, output_scale, output_zero_point, output);
+  return output;
 }
 
 at::Tensor PackedLinearWeight::apply_relu(
     at::Tensor input,
     double output_scale,
     int64_t output_zero_point) {
-  return apply_impl<true>(std::move(input), output_scale, output_zero_point);
+  auto output = at::_empty_affine_quantized(
+      {0},
+      at::device(c10::kCPU).dtype(c10::kQUInt8),
+      output_scale,
+      output_zero_point);
+  apply_impl<true>(input, output_scale, output_zero_point, output);
+  return output;
+}
+
+at::Tensor& PackedLinearWeight::apply_out(
+    const at::Tensor& input,
+    double output_scale,
+    int64_t output_zero_point,
+    at::Tensor& output) {
+  TORCH_CHECK(
+      (output.device() == c10::kCPU) && (output.dtype() == c10::kQUInt8) &&
+      (output.q_scale() == output_scale) &&
+      (output.q_zero_point() == output_zero_point));
+  return apply_impl<false>(input, output_scale, output_zero_point, output);
+}
+
+at::Tensor& PackedLinearWeight::apply_relu_out(
+    const at::Tensor& input,
+    double output_scale,
+    int64_t output_zero_point,
+    at::Tensor& output) {
+  TORCH_CHECK(
+      (output.device() == c10::kCPU) && (output.dtype() == c10::kQUInt8) &&
+      (output.q_scale() == output_scale) &&
+      (output.q_zero_point() == output_zero_point));
+  return apply_impl<true>(input, output_scale, output_zero_point, output);
 }
 
 #endif // USE_FBGEMM
@@ -245,6 +280,8 @@ at::Tensor PackedLinearWeightsQnnp::apply_impl(
   size_t cols_w = input_contig.size(input_contig.dim() - 1);
   auto input_scale = input_contig.q_scale();
 
+  // QNNPack is not thread safe
+  std::lock_guard<std::mutex> lock(qnnp_mutex_);
   if (!this->input_scale.has_value() ||
       this->input_scale.value() != input_scale) {
     // Get the original weight and adjust it to uint8 from int8
@@ -267,7 +304,6 @@ at::Tensor PackedLinearWeightsQnnp::apply_impl(
     auto* qnnp_w_data = qnnp_weight.data_ptr<c10::quint8>();
     auto wt_numel = weight_contig.numel();
     for (int i = 0; i < wt_numel; ++i) {
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       qnnp_w_data[i] = static_cast<c10::quint8>(w_data[i] + 128);
     }
     // Original bias was float, so we requantize it here.
@@ -278,7 +314,7 @@ at::Tensor PackedLinearWeightsQnnp::apply_impl(
       at::Tensor bias_quant_scales =
           weight_contig.q_per_channel_scales() * input_scale;
       at::Tensor bias_zp = at::zeros(bias_quant_scales.sizes(), c10::kInt);
-      qbias = at::native::quantize_per_channel_cpu(
+      qbias = at::native::quantize_per_channel(
           bias_fp32, bias_quant_scales, bias_zp, 0, c10::kQInt32);
     } else {
       qbias = at::native::quantize_per_tensor(
@@ -305,8 +341,7 @@ at::Tensor PackedLinearWeightsQnnp::apply_impl(
 
   size_t rows_input = 1;
   size_t cols_input = input_contig.size(input_contig.dim() - 1);
-  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-  for (size_t i = 0; i < input_contig.dim() - 1; ++i) {
+  for (const auto i : c10::irange(input_contig.dim() -1)) {
     rows_input *= input_contig.size(i);
   }
 

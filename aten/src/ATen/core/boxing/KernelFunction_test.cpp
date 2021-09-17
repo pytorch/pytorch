@@ -24,7 +24,6 @@ namespace kernels {
 // The expectXXX() functions further below use these invariants
 // to check that calling a specific kernels works correctly.
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 optional<tuple<int64_t, int64_t>> called_with_args;
 
 
@@ -32,7 +31,6 @@ optional<tuple<int64_t, int64_t>> called_with_args;
 // take in a DispatchKeySet.
 // The value itself is meaningless for all of the tests that use kernels without a DispatchKeySet argument.
 // See Note [Plumbing Keys Through The Dispatcher] for details.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 c10::DispatchKeySet CPU_TEST_SET = c10::DispatchKeySet(c10::DispatchKey::CPU);
 
 void boxed_func_with_return(const OperatorHandle& /*opHandle*/, Stack* stack) {
@@ -42,7 +40,6 @@ void boxed_func_with_return(const OperatorHandle& /*opHandle*/, Stack* stack) {
   called_with_args = tuple<int64_t, int64_t>(stack->at(0).toInt(), stack->at(1).toInt());
 
   stack->clear();
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   stack->push_back(5);
 }
 
@@ -71,7 +68,6 @@ void boxed_func_with_multi_return(const OperatorHandle& /*opHandle*/, Stack* sta
 struct unboxed_functor_with_return final : OperatorKernel {
   int64_t operator()(int64_t a, int64_t b) {
     called_with_args = tuple<int64_t, int64_t>(a, b);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     return 5;
   }
 };
@@ -96,7 +92,6 @@ struct unboxed_functor_without_return_factory final {
 
 int64_t unboxed_function_with_return(int64_t a, int64_t b) {
   called_with_args = tuple<int64_t, int64_t>(a, b);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   return 5;
 }
 
@@ -104,14 +99,11 @@ void unboxed_function_without_return(int64_t a, int64_t b) {
   called_with_args = tuple<int64_t, int64_t>(a, b);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 auto unboxed_lambda_with_return = [] (int64_t a, int64_t b) -> int64_t {
   called_with_args = tuple<int64_t, int64_t>(a, b);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   return 5;
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 auto unboxed_lambda_without_return = [] (int64_t a, int64_t b) -> void{
   called_with_args = tuple<int64_t, int64_t>(a, b);
 };
@@ -267,7 +259,6 @@ void expectOutOfPlaceMultiBoxedCallingWorks(const KernelFunction& func) {
   OperatorHandle dummy = makeDummyOperatorHandle();
 
   auto s1 = 1.0f;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto s2 = 2.0f;
   auto t1 = at::zeros({1});
   auto t2 = at::zeros({1});
@@ -368,7 +359,6 @@ void expectOutOfPlaceMultiUnboxedCallingWorks(const KernelFunction& func) {
   OperatorHandle dummy = makeDummyOperatorHandle();
 
   auto s1 = 1.0f;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto s2 = 2.0f;
   auto t1 = at::zeros({1});
   auto t2 = at::zeros({1});
@@ -394,19 +384,16 @@ void expectOutOfPlaceMultiUnboxedCallingWorks(const KernelFunction& func) {
 
 // functional, boxed calling
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(KernelFunctionTest, givenBoxedFunction_withReturn_whenCallingBoxed_thenWorks) {
   KernelFunction func = KernelFunction::makeFromBoxedFunction<&kernels::boxed_func_with_return>();
   kernels::expectBoxedCallingWithReturnWorks(func);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(KernelFunctionTest, givenBoxedFunction_withoutReturn_whenCallingBoxed_thenWorks) {
   KernelFunction func = KernelFunction::makeFromBoxedFunction<&kernels::boxed_func_without_return>();
   kernels::expectBoxedCallingWithoutReturnWorks(func);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(KernelFunctionTest, givenBoxedFunction_withMultiReturn_whenCallingBoxed_thenWorks) {
   KernelFunction func = KernelFunction::makeFromBoxedFunction<&kernels::boxed_func_with_multi_return>();
   kernels::expectBoxedCallingWithMultiReturnWorks(func);
@@ -414,19 +401,16 @@ TEST(KernelFunctionTest, givenBoxedFunction_withMultiReturn_whenCallingBoxed_the
 
 // in/out, boxed calling
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(KernelFunctionTest, givenBoxedFunction_withInPlaceSignature_whenCallingBoxed_thenWorks) {
   KernelFunction func = KernelFunction::makeFromBoxedFunction<&kernels::boxed_func_for_inplace_op>();
   kernels::expectInPlaceBoxedCallingWorks(func);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(KernelFunctionTest, givenBoxedFunction_withOutOfPlaceSignature_whenCallingBoxed_thenWorks) {
   KernelFunction func = KernelFunction::makeFromBoxedFunction<&kernels::boxed_func_for_outofplace_op>();
   kernels::expectOutOfPlaceBoxedCallingWorks(func);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(KernelFunctionTest, givenBoxedFunction_withOutOfPlaceMultiSignature_whenCallingBoxed_thenWorks) {
   KernelFunction func = KernelFunction::makeFromBoxedFunction<&kernels::boxed_func_for_outofplace_multi_op>();
   kernels::expectOutOfPlaceMultiBoxedCallingWorks(func);
@@ -434,19 +418,16 @@ TEST(KernelFunctionTest, givenBoxedFunction_withOutOfPlaceMultiSignature_whenCal
 
 // functional, unboxed calling
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(KernelFunctionTest, givenBoxedFunction_withReturn_whenCallingUnboxed_thenWorks) {
   KernelFunction func = KernelFunction::makeFromBoxedFunction<&kernels::boxed_func_with_return>();
   kernels::expectUnboxedCallingWithReturnWorks(func);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(KernelFunctionTest, givenBoxedFunction_withoutReturn_whenCallingUnboxed_thenWorks) {
   KernelFunction func = KernelFunction::makeFromBoxedFunction<&kernels::boxed_func_without_return>();
   kernels::expectUnboxedCallingWithoutReturnWorks(func);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(KernelFunctionTest, givenBoxedFunction_withMultiReturn_whenCallingUnboxed_thenWorks) {
   KernelFunction func = KernelFunction::makeFromBoxedFunction<&kernels::boxed_func_with_multi_return>();
   kernels::expectUnboxedCallingWithMultiReturnWorks(func);
@@ -454,19 +435,16 @@ TEST(KernelFunctionTest, givenBoxedFunction_withMultiReturn_whenCallingUnboxed_t
 
 // in/out, unboxed calling
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(KernelFunctionTest, givenBoxedFunction_withInPlaceSignature_whenCallingUnboxed_thenWorks) {
   KernelFunction func = KernelFunction::makeFromBoxedFunction<&kernels::boxed_func_for_inplace_op>();
   kernels::expectInPlaceUnboxedCallingWorks(func);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(KernelFunctionTest, givenBoxedFunction_withOutOfPlaceSignature_whenCallingUnboxed_thenWorks) {
   KernelFunction func = KernelFunction::makeFromBoxedFunction<&kernels::boxed_func_for_outofplace_op>();
   kernels::expectOutOfPlaceUnboxedCallingWorks(func);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(KernelFunctionTest, givenBoxedFunction_withOutOfPlaceMultiSignature_whenCallingUnboxed_thenWorks) {
   KernelFunction func = KernelFunction::makeFromBoxedFunction<&kernels::boxed_func_for_outofplace_multi_op>();
   kernels::expectOutOfPlaceMultiUnboxedCallingWorks(func);
@@ -474,97 +452,81 @@ TEST(KernelFunctionTest, givenBoxedFunction_withOutOfPlaceMultiSignature_whenCal
 
 // functors etc.
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(KernelFunctionTest, givenUnboxedFunctor_withReturn_whenCallingBoxed_thenWorks) {
   KernelFunction func = KernelFunction::makeFromUnboxedFunctor<false, kernels::unboxed_functor_with_return>(std::unique_ptr<OperatorKernel>(std::make_unique<kernels::unboxed_functor_with_return>()));
   kernels::expectBoxedCallingWithReturnWorks(func);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(KernelFunctionTest, givenUnboxedFunctor_withoutReturn_whenCallingBoxed_thenWorks) {
   KernelFunction func = KernelFunction::makeFromUnboxedFunctor<false, kernels::unboxed_functor_without_return>(std::unique_ptr<OperatorKernel>(std::make_unique<kernels::unboxed_functor_without_return>()));
   kernels::expectBoxedCallingWithoutReturnWorks(func);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(KernelFunctionTest, givenUnboxedFunctor_withReturn_whenCallingUnboxed_thenWorks) {
   KernelFunction func = KernelFunction::makeFromUnboxedFunctor<false, kernels::unboxed_functor_with_return>(std::unique_ptr<OperatorKernel>(std::make_unique<kernels::unboxed_functor_with_return>()));
   kernels::expectUnboxedCallingWithReturnWorks(func);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(KernelFunctionTest, givenUnboxedFunctor_withoutReturn_whenCallingUnboxed_thenWorks) {
   KernelFunction func = KernelFunction::makeFromUnboxedFunctor<false, kernels::unboxed_functor_without_return>(std::unique_ptr<OperatorKernel>(std::make_unique<kernels::unboxed_functor_without_return>()));
   kernels::expectUnboxedCallingWithoutReturnWorks(func);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(KernelFunctionTest, givenUnboxedFunction_withReturn_whenCallingBoxed_thenWorks) {
   KernelFunction func = KernelFunction::makeFromUnboxedFunction(TORCH_FN(kernels::unboxed_function_with_return));
   kernels::expectBoxedCallingWithReturnWorks(func);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(KernelFunctionTest, givenUnboxedFunction_withoutReturn_whenCallingBoxed_thenWorks) {
   KernelFunction func = KernelFunction::makeFromUnboxedFunction(TORCH_FN(kernels::unboxed_function_without_return));
   kernels::expectBoxedCallingWithoutReturnWorks(func);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(KernelFunctionTest, givenUnboxedFunction_withReturn_whenCallingUnboxed_thenWorks) {
   KernelFunction func = KernelFunction::makeFromUnboxedFunction(TORCH_FN(kernels::unboxed_function_with_return));
   kernels::expectUnboxedCallingWithReturnWorks(func);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(KernelFunctionTest, givenUnboxedFunction_withoutReturn_whenCallingUnboxed_thenWorks) {
   KernelFunction func = KernelFunction::makeFromUnboxedFunction(TORCH_FN(kernels::unboxed_function_without_return));
   kernels::expectUnboxedCallingWithoutReturnWorks(func);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(KernelFunctionTest, givenUnboxedRuntimeFunction_withReturn_whenCallingBoxed_thenWorks) {
   KernelFunction func = KernelFunction::makeFromUnboxedRuntimeFunction(&kernels::unboxed_function_with_return);
   kernels::expectBoxedCallingWithReturnWorks(func);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(KernelFunctionTest, givenUnboxedRuntimeFunction_withoutReturn_whenCallingBoxed_thenWorks) {
   KernelFunction func = KernelFunction::makeFromUnboxedRuntimeFunction(&kernels::unboxed_function_without_return);
   kernels::expectBoxedCallingWithoutReturnWorks(func);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(KernelFunctionTest, givenUnboxedRuntimeFunction_withReturn_whenCallingUnboxed_thenWorks) {
   KernelFunction func = KernelFunction::makeFromUnboxedRuntimeFunction(&kernels::unboxed_function_with_return);
   kernels::expectUnboxedCallingWithReturnWorks(func);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(KernelFunctionTest, givenUnboxedRuntimeFunction_withoutReturn_whenCallingUnboxed_thenWorks) {
   KernelFunction func = KernelFunction::makeFromUnboxedRuntimeFunction(&kernels::unboxed_function_without_return);
   kernels::expectUnboxedCallingWithoutReturnWorks(func);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(KernelFunctionTest, givenUnboxedLambda_withReturn_whenCallingBoxed_thenWorks) {
   KernelFunction func = KernelFunction::makeFromUnboxedLambda(kernels::unboxed_lambda_with_return);
   kernels::expectBoxedCallingWithReturnWorks(func);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(KernelFunctionTest, givenUnboxedLambda_withoutReturn_whenCallingBoxed_thenWorks) {
   KernelFunction func = KernelFunction::makeFromUnboxedLambda(kernels::unboxed_lambda_without_return);
   kernels::expectBoxedCallingWithoutReturnWorks(func);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(KernelFunctionTest, givenUnboxedLambda_withReturn_whenCallingUnboxed_thenWorks) {
   KernelFunction func = KernelFunction::makeFromUnboxedLambda(kernels::unboxed_lambda_with_return);
   kernels::expectUnboxedCallingWithReturnWorks(func);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(KernelFunctionTest, givenUnboxedLambda_withoutReturn_whenCallingUnboxed_thenWorks) {
   KernelFunction func = KernelFunction::makeFromUnboxedLambda(kernels::unboxed_lambda_without_return);
   kernels::expectUnboxedCallingWithoutReturnWorks(func);

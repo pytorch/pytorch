@@ -7,26 +7,19 @@ CONFIG_TREE_DATA = [
             ("5.4", [  # All this subtree rebases to master and then build
                 ("3.6", [
                     ("important", [X(True)]),
-                    ("parallel_tbb", [X(True)]),
-                    ("parallel_native", [X(True)]),
-                    ("pure_torch", [X(True)]),
                 ]),
             ]),
             # TODO: bring back libtorch test
             ("7", [X("3.6")]),
         ]),
         ("clang", [
-            ("5", [
+            ("7", [
                 ("3.6", [
                     ("asan", [
                         (True, [
                             ("shard_test", [XImportant(True)]),
                         ]),
                     ]),
-                ]),
-            ]),
-            ("7", [
-                ("3.6", [
                     ("onnx", [XImportant(True)]),
                 ]),
             ]),
@@ -34,22 +27,22 @@ CONFIG_TREE_DATA = [
         ("cuda", [
             ("10.2", [
                 ("3.6", [
-                    ("shard_test", [X(True)]),
-                    ("libtorch", [
+                    # Build are needed for slow_gradcheck
+                    ('build_only', [X(True)]),
+                    ("slow_gradcheck", [
+                        # If you update this slow gradcheck, you should
+                        # also update docker_definitions.py to make sure
+                        # the docker image match the config used here
                         (True, [
-                            ('build_only', [X(True)]),
+                            ('shard_test', [XImportant(True)]),
                         ]),
                     ]),
-                ]),
-            ]),
-            ("11.1", [
-                ("3.8", [
-                    ("shard_test", [XImportant(True)]),
-                    ("libtorch", [
-                        (True, [
-                            ('build_only', [XImportant(True)]),
-                        ]),
-                    ]),
+                    # UNCOMMENT THE BELOW TO REENABLE LIBTORCH
+                    # ("libtorch", [
+                    #     (True, [
+                    #         ('build_only', [X(True)]),
+                    #     ]),
+                    # ]),
                 ]),
             ]),
         ]),
@@ -58,34 +51,19 @@ CONFIG_TREE_DATA = [
         ("clang", [
             ("9", [
                 ("3.6", [
-                    ("noarch", [XImportant(True)]),
-                ]),
-            ]),
-            ("9", [
-                ("3.6", [
                     ("xla", [XImportant(True)]),
                     ("vulkan", [XImportant(True)]),
                 ]),
             ]),
         ]),
-        ("gcc", [
-            ("9", [
-                ("3.8", [
-                    ("coverage", [
-                        (True, [
-                            ("shard_test", [XImportant(True)]),
-                        ]),
-                    ]),
-                ]),
-            ]),
-        ]),
-        ("rocm", [
-            ("3.9", [
-                ("3.6", [
-                    ('build_only', [XImportant(True)]),
-                ]),
-            ]),
-        ]),
+        # @jithunnair-amd believes Jenkins builds are sufficient
+        # ("rocm", [
+        #     ("3.9", [
+        #         ("3.6", [
+        #             ('build_only', [XImportant(True)]),
+        #         ]),
+        #     ]),
+        # ]),
     ]),
 ]
 
@@ -138,6 +116,8 @@ class PyVerConfigNode(TreeConfigNode):
     def init2(self, node_name):
         self.props["pyver"] = node_name
         self.props["abbreviated_pyver"] = get_major_pyver(node_name)
+        if node_name == "3.9":
+            self.props["abbreviated_pyver"] = "py3.9"
 
     # noinspection PyMethodMayBeStatic
     def child_constructor(self):
@@ -167,9 +147,17 @@ class ExperimentalFeatureConfigNode(TreeConfigNode):
             "cuda_gcc_override": CudaGccOverrideConfigNode,
             "coverage": CoverageConfigNode,
             "pure_torch": PureTorchConfigNode,
+            "slow_gradcheck": SlowGradcheckConfigNode,
         }
         return next_nodes[experimental_feature]
 
+
+class SlowGradcheckConfigNode(TreeConfigNode):
+    def init2(self, node_name):
+        self.props["is_slow_gradcheck"] = True
+
+    def child_constructor(self):
+        return ExperimentalFeatureConfigNode
 
 class PureTorchConfigNode(TreeConfigNode):
     def modify_label(self, label):

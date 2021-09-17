@@ -5,41 +5,25 @@
 
 namespace caffe2 {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(UtilsBoxesTest, TestBboxTransformRandom) {
   using EMatXf = Eigen::MatrixXf;
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   EMatXf bbox(5, 4);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   bbox << 175.62031555, 20.91103172, 253.352005, 155.0145874, 169.24636841,
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       4.85241556, 228.8605957, 105.02092743, 181.77426147, 199.82876587,
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       192.88427734, 214.0255127, 174.36262512, 186.75761414, 296.19091797,
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       231.27906799, 22.73153877, 92.02596283, 135.5695343, 208.80291748;
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   EMatXf deltas(5, 4);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   deltas << 0.47861834, 0.13992102, 0.14961673, 0.71495209, 0.29915856,
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       -0.35664671, 0.89018666, 0.70815367, -0.03852064, 0.44466892, 0.49492538,
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       0.71409376, 0.28052918, 0.02184832, 0.65289006, 1.05060139, -0.38172557,
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       -0.08533806, -0.60335309, 0.79052375;
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   EMatXf result_gt(5, 4);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   result_gt << 206.949539, -30.715202, 297.387665, 244.448486, 143.871216,
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       -83.342888, 290.502289, 121.053398, 177.430283, 198.666245, 196.295273,
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       228.703079, 152.251892, 145.431564, 387.215454, 274.594238, 5.062420,
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       11.040955, 66.328903, 269.686218;
 
   // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
@@ -53,43 +37,27 @@ TEST(UtilsBoxesTest, TestBboxTransformRandom) {
   EXPECT_NEAR((result.matrix() - result_gt).norm(), 0.0, 1e-4);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(UtilsBoxesTest, TestBboxTransformRotated) {
   // Test rotated bbox transform w/o angle normalization
   using EMatXf = Eigen::MatrixXf;
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   EMatXf bbox(5, 5);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   bbox << 214.986, 88.4628, 78.7317, 135.104, 0.0, 199.553, 55.4367, 60.6142,
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       101.169, 45.0, 187.829, 207.427, 0012.11, 15.1967, 90.0, 235.777, 209.518,
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       122.828, 45.5215, -60.0, 79.6505, 150.914, 113.838, 117.777, 170.5;
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   EMatXf deltas(5, 5);
   // 0.174533 radians -> 10 degrees
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   deltas << 0.47861834, 0.13992102, 0.14961673, 0.71495209, 0.0, 0.29915856,
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       -0.35664671, 0.89018666, 0.70815367, 0.174533, -0.03852064, 0.44466892,
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       0.49492538, 0.71409376, 0.174533, 0.28052918, 0.02184832, 0.65289006,
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       1.05060139, 0.174533, -0.38172557, -0.08533806, -0.60335309, 0.79052375,
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       0.174533;
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   EMatXf result_gt(5, 5);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   result_gt << 252.668, 107.367, 91.4381, 276.165, 0.0, 217.686, 19.3551,
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       147.631, 205.397, 55.0, 187.363, 214.185, 19.865, 31.0368, 100.0, 270.234,
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       210.513, 235.963, 130.163, -50.0, 36.1956, 140.863, 62.2665, 259.645,
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       180.5;
 
   // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
@@ -104,41 +72,26 @@ TEST(UtilsBoxesTest, TestBboxTransformRotated) {
   EXPECT_NEAR((result.matrix() - result_gt).norm(), 0.0, 1e-2);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(UtilsBoxesTest, TestBboxTransformRotatedNormalized) {
   // Test rotated bbox transform with angle normalization
   using EMatXf = Eigen::MatrixXf;
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   EMatXf bbox(5, 5);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   bbox << 214.986, 88.4628, 78.7317, 135.104, 0.0, 199.553, 55.4367, 60.6142,
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       101.169, 45.0, 187.829, 207.427, 0012.11, 15.1967, 90.0, 235.777, 209.518,
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       122.828, 45.5215, -60.0, 79.6505, 150.914, 113.838, 117.777, 170.5;
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   EMatXf deltas(5, 5);
   // 0.174533 radians -> 10 degrees
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   deltas << 0.47861834, 0.13992102, 0.14961673, 0.71495209, 0.0, 0.29915856,
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       -0.35664671, 0.89018666, 0.70815367, 0.174533, -0.03852064, 0.44466892,
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       0.49492538, 0.71409376, 0.174533, 0.28052918, 0.02184832, 0.65289006,
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       1.05060139, 0.174533, -0.38172557, -0.08533806, -0.60335309, 0.79052375,
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       0.174533;
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   EMatXf result_gt(5, 5);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   result_gt << 252.668, 107.367, 91.4381, 276.165, 0.0, 217.686, 19.3551,
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       147.631, 205.397, 55.0, 187.363, 214.185, 19.865, 31.0368, -80.0, 270.234,
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       210.513, 235.963, 130.163, -50.0, 36.1956, 140.863, 62.2665, 259.645, 0.5;
 
   // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
@@ -150,33 +103,22 @@ TEST(UtilsBoxesTest, TestBboxTransformRotatedNormalized) {
       BBOX_XFORM_CLIP,
       true, /* legacy_plus_one */
       true, /* angle_bound_on */
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       -90, /* angle_bound_lo */
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       90 /* angle_bound_hi */);
   EXPECT_NEAR((result.matrix() - result_gt).norm(), 0.0, 1e-2);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(UtilsBoxesTest, ClipRotatedBoxes) {
   // Test utils::clip_boxes_rotated()
   using EMatXf = Eigen::MatrixXf;
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   int height = 800;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   int width = 600;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   EMatXf bbox(5, 5);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   bbox << 20, 20, 200, 150, 0, // Horizontal
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       20, 20, 200, 150, 0.5, // Almost horizontal
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       20, 20, 200, 150, 30, // Rotated
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       300, 300, 200, 150, 30, // Rotated
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       579, 779, 200, 150, -0.5; // Almost horizontal
 
   // Test with no clipping
@@ -185,13 +127,9 @@ TEST(UtilsBoxesTest, ClipRotatedBoxes) {
       bbox.array(), height, width, angle_thresh, true /* legacy_plus_one */);
   EXPECT_NEAR((result.matrix() - bbox).norm(), 0.0, 1e-4);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   EMatXf result_gt(5, 5);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   result_gt << 59.75, 47.25, 120.5, 95.5, 0, 59.75, 47.25, 120.5, 95.5, 0.5, 20,
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       20, 200, 150, 30, 300, 300, 200, 150, 30, 539.25, 751.75, 120.5, 95.5,
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       -0.5;
 
   // Test clipping with tolerance

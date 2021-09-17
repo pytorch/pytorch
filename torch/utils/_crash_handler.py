@@ -5,17 +5,21 @@ import pathlib
 import torch
 
 DEFAULT_MINIDUMP_DIR = "/tmp/pytorch_crashes"
+if sys.platform == "win32":
+    DEFAULT_MINIDUMP_DIR = str(pathlib.Path.home() / "AppData" / "pytorch_crashes")
 
-def enable_minidump_collection(directory=DEFAULT_MINIDUMP_DIR):
-    if sys.platform != "linux":
-        raise RuntimeError("Minidump collection is currently only implemented for Linux platforms")
-
+def enable_minidumps(directory=DEFAULT_MINIDUMP_DIR):
     if directory == DEFAULT_MINIDUMP_DIR:
         pathlib.Path(directory).mkdir(parents=True, exist_ok=True)
     elif not os.path.exists(directory):
         raise RuntimeError(f"Directory does not exist: {directory}")
 
-    torch._C._enable_minidump_collection(directory)  # type: ignore[attr-defined]
+    torch._C._enable_minidumps(directory)
 
-def disable_minidump_collection():
-    torch._C._disable_minidump_collection()  # type: ignore[attr-defined]
+
+def enable_minidumps_on_exceptions():
+    torch._C._enable_minidumps_on_exceptions()
+
+
+def disable_minidumps():
+    torch._C._disable_minidumps()

@@ -26,7 +26,6 @@ void TestResize(DeprecatedTypeProperties& type) {
   auto a = at::empty({0}, type.options());
   a.resize_({3, 4});
   ASSERT_EQ_RESOLVED(a.numel(), 12);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   a.resize_({5, 7});
   ASSERT_EQ_RESOLVED(a.numel(), 35);
 }
@@ -56,7 +55,6 @@ void TestSort(DeprecatedTypeProperties& type) {
 
 void TestRandperm(DeprecatedTypeProperties& type) {
   if (type.backend() != Backend::CUDA) {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     Tensor b = randperm(15, type);
     Tensor rv, ri;
     std::tie(rv, ri) = sort(b, 0);
@@ -75,7 +73,6 @@ void TestAdd(DeprecatedTypeProperties& type) {
   Tensor b = rand({3, 4}, type);
   Tensor c = add(a, add(a, b));
   // TODO:0-dim Tensor d(3.f);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Scalar d = 3.f;
   if (type.backend() == Backend::CPU && type.scalarType() == kHalf) {
       ASSERT_TRUE(add(c, d).allclose(a + a + b + d, 1e-2));
@@ -86,11 +83,8 @@ void TestAdd(DeprecatedTypeProperties& type) {
 
 void TestZeros(DeprecatedTypeProperties& type) {
   auto begin = std::chrono::high_resolution_clock::now();
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Tensor a = zeros({1024, 1024}, type);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (int i = 1; i < 1000; ++i) {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     a = zeros({128, 128}, type);
   }
   auto end = std::chrono::high_resolution_clock::now();
@@ -108,7 +102,6 @@ void TestLoadsOfAdds(DeprecatedTypeProperties& type) {
   auto begin = std::chrono::high_resolution_clock::now();
   Tensor d = ones({3, 4}, type);
   Tensor r = zeros({3, 4}, type);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (auto i = 0; i < 100000; i++) {
     add_out(r, r, d);
   }
@@ -126,7 +119,6 @@ void TestLoadOfAddsWithCopy(DeprecatedTypeProperties& type) {
   auto begin = std::chrono::high_resolution_clock::now();
   Tensor d = ones({3, 4}, type);
   Tensor r = zeros({3, 4}, type);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (auto i = 0; i < 100000; i++) {
     r = add(r, d);
   }
@@ -148,7 +140,6 @@ void TestIsContiguous(DeprecatedTypeProperties& type) {
 }
 
 void TestPermute(DeprecatedTypeProperties& type) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Tensor a = rand({3, 4, 5}, type);
   Tensor b = a.permute({1, 2, 0});
   ASSERT_TRUE(b.sizes().equals({4, 5, 3}));
@@ -212,7 +203,6 @@ void TestAddingAValueWithScalar(DeprecatedTypeProperties& type) {
 }
 
 void TestSelect(DeprecatedTypeProperties& type) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Tensor a = rand({3, 7}, type);
   auto a_13 = select(a, 1, 3);
   auto a_13_02 = select(select(a, 1, 3), 0, 2);
@@ -239,7 +229,6 @@ void TestZeroDim(DeprecatedTypeProperties& type) {
 
 void TestToCFloat() {
   Tensor a = zeros({3, 4});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Tensor b = ones({3, 7});
   Tensor c = cat({a, b}, 1);
   ASSERT_EQ_RESOLVED(c.size(1), 11);
@@ -248,7 +237,6 @@ void TestToCFloat() {
   ASSERT_EQ_RESOLVED(*e.data_ptr<float>(), e.sum().item<float>());
 }
 void TestToString() {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Tensor b = ones({3, 7}) * .0000001f;
   std::stringstream s;
   s << b << "\n";
@@ -257,7 +245,6 @@ void TestToString() {
 }
 
 void TestIndexingByScalar() {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Tensor tensor = arange(0, 10, kInt);
   Tensor one = ones({}, kInt);
   for (int64_t i = 0; i < tensor.numel(); ++i) {
@@ -283,7 +270,6 @@ void TestIndexingByScalar() {
 }
 
 void TestIndexingByZerodimTensor() {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Tensor tensor = arange(0, 10, kInt);
   Tensor one = ones({}, kInt);
   for (int i = 0; i < tensor.numel(); ++i) {
@@ -301,17 +287,13 @@ void TestIndexingByZerodimTensor() {
   ASSERT_ANY_THROW(tensor[ones({2, 3, 4}, kInt)].equal(one));
 }
 void TestIndexingMixedDevice(DeprecatedTypeProperties& type) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Tensor tensor = randn({20, 20}, type);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Tensor index = arange(10, kLong).cpu();
   Tensor result = tensor.index({index});
   ASSERT_TRUE(result[0].equal(tensor[0]));
 }
 void TestDispatch() {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Tensor tensor = randn({20, 20});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Tensor other = randn({20, 20});
   auto result = tensor.m(relu).m(mse_loss, other, at::Reduction::Mean);
   ASSERT_TRUE(result.allclose(mse_loss(relu(tensor), other)));
@@ -322,7 +304,6 @@ void TestNegativeDim(DeprecatedTypeProperties& type) {
   ASSERT_ANY_THROW(empty({5, -5, 5}, type.options()));
   // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   ASSERT_ANY_THROW(empty({5, -5, -5}, type.options()));
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Tensor tensor = empty({5, 5}, type.options());
   // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   ASSERT_ANY_THROW(tensor.reshape({-5, -5}));
@@ -334,7 +315,6 @@ void TestView(DeprecatedTypeProperties& type) {
   // for details
   Tensor tensor = randn({3, 4}, type);;
   Tensor viewed = tensor.view({3, 4});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   tensor.resize_({6, 2});
   ASSERT_TRUE(tensor.sizes().equals({6, 2}));
   ASSERT_TRUE(viewed.sizes().equals({3, 4}));
@@ -380,25 +360,19 @@ void test(DeprecatedTypeProperties& type) {
   TestIntArrayRefExpansion(type);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BasicTest, BasicTestCPU) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   manual_seed(123);
 
   test(CPU(kFloat));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BasicTest, BasicTestHalfCPU) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   manual_seed(234);
 
   test(CPU(kHalf));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BasicTest, BasicTestCUDA) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   manual_seed(123);
 
   if (at::hasCUDA()) {
@@ -406,7 +380,6 @@ TEST(BasicTest, BasicTestCUDA) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BasicTest, FactoryMethodsTest) {
   // Test default values
   at::Tensor tensor0 = at::empty({4});
@@ -446,7 +419,7 @@ TEST(BasicTest, FactoryMethodsTest) {
   ASSERT_EQ(tensor1.device(), at::kCPU);
   ASSERT_FALSE(tensor1.requires_grad());
   // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
-  ASSERT_ANY_THROW(tensor1.is_pinned());
+  ASSERT_FALSE(tensor1.is_pinned());
 #endif // ATEN_CPU_STATIC_DISPATCH
 
   if (torch::cuda::is_available()) {
@@ -477,11 +450,7 @@ TEST(BasicTest, FactoryMethodsTest) {
     // This is a bug
     // Issue https://github.com/pytorch/pytorch/issues/30405
     ASSERT_FALSE(tensor1.requires_grad());
-
-    // This will cause an exception
-    // Issue https://github.com/pytorch/pytorch/issues/30405
-    // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
-    ASSERT_ANY_THROW(tensor1.is_pinned());
+    ASSERT_FALSE(tensor1.is_pinned());
   }
 
   // Test _like variants

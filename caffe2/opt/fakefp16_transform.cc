@@ -3,14 +3,12 @@
 #include "caffe2/opt/glow_net_transform.h"
 #include "caffe2/utils/proto_utils.h"
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_bool(
     fake_fp16_conversion_use_fp16_acc,
     false,
     "Whether to enable fp16 accumulation for FC / BatchMatMul for fakefp16 "
     "operators.");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_bool(
     fake_fp16_conversion_use_nnpi,
     false,
@@ -43,6 +41,7 @@ std::unordered_map<std::string, std::string> getFakeFp16OpMapping(
        "SparseLengthsWeightedSumFused8BitRowwiseFakeFP16NNPI"},
       {"SparseLengthsMeanFused8BitRowwise",
        "SparseLengthsMeanFused8BitRowwiseFakeFP16AccFP16"},
+      {"MatMul", "BatchMatMulFP16Acc32Fake"},
       {"BatchMatMul", "BatchMatMulFP16Acc32Fake"},
       {"Sigmoid", "SigmoidFakeFp16"},
       {"SpatialBN", "SpatialBNFakeFp16NNPI"},
@@ -60,6 +59,7 @@ std::unordered_map<std::string, std::string> getFakeFp16OpMapping(
     fake_fp16_op_conversion_map["FC"] = "Fp16FCAcc16NNPI";
     fake_fp16_op_conversion_map["FbFCPacked"] = "Fp16FCAcc16NNPI";
     fake_fp16_op_conversion_map["BatchMatMul"] = "BatchMatMulFP16Acc16Fake";
+    fake_fp16_op_conversion_map["MatMul"] = "BatchMatMulFP16Acc16Fake";
   }
   if (use_nnpi) {
     fake_fp16_op_conversion_map["Sigmoid"] = "SigmoidFakeFp16NNPI";

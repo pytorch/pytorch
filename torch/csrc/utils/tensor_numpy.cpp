@@ -2,6 +2,7 @@
 #include <torch/csrc/utils/tensor_numpy.h>
 #define WITH_NUMPY_IMPORT_ARRAY
 #include <torch/csrc/utils/numpy_stub.h>
+#include <c10/util/irange.h>
 
 #ifndef USE_NUMPY
 namespace torch { namespace utils {
@@ -73,7 +74,7 @@ static std::vector<npy_intp> to_numpy_shape(IntArrayRef x) {
   // shape and stride conversion from int64_t to npy_intp
   auto nelem = x.size();
   auto result = std::vector<npy_intp>(nelem);
-  for (size_t i = 0; i < nelem; i++) {
+  for(const auto i : c10::irange(nelem)) {
     result[i] = static_cast<npy_intp>(x[i]);
   }
   return result;
@@ -82,7 +83,7 @@ static std::vector<npy_intp> to_numpy_shape(IntArrayRef x) {
 static std::vector<int64_t> to_aten_shape(int ndim, npy_intp* values) {
   // shape and stride conversion from npy_intp to int64_t
   auto result = std::vector<int64_t>(ndim);
-  for (int i = 0; i < ndim; i++) {
+  for(const auto i : c10::irange(ndim)) {
     result[i] = static_cast<int64_t>(values[i]);
   }
   return result;
@@ -94,7 +95,7 @@ static std::vector<int64_t> seq_to_aten_shape(PyObject *py_seq) {
     throw TypeError("shape and strides must be sequences");
   }
   auto result = std::vector<int64_t>(ndim);
-  for (int i = 0; i < ndim; i++) {
+  for(const auto i : c10::irange(ndim)) {
     auto item = THPObjectPtr(PySequence_GetItem(py_seq, i));
     if (!item) throw python_error();
 
@@ -105,24 +106,30 @@ static std::vector<int64_t> seq_to_aten_shape(PyObject *py_seq) {
 }
 
 PyObject* tensor_to_numpy(const at::Tensor& tensor) {
-  if (!is_numpy_available()) {
-    throw std::runtime_error("Numpy is not available");
-  }
-  if (tensor.device().type() != DeviceType::CPU) {
-    throw TypeError(
-      "can't convert %s device type tensor to numpy. Use Tensor.cpu() to "
-      "copy the tensor to host memory first.", tensor.device().str().c_str());
-  }
-  if (tensor.layout() != Layout::Strided) {
-      throw TypeError(
-        "can't convert %s layout tensor to numpy."
-        "convert the tensor to a strided layout first.", c10::str(tensor.layout()).c_str());
-  }
-  if (at::GradMode::is_enabled() && tensor.requires_grad()) {
-    throw std::runtime_error(
-        "Can't call numpy() on Tensor that requires grad. "
-        "Use tensor.detach().numpy() instead.");
-  }
+  TORCH_CHECK(is_numpy_available(), "Numpy is not available");
+
+  TORCH_CHECK_TYPE(tensor.device().type() == DeviceType::CPU,
+      "can't convert ", tensor.device().str().c_str(),
+      " device type tensor to numpy. Use Tensor.cpu() to ",
+      "copy the tensor to host memory first.");
+
+  TORCH_CHECK_TYPE(tensor.layout() == Layout::Strided,
+      "can't convert ", c10::str(tensor.layout()).c_str(),
+      " layout tensor to numpy.",
+      "convert the tensor to a strided layout first.");
+
+  TORCH_CHECK(!(at::GradMode::is_enabled() && tensor.requires_grad()),
+      "Can't call numpy() on Tensor that requires grad. "
+      "Use tensor.detach().numpy() instead.");
+
+  TORCH_CHECK(!tensor.is_conj(),
+      "Can't call numpy() on Tensor that has conjugate bit set. ",
+      "Use tensor.resolve_conj().numpy() instead.");
+
+  TORCH_CHECK(!tensor.is_neg(),
+      "Can't call numpy() on Tensor that has negative bit set. "
+      "Use tensor.resolve_neg().numpy() instead.");
+
   auto dtype = aten_to_numpy_dtype(tensor.scalar_type());
   auto sizes = to_numpy_shape(tensor.sizes());
   auto strides = to_numpy_shape(tensor.strides());
@@ -196,7 +203,7 @@ at::Tensor tensor_from_numpy(PyObject* obj, bool warn_if_not_writeable/*=true*/)
   }
 
   size_t storage_size = 1;
-  for (int i = 0; i < ndim; i++) {
+  for(const auto i : c10::irange(ndim)) {
     if (strides[i] < 0) {
       throw ValueError(
           "At least one stride in the given numpy array is negative, "

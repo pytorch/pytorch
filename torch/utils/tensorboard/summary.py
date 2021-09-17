@@ -230,7 +230,7 @@ def hparams(hparam_dict=None, metric_dict=None, hparam_domain_discrete=None):
     return exp, ssi, sei
 
 
-def scalar(name, scalar, collections=None, new_style=False):
+def scalar(name, scalar, collections=None, new_style=False, double_precision=False):
     """Outputs a `Summary` protocol buffer containing a single scalar value.
     The generated Summary has a Tensor.proto containing the input Tensor.
     Args:
@@ -248,15 +248,20 @@ def scalar(name, scalar, collections=None, new_style=False):
     """
     scalar = make_np(scalar)
     assert scalar.squeeze().ndim == 0, "scalar should be 0D"
+    # python float is double precision in numpy
     scalar = float(scalar)
     if new_style:
+        tensor = TensorProto(float_val=[scalar], dtype="DT_FLOAT")
+        if double_precision:
+            tensor = TensorProto(double_val=[scalar], dtype="DT_DOUBLE")
+
         plugin_data = SummaryMetadata.PluginData(plugin_name="scalars")
         smd = SummaryMetadata(plugin_data=plugin_data)
         return Summary(
             value=[
                 Summary.Value(
                     tag=name,
-                    tensor=TensorProto(float_val=[scalar], dtype="DT_FLOAT"),
+                    tensor=tensor,
                     metadata=smd,
                 )
             ]

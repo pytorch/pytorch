@@ -4,7 +4,6 @@
 
 #include <gtest/gtest.h>
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Match, Basic) {
   nom::Graph<std::string> graph;
   auto entry = graph.createNode(std::string("entry"));

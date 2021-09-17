@@ -3,8 +3,8 @@
 #include <ATen/ATen.h>
 
 #include <ATen/Dispatch.h>
-#include <ATen/cpu/vec256/functional.h>
-#include <ATen/cpu/vec256/vec256.h>
+#include <ATen/cpu/vec/functional.h>
+#include <ATen/cpu/vec/vec.h>
 #include <ATen/native/cpu/StackKernel.h>
 
 namespace at {
@@ -35,7 +35,7 @@ void stack_serial_kernel_impl(Tensor& result, TensorList tensors, int64_t dim) {
     inputs.emplace_back(tensor, dim, tensor.strides()[dim]);
   }
 
-  using Vec = vec256::Vec256<scalar_t>;
+  using Vec = vec::Vectorized<scalar_t>;
   scalar_t* result_ptr = result_data;
   for (int64_t i = 0; i < outer; ++i) {
     for (int64_t j = 0; j < ninputs; j++) {
@@ -50,7 +50,7 @@ void stack_serial_kernel_impl(Tensor& result, TensorList tensors, int64_t dim) {
           result_ptr[k] = input_ptr[k];
         }
       } else {
-        vec256::map(
+        vec::map(
             [](Vec x) { return x; }, result_ptr, input_ptr, local_inner);
       }
       result_ptr += local_inner;
@@ -67,7 +67,6 @@ void stack_serial_kernel(Tensor& result, TensorList tensors, int64_t dim) {
 
 } // anonymous namespace
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(stack_serial_stub, &stack_serial_kernel);
 
 } // namespace native

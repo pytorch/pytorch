@@ -12,6 +12,7 @@
 
 #include <ATen/ATen.h>
 
+#include <array>
 #include <memory>
 #include <sstream>
 #include <stdexcept>
@@ -25,18 +26,12 @@
 
 namespace torch {
 namespace {
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::unordered_map<at::DeprecatedTypeProperties*, PyTypeObject*> attype_to_py_storage_type;
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::unordered_map<PyTypeObject*, at::DeprecatedTypeProperties*> py_storage_type_to_attype;
 
-// NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables,cppcoreguidelines-avoid-c-arrays)
-THPDtype* dtype_registry
-  [static_cast<int>(at::ScalarType::NumOptions)] = {};
+std::array<THPDtype*, static_cast<int>(at::ScalarType::NumOptions)> dtype_registry = {};
 
-// NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables,cppcoreguidelines-avoid-c-arrays)
-THPLayout* layout_registry
-  [static_cast<int>(at::Layout::NumOptions)] = {};
+std::array<THPLayout*, static_cast<int>(at::Layout::NumOptions)> layout_registry = {};
 
 at::Backend get_backend(bool is_cuda, bool is_sparse) {
   if (is_cuda) {

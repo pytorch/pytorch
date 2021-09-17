@@ -7,8 +7,7 @@
 
 #include <c10/core/DeviceGuard.h>
 #include <c10/core/Stream.h>
-#include <c10/cuda/CUDAException.h>
-#include <c10/cuda/CUDAMacros.h>
+#include <c10/cuda/CUDAFunctions.h>
 #include <c10/util/Exception.h>
 
 /*
@@ -118,6 +117,9 @@ class C10_CUDA_API CUDAStream {
       return true;
     } else if (err != cudaErrorNotReady) {
       C10_CUDA_CHECK(err);
+    } else {
+      // ignore and clear the error if not ready
+      (void)cudaGetLastError();
     }
 
     return false;
@@ -125,7 +127,7 @@ class C10_CUDA_API CUDAStream {
 
   void synchronize() const {
     DeviceGuard guard{stream_.device()};
-    C10_CUDA_CHECK(cudaStreamSynchronize(stream()));
+    c10::cuda::stream_synchronize(stream());
   }
 
   int priority() const {
@@ -194,6 +196,16 @@ class C10_CUDA_API CUDAStream {
  */
 TORCH_API CUDAStream
 getStreamFromPool(const bool isHighPriority = false, DeviceIndex device = -1);
+
+/**
+ * Get a CUDAStream from a externally allocated one.
+ *
+ * This is mainly for interoperability with different libraries where we
+ * want to operate on a non-torch allocated stream for data exchange or similar
+ * purposes
+ */
+TORCH_API CUDAStream
+getStreamFromExternal(cudaStream_t ext_stream, DeviceIndex device_index);
 
 /**
  * Get the default CUDA stream, for the passed CUDA device, or for the

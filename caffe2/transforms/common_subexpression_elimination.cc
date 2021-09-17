@@ -153,7 +153,6 @@ bool CommonSubexpressionEliminationTransform::ReplaceRule(
   return true;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_TRANSFORM(
     CommonSubexpressionElimination,
     CommonSubexpressionEliminationTransform);

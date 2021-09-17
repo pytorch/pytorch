@@ -11,7 +11,6 @@ template <typename R, typename Func>
 bool test_RNN_xor(Func&& model_maker, bool cuda = false) {
   torch::manual_seed(0);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto nhid = 32;
   auto model = std::make_shared<SimpleContainer>();
   auto l1 = model->add(Linear(1, nhid), "l1");
@@ -23,7 +22,6 @@ bool test_RNN_xor(Func&& model_maker, bool cuda = false) {
   }
   auto lo = model->add(Linear(nout, 1), "lo");
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   torch::optim::Adam optimizer(model->parameters(), 1e-2);
   auto forward_op = [&](torch::Tensor x) {
     auto T = x.size(0);
@@ -41,13 +39,9 @@ bool test_RNN_xor(Func&& model_maker, bool cuda = false) {
 
   float running_loss = 1;
   int epoch = 0;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto max_epoch = 1500;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   while (running_loss > 1e-2) {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto bs = 16U;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto nlen = 5U;
 
     const auto backend = cuda ? torch::kCUDA : torch::kCPU;
@@ -132,12 +126,9 @@ void check_lstm_sizes_proj(std::tuple<torch::Tensor, std::tuple<torch::Tensor, t
 
 struct RNNTest : torch::test::SeedingFixture {};
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(RNNTest, CheckOutputSizes) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   LSTM model(LSTMOptions(128, 64).num_layers(3).dropout(0.2));
   // Input size is: sequence length, batch size, input size
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto x = torch::randn({10, 16, 128}, torch::requires_grad());
   auto output = model->forward(x);
   auto y = x.mean();
@@ -161,12 +152,9 @@ TEST_F(RNNTest, CheckOutputSizes) {
   ASSERT_GT(diff.abs().sum().item<float>(), 1e-3);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(RNNTest, CheckOutputSizesProj) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   LSTM model(LSTMOptions(128, 64).num_layers(3).dropout(0.2).proj_size(32));
   // Input size is: sequence length, batch size, input size
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto x = torch::randn({10, 16, 128}, torch::requires_grad());
   auto output = model->forward(x);
   auto y = x.mean();
@@ -191,7 +179,6 @@ TEST_F(RNNTest, CheckOutputSizesProj) {
   ASSERT_GT(diff.abs().sum().item<float>(), 1e-3);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(RNNTest, CheckOutputValuesMatchPyTorch) {
   torch::manual_seed(0);
   // Make sure the outputs match pytorch outputs
@@ -220,11 +207,8 @@ TEST_F(RNNTest, CheckOutputValuesMatchPyTorch) {
   auto flat = std::get<0>(out).view(3 * 4 * 2);
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
   float c_out[] = {0.4391, 0.5402, 0.4330, 0.5324, 0.4261, 0.5239,
-                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                    0.4183, 0.5147, 0.6822, 0.8064, 0.6726, 0.7968,
-                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                    0.6620, 0.7860, 0.6501, 0.7741, 0.7889, 0.9003,
-                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                    0.7769, 0.8905, 0.7635, 0.8794, 0.7484, 0.8666};
   for (size_t i = 0; i < 3 * 4 * 2; i++) {
     ASSERT_LT(std::abs(flat[i].item<float>() - c_out[i]), 1e-3);
@@ -243,84 +227,59 @@ TEST_F(RNNTest, CheckOutputValuesMatchPyTorch) {
   ASSERT_EQ(cx.size(1), 4);
   ASSERT_EQ(cx.size(2), 2);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   flat = torch::cat({hx, cx}, 0).view(16);
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
   float h_out[] = {0.7889,
-                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                    0.9003,
-                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                    0.7769,
-                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                    0.8905,
-                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                    0.7635,
-                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                    0.8794,
-                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                    0.7484,
-                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                    0.8666,
-                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                    1.1647,
-                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                    1.6106,
-                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                    1.1425,
-                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                    1.5726,
-                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                    1.1187,
-                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                    1.5329,
-                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                    1.0931,
-                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                    1.4911};
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (size_t i = 0; i < 16; i++) {
     ASSERT_LT(std::abs(flat[i].item<float>() - h_out[i]), 1e-3);
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(RNNTest, EndToEndLSTM) {
   ASSERT_TRUE(test_RNN_xor<LSTM>(
       [](int s) { return LSTM(LSTMOptions(s, s).num_layers(2)); }));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(RNNTest, EndToEndLSTMProj) {
   ASSERT_TRUE(test_RNN_xor<LSTM>(
       [](int s) { return LSTM(LSTMOptions(s, s).num_layers(2).proj_size(s / 2)); }));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(RNNTest, EndToEndGRU) {
   ASSERT_TRUE(
       test_RNN_xor<GRU>([](int s) { return GRU(GRUOptions(s, s).num_layers(2)); }));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(RNNTest, EndToEndRNNRelu) {
   ASSERT_TRUE(test_RNN_xor<RNN>(
       [](int s) { return RNN(RNNOptions(s, s).nonlinearity(torch::kReLU).num_layers(2)); }));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(RNNTest, EndToEndRNNTanh) {
   ASSERT_TRUE(test_RNN_xor<RNN>(
       [](int s) { return RNN(RNNOptions(s, s).nonlinearity(torch::kTanh).num_layers(2)); }));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(RNNTest, Sizes_CUDA) {
   torch::manual_seed(0);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   LSTM model(LSTMOptions(128, 64).num_layers(3).dropout(0.2));
   model->to(torch::kCUDA);
   auto x =
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       torch::randn({10, 16, 128}, torch::requires_grad().device(torch::kCUDA));
   auto output = model->forward(x);
   auto y = x.mean();
@@ -344,14 +303,11 @@ TEST_F(RNNTest, Sizes_CUDA) {
   ASSERT_GT(diff.abs().sum().item<float>(), 1e-3);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(RNNTest, SizesProj_CUDA) {
   torch::manual_seed(0);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   LSTM model(LSTMOptions(128, 64).num_layers(3).dropout(0.2).proj_size(32));
   model->to(torch::kCUDA);
   auto x =
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       torch::randn({10, 16, 128}, torch::requires_grad().device(torch::kCUDA));
   auto output = model->forward(x);
   auto y = x.mean();
@@ -376,36 +332,30 @@ TEST_F(RNNTest, SizesProj_CUDA) {
   ASSERT_GT(diff.abs().sum().item<float>(), 1e-3);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(RNNTest, EndToEndLSTM_CUDA) {
   ASSERT_TRUE(test_RNN_xor<LSTM>(
       [](int s) { return LSTM(LSTMOptions(s, s).num_layers(2)); }, true));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(RNNTest, EndToEndLSTMProj_CUDA) {
   ASSERT_TRUE(test_RNN_xor<LSTM>(
       [](int s) { return LSTM(LSTMOptions(s, s).num_layers(2).proj_size(s / 2)); }, true));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(RNNTest, EndToEndGRU_CUDA) {
   ASSERT_TRUE(test_RNN_xor<GRU>(
       [](int s) { return GRU(GRUOptions(s, s).num_layers(2)); }, true));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(RNNTest, EndToEndRNNRelu_CUDA) {
   ASSERT_TRUE(test_RNN_xor<RNN>(
       [](int s) { return RNN(RNNOptions(s, s).nonlinearity(torch::kReLU).num_layers(2)); }, true));
 }
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(RNNTest, EndToEndRNNTanh_CUDA) {
   ASSERT_TRUE(test_RNN_xor<RNN>(
       [](int s) { return RNN(RNNOptions(s, s).nonlinearity(torch::kTanh).num_layers(2)); }, true));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(RNNTest, PrettyPrintRNNs) {
   ASSERT_EQ(
       c10::str(LSTM(LSTMOptions(128, 64).num_layers(3).dropout(0.2))),
@@ -424,9 +374,7 @@ TEST_F(RNNTest, PrettyPrintRNNs) {
 // This test assures that flatten_parameters does not crash,
 // when bidirectional is set to true
 // https://github.com/pytorch/pytorch/issues/19545
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(RNNTest, BidirectionalFlattenParameters) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   GRU gru(GRUOptions(100, 256).num_layers(2).bidirectional(true));
   gru->flatten_parameters();
 }
@@ -465,9 +413,7 @@ std::tuple<torch::Tensor, std::tuple<torch::Tensor, torch::Tensor>> lstm_output_
 void BidirectionalGRUReverseForward(bool cuda) {
   auto opt = torch::TensorOptions().dtype(torch::kFloat32).requires_grad(false)
                                    .device(cuda ? torch::kCUDA : torch::kCPU);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto input = torch::tensor({1, 2, 3, 4, 5}, opt).reshape({5, 1, 1});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto input_reversed = torch::tensor({5, 4, 3, 2, 1}, opt).reshape({5, 1, 1});
 
   auto gru_options = GRUOptions(1, 1).num_layers(1).batch_first(false);
@@ -503,12 +449,10 @@ void BidirectionalGRUReverseForward(bool cuda) {
             std::get<1>(reverse_output)[0][0][0].item<float>());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(RNNTest, BidirectionalGRUReverseForward) {
   BidirectionalGRUReverseForward(false);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(RNNTest, BidirectionalGRUReverseForward_CUDA) {
   BidirectionalGRUReverseForward(true);
 }
@@ -518,9 +462,7 @@ TEST_F(RNNTest, BidirectionalGRUReverseForward_CUDA) {
 void BidirectionalLSTMReverseForwardTest(bool cuda) {
   auto opt = torch::TensorOptions().dtype(torch::kFloat32).requires_grad(false)
                                    .device(cuda ? torch::kCUDA : torch::kCPU);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto input = torch::tensor({1, 2, 3, 4, 5}, opt).reshape({5, 1, 1});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto input_reversed = torch::tensor({5, 4, 3, 2, 1}, opt).reshape({5, 1, 1});
 
   auto lstm_opt = LSTMOptions(1, 1).num_layers(1).batch_first(false);
@@ -559,17 +501,14 @@ void BidirectionalLSTMReverseForwardTest(bool cuda) {
             std::get<1>(std::get<1>(reverse_output))[0][0][0].item<float>());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(RNNTest, BidirectionalLSTMReverseForward) {
   BidirectionalLSTMReverseForwardTest(false);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(RNNTest, BidirectionalLSTMReverseForward_CUDA) {
   BidirectionalLSTMReverseForwardTest(true);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(RNNTest, BidirectionalMultilayerGRU_CPU_vs_CUDA) {
   // Create two GRUs with the same options
   auto opt = GRUOptions(2, 4).num_layers(3).batch_first(false).bidirectional(true);
@@ -593,10 +532,8 @@ TEST_F(RNNTest, BidirectionalMultilayerGRU_CPU_vs_CUDA) {
   // Create the same inputs
   auto input_opt = torch::TensorOptions()
                     .dtype(torch::kFloat32).requires_grad(false);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto input_cpu = torch::tensor({1, 2, 3, 4, 5, 6}, input_opt)
                     .reshape({3, 1, 2});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto input_cuda = torch::tensor({1, 2, 3, 4, 5, 6}, input_opt)
                     .reshape({3, 1, 2}).to(torch::kCUDA);
 
@@ -622,7 +559,6 @@ TEST_F(RNNTest, BidirectionalMultilayerGRU_CPU_vs_CUDA) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(RNNTest, BidirectionalMultilayerLSTM_CPU_vs_CUDA) {
   // Create two LSTMs with the same options
   auto opt = LSTMOptions(2, 4).num_layers(3).batch_first(false).bidirectional(true);
@@ -645,10 +581,8 @@ TEST_F(RNNTest, BidirectionalMultilayerLSTM_CPU_vs_CUDA) {
 
   auto options = torch::TensorOptions()
                   .dtype(torch::kFloat32).requires_grad(false);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto input_cpu = torch::tensor({1, 2, 3, 4, 5, 6}, options)
                   .reshape({3, 1, 2});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto input_cuda = torch::tensor({1, 2, 3, 4, 5, 6}, options)
                   .reshape({3, 1, 2}).to(torch::kCUDA);
 
@@ -674,7 +608,6 @@ TEST_F(RNNTest, BidirectionalMultilayerLSTM_CPU_vs_CUDA) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(RNNTest, BidirectionalMultilayerLSTMProj_CPU_vs_CUDA) {
   // Create two LSTMs with the same options
   auto opt = LSTMOptions(2, 4).num_layers(3).batch_first(false).bidirectional(true).proj_size(2);
@@ -697,10 +630,8 @@ TEST_F(RNNTest, BidirectionalMultilayerLSTMProj_CPU_vs_CUDA) {
 
   auto options = torch::TensorOptions()
                   .dtype(torch::kFloat32).requires_grad(false);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto input_cpu = torch::tensor({1, 2, 3, 4, 5, 6}, options)
                   .reshape({3, 1, 2});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto input_cuda = torch::tensor({1, 2, 3, 4, 5, 6}, options)
                   .reshape({3, 1, 2}).to(torch::kCUDA);
 
@@ -726,7 +657,6 @@ TEST_F(RNNTest, BidirectionalMultilayerLSTMProj_CPU_vs_CUDA) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(RNNTest, UsePackedSequenceAsInput) {
   {
     torch::manual_seed(0);
@@ -734,11 +664,8 @@ TEST_F(RNNTest, UsePackedSequenceAsInput) {
     torch::nn::utils::rnn::PackedSequence packed_input = torch::nn::utils::rnn::pack_sequence({torch::ones({3, 2})});
     auto rnn_output = m->forward_with_packed_input(packed_input);
     auto expected_output = torch::tensor(
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     {{-0.0645, -0.7274,  0.4531},
-     // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
      {-0.3970, -0.6950,  0.6009},
-     // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
      {-0.3877, -0.7310,  0.6806}});
     ASSERT_TRUE(torch::allclose(std::get<0>(rnn_output).data(), expected_output, 1e-05, 2e-04));
 
@@ -752,11 +679,8 @@ TEST_F(RNNTest, UsePackedSequenceAsInput) {
     torch::nn::utils::rnn::PackedSequence packed_input = torch::nn::utils::rnn::pack_sequence({torch::ones({3, 2})});
     auto rnn_output = m->forward_with_packed_input(packed_input);
     auto expected_output = torch::tensor(
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     {{-0.2693, -0.1240,  0.0744},
-     // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
      {-0.3889, -0.1919,  0.1183},
-     // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
      {-0.4425, -0.2314,  0.1386}});
     ASSERT_TRUE(torch::allclose(std::get<0>(rnn_output).data(), expected_output, 1e-05, 2e-04));
 
@@ -770,11 +694,8 @@ TEST_F(RNNTest, UsePackedSequenceAsInput) {
     torch::nn::utils::rnn::PackedSequence packed_input = torch::nn::utils::rnn::pack_sequence({torch::ones({3, 2})});
     auto rnn_output = m->forward_with_packed_input(packed_input);
     auto expected_output = torch::tensor(
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     {{-0.1134,  0.0467,  0.2336},
-     // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
      {-0.1189,  0.0502,  0.2960},
-     // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
      {-0.1138,  0.0484,  0.3110}});
     ASSERT_TRUE(torch::allclose(std::get<0>(rnn_output).data(), expected_output, 1e-05, 2e-04));
 

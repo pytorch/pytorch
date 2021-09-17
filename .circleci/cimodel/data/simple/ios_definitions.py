@@ -1,7 +1,7 @@
 from cimodel.data.simple.util.versions import MultiPartVersion
 import cimodel.lib.miniutils as miniutils
 
-XCODE_VERSION = MultiPartVersion([12, 0, 0])
+XCODE_VERSION = MultiPartVersion([12, 5, 1])
 
 
 class ArchVariant:
@@ -61,14 +61,20 @@ class IOSJob:
 
 
 WORKFLOW_DATA = [
-    IOSJob(XCODE_VERSION, ArchVariant("x86_64"), is_org_member_context=False),
-    IOSJob(XCODE_VERSION, ArchVariant("x86_64", "lite_interpreter"), is_org_member_context=False, extra_props={
+    IOSJob(XCODE_VERSION, ArchVariant("x86_64"), is_org_member_context=False, extra_props={
         "lite_interpreter": miniutils.quote(str(int(True)))}),
-    IOSJob(XCODE_VERSION, ArchVariant("arm64")),
-    IOSJob(XCODE_VERSION, ArchVariant("arm64", "metal"), extra_props={"use_metal": miniutils.quote(str(int(True)))}),
-    IOSJob(XCODE_VERSION, ArchVariant("arm64", "lite_interpreter"), extra_props={
+    IOSJob(XCODE_VERSION, ArchVariant("x86_64", "full_jit"), is_org_member_context=False, extra_props={
+        "lite_interpreter": miniutils.quote(str(int(False)))}),
+    IOSJob(XCODE_VERSION, ArchVariant("arm64"), extra_props={
         "lite_interpreter": miniutils.quote(str(int(True)))}),
-    IOSJob(XCODE_VERSION, ArchVariant("arm64", "custom"), extra_props={"op_list": "mobilenetv2.yaml"}),
+    IOSJob(XCODE_VERSION, ArchVariant("arm64", "metal"), extra_props={
+        "use_metal": miniutils.quote(str(int(True))),
+        "lite_interpreter": miniutils.quote(str(int(True)))}),
+    IOSJob(XCODE_VERSION, ArchVariant("arm64", "full_jit"), extra_props={
+        "lite_interpreter": miniutils.quote(str(int(False)))}),
+    IOSJob(XCODE_VERSION, ArchVariant("arm64", "custom"), extra_props={
+        "op_list": "mobilenetv2.yaml",
+        "lite_interpreter": miniutils.quote(str(int(True)))}),
 ]
 
 

@@ -24,13 +24,11 @@ class TanhFunctor {
   Tanh<T> tanh_;
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     Tanh,
     DNNLOWP,
     UnaryElementwiseWithArgsDNNLowPOp<std::uint8_t, TanhFunctor<std::uint8_t>>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     Int8Tanh,
     DNNLOWP,

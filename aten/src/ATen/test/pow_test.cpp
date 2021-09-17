@@ -287,7 +287,6 @@ void test_inverse(const std::vector<T> vals) {
 
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(PowTest, IntTensorPowAllScalars) {
   tensor_pow_scalar(ints, non_neg_ints, kInt, kInt);
   tensor_pow_scalar(ints, non_neg_longs, kInt, kInt);
@@ -295,7 +294,6 @@ TEST(PowTest, IntTensorPowAllScalars) {
   tensor_pow_scalar(ints, doubles, kInt, kDouble);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(PowTest, LongTensorPowAllScalars) {
   tensor_pow_scalar(longs, non_neg_ints, kLong, kLong);
   tensor_pow_scalar(longs, non_neg_longs, kLong, kLong);
@@ -303,7 +301,6 @@ TEST(PowTest, LongTensorPowAllScalars) {
   tensor_pow_scalar(longs, doubles, kLong, kDouble);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(PowTest, FloatTensorPowAllScalars) {
   tensor_pow_scalar(floats, ints, kFloat, kDouble);
   tensor_pow_scalar(floats, longs, kFloat, kDouble);
@@ -311,7 +308,6 @@ TEST(PowTest, FloatTensorPowAllScalars) {
   tensor_pow_scalar(floats, doubles, kFloat, kDouble);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(PowTest, DoubleTensorPowAllScalars) {
   tensor_pow_scalar(doubles, ints, kDouble, kDouble);
   tensor_pow_scalar(doubles, longs, kDouble, kDouble);
@@ -319,7 +315,6 @@ TEST(PowTest, DoubleTensorPowAllScalars) {
   tensor_pow_scalar(doubles, doubles, kDouble, kDouble);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(PowTest, IntScalarPowAllTensors) {
   scalar_pow_tensor(ints, c10::kInt, ints, c10::kInt);
   scalar_pow_tensor(ints, c10::kInt, longs, c10::kLong);
@@ -327,45 +322,37 @@ TEST(PowTest, IntScalarPowAllTensors) {
   scalar_pow_tensor(ints, c10::kInt, doubles, c10::kDouble);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(PowTest, LongScalarPowAllTensors) {
   scalar_pow_tensor(longs, c10::kLong, longs, c10::kLong);
   scalar_pow_tensor(longs, c10::kLong, floats, c10::kFloat);
   scalar_pow_tensor(longs, c10::kLong, doubles, c10::kDouble);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(PowTest, FloatScalarPowAllTensors) {
   scalar_pow_tensor(floats, c10::kFloat, floats, c10::kFloat);
   scalar_pow_tensor(floats, c10::kFloat, doubles, c10::kDouble);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(PowTest, DoubleScalarPowAllTensors) {
   scalar_pow_tensor(doubles, c10::kDouble, doubles, c10::kDouble);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(PowTest, IntTensorPowIntTensor) {
   tensor_pow_tensor(ints, c10::kInt, ints, c10::kInt);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(PowTest, LongTensorPowLongTensor) {
   tensor_pow_tensor(longs, c10::kLong, longs, c10::kLong);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(PowTest, FloatTensorPowFloatTensor) {
   tensor_pow_tensor(floats, c10::kFloat, floats, c10::kFloat);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(PowTest, DoubleTensorPowDoubleTensor) {
   tensor_pow_tensor(doubles, c10::kDouble, doubles, c10::kDouble);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(PowTest, TestIntegralPow) {
   test_pow_one(longs);
   test_pow_one(ints);

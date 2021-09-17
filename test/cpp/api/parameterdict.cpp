@@ -11,7 +11,6 @@ using namespace torch::test;
 
 struct ParameterDictTest : torch::test::SeedingFixture {};
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ParameterDictTest, ConstructFromTensor) {
   ParameterDict dict;
   torch::Tensor ta = torch::randn({1, 2}, torch::requires_grad(true));
@@ -29,7 +28,6 @@ TEST_F(ParameterDictTest, ConstructFromTensor) {
   ASSERT_FALSE(dict["B"].requires_grad());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ParameterDictTest, ConstructFromOrderedDict) {
   torch::Tensor ta = torch::randn({1, 2}, torch::requires_grad(true));
   torch::Tensor tb = torch::randn({1, 2}, torch::requires_grad(false));
@@ -44,7 +42,6 @@ TEST_F(ParameterDictTest, ConstructFromOrderedDict) {
   ASSERT_FALSE(dict["B"].requires_grad());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ParameterDictTest, InsertAndContains) {
   ParameterDict dict;
   dict->insert("A", torch::tensor({1.0}));
@@ -53,7 +50,6 @@ TEST_F(ParameterDictTest, InsertAndContains) {
   ASSERT_FALSE(dict->contains("C"));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ParameterDictTest, InsertAndClear) {
   ParameterDict dict;
   dict->insert("A", torch::tensor({1.0}));
@@ -62,7 +58,6 @@ TEST_F(ParameterDictTest, InsertAndClear) {
   ASSERT_EQ(dict->size(), 0);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ParameterDictTest, InsertAndPop) {
   ParameterDict dict;
   dict->insert("A", torch::tensor({1.0}));
@@ -74,35 +69,26 @@ TEST_F(ParameterDictTest, InsertAndPop) {
   ASSERT_TRUE(torch::eq(p, torch::tensor({1.0})).item<bool>());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ParameterDictTest, SimpleUpdate) {
   ParameterDict dict;
   ParameterDict wrongDict;
   ParameterDict rightDict;
   dict->insert("A", torch::tensor({1.0}));
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   dict->insert("B", torch::tensor({2.0}));
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   dict->insert("C", torch::tensor({3.0}));
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   wrongDict->insert("A", torch::tensor({5.0}));
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   wrongDict->insert("D", torch::tensor({5.0}));
   ASSERT_THROWS_WITH(dict->update(*wrongDict), "Parameter 'D' is not defined");
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   rightDict->insert("A", torch::tensor({5.0}));
   dict->update(*rightDict);
   ASSERT_EQ(dict->size(), 3);
   ASSERT_TRUE(torch::eq(dict["A"], torch::tensor({5.0})).item<bool>());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ParameterDictTest, Keys) {
   torch::OrderedDict<std::string, torch::Tensor> params = {
       {"a", torch::tensor({1.0})},
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {"b", torch::tensor({2.0})},
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {"c", torch::tensor({1.0, 2.0})}};
   auto dict = torch::nn::ParameterDict(params);
   std::vector<std::string> keys = dict->keys();
@@ -110,7 +96,6 @@ TEST_F(ParameterDictTest, Keys) {
   ASSERT_EQ(keys, true_keys);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ParameterDictTest, Values) {
   torch::Tensor ta = torch::randn({1, 2}, torch::requires_grad(true));
   torch::Tensor tb = torch::randn({1, 2}, torch::requires_grad(false));
@@ -125,7 +110,6 @@ TEST_F(ParameterDictTest, Values) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ParameterDictTest, Get) {
   ParameterDict dict;
   torch::Tensor ta = torch::randn({1, 2}, torch::requires_grad(true));
@@ -143,15 +127,11 @@ TEST_F(ParameterDictTest, Get) {
   ASSERT_FALSE(dict->get("B").requires_grad());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ParameterDictTest, PrettyPrintParameterDict) {
   torch::OrderedDict<std::string, torch::Tensor> params = {
       {"a", torch::tensor({1.0})},
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {"b", torch::tensor({2.0, 1.0})},
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {"c", torch::tensor({{3.0}, {2.1}})},
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {"d", torch::tensor({{3.0, 1.3}, {1.2, 2.1}})}};
   auto dict = torch::nn::ParameterDict(params);
   ASSERT_EQ(

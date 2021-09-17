@@ -4,7 +4,7 @@
 source "$(dirname "${BASH_SOURCE[0]}")/macos-common.sh"
 
 git submodule sync --recursive
-git submodule update --init --recursive
+git submodule update --init --recursive --jobs 0
 export CMAKE_PREFIX_PATH=${WORKSPACE_DIR}/miniconda3/
 
 # Build PyTorch
@@ -28,7 +28,6 @@ if [ "${BUILD_LITE_INTERPRETER}" == 1 ]; then
     popd || exit
 
     "${CPP_BUILD}/caffe2/build/bin/test_lite_interpreter_runtime"
-    "${CPP_BUILD}/caffe2/build/bin/test_mobile_nnc"
 
     # Change the permission manually from 755 to 644 to keep git clean
     chmod 644 "${HOME}/project/.jenkins/pytorch/macos-lite-interpreter-build-test.sh"

@@ -264,9 +264,11 @@ at::Tensor PackedLinearWeightsQnnp::apply_dynamic_impl(at::Tensor input) {
       /*min=*/x_min,
       /*max=*/x_max,
       /*qmin=*/0,
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       /*qmax=*/255);
   float* weight_scales_data = w_scales.data_ptr<float>();
+
+  // QNNPack is not thread safe
+  std::lock_guard<std::mutex> lock(qnnp_mutex_);
   if (!input_scale.has_value() || input_scale.value() != q_params.scale) {
     generate_requantization_scales(
         // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
@@ -289,7 +291,6 @@ at::Tensor PackedLinearWeightsQnnp::apply_dynamic_impl(at::Tensor input) {
     int8_t* w_data = (int8_t*)weight_contig.data_ptr<c10::qint8>();
     auto wt_numel = weight_contig.numel();
     for (int i = 0; i < wt_numel; ++i) {
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       qnnp_w_data[i] = static_cast<c10::quint8>(w_data[i] + 128);
     }
 
@@ -329,8 +330,7 @@ at::Tensor PackedLinearWeightsQnnp::apply_dynamic_impl(at::Tensor input) {
 
   size_t rows_input = 1;
   size_t cols_input = input_contig.size(input_contig.dim() - 1);
-  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-  for (size_t i = 0; i < input_contig.dim() - 1; ++i) {
+  for (const auto i : c10::irange(input_contig.dim() - 1)) {
     rows_input *= input_contig.size(i);
   }
   pytorch_qnnp_status runStatus = qnnpack::qnnpackLinearDynamic(
@@ -352,6 +352,12 @@ at::Tensor PackedLinearWeightsQnnp::apply_dynamic_impl(at::Tensor input) {
   TORCH_INTERNAL_ASSERT(
       runStatus == pytorch_qnnp_status_success,
       "failed to run QNNPACK Linear operator");
+
+  // Call the relu operator here until qlinear dynamic in QNNPACK
+  // supports it natively.
+  if (ReluFused) {
+    output.relu_();
+  }
   return output;
 }
 
@@ -427,9 +433,6 @@ class QLinearDynamicInt8 final {
       at::Tensor input,
       const c10::intrusive_ptr<LinearPackedParamsBase>& packed_weight,
       bool reduce_range) {
-    // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
-    auto& ctx = at::globalContext();
-
     if (ReluFused) {
       return packed_weight->apply_dynamic_relu(std::move(input), reduce_range);
     } else {
@@ -451,8 +454,14 @@ class QLinearDynamicFp16 final {
     TORCH_CHECK(
         fbgemm::fbgemmSupportedCPU(), "Your CPU doesn't support FBGEMM.");
 
-    TORCH_INTERNAL_ASSERT(!ReluFused);
-    return packed_weight->apply_dynamic(std::move(input));
+    auto output = packed_weight->apply_dynamic(std::move(input));
+
+    // Call the relu operator here until fp16 linear dynamic in FBGEMM
+    // supports it natively.
+    if (ReluFused) {
+      output.relu_();
+    }
+    return output;
   }
 #else // USE_FBGEMM
   static at::Tensor run(
@@ -471,6 +480,7 @@ TORCH_LIBRARY_IMPL(quantized, CPU, m) {
   m.impl(TORCH_SELECTIVE_NAME("quantized::linear_dynamic"), TORCH_FN(QLinearDynamicInt8<false>::run));
   m.impl(TORCH_SELECTIVE_NAME("quantized::linear_relu_dynamic"), TORCH_FN(QLinearDynamicInt8<true>::run));
   m.impl(TORCH_SELECTIVE_NAME("quantized::linear_dynamic_fp16"), TORCH_FN(QLinearDynamicFp16<false>::run));
+  m.impl(TORCH_SELECTIVE_NAME("quantized::linear_relu_dynamic_fp16"), TORCH_FN(QLinearDynamicFp16<true>::run));
 }
 
 TORCH_LIBRARY_IMPL(_quantized, CPU, m) {

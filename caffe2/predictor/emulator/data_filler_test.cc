@@ -4,7 +4,6 @@
 
 #include <gtest/gtest.h>
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DataFiller, FillNetInputTest) {
   using namespace caffe2::testing;
   using namespace caffe2::emulator;
@@ -13,7 +12,6 @@ TEST(DataFiller, FillNetInputTest) {
       .newOp("Concat", {"X0", "X1", "X2"}, {"concat_out", "split_info"})
       .addArgument("axis", 1);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<int64_t> input_dim = {30, 20};
   std::vector<std::vector<std::vector<int64_t>>> input_dims = {
       {/* X0 */ input_dim, /* X1 */ input_dim, /* X2 */ input_dim}};

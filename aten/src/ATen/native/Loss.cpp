@@ -22,27 +22,40 @@ namespace {
 
 namespace at { namespace native {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(smooth_l1_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(smooth_l1_backward_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(huber_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(huber_backward_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(mse_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(mse_backward_stub);
 
 Tensor cosine_embedding_loss(const Tensor& input1, const Tensor& input2, const Tensor& target, double margin, int64_t reduction) {
+  auto targ_dim = target.dim();
   TORCH_CHECK(
-      target.dim() == 1,
-      "1D target tensor expected, multi-target not supported");
+      targ_dim == 1 || targ_dim == 0,
+      "0D or 1D target tensor expected, multi-target not supported");
 
-  auto prod_sum = (input1 * input2).sum(1);
-  auto mag_square1 = (input1 * input1).sum(1) + EPSILON;
-  auto mag_square2 = (input2 * input2).sum(1) + EPSILON;
+  if (targ_dim == 1) {
+    TORCH_CHECK(
+        input1.dim() == 2,
+        "1D target tensor expects 2D input tensors, but found inputs with sizes ",
+        input1.sizes(),
+        " and ",
+        input2.sizes(),
+        ".");
+  } else {
+    TORCH_CHECK(
+        input1.dim() == 1,
+        "0D target tensor expects 1D input tensors, but found inputs with sizes ",
+        input1.sizes(),
+        " and ",
+        input2.sizes(),
+        ".");
+  }
+
+  auto prod_sum = (input1 * input2).sum(targ_dim);
+  auto mag_square1 = (input1 * input1).sum(targ_dim) + EPSILON;
+  auto mag_square2 = (input2 * input2).sum(targ_dim) + EPSILON;
   auto denom = (mag_square1 * mag_square2).sqrt_();
   auto cos = prod_sum / denom;
 
@@ -142,8 +155,8 @@ Tensor& binary_cross_entropy_out_cpu(const Tensor& input, const Tensor& target, 
 
     auto iter = TensorIteratorConfig()
       .add_output(loss_squeezed)
-      .add_input(at::squeeze(input))
-      .add_input(at::squeeze(target))
+      .add_owned_input(at::squeeze(input))
+      .add_owned_input(at::squeeze(target))
       .build();
 
     AT_DISPATCH_FLOATING_TYPES(loss.scalar_type(), "binary_cross_entropy", [&] {
@@ -192,9 +205,9 @@ Tensor& binary_cross_entropy_backward_out_cpu(const Tensor& grad, const Tensor& 
 
     auto iter = TensorIteratorConfig()
       .add_output(grad_input_squeezed)
-      .add_input(at::squeeze(grad))
-      .add_input(at::squeeze(input))
-      .add_input(at::squeeze(target))
+      .add_owned_input(at::squeeze(grad))
+      .add_owned_input(at::squeeze(input))
+      .add_owned_input(at::squeeze(target))
       .build();
 
     AT_DISPATCH_FLOATING_TYPES(grad_input.scalar_type(), "binary_cross_entropy_backward", [&] {
@@ -280,7 +293,6 @@ Tensor poisson_nll_loss(const Tensor& input, const Tensor& target, const bool lo
     }
 
     if (full) {
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         auto stirling_term = target * at::log(target) - target + 0.5 * at::log(2 * c10::pi<double> * target);
         loss += stirling_term.masked_fill(target <= 1, 0);
     }
@@ -333,7 +345,7 @@ Tensor smooth_l1_loss(const Tensor& input, const Tensor& target, const int64_t r
       return at::native::l1_loss(input, target, reduction);
   }
   Tensor loss;
-  auto iter = TensorIterator::binary_op(loss, input, target);
+  auto iter = TensorIterator::borrowing_binary_op(loss, input, target);
   smooth_l1_stub(iter.device_type(), iter, beta);
   return apply_loss_reduction(iter.output(), reduction);
 }
@@ -345,7 +357,7 @@ Tensor& smooth_l1_loss_out(const Tensor& input, const Tensor& target, int64_t re
   }
   if (reduction != Reduction::None) {
     Tensor loss;
-    auto iter = TensorIterator::binary_op(loss, input, target);
+    auto iter = TensorIterator::borrowing_binary_op(loss, input, target);
     smooth_l1_stub(iter.device_type(), iter, beta);
     if (reduction == Reduction::Mean) {
       at::mean_out(result, iter.output(), 0);
@@ -353,7 +365,7 @@ Tensor& smooth_l1_loss_out(const Tensor& input, const Tensor& target, int64_t re
       at::sum_out(result, iter.output(), 0);
     }
   } else {
-    auto iter = TensorIterator::binary_op(result, input, target);
+    auto iter = TensorIterator::borrowing_binary_op(result, input, target);
     smooth_l1_stub(iter.device_type(), iter, beta);
   }
   return result;
@@ -369,6 +381,9 @@ Tensor& smooth_l1_loss_backward_out(const Tensor& grad_output, const Tensor& inp
     .add_input(input)
     .add_input(target)
     .add_input(grad_output)
+    .promote_inputs_to_common_dtype(true)
+    .cast_common_dtype_to_outputs(true)
+    .enforce_safe_casting_to_output(true)
     .build();
   smooth_l1_backward_stub(iter.device_type(), iter, norm, beta);
   return grad_input;
@@ -384,14 +399,14 @@ Tensor smooth_l1_loss_backward(const Tensor& grad_output, const Tensor& input, c
 Tensor huber_loss(const Tensor& input, const Tensor& target, int64_t reduction, double delta) {
   TORCH_CHECK(delta > 0, "huber_loss does not support non-positive values for delta.")
   Tensor loss = at::empty_like(input);
-  auto iter = TensorIterator::binary_op(loss, input, target);
+  auto iter = TensorIterator::borrowing_binary_op(loss, input, target);
   huber_stub(iter.device_type(), iter, delta);
   return apply_loss_reduction(loss, reduction);
 }
 
 Tensor& huber_loss_out(const Tensor& input, const Tensor& target, int64_t reduction, double delta, Tensor& result) {
   TORCH_CHECK(delta > 0, "huber_loss does not support non-positive values for delta.")
-  auto iter = TensorIterator::binary_op(result, input, target);
+  auto iter = TensorIterator::borrowing_binary_op(result, input, target);
   huber_stub(iter.device_type(), iter, delta);
   if (reduction != Reduction::None) {
     auto reduced = apply_loss_reduction(result, reduction);
@@ -420,7 +435,7 @@ Tensor& huber_loss_backward_out(const Tensor& grad_output, const Tensor& input, 
 
 Tensor mse_loss(const Tensor& input, const Tensor& target, int64_t reduction) {
   Tensor loss;
-  auto iter = TensorIterator::binary_op(loss, input, target);
+  auto iter = TensorIterator::borrowing_binary_op(loss, input, target);
   mse_stub(iter.device_type(), iter);
   return apply_loss_reduction(iter.output(), reduction);
 }
@@ -428,7 +443,7 @@ Tensor mse_loss(const Tensor& input, const Tensor& target, int64_t reduction) {
 Tensor& mse_loss_out(const Tensor& input, const Tensor& target, int64_t reduction, Tensor&result) {
   if (reduction != Reduction::None) {
     Tensor loss;
-    auto iter = TensorIterator::binary_op(loss, input, target);
+    auto iter = TensorIterator::borrowing_binary_op(loss, input, target);
     mse_stub(iter.device_type(), iter);
     if (reduction == Reduction::Mean) {
       at::mean_out(result, iter.output(), 0);
@@ -436,8 +451,8 @@ Tensor& mse_loss_out(const Tensor& input, const Tensor& target, int64_t reductio
       at::sum_out(result, iter.output(), 0);
     }
   } else {
-    auto iter = TensorIterator::binary_op(result, input, target);
-    mse_stub(iter.device_type(), iter);;
+    auto iter = TensorIterator::borrowing_binary_op(result, input, target);
+    mse_stub(iter.device_type(), iter);
   }
   return result;
 }
@@ -449,7 +464,6 @@ Tensor mse_loss_backward(const Tensor& grad_output, const Tensor& input, const T
 
 Tensor& mse_loss_backward_out(const Tensor& grad_output,
     const Tensor& input, const Tensor& target, int64_t reduction, Tensor& grad_input) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto norm = reduction == Reduction::Mean ? 2. / input.numel() : 2.;
   auto iter = at::TensorIteratorConfig()
     .add_output(grad_input)

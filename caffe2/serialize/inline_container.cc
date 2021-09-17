@@ -9,6 +9,7 @@
 #include <c10/core/Allocator.h>
 #include <c10/core/CPUAllocator.h>
 #include <c10/core/Backend.h>
+#include <c10/util/Exception.h>
 
 #include "caffe2/core/common.h"
 #include "caffe2/core/logging.h"
@@ -189,7 +190,6 @@ size_t getPadding(
   padding_buf[0] = 'F';
   padding_buf[1] = 'B';
   padding_buf[2] = (uint8_t)padding_size;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   padding_buf[3] = (uint8_t)(padding_size >> 8);
   return padding_size_plus_fbxx;
 }
@@ -236,8 +236,9 @@ std::vector<std::string> PyTorchStreamReader::getAllRecords() {
   return out;
 }
 
-const std::vector<std::string>& PyTorchStreamWriter::getAllWrittenRecords() {
-  return files_written;
+const std::unordered_set<std::string>&
+PyTorchStreamWriter::getAllWrittenRecords() {
+  return files_written_;
 }
 
 size_t PyTorchStreamReader::getRecordID(const std::string& name) {
@@ -262,7 +263,6 @@ std::tuple<at::DataPtr, size_t> PyTorchStreamReader::getRecord(const std::string
 }
 
 static int64_t read_le_16(uint8_t* buf) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   return buf[0] + (buf[1] << 8);
 }
 
@@ -358,6 +358,8 @@ void PyTorchStreamWriter::writeRecord(
     bool compress) {
   AT_ASSERT(!finalized_);
   AT_ASSERT(!archive_name_plus_slash_.empty());
+  TORCH_INTERNAL_ASSERT(
+      files_written_.count(name) == 0, "Tried to serialize file twice: ", name);
   std::string full_name = archive_name_plus_slash_ + name;
   size_t padding_size =
       detail::getPadding(ar_->m_archive_size, full_name.size(), size, padding_);
@@ -378,14 +380,13 @@ void PyTorchStreamWriter::writeRecord(
       nullptr,
       0);
   valid("writing file ", name.c_str());
-  files_written.push_back(name);
+  files_written_.insert(name);
 }
 
 void PyTorchStreamWriter::writeEndOfFile() {
   // Rewrites version info
   std::string version = c10::to_string(version_);
   version.push_back('\n');
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   if (version_ >= 0x6L) {
     writeRecord(".data/version", version.c_str(), version.size());
   } else {

@@ -172,12 +172,12 @@ bool SaveOpImpl::RunOnDevice() {
   }
 
   BlobSerializerBase::SerializationAcceptor acceptor =
-      [&](const std::string& blobName, const std::string& data) {
+      [&](const std::string& blobName, std::string&& data) {
         // transaction should take care of locking
         VLOG(2) << "Sending " << blobName << " blob's data of size "
                 << data.size() << " to db";
         auto transaction = out_db->NewTransaction();
-        transaction->Put(blobName, data);
+        transaction->Put(blobName, std::move(data));
         transaction->Commit();
       };
 
@@ -199,19 +199,61 @@ bool SaveOpImpl::RunOnDevice() {
 
 } // namespace internal
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+namespace {
+class EstimateAllBlobSizesOp final : public Operator<CPUContext> {
+ public:
+  explicit EstimateAllBlobSizesOp(
+      const OperatorDef& operator_def,
+      Workspace* ws)
+      : Operator<CPUContext>(operator_def, ws),
+        include_shared_(GetSingleArgument<int>("include_shared", true)),
+        ws_(ws) {
+    auto options_data = GetSingleArgument<string>("options", "");
+    if (!options_data.empty()) {
+      if (!options_.ParseFromString(options_data)) {
+        CAFFE_ENFORCE(false, "unable to parse serialization options");
+      }
+    }
+  }
+
+  bool RunOnDevice() override {
+    const auto& blob_names = include_shared_ ? ws_->Blobs() : ws_->LocalBlobs();
+    auto* names_out = Output(0, {static_cast<int64_t>(blob_names.size())}, at::dtype<std::string>());
+    auto* sizes_out = Output(1, {static_cast<int64_t>(blob_names.size())}, at::dtype<int64_t>());
+    BlobSerializationOptions default_options;
+    for (size_t idx = 0; idx < blob_names.size(); ++idx) {
+      const auto& name = blob_names[idx];
+      auto* blob = ws_->GetBlob(name);
+      if (!blob) {
+        LOG(ERROR) << "unable to find blob " << name
+                   << " when estimating serialization size";
+        continue;
+      }
+
+      names_out->template mutable_data<std::string>()[idx] = name;
+      const auto& blob_serialization_options =
+          internal::GetBlobOptions(name, options_, default_options);
+      sizes_out->template mutable_data<int64_t>()[idx] =
+          EstimateSerializedBlobSize(*blob, name, blob_serialization_options);
+    }
+    return true;
+  }
+
+ private:
+  bool include_shared_{true};
+  Workspace* ws_{nullptr};
+  SerializationOptions options_;
+};
+} // namespace
+
 REGISTER_CPU_OPERATOR(DBExists, DBExistsOp<CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(Load, LoadOp<CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(Save, SaveOp<CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(Checkpoint, CheckpointOp<CPUContext>);
 // CPU Operator old name: do NOT use, we may deprecate this later.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(Snapshot, CheckpointOp<CPUContext>);
+REGISTER_CPU_OPERATOR(EstimateAllBlobSizes, EstimateAllBlobSizesOp);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(DBExists)
     .NumInputs(0)
     .NumOutputs(1)
@@ -261,7 +303,6 @@ print("exists:", workspace.FetchBlob("exists"))
     .Arg("db_type", "*(type: string)* Type of db to save (options: \"lmdb\", "
     "\"leveldb\", \"minidb\").");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Load)
     .NumInputs(0, INT_MAX)
     .NumOutputs(0, INT_MAX)
@@ -359,7 +400,6 @@ print("Y:", workspace.FetchBlob("Y"))
         "specify which blobs in the db shall be loaded. Must be the same "
         "length as number of output blobs.");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Save)
     .NumInputs(1, INT_MAX)
     .NumOutputs(0)
@@ -426,7 +466,6 @@ workspace.RunOperatorOnce(op)
     "be used")
     .Input(0, "X", "*(type: Tensor)* Input tensor(s).");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Checkpoint)
     .NumInputs(1, INT_MAX)
     .NumOutputs(0)
@@ -452,18 +491,32 @@ counter). This is determined whether we need to do checkpointing.
         "(int, default 1) the checkpointing is carried out when "
         "(iter mod every) is zero.");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Snapshot);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+OPERATOR_SCHEMA(EstimateAllBlobSizes)
+    .NumInputs(0)
+    .NumOutputs(2)
+    .SetDoc(R"DOC(
+Returns two outputs: a 1D tensor of strings containing the names
+of each blob in the active workspace, and a 1D tensor of integers containing the
+estimated serialized size of each blob (in bytes).
+)DOC")
+    .Arg(
+        "include_shared",
+        "(bool, default true) Whether to include blobs "
+        "inherited from parent workspaces.")
+    .Arg(
+        "options",
+        "(string, default empty) A BlobSerializationOptions message specifying "
+        "options for how specific blobs should be serialized.")
+    .Output(0, "blob_names", "1D tensor of strings containing blob names.")
+    .Output(1, "blob_sizes", "1D tensor of int64_t containing blob sizes.");
+
 NO_GRADIENT(Load);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(DBExists);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(Save);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(Checkpoint);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(Snapshot);
+SHOULD_NOT_DO_GRADIENT(EstimateAllBlobSizesOp);
 
 }  // namespace caffe2

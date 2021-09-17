@@ -9,11 +9,9 @@ using namespace dnnlowp;
 CAFFE_KNOWN_TYPE(unique_ptr<Int8QuantSchemeBlob>);
 CAFFE_KNOWN_TYPE(unique_ptr<Int8QuantParamsBlob>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     Int8GenQuantParams,
     Int8GenQuantParamsOp<CPUContext, DefaultEngine>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Int8GenQuantParams)
     .NumInputs(2)
     .NumOutputs(1)

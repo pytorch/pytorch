@@ -1,10 +1,8 @@
 #include "caffe2/operators/lengths_pad_op.h"
 
 namespace caffe2 {
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(LengthsPad, LengthsPadOp<CPUContext>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(LengthsPad)
     .NumInputs(2)
     .NumOutputs(1)
@@ -58,6 +56,5 @@ Example:
       return out;
     });
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 NO_GRADIENT(LengthsPad);
 } // namespace caffe2

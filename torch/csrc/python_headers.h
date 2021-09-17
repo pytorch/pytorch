@@ -1,6 +1,5 @@
 #pragma once
-// NOLINTNEXTLINE(modernize-deprecated-headers)
-#include <math.h>
+#include <cmath>
 // workaround for Python 2 issue: https://bugs.python.org/issue17120
 // NOTE: It looks like this affects Python 3 as well.
 #pragma push_macro("_XOPEN_SOURCE")

@@ -26,7 +26,6 @@ bool DropoutOp<float, CPUContext>::RunOnDevice() {
     bool* mask_data = mask->template mutable_data<bool>();
     auto* gen = context_.RandGenerator();
     for (int i = 0; i < X.numel(); ++i) {
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       mask_data[i] = dist(gen) > 0.5;
       // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
       Ydata[i] = Xdata[i] * scale * mask_data[i];
@@ -62,14 +61,11 @@ bool DropoutGradientOp<float, CPUContext>::RunOnDevice() {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(Dropout, DropoutOp<float, CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_GRADIENT_OPERATOR(
     DropoutGrad,
     DropoutGradientOp<float, CPUContext>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Dropout)
     .NumInputs(1)
     .NumOutputs(1, 2)
@@ -170,7 +166,6 @@ mask: [[False False False  True  True]
         "nonzero, this output is not filled.")
     .InheritOnnxSchema();
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 GRADIENT_OPERATOR_SCHEMA(DropoutGrad)
     .NumInputs(1, 2)
     .NumOutputs(1)
@@ -194,6 +189,5 @@ class GetDropoutGradient : public GradientMakerBase {
     }
   }
 };
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(Dropout, GetDropoutGradient);
 } // namespace caffe2

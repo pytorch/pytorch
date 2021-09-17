@@ -71,7 +71,7 @@ def create_c10d_store(
             # detects timeouts and port conflicts in their own unittests
             # see - caffe2/torch/testing/_internal/common_utils.py
             # TODO properly map the exceptions in pybind (c10d/init.cpp)
-            if str(e) == _CONNECT_TIMEOUT and not is_server:
+            if _CONNECT_TIMEOUT in str(e) and not is_server:
                 raise TimeoutError(
                     f"timed out waiting for tcp store's server: {server_addr}:{port}"
                 ) from e

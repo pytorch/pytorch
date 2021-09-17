@@ -3,6 +3,7 @@
 #include <ATen/Functions.h>
 #include <ATen/core/functional.h>
 #include <c10/core/CPUAllocator.h>
+#include <c10/util/irange.h>
 
 #include <torch/csrc/jit/mobile/nnc/registry.h>
 
@@ -89,7 +90,7 @@ Function::Function(const c10::IValue& value) {
   auto dict = value.toGenericDict();
   name_ = c10::QualifiedName(dict.at("name").toStringRef());
   nnc_kernel_id_ = dict.at("nnc_kernel_id").toStringRef();
-  parameters_ = dict.at("parameters").toTensorVector();
+  parameters_ = dict.at("parameters").toList();
 
   // input_specs_
   for (const auto& input_value : dict.at("input_specs").toTuple()->elements()) {
@@ -157,9 +158,18 @@ void Function::init_execution_state() const {
   // Keep empty slots to fill in inputs/outputs pointers at execution time.
   arguments.resize(input_args + output_args);
 
-  // Fill in parameter pointers.
+  // Fill in parameters as untyped raw pointers.
+  // The underlying storage of the parameters should be owned by `parameters_`,
+  // which should be alive when `execution_state_` is being used.
   for (const auto& param : parameters_) {
-    arguments.emplace_back(param.data_ptr());
+    const c10::IValue& ivalue = (c10::IValue)param;
+    if (ivalue.isTensor()) {
+      arguments.emplace_back(ivalue.toTensor().data_ptr());
+    } else if (torch::isCustomClass(ivalue)) {
+      arguments.emplace_back(ivalue.toObjectRef().getSlot(0).toCapsule().get());
+    } else {
+      TORCH_CHECK(false, "Invalid parameter: ", ivalue);
+    }
   }
 
   // Fill in preallocated buffer pointers.
@@ -188,7 +198,7 @@ c10::impl::GenericList Function::run(
       input_specs_.size(),
       " actual: ",
       inputs.size());
-  for (size_t i = 0; i < inputs.size(); ++i) {
+  for (const auto i : c10::irange(inputs.size())) {
     const c10::IValue& input = inputs[i];
     const auto& input_tensor = input.toTensor();
     TORCH_CHECK(
@@ -199,7 +209,7 @@ c10::impl::GenericList Function::run(
   // Preallocate and fill in output tensors.
   c10::List<at::Tensor> outputs;
   outputs.reserve(output_specs_.size());
-  for (size_t i = 0; i < output_specs_.size(); ++i) {
+  for (const auto i : c10::irange(output_specs_.size())) {
     at::Tensor output = output_specs_[i].allocate();
     outputs.emplace_back(output);
     args[inputs.size() + i] = output.data_ptr();

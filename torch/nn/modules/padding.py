@@ -37,8 +37,8 @@ class ConstantPad1d(_ConstantPadNd):
             (:math:`\text{padding\_left}`, :math:`\text{padding\_right}`)
 
     Shape:
-        - Input: :math:`(N, C, W_{in})`
-        - Output: :math:`(N, C, W_{out})` where
+        - Input: :math:`(C, W_{in})` or :math:`(N, C, W_{in})`.
+        - Output: :math:`(C, W_{out})` or :math:`(N, C, W_{out})`, where
 
           :math:`W_{out} = W_{in} + \text{padding\_left} + \text{padding\_right}`
 
@@ -87,8 +87,8 @@ class ConstantPad2d(_ConstantPadNd):
             :math:`\text{padding\_right}`, :math:`\text{padding\_top}`, :math:`\text{padding\_bottom}`)
 
     Shape:
-        - Input: :math:`(N, C, H_{in}, W_{in})`
-        - Output: :math:`(N, C, H_{out}, W_{out})` where
+        - Input: :math:`(N, C, H_{in}, W_{in})` or :math:`(C, H_{in}, W_{in})`.
+        - Output: :math:`(N, C, H_{out}, W_{out})` or :math:`(C, H_{out}, W_{out})`, where
 
           :math:`H_{out} = H_{in} + \text{padding\_top} + \text{padding\_bottom}`
 
@@ -139,8 +139,9 @@ class ConstantPad3d(_ConstantPadNd):
             :math:`\text{padding\_front}`, :math:`\text{padding\_back}`)
 
     Shape:
-        - Input: :math:`(N, C, D_{in}, H_{in}, W_{in})`
-        - Output: :math:`(N, C, D_{out}, H_{out}, W_{out})` where
+        - Input: :math:`(N, C, D_{in}, H_{in}, W_{in})` or :math:`(C, D_{in}, H_{in}, W_{in})`.
+        - Output: :math:`(N, C, D_{out}, H_{out}, W_{out})` or
+          :math:`(C, D_{out}, H_{out}, W_{out})`, where
 
           :math:`D_{out} = D_{in} + \text{padding\_front} + \text{padding\_back}`
 
@@ -187,8 +188,8 @@ class ReflectionPad1d(_ReflectionPadNd):
             (:math:`\text{padding\_left}`, :math:`\text{padding\_right}`)
 
     Shape:
-        - Input: :math:`(N, C, W_{in})`
-        - Output: :math:`(N, C, W_{out})` where
+        - Input: :math:`(C, W_{in})` or :math:`(N, C, W_{in})`.
+        - Output: :math:`(C, W_{out})` or :math:`(N, C, W_{out})`, where
 
           :math:`W_{out} = W_{in} + \text{padding\_left} + \text{padding\_right}`
 
@@ -227,8 +228,8 @@ class ReflectionPad2d(_ReflectionPadNd):
             :math:`\text{padding\_right}`, :math:`\text{padding\_top}`, :math:`\text{padding\_bottom}`)
 
     Shape:
-        - Input: :math:`(N, C, H_{in}, W_{in})`
-        - Output: :math:`(N, C, H_{out}, W_{out})` where
+        - Input: :math:`(N, C, H_{in}, W_{in})` or :math:`(C, H_{in}, W_{in})`.
+        - Output: :math:`(N, C, H_{out}, W_{out})` or :math:`(C, H_{out}, W_{out})` where
 
           :math:`H_{out} = H_{in} + \text{padding\_top} + \text{padding\_bottom}`
 
@@ -267,6 +268,58 @@ class ReflectionPad2d(_ReflectionPadNd):
         self.padding = _quadruple(padding)
 
 
+class ReflectionPad3d(_ReflectionPadNd):
+    r"""Pads the input tensor using the reflection of the input boundary.
+
+    For `N`-dimensional padding, use :func:`torch.nn.functional.pad()`.
+
+    Args:
+        padding (int, tuple): the size of the padding. If is `int`, uses the same
+            padding in all boundaries. If a 6-`tuple`, uses
+            (:math:`\text{padding\_left}`, :math:`\text{padding\_right}`,
+            :math:`\text{padding\_top}`, :math:`\text{padding\_bottom}`,
+            :math:`\text{padding\_front}`, :math:`\text{padding\_back}`)
+
+    Shape:
+        - Input: :math:`(N, C, D_{in}, H_{in}, W_{in})` or :math:`(C, D_{in}, H_{in}, W_{in})`.
+        - Output: :math:`(N, C, D_{out}, H_{out}, W_{out})` or :math:`(C, D_{out}, H_{out}, W_{out})`,
+          where
+
+          :math:`D_{out} = D_{in} + \text{padding\_front} + \text{padding\_back}`
+
+          :math:`H_{out} = H_{in} + \text{padding\_top} + \text{padding\_bottom}`
+
+          :math:`W_{out} = W_{in} + \text{padding\_left} + \text{padding\_right}`
+
+    Examples::
+
+        >>> m = nn.ReflectionPad3d(1)
+        >>> input = torch.arange(8, dtype=torch.float).reshape(1, 1, 2, 2, 2)
+        >>> m(input)
+        tensor([[[[[7., 6., 7., 6.],
+                   [5., 4., 5., 4.],
+                   [7., 6., 7., 6.],
+                   [5., 4., 5., 4.]],
+                  [[3., 2., 3., 2.],
+                   [1., 0., 1., 0.],
+                   [3., 2., 3., 2.],
+                   [1., 0., 1., 0.]],
+                  [[7., 6., 7., 6.],
+                   [5., 4., 5., 4.],
+                   [7., 6., 7., 6.],
+                   [5., 4., 5., 4.]],
+                  [[3., 2., 3., 2.],
+                   [1., 0., 1., 0.],
+                   [3., 2., 3., 2.],
+                   [1., 0., 1., 0.]]]]])
+    """
+    padding: Tuple[int, int, int, int, int, int]
+
+    def __init__(self, padding: _size_6_t) -> None:
+        super(ReflectionPad3d, self).__init__()
+        self.padding = _ntuple(6)(padding)
+
+
 class _ReplicationPadNd(Module):
     __constants__ = ['padding']
     padding: Sequence[int]
@@ -289,8 +342,8 @@ class ReplicationPad1d(_ReplicationPadNd):
             (:math:`\text{padding\_left}`, :math:`\text{padding\_right}`)
 
     Shape:
-        - Input: :math:`(N, C, W_{in})`
-        - Output: :math:`(N, C, W_{out})` where
+        - Input: :math:`(C, W_{in})` or :math:`(N, C, W_{in})`.
+        - Output: :math:`(C, W_{out})` or :math:`(N, C, W_{out})`, where
 
           :math:`W_{out} = W_{in} + \text{padding\_left} + \text{padding\_right}`
 
@@ -329,8 +382,8 @@ class ReplicationPad2d(_ReplicationPadNd):
             :math:`\text{padding\_right}`, :math:`\text{padding\_top}`, :math:`\text{padding\_bottom}`)
 
     Shape:
-        - Input: :math:`(N, C, H_{in}, W_{in})`
-        - Output: :math:`(N, C, H_{out}, W_{out})` where
+        - Input: :math:`(N, C, H_{in}, W_{in})` or :math:`(C, H_{in}, W_{in})`.
+        - Output: :math:`(N, C, H_{out}, W_{out})` or :math:`(C, H_{out}, W_{out})`, where
 
           :math:`H_{out} = H_{in} + \text{padding\_top} + \text{padding\_bottom}`
 
@@ -382,8 +435,9 @@ class ReplicationPad3d(_ReplicationPadNd):
             :math:`\text{padding\_front}`, :math:`\text{padding\_back}`)
 
     Shape:
-        - Input: :math:`(N, C, D_{in}, H_{in}, W_{in})`
-        - Output: :math:`(N, C, D_{out}, H_{out}, W_{out})` where
+        - Input: :math:`(N, C, D_{in}, H_{in}, W_{in})` or :math:`(C, D_{in}, H_{in}, W_{in})`.
+        - Output: :math:`(N, C, D_{out}, H_{out}, W_{out})` or :math:`(C, D_{out}, H_{out}, W_{out})`,
+          where
 
           :math:`D_{out} = D_{in} + \text{padding\_front} + \text{padding\_back}`
 
@@ -419,8 +473,8 @@ class ZeroPad2d(ConstantPad2d):
             :math:`\text{padding\_right}`, :math:`\text{padding\_top}`, :math:`\text{padding\_bottom}`)
 
     Shape:
-        - Input: :math:`(N, C, H_{in}, W_{in})`
-        - Output: :math:`(N, C, H_{out}, W_{out})` where
+        - Input: :math:`(N, C, H_{in}, W_{in})` or :math:`(C, H_{in}, W_{in})`.
+        - Output: :math:`(N, C, H_{out}, W_{out})` or :math:`(C, H_{out}, W_{out})`, where
 
           :math:`H_{out} = H_{in} + \text{padding\_top} + \text{padding\_bottom}`
 

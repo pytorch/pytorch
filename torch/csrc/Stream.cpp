@@ -5,7 +5,6 @@
 
 #include <structmember.h>
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 PyTypeObject *THPStreamClass = nullptr;
 
 static PyObject* THPStream_pynew(
@@ -65,70 +64,44 @@ static PyMethodDef THPStream_methods[] = {
   {nullptr}
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 PyTypeObject THPStreamType = {
   PyVarObject_HEAD_INIT(nullptr, 0)
   "torch.Stream",                        /* tp_name */
   sizeof(THPStream),                     /* tp_basicsize */
   0,                                     /* tp_itemsize */
   (destructor)THPStream_dealloc,         /* tp_dealloc */
-  // NOLINTNEXTLINE(modernize-use-nullptr)
   0,                                     /* tp_vectorcall_offset */
-  // NOLINTNEXTLINE(modernize-use-nullptr)
-  0,                                     /* tp_getattr */
-  // NOLINTNEXTLINE(modernize-use-nullptr)
-  0,                                     /* tp_setattr */
-  // NOLINTNEXTLINE(modernize-use-nullptr)
-  0,                                     /* tp_reserved */
-  // NOLINTNEXTLINE(modernize-use-nullptr)
-  0,                                     /* tp_repr */
-  // NOLINTNEXTLINE(modernize-use-nullptr)
-  0,                                     /* tp_as_number */
-  // NOLINTNEXTLINE(modernize-use-nullptr)
-  0,                                     /* tp_as_sequence */
-  // NOLINTNEXTLINE(modernize-use-nullptr)
-  0,                                     /* tp_as_mapping */
-  // NOLINTNEXTLINE(modernize-use-nullptr)
-  0,                                     /* tp_hash  */
-  // NOLINTNEXTLINE(modernize-use-nullptr)
-  0,                                     /* tp_call */
-  // NOLINTNEXTLINE(modernize-use-nullptr)
-  0,                                     /* tp_str */
-  // NOLINTNEXTLINE(modernize-use-nullptr)
-  0,                                     /* tp_getattro */
-  // NOLINTNEXTLINE(modernize-use-nullptr)
-  0,                                     /* tp_setattro */
-  // NOLINTNEXTLINE(modernize-use-nullptr)
-  0,                                     /* tp_as_buffer */
+  nullptr,                               /* tp_getattr */
+  nullptr,                               /* tp_setattr */
+  nullptr,                               /* tp_reserved */
+  nullptr,                               /* tp_repr */
+  nullptr,                               /* tp_as_number */
+  nullptr,                               /* tp_as_sequence */
+  nullptr,                               /* tp_as_mapping */
+  nullptr,                               /* tp_hash  */
+  nullptr,                               /* tp_call */
+  nullptr,                               /* tp_str */
+  nullptr,                               /* tp_getattro */
+  nullptr,                               /* tp_setattro */
+  nullptr,                               /* tp_as_buffer */
   Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE, /* tp_flags */
   nullptr,                                  /* tp_doc */
-  // NOLINTNEXTLINE(modernize-use-nullptr)
-  0,                                     /* tp_traverse */
-  // NOLINTNEXTLINE(modernize-use-nullptr)
-  0,                                     /* tp_clear */
-  // NOLINTNEXTLINE(modernize-use-nullptr)
-  0,                                     /* tp_richcompare */
+  nullptr,                               /* tp_traverse */
+  nullptr,                               /* tp_clear */
+  nullptr,                               /* tp_richcompare */
   0,                                     /* tp_weaklistoffset */
-  // NOLINTNEXTLINE(modernize-use-nullptr)
-  0,                                     /* tp_iter */
-  // NOLINTNEXTLINE(modernize-use-nullptr)
-  0,                                     /* tp_iternext */
+  nullptr,                               /* tp_iter */
+  nullptr,                               /* tp_iternext */
   THPStream_methods,                     /* tp_methods */
   THPStream_members,                     /* tp_members */
   THPStream_properties,                  /* tp_getset */
-  // NOLINTNEXTLINE(modernize-use-nullptr)
-  0,                                     /* tp_base */
-  // NOLINTNEXTLINE(modernize-use-nullptr)
-  0,                                     /* tp_dict */
-  // NOLINTNEXTLINE(modernize-use-nullptr)
-  0,                                     /* tp_descr_get */
-  // NOLINTNEXTLINE(modernize-use-nullptr)
-  0,                                     /* tp_descr_set */
+  nullptr,                               /* tp_base */
+  nullptr,                               /* tp_dict */
+  nullptr,                               /* tp_descr_get */
+  nullptr,                               /* tp_descr_set */
   0,                                     /* tp_dictoffset */
-  // NOLINTNEXTLINE(modernize-use-nullptr)
-  0,                                     /* tp_init */
-  // NOLINTNEXTLINE(modernize-use-nullptr)
-  0,                                     /* tp_alloc */
+  nullptr,                               /* tp_init */
+  nullptr,                               /* tp_alloc */
   THPStream_pynew,                       /* tp_new */
 };
 

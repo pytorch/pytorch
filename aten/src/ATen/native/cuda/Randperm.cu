@@ -39,11 +39,15 @@ namespace native {
 // Reference
 // [1] https://osf.io/af2hy/
 
+// The kernels are templated on an opaque, self-aligned type of the correct
+// size to avoid redundant kernels for different types of the same size.
+namespace {
+template <int N> struct alignas(N) OpaqueType { char data[N]; };
+}
+
 Tensor& randperm_out_cuda(int64_t n, c10::optional<Generator> generator, Tensor& result) {
   TORCH_CHECK(n >= 0, "n must be non-negative, got", n);
-  TORCH_CHECK(!generator.has_value() || (generator.has_value() && result.device() == generator->device()), "Expected a '", result.device(), "' generator device but found '", generator->device(), "'");
-  TORCH_CHECK(n <= std::numeric_limits<int>::max(),
-    "randperm of tensors larger than INT_MAX is not supported yet in pytorch");
+
   check_supported_max_int_with_precision(n, result);
 
   result.resize_({n});
@@ -67,49 +71,26 @@ Tensor& randperm_out_cuda(int64_t n, c10::optional<Generator> generator, Tensor&
   const double log_threshold_12 = std::log(0.9) * 12;
   double nd = static_cast<double>(n);
 
-  constexpr bool is_reduced_bits = true;
   int bits = std::min(64,
     static_cast<int>(std::ceil(std::log2(nd - (6 * nd * nd + 1) / log_threshold_12))));
 
   if (n == 0) {
     return result;
-  } else if (bits <= 8) {
-    auto keys = at::empty(result.sizes(), opt.dtype(kByte)).random_(generator);
-    auto keys_tmp = at::empty_like(keys);
-    auto keys_out = keys_tmp.data_ptr<uint8_t>();
-    AT_DISPATCH_ALL_TYPES_AND(kHalf, result.scalar_type(), "randperm_out_cuda", [&] {
-      auto shuffled_data_ = reinterpret_cast<scalar_t*>(shuffled_data);
-      at::cuda::cub::sort_pairs<uint8_t, scalar_t>(
-        keys.data_ptr<uint8_t>(), keys_out,
-        range.data_ptr<scalar_t>(), shuffled_data_,
-        n, false, 0, bits);
-
-      randperm_handle_duplicate_keys(keys_out, shuffled_data_, bits, n, generator);
-    });
-  } else if (bits <= 16) {
-    auto keys = at::empty(result.sizes(), opt.dtype(kShort)).random_(
-      std::numeric_limits<int16_t>::min(), std::numeric_limits<int16_t>::max(), generator);
-    auto keys_tmp = at::empty_like(keys);
-    auto keys_out = keys_tmp.data_ptr<int16_t>();
-    AT_DISPATCH_ALL_TYPES_AND(kHalf, result.scalar_type(), "randperm_out_cuda", [&] {
-      auto shuffled_data_ = reinterpret_cast<scalar_t*>(shuffled_data);
-      at::cuda::cub::sort_pairs<int16_t, scalar_t>(
-        keys.data_ptr<int16_t>(), keys_out,
-        range.data_ptr<scalar_t>(), shuffled_data_,
-        n, false, 0, bits);
-
-      randperm_handle_duplicate_keys(keys_out, shuffled_data_, bits, n, generator);
-    });
   } else if (bits <= 32) {
+    // For asserting device type match of the generator and result,
+    // we deligate that to the 'random_' function below.
+
     auto keys = at::empty(result.sizes(), opt.dtype(kInt)).random_(
       std::numeric_limits<int>::min(), std::numeric_limits<int>::max(), generator);
     auto keys_tmp = at::empty_like(keys);
     auto keys_out = keys_tmp.data_ptr<int>();
     AT_DISPATCH_ALL_TYPES_AND(kHalf, result.scalar_type(), "randperm_out_cuda", [&] {
-      auto shuffled_data_ = reinterpret_cast<scalar_t*>(shuffled_data);
-      at::cuda::cub::sort_pairs<int, scalar_t>(
+      using dtype = OpaqueType<sizeof(scalar_t)>;
+      auto shuffled_data_ = reinterpret_cast<dtype*>(shuffled_data);
+      dtype* range_data = reinterpret_cast<dtype*>(range.data_ptr());
+      at::cuda::cub::sort_pairs<int, dtype>(
         keys.data_ptr<int>(), keys_out,
-        range.data_ptr<scalar_t>(), shuffled_data_,
+        range_data, shuffled_data_,
         n, false, 0, bits);
 
       randperm_handle_duplicate_keys(keys_out, shuffled_data_, bits, n, generator);
@@ -120,10 +101,12 @@ Tensor& randperm_out_cuda(int64_t n, c10::optional<Generator> generator, Tensor&
     auto keys_tmp = at::empty_like(keys);
     auto keys_out = keys_tmp.data_ptr<int64_t>();
     AT_DISPATCH_ALL_TYPES_AND(kHalf, result.scalar_type(), "randperm_out_cuda", [&] {
-      auto shuffled_data_ = reinterpret_cast<scalar_t*>(shuffled_data);
-      at::cuda::cub::sort_pairs<int64_t, scalar_t>(
+      using dtype = OpaqueType<sizeof(scalar_t)>;
+      auto shuffled_data_ = reinterpret_cast<dtype*>(shuffled_data);
+      dtype* range_data = reinterpret_cast<dtype*>(range.data_ptr());
+      at::cuda::cub::sort_pairs<int64_t, dtype>(
         keys.data_ptr<int64_t>(), keys_out,
-        range.data_ptr<scalar_t>(), shuffled_data_,
+        range_data, shuffled_data_,
         n, false, 0, bits);
 
       randperm_handle_duplicate_keys(keys_out, shuffled_data_, bits, n, generator);

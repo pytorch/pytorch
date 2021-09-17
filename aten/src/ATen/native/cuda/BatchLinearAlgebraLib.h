@@ -12,13 +12,34 @@
 #define USE_CUSOLVER
 #endif
 
+// cusolverDn<T>potrfBatched may have numerical issue before cuda 11.3 release,
+// (which is cusolver version 11101 in the header), so we only use cusolver potrf batched
+// if cuda version is >= 11.3
+#if CUSOLVER_VERSION >= 11101
+  constexpr bool use_cusolver_potrf_batched_ = true;
+#else
+  constexpr bool use_cusolver_potrf_batched_ = false;
+#endif
+
+// cusolverDn<T>syevjBatched may have numerical issue before cuda 11.3.1 release,
+// (which is cusolver version 11102 in the header), so we only use cusolver syevj batched
+// if cuda version is >= 11.3.1
+// See https://github.com/pytorch/pytorch/pull/53040#issuecomment-793626268 and https://github.com/cupy/cupy/issues/4847
+#if CUSOLVER_VERSION >= 11102
+  constexpr bool use_cusolver_syevj_batched_ = true;
+#else
+  constexpr bool use_cusolver_syevj_batched_ = false;
+#endif
+
+
 namespace at {
 namespace native {
 
 void geqrf_batched_cublas(const Tensor& input, const Tensor& tau);
-
-void triangular_solve_cublas(Tensor& A, Tensor& B, Tensor& infos, bool upper, bool transpose, bool conjugate_transpose, bool unitriangular);
-void triangular_solve_batched_cublas(Tensor& A, Tensor& B, Tensor& infos, bool upper, bool transpose, bool conjugate_transpose, bool unitriangular);
+void triangular_solve_cublas(Tensor& A, Tensor& B, bool left, bool upper, TransposeType transpose, bool unitriangular);
+void triangular_solve_batched_cublas(Tensor& A, Tensor& B, bool left, bool upper, TransposeType transpose, bool unitriangular);
+void gels_batched_cublas(const Tensor& a, Tensor& b, Tensor& infos);
+void lu_solve_batched_cublas(const Tensor& b, const Tensor& lu, const Tensor& pivots, TransposeType transpose);
 
 #ifdef USE_CUSOLVER
 
@@ -38,7 +59,10 @@ void geqrf_cusolver(const Tensor& input, const Tensor& tau);
 void ormqr_cusolver(const Tensor& input, const Tensor& tau, const Tensor& other, bool left, bool transpose);
 Tensor& orgqr_helper_cusolver(Tensor& result, const Tensor& tau);
 
-void linalg_eigh_cusolver(Tensor& eigenvalues, Tensor& eigenvectors, Tensor& infos, bool upper, bool compute_eigenvectors);
+void linalg_eigh_cusolver(const Tensor& eigenvalues, const Tensor& eigenvectors, const Tensor& infos, bool upper, bool compute_eigenvectors);
+void lu_solve_looped_cusolver(const Tensor& b, const Tensor& lu, const Tensor& pivots, TransposeType transpose);
+
+void lu_looped_cusolver(const Tensor& self, const Tensor& pivots, const Tensor& infos, bool get_pivots);
 
 #endif  // USE_CUSOLVER
 

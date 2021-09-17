@@ -168,11 +168,16 @@ void fractional_max_pool3d_out_cpu_template(
   int64_t widthDim = 3;
 
   int64_t ndims = input_.ndimension();
-  TORCH_CHECK(input_.numel() != 0 && (ndims == 4 || ndims == 5),
-    "fractional_max_pool3d_out(): non-empty 4D or 5D (batch mode) tensor ",
-    " expected for input, but got: ", ndims);
+  TORCH_CHECK(ndims == 4 || ndims == 5,
+              "fractional_max_pool3d_out(): Expected 4D or 5D tensor, but got: ",
+              input_.sizes());
+  for (int64_t i = 1; i < ndims; ++i) {
+    TORCH_CHECK(input_.size(i) > 0,
+                "fractional_max_pool3d_out(): Expected input to have non-zero size for non-batch dimensions, but got",
+                input_.sizes(), " with dimension ", i, " being empty.");
+  }
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+
   if (ndims == 5) {
     numBatch = input_.size(0);
     planeDim++;
@@ -312,7 +317,6 @@ void fractional_max_pool3d_backward_out_cpu_template(
   int64_t widthDim = 3;
 
   int64_t ndims = input.ndimension();
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   if (ndims == 5) {
     numBatch = input.size(0);
     planeDim = 1;

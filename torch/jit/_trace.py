@@ -24,7 +24,7 @@ from torch._jit_internal import _qualified_name, is_scripting, get_callable_argu
 from torch.autograd import function
 from torch.nn import Module
 
-from torch.testing._core import _get_default_tolerance
+from torch.testing._asserts import _get_default_rtol_and_atol
 
 _flatten = torch._C._jit_flatten
 _unflatten = torch._C._jit_unflatten
@@ -148,7 +148,7 @@ def _clone_inputs(args):
             # TODO: figure out one liner to .clone() and set requires_grad
             v = (
                 a.detach()
-                .clone(memory_format=torch.preserve_format)
+                .clone(memory_format=None if a.is_mkldnn else torch.preserve_format)
                 .requires_grad_(a.requires_grad)
             )
             if a.grad is not None:
@@ -417,7 +417,7 @@ def _check_trace(
                     check_tensor_val = n_check.t("value")
 
                     try:
-                        torch.testing.assert_allclose(mod_tensor_val, check_tensor_val)
+                        torch.testing.assert_close(mod_tensor_val, check_tensor_val, equal_nan=True)
                     except (RuntimeError, AssertionError) as e:
                         if tensor_compare_errors is None:
                             tensor_compare_errors = ""
@@ -485,11 +485,16 @@ def _check_trace(
                         orig = orig.dequantize()
                     if ref.is_quantized:
                         ref = ref.dequantize()
-                    torch.testing.assert_allclose(
+                    if orig.is_mkldnn:
+                        orig = orig.to_dense()
+                    if ref.is_mkldnn:
+                        ref = ref.to_dense()
+                    torch.testing.assert_close(
                         orig.double(),
                         ref.double(),
                         rtol=check_tolerance,
-                        atol=_get_default_tolerance(orig, ref)[1],
+                        atol=_get_default_rtol_and_atol(orig, ref)[1],
+                        equal_nan=True,
                     )
                 except AssertionError as e:
                     maybe_warn_nondeterministic()
@@ -554,7 +559,8 @@ def make_module(mod, _module_class, _compilation_unit):
         return torch.jit._recursive.create_script_module(
             mod,
             infer_methods_stubs_fn,
-            share_types=False
+            share_types=False,
+            is_tracing=True
         )
     else:
         if _module_class is None:
@@ -1063,7 +1069,7 @@ class TracedModule(ScriptModule):
             )
 
         script_module = torch.jit._recursive.create_script_module(
-            tmp_module, lambda module: (), share_types=False
+            tmp_module, lambda module: (), share_types=False, is_tracing=True
         )
 
         self.__dict__["_name"] = type(orig).__name__

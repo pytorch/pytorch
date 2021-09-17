@@ -22,7 +22,7 @@ def _fill_diagonal(shape, value):
 class TestFillerOperator(serial.SerializedTestCase):
 
     @given(**hu.gcs)
-    @settings(deadline=1000)
+    @settings(deadline=10000)
     def test_shape_error(self, gc, dc):
         op = core.CreateOperator(
             'GaussianFill',
@@ -77,7 +77,7 @@ class TestFillerOperator(serial.SerializedTestCase):
         b=st.integers(min_value=0, max_value=100),
         **hu.gcs
     )
-    @settings(deadline=1000)
+    @settings(deadline=10000)
     def test_uniform_int_fill_op_blob_input(self, shape, a, b, gc, dc):
         net = core.Net('test_net')
 

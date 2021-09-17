@@ -32,7 +32,6 @@ void fp32_to_bfp16(const float* source, size_t size, float* dest) {
   __m256 wmask = _mm256_broadcast_ss(reinterpret_cast<const float*>(&mask));
 
   size_t i = 0;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (; i < (size / 8) * 8; i += 8) {
     __m256 data = _mm256_loadu_ps(&source[i]);
     _mm256_storeu_ps(&dest[i], _mm256_and_ps(wmask, data));
@@ -53,7 +52,6 @@ void fp32_to_bfp24(const float* source, size_t size, float* dest) {
   __m256 wmask = _mm256_broadcast_ss(reinterpret_cast<const float*>(&mask));
 
   size_t i = 0;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (; i < (size / 8) * 8; i += 8) {
     __m256 data = _mm256_loadu_ps(&source[i]);
     _mm256_storeu_ps(&dest[i], _mm256_and_ps(wmask, data));
@@ -74,7 +72,6 @@ void fp32_to_bfp14(const float* source, size_t size, float* dest) {
   __m256 wmask = _mm256_broadcast_ss((float*)(&mask));
 
   size_t i = 0;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (; i < (size / 8) * 8; i += 8) {
     __m256 data = _mm256_loadu_ps(&source[i]);
     _mm256_storeu_ps(&dest[i], _mm256_and_ps(wmask, data));
@@ -98,7 +95,6 @@ void fp32_to_bfp16_scalar(const float* source, size_t size, float* dest) {
 // convert to IEEE float16
 void fp32_to_fp16(const float* source, size_t size, float* dest) {
   size_t i = 0;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (; i < (size / 8) * 8; i += 8) {
     __m128i vin_fp16 = _mm256_cvtps_ph(_mm256_loadu_ps(&source[i]), 0);
     _mm256_storeu_ps(&dest[i], _mm256_cvtph_ps(vin_fp16));
@@ -122,7 +118,6 @@ void fp32_to_bfp16_round(const float* source, size_t size, float* dest) {
   __m256i wmask = _mm256_set1_epi32(mask);
 
   size_t i = 0;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (; i < (size / 8) * 8; i += 8) {
     __m256i v32int = _mm256_add_epi32(
         _mm256_loadu_si256(reinterpret_cast<const __m256i*>(&source[i])),

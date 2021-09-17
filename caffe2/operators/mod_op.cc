@@ -25,9 +25,7 @@ bool ModOp<CPUContext>::DoRunWithType() {
   return true;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(Mod, ModOp<CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Mod)
     .NumInputs(1)
     .NumOutputs(1)
@@ -94,6 +92,5 @@ X after running op:
     .Input(0, "X", "*(type: Tensor`<int>`)* Input tensor with int32 or int64 data.")
     .Output(0, "Y", "*(type: Tensor`<int>`)* Output tensor of data with modulo operation applied.");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(ModOp);
 } // namespace caffe2

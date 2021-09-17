@@ -5,15 +5,15 @@ import io
 import linecache
 import os.path
 import types
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, BinaryIO, Callable, Dict, List, Optional, Union
+from typing import cast, Any, BinaryIO, Callable, Dict, List, Optional, Union
 from weakref import WeakValueDictionary
 
 import torch
 from torch.serialization import _get_restore_location, _maybe_decode_ascii
 
-from .file_structure_representation import Directory, _create_directory_from_file_list
-from .glob_group import GlobPattern
+from ._directory_reader import DirectoryReader
 from ._importlib import (
     _calc___package__,
     _normalize_line_endings,
@@ -22,13 +22,14 @@ from ._importlib import (
     _sanity_check,
 )
 from ._mangling import PackageMangler, demangle
-from ._mock_zipreader import MockZipReader
 from ._package_unpickler import PackageUnpickler
+from .file_structure_representation import Directory, _create_directory_from_file_list
+from .glob_group import GlobPattern
 from .importer import Importer
 
 
 class PackageImporter(Importer):
-    """Importers allow you to load code written to packages by PackageExporter.
+    """Importers allow you to load code written to packages by :class:`PackageExporter`.
     Code is loaded in a hermetic way, using files from the package
     rather than the normal python import system. This allows
     for the packaging of PyTorch model code and data so that it can be run
@@ -36,27 +37,27 @@ class PackageImporter(Importer):
 
     The importer for packages ensures that code in the module can only be loaded from
     within the package, except for modules explicitly listed as external during export.
-    The file `extern_modules` in the zip archive lists all the modules that a package externally depends on.
+    The file ``extern_modules`` in the zip archive lists all the modules that a package externally depends on.
     This prevents "implicit" dependencies where the package runs locally because it is importing
     a locally-installed package, but then fails when the package is copied to another machine.
     """
 
-    """The dictionary of already loaded modules from this package, equivalent to `sys.modules` but
+    """The dictionary of already loaded modules from this package, equivalent to ``sys.modules`` but
     local to this importer.
     """
-    modules: Dict[str, Optional[types.ModuleType]]
+    modules: Dict[str, types.ModuleType]
 
     def __init__(
         self,
         file_or_buffer: Union[str, torch._C.PyTorchFileReader, Path, BinaryIO],
         module_allowed: Callable[[str], bool] = lambda module_name: True,
     ):
-        """Open `file_or_buffer` for importing. This checks that the imported package only requires modules
-        allowed by `module_allowed`
+        """Open ``file_or_buffer`` for importing. This checks that the imported package only requires modules
+        allowed by ``module_allowed``
 
         Args:
             file_or_buffer: a file-like object (has to implement :meth:`read`, :meth:`readline`, :meth:`tell`, and :meth:`seek`),
-                or a string or os.PathLike object containing a file name.
+                a string, or an ``os.PathLike`` object containing a filename.
             module_allowed (Callable[[str], bool], optional): A method to determine if a externally provided module
                 should be allowed. Can be used to ensure packages loaded do not depend on modules that the server
                 does not support. Defaults to allowing anything.
@@ -73,7 +74,7 @@ class PackageImporter(Importer):
             if not os.path.isdir(self.filename):
                 self.zip_reader = torch._C.PyTorchFileReader(self.filename)
             else:
-                self.zip_reader = MockZipReader(self.filename)
+                self.zip_reader = DirectoryReader(self.filename)
         else:
             self.filename = "<binary>"
             self.zip_reader = torch._C.PyTorchFileReader(file_or_buffer)
@@ -100,20 +101,24 @@ class PackageImporter(Importer):
 
         self._mangler = PackageMangler()
 
+        # used for reduce deserializaiton
+        self.storage_context: Any = None
+        self.last_map_location = None
+
         # used for torch.serialization._load
         self.Unpickler = lambda *args, **kwargs: PackageUnpickler(self, *args, **kwargs)
 
     def import_module(self, name: str, package=None):
         """Load a module from the package if it hasn't already been loaded, and then return
         the module. Modules are loaded locally
-        to the importer and will appear in `self.modules` rather than `sys.modules`
+        to the importer and will appear in ``self.modules`` rather than ``sys.modules``.
 
         Args:
             name (str): Fully qualified name of the module to load.
-            package ([type], optional): Unused, but present to match the signature of importlib.import_module. Defaults to None.
+            package ([type], optional): Unused, but present to match the signature of importlib.import_module. Defaults to ``None``.
 
         Returns:
-            types.ModuleType: the (possibly already) loaded module.
+            types.ModuleType: The (possibly already) loaded module.
         """
         return self._gcd_import(name)
 
@@ -121,7 +126,7 @@ class PackageImporter(Importer):
         """Load raw bytes.
 
         Args:
-            package (str): The name of module package (e.g. "my_package.my_subpackage")
+            package (str): The name of module package (e.g. ``"my_package.my_subpackage"``).
             resource (str): The unique name for the resource.
 
         Returns:
@@ -141,10 +146,10 @@ class PackageImporter(Importer):
         """Load a string.
 
         Args:
-            package (str): The name of module package (e.g. "my_package.my_subpackage")
+            package (str): The name of module package (e.g. ``"my_package.my_subpackage"``).
             resource (str): The unique name for the resource.
-            encoding (str, optional): Passed to `decode`. Defaults to 'utf-8'.
-            errors (str, optional): Passed to `decode`. Defaults to 'strict'.
+            encoding (str, optional): Passed to ``decode``. Defaults to ``'utf-8'``.
+            errors (str, optional): Passed to ``decode``. Defaults to ``'strict'``.
 
         Returns:
             str: The loaded text.
@@ -154,27 +159,35 @@ class PackageImporter(Importer):
 
     def load_pickle(self, package: str, resource: str, map_location=None) -> Any:
         """Unpickles the resource from the package, loading any modules that are needed to construct the objects
-        using :meth:`import_module`
+        using :meth:`import_module`.
 
         Args:
-            package (str): The name of module package (e.g. "my_package.my_subpackage")
+            package (str): The name of module package (e.g. ``"my_package.my_subpackage"``).
             resource (str): The unique name for the resource.
-            map_location: Passed to `torch.load` to determine how tensors are mapped to devices. Defaults to None.
+            map_location: Passed to `torch.load` to determine how tensors are mapped to devices. Defaults to ``None``.
 
         Returns:
-            Any: the unpickled object.
+            Any: The unpickled object.
         """
         pickle_file = self._zipfile_path(package, resource)
         restore_location = _get_restore_location(map_location)
         loaded_storages = {}
+        loaded_reduces = {}
+        storage_context = torch._C.DeserializationStorageContext()
 
         def load_tensor(data_type, size, key, location, restore_location):
-            name = f".data/{key}.storage"
+            name = f"{int(key)}.storage"
             dtype = data_type(0).dtype
 
-            storage = self.zip_reader.get_storage_from_record(
-                name, size, dtype
-            ).storage()
+            if storage_context.has_storage(name):
+                storage = storage_context.get_storage(name, dtype).storage()
+            else:
+                tensor = self.zip_reader.get_storage_from_record(
+                    ".data/" + name, size, dtype
+                )
+                if isinstance(self.zip_reader, torch._C.PyTorchFileReader):
+                    storage_context.add_storage(name, tensor)
+                storage = tensor.storage()
             loaded_storages[key] = restore_location(storage, location)
 
         def persistent_load(saved_id):
@@ -195,16 +208,36 @@ class PackageImporter(Importer):
                 storage = loaded_storages[key]
                 return storage
             elif typename == "reduce_package":
-                func, args = data
-                return func(self, *args)
+                # to fix BC breaking change, objects on this load path
+                # will be loaded multiple times erroneously
+                if len(data) == 2:
+                    func, args = data
+                    return func(self, *args)
+                reduce_id, func, args = data
+                if reduce_id not in loaded_reduces:
+                    loaded_reduces[reduce_id] = func(self, *args)
+                return loaded_reduces[reduce_id]
             else:
-                f"Unknown typename for persistent_load, expected 'storage' but got '{typename}'"
+                f"Unknown typename for persistent_load, expected 'storage' or 'reduce_package' but got '{typename}'"
 
         # Load the data (which may in turn use `persistent_load` to load tensors)
         data_file = io.BytesIO(self.zip_reader.get_record(pickle_file))
         unpickler = self.Unpickler(data_file)
         unpickler.persistent_load = persistent_load
-        result = unpickler.load()
+
+        @contextmanager
+        def set_deserialization_context():
+            # to let reduce_package access deserializaiton context
+            self.storage_context = storage_context
+            self.last_map_location = map_location
+            try:
+                yield
+            finally:
+                self.storage_context = None
+                self.last_map_location = None
+
+        with set_deserialization_context():
+            result = unpickler.load()
 
         # TODO from zdevito:
         #   This stateful weird function will need to be removed in our efforts
@@ -216,7 +249,7 @@ class PackageImporter(Importer):
 
     def id(self):
         """
-        Returns internal identifier that torch.package uses to distinguish PackageImporter instances.
+        Returns internal identifier that torch.package uses to distinguish :class:`PackageImporter` instances.
         Looks like::
 
             <torch_package_0>
@@ -229,7 +262,7 @@ class PackageImporter(Importer):
         """Returns a file structure representation of package's zipfile.
 
         Args:
-            include (Union[List[str], str]): An optional string e.g. "my_package.my_subpackage", or optional list of strings
+            include (Union[List[str], str]): An optional string e.g. ``"my_package.my_subpackage"``, or optional list of strings
                 for the names of the files to be inluded in the zipfile representation. This can also be
                 a glob-style pattern, as described in :meth:`PackageExporter.mock`
 
@@ -253,7 +286,12 @@ class PackageImporter(Importer):
         self, name: str, filename: Optional[str], is_package: bool, parent: str
     ):
         mangled_filename = self._mangler.mangle(filename) if filename else None
-        spec = importlib.machinery.ModuleSpec(name, self, is_package=is_package)  # type: ignore[arg-type]
+        spec = importlib.machinery.ModuleSpec(
+            name,
+            self,  # type: ignore[arg-type]
+            origin="<package_importer>",
+            is_package=is_package,
+        )
         module = importlib.util.module_from_spec(spec)
         self.modules[name] = module
         module.__name__ = self._mangler.mangle(name)
@@ -328,7 +366,7 @@ class PackageImporter(Importer):
             return
         # Set the module as an attribute on its parent.
         parent_module = self.modules[parent]
-        if parent_module.__loader__ is self:  # type: ignore[union-attr]
+        if parent_module.__loader__ is self:
             setattr(parent_module, name.rpartition(".")[2], module)
 
     # note: copied from cpython's import code, with call to create module replaced with _make_module
@@ -343,7 +381,7 @@ class PackageImporter(Importer):
                 return self.modules[name]
             parent_module = self.modules[parent]
             try:
-                path = parent_module.__path__  # type: ignore[union-attr]
+                path = parent_module.__path__  # type: ignore[attr-defined]
             except AttributeError:
                 msg = (_ERR_MSG + "; {!r} is not a package").format(name, parent)
                 raise ModuleNotFoundError(msg, name=name) from None
@@ -363,6 +401,15 @@ class PackageImporter(Importer):
         if module is None:
             message = "import of {} halted; " "None in sys.modules".format(name)
             raise ModuleNotFoundError(message, name=name)
+
+        # To handle https://github.com/pytorch/pytorch/issues/57490, where std's
+        # creation of fake submodules via the hacking of sys.modules is not import
+        # friendly
+        if name == "os":
+            self.modules["os.path"] = cast(Any, module).path
+        elif name == "typing":
+            self.modules["typing.io"] = cast(Any, module).io
+            self.modules["typing.re"] = cast(Any, module).re
 
         return module
 
@@ -495,7 +542,14 @@ class PackageImporter(Importer):
         return cur
 
     def _add_file(self, filename: str):
+        """Assembles a Python module out of the given file. Will ignore files in the .data directory.
+
+        Args:
+            filename (str): the name of the file inside of the package archive to be added
+        """
         *prefix, last = filename.split("/")
+        if len(prefix) > 1 and prefix[0] == ".data":
+            return
         package = self._get_or_create_package(prefix)
         if isinstance(package, _ExternNode):
             raise ImportError(
@@ -579,6 +633,14 @@ class _PackageResourceReader:
     def resource_path(self, resource):
         # The contract for resource_path is that it either returns a concrete
         # file system path or raises FileNotFoundError.
+        if isinstance(
+            self.importer.zip_reader, DirectoryReader
+        ) and self.importer.zip_reader.has_record(
+            os.path.join(self.fullname, resource)
+        ):
+            return os.path.join(
+                self.importer.zip_reader.directory, self.fullname, resource
+            )
         raise FileNotFoundError
 
     def is_resource(self, name):

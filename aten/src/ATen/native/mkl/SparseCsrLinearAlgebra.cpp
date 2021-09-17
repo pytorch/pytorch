@@ -100,6 +100,7 @@ class SparseCsrMKLInterface {
         retval);
   }
 
+ // res(nrows, dense_ncols) = (sparse(nrows * ncols) @ dense(ncols x dense_ncols))
   inline void sparse_mm(
       float* res,
       float* dense,
@@ -108,19 +109,32 @@ class SparseCsrMKLInterface {
       MKL_INT nrows,
       MKL_INT ncols,
       MKL_INT dense_ncols) {
-    int stat = mkl_sparse_s_mm(
+    int stat;
+    if (dense_ncols == 1) {
+      stat = mkl_sparse_s_mv(
+        SPARSE_OPERATION_NON_TRANSPOSE,
+        alpha,
+        A,
+        desc,
+        dense,
+        beta,
+        res);
+      TORCH_CHECK(stat == 0, "mkl_sparse_s_mv failed with error code: ", stat);
+    } else {
+      stat = mkl_sparse_s_mm(
         SPARSE_OPERATION_NON_TRANSPOSE,
         alpha,
         A,
         desc,
         SPARSE_LAYOUT_ROW_MAJOR,
         dense,
-        dense_ncols,
-        dense_ncols,
+        nrows,
+        ncols,
         beta,
         res,
         dense_ncols);
-    TORCH_CHECK(stat == 0, "mkl_sparse_s_mm failed with error code: ", stat);
+      TORCH_CHECK(stat == 0, "mkl_sparse_s_mm failed with error code: ", stat);
+    }
   }
 
   inline void sparse_mm(
@@ -131,19 +145,33 @@ class SparseCsrMKLInterface {
       MKL_INT nrows,
       MKL_INT ncols,
       MKL_INT dense_ncols) {
-    int stat = mkl_sparse_d_mm(
+    int stat;
+    if (dense_ncols == 1) {
+      stat = mkl_sparse_d_mv(
+        SPARSE_OPERATION_NON_TRANSPOSE,
+        alpha,
+        A,
+        desc,
+        dense,
+        beta,
+        res);
+      TORCH_CHECK(stat == 0, "mkl_sparse_d_mv failed with error code: ", stat);
+    }
+    else {
+      stat = mkl_sparse_d_mm(
         SPARSE_OPERATION_NON_TRANSPOSE,
         alpha,
         A,
         desc,
         SPARSE_LAYOUT_ROW_MAJOR,
         dense,
-        dense_ncols,
-        dense_ncols,
+        nrows,
+        ncols,
         beta,
         res,
         dense_ncols);
-    TORCH_CHECK(stat == 0, "mkl_sparse_d_mm failed with error code: ", stat);
+      TORCH_CHECK(stat == 0, "mkl_sparse_d_mm failed with error code: ", stat);
+    }
   }
 
   ~SparseCsrMKLInterface() {

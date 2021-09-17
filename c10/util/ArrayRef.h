@@ -54,6 +54,12 @@ class ArrayRef final {
   /// The number of elements.
   size_type Length;
 
+  void debugCheckNullptrInvariant() {
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+        Data != nullptr || Length == 0,
+        "created ArrayRef with nullptr and non-zero length! c10::optional relies on this being illegal");
+  }
+
  public:
   /// @name Constructors
   /// @{
@@ -66,19 +72,38 @@ class ArrayRef final {
   constexpr ArrayRef(const T& OneElt) : Data(&OneElt), Length(1) {}
 
   /// Construct an ArrayRef from a pointer and length.
-  constexpr ArrayRef(const T* data, size_t length)
-      : Data(data), Length(length) {}
+  /// CUDA 9.2 fails to compile constexpr of host-only function on device
+  C10_HOST_CONSTEXPR_EXCEPT_CUDA92 ArrayRef(const T* data, size_t length)
+      : Data(data), Length(length) {
+    debugCheckNullptrInvariant();
+  }
 
   /// Construct an ArrayRef from a range.
-  constexpr ArrayRef(const T* begin, const T* end)
-      : Data(begin), Length(end - begin) {}
+  /// CUDA 9.2 fails to compile constexpr of host-only function on device
+  C10_HOST_CONSTEXPR_EXCEPT_CUDA92 ArrayRef(const T* begin, const T* end)
+      : Data(begin), Length(end - begin) {
+    debugCheckNullptrInvariant();
+  }
 
   /// Construct an ArrayRef from a SmallVector. This is templated in order to
   /// avoid instantiating SmallVectorTemplateCommon<T> whenever we
   /// copy-construct an ArrayRef.
   template <typename U>
   /* implicit */ ArrayRef(const SmallVectorTemplateCommon<T, U>& Vec)
-      : Data(Vec.data()), Length(Vec.size()) {}
+      : Data(Vec.data()), Length(Vec.size()) {
+    debugCheckNullptrInvariant();
+  }
+
+  /// Construct an ArrayRef from a generic Container.
+  template <
+      typename Container,
+      typename = std::enable_if_t<std::is_same<
+          std::remove_const_t<decltype(std::declval<Container>().data())>,
+          T*>::value>>
+  /* implicit */ ArrayRef(const Container& container)
+      : Data(container.data()), Length(container.size()) {
+    debugCheckNullptrInvariant();
+  }
 
   /// Construct an ArrayRef from a std::vector.
   // The enable_if stuff here makes sure that this isn't used for

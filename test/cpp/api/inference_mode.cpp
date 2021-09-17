@@ -25,15 +25,6 @@ namespace {
     Tensors created in InferenceMode are mostly inference tensors. The only exception
     is that view of normal tensors created in InferenceMode still produce normal tensor.
   */
-  bool is_inference_tensor(torch::Tensor& x) {
-    c10::DispatchKeySet ks = x.key_set();
-    bool has_Autograd = ks.has(c10::DispatchKey::AutogradCPU);
-    bool has_ADInplaceOrView = ks.has(c10::DispatchKey::ADInplaceOrView);
-    // They must be either both true or false.
-    bool is_inference_tensor = !has_Autograd && !has_ADInplaceOrView && x.is_leaf();
-    return is_inference_tensor;
-  }
-
   void assert_TLS_states(bool inference_mode) {
     ASSERT_EQ(InferenceMode::is_enabled(), inference_mode);
     ASSERT_FALSE(c10::impl::tls_is_dispatch_key_excluded(c10::DispatchKey::ADInplaceOrView));
@@ -44,7 +35,6 @@ namespace {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InferenceModeTest, TestTLSState) {
   assert_TLS_states(false);
   {
@@ -59,27 +49,25 @@ TEST(InferenceModeTest, TestTLSState) {
   assert_TLS_states(false);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InferenceModeTest, TestInferenceTensorCreation) {
   {
     InferenceMode guard;
     // New tensor created through constructors are inference tensors.
     torch::Tensor c = torch::ones({1, 2, 3});
     ASSERT_FALSE(c.requires_grad());
-    ASSERT_TRUE(is_inference_tensor(c));
+    ASSERT_TRUE(c.is_inference());
 
     // requires_grad doesn't change inference tensor behavior inside InferenceMode.
     torch::Tensor tmp = torch::ones({1, 2, 3}).set_requires_grad(true);
     ASSERT_TRUE(tmp.requires_grad());
-    ASSERT_TRUE(is_inference_tensor(tmp));
+    ASSERT_TRUE(tmp.is_inference());
 
     tmp = torch::ones({1, 2, 3}).set_requires_grad(false);
     ASSERT_FALSE(tmp.requires_grad());
-    ASSERT_TRUE(is_inference_tensor(tmp));
+    ASSERT_TRUE(tmp.is_inference());
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InferenceModeTest, TestExistingAutogradSession) {
   torch::Tensor s = torch::ones({1, 2, 3}).set_requires_grad(true);
   torch::Tensor a = s.clone();
@@ -95,45 +83,41 @@ TEST(InferenceModeTest, TestExistingAutogradSession) {
     "one of the variables needed for gradient computation has been modified by an inplace operation")
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InferenceModeTest, TestInferenceTensorInInferenceModeFunctionalOp) {
   c10::InferenceMode guard;
   for (bool requires_grad : {true, false}) {
     torch::Tensor c = torch::ones({1, 2, 3}).set_requires_grad(requires_grad);
 
     torch::Tensor func_out = functional_op(c);  // go through kernels: CPU
-    ASSERT_TRUE(is_inference_tensor(func_out));
+    ASSERT_TRUE(func_out.is_inference());
     ASSERT_FALSE(func_out.requires_grad());
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InferenceModeTest, TestInferenceTensorInInferenceModeInplaceOp) {
   c10::InferenceMode guard;
   for (bool requires_grad : {true, false}) {
     torch::Tensor c = torch::ones({1, 2, 3}).set_requires_grad(requires_grad);
 
     inplace_op(c);  // go through kernels: CPU
-    ASSERT_TRUE(is_inference_tensor(c));
+    ASSERT_TRUE(c.is_inference());
     ASSERT_EQ(c.requires_grad(), requires_grad);
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InferenceModeTest, TestInferenceTensorInInferenceModeViewOp) {
   c10::InferenceMode guard;
   for (bool requires_grad : {true, false}) {
     torch::Tensor c = torch::ones({1, 2, 3}).set_requires_grad(requires_grad);
 
     torch::Tensor view_out = view_op(c);  // go through kernels: CPU
-    ASSERT_TRUE(is_inference_tensor(view_out));
+    ASSERT_TRUE(view_out.is_inference());
     // Note this is different from NoGradMode but makes sense.
     ASSERT_FALSE(view_out.requires_grad());
     ASSERT_FALSE(view_out.is_view());
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InferenceModeTest, TestInferenceTensorInNormalModeFunctionalOp) {
   torch::Tensor inference_tensor;
   for (bool requires_grad: {true, false}) {
@@ -147,12 +131,11 @@ TEST(InferenceModeTest, TestInferenceTensorInNormalModeFunctionalOp) {
     // kernels. This is fine since users can easily fix it by moving
     // it inside InferenceMode block.
     torch::Tensor tmp = functional_op(inference_tensor); // go through kernels: ADInplaceOrView(fallthrough), CPU
-    ASSERT_FALSE(is_inference_tensor(tmp));
+    ASSERT_FALSE(tmp.is_inference());
     ASSERT_FALSE(tmp.requires_grad());
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InferenceModeTest, TestInferenceTensorInNormalModeInplaceOp) {
   torch::Tensor inference_tensor;
   for (bool requires_grad: {true, false}) {
@@ -165,7 +148,6 @@ TEST(InferenceModeTest, TestInferenceTensorInNormalModeInplaceOp) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InferenceModeTest, TestInferenceTensorInNormalModeViewOp) {
   torch::Tensor inference_tensor;
   for (bool requires_grad: {true, false}) {
@@ -174,14 +156,13 @@ TEST(InferenceModeTest, TestInferenceTensorInNormalModeViewOp) {
       inference_tensor = torch::ones({1, 2, 3}).set_requires_grad(requires_grad);
     }
     torch::Tensor out = view_op(inference_tensor); // go through kernels: ADInplaceOrView, CPU
-    ASSERT_TRUE(is_inference_tensor(out));
+    ASSERT_TRUE(out.is_inference());
     ASSERT_FALSE(out.requires_grad());
     ASSERT_FALSE(out.is_view());
     ASSERT_TRUE(out.is_leaf());
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InferenceModeTest, TestNormalTensorInplaceOutputInInferenceMode) {
   for (bool requires_grad: {true, false}) {
     torch::Tensor s = torch::ones({1, 2, 3}).set_requires_grad(requires_grad);
@@ -191,23 +172,22 @@ TEST(InferenceModeTest, TestNormalTensorInplaceOutputInInferenceMode) {
       c10::InferenceMode guard;
 
       inplace_op(a);  // go through kernels: ADInplaceOrView, CPU
-      ASSERT_FALSE(is_inference_tensor(a));
+      ASSERT_FALSE(a.is_inference());
       ASSERT_EQ(a.requires_grad(), requires_grad);
 
       // inplace -> inplace
       inplace_op(a);  // go through kernels: ADInplaceOrView, CPU
-      ASSERT_FALSE(is_inference_tensor(a));
+      ASSERT_FALSE(a.is_inference());
       ASSERT_EQ(a.requires_grad(), requires_grad);
 
       // inplace -> inplace -> view
       torch::Tensor view_out = view_op(a);  // go through kernels: ADInplaceOrView, CPU
-      ASSERT_FALSE(is_inference_tensor(view_out));
+      ASSERT_FALSE(view_out.is_inference());
       ASSERT_EQ(view_out.requires_grad(), requires_grad);
     }
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InferenceModeTest, TestNormalTensorInplaceOutputInNormalMode) {
   for (bool requires_grad: {true, false}) {
     torch::Tensor s = torch::ones({1, 2, 3}).set_requires_grad(requires_grad);
@@ -217,25 +197,24 @@ TEST(InferenceModeTest, TestNormalTensorInplaceOutputInNormalMode) {
       c10::InferenceMode guard;
 
       inplace_op(a);  // go through kernels: ADInplaceOrView, CPU
-      ASSERT_FALSE(is_inference_tensor(a));
+      ASSERT_FALSE(a.is_inference());
       ASSERT_EQ(a.requires_grad(), requires_grad);
     }
 
     torch::Tensor tmp = functional_op(a);  // go through kernels: VariableType, ADInplaceOrView(fallthrough), CPU
-    ASSERT_FALSE(is_inference_tensor(tmp));
+    ASSERT_FALSE(tmp.is_inference());
     ASSERT_EQ(tmp.requires_grad(), requires_grad);
 
     inplace_op(a); // go through kernels: VariableType, ADInplaceOrView, CPU
-    ASSERT_FALSE(is_inference_tensor(a));
+    ASSERT_FALSE(a.is_inference());
     ASSERT_EQ(a.requires_grad(), requires_grad);
 
     tmp = view_op(a);  // go through kernels: VariableType, ADInplaceOrView, CPU
-    ASSERT_FALSE(is_inference_tensor(tmp));
+    ASSERT_FALSE(tmp.is_inference());
     ASSERT_EQ(tmp.requires_grad(), requires_grad);
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InferenceModeTest, TestNormalTensorViewOutputInInferenceMode) {
   for (bool requires_grad: {true, false}) {
     torch::Tensor s = torch::ones({1, 2, 3}).set_requires_grad(requires_grad);
@@ -257,14 +236,14 @@ TEST(InferenceModeTest, TestNormalTensorViewOutputInInferenceMode) {
       //   exactly the same as a view tensor created in no_grad mode.
 
       view_out = view_op(a);  // go through kernels: ADInplaceOrView, CPU
-      ASSERT_FALSE(is_inference_tensor(view_out));
+      ASSERT_FALSE(view_out.is_inference());
       assert_tensor_creation_meta(view_out, CreationMeta::INFERENCE_MODE);
       ASSERT_EQ(view_out.requires_grad(), requires_grad);
       ASSERT_TRUE(view_out.is_leaf());
 
       // view -> view
       tmp = view_op(view_out);  // go through kernels: ADInplaceOrView, CPU
-      ASSERT_FALSE(is_inference_tensor(tmp));
+      ASSERT_FALSE(tmp.is_inference());
       assert_tensor_creation_meta(tmp, CreationMeta::INFERENCE_MODE);
       ASSERT_EQ(tmp.requires_grad(), requires_grad);
       ASSERT_TRUE(tmp.is_leaf());
@@ -272,7 +251,7 @@ TEST(InferenceModeTest, TestNormalTensorViewOutputInInferenceMode) {
       // view -> view -> inplace
       inplace_op(tmp);  // kernels: ADInplaceOrView, CPU
       assert_tensor_creation_meta(tmp, CreationMeta::INFERENCE_MODE);
-      ASSERT_FALSE(is_inference_tensor(tmp));
+      ASSERT_FALSE(tmp.is_inference());
       ASSERT_EQ(tmp.requires_grad(), requires_grad);
       ASSERT_TRUE(tmp.is_leaf());
       ASSERT_EQ(a._version(), tmp._version());
@@ -280,7 +259,6 @@ TEST(InferenceModeTest, TestNormalTensorViewOutputInInferenceMode) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InferenceModeTest, TestNormalTensorViewOutputInNormalMode) {
   for (bool requires_grad: {true, false}) {
     torch::Tensor s = torch::ones({1, 2, 3}).set_requires_grad(requires_grad);
@@ -290,14 +268,14 @@ TEST(InferenceModeTest, TestNormalTensorViewOutputInNormalMode) {
     {
       c10::InferenceMode guard;
       view_out = view_op(a);  // go through kernels: ADInplaceOrView, CPU
-      ASSERT_FALSE(is_inference_tensor(view_out));
+      ASSERT_FALSE(view_out.is_inference());
       assert_tensor_creation_meta(view_out, CreationMeta::INFERENCE_MODE);
       ASSERT_EQ(view_out.requires_grad(), requires_grad);
       ASSERT_TRUE(view_out.is_leaf());
     }
 
     tmp = functional_op(view_out);
-    ASSERT_FALSE(is_inference_tensor(view_out));
+    ASSERT_FALSE(view_out.is_inference());
     ASSERT_EQ(tmp.requires_grad(), requires_grad);
 
     if (requires_grad) {
@@ -308,12 +286,11 @@ TEST(InferenceModeTest, TestNormalTensorViewOutputInNormalMode) {
     }
 
     tmp = view_op(view_out);
-    ASSERT_FALSE(is_inference_tensor(view_out));
+    ASSERT_FALSE(view_out.is_inference());
     ASSERT_EQ(tmp.requires_grad(), requires_grad);
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InferenceModeTest, TestMixInferenceAndNormalTensorFunctionalOp) {
   for (bool requires_grad: {true, false}) {
     torch::Tensor s = torch::ones({1, 2, 3}).set_requires_grad(requires_grad);
@@ -325,7 +302,7 @@ TEST(InferenceModeTest, TestMixInferenceAndNormalTensorFunctionalOp) {
 
     // add(Tensor, Tensor) is safe with inference tensor since it doesn't save any variable for backward.
     torch::Tensor out = c.add(s);  // go through kernels: VariableType, ADInplaceOrView(fallthrough), CPU
-    ASSERT_FALSE(is_inference_tensor(out));
+    ASSERT_FALSE(out.is_inference());
     ASSERT_EQ(out.requires_grad(), requires_grad);
     if (requires_grad) {
       // leaf inference tensor with requires_grad=true can still have gradient.
@@ -347,7 +324,6 @@ TEST(InferenceModeTest, TestMixInferenceAndNormalTensorFunctionalOp) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InferenceModeTest, TestMixInferenceAndNormalTensorInplaceOp) {
   for (bool requires_grad: {true, false}) {
     torch::Tensor s = torch::ones({1, 2, 3}).set_requires_grad(requires_grad);
@@ -373,7 +349,6 @@ TEST(InferenceModeTest, TestMixInferenceAndNormalTensorInplaceOp) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InferenceModeTest, TestMixInferenceAndNormalTensorViewOp) {
   for (bool requires_grad: {true, false}) {
     torch::Tensor s = torch::ones({1, 2, 3}).set_requires_grad(requires_grad);
@@ -386,18 +361,17 @@ TEST(InferenceModeTest, TestMixInferenceAndNormalTensorViewOp) {
     // view_as is a composite op which calls view() with only one tensor argument.
     // So there isn't a mixed inference tensor and normal tensor inputs for view ops.
     torch::Tensor tmp1 = c.view_as(s); // go through kernels: ADInplaceOrView, CPU
-    ASSERT_TRUE(is_inference_tensor(tmp1));
+    ASSERT_TRUE(tmp1.is_inference());
     ASSERT_FALSE(tmp1.requires_grad());
 
     // This is fine since it's equivalent as s.view(c.sizes()) which
     // isn't a mixed input scenario.
     torch::Tensor tmp2 = s.view_as(c); // go through kernels: VariableType, ADInplaceOrView, CPU
-    ASSERT_FALSE(is_inference_tensor(tmp2));
+    ASSERT_FALSE(tmp2.is_inference());
     ASSERT_EQ(tmp2.requires_grad(), requires_grad);
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InferenceModeTest, TestHandleDirectViewOnRebase) {
   for (bool requires_grad: {true, false}) {
     torch::Tensor s = torch::ones({1, 2, 3}).set_requires_grad(requires_grad);
@@ -416,7 +390,6 @@ TEST(InferenceModeTest, TestHandleDirectViewOnRebase) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InferenceModeTest, TestHandleInDirectViewOnRebase) {
   for (bool requires_grad: {true, false}) {
     torch::Tensor s = torch::ones({1, 2, 3}).set_requires_grad(requires_grad);
@@ -436,7 +409,6 @@ TEST(InferenceModeTest, TestHandleInDirectViewOnRebase) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InferenceModeTest, TestCreationMetaPropagation) {
   torch::Tensor s = torch::ones({1, 2, 3}).set_requires_grad(true);
   torch::Tensor b, c;
@@ -454,7 +426,6 @@ TEST(InferenceModeTest, TestCreationMetaPropagation) {
     "A view was created in inference mode and is being modified inplace");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InferenceModeTest, TestCreationMetaPropagationInput) {
   torch::Tensor s = torch::ones({2, 2, 3}).set_requires_grad(true);
   auto s_view = s.view_as(s);
@@ -467,12 +438,9 @@ TEST(InferenceModeTest, TestCreationMetaPropagationInput) {
     c = s.split_with_sizes({1, 1});
   }
   for (auto& b_el: b) {
-    // TODO: fix the codegen not setting these properly in no_grad/inference mode
-    // The next line should be assert_tensor_creation_meta(b_el, CreationMeta::INFERENCE_MODE);
-    assert_tensor_creation_meta(b_el, CreationMeta::MULTI_OUTPUT_SAFE);
-    // The error in the next line should be "A view was created in inference mode and is being..."
+    assert_tensor_creation_meta(b_el, CreationMeta::INFERENCE_MODE);
     ASSERT_THROWS_WITH(b_el.add_(1),
-      "This view is an output of a function that returns multiple views.");
+      "A view was created in inference mode and is being modified inplace");
   }
   for (auto& c_el: c) {
     assert_tensor_creation_meta(c_el, CreationMeta::INFERENCE_MODE);
@@ -481,7 +449,6 @@ TEST(InferenceModeTest, TestCreationMetaPropagationInput) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InferenceModeTest, TestInplaceCopyOnInferenceTensor) {
   for (bool requires_grad: {true, false}) {
     torch::Tensor s = torch::ones({1, 2, 3}).set_requires_grad(requires_grad);
@@ -490,7 +457,7 @@ TEST(InferenceModeTest, TestInplaceCopyOnInferenceTensor) {
       InferenceMode guard;
       t = torch::ones({1, 2, 3});
       t.copy_(s);
-      ASSERT_TRUE(is_inference_tensor(t));
+      ASSERT_TRUE(t.is_inference());
       ASSERT_FALSE(t.requires_grad());
     }
 
@@ -499,7 +466,6 @@ TEST(InferenceModeTest, TestInplaceCopyOnInferenceTensor) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InferenceModeTest, TestSetRequiresGradInNormalMode) {
   torch::Tensor t;
   {
@@ -511,18 +477,17 @@ TEST(InferenceModeTest, TestSetRequiresGradInNormalMode) {
     "Setting requires_grad=True on inference tensor outside InferenceMode is not allowed.");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InferenceModeTest, TestAccessVersionCounter) {
   torch::Tensor t;
   {
     InferenceMode guard;
     t = torch::ones({1, 2, 3});
     ASSERT_THROWS_WITH(t.unsafeGetTensorImpl()->version_counter().current_version(),
-      "Inference tensor do not track version counter.");
+      "Inference tensors do not track version counter.");
     t.unsafeGetTensorImpl()->bump_version();
   }
   ASSERT_THROWS_WITH(t.unsafeGetTensorImpl()->version_counter().current_version(),
-    "Inference tensor do not track version counter.");
+    "Inference tensors do not track version counter.");
   ASSERT_THROWS_WITH(t.unsafeGetTensorImpl()->bump_version(),
     "Inplace update to inference tensor outside InferenceMode is not allowed.");
   // Suggested workaround
@@ -532,7 +497,6 @@ TEST(InferenceModeTest, TestAccessVersionCounter) {
   ASSERT_EQ(c.unsafeGetTensorImpl()->version_counter().current_version(), v + 1);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InferenceModeTest, TestInplaceUpdateInferenceTensorWithNormalTensor) {
   torch::Tensor s = torch::ones({1, 2, 3});
   torch::Tensor t;
@@ -554,7 +518,6 @@ TEST(InferenceModeTest, TestInplaceUpdateInferenceTensorWithNormalTensor) {
     "Inplace update to inference tensor outside InferenceMode is not allowed");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InferenceModeTest, TestComplexViewInInferenceMode) {
   torch::Tensor s = torch::ones({3, 3, 2});
   torch::Tensor t = torch::view_as_complex(s);
@@ -563,19 +526,18 @@ TEST(InferenceModeTest, TestComplexViewInInferenceMode) {
     torch::Tensor tmp;
 
     tmp = torch::view_as_real(t);
-    ASSERT_FALSE(is_inference_tensor(tmp));
+    ASSERT_FALSE(tmp.is_inference());
     tmp = torch::view_as_complex(s);
-    ASSERT_FALSE(is_inference_tensor(tmp));
+    ASSERT_FALSE(tmp.is_inference());
 
     torch::Tensor e = torch::ones({3, 3, 2});
     tmp = torch::view_as_complex(e);
-    ASSERT_TRUE(is_inference_tensor(tmp));
+    ASSERT_TRUE(tmp.is_inference());
     tmp = torch::view_as_real(tmp);
-    ASSERT_TRUE(is_inference_tensor(tmp));
+    ASSERT_TRUE(tmp.is_inference());
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InferenceModeTest, TestComplexViewInNormalMode) {
   torch::Tensor s;
   {
@@ -583,12 +545,11 @@ TEST(InferenceModeTest, TestComplexViewInNormalMode) {
     s = torch::ones({3, 3, 2});
   }
   torch::Tensor tmp = torch::view_as_complex(s);
-  ASSERT_TRUE(is_inference_tensor(tmp));
+  ASSERT_TRUE(tmp.is_inference());
   tmp = torch::view_as_real(tmp);
-  ASSERT_TRUE(is_inference_tensor(tmp));
+  ASSERT_TRUE(tmp.is_inference());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InferenceModeTest, TestCustomFunction) {
   struct MyFunction : public Function<MyFunction> {
     static Variable forward(AutogradContext *ctx, Variable var1, int mul, Variable var2) {
@@ -620,16 +581,10 @@ TEST(InferenceModeTest, TestCustomFunction) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InferenceModeTest, TestLegacyAutoNonVariableTypeModeWarning) {
-  bool prev = c10::Warning::get_warnAlways();
-  c10::Warning::set_warnAlways(true);
-
-  {
-    WarningCapture warnings;
-    at::AutoNonVariableTypeMode guard;
-    ASSERT_TRUE(
-      warnings.str().find("AutoNonVariableTypeMode is deprecated") != std::string::npos);
-  }
-  c10::Warning::set_warnAlways(prev);
+  c10::Warning::WarnAlways warn_always(true);
+  WarningCapture warnings;
+  at::AutoNonVariableTypeMode guard;
+  ASSERT_TRUE(
+    warnings.str().find("AutoNonVariableTypeMode is deprecated") != std::string::npos);
 }

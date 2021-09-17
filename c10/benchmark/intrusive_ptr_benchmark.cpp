@@ -31,7 +31,6 @@ static void BM_IntrusivePtrCtorDtor(benchmark::State& state) {
     volatile intrusive_ptr<Foo> var2 = var;
   }
 }
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 BENCHMARK(BM_IntrusivePtrCtorDtor);
 
 static void BM_SharedPtrCtorDtor(benchmark::State& state) {
@@ -41,7 +40,6 @@ static void BM_SharedPtrCtorDtor(benchmark::State& state) {
     volatile std::shared_ptr<Bar> var2 = var;
   }
 }
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 BENCHMARK(BM_SharedPtrCtorDtor);
 
 static void BM_IntrusivePtrArray(benchmark::State& state) {

@@ -1,5 +1,5 @@
 #include <ATen/Parallel.h>
-#include <ATen/cpu/vec256/vec256.h>
+#include <ATen/cpu/vec/vec.h>
 #include <ATen/native/Unfold2d.h>
 #include <ATen/native/cpu/Loops.h>
 #include <cmath>
@@ -15,7 +15,7 @@ static inline void cadd(
     const scalar_t* x,
     const scalar_t* y,
     int64_t n) {
-  using Vec = vec256::Vec256<scalar_t>;
+  using Vec = vec::Vectorized<scalar_t>;
   // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
   char* ptrs[] = {reinterpret_cast<char*>(z),
                   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
@@ -308,9 +308,7 @@ void unfolded2d_copy_kernel(
 
 } // namespace
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(unfolded2d_copy_stub, &unfolded2d_copy_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(unfolded2d_acc_stub, &unfolded2d_acc_kernel);
 
 } // namespace native

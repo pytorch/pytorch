@@ -32,6 +32,7 @@
 #include "caffe2/utils/cpu_neon.h"
 #include "caffe2/utils/eigen_utils.h"
 #include "caffe2/utils/fixed_divisor.h"
+#include "caffe2/utils/math/broadcast.h"
 
 #include "Eigen/Core"
 #include "Eigen/Dense"
@@ -468,7 +469,7 @@ C10_EXPORT void GemmStridedBatched<float, CPUContext>(
 namespace {
 
 template <typename T>
-C10_EXPORT void BroadcastImpl(
+void BroadcastImpl(
     const int X_ndim,
     const int* X_dims,
     const int Y_ndim,
@@ -476,7 +477,8 @@ C10_EXPORT void BroadcastImpl(
     const T alpha,
     const T* X,
     T* Y,
-    CPUContext* context) {
+    CPUContext* context,
+    bool allow_broadcast_fastpath) {
   CAFFE_ENFORCE_LE(X_ndim, Y_ndim);
   std::vector<int> X_dims_vector(Y_ndim);
   const int d = Y_ndim - X_ndim;
@@ -486,14 +488,29 @@ C10_EXPORT void BroadcastImpl(
     X_dims_vector[i] = X_dims[i - d];
   }
   X_dims = X_dims_vector.data();
+  CAFFE_ENFORCE_EQ(X_dims_vector.size(), Y_ndim);
+  const int X_size =
+      // NOLINTNEXTLINE(modernize-use-transparent-functors)
+      std::accumulate(X_dims, X_dims + Y_ndim, 1, std::multiplies<int>());
   const int Y_size =
       // NOLINTNEXTLINE(modernize-use-transparent-functors)
       std::accumulate(Y_dims, Y_dims + Y_ndim, 1, std::multiplies<int>());
-  std::vector<int> index(Y_ndim, 0);
-  for (int Y_index = 0; Y_index < Y_size; ++Y_index) {
-    const int X_index = utils::GetIndexFromDims(Y_ndim, X_dims, index.data());
-    Y[Y_index] = X[X_index];
-    utils::IncreaseIndexInDims(Y_ndim, Y_dims, index.data());
+  if (allow_broadcast_fastpath && can_use_broadcast_fastpath(Y_ndim, X_dims)) {
+    int X_index = 0;
+    for (int Y_index = 0; Y_index < Y_size; ++Y_index) {
+      Y[Y_index] = X[X_index];
+      X_index++;
+      if (X_index >= X_size) {
+        X_index = 0;
+      }
+    }
+  } else {
+    std::vector<int> index(Y_ndim, 0);
+    for (int Y_index = 0; Y_index < Y_size; ++Y_index) {
+      const int X_index = utils::GetIndexFromDims(Y_ndim, X_dims, index.data());
+      Y[Y_index] = X[X_index];
+      utils::IncreaseIndexInDims(Y_ndim, Y_dims, index.data());
+    }
   }
   Scale<T, T, CPUContext>(Y_size, alpha, Y, Y, context);
 }
@@ -510,8 +527,10 @@ C10_EXPORT void BroadcastImpl(
       const T alpha,                                                        \
       const T* X,                                                           \
       T* Y,                                                                 \
-      CPUContext* context) {                                                \
-    BroadcastImpl<T>(X_ndim, X_dims, Y_ndim, Y_dims, alpha, X, Y, context); \
+      CPUContext* context,                                                  \
+      bool allow_broadcast_fastpath) {                                      \
+    BroadcastImpl<T>(X_ndim, X_dims, Y_ndim, Y_dims, alpha, X, Y,           \
+                     context, allow_broadcast_fastpath);                    \
   }
 CAFFE2_SPECIALIZED_BROADCAST(std::int32_t)
 CAFFE2_SPECIALIZED_BROADCAST(std::int64_t)
@@ -761,7 +780,7 @@ CAFFE2_SPECIALIZED_CPU_ADD_STRIPED_BATCH(float);
 namespace {
 
 template <typename TIn, typename TOut, class BinaryOperator, bool kBroadcast1st>
-C10_EXPORT void RowwiseBinaryOp(
+void RowwiseBinaryOp(
     const int rows,
     const int cols,
     const BinaryOperator& op,
@@ -779,7 +798,7 @@ C10_EXPORT void RowwiseBinaryOp(
 }
 
 template <typename TIn, typename TOut, class BinaryOperator, bool kBroadcast1st>
-C10_EXPORT void ColwiseBinaryOp(
+void ColwiseBinaryOp(
     const int rows,
     const int cols,
     const BinaryOperator& op,
@@ -797,7 +816,7 @@ C10_EXPORT void ColwiseBinaryOp(
 }
 
 template <typename TIn, typename TOut, class BinaryOperator>
-C10_EXPORT void BroadcastBinaryOpImpl(
+void BroadcastBinaryOpImpl(
     const int ndim,
     const int* A_dims,
     const int* B_dims,
@@ -1652,7 +1671,7 @@ CAFFE2_SPECIALIZED_COPY_MATRIX(std::uint16_t)
 namespace {
 
 template <typename T>
-C10_EXPORT void Im2ColZeroPaddingAndNoDilationNCHW(
+void Im2ColZeroPaddingAndNoDilationNCHW(
     const int C,
     const int H,
     const int W,
@@ -1699,7 +1718,7 @@ C10_EXPORT void Im2ColZeroPaddingAndNoDilationNCHW(
 }
 
 template <typename T>
-C10_EXPORT void Col2ImZeroPaddingAndNoDilationNCHW(
+void Col2ImZeroPaddingAndNoDilationNCHW(
     const int C,
     const int H,
     const int W,
@@ -1735,7 +1754,7 @@ C10_EXPORT void Col2ImZeroPaddingAndNoDilationNCHW(
 }
 
 template <typename T>
-C10_EXPORT void Im2ColZeroPaddingAndNoDilationNHWC(
+void Im2ColZeroPaddingAndNoDilationNHWC(
     const int C,
     const int H,
     const int W,
@@ -1760,7 +1779,7 @@ C10_EXPORT void Im2ColZeroPaddingAndNoDilationNHWC(
 }
 
 template <typename T>
-C10_EXPORT void Col2ImZeroPaddingAndNoDilationNHWC(
+void Col2ImZeroPaddingAndNoDilationNHWC(
     const int C,
     const int H,
     const int W,
@@ -1787,7 +1806,7 @@ C10_EXPORT void Col2ImZeroPaddingAndNoDilationNHWC(
 }
 
 template <typename T, bool kCol2Im>
-C10_EXPORT void Im2ColNdNCHWImpl(
+void Im2ColNdNCHWImpl(
     const int N,
     const int img_size,
     const int col_size,
@@ -2042,7 +2061,6 @@ C10_EXPORT void Im2ColNd<float, CPUContext, StorageOrder::NCHW>(
         pad[2],
         pad[3],
         pad[4],
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         pad[5],
         stride[0],
         stride[1],
@@ -2383,7 +2401,6 @@ C10_EXPORT void Im2ColNd<float, CPUContext, StorageOrder::NHWC>(
         pad[2],
         pad[3],
         pad[4],
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         pad[5],
         stride[0],
         stride[1],
@@ -2672,7 +2689,6 @@ C10_EXPORT void Col2ImNd<float, CPUContext, StorageOrder::NHWC>(
         pad[2],
         pad[3],
         pad[4],
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         pad[5],
         stride[0],
         stride[1],

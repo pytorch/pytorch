@@ -12,16 +12,18 @@
 
 #ifndef _WIN32
 
+#include <torch/csrc/Exceptions.h>
+#include <torch/csrc/utils/python_numbers.h>
+
+#include <c10/util/irange.h>
+#include <fmt/format.h>
+
 #include <atomic>
 #include <map>
 #include <set>
 #include <csignal>
 #include <sstream>
 #include <sys/wait.h>
-
-#include <torch/csrc/Exceptions.h>
-#include <torch/csrc/utils/python_numbers.h>
-#include <fmt/format.h>
 
 using namespace torch;
 
@@ -97,7 +99,6 @@ static PyObject *THPModule_setWorkerSignalHandlers(PyObject *module, PyObject *a
   END_HANDLE_TH_ERRORS
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static std::map<int64_t, std::set<pid_t>> worker_pids = {};
 
 static PyObject *THPModule_errorIfAnyWorkerFails(PyObject *module, PyObject *noargs) {
@@ -170,7 +171,7 @@ static PyObject *THPModule_setWorkerPIDs(PyObject *module, PyObject *args) {
 
   std::set<pid_t> pids_set = {};
   auto size = PyTuple_GET_SIZE(child_pids);
-  for (int idx = 0; idx < size; idx++) {
+  for(const auto idx : c10::irange(size)) {
     PyObject* obj = PyTuple_GET_ITEM(child_pids, idx);
     pids_set.insert(static_cast<pid_t>(THPUtils_unpackLong(obj)));
   }

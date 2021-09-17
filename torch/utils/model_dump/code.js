@@ -54,21 +54,15 @@ class Hider extends Component {
     this.setState({ shown: this.props.shown === "true" });
   }
 
-  render(_, {shown}) {
-    return html`<h2>
-      <span class=caret onClick=${() => this.click()} >${caret(shown)} </span>
-      ${this.props.name}</h2>`;
+  render({name, children}, {shown}) {
+    let my_caret = html`<span class=caret onClick=${() => this.click()} >${caret(shown)}</span>`;
+    return html`<div data-hider-title=${name} data-shown=${shown}>
+      <h2>${my_caret} ${name}</h2>
+      <div>${shown ? this.props.children : []}</div></div>`;
   }
 
   click() {
-    const shown = !this.state.shown;
-    this.setState({shown: shown});
-    const elt = document.getElementById(this.props.elt);
-    if (shown) {
-      elt.style.display = "block";
-    } else {
-      elt.style.display = "none";
-    }
+    this.setState({shown: !this.state.shown});
   }
 }
 
@@ -86,22 +80,24 @@ function ModelSizeSection({model: {file_size, zip_files}}) {
   let zip_overhead = file_size - store_size - compr_size;
   // TODO: Better formatting.  Right-align this.
   return html`
-    <${Hider} name="Model Size" elt=model_size shown=true />
-    <pre id=model_size>.
+    <${Hider} name="Model Size" shown=true>
+    <pre>.
       Model size: ${file_size} (${humanFileSize(file_size)})
       Stored files: ${store_size} (${humanFileSize(store_size)})
       Compressed files: ${compr_size} (${humanFileSize(compr_size)})
       Zip overhead: ${zip_overhead} (${humanFileSize(zip_overhead)})
-    </pre>`;
+    </pre><//>`;
 }
 
-function ModelStructureSection({model: {model_data}}) {
+function StructuredDataSection({name, data, shown}) {
   return html`
-    <${Hider} name="Model Structure" elt=model_structure shown=true />
-    <div id=model_structure style="font-family:monospace;"><${ModelData} data=${model_data} indent="" prefix=""/></pre>`;
+    <${Hider} name=${name} shown=${shown}>
+    <div style="font-family:monospace;">
+      <${StructuredData} data=${data} indent="" prefix=""/>
+    </div><//>`;
 }
 
-class ModelData extends Component {
+class StructuredData extends Component {
   constructor() {
     super();
     this.state = { shown: false };
@@ -111,8 +107,7 @@ class ModelData extends Component {
   }
 
   click() {
-    const shown = !this.state.shown;
-    this.setState({shown: shown});
+    this.setState({shown: !this.state.shown});
   }
 
   expando(data) {
@@ -130,6 +125,10 @@ class ModelData extends Component {
       // TODO: Maybe show simple lists and tuples on one line.
       return true;
     }
+    if (data.__is_dict__) {
+      // TODO: Maybe show simple (empty?) dicts on one line.
+      return true;
+    }
     if (data.__module_type__) {
       return true;
     }
@@ -139,7 +138,7 @@ class ModelData extends Component {
     if (data.__qtensor__) {
       return false;
     }
-    throw new Error("TODO: handle dict, etc.");
+    throw new Error("Can't handle data type.", data);
   }
 
   renderHeadline(data) {
@@ -165,63 +164,65 @@ class ModelData extends Component {
     if (data.__tuple_values__) {
       return "tuple((";
     }
+    if (data.__is_dict__) {
+      return "dict({";
+    }
     if (data.__module_type__) {
       return data.__module_type__ + "()";
     }
     if (data.__tensor_v2__) {
       const [storage, offset, size, stride, grad] = data.__tensor_v2__;
       const [dtype, key, device, numel] = storage;
-      let parts = [
-        "(" + size.join(",") + ")",
-        dtype,
-      ];
-      if (device != "cpu") {
-        parts.push(device);
-      }
-      if (grad) {
-        parts.push("grad");
-      }
-      // TODO: Check stride and indicate if the tensor is channels-last or non-contiguous
-      // TODO: Check size, stride, offset, and numel and indicate if
-      // the tensor doesn't use all data in storage.
-      // TODO: Maybe show key?
-      void(offset);
-      void(stride);
-      void(key);
-      void(numel);
-      return "tensor(" + parts.join(", ") + ")";
+      return this.renderTensor(
+        "tensor", dtype, key, device, numel, offset, size, stride, grad, []);
     }
     if (data.__qtensor__) {
-      // TODO: Make this have less copy/paste with tensor
       const [storage, offset, size, stride, quantizer, grad] = data.__qtensor__;
       const [dtype, key, device, numel] = storage;
-      let parts = [
-        "(" + size.join(",") + ")",
-        dtype,
-      ];
+      let extra_parts = [];
       if (quantizer[0] == "per_tensor_affine") {
-        parts.push(`scale=${quantizer[1]}`);
-        parts.push(`zero_point=${quantizer[2]}`);
+        extra_parts.push(`scale=${quantizer[1]}`);
+        extra_parts.push(`zero_point=${quantizer[2]}`);
       } else {
-        parts.push(`quantizer=${quantizer[0]}`);
+        extra_parts.push(`quantizer=${quantizer[0]}`);
       }
-      if (device != "cpu") {
-        parts.push(device);
-      }
-      if (grad) {
-        parts.push("grad");
-      }
-      // TODO: Check stride and indicate if the tensor is channels-last or non-contiguous
-      // TODO: Check size, stride, offset, and numel and indicate if
-      // the tensor doesn't use all data in storage.
-      // TODO: Maybe show key?
-      void(offset);
-      void(stride);
-      void(key);
-      void(numel);
-      return "qtensor(" + parts.join(", ") + ")";
+      return this.renderTensor(
+        "qtensor", dtype, key, device, numel, offset, size, stride, grad, extra_parts);
     }
-    throw new Error("TODO: handle dict, etc.");
+    throw new Error("Can't handle data type.", data);
+  }
+
+  renderTensor(
+      prefix,
+      dtype,
+      storage_key,
+      device,
+      storage_numel,
+      offset,
+      size,
+      stride,
+      grad,
+      extra_parts) {
+    let parts = [
+      "(" + size.join(",") + ")",
+      dtype,
+    ];
+    parts.push(...extra_parts);
+    if (device != "cpu") {
+      parts.push(device);
+    }
+    if (grad) {
+      parts.push("grad");
+    }
+    // TODO: Check stride and indicate if the tensor is channels-last or non-contiguous
+    // TODO: Check size, stride, offset, and numel and indicate if
+    // the tensor doesn't use all data in storage.
+    // TODO: Maybe show key?
+    void(offset);
+    void(stride);
+    void(storage_key);
+    void(storage_numel);
+    return prefix + "(" + parts.join(", ") + ")";
   }
 
   renderBody(indent, data) {
@@ -236,13 +237,25 @@ class ModelData extends Component {
       let parts = [];
       for (let idx = 0; idx < data.length; idx++) {
         // Does it make sense to put explicit index numbers here?
-        parts.push(html`<br/><${ModelData} prefix=${idx + ": "} indent=${new_indent} data=${data[idx]} />`);
+        parts.push(html`<br/><${StructuredData} prefix=${idx + ": "} indent=${new_indent} data=${data[idx]} />`);
       }
       return parts;
     }
     if (data.__tuple_values__) {
       // Handled the same as lists.
       return this.renderBody(indent, data.__tuple_values__);
+    }
+    if (data.__is_dict__) {
+      let new_indent = indent + "\u00A0\u00A0";
+      let parts = [];
+      for (let idx = 0; idx < data.keys.length; idx++) {
+        if (typeof(data.keys[idx]) != "string") {
+          parts.push(html`<br/>${new_indent}Non-string key`);
+        } else {
+          parts.push(html`<br/><${StructuredData} prefix=${data.keys[idx] + ": "} indent=${new_indent} data=${data.values[idx]} />`);
+        }
+      }
+      return parts;
     }
     if (data.__module_type__) {
       const mstate = data.state;
@@ -252,17 +265,23 @@ class ModelData extends Component {
       let new_indent = indent + "\u00A0\u00A0";
       let parts = [];
       if (mstate.__is_dict__) {
+        // TODO: Less copy/paste between this and normal dicts.
         for (let idx = 0; idx < mstate.keys.length; idx++) {
           if (typeof(mstate.keys[idx]) != "string") {
             parts.push(html`<br/>${new_indent}Non-string key`);
           } else if (this.IGNORED_STATE_KEYS.has(mstate.keys[idx])) {
             // Do nothing.
           } else {
-            parts.push(html`<br/><${ModelData} prefix=${mstate.keys[idx] + ": "} indent=${new_indent} data=${mstate.values[idx]} />`);
+            parts.push(html`<br/><${StructuredData} prefix=${mstate.keys[idx] + ": "} indent=${new_indent} data=${mstate.values[idx]} />`);
           }
         }
       } else if (mstate.__tuple_values__) {
-        parts.push(html`<br/><${ModelData} prefix="" indent=${new_indent} data=${mstate} />`);
+        parts.push(html`<br/><${StructuredData} prefix="" indent=${new_indent} data=${mstate} />`);
+      } else if (mstate.__module_type__) {
+        // We normally wouldn't have the state of a module be another module,
+        // but we use "modules" to encode special values (like Unicode decode
+        // errors) that might be valid states.  Just go with it.
+        parts.push(html`<br/><${StructuredData} prefix="" indent=${new_indent} data=${mstate} />`);
       } else {
         throw new Error("Bad module state");
       }
@@ -274,7 +293,7 @@ class ModelData extends Component {
     if (data.__qtensor__) {
       throw "Should not reach here."
     }
-    throw new Error("TODO: handle dict, etc.");
+    throw new Error("Can't handle data type.", data);
   }
 
   render({data, indent, prefix}, {shown}) {
@@ -290,8 +309,8 @@ function ZipContentsSection({model: {zip_files}}) {
   // TODO: Add sorting options?
   // TODO: Add hierarchical collapsible tree?
   return html`
-    <${Hider} name="Zip Contents" elt=zipfiles shown=false />
-    <table id=zipfiles style="display:none;">
+    <${Hider} name="Zip Contents" shown=false>
+    <table>
       <thead>
         <tr>
           <th>Mode</th>
@@ -308,18 +327,16 @@ function ZipContentsSection({model: {zip_files}}) {
           <td>${zf.filename}</td>
         </tr>`)}
       </tbody>
-    </table>
-    `;
+    </table><//>`;
 }
 
 function CodeSection({model: {code_files}}) {
   return html`
-    <${Hider} name="Code" elt=code_section shown=false />
-    <div id=code_section style="display:none;">
+    <${Hider} name="Code" shown=false>
+    <div>
       ${Object.entries(code_files).map(([fn, code]) => html`<${OneCodeSection}
           filename=${fn} code=${code} />`)}
-    </div>
-    `;
+    </div><//>`;
 }
 
 class OneCodeSection extends Component {
@@ -357,13 +374,12 @@ class OneCodeSection extends Component {
 
 function ExtraJsonSection({files}) {
   return html`
-    <${Hider} name="Extra files (JSON)" elt=json_section shown=false />
-    <div id=json_section style="display:none;">
+    <${Hider} name="Extra files (JSON)" shown=false>
+    <div>
       <p>Use "Log Raw Model Info" for hierarchical view in browser console.</p>
       ${Object.entries(files).map(([fn, json]) => html`<${OneJsonSection}
           filename=${fn} json=${json} />`)}
-    </div>
-    `;
+    </div><//>`;
 }
 
 class OneJsonSection extends Component {
@@ -395,12 +411,11 @@ class OneJsonSection extends Component {
 
 function ExtraPicklesSection({files}) {
   return html`
-    <${Hider} name="Extra Pickles" elt=pickle_section shown=false />
-    <div id=pickle_section style="display:none;">
+    <${Hider} name="Extra Pickles" shown=false>
+    <div>
       ${Object.entries(files).map(([fn, content]) => html`<${OnePickleSection}
           filename=${fn} content=${content} />`)}
-    </div>
-    `;
+    </div><//>`;
 }
 
 class OnePickleSection extends Component {
@@ -428,6 +443,135 @@ class OnePickleSection extends Component {
       <pre>${content}</pre>
       `;
   }
+}
+
+function assertStorageAreEqual(key, lhs, rhs) {
+  if (lhs.length !== rhs.length ||
+    !lhs.every((val, idx) => val === rhs[idx])) {
+    throw new Error("Storage mismatch for key '" + key + "'");
+  }
+}
+
+function computeTensorMemory(numel, dtype) {
+  const sizes = {
+    "Byte": 1,
+    "Char": 1,
+    "Short": 2,
+    "Int": 4,
+    "Long": 8,
+    "Half": 2,
+    "Float": 4,
+    "Double": 8,
+    "ComplexHalf": 4,
+    "ComplexFloat": 8,
+    "ComplexDouble": 16,
+    "Bool": 1,
+    "QInt8": 1,
+    "QUInt8": 1,
+    "QInt32": 4,
+    "BFloat16": 2,
+  };
+  let dtsize = sizes[dtype];
+  if (!dtsize) {
+    throw new Error("Unrecognized dtype: " + dtype);
+  }
+  return numel * dtsize;
+}
+
+// TODO: Maybe track by dtype as well.
+// TODO: Maybe distinguish between visible size and storage size.
+function getTensorStorages(data) {
+  if (data === null) {
+    return new Map();
+  }
+  if (typeof(data) == "boolean") {
+    return new Map();
+  }
+  if (typeof(data) == "number") {
+    return new Map();
+  }
+  if (typeof(data) == "string") {
+    return new Map();
+  }
+  if (typeof(data) != "object") {
+    throw new Error("Not an object");
+  }
+  if (Array.isArray(data)) {
+    let result = new Map();
+    for (const item of data) {
+      const tensors = getTensorStorages(item);
+      for (const [key, storage] of tensors.entries()) {
+        if (!result.has(key)) {
+          result.set(key, storage);
+        } else {
+          const old_storage = result.get(key);
+          assertStorageAreEqual(key, old_storage, storage);
+        }
+      }
+    }
+    return result;
+  }
+  if (data.__tuple_values__) {
+    return getTensorStorages(data.__tuple_values__);
+  }
+  if (data.__is_dict__) {
+    return getTensorStorages(data.values);
+  }
+  if (data.__module_type__) {
+    return getTensorStorages(data.state);
+  }
+  if (data.__tensor_v2__) {
+    const [storage, offset, size, stride, grad] = data.__tensor_v2__;
+    const [dtype, key, device, numel] = storage;
+    return new Map([[key, storage]]);
+  }
+  if (data.__qtensor__) {
+    const [storage, offset, size, stride, quantizer, grad] = data.__qtensor__;
+    const [dtype, key, device, numel] = storage;
+    return new Map([[key, storage]]);
+  }
+  throw new Error("Can't handle data type.", data);
+}
+
+function getTensorMemoryByDevice(data) {
+  const tensors = getTensorStorages(data);
+  let result = {};
+  for (const storage of tensors.values()) {
+    const [dtype, key, device, numel] = storage;
+    const size = computeTensorMemory(numel, dtype);
+    result[device] = (result[device] || 0) + size;
+  }
+  return result;
+}
+
+// Make this a separate component so it is rendered lazily.
+class OpenTensorMemorySection extends Component {
+  render({model: {model_data, constants}}) {
+    let sizes = getTensorMemoryByDevice([model_data, constants]);
+    return html`
+      <table>
+        <thead>
+          <tr>
+            <th>Device</th>
+            <th>Bytes</th>
+            <th>Human</th>
+          </tr>
+        </thead>
+        <tbody style="font-family:monospace;">
+          ${Object.entries(sizes).map(([dev, size]) => html`<tr>
+            <td>${dev}</td>
+            <td>${size}</td>
+            <td>${humanFileSize(size)}</td>
+          </tr>`)}
+        </tbody>
+      </table>`;
+  }
+}
+
+function TensorMemorySection({model}) {
+  return html`
+    <${Hider} name="Tensor Memory" shown=false>
+    <${OpenTensorMemorySection} model=${model} /><//>`;
 }
 
 class AuxContentPane extends Component {
@@ -517,11 +661,13 @@ class App extends Component {
         <h1>TorchScript Model (version ${model.version}): ${model.title}</h1>
         <button onClick=${() => console.log(model)}>Log Raw Model Info</button>
         <${ModelSizeSection} model=${model}/>
-        <${ModelStructureSection} model=${model}/>
+        <${StructuredDataSection} name="Model Data" data=${model.model_data} shown=true/>
+        <${StructuredDataSection} name="Constants" data=${model.constants} shown=false/>
         <${ZipContentsSection} model=${model}/>
         <${CodeSection} model=${model}/>
         <${ExtraJsonSection} files=${model.extra_files_jsons}/>
         <${ExtraPicklesSection} files=${model.extra_pickles}/>
+        <${TensorMemorySection} model=${model}/>
       </div>
       <div id=aux_content style="position:absolute;width:99%;top:80%;height:20%;overflow:scroll">
         <${AuxContentPane}

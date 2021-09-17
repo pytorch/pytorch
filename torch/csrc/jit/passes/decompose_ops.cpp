@@ -56,14 +56,12 @@ bool isDecomposableNorm(Node* normalize_op) {
   return false;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 RegisterOperators reg_ops(
     {Operator(
          "aten::_ncf_unsqueeze(Tensor(a) self, int ndim) -> Tensor(a)",
-         [](Stack* stack) {
+         [](Stack& stack) {
            const int64_t ndim = pop(stack).toInt();
            auto self = pop(stack).toTensor();
-           // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
            c10::SmallVector<int64_t, 8> sizes(ndim, 1);
            AT_ASSERT(self.dim() == 1);
            sizes.at(1) = self.size(0);
@@ -72,12 +70,11 @@ RegisterOperators reg_ops(
          aliasAnalysisFromSchema()),
      Operator(
          "aten::_ncf_view(Tensor(a) self, int[] input_shape, int normalized_ndim) -> Tensor(a)",
-         [](Stack* stack) {
+         [](Stack& stack) {
            const int64_t normalized_ndim = pop(stack).toInt();
            auto input_shape = pop(stack).toIntList();
            auto self = pop(stack).toTensor();
            const int64_t input_ndim = input_shape.size();
-           // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
            c10::SmallVector<int64_t, 8> sizes(input_ndim, 1);
            for (int i = 0; i < input_ndim - normalized_ndim; ++i) {
              sizes.at(i) = input_shape.get(i);

@@ -5,6 +5,7 @@
 #include <ATen/core/Dict.h>
 #include <ATen/core/functional.h>
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/autograd/engine.h>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/variable.h>
@@ -62,7 +63,6 @@ void badArgType(const T& v) {
       ". File a bug report.");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 thread_local std::shared_ptr<TracingState> tracing_state;
 } // namespace detail
 
@@ -78,7 +78,7 @@ void delValueTrace(const IValue& var) {
   getTracingState()->delValue(var);
 }
 void TracingState::delValue(const IValue& var) {
-  for (size_t i = 0; i < env_stack.size(); ++i) {
+  for (const auto i : c10::irange(env_stack.size())) {
     auto& value_map = env_stack.at(env_stack.size() - 1 - i);
     auto it = value_map.find(var);
     if (it == value_map.end()) {
@@ -144,7 +144,7 @@ Value* TracingState::getValue(const IValue& var) {
       Node* n = graph->createNone();
       return graph->insertNode(n)->output();
     }
-    for (size_t i = 0; i < env_stack.size(); ++i) {
+    for (const auto i : c10::irange(env_stack.size())) {
       auto& value_map = env_stack.at(env_stack.size() - 1 - i);
       auto it = value_map.find(var);
       if (it == value_map.end()) {
@@ -176,7 +176,7 @@ Value* TracingState::getValue(const IValue& var) {
     auto it = env_stack.back().emplace(var, constant);
     return it.first->second;
   } else if (var.isFuture() || var.isObject()) {
-    for (size_t i = 0; i < env_stack.size(); ++i) {
+    for (const auto i : c10::irange(env_stack.size())) {
       auto& future_map = env_stack.at(env_stack.size() - 1 - i);
       auto it = future_map.find(var);
       if (it == future_map.end()) {
@@ -192,7 +192,7 @@ Value* TracingState::getValue(const IValue& var) {
       auto custom_class_type = getCustomClass(qualname->qualifiedName());
       if (custom_class_type) {
         auto capsule = var.toObject()->getAttr("capsule");
-        for (size_t i = 0; i < env_stack.size(); ++i) {
+        for (const auto i : c10::irange(env_stack.size())) {
           auto& value_map = env_stack.at(env_stack.size() - 1 - i);
           auto it = value_map.find(capsule);
           if (it == value_map.end()) {
@@ -351,7 +351,7 @@ static IValue addInput(
     size_t num_elems = elems.size();
     AT_ASSERT(
         elem_values.size() == num_elems && elem_types.size() == num_elems);
-    for (size_t i = 0; i < num_elems; ++i) {
+    for (const auto i : c10::irange(num_elems)) {
       elems[i] = addInput(state, elems.at(i), elem_types[i], elem_values[i]);
     }
     return tuple;
@@ -381,7 +381,7 @@ static IValue addInput(
 
     if (input.isTensorList()) {
       auto elems = input.toTensorList();
-      for (size_t i = 0; i < num_elems; i++) {
+      for (const auto i : c10::irange(num_elems)) {
         elems[i] = addInput(
                        state,
                        elems.get(i),
@@ -392,7 +392,7 @@ static IValue addInput(
       return elems;
     } else {
       auto elems = input.toList();
-      for (size_t i = 0; i < num_elems; i++) {
+      for (const auto i : c10::irange(num_elems)) {
         elems[i] = addInput(
             state,
             elems.get(i),
@@ -542,20 +542,20 @@ void TracingState::setValue(const IValue& v, Value* value) {
     auto outputs = v.toTensorList();
     Node* unpack_node =
         graph->insertNode(graph->createListUnpack(value, outputs.size()));
-    for (size_t i = 0; i < outputs.size(); ++i) {
+    for (const auto i : c10::irange(outputs.size())) {
       setValue(outputs.get(i), unpack_node->outputs()[i]);
     }
   } else if (v.isTuple()) {
     auto outputs = v.toTuple()->elements();
     Node* unpack_node = graph->insertNode(graph->createTupleUnpack(value));
-    for (size_t i = 0; i < outputs.size(); ++i) {
+    for (const auto i : c10::irange(outputs.size())) {
       setValue(outputs[i], unpack_node->outputs()[i]);
     }
   } else if (v.isList()) {
     auto elements = v.toListRef();
     Node* unpack_node =
         graph->insertNode(graph->createListUnpack(value, elements.size()));
-    for (size_t i = 0; i < elements.size(); ++i) {
+    for (const auto i : c10::irange(elements.size())) {
       setValue(elements[i], unpack_node->outputs()[i]);
     }
   } else if (isCustomClass(v)) {
@@ -630,13 +630,13 @@ void addInputs(
     const c10::optional<at::Scalar>& value) {
   detail::genericAddOptionalInput(n, name, value);
 }
-void addInputs(Node* n, const char* name, const std::string& value) {
-  detail::genericAddInput(n, value);
+void addInputs(Node* n, const char* name, const c10::string_view value) {
+  detail::genericAddInput(n, std::string(value));
 }
 void addInputs(
     Node* n,
     const char* name,
-    const c10::optional<std::string>& value) {
+    const c10::optional<c10::string_view>& value) {
   detail::genericAddOptionalInput(n, name, value);
 }
 void addInputs(Node* n, const char* name, const at::Tensor& value) {
@@ -764,7 +764,7 @@ void addInputs(Node* n, const char* name, at::IntArrayRef value) {
       : ArgumentStash::IntArrayRefTrace(value.size());
 
   auto& g = getTracingState()->graph;
-  for (size_t i = 0; i < info.size(); ++i) {
+  for (const auto i : c10::irange(info.size())) {
     if (info[i] != nullptr)
       continue;
     info[i] = g->insertConstant(value[i]);
@@ -830,7 +830,7 @@ void addOutput(Node* node, const std::vector<at::Tensor>& outputs) {
   Graph* graph = node->owningGraph();
   Node* unpack_node = graph->insertNode(
       graph->create(prim::ListUnpack, {value}, outputs.size()));
-  for (size_t i = 0; i < outputs.size(); ++i) {
+  for (const auto i : c10::irange(outputs.size())) {
     Value* output_val = unpack_node->outputs()[i];
     output_val->inferTypeFrom(outputs[i]);
     setValueTrace(outputs[i], output_val);
@@ -914,7 +914,6 @@ void ensureUniqueIfOutOfPlaced(
 ////////////////////////////////////////////////////////////////////////////////
 // Argument stash
 ////////////////////////////////////////////////////////////////////////////////
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 thread_local ArgumentStash ArgumentStash::stash;
 
 void ArgumentStash::stashIntArrayRefElem(
@@ -965,7 +964,6 @@ void ArgumentStash::stashValue(
 ////////////////////////////////////////////////////////////////////////////////
 // no python present so we just do not record source information
 void defaultRecordSourceLocation(Node* n) {}
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::atomic<decltype(&defaultRecordSourceLocation)> record_source_location(
     defaultRecordSourceLocation);
 void recordSourceLocation(Node* n) {
@@ -978,7 +976,6 @@ void setRecordSourceLocation(void (*v)(Node*)) {
 std::vector<StackEntry> defaultPythonCallstack() {
   return std::vector<StackEntry>();
 }
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::atomic<decltype(&defaultPythonCallstack)> python_callstack_fn(
     defaultPythonCallstack);
 std::vector<StackEntry> pythonCallstack() {
@@ -991,26 +988,21 @@ void setPythonCallstack(std::vector<StackEntry> (*v)()) {
 void defaultWarn(const std::string& str) {
   TORCH_WARN(str);
 }
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::atomic<warn_fn_type> warn_callback{defaultWarn};
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 const char* WARN_PYTHON_DATAFLOW =
     " might cause the trace to be incorrect. We can't record the data flow of "
     "Python values, so this value will be treated as a constant in the future. "
     "This means that the trace might not generalize to other inputs!";
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 const char* WARN_CONSTRUCTOR =
     " results are registered as constants in the trace. You can safely ignore this "
     "warning if you use this function to create tensors out of constant variables "
     "that would be the same every time you call this function. In any other case, "
     "this might cause the trace to be incorrect.";
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 const char* WARN_RESIZE =
     " can't be represented in the JIT at the moment, so we won't connect any uses of "
     "this value with its current trace. If you happen to use it again, it will show "
     "up as a constant in the graph.";
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 const char* STRICT_TRACER_MSG =
     " might cause the trace to be incorrect, this is only valid if the container "
     "structure does not change based on the module's inputs. Consider using a constant "
@@ -1032,9 +1024,3 @@ void setWarn(warn_fn_type fn) {
 } // namespace tracer
 } // namespace jit
 } // namespace torch
-
-TORCH_LIBRARY_IMPL(_, Tracer, m) {
-  // TODO: register fallback kernel with tracing function from
-  // `torch/csrc/jit/runtime/register_c10_ops.cpp`.
-  m.fallback(torch::CppFunction::makeFallthrough());
-}

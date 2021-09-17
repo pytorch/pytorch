@@ -1,5 +1,6 @@
 #pragma once
 
+#include <ATen/core/ivalue.h>
 #include <caffe2/serialize/inline_container.h>
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/ir/ir.h>
@@ -36,6 +37,14 @@ TORCH_API Module import_ir_module(
     const std::string& filename,
     c10::optional<c10::Device> device,
     ExtraFilesMap& extra_files);
+
+// For reading unified serialization format from torch.Package
+TORCH_API Module import_ir_module(
+    std::shared_ptr<CompilationUnit> cu,
+    std::shared_ptr<caffe2::serialize::PyTorchStreamReader> reader,
+    std::shared_ptr<torch::jit::DeserializationStorageContext> storage_context,
+    c10::optional<at::Device> device,
+    std::string ts_id /* torchscript identifier inside package */);
 
 TORCH_API Module import_ir_module(
     std::shared_ptr<CompilationUnit> cu,

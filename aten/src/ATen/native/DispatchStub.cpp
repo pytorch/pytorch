@@ -16,11 +16,11 @@ static CPUCapability compute_cpu_capability() {
       return CPUCapability::VSX;
     }
 #else
+    if (strcmp(envar, "avx512") == 0) {
+      return CPUCapability::AVX512;
+    }
     if (strcmp(envar, "avx2") == 0) {
       return CPUCapability::AVX2;
-    }
-    if (strcmp(envar, "avx") == 0) {
-      return CPUCapability::AVX;
     }
 #endif
     if (strcmp(envar, "default") == 0) {
@@ -31,11 +31,12 @@ static CPUCapability compute_cpu_capability() {
 
 #if !defined(__powerpc__) && !defined(__s390x__)
   if (cpuinfo_initialize()) {
+    if (cpuinfo_has_x86_avx512vl() && cpuinfo_has_x86_avx512bw() &&  \
+        cpuinfo_has_x86_avx512dq() && cpuinfo_has_x86_fma3()) {
+      return CPUCapability::AVX512;
+    }
     if (cpuinfo_has_x86_avx2() && cpuinfo_has_x86_fma3()) {
       return CPUCapability::AVX2;
-    }
-    if (cpuinfo_has_x86_avx()) {
-      return CPUCapability::AVX;
     }
   }
 #endif
@@ -54,8 +55,8 @@ CPUCapability get_cpu_capability() {
 void* DispatchStubImpl::get_call_ptr(
   DeviceType device_type
   , void *DEFAULT
-#ifdef HAVE_AVX_CPU_DEFINITION
-  , void *AVX
+#ifdef HAVE_AVX512_CPU_DEFINITION
+  , void *AVX512
 #endif
 #ifdef HAVE_AVX2_CPU_DEFINITION
   , void *AVX2
@@ -72,8 +73,8 @@ void* DispatchStubImpl::get_call_ptr(
       if (!fptr) {
         fptr = choose_cpu_impl(
           DEFAULT
-#ifdef HAVE_AVX_CPU_DEFINITION
-          , AVX
+#ifdef HAVE_AVX512_CPU_DEFINITION
+          , AVX512
 #endif
 #ifdef HAVE_AVX2_CPU_DEFINITION
           , AVX2
@@ -102,8 +103,8 @@ void* DispatchStubImpl::get_call_ptr(
 
 void* DispatchStubImpl::choose_cpu_impl(
   void *DEFAULT
-#ifdef HAVE_AVX_CPU_DEFINITION
-  , void *AVX
+#ifdef HAVE_AVX512_CPU_DEFINITION
+  , void *AVX512
 #endif
 #ifdef HAVE_AVX2_CPU_DEFINITION
   , void *AVX2
@@ -114,16 +115,24 @@ void* DispatchStubImpl::choose_cpu_impl(
 ) {
   auto capability = static_cast<int>(get_cpu_capability());
   (void)capability;
+#ifdef HAVE_AVX512_CPU_DEFINITION
+  if (capability >= static_cast<int>(CPUCapability::AVX512)) {
+    // Quantization kernels have also been disabled on Windows
+    // for AVX512 because some of their tests are flaky on Windows.
+    // Ideally, we should have AVX512 kernels for all kernels.
+    if (C10_UNLIKELY(!AVX512)) {
+      // dispatch to AVX2, since the AVX512 kernel is missing
+      TORCH_INTERNAL_ASSERT(AVX2, "DispatchStub: missing AVX2 kernel");
+      return AVX2;
+    } else {
+      return AVX512;
+    }
+  }
+#endif
 #ifdef HAVE_AVX2_CPU_DEFINITION
   if (capability >= static_cast<int>(CPUCapability::AVX2)) {
     TORCH_INTERNAL_ASSERT(AVX2, "DispatchStub: missing AVX2 kernel");
     return AVX2;
-  }
-#endif
-#ifdef HAVE_AVX_CPU_DEFINITION
-  if (capability >= static_cast<int>(CPUCapability::AVX)) {
-    TORCH_INTERNAL_ASSERT(AVX, "DispatchStub: missing AVX kernel");
-    return AVX;
   }
 #endif
 #ifdef HAVE_VSX_CPU_DEFINITION

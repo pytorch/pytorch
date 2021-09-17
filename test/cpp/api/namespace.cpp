@@ -12,7 +12,6 @@ struct Node {};
 // ```
 void NotLeakingSymbolsFromTorchAutogradNamespace_test_func(Node *node) {}
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(NamespaceTests, NotLeakingSymbolsFromTorchAutogradNamespace) {
   // Checks that we are not leaking symbols from the
   // `torch::autograd` namespace to the root namespace

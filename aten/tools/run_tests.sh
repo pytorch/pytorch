@@ -18,13 +18,14 @@ VALGRIND=${VALGRIND:=ON}
 ./tensor_interop_test
 ./undefined_tensor_test
 ./extension_backend_test
-./xla_tensor_test
+./lazy_tensor_test
 ./tensor_iterator_test
 ./Dimname_test
 ./Dict_test
 ./NamedTensor_test
 ./cpu_generator_test
 ./vmap_test
+./operators_test
 if [[ -x ./cudnn_test ]]; then
   ./cudnn_test
 fi

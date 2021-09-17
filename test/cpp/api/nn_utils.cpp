@@ -16,9 +16,7 @@ namespace rnn_utils = torch::nn::utils::rnn;
 struct NNUtilsTest : torch::test::SeedingFixture {};
 struct PackedSequenceTest : torch::test::SeedingFixture {};
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(NNUtilsTest, ClipGradNorm) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto l = Linear(10, 10);
   float max_norm = 2;
   auto compute_norm = [&](float norm_type) -> float {
@@ -52,19 +50,13 @@ TEST_F(NNUtilsTest, ClipGradNorm) {
   };
 
   std::vector<torch::Tensor> grads = {
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       torch::arange(1.0, 101).view({10, 10}),
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       torch::ones({10}).div(1000),
   };
   std::vector<float> norm_types = {
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       0.5,
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       1.5,
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       2.0,
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       4.0,
       std::numeric_limits<float>::infinity(),
   };
@@ -84,9 +76,7 @@ TEST_F(NNUtilsTest, ClipGradNorm) {
   }
   // Small gradients should be left unchanged
   grads = {
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       torch::rand({10, 10}).div(10000),
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       torch::ones(10).div(500),
   };
   for (auto norm_type : norm_types) {
@@ -104,11 +94,8 @@ TEST_F(NNUtilsTest, ClipGradNorm) {
     ASSERT_EQ(scaled[0].item().toFloat(), 1);
   }
   // should accept a single tensor as input
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto p1 = torch::randn({10, 10});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto p2 = torch::randn({10, 10});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto g = torch::arange(1., 101).view({10, 10});
   p1.mutable_grad() = g.clone();
   p2.mutable_grad() = g.clone();
@@ -121,22 +108,16 @@ TEST_F(NNUtilsTest, ClipGradNorm) {
 
 // Check that clip_grad_norm_ raises an error if the norm of a gradient
 // is non-finite
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(NNUtilsTest, ClipGradNormErrorIfNonfinite) {
   double inf = std::numeric_limits<double>::infinity();
   double nan = std::numeric_limits<double>::quiet_NaN();
 
   using Vector = std::vector<double>;
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Vector norms_pos = {0.1, 1, 2, 3.5, inf};
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Vector norms_neg = {-0.1, -1, -2, -3.5};
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Vector norms_neg_plus_0 = {0, -0.1, -1, -2, -3.5};
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Vector norms_except_0 = {0.1, 1, 2, 3.5, inf, -0.1, -1, -2, -3.5};
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Vector norms_all = {0, 0.1, 1, 2, 3.5, inf, -0.1, -1, -2, -3.5};
 
   // Each entry in test_cases has the following values, in this order:
@@ -169,35 +150,23 @@ TEST_F(NNUtilsTest, ClipGradNormErrorIfNonfinite) {
     std::make_tuple(true, true, Vector({nan}), norms_except_0, Vector({0})),
 
     // Test a grad that should never error
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     std::make_tuple(false, false, Vector({2e22, -2e22}), Vector(), norms_all),
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     std::make_tuple(false, true, Vector({2e22, -2e22}), Vector(), norms_all),
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     std::make_tuple(true, false, Vector({2e22, -2e22}), Vector(), norms_all),
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     std::make_tuple(true, true, Vector({2e22, -2e22}), Vector(), norms_all),
 
     // Test a grad that will overflow to inf for only some norm orders
     std::make_tuple(
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       false, false, Vector({2e200, -2e200}), Vector({3.5, 2, -2, -3.5}),
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       Vector({inf, 1, 0.1, 0, -1, -0.1})),
     std::make_tuple(
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       false, true, Vector({2e200, -2e200}), Vector({3.5, 2}),
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       Vector({inf, 1, 0.1, 0, -1, -0.1, -2, -3.5})),
     std::make_tuple(
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       true, false, Vector({2e200, -2e200}), Vector({3.5, 2}),
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       Vector({inf, 1, 0.1, 0, -1, -0.1, -2, -3.5})),
     std::make_tuple(
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       false, true, Vector({2e200, -2e200}), Vector({3.5, 2}),
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       Vector({inf, 1, 0.1, 0, -1, -0.1, -2, -3.5})),
   });
 
@@ -206,7 +175,6 @@ TEST_F(NNUtilsTest, ClipGradNormErrorIfNonfinite) {
       bool grad_only_one_elem,
       bool prefix_finite_grad_param,
       torch::DeviceType device_type) {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto param = torch::ones(10, torch::TensorOptions().dtype(torch::kDouble).device(device_type).requires_grad(true));
     if (grad_only_one_elem) {
       param[1].mul(scalar).sum().backward();
@@ -308,16 +276,11 @@ TEST_F(NNUtilsTest, ClipGradNormErrorIfNonfinite) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(NNUtilsTest, ClipGradValue) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto l = Linear(10, 10);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   float clip_value = 2.5;
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   torch::Tensor grad_w = torch::arange(-50., 50).view({10, 10}).div_(5);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   torch::Tensor grad_b = torch::ones({10}).mul_(2);
   std::vector<std::vector<torch::Tensor>> grad_lists = {
       {grad_w, grad_b}, {grad_w, torch::Tensor()}};
@@ -340,11 +303,8 @@ TEST_F(NNUtilsTest, ClipGradValue) {
   }
 
   // Should accept a single Tensor as input
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto p1 = torch::randn({10, 10});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto p2 = torch::randn({10, 10});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto g = torch::arange(-50., 50).view({10, 10}).div_(5);
   p1.mutable_grad() = g.clone();
   p2.mutable_grad() = g.clone();
@@ -353,34 +313,24 @@ TEST_F(NNUtilsTest, ClipGradValue) {
   ASSERT_TRUE(torch::allclose(p1.grad(), p2.grad()));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(NNUtilsTest, ConvertParameters) {
   std::vector<torch::Tensor> parameters{
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     torch::arange(9, torch::kFloat32),
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     torch::arange(9, torch::kFloat32).view({3, 3}),
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     torch::arange(8, torch::kFloat32).view({2, 2, 2})
   };
 
   auto expected = torch::cat({
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     torch::arange(9, torch::kFloat32),
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     torch::arange(9, torch::kFloat32).view(-1),
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     torch::arange(8, torch::kFloat32).view(-1)
   });
   auto vector = utils::parameters_to_vector(parameters);
   ASSERT_TRUE(vector.allclose(expected));
 
   std::vector<torch::Tensor> zero_parameters{
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     torch::zeros({9}, torch::kFloat32),
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     torch::zeros({9}, torch::kFloat32).view({3, 3}),
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     torch::zeros({8}, torch::kFloat32).view({2, 2, 2})
   };
 
@@ -390,9 +340,7 @@ TEST_F(NNUtilsTest, ConvertParameters) {
   }
 
   {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto conv1 = Conv2d(3, 10, 5);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto fc1 = Linear(10, 20);
     auto model = Sequential(conv1, fc1);
 
@@ -400,13 +348,10 @@ TEST_F(NNUtilsTest, ConvertParameters) {
     ASSERT_EQ(vec.size(0), 980);
   }
   {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto conv1 = Conv2d(3, 10, 5);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto fc1 = Linear(10, 20);
     auto model = Sequential(conv1, fc1);
 
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto vec = torch::arange(0., 980);
     utils::vector_to_parameters(vec, model->parameters());
 
@@ -429,7 +374,6 @@ std::vector<torch::Tensor> PackedSequenceTest_ordered_sequence(torch::ScalarType
     }, tensor_type));
   }
   for (auto& s : seqs) {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     s.random_(-128, 128);
   }
   sort(
@@ -471,11 +415,8 @@ void assert_is_same_packed_sequence(const rnn_utils::PackedSequence& a, const rn
   ASSERT_TRUE(a.unsorted_indices().is_same(b.unsorted_indices()));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(PackedSequenceTest, WrongOrder) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto a = torch::ones({25, 300});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto b = torch::ones({22, 300});
   auto b_a = rnn_utils::pad_sequence({b, a});
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
@@ -485,7 +426,6 @@ TEST_F(PackedSequenceTest, WrongOrder) {
     c10::Error);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(PackedSequenceTest, TotalLength) {
   torch::Tensor padded, lengths;
   std::tie(padded, lengths) = PackedSequenceTest_padded_sequence(torch::kFloat);
@@ -534,7 +474,6 @@ TEST_F(PackedSequenceTest, TotalLength) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(PackedSequenceTest, To) {
   for (bool enforce_sorted : std::vector<bool>{true, false}) {
     torch::Tensor padded, lengths;
@@ -558,7 +497,6 @@ TEST_F(PackedSequenceTest, To) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(NNUtilsTest, PackSequence) {
   auto _compatibility_test = [&](
       torch::ArrayRef<torch::Tensor> sequences,
@@ -576,12 +514,9 @@ TEST_F(NNUtilsTest, PackSequence) {
 
   // single dimensional
   auto a = torch::tensor({1, 2, 3});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto b = torch::tensor({4, 5});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto c = torch::tensor({6});
   rnn_utils::PackedSequence packed = rnn_utils::pack_sequence({a, b, c}, /*enforce_sorted=*/false);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto expected = torch::tensor({1, 4, 6, 2, 5, 3});
   ASSERT_TRUE(torch::allclose(packed.batch_sizes(), torch::tensor({3, 2, 1})));
   ASSERT_TRUE(torch::allclose(packed.data(), expected));
@@ -610,7 +545,6 @@ TEST_F(NNUtilsTest, PackSequence) {
     "You can pass `enforce_sorted=False`");
 
   // more dimensions
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   int64_t maxlen = 9;
   for (int64_t num_dim : std::vector<int64_t>{0, 1, 2, 3}) {
     std::vector<torch::Tensor> sequences;
@@ -619,7 +553,6 @@ TEST_F(NNUtilsTest, PackSequence) {
     for (int64_t i = maxlen; i > 0; i--) {
       int64_t seq_len = i * i;
       lengths_vec.emplace_back(seq_len);
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       std::vector<int64_t> tensor_sizes{seq_len, 5};
       tensor_sizes.insert(
         tensor_sizes.end(),
@@ -655,7 +588,6 @@ TEST_F(NNUtilsTest, PackSequence) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(NNUtilsTest, PackPaddedSequence) {
   auto generate_test_case = [&](
       torch::ArrayRef<int64_t> sorted_lengths,
@@ -683,7 +615,6 @@ TEST_F(NNUtilsTest, PackPaddedSequence) {
     std::vector<torch::Tensor> tensors_to_be_cat;
     for (int64_t i = 1; i < sorted_lengths.size() + 1; i++) {
       int64_t l = sorted_lengths.at(i-1);
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       tensors_to_be_cat.emplace_back(pad(i * 100 + torch::arange(1., 5 * l + 1).view({l, 1, 5}), max_length));
     }
     auto padded = torch::cat(tensors_to_be_cat, 1);
@@ -691,7 +622,6 @@ TEST_F(NNUtilsTest, PackPaddedSequence) {
     for (int64_t n = 0; n < batch_sizes.size(0); n++) {
       int64_t batch_size = batch_sizes[n].item<int64_t>();
       for (int64_t i = 0; i < batch_size; i++) {
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         expected_data_vec.emplace_back(torch::arange(1., 6) + (i + 1) * 100 + 5 * n);
       }
     }
@@ -723,11 +653,8 @@ TEST_F(NNUtilsTest, PackPaddedSequence) {
 
   std::vector<std::pair<std::vector<int64_t>, bool>> test_cases = {
     // sorted_lengths, should_shuffle
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     {{10, 8, 4, 2, 2, 2, 1}, false},
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     {{11, 10, 8, 6, 4, 3, 1}, false},
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     {{11, 10, 8, 6, 4, 3, 1}, true}
   };
 
@@ -780,7 +707,6 @@ TEST_F(NNUtilsTest, PackPaddedSequence) {
         ASSERT_TRUE(torch::allclose(
           padded.grad().narrow(0, 0, l).select(1, i),
           grad_output.narrow(0, 0, l).select(1, i)));
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         if (l < 10) {
           ASSERT_EQ(
             padded.grad().narrow(0, l, padded.grad().size(0) - l).select(1, i).abs().sum().item<double>(),
@@ -797,7 +723,6 @@ TEST_F(NNUtilsTest, PackPaddedSequence) {
       "empty tensor");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(NNUtilsTest, PadSequence) {
   auto pad = [&](const torch::Tensor& tensor, int64_t length) {
     torch::NoGradGuard no_grad;
@@ -811,15 +736,12 @@ TEST_F(NNUtilsTest, PadSequence) {
 
   // single dimensional
   auto a = torch::tensor({1, 2, 3});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto b = torch::tensor({4, 5});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto c = torch::tensor({6});
 
   torch::Tensor expected, padded;
 
   // batch_first = true
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   expected = torch::tensor({{4, 5, 0}, {1, 2, 3}, {6, 0, 0}});
   padded = rnn_utils::pad_sequence({b, a, c}, true);
   ASSERT_TRUE(padded.allclose(expected));
@@ -829,26 +751,22 @@ TEST_F(NNUtilsTest, PadSequence) {
   ASSERT_TRUE(padded.allclose(expected.transpose(0, 1)));
 
   // pad with non-zero value
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   expected = torch::tensor({{4, 5, 1}, {1, 2, 3}, {6, 1, 1}});
   padded = rnn_utils::pad_sequence({b, a, c}, true, 1);
   ASSERT_TRUE(padded.allclose(expected));
 
   // Test pad sorted sequence
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   expected = torch::tensor({{1, 2, 3}, {4, 5, 0}, {6, 0, 0}});
   padded = rnn_utils::pad_sequence({a, b, c}, true);
   ASSERT_TRUE(padded.allclose(expected));
 
   // more dimensions
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   int64_t maxlen = 9;
   for (int64_t num_dim : std::vector<int64_t>{0, 1, 2, 3}) {
     std::vector<torch::Tensor> sequences;
     std::vector<int64_t> trailing_dims(num_dim, 4);
     for (int64_t i = 1; i < maxlen + 1; i++) {
       int64_t seq_len = i * i;
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       std::vector<int64_t> tensor_sizes{seq_len, 5};
       tensor_sizes.insert(
         tensor_sizes.end(),

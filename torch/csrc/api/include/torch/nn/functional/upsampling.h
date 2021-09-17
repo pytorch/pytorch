@@ -1,5 +1,6 @@
 #pragma once
 
+#include <c10/util/irange.h>
 #include <torch/nn/functional/pooling.h>
 #include <torch/nn/options/upsampling.h>
 
@@ -62,7 +63,7 @@ inline std::vector<int64_t> _interp_output_size(
   }
 
   std::vector<int64_t> ret;
-  for (int64_t i = 0; i < dim; i++) {
+  for (const auto i : c10::irange(dim)) {
     ret.emplace_back(static_cast<int64_t>(floor(input.size(i + 2) * scale_factors[i])));
   }
   return ret;
@@ -112,7 +113,6 @@ inline Tensor interpolate(
   } else if (input.dim() == 4 && c10::get_if<enumtype::kNearest>(&mode)) {
     return torch::upsample_nearest2d(input, _interp_output_size(2, closed_over_args),
                                      scale_factor_list.at(0), scale_factor_list.at(1));
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   } else if (input.dim() == 5 && c10::get_if<enumtype::kNearest>(&mode)) {
     return torch::upsample_nearest3d(input, _interp_output_size(3, closed_over_args),
                                      scale_factor_list.at(0), scale_factor_list.at(1), scale_factor_list.at(2));
@@ -120,7 +120,6 @@ inline Tensor interpolate(
     return detail::adaptive_avg_pool1d(input, _interp_output_size(1, closed_over_args));
   } else if (input.dim() == 4 && c10::get_if<enumtype::kArea>(&mode)) {
     return detail::adaptive_avg_pool2d(input, _interp_output_size(2, closed_over_args));
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   } else if (input.dim() == 5 && c10::get_if<enumtype::kArea>(&mode)) {
     return detail::adaptive_avg_pool3d(input, _interp_output_size(3, closed_over_args));
   } else if (input.dim() == 3 && c10::get_if<enumtype::kLinear>(&mode)) {
@@ -138,13 +137,10 @@ inline Tensor interpolate(
                                       scale_factor_list.at(0), scale_factor_list.at(1));
   } else if (input.dim() == 4 && c10::get_if<enumtype::kTrilinear>(&mode)) {
     TORCH_CHECK(false, "Got 4D input, but trilinear mode needs 5D input");
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   } else if (input.dim() == 5 && c10::get_if<enumtype::kLinear>(&mode)) {
     TORCH_CHECK(false, "Got 5D input, but linear mode needs 3D input");
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   } else if (input.dim() == 5 && c10::get_if<enumtype::kBilinear>(&mode)) {
     TORCH_CHECK(false, "Got 5D input, but bilinear mode needs 4D input");
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   } else if (input.dim() == 5 && c10::get_if<enumtype::kTrilinear>(&mode)) {
     TORCH_INTERNAL_ASSERT(align_corners != c10::nullopt);
     return torch::upsample_trilinear3d(input, _interp_output_size(3, closed_over_args), *align_corners,

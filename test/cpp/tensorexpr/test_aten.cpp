@@ -14,18 +14,16 @@ namespace jit {
 
 using namespace torch::jit::tensorexpr;
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ATen, _cast_Float) {
-  KernelScope kernel_scope;
   const int kTotalSize = 128;
-  Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kInt));
-  Placeholder b_buf(BufHandle("B", {ExprHandle(kTotalSize)}, kFloat));
+  BufHandle a_buf("A", {ExprHandle(kTotalSize)}, kInt);
+  BufHandle b_buf("B", {ExprHandle(kTotalSize)}, kFloat);
 
   VarHandle index = VarHandle("index", kInt);
   ExprHandle load_a = a_buf.load(index);
   ExprHandle to_float = Cast::make(kFloat, load_a);
-  Stmt* store_b = b_buf.store({index}, to_float);
-  Stmt* stmt = For::make(index, 0, kTotalSize, store_b);
+  StmtPtr store_b = b_buf.store({index}, to_float);
+  StmtPtr stmt = For::make(index, 0, kTotalSize, store_b);
 
   PaddedBuffer<int> a_v(kTotalSize);
   PaddedBuffer<float> b_v(kTotalSize);
@@ -43,18 +41,16 @@ TEST(ATen, _cast_Float) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ATen, negInt) {
-  KernelScope kernel_scope;
   const int kTotalSize = 128;
-  Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kInt));
-  Placeholder b_buf(BufHandle("B", {ExprHandle(kTotalSize)}, kInt));
+  BufHandle a_buf("A", {ExprHandle(kTotalSize)}, kInt);
+  BufHandle b_buf("B", {ExprHandle(kTotalSize)}, kInt);
 
   VarHandle index = VarHandle("index", kInt);
   ExprHandle load_a = a_buf.load(index);
   ExprHandle to_float = Sub::make(0, load_a);
-  Stmt* store_b = b_buf.store({index}, to_float);
-  Stmt* stmt = For::make(index, 0, kTotalSize, store_b);
+  StmtPtr store_b = b_buf.store({index}, to_float);
+  StmtPtr stmt = For::make(index, 0, kTotalSize, store_b);
 
   PaddedBuffer<int> a_v(kTotalSize);
   PaddedBuffer<int> b_v(kTotalSize);
@@ -72,18 +68,16 @@ TEST(ATen, negInt) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ATen, negFloat) {
-  KernelScope kernel_scope;
   const int kTotalSize = 128;
-  Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
-  Placeholder b_buf(BufHandle("B", {ExprHandle(kTotalSize)}, kFloat));
+  BufHandle a_buf("A", {ExprHandle(kTotalSize)}, kFloat);
+  BufHandle b_buf("B", {ExprHandle(kTotalSize)}, kFloat);
 
   VarHandle index = VarHandle("index", kInt);
   ExprHandle load_a = a_buf.load(index);
   ExprHandle to_float = Sub::make(0, load_a);
-  Stmt* store_b = b_buf.store({index}, to_float);
-  Stmt* stmt = For::make(index, 0, kTotalSize, store_b);
+  StmtPtr store_b = b_buf.store({index}, to_float);
+  StmtPtr stmt = For::make(index, 0, kTotalSize, store_b);
 
   PaddedBuffer<float> a_v(kTotalSize);
   PaddedBuffer<float> b_v(kTotalSize);
@@ -101,21 +95,19 @@ TEST(ATen, negFloat) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ATen, addInt) {
-  KernelScope kernel_scope;
   const int kTotalSize = 128;
-  Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kInt));
-  Placeholder b_buf(BufHandle("B", {ExprHandle(kTotalSize)}, kInt));
-  Placeholder c_buf(BufHandle("C", {ExprHandle(kTotalSize)}, kInt));
-  Placeholder d_buf(BufHandle("D", {ExprHandle(kTotalSize)}, kInt));
+  BufHandle a_buf("A", {ExprHandle(kTotalSize)}, kInt);
+  BufHandle b_buf("B", {ExprHandle(kTotalSize)}, kInt);
+  BufHandle c_buf("C", {ExprHandle(kTotalSize)}, kInt);
+  BufHandle d_buf("D", {ExprHandle(kTotalSize)}, kInt);
 
   VarHandle index = VarHandle("index", kInt);
   ExprHandle load_a = a_buf.load(index);
   ExprHandle load_b = b_buf.load(index);
   ExprHandle load_c = c_buf.load(index);
-  Stmt* store_d = d_buf.store({index}, load_a + load_b * load_c);
-  Stmt* stmt = For::make(index, 0, kTotalSize, store_d);
+  StmtPtr store_d = d_buf.store({index}, load_a + load_b * load_c);
+  StmtPtr stmt = For::make(index, 0, kTotalSize, store_d);
 
   PaddedBuffer<int> a_v(kTotalSize);
   PaddedBuffer<int> b_v(kTotalSize);
@@ -139,21 +131,19 @@ TEST(ATen, addInt) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ATen, addFloat) {
-  KernelScope kernel_scope;
   const int kTotalSize = 128;
-  Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
-  Placeholder b_buf(BufHandle("B", {ExprHandle(kTotalSize)}, kFloat));
-  Placeholder c_buf(BufHandle("C", {ExprHandle(kTotalSize)}, kFloat));
-  Placeholder d_buf(BufHandle("D", {ExprHandle(kTotalSize)}, kFloat));
+  BufHandle a_buf("A", {ExprHandle(kTotalSize)}, kFloat);
+  BufHandle b_buf("B", {ExprHandle(kTotalSize)}, kFloat);
+  BufHandle c_buf("C", {ExprHandle(kTotalSize)}, kFloat);
+  BufHandle d_buf("D", {ExprHandle(kTotalSize)}, kFloat);
 
   VarHandle index = VarHandle("index", kInt);
   ExprHandle load_a = a_buf.load(index);
   ExprHandle load_b = b_buf.load(index);
   ExprHandle load_c = c_buf.load(index);
-  Stmt* store_d = d_buf.store({index}, load_a + load_b * load_c);
-  Stmt* stmt = For::make(index, 0, kTotalSize, store_d);
+  StmtPtr store_d = d_buf.store({index}, load_a + load_b * load_c);
+  StmtPtr stmt = For::make(index, 0, kTotalSize, store_d);
 
   PaddedBuffer<float> a_v(kTotalSize);
   PaddedBuffer<float> b_v(kTotalSize);
@@ -177,21 +167,19 @@ TEST(ATen, addFloat) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ATen, subInt) {
-  KernelScope kernel_scope;
   const int kTotalSize = 128;
-  Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kInt));
-  Placeholder b_buf(BufHandle("B", {ExprHandle(kTotalSize)}, kInt));
-  Placeholder c_buf(BufHandle("C", {ExprHandle(kTotalSize)}, kInt));
-  Placeholder d_buf(BufHandle("D", {ExprHandle(kTotalSize)}, kInt));
+  BufHandle a_buf("A", {ExprHandle(kTotalSize)}, kInt);
+  BufHandle b_buf("B", {ExprHandle(kTotalSize)}, kInt);
+  BufHandle c_buf("C", {ExprHandle(kTotalSize)}, kInt);
+  BufHandle d_buf("D", {ExprHandle(kTotalSize)}, kInt);
 
   VarHandle index = VarHandle("index", kInt);
   ExprHandle load_a = a_buf.load(index);
   ExprHandle load_b = b_buf.load(index);
   ExprHandle load_c = c_buf.load(index);
-  Stmt* store_d = d_buf.store({index}, load_a - load_b * load_c);
-  Stmt* stmt = For::make(index, 0, kTotalSize, store_d);
+  StmtPtr store_d = d_buf.store({index}, load_a - load_b * load_c);
+  StmtPtr stmt = For::make(index, 0, kTotalSize, store_d);
 
   PaddedBuffer<int> a_v(kTotalSize);
   PaddedBuffer<int> b_v(kTotalSize);
@@ -215,21 +203,19 @@ TEST(ATen, subInt) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ATen, subFloat) {
-  KernelScope kernel_scope;
   const int kTotalSize = 128;
-  Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
-  Placeholder b_buf(BufHandle("B", {ExprHandle(kTotalSize)}, kFloat));
-  Placeholder c_buf(BufHandle("C", {ExprHandle(kTotalSize)}, kFloat));
-  Placeholder d_buf(BufHandle("D", {ExprHandle(kTotalSize)}, kFloat));
+  BufHandle a_buf("A", {ExprHandle(kTotalSize)}, kFloat);
+  BufHandle b_buf("B", {ExprHandle(kTotalSize)}, kFloat);
+  BufHandle c_buf("C", {ExprHandle(kTotalSize)}, kFloat);
+  BufHandle d_buf("D", {ExprHandle(kTotalSize)}, kFloat);
 
   VarHandle index = VarHandle("index", kInt);
   ExprHandle load_a = a_buf.load(index);
   ExprHandle load_b = b_buf.load(index);
   ExprHandle load_c = c_buf.load(index);
-  Stmt* store_d = d_buf.store({index}, load_a - load_b * load_c);
-  Stmt* stmt = For::make(index, 0, kTotalSize, store_d);
+  StmtPtr store_d = d_buf.store({index}, load_a - load_b * load_c);
+  StmtPtr stmt = For::make(index, 0, kTotalSize, store_d);
 
   PaddedBuffer<float> a_v(kTotalSize);
   PaddedBuffer<float> b_v(kTotalSize);
@@ -253,21 +239,19 @@ TEST(ATen, subFloat) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ATen, lerp) {
-  KernelScope kernel_scope;
   const int kTotalSize = 128;
-  Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
-  Placeholder b_buf(BufHandle("B", {ExprHandle(kTotalSize)}, kFloat));
-  Placeholder c_buf(BufHandle("C", {ExprHandle(kTotalSize)}, kFloat));
-  Placeholder d_buf(BufHandle("D", {ExprHandle(kTotalSize)}, kFloat));
+  BufHandle a_buf("A", {ExprHandle(kTotalSize)}, kFloat);
+  BufHandle b_buf("B", {ExprHandle(kTotalSize)}, kFloat);
+  BufHandle c_buf("C", {ExprHandle(kTotalSize)}, kFloat);
+  BufHandle d_buf("D", {ExprHandle(kTotalSize)}, kFloat);
 
   VarHandle index = VarHandle("index", kInt);
   ExprHandle load_a = a_buf.load(index);
   ExprHandle load_b = b_buf.load(index);
   ExprHandle load_c = c_buf.load(index);
-  Stmt* store_d = d_buf.store({index}, load_a + load_c * (load_b - load_a));
-  Stmt* stmt = For::make(index, 0, kTotalSize, store_d);
+  StmtPtr store_d = d_buf.store({index}, load_a + load_c * (load_b - load_a));
+  StmtPtr stmt = For::make(index, 0, kTotalSize, store_d);
 
   PaddedBuffer<float> a_v(kTotalSize);
   PaddedBuffer<float> b_v(kTotalSize);
@@ -291,23 +275,21 @@ TEST(ATen, lerp) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ATen, addcmulInt) {
-  KernelScope kernel_scope;
   const int kTotalSize = 128;
-  Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kInt));
-  Placeholder b_buf(BufHandle("B", {ExprHandle(kTotalSize)}, kInt));
-  Placeholder c_buf(BufHandle("C", {ExprHandle(kTotalSize)}, kInt));
-  Placeholder d_buf(BufHandle("D", {ExprHandle(kTotalSize)}, kInt));
-  Placeholder e_buf(BufHandle("E", {ExprHandle(kTotalSize)}, kInt));
+  BufHandle a_buf("A", {ExprHandle(kTotalSize)}, kInt);
+  BufHandle b_buf("B", {ExprHandle(kTotalSize)}, kInt);
+  BufHandle c_buf("C", {ExprHandle(kTotalSize)}, kInt);
+  BufHandle d_buf("D", {ExprHandle(kTotalSize)}, kInt);
+  BufHandle e_buf("E", {ExprHandle(kTotalSize)}, kInt);
 
   VarHandle index = VarHandle("index", kInt);
   ExprHandle load_a = a_buf.load(index);
   ExprHandle load_b = b_buf.load(index);
   ExprHandle load_c = c_buf.load(index);
   ExprHandle load_d = d_buf.load(index);
-  Stmt* store_e = e_buf.store({index}, load_a + load_b * load_c * load_d);
-  Stmt* stmt = For::make(index, 0, kTotalSize, store_e);
+  StmtPtr store_e = e_buf.store({index}, load_a + load_b * load_c * load_d);
+  StmtPtr stmt = For::make(index, 0, kTotalSize, store_e);
 
   PaddedBuffer<int> a_v(kTotalSize);
   PaddedBuffer<int> b_v(kTotalSize);
@@ -319,7 +301,6 @@ TEST(ATen, addcmulInt) {
     a_v(i) = i;
     b_v(i) = 2 * i + 1;
     c_v(i) = 3 * i + 2;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     d_v(i) = 5 * i + 3;
   }
 
@@ -335,23 +316,21 @@ TEST(ATen, addcmulInt) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ATen, addcmulFloat) {
-  KernelScope kernel_scope;
   const int kTotalSize = 128;
-  Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
-  Placeholder b_buf(BufHandle("B", {ExprHandle(kTotalSize)}, kFloat));
-  Placeholder c_buf(BufHandle("C", {ExprHandle(kTotalSize)}, kFloat));
-  Placeholder d_buf(BufHandle("D", {ExprHandle(kTotalSize)}, kFloat));
-  Placeholder e_buf(BufHandle("E", {ExprHandle(kTotalSize)}, kFloat));
+  BufHandle a_buf("A", {ExprHandle(kTotalSize)}, kFloat);
+  BufHandle b_buf("B", {ExprHandle(kTotalSize)}, kFloat);
+  BufHandle c_buf("C", {ExprHandle(kTotalSize)}, kFloat);
+  BufHandle d_buf("D", {ExprHandle(kTotalSize)}, kFloat);
+  BufHandle e_buf("E", {ExprHandle(kTotalSize)}, kFloat);
 
   VarHandle index = VarHandle("index", kInt);
   ExprHandle load_a = a_buf.load(index);
   ExprHandle load_b = b_buf.load(index);
   ExprHandle load_c = c_buf.load(index);
   ExprHandle load_d = d_buf.load(index);
-  Stmt* store_e = e_buf.store({index}, load_a + load_b * load_c * load_d);
-  Stmt* stmt = For::make(index, 0, kTotalSize, store_e);
+  StmtPtr store_e = e_buf.store({index}, load_a + load_b * load_c * load_d);
+  StmtPtr stmt = For::make(index, 0, kTotalSize, store_e);
 
   PaddedBuffer<float> a_v(kTotalSize);
   PaddedBuffer<float> b_v(kTotalSize);
@@ -363,7 +342,6 @@ TEST(ATen, addcmulFloat) {
     a_v(i) = i;
     b_v(i) = 2 * i + 1;
     c_v(i) = 3 * i + 2;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     d_v(i) = 5 * i + 3;
   }
 
@@ -379,19 +357,17 @@ TEST(ATen, addcmulFloat) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ATen, mulInt) {
-  KernelScope kernel_scope;
   const int kTotalSize = 128;
-  Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kInt));
-  Placeholder b_buf(BufHandle("B", {ExprHandle(kTotalSize)}, kInt));
-  Placeholder c_buf(BufHandle("C", {ExprHandle(kTotalSize)}, kInt));
+  BufHandle a_buf("A", {ExprHandle(kTotalSize)}, kInt);
+  BufHandle b_buf("B", {ExprHandle(kTotalSize)}, kInt);
+  BufHandle c_buf("C", {ExprHandle(kTotalSize)}, kInt);
 
   VarHandle index = VarHandle("index", kInt);
   ExprHandle load_a = a_buf.load(index);
   ExprHandle load_b = b_buf.load(index);
-  Stmt* store_c = c_buf.store({index}, load_a * load_b);
-  Stmt* stmt = For::make(index, 0, kTotalSize, store_c);
+  StmtPtr store_c = c_buf.store({index}, load_a * load_b);
+  StmtPtr stmt = For::make(index, 0, kTotalSize, store_c);
 
   PaddedBuffer<int> a_v(kTotalSize);
   PaddedBuffer<int> b_v(kTotalSize);
@@ -412,19 +388,17 @@ TEST(ATen, mulInt) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ATen, mulFloat) {
-  KernelScope kernel_scope;
   const int kTotalSize = 128;
-  Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
-  Placeholder b_buf(BufHandle("B", {ExprHandle(kTotalSize)}, kFloat));
-  Placeholder c_buf(BufHandle("C", {ExprHandle(kTotalSize)}, kFloat));
+  BufHandle a_buf("A", {ExprHandle(kTotalSize)}, kFloat);
+  BufHandle b_buf("B", {ExprHandle(kTotalSize)}, kFloat);
+  BufHandle c_buf("C", {ExprHandle(kTotalSize)}, kFloat);
 
   VarHandle index = VarHandle("index", kInt);
   ExprHandle load_a = a_buf.load(index);
   ExprHandle load_b = b_buf.load(index);
-  Stmt* store_c = c_buf.store({index}, load_a * load_b);
-  Stmt* stmt = For::make(index, 0, kTotalSize, store_c);
+  StmtPtr store_c = c_buf.store({index}, load_a * load_b);
+  StmtPtr stmt = For::make(index, 0, kTotalSize, store_c);
 
   PaddedBuffer<float> a_v(kTotalSize);
   PaddedBuffer<float> b_v(kTotalSize);
@@ -445,19 +419,17 @@ TEST(ATen, mulFloat) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ATen, divInt) {
-  KernelScope kernel_scope;
   const int kTotalSize = 128;
-  Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kInt));
-  Placeholder b_buf(BufHandle("B", {ExprHandle(kTotalSize)}, kInt));
-  Placeholder c_buf(BufHandle("C", {ExprHandle(kTotalSize)}, kInt));
+  BufHandle a_buf("A", {ExprHandle(kTotalSize)}, kInt);
+  BufHandle b_buf("B", {ExprHandle(kTotalSize)}, kInt);
+  BufHandle c_buf("C", {ExprHandle(kTotalSize)}, kInt);
 
   VarHandle index = VarHandle("index", kInt);
   ExprHandle load_a = a_buf.load(index);
   ExprHandle load_b = b_buf.load(index);
-  Stmt* store_c = c_buf.store({index}, load_a / load_b);
-  Stmt* stmt = For::make(index, 0, kTotalSize, store_c);
+  StmtPtr store_c = c_buf.store({index}, load_a / load_b);
+  StmtPtr stmt = For::make(index, 0, kTotalSize, store_c);
 
   PaddedBuffer<int> a_v(kTotalSize);
   PaddedBuffer<int> b_v(kTotalSize);
@@ -478,19 +450,17 @@ TEST(ATen, divInt) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ATen, divFloat) {
-  KernelScope kernel_scope;
   const int kTotalSize = 128;
-  Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
-  Placeholder b_buf(BufHandle("B", {ExprHandle(kTotalSize)}, kFloat));
-  Placeholder c_buf(BufHandle("C", {ExprHandle(kTotalSize)}, kFloat));
+  BufHandle a_buf("A", {ExprHandle(kTotalSize)}, kFloat);
+  BufHandle b_buf("B", {ExprHandle(kTotalSize)}, kFloat);
+  BufHandle c_buf("C", {ExprHandle(kTotalSize)}, kFloat);
 
   VarHandle index = VarHandle("index", kInt);
   ExprHandle load_a = a_buf.load(index);
   ExprHandle load_b = b_buf.load(index);
-  Stmt* store_c = c_buf.store({index}, load_a / load_b);
-  Stmt* stmt = For::make(index, 0, kTotalSize, store_c);
+  StmtPtr store_c = c_buf.store({index}, load_a / load_b);
+  StmtPtr stmt = For::make(index, 0, kTotalSize, store_c);
 
   PaddedBuffer<float> a_v(kTotalSize);
   PaddedBuffer<float> b_v(kTotalSize);
@@ -511,19 +481,17 @@ TEST(ATen, divFloat) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ATen, maxInt) {
-  KernelScope kernel_scope;
   const int kTotalSize = 128;
-  Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kInt));
-  Placeholder b_buf(BufHandle("B", {ExprHandle(kTotalSize)}, kInt));
-  Placeholder c_buf(BufHandle("C", {ExprHandle(kTotalSize)}, kInt));
+  BufHandle a_buf("A", {ExprHandle(kTotalSize)}, kInt);
+  BufHandle b_buf("B", {ExprHandle(kTotalSize)}, kInt);
+  BufHandle c_buf("C", {ExprHandle(kTotalSize)}, kInt);
 
   VarHandle index = VarHandle("index", kInt);
   ExprHandle load_a = a_buf.load(index);
   ExprHandle load_b = b_buf.load(index);
-  Stmt* store_c = c_buf.store({index}, Max::make(load_a, load_b, true));
-  Stmt* stmt = For::make(index, 0, kTotalSize, store_c);
+  StmtPtr store_c = c_buf.store({index}, Max::make(load_a, load_b, true));
+  StmtPtr stmt = For::make(index, 0, kTotalSize, store_c);
 
   PaddedBuffer<int> a_v(kTotalSize);
   PaddedBuffer<int> b_v(kTotalSize);
@@ -544,19 +512,17 @@ TEST(ATen, maxInt) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ATen, maxFloat) {
-  KernelScope kernel_scope;
   const int kTotalSize = 128;
-  Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
-  Placeholder b_buf(BufHandle("B", {ExprHandle(kTotalSize)}, kFloat));
-  Placeholder c_buf(BufHandle("C", {ExprHandle(kTotalSize)}, kFloat));
+  BufHandle a_buf("A", {ExprHandle(kTotalSize)}, kFloat);
+  BufHandle b_buf("B", {ExprHandle(kTotalSize)}, kFloat);
+  BufHandle c_buf("C", {ExprHandle(kTotalSize)}, kFloat);
 
   VarHandle index = VarHandle("index", kInt);
   ExprHandle load_a = a_buf.load(index);
   ExprHandle load_b = b_buf.load(index);
-  Stmt* store_c = c_buf.store({index}, Max::make(load_a, load_b, true));
-  Stmt* stmt = For::make(index, 0, kTotalSize, store_c);
+  StmtPtr store_c = c_buf.store({index}, Max::make(load_a, load_b, true));
+  StmtPtr stmt = For::make(index, 0, kTotalSize, store_c);
 
   PaddedBuffer<float> a_v(kTotalSize);
   PaddedBuffer<float> b_v(kTotalSize);
@@ -577,19 +543,17 @@ TEST(ATen, maxFloat) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ATen, minInt) {
-  KernelScope kernel_scope;
   const int kTotalSize = 128;
-  Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kInt));
-  Placeholder b_buf(BufHandle("B", {ExprHandle(kTotalSize)}, kInt));
-  Placeholder c_buf(BufHandle("C", {ExprHandle(kTotalSize)}, kInt));
+  BufHandle a_buf("A", {ExprHandle(kTotalSize)}, kInt);
+  BufHandle b_buf("B", {ExprHandle(kTotalSize)}, kInt);
+  BufHandle c_buf("C", {ExprHandle(kTotalSize)}, kInt);
 
   VarHandle index = VarHandle("index", kInt);
   ExprHandle load_a = a_buf.load(index);
   ExprHandle load_b = b_buf.load(index);
-  Stmt* store_c = c_buf.store({index}, Min::make(load_a, load_b, true));
-  Stmt* stmt = For::make(index, 0, kTotalSize, store_c);
+  StmtPtr store_c = c_buf.store({index}, Min::make(load_a, load_b, true));
+  StmtPtr stmt = For::make(index, 0, kTotalSize, store_c);
 
   PaddedBuffer<int> a_v(kTotalSize);
   PaddedBuffer<int> b_v(kTotalSize);
@@ -610,19 +574,17 @@ TEST(ATen, minInt) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ATen, minFloat) {
-  KernelScope kernel_scope;
   const int kTotalSize = 128;
-  Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
-  Placeholder b_buf(BufHandle("B", {ExprHandle(kTotalSize)}, kFloat));
-  Placeholder c_buf(BufHandle("C", {ExprHandle(kTotalSize)}, kFloat));
+  BufHandle a_buf("A", {ExprHandle(kTotalSize)}, kFloat);
+  BufHandle b_buf("B", {ExprHandle(kTotalSize)}, kFloat);
+  BufHandle c_buf("C", {ExprHandle(kTotalSize)}, kFloat);
 
   VarHandle index = VarHandle("index", kInt);
   ExprHandle load_a = a_buf.load(index);
   ExprHandle load_b = b_buf.load(index);
-  Stmt* store_c = c_buf.store({index}, Min::make(load_a, load_b, true));
-  Stmt* stmt = For::make(index, 0, kTotalSize, store_c);
+  StmtPtr store_c = c_buf.store({index}, Min::make(load_a, load_b, true));
+  StmtPtr stmt = For::make(index, 0, kTotalSize, store_c);
 
   PaddedBuffer<float> a_v(kTotalSize);
   PaddedBuffer<float> b_v(kTotalSize);
@@ -644,15 +606,14 @@ TEST(ATen, minFloat) {
 }
 
 void __ubsan_ignore_float_divide_by_zero__ testATenreciprocal() {
-  KernelScope kernel_scope;
   const int kTotalSize = 128;
-  Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
-  Placeholder b_buf(BufHandle("B", {ExprHandle(kTotalSize)}, kFloat));
+  BufHandle a_buf("A", {ExprHandle(kTotalSize)}, kFloat);
+  BufHandle b_buf("B", {ExprHandle(kTotalSize)}, kFloat);
 
   VarHandle index = VarHandle("index", kInt);
   ExprHandle load_a = a_buf.load(index);
-  Stmt* store_b = b_buf.store({index}, FloatImm::make(1.0f) / load_a);
-  Stmt* stmt = For::make(index, 0, kTotalSize, store_b);
+  StmtPtr store_b = b_buf.store({index}, FloatImm::make(1.0f) / load_a);
+  StmtPtr stmt = For::make(index, 0, kTotalSize, store_b);
 
   PaddedBuffer<float> a_v(kTotalSize);
   PaddedBuffer<float> b_v(kTotalSize);
@@ -670,23 +631,20 @@ void __ubsan_ignore_float_divide_by_zero__ testATenreciprocal() {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ATen, reluInt) {
-  KernelScope kernel_scope;
   const int kTotalSize = 128;
-  Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kInt));
-  Placeholder b_buf(BufHandle("B", {ExprHandle(kTotalSize)}, kInt));
+  BufHandle a_buf("A", {ExprHandle(kTotalSize)}, kInt);
+  BufHandle b_buf("B", {ExprHandle(kTotalSize)}, kInt);
 
   VarHandle index = VarHandle("index", kInt);
   ExprHandle load_a = a_buf.load(index);
-  Stmt* store_b = b_buf.store({index}, Max::make(load_a, 0, false));
-  Stmt* stmt = For::make(index, 0, kTotalSize, store_b);
+  StmtPtr store_b = b_buf.store({index}, Max::make(load_a, 0, false));
+  StmtPtr stmt = For::make(index, 0, kTotalSize, store_b);
 
   PaddedBuffer<int> a_v(kTotalSize);
   PaddedBuffer<int> b_v(kTotalSize);
 
   for (int i = 0; i < kTotalSize; ++i) {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     a_v(i) = i - 64;
   }
 
@@ -699,25 +657,22 @@ TEST(ATen, reluInt) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ATen, reluFloat) {
-  KernelScope kernel_scope;
   const int kTotalSize = 128;
-  Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
-  Placeholder b_buf(BufHandle("B", {ExprHandle(kTotalSize)}, kFloat));
+  BufHandle a_buf("A", {ExprHandle(kTotalSize)}, kFloat);
+  BufHandle b_buf("B", {ExprHandle(kTotalSize)}, kFloat);
 
   VarHandle index = VarHandle("index", kInt);
   ExprHandle load_a = a_buf.load(index);
-  Stmt* store_b = b_buf.store(
+  StmtPtr store_b = b_buf.store(
       {index}, Max::make(load_a, 0, false) // relu does not propagate nans
   );
-  Stmt* stmt = For::make(index, 0, kTotalSize, store_b);
+  StmtPtr stmt = For::make(index, 0, kTotalSize, store_b);
 
   PaddedBuffer<float> a_v(kTotalSize);
   PaddedBuffer<float> b_v(kTotalSize);
 
   for (int i = 0; i < kTotalSize; ++i) {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     a_v(i) = i - 64;
   }
 
@@ -730,23 +685,20 @@ TEST(ATen, reluFloat) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ATen, logFloat) {
-  KernelScope kernel_scope;
   const int kTotalSize = 128;
-  Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
-  Placeholder b_buf(BufHandle("B", {ExprHandle(kTotalSize)}, kFloat));
+  BufHandle a_buf("A", {ExprHandle(kTotalSize)}, kFloat);
+  BufHandle b_buf("B", {ExprHandle(kTotalSize)}, kFloat);
 
   VarHandle index = VarHandle("index", kInt);
   ExprHandle load_a = a_buf.load(index);
-  Stmt* store_b = b_buf.store({index}, log(load_a));
-  Stmt* stmt = For::make(index, 0, kTotalSize, store_b);
+  StmtPtr store_b = b_buf.store({index}, log(load_a));
+  StmtPtr stmt = For::make(index, 0, kTotalSize, store_b);
 
   PaddedBuffer<float> a_v(kTotalSize);
   PaddedBuffer<float> b_v(kTotalSize);
 
   for (int i = 0; i < kTotalSize; ++i) {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     a_v(i) = i + 10;
   }
 
@@ -759,17 +711,15 @@ TEST(ATen, logFloat) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ATen, fastLogFloat) {
-  KernelScope kernel_scope;
   const int kTotalSize = 128;
-  Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
-  Placeholder b_buf(BufHandle("B", {ExprHandle(kTotalSize)}, kFloat));
+  BufHandle a_buf("A", {ExprHandle(kTotalSize)}, kFloat);
+  BufHandle b_buf("B", {ExprHandle(kTotalSize)}, kFloat);
 
   VarHandle index = VarHandle("index", kInt);
   ExprHandle load_a = a_buf.load(index);
-  Stmt* store_b = b_buf.store({index}, fast_log(load_a));
-  Stmt* stmt = For::make(index, 0, kTotalSize, store_b);
+  StmtPtr store_b = b_buf.store({index}, fast_log(load_a));
+  StmtPtr stmt = For::make(index, 0, kTotalSize, store_b);
 
   PaddedBuffer<float> a_v(kTotalSize);
   PaddedBuffer<float> b_v(kTotalSize);
@@ -792,17 +742,15 @@ TEST(ATen, fastLogFloat) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ATen, fastTanhFloat) {
-  KernelScope kernel_scope;
   const int kTotalSize = 128;
-  Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
-  Placeholder b_buf(BufHandle("B", {ExprHandle(kTotalSize)}, kFloat));
+  BufHandle a_buf("A", {ExprHandle(kTotalSize)}, kFloat);
+  BufHandle b_buf("B", {ExprHandle(kTotalSize)}, kFloat);
 
   VarHandle index = VarHandle("index", kInt);
   ExprHandle load_a = a_buf.load(index);
-  Stmt* store_b = b_buf.store({index}, fast_tanh(load_a));
-  Stmt* stmt = For::make(index, 0, kTotalSize, store_b);
+  StmtPtr store_b = b_buf.store({index}, fast_tanh(load_a));
+  StmtPtr stmt = For::make(index, 0, kTotalSize, store_b);
 
   PaddedBuffer<float> a_v(kTotalSize);
   PaddedBuffer<float> b_v(kTotalSize);
@@ -825,17 +773,15 @@ TEST(ATen, fastTanhFloat) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ATen, fastSigmoidFloat) {
-  KernelScope kernel_scope;
   const int kTotalSize = 128;
-  Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
-  Placeholder b_buf(BufHandle("B", {ExprHandle(kTotalSize)}, kFloat));
+  BufHandle a_buf("A", {ExprHandle(kTotalSize)}, kFloat);
+  BufHandle b_buf("B", {ExprHandle(kTotalSize)}, kFloat);
 
   VarHandle index = VarHandle("index", kInt);
   ExprHandle load_a = a_buf.load(index);
-  Stmt* store_b = b_buf.store({index}, fast_sigmoid(load_a));
-  Stmt* stmt = For::make(index, 0, kTotalSize, store_b);
+  StmtPtr store_b = b_buf.store({index}, fast_sigmoid(load_a));
+  StmtPtr stmt = For::make(index, 0, kTotalSize, store_b);
 
   PaddedBuffer<float> a_v(kTotalSize);
   PaddedBuffer<float> b_v(kTotalSize);
@@ -859,23 +805,20 @@ TEST(ATen, fastSigmoidFloat) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ATen, log10Float) {
-  KernelScope kernel_scope;
   const int kTotalSize = 128;
-  Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
-  Placeholder b_buf(BufHandle("B", {ExprHandle(kTotalSize)}, kFloat));
+  BufHandle a_buf("A", {ExprHandle(kTotalSize)}, kFloat);
+  BufHandle b_buf("B", {ExprHandle(kTotalSize)}, kFloat);
 
   VarHandle index = VarHandle("index", kInt);
   ExprHandle load_a = a_buf.load(index);
-  Stmt* store_b = b_buf.store({index}, log10(load_a));
-  Stmt* stmt = For::make(index, 0, kTotalSize, store_b);
+  StmtPtr store_b = b_buf.store({index}, log10(load_a));
+  StmtPtr stmt = For::make(index, 0, kTotalSize, store_b);
 
   PaddedBuffer<float> a_v(kTotalSize);
   PaddedBuffer<float> b_v(kTotalSize);
 
   for (int i = 0; i < kTotalSize; ++i) {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     a_v(i) = i + 10;
   }
 
@@ -888,23 +831,20 @@ TEST(ATen, log10Float) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ATen, log2Float) {
-  KernelScope kernel_scope;
   const int kTotalSize = 128;
-  Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
-  Placeholder b_buf(BufHandle("B", {ExprHandle(kTotalSize)}, kFloat));
+  BufHandle a_buf("A", {ExprHandle(kTotalSize)}, kFloat);
+  BufHandle b_buf("B", {ExprHandle(kTotalSize)}, kFloat);
 
   VarHandle index = VarHandle("index", kInt);
   ExprHandle load_a = a_buf.load(index);
-  Stmt* store_b = b_buf.store({index}, log2(load_a));
-  Stmt* stmt = For::make(index, 0, kTotalSize, store_b);
+  StmtPtr store_b = b_buf.store({index}, log2(load_a));
+  StmtPtr stmt = For::make(index, 0, kTotalSize, store_b);
 
   PaddedBuffer<float> a_v(kTotalSize);
   PaddedBuffer<float> b_v(kTotalSize);
 
   for (int i = 0; i < kTotalSize; ++i) {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     a_v(i) = i + 10;
   }
 
@@ -917,17 +857,15 @@ TEST(ATen, log2Float) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ATen, expFloat) {
-  KernelScope kernel_scope;
   const int kTotalSize = 128;
-  Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
-  Placeholder b_buf(BufHandle("B", {ExprHandle(kTotalSize)}, kFloat));
+  BufHandle a_buf("A", {ExprHandle(kTotalSize)}, kFloat);
+  BufHandle b_buf("B", {ExprHandle(kTotalSize)}, kFloat);
 
   VarHandle index = VarHandle("index", kInt);
   ExprHandle load_a = a_buf.load(index);
-  Stmt* store_b = b_buf.store({index}, exp(load_a));
-  Stmt* stmt = For::make(index, 0, kTotalSize, store_b);
+  StmtPtr store_b = b_buf.store({index}, exp(load_a));
+  StmtPtr stmt = For::make(index, 0, kTotalSize, store_b);
 
   PaddedBuffer<float> a_v(kTotalSize);
   PaddedBuffer<float> b_v(kTotalSize);
@@ -946,17 +884,15 @@ TEST(ATen, expFloat) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ATen, erfFloat) {
-  KernelScope kernel_scope;
   const int kTotalSize = 128;
-  Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
-  Placeholder b_buf(BufHandle("B", {ExprHandle(kTotalSize)}, kFloat));
+  BufHandle a_buf("A", {ExprHandle(kTotalSize)}, kFloat);
+  BufHandle b_buf("B", {ExprHandle(kTotalSize)}, kFloat);
 
   VarHandle index = VarHandle("index", kInt);
   ExprHandle load_a = a_buf.load(index);
-  Stmt* store_b = b_buf.store({index}, erf(load_a));
-  Stmt* stmt = For::make(index, 0, kTotalSize, store_b);
+  StmtPtr store_b = b_buf.store({index}, erf(load_a));
+  StmtPtr stmt = For::make(index, 0, kTotalSize, store_b);
 
   PaddedBuffer<float> a_v(kTotalSize);
   PaddedBuffer<float> b_v(kTotalSize);
@@ -975,17 +911,15 @@ TEST(ATen, erfFloat) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ATen, cosFloat) {
-  KernelScope kernel_scope;
   const int kTotalSize = 128;
-  Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
-  Placeholder b_buf(BufHandle("B", {ExprHandle(kTotalSize)}, kFloat));
+  BufHandle a_buf("A", {ExprHandle(kTotalSize)}, kFloat);
+  BufHandle b_buf("B", {ExprHandle(kTotalSize)}, kFloat);
 
   VarHandle index = VarHandle("index", kInt);
   ExprHandle load_a = a_buf.load(index);
-  Stmt* store_b = b_buf.store({index}, cos(load_a));
-  Stmt* stmt = For::make(index, 0, kTotalSize, store_b);
+  StmtPtr store_b = b_buf.store({index}, cos(load_a));
+  StmtPtr stmt = For::make(index, 0, kTotalSize, store_b);
 
   PaddedBuffer<float> a_v(kTotalSize);
   PaddedBuffer<float> b_v(kTotalSize);
@@ -1004,13 +938,11 @@ TEST(ATen, cosFloat) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ATen, eqInt) {
-  KernelScope kernel_scope;
   constexpr int N = 128;
-  Placeholder a(BufHandle("A", {N}, kInt));
-  Placeholder b(BufHandle("B", {N}, kInt));
-  Placeholder c(BufHandle("C", {N}, kInt));
+  BufHandle a("A", {N}, kInt);
+  BufHandle b("B", {N}, kInt);
+  BufHandle c("C", {N}, kInt);
   std::vector<int> a_buffer(N, 1);
   std::vector<int> b_buffer(N, 1);
   std::vector<int> c_buffer(N, 0);
@@ -1031,16 +963,12 @@ TEST(ATen, eqInt) {
   assertAllEqual(c_buffer, 1);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ATen, geInt) {
-  KernelScope kernel_scope;
   constexpr int N = 128;
-  Placeholder a(BufHandle("A", {N}, kInt));
-  Placeholder b(BufHandle("B", {N}, kInt));
-  Placeholder c(BufHandle("C", {N}, kInt));
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  BufHandle a("A", {N}, kInt);
+  BufHandle b("B", {N}, kInt);
+  BufHandle c("C", {N}, kInt);
   std::vector<int> a_buffer(N, 5);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<int> b_buffer(N, 5);
   std::vector<int> c_buffer(N, 0);
 
@@ -1060,14 +988,11 @@ TEST(ATen, geInt) {
   assertAllEqual(c_buffer, 1);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ATen, gtInt) {
-  KernelScope kernel_scope;
   constexpr int N = 128;
-  Placeholder a(BufHandle("A", {N}, kInt));
-  Placeholder b(BufHandle("B", {N}, kInt));
-  Placeholder c(BufHandle("C", {N}, kInt));
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  BufHandle a("A", {N}, kInt);
+  BufHandle b("B", {N}, kInt);
+  BufHandle c("C", {N}, kInt);
   std::vector<int> a_buffer(N, 6);
   std::vector<int> b_buffer(N, 3);
   std::vector<int> c_buffer(N, 0);
@@ -1088,16 +1013,12 @@ TEST(ATen, gtInt) {
   assertAllEqual(c_buffer, 1);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ATen, leInt) {
-  KernelScope kernel_scope;
   constexpr int N = 128;
-  Placeholder a(BufHandle("A", {N}, kInt));
-  Placeholder b(BufHandle("B", {N}, kInt));
-  Placeholder c(BufHandle("C", {N}, kInt));
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  BufHandle a("A", {N}, kInt);
+  BufHandle b("B", {N}, kInt);
+  BufHandle c("C", {N}, kInt);
   std::vector<int> a_buffer(N, 5);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<int> b_buffer(N, 5);
   std::vector<int> c_buffer(N, 0);
 
@@ -1117,16 +1038,12 @@ TEST(ATen, leInt) {
   assertAllEqual(c_buffer, 1);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ATen, ltInt) {
-  KernelScope kernel_scope;
   constexpr int N = 128;
-  Placeholder a(BufHandle("A", {N}, kInt));
-  Placeholder b(BufHandle("B", {N}, kInt));
-  Placeholder c(BufHandle("C", {N}, kInt));
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  BufHandle a("A", {N}, kInt);
+  BufHandle b("B", {N}, kInt);
+  BufHandle c("C", {N}, kInt);
   std::vector<int> a_buffer(N, 5);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<int> b_buffer(N, 5);
   std::vector<int> c_buffer(N, 1);
 

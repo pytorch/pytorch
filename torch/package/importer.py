@@ -3,7 +3,7 @@ from abc import ABC, abstractmethod
 from pickle import _getattribute, _Pickler  # type: ignore[attr-defined]
 from pickle import whichmodule as _pickle_whichmodule  # type: ignore[attr-defined]
 from types import ModuleType
-from typing import Any, List, Optional, Tuple
+from typing import Any, List, Optional, Tuple, Dict
 
 from ._mangling import demangle, get_mangle_prefix, is_mangled
 
@@ -40,6 +40,8 @@ class Importer(ABC):
         obj2 = getattr(module, obj_name)
         assert obj1 is obj2
     """
+
+    modules: Dict[str, ModuleType]
 
     @abstractmethod
     def import_module(self, module_name: str) -> ModuleType:
@@ -141,8 +143,23 @@ class Importer(ABC):
         module_name = getattr(obj, "__module__", None)
         if module_name is not None:
             return module_name
-        else:
-            return "__main__"
+
+        # Protect the iteration by using a list copy of self.modules against dynamic
+        # modules that trigger imports of other modules upon calls to getattr.
+        for module_name, module in self.modules.copy().items():
+            if (
+                module_name == "__main__"
+                or module_name == "__mp_main__"  # bpo-42406
+                or module is None
+            ):
+                continue
+            try:
+                if _getattribute(module, name)[0] is obj:
+                    return module_name
+            except AttributeError:
+                pass
+
+        return "__main__"
 
 
 class _SysImporter(Importer):

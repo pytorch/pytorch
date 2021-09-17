@@ -6,8 +6,15 @@ on:
   pull_request_target:
     types: [edited, opened, synchronize, reopened]
 
+
+concurrency:
+  group: auto-label-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true
+
+
 jobs:
   auto-label-rocm:
+    if: ${{ github.repository == 'pytorch/pytorch' }}
     runs-on: ubuntu-18.04
     steps:
     - name: Retrieve information

@@ -63,8 +63,10 @@ TEST(Function, ExecuteSlowMul) {
 
   f.set_nnc_kernel_id("slow_mul");
   f.set_input_specs({create_test_input_spec({size})});
-  f.set_output_spec({create_test_output_spec({size})});
-  f.set_parameters({at::ones({1}, at::kInt).mul(n)});
+  f.set_output_specs({create_test_output_spec({size})});
+  f.set_parameters(c10::impl::toList(c10::List<at::Tensor>({
+      at::ones({1}, at::kInt).mul(n)
+  })));
   f.set_memory_plan(create_test_memory_plan({sizeof(float) * size}));
 
   c10::List<at::Tensor> input({
@@ -80,22 +82,16 @@ TEST(Function, Serialization) {
   Function f;
   f.set_name("test_function");
   f.set_nnc_kernel_id("test_kernel");
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   f.set_input_specs({create_test_input_spec({1, 3, 224, 224})});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-  f.set_output_spec({create_test_output_spec({1000})});
-  f.set_parameters({
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  f.set_output_specs({create_test_output_spec({1000})});
+
+  f.set_parameters(c10::impl::toList(c10::List<at::Tensor>({
       at::ones({1, 16, 3, 3}, at::kFloat),
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       at::ones({16, 32, 1, 1}, at::kFloat),
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       at::ones({32, 1, 3, 3}, at::kFloat)
-  });
+  })));
   f.set_memory_plan(create_test_memory_plan({
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       sizeof(float) * 1024,
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       sizeof(float) * 2048,
   }));
 
@@ -112,9 +108,9 @@ TEST(Function, Serialization) {
   EXPECT_EQ(f2.output_specs()[0].dtype_, at::kFloat);
 
   EXPECT_EQ(f2.parameters().size(), 3);
-  EXPECT_EQ(f2.parameters()[0].sizes(), at::IntArrayRef({1, 16, 3, 3}));
-  EXPECT_EQ(f2.parameters()[1].sizes(), at::IntArrayRef({16, 32, 1, 1}));
-  EXPECT_EQ(f2.parameters()[2].sizes(), at::IntArrayRef({32, 1, 3, 3}));
+  EXPECT_EQ(f2.parameters()[0].toTensor().sizes(), at::IntArrayRef({1, 16, 3, 3}));
+  EXPECT_EQ(f2.parameters()[1].toTensor().sizes(), at::IntArrayRef({16, 32, 1, 1}));
+  EXPECT_EQ(f2.parameters()[2].toTensor().sizes(), at::IntArrayRef({32, 1, 3, 3}));
 
   EXPECT_EQ(f2.memory_plan().buffer_sizes_.size(), 2);
   EXPECT_EQ(f2.memory_plan().buffer_sizes_[0], sizeof(float) * 1024);

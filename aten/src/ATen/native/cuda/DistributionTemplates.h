@@ -430,7 +430,7 @@ void normal_and_transform(TensorIteratorBase& iter, RNG gen, transform_t transfo
 
 template<typename RNG>
 void normal_kernel(Tensor& self, double mean_, double std_, RNG gen) {
-  auto iter = TensorIterator::nullary_op(self);
+  auto iter = TensorIterator::borrowing_nullary_op(self);
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "normal_kernel_cuda", [&] {
     using accscalar_t = at::acc_type<scalar_t, true>;
     auto mean = static_cast<accscalar_t>(mean_);
