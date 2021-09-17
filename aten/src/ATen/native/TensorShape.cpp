@@ -9,6 +9,7 @@
 #include <ATen/native/Resize.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/TypeProperties.h>
+#include <ATen/native/TensorShape.h>
 #include <ATen/native/cpu/CatKernel.h>
 #include <ATen/native/cpu/StackKernel.h>
 #include <ATen/NativeFunctions.h>
@@ -91,25 +92,6 @@ Tensor broadcast_to(const Tensor& self, IntArrayRef size) {
 
 std::vector<Tensor> broadcast_tensors(TensorList tensors) {
   return expand_outplace(tensors);
-}
-
-// Check to see if the shape of tensors is compatible
-// for being concatenated along a given dimension.
-static inline void check_cat_shape_except_dim(const Tensor & first, const Tensor & second, int64_t dimension, int64_t index) {
-  int64_t first_dims = first.dim();
-  int64_t second_dims = second.dim();
-  TORCH_CHECK(first_dims == second_dims, "torch.cat(): Tensors must have same number of dimensions: got ",
-              first_dims, " and ", second_dims);
-  for (int64_t dim = 0; dim < first_dims; dim++) {
-    if (dim == dimension) {
-      continue;
-    }
-    int64_t first_dim_size = first.sizes()[dim];
-    int64_t second_dim_size = second.sizes()[dim];
-    TORCH_CHECK(first_dim_size == second_dim_size, "torch.cat(): Sizes of tensors must match except in dimension ",
-                dimension, ". Got ", first_dim_size, " and ", second_dim_size, " in dimension ", dim,
-                " (The offending index is ", index, ")");
-  }
 }
 
 static bool should_skip(const Tensor& t) {
@@ -195,7 +177,10 @@ Tensor & _cat_out_cpu(TensorList tensors, int64_t dim, Tensor& result) {
   // raise a warning while resizing if output has one or more elements
   // See https://github.com/pytorch/pytorch/pull/62560#discussion_r687363362
   // for understanding why at::native::resize_output is not called directly.
-  if (at::native::resize_output_check(result, result_size)) {
+  // if (at::native::resize_output_check(result, result_size)) {
+  // TODO: restore the above, see https://github.com/pytorch/pytorch/issues/64709
+
+  if (result.sizes() != result_size) {
     result.resize_(result_size, first_tensor_mem_format);
   }
 
@@ -1517,7 +1502,13 @@ bool inline maybe_native_stack(Tensor& result, TensorList tensors, int64_t dim) 
 
     // skip resizing if size of result is same as expected
     // raise a warning while resizing if output has one or more elements
-    at::native::resize_output(result, result_sizes);
+    // at::native::resize_output(result, result_sizes);
+    // TODO: restore the above, see https://github.com/pytorch/pytorch/issues/64709
+
+    if (result.sizes() != result_sizes) {
+      result.resize_(result_sizes);
+    }
+
     stack_serial_stub(kCPU, result, tensors, dim);
     return true;
   }
@@ -2162,8 +2153,21 @@ std::vector<Tensor> unbind(const Tensor& self, Dimname dim) {
 }
 
 std::vector<Tensor> meshgrid(TensorList tensors) {
+  TORCH_WARN_ONCE("torch.meshgrid: in an upcoming release, it will be required to pass the "
+                  "indexing argument.");
+  return native::meshgrid(tensors, /*indexing=*/"ij");
+}
+
+std::vector<Tensor> meshgrid(TensorList tensors,
+                             c10::string_view indexing) {
   int64_t size = tensors.size();
   TORCH_CHECK(size > 0, "meshgrid expects a non-empty TensorList");
+
+  TORCH_CHECK(
+      indexing == "ij",
+      "torch.meshgrid: only \"ij\" indexing is supported at this time, but "
+      "received: ", indexing);
+
   std::vector<int64_t> shape(size);
   for(const auto i: c10::irange(size)){
     switch (tensors[i].dim()) {
@@ -2321,10 +2325,7 @@ Tensor diag_backward(const Tensor& grad, IntArrayRef input_sizes, int64_t diagon
   }
 
   // Input was a matrix but was not square
-  auto grad_input = at::zeros(input_sizes, grad.options());
-  auto diag = grad_input.diagonal(diagonal);
-  diag.copy_(grad);
-  return grad_input;
+  return at::diagonal_backward(grad, input_sizes, diagonal, 0, 1);
 }
 
 Tensor diagonal_backward(const Tensor & grad, IntArrayRef input_sizes, int64_t offset, int64_t dim1, int64_t dim2) {
