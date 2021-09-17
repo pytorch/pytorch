@@ -278,18 +278,15 @@ TORCH_IMPL_FUNC(upsample_nearest3d_out_cuda) (
     c10::optional<double> scales_d,
     c10::optional<double> scales_h,
     c10::optional<double> scales_w,
+    bool exact,
     const Tensor& output) {
-  upsample_nearest3d_out_cuda_template<nearest_neighbor_compute_source_index>(output, input, output_size, scales_d, scales_h, scales_w);
-}
-
-TORCH_IMPL_FUNC(upsample_nearest_exact3d_out_cuda) (
-    const Tensor& input,
-    IntArrayRef output_size,
-    c10::optional<double> scales_d,
-    c10::optional<double> scales_h,
-    c10::optional<double> scales_w,
-    const Tensor& output) {
-  upsample_nearest3d_out_cuda_template<nearest_neighbor_exact_compute_source_index>(output, input, output_size, scales_d, scales_h, scales_w);
+  if (exact) {
+    upsample_nearest3d_out_cuda_template<nearest_neighbor_exact_compute_source_index>(
+        output, input, output_size, scales_d, scales_h, scales_w);
+  } else {
+    upsample_nearest3d_out_cuda_template<nearest_neighbor_compute_source_index>(
+        output, input, output_size, scales_d, scales_h, scales_w);
+  }
 }
 
 TORCH_IMPL_FUNC(upsample_nearest3d_backward_out_cuda) (
@@ -299,21 +296,16 @@ TORCH_IMPL_FUNC(upsample_nearest3d_backward_out_cuda) (
     c10::optional<double> scales_d,
     c10::optional<double> scales_h,
     c10::optional<double> scales_w,
+    bool exact,
     const Tensor& grad_input) {
-  upsample_nearest3d_backward_out_cuda_template<nearest_neighbor_bw_compute_source_index>(
-      grad_input, grad_output, output_size, input_size, scales_d, scales_h, scales_w);
-}
 
-TORCH_IMPL_FUNC(upsample_nearest_exact3d_backward_out_cuda) (
-    const Tensor& grad_output,
-    IntArrayRef output_size,
-    IntArrayRef input_size,
-    c10::optional<double> scales_d,
-    c10::optional<double> scales_h,
-    c10::optional<double> scales_w,
-    const Tensor& grad_input) {
-  upsample_nearest3d_backward_out_cuda_template<nearest_neighbor_exact_bw_compute_source_index>(
-      grad_input, grad_output, output_size, input_size, scales_d, scales_h, scales_w);
+  if (exact) {
+    upsample_nearest3d_backward_out_cuda_template<nearest_neighbor_exact_bw_compute_source_index>(
+        grad_input, grad_output, output_size, input_size, scales_d, scales_h, scales_w);
+  } else {
+    upsample_nearest3d_backward_out_cuda_template<nearest_neighbor_bw_compute_source_index>(
+        grad_input, grad_output, output_size, input_size, scales_d, scales_h, scales_w);
+  }
 }
 
 using at::native::upsample::compute_output_size;
@@ -322,23 +314,13 @@ using at::native::upsample_cuda::get_scale_value;
 Tensor upsample_nearest3d_cuda(
     const Tensor& input,
     c10::optional<IntArrayRef> output_size,
-    c10::optional<ArrayRef<double>> scale_factors) {
+    c10::optional<ArrayRef<double>> scale_factors,
+    bool exact) {
   auto osize = compute_output_size(input.sizes(), output_size, scale_factors);
   auto scale_d = get_scale_value(scale_factors, 0);
   auto scale_h = get_scale_value(scale_factors, 1);
   auto scale_w = get_scale_value(scale_factors, 2);
-  return at::upsample_nearest3d(input, osize, scale_d, scale_h, scale_w);
-}
-
-Tensor upsample_nearest_exact3d_cuda(
-    const Tensor& input,
-    c10::optional<IntArrayRef> output_size,
-    c10::optional<ArrayRef<double>> scale_factors) {
-  auto osize = compute_output_size(input.sizes(), output_size, scale_factors);
-  auto scale_d = get_scale_value(scale_factors, 0);
-  auto scale_h = get_scale_value(scale_factors, 1);
-  auto scale_w = get_scale_value(scale_factors, 2);
-  return at::upsample_nearest_exact3d(input, osize, scale_d, scale_h, scale_w);
+  return at::upsample_nearest3d(input, osize, scale_d, scale_h, scale_w, exact);
 }
 
 // when structured kernels can handle QuantizedCPU, update these overloads to be CompositeExplicitAutograd
@@ -346,24 +328,13 @@ Tensor upsample_nearest3d_backward_cuda(
     const Tensor& grad_output,
     c10::optional<IntArrayRef> output_size,
     IntArrayRef input_size,
-    c10::optional<ArrayRef<double>> scale_factors) {
+    c10::optional<ArrayRef<double>> scale_factors,
+    bool exact) {
   auto osize = compute_output_size(input_size, output_size, scale_factors);
   auto scale_d = get_scale_value(scale_factors, 0);
   auto scale_h = get_scale_value(scale_factors, 1);
   auto scale_w = get_scale_value(scale_factors, 2);
-  return at::upsample_nearest3d_backward(grad_output, osize, input_size, scale_d, scale_h, scale_w);
-}
-
-Tensor upsample_nearest_exact3d_backward_cuda(
-    const Tensor& grad_output,
-    c10::optional<IntArrayRef> output_size,
-    IntArrayRef input_size,
-    c10::optional<ArrayRef<double>> scale_factors) {
-  auto osize = compute_output_size(input_size, output_size, scale_factors);
-  auto scale_d = get_scale_value(scale_factors, 0);
-  auto scale_h = get_scale_value(scale_factors, 1);
-  auto scale_w = get_scale_value(scale_factors, 2);
-  return at::upsample_nearest_exact3d_backward(grad_output, osize, input_size, scale_d, scale_h, scale_w);
+  return at::upsample_nearest3d_backward(grad_output, osize, input_size, scale_d, scale_h, scale_w, exact);
 }
 
 } // namespace native

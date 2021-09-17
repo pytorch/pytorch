@@ -211,41 +211,28 @@ Tensor upsample_nearest3d_quantized_cpu(
     IntArrayRef osize,
     c10::optional<double> scale_d,
     c10::optional<double> scale_h,
-    c10::optional<double> scale_w) {
-  return _upsample_nearest3d_quantized_cpu<nearest_neighbor_compute_source_index>(
-      input, osize, scale_d, scale_h, scale_w);
-}
+    c10::optional<double> scale_w,
+    bool exact) {
 
-Tensor upsample_nearest_exact3d_quantized_cpu(
-    const Tensor& input,
-    IntArrayRef osize,
-    c10::optional<double> scale_d,
-    c10::optional<double> scale_h,
-    c10::optional<double> scale_w) {
-  return _upsample_nearest3d_quantized_cpu<nearest_neighbor_exact_compute_source_index>(
-      input, osize, scale_d, scale_h, scale_w);
+  if (exact) {
+    return _upsample_nearest3d_quantized_cpu<nearest_neighbor_exact_compute_source_index>(
+        input, osize, scale_d, scale_h, scale_w);
+  } else {
+    return _upsample_nearest3d_quantized_cpu<nearest_neighbor_compute_source_index>(
+        input, osize, scale_d, scale_h, scale_w);
+  }
 }
 
 Tensor upsample_nearest3d_quantized_cpu(
     const Tensor& input,
     c10::optional<IntArrayRef> output_size,
-    c10::optional<ArrayRef<double>> scale_factors) {
+    c10::optional<ArrayRef<double>> scale_factors,
+    bool exact) {
   auto osize = compute_output_size(input.sizes(), output_size, scale_factors);
   auto scale_d = get_scale_value(scale_factors, 0);
   auto scale_h = get_scale_value(scale_factors, 1);
   auto scale_w = get_scale_value(scale_factors, 2);
-  return upsample_nearest3d_quantized_cpu(input, osize, scale_d, scale_h, scale_w);
-}
-
-Tensor upsample_nearest_exact3d_quantized_cpu(
-    const Tensor& input,
-    c10::optional<IntArrayRef> output_size,
-    c10::optional<ArrayRef<double>> scale_factors) {
-  auto osize = compute_output_size(input.sizes(), output_size, scale_factors);
-  auto scale_d = get_scale_value(scale_factors, 0);
-  auto scale_h = get_scale_value(scale_factors, 1);
-  auto scale_w = get_scale_value(scale_factors, 2);
-  return upsample_nearest_exact3d_quantized_cpu(input, osize, scale_d, scale_h, scale_w);
+  return upsample_nearest3d_quantized_cpu(input, osize, scale_d, scale_h, scale_w, exact);
 }
 
 } // namespace native

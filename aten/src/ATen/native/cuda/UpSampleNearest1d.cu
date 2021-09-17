@@ -188,18 +188,16 @@ TORCH_IMPL_FUNC(upsample_nearest1d_out_cuda) (
     const Tensor& input,
     IntArrayRef output_size,
     c10::optional<double> scales,
+    bool exact,
     const Tensor& output
 ) {
-  upsample_nearest1d_out_cuda_template<nearest_neighbor_compute_source_index>(output, input, output_size, scales);
-}
-
-TORCH_IMPL_FUNC(upsample_nearest_exact1d_out_cuda) (
-    const Tensor& input,
-    IntArrayRef output_size,
-    c10::optional<double> scales,
-    const Tensor& output
-) {
-  upsample_nearest1d_out_cuda_template<nearest_neighbor_exact_compute_source_index>(output, input, output_size, scales);
+  if (exact) {
+    upsample_nearest1d_out_cuda_template<nearest_neighbor_exact_compute_source_index>(
+        output, input, output_size, scales);
+  } else {
+    upsample_nearest1d_out_cuda_template<nearest_neighbor_compute_source_index>(
+        output, input, output_size, scales);
+  }
 }
 
 TORCH_IMPL_FUNC(upsample_nearest1d_backward_out_cuda) (
@@ -207,21 +205,16 @@ TORCH_IMPL_FUNC(upsample_nearest1d_backward_out_cuda) (
     IntArrayRef output_size,
     IntArrayRef input_size,
     c10::optional<double> scales,
+    bool exact,
     const Tensor& grad_input
 ) {
-  upsample_nearest1d_backward_out_cuda_template<nearest_neighbor_bw_compute_source_index>(
-      grad_input, grad_output, output_size, input_size, scales);
-}
-
-TORCH_IMPL_FUNC(upsample_nearest_exact1d_backward_out_cuda) (
-    const Tensor& grad_output,
-    IntArrayRef output_size,
-    IntArrayRef input_size,
-    c10::optional<double> scales,
-    const Tensor& grad_input
-) {
-  upsample_nearest1d_backward_out_cuda_template<nearest_neighbor_exact_bw_compute_source_index>(
-      grad_input, grad_output, output_size, input_size, scales);
+  if (exact) {
+    upsample_nearest1d_backward_out_cuda_template<nearest_neighbor_exact_bw_compute_source_index>(
+        grad_input, grad_output, output_size, input_size, scales);
+  } else {
+    upsample_nearest1d_backward_out_cuda_template<nearest_neighbor_bw_compute_source_index>(
+        grad_input, grad_output, output_size, input_size, scales);
+  }
 }
 
 } // namespace native

@@ -1724,23 +1724,14 @@
 - name: upsample_trilinear3d(Tensor self, int[3] output_size, bool align_corners, float? scales_d=None, float? scales_h=None, float? scales_w=None) -> Tensor
   self: upsample_trilinear3d_backward(grad, output_size, self.sizes(), align_corners, scales_d, scales_h, scales_w)
 
-- name: upsample_nearest1d(Tensor self, int[1] output_size, float? scales=None) -> Tensor
-  self: upsample_nearest1d_backward(grad, output_size, self.sizes(), scales)
+- name: upsample_nearest1d(Tensor self, int[1] output_size, float? scales=None, bool exact=False) -> Tensor
+  self: upsample_nearest1d_backward(grad, output_size, self.sizes(), scales, exact)
 
-- name: upsample_nearest_exact1d(Tensor self, int[1] output_size, float? scales=None) -> Tensor
-  self: upsample_nearest_exact1d_backward(grad, output_size, self.sizes(), scales)
+- name: upsample_nearest2d(Tensor self, int[2] output_size, float? scales_h=None, float? scales_w=None, bool exact=False) -> Tensor
+  self: upsample_nearest2d_backward(grad, output_size, self.sizes(), scales_h, scales_w, exact)
 
-- name: upsample_nearest2d(Tensor self, int[2] output_size, float? scales_h=None, float? scales_w=None) -> Tensor
-  self: upsample_nearest2d_backward(grad, output_size, self.sizes(), scales_h, scales_w)
-
-- name: upsample_nearest_exact2d(Tensor self, int[2] output_size, float? scales_h=None, float? scales_w=None) -> Tensor
-  self: upsample_nearest_exact2d_backward(grad, output_size, self.sizes(), scales_h, scales_w)
-
-- name: upsample_nearest3d(Tensor self, int[3] output_size, float? scales_d=None, float? scales_h=None, float? scales_w=None) -> Tensor
-  self: upsample_nearest3d_backward(grad, output_size, self.sizes(), scales_d, scales_h, scales_w)
-
-- name: upsample_nearest_exact3d(Tensor self, int[3] output_size, float? scales_d=None, float? scales_h=None, float? scales_w=None) -> Tensor
-  self: upsample_nearest_exact3d_backward(grad, output_size, self.sizes(), scales_d, scales_h, scales_w)
+- name: upsample_nearest3d(Tensor self, int[3] output_size, float? scales_d=None, float? scales_h=None, float? scales_w=None, bool exact=False) -> Tensor
+  self: upsample_nearest3d_backward(grad, output_size, self.sizes(), scales_d, scales_h, scales_w, exact)
 
 - name: upsample_linear1d.vec(Tensor input, int[]? output_size, bool align_corners, float[]? scale_factors) -> Tensor
   input: upsample_linear1d_backward(grad, output_size, input.sizes(), align_corners, scale_factors)
@@ -1754,23 +1745,14 @@
 - name: upsample_bicubic2d.vec(Tensor input, int[]? output_size, bool align_corners, float[]? scale_factors) -> Tensor
   input: upsample_bicubic2d_backward(grad, output_size, input.sizes(), align_corners, scale_factors)
 
-- name: upsample_nearest1d.vec(Tensor input, int[]? output_size, float[]? scale_factors) -> Tensor
-  input: upsample_nearest1d_backward(grad, output_size, input.sizes(), scale_factors)
+- name: upsample_nearest1d.vec(Tensor input, int[]? output_size, float[]? scale_factors, bool exact=False) -> Tensor
+  input: upsample_nearest1d_backward(grad, output_size, input.sizes(), scale_factors, exact)
 
-- name: upsample_nearest_exact1d.vec(Tensor input, int[]? output_size, float[]? scale_factors) -> Tensor
-  input: upsample_nearest_exact1d_backward(grad, output_size, input.sizes(), scale_factors)
+- name: upsample_nearest2d.vec(Tensor input, int[]? output_size, float[]? scale_factors, bool exact=False) -> Tensor
+  input: upsample_nearest2d_backward(grad, output_size, input.sizes(), scale_factors, exact)
 
-- name: upsample_nearest2d.vec(Tensor input, int[]? output_size, float[]? scale_factors) -> Tensor
-  input: upsample_nearest2d_backward(grad, output_size, input.sizes(), scale_factors)
-
-- name: upsample_nearest_exact2d.vec(Tensor input, int[]? output_size, float[]? scale_factors) -> Tensor
-  input: upsample_nearest_exact2d_backward(grad, output_size, input.sizes(), scale_factors)
-
-- name: upsample_nearest3d.vec(Tensor input, int[]? output_size, float[]? scale_factors) -> Tensor
-  input: upsample_nearest3d_backward(grad, output_size, input.sizes(), scale_factors)
-
-- name: upsample_nearest_exact3d.vec(Tensor input, int[]? output_size, float[]? scale_factors) -> Tensor
-  input: upsample_nearest_exact3d_backward(grad, output_size, input.sizes(), scale_factors)
+- name: upsample_nearest3d.vec(Tensor input, int[]? output_size, float[]? scale_factors, bool exact=False) -> Tensor
+  input: upsample_nearest3d_backward(grad, output_size, input.sizes(), scale_factors, exact)
 
 - name: _adaptive_avg_pool2d(Tensor self, int[2] output_size) -> Tensor
   self: _adaptive_avg_pool2d_backward(grad, self)
@@ -2048,23 +2030,14 @@
 - name: upsample_trilinear3d_backward(Tensor grad_output, int[3] output_size, int[5] input_size, bool align_corners, float? scales_d=None, float? scales_h=None, float? scales_w=None) -> Tensor
   grad_output: upsample_trilinear3d(grad, output_size, align_corners, scales_d, scales_h, scales_w)
 
-- name: upsample_nearest1d_backward(Tensor grad_output, int[1] output_size, int[3] input_size, float? scales=None) -> Tensor
-  grad_output: upsample_nearest1d(grad, output_size, scales)
+- name: upsample_nearest1d_backward(Tensor grad_output, int[1] output_size, int[3] input_size, float? scales=None, bool exact=False) -> Tensor
+  grad_output: upsample_nearest1d(grad, output_size, scales, exact)
 
-- name: upsample_nearest_exact1d_backward(Tensor grad_output, int[1] output_size, int[3] input_size, float? scales=None) -> Tensor
-  grad_output: upsample_nearest_exact1d(grad, output_size, scales)
+- name: upsample_nearest2d_backward(Tensor grad_output, int[2] output_size, int[4] input_size, float? scales_h=None, float? scales_w=None, bool exact=False) -> Tensor
+  grad_output: upsample_nearest2d(grad, output_size, scales_h, scales_w, exact)
 
-- name: upsample_nearest2d_backward(Tensor grad_output, int[2] output_size, int[4] input_size, float? scales_h=None, float? scales_w=None) -> Tensor
-  grad_output: upsample_nearest2d(grad, output_size, scales_h, scales_w)
-
-- name: upsample_nearest_exact2d_backward(Tensor grad_output, int[2] output_size, int[4] input_size, float? scales_h=None, float? scales_w=None) -> Tensor
-  grad_output: upsample_nearest_exact2d(grad, output_size, scales_h, scales_w)
-
-- name: upsample_nearest3d_backward(Tensor grad_output, int[3] output_size, int[5] input_size, float? scales_d=None, float? scales_h=None, float? scales_w=None) -> Tensor
-  grad_output: upsample_nearest3d(grad, output_size, scales_d, scales_h, scales_w)
-
-- name: upsample_nearest_exact3d_backward(Tensor grad_output, int[3] output_size, int[5] input_size, float? scales_d=None, float? scales_h=None, float? scales_w=None) -> Tensor
-  grad_output: upsample_nearest_exact3d(grad, output_size, scales_d, scales_h, scales_w)
+- name: upsample_nearest3d_backward(Tensor grad_output, int[3] output_size, int[5] input_size, float? scales_d=None, float? scales_h=None, float? scales_w=None, bool exact=False) -> Tensor
+  grad_output: upsample_nearest3d(grad, output_size, scales_d, scales_h, scales_w, exact)
 
 - name: upsample_linear1d_backward.vec(Tensor grad_output, int[]? output_size, int[] input_size, bool align_corners, float[]? scale_factors) -> Tensor
   grad_output: upsample_linear1d(grad, output_size, align_corners, scale_factors)
@@ -2078,23 +2051,14 @@
 - name: upsample_bicubic2d_backward.vec(Tensor grad_output, int[]? output_size, int[] input_size, bool align_corners, float[]? scale_factors) -> Tensor
   grad_output: upsample_bicubic2d(grad, output_size, align_corners, scale_factors)
 
-- name: upsample_nearest1d_backward.vec(Tensor grad_output, int[]? output_size, int[] input_size, float[]? scale_factors) -> Tensor
-  grad_output: upsample_nearest1d(grad, output_size, scale_factors)
+- name: upsample_nearest1d_backward.vec(Tensor grad_output, int[]? output_size, int[] input_size, float[]? scale_factors, bool exact=False) -> Tensor
+  grad_output: upsample_nearest1d(grad, output_size, scale_factors, exact)
 
-- name: upsample_nearest_exact1d_backward.vec(Tensor grad_output, int[]? output_size, int[] input_size, float[]? scale_factors) -> Tensor
-  grad_output: upsample_nearest_exact1d(grad, output_size, scale_factors)
+- name: upsample_nearest2d_backward.vec(Tensor grad_output, int[]? output_size, int[] input_size, float[]? scale_factors, bool exact=False) -> Tensor
+  grad_output: upsample_nearest2d(grad, output_size, scale_factors, exact)
 
-- name: upsample_nearest2d_backward.vec(Tensor grad_output, int[]? output_size, int[] input_size, float[]? scale_factors) -> Tensor
-  grad_output: upsample_nearest2d(grad, output_size, scale_factors)
-
-- name: upsample_nearest_exact2d_backward.vec(Tensor grad_output, int[]? output_size, int[] input_size, float[]? scale_factors) -> Tensor
-  grad_output: upsample_nearest_exact2d(grad, output_size, scale_factors)
-
-- name: upsample_nearest3d_backward.vec(Tensor grad_output, int[]? output_size, int[] input_size, float[]? scale_factors) -> Tensor
-  grad_output: upsample_nearest3d(grad, output_size, scale_factors)
-
-- name: upsample_nearest_exact3d_backward.vec(Tensor grad_output, int[]? output_size, int[] input_size, float[]? scale_factors) -> Tensor
-  grad_output: upsample_nearest_exact3d(grad, output_size, scale_factors)
+- name: upsample_nearest3d_backward.vec(Tensor grad_output, int[]? output_size, int[] input_size, float[]? scale_factors, bool exact=False) -> Tensor
+  grad_output: upsample_nearest3d(grad, output_size, scale_factors, exact)
 
 - name: sigmoid_backward(Tensor grad_output, Tensor output) -> Tensor
   grad_output: sigmoid_backward(grad, output.conj())
