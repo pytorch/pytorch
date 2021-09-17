@@ -6737,5 +6737,68 @@ TEST(LoopNest, compressMultipleBuffers) {
   IS_IMM_WITH_VAL(Int, cBuf.node()->dim(1), 1);
 }
 
+TEST(LoopNest, sanitizeNames) {
+  std::vector<DimArg> dim_args;
+  // Let's pick names that would overlap with default index names if not
+  // sanitized properly:
+  dim_args.emplace_back(ExprHandle(alloc<Var>("i", kInt)), "");
+  dim_args.emplace_back(ExprHandle(alloc<Var>("N:2", kInt)), "");
+  // Now let's create a many dimensions so that we had to use the same letter
+  // for different loops
+  for (int i = 0; i < 10; i++) {
+    dim_args.emplace_back(ExprHandle(alloc<Var>("N", kInt)), "");
+  }
+
+  // Now create two Computes with conflicting after sanitization names:
+  Tensor X = Compute("$X:!", dim_args, [&](const std::vector<VarHandle>& v) {
+    return v[0] + v[1] + v[9] + 1;
+  });
+  Tensor Y = Reduce(
+      "%X\"+",
+      {},
+      Sum(),
+      [&](const std::vector<VarHandle>& v) { return X.load(v); },
+      dim_args);
+
+  // Finally, let's verify what we got after sanitization:
+  LoopNest l({X, Y});
+  StmtPtr s = l.root_stmt();
+  LoopNest::sanitizeNames(s);
+
+  std::ostringstream oss;
+  oss << *s;
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK:  for (int i = 0; i < i_1; i++) {
+# CHECK-NEXT:    for (int j = 0; j < N_2_1; j++) {
+# CHECK-NEXT:      for (int k = 0; k < N_9; k++) {
+# CHECK-NEXT:        for (int l = 0; l < N_8; l++) {
+# CHECK-NEXT:          for (int m = 0; m < N_7; m++) {
+# CHECK-NEXT:            for (int n = 0; n < N_6; n++) {
+# CHECK-NEXT:              for (int o = 0; o < N_5; o++) {
+# CHECK-NEXT:                for (int p = 0; p < N_4; p++) {
+# CHECK-NEXT:                  for (int i1 = 0; i1 < N_3; i1++) {
+# CHECK-NEXT:                    for (int j1 = 0; j1 < N_2; j1++) {
+# CHECK-NEXT:                      for (int k1 = 0; k1 < N_1; k1++) {
+# CHECK-NEXT:                        for (int l1 = 0; l1 < N; l1++) {
+# CHECK-NEXT:                          v_X__[i, j, k, l, m, n, o, p, i1, j1, k1, l1] = ((i + j) + j1) + 1;
+# CHECK:  v_X___1 = int(0);
+# CHECK-NEXT:  for (int i_2 = 0; i_2 < i_1; i_2++) {
+# CHECK-NEXT:    for (int j_1 = 0; j_1 < N_2_1; j_1++) {
+# CHECK-NEXT:      for (int k_1 = 0; k_1 < N_9; k_1++) {
+# CHECK-NEXT:        for (int l_1 = 0; l_1 < N_8; l_1++) {
+# CHECK-NEXT:          for (int m_1 = 0; m_1 < N_7; m_1++) {
+# CHECK-NEXT:            for (int n_1 = 0; n_1 < N_6; n_1++) {
+# CHECK-NEXT:              for (int o_1 = 0; o_1 < N_5; o_1++) {
+# CHECK-NEXT:                for (int p_1 = 0; p_1 < N_4; p_1++) {
+# CHECK-NEXT:                  for (int i1_1 = 0; i1_1 < N_3; i1_1++) {
+# CHECK-NEXT:                    for (int j1_1 = 0; j1_1 < N_2; j1_1++) {
+# CHECK-NEXT:                      for (int k1_1 = 0; k1_1 < N_1; k1_1++) {
+# CHECK-NEXT:                        for (int l1_1 = 0; l1_1 < N; l1_1++) {
+# CHECK-NEXT:                          v_X___1 = ReduceOp((v_X___1) + (v_X__[i_2, j_1, k_1, l_1, m_1, n_1, o_1, p_1, i1_1, j1_1, k1_1, l1_1]), reduce_args={i_2, j_1, k_1, l_1, m_1, n_1, o_1, p_1, i1_1, j1_1, k1_1, l1_1});
+      )IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+}
+
 } // namespace jit
 } // namespace torch
