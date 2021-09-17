@@ -11,6 +11,7 @@ constexpr size_t BYTECODE_INDEX_REGISTER_SIZE = 4;
 
 constexpr size_t BYTECODE_INDEX_SCHEMA_ARGUMENTS = 0;
 constexpr size_t BYTECODE_INDEX_SCHEMA_RETURNS = 1;
+constexpr size_t BYTECODE_INDEX_SCHEMA_IS_INTERFACE = 2;
 
 constexpr size_t BYTECODE_INDEX_ARGUMENT_NAME = 0;
 constexpr size_t BYTECODE_INDEX_ARGUMENT_TYPE = 1;
