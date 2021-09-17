@@ -256,7 +256,7 @@ void updateHaloInfoForReference(
     auto consumer_root_axis = *consumer_it;
     auto root_axis_info =
         gpu_lower->haloInfo().getRootAxisInfo(consumer_root_axis);
-    if (root_axis_info.width() == 0) {
+    if (root_axis_info.width() == nullptr) {
       continue;
     }
     halo_info.setRootAxisInfo(reference_root_axis, root_axis_info);
@@ -2005,7 +2005,7 @@ namespace {
 struct PredicateContigInfo {
  public:
   // Iteration domain that is only comprised of merge transformations
-  IterDomain* contig_id;
+  IterDomain* contig_id = nullptr;
   // The set of root iteration domains that make up the contig_id
   std::unordered_set<IterDomain*> root_ids;
 };
