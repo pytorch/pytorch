@@ -8,7 +8,10 @@ from torch.fx.node import Node, Target, Argument, map_arg, map_aggregate
 from torch.fx.node import _get_qualified_name
 from torch.fx.passes.shape_prop import ShapeProp
 
+from torch.fx._compatibility import compatibility
 
+
+@compatibility(is_backward_compatible=False)
 def replace_target_nodes_with(
     fx_module: GraphModule,
     old_op: str,
@@ -33,12 +36,12 @@ def replace_target_nodes_with(
             val_map[node] = new_graph.node_copy(node, lambda n: val_map[n])
     fx_module.graph = new_graph
 
-
+@compatibility(is_backward_compatible=False)
 class size_bytes(NamedTuple):
     output_size: int
     total_size: int
 
-
+@compatibility(is_backward_compatible=False)
 def get_size_of_all_nodes(
     fx_module: GraphModule, args: Optional[List[torch.Tensor]] = None
 ) -> None:
@@ -56,7 +59,7 @@ def get_size_of_all_nodes(
         node.size_bytes = get_size_of_node(fx_module, node)
     return
 
-
+@compatibility(is_backward_compatible=False)
 def get_tensor_meta(node: Node) -> Any:
     tensor_meta = node.meta.get("tensor_meta")
 
@@ -68,7 +71,7 @@ def get_tensor_meta(node: Node) -> Any:
 
     return tensor_meta
 
-
+@compatibility(is_backward_compatible=False)
 def get_size_of_node(fx_module: GraphModule, node: Node) -> size_bytes:
     """Given a node with node.dtype and node.shape, return its total size and its output size.
     total_size = weights + bias + output_size
@@ -99,15 +102,15 @@ def get_size_of_node(fx_module: GraphModule, node: Node) -> size_bytes:
     output_size = size_per_elem_bytes * output_elem
     return size_bytes(output_size, total_size)
 
-
+@compatibility(is_backward_compatible=False)
 def serialize_shape(shape: torch.Size) -> str:
     return str(list(shape))
 
-
+@compatibility(is_backward_compatible=False)
 def serialize_stride(stride: Tuple[int]) -> str:
     return str(list(stride))
 
-
+@compatibility(is_backward_compatible=False)
 def serialize_tensor_quantization(
     tensor: torch.Tensor, weights: Dict, pcq_prefix: str
 ) -> Tuple[Dict, Dict]:
@@ -206,7 +209,7 @@ def serialize_tensor_quantization(
         scheme["q_per_channel_axis"] = tensor.q_per_channel_axis()
     return scheme, per_channel_dict
 
-
+@compatibility(is_backward_compatible=False)
 def serialize_weight(tensor: torch.Tensor, weights: Dict, name: str) -> Dict:
     weight_dict: Dict[str, Dict] = {name: {}}
     weight_dict[name]["dtype"] = str(tensor.dtype)
@@ -224,7 +227,7 @@ def serialize_weight(tensor: torch.Tensor, weights: Dict, name: str) -> Dict:
 
     return weight_dict
 
-
+@compatibility(is_backward_compatible=False)
 def serialize_leaf_module(
     node: Node, weights_metadata: Dict, weights: Dict, name_prefix: str
 ) -> Dict:
@@ -241,7 +244,7 @@ def serialize_leaf_module(
 
     return parameters
 
-
+@compatibility(is_backward_compatible=False)
 def serialize_module(fx_module: GraphModule, weights: Dict, name_prefix="") -> Dict:
     """Recursively Serializes a graph module (fx_module) to a dictionary which is later exported to JSON.
     It also adds all weights the provided weights dictionary by qualified_name.
