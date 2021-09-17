@@ -163,12 +163,17 @@ test_python_legacy_jit() {
 }
 
 test_python_shard1() {
-  time python test/run_test.py --exclude-jit-executor --exclude-distributed-tests --shard 1 2 --verbose --determine-from="$DETERMINE_FROM"
+  time python test/run_test.py --exclude-jit-executor --shard 1 "$NUM_TEST_SHARDS" --verbose --determine-from="$DETERMINE_FROM"
   assert_git_not_dirty
 }
 
 test_python_shard2() {
-  time python test/run_test.py --exclude-jit-executor --exclude-distributed-tests --shard 2 2 --verbose --determine-from="$DETERMINE_FROM"
+  time python test/run_test.py --exclude-jit-executor --shard 2 "$NUM_TEST_SHARDS" --verbose --determine-from="$DETERMINE_FROM"
+  assert_git_not_dirty
+}
+
+test_python_shard() {
+  time python test/run_test.py --exclude-jit-executor --shard "$1" "$NUM_TEST_SHARDS" --verbose --determine-from="$DETERMINE_FROM"
   assert_git_not_dirty
 }
 
@@ -530,6 +535,9 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-test2 || "${JOB_BASE_NAME}" == *-test2 || "$
   test_custom_script_ops
   test_custom_backend
   test_torch_function_benchmark
+elif [[ "${SHARD_NUMBER}" -gt 2 ]]; then
+  # Handle arbitrary number of shards
+  test_python_shard "$SHARD_NUMBER"
 elif [[ "${BUILD_ENVIRONMENT}" == *vulkan-linux* ]]; then
   test_vulkan
 elif [[ "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then

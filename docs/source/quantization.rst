@@ -505,7 +505,7 @@ API Example::
   qconfig_dict = {"": torch.quantization.get_default_qat_qconfig('qnnpack')}
   model_to_quantize.train()
   # prepare
-  model_prepared = quantize_fx.prepare_qat_fx(model_to_qunatize, qconfig_dict)
+  model_prepared = quantize_fx.prepare_qat_fx(model_to_quantize, qconfig_dict)
   # training loop (not shown)
   # quantize
   model_quantized = quantize_fx.convert_fx(model_prepared)

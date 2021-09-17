@@ -109,6 +109,21 @@ def split_const_subgraphs(
 
     split = split_module(mod_traced, module, mod_partition)
 
+    # Later we are creating get_attr nodes from main module get_attr nodes and we use the
+    # same node.target. If there's a get_attr that refers to an attributes in a module and
+    # this module is not included in submod_1 then we would have a trouble when creating
+    # get_attr ndoes because it will try to find the module that owns the attribute first.
+    # Setting owning_module here makes the owning_module of submod_1.graph to None then
+    # the check when creating get_attr nodes will get skipped.
+    split.submod_1.graph.owning_module = mod_traced
+
+    # The module that a call_module node refers to gets copied to submodules during split.
+    # The path to the module also gets inlined, i.e. mod.a.b -> mod_a_b. Here we need to
+    # attach inlined modules to `mod_traced` as it's the owning module now.
+    for node in split.submod_1.graph.nodes:
+        if node.op == "call_module":
+            setattr(mod_traced, node.target, getattr(split.submod_1, node.target))
+
     # Gather all names that are output from the const folding subgraph, which we
     # will need to set dummy params on the module.
     const_output_names: List[str] = []
@@ -194,6 +209,7 @@ def split_const_subgraphs(
     # Now we have a mapping from const output names to the index they are passed
     # into submod_1, so swap in getattrs for placeholders.
     ph_idx = 0
+
     for node in split.submod_1.graph.nodes:
         if node.op != "placeholder":
             continue
@@ -217,6 +233,7 @@ def split_const_subgraphs(
                 const_output_name,
                 torch.nn.Parameter(torch.randn(1)),
             )
+
         with split.submod_1.graph.inserting_before(node):
             new_node = split.submod_1.graph.get_attr(const_output_name)
             new_node.meta = node.meta.copy()

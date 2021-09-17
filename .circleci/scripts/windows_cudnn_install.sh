@@ -32,12 +32,15 @@ cudnn_install_folder="C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v${CUDA
 if [[ -f "${cudnn_install_folder}/include/cudnn.h" ]]; then
     echo "Existing cudnn installation found, skipping install..."
 else
-    curl --retry 3 -o "${cudnn_installer_name}" "$cudnn_installer_link"
-    7z x "${cudnn_installer_name}" -ocudnn
-    # Use '${var:?}/*' to avoid potentially expanding to '/*'
-    # Remove all of the directories before attempting to copy files
-    rm -rf "${cudnn_install_folder:?}/*"
-    cp -rf cudnn/cuda/* "${cudnn_install_folder}"
-    rm -rf cudnn
-    rm -f "${cudnn_installer_name}.zip"
+    tmp_dir=$(mktemp -d)
+    (
+        pushd "${tmp_dir}"
+        curl --retry 3 -o "${cudnn_installer_name}" "$cudnn_installer_link"
+        7z x "${cudnn_installer_name}" -ocudnn
+        # Use '${var:?}/*' to avoid potentially expanding to '/*'
+        # Remove all of the directories before attempting to copy files
+        rm -rf "${cudnn_install_folder:?}/*"
+        cp -rf cudnn/cuda/* "${cudnn_install_folder}"
+    )
+    rm -rf "${tmp_dir}"
 fi
