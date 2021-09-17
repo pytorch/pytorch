@@ -295,6 +295,19 @@ Tensor _lu_with_info_jvp(
   const Tensor& pivs
 );
 
+Tensor mkldnn_convolution_forward(
+  const Tensor& self,
+  const Tensor& self_fw_grad,
+  const Tensor& weight_fw_grad,
+  const Tensor& bias_fw_grad,
+  const Tensor& weight,
+  const at::IntArrayRef padding,
+  const at::IntArrayRef stride,
+  const at::IntArrayRef dilation,
+  const int groups,
+  const Tensor& result
+);
+
 Tensor cat_jvp(at::TensorList tensors, int64_t dim);
 Tensor cumprod_jvp(Tensor self_t, Tensor self_p, Tensor result, int dim);
 Tensor gather_with_keepdimed_indices(const Tensor& input, int64_t dim, const Tensor& indices, bool keepdim);
