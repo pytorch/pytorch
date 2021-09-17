@@ -133,7 +133,7 @@ def rds_write(
         return
 
     pr = os.getenv("CIRCLE_PR_NUMBER", None)
-    if pr.strip() == "":
+    if pr is not None and pr.strip() == "":
         pr = None
 
     base = {
