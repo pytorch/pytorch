@@ -245,6 +245,41 @@ struct SpecializationKey {
 };
 #pragma pack(pop)
 
+/// Compiled kernel interface, used to set up kernel properties from
+/// python.  Implemented by template-specialized subclasses.
+struct CompileResultBase {
+  /// Destructor.
+  virtual ~CompileResultBase() = default;
+
+  /// Set contained code to cg.
+  virtual void setCode(const py::object& cg) = 0;
+
+  /// Set vector of (arg, dim) pairs that indicate from which argument/dimension
+  /// to extract the output size.
+  virtual void setShapeFrom(
+      const std::vector<std::pair<int, int>>& indices) = 0;
+
+  /// Set vector of (arg, dim) pairs that indicate from which argument/dimension
+  /// to extract the output stride.
+  virtual void setStrideArgsFrom(
+      const std::vector<std::pair<int, int>>& indices) = 0;
+
+  /// Add an output for this kernel with the associated options and storage
+  /// order.
+  virtual void addAllocatedOutput(
+      int options_from,
+      const std::vector<int>& storage_order) = 0;
+
+  /// Add a shape-checking constraint on the inputs.
+  virtual void addShapeCheck(const std::tuple<int, int, int, int>& indices) = 0;
+};
+
+/// Proxy object to bind compilation results to python.
+struct CompileResultProxy {
+  CompileResultBase* res;
+  explicit CompileResultProxy(CompileResultBase* r) : res(r) {}
+};
+
 /// Metaprogramming struct containing the number of arguments to a
 /// kernel.  Counts input, outputs that need to be allocated, and
 /// outputs that are provided by the caller.
@@ -262,10 +297,11 @@ struct ArgCounts {
 /// of arguments (from specializing ArgCounts) and the maximum number
 /// of tensor dimensions.
 template <typename Counts, int MAX_DIMS>
-struct CompileResult {
+struct CompileResult : public CompileResultBase {
   /// Set contained code to cg.
-  void setCode(CodeGen* cg) {
-    cg_ = cg;
+  void setCode(const py::object& cg) {
+    pyCg_ = cg;
+    cg_ = cg.cast<CodeGen*>();
   }
 
   /// Set vector of (arg, dim) pairs that indicate from which argument/dimension
@@ -353,11 +389,13 @@ struct CompileResult {
           args[allocatedArgsOffset + i].data_ptr();
     }
 
+    // Release the GIL before calling the kernel, unless the kernel is
+    // tiny.
     if (numel < 128) {
-      // don't bother releasing GIL for tiny tensors
-      // TODO(jansel): should we also skip this on GPU?
+      // TODO(jansel): should we also skip releasing the GIL on GPU?
       cg_->call_with_numel(callArgs, numel);
     } else {
+      py::gil_scoped_release release;
       cg_->call_with_numel(callArgs, numel);
     }
   }
@@ -393,6 +431,9 @@ struct CompileResult {
  private:
   /// Cached generated code.
   CodeGen* cg_ = nullptr;
+
+  /// Python handle to generated code object, for refcounting.
+  py::object pyCg_;
 
   /// Vector of pairs (arg, dim) indicating from which argument and
   /// dimension to retrieve the shape for the output of this kernel.
