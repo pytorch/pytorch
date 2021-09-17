@@ -294,6 +294,7 @@ jobs:
       - name: Test PyTorch
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          IS_GHA: 1
         run: |
           if [[ $TEST_CONFIG == 'multigpu' ]]; then
             TEST_COMMAND=.jenkins/pytorch/multigpu-test.sh
@@ -314,6 +315,7 @@ jobs:
             -e CUSTOM_TEST_ARTIFACT_BUILD_DIR \
             -e GITHUB_ACTIONS \
             -e IN_CI \
+            -e IS_GHA \
             -e IN_WHEEL_TEST \
             -e SHARD_NUMBER \
             -e JOB_BASE_NAME \
