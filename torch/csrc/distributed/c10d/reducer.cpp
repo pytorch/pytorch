@@ -1680,7 +1680,8 @@ bool Reducer::rebuild_buckets() {
           rebuilt_params_,
           bucket_size_limits,
           expect_sparse_gradients_,
-          rebuilt_param_indices_);
+          rebuilt_param_indices_,
+          logger_);
 
   if (ddp_set_last_bucket_as_small) {
     // Reverse again because buckets were rebuilt in the opposite of gradient
@@ -1936,7 +1937,8 @@ compute_bucket_assignment_by_size(
     const std::vector<at::Tensor>& tensors,
     const std::vector<size_t>& bucket_size_limits,
     const std::vector<bool>& expect_sparse_gradient,
-    const std::vector<int64_t>& tensor_indices) {
+    const std::vector<int64_t>& tensor_indices,
+    const c10::optional<std::weak_ptr<c10d::Logger>>& logger) {
   // Either expect_sparse_gradient is not specified or it has as many elements
   // as the vector with tensors.
   TORCH_INTERNAL_ASSERT(
@@ -1966,9 +1968,12 @@ compute_bucket_assignment_by_size(
 
   for (const auto i : c10::irange(tensors.size())) {
     const auto& tensor = tensors[i];
-    // TODO: This is not a reducer method so it does not have access to logger,
-    // pass in logger directly here.
-    TORCH_CHECK(!tensor.is_sparse(), "No support for sparse tensors.");
+    auto msg = std::string("No support for sparse tensors.");
+    if (logger.has_value()) {
+      REDUCER_CHECK(!tensor.is_sparse(), logger.value(), msg);
+    } else {
+      TORCH_CHECK(!tensor.is_sparse(), msg);
+    }
 
     // when tensor_indices is empty, the index of tensors[i] assigned to
     // bucket is i, otherwise the tensor index is tensor_indices[i].
@@ -2056,8 +2061,9 @@ compute_bucket_assignment_by_size(
 // Verifies corresponding params in the model replica have the same sizes/strides
 // across processes.
 void verify_params_across_processes(
-    c10::intrusive_ptr<c10d::ProcessGroup> process_group,
-    std::vector<at::Tensor> params) {
+    const c10::intrusive_ptr<c10d::ProcessGroup>& process_group,
+    const std::vector<at::Tensor>& params,
+    const c10::optional<std::weak_ptr<c10d::Logger>>& logger) {
   size_t i = 0;
   for (const auto& t : params) {
     i += 2 * t.dim();
@@ -2094,26 +2100,27 @@ void verify_params_across_processes(
     // I'd like to include which process we are in the message,
     // but ProcessGroup::getRank is not public!
     for (const auto& sz : t.sizes()) {
-      // TODO: pass in logger and use REDUCER_CHECK.
-      TORCH_CHECK(
-          sz == control_accessor[i++],
-          "params[",
-          p,
-          "] in this process"
-          " with sizes ",
-          t.sizes(),
-          " appears not to match sizes of the same param in process 0.");
+      auto msg = c10::str("params[", p, "] in this process",
+                        " with sizes ",
+                        t.sizes(),
+                        " appears not to match sizes of the same param in process 0.");
+      if (logger.has_value()) {
+        REDUCER_CHECK(sz == control_accessor[i++], logger.value(), msg)
+      } else {
+        TORCH_CHECK(sz == control_accessor[i++], msg)
+      }
+
     }
     for (const auto& str : t.strides()) {
-      // TODO: pass in logger and use REDUCER_CHECK.
-      TORCH_CHECK(
-          str == control_accessor[i++],
-          "replicas[",
-          p,
-          "] in this process"
-          " with strides ",
-          t.strides(),
-          " appears not to match strides of the same param in process 0.");
+      auto msg = c10::str("params[", p, "] in this process",
+                        " with sizes ",
+                        t.sizes(),
+                        " appears not to match strides of the same param in process 0.");
+      if (logger.has_value()) {
+        REDUCER_CHECK(str == control_accessor[i++], logger.value(), msg)
+      } else {
+        TORCH_CHECK(str == control_accessor[i++], msg)
+      }
     }
   }
 }

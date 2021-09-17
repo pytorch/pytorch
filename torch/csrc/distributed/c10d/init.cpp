@@ -1544,11 +1544,40 @@ Example::
 
   module.def(
       "_compute_bucket_assignment_by_size",
-      &::c10d::compute_bucket_assignment_by_size,
+      [](const std::vector<at::Tensor>& tensors,
+            const std::vector<size_t>& bucket_size_limits,
+            const std::vector<bool>& expect_sparse_gradient,
+            const std::vector<int64_t>& tensor_indices,
+            const c10::optional<std::shared_ptr<::c10d::Logger>>& logger) {
+             if (logger.has_value()) {
+                std::weak_ptr<::c10d::Logger> logger_weakref = logger.value();
+                return ::c10d::compute_bucket_assignment_by_size(tensors, bucket_size_limits, expect_sparse_gradient, tensor_indices, {logger_weakref});
+             } else {
+                return ::c10d::compute_bucket_assignment_by_size(tensors, bucket_size_limits, expect_sparse_gradient, tensor_indices, {});
+             }
+      },
       py::arg("tensors"),
       py::arg("bucket_size"),
       py::arg("expect_sparse_gradient") = std::vector<bool>(),
       py::arg("tensor_indices") = std::vector<int64_t>(),
+      py::arg("logger") = c10::optional<std::shared_ptr<::c10d::Logger>>{},
+      py::call_guard<py::gil_scoped_release>());
+
+  module.def(
+      "_verify_model_across_ranks",
+      [](const c10::intrusive_ptr<::c10d::ProcessGroup>& process_group,
+         const std::vector<at::Tensor>& params,
+         const c10::optional<std::shared_ptr<::c10d::Logger>>& logger) {
+             if (logger.has_value()) {
+                std::weak_ptr<::c10d::Logger> logger_weakref = logger.value();
+                verify_replica0_across_processes(process_group, params, {logger_weakref});
+             } else {
+                verify_replica0_across_processes(process_group, params, {});
+             }
+      },
+      py::arg("process_group"),
+      py::arg("replicas"),
+      py::arg("logger") = c10::optional<std::shared_ptr<::c10d::Logger>>{},
       py::call_guard<py::gil_scoped_release>());
 
   module.def(
