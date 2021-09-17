@@ -39,6 +39,10 @@ class TORCH_API PythonRemoteCall : public RpcCommandBase {
     return std::move(deviceMap_);
   }
 
+  const DeviceMap& getDeviceMap() const {
+    return deviceMap_;
+  }
+
   c10::intrusive_ptr<Message> toMessageImpl() && override;
   static std::unique_ptr<PythonRemoteCall> fromMessage(const Message& message);
 

@@ -44,6 +44,10 @@ class TORCH_API ScriptCall : public RpcCommandBase {
     return std::move(deviceMap_);
   }
 
+  const DeviceMap& getDeviceMap() const {
+    return deviceMap_;
+  }
+
   c10::intrusive_ptr<Message> toMessageImpl() && override;
   static std::unique_ptr<ScriptCall> fromMessage(const Message& message);
 

@@ -22,7 +22,7 @@ class TORCH_API RRefMessageBase : public RpcCommandBase {
 
   const RRefId& rrefId();
 
-  DeviceMap&& moveDeviceMap() &&;
+  const DeviceMap& getDeviceMap() const;
 
  protected:
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)

@@ -26,6 +26,10 @@ class TORCH_API PythonCall final : public RpcCommandBase {
     return std::move(deviceMap_);
   }
 
+  const DeviceMap& getDeviceMap() const {
+    return deviceMap_;
+  }
+
  private:
   SerializedPyObj serializedPyObj_;
   DeviceMap deviceMap_;

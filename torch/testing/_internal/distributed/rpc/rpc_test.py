@@ -6847,6 +6847,9 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture):
     def test_my_device_map_rref_remote_callee_device_py_py(self):
         self._test_device_on_callee(_rref_remote_test_callee_device_py_py)
 
+
+
+    @skip_if_lt_x_gpu(3)
     def test_my_device_map_rref_backward(self):
         dst = worker_name((self.rank + 1) % self.world_size)
         options = self.rpc_backend_options

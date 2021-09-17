@@ -164,8 +164,8 @@ class TORCH_API Message final : public torch::CustomClassHolder {
   std::vector<char> payload_;
   std::vector<torch::Tensor> tensors_;
   MessageType type_ = MessageType::UNKNOWN;
-  DeviceMap deviceMap_;
   int64_t id_ = -1;
+  DeviceMap deviceMap_;
 };
 
 // Create a response Message of type Exception.

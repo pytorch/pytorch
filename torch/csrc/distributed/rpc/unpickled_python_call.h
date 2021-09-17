@@ -32,8 +32,8 @@ class TORCH_API UnpickledPythonCall : public RpcCommandBase {
     return isAsyncExecution_;
   }
 
-  DeviceMap&& moveDeviceMap() && {
-    return std::move(deviceMap_);
+  const DeviceMap& getDeviceMap() const {
+    return deviceMap_;
   }
 
  private:

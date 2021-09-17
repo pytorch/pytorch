@@ -170,7 +170,7 @@ c10::intrusive_ptr<JitFuture> RequestCallbackImpl::processScriptCall(
     RpcCommandBase& rpc,
     std::vector<c10::Stream> streams) const {
   auto& scriptCall = static_cast<ScriptCall&>(rpc);
-  DeviceMap reversed_dm = reverse(std::move(scriptCall).moveDeviceMap()); // TODO(pbelevich): replace with getDeviceMap
+  DeviceMap reversed_dm = reverse(scriptCall.getDeviceMap());
   c10::intrusive_ptr<JitFuture> future;
   if (scriptCall.hasOp()) {
     future = runJitOperator(
@@ -194,7 +194,7 @@ c10::intrusive_ptr<JitFuture> RequestCallbackImpl::processPythonCall(
     RpcCommandBase& rpc,
     std::vector<c10::Stream> streams) const {
   auto& upc = static_cast<UnpickledPythonCall&>(rpc);
-  DeviceMap reversed_dm = reverse(std::move(upc).moveDeviceMap()); // TODO(pbelevich): replace with getDeviceMap
+  DeviceMap reversed_dm = reverse(upc.getDeviceMap());
   auto future = runPythonFunction(
       upc.pythonUdf(), std::move(streams), upc.isAsyncExecution());
 
@@ -244,7 +244,7 @@ c10::intrusive_ptr<JitFuture> RequestCallbackImpl::processPythonRemoteCall(
 c10::intrusive_ptr<JitFuture> RequestCallbackImpl::processPythonRRefFetchCall(
     RpcCommandBase& rpc) const {
   auto& prf = static_cast<PythonRRefFetchCall&>(rpc);
-  DeviceMap reversed_dm = reverse(std::move(prf).moveDeviceMap()); // TODO(pbelevich): replace with getDeviceMap
+  DeviceMap reversed_dm = reverse(prf.getDeviceMap());
   auto future = retrieveOwnerRRef(prf.rrefId());
 
   return future->then(

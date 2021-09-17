@@ -149,7 +149,7 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::processScriptCall(
     RpcCommandBase& rpc,
     std::vector<c10::Stream> streams) const {
   auto& scriptCall = static_cast<ScriptCall&>(rpc);
-  DeviceMap reversed_dm = reverse(std::move(scriptCall).moveDeviceMap()); // TODO(pbelevich): replace with getDeviceMap
+  DeviceMap reversed_dm = reverse(scriptCall.getDeviceMap());
   TORCH_CHECK(
       scriptCall.hasOp(), "Only supports the case where ScriptCall has an op");
   auto future = runJitOperator(
@@ -248,7 +248,7 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::retrieveOwnerRRef(
 c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::
     processScriptRRefFetchCall(RpcCommandBase& rpc) const {
   auto& srf = static_cast<ScriptRRefFetchCall&>(rpc);
-  DeviceMap reversed_dm = reverse(std::move(srf).moveDeviceMap()); // TODO(pbelevich): replace with getDeviceMap
+  DeviceMap reversed_dm = reverse(srf.getDeviceMap());
   auto future = retrieveOwnerRRef(srf.rrefId());
 
   return future->then(

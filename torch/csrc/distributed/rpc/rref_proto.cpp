@@ -14,8 +14,8 @@ const RRefId& RRefMessageBase::rrefId() {
   return rrefId_;
 }
 
-DeviceMap&& RRefMessageBase::moveDeviceMap() && {
-  return std::move(deviceMap_);
+const DeviceMap& RRefMessageBase::getDeviceMap() const {
+  return deviceMap_;
 }
 
 /////////////////////////// ForkMessageBase //////////////////////////////////
