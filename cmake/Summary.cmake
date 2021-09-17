@@ -182,4 +182,6 @@ function(caffe2_print_configuration_summary)
   message(STATUS "  USE_BREAKPAD         : ${USE_BREAKPAD}")
   message(STATUS "  Public Dependencies  : ${Caffe2_PUBLIC_DEPENDENCY_LIBS}")
   message(STATUS "  Private Dependencies : ${Caffe2_DEPENDENCY_LIBS}")
+  # coreml
+  message(STATUS "  USE_COREML_DELEGATE     : ${USE_COREML_DELEGATE}")
 endfunction()
