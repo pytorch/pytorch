@@ -448,7 +448,7 @@ $6 = torch._ops.aten.add_($1, $5)''')
             with enable_python_mode(LoggingTensor):
                 with enable_python_mode(LoggingTensor):
                     pass
-    
+
     def test_enable_python_mode_subclass_autograd_device_check(self) -> None:
         x = LoggingTensor(torch.tensor([3.0, 4.0], requires_grad=True))
         y = torch.randn(2)

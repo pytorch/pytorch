@@ -721,7 +721,6 @@ void validate_outputs(
         }
       }
     }
-  
     // We should not build graph for Tensors that are not differentiable
     TORCH_INTERNAL_ASSERT(isDifferentiableType(grad.scalar_type()));
   }
