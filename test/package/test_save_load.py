@@ -234,6 +234,26 @@ class TestSaveLoad(PackageTestCase):
             exporter.intern("**")
             exporter.save_module(imported_obj2_module)
 
+    def test_save_imported_module_using_package_importer(self):
+        """Exercise a corner case: re-packaging a module that uses `torch_package_importer`
+        """
+        import package_a.use_torch_package_importer
+
+        buffer = BytesIO()
+        with PackageExporter(buffer) as exporter:
+            exporter.intern("**")
+            exporter.save_module("package_a.use_torch_package_importer")
+
+        buffer.seek(0)
+
+        importer = PackageImporter(buffer)
+
+        # Should export without error.
+        buffer2 = BytesIO()
+        with PackageExporter(buffer2, importer=(importer, sys_importer)) as exporter:
+            exporter.intern("**")
+            exporter.save_module("package_a.use_torch_package_importer")
+
 
 if __name__ == "__main__":
     run_tests()

@@ -53,6 +53,10 @@ class _ModuleProviderAction(Enum):
     # we may encounter a `_mock` module from the original package. If we do,
     # just ignore it and write a `_mock` module once.
     REPACKAGED_MOCK_MODULE = 5
+    # Special case: PackageImporter adds a fake module
+    # (`torch_package_importer`) that allows packaged code to access it. Don't
+    # re-export this.
+    SKIP = 6
 
 
 class PackagingErrorReason(Enum):
@@ -420,6 +424,17 @@ class PackageExporter:
             module_name in self.dependency_graph
             and self.dependency_graph.nodes[module_name].get("provided") is True
         ):
+            return
+
+        # Special case: PackageImporter provides a special module called
+        # `torch_package_importer` that allows packaged modules to reference
+        # their PackageImporter. We don't want to re-export this.
+        if module_name == "torch_package_importer":
+            self.dependency_graph.add_node(
+                module_name,
+                action=_ModuleProviderAction.SKIP,
+                provided=True,
+            )
             return
 
         if module_name == "_mock":
@@ -904,7 +919,8 @@ class PackageExporter:
 
             elif action == _ModuleProviderAction.REPACKAGED_MOCK_MODULE:
                 self._write_mock_file()
-
+            elif action == _ModuleProviderAction.SKIP:
+                continue
             else:
                 raise AssertionError(
                     f"Invalid action: {module_name}, {action}. Please report a bug to PyTorch."
