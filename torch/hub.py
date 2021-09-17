@@ -5,7 +5,6 @@ import os
 import re
 import shutil
 import sys
-import string
 import tempfile
 import torch
 import warnings
