@@ -209,7 +209,7 @@ jobs:
         name: Setup Python3
         with:
           python-version: '3.x'
-      - name: Run test scripts
+      - name: Test
         shell: bash
         env:
           PYTORCH_FINAL_PACKAGE_DIR: /c/${{ github.run_id }}/build-results/

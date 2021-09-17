@@ -44,6 +44,7 @@ env:
   CUSTOM_TEST_ARTIFACT_BUILD_DIR: build/custom_test_artifacts
   ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
   PR_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
 !{{ common.concurrency(build_environment) }}
 
@@ -126,19 +127,17 @@ jobs:
     env:
       DOCKER_IMAGE: ${{ needs.calculate-docker-image.outputs.docker_image }}
       JOB_BASE_NAME: !{{ build_environment }}-build
-      IS_GHA: "1"
     steps:
       !{{ common.setup_ec2_linux() }}
       !{{ common.checkout_pytorch("recursive") }}
       - name: Pull docker image
         run: |
           docker pull "${DOCKER_IMAGE}"
-      - name: Build PyTorch
+      - name: Build
         run: |
           # detached container should get cleaned up by teardown_ec2_linux
           container_name=$(docker run \
             -e BUILD_ENVIRONMENT \
-            -e IS_GHA \
             -e JOB_BASE_NAME \
             -e MAX_JOBS="$(nproc --ignore=2)" \
             -e SCCACHE_BUCKET \
@@ -291,10 +290,11 @@ jobs:
       - name: Output disk space left
         run: |
           sudo df -H
-      - name: Test PyTorch
+      - name: Test
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           IS_GHA: 1
+          AWS_DEFAULT_REGION: us-east-1
         run: |
           if [[ $TEST_CONFIG == 'multigpu' ]]; then
             TEST_COMMAND=.jenkins/pytorch/multigpu-test.sh
@@ -316,6 +316,7 @@ jobs:
             -e GITHUB_ACTIONS \
             -e IN_CI \
             -e IS_GHA \
+            -e AWS_DEFAULT_REGION \
             -e IN_WHEEL_TEST \
             -e SHARD_NUMBER \
             -e JOB_BASE_NAME \
