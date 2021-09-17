@@ -38,7 +38,7 @@ bool Function::append_operator(
                                 are removed */
   // Keep the original opname in code_
   code_->op_names_.emplace_back(name, overload_name);
-  auto opname = code_->op_names_.back();
+  const auto& opname = code_->op_names_.back();
 
   const auto& opname_c10 = opname;
   std::function<void(Stack&)> fn;
