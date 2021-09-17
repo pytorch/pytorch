@@ -90,7 +90,7 @@ std::unordered_map<Val*, Val*> getSimplificationMap(Fusion* fusion) {
       // add entry into existing set
     } else {
       // create new set entry
-      disjoint_root_sets.push_back(std::unordered_set<IterDomain*>());
+      disjoint_root_sets.emplace_back(std::unordered_set<IterDomain*>());
       auto* new_set = &disjoint_root_sets.back();
       new_set->emplace(id0);
       new_set->emplace(id1);

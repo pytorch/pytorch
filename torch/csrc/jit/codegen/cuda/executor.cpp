@@ -735,7 +735,7 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
               dataTypeSize(aten_to_data_type(input.toTensor().scalar_type()));
         }
       }
-      for (auto output : allocated_outputs) {
+      for (const auto& output : allocated_outputs) {
         bytes += output.numel() *
             dataTypeSize(aten_to_data_type(output.scalar_type()));
       }

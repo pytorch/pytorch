@@ -426,7 +426,9 @@ const AxisHaloInfo& HaloInfo::getRootAxisInfo(IterDomain* id) const {
 }
 
 AxisHaloInfo& HaloInfo::getRootAxisInfo(IterDomain* id) {
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
   return const_cast<AxisHaloInfo&>(
+      // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
       const_cast<const HaloInfo*>(this)->getRootAxisInfo(id));
 }
 
@@ -442,7 +444,9 @@ const AxisHaloInfo& HaloInfo::getRootAxisInfo(kir::IterDomain* id) const {
 }
 
 AxisHaloInfo& HaloInfo::getRootAxisInfo(kir::IterDomain* id) {
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
   return const_cast<AxisHaloInfo&>(
+      // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
       const_cast<const HaloInfo*>(this)->getRootAxisInfo(id));
 }
 

@@ -1599,13 +1599,11 @@ void alterBatchNormImplIndexBackward(Node* node) {
         1));
     empty_tensor->moveBefore(node);
 
-    for (auto iter = bn_buffer_in_indices.begin();
-         iter != bn_buffer_in_indices.end();
-         ++iter) {
-      subgraph->inputs()[*iter]->setType(
-          node->inputs()[*iter]->type()->cast<TensorType>()->withScalarType(
+    for (const auto& item : bn_buffer_in_indices) {
+      subgraph->inputs()[item]->setType(
+          node->inputs()[item]->type()->cast<TensorType>()->withScalarType(
               at::ScalarType::Float));
-      node->replaceInput(*iter, empty_tensor->output());
+      node->replaceInput(item, empty_tensor->output());
     }
   }
 }

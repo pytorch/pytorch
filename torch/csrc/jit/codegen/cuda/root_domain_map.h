@@ -172,7 +172,7 @@ class ComputeAtRootDomainMap;
 class TORCH_CUDA_CU_API UnmappableReductionDomains : private IterVisitor {
  public:
   UnmappableReductionDomains();
-  virtual ~UnmappableReductionDomains() = default;
+  ~UnmappableReductionDomains() override = default;
 
   //! Returns true when mapping consumer domains would cause a
   //! reduction output domain to be mapped with a consumer domain of

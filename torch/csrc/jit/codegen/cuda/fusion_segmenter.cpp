@@ -619,7 +619,7 @@ void detailGroupPrint(std::ostream& os, const SegmentedGroup* group) {
 
   auto expr_to_print = groupExprPrintSorting(group->exprs());
 
-  for (size_t i = 0; i < expr_to_print.size(); i++) {
+  for (const auto i : c10::irange(expr_to_print.size())) {
     irp.handle(expr_to_print[i]);
   }
   os << "}\n\n";

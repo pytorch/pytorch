@@ -350,7 +350,7 @@ FusionKernelRuntime* FusionExecutorCache::getKernelRuntimeFor(
         return true;
       });
 
-  FusionKernelRuntime* kernel_runtime;
+  FusionKernelRuntime* kernel_runtime = nullptr;
   if (reuse_it != kernel_runtimes.end()) {
     kernel_runtime = reuse_it->get();
     kernel_runtime->updateHeuristicsLaunchParams(new_heuristics.get());

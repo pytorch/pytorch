@@ -34,7 +34,7 @@ class InputDomainCounter : public IterVisitor {
     InputDomainCounter counter(domain);
 
     std::unordered_map<IterDomain*, std::pair<int, int>> count_map;
-    for (auto entry : counter.domain_set_) {
+    for (const auto& entry : counter.domain_set_) {
       auto id = entry.first;
       auto input_id_set = entry.second;
       int concrete_counts = 0;
