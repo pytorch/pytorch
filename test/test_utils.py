@@ -594,7 +594,7 @@ TORCHHUB_EXAMPLE_RELEASE_URL = 'https://github.com/ailzhang/torchhub_example/rel
 
 @unittest.skipIf(IS_SANDCASTLE, 'Sandcastle cannot ping external')
 class TestHub(TestCase):
-    @retry(URLError, tries=3, skip_after_retries=True)
+    @retry(URLError, tries=3)
     def test_load_from_github(self):
         hub_model = hub.load(
             'ailzhang/torchhub_example',
@@ -605,7 +605,7 @@ class TestHub(TestCase):
         self.assertEqual(sum_of_state_dict(hub_model.state_dict()),
                          SUM_OF_HUB_EXAMPLE)
 
-    @retry(URLError, tries=3, skip_after_retries=True)
+    @retry(URLError, tries=3)
     def test_load_from_local_dir(self):
         local_dir = hub._get_cache_or_reload(
             'ailzhang/torchhub_example', force_reload=False)
@@ -618,7 +618,7 @@ class TestHub(TestCase):
         self.assertEqual(sum_of_state_dict(hub_model.state_dict()),
                          SUM_OF_HUB_EXAMPLE)
 
-    @retry(URLError, tries=3, skip_after_retries=True)
+    @retry(URLError, tries=3)
     def test_load_from_branch(self):
         hub_model = hub.load(
             'ailzhang/torchhub_example:ci/test_slash',
@@ -628,7 +628,7 @@ class TestHub(TestCase):
         self.assertEqual(sum_of_state_dict(hub_model.state_dict()),
                          SUM_OF_HUB_EXAMPLE)
 
-    @retry(URLError, tries=3, skip_after_retries=True)
+    @retry(URLError, tries=3)
     def test_set_dir(self):
         temp_dir = tempfile.gettempdir()
         hub.set_dir(temp_dir)
@@ -642,12 +642,12 @@ class TestHub(TestCase):
         assert os.path.exists(temp_dir + '/ailzhang_torchhub_example_master')
         shutil.rmtree(temp_dir + '/ailzhang_torchhub_example_master')
 
-    @retry(URLError, tries=3, skip_after_retries=True)
+    @retry(URLError, tries=3)
     def test_list_entrypoints(self):
         entry_lists = hub.list('ailzhang/torchhub_example', force_reload=True)
         self.assertObjectIn('mnist', entry_lists)
 
-    @retry(URLError, tries=3, skip_after_retries=True)
+    @retry(URLError, tries=3)
     def test_download_url_to_file(self):
         temp_file = os.path.join(tempfile.gettempdir(), 'temp')
         hub.download_url_to_file(TORCHHUB_EXAMPLE_RELEASE_URL, temp_file, progress=False)
@@ -655,13 +655,13 @@ class TestHub(TestCase):
         self.assertEqual(sum_of_state_dict(loaded_state),
                          SUM_OF_HUB_EXAMPLE)
 
-    @retry(URLError, tries=3, skip_after_retries=True)
+    @retry(URLError, tries=3)
     def test_load_state_dict_from_url(self):
         loaded_state = hub.load_state_dict_from_url(TORCHHUB_EXAMPLE_RELEASE_URL)
         self.assertEqual(sum_of_state_dict(loaded_state),
                          SUM_OF_HUB_EXAMPLE)
 
-    @retry(URLError, tries=3, skip_after_retries=True)
+    @retry(URLError, tries=3)
     def test_load_zip_checkpoint(self):
         hub_model = hub.load(
             'ailzhang/torchhub_example',
@@ -672,7 +672,7 @@ class TestHub(TestCase):
                          SUM_OF_HUB_EXAMPLE)
 
     # Test the default zipfile serialization format produced by >=1.6 release.
-    @retry(URLError, tries=3, skip_after_retries=True)
+    @retry(URLError, tries=3)
     def test_load_zip_1_6_checkpoint(self):
         hub_model = hub.load(
             'ailzhang/torchhub_example',
@@ -688,7 +688,7 @@ class TestHub(TestCase):
             torch.hub.set_dir(dirname)
             self.assertEqual(torch.hub.get_dir(), dirname)
 
-    @retry(URLError, tries=3, skip_after_retries=True)
+    @retry(URLError, tries=3)
     def test_load_state_dict_from_url_with_name(self):
         with tempfile.TemporaryDirectory('hub_dir') as dirname:
             torch.hub.set_dir(dirname)
@@ -698,9 +698,7 @@ class TestHub(TestCase):
             self.assertEqual(sum_of_state_dict(loaded_state),
                              SUM_OF_HUB_EXAMPLE)
 
-    # TODO: Fix this. We're getting an assertion error on the message because we hit a rate API issue.
-    # We should try using a GitHub token that still has credits.
-    @retry(AssertionError, tries=3, skip_after_retries=True)
+    @retry(URLError, tries=3)
     def test_load_commit_from_forked_repo(self):
         with self.assertRaisesRegex(
                 ValueError,
