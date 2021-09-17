@@ -51,10 +51,6 @@ inline void gemm(CUDABLAS_GEMM_ARGTYPES(Dtype)) {
 }
 
 template <>
-void gemm<int32_t>(CUDABLAS_GEMM_ARGTYPES(int32_t));
-template <>
-void gemm<int64_t>(CUDABLAS_GEMM_ARGTYPES(int64_t));
-template <>
 void gemm<double>(CUDABLAS_GEMM_ARGTYPES(double));
 template <>
 void gemm<float>(CUDABLAS_GEMM_ARGTYPES(float));
