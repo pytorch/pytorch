@@ -540,11 +540,8 @@ class TestBinaryUfuncs(TestCase):
         t -= 1
         t *= 1
         t /= 1
-        if self.device_type == 'meta':
+        with self.assertWarnsOnceRegex(UserWarning, 'floor_divide'):
             t //= 1
-        else:
-            with self.assertWarnsOnceRegex(UserWarning, 'floor_divide'):
-                t //= 1
         t %= 1
         self.assertEqual(expected, t.data_ptr())
 
