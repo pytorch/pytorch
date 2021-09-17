@@ -1033,6 +1033,29 @@ void CudaCodeGen::Initialize() {
     }
   }
 
+  // Precompute block and thread extents for call_with_numel().  If
+  // precomputation can't be done (block/thread extents aren't
+  // constant), then disallow call_with_numel.
+  auto block_extents = metavar_rewriter_->gpu_block_extents();
+  auto thread_extents = metavar_rewriter_->gpu_thread_extents();
+  bool canCallWithNumel =
+      !has_random_ && block_extents.size() > 0 && thread_extents.size() > 0;
+  for (size_t i = 1; i < block_extents.size() && canCallWithNumel; i++) {
+    canCallWithNumel = canCallWithNumel && block_extents[i]->isConstant() &&
+        immediateAs<int>(block_extents[i]) == 1;
+  }
+  for (size_t i = 1; i < thread_extents.size() && canCallWithNumel; i++) {
+    canCallWithNumel = canCallWithNumel && thread_extents[i]->isConstant() &&
+        immediateAs<int>(thread_extents[i]) == 1;
+  }
+  if (canCallWithNumel && thread_extents[0]->isConstant()) {
+    // We assume block_extents[0] is output.numel()/thread_block_size_.
+    thread_block_size_ = immediateAs<int>(thread_extents[0]);
+  } else {
+    // Disable call_with_numel.
+    thread_block_size_ = -1;
+  }
+
   GRAPH_DEBUG(
       "Fused TE CUDA kernel:\n",
       oss_.str(),
@@ -1045,6 +1068,58 @@ void CudaCodeGen::Initialize() {
       ")");
 
   CompileToNVRTC(oss_.str(), func_name);
+}
+
+void CudaCodeGen::call_with_numel(void** args, int64_t numel) {
+  if (C10_UNLIKELY(numel == 0)) {
+    return;
+  }
+  if (C10_UNLIKELY(thread_block_size_ <= 0)) {
+    TORCH_INTERNAL_ASSERT(
+        thread_block_size_ >= 0,
+        "call_with_numel() requires a precomputed thread block size");
+  }
+
+  auto const& buffer_args = this->buffer_args();
+  size_t gpu_block_extents =
+      (numel + thread_block_size_ - 1) / thread_block_size_;
+  size_t gpu_thread_extents = thread_block_size_;
+
+  // In CUDA we need to pass pointers to pointers for buffers, thus we need to
+  // go over args and add an extra indirection for such non-scalar
+  // arguments.
+  // Why? See some details here:
+  // https://stackoverflow.com/questions/34388712/cannot-understand-how-jcuda-culaunchkernel-work
+  std::vector<void*> ptr_to_args(buffer_args.size());
+  for (size_t i = 0; i < buffer_args.size(); i++) {
+    ptr_to_args[i] =
+        // NOLINTNEXTLINE: const_cast
+        buffer_args[i].isVar() ? args[i] : const_cast<void**>(&args[i]);
+  }
+
+  const auto device = this->device().index();
+  const auto prior_device = at::cuda::current_device();
+  if (prior_device != device) {
+    at::cuda::set_device(device);
+  }
+
+  auto stream = at::cuda::getCurrentCUDAStream();
+  AT_CUDA_DRIVER_CHECK(nvrtc().cuLaunchKernel(
+      function_,
+      gpu_block_extents,
+      1,
+      1,
+      gpu_thread_extents,
+      1,
+      1,
+      0,
+      stream,
+      ptr_to_args.data(),
+      nullptr));
+
+  if (prior_device != device) {
+    at::cuda::set_device(prior_device);
+  }
 }
 
 void CudaCodeGen::call_raw(const std::vector<void*>& raw_args) {
