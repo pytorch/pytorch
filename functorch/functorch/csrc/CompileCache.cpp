@@ -449,4 +449,148 @@ struct CompileResult : public CompileResultBase {
   std::vector<std::pair<int, std::vector<int>>> allocatedOutputs_;
 };
 
+/// Class template for a kernel cache specialized on the number of
+/// kernel args and max tensor dimensions.
+template <typename Counts, int MAX_DIMS>
+struct ArgAndDimSpecializedCache {
+  /// Construct a cache that compiles kernels using the supplied compileFn.
+  explicit ArgAndDimSpecializedCache(py::object compileFn)
+      : compileFn_(std::move(compileFn)) {}
+
+  /// Call the cached kernel matching args.
+  void call(at::Tensor* args) {
+    cachedCompile(computeCacheKey(args), args)->call(args);
+  }
+
+ private:
+  /// Array of keys used for specializing kernels in this cache.
+  using SpecializationKeys =
+      std::array<SpecializationKey<MAX_DIMS>, Counts::numKeys>;
+
+  /// Compiled kernel.
+  using CachedResult = CompileResult<Counts, MAX_DIMS>;
+
+  /// Array defining groups of aliased tensors.
+  using AliasGroups = std::array<int8_t, Counts::numKeys>;
+
+  /// Cache type mapping specialization keys to compiled kernels.
+  using Cache = std::map<SpecializationKeys, std::unique_ptr<CachedResult>>;
+
+  /// Compile a kernel for the given specializations.
+  std::unique_ptr<CachedResult> compile(
+      const SpecializationKeys& key,
+      at::Tensor* args) {
+    // Handle a cache miss by creating a new specialized implementation.
+    checkDispatchKeys(key);
+    auto cr = std::make_unique<CachedResult>();
+    std::vector<py::object> spec;
+    spec.reserve(Counts::numKeys);
+    for (int i = 0; i < Counts::numKeys; i++) {
+      spec.emplace_back(key[i].toPython(args[i], i >= Counts::numIn));
+    }
+    compileFn_(spec, CompileResultProxy(cr.get()));
+    cr->errorChecks();
+    return cr;
+  }
+
+  /// Retrieve a kernel from cache or compile if not found.
+  CachedResult* cachedCompile(const SpecializationKeys& key, at::Tensor* args) {
+    auto item = cache_.find(key); // protected by GIL
+    if (C10_LIKELY(item != cache_.end())) {
+      return item->second.get();
+    } else { // cache miss
+      auto iter = cache_.emplace(key, compile(key, args)).first;
+      return iter->second.get();
+    }
+  }
+
+  /// Verify that the current set of dispatch keys is supported by
+  /// this kernel, or throw an error.
+  void checkDispatchKeys(const SpecializationKeys& key) {
+    at::DispatchKeySet ks;
+    for (auto& item : key) {
+      ks = ks | item.dispatchKey();
+    }
+    constexpr at::DispatchKeySet supported = at::DispatchKeySet({
+        at::DispatchKey::CPU,
+        at::DispatchKey::CUDA,
+        at::DispatchKey::AutogradCPU,
+        at::DispatchKey::AutogradCUDA,
+        at::DispatchKey::BackendSelect,
+        at::DispatchKey::ADInplaceOrView,
+    });
+    ks = ks - supported;
+    if (C10_LIKELY(ks.empty())) {
+      return;
+    }
+    std::stringstream ss;
+    ss << "DispatchKeys not yet supported:";
+    for (at::DispatchKey k : ks) {
+      ss << " " << k;
+    }
+    throw std::runtime_error(ss.str());
+  }
+
+  /// Compute aliasing relationships between tensors a and b.
+  /// 0 means a/b don't alias.
+  /// 1 means a/b alias and are the same.
+  /// -1 means a/b have crazy aliasing overlaps.
+  int8_t computeAliasing(const at::Tensor& a, const at::Tensor& b) {
+    if (a.is_alias_of(b)) {
+      if (a.is_set_to(b)) {
+        return 1;
+      } else {
+        // TODO(jansel): check for non-overlapping and return 0 in cases where
+        // we can prove no aliasing. Possibly could take some logic from
+        // tensoriterator.
+        return -1;
+      }
+    } else {
+      return 0;
+    }
+  }
+
+  /// Compute aliasing groups: group of tensors that alias each other.
+  AliasGroups computeAliasGroups(at::Tensor* args) {
+    AliasGroups aliasGroups;
+    int8_t currentId = 0;
+    for (int i = 0; i < Counts::numKeys; ++i) {
+      aliasGroups[i] = 0;
+    }
+    for (int i = 0; i < Counts::numKeys; ++i) {
+      if (aliasGroups[i] == 0) {
+        for (int j = i + 1; j < Counts::numKeys; ++j) {
+          int8_t alias_type = computeAliasing(args[i], args[j]);
+          if (alias_type != 0) {
+            if (aliasGroups[i] == 0)
+              ++currentId;
+            aliasGroups[i] = currentId;
+            aliasGroups[j] = currentId * alias_type;
+          }
+        }
+      }
+    }
+    return aliasGroups;
+  }
+
+  /// Compute the set of specialization keys based on the inputs to
+  /// the kernel.
+  SpecializationKeys computeCacheKey(at::Tensor* args) {
+    LocalState state;
+    AliasGroups aliasGroups = computeAliasGroups(args);
+    SpecializationKeys key;
+    for (int i = 0; i < Counts::numKeys; ++i) {
+      key[i] = SpecializationKey<MAX_DIMS>(state, args[i], aliasGroups[i]);
+    }
+    return key;
+  }
+
+ private:
+  /// Storage for the cache.
+  Cache cache_;
+
+  /// The compilation function to apply when filling the cache.
+  py::object compileFn_;
+};
+
 } // namespace
