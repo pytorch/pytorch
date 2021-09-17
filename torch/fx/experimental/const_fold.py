@@ -109,6 +109,11 @@ def split_const_subgraphs(
 
     split = split_module(mod_traced, module, mod_partition)
 
+    # Later we are creating get_attr nodes from main module get_attr nodes and we use the
+    # same node.target. If we don't set the owning_module here, we won't be able to find
+    # the targets of get_attr nodes.
+    split.submod_1.graph.owning_module = mod_traced
+
     # The module that a call_module node refers to gets copied to submodules during split.
     # The path to the module also gets inlined, i.e. mod.a.b -> mod_a_b. Here we need to
     # attach inlined modules to `mod_traced` as it's the owning module now.
