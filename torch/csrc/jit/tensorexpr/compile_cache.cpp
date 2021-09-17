@@ -30,7 +30,10 @@
 /// launch!.
 ///
 #include <torch/csrc/autograd/custom_function.h>
-#include <torch/csrc/jit/tensorexpr/compile_cache.h>
+#include <torch/csrc/jit/python/pybind_utils.h>
+#include <torch/csrc/jit/tensorexpr/codegen.h>
+
+using namespace torch::jit::tensorexpr;
 
 namespace {
 
@@ -135,6 +138,30 @@ struct SpecializationKey {
       }
     }
     return result;
+  }
+
+  /// Convert this specialization key to a python namedtuple.
+  py::object toPython(const at::Tensor& example, bool is_out) const {
+    // Create the python specialization key type (a namedtuple) lazily.
+    static py::object keyType = [] {
+      // create it lazily
+      py::object namedtuple =
+          py::module_::import("collections").attr("namedtuple");
+      return namedtuple(
+          "SpecializationKey",
+          "alias_group,ndim,dtype,device,layout,requires_grad,out,shape,stride");
+    }();
+    py::object ex = py::cast(example);
+    return keyType(
+        static_cast<int>(aliasGroup_),
+        ex.attr("ndim"),
+        ex.attr("dtype"),
+        ex.attr("device"),
+        ex.attr("layout"),
+        ex.attr("requires_grad"),
+        py::bool_(is_out),
+        shape(),
+        stride());
   }
 
  private:
