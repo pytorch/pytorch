@@ -2043,6 +2043,26 @@ def sample_inputs_broadcast_to(op_info, device, dtype, requires_grad, **kwargs):
             make_tensor(size, device, dtype, low=None, high=None, requires_grad=requires_grad),
             args=(shape,)) for size, shape in test_cases)
 
+def sample_inputs_broadcast_tensors(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
+    test_cases: Tuple[tuple] = (((3,), (1, 2, 1), (1, 1), (5, 1, 1),),)
+
+    samples: List[SampleInput] = []
+    for shape, *other_shapes in test_cases:
+        samples.append(SampleInput(make_arg(shape), args=tuple(make_arg(s) for s in other_shapes)))
+
+    return samples
+
+def sample_inputs_block_diag(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
+    test_cases: Tuple[tuple] = (((1, S), (2, S), (3, S),),)
+
+    samples: List[SampleInput] = []
+    for shape, *other_shapes in test_cases:
+        samples.append(SampleInput(make_arg(shape), args=tuple(make_arg(s) for s in other_shapes)))
+
+    return samples
+
 def sample_inputs_bitwise_shift(op_info, device, dtype, requires_grad, **kwargs):
     test_cases = (
         (S, S, S),
@@ -2215,9 +2235,10 @@ def sample_inputs_gather(op_info, device, dtype, requires_grad, **kwargs):
         SampleInput(
             make_tensor((), device, dtype, low=None, high=None, requires_grad=requires_grad),
             args=(0, torch.tensor([0], dtype=torch.int64, device=device))),
+        # Empty index tensor case, see: https://github.com/pytorch/pytorch/pull/65006
         SampleInput(
             make_tensor((S,), device, dtype, low=None, high=None, requires_grad=requires_grad),
-            args=(0, torch.tensor(0, dtype=torch.int64, device=device))),
+            args=(0, torch.tensor([], dtype=torch.uint8, device=device))),
         SampleInput(
             make_tensor((), device, dtype, low=None, high=None, requires_grad=requires_grad),
             args=(0, torch.tensor(0, dtype=torch.int64, device=device))),
@@ -2566,6 +2587,40 @@ def sample_inputs_adaptive_avg_pool2d(op_info, device, dtype, requires_grad, **k
 
     return list(generator())
 
+def sample_inputs_max_pool2d(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    kerneli = [[3, 2], 3]
+    stridei = [[2, 2]]
+    Ni = [1, 4, None]
+    Ci = [32]
+    Hi = [8, 16]
+    Wi = [8, 16]
+    ceil_modei = [True, False]
+    paddingi = [0, 1]
+    dilationi = [1, (1, 2)]
+    return_indicesi = [True, False]
+
+    products = product(kerneli, stridei, Ni, Ci, Hi, Wi, ceil_modei, paddingi, dilationi, return_indicesi)
+
+    def generator():
+        for kernel, stride, N, C, H, W, ceil_mode, padding, dilation, return_indices in products:
+            max_pool = torch.nn.MaxPool2d(kernel, stride, ceil_mode=ceil_mode, padding=padding,
+                                          dilation=dilation, return_indices=return_indices)
+            kwargs = {
+                "kernel_size": max_pool.kernel_size,
+                "stride": max_pool.stride,
+                "padding": max_pool.padding,
+                "dilation": max_pool.dilation,
+                "ceil_mode": max_pool.ceil_mode,
+                "return_indices": max_pool.return_indices,
+            }
+            sample_input = make_arg((N, C, H, W)) if N is not None else (make_arg((C, H, W)))
+
+            yield SampleInput(sample_input, kwargs=kwargs)
+
+    return list(generator())
+
 def sample_inputs_normalize(self, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, low=-1, high=1, device=device, dtype=dtype, requires_grad=requires_grad)
 
@@ -2611,6 +2666,49 @@ def sample_inputs_conv_transpose2d(op_info, device, dtype, requires_grad, **kwar
             ), kwargs=kwargs)
 
     return list(generator())
+
+
+def sample_inputs_conv2d(op_info, device, dtype, requires_grad, jit_fail_sample=False, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    # Ordered as shapes for input, weight, bias
+    # and a dict of values of (stride, padding, groups, dilation)
+    cases: Tuple = (
+        ((1, 3, 4, 4), (3, 3, 3, 3), (3,),
+            {'stride': (2, 2), 'padding': 2, 'groups': 1}),
+        ((2, 4, 8, 8), (2, 2, 3, 3), (2,),
+            {'stride': (3, 2), 'padding': (2, 1), 'groups': 2, 'dilation': (4, 4)}),
+        ((1, 4, 5, 5), (1, 4, 2, 3), (1,),
+            {'stride': 2, 'padding': 1, 'groups': 1, 'dilation': (2, 3)}),
+        ((1, 4, 5, 5), (1, 4, 2, 3), (1,),
+            {'stride': 2, 'padding': 1, 'groups': 1, 'dilation': (2, 3)}),
+        ((1, 2, 4, 3), (4, 2, 3, 4), None,
+            {'stride': 2, 'padding': 1, 'groups': 1}),
+        ((1, 4, 5, 5), (1, 4, 2, 3), (1,),
+            {'stride': 2, 'padding': "valid"}),
+        ((1, 4, 5, 5), (1, 4, 2, 3), (1,),
+            {'stride': 1, 'padding': "same", 'dilation': 3}),
+        # Below are the group related samples from common_nn.py
+        ((2, 4, 6, 6), (4, 1, 3, 3), (4,), {'groups': 4}),
+        ((2, 4, 6, 6), (8, 1, 3, 3), (8,), {'groups': 4}),
+        ((2, 4, 6, 6), (8, 1, 3, 3), None, {'groups': 4}),
+        ((2, 4, 6, 6), (4, 1, 3, 3), (4,), {'groups': 4, 'stride': (3, 2)}),
+        ((2, 4, 6, 6), (4, 1, 3, 3), (4,), {'groups': 4, 'padding': (1, 1)}),
+        ((2, 4, 5, 5), (4, 1, 2, 2), (4,), {'groups': 4, 'dilation': (2, 2)}),
+        ((2, 4, 6, 5), (6, 2, 3, 2), (6,), {'groups': 2}),
+        # With defaults
+        ((1, 4, 5, 5), (3, 4, 3, 3), None, {}),
+    )
+
+    def generator():
+        for input_shape, weight, bias, kwargs in cases:
+            yield SampleInput(make_arg(input_shape), args=(
+                make_arg(weight),
+                make_arg(bias) if bias is not None else bias
+            ), kwargs=kwargs)
+
+    return list(generator())
+
 
 def sample_inputs_layer_norm(opinfo, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -4554,11 +4652,12 @@ def sample_inputs_meshgrid(op_info: OpInfo, device: torch.device, dtype: torch.d
     ]
 
     sample_inputs = []
-    for shapes in test_cases:
+    for shapes, indexing in itertools.product(test_cases, {'ij'}):
         input, args = make_inputs(
             [make_tensor(shape, device, dtype, requires_grad=requires_grad)
              for shape in shapes])
-        sample_inputs.append(SampleInput(input=input, args=args))
+        sample_inputs.append(SampleInput(input=input, args=args,
+                                         kwargs=dict(indexing=indexing)))
     return sample_inputs
 
 
@@ -5331,6 +5430,16 @@ def sample_inputs_kthvalue(op_info, device, dtype, requires_grad, **kwargs):
 
     return [SampleInput(tensor, args=args) for tensor, args in test_cases]
 
+def sample_inputs_dropout(op_info, device, dtype, requires_grad, **kwargs):
+    input = make_tensor((S,), device=device, dtype=dtype, requires_grad=requires_grad)
+
+    return [
+        SampleInput(input),
+        SampleInput(input, kwargs=dict(p=0.0)),
+        SampleInput(input, kwargs=dict(p=1.0)),
+        SampleInput(input, kwargs=dict(training=False)),
+    ]
+
 def sample_inputs_one_hot(op_info, device, dtype, requires_grad, **kwargs):
     def make_input(shape, *, low, high):
         return make_tensor(shape, device=device, dtype=dtype, low=low, high=high, requires_grad=requires_grad)
@@ -5733,6 +5842,14 @@ def reference_mse_loss(input, target, reduction="mean"):
         return np.sum(se)
     else:  # reduction == "none"
         return se
+
+
+def wrapper_set_seed(op, input, *args, **kwargs):
+    """Wrapper to set seed manually for some functions like dropout
+    See: https://github.com/pytorch/pytorch/pull/62315#issuecomment-896143189 for more details.
+    """
+    torch.manual_seed(42)
+    return op(input, *args, **kwargs)
 
 
 def reference_layer_norm(inp: np.ndarray, normalized_shape: Tuple[int], weight=None, bias=None, eps=1e-5):
@@ -6203,6 +6320,24 @@ op_db: List[OpInfo] = [
            supports_out=False,
            supports_forward_ad=True,
            sample_inputs_func=sample_inputs_broadcast_to),
+    OpInfo('broadcast_tensors',
+           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+           supports_out=False,
+           supports_forward_ad=True,
+           skips=(
+               # JIT does not support variadic tensors.
+               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit', dtypes=[torch.float32]),
+           ),
+           sample_inputs_func=sample_inputs_broadcast_tensors),
+    OpInfo('block_diag',
+           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+           supports_out=False,
+           supports_forward_ad=True,
+           skips=(
+               # JIT does not support variadic tensors.
+               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit', dtypes=[torch.float32]),
+           ),
+           sample_inputs_func=sample_inputs_block_diag),
     OpInfo('bitwise_and',
            dtypes=integral_types_and(torch.bool),
            supports_autograd=False,
@@ -7306,9 +7441,7 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_forward_mode_AD'))),
     OpInfo('meshgrid',
            variant_test_name='variadic_tensors',
-           # Our implementation corresponds to "ij" indexing for
-           # numpy.meshgrid, but its default value is "xy".
-           ref=lambda *tensors: np.meshgrid(*tensors, indexing='ij'),
+           ref=np.meshgrid,
            dtypes=all_types_and_complex_and(torch.bfloat16, torch.bool, torch.float16),
            sample_inputs_func=partial(sample_inputs_meshgrid, variant='variadic'),
            skips=[
@@ -7457,6 +7590,21 @@ op_db: List[OpInfo] = [
            skips=(
                # RuntimeError: !lhs.isAliasOf(rhs)INTERNAL ASSERT FAILED at
                # "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":104, please report a bug to PyTorch.
+               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+           ),
+           supports_out=False,),
+    # Added 2 entries for conv2d
+    # One runs with cudnn and other without.
+    OpInfo('nn.functional.conv2d',
+           aliases=('conv2d',),
+           aten_name='conv2d',
+           dtypes=floating_types_and(torch.int64),
+           dtypesIfCUDA=floating_types_and(torch.float16, *[torch.bfloat16] if CUDA11OrLater else []),
+           sample_inputs_func=partial(sample_inputs_conv2d),
+           gradcheck_nondet_tol=GRADCHECK_NONDET_TOL if CUDA11OrLater else 0.,
+           skips=(
+               # RuntimeError: !lhs.isAliasOf(rhs)INTERNAL ASSERT FAILED at
+               # "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":103, please report a bug to PyTorch.
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
            ),
            supports_out=False,),
@@ -7632,6 +7780,15 @@ op_db: List[OpInfo] = [
            dtypesIfCPU=floating_types_and(torch.int64),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_avgpool2d),
+    OpInfo('nn.functional.max_pool2d',
+           aten_name='max_pool2d',
+           supports_autograd=True,
+           supports_out=False,
+           assert_jit_shape_analysis=True,
+           dtypesIfCPU=floating_types(),
+           dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           supports_scripting=False,  # TODO: fix aliasing test
+           sample_inputs_func=sample_inputs_max_pool2d),
     UnaryUfuncInfo(
         'nn.functional.logsigmoid',
         aten_name="log_sigmoid",
@@ -9317,6 +9474,30 @@ op_db: List[OpInfo] = [
                    decorators=(toleranceOverride({torch.float32: tol(atol=0, rtol=4e-6), }),),
                    dtypes=all_types_and(torch.bool),
                    safe_casts_outputs=True),
+    OpInfo(
+        "nn.functional.dropout",
+        op=lambda input, *args, **kwargs:
+            wrapper_set_seed(torch.nn.functional.dropout, input, *args, **kwargs),
+        ref=_NOTHING,
+        dtypes=floating_types_and(torch.bfloat16),
+        dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+        skips=(
+            # Probably because we have used lambda for the op here
+            # AssertionError: JIT Test does not execute any logic
+            DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+            # inplace variant dispatches to dropout kernel, while on CUDA
+            # the op dispatches to _fused_dropout (with a few more conditions)
+            # hence, different values and this skip here
+            DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_neg_view', device_type='cuda'),
+            # On CUDA, the op is dispatched (and a few more conditions) to
+            # _fused_dropout, which doesn't support forward AD
+            DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_forward_mode_AD', device_type='cuda'),),
+        gradcheck_wrapper=wrapper_set_seed,
+        supports_forward_ad=True,
+        supports_out=False,
+        sample_inputs_func=sample_inputs_dropout,
+        inplace_variant=lambda input, *args, **kwargs:
+            wrapper_set_seed(torch.nn.functional.dropout, input, *args, **kwargs, inplace=True)),
     OpInfo(
         "nn.functional.one_hot",
         ref=reference_one_hot,
