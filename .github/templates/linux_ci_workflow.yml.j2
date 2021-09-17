@@ -133,7 +133,7 @@ jobs:
       - name: Pull docker image
         run: |
           docker pull "${DOCKER_IMAGE}"
-      - name: Build PyTorch
+      - name: Build
         run: |
           # detached container should get cleaned up by teardown_ec2_linux
           container_name=$(docker run \
@@ -289,7 +289,7 @@ jobs:
       - name: Output disk space left
         run: |
           sudo df -H
-      - name: Test PyTorch
+      - name: Test
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
