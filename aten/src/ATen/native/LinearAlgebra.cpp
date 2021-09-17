@@ -3,6 +3,7 @@
 #include <ATen/Dispatch.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/NamedTensorUtils.h>
+#include <ATen/native/mkldnn/Matmul.h>
 #include <ATen/native/CPUBlas.h>
 #include <ATen/native/IndexingUtils.h>
 #include <ATen/native/LinearAlgebra.h>
@@ -22,7 +23,6 @@
 #include <functional>
 #include <limits>
 #include <numeric>
-
 
 namespace at {
 namespace meta {
@@ -984,6 +984,11 @@ static void addmm_impl_cpu_(
     result.copy_(self);
   }
 
+  if (use_mkldnn_bf16_matmul(m1, m2, result)){
+    mkldnn_matmul(m1, m2, result, beta.to<float>(), alpha.to<float>());
+    return;
+  }
+
   bool transpose_c = false;
   Tensor c;
 
@@ -1253,6 +1258,11 @@ static inline Tensor& bmm_out_or_baddbmm_(Tensor& self_or_result, const Tensor& 
     return (strides[2] == 1 && strides[1] >= sizes[2])
             || (strides[1] == 1 && strides[2] >= sizes[1]);
   };
+
+  if (use_mkldnn_bf16_matmul(batch1, batch2, self_or_result)){
+    mkldnn_matmul(batch1, batch2, self_or_result, beta.to<float>(), alpha.to<float>());
+    return self_or_result;
+  }
 
   if (contraction_size * res_rows * res_cols < 400) {
     if (is_bmm_out) {
