@@ -610,6 +610,7 @@ Tensor& floor_divide_(Tensor& self, const Tensor& other) {
   return native::floor_divide_out(self, other, self);
 }
 
+// Codegen for Meta doesn't raise this warning.
 Tensor& floor_divide_meta_(Tensor& self, const Tensor& other) {
   TORCH_WARN_ONCE(
     "floor_divide is deprecated, and will be removed in a future version of pytorch. "
