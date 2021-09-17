@@ -17050,6 +17050,222 @@ TEST(NVFuserTest, FusionPointwiseBroadcast_CUDA) {
   testValidate(&fusion, outputs, aten_inputs, {aten_y}, __LINE__, __FILE__);
 }
 
+TEST(NVFuserTest, FusionSmemAliasSerial_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(1);
+  fusion.addInput(tv0);
+
+  auto tv1 = add(tv0, new Double(1));
+  auto tv2 = add(tv1, new Double(1));
+  auto tv3 = add(tv2, new Double(1));
+
+  fusion.addOutput(tv3);
+
+  // Just set the dimension of TIDx
+  auto tv4 = makeSymbolicTensor(1);
+  fusion.addInput(tv4);
+  auto tv5 = add(tv4, new Double(1));
+  fusion.addOutput(tv5);
+
+  tv1->setMemoryType(MemoryType::Shared);
+  tv2->setMemoryType(MemoryType::Shared);
+
+  tv5->axis(0)->parallelize(ParallelType::TIDx);
+
+  // tv1 and tv2 are on shared memory and are not parallelized with
+  // TIDx. They should be predicated as they are redundant and can
+  // interfere with smem aliasing (issue #1100).
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({10}, options);
+
+  at::Tensor t4 = at::randn({1024}, options);
+  std::vector<IValue> aten_inputs = {t0, t4};
+  auto outputs = fe.runFusion(aten_inputs);
+
+  auto ref1 = t0 + 3;
+  auto ref2 = t4 + 1;
+
+  testValidate(&fusion, outputs, aten_inputs, {ref1, ref2}, __LINE__, __FILE__);
+}
+
+TEST(NVFuserTest, FusionGridReductionWithNonExactParallelDimensions_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(1);
+  fusion.addInput(tv0);
+
+  auto tv1 = add(tv0, new Double(1));
+  fusion.addOutput(tv1);
+
+  auto tv2 = makeSymbolicTensor(1);
+  fusion.addInput(tv2);
+  auto tv3 = sum(tv2, {0});
+  fusion.addOutput(tv3);
+
+  tv1->axis(0)->parallelize(ParallelType::TIDx);
+  tv3->axis(0)->parallelize(ParallelType::BIDx);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({17}, options);
+  at::Tensor t2 = at::randn({19}, options);
+  std::vector<IValue> aten_inputs = {t0, t2};
+  auto outputs = fe.runFusion(aten_inputs);
+
+  auto ref1 = t0 + 1;
+  auto ref2 = sum(t2);
+
+  testValidate(&fusion, outputs, aten_inputs, {ref1, ref2}, __LINE__, __FILE__);
+}
+
+TEST(NVFuserTest, FusionGridWelfordWithNonExactParallelDimensions_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(1);
+  fusion.addInput(tv0);
+
+  auto tv1 = add(tv0, new Double(1));
+  fusion.addOutput(tv1);
+
+  auto tv2 = makeSymbolicTensor(1);
+  fusion.addInput(tv2);
+  auto tv3 = Welford(tv2, {0}).avg;
+  fusion.addOutput(tv3);
+
+  tv1->axis(0)->parallelize(ParallelType::TIDx);
+  tv3->axis(0)->parallelize(ParallelType::BIDx);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({17}, options);
+  at::Tensor t2 = at::randn({19}, options);
+  std::vector<IValue> aten_inputs = {t0, t2};
+  auto outputs = fe.runFusion(aten_inputs);
+
+  auto ref1 = t0 + 1;
+  auto ref2 = mean(t2, {0});
+
+  testValidate(&fusion, outputs, aten_inputs, {ref1, ref2}, __LINE__, __FILE__);
+}
+
+TEST(NVFuserTest, FusionGridReductionWithNonExactParallelDimensions2_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(2);
+  fusion.addInput(tv0);
+
+  auto tv1 = sum(tv0, {0, 1});
+  fusion.addOutput(tv1);
+
+  auto tv2 = makeSymbolicTensor(3);
+  fusion.addInput(tv2);
+  auto tv3 = add(tv2, new Double(1));
+  fusion.addOutput(tv3);
+
+  auto tv4 = makeSymbolicTensor(3);
+  fusion.addInput(tv4);
+  auto tv5 = add(tv4, new Double(1));
+  fusion.addOutput(tv5);
+
+  tv1->axis(0)->parallelize(ParallelType::BIDx);
+  tv1->axis(1)->parallelize(ParallelType::TIDx);
+
+  tv3->axis(0)->parallelize(ParallelType::TIDx);
+  tv3->axis(1)->parallelize(ParallelType::TIDy);
+  tv3->axis(2)->parallelize(ParallelType::TIDz);
+
+  tv5->axis(0)->parallelize(ParallelType::BIDx);
+  tv5->axis(1)->parallelize(ParallelType::BIDy);
+  tv5->axis(2)->parallelize(ParallelType::BIDz);
+
+  // TODO: This needs a fix for issue #1102.
+  // Also, need to allow predicated grid reductions.
+#if 0
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({2, 3}, options);
+  at::Tensor t2 = at::randn({5, 6, 7}, options);
+  at::Tensor t4 = at::randn({8, 9, 10}, options);
+  std::vector<IValue> aten_inputs = {t0, t2, t4};
+  auto outputs = fe.runFusion(aten_inputs);
+
+  auto ref1 = t0.sum(at::IntArrayRef{0, 1});
+  auto ref2 = t2 + 1;
+  auto ref3 = t4 + 1;
+
+  testValidate(
+      &fusion, outputs, aten_inputs, {ref1, ref2, ref3}, __LINE__, __FILE__);
+#endif
+}
+
+TEST(NVFuserTest, FusionGridWelfordWithNonExactParallelDimensions2_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(2);
+  fusion.addInput(tv0);
+
+  auto tvs = Welford(tv0, {0, 1});
+  fusion.addOutput(tvs.avg);
+
+  auto tv2 = makeSymbolicTensor(3);
+  fusion.addInput(tv2);
+  auto tv3 = add(tv2, new Double(1));
+  fusion.addOutput(tv3);
+
+  auto tv4 = makeSymbolicTensor(3);
+  fusion.addInput(tv4);
+  auto tv5 = add(tv4, new Double(1));
+  fusion.addOutput(tv5);
+
+  tvs.avg->axis(0)->parallelize(ParallelType::BIDx);
+  tvs.avg->axis(1)->parallelize(ParallelType::TIDx);
+
+  tv3->axis(0)->parallelize(ParallelType::TIDx);
+  tv3->axis(1)->parallelize(ParallelType::TIDy);
+  tv3->axis(2)->parallelize(ParallelType::TIDz);
+
+  tv5->axis(0)->parallelize(ParallelType::BIDx);
+  tv5->axis(1)->parallelize(ParallelType::BIDy);
+  tv5->axis(2)->parallelize(ParallelType::BIDz);
+
+  // TODO: needs a fix for issue #1102
+  // Also, need to allow predicated grid reductions.
+#if 0
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({2, 3}, options);
+  at::Tensor t2 = at::randn({5, 6, 7}, options);
+  at::Tensor t4 = at::randn({8, 9, 10}, options);
+  std::vector<IValue> aten_inputs = {t0, t2, t4};
+  auto outputs = fe.runFusion(aten_inputs);
+
+  auto ref1 = t0.mean(at::IntArrayRef{0, 1});
+  auto ref2 = t2 + 1;
+  auto ref3 = t4 + 1;
+
+  testValidate(
+      &fusion, outputs, aten_inputs, {ref1, ref2, ref3}, __LINE__, __FILE__);
+#endif
+}
+
 } // namespace jit
 } // namespace torch
 #endif // #if defined(USE_CUDA)

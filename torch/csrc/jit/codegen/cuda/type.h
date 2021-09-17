@@ -197,6 +197,16 @@ static constexpr std::array<ParallelType, 6> kParallelTypeThreads = {
     ParallelType::TIDy,
     ParallelType::TIDz};
 
+static constexpr std::array<ParallelType, 6> kParallelTypeBIDs = {
+    ParallelType::BIDx,
+    ParallelType::BIDy,
+    ParallelType::BIDz};
+
+static constexpr std::array<ParallelType, 6> kParallelTypeTIDs = {
+    ParallelType::BIDx,
+    ParallelType::BIDy,
+    ParallelType::BIDz};
+
 enum class MemoryType { Local, Shared, Global };
 
 // sometimes broadcasted tensors may be inputed in the kernel with an explicit 1

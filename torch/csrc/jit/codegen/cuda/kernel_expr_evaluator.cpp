@@ -23,6 +23,19 @@ void ExpressionEvaluator::bind(
   known_values_[value] = concrete_value;
 }
 
+void ExpressionEvaluator::bind(
+    ParallelType pt,
+    Int::ScalarType concrete_value) {
+  TORCH_INTERNAL_ASSERT(isParallelTypeThread(pt));
+  if (precomputed_integers_) {
+    // Need to bind the thread value to integer machine
+    //  in pre-computed mode.
+    precomputed_integers_->bindConcreteParallelTypeValue(pt, concrete_value);
+  } else {
+    known_parallel_dimensions_[pt] = concrete_value;
+  }
+}
+
 c10::optional<Int::ScalarType> ExpressionEvaluator::evaluate(const Val* value) {
   if (precomputed_integers_ && precomputed_integers_->ready()) {
     return precomputed_integers_->getMaybeValueFor(value);
@@ -76,7 +89,17 @@ void ExpressionEvaluator::visit(const Int* value) {
 }
 
 void ExpressionEvaluator::visit(const NamedScalar* named_scalar) {
-  // It's a legal expresison node so we must handle it
+  const auto& name = named_scalar->name();
+  for (auto pt : kParallelTypeThreads) {
+    auto pt_val_it = known_parallel_dimensions_.find(pt);
+    if (pt_val_it == known_parallel_dimensions_.end()) {
+      continue;
+    }
+    if (name == stringifyThreadSize(pt)) {
+      known_values_[named_scalar] = pt_val_it->second;
+      return;
+    }
+  }
 }
 
 void ExpressionEvaluator::visit(const UnaryOp* unary_op) {

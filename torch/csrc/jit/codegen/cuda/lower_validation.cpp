@@ -498,7 +498,7 @@ void validateParallelize(Fusion* fusion) {
             producer->name(),
             ": ",
             producer);
-        pt_map.set(producer_ptype, true);
+        pt_map.set(producer_ptype);
         // When the producer axis is a broadcast, it is not really
         // parallelized unless thread-predicated
         if (producer_axis->isBroadcast() && parallel_bcast_doms.none()) {

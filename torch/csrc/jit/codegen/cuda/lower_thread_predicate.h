@@ -27,6 +27,14 @@ namespace cuda {
 //! If we follow a reduction parallelized on TIDx with a broadcast on TIDx we
 //! no longer need the predicate and can reset the bit accordingly
 //!
+//! In addition, if a parallel thread type is not used, it is
+//! redundant to use all threads/blocks. That isn't a problem
+//! generally although it can be inefficient, but when an aliased smem
+//! buffer is used as an output, redundant writes can be invalid (see issue
+//! #1110). PredicateInfo::redundant_types track which parallel types
+//! are redundant for each tensor and is used to let only one
+//! thread/block of a redundant type execute the expression for a
+//! tensor.
 class TORCH_CUDA_CU_API ThreadPredicateMap {
  public:
   using SourceMap = std::unordered_map<
@@ -34,31 +42,35 @@ class TORCH_CUDA_CU_API ThreadPredicateMap {
       std::unordered_set<const TensorView*>,
       TypeHash>;
 
-  struct PredAndSource {
-    ParallelTypeBitmap pred;
+  //! Thread predicate information for each tensor
+  struct PredicateInfo {
+    // Parallel types where only one thread/block is valid.
+    ParallelTypeBitmap limited_types;
+    // Source tensors to grid reductions.
     SourceMap source_map;
+    // Parallel types where only one thread/block is enough.
+    ParallelTypeBitmap redundant_types;
   };
 
-  using MapType = std::unordered_map<const TensorView*, PredAndSource>;
+  using MapType = std::unordered_map<const TensorView*, PredicateInfo>;
 
   using const_iterator = MapType::const_iterator;
 
+  //! Build a map from each tensor to PredicateInfo.
   void build(Fusion* fusion);
 
-  // TODO(kir): these methods are only used by getParallelBroadcastDomains() ?
-  const_iterator find(const TensorView* tv) const;
-  const_iterator end() const;
-  const PredAndSource& at(const TensorView* tv) const;
-  PredAndSource& at(const TensorView* tv);
+  //! Returns a flag set that indicates which parallel types should be
+  //! predicated.
+  ParallelTypeBitmap getPredicatedParallelTypes(const TensorView* tv) const;
 
-  // Returns a Bool predicate for a given TensorView.
+  //! Returns a Bool predicate for a given TensorView.
   kir::Bool* getPredicate(const TensorView* tv) const;
 
   //! Returns a ParallelTypeBitmap representing which domain needs
   //! blockBroadcast.
   //!
   //! Even when a domain is broadcast and parallelized, it does not need
-  //! blockBroadcast unless it is predicated.
+  //! blockBroadcast unless it is predicated by limited_types_
   ParallelTypeBitmap getParallelBroadcastDomains(const TensorView* tv) const;
 
   void print() const;
@@ -67,12 +79,28 @@ class TORCH_CUDA_CU_API ThreadPredicateMap {
   // Update the thread_predicates bitset based on provided Expr
   void updateBitSet(const Expr*);
 
+  const_iterator find(const TensorView* tv) const;
+  const_iterator end() const;
+
+  const PredicateInfo& at(const TensorView* tv) const;
+  PredicateInfo& at(const TensorView* tv);
+
+  //! Insert a new mapping
   void insert(
       const TensorView* tv,
-      const ParallelTypeBitmap& pred,
-      const SourceMap& src_map);
+      const ParallelTypeBitmap& valid_types,
+      const SourceMap& src_map,
+      const ParallelTypeBitmap& redundant_types);
 
-  void insert(const TensorView* tv, const PredAndSource& pred_and_src);
+  //! Insert a new mapping
+  void insert(const TensorView* tv, const PredicateInfo& pred_and_src);
+
+  //! Get a PredicateInfo for a given tensor. If it's an output of
+  //! a parallel broadcast, unmask the limited_types_ bit of the
+  //! corresponding parallel type since it must join the broadcast
+  //! operation although the valid input is only available at one of
+  //! the threads/blocks.
+  PredicateInfo getPredicateInfo(const TensorView* tv) const;
 
  private:
   MapType thread_predicates_;

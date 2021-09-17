@@ -403,6 +403,11 @@ LaunchParams FusionExecutor::computeLaunchParams(
         if (!launch_params.hasDim(p_type)) {
           // Bind the launch constraint into our evaluation context
           launch_params.bind(launch_constraints.getDim(p_type), p_type);
+          // Makes sure the p-types bound to evaluators are the
+          //  final values that will become the actual launch
+          //  param size to ensure accurate smem buffer size
+          //  computation.
+          expr_eval.bind(p_type, launch_constraints.getDim(p_type));
         }
       }
     }
@@ -445,7 +450,14 @@ LaunchParams FusionExecutor::computeLaunchParams(
       }
       maximum_value = std::max(maximum_value, *val);
     }
+    expr_eval.bind(p_type, maximum_value);
     launch_params.bind(maximum_value, p_type);
+  }
+
+  // Re-run the integer machine with all
+  //  the thread sizes now determined.
+  if (expr_eval.precomputedIntegers()) {
+    expr_eval.precomputedIntegers()->evaluate();
   }
 
   const auto kernel = lowered_.kernel();

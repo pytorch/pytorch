@@ -223,6 +223,12 @@ NaiveIntegerMachine<IRContext>::NaiveIntegerMachine(
 template <typename IRContext>
 void NaiveIntegerMachine<IRContext>::run() {
   for (int i = 0; i < num_of_instructions_; i++) {
+    // Skip this instruction if the dest location
+    //  has already been computed or is constant.
+    if (precomputed_integers_.defined_[dest_[i]] ||
+        precomputed_integers_.is_constant_[dest_[i]]) {
+      continue;
+    }
     runInstruction(i);
   }
 }
@@ -378,6 +384,7 @@ KernelPrecomputedIntegers::KernelPrecomputedIntegers(
   loadSymbols(collectRuntimeUsedIntegers(fusion, lower_));
   kir::ExpressionEvaluator evaluator;
   initializeValueList(evaluator, symbols());
+  initializeNamedScalars();
   initializeIntegerMachine();
 }
 
@@ -395,6 +402,40 @@ void KernelPrecomputedIntegers::bindTensorMetaData(
     auto extent = root_domain[dim]->extent();
     auto value = at_tensor.sizes()[dim];
     bindValue(extent->evaluatorIndex(), value);
+  }
+}
+
+namespace {
+
+//! Compares the name of given scalar with thread size strings
+//!  and returns the corresponding parallel type if a match
+//!  is found.
+c10::optional<ParallelType> getMaybeThreadSizeParallelType(
+    kir::NamedScalar* named_scalar) {
+  auto& var_name = named_scalar->name();
+  for (auto ptype : kParallelTypeThreads) {
+    if (var_name == stringifyThreadSize(ptype)) {
+      return ptype;
+    }
+  }
+  return c10::nullopt;
+}
+
+} // namespace
+
+void KernelPrecomputedIntegers::initializeNamedScalars() {
+  for (auto val : symbols()) {
+    if (auto named_scalar = dynamic_cast<kir::NamedScalar*>(val)) {
+      auto maybe_parallel_type = getMaybeThreadSizeParallelType(named_scalar);
+      if (maybe_parallel_type.has_value()) {
+        auto& index_list =
+            thread_dim_value_indices_[maybe_parallel_type.value()];
+        if (!index_list) {
+          index_list = std::make_unique<std::vector<int>>();
+        }
+        index_list->push_back(val->evaluatorIndex());
+      }
+    }
   }
 }
 
@@ -430,6 +471,17 @@ void KernelPrecomputedIntegers::bindParallelExtents(
       for (auto extent : it.second) {
         bindValue(extent->evaluatorIndex(), raw_val);
       }
+    }
+  }
+}
+
+void KernelPrecomputedIntegers::bindConcreteParallelTypeValue(
+    ParallelType pt,
+    int64_t value) {
+  auto index_list_it = thread_dim_value_indices_.find(pt);
+  if (index_list_it != thread_dim_value_indices_.end()) {
+    for (auto index : *(index_list_it->second)) {
+      bindValue(index, value);
     }
   }
 }

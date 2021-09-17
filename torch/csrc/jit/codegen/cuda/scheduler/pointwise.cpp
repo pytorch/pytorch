@@ -520,7 +520,6 @@ void schedulePointwise(Fusion* fusion, const PointwiseParams& params) {
     }
   }
 
-
   if (params.break_point) {
     // 2D parallelization scheme
     TORCH_INTERNAL_ASSERT(rhs_i >= 0 && lhs_i >= 0);
