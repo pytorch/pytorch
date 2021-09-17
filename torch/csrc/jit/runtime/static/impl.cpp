@@ -83,6 +83,7 @@ void OptimizeGraph(
   }
 #endif
   ConstantPropagation(graph);
+  RemoveImmutableInputDictLookups(graph);
 }
 
 // remove unused input 0 from graph
