@@ -18,10 +18,27 @@
 #include <nnpack.h>
 #endif
 
-
 constexpr int MIOPEN_DIM_MAX = 5;
 
-namespace at { namespace native {
+namespace at {
+namespace meta {
+TORCH_META_FUNC(convolution_backward)(
+    const Tensor& grad_output, const Tensor& input, const Tensor& weight, OptionalTensorRef bias,
+    IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation, bool transposed, IntArrayRef output_padding,
+    int64_t groups, std::array<bool, 3> output_mask) {
+  if (output_mask[0]) {
+    set_output(0, input.sizes(), input.options());
+  }
+  if (output_mask[1]) {
+    set_output(1, weight.sizes(), weight.options());
+  }
+  if (output_mask[2] && bias.has_value()) {
+    set_output(2, bias->sizes(), bias->options());
+  }
+}
+} // namespace meta
+
+namespace native {
 
 DEFINE_DISPATCH(convolution_depthwise3x3_winograd_stub);
 
@@ -562,7 +579,7 @@ static void check_shape_forward(const at::Tensor& input,
   }
 }
 
-static void check_input_same_type_as_parameters(
+static inline void check_input_same_type_as_parameters(
     const Tensor& input,
     const Tensor& weight,
     const Tensor& bias) {
@@ -847,11 +864,9 @@ ConvBackend select_conv_backend(
 
   // don't send empty inputs through backends
   if (input.size(0) == 0 || input.size(1) == 0) {
-    if (input.is_mkldnn() && weight.is_mkldnn()) {
-      return ConvBackend::MkldnnEmpty;
-    } else {
-      return ConvBackend::Empty;
-    }
+    return input.is_mkldnn() ? ConvBackend::MkldnnEmpty : ConvBackend::Empty;
+  } else if (input.numel() == 0) {
+    TORCH_CHECK(false, "Only zero batch or zero channel inputs are supported, but got input shape: ", input.sizes());
   }
 
   if (params.is_depthwise(input, weight)) {
@@ -985,6 +1000,25 @@ static inline std::vector<int64_t> calc_output_size(
   return output_size;
 }
 
+static inline at::MemoryFormat determine_backend_memory_format(
+    const Tensor& input,
+    const Tensor& weight) {
+  at::MemoryFormat backend_memory_format = at::MemoryFormat::Contiguous;
+  auto k = weight.ndimension();
+#if !defined(C10_MOBILE)
+  // cudnn and miopen are guaranteed not to be on mobile, and T102591915
+  // suggests that maybe the cudnn condition sometimes segfaults (though
+  // I can't imagine how)
+  if (detail::getCUDAHooks().compiledWithCuDNN()) {
+    backend_memory_format = cudnn_conv_suggest_memory_format(input, weight);
+  }
+  if (detail::getCUDAHooks().compiledWithMIOpen() && miopen_conv_use_channels_last(input, weight)) {
+    backend_memory_format = (k == 5) ? at::MemoryFormat::Contiguous /*at::MemoryFormat::ChannelsLast3d*/ : at::MemoryFormat::ChannelsLast;
+  }
+#endif
+  return backend_memory_format;
+}
+
 at::Tensor _convolution(
     const Tensor& input_r, const Tensor& weight_r, const c10::optional<Tensor>& bias_r_opt,
     IntArrayRef stride_, IntArrayRef padding_, IntArrayRef dilation_,
@@ -1029,19 +1063,7 @@ at::Tensor _convolution(
 
   // Select appropriate backend to use.
   ConvBackend backend = select_conv_backend(input, weight, bias, params);
-
-  at::MemoryFormat backend_memory_format = at::MemoryFormat::Contiguous;
-#if !defined(C10_MOBILE)
-  // cudnn and miopen are guaranteed not to be on mobile, and T102591915
-  // suggests that maybe the cudnn condition sometimes segfaults (though
-  // I can't imagine how)
-  if (detail::getCUDAHooks().compiledWithCuDNN()) {
-    backend_memory_format = cudnn_conv_suggest_memory_format(input, weight);
-  }
-  if (detail::getCUDAHooks().compiledWithMIOpen() && miopen_conv_use_channels_last(input, weight)) {
-    backend_memory_format = (k == 5) ? at::MemoryFormat::Contiguous /*at::MemoryFormat::ChannelsLast3d*/ : at::MemoryFormat::ChannelsLast;
-  }
-#endif
+  at::MemoryFormat backend_memory_format = determine_backend_memory_format(input, weight);
 
   // Call the backend.
   Tensor output;
@@ -1308,8 +1330,9 @@ std::tuple<Tensor,Tensor,Tensor> _convolution_double_backward( const c10::option
   // TODO: hacky way of inferring the groups number for grouped Conv3D
   // See: https://github.com/pytorch/pytorch/pull/36355
   if (!params.transposed && input.dim() > 4) {
+    // Avoid undefined behavior when num channels == 0; params are unused for that case.
     // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
-    params.groups = input.size(1) / weight.size(1);
+    params.groups = (weight.size(1) > 0) ? input.size(1) / weight.size(1) : -1;
   } else {
     params.groups = groups_;
   }
@@ -1481,6 +1504,258 @@ std::tuple<Tensor,Tensor,Tensor> _convolution_double_backward( const c10::option
   }
 
   return std::tuple<Tensor,Tensor,Tensor>{ggO, gI, gW};
+}
+
+std::tuple<at::Tensor, at::Tensor, at::Tensor> _convolution_backward_nogroup_backend(
+    const Tensor& grad_output,
+    const Tensor& input,
+    const Tensor& weight,
+    const Tensor& bias,
+    const std::array<bool, 3> output_mask,
+    const ConvBackend backend,
+    const ConvParams& params) {
+  auto kernel_size = weight.sizes().slice(2);
+  switch(backend) {
+    case ConvBackend::Slow2d:
+    {
+      /* CPU implementation has specialized MM kernels
+         for non-dilated case here */
+      Tensor finput = compute_finput2d(input, weight, kernel_size, params.stride, params.padding);
+      return at::_slow_conv2d_backward(
+        grad_output, input, weight, kernel_size, params.stride, params.padding, finput, output_mask);
+    }
+    // NB: nnpack backward does not support strided convolutions; use slow impl instead
+    case ConvBackend::NnpackSpatial:
+    case ConvBackend::SlowDilated2d:
+      return at::slow_conv_dilated2d_backward(
+        grad_output, input, weight, kernel_size, params.stride, params.padding, params.dilation, output_mask);
+    case ConvBackend::SlowDilated3d:
+      return at::slow_conv_dilated3d_backward(
+        grad_output, input, weight, kernel_size, params.stride, params.padding, params.dilation, output_mask);
+    case ConvBackend::SlowTranspose2d:
+    {
+      Tensor columns = compute_finput2d(input, weight, kernel_size, params.stride, params.padding);
+      Tensor ones = at::empty(columns.sizes(), input.options());
+      ones.fill_(1.);
+      return at::slow_conv_transpose2d_backward(
+        grad_output, input, weight, kernel_size, params.stride, params.padding, params.output_padding,
+        params.dilation, columns, ones, output_mask);
+    }
+    case ConvBackend::SlowTranspose3d:
+    {
+      Tensor finput = compute_finput3d(input, weight, kernel_size, params.stride, params.padding);
+      Tensor fgrad_input = at::empty({0}, input.options());
+      return at::slow_conv_transpose3d_backward(
+        grad_output, input, weight, kernel_size, params.stride, params.padding, params.output_padding,
+        params.dilation, finput, fgrad_input, output_mask);
+    }
+    default:
+      TORCH_CHECK(false, "Unsupported conv nogroup backend encountered");
+  }
+}
+
+TORCH_IMPL_FUNC(convolution_backward_out)(
+    const Tensor& grad_output_, const Tensor& input_, const Tensor& weight_, OptionalTensorRef bias_opt,
+    IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation, bool transposed, IntArrayRef output_padding,
+    int64_t groups, std::array<bool, 3> output_mask, const Tensor& grad_input, const Tensor& grad_weight,
+    const Tensor& grad_bias) {
+  auto grad_output = grad_output_;
+  auto input = input_;
+  auto weight = weight_;
+  auto bias = bias_opt.getTensorRef();
+
+  auto k = weight.ndimension();
+  int64_t dim = k - 2;
+
+  TORCH_CHECK(dim > 0, "weight should have at least three dimensions");
+
+  auto& ctx = at::globalContext();
+  ConvParams params;
+  params.stride = expand_param_if_needed(stride, "stride", dim);
+  params.padding = expand_param_if_needed(padding, "padding", dim);
+  params.dilation = expand_param_if_needed(dilation, "dilation", dim);
+  params.transposed = transposed;
+  params.output_padding = expand_param_if_needed(output_padding, "output_padding", dim);
+  params.groups = groups;
+  params.benchmark = ctx.benchmarkCuDNN();
+  params.deterministic = ctx.deterministicCuDNN() || ctx.deterministicAlgorithms();
+  params.cudnn_enabled = ctx.userEnabledCuDNN();
+  params.allow_tf32 = ctx.allowTF32CuDNN();
+
+  // output_padding is only supported for transposed convolutions
+  if (!params.transposed) {
+    for (auto pad : params.output_padding) {
+      TORCH_CHECK(pad == 0, "output_padding is not supported for non-transposed convolutions; got: ",
+        params.output_padding);
+    }
+  }
+
+  if (k == 3) {
+    // avoid accidentally going through NHWC for permuted 3d input.
+    if (!input.is_mkldnn()) {
+      input = input.contiguous();
+    }
+    params.view1d_as_2d();
+    grad_output = view4d(grad_output);
+    input = view4d(input);
+    weight = view4d(weight);
+  }
+
+  // Select appropriate backend to use.
+  ConvBackend backend = select_conv_backend(input, weight, bias, params);
+  at::MemoryFormat backend_memory_format = determine_backend_memory_format(input, weight);
+
+  // Call the backend.
+  Tensor backend_grad_input, backend_grad_weight, backend_grad_bias;
+  auto kernel_size = weight.sizes().slice(2);
+  switch(backend) {
+    case ConvBackend::CudaDepthwise2d:
+      std::tie(backend_grad_input, backend_grad_weight) =
+        at::_conv_depthwise2d_backward(grad_output, input.contiguous(), weight, kernel_size,
+            params.stride, params.padding, params.dilation, {output_mask[0], output_mask[1]});
+      break;
+    case ConvBackend::CudaDepthwise3d:
+      TORCH_CHECK(input.ndimension() == 5);
+      std::tie(backend_grad_input, backend_grad_weight, backend_grad_bias) =
+        at::conv_depthwise3d_backward(
+          grad_output, input.contiguous(), weight, kernel_size, params.stride, params.padding, params.dilation,
+          output_mask);
+      break;
+    case ConvBackend::Cudnn:
+      check_input_same_type_as_parameters(input, weight, bias);
+      std::tie(backend_grad_input, backend_grad_weight) = at::cudnn_convolution_backward(
+          input.contiguous(backend_memory_format), grad_output, weight, params.padding, params.stride,
+          params.dilation, params.groups, params.benchmark, params.deterministic, params.allow_tf32,
+          {output_mask[0], output_mask[1]});
+      break;
+    case ConvBackend::CudnnTranspose:
+      check_input_same_type_as_parameters(input, weight, bias);
+      std::tie(backend_grad_input, backend_grad_weight) = at::cudnn_convolution_transpose_backward(
+        input.contiguous(backend_memory_format), grad_output, weight, params.padding, params.output_padding,
+        params.stride, params.dilation, params.groups, params.benchmark, params.deterministic, params.allow_tf32,
+        {output_mask[0], output_mask[1]});
+      break;
+    case ConvBackend::Empty:
+    case ConvBackend::MkldnnEmpty:
+      if (output_mask[0] && grad_input.numel() > 0) {
+        grad_input.fill_(0.);
+      }
+      if (output_mask[1] && grad_weight.numel() > 0) {
+        grad_weight.fill_(0.);
+      }
+      if (output_mask[2] && grad_bias.numel() > 0) {
+        grad_bias.fill_(0.);
+      }
+      return;
+    case ConvBackend::Miopen:
+      check_input_same_type_as_parameters(input, weight, bias);
+      std::tie(backend_grad_input, backend_grad_weight, backend_grad_bias) =
+        at::miopen_convolution_backward(
+          input.contiguous(backend_memory_format), grad_output, weight, params.padding, params.stride,
+          params.dilation, params.groups, params.benchmark, params.deterministic, output_mask);
+      break;
+    case ConvBackend::MiopenDepthwise:
+      std::tie(backend_grad_input, backend_grad_weight, backend_grad_bias) =
+          at::miopen_depthwise_convolution_backward(
+            input.contiguous(backend_memory_format), grad_output, weight, params.padding, params.stride,
+            params.dilation, params.groups, params.benchmark, params.deterministic, output_mask);
+      break;
+    case ConvBackend::MiopenTranspose:
+      check_input_same_type_as_parameters(input, weight, bias);
+      std::tie(backend_grad_input, backend_grad_weight, backend_grad_bias) =
+        at::miopen_convolution_transpose_backward(
+          input.contiguous(backend_memory_format), grad_output, weight, params.padding, params.output_padding,
+          params.stride, params.dilation, params.groups, params.benchmark, params.deterministic, output_mask);
+      break;
+    case ConvBackend::Mkldnn:
+      std::tie(backend_grad_input, backend_grad_weight, backend_grad_bias) =
+        at::mkldnn_convolution_backward(input, grad_output, weight, params.padding, params.stride, params.dilation,
+            params.groups, output_mask);
+      break;
+    case ConvBackend::Overrideable:
+      // Only reach here when input is backend with out-of-source implementation.
+      std::tie(backend_grad_input, backend_grad_weight, backend_grad_bias) =
+        at::convolution_backward_overrideable(grad_output, input, weight, params.stride, params.padding,
+          params.dilation, params.transposed, params.output_padding, params.groups, output_mask);
+      break;
+    case ConvBackend::Slow3d:
+    {
+      Tensor finput = compute_finput3d(input, weight, kernel_size, params.stride, params.padding);
+      Tensor fgrad_input = at::empty({0}, input.options());
+      std::tie(backend_grad_input, backend_grad_weight, backend_grad_bias) =
+        at::slow_conv3d_backward(grad_output, input, weight, kernel_size, params.stride, params.padding,
+          finput, fgrad_input, output_mask);
+      break;
+    }
+    // Handle backends that don't natively support groups > 1.
+    case ConvBackend::NnpackSpatial:
+    case ConvBackend::Slow2d:
+    case ConvBackend::SlowDilated2d:
+    case ConvBackend::SlowDilated3d:
+    case ConvBackend::SlowTranspose2d:
+    case ConvBackend::SlowTranspose3d:
+    {
+      if (params.groups == 1) {
+        std::tie(backend_grad_input, backend_grad_weight, backend_grad_bias) =
+          _convolution_backward_nogroup_backend(
+            grad_output, input, weight, bias, output_mask, backend, params);
+      } else {
+        std::vector<Tensor> backend_grad_inputs(params.groups);
+        std::vector<Tensor> backend_grad_weights(params.groups);
+        std::vector<Tensor> backend_grad_biases(params.groups);
+        for (int g = 0; g < params.groups; ++g) {
+          auto grad_output_g = subtensor(grad_output, 1, params.groups, g);
+          auto input_g = subtensor(input, 1, params.groups, g);
+          auto weight_g = subtensor(weight, 0, params.groups, g);
+          auto bias_g = subtensor(bias, 0, params.groups, g);
+          std::tie(backend_grad_inputs[g], backend_grad_weights[g], backend_grad_biases[g]) =
+            _convolution_backward_nogroup_backend(
+              grad_output_g, input_g, weight_g, bias_g, output_mask, backend, params);
+        }
+        if (output_mask[0]) {
+          backend_grad_input = at::cat(backend_grad_inputs, 1);
+        }
+        if (output_mask[1]) {
+          backend_grad_weight = at::cat(backend_grad_weights, 0);
+        }
+        if (output_mask[2]) {
+          backend_grad_bias = at::cat(backend_grad_biases, 0);
+        }
+      }
+      break;
+    }
+    // Backward is not supported for these backends.
+    case ConvBackend::Winograd3x3Depthwise:
+      TORCH_CHECK(false, "Backward is not supported for depthwise 3x3 winograd");
+      break;
+    case ConvBackend::Xnnpack2d:
+      TORCH_CHECK(false, "Backward is not supported for xnnpack");
+      break;
+  }
+
+  // TODO: Make these copies unnecessary by refactoring the backend-specific backward
+  // functions to take in output tensors instead of returning them.
+  if (output_mask[0]) {
+    if (k == 3) {
+      backend_grad_input = view3d(backend_grad_input);
+    }
+    grad_input.copy_(backend_grad_input);
+  }
+  if (output_mask[1]) {
+    if (k == 3) {
+      backend_grad_weight = view3d(backend_grad_weight);
+    }
+    grad_weight.copy_(backend_grad_weight);
+  }
+  if (output_mask[2]) {
+    if (backend_grad_bias.defined()) {
+      grad_bias.copy_(backend_grad_bias);
+    } else {
+      // Calculate bias gradients outside of the backend for those that don't support it.
+      auto sum_dims = (dim == 3) ? IntArrayRef{0, 2, 3, 4} : IntArrayRef{0, 2, 3};
+      at::sum_out(const_cast<Tensor&>(grad_bias), grad_output, sum_dims);
+    }
+  }
 }
 
 }} // at::native

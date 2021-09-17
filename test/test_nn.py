@@ -13419,18 +13419,28 @@ class TestNNDeviceType(NNTestCase):
         # NnpackSpatial, Winograd3x3Depthwise, and Xnnpack2d backends. Testing these
         # requires the ability to gate tests by whether PyTorch is built with USE_MOBILE=1.
     ])
+    # Test with both stride=1 and stride>1 cases.
     @parametrize_test("strided", [False, True])
-    def test_conv_backend_selection(
-            self, device, input_shape, strided, transposed, dilated, groups, layout, backend_expected):
+    # Test with both contiguous and non-contiguous inputs.
+    @parametrize_test("contiguous", [False, True])
+    def test_conv_backend(
+            self, device, input_shape, strided, contiguous, transposed, dilated, groups, layout, backend_expected):
         # Build up inputs.
         dtype = torch.float32
         C_in, C_out, dim, kernel_size = input_shape[1], 6, len(input_shape) - 2, 3
-        x = torch.empty(*input_shape, device=device, dtype=dtype, layout=layout, requires_grad=True)
-        weight = torch.empty(C_in if transposed else C_out,
+        x = torch.randn(*input_shape, device=device, dtype=dtype, requires_grad=True)
+        if not contiguous:
+            x = torch.repeat_interleave(x, 2, dim=-1)
+            x = x[..., ::2].detach()
+        weight = torch.randn(C_in if transposed else C_out,
                              C_out // groups if transposed else C_in // groups,
                              *[kernel_size for _ in range(dim)],
-                             device=device, dtype=dtype, layout=layout, requires_grad=True)
-        bias = torch.empty(C_out, device=device, dtype=dtype, layout=layout, requires_grad=True)
+                             device=device, dtype=dtype, requires_grad=True)
+        bias = torch.randn(C_out, device=device, dtype=dtype, requires_grad=True)
+        if layout is torch._mkldnn:
+            x = x.to_mkldnn()
+            weight = weight.to_mkldnn()
+            bias = bias.to_mkldnn()
 
         stride = (2,) * dim if strided else (1,) * dim
         padding = (0,) * dim
@@ -13441,6 +13451,50 @@ class TestNNDeviceType(NNTestCase):
         # Ensure correct backend is selected.
         backend_actual = torch._C._select_conv_backend(*inputs)
         self.assertEqual(backend_actual, backend_expected)
+
+        # mkldnn doesn't support float64 for gradcheck.
+        if layout is torch._mkldnn:
+            return
+
+        # Convert to float64 for gradcheck.
+        x = x.to(torch.float64).detach().requires_grad_(True)
+        weight = weight.to(torch.float64).detach().requires_grad_(True)
+        bias = bias.to(torch.float64).detach().requires_grad_(True)
+        inputs = [x, weight, bias, stride, padding, dilation, transposed, output_padding, groups]
+
+        # Autograd function to hook up the general convolution function to convolution_backward
+        # without a derivatives.yaml entry. TODO: Once general forward + backward are hooked up together,
+        # remove this.
+        class MyConv(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, input, weight, bias, stride, padding, dilation, transposed, output_padding, groups):
+                ctx.save_for_backward(input, weight, bias)
+                ctx.stuff = (stride, padding, dilation, transposed, output_padding, groups)
+                return torch.convolution(input, weight, bias, stride, padding, dilation, transposed,
+                                         output_padding, groups)
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                input, weight, bias = ctx.saved_tensors
+                stride, padding, dilation, transposed, output_padding, groups = ctx.stuff
+                grad_input, grad_weight, grad_bias = torch.ops.aten.convolution_backward(
+                    grad_output, input, weight, bias, stride, padding, dilation, transposed,
+                    output_padding, groups, ctx.needs_input_grad[:3])
+                return grad_input, grad_weight, grad_bias, None, None, None, None, None, None
+
+        convolution = MyConv.apply
+
+        # Set some backend-specfic validation settings.
+        gradcheck_nondet_tol = 0.0
+        if torch.backends.cudnn.is_available():
+            # cuDNN introduces non-determinism
+            gradcheck_nondet_tol = GRADCHECK_NONDET_TOL
+
+        self.assertTrue(gradcheck(convolution, inputs, nondet_tol=gradcheck_nondet_tol))
+
+        # double backward doesn't support bias gradients
+        bias.requires_grad_(False)
+        self.assertTrue(gradgradcheck(convolution, inputs, nondet_tol=gradcheck_nondet_tol))
 
     def test_Dropout(self, device):
         input = torch.empty(1000)

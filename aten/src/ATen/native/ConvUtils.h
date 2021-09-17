@@ -1,5 +1,9 @@
 #pragma once
+#include <ATen/Parallel.h>
 #include <ATen/detail/CUDAHooksInterface.h>
+#include <ATen/native/DispatchStub.h>
+#include <ATen/native/Unfold2d.h>
+#include <ATen/native/Unfold3d.h>
 #include <c10/util/env.h>
 #include <c10/util/irange.h>
 
@@ -212,6 +216,181 @@ static inline bool miopen_conv_use_channels_last(const at::Tensor& input, const 
   bool can_use_miopen_channels_last_3d = false;
 
   return can_use_miopen_channels_last_2d || can_use_miopen_channels_last_3d;
+}
+
+static Tensor view_weight_2d(const Tensor& weight_) {
+  Tensor weight = weight_.contiguous();
+  if (weight.dim() == 4) {
+    const int64_t s1 = weight.size(0);
+    const int64_t s2 = weight.size(1) * weight.size(2) * weight.size(3);
+    return weight.view({s1, s2});
+  } else {
+    return weight;
+  }
+}
+
+// Computes finput used in slow 2D kernel computation.
+// This is computed separately in the forward and backward passes.
+static Tensor compute_finput2d(
+    const Tensor& input,
+    const Tensor& weight,
+    IntArrayRef kernel_size,
+    IntArrayRef stride,
+    IntArrayRef padding) {
+  const Tensor weight_2d = view_weight_2d(weight);
+  const int64_t kernel_height = kernel_size[0];
+  const int64_t kernel_width = kernel_size[1];
+  const int64_t pad_height = padding[0];
+  const int64_t pad_width = padding[1];
+  const int64_t stride_height = stride[0];
+  const int64_t stride_width = stride[1];
+  const int64_t dim_planes = 1;
+  const int64_t dim_height = 2;
+  const int64_t dim_width = 3;
+  const int64_t n_input_plane = input.size(dim_planes);
+  const int64_t input_height = input.size(dim_height);
+  const int64_t input_width = input.size(dim_width);
+  const int64_t n_output_plane = weight_2d.size(0);
+  const int64_t output_height =
+      (input_height + 2 * pad_height - kernel_height) / stride_height + 1;
+  const int64_t output_width =
+      (input_width + 2 * pad_width - kernel_width) / stride_width + 1;
+  const int64_t batch_size = input.size(0);
+
+  Tensor finput = at::empty({0}, input.options());
+  if ((input.ndimension() == 4) && (kernel_height == 1) && (stride_height == 1) && (pad_height == 0) &&
+      (kernel_width == 1) && (stride_width == 1) && (pad_width == 0)) {
+    finput = input.view(
+      {batch_size,
+      n_input_plane,
+      output_height * output_width}).detach();
+  } else {
+    finput.resize_(
+      {batch_size,
+        n_input_plane * kernel_height * kernel_width,
+        output_height * output_width});
+
+    AT_DISPATCH_ALL_TYPES_AND(kBFloat16, input.scalar_type(), "compute_finput2d", [&]{
+      auto input_a = input.accessor<scalar_t, 4>();
+      auto finput_a = finput.accessor<scalar_t, 3>();
+
+      at::parallel_for(0, batch_size, 0, [&](int64_t start, int64_t end) {
+        for (int64_t t = start; t < end; t++) {
+          auto input_t = input_a[t];
+          auto finput_t = finput_a[t];
+          unfolded2d_copy_stub(
+            kCPU,
+            c10::CppTypeToScalarType<scalar_t>::value,
+            finput_t.data(),
+            input_t.data(),
+            kernel_height,
+            kernel_width,
+            stride_height,
+            stride_width,
+            pad_height,
+            pad_width,
+            n_input_plane,
+            input_height,
+            input_width,
+            output_height,
+            output_width);
+        }
+      });
+    });
+  }
+
+  return finput;
+}
+
+// Computes finput used in slow 3D kernel computation.
+// This is computed separately in the forward and backward passes.
+static Tensor compute_finput3d(
+    const Tensor& input_,
+    const Tensor& weight,
+    IntArrayRef kernel_size,
+    IntArrayRef stride,
+    IntArrayRef padding) {
+  const int64_t kernel_depth = kernel_size[0];
+  const int64_t kernel_height = kernel_size[1];
+  const int64_t kernel_width = kernel_size[2];
+  const int64_t pad_depth = padding[0];
+  const int64_t pad_height = padding[1];
+  const int64_t pad_width = padding[2];
+  const int64_t stride_depth = stride[0];
+  const int64_t stride_height = stride[1];
+  const int64_t stride_width = stride[2];
+
+  // TODO: hacky way of deciding the groups
+  // Assuming the group size is checked in upstream functions
+  const int64_t groups = input_.size(1) / weight.size(1);
+
+  const Tensor input = input_.contiguous();
+  const Tensor weight_2d = view_weight_2d(weight);
+
+  const int64_t dim_planes = 1;
+  const int64_t dim_depth = 2;
+  const int64_t dim_height = 3;
+  const int64_t dim_width = 4;
+
+  const int64_t n_input_plane = input.size(dim_planes);
+  const int64_t input_depth = input.size(dim_depth);
+  const int64_t input_height = input.size(dim_height);
+  const int64_t input_width = input.size(dim_width);
+  const int64_t n_output_plane = weight_2d.size(0);
+  const int64_t output_depth =
+      (input_depth + 2 * pad_depth - kernel_depth) / stride_depth + 1;
+  const int64_t output_height =
+      (input_height + 2 * pad_height - kernel_height) / stride_height + 1;
+  const int64_t output_width =
+      (input_width + 2 * pad_width - kernel_width) / stride_width + 1;
+
+  const int64_t batch_size = input.size(0);
+  Tensor finput = at::empty({0}, input.options());
+  if ((kernel_depth == 1) && (kernel_height == 1) && (kernel_width == 1) &&
+      (pad_depth == 0) && (pad_height == 0) && (pad_width == 0) &&
+      (stride_depth == 1) && (stride_height == 1) && (stride_width == 1) && (groups == 1)) {
+    finput = input.view({batch_size, n_input_plane, output_height * output_width * output_depth}).detach();
+  } else {
+    finput.resize_({batch_size,
+                    n_input_plane * kernel_depth * kernel_height * kernel_width,
+                    output_depth * output_height * output_width});
+
+    AT_DISPATCH_ALL_TYPES_AND(kBFloat16, input.scalar_type(), "compute_finput3d", [&] {
+      auto input_a = input.accessor<scalar_t, 5>();
+      auto finput_a = finput.accessor<scalar_t, 3>();
+
+      constexpr int64_t CONV3D_GRAIN_SALT = 20;
+
+      at::parallel_for(0, batch_size, CONV3D_GRAIN_SALT, [&](int64_t start, int64_t end) {
+        for (int64_t t = start; t < end; t++) {
+          auto input_t = input_a[t];
+          auto finput_t = finput_a[t];
+          Unfold3dCopyCPU(
+            c10::CppTypeToScalarType<scalar_t>::value,
+            input_t.data(),
+            n_input_plane,
+            input_depth,
+            input_height,
+            input_width,
+            output_depth,
+            output_height,
+            output_width,
+            kernel_depth,
+            kernel_height,
+            kernel_width,
+            stride_depth,
+            stride_height,
+            stride_width,
+            pad_depth,
+            pad_height,
+            pad_width,
+            finput_t.data());
+          }
+      });
+    });
+  }
+
+  return finput;
 }
 
 }} // namespace at::native
