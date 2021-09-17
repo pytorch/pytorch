@@ -12,7 +12,7 @@ from torch.testing import make_tensor
 from torch.testing._internal.common_utils import TestCase, run_tests
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests, onlyCUDA, dtypes, dtypesIfCPU, dtypesIfCUDA,
-    onlyOnCPUAndCUDA)
+    onlyNativeDeviceTypes)
 
 
 class TestIndexing(TestCase):
@@ -126,7 +126,7 @@ class TestIndexing(TestCase):
 
         self.assertRaises(TypeError, delitem)
 
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     @dtypes(torch.half, torch.double)
     def test_advancedindex(self, device, dtype):
         # Tests for Integer Array Indexing, Part I - Purely integer array
@@ -760,7 +760,7 @@ class TestIndexing(TestCase):
         self.assertEqual(a[-1, -1], 14)
         self.assertEqual(a[0, -1], 1)
 
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     def test_index_put_accumulate_duplicate_indices(self, device):
         for i in range(1, 512):
             # generate indices by random walk, this will create indices with

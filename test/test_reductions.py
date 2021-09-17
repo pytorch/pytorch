@@ -19,7 +19,7 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS)
 from torch.testing._internal.common_device_type import (
     OpDTypes, instantiate_device_type_tests, onlyCPU, dtypes, dtypesIfCUDA, dtypesIfCPU,
-    onlyOnCPUAndCUDA, onlyCUDA, largeTensorTest, ops, precisionOverride)
+    onlyNativeDeviceTypes, onlyCUDA, largeTensorTest, ops, precisionOverride)
 from torch.testing._internal.common_methods_invocations import (
     ReductionOpInfo, reduction_ops)
 
@@ -854,7 +854,7 @@ class TestReductions(TestCase):
         # Naive kernel for big slice sizes (> 2048)
         testset_for_shape((10, 4096), 10)
 
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     def test_mode_wrong_dtype(self, device):
         def test_for_dtypes(x_ty, v_ty, i_ty, message):
             x = torch.ones(10, device=device, dtype=x_ty)
@@ -1022,7 +1022,7 @@ class TestReductions(TestCase):
     def test_amax(self, device, dtype):
         self._test_minmax_helper(torch.amax, np.amax, device, dtype)
 
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     @dtypesIfCPU(torch.float, torch.double)
     @dtypesIfCUDA(torch.half, torch.float, torch.bfloat16)
     def test_aminmax(self, device, dtype):
@@ -1474,14 +1474,14 @@ class TestReductions(TestCase):
                                                      atol=atol, rtol=rtol, exact_dtype=exact_dtype,
                                                      with_keepdim=with_keepdim, with_extremal=with_extremal)
 
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     @dtypes(*(get_all_int_dtypes() + get_all_fp_dtypes(include_bfloat16=False)))
     def test_sum_vs_numpy(self, device, dtype):
         self._test_sum_reduction_vs_numpy(torch.sum, np.sum, device, dtype)
         self._test_sum_reduction_vs_numpy(torch.sum, np.sum, device, dtype, with_extremal=True)
         self._test_sum_reduction_vs_numpy(torch.sum, np.sum, device, dtype, with_keepdim=True)
 
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     @dtypes(*(get_all_int_dtypes() + get_all_fp_dtypes(include_bfloat16=False)))
     def test_nansum_vs_numpy(self, device, dtype):
         self._test_sum_reduction_vs_numpy(torch.nansum, np.nansum, device, dtype)
@@ -1702,7 +1702,7 @@ class TestReductions(TestCase):
                 _test_all_any_with_dim_keepdim(x, dim, keepdim=False)
 
     # TODO: part of this test covers torch.norm, with should be covered by test_linalg
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     def test_repeated_dim(self, device):
         ops = [torch.mean, torch.sum, torch.nansum, torch.std, torch.logsumexp, torch.std, torch.var,
                torch.amin, torch.amax, torch.norm]
@@ -1789,7 +1789,7 @@ class TestReductions(TestCase):
                 torch.sum(x, dim=[0], dtype=torch.float32, out=y)
 
     # Assert for illegal dtype would not be raised on XLA
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     def test_minmax_illegal_dtype(self, device):
         x = torch.randn(5, 5, dtype=torch.float32, device=device)
         valid_values = torch.empty(5, dtype=torch.float32, device=device)
@@ -2290,7 +2290,7 @@ class TestReductions(TestCase):
         self.assertEqual(a[:, ::2, :].nanmedian(-1)[0], torch.tensor([[0, 4], [6, 10]], device=device))
 
 
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     @dtypes(torch.float, torch.double)
     def test_quantile(self, device, dtype):
         # Generate some random test cases

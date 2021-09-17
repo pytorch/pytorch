@@ -6,7 +6,7 @@ import torch
 
 from torch.testing._internal.common_utils import (TestCase, run_tests, load_tests,
                                                   TEST_NUMPY, torch_to_numpy_dtype_dict)
-from torch.testing._internal.common_device_type import (instantiate_device_type_tests, onlyOnCPUAndCUDA,
+from torch.testing._internal.common_device_type import (instantiate_device_type_tests, onlyNativeDeviceTypes,
                                                         dtypes, dtypesIfCUDA, onlyCPU, expectedFailureMeta)
 from torch.testing._internal.common_dtype import (
     get_all_dtypes, get_all_math_dtypes, get_all_int_dtypes, get_all_fp_dtypes
@@ -503,7 +503,7 @@ class TestTypePromotion(TestCase):
                     self.assertTrue(t2.dtype == dt2)
 
     # XLA tests fail for self.assertRaises for complex dtypes
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     def test_complex_assertraises(self, device):
         comparison_ops = [
             dict(name="lt", compare_op=lambda x, y: x < y, ),
@@ -605,7 +605,7 @@ class TestTypePromotion(TestCase):
             casting_result = dividend.to(torch.get_default_dtype()) / 2
             self.assertEqual(casting_result, op(dividend, 2.))
 
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     @dtypes(torch.float, torch.double,
             torch.bool, torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
     def test_div_promotion_out(self, device, dtype):
@@ -758,28 +758,28 @@ class TestTypePromotion(TestCase):
             for inplace, coalesced in itertools.product([True, False], [True, False]):
                 self._test_sparse_op(op_name, inplace, dtype1, dtype2, device, coalesced)
 
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     def test_sparse_add(self, device):
         self._run_all_tests_for_sparse_op('add', device,
                                           dtypes=get_all_math_dtypes(device))
 
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     def test_sparse_mul(self, device):
         self._run_all_tests_for_sparse_op('mul', device,
                                           dtypes=get_all_math_dtypes(device))
 
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     def test_sparse_div(self, device):
         self._run_all_tests_for_sparse_op('div', device,
                                           dtypes=(torch.float32, torch.float64,
                                                   torch.complex64, torch.complex128))
 
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     def test_sparse_sub(self, device):
         self._run_all_tests_for_sparse_op('sub', device,
                                           dtypes=get_all_math_dtypes(device))
 
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     @dtypes(torch.bool, torch.short, torch.uint8, torch.int, torch.long)
     @float_double_default_dtype
     def test_sparse_div_promotion(self, device, dtype):
@@ -790,7 +790,7 @@ class TestTypePromotion(TestCase):
             casting_result = dividend.to(torch.get_default_dtype()) / 2
             self.assertEqual(casting_result, op(dividend_sparse, 2).to_dense())
 
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     @dtypes(torch.int8, torch.uint8, torch.int16, torch.int32, torch.int64)
     def test_integer_addcdiv_deprecated(self, device, dtype):
         t = torch.tensor(1, device=device, dtype=dtype)
@@ -872,7 +872,7 @@ class TestTypePromotion(TestCase):
                     self.fail(msg)
 
 
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     def test_cat_different_dtypes(self, device):
         dtypes = get_all_dtypes(include_bfloat16=False)
         for x_dtype, y_dtype in itertools.product(dtypes, dtypes):
@@ -891,7 +891,7 @@ class TestTypePromotion(TestCase):
             res = torch.cat([x, y])
             self.assertEqual(res, expected_res, exact_dtype=True)
 
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     def test_cat_out_different_dtypes(self, device):
         dtypes = get_all_dtypes(include_bfloat16=False, include_bool=False)
         for x_dtype, y_dtype, out_dtype in itertools.product(dtypes, dtypes, dtypes):
@@ -910,7 +910,7 @@ class TestTypePromotion(TestCase):
                 self.assertEqual(out, expected_out, exact_dtype=True)
 
     # Verfies that unary ops require matching out types
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     @dtypes(*itertools.product((torch.int64,
                                 torch.float32, torch.float64,
                                 torch.complex64, torch.complex128),
@@ -940,7 +940,7 @@ class TestTypePromotion(TestCase):
 
     # Verifies that the out= argument doesn't affect the computation, that
     # is, out = op(...) and op(..., out=out) produce the same result.
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     def test_computation_ignores_out(self, device):
         t = torch.tensor(33000, dtype=torch.float16, device=device)
         out = torch.empty(0, dtype=torch.float64, device=device)

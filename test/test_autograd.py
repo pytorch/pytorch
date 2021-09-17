@@ -36,7 +36,7 @@ from torch.autograd.function import InplaceFunction
 import torch.autograd.forward_ad as fwAD
 from torch.testing._internal.common_methods_invocations import mask_not_all_zeros
 from torch.testing._internal.common_device_type import (instantiate_device_type_tests, skipCUDAIfRocm,
-                                                        onlyCPU, onlyCUDA, onlyOnCPUAndCUDA, dtypes, dtypesIfCUDA,
+                                                        onlyCPU, onlyCUDA, onlyNativeDeviceTypes, dtypes, dtypesIfCUDA,
                                                         deviceCountAtLeast, skipCUDAIfCudnnVersionLessThan,
                                                         skipCUDAIf, skipMeta)
 from torch.testing._internal.common_dtype import get_all_dtypes
@@ -8137,7 +8137,7 @@ class TestAutogradDeviceType(TestCase):
         expected_bf16 = torch.tensor([0., 0., 1.], device=device, dtype=torch.bfloat16)
         self.assertEqual(a_bf16.grad, expected_bf16)
 
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     def test_elu_inplace_with_neg_alpha(self, device):
         a = torch.tensor([-1., 1.], device=device, requires_grad=True)
         b = torch.nn.functional.elu_(a.clone(), alpha=-2)

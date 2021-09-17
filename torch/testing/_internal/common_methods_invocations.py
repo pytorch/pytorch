@@ -22,7 +22,7 @@ from torch.testing._internal.common_dtype import (
     all_types, double_types,
 )
 from torch.testing._internal.common_device_type import \
-    (onlyOnCPUAndCUDA, skipCUDAIfNoMagma, skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfNoCusolver,
+    (onlyNativeDeviceTypes, skipCUDAIfNoMagma, skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfNoCusolver,
      skipCPUIfNoLapack, skipCPUIfNoFFT, skipCUDAIfRocm, precisionOverride, toleranceOverride, tol)
 from torch.testing._internal.common_cuda import CUDA11OrLater, SM53OrLater, SM60OrLater
 from torch.testing._internal.common_utils import \
@@ -7546,7 +7546,7 @@ op_db: List[OpInfo] = [
            ref=lambda x, dim=None, keepdim=False: (np.amin(x, axis=dim, keepdims=keepdim), np.amax(x, axis=dim, keepdims=keepdim)),
            dtypes=all_types_and(torch.bool),
            dtypesIfCUDA=all_types_and(torch.bool, torch.float16, torch.bfloat16),
-           decorators=(onlyOnCPUAndCUDA,),
+           decorators=(onlyNativeDeviceTypes,),
            supports_autograd=False,
            sample_inputs_func=sample_inputs_aminmax,
            skips=(

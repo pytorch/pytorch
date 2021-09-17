@@ -187,8 +187,8 @@ except ImportError:
 #         In addition to accepting multiple dtypes, the @dtypes decorator
 #         can accept a sequence of tuple pairs of dtypes. The test template
 #         will be called with each tuple for its "dtype" argument.
-#     - @onlyOnCPUAndCUDA
-#         Skips the test if the device is not a CPU or CUDA device
+#     - @onlyNativeDeviceTypes
+#         Skips the test if the device is not native device type (currently CPU, CUDA, Meta)
 #     - @onlyCPU
 #         Skips the test if the device is not a CPU device
 #     - @onlyCUDA
@@ -906,12 +906,12 @@ class deviceCountAtLeast(object):
 
         return multi_fn
 
-# Only runs the test on the CPU and CUDA (the native device types)
-def onlyOnCPUAndCUDA(fn):
+# Only runs the test on the native device type (currently CPU, CUDA, Meta)
+def onlyNativeDeviceTypes(fn):
     @wraps(fn)
     def only_fn(self, *args, **kwargs):
-        if self.device_type != 'cpu' and self.device_type != 'cuda':
-            reason = "onlyOnCPUAndCUDA: doesn't run on {0}".format(self.device_type)
+        if self.device_type not in ['cpu', 'cuda', 'meta']:
+            reason = "onlyNativeDeviceTypes: doesn't run on {0}".format(self.device_type)
             raise unittest.SkipTest(reason)
 
         return fn(self, *args, **kwargs)
