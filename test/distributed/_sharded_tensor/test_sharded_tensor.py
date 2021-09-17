@@ -25,7 +25,6 @@ from torch.distributed._sharded_tensor.api import (
     _create_tensor_from_params,
 )
 from torch.testing._internal.common_distributed import (
-    MultiProcessTestCase,
     requires_nccl,
     skip_if_lt_x_gpu,
 )
@@ -239,7 +238,7 @@ class TestCreateTensorFromParams(TestCase):
         self.assertEqual(expected_tensor, local_tensor)
 
 
-class TestShardParameter(ShardedTensorTestBase, MultiProcessTestCase):
+class TestShardParameter(ShardedTensorTestBase):
     @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(4)
     @requires_nccl()
@@ -255,6 +254,7 @@ class TestShardParameter(ShardedTensorTestBase, MultiProcessTestCase):
         )
 
         fc = torch.nn.Linear(12, 12).cuda(self.rank)
+        weight_og = fc.weight.clone()
         shard_parameter(fc, 'weight', spec)
 
         # Verify.
@@ -262,6 +262,7 @@ class TestShardParameter(ShardedTensorTestBase, MultiProcessTestCase):
         local_shards = fc.weight.local_shards()
         self.assertEqual(1, len(local_shards))
         self.assertEqual(torch.Size([3, 12]), local_shards[0].tensor.size())
+        self.assertEqual(torch.narrow(weight_og, 0, 3 * self.rank, 3), local_shards[0].tensor)
 
     @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(4)
@@ -321,7 +322,7 @@ class TestShardParameter(ShardedTensorTestBase, MultiProcessTestCase):
             shard_parameter(fc, 'weight', spec)
 
 
-class TestShardedTensorChunked(ShardedTensorTestBase, MultiProcessTestCase):
+class TestShardedTensorChunked(ShardedTensorTestBase):
 
     @with_comms
     @skip_if_lt_x_gpu(4)
@@ -755,7 +756,7 @@ class TestShardedTensorChunked(ShardedTensorTestBase, MultiProcessTestCase):
         spec = ChunkShardingSpec(dim=0, placements=["rank:0/cuda:1"])
         sharded_tensor = _sharded_tensor.empty(spec, 10, 20)
         tensor = torch.empty(10, 20)
-        with self.assertRaisesRegex(RuntimeError, "torch function 'add' not supported for ShardedTensor!"):
+        with self.assertRaisesRegex(RuntimeError, "not supported for ShardedTensor!"):
             torch.add(sharded_tensor, tensor)
 
         spec = ChunkShardingSpec(dim=0, placements=["rank:0/cuda:1"])
@@ -902,8 +903,8 @@ class TestShardedTensorChunked(ShardedTensorTestBase, MultiProcessTestCase):
         module_load.load_state_dict(state_dict_deser, strict=False)
 
         # Verify after load.
-        self.verify_sharded_tensor(m.sharded_tensor1, module_load.sharded_tensor1)
-        self.verify_sharded_tensor(m.submodule.sharded_tensor2, module_load.submodule.sharded_tensor2)
+        self.assert_sharded_tensor_equal(m.sharded_tensor1, module_load.sharded_tensor1)
+        self.assert_sharded_tensor_equal(m.submodule.sharded_tensor2, module_load.submodule.sharded_tensor2)
 
     @with_comms
     @skip_if_lt_x_gpu(4)
@@ -938,8 +939,8 @@ class TestShardedTensorChunked(ShardedTensorTestBase, MultiProcessTestCase):
             module_load.load_state_dict(state_dict_deser, strict=False)
 
         # Verify after load.
-        self.verify_sharded_tensor(m.sharded_tensor1, module_load.sharded_tensor1)
-        self.verify_sharded_tensor(m.submodule.sharded_tensor2, module_load.submodule.sharded_tensor2)
+        self.assert_sharded_tensor_equal(m.sharded_tensor1, module_load.sharded_tensor1)
+        self.assert_sharded_tensor_equal(m.submodule.sharded_tensor2, module_load.submodule.sharded_tensor2)
 
     @with_comms
     @skip_if_lt_x_gpu(4)
@@ -1014,7 +1015,7 @@ class TestShardedTensorChunked(ShardedTensorTestBase, MultiProcessTestCase):
             state_dict_deser = torch.load(buffer)
 
 
-class TestShardedTensorEnumerable(ShardedTensorTestBase, MultiProcessTestCase):
+class TestShardedTensorEnumerable(ShardedTensorTestBase):
 
     @with_comms
     @skip_if_lt_x_gpu(4)
@@ -1504,7 +1505,7 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase, MultiProcessTestCase):
                 self.assertEqual((5, 5), shard.tensor.size())
 
 
-class TestShardedTensorFromLocalShards(ShardedTensorTestBase, MultiProcessTestCase):
+class TestShardedTensorFromLocalShards(ShardedTensorTestBase):
 
     @with_comms
     @skip_if_lt_x_gpu(4)

@@ -419,14 +419,14 @@ def shard_parameter(
         dist.all_gather_object(gathered_list, (src_rank, sharding_spec), group=pg)
 
     for idx, entry in enumerate(gathered_list):
-        if src_rank != entry[0]:
+        if src_rank != entry[0]:  # type: ignore[index]
             raise ValueError(
                 f'src_rank={src_rank} on rank: {rank} does not '
-                f'match with src_rank={entry[0]} on rank: {idx}')
-        if sharding_spec != entry[1]:
+                f'match with src_rank={entry[0]} on rank: {idx}')  # type: ignore[index]
+        if sharding_spec != entry[1]:  # type: ignore[index]
             raise ValueError(
                 f'sharding_spec={sharding_spec} on rank: {rank} does not '
-                f'match with sharding_spec={entry[1]} on rank: {idx}')
+                f'match with sharding_spec={entry[1]} on rank: {idx}')  # type: ignore[index]
 
     # Rearrange chunks according to placement.
     local_metadata = None

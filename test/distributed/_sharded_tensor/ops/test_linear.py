@@ -6,7 +6,6 @@ from torch.distributed._sharding_spec import (
     ChunkShardingSpec,
 )
 from torch.testing._internal.common_distributed import (
-    MultiProcessTestCase,
     requires_nccl,
     skip_if_lt_x_gpu,
 )
@@ -16,7 +15,7 @@ from torch.testing._internal.distributed._sharded_tensor import (
 )
 
 
-class TestShardedTensorOps(ShardedTensorTestBase, MultiProcessTestCase):
+class TestShardedTensorOps(ShardedTensorTestBase):
     def _run_sharded_linear(self, spec, input_size, linear_size, sharded_dim):
         # Use same seed.
         torch.manual_seed(0)

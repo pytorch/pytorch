@@ -5,11 +5,12 @@ import torch
 import torch.distributed as dist
 from torch.distributed import rpc
 from torch.testing._internal.common_distributed import (
+    MultiProcessTestCase,
     TEST_SKIPS,
 )
 
 
-class ShardedTensorTestBase(object):
+class ShardedTensorTestBase(MultiProcessTestCase):
     @property
     def world_size(self):
         return 4
@@ -54,7 +55,7 @@ class ShardedTensorTestBase(object):
         super().setUp()
         self._spawn_processes()
 
-    def verify_sharded_tensor(self, st1, st2):
+    def assert_sharded_tensor_equal(self, st1, st2):
         st1_local_shards = st1.local_shards()
         st2_local_shards = st2.local_shards()
         self.assertEqual(len(st1_local_shards), len(st2_local_shards))
