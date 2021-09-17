@@ -527,12 +527,17 @@ ProcessGroupNCCL::ProcessGroupNCCL(
 void ProcessGroupNCCL::runHealthCheck() {
   // Run health check in a separate thread and wait on CV to handle timeouts, since
   // majority of getNCCLComm failures are hangs.
-  std::mutex healthCheckMutex;
-  std::condition_variable healthCheckCv;
-  bool healthCheckSuccess = false;
-  std::atomic<bool> healthCheckExceptionSet{false};
-  std::exception_ptr healthCheckException;
-  auto t = std::thread([&healthCheckMutex, &healthCheckCv, &healthCheckSuccess, &healthCheckExceptionSet, &healthCheckException, this]() {
+
+  struct HealthCheckData {
+    std::mutex healthCheckMutex;
+    std::condition_variable healthCheckCv;
+    bool healthCheckSuccess = false;
+    std::atomic<bool> healthCheckExceptionSet{false};
+    std::exception_ptr healthCheckException;
+  };
+
+  HealthCheckData healthCheckData;
+  auto t = std::thread([&healthCheckData, this]() {
     try {
       std::vector<at::Device> rankDevice = {getDeviceForRank(rank_)};
       const auto key = getKeyFromDevices(rankDevice);
@@ -544,18 +549,18 @@ void ProcessGroupNCCL::runHealthCheck() {
       destroyNCCLComms(key);
       // Notify main thread the health check is complete.
       {
-        std::lock_guard<std::mutex> lk(healthCheckMutex);
-        healthCheckSuccess = true;
+        std::lock_guard<std::mutex> lk(healthCheckData.healthCheckMutex);
+        healthCheckData.healthCheckSuccess = true;
       }
-      healthCheckCv.notify_one();
+      healthCheckData.healthCheckCv.notify_one();
     } catch (const std::exception &e) {
       // Populate exception ptr and boolean indicating it is set.
       // TODO: there does not appear to be a way to propagate the type of e like
       // python, so just using runtime_error here.
-      healthCheckException = std::make_exception_ptr(std::runtime_error(c10::str("Health check got exception while initializing + destroying communicators: ", e.what())));
-      healthCheckExceptionSet.store(true);
+      healthCheckData.healthCheckException = std::make_exception_ptr(std::runtime_error(c10::str("Health check got exception while initializing + destroying communicators: ", e.what())));
+      healthCheckData.healthCheckExceptionSet.store(true);
       // Unblock waiting main thread which will report exception.
-      healthCheckCv.notify_one();
+      healthCheckData.healthCheckCv.notify_one();
     } // Unknown exceptions will just cause the program to terminate.
   });
   // We don't need to join the thread, just need to verify health check via the
@@ -565,17 +570,17 @@ void ProcessGroupNCCL::runHealthCheck() {
                << " will wait for"
                << options_->timeout.count()
                << " msec for NCCL health check to complete.";
-  std::unique_lock<std::mutex> lock(healthCheckMutex);
-  healthCheckCv.wait_for(
-      lock, options_->timeout, [&healthCheckSuccess]() { return healthCheckSuccess; });
+  std::unique_lock<std::mutex> lock(healthCheckData.healthCheckMutex);
+  healthCheckData.healthCheckCv.wait_for(
+      lock, options_->timeout, [&healthCheckData]() { return healthCheckData.healthCheckSuccess; });
 
-  if (healthCheckExceptionSet) {
-    TORCH_INTERNAL_ASSERT(healthCheckException, "Expected health check exception to be set!");
-    std::rethrow_exception(healthCheckException);
+  if (healthCheckData.healthCheckExceptionSet) {
+    TORCH_INTERNAL_ASSERT(healthCheckData.healthCheckException, "Expected health check exception to be set!");
+    std::rethrow_exception(healthCheckData.healthCheckException);
   }
   // If there is no exception, the likely culprit is a timeout/hang which is how
   // most communicator init issues manifest themselves.
-  TORCH_CHECK(healthCheckSuccess, "ProcessGroupNCCL: Health check falure: Failed to initialize NCCL communicator on rank ", rank_);
+  TORCH_CHECK(healthCheckData.healthCheckSuccess, "ProcessGroupNCCL: Health check falure: Failed to initialize NCCL communicator on rank ", rank_);
 }
 
 void ProcessGroupNCCL::setSequenceNumberForGroup() {
