@@ -804,16 +804,16 @@ def test_with_device_wrapper(setup_rpc):
 
     model = nn.Sequential(fc1, fc2, WithDevice(dropout, 'cuda:1'))
     model = Pipe(model, chunks=8)
-    model(torch.rand(16, 16).cuda(0))
+    assert torch.device('cuda:1') == model(torch.rand(16, 16).cuda(0)).local_value().device
     assert [torch.device('cuda:0'), torch.device('cuda:1')] == model.devices
 
     model = nn.Sequential(fc1, WithDevice(dropout, 'cuda:1'))
     model = Pipe(model, chunks=8)
-    model(torch.rand(16, 16).cuda(0))
+    assert torch.device('cuda:1') == model(torch.rand(16, 16).cuda(0)).local_value().device
     assert [torch.device('cuda:0'), torch.device('cuda:1')] == model.devices
 
     model = nn.Sequential(fc1, WithDevice(fc2, 'cuda:0'))
     model = Pipe(model, chunks=8)
-    model(torch.rand(16, 16).cuda(0))
+    assert torch.device('cuda:0') == model(torch.rand(16, 16).cuda(0)).local_value().device
     assert [torch.device('cuda:0')] == model.devices
     assert torch.device('cuda:0') == fc2.weight.device

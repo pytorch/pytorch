@@ -135,7 +135,7 @@ class PipeSequential(nn.Sequential):
 
 class WithDevice(nn.Module):
     """
-    Wraps an nn.Module which is part of nn.Sequential passed into :class:`Pipe`
+    Wraps an ``nn.Module`` which is part of ``nn.Sequential`` passed into :class:`Pipe`
     that overrides the device for that module. In cases where :class:`Pipe`
     can't implicitly determine the device for the module and places it on CPU,
     this wrapper can be used to override the implicit behavior and explicitly
