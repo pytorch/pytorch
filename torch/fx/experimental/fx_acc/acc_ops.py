@@ -357,53 +357,6 @@ def square_mapper(node: torch.fx.Node, _: nn.Module) -> torch.fx.Node:
 def matmul(*, input, other):
     return torch.matmul(**locals())
 
-
-@register_custom_acc_mapper_fn(
-    op_and_target=("call_function", torch.min),
-    arg_replacement_tuples=[
-        ("input", "input"),
-        ("other", "other", this_arg_is_optional),
-        ("dim", "dim", this_arg_is_optional),
-        ("keepdim", "keepdim", this_arg_is_optional),
-    ],
-)
-def custom_torch_min_mapper(node: torch.fx.Node, mod: nn.Module) -> torch.fx.Node:
-    """
-    Add custom mapping for torch.min because torch.min has three input types, where each yields a different output type:
-        1. torch.min(input); Output: tensor wih the minimum number
-        2. torch.min(input, other); Output: tensor with coordinate-wise min value
-        3[Not Supported] torch.min(input, dim, keepdim); Output:(min_values，and min_indices)
-    """
-    with node.graph.inserting_before(node):
-        # If dim is in kwargs, assert "Not Supported"
-        assert "dim" not in node.kwargs, "Currently not support dim in torch.min"
-
-        if "other" in node.kwargs and node.kwargs["other"] is not None:
-            # If kwargs[other] is a valid tensor, call min_two_tensors_input,
-            op_func = min_two_tensors_input
-        else:
-            # Otherwise, call min_single_tensor_input
-            op_func = min_single_tensor_input
-
-        new_node = node.graph.create_node(
-            "call_function",
-            op_func,
-            kwargs=node.kwargs,
-            name=node.name,
-        )
-        new_node.meta = node.meta
-        return new_node
-
-
-@register_acc_op
-def min_single_tensor_input(*, input):
-    return torch.min(input)
-
-
-@register_acc_op
-def min_two_tensors_input(*, input, other):
-    return torch.min(input, other)
-
 @register_acc_op_mapping(
     op_and_target=("call_function", torch.ops.quantized.add),
     arg_replacement_tuples=[
@@ -415,8 +368,8 @@ def min_two_tensors_input(*, input, other):
     kwargs_to_move_to_acc_out_ty=[
         ("scale", "scale"),
         ("zero_point", "zero_point"),
+        ("qscheme", torch.per_tensor_affine, True),
     ],
-    qscheme=torch.per_tensor_affine,
 )
 @register_acc_op
 def quantized_add(*, input, other, acc_out_ty=None):
@@ -441,8 +394,8 @@ def quantized_add(*, input, other, acc_out_ty=None):
     kwargs_to_move_to_acc_out_ty=[
         ("scale", "scale"),
         ("zero_point", "zero_point"),
+        ("qscheme", torch.per_tensor_affine, True),
     ],
-    qscheme=torch.per_tensor_affine,
 )
 @register_acc_op
 def quantized_mul(*, input, other, acc_out_ty=None):
@@ -466,9 +419,9 @@ def quantized_mul(*, input, other, acc_out_ty=None):
     kwargs_to_move_to_acc_out_ty=[
         ("scale", "scale"),
         ("zero_point", "zero_point"),
-        ("dtype", "dtype")
+        ("dtype", "dtype"),
+        ("qscheme", torch.per_tensor_affine, True),
     ],
-    qscheme=torch.per_tensor_affine,
 )
 @register_acc_op
 def quantize_per_tensor(*, input, acc_out_ty=None):
@@ -494,9 +447,9 @@ def quantize_per_tensor(*, input, acc_out_ty=None):
         ("scales", "scale"),
         ("zero_points", "zero_point"),
         ("axis", "axis"),
-        ("dtype", "dtype")
+        ("dtype", "dtype"),
+        ("qscheme", torch.per_channel_affine, True),
     ],
-    qscheme=torch.per_channel_affine,
 )
 @register_acc_op
 def quantize_per_channel(*, input, acc_out_ty=None):
@@ -993,8 +946,8 @@ def tuple_construct(*, tensors):
     kwargs_to_move_to_acc_out_ty=[
         ("scale", "q_scale"),
         ("zero_point", "q_zero_point"),
+        ("qscheme", torch.per_tensor_affine, True),
     ],
-    qscheme=torch.per_tensor_affine,
 )
 @register_acc_op
 def quantized_batch_norm2d(

@@ -60,10 +60,6 @@ class NormalizationInfo(NamedTuple):
     custom_mapping_fn: Optional[Callable]
     kwargs_to_move_to_acc_out_ty: Optional[Optional[List[Tuple[str, str]]]]
     needs_shapes_for_normalization: bool
-    # qscheme of Tensor, used to get different fields for quantization
-    # parameters
-    qscheme: Optional[torch.qscheme]
-
 
 # Dict from (op, target) to NormalizationInfo for that op.
 _normalization_dict: Dict[Tuple[str, Union[str, Callable]], NormalizationInfo] = {}
@@ -80,7 +76,6 @@ def _insert_fun(
     kwargs_to_move_to_acc_out_ty: Optional[Optional[List[Tuple[str, str]]]] = None,
     needs_shapes_for_normalization=False,
     allow_normalize_from_torch_package=False,
-    qscheme=None,
 ):
     if op_and_target[0] == "call_function":
         assert callable(op_and_target[1])
@@ -122,7 +117,6 @@ def _insert_fun(
         custom_mapping_fn=custom_mapping_fn,
         kwargs_to_move_to_acc_out_ty=kwargs_to_move_to_acc_out_ty,
         needs_shapes_for_normalization=needs_shapes_for_normalization,
-        qscheme=qscheme
     )
     _normalization_dict[op_and_target] = norm_info
 
@@ -163,7 +157,6 @@ def register_acc_op_mapping(
         List[Union[Tuple[Union[str, Tuple[str, ...]], str], Tuple[Union[str, Tuple[str, ...]], str, bool]]]
     ] = None,
     kwargs_to_move_to_acc_out_ty: Optional[List[Tuple[str, str]]] = None,
-    qscheme=None
 ):
     """
     Use this decorator to map a non-acc operator to an acc operator.
@@ -187,7 +180,6 @@ def register_acc_op_mapping(
             new_fn_target=new_fn_target,
             arg_replacement_tuples=final_arg_replacement_tuples,  # type: ignore[arg-type]
             kwargs_to_move_to_acc_out_ty=kwargs_to_move_to_acc_out_ty,
-            qscheme=qscheme,
         )
         return new_fn_target
 
@@ -243,26 +235,38 @@ def move_kwargs_to_acc_out_ty(
     # acc_out_ty instead.
     tmd_dict: Dict[str, Any] = {}
 
-    # Extract quantization related kwargs
-    qscheme_to_fields = {
-        torch.per_tensor_affine: {"scale", "zero_point", "dtype"},
-        torch.per_channel_affine: {"scale", "zero_point", "axis", "dtype"},
-    }
-    qscheme = normalization_info.qscheme
-    qparams = None
-    if qscheme is not None:
-        qparams = {}
-        qparams["qscheme"] = qscheme
-    qparam_fields = qscheme_to_fields[qscheme] if qscheme is not None else set()
-    for (
-        orig_kwarg_name,
-        tmd_field_name,
-    ) in normalization_info.kwargs_to_move_to_acc_out_ty:
-        if tmd_field_name in qparam_fields:
-            qparams[tmd_field_name] = new_kwargs[orig_kwarg_name]
+    for kwarg_replacement_tuple in normalization_info.kwargs_to_move_to_acc_out_ty:
+        if len(kwarg_replacement_tuple) == 2:
+            orig_kwarg_name, tmd_field_name, is_constant = *kwarg_replacement_tuple, False
+        else:
+            assert len(kwarg_replacement_tuple) == 3
+            orig_kwarg_name, tmd_field_name, is_constant = kwarg_replacement_tuple
+        if is_constant:
+            # when the arg is constant, the fields will be name and value
+            tmd_dict[orig_kwarg_name] = tmd_field_name
         else:
             tmd_dict[tmd_field_name] = new_kwargs[orig_kwarg_name]
-        del new_kwargs[orig_kwarg_name]
+            del new_kwargs[orig_kwarg_name]
+
+    qparams = None
+    # generate the qparams dict
+    if "qscheme" in tmd_dict:
+        qscheme = tmd_dict["qscheme"]
+        del tmd_dict["qscheme"]
+        # Extract quantization related kwargs
+        qscheme_to_fields = {
+            torch.per_tensor_affine: {"scale", "zero_point", "dtype"},
+            torch.per_channel_affine: {"scale", "zero_point", "axis", "dtype"},
+        }
+        qparam_fields = set()
+        if qscheme is not None:
+            qparams = {}
+            qparams["qscheme"] = qscheme
+            qparam_fields = qscheme_to_fields[qscheme] if qscheme is not None else set()
+        for tmd_field_name in set(tmd_dict.keys()):
+            if tmd_field_name in qparam_fields:
+                qparams[tmd_field_name] = tmd_dict[tmd_field_name]
+                del tmd_dict[tmd_field_name]
     tmd_dict["qparams"] = qparams
     # Note: allow_partial_spec here because we are only using the tensor metadata tuple
     # here to pass specific values into the function. For example, for quantization we
