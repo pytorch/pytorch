@@ -7521,8 +7521,6 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
            ),
            supports_out=False,),
-    # Added 2 entries for conv2d
-    # One runs with cudnn and other without.
     OpInfo('nn.functional.conv2d',
            aliases=('conv2d',),
            aten_name='conv2d',
