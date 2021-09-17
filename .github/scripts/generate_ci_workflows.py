@@ -562,11 +562,14 @@ if __name__ == "__main__":
         loader=jinja2.FileSystemLoader(str(GITHUB_DIR.joinpath("templates"))),
         undefined=jinja2.StrictUndefined,
     )
-    template_and_workflows = [
+    from typing import *
+    template_and_workflows: List[Tuple[Any, Any]] = [
         (jinja_env.get_template("linux_ci_workflow.yml.j2"), LINUX_WORKFLOWS),
         (jinja_env.get_template("windows_ci_workflow.yml.j2"), WINDOWS_WORKFLOWS),
         (jinja_env.get_template("bazel_ci_workflow.yml.j2"), BAZEL_WORKFLOWS),
-        (jinja_env.get_template("auto_formatter.yml.j2"), [SimpleWorkflow("periodic-auto-formatter")]),
+        (jinja_env.get_template("auto_formatter.yml.j2"), [
+            SimpleWorkflow("periodic-auto-formatter"),
+        ]),
     ]
     # Delete the existing generated files first, this should align with .gitattributes file description.
     existing_workflows = GITHUB_DIR.glob("workflows/generated-*")
