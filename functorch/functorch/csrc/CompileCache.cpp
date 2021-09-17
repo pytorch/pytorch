@@ -32,6 +32,7 @@
 #include <torch/csrc/autograd/custom_function.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/jit/tensorexpr/codegen.h>
+#include <torch/csrc/utils/pybind.h>
 
 using namespace torch::jit::tensorexpr;
 
@@ -630,4 +631,139 @@ struct ArgSpecializedCache {
   ArgAndDimSpecializedCache<Counts, 8> cache8;
 };
 
+/// Kernel cache interface.
+struct CompileCache {
+  /// Destructor.
+  virtual ~CompileCache() = default;
+
+  /// Call kernel using python objects.
+  virtual PyObject* pyCall(PyObject* args, PyObject* kwargs) = 0;
+
+  /// Call kernel using vector of tensors.
+  virtual at::Tensor call(const std::vector<at::Tensor>& args) = 0;
+
+  /// Get name of kernel.
+  virtual const std::string& getName() const = 0;
+};
+
+/// Specialized kernel cache templated on the number of input
+/// and output arguments.  Uses ArgSpecializedCache to further
+/// specialize on whether kernels are out variants.
+template <int NUM_IN, int NUM_OUT = 1>
+struct InOutSpecializedCache : public CompileCache {
+  constexpr static int NUM_ARGS = NUM_IN + NUM_OUT;
+  constexpr static int LAST_ARG = NUM_ARGS - 1;
+
+ public:
+  /// Construct a kernel cache for a kernel with given name,
+  /// module_name, and signatures, using a given compilation function.
+  InOutSpecializedCache(
+      std::string name,
+      std::string moduleName,
+      const std::vector<std::string>& signatures,
+      const py::object& compileFn)
+      : cache_(compileFn),
+        cacheOut_(compileFn),
+        parser_(signatures),
+        name_(std::move(name)),
+        moduleName_(std::move(moduleName_)) {
+    if (signatures.size() != 1) {
+      throw std::runtime_error("TODO: support overloaded signatures");
+    }
+  }
+
+  /// Returns name of kernel.
+  const std::string& getName() const {
+    return name_;
+  }
+
+  /// Call kernel using python objects.
+  PyObject* pyCall(PyObject* args, PyObject* kwargs) {
+    torch::ParsedArgs<NUM_ARGS> parsed_args;
+    torch::PythonArgs r = parser_.parse(args, kwargs, parsed_args);
+    bool presampled = false;
+    if (C10_UNLIKELY(r.has_torch_function())) {
+      py::object op = py::cast(static_cast<CompileCache*>(this));
+      return torch::handle_torch_function_no_python_arg_parser(
+          r.signature.overloaded_args,
+          args,
+          kwargs,
+          name_.c_str(),
+          op.ptr(),
+          moduleName_.c_str());
+    } else if (C10_UNLIKELY(
+                   at::hasCallbacks() &&
+                   at::shouldRunRecordFunction(&presampled))) {
+      throw std::runtime_error("TODO: implement record function");
+    } else {
+      at::Tensor tensorArgs[NUM_ARGS]; // NOLINT: c-style arrays
+      for (int i = 0; i < NUM_ARGS; ++i) {
+        tensorArgs[i] = r.tensor(i);
+      }
+      if (tensorArgs[LAST_ARG].defined()) {
+        cacheOut_.call(tensorArgs);
+      } else {
+        cache_.call(tensorArgs);
+      }
+      return THPVariable_Wrap(tensorArgs[LAST_ARG]);
+    }
+  }
+
+  /// Call kernel using vector of tensors.
+  at::Tensor call(const std::vector<at::Tensor>& args) {
+    if (C10_UNLIKELY(args.size() != NUM_IN)) {
+      throw std::runtime_error("wrong number of args");
+    }
+    at::Tensor tensorArgs[NUM_ARGS]; // NOLINT: c-style arrays
+    std::copy(args.begin(), args.end(), tensorArgs);
+    py::gil_scoped_acquire guard; // we protect our cache w/ GIL
+    cache_.call(tensorArgs);
+    return tensorArgs[LAST_ARG];
+  }
+
+ private:
+  /// Cache for kernel that allocates its output.
+  ArgSpecializedCache<ArgCounts<NUM_IN, NUM_OUT, 0>> cache_;
+
+  /// Cache for out-variant kernel, which has output provided.
+  ArgSpecializedCache<ArgCounts<NUM_IN, 0, NUM_OUT>> cacheOut_;
+
+  /// Parser for kernel args.
+  torch::PythonArgParser parser_;
+
+  /// Name of kernel.
+  std::string name_;
+
+  /// Module name of kernel.
+  std::string moduleName_;
+};
+
+/// Create a CompileCache with the given number of arguments.
+static CompileCache* createCompileCache(
+    const std::string& name,
+    const std::string& moduleName,
+    const std::vector<std::string>& sig,
+    const py::object& compileFn,
+    int numArgs) {
+  switch (numArgs) {
+    case 1:
+      return new InOutSpecializedCache<1>(name, moduleName, sig, compileFn);
+    case 2:
+      return new InOutSpecializedCache<2>(name, moduleName, sig, compileFn);
+    case 3:
+      return new InOutSpecializedCache<3>(name, moduleName, sig, compileFn);
+    case 4:
+      return new InOutSpecializedCache<4>(name, moduleName, sig, compileFn);
+    case 5:
+      return new InOutSpecializedCache<5>(name, moduleName, sig, compileFn);
+    case 6:
+      return new InOutSpecializedCache<6>(name, moduleName, sig, compileFn);
+    case 7:
+      return new InOutSpecializedCache<7>(name, moduleName, sig, compileFn);
+    case 8:
+      return new InOutSpecializedCache<8>(name, moduleName, sig, compileFn);
+    default:
+      throw std::runtime_error("TODO: support other arg counts");
+  }
+}
 } // namespace
