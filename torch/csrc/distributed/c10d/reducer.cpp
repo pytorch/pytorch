@@ -958,7 +958,9 @@ void Reducer::mark_bucket_ready(size_t bucket_index) {
 }
 
 void Reducer::install_futures(c10::List<c10::intrusive_ptr<c10::ivalue::Future>> futs) {
-    installed_futures_ = std::move(futs);
+  // Append instead of overwrite so that this method can be called multiple
+  // times in one iteration.
+  installed_futures_->append(futs);
 }
 
 void Reducer::initialize_buckets(

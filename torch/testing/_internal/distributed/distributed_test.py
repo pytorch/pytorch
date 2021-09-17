@@ -8014,9 +8014,13 @@ class DistributedTest:
                         self._verify_buffers_equal(model_ddp, model_ddp_no_hook)
                     loss_hook.backward()
                     loss_no_hook.backward()
-                    # Note that when custom hooks return futures, this comparison is not expected to work when hook run location is pre-forward pass. This is because the hook does async communication
-                    # and forward pass modifies the buffer without appropriate synchronization. Therefore, if returning futures from custom buffer hooks, it is advised to set hook run location to post
-                    # forward.
+                    # Note that when custom hooks return futures, this
+                    # comparison is not expected to work when hook run location
+                    # is pre-forward pass. This is because the hook does async
+                    # communication and forward pass modifies the buffer without
+                    # appropriate synchronization. Therefore, if returning
+                    # futures from custom buffer hooks, it is advised to set
+                    # hook run location to post forward.
                     if return_futures and hook_run_location == hook_post_fwd:
                         self._verify_buffers_equal(model_ddp, model_ddp_no_hook)
 
