@@ -709,24 +709,21 @@ class TestUtilityFuns(TestCase):
         funcs = onnx_model.functions
         assert len(funcs) == 3
 
-    def test_diagnose_export_mode(self):
+    def test_unconvertible_ops(self):
         class MyModule(torch.nn.Module):
             def forward(self, x):
                 return torch.cumsum(x, dim=0)
 
         model = MyModule()
         x = torch.randn(2, 3, 4)
-        f = io.BytesIO()
 
-        # run export in diagnose mode
-        graph, unsupported_ops = utils._find_missing_ops_onnx_export(model, (x,), f,
-                                                                     opset_version=9)
+        graph, unconvertible_ops = utils.unconvertible_ops(model, (x,), opset_version=9)
         iter = graph.nodes()
         assert next(iter).kind() == "onnx::Constant"
         assert next(iter).kind() == "prim::Constant"
         assert next(iter).kind() == "aten::cumsum"
-        assert len(unsupported_ops) == 1
-        assert unsupported_ops == ["aten::cumsum"]
+        assert len(unconvertible_ops) == 1
+        assert unconvertible_ops == ["aten::cumsum"]
 
     def test_aten_fallthrough(self):
         # Test aten export of op with no symbolic
