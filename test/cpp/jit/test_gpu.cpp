@@ -17266,6 +17266,38 @@ TEST(NVFuserTest, FusionGridWelfordWithNonExactParallelDimensions2_CUDA) {
 #endif
 }
 
+// Repro of issue #1136
+TEST(NVFuserTest, FusionFloatPow_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(1);
+  fusion.addInput(tv0);
+
+  auto tv1 = binaryOp(BinaryOpType::Pow, tv0, new Int(4));
+
+  fusion.addOutput(tv1);
+
+  tv1->split(0, 32);
+
+  tv1->axis(0)->parallelize(ParallelType::BIDx);
+  tv1->axis(1)->parallelize(ParallelType::TIDx);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({1000}, options);
+  // Negative inputs cause nan in Fuesr as use_fast_math is enabled
+  t0 = abs(t0);
+  std::vector<IValue> aten_inputs = {t0};
+  auto outputs = fe.runFusion(aten_inputs);
+
+  auto ref = at::pow(t0, 4);
+
+  testValidate(&fusion, outputs, aten_inputs, {ref}, __LINE__, __FILE__);
+}
+
 } // namespace jit
 } // namespace torch
 #endif // #if defined(USE_CUDA)

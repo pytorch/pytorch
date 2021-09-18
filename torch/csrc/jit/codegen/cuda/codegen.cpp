@@ -557,7 +557,13 @@ class CudaKernelGenerator : private kir::IrVisitor {
             auto int_op = integer_op_str(op_type);
             code_ << " = " << *int_op << "(\n";
           } else {
-            code_ << " = " << op_type << "(\n";
+            std::stringstream op_str;
+            op_str << op_type;
+            if (needFloatSuffix(op_type) &&
+                node->out()->dtype() == DataType::Float) {
+              op_str << "f";
+            }
+            code_ << " = " << op_str.str() << "(\n";
           }
           indent() << kTab << (node->lhs()->isScalar() ? cast : "")
                    << gen(node->lhs()) << ",\n";
