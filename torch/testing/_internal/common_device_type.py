@@ -12,7 +12,8 @@ import os
 import torch
 from torch.testing._internal.common_utils import TestCase, TEST_WITH_ROCM, TEST_MKL, \
     skipCUDANonDefaultStreamIf, TEST_WITH_ASAN, TEST_WITH_UBSAN, TEST_WITH_TSAN, \
-    IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, DeterministicGuard, TEST_SKIP_NOARCH
+    IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, DeterministicGuard, TEST_SKIP_NOARCH, \
+    _TestParametrizer, dtype_name, TEST_WITH_MIOPEN_SUGGEST_NHWC
 from torch.testing._internal.common_cuda import _get_torch_cuda_version
 from torch.testing._internal.common_dtype import get_all_dtypes
 
@@ -251,19 +252,14 @@ except ImportError:
 # then inherit from it for your generic test.
 
 
-def _dtype_name(dtype):
-    """ Returns the pretty name of the dtype (e.g. torch.int64 -> int64). """
-    return str(dtype).split('.')[1]
-
-
 def _dtype_test_suffix(dtypes):
     """ Returns the test suffix for a dtype, sequence of dtypes, or None. """
     if isinstance(dtypes, list) or isinstance(dtypes, tuple):
         if len(dtypes) == 0:
             return ''
-        return '_' + '_'.join((_dtype_name(d) for d in dtypes))
+        return '_' + '_'.join((dtype_name(d) for d in dtypes))
     elif dtypes:
-        return '_{}'.format(_dtype_name(dtypes))
+        return '_{}'.format(dtype_name(dtypes))
     else:
         return ''
 
@@ -381,22 +377,32 @@ class DeviceTypeTestBase(TestCase):
 
                 return result
 
-            assert not hasattr(cls, test_name), "Redefinition of test {0}".format(test_name)
-            setattr(cls, test_name, instantiated_test)
+            assert not hasattr(cls, name), "Redefinition of test {0}".format(name)
+            setattr(cls, name, instantiated_test)
 
         # Handles tests that need parametrization (e.g. those that run across a set of
         # ops / modules using the @ops or @modules decorators).
-        if hasattr(test, 'parametrize_fn'):
-            for (test, test_name, param_kwargs) in test.parametrize_fn(test, generic_cls, cls):
-                instantiate_test_helper(cls=cls, name=test_name, test=test, param_kwargs=param_kwargs)
-        else:
-            dtypes = cls._get_dtypes(test)
-            dtypes = tuple(dtypes) if dtypes is not None else (None,)
-            for dtype in dtypes:
-                param_kwargs = {}
-                _update_param_kwargs(param_kwargs, 'dtype', dtype)
-                test_name = '{}_{}{}'.format(name, cls.device_type, _dtype_test_suffix(dtype))
-                instantiate_test_helper(cls=cls, name=test_name, test=test, param_kwargs=param_kwargs)
+
+        def default_parametrize_fn(test, generic_cls, cls):
+            # By default, parametrize only over device.
+            test_suffix = cls.device_type
+            yield (test, test_suffix, {})
+
+        parametrize_fn = test.parametrize_fn if hasattr(test, 'parametrize_fn') else default_parametrize_fn
+        for (test, test_suffix, param_kwargs) in parametrize_fn(test, generic_cls, cls):
+            if hasattr(test, 'handles_dtypes') and test.handles_dtypes:
+                full_name = '{}_{}'.format(name, test_suffix)
+                instantiate_test_helper(cls=cls, name=full_name, test=test, param_kwargs=param_kwargs)
+            else:
+                # The parametrize_fn doesn't handle dtypes internally; handle them here instead by generating
+                # a test per dtype.
+                dtypes = cls._get_dtypes(test)
+                dtypes = tuple(dtypes) if dtypes is not None else (None,)
+                for dtype in dtypes:
+                    all_param_kwargs = dict(param_kwargs)
+                    _update_param_kwargs(all_param_kwargs, 'dtype', dtype)
+                    full_name = '{}_{}{}'.format(name, test_suffix, _dtype_test_suffix(dtype))
+                    instantiate_test_helper(cls=cls, name=full_name, test=test, param_kwargs=all_param_kwargs)
 
     def run(self, result=None):
         super().run(result=result)
@@ -633,43 +639,6 @@ class OpDTypes(Enum):
     none = 5  # Instantiate no dtype variants (no dtype kwarg needed)
 
 
-class _TestParametrizer(object):
-    """
-    Decorator class for parametrizing a test function, yielding a set of new tests spawned
-    from the original generic test, each specialized for a specific set of test inputs. For
-    example, parametrizing a test across the set of ops will result in a test function per op.
-
-    The decision of how to parametrize / what to parametrize over is intended to be implemented
-    by each derived class.
-
-    In the details, the decorator adds a 'parametrize_fn' property to the test function that is called
-    during device-specific test instantiation performed in instantiate_device_type_tests(). Because of this,
-    there is no need to parametrize over device type, as that is already handled separately.
-    """
-    def _parametrize_test(self, test, generic_cls, device_cls):
-        """
-        Parametrizes the given test function across whatever dimension is specified by the derived class.
-        Tests can be parametrized over any arbitrary dimension or combination of dimensions, such as all
-        ops, all modules, or all ops + their associated dtypes.
-
-        Args:
-            test (fn): Test function to parametrize over; must support least a device arg
-            generic_cls (class): Generic test class object containing tests (e.g. TestFoo)
-            device_cls (class): Device-specialized test class object (e.g. TestFooCPU)
-
-        Returns:
-            Generator object returning 3-tuples of:
-                test (fn): Parametrized test function; must support a device arg and args for any params
-                test_name (str): Parametrized name of the test (e.g. test_bar_opname_int64)
-                param_kwargs (dict): Param kwargs to pass to the test (e.g. {'op': 'add', 'dtype': torch.int64})
-        """
-        raise NotImplementedError
-
-    def __call__(self, fn):
-        fn.parametrize_fn = self._parametrize_test
-        return fn
-
-
 # Decorator that defines the OpInfos a test template should be instantiated for.
 #
 # Example usage:
@@ -711,6 +680,7 @@ class _TestParametrizer(object):
 class ops(_TestParametrizer):
     def __init__(self, op_list, *, dtypes: OpDTypes = OpDTypes.basic,
                  allowed_dtypes: Optional[Sequence[torch.dtype]] = None):
+        super().__init__(handles_dtypes=True)
         self.op_list = op_list
         self.opinfo_dtypes = dtypes
         self.allowed_dtypes = set(allowed_dtypes) if allowed_dtypes is not None else None
@@ -744,11 +714,10 @@ class ops(_TestParametrizer):
 
             for dtype in dtypes:
                 # Construct the test name.
-                test_name = '{}_{}{}_{}{}'.format(test.__name__,
-                                                  op.name.replace('.', '_'),
-                                                  '_' + op.variant_test_name if op.variant_test_name else '',
-                                                  device_cls.device_type,
-                                                  _dtype_test_suffix(dtype))
+                test_name = '{}{}_{}{}'.format(op.name.replace('.', '_'),
+                                               '_' + op.variant_test_name if op.variant_test_name else '',
+                                               device_cls.device_type,
+                                               _dtype_test_suffix(dtype))
 
                 # Construct parameter kwargs to pass to the test.
                 param_kwargs = {'op': op}
@@ -1165,6 +1134,32 @@ def skipCUDAIfRocm(fn):
 # Skips a test on CUDA when not using ROCm.
 def skipCUDAIfNotRocm(fn):
     return skipCUDAIf(not TEST_WITH_ROCM, "test doesn't currently work on the CUDA stack")(fn)
+
+# Skips a test on CUDA if ROCm is unavailable or its version is lower than requested.
+def skipCUDAIfRocmVersionLessThan(version=None):
+
+    def dec_fn(fn):
+        @wraps(fn)
+        def wrap_fn(self, *args, **kwargs):
+            if self.device_type == 'cuda':
+                if not TEST_WITH_ROCM:
+                    reason = "ROCm not available"
+                    raise unittest.SkipTest(reason)
+                rocm_version = str(torch.version.hip)
+                rocm_version = rocm_version.split("-")[0]    # ignore git sha
+                rocm_version_tuple = tuple(int(x) for x in rocm_version.split("."))
+                if rocm_version_tuple is None or version is None or rocm_version_tuple < tuple(version):
+                    reason = "ROCm {0} is available but {1} required".format(rocm_version_tuple, version)
+                    raise unittest.SkipTest(reason)
+
+            return fn(self, *args, **kwargs)
+
+        return wrap_fn
+    return dec_fn
+
+# Skips a test on CUDA when using ROCm.
+def skipCUDAIfNotMiopenSuggestNHWC(fn):
+    return skipCUDAIf(not TEST_WITH_MIOPEN_SUGGEST_NHWC, "test doesn't currently work without MIOpen NHWC activation")(fn)
 
 # Skips a test for specified CUDA versions, given in the form of a list of [major, minor]s.
 def skipCUDAVersionIn(versions : List[Tuple[int, int]] = None):

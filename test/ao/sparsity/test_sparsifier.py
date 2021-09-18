@@ -75,7 +75,6 @@ class TestBaseSparsifier(TestCase):
         # Check the expected keys in the state_dict
         assert 'state' in state_dict
         assert 'linear' in state_dict['state']
-        assert 'mask' in state_dict['state']['linear']
         assert 'step_count' in state_dict['state']['linear']
         assert state_dict['state']['linear']['step_count'] == 3
 
@@ -176,7 +175,7 @@ class TestWeightNormSparsifier(TestCase):
     def test_step_2_of_4(self):
         model = Model()
         sparsifier = WeightNormSparsifier(sparsity_level=1.0,
-                                          zeros_block_shape=(1, 4),
+                                          sparse_block_shape=(1, 4),
                                           zeros_per_block=2)
         sparsifier.prepare(model, config=[model.linear])
         sparsifier.step()
@@ -188,7 +187,7 @@ class TestWeightNormSparsifier(TestCase):
         for row in mask:
             for idx in range(0, len(row), 4):
                 block = row[idx:idx + 4]
-                block.sort()
+                block, _ = block.sort()
                 assert (block[:2] == 0).all()
                 assert (block[2:] != 0).all()
 

@@ -1,4 +1,5 @@
 from functools import reduce
+from typing import Tuple
 
 import torch
 import torch.nn.functional as F
@@ -68,7 +69,7 @@ class WeightNormSparsifier(BaseSparsifier):
         mask = layer.parametrizations.weight[0].mask
         if sparsity_level <= 0:
             mask.data = torch.ones(layer.weight.shape, device=layer.weight.device)
-        elif sparsity_level >= 1.0:
+        elif sparsity_level >= 1.0 and (zeros_per_block == values_per_block):
             mask.data = torch.zeros(layer.weight.shape, device=layer.weight.device)
         else:
             ww = layer.weight * layer.weight
@@ -87,8 +88,8 @@ class WeightNormSparsifier(BaseSparsifier):
             for row, col in zip(rows, cols):
                 submask = new_mask[row:row + sparse_block_shape[0],
                                    col:col + sparse_block_shape[1]]
-                subweight = weight[row:row + sparse_block_shape[0],
-                                   col:col + sparse_block_shape[1]]
+                subweight = layer.weight[row:row + sparse_block_shape[0],
+                                         col:col + sparse_block_shape[1]]
                 self._update_block(submask, subweight,
                                    zeros_per_block, values_per_block)
             mask.data = new_mask
