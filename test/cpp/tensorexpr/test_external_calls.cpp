@@ -20,9 +20,9 @@ namespace jit {
 using namespace torch::jit::tensorexpr;
 
 TEST(ExternalCall, Conv2d_float) {
-  Placeholder Input("Input", kFloat, {1, 3, 224, 224});
-  Placeholder Weight("Weight", kFloat, {16, 3, 3, 3});
-  Placeholder Bias("Bias", kFloat, {16});
+  BufHandle Input("Input", {1, 3, 224, 224}, kFloat);
+  BufHandle Weight("Weight", {16, 3, 3, 3}, kFloat);
+  BufHandle Bias("Bias", {16}, kFloat);
   BufHandle ResultBuf("Result", {1, 16, 112, 112}, kFloat);
   int64_t stride = 2;
   int64_t pad = 1;
@@ -34,9 +34,7 @@ TEST(ExternalCall, Conv2d_float) {
       ExternalCall::make(
           ResultBuf,
           "nnc_aten_conv2d",
-          {BufHandle(Input.data()),
-           BufHandle(Weight.data()),
-           BufHandle(Bias.data())},
+          {Input, Weight, Bias},
           {stride, stride, pad, pad, dilation, dilation, groups}));
   LoopNest l({Result});
   l.prepareForCodegen();
@@ -83,9 +81,9 @@ TEST(ExternalCall, Conv2d_float) {
 TEST(ExternalCall, Conv2d_int) {
   // A similar test, but now using kInt tensors
 
-  Placeholder Input("Input", kInt, {1, 3, 224, 224});
-  Placeholder Weight("Weight", kInt, {16, 3, 3, 3});
-  Placeholder Bias("Bias", kInt, {16});
+  BufHandle Input("Input", {1, 3, 224, 224}, kInt);
+  BufHandle Weight("Weight", {16, 3, 3, 3}, kInt);
+  BufHandle Bias("Bias", {16}, kInt);
   BufHandle ResultBuf("Result", {1, 16, 112, 112}, kInt);
   int64_t stride = 2;
   int64_t pad = 1;
@@ -97,9 +95,7 @@ TEST(ExternalCall, Conv2d_int) {
       ExternalCall::make(
           ResultBuf,
           "nnc_aten_conv2d",
-          {BufHandle(Input.data()),
-           BufHandle(Weight.data()),
-           BufHandle(Bias.data())},
+          {Input, Weight, Bias},
           {stride, stride, pad, pad, dilation, dilation, groups}));
   LoopNest l({Result});
   l.prepareForCodegen();
@@ -144,17 +140,13 @@ TEST(ExternalCall, Conv2d_int) {
 }
 
 TEST(ExternalCall, Conv2d_nobias_noargs) {
-  Placeholder Input("Input", kFloat, {1, 16, 112, 112});
-  Placeholder Weight("Weight", kFloat, {16, 16, 1, 1});
+  BufHandle Input("Input", {1, 16, 112, 112}, kFloat);
+  BufHandle Weight("Weight", {16, 16, 1, 1}, kFloat);
   BufHandle ResultBuf("Result", {1, 16, 112, 112}, kFloat);
 
   Tensor Result = Tensor(
       ResultBuf.node(),
-      ExternalCall::make(
-          ResultBuf,
-          "nnc_aten_conv2d",
-          {BufHandle(Input.data()), BufHandle(Weight.data())},
-          {}));
+      ExternalCall::make(ResultBuf, "nnc_aten_conv2d", {Input, Weight}, {}));
   LoopNest l({Result});
   l.prepareForCodegen();
   l.simplify();
@@ -189,9 +181,9 @@ TEST(ExternalCall, Conv2d_nobias_noargs) {
 }
 
 TEST(ExternalCall, Addmm_float) {
-  Placeholder Input("Input", kFloat, {100, 300});
-  Placeholder Mat1("Mat1", kFloat, {100, 200});
-  Placeholder Mat2("Mat2", kFloat, {200, 300});
+  BufHandle Input("Input", {100, 300}, kFloat);
+  BufHandle Mat1("Mat1", {100, 200}, kFloat);
+  BufHandle Mat2("Mat2", {200, 300}, kFloat);
   BufHandle ResultBuf("Result", {100, 300}, kFloat);
   int64_t beta = 2;
   int64_t alpha = 2;
@@ -199,12 +191,7 @@ TEST(ExternalCall, Addmm_float) {
   Tensor Result = Tensor(
       ResultBuf.node(),
       ExternalCall::make(
-          ResultBuf,
-          "nnc_aten_addmm",
-          {BufHandle(Input.data()),
-           BufHandle(Mat1.data()),
-           BufHandle(Mat2.data())},
-          {beta, alpha}));
+          ResultBuf, "nnc_aten_addmm", {Input, Mat1, Mat2}, {beta, alpha}));
   LoopNest l({Result});
   l.prepareForCodegen();
   l.simplify();
@@ -245,7 +232,7 @@ TEST(ExternalCall, Addmm_float) {
 TEST(ExternalCall, Prepacked_Linear_float) {
   using namespace at::native::xnnpack;
 
-  Placeholder Input("Input", kFloat, {100, 200});
+  BufHandle Input("Input", {100, 200}, kFloat);
   BufHandle ResultBuf("Result", {100, 300}, kFloat);
 
   // Calculate reference result using at::linear.
@@ -273,13 +260,13 @@ TEST(ExternalCall, Prepacked_Linear_float) {
   auto prepacked = linear_clamp_prepack_op.call(
       weight, bias, c10::optional<at::Scalar>(), c10::optional<at::Scalar>());
 
-  Placeholder DummyPrepacked("DummyPrepacked", kFloat, {1});
+  BufHandle DummyPrepacked("DummyPrepacked", {1}, kFloat);
   Tensor Result = Tensor(
       ResultBuf.node(),
       ExternalCall::make(
           ResultBuf,
           "nnc_prepacked_linear_clamp_run",
-          {BufHandle(Input.data()), BufHandle(DummyPrepacked.data())},
+          {Input, DummyPrepacked},
           {}));
   LoopNest l({Result});
   l.prepareForCodegen();
@@ -308,7 +295,7 @@ TEST(ExternalCall, Prepacked_Linear_float) {
 TEST(ExternalCall, Prepacked_Conv2d_float) {
   using namespace at::native::xnnpack;
 
-  Placeholder Input("Input", kFloat, {1, 3, 224, 224});
+  BufHandle Input("Input", {1, 3, 224, 224}, kFloat);
   BufHandle ResultBuf("Result", {1, 16, 112, 112}, kFloat);
   int64_t stride = 2;
   int64_t pad = 1;
@@ -358,13 +345,13 @@ TEST(ExternalCall, Prepacked_Conv2d_float) {
       c10::optional<at::Scalar>(),
       c10::optional<at::Scalar>());
 
-  Placeholder DummyPrepacked("DummyPrepacked", kFloat, {1});
+  BufHandle DummyPrepacked("DummyPrepacked", {1}, kFloat);
   Tensor Result = Tensor(
       ResultBuf.node(),
       ExternalCall::make(
           ResultBuf,
           "nnc_prepacked_conv2d_clamp_run",
-          {BufHandle(Input.data()), BufHandle(DummyPrepacked.data())},
+          {Input, DummyPrepacked},
           {}));
   LoopNest l({Result});
   l.prepareForCodegen();
@@ -415,17 +402,13 @@ TEST(ExternalCall, BinaryFloat) {
       auto intV = std::vector<int>(v.begin(), v.end());
       return std::vector<ExprHandle>(intV.begin(), intV.end());
     };
-    Placeholder A("A", kFloat, toExprHandleVec(aShape));
-    Placeholder B("", kFloat, toExprHandleVec(bShape));
+    BufHandle A("A", toExprHandleVec(aShape), kFloat);
+    BufHandle B("B", toExprHandleVec(bShape), kFloat);
     BufHandle ResultBuf("Result", toExprHandleVec(resShape), kFloat);
 
     Tensor Result = Tensor(
         ResultBuf.node(),
-        ExternalCall::make(
-            ResultBuf,
-            externCallName,
-            {BufHandle(A.data()), BufHandle(B.data())},
-            {}));
+        ExternalCall::make(ResultBuf, externCallName, {A, B}, {}));
     LoopNest l({Result});
     l.prepareForCodegen();
     l.simplify();
@@ -500,13 +483,12 @@ TEST(ExternalCall, UnaryFloat) {
     std::vector<ExprHandle> externCallArgs;
     std::tie(aShape, resShape, torchFunc, externCallName, externCallArgs) =
         curTest;
-    Placeholder A("A", kFloat, toExprHandleVec(aShape));
+    BufHandle A("A", toExprHandleVec(aShape), kFloat);
     BufHandle ResultBuf("Result", toExprHandleVec(resShape), kFloat);
 
     Tensor Result = Tensor(
         ResultBuf.node(),
-        ExternalCall::make(
-            ResultBuf, externCallName, {BufHandle(A.data())}, externCallArgs));
+        ExternalCall::make(ResultBuf, externCallName, {A}, externCallArgs));
     LoopNest l({Result});
     l.prepareForCodegen();
     l.simplify();
