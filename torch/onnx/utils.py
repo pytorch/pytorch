@@ -76,7 +76,7 @@ def select_model_mode_for_export(model, mode):
 def export(model, args, f, export_params=True, verbose=False, training=None,
            input_names=None, output_names=None, operator_export_type=None,
            opset_version=None, _retain_param_name=None, do_constant_folding=True,
-           example_outputs=None, strip_doc_string=True, dynamic_axes=None,
+           example_outputs=None, strip_doc_string=None, dynamic_axes=None,
            keep_initializers_as_inputs=None, custom_opsets=None,
            enable_onnx_checker=None, use_external_data_format=False):
     if operator_export_type is None:
@@ -86,20 +86,21 @@ def export(model, args, f, export_params=True, verbose=False, training=None,
             operator_export_type = OperatorExportTypes.ONNX
 
     if enable_onnx_checker is not None:
-        warnings.warn("`enable_onnx_checker' is deprecated and ignored. It will be removed in"
-                      "the next PyTorch release. To proceed despite ONNX checker failures, you"
+        warnings.warn("`enable_onnx_checker' is deprecated and ignored. It will be removed in "
+                      "the next PyTorch release. To proceed despite ONNX checker failures, you "
                       "can catch torch.onnx.ONNXCheckerError.")
-
     if _retain_param_name is not None:
         warnings.warn("`_retain_param_name' is deprecated and ignored. Will be removed in "
-                      "next release. The code now will work as it is True to keep the original "
+                      "next PyTorch release. The code now will work as it is True to keep the original "
                       "parameter names in the final ONNX graph.")
+    if strip_doc_string is not None:
+        warnings.warn("`strip_doc_string' is deprecated and ignored. Will be removed in "
+                      "next PyTorch release. It's combined with `verbose' argument now. ")
 
     _export(model, args, f, export_params, verbose, training, input_names, output_names,
             operator_export_type=operator_export_type, opset_version=opset_version,
             do_constant_folding=do_constant_folding, example_outputs=example_outputs,
-            strip_doc_string=strip_doc_string, dynamic_axes=dynamic_axes,
-            keep_initializers_as_inputs=keep_initializers_as_inputs,
+            dynamic_axes=dynamic_axes, keep_initializers_as_inputs=keep_initializers_as_inputs,
             custom_opsets=custom_opsets, use_external_data_format=use_external_data_format)
 
 
@@ -642,7 +643,7 @@ def _find_missing_ops_onnx_export(model, args, f, verbose=False, training=Traini
 def _export(model, args, f, export_params=True, verbose=False, training=None,
             input_names=None, output_names=None, operator_export_type=None,
             export_type=ExportTypes.PROTOBUF_FILE, example_outputs=None,
-            opset_version=None, do_constant_folding=True, strip_doc_string=True,
+            opset_version=None, do_constant_folding=True,
             dynamic_axes=None, keep_initializers_as_inputs=None,
             fixed_batch_size=False, custom_opsets=None, add_node_names=True,
             use_external_data_format=False, onnx_shape_inference=True):
@@ -709,12 +710,12 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
             if export_params:
                 proto, export_map = graph._export_onnx(
                     params_dict, opset_version, dynamic_axes, defer_weight_export,
-                    operator_export_type, strip_doc_string, val_keep_init_as_ip, custom_opsets,
+                    operator_export_type, not verbose, val_keep_init_as_ip, custom_opsets,
                     val_add_node_names, val_use_external_data_format, model_file_location)
             else:
                 proto, export_map = graph._export_onnx(
                     {}, opset_version, dynamic_axes, False, operator_export_type,
-                    strip_doc_string, val_keep_init_as_ip, custom_opsets, val_add_node_names,
+                    not verbose, val_keep_init_as_ip, custom_opsets, val_add_node_names,
                     val_use_external_data_format, model_file_location)
 
             if export_type == ExportTypes.PROTOBUF_FILE:
