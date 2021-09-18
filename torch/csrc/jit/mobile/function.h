@@ -3,10 +3,10 @@
 #include <unordered_map>
 #include <vector>
 
+#include <ATen/core/function.h>
 #include <ATen/core/function_schema.h>
 #include <ATen/core/ivalue.h>
 #include <ATen/core/operator_name.h>
-#include <ATen/core/function.h>
 #include <c10/util/Exception.h>
 
 namespace torch {
@@ -20,7 +20,7 @@ struct Code;
 class Function;
 class BytecodeFunction : public torch::jit::Function {
  public:
-  BytecodeFunction(mobile::Function& function): function_(function) {}
+  BytecodeFunction(mobile::Function& function) : function_(function) {}
 
   bool isGraphFunction() const override {
     return false;
@@ -130,6 +130,7 @@ class Function {
   BytecodeFunction& getBytecodeFunction() {
     return bytecodeFunction_;
   }
+
  private:
   c10::QualifiedName name_;
   std::shared_ptr<Code> code_;

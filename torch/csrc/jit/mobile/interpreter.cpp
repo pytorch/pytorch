@@ -55,13 +55,15 @@ void InterpreterState::enterFrame(const Code& code) {
 }
 
 void InterpreterState::leaveFrame() {
-  registers_.resize(registers_.size() - frames_.back().getCode().register_size_);
+  registers_.resize(
+      registers_.size() - frames_.back().getCode().register_size_);
   frames_.pop_back();
 }
 
 void InterpreterState::saveExceptionDebugHandle() {
   const auto& frame = frames_.back();
-  exception_debug_handle_ = frame.getCode().instructions_with_handles_.at(frame.getPC()).debug_handle;
+  exception_debug_handle_ =
+      frame.getCode().instructions_with_handles_.at(frame.getPC()).debug_handle;
 }
 
 bool InterpreterState::run(Stack& stack) {
