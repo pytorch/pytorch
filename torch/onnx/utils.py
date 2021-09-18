@@ -79,7 +79,7 @@ def export(model, args, f, export_params=True, verbose=False, training=None,
            opset_version=None, _retain_param_name=None, do_constant_folding=True,
            example_outputs=None, strip_doc_string=None, dynamic_axes=None,
            keep_initializers_as_inputs=None, custom_opsets=None,
-           enable_onnx_checker=None, use_external_data_format=False):
+           enable_onnx_checker=True, use_external_data_format=None):
     if operator_export_type is None:
         if torch.onnx.PYTORCH_ONNX_CAFFE2_BUNDLE:
             operator_export_type = OperatorExportTypes.ONNX_ATEN_FALLBACK
@@ -99,6 +99,11 @@ def export(model, args, f, export_params=True, verbose=False, training=None,
     if example_outputs is not None:
         warnings.warn("`example_outputs' is deprecated and ignored. Will be removed in "
                       "next PyTorch release.")
+    if use_external_data_format is not None:
+        warnings.warn("`use_external_data_format' is deprecated and ignored. Will be removed in next "
+                      "PyTorch release. The code will work as it is False if models are not larger than 2GB, "
+                      "Otherwise set to False because of size limits imposed by Protocol Buffers.")
+
     _export(model, args, f, export_params, verbose, training, input_names, output_names,
             operator_export_type=operator_export_type, opset_version=opset_version,
             do_constant_folding=do_constant_folding, example_outputs=example_outputs,
@@ -321,7 +326,10 @@ def _decide_external_data_format(use_external_data_format, operator_export_type,
     # string specifying the location of the model. For large model cases, if f is not a non-empty string,
     # then this method returns an empty string, which is an error condition for the large model export code
     # path later (but not for regular model export code path).
-    model_file_location = f if val_use_external_data_format and isinstance(f, str) else str()
+    if (val_use_external_data_format is None or val_use_external_data_format is True) and isinstance(f, str):
+        model_file_location = f
+    else:
+        model_file_location = str()
     return val_use_external_data_format, model_file_location
 
 def _decide_input_format(model, args):
@@ -664,7 +672,8 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
             opset_version=None, do_constant_folding=True,
             dynamic_axes=None, keep_initializers_as_inputs=None,
             fixed_batch_size=False, custom_opsets=None, add_node_names=True,
-            use_external_data_format=False, onnx_shape_inference=True):
+            enable_onnx_checker=True, use_external_data_format=None,
+            onnx_shape_inference=True):
 
     if isinstance(model, torch.nn.DataParallel):
         raise ValueError("torch.nn.DataParallel is not supported by ONNX "
@@ -726,12 +735,12 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
                 custom_opsets = {}
 
             if export_params:
-                proto, export_map = graph._export_onnx(
+                proto, export_map, val_use_external_data_format = graph._export_onnx(
                     params_dict, opset_version, dynamic_axes, defer_weight_export,
                     operator_export_type, not verbose, val_keep_init_as_ip, custom_opsets,
                     val_add_node_names, val_use_external_data_format, model_file_location)
             else:
-                proto, export_map = graph._export_onnx(
+                proto, export_map, val_use_external_data_format = graph._export_onnx(
                     {}, opset_version, dynamic_axes, False, operator_export_type,
                     not verbose, val_keep_init_as_ip, custom_opsets, val_add_node_names,
                     val_use_external_data_format, model_file_location)

@@ -31,9 +31,9 @@ def _export(*args, **kwargs):
 
 def export(model, args, f, export_params=True, verbose=False, training=TrainingMode.EVAL,
            input_names=None, output_names=None, operator_export_type=None,
-           opset_version=None, _retain_param_name=None, do_constant_folding=True,
-           example_outputs=None, strip_doc_string=None, dynamic_axes=None,
-           keep_initializers_as_inputs=None, custom_opsets=None, enable_onnx_checker=None,
+           opset_version=None, _retain_param_name=True, do_constant_folding=True,
+           example_outputs=None, strip_doc_string=True, dynamic_axes=None,
+           keep_initializers_as_inputs=None, custom_opsets=None, enable_onnx_checker=True,
            use_external_data_format=False):
     r"""
     Exports a model into ONNX format. If ``model`` is not a
@@ -307,12 +307,13 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
             the opset version is set to 1. Only custom opset domain name and version should be
             indicated through this argument.
 
-        enable_onnx_checker (bool, default True): Deprecated and ignored. Will be removed in next
-            Pytorch release.
-        use_external_data_format (bool, default False): If True, then some of the model
-            parameters are stored in external data files and not in the ONNX model file itself.
-            Models larger than 2GB cannot be exported in one file because of size limits imposed
-            by Protocol Buffers.
+        enable_onnx_checker (bool, default True): If True the onnx model checker will be run
+            to ensure the exported model is a valid ONNX model.
+        use_external_data_format (bool, default False): [Deprecated and ignored. Will be removed in
+            next Pytorch release.]
+            If True, then some of the model parameters are stored in external data files and not in
+            the ONNX model file itself. Models larger than 2GB cannot be exported in one file because
+            of size limits imposed by Protocol Buffers.
             For details see
             `onnx.proto <https://github.com/onnx/onnx/blob/32c7cb66/onnx/onnx.proto#L562>`_.
             If True,  argument ``f`` must be a string specifying the location of the model.

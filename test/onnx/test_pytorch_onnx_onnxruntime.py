@@ -322,7 +322,7 @@ class TestONNXRuntime(unittest.TestCase):
     def run_model_test_with_external_data(self, model, input, rtol=0.001, atol=1e-7,
                                           do_constant_folding=True, dynamic_axes=None,
                                           input_names=None, output_names=None,
-                                          ort_optim_on=True, training=None):
+                                          ort_optim_on=True, training=None, use_external_data_format=None):
         import os
         import tempfile
 
@@ -351,7 +351,7 @@ class TestONNXRuntime(unittest.TestCase):
                                   keep_initializers_as_inputs=self.keep_initializers_as_inputs,
                                   dynamic_axes=dynamic_axes,
                                   input_names=input_names, output_names=output_names,
-                                  use_external_data_format=True)
+                                  use_external_data_format=use_external_data_format)
                 # compute onnxruntime output prediction
                 ort_sess_opt = onnxruntime.SessionOptions()
                 ort_sess_opt.graph_optimization_level = \
@@ -401,19 +401,55 @@ class TestONNXRuntime(unittest.TestCase):
                 return x + torch.ones(2, 1024)
 
         x = torch.randn(2, 1)
-        self.run_model_test_with_external_data(LargeModel(), x)
+        self.run_model_test_with_external_data(LargeModel(), x, use_external_data_format=None)
 
     @skipIfUnsupportedMinOpsetVersion(9)  # Because external data format was released with Opset 9.
-    @unittest.skip("Enable this once large model with subgraph is supported in ORT")
-    def test_subgraph_with_external_data(self):
+    def test_largemodel_without_use_external_data_format_param(self):
         class LargeModel(torch.nn.Module):
-            def forward(self, x):
-                for i in range(x.size(0)):
-                    x = x + torch.ones(2, 1024)
-                return x
+            def __init__(self):
+                super(LargeModel, self).__init__()
+                dim = 5
+                n = 40 * 4 * 10 ** 6
+                self.emb = torch.nn.Embedding(n, dim)
+                self.lin1 = torch.nn.Linear(dim, 1)
+                self.seq = torch.nn.Sequential(
+                    self.emb,
+                    self.lin1,
+                )
 
-        x = torch.randn(2, 1)
-        self.run_model_test_with_external_data(torch.jit.script(LargeModel()), x)
+            def forward(self, input):
+                return self.seq(input)
+
+        model = LargeModel()
+        x = torch.tensor([2], dtype=torch.long)
+        self.run_model_test_with_external_data(LargeModel(), x, use_external_data_format=None)
+
+    @skipIfUnsupportedMinOpsetVersion(9)  # Because external data format was released with Opset 9.
+    def test_largemodel_with_use_external_data_format_False(self):
+        class LargeModel(torch.nn.Module):
+            def __init__(self):
+                super(LargeModel, self).__init__()
+                dim = 5
+                n = 30 * 4 * 10 ** 6
+                self.emb = torch.nn.Embedding(n, dim)
+                self.lin1 = torch.nn.Linear(dim, 1)
+                self.seq = torch.nn.Sequential(
+                    self.emb,
+                    self.lin1,
+                )
+
+            def forward(self, input):
+                return self.seq(input)
+
+        model = LargeModel()
+        x = torch.tensor([3], dtype=torch.long)
+
+        with self.assertRaises(RuntimeError) as cm:
+            self.run_model_test_with_external_data(LargeModel(), x, use_external_data_format=False)
+
+            the_exception = cm.exception
+            self.assertEqual("RuntimeError: Exporting model exceed maximum protobuf size of 2GB. " +
+                             "Please call torch.onnx.export without setting use_external_data_format parameter.")
 
     def test_fuse_conv_bn1d(self):
         class Fuse(torch.nn.Module):
