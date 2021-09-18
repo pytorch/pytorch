@@ -77,7 +77,11 @@ std::string normalizeAttrName(c10::string_view field) {
   return std::string{field};
 }
 
-void findAllNodes(Block& block, Symbol kind, bool recurse, std::vector<Node*>& ret) {
+void findAllNodes(
+    Block& block,
+    Symbol kind,
+    bool recurse,
+    std::vector<Node*>& ret) {
   for (Node* n : block.nodes()) {
     if (n->kind() == kind) {
       ret.push_back(n);
@@ -2208,10 +2212,7 @@ std::vector<Node*> findAllNodes(Block& block, Symbol kind, bool recurse) {
   return findAllNodes({&block}, kind, recurse);
 }
 
-std::vector<Node*> findAllNodes(
-    Graph& g,
-    Symbol kind,
-    bool recurse) {
+std::vector<Node*> findAllNodes(Graph& g, Symbol kind, bool recurse) {
   return findAllNodes(*g.block(), kind, recurse);
 }
 

@@ -338,8 +338,7 @@ void initPythonIRBindings(PyObject* module_) {
       .def(
           "findAllNodes",
           [](Graph& g, const std::string& kind, bool recurse) {
-            return findAllNodes(
-                g, Symbol::fromQualString(kind), recurse);
+            return findAllNodes(g, Symbol::fromQualString(kind), recurse);
           },
           "Find all nodes",
           py::arg("kind"),
