@@ -230,6 +230,7 @@ When indexing into a tensor for reading, the following patterns are not supporte
 
   # Tensor indices that includes negative values.
   data[torch.tensor([[1, 2], [2, -3]]), torch.tensor([-2, 3])]
+  # Workarounds: use positive index values.
 
 Writes / Sets
 ~~~~~~~~~~~~~
@@ -238,12 +239,24 @@ When indexing into a Tensor for writing, the following patterns are not supporte
 
   # Multiple tensor indices if any has rank >= 2
   data[torch.tensor([[1, 2], [2, 3]]), torch.tensor([2, 3])] = new_data
+  # Workarounds: use single tensor index with rank >= 2,
+  #              or multiple consecutive tensor indices with rank == 1.
 
   # Multiple tensor indices that are not consecutive
   data[torch.tensor([2, 3]), :, torch.tensor([1, 2])] = new_data
+  # Workarounds: transpose `data` such that tensor indices are consecutive.
 
   # Tensor indices that includes negative values.
   data[torch.tensor([1, -2]), torch.tensor([-2, 3])] = new_data
+  # Workarounds: use postive index values.
+
+  # Implicit broadcasting required for new_data.
+  data[torch.tensor([[0, 2], [1, 1]]), 1:3] = new_data
+  # Workarounds: expand new_data explicitly.
+  # Example:
+  #   data shape: [3, 4, 5]
+  #   new_data shape: [5]
+  #   expected new_data shape after broadcasting: [2, 2, 2, 5]
 
 Adding support for operators
 ----------------------------
