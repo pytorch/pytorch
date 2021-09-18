@@ -50,10 +50,14 @@ def flatten(*, input, start_dim=0, end_dim=-1):
 
 
 @register_acc_op_mapping(
-    op_and_target=(
-        "call_method",
-        "squeeze",
-    ),
+    op_and_target=("call_method", "squeeze"),
+    arg_replacement_tuples=[
+        ("input", "input"),
+        ("dim", "dim", this_arg_is_optional),
+    ],
+)
+@register_acc_op_mapping(
+    op_and_target=("call_function", torch.squeeze),
     arg_replacement_tuples=[
         ("input", "input"),
         ("dim", "dim", this_arg_is_optional),
@@ -359,6 +363,16 @@ def square_mapper(node: torch.fx.Node, _: nn.Module) -> torch.fx.Node:
 def matmul(*, input, other):
     return torch.matmul(**locals())
 
+@register_custom_acc_mapper_fn(
+    op_and_target=("call_function", nn.functional.dropout),
+    arg_replacement_tuples=[("input", "input")])
+def dropout_mapper(node: torch.fx.Node, mod: nn.Module):
+    """
+    Remove dropout node and directly map its input to output.
+    """
+    return node.kwargs["input"]
+
+
 @register_acc_op_mapping(
     op_and_target=("call_function", torch.ops.quantized.add),
     arg_replacement_tuples=[
@@ -436,32 +450,9 @@ def quantize_per_tensor(*, input, acc_out_ty=None):
         qparams["dtype"]
     )
 
-@register_acc_op_mapping(
-    op_and_target=("call_function", torch.quantize_per_channel),
-    arg_replacement_tuples=[
-        ("input", "input"),
-        ("scales", "scales"),
-        ("zero_points", "zero_points"),
-        ("axis", "axis"),
-        ("dtype", "dtype")
-    ],
-    kwargs_to_move_to_acc_out_ty=[
-        ("scales", "scale", False),
-        ("zero_points", "zero_point", False),
-        ("axis", "axis", False),
-        ("dtype", "dtype", False),
-        (torch.per_channel_affine, "qscheme", True),
-    ],
-)
-@register_acc_op
-def quantize_per_channel(*, input, acc_out_ty=None):
-    assert acc_out_ty is not None
-    qparams = acc_utils.get_field_from_acc_out_ty(acc_out_ty, "qparams")
-    return torch.quantize_per_tensor(input, qparams["scale"], qparams["zero_point"], qparams["axis"], qparams["dtype"])  # type: ignore[call-overload]
-
 @register_acc_op
 def dequantize(*, input, input_tensor_meta):
-    """ `input_tensor_meta` contains extra argument of quantization
+    """`input_tensor_meta` contains extra argument of quantization
     parameters, e.g. scale/zero_point and will be using for
     lowring dequantize op to TensorRT
     """
@@ -474,6 +465,7 @@ def sub(*, input, other):
     return input - other
 
 
+@register_acc_op_mapping(op_and_target=("call_function", torch.mul))
 @register_acc_op_mapping(op_and_target=("call_function", operator.mul))
 @register_acc_op
 def mul(*, input, other):
@@ -505,6 +497,7 @@ def pow(*, input, exponent):
 def relu(*, input, inplace=False):
     return nn.functional.relu(**locals())
 
+
 @register_custom_acc_mapper_fn(
     op_and_target=("call_function", torch.log1p),
     arg_replacement_tuples=[
@@ -520,6 +513,7 @@ def torch_log1p_mapper(node: torch.fx.Node, _: torch.nn.Module) -> torch.fx.Node
         log_node = node.graph.call_function(log, kwargs=log_kwargs)
         log_node.meta = node.meta.copy()
         return log_node
+
 
 @register_custom_acc_mapper_fn(
     op_and_target=("call_method", "sum"),
@@ -801,6 +795,7 @@ def batch_norm(
 def layer_norm(*, input, normalized_shape, weight, bias, eps):
     return nn.functional.layer_norm(**locals())
 
+
 def argmin_max_mapper_impl(node: torch.fx.Node, largest: bool) -> torch.fx.Node:
     """
     Map torch.argmin or torch.argmax to acc_ops.flatten (depend on dim) + acc_ops.topk
@@ -811,17 +806,29 @@ def argmin_max_mapper_impl(node: torch.fx.Node, largest: bool) -> torch.fx.Node:
     keepdim = node.kwargs["keepdim"]
 
     if dim is None and keepdim:
-        raise RuntimeError("We currently don't support argmin/argmax with dim=None and keepdim=True")
+        raise RuntimeError(
+            "We currently don't support argmin/argmax with dim=None and keepdim=True"
+        )
 
     with node.graph.inserting_before(node):
         if dim is None:
-            flatten_kwargs = {"input": node.kwargs["input"], "start_dim": 0, "end_dim": -1}
+            flatten_kwargs = {
+                "input": node.kwargs["input"],
+                "start_dim": 0,
+                "end_dim": -1,
+            }
             flatten_node = node.graph.call_function(flatten, kwargs=flatten_kwargs)
             flatten_node.meta["type"] = torch.Tensor
             input_node = flatten_node
             dim = -1
 
-        topk_kwargs = {"input": input_node, "k": 1, "dim": dim, "largest": largest, "sorted": False}
+        topk_kwargs = {
+            "input": input_node,
+            "k": 1,
+            "dim": dim,
+            "largest": largest,
+            "sorted": False,
+        }
         topk_node = node.graph.call_function(topk, kwargs=topk_kwargs)
         # It's actually more like NamedTuple but tuple here should be fine.
         topk_node.meta["type"] = tuple
@@ -838,6 +845,7 @@ def argmin_max_mapper_impl(node: torch.fx.Node, largest: bool) -> torch.fx.Node:
         output_node.meta = node.meta.copy()
         return output_node
 
+
 @register_custom_acc_mapper_fn(
     op_and_target=("call_function", torch.argmin),
     arg_replacement_tuples=[
@@ -852,6 +860,7 @@ def torch_argmin_mapper(node: torch.fx.Node, _: torch.nn.Module) -> torch.fx.Nod
     + acc_ops.squeeze (depends on keepdim).
     """
     return argmin_max_mapper_impl(node, largest=False)
+
 
 @register_acc_op_mapping(op_and_target=("call_function", torch.linalg.norm))
 @register_acc_op
@@ -1000,6 +1009,7 @@ def embedding_bag_byte_rowwise_offsets(
     include_last_offset,
 ):
     return torch.ops.quantized.embedding_bag_byte_rowwise_offsets(**locals())
+
 
 @register_acc_op_mapping(
     op_and_target=(
@@ -1263,12 +1273,16 @@ def packed_quantized_linear_mapper(
     with node.graph.inserting_before(node):
         # Insert get_attr nodes for weight and bias
         get_weight = node.graph.get_attr(weight_name)
-        get_weight.meta["tensor_meta"] = _extract_tensor_metadata(linear_module.weight())
+        get_weight.meta["tensor_meta"] = _extract_tensor_metadata(
+            linear_module.weight()
+        )
 
         get_bias = None
         if linear_module.bias() is not None:
             get_bias = node.graph.get_attr(bias_name)
-            get_bias.meta["tensor_meta"] = _extract_tensor_metadata(linear_module.bias())
+            get_bias.meta["tensor_meta"] = _extract_tensor_metadata(
+                linear_module.bias()
+            )
 
         qparams = {
             "qscheme": torch.per_tensor_affine,
@@ -1410,22 +1424,22 @@ def packed_quantized_convrelu2d_mapper(
         relu_node.meta = node.meta
         return relu_node
 
+
 @register_custom_acc_mapper_fn(
     op_and_target=("call_function", torch.dequantize),
-    arg_replacement_tuples=[
-        ("input", "input")
-    ]
+    arg_replacement_tuples=[("input", "input")],
 )
 @register_custom_acc_mapper_fn(
     op_and_target=("call_method", "dequantize"),
-    arg_replacement_tuples=[
-        ("input", "input")
-    ]
+    arg_replacement_tuples=[("input", "input")],
 )
 def custom_dequantize_mapper(node: torch.fx.Node, mod: nn.Module) -> torch.fx.Node:
     assert isinstance(node.kwargs["input"], torch.fx.Node)
     assert "tensor_meta" in node.kwargs["input"].meta
-    new_kwargs = {"input": node.kwargs["input"], "input_tensor_meta": node.kwargs["input"].meta["tensor_meta"]}
+    new_kwargs = {
+        "input": node.kwargs["input"],
+        "input_tensor_meta": node.kwargs["input"].meta["tensor_meta"],
+    }
     # `input_tensor_meta` contains quantization parameters that can be used to lower
     # acc_ops.dequantize to TensorRT ops
     with node.graph.inserting_before(node):

@@ -25,6 +25,7 @@ env:
   CUSTOM_TEST_ARTIFACT_BUILD_DIR: build/custom_test_artifacts
   ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
   PR_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
 concurrency:
   group: parallelnative-linux-xenial-py3.6-gcc5.4-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
@@ -33,7 +34,7 @@ concurrency:
 jobs:
   ciflow_should_run:
     runs-on: ubuntu-18.04
-    if: ${{ (github.event_name != 'pull_request') || (github.event.action !='unassigned') || (contains(github.event.pull_request.labels.*.name, 'ciflow/all') || contains(github.event.pull_request.labels.*.name, 'ciflow/cpu') || contains(github.event.pull_request.labels.*.name, 'ciflow/linux')) }}
+    if: ${{ (github.repository == 'pytorch/pytorch') && ((github.event_name != 'pull_request') || (github.event.action !='unassigned') || (contains(github.event.pull_request.labels.*.name, 'ciflow/all') || contains(github.event.pull_request.labels.*.name, 'ciflow/cpu') || contains(github.event.pull_request.labels.*.name, 'ciflow/linux'))) }}
     env:
       LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
     steps:
@@ -42,7 +43,6 @@ jobs:
       - name: print labels
         run: echo "${LABELS}"
   calculate-docker-image:
-    if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: linux.2xlarge
     needs: [ciflow_should_run]
     env:
@@ -76,8 +76,12 @@ jobs:
         env:
           ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
         run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+          retry docker pull "${ALPINE_IMAGE}"
+          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
       - name: Clean workspace
         run: |
           rm -rf "${GITHUB_WORKSPACE:?}/*"
@@ -174,8 +178,12 @@ jobs:
         env:
           ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
         run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+          retry docker pull "${ALPINE_IMAGE}"
+          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
       - name: Clean workspace
         run: |
           rm -rf "${GITHUB_WORKSPACE:?}/*"
@@ -196,7 +204,7 @@ jobs:
       - name: Pull docker image
         run: |
           docker pull "${DOCKER_IMAGE}"
-      - name: Build PyTorch
+      - name: Build
         run: |
           # detached container should get cleaned up by teardown_ec2_linux
           container_name=$(docker run \
@@ -260,6 +268,13 @@ jobs:
         # Always hold for active ssh sessions
         if: always()
         run: .github/scripts/wait_for_ssh_to_drain.sh
+      - name: Chown workspace
+        if: always()
+        env:
+          ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
+        run: |
+          # Ensure the working directory gets chowned back to the current user
+          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
       - name: Kill containers, clean up images
         if: always()
         run: |
@@ -268,13 +283,6 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-      - name: Chown workspace
-        if: always()
-        env:
-          ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
       - name: Hold runner for 2 hours or until ssh sessions have drained
         # Always hold for active ssh sessions
         if: always()
@@ -286,7 +294,6 @@ jobs:
           docker system prune -af
 
   generate-test-matrix:
-    if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: ubuntu-18.04
     needs: [ciflow_should_run]
     env:
@@ -333,7 +340,7 @@ jobs:
       SHARD_NUMBER: ${{ matrix.shard }}
       NUM_TEST_SHARDS: ${{ matrix.num_shards }}
       PYTORCH_IGNORE_DISABLED_ISSUES: ${{ needs.generate-test-matrix.outputs.ignore-disabled-issues }}
-      CONTINUE_THROUGH_ERROR: ${{ github.repository_owner == 'pytorch' && (github.event_name == 'push' || github.event_name == 'schedule') }}
+      CONTINUE_THROUGH_ERROR: ${{ github.repository == 'pytorch/pytorch' && (github.event_name == 'push' || github.event_name == 'schedule') }}
     steps:
       - name: Display EC2 information
         shell: bash
@@ -360,8 +367,12 @@ jobs:
         env:
           ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
         run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+          retry docker pull "${ALPINE_IMAGE}"
+          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
       - name: Clean workspace
         run: |
           rm -rf "${GITHUB_WORKSPACE:?}/*"
@@ -409,7 +420,7 @@ jobs:
       - name: Output disk space left
         run: |
           sudo df -H
-      - name: Test PyTorch
+      - name: Test
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
@@ -524,6 +535,13 @@ jobs:
         # Always hold for active ssh sessions
         if: always()
         run: .github/scripts/wait_for_ssh_to_drain.sh
+      - name: Chown workspace
+        if: always()
+        env:
+          ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
+        run: |
+          # Ensure the working directory gets chowned back to the current user
+          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
       - name: Kill containers, clean up images
         if: always()
         run: |
@@ -532,10 +550,3 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-      - name: Chown workspace
-        if: always()
-        env:
-          ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .

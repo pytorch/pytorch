@@ -2235,9 +2235,10 @@ def sample_inputs_gather(op_info, device, dtype, requires_grad, **kwargs):
         SampleInput(
             make_tensor((), device, dtype, low=None, high=None, requires_grad=requires_grad),
             args=(0, torch.tensor([0], dtype=torch.int64, device=device))),
+        # Empty index tensor case, see: https://github.com/pytorch/pytorch/pull/65006
         SampleInput(
             make_tensor((S,), device, dtype, low=None, high=None, requires_grad=requires_grad),
-            args=(0, torch.tensor(0, dtype=torch.int64, device=device))),
+            args=(0, torch.tensor([], dtype=torch.uint8, device=device))),
         SampleInput(
             make_tensor((), device, dtype, low=None, high=None, requires_grad=requires_grad),
             args=(0, torch.tensor(0, dtype=torch.int64, device=device))),
@@ -4608,11 +4609,12 @@ def sample_inputs_meshgrid(op_info: OpInfo, device: torch.device, dtype: torch.d
     ]
 
     sample_inputs = []
-    for shapes in test_cases:
+    for shapes, indexing in itertools.product(test_cases, {'xy', 'ij'}):
         input, args = make_inputs(
             [make_tensor(shape, device, dtype, requires_grad=requires_grad)
              for shape in shapes])
-        sample_inputs.append(SampleInput(input=input, args=args))
+        sample_inputs.append(SampleInput(input=input, args=args,
+                                         kwargs=dict(indexing=indexing)))
     return sample_inputs
 
 
@@ -6087,14 +6089,14 @@ op_db: List[OpInfo] = [
            ),
            sample_inputs_func=sample_inputs_baddbmm),
     OpInfo('dot',
-           dtypes=all_types_and_complex_and(torch.float16),
+           dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16, *[torch.bfloat16] if CUDA11OrLater else []),
            assert_autodiffed=True,
            sample_inputs_func=sample_inputs_dot_vdot,
            supports_forward_ad=True,
            ),
     OpInfo('vdot',
-           dtypes=all_types_and_complex_and(torch.float16),
+           dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16, *[torch.bfloat16] if CUDA11OrLater else []),
            sample_inputs_func=sample_inputs_dot_vdot,
            supports_forward_ad=True,
@@ -7307,7 +7309,7 @@ op_db: List[OpInfo] = [
     OpInfo('matmul',
            aliases=('linalg.matmul',),
            dtypes=floating_types(),
-           dtypesIfCPU=all_types_and_complex(),
+           dtypesIfCPU=all_types_and_complex_and(torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16, *[torch.bfloat16] if CUDA11OrLater else []),
            dtypesIfROCM=floating_types_and(torch.half, torch.bfloat16),
            backward_dtypesIfCUDA=floating_and_complex_types_and(torch.float16,
@@ -7396,9 +7398,7 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_forward_mode_AD'))),
     OpInfo('meshgrid',
            variant_test_name='variadic_tensors',
-           # Our implementation corresponds to "ij" indexing for
-           # numpy.meshgrid, but its default value is "xy".
-           ref=lambda *tensors: np.meshgrid(*tensors, indexing='ij'),
+           ref=np.meshgrid,
            dtypes=all_types_and_complex_and(torch.bfloat16, torch.bool, torch.float16),
            sample_inputs_func=partial(sample_inputs_meshgrid, variant='variadic'),
            skips=[
@@ -8155,7 +8155,7 @@ op_db: List[OpInfo] = [
     OpInfo('__rmatmul__',
            op=torch.Tensor.__rmatmul__,
            dtypes=floating_types(),
-           dtypesIfCPU=all_types_and_complex(),
+           dtypesIfCPU=all_types_and_complex_and(torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.float16, *[torch.bfloat16] if CUDA11OrLater else [],
                                            torch.complex64, torch.complex128),
            backward_dtypesIfCUDA=floating_types_and(torch.float16,
