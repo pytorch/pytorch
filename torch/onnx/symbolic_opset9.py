@@ -164,8 +164,8 @@ def _floor_divide(g, self, other):
         # Division is negative if: self < 0 != other < 0
         zero = g.op("Constant", value_t=torch.tensor(0, dtype=torch.int64))
         negative = g.op("Xor",
-                        g.op("Less", self, zero),
-                        g.op("Less", other, zero))
+                        sym_help._lt_helper(g, self, zero),
+                        sym_help._lt_helper(g, other, zero))
 
         # For negative numbers with self % other != 0, subtract 1 to round down instead of up
         mod = g.op("Sub", self, g.op("Mul", div, other))
@@ -173,8 +173,8 @@ def _floor_divide(g, self, other):
                           g.op("Not", g.op("Equal", mod, zero)))
 
         one = g.op("Constant", value_t=torch.tensor(1, dtype=torch.int64))
-        fixup = g.op("Sub", div, one)
-        return g.op("Where", fixup_mask, fixup, div)
+        fixup = g.op("Mul", fixup_mask, one)
+        return g.op("Sub", div, fixup)
 
 
 def floor_divide(g, self, other):
@@ -190,24 +190,13 @@ def floordiv(g, self, other):
 # If only one input is a floating type, the other input is cast to its type
 # If neither input is a floating type, both inputs are cast to the default scalar type
 def true_divide(g, self, other):
-    # Case 1: both values are floating
-    # Performs div as usual
-    if sym_help._is_fp(self) and sym_help._is_fp(other):
+    # Case 1: either values are floating
+    # Performs div as usual.
+    # Implicit casting will be handled in scalar type analysis pass.
+    if sym_help._is_fp(self) or sym_help._is_fp(other):
         return g.op("Div", self, other)
 
-    # Case 2: self is floating, other is not
-    # Casts other to self's dtype
-    if sym_help._is_fp(self):
-        other = g.op("Cast", other, to_i=sym_help.cast_pytorch_to_onnx[self.type().scalarType()])
-        return g.op("Div", self, other)
-
-    # Case 3: other is floating, self is not
-    # Casts self to other's dtype
-    if sym_help._is_fp(other):
-        self = g.op("Cast", self, to_i=sym_help.cast_pytorch_to_onnx[other.type().scalarType()])
-        return g.op("Div", self, other)
-
-    # Case 4: neither is floating
+    # Case 2: neither is floating
     # Casts both inputs to the default scalar type
     scalar_type = torch.get_default_dtype()
     onnx_scalar_type = sym_help.cast_pytorch_to_onnx["Float"]
@@ -2944,9 +2933,7 @@ def meshgrid(g, tensor_list):
 
 
 def remainder(g, input, other):
-    div = g.op("Div", input, other)
-    if sym_help._is_fp(input) or sym_help._is_fp(other):
-        div = g.op("Floor", div)
+    div = _floor_divide(g, input, other)
     quo = g.op("Mul", div, other)
     return g.op("Sub", input, quo)
 

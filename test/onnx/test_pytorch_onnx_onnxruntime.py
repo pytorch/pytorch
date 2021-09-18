@@ -1721,7 +1721,7 @@ class TestONNXRuntime(unittest.TestCase):
                     x.to(dtype=torch.float64) // y.to(dtype=torch.int64), x.to(dtype=torch.float64) // y.to(dtype=torch.float64), \
                     x.to(dtype=torch.int64) // y.to(dtype=torch.int64), x.to(dtype=torch.int64) // y
 
-        x = torch.randn(2, 3, 4)
+        x = torch.arange(-2, 4).reshape(2, 3, 1)
         y = torch.arange(1, 2 * 3 * 4 + 1).reshape(2, 3, 4)
         self.run_test(FloorDivModule(), (x, y))
 
@@ -1731,7 +1731,7 @@ class TestONNXRuntime(unittest.TestCase):
             def forward(self, x, y):
                 return x // 3, x // 2., x // y
 
-        x = torch.randn(2, 3, 4)
+        x = torch.arange(-2, 4).reshape(2, 3, 1)
         y = torch.randn(2, 3, 4)
         self.run_test(FloorDivModule(), (x, y))
 
@@ -1829,9 +1829,7 @@ class TestONNXRuntime(unittest.TestCase):
                 return (x.div(y, rounding_mode="floor"),
                         torch.div(x, y, rounding_mode="floor"))
 
-        modules = [TrueDivModule(), TruncDivModule()]
-        if self.opset_version >= 9:
-            modules.append(FloorDivModule())
+        modules = [TrueDivModule(), TruncDivModule(), FloorDivModule()]
 
         x = (torch.randn(2, 3, 4) * 100).to(torch.int)
         y = torch.arange(1, 2 * 3 * 4 + 1).reshape(2, 3, 4).to(torch.int)
@@ -4266,6 +4264,13 @@ class TestONNXRuntime(unittest.TestCase):
         y = torch.randint(10, (2, 3, 5), dtype=torch.long)
         self.run_test(XorModel(), input=(x, y))
 
+    @skipIfUnsupportedMinOpsetVersion(11)  # float equal added after opset 11
+    def test_eq(self):
+        class EqualModel(torch.nn.Module):
+            def forward(self, input, other):
+                return input == other
+        self._test_compare_ops(EqualModel(), 2)
+
     def test_gt(self):
         class GreaterModel(torch.nn.Module):
             def forward(self, input, other):
@@ -5962,13 +5967,33 @@ class TestONNXRuntime(unittest.TestCase):
         y = torch.randn(1, 2, 1)
         self.run_test(RemainderModel(), (x, y))
 
+        x = torch.tensor([7, 6, -7, -6], dtype=torch.long)
+        y = torch.tensor([2], dtype=torch.long)
+        self.run_test(RemainderModel(), (x, y))
+
+        x = x.to(torch.float)
+        self.run_test(RemainderModel(), (x, y))
+
+        y = y.to(torch.float)
+        self.run_test(RemainderModel(), (x, y))
+
+        x = x.to(torch.int32)
+        self.run_test(RemainderModel(), (x, y))
+
     def test_remainder_scalar(self):
         class RemainderModel(torch.nn.Module):
+            def __init__(self, scalar=2.55):
+                super().__init__()
+                self.scalar = scalar
+
             def forward(self, input):
-                return torch.remainder(input, 2.55)
+                return torch.remainder(input, self.scalar)
 
         x = torch.randint(10, (2, 3))
         self.run_test(RemainderModel(), x)
+
+        x = torch.tensor([7, 6, -7, -6], dtype=torch.long)
+        self.run_test(RemainderModel(2), x)
 
     @skipIfUnsupportedMinOpsetVersion(10)
     def test_fmod(self):
