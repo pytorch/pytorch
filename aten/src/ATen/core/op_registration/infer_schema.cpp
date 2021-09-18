@@ -11,8 +11,7 @@ std::vector<Argument> createArgumentVector(c10::ArrayRef<ArgumentDef> args) {
   result.reserve(args.size());
   for (size_t i = 0; i < args.size(); ++i) {
     // Arguments are named "_<index>"
-    // NOLINTNEXTLINE(modernize-use-emplace)
-    result.push_back(Argument("_" + c10::guts::to_string(i), (*args[i].getTypeFn)()));
+    result.emplace_back("_" + c10::guts::to_string(i), (*args[i].getTypeFn)());
   }
   return result;
 }
@@ -40,14 +39,22 @@ C10_EXPORT c10::optional<std::string> findSchemaDifferences(const FunctionSchema
   }
 
   for (size_t i = 0; i < lhs.arguments().size(); ++i) {
-    if (*lhs.arguments()[i].type() != *rhs.arguments()[i].type()) {
+    const TypePtr& leftType = lhs.arguments()[i].type();
+    const TypePtr& rightType = rhs.arguments()[i].type();
+    // Type::operator== is virtual. Comparing pointers first is
+    // cheaper, particularly when one of the types is a singleton like
+    // NumberType or AnyType.
+    if (leftType.get() != rightType.get() && *leftType != *rightType) {
       return "Type mismatch in argument " + guts::to_string(i+1) + ": " + lhs.arguments()[i].type()->str() +
                " vs " + rhs.arguments()[i].type()->str();
     }
   }
 
   for (size_t i = 0; i < lhs.returns().size(); ++i) {
-    if (*lhs.returns()[i].type() != *rhs.returns()[i].type()) {
+    const TypePtr& leftType = lhs.returns()[i].type();
+    const TypePtr& rightType = rhs.returns()[i].type();
+    // See above about comparing pointers first.
+    if (leftType.get() != rightType.get() && *leftType != *rightType) {
       return "Type mismatch in return " + guts::to_string(i+1) + ": " + lhs.returns()[i].type()->str() +
                " vs " + rhs.returns()[i].type()->str();
     }
