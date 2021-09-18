@@ -728,22 +728,6 @@ class TestOperators(TestCase):
         x = torch.randn(2, 3, 4, requires_grad=True)
         self.assertONNX(lambda x: torch.cumsum(x, dim=1), x, opset_version=11)
 
-    def test_retain_param_name_disabled(self):
-        class MyModule(Module):
-            def __init__(self):
-                super(MyModule, self).__init__()
-                self.fc1 = nn.Linear(4, 5, bias=False)
-                self.fc1.weight.data.fill_(2.)
-                self.fc2 = nn.Linear(5, 6, bias=False)
-                self.fc2.weight.data.fill_(3.)
-
-            def forward(self, x):
-                return self.fc2(self.fc1(x))
-
-        x = torch.randn(3, 4).float()
-        self.assertONNX(MyModule(), (x,), _retain_param_name=False,
-                        keep_initializers_as_inputs=True)
-
     def test_c2_op(self):
         class MyModel(torch.nn.Module):
             def __init__(self):
