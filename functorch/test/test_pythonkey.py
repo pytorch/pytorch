@@ -256,6 +256,7 @@ class TestEagerFusionOpInfo(TestCase):
         xfail('trapz'),
         xfail('igamma', 'grad_other'),
         xfail('igammac', 'grad_other'),
+        xfail('block_diag'),
     })
     def test_eager_compilation_exhaustive(self, device, dtype, op):
 

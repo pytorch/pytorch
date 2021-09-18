@@ -95,32 +95,6 @@ additional_op_db.extend([
 ])
 
 # https://github.com/pytorch/pytorch/pull/61068
-def sample_inputs_dropout(self, device, dtype, requires_grad):
-    samples = []
-    dropout_args = [
-        (0.6, False, False),
-        (1.0, True, False),
-        (0.0, True, False)
-    ]
-    shapes = [(), (2,), (2, 3, 4), (2, 3, 4, 5, 6)]
-    for rank in [1, 3, 5]:
-        for shape in shapes:
-            for args in dropout_args:
-                samples.append(SampleInput(make_tensor(shape, device=device, dtype=dtype, requires_grad=requires_grad, low=-5, high=5), args=args))
-    return samples
-
-additional_op_db.extend([
-    OpInfo('nn.functional.dropout',
-           aten_name="dropout",
-           supports_autograd=True,
-           assert_autodiffed=True,
-           sample_inputs_func=sample_inputs_dropout,
-           dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
-           supports_gradgrad=False,
-           supports_forward_ad=True,
-           supports_out=False,
-           autodiff_nonfusible_nodes=["aten::dropout"]),
-])
 
 def sample_inputs_conv2d(has_bias, self, device, dtype, requires_grad, extra_args=(), groups=1):
     in_ch, out_ch = 6, 4
