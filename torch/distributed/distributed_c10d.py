@@ -721,12 +721,15 @@ def _new_process_group_helper(
                 # Also enable NCCL_BLOCKING_WAIT if it is not explicitly
                 # disabled.
                 nccl_blocking_wait = os.environ.get("NCCL_BLOCKING_WAIT", None)
+                print(f"Got nccl blocking wait {nccl_blocking_wait} on rank {rank}")
                 if nccl_blocking_wait != "0":
                     logger.info(
                         "Enabling NCCL_BLOCKING_WAIT by default since "
                         f"TORCH_DISTRIBUTED_DEBUG level is {debug_level}"
                     )
                     os.environ["NCCL_BLOCKING_WAIT"] = "1"
+                    val = os.environ["NCCL_BLOCKING_WAIT"]
+                    print(f"on rank {rank} enabled nccl blocking wait with: {val}")
 
             pg = ProcessGroupNCCL(prefix_store, rank, world_size, pg_options)
             # In debug mode and if GLOO is available, wrap in a wrapper PG that
