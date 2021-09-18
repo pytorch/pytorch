@@ -109,6 +109,8 @@ core_sources_common = [
     "torch/csrc/jit/runtime/slice_indices_adjust.cpp",
     "torch/csrc/jit/runtime/register_ops_utils.cpp",
     "torch/csrc/jit/runtime/vararg_functions.cpp",
+    "torch/csrc/jit/mobile/promoted_prim_ops.cpp",
+    "torch/csrc/jit/mobile/prim_ops_registery.cpp",
     "torch/csrc/jit/serialization/import_read.cpp",
     "torch/csrc/jit/serialization/unpickler.cpp",
 ]
@@ -331,6 +333,7 @@ core_sources_full_mobile = core_sources_full_mobile_no_backend_interface + [
 core_sources_full = core_sources_full_mobile + [
     "torch/csrc/jit/runtime/static/fusion.cpp",
     "torch/csrc/jit/runtime/static/impl.cpp",
+    "torch/csrc/jit/runtime/static/memory_planner.cpp",
     "torch/csrc/jit/runtime/static/native_ops.cpp",
     "torch/csrc/jit/runtime/static/ops.cpp",
     "torch/csrc/jit/runtime/static/passes.cpp",
@@ -436,6 +439,7 @@ torch_mobile_core = [
     "torch/csrc/jit/mobile/module.cpp",
     "torch/csrc/jit/mobile/observer.cpp",
     "torch/csrc/jit/mobile/parse_bytecode.cpp",
+    "torch/csrc/jit/mobile/parse_operators.cpp",
     "torch/csrc/jit/runtime/register_prim_ops.cpp",
     "torch/csrc/jit/runtime/register_special_ops.cpp",
 ]
@@ -477,6 +481,7 @@ libtorch_extra_sources = libtorch_core_jit_sources + [
     "torch/csrc/jit/mobile/module.cpp",
     "torch/csrc/jit/mobile/observer.cpp",
     "torch/csrc/jit/mobile/parse_bytecode.cpp",
+    "torch/csrc/jit/mobile/parse_operators.cpp",
     "torch/csrc/jit/mobile/train/export_data.cpp",
     "torch/csrc/jit/mobile/train/optim/sgd.cpp",
     "torch/csrc/jit/mobile/train/random.cpp",
@@ -871,6 +876,7 @@ aten_cpu_source_non_codegen_list = [
     "aten/src/ATen/native/mkldnn/TensorShape.cpp",
     "aten/src/ATen/native/mkldnn/UnaryOps.cpp",
     "aten/src/ATen/native/mkldnn/Utils.cpp",
+    "aten/src/ATen/native/mkldnn/Matmul.cpp",
     "aten/src/ATen/native/quantized/cpu/init_qnnpack.cpp",
     "aten/src/ATen/record_function.cpp",
     "aten/src/ATen/SavedTensorHooks.cpp",
