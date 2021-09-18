@@ -640,7 +640,8 @@ void detailGroupPrint(std::ostream& os, const SegmentedGroup* group) {
 //!   automatically included in each of the groups.
 TensorView* castIntermediateValueInCompleteFusion(
     Fusion* fusion,
-    TensorView* original_tv) {
+    TensorView* original_tv,
+    std::unordered_set<Expr*> edge_from_group_uses) {
   FusionGuard fg(fusion);
 
   // A utility lambda that creates consumer tensordomain of
@@ -670,7 +671,10 @@ TensorView* castIntermediateValueInCompleteFusion(
   // replace uses of original tv with fp32_tv in the complete
   //  fusion
   for (auto expr : fusion->unordered_uses(original_tv)) {
-    ir_utils::replaceValInExpr(expr, original_tv, fp32_tv);
+    // Don't modify internal uses of buffers, only cast for outputs.
+    if (edge_from_group_uses.find(expr) == edge_from_group_uses.end()) {
+      ir_utils::replaceValInExpr(expr, original_tv, fp32_tv);
+    }
   }
 
   // Insert the cast ops.
@@ -686,7 +690,6 @@ TensorView* castIntermediateValueInCompleteFusion(
 
 void SegmentedFusion::finalize() {
   impl_.cleanUnused();
-
   // Insert casts for the tensorviews that are on
   //  segmented edges and also on the force_to_fp16 list
   //
@@ -709,7 +712,30 @@ void SegmentedFusion::finalize() {
 
   // Go through all edges of the segmented fusion.
   for (auto edge : edges()) {
+    TORCH_INTERNAL_ASSERT(edge->val->isA<TensorView>());
     auto edge_tv = edge->val->as<TensorView>();
+
+    // Uses of the edge value within the from group should not be replaced. This
+    // will cause the group to have an intermediate tensor
+    // tv -> float2half -> output
+    //            \ -> half2float -> other uses in group
+    // The conversion back and forth from half precision can hurt numerics.
+    // Collect expressions that use the edge value of concern within the from
+    // group to avoid replacing with the casted tensor.
+    std::unordered_set<Expr*> uses_in_from_group;
+
+    // All expressions in the from group of the edge
+    std::unordered_set<Expr*> from_group_exprs(
+        edge->from->exprs().begin(), edge->from->exprs().end());
+
+    // All uses of the edge val
+    for (auto edge_val_use_expr : edge_tv->uses()) {
+      if (from_group_exprs.count(edge_val_use_expr)) {
+        // Find uses in the to group of the val
+        uses_in_from_group.emplace(edge_val_use_expr);
+      }
+    }
+
     // Only look at ones that need to cast to fp16
     if (force_fp16_tv_set_.count(edge_tv)) {
       auto cast_tv_it = fp32_to_fp16_cast_map.find(edge->val->as<TensorView>());
@@ -717,7 +743,7 @@ void SegmentedFusion::finalize() {
       // Insert cast ops for this tv if we haven't done so.
       if (cast_tv_it == fp32_to_fp16_cast_map.end()) {
         cast_tv = castIntermediateValueInCompleteFusion(
-            complete_fusion_.get(), edge_tv);
+            complete_fusion_.get(), edge_tv, uses_in_from_group);
         fp32_to_fp16_cast_map[edge->val->as<TensorView>()] = cast_tv;
       } else {
         cast_tv = cast_tv_it->second;
