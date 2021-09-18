@@ -2194,12 +2194,18 @@ std::vector<Value*> unpackOutputs(const std::vector<Value*>& outputs) {
 }
 
 std::vector<Node*> findAllNodes(
-    Block& block,
+    at::ArrayRef<Block*> array,
     Symbol kind,
     bool recurse) {
   std::vector<Node*> ret;
-  findAllNodes(block, kind, recurse, ret);
+  for (auto block : array) {
+    findAllNodes(*block, kind, recurse, ret);
+  }
   return ret;
+}
+
+std::vector<Node*> findAllNodes(Block& block, Symbol kind, bool recurse) {
+  return findAllNodes({&block}, kind, recurse);
 }
 
 std::vector<Node*> findAllNodes(
