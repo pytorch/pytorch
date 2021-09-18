@@ -10,6 +10,8 @@ from torch.fx.experimental.fx_acc.acc_normalizer import (
     register_custom_acc_mapper_fn,
 )
 
+from torch.fx.passes.shape_prop import _extract_tensor_metadata
+
 from typing import Sequence, Optional, List
 
 this_arg_is_optional = True
@@ -366,9 +368,9 @@ def matmul(*, input, other):
         ("zero_point", "zero_point"),
     ],
     kwargs_to_move_to_acc_out_ty=[
-        ("scale", "scale"),
-        ("zero_point", "zero_point"),
-        ("qscheme", torch.per_tensor_affine, True),
+        ("scale", "scale", False),
+        ("zero_point", "zero_point", False),
+        (torch.per_tensor_affine, "qscheme", True),
     ],
 )
 @register_acc_op
@@ -392,9 +394,9 @@ def quantized_add(*, input, other, acc_out_ty=None):
         ("zero_point", "zero_point"),
     ],
     kwargs_to_move_to_acc_out_ty=[
-        ("scale", "scale"),
-        ("zero_point", "zero_point"),
-        ("qscheme", torch.per_tensor_affine, True),
+        ("scale", "scale", False),
+        ("zero_point", "zero_point", False),
+        (torch.per_tensor_affine, "qscheme", True),
     ],
 )
 @register_acc_op
@@ -417,10 +419,10 @@ def quantized_mul(*, input, other, acc_out_ty=None):
         ("dtype", "dtype")
     ],
     kwargs_to_move_to_acc_out_ty=[
-        ("scale", "scale"),
-        ("zero_point", "zero_point"),
-        ("dtype", "dtype"),
-        ("qscheme", torch.per_tensor_affine, True),
+        ("scale", "scale", False),
+        ("zero_point", "zero_point", False),
+        ("dtype", "dtype", False),
+        (torch.per_tensor_affine, "qscheme", True),
     ],
 )
 @register_acc_op
@@ -444,24 +446,18 @@ def quantize_per_tensor(*, input, acc_out_ty=None):
         ("dtype", "dtype")
     ],
     kwargs_to_move_to_acc_out_ty=[
-        ("scales", "scale"),
-        ("zero_points", "zero_point"),
-        ("axis", "axis"),
-        ("dtype", "dtype"),
-        ("qscheme", torch.per_channel_affine, True),
+        ("scales", "scale", False),
+        ("zero_points", "zero_point", False),
+        ("axis", "axis", False),
+        ("dtype", "dtype", False),
+        (torch.per_channel_affine, "qscheme", True),
     ],
 )
 @register_acc_op
 def quantize_per_channel(*, input, acc_out_ty=None):
     assert acc_out_ty is not None
     qparams = acc_utils.get_field_from_acc_out_ty(acc_out_ty, "qparams")
-    return torch.quantize_per_tensor(
-        input,
-        qparams["scale"],
-        qparams["zero_point"],
-        qparams["axis"],
-        qparams["dtype"]
-    )
+    return torch.quantize_per_tensor(input, qparams["scale"], qparams["zero_point"], qparams["axis"], qparams["dtype"])  # type: ignore[call-overload]
 
 @register_acc_op
 def dequantize(*, input, input_tensor_meta):
@@ -944,9 +940,9 @@ def tuple_construct(*, tensors):
         ("zero_point", "zero_point"),
     ],
     kwargs_to_move_to_acc_out_ty=[
-        ("scale", "q_scale"),
-        ("zero_point", "q_zero_point"),
-        ("qscheme", torch.per_tensor_affine, True),
+        ("scale", "q_scale", False),
+        ("zero_point", "q_zero_point", False),
+        (torch.per_tensor_affine, "qscheme", True),
     ],
 )
 @register_acc_op
@@ -1274,13 +1270,18 @@ def packed_quantized_linear_mapper(
             get_bias = node.graph.get_attr(bias_name)
             get_bias.meta["tensor_meta"] = _extract_tensor_metadata(linear_module.bias())
 
+        qparams = {
+            "qscheme": torch.per_tensor_affine,
+            "scale": linear_module.scale,
+            "zero_point": linear_module.zer_point
+        }
         # Create kwargs for acc_op.quantized_linear
         kwargs = {
             "input": node.kwargs["input"],
             "weight": get_weight,
             "bias": get_bias,
             "acc_out_ty": acc_utils.build_raw_tensor_meta(
-                q_scale=linear_module.scale, q_zero_point=linear_module.zero_point
+                qparams=qparams
             ),
         }
 
@@ -1323,6 +1324,12 @@ def packed_quantized_conv2d_mapper(
             get_bias = node.graph.get_attr(bias_name)
             get_bias.meta["tensor_meta"] = _extract_tensor_metadata(conv_module.bias())
 
+        qparams = {
+            "qscheme": torch.per_tensor_affine,
+            "scale": conv_module.scale,
+            "zero_point": conv_module.zer_point
+        }
+
         # Create kwargs for acc_op.conv
         kwargs = {
             "input": node.kwargs["input"],
@@ -1334,7 +1341,7 @@ def packed_quantized_conv2d_mapper(
             "groups": conv_module.groups,
             "padding_mode": conv_module.padding_mode,
             "acc_out_ty": acc_utils.build_raw_tensor_meta(
-                q_scale=conv_module.scale, q_zero_point=conv_module.zero_point
+                qparams=qparams
             ),
         }
 
@@ -1356,12 +1363,16 @@ def add_relu_unfuse_mapper(
     node: torch.fx.Node, mod: torch.fx.GraphModule
 ) -> torch.fx.Node:
     with node.graph.inserting_before(node):
+        qparams = {
+            "qscheme": torch.per_tensor_affine,
+            "scale": node.kwargs["scale"],
+            "zero_point": node.kwargs["zero_point"]
+        }
         add_kwargs = {
             "input": node.kwargs["input"],
             "other": node.kwargs["other"],
             "acc_out_ty": acc_utils.build_raw_tensor_meta(
-                q_scale=node.kwargs["scale"],
-                q_zero_point=node.kwargs["zero_point"],
+                qparams=qparams
             ),
         }
         add_node = node.graph.call_function(quantized_add, kwargs=add_kwargs)

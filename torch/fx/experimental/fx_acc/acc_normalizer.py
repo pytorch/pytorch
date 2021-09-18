@@ -58,7 +58,11 @@ class NormalizationInfo(NamedTuple):
     new_fn_target: Callable
     arg_replacement_tuples: Optional[ArgReplacementTuplesType]
     custom_mapping_fn: Optional[Callable]
-    kwargs_to_move_to_acc_out_ty: Optional[Optional[List[Tuple[str, str]]]]
+    kwargs_to_move_to_acc_out_ty: Optional[List[
+        Union[
+            Tuple[Any, str, bool],
+            Tuple[str, str]]
+    ]]
     needs_shapes_for_normalization: bool
 
 # Dict from (op, target) to NormalizationInfo for that op.
@@ -73,7 +77,12 @@ def _insert_fun(
     arg_replacement_tuples: List[Tuple],
     new_fn_target: Optional[Callable] = None,
     custom_mapping_fn: Optional[Callable] = None,
-    kwargs_to_move_to_acc_out_ty: Optional[Optional[List[Tuple[str, str]]]] = None,
+    kwargs_to_move_to_acc_out_ty:
+        Optional[List[
+            Union[
+                Tuple[Any, str, bool],
+                Tuple[str, str]]
+        ]] = None,
     needs_shapes_for_normalization=False,
     allow_normalize_from_torch_package=False,
 ):
@@ -156,7 +165,12 @@ def register_acc_op_mapping(
     arg_replacement_tuples: Optional[
         List[Union[Tuple[Union[str, Tuple[str, ...]], str], Tuple[Union[str, Tuple[str, ...]], str, bool]]]
     ] = None,
-    kwargs_to_move_to_acc_out_ty: Optional[List[Tuple[str, str]]] = None,
+    kwargs_to_move_to_acc_out_ty:
+        Optional[List[
+            Union[
+                Tuple[Any, str, bool],
+                Tuple[str, str]]
+        ]] = None,
 ):
     """
     Use this decorator to map a non-acc operator to an acc operator.
@@ -237,14 +251,16 @@ def move_kwargs_to_acc_out_ty(
 
     for kwarg_replacement_tuple in normalization_info.kwargs_to_move_to_acc_out_ty:
         if len(kwarg_replacement_tuple) == 2:
-            orig_kwarg_name, tmd_field_name, is_constant = *kwarg_replacement_tuple, False
+            orig_kwarg_name, tmd_field_name, is_constant = *kwarg_replacement_tuple, False  # type: ignore[misc]
         else:
             assert len(kwarg_replacement_tuple) == 3
-            orig_kwarg_name, tmd_field_name, is_constant = kwarg_replacement_tuple
+            orig_kwarg_name, tmd_field_name, is_constant = kwarg_replacement_tuple  # type: ignore[misc]
         if is_constant:
-            # when the arg is constant, the fields will be name and value
-            tmd_dict[orig_kwarg_name] = tmd_field_name
+            # when the arg is constant, the fields will be constant value and tmd_field_name
+            constant_value = orig_kwarg_name
+            tmd_dict[tmd_field_name] = constant_value
         else:
+            assert isinstance(orig_kwarg_name, str)
             tmd_dict[tmd_field_name] = new_kwargs[orig_kwarg_name]
             del new_kwargs[orig_kwarg_name]
 
