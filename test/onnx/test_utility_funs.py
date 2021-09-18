@@ -65,11 +65,11 @@ class TestUtilityFuns_opset_independent(_BaseTestCase):
 
         graph, unconvertible_ops = utils.unconvertible_ops(model, (x,), opset_version=9)
         iter = graph.nodes()
-        assert next(iter).kind() == "onnx::Constant"
-        assert next(iter).kind() == "prim::Constant"
-        assert next(iter).kind() == "aten::cumsum"
-        assert len(unconvertible_ops) == 1
-        assert unconvertible_ops == ["aten::cumsum"]
+        self.assertEqual(next(iter).kind(), "onnx::Constant")
+        self.assertEqual(next(iter).kind(), "prim::Constant")
+        self.assertEqual(next(iter).kind(), "aten::cumsum")
+        self.assertEqual(len(unconvertible_ops), 1)
+        self.assertEqual(unconvertible_ops, ["aten::cumsum"])
 
 
 class TestUtilityFuns_opset9(_BaseTestCase):
@@ -99,9 +99,13 @@ class TestUtilityFuns_opset9(_BaseTestCase):
                                          "invalid_name1": {}, "invalid_name2": {}},
                                          None, ["input1", "input2"], ["output"])
             messages = [str(warning.message) for warning in w]
-        assert "Provided key invalid_name1 for dynamic axes is not a valid input/output name" in messages
-        assert "Provided key invalid_name2 for dynamic axes is not a valid input/output name" in messages
-        assert len(messages) == 2
+        self.assertIn(
+            "Provided key invalid_name1 for dynamic axes is not a valid input/output name",
+            messages)
+        self.assertIn(
+            "Provided key invalid_name2 for dynamic axes is not a valid input/output name",
+            messages)
+        self.assertEqual(len(messages), 2)
 
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_split_to_slice(self):
@@ -119,7 +123,7 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         graph, _, _ = self._model_to_graph(SplitModule(), (x, y, t), input_names=['x', 'y', 't'],
                                            dynamic_axes={'x': [0, 1], 'y': [0, 1], 't': [0, 1]})
         for node in graph.nodes():
-            assert node.kind() != "onnx::SplitToSequence"
+            self.assertNotEqual(node.kind(), "onnx::SplitToSequence")
 
     def test_output_list(self):
         class PaddingLayer(torch.jit.ScriptModule):
@@ -155,10 +159,10 @@ class TestUtilityFuns_opset9(_BaseTestCase):
                                             dynamic_axes={'x': [0, 1]})
 
         for node in graph.nodes():
-            assert node.kind() != "onnx::Transpose"
-            assert node.kind() != "onnx::Cast"
-            assert node.kind() != "onnx::Constant"
-        assert len(list(graph.nodes())) == 1
+            self.assertNotEqual(node.kind(), "onnx::Transpose")
+            self.assertNotEqual(node.kind(), "onnx::Cast")
+            self.assertNotEqual(node.kind(), "onnx::Constant")
+        self.assertEqual(len(list(graph.nodes())), 1)
 
     def test_constant_fold_reduceL2(self):
         class ReduceModule(torch.nn.Module):
@@ -174,8 +178,8 @@ class TestUtilityFuns_opset9(_BaseTestCase):
                                             dynamic_axes={'x': [0, 1]})
 
         for node in graph.nodes():
-            assert node.kind() != "onnx::ReduceL2"
-        assert len(list(graph.nodes())) == 1
+            self.assertNotEqual(node.kind(), "onnx::ReduceL2")
+        self.assertEqual(len(list(graph.nodes())), 1)
 
     def test_constant_fold_reduceL1(self):
         class NormModule(torch.nn.Module):
@@ -191,8 +195,8 @@ class TestUtilityFuns_opset9(_BaseTestCase):
                                             dynamic_axes={'x': [0, 1]})
 
         for node in graph.nodes():
-            assert node.kind() != "onnx::ReduceL1"
-        assert len(list(graph.nodes())) == 1
+            self.assertNotEqual(node.kind(), "onnx::ReduceL1")
+        self.assertEqual(len(list(graph.nodes())), 1)
 
     def test_constant_fold_slice(self):
         class NarrowModule(torch.nn.Module):
@@ -208,10 +212,10 @@ class TestUtilityFuns_opset9(_BaseTestCase):
                                             dynamic_axes={'x': [0, 1]})
 
         for node in graph.nodes():
-            assert node.kind() != "onnx::Slice"
-            assert node.kind() != "onnx::Cast"
-            assert node.kind() != "onnx::Constant"
-        assert len(list(graph.nodes())) == 1
+            self.assertNotEqual(node.kind(), "onnx::Slice")
+            self.assertNotEqual(node.kind(), "onnx::Cast")
+            self.assertNotEqual(node.kind(), "onnx::Constant")
+        self.assertEqual(len(list(graph.nodes())), 1)
 
     def test_constant_fold_slice_index_exceeds_dim(self):
         class SliceIndexExceedsDimModule(torch.nn.Module):
@@ -227,10 +231,10 @@ class TestUtilityFuns_opset9(_BaseTestCase):
                                             dynamic_axes={'x': [0, 1]})
 
         for node in graph.nodes():
-            assert node.kind() != "onnx::Slice"
-            assert node.kind() != "onnx::Cast"
-            assert node.kind() != "onnx::Constant"
-        assert len(list(graph.nodes())) == 1
+            self.assertNotEqual(node.kind(), "onnx::Slice")
+            self.assertNotEqual(node.kind(), "onnx::Cast")
+            self.assertNotEqual(node.kind(), "onnx::Constant")
+        self.assertEqual(len(list(graph.nodes())), 1)
 
     def test_constant_fold_slice_negative_index(self):
         class SliceNegativeIndexModule(torch.nn.Module):
@@ -248,9 +252,9 @@ class TestUtilityFuns_opset9(_BaseTestCase):
                                             dynamic_axes={'x': [0, 1]})
 
         for node in graph.nodes():
-            assert node.kind() != "onnx::Slice"
-            assert node.kind() != "onnx::Cast"
-            assert node.kind() != "onnx::Constant"
+            self.assertNotEqual(node.kind(), "onnx::Slice")
+            self.assertNotEqual(node.kind(), "onnx::Cast")
+            self.assertNotEqual(node.kind(), "onnx::Constant")
 
     def test_constant_fold_gather(self):
         class GatherModule(torch.nn.Module):
@@ -269,7 +273,7 @@ class TestUtilityFuns_opset9(_BaseTestCase):
                                             dynamic_axes={'x': [0, 1]})
 
         for node in graph.nodes():
-            assert node.kind() != "onnx::Gather"
+            self.assertNotEqual(node.kind(), "onnx::Gather")
 
     def test_constant_fold_unsqueeze(self):
         class UnsqueezeModule(torch.nn.Module):
@@ -285,10 +289,10 @@ class TestUtilityFuns_opset9(_BaseTestCase):
                                             dynamic_axes={'x': [0, 1, 2]})
 
         for node in graph.nodes():
-            assert node.kind() != "onnx::Unsqueeze"
-            assert node.kind() != "onnx::Cast"
-            assert node.kind() != "onnx::Constant"
-        assert len(list(graph.nodes())) == 1
+            self.assertNotEqual(node.kind(), "onnx::Unsqueeze")
+            self.assertNotEqual(node.kind(), "onnx::Cast")
+            self.assertNotEqual(node.kind(), "onnx::Constant")
+        self.assertEqual(len(list(graph.nodes())), 1)
 
     def test_constant_fold_unsqueeze_multi_axies(self):
         class PReluModel(torch.nn.Module):
@@ -307,10 +311,10 @@ class TestUtilityFuns_opset9(_BaseTestCase):
                                             dynamic_axes={'x': [0, 1, 2, 3, 4, 5]})
 
         for node in graph.nodes():
-            assert node.kind() != "onnx::Unsqueeze"
-            assert node.kind() != "onnx::Cast"
-            assert node.kind() != "onnx::Constant"
-        assert len(list(graph.nodes())) == 4
+            self.assertNotEqual(node.kind(), "onnx::Unsqueeze")
+            self.assertNotEqual(node.kind(), "onnx::Cast")
+            self.assertNotEqual(node.kind(), "onnx::Constant")
+        self.assertEqual(len(list(graph.nodes())), 4)
 
     def test_constant_fold_squeeze_without_axes(self):
         class SqueezeModule(torch.nn.Module):
@@ -324,10 +328,10 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         graph, _, __ = self._model_to_graph(SqueezeModule(), (x, ), input_names=['x'],
                                             dynamic_axes={'x': [0, 1]})
         for node in graph.nodes():
-            assert node.kind() != "onnx::Squeeze"
-            assert node.kind() != "onnx::Cast"
-            assert node.kind() != "onnx::Constant"
-        assert len(list(graph.nodes())) == 2
+            self.assertNotEqual(node.kind(), "onnx::Squeeze")
+            self.assertNotEqual(node.kind(), "onnx::Cast")
+            self.assertNotEqual(node.kind(), "onnx::Constant")
+        self.assertEqual(len(list(graph.nodes())), 2)
 
     def test_constant_fold_squeeze_with_axes(self):
         class SqueezeAxesModule(torch.nn.Module):
@@ -342,10 +346,10 @@ class TestUtilityFuns_opset9(_BaseTestCase):
                                             dynamic_axes={'x': [0, 1]})
 
         for node in graph.nodes():
-            assert node.kind() != "onnx::Squeeze"
-            assert node.kind() != "onnx::Cast"
-            assert node.kind() != "onnx::Constant"
-        assert len(list(graph.nodes())) == 1
+            self.assertNotEqual(node.kind(), "onnx::Squeeze")
+            self.assertNotEqual(node.kind(), "onnx::Cast")
+            self.assertNotEqual(node.kind(), "onnx::Constant")
+        self.assertEqual(len(list(graph.nodes())), 1)
 
     def test_constant_fold_concat(self):
         class ConcatModule(torch.nn.Module):
@@ -378,10 +382,10 @@ class TestUtilityFuns_opset9(_BaseTestCase):
                                             dynamic_axes={'x': [0, 1]})
 
         for node in graph.nodes():
-            assert node.kind() != "onnx::Concat"
-            assert node.kind() != "onnx::Cast"
-            assert node.kind() != "onnx::Constant"
-        assert len(list(graph.nodes())) == 1
+            self.assertNotEqual(node.kind(), "onnx::Concat")
+            self.assertNotEqual(node.kind(), "onnx::Cast")
+            self.assertNotEqual(node.kind(), "onnx::Constant")
+        self.assertEqual(len(list(graph.nodes())), 1)
 
     def test_constant_fold_lstm(self):
         class GruNet(torch.nn.Module):
@@ -400,15 +404,15 @@ class TestUtilityFuns_opset9(_BaseTestCase):
                                             dynamic_axes={'input': [0, 1, 2], 'h0': [0, 1, 2]})
 
         for node in graph.nodes():
-            assert node.kind() != "onnx::Slice"
-            assert node.kind() != "onnx::Concat"
-            assert node.kind() != "onnx::Unsqueeze"
+            self.assertNotEqual(node.kind(), "onnx::Slice")
+            self.assertNotEqual(node.kind(), "onnx::Concat")
+            self.assertNotEqual(node.kind(), "onnx::Unsqueeze")
 
         if self.opset_version <= 12:
-            assert len(list(graph.nodes())) == 3
+            self.assertEqual(len(list(graph.nodes())), 3)
         else:
             # Unsqueeze op parameter "axes" as an input instead of as an attribute when opset version >= 13
-            assert len(list(graph.nodes())) == 4
+            self.assertEqual(len(list(graph.nodes())), 4)
 
     def test_constant_fold_transpose_matmul(self):
         class MatMulNet(torch.nn.Module):
@@ -426,8 +430,8 @@ class TestUtilityFuns_opset9(_BaseTestCase):
                                             input_names=['A'], dynamic_axes={'A': [0, 1]})
 
         for node in graph.nodes():
-            assert node.kind() != "onnx::Transpose"
-        assert len(list(graph.nodes())) == 1
+            self.assertNotEqual(node.kind(), "onnx::Transpose")
+        self.assertEqual(len(list(graph.nodes())), 1)
 
     def test_constant_fold_reshape(self):
         class ReshapeModule(torch.nn.Module):
@@ -446,8 +450,8 @@ class TestUtilityFuns_opset9(_BaseTestCase):
                                             input_names=['x'], dynamic_axes={'x': [0, 1]})
 
         for node in graph.nodes():
-            assert node.kind() != "onnx::Reshape"
-        assert len(list(graph.nodes())) == 1
+            self.assertNotEqual(node.kind(), "onnx::Reshape")
+        self.assertEqual(len(list(graph.nodes())), 1)
 
     def test_constant_fold_div(self):
         class Module(torch.nn.Module):
@@ -466,8 +470,8 @@ class TestUtilityFuns_opset9(_BaseTestCase):
                                             dynamic_axes={'x': [0, 1]})
 
         for node in graph.nodes():
-            assert node.kind() != "onnx::Div"
-        assert len(list(graph.nodes())) == 1
+            self.assertNotEqual(node.kind(), "onnx::Div")
+        self.assertEqual(len(list(graph.nodes())), 1)
 
     def test_constant_fold_mul(self):
         class Module(torch.nn.Module):
@@ -486,8 +490,8 @@ class TestUtilityFuns_opset9(_BaseTestCase):
                                             dynamic_axes={'x': [0, 1]})
 
         for node in graph.nodes():
-            assert node.kind() != "onnx::Mul"
-        assert len(list(graph.nodes())) == 1
+            self.assertNotEqual(node.kind(), "onnx::Mul")
+        self.assertEqual(len(list(graph.nodes())), 1)
 
     def test_constant_fold_add(self):
         class Module(torch.nn.Module):
@@ -532,7 +536,7 @@ class TestUtilityFuns_opset9(_BaseTestCase):
             Module(), (x, ), do_constant_folding=True,
             operator_export_type=OperatorExportTypes.ONNX, input_names=['x'], dynamic_axes={'x': [0, 1]})
         for node in graph.nodes():
-            assert node.kind() != "onnx::Sub"
+            self.assertNotEqual(node.kind(), "onnx::Sub")
         self.assertEqual(len(list(graph.nodes())), 1)
         params = list(params_dict.values())
         self.assertEqual(len(params), 1)
@@ -555,8 +559,8 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         _set_operator_export_type(OperatorExportTypes.ONNX)
         graph, _, __ = self._model_to_graph(Module(), (x, ), input_names=['x'], dynamic_axes={'x': [0, 1]})
         for node in graph.nodes():
-            assert node.kind() != "onnx::Sqrt"
-        assert len(list(graph.nodes())) == 1
+            self.assertNotEqual(node.kind(), "onnx::Sqrt")
+        self.assertEqual(len(list(graph.nodes())), 1)
 
     def test_constant_fold_shape(self):
         class ShapeModule(torch.nn.Module):
@@ -574,8 +578,8 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         graph, _, __ = self._model_to_graph(ShapeModule(), (x, ), input_names=['x'], dynamic_axes={'x': [0, 1]})
 
         for node in graph.nodes():
-            assert node.kind() != "onnx::Shape"
-        assert len(list(graph.nodes())) == 1
+            self.assertNotEqual(node.kind(), "onnx::Shape")
+        self.assertEqual(len(list(graph.nodes())), 1)
 
     def test_verbose(self):
         class MyModule(torch.nn.Module):
@@ -626,7 +630,7 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         torch.onnx.export(model, (x,), f,
                           opset_version=self.opset_version, training=torch.onnx.TrainingMode.TRAINING)
         # verify that the model state is preserved
-        assert model.training == old_state
+        self.assertEqual(model.training, old_state)
 
         # set mode to training mode and export in inference mode
         model.train()
@@ -634,7 +638,7 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         torch.onnx.export(model, (x,), f,
                           opset_version=self.opset_version, training=torch.onnx.TrainingMode.EVAL)
         # verify that the model state is preserved
-        assert model.training == old_state
+        self.assertEqual(model.training, old_state)
 
     @skipIfUnsupportedMinOpsetVersion(12)
     def test_local_function(self):
@@ -678,24 +682,24 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         # Check function definition
         funcs = onnx_model.functions
         celu_funcs = [f for f in funcs if f.name == "CELU"]
-        assert len(celu_funcs) == 1
-        assert celu_funcs[0].domain == "torch.nn.modules.activation"
-        assert len(celu_funcs[0].attribute) == 1
+        self.assertEqual(len(celu_funcs), 1)
+        self.assertEqual(celu_funcs[0].domain, "torch.nn.modules.activation")
+        self.assertEqual(len(celu_funcs[0].attribute), 1)
         ln_funcs = [f for f in funcs if f.name == "LayerNorm"]
-        assert len(ln_funcs) == 1
-        assert ln_funcs[0].domain == "torch.nn.modules.normalization"
-        assert len(ln_funcs[0].attribute) == 1
+        self.assertEqual(len(ln_funcs), 1)
+        self.assertEqual(ln_funcs[0].domain, "torch.nn.modules.normalization")
+        self.assertEqual(len(ln_funcs[0].attribute), 1)
 
         # Check local function nodes
         nodes = onnx_model.graph.node
         celu_ns = [n for n in nodes if n.op_type == 'CELU']
         ln_ns = [n for n in nodes if n.op_type == 'LayerNorm']
-        assert len(celu_ns) == 2
-        assert celu_ns[0].domain == 'torch.nn.modules.activation'
-        assert len(celu_ns[0].attribute) == 1
-        assert len(ln_ns) == 3
-        assert ln_ns[0].domain == 'torch.nn.modules.normalization'
-        assert len(ln_ns[0].attribute) == 1
+        self.assertEqual(len(celu_ns), 2)
+        self.assertEqual(celu_ns[0].domain, 'torch.nn.modules.activation')
+        self.assertEqual(len(celu_ns[0].attribute), 1)
+        self.assertEqual(len(ln_ns), 3)
+        self.assertEqual(ln_ns[0].domain, 'torch.nn.modules.normalization')
+        self.assertEqual(len(ln_ns[0].attribute), 1)
 
         """
         Export specified modules.
@@ -706,8 +710,8 @@ class TestUtilityFuns_opset9(_BaseTestCase):
 
         onnx_model = onnx.load(io.BytesIO(f.getvalue()))
         funcs = onnx_model.functions
-        assert len(funcs) == 1
-        assert funcs[0].name == "CELU"
+        self.assertEqual(len(funcs), 1)
+        self.assertEqual(funcs[0].name, "CELU")
 
         """
         Export with empty specified modules. Normal export.
@@ -718,7 +722,7 @@ class TestUtilityFuns_opset9(_BaseTestCase):
 
         onnx_model = onnx.load(io.BytesIO(f.getvalue()))
         funcs = onnx_model.functions
-        assert len(funcs) == 0
+        self.assertEqual(len(funcs), 0)
 
         """
         Export all modules. Should contain {M, CELU, LayerNorm}.
@@ -729,7 +733,7 @@ class TestUtilityFuns_opset9(_BaseTestCase):
 
         onnx_model = onnx.load(io.BytesIO(f.getvalue()))
         funcs = onnx_model.functions
-        assert len(funcs) == 3
+        self.assertEqual(len(funcs), 3)
 
     def test_aten_fallthrough(self):
         # Test aten export of op with no symbolic
@@ -743,7 +747,7 @@ class TestUtilityFuns_opset9(_BaseTestCase):
                                             operator_export_type=OperatorExportTypes.ONNX_FALLTHROUGH,
                                             input_names=['x'], dynamic_axes={'x': [0, 1, 2]})
         iter = graph.nodes()
-        assert next(iter).kind() == "aten::erfc"
+        self.assertEqual(next(iter).kind(), "aten::erfc")
 
     def test_custom_op_fallthrough(self):
         # Test custom op
@@ -778,7 +782,7 @@ class TestUtilityFuns_opset9(_BaseTestCase):
                                             input_names=['x', 'y'],
                                             dynamic_axes={'x': [0, 1, 2], 'y': [0, 1, 2]})
         iter = graph.nodes()
-        assert next(iter).kind() == "custom_namespace::custom_op"
+        self.assertEqual(next(iter).kind(), "custom_namespace::custom_op")
 
     def test_custom_opsets_gelu(self):
         def gelu(g, self):
@@ -792,10 +796,10 @@ class TestUtilityFuns_opset9(_BaseTestCase):
                           opset_version=self.opset_version, custom_opsets={"com.microsoft": 1})
 
         graph = onnx.load(io.BytesIO(f.getvalue()))
-        assert graph.graph.node[0].op_type == "Gelu"
-        assert graph.opset_import[0].version == self.opset_version
-        assert graph.opset_import[1].domain == 'com.microsoft'
-        assert graph.opset_import[1].version == 1
+        self.assertEqual(graph.graph.node[0].op_type, "Gelu")
+        self.assertEqual(graph.opset_import[0].version, self.opset_version)
+        self.assertEqual(graph.opset_import[1].domain, 'com.microsoft')
+        self.assertEqual(graph.opset_import[1].version, 1)
 
     def test_custom_opsets_inverse(self):
         class CustomInverse(torch.nn.Module):
@@ -813,10 +817,10 @@ class TestUtilityFuns_opset9(_BaseTestCase):
                           opset_version=self.opset_version, custom_opsets={"com.microsoft": 1})
 
         graph = onnx.load(io.BytesIO(f.getvalue()))
-        assert graph.graph.node[0].op_type == "Inverse"
-        assert graph.opset_import[0].version == self.opset_version
-        assert graph.opset_import[1].domain == 'com.microsoft'
-        assert graph.opset_import[1].version == 1
+        self.assertEqual(graph.graph.node[0].op_type, "Inverse")
+        self.assertEqual(graph.opset_import[0].version, self.opset_version)
+        self.assertEqual(graph.opset_import[1].domain, 'com.microsoft')
+        self.assertEqual(graph.opset_import[1].version, 1)
 
     def test_onnx_fallthrough(self):
         # Test aten export of op with symbolic for aten
@@ -829,9 +833,9 @@ class TestUtilityFuns_opset9(_BaseTestCase):
                                             input_names=['x', 'y'],
                                             dynamic_axes={'x': [0, 1], 'y': [0, 1]})
         iter = graph.nodes()
-        assert next(iter).kind() == "onnx::Constant"
-        assert next(iter).kind() == "onnx::Constant"
-        assert next(iter).kind() == "aten::cosine_similarity"
+        self.assertEqual(next(iter).kind(), "onnx::Constant")
+        self.assertEqual(next(iter).kind(), "onnx::Constant")
+        self.assertEqual(next(iter).kind(), "aten::cosine_similarity")
 
     def test_quantized_fallthrough(self):
         # Test Quantized op
@@ -860,11 +864,11 @@ class TestUtilityFuns_opset9(_BaseTestCase):
                                             dynamic_axes={'pt_inputs': [0, 1, 2, 3]})
 
         iter = graph.nodes()
-        assert next(iter).kind() == "onnx::Constant"
-        assert next(iter).kind() == "onnx::Constant"
-        assert next(iter).kind() == "onnx::Constant"
-        assert next(iter).kind() == "aten::quantize_per_tensor"
-        assert next(iter).kind() == "aten::dequantize"
+        self.assertEqual(next(iter).kind(), "onnx::Constant")
+        self.assertEqual(next(iter).kind(), "onnx::Constant")
+        self.assertEqual(next(iter).kind(), "onnx::Constant")
+        self.assertEqual(next(iter).kind(), "aten::quantize_per_tensor")
+        self.assertEqual(next(iter).kind(), "aten::dequantize")
 
     # prim::ListConstruct is exported as onnx::SequenceConstruct for opset >= 11
     @skipIfUnsupportedMaxOpsetVersion(10)
@@ -886,7 +890,7 @@ class TestUtilityFuns_opset9(_BaseTestCase):
                                             operator_export_type=OperatorExportTypes.ONNX_FALLTHROUGH,
                                             input_names=['x'], dynamic_axes={'x': [0]})
         iter = graph.nodes()
-        assert next(iter).kind() == "prim::ListConstruct"
+        self.assertEqual(next(iter).kind(), "prim::ListConstruct")
 
     def test_custom_layer_tuple(self):
         class CustomFunction(torch.autograd.Function):
@@ -908,7 +912,7 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         graph, _, _ = self._model_to_graph(model, batch,
                                            input_names=['batch'], dynamic_axes={'batch': [0, 1]})
         iter = graph.nodes()
-        assert next(iter).kind() == "CustomNamespace::Custom"
+        self.assertEqual(next(iter).kind(), "CustomNamespace::Custom")
 
     def test_unused_initializers(self):
         class Model(torch.nn.Module):
@@ -929,7 +933,7 @@ class TestUtilityFuns_opset9(_BaseTestCase):
                                                   input_names=['x'],
                                                   dynamic_axes={'x': [0, 1, 2, 3]})
 
-        assert len(params_dict) == 2
+        self.assertEqual(len(params_dict), 2)
 
     def test_scripting_param(self):
         class MyModule(torch.nn.Module):
@@ -953,8 +957,10 @@ class TestUtilityFuns_opset9(_BaseTestCase):
                                             input_names=['x'], dynamic_axes={'x': [0, 1, 2, 3]})
 
         graph_input_params = [param.debugName() for param in graph.inputs()]
-        assert all(item in graph_input_params for item in dict(model.named_parameters())), \
-            "Graph parameter names does not match model parameters."
+        for item in dict(model.named_parameters()):
+            self.assertIn(
+                item, graph_input_params,
+                "Graph parameter names does not match model parameters.")
 
     def test_modifying_params(self):
         class MyModel(torch.nn.Module):
@@ -986,10 +992,10 @@ class TestUtilityFuns_opset9(_BaseTestCase):
                                             training=TrainingMode.EVAL, input_names=['x'],
                                             dynamic_axes={'x': [0, 1, 2, 3]})
         for node in graph.nodes():
-            assert node.kind() != "onnx::BatchNormalization"
-            assert node.kind() == "onnx::Conv"
+            self.assertNotEqual(node.kind(), "onnx::BatchNormalization")
+            self.assertEqual(node.kind(), "onnx::Conv")
 
-        assert len(list(graph.nodes())) == 1
+        self.assertEqual(len(list(graph.nodes())), 1)
 
     def test_fuse_resnet18(self):
         model = torchvision.models.resnet18(pretrained=True)
@@ -999,7 +1005,7 @@ class TestUtilityFuns_opset9(_BaseTestCase):
                                             input_names=['x'], dynamic_axes={'x': [0, 1, 2, 3]})
 
         for node in graph.nodes():
-            assert node.kind() != "onnx::BatchNormalization"
+            self.assertNotEqual(node.kind(), "onnx::BatchNormalization")
 
     def test_onnx_function_substitution_pass(self):
 
@@ -1027,8 +1033,8 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         # scripted function `f` is removed and the following prim::CallFunction
         # is replced by inline graph, with onnx::Sub and onnx::Add nodes.
         for node in graph.nodes():
-            assert node.kind() != "prim::Constant"
-        assert len(list(graph.nodes())) == 2  # onnx::Sub and onnx::Add nodes only.
+            self.assertNotEqual(node.kind(), "prim::Constant")
+        self.assertEqual(len(list(graph.nodes())), 2)  # onnx::Sub and onnx::Add nodes only.
 
     def test_duplicated_output_node(self):
         class DuplicatedOutputNet(torch.nn.Module):
@@ -1067,15 +1073,15 @@ class TestUtilityFuns_opset9(_BaseTestCase):
                           keep_initializers_as_inputs=True)
 
         graph = onnx.load(io.BytesIO(f.getvalue()))
-        assert graph.graph.input[0].name == "input0"
-        assert graph.graph.input[1].name == "input1"
+        self.assertEqual(graph.graph.input[0].name, "input0")
+        self.assertEqual(graph.graph.input[1].name, "input1")
         for i in range(5):
-            assert graph.graph.output[i].name == "output-" + str(i)
-        assert graph.graph.node[0].op_type == "Gemm"
-        assert graph.graph.node[1].op_type == "Identity"
-        assert graph.graph.node[2].op_type == "Identity"
-        assert graph.graph.node[3].op_type == "Gemm"
-        assert graph.graph.node[4].op_type == "Identity"
+            self.assertEqual(graph.graph.output[i].name, f"output-{i}")
+        self.assertEqual(graph.graph.node[0].op_type, "Gemm")
+        self.assertEqual(graph.graph.node[1].op_type, "Identity")
+        self.assertEqual(graph.graph.node[2].op_type, "Identity")
+        self.assertEqual(graph.graph.node[3].op_type, "Gemm")
+        self.assertEqual(graph.graph.node[4].op_type, "Identity")
 
 
 class TestUtilityFuns_opset10(TestUtilityFuns_opset9):
