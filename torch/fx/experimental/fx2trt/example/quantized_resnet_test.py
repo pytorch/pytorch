@@ -29,6 +29,8 @@ def build_int8_trt(rn18):
             qscheme=torch.per_tensor_symmetric, dtype=torch.qint8
         ),
         weight=torch.quantization.default_weight_observer
+        # uncomment to check per channel quant works
+        # weight=torch.quantization.default_per_channel_weight_observer
     )
     prepared = prepare_fx(rn18, {"": qconfig})
     for _ in range(10):

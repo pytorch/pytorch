@@ -47,24 +47,38 @@ def get_axes_for_reduce_op(dim, has_implicit_batch_dimension):
     return axes
 
 
-def create_constant(network, tensor, name, dtype):
+def create_constant(network, tensor, name, squeeze_vector=True):
+    """
+    Args:
+        squeeze_vector: if set to True, we'll squeeze a vector of shape (1, ..1, n) to (n,)
+        and rely on broadcasting to expand the dimensions as needed
+    """
     if isinstance(tensor, int):
         tensor = torch.IntTensor([tensor])
 
     if isinstance(tensor, float):
         tensor = torch.Tensor([tensor])
 
-    if dtype:
-        tensor = tensor.to(dtype)
+    shape = tuple(tensor.shape)
+    if squeeze_vector:
+        # Remove all preceding 1s as they can be re-inserted later during broadcasting.
+        num_preceding_ones = 0
+        for j in range(len(shape)):
+            if int(shape[j]) == 1:
+                num_preceding_ones += 1
+            else:
+                break
 
-    constant = network.add_constant(tensor.shape, to_numpy(tensor))
+        # If shape is all 1s, we want last digit.
+        shape = shape[num_preceding_ones:] if num_preceding_ones < len(shape) else (1,)
+    constant = network.add_constant(shape, to_numpy(tensor))
     constant.name = name
     return constant.get_output(0)
 
 
-def get_trt_tensor(network, input_val, name, dtype=None) -> trt.tensorrt.ITensor:
+def get_trt_tensor(network, input_val, name, squeeze_vector=True) -> trt.tensorrt.ITensor:
     if isinstance(input_val, (torch.Tensor, int, float)):
-        return create_constant(network, input_val, name, dtype)
+        return create_constant(network, input_val, name, squeeze_vector)
     elif not isinstance(input_val, trt.tensorrt.ITensor):
         raise RuntimeError(
             f"Received input {input_val} of name {name} that "
@@ -98,24 +112,6 @@ def append_ones(network, input, name, num_prepend_ones):
 
 
 def broadcast(network, a, b, a_name, b_name, preset_diff=0):
-    """
-    Broadcast two TensorRT tensors to the same number of dimensions by
-    prepending 1s to the tensor with less number of dimensions.
-
-    Args:
-        network: TensorRT network object.
-        a: A TensorRT tensor.
-        b: A TensorRT tensor.
-        a_name: Name of tensor a.
-        b_name: Name of tensor b.
-        preset_diff: The difference of number of dimensions after broadcast.
-            A positive number means after broadcast, tensor `a` would have
-            `preset_diff` more dimensions than `b`. This is used in matmul,
-            since we need to broadcast tensors but not always to the same
-            number of dimension. The reason is that matmul supports Matrix
-            x Vector and in this case broadcasted vector should have 1 less
-            number of dimensions than the matrix tensor.
-    """
     a_shape = tuple(a.shape)
     b_shape = tuple(b.shape)
 
@@ -127,52 +123,10 @@ def broadcast(network, a, b, a_name, b_name, preset_diff=0):
 
     return a, b
 
+
 def add_binary_elementwise_layer(network, lhs_val, rhs_val, op_type, name):
-    """
-    This function adds a TensorRT elementwise layer. We only allow at most one
-    operand to not be a trt tensor, otherwise, we should const fold it first.
-    If any operand is not a trt tensor, we make it a trt constant layer which
-    has the same type as the other trt tensor. Then we broadcast these two inputs
-    to have the same number of dimensions.
-
-    Limitation:
-        If we are using implicit batch dim mode, the operand that is not a trt
-    tensor are not allowed to have larger ranks than the trt tensor operand.
-
-    Args:
-        network: TensorRT network object.
-        lhs_val: Left operand of the binary operation. Could be a TensorRT tensor,
-            a PyTorch tensor or a simple value.
-        rhs_val: Right operand of the binary operation. Similar to lhs_val.
-        op_type: Type of the TensorRT elementwise binary operation.
-        name: The name we want to assign to the created TensorRT layer.
-
-    Returns:
-        The output of TensorRT elementwise layer.
-    """
-    dtype = None
-    is_lhs_trt_tensor = False
-    is_rhs_trt_tensor = False
-    if isinstance(lhs_val, trt.tensorrt.ITensor):
-        dtype = torch_dtype_from_trt(lhs_val.dtype)
-        is_lhs_trt_tensor = True
-    if isinstance(rhs_val, trt.tensorrt.ITensor):
-        dtype = torch_dtype_from_trt(rhs_val.dtype)
-        is_rhs_trt_tensor = True
-    if not is_lhs_trt_tensor and not is_rhs_trt_tensor:
-        raise RuntimeError(f"Both operands of the binary elementwise op {name}"
-                           "are constant. In this case, please consider constant fold the model first.")
-
-    lhs_val = get_trt_tensor(network, lhs_val, f"{name}_lhs", dtype)
-    rhs_val = get_trt_tensor(network, rhs_val, f"{name}_rhs", dtype)
-
-    # Check the limitation in the doc string.
-    if network.has_implicit_batch_dimension:
-        if is_lhs_trt_tensor and not is_rhs_trt_tensor:
-            assert len(lhs_val.shape) >= len(rhs_val.shape)
-        elif not is_lhs_trt_tensor and is_rhs_trt_tensor:
-            assert len(rhs_val.shape) >= len(lhs_val.shape)
-
+    lhs_val = get_trt_tensor(network, lhs_val, f"{name}_lhs")
+    rhs_val = get_trt_tensor(network, rhs_val, f"{name}_rhs")
     lhs_val, rhs_val = broadcast(
         network, lhs_val, rhs_val, f"{name}_lhs", f"{name}_rhs"
     )
@@ -736,104 +690,6 @@ def acc_ops_sum(network, target, args, kwargs, name):
     return layer.get_output(0)
 
 
-def add_acc_ops_full_reduce(network, target, args, kwargs, name, reduce_op):
-    input_val = kwargs["input"]
-    if not isinstance(input_val, trt.tensorrt.ITensor):
-        raise RuntimeError(
-            f"max received input {input_val} that is not part "
-            "of the TensorRT region!"
-        )
-    assert (
-        not network.has_implicit_batch_dimension
-    ), "Do not support max over all the elements for implicit batch."
-
-    dim = range(len(input_val.shape))
-
-    layer = network.add_reduce(
-        input_val,
-        reduce_op,
-        get_axes_for_reduce_op(dim, network.has_implicit_batch_dimension),
-        False,
-    )
-    layer.name = name
-    return layer.get_output(0)
-
-def add_acc_ops_dim_reduce(network, target, args, kwargs, name, reduce_op):
-    new_kwargs = kwargs.copy()
-    new_kwargs['k'] = 1
-
-
-    if reduce_op == trt.ReduceOperation.MAX:
-        new_kwargs['largest'] = True
-    elif reduce_op == trt.ReduceOperation.MIN:
-        new_kwargs['largest'] = False
-    new_kwargs['sorted'] = False
-
-
-    (topk_out0, topk_out1) = acc_ops_topk(network, target, args, new_kwargs, name + "_topk")
-
-    topk_out0.name = f"{name}_topk0"
-    topk_out1.name = f"{name}_topk1"
-
-    if 'keepdim' in new_kwargs and new_kwargs['keepdim']:
-        return (topk_out0, topk_out1)
-
-    dim = new_kwargs['dim']
-    if network.has_implicit_batch_dimension:
-        assert dim != 0, "can't reduce on dim == 0 when network has implicit batch dimension"
-        # we remove the first dim in the shape tuple when it is implicit
-        dim -= 1
-    input_val = topk_out0
-    shape = input_val.shape
-
-    output_shape = []
-    for i, s in enumerate(shape):
-        if i == dim and s == 1:
-            continue
-        output_shape.append(s)
-
-    shuffle_layer0 = network.add_shuffle(input_val)
-    shuffle_layer0.reshape_dims = tuple(output_shape)
-    shuffle_layer0.name = name + '_shuffle0'
-
-    input_val = topk_out1
-    shape = input_val.shape
-
-    shuffle_layer1 = network.add_shuffle(input_val)
-    shuffle_layer1.reshape_dims = tuple(output_shape)
-    shuffle_layer1.name = name + '_shuffle1'
-
-
-    return (shuffle_layer0.get_output(0), shuffle_layer1.get_output(0))
-
-@tensorrt_converter(acc_ops.max_full_reduce)
-def acc_ops_max_full_reduce(network, target, args, kwargs, name):
-    return add_acc_ops_full_reduce(network, target, args, kwargs, name, trt.ReduceOperation.MAX)
-
-@tensorrt_converter(acc_ops.min_full_reduce)
-def acc_ops_min_full_reduce(network, target, args, kwargs, name):
-    return add_acc_ops_full_reduce(network, target, args, kwargs, name, trt.ReduceOperation.MIN)
-
-@tensorrt_converter(acc_ops.max_dim_reduce)
-def acc_ops_max_dim_reduce(network, target, args, kwargs, name):
-    return add_acc_ops_dim_reduce(network, target, args, kwargs, name, trt.ReduceOperation.MAX)
-
-@tensorrt_converter(acc_ops.min_dim_reduce)
-def acc_ops_min_dim_reduce(network, target, args, kwargs, name):
-    return add_acc_ops_dim_reduce(network, target, args, kwargs, name, trt.ReduceOperation.MIN)
-
-@tensorrt_converter(acc_ops.maximum)
-def acc_ops_maximum(network, target, args, kwargs, name):
-    return add_binary_elementwise_layer(
-        network, kwargs["input"], kwargs["other"], trt.ElementWiseOperation.MAX, name
-    )
-
-@tensorrt_converter(acc_ops.minimum)
-def acc_ops_minimum(network, target, args, kwargs, name):
-    return add_binary_elementwise_layer(
-        network, kwargs["input"], kwargs["other"], trt.ElementWiseOperation.MIN, name
-    )
-
 @tensorrt_converter(acc_ops.max_pool2d)
 def acc_ops_max_pool2d(network, target, args, kwargs, name):
     input_val = kwargs["input"]
@@ -937,6 +793,13 @@ def acc_ops_pow(network, target, args, kwargs, name):
         network, kwargs["input"], kwargs["exponent"], trt.ElementWiseOperation.POW, name
     )
 
+@tensorrt_converter(acc_ops.min_two_tensors_input)
+def acc_ops_min_two_tensors_input(network, target, args, kwargs, name):
+    return add_binary_elementwise_layer(
+        network, kwargs["input"], kwargs["other"], trt.ElementWiseOperation.MIN, name
+    )
+
+
 @tensorrt_converter(acc_ops.unsqueeze)
 def acc_ops_unsqueeze(network, target, args, kwargs, name):
     input_val = kwargs["input"]
@@ -978,7 +841,7 @@ def acc_ops_topk(network, target, args, kwargs, name):
         input_val, operation, k, get_axes_for_reduce_op(dim, network.has_implicit_batch_dimension)
     )
     layer.name = name
-    return layer.get_output(0), layer.get_output(1)
+    return (layer.get_output(0), layer.get_output(1))
 
 @tensorrt_converter(acc_ops.adaptive_avg_pool2d)
 def acc_ops_adaptive_avg_pool2d(network, target, args, kwargs, name):
@@ -1080,9 +943,7 @@ def acc_ops_reshape(network, target, args, kwargs, name):
                     s = append_ones(network, s, f"{name}_{i}", 1)
                 trt_shape.append(s)
             else:
-                trt_shape.append(
-                    get_trt_tensor(network, s, f"{name}_{i}")
-                )
+                trt_shape.append(get_trt_tensor(network, s, f"{name}_{i}"))
 
         shape_layer = network.add_concatenation(inputs=trt_shape)
         shape_layer.axis = 0
@@ -1498,6 +1359,45 @@ def acc_ops_quantize_per_tensor(network, target, args, kwargs, name):
     layer.name = input_val.name + ".per_tensor_quant"
     return layer.get_output(0)
 
+@tensorrt_converter(acc_ops.quantize_per_channel)
+def acc_ops_quantize_per_channel(network, target, args, kwargs, name):
+    input_val = get_trt_tensor(network, kwargs["input"], f"{name}_input")
+
+    if not isinstance(input_val, trt.tensorrt.ITensor):
+        raise RuntimeError(f"{name} received input {input_val} that is not part "
+                           "of the TensorRT region!")
+
+    qparams = acc_utils.get_field_from_acc_out_ty(kwargs["acc_out_ty"], "qparams")
+    q_per_channel_scales = qparams["scale"]
+    q_per_channel_zero_points = qparams["zero_point"]
+    q_per_channel_axis = qparams["axis"]
+    dtype = qparams["dtype"]
+    if dtype not in (torch.quint8, torch.qint8, torch.qint32):
+        raise RuntimeError("Only support (torch.quint8, torch.qint8, torch.qint32) "
+                           f"quantized type in quantize_per_tensor, get {dtype}.")
+
+    # Make sure zero_points are all 0 because only symmetric quantization
+    # is supported in TensorRT
+    if not torch.equal(
+            q_per_channel_zero_points,
+            torch.zeros(q_per_channel_zero_points.shape, dtype=q_per_channel_zero_points.dtype)):
+        raise RuntimeError(f"Only support zero_point == 0, get {q_per_channel_zero_points}")
+
+    if not torch.all(torch.ge(q_per_channel_scales, 0)):
+        raise RuntimeError(f"All scale values must be >= 0, get {q_per_channel_scales}")
+
+    scale_layer = network.add_constant(
+        q_per_channel_scales.shape,
+        trt.Weights(np.ascontiguousarray(q_per_channel_scales, dtype=np.float32)))
+    scale_layer.name = input_val.name + ".per_channel_quant.scale"
+    scale = scale_layer.get_output(0)
+    # assert trt.__version__ > "8.0", "Explicit quantize op is only supported in "
+    # "TensorRT 8.0 or above, current TensorRT version:" + trt.__version__
+    layer = network.add_quantize(input=input_val, scale=scale)
+    layer.axis = q_per_channel_axis
+    layer.name = input_val.name + ".per_channel_quant"
+    return layer.get_output(0)
+
 @tensorrt_converter(acc_ops.dequantize)
 def acc_ops_dequantize(network, target, args, kwargs, name):
     input_val = kwargs["input"]
@@ -1514,6 +1414,13 @@ def acc_ops_dequantize(network, target, args, kwargs, name):
         q_axis = 0
         scale_shape = (1,)
         if q_zero_point != 0:
+            raise RuntimeError(f"Only support zero_point == 0, get {q_zero_point}")
+    elif qscheme == torch.per_channel_affine:
+        q_scale = qparams["scale"]
+        q_zero_point = qparams["zero_point"]
+        q_axis = qparams["axis"]
+        scale_shape = q_scale.shape
+        if not torch.equal(q_zero_point, torch.zeros(q_zero_point.shape, dtype=q_zero_point.dtype)):
             raise RuntimeError(f"Only support zero_point == 0, get {q_zero_point}")
     else:
         raise RuntimeError("Unsupported qscheme in dequantize: {qscheme}")
