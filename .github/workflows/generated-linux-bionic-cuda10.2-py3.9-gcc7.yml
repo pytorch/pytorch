@@ -524,9 +524,6 @@ jobs:
           if-no-files-found: error
           path:
             test-reports-*.zip
-      - name: Parse ref
-        id: parse-ref
-        run: .github/scripts/parse_ref.py
       - name: Display and upload test statistics (Click Me)
         if: always()
         # temporary hack: set CIRCLE_* vars, until we update

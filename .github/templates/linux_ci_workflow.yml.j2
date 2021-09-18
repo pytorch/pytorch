@@ -361,7 +361,6 @@ jobs:
           python3 -mcodecov
       {%- endif %}
       !{{ common.upload_test_reports(name='linux') }}
-      !{{ common.parse_ref() }}
       !{{ common.upload_test_statistics(build_environment) }}
       !{{ common.teardown_ec2_linux() }}
 {% endblock %}
