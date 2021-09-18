@@ -53,14 +53,14 @@ def _extract_tensor_metadata(result : torch.Tensor) -> TensorMetadata:
     if is_quantized:
         qparams = {}
         qparams["qscheme"] = result.qscheme()
-        qparams["dtype"] = result.dtype
+        qparams["dtype"] = result.dtype  # type: ignore[assignment]
         if qparams["qscheme"] in {torch.per_tensor_affine, torch.per_tensor_symmetric}:
-            qparams["scale"] = result.q_scale()
-            qparams["zero_point"] = result.q_zero_point()
+            qparams["scale"] = result.q_scale()  # type: ignore[assignment]
+            qparams["zero_point"] = result.q_zero_point()  # type: ignore[assignment]
         elif qparams["qscheme"] in {torch.per_channel_affine, torch.per_channel_affine_float_qparams, torch.per_channel_symmetric}:
-            qparams["scale"] = result.q_per_channel_scales()
-            qparams["zero_point"] = result.q_per_channel_zero_points()
-            qparams["axis"] = result.q_per_channel_axis()
+            qparams["scale"] = result.q_per_channel_scales()  # type: ignore[assignment]
+            qparams["zero_point"] = result.q_per_channel_zero_points()  # type: ignore[assignment]
+            qparams["axis"] = result.q_per_channel_axis()  # type: ignore[assignment]
 
     return TensorMetadata(
         shape, dtype, requires_grad, stride, memory_format, is_quantized, qparams)
