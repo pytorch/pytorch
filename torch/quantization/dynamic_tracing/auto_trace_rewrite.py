@@ -45,6 +45,8 @@ class AllModuleTracer(torch.fx.Tracer):
                             (args[0][idx], scale.item(), zp.item(), torch.quint8), {}, None, None)
                         new_first_arg.append(quant)
                 new_args = [new_first_arg, *args[1:]]
+            elif target == torch.cat:
+                return args
             else:
                 for idx, input_arg_quant_info in enumerate(arg_quant_infos):
 

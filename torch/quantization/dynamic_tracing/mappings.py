@@ -80,6 +80,14 @@ q_mod_to_float_mod_mapping = {
     nnq.LayerNorm: nn.LayerNorm,
 }
 
+add_and_mul_ops = set([
+    torch.add,
+    torch.Tensor.add,
+    torch.Tensor.add_,
+    torch.mul,
+    torch.Tensor.mul,
+])
+
 # validity checks
 # TODO: move these out
 for m in module_types_supported_by_quantization_preserves_dtype:

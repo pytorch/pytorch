@@ -1,3 +1,4 @@
+import collections
 import copy
 import unittest
 
@@ -209,7 +210,7 @@ class TestAutoTracing(AutoTracingTestCase):
 
     # TODO(future PR): implement observer sharing to match FX
     @skipIfNoFBGEMM
-    def test_cat(self):
+    def test_cat_fp32(self):
         class M(torch.nn.Module):
             def forward(self, x):
                 x = torch.cat([x, x], dim=1)
@@ -227,6 +228,21 @@ class TestAutoTracing(AutoTracingTestCase):
         m = M().eval()
         qconfig = torch.quantization.default_qconfig
         self._test_auto_tracing(m, qconfig, (torch.randn(1, 1, 2, 2),))
+
+    @skipIfNoFBGEMM
+    def test_cat_int(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                x = torch.cat([x, x], dim=1)
+                return x
+
+        m = M().eval()
+        qconfig = torch.quantization.default_qconfig
+        for dtype in (torch.int32, torch.int64):
+            self._test_auto_tracing(
+                m, qconfig, (torch.zeros(1, 1, 1, 1, dtype=dtype),),
+                # FX graph mode quant does not support this yet
+                do_fx_comparison=False)
 
     # TODO: fix this test (iteration over the (1, 1) arg for arg_quant_infos)
     @unittest.skip('foo')
@@ -394,10 +410,10 @@ class TestAutoTracing(AutoTracingTestCase):
         qconfig = torch.quantization.default_qconfig
         self._test_auto_tracing(model_fp32, qconfig, (torch.randn(1, 1, 2, 2),))
 
-    @unittest.skip("TODO next")
     @skipIfNoFBGEMM
-    def test_mul_int32(self):
+    def test_mul_int(self):
         # TODO: make all the math functions work correctly for integer types
+        # TODO: make the same improvement in FX graph mode quant, if possible
         class M(torch.nn.Module):
             def forward(self, x):
                 x = x * x
@@ -405,8 +421,12 @@ class TestAutoTracing(AutoTracingTestCase):
 
         model_fp32 = M().eval()
         qconfig = torch.quantization.default_qconfig
-        self._test_auto_tracing(
-            model_fp32, qconfig, (torch.ones(1, 1, 2, 2, dtype=torch.int32),))
+        for dtype in (torch.int32, torch.int64):
+            self._test_auto_tracing(
+                copy.deepcopy(model_fp32), qconfig,
+                (torch.ones(1, 1, 2, 2, dtype=dtype),),
+                # FX graph mode quant does not support this yet
+                do_fx_comparison=False)
 
     @skipIfNoFBGEMM
     def test_div(self):
@@ -462,6 +482,31 @@ class TestAutoTracing(AutoTracingTestCase):
         self._test_auto_tracing(
             model_fp32, qconfig, (torch.randn(1, 1, 1, 1),),
             # This syntax is not supported by FX or TorchScript
+            do_fx_comparison=False, do_torchscript_checks=False)
+
+    @skipIfNoFBGEMM
+    def test_module_returns_namedtuple(self):
+        NamedTuple = collections.namedtuple("NamedTuple", ["x0", "x1"])
+
+        """Some hf models have this pattern"""
+        class M1(torch.nn.Module):
+            def forward(self, x):
+                return NamedTuple(x, x)
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.m1 = M1()
+
+            def forward(self, x):
+                m1 = self.m1(x)
+                return (m1.x0, m1.x1)
+
+        model_fp32 = M().eval()
+        qconfig = torch.quantization.default_qconfig
+        self._test_auto_tracing(
+            model_fp32, qconfig, (torch.randn(1, 1, 1, 1),),
+            # TODO(future PR): add FX rewrite support
             do_fx_comparison=False, do_torchscript_checks=False)
 
     @unittest.skip('TODO build this')

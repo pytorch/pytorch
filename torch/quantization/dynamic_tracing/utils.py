@@ -10,6 +10,8 @@ from .mappings import (
     q_mod_to_float_mod_mapping,
     module_types_supported_by_quantization_preserves_dtype,
     functions_supported_by_quantization_preserves_dtype,
+    fp32_to_int8_fun_mapping,
+    add_and_mul_ops,
 )
 
 from torch.quantization import (
@@ -151,25 +153,37 @@ def get_func_output_obs_type(
 ) -> FuncOutputObsType:
     if isinstance(op, torch.nn.Module):
         return FuncOutputObsType.NONE
-    if (
-        op in (torch.add, torch.Tensor.add, torch.Tensor.add_, torch.mul, torch.Tensor.mul) and
-        len(args) > 1 and
-        (not isinstance(args[1], torch.Tensor))
-    ):
-        return FuncOutputObsType.REUSES_FIRST_INPUT_OBS
+    if op in add_and_mul_ops:
+        if len(args) > 0 and args[0].dtype in (torch.int32, torch.int64):
+            # this is handling ops on dtypes such as torch.int
+            return FuncOutputObsType.NONE
+        elif (
+            len(args) > 1 and
+            (not isinstance(args[1], torch.Tensor))
+        ):
+            return FuncOutputObsType.REUSES_FIRST_INPUT_OBS
+    elif op == torch.cat:
+        if len(args[0]) > 0 and args[0][0].dtype in (torch.int32, torch.int64):
+            return FuncOutputObsType.NONE
     return FuncOutputObsType.NEW_OBS
 
 def converted_func_needs_scale_zp(op: Callable, seen_op: SeenOp) -> bool:
     if isinstance(op, torch.nn.Module):
         return False
-    if op in (torch.add, torch.Tensor.add, torch.Tensor.add_, torch.mul, torch.Tensor.mul):
+    if op in add_and_mul_ops:
         # check if both arguments are tensors
         inputs = seen_op.input_tensor_infos
         both_args_tensors = len(inputs) == 2 and inputs[0] is not None and \
             inputs[1] is not None
-        return both_args_tensors
-    elif op in (torch.cat,):
-        return True
+        # disable quantization for torch.mul with int tensor arguments
+        first_dtype_is_not_int = len(inputs) > 0 and \
+            inputs[0].inf_dtype not in (torch.int32, torch.int64)
+        return both_args_tensors and first_dtype_is_not_int
+    elif op == torch.cat:
+        inputs = seen_op.input_tensor_infos
+        first_dtype_is_not_int = len(inputs) > 0 and \
+            inputs[0].inf_dtype not in (torch.int32, torch.int64)
+        return first_dtype_is_not_int
     # TODO: add more ops
     # print('op', op)
     return False
@@ -184,6 +198,7 @@ class FuncOutputDTypeType(enum.Enum):
 
 def get_func_output_dtype_type(
     op: Callable,
+    args: Tuple[Any, ...],
 ) -> FuncOutputDTypeType:
     if isinstance(op, torch.nn.Module):
         for target_mod_cls in module_types_supported_by_quantization_preserves_dtype:
@@ -191,4 +206,29 @@ def get_func_output_dtype_type(
                 return FuncOutputDTypeType.DTYPE_EQUALS_INPUT_DTYPE
     elif op in functions_supported_by_quantization_preserves_dtype:
         return FuncOutputDTypeType.DTYPE_EQUALS_INPUT_DTYPE
+    elif op in add_and_mul_ops and len(args) > 0 and \
+            args[0].dtype in (torch.int32, torch.int64):
+        # binary ops with torch.int arguments do not support quantization
+        return FuncOutputDTypeType.DTYPE_EQUALS_INPUT_DTYPE
+    elif op == torch.cat and len(args) > 0 and \
+            args[0][0].dtype in (torch.int32, torch.int64):
+        return FuncOutputDTypeType.DTYPE_EQUALS_INPUT_DTYPE
+
     return FuncOutputDTypeType.DTYPE_DEPENDS_ON_QCONFIG
+
+def get_quantized_op(
+    op: Callable,
+    seen_op: SeenOp,
+) -> Callable:
+    new_op = op
+    if not isinstance(op, torch.nn.Module):
+        if (
+            (op in add_and_mul_ops or op == torch.cat) and
+            seen_op.input_tensor_infos[0].inf_dtype in (torch.int32, torch.int64)
+        ):
+            # handle torch.mul with int tensor arguments
+            pass
+        elif op in fp32_to_int8_fun_mapping:
+            new_op = fp32_to_int8_fun_mapping[op]
+
+    return new_op

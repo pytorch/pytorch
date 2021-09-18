@@ -18,6 +18,7 @@ from .utils import (
     converted_func_needs_scale_zp,
     FuncOutputDTypeType,
     get_func_output_dtype_type,
+    get_quantized_op,
 )
 
 # TODO(future PR): maybe better name
@@ -161,10 +162,12 @@ class AutoQuantizationState(torch.nn.Module):
         This function is expected to be called on the outputs of a prepared
         module right before they are returned to the parent.
         """
+        # TODO: handle objects with deeper nested tensors
         if first_call:
             if isinstance(outputs, torch.Tensor):
                 self._outputs_prepare_hook_tensor(outputs, first_call, qtensor_id)
             elif isinstance(outputs, tuple):
+                # TODO: handle other tuple subclasses more generically
                 new_outputs = []
                 for output in outputs:
                     if isinstance(output, torch.Tensor):
@@ -172,7 +175,12 @@ class AutoQuantizationState(torch.nn.Module):
                             output, first_call, qtensor_id))
                     else:
                         new_outputs.append(output)
-                return tuple(new_outputs)
+                # hacky check for collections.namedtuple, TODO improve this
+                # https://stackoverflow.com/questions/2166818/how-to-check-if-an-object-is-an-instance-of-a-namedtuple
+                if hasattr(outputs, '_fields'):
+                    return outputs.__class__(*new_outputs)
+                else:
+                    return tuple(new_outputs)
             else:
                 if False:
                     print('unhandled outputs', outputs)
@@ -221,8 +229,10 @@ class AutoQuantizationState(torch.nn.Module):
 
     def _op_prepare_before_hook_tensor_first_call(
         self,
+        op: Callable,
         arg: Any,
         arg_tensor_infos: List[QTensorInfo],
+        func_output_dtype_type: FuncOutputDTypeType,
         qtensor_id: List[int],
     ) -> None:
         # TODO(next): fix this for torch.cat
@@ -237,16 +247,17 @@ class AutoQuantizationState(torch.nn.Module):
             qtensor_id[0] += 1
         arg_tensor_infos.append(arg._qtensor_info)  # type: ignore[attr-defined]
 
-        # if the existing inf_dtype is not torch.quint8, add an observer
-        # which will be converted to a quant later
-        # TODO(future PR): share these observers if multiple ops need
-        # this quant.
-        # TODO(future PR): create from qconfig of op instead of global
-        # qconfig.
-        if arg._qtensor_info.inf_dtype != torch.quint8:  # type: ignore[attr-defined]
-            tensor_id = arg._qtensor_info.id  # type: ignore[attr-defined]
-            self.tensor_id_to_observer[str(tensor_id)] = \
-                self.qconfig.activation()
+        if func_output_dtype_type == FuncOutputDTypeType.DTYPE_DEPENDS_ON_QCONFIG:
+            # if the existing inf_dtype is not torch.quint8, add an observer
+            # which will be converted to a quant later
+            # TODO(future PR): share these observers if multiple ops need
+            # this quant.
+            # TODO(future PR): create from qconfig of op instead of global
+            # qconfig.
+            if arg._qtensor_info.inf_dtype != torch.quint8:  # type: ignore[attr-defined]
+                tensor_id = arg._qtensor_info.id  # type: ignore[attr-defined]
+                self.tensor_id_to_observer[str(tensor_id)] = \
+                    self.qconfig.activation()
 
     def op_prepare_before_hook(
         self,
@@ -273,15 +284,18 @@ class AutoQuantizationState(torch.nn.Module):
         """
         assert self.cur_op_needs_hooks(op)
         if first_call:
+            func_output_dtype_type = get_func_output_dtype_type(op, args)
             arg_tensor_infos: List[Optional[QTensorInfo]] = []
             for arg in args:
                 if isinstance(arg, (list, tuple)):
                     for inner_arg in arg:
                         self._op_prepare_before_hook_tensor_first_call(
-                            inner_arg, arg_tensor_infos, qtensor_id)
+                            op, inner_arg, arg_tensor_infos, func_output_dtype_type,
+                            qtensor_id)
                 else:
                     self._op_prepare_before_hook_tensor_first_call(
-                        arg, arg_tensor_infos, qtensor_id)
+                        op, arg, arg_tensor_infos, func_output_dtype_type,
+                        qtensor_id)
 
             key = str(self.idx)
             if key not in self.idx_to_seen_ops:
@@ -381,12 +395,14 @@ class AutoQuantizationState(torch.nn.Module):
             # attribute of Tensor
             # TODO(future PR): handle non-tensor outputs
 
-            func_output_dtype_type = get_func_output_dtype_type(op)
+            func_output_dtype_type = get_func_output_dtype_type(op, args)
             if func_output_dtype_type == FuncOutputDTypeType.DTYPE_DEPENDS_ON_QCONFIG:
                 dtype_to_use = torch.quint8
             else:
-                first_arg_dtype = args[0]._qtensor_info.inf_dtype
-                dtype_to_use = first_arg_dtype
+                if op == torch.cat:
+                    dtype_to_use = args[0][0]._qtensor_info.inf_dtype
+                else:
+                    dtype_to_use = args[0]._qtensor_info.inf_dtype
             output._qtensor_info = QTensorInfo(qtensor_id[0], dtype_to_use)
             self.idx_to_seen_ops[str(self.idx)].output_tensor_infos.append(
                 output._qtensor_info)
@@ -484,12 +500,10 @@ class AutoQuantizationState(torch.nn.Module):
         applicable.
         """
         assert self.cur_op_needs_hooks(op)
+        seen_op = self._get_cur_seen_op()
 
         # calculate new op
-        new_op = op
-        if not isinstance(op, torch.nn.Module):
-            if op in fp32_to_int8_fun_mapping:
-                new_op = fp32_to_int8_fun_mapping[op]
+        new_op = get_quantized_op(op, seen_op)
 
         # calculate quant infos
         arg_quant_infos = self._get_input_args_quant_info(op)
@@ -498,7 +512,6 @@ class AutoQuantizationState(torch.nn.Module):
         # TODO: instead of always doing this if there is an observer,
         # calculate whether this is needed based on the op and dtypes
         additional_kwargs = {}
-        seen_op = self._get_cur_seen_op()
         needs_scale_zp = converted_func_needs_scale_zp(op, seen_op)
         if needs_scale_zp:
             seen_op = self._get_cur_seen_op()
