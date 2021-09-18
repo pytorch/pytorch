@@ -10837,7 +10837,7 @@ class TestNN(NNTestCase):
             g, = torch.autograd.grad(dummy_out.sum(), x, create_graph=True)
             return g.requires_grad
 
-        return gradgradcheck(func, inputs, (grad_y,))
+        return gradgradcheck(func, inputs, grad_outputs=(grad_y,))
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     @unittest.skipIf(not TEST_CUDNN, "needs cudnn")

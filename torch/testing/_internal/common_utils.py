@@ -2703,7 +2703,7 @@ def gradgradcheck(fn, inputs, grad_outputs=None, **kwargs):
         k = kwargs.get(key, None)
         kwargs[key] = k if k is not None else value
 
-    return torch.autograd.gradgradcheck(fn, inputs, grad_outputs, **kwargs)
+    return torch.autograd.gradgradcheck(fn, inputs, grad_outputs=grad_outputs, **kwargs)
 
 
 def _assertGradAndGradgradChecks(test_case, apply_fn, inputs, **kwargs):

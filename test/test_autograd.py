@@ -2770,7 +2770,7 @@ class TestAutograd(TestCase):
             # Note it is not required if symeig is in forward instead (tested).
             D_grad = torch.rand(*A.shape[:-2], k) / 100
             U_grad = torch.rand(*A.shape[:-1], k) / 100
-            gradgradcheck(lambda A: func(k, A, largest), A, [D_grad, U_grad], atol=1e-4, check_batched_grad=False)
+            gradgradcheck(lambda A: func(k, A, largest), A, grad_outputs=[D_grad, U_grad], atol=1e-4, check_batched_grad=False)
 
             # check whether A.grad is symmetric
             A = A.detach().requires_grad_(True)
@@ -3342,7 +3342,7 @@ class TestAutograd(TestCase):
         )
 
         x = torch.tensor([[[[1.0, 1.0]]]], requires_grad=True)
-        g, = torch.autograd.grad(net(x).pow(2), [x], grad_outputs=x.new_ones(x.shape) , create_graph=True)
+        g, = torch.autograd.grad(net(x).pow(2), [x], grad_outputs=x.new_ones(x.shape), create_graph=True)
         torch.autograd.grad(g.sum(), [x])
         self.assertEqual(x, torch.tensor([[[[1.0, 1.0]]]]))
 
@@ -8014,12 +8014,12 @@ class TestAutogradDeviceType(TestCase):
             return torch.where(cond, x, y)
 
         gradcheck(where, [cond, x, y], raise_exception=True)
-        gradgradcheck(where, [cond, x, y], [torch.randn(5, 5, device=device)])
+        gradgradcheck(where, [cond, x, y], grad_outputs=[torch.randn(5, 5, device=device)])
 
         x = torch.randn(5, 1, 5, dtype=torch.double, device=device, requires_grad=True)
         y = torch.randn(5, 5, 1, dtype=torch.double, device=device, requires_grad=True)
         gradcheck(where, [cond, x, y], raise_exception=True)
-        gradgradcheck(where, [cond, x, y], [torch.randn(5, 5, 5, device=device)])
+        gradgradcheck(where, [cond, x, y], grad_outputs=[torch.randn(5, 5, 5, device=device)])
 
     def test_where_scalar(self, device):
         x = torch.randn(5, 5, dtype=torch.double, device=device, requires_grad=True)
@@ -8506,7 +8506,7 @@ class TestAutogradDeviceType(TestCase):
 
         gradcheck(func, [a, b], raise_exception=True)
         go = torch.randn(a.size(), dtype=torch.double, device=device, requires_grad=True)
-        gradgradcheck(func, (a, b), (go,))
+        gradgradcheck(func, (a, b), grad_outputs=(go,))
 
     def test_inplace_on_view_multiple_outputs(self, device):
         root = torch.arange(9., dtype=torch.double).reshape(3, 3).requires_grad_()
@@ -8543,7 +8543,7 @@ class TestAutogradDeviceType(TestCase):
 
         gradcheck(func, [a, b], raise_exception=True)
         go = torch.randn(a.size(), dtype=torch.double, device=device, requires_grad=True)
-        gradgradcheck(func, (a, b), (go,))
+        gradgradcheck(func, (a, b), grad_outputs=(go,))
 
     def test_inplace_on_view_backprop_view(self, device):
         # modify view and backprop through view
@@ -8596,7 +8596,7 @@ class TestAutogradDeviceType(TestCase):
 
         gradcheck(func, [a, b], raise_exception=True)
         go = torch.randn(a.size(), dtype=torch.double, device=device, requires_grad=True)
-        gradgradcheck(func, (a, b), (go,))
+        gradgradcheck(func, (a, b), grad_outputs=(go,))
 
     def test_inplace_on_view_non_contig(self, device):
         root = torch.ones(2, 3, 2, device=device).select(2, 1).t().requires_grad_(True)
