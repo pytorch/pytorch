@@ -71,9 +71,9 @@ int main(int argc, char* argv[]) {
     // also be a 'Mul' or some other expression.
     //
     // Let's construct a simple TE:
-    Expr* lhs = new IntImm(5);
-    Expr* rhs = new Var("x", kInt);
-    Expr* mul = new Mul(lhs, rhs);
+    ExprPtr lhs = alloc<IntImm>(5);
+    ExprPtr rhs = alloc<Var>("x", kInt);
+    ExprPtr mul = alloc<Mul>(lhs, rhs);
     std::cout << "Tensor expression: " << *mul << std::endl;
     // Prints: Tensor expression: 5 * x
 
@@ -127,13 +127,14 @@ int main(int argc, char* argv[]) {
     // Let's start with defining a domain. We do this by creating a Buf object.
 
     // First, let's specify the sizes:
-    std::vector<Expr*> dims = {
-        new IntImm(64), new IntImm(32)}; // IntImm stands for Integer Immediate
+    std::vector<ExprPtr> dims = {
+        alloc<IntImm>(64),
+        alloc<IntImm>(32)}; // IntImm stands for Integer Immediate
     // and represents an integer constant
 
     // Now we can create a Buf object by providing a name, dimensions, and a
     // data type of the elements:
-    Buf* buf = new Buf("X", dims, kInt);
+    BufPtr buf = alloc<Buf>("X", dims, kInt);
 
     // Next we need to spefify the computation. We can do that by either
     // constructing a complete tensor statement for it (statements are
@@ -144,14 +145,14 @@ int main(int argc, char* argv[]) {
 
     // Let's define two variables, i and j - they will be axis in our
     // computation.
-    Var* i = new Var("i", kInt);
-    Var* j = new Var("j", kInt);
-    std::vector<Var*> args = {i, j};
+    VarPtr i = alloc<Var>("i", kInt);
+    VarPtr j = alloc<Var>("j", kInt);
+    std::vector<VarPtr> args = {i, j};
 
     // Now we can define the body of the tensor computation using these
     // variables. What this means is that values in our tensor are:
     //   X[i, j] = i * j
-    Expr* body = new Mul(i, j);
+    ExprPtr body = alloc<Mul>(i, j);
 
     // Finally, we pass all these pieces together to Tensor constructor:
     Tensor* X = new Tensor(buf, args, body);
@@ -311,11 +312,11 @@ int main(int argc, char* argv[]) {
     // Loop transformations can be composed, so we can do something else with
     // our loop nest now. Let's split the inner loop with a factor of 9, for
     // instance.
-    std::vector<For*> loops = loopnest.getLoopStmtsFor(Y);
+    std::vector<ForPtr> loops = loopnest.getLoopStmtsFor(Y);
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    For* j_inner;
+    ForPtr j_inner;
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    For* j_tail;
+    ForPtr j_tail;
     int split_factor = 9;
     loopnest.splitWithTail(
         loops[1], // loops[0] is the outer loop, loops[1] is inner

@@ -405,6 +405,7 @@ _(aten, is_complex) \
 _(aten, is_contiguous) \
 _(aten, is_cuda) \
 _(aten, is_mlc) \
+_(aten, is_ort) \
 _(aten, is_distributed) \
 _(aten, is_floating_point) \
 _(aten, is_inference) \

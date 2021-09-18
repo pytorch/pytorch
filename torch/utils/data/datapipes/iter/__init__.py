@@ -43,6 +43,9 @@ from torch.utils.data.datapipes.iter.selecting import (
 from torch.utils.data.datapipes.iter.tobytes import (
     ToBytesIterDataPipe as ToBytes,
 )
+from torch.utils.data.datapipes.iter.utils import (
+    IterableAsDataPipeIterDataPipe as IterableAsDataPipe,
+)
 
 __all__ = ['Batch',
            'BucketBatcher',
@@ -51,6 +54,7 @@ __all__ = ['Batch',
            'Filter',
            'GroupByKey',
            'HttpReader',
+           'IterableAsDataPipe',
            'ListDirFiles',
            'LoadFilesFromDisk',
            'Map',

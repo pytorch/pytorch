@@ -44,26 +44,17 @@ from torch.testing._internal.common_utils import (
     run_tests,
     retry_on_connect_failures,
     TEST_WITH_DEV_DBG_ASAN,
-    TEST_WITH_TSAN,
+    TEST_WITH_ROCM,
     sandcastle_skip,
     sandcastle_skip_if,
 )
 from torch.utils.checkpoint import checkpoint
+from torch.distributed.optim import functional_optim_map
 
 if not IS_WINDOWS:
     from torch.distributed.optim.functional_sgd import _FunctionalSGD
     from torch.distributed.optim.functional_adam import _FunctionalAdam
-    _SUPPORTED_OPTIM_MAPPING = {
-        _FunctionalSGD: torch.optim.SGD,
-        _FunctionalAdam: torch.optim.Adam
-    }
-
-if TEST_WITH_TSAN:
-    print(
-        "Skip as TSAN is not fork-safe since we're forking in a multi-threaded environment",
-        file=sys.stderr,
-    )
-    sys.exit(0)
+    from torch.distributed.optim.functional_adamw import _FunctionalAdamW
 
 if TEST_WITH_DEV_DBG_ASAN:
     print(
@@ -71,6 +62,11 @@ if TEST_WITH_DEV_DBG_ASAN:
     )
     sys.exit(0)
 
+# bfloat16 is only supported by CUDA 11+
+BFLOAT16_AVAILABLE = (
+    torch.cuda.is_available()
+    and torch.version.cuda is not None
+    and int(torch.version.cuda.split('.')[0]) >= 11)
 
 class RendezvousEnvTest(TestCase):
     @retry_on_connect_failures
@@ -1561,15 +1557,23 @@ class DistributedDataParallelTest(
 
     def _test_default_ddp_comm_hooks_nccl(self, gradient_as_bucket_view=False):
         """
-        This unit test verifies whether default Python DDP communication hooks ALLREDUCE and FP16_COMPRESS
-        can give the same result with the case of no hook registered.
+        This unit test verifies whether default Python DDP communication hooks ALLREDUCE, FP16_COMPRESS
+        and BF16_COMPRESS, can give the same result with the case of no hook registered.
         """
         store = c10d.FileStore(self.file_name, self.world_size)
         process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
 
         # For these default DDP comm hooks, the only state is process group.
         state = process_group
-        for hook in [default.allreduce_hook, default.fp16_compress_hook]:
+        hook_options = [default.allreduce_hook, default.fp16_compress_hook]
+        if (
+            not TEST_WITH_ROCM
+            and BFLOAT16_AVAILABLE
+            and c10d.is_nccl_available()
+            and torch.cuda.nccl.version() >= (2, 9, 7)
+        ):
+            hook_options.append(default.bf16_compress_hook)
+        for hook in hook_options:
             # Get GPU model with the hook registered.
             # The first arg 'process_group' is used for initializing the test environment,
             # so it cannot be replaced by 'state', although they have the same value.
@@ -1598,6 +1602,31 @@ class DistributedDataParallelTest(
             gpu_model = self._gpu_model_with_ddp_comm_hook(
                 process_group,
                 default.fp16_compress_wrapper(hook),
+                gradient_as_bucket_view,
+                state,
+            )
+
+            # check whether the grads are equal to what DDP without hook would return.
+            self._run_and_verify_hook(gpu_model, 8, 0.25 * torch.ones(2, 2))
+
+    def _test_bf16_compress_wrapper(self, gradient_as_bucket_view=False):
+        """
+        This unit test verifies whether wrapping the ALLREDUCE and POWER_SGD hooks with
+        the BF16_WRAPPER can give the same result as when there is no hook registered.
+        """
+        store = c10d.FileStore(self.file_name, self.world_size)
+        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+        powerSGD_state = powerSGD.PowerSGDState(process_group=process_group)
+
+        hook_args = [
+            (powerSGD.powerSGD_hook, powerSGD_state),
+            (default.allreduce_hook, process_group),
+        ]
+
+        for hook, state in hook_args:
+            gpu_model = self._gpu_model_with_ddp_comm_hook(
+                process_group,
+                default.bf16_compress_wrapper(hook),
                 gradient_as_bucket_view,
                 state,
             )
@@ -1637,7 +1666,8 @@ class DistributedDataParallelTest(
         gpu_model_allreduce = self._gpu_model_with_ddp_comm_hook(
             process_group, default.allreduce_hook, gradient_as_bucket_view, hook_state
         )
-        sgd = _SUPPORTED_OPTIM_MAPPING.get(functional_optim_cls)(
+        mapping = {v: k for k, v in functional_optim_map.items()}
+        sgd = mapping.get(functional_optim_cls)(
             gpu_model_allreduce.parameters(),
             *functional_optim_args,
             **functional_optim_kwargs,
@@ -1711,6 +1741,17 @@ class DistributedDataParallelTest(
         self._test_fp16_compress_wrapper()
 
     @requires_nccl()
+    @requires_nccl_version((2, 9, 7), "Need NCCL 2.9.7+ for BF16_COMPRESS")
+    @sandcastle_skip_if(
+        not BFLOAT16_AVAILABLE,
+        "BFloat16 is only supported by CUDA 11+",
+    )
+    @skip_if_lt_x_gpu(2)
+    @skip_if_rocm
+    def test_bf16_compress_wrapper_nccl(self):
+        self._test_bf16_compress_wrapper()
+
+    @requires_nccl()
     @skip_if_lt_x_gpu(2)
     def test_hook_then_sgd_nccl(self):
         sgd_lr = 1e-2
@@ -1734,6 +1775,20 @@ class DistributedDataParallelTest(
             sgd_lr,
             momentum=sgd_momentum,
             weight_decay=sgd_weight_decay,
+            gradient_as_bucket_view=True
+        )
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_hook_then_adamw_nccl(self):
+        adamw_lr = 1e-2
+        adamw_betas = (0.9, 0.99)
+        adamw_eps = 1e-6
+        self._test_hook_then_optimizer(
+            _FunctionalAdamW,
+            adamw_lr,
+            betas=adamw_betas,
+            eps=adamw_eps,
             gradient_as_bucket_view=True
         )
 
@@ -1794,6 +1849,17 @@ class DistributedDataParallelTest(
     @skip_if_lt_x_gpu(2)
     def test_fp16_compress_wrapper_is_view(self):
         self._test_fp16_compress_wrapper(gradient_as_bucket_view=True)
+
+    @requires_nccl()
+    @requires_nccl_version((2, 9, 7), "Need NCCL 2.9.7+ for BF16_COMPRESS")
+    @sandcastle_skip_if(
+        not BFLOAT16_AVAILABLE,
+        "BFloat16 is only supported by CUDA 11+",
+    )
+    @skip_if_lt_x_gpu(2)
+    @skip_if_rocm
+    def test_bf16_compress_wrapper_is_view(self):
+        self._test_bf16_compress_wrapper(gradient_as_bucket_view=True)
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)

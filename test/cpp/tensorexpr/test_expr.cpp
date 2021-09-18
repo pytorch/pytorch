@@ -70,9 +70,9 @@ TEST(Expr, LetStmtTest01) {
 
   ExprHandle load_a = a_buf.load(0);
   VarHandle var = VarHandle("v", kFloat);
-  Stmt* let_store = Let::make(var, load_a);
-  Stmt* store_b = b_buf.store({0}, var);
-  Block* block = Block::make({let_store, store_b});
+  StmtPtr let_store = Let::make(var, load_a);
+  StmtPtr store_b = b_buf.store({0}, var);
+  BlockPtr block = Block::make({let_store, store_b});
 
   SimpleIREvaluator eval(block, {a_buf, b_buf});
 
@@ -189,9 +189,9 @@ TEST(Expr, VectorAdd01) {
   ExprHandle load_b =
       b_buf.load({Ramp::make(index * kVectorSize, 1, kVectorSize)});
   ExprHandle value = load_a + load_b;
-  Stmt* store_c =
+  StmtPtr store_c =
       c_buf.store({Ramp::make(index * kVectorSize, 1, kVectorSize)}, value);
-  Stmt* stmt = For::make(index, 0, kVectorCount, store_c);
+  StmtPtr stmt = For::make(index, 0, kVectorCount, store_c);
 
   ASSERT_EQ(load_a.dtype(), Dtype(kFloat, kVectorSize));
   ASSERT_EQ(load_b.dtype(), Dtype(kFloat, kVectorSize));
@@ -313,15 +313,16 @@ TEST(Expr, IntrinsicsDtypes) {
 
 TEST(Expr, Substitute01) {
   KernelScope kernel_scope;
-  Var* x = new Var("x", kFloat);
-  Var* y = new Var("y", kFloat);
-  Expr* e = new Mul(new Sub(x, new FloatImm(1.0f)), new Add(x, y));
+  VarPtr x = alloc<Var>("x", kFloat);
+  VarPtr y = alloc<Var>("y", kFloat);
+  ExprPtr e =
+      alloc<Mul>(alloc<Sub>(x, alloc<FloatImm>(1.0f)), alloc<Add>(x, y));
 
-  Var* z = new Var("z", kFloat);
-  Expr* e2 = Substitute(e, {{x, new Add(z, new FloatImm(5.0f))}});
-  Expr* e2_ref = new Mul(
-      new Sub(new Add(z, new FloatImm(5.0f)), new FloatImm(1.0f)),
-      new Add(new Add(z, new FloatImm(5.0f)), y));
+  VarPtr z = alloc<Var>("z", kFloat);
+  ExprPtr e2 = Substitute(e, {{x, alloc<Add>(z, alloc<FloatImm>(5.0f))}});
+  ExprPtr e2_ref = alloc<Mul>(
+      alloc<Sub>(alloc<Add>(z, alloc<FloatImm>(5.0f)), alloc<FloatImm>(1.0f)),
+      alloc<Add>(alloc<Add>(z, alloc<FloatImm>(5.0f)), y));
   std::ostringstream oss;
   oss << *e2;
   std::string e2_str = oss.str();
@@ -568,7 +569,7 @@ TEST(Expr, DynamicShapeAdd) {
     Placeholder b(BufHandle("b", {n}, kFloat));
     Placeholder c(BufHandle("c", {n}, kFloat));
     VarHandle i("i", kInt);
-    Stmt* s = For::make(i, 0, n, c.store({i}, a.load(i) + b.load(i)));
+    StmtPtr s = For::make(i, 0, n, c.store({i}, a.load(i) + b.load(i)));
     std::vector<float> aData(size, 1.0f);
     std::vector<float> bData(size, 2.0f);
     std::vector<float> cData(size, 0.0f);
@@ -586,11 +587,11 @@ void testCond01() {
   PaddedBuffer<float> a_v(N);
   Placeholder a_buf("a", kFloat, {N});
   VarHandle index = VarHandle("index", kInt);
-  Stmt* assign_x2 = a_buf.store({index}, cast<float>(index) * 2);
-  Stmt* assign_x3 = a_buf.store({index}, cast<float>(index) * 3);
+  StmtPtr assign_x2 = a_buf.store({index}, cast<float>(index) * 2);
+  StmtPtr assign_x3 = a_buf.store({index}, cast<float>(index) * 3);
   ExprHandle even_cond = CompareSelect::make(Mod::make(index, 2), 0, kEQ);
-  Stmt* assign = Cond::make(even_cond, assign_x2, assign_x3);
-  Stmt* for_stmt = For::make(index, 0, N, assign);
+  StmtPtr assign = Cond::make(even_cond, assign_x2, assign_x3);
+  StmtPtr for_stmt = For::make(index, 0, N, assign);
   SimpleIREvaluator(for_stmt, {a_buf})(a_v);
 
   PaddedBuffer<float> a_ref(N);
@@ -647,10 +648,10 @@ void testStmtClone() {
 
   Placeholder a_buf("a", kInt, {N});
   VarHandle index = VarHandle("index", kInt);
-  Stmt* body = a_buf.store({index}, 5);
-  Stmt* loop = For::make(index, 0, N, body);
+  StmtPtr body = a_buf.store({index}, 5);
+  StmtPtr loop = For::make(index, 0, N, body);
 
-  Stmt* cloned_loop = Stmt::clone(loop);
+  StmtPtr cloned_loop = Stmt::clone(loop);
   std::vector<int> orig_loop_results(N);
   std::vector<int> cloned_loop_results(N);
   SimpleIREvaluator(loop, {a_buf})(orig_loop_results);
@@ -661,9 +662,8 @@ void testStmtClone() {
 
   // Let's add another assign to the body in the cloned loop and verify that the
   // original statement hasn't changed while the cloned one has.
-  Stmt* body_addition = a_buf.store({index}, 33);
-  Block* cloned_body =
-      static_cast<Block*>(static_cast<For*>(cloned_loop)->body());
+  StmtPtr body_addition = a_buf.store({index}, 33);
+  BlockPtr cloned_body = static_to<Block>(static_to<For>(cloned_loop)->body());
   cloned_body->append_stmt(body_addition);
 
   std::vector<int> orig_loop_results_after_mutation(N);

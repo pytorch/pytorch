@@ -66,6 +66,7 @@ def broadcast_tensors(*tensors):
         tensor([[0, 1, 2],
                 [0, 1, 2]])
     """
+    # This wrapper exists to support variadic args.
     if has_torch_function(tensors):
         return handle_torch_function(broadcast_tensors, tensors, *tensors)
     return _VF.broadcast_tensors(tensors)  # type: ignore[attr-defined]
@@ -96,6 +97,7 @@ def broadcast_shapes(*shapes):
     Raises:
         RuntimeError: If shapes are incompatible.
     """
+    # This wrapper exists to support variadic args.
     # TODO Movie this to C++ once the jit has better support for torch.Size.
     with torch.no_grad():
         scalar = torch.zeros((), device="cpu")
@@ -277,6 +279,7 @@ def einsum(*args):
         tensor([[-0.3430, -5.2405,  0.4494],
                 [ 0.3311,  5.5201, -3.0356]])
     """
+    # This wrapper exists to support variadic args.
     if len(args) < 2:
         raise ValueError('einsum(): must specify the equation string and at least one operand, '
                          'or at least one operand and its subscripts list')
@@ -324,29 +327,61 @@ def einsum(*args):
     return _VF.einsum(equation, operands)  # type: ignore[attr-defined]
 
 
+# This wrapper exists to support variadic args.
 if TYPE_CHECKING:
     # The JIT doesn't understand Union, so only add type annotation for mypy
     def meshgrid(*tensors: Union[Tensor, List[Tensor]]) -> Tuple[Tensor, ...]:
         return _meshgrid(*tensors)
 else:
     def meshgrid(*tensors):
-        r"""Take :math:`N` tensors, each of which can be either scalar or 1-dimensional
-        vector, and create :math:`N` N-dimensional grids, where the :math:`i` :sup:`th` grid is defined by
-        expanding the :math:`i` :sup:`th` input over dimensions defined by other inputs.
+        r"""Creates grids of coordinates specified by the 1D inputs in `attr`:tensors.
+
+        This is helpful when you want to visualize data over some
+        range of inputs. See below for a plotting example.
+
+        Given :math:`N` 1D tensors :math:`T_0 \ldots T_{N-1}` as
+        inputs with corresponding sizes :math:`S_0 \ldots S_{N-1}`,
+        this creates :math:`N` N-dimensional tensors :math:`G_0 \ldots
+        G_{N-1}`, each with shape :math:`(S_0, ..., S_{N-1})` where
+        the output :math:`G_i` is constructed by expanding :math:`T_i`
+        to the result shape.
+
+        .. note::
+            0D inputs are treated equivalently to 1D inputs of a
+            single element.
+
+        .. warning::
+            `torch.meshgrid` has the same behavior as calling
+            `numpy.meshgrid(..., indexing='ij')`, and in the future
+            `torch.meshgrid` will also support the `indexing`
+            argument.
+
+            https://github.com/pytorch/pytorch/issues/50276 tracks
+            this issue with the goal of migrating to NumPy's behavior.
+
+        .. seealso::
+
+            :func:`torch.cartesian_prod` has the same effect but it
+            collects the data in a tensor of vectors.
 
         Args:
             tensors (list of Tensor): list of scalars or 1 dimensional tensors. Scalars will be
                 treated as tensors of size :math:`(1,)` automatically
 
         Returns:
-            seq (sequence of Tensors): If the input has :math:`k` tensors of size
-            :math:`(N_1,), (N_2,), \ldots , (N_k,)`, then the output would also have :math:`k` tensors,
-            where all tensors are of size :math:`(N_1, N_2, \ldots , N_k)`.
+            seq (sequence of Tensors): If the input has :math:`N`
+            tensors of size :math:`S_0 \ldots S_{N-1}``, then the
+            output will also have :math:`N` tensors, where each tensor
+            is of shape :math:`(S_0, ..., S_{N-1})`.
 
         Example::
 
             >>> x = torch.tensor([1, 2, 3])
             >>> y = torch.tensor([4, 5, 6])
+
+            Observe the element-wise pairings across the grid, (1, 4),
+            (1, 5), ..., (3, 6). This is the same thing as the
+            cartesian product.
             >>> grid_x, grid_y = torch.meshgrid(x, y)
             >>> grid_x
             tensor([[1, 1, 1],
@@ -356,6 +391,28 @@ else:
             tensor([[4, 5, 6],
                     [4, 5, 6],
                     [4, 5, 6]])
+
+            This correspondence can be seen when these grids are
+            stacked properly.
+            >>> torch.equal(torch.cat(tuple(torch.dstack([grid_x, grid_y]))),
+            ...             torch.cartesian_prod(x, y))
+            True
+
+            `torch.meshgrid` is commonly used to produce a grid for
+            plotting.
+            >>> import matplotlib.pyplot as plt
+            >>> xs = torch.linspace(-5, 5, steps=100)
+            >>> ys = torch.linspace(-5, 5, steps=100)
+            >>> x, y = torch.meshgrid(xs, ys)
+            >>> z = torch.sin(torch.sqrt(x * x + y * y))
+            >>> ax = plt.axes(projection='3d')
+            >>> ax.plot_surface(x.numpy(), y.numpy(), z.numpy())
+            <mpl_toolkits.mplot3d.art3d.Poly3DCollection object at 0x7f8f30d40100>
+            >>> plt.show()
+
+        .. image:: ../_static/img/meshgrid.png
+            :width: 512
+
         """
         return _meshgrid(*tensors)
 
@@ -989,6 +1046,7 @@ def cartesian_prod(*tensors):
                 [3, 4],
                 [3, 5]])
     """
+    # This wrapper exists to support variadic args.
     if has_torch_function(tensors):
         return handle_torch_function(cartesian_prod, tensors, *tensors)
     return _VF.cartesian_prod(tensors)  # type: ignore[attr-defined]
@@ -1023,6 +1081,7 @@ def block_diag(*tensors):
                 [0, 0, 0, 0, 0, 0, 0, 0, 0, 5],
                 [0, 0, 0, 0, 0, 0, 0, 0, 0, 6]])
     """
+    # This wrapper exists to support variadic args.
     if has_torch_function(tensors):
         return handle_torch_function(block_diag, tensors, *tensors)
     return torch._C._VariableFunctions.block_diag(tensors)  # type: ignore[attr-defined]
@@ -1110,6 +1169,7 @@ def atleast_1d(*tensors):
         >>> torch.atleast_1d((x,y))
         (tensor([0.5000]), tensor([1.]))
     """
+    # This wrapper exists to support variadic args.
     if has_torch_function(tensors):
         return handle_torch_function(atleast_1d, tensors, *tensors)
     if len(tensors) == 1:
@@ -1146,6 +1206,7 @@ def atleast_2d(*tensors):
         >>> torch.atleast_2d((x,y))
         (tensor([[0.5000]]), tensor([[1.]]))
     """
+    # This wrapper exists to support variadic args.
     if has_torch_function(tensors):
         return handle_torch_function(atleast_2d, tensors, *tensors)
     if len(tensors) == 1:
@@ -1190,6 +1251,7 @@ def atleast_3d(*tensors):
         >>> torch.atleast_3d((x,y))
         (tensor([[[0.5000]]]), tensor([[[1.]]]))
     """
+    # This wrapper exists to support variadic args.
     if has_torch_function(tensors):
         return handle_torch_function(atleast_3d, tensors, *tensors)
     if len(tensors) == 1:
@@ -1426,6 +1488,7 @@ def chain_matmul(*matrices, out=None):
 
     .. _`[CLRS]`: https://mitpress.mit.edu/books/introduction-algorithms-third-edition
     """
+    # This wrapper exists to support variadic args.
     if has_torch_function(matrices):
         return handle_torch_function(chain_matmul, matrices, *matrices)
 

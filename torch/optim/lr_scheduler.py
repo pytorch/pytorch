@@ -328,7 +328,7 @@ class MultiplicativeLR(_LRScheduler):
             return [group['lr'] * lmbda(self.last_epoch)
                     for lmbda, group in zip(self.lr_lambdas, self.optimizer.param_groups)]
         else:
-            return list(self.base_lrs)
+            return [group['lr'] for group in self.optimizer.param_groups]
 
 
 class StepLR(_LRScheduler):
@@ -526,7 +526,7 @@ class ExponentialLR(_LRScheduler):
                           "please use `get_last_lr()`.", UserWarning)
 
         if self.last_epoch == 0:
-            return self.base_lrs
+            return [group['lr'] for group in self.optimizer.param_groups]
         return [group['lr'] * self.gamma
                 for group in self.optimizer.param_groups]
 
@@ -586,7 +586,7 @@ class CosineAnnealingLR(_LRScheduler):
                           "please use `get_last_lr()`.", UserWarning)
 
         if self.last_epoch == 0:
-            return self.base_lrs
+            return [group['lr'] for group in self.optimizer.param_groups]
         elif (self.last_epoch - 1 - self.T_max) % (2 * self.T_max) == 0:
             return [group['lr'] + (base_lr - self.eta_min) *
                     (1 - math.cos(math.pi / self.T_max)) / 2

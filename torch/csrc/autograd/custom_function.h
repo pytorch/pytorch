@@ -9,6 +9,8 @@
 
 namespace torch { namespace autograd {
 
+using optional_variable_list = std::vector<c10::optional<Variable>>;
+
 TORCH_API std::vector<c10::optional<Variable>> _wrap_outputs(
   const variable_list &input_vars,
   const std::unordered_set<at::TensorImpl*> &non_differentiable,

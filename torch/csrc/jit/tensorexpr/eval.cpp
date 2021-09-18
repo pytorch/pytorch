@@ -59,14 +59,14 @@ class SimpleIREvaluatorImpl : public IRVisitor {
 
   ~SimpleIREvaluatorImpl() override = default;
 
-  void bindBuf(Buf* buf, void* ptr) {
+  void bindBuf(BufPtr buf, void* ptr) {
     buffer_mapping_[buf] = ptr;
   }
-  void bindVar(Var* var, const Value& val) {
+  void bindVar(VarPtr var, const Value& val) {
     eval_context_[var] = val;
   }
 
-  Value evaluateExpr(Expr* e) {
+  Value evaluateExpr(ExprPtr e) {
     e->accept(this);
     return value_;
   }
@@ -81,45 +81,45 @@ class SimpleIREvaluatorImpl : public IRVisitor {
     internal_buffers_.clear();
   }
 
-  TORCH_API void visit(Add* v) override {
+  TORCH_API void visit(AddPtr v) override {
     visit_binary_op(v);
   }
-  TORCH_API void visit(Sub* v) override {
+  TORCH_API void visit(SubPtr v) override {
     visit_binary_op(v);
   }
-  TORCH_API void visit(Mul* v) override {
+  TORCH_API void visit(MulPtr v) override {
     visit_binary_op(v);
   }
-  TORCH_API void visit(Div* v) override {
+  TORCH_API void visit(DivPtr v) override {
     visit_binary_op(v);
   }
-  TORCH_API void visit(Mod* v) override {
+  TORCH_API void visit(ModPtr v) override {
     visit_binary_op(v);
   }
-  TORCH_API void visit(Max* v) override {
+  TORCH_API void visit(MaxPtr v) override {
     visit_binary_op(v, v->propagate_nans());
   }
-  TORCH_API void visit(Min* v) override {
+  TORCH_API void visit(MinPtr v) override {
     visit_binary_op(v, v->propagate_nans());
   }
 
-  TORCH_API void visit(And* v) override {
+  TORCH_API void visit(AndPtr v) override {
     visit_binary_op(v);
   }
-  TORCH_API void visit(Or* v) override {
+  TORCH_API void visit(OrPtr v) override {
     visit_binary_op(v);
   }
-  TORCH_API void visit(Xor* v) override {
+  TORCH_API void visit(XorPtr v) override {
     visit_binary_op(v);
   }
-  TORCH_API void visit(Lshift* v) override {
+  TORCH_API void visit(LshiftPtr v) override {
     visit_binary_op(v);
   }
-  TORCH_API void visit(Rshift* v) override {
+  TORCH_API void visit(RshiftPtr v) override {
     visit_binary_op(v);
   }
 
-  void visit(CompareSelect* v) override {
+  void visit(CompareSelectPtr v) override {
     visit_compare_select_op(v, v->compare_select_op());
   }
 
@@ -365,7 +365,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
   }
 
   void visit_compare_select_op(
-      CompareSelect* v,
+      CompareSelectPtr v,
       CompareSelectOperation cmp_op) {
     v->lhs()->accept(this);
     Value lhs_v = value_;
@@ -394,23 +394,23 @@ class SimpleIREvaluatorImpl : public IRVisitor {
     }
   }
 
-#define IMM_VISIT(Type, Name)                   \
-  TORCH_API void visit(Name##Imm* v) override { \
-    value_ = Value(v->value());                 \
+#define IMM_VISIT(Type, Name)                     \
+  TORCH_API void visit(Name##ImmPtr v) override { \
+    value_ = Value(v->value());                   \
   }
   AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, IMM_VISIT);
 #undef IMM_VISIT
 
-  TORCH_API void visit(Block* v) override {
-    Block* last = scope_;
+  TORCH_API void visit(BlockPtr v) override {
+    BlockPtr last = scope_;
     scope_ = v;
-    for (Stmt* s : v->stmts()) {
+    for (StmtPtr s : v->stmts()) {
       s->accept(this);
     }
 
     auto it = var_by_scope_.find(v);
     if (it != var_by_scope_.end()) {
-      for (Expr* v : it->second) {
+      for (ExprPtr v : it->second) {
         eval_context_.erase(v);
       }
       var_by_scope_.erase(it);
@@ -419,7 +419,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
     scope_ = last;
   }
 
-  TORCH_API void visit(Var* v) override {
+  TORCH_API void visit(VarPtr v) override {
     auto iter = eval_context_.find(v);
     if (iter == eval_context_.end()) {
       throw malformed_input("could not find Var in context", v);
@@ -456,8 +456,8 @@ class SimpleIREvaluatorImpl : public IRVisitor {
     }
   }
 
-  TORCH_API void visit(Cast* v) override {
-    Expr* src_value = v->src_value();
+  TORCH_API void visit(CastPtr v) override {
+    ExprPtr src_value = v->src_value();
     src_value->accept(this);
     Dtype dst_dtype = v->dtype();
     Dtype src_dtype = src_value->dtype();
@@ -507,8 +507,8 @@ class SimpleIREvaluatorImpl : public IRVisitor {
     }
   }
 
-  TORCH_API void visit(BitCast* v) override {
-    Expr* src_value = v->src_value();
+  TORCH_API void visit(BitCastPtr v) override {
+    ExprPtr src_value = v->src_value();
     src_value->accept(this);
     Dtype dst_dtype = v->dtype();
     Dtype src_dtype = src_value->dtype();
@@ -530,8 +530,8 @@ class SimpleIREvaluatorImpl : public IRVisitor {
     }
   }
 
-  TORCH_API void visit(For* v) override {
-    Expr* var_node = v->var();
+  TORCH_API void visit(ForPtr v) override {
+    ExprPtr var_node = v->var();
     v->start()->accept(this);
     int start = value_.as<int>();
     v->stop()->accept(this);
@@ -549,7 +549,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
     eval_context_.erase(var_node);
   }
 
-  TORCH_API void visit(Ramp* v) override {
+  TORCH_API void visit(RampPtr v) override {
     v->base()->accept(this);
     int base = value().as<int>();
     v->stride()->accept(this);
@@ -564,7 +564,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
     value_ = Value(values);
   }
 
-  TORCH_API void visit(Broadcast* v) override {
+  TORCH_API void visit(BroadcastPtr v) override {
     v->value()->accept(this);
     Value value = this->value();
     int lanes = v->lanes();
@@ -581,7 +581,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
     }
   }
 
-  TORCH_API void visit(IfThenElse* v) override {
+  TORCH_API void visit(IfThenElsePtr v) override {
     v->condition()->accept(this);
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     bool cond_v;
@@ -605,14 +605,14 @@ class SimpleIREvaluatorImpl : public IRVisitor {
     }
   }
 
-  TORCH_API void visit(Load* v) override {
+  TORCH_API void visit(LoadPtr v) override {
     auto iter = buffer_mapping_.find(v->buf());
     if (iter == buffer_mapping_.end()) {
       throw malformed_input("could not find base node in Load", v);
     }
     void* ptr = iter->second;
 
-    Expr* flat_idx = flatten_index(v->buf()->dims(), v->indices());
+    ExprPtr flat_idx = flatten_index(v->buf()->dims(), v->indices());
     flat_idx->accept(this);
     std::vector<int> index = value().as_vec<int>();
     ScalarType v_sdtype = v->dtype().scalar_type();
@@ -633,7 +633,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
     }
   }
 
-  TORCH_API void visit(Store* v) override {
+  TORCH_API void visit(StorePtr v) override {
     auto iter = buffer_mapping_.find(v->buf());
     if (iter == buffer_mapping_.end()) {
       throw malformed_input("could not find base node in Store", v);
@@ -641,7 +641,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
 
     void* ptr = iter->second;
 
-    Expr* flat_idx = flatten_index(v->buf()->dims(), v->indices());
+    ExprPtr flat_idx = flatten_index(v->buf()->dims(), v->indices());
     flat_idx->accept(this);
     std::vector<int> index = value().as_vec<int>();
     ScalarType v_sdtype = v->value()->dtype().scalar_type();
@@ -666,13 +666,13 @@ class SimpleIREvaluatorImpl : public IRVisitor {
     }
   }
 
-  void visit(ExternalCall* v) override {
+  void visit(ExternalCallPtr v) override {
     auto& func_registry = getNNCFunctionRegistry();
     if (!func_registry.count(v->func_name())) {
       throw unimplemented_lowering(v);
     }
 
-    std::vector<Buf*> bufs(v->buf_args());
+    std::vector<BufPtr> bufs(v->buf_args());
     bufs.insert(bufs.begin(), v->buf());
 
     std::vector<void*> buf_ptrs;
@@ -681,7 +681,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
     std::vector<int8_t> buf_dtypes;
     std::vector<int64_t> extra_args;
 
-    for (Buf* b : bufs) {
+    for (BufPtr b : bufs) {
       auto iter = buffer_mapping_.find(b);
       if (iter == buffer_mapping_.end()) {
         throw malformed_input("could not find buf", v);
@@ -690,12 +690,12 @@ class SimpleIREvaluatorImpl : public IRVisitor {
       buf_ptrs.push_back(iter->second);
       buf_ranks.push_back(b->dims().size());
       buf_dtypes.push_back((int8_t)b->dtype().scalar_type());
-      for (Expr* dim_expr : b->dims()) {
+      for (ExprPtr dim_expr : b->dims()) {
         dim_expr->accept(this);
         buf_dims.push_back(value().as<int>());
       }
     }
-    for (Expr* a : v->args()) {
+    for (ExprPtr a : v->args()) {
       a->accept(this);
       // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       int64_t val;
@@ -722,7 +722,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
   }
 
   template <typename TReturn, typename TInput>
-  void visit_intrinsics_helper(Intrinsics* v) {
+  void visit_intrinsics_helper(IntrinsicsPtr v) {
     std::vector<Value> values(v->nparams());
     for (const auto i : c10::irange(v->nparams())) {
       v->param(i)->accept(this);
@@ -757,7 +757,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
     value_ = Value(result);
   }
 
-  TORCH_API void visit(Intrinsics* v) override {
+  TORCH_API void visit(IntrinsicsPtr v) override {
     auto ty = v->dtype().scalar_type();
     if (v->op_type() == kIsNan) {
       auto inp_dtype = v->params().at(0)->dtype().scalar_type();
@@ -782,9 +782,9 @@ class SimpleIREvaluatorImpl : public IRVisitor {
     }
   }
 
-  void visit(Allocate* v) override {
-    Buf* b = v->buf();
-    std::vector<Expr*> dims = b->dims();
+  void visit(AllocatePtr v) override {
+    BufPtr b = v->buf();
+    std::vector<ExprPtr> dims = b->dims();
     int total_byte_size = b->dtype().byte_size();
     for (auto& dim : dims) {
       dim->accept(this);
@@ -802,8 +802,8 @@ class SimpleIREvaluatorImpl : public IRVisitor {
     internal_buffers_.insert(std::make_pair(b, std::move(buffer)));
   }
 
-  void visit(Free* v) override {
-    Buf* b = v->buf();
+  void visit(FreePtr v) override {
+    BufPtr b = v->buf();
     int count = internal_buffers_.erase(b);
     if (count == 0) {
       throw std::runtime_error(
@@ -813,12 +813,12 @@ class SimpleIREvaluatorImpl : public IRVisitor {
     buffer_mapping_.erase(b);
   }
 
-  void visit(Let* v) override {
+  void visit(LetPtr v) override {
     var_by_scope_[scope_].push_back(v->var());
     bindVar(v->var(), evaluateExpr(v->value()));
   }
 
-  void visit(Cond* v) override {
+  void visit(CondPtr v) override {
     v->condition()->accept(this);
     if (value().as<int>()) {
       if (v->true_stmt()) {
@@ -950,15 +950,16 @@ class SimpleIREvaluatorImpl : public IRVisitor {
   }
 
   Value value_;
-  Block* scope_;
-  std::unordered_map<Expr*, Value> eval_context_;
-  std::unordered_map<Block*, std::vector<Expr*>> var_by_scope_;
-  std::unordered_map<Buf*, void*> buffer_mapping_;
-  std::unordered_map<Buf*, std::unique_ptr<std::vector<int>>> internal_buffers_;
+  BlockPtr scope_;
+  std::unordered_map<ExprPtr, Value> eval_context_;
+  std::unordered_map<BlockPtr, std::vector<ExprPtr>> var_by_scope_;
+  std::unordered_map<BufPtr, void*> buffer_mapping_;
+  std::unordered_map<BufPtr, std::unique_ptr<std::vector<int>>>
+      internal_buffers_;
 };
 
 SimpleIREvaluator::SimpleIREvaluator(
-    Stmt* stmt,
+    StmtPtr stmt,
     const std::vector<BufferArg>& buffer_args,
     at::Device device,
     const std::string& kernel_func_name)
@@ -1011,7 +1012,7 @@ void SimpleIREvaluator::bindArg(const BufferArg& bufArg, void* data) {
   }
 }
 
-void SimpleIREvaluator::bindVar(Var* v, Expr* e) {
+void SimpleIREvaluator::bindVar(VarPtr v, ExprPtr e) {
   impl_->bindVar(v, impl_->evaluateExpr(e));
 }
 

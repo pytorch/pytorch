@@ -630,7 +630,6 @@ class TestFile:
 
     def append(self, test_case: TestCase, test_type: str) -> None:
         is_multi_test = self.name == 'test_cpp_extensions_aot' or \
-            self.name == 'distributed/test_distributed_fork' or \
             self.name == 'distributed/test_distributed_spawn' or \
             self.name == 'distributed/test_c10d_gloo' or \
             self.name == 'cpp'  # The caffe2 cpp tests spawn duplicate test cases as well.

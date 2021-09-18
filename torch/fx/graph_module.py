@@ -15,27 +15,59 @@ from pathlib import Path
 import os
 import warnings
 
-# normal exec loses the source code, however we can patch
-# the linecache module to still recover it.
-# using exec_with_source will add it to our local cache
+# Normal exec loses the source code, however we can work with
+# the linecache module to recover it.
+# Using exec_with_source will add it to our local cache
 # and then tools like TorchScript will be able to get source info.
-_next_id = 0
-def exec_with_source(src: str, globals: Dict[str, Any]):
-    global _next_id
-    key = f'<eval_with_key_{_next_id}>'
-    _next_id += 1
-    _eval_cache[key] = [line + '\n' for line in src.splitlines()]
-    exec(compile(src, key, 'exec'), globals)
+class EvalCacheLoader(object):
+    def __init__(self):
+        self.eval_cache = {}
+        self.next_id = 0
 
-# patch linecache so that any code we exec using exec_with_source
-# works with inspect
-_eval_cache : Dict[str, List[str]] = {}
-_orig_getlines = linecache.getlines
-def patched_getline(*args, **kwargs):
-    if args[0] in _eval_cache:
-        return _eval_cache[args[0]]
-    return _orig_getlines(*args, **kwargs)
-linecache.getlines = patched_getline
+    def cache(self, src: str, globals: Dict[str, Any]):
+        """Store the source in a private cache, and add a lazy entry in linecache
+        that allows the source to be retrieved by 'filename'.
+
+        Args:
+            src (str): The module source to cache
+            globals (dict): The module globals
+
+        Returns:
+            str: The cache key (and dummy filename) generated for src.
+        """
+
+        key = self._get_key()
+        self.eval_cache[key] = src
+
+        # Don't mutate globals so that this loader is only used
+        # to populate linecache, and doesn't interact with other modules
+        # that might check `__loader__`
+        globals_copy = globals.copy()
+        globals_copy['__file__'] = key
+        globals_copy['__name__'] = key
+        globals_copy['__loader__'] = self
+        linecache.lazycache(key, globals_copy)
+
+        return key
+
+    # Part of the loader protocol (PEP 302)
+    # linecache will use this method when trying to find source code
+    def get_source(self, module_name) -> Optional[str]:
+        if module_name in self.eval_cache:
+            return self.eval_cache[module_name]
+        return None
+
+    def _get_key(self):
+        key = f'<eval_with_key>.{self.next_id}'
+        self.next_id += 1
+        return key
+
+_loader = EvalCacheLoader()
+
+
+def exec_with_source(src: str, globals: Dict[str, Any]):
+    key = _loader.cache(src, globals)
+    exec(compile(src, key, 'exec'), globals)
 
 
 def _forward_from_src(src: str, globals: Dict[str, Any]):
@@ -539,7 +571,7 @@ class {module_name}(torch.nn.Module):
             # auxiliary variables (for readability)
             err_lineno = frame_summary.lineno
             err_line_len = len(frame_summary.line)
-            all_src_lines = _eval_cache[frame_summary.filename]
+            all_src_lines = linecache.getlines(frame_summary.filename)
 
             # constituent substrings of the error message
             tb_repr = traceback.format_exc()
@@ -615,7 +647,7 @@ class {module_name}(torch.nn.Module):
     def __deepcopy__(self, memo):
         fake_mod = torch.nn.Module()
         fake_mod.__dict__ = copy.deepcopy(self.__dict__)
-        return GraphModule(fake_mod, self.graph)
+        return GraphModule(fake_mod, fake_mod.__dict__['_graph'])
 
     def __copy__(self):
         return GraphModule(self, self.graph)

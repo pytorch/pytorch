@@ -94,7 +94,13 @@ std::tuple<Tensor, Tensor, Tensor, int64_t> compute_unique(
   Tensor length = at::empty({1}, options);
   int64_t num_out;
   if (!return_counts) {
-    cuda::cub::unique(data, data_out.data_ptr<scalar_t>(), length.data_ptr<int64_t>(), num_inp);
+    CUB_WRAPPER(
+        cub::DeviceSelect::Unique,
+        data,
+        data_out.data_ptr<scalar_t>(),
+        length.data_ptr<int64_t>(),
+        num_inp,
+        stream);
     num_out = length.item<int64_t>();
   } else {
     counts.resize_(num_inp);
@@ -129,6 +135,11 @@ std::tuple<Tensor, Tensor, Tensor> unique_cuda_template(
 
   auto options = self.options().dtype(kLong);
   int64_t num_inp = self.numel();
+  TORCH_CHECK(
+      num_inp <= INT_MAX,
+      "num_inp ",
+      num_inp,
+      " is too big to be handled by cub");
   Tensor sorted;
   Tensor self_c = self.contiguous();
   if (consecutive) {

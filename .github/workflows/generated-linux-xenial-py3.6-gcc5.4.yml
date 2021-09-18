@@ -5,6 +5,7 @@ name: linux-xenial-py3.6-gcc5.4
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, unassigned]
   push:
     branches:
       - master
@@ -28,9 +29,16 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  ciflow_should_run:
+    runs-on: ubuntu-18.04
+    if: ${{ (github.event_name != 'pull_request') || (github.event.action !='unassigned') || (contains(github.event.pull_request.labels.*.name, 'ciflow/cpu') || contains(github.event.pull_request.labels.*.name, 'ciflow/default') || contains(github.event.pull_request.labels.*.name, 'ciflow/linux')) }}
+    steps:
+      - name: noop
+        run: echo running ciflow_should_run
   calculate-docker-image:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: linux.2xlarge
+    needs: [ciflow_should_run]
     env:
       DOCKER_BUILDKIT: 1
     timeout-minutes: 90
@@ -104,7 +112,7 @@ jobs:
 
   build:
     runs-on: linux.2xlarge
-    needs: [calculate-docker-image, ]
+    needs: [calculate-docker-image, ciflow_should_run]
     env:
       DOCKER_IMAGE: ${{ needs.calculate-docker-image.outputs.docker_image }}
       JOB_BASE_NAME: linux-xenial-py3.6-gcc5.4-build
@@ -215,6 +223,7 @@ jobs:
   generate-test-matrix:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: ubuntu-18.04
+    needs: [ciflow_should_run]
     env:
       TEST_RUNNER_TYPE: linux.2xlarge
       ENABLE_JIT_LEGACY_TEST: ''
@@ -242,7 +251,7 @@ jobs:
         run: .github/scripts/generate_pytorch_test_matrix.py
 
   test:
-    needs: [calculate-docker-image, build, generate-test-matrix, ]
+    needs: [calculate-docker-image, build, generate-test-matrix, ciflow_should_run]
     strategy:
       matrix: ${{ fromJson(needs.generate-test-matrix.outputs.matrix) }}
       fail-fast: false
@@ -312,6 +321,7 @@ jobs:
       - name: Test PyTorch
         env:
           BUILD_ENVIRONMENT: linux-xenial-py3.6-gcc5.4-${{ matrix.config }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           if [[ $TEST_CONFIG == 'multigpu' ]]; then
             TEST_COMMAND=.jenkins/pytorch/multigpu-test.sh
@@ -327,6 +337,7 @@ jobs:
           docker run \
             ${GPU_FLAG:-} \
             -e BUILD_ENVIRONMENT \
+            -e PR_NUMBER \
             -e CUSTOM_TEST_ARTIFACT_BUILD_DIR \
             -e GITHUB_ACTIONS \
             -e IN_CI \
@@ -400,7 +411,7 @@ jobs:
   # logs (like test); we can always move it back to the other one, but it
   # doesn't create the best experience
   render_test_results:
-    needs: [generate-test-matrix, test, ]
+    needs: [generate-test-matrix, test, ciflow_should_run]
     if: ${{ needs.test.result != 'skipped' || failure() }}
     runs-on: linux.2xlarge
     strategy:
@@ -460,7 +471,7 @@ jobs:
 
   pytorch_python_doc_build:
     runs-on: linux.2xlarge
-    needs: [calculate-docker-image, build, ]
+    needs: [calculate-docker-image, build, ciflow_should_run]
     env:
       DOCKER_IMAGE: ${{ needs.calculate-docker-image.outputs.docker_image }}
     steps:

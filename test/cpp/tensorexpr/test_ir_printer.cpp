@@ -83,7 +83,7 @@ TEST(IRPrinter, FunctionName) {
       });
 
   LoopNest l({chunk_0, chunk_1, consumer});
-  auto* body = l.root_stmt();
+  auto body = l.root_stmt();
 
   std::stringstream ss;
   ss << *body;

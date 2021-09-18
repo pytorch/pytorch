@@ -486,8 +486,8 @@ void optimizePointwise(
     tensorexpr::Tensor* target,
     int width) {
   using namespace torch::jit::tensorexpr;
-  std::vector<For*> loops = ln->getLoopStmtsFor(target);
-  For *inner, *tail;
+  std::vector<ForPtr> loops = ln->getLoopStmtsFor(target);
+  ForPtr inner, tail;
   TORCH_CHECK(loops.size() > 0, "No loops created for pointwise op");
   ln->splitWithTail(loops[0], width, &inner, &tail);
   ln->vectorize(inner);
@@ -503,7 +503,7 @@ std::shared_ptr<TEWrapper> wrapTECompute(
   LoopNest ln({out});
   optimizePointwise(&ln, out, width);
   ln.prepareForCodegen();
-  Stmt* s = ln.root_stmt();
+  StmtPtr s = ln.root_stmt();
   s = tensorexpr::IRSimplifier::simplify(s);
   std::vector<CodeGen::BufferArg> args;
   args.emplace_back(out);

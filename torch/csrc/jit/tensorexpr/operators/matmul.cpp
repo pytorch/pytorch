@@ -21,11 +21,11 @@ Tensor* computeMatmul(
   auto size_b = b.dims();
   // We currently only support rank 2 matmuls
   TORCH_INTERNAL_ASSERT(size_a.size() == 2 && size_b.size() == 2);
-  auto total_size = dynamic_cast<LongImm*>(
-      IRSimplifier::simplify(
-          cast<int64_t>(size_a[0]) * cast<int64_t>(size_a[1]) *
-          cast<int64_t>(size_b[1]))
-          .node());
+  auto total_size =
+      to<LongImm>(IRSimplifier::simplify(
+                      cast<int64_t>(size_a[0]) * cast<int64_t>(size_a[1]) *
+                      cast<int64_t>(size_b[1]))
+                      .node());
 
   // For small sizes, where N*M*K < 1000, lower matmul to a naive 3-level
   // loopnest. The number is not tuned very carefully, and in future we should
