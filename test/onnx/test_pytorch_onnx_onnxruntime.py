@@ -4209,6 +4209,16 @@ class TestONNXRuntime(unittest.TestCase):
             self.run_test(model, x_int)
 
     @skipIfUnsupportedMinOpsetVersion(9)
+    def test_and_or_xor(self):
+        class MyModel(torch.nn.Module):
+            def forward(self, x, y):
+                return x ^ y, x | y, x & y, ~x
+
+        x = torch.randint(0, 2, (5, 5), dtype=torch.bool)
+        y = torch.randint(0, 2, (5, 5), dtype=torch.bool)
+        self.run_test(MyModel(), input=(x, y))
+
+    @skipIfUnsupportedMinOpsetVersion(9)
     def test_logical_and(self):
         class AndModel(torch.nn.Module):
             def forward(self, x, y):

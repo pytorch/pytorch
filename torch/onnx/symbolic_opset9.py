@@ -1084,10 +1084,11 @@ def __interpolate(g, input, size, scale_factor, mode , align_corners, recompute_
                                                              mode , align_corners)
     return g.op("Upsample", input, scales, mode_s=mode)
 
-@parse_args("v")
+
 def bitwise_not(g, inp):
     if inp.type().scalarType() != "Bool":
-        return _unimplemented("bitwise_not", "non-bool tensor")
+        raise NotImplementedError("ONNX export does NOT support exporting bitwise Not " +
+                                  "for non-boolean input values")
     return g.op("Not", inp)
 
 
@@ -1116,6 +1117,9 @@ def wrap_logical_op_with_negation(func):
 
 
 def __not_(g, self):
+    if self.type().scalarType() != "Bool":
+        raise NotImplementedError("ONNX export does NOT support exporting bitwise Not " +
+                                  "for non-boolean input values")
     return g.op("Not", self)
 
 
@@ -1162,14 +1166,31 @@ def le(g, input, other):
     return gt_impl(g, input, other)
 
 
-@wrap_logical_op_with_cast_to_and_from("Bool")
 def __and_(g, input, other):
-    return g.op("And", input, other)
+    if input.type().scalarType() == "Bool" and \
+            other.type().scalarType() == "Bool":
+        return g.op("And", input, other)
+    else:
+        raise NotImplementedError("ONNX export does NOT support exporting bitwise AND " +
+                                  "for non-boolean input values")
 
 
-@wrap_logical_op_with_cast_to_and_from("Bool")
 def __or_(g, input, other):
-    return g.op("Or", input, other)
+    if input.type().scalarType() == "Bool" and \
+            other.type().scalarType() == "Bool":
+        return g.op("Or", input, other)
+    else:
+        raise NotImplementedError("ONNX export does NOT support exporting bitwise OR " +
+                                  "for non-boolean input values")
+
+
+def __xor_(g, input, other):
+    if input.type().scalarType() == "Bool" and \
+            other.type().scalarType() == "Bool":
+        return g.op("Xor", input, other)
+    else:
+        raise NotImplementedError("ONNX export does NOT support exporting bitwise XOR " +
+                                  "for non-boolean input values")
 
 
 @wrap_logical_op_with_cast_to_and_from("Bool")
