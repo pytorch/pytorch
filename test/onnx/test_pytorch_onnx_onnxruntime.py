@@ -9476,6 +9476,15 @@ class TestONNXRuntime(unittest.TestCase):
         filled_value = 7
         self.run_test(FillModule(), (x, filled_value))
 
+        class FillScalarModule(torch.nn.Module):
+            def forward(self, x):
+                res = x + 2
+                res.fill_(2.5)
+                return res, x
+
+        x = torch.ones(2, 3, 4, dtype=torch.long)
+        self.run_test(FillScalarModule(), x)
+
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_index_add_normal(self):
         class M(torch.nn.Module):
