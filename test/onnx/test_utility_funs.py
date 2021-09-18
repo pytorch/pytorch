@@ -22,8 +22,7 @@ import unittest
 skip = unittest.skip
 
 
-class TestUtilityFuns(TestCase):
-    opset_version = 9
+class _BaseTestCase(TestCase):
 
     def setUp(self):
         torch.manual_seed(0)
@@ -52,6 +51,29 @@ class TestUtilityFuns(TestCase):
                                                               dynamic_axes=dynamic_axes)
         _set_onnx_shape_inference(True)
         return graph, params_dict, torch_out
+
+
+class TestUtilityFuns_opset_independent(_BaseTestCase):
+
+    def test_unconvertible_ops(self):
+        class MyModule(torch.nn.Module):
+            def forward(self, x):
+                return torch.cumsum(x, dim=0)
+
+        model = MyModule()
+        x = torch.randn(2, 3, 4)
+
+        graph, unconvertible_ops = utils.unconvertible_ops(model, (x,), opset_version=9)
+        iter = graph.nodes()
+        assert next(iter).kind() == "onnx::Constant"
+        assert next(iter).kind() == "prim::Constant"
+        assert next(iter).kind() == "aten::cumsum"
+        assert len(unconvertible_ops) == 1
+        assert unconvertible_ops == ["aten::cumsum"]
+
+
+class TestUtilityFuns_opset9(_BaseTestCase):
+    opset_version = 9
 
     def test_is_in_onnx_export(self):
         test_self = self
@@ -709,22 +731,6 @@ class TestUtilityFuns(TestCase):
         funcs = onnx_model.functions
         assert len(funcs) == 3
 
-    def test_unconvertible_ops(self):
-        class MyModule(torch.nn.Module):
-            def forward(self, x):
-                return torch.cumsum(x, dim=0)
-
-        model = MyModule()
-        x = torch.randn(2, 3, 4)
-
-        graph, unconvertible_ops = utils.unconvertible_ops(model, (x,), opset_version=9)
-        iter = graph.nodes()
-        assert next(iter).kind() == "onnx::Constant"
-        assert next(iter).kind() == "prim::Constant"
-        assert next(iter).kind() == "aten::cumsum"
-        assert len(unconvertible_ops) == 1
-        assert unconvertible_ops == ["aten::cumsum"]
-
     def test_aten_fallthrough(self):
         # Test aten export of op with no symbolic
         class Module(torch.nn.Module):
@@ -1071,30 +1077,25 @@ class TestUtilityFuns(TestCase):
         assert graph.graph.node[3].op_type == "Gemm"
         assert graph.graph.node[4].op_type == "Identity"
 
-# opset 10 tests
-TestUtilityFuns_opset10 = type(str("TestUtilityFuns_opset10"),
-                               (TestCase,),
-                               dict(TestUtilityFuns.__dict__, opset_version=10))
 
-# opset 11 tests
-TestUtilityFuns_opset11 = type(str("TestUtilityFuns_opset11"),
-                               (TestCase,),
-                               dict(TestUtilityFuns.__dict__, opset_version=11))
+class TestUtilityFuns_opset10(TestUtilityFuns_opset9):
+    opset_version = 10
 
-# opset 12 tests
-TestUtilityFuns_opset12 = type(str("TestUtilityFuns_opset12"),
-                               (TestCase,),
-                               dict(TestUtilityFuns.__dict__, opset_version=12))
 
-# opset 13 tests
-TestUtilityFuns_opset13 = type(str("TestUtilityFuns_opset13"),
-                               (TestCase,),
-                               dict(TestUtilityFuns.__dict__, opset_version=13))
+class TestUtilityFuns_opset11(TestUtilityFuns_opset9):
+    opset_version = 11
 
-# opset 14 tests
-TestUtilityFuns_opset14 = type(str("TestUtilityFuns_opset14"),
-                               (TestCase,),
-                               dict(TestUtilityFuns.__dict__, opset_version=14))
+
+class TestUtilityFuns_opset12(TestUtilityFuns_opset9):
+    opset_version = 12
+
+
+class TestUtilityFuns_opset13(TestUtilityFuns_opset9):
+    opset_version = 13
+
+
+class TestUtilityFuns_opset14(TestUtilityFuns_opset9):
+    opset_version = 14
 
 
 if __name__ == "__main__":
