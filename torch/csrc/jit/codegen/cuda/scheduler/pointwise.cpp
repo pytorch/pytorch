@@ -599,7 +599,7 @@ void schedulePointwise(Fusion* fusion, const PointwiseParams& params) {
       reference_tv->axis(2)->parallelize(ParallelType::Unswitch);
       // Aggressively mark with vectorized and cleanup later. That way we don't
       // have to manually specify parallelization outside the reference.
-      reference_tv->axis(-1)->parallelize(ParallelType::Vectorize);
+      reference_tv->axis(3)->parallelize(ParallelType::Vectorize);
 
       //[BIDx, TIDx, Unswitch, Vectorization]
       // To make consistent with unrolling:
