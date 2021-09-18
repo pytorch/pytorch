@@ -344,6 +344,9 @@ class TestOperators(TestCase):
         xfail('linalg.tensorinv'),
         xfail('nn.functional.conv_transpose2d', device_type='cuda'),
         xfail('nanmean'),
+        xfail('block_diag'),
+        xfail('nn.functional.dropout'),
+        xfail('nn.functional.max_pool2d'),
     }))
     def test_vmapvjp(self, device, dtype, op):
         # These are too annoying to put into the list above
@@ -470,6 +473,9 @@ class TestOperators(TestCase):
         xfail('nn.functional.cosine_similarity'),
         xfail('nn.functional.layer_norm'),
         xfail('nn.functional.nll_loss'),
+        xfail('block_diag'),
+        xfail('nn.functional.dropout'),
+        xfail('nn.functional.max_pool2d'),
     })
     def test_vmapvjp_has_batch_rule(self, device, dtype, op):
         # These are too annoying to put into the list above
@@ -515,6 +521,9 @@ class TestOperators(TestCase):
         xfail('linalg.multi_dot'),
         xfail('nanmean'),
         xfail('vstack'),
+        xfail('block_diag'),
+        xfail('nn.functional.dropout'),
+        xfail('nn.functional.max_pool2d'),
     }))
     def test_vjpvmap(self, device, dtype, op):
         # NB: there is no vjpvmap_has_batch_rule test because that is almost
