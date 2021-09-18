@@ -412,7 +412,7 @@ def serialize_module(fx_module: GraphModule, weights: Dict, name_prefix="") -> D
         def get_arg_info(arg: Argument) -> Any:
             if isinstance(arg, torch.fx.Node):
                 return {"is_node": True, "name": str(arg)}
-            elif isinstance(arg, torch.dtype):
+            elif isinstance(arg, (torch.dtype, torch.memory_format, torch.qscheme)):
                 return str(arg)
             else:
                 return arg

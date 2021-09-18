@@ -19,6 +19,7 @@ constexpr DispatchKeySet backend_dispatch_keyset = autogradother_backends |
         DispatchKey::PrivateUse3,
         DispatchKey::MLC,
         DispatchKey::HPU,
+        DispatchKey::ORT,
         DispatchKey::Meta,
     });
 

@@ -9,10 +9,11 @@
 #include <c10/util/TypeList.h>
 #include <c10/util/Optional.h>
 
-#include <iostream>
-#include <memory>
-#include <type_traits>
 #include <array>
+#include <memory>
+#include <ostream>
+#include <sstream>
+#include <type_traits>
 
 struct ClassType;
 namespace torch {

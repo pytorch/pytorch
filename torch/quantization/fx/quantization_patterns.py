@@ -1389,18 +1389,6 @@ class FixedQParamsOpQuantizeHandler(QuantizeHandler):
         super().__init__(node, modules)
         self.node = node
 
-    def should_insert_observer_for_output(
-        self,
-        qconfig: Any,
-        model_is_training: bool,
-    ) -> bool:
-        if model_is_training:
-            # in QAT, always insert fake_quants
-            return True
-        else:
-            # in PTQ, only insert observers when emulating fp16
-            return activation_dtype(qconfig) == torch.float16
-
     def should_mark_output_quantized_from_input_quantized_status(
         self,
         qconfig: QConfigAny
@@ -1425,14 +1413,32 @@ class FixedQParamsOpQuantizeHandler(QuantizeHandler):
                 load_arg: Callable,
                 is_reference: bool = False,
                 convert_custom_config_dict: Dict[str, Any] = None) -> Node:
-        dtypes = get_qconfig_dtypes(qconfig)
-        if dtypes == (torch.float16, torch.float16, None):
-            op_out = quantized_graph.node_copy(node, load_arg(quantized=torch.float))
-            return quantized_graph.create_node(
-                "call_method", "to", (op_out, torch.float16,), {}
-            )
+        if not is_reference:
+            dtypes = get_qconfig_dtypes(qconfig)
+            if dtypes == (torch.float16, torch.float16, None):
+                op_out = quantized_graph.node_copy(node, load_arg(quantized=torch.float))
+                return quantized_graph.create_node(
+                    "call_method", "to", (op_out, torch.float16,), {}
+                )
+            else:
+                return quantized_graph.node_copy(node, load_arg(quantized=None))
         else:
-            return quantized_graph.node_copy(node, load_arg(quantized=None))
+            act_dtype = activation_dtype(qconfig)
+            if act_dtype == torch.float:
+                op_out = quantized_graph.node_copy(node, load_arg(quantized=torch.float))
+                return op_out
+            else:
+                activation_post_process = \
+                    self._maybe_get_last_node_only_observer(modules)
+                assert activation_post_process is not None
+                # make sure the input is quantized to act_dtype
+                load_arg(quantized={0: act_dtype})(node.args)
+                args = load_arg(quantized=torch.float)(node.args)
+                kwargs = load_arg(quantized=torch.float)(node.kwargs)
+                op_out = quantized_graph.node_copy(node, load_arg(quantized=torch.float))
+                return quantize_node(
+                    op_out, activation_post_process,
+                    node, modules, quantized_graph, node_name_to_scope, is_input=False)
 
 @register_quant_pattern(torch.nn.AdaptiveAvgPool1d)
 @register_quant_pattern(torch.nn.AdaptiveAvgPool2d)

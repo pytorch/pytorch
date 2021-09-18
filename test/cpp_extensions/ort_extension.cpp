@@ -10,10 +10,10 @@ Tensor get_tensor(caffe2::TypeMeta dtype, IntArrayRef size) {
       Storage(
           Storage::use_byte_size_t(),
           0,
-          at::DataPtr(nullptr, Device(DeviceType::MSNPU, 0)),
+          at::DataPtr(nullptr, Device(DeviceType::ORT, 0)),
           nullptr,
           false),
-      DispatchKey::MSNPU,
+      DispatchKey::ORT,
       dtype);
   // This is a hack to workaround the shape checks in _convolution.
   tensor_impl->set_sizes_contiguous(size);
@@ -52,7 +52,7 @@ std::tuple<Tensor,Tensor,Tensor> fake_convolution_backward(
             get_tensor(input.dtype(), {}));
 }
 
-TORCH_LIBRARY_IMPL(aten, MSNPU, m) {
+TORCH_LIBRARY_IMPL(aten, ORT, m) {
   m.impl("empty.memory_format",                empty_override);
   m.impl("add.out",                            add_out_override);
   m.impl("convolution_overrideable",           fake_convolution);
@@ -61,34 +61,34 @@ TORCH_LIBRARY_IMPL(aten, MSNPU, m) {
 
 // TODO: Extend this to exercise multi-device setting.  In that case,
 // we need to add a thread local variable to track the current device.
-struct MSNPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
-  static constexpr DeviceType static_type = DeviceType::MSNPU;
-  MSNPUGuardImpl() {}
-  MSNPUGuardImpl(DeviceType t) {
-    AT_ASSERT(t == DeviceType::MSNPU);
+struct ORTGuardImpl final : public c10::impl::DeviceGuardImplInterface {
+  static constexpr DeviceType static_type = DeviceType::ORT;
+  ORTGuardImpl() {}
+  ORTGuardImpl(DeviceType t) {
+    AT_ASSERT(t == DeviceType::ORT);
   }
   DeviceType type() const override {
-    return DeviceType::MSNPU;
+    return DeviceType::ORT;
   }
   Device exchangeDevice(Device d) const override {
-    AT_ASSERT(d.type() == DeviceType::MSNPU);
+    AT_ASSERT(d.type() == DeviceType::ORT);
     AT_ASSERT(d.index() == 0);
     return d;
   }
   Device getDevice() const override {
-    return Device(DeviceType::MSNPU, 0);
+    return Device(DeviceType::ORT, 0);
   }
   void setDevice(Device d) const override {
-    AT_ASSERT(d.type() == DeviceType::MSNPU);
+    AT_ASSERT(d.type() == DeviceType::ORT);
     AT_ASSERT(d.index() == 0);
   }
   void uncheckedSetDevice(Device d) const noexcept override {
   }
   Stream getStream(Device d) const noexcept override {
-    return Stream(Stream::DEFAULT, Device(DeviceType::MSNPU, 0));
+    return Stream(Stream::DEFAULT, Device(DeviceType::ORT, 0));
   }
   Stream exchangeStream(Stream s) const noexcept override {
-    return Stream(Stream::DEFAULT, Device(DeviceType::MSNPU, 0));
+    return Stream(Stream::DEFAULT, Device(DeviceType::ORT, 0));
   }
   DeviceIndex deviceCount() const noexcept override {
     return 1;
@@ -99,23 +99,23 @@ struct MSNPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     const Stream& stream,
     const DeviceIndex device_index,
     const EventFlag flag) const override {
-    TORCH_CHECK(false, "MSNPU backend doesn't support events.");
+    TORCH_CHECK(false, "ORT backend doesn't support events.");
   }
   void block(
     void* event,
     const Stream& stream) const override {
-    TORCH_CHECK(false, "MSNPU backend doesn't support events.");
+    TORCH_CHECK(false, "ORT backend doesn't support events.");
   }
   bool queryEvent(void* event) const override {
-    TORCH_CHECK(false, "MSNPU backend doesn't support events.");
+    TORCH_CHECK(false, "ORT backend doesn't support events.");
   }
   void destroyEvent(
     void* event,
     const DeviceIndex device_index) const noexcept override { }
 };
 
-constexpr DeviceType MSNPUGuardImpl::static_type;
-C10_REGISTER_GUARD_IMPL(MSNPU, MSNPUGuardImpl);
+constexpr DeviceType ORTGuardImpl::static_type;
+C10_REGISTER_GUARD_IMPL(ORT, ORTGuardImpl);
 
 int get_test_int() {
   return test_int;

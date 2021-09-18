@@ -44,7 +44,7 @@ class TestTensorExprPyBind(JitTestCase):
             tB = torch.randn(n)
             tC = torch.empty(n)
             cg.call([tA, tB, tC])
-            torch.testing.assert_allclose(tA + tB, tC)
+            torch.testing.assert_close(tA + tB, tC)
 
     def test_call_raw(self):
         with kernel_arena_scope():
@@ -55,7 +55,7 @@ class TestTensorExprPyBind(JitTestCase):
             tB = torch.randn(n, dtype=torch.float64)
             tC = torch.empty(n, dtype=torch.float64)
             cg.call_raw([tA.data_ptr(), tB.data_ptr(), tC.data_ptr()])
-            torch.testing.assert_allclose(tA + tB, tC)
+            torch.testing.assert_close(tA + tB, tC)
 
     def test_external_calls(self):
         with kernel_arena_scope():
@@ -77,7 +77,7 @@ class TestTensorExprPyBind(JitTestCase):
             tB = torch.ones(4, 1)
             tC = torch.empty(1, 1)
             codegen.call([tA, tB, tC])
-            torch.testing.assert_allclose(torch.matmul(tA, tB), tC)
+            torch.testing.assert_close(torch.matmul(tA, tB), tC)
 
     def test_dynamic_shape(self):
         with kernel_arena_scope():
@@ -103,7 +103,7 @@ class TestTensorExprPyBind(JitTestCase):
                 tB = torch.randn(n, dtype=torch.double)
                 tC = torch.empty(n, dtype=torch.double)
                 cg.call([tA, tB, tC, n])
-                torch.testing.assert_allclose(tA - tB, tC)
+                torch.testing.assert_close(tA - tB, tC)
 
             test_with_shape(8)
             test_with_shape(31)

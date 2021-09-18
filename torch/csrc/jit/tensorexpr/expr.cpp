@@ -360,7 +360,7 @@ ExprHandle Buf::make(
     const std::vector<ExprHandle>& dims,
     Dtype dtype) {
   return ExprHandle(
-      new Buf(name_hint, ExprHandleVectorToExprVector(dims), dtype));
+      alloc<Buf>(name_hint, ExprHandleVectorToExprVector(dims), dtype));
 }
 
 ExprHandle Buf::make(const std::vector<ExprHandle>& dims, Dtype dtype) {

@@ -834,6 +834,17 @@ PyObject *THPVariable_is_mlc(THPVariable *self, void *unused)
   END_HANDLE_TH_ERRORS
 }
 
+PyObject *THPVariable_is_ort(THPVariable *self, void *unused)
+{
+  HANDLE_TH_ERRORS
+  if (check_has_torch_function((PyObject *)self)) {
+    return handle_torch_function_getter(self, "is_ort");
+  }
+  auto& self_ = THPVariable_Unpack(self);
+  return torch::autograd::utils::wrap(self_.is_ort());
+  END_HANDLE_TH_ERRORS
+}
+
 PyObject *THPVariable_is_vulkan(THPVariable *self, void *unused)
 {
   HANDLE_TH_ERRORS
@@ -980,6 +991,7 @@ static struct PyGetSetDef THPVariable_properties[] = {
   {"is_sparse_csr", (getter)THPVariable_is_sparse_csr, nullptr, nullptr, nullptr},
   {"is_mkldnn", (getter)THPVariable_is_mkldnn, nullptr, nullptr, nullptr},
   {"is_mlc", (getter)THPVariable_is_mlc, nullptr, nullptr, nullptr},
+  {"is_ort", (getter)THPVariable_is_ort, nullptr, nullptr, nullptr},
   {"is_vulkan", (getter)THPVariable_is_vulkan, nullptr, nullptr, nullptr},
   {"is_complex", (getter)THPVariable_is_complex, nullptr, nullptr, nullptr},
   {"is_quantized", (getter)THPVariable_is_quantized, nullptr, nullptr, nullptr},
@@ -1562,7 +1574,7 @@ void concrete_dispatch_fn(const c10::impl::PyInterpreter*, const c10::OperatorHa
     if (ivalue.isTensor()) {
       const auto& tensor = ivalue.toTensor();
       if (isPythonTensor(tensor)) {
-        overloaded_args.emplace_back(py::cast(tensor));
+        append_overloaded_arg(&overloaded_args, py::cast(tensor).ptr());
       }
     } else if (ivalue.isList()) {
       const auto& list = ivalue.toListRef();
@@ -1571,7 +1583,7 @@ void concrete_dispatch_fn(const c10::impl::PyInterpreter*, const c10::OperatorHa
         if (nv.isTensor()) {
           const auto& tensor = nv.toTensor();
           if (isPythonTensor(tensor)) {
-            overloaded_args.emplace_back(py::cast(tensor));
+            append_overloaded_arg(&overloaded_args, py::cast(tensor).ptr());
           }
         }
       }
@@ -1620,7 +1632,8 @@ c10::intrusive_ptr<TensorImpl> concrete_detach_fn(const c10::impl::PyInterpreter
   // TODO: fix the constness of target
   Tensor self_t = Tensor(c10::intrusive_ptr<c10::TensorImpl, c10::UndefinedTensorImpl>::unsafe_reclaim_from_nonowning(const_cast<c10::TensorImpl*>(self)));
   auto self_p = py::reinterpret_steal<py::object>(THPVariable_Wrap(self_t));
-  overloaded_args.emplace_back(self_p);
+  TORCH_INTERNAL_ASSERT(isPythonTensor(self_t));
+  append_overloaded_arg(&overloaded_args, self_p.ptr());
   auto args = py::reinterpret_steal<py::object>(PyTuple_New(1));
   PyTuple_SET_ITEM(args.ptr(), 0, self_p.release().ptr());
 

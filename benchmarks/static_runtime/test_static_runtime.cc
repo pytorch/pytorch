@@ -589,6 +589,17 @@ TEST(StaticRuntime, IndividualOps_to) {
   test_to(at::ScalarType::Half, false, true, c10::MemoryFormat::ChannelsLast);
 }
 
+TEST(StaticRuntime, IndividualOps_Detach) {
+  auto a = at::randn({4, 3, 1, 2});
+  auto b = at::randn({3, 2, 2});
+  std::vector<IValue> args{a};
+  std::vector<IValue> args2{b};
+  testStaticRuntime(detach_script_0, args);
+  testStaticRuntime(detach_script_0, args, args2);
+  testStaticRuntime(detach_script_1, args);
+  testStaticRuntime(detach_script_1, args, args2);
+}
+
 TEST(StaticRuntime, IndividualOps_Full) {
   auto dtype = at::ScalarType::Int;
   auto cpu = at::Device(DeviceType::CPU);
@@ -1043,19 +1054,30 @@ TEST(StaticRuntime, IndividualOps_Argmin) {
   testStaticRuntime(argmin_with_keep_dim_script, args_a, args_b);
 }
 
-TEST(StaticRuntime, IndividualOps_GetItem) {
+TEST(StaticRuntime, IndividualOps_GetItem_Dict) {
   int int_key = 0;
   std::string str_key = "str";
 
   // No need to test these multiple times, args are not tensors
-  testStaticRuntime(getitem_int_script, {int_key});
-  testStaticRuntime(getitem_str_script, {str_key});
+  testStaticRuntime(getitem_dict_int_script, {int_key});
+  testStaticRuntime(getitem_dict_str_script, {str_key});
 
   auto a = torch::tensor({1});
   auto b = torch::tensor({1, 1});
 
-  testStaticRuntime(getitem_tensor_script, {a});
-  testStaticRuntime(getitem_tensor_script, {a}, {b});
+  testStaticRuntime(getitem_dict_tensor_script, {a});
+  testStaticRuntime(getitem_dict_tensor_script, {a}, {b});
+}
+
+TEST(StaticRuntime, IndividualOps_GetItem_List) {
+  testStaticRuntime(getitem_list_int_script, {1});
+  testStaticRuntime(getitem_list_int_script, {-1});
+
+  auto a = torch::tensor({1});
+  auto b = torch::tensor({1, 1});
+
+  testStaticRuntime(getitem_list_tensor_script, {a, 1});
+  testStaticRuntime(getitem_list_tensor_script, {a, 1}, {b, -1});
 }
 
 TEST(StaticRuntime, IndividualOps_Transpose) {
@@ -1137,4 +1159,16 @@ TEST(StaticRuntime, InvidualOps_TupleUnpack) {
 
   testStaticRuntime(three_tuple_unpack_script, {three_tup});
   testStaticRuntime(three_tuple_unpack_script, {three_tup}, {three_tup_large});
+}
+
+TEST(StaticRuntime, IndividualOps_Append) {
+  std::vector<IValue> args_int{1};
+
+  testStaticRuntime(append_int_script, args_int);
+
+  std::vector<IValue> args_tensor{at::randn({1})};
+  std::vector<IValue> args_tensor_large{at::randn({2, 2})};
+
+  testStaticRuntime(append_tensor_script, args_tensor);
+  testStaticRuntime(append_tensor_script, args_tensor, args_tensor_large);
 }

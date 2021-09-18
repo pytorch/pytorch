@@ -1455,7 +1455,12 @@ Tensor matmul(
     }
 
     // fold the batch into the first dimension
-    Tensor t1 = tensor1.expect_contiguous()->view({-1, size1[size1.size() - 1]});
+    // Why not tensor1.view(-1, size1[size1.size() -1])?
+    // If the last dim is 0, then view(-1, 0) won't work because the -1 becomes ambiguous.
+    // This can happen in e.g. [3, 5, 0] @ [0, 0].
+    // So we manually compute the folding as a result.
+    const auto dim1_size = c10::multiply_integers(size1.begin(), size1.end() - 1);
+    auto t1 = tensor1.expect_contiguous()->view({dim1_size, size1[size1.size() - 1]});
     Tensor output = has_out ? at::_unsafe_view(at::mm_out(out, t1, t2), output_size)
                             : at::_unsafe_view(t1.mm(t2), output_size);
     return has_out ? out.set_(output) : output;
@@ -2646,12 +2651,9 @@ Tensor linalg_tensorinv(const Tensor& self, int64_t ind) {
   shape_ind_end.insert(shape_ind_end.cend(), shape_start_ind.cbegin(), shape_start_ind.cend());
 
   // If the reshaped self is not invertible catch this error
-  Tensor result;
-  try {
-    result = at::inverse(self.reshape({prod_ind_end, prod_ind_end}));
-  } catch (...) {
-    TORCH_CHECK(false, "Failed to invert the input tensor, because it is singular.");
-  }
+  Tensor result, info;
+  std::tie(result, info) = at::linalg_inv_ex(self.reshape({prod_ind_end, prod_ind_end}), /*check_errors=*/false);
+  TORCH_CHECK(info.item<int64_t>() == 0, "Failed to invert the input tensor, because it is singular.");
 
   return result.reshape(shape_ind_end);
 }

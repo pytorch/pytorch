@@ -59,7 +59,7 @@ for op in unary_ops:
         traced(x)
 
     # Validate result.
-    torch.testing.assert_allclose(op(x), traced(x))
+    torch.testing.assert_close(op(x), traced(x))
 
     # Benchmark.
     bench_iters = 100
@@ -94,7 +94,7 @@ def test_batch_norm():
             traced(x, y, z)
 
         # Validate result.
-        torch.testing.assert_allclose(op(x, y, z), traced(x, y, z))
+        torch.testing.assert_close(op(x, y, z), traced(x, y, z))
 
         # Benchmark.
         bench_iters = 100

@@ -229,6 +229,10 @@ class TRTInterpreter(torch.fx.Interpreter):
         self.input_specs = input_specs
         self.input_specs_iter = 0
         self.validate_input_specs()
+        missing_ops = self.validate_conversion
+        if not missing_ops:
+            warnings.warn("Interpretation may fail due to missing operations \n"
+                          + "\n".join(f"{i}" for i in missing_ops))
         self._cur_node_name: Optional[str] = None
         self._input_names: List[str] = []
         self._output_names: List[str] = []
@@ -289,6 +293,20 @@ class TRTInterpreter(torch.fx.Interpreter):
                 assert (
                     len(shape_ranges) == 0
                 ), "shape_ranges are provided for input that doesn't have dynamic dim."
+
+    def validate_conversion(self):
+        missing_converter = set()
+
+        for node in self.module.graph.nodes:
+            if node.op in ["call_function", "call_method"] and not CONVERTERS.get(node.target):
+                missing_converter.add(f"{node.op} {node.target}")
+            elif node.op == "call_module":
+                submod = self.fetch_attr(node.target)
+                submod_type = getattr(submod, "_base_class_origin", type(submod))
+                if not CONVERTERS.get(submod_type):
+                    missing_converter.add(f"{node.op} {submod_type}")
+
+        return missing_converter
 
     def run(
         self,
@@ -356,12 +374,11 @@ class TRTInterpreter(torch.fx.Interpreter):
     def call_module(self, target, args, kwargs):
         assert isinstance(target, str)
         submod = self.fetch_attr(target)
-        converter = CONVERTERS.get(type(submod))
+        submod_type = getattr(submod, "_base_class_origin", type(submod))
+        converter = CONVERTERS.get(submod_type)
 
         if not converter:
-            raise RuntimeError(
-                f"Conversion of module of type {type(submod)} not currently supported!"
-            )
+            raise RuntimeError(f'Conversion of module of type {submod_type} not currently supported!')
 
         return converter(self.network, submod, args, kwargs, self._cur_node_name)
 

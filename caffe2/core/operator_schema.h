@@ -460,21 +460,7 @@ class TORCH_API OpSchema {
 class TORCH_API OpSchemaRegistry {
  public:
   static OpSchema&
-  NewSchema(const string& key, const string& file, const int line) {
-    auto& m = map();
-    auto it = m.find(key);
-    if (it != m.end()) {
-      const auto& schema = it->second;
-      std::ios_base::Init init;
-      std::cerr << "Trying to register schema with name " << key
-                << " from file " << file << " line " << line
-                << ", but it is already registered from file " << schema.file()
-                << " line " << schema.line();
-      abort();
-    }
-    m.emplace(key, OpSchema(key, file, line));
-    return m[key];
-  }
+  NewSchema(const string& key, const string& file, const int line);
 
   static const OpSchema* Schema(const string& key) {
     auto& m = map();

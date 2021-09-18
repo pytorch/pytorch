@@ -440,8 +440,8 @@ class TestOptim(TestCase):
             )
             self._test_basic_cases(
                 lambda weight, bias: optimizer([weight, bias], lr=1e-3, amsgrad=True),
-                [lambda opt: ExponentialLR(opt, gamma=0.9),
-                 lambda opt: WarmUpLR(opt, warmup_factor=0.4, warmup_iters=4, warmup_method="constant")]
+                [lambda opt: WarmUpLR(opt, warmup_factor=0.4, warmup_iters=4, warmup_method="constant"),
+                 lambda opt: ExponentialLR(opt, gamma=0.9)]
             )
             self._test_basic_cases(
                 lambda weight, bias: optimizer([weight, bias], lr=1e-3, amsgrad=True),
@@ -1294,8 +1294,8 @@ class TestLRScheduler(TestCase):
         for i in range(iters):
             single_targets[i] *= factor + i / iters * (1 - factor)
         targets = [single_targets, [x * epochs for x in single_targets]]
-        schedulers[0] = ExponentialLR(self.opt, gamma=0.9)
-        schedulers[1] = WarmUpLR(self.opt, warmup_factor=factor, warmup_iters=iters, warmup_method="linear")
+        schedulers[0] = WarmUpLR(self.opt, warmup_factor=factor, warmup_iters=iters, warmup_method="linear")
+        schedulers[1] = ExponentialLR(self.opt, gamma=0.9)
         self._test(schedulers, targets, epochs)
 
     def test_compound_step_and_constant_warmup(self):
@@ -1361,8 +1361,8 @@ class TestLRScheduler(TestCase):
         for i in range(iters):
             single_targets[i] *= factor + i / iters * (1 - factor)
         targets = [single_targets, [x * epochs for x in single_targets]]
-        schedulers[0] = CosineAnnealingLR(self.opt, T_max=epochs, eta_min=eta_min)
-        schedulers[1] = WarmUpLR(self.opt, warmup_factor=factor, warmup_iters=iters, warmup_method="linear")
+        schedulers[0] = WarmUpLR(self.opt, warmup_factor=factor, warmup_iters=iters, warmup_method="linear")
+        schedulers[1] = CosineAnnealingLR(self.opt, T_max=epochs, eta_min=eta_min)
         self._test(schedulers, targets, epochs)
 
     def test_compound_cosanneal_and_exp_lr(self):

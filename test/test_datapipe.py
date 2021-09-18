@@ -110,14 +110,54 @@ def create_temp_dir_and_files():
 
 
 class TestDataChunk(TestCase):
+    def setUp(self):
+        self.elements = list(range(10))
+        random.shuffle(self.elements)
+        self.chunk: DataChunk[int] = DataChunk(self.elements)
+
+    def test_getitem(self):
+        for i in range(10):
+            self.assertEqual(self.elements[i], self.chunk[i])
+
+    def test_iter(self):
+        for ele, dc in zip(self.elements, iter(self.chunk)):
+            self.assertEqual(ele, dc)
+
+    def test_len(self):
+        self.assertEqual(len(self.elements), len(self.chunk))
+
     def test_as_string(self):
+        self.assertEqual(str(self.chunk), str(self.elements))
+
+        batch = [self.elements] * 3
+        chunks: List[DataChunk[int]] = [DataChunk(self.elements)] * 3
+        self.assertEqual(str(batch), str(chunks))
+
+    def test_sort(self):
+        chunk: DataChunk[int] = DataChunk(self.elements)
+        chunk.sort()
+        self.assertTrue(isinstance(chunk, DataChunk))
+        for i, d in enumerate(chunk):
+            self.assertEqual(i, d)
+
+    def test_reverse(self):
+        chunk: DataChunk[int] = DataChunk(self.elements)
+        chunk.reverse()
+        self.assertTrue(isinstance(chunk, DataChunk))
+        for i in range(10):
+            self.assertEqual(chunk[i], self.elements[9 - i])
+
+    def test_random_shuffle(self):
         elements = list(range(10))
         chunk: DataChunk[int] = DataChunk(elements)
-        self.assertEqual(str(chunk), str(elements))
 
-        batch = [elements] * 3
-        chunks: List[DataChunk] = [DataChunk(elements)] * 3
-        self.assertEqual(str(chunk), str(elements))
+        rng = random.Random(0)
+        rng.shuffle(chunk)
+
+        rng = random.Random(0)
+        rng.shuffle(elements)
+
+        self.assertEqual(chunk, elements)
 
 
 class TestIterableDataPipeBasic(TestCase):

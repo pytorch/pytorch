@@ -218,6 +218,9 @@ void index_put_with_sort_kernel(Tensor & self, const c10::List<c10::optional<Ten
   std::tie(linearIndex, src, nElemBefore, strideBefore, sliceSize, inversePerm) = makeLinearIndex(self, indices, !unsafe);
   int64_t num_indices = linearIndex.numel();
 
+  TORCH_CHECK(num_indices <= std::numeric_limits<int>::max(),
+    "index_put of tensors larger than INT_MAX is not supported yet in pytorch");
+
   if (num_indices > 0 && sliceSize > 0) {
       const bool permuted = !src.is_contiguous();
       auto src_ = permuted ? src.contiguous() : src;

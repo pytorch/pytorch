@@ -942,7 +942,7 @@ TEST(VulkanAPITest, hardshrink) {
   }
 
   for (const auto lambd_value : {-4.2, -1.0, -0.42, 0.0, 0.42, 1.0, 4.2, 42.42}) {
-    const auto in_cpu = at::rand({17, 197, 302, 5}, at::device(at::kCPU).dtype(at::kFloat));
+    const auto in_cpu = (at::rand({17, 197, 302, 5}, at::device(at::kCPU).dtype(at::kFloat)) - 0.5) * 20;  // between -10 and +10
     const auto in_vulkan = in_cpu.vulkan();
 
     const auto out_cpu = at::hardshrink(in_cpu, lambd_value);
@@ -964,7 +964,7 @@ TEST(VulkanAPITest, hardshrink_) {
   }
 
   for (const auto lambd_value : {-4.2, -1.0, -0.42, 0.0, 0.42, 1.0, 4.2, 42.42}) {
-    const auto cpu = at::rand({17, 197, 302, 5}, at::device(at::kCPU).dtype(at::kFloat));
+    const auto cpu = (at::rand({17, 197, 302, 5}, at::device(at::kCPU).dtype(at::kFloat)) - 0.5) * 20;  // between -10 and +10
     const auto vulkan = cpu.vulkan();
 
     cpu.hardshrink(lambd_value);
@@ -1395,6 +1395,29 @@ TEST(VulkanAPITest, softmax) {
 
     const auto in_vulkan = in_cpu.vulkan();
     const auto out_vulkan = at::softmax(in_vulkan, 1);
+
+    const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+    if (!check) {
+      showRtol(out_cpu, out_vulkan.cpu());
+    }
+
+    ASSERT_TRUE(check);
+  }
+}
+
+TEST(VulkanAPITest, log_softmax) {
+  at::Tensor test_in[] = {
+    at::rand({1, 196, 302, 5}, at::TensorOptions(at::kCPU).dtype(at::kFloat)),
+    at::rand({1, 197, 302, 5}, at::TensorOptions(at::kCPU).dtype(at::kFloat)),
+    at::rand({1, 198, 302, 5}, at::TensorOptions(at::kCPU).dtype(at::kFloat)),
+    at::rand({1, 199, 302, 5}, at::TensorOptions(at::kCPU).dtype(at::kFloat)),
+  };
+
+  for (auto in_cpu : test_in) {
+    const auto out_cpu = at::softmax(in_cpu, 1);
+
+    const auto in_vulkan = in_cpu.vulkan();
+    const auto out_vulkan = at::log_softmax(in_vulkan, 1);
 
     const auto check = almostEqual(out_cpu, out_vulkan.cpu());
     if (!check) {

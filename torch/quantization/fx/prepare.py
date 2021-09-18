@@ -15,7 +15,7 @@ from torch.fx.graph import (
 )
 from torch.fx.node import Argument
 
-from ..qconfig import QConfigAny
+from ..qconfig import QConfigAny, qconfig_equals
 from .qconfig_utils import (
     convert_dict_to_ordered_dict,
     generate_qconfig_map,
@@ -163,7 +163,8 @@ def update_qconfig_for_qat(
     all_qat_mappings = get_combined_dict(
         get_default_qat_module_mappings(), additional_qat_module_mapping)
     object_type_dict = qconfig_dict.get("object_type", None)
-    for k, v in object_type_dict.items():
+    new_object_type_dict = object_type_dict.copy()
+    for k, v in new_object_type_dict.items():
         if k in all_qat_mappings:
             object_type_dict[all_qat_mappings[k]] = v
     return qconfig_dict
@@ -194,7 +195,7 @@ def update_qconfig_for_fusion(
                     # Raise an error if the modules in the fused module have
                     # different qconfigs specified in the qconfig_dict
                     for op in ops:
-                        if object_type_dict.get(op, None) != fused_qconfig:
+                        if not qconfig_equals(object_type_dict.get(op, None), fused_qconfig):
                             raise LookupError("During fusion, we need to specify the same " +
                                               f"qconfigs for both modules in {module_type}.")
 
@@ -323,7 +324,7 @@ def maybe_insert_input_observer_for_arg_or_kwarg(
                 graph, node_name_to_target_dtype,
                 qhandler, prepare_custom_config_dict)
             new_arg_to_return.append(new_inner_arg)
-        return new_arg_to_return
+        return type(arg)(new_arg_to_return)
 
     if not isinstance(arg, Node):
         return arg
