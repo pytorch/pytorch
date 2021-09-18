@@ -7995,7 +7995,7 @@ class DistributedTest:
                     broadcast_buffers=False
                 )
                 inp = torch.randn(2, 10, device=rank)
-                for i in range(6):
+                for i in range(2):
                     loss_hook = model_ddp(inp).sum()
                     # Since buffer reduction is done pre-forward, simulate it for
                     # no hook case here.
@@ -8050,7 +8050,7 @@ class DistributedTest:
                 device_ids=[self.rank],
             )
             inp = torch.randn(2, 10, device=rank)
-            for i in range(6):
+            for i in range(2):
                 loss_hook = model_ddp(inp).sum()
                 loss_no_hook = model_ddp_no_hook(inp).sum()
                 self._verify_buffers_equal(model_ddp, model_ddp_no_hook)
