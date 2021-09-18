@@ -86,16 +86,16 @@ def export(model, args, f, export_params=True, verbose=False, training=None,
             operator_export_type = OperatorExportTypes.ONNX
 
     if enable_onnx_checker is not None:
-        warnings.warn("`enable_onnx_checker' is deprecated and ignored. It will be removed in "
-                      "the next PyTorch release. To proceed despite ONNX checker failures, you "
-                      "can catch torch.onnx.ONNXCheckerError.")
+        warnings.warn("'enable_onnx_checker' is deprecated and ignored. It will be removed in "
+                      "the next PyTorch release. To proceed despite ONNX checker failures, "
+                      "catch torch.onnx.ONNXCheckerError.")
     if _retain_param_name is not None:
-        warnings.warn("`_retain_param_name' is deprecated and ignored. Will be removed in "
-                      "next PyTorch release. The code now will work as it is True to keep the original "
-                      "parameter names in the final ONNX graph.")
+        warnings.warn("'_retain_param_name' is deprecated and ignored. "
+                      "It will be removed in the next PyTorch release.")
     if strip_doc_string is not None:
-        warnings.warn("`strip_doc_string' is deprecated and ignored. Will be removed in "
-                      "next PyTorch release. It's combined with `verbose' argument now. ")
+        warnings.warn("`strip_doc_string' is deprecated and ignored. It will be removed in "
+                      "the next PyTorch release. The behavior is now controlled by the "
+                      "'verbose' arg")
 
     _export(model, args, f, export_params, verbose, training, input_names, output_names,
             operator_export_type=operator_export_type, opset_version=opset_version,
@@ -542,9 +542,14 @@ def _model_to_graph(model, args, verbose=False,
 def export_to_pretty_string(model, args, f, export_params=True, verbose=False, training=None,
                             input_names=None, output_names=None, operator_export_type=OperatorExportTypes.ONNX,
                             export_type=ExportTypes.PROTOBUF_FILE, example_outputs=None,
-                            google_printer=False, opset_version=None, _retain_param_name=True,
+                            google_printer=False, opset_version=None, _retain_param_name=None,
                             keep_initializers_as_inputs=None, custom_opsets=None, add_node_names=True,
                             do_constant_folding=True, dynamic_axes=None):
+    if f is not None:
+        warnings.warn("'f' is deprecated and ignored. It will be removed in the next PyTorch release.")
+    if _retain_param_name is not None:
+        warnings.warn("'_retain_param_name' is deprecated and ignored. "
+                      "It will be removed in the next PyTorch release.")
     return _export_to_pretty_string(model, args, f, export_params, verbose, training,
                                     input_names, output_names, operator_export_type,
                                     export_type, example_outputs, google_printer,
