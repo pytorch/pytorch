@@ -438,9 +438,13 @@ void getModuleInterfaceDefs(
   }
 }
 
-std::unordered_map<std::string, Function*> getModuleInterfaceDefs(const Module& module, BackendDebugInfoRecorder& recorder, TypeNameUniquer& uniquer) {
+std::unordered_map<std::string, Function*> getModuleInterfaceDefs(
+    const Module& module,
+    BackendDebugInfoRecorder& recorder,
+    TypeNameUniquer& uniquer) {
   std::unordered_map<std::string, Function*> ret;
-  getModuleInterfaceDefs(module, getModuleInterfaces(module), recorder, uniquer, ret);
+  getModuleInterfaceDefs(
+      module, getModuleInterfaces(module), recorder, uniquer, ret);
   return ret;
 }
 } // namespace
@@ -466,7 +470,12 @@ void moduleMethodsTuple(
       interface_defs.erase(it);
     }
     auto func_tuple = getFunctionTuple(
-        module, method.function(), debug_info_recorder, qn, type_name_uniquer_, isInterface);
+        module,
+        method.function(),
+        debug_info_recorder,
+        qn,
+        type_name_uniquer_,
+        isInterface);
     elements.push_back(func_tuple.first);
     qn_cache.emplace(qn);
     debug_info_elements.push_back(func_tuple.second);
@@ -695,7 +704,8 @@ void ScriptModuleSerializer::writeByteCode(
   // Always save debug handles
   debug_info_elements.emplace_back(static_cast<int64_t>(version_to_write));
 
-  auto interface_defs = getModuleInterfaceDefs(module, debug_info_recorder, type_name_uniquer_);
+  auto interface_defs =
+      getModuleInterfaceDefs(module, debug_info_recorder, type_name_uniquer_);
 
   moduleMethodsTuple(
       module,
@@ -901,7 +911,8 @@ void export_opnames(const script::Module& m, std::set<std::string>& opnames) {
   BackendDebugInfoRecorder dummy;
   TypeNameUniquer dummy_uniquer = TypeNameUniquer();
   std::unordered_map<std::string, Function*> dummy_i;
-  moduleMethodsTuple(m, elements, debug_info_elements, dummy, dummy_uniquer, dummy_i);
+  moduleMethodsTuple(
+      m, elements, debug_info_elements, dummy, dummy_uniquer, dummy_i);
   for (const auto& element : elements) {
     auto table = element.toTuple()->elements()[1];
     auto row =
