@@ -4,7 +4,7 @@ import torch
 
 from torch.cuda.amp import autocast
 
-from test_pytorch_common import skipIfUnsupportedMinOpsetVersion
+from test_pytorch_common import disableScriptTest, skipIfUnsupportedMinOpsetVersion
 from test_pytorch_common import skipIfNoCuda
 
 from test_pytorch_onnx_onnxruntime import TestONNXRuntime
@@ -27,21 +27,24 @@ class TestONNXRuntime_cuda(unittest.TestCase):
 
     @skipIfUnsupportedMinOpsetVersion(9)
     @skipIfNoCuda
+    @disableScriptTest()
     def test_layer_norm_fp16(self):
         class LayerNormModel(torch.nn.Module):
             def __init__(self):
                 super(LayerNormModel, self).__init__()
                 self.layer_norm = torch.nn.LayerNorm([10, 10])
 
+            @autocast()
             def forward(self, x):
                 return self.layer_norm(x)
 
         x = torch.randn(20, 5, 10, 10, requires_grad=True, dtype=torch.float16, device=torch.device("cuda"))
-        self.run_test(LayerNormModel(), x, rtol=1e-3, atol=1e-5)
+        self.run_test(LayerNormModel().cuda(), x, rtol=1e-3, atol=1e-5)
 
 
     @skipIfUnsupportedMinOpsetVersion(12)
     @skipIfNoCuda
+    @disableScriptTest()
     def test_softmaxCrossEntropy_fusion_fp16(self):
         class FusionModel(torch.nn.Module):
             def __init__(self):
