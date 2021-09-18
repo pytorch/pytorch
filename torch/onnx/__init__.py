@@ -103,17 +103,11 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
         export_params (bool, default True): if True, all parameters will
             be exported. Set this to False if you want to export an untrained model.
             In this case, the exported model will first take all of its parameters
-            as arguments, with the ordering as specified by ``model.state_dict().values()``.
-            This helps in stripping parameters from the model which is useful for training.
-            Besides, if this is False, any optimization that may adjust graph inputs will
-            be skipped - for example, Conv and BatchNorm fusion.
+            as arguments, with the ordering as specified by ``model.state_dict().values()``
         verbose (bool, default False): if True, prints a description of the
             model being exported to stdout.
         training (enum, default TrainingMode.EVAL):
-            * ``TrainingMode.EVAL``: export the model in inference mode. In this case, optimizations
-              (e.g., fusing Conv and BatchNorm ops) may adjust graph inputs by modifying model params
-              and model param names. Such adjustment could be skipped by setting export_params = False
-              or keep_initializers_as_inputs = True.
+            * ``TrainingMode.EVAL``: export the model in inference mode.
             * ``TrainingMode.PRESERVE``: export the model in inference mode if model.training is
               False and in training mode if model.training is True.
             * ``TrainingMode.TRAINING``: export the model in training mode. Disables optimizations
@@ -190,8 +184,6 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
         do_constant_folding (bool, default False): Apply the constant-folding optimization.
             Constant-folding will replace some of the ops that have all constant inputs
             with pre-computed constant nodes.
-            Since this optimization adjusts model initializers, it will be disabled if
-            export_params = False or keep_initializers_as_inputs = True.
         example_outputs (T or a tuple of T, where T is Tensor or convertible to Tensor, default None):
             Must be provided when exporting a ScriptModule or ScriptFunction, ignored otherwise.
             Used to determine the type and shape of the outputs without tracing the execution of
@@ -273,13 +265,9 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
 
         keep_initializers_as_inputs (bool, default None): If True, all the
             initializers (typically corresponding to parameters) in the
-            exported graph will also be added as inputs to the graph.
-
-            If False, then initializers are not added as inputs to the graph, and only
-            the non-parameter inputs are added as inputs. Meanwhile, the optimization
-            that might adjust graph inputs will be skipped (e.g., fusing Conv and
-            BatchNorm ops), even when the user export this model in inference mode.
-
+            exported graph will also be added as inputs to the graph. If False,
+            then initializers are not added as inputs to the graph, and only
+            the non-parameter inputs are added as inputs.
             This may allow for better optimizations (e.g. constant folding) by
             backends/runtimes.
 
@@ -303,8 +291,8 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
             If a custom opset is referenced by ``model`` but not mentioned in this dictionary,
             the opset version is set to 1.
 
-        enable_onnx_checker (bool, default True): If True the onnx model checker will be run
-            to ensure the exported model is a valid ONNX model.
+        enable_onnx_checker (bool, default True): Deprecated and ignored. Will be removed in next
+            Pytorch release.
         use_external_data_format (bool, default False): If True, then some of the model
             parameters are stored in external data files and not in the ONNX model file itself.
             Models larger than 2GB cannot be exported in one file because of size limits imposed
@@ -314,6 +302,10 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
             If True,  argument ``f`` must be a string specifying the location of the model.
             The external data files will be stored in the same directory as ``f``.
             This argument is ignored unless ``operator_export_type=OperatorExportTypes.ONNX``.
+
+    Raises:
+      ONNXCheckerError: If the ONNX checker detects an invalid ONNX graph. Will still export the
+        model to the file ``f`` even if this is raised.
     """
 
     from torch.onnx import utils
@@ -391,3 +383,8 @@ def register_custom_op_symbolic(symbolic_name, symbolic_fn, opset_version):
     """
     from torch.onnx import utils
     utils.register_custom_op_symbolic(symbolic_name, symbolic_fn, opset_version)
+
+
+def unregister_custom_op_symbolic(symbolic_name, opset_version):
+    from torch.onnx import utils
+    utils.unregister_custom_op_symbolic(symbolic_name, opset_version)
