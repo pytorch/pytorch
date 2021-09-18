@@ -7486,7 +7486,7 @@ op_db: List[OpInfo] = [
         ref=np.maximum,
         skips=(
             # FIXME: maximum does not accept scalar inputs
-            SkipInfo('TestBinaryUfuncs', 'test_broadcast_python_scalar'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs', 'test_broadcast_python_scalar'),
         ),
     ),
     BinaryUfuncInfo(
@@ -7497,7 +7497,7 @@ op_db: List[OpInfo] = [
         ref=np.maximum,
         skips=(
             # FIXME: maximum does not accept scalar inputs
-            SkipInfo('TestBinaryUfuncs', 'test_broadcast_python_scalar'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs', 'test_broadcast_python_scalar'),
         ),
     ),
     BinaryUfuncInfo(
@@ -7511,7 +7511,7 @@ op_db: List[OpInfo] = [
         ref=np.minimum,
         skips=(
             # FIXME: min does not accept scalar inputs
-            SkipInfo('TestBinaryUfuncs', 'test_broadcast_python_scalar'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs', 'test_broadcast_python_scalar'),
         ),
     ),
     BinaryUfuncInfo(
@@ -7522,7 +7522,7 @@ op_db: List[OpInfo] = [
         ref=np.minimum,
         skips=(
             # FIXME: minimum does not accept scalar inputs
-            SkipInfo('TestBinaryUfuncs', 'test_broadcast_python_scalar'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs', 'test_broadcast_python_scalar'),
         ),
     ),
     # `softmax` supports different dtypes based on whether `dtype` argument,
