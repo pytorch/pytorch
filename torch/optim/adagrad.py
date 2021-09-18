@@ -4,9 +4,30 @@ from .optimizer import Optimizer
 
 
 class Adagrad(Optimizer):
-    """Implements Adagrad algorithm.
+    r"""Implements Adagrad algorithm.
 
-    It has been proposed in `Adaptive Subgradient Methods for Online Learning
+    .. math::
+       \begin{aligned}
+            &\rule{110mm}{0.4pt}                                                                 \\
+            &\textbf{input}      : \gamma \text{ (lr)}, \: \theta_0 \text{ (params)}, \: f(\theta)
+                \text{ (objective)}, \: \lambda \text{ (weight decay)},                          \\
+            &\hspace{12mm}    \tau \text{ (initial accumulator value)}, \: \eta\text{ (lr decay)}\\
+            &\textbf{initialize} :  state\_sum_0 \leftarrow 0                             \\[-1.ex]
+            &\rule{110mm}{0.4pt}                                                                 \\
+            &\textbf{for} \: t=1 \: \textbf{to} \: \ldots \: \textbf{do}                         \\
+            &\hspace{5mm}g_t           \leftarrow   \nabla_{\theta} f_t (\theta_{t-1})           \\
+            &\hspace{5mm} \tilde{\gamma}    \leftarrow \gamma / (1 +(t-1) \eta)                  \\
+            &\hspace{5mm} \textbf{if} \: \lambda \neq 0                                          \\
+            &\hspace{10mm} g_t \leftarrow g_t + \lambda \theta_{t-1}                             \\
+            &\hspace{5mm}state\_sum_t  \leftarrow  state\_sum_{t-1} + g^2_t                      \\
+            &\hspace{5mm}\theta_t \leftarrow
+                \theta_{t-1}- \tilde{\gamma} \frac{g_t}{\sqrt{state\_sum_t}+\epsilon}            \\
+            &\rule{110mm}{0.4pt}                                                          \\[-1.ex]
+            &\bf{return} \:  \theta_t                                                     \\[-1.ex]
+            &\rule{110mm}{0.4pt}                                                          \\[-1.ex]
+       \end{aligned}
+
+    For further details regarding the algorithm we refer to `Adaptive Subgradient Methods for Online Learning
     and Stochastic Optimization`_.
 
     Args:

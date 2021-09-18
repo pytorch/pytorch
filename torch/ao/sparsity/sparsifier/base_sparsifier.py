@@ -81,6 +81,8 @@ class BaseSparsifier(abc.ABC):
         * state - current state of the sparsification.
         * module_groups - a list containing all sparsity configuration groups
             with the key 'fqn' specifying the layer path within a model
+
+        TODO: Need a clean way of loading the state of the "preapred" module
         """
         module_groups = [
             dict(filter(lambda key_value: key_value[0] != 'module', mg.items()))
@@ -161,6 +163,7 @@ class BaseSparsifier(abc.ABC):
             module = config['module']
             param = config.get('parametrization', FakeSparsity)
             mask = config.get('mask', torch.ones(module.weight.shape))
+            self.state[config['fqn']]['mask'] = mask
             parametrize.register_parametrization(module, 'weight', param(mask))
 
     def squash_mask(self, *args, **kwargs):

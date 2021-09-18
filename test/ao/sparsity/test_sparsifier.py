@@ -75,7 +75,6 @@ class TestBaseSparsifier(TestCase):
         # Check the expected keys in the state_dict
         assert 'state' in state_dict
         assert 'linear' in state_dict['state']
-        assert 'mask' in state_dict['state']['linear']
         assert 'step_count' in state_dict['state']['linear']
         assert state_dict['state']['linear']['step_count'] == 3
 

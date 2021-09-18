@@ -7,6 +7,7 @@ from typing import Dict, Set
 import jinja2
 import json
 import os
+import sys
 from typing_extensions import Literal
 
 YamlShellBool = Literal["''", 1]
@@ -56,6 +57,8 @@ LABEL_CIFLOW_NOARCH = "ciflow/noarch"
 @dataclass
 class CIFlowConfig:
     enabled: bool = False
+    # For use to enable workflows to run on pytorch/pytorch-canary
+    run_on_canary: bool = False
     labels: Set[str] = field(default_factory=set)
     trigger_action: str = 'unassigned'
     trigger_actor: str = 'pytorchbot'
@@ -75,9 +78,13 @@ class CIFlowConfig:
         #      REMOVE   github.event.action !='{self.trigger_action}'
         label_conditions = [
             f"contains(github.event.pull_request.labels.*.name, '{label}')" for label in sorted(self.labels)]
-        self.root_job_condition = f"(github.event_name != 'pull_request') || " \
+        if self.run_on_canary:
+            self.root_job_condition = "(github.repository_owner == 'pytorch') && "
+        else:
+            self.root_job_condition = "(github.repository == 'pytorch/pytorch') && "
+        self.root_job_condition += f"((github.event_name != 'pull_request') || " \
             f"(github.event.action !='{self.trigger_action}') || " \
-            f"({' || '.join(label_conditions)})"
+            f"({' || '.join(label_conditions)}))"
 
     def reset_root_job(self) -> None:
         self.root_job_name = ''
@@ -202,7 +209,11 @@ class CIWorkflow:
         with open(output_file_path, "w") as output_file:
             GENERATED = "generated"  # Note that please keep the variable GENERATED otherwise phabricator will hide the whole file
             output_file.writelines([f"# @{GENERATED} DO NOT EDIT MANUALLY\n"])
-            content = workflow_template.render(asdict(self))
+            try:
+                content = workflow_template.render(asdict(self))
+            except Exception as e:
+                print(f"Failed on template: {workflow_template}", file=sys.stderr)
+                raise e
             output_file.write(content)
             if content[-1] != "\n":
                 output_file.write("\n")
@@ -219,20 +230,21 @@ WINDOWS_WORKFLOWS = [
         num_test_shards=2,
         ciflow_config=CIFlowConfig(
             enabled=True,
+            run_on_canary=True,
             labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_CPU, LABEL_CIFLOW_WIN}
         ),
     ),
     CIWorkflow(
         arch="windows",
-        build_environment="win-vs2019-cuda10.1-py3",
-        cuda_version="10.1",
+        build_environment="win-vs2019-cuda10.2-py3",
+        cuda_version="10.2",
         test_runner_type=WINDOWS_CUDA_TEST_RUNNER,
         on_pull_request=True,
-        only_run_smoke_tests_on_pull_request=True,
         num_test_shards=2,
         ciflow_config=CIFlowConfig(
             enabled=True,
-            labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_CUDA, LABEL_CIFLOW_WIN}
+            trigger_action_only=True,
+            labels={LABEL_CIFLOW_CUDA, LABEL_CIFLOW_WIN}
         ),
     ),
     CIWorkflow(
@@ -242,10 +254,11 @@ WINDOWS_WORKFLOWS = [
         test_runner_type=WINDOWS_CUDA_TEST_RUNNER,
         num_test_shards=2,
         on_pull_request=True,
+        only_run_smoke_tests_on_pull_request=True,
         ciflow_config=CIFlowConfig(
             enabled=True,
-            trigger_action_only=True,
-            labels={LABEL_CIFLOW_CUDA, LABEL_CIFLOW_WIN}
+            run_on_canary=True,
+            labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_CUDA, LABEL_CIFLOW_WIN}
         ),
     ),
     CIWorkflow(
@@ -271,28 +284,31 @@ LINUX_WORKFLOWS = [
         docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-py3.6-gcc5.4",
         test_runner_type=LINUX_CPU_TEST_RUNNER,
         on_pull_request=True,
+        enable_jit_legacy_test=1,
         enable_doc_jobs=True,
         enable_docs_test=1,
         enable_backwards_compat_test=1,
         num_test_shards=2,
         ciflow_config=CIFlowConfig(
             enabled=True,
+            run_on_canary=True,
             labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CPU}
         ),
     ),
-    CIWorkflow(
-        arch="linux",
-        build_environment="paralleltbb-linux-xenial-py3.6-gcc5.4",
-        docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-py3.6-gcc5.4",
-        test_runner_type=LINUX_CPU_TEST_RUNNER,
-        # This is a master only job despite on_pull_request is set to True
-        on_pull_request=True,
-        ciflow_config=CIFlowConfig(
-            enabled=True,
-            trigger_action_only=True,
-            labels={LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CPU},
-        ),
-    ),
+    # ParallelTBB does not have a maintainer and is currently flaky
+    # CIWorkflow(
+    #    arch="linux",
+    #    build_environment="paralleltbb-linux-xenial-py3.6-gcc5.4",
+    #    docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-py3.6-gcc5.4",
+    #    test_runner_type=LINUX_CPU_TEST_RUNNER,
+    #    # This is a master only job despite on_pull_request is set to True
+    #    on_pull_request=True,
+    #    ciflow_config=CIFlowConfig(
+    #        enabled=True,
+    #        trigger_action_only=True,
+    #        labels={LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CPU},
+    #    ),
+    # ),
     CIWorkflow(
         arch="linux",
         build_environment="parallelnative-linux-xenial-py3.6-gcc5.4",
@@ -348,6 +364,7 @@ LINUX_WORKFLOWS = [
         on_pull_request=True,
         ciflow_config=CIFlowConfig(
             enabled=True,
+            run_on_canary=True,
             trigger_action_only=True,
             labels={LABEL_CIFLOW_SLOW, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CUDA}
         ),
