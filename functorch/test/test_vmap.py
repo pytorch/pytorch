@@ -2931,6 +2931,8 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('dstack'),
         xfail('linalg.multi_dot'),
         xfail('nanmean'),
+        xfail('block_diag'),
+        xfail('nn.functional.dropout'),
 
         # entries in here need don't work and need to be fixed.
         # Each one of these is a bug
@@ -2940,6 +2942,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('svd', device_type='cuda'),
         xfail('linalg.svd', device_type='cuda'),
         xfail('index_put'),
+        xfail('nn.functional.max_pool2d'),
     })
     def test_vmap_exhaustive(self, device, dtype, op):
         sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)
@@ -3042,6 +3045,9 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('nn.functional.layer_norm'),
         xfail('nn.functional.nll_loss'),
         xfail('vstack'),
+        xfail('block_diag'),
+        xfail('nn.functional.dropout'),
+        xfail('nn.functional.max_pool2d'),
     })
     def test_op_has_batch_rule(self, device, dtype, op):
         def test():
