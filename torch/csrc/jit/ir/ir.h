@@ -1548,7 +1548,8 @@ TORCH_API std::vector<Value*> inlineCallTo(
 TORCH_API std::vector<Value*> unpackOutputs(const std::vector<Value*>& outputs);
 
 TORCH_API std::vector<Node*> findAllNodes(Graph& g, Symbol kind, bool recurse);
-TORCH_API std::vector<Node*> findAllNodes(Block& g, Symbol kind, bool recurse);
+TORCH_API std::vector<Node*> findAllNodes(Block& b, Symbol kind, bool recurse);
+TORCH_API std::vector<Node*> findAllNodes(at::ArrayRef<Block*> a, Symbol kind, bool recurse);
 
 struct OperatorSet {
   OperatorSet(std::initializer_list<const char*> sig_literals);
