@@ -450,6 +450,36 @@ def quantize_per_tensor(*, input, acc_out_ty=None):
         qparams["dtype"]
     )
 
+
+@register_acc_op_mapping(
+    op_and_target=("call_function", torch.quantize_per_channel),
+    arg_replacement_tuples=[
+        ("input", "input"),
+        ("scales", "scales"),
+        ("zero_points", "zero_points"),
+        ("axis", "axis"),
+        ("dtype", "dtype")
+    ],
+    kwargs_to_move_to_acc_out_ty=[
+        ("scales", "scale", False),
+        ("zero_points", "zero_point", False),
+        ("axis", "axis", False),
+        ("dtype", "dtype", False),
+        (torch.per_channel_affine, "qscheme", True),
+    ],
+)
+@register_acc_op
+def quantize_per_channel(*, input, acc_out_ty=None):
+    assert acc_out_ty is not None
+    qparams = acc_utils.get_field_from_acc_out_ty(acc_out_ty, "qparams")
+    return torch.quantize_per_tensor(
+        input,
+        qparams["scale"],
+        qparams["zero_point"],
+        qparams["axis"],
+        qparams["dtype"])  # type: ignore[call-overload]
+
+
 @register_acc_op
 def dequantize(*, input, input_tensor_meta):
     """`input_tensor_meta` contains extra argument of quantization
