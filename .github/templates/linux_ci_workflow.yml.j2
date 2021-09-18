@@ -289,6 +289,7 @@ jobs:
       - name: Output disk space left
         run: |
           sudo df -H
+      !{{ common.parse_ref() }}
       - name: Test
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}

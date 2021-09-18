@@ -418,6 +418,9 @@ jobs:
       - name: Output disk space left
         run: |
           sudo df -H
+      - name: Parse ref
+        id: parse-ref
+        run: .github/scripts/parse_ref.py
       - name: Test
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
