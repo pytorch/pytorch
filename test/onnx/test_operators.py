@@ -1,5 +1,6 @@
 
-from test_pytorch_common import TestCase, run_tests, flatten, skipIfNoLapack
+from test_pytorch_common import TestCase, run_tests, flatten, skipIfNoLapack, \
+    BATCH_SIZE, RNN_SEQUENCE_LENGTH, RNN_INPUT_SIZE, RNN_HIDDEN_SIZE
 
 import torch
 import torch.onnx
@@ -891,6 +892,52 @@ class TestOperators(TestCase):
         x = torch.randn(3, 5, 2, 1)
         y = torch.empty(3, 2, 1, dtype=torch.long).random_(5)
         self.assertONNX(torch.nn.CrossEntropyLoss(), (x, y), opset_version=12)
+
+    def test_lstm_none_sequence_lens(self):
+        """Test symbolic shape inference for LSTM when the input sequence_lens = None."""
+        input = torch.randn(RNN_SEQUENCE_LENGTH, BATCH_SIZE, RNN_INPUT_SIZE)
+        h0 = torch.randn(1, BATCH_SIZE, RNN_HIDDEN_SIZE)
+        c0 = torch.randn(1, BATCH_SIZE, RNN_HIDDEN_SIZE)
+
+        class LSTMModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.rnn = torch.nn.LSTM(RNN_INPUT_SIZE, RNN_HIDDEN_SIZE, 1, bidirectional=False)
+
+            def forward(self, x, h0, c0):
+                a, b = self.rnn(x, (h0, c0))
+                return torch.ones(b[0].shape)
+
+        self.assertONNX(LSTMModel(),
+                        (input, h0, c0), input_names=["x", "y"],
+                        dynamic_axes={"x" : {0: 'batch'}}, opset_version=12)
+
+    def test_dynamic_axes_add(self):
+        m1 = torch.randn(2, 3, requires_grad=True)
+        m2 = torch.randn(2, 1, requires_grad=True)
+        self.assertONNX(lambda x, y: torch.add(x, y), (m1, m2), input_names=["input_1", "input_2"],
+                        dynamic_axes={"input_1": {1: "dim_1"}, "input_2": {1: "dim_2"}},
+                        opset_version=12)
+
+    def test_dynamic_axes_matmul(self):
+        m1 = torch.randn(2, 2, 4, requires_grad=True)
+        m2 = torch.randn(2, 4, 3, requires_grad=True)
+        self.assertONNX(lambda x, y: torch.matmul(x, y), (m1, m2), input_names=["input_1", "input_2"],
+                        dynamic_axes={"input_1": {1: "dim_0"}, "input_2": {2: "dim_1"}},
+                        opset_version=12)
+
+    def test_dynamic_axes_reduce_mean(self):
+        m1 = torch.randn(2, 3, 4, requires_grad=True)
+        self.assertONNX(lambda x: torch.mean(x, dim=1), (m1), input_names=["input"],
+                        dynamic_axes={"input": {1: "dim_1", 2: "dim_2"}},
+                        opset_version=12)
+
+    def test_dynamic_axes_unchange(self):
+        """Test ProcessUnchangeNode in symbolic shape inference."""
+        m1 = torch.randn(2, 3, requires_grad=True)
+        self.assertONNX(lambda x: torch.softmax(x, dim=0), (m1,), input_names=["input"],
+                        dynamic_axes={"input": {1: "dim_1"}},
+                        opset_version=12)
 
     def test_aten_embedding_1(self):
         _onnx_opset_version = 12

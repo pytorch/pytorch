@@ -293,10 +293,10 @@ void NodeToONNX(
           ONNXShapeTypeInference(const_node, empty_params_dict, opset_version);
           env[old] = const_node->output();
         } else {
-          auto input_reliable = AreInputsReliableOrStatic(outputs[i]->node());
+          // ConstantValueMap has been set in shape inference,
+          // set_constant_value_map = false here to avoid redundancy.
           MergeInferredTypeAndSetMap(
-              outputs[i], old->type(), outputs[i]->type());
-          UpdateReliable(outputs[i], input_reliable);
+              outputs[i], old->type(), outputs[i]->type(), false);
 
           // Copy over source location and scope information to all nodes
           // created by the symbolic

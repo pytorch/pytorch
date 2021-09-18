@@ -35,10 +35,14 @@ Node* MutationRemover::createSpecialMappedOp(Node* n) {
           "aten::fill_.Scalar(Tensor(a!) self, Scalar value) -> Tensor(a!)")) {
     new_node =
         graph_->insert(aten::full_like, {inputs.at(0), inputs.at(1)})->node();
-    new_node->copyMetadata(n);
-    new_node->output()->setType(n->output()->type());
-    new_node = graph_->insert(aten::type_as, {new_node->output(), inputs.at(0)})
-                   ->node();
+    // aten::empty type can be undefined.
+    if (inputs.at(0)->node()->kind() != aten::empty) {
+      new_node->copyMetadata(n);
+      new_node->output()->setType(n->output()->type());
+      new_node =
+          graph_->insert(aten::type_as, {new_node->output(), inputs.at(0)})
+              ->node();
+    }
   } else if (n->matches("aten::zero_(Tensor(a!) self) -> Tensor(a!)")) {
     new_node = graph_->insert(aten::zeros_like, {n->inputs().at(0)})->node();
   } else if (
