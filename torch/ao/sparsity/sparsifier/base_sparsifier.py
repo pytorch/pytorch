@@ -147,8 +147,24 @@ class BaseSparsifier(abc.ABC):
                 module_config = {'module': module_config}
             local_args = copy.deepcopy(self.defaults)
             local_args.update(module_config)
-            module = local_args['module']
-            module_fqn = module_to_fqn(model, module)
+            # Make sure there is at least one way of handling the model
+            module = local_args.get('module', None)
+            module_fqn = local_args.get('fqn', None)
+            if module is None and module_fqn is None:
+                # No module given for this group
+                raise ValueError('Either `module` or `fqn` must be specified!')
+            elif module is None:
+                # FQN is given
+                module = fqn_to_module(model, module_fqn)
+            elif module_fqn is None:
+                # Module is given
+                module_fqn = module_to_fqn(model, module)
+            else:
+                # Both Module and FQN are given
+                module_from_fqn = fqn_to_module(model, module_fqn)
+                assert module is module_from_fqn, \
+                    'Given both `module` and `fqn`, it is expected them to ' \
+                    'refer to the same thing!'
             if module_fqn and module_fqn[0] == '.':
                 module_fqn = module_fqn[1:]
             local_args['fqn'] = module_fqn
