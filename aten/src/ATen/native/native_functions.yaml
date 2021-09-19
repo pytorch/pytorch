@@ -172,7 +172,7 @@
     CPU: native_dropout_cpu
     CUDA: native_dropout_cuda
 
-- func: native_dropout_backward(Tensor grad, Tensor mask, float scale) -> Tensor
+- func: native_dropout_backward(Tensor grad_output, Tensor mask, float scale) -> Tensor
   dispatch:
     CPU: native_dropout_backward_cpu
     CUDA: native_dropout_backward_cuda
