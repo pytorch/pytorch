@@ -120,6 +120,15 @@ class PackageImporter(Importer):
         Returns:
             types.ModuleType: The (possibly already) loaded module.
         """
+        # We should always be able to support importing modules from this package.
+        # This is to support something like:
+        #   obj = importer.load_pickle(...)
+        #   importer.import_module(obj.__module__)  <- this string will be mangled
+        #
+        # Note that _mangler.demangle will not demangle any module names
+        # produced by a different PackageImporter instance.
+        name = self._mangler.demangle(name)
+
         return self._gcd_import(name)
 
     def load_binary(self, package: str, resource: str) -> bytes:

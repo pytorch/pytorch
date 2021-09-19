@@ -1,5 +1,7 @@
 #include <torch/csrc/autograd/FunctionsManual.h>
 #include <torch/csrc/autograd/variable.h>
+#include <torch/csrc/autograd/functions/utils.h>
+
 
 #include <ATen/ATen.h>
 #include <ATen/AccumulateType.h>
@@ -42,10 +44,6 @@ const char* kCudnnDoubleBackwardMsg = "Double backwards is not supported for CuD
 
 bool isDefined(const c10::optional<Tensor>& t) {
   return t.has_value() && t->defined();
-}
-
-bool isFwGradDefined(const c10::optional<Tensor>& t) {
-  return t.has_value() && t->defined() && t->_fw_grad(/*level */ 0).defined();
 }
 
 Tensor toNonOptTensor(const c10::optional<Tensor>& t) {
@@ -1001,6 +999,20 @@ Tensor masked_scatter_backward(const Tensor & grad, const Tensor & mask, IntArra
     mask_selected = at::cat({mask_selected, zeros_fillin}, 0);
   }
   return mask_selected.view(sizes);
+}
+
+Tensor cholesky_jvp(const Tensor& input_tangent, const Tensor& L, bool upper) {
+  // Differentiation of the Cholesky decomposition, Iain Murray
+  // https://arxiv.org/abs/1602.07527
+  // equation 8
+  auto input_tangent_ = upper ? input_tangent.transpose(-1, -2).conj() : input_tangent;
+  auto L_ = upper ? L.transpose(-1, -2).conj() : L;
+
+  auto L_inverse = std::get<0>(at::triangular_solve(at::eye(L.size(-1), L.options()), L_, /*upper=*/false));
+  auto phi = at::matmul(at::matmul(L_inverse, input_tangent_), L_inverse.transpose(-2, -1).conj());
+  phi.tril_().diagonal(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1).mul_(0.5);
+  auto L_tangent = L_.matmul(phi);
+  return upper ? L_tangent.transpose(-1, -2).conj() : L_tangent;
 }
 
 Tensor cholesky_backward(Tensor grad, bool upper, Tensor L) {
@@ -2392,6 +2404,54 @@ Tensor linalg_eig_backward(const std::vector<torch::autograd::Variable> &grads,
   }
 }
 
+// jvp functions for eigenvalues and eigenvectors are separate
+// because currently forward AD only works with one rule per output
+Tensor eigh_jvp_eigenvalues(
+    const Tensor& input_tangent,
+    const Tensor& eigenvalues,
+    const Tensor& eigenvectors) {
+  // An extended collection of matrix derivative results for forward and reverse mode automatic differentiation
+  // https://ora.ox.ac.uk/objects/uuid:8d0c0a29-c92b-4153-a1d2-38b276e93124
+  // Section 3.1 Eigenvalues and eigenvectors
+
+  // TODO: gradcheck from test_ops.py hangs with complex inputs
+  TORCH_CHECK_NOT_IMPLEMENTED(
+      !input_tangent.is_complex(),
+      "the derivative for 'eigh' with complex inputs is not implemented.");
+
+  // see the note in the implementation of eigh_backward that tangent should be Hermitian
+  auto hermitian_tangent = 0.5*(input_tangent + input_tangent.transpose(-2, -1).conj());
+
+  auto tmp = at::matmul(at::matmul(eigenvectors.transpose(-2, -1).conj(), hermitian_tangent), eigenvectors);
+  auto eigenvalues_tangent = tmp.diagonal(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1);
+  if (eigenvalues_tangent.is_complex()) {
+    return at::real(eigenvalues_tangent);
+  }
+  return eigenvalues_tangent;
+}
+
+Tensor eigh_jvp_eigenvectors(
+    const Tensor& input_tangent,
+    const Tensor& eigenvalues,
+    const Tensor& eigenvectors) {
+  // An extended collection of matrix derivative results for forward and reverse mode automatic differentiation
+  // https://ora.ox.ac.uk/objects/uuid:8d0c0a29-c92b-4153-a1d2-38b276e93124
+  // Section 3.1 Eigenvalues and eigenvectors
+
+  TORCH_CHECK_NOT_IMPLEMENTED(
+      !input_tangent.is_complex(),
+      "the derivative for 'eigh' with complex inputs is not implemented.");
+
+  auto E = eigenvalues.unsqueeze(-2) - eigenvalues.unsqueeze(-1);
+  E.diagonal(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1).fill_(INFINITY);
+
+  // see the note in the implementation of eigh_backward that tangent should be Hermitian
+  auto hermitian_tangent = 0.5*(input_tangent + input_tangent.transpose(-2, -1).conj());
+
+  auto tmp = at::matmul(at::matmul(eigenvectors.transpose(-2, -1).conj(), hermitian_tangent), eigenvectors);
+  return at::matmul(eigenvectors, tmp.div(E));
+}
+
 Tensor eigh_backward(const std::vector<torch::autograd::Variable> &grads, const Tensor& self,
                      bool eigenvectors, const Tensor& L, const Tensor& V) {
   // This function is used for both torch.symeig and torch.linalg.eigh.
@@ -3729,6 +3789,42 @@ std::tuple<Tensor, Tensor> lu_solve_backward(
   return std::make_tuple(self_grad, LU_data_grad);
 }
 
+Tensor lu_solve_forward_AD(
+  const Tensor& dB,
+  const Tensor& dLU_data,
+  const Tensor& LU_data,
+  const Tensor& LU_pivots,
+  const Tensor& X
+) {
+  auto dL = dLU_data.tril(-1);
+  auto dU = dLU_data.triu();
+
+  // From the derivations from above we have that:
+  // dX = -U^{-1} dU U^{-1} L^{-1} P^T B - U^{-1} L^{-1} dL L^{-1} P^T B + U^{-1} L^{-1} P^T dB,
+  // or, using that X = (LU)^{-1} P^T B,
+  // dX = -U^{-1} dU X - (LU)^{-1} dL U X + (LU)^{-1} P^T dB
+
+  // -U^{-1} dU X
+  auto U = LU_data.triu();
+  auto dU_part = -std::get<0>(at::triangular_solve(
+    dU.matmul(X),
+    U,
+    /*upper=*/true
+  ));
+
+  // (LU)^{-1} dL U X,
+  // we use lu_solve to solve this system which requires pivots which are returned by the lu routine.
+  // Since no pivoting is required for the system, we create a tensor of identity permutations
+  // which are 1-based because of the Fortran-like LAPACK interfaces.
+  auto identity_pivots = at::arange(1, LU_data.size(-1) + 1, LU_pivots.options()).expand(LU_pivots.sizes());
+  auto dL_part = at::lu_solve(dL.matmul(U).matmul(X), LU_data, identity_pivots);
+
+  // (LU)^{-1} P^T dB
+  auto dB_part = at::lu_solve(dB, LU_data, LU_pivots);
+
+  return dU_part - dL_part + dB_part;
+}
+
 Tensor lu_unpack_backward(
   const variable_list& grads,
   const Tensor& LU_data,
@@ -3996,6 +4092,91 @@ Tensor _lu_with_info_backward(
   // L_grad = LU_grad,
   // U_grad = LU_grad.
   return plu_backward_base({/*L_grad=*/grad, /*U_grad=*/grad}, self, P, L, U);
+}
+
+Tensor _lu_with_info_jvp(
+  const Tensor& dX,
+  const Tensor& LU,
+  const Tensor& pivs
+) {
+  // This function is based on the forward AD derivations outlined
+  // in the description to the plu_backward_base function.
+
+  Tensor P, L, U;
+  std::tie(P, L, U) = at::lu_unpack(LU, pivs);
+
+  auto m = LU.size(-2);
+  auto n = LU.size(-1);
+  auto k = std::min(m, n);
+
+  auto pdX = P.transpose(-1, -2).matmul(dX);
+
+  // similar to the backward implementation, we also consider block structures such as:
+  // for a matrix A of size m x n we decompose it as
+  // A = (A1 | A2) with A1 of size m x m if m <= n and
+  // A = (A1^T | A2^T)^T with A1 of size n x n if m > n.
+  auto pdX1 = pdX.narrow(-2, 0, k).narrow(-1, 0, k);
+  auto L1 = L.narrow(-2, 0, k).narrow(-1, 0, k);
+  auto U1 = U.narrow(-2, 0, k).narrow(-1, 0, k);
+
+  // dK = L1^{-1} pdX1
+  auto dK = std::get<0>(at::triangular_solve(
+    pdX1,
+    L1,
+    /*upper=*/false,
+    /*transpose=*/false,
+    /*unitriangular=*/true
+  ));
+  // dK <- dK U1^{-1}
+  dK = std::get<0>(at::triangular_solve(
+    dK.transpose(-1, -2),
+    U1,
+    /*upper=*/true,
+    /*transpose=*/true
+  )).transpose(-1, -2);
+
+  auto dL1 = L1.matmul(dK.tril(-1));
+  auto dU1 = dK.triu().matmul(U1);
+
+  // since LU = L + U - I, we have that dLU = dL + dU
+  // if LU is of size m x n, we always have
+  // dLU1 = dL1 + dU1, where the block indexing follows the rules
+  // outlined above.
+  if (m == n) {
+    return dL1 + dU1;
+  }
+  else {
+    auto dLU = at::zeros_like(LU);
+    dLU.narrow(-2, 0, k).narrow(-1, 0, k).copy_(dL1 + dU1);
+
+    if (m < n) {
+      // we only need to update dU2 defined as
+      // dU2 := L1^{-1} (pdX2 - dL1 U2)
+      auto pdX2 = pdX.narrow(-1, k, n - k);
+      auto U2 = U.narrow(-1, k, n - k);
+      dLU.narrow(-1, k, n - k).copy_(std::get<0>(at::triangular_solve(
+        pdX2 - dL1.matmul(U2),
+        L1,
+        /*upper=*/false,
+        /*transpose=*/false,
+        /*unitriangular=*/true
+      )));
+    }
+    else {
+      // we only need to update dL2 defined as
+      // dL2 := (pdX2 - L2 dU1) U1^{-1}
+      auto pdX2 = pdX.narrow(-2, k, m - k);
+      auto L2 = L.narrow(-2, k, m - k);
+      dLU.narrow(-2, k, m - k).copy_(std::get<0>(at::triangular_solve(
+        (pdX2 - L2.matmul(dU1)).transpose(-1, -2),
+        U1,
+        /*upper=*/true,
+        /*transpose=*/true
+      )).transpose(-1, -2));
+    }
+
+    return dLU;
+  }
 }
 
 } // namespace details

@@ -288,6 +288,24 @@ class ShapePropagator {
     return zerodim;
   }
 
+  bool mergeTypes(
+      ArrayRef<Value*> lhs,
+      ArrayRef<Value*> rhs,
+      ArrayRef<Value*> outputs) {
+    AT_ASSERT(lhs.size() == rhs.size() && rhs.size() == outputs.size());
+    bool changed = false;
+    for (size_t i = 0; i < lhs.size(); ++i) {
+      auto old_output_type = outputs[i]->type();
+      auto new_type =
+          unifyTypes(lhs[i]->type(), rhs[i]->type(), /*default_to_union=*/true);
+      AT_ASSERT(new_type);
+      outputs[i]->setType(*new_type);
+      if (*old_output_type != *outputs[i]->type())
+        changed = true;
+    }
+    return changed;
+  }
+
   void broadcastBinary(
       Node* node,
       std::vector<TensorTypePtr>& types,
@@ -410,7 +428,7 @@ class ShapePropagator {
     // is to uncover any mistakes we could make when editing this code,
     // and eventually it shouldn't matter, because this phase should be
     // preceded by schema checking.
-    op(&stack);
+    op(stack);
 
     AT_ASSERT(stack.size() == node->outputs().size());
     for (const auto i : c10::irange(stack.size())) {
