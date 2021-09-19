@@ -533,7 +533,7 @@
   input: "GradMode::is_enabled() ? infinitely_differentiable_native_dropout_backward(grad, result1, scale) : native_dropout_backward(grad, result1, scale)"
 
 - name: native_dropout_backward(Tensor grad_output, Tensor mask, float scale) -> Tensor
-  grad_output: "native_dropout_double_backward(grad_output, input, mask, scale)"
+  grad_output: "native_dropout_double_backward(grad, grad_output, mask, scale)"
   mask: 'not_implemented("native_dropout_backward: mask")'
 
 - name: eig(Tensor self, bool eigenvectors=False) -> (Tensor eigenvalues, Tensor eigenvectors)
