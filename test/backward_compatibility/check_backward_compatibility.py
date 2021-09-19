@@ -50,6 +50,8 @@ ALLOW_LIST = [
     ("aten::adaptive_avg_pool3d_backward", datetime.date(9999, 1, 1)),
     ("aten::_embedding_bag_dense_backward", datetime.date(9999, 1, 1)),
     ("aten::randperm", datetime.date(9999, 1, 1)),
+    ("aten::_masked_scale", datetime.date(9999, 1, 1)),
+    ("aten::_fused_dropout", datetime.date(9999, 1, 1)),
 ]
 
 ALLOW_LIST_COMPILED = [

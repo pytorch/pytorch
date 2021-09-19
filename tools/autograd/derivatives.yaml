@@ -532,6 +532,9 @@
 - name: native_dropout(Tensor input, float p, float scale, bool train) -> (Tensor, Tensor)
   input: "GradMode::is_enabled() ? infinitely_differentiable_native_dropout_backward(grad, result1, scale) : native_dropout_backward(grad, result1, scale)"
 
+- name: native_dropout_backward(Tensor input, Tensor mask, float scale) -> Tensor
+  input: "native_dropout_double_backward(grad, input, mask, scale)"
+
 - name: eig(Tensor self, bool eigenvectors=False) -> (Tensor eigenvalues, Tensor eigenvectors)
   self: eig_backward(grads, self, eigenvectors, eigenvalues, eigenvectors_return)
 
