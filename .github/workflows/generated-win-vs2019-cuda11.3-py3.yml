@@ -1,12 +1,11 @@
 # @generated DO NOT EDIT MANUALLY
-
 # Template is at:    .github/templates/windows_ci_workflow.yml.j2
 # Generation script: .github/scripts/generate_ci_workflows.py
 name: win-vs2019-cuda11.3-py3
 
 on:
   pull_request:
-    types: [unassigned]
+    types: [opened, synchronize, reopened, unassigned]
   push:
     branches:
       - master
@@ -20,6 +19,7 @@ env:
   IN_CI: 1
   INSTALL_WINDOWS_SDK: 1
   PYTHON_VERSION: "3.8"
+  PR_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
   SCCACHE_BUCKET: "ossci-compiler-cache"
   VC_PRODUCT: "BuildTools"
   VC_VERSION: ""
@@ -31,18 +31,17 @@ env:
   USE_CUDA: 1
 
 concurrency:
-  group: win-vs2019-cuda11.3-py3-${{ github.event.pull_request.number || github.sha }}
+  group: win-vs2019-cuda11.3-py3-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true
 
 jobs:
   ciflow_should_run:
     runs-on: ubuntu-18.04
-    if: ${{ (github.event_name != 'pull_request') || (github.event.action !='unassigned') || (contains(github.event.pull_request.labels.*.name, 'ciflow/all') || contains(github.event.pull_request.labels.*.name, 'ciflow/cuda') || contains(github.event.pull_request.labels.*.name, 'ciflow/win')) }}
+    if: ${{ (github.repository_owner == 'pytorch') && ((github.event_name != 'pull_request') || (github.event.action !='unassigned') || (contains(github.event.pull_request.labels.*.name, 'ciflow/all') || contains(github.event.pull_request.labels.*.name, 'ciflow/cuda') || contains(github.event.pull_request.labels.*.name, 'ciflow/default') || contains(github.event.pull_request.labels.*.name, 'ciflow/win'))) }}
     steps:
       - name: noop
         run: echo running ciflow_should_run
   build:
-    if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: "windows.4xlarge"
     defaults:
       run:
@@ -58,7 +57,7 @@ jobs:
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Checkout PyTorch
-        uses: actions/checkout@v2
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
           submodules: recursive
           path: pytorch-${{ github.run_id }}
@@ -67,7 +66,16 @@ jobs:
       - name: Display EC2 information
         shell: bash
         run: |
-          .github/scripts/display_ec2_information.sh
+          set -euo pipefail
+          function get_ec2_metadata() {
+            # Pulled from instance metadata endpoint for EC2
+            # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
+            category=$1
+            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
+          }
+          echo "ami-id: $(get_ec2_metadata ami-id)"
+          echo "instance-id: $(get_ec2_metadata instance-id)"
+          echo "instance-type: $(get_ec2_metadata instance-type)"
       - name: Install Visual Studio 2019 toolchain
         shell: powershell
         run: |
@@ -99,7 +107,7 @@ jobs:
           path: C:\${{ github.run_id }}\build-results
       - name: Upload artifacts to s3
         if: always()
-        uses: seemethere/upload-artifact-s3@9d7ceb0ab39c2c88d93ef7792b27425b27d59162
+        uses: seemethere/upload-artifact-s3@v3
         with:
           retention-days: 14
           if-no-files-found: error
@@ -127,13 +135,12 @@ jobs:
           rm -rf ./*
 
   generate-test-matrix:
-    if: ${{ github.repository_owner == 'pytorch' }}
     needs: [ciflow_should_run]
     runs-on: ubuntu-18.04
     env:
       TEST_RUNNER_TYPE: windows.8xlarge.nvidia.gpu
       NUM_TEST_SHARDS: 2
-      NUM_TEST_SHARDS_ON_PULL_REQUEST: 2
+      NUM_TEST_SHARDS_ON_PULL_REQUEST: 1
       PR_BODY: ${{ github.event.pull_request.body }}
     outputs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
@@ -143,9 +150,9 @@ jobs:
       image: python:3.9
     steps:
       - name: Install dependencies
-        run: pip install typing-extensions
+        run: pip install typing-extensions==3.10
       - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
       - name: Generating test matrix
         id: set-matrix
         run: .github/scripts/generate_pytorch_test_matrix.py
@@ -158,9 +165,9 @@ jobs:
       TEST_CONFIG: ${{ matrix.config }}
       http_proxy: "http://internal-tf-lb-20210727220640487900000002-835786077.us-east-1.elb.amazonaws.com:3128"
       https_proxy: "http://internal-tf-lb-20210727220640487900000002-835786077.us-east-1.elb.amazonaws.com:3128"
-      RUN_SMOKE_TESTS_ONLY_ON_PR: False
+      RUN_SMOKE_TESTS_ONLY_ON_PR: True
       PYTORCH_IGNORE_DISABLED_ISSUES: ${{ needs.generate-test-matrix.outputs.ignore-disabled-issues }}
-      CONTINUE_THROUGH_ERROR: ${{ github.repository_owner == 'pytorch' && (github.event_name == 'push' || github.event_name == 'schedule') }}
+      CONTINUE_THROUGH_ERROR: ${{ github.repository == 'pytorch/pytorch' && (github.event_name == 'push' || github.event_name == 'schedule') }}
     needs: [build, generate-test-matrix, ciflow_should_run]
     strategy:
       matrix: ${{ fromJson(needs.generate-test-matrix.outputs.matrix) }}
@@ -171,7 +178,7 @@ jobs:
         working-directory: pytorch-${{ github.run_id }}
     steps:
       - name: Checkout PyTorch
-        uses: actions/checkout@v2
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
           submodules: recursive
           path: pytorch-${{ github.run_id }}
@@ -180,7 +187,16 @@ jobs:
       - name: Display EC2 information
         shell: bash
         run: |
-          .github/scripts/display_ec2_information.sh
+          set -euo pipefail
+          function get_ec2_metadata() {
+            # Pulled from instance metadata endpoint for EC2
+            # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
+            category=$1
+            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
+          }
+          echo "ami-id: $(get_ec2_metadata ami-id)"
+          echo "instance-id: $(get_ec2_metadata instance-id)"
+          echo "instance-type: $(get_ec2_metadata instance-type)"
       - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
         uses: seemethere/add-github-ssh-key@v1
         with:
@@ -226,14 +242,13 @@ jobs:
       - name: Zip test reports for upload
         if: always()
         env:
-          COMMIT_SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
-          WORKFLOW_ID: '${{ github.run_id }}_${{ github.run_number }}'
+          FILE_SUFFIX: '${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}'
         shell: powershell
         run: |
           # -ir => recursive include all files in pattern
-          7z a "test-reports-$Env:COMMIT_SHA1-$Env:WORKFLOW_ID.zip" -ir'!test\*.xml'
+          7z a "test-reports-$Env:FILE_SUFFIX.zip" -ir'!test\*.xml'
       - uses: actions/upload-artifact@v2
-        name: Store PyTorch Test Reports
+        name: Store Test Reports
         if: always()
         with:
           name: test-reports-${{ matrix.config }}
@@ -241,6 +256,27 @@ jobs:
           if-no-files-found: error
           path:
             pytorch-${{ github.run_id }}/test-reports-*.zip
+      - uses: seemethere/upload-artifact-s3@v3
+        name: Store Test Reports on S3
+        if: always()
+        with:
+          retention-days: 14
+          if-no-files-found: error
+          path:
+            pytorch-${{ github.run_id }}/test-reports-*.zip
+      - name: Install render_test_results dependencies
+        if: always()
+        shell: bash
+        run: |
+          python3 -m pip install junitparser==2.1.1 rich==10.9.0
+      - name: "[[ Click me for rendered test results (useful for finding failing tests) ]]"
+        if: always()
+        shell: bash
+        # Encoding is weird on windows, just try to default to utf-8 if possible
+        env:
+          PYTHONIOENCODING: "utf-8"
+        run: |
+          python3 tools/render_junit.py test/
       - name: Wait until all sessions have drained
         shell: powershell
         if: always()
@@ -256,6 +292,7 @@ jobs:
         id: parse-ref
         run: .github/scripts/parse_ref.py
       - name: Display and upload test statistics (Click Me)
+        if: always()
         # temporary hack: set CIRCLE_* vars, until we update
         # tools/stats/print_test_stats.py to natively support GitHub Actions
         env:

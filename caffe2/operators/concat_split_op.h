@@ -282,7 +282,7 @@ bool ConcatOp<Context>::RunOnDevice() {
   // We can override default options(Context::GetDeviceType())
   // by explicitly passing in device type we want
   Tensor* split = Output(
-      1, std::vector<int64_t>(1, InputSize()), at::dtype<int>().device(CPU));
+      1, at::IntArrayRef({InputSize()}), at::dtype<int>().device(CPU));
   int* axis_data = split->template mutable_data<int>();
   auto& input_zero = Input(0);
   int adj_size = input_zero.dim() + (add_axis_ ? 1 : 0);
