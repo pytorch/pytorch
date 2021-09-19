@@ -1,7 +1,5 @@
 #pragma once
 
-#include <torch/csrc/jit/codegen/cuda/root_domain_map.h>
-
 #include <c10/util/Exception.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
@@ -17,23 +15,93 @@ namespace cuda {
 class TensorDomain;
 class TensorView;
 
+// We're going to keep data related to the computeAt pass for each TensorView in
+// this structure, this will allow us to keep a single entry in a map from a
+// TensorView to this one.
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+class ComputeAtData {
+ public:
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+  ComputeAtData() = default;
+  ComputeAtData(TensorView* tv);
+
+  // Clear after a given traversal. There will be more than one.
+  void clearPass();
+
+  // Makes sure value matches current_traversal_position if
+  // current_traversal_position_set is true. If this is not the case we're in
+  // an invalid compute_at that would require tensor replication.
+  void setPassPosition(unsigned int pos);
+
+  // Returns if new postion is greater or equal to previous seen, if
+  bool shouldSetComputeAt(unsigned int pos) const {
+    return pos > original_compute_at_position &&
+        pos > new_compute_at_position && pos >= current_traversal_position;
+  }
+
+  // Will return new_compute_at_position, after making sure we cleared out the
+  // last pass
+  unsigned int getNewPosition() const;
+
+  // Will make sure we haven't invalidated previous computeAt calls by
+  // checking that any axes previously in computeAt are still there.
+  void validateNewComputeAt() const;
+
+  // Did we ever compute a value for this TV?
+  bool touched() const {
+    return touched_;
+  }
+
+  TensorDomain* getOriginalDomain() const {
+    return original_domain_;
+  }
+
+  // If we set computeAt, save the domain so we can reset it after traversal.
+  // Traversal state can deviate from the domain we will want to save after the
+  // entire computeAt pass.
+  void setComputeAtDomain(TensorDomain* td);
+
+  // Return domain set in setComputeAtDomain
+  TensorDomain* getComputeAtDomain() const {
+    return new_compute_at_domain_;
+  }
+
+ private:
+  // Was the position ever modified?
+  bool touched_ = false;
+
+  // Hold onto the provided TensorView
+  TensorView* tv_ref_ = nullptr;
+
+  // Did this tv have computeAt set before calling this computeAt pass?
+  bool original_has_compute_at_ = false;
+
+  // What was the computeAt position before the computeAt pass started
+  unsigned int original_compute_at_position = 0;
+
+  // and what was the previous domain that position was set relative to.
+  TensorDomain* original_domain_ = nullptr;
+
+  // Position we can update during a traversal
+  unsigned int current_traversal_position = 0;
+
+  // Did this traversal set a position or not yet
+  bool current_traversal_position_set = false;
+
+  // Position to update after a traversal
+  unsigned int new_compute_at_position = 0;
+
+  // Domain when we actually set computeAt, will set back to this after the
+  // pass.
+  TensorDomain* new_compute_at_domain_;
+};
+
 class ComputeAt {
  public:
-  // Runs the compute at pass making producer look like consumer, computing
-  // producer relative to consumer
-  static void runAt(
-      TensorView* producer,
-      TensorView* consumer,
-      unsigned int consumer_position,
-      ComputeAtMode mode = ComputeAtMode::Standard);
-
-  // Runs the compute with pass making consumer look like producer, computing
-  // producer relative to consumer
-  static void runWith(
-      TensorView* producer,
-      TensorView* consumer,
-      unsigned int producer_position,
-      ComputeAtMode mode = ComputeAtMode::Standard);
+  static void run(
+      TensorView* _producer,
+      TensorView* _consumer,
+      unsigned int _consumer_position);
 
   ComputeAt() = delete;
   ComputeAt(ComputeAt&) = delete;
@@ -42,26 +110,21 @@ class ComputeAt {
  private:
   TensorView* producer_;
   TensorView* consumer_;
-  TensorView* reference_;
-  unsigned int reference_position_;
-  ComputeAtMode mode_ = ComputeAtMode::Standard;
-
-  unsigned int producer_position_ = 0;
-  ComputeAtRootDomainMap root_map_;
+  unsigned int consumer_position_;
 
   // Runs replayPasC and sets producer computeAt settings. Returns
-  // producer_compute_at_pos.
+  // producer_compute_at_axis.
   unsigned int backwardComputeAt_impl(
       TensorView* producer,
       TensorView* consumer,
-      unsigned int consumer_compute_at_pos);
+      unsigned int consumer_compute_at_axis);
 
   // Runs replayCasP and sets producer computeAt settings. Returns
-  // consumer_compute_at_pos.
+  // consumer_compute_at_axis.
   unsigned int forwardComputeAt_impl(
       TensorView* producer,
       TensorView* consumer,
-      unsigned int producer_compute_at_pos);
+      unsigned int producer_compute_at_axis);
 
   // Look through all the use chains of producer. Check if there's a single
   // consumer for all chains at or after the consumer specified in the computeAt
@@ -76,29 +139,11 @@ class ComputeAt {
   // of producer
   void traverseForward();
 
-  // Looks at producer tensor views of consumer_tv, recomputes its max
-  // producer position, and sets max producer position. This function can
-  // only potentially lower the max producer position of consumer_tv.
-  void resetMaxProducerPos(TensorView* consumer_tv);
-
-  // Undo the inlining of block broadcast at the innermost positions
-  //  to avoid generating repeated block broadcasts
-  void hoistInnermostBroadcast();
-
-  // Update multi-output expressions. If one output is modified, all outputs
-  // should be modified as well. Propagate transformations, compute at, and
-  // produce at from tv to siblings. Run as final pass as it will invalidate the
-  // computeAt map originally computed.
-  void updateSiblings();
-
-  // Compute at pass requires tracking "maxProducerPosition" even if set simply
-  // from input tensor views. However, when lowering, we need a valid produce at
-  // position of all tensors, so inputs should never actually set their
-  // consumers maxProduceAt position.
-  void updateInputProduceAts();
-
   // Run the computeAt pass
   void runPass();
+
+  // Set outputs relative to eachother if there is not a common consumer
+  void setupOutputs();
 
   // Common consumer if it exists
   TensorView* common_consumer_ = nullptr;
@@ -106,12 +151,13 @@ class ComputeAt {
   // Producer use chains set in, used in a few spots.
   std::deque<std::deque<TensorView*>> producer_use_chains_;
 
+  // All we need to know and keep track of for each TensorView in this pass.
+  std::unordered_map<TensorView*, ComputeAtData> tv_data;
+
   ComputeAt(
       TensorView* _producer,
       TensorView* _consumer,
-      TensorView* _reference,
-      unsigned int _reference_position,
-      ComputeAtMode _mode);
+      unsigned int _consumer_position);
 
   ~ComputeAt() = default;
 };
