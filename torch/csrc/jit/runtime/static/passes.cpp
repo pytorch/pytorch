@@ -306,6 +306,31 @@ TORCH_LIBRARY_FRAGMENT(static_runtime, m) {
   m.def(torch::schema(
       "static_runtime::layer_norm(Tensor input, int[] normalized_shape, Tensor? weight=None, Tensor? bias=None, float eps=1e-05, bool cudnn_enable=True) -> (Tensor, Tensor, Tensor)",
       c10::AliasAnalysisKind::PURE_FUNCTION));
+  m.def("static_runtime::signed_log1p(Tensor input) -> Tensor");
+  m.def(torch::schema(
+      "static_runtime::dict_unpack(...) -> ...",
+      c10::AliasAnalysisKind::CONSERVATIVE));
+}
+
+void FuseSignLog1P(std::shared_ptr<torch::jit::Graph>& graph) {
+  std::string pattern = R"IR(
+    graph(%input):
+        %0 : Tensor = aten::sign(%input)
+        %1 : Tensor = aten::abs(%input)
+        %2 : Tensor = aten::log1p(%1)
+        %res : Tensor = aten::mul(%0, %2)
+        return (%res)
+  )IR";
+
+  std::string fused_pattern = R"IR(
+    graph(%input):
+        %res : Tensor = static_runtime::signed_log1p(%input)
+        return (%res)
+    )IR";
+
+  SubgraphRewriter fuse;
+  fuse.RegisterRewritePattern(pattern, fused_pattern);
+  fuse.runOnGraph(graph);
 }
 
 bool HasInplaceOp(std::shared_ptr<Graph>& graph, const AliasDb& alias_db) {
@@ -500,6 +525,77 @@ void EnableStaticRuntimeLayerNorm(std::shared_ptr<torch::jit::Graph>& graph) {
     old_node->output(0)->replaceAllUsesWith(new_node->output(0));
     old_node->destroy();
   }
+}
+
+void RemoveImmutableInputDictLookups(
+    std::shared_ptr<torch::jit::Graph>& graph) {
+  auto nodes = graph->nodes();
+  AliasDb db(graph);
+  // Gather all dict -> getitems where dict is immutable and getitems use
+  // constant keys.
+  std::unordered_map<Value*, std::vector<Node*>> dict_to_getitems;
+  std::unordered_set<Node*> keys;
+  for (Node* node : nodes) {
+    // Find aten::__getitem__(%dict, %constant_key).
+    if (node->kind() != aten::__getitem__) {
+      continue;
+    }
+    Node* getitem_node = node;
+    Value* dict = getitem_node->input(0);
+    if (db.hasWriters(dict)) {
+      // Mutable dict. Skip this optimization.
+      continue;
+    }
+    if (dict->type()->kind() != TypeKind::DictType ||
+        dict->node() != graph->param_node()) {
+      continue;
+    }
+    DCHECK(getitem_node->inputs().size() == 2);
+    Node* key = getitem_node->input(1)->node();
+    if (key->kind() != prim::Constant) {
+      continue;
+    }
+    keys.insert(key);
+    auto iter = dict_to_getitems.find(dict);
+    if (iter == dict_to_getitems.end()) {
+      dict_to_getitems.emplace(dict, std::vector<Node*>{getitem_node});
+      continue;
+    }
+    iter->second.push_back(getitem_node);
+  }
+  if (keys.size() == 0) {
+    return;
+  }
+  // Move all keys to the beginning of the graph and insert new dict_unpack
+  // nodes after that.
+  auto* marker = graph->create(prim::Constant);
+  graph->prependNode(marker);
+  graph->setInsertPoint(marker);
+  for (Node* key : keys) {
+    DCHECK(key->inputs().size() == 0);
+    key->moveBefore(marker);
+  }
+  const c10::Symbol static_runtime_dict_unpack_symbol =
+      c10::Symbol::fromQualString("static_runtime::dict_unpack");
+  for (auto& it : dict_to_getitems) {
+    Value* dict = it.first;
+    std::vector<Node*>& getitems = it.second;
+    DCHECK(getitems.size() > 0);
+    auto* dict_unpack =
+        graph->create(static_runtime_dict_unpack_symbol, getitems.size());
+    graph->insertNode(dict_unpack);
+    dict_unpack->addInput(getitems[0]->input(0));
+    for (size_t i = 0; i < getitems.size(); ++i) {
+      Node* getitem_node = getitems[i];
+      DCHECK(getitem_node->input(0) == dict);
+      dict_unpack->addInput(getitem_node->input(1));
+      dict_unpack->output(i)->copyMetadata(getitem_node->output());
+      getitem_node->output(0)->replaceAllUsesWith(dict_unpack->output(i));
+      getitem_node->destroy();
+    }
+  }
+  graph->setInsertPoint(graph->block());
+  marker->destroy();
 }
 
 } // namespace jit

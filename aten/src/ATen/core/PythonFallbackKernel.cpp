@@ -1,6 +1,6 @@
 #include <torch/library.h>
 #include <ATen/core/dispatch/Dispatcher.h>
-#include <ATen/PythonModeTLS.h>
+#include <ATen/core/PythonModeTLS.h>
 
 namespace {
 

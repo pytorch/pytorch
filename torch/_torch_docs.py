@@ -149,7 +149,7 @@ add_docstr(torch.absolute,
 absolute(input, *, out=None) -> Tensor
 
 Alias for :func:`torch.abs`
-""".format(**common_args))
+""")
 
 add_docstr(torch.acos, r"""
 acos(input, *, out=None) -> Tensor
@@ -211,7 +211,7 @@ add_docstr(torch.arccosh, r"""
 arccosh(input, *, out=None) -> Tensor
 
 Alias for :func:`torch.acosh`.
-""".format(**common_args))
+""")
 
 add_docstr(torch.add, r"""
 add(input, other, *, alpha=1, out=None) -> Tensor
@@ -1856,6 +1856,13 @@ Example::
              -0.5790,  0.1497]])
 """.format(**common_args))
 
+add_docstr(torch.concat,
+           r"""
+concat(tensors, dim=0, *, out=None) -> Tensor
+
+Alias of :func:`torch.cat`.
+""")
+
 add_docstr(torch.ceil,
            r"""
 ceil(input, *, out=None) -> Tensor
@@ -2262,7 +2269,7 @@ add_docstr(torch.clip, r"""
 clip(input, min=None, max=None, *, out=None) -> Tensor
 
 Alias for :func:`torch.clamp`.
-""".format(**common_args))
+""")
 
 add_docstr(torch.column_stack,
            r"""
@@ -4329,92 +4336,15 @@ add_docstr(torch.igamma,
            r"""
 igamma(input, other, *, out=None) -> Tensor
 
-Computes the regularized lower incomplete gamma function:
-
-.. math::
-    \text{out}_{i} = \frac{1}{\Gamma(\text{input}_i)} \int_0^{\text{other}_i} t^{\text{input}_i-1} e^{-t} dt
-
-where both :math:`\text{input}_i` and :math:`\text{other}_i` are weakly positive
-and at least one is strictly positive.
-If both are zero or either is negative then :math:`\text{out}_i=\text{nan}`.
-:math:`\Gamma(\cdot)` in the equation above is the gamma function,
-
-.. math::
-    \Gamma(\text{input}_i) = \int_0^\infty t^{(\text{input}_i-1)} e^{-t} dt.
-
-See :func:`torch.igammac` and :func:`torch.lgamma` for related functions.
-
-Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`
-and float inputs.
-
-.. note::
-    The backward pass with respect to :attr:`input` is not yet supported.
-    Please open an issue on PyTorch's Github to request it.
-
-""" + r"""
-Args:
-    input (Tensor): the first non-negative input tensor
-    other (Tensor): the second non-negative input tensor
-
-Keyword args:
-    {out}
-
-Example::
-
-    >>> a1 = torch.tensor([4.0])
-    >>> a2 = torch.tensor([3.0, 4.0, 5.0])
-    >>> a = torch.igammac(a1, a2)
-    tensor([0.3528, 0.5665, 0.7350])
-    tensor([0.3528, 0.5665, 0.7350])
-    >>> b = torch.igamma(a1, a2) + torch.igammac(a1, a2)
-    tensor([1., 1., 1.])
-
-""".format(**common_args))
+Alias for :func:`torch.special.gammainc`.
+""")
 
 add_docstr(torch.igammac,
            r"""
 igammac(input, other, *, out=None) -> Tensor
 
-Computes the regularized upper incomplete gamma function:
-
-.. math::
-    \text{out}_{i} = \frac{1}{\Gamma(\text{input}_i)} \int_{\text{other}_i}^{\infty} t^{\text{input}_i-1} e^{-t} dt
-
-where both :math:`\text{input}_i` and :math:`\text{other}_i` are weakly positive
-and at least one is strictly positive.
-If both are zero or either is negative then :math:`\text{out}_i=\text{nan}`.
-:math:`\Gamma(\cdot)` in the equation above is the gamma function,
-
-.. math::
-    \Gamma(\text{input}_i) = \int_0^\infty t^{(\text{input}_i-1)} e^{-t} dt.
-
-See :func:`torch.igamma` and :func:`torch.lgamma` for related functions.
-
-Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`
-and float inputs.
-
-.. note::
-    The backward pass with respect to :attr:`input` is not yet supported.
-    Please open an issue on PyTorch's Github to request it.
-
-""" + r"""
-Args:
-    input (Tensor): the first non-negative input tensor
-    other (Tensor): the second non-negative input tensor
-
-Keyword args:
-    {out}
-
-Example::
-
-    >>> a1 = torch.tensor([4.0])
-    >>> a2 = torch.tensor([3.0, 4.0, 5.0])
-    >>> a = torch.igammac(a1, a2)
-    tensor([0.6472, 0.4335, 0.2650])
-    >>> b = torch.igamma(a1, a2) + torch.igammac(a1, a2)
-    tensor([1., 1., 1.])
-
-""".format(**common_args))
+Alias for :func:`torch.special.gammaincc`.
+""")
 
 add_docstr(torch.index_select,
            r"""
@@ -4461,7 +4391,7 @@ add_docstr(torch.inverse, r"""
 inverse(input, *, out=None) -> Tensor
 
 Alias for :func:`torch.linalg.inv`
-""".format(**common_args))
+""")
 
 add_docstr(torch.isin, r"""
 isin(elements, test_elements, *, assume_unique=False, invert=False) -> Tensor
@@ -5694,7 +5624,7 @@ add_docstr(torch.matrix_power, r"""
 matrix_power(input, n, *, out=None) -> Tensor
 
 Alias for :func:`torch.linalg.matrix_power`
-""".format(**common_args))
+""")
 
 add_docstr(torch.matrix_exp, r"""
 matrix_exp(input) -> Tensor
@@ -5942,14 +5872,16 @@ Example::
     tensor([ 0,  2,  0,  1])
 """.format(**single_dim_common))
 
-add_docstr(torch.mean,
-           r"""
-mean(input) -> Tensor
+add_docstr(torch.mean, r"""
+mean(input, *, dtype=None) -> Tensor
 
 Returns the mean value of all elements in the :attr:`input` tensor.
 
 Args:
     {input}
+
+Keyword args:
+    {dtype}
 
 Example::
 
@@ -5959,7 +5891,7 @@ Example::
     >>> torch.mean(a)
     tensor(0.3367)
 
-.. function:: mean(input, dim, keepdim=False, *, out=None) -> Tensor
+.. function:: mean(input, dim, keepdim=False, *, dtype=None, out=None) -> Tensor
    :noindex:
 
 Returns the mean value of each row of the :attr:`input` tensor in the given
@@ -5974,7 +5906,12 @@ Args:
     {keepdim}
 
 Keyword args:
+    {dtype}
     {out}
+
+.. seealso::
+
+    :func:`torch.nanmean` computes the mean value of `non-NaN` elements.
 
 Example::
 
@@ -5991,6 +5928,48 @@ Example::
             [-0.5085],
             [-0.4599],
             [ 0.1807]])
+""".format(**multi_dim_common))
+
+add_docstr(torch.nanmean, r"""
+nanmean(input, dim=None, keepdim=False, *, dtype=None, out=None) -> Tensor
+
+Computes the mean of all `non-NaN` elements along the specified dimensions.
+
+This function is identical to :func:`torch.mean` when there are no `NaN` values
+in the :attr:`input` tensor. In the presence of `NaN`, :func:`torch.mean` will
+propagate the `NaN` to the output whereas :func:`torch.nanmean` will ignore the
+`NaN` values (`torch.nanmean(a)` is equivalent to `torch.mean(a[~a.isnan()])`).
+
+{keepdim_details}
+
+Args:
+    {input}
+    {dim} If `None`, reduces all dimensions. Default is `None`.
+    {keepdim}
+
+Keyword args:
+    {dtype}
+    {out}
+
+.. seealso::
+
+    :func:`torch.mean` computes the mean value, propagating `NaN`.
+
+Example::
+
+    >>> x = torch.tensor([[torch.nan, 1, 2], [1, 2, 3]])
+    >>> x.mean()
+    tensor(nan)
+    >>> x.nanmean()
+    tensor(1.8000)
+    >>> x.mean(dim=0)
+    tensor([   nan, 1.5000, 2.5000])
+    >>> x.nanmean(dim=0)
+    tensor([1.0000, 1.5000, 2.5000])
+
+    # If all elements in the reduced dimensions are NaN then the result is NaN
+    >>> torch.tensor([torch.nan]).nanmean()
+    tensor(nan)
 """.format(**multi_dim_common))
 
 add_docstr(torch.median,
@@ -6660,7 +6639,7 @@ add_docstr(torch.multiply, r"""
 multiply(input, other, *, out=None)
 
 Alias for :func:`torch.mul`.
-""".format(**common_args))
+""")
 
 add_docstr(torch.multinomial,
            r"""
@@ -7010,7 +6989,7 @@ add_docstr(torch.negative,
 negative(input, *, out=None) -> Tensor
 
 Alias for :func:`torch.neg`
-""".format(**common_args))
+""")
 
 add_docstr(torch.nextafter,
            r"""
@@ -7383,7 +7362,7 @@ add_docstr(torch.polygamma,
 polygamma(n, input, *, out=None) -> Tensor
 
 Alias for :func:`torch.special.polygamma`.
-""".format(**common_args))
+""")
 
 add_docstr(torch.positive,
            r"""
@@ -8242,7 +8221,7 @@ add_docstr(torch.row_stack,
 row_stack(tensors, *, out=None) -> Tensor
 
 Alias of :func:`torch.vstack`.
-""".format(**common_args))
+""")
 
 add_docstr(torch.round,
            r"""
@@ -9691,6 +9670,10 @@ with the default keyword arguments.
 batches of 2D matrices. If the inputs are batches, then returns
 batched outputs `X`
 
+If the diagonal of :attr:`A` contains zeros or elements that are very close to zero and
+:attr:`unitriangular`\ `= False` (default) or if the input matrix is badly conditioned,
+the result may contain `NaN` s.
+
 Supports input of float, double, cfloat and cdouble data types.
 
 Args:
@@ -9967,7 +9950,7 @@ add_docstr(torch.true_divide, r"""
 true_divide(dividend, divisor, *, out) -> Tensor
 
 Alias for :func:`torch.div` with ``rounding_mode=None``.
-""".format(**common_args))
+""")
 
 add_docstr(torch.trunc,
            r"""
@@ -10083,7 +10066,7 @@ add_docstr(torch.fix,
 fix(input, *, out=None) -> Tensor
 
 Alias for :func:`torch.trunc`
-""".format(**common_args))
+""")
 
 add_docstr(torch.unsqueeze,
            r"""
@@ -10869,11 +10852,12 @@ elements :math:`{x_0, x_1, ..., x_n}`, the computation becomes
         \sum_{i = 1}^{n-1} \frac{(x_i - x_{i-1})}{2} (y_i + y_{i-1})
     \end{aligned}
 
-When :attr:`y` is two or more dimensions, this computation is performed independently
-along dimension :attr:`dim`. If :attr:`x` is also specified and is one-dimensional,
-then that dimension defines the spacing for each computation.
-If :attr:`x` is also specified and is not one-dimensional, then it is broadcast to
-the shape of :attr:`y` and the corresponding sizes are used for each computation.
+When :attr:`x` and :attr:`y` have the same size, the computation is as described above and no broadcasting is needed.
+The broadcasting behavior of this function is as follows when their sizes are different. For both :attr:`x`
+and :attr:`y`, the function computes the difference between consecutive elements along
+dimension :attr:`dim`. This effectively creates two tensors, `x_diff` and `y_diff`, that have
+the same shape as the original tensors except their lengths along the dimension :attr:`dim` is reduced by 1.
+After that, those two tensors are broadcast together to compute final output as part of the trapezoidal rule.
 See the examples below for details.
 
 .. note::
