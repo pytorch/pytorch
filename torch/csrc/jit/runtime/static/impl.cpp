@@ -19,6 +19,11 @@
 #include <torch/csrc/jit/runtime/vararg_functions.h>
 #include <stdexcept>
 
+#ifdef FBCODE_CAFFE2
+#include <folly/dynamic.h>
+#include <folly/json.h>
+#endif
+
 namespace torch {
 namespace jit {
 
@@ -78,6 +83,7 @@ void OptimizeGraph(
   }
 #endif
   ConstantPropagation(graph);
+  RemoveImmutableInputDictLookups(graph);
 }
 
 // remove unused input 0 from graph
@@ -159,7 +165,7 @@ FastSet<const Value*> GetAlwaysAliveValues(
 }
 
 //  Map each value to all values that are alive at the same time.
-using LivenessMap = FastMap<const Value*, std::set<const Value*>>;
+using LivenessMap = FastMap<const Value*, FastSet<const Value*>>;
 
 //  The algorithm does a traversal of the execution graph
 //  while keeping track of the live values.
@@ -168,7 +174,7 @@ LivenessMap GetLivenessMap(
     const FastSet<const Value*>& always_alive,
     AliasDb& db) {
   // map a Value to a set of Values that overlap live-ranges with the Value's
-  FastMap<const Value*, std::set<const Value*>> liveness_map;
+  FastMap<const Value*, FastSet<const Value*>> liveness_map;
 
   // map Values to its creation order in graph (Note: only traverse top-level
   // nodes such that nodes under control-flows are represented by top-level
@@ -185,10 +191,10 @@ LivenessMap GetLivenessMap(
   // presence of a Value in live_values_use_chain means the Value alive
   // Value mapped to set of Nodes that may use the Value (i.e., use-chain of
   // Value)
-  FastMap<const Value*, std::set<const Node*>> live_values_use_chain;
+  FastMap<const Value*, FastSet<const Node*>> live_values_use_chain;
   // Node mapped to set of Values that the Node may use (i.e., def-chain of node
   // inputs)
-  FastMap<const Node*, std::set<const Value*>> live_nodes_def_chain;
+  FastMap<const Node*, FastSet<const Value*>> live_nodes_def_chain;
 
   // add v to the current liveness_map
   std::function<void(const Value* v)> add_live_value_fn = [&](const Value* v) {
@@ -411,7 +417,7 @@ FastMap<const Value*, std::vector<const Value*>> GenerateSameStorageValues(
       return;
     }
     DCHECK(same_storage_values.count(old_v));
-    std::set<const Value*> seen;
+    FastSet<const Value*> seen;
     std::vector<const Value*> values;
     for (auto* v : same_storage_values.at(old_v)) {
       if (seen.count(v)) {
@@ -457,10 +463,10 @@ FastMap<const Value*, std::vector<const Value*>> GenerateSameStorageValues(
 
   auto compute_liveset_fn =
       [&always_alive, &alive_during, &same_storage_values](
-          std::set<const Value*>& live, const Value* v) {
+          FastSet<const Value*>& live, const Value* v) {
         for (const auto* sv : same_storage_values.at(v)) {
           const auto& l = alive_during.count(sv) ? alive_during.at(sv)
-                                                 : std::set<const Value*>{};
+                                                 : FastSet<const Value*>{};
           live.insert(l.begin(), l.end());
         }
         live.insert(always_alive.begin(), always_alive.end());
@@ -468,7 +474,7 @@ FastMap<const Value*, std::vector<const Value*>> GenerateSameStorageValues(
 
   // check if same_storage_values[s] intersects with live
   auto intersect_fn = [&same_storage_values](
-                          std::set<const Value*>& live, const Value* s) {
+                          FastSet<const Value*>& live, const Value* s) {
     bool intersect = false;
     for (const auto* v : same_storage_values.at(s)) {
       if (live.count(v)) {
@@ -484,7 +490,7 @@ FastMap<const Value*, std::vector<const Value*>> GenerateSameStorageValues(
       continue;
     }
     // get values that are live during the lifetime of v
-    std::set<const Value*> live;
+    FastSet<const Value*> live;
     compute_liveset_fn(live, v);
     for (const auto* s : seen) {
       // if live(same_storage_values[v]) and same_storage_values[s]
@@ -873,12 +879,30 @@ c10::IValue StaticRuntime::operator()(
   return std::move(*outputs_[0]);
 }
 
+namespace {
+
+std::string generate_latency_json(const std::string& label, double millis) {
+#ifdef FBCODE_CAFFE2
+  folly::dynamic json = folly::dynamic::object();
+  json["type"] = label;
+  json["metric"] = "latency";
+  json["unit"] = "ms";
+  json["value"] = millis;
+  return "PyTorchObserver " + folly::toJson(json);
+#else
+  return "";
+#endif
+}
+
+} // namespace
+
 void StaticRuntime::benchmark(
     const std::vector<c10::IValue>& args,
     const std::unordered_map<std::string, c10::IValue>& kwargs,
     const int warmup_runs,
     const int main_runs,
-    bool print_per_node_time) {
+    bool print_per_node_time,
+    bool generate_ai_pep_output) {
   float time_per_iter = benchmark_model(args, kwargs, warmup_runs, main_runs);
   std::cout << "Static runtime ms per iter: " << time_per_iter
             << ". Iters per second: " << 1000.0 / time_per_iter << std::endl;
@@ -916,6 +940,14 @@ void StaticRuntime::benchmark(
     } else {
       std::cout << ")" << std::endl;
     }
+
+    if (generate_ai_pep_output) {
+      LOG(INFO) << generate_latency_json(kind, ms);
+    }
+  }
+  if (generate_ai_pep_output) {
+    LOG(INFO) << generate_latency_json(
+        "static_runtime_first_iter", results.first_iter_time);
   }
   std::cout << std::setw(15) << results.total_time << " ms. in Total"
             << std::endl;
@@ -927,6 +959,8 @@ void StaticRuntime::benchmark(
             << " ms" << std::endl;
   std::cout << "Outputs deallocation time: " << results.output_dealloc_time
             << " ms" << std::endl;
+  std::cout << "First iter time: " << results.first_iter_time << " ms"
+            << std::endl;
 
   if (planner_) {
     std::cout << "Total memory managed: " << planner_->total_managed()
@@ -1057,7 +1091,7 @@ StaticRuntime::IndividualMetrics StaticRuntime::benchmark_individual_ops(
     const std::unordered_map<std::string, c10::IValue>& kwargs,
     const int warmup_runs,
     const int main_runs) {
-  TORCH_CHECK(warmup_runs >= 0 && main_runs >= 1);
+  TORCH_CHECK(warmup_runs >= 1 && main_runs >= 1);
 
   // See comment on above use of InferenceMode for
   // explanation.
@@ -1073,8 +1107,15 @@ StaticRuntime::IndividualMetrics StaticRuntime::benchmark_individual_ops(
 
   results.setup_time = timer.MilliSeconds();
 
+  // The first iteration profiles each node's output Tensors' sizes and
+  // initializes the memory planner with the profile information. Folllowing
+  // iterations just use the already established memory planning.
+  timer.Start();
+  operator()(args, kwargs);
+  results.first_iter_time = timer.MilliSeconds();
+
   // warmup runs
-  for (const auto i : c10::irange(warmup_runs)) {
+  for (const auto i : c10::irange(warmup_runs - 1)) {
     (void)i; // Suppress unused variable warning
     operator()(args, kwargs);
   }
@@ -1422,7 +1463,7 @@ ProcessedNode::ProcessedNode(
 }
 
 void ProcessedNode::run() {
-  DCHECK(verify_outputs_not_overlapping_with_immutable_inputs());
+  DCHECK(verify_no_memory_overlap());
   if (fn_) {
     fn_(this);
   } else if (native_fn_) {
@@ -1449,8 +1490,35 @@ void ProcessedNode::run() {
   }
 }
 
-bool ProcessedNode::verify_outputs_not_overlapping_with_immutable_inputs()
-    const {
+static bool checkNoMemoryOverlap(const at::Tensor& a, const at::Tensor& b) {
+  at::MemOverlapStatus status = at::get_overlap_status(a, b);
+  if (status == at::MemOverlapStatus::FULL ||
+      status == at::MemOverlapStatus::PARTIAL) {
+    return false;
+  }
+  if (status == at::MemOverlapStatus::TOO_HARD) {
+    LOG(WARNING) << "Detected TOO_HARD memory overlap status";
+  }
+  return true;
+}
+
+bool ProcessedNode::verify_no_memory_overlap() const {
+  for (size_t i = 0; i < outputs_.size(); ++i) {
+    if (!outputs_[i].isTensor()) {
+      continue;
+    }
+    const auto& out0_t = outputs_[i].toTensor();
+    for (size_t j = i + 1; j < outputs_.size(); ++j) {
+      if (!outputs_[j].isTensor()) {
+        continue;
+      }
+      const auto& out1_t = outputs_[j].toTensor();
+      if (!checkNoMemoryOverlap(out0_t, out1_t)) {
+        return false;
+      }
+    }
+  }
+
   auto schema = node()->maybeSchema();
   if (!schema || schema->is_mutable()) {
     return true;
@@ -1465,8 +1533,7 @@ bool ProcessedNode::verify_outputs_not_overlapping_with_immutable_inputs()
         continue;
       }
       const auto& out_t = out.toTensor();
-      at::MemOverlapStatus status = at::get_overlap_status(in_t, out_t);
-      if (status != at::MemOverlapStatus::NO) {
+      if (!checkNoMemoryOverlap(in_t, out_t)) {
         return false;
       }
     }

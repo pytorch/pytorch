@@ -57,7 +57,15 @@ std::string concrete_name_fn(const c10::impl::PyInterpreter* self) {
   return ss.str();
 }
 
-void concrete_decref_fn(const c10::impl::PyInterpreter* self, PyObject* pyobj) {
+// NOTE [PyInterpreter::decref takes an `is_tensor` arg]
+// Before calling PyInterpreter::decref, we must statically know if the
+// pyobj is a Tensor or not.
+// - If it is a tensor, we need to be careful about PyObject resurrection
+// - If it is not a tensor, we can freely decref
+// One alternative to this is using PyObject_IsInstance
+// to get at this information. However, we don't want to risk an incorrect
+// `__instancecheck__` changing the semantics here.
+void concrete_decref_fn(const c10::impl::PyInterpreter* self, PyObject* pyobj, bool is_tensor) {
   // Leak the pyobj if not initialized.  This can happen if we are running
   // exit handlers that are destructing tensors with residual (owned)
   // PyObjects stored in them.
@@ -70,7 +78,7 @@ void concrete_decref_fn(const c10::impl::PyInterpreter* self, PyObject* pyobj) {
   // PyObject resurrection (this only applies to Tensors, see THPVariable_clear).
   // 2. We are decref-ing some other Python object. We don't do
   // PyObject resurrection on non-Tensors, so we just carry on as usual
-  if (THPVariable_Check(pyobj) && Py_REFCNT(pyobj) > 1) {
+  if (is_tensor && Py_REFCNT(pyobj) > 1) {
     // It's still alive!  This can happen if a weak ref resurrected
     // the PyObject without flipping ownership.  At this point it is
     // too late to rescue the object, so just stub out the PyObject
@@ -127,6 +135,11 @@ PyObject *THPVariableClass = nullptr;
 
 PyObject *ParameterClass = nullptr;
 
+static PyObject* THPVariable_NewWithVar(
+    PyTypeObject* type,
+    Variable _var,
+    c10::impl::PyInterpreterStatus status);
+
 // clang-tidy gets confused by static const
 static const char* VOLATILE_WARNING =
     "volatile was removed and now has no effect. Use "
@@ -141,34 +154,8 @@ static bool check_has_torch_dispatch(PyObject *obj) {
   );
 }
 
-// Creates a new Python object for a Variable.  The status parameter
-// specifies what the interpreter tag status on the object is; for
-// example, if you ran check_pyobj, the return optional of this object
-// tells you if the tensor was already tagged or not so you can pass
-// TAGGED_BY_US or MAYBE_UNINITIALIZED; in other cases, you know where
-// var came from and can directly assert that it's DEFINITELY_UNINITIALIZED.
-// It's ALWAYS safe (albeit slower) to call this with MAYBE_UNINITIALIZED.
-static PyObject* THPVariable_NewWithVar(
-    PyTypeObject* type,
-    Variable _var,
-    c10::impl::PyInterpreterStatus status) {
-  PyObject* obj = type->tp_alloc(type, 0);
-  if (obj) {
-    auto v = (THPVariable*) obj;
-    // TODO: named constructor to avoid default initialization
-    new (&v->cdata) MaybeOwned<Variable>();
-    v->cdata = MaybeOwned<Variable>::owned(std::move(_var));
-    const auto& var = THPVariable_Unpack(v);
-    var.unsafeGetTensorImpl()->init_pyobj(self_interpreter.get(), obj, status);
-    if (check_has_torch_dispatch(obj)) {
-      var.unsafeGetTensorImpl()->set_python_dispatch(true);
-    }
-  }
-  return obj;
-}
-
 // TODO: Make this take Variable by const reference
-PyObject * THPVariable_Wrap(Variable var)
+PyObject * THPVariable_Wrap(at::TensorBase var)
 {
   if (!var.defined()) {
     Py_RETURN_NONE;
@@ -507,6 +494,8 @@ int THPVariable_set_grad(THPVariable *self, PyObject *py_grad, void *unused)
     return 0;
   }
 
+  TORCH_CHECK_TYPE(THPVariable_Check(py_grad),
+      "assigned grad expected to be a Tensor or None but got grad of type", THPUtils_typename(py_grad));
   THPUtils_assertRet(-1, self != (THPVariable*)py_grad,
       "can't assign Variable as its own grad");
 
@@ -1270,6 +1259,43 @@ void THPVariable_subclass_dealloc(PyObject* self) {
   // Python defined subclasses should always be on the heap
   TORCH_INTERNAL_ASSERT(type->tp_flags & Py_TPFLAGS_HEAPTYPE);
   Py_DECREF(type);
+}
+
+// Creates a new Python object for a Variable.  The status parameter
+// specifies what the interpreter tag status on the object is; for
+// example, if you ran check_pyobj, the return optional of this object
+// tells you if the tensor was already tagged or not so you can pass
+// TAGGED_BY_US or MAYBE_UNINITIALIZED; in other cases, you know where
+// var came from and can directly assert that it's DEFINITELY_UNINITIALIZED.
+// It's ALWAYS safe (albeit slower) to call this with MAYBE_UNINITIALIZED.
+static PyObject* THPVariable_NewWithVar(
+    PyTypeObject* type,
+    Variable _var,
+    c10::impl::PyInterpreterStatus status) {
+  // This function overwrite the Tensor's pyobj field without extra checks
+  // Make sure it is not set otherwise we would leak memory
+  auto mb_obj = _var.unsafeGetTensorImpl()->check_pyobj(self_interpreter.get());
+  TORCH_CHECK(!mb_obj.has_value() || !mb_obj.value(), "Creating a new Tensor subclass ",
+    type->tp_name, " but the raw Tensor object is already associated to a python object ",
+    "of type ", mb_obj.value()->ob_type->tp_name);
+
+  // Make sure that the reinterpret into a THPVariable* will be valid
+  TORCH_CHECK(PyType_IsSubtype(type, &THPVariableType), "Creating a Tensor subclass from a class ",
+    "that does not inherit from Tensor is not possible. Make sure your class inherits from Tensor.");
+
+  PyObject* obj = type->tp_alloc(type, 0);
+  if (obj) {
+    auto v = (THPVariable*) obj;
+    // TODO: named constructor to avoid default initialization
+    new (&v->cdata) MaybeOwned<Variable>();
+    v->cdata = MaybeOwned<Variable>::owned(std::move(_var));
+    const auto& var = THPVariable_Unpack(v);
+    var.unsafeGetTensorImpl()->init_pyobj(self_interpreter.get(), obj, status);
+    if (check_has_torch_dispatch(obj)) {
+      var.unsafeGetTensorImpl()->set_python_dispatch(true);
+    }
+  }
+  return obj;
 }
 
 /// NOTE [ PyObject Traversal ]
