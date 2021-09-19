@@ -115,6 +115,11 @@ MemoryPlanner::MemoryPlanner(
         value_to_same_storage_values,
         managed_tensors_);
   }
+
+  num_managed_tensors_ = 0;
+  for (const auto& ms : managed_tensors_) {
+    num_managed_tensors_ += ms.second.size();
+  }
 }
 
 // Don't change the size if it is already aligned, otherwise increase the size
