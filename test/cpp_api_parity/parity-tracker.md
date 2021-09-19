@@ -99,6 +99,7 @@ torch::nn::Identity|Yes|No
 torch::nn::Linear|Yes|No
 torch::nn::Bilinear|Yes|No
 torch::nn::Flatten|Yes|No
+torch::nn::Unflatten|Yes|No
 torch::nn::Dropout|Yes|No
 torch::nn::Dropout2d|Yes|No
 torch::nn::Dropout3d|Yes|No
