@@ -48,9 +48,18 @@ class MemoryPlanner {
   void allocate();
   void deallocate();
 
+  size_t total_num_managed_tensors() const {
+    return num_managed_tensors_;
+  }
+
+  size_t total_num_unmanaged() const {
+    return unmanaged_ivalues_.size();
+  }
+
   size_t total_managed() const {
     return managed_bytes_;
   }
+
   size_t total_reused_tensors() const {
     return reused_tensors_;
   }
@@ -64,6 +73,7 @@ class MemoryPlanner {
   // Thus, if memonger is disabled, all vectors are of size 1.
   std::vector<std::pair<size_t, std::vector<at::Tensor*>>> managed_tensors_;
   at::DataPtr buffer_; // allocated each time we call Run()
+  size_t num_managed_tensors_{0};
   size_t managed_bytes_{0};
   size_t reused_tensors_{0};
 
