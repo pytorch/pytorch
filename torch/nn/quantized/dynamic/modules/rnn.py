@@ -53,11 +53,11 @@ class RNNBase(torch.nn.Module):
         # "type: ignore" is required since ints and Numbers are not fully comparable
         # https://github.com/python/mypy/issues/8566
         if not isinstance(dropout, numbers.Number) \
-                or not 0 <= dropout <= 1 or isinstance(dropout, bool):  # type: ignore
+                or not 0 <= dropout <= 1 or isinstance(dropout, bool):  # type: ignore[operator]
             raise ValueError("dropout should be a number in range [0, 1] "
                              "representing the probability of an element being "
                              "zeroed")
-        if dropout > 0 and num_layers == 1:  # type: ignore
+        if dropout > 0 and num_layers == 1:  # type: ignore[operator]
             warnings.warn("dropout option adds dropout after all but last "
                           "recurrent layer, so non-zero dropout expects "
                           "num_layers greater than 1, but got dropout={} and "
@@ -386,7 +386,7 @@ class LSTM(RNNBase):
     @torch.jit.export
     def forward_packed(
         self, input: PackedSequence, hx: Optional[Tuple[Tensor, Tensor]] = None
-    ) -> Tuple[PackedSequence, Tuple[Tensor, Tensor]]:  # noqa
+    ) -> Tuple[PackedSequence, Tuple[Tensor, Tensor]]:
         input_, batch_sizes, sorted_indices, unsorted_indices = input
         max_batch_size = batch_sizes[0]
         max_batch_size = int(max_batch_size)
@@ -399,7 +399,7 @@ class LSTM(RNNBase):
         return output, self.permute_hidden(hidden, unsorted_indices)
 
     # "type: ignore" is required due to issue #43072
-    def permute_hidden(  # type: ignore
+    def permute_hidden(  # type: ignore[override]
         self, hx: Tuple[Tensor, Tensor], permutation: Optional[Tensor]
     ) -> Tuple[Tensor, Tensor]:
         if permutation is None:
@@ -407,7 +407,7 @@ class LSTM(RNNBase):
         return apply_permutation(hx[0], permutation), apply_permutation(hx[1], permutation)
 
     # "type: ignore" is required due to issue #43072
-    def check_forward_args(  # type: ignore
+    def check_forward_args(  # type: ignore[override]
         self, input: Tensor, hidden: Tuple[Tensor, Tensor], batch_sizes: Optional[Tensor]
     ) -> None:
         self.check_input(input, batch_sizes)
@@ -614,7 +614,7 @@ class GRU(RNNBase):
     @torch.jit.export
     def forward_packed(
         self, input: PackedSequence, hx: Optional[Tensor] = None
-    ) -> Tuple[PackedSequence, Tensor]:  # noqa
+    ) -> Tuple[PackedSequence, Tensor]:
         input_, batch_sizes, sorted_indices, unsorted_indices = input
         max_batch_size = batch_sizes[0]
         max_batch_size = int(max_batch_size)
@@ -625,7 +625,7 @@ class GRU(RNNBase):
                                 sorted_indices, unsorted_indices)
         return output, self.permute_hidden(hidden, unsorted_indices)
 
-    def permute_hidden(  # type: ignore
+    def permute_hidden(
         self, hx: Tensor, permutation: Optional[Tensor]
     ) -> Tensor:
         if permutation is None:
@@ -883,7 +883,7 @@ class LSTMCell(RNNCellBase):
     """
 
     def __init__(self, *args, **kwargs):
-        super(LSTMCell, self).__init__(*args, num_chunks=4, **kwargs)  # type: ignore
+        super(LSTMCell, self).__init__(*args, num_chunks=4, **kwargs)  # type: ignore[misc]
 
     def _get_name(self):
         return 'DynamicQuantizedLSTMCell'

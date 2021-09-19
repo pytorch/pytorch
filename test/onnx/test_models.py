@@ -129,7 +129,7 @@ class TestModels(TestCase):
 
     @unittest.skip("This model takes too much memory")
     def test_vgg19_bn(self):
-        # VGG 19-layer model (configuration 'E') with batch normalization
+        # VGG 19-layer model (configuration "E") with batch normalization
         x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
         self.exportTest(toC(vgg19_bn()), toC(x))
 
@@ -140,8 +140,7 @@ class TestModels(TestCase):
 
     @disableScriptTest()  # None type in outputs
     def test_inception(self):
-        x = Variable(
-            torch.randn(BATCH_SIZE, 3, 299, 299) + 1.)
+        x = Variable(torch.randn(BATCH_SIZE, 3, 299, 299))
         self.exportTest(toC(inception_v3()), toC(x))
 
     def test_squeezenet(self):
@@ -166,14 +165,14 @@ class TestModels(TestCase):
     def test_dcgan_netD(self):
         netD = _netD(1)
         netD.apply(weights_init)
-        input = Variable(torch.Tensor(bsz, 3, imgsz, imgsz).normal_(0, 1))
+        input = Variable(torch.empty(bsz, 3, imgsz, imgsz).normal_(0, 1))
         self.exportTest(toC(netD), toC(input))
 
     @disableScriptTest()
     def test_dcgan_netG(self):
         netG = _netG(1)
         netG.apply(weights_init)
-        input = Variable(torch.Tensor(bsz, nz, 1, 1).normal_(0, 1))
+        input = Variable(torch.empty(bsz, nz, 1, 1).normal_(0, 1))
         self.exportTest(toC(netG), toC(input))
 
     @skipIfUnsupportedMinOpsetVersion(10)
@@ -264,5 +263,5 @@ class TestModels(TestCase):
         self.exportTest(toC(r2plus1d_18()), toC(x), rtol=1e-3, atol=1e-5)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     run_tests()

@@ -4,6 +4,7 @@
 namespace nom {
 namespace repr {
 
+// NOLINTNEXTLINE(modernize-use-equals-default)
 NeuralNetOperator::~NeuralNetOperator() {}
 
 const std::string NeuralNetOperator::getName() const {
@@ -20,6 +21,7 @@ const std::string NeuralNetOperator::getName() const {
   }
 }
 
+// NOLINTNEXTLINE(modernize-use-equals-default)
 NeuralNetData::~NeuralNetData() {}
 
 const std::string NeuralNetData::getName() const {
@@ -313,6 +315,7 @@ void coalesceInsertedDataDependencies(repr::NNModule* m) {
   // Finally we reconcile any data dependency issues (if we can).
   for (auto& bbNode : m->controlFlow.getMutableNodes()) {
     auto bb = bbNode->mutableData();
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     int permutation;
     do {
       permutation = 0;

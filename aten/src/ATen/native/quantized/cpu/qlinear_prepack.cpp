@@ -8,6 +8,9 @@
 #include <ATen/quantized/Quantizer.h>
 #include <torch/custom_class.h>
 #include <torch/library.h>
+
+#include <c10/util/irange.h>
+
 #include <algorithm>
 #include <vector>
 
@@ -26,9 +29,9 @@ void calc_col_offsets_transpose(
     int32_t* B_zero_point,
     int32_t* col_offsets,
     c10::QScheme qtype) {
-  for (size_t i = 0; i < N; ++i) {
+  for (const auto i : c10::irange(N)) {
     int32_t sum = 0;
-    for (size_t j = 0; j < K; ++j) {
+    for (const auto j : c10::irange(K)) {
       sum += Bint8[i * K + j];
     }
     if (qtype == c10::kPerTensorAffine) {
@@ -59,7 +62,7 @@ c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeight::prepack(
     weight_zero_points_int32[0] = weight.q_zero_point();
   } else if (qtype == c10::kPerChannelAffine) {
     weight_zero_points_int32.resize(N, 0);
-    for (int i = 0; i < N; ++i) {
+    for (const auto i : c10::irange(N)) {
       weight_zero_points_int32[i] =
           weight.q_per_channel_zero_points()[i].item<int32_t>();
     }
@@ -69,7 +72,7 @@ c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeight::prepack(
     weight_scales_float[0] = weight.q_scale();
   } else if (qtype == c10::kPerChannelAffine) {
     weight_scales_float.resize(N, 0.0);
-    for (int i = 0; i < N; ++i) {
+    for (const auto i : c10::irange(N)) {
       weight_scales_float[i] = weight.q_per_channel_scales()[i].item<float>();
     }
   }
@@ -195,7 +198,8 @@ namespace at {
 namespace native {
 
 at::Tensor _saturate_weight_to_fp16(const Tensor& weight) {
-  float* weight_contig_ptr = weight.contiguous().data_ptr<float>();
+  Tensor weight_contig = weight.contiguous();
+  float* weight_contig_ptr = weight_contig.data_ptr<float>();
   quant_utils::HandleWeightsSaturation(weight.size(0) * weight.size(1), weight_contig_ptr);
   return weight;
 }
@@ -291,8 +295,8 @@ class QLinearPackWeightFp16Legacy final {
  public:
   static Tensor run(at::Tensor weight, c10::optional<Tensor> bias) {
     auto& ctx = at::globalContext();
-    auto options = weight.options();
 #ifdef USE_FBGEMM
+    auto options = weight.options();
     if (ctx.qEngine() == at::QEngine::FBGEMM) {
       auto prepacked =
           PackedLinearWeightFp16::prepack(std::move(weight), std::move(bias));

@@ -6,6 +6,7 @@
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/util/Exception.h>
 #include <c10/util/hash.h>
+#include <c10/util/irange.h>
 
 #include <THC/THC.h>
 
@@ -89,7 +90,7 @@ ncclDataType_t to_nccl_data_type(c10::ScalarType type) {
       return ncclDataType_t::ncclUint8;
     case at::kBool:
       return ncclDataType_t::ncclUint8;
-#if defined(__HIP_PLATFORM_HCC__) && HIP_VERSION >= 301
+#if defined(__HIP_PLATFORM_HCC__) && TORCH_HIP_VERSION >= 301
     case at::kBFloat16:
       return ncclDataType_t::ncclBfloat16;
 #endif
@@ -153,7 +154,7 @@ struct NcclCommList {
   NcclCommList(NcclCommList&& foo) = default;
   ~NcclCommList() {
     if (comms) {
-      for (int i = 0; i < ndevices; i++) {
+      for(const auto i : c10::irange(ndevices)) {
         int dummy_var;
         if (cudaGetDevice(&dummy_var) != cudaSuccess) {
           /* there are cases when this destructor is called after the
@@ -257,7 +258,7 @@ void check_inputs(
   int64_t numel = inputs[0].numel();
   auto dtype = inputs[0].scalar_type();
 
-  for (size_t i = 0; i < len; i++) {
+  for(const auto i : c10::irange(len)) {
     auto input = inputs[i];
     auto output = outputs[i];
 
@@ -288,7 +289,7 @@ void check_inputs(
   int64_t numel = inputs[0].numel();
   auto dtype = inputs[0].scalar_type();
 
-  for (size_t i = 0; i < len; i++) {
+  for(const auto i : c10::irange(len)) {
     auto input = inputs[i];
 
     check_tensor(
@@ -328,9 +329,13 @@ bool is_available(TensorList tensors) {
 
 std::uint64_t version() {
 #if defined(NCCL_MAJOR)
-  return NCCL_MAJOR * 1000 + NCCL_MINOR * 100 + NCCL_PATCH;
+  constexpr std::uint64_t ver = (((uint64_t) NCCL_MAJOR) << 32) |
+                                (((uint64_t) NCCL_MINOR) << 16) |
+                                ((uint64_t) NCCL_PATCH);
+  return ver;
 #elif defined(USE_NCCL)
-  return 1000;
+  // return major version "1"
+  return ((uint64_t) 1) << 32;
 #else
   return 0;
 #endif
@@ -464,7 +469,7 @@ void reduce(
 
   AutoNcclGroup nccl_group_guard;
   at::cuda::OptionalCUDAGuard device_guard;
-  for (size_t i = 0; i < len; i++) {
+  for(const auto i : c10::irange(len)) {
     int device = inputs[i].device().index();
     device_guard.set_index(device);
     // Default to the current stream
@@ -516,7 +521,7 @@ void all_reduce(
 
   AutoNcclGroup nccl_group_guard;
   at::cuda::OptionalCUDAGuard device_guard;
-  for (size_t i = 0; i < len; i++) {
+  for(const auto i : c10::irange(len)) {
     int device = inputs[i].device().index();
     device_guard.set_index(device);
     // Default to the current stream
@@ -558,7 +563,7 @@ void reduce_scatter(
 
   AutoNcclGroup nccl_group_guard;
   at::cuda::OptionalCUDAGuard device_guard;
-  for (size_t i = 0; i < len; i++) {
+  for(const auto i : c10::irange(len)) {
     int device = inputs[i].device().index();
     device_guard.set_index(device);
     // Default to the current stream
@@ -599,7 +604,7 @@ void all_gather(
 
   AutoNcclGroup nccl_group_guard;
   at::cuda::OptionalCUDAGuard device_guard;
-  for (size_t i = 0; i < len; i++) {
+  for(const auto i : c10::irange(len)) {
     int device = inputs[i].device().index();
     device_guard.set_index(device);
     // Default to the current stream
@@ -649,7 +654,7 @@ void all2all_single_equal_split(at::Tensor& input,
   auto comm = to_nccl_comm(_comm);
   NCCL_CHECK(ncclCommCount(comm, &numranks));
   NCCL_CHECK(ncclGroupStart());
-  for (int r = 0; r < numranks; r++) {
+  for(const auto r : c10::irange(numranks)) {
     // NCCL uses 0 byte message for synchronization
     // Avoid send/recv when message size is zero
     if (count != 0) {
@@ -686,7 +691,7 @@ void all2all_single_unequal_split(
   int numranks;
   NCCL_CHECK(ncclCommCount(comm, &numranks));
   NCCL_CHECK(ncclGroupStart());
-  for (int r = 0; r < numranks; r++) {
+  for(const auto r : c10::irange(numranks)) {
     // NCCL uses 0 byte message for synchronization
     // Avoid send/recv when message size is zero
     if (sendcounts[r] != 0) {
@@ -727,7 +732,7 @@ void all2all(std::vector<at::Tensor>& outputTensors,
   auto comm = to_nccl_comm(_comm);
 
   NCCL_CHECK(ncclGroupStart());
-  for (size_t r = 0; r < outputTensors.size(); r++) {
+  for(const auto r : c10::irange(outputTensors.size())) {
     at::Tensor &input = inputTensors[r];
     at::Tensor &output = outputTensors[r];
     if (input.numel() != 0) {

@@ -9,6 +9,7 @@
 #include <c10/core/Allocator.h>
 #include <c10/core/CPUAllocator.h>
 #include <c10/core/Backend.h>
+#include <c10/util/Exception.h>
 
 #include "caffe2/core/common.h"
 #include "caffe2/core/logging.h"
@@ -52,18 +53,21 @@ size_t PyTorchStreamReader::read(uint64_t pos, char* buf, size_t n) {
   return in_->read(pos, buf, n, "reading file");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 PyTorchStreamReader::PyTorchStreamReader(const std::string& file_name)
     : ar_(std::make_unique<mz_zip_archive>()),
       in_(std::make_unique<FileAdapter>(file_name)) {
   init();
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 PyTorchStreamReader::PyTorchStreamReader(std::istream* in)
     : ar_(std::make_unique<mz_zip_archive>()),
       in_(std::make_unique<IStreamAdapter>(in)) {
   init();
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 PyTorchStreamReader::PyTorchStreamReader(
     std::shared_ptr<ReadAdapterInterface> in)
     : ar_(std::make_unique<mz_zip_archive>()), in_(std::move(in)) {
@@ -80,6 +84,7 @@ void PyTorchStreamReader::init() {
   // check for the old magic number,
   constexpr size_t kMagicValueLength = 8;
   if (size > kMagicValueLength) {
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
     char buf[kMagicValueLength];
     read(0, buf, kMagicValueLength);
     valid("checking magic number");
@@ -114,6 +119,7 @@ void PyTorchStreamReader::init() {
 
   // version check
   at::DataPtr version_ptr;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   size_t version_size;
   if (hasRecord(".data/version")) {
     std::tie(version_ptr, version_size) = getRecord(".data/version");
@@ -124,6 +130,7 @@ void PyTorchStreamReader::init() {
   std::string version(static_cast<const char*>(version_ptr.get()), version_size);
   version_ = caffe2::stoull(version);
   AT_ASSERTM(
+      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
       version_ >= kMinSupportedFileFormatVersion,
       "Attempted to read a PyTorch file with version ",
       c10::to_string(version_),
@@ -131,6 +138,7 @@ void PyTorchStreamReader::init() {
       c10::to_string(kMinSupportedFileFormatVersion),
       ". Your PyTorch script module file is too old. Please re-export it again.");
   AT_ASSERTM(
+      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
       version_ <= kMaxSupportedFileFormatVersion,
       "Attempted to read a PyTorch file with version ",
       version_,
@@ -140,15 +148,14 @@ void PyTorchStreamReader::init() {
 }
 
 void PyTorchStreamReader::valid(const char* what, const char* info) {
-  auto err = mz_zip_get_last_error(ar_.get());
-  if (err != MZ_ZIP_NO_ERROR) {
-    CAFFE_THROW(
-        "PytorchStreamReader failed ",
-        what,
-        info,
-        ": ",
-        mz_zip_get_error_string(err));
-  }
+  const auto err = mz_zip_get_last_error(ar_.get());
+  TORCH_CHECK(
+      err == MZ_ZIP_NO_ERROR,
+      "PytorchStreamReader failed ",
+      what,
+      info,
+      ": ",
+      mz_zip_get_error_string(err));
 }
 
 constexpr int MZ_ZIP_LOCAL_DIR_HEADER_SIZE = 30;
@@ -189,19 +196,27 @@ size_t getPadding(
 }
 
 bool PyTorchStreamReader::hasRecord(const std::string& name) {
+  std::lock_guard<std::mutex> guard(reader_lock_);
   std::string ss = archive_name_plus_slash_ + name;
   mz_zip_reader_locate_file(ar_.get(), ss.c_str(), nullptr, 0);
-  bool result = ar_->m_last_error != MZ_ZIP_FILE_NOT_FOUND;
-  if (!result) {
-    ar_->m_last_error = MZ_ZIP_NO_ERROR;
+  const mz_zip_error err = mz_zip_get_last_error(ar_.get());
+
+  if (err == MZ_ZIP_NO_ERROR) {
+    return true;
+  } else if (err == MZ_ZIP_FILE_NOT_FOUND) {
+    return false;
+  } else {
+    // A different error happened, raise it.
+    valid("attempting to locate file ", name.c_str());
   }
-  valid("attempting to locate file ", name.c_str());
-  return result;
+  TORCH_INTERNAL_ASSERT(false, "should not reach here");
 }
 
 std::vector<std::string> PyTorchStreamReader::getAllRecords() {
+  std::lock_guard<std::mutex> guard(reader_lock_);
   mz_uint num_files = mz_zip_reader_get_num_files(ar_.get());
   std::vector<std::string> out;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
   char buf[MZ_ZIP_MAX_ARCHIVE_FILENAME_SIZE];
   for (size_t i = 0; i < num_files; i++) {
     mz_zip_reader_get_filename(ar_.get(), i, buf, MZ_ZIP_MAX_ARCHIVE_FILENAME_SIZE);
@@ -215,23 +230,27 @@ std::vector<std::string> PyTorchStreamReader::getAllRecords() {
           ": ",
           buf);
     }
+    // NOLINTNEXTLINE(modernize-use-emplace)
     out.push_back(buf + archive_name_plus_slash_.size());
   }
   return out;
 }
 
+const std::unordered_set<std::string>&
+PyTorchStreamWriter::getAllWrittenRecords() {
+  return files_written_;
+}
+
 size_t PyTorchStreamReader::getRecordID(const std::string& name) {
   std::string ss = archive_name_plus_slash_ + name;
   size_t result = mz_zip_reader_locate_file(ar_.get(), ss.c_str(), nullptr, 0);
-  if (ar_->m_last_error == MZ_ZIP_FILE_NOT_FOUND) {
-    CAFFE_THROW("file not found: ", ss);
-  }
   valid("locating file ", name.c_str());
   return result;
 }
 
 // return dataptr, size
 std::tuple<at::DataPtr, size_t> PyTorchStreamReader::getRecord(const std::string& name) {
+  std::lock_guard<std::mutex> guard(reader_lock_);
   size_t key = getRecordID(name);
   mz_zip_archive_file_stat stat;
   mz_zip_reader_file_stat(ar_.get(), key, &stat);
@@ -248,9 +267,11 @@ static int64_t read_le_16(uint8_t* buf) {
 }
 
 size_t PyTorchStreamReader::getRecordOffset(const std::string& name) {
+  std::lock_guard<std::mutex> guard(reader_lock_);
   mz_zip_archive_file_stat stat;
   mz_zip_reader_file_stat(ar_.get(), getRecordID(name), &stat);
   valid("retrieving file meta-data for ", name.c_str());
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
   uint8_t local_header[MZ_ZIP_LOCAL_DIR_HEADER_SIZE];
   in_->read(
       stat.m_local_header_ofs,
@@ -292,6 +313,7 @@ PyTorchStreamWriter::PyTorchStreamWriter(std::string file_name)
 }
 
 PyTorchStreamWriter::PyTorchStreamWriter(
+    // NOLINTNEXTLINE(modernize-pass-by-value)
     const std::function<size_t(const void*, size_t)>& writer_func)
     : archive_name_("archive"),
       writer_func_(writer_func) {
@@ -336,6 +358,8 @@ void PyTorchStreamWriter::writeRecord(
     bool compress) {
   AT_ASSERT(!finalized_);
   AT_ASSERT(!archive_name_plus_slash_.empty());
+  TORCH_INTERNAL_ASSERT(
+      files_written_.count(name) == 0, "Tried to serialize file twice: ", name);
   std::string full_name = archive_name_plus_slash_ + name;
   size_t padding_size =
       detail::getPadding(ar_->m_archive_size, full_name.size(), size, padding_);
@@ -356,6 +380,7 @@ void PyTorchStreamWriter::writeRecord(
       nullptr,
       0);
   valid("writing file ", name.c_str());
+  files_written_.insert(name);
 }
 
 void PyTorchStreamWriter::writeEndOfFile() {
@@ -394,6 +419,7 @@ void PyTorchStreamWriter::valid(const char* what, const char* info) {
   }
 }
 
+// NOLINTNEXTLINE(bugprone-exception-escape)
 PyTorchStreamWriter::~PyTorchStreamWriter() {
   if (!finalized_) {
     writeEndOfFile();

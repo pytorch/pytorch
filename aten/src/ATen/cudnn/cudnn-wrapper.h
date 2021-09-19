@@ -13,4 +13,3 @@
 
 #undef STRINGIFY
 #undef STRING
-

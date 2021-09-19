@@ -20,9 +20,11 @@ from typing import Any, Dict, List, Optional, Set
 
 from torch.jit._state import _python_cu, _enabled
 from torch.jit._script import ScriptModule, _CachedForward, script
-from torch._jit_internal import _qualified_name, get_callable_argument_names
+from torch._jit_internal import _qualified_name, is_scripting, get_callable_argument_names
 from torch.autograd import function
 from torch.nn import Module
+
+from torch.testing._asserts import _get_default_rtol_and_atol
 
 _flatten = torch._C._jit_flatten
 _unflatten = torch._C._jit_unflatten
@@ -146,7 +148,7 @@ def _clone_inputs(args):
             # TODO: figure out one liner to .clone() and set requires_grad
             v = (
                 a.detach()
-                .clone(memory_format=torch.preserve_format)
+                .clone(memory_format=None if a.is_mkldnn else torch.preserve_format)
                 .requires_grad_(a.requires_grad)
             )
             if a.grad is not None:
@@ -217,7 +219,7 @@ def verify(model, args, loss_fn=torch.sum, devices=None):
 
     # TODO: Consider adding a utility function to torch.jit to test
     # for this case
-    if not isinstance(model, torch._C.CompiledFunction):  # type: ignore
+    if not isinstance(model, torch._C.CompiledFunction):  # type: ignore[attr-defined]
         raise TypeError(
             "Cannot verify an uncompiled module.  Add @torch.jit.compile to compile it"
         )
@@ -415,7 +417,7 @@ def _check_trace(
                     check_tensor_val = n_check.t("value")
 
                     try:
-                        torch.testing.assert_allclose(mod_tensor_val, check_tensor_val)
+                        torch.testing.assert_close(mod_tensor_val, check_tensor_val, equal_nan=True)
                     except (RuntimeError, AssertionError) as e:
                         if tensor_compare_errors is None:
                             tensor_compare_errors = ""
@@ -483,11 +485,16 @@ def _check_trace(
                         orig = orig.dequantize()
                     if ref.is_quantized:
                         ref = ref.dequantize()
-                    torch.testing.assert_allclose(
+                    if orig.is_mkldnn:
+                        orig = orig.to_dense()
+                    if ref.is_mkldnn:
+                        ref = ref.to_dense()
+                    torch.testing.assert_close(
                         orig.double(),
                         ref.double(),
                         rtol=check_tolerance,
-                        atol=torch.testing._get_default_tolerance(orig, ref)[1],
+                        atol=_get_default_rtol_and_atol(orig, ref)[1],
+                        equal_nan=True,
                     )
                 except AssertionError as e:
                     maybe_warn_nondeterministic()
@@ -552,7 +559,8 @@ def make_module(mod, _module_class, _compilation_unit):
         return torch.jit._recursive.create_script_module(
             mod,
             infer_methods_stubs_fn,
-            share_types=False
+            share_types=False,
+            is_tracing=True
         )
     else:
         if _module_class is None:
@@ -993,6 +1001,8 @@ def is_tracing():
     Returns ``True`` in tracing (if a function is called during the tracing of
     code with ``torch.jit.trace``) and ``False`` otherwise.
     """
+    if is_scripting():
+        return False
     return torch._C._is_tracing()
 
 
@@ -1015,7 +1025,7 @@ class TracedModule(ScriptModule):
         class QualnameWrapper(torch.nn.Module):
             pass
 
-        QualnameWrapper._jit_override_qualname = torch._jit_internal._qualified_name(  # type: ignore
+        QualnameWrapper._jit_override_qualname = torch._jit_internal._qualified_name(  # type: ignore[attr-defined]
             type(orig)
         )
 
@@ -1059,7 +1069,7 @@ class TracedModule(ScriptModule):
             )
 
         script_module = torch.jit._recursive.create_script_module(
-            tmp_module, lambda module: (), share_types=False
+            tmp_module, lambda module: (), share_types=False, is_tracing=True
         )
 
         self.__dict__["_name"] = type(orig).__name__
@@ -1107,11 +1117,11 @@ def _script_if_tracing(fn):
             # Not tracing, don't do anything
             return fn(*args, **kwargs)
 
-        compiled_fn = script(wrapper.__original_fn)  # type: ignore
+        compiled_fn = script(wrapper.__original_fn)  # type: ignore[attr-defined]
         return compiled_fn(*args, **kwargs)
 
-    wrapper.__original_fn = fn  # type: ignore
-    wrapper.__script_if_tracing_wrapper = True  # type: ignore
+    wrapper.__original_fn = fn  # type: ignore[attr-defined]
+    wrapper.__script_if_tracing_wrapper = True  # type: ignore[attr-defined]
 
     return wrapper
 

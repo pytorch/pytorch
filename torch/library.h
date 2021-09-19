@@ -59,7 +59,7 @@
 /// ```
 
 #include <c10/core/DispatchKey.h>
-#include <ATen/core/op_registration/op_whitelist.h>
+#include <ATen/core/op_registration/op_allowlist.h>
 #include <ATen/core/op_registration/infer_schema.h>
 #if defined(EXPOSE_C2_OPS) || !defined(CAFFE2_IS_XPLAT_BUILD)
 #include <torch/csrc/jit/frontend/function_schema_parser.h>
@@ -214,6 +214,23 @@ public:
     );
   }
 
+  /// Create a function from a boxed kernel functor which defines
+  /// `operator()(const OperatorHandle&, DispatchKeySet, Stack*)`
+  /// (receiving arguments from boxed calling convention) and inherits
+  /// from `c10::OperatorKernel`.  Unlike makeFromBoxedFunction, functions
+  /// registered in this way can also carry additional state which
+  /// is managed by the functor; this is useful if you're writing an
+  /// adapter to some other implementation, e.g., a Python callable, which
+  /// is dynamically associated with the registered kernel.
+  template<class KernelFunctor>
+  static CppFunction makeFromBoxedFunctor(std::unique_ptr<KernelFunctor> kernelFunctor) {
+    return CppFunction(
+      c10::KernelFunction::makeFromBoxedFunctor(std::move(kernelFunctor)),
+      /* cpp_signature */ c10::nullopt, // not known for boxed functions
+      /* schema */ nullptr
+    );
+  }
+
   /// Create a function from an unboxed kernel function.
   /// This is typically used to register common operators.
   template<typename FuncPtr, std::enable_if_t<c10::guts::is_function_type<FuncPtr>::value, std::nullptr_t> = nullptr>
@@ -292,10 +309,18 @@ inline CppFunction dispatch(c10::DeviceType type, Func&& raw_f) {
         return c10::DispatchKey::CUDA;
       case c10::DeviceType::XLA:
         return c10::DispatchKey::XLA;
+      case c10::DeviceType::Lazy:
+        return c10::DispatchKey::Lazy;
+      case c10::DeviceType::MLC:
+        return c10::DispatchKey::MLC;
+      case c10::DeviceType::Meta:
+        return c10::DispatchKey::Meta;
       case c10::DeviceType::HIP:
         return c10::DispatchKey::HIP;
-      case c10::DeviceType::MSNPU:
-        return c10::DispatchKey::MSNPU;
+      case c10::DeviceType::ORT:
+        return c10::DispatchKey::ORT;
+      case c10::DeviceType::HPU:
+        return c10::DispatchKey::HPU;
       default:
         TORCH_CHECK(false,
           "Device type ", t, " cannot be overloaded at dispatch time, "
@@ -379,7 +404,7 @@ namespace detail {
 // registration should actually happen or not.  We then have extra overloads which
 // bypass registration entirely if a selective name is disabled.  We do a
 // constexpr test to see if a operator should be enabled or not; this is
-// currently implemented in ATen/core/op_registration/op_whitelist.h
+// currently implemented in ATen/core/op_registration/op_allowlist.h
 
 namespace detail {
 
@@ -398,8 +423,8 @@ namespace detail {
     const char* name_;
   };
 
-#define TORCH_SELECTIVE_NAME(n) torch::detail::SelectiveStr<c10::impl::op_whitelist_check(n)>(n)
-#define TORCH_SELECTIVE_SCHEMA(n) torch::detail::SelectiveStr<c10::impl::schema_whitelist_check(n)>(n)
+#define TORCH_SELECTIVE_NAME(n) torch::detail::SelectiveStr<c10::impl::op_allowlist_check(n)>(n)
+#define TORCH_SELECTIVE_SCHEMA(n) torch::detail::SelectiveStr<c10::impl::schema_allowlist_check(n)>(n)
 
 }
 
@@ -654,7 +679,7 @@ public:
   }
 
   template <class CurClass>
-  inline class_<CurClass> class_(const std::string& className);
+  inline torch::class_<CurClass> class_(const std::string& className);
 
 private:
   Kind kind_;
@@ -803,7 +828,7 @@ public:
   static void C10_CONCATENATE(TORCH_LIBRARY_IMPL_init_ ## ns ## _ ## k ## _, uid) (torch::Library&); \
   static const torch::detail::TorchLibraryInit C10_CONCATENATE(TORCH_LIBRARY_IMPL_static_init_ ## ns ## _ ## k ## _, uid) ( \
     torch::Library::IMPL, \
-    c10::guts::if_constexpr<c10::impl::dispatch_key_whitelist_check(c10::DispatchKey::k)>( \
+    c10::guts::if_constexpr<c10::impl::dispatch_key_allowlist_check(c10::DispatchKey::k)>( \
       []() { return & C10_CONCATENATE(TORCH_LIBRARY_IMPL_init_ ## ns ## _ ## k ## _, uid); }, \
       []() { return [](torch::Library&) -> void {}; } \
     ), \

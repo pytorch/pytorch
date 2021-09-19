@@ -39,6 +39,7 @@ Tensor qnnpack_sigmoid(
     zero_point /* input zero point */,
     scale /* input scale */,
     output_zero_point /* output zero point */,
+    // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
     output_scale /* output scale */,
     std::numeric_limits<uint8_t>::min() /* output min */,
     std::numeric_limits<uint8_t>::max() /* output max */,
@@ -101,6 +102,7 @@ Tensor sigmoid_quantized_cpu(const Tensor& qx) {
     // optimizations
     double output_scale = 0.00390625;  // 1.0 / 2^8
     int64_t output_zero_point = 0;
+    // NOLINTNEXTLINE(clang-analyzer-core.NullDereference)
     if (SCALAR_TYPE == at::kQInt32) {
       output_scale = 2.3283064365386963e-10;  // 1.0 / 2^32
     } else if (SCALAR_TYPE == at::kQInt8) {

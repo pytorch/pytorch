@@ -1,3 +1,4 @@
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/codegen/cuda/lower_loops.h>
 
 #include <torch/csrc/jit/codegen/cuda/arith.h>
@@ -66,7 +67,7 @@ Expr* LoopNestGenerator::pushAlloc(TensorView* tv) {
     size = ir_builder_.create<kir::Int>(1);
   } else {
     size = GpuLower::lowerValue(alloc_dims[0]);
-    for (size_t i = 1; i < alloc_dims.size(); i++) {
+    for (const auto i : c10::irange(1, alloc_dims.size())) {
       size = ir_builder_.mulExpr(size, GpuLower::lowerValue(alloc_dims[i]));
     }
   }
@@ -168,6 +169,7 @@ void LoopNestGenerator::initReduction(
   // Work through the iter domains that we need to initialize on, outside to
   // inside, to construct the loop nest for the initialization.
   for (auto id : ids) {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     kir::ForLoop* new_fl;
 
     if (id->isThread()) {
@@ -478,6 +480,7 @@ void groupExpressions(
     TargetGroupMapT& computed_at_exprs,
     ExprScoreMapT& scores) {
   TensorView* target_tensor = nullptr;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   ScoreT score;
   findTargetTensor(expr, target_tensor, score);
   scores.emplace(expr, score);

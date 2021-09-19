@@ -15,6 +15,7 @@
 #include <llvm/ExecutionEngine/SectionMemoryManager.h>
 #include <llvm/IR/DataLayout.h>
 #include <llvm/IR/Mangler.h>
+#include <llvm/Support/CFGUpdate.h>
 #include <llvm/Support/DynamicLibrary.h>
 #include <llvm/Support/Host.h>
 #include <llvm/Support/raw_ostream.h>
@@ -37,32 +38,61 @@ static llvm::JITTargetAddress toAddress(T* Ptr) {
   return static_cast<llvm::JITTargetAddress>(reinterpret_cast<uintptr_t>(Ptr));
 }
 
-static llvm::orc::JITTargetMachineBuilder makeTargetMachineBuilder() {
-#if 0
-  // FIXME: Switch to using detectHost() rather than setting up the JTMB manually
-  // once LLVM 10 is available.
-  return assertSuccess(llvm::orc::JITTargetMachineBuilder::detectHost());
-#else
+// Get subtarget features for the host.
+static llvm::SubtargetFeatures getHostSubtargetFeatures() {
+  llvm::SubtargetFeatures subtargetFeatures;
+  llvm::StringMap<bool> featureMap;
+  llvm::sys::getHostCPUFeatures(featureMap);
+  for (auto& feature : featureMap) {
+    subtargetFeatures.AddFeature(feature.first(), feature.second);
+  }
+  return subtargetFeatures;
+}
+
+// Create a JTMB using the host's triple.  CPU and attrs default to the host
+// unless they are supplied.
+static llvm::orc::JITTargetMachineBuilder makeJTMBFromHost(
+    c10::optional<std::string> cpu,
+    c10::optional<std::string> attrs) {
   llvm::orc::JITTargetMachineBuilder JTMB(
       (llvm::Triple(llvm::sys::getProcessTriple())));
-
-  // Retrieve host CPU name and sub-target features and add them to builder.
-  // Relocation model, code model and codegen opt level are kept to default
-  // values.
-  llvm::SubtargetFeatures SubtargetFeatures;
-  llvm::StringMap<bool> FeatureMap;
-  llvm::sys::getHostCPUFeatures(FeatureMap);
-  for (auto& Feature : FeatureMap) {
-    SubtargetFeatures.AddFeature(Feature.first(), Feature.second);
+  JTMB.setCPU(cpu.value_or(llvm::sys::getHostCPUName().str()));
+  if (attrs) {
+    std::vector<std::string> features;
+    llvm::SubtargetFeatures::Split(features, *attrs);
+    JTMB.addFeatures(features);
+  } else {
+    JTMB.addFeatures(getHostSubtargetFeatures().getFeatures());
   }
-
-  JTMB.setCodeGenOptLevel(llvm::CodeGenOpt::Default);
-  JTMB.setCPU(llvm::sys::getHostCPUName().str());
-  JTMB.addFeatures(SubtargetFeatures.getFeatures());
-  JTMB.getOptions().AllowFPOpFusion = llvm::FPOpFusion::Fast;
-
   return JTMB;
-#endif
+}
+
+// Create a JTMB using a given triple.  Do not set cpu or attrs if not supplied.
+static llvm::orc::JITTargetMachineBuilder makeJTMBFromTriple(
+    const std::string& triple,
+    c10::optional<std::string> cpu,
+    c10::optional<std::string> attrs) {
+  llvm::orc::JITTargetMachineBuilder JTMB((llvm::Triple(triple)));
+  if (cpu) {
+    JTMB.setCPU(*cpu);
+  }
+  if (attrs) {
+    std::vector<std::string> features;
+    llvm::SubtargetFeatures::Split(features, *attrs);
+    JTMB.addFeatures(features);
+  }
+  return JTMB;
+}
+
+static llvm::orc::JITTargetMachineBuilder makeTargetMachineBuilder(
+    c10::optional<std::string> triple,
+    c10::optional<std::string> cpu,
+    c10::optional<std::string> attrs) {
+  auto JTMB = triple ? makeJTMBFromTriple(*triple, cpu, attrs)
+                     : makeJTMBFromHost(cpu, attrs);
+  JTMB.setCodeGenOptLevel(llvm::CodeGenOpt::Default);
+  JTMB.getOptions().AllowFPOpFusion = llvm::FPOpFusion::Fast;
+  return JTMB;
 }
 
 static void registerIntrinsics(
@@ -83,10 +113,12 @@ static void registerIntrinsics(
   }
   assertSuccess(JD.define(absoluteSymbols(symbols)));
 
-  for (const auto& kv : getNNCFunctionRegistry()) {
+  for (auto& kv : getNNCFunctionRegistry()) {
     assertSuccess(
         JD.define(absoluteSymbols({entry(kv.first.c_str(), kv.second)})));
   }
+  assertSuccess(JD.define(
+      absoluteSymbols({entry("DispatchParallel", DispatchParallel)})));
 }
 
 namespace llvm {
@@ -102,12 +134,16 @@ class TORCH_API PytorchLLVMJITImpl {
   std::unordered_set<std::string> intrinsics;
 
  public:
-  PytorchLLVMJITImpl()
-      : TM(assertSuccess(makeTargetMachineBuilder().createTargetMachine())),
-        LLJ(assertSuccess(
-            LLJITBuilder()
-                .setJITTargetMachineBuilder(makeTargetMachineBuilder())
-                .create())) {
+  PytorchLLVMJITImpl(
+      c10::optional<std::string> triple,
+      c10::optional<std::string> cpu,
+      c10::optional<std::string> attrs)
+      : TM(assertSuccess(makeTargetMachineBuilder(triple, cpu, attrs)
+                             .createTargetMachine())),
+        LLJ(assertSuccess(LLJITBuilder()
+                              .setJITTargetMachineBuilder(
+                                  makeTargetMachineBuilder(triple, cpu, attrs))
+                              .create())) {
     auto ProcSymbolsGenerator =
         assertSuccess(DynamicLibrarySearchGenerator::GetForCurrentProcess(
             LLJ->getDataLayout().getGlobalPrefix()));
@@ -161,7 +197,10 @@ class TORCH_API PytorchLLVMJITImpl {
   std::unordered_set<std::string> intrinsics;
 
  public:
-  PytorchLLVMJITImpl()
+  PytorchLLVMJITImpl(
+      c10::optional<std::string> triple,
+      c10::optional<std::string> cpu,
+      c10::optional<std::string> attrs)
       : Resolver(createLegacyLookupResolver(
             ES,
             [this](const std::string& Name) -> JITSymbol {
@@ -181,7 +220,8 @@ class TORCH_API PytorchLLVMJITImpl {
             [](Error Err) {
               assertSuccess(std::move(Err), "lookupFlags failed");
             })),
-        TM(assertSuccess(makeTargetMachineBuilder().createTargetMachine())),
+        TM(assertSuccess(makeTargetMachineBuilder(triple, cpu, attrs)
+                             .createTargetMachine())),
         DL(TM->createDataLayout()),
         ObjectLayer(
             ES,
@@ -236,8 +276,11 @@ class TORCH_API PytorchLLVMJITImpl {
 #error Only LLVM versions 8 and above are supported.
 #endif
 
-PytorchLLVMJIT::PytorchLLVMJIT()
-    : impl_(std::make_unique<PytorchLLVMJITImpl>()) {}
+PytorchLLVMJIT::PytorchLLVMJIT(
+    c10::optional<std::string> triple,
+    c10::optional<std::string> cpu,
+    c10::optional<std::string> attrs)
+    : impl_(std::make_unique<PytorchLLVMJITImpl>(triple, cpu, attrs)) {}
 
 PytorchLLVMJIT::~PytorchLLVMJIT() = default;
 
@@ -262,6 +305,15 @@ TargetMachine& PytorchLLVMJIT::getTargetMachine() {
 const DataLayout& PytorchLLVMJIT::getDataLayout() {
   return impl_->getDataLayout();
 }
+
+#if !defined(NDEBUG)
+void dumpCFG(const llvm::cfg::Update<llvm::BasicBlock*>& update) {
+  // XXX: This method call is only here to placate gcov builds.  The `dump`
+  // method is conditionally defined when NDEBUG is unset, so if you try to
+  // link a debug-mode pytorch with an opt-mode llvm, the symbol is undefined.
+  update.dump();
+}
+#endif
 
 } // end namespace orc
 } // end namespace llvm

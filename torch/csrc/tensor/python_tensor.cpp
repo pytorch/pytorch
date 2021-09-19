@@ -34,6 +34,7 @@ struct PyTensorType {
   THPDtype* dtype;
   THPLayout* layout;
   bool is_cuda;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-magic-numbers,modernize-avoid-c-arrays)
   char name[64];
   int backend;
   int scalar_type;
@@ -80,7 +81,7 @@ static PyObject* Tensor_instancecheck(PyObject* _self, PyObject* arg) {
   HANDLE_TH_ERRORS
   auto self = (PyTensorType*)_self;
   if (THPVariable_Check(arg)) {
-    auto& var = ((THPVariable*)arg)->cdata;
+    const auto& var = THPVariable_Unpack(arg);
     // NB: This is a little unfortunate, in that if I do an isinstance check
     // against torch.cuda.FloatTensor, this will immediately initialize CUDA.
     // I originally thought that it would not be possible for aten_type_ to
@@ -123,6 +124,15 @@ PyObject *Tensor_is_sparse(PyTensorType *self, void *unused) {
   }
 }
 
+PyObject *Tensor_is_sparse_csr(PyTensorType *self, void *unused) {
+  if (self->layout->layout == at::Layout::SparseCsr) {
+    Py_RETURN_TRUE;
+  } else {
+    Py_RETURN_FALSE;
+  }
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays)
 static struct PyMethodDef metaclass_methods[] = {
   {"__instancecheck__", Tensor_instancecheck, METH_O, nullptr},
   {nullptr}
@@ -130,11 +140,13 @@ static struct PyMethodDef metaclass_methods[] = {
 
 typedef PyObject *(*getter)(PyObject *, void *);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays)
 static struct PyGetSetDef metaclass_properties[] = {
   {"dtype",        (getter)Tensor_dtype, nullptr, nullptr, nullptr},
   {"layout",       (getter)Tensor_layout, nullptr, nullptr, nullptr},
   {"is_cuda",      (getter)Tensor_is_cuda, nullptr, nullptr, nullptr},
   {"is_sparse",    (getter)Tensor_is_sparse, nullptr, nullptr, nullptr},
+  {"is_sparse_csr",(getter)Tensor_is_sparse_csr, nullptr, nullptr, nullptr},
   {nullptr}
 };
 
@@ -372,6 +384,7 @@ static bool PyTensorType_Check(PyObject* obj) {
 }
 
 void py_set_default_tensor_type(PyObject* obj) {
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   PyTensorType *type;
   if (PyTensorType_Check(obj)) {
     type = (PyTensorType*)obj;

@@ -5,6 +5,7 @@
 #include <torch/utils.h>
 
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 
 #include <array>
 #include <cmath>
@@ -50,6 +51,7 @@ namespace detail {
 template <typename Derived>
 RNNImplBase<Derived>::RNNImplBase(const RNNOptionsBase& options_)
   : options_base(options_) {
+  // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
   reset();
 }
 
@@ -87,6 +89,7 @@ void RNNImplBase<Derived>::reset() {
     gate_size = 4 * options_base.hidden_size();
   } else if (c10::get_if<enumtype::kGRU>(&options_base.mode())) {
     gate_size = 3 * options_base.hidden_size();
+  // NOLINTNEXTLINE(bugprone-branch-clone)
   } else if (c10::get_if<enumtype::kRNN_TANH>(&options_base.mode())) {
     gate_size = options_base.hidden_size();
   } else if (c10::get_if<enumtype::kRNN_RELU>(&options_base.mode())) {
@@ -98,8 +101,8 @@ void RNNImplBase<Derived>::reset() {
   flat_weights_names_ = {};
   all_weights_ = {};
 
-  for (int64_t layer = 0; layer < options_base.num_layers(); layer++) {
-    for (int64_t direction = 0; direction < num_directions; direction++) {
+  for(const auto layer : c10::irange(options_base.num_layers())) {
+    for(const auto direction : c10::irange(num_directions)) {
       int64_t real_hidden_size = options_base.proj_size() > 0 ? options_base.proj_size() : options_base.hidden_size();
       int64_t layer_input_size = layer == 0 ? options_base.input_size() : real_hidden_size * num_directions;
 
@@ -124,13 +127,12 @@ void RNNImplBase<Derived>::reset() {
         layer_params.emplace_back(w_hr);
         param_names.emplace_back("weight_hr_l{layer}{suffix}");
       }
-      for (size_t i = 0; i < param_names.size(); i++) {  // NOLINT(modernize-loop-convert)
-        std::string x = std::regex_replace(param_names[i], std::regex("\\{layer\\}"), c10::str(layer));
-        x = std::regex_replace(x, std::regex("\\{suffix\\}"), c10::str(suffix));
-        param_names[i] = x;
+      for(auto& param_name : param_names) {
+        std::string x = std::regex_replace(param_name, std::regex("\\{layer\\}"), c10::str(layer));
+        param_name = std::regex_replace(x, std::regex("\\{suffix\\}"), c10::str(suffix));
       }
 
-      for (size_t i = 0; i < param_names.size(); i++) {
+      for(const auto i : c10::irange(param_names.size())) {
         auto name = param_names[i];
         auto param = layer_params[i];
         this->register_parameter(name, param);
@@ -650,6 +652,7 @@ template <typename Derived>
 RNNCellImplBase<Derived>::RNNCellImplBase(
   const RNNCellOptionsBase& options_)
   : options_base(options_) {
+  // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
   reset();
 }
 

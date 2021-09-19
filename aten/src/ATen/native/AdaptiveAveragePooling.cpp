@@ -1,6 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/AdaptivePooling.h>
+#include <ATen/native/xnnpack/Engine.h>
 
 
 namespace at {
@@ -15,21 +16,19 @@ namespace {
   {
     TORCH_CHECK(output_size.size() == 2, "adaptive_avg_pool2d: output_size must be 2");
     int64_t ndim = input.ndimension();
-    for (int64_t i = 0; i < ndim; i++) {
+    for (int64_t i = 1; i < ndim; i++) {
       TORCH_CHECK(input.size(i) > 0,
-        "adaptive_avg_pooling2d(): expected input to have non-empty spatial dimensions, "
+        "adaptive_avg_pool2d(): Expected input to have non-zero size for non-batch dimensions, "
         "but input has sizes ", input.sizes(), " with dimension ", i, " being "
         "empty");
     }
 
     TORCH_CHECK((ndim == 3 || ndim == 4),
-      "non-empty 3D or 4D (batch mode) tensor expected for input");
+      "adaptive_avg_pool2d(): Expected 3D or 4D tensor, but got ", input.sizes());
     TORCH_CHECK(input.dtype() == output.dtype(),
       "expected dtype ", input.dtype(), " for `output` but got dtype ", output.dtype());
 
     int64_t channels  = input.size(-3);
-    int64_t input_height = input.size(-2);
-    int64_t input_width = input.size(-1);
     int64_t output_height = output_size[0];
     int64_t output_width = output_size[1];
 
@@ -38,6 +37,10 @@ namespace {
     } else {
       int64_t nbatch = input.size(0);
       output.resize_({nbatch, channels, output_height, output_width}, input.suggest_memory_format());
+    }
+
+    if (output.numel() == 0) {
+      return;
     }
 
     adaptive_avg_pool2d_kernel(kCPU, output, input, output_size);
@@ -49,15 +52,15 @@ namespace {
     const Tensor& input)
   {
     int64_t ndim = grad_output.ndimension();
-    for (int64_t i = 0; i < ndim; i++) {
+    for (int64_t i = 1; i < ndim; i++) {
       TORCH_CHECK(grad_output.size(i) > 0,
-        "adaptive_avg_pooling2d_backward(): expected grad_output to have non-empty spatial dimensions, "
+        "adaptive_avg_pool2d_backward(): Expected grad_output to have non-zero size for non-batch dimensions, "
         "but grad_output has sizes ", grad_output.sizes(), " with dimension ", i, " being "
         "empty");
     }
 
     TORCH_CHECK((ndim == 3 || ndim == 4),
-      "non-empty 3D or 4D (batch mode) tensor expected for grad_output");
+      "adaptive_avg_pool2d_backward(): Expected 3D or 4D tensor, but got ", input.sizes());
     TORCH_CHECK(input.dtype() == grad_output.dtype(),
       "expected dtype ", input.dtype(), " for `grad_output` but got dtype ", grad_output.dtype());
     TORCH_CHECK(input.dtype() == grad_input.dtype(),
@@ -72,10 +75,9 @@ namespace {
 
 } // namespace
 
-  Tensor& adaptive_avg_pool2d_out_cpu(
-    Tensor& output,
-    const Tensor& input,
-    IntArrayRef output_size)
+  Tensor& adaptive_avg_pool2d_out_cpu(const Tensor& input,
+    IntArrayRef output_size,
+    Tensor& output)
   {
     adaptive_avg_pool2d_out_cpu_template(
       output, input, output_size);
@@ -102,6 +104,12 @@ namespace {
     if (!input.is_quantized() && output_size[0] == 1 && output_size[1] == 1) {
       // in this case, adaptive pooling is just computing mean over hw
       // dimensions, which can be done more efficiently
+      #if defined(C10_MOBILE) && defined(USE_XNNPACK)
+      if (xnnpack::use_global_average_pool(input)) {
+        return xnnpack::global_average_pool(input);
+      }
+      #endif
+
       Tensor out = input.mean({-1, -2}, /* keepdim = */ true);
       if (input.suggest_memory_format() == at::MemoryFormat::ChannelsLast) {
         // assert ndim == 4, since ndim = 3 doesn't give channels_last

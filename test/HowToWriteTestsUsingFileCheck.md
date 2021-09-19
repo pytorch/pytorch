@@ -79,6 +79,9 @@ annotations from the example above one would write:
 
 * `CHECK: <pattern>`
   Scans the input until `PATTERN` is found. Fails if the pattern is not found.
+* `CHECK-NEXT: <pattern>`
+  Scans the input on the line immediately following the previous CHECK until
+  `PATTERN` is found. Fails if the pattern is not found on that line.
 * `CHECK-NOT: <pattern>`
   Scans the input and fails if `PATTERN` is found on any line. The scan stops when
   a match for a next `CHECK` is found.

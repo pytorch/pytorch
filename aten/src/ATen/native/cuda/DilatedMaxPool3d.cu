@@ -34,7 +34,8 @@ __global__ static void max_pool3d_with_indices_single_out_frame(
   int oColumn = blockIdx.x * blockDim.x + threadIdx.x;
   int oRow    = blockIdx.y * blockDim.y + threadIdx.y;
   int oFrame  = (blockIdx.z + offsetZ) % output.size(1); // output frame/time
-  int slice   = (blockIdx.z + offsetZ) / output.size(1); // output slice/feature
+  int64_t slice   = (blockIdx.z + offsetZ) / output.size(1); // output slice/feature
+  // For int64_t data type, see https://github.com/pytorch/pytorch/issues/52822
 
   if (oRow < output.size(2) && oColumn < output.size(3))
   {
@@ -141,7 +142,7 @@ __global__ static void max_pool3d_with_indices_backward_single_out_frame(
   {
     int maxIndex = indices[slice][oFrame][oRow][oColumn];
     if (maxIndex != -1) {
-      gpuAtomicAdd(&gradInputData[slice * itime * iheight * iwidth + maxIndex],
+      gpuAtomicAddNoReturn(&gradInputData[slice * itime * iheight * iwidth + maxIndex],
                 gradOutput[slice][oFrame][oRow][oColumn]);
     }
   }
@@ -198,7 +199,7 @@ void max_pool3d_with_indices_out_cuda_template(
   TensorArg indices_arg{ indices, "indices", 2 };
   TensorArg input_arg{ input, "input", 3 };
 
-  checkAllSameGPU("max_pool3d_with_indices_out_cuda",
+  checkAllSameGPU(__func__,
                   {output_arg, indices_arg, input_arg});
 
   // #20866, #22032: Guarantee this for the official C++ API?
@@ -228,9 +229,6 @@ void max_pool3d_with_indices_out_cuda_template(
   const int dilationH = dilation.size() == 1 ? dilationT : safe_downcast<int, int64_t>(dilation[1]);
   const int dilationW = dilation.size() == 1 ? dilationT : safe_downcast<int, int64_t>(dilation[2]);
 
-  TORCH_CHECK((input.ndimension() == 4 || input.ndimension() == 5),
-    "non-empty 4D or 5D (batch mode) tensor expected for input");
-
   const int64_t nbatch = input.ndimension() == 5 ? input.size(-5) : 1;
   const int64_t nslices = input.size(-4);
   const int64_t itime = input.size(-3);
@@ -249,7 +247,8 @@ void max_pool3d_with_indices_out_cuda_template(
     pT, pH, pW,
     dilationT, dilationH, dilationW,
     itime, iheight, iwidth,
-    otime, oheight, owidth);
+    otime, oheight, owidth,
+    "max_pool3d_with_indices_out_cuda_template()");
 
   if (input.ndimension() == 4) {
     output.resize_({ nslices, otime, oheight, owidth});
@@ -258,6 +257,10 @@ void max_pool3d_with_indices_out_cuda_template(
   else {
     output.resize_({nbatch, nslices, otime, oheight, owidth});
     indices.resize_({nbatch, nslices, otime, oheight, owidth});
+  }
+
+  if (input.numel() == 0) {
+    return;
   }
 
   Tensor work_input = input.contiguous();
@@ -306,7 +309,7 @@ void max_pool3d_with_indices_backward_out_cuda_template(
   TensorArg input_arg{ input, "input", 3 };
   TensorArg indices_arg{ indices, "indices", 4 };
 
-  checkAllSameGPU("max_pool3d_with_indices_backward_out_cuda",
+  checkAllSameGPU(__func__,
                   {gradInput_arg, gradOutput_arg, input_arg, indices_arg});
 
   // #20866, #22032: Guarantee this for the official C++ API?
@@ -337,10 +340,12 @@ void max_pool3d_with_indices_backward_out_cuda_template(
   const int dilationW = dilation.size() == 1 ? dilationT : safe_downcast<int, int64_t>(dilation[2]);
 
   TORCH_CHECK((input.ndimension() == 4 || input.ndimension() == 5),
-    "non-empty 4D or 5D (batch mode) tensor expected for input");
+    "max_pool2d_with_indices_backward_out_cuda_template(): ",
+    "Expected 4D or 5D input tensor, but got ", input.sizes());
 
   TORCH_CHECK((gradOutput.ndimension() == 4 || gradOutput.ndimension() == 5),
-    "non-empty 4D or 5D (batch mode) tensor expected for gradOutput");
+    "max_pool2d_with_indices_backward_out_cuda_template(): ",
+    "Expected 4D or 5D gradOutput tensor, but got ", gradOutput.sizes());
 
   // Resize and initialize result tensor.
   gradInput.resize_as_(input);
@@ -367,7 +372,12 @@ void max_pool3d_with_indices_backward_out_cuda_template(
     pT, pH, pW,
     dilationT, dilationH, dilationW,
     itime, iheight, iwidth,
-    otime, oheight, owidth);
+    otime, oheight, owidth,
+    "max_pool3d_with_indices_backward_out_cuda_template()");
+
+  if (gradOutput.numel() == 0) {
+    return;
+  }
 
   Tensor work_grad_input = gradInput;
   Tensor work_grad_output = gradOutput.contiguous();
@@ -400,15 +410,14 @@ void max_pool3d_with_indices_backward_out_cuda_template(
 
 } // namespace
 
-std::tuple<Tensor&, Tensor&> max_pool3d_with_indices_out_cuda(
-  Tensor& output,
-  Tensor& indices,
-  const Tensor& input,
+std::tuple<Tensor&, Tensor&> max_pool3d_with_indices_out_cuda(const Tensor& input,
   IntArrayRef kernel_size,
   IntArrayRef stride,
   IntArrayRef padding,
   IntArrayRef dilation,
-  bool ceil_mode)
+  bool ceil_mode,
+  Tensor& output,
+  Tensor& indices)
 {
   max_pool3d_with_indices_out_cuda_template(
     output,
@@ -451,16 +460,15 @@ std::tuple<Tensor, Tensor> max_pool3d_with_indices_cuda(
   return std::tuple<Tensor, Tensor>(output, indices);
 }
 
-Tensor& max_pool3d_with_indices_backward_out_cuda(
-  Tensor& gradInput,
-  const Tensor& gradOutput,
+Tensor& max_pool3d_with_indices_backward_out_cuda(const Tensor& gradOutput,
   const Tensor& input,
   IntArrayRef kernel_size,
   IntArrayRef stride,
   IntArrayRef padding,
   IntArrayRef dilation,
   bool ceil_mode,
-  const Tensor& indices)
+  const Tensor& indices,
+  Tensor& gradInput)
 {
   // See Note [Writing Nondeterministic Operations]
   // Nondeterministic because of atomicAdd usage

@@ -40,10 +40,10 @@ import contextlib
 import subprocess
 from ast import literal_eval
 from argparse import ArgumentParser
-from typing import Dict, Optional, Iterator
+from typing import (Any, Callable, Dict, Generator, Iterable, Iterator, List,
+                    Optional, Sequence, Set, Tuple, TypeVar, cast)
 
-
-LOGGER = None
+LOGGER: Optional[logging.Logger] = None
 URL_FORMAT = "{base_url}/{platform}/{dist_name}.tar.bz2"
 DATETIME_FORMAT = "%Y-%m-%d_%Hh%Mm%Ss"
 SHA1_RE = re.compile("([0-9a-fA-F]{40})")
@@ -75,7 +75,7 @@ class Formatter(logging.Formatter):
         else:
             # I'm not sure why, but formatMessage doesn't show up
             # even though it's in the typeshed for Python >3
-            return super().formatMessage(record)  # type: ignore
+            return super().formatMessage(record)
 
     def format(self, record: logging.LogRecord) -> str:
         return self._filter(super().format(record))
@@ -133,7 +133,7 @@ def logging_rotate() -> None:
 
 
 @contextlib.contextmanager
-def logging_manager(*, debug: bool = False) -> Iterator[None]:
+def logging_manager(*, debug: bool = False) -> Generator[logging.Logger, None, None]:
     """Setup logging. If a failure starts here we won't
     be able to save the user in a reasonable way.
 
@@ -179,7 +179,7 @@ def logging_manager(*, debug: bool = False) -> Iterator[None]:
         sys.exit(1)
 
 
-def check_in_repo():
+def check_in_repo() -> Optional[str]:
     """Ensures that we are in the PyTorch repo."""
     if not os.path.isfile("setup.py"):
         return "Not in root-level PyTorch repo, no setup.py found"
@@ -187,52 +187,61 @@ def check_in_repo():
         s = f.read()
     if "PyTorch" not in s:
         return "Not in PyTorch repo, 'PyTorch' not found in setup.py"
+    return None
 
 
-def check_branch(subcommand, branch):
+def check_branch(subcommand: str, branch: Optional[str]) -> Optional[str]:
     """Checks that the branch name can be checked out."""
     if subcommand != "checkout":
-        return
+        return None
     # first make sure actual branch name was given
     if branch is None:
         return "Branch name to checkout must be supplied with '-b' option"
     # next check that the local repo is clean
     cmd = ["git", "status", "--untracked-files=no", "--porcelain"]
-    p = subprocess.run(cmd, capture_output=True, check=True, text=True)
+    p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True, universal_newlines=True)
     if p.stdout.strip():
         return "Need to have clean working tree to checkout!\n\n" + p.stdout
     # next check that the branch name doesn't already exist
     cmd = ["git", "show-ref", "--verify", "--quiet", "refs/heads/" + branch]
-    p = subprocess.run(cmd, capture_output=True, check=False)
+    p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)  # type: ignore[assignment]
     if not p.returncode:
         return f"Branch {branch!r} already exists"
+    return None
 
 
 @contextlib.contextmanager
-def timer(logger, prefix):
+def timer(logger: logging.Logger, prefix: str) -> Iterator[None]:
     """Timed context manager"""
     start_time = time.time()
     yield
     logger.info(f"{prefix} took {time.time() - start_time:.3f} [s]")
 
 
-def timed(prefix):
+F = TypeVar('F', bound=Callable[..., Any])
+
+
+def timed(prefix: str) -> Callable[[F], F]:
     """Decorator for timing functions"""
 
-    def dec(f):
+    def dec(f: F) -> F:
         @functools.wraps(f)
-        def wrapper(*args, **kwargs):
+        def wrapper(*args: Any, **kwargs: Any) -> Any:
             global LOGGER
-            LOGGER.info(prefix)
-            with timer(LOGGER, prefix):
+            logger = cast(logging.Logger, LOGGER)
+            logger.info(prefix)
+            with timer(logger, prefix):
                 return f(*args, **kwargs)
 
-        return wrapper
+        return cast(F, wrapper)
 
     return dec
 
 
-def _make_channel_args(channels=("pytorch-nightly",), override_channels=False):
+def _make_channel_args(
+    channels: Iterable[str] = ("pytorch-nightly",),
+    override_channels: bool = False,
+) -> List[str]:
     args = []
     for channel in channels:
         args.append("--channel")
@@ -244,8 +253,11 @@ def _make_channel_args(channels=("pytorch-nightly",), override_channels=False):
 
 @timed("Solving conda environment")
 def conda_solve(
-    name=None, prefix=None, channels=("pytorch-nightly",), override_channels=False
-):
+    name: Optional[str] = None,
+    prefix: Optional[str] = None,
+    channels: Iterable[str] = ("pytorch-nightly",),
+    override_channels: bool = False,
+) -> Tuple[List[str], str, str, bool, List[str]]:
     """Performs the conda solve and splits the deps from the package."""
     # compute what environment to use
     if prefix is not None:
@@ -283,7 +295,7 @@ def conda_solve(
     )
     cmd.extend(channel_args)
     cmd.extend(SPECS_TO_INSTALL)
-    p = subprocess.run(cmd, capture_output=True, check=True)
+    p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
     # parse solution
     solve = json.loads(p.stdout)
     link = solve["actions"]["LINK"]
@@ -299,7 +311,7 @@ def conda_solve(
 
 
 @timed("Installing dependencies")
-def deps_install(deps, existing_env, env_opts):
+def deps_install(deps: List[str], existing_env: bool, env_opts: List[str]) -> None:
     """Install dependencies to deps environment"""
     if not existing_env:
         # first remove previous pytorch-deps env
@@ -312,7 +324,7 @@ def deps_install(deps, existing_env, env_opts):
 
 
 @timed("Installing pytorch nightly binaries")
-def pytorch_install(url):
+def pytorch_install(url: str) -> "tempfile.TemporaryDirectory[str]":
     """"Install pytorch into a temporary directory"""
     pytdir = tempfile.TemporaryDirectory()
     cmd = ["conda", "create", "--yes", "--no-deps", "--prefix", pytdir.name, url]
@@ -320,7 +332,7 @@ def pytorch_install(url):
     return pytdir
 
 
-def _site_packages(dirname, platform):
+def _site_packages(dirname: str, platform: str) -> str:
     if platform.startswith("win"):
         template = os.path.join(dirname, "Lib", "site-packages")
     else:
@@ -329,10 +341,10 @@ def _site_packages(dirname, platform):
     return spdir
 
 
-def _ensure_commit(git_sha1):
+def _ensure_commit(git_sha1: str) -> None:
     """Make sure that we actually have the commit locally"""
     cmd = ["git", "cat-file", "-e", git_sha1 + "^{commit}"]
-    p = subprocess.run(cmd, capture_output=True, check=False)
+    p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
     if p.returncode == 0:
         # we have the commit locally
         return
@@ -341,7 +353,7 @@ def _ensure_commit(git_sha1):
     p = subprocess.run(cmd, check=True)
 
 
-def _nightly_version(spdir):
+def _nightly_version(spdir: str) -> str:
     # first get the git version from the installed module
     version_fname = os.path.join(spdir, "torch", "version.py")
     with open(version_fname) as f:
@@ -357,7 +369,7 @@ def _nightly_version(spdir):
     # now cross reference with nightly version
     _ensure_commit(git_version)
     cmd = ["git", "show", "--no-patch", "--format=%s", git_version]
-    p = subprocess.run(cmd, capture_output=True, check=True, text=True)
+    p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True, universal_newlines=True)
     m = SHA1_RE.search(p.stdout)
     if m is None:
         raise RuntimeError(
@@ -371,7 +383,7 @@ def _nightly_version(spdir):
 
 
 @timed("Checking out nightly PyTorch")
-def checkout_nightly_version(branch, spdir):
+def checkout_nightly_version(branch: str, spdir: str) -> None:
     """Get's the nightly version and then checks it out."""
     nightly_version = _nightly_version(spdir)
     cmd = ["git", "checkout", "-b", branch, nightly_version]
@@ -379,40 +391,40 @@ def checkout_nightly_version(branch, spdir):
 
 
 @timed("Pulling nightly PyTorch")
-def pull_nightly_version(spdir):
+def pull_nightly_version(spdir: str) -> None:
     """Fetches the nightly version and then merges it ."""
     nightly_version = _nightly_version(spdir)
     cmd = ["git", "merge", nightly_version]
     p = subprocess.run(cmd, check=True)
 
 
-def _get_listing_linux(source_dir):
+def _get_listing_linux(source_dir: str) -> List[str]:
     listing = glob.glob(os.path.join(source_dir, "*.so"))
     listing.extend(glob.glob(os.path.join(source_dir, "lib", "*.so")))
     return listing
 
 
-def _get_listing_osx(source_dir):
+def _get_listing_osx(source_dir: str) -> List[str]:
     # oddly, these are .so files even on Mac
     listing = glob.glob(os.path.join(source_dir, "*.so"))
     listing.extend(glob.glob(os.path.join(source_dir, "lib", "*.dylib")))
     return listing
 
 
-def _get_listing_win(source_dir):
+def _get_listing_win(source_dir: str) -> List[str]:
     listing = glob.glob(os.path.join(source_dir, "*.pyd"))
     listing.extend(glob.glob(os.path.join(source_dir, "lib", "*.lib")))
     listing.extend(glob.glob(os.path.join(source_dir, "lib", "*.dll")))
     return listing
 
 
-def _glob_pyis(d):
+def _glob_pyis(d: str) -> Set[str]:
     search = os.path.join(d, "**", "*.pyi")
     pyis = {os.path.relpath(p, d) for p in glob.iglob(search)}
     return pyis
 
 
-def _find_missing_pyi(source_dir, target_dir):
+def _find_missing_pyi(source_dir: str, target_dir: str) -> List[str]:
     source_pyis = _glob_pyis(source_dir)
     target_pyis = _glob_pyis(target_dir)
     missing_pyis = [os.path.join(source_dir, p) for p in (source_pyis - target_pyis)]
@@ -420,7 +432,7 @@ def _find_missing_pyi(source_dir, target_dir):
     return missing_pyis
 
 
-def _get_listing(source_dir, target_dir, platform):
+def _get_listing(source_dir: str, target_dir: str, platform: str) -> List[str]:
     if platform.startswith("linux"):
         listing = _get_listing_linux(source_dir)
     elif platform.startswith("osx"):
@@ -431,12 +443,13 @@ def _get_listing(source_dir, target_dir, platform):
         raise RuntimeError(f"Platform {platform!r} not recognized")
     listing.extend(_find_missing_pyi(source_dir, target_dir))
     listing.append(os.path.join(source_dir, "version.py"))
+    listing.append(os.path.join(source_dir, "testing", "_internal", "generated"))
     listing.append(os.path.join(source_dir, "bin"))
     listing.append(os.path.join(source_dir, "include"))
     return listing
 
 
-def _remove_existing(trg, is_dir):
+def _remove_existing(trg: str, is_dir: bool) -> None:
     if os.path.exists(trg):
         if is_dir:
             shutil.rmtree(trg)
@@ -444,7 +457,13 @@ def _remove_existing(trg, is_dir):
             os.remove(trg)
 
 
-def _move_single(src, source_dir, target_dir, mover, verb):
+def _move_single(
+    src: str,
+    source_dir: str,
+    target_dir: str,
+    mover: Callable[[str, str], None],
+    verb: str,
+) -> None:
     is_dir = os.path.isdir(src)
     relpath = os.path.relpath(src, source_dir)
     trg = os.path.join(target_dir, relpath)
@@ -468,18 +487,18 @@ def _move_single(src, source_dir, target_dir, mover, verb):
         mover(src, trg)
 
 
-def _copy_files(listing, source_dir, target_dir):
+def _copy_files(listing: List[str], source_dir: str, target_dir: str) -> None:
     for src in listing:
         _move_single(src, source_dir, target_dir, shutil.copy2, "Copying")
 
 
-def _link_files(listing, source_dir, target_dir):
+def _link_files(listing: List[str], source_dir: str, target_dir: str) -> None:
     for src in listing:
         _move_single(src, source_dir, target_dir, os.link, "Linking")
 
 
 @timed("Moving nightly files into repo")
-def move_nightly_files(spdir, platform):
+def move_nightly_files(spdir: str, platform: str) -> None:
     """Moves PyTorch files from temporary installed location to repo."""
     # get file listing
     source_dir = os.path.join(spdir, "torch")
@@ -495,9 +514,9 @@ def move_nightly_files(spdir, platform):
             _copy_files(listing, source_dir, target_dir)
 
 
-def _available_envs():
+def _available_envs() -> Dict[str, str]:
     cmd = ["conda", "env", "list"]
-    p = subprocess.run(cmd, check=True, capture_output=True, text=True)
+    p = subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
     lines = p.stdout.splitlines()
     envs = {}
     for line in map(str.strip, lines):
@@ -512,7 +531,7 @@ def _available_envs():
 
 
 @timed("Writing pytorch-nightly.pth")
-def write_pth(env_opts, platform):
+def write_pth(env_opts: List[str], platform: str) -> None:
     """Writes Python path file for this dir."""
     env_type, env_dir = env_opts
     if env_type == "--name":
@@ -532,17 +551,16 @@ def write_pth(env_opts, platform):
 
 
 def install(
-    subcommand="checkout",
-    branch=None,
-    name=None,
-    prefix=None,
-    channels=("pytorch-nightly",),
-    override_channels=False,
-    logger=None,
-):
+    *,
+    logger: logging.Logger,
+    subcommand: str = "checkout",
+    branch: Optional[str] = None,
+    name: Optional[str] = None,
+    prefix: Optional[str] = None,
+    channels: Iterable[str] = ("pytorch-nightly",),
+    override_channels: bool = False,
+) -> None:
     """Development install of PyTorch"""
-    global LOGGER
-    logger = logger or LOGGER
     deps, pytorch, platform, existing_env, env_opts = conda_solve(
         name=name, prefix=prefix, channels=channels, override_channels=override_channels
     )
@@ -551,7 +569,7 @@ def install(
     pytdir = pytorch_install(pytorch)
     spdir = _site_packages(pytdir.name, platform)
     if subcommand == "checkout":
-        checkout_nightly_version(branch, spdir)
+        checkout_nightly_version(cast(str, branch), spdir)
     elif subcommand == "pull":
         pull_nightly_version(spdir)
     else:
@@ -565,7 +583,7 @@ def install(
     )
 
 
-def make_parser():
+def make_parser() -> ArgumentParser:
     p = ArgumentParser("nightly")
     # subcommands
     subcmd = p.add_subparsers(dest="subcmd", help="subcommand to execute")
@@ -626,7 +644,7 @@ def make_parser():
     return p
 
 
-def main(args=None):
+def main(args: Optional[Sequence[str]] = None) -> None:
     """Main entry point"""
     global LOGGER
     p = make_parser()

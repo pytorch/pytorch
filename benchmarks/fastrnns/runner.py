@@ -3,7 +3,12 @@ from functools import partial
 import torch
 import torchvision.models as cnn
 
-from .factory import *
+from .factory import (dropoutlstm_creator, imagenet_cnn_creator,
+                      layernorm_pytorch_lstm_creator, lnlstm_creator,
+                      lstm_creator, lstm_multilayer_creator,
+                      lstm_premul_bias_creator, lstm_premul_creator,
+                      lstm_simple_creator, pytorch_lstm_creator,
+                      varlen_lstm_creator, varlen_pytorch_lstm_creator)
 
 
 class DisableCuDNN():

@@ -100,7 +100,7 @@ class LMDBTransaction final : public Transaction {
     MDB_CHECK(mdb_txn_commit(mdb_txn_));
     mdb_dbi_close(mdb_env_, mdb_dbi_);
   }
-  void Put(const string& key, const string& value) override;
+  void Put(const string& key, string&& value) override;
   void Commit() override {
     MDB_CHECK(mdb_txn_commit(mdb_txn_));
     mdb_dbi_close(mdb_env_, mdb_dbi_);
@@ -159,7 +159,7 @@ LMDB::LMDB(const string& source, Mode mode) : DB(source, mode) {
   VLOG(1) << "Opened lmdb " << source;
 }
 
-void LMDBTransaction::Put(const string& key, const string& value) {
+void LMDBTransaction::Put(const string& key, string&& value) {
   MDB_val mdb_key, mdb_value;
   mdb_key.mv_data = const_cast<char*>(key.data());
   mdb_key.mv_size = key.size();

@@ -83,7 +83,7 @@ static inline void pytorch_pack_q8gemm_wrq(
     const size_t nr_block_size = min(nc - nr_block_start, nr);
     for (size_t nr_block_offset = 0; nr_block_offset < nr_block_size;
          nr_block_offset++) {
-      *(packed.as_int32_ptr++) = b ? b[nr_block_start + nr_block_offset] : 0.0f;
+      *(packed.as_int32_ptr++) = b ? b[nr_block_start + nr_block_offset] : 0;
     }
     packed.as_int32_ptr += (nr - nr_block_size);
     for (size_t kr_block_start = 0; kr_block_start < kc; kr_block_start += kr) {

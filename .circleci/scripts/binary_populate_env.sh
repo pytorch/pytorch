@@ -62,10 +62,22 @@ if [[ -z "$DOCKER_IMAGE" ]]; then
   if [[ "$PACKAGE_TYPE" == conda ]]; then
     export DOCKER_IMAGE="pytorch/conda-cuda"
   elif [[ "$DESIRED_CUDA" == cpu ]]; then
-    export DOCKER_IMAGE="pytorch/manylinux-cuda100"
+    export DOCKER_IMAGE="pytorch/manylinux-cpu"
   else
     export DOCKER_IMAGE="pytorch/manylinux-cuda${DESIRED_CUDA:2}"
   fi
+fi
+
+USE_GOLD_LINKER="OFF"
+# GOLD linker can not be used if CUPTI is statically linked into PyTorch, see https://github.com/pytorch/pytorch/issues/57744
+if [[ ${DESIRED_CUDA} == "cpu" ]]; then
+  USE_GOLD_LINKER="ON"
+fi
+
+USE_WHOLE_CUDNN="OFF"
+# Link whole cuDNN for CUDA-11.1 to include fp16 fast kernels
+if [[  "$(uname)" == "Linux" && "${DESIRED_CUDA}" == "cu111" ]]; then
+  USE_WHOLE_CUDNN="ON"
 fi
 
 # Default to nightly, since that's where this normally uploads to
@@ -73,7 +85,7 @@ PIP_UPLOAD_FOLDER='nightly/'
 # We put this here so that OVERRIDE_PACKAGE_VERSION below can read from it
 export DATE="$(date -u +%Y%m%d)"
 #TODO: We should be pulling semver version from the base version.txt
-BASE_BUILD_VERSION="1.9.0.dev$DATE"
+BASE_BUILD_VERSION="1.10.0.dev$DATE"
 # Change BASE_BUILD_VERSION to git tag when on a git tag
 # Use 'git -C' to make doubly sure we're in the correct directory for checking
 # the git tag
@@ -85,7 +97,7 @@ if tagged_version >/dev/null; then
   # Turns tag v1.6.0-rc1 -> v1.6.0
   BASE_BUILD_VERSION="$(tagged_version | sed -e 's/^v//' -e 's/-.*$//')"
 fi
-if [[ "$(uname)" == 'Darwin' ]] || [[ "$DESIRED_CUDA" == "cu102" ]] || [[ "$PACKAGE_TYPE" == conda ]]; then
+if [[ "$(uname)" == 'Darwin' ]] || [[ "$PACKAGE_TYPE" == conda ]]; then
   export PYTORCH_BUILD_VERSION="${BASE_BUILD_VERSION}"
 else
   export PYTORCH_BUILD_VERSION="${BASE_BUILD_VERSION}+$DESIRED_CUDA"
@@ -136,7 +148,7 @@ if [[ "${BUILD_FOR_SYSTEM:-}" == "windows" ]]; then
 fi
 
 export DATE="$DATE"
-export NIGHTLIES_DATE_PREAMBLE=1.9.0.dev
+export NIGHTLIES_DATE_PREAMBLE=1.10.0.dev
 export PYTORCH_BUILD_VERSION="$PYTORCH_BUILD_VERSION"
 export PYTORCH_BUILD_NUMBER="$PYTORCH_BUILD_NUMBER"
 export OVERRIDE_PACKAGE_VERSION="$PYTORCH_BUILD_VERSION"
@@ -168,6 +180,10 @@ export CIRCLE_SHA1="$CIRCLE_SHA1"
 export CIRCLE_PR_NUMBER="${CIRCLE_PR_NUMBER:-}"
 export CIRCLE_BRANCH="$CIRCLE_BRANCH"
 export CIRCLE_WORKFLOW_ID="$CIRCLE_WORKFLOW_ID"
+
+export USE_GOLD_LINKER="${USE_GOLD_LINKER}"
+export USE_GLOO_WITH_OPENSSL="ON"
+export USE_WHOLE_CUDNN="${USE_WHOLE_CUDNN}"
 # =================== The above code will be executed inside Docker container ===================
 EOL
 

@@ -6,46 +6,10 @@
 namespace at {
 namespace meta {
 
-static std::array<int64_t, 4> upsample_nearest2d_common_check(IntArrayRef input_size, IntArrayRef output_size) {
-  TORCH_CHECK(
-      output_size.size() == 2,
-      "It is expected output_size equals to 2, but got size ",
-      output_size.size());
-
-  TORCH_CHECK(
-      input_size.size() == 4,
-      "It is expected input_size equals to 4, but got size ",
-      input_size.size());
-
-  int64_t output_height = output_size[0];
-  int64_t output_width = output_size[1];
-
-  int64_t nbatch = input_size[0];
-  int64_t channels = input_size[1];
-  int64_t input_height = input_size[2];
-  int64_t input_width = input_size[3];
-
-  TORCH_CHECK(
-      input_height > 0 && input_width > 0 && output_height > 0 &&
-          output_width > 0,
-      "Input and output sizes should be greater than 0,"
-      " but got input (H: ",
-      input_height,
-      ", W: ",
-      input_width,
-      ") output (H: ",
-      output_height,
-      ", W: ",
-      output_width,
-      ")");
-
-  return {nbatch, channels, output_height, output_width};
-}
-
 TORCH_META_FUNC(upsample_nearest2d) (
   const Tensor& input, IntArrayRef output_size, c10::optional<double> scales_h, c10::optional<double> scales_w
 ) {
-  auto full_output_size = upsample_nearest2d_common_check(input.sizes(), output_size);
+  auto full_output_size = native::upsample_2d_common_check(input.sizes(), output_size);
 
   // Allow for empty batch size but not other dimensions
   TORCH_CHECK(
@@ -53,7 +17,7 @@ TORCH_META_FUNC(upsample_nearest2d) (
       "Non-empty 4D data tensor expected but got a tensor with sizes ",
       input.sizes());
 
-  set_output(full_output_size, input.options());
+  set_output(full_output_size, input.options().memory_format(input.suggest_memory_format()));
 }
 
 TORCH_META_FUNC(upsample_nearest2d_backward) (
@@ -63,7 +27,7 @@ TORCH_META_FUNC(upsample_nearest2d_backward) (
   c10::optional<double> scales_h,
   c10::optional<double> scales_w
 ) {
-  auto full_output_size = upsample_nearest2d_common_check(input_size, output_size);
+  auto full_output_size = native::upsample_2d_common_check(input_size, output_size);
 
   TORCH_CHECK(
       grad_output.dim() == 4,
@@ -77,7 +41,7 @@ TORCH_META_FUNC(upsample_nearest2d_backward) (
         " but got grad_output.size(", i, ") = ", grad_output.size(i));
   }
 
-  set_output(input_size, grad_output.options());
+  set_output(input_size, grad_output.options().memory_format(grad_output.suggest_memory_format()));
 }
 
 } // namespace meta

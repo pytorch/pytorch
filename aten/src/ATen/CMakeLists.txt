@@ -16,13 +16,22 @@ if(NOT AT_INSTALL_BIN_DIR OR NOT AT_INSTALL_LIB_DIR OR NOT AT_INSTALL_INCLUDE_DI
   set(AT_INSTALL_SHARE_DIR "share" CACHE PATH "AT install include subdirectory")
 endif()
 
-# this flag is used in Config but set externally, we must normalize it
-# to 0/1 otherwise `#if ON` will be evaluated to false.
-if(CAFFE2_STATIC_LINK_CUDA)
-  set(CAFFE2_STATIC_LINK_CUDA_INT 1)
-else()
-  set(CAFFE2_STATIC_LINK_CUDA_INT 0)
-endif()
+# These flag are used in Config but set externally. We must normalize them to
+# 0/1 otherwise `#if ON` will be evaluated to false.
+macro(set_bool OUT IN)
+  if(${IN})
+    set(${OUT} 1)
+  else()
+    set(${OUT} 0)
+  endif()
+endmacro()
+
+set_bool(AT_BUILD_WITH_BLAS USE_BLAS)
+set_bool(AT_BUILD_WITH_LAPACK USE_LAPACK)
+set_bool(AT_BLAS_F2C BLAS_F2C)
+set_bool(AT_BLAS_USE_CBLAS_DOT BLAS_USE_CBLAS_DOT)
+set_bool(CAFFE2_STATIC_LINK_CUDA_INT CAFFE2_STATIC_LINK_CUDA)
+
 configure_file(Config.h.in "${CMAKE_CURRENT_SOURCE_DIR}/Config.h")
 # TODO: Don't unconditionally generate CUDAConfig.h.in.  Unfortunately,
 # this file generates AT_ROCM_ENABLED() which is required by the miopen
@@ -36,10 +45,12 @@ endif()
 # NB: If you edit these globs, you'll have to update setup.py package_data as well
 file(GLOB_RECURSE ATen_CORE_HEADERS  "core/*.h")
 file(GLOB_RECURSE ATen_CORE_SRCS "core/*.cpp")
-file(GLOB_RECURSE ATen_CORE_TEST_SRCS "core/*_test.cpp")
+if(NOT BUILD_LITE_INTERPRETER)
+  file(GLOB_RECURSE ATen_CORE_TEST_SRCS "core/*_test.cpp")
+endif()
 EXCLUDE(ATen_CORE_SRCS "${ATen_CORE_SRCS}" ${ATen_CORE_TEST_SRCS})
 
-file(GLOB base_h "*.h" "detail/*.h" "cpu/*.h" "cpu/vec256/*.h" "quantized/*.h")
+file(GLOB base_h "*.h" "detail/*.h" "cpu/*.h" "cpu/vec/vec512/*.h" "cpu/vec/vec256/*.h" "cpu/vec/*.h" "quantized/*.h")
 file(GLOB base_cpp "*.cpp" "detail/*.cpp" "cpu/*.cpp")
 file(GLOB cuda_h "cuda/*.h" "cuda/detail/*.h" "cuda/*.cuh" "cuda/detail/*.cuh")
 file(GLOB cuda_cpp "cuda/*.cpp" "cuda/detail/*.cpp")
@@ -77,11 +88,21 @@ EXCLUDE(native_metal_srcs "${native_metal_srcs}" ${metal_test_srcs})
 file(GLOB metal_prepack_h "native/metal/MetalPrepackOpContext.h")
 file(GLOB metal_prepack_cpp "native/metal/MetalPrepackOpRegister.cpp")
 
+file(GLOB native_ao_sparse_cpp
+            "native/ao_sparse/*.cpp"
+            "native/ao_sparse/cpu/*.cpp"
+            "native/ao_sparse/quantized/*.cpp"
+            "native/ao_sparse/quantized/cpu/*.cpp")
 file(GLOB native_sparse_cpp "native/sparse/*.cpp")
 file(GLOB native_quantized_cpp
             "native/quantized/*.cpp"
             "native/quantized/cpu/*.cpp")
 file(GLOB native_h "native/*.h")
+file(GLOB native_ao_sparse_h
+            "native/ao_sparse/*.h"
+            "native/ao_sparse/cpu/*.h"
+            "native/ao_sparse/quantized/*.h"
+            "native/ao_sparse/quantized/cpu/*.h")
 file(GLOB native_quantized_h "native/quantized/*.h" "native/quantized/cpu/*.h")
 file(GLOB native_cpu_h "native/cpu/*.h")
 
@@ -116,7 +137,23 @@ append_filelist("jit_core_sources" ATen_CORE_SRCS)
 
 add_subdirectory(quantized)
 add_subdirectory(nnapi)
-set(all_cpu_cpp ${base_cpp} ${ATen_CORE_SRCS} ${native_cpp} ${native_sparse_cpp} ${native_quantized_cpp} ${native_mkl_cpp} ${native_mkldnn_cpp} ${native_utils_cpp} ${native_xnnpack} ${generated_cpp} ${core_generated_cpp} ${ATen_CPU_SRCS} ${ATen_QUANTIZED_SRCS} ${ATen_NNAPI_SRCS} ${cpu_kernel_cpp})
+
+if(BUILD_LITE_INTERPRETER)
+  set(all_cpu_cpp ${generated_cpp} ${core_generated_cpp} ${cpu_kernel_cpp})
+  append_filelist("jit_core_sources" all_cpu_cpp)
+  append_filelist("aten_cpu_source_non_codegen_list" all_cpu_cpp)
+  append_filelist("aten_native_source_non_codegen_list" all_cpu_cpp)
+  list(APPEND all_cpu_cpp ${Aten_TH_AVX_extra_src})
+else()
+  set(
+    all_cpu_cpp ${base_cpp} ${ATen_CORE_SRCS} ${native_cpp}
+    ${native_ao_sparse_cpp} ${native_sparse_cpp}
+    ${native_quantized_cpp} ${native_mkl_cpp} ${native_mkldnn_cpp}
+    ${native_utils_cpp} ${native_xnnpack} ${generated_cpp} ${core_generated_cpp}
+    ${ATen_CPU_SRCS} ${ATen_QUANTIZED_SRCS} ${ATen_NNAPI_SRCS} ${cpu_kernel_cpp}
+  )
+endif()
+
 if(AT_MKL_ENABLED)
   set(all_cpu_cpp ${all_cpu_cpp} ${mkl_cpp})
 endif()
@@ -130,13 +167,12 @@ else()
 endif()
 
 # Metal
-if(USE_PYTORCH_METAL)
-  if(APPLE)
-    set(all_cpu_cpp ${all_cpu_cpp} ${metal_cpp} ${native_metal_srcs})
-  else()
-    # Add files needed from optimized_for_mobile
-    set(all_cpu_cpp ${all_cpu_cpp} ${metal_cpp} ${metal_prepack_cpp})
-  endif()
+if(USE_PYTORCH_METAL_EXPORT)
+  # Add files needed from exporting metal models(optimized_for_mobile)
+  set(all_cpu_cpp ${all_cpu_cpp} ${metal_cpp} ${metal_prepack_cpp})
+elseif(APPLE AND USE_PYTORCH_METAL)
+  # Compile Metal kernels
+  set(all_cpu_cpp ${all_cpu_cpp} ${metal_cpp} ${native_metal_srcs})
 else()
   set(all_cpu_cpp ${all_cpu_cpp} ${metal_cpp})
 endif()
@@ -175,9 +211,13 @@ list(APPEND ATen_CPU_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/..)
 list(APPEND ATen_CPU_INCLUDE ${CMAKE_CURRENT_BINARY_DIR})
 
 if(USE_TBB)
-  message("ATen is compiled with TBB (${TBB_ROOT_DIR})")
-  list(APPEND ATen_CPU_INCLUDE ${TBB_ROOT_DIR}/include)
-  list(APPEND ATen_CPU_DEPENDENCY_LIBS tbb)
+  if(USE_SYSTEM_TBB)
+    message("ATen is compiled with system-provided Intel TBB.")
+  else()
+    message("ATen is compiled with Intel TBB (${TBB_ROOT_DIR}).")
+  endif()
+  list(APPEND ATen_CPU_INCLUDE ${TBB_INCLUDE_DIR})
+  list(APPEND ATen_CPU_DEPENDENCY_LIBS TBB::tbb)
 endif()
 
 if(BLAS_FOUND)
@@ -281,6 +321,9 @@ if(NOT MSVC AND NOT EMSCRIPTEN AND NOT INTERN_BUILD_MOBILE)
     set(BUILD_GNUABI_LIBS OFF CACHE BOOL "Don't build sleef gnuabi libs" FORCE)
     set(BUILD_TESTS OFF CACHE BOOL "Don't build sleef tests" FORCE)
     set(OLD_CMAKE_BUILD_TYPE ${CMAKE_BUILD_TYPE})
+    if(CMAKE_SYSTEM_PROCESSOR STREQUAL "arm64" AND CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+      set(DISABLE_SVE ON CACHE BOOL "Xcode's clang-12.5 crashes while trying to compile SVE code" FORCE)
+    endif()
     if("${CMAKE_C_COMPILER_ID}" STREQUAL "GNU" AND
         CMAKE_C_COMPILER_VERSION VERSION_GREATER 6.9 AND CMAKE_C_COMPILER_VERSION VERSION_LESS 8)
       set(GCC_7 True)
@@ -405,14 +448,22 @@ install(FILES "${CMAKE_CURRENT_BINARY_DIR}/cmake-exports/ATenConfig.cmake"
 
 set(INSTALL_HEADERS ${base_h} ${ATen_CORE_HEADERS})
 if(NOT INTERN_BUILD_MOBILE)
-  list(APPEND INSTALL_HEADERS ${native_h} ${native_cpu_h} ${native_quantized_h} ${cuda_h} ${native_cuda_h} ${native_hip_h} ${cudnn_h} ${hip_h} ${miopen_h})
+  list(APPEND INSTALL_HEADERS ${native_h} ${native_cpu_h} ${native_ao_sparse_h} ${native_quantized_h} ${cuda_h} ${native_cuda_h} ${native_hip_h} ${cudnn_h} ${hip_h} ${miopen_h})
+  # Metal
+  if(USE_PYTORCH_METAL_EXPORT)
+    # Add files needed from exporting metal models(optimized_for_mobile)
+    list(APPEND INSTALL_HEADERS ${metal_h} ${metal_prepack_h})
+  elseif(APPLE AND USE_PYTORCH_METAL)
+    # Needed by Metal kernels
+    list(APPEND INSTALL_HEADERS ${metal_h} ${native_metal_h})
+  else()
+    list(APPEND INSTALL_HEADERS ${metal_h})
+  endif()
 else()
-  if(USE_PYTORCH_METAL)
-    if(IOS)
+  if(IOS AND USE_PYTORCH_METAL)
       list(APPEND INSTALL_HEADERS ${metal_h} ${native_metal_h})
-    else()
+  else()
       list(APPEND INSTALL_HEADERS ${metal_h} ${metal_prepack_h})
-    endif()
   endif()
 endif()
 
@@ -441,6 +492,8 @@ install(FILES ${CMAKE_BINARY_DIR}/aten/src/ATen/Declarations.yaml
 
 if(ATEN_NO_TEST)
   message("disable test because ATEN_NO_TEST is set")
+elseif(BUILD_LITE_INTERPRETER)
+  message("disable aten test when BUILD_LITE_INTERPRETER is enabled")
 else()
   add_subdirectory(test)
 endif()
@@ -467,7 +520,7 @@ set(ATen_HIP_TEST_SRCS ${ATen_HIP_TEST_SRCS} PARENT_SCOPE)
 set(ATen_VULKAN_TEST_SRCS ${ATen_VULKAN_TEST_SRCS} PARENT_SCOPE)
 set(ATen_MOBILE_BENCHMARK_SRCS ${ATen_MOBILE_BENCHMARK_SRCS} PARENT_SCOPE)
 set(ATen_MOBILE_TEST_SRCS ${ATen_MOBILE_TEST_SRCS} ${ATen_VULKAN_TEST_SRCS} PARENT_SCOPE)
-set(ATen_VEC256_TEST_SRCS  ${ATen_VEC256_TEST_SRCS} PARENT_SCOPE)
+set(ATen_VEC_TEST_SRCS  ${ATen_VEC_TEST_SRCS} PARENT_SCOPE)
 set(ATen_QUANTIZED_TEST_SRCS ${ATen_QUANTIZED_TEST_SRCS} PARENT_SCOPE)
 set(ATen_CPU_INCLUDE ${ATen_CPU_INCLUDE} PARENT_SCOPE)
 set(ATen_THIRD_PARTY_INCLUDE ${ATen_THIRD_PARTY_INCLUDE} PARENT_SCOPE)

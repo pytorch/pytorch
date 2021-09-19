@@ -2,11 +2,9 @@
 
 #include <torch/csrc/python_headers.h>
 #include <structmember.h>
-#include <unordered_map>
-#include <unordered_set>
-#include <exception>
 #include <ATen/ATen.h>
 #include <ATen/SequenceNumber.h>
+#include <c10/util/irange.h>
 #include <pybind11/pybind11.h>
 
 #include <torch/csrc/THP.h>
@@ -21,6 +19,7 @@
 #include <torch/csrc/jit/frontend/tracer.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/python/python_tracer.h>
+#include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/Exceptions.h>
@@ -31,6 +30,8 @@
 #include <stdexcept>
 #include <string>
 #include <tuple>
+#include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -44,56 +45,28 @@ PyObject *THPFunctionClass = nullptr;
 #define THPFunction_assert(condition, ...)                                     \
   if (!(condition)) { THPUtils_setError(__VA_ARGS__); throw python_error(); }
 
-namespace torch { namespace autograd {
+// Anonymous namespace for helpful functions used in this file
+namespace {
 
-void PyNode::throw_python_error() {
+// Throw a python_error with the PyErr state persisted, so that we
+// don't lose the error state if the GIL is released when we don't
+// have a PyThreadState created beforehand, this is made so that
+// even for pure C++ thread without a pre-created PyThreadState could
+// also capture the correct error message.
+// TODO: This is a temporary approach to allow C++ thread to correctly
+// capture Python Error in autograd, remove this when c10 thread pool
+// allow to do one time initialization.
+// see discussion in https://github.com/pytorch/pytorch/pull/34845
+// Follow up issue: https://github.com/pytorch/pytorch/issues/35006
+void throw_python_error() {
   python_error err;
   err.persist();
   throw err;
 }
-auto PyNode::legacy_apply(const variable_list& inputs) -> variable_list {
-  pybind11::gil_scoped_acquire gil;
 
-  THPObjectPtr pyInputs(PyTuple_New(inputs.size()));
-  if (!pyInputs) throw_python_error();
-
-  for (size_t i = 0; i != inputs.size(); ++i) {
-    PyTuple_SET_ITEM(pyInputs.get(), i, THPVariable_Wrap(inputs[i]));
-  }
-
-  THPObjectPtr r(PyObject_CallMethod(
-      obj, "_do_backward", "OO", pyInputs.get(), Py_True));
-  if (!r) throw_python_error();
-
-  auto num_outputs = PyTuple_GET_SIZE(r.get());
-  tensor_list tensor_results(num_outputs);
-  for (int i = 0; i != num_outputs; ++i) {
-    PyObject* obj = PyTuple_GET_ITEM(r.get(), i);
-    if (obj != Py_None) {
-      if (!THPVariable_Check(obj)) {
-        std::string msg("expected Variable (got '");
-        msg += THPUtils_typename(obj);
-        msg += "')'";
-        throw std::runtime_error(msg);
-      }
-      tensor_results[i] = ((THPVariable*)obj)->cdata.tensor_data();
-    }
-  }
-
-  // XXX: this might get requires_grad wrong - there's no way to figure out
-  // if _do_backward didn't use ctx.saved_tensors and as a result some
-  // Variables might require grad, even if no args do. Unfortunately, this
-  // leads to unexpected error messages ("no nodes require computing gradients"),
-  // but I don't have a better idea. These functions would raise an error
-  // in backward anyway.
-  return wrap_outputs(
-      inputs,
-      std::move(tensor_results),
-      [this](edge_list&& next_edges) {
-        return std::make_shared<Error>(
-            name() + " is not differentiable twice", std::move(next_edges));
-      });
 }
+
+namespace torch { namespace autograd {
 
 // NOTE: this function is written in a way that assumes it's only called for backward;
 // it's used by engine.cpp.  This is responsible for forwarding a call from
@@ -103,17 +76,13 @@ auto PyNode::apply(variable_list&& inputs) -> variable_list {
   at::OptionalDeviceGuard _device_guard;
   THPFunction* py_fn = (THPFunction*)obj;
 
-  THPObjectPtr _legacy(PyObject_GetAttrString(obj, "_is_legacy"));
-  if (_legacy == Py_True) {
-    return legacy_apply(inputs);
-  }
-
   // Massage a C++ variable_list into a Python arguments tuple
   auto num_inputs = inputs.size();
   THPObjectPtr pyInputs(PyTuple_New(num_inputs));
   if (!pyInputs) throw_python_error();
   auto& output_info = py_fn->output_info;
-  for (size_t i = 0; i < num_inputs; ++i) {
+  for (const auto i : c10::irange(num_inputs)) {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     PyObject* input;
     if (inputs[i].defined() || !py_fn->materialize_grads) {
       input = THPVariable_Wrap(inputs[i]);
@@ -137,7 +106,7 @@ auto PyNode::apply(variable_list&& inputs) -> variable_list {
   // Truncate the result tuple in that case.
   if (num_outputs > num_forward_inputs) {
     bool all_none = true;
-    for (int i = num_forward_inputs; i < num_outputs; i++) {
+    for (const auto i : c10::irange(num_forward_inputs, num_outputs)) {
       all_none &= PyTuple_GET_ITEM(r.get(), i) == Py_None;
     }
     if (all_none) {
@@ -159,7 +128,6 @@ auto PyNode::apply(variable_list&& inputs) -> variable_list {
   // Massage the Python results tuple back into a C++ variable_list
   variable_list results;
   results.reserve(num_outputs);
-  auto& input_info = py_fn->input_info;
   for (int i = 0; i != num_outputs; ++i) {
     PyObject* output = PyTuple_GET_ITEM(r.get(), i);
     bool was_variable = is_variable_input[i];
@@ -181,7 +149,7 @@ auto PyNode::apply(variable_list&& inputs) -> variable_list {
         msg += ")";
         throw std::runtime_error(msg);
       }
-      results.emplace_back(((THPVariable*)output)->cdata);
+      results.emplace_back(THPVariable_Unpack(output));
     }
   }
 
@@ -208,11 +176,6 @@ auto PyNode::name() const -> std::string {
   pybind11::gil_scoped_acquire gil;
   auto f = (THPFunction*) obj;
   auto name = std::string(Py_TYPE(f)->tp_name);
-  // Python API functions are not const-correct
-  THPObjectPtr _legacy(PyObject_GetAttrString(const_cast<PyObject*>(obj), "_is_legacy")); // NOLINT
-  if (_legacy == Py_True) {
-    name += "LegacyBackward";
-  }
   return name;
 }
 
@@ -221,10 +184,8 @@ auto PyNode::name() const -> std::string {
 // Traverse and clear are required for supporting Python's GC cycle handling.
 static int THPFunction_traverse(THPFunction *self, visitproc visit, void *arg)
 {
-  // cdata could be null if someone constructed a legacy function but haven't
-  // actually called backward() on it yet, or if the PyNode has already
-  // gone out of scope by the time we're GC'ing this THPFunction (e.g., the
-  // user saved grad_fn only).
+  // cdata could be null if the PyNode has already gone out of scope
+  // by the time we're GC'ing this THPFunction (e.g., the user saved grad_fn only).
   //
   // TODO: I'm not really sure if we're actually obligated to traverse PyObject
   // that is stored in PyNode, since we don't really own that C++ object.
@@ -248,19 +209,9 @@ static int THPFunction_traverse(THPFunction *self, visitproc visit, void *arg)
 
 static int THPFunction_clear(THPFunction *self)
 {
-  // Why is this guaranteed to be true?  Suppose that self->cdata is non-null
-  // (otherwise the condition is trivially true).  Then there is a PyNode
-  // which contains an owning reference to this object.  But we are only
-  // allowed to clear if all owning references are gone!  Contradiction.
-  //
-  // However, note that THPFunction_clear is typically called in the shared_ptr
-  // destructor of PyNode; in that case, per
-  // https://cplusplus.github.io/LWG/lwg-active.html#2751 it's not currently
-  // specified in the standard that this is guaranteed.  If you see this
-  // assert triggering in the wild, feel free to comment it out.  They're
-  // likely to standardize that you ARE guaranteed to see the weak pointers
-  // as expired in the destructor in the future, so we'll keep this for now.
-  TORCH_INTERNAL_ASSERT(self->cdata.expired());
+  // Note that the cdata might not be expired yet in the case where this
+  // object is part of a cycle and the GC happens to tp_clear this PyObject
+  // before the other ones that trigger the de-allocation of the cdata
 
   Py_CLEAR(self->needs_input_grad);
 
@@ -278,6 +229,20 @@ static int THPFunction_clear(THPFunction *self)
 
 static void THPFunction_dealloc(THPFunction* self)
 {
+  // Why is this guaranteed to be true?  Suppose that self->cdata is non-null
+  // (otherwise the condition is trivially true).  Then there is a PyNode
+  // which contains an owning reference to this object.  But we are only
+  // allowed to clear if all owning references are gone!  Contradiction.
+  //
+  // However, note that THPFunction_clear is typically called in the shared_ptr
+  // destructor of PyNode; in that case, per
+  // https://cplusplus.github.io/LWG/lwg-active.html#2751 it's not currently
+  // specified in the standard that this is guaranteed.  If you see this
+  // assert triggering in the wild, feel free to comment it out.  They're
+  // likely to standardize that you ARE guaranteed to see the weak pointers
+  // as expired in the destructor in the future, so we'll keep this for now.
+  TORCH_INTERNAL_ASSERT(self->cdata.expired());
+
   PyObject_GC_UnTrack(self);
   THPFunction_clear(self);
   self->cdata.~weak_ptr<PyNode>();
@@ -309,8 +274,6 @@ PyObject *THPFunction_new(PyTypeObject *type, PyObject *args, PyObject *kwargs)
 // Forward
 ////////////////////////////////////////////////////////////////////////////////
 
-using t2var_type = std::unordered_map<PyObject *, THPVariable *>;
-
 // Bump the counters of all recorded dirty input tensors, adding each of them
 // into dirty_inputs.  Also does some sanity checking.
 static std::unordered_set<at::TensorImpl*> _mark_dirty(THPFunction *self)
@@ -324,15 +287,15 @@ static std::unordered_set<at::TensorImpl*> _mark_dirty(THPFunction *self)
       "but is %s", THPUtils_typename(self->dirty_tensors));
   Py_ssize_t num_dirty = PyTuple_GET_SIZE(self->dirty_tensors);
   dirty_inputs.reserve(num_dirty);
-  for (int i = 0; i < num_dirty; i++) {
+  for(const auto i : c10::irange(num_dirty)) {
     PyObject *obj = PyTuple_GET_ITEM(self->dirty_tensors, i);
     THPFunction_assert(THPVariable_Check(obj), "mark_dirty can "
         "only accept variables, but argument %d is of type %s", i,
         THPUtils_typename(obj));
 
-    dirty_inputs.insert(((THPVariable*)obj)->cdata.unsafeGetTensorImpl());
-    auto variable = (THPVariable*)obj;
-    torch::autograd::impl::bump_version(variable->cdata);
+    const auto& tensor = THPVariable_Unpack(obj);
+    dirty_inputs.insert(tensor.unsafeGetTensorImpl());
+    torch::autograd::impl::bump_version(tensor);
   }
   // We're not going to ever need this so let's remove references now
   Py_CLEAR(self->dirty_tensors);
@@ -362,30 +325,92 @@ static void _wrap_outputs(const std::shared_ptr<PyNode>& cdata, THPFunction *sel
     self->output_info.reserve(num_outputs);
   }
 
-  auto as_variable = [&](PyObject* obj, int i) -> Variable {
-    if (THPVariable_Check(obj)) {
-      return ((THPVariable*)obj)->cdata;
-    }
-    throw TypeError("%s.forward: expected Tensor or tuple of Tensor (got %s) for return value %d",
-        Py_TYPE(self)->tp_name, Py_TYPE(obj)->tp_name, i);
-  };
-
   auto non_differentiable = _parse_non_differentiable(self);
   auto dirty_inputs = _mark_dirty(self);
 
-  std::vector<Variable> raw_output_vars;
+  std::vector<c10::optional<Variable>> raw_output_vars;
   raw_output_vars.reserve(num_outputs);
-  for(int i = 0; i < num_outputs; ++i){
+  for (const auto i : c10::irange(num_outputs)) {
     PyObject* obj = PyTuple_GET_ITEM(raw_output, i);
-    raw_output_vars.push_back(as_variable(obj,i));
+    // Only process tensors as outputs for autograd purposes.
+    if (THPVariable_Check(obj)) {
+      raw_output_vars.emplace_back(THPVariable_Unpack(obj));
+    } else {
+      raw_output_vars.emplace_back();
+    }
   }
 
-  auto wrapped_outputs = _wrap_outputs(input_vars, non_differentiable, dirty_inputs, raw_output_vars, cdata_if_executable);
-  for (int i = 0; i < num_outputs; i++) {
-    if (is_executable) {
-      self->output_info.emplace_back(wrapped_outputs[i]);
+  _jvp_fn_t jvp_user_function = [self](variable_list inputs, variable_list grad_inputs) {
+    pybind11::gil_scoped_acquire gil;
+
+    // Massage a C++ variable_list into a Python arguments tuple
+    // Making sure to introduce the proper None for non-Tensor inputs
+    auto num_inputs = self->is_variable_input.size();
+    THPObjectPtr pyInputs(PyTuple_New(num_inputs));
+    if (!pyInputs) throw_python_error();
+    auto var_input_idx = 0;
+    for (const auto i : c10::irange(num_inputs)) {
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+      PyObject* input;
+      if (self->is_variable_input[i]) {
+        if (grad_inputs[i].defined() || !self->materialize_grads) {
+          input = THPVariable_Wrap(grad_inputs[i]);
+        } else {
+          input = THPVariable_Wrap(at::zeros_like(inputs[i]));
+        }
+        if (!input) throw_python_error();
+      } else {
+        Py_INCREF(Py_None);
+        input = Py_None;
+      }
+      PyTuple_SET_ITEM(pyInputs.get(), i, input);
     }
-    PyTuple_SET_ITEM(outputs, i, THPVariable_Wrap(wrapped_outputs[i]));
+
+    THPObjectPtr apply_jvp_fn(PyObject_GetAttrString((PyObject*)self, "apply_jvp"));
+    if (!apply_jvp_fn) throw_python_error();
+    THPObjectPtr r(PyObject_CallObject(apply_jvp_fn, pyInputs.get()));
+    if (!r) throw_python_error();
+    ensure_tuple(r);
+
+    // Massage the Python results tuple back into a C++ variable_list
+    // Don't do any check on the number of results here as
+    // it is handled by the caller
+    const int num_outputs = PyTuple_GET_SIZE(r.get());
+    variable_list results;
+    results.reserve(num_outputs);
+    for (int i = 0; i != num_outputs; ++i) {
+      PyObject* output = PyTuple_GET_ITEM(r.get(), i);
+      if (output == Py_None) {
+        results.emplace_back();
+      } else {
+        TORCH_CHECK(THPVariable_Check(output), "expected Variable or None (got ",
+                    THPUtils_typename(output), ") for grad output ", i, ".")
+        results.emplace_back(THPVariable_Unpack(output));
+      }
+    }
+
+    return results;
+  };
+
+  // Wrap only the tensor outputs.
+  auto wrapped_outputs = _wrap_outputs(input_vars, non_differentiable, dirty_inputs,
+                                       raw_output_vars, cdata_if_executable, jvp_user_function);
+
+  for(const auto i : c10::irange(num_outputs)) {
+    PyObject* obj = PyTuple_GetItem(raw_output, i);
+    // Keep the non-tensor outputs as is.
+    if (!THPVariable_Check(obj)) {
+      if (is_executable) {
+        self->output_info.emplace_back();
+      }
+      Py_INCREF(obj);
+      PyTuple_SetItem(outputs, i, obj);
+    } else {
+      if (is_executable) {
+        self->output_info.emplace_back(*wrapped_outputs[i]);
+      }
+      PyTuple_SetItem(outputs, i, THPVariable_Wrap(*wrapped_outputs[i]));
+    }
   }
 }
 
@@ -400,18 +425,18 @@ static void _save_variables(const std::shared_ptr<PyNode>& cdata_ptr, THPFunctio
   Py_ssize_t num_saved = PyTuple_GET_SIZE(self->to_save);
   self->saved_variables.clear();
   self->saved_variables.reserve(num_saved);
-  for (int i = 0; i < num_saved; i++) {
+  for(const auto i : c10::irange(num_saved)) {
     PyObject *obj = PyTuple_GET_ITEM(self->to_save, i);
     if (obj == Py_None) {
       self->saved_variables.emplace_back();
       continue;
     } else if (THPVariable_Check(obj)) {
-      auto variable = (THPVariable*)obj;
-      bool is_output = variable->cdata.grad_fn().get() == cdata_ptr.get();
-      self->saved_variables.emplace_back(variable->cdata, is_output);
+      const auto& tensor = THPVariable_Unpack(obj);
+      bool is_output = tensor.grad_fn().get() == cdata_ptr.get();
+      self->saved_variables.emplace_back(tensor, is_output);
     } else {
-      throw TypeError(
-          "save_for_backward can only save variables, but argument %d is of "
+      throw torch::TypeError(
+          "save_for_backward can only save variables, but argument %ld is of "
           "type %s", i, Py_TYPE(obj)->tp_name);
     }
   }
@@ -431,11 +456,11 @@ _parse_non_differentiable(THPFunction *self)
       "tuple but is %s", THPUtils_typename(self->non_differentiable));
   Py_ssize_t num_nondiff = PyTuple_GET_SIZE(self->non_differentiable);
   set.reserve(num_nondiff);
-  for (int i = 0; i < num_nondiff; i++) {
+  for(const auto i : c10::irange(num_nondiff)) {
     PyObject *t = PyTuple_GET_ITEM(self->non_differentiable, i);
     THPFunction_assert(THPVariable_Check(t), "mark_non_differentiable "
         "only accepts variable arguments, but got %s", THPUtils_typename(t));
-    set.insert(((THPVariable*)t)->cdata.unsafeGetTensorImpl());
+    set.insert(THPVariable_Unpack(t).unsafeGetTensorImpl());
   }
   Py_CLEAR(self->non_differentiable);
   return set;
@@ -461,7 +486,7 @@ std::pair<UnpackedInput, InputFlags> unpack_input(PyObject *args) {
   auto num_args = PyTuple_GET_SIZE(args);
   unpacked.input_tuple = PyTuple_New(num_args);
   flags.needs_input_grad = PyTuple_New(num_args);
-  for (int i = 0; i < num_args; i++) {
+  for(const auto i : c10::irange(num_args)) {
     PyObject *arg = PyTuple_GET_ITEM(args, i);
 
     bool is_variable = THPVariable_Check(arg);
@@ -469,16 +494,16 @@ std::pair<UnpackedInput, InputFlags> unpack_input(PyObject *args) {
     if (!is_variable) {
       // TODO: remove this code path once Variable and Tensor are merged in Python
       if (enforce_variables) {
-        THPUtils_setError("expected a Variable argument, but got %s",
+        THPUtils_setError("expected a Tensor argument, but got %s",
                           THPUtils_typename(arg));
         throw python_error();
       }
       Py_INCREF(Py_False);
       PyTuple_SET_ITEM(flags.needs_input_grad.get(), i, Py_False);
     } else {
-      THPVariable* variable = (THPVariable*)arg;
-      unpacked.input_vars.push_back(variable->cdata);
-      PyObject* needs_grad = variable->cdata.requires_grad() ? Py_True : Py_False;
+      const auto& tensor = THPVariable_Unpack(arg);
+      unpacked.input_vars.push_back(tensor);
+      PyObject* needs_grad = tensor.requires_grad() ? Py_True : Py_False;
       Py_INCREF(needs_grad);
       PyTuple_SET_ITEM(flags.needs_input_grad.get(), i, needs_grad);
     }
@@ -489,15 +514,6 @@ std::pair<UnpackedInput, InputFlags> unpack_input(PyObject *args) {
   flags.is_executable = GradMode::is_enabled() && any_variable_requires_grad(unpacked.input_vars);
   flags.next_edges = (flags.is_executable ? collect_next_edges(unpacked.input_vars) : edge_list());
   return std::make_pair(std::move(unpacked), std::move(flags));
-}
-
-static void _assert_not_tracing(const char* name, const variable_list& input_vars) {
-  if (tracer::isTracing()) {
-    std::ostringstream oss;
-    oss << "Attempted to trace " << name;
-    oss << ", but tracing of legacy functions is not supported";
-    throw std::runtime_error(oss.str());
-  }
 }
 
 static torch::jit::Node* _trace_pre_record(
@@ -514,7 +530,7 @@ static torch::jit::Node* _trace_pre_record(
   std::string arg_types;
   arg_types.reserve(num_args);
   scalar_args.reserve(num_args);
-  for (int i = 0; i < num_args; i++) {
+  for(const auto i : c10::irange(num_args)) {
     PyObject *arg_object = PyTuple_GET_ITEM(input_objects, i);
     if (THPVariable_Check(arg_object)) {
       arg_types.push_back('d');
@@ -546,23 +562,40 @@ static void _trace_post_record(
 
   // Isolate C variable ptrs in a vector
   int num_outputs = PyTuple_GET_SIZE(output_objects);
-  variable_list output_vars(num_outputs);
   auto graph = node->owningGraph();
   node->addOutput();
+  auto old_node = node;
   if (!unpack_output) {
     std::vector<TypePtr> tuple_values(num_outputs, TensorType::get());
     TypePtr tuple_type = TupleType::create(std::move(tuple_values));
+    // Original type is tuple of tensors "without" element type and shape.
+    // The missed parts will be added below.
     node->output()->setType(tuple_type);
     auto unpacked = graph->createTupleUnpack(node->output())->insertAfter(node);
     node = unpacked;
   }
-  for (int i = 0; i < num_outputs; ++i) {
-    auto var = (THPVariable*)PyTuple_GET_ITEM(output_objects, i);
-    Value* value = node->outputs()[i];
-    if (var->cdata.defined()) {
-      value->inferTypeFrom(var->cdata);
-      jit::tracer::setValueTrace(var->cdata, value);
+  for (const auto i : c10::irange(num_outputs)) {
+    PyObject* obj = PyTuple_GET_ITEM(output_objects, i);
+    if (THPVariable_Check(obj)) {
+      Value* value = node->outputs()[i];
+      const auto& tensor = THPVariable_Unpack(obj);
+      if (tensor.defined()) {
+        value->inferTypeFrom(tensor);
+        jit::tracer::setValueTrace(tensor, value);
+      }
     }
+  }
+  // If TupleUnpack operator is created, we copy its output type back
+  // to the original tuple type.
+  if (!unpack_output) {
+    std::vector<TypePtr> new_tuple_values;
+    for (int i = 0; i < num_outputs; ++i) {
+      TypePtr ptr = node->outputs()[i]->type();
+      new_tuple_values.push_back(ptr);
+    }
+    TypePtr tuple_type = TupleType::create(std::move(new_tuple_values));
+    // The i-th tuple element receives a new tensor type with element type and shape.
+    old_node->output()->setType(tuple_type);
   }
 }
 
@@ -591,6 +624,9 @@ PyObject* process_outputs(PyObject *op_obj, const std::shared_ptr<PyNode>& cdata
   bool is_inplace = static_cast<bool>(grad_fn->dirty_tensors);
   _wrap_outputs(cdata, grad_fn, unpacked.input_vars, raw_output, outputs, is_executable);
   _trace_post_record(node, op_obj, unpacked.input_vars, outputs, is_inplace, unpack_output);
+
+  // It is important that creating the SavedVariables happen after the output wrapping as the
+  // outputs must have their grad_fn/fw_grad properly set before we save them.
   if (is_executable) {
     _save_variables(cdata, grad_fn);
   } else {
@@ -614,6 +650,12 @@ PyObject* process_outputs(PyObject *op_obj, const std::shared_ptr<PyNode>& cdata
 PyObject* THPFunction_name(PyObject *self, PyObject* noargs) {
   HANDLE_TH_ERRORS
   auto cdata = ((THPFunction*)self)->cdata.lock();
+  TORCH_CHECK(cdata,
+    "Attribute 'name' is invalid for this instance of _C._FunctionBase. "
+    "Accessing this attribute directly on an instance of autograd.Function is a legacy "
+    "access pattern that is no longer supported. For examples on how to use new-style "
+    "autograd functions, see "
+    "https://pytorch.org/docs/stable/autograd.html#torch.autograd.Function ");
   return THPUtils_packString(cdata->name());
   END_HANDLE_TH_ERRORS
 }
@@ -655,7 +697,7 @@ PyObject *THPFunction_apply(PyObject *cls, PyObject *inputs)
   if (!ctx_input_tuple) return nullptr;
   Py_INCREF(ctx);
   PyTuple_SET_ITEM(ctx_input_tuple.get(), 0, (PyObject*)ctx);
-  for (int i = 0; i < num_args; ++i) {
+  for (const auto i : c10::irange(num_args)) {
     PyObject *arg = PyTuple_GET_ITEM(unpacked_input.input_tuple.get(), i);
     Py_INCREF(arg);
     PyTuple_SET_ITEM(ctx_input_tuple.get(), i + 1, arg);
@@ -665,6 +707,7 @@ PyObject *THPFunction_apply(PyObject *cls, PyObject *inputs)
   THPObjectPtr tensor_outputs;
   {
     AutoGradMode grad_mode(false);
+    at::AutoFwGradMode fw_grad_mode(false);
     THPObjectPtr forward_fn(PyObject_GetAttrString(cls, "forward"));
     if (!forward_fn) return nullptr;
     tensor_outputs = PyObject_CallObject(forward_fn, ctx_input_tuple);
@@ -678,144 +721,25 @@ PyObject *THPFunction_apply(PyObject *cls, PyObject *inputs)
 
 
 ////////////////////////////////////////////////////////////////////////////////
-// Backward
-////////////////////////////////////////////////////////////////////////////////
-
-static void _prepare_grads(THPFunction *self, THPObjectPtr& raw_grads, bool is_grad_output)
-{
-  at::OptionalDeviceGuard device_guard;
-  int num_grads = PyTuple_GET_SIZE(raw_grads.get());
-  // First, check if any of grads is None. If not, there's nothing to do
-  bool has_none = false;
-  for (int i = 0; i < num_grads; i++) {
-    has_none |= PyTuple_GET_ITEM(raw_grads.get(), i) == Py_None;
-  }
-  if (!has_none)
-      return;
-
-  THPObjectPtr grads;
-  grads = PyTuple_New(num_grads);
-  if (!grads) throw python_error();
-
-  // Look for Nones and replace them with new buffers
-  auto& grads_info = is_grad_output ? self->output_info : self->input_info;
-  AT_ASSERT(grads_info.size() == (size_t)num_grads);
-  for (int i = 0; i < num_grads; i++) {
-    PyObject *grad = PyTuple_GET_ITEM(raw_grads.get(), i);
-    if (grad == Py_None) {
-      grad = THPVariable_Wrap(grads_info[i].zeros(device_guard));
-      if (!grad) throw python_error();
-    } else {
-      Py_INCREF(grad);
-    }
-    PyTuple_SET_ITEM(grads.get(), i, grad);
-  }
-  raw_grads = grads.release();
-}
-
-static void _trim_grad_input(const std::shared_ptr<PyNode>& cdata, THPFunction *self, THPObjectPtr& grad_input)
-{
-  int num_grads = PyTuple_GET_SIZE(grad_input.get());
-  const int num_outputs = cdata->num_outputs();
-  if (num_grads > num_outputs) {
-    // Check that all extra grads are none
-    bool all_none = true;
-    for (int i = num_outputs; i < num_grads; i++) {
-      all_none = (PyTuple_GET_ITEM(grad_input.get(), i) == Py_None);
-      if (!all_none) break;
-    }
-    // If yes, slice the tuple
-    if (all_none) {
-      num_grads = num_outputs;
-      grad_input = PyTuple_GetSlice(grad_input.get(), 0, num_grads);
-      if (!grad_input) throw python_error();
-    }
-  }
-}
-
-PyObject * THPFunction_do_backward(PyObject *_self, PyObject *args)
-{
-  try {
-    Py_ssize_t num_args = args ? PyTuple_GET_SIZE(args) : 0;
-    THPUtils_assert(num_args == 2, "_do_backward expects exactly two arguments");
-    PyObject *raw_grad_output = PyTuple_GET_ITEM(args, 0);
-    PyObject *retain_variables = PyTuple_GET_ITEM(args, 1);
-    if (!PyTuple_Check(raw_grad_output) || !PyBool_Check(retain_variables)) {
-      THPUtils_invalidArguments(args, nullptr, "_do_backward", 1, "(tuple, bool)");
-      return nullptr;
-    }
-
-    auto self = (THPFunction*)_self;
-    auto cdata = self->cdata.lock();
-    // In obscure situations, cdata might be nullptr because it's expired.  THAT
-    // is an internal error and I'd like to know about it, but since this is
-    // all dead soon I didn't bother implementing a sanity check here.  See
-    // https://stackoverflow.com/questions/45507041/how-to-check-if-weak-ptr-is-empty-non-assigned
-    // for how to do it.
-    TORCH_CHECK(cdata,
-      "Legacy autograd function attempted to call backward before forward "
-      "was called.  This could occur if you manually called _do_backward on Function.  "
-      "In any case, this is very naughty!  If you absolutely need this to work, "
-      "try porting your code to use non-legacy autograd function, see: "
-      "https://pytorch.org/docs/stable/notes/extending.html#extending-torch-autograd");
-    THPUtils_assert(PyTuple_GET_SIZE(raw_grad_output) == cdata->num_inputs(),
-                    "%s got an invalid number of gradients (expected %d got %d)",
-                    THPUtils_typename(self), cdata->num_inputs(),
-                    PyTuple_GET_SIZE(raw_grad_output));
-
-    // Some of the output might have been unused, so we have to allocate
-    // zero-filled buffers instead
-    Py_INCREF(raw_grad_output);
-    THPObjectPtr grad_output(raw_grad_output);
-    if (self->materialize_grads) {
-      _prepare_grads(self, grad_output, true);
-    }
-
-    // self.backward(*grad_output)
-    THPObjectPtr backward_fn(PyObject_GetAttrString((PyObject*)self, "backward"));
-    THPUtils_assert(backward_fn.get(), "function %s doesn't implement a required "
-        "'backward' method", THPUtils_typename((PyObject*)self));
-    THPObjectPtr grad_input(PyObject_CallObject(backward_fn, grad_output.get()));
-    if (!grad_input) return nullptr;
-    ensure_tuple(grad_input);
-
-    // We allow functions to return more gradients, than there were outputs,
-    // if and only if the additional ones are all None
-    _trim_grad_input(cdata, self, grad_input);
-    int num_grads = PyTuple_GET_SIZE(grad_input.get());
-    int num_outputs = cdata->num_outputs();
-    THPUtils_assert(num_grads == num_outputs, "%s returned an invalid number of "
-        "gradient tensors (expected %d, but got %d)", THPUtils_typename(self),
-        num_outputs, num_grads);
-
-    return grad_input.release();
-
-  } catch (python_error& e) {
-    return nullptr;
-  } catch (std::exception& e) {
-    THPUtils_setError(e.what());
-    return nullptr;
-  }
-}
-
-////////////////////////////////////////////////////////////////////////////////
 // Other methods / attributes
 ////////////////////////////////////////////////////////////////////////////////
 
 PyObject* THPFunction__register_hook_dict(PyObject *_self, PyObject *_var)
 {
   HANDLE_TH_ERRORS
-  THPUtils_assert(THPVariable_Check(_var), "_register_hook_dict expected a variable");
-  THPVariable *var = (THPVariable*)_var;
+  THPUtils_assert(THPVariable_Check(_var), "_register_hook_dict expected a Tensor");
+  THPVariable* var = reinterpret_cast<THPVariable*>(_var);
+  const auto& tensor = THPVariable_Unpack(var);
   std::unique_ptr<FunctionPreHook> hook(new PyFunctionPreHook(
-      var->backward_hooks, var->cdata.output_nr()));
+      var->backward_hooks, tensor.output_nr()));
   auto self = (THPFunction*)_self;
   auto cdata = self->cdata.lock();
   TORCH_CHECK(cdata,
-    "Legacy autograd function had register_hook called before the function was "
-    "invoked.  This usage pattern is no longer supported: please call register_hook "
-    "AFTER calling your function, or port your code to use non-legacy autograd function, see: "
-    "https://pytorch.org/docs/stable/notes/extending.html#extending-torch-autograd")
+    "Attribute '_register_hook_dict' is invalid for this instance of _C._FunctionBase. "
+    "Accessing this attribute directly on an instance of autograd.Function is a legacy "
+    "access pattern that is no longer supported. For examples on how to use new-style "
+    "autograd functions, see "
+    "https://pytorch.org/docs/stable/autograd.html#torch.autograd.Function ");
   cdata->add_pre_hook(std::move(hook));
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -827,10 +751,11 @@ PyObject* THPFunction_register_hook(PyObject *_self, PyObject *hook)
   auto self= (THPFunction*)_self;
   auto cdata = self->cdata.lock();
   TORCH_CHECK(cdata,
-    "Legacy autograd function had _register_hook called before the function was "
-    "invoked.  This usage pattern is no longer supported: please call _register_hook "
-    "AFTER calling your function, or port your code to use non-legacy autograd function, see: "
-    "https://pytorch.org/docs/stable/notes/extending.html#extending-torch-autograd")
+    "Attribute 'register_hook' is invalid for this instance of _C._FunctionBase. "
+    "Accessing this attribute directly on an instance of autograd.Function is a legacy "
+    "access pattern that is no longer supported. For examples on how to use new-style "
+    "autograd functions, see "
+    "https://pytorch.org/docs/stable/autograd.html#torch.autograd.Function ");
   return torch::autograd::registerFunctionHook(*cdata, hook);
   END_HANDLE_TH_ERRORS
 }
@@ -869,7 +794,7 @@ static PyObject *unpack_saved_variables(
   // because we will never hit this line of code if the buffers are freed--
   // and in any case saved_for will be non-NULL.)
   TORCH_INTERNAL_ASSERT(saved_for);
-  for (int i = 0; i < num_saved; i++) {
+  for(const auto i : c10::irange(num_saved)) {
     auto unpacked_var = saved_variables[i].unpack(saved_for);
     THPObjectPtr value;
     if (!unpacked_var.defined()) {
@@ -904,20 +829,42 @@ PyObject *THPFunction_saved_variables(THPFunction *self, void *_unused)
   END_HANDLE_TH_ERRORS
 }
 
+PyObject *THPFunction_raw_saved_tensors(THPFunction *self, void *_unused)
+{
+  HANDLE_TH_ERRORS
+  // User tries to access saved variables after they have been freed
+  THPUtils_assert(!self->has_freed_buffers, ERR_BACKWARD_TWICE);
+  const auto& saved_variables = self->saved_variables;
+  if (saved_variables.empty())
+    return PyTuple_New(0);
+  size_t num_saved = saved_variables.size();
+  THPObjectPtr saved(PyTuple_New(num_saved));
+  if (!saved) {
+    return nullptr;
+  }
+  for(const auto i : c10::irange(num_saved)) {
+    py::object obj = py::cast(saved_variables[i], py::return_value_policy::reference);
+    PyTuple_SET_ITEM(saved.get(), i, obj.release().ptr());
+  }
+  return saved.release();
+  END_HANDLE_TH_ERRORS
+}
+
 PyObject *THPFunction_next_functions(THPFunction *self, void *_unused)
 {
   HANDLE_TH_ERRORS
   auto cdata = self->cdata.lock();
   TORCH_CHECK(cdata,
-    "Legacy autograd function had next_functions accessed before the function was "
-    "invoked.  This doesn't make any sense: we have no idea what the next "
-    "functions are, because you haven't actually inserted this grad_fn inside "
-    "a graph.  Try invoking your function first before accessing this field.")
+    "Attribute 'next_functions' is invalid for this instance of _C._FunctionBase. "
+    "Accessing this attribute directly on an instance of autograd.Function is a legacy "
+    "access pattern that is no longer supported. For examples on how to use new-style "
+    "autograd functions, see "
+    "https://pytorch.org/docs/stable/autograd.html#torch.autograd.Function ");
   const auto num_outputs = cdata->num_outputs();
   THPObjectPtr result(PyTuple_New(num_outputs));
   if (!result)
     return nullptr;
-  for (uint32_t i = 0; i < num_outputs; i++) {
+  for (const auto i : c10::irange(num_outputs)) {
     THPObjectPtr fn_tuple(PyTuple_New(2));
     if (!fn_tuple) return nullptr;
     const auto& edge = cdata->next_edge(i);
@@ -1001,9 +948,11 @@ PyObject* getRequiresGrad(PyObject* obj, void* _unused) {
 
 }
 
+// NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
 static struct PyGetSetDef THPFunction_properties[] = {
   {"saved_tensors", (getter)THPFunction_saved_tensors, nullptr, nullptr, nullptr},
   {"saved_variables", (getter)THPFunction_saved_variables, nullptr, nullptr, nullptr},
+  {"_raw_saved_tensors", (getter)THPFunction_raw_saved_tensors, nullptr, nullptr, nullptr},
   {"next_functions", (getter)THPFunction_next_functions, nullptr, nullptr, nullptr},
   {"to_save", &getObject<&THPFunction::to_save>, &setObject<&THPFunction::to_save>, nullptr, nullptr},
   {"non_differentiable", &getObject<&THPFunction::non_differentiable>, &setObject<&THPFunction::non_differentiable>, nullptr, nullptr},
@@ -1015,10 +964,10 @@ static struct PyGetSetDef THPFunction_properties[] = {
   {nullptr}
 };
 
+// NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
 static struct PyMethodDef THPFunction_methods[] = {
   {(char*)"name", THPFunction_name, METH_NOARGS, nullptr},
   {(char*)"apply", THPFunction_apply, METH_CLASS | METH_VARARGS, nullptr},
-  {(char*)"_do_backward", THPFunction_do_backward, METH_VARARGS, nullptr},
   {(char*)"_register_hook_dict", THPFunction__register_hook_dict, METH_O, nullptr},
   {(char*)"register_hook", THPFunction_register_hook, METH_O, nullptr},
   {nullptr}

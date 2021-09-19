@@ -282,7 +282,6 @@ bool geometry_is_contiguous(IntArrayRef sizes, IntArrayRef strides) {
   return contig_if_nonempty;
 }
 
-// Correspond to THCUNN_check_dim_size/THNN_check_dim_size
 void check_dim_size(
     const Tensor& tensor,
     int64_t dim,
@@ -341,12 +340,19 @@ size_t computeStorageNbytes(
 //    `oldshape` was separated into, where each chunk of newshape has matching
 //    ``numel'', i.e., number of subspaces, as the corresponding chunk of
 //    `oldshape`.
-c10::optional<std::vector<int64_t>> computeStride(
+//
+// templatized for DimVector and IntArrayRef use cases,
+// see overloads of computeStride() below.
+//
+template <typename ResultVec, typename NewShapeVec>
+inline c10::optional<ResultVec> computeStride_impl(
     IntArrayRef oldshape,
     IntArrayRef oldstride,
-    IntArrayRef newshape) {
+    const NewShapeVec& newshape,
+    ResultVec toResult(const IntArrayRef&)
+) {
   if (oldshape.empty()) {
-    return std::vector<int64_t>(newshape.size(), 1);
+    return ResultVec(newshape.size(), 1);
   }
 
   // NOTE: stride is arbitrary in the numel() == 0 case;
@@ -356,10 +362,10 @@ c10::optional<std::vector<int64_t>> computeStride(
   // didn't seem worth it.
   const int64_t numel = c10::multiply_integers(oldshape);
   if (numel == 0 && oldshape.equals(newshape)) {
-    return oldstride.vec();
+    return toResult(oldstride);
   }
 
-  std::vector<int64_t> newstride(newshape.size());
+  ResultVec newstride(newshape.size());
   if (numel == 0) {
     for (int64_t view_d = newshape.size() - 1; view_d >= 0; view_d--) {
       if (view_d == (int64_t)(newshape.size() - 1)) {
@@ -404,6 +410,22 @@ c10::optional<std::vector<int64_t>> computeStride(
     return c10::nullopt;
   }
   return newstride;
+}
+
+c10::optional<std::vector<int64_t>> computeStride(
+    IntArrayRef oldshape,
+    IntArrayRef oldstride,
+    IntArrayRef newshape) {
+  auto toResult = [](const IntArrayRef& a) { return a.vec(); };
+  return computeStride_impl<std::vector<int64_t>, IntArrayRef>(oldshape, oldstride, newshape, toResult);
+}
+
+c10::optional<DimVector> computeStride(
+    IntArrayRef oldshape,
+    IntArrayRef oldstride,
+    const DimVector& newshape) {
+  auto toResult = [](const IntArrayRef& a) { return DimVector(a); };
+  return computeStride_impl<DimVector, DimVector>(oldshape, oldstride, newshape, toResult);
 }
 
 }  // namespace detail

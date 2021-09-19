@@ -278,7 +278,7 @@ k_loop:
     # v10 : x10, x11, x12, x13
     # v12 : x20, x21, x22, x23
     # v14 : x30, x31, x32, x33
-    # Then using 
+    # Then using
     # TRANSPOSE_4X4_S32 v16, v18, v20, v22, v4, v5, v6, v7
     # We get
     # v16 : x04, x05, x06, x07

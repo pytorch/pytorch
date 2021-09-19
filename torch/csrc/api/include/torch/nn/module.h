@@ -540,6 +540,7 @@ class TORCH_API Module : public std::enable_shared_from_this<Module> {
 
   /// The registered parameters of this `Module`.
   /// Inorder to access parameters_ in ParameterDict and ParameterList
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   OrderedDict<std::string, Tensor> parameters_;
 
  private:

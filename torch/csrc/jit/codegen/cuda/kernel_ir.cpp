@@ -72,6 +72,7 @@ IterDomain::IterDomain(Passkey, const fuser::cuda::IterDomain* iter_domain)
 Val* IterDomain::extent() const {
   TORCH_CHECK(isLoweredVal(extent_));
   if (isThread()) {
+    // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
     if (extent_->getValType() == ValType::KirScalar) {
       if (extent_->as<kir::Int>()->isConst()) {
         return extent_;

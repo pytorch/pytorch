@@ -1,18 +1,23 @@
-from tools.codegen.utils import *
-from tools.codegen.model import *
+from tools.codegen.utils import S, T, context
+from tools.codegen.model import (NativeFunction, NativeFunctionsGroup, BackendIndex, DispatchKey)
 import tools.codegen.local as local
 
 import functools
-from typing import TypeVar, Union, Iterator, Callable
+from typing import TypeVar, Union, Iterator, Callable, Dict
 import contextlib
 
 # Helper functions for defining generators on things in the model
 
-F = TypeVar('F', NativeFunction, StructuredNativeFunctions, Union[NativeFunction, StructuredNativeFunctions])
+F = TypeVar(
+    'F',
+    NativeFunction,
+    NativeFunctionsGroup,
+    Union[NativeFunction, NativeFunctionsGroup],
+)
 
 @contextlib.contextmanager
-def native_function_manager(g: Union[StructuredNativeFunctions, NativeFunction]) -> Iterator[None]:
-    if isinstance(g, StructuredNativeFunctions):
+def native_function_manager(g: Union[NativeFunctionsGroup, NativeFunction]) -> Iterator[None]:
+    if isinstance(g, NativeFunctionsGroup):
         # By default, we associate all errors with structured native functions
         # with the out variant.  In some cases, it might be better to have
         # a more specific place to hang things; if so, use
@@ -20,10 +25,8 @@ def native_function_manager(g: Union[StructuredNativeFunctions, NativeFunction])
         f = g.out
     else:
         f = g
-    with context(f'in {f.loc}:\n  {f.func}'):
-        with local.parametrize(
-            use_c10_dispatcher=f.use_c10_dispatcher,
-        ):
+    with context(lambda: f'in native_functions.yaml line {f.loc}:\n  {f.func}'):
+        with local.parametrize(use_const_ref_for_mutable_tensors=f.use_const_ref_for_mutable_tensors):
             yield
 
 # Given a function that operates on NativeFunction, wrap it into a new function
@@ -43,4 +46,22 @@ def method_with_native_function(func: Callable[[S, F], T]) -> Callable[[S, F], T
     def wrapper(slf: S, f: F) -> T:
         with native_function_manager(f):
             return func(slf, f)
+    return wrapper
+
+# Convenience decorator for functions that explicitly take in a BackendIndex,
+# instead of indirectly taking one in as a closure
+def with_native_function_and_index(func: Callable[[F, BackendIndex], T]) -> Callable[[F, BackendIndex], T]:
+    @functools.wraps(func)
+    def wrapper(f: F, backend_index: BackendIndex) -> T:
+        with native_function_manager(f):
+            return func(f, backend_index)
+    return wrapper
+
+def with_native_function_and_indices(
+        func: Callable[[F, Dict[DispatchKey, BackendIndex]], T]
+) -> Callable[[F, Dict[DispatchKey, BackendIndex]], T]:
+    @functools.wraps(func)
+    def wrapper(f: F, backend_indices: Dict[DispatchKey, BackendIndex]) -> T:
+        with native_function_manager(f):
+            return func(f, backend_indices)
     return wrapper

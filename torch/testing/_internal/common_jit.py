@@ -7,13 +7,15 @@ import torch.jit.frontend
 import torch.jit.quantized
 
 # Testing utils
-from torch.testing import floating_and_complex_types_and
+from torch.testing._internal.common_dtype import floating_and_complex_types_and
 from torch.testing._internal.common_utils import TestCase, \
-    freeze_rng_state, TemporaryFileName, enable_profiling_mode_for_profiling_tests
+    freeze_rng_state, TemporaryFileName, enable_profiling_mode_for_profiling_tests, is_iterable_of_tensors
 from torch.testing._internal.common_utils import enable_profiling_mode  # noqa: F401
 
 # Standard library
 from itertools import chain
+from typing import List, Union
+from torch._C import TensorType
 
 import io
 
@@ -37,7 +39,13 @@ nn_functional_single_grad = frozenset('test_nn_' + name for name in [
 ])
 
 def check_against_reference(self, func, reference_func, output_func, args, kwargs=None,
-                            allow_unused=True, check_types=True, no_grad=False):
+                            allow_unused=True, check_types=True, no_grad=False, no_gradgrad=False):
+    """Verifies a function performs identically to some reference implementation.
+
+    Commonly, this is used to verify that a JIT implementation
+    (output_func) matches the behavior of the eager implementation
+    (reference_func).
+    """
     kwargs = kwargs if kwargs else {}
 
     def allSum(vs):
@@ -47,17 +55,37 @@ def check_against_reference(self, func, reference_func, output_func, args, kwarg
                    for i, v in enumerate(vs)
                    if v is not None and v.dtype in floating_and_complex_types_and(torch.half, torch.bfloat16))
 
-    def clone_inputs(requires_grad):
-        inputs = [
-            arg.detach().clone().requires_grad_(requires_grad and arg.requires_grad)
-            if isinstance(arg, torch.Tensor) else arg for arg in args
-        ]
-        return inputs, [input for input in inputs if isinstance(input, torch.Tensor) and input.requires_grad]
+    def clone_tensor(t, preserve_requires_grad):
+        require_grad = preserve_requires_grad and t.requires_grad
+        return t.detach().clone().requires_grad_(require_grad)
 
-    nograd_inputs, nograd_tensors = clone_inputs(False)
-    recording_inputs, recording_tensors = clone_inputs(True)
+    def clone_inputs(preserve_requires_grad: bool):
+        inputs: List[Union[torch.Tensor, List[torch.Tensor]]] = []
+
+        for arg in args:
+            if isinstance(arg, torch.Tensor):
+                inputs.append(clone_tensor(arg, preserve_requires_grad))
+            elif is_iterable_of_tensors(arg):
+                inputs.append([clone_tensor(t, preserve_requires_grad) for t in arg])
+            else:
+                inputs.append(arg)
+
+        return inputs
+
+    # Returns tensors in args that requires_grad, including tensors in TensorList args
+    def get_recording_tensors(args):
+        recording_tensors: List[torch.Tensor] = []
+
+        for arg in args:
+            if isinstance(arg, torch.Tensor) and arg.requires_grad:
+                recording_tensors.append(arg)
+            elif is_iterable_of_tensors(arg):
+                recording_tensors.extend(filter(lambda t: t.requires_grad, arg))
+
+        return recording_tensors
 
     # test no gradients case
+    nograd_inputs = clone_inputs(preserve_requires_grad=False)
     outputs = self.runAndSaveRNG(reference_func, nograd_inputs, kwargs)
     with enable_profiling_mode_for_profiling_tests():
         outputs_test = self.runAndSaveRNG(func, nograd_inputs, kwargs)
@@ -72,6 +100,8 @@ def check_against_reference(self, func, reference_func, output_func, args, kwarg
 
     with enable_profiling_mode_for_profiling_tests():
         # test single grad case
+        recording_inputs = clone_inputs(preserve_requires_grad=True)
+        recording_tensors = get_recording_tensors(recording_inputs)
         outputs = output_func(self.runAndSaveRNG(reference_func, recording_inputs, kwargs))
         grads = torch.autograd.grad(allSum(outputs), recording_tensors,
                                     allow_unused=allow_unused)
@@ -81,7 +111,7 @@ def check_against_reference(self, func, reference_func, output_func, args, kwarg
         self.assertEqual(outputs, outputs_test)
         self.assertEqual(grads, grads_test)
         # test the grad grad case
-        if self._testMethodName in nn_functional_single_grad:
+        if self._testMethodName in nn_functional_single_grad or no_gradgrad:
             return
 
         outputs = output_func(self.runAndSaveRNG(reference_func, recording_inputs, kwargs))
@@ -91,7 +121,8 @@ def check_against_reference(self, func, reference_func, output_func, args, kwarg
 
         l2 = (allSum(grads) * l1)
         grads2 = torch.autograd.grad(l2, recording_tensors, allow_unused=allow_unused)
-        recording_inputs, recording_tensors = clone_inputs(True)
+        recording_inputs = clone_inputs(preserve_requires_grad=True)
+        recording_tensors = get_recording_tensors(recording_inputs)
         outputs_test = output_func(self.runAndSaveRNG(func, recording_inputs, kwargs))
         l1_test = allSum(outputs_test)
         grads_test = torch.autograd.grad(
@@ -105,8 +136,7 @@ def check_against_reference(self, func, reference_func, output_func, args, kwarg
         for g2, g2_test in zip(grads2, grads2_test):
             if g2 is None and g2_test is None:
                 continue
-            self.assertTrue(torch.allclose(g2, g2_test, atol=5e-4, rtol=1e-4))
-
+            self.assertEqual(g2, g2_test, atol=5e-4, rtol=1e-4)
 
 class JitCommonTestCase(TestCase):
     def createFunctionFromGraph(self, trace):
@@ -143,15 +173,15 @@ class JitCommonTestCase(TestCase):
             torch.jit.save(imported, fname)
             return torch.jit.load(fname, map_location=map_location)
 
-    def autoDiffErrorMessage(self, should_autodiff_node, nodes_not_in_diff_graph, 
-                             fusion_nodes_not_found, non_fusible_nodes_being_fused, 
+    def autoDiffErrorMessage(self, should_autodiff_node, nodes_not_in_diff_graph,
+                             fusion_nodes_not_found, non_fusible_nodes_being_fused,
                              fusion_nodes_found, nodes_in_diff_graph):
         err_msg = "\nFailure in testing nodes' autodifferentiation. "
         if should_autodiff_node:
             err_msg += "One or more nodes were expected to be autodiffed, " \
                 "but were not found in specified fusible/nonfusible " \
                 "DifferentiableGraph groups. \nSpecifically:"
-            # The node is intended to appear in a differentiable graph but doesn't 
+            # The node is intended to appear in a differentiable graph but doesn't
             diff_nodes_missing = []
             # The node is intended to appear in a differentiable graph
             # outside of a fusion group but instead is in a fusion group
@@ -196,7 +226,7 @@ class JitCommonTestCase(TestCase):
                     "Did you intend for these nodes to be fused? If not, you should " \
                     "move these nodes into the test's nonfusible nodes. Otherwise your " \
                     "autodifferentiation logic might be wrong."
-        else: 
+        else:
             err_msg += "One or more nodes were not expected to be autodiffed " \
                 "but were found in a DifferentiableGraph or in a FusionGroup " \
                 "of a DifferentiableGraph. Did you intend for these nodes to be " \
@@ -226,7 +256,7 @@ class JitCommonTestCase(TestCase):
         for node in nonfusible_nodes:
             if any(g.findNode(node) is not None for g in diff_subgraphs):
                 nodes_in_diff_graph.append(node)
-            else: 
+            else:
                 nodes_not_in_diff_graph.append(node)
             if any(g.findNode(node) is not None for g in fusion_subgraphs):
                 non_fusible_nodes_being_fused.append(node)
@@ -239,14 +269,52 @@ class JitCommonTestCase(TestCase):
             if any(g.findNode(node) is not None for g in fusion_subgraphs):
                 fusion_nodes_found.append(node)
             else:
-                fusion_nodes_not_found.append(node) 
-        found_all_fusible_nodes = len(fusion_nodes_found) == len(fusible_nodes)    
+                fusion_nodes_not_found.append(node)
+        found_all_fusible_nodes = len(fusion_nodes_found) == len(fusible_nodes)
 
-        err_msg = self.autoDiffErrorMessage(should_autodiff_node, 
-                                            nodes_not_in_diff_graph, 
-                                            fusion_nodes_not_found, 
+        err_msg = self.autoDiffErrorMessage(should_autodiff_node,
+                                            nodes_not_in_diff_graph,
+                                            fusion_nodes_not_found,
                                             non_fusible_nodes_being_fused,
-                                            fusion_nodes_found, 
+                                            fusion_nodes_found,
                                             nodes_in_diff_graph)
-        self.assertEqual(should_autodiff_node, 
-                         found_all_nonfusible_nodes and found_all_fusible_nodes, err_msg)  
+        self.assertEqual(should_autodiff_node,
+                         found_all_nonfusible_nodes and found_all_fusible_nodes, err_msg)
+
+    def checkShapeAnalysis(self, out_sizes: Union[List[int], List[List[int]]],
+                           traced_graph, assert_propagation, constant_prop=True):
+        # repropagte input shapes provided by tracing,
+        prev_symbolic_shapes_test_enabled = torch._C._jit_symbolic_shapes_test_mode_enabled()
+        for enable_test_mode in [True, False]:
+            # here we are testing allowing/disallowing substituting in complete shapes as constants,
+            # disallowing constants helps stress test partial eval and substitution pipeline
+            torch._C._jit_set_symbolic_shapes_test_mode(enable_test_mode)
+            torch._C._jit_erase_non_input_shape_information(traced_graph)
+            if constant_prop:
+                torch._C._jit_pass_constant_propagation(traced_graph)
+            torch._C._jit_pass_propagate_shapes_on_graph(traced_graph)
+            # Add sizes to default tensor type to avoid checking something out of scope
+            # and difficulties with tracer leaving in other parts of tensor type
+            output = next(traced_graph.outputs()).type()
+
+            def test_type(type, actual_size):
+                sizes = type.symbolic_sizes()
+                out_type = TensorType.get().with_sizes(sizes)
+                actual_type = TensorType.get().with_sizes(actual_size)
+
+                # always check actual shape is a subtype of the output
+                self.assertTrue(actual_type.isSubtypeOf(out_type))
+
+                # and then if assertion flag is provided, check shape analysis
+                # is successful
+                if assert_propagation:
+                    self.assertEqual(out_type.sizes(), actual_size)
+
+            if output.isSubtypeOf(torch._C.TensorType.get()):
+                test_type(output, out_sizes)
+            else:
+                tuple_elements = output.elements()
+                for i in range(len(tuple_elements)):
+                    test_type(tuple_elements[i], out_sizes[i])
+
+        torch._C._jit_set_symbolic_shapes_test_mode(prev_symbolic_shapes_test_enabled)

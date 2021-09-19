@@ -1,8 +1,14 @@
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/frontend/source_range.h>
 #include <torch/csrc/jit/serialization/source_range_serialization.h>
 
 namespace torch {
 namespace jit {
+size_t SourceRangeHasher::operator()(const torch::jit::SourceRange& key) const {
+  return (
+      std::hash<uintptr_t>()(reinterpret_cast<uintptr_t>(key.source().get())) ^
+      std::hash<size_t>()(key.start()) ^ std::hash<size_t>()(key.end()));
+}
 
 c10::optional<SourceRange> Source::findSourceRangeThatGenerated(
     const SourceRange& range) {
@@ -118,6 +124,7 @@ C10_EXPORT void SourceRange::print_with_context(
   // print out location information
   if (auto flc = file_line_col()) {
     std::string filename;
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     size_t line, col;
     std::tie(filename, line, col) = *flc;
     out << "  File \"" << filename << "\", line " << line;
@@ -158,7 +165,7 @@ C10_EXPORT void SourceRange::print_with_context(
       AT_ASSERT(hightlight_begin == 0 || str[hightlight_begin - 1] == '\n');
       AT_ASSERT(highlight_end == range_end || str[highlight_end] == '\n');
       // determine amount of empty space vs highlighted space
-      for (size_t i = hightlight_begin; i < highlight_end; i++) {
+      for (const auto i : c10::irange(hightlight_begin, highlight_end)) {
         if (str[i] == ' ' || i < start()) {
           empty_space++;
         } else {

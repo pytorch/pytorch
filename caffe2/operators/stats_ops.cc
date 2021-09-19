@@ -14,6 +14,7 @@ class StatRegistryCreateOp : public Operator<CPUContext> {
 
   bool RunOnDevice() override {
     *OperatorBase::Output<std::unique_ptr<StatRegistry>>(0) =
+        // NOLINTNEXTLINE(modernize-make-unique)
         std::unique_ptr<StatRegistry>(new StatRegistry);
     return true;
   }
@@ -42,6 +43,7 @@ class StatRegistryExportOp : public Operator<CPUContext> {
     auto* ptimestamps = timestamps->template mutable_data<int64_t>();
     int i = 0;
     for (const auto& stat : data) {
+      // NOLINTNEXTLINE(performance-move-const-arg)
       pkeys[i] = std::move(stat.key);
       pvals[i] = stat.value;
       ptimestamps[i] =
@@ -98,6 +100,7 @@ class TimerInstance {
     using namespace std::chrono;
     auto duration = high_resolution_clock::now() - start_;
     auto nanos = duration_cast<nanoseconds>(duration).count();
+    // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
     CAFFE_EVENT(stat_, time_ns, nanos);
     running_ = false;
   }
@@ -115,6 +118,7 @@ class TimerInstance {
   std::chrono::high_resolution_clock::time_point start_;
 
   struct TimerStat {
+    // NOLINTNEXTLINE(modernize-pass-by-value)
     CAFFE_STAT_CTOR(TimerStat);
     CAFFE_AVG_EXPORTED_STAT(time_ns);
   } stat_;

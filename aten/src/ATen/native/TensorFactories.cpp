@@ -2,6 +2,8 @@
 #include <ATen/CPUGeneratorImpl.h>
 #include <ATen/Utils.h>
 #include <ATen/Dispatch.h>
+#include <ATen/Parallel.h>
+#include <ATen/MapAllocator.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/TracerMode.h>
 #include <c10/core/ScalarType.h>
@@ -10,10 +12,10 @@
 #include <ATen/native/Resize.h>
 #include <ATen/native/TensorFactories.h>
 #include <c10/core/TensorOptions.h>
-#include <TH/THAllocator.h>
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <c10/util/Exception.h>
 #include <ATen/NamedTensorUtils.h>
+#include <ATen/native/UnaryOps.h>
 
 #include <algorithm>
 #include <cctype>
@@ -45,16 +47,6 @@ void window_function_checks(
       window_length);
 }
 
-// bool inputs are considered integral
-static inline bool allIntegral(std::initializer_list<std::reference_wrapper<Scalar>> l) {
-  for (Scalar& s : l) {
-    if (!s.isIntegral(true)) {
-      return false;
-    }
-  }
-  return true;
-}
-
 } // namespace
 
 DEFINE_DISPATCH(complex_stub);
@@ -62,31 +54,51 @@ DEFINE_DISPATCH(polar_stub);
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ arange ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Tensor arange(Scalar end, const TensorOptions& options) {
-  return native::arange(/*start=*/0, end, options);
+Tensor arange(const Scalar& end,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory) {
+  return native::arange(/*start=*/0, end, dtype, layout, device, pin_memory);
 }
 
-Tensor arange(Scalar start, Scalar end, const TensorOptions& options) {
-  return native::arange(start, end, /*step=*/1, options);
+Tensor arange(const Scalar& start, const Scalar& end,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory) {
+  return native::arange(
+      start, end, /*step=*/1, dtype, layout, device, pin_memory);
 }
 
 Tensor arange(
-    Scalar start,
-    Scalar end,
-    Scalar step,
-    const TensorOptions& options) {
-  bool set_to_integral_dtype = !options.has_dtype() && allIntegral({start, end, step});
+    const Scalar& start,
+    const Scalar& end,
+    const Scalar& step,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory) {
+  // See [Note: hacky wrapper removal for TensorOptions]
+  TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
+
+  bool set_to_integral_dtype = !options.has_dtype() &&
+       // bool inputs are considered integral
+       start.isIntegral(true) &&
+       end.isIntegral(true) &&
+       step.isIntegral(true);
+
   Tensor result = set_to_integral_dtype
       ? at::empty({0}, options.dtype(at::ScalarType::Long))
       : at::empty({0}, options);
   return at::arange_out(result, start, end, step);
 }
 
-Tensor& arange_out(Tensor& result, Scalar end) {
+Tensor& arange_out(const Scalar& end, Tensor& result) {
   return at::arange_out(result, /*start=*/0, end);
 }
 
-Tensor& arange_out(Tensor& result, Scalar start, Scalar end) {
+Tensor& arange_out(Tensor& result, const Scalar& start, const Scalar& end) {
   return at::arange_out(result, start, end, /*step=*/1);
 }
 
@@ -117,7 +129,7 @@ void complex_check_dtype(
               " for argument 'out'");
 }
 
-Tensor& complex_out(Tensor& result, const Tensor& real, const Tensor& imag) {
+Tensor& complex_out(const Tensor& real, const Tensor& imag, Tensor& result) {
   complex_check_dtype(result, real, imag);
   auto iter = TensorIteratorConfig()
       .add_output(result)
@@ -137,7 +149,7 @@ Tensor complex(const Tensor& real, const Tensor& imag) {
   return at::complex_out(result, real, imag);
 }
 
-Tensor& polar_out(Tensor& result, const Tensor& abs, const Tensor& angle) {
+Tensor& polar_out(const Tensor& abs, const Tensor& angle, Tensor& result) {
   complex_check_dtype(result, abs, angle);
   auto iter = TensorIteratorConfig()
       .add_output(result)
@@ -165,15 +177,21 @@ Tensor empty_cpu(IntArrayRef size, c10::optional<ScalarType> dtype_opt, c10::opt
 
 Tensor empty(
     IntArrayRef size,
-    at::optional<DimnameList> names,
-    const TensorOptions& options,
+    c10::optional<DimnameList> names,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory,
     optional<MemoryFormat> optional_memory_format) {
+  // See [Note: hacky wrapper removal for TensorOptions]
+  TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
+
   if (!names.has_value()) {
     return at::empty(size, options, optional_memory_format);
   }
   TORCH_CHECK(options.layout() == Layout::Strided,
       "NYI: named tensors only support strided layout");
-  TORCH_CHECK(options.device().type() == DeviceType::CPU || options.device().type() == DeviceType::CUDA,
+  TORCH_CHECK(options.device().is_cpu() || options.device().is_cuda(),
       "NYI: named tensors only support CPU and CUDA tensors");
   auto result = at::empty(size, options, optional_memory_format);
   internal_set_names_inplace(result, names);
@@ -188,10 +206,9 @@ Tensor empty_strided_cpu(IntArrayRef size, IntArrayRef stride, c10::optional<Sca
   return t;
 }
 
-Tensor& empty_out(
-    Tensor& result,
-    IntArrayRef size,
-    c10::optional<c10::MemoryFormat> optional_memory_format) {
+Tensor& empty_out(IntArrayRef size,
+    c10::optional<c10::MemoryFormat> optional_memory_format,
+    Tensor& result) {
   // Preferably, this argument would not be accepted by _out, but the code
   // generator requires the out and non-out overloads to match exactly
   TORCH_CHECK(
@@ -224,8 +241,14 @@ AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, DEFINE_CAST_OP)
 
 Tensor empty_like(
     const Tensor& self,
-    const TensorOptions& options_,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory,
     c10::optional<c10::MemoryFormat> optional_memory_format) {
+  // See [Note: hacky wrapper removal for TensorOptions]
+  TensorOptions options_ = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
+
 
   TORCH_CHECK(
     !(options_.has_memory_format() && optional_memory_format.has_value()),
@@ -325,6 +348,9 @@ Tensor empty_like(
     namedinference::propagate_names(result, self.names());
   }
 
+  // never propagate Conjugate and Negative dispatch key
+  result._set_conj(false);
+  result._set_neg(false);
   return result;
 }
 
@@ -347,29 +373,46 @@ Tensor new_empty_strided(
     const Tensor& self,
     IntArrayRef size,
     IntArrayRef stride,
-    const TensorOptions& options
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory
     ) {
+  // See [Note: hacky wrapper removal for TensorOptions]
+  TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
+
   return at::empty_strided(size, stride, self.options().merge_in(options));
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ eye ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Tensor eye(int64_t n, const TensorOptions& options) {
+Tensor eye(int64_t n,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory) {
   // the default value of `m` equals to `n`
-  return native::eye(n, n, options);
+  return native::eye(n, n, dtype, layout, device, pin_memory);
 }
 
-Tensor eye(int64_t n, int64_t m, const TensorOptions& options) {
+Tensor eye(int64_t n, int64_t m,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory) {
+  // See [Note: hacky wrapper removal for TensorOptions]
+  TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
+
   auto tensor = at::empty({0}, options); // to be resized
   return at::eye_out(tensor, n, m);
 }
 
-Tensor& eye_out_cpu(Tensor& result, int64_t n) {
+Tensor& eye_out_cpu(int64_t n, Tensor& result) {
   // the default value of `m` equals to `n`
-  return native::eye_out_cpu(result, n, n);
+  return native::eye_out_cpu(n, n, result);
 }
 
-Tensor& eye_out_cpu(Tensor& result, int64_t n, int64_t m) {
+Tensor& eye_out_cpu(int64_t n, int64_t m, Tensor& result) {
   TORCH_CHECK(n >= 0, "n must be greater or equal to 0, got ", n);
   TORCH_CHECK(m >= 0, "m must be greater or equal to 0, got ", m);
 
@@ -394,7 +437,7 @@ namespace {
 
 // Performs dtype inference for full
 TensorOptions infer_full_options(
-  Scalar fill_value,
+  const Scalar& fill_value,
   const TensorOptions& options) {
 
   if (!options.has_dtype()) {
@@ -417,7 +460,14 @@ TensorOptions infer_full_options(
 
 } // anonymous namespace
 
-Tensor full(IntArrayRef size, Scalar fill_value, const TensorOptions& options) {
+Tensor full(IntArrayRef size, const Scalar& fill_value,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory) {
+  // See [Note: hacky wrapper removal for TensorOptions]
+  TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
+
   TORCH_CHECK(options.layout() != kSparse,
     "full(...) is not implemented for sparse layout");
 
@@ -425,7 +475,7 @@ Tensor full(IntArrayRef size, Scalar fill_value, const TensorOptions& options) {
   return result.fill_(fill_value);
 }
 
-Tensor& full_out(Tensor& result, IntArrayRef size, Scalar fill_value) {
+Tensor& full_out(IntArrayRef size, const Scalar& fill_value, Tensor& result) {
   TORCH_CHECK(!result.is_sparse(),
     "full(...) is not implemented for sparse layout");
 
@@ -435,9 +485,15 @@ Tensor& full_out(Tensor& result, IntArrayRef size, Scalar fill_value) {
 
 Tensor full_like(
     const Tensor& self,
-    Scalar fill_value,
-    const TensorOptions& options,
+    const Scalar& fill_value,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory,
     c10::optional<c10::MemoryFormat> optional_memory_format) {
+  // See [Note: hacky wrapper removal for TensorOptions]
+  TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
+
   auto result = at::empty_like(self, options, optional_memory_format);
   return result.fill_(fill_value);
 }
@@ -445,61 +501,130 @@ Tensor full_like(
 Tensor new_full(
     const Tensor& self,
     IntArrayRef size,
-    Scalar fill_value,
-    const TensorOptions& options
+    const Scalar& fill_value,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory
     ) {
+  // See [Note: hacky wrapper removal for TensorOptions]
+  TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
+
   return at::full(size, fill_value, self.options().merge_in(options));
 }
 
+namespace {
+TensorOptions linspace_logspace_infer_options(
+    const Scalar& start,
+    const Scalar& end,
+    const TensorOptions& options,
+    const char* fn_name) {
+  if (start.isComplex() || end.isComplex()) {
+    const auto default_complex_dtype = c10::get_default_complex_dtype();
+    if (options.has_dtype()) {
+      auto dtype = c10::typeMetaToScalarType(options.dtype());
+      TORCH_CHECK(at::isComplexType(dtype),
+          fn_name, ": inferred dtype ", default_complex_dtype, " can't be safely cast to passed dtype ", dtype);
+    } else {
+      return options.dtype(default_complex_dtype);
+    }
+  }
+
+  return options.has_dtype() ? options : options.dtype(c10::get_default_dtype());
+}
+} // anonymous namespace
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ linspace ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Tensor linspace(
-    Scalar start,
-    Scalar end,
+    const Scalar& start,
+    const Scalar& end,
     c10::optional<int64_t> steps,
-    const TensorOptions& options) {
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory) {
+  // See [Note: hacky wrapper removal for TensorOptions]
+  TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
+
   const auto steps_ = steps.value_or(100);
   TORCH_CHECK(steps_ >= 0, "number of steps must be non-negative");
-  Tensor result = at::empty({steps_}, options);
+  auto result_options = linspace_logspace_infer_options(start, end, options, "torch.linspace()");
+  Tensor result = at::empty({steps_}, result_options);
   return at::linspace_out(result, start, end, steps);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ logspace ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Tensor logspace(
-    Scalar start,
-    Scalar end,
+    const Scalar& start,
+    const Scalar& end,
     c10::optional<int64_t> steps,
     double base,
-    const TensorOptions& options) {
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory) {
+  // See [Note: hacky wrapper removal for TensorOptions]
+  TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
+
   const auto steps_ = steps.value_or(100);
   TORCH_CHECK(steps_ >= 0, "number of steps must be non-negative");
-  Tensor result = at::empty({steps_}, options);
+  auto result_options = linspace_logspace_infer_options(start, end, options, "torch.logspace()");
+  Tensor result = at::empty({steps_}, result_options);
   return at::logspace_out(result, start, end, steps, base);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ones ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Tensor ones(IntArrayRef size, const TensorOptions& options) {
-  return native::full(size, /*fill_value=*/1., options);
+Tensor ones(IntArrayRef size,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory) {
+  return native::full(size, /*fill_value=*/1., dtype, layout, device, pin_memory);
 }
 
-Tensor& ones_out(Tensor& result, IntArrayRef size) {
-  return native::full_out(result, size, /*fill_value=*/1.);
+Tensor& ones_out(IntArrayRef size, Tensor& result) {
+  return native::full_out(size, /*fill_value=*/1., result);
 }
 
 Tensor ones_like(
     const Tensor& self,
-    const TensorOptions& options,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory,
     c10::optional<c10::MemoryFormat> optional_memory_format) {
-  auto result = at::empty_like(self, options, optional_memory_format);
+  auto result = at::empty_like(self, dtype, layout, device, pin_memory, optional_memory_format);
   return result.fill_(1.);
+}
+
+Tensor new_ones(
+    const Tensor& self,
+    IntArrayRef size,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory) {
+  // See [Note: hacky wrapper removal for TensorOptions]
+  TensorOptions options =
+      TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(
+          pin_memory);
+
+  return at::ones(size, self.options().merge_in(options));
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ scalar_tensor ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Tensor scalar_tensor(Scalar s, const TensorOptions& options) {
+Tensor scalar_tensor(const Scalar& s,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory) {
+  // See [Note: hacky wrapper removal for TensorOptions]
+  TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
+
   if (options.device() == at::kCPU) {
     // This is a fast track to skip device dispatch for making scalar tensor on CPU.
     // See https://github.com/pytorch/pytorch/pull/29915 for more detailed perf
@@ -508,7 +633,7 @@ Tensor scalar_tensor(Scalar s, const TensorOptions& options) {
     // revert this to following:
     //   auto result = at::empty({}, options);
     at::tracer::impl::NoTracerDispatchMode tracer_guard;
-    at::AutoNonVariableTypeMode non_var_type_mode(true);
+    at::AutoDispatchBelowAutograd mode;
     auto result = empty_cpu({}, optTypeMetaToScalarType(options.dtype_opt()), options.layout_opt(), options.device_opt(), options.pinned_memory_opt());
     at::native::fill_(result, s);
     return result;
@@ -518,52 +643,79 @@ Tensor scalar_tensor(Scalar s, const TensorOptions& options) {
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ rand ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Tensor rand(IntArrayRef size, const TensorOptions& options) {
-  return native::rand(size, static_cast<c10::optional<Generator>>(c10::nullopt), options);
+Tensor rand(IntArrayRef size,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory) {
+  return native::rand(size, static_cast<c10::optional<Generator>>(c10::nullopt), dtype, layout, device, pin_memory);
 }
 
-Tensor rand(IntArrayRef size, c10::optional<Generator> generator, const TensorOptions& options) {
+Tensor rand(IntArrayRef size, c10::optional<Generator> generator,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory) {
+  // See [Note: hacky wrapper removal for TensorOptions]
+  TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
+
   auto result = at::empty(size, options);
   return result.uniform_(0, 1, generator);
 }
 
-Tensor& rand_out(Tensor& result, IntArrayRef size) {
-  return native::rand_out(result, size, c10::nullopt);
+Tensor& rand_out(IntArrayRef size, Tensor& result) {
+  return native::rand_out(size, c10::nullopt, result);
 }
 
-Tensor& rand_out(Tensor& result, IntArrayRef size, c10::optional<Generator> generator) {
+Tensor& rand_out(IntArrayRef size, c10::optional<Generator> generator, Tensor& result) {
   result.resize_(size);
   return result.uniform_(0, 1, generator);
 }
 
 Tensor rand_like(
     const Tensor& self,
-    const TensorOptions& options,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory,
     c10::optional<c10::MemoryFormat> optional_memory_format) {
+  // See [Note: hacky wrapper removal for TensorOptions]
+  TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
+
   auto result = at::empty_like(self, options, optional_memory_format);
   return result.uniform_(0, 1, c10::nullopt);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ randint ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Tensor randint(int64_t high, IntArrayRef size, const TensorOptions& options) {
-  return native::randint(high, size, c10::nullopt, options);
+Tensor randint(int64_t high, IntArrayRef size,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory) {
+  return native::randint(high, size, c10::nullopt /* generator*/, dtype, layout, device, pin_memory);
 }
 
 Tensor randint(
     int64_t high,
     IntArrayRef size,
     c10::optional<Generator> generator,
-    const TensorOptions& options) {
-  return native::randint(0, high, size, generator, options);
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory) {
+  return native::randint(0, high, size, generator, dtype, layout, device, pin_memory);
 }
 
 Tensor randint(
     int64_t low,
     int64_t high,
     IntArrayRef size,
-    const TensorOptions& options) {
-  return native::randint(low, high, size, c10::nullopt, options);
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory) {
+  return native::randint(low, high, size, c10::nullopt, dtype, layout, device, pin_memory);
 }
 
 Tensor randint(
@@ -571,34 +723,38 @@ Tensor randint(
     int64_t high,
     IntArrayRef size,
     c10::optional<Generator> generator,
-    const TensorOptions& options) {
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory) {
+  // See [Note: hacky wrapper removal for TensorOptions]
+  TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
+
   auto result = at::empty(size, options);
   return result.random_(low, high, generator);
 }
 
-Tensor& randint_out(Tensor& result, int64_t high, IntArrayRef size) {
-  return native::randint_out(result, high, size, c10::nullopt);
+Tensor& randint_out(int64_t high, IntArrayRef size, Tensor& result) {
+  return native::randint_out(high, size, c10::nullopt, result);
 }
 
-Tensor& randint_out(
-    Tensor& result,
-    int64_t high,
+Tensor& randint_out(int64_t high,
     IntArrayRef size,
-    c10::optional<Generator> generator) {
+    c10::optional<Generator> generator,
+    Tensor& result) {
   result.resize_(size);
   return result.random_(0, high, generator);
 }
 
-Tensor& randint_out(Tensor& result, int64_t low, int64_t high, IntArrayRef size) {
-  return native::randint_out(result, low, high, size, c10::nullopt);
+Tensor& randint_out(int64_t low, int64_t high, IntArrayRef size, Tensor& result) {
+  return native::randint_out(low, high, size, c10::nullopt, result);
 }
 
-Tensor& randint_out(
-    Tensor& result,
-    int64_t low,
+Tensor& randint_out(int64_t low,
     int64_t high,
     IntArrayRef size,
-    c10::optional<Generator> generator) {
+    c10::optional<Generator> generator,
+    Tensor& result) {
   result.resize_(size);
   return result.random_(low, high, generator);
 }
@@ -606,8 +762,14 @@ Tensor& randint_out(
 Tensor randint_like(
     const Tensor& self,
     int64_t high,
-    const TensorOptions& options,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory,
     c10::optional<c10::MemoryFormat> optional_memory_format) {
+  // See [Note: hacky wrapper removal for TensorOptions]
+  TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
+
   auto result = at::empty_like(self, options, optional_memory_format);
   return result.random_(0, high, c10::nullopt);
 }
@@ -616,48 +778,78 @@ Tensor randint_like(
     const Tensor& self,
     int64_t low,
     int64_t high,
-    const TensorOptions& options,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory,
     c10::optional<c10::MemoryFormat> optional_memory_format) {
+  // See [Note: hacky wrapper removal for TensorOptions]
+  TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
+
   auto result = at::empty_like(self, options, optional_memory_format);
   return result.random_(low, high, c10::nullopt);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ randn ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Tensor randn(IntArrayRef size, const TensorOptions& options) {
-  return native::randn(size, static_cast<c10::optional<Generator>>(c10::nullopt), options);
+Tensor randn(IntArrayRef size,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory) {
+  return native::randn(size, static_cast<c10::optional<Generator>>(c10::nullopt), dtype, layout, device, pin_memory);
 }
 
-Tensor randn(IntArrayRef size, c10::optional<Generator> generator, const TensorOptions& options) {
+Tensor randn(IntArrayRef size, c10::optional<Generator> generator,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory) {
+  // See [Note: hacky wrapper removal for TensorOptions]
+  TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
+
   auto result = at::empty(size, options);
   return result.normal_(0, 1, generator);
 }
 
-Tensor& randn_out(Tensor& result, IntArrayRef size) {
-  return native::randn_out(result, size, c10::nullopt);
+Tensor& randn_out(IntArrayRef size, Tensor& result) {
+  return native::randn_out(size, c10::nullopt, result);
 }
 
-Tensor& randn_out(Tensor& result, IntArrayRef size, c10::optional<Generator> generator) {
+Tensor& randn_out(IntArrayRef size, c10::optional<Generator> generator, Tensor& result) {
   result.resize_(size);
   return result.normal_(0, 1, generator);
 }
 
 Tensor normal(double mean, double std, IntArrayRef size,
-              c10::optional<Generator> generator, const TensorOptions& options) {
+              c10::optional<Generator> generator,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory) {
+  // See [Note: hacky wrapper removal for TensorOptions]
+  TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
+
   auto result = at::empty(size, options);
   return result.normal_(mean, std, generator);
 }
 
-Tensor& normal_out(Tensor& result, double mean, double std,
-                   IntArrayRef size, c10::optional<Generator> generator) {
+Tensor& normal_out(double mean, double std,
+                   IntArrayRef size, c10::optional<Generator> generator, Tensor& result) {
   result.resize_(size);
   return result.normal_(mean, std, generator);
 }
 
 Tensor randn_like(
     const Tensor& self,
-    const TensorOptions& options,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory,
     c10::optional<c10::MemoryFormat> optional_memory_format) {
+  // See [Note: hacky wrapper removal for TensorOptions]
+  TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
+
   auto result = at::empty_like(self, options, optional_memory_format);
   return result.normal_(0, 1, c10::nullopt);
 }
@@ -680,6 +872,7 @@ void randperm_cpu(Tensor& result, int64_t n, CPUGeneratorImpl* generator) {
 
   for(int64_t i = 0; i < n - 1; i++)
   {
+    // NOLINTNEXTLINE(clang-analyzer-security.insecureAPI.rand)
     int64_t z = generator->random() % (n-i);
     scalar_t sav = r__data[i*r__stride_0];
     r__data[i*r__stride_0] = r__data[(z+i)*r__stride_0];
@@ -688,20 +881,35 @@ void randperm_cpu(Tensor& result, int64_t n, CPUGeneratorImpl* generator) {
 }
 } // namespace
 
-Tensor randperm(int64_t n, const TensorOptions& options) {
-  return native::randperm(n, c10::nullopt, options);
+Tensor randperm(int64_t n,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory) {
+  return native::randperm(n, c10::nullopt, dtype, layout, device, pin_memory);
 }
 
-Tensor randperm(int64_t n, c10::optional<Generator> generator, const TensorOptions& options) {
+Tensor randperm(int64_t n, c10::optional<Generator> generator,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory) {
+  if (!dtype.has_value()) {
+    dtype = ScalarType::Long;
+  }
+
+  // See [Note: hacky wrapper removal for TensorOptions]
+  TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
+
   auto tensor = at::empty(n, options);
   return at::randperm_out(tensor, n, generator);
 }
 
-Tensor& randperm_out(Tensor& result, int64_t n) {
+Tensor& randperm_out(int64_t n, Tensor& result) {
   return at::randperm_out(result, n, c10::nullopt);
 }
 
-Tensor& randperm_out_cpu(Tensor& result, int64_t n, c10::optional<Generator> generator) {
+Tensor& randperm_out_cpu(int64_t n, c10::optional<Generator> generator, Tensor& result) {
   TORCH_CHECK(n >= 0, "n must be non-negative, got", n);
   TORCH_CHECK(!generator.has_value() || (generator.has_value() && result.device() == generator->device()), "Expected a '", result.device(), "' generator device but found '", generator->device(), "'");
   check_supported_max_int_with_precision(n, result);
@@ -719,19 +927,28 @@ Tensor& randperm_out_cpu(Tensor& result, int64_t n, c10::optional<Generator> gen
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ range ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Tensor range(
-    Scalar start,
-    Scalar end,
-    Scalar step,
-    const TensorOptions& options) {
+    const Scalar& start,
+    const Scalar& end,
+    const Scalar& step,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory) {
+  // See [Note: hacky wrapper removal for TensorOptions]
+  TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
+
   Tensor result = at::empty({0}, options);
   return at::range_out(result, start, end, step);
 }
 
 Tensor range(
-    Scalar start,
-    Scalar end,
-    const TensorOptions& options) {
-  return at::native::range(start, end, 1, options);
+    const Scalar& start,
+    const Scalar& end,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory) {
+  return at::native::range(start, end, 1, dtype, layout, device, pin_memory);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ triangle ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -739,6 +956,10 @@ Tensor range(
 Tensor tril_indices_cpu(
     int64_t row, int64_t col, int64_t offset, c10::optional<ScalarType> dtype_opt,
     c10::optional<Layout> layout_opt, c10::optional<Device> device_opt, c10::optional<bool> pin_memory_opt) {
+  if (!dtype_opt.has_value()) {
+    dtype_opt = ScalarType::Long;
+  }
+
   check_args(row, col, layout_opt);
 
   auto tril_size = get_tril_size(row, col, offset);
@@ -758,7 +979,7 @@ Tensor tril_indices_cpu(
   //
   // 3. sequential RAM + transpose: create an n X 2 Tensor, fill the Tensor
   //    sequentially, and then transpose it.
-  AT_DISPATCH_ALL_TYPES(result.scalar_type(), "tril_indices", [&]() -> void {
+  AT_DISPATCH_ALL_TYPES_AND(kBFloat16, result.scalar_type(), "tril_indices", [&]() -> void {
     // fill the Tensor with correct values
     scalar_t* result_data = result.data_ptr<scalar_t>();
     int64_t i = 0;
@@ -785,6 +1006,10 @@ Tensor tril_indices_cpu(
 Tensor triu_indices_cpu(
     int64_t row, int64_t col, int64_t offset, c10::optional<ScalarType> dtype_opt,
     c10::optional<Layout> layout_opt, c10::optional<Device> device_opt, c10::optional<bool> pin_memory_opt) {
+  if (!dtype_opt.has_value()) {
+    dtype_opt = ScalarType::Long;
+  }
+
   check_args(row, col, layout_opt);
 
   auto triu_size = row * col - get_tril_size(row, col, offset - 1);
@@ -792,7 +1017,7 @@ Tensor triu_indices_cpu(
   // create an empty Tensor with correct size
   auto result = at::native::empty_cpu({2, triu_size}, dtype_opt, layout_opt, device_opt, pin_memory_opt);
 
-  AT_DISPATCH_ALL_TYPES(result.scalar_type(), "triu_indices", [&]() -> void {
+  AT_DISPATCH_ALL_TYPES_AND(kBFloat16, result.scalar_type(), "triu_indices", [&]() -> void {
     // fill the Tensor with correct values
     scalar_t* result_data = result.data_ptr<scalar_t>();
     int64_t i = 0;
@@ -821,12 +1046,19 @@ Tensor triu_indices_cpu(
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ zeros ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Tensor zeros(IntArrayRef size, const TensorOptions& options) {
+Tensor zeros(IntArrayRef size,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory) {
+  // See [Note: hacky wrapper removal for TensorOptions]
+  TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
+
   auto result = at::empty(size, options);
   return result.zero_();
 }
 
-Tensor& zeros_out(Tensor& result, IntArrayRef size) {
+Tensor& zeros_out(IntArrayRef size, Tensor& result) {
   if (result.is_sparse()) {
     result.sparse_resize_and_clear_(size, size.size(), 0.);
     return result;
@@ -838,8 +1070,14 @@ Tensor& zeros_out(Tensor& result, IntArrayRef size) {
 
 Tensor zeros_like(
     const Tensor& self,
-    const TensorOptions& options,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory,
     c10::optional<c10::MemoryFormat> optional_memory_format) {
+  // See [Note: hacky wrapper removal for TensorOptions]
+  TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
+
   if (options.layout() == kSparse && self.is_sparse()) {
     TORCH_CHECK(
         !(optional_memory_format.has_value()),
@@ -856,32 +1094,50 @@ Tensor zeros_like(
 Tensor new_zeros(
     const Tensor& self,
     IntArrayRef size,
-    const TensorOptions& options
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory
     ) {
+  // See [Note: hacky wrapper removal for TensorOptions]
+  TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
+
   return at::zeros(size, self.options().merge_in(options));
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~ bartlett_window ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Tensor bartlett_window(int64_t window_length, const TensorOptions& options) {
-  return native::bartlett_window(window_length, /*periodic=*/true, options);
+Tensor bartlett_window(int64_t window_length,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory) {
+  return native::bartlett_window(
+      window_length, /*periodic=*/true, dtype, layout, device, pin_memory);
 }
 
 Tensor bartlett_window(
     int64_t window_length,
     bool periodic,
-    const TensorOptions& options) {
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory) {
+  // See [Note: hacky wrapper removal for TensorOptions]
+  TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
+
   window_function_checks("bartlett_window", options, window_length);
   if (window_length == 0) {
     return at::empty({0}, options);
   }
   if (window_length == 1) {
-    return native::ones({1}, options);
+    return native::ones({1}, dtype, layout, device, pin_memory);
   }
   if (periodic) {
     window_length += 1;
   }
-  auto window = native::arange(window_length, options).mul_(2. / static_cast<double>(window_length - 1));
+  auto window = native::arange(window_length, dtype, layout, device, pin_memory)
+                    .mul_(2. / static_cast<double>(window_length - 1));
   const int64_t first_half_size = ((window_length - 1) >> 1) + 1;
   window.narrow(0, first_half_size, window_length - first_half_size).mul_(-1).add_(2);
   return periodic ? window.narrow(0, 0, window_length - 1) : window;
@@ -889,51 +1145,81 @@ Tensor bartlett_window(
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~ blackman_window ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Tensor blackman_window(int64_t window_length, const TensorOptions& options) {
-  return native::blackman_window(window_length, /*periodic=*/true, options);
+Tensor blackman_window(int64_t window_length,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory) {
+  return native::blackman_window(
+      window_length, /*periodic=*/true, dtype, layout, device, pin_memory);
 }
 
 Tensor blackman_window(
     int64_t window_length,
     bool periodic,
-    const TensorOptions& options) {
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory) {
+  // See [Note: hacky wrapper removal for TensorOptions]
+  TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
+
   window_function_checks("blackman_window", options, window_length);
   if (window_length == 0) {
     return at::empty({0}, options);
   }
   if (window_length == 1) {
-    return native::ones({1}, options);
+    return native::ones({1}, dtype, layout, device, pin_memory);
   }
   if (periodic) {
     window_length += 1;
   }
   // from https://en.wikipedia.org/wiki/Window_function#Blackman_window
-  auto window = native::arange(window_length, options).mul_(c10::pi<double> / static_cast<double>(window_length - 1));
+  auto window =
+      native::arange(window_length, dtype, layout, device, pin_memory)
+          .mul_(c10::pi<double> / static_cast<double>(window_length - 1));
   window = window.mul(4).cos_().mul_(0.08) - window.mul(2).cos_().mul_(0.5) + 0.42;
   return periodic ? window.narrow(0, 0, window_length - 1) : window;
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~ hamming_window ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Tensor hamming_window(int64_t window_length, const TensorOptions& options) {
-  return native::hamming_window(window_length, /*periodic=*/true, options);
+Tensor hamming_window(int64_t window_length,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory) {
+  return native::hamming_window(
+      window_length, /*periodic=*/true, dtype, layout, device, pin_memory);
 }
 
 Tensor hamming_window(
     int64_t window_length,
     bool periodic,
-    const TensorOptions& options) {
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory) {
   return native::hamming_window(
-      window_length, periodic, /*alpha=*/0.54, options);
+      window_length,
+      periodic,
+      /*alpha=*/0.54,
+      dtype,
+      layout,
+      device,
+      pin_memory);
 }
 
 Tensor hamming_window(
     int64_t window_length,
     bool periodic,
     double alpha,
-    const TensorOptions& options) {
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory) {
   return native::hamming_window(
-      window_length, periodic, alpha, /*beta=*/0.46, options);
+      window_length, periodic, alpha, /*beta=*/0.46, dtype, layout, device, pin_memory);
 }
 
 Tensor hamming_window(
@@ -941,52 +1227,89 @@ Tensor hamming_window(
     bool periodic,
     double alpha,
     double beta,
-    const TensorOptions& options) {
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory) {
+  // See [Note: hacky wrapper removal for TensorOptions]
+  TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
+
   window_function_checks("hamming_window", options, window_length);
   if (window_length == 0) {
     return at::empty({0}, options);
   }
   if (window_length == 1) {
-    return native::ones({1}, options);
+    return native::ones({1}, dtype, layout, device, pin_memory);
   }
   if (periodic) {
     window_length += 1;
   }
-  auto window = native::arange(window_length, options);
+  auto window = native::arange(window_length, dtype, layout, device, pin_memory);
   window.mul_(c10::pi<double> * 2. / static_cast<double>(window_length - 1)).cos_().mul_(-beta).add_(alpha);
   return periodic ? window.narrow(0, 0, window_length - 1) : window;
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ hann_window ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Tensor hann_window(int64_t window_length, const TensorOptions& options) {
-  return native::hann_window(window_length, /*periodic=*/true, options);
+Tensor hann_window(int64_t window_length,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory) {
+  return native::hann_window(window_length, /*periodic=*/true, dtype, layout, device, pin_memory);
 }
 
 Tensor hann_window(
     int64_t window_length,
     bool periodic,
-    const TensorOptions& options) {
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory) {
+  // See [Note: hacky wrapper removal for TensorOptions]
+  TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
+
   window_function_checks("hann_window", options, window_length);
   return native::hamming_window(
-      window_length, periodic, /*alpha=*/0.5, /*beta=*/0.5, options);
+      window_length, periodic, /*alpha=*/0.5, /*beta=*/0.5, dtype, layout, device, pin_memory);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~ kaiser_window ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Tensor kaiser_window(int64_t window_length, const TensorOptions& options) {
-  return native::kaiser_window(window_length, /*periodic=*/true, /*beta=*/12.0, options);
+Tensor kaiser_window(int64_t window_length,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory) {
+  return native::kaiser_window(
+      window_length,
+      /*periodic=*/true,
+      /*beta=*/12.0,
+      dtype,
+      layout,
+      device,
+      pin_memory);
 }
 
-Tensor kaiser_window(int64_t window_length, bool periodic, const TensorOptions& options) {
-  return native::kaiser_window(window_length, periodic, /*beta=*/12.0, options);
+Tensor kaiser_window(int64_t window_length, bool periodic,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory) {
+  return native::kaiser_window(window_length, periodic, /*beta=*/12.0, dtype, layout, device, pin_memory);
 }
 
 Tensor kaiser_window(
     int64_t window_length,
     bool periodic,
     double beta,
-    const TensorOptions& options) {
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory) {
+  // See [Note: hacky wrapper removal for TensorOptions]
+  TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
+
   window_function_checks("kaiser_window", options, window_length);
   if (window_length == 0) {
     return at::empty({0}, options);
@@ -1057,21 +1380,28 @@ Tensor tensor_complex_backend(ArrayRef<T> values, const TensorOptions& options) 
   return at::detail::tensor_complex_backend(values, options);
 }
 
-Tensor from_file(std::string filename, c10::optional<bool> shared, c10::optional<int64_t> size, const TensorOptions& options) {
+Tensor from_file(c10::string_view filename, c10::optional<bool> shared, c10::optional<int64_t> size,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory) {
+  // See [Note: hacky wrapper removal for TensorOptions]
+  TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
+
     TORCH_CHECK(!options.pinned_memory(), "tensors constructed from a file cannot be pinned");
     int64_t my_size = size.value_or(0);
-    int flags = shared.value_or(false) ? TH_ALLOCATOR_MAPPED_SHARED : 0;
-    auto dtype = options.dtype();
-    size_t size_bytes = my_size * dtype.itemsize();
+    int flags = shared.value_or(false) ? ALLOCATOR_MAPPED_SHARED : 0;
+    auto my_dtype = options.dtype();
+    size_t size_bytes = my_size * my_dtype.itemsize();
     auto storage_impl = c10::make_intrusive<at::StorageImpl>(
         c10::StorageImpl::use_byte_size_t(),
         size_bytes,
-        THMapAllocator::makeDataPtr(
-            filename.c_str(), flags, size_bytes, nullptr),
+        MapAllocator::makeDataPtr(
+            std::string(filename), flags, size_bytes, nullptr),
         /*allocator=*/nullptr,
         /*resizable=*/false);
     auto tensor = detail::make_tensor<at::TensorImpl>(
-        storage_impl, at::DispatchKey::CPU, dtype);
+        storage_impl, at::DispatchKey::CPU, my_dtype);
     tensor.unsafeGetTensorImpl()->set_sizes_contiguous({my_size});
     return tensor;
 }
@@ -1081,17 +1411,18 @@ Tensor from_file(std::string filename, c10::optional<bool> shared, c10::optional
 Tensor clone(const Tensor& src, c10::optional<c10::MemoryFormat> optional_memory_format) {
   auto memory_format =
       optional_memory_format.value_or(MemoryFormat::Preserve);
+  Tensor self;
   if (memory_format == MemoryFormat::Preserve) {
     if (src.is_non_overlapping_and_dense()) {
-      // Copy all strides
-      auto self = at::empty_strided(src.sizes(), src.strides(), src.options());
-      self.copy_(src);
-      return self;
+      // Copy all strides, this is marginally faster than calling empty_like
+      self = at::empty_strided(src.sizes(), src.strides(), src.options());
     } else {
-      memory_format = src.suggest_memory_format();
+      self = at::empty_like(src);
     }
+  } else {
+    self = at::empty_like(src, src.options(), memory_format);
   }
-  auto self = at::empty_like(src, src.options(), memory_format);
+
   self.copy_(src);
   return self;
 }
@@ -1103,9 +1434,15 @@ Tensor clone(const Tensor& src, c10::optional<c10::MemoryFormat> optional_memory
 
 Tensor full(
     IntArrayRef size,
-    Scalar fill_value,
+    const Scalar& fill_value,
     optional<DimnameList> names,
-    const TensorOptions& options) {
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory) {
+  // See [Note: hacky wrapper removal for TensorOptions]
+  TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
+
 
   TORCH_CHECK(options.layout() != kSparse,
     "full(...) is not implemented for sparse layout");
@@ -1117,29 +1454,47 @@ Tensor full(
 Tensor ones(
     IntArrayRef size,
     optional<DimnameList> names,
-    const TensorOptions& options) {
-  return native::full(size, /*fill_value=*/1., names, options);
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory) {
+  // See [Note: hacky wrapper removal for TensorOptions]
+
+  return native::full(
+      size, /*fill_value=*/1., names, dtype, layout, device, pin_memory);
 }
 
 Tensor zeros(
     IntArrayRef size,
     optional<DimnameList> names,
-    const TensorOptions& options) {
-  return native::full(size, /*fill_value=*/0., names, options);
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory) {
+  return native::full(size, /*fill_value=*/0., names, dtype, layout, device, pin_memory);
 }
 
 Tensor randn(
     IntArrayRef size,
     optional<DimnameList> names,
-    const TensorOptions& options) {
-  return native::randn(size, c10::nullopt, names, options);
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory) {
+  return native::randn(size, c10::nullopt, names, dtype, layout, device, pin_memory);
 }
 
 Tensor randn(
     IntArrayRef size,
     c10::optional<Generator> generator,
     optional<DimnameList> names,
-    const TensorOptions& options) {
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory) {
+  // See [Note: hacky wrapper removal for TensorOptions]
+  TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
+
   auto result = at::empty(size, names, options);
   return result.normal_(0, 1, generator);
 }
@@ -1147,15 +1502,24 @@ Tensor randn(
 Tensor rand(
     IntArrayRef size,
     optional<DimnameList> names,
-    const TensorOptions& options) {
-  return native::rand(size, c10::nullopt, names, options);
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory) {
+  return native::rand(size, c10::nullopt, names, dtype, layout, device, pin_memory);
 }
 
 Tensor rand(
     IntArrayRef size,
     c10::optional<Generator> generator,
     optional<DimnameList> names,
-    const TensorOptions& options) {
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory) {
+  // See [Note: hacky wrapper removal for TensorOptions]
+  TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
+
   auto result = at::empty(size, names, options);
   return result.uniform_(0, 1, generator);
 }

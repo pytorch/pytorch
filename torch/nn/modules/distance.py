@@ -43,7 +43,7 @@ class PairwiseDistance(Module):
 
 
 class CosineSimilarity(Module):
-    r"""Returns cosine similarity between :math:`x_1` and :math:`x_2`, computed along dim.
+    r"""Returns cosine similarity between :math:`x_1` and :math:`x_2`, computed along `dim`.
 
     .. math ::
         \text{similarity} = \dfrac{x_1 \cdot x_2}{\max(\Vert x_1 \Vert _2 \cdot \Vert x_2 \Vert _2, \epsilon)}.
@@ -54,7 +54,8 @@ class CosineSimilarity(Module):
             Default: 1e-8
     Shape:
         - Input1: :math:`(\ast_1, D, \ast_2)` where D is at position `dim`
-        - Input2: :math:`(\ast_1, D, \ast_2)`, same shape as the Input1
+        - Input2: :math:`(\ast_1, D, \ast_2)`, same number of dimensions as x1, matching x1 size at dimension `dim`,
+              and broadcastable with x1 at other dimensions.
         - Output: :math:`(\ast_1, \ast_2)`
     Examples::
         >>> input1 = torch.randn(100, 128)

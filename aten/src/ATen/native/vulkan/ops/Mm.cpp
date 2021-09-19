@@ -156,13 +156,13 @@ bool available(
          (2 == weight.ndimension()) &&
          (weight.size(Layout::Parameter::height) > 0) &&
          (weight.size(Layout::Parameter::width) > 0) &&
-         ((c10::DeviceType::CPU == weight.device().type()) ||
+         ((weight.device().is_cpu()) ||
           (c10::DeviceType::Vulkan == weight.device().type())) &&
          (kFloat == weight.scalar_type()) &&
          !weight.requires_grad() &&
          // Bias
          ((bias && bias->defined()) ? ((bias->ndimension() > 0) &&
-                                       ((c10::DeviceType::CPU == bias->device().type()) ||
+                                       ((bias->device().is_cpu()) ||
                                         (c10::DeviceType::Vulkan == bias->device().type())) &&
                                        (kFloat == bias->scalar_type()) &&
                                        ((bias->ndimension() > 1) ?
@@ -191,8 +191,8 @@ Tensor addmm(
     const Tensor& bias,
     const Tensor& input,
     const Tensor& weight,
-    const Scalar beta,
-    const Scalar alpha) {
+    const Scalar& beta,
+    const Scalar& alpha) {
   return LinearOpContext::create(
       api::context()->resource().pool,
       weight,
@@ -217,8 +217,8 @@ Tensor mm(
 #ifdef USE_VULKAN_API
 
 TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
-  m.impl("addmm", TORCH_FN(addmm));
-  m.impl("mm", TORCH_FN(mm));
+  m.impl(TORCH_SELECTIVE_NAME("aten::addmm"), TORCH_FN(addmm));
+  m.impl(TORCH_SELECTIVE_NAME("aten::mm"), TORCH_FN(mm));
 }
 
 #endif /* USE_VULKAN_API */
@@ -281,7 +281,6 @@ Tensor LinearOpContext::run(
   vTensor v_output {
       context,
       {
-        1,
         v_input.sizes()[Layout::Parameter::height],
         unpacked_.weight.sizes()[Layout::Parameter::width],
       },
@@ -320,8 +319,8 @@ Tensor LinearOpContext::run(
             },
             VK_KERNEL(addmm),
             {
-              div_up(unpacked_.weight.sizes()[Layout::Parameter::width], INT64_C(2)),
-              div_up(v_input.sizes()[Layout::Parameter::height], INT64_C(2)),
+              safe_downcast<uint32_t>(div_up(unpacked_.weight.sizes()[Layout::Parameter::width], INT64_C(2))),
+              safe_downcast<uint32_t>(div_up(v_input.sizes()[Layout::Parameter::height], INT64_C(2))),
               1,
             },
             {8, 8, 1},
@@ -369,8 +368,8 @@ Tensor LinearOpContext::run(
             },
             VK_KERNEL(mm),
             {
-              div_up(unpacked_.weight.sizes()[Layout::Parameter::width], INT64_C(2)),
-              div_up(v_input.sizes()[Layout::Parameter::height], INT64_C(2)),
+              safe_downcast<uint32_t>(div_up(unpacked_.weight.sizes()[Layout::Parameter::width], INT64_C(2))),
+              safe_downcast<uint32_t>(div_up(v_input.sizes()[Layout::Parameter::height], INT64_C(2))),
               1,
             },
             {8, 8, 1},

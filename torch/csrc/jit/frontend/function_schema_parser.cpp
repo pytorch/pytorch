@@ -58,6 +58,17 @@ struct SchemaParser {
             idx++, /*is_return=*/false, /*kwarg_only=*/kwarg_only));
       }
     });
+
+    // check if all arguments are not-default for vararg schemas
+    if (is_vararg) {
+      for (const auto& arg : arguments) {
+        if (arg.default_value().has_value()) {
+          throw ErrorReport(L.cur())
+              << "schemas with vararg (...) can't have default value args";
+        }
+      }
+    }
+
     idx = 0;
     L.expect(TK_ARROW);
     if (L.nextIf(TK_DOTS)) {
@@ -79,6 +90,7 @@ struct SchemaParser {
       returns.push_back(
           parseArgument(0, /*is_return=*/true, /*kwarg_only=*/false));
     }
+
     return make_right<OperatorName, FunctionSchema>(
         std::move(name.name),
         std::move(name.overload_name),
@@ -108,6 +120,13 @@ struct SchemaParser {
     } while (L.nextIf(TK_NEWLINE));
     L.expect(TK_EOF);
     return results;
+  }
+
+  either<OperatorName, FunctionSchema> parseExactlyOneDeclaration() {
+    auto result = parseDeclaration();
+    L.nextIf(TK_NEWLINE);
+    L.expect(TK_EOF);
+    return result;
   }
 
   Argument parseArgument(size_t idx, bool is_return, bool kwarg_only) {
@@ -173,6 +192,8 @@ struct SchemaParser {
         auto text = tok.text();
         if ("float" == text) {
           return static_cast<int64_t>(at::kFloat);
+        } else if ("complex" == text) {
+          return static_cast<int64_t>(at::kComplexFloat);
         } else if ("long" == text) {
           return static_cast<int64_t>(at::kLong);
         } else if ("strided" == text) {
@@ -191,7 +212,12 @@ struct SchemaParser {
           n = "-" + L.expect(TK_NUMBER).text();
         else
           n = L.expect(TK_NUMBER).text();
-        if (kind == TypeKind::FloatType || n.find('.') != std::string::npos ||
+
+        if (kind == TypeKind::ComplexType || n.find('j') != std::string::npos) {
+          auto imag = c10::stod(n.substr(0, n.size() - 1));
+          return c10::complex<double>(0, imag);
+        } else if (
+            kind == TypeKind::FloatType || n.find('.') != std::string::npos ||
             n.find('e') != std::string::npos) {
           return c10::stod(n);
         } else {
@@ -205,6 +231,8 @@ struct SchemaParser {
       const SourceRange& range,
       const std::vector<IValue>& vs) {
     switch (kind) {
+      case TypeKind::ComplexType:
+        return fmap(vs, [](const IValue& v) { return v.toComplexDouble(); });
       case TypeKind::FloatType:
         return fmap(vs, [](const IValue& v) { return v.toDouble(); });
       case TypeKind::IntType:
@@ -213,7 +241,7 @@ struct SchemaParser {
         return fmap(vs, [](const IValue& v) { return v.toBool(); });
       default:
         throw ErrorReport(range)
-            << "lists are only supported for float or int types";
+            << "lists are only supported for float, int and complex types";
     }
   }
   IValue parseConstantList(TypeKind kind) {
@@ -248,6 +276,7 @@ struct SchemaParser {
       case TypeKind::IntType:
       case TypeKind::BoolType:
       case TypeKind::FloatType:
+      case TypeKind::ComplexType:
         return parseSingleConstant(arg_type->kind());
         break;
       case TypeKind::DeviceObjType: {
@@ -297,7 +326,7 @@ struct SchemaParser {
 
 C10_EXPORT either<OperatorName, FunctionSchema> parseSchemaOrName(
     const std::string& schemaOrName) {
-  return SchemaParser(schemaOrName).parseDeclarations().at(0);
+  return SchemaParser(schemaOrName).parseExactlyOneDeclaration();
 }
 
 C10_EXPORT FunctionSchema parseSchema(const std::string& schema) {

@@ -1,11 +1,10 @@
 import torch
-from typing import Union
-from torch.types import Device
+from typing import Any
 # The _get_device_index has been moved to torch.utils._get_device_index
 from torch._utils import _get_device_index as _torch_get_device_index
 
 
-def _get_device_index(device: Union[Device, str, int, None], optional: bool = False,
+def _get_device_index(device: Any, optional: bool = False,
                       allow_cpu: bool = False) -> int:
     r"""Gets the device index from :attr:`device`, which can be a torch.device
     object, a Python integer, or ``None``.
@@ -25,12 +24,13 @@ def _get_device_index(device: Union[Device, str, int, None], optional: bool = Fa
         device = torch.device(device)
     if isinstance(device, torch.device):
         if allow_cpu:
-            if device.type not in {'cuda', 'cpu'}:
+            if device.type not in ['cuda', 'cpu']:
                 raise ValueError('Expected a cuda or cpu device, but got: {}'.format(device))
         elif device.type != 'cuda':
             raise ValueError('Expected a cuda device, but got: {}'.format(device))
-    if isinstance(device, torch.cuda.device):
-        return device.idx
+    if not torch.jit.is_scripting():
+        if isinstance(device, torch.cuda.device):
+            return device.idx
     return _torch_get_device_index(device, optional, allow_cpu)
 
 

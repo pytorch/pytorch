@@ -31,6 +31,7 @@ class Conf:
     is_libtorch: bool = False
     is_important: bool = False
     parallel_backend: Optional[str] = None
+    build_only: bool = False
 
     @staticmethod
     def is_test_phase(phase):
@@ -112,6 +113,8 @@ class Conf:
             parameters["resource_class"] = "xlarge"
         if hasattr(self, 'filters'):
             parameters['filters'] = self.filters
+        if self.build_only:
+            parameters['build_only'] = miniutils.quote(str(int(True)))
         return parameters
 
     def gen_workflow_job(self, phase):
@@ -175,35 +178,6 @@ class DocPushConf(object):
             }
         }
 
-# TODO Convert these to graph nodes
-def gen_dependent_configs(xenial_parent_config):
-
-    extra_parms = [
-        (["multigpu"], "large"),
-        (["nogpu", "NO_AVX2"], None),
-        (["nogpu", "NO_AVX"], None),
-        (["slow"], "medium"),
-    ]
-
-    configs = []
-    for parms, gpu in extra_parms:
-
-        c = Conf(
-            xenial_parent_config.distro,
-            ["py3"] + parms,
-            pyver=xenial_parent_config.pyver,
-            cuda_version=xenial_parent_config.cuda_version,
-            restrict_phases=["test"],
-            gpu_resource=gpu,
-            parent_build=xenial_parent_config,
-            is_important=False,
-        )
-
-        configs.append(c)
-
-    return configs
-
-
 def gen_docs_configs(xenial_parent_config):
     configs = []
 
@@ -211,7 +185,7 @@ def gen_docs_configs(xenial_parent_config):
         HiddenConf(
             "pytorch_python_doc_build",
             parent_build=xenial_parent_config,
-            filters=gen_filter_dict(branches_list=r"/.*/",
+            filters=gen_filter_dict(branches_list=["master", "nightly"],
                                     tags_list=RC_PATTERN),
         )
     )
@@ -227,7 +201,7 @@ def gen_docs_configs(xenial_parent_config):
         HiddenConf(
             "pytorch_cpp_doc_build",
             parent_build=xenial_parent_config,
-            filters=gen_filter_dict(branches_list=r"/.*/",
+            filters=gen_filter_dict(branches_list=["master", "nightly"],
                                     tags_list=RC_PATTERN),
         )
     )
@@ -236,13 +210,6 @@ def gen_docs_configs(xenial_parent_config):
             "pytorch_cpp_doc_push",
             parent_build="pytorch_cpp_doc_build",
             branch="master",
-        )
-    )
-
-    configs.append(
-        HiddenConf(
-            "pytorch_doc_test",
-            parent_build=xenial_parent_config
         )
     )
     return configs
@@ -258,7 +225,7 @@ def gen_tree():
     return configs_list
 
 
-def instantiate_configs():
+def instantiate_configs(only_slow_gradcheck):
 
     config_list = []
 
@@ -273,10 +240,15 @@ def instantiate_configs():
         is_xla = fc.find_prop("is_xla") or False
         is_asan = fc.find_prop("is_asan") or False
         is_coverage = fc.find_prop("is_coverage") or False
+        is_noarch = fc.find_prop("is_noarch") or False
         is_onnx = fc.find_prop("is_onnx") or False
         is_pure_torch = fc.find_prop("is_pure_torch") or False
         is_vulkan = fc.find_prop("is_vulkan") or False
+        is_slow_gradcheck = fc.find_prop("is_slow_gradcheck") or False
         parms_list_ignored_for_docker_image = []
+
+        if only_slow_gradcheck ^ is_slow_gradcheck:
+            continue
 
         python_version = None
         if compiler_name == "cuda" or compiler_name == "android":
@@ -316,6 +288,9 @@ def instantiate_configs():
             parms_list_ignored_for_docker_image.append("coverage")
             python_version = fc.find_prop("pyver")
 
+        if is_noarch:
+            parms_list_ignored_for_docker_image.append("noarch")
+
         if is_onnx:
             parms_list.append("onnx")
             python_version = fc.find_prop("pyver")
@@ -338,6 +313,10 @@ def instantiate_configs():
         if build_only or is_pure_torch:
             restrict_phases = ["build"]
 
+        if is_slow_gradcheck:
+            parms_list_ignored_for_docker_image.append("old")
+            parms_list_ignored_for_docker_image.append("gradcheck")
+
         gpu_resource = None
         if cuda_version and cuda_version != "10":
             gpu_resource = "medium"
@@ -357,6 +336,7 @@ def instantiate_configs():
             is_libtorch=is_libtorch,
             is_important=is_important,
             parallel_backend=parallel_backend,
+            build_only=build_only,
         )
 
         # run docs builds on "pytorch-linux-xenial-py3.6-gcc5.4". Docs builds
@@ -377,19 +357,19 @@ def instantiate_configs():
                                         tags_list=RC_PATTERN)
             c.dependent_tests = gen_docs_configs(c)
 
-        if cuda_version == "10.2" and python_version == "3.6" and not is_libtorch:
-            c.dependent_tests = gen_dependent_configs(c)
-
         if (
-            compiler_name == "gcc"
-            and compiler_version == "5.4"
+            compiler_name != "clang"
+            and not rocm_version
             and not is_libtorch
             and not is_vulkan
             and not is_pure_torch
-            and parallel_backend is None
+            and not is_noarch
+            and not is_slow_gradcheck
+            and not only_slow_gradcheck
+            and not build_only
         ):
-            bc_breaking_check = Conf(
-                "backward-compatibility-check",
+            distributed_test = Conf(
+                c.gen_build_name("") + "distributed",
                 [],
                 is_xla=False,
                 restrict_phases=["test"],
@@ -397,16 +377,16 @@ def instantiate_configs():
                 is_important=True,
                 parent_build=c,
             )
-            c.dependent_tests.append(bc_breaking_check)
+            c.dependent_tests.append(distributed_test)
 
         config_list.append(c)
 
     return config_list
 
 
-def get_workflow_jobs():
+def get_workflow_jobs(only_slow_gradcheck=False):
 
-    config_list = instantiate_configs()
+    config_list = instantiate_configs(only_slow_gradcheck)
 
     x = []
     for conf_options in config_list:

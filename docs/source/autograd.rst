@@ -7,9 +7,12 @@ Automatic differentiation package - torch.autograd
 .. automodule:: torch.autograd
 .. currentmodule:: torch.autograd
 
-.. autofunction:: backward
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
 
-.. autofunction:: grad
+    backward
+    grad
 
 .. _functional-api:
 
@@ -31,28 +34,34 @@ For example, for a function ``f`` that takes three inputs, a Tensor for which we
 tensor that should be considered constant and a boolean flag as ``f(input, constant, flag=flag)``
 you can use it as ``functional.jacobian(lambda x: f(x, constant, flag=flag), input)``.
 
-.. autofunction:: torch.autograd.functional.jacobian
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
 
-.. autofunction:: torch.autograd.functional.hessian
-
-.. autofunction:: torch.autograd.functional.vjp
-
-.. autofunction:: torch.autograd.functional.jvp
-
-.. autofunction:: torch.autograd.functional.vhp
-
-.. autofunction:: torch.autograd.functional.hvp
+    functional.jacobian
+    functional.hessian
+    functional.vjp
+    functional.jvp
+    functional.vhp
+    functional.hvp
 
 .. _locally-disable-grad:
 
 Locally disabling gradient computation
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-.. autoclass:: no_grad
+See :ref:`locally-disable-grad-doc` for more information on the differences
+between no-grad and inference mode as well as other related mechanisms that
+may be confused with the two.
 
-.. autoclass:: enable_grad
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
 
-.. autoclass:: set_grad_enabled
+    no_grad
+    enable_grad
+    set_grad_enabled
+    inference_mode
 
 .. _default-grad-layouts:
 
@@ -148,39 +157,54 @@ Variable (deprecated)
 
 Tensor autograd functions
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-.. autoclass:: torch.Tensor
-   :noindex:
+.. autosummary::
+    :nosignatures:
 
-   .. autoattribute:: grad
-   .. autoattribute:: requires_grad
-   .. autoattribute:: is_leaf
-   .. automethod:: backward
-   .. automethod:: detach
-   .. automethod:: detach_
-   .. automethod:: register_hook
-   .. automethod:: retain_grad
+   torch.Tensor.grad
+   torch.Tensor.requires_grad
+   torch.Tensor.is_leaf
+   torch.Tensor.backward
+   torch.Tensor.detach
+   torch.Tensor.detach_
+   torch.Tensor.register_hook
+   torch.Tensor.retain_grad
 
 :hidden:`Function`
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 .. autoclass:: Function
-    :members:
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    Function.backward
+    Function.forward
 
 Context method mixins
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 When creating a new :class:`Function`, the following methods are available to `ctx`.
 
-.. autoclass:: torch.autograd.function._ContextMethodMixin
-    :members:
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    function.FunctionCtx.mark_dirty
+    function.FunctionCtx.mark_non_differentiable
+    function.FunctionCtx.save_for_backward
+    function.FunctionCtx.set_materialize_grads
 
 .. _grad-check:
 
 Numerical gradient checking
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-.. autofunction:: gradcheck
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
 
-.. autofunction:: gradgradcheck
+    gradcheck
+    gradgradcheck
 
 Profiler
 ^^^^^^^^
@@ -192,12 +216,24 @@ and nvprof based (registers both CPU and GPU activity) using
 :class:`~torch.autograd.profiler.emit_nvtx`.
 
 .. autoclass:: torch.autograd.profiler.profile
-    :members:
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    profiler.profile.export_chrome_trace
+    profiler.profile.key_averages
+    profiler.profile.self_cpu_time_total
+    profiler.profile.total_average
 
 .. autoclass:: torch.autograd.profiler.emit_nvtx
-    :members:
 
-.. autofunction:: torch.autograd.profiler.load_nvprof
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    profiler.load_nvprof
 
 Anomaly detection
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -205,3 +241,19 @@ Anomaly detection
 .. autoclass:: detect_anomaly
 
 .. autoclass:: set_detect_anomaly
+
+
+Saved tensors default hooks
+^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Some operations need intermediary results to be saved during the forward pass
+in order to execute the backward pass.
+You can define how these saved tensors should be packed / unpacked using hooks.
+A common application is to trade compute for memory by saving those intermediary results
+to disk or to CPU instead of leaving them on the GPU. This is especially useful if you
+notice your model fits on GPU during evaluation, but not training.
+Also see :ref:`saved-tensors-hooks-doc`.
+
+.. autoclass:: torch.autograd.graph.saved_tensors_hooks
+
+.. autoclass:: torch.autograd.graph.save_on_cpu

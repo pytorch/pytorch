@@ -182,7 +182,7 @@ struct ProfilingRecord {
   TORCH_API static void removeProfileCounter(Block* b);
 
   std::shared_ptr<Graph> profiled_graph_;
-  std::mutex mutex_;
+  mutable std::mutex mutex_;
   size_t profiling_count_;
   // the key is a frame id
   // the value is a mapping from a Value in a graph
@@ -197,9 +197,8 @@ struct ProfilingRecord {
       const c10::SymbolicShape& sym_shapes,
       SetPartitioningHelper& partition_helper);
 
-  bool ready() const {
-    return profiling_count_ == 0;
-  }
+  bool ready() const;
+
   std::shared_ptr<Graph> graph() const {
     return profiled_graph_;
   }

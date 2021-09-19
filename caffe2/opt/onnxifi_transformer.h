@@ -5,6 +5,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "caffe2/opt/backend_cutting.h"
 #include "onnx/onnx_pb.h"
 
 #include "caffe2/core/operator.h"
@@ -39,6 +40,9 @@ struct OnnxifiTransformerOptions final : public BackendTransformOptions {
   // fp16 or not
   bool merge_fp32_inputs_into_fp16{false};
 
+  // Whether to verify that a single subnet was created
+  bool verify_only_single_subnet{false};
+
   // Whether the net has been ssaRewritten
   bool predictor_net_ssa_rewritten{false};
 
@@ -47,6 +51,24 @@ struct OnnxifiTransformerOptions final : public BackendTransformOptions {
 
   // Mapping of batch sizes to shape infos
   std::unordered_map<int, ShapeInfoMap> shape_hints_per_bs;
+
+  // Whether to read batch size from Onnxifi.
+  bool use_onnxifi_batch_size{false};
+};
+
+class TORCH_API OnnxifiOptionHelper final {
+ public:
+  OnnxifiOptionHelper();
+
+  // Set Onnxifi option
+  bool setOnnxifiOption(const std::string& option, const std::string& value);
+
+  //  Get Onnxifi option
+  std::string getOnnxifiOption(const std::string& option);
+
+ private:
+  // Pointer to loaded onnxifi library
+  onnxifi_library* lib_{nullptr};
 };
 
 class TORCH_API OnnxifiTransformer final : public BackendTransformerBase {
@@ -84,14 +106,14 @@ class TORCH_API OnnxifiTransformer final : public BackendTransformerBase {
       Workspace* ws,
       onnx::OnnxExporter* exporter,
       ShapeInfoMap* shape_hints_max_bs,
-      const std::unordered_map<int, ShapeInfoMap> &shape_hints_per_bs);
+      const std::unordered_map<int, ShapeInfoMap>& shape_hints_per_bs);
 
   // Convert a cutoff subgraph net to an Onnxifi op
   caffe2::NetDef SubnetToOnnxifiOpViaC2(
       const caffe2::NetDef& net,
       const std::unordered_set<std::string>& weights_in_ws,
       const ShapeInfoMap& shape_hints_max_bs,
-      const std::unordered_map<int, ShapeInfoMap> &shape_hints_per_bs);
+      const std::unordered_map<int, ShapeInfoMap>& shape_hints_per_bs);
 
   // Check that output shape hints are present to ensure we can pass them to
   // OnnxifiOp
@@ -106,24 +128,24 @@ class TORCH_API OnnxifiTransformer final : public BackendTransformerBase {
       const std::vector<std::string>& external_inputs,
       const std::vector<std::string>& external_outputs,
       const ShapeInfoMap& shape_hints_max_bs,
-      const std::unordered_map<int, ShapeInfoMap> &shape_hints_per_bs);
+      const std::unordered_map<int, ShapeInfoMap>& shape_hints_per_bs);
 
   // Transform by passing C2 proto to backend
-  NetDef TransformViaC2(
+  opt::CutResult TransformViaC2(
       NetDef* pred_net,
       const std::unordered_set<std::string>& weights,
       const std::unordered_set<int>& blocklisted_ops,
       const ShapeInfoMap& shape_hints_max_bs,
-      const std::unordered_map<int, ShapeInfoMap> &shape_hints_per_bs);
+      const std::unordered_map<int, ShapeInfoMap>& shape_hints_per_bs);
 
   // Transform by passing ONNX proto to backend
-  NetDef TransformViaOnnx(
+  opt::CutResult TransformViaOnnx(
       Workspace* ws,
       NetDef* pred_net,
       const std::unordered_set<std::string>& weights,
       const std::unordered_set<int>& blocklisted_ops,
       ShapeInfoMap* shape_hints_max_bs,
-      const std::unordered_map<int, ShapeInfoMap> &shape_hints_per_bs);
+      const std::unordered_map<int, ShapeInfoMap>& shape_hints_per_bs);
 
   // Query whether an operator is supported by passing ONNX protobuf
   bool supportOpOnnx(

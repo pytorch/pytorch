@@ -76,6 +76,7 @@ std::vector<IValue> getParamAttributes(
   WithInsertPoint guard(m);
 
   std::vector<IValue> parameterIValues = {};
+  std::unordered_set<Node*> nodesToDestroy;
   for (auto it = block->nodes().begin(); it != block->nodes().end();) {
     Node* n = *it;
     it++; // node n can be destroyed
@@ -142,7 +143,7 @@ std::vector<IValue> getParamAttributes(
           // This attr is constant for ONNX.
           auto attrVal = tryInsertConstant(*graph, attr);
           n->output()->replaceAllUsesWith(*attrVal);
-          n->destroy();
+          nodesToDestroy.emplace(n);
         }
       }
     }
@@ -156,11 +157,14 @@ std::vector<IValue> getParamAttributes(
           std::end(nextParameterIValues));
     }
   }
+  for (auto n : nodesToDestroy) {
+    n->destroy();
+  }
   return parameterIValues;
 }
 
 void insertMainModuleAsConstant(const std::shared_ptr<Graph>& graph) {
-  auto* constNode = graph->create(prim::Constant);
+  auto* constNode = graph->create(prim::CreateObject);
   constNode->output()->setType(graph->inputs().at(0)->type());
   auto it = graph->nodes().begin();
   constNode->insertBefore(*it);

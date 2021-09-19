@@ -7,6 +7,7 @@
 # shellcheck disable=SC2034
 COMPACT_JOB_NAME="${BUILD_ENVIRONMENT}"
 
+# shellcheck source=./common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 echo "Clang version:"
@@ -15,6 +16,9 @@ clang --version
 # detect_leaks=0: Python is very leaky, so we need suppress it
 # symbolize=1: Gives us much better errors when things go wrong
 export ASAN_OPTIONS=detect_leaks=0:symbolize=1:detect_odr_violation=0
+if [ -n "$(which conda)" ]; then
+  export CMAKE_PREFIX_PATH=/opt/conda
+fi
 
 # FIXME: Remove the hardcoded "-pthread" option.
 # With asan build, the cmake thread CMAKE_HAVE_LIBC_CREATE[1] checking will
@@ -35,5 +39,14 @@ CC="clang" CXX="clang++" LDSHARED="clang --shared" \
   CXX_FLAGS="-pthread" \
   USE_ASAN=1 USE_CUDA=0 USE_MKLDNN=0 \
   python setup.py install
+
+# Test building via the sdist source tarball
+python setup.py sdist
+mkdir -p /tmp/tmp
+pushd /tmp/tmp
+tar zxf "$(dirname "${BASH_SOURCE[0]}")/../../dist/"*.tar.gz
+cd torch-*
+python setup.py build --cmake-only
+popd
 
 assert_git_not_dirty

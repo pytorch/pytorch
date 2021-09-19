@@ -56,6 +56,7 @@ bool test_optimizer_xor(Options options) {
 
     torch::Tensor loss = step(optimizer, model, inputs, labels);
 
+    // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,cppcoreguidelines-avoid-magic-numbers,bugprone-narrowing-conversions)
     running_loss = running_loss * 0.99 + loss.item<float>() * 0.01;
     if (epoch > kMaximumNumberOfEpochs) {
       std::cout << "Loss is too high after epoch " << epoch << ": "
@@ -151,6 +152,7 @@ TEST(OptimTest, OptimizerAccessors) {
   ASSERT_TRUE(options == options_);
   // test for param_groups() with non-const reference return
   auto& params_groups = optimizer.param_groups();
+  // NOLINTNEXTLINE(modernize-use-emplace)
   params_groups.push_back(OptimizerParamGroup(params));
   auto& params_1 = params_groups[1].params();
   for (size_t i = 0; i < params_1.size(); i++) {
@@ -195,12 +197,14 @@ TEST(OptimTest, OldInterface) {
     torch::Tensor step(LossClosure closure = nullptr) override { return {};}
     explicit MyOptimizer(
         std::vector<at::Tensor> params, MyOptimizerOptions defaults = {}) :
+          // NOLINTNEXTLINE(performance-move-const-arg)
           Optimizer({std::move(OptimizerParamGroup(params))}, std::make_unique<MyOptimizerOptions>(defaults)) {}
   };
   std::vector<torch::Tensor> parameters = {
       torch::ones({2, 3}), torch::zeros({2, 3}), torch::rand({2, 3})};
   {
     MyOptimizer optimizer(parameters);
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     size_t size;
     OLD_INTERFACE_WARNING_CHECK(size = optimizer.size());
     ASSERT_EQ(size, parameters.size());
@@ -209,6 +213,7 @@ TEST(OptimTest, OldInterface) {
     std::vector<at::Tensor> params;
     MyOptimizer optimizer(params);
 
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     size_t size;
     OLD_INTERFACE_WARNING_CHECK(size = optimizer.size());
     ASSERT_EQ(size, 0);
@@ -228,6 +233,7 @@ TEST(OptimTest, OldInterface) {
     Linear linear(3, 4);
     MyOptimizer optimizer(linear->parameters());
 
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     size_t size;
     OLD_INTERFACE_WARNING_CHECK(size = optimizer.size());
     ASSERT_EQ(size, linear->parameters().size());
@@ -451,4 +457,52 @@ TEST(OptimTest, AddParameter_LBFGS) {
   optimizer.step([]() { return torch::tensor(1); });
 
   // REQUIRE this doesn't throw
+}
+
+//Check whether the learning rate of the parameter groups in the optimizer are the
+//same as the expected learning rates given in the epoch:learning rate map
+void check_lr_change(
+    Optimizer& optimizer,
+    LRScheduler& lr_scheduler,
+    std::map<unsigned, double> expected_epoch_lrs) {
+
+  //Find maximum epoch in map
+  unsigned kIterations =
+    std::max_element(expected_epoch_lrs.begin(),
+                     expected_epoch_lrs.end(),
+                     [] (const std::pair<unsigned, double>& a,
+                         const std::pair<unsigned, double>& b) -> bool {
+                       return a.second > b.second;
+                     })->first;
+
+  for(unsigned i = 0; i <= kIterations; i++) {
+    const auto epoch_iter = expected_epoch_lrs.find(i);
+    if(epoch_iter != expected_epoch_lrs.end())
+    {
+      //Compare the similarity of the two floating point learning rates
+      ASSERT_TRUE(fabs(epoch_iter->second - optimizer.param_groups()[0].options().get_lr()) <
+                  std::numeric_limits<double>::epsilon());
+    }
+    optimizer.step();
+    lr_scheduler.step();
+  }
+
+}
+
+TEST(OptimTest, CheckLRChange_StepLR_Adam) {
+
+  torch::Tensor parameters = torch::zeros({1});
+  auto optimizer = Adam({parameters}, AdamOptions().lr(1e-3));
+
+  const unsigned step_size = 20;
+  const double gamma = 0.5;
+  StepLR step_lr_scheduler(optimizer, step_size, gamma);
+
+  //The learning rate should have halved at epoch 20
+  const std::map<unsigned, double> expected_epoch_lrs = {
+    {1, 1e-3},
+    {25, 5e-4}
+  };
+
+  check_lr_change(optimizer, step_lr_scheduler, expected_epoch_lrs);
 }

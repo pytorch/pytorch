@@ -4,7 +4,6 @@ import os
 from setuptools import setup
 from torch.utils.cpp_extension import BuildExtension, CppExtension, CUDAExtension
 from torch.utils.cpp_extension import CUDA_HOME, ROCM_HOME
-from torch.testing._internal.common_utils import IS_WINDOWS
 
 if sys.platform == 'win32':
     vc_version = os.getenv('VCToolsVersion', '')
@@ -22,7 +21,7 @@ ext_modules = [
         'torch_test_cpp_extension.cpp', ['extension.cpp'],
         extra_compile_args=CXX_FLAGS),
     CppExtension(
-        'torch_test_cpp_extension.msnpu', ['msnpu_extension.cpp'],
+        'torch_test_cpp_extension.ort', ['ort_extension.cpp'],
         extra_compile_args=CXX_FLAGS),
     CppExtension(
         'torch_test_cpp_extension.rng', ['rng_extension.cpp'],
@@ -40,15 +39,14 @@ if torch.cuda.is_available() and (CUDA_HOME is not None or ROCM_HOME is not None
                             'nvcc': ['-O2']})
     ext_modules.append(extension)
 
-if not IS_WINDOWS:  # MSVC has bug compiling this example
-    if torch.cuda.is_available() and (CUDA_HOME is not None or ROCM_HOME is not None):
-        extension = CUDAExtension(
-            'torch_test_cpp_extension.torch_library', [
-                'torch_library.cu'
-            ],
-            extra_compile_args={'cxx': CXX_FLAGS,
-                                'nvcc': ['-O2']})
-        ext_modules.append(extension)
+if torch.cuda.is_available() and (CUDA_HOME is not None or ROCM_HOME is not None):
+    extension = CUDAExtension(
+        'torch_test_cpp_extension.torch_library', [
+            'torch_library.cu'
+        ],
+        extra_compile_args={'cxx': CXX_FLAGS,
+                            'nvcc': ['-O2']})
+    ext_modules.append(extension)
 
 setup(
     name='torch_test_cpp_extension',

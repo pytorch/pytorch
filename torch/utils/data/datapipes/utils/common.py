@@ -1,8 +1,9 @@
 import os
 import fnmatch
 import warnings
-from typing import List, Union, Iterable
+
 from io import BufferedIOBase
+from typing import Iterable, List, Union
 
 
 def match_masks(name : str, masks : Union[str, List[str]]) -> bool:
@@ -40,19 +41,18 @@ def get_file_pathnames_from_root(
             break
 
 
-def get_file_binaries_from_pathnames(pathnames : Iterable):
-
+def get_file_binaries_from_pathnames(pathnames: Iterable, mode: str):
     if not isinstance(pathnames, Iterable):
-        warnings.warn("get_file_binaries_from_pathnames needs the input be an Iterable")
-        raise TypeError
+        pathnames = [pathnames, ]
+
+    if mode in ('b', 't'):
+        mode = 'r' + mode
 
     for pathname in pathnames:
         if not isinstance(pathname, str):
-            warnings.warn("file pathname must be string type, but got {}".format(type(pathname)))
-            raise TypeError
-
-        yield (pathname, open(pathname, 'rb'))
-
+            raise TypeError("Expected string type for pathname, but got {}"
+                            .format(type(pathname)))
+        yield (pathname, open(pathname, mode))
 
 def validate_pathname_binary_tuple(data):
     if not isinstance(data, tuple):

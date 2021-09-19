@@ -61,6 +61,7 @@ class TORCH_CUDA_CU_API FusionExecutor : public NonCopyable {
   //       codegen.
   // struct used to hold necessary information to launch compiled kernel on a
   // given input set.
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   struct ExecutorEntry {
     bool init = false;
     LaunchParams launch_params;
@@ -78,6 +79,7 @@ class TORCH_CUDA_CU_API FusionExecutor : public NonCopyable {
   }
 
  private:
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   struct GlobalBuffers {
     std::vector<at::Tensor> empty_buffers;
     std::vector<at::Tensor> zero_buffers;

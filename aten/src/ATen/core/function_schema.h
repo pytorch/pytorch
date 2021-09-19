@@ -1,6 +1,7 @@
 #pragma once
 
 #include <c10/util/StringUtil.h>
+#include <c10/util/string_view.h>
 #include <ATen/core/jit_type.h>
 #include <ATen/core/interned_strings.h>
 #include <ATen/core/ivalue.h>
@@ -29,11 +30,14 @@ struct Argument {
       bool kwarg_only = false,
       c10::optional<AliasInfo> alias_info = c10::nullopt)
       : name_(std::move(name)),
-        type_(type ? type : TensorType::get()),
+        type_(type ? std::move(type) : TensorType::get()),
         N_(std::move(N)),
         default_value_(std::move(default_value)),
-        kwarg_only_(kwarg_only),
-        alias_info_(std::move(alias_info)) {
+        alias_info_(std::move(alias_info)),
+        kwarg_only_(kwarg_only) {
+    // this is an softly-enforced invariant for out arguments.
+    bool is_alias = alias_info_.has_value() && alias_info_.value().isWrite();
+    is_out_ = kwarg_only_ && is_alias;
   }
   const std::string& name() const {
     return name_;
@@ -50,6 +54,11 @@ struct Argument {
   bool kwarg_only() const {
     return kwarg_only_;
   }
+
+  bool is_out() const {
+    return is_out_;
+  }
+
   const c10::optional<AliasInfo>& alias_info() const {
     return alias_info_;
   }
@@ -113,9 +122,11 @@ struct Argument {
   c10::optional<int32_t> N_;
 
   c10::optional<IValue> default_value_;
+  c10::optional<AliasInfo> alias_info_;
   // is this only specifiable as a keyword argument?
   bool kwarg_only_;
-  c10::optional<AliasInfo> alias_info_;
+  // marks if the argument is out variant of the schema
+  bool is_out_;
 };
 
 inline bool operator==(const Argument& lhs, const Argument& rhs) {
@@ -262,7 +273,7 @@ struct FunctionSchema {
         });
   }
 
-  c10::optional<int> argumentIndexWithName(const std::string& name) const {
+  c10::optional<int> argumentIndexWithName(c10::string_view name) const {
     for(size_t i = 0; i < arguments().size(); ++i) {
       if(name == arguments()[i].name())
         return i;
@@ -406,7 +417,7 @@ inline std::ostream& operator<<(std::ostream& out, const Argument& arg) {
 
   if (arg.default_value()) {
     out << "=";
-    if (type->kind() == c10::TypeKind::StringType) {
+    if (type->kind() == c10::TypeKind::StringType || (unopt_type->kind() == c10::TypeKind::StringType && !arg.default_value().value().isNone())) {
       printQuotedString(out, arg.default_value().value().toStringRef());
     } else {
       out << arg.default_value().value();

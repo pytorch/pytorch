@@ -85,6 +85,21 @@ TypePtr tryInferTypeWithTypeHint(
         "type_hint should only be specified when the RRef being created contains a ScriptModule.");
   }
 
+  // Check if value is an instance of a ScriptClass. If not, skip type inference
+  // because it will try to script the class that value is in instance of, and
+  // this should be avoided.
+  py::bool_ can_compile = py::module::import("torch._jit_internal")
+                              .attr("can_compile_class")(value.get_type());
+
+  if (py::cast<bool>(can_compile)) {
+    py::object existing_ty = py::module::import("torch.jit._state")
+                                 .attr("_get_script_class")(value.get_type());
+
+    if (existing_ty.is_none()) {
+      return PyObjectType::get();
+    }
+  }
+
   // NB: `jit::tryToInferType(..)` infers types including ScriptClass, but
   // excluding ScripModule.
   jit::InferredType type_inferred = jit::tryToInferType(value);
@@ -109,7 +124,7 @@ PyRRef::PyRRef(c10::intrusive_ptr<RRef> rref)
 }
 
 PyRRef::PyRRef(const py::object& value, const py::object& type_hint)
-    : PyRRef([&value, &type_hint]() {
+    : PyRRef([&value, &type_hint]() mutable {
         TypePtr elem_type = tryInferTypeWithTypeHint(value, type_hint);
         auto rref = RRefContext::getInstance().createOwnerRRef(elem_type);
         // jit::toIValue takes a py::handle as the first argument, and it calls
@@ -292,37 +307,41 @@ void PyRRef::backward(int64_t autogradContextId, bool retainGraph) {
   backward(autogradContextId, retainGraph, rref_);
 }
 
+void PyRRef::backwardOwnerRRef(
+    int64_t autogradContextId,
+    bool retainGraph,
+    IValue value) {
+  // If we have a PyObj, retrieve the underlying tensor.
+  if (value.isPyObject()) {
+    py::gil_scoped_acquire gil;
+    py::object obj = torch::jit::toPyObject(value);
+    try {
+      value = torch::jit::toIValue(obj, c10::TensorType::get());
+    } catch (py::cast_error& e) {
+      TORCH_CHECK(false, "RRef should contain a tensor for .backward()");
+    }
+  }
+
+  TORCH_CHECK(value.isTensor(), "RRef should contain a tensor for .backward()");
+  auto root = value.toTensor();
+
+  if (autogradContextId == -1) {
+    torch::autograd::backward({root});
+  } else {
+    torch::distributed::autograd::backward(
+        autogradContextId, {root}, retainGraph);
+  }
+}
+
 void PyRRef::backward(
     int64_t autogradContextId,
     bool retainGraph,
     const c10::intrusive_ptr<RRef>& rref) {
   if (rref->isOwner()) {
-    auto value =
-        c10::static_intrusive_pointer_cast<const OwnerRRef>(rref)->getValue();
-
-    // If we have a PyObj, retrieve the underlying tensor.
-    if (rref->isPyObj()) {
-      py::gil_scoped_acquire gil;
-      py::object obj = torch::jit::toPyObject(value);
-      try {
-        value = torch::jit::toIValue(obj, c10::TensorType::get());
-      } catch (py::cast_error& e) {
-        throw std::runtime_error(
-            "RRef should contain a tensor for .backward()");
-      }
-    }
-
-    TORCH_CHECK(
-        value.isTensor(), "RRef should contain a tensor for .backward()");
-    auto root = value.toTensor();
-
-    if (autogradContextId == -1) {
-      torch::autograd::backward({root});
-    } else {
-      torch::distributed::autograd::backward(
-          autogradContextId, {root}, retainGraph);
-    }
-
+    backwardOwnerRRef(
+        autogradContextId,
+        retainGraph,
+        c10::static_intrusive_pointer_cast<const OwnerRRef>(rref)->getValue());
   } else {
     TORCH_CHECK(
         autogradContextId != -1,

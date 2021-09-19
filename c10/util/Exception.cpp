@@ -1,11 +1,11 @@
-#include <c10/util/Exception.h>
 #include <c10/util/Backtrace.h>
-#include <c10/util/Type.h>
+#include <c10/util/Exception.h>
 #include <c10/util/Logging.h>
+#include <c10/util/Type.h>
 
 #include <iostream>
-#include <sstream>
 #include <numeric>
+#include <sstream>
 #include <string>
 
 namespace c10 {
@@ -78,12 +78,40 @@ void Error::add_context(std::string new_msg) {
 
 namespace detail {
 
-void torchCheckFail(const char *func, const char *file, uint32_t line, const std::string& msg) {
+void torchCheckFail(
+    const char* func,
+    const char* file,
+    uint32_t line,
+    const std::string& msg) {
   throw ::c10::Error({func, file, line}, msg);
 }
 
-void torchCheckFail(const char *func, const char *file, uint32_t line, const char* msg) {
+void torchCheckFail(
+    const char* func,
+    const char* file,
+    uint32_t line,
+    const char* msg) {
   throw ::c10::Error({func, file, line}, msg);
+}
+
+void torchInternalAssertFail(
+    const char* func,
+    const char* file,
+    uint32_t line,
+    const char* condMsg,
+    const char* userMsg) {
+  torchCheckFail(func, file, line, c10::str(condMsg, userMsg));
+}
+
+// This should never be called. It is provided in case of compilers
+// that don't do any dead code stripping in debug builds.
+void torchInternalAssertFail(
+    const char* func,
+    const char* file,
+    uint32_t line,
+    const char* condMsg,
+    const std::string& userMsg) {
+  torchCheckFail(func, file, line, c10::str(condMsg, userMsg));
 }
 
 } // namespace detail
@@ -91,35 +119,52 @@ void torchCheckFail(const char *func, const char *file, uint32_t line, const cha
 namespace Warning {
 
 namespace {
-  WarningHandler* getBaseHandler() {
-    static WarningHandler base_warning_handler_ = WarningHandler();
-    return &base_warning_handler_;
-  };
+WarningHandler* getBaseHandler() {
+  static WarningHandler base_warning_handler_ = WarningHandler();
+  return &base_warning_handler_;
+};
 
-  class ThreadWarningHandler {
-    public:
-      ThreadWarningHandler() = delete;
+class ThreadWarningHandler {
+ public:
+  ThreadWarningHandler() = delete;
 
-      static WarningHandler* get_handler() {
-        if (!warning_handler_) {
-          warning_handler_ = getBaseHandler();
-        }
-        return warning_handler_;
-      }
+  static WarningHandler* get_handler() {
+    if (!warning_handler_) {
+      warning_handler_ = getBaseHandler();
+    }
+    return warning_handler_;
+  }
 
-      static void set_handler(WarningHandler* handler) {
-        warning_handler_ = handler;
-      }
+  static void set_handler(WarningHandler* handler) {
+    warning_handler_ = handler;
+  }
 
-    private:
-      static thread_local WarningHandler* warning_handler_;
-  };
+ private:
+  static thread_local WarningHandler* warning_handler_;
+};
 
-  thread_local WarningHandler* ThreadWarningHandler::warning_handler_ = nullptr;
+thread_local WarningHandler* ThreadWarningHandler::warning_handler_ = nullptr;
 
+} // namespace
+
+void warn(
+    const SourceLocation& source_location,
+    const std::string& msg,
+    const bool verbatim) {
+  ThreadWarningHandler::get_handler()->process(source_location, msg, verbatim);
 }
 
-void warn(SourceLocation source_location, const std::string& msg, const bool verbatim) {
+void warn(
+    SourceLocation source_location,
+    detail::CompileTimeEmptyString msg,
+    const bool verbatim) {
+  warn(source_location, "", verbatim);
+}
+
+void warn(
+    SourceLocation source_location,
+    const char* msg,
+    const bool verbatim) {
   ThreadWarningHandler::get_handler()->process(source_location, msg, verbatim);
 }
 
@@ -134,11 +179,20 @@ WarningHandler* get_warning_handler() noexcept(true) {
 bool warn_always = false;
 
 void set_warnAlways(bool setting) noexcept(true) {
-    warn_always = setting;
+  warn_always = setting;
 }
 
 bool get_warnAlways() noexcept(true) {
-    return warn_always;
+  return warn_always;
+}
+
+WarnAlways::WarnAlways(bool setting /*=true*/)
+    : prev_setting(get_warnAlways()) {
+  set_warnAlways(setting);
+}
+
+WarnAlways::~WarnAlways() {
+  set_warnAlways(prev_setting);
 }
 
 } // namespace Warning
@@ -150,7 +204,6 @@ void WarningHandler::process(
   LOG_AT_FILE_LINE(WARNING, source_location.file, source_location.line)
       << "Warning: " << msg << " (function " << source_location.function << ")";
 }
-
 
 std::string GetExceptionString(const std::exception& e) {
 #ifdef __GXX_RTTI

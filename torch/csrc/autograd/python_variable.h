@@ -10,19 +10,19 @@
 // Python object that backs torch.autograd.Variable
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 struct THPVariable {
-    PyObject_HEAD
-    // Payload
-    torch::autograd::Variable cdata;
-    // Hooks to be run on backwards pass (corresponds to Python attr
-    // '_backwards_hooks', set by 'register_hook')
-    PyObject* backward_hooks = nullptr;
+  PyObject_HEAD;
+  // Payload
+  c10::MaybeOwned<at::Tensor> cdata;
+  // Hooks to be run on backwards pass (corresponds to Python attr
+  // '_backwards_hooks', set by 'register_hook')
+  PyObject* backward_hooks = nullptr;
 };
 
 THP_API PyObject *THPVariableClass;
 THP_API PyObject *ParameterClass;
 
 bool THPVariable_initModule(PyObject *module);
-THP_API PyObject * THPVariable_Wrap(torch::autograd::Variable var);
+THP_API PyObject * THPVariable_Wrap(at::TensorBase var);
 
 static inline bool THPVariable_CheckTypeExact(PyTypeObject* tp) {
   // Check that a python object is a `Tensor`, but not a `Tensor` subclass.
@@ -44,7 +44,12 @@ inline bool THPVariable_Check(PyObject *obj)
   return THPVariableClass && PyObject_IsInstance(obj, THPVariableClass);
 }
 
-inline torch::autograd::Variable& THPVariable_Unpack(PyObject* obj) {
-  auto var = (THPVariable*)obj;
-  return var->cdata;
+inline const at::Tensor& THPVariable_Unpack(THPVariable* var) {
+  return *var->cdata;
 }
+
+inline const at::Tensor& THPVariable_Unpack(PyObject* obj) {
+  return THPVariable_Unpack(reinterpret_cast<THPVariable*>(obj));
+}
+
+THP_API c10::impl::PyInterpreter* getPyInterpreter();

@@ -20,7 +20,7 @@ SET(BLAS_INCLUDE_DIR)
 SET(BLAS_INFO)
 SET(BLAS_F2C)
 
-SET(WITH_BLAS "" CACHE STRING "Blas type [mkl/open/goto/acml/atlas/accelerate/veclib/generic]")
+SET(WITH_BLAS "" CACHE STRING "Blas type [accelerate/acml/atlas/blis/generic/goto/mkl/open/veclib]")
 
 # Old FindBlas
 INCLUDE(CheckCSourceRuns)
@@ -67,7 +67,7 @@ MACRO(Check_Fortran_Libraries LIBRARIES _prefix _name _flags _list)
       else ( APPLE )
         find_library(${_prefix}_${_library}_LIBRARY
           NAMES ${_library}
-          PATHS /usr/local/lib /usr/lib /usr/local/lib64 /usr/lib64 /opt/OpenBLAS/lib /usr/lib/aarch64-linux-gnu
+          PATHS /usr/local/lib /usr/lib /usr/local/lib64 /usr/lib64 /opt/OpenBLAS/lib /usr/lib/aarch64-linux-gnu ${CMAKE_C_IMPLICIT_LINK_DIRECTORIES}
           ENV LD_LIBRARY_PATH )
       endif( APPLE )
       mark_as_advanced(${_prefix}_${_library}_LIBRARY)
@@ -105,6 +105,20 @@ if((NOT BLAS_LIBRARIES)
   ENDIF(MKL_FOUND)
 endif()
 
+#BLIS?
+if((NOT BLAS_LIBRARIES)
+    AND ((NOT WITH_BLAS) OR (WITH_BLAS STREQUAL "blis")))
+  check_fortran_libraries(
+  BLAS_LIBRARIES
+  BLAS
+  sgemm
+  ""
+  "blis")
+  if(BLAS_LIBRARIES)
+    set(BLAS_INFO "blis")
+  endif(BLAS_LIBRARIES)
+endif()
+
 # Apple BLAS library?
 if((NOT BLAS_LIBRARIES)
     AND ((NOT WITH_BLAS) OR (WITH_BLAS STREQUAL "accelerate")))
@@ -140,23 +154,15 @@ endif()
 
 if((NOT BLAS_LIBRARIES)
     AND ((NOT WITH_BLAS) OR (WITH_BLAS STREQUAL "open")))
-  FIND_PACKAGE(OpenBLAS)
-  if(OpenBLAS_FOUND)
-    SET(BLAS_INFO "open")
-    SET(BLAS_LIBRARIES ${OpenBLAS_LIB})
-    SET(BLAS_INCLUDE_DIR ${OpenBLAS_INCLUDE_DIR})
-    SET(BLAS_VERSION ${OpenBLAS_VERSION})
-  else()
-    check_fortran_libraries(
-    BLAS_LIBRARIES
-    BLAS
-    sgemm
-    ""
-    "openblas")
-    if(BLAS_LIBRARIES)
-      set(BLAS_INFO "open")
-    endif(BLAS_LIBRARIES)
-  endif()
+  check_fortran_libraries(
+  BLAS_LIBRARIES
+  BLAS
+  sgemm
+  ""
+  "openblas")
+  if(BLAS_LIBRARIES)
+    set(BLAS_INFO "open")
+  endif(BLAS_LIBRARIES)
 endif()
 
 if((NOT BLAS_LIBRARIES)
@@ -167,6 +173,19 @@ if((NOT BLAS_LIBRARIES)
   sgemm
   ""
   "openblas;pthread;m")
+  if(BLAS_LIBRARIES)
+    set(BLAS_INFO "open")
+  endif(BLAS_LIBRARIES)
+endif()
+
+if((NOT BLAS_LIBRARIES)
+    AND ((NOT WITH_BLAS) OR (WITH_BLAS STREQUAL "open")))
+  check_fortran_libraries(
+  BLAS_LIBRARIES
+  BLAS
+  sgemm
+  ""
+  "openblas;pthread;m;gomp")
   if(BLAS_LIBRARIES)
     set(BLAS_INFO "open")
   endif(BLAS_LIBRARIES)
@@ -273,56 +292,79 @@ endif()
 
 # Determine if blas was compiled with the f2c conventions
 IF (BLAS_LIBRARIES)
-  SET(CMAKE_REQUIRED_LIBRARIES ${BLAS_LIBRARIES})
-  CHECK_C_SOURCE_RUNS("
-#include <stdlib.h>
-#include <stdio.h>
-float x[4] = { 1, 2, 3, 4 };
-float y[4] = { .1, .01, .001, .0001 };
-int four = 4;
-int one = 1;
-extern double sdot_();
-int main() {
-  int i;
-  double r = sdot_(&four, x, &one, y, &one);
-  exit((float)r != (float).1234);
-}" BLAS_F2C_DOUBLE_WORKS )
-  CHECK_C_SOURCE_RUNS("
-#include <stdlib.h>
-#include <stdio.h>
-float x[4] = { 1, 2, 3, 4 };
-float y[4] = { .1, .01, .001, .0001 };
-int four = 4;
-int one = 1;
-extern float sdot_();
-int main() {
-  int i;
-  double r = sdot_(&four, x, &one, y, &one);
-  exit((float)r != (float).1234);
-}" BLAS_F2C_FLOAT_WORKS )
-  IF (BLAS_F2C_DOUBLE_WORKS AND NOT BLAS_F2C_FLOAT_WORKS)
-    MESSAGE(STATUS "This BLAS uses the F2C return conventions")
-    SET(BLAS_F2C TRUE)
-  ELSE (BLAS_F2C_DOUBLE_WORKS AND NOT BLAS_F2C_FLOAT_WORKS)
-    SET(BLAS_F2C FALSE)
-  ENDIF(BLAS_F2C_DOUBLE_WORKS AND NOT BLAS_F2C_FLOAT_WORKS)
-  CHECK_C_SOURCE_RUNS("
-#include <stdlib.h>
-#include <stdio.h>
-float x[4] = { 1, 2, 3, 4 };
-float y[4] = { .1, .01, .001, .0001 };
-extern float cblas_sdot();
-int main() {
-  int i;
-  double r = cblas_sdot(4, x, 1, y, 1);
-  exit((float)r != (float).1234);
-}" BLAS_USE_CBLAS_DOT )
-  IF (BLAS_USE_CBLAS_DOT)
-    SET(BLAS_USE_CBLAS_DOT TRUE)
-  ELSE (BLAS_USE_CBLAS_DOT)
-    SET(BLAS_USE_CBLAS_DOT FALSE)
-  ENDIF(BLAS_USE_CBLAS_DOT)
-  SET(CMAKE_REQUIRED_LIBRARIES)
+   # Push host architecture when cross-compiling otherwise check would fail
+   # when cross-compiling for arm64 on x86_64
+   cmake_push_check_state(RESET)
+  if(CMAKE_SYSTEM_NAME STREQUAL "Darwin" AND CMAKE_OSX_ARCHITECTURES MATCHES "^(x86_64|arm64)$")
+    list(APPEND CMAKE_REQUIRED_FLAGS "-arch ${CMAKE_HOST_SYSTEM_PROCESSOR}")
+  endif()
+
+# Set values through env variables if cross compiling
+  IF (CMAKE_CROSSCOMPILING)
+    IF("$ENV{PYTORCH_BLAS_F2C}" STREQUAL "ON")
+      SET(BLAS_F2C TRUE)
+    ELSE()
+      SET(BLAS_F2C FALSE)
+    ENDIF()
+
+    IF("$ENV{PYTORCH_BLAS_USE_CBLAS_DOT}" STREQUAL "ON")
+      SET(BLAS_USE_CBLAS_DOT TRUE)
+    ELSE()
+      SET(BLAS_USE_CBLAS_DOT FALSE)
+    ENDIF()
+  ELSE ()
+    SET(CMAKE_REQUIRED_LIBRARIES ${BLAS_LIBRARIES})
+    CHECK_C_SOURCE_RUNS("
+  #include <stdlib.h>
+  #include <stdio.h>
+  float x[4] = { 1, 2, 3, 4 };
+  float y[4] = { .1, .01, .001, .0001 };
+  int four = 4;
+  int one = 1;
+  extern double sdot_();
+  int main() {
+    int i;
+    double r = sdot_(&four, x, &one, y, &one);
+    exit((float)r != (float).1234);
+  }" BLAS_F2C_DOUBLE_WORKS )
+    CHECK_C_SOURCE_RUNS("
+  #include <stdlib.h>
+  #include <stdio.h>
+  float x[4] = { 1, 2, 3, 4 };
+  float y[4] = { .1, .01, .001, .0001 };
+  int four = 4;
+  int one = 1;
+  extern float sdot_();
+  int main() {
+    int i;
+    double r = sdot_(&four, x, &one, y, &one);
+    exit((float)r != (float).1234);
+  }" BLAS_F2C_FLOAT_WORKS )
+    IF (BLAS_F2C_DOUBLE_WORKS AND NOT BLAS_F2C_FLOAT_WORKS)
+      MESSAGE(STATUS "This BLAS uses the F2C return conventions")
+      SET(BLAS_F2C TRUE)
+    ELSE (BLAS_F2C_DOUBLE_WORKS AND NOT BLAS_F2C_FLOAT_WORKS)
+      SET(BLAS_F2C FALSE)
+    ENDIF(BLAS_F2C_DOUBLE_WORKS AND NOT BLAS_F2C_FLOAT_WORKS)
+    CHECK_C_SOURCE_RUNS("
+  #include <stdlib.h>
+  #include <stdio.h>
+  float x[4] = { 1, 2, 3, 4 };
+  float y[4] = { .1, .01, .001, .0001 };
+  extern float cblas_sdot();
+  int main() {
+    int i;
+    double r = cblas_sdot(4, x, 1, y, 1);
+    exit((float)r != (float).1234);
+  }" BLAS_USE_CBLAS_DOT )
+    IF (BLAS_USE_CBLAS_DOT)
+      SET(BLAS_USE_CBLAS_DOT TRUE)
+    ELSE (BLAS_USE_CBLAS_DOT)
+      SET(BLAS_USE_CBLAS_DOT FALSE)
+    ENDIF(BLAS_USE_CBLAS_DOT)
+    SET(CMAKE_REQUIRED_LIBRARIES)
+  ENDIF(CMAKE_CROSSCOMPILING)
+  cmake_pop_check_state()
 ENDIF(BLAS_LIBRARIES)
 
 # epilogue

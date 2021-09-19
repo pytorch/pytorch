@@ -2,6 +2,7 @@
 #include <ATen/Config.h>
 #include <ATen/cuda/CUDAConfig.h>
 #include <ATen/cuda/CUDAEvent.h>
+#include <ATen/cuda/CUDAGraphsUtils.cuh>
 #include <ATen/cuda/Exceptions.h>
 #include <ATen/InitialTensorOptions.h>
 #include <ATen/MatrixRef.h>
@@ -29,30 +30,33 @@ Tensor _cudnn_rnn_flatten_weight(
 
 std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
     const Tensor& input_r,
-    TensorList weight, int64_t weight_stride0,
-    const Tensor& weight_buf_r, const Tensor& hx, const Tensor& cx,
+    TensorList weight, int64_t weight_stride0, const c10::optional<Tensor>& weight_buf_r_opt, const Tensor& hx, const c10::optional<Tensor>& cx_opt,
     int64_t fn_mode, int64_t fn_hidden_size, int64_t fn_proj_size,
     int64_t fn_num_layers, bool batch_first, double fn_dropout,
-    bool fn_train, bool fn_bidirectional, IntArrayRef fn_batch_sizes,
-    const Tensor& fn_dropout_state
+    bool fn_train, bool fn_bidirectional, IntArrayRef fn_batch_sizes, const c10::optional<Tensor>& fn_dropout_state_opt
     ) {
   AT_ERROR("_cudnn_rnn: ATen not compiled with cuDNN support");
 }
 
 std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> _cudnn_rnn_backward(
-    const Tensor& input, TensorList weight, int64_t weight_stride0, const Tensor& weight_buf, const Tensor& hx, const Tensor& cx,
-    const Tensor& output, const Tensor& grad_output_r, const Tensor& grad_hy_r,
-    const Tensor& grad_cy_r,
+    const Tensor& input, TensorList weight, int64_t weight_stride0, const Tensor& weight_buf, const Tensor& hx, const c10::optional<Tensor>& cx_opt,
+    const Tensor& output, const c10::optional<Tensor>& grad_output_r_opt, const c10::optional<Tensor>& grad_hy_r_opt, const c10::optional<Tensor>& grad_cy_r_opt,
     int64_t mode, int64_t hidden_size, int64_t proj_size,
     int64_t num_layers, bool batch_first, double dropout,
-    bool train, bool bidirectional, IntArrayRef batch_sizes,
-    const Tensor& dropout_state, const Tensor& reserve,
+    bool train, bool bidirectional, IntArrayRef batch_sizes, const c10::optional<Tensor>& dropout_state_opt, const Tensor& reserve,
     std::array<bool, 4> output_mask
     ) {
   AT_ERROR("_cudnn_rnn_backward: ATen not compiled with cuDNN support");
 }
 
-Tensor _cudnn_init_dropout_state(double dropout, bool train, int64_t dropout_seed, const TensorOptions& options) {
+Tensor _cudnn_init_dropout_state(double dropout, bool train, int64_t dropout_seed,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory) {
+  // See [Note: hacky wrapper removal for TensorOptions]
+  TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
+
   AT_ERROR("_cudnn_init_dropout_state: ATen not compiled with cuDNN support");
 }
 
@@ -722,7 +726,8 @@ namespace {
                 (tensors.seq_length >=20 && bsize <=96) ||
                 (tensors.seq_length >=10 && bsize <=32));
       }
-    } else if (prop->major >= 8) {
+    } else if (prop->major >= 8 && prop->multiProcessorCount >= 98) {
+      // SM count check excludes A30 (similar issue to A40)
       if (prop->minor == 6) {
         // Excludes sm_86 GPU devices from using persistent rnn.
         // This is because there are some edge cases that will throw exceptions with cudnn 8.0.5 on Nvidia A40 GPU.
@@ -902,13 +907,17 @@ const char * WEIGHT_FORMAT_WARN = "RNN module weights are not part of single con
 // NB: when fn_batch_sizes is empty, that means no batch sizes was specified
 std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
     const Tensor& input_r,
-    TensorList weight, int64_t weight_stride0,
-    const Tensor& weight_buf_r, const Tensor& hx, const Tensor& cx,
+    TensorList weight, int64_t weight_stride0, const c10::optional<Tensor>& weight_buf_r_opt, const Tensor& hx, const c10::optional<Tensor>& cx_opt,
     int64_t fn_mode, int64_t fn_hidden_size, int64_t fn_proj_size,
     int64_t fn_num_layers, bool batch_first, double fn_dropout,
-    bool fn_train, bool fn_bidirectional, IntArrayRef fn_batch_sizes,
-    const Tensor& fn_dropout_state
+    bool fn_train, bool fn_bidirectional, IntArrayRef fn_batch_sizes, const c10::optional<Tensor>& fn_dropout_state_opt
     ) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  c10::MaybeOwned<Tensor> weight_buf_r_maybe_owned = at::borrow_from_optional_tensor(weight_buf_r_opt);
+  const Tensor& weight_buf_r = *weight_buf_r_maybe_owned;
+  const Tensor& cx = c10::value_or_else(cx_opt, [] {return Tensor();});
+  const Tensor& fn_dropout_state = c10::value_or_else(fn_dropout_state_opt, [] {return Tensor();});
+
   check_attributes(input_r, weight, {hx, cx}, /*check_dtype=*/true);
   auto input = input_r;
   auto weight_buf = weight_buf_r;
@@ -1277,15 +1286,21 @@ std::vector<Tensor> _cudnn_rnn_backward_weight(
 // We need this dispatcher because _cudnn_rnn_backward_weight has a stringent
 // ordering requirement with _cudnn_rnn_backward_input
 std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> _cudnn_rnn_backward(
-    const Tensor& input, TensorList weight, int64_t weight_stride0, const Tensor& weight_buf, const Tensor& hx, const Tensor& cx,
-    const Tensor& output, const Tensor& grad_output_r, const Tensor& grad_hy_r,
-    const Tensor& grad_cy_r,
+    const Tensor& input, TensorList weight, int64_t weight_stride0, const Tensor& weight_buf, const Tensor& hx, const c10::optional<Tensor>& cx_opt,
+    const Tensor& output, const c10::optional<Tensor>& grad_output_r_opt, const c10::optional<Tensor>& grad_hy_r_opt, const c10::optional<Tensor>& grad_cy_r_opt,
     int64_t mode, int64_t hidden_size, int64_t proj_size,
     int64_t num_layers, bool batch_first, double dropout,
-    bool train, bool bidirectional, IntArrayRef batch_sizes,
-    const Tensor& dropout_state, const Tensor& reserve,
+    bool train, bool bidirectional, IntArrayRef batch_sizes, const c10::optional<Tensor>& dropout_state_opt, const Tensor& reserve,
     std::array<bool, 4> output_mask
     ) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  c10::MaybeOwned<Tensor> cx_maybe_owned = at::borrow_from_optional_tensor(cx_opt);
+  const Tensor& cx = *cx_maybe_owned;
+  const Tensor& grad_output_r = c10::value_or_else(grad_output_r_opt, [] {return Tensor();});
+  const Tensor& grad_hy_r = c10::value_or_else(grad_hy_r_opt, [] {return Tensor();});
+  const Tensor& grad_cy_r = c10::value_or_else(grad_cy_r_opt, [] {return Tensor();});
+  const Tensor& dropout_state = c10::value_or_else(dropout_state_opt, [] {return Tensor();});
+
   if (!grad_output_r.defined() && !grad_hy_r.defined() && !grad_cy_r.defined()) {
     return std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>>(Tensor(), Tensor(), Tensor(), std::vector<Tensor>(weight.size()));
   }
@@ -1313,7 +1328,14 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> _cudnn_rnn_backward(
 // as input.  The codegen currently assumes that ALL factory functions
 // take TensorOptions, so it's just a lot easier for this function to
 // be bound if it also does it.
-Tensor _cudnn_init_dropout_state(double dropout, bool train, int64_t dropout_seed, const TensorOptions& options) {
+Tensor _cudnn_init_dropout_state(double dropout, bool train, int64_t dropout_seed,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory) {
+  // See [Note: hacky wrapper removal for TensorOptions]
+  TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
+
   auto handle = getCudnnHandle();
   DropoutDescriptor dropout_desc;
   auto dropout_p = train ? dropout : 0;
@@ -1353,6 +1375,30 @@ std::tuple<Tensor, Tensor> pack_hidden<std::tuple<Tensor, Tensor>>(const Tensor&
   return std::make_tuple(hx, cx);
 }
 
+/**
+ * Note [DropoutState and CUDA graph capture]
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ * (1) Telling a capturing stream to wait on an event recorded in a non-capturing stream is an error.
+ * (2) Telling a non-capturing stream to wait on an event recorded during capture is also an error.
+ *
+ * So DropoutState's usage syncs could error if an RNN with dropout is called in an uncaptured region
+ * then called in a captured region (triggering 1), or called in a captured region then called
+ # in an uncaptured region (triggering 2).
+ *
+ * To prevent 1 and 2, lock() only syncs on the last usage event if it was recorded in the same
+ * capture state as the current state (which also means the same graph, if capture is in progress).
+ *
+ * The solution should be safe as long as capture obeys the following restrictions:
+ *  - Only one capture may be underway at a time in a given process.
+ *  - While a capture is underway, no calls to eager ops on noncapturing streams (on any thread)
+ *    may interleave with the captured ops.
+ *
+ * TODO: As people experiment with capture, keep an eye out for use cases that might need to
+ * relax those restrictions.
+ *
+ * See https://github.com/pytorch/pytorch/pull/56433 for more discussion.
+ */
+
 struct DropoutState {
   // Both buffer and event are lazily instantiated when a dropout state is needed
   // for the first time. Note that in this case needed != used, as we don't need
@@ -1360,6 +1406,12 @@ struct DropoutState {
   at::Tensor buffer;
   c10::optional<cuda::CUDAEvent> event;
   std::mutex mutex;
+#if CUDA_VERSION >= 11000
+  // cudaStreamGetCaptureInfo will never give back a capture id of 0, so 0 can serve
+  // as a sentinel value that capture was not underway.
+  cuda::CaptureId_t capture_id_last_lock = 0;
+  cuda::CaptureId_t capture_id_last_unlock = 0;
+#endif
 
   // Every time we use a dropout state, we need to synchronize with its event,
   // to make sure all previous uses finish running before this one starts. Once
@@ -1372,13 +1424,38 @@ struct DropoutState {
     // could then define it before we get to unlock().
     mutex.lock();
     if (event) {
+#if CUDA_VERSION >= 11000
+      // See Note [DropoutState and CUDA graph capture]
+      cudaStreamCaptureStatus status;
+      AT_CUDA_CHECK(cudaStreamGetCaptureInfo(cuda::getCurrentCUDAStream(),
+                                             &status,
+                                             &capture_id_last_lock));
+      if (status == cudaStreamCaptureStatus::cudaStreamCaptureStatusNone) {
+        capture_id_last_lock = 0;
+      }
+      if (capture_id_last_lock == capture_id_last_unlock) {
+        event->block(cuda::getCurrentCUDAStream());
+      }
+#else
       event->block(cuda::getCurrentCUDAStream());
+#endif
     }
   }
 
   void unlock() {
     if (event) {
       event->record();
+#if CUDA_VERSION >= 11000
+      // See Note [DropoutState and CUDA graph capture]
+      cudaStreamCaptureStatus status;
+      AT_CUDA_CHECK(cudaStreamGetCaptureInfo(cuda::getCurrentCUDAStream(),
+                                             &status,
+                                             &capture_id_last_unlock));
+      if (status == cudaStreamCaptureStatus::cudaStreamCaptureStatusNone) {
+        capture_id_last_unlock = 0;
+      }
+      TORCH_INTERNAL_ASSERT(capture_id_last_unlock == capture_id_last_lock);
+#endif
     }
     mutex.unlock();
   }
@@ -1389,7 +1466,9 @@ DropoutState& get_dropout_state(double dropout_p, bool train, TensorOptions opti
   static std::vector<DropoutState> dropout_state_cache { static_cast<size_t>(cuda::getNumGPUs()) };
   static std::mutex state_cache_mut;
 
-  int device = cuda::current_device();
+  AT_ASSERT(options.device().is_cuda());
+  int device = options.device().index();
+
   std::unique_lock<std::mutex> lock {state_cache_mut};
   auto& state = dropout_state_cache.at(device);
   if (train && dropout_p > 0 && !state.buffer.defined()) {

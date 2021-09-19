@@ -18,6 +18,7 @@
 #include <ATen/record_function.h>
 #include <c10/core/Allocator.h>
 #include <c10/util/ThreadLocalDebugInfo.h>
+#include <c10/util/irange.h>
 
 #include <iostream>
 
@@ -153,6 +154,10 @@ inline const CUDAStubs*& cuda_stubs() {
 }
 }
 
+const CUDAStubs* cudaStubs() {
+  return cuda_stubs();
+}
+
 // Profiler state
 const ProfilerConfig& ProfilerThreadLocalState::config() const {
   return config_;
@@ -206,14 +211,13 @@ void ProfilerThreadLocalState::setOrAddRemoteProfiledEvents(
 void ProfilerThreadLocalState::pushRange(
     const at::RecordFunction& fn,
     const bool record_cuda,
-    const char* msg,
     std::vector<std::vector<int64_t>>&& shapes) {
   if (config_.state == ProfilerState::Disabled) {
     return;
   }
   if (config_.state == ProfilerState::NVTX) {
     cuda_stubs()->nvtxRangePushA(getNvtxStr(
-        fn.name(), msg, fn.seqNr(), shapes).c_str());
+        fn.name(), fn.seqNr(), shapes).c_str());
   } else {
     LegacyEvent evt(
         EventKind::PushRange,
@@ -222,7 +226,8 @@ void ProfilerThreadLocalState::pushRange(
         record_cuda,
         fn.handle(),
         std::move(shapes),
-        at::RecordFunction::getDefaultNodeId());
+        at::RecordFunction::getDefaultNodeId(),
+        fn.isAsync());
     evt.setSequenceNr(fn.seqNr());
     evt.setFwdThreadId(fn.forwardThreadId());
     evt.setScope((uint8_t)fn.scope());
@@ -230,7 +235,9 @@ void ProfilerThreadLocalState::pushRange(
       evt.setExtraArgs(saveExtraArgs(fn));
       evt.setFlops(computeFlops(std::string(fn.name().str()), evt.extraArgs()));
     }
-#ifndef C10_MOBILE
+
+// TODO: will unify the two macros BUILD_LITE_INTERPRETER and C10_MOBILE soon.
+#if !defined BUILD_LITE_INTERPRETER && !defined C10_MOBILE
     // backward nodes source range corresponds to the forward node
     // TODO: consider using C++ stack trace
     if (config_.with_stack && fn.scope() != at::RecordScope::BACKWARD_FUNCTION) {
@@ -270,6 +277,8 @@ void ProfilerThreadLocalState::popRange(const at::RecordFunction& fn, const bool
 void ProfilerThreadLocalState::reportMemoryUsage(
     void* /* unused */,
     int64_t alloc_size,
+    int64_t /* total_allocated, unused for legacy */,
+    int64_t /* total_reserved, unused for legacy */,
     c10::Device device) {
   if (config_.profile_memory && config_.state != ProfilerState::Disabled) {
     uint64_t thread_id = at::RecordFunction::currentThreadId();
@@ -287,26 +296,29 @@ bool ProfilerThreadLocalState::memoryProfilingEnabled() const {
   return config_.profile_memory;
 }
 
-std::string ProfilerThreadLocalState::getNvtxStr(
+std::string getNvtxStr(
     const at::StringView& name,
-    const char* msg,
     int64_t sequence_nr,
-    const std::vector<std::vector<int64_t>>& shapes) const {
-  if (sequence_nr >= 0 || shapes.size() > 0) {
+    const std::vector<std::vector<int64_t>>& shapes) {
+  if (sequence_nr >= -1 || shapes.size() > 0) {
     std::stringstream s;
 #ifdef __HIP_PLATFORM_HCC__
     s << name.str();
 #endif
     if (sequence_nr >= 0) {
 #ifdef __HIP_PLATFORM_HCC__
-      s << msg << sequence_nr;
+      s << ", seq = " << sequence_nr;
 #else
-      s << name.str() << msg << sequence_nr;
+      s << name.str() << ", seq = " << sequence_nr;
+#endif
+    } else if (sequence_nr == -1) {
+#ifndef __HIP_PLATFORM_HCC__
+      s << name.str();
 #endif
     }
     if (shapes.size() > 0) {
       s << ", sizes = [";
-      for (size_t idx = 0; idx < shapes.size(); ++idx) {
+      for (const auto idx : c10::irange(shapes.size())) {
         if (shapes[idx].size() > 0) {
           s << "[";
           for (size_t dim = 0; dim < shapes[idx].size(); ++dim) {
@@ -429,12 +441,11 @@ void pushProfilingCallbacksLegacy() {
           record_cuda = false;
         }
 
-        auto* msg = (fn.seqNr() >= 0) ? ", seq = " : "";
         if (state_ptr->config().report_input_shapes) {
           auto sizes = inputSizes(fn);
-          state_ptr->pushRange(fn, record_cuda, msg, std::move(sizes));
+          state_ptr->pushRange(fn, record_cuda, std::move(sizes));
         } else {
-          state_ptr->pushRange(fn, record_cuda, msg);
+          state_ptr->pushRange(fn, record_cuda);
         }
 
         return nullptr;
@@ -455,8 +466,6 @@ void pushProfilingCallbacksLegacy() {
     .needsIds(true));
   state_ptr->setCallbackHandle(handle);
 }
-
-const int kCUDAWarmupStart = 5;
 
 } // namespace
 
@@ -517,23 +526,6 @@ void enableProfilerLegacy(const ProfilerConfig& new_config) {
 
   pushProfilingCallbacksLegacy();
 
-  if (new_config.state == ProfilerState::CUDA) {
-    // event recording appears to have some startup overhead, so we need to
-    // to generate some dummy events first before recording synchronization events
-    for (int idx = 0; idx < kCUDAWarmupStart; ++idx) {
-      cuda_stubs()->onEachDevice([state](int /* unused */) {
-          state->mark("__cuda_startup");
-          cuda_stubs()->synchronize();
-      });
-    }
-
-    // cuda events must be on the same device, so we need a start event recorded
-    // for each gpu. we then use this event to synchronize time on the GPU
-    // with the CPU clock.
-    cuda_stubs()->onEachDevice([state](int d) {
-        state->mark("__cuda_start_event");
-    });
-  }
   state->mark("__start_profile", false);
 }
 
@@ -560,7 +552,7 @@ thread_event_lists disableProfilerLegacy(c10::optional<ProfilerDisableOptions> p
     return thread_event_lists();
   }
 
-  state_ptr->mark("__stop_profile");
+  state_ptr->mark("__stop_profile", false);
   // Note that this will erase the underlying events.
   return state_ptr->consolidate();
 }
@@ -600,7 +592,7 @@ void LegacyEvent::record(bool record_cuda) {
   auto shapeList = shapeListIValue.toList();
   std::vector<std::vector<int64_t>> shapes;
   shapes.reserve(shapeList.size());
-  for (size_t i = 0 ; i < shapeList.size(); ++i) {
+  for (const auto i : c10::irange(shapeList.size())) {
     std::vector<int64_t> s;
     auto shapeIValue = shapeList.get(i);
     TORCH_INTERNAL_ASSERT(
@@ -608,7 +600,7 @@ void LegacyEvent::record(bool record_cuda) {
         "Expected each profiler shape element to contain shapes of type c10::impl::GenericList.")
     auto curShapesList = shapeIValue.toList();
     s.reserve(curShapesList.size());
-    for (size_t j = 0; j < curShapesList.size(); ++j) {
+    for (const auto j : c10::irange(curShapesList.size())) {
       s.emplace_back(curShapesList.get(j).toInt());
     }
     shapes.emplace_back(s);

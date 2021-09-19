@@ -44,10 +44,15 @@ struct TORCH_API TracingState
   TracingState();
   ~TracingState();
 
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::shared_ptr<Graph> graph;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   bool warn = true;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   bool strict = true;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   bool force_outplace = false;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::function<std::string(const Variable& var)> lookup_var_name_fn =
       [](const Variable& var) { return ""; };
 
@@ -92,6 +97,7 @@ struct TORCH_API TracingState
 // data dependencies, but once they get to the ATen call where we actually have
 // the tracing logic, they get converted into a raw IntArrayRef, and we loose
 // all information. To prevent this, we temporarily stash it in here.
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 struct ArgumentStash {
   struct IntArrayRefTrace : std::vector<Value*> {
     IntArrayRefTrace(int size) : std::vector<Value*>(size, nullptr) {}
@@ -167,6 +173,7 @@ inline void warn(const char* _reason, const char* _kind = nullptr) {
 TORCH_API void setWarn(warn_fn_type fn);
 
 struct TORCH_API NoWarn {
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   NoWarn() : state(getTracingState()) {
     if (state) {
       prev = state->warn;
@@ -270,11 +277,14 @@ TORCH_API void addInputs(
     Node* n,
     const char* name,
     const c10::optional<ArrayRef<double>>& value);
-TORCH_API void addInputs(Node* n, const char* name, const std::string& value);
 TORCH_API void addInputs(
     Node* n,
     const char* name,
-    const c10::optional<std::string>& value);
+    const c10::string_view value);
+TORCH_API void addInputs(
+    Node* n,
+    const char* name,
+    const c10::optional<c10::string_view>& value);
 TORCH_API void addInputs(Node* n, const char* name, at::Device value);
 TORCH_API void addInputs(Node* n, const char* name, c10::Stream stream);
 TORCH_API void addInputs(Node* n, const char* name, at::Layout value);

@@ -6,7 +6,8 @@
 namespace c10 {
 
 /**
- * quint4x2 is for un-signed 4 bit quantized Tensors that are packed to byte boundary.
+ * quint4x2 is for un-signed 4 bit quantized Tensors that are packed to byte
+ * boundary.
  */
 struct alignas(1) quint4x2 {
   using underlying = uint8_t;

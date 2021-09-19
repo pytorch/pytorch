@@ -23,26 +23,31 @@ DEFINE_DISPATCH(dequantize_tensor_per_tensor_affine_sub_byte_stub);
 namespace {
 
 void checkRoundingMode(const std::string& fn_name) {
-// Disabling this warning message for now as it is printed incorrectly. Need to fix
+  // Disabling this warning message for now as it is printed incorrectly. Need
+  // to fix
 
-/*  TORCH_WARN_ONCE(
-      std::fegetround() != FE_TONEAREST,
-      fn_name,
-      " current rounding mode is not set to round-to-nearest-ties-to-even (FE_TONEAREST). This will cause accuracy issues in quantized models.");
-*/
+  /*  TORCH_WARN_ONCE(
+        std::fegetround() != FE_TONEAREST,
+        fn_name,
+        " current rounding mode is not set to round-to-nearest-ties-to-even
+     (FE_TONEAREST). This will cause accuracy issues in quantized models.");
+  */
   return;
 }
 
-void checkCPUTensor(const std::string& fn_name, Tensor t) {
+void checkCPUTensor(const std::string& fn_name, const Tensor& t) {
   TORCH_CHECK(
       t.device().type() == kCPU, fn_name, " only supports CPU device type.");
 }
 
-void checkFloatTensor(const std::string& fn_name, Tensor t) {
+void checkFloatTensor(const std::string& fn_name, const Tensor& t) {
   TORCH_CHECK(t.scalar_type() == kFloat, fn_name, " expects a Float Tensor.");
 }
 
-void checkSameDevice(const std::string& fn_name, Tensor t1, Tensor t2) {
+void checkSameDevice(
+    const std::string& fn_name,
+    const Tensor& t1,
+    const Tensor& t2) {
   TORCH_CHECK(
       t1.device() == t2.device(),
       fn_name,
@@ -50,7 +55,7 @@ void checkSameDevice(const std::string& fn_name, Tensor t1, Tensor t2) {
 }
 
 template <typename T>
-void checkQuantizedTensor(const std::string& fn_name, Tensor t) {
+void checkQuantizedTensor(const std::string& fn_name, const Tensor& t) {
   TORCH_CHECK(t.is_quantized(), fn_name, " expects a quantized Tensor.");
   TORCH_CHECK(
       t.scalar_type() == caffe2::TypeMeta::Make<T>(),
@@ -68,24 +73,27 @@ void checkZeroPoint(const std::string& fn_name, int64_t zero_point) {
       fn_name,
       " zero_point ",
       zero_point,
-      " is out of range.");
+      " is above upper bound.");
   TORCH_CHECK(
       zero_point >= std::numeric_limits<T>::min(),
       fn_name,
       " zero_point ",
       zero_point,
-      " is out of range.");
+      " is below lower bound.");
 }
 
 template <typename T>
-void checkZeroPoints(const std::string& fn_name, Tensor zero_points) {
+void checkZeroPoints(const std::string& fn_name, const Tensor& zero_points) {
   auto zero_points_data = zero_points.data_ptr<int64_t>();
-  for (size_t i = 0; i < zero_points.numel(); ++i) {
+  for (const auto i : c10::irange(zero_points.numel())) {
     checkZeroPoint<T>(fn_name, zero_points_data[i]);
   }
 }
 
-void checkSameSize(const std::string& fn_name, Tensor qt, Tensor rt) {
+void checkSameSize(
+    const std::string& fn_name,
+    const Tensor& qt,
+    const Tensor& rt) {
   TORCH_CHECK(
       qt.sizes().equals(rt.sizes()),
       fn_name,
@@ -94,18 +102,19 @@ void checkSameSize(const std::string& fn_name, Tensor qt, Tensor rt) {
 
 } // anonymous namespace
 
-Tensor quantize_tensor_per_tensor_affine(
-    Tensor rtensor,
-    Tensor qtensor,
+Tensor& quantize_tensor_per_tensor_affine(
+    const Tensor& rtensor,
+    Tensor& qtensor,
     double scale,
     int64_t zero_point) {
-  static const auto fn_name = "quantize_tensor_per_tensor_affine";
+  static constexpr auto fn_name = "quantize_tensor_per_tensor_affine";
 
   checkRoundingMode(fn_name);
   checkFloatTensor(fn_name, rtensor);
   checkSameDevice(fn_name, rtensor, qtensor);
   checkSameSize(fn_name, qtensor, rtensor);
 
+  // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
   AT_DISPATCH_QINT_AND_SUB_BYTE_TYPES(qtensor.scalar_type(), fn_name, [&]() {
     checkQuantizedTensor<scalar_t>(fn_name, qtensor);
     checkZeroPoint<underlying_t>(fn_name, zero_point);
@@ -115,38 +124,41 @@ Tensor quantize_tensor_per_tensor_affine(
   // Can move this into the fbgemm::Quantize op.
   if (qtensor.scalar_type() == at::ScalarType::QUInt4x2) {
     quantize_tensor_per_tensor_affine_sub_byte_stub(
-      rtensor.device().type(), rtensor, qtensor, scale, zero_point);
-  }
-  else {
+        rtensor.device().type(), rtensor, qtensor, scale, zero_point);
+  } else {
     quantize_tensor_per_tensor_affine_stub(
-      rtensor.device().type(), rtensor, qtensor, scale, zero_point);
+        rtensor.device().type(), rtensor, qtensor, scale, zero_point);
   }
   return qtensor;
 }
 
-Tensor quantize_tensor_per_channel_affine(
-    Tensor rtensor,
-    Tensor qtensor,
+Tensor& quantize_tensor_per_channel_affine(
+    const Tensor& rtensor,
+    Tensor& qtensor,
     Tensor scales,
     Tensor zero_points,
     int64_t axis) {
-  static const auto fn_name = "quantize_tensor_per_channel_affine";
+  static constexpr auto fn_name = "quantize_tensor_per_channel_affine";
 
   checkRoundingMode(fn_name);
   checkFloatTensor(fn_name, rtensor);
-  checkCPUTensor(fn_name, rtensor);
   checkSameDevice(fn_name, rtensor, qtensor);
   checkSameSize(fn_name, qtensor, rtensor);
 
   AT_DISPATCH_QINT_TYPES(qtensor.scalar_type(), fn_name, [&]() {
     checkQuantizedTensor<scalar_t>(fn_name, qtensor);
-    checkZeroPoints<underlying_t>(fn_name, zero_points);
+    if(qtensor.device().type() != c10::DeviceType::CUDA){
+      checkZeroPoints<underlying_t>(fn_name, zero_points);
+    }  // for cuda, this check will occur in the actual cuda function
   });
 
   TORCH_CHECK(
       0 <= axis && axis < rtensor.dim(),
       "Channel axis out of range in per channel affine quantization. Got: ",
-      axis, "Expected: [0, ", rtensor.dim(), ")");
+      axis,
+      "Expected: [0, ",
+      rtensor.dim(),
+      ")");
   int64_t channel = rtensor.size(axis);
   TORCH_CHECK(
       channel == int64_t(scales.numel()),
@@ -160,20 +172,21 @@ Tensor quantize_tensor_per_channel_affine(
   return qtensor;
 }
 
-Tensor quantize_tensor_per_channel_float_qparams(
-    Tensor rtensor,
-    Tensor qtensor,
+Tensor& quantize_tensor_per_channel_float_qparams(
+    const Tensor& rtensor,
+    Tensor& qtensor,
     Tensor scales,
     Tensor zero_points,
     int64_t axis) {
-  static const auto fn_name = "quantize_tensor_per_channel_float_qparams";
+  static constexpr auto fn_name =
+      "quantize_tensor_per_channel_float_qparams";
 
   checkRoundingMode(fn_name);
   checkFloatTensor(fn_name, rtensor);
-  checkCPUTensor(fn_name, rtensor);
   checkSameDevice(fn_name, rtensor, qtensor);
   checkSameSize(fn_name, qtensor, rtensor);
 
+  // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
   AT_DISPATCH_QINT_AND_SUB_BYTE_TYPES(qtensor.scalar_type(), fn_name, [&]() {
     checkQuantizedTensor<scalar_t>(fn_name, qtensor);
   });
@@ -181,7 +194,10 @@ Tensor quantize_tensor_per_channel_float_qparams(
   TORCH_CHECK(
       0 <= axis && axis < rtensor.dim(),
       "Channel axis out of range in per channel float qparams quantization. Got: ",
-      axis, "Expected: [0, ", rtensor.dim(), ")");
+      axis,
+      "Expected: [0, ",
+      rtensor.dim(),
+      ")");
   int64_t channel = rtensor.size(axis);
   TORCH_CHECK(
       channel == int64_t(scales.numel()),
@@ -193,19 +209,19 @@ Tensor quantize_tensor_per_channel_float_qparams(
   quantize_tensor_per_channel_float_qparams_stub(
       rtensor.device().type(), rtensor, qtensor, scales, zero_points, axis);
   return qtensor;
-
 }
 
-Tensor dequantize_tensor_per_tensor_affine(
-    Tensor qtensor,
-    Tensor rtensor,
+Tensor& dequantize_tensor_per_tensor_affine(
+    const Tensor& qtensor,
+    Tensor& rtensor,
     double scale,
     int64_t zero_point) {
-  static const auto fn_name = "dequantize_tensor_per_tensor_affine";
+  static constexpr auto fn_name = "dequantize_tensor_per_tensor_affine";
   checkFloatTensor(fn_name, rtensor);
   checkSameDevice(fn_name, rtensor, qtensor);
   checkSameSize(fn_name, qtensor, rtensor);
 
+  // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
   AT_DISPATCH_QINT_AND_SUB_BYTE_TYPES(qtensor.scalar_type(), fn_name, [&]() {
     checkQuantizedTensor<scalar_t>(fn_name, qtensor);
     checkZeroPoint<underlying_t>(fn_name, zero_point);
@@ -221,28 +237,32 @@ Tensor dequantize_tensor_per_tensor_affine(
   return rtensor;
 }
 
-Tensor dequantize_tensor_per_channel_affine(
-    Tensor qtensor,
-    Tensor rtensor,
+Tensor& dequantize_tensor_per_channel_affine(
+    const Tensor& qtensor,
+    Tensor& rtensor,
     Tensor scales,
     Tensor zero_points,
     int64_t axis) {
-  static const auto fn_name = "dequantize_tensor_per_channel_affine";
+  static constexpr auto fn_name = "dequantize_tensor_per_channel_affine";
 
   checkFloatTensor(fn_name, rtensor);
-  checkCPUTensor(fn_name, rtensor);
   checkSameDevice(fn_name, rtensor, qtensor);
   checkSameSize(fn_name, qtensor, rtensor);
 
   AT_DISPATCH_QINT_TYPES(qtensor.scalar_type(), fn_name, [&]() {
     checkQuantizedTensor<scalar_t>(fn_name, qtensor);
-    checkZeroPoints<underlying_t>(fn_name, zero_points);
+    if(qtensor.device().type() != c10::DeviceType::CUDA){
+      checkZeroPoints<underlying_t>(fn_name, zero_points);
+    }  // for cuda, this check will occur in the actual cuda function
   });
 
   TORCH_CHECK(
       0 <= axis && axis < qtensor.dim(),
       "Channel axis out of range in per channel affine dequantization. Got:",
-      axis, " Expected: [0, ", qtensor.dim(), ")");
+      axis,
+      " Expected: [0, ",
+      qtensor.dim(),
+      ")");
   int64_t channel = qtensor.size(axis);
   TORCH_CHECK(
       channel == int64_t(scales.numel()),
@@ -256,19 +276,19 @@ Tensor dequantize_tensor_per_channel_affine(
   return rtensor;
 }
 
-Tensor dequantize_tensor_per_channel_float_qparams(
-    Tensor qtensor,
-    Tensor rtensor,
+Tensor& dequantize_tensor_per_channel_float_qparams(
+    const Tensor& qtensor,
+    Tensor& rtensor,
     Tensor scales,
     Tensor zero_points,
     int64_t axis) {
-  static const auto fn_name = "dequantize_tensor_per_channel_affine";
+  static constexpr auto fn_name = "dequantize_tensor_per_channel_affine";
 
   checkFloatTensor(fn_name, rtensor);
-  checkCPUTensor(fn_name, rtensor);
   checkSameDevice(fn_name, rtensor, qtensor);
   checkSameSize(fn_name, qtensor, rtensor);
 
+  // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
   AT_DISPATCH_QINT_AND_SUB_BYTE_TYPES(qtensor.scalar_type(), fn_name, [&]() {
     checkQuantizedTensor<scalar_t>(fn_name, qtensor);
   });
@@ -276,7 +296,10 @@ Tensor dequantize_tensor_per_channel_float_qparams(
   TORCH_CHECK(
       0 <= axis && axis < qtensor.dim(),
       "Channel axis out of range in per channel float qparams dequantization. Got:",
-      axis, " Expected: [0, ", qtensor.dim(), ")");
+      axis,
+      " Expected: [0, ",
+      qtensor.dim(),
+      ")");
   int64_t channel = qtensor.size(axis);
   TORCH_CHECK(
       channel == int64_t(scales.numel()),

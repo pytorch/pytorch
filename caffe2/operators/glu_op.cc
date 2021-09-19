@@ -1,3 +1,4 @@
+// NOLINTNEXTLINE(modernize-deprecated-headers)
 #include <math.h>
 
 #include "caffe2/operators/glu_op.h"
@@ -7,6 +8,7 @@ namespace caffe2 {
 namespace {
 float sigmoid(const float x) {
   if (x >= 0) {
+    // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
     return 1. / (1. + exp(-x));
   } else {
     const float exp_x = exp(x);

@@ -61,6 +61,7 @@ void HardshrinkImpl::pretty_print(std::ostream& stream) const {
 
 HardtanhImpl::HardtanhImpl(const HardtanhOptions& options_)
     : options(options_) {
+  // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
   reset();
 }
 
@@ -169,13 +170,14 @@ void Softmax2dImpl::pretty_print(std::ostream& stream) const {
 }
 
 Tensor Softmax2dImpl::forward(const Tensor& input) {
-  TORCH_CHECK(input.dim() == 4, "Softmax2d requires a 4D tensor as input");
-  return F::detail::softmax(input, /*dim=*/1, c10::nullopt);
+  TORCH_CHECK(input.dim() == 4 || input.dim() == 3, "Softmax2d requires a 3D or 4D tensor as input");
+  return F::detail::softmax(input, /*dim=*/-3, c10::nullopt);
 }
 
 // ============================================================================
 
 PReLUImpl::PReLUImpl(const PReLUOptions& options_) : options(options_) {
+  // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
   reset();
 }
 
@@ -306,6 +308,18 @@ void SiLUImpl::pretty_print(std::ostream& stream) const {
 
 // ============================================================================
 
+Tensor MishImpl::forward(const Tensor& input) {
+  return F::mish(input);
+}
+
+void MishImpl::reset() {}
+
+void MishImpl::pretty_print(std::ostream& stream) const {
+  stream << "torch::nn::Mish()";
+}
+
+// ============================================================================
+
 Tensor SigmoidImpl::forward(const Tensor& input) {
   return torch::sigmoid(input);
 }
@@ -405,8 +419,10 @@ void ThresholdImpl::pretty_print(std::ostream& stream) const {
 
 // ============================================================================
 
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 MultiheadAttentionImpl::MultiheadAttentionImpl(const MultiheadAttentionOptions& options_)
     : Module("torch::nn::MultiheadAttention"), options(options_) {
+  // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
   reset();
 }
 
@@ -495,8 +511,8 @@ void MultiheadAttentionImpl::reset() {
     bias_k = register_parameter("bias_k", torch::empty({1, 1, options.embed_dim()}));
     bias_v = register_parameter("bias_v", torch::empty({1, 1, options.embed_dim()}));
   } else {
-    bias_k = {};
-    bias_v = {};
+    bias_k.reset();
+    bias_v.reset();
   }
   _reset_parameters();
 }

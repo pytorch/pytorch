@@ -16,10 +16,8 @@
 #include <ATen/native/Distributions.h>
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/TensorIterator.h>
-#include <ATen/LegacyTHFunctionsCUDA.h>
 
 #include <THC/THCGeneral.h>
-#include <THC/THCApply.cuh>
 #include <THC/THCDeviceUtils.cuh>
 
 #include <cstdint>
@@ -29,7 +27,7 @@
 
 namespace at { namespace native {
 
-void geometric_kernel(TensorIterator& iter, double p_, c10::optional<Generator> gen) {
+void geometric_kernel(TensorIteratorBase& iter, double p_, c10::optional<Generator> gen) {
   auto generator = get_generator_or_default<CUDAGeneratorImpl>(gen, cuda::detail::getDefaultCUDAGenerator());
   at::native::templates::cuda::geometric_kernel(iter, p_, generator);
 }

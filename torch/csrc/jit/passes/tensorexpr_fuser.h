@@ -58,7 +58,8 @@ TORCH_API bool usedOnlyInSize(Value* v);
 TORCH_API Value* broadcastSizes(at::ArrayRef<Value*> sizes, AliasDb* db);
 
 namespace tensorexpr {
+TORCH_API const OperatorSet& supported_eltwise_set();
 TORCH_API bool isSupported(Node* node);
-}
+} // namespace tensorexpr
 } // namespace jit
 } // namespace torch

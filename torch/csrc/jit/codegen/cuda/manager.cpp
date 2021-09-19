@@ -3,6 +3,7 @@
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_cache.h>
+#include <torch/csrc/jit/codegen/cuda/manager.h>
 #include <torch/csrc/jit/codegen/cuda/parser.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler.h>
 #include <torch/csrc/jit/codegen/cuda/shape_inference.h>
@@ -11,12 +12,11 @@
 #include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
 
-#include <unordered_map>
-
 #include <ATen/DimVector.h>
 #include <c10/core/DeviceType.h>
+#include <c10/util/irange.h>
 
-#include <torch/csrc/jit/codegen/cuda/manager.h>
+#include <unordered_map>
 
 namespace torch {
 namespace jit {
@@ -52,6 +52,7 @@ namespace {
 // CudaFusionManager is not thread safe!
 // TODO: we should make the tradeoff here to use thread_local instead of global
 // singleton;
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 class CudaFusionManager {
  public:
   static CudaFusionManager& getManager() {
@@ -133,7 +134,7 @@ class CudaFusionManager {
   at::DimVector restorePermutation(at::DimVector permuted) {
     int rank = static_cast<int>(permuted.size());
     at::DimVector permutation(rank, -1);
-    for (int i = 0; i < rank; i++) {
+    for (const auto i : c10::irange(rank)) {
       permutation[permuted[i]] = i;
     }
     return permutation;
@@ -153,10 +154,11 @@ class CudaFusionManager {
     const int rank = static_cast<int>(stride_properties->size());
 
     // stores axes with stride_index;
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     std::set<int> ordered_axes;
 
     // TODO: this does not support broadcast yet;
-    for (int i = 0; i < rank; i++) {
+    for (const auto i : c10::irange(rank)) {
       if ((*stride_properties)[i].has_value() &&
           (*stride_properties)[i]->stride_index_.has_value()) {
         ordered_axes.insert((*stride_properties)[i]->stride_index_.value());
@@ -221,6 +223,7 @@ void compileCudaFusionGroup(Node* fusion_node) {
   // insert meta information after itself).
   TypePropagate(graph);
 
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int32_t fusion_cache_id =
       CudaFusionManager::getManager().registerOrGetCacheId(graph);
   fusion_node->i_(attr::cache_id, fusion_cache_id);

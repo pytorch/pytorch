@@ -13,13 +13,42 @@ template <typename T, class Context>
 class BatchSparseToDenseOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
+  USE_DISPATCH_HELPER;
 
   template <class... Args>
   explicit BatchSparseToDenseOp(Args&&... args)
       : Operator<Context>(std::forward<Args>(args)...),
         OP_SINGLE_ARG(int64_t, "dense_last_dim", dense_last_dim_, -1),
         OP_SINGLE_ARG(T, "default_value", default_value_, static_cast<T>(0)) {}
-  bool RunOnDevice() {
+
+  bool RunOnDevice() override {
+    return DispatchHelper<TensorTypes<int32_t, int64_t>>::call(
+        this, Input(LENGTHS));
+  }
+
+ private:
+  template <typename TLen, typename TInd>
+  void FillInDenseValues(
+      const int64_t batch_size,
+      const int64_t indice_lengths,
+      const TLen* lengths_data,
+      const TInd* indices_data,
+      const T* values_data,
+      T* output_data,
+      Context* context);
+
+  template <typename TLen>
+  bool DoRunWithType() {
+    return DispatchHelper<
+        TensorTypes2<
+            int32_t,
+            int64_t,
+            GenericTensorImplementation>,
+        TLen>::call(this, Input(INDICES));
+  }
+
+  template <typename TLen, typename TInd>
+  bool DoRunWithType2() {
     auto& lengths = Input(LENGTHS);
     auto& indices = Input(INDICES);
     auto& values = Input(VALUES);
@@ -27,12 +56,10 @@ class BatchSparseToDenseOp : public Operator<Context> {
     CAFFE_ENFORCE_EQ(indices.numel(), values.numel());
     CAFFE_ENFORCE_EQ(lengths.dim(), 1);
     CAFFE_ENFORCE_EQ(indices.dim(), 1);
-
-    const int64_t* lengths_data = lengths.template data<int64_t>();
-    const int64_t* indices_data = indices.template data<int64_t>();
+    const TLen* lengths_data = lengths.template data<TLen>();
+    const TInd* indices_data = indices.template data<TInd>();
     const T* values_data = values.template data<T>();
     int64_t batch_size = lengths.numel();
-
     vector<int64_t> output_shape = {batch_size};
     if (InputSize() == 4) {
       auto& shaper = Input(3);
@@ -68,15 +95,16 @@ class BatchSparseToDenseOp : public Operator<Context> {
     return true;
   }
 
- private:
-  void FillInDenseValues(
-      const int64_t batch_size,
-      const int64_t indice_lengths,
-      const int64_t* lengths_data,
-      const int64_t* indices_data,
-      const T* values_data,
-      T* output_data,
-      Context* context);
+  template <typename TLen>
+  bool DoRunWithOtherType2() {
+    CAFFE_THROW(
+        "BatchSparseToDense is not implemented on values of type ",
+        Input(VALUES).dtype().name(),
+        " with lengths of type ",
+        Input(LENGTHS).dtype().name(),
+        " and indices of type ",
+        Input(INDICES).dtype().name());
+  }
 
   int64_t dense_last_dim_;
   T default_value_;
@@ -92,10 +120,39 @@ template <typename T, class Context>
 class BatchDenseToSparseOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
+  USE_DISPATCH_HELPER;
+
   template <class... Args>
   explicit BatchDenseToSparseOp(Args&&... args)
       : Operator<Context>(std::forward<Args>(args)...) {}
   bool RunOnDevice() {
+    return DispatchHelper<TensorTypes<int32_t, int64_t>>::call(
+        this, Input(LENGTHS));
+  }
+
+ private:
+  template <typename TLen, typename TInd>
+  void FillInSparseValues(
+      const int64_t batch_size,
+      const int64_t indice_lengths,
+      const TLen* lengths_data,
+      const TInd* indices_data,
+      const T* dense_data,
+      T* output_data,
+      Context* context);
+
+  template <typename TLen>
+  bool DoRunWithType() {
+    return DispatchHelper<
+        TensorTypes2<
+            int32_t,
+            int64_t,
+            GenericTensorImplementation>,
+        TLen>::call(this, Input(INDICES));
+  }
+
+  template <typename TLen, typename TInd>
+  bool DoRunWithType2() {
     auto& lengths = Input(LENGTHS);
     auto& indices = Input(INDICES);
     auto& dense = Input(DENSE);
@@ -103,12 +160,11 @@ class BatchDenseToSparseOp : public Operator<Context> {
     CAFFE_ENFORCE_EQ(lengths.dim(), 1);
     CAFFE_ENFORCE_EQ(indices.dim(), 1);
     CAFFE_ENFORCE_EQ(dense.dim(), 2);
-    const int64_t* lengths_data = lengths.template data<int64_t>();
-    const int64_t* indices_data = indices.template data<int64_t>();
+    const TLen* lengths_data = lengths.template data<TLen>();
+    const TInd* indices_data = indices.template data<TInd>();
     const T* dense_data = dense.template data<T>();
 
     int64_t batch_size = lengths.numel();
-
     CAFFE_ENFORCE_EQ(batch_size, dense.size(0));
     dense_last_dim_ = dense.size(1);
     vector<int64_t> output_shape = indices.sizes().vec();
@@ -127,17 +183,18 @@ class BatchDenseToSparseOp : public Operator<Context> {
     return true;
   }
 
- private:
-  void FillInSparseValues(
-      const int64_t batch_size,
-      const int64_t indice_lengths,
-      const int64_t* lengths_data,
-      const int64_t* indices_data,
-      const T* dense_data,
-      T* output_data,
-      Context* context);
+  template <typename TLen>
+  bool DoRunWithOtherType2() {
+    CAFFE_THROW(
+        "BatchDenseToSparse is not implemented on values of type ",
+        Input(DENSE).dtype().name(),
+        " with lengths of type ",
+        Input(LENGTHS).dtype().name(),
+        " and indices of type ",
+        Input(INDICES).dtype().name());
+  }
 
-  int64_t dense_last_dim_;
+  int64_t dense_last_dim_{};
   INPUT_TAGS(LENGTHS, INDICES, DENSE);
 
   // len_prefix_sum_ and len_prefix_tmp_ are buffers on the GPU. It is not used

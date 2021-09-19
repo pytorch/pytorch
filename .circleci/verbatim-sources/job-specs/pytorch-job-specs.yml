@@ -2,7 +2,7 @@ jobs:
   pytorch_linux_build:
     <<: *pytorch_params
     machine:
-      image: ubuntu-1604:202007-01
+      image: ubuntu-2004:202104-01
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
     - checkout
@@ -15,9 +15,6 @@ jobs:
         no_output_timeout: "1h"
         command: |
           set -e
-          if [[ "${DOCKER_IMAGE}" == *rocm3.9* ]]; then
-            export DOCKER_TAG="f3d89a32912f62815e4feaeed47e564e887dffd6"
-          fi
           if [[ ${BUILD_ENVIRONMENT} == *"pure_torch"* ]]; then
             echo 'BUILD_CAFFE2=OFF' >> "${BASH_ENV}"
           fi
@@ -33,11 +30,11 @@ jobs:
           time docker pull ${DOCKER_IMAGE}:${DOCKER_TAG} >/dev/null
           export id=$(docker run --env-file "${BASH_ENV}" --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${DOCKER_IMAGE}:${DOCKER_TAG})
 
-          git submodule sync && git submodule update -q --init --recursive
+          git submodule sync && git submodule update -q --init --recursive --depth 1 --jobs 0
 
           docker cp /home/circleci/project/. $id:/var/lib/jenkins/workspace
 
-          export COMMAND='((echo "sudo chown -R jenkins workspace && cd workspace && .jenkins/pytorch/build.sh && find ${BUILD_ROOT} -type f -name "*.a" -or -name "*.o" -delete") | docker exec -u jenkins -i "$id" bash) 2>&1'
+          export COMMAND='((echo "sudo chown -R jenkins workspace && export JOB_BASE_NAME="$CIRCLE_JOB" && cd workspace && .jenkins/pytorch/build.sh && find ${BUILD_ROOT} -type f -name "*.a" -or -name "*.o" -delete") | docker exec -u jenkins -i "$id" bash) 2>&1'
 
           echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
 
@@ -50,7 +47,7 @@ jobs:
             # The xla build uses the same docker image as
             # pytorch_linux_bionic_py3_6_clang9_build. In the push step, we have to
             # distinguish between them so the test can pick up the correct image.
-            output_image=${DOCKER_IMAGE}:${DOCKER_TAG}-${CIRCLE_SHA1}
+            output_image=${DOCKER_IMAGE}:build-${DOCKER_TAG}-${CIRCLE_SHA1}
             if [[ ${BUILD_ENVIRONMENT} == *"xla"* ]]; then
               export COMMIT_DOCKER_IMAGE=$output_image-xla
             elif [[ ${BUILD_ENVIRONMENT} == *"libtorch"* ]]; then
@@ -77,13 +74,21 @@ jobs:
             docker commit "$id" ${COMMIT_DOCKER_IMAGE}
             time docker push ${COMMIT_DOCKER_IMAGE}
           fi
+    - run:
+        name: upload build & binary data
+        no_output_timeout: "5m"
+        command: |
+            cd /pytorch && export COMMIT_TIME=$(git log --max-count=1 --format=%ct || echo 0)
+            python3 -mpip install requests && \
+            SCRIBE_GRAPHQL_ACCESS_TOKEN=${SCRIBE_GRAPHQL_ACCESS_TOKEN} \
+            python3 -m tools.stats.upload_binary_size_to_scuba || exit 0
     - store_artifacts:
         path: /home/circleci/project/dist
 
   pytorch_linux_test:
     <<: *pytorch_params
     machine:
-      image: ubuntu-1604:202007-01
+      image: ubuntu-2004:202104-01
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
     - checkout
@@ -100,7 +105,7 @@ jobs:
             export DOCKER_TAG="f3d89a32912f62815e4feaeed47e564e887dffd6"
           fi
           # See Note [Special build images]
-          output_image=${DOCKER_IMAGE}:${DOCKER_TAG}-${CIRCLE_SHA1}
+          output_image=${DOCKER_IMAGE}:build-${DOCKER_TAG}-${CIRCLE_SHA1}
           if [[ ${BUILD_ENVIRONMENT} == *"xla"* ]]; then
             export COMMIT_DOCKER_IMAGE=$output_image-xla
           elif [[ ${BUILD_ENVIRONMENT} == *"libtorch"* ]]; then
@@ -159,7 +164,7 @@ jobs:
             echo "Skipping for ${BUILD_ENVIRONMENT}"
           fi
     - run:
-        name: Run tests
+        name: Test
         no_output_timeout: "90m"
         command: |
           set -e
@@ -168,6 +173,16 @@ jobs:
           # =================== The following code will be executed inside Docker container ===================
           set -ex
           export SCRIBE_GRAPHQL_ACCESS_TOKEN="${SCRIBE_GRAPHQL_ACCESS_TOKEN}"
+          export JOB_BASE_NAME="$CIRCLE_JOB"
+          # temporary fix for https://github.com/pytorch/pytorch/issues/60746
+          if [ -z "$CIRCLE_PR_NUMBER" ]; then
+            if [[ $CIRCLE_BRANCH =~ .*pull.* ]]; then
+              export PR_NUMBER="$(echo $CIRCLE_BRANCH | sed 's/[^0-9]//g')"
+              export CIRCLE_PR_NUMBER="$PR_NUMBER"
+            fi
+          else
+            export PR_NUMBER="$CIRCLE_PR_NUMBER"
+          fi
           ${PARALLEL_FLAGS}
           cd workspace
           EOL
@@ -182,32 +197,7 @@ jobs:
           fi
           echo "(cat docker_commands.sh | docker exec -u jenkins -i "$id" bash) 2>&1" > command.sh
           unbuffer bash command.sh | ts
-    - run:
-        name: Report results
-        no_output_timeout: "5m"
-        command: |
-          set -e
-          docker stats --all --no-stream
 
-          cat >docker_commands.sh \<<EOL
-          # =================== The following code will be executed inside Docker container ===================
-          set -ex
-          export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}
-          export SCRIBE_GRAPHQL_ACCESS_TOKEN="${SCRIBE_GRAPHQL_ACCESS_TOKEN}"
-          export CIRCLE_TAG="${CIRCLE_TAG:-}"
-          export CIRCLE_SHA1="$CIRCLE_SHA1"
-          export CIRCLE_PR_NUMBER="${CIRCLE_PR_NUMBER:-}"
-          export CIRCLE_BRANCH="$CIRCLE_BRANCH"
-          export CIRCLE_JOB="$CIRCLE_JOB"
-          export CIRCLE_WORKFLOW_ID="$CIRCLE_WORKFLOW_ID"
-          cd workspace
-          python torch/testing/_internal/print_test_stats.py --upload-to-s3 --compare-with-s3 test
-          EOL
-          echo "(cat docker_commands.sh | docker exec -u jenkins -e LANG=C.UTF-8 -i "$id" bash) 2>&1" > command.sh
-          unbuffer bash command.sh | ts
-
-          echo "Retrieving test reports"
-          docker cp $id:/var/lib/jenkins/workspace/test/test-reports ./ || echo 'No test reports found!'
           if [[ ${BUILD_ENVIRONMENT} == *"coverage"* ]]; then
               echo "Retrieving C++ coverage report"
               docker cp $id:/var/lib/jenkins/workspace/build/coverage.info ./test
@@ -219,9 +209,40 @@ jobs:
               python3 -mpip install codecov
               python3 -mcodecov
           fi
+    - run:
+        name: Report results
+        no_output_timeout: "5m"
+        command: |
+          set -e
+          # Retrieving test results should be done as very first step as command never fails
+          # But is always executed if previous step fails for some reason
+          echo "Retrieving test reports"
+          docker cp $id:/var/lib/jenkins/workspace/test/test-reports ./ || echo 'No test reports found!'
+          docker stats --all --no-stream
+
+          cat >docker_commands.sh \<<EOL
+          # =================== The following code will be executed inside Docker container ===================
+          set -ex
+          export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}
+          export SCRIBE_GRAPHQL_ACCESS_TOKEN="${SCRIBE_GRAPHQL_ACCESS_TOKEN}"
+          export CIRCLE_TAG="${CIRCLE_TAG:-}"
+          export CIRCLE_SHA1="$CIRCLE_SHA1"
+          export CIRCLE_PR_NUMBER="${CIRCLE_PR_NUMBER:-}"
+          export CIRCLE_BRANCH="$CIRCLE_BRANCH"
+          export JOB_BASE_NAME="$CIRCLE_JOB"
+          export CIRCLE_WORKFLOW_ID="$CIRCLE_WORKFLOW_ID"
+          cd workspace
+          python -m tools.stats.print_test_stats --upload-to-s3 --compare-with-s3 test
+          EOL
+          echo "(cat docker_commands.sh | docker exec -u jenkins -e LANG=C.UTF-8 -i "$id" bash) 2>&1" > command.sh
+          unbuffer bash command.sh | ts
         when: always
     - store_test_results:
         path: test-reports
+    - store_artifacts:
+        path: test/.coverage
+    - store_artifacts:
+        path: test/coverage.xml
 
   pytorch_windows_build:
     <<: *pytorch_windows_params
@@ -240,7 +261,10 @@ jobs:
         default: "10.1"
       python_version:
         type: string
-        default: "3.6"
+        default: "3.8"
+      vs_version:
+        type: string
+        default: "16.8.6"
       vc_version:
         type: string
         default: "14.16"
@@ -256,6 +280,11 @@ jobs:
     executor: <<parameters.executor>>
     steps:
       - checkout
+      - run:
+          name: Install VS2019 toolchain
+          no_output_timeout: 10m
+          command: |
+              powershell .circleci/scripts/vs_install.ps1
       - run:
           name: Install Cuda
           no_output_timeout: 30m
@@ -302,7 +331,10 @@ jobs:
         default: "10.1"
       python_version:
         type: string
-        default: "3.6"
+        default: "3.8"
+      vs_version:
+        type: string
+        default: "16.8.6"
       vc_version:
         type: string
         default: "14.16"
@@ -320,6 +352,11 @@ jobs:
       - checkout
       - attach_workspace:
           at: c:/users/circleci/workspace
+      - run:
+          name: Install VS2019 toolchain
+          no_output_timeout: 10m
+          command: |
+              powershell .circleci/scripts/vs_install.ps1
       - run:
           name: Install Cuda
           no_output_timeout: 30m
@@ -346,5 +383,17 @@ jobs:
             export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_WIN_BUILD_V1}
             set -x
             .jenkins/pytorch/win-test.sh
+      - run:
+          name: Report results
+          no_output_timeout: "5m"
+          command: |
+            set -ex
+            export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_WIN_BUILD_V1}
+            export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_WIN_BUILD_V1}
+            pip install typing_extensions boto3
+            python -m tools.stats.print_test_stats --upload-to-s3 --compare-with-s3 test
+          when: always
       - store_test_results:
           path: test/test-reports
+      - store_artifacts:
+          path: test/coverage.xml

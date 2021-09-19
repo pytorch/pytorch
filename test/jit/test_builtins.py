@@ -5,6 +5,7 @@ import unittest
 from typing import Dict, List
 
 import torch
+from torch.testing import FileCheck
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
@@ -63,7 +64,7 @@ class TestBuiltins(JitTestCase):
                 # not allowed, `name` must be static.
                 return hasattr(self.mod, name)
 
-        with self.assertRaisesRegex(RuntimeError, "hasattr"):
+        with self.assertRaisesRegexWithHighlight(RuntimeError, "hasattr", "name"):
             torch.jit.script(Mod())
 
         class Mod(torch.nn.Module):
@@ -74,7 +75,7 @@ class TestBuiltins(JitTestCase):
                 # not allowed, `torch.rand` is not a class type
                 return hasattr(torch.rand(2, 3), name)
 
-        with self.assertRaisesRegex(RuntimeError, "hasattr"):
+        with self.assertRaisesRegexWithHighlight(RuntimeError, "hasattr", "name"):
             torch.jit.script(Mod())
 
     def test_del(self):
@@ -85,14 +86,14 @@ class TestBuiltins(JitTestCase):
 
         self.checkScript(fn, ([1, 2, 3],))
 
-        with self.assertRaisesRegex(RuntimeError, "undefined value"):
+        with self.assertRaisesRegexWithHighlight(RuntimeError, "undefined value", "a"):
             @torch.jit.script
             def fn(x):
                 a = x ** 2
                 del a
                 return a
 
-        with self.assertRaisesRegex(RuntimeError, "undefined value"):
+        with self.assertRaisesRegexWithHighlight(RuntimeError, "undefined value", "a"):
             @torch.jit.script
             def fn(x):
                 a = x ** 2
@@ -100,7 +101,7 @@ class TestBuiltins(JitTestCase):
                     del a
                 return a
 
-        with self.assertRaisesRegex(RuntimeError, "undefined value"):
+        with self.assertRaisesRegexWithHighlight(RuntimeError, "undefined value", "b"):
             @torch.jit.script
             def fn(x):
                 a = x ** 2
@@ -121,7 +122,7 @@ class TestBuiltins(JitTestCase):
 
         py_out = del_list_multiple_operands([0, 1, 2])
         jit_out = torch.jit.script(del_list_multiple_operands)([0, 1, 2])
-        self.assertEquals(py_out, jit_out)
+        self.assertEqual(py_out, jit_out)
 
         def del_dict_multiple_operands(x: Dict[str, int]) -> Dict[str, int]:
             del x['hi'], x['there']
@@ -129,7 +130,7 @@ class TestBuiltins(JitTestCase):
 
         py_out = del_dict_multiple_operands({"hi": 5, "there": 6})
         jit_out = torch.jit.script(del_dict_multiple_operands)({"hi": 5, "there": 6})
-        self.assertEquals(py_out, jit_out)
+        self.assertEqual(py_out, jit_out)
 
 
 class TestTensorBuiltins(JitTestCase):
@@ -219,3 +220,73 @@ class TestTensorBuiltins(JitTestCase):
             return a
 
         self.checkScript(fn6, (torch.zeros(2, dtype=torch.float32, device="cuda"),))
+
+    def test_tensor_item(self):
+        def test_scalar_cast(x):
+            scalar = x.item()
+            return int(scalar), float(scalar)
+
+        graph = torch.jit.script(test_scalar_cast).graph
+        FileCheck().check("(int, float) = prim::TupleConstruct").run(graph)
+        self.checkScript(test_scalar_cast, (torch.tensor(1.0),))
+        self.checkScript(test_scalar_cast, (torch.tensor(1),))
+
+    def test_method_on_number(self):
+        def func():
+            c = 1
+            return c.add(1)
+        with self.assertRaisesRegex(RuntimeError, 'object has no attribute or method'):
+            torch.jit.script(func)
+
+    # testing implicit conversion of tensors to scalars to match function arguments
+    def test_scalar_to_num_conversions(self):
+        @torch.jit.script
+        def multiple_defs(x):
+            c = 1
+            x = x + c
+            return x
+
+        self.assertTrue("ImplicitTensorToNum" not in str(multiple_defs.graph))
+
+        @torch.jit.script
+        def tensor_to_int_script(x, tensor):
+            return x.unsqueeze(tensor)
+
+        # location present in error message
+        with self.assertRaisesRegex(RuntimeError, "x.unsqueeze"):
+            tensor_to_int_script(torch.tensor([2]), torch.tensor([2, 2]))
+
+        def tensor_to_int(x, tensor):
+            return x.unsqueeze(tensor)
+
+        @torch.jit.script
+        def tensor_to_float_script(x, tensor):
+            return x.addcmul(tensor, tensor, value=tensor)
+
+        def tensor_to_float(x, tensor):
+            return x.addcmul(tensor, tensor, value=tensor)
+
+        x = torch.zeros(10)
+        # float tensor, float tensor with grad, int tensor (can't set grad on int tensor)
+        tensors = [torch.tensor(1.1),
+                   torch.tensor(1.1, requires_grad=True),
+                   torch.tensor(0),
+                   torch.tensor([2])]
+
+        script_funs = [tensor_to_int_script, tensor_to_float_script]
+        funs = [tensor_to_int, tensor_to_float]
+
+        # return the result, or whether exception was thrown
+        def test_func(func, x, tensor):
+            try:
+                result = func(x, tensor)
+            except RuntimeError as e:
+                result = True
+            except TypeError as e:
+                result = True
+            return result
+
+        # assert result or exception equal for each (function, inputs)
+        for tensor in tensors:
+            for i in range(len(script_funs)):
+                self.assertEqual(test_func(script_funs[i], x, tensor), test_func(funs[i], x, tensor))

@@ -1,5 +1,6 @@
 import errno
 import hashlib
+import json
 import os
 import re
 import shutil
@@ -19,7 +20,7 @@ except ImportError:
         from tqdm import tqdm
     except ImportError:
         # fake tqdm if it's not installed
-        class tqdm(object):  # type: ignore
+        class tqdm(object):  # type: ignore[no-redef]
 
             def __init__(self, total=None, disable=False,
                          unit=None, unit_scale=None, unit_divisor=None):
@@ -55,6 +56,7 @@ except ImportError:
 HASH_REGEX = re.compile(r'-([a-f0-9]*)\.')
 
 MASTER_BRANCH = 'master'
+ENV_GITHUB_TOKEN = 'GITHUB_TOKEN'
 ENV_TORCH_HOME = 'TORCH_HOME'
 ENV_XDG_CACHE_HOME = 'XDG_CACHE_HOME'
 DEFAULT_CACHE_DIR = '~/.cache'
@@ -112,7 +114,37 @@ def _parse_repo_info(github):
     return repo_owner, repo_name, branch
 
 
-def _get_cache_or_reload(github, force_reload, verbose=True):
+def _read_url(url):
+    with urlopen(url) as r:
+        return r.read().decode(r.headers.get_content_charset('utf-8'))
+
+
+def _validate_not_a_forked_repo(repo_owner, repo_name, branch):
+    # Use urlopen to avoid depending on local git.
+    headers = {'Accept': 'application/vnd.github.v3+json'}
+    token = os.environ.get(ENV_GITHUB_TOKEN)
+    if token is not None:
+        headers['Authorization'] = f'token {token}'
+    for url_prefix in (
+            f'https://api.github.com/repos/{repo_owner}/{repo_name}/branches',
+            f'https://api.github.com/repos/{repo_owner}/{repo_name}/tags'):
+        page = 0
+        while True:
+            page += 1
+            url = f'{url_prefix}?per_page=100&page={page}'
+            response = json.loads(_read_url(Request(url, headers=headers)))
+            # Empty response means no more data to process
+            if not response:
+                break
+            for br in response:
+                if br['name'] == branch or br['commit']['sha'].startswith(branch):
+                    return
+
+    raise ValueError(f'Cannot find {branch} in https://github.com/{repo_owner}/{repo_name}. '
+                     'If it\'s a commit from a forked repo, please call hub.load() with forked repo directly.')
+
+
+def _get_cache_or_reload(github, force_reload, verbose=True, skip_validation=False):
     # Setup hub_dir to save downloaded files
     hub_dir = get_dir()
     if not os.path.exists(hub_dir):
@@ -136,6 +168,10 @@ def _get_cache_or_reload(github, force_reload, verbose=True):
         if verbose:
             sys.stderr.write('Using cache found in {}\n'.format(repo_dir))
     else:
+        # Validate the tag/branch is from the original repo instead of a forked repo
+        if not skip_validation:
+            _validate_not_a_forked_repo(repo_owner, repo_name, branch)
+
         cached_file = os.path.join(hub_dir, normalized_br + '.zip')
         _remove_if_exists(cached_file)
 
@@ -219,27 +255,32 @@ def set_dir(d):
     _hub_dir = d
 
 
-def list(github, force_reload=False):
+def list(github, force_reload=False, skip_validation=False):
     r"""
-    List all entrypoints available in `github` hubconf.
+    List all callable entrypoints available in the repo specified by ``github``.
 
     Args:
         github (string): a string with format "repo_owner/repo_name[:tag_name]" with an optional
-            tag/branch. The default branch is `master` if not specified.
+            tag/branch. The default branch is ``master`` if not specified.
             Example: 'pytorch/vision[:hub]'
         force_reload (bool, optional): whether to discard the existing cache and force a fresh download.
-            Default is `False`.
+            Default is ``False``.
+        skip_validation (bool, optional): if ``False``, torchhub will check that the branch or commit
+            specified by the ``github`` argument properly belongs to the repo owner. This will make
+            requests to the GitHub API; you can specify a non-default GitHub token by setting the
+            ``GITHUB_TOKEN`` environment variable. Default is ``False``.
     Returns:
-        entrypoints: a list of available entrypoint names
+        list: The available callables entrypoint
 
     Example:
         >>> entrypoints = torch.hub.list('pytorch/vision', force_reload=True)
     """
-    repo_dir = _get_cache_or_reload(github, force_reload, True)
+    repo_dir = _get_cache_or_reload(github, force_reload, verbose=True, skip_validation=skip_validation)
 
     sys.path.insert(0, repo_dir)
 
-    hub_module = import_module(MODULE_HUBCONF, repo_dir + '/' + MODULE_HUBCONF)
+    hubconf_path = os.path.join(repo_dir, MODULE_HUBCONF)
+    hub_module = import_module(MODULE_HUBCONF, hubconf_path)
 
     sys.path.remove(repo_dir)
 
@@ -249,25 +290,30 @@ def list(github, force_reload=False):
     return entrypoints
 
 
-def help(github, model, force_reload=False):
+def help(github, model, force_reload=False, skip_validation=False):
     r"""
-    Show the docstring of entrypoint `model`.
+    Show the docstring of entrypoint ``model``.
 
     Args:
         github (string): a string with format <repo_owner/repo_name[:tag_name]> with an optional
-            tag/branch. The default branch is `master` if not specified.
+            tag/branch. The default branch is ``master`` if not specified.
             Example: 'pytorch/vision[:hub]'
-        model (string): a string of entrypoint name defined in repo's hubconf.py
+        model (string): a string of entrypoint name defined in repo's ``hubconf.py``
         force_reload (bool, optional): whether to discard the existing cache and force a fresh download.
-            Default is `False`.
+            Default is ``False``.
+        skip_validation (bool, optional): if ``False``, torchhub will check that the branch or commit
+            specified by the ``github`` argument properly belongs to the repo owner. This will make
+            requests to the GitHub API; you can specify a non-default GitHub token by setting the
+            ``GITHUB_TOKEN`` environment variable. Default is ``False``.
     Example:
         >>> print(torch.hub.help('pytorch/vision', 'resnet18', force_reload=True))
     """
-    repo_dir = _get_cache_or_reload(github, force_reload, True)
+    repo_dir = _get_cache_or_reload(github, force_reload, verbose=True, skip_validation=skip_validation)
 
     sys.path.insert(0, repo_dir)
 
-    hub_module = import_module(MODULE_HUBCONF, repo_dir + '/' + MODULE_HUBCONF)
+    hubconf_path = os.path.join(repo_dir, MODULE_HUBCONF)
+    hub_module = import_module(MODULE_HUBCONF, hubconf_path)
 
     sys.path.remove(repo_dir)
 
@@ -276,22 +322,19 @@ def help(github, model, force_reload=False):
     return entry.__doc__
 
 
-# Ideally this should be `def load(github, model, *args, forece_reload=False, **kwargs):`,
-# but Python2 complains syntax error for it. We have to skip force_reload in function
-# signature here but detect it in kwargs instead.
-# TODO: fix it after Python2 EOL
-def load(repo_or_dir, model, *args, **kwargs):
+def load(repo_or_dir, model, *args, source='github', force_reload=False, verbose=True, skip_validation=False,
+         **kwargs):
     r"""
     Load a model from a github repo or a local directory.
 
     Note: Loading a model is the typical use case, but this can also be used to
     for loading other objects such as tokenizers, loss functions, etc.
 
-    If :attr:`source` is ``'github'``, :attr:`repo_or_dir` is expected to be
+    If ``source`` is 'github', ``repo_or_dir`` is expected to be
     of the form ``repo_owner/repo_name[:tag_name]`` with an optional
-    tag/branch.
+    tag/branch. The default branch is ``master`` if not specified.
 
-    If :attr:`source` is ``'local'``, :attr:`repo_or_dir` is expected to be a
+    If ``source`` is 'local', ``repo_or_dir`` is expected to be a
     path to a local directory.
 
     Args:
@@ -300,9 +343,9 @@ def load(repo_or_dir, model, *args, **kwargs):
             ``source = 'local'``.
         model (string): the name of a callable (entrypoint) defined in the
             repo/dir's ``hubconf.py``.
-        *args (optional): the corresponding args for callable :attr:`model`.
-        source (string, optional): ``'github'`` | ``'local'``. Specifies how
-            ``repo_or_dir`` is to be interpreted. Default is ``'github'``.
+        *args (optional): the corresponding args for callable ``model``.
+        source (string, optional): 'github' or 'local'. Specifies how
+            ``repo_or_dir`` is to be interpreted. Default is 'github'.
         force_reload (bool, optional): whether to force a fresh download of
             the github repo unconditionally. Does not have any effect if
             ``source = 'local'``. Default is ``False``.
@@ -310,11 +353,14 @@ def load(repo_or_dir, model, *args, **kwargs):
             local caches. Note that the message about first download cannot be
             muted. Does not have any effect if ``source = 'local'``.
             Default is ``True``.
-        **kwargs (optional): the corresponding kwargs for callable
-            :attr:`model`.
+        skip_validation (bool, optional): if ``False``, torchhub will check that the branch or commit
+            specified by the ``github`` argument properly belongs to the repo owner. This will make
+            requests to the GitHub API; you can specify a non-default GitHub token by setting the
+            ``GITHUB_TOKEN`` environment variable. Default is ``False``.
+        **kwargs (optional): the corresponding kwargs for callable ``model``.
 
     Returns:
-        The output of the :attr:`model` callable when called with the given
+        The output of the ``model`` callable when called with the given
         ``*args`` and ``**kwargs``.
 
     Example:
@@ -325,16 +371,14 @@ def load(repo_or_dir, model, *args, **kwargs):
         >>> path = '/some/local/path/pytorch/vision'
         >>> model = torch.hub.load(path, 'resnet50', pretrained=True)
     """
-    source = kwargs.pop('source', 'github').lower()
-    force_reload = kwargs.pop('force_reload', False)
-    verbose = kwargs.pop('verbose', True)
+    source = source.lower()
 
     if source not in ('github', 'local'):
         raise ValueError(
             f'Unknown source: "{source}". Allowed values: "github" | "local".')
 
     if source == 'github':
-        repo_or_dir = _get_cache_or_reload(repo_or_dir, force_reload, verbose)
+        repo_or_dir = _get_cache_or_reload(repo_or_dir, force_reload, verbose, skip_validation)
 
     model = _load_local(repo_or_dir, model, *args, **kwargs)
     return model
@@ -348,7 +392,7 @@ def _load_local(hubconf_dir, model, *args, **kwargs):
         hubconf_dir (string): path to a local directory that contains a
             ``hubconf.py``.
         model (string): name of an entrypoint defined in the directory's
-            `hubconf.py`.
+            ``hubconf.py``.
         *args (optional): the corresponding args for callable ``model``.
         **kwargs (optional): the corresponding kwargs for callable ``model``.
 
@@ -377,8 +421,8 @@ def download_url_to_file(url, dst, hash_prefix=None, progress=True):
 
     Args:
         url (string): URL of the object to download
-        dst (string): Full path where object will be saved, e.g. `/tmp/temporary_file`
-        hash_prefix (string, optional): If not None, the SHA256 downloaded file should start with `hash_prefix`.
+        dst (string): Full path where object will be saved, e.g. ``/tmp/temporary_file``
+        hash_prefix (string, optional): If not None, the SHA256 downloaded file should start with ``hash_prefix``.
             Default: None
         progress (bool, optional): whether or not to display a progress bar to stderr
             Default: True
@@ -388,8 +432,6 @@ def download_url_to_file(url, dst, hash_prefix=None, progress=True):
 
     """
     file_size = None
-    # We use a different API for python2 since urllib(2) doesn't recognize the CA
-    # certificates in older Python
     req = Request(url, headers={"User-Agent": "torch.hub"})
     u = urlopen(req)
     meta = u.info()
@@ -433,11 +475,13 @@ def download_url_to_file(url, dst, hash_prefix=None, progress=True):
         if os.path.exists(f.name):
             os.remove(f.name)
 
+
 def _download_url_to_file(url, dst, hash_prefix=None, progress=True):
     warnings.warn('torch.hub._download_url_to_file has been renamed to\
             torch.hub.download_url_to_file to be a public API,\
             _download_url_to_file will be removed in after 1.3 release')
     download_url_to_file(url, dst, hash_prefix, progress)
+
 
 # Hub used to support automatically extracts from zipfile manually compressed by users.
 # The legacy zip format expects only one file from torch.save() < 1.6 in the zip.
@@ -447,6 +491,7 @@ def _is_legacy_zip_format(filename):
         infolist = zipfile.ZipFile(filename).infolist()
         return len(infolist) == 1 and not infolist[0].is_dir()
     return False
+
 
 def _legacy_zip_load(filename, model_dir, map_location):
     warnings.warn('Falling back to the old format < 1.6. This support will be '
@@ -464,6 +509,7 @@ def _legacy_zip_load(filename, model_dir, map_location):
         extracted_file = os.path.join(model_dir, extraced_name)
     return torch.load(extracted_file, map_location=map_location)
 
+
 def load_state_dict_from_url(url, model_dir=None, map_location=None, progress=True, check_hash=False, file_name=None):
     r"""Loads the Torch serialized object at the given URL.
 
@@ -472,8 +518,8 @@ def load_state_dict_from_url(url, model_dir=None, map_location=None, progress=Tr
 
     If the object is already present in `model_dir`, it's deserialized and
     returned.
-    The default value of `model_dir` is ``<hub_dir>/checkpoints`` where
-    `hub_dir` is the directory returned by :func:`~torch.hub.get_dir`.
+    The default value of ``model_dir`` is ``<hub_dir>/checkpoints`` where
+    ``hub_dir`` is the directory returned by :func:`~torch.hub.get_dir`.
 
     Args:
         url (string): URL of the object to download
@@ -486,7 +532,7 @@ def load_state_dict_from_url(url, model_dir=None, map_location=None, progress=Tr
             digits of the SHA256 hash of the contents of the file. The hash is used to
             ensure unique names and to verify the contents of the file.
             Default: False
-        file_name (string, optional): name for the downloaded file. Filename from `url` will be used if not set.
+        file_name (string, optional): name for the downloaded file. Filename from ``url`` will be used if not set.
 
     Example:
         >>> state_dict = torch.hub.load_state_dict_from_url('https://s3.amazonaws.com/pytorch/models/resnet18-5c106cde.pth')

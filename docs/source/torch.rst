@@ -19,6 +19,7 @@ Tensors
     is_tensor
     is_storage
     is_complex
+    is_conj
     is_floating_point
     is_nonzero
     set_default_dtype
@@ -31,7 +32,7 @@ Tensors
 .. _tensor-creation-ops:
 
 Creation Ops
-~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~
 
 .. note::
     Random sampling creation ops are listed under :ref:`random-sampling` and
@@ -56,6 +57,7 @@ Creation Ops
     as_tensor
     as_strided
     from_numpy
+    frombuffer
     zeros
     zeros_like
     ones
@@ -77,6 +79,8 @@ Creation Ops
     polar
     heaviside
 
+.. _indexing-slicing-joining:
+
 Indexing, Slicing, Joining, Mutating Ops
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 .. autosummary::
@@ -84,10 +88,14 @@ Indexing, Slicing, Joining, Mutating Ops
     :nosignatures:
 
     cat
+    concat
+    conj
     chunk
+    dsplit
     column_stack
     dstack
     gather
+    hsplit
     hstack
     index_select
     masked_select
@@ -95,6 +103,7 @@ Indexing, Slicing, Joining, Mutating Ops
     moveaxis
     narrow
     nonzero
+    permute
     reshape
     row_stack
     scatter
@@ -106,11 +115,13 @@ Indexing, Slicing, Joining, Mutating Ops
     swapdims
     t
     take
+    take_along_dim
     tensor_split
     tile
     transpose
     unbind
     unsqueeze
+    vsplit
     vstack
     where
 
@@ -247,6 +258,9 @@ Examples::
     no_grad
     enable_grad
     set_grad_enabled
+    is_grad_enabled
+    inference_mode
+    is_inference_mode_enabled
 
 Math operations
 ---------------
@@ -281,10 +295,12 @@ Pointwise Ops
     bitwise_and
     bitwise_or
     bitwise_xor
+    bitwise_left_shift
+    bitwise_right_shift
     ceil
     clamp
     clip
-    conj
+    conj_physical
     copysign
     cos
     cosh
@@ -306,6 +322,8 @@ Pointwise Ops
     floor_divide
     fmod
     frac
+    frexp
+    gradient
     imag
     ldexp
     lerp
@@ -333,7 +351,11 @@ Pointwise Ops
     negative
     nextafter
     polygamma
+    positive
     pow
+    quantized_batch_norm
+    quantized_max_pool1d
+    quantized_max_pool2d
     rad2deg
     real
     reciprocal
@@ -367,6 +389,7 @@ Reduction Ops
     argmin
     amax
     amin
+    aminmax
     all
     any
     max
@@ -374,6 +397,7 @@ Reduction Ops
     dist
     logsumexp
     mean
+    nanmean
     median
     nanmedian
     mode
@@ -407,6 +431,7 @@ Comparison Ops
     greater
     isclose
     isfinite
+    isin
     isinf
     isposinf
     isneginf
@@ -463,6 +488,8 @@ Other Operations
     cdist
     clone
     combinations
+    corrcoef
+    cov
     cross
     cummax
     cummin
@@ -482,6 +509,7 @@ Other Operations
     rot90
     gcd
     histc
+    histogram
     meshgrid
     lcm
     logcumsumexp
@@ -499,6 +527,8 @@ Other Operations
     vander
     view_as_real
     view_as_complex
+    resolve_conj
+    resolve_neg
 
 
 BLAS and LAPACK Operations
@@ -548,6 +578,8 @@ BLAS and LAPACK Operations
     symeig
     lobpcg
     trapz
+    trapezoid
+    cumulative_trapezoid
     triangular_solve
     vdot
 

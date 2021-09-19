@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/frontend/schema_matching.h>
 
 #include <ATen/core/jit_type.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/frontend/builtin_functions.h>
 #include <torch/csrc/jit/frontend/error_report.h>
 #include <torch/csrc/jit/runtime/operator.h>
@@ -101,11 +102,14 @@ Value* tryConvertToType(
     bool value_isa_tensor = value->type()->isSubtypeOf(TensorType::get());
     bool value_equals_number = *value->type() == *NumberType::get();
     bool concrete_float = *concrete_type == *FloatType::get();
+    bool concrete_complex = *concrete_type == *ComplexType::get();
     bool concrete_int = *concrete_type == *IntType::get();
     bool concrete_number = *concrete_type == *NumberType::get();
     if (value_isa_tensor) {
       if (concrete_float) {
         value = graph.insert(aten::FloatImplicit, {value}, {}, loc);
+      } else if (concrete_complex) {
+        value = graph.insert(aten::ComplexImplicit, {value}, {}, loc);
       } else if (concrete_int) {
         value = graph.insert(aten::IntImplicit, {value}, {}, loc);
       } else if (concrete_number) {
@@ -114,6 +118,8 @@ Value* tryConvertToType(
     } else if (value_equals_number) {
       if (concrete_float) {
         value = graph.insert(aten::Float, {value}, {}, loc);
+      } else if (concrete_complex) {
+        value = graph.insert(aten::Complex, {value}, {}, loc);
       } else if (concrete_int) {
         value = graph.insert(aten::Int, {value}, {}, loc);
       }
@@ -216,7 +222,7 @@ static Value* tryMatchArgument(
 c10::optional<size_t> findInputWithName(
     const std::string& name,
     at::ArrayRef<NamedValue> kwargs) {
-  for (size_t i = 0; i < kwargs.size(); ++i) {
+  for (const auto i : c10::irange(kwargs.size())) {
     if (kwargs[i].name() == name)
       return i;
   }
@@ -324,7 +330,7 @@ static c10::optional<MatchedSchema> tryMatchSchema(
 
   // if we finish the loop will we have consumed all arguments?
   size_t used_args = 0;
-  for (size_t schema_i = 0; schema_i < schema.arguments().size(); ++schema_i) {
+  for (const auto schema_i : c10::irange(schema.arguments().size())) {
     const auto& arg = schema.arguments()[schema_i];
     c10::optional<NamedValue> actual_named_value;
     if (arg.name() == "self" && self) {
@@ -424,7 +430,7 @@ static c10::optional<MatchedSchema> tryMatchSchema(
     return c10::nullopt;
   }
   // check for unused kwargs
-  for (size_t i = 0; i < kwargs.size(); ++i) {
+  for (const auto i : c10::irange(kwargs.size())) {
     const auto& nv = kwargs[i];
     if (!used_kwarg[i]) {
       if (failure_messages) {
@@ -528,7 +534,7 @@ std::pair<size_t, MatchedSchema> matchSchemas(
   for (bool allow_conversions : {false, true}) {
     // clear previous error messages
     failure_messages.str("");
-    for (size_t i = 0; i < schemas.size(); ++i) {
+    for (const auto i : c10::irange(schemas.size())) {
       const auto matched_schema = tryMatchSchema(
           *schemas[i],
           loc,

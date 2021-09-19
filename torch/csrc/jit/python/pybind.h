@@ -4,6 +4,7 @@
 
 #include <ATen/core/interned_strings.h>
 #include <ATen/core/ivalue.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/THP.h>
 #include <torch/csrc/autograd/variable.h>
@@ -118,6 +119,7 @@ namespace detail {
 template <>
 struct type_caster<torch::jit::IValue> {
  public:
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   PYBIND11_TYPE_CASTER(torch::jit::IValue, _("IValue"));
 
   bool load(handle src, bool) {
@@ -140,6 +142,7 @@ struct type_caster<torch::jit::IValue> {
 template <>
 struct type_caster<torch::jit::Symbol> {
  public:
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   PYBIND11_TYPE_CASTER(torch::jit::Symbol, _("Symbol"));
 
   bool load(handle src, bool) {
@@ -167,6 +170,7 @@ struct type_caster<torch::jit::Symbol> {
 template <>
 struct type_caster<torch::jit::AttributeKind> {
  public:
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   PYBIND11_TYPE_CASTER(torch::jit::AttributeKind, _("AttributeKind"));
 
   bool load(handle src, bool) {
@@ -211,7 +215,7 @@ namespace jit {
 
 static inline py::tuple tuple_tail(const py::tuple& tup) {
   py::tuple r(tup.size() - 1);
-  for (size_t i = 1; i < tup.size(); i++) {
+  for (const auto i : c10::irange(1, tup.size())) {
     r[i - 1] = tup[i];
   }
   return r;

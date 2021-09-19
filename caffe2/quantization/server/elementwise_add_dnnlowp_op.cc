@@ -13,7 +13,7 @@ using namespace std;
 using namespace dnnlowp;
 
 using AddFp32Op =
-    BinaryElementwiseOp<NumericTypes, CPUContext, AddFunctor<CPUContext>>;
+    BinaryElementwiseBroadcastOp<NumericTypes, CPUContext, AddFunctor<CPUContext>>;
 
 template <typename T>
 class AddDNNLowPOp : public BinaryElementwiseDNNLowPOp<T, AddFp32Op> {
@@ -24,6 +24,7 @@ class AddDNNLowPOp : public BinaryElementwiseDNNLowPOp<T, AddFp32Op> {
   using BinaryElementwiseDNNLowPOp<T, AddFp32Op>::enable_broadcast_;
   using BinaryElementwiseDNNLowPOp<T, AddFp32Op>::requantization_params_;
 
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   AddDNNLowPOp(const OperatorDef& operator_def, Workspace* ws)
       : BinaryElementwiseDNNLowPOp<T, AddFp32Op>(operator_def, ws) {}
 
@@ -53,6 +54,7 @@ class AddDNNLowPOp : public BinaryElementwiseDNNLowPOp<T, AddFp32Op> {
 #endif
       {
         constexpr int VLEN = 8;
+        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         int j_begin, j_end;
         tie(j_begin, j_end) = Get1DPartition(
             A.numel(),
@@ -138,14 +140,18 @@ class AddDNNLowPOp : public BinaryElementwiseDNNLowPOp<T, AddFp32Op> {
         C_quantized[i] = fbgemm::Requantize<T>(raw, requantization_params_);
       }
     } else {
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       size_t pre, n, post;
       std::tie(pre, n, post) =
           elementwise_ops_utils::ComputeLegacyBroadcastSizes(A, B, axis_);
 #ifdef _OPENMP
 #pragma omp parallel for
 #endif
+      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
       for (int i = 0; i < pre; ++i) {
+        // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
         for (int j = 0; j < n; ++j) {
+          // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
           for (int k = 0; k < post; ++k) {
             int32_t raw = A_quantized[((i * n) + j) * post + k] +
                 B_quantized[j] - intermediate_zero_point;

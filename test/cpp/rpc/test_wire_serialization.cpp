@@ -7,6 +7,8 @@
 #include <string>
 #include <vector>
 
+using ::testing::IsSubstring;
+
 TEST(WireSerialize, Base) {
   auto run = [](const std::string& payload,
                 const std::vector<at::Tensor>& tensors) {
@@ -71,8 +73,8 @@ TEST(WireSerialize, Errors) {
     try {
       f();
       FAIL();
-    } catch (const std::runtime_error& e) {
-      EXPECT_STREQ(e.what(), msg);
+    } catch (const std::exception& e) {
+      EXPECT_PRED_FORMAT2(IsSubstring, msg, e.what());
     } catch (...) {
       FAIL();
     }

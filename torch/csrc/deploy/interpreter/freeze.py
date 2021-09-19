@@ -35,17 +35,13 @@ MAIN_INCLUDES = """#include <Python.h>
 
 """
 
-MAIN_PREFIX = """
+MAIN_PREFIX_TEMPLATE = """
 // Compiled standard library modules. These should be appended to the existing
 // `PyImport_FrozenModules` that ships with CPython.
-struct _frozen _PyImport_FrozenModules_torch[] = {
+struct _frozen {}[] = {{
 """
 
-FAKE_PREFIX = """
-// Compiled standard library modules. These should be appended to the existing
-// `PyImport_FrozenModules` that ships with CPython.
-struct _frozen _PyImport_FrozenModules[] = {
-"""
+FAKE_PREFIX = MAIN_PREFIX_TEMPLATE.format("_PyImport_FrozenModules")
 
 MAIN_SUFFIX = """\
     {0, 0, 0} /* sentinel */
@@ -133,7 +129,7 @@ class Freezer:
         for f in bytecode_files:
             f.close()
 
-    def write_main(self, install_root, oss):
+    def write_main(self, install_root, oss, symbol_name):
         """
         Write the `main.c` file containing a table enumerating all the
         frozen modules.
@@ -143,7 +139,7 @@ class Freezer:
             for m in self.frozen_modules:
                 outfp.write(f"extern unsigned char {m.c_name}[];\n")
 
-            outfp.write(MAIN_PREFIX)
+            outfp.write(MAIN_PREFIX_TEMPLATE.format(symbol_name))
             for m in self.frozen_modules:
                 outfp.write(f'\t{{"{m.module_name}", {m.c_name}, {m.size}}},\n')
             outfp.write(MAIN_SUFFIX)
@@ -245,25 +241,28 @@ parser = argparse.ArgumentParser(description="Compile py source")
 parser.add_argument("paths", nargs="*", help="Paths to freeze.")
 parser.add_argument("--verbose", action="store_true", help="Print debug logs")
 parser.add_argument("--install_dir", help="Root directory for all output files")
-parser.add_argument("--fbcode_dir", help="Root directory for all output files")
 parser.add_argument("--oss", action="store_true", help="If it's OSS build, add a fake _PyImport_FrozenModules")
+parser.add_argument(
+    "--symbol_name",
+    help="The name of the frozen module array symbol to generate",
+    default="_PyImport_FrozenModules_torch",
+)
 
 args = parser.parse_args()
 
 f = Freezer(args.verbose)
 
 for p in args.paths:
-    if args.fbcode_dir:
-        p = os.path.join(args.fbcode_dir, p)
     path = Path(p)
     if path.is_dir() and not Path.exists(path / '__init__.py'):
         # this 'top level path p' is a standard directory containing modules,
         # not a module itself
         # each 'mod' could be a dir containing __init__.py or .py file
-        for mod in path.glob("*"):
+        # NB: sorted to make sure this is deterministic
+        for mod in sorted(path.glob("*")):
             f.compile_path(mod, mod)
     else:
         f.compile_path(path, path)
 
 f.write_bytecode(args.install_dir)
-f.write_main(args.install_dir, args.oss)
+f.write_main(args.install_dir, args.oss, args.symbol_name)

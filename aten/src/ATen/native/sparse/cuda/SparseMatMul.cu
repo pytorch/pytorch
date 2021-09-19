@@ -13,13 +13,12 @@
 #include <thrust/for_each.h>
 #include <thrust/sequence.h>
 
-#include <THC/THCTensorMathPointwise.cuh>
 #include <THC/THCThrustAllocator.cuh>
 
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAUtils.h>
 #include <cusparse.h>
-#include <ATen/native/sparse/cuda/SparseCUDABlas.cuh>
+#include <ATen/native/sparse/cuda/SparseCUDABlas.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 
 #include <thrust/device_vector.h>
@@ -57,6 +56,11 @@ Tensor _to_csr_int(const Tensor& rowIndices, int64_t dim, int64_t nnz) {
   return csr;
 }
 
+
+#pragma push
+// NVCC complains that confirm_mult_size is not used,
+// but it is used in specializations of CusparseMatrixMultiplyOp below
+#pragma diag_suppress 177   // Function was declared but never referenced
 int confirm_mult_size(const std::vector<int>& mat1_size, const std::vector<int>& mat2_size) {
   TORCH_CHECK(
       mat1_size[1] == mat2_size[0],
@@ -71,6 +75,7 @@ int confirm_mult_size(const std::vector<int>& mat1_size, const std::vector<int>&
       ")");
   return mat1_size[1];
 }
+#pragma pop
 
 void create_general_description_(cusparseMatDescr_t& description_) {
   TORCH_CUDASPARSE_CHECK(cusparseCreateMatDescr(&description_));
@@ -78,10 +83,10 @@ void create_general_description_(cusparseMatDescr_t& description_) {
   TORCH_CUDASPARSE_CHECK(cusparseSetMatIndexBase(description_, CUSPARSE_INDEX_BASE_ZERO));
 }
 
-// csrMatrixRef is used to have a representation of a raw CSR matrix representation 
-// comming from `sparse_sparse_matmul_cuda_kernel` function. 
+// csrMatrixRef is used to have a representation of a raw CSR matrix representation
+// comming from `sparse_sparse_matmul_cuda_kernel` function.
 // Moreover this implements a RAII guard for a cusparse descriptor
-template<class scalar_t> 
+template<class scalar_t>
 struct csrMatrixRef {
   int* csr_indices_{nullptr};
   int* csr_pointers_{nullptr};
@@ -91,7 +96,7 @@ struct csrMatrixRef {
 
   #if IS_CUSPARSE11_AVAILABLE()
     cusparseSpMatDescr_t description_{0};
-  #else 
+  #else
     cusparseMatDescr_t description_{0};
   #endif
 
@@ -133,9 +138,9 @@ struct csrMatrixRef {
         CUSPARSE_INDEX_32I,
         CUSPARSE_INDEX_BASE_ZERO,
         cuda_data_type));
-    #else 
+    #else
       create_general_description_(description_);
-    #endif  
+    #endif
   }
 
   ~csrMatrixRef() {
@@ -145,16 +150,16 @@ struct csrMatrixRef {
       cusparseDestroyMatDescr(description_);
     #endif
   }
- 
+
   int size(int index) const {
     return size_.at(index);
-  } 
+  }
 };
 
-// csrOutput is used to represent the output for `CusparseMatrixMultiplyOp`  
-// Note that `csrOutput` is different from `csrMatrixRef` and the purpose 
+// csrOutput is used to represent the output for `CusparseMatrixMultiplyOp`
+// Note that `csrOutput` is different from `csrMatrixRef` and the purpose
 // of this was to have a materialized  version of a CSR matrix.
-// Moreover this implements a RAII guard for a cusparse descriptor  
+// Moreover this implements a RAII guard for a cusparse descriptor
 struct csrOutput {
   Tensor csr_indices_{};
   Tensor csr_pointers_{};
@@ -180,10 +185,10 @@ struct csrOutput {
 #if IS_CUSPARSE11_AVAILABLE()
 
 // RAII guard helps to support cuSparse 11 API for `A @ B` operation
-// This generic template exists because with cuSparse the `scalar_t` type could be a double or float  
+// This generic template exists because with cuSparse the `scalar_t` type could be a double or float
 template <class scalar_t>
-struct CusparseMatrixMultiplyOp { 
-  
+struct CusparseMatrixMultiplyOp {
+
   cusparseSpGEMMDescr_t spgemmDesc;
 
   CusparseMatrixMultiplyOp() {
@@ -204,20 +209,8 @@ struct CusparseMatrixMultiplyOp {
       Tensor& output_values,
       Tensor& output_indices) {
     const int A_num_rows = A.size(0);
-    const int A_num_cols = A.size(1);
-    const int A_num_nnz = A.nnz_;
 
-    const int B_num_rows = B.size(0);
     const int B_num_cols = B.size(1);
-    const int B_num_nnz = B.nnz_;
-
-    int* dA_csrOffsets = A.csr_pointers_;
-    int* dA_columns = A.csr_indices_;
-    scalar_t* dA_values = A.csr_values_;
-
-    int* dB_csrOffsets = B.csr_pointers_;
-    int* dB_columns = B.csr_indices_;
-    scalar_t* dB_values = B.csr_values_;
 
     cudaDataType computeType;
     if ( std::is_same<float, scalar_t>::value ) {
@@ -233,13 +226,13 @@ struct CusparseMatrixMultiplyOp {
 
     int* dC_csrOffsets = out.csr_pointers_.data_ptr<int>();
     int* dC_columns = nullptr;
-    scalar_t* dC_values = nullptr; 
+    scalar_t* dC_values = nullptr;
 
     scalar_t alpha = 1.0f;
     scalar_t beta = 0.0f;
     cusparseOperation_t opA = CUSPARSE_OPERATION_NON_TRANSPOSE;
     cusparseOperation_t opB = CUSPARSE_OPERATION_NON_TRANSPOSE;
-    
+
     csrMatrixRef<scalar_t> C(
       nullptr,
       nullptr,
@@ -253,7 +246,7 @@ struct CusparseMatrixMultiplyOp {
     cusparseHandle_t handle = at::cuda::getCurrentCUDASparseHandle();
     void *dBuffer1 = NULL, *dBuffer2 = NULL;
     size_t bufferSize1 = 0, bufferSize2 = 0;
-  
+
     cusparseSpMatDescr_t matA = A.description_;
     cusparseSpMatDescr_t matB = B.description_;
     cusparseSpMatDescr_t matC = C.description_;
@@ -274,7 +267,7 @@ struct CusparseMatrixMultiplyOp {
         spgemmDesc,
         &bufferSize1,
         NULL));
-    
+
     auto& allocator = *::c10::cuda::CUDACachingAllocator::get();
 
     at::DataPtr dataPtr1 = allocator.allocate(bufferSize1);
@@ -342,7 +335,7 @@ struct CusparseMatrixMultiplyOp {
     out.csr_values_ = at::empty({out.nnz_}, output_values.options());
     dC_columns = out.csr_indices_.data_ptr<int>();
     dC_values = out.csr_values_.data_ptr<scalar_t>();
-    
+
     // update matC with the new pointers
     TORCH_CUDASPARSE_CHECK(
         cusparseCsrSetPointers(matC, dC_csrOffsets, dC_columns, dC_values));
@@ -372,16 +365,16 @@ template struct CusparseMatrixMultiplyOp<double>;
 #else // if not IS_CUSPARSE11_AVAILABLE()
 
 using DcsrMatrixRef = csrMatrixRef<double>;
-using ScsrMatrixRef = csrMatrixRef<float>; 
+using ScsrMatrixRef = csrMatrixRef<float>;
 
 // RAII guard helps to support cuSparse 10 API for `A @ B` operation
-// This generic template exists because with cuSparse the `scalar_t` type could be a double or float  
+// This generic template exists because with cuSparse the `scalar_t` type could be a double or float
 template <class scalar_t>
-struct CusparseMatrixMultiplyOp { 
+struct CusparseMatrixMultiplyOp {
   csrOutput operator()(
       const csrMatrixRef<scalar_t>& lhs,
       const csrMatrixRef<scalar_t>& rhs,
-      Tensor &output_values, 
+      Tensor &output_values,
       Tensor &output_indices)
   {
     TORCH_INTERNAL_ASSERT(false, "cusparse csr sparse-sparse MM only supports data type of float and double.");
@@ -402,7 +395,7 @@ template<> struct CusparseMatrixMultiplyOp<double> {
   csrOutput operator ()(
       const DcsrMatrixRef& lhs,
       const DcsrMatrixRef& rhs,
-      Tensor &output_values, 
+      Tensor &output_values,
       Tensor &output_indices) {
     double alpha = 1.0;
     DcsrMatrixRef empty;
@@ -415,7 +408,7 @@ template<> struct CusparseMatrixMultiplyOp<double> {
       const DcsrMatrixRef& C,
       const double* alpha,
       const double* beta,
-      Tensor &output_values, 
+      Tensor &output_values,
       Tensor &output_indices) {
     void* buffer_{nullptr};
     cusparseHandle_t cusparseHandle_ = at::cuda::getCurrentCUDASparseHandle();
@@ -529,20 +522,20 @@ template<> struct CusparseMatrixMultiplyOp<float> {
   csrOutput operator()(
       const ScsrMatrixRef& lhs,
       const ScsrMatrixRef& rhs,
-      Tensor &output_values, 
+      Tensor &output_values,
       Tensor &output_indices) {
     float alpha = 1.0;
     ScsrMatrixRef empty;
     return Sgemm2(lhs, rhs, empty, &alpha, nullptr, output_values, output_indices);
   }
 
-  csrOutput Sgemm2( 
+  csrOutput Sgemm2(
       const ScsrMatrixRef& A,
       const ScsrMatrixRef& B,
       const ScsrMatrixRef& C,
       const float* alpha,
       const float* beta,
-      Tensor &output_values, 
+      Tensor &output_values,
       Tensor &output_indices) {
     void* buffer_{nullptr};
     cusparseHandle_t cusparseHandle_ = at::cuda::getCurrentCUDASparseHandle();
@@ -644,7 +637,7 @@ template<> struct CusparseMatrixMultiplyOp<float> {
 };
 
 
- 
+
 #endif // IS_CUSPARSE11_AVAILABLE()
 
 template <typename scalar_t>
@@ -653,9 +646,9 @@ void sparse_sparse_matmul_cuda_kernel(
     const Tensor& mat1,
     const Tensor& mat2) {
 
-  static_assert(std::is_same<float, scalar_t>::value || std::is_same<double, scalar_t>::value, 
+  static_assert(std::is_same<float, scalar_t>::value || std::is_same<double, scalar_t>::value,
     "sparse_sparse_matmul_cuda_kernel only supports float and double value types");
-  
+
   Tensor mat1_indices_ = mat1._indices().contiguous();
   Tensor mat1_values = mat1._values().contiguous();
 
@@ -663,10 +656,10 @@ void sparse_sparse_matmul_cuda_kernel(
   Tensor mat1_col_indices = mat1_indices_.select(0, 1);
 
   Tensor mat1_indptr = _to_csr_int(mat1_row_indices, mat1.size(0), mat1._nnz());
-  
+
   Tensor mat1_indices = at::empty(
       {mat1_col_indices.size(0)}, mat1_col_indices.options().dtype(kInt));
-  
+
   mat1_indices.copy_(mat1_col_indices);
 
   Tensor mat2_indices_ = mat2._indices().contiguous();
@@ -712,7 +705,7 @@ void sparse_sparse_matmul_cuda_kernel(
 
   // Sparse matrix multiplication
   CusparseMatrixMultiplyOp<scalar_t> op;
-  csrOutput csr_output = op(csr_mat1, csr_mat2, output_values, output_indices); 
+  csrOutput csr_output = op(csr_mat1, csr_mat2, output_values, output_indices);
   auto nnz = csr_output.nnz_;
 
   output_values.set_(csr_output.csr_values_);
@@ -729,8 +722,8 @@ void sparse_sparse_matmul_cuda_kernel(
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
   auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
   auto policy = thrust::cuda::par(allocator).on(stream);
-  
-  // Filling the COO row indices 
+
+  // Filling the COO row indices
   thrust::for_each(
       policy,
       thrust::make_counting_iterator(int64_t(0)),
@@ -747,7 +740,7 @@ void sparse_sparse_matmul_cuda_kernel(
         }
       });
 
-  // Filling the COO column indices 
+  // Filling the COO column indices
   thrust::for_each(
     policy,
     thrust::make_counting_iterator(int64_t(0)),
