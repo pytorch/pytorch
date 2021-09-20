@@ -2863,7 +2863,7 @@ class TestReductions(TestCase):
     @onlyCPU
     @dtypes(torch.float32, torch.float64)
     def test_histogram_error_handling(self, device, dtype):
-        with self.assertRaisesRegex(RuntimeError, '\"histogram_cpu\" not implemented for'):
+        with self.assertRaisesRegex(RuntimeError, 'not implemented for'):
             values = make_tensor((), device, dtype=torch.int32)
             torch.histogram(values, 1)
 
@@ -2903,16 +2903,11 @@ class TestReductions(TestCase):
             values = make_tensor((), device, dtype=dtype)
             torch.histogram(values, -1)
 
-        with self.assertRaisesRegex(RuntimeError, 'input tensor and weight tensor should have the same shape'):
+        with self.assertRaisesRegex(RuntimeError, 'if weight tensor is provided, \
+it should have the same shape as the input tensor excluding its last dimension'):
             values = make_tensor((2, 2), device, dtype=dtype)
             weight = make_tensor((1), device, dtype=dtype)
             torch.histogram(values, 1, weight=weight)
-
-        with self.assertRaisesRegex(RuntimeError, 'hist tensor must be contiguous'):
-            values = make_tensor((), device, dtype=dtype)
-            hist = make_tensor((2), device, dtype=dtype, noncontiguous=True)
-            bin_edges = make_tensor((), device, dtype=dtype)
-            torch.histogram(values, 2, out=(hist, bin_edges))
 
         with self.assertRaisesRegex(TypeError, 'received an invalid combination of arguments'):
             values = make_tensor((), device, dtype=dtype)
@@ -2923,7 +2918,7 @@ class TestReductions(TestCase):
             values = make_tensor((), device, dtype=dtype)
             torch.histogram(values, 2, range=(1, 0))
 
-        with self.assertRaisesRegex(RuntimeError, r'range of \[nan, nan\] is not finite'):
+        with self.assertRaisesRegex(RuntimeError, r'range \[nan, nan\] is not finite'):
             values = torch.tensor([float("nan")], device=device, dtype=dtype)
             torch.histogram(values, 2)
 
