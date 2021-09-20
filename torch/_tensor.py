@@ -1,4 +1,5 @@
 from collections import OrderedDict
+import enum
 import functools
 from numbers import Number
 from typing import Any, Dict, Optional, Tuple, Union
@@ -582,11 +583,21 @@ class Tensor(torch._C._TensorBase):
 
     @_wrap_type_error_to_not_implemented
     def __floordiv__(self, other):
-        return torch.floor_divide(self, other)
+        warnings.warn("__floordiv__ is deprecated, and its behavior will change in a future version of pytorch. "
+                      "It currently rounds toward 0 (like the 'trunc' function NOT 'floor'). "
+                      "This results in incorrect rounding for negative values. "
+                      "To keep the current behavior, use torch.div(a, b, rounding_mode='trunc'), "
+                      "or for actual floor division, use torch.div(a, b, rounding_mode='floor').", stacklevel=3)
+        return torch.div(self, other, rounding_mode='trunc')
 
     @_wrap_type_error_to_not_implemented
     def __rfloordiv__(self, other):
-        return torch.floor_divide(other, self)
+        warnings.warn("__rfloordiv__ is deprecated, and its behavior will change in a future version of pytorch. "
+                      "It currently rounds toward 0 (like the 'trunc' function NOT 'floor'). "
+                      "This results in incorrect rounding for negative values. "
+                      "To keep the current behavior, use torch.div(a, b, rounding_mode='trunc'), "
+                      "or for actual floor division, use torch.div(a, b, rounding_mode='floor').", stacklevel=3)
+        return torch.div(other, self, rounding_mode='trunc')
 
     @_wrap_type_error_to_not_implemented
     def __rlshift__(self, other):
@@ -1042,6 +1053,67 @@ class Tensor(torch._C._TensorBase):
                 return ret
             else:
                 return _convert(ret, cls)
+
+    def __dlpack__(self, stream=None):
+        """
+        Creates a DLpack `capsule https://data-apis.org/array-api/latest/design_topics/data_interchange.html#data-interchange`_
+        of the current tensor to be exported to other libraries.
+
+        This function will be called from the `from_dlpack` method
+        of the library that will consume the capsule. `from_dlpack` passes the current
+        stream to this method as part of the specification.
+
+        Args:
+            stream (integer or None): An optional Python integer representing a
+            pointer to a CUDA stream. The current stream is synchronized with
+            this stream before the capsule is created, and since the capsule
+            shares its storage with the tensor this make it safe to access from
+            both streams.  If None or -1 is passed then no synchronization is performed.
+        """
+        if has_torch_function_unary(self):
+            return handle_torch_function(Tensor.__dlpack__, (self,), self, stream)
+
+        # DLPack capsules can't capture all of PyTorch's semantics,
+        # so we prohibit exporting tensors that would lose their properties like
+        # requires_grad and having the conjugate bit set.
+        if self.requires_grad:
+            raise RuntimeError('Can\'t export tensors that require gradient, use tensor.detach()')
+        if self.is_conj():
+            raise RuntimeError('Can\'t export tensors with the conjugate bit set')
+        if self.layout != torch.strided:
+            raise RuntimeError('Can\'t export tensors with layout other than torch.strided')
+
+        if stream is not None and type(stream) is not int:
+            # Stream pointers in CUDA/ROCm are uniquely numbered and can
+            # be retrieved from their integer value.
+            raise TypeError('stream must be ``int`` or ``none``')
+        elif stream is not None and stream != -1:
+            if self.device.type == 'cuda':
+                stream = torch.cuda.streams.ExternalStream(stream)
+                # Only synchronize on different streams
+                if stream != torch.cuda.current_stream:
+                    event = torch.cuda.Event()
+                    event.record(torch.cuda.current_stream())
+                    stream.wait_event(event)
+        return torch.to_dlpack(self)
+
+    def __dlpack_device__(self) -> Tuple[enum.IntEnum, int]:
+        # Avoid circular import
+        from torch.utils.dlpack import DLDeviceType
+        if has_torch_function_unary(self):
+            return handle_torch_function(Tensor.__dlpack_device__, (self,), self)
+        idx = self.device.index if self.device.index is not None else 0
+        if self.device.type == 'cuda' and torch.version.hip is not None:
+            device_type = DLDeviceType.kDLROCM
+        elif self.device.type == 'cpu' and self.is_pinned():
+            device_type = DLDeviceType.kDLCPUPinned
+        elif self.device.type == 'cuda':
+            device_type = DLDeviceType.kDLGPU
+        elif self.device.type == 'cpu':
+            device_type = DLDeviceType.kDLCPU
+        else:
+            raise ValueError('Unknown device type {} for Dlpack'.format(self.device.type))
+        return (device_type, idx)
 
     __module__ = 'torch'
 

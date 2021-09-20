@@ -1236,8 +1236,8 @@ class Softmax2d(Module):
     apply `Softmax` to each location :math:`(Channels, h_i, w_j)`
 
     Shape:
-        - Input: :math:`(N, C, H, W)`
-        - Output: :math:`(N, C, H, W)` (same shape as input)
+        - Input: :math:`(N, C, H, W)` or :math:`(C, H, W)`.
+        - Output: :math:`(N, C, H, W)` or :math:`(C, H, W)` (same shape as input)
 
     Returns:
         a Tensor of the same dimension and shape as the input with
@@ -1252,8 +1252,8 @@ class Softmax2d(Module):
     """
 
     def forward(self, input: Tensor) -> Tensor:
-        assert input.dim() == 4, 'Softmax2d requires a 4D tensor as input'
-        return F.softmax(input, 1, _stacklevel=5)
+        assert input.dim() == 4 or input.dim() == 3, 'Softmax2d requires a 3D or 4D tensor as input'
+        return F.softmax(input, -3, _stacklevel=5)
 
 
 class LogSoftmax(Module):
