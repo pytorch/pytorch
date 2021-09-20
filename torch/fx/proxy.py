@@ -351,12 +351,12 @@ for method in magic_methods:
             target = getattr(operator, method)
             return tracer.create_proxy('call_function', target, args, kwargs)
         impl.__name__ = method
-        as_magic = f'__{method}__'
+        as_magic = f'__{method.strip("_")}__'
         setattr(Proxy, as_magic, impl)
     _scope(method)
 
 def _define_reflectable(orig_method_name):
-    method_name = f'__r{orig_method_name}__'
+    method_name = f'__r{orig_method_name.strip("_")}__'
 
     def impl(self, rhs):
         target = getattr(operator, orig_method_name)

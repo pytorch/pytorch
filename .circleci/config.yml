@@ -332,6 +332,9 @@ pytorch_ios_params: &pytorch_ios_params
     lite_interpreter:
       type: string
       default: "1"
+    use_coreml:
+      type: string
+      default: "0"
   environment:
     BUILD_ENVIRONMENT: << parameters.build_environment >>
     IOS_ARCH: << parameters.ios_arch >>
@@ -339,6 +342,7 @@ pytorch_ios_params: &pytorch_ios_params
     SELECTED_OP_LIST: << parameters.op_list >>
     USE_PYTORCH_METAL: << parameters.use_metal >>
     BUILD_LITE_INTERPRETER: << parameters.lite_interpreter >>
+    USE_COREML_DELEGATE: << parameters.use_coreml >>
 
 pytorch_windows_params: &pytorch_windows_params
   parameters:
@@ -634,7 +638,7 @@ jobs:
             echo "Skipping for ${BUILD_ENVIRONMENT}"
           fi
     - run:
-        name: Run tests
+        name: Test
         no_output_timeout: "90m"
         command: |
           set -e
@@ -7590,6 +7594,7 @@ workflows:
           ios_arch: x86_64
           ios_platform: SIMULATOR
           name: pytorch_ios_12_5_1_nightly_x86_64_build
+          use_coreml: "1"
           use_metal: "1"
       - binary_ios_build:
           build_environment: libtorch-ios-12.5.1-nightly-arm64-build
@@ -7600,6 +7605,7 @@ workflows:
           ios_arch: arm64
           ios_platform: OS
           name: pytorch_ios_12_5_1_nightly_arm64_build
+          use_coreml: "1"
           use_metal: "1"
       - binary_ios_upload:
           build_environment: libtorch-ios-12.5.1-nightly-binary-build-upload
