@@ -6,6 +6,7 @@ import torch.fx
 from typing import Dict, Any, TYPE_CHECKING
 from torch.fx.node import _get_qualified_name
 from torch.fx.passes.shape_prop import TensorMetadata
+from torch.fx._compatibility import compatibility
 
 try:
     import pydot
@@ -48,6 +49,7 @@ _WEIGHT_TEMPLATE = {
 }
 
 if HAS_PYDOT:
+    @compatibility(is_backward_compatible=False)
     class FxGraphDrawer:
         """
         Visualize a torch.fx.Graph with graphviz
