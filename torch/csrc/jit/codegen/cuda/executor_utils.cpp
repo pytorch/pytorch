@@ -712,15 +712,12 @@ NvrtcFunction nvrtcCompile(
 
   // keeping the string outside the loop for lifetime
   std::string max_register_usage = "--maxrregcount=";
-  uint32_t max_register = 0;
   if (opt_block_size.has_value() && opt_block_size.value() > 0) {
     int num_partition = 0;
     int reg_allocation_granularity = 0;
-    int max_regs_per_thread = 0;
     cudaOccDeviceProp occ_prop(*prop);
     cudaOccSubPartitionsPerMultiprocessor(&num_partition, &occ_prop);
     cudaOccRegAllocationGranularity(&reg_allocation_granularity, &occ_prop);
-    cudaOccRegAllocationMaxPerThread(&max_regs_per_thread, &occ_prop);
     int warp_size = prop->warpSize;
     int num_warps = ceilDiv(opt_block_size.value(), warp_size);
 
@@ -733,8 +730,9 @@ NvrtcFunction nvrtcCompile(
     // clamp down to register allocation granularity at warp level
     int effective_max_reg_per_warp = max_reg_per_warp /
         reg_allocation_granularity * reg_allocation_granularity;
-    max_register = static_cast<uint32_t>(
-        std::min(effective_max_reg_per_warp / warp_size, max_regs_per_thread));
+    // The maximum possible count allowed by ptxas is 255
+    auto max_register = static_cast<uint32_t>(
+        std::min(effective_max_reg_per_warp / warp_size, 255));
 
     if (compile_to_sass) {
       max_register_usage += std::to_string(max_register);
