@@ -40,15 +40,3 @@ TORCH_CUDA_CU_API void THCTensor_free(THCState* state, THCTensor* self);
 TORCH_CUDA_CU_API int THCTensor_getDevice(
     THCState* state,
     const THCTensor* tensor);
-
-#include <THC/generic/THCTensor.hpp>
-#include <THC/THCGenerateAllTypes.h>
-
-#include <THC/generic/THCTensor.hpp>
-#include <THC/THCGenerateComplexTypes.h>
-
-#include <THC/generic/THCTensor.hpp>
-#include <THC/THCGenerateBoolType.h>
-
-#include <THC/generic/THCTensor.hpp>
-#include <THC/THCGenerateBFloat16Type.h>
