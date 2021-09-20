@@ -392,12 +392,26 @@ REGISTER_OPERATOR_FUNCTOR(
         }
         // prepare inputs
         const size_t size = p_node->inputs().size();
-        std::vector<IValue> vals;
-        vals.reserve(size);
-        for (const auto i : c10::irange(size)) {
-          vals.push_back(p_node->Input(i));
+        switch (size) {
+          case 1:
+            p_node->Output(0) = c10::ivalue::Tuple::create(p_node->Input(0));
+            break;
+          case 2:
+            p_node->Output(1) = c10::ivalue::Tuple::create(p_node->Input(0), p_node->Input(1));
+            break;
+          case 3:
+            p_node->Output(2) = c10::ivalue::Tuple::create(p_node->Input(0), p_node->Input(1), p_node->Input(2));
+            break;
+          default: {
+            std::vector<IValue> vals;
+            vals.reserve(size);
+            for (const auto i : c10::irange(size)) {
+              vals.push_back(p_node->Input(i));
+            }
+            p_node->Output(0) = c10::ivalue::Tuple::create(std::move(vals));
+            break;
+          }
         }
-        p_node->Output(0) = c10::ivalue::Tuple::create(std::move(vals));
       };
     });
 

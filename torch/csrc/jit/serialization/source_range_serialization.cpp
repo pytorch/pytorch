@@ -52,9 +52,8 @@ std::shared_ptr<Source> SourceRangeDeserializer::deserialize_source(
 }
 
 c10::IValue SourceRangeSerializer::serialize(const SourceRange& sr) {
-  std::vector<c10::IValue> elements = {
-      serialize_source(sr.source()), (int64_t)sr.start(), (int64_t)sr.end()};
-  return c10::ivalue::Tuple::create(std::move(elements));
+  return c10::ivalue::Tuple::create(
+      serialize_source(sr.source()), (int64_t)sr.start(), (int64_t)sr.end());
 }
 
 c10::IValue SourceRangeSerializer::serialize_source(
@@ -62,13 +61,12 @@ c10::IValue SourceRangeSerializer::serialize_source(
   if (serialized_sources.count(s)) {
     return serialized_sources.at(s);
   }
-  std::vector<c10::IValue> elements;
+  c10::intrusive_ptr<c10::ivalue::Tuple> serialized;
   if (s == nullptr) {
-    elements = {"", "", 0};
+    serialized = c10::ivalue::Tuple::create({"", "", 0});
   } else {
-    elements = {s->text(), s->filename(), (int64_t)s->starting_line_no()};
+    serialized = c10::ivalue::Tuple::create({s->text(), s->filename(), (int64_t)s->starting_line_no()});
   }
-  auto serialized = c10::ivalue::Tuple::create(std::move(elements));
   serialized_sources[s] = serialized;
   return serialized;
 }
@@ -85,11 +83,10 @@ std::vector<char> SourceRangePickler::pickle(
     if (it != source_range_tags.end()) {
       source_range_tag = it->second;
     }
-    std::vector<c10::IValue> row_elems{
+    ivalues.emplace_back(c10::ivalue::Tuple::create({
         (int64_t)range.bytes,
         srs->serialize(range.range),
-        static_cast<int64_t>(source_range_tag)};
-    ivalues.emplace_back(c10::ivalue::Tuple::create(std::move(row_elems)));
+        static_cast<int64_t>(source_range_tag)}));
   }
   std::vector<at::Tensor> table;
   auto ivalue = c10::ivalue::Tuple::create(std::move(ivalues));

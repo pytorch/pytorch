@@ -319,6 +319,8 @@ class TORCH_API StaticRuntime {
     }
   }
 
+  IValue moveOutputsToTuple(size_t num_outputs);
+
   // Memory planning is only enabled if sm->opts().cleanup_activations is true.
   // Otherwise, the memory used by activations is cached inside the static
   // runtime.
