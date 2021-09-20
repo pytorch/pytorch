@@ -612,15 +612,22 @@ class OpInfo(object):
         if supports_gradgrad is None:
             supports_gradgrad = supports_autograd
         else:
-            assert not (supports_gradgrad and not supports_autograd)
+            assert not (supports_gradgrad and not supports_autograd), (
+                "supports_gradgrad refines the part of autograd is supported, so it should "
+                "not be set if supports_autograd is False")
         if check_batched_grad is None:
             check_batched_grad = supports_autograd
         else:
-            assert not (check_batched_grad and not supports_autograd)
+            assert not (check_batched_grad and not supports_autograd), (
+                "check_batched_grad refines the part of autograd that will be checked (by gradcheck), so "
+                "it should not be set if supports_autograd is False")
         if check_batched_gradgrad is None:
             check_batched_gradgrad = supports_gradgrad
         else:
-            assert not (check_batched_gradgrad and not supports_gradgrad)
+            assert not (check_batched_gradgrad and not supports_gradgrad), (
+                "check_batched_gradgrad refines the part of autograd that will be checked (by "
+                "gradgradcheck), so it should not be set if either supports_gradgrad or supports_autograd "
+                "is False.")
 
         self.supports_gradgrad = supports_gradgrad
         self.check_batched_grad = check_batched_grad
@@ -630,7 +637,9 @@ class OpInfo(object):
         if supports_inplace_autograd is None:
             supports_inplace_autograd = supports_autograd or supports_forward_ad
         else:
-            assert not (supports_inplace_autograd and not supports_autograd and not supports_forward_ad)
+            assert not (supports_inplace_autograd and not supports_autograd and not supports_forward_ad), (
+                "supports_inplace_autograd refines the part of autograd that is supported, so "
+                "it should not be set if both supports_autograd and supports_forward_ad are False")
         self.supports_inplace_autograd = supports_inplace_autograd
 
         self.supports_sparse = supports_sparse
