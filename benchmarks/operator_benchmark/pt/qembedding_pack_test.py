@@ -1,7 +1,6 @@
 
 import operator_benchmark as op_bench
 import torch
-import numpy as np
 
 embeddingbag_conversion_short_configs = op_bench.cross_product_configs(
     num_embeddings=(80,),
@@ -43,8 +42,7 @@ unpack_ops = op_bench.op_list(
 class EmbeddingBagFloatToFusedBase(op_bench.TorchBenchmarkBase):
     def init(self, num_embeddings, embedding_dim, op_func):
         self.inputs = {
-            "weight": torch.from_numpy((np.random.random_sample((
-                num_embeddings, embedding_dim)) + 1).astype(np.float32))
+            "weight": torch.rand(num_embeddings, embedding_dim, dtype=torch.float) + 1
         }
         self.op_func = op_func
 
