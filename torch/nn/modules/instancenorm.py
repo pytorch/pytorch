@@ -22,6 +22,15 @@ class _InstanceNorm(_NormBase):
     def _check_input_dim(self, input):
         raise NotImplementedError
 
+    def _get_no_batch_dim(self):
+        raise NotImplementedError
+
+    def _handle_no_batch_input(self, input):
+        input = input.unsqueeze(0)
+        return F.instance_norm(
+            input, self.running_mean, self.running_var, self.weight, self.bias,
+            self.training or not self.track_running_stats, self.momentum, self.eps).squeeze(0)
+
     def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
                               missing_keys, unexpected_keys, error_msgs):
         version = local_metadata.get('version', None)
@@ -54,6 +63,10 @@ class _InstanceNorm(_NormBase):
 
     def forward(self, input: Tensor) -> Tensor:
         self._check_input_dim(input)
+
+        if input.dim() == self._get_no_batch_dim():
+            return self._handle_no_batch_input(input)
+
         return F.instance_norm(
             input, self.running_mean, self.running_var, self.weight, self.bias,
             self.training or not self.track_running_stats, self.momentum, self.eps)
@@ -114,8 +127,8 @@ class InstanceNorm1d(_InstanceNorm):
             statistics in both training and eval modes. Default: ``False``
 
     Shape:
-        - Input: :math:`(N, C, L)`
-        - Output: :math:`(N, C, L)` (same shape as input)
+        - Input: :math:`(N, C, L)` or :math:`(C, L)`
+        - Output: :math:`(N, C, L)` or :math:`(C, L)` (same shape as input)
 
     Examples::
 
@@ -127,16 +140,12 @@ class InstanceNorm1d(_InstanceNorm):
         >>> output = m(input)
     """
 
+    def _get_no_batch_dim(self):
+        return 2
+
     def _check_input_dim(self, input):
-        if input.dim() == 2:
-            raise ValueError(
-                'InstanceNorm1d returns 0-filled tensor to 2D tensor.'
-                'This is because InstanceNorm1d reshapes inputs to'
-                '(1, N * C, ...) from (N, C,...) and this makes'
-                'variances 0.'
-            )
-        if input.dim() != 3:
-            raise ValueError('expected 3D input (got {}D input)'
+        if input.dim() not in (2, 3):
+            raise ValueError('expected 2D or 3D input (got {}D input)'
                              .format(input.dim()))
 
 
@@ -234,8 +243,8 @@ class InstanceNorm2d(_InstanceNorm):
             statistics in both training and eval modes. Default: ``False``
 
     Shape:
-        - Input: :math:`(N, C, H, W)`
-        - Output: :math:`(N, C, H, W)` (same shape as input)
+        - Input: :math:`(N, C, H, W)` or :math:`(C, H, W)`
+        - Output: :math:`(N, C, H, W)` or :math:`(C, H, W)` (same shape as input)
 
     Examples::
 
@@ -247,9 +256,12 @@ class InstanceNorm2d(_InstanceNorm):
         >>> output = m(input)
     """
 
+    def _get_no_batch_dim(self):
+        return 3
+
     def _check_input_dim(self, input):
-        if input.dim() != 4:
-            raise ValueError('expected 4D input (got {}D input)'
+        if input.dim() not in (3, 4):
+            raise ValueError('expected 3D or 4D input (got {}D input)'
                              .format(input.dim()))
 
 
@@ -339,8 +351,8 @@ class InstanceNorm3d(_InstanceNorm):
             statistics in both training and eval modes. Default: ``False``
 
     Shape:
-        - Input: :math:`(N, C, D, H, W)`
-        - Output: :math:`(N, C, D, H, W)` (same shape as input)
+        - Input: :math:`(N, C, D, H, W)` or :math:`(C, D, H, W)`
+        - Output: :math:`(N, C, D, H, W)` or :math:`(C, D, H, W)` (same shape as input)
 
     Examples::
 
@@ -352,8 +364,11 @@ class InstanceNorm3d(_InstanceNorm):
         >>> output = m(input)
     """
 
+    def _get_no_batch_dim(self):
+        return 4
+
     def _check_input_dim(self, input):
-        if input.dim() != 5:
+        if input.dim() not in (4, 5):
             raise ValueError('expected 5D input (got {}D input)'
                              .format(input.dim()))
 

@@ -10,11 +10,29 @@ namespace nn {
 template <size_t D, typename Derived>
 // NOLINTNEXTLINE(bugprone-exception-escape)
 class InstanceNormImpl : public torch::nn::NormImplBase<D, Derived, InstanceNormOptions> {
+ private:
+  Tensor handle_no_batch_input(const Tensor& input) {
+    auto batched_input = input.unsqueeze(0);
+    return torch::nn::functional::detail::instance_norm(
+               batched_input,
+               this->running_mean,
+               this->running_var,
+               this->weight,
+               this->bias,
+               this->is_training() || !this->options.track_running_stats(),
+               this->options.momentum(),
+               this->options.eps())
+        .squeeze(0);
+  }
+
  public:
   using torch::nn::NormImplBase<D, Derived, InstanceNormOptions>::NormImplBase;
 
   Tensor forward(const Tensor& input) {
     this->_check_input_dim(input);
+    if (input.dim() == D + 1) {
+      return this->handle_no_batch_input(input);
+    }
     return torch::nn::functional::detail::instance_norm(
       input, this->running_mean, this->running_var, this->weight, this->bias,
       this->is_training() || !this->options.track_running_stats(), this->options.momentum(), this->options.eps());

@@ -1561,6 +1561,27 @@ new_module_tests = [
         desc='tracking_stats',
     ),
     dict(
+        module_name='InstanceNorm1d',
+        constructor_args=(3, 1e-3, 0.3, False, True),
+        cpp_constructor_args='''torch::nn::InstanceNorm1dOptions(3)
+                                .eps(1e-3).momentum(0.3).affine(false).track_running_stats(true)''',
+        input_size=(3, 15),
+        cudnn=True,
+        check_eval=True,
+        ref=single_batch_reference_fn,
+        desc='tracking_stats_no_batch_dim',
+    ),
+    dict(
+        module_name='InstanceNorm1d',
+        constructor_args=(3, 1e-3, 0.3),
+        cpp_constructor_args='torch::nn::InstanceNorm1dOptions(3).eps(1e-3).momentum(0.3)',
+        input_size=(3, 15),
+        cudnn=True,
+        check_eval=True,
+        ref=single_batch_reference_fn,
+        desc='no_batch_dim',
+    ),
+    dict(
         module_name='InstanceNorm2d',
         constructor_args=(3, 1e-3, 0.3),
         cpp_constructor_args='torch::nn::InstanceNorm2dOptions(3).eps(1e-3).momentum(0.3)',
@@ -1579,6 +1600,27 @@ new_module_tests = [
         desc='tracking_stats',
     ),
     dict(
+        module_name='InstanceNorm2d',
+        constructor_args=(3, 1e-3, 0.3),
+        cpp_constructor_args='torch::nn::InstanceNorm2dOptions(3).eps(1e-3).momentum(0.3)',
+        input_size=(3, 6, 6),
+        cudnn=True,
+        check_eval=True,
+        ref=single_batch_reference_fn,
+        desc='no_batch_dim'
+    ),
+    dict(
+        module_name='InstanceNorm2d',
+        constructor_args=(3, 1e-3, 0.3, False, True),
+        cpp_constructor_args='''torch::nn::InstanceNorm2dOptions(3)
+                                .eps(1e-3).momentum(0.3).affine(false).track_running_stats(true)''',
+        input_size=(3, 6, 6),
+        cudnn=True,
+        check_eval=True,
+        ref=single_batch_reference_fn,
+        desc='tracking_stats_no_batch_dim',
+    ),
+    dict(
         module_name='InstanceNorm3d',
         constructor_args=(3, 1e-3, 0.3),
         cpp_constructor_args='torch::nn::InstanceNorm3dOptions(3).eps(1e-3).momentum(0.3)',
@@ -1595,6 +1637,27 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='tracking_stats',
+    ),
+    dict(
+        module_name='InstanceNorm3d',
+        constructor_args=(3, 1e-3, 0.3),
+        cpp_constructor_args='torch::nn::InstanceNorm3dOptions(3).eps(1e-3).momentum(0.3)',
+        input_size=(3, 4, 4, 4),
+        cudnn=True,
+        check_eval=True,
+        ref=single_batch_reference_fn,
+        desc='no_batch_dim'
+    ),
+    dict(
+        module_name='InstanceNorm3d',
+        constructor_args=(3, 1e-3, 0.3, False, True),
+        cpp_constructor_args='''torch::nn::InstanceNorm3dOptions(3)
+                                .eps(1e-3).momentum(0.3).affine(false).track_running_stats(true)''',
+        input_size=(2, 3, 4, 4, 4),
+        cudnn=True,
+        check_eval=True,
+        ref=single_batch_reference_fn,
+        desc='tracking_stats_no_batch_dim',
     ),
     dict(
         module_name='LayerNorm',
