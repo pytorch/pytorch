@@ -333,7 +333,7 @@ def diagonal(g, self, offset, dim1, dim2):
         axes.remove(dim2)
         self = g.op("Transpose", self, perm_i=axes + [dim1, dim2])
     else:
-        return _unimplemented("diagonal", "negative axis with unknown input rank")
+        return _unimplemented("diagonal", "unknown input rank")
 
     # Multiply input and mask to calculate values along diagonal
     # The mask consists of one values where diagonal values are to be calculated
