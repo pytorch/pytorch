@@ -821,12 +821,20 @@ def _rpc_to_here_test_caller_device_py_jit(dst: str, device_map: Dict[torch.devi
     ).to_here(device_map).device
 
 @torch.jit.script
+def _rpc_to_here_timeout_test_caller_device_jit_jit(dst: str, device_map: Dict[torch.device, torch.device], original_device: torch.device):
+    return rpc.remote(
+        dst,
+        _create_empty_tensor_jit,
+        ((1,), original_device)
+    ).to_here(1000.0, device_map).device
+
+@torch.jit.script
 def _rpc_to_here_test_caller_device_jit_jit(dst: str, device_map: Dict[torch.device, torch.device], original_device: torch.device):
     return rpc.remote(
         dst,
         _create_empty_tensor_jit,
         ((1,), original_device)
-    ).to_here(1000.0, device_map).device  # TODO(pbelevich): what to do with timeout?
+    ).to_here(device_map).device
 
 
 
@@ -6796,6 +6804,10 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture):
     @skip_if_lt_x_gpu(3)
     def test_my_device_map_rpc_to_here_caller_device_jit_jit(self):
         self._test_device_on_caller(_rpc_to_here_test_caller_device_jit_jit)
+
+    @skip_if_lt_x_gpu(3)
+    def test_my_device_map_rpc_to_here_timeout_caller_device_jit_jit(self):
+        self._test_device_on_caller(_rpc_to_here_timeout_test_caller_device_jit_jit)
 
 
 

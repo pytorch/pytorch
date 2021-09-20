@@ -213,6 +213,33 @@ RegisterOperators reg_rpc_ops(
          },
          aliasAnalysisFromSchema()),
      Operator(
+         fmt::format(
+             "aten::to_here(RRef(t) self, Dict(Device, Device)? device_map = None, float timeout = {}) -> t(*)",
+             torch::distributed::rpc::kDefaultRpcTimeoutSeconds),
+         [](Stack& stack) {
+           auto timeout = pop(stack).toDouble();
+           auto deviceMapDictIValue = pop(stack);
+           dist_rpc::DeviceMap deviceMap;
+           if (!deviceMapDictIValue.isNone()) {
+             TORCH_INTERNAL_ASSERT(deviceMapDictIValue.isGenericDict());
+             for (const auto& pair : deviceMapDictIValue.toGenericDict()) {
+               deviceMap.insert({pair.key().toDevice(), pair.value().toDevice()});
+             }
+           }
+           auto rref = pop(stack).toRRef();
+           IValue res;
+           if (rref->isOwner()) {
+             res =
+                 c10::dynamic_intrusive_pointer_cast<dist_rpc::OwnerRRef>(rref)
+                     ->getValue();
+           } else {
+             res = c10::dynamic_intrusive_pointer_cast<dist_rpc::UserRRef>(rref)
+                       ->toHere(std::move(deviceMap), timeout);
+           }
+           push(stack, std::move(res));
+         },
+         aliasAnalysisFromSchema()),
+     Operator(
          "aten::local_value(RRef(t) self) -> t(*)",
          [](Stack& stack) {
            auto rref = pop(stack).toRRef();
