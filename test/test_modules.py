@@ -206,36 +206,34 @@ class TestModule(TestCase):
             output_ip.backward(grad)
             self.assertEqual(input_args[0].grad, input_arg_copy[0].grad)
 
+    def _traverse_obj(self, obj, func):
+        if isinstance(obj, (tuple, list)) or isgenerator(obj):
+            return tuple(self._traverse_obj(o, func) for o in obj)
+        elif isinstance(obj, dict):
+            return {name: self._traverse_obj(o, func) for name, o in obj.items()}
+        elif isinstance(obj, (torch.Tensor, torch.nn.Parameter)):
+            return func(obj)
+
     def _retain_grad(self, obj):
         # gradients needs to be retained to check for grad. This is useful when
         # non-leafs are present in the graph.
-        if isinstance(obj, (tuple, list)):
-            for i in obj:
-                self._retain_grad(i)
-        elif isinstance(obj, dict):
-            for i in obj.values():
-                self._retain_grad(i)
-        elif isinstance(obj, torch.Tensor) and obj.requires_grad:
-            obj.retain_grad()
+        def retain_grad(obj):
+            if obj.requires_grad:
+                obj.retain_grad()
+        self._traverse_obj(obj, retain_grad)
 
     def _get_grads(self, obj):
-        if isinstance(obj, (tuple, list)):
-            return tuple(self._get_grads(o) for o in obj)
-        elif isinstance(obj, dict):
-            return {name: self._get_grads(o) for name, o in obj.items()}
-        elif isinstance(obj, torch.Tensor) and obj.requires_grad:
-            return obj.grad
+        def get_grad(obj):
+            if obj.requires_grad:
+                return obj.grad
+        return self._traverse_obj(obj, get_grad)
 
     def _zero_grad(self, obj):
-        if isinstance(obj, (tuple, list)) or isgenerator(obj):
-            for o in obj:
-                self._zero_grad(o)
-        elif isinstance(obj, dict):
-            for o in obj.values():
-                self._zero_grad(o)
-        elif isinstance(obj, (torch.Tensor, torch.nn.Parameter)) and obj.grad is not None:
-            obj.grad.detach_()
-            obj.grad.zero_()
+        def zero_grad(obj):
+            if obj.grad is not None:
+                obj.grad.detach_()
+                obj.grad.zero_()
+        self._traverse_obj(obj, zero_grad)
 
     @modules(module_db)
     def test_non_contiguous_tensors(self, device, dtype, module_info):
