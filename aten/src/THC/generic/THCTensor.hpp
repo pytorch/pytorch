@@ -16,10 +16,4 @@ TORCH_CUDA_CU_API void THCTensor_(setStorage)(
     at::IntArrayRef size_,
     at::IntArrayRef stride_);
 
-TORCH_CUDA_CU_API void THCTensor_(resize)(
-    THCState* state,
-    THCTensor* self,
-    at::IntArrayRef size,
-    at::IntArrayRef stride);
-
 #endif
