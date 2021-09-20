@@ -215,7 +215,7 @@ void batchedTensorInplaceForLoopFallback(const c10::OperatorHandle& op, torch::j
       // simplicity. When that is not the case, this code should be updated.
       const auto& argument = (*stack)[arguments_begin + arg_idx];
       if (batched_tensor_inputs_pos_iter == batched_tensor_inputs_position.end()
-          || arg_idx != *batched_tensor_inputs_pos_iter) {
+          || (int64_t)arg_idx != *batched_tensor_inputs_pos_iter) {
         // argument isn't a BatchedTensor
         torch::jit::push(stack, argument);
         continue;
@@ -392,7 +392,7 @@ void batchedTensorForLoopFallback(const c10::OperatorHandle& op, torch::jit::Sta
       // simplicity. When that is not the case, this code should be updated.
       const auto& argument = (*stack)[arguments_begin + arg_idx];
       if (batched_tensor_inputs_pos_iter == batched_tensor_inputs_position.end()
-          || arg_idx != *batched_tensor_inputs_pos_iter) {
+          || (int64_t)arg_idx != *batched_tensor_inputs_pos_iter) {
         // argument isn't a BatchedTensor
         torch::jit::push(stack, argument);
         continue;
