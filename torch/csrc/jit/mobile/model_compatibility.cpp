@@ -190,46 +190,35 @@ std::unordered_map<std::string, OperatorInfo> _get_model_ops_and_info(
 /********************** Get Type Table **********************/
 
 // Get deduplicate type table given bytecode,
-SupportedType _get_type_table(std::vector<IValue> bytecode_ivalues) {
-  std::unordered_set<std::string> contained_primitive_types;
-  std::unordered_set<std::string> contained_custom_types;
-  // type table can be either string (primitive type) or tuple (custom type)
-  // IValue don't have a good hash function for IValue, so use type name
-  // (string, ex: "Dict[int, Tuple[Tensor, Tensor, Tensor]]") as the hash.
-  std::unordered_set<std::string> all_type_names;
+std::unordered_set<std::string> _get_type_table(
+    std::vector<IValue> bytecode_ivalues) {
+  std::unordered_set<std::string> contained_types;
+  // To avoid parsing types twice, declare $parsed_type_names_records and use
+  // type name (string, ex: "Dict[int, Tuple[Tensor, Tensor, Tensor]]") as the
+  // hash to record which types are parsed.
+  std::unordered_set<std::string> parsed_type_names_records;
   for (const auto i : c10::irange(1, bytecode_ivalues.size())) {
     auto method_tuple = bytecode_ivalues.at(i).toTuple()->elements();
     auto type_table_tuple = method_tuple.at(1).toTuple()->elements()[3];
     auto type_table =
         type_table_tuple.toTuple()->elements()[1].toTuple()->elements();
+    // type_table is a list of IValue, and each IValue is a string,
+    // for example: "Dict[int, Tuple[Tensor, Tensor, Tensor]]"
     for (const auto& type_definition : type_table) {
       std::unordered_set<std::string> type_tokens;
-      std::string type_name;
-      if (type_definition.isString()) {
-        // For all primitive types
-        type_name = type_definition.toString()->string();
-      } else if (type_definition.isTuple()) {
-        // For all custom types
-        type_name = type_definition.toTuple()
-                        ->elements()[1]
-                        .toTuple()
-                        ->elements()[0]
-                        .toString()
-                        ->string();
-      }
-      if (all_type_names.find(type_name) == all_type_names.end()) {
-        all_type_names.insert(type_name);
-        if (!type_name.empty()) {
-          // parse the type only if it's a new type
-          type_tokens = at::getContainedTypes(type_name);
-          contained_primitive_types.insert(
-              type_tokens.begin(), type_tokens.end());
-        }
+      std::string type_name = type_definition.toString()->string();
+
+      // parse the type only if it's new, and insert it in the record
+      if (parsed_type_names_records.find(type_name) ==
+          parsed_type_names_records.end()) {
+        parsed_type_names_records.insert(type_name);
+        type_tokens = at::getContainedTypes(type_name);
+        contained_types.insert(type_tokens.begin(), type_tokens.end());
       }
     }
   }
 
-  return SupportedType{contained_primitive_types, contained_custom_types};
+  return contained_types;
 }
 
 /********************** Compatibility Checker **********************/
@@ -256,7 +245,7 @@ ModelCompatibilityInfo ModelCompatibilityInfo::get(
   uint64_t model_bytecode_version =
       _get_model_bytecode_version(bytecode_values);
   auto model_info = _get_model_ops_and_info(bytecode_values);
-  SupportedType type_table = _get_type_table(bytecode_values);
+  std::unordered_set<std::string> type_table = _get_type_table(bytecode_values);
   return ModelCompatibilityInfo{model_bytecode_version, model_info, type_table};
 }
 
@@ -274,28 +263,14 @@ ModelCompatCheckResult is_compatible(
     result.errors.emplace_back(s.str());
   }
 
-  SupportedType supported_type = runtime_info.supported_types;
-  std::unordered_set<std::string> all_primitive_types;
-  std::unordered_set<std::string> all_custom_types;
+  std::unordered_set<std::string> supported_type = runtime_info.supported_types;
 
   // Check type table
-  for (const auto& primitive_type : model_info.type_table.primitive_types) {
-    if (supported_type.primitive_types.find(primitive_type) ==
-        supported_type.primitive_types.end()) {
+  for (const auto& type_name : model_info.type_table) {
+    if (supported_type.find(type_name) == supported_type.end()) {
       result.status = ModelCompatibilityStatus::ERROR;
       std::ostringstream s;
-      s << "Primitive type: '" << primitive_type
-        << "' is not supported in current runtime";
-      result.errors.push_back(s.str());
-    }
-  }
-
-  for (const auto& custom_type : model_info.type_table.custom_types) {
-    if (supported_type.custom_types.find(custom_type) ==
-        supported_type.custom_types.end()) {
-      result.status = ModelCompatibilityStatus::ERROR;
-      std::ostringstream s;
-      s << "Custom type: '" << custom_type
+      s << "Primitive type: '" << type_name
         << "' is not supported in current runtime";
       result.errors.push_back(s.str());
     }

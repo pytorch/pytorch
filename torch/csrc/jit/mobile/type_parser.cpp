@@ -18,7 +18,11 @@ using torch::jit::valid_single_char_tokens;
 namespace c10 {
 namespace {
 
-static constexpr const char* kTypingNamedTuple = "NamedTuple";
+// Torchbind custom class always starts with the follow prefix, so use it as an
+// identifier for torchbind custom class type
+static constexpr const char* kTypeTorchbindCustomClass =
+    "__torch__.torch.classes";
+static constexpr const char* kTypeNamedTuple = "NamedTuple";
 
 bool isSpecialChar(char a) {
   for (const char* c = valid_single_char_tokens; *c; c++) {
@@ -35,12 +39,24 @@ class TypeParser {
     lex();
   }
 
+  // The list of non-simple types supported by currrent parser.
   static std::unordered_set<std::string> getNonSimpleType() {
-    static std::unordered_set<std::string> nonSimpleType{
-        "List", "Optional", "Dict", "Tuple", "__torch__"};
-    return nonSimpleType;
+    static std::unordered_set<std::string> nonSimpleTypes{
+        "List", "Union", "Optional", "Future", "Dict", "Tuple"};
+    return nonSimpleTypes;
   }
 
+  // The list of custom types supported by currrent parser.
+  static std::unordered_set<std::string> getCustomType() {
+    static std::unordered_set<std::string> customeTypes{
+        kTypeTorchbindCustomClass, kTypeNamedTuple};
+    return customeTypes;
+  }
+
+  // Given a PyThon str, get all contained types. It's usually used for
+  // compatibility check between model and runtime. For example:
+  // PyThon string: "Dict[int, Tuple[Tensor, Tensor, Tensor]]"
+  // contained type is: [Dict, int, Tuple, Tensor]
   std::unordered_set<std::string> getContainedTypes() {
     return contained_types_;
   }
@@ -81,40 +97,113 @@ class TypeParser {
       }
       expect("]");
       return TupleType::create(types);
-    } else if (token == "__torch__") {
-      return parseClassType();
     }
     return nullptr;
   }
 
-  TypePtr parse(bool hard_fail = true) {
+  TypePtr parse() {
     std::string token = next();
-    contained_types_.insert(token);
     auto simpleTypeIt = string_to_type_lut().find(token);
     if (simpleTypeIt != string_to_type_lut().end()) {
-      if (hard_fail && cur() != "]" && cur() != "," && cur() != "") {
+      if (cur() != "]" && cur() != "," && cur() != "") {
         TORCH_CHECK(
             false, "Simple type ", token, " is followed by ", "invalid chars.");
       }
+      contained_types_.insert(token);
       return simpleTypeIt->second;
     } else if (getNonSimpleType().find(token) != getNonSimpleType().end()) {
+      contained_types_.insert(token);
       return parseNonSimple(token);
-    } else {
-      if (hard_fail) {
-        TORCH_CHECK(
-            false,
-            "Type ",
-            token,
-            " is not supported in the parser, ",
-            "or the token is in wrong format.");
+    } else if (token == "__torch__") {
+      expect(".");
+      if (cur() == "torch") {
+        // torch bind class starts with __torch__.torch.classes
+        return parseTorchbindClassType();
+      } else {
+        // other class starts with __torch__ following by custom names
+        return parseCustomType();
       }
+    } else {
+      TORCH_CHECK(
+          false,
+          "Type ",
+          token,
+          " is not supported in the parser, ",
+          "or the token is in wrong format.");
     }
     return nullptr;
   }
 
  private:
-  TypePtr parseClassType() {
-    std::vector<std::string> expected_atoms{".", "torch", ".", "classes", "."};
+  // NamedTuple custom type will be following structure:
+  // "qualified_named[
+  //   NamedTuple, [
+  //       [filed_name_1, field_type_1],
+  //       [filed_name_2, field_type_2]
+  //   ]
+  // ]"
+  //  Example NamedTuple type:
+  //  "__torch__.base_models.sparse_nn.pytorch_preproc_types.PreprocOutputType[
+  //     NamedTuple, [
+  //         [float_features, Tensor],
+  //         [id_list_features, List[Tensor]],
+  //         [label,  Tensor],
+  //         [weight, Tensor],
+  //         ]
+  //     ]"
+  TypePtr parseNamedTuple(const std::string& qualified_name) {
+    std::vector<std::string> field_names;
+    std::vector<TypePtr> field_types;
+    std::string ns;
+    expect(",");
+    expect("[");
+    while (cur() != "]") {
+      expect("[");
+      std::string field_name = next();
+      expect(",");
+      TypePtr field_type = parse();
+      field_names.emplace_back(field_name);
+      field_types.emplace_back(field_type);
+      std::cout << cur() << std::endl;
+      expect("]");
+      if (cur() == ",") {
+        next();
+      }
+    }
+    auto named_tuple_type =
+        TupleType::createNamed(qualified_name, field_names, field_types);
+    return named_tuple_type;
+  }
+
+  // Custom type will be following structure:
+  // "qualified_named[
+  //   custom_type, [
+  //       [filed_name_1, field_type_1],
+  //       [filed_name_2, field_type_2]
+  //   ]
+  // ]"
+  TypePtr parseCustomType() {
+    std::string qualified_name = "__torch__.";
+    std::string ns;
+    while (cur() != "[") {
+      qualified_name.append(next());
+    }
+    expect("[");
+    std::string type_name = next();
+    // Currently only supports NamedTuple custom type, if more types need to be
+    // supported, extend them here.
+    if (type_name == kTypeNamedTuple) {
+      contained_types_.insert(kTypeNamedTuple);
+      return parseNamedTuple(qualified_name);
+    } else {
+      TORCH_CHECK(
+          false, "Custom Type ", type_name, " is not supported in the parser.");
+    }
+    return nullptr;
+  }
+
+  TypePtr parseTorchbindClassType() {
+    std::vector<std::string> expected_atoms{"torch", ".", "classes", "."};
     for (const auto& atom : expected_atoms) {
       expect(atom);
     }
@@ -122,9 +211,9 @@ class TypeParser {
     std::string ns = next();
     expect(".");
     std::string classname = next();
-
-    return torch::getCustomClass(
-        std::string("__torch__.torch.classes." + ns + "." + classname));
+    contained_types_.insert(kTypeTorchbindCustomClass);
+    return torch::getCustomClass(std::string(kTypeTorchbindCustomClass)
+                                     .append("." + ns + "." + classname));
   }
 
   void expect(const std::string& s) {
@@ -184,167 +273,9 @@ class TypeParser {
   std::string pythonStr_;
   size_t start_;
   std::string next_token_;
+  // Store all contained types when parsing a string
   std::unordered_set<std::string> contained_types_;
 };
-
-/*
-CustomTypeParser to parse custom type. Currently custom type will be
-in following structure:
-('type_name',
-    ('NamedTuple',
-        ('filed_name_1', 'field_type_1')
-        ('filed_name_2', 'field_type_2')
-    )
-)
-
-For example, python source code is:
-
-class Foo(NamedTuple):
-    id: torch.Tensor
-
-class Bar(torch.nn.Module):
-    def __init__(self):
-        super(Bar, self).__init__()
-        self.foo = Foo(torch.tensor(1))
-
-    def forward(self, a: torch.Tensor):
-        self.foo = Foo(a)
-        return self.foo
-
-The corresponding bytecode will be:
-(6,
- ('__torch__.Bar.forward',
-  (('instructions',
-    (('STOREN', 1, 2),
-     ('LOAD', 1, 0),
-     ('MOVE', 2, 0),
-     ('NAMED_TUPLE_CONSTRUCT', 0, 1),
-     ('SET_ATTR', 2, 0),
-     ('MOVE', 1, 0),
-     ('GET_ATTR', 2, 0),
-     ('RET', 0, 0))),
-   ('operators', ()),
-   ('constants', ()),
-   ('types', (('__torch__.Foo', ('NamedTuple', (('id', 'Tensor'),))),)),
-   ('register_size', 2)),
-  (('arguments',
-    ((('name', 'self'), ('type', '__torch__.Bar'), ('default_value', None)),
-     (('name', 'a'), ('type', 'Tensor'), ('default_value', None)))),
-   ('returns',
-    ((('name', ''), ('type', 'Tuple[Tensor]'), ('default_value', None)),)))))
-
-*/
-class CustomTypeParser final {
- public:
-  CustomTypeParser(CustomTypeParser const&) = delete;
-  CustomTypeParser& operator=(CustomTypeParser const&) = delete;
-  CustomTypeParser() {
-    registerParserFunction(kTypingNamedTuple, parseCustomTypeNamedTuple);
-  }
-
-  TypePtr parse(IValue custom_type) {
-    // Parse custom type, currently only support NamedTuple
-    if (custom_type.isTuple()) {
-      auto tuple_difinition = custom_type.toTuple()->elements();
-      const std::string type_name = getType(custom_type);
-      if (hasParserFunction(type_name)) {
-        return parserFunctions()[type_name](custom_type);
-      } else {
-        TORCH_CHECK(
-            false,
-            "The custom type: ",
-            type_name,
-            " is currently not supported.")
-      }
-    }
-    TORCH_CHECK(
-        false,
-        "For custom type, the definition needs to tuple, however receives : ",
-        custom_type.tagKind())
-    return nullptr;
-  }
-
-  [[nodiscard]] std::unordered_set<std::string> getSupportedTypes() {
-    std::unordered_set<std::string> supported_type_list;
-    for (const auto& type_name : parserFunctions()) {
-      supported_type_list.insert(type_name.first);
-    }
-    return supported_type_list;
-  }
-
- private:
-  [[nodiscard]] bool hasParserFunction(const std::string& custom_type) const {
-    return parserFunctions().count(custom_type);
-  }
-
-  std::string getType(IValue custom_type) {
-    auto difinition = custom_type.toTuple()->elements()[1];
-    return difinition.toTuple()->elements()[0].toString()->string();
-  }
-
-  [[nodiscard]] std::
-      unordered_map<std::string, std::function<TypePtr(IValue&)>>&
-      parserFunctions() const {
-    static std::unordered_map<std::string, std::function<TypePtr(IValue&)>>
-        custom_type_parser_functions;
-    return custom_type_parser_functions;
-  }
-
-  void registerParserFunction(
-      const std::string& custom_type,
-      const std::function<TypePtr(IValue&)>& custom_type_parser_function) {
-    parserFunctions()[custom_type] = custom_type_parser_function;
-  }
-
-  static TypePtr parseCustomTypeNamedTuple(IValue named_tuple_type_tuple) {
-    //  Example NamedTuple type structure:
-    //  ('__torch__.A.B.CType',
-    //   ('NamedTuple',
-    //     ('id_list_features', 'Dict[int, Tensor]'),
-    //     ('label', 'Tuple[Tensor, Tensor]'),
-    //     ('weight', 'Tuple[Tensor, Tensor]'),
-    //     ('id_score_list_features', 'Dict[int, Tensor]')))),
-    named_tuple_type_tuple.dump();
-    std::vector<IValue> named_tuple_type =
-        named_tuple_type_tuple.toTuple()->elements();
-
-    TORCH_CHECK(
-        named_tuple_type.size() == 2, "Invalid NamedTuple type definition.")
-
-    const std::string custom_type_name =
-        named_tuple_type[0].toString()->string();
-
-    // get namedtuple definition
-    std::vector<IValue> name_type_pairs =
-        named_tuple_type[1].toTuple()->elements();
-
-    TORCH_CHECK(
-        name_type_pairs.size() == 2, "Invalid NamedTuple type definition.")
-
-    at::QualifiedName qualified_name = at::QualifiedName(custom_type_name);
-    std::vector<std::string> field_names;
-    std::vector<TypePtr> field_types;
-
-    // Find all type names and it's corresponding type
-    for (auto const& name_type_pair :
-         name_type_pairs[1].toTuple()->elements()) {
-      std::vector<IValue> name_type_vector =
-          name_type_pair.toTuple()->elements();
-      TORCH_CHECK(
-          name_type_vector.size() == 2, "Invalid NamedTuple type definition.")
-      std::string field_name = name_type_vector[0].toString()->string();
-      TypePtr field_type =
-          c10::parseType(name_type_vector[1].toString()->string());
-      field_names.emplace_back(field_name);
-      field_types.emplace_back(field_type);
-    }
-    // Create the NamedTuple type after reading from the tuple, and add it
-    // to function
-    auto tt = TupleType::createNamed(qualified_name, field_names, field_types);
-    return tt;
-  }
-};
-
 } // namespace
 
 TORCH_API TypePtr parseType(const std::string& pythonStr) {
@@ -352,31 +283,27 @@ TORCH_API TypePtr parseType(const std::string& pythonStr) {
   return parser.parse();
 }
 
+// Get all contained type given a string
 TORCH_API std::unordered_set<std::string> getContainedTypes(
     const std::string& pythonStr) {
   TypeParser parser(pythonStr);
-  parser.parse(false);
+  parser.parse();
   return parser.getContainedTypes();
 }
 
-TORCH_API TypePtr parseCustomType(IValue custom_type) {
-  CustomTypeParser custom_type_parser;
-  return custom_type_parser.parse(custom_type);
-}
-
-TORCH_API torch::jit::SupportedType getSupportedType() {
-  CustomTypeParser custom_type_parser;
-  std::unordered_set<std::string> primitive_types;
-
+// Get all supported type given a runtime
+TORCH_API std::unordered_set<std::string> getSupportedType() {
+  std::unordered_set<std::string> supported_types;
   for (const auto& it : string_to_type_lut()) {
-    primitive_types.insert(it.first);
+    supported_types.insert(it.first);
   }
-  primitive_types.insert(
+  supported_types.insert(
       TypeParser::getNonSimpleType().begin(),
       TypeParser::getNonSimpleType().end());
+  supported_types.insert(
+      TypeParser::getCustomType().begin(), TypeParser::getCustomType().end());
 
-  return torch::jit::SupportedType{
-      primitive_types, custom_type_parser.getSupportedTypes()};
+  return supported_types;
 }
 
 } // namespace c10
