@@ -329,13 +329,14 @@ inline void launcher(
 
 std::tuple<Tensor,Tensor>
 native_dropout_cuda(const Tensor& self, double p, double scale, bool train){
-  TORCH_CHECK(train, "Train parameter is incorrectly set!");
   auto gen = get_generator_or_default<CUDAGeneratorImpl>(c10::nullopt, cuda::detail::getDefaultCUDAGenerator());
-  Tensor ret = at::empty_like(self);
   Tensor mask = at::empty_like(self, self.options().dtype(kBool));
   const int64_t nelem = self.numel();
-//empty tensors should not get here, but just in case, avoid FPE
-  if (nelem==0) return std::tuple<Tensor,Tensor>(self, mask);
+  // empty tensors should not get here, but just in case, avoid FPE
+  // non-training shot-cut
+  if (nelem==0 || !train) return std::tuple<Tensor,Tensor>(self, mask);
+
+  Tensor ret = at::empty_like(self);
   const int64_t block_size = 256;
   unsigned int blocks_per_sm = at::cuda::getCurrentDeviceProperties()->maxThreadsPerMultiProcessor/block_size;
   dim3 dim_block(block_size);

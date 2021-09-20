@@ -85,16 +85,20 @@ ALIAS_SPECIALIZATION(_feature_alpha_dropout, true,  true )
 
 std::tuple<Tensor,Tensor>
 native_dropout_cpu(const Tensor& input, double p, double scale, bool train) {
-  TORCH_CHECK(train, "Train parameter is incorrectly set!");
   if (input.numel() == 0) {
     return std::make_tuple(input, at::empty_like(input, input.options()));
   }
 
-  auto noise = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  noise.bernoulli_(p);
+  Tensor mask = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  Tensor output;
 
-  auto output = input.mul(noise).mul_(scale);
-  return std::make_tuple(output, noise);
+  if (train) {
+    mask.bernoulli_(p);
+    output = input.mul(mask).mul_(scale);
+  } else {
+    output = input;
+  }
+  return std::make_tuple(output, mask);
 }
 
 Tensor native_dropout_backward_cpu(const Tensor& grad, const Tensor& mask, double scale) {
