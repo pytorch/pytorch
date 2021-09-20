@@ -73,6 +73,34 @@ def select_model_mode_for_export(model, mode):
         if not isinstance(model, torch.jit.ScriptFunction):
             model.train(is_originally_training)
 
+@contextlib.contextmanager
+def disable_apex_o2_state_dict_hook(model):
+    # Apex O2 hook state_dict to return fp16 weights as fp32.
+    # Exporter cannot identify them as same tensors.
+    # Since this hook is only used by optimizer, it is safe to
+    # remove this hook while exporting.
+    tmp_map = {}
+    for module in model.modules():
+        for k, v in module._state_dict_hooks.items():
+            if type(v).__name__ == 'O2StateDictHook':
+                if module not in tmp_map:
+                    tmp_map[module] = {}
+                tmp_map[module][k] = v
+        if module in tmp_map:
+            for k in tmp_map[module].keys():
+                module._state_dict_hooks.pop(k)
+    try:
+        yield
+    finally:
+        for module, m_map in tmp_map.items():
+            for k, v in m_map.items():
+                module._state_dict_hooks[k] = v
+
+@contextlib.contextmanager
+def exporter_context(model, mode):
+    with select_model_mode_for_export(model, mode) as mode_ctx, \
+        disable_apex_o2_state_dict_hook(model) as apex_ctx:
+        yield (mode_ctx, apex_ctx)
 
 def export(model, args, f, export_params=True, verbose=False, training=None,
            input_names=None, output_names=None, operator_export_type=None,
@@ -602,7 +630,7 @@ def _export_to_pretty_string(model, args, f, export_params=True, verbose=False, 
     _set_operator_export_type(operator_export_type)
     from torch.onnx.symbolic_helper import _set_onnx_shape_inference
     _set_onnx_shape_inference(onnx_shape_inference)
-    with select_model_mode_for_export(model, training):
+    with exporter_context(model, training):
         val_keep_init_as_ip = _decide_keep_init_as_input(keep_initializers_as_inputs,
                                                          operator_export_type,
                                                          opset_version)
@@ -640,7 +668,7 @@ def unconvertible_ops(model, args, training=TrainingMode.EVAL, opset_version=Non
     from torch.onnx.symbolic_helper import _default_onnx_opset_version, _set_opset_version
     opset_version = opset_version or _default_onnx_opset_version
     _set_opset_version(opset_version)
-    with select_model_mode_for_export(model, training):
+    with exporter_context(model, training):
         args = _decide_input_format(model, args)
         graph, params_dict, torch_out = _model_to_graph(
             model, args,
@@ -716,7 +744,7 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
         # (to preserve whatever the original training mode was.)
         _set_opset_version(opset_version)
         _set_operator_export_type(operator_export_type)
-        with select_model_mode_for_export(model, training):
+        with exporter_context(model, training):
             val_keep_init_as_ip = _decide_keep_init_as_input(keep_initializers_as_inputs,
                                                              operator_export_type,
                                                              opset_version)

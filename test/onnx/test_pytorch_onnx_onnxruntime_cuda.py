@@ -65,6 +65,24 @@ class TestONNXRuntime_cuda(unittest.TestCase):
         target[target == 1] = -100
         self.run_test(FusionModel(), (input, target))
 
+    @skipIfNoCuda
+    @disableScriptTest()
+    def test_apex_o2(self):
+        class LinearModel(torch.nn.Module):
+            def __init__(self):
+                super(LinearModel, self).__init__()
+                self.linear = torch.nn.Linear(3, 5)
+
+            def forward(self, x):
+                return self.linear(x)
+        try:
+            from apex import amp
+        except:
+            raise unittest.SkipTest("Apex is not available")
+        input = torch.randn(3, 3, device=torch.device("cuda"))
+        model = amp.initialize(LinearModel(), opt_level="O2")
+        self.run_test(model, input)
+
 TestONNXRuntime_cuda.setUp = TestONNXRuntime.setUp
 TestONNXRuntime_cuda.run_test = TestONNXRuntime.run_test
 
