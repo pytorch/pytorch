@@ -279,9 +279,13 @@ Tensor internal_new_from_data(
     // looks like for mode-based dispatch keys and C++ tensor extensions.
     c10::impl::ExcludeDispatchKeyGuard functorch_guard(c10::DispatchKey::FuncTorchDynamicLayerBackMode);
     tensor = at::empty(sizes, at::initialTensorOptions().dtype(inferred_scalar_type).pinned_memory(pin_memory));
-    recursive_store(
-        (char*)tensor.data_ptr(), tensor.sizes(), tensor.strides(), 0,
-        inferred_scalar_type, tensor.dtype().itemsize(), data);
+    // If either the source or the target of the store operation has a meta
+    // device, we can skip it since the data will be discarded anyways.
+    if (tensor.device() != at::kMeta && device != at::kMeta) {
+      recursive_store(
+          (char*)tensor.data_ptr(), tensor.sizes(), tensor.strides(), 0,
+          inferred_scalar_type, tensor.dtype().itemsize(), data);
+    }
   }
   auto device = device_opt.has_value() ? *device_opt : options.device();
   pybind11::gil_scoped_release no_gil;
