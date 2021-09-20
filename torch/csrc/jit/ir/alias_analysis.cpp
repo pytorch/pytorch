@@ -93,7 +93,7 @@ class MutableTypePtrHelper {
       case TypeKind::UnionType: {
         AliasTypeSet mutable_types;
         for (const TypePtr& inner :
-             type->expect<UnionType>()->containedTypes()) {
+             type->expectRef<UnionType>().containedTypes()) {
           if (auto maybe_inner_types = mapTypeToAliasTypeSet(inner)) {
             mutable_types.insert(
                 mutable_types.end(),
@@ -115,8 +115,7 @@ class MutableTypePtrHelper {
       case TypeKind::FutureType: {
         if (auto maybe_mut_types = mapTypeToAliasTypeSet(
                 type->castRaw<FutureType>()->getElementType())) {
-          auto mut_type = toSingleType(*maybe_mut_types);
-          return {AliasTypeSet{FutureType::create(*mut_type)}};
+          return {AliasTypeSet{FutureType::create(*toSingleType(*maybe_mut_types))}};
         }
         return c10::nullopt;
       }
