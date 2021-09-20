@@ -45,7 +45,7 @@ void MemoryPlanningAllocator::push_allocation(
 
 using namespace torch::jit;
 
-at::DataPtr MemoryTracingAllocator::allocate(size_t nbytes) const {
+at::DataPtr MemorizingAllocator::allocate(size_t nbytes) const {
   auto orig_ptr = orig_allocator_.raw_allocate(nbytes);
   auto bt = c10::get_backtrace(0, 200, true);
   auto frame_node_id = torch::jit::currentFrameId();
@@ -79,7 +79,7 @@ at::DataPtr MemoryTracingAllocator::allocate(size_t nbytes) const {
 
 WithProfileTracingAllocationsGuard::WithProfileTracingAllocationsGuard(
     at::DeviceType device_type)
-    : tracer_(MemoryTracingAllocator{device_type}), device_type_(device_type) {}
+    : tracer_(MemorizingAllocator{device_type}), device_type_(device_type) {}
 
 std::vector<torch::jit::MemoryEvent> WithProfileTracingAllocationsGuard::
     getAllocationTraces() {

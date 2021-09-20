@@ -122,7 +122,7 @@ endif()
 
 # setting default preferred BLAS options if not already present.
 if(NOT INTERN_BUILD_MOBILE)
-  set(BLAS "MKL" CACHE STRING "Selected BLAS library")
+  set(BLAS "OpenBLAS" CACHE STRING "Selected BLAS library")
 else()
   set(BLAS "Eigen" CACHE STRING "Selected BLAS library")
   set(AT_MKLDNN_ENABLED 0)
