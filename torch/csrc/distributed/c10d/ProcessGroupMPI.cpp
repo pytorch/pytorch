@@ -230,17 +230,25 @@ void ProcessGroupMPI::mpiExit() {
 void ProcessGroupMPI::initMPIOnce() {
   // Initialize MPI environment
   std::call_once(onceFlagInitMPI, []() {
-    MPI_CHECK(MPI_Init_thread(
-        nullptr, nullptr, MPI_THREAD_SERIALIZED, &mpiThreadSupport_));
+    int is_initialized = 0;
+    MPI_Initialized(&is_initialized);
+
+    if(is_initialized == 0)
+    {
+      MPI_CHECK(MPI_Init_thread(
+          nullptr, nullptr, MPI_THREAD_MULTIPLE, &mpiThreadSupport_));
+    
+      if (std::atexit(ProcessGroupMPI::mpiExit)) {
+        TORCH_CHECK(false, "Fail to register the MPI exit handler");
+      }
+    }
+
     if (mpiThreadSupport_ < MPI_THREAD_SERIALIZED) {
       TORCH_CHECK(false,
-          "Used MPI implementation doesn't have the "
-          "minimum level of threading support: "
-          "MPI_THREAD_SERIALIZED. This is required by "
-          "c10d package");
-    }
-    if (std::atexit(ProcessGroupMPI::mpiExit)) {
-      TORCH_CHECK(false, "Fail to register the MPI exit handler");
+	    "Used MPI implementation doesn't have the "
+	    "minimum level of threading support: "
+	    "MPI_THREAD_SERIALIZED. This is required by "
+	    "c10d package");
     }
   });
 }
