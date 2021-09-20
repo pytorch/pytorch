@@ -1,6 +1,7 @@
 import math
 import sys
 import errno
+import multiprocessing
 import os
 import ctypes
 import faulthandler
@@ -2353,7 +2354,7 @@ class SetAffinityDataset(IterableDataset):
 
 
 def worker_set_affinity(_):
-    os.sched_setaffinity(0, [2])
+    os.sched_setaffinity(0, [multiprocessing.cpu_count() - 1])
 
 
 @unittest.skipIf(
@@ -2366,7 +2367,7 @@ class TestSetAffinity(TestCase):
         dataloader = torch.utils.data.DataLoader(
             dataset, num_workers=2, worker_init_fn=worker_set_affinity)
         for sample in dataloader:
-            self.assertEqual(sample, [2])
+            self.assertEqual(sample, [multiprocessing.cpu_count() - 1])
 
 class ConvDataset(Dataset):
     def __init__(self):

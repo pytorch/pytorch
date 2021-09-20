@@ -184,30 +184,54 @@ std::pair<IValue, IValue> getFunctionTuple(
   static const std::string class_prefix("__torch__.torch.classes");
   std::shared_ptr<torch::jit::CompilationUnit> cu =
       module._ivalue()->compilation_unit();
+
   for (const TypePtr& t : code->type_table()) {
     auto type_str = t->annotation_str();
-    if (cu->get_named_tuple(t->str())) {
+    if (t->kind() == TypeKind::TupleType) {
+      TORCH_CHECK(
+          cu->get_named_tuple(t->str()),
+          "Can't find definition for the qualified name: ",
+          t->str(),
+          "(TypeKind::TupleType)  in compilation unit.",
+          "Please report a bug to PyTorch.");
       auto named_tuple_type = cu->get_named_tuple(t->str());
       if (named_tuple_type != nullptr) {
-        IValue named_tuple{"NamedTuple"};
+        std::string named_tuple_str = t->str();
+        named_tuple_str.append("[NamedTuple, [");
         std::vector<IValue> name_type_pairs;
+
         // Get the field name and field type for the NamedTuple
-        for (auto const& argument : named_tuple_type->schema()->arguments()) {
-          name_type_pairs.emplace_back(c10::ivalue::Tuple::create(
-              {argument.name(), argument.type()->repr_str()}));
+        for (auto it = named_tuple_type->schema()->arguments().begin();
+             it != named_tuple_type->schema()->arguments().end();
+             it++) {
+          name_type_pairs.emplace_back(
+              c10::ivalue::Tuple::create({it->name(), it->type()->repr_str()}));
+          std::string type_str = it->is_inferred_type()
+              ? it->type()->str()
+              : it->type()->repr_str();
+          named_tuple_str.append("[" + it->name() + ", " + type_str + "]");
+          if (it != named_tuple_type->schema()->arguments().end() - 1) {
+            named_tuple_str.append(",");
+          }
         }
-        // Create a tuple with following structure
-        // ('type_name',
-        //   ('NamedTuple,
-        //     ('filed_name_1', 'field_type_1')
-        //     ('filed_name_2', 'field_type_2')
-        //   )
-        // )
-        IValue named_tuple_type_definition =
-            c10::ivalue::Tuple::create(std::vector<IValue>{
-                named_tuple, c10::ivalue::Tuple::create(name_type_pairs)});
-        types.emplace_back(c10::ivalue::Tuple::create(std::vector<IValue>{
-            IValue(t->str()), named_tuple_type_definition}));
+        named_tuple_str.append("]]");
+        // Create a named_tuple type with following structure
+        // "qualified_named[
+        //   NamedTuple, [
+        //       [filed_name_1, field_type_1],
+        //       [filed_name_2, field_type_2]
+        //   ]
+        // ]"
+        //  Example NamedTuple type:
+        //  "__torch__.base_models.sparse_nn.pytorch_preproc_types.PreprocOutputType[
+        //     NamedTuple, [
+        //         [float_features, Tensor],
+        //         [id_list_features, List[Tensor]],
+        //         [label,  Tensor],
+        //         [weight, Tensor],
+        //         ]
+        //     ]"
+        types.emplace_back(named_tuple_str);
         continue;
       }
     } else if (type_str.find(torch_prefix) == 0) {

@@ -5,13 +5,14 @@ from typing import List, NamedTuple
 
 from torch.jit.mobile import _load_for_lite_interpreter
 from torch.testing._internal.common_utils import TestCase, run_tests
+from collections import namedtuple
 
 
 class TestLiteScriptModule(TestCase):
 
-
-    def test_namedtupe(self):
+    def test_typing_namedtuple(self):
         myNamedTuple = NamedTuple('myNamedTuple', [('a', List[torch.Tensor])])
+
         class MyTestModule(torch.nn.Module):
             def forward(self, a: torch.Tensor):
                 p = myNamedTuple([a])
@@ -30,7 +31,7 @@ class TestLiteScriptModule(TestCase):
             mobile_module_result
         )
 
-    def test_namedtuple_custom_classtype(self):
+    def test_typing_namedtuple_custom_classtype(self):
         class Foo(NamedTuple):
             id: torch.Tensor
 
@@ -43,14 +44,29 @@ class TestLiteScriptModule(TestCase):
                 self.foo = Foo(a)
                 return self.foo
 
-        sample_input = torch.Tensor(1)
-
         sample_input = torch.tensor(5)
         script_module = torch.jit.script(Bar())
         script_module_result = script_module(sample_input)
-        buffer_jit = io.BytesIO(script_module.save_to_buffer())
-        buffer_jit.seek(0)
 
+        buffer_mobile = io.BytesIO(script_module._save_to_buffer_for_lite_interpreter())
+        buffer_mobile.seek(0)
+        mobile_module = _load_for_lite_interpreter(buffer_mobile)
+        mobile_module_result = mobile_module(sample_input)
+        torch.testing.assert_allclose(
+            script_module_result,
+            mobile_module_result
+        )
+
+    def test_return_collections_namedtuple(self):
+        myNamedTuple = namedtuple('myNamedTuple', [('a')])
+
+        class MyTestModule(torch.nn.Module):
+            def forward(self, a: torch.Tensor):
+                return myNamedTuple(a)
+
+        sample_input = torch.Tensor(1)
+        script_module = torch.jit.script(MyTestModule())
+        script_module_result = script_module(sample_input)
         buffer_mobile = io.BytesIO(script_module._save_to_buffer_for_lite_interpreter())
         buffer_mobile.seek(0)
         mobile_module = _load_for_lite_interpreter(buffer_mobile)
