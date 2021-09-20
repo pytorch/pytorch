@@ -2029,6 +2029,7 @@ works_list = [
     'reshape',
     'round',
     'rsub',
+    'rsub.rsub_tensor',
     'rsqrt',
     'sigmoid',
     'sign',
