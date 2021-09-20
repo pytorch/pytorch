@@ -283,7 +283,7 @@ class TORCH_API StaticRuntime {
     return *outputs_[i];
   }
 
-  const std::vector<IValue*> outputs() const {
+  const std::vector<IValue*>& outputs() const {
     return outputs_;
   }
 
