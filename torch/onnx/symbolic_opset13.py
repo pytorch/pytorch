@@ -4,10 +4,10 @@
 # This file exports ONNX ops for opset 13
 import torch
 import torch.onnx.symbolic_helper as sym_help
-from torch.onnx.symbolic_helper import _squeeze_helper, parse_args, _unimplemented
+from torch.onnx.symbolic_helper import parse_args, _unimplemented
 from torch.onnx.symbolic_opset9 import (overload_by_arg_count, _maybe_cast_reduce_op_input,
-                                        nonzero, expand, zeros, ones, size, max, min)
-from torch.onnx.symbolic_opset11 import cumsum, unsqueeze
+                                        nonzero, expand, zeros, ones, size)
+from torch.onnx.symbolic_opset11 import unsqueeze
 from torch.onnx.utils import _add_block, _add_input_to_block, _add_output_to_block
 
 
@@ -359,7 +359,7 @@ def diagonal(g, self, offset, dim1, dim2):
 
     # Calculate which diagonal values to select
     # For example, in cases with offsets:
-    # [[0, 1.1, 0]    
+    # [[0, 1.1, 0]
     #  [0, 0, 2.2]]
     # we need to select the last two columns, so we create a tensor
     # with all columns that are to be selected
@@ -368,7 +368,7 @@ def diagonal(g, self, offset, dim1, dim2):
     select_window = g.op("CumSum", select_window_ones_fill, g.op("Constant", value_t=torch.LongTensor([0])))
     select_window = g.op("Add", select_window, g.op("Constant", value_t=torch.LongTensor([abs(offset) - 1])))
 
-    gather_shape = [size(g, result, 
+    gather_shape = [size(g, result,
                          dim=g.op("Constant", value_t=torch.LongTensor([axis]))) for axis in list(range(rank))[:-2]]
     gather_shape.append(diag_size)
     gather_shape = g.op("Concat", *gather_shape, axis_i=0)

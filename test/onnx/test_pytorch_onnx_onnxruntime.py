@@ -1,6 +1,5 @@
 import unittest
 import onnxruntime
-
 import torch
 import torchvision
 
@@ -13,6 +12,7 @@ import random
 
 import model_defs.word_language_model as word_language_model
 import onnx
+
 from torch.nn.utils import rnn as rnn_utils
 from model_defs.lstm_flattening_result import (LstmFlatteningResultWithSeqLength,
                                                LstmFlatteningResultWithoutSeqLength)
