@@ -25,6 +25,9 @@ from typing import List, Tuple, Union
 __IN_ONNX_EXPORT = False
 
 
+class ONNXCheckerError(Exception):
+    pass
+
 def is_in_onnx_export():
     global __IN_ONNX_EXPORT
     return __IN_ONNX_EXPORT
@@ -75,19 +78,23 @@ def export(model, args, f, export_params=True, verbose=False, training=None,
            opset_version=None, _retain_param_name=True, do_constant_folding=True,
            example_outputs=None, strip_doc_string=True, dynamic_axes=None,
            keep_initializers_as_inputs=None, custom_opsets=None,
-           enable_onnx_checker=True, use_external_data_format=False):
+           enable_onnx_checker=None, use_external_data_format=False):
     if operator_export_type is None:
         if torch.onnx.PYTORCH_ONNX_CAFFE2_BUNDLE:
             operator_export_type = OperatorExportTypes.ONNX_ATEN_FALLBACK
         else:
             operator_export_type = OperatorExportTypes.ONNX
+    if enable_onnx_checker is not None:
+        warnings.warn("`enable_onnx_checker' is deprecated and ignored. It will be removed in"
+                      "the next PyTorch release. To proceed despite ONNX checker failures, you"
+                      "can catch torch.onnx.ONNXCheckerError.")
+
     _export(model, args, f, export_params, verbose, training, input_names, output_names,
             operator_export_type=operator_export_type, opset_version=opset_version,
             _retain_param_name=_retain_param_name, do_constant_folding=do_constant_folding,
             example_outputs=example_outputs, strip_doc_string=strip_doc_string,
             dynamic_axes=dynamic_axes, keep_initializers_as_inputs=keep_initializers_as_inputs,
-            custom_opsets=custom_opsets, enable_onnx_checker=enable_onnx_checker,
-            use_external_data_format=use_external_data_format)
+            custom_opsets=custom_opsets, use_external_data_format=use_external_data_format)
 
 
 def _is_constant_tensor_list(node):
@@ -197,8 +204,6 @@ def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=Fa
 
     torch._C._jit_pass_onnx_scalar_type_analysis(graph, True, _export_onnx_opset_version)
     torch._C._jit_pass_lint(graph)
-
-    torch._C._jit_pass_onnx_fold_if(graph)
 
     torch._C._jit_pass_onnx_peephole(graph, _export_onnx_opset_version, fixed_batch_size)
     torch._C._jit_pass_lint(graph)
@@ -530,7 +535,7 @@ def export_to_pretty_string(model, args, f, export_params=True, verbose=False, t
                             export_type=ExportTypes.PROTOBUF_FILE, example_outputs=None,
                             google_printer=False, opset_version=None, _retain_param_name=True,
                             keep_initializers_as_inputs=None, custom_opsets=None, add_node_names=True,
-                            do_constant_folding=True):
+                            do_constant_folding=True, dynamic_axes=None):
     return _export_to_pretty_string(model, args, f, export_params, verbose, training,
                                     input_names, output_names, operator_export_type,
                                     export_type, example_outputs, google_printer,
@@ -538,7 +543,7 @@ def export_to_pretty_string(model, args, f, export_params=True, verbose=False, t
                                     do_constant_folding=do_constant_folding,
                                     add_node_names=add_node_names,
                                     keep_initializers_as_inputs=keep_initializers_as_inputs,
-                                    custom_opsets=custom_opsets)
+                                    custom_opsets=custom_opsets, dynamic_axes=dynamic_axes)
 
 
 def _export_to_pretty_string(model, args, f, export_params=True, verbose=False, training=None,
@@ -547,7 +552,7 @@ def _export_to_pretty_string(model, args, f, export_params=True, verbose=False, 
                              google_printer=False, opset_version=None, _retain_param_name=False,
                              do_constant_folding=True, keep_initializers_as_inputs=None,
                              fixed_batch_size=False, custom_opsets=None, add_node_names=True,
-                             onnx_shape_inference=True):
+                             onnx_shape_inference=True, dynamic_axes=None):
     from torch.onnx.symbolic_helper import _default_onnx_opset_version, _set_opset_version
     from torch.onnx.symbolic_helper import _set_operator_export_type
     if opset_version is None:
@@ -569,7 +574,7 @@ def _export_to_pretty_string(model, args, f, export_params=True, verbose=False, 
                                                         output_names, operator_export_type,
                                                         example_outputs, _retain_param_name,
                                                         val_do_constant_folding, fixed_batch_size=fixed_batch_size,
-                                                        training=training)
+                                                        training=training, dynamic_axes=dynamic_axes)
 
         return graph._pretty_print_onnx(params_dict, opset_version, False,
                                         operator_export_type, google_printer,
@@ -631,8 +636,7 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
             opset_version=None, _retain_param_name=False, do_constant_folding=True,
             strip_doc_string=True, dynamic_axes=None, keep_initializers_as_inputs=None,
             fixed_batch_size=False, custom_opsets=None, add_node_names=True,
-            enable_onnx_checker=True, use_external_data_format=False,
-            onnx_shape_inference=True):
+            use_external_data_format=False, onnx_shape_inference=True):
 
     if isinstance(model, torch.nn.DataParallel):
         raise ValueError("torch.nn.DataParallel is not supported by ONNX "
@@ -703,13 +707,6 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
                     strip_doc_string, val_keep_init_as_ip, custom_opsets, val_add_node_names,
                     val_use_external_data_format, model_file_location)
 
-            if enable_onnx_checker and \
-                operator_export_type is OperatorExportTypes.ONNX and \
-                    not val_use_external_data_format:
-                # Only run checker if enabled and we are using ONNX export type and
-                # large model format export in not enabled.
-                _check_onnx_proto(proto)
-
             if export_type == ExportTypes.PROTOBUF_FILE:
                 assert(len(export_map) == 0)
                 with torch.serialization._open_file_like(f, "wb") as opened_file:
@@ -740,6 +737,17 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
                         opened_file.write(v)
             else:
                 raise RuntimeError("Unknown export type")
+
+            # The ONNX checker only works for ONNX graph. So if the operator_export_type is not ONNX,
+            # we can skip this check.
+            # If large model format export is enabled, proto will only contain data location instead of
+            # raw data and _check_onnx_proto() will fail because it can only handle the raw ONNX proto
+            # string in memory.
+            if (operator_export_type is OperatorExportTypes.ONNX) and (not val_use_external_data_format):
+                try:
+                    _check_onnx_proto(proto)
+                except RuntimeError as e:
+                    raise ONNXCheckerError(e)
     finally:
         assert __IN_ONNX_EXPORT
         __IN_ONNX_EXPORT = False
@@ -1187,7 +1195,7 @@ def _node_getitem(self, k):
     return getattr(self, sel)(k)
 
 
-def register_custom_op_symbolic(symbolic_name, symbolic_fn, opset_version):
+def get_ns_op_name_from_custom_op(symbolic_name):
     if not bool(re.match(r"^[a-zA-Z0-9-_]*::[a-zA-Z-_]+[a-zA-Z0-9-_]*$", symbolic_name)):
         raise RuntimeError("Failed to register operator {}. \
                            The symbolic name must match the format Domain::Name, \
@@ -1199,12 +1207,32 @@ def register_custom_op_symbolic(symbolic_name, symbolic_fn, opset_version):
     if ns in unaccepted_domain_names:
         raise RuntimeError("Failed to register operator {}. The domain {} is already a used domain."
                            .format(symbolic_name, ns))
+    return ns, op_name
+
+
+# When the user registers symbolic for custom/contrib ops,
+# it is highly recommended to add shape inference for that operator via setType API,
+# otherwise the exported graph may have incorrect shape inference in some extreme cases.
+# An example of setType is test_aten_embedding_2 in test_operators.py..
+def register_custom_op_symbolic(symbolic_name, symbolic_fn, opset_version):
+    ns, op_name = get_ns_op_name_from_custom_op(symbolic_name)
     import torch.onnx.symbolic_registry as sym_registry
     from torch.onnx.symbolic_helper import _onnx_stable_opsets, _onnx_main_opset
 
     for version in _onnx_stable_opsets + [_onnx_main_opset]:
         if version >= opset_version:
             sym_registry.register_op(op_name, symbolic_fn, ns, version)
+
+
+def unregister_custom_op_symbolic(symbolic_name, opset_version):
+    ns, op_name = get_ns_op_name_from_custom_op(symbolic_name)
+    import torch.onnx.symbolic_registry as sym_registry
+    from torch.onnx.symbolic_helper import _onnx_stable_opsets, _onnx_main_opset
+
+    for version in _onnx_stable_opsets + [_onnx_main_opset]:
+        if version >= opset_version:
+            sym_registry.unregister_op(op_name, ns, version)
+
 
 # This helper function ensures dynamic axes argument is following the expected format
 def _validate_dynamic_axes(dynamic_axes, model, input_names, output_names):
