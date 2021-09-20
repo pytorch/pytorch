@@ -251,7 +251,7 @@ class TestModule(TestCase):
             elif isinstance(obj, dict):
                 return {name: _make_non_contiguous(o) for name, o in obj.items()}
 
-            # Scalar tensors can not be made contiguous
+            # Scalar tensors can not be made non-contiguous
             if not isinstance(obj, torch.Tensor) or obj.dim() == 0:
                 return obj
 

@@ -184,8 +184,8 @@ def module_inputs_torch_nn_NLLLoss(module_info, device, dtype, requires_grad, **
 
     cases: List[Tuple[str, dict]] = [
         ('', {}),
-        ('', {'reduction': 'sum'}),
-        ('', {'reduction': 'none'}),
+        ('reduction_sum', {'reduction': 'sum'}),
+        ('reduction_none', {'reduction': 'none'}),
         ('ignore_index', {'ignore_index': 2}),
         ('weights', {'weight': make_weight(10).abs()}),
         ('weights_ignore_index', {'weight': make_weight(10).abs(), 'ignore_index': 2}),
