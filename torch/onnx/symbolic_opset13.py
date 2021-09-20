@@ -335,39 +335,45 @@ def diagonal(g, self, offset, dim1, dim2):
     else:
         return _unimplemented("diagonal", "negative axis with unknown input rank")
 
-    # Update mask
-    axes = list(range(rank))
-    mask_shape = [size(g, self, 
-                       dim=g.op("Constant", value_t=torch.LongTensor([axis]))) for axis in axes[:-2]]
-    mask_shape.append(g.op("Constant", value_t=torch.LongTensor([-1])))
-    mask_shape.append(g.op("Constant", value_t=torch.LongTensor([-1])))
-    mask_shape = g.op("Concat", *mask_shape, axis_i=0)
-    mask = expand(g, mask, mask_shape, None)
-    
-    # Multiply input and mask
+    # Multiply input and mask to calculate values along diagonal
+    # The mask consists of one values where diagonal values are to be calculated
+    # For example:
+    # [[1.1, 1.2, 1.3],   *    [[1, 0, 0]   =   [[1.1, 0, 0],
+    #  [2.1, 2.2, 2.3],         [0, 1, 0]        [0, 2.2, 0],
+    #  [3.1, 3.2, 3.3]]         [0, 0, 1]]       [0, 0, 3.3]]
     result = g.op("Mul", self, mask)
     result = sym_help._reducesum_helper(g, result, axes_i=[-1], keepdims_i=0)
 
     # Calculate gather indices based on offset and dims
-    _offset = g.op("Constant", value_t=torch.LongTensor([offset]))
+    # If offset is greater than zero, set offset to zero as this aids in
+    # calculation of selection window
+    offset_op = g.op("Constant", value_t=torch.LongTensor([offset]))
     if offset >= 0:
-        diag_size = g.op("Max", g.op("Min", dim1_size, g.op("Sub", dim2_size, _offset)),
+        diag_size = g.op("Max", g.op("Min", dim1_size, g.op("Sub", dim2_size, offset_op)),
                          g.op("Constant", value_t=torch.LongTensor([0])))
+        offset = 0
     else:
-        diag_size = g.op("Max", g.op("Min", g.op("Add", dim1_size, _offset), dim2_size),
+        diag_size = g.op("Max", g.op("Min", g.op("Add", dim1_size, offset_op), dim2_size),
                          g.op("Constant", value_t=torch.LongTensor([0])))
+    diag_size = g.op("Concat", diag_size, axis_i=0)
 
-    gather_indices = ones(g, g.op("Concat", diag_size, axis_i=0), 4, None, None)
-    gather_indices = g.op("CumSum", gather_indices, g.op("Constant", value_t=torch.LongTensor([0])))
-    gather_indices = g.op("Add", gather_indices, g.op("Constant", value_t=torch.LongTensor([abs(offset) - 1])))
+    # Calculate which diagonal values to select
+    # For example, in cases with offsets:
+    # [[0, 1.1, 0]    
+    #  [0, 0, 2.2]]
+    # we need to select the last two columns, so we create a tensor
+    # with all columns that are to be selected
+    # So in this example, it is [1, 2]
+    select_window_ones_fill = ones(g, diag_size, 4, None, None)
+    select_window = g.op("CumSum", select_window_ones_fill, g.op("Constant", value_t=torch.LongTensor([0])))
+    select_window = g.op("Add", select_window, g.op("Constant", value_t=torch.LongTensor([abs(offset) - 1])))
 
     gather_shape = [size(g, result, 
-                         dim=g.op("Constant", value_t=torch.LongTensor([axis]))) for axis in axes[:-2]]
-    gather_shape.append(g.op("Constant", value_t=torch.LongTensor([-1])))
+                         dim=g.op("Constant", value_t=torch.LongTensor([axis]))) for axis in list(range(rank))[:-2]]
+    gather_shape.append(diag_size)
     gather_shape = g.op("Concat", *gather_shape, axis_i=0)
 
-    gather_indices = expand(g, gather_indices, gather_shape, None)
+    gather_indices = zeros(g, gather_shape, 4, None, None)
+    gather_indices = g.op("Add", gather_indices, select_window)
     gather_indices = sym_help._unsqueeze_helper(g, gather_indices, [rank - 1])
-    
-    # Perform gather operation
     return g.op("GatherND", result, gather_indices, batch_dims_i=rank - 2)

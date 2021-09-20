@@ -1,5 +1,6 @@
 import unittest
 import onnxruntime
+
 import torch
 import torchvision
 
@@ -12,7 +13,6 @@ import random
 
 import model_defs.word_language_model as word_language_model
 import onnx
-
 from torch.nn.utils import rnn as rnn_utils
 from model_defs.lstm_flattening_result import (LstmFlatteningResultWithSeqLength,
                                                LstmFlatteningResultWithoutSeqLength)
@@ -5241,10 +5241,44 @@ class TestONNXRuntime(unittest.TestCase):
                 return torch.diagonal(x)
 
         x = torch.randn(2, 4, 5, 2)
+        # Other test inputs to test dynamic behavior
         another_x = torch.randn(5, 6, 7, 8)
         self.run_test(DiagonalModel(), x, test_with_inputs=[another_x],
-                      input_names=["input_1"], output_names=["outputs"],
-                      dynamic_axes={"input_1": [0, 1, 2, 3], "outputs": [0, 1, 2, 3]})
+                      input_names=["input_1"],
+                      dynamic_axes={"input_1": [0, 1, 2, 3]})
+
+        class DiagonalModelNegOffset(torch.nn.Module):
+            def forward(self, x):
+                return torch.diagonal(x, offset=-1)
+
+        x = torch.randn(2, 4, 5, 2)
+        # Other test inputs to test dynamic behavior
+        another_x = torch.randn(5, 6, 7, 8)
+        self.run_test(DiagonalModelNegOffset(), x, test_with_inputs=[another_x],
+                      input_names=["input_1"],
+                      dynamic_axes={"input_1": [0, 1, 2, 3]})
+
+        class DiagonalModelPosOffset(torch.nn.Module):
+            def forward(self, x):
+                return torch.diagonal(x, offset=1)
+
+        x = torch.randn(2, 4, 5, 2)
+        # Other test inputs to test dynamic behavior
+        another_x = torch.randn(5, 6, 7, 8)
+        self.run_test(DiagonalModelPosOffset(), x, test_with_inputs=[another_x],
+                      input_names=["input_1"],
+                      dynamic_axes={"input_1": [0, 1, 2, 3]})
+
+        class DiagonalModelWithDims(torch.nn.Module):
+            def forward(self, x):
+                return torch.diagonal(x, offset=-1, dim1=1, dim2=2)
+
+        x = torch.randn(2, 4, 5, 2)
+        # Other test inputs to test dynamic behavior
+        another_x = torch.randn(5, 6, 7, 8)
+        self.run_test(DiagonalModelWithDims(), x, test_with_inputs=[another_x],
+                      input_names=["input_1"],
+                      dynamic_axes={"input_1": [0, 1, 2, 3]})
 
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_inplace_zero(self):
