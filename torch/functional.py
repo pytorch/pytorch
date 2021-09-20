@@ -1,7 +1,6 @@
 from typing import (
     Tuple, Optional, Union, Any, Sequence, TYPE_CHECKING
 )
-import warnings
 
 import torch
 import torch.nn.functional as F
@@ -443,9 +442,11 @@ def _meshgrid(*tensors, indexing: Optional[str]):
         # state to take the same parameter type to avoid having to
         # juggle a forward-compatibility breaking change in the
         # future.
-        warnings.warn('torch.meshgrid: in an upcoming release, it will be '
-                      'required to pass the indexing argument.')
-        indexing = 'ij'
+        raise RuntimeError('torch.meshgrid: the "indexing" parameter is '
+                           'required. The default value was \"ij\", so pass '
+                           'indexing=\'ij\' to keep the existing behavior. In '
+                           'a future release of PyTorch the default will '
+                           'become "xy".')
 
     if has_torch_function(tensors):
         return handle_torch_function(meshgrid, tensors, *tensors, indexing=indexing)

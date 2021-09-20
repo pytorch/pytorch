@@ -6027,7 +6027,7 @@ class TestONNXRuntime(unittest.TestCase):
     def test_meshgrid(self):
         class Meshgrid(torch.nn.Module):
             def forward(self, x, y, z):
-                output1, output2, output3 = torch.meshgrid(x, y, z)
+                output1, output2, output3 = torch.meshgrid(x, y, z, indexing='ij')
                 return output1, output2, output3
 
         x = torch.randn(3, requires_grad=True)
@@ -6039,7 +6039,7 @@ class TestONNXRuntime(unittest.TestCase):
     def test_meshgrid_scalar(self):
         class Meshgrid(torch.nn.Module):
             def forward(self, x, y, z):
-                output1, output2, output3 = torch.meshgrid(x, y, z)
+                output1, output2, output3 = torch.meshgrid(x, y, z, indexing='ij')
                 return output1, output2, output3
 
         x = torch.ones(3, requires_grad=True)

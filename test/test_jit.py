@@ -5228,20 +5228,21 @@ a")
     def test_meshgrid(self):
         with enable_profiling_mode_for_profiling_tests():
             @torch.jit.script
-            def func(a):
-                # type: (List[Tensor]) -> List[Tensor]
-                return torch.meshgrid(a)
+            def func(a, *, indexing: str):
+                # type: (List[Tensor], str) -> List[Tensor]
+                return torch.meshgrid(a, indexing=indexing)
             with disable_autodiff_subgraph_inlining():
                 a = torch.tensor([1.0, 2, 3]).requires_grad_()
                 b = torch.tensor([1.0, 2, 3, 4]).requires_grad_()
                 inputs = [a, b]
 
-                outputs_ref = torch.meshgrid(inputs)
-                outputs = func(inputs, profile_and_replay=True)
+                outputs_ref = torch.meshgrid(inputs, indexing='ij')
+                outputs = func(inputs, indexing='ij', profile_and_replay=True)
                 self.assertEqual(outputs, outputs_ref)
 
                 if GRAPH_EXECUTOR != ProfilingMode.SIMPLE:
-                    self.assertAutodiffNode(func.graph_for(inputs), True, ['aten::meshgrid'], [])
+                    self.assertAutodiffNode(func.graph_for(inputs, indexing='ij'), True,
+                                            ['aten::meshgrid'], [])
 
                     grads = torch.autograd.grad(_sum_of_list(outputs), inputs)
                     grads_ref = torch.autograd.grad(_sum_of_list(outputs_ref), inputs)
