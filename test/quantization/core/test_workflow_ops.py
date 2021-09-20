@@ -8,7 +8,7 @@ from torch.quantization import (
     default_affine_fixed_qparams_fake_quant,
 )
 
-from torch.quantization._learnable_fake_quantize import _LearnableFakeQuantize
+from torch.ao.quantization._learnable_fake_quantize import _LearnableFakeQuantize
 from torch.testing._internal.common_quantized import (
     _fake_quantize_per_channel_affine_reference,
     _fake_quantize_per_channel_affine_grad_reference,
@@ -1038,6 +1038,26 @@ class TestFusedObsFakeQuant(TestCase):
             self.assertEqual(in_running_min_ref, in_running_min_op)
             self.assertEqual(in_running_max_ref, in_running_max_op)
             torch.testing.assert_allclose(out, x_in)
+
+        # Test empty input works
+        x = torch.empty(0, 5, device=device)
+        out = pt_op(
+            x,
+            torch.tensor(1, device=device),
+            torch.tensor(1, device=device),
+            in_running_min_op,
+            in_running_max_op,
+            scale,
+            zero_point,
+            avg_const,
+            0,
+            255,
+            0,
+            False,
+            symmetric_quant,
+        )
+        output_shape = (0, 5)
+        self.assertEqual(out.shape, output_shape)
 
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
            symmetric_quant=st.booleans())
