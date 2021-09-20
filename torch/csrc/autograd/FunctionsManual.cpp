@@ -4185,11 +4185,11 @@ Tensor _lu_with_info_jvp(
 }
 
 Tensor mkldnn_convolution_forward(
-  const Tensor& self,
-  const Tensor& self_fw_grad,
-  const Tensor& weight_fw_grad,
-  const Tensor& bias_fw_grad,
-  const Tensor& weight,
+  const Tensor& self_p,
+  const Tensor& self_t,
+  const Tensor& weight_p,
+  const Tensor& weight_t,
+  const Tensor& bias_t,
   const at::IntArrayRef padding,
   const at::IntArrayRef stride,
   const at::IntArrayRef dilation,
@@ -4199,51 +4199,27 @@ Tensor mkldnn_convolution_forward(
 
   Tensor out_fw_grad;
 
-  if (self_fw_grad.defined()) {
-    out_fw_grad = at::mkldnn_convolution(
-      self_fw_grad,
-      weight,
-      Tensor(),
-      padding,
-      stride,
-      dilation,
-      groups
-    );
-  }
+  out_fw_grad = at::mkldnn_convolution(
+    self_t,
+    weight_p,
+    Tensor(),
+    padding,
+    stride,
+    dilation,
+    groups
+  );
 
-  if (weight_fw_grad.defined()) {
+  auto val = at::mkldnn_convolution(
+    self_p,
+    weight_t,
+    bias_t,
+    padding,
+    stride,
+    dilation,
+    groups
+  );
 
-    auto val = at::mkldnn_convolution(
-      self,
-      weight_fw_grad,
-      bias_fw_grad,
-      padding,
-      stride,
-      dilation,
-      groups
-    );
-
-    if (out_fw_grad.defined()) {
-      out_fw_grad += val;
-    } else {
-      out_fw_grad = val;
-    }
-
-  } else if (bias_fw_grad.defined()) {
-
-    auto view_size = result.sizes().vec();
-    for (auto dim = 0; dim < view_size.size(); ++dim) {
-      if (dim != 1) {
-        view_size[dim] = 1;
-      }
-    }
-
-    if ((out_fw_grad.defined())) {
-      out_fw_grad += bias_fw_grad.view(view_size);
-    } else {
-      out_fw_grad = bias_fw_grad.view(view_size).expand_as(result);
-    }
-  }
+  out_fw_grad += val;
 
   return out_fw_grad;
 }
