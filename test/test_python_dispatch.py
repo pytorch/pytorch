@@ -24,7 +24,6 @@ def no_dispatch() -> Iterator[None]:
 # 3. Enter dispatcher, wind your way through Autograd
 # 4. Hit Python dispatch key, call __torch_dispatch__
 
-WRAPPER_DEVICE = "meta"
 # TODO: TensorBase should work
 class LoggingTensor(torch.Tensor):
     elem: torch.Tensor
@@ -33,10 +32,15 @@ class LoggingTensor(torch.Tensor):
 
     @staticmethod
     def __new__(cls, elem, *args, **kwargs):
-        # The wrapping tensor (LoggingTensor) is just a meta tensor, so it
-        # doesn't hold any memory (meta tensor is generally the preferred type
-        # of tensor you want to make a subclass from)...
-        r = torch.Tensor._make_subclass(cls, elem.to(WRAPPER_DEVICE), elem.requires_grad)
+        # The wrapping tensor (LoggingTensor) shouldn't hold any
+        # memory for the class in question, but it should still
+        # advertise the same device as before
+        r = torch.Tensor._make_wrapper_subclass(
+            cls, elem.size(),
+            # TODO: clone strides and storage aliasing
+            dtype=elem.dtype, layout=elem.layout,
+            device=elem.device, requires_grad=elem.requires_grad
+        )
         # ...the real tensor is held as an element on the tensor.
         r.elem = elem
         return r
@@ -353,25 +357,11 @@ $6 = torch._ops.aten.add_($1, $5)''')
             a = torch.Tensor._make_subclass(Foo, LoggingTensor(torch.rand(2)))
         with self.assertRaisesRegex(RuntimeError, err_msg):
             b = LoggingTensor(torch.rand(2)).as_subclass(Foo)
-
-        # And in case where we don't know if the user wants this subclass
-        # overwritten, raise a nice error.
-        # The standard LoggingTensor will fail because it is not on the right device
-        with self.assertRaisesRegex(TypeError, "expected.*device=cpu.*device=meta"):
+        with self.assertRaisesRegex(RuntimeError, err_msg):
             Foo(LoggingTensor(torch.rand(2)))
 
-        # And if we put it on the right device, we still get a nice error
-        try:
-            global WRAPPER_DEVICE
-            prev_device = WRAPPER_DEVICE
-            WRAPPER_DEVICE = "cpu"
-
-            err_msg = "Creating a new Tensor subclass Foo.*python object of type LoggingTensor"
-            with self.assertRaisesRegex(RuntimeError, err_msg):
-                Foo(LoggingTensor(torch.rand(2)))
-
-        finally:
-            WRAPPER_DEVICE = prev_device
+        with self.assertRaisesRegex(TypeError, "Foo must define __torch_dispatch__"):
+            torch.Tensor._make_wrapper_subclass(Foo, (2, 2))
 
     def test_new_ones(self) -> None:
         class MyTensor(torch.Tensor):

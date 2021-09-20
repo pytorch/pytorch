@@ -364,6 +364,54 @@ static PyObject* THPVariable_make_subclass(PyObject* _ignored, PyObject* args, P
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* THPVariable_make_wrapper_subclass(PyObject* _ignored, PyObject* args, PyObject* kwargs) {
+  HANDLE_TH_ERRORS
+  // NB: pin_memory doesn't actually do anything
+  // TODO: strides variant?
+  static PythonArgParser parser({
+    "_make_wrapper_subclass(PyObject* cls, IntArrayRef size, *, MemoryFormat? memory_format=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False)",
+  });
+  ParsedArgs<8> parsed_args{};
+  auto r = parser.parse(args, kwargs, parsed_args);
+  // TODO: handle has_torch_function, maybe?
+  PyObject* cls = r.pyobject(0);
+  if (!PyType_Check(cls)) {
+    throw torch::TypeError("cls must be a type (got %s)", Py_TYPE(cls)->tp_name);
+  }
+
+  // This is an important safety check; without it, the default behavior will be
+  // to continue on to the underlying CPU/CUDA kernel advertised by the dispatch
+  // key, which will immediately segfault because the data pointer is null.  By
+  // forcing users to define __torch_dispatch__ we ensure this does not happen
+  if (PyObject_FastGetAttrString(cls, "__torch_dispatch__").ptr() == nullptr) {
+    throw torch::TypeError("%s must define __torch_dispatch__", ((PyTypeObject*)cls)->tp_name);
+  }
+
+  const auto options = TensorOptions()
+    .dtype(r.scalartype(3))
+    .device(r.device(5))
+    .layout(r.layoutOptional(4))
+    // NB: long standing issue, requires_grad is not respected here; you
+    // have to set it post facto, see https://github.com/pytorch/pytorch/issues/26428
+    // .requires_grad(r.toBool(7))
+    .pinned_memory(r.toBool(6));
+
+  // don't bother releasing GIL here, as we are not allocating any nontrivial
+  // data
+  auto data = at::for_blob(nullptr, r.intlist(1))
+    .context(nullptr, [](void *ctx) {})
+    .target_device(options.device())  // TODO: this shouldn't be necessary if it came from options
+    .options(options)
+    .make_tensor();
+  data.set_requires_grad(r.toBool(7));
+
+  return THPVariable_NewWithVar(
+      (PyTypeObject*)cls,
+      std::move(data),
+      c10::impl::PyInterpreterStatus::DEFINITELY_UNINITIALIZED);
+  END_HANDLE_TH_ERRORS
+}
+
 typedef PyObject *(*getter)(PyObject *, void *);
 typedef int (*setter)(PyObject *, PyObject *, void *);
 
@@ -1016,6 +1064,8 @@ static PyMethodDef extra_methods[] = {
   {"as_subclass", castPyCFunctionWithKeywords(THPVariable_as_subclass),
     METH_VARARGS | METH_KEYWORDS, nullptr},
   {"_make_subclass", castPyCFunctionWithKeywords(THPVariable_make_subclass),
+    METH_STATIC | METH_VARARGS | METH_KEYWORDS, nullptr},
+  {"_make_wrapper_subclass", castPyCFunctionWithKeywords(THPVariable_make_wrapper_subclass),
     METH_STATIC | METH_VARARGS | METH_KEYWORDS, nullptr},
   {"_fix_weakref", THPVariable_fix_weakref,
     METH_NOARGS, nullptr},
