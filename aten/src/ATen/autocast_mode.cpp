@@ -281,6 +281,8 @@ The stuff below could be codegenned.  Ed said
 Therefore, for the moment, this is all copy pasted in from VariableTypeEverything.cpp with appropriate substitutions.
 ********************************************************************************************************************/
 
+#define ADD_NS(RAW_OP) at::RAW_OP
+
 // Common cases where registration signature matches redispatch signature
 // (that's why SIGNATURE is repeated in the WrapFunction instantiation)
 #define KERNEL(FUNC, REGISTER_NAME, SIGNATURE, POLICY) \
@@ -306,161 +308,156 @@ TORCH_LIBRARY_IMPL(_, Autocast, m) {
 
 TORCH_LIBRARY_IMPL(aten, Autocast, m) {
   // lower_precision_fp
-  KERNEL(at::_convolution, "_convolution.deprecated", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, IntArrayRef, IntArrayRef, IntArrayRef, bool, IntArrayRef, int64_t, bool, bool, bool), lower_precision_fp)
-  KERNEL(at::_convolution, "_convolution", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, IntArrayRef, IntArrayRef, IntArrayRef, bool, IntArrayRef, int64_t, bool, bool, bool, bool), lower_precision_fp)
-  KERNEL(at::_convolution_nogroup, "_convolution_nogroup", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, IntArrayRef, IntArrayRef, IntArrayRef, bool, IntArrayRef), lower_precision_fp)
-  KERNEL(at::conv1d, "conv1d", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, IntArrayRef, IntArrayRef, IntArrayRef, int64_t), lower_precision_fp)
-  KERNEL(at::conv2d, "conv2d", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, IntArrayRef, IntArrayRef, IntArrayRef, int64_t), lower_precision_fp)
-  KERNEL(at::conv3d, "conv3d", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, IntArrayRef, IntArrayRef, IntArrayRef, int64_t), lower_precision_fp)
-  KERNEL(at::conv_tbc, "conv_tbc", Tensor (const Tensor &, const Tensor &, const Tensor &, int64_t), lower_precision_fp)
-  KERNEL(at::conv_transpose1d, "conv_transpose1d", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, IntArrayRef), lower_precision_fp)
-  KERNEL(at::conv_transpose2d, "conv_transpose2d.input", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, IntArrayRef), lower_precision_fp)
-  KERNEL(at::conv_transpose3d, "conv_transpose3d.input", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, IntArrayRef), lower_precision_fp)
-  KERNEL(at::convolution, "convolution", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, IntArrayRef, IntArrayRef, IntArrayRef, bool, IntArrayRef, int64_t), lower_precision_fp)
-  KERNEL(at::cudnn_convolution, "cudnn_convolution.deprecated", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool), lower_precision_fp)
-  KERNEL(at::cudnn_convolution_transpose, "cudnn_convolution_transpose.deprecated", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, IntArrayRef, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool), lower_precision_fp)
-  KERNEL(at::cudnn_convolution, "cudnn_convolution.deprecated2", Tensor (const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool), lower_precision_fp)
-  KERNEL(at::cudnn_convolution_transpose, "cudnn_convolution_transpose.deprecated2", Tensor (const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool), lower_precision_fp)
-  KERNEL(at::cudnn_convolution, "cudnn_convolution", Tensor (const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool, bool), lower_precision_fp)
-  KERNEL(at::cudnn_convolution_transpose, "cudnn_convolution_transpose", Tensor (const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool, bool), lower_precision_fp)
-  KERNEL(at::prelu, "prelu", Tensor (const Tensor &, const Tensor &), lower_precision_fp)
-  KERNEL(at::addmm, "addmm", Tensor (const Tensor &, const Tensor &, const Tensor &, const Scalar&, const Scalar&), lower_precision_fp)
-  KERNEL(at::addmv, "addmv", Tensor (const Tensor &, const Tensor &, const Tensor &, const Scalar&, const Scalar&), lower_precision_fp)
-  KERNEL(at::addr, "addr", Tensor (const Tensor &, const Tensor &, const Tensor &, const Scalar&, const Scalar&), lower_precision_fp)
-  KERNEL(at::matmul, "matmul", Tensor (const Tensor &, const Tensor &), lower_precision_fp)
-  KERNEL(at::mm, "mm", Tensor (const Tensor &, const Tensor &), lower_precision_fp)
-  KERNEL(at::mv, "mv", Tensor (const Tensor &, const Tensor &), lower_precision_fp)
-  KERNEL(at::linear, "linear", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&), lower_precision_fp)
-  KERNEL(at::addbmm, "addbmm", Tensor (const Tensor &, const Tensor &, const Tensor &, const Scalar&, const Scalar&), lower_precision_fp)
-  KERNEL(at::baddbmm, "baddbmm", Tensor (const Tensor &, const Tensor &, const Tensor &, const Scalar&, const Scalar&), lower_precision_fp)
-  KERNEL(at::bmm, "bmm", Tensor (const Tensor &, const Tensor &), lower_precision_fp)
-  KERNEL(at::chain_matmul, "chain_matmul", Tensor (TensorList), lower_precision_fp)
-  KERNEL(at::linalg_multi_dot, "linalg_multi_dot", Tensor (TensorList), lower_precision_fp)
+  KERNEL(ADD_NS(_convolution), "_convolution.deprecated", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, IntArrayRef, IntArrayRef, IntArrayRef, bool, IntArrayRef, int64_t, bool, bool, bool), lower_precision_fp)
+  KERNEL(ADD_NS(_convolution), "_convolution", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, IntArrayRef, IntArrayRef, IntArrayRef, bool, IntArrayRef, int64_t, bool, bool, bool, bool), lower_precision_fp)
+  KERNEL(ADD_NS(_convolution_nogroup), "_convolution_nogroup", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, IntArrayRef, IntArrayRef, IntArrayRef, bool, IntArrayRef), lower_precision_fp)
+  KERNEL(ADD_NS(conv1d), "conv1d", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, IntArrayRef, IntArrayRef, IntArrayRef, int64_t), lower_precision_fp)
+  KERNEL(ADD_NS(conv2d), "conv2d", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, IntArrayRef, IntArrayRef, IntArrayRef, int64_t), lower_precision_fp)
+  KERNEL(ADD_NS(conv3d), "conv3d", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, IntArrayRef, IntArrayRef, IntArrayRef, int64_t), lower_precision_fp)
+  KERNEL(ADD_NS(conv_tbc), "conv_tbc", Tensor (const Tensor &, const Tensor &, const Tensor &, int64_t), lower_precision_fp)
+  KERNEL(ADD_NS(conv_transpose1d), "conv_transpose1d", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, IntArrayRef), lower_precision_fp)
+  KERNEL(ADD_NS(conv_transpose2d), "conv_transpose2d.input", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, IntArrayRef), lower_precision_fp)
+  KERNEL(ADD_NS(conv_transpose3d), "conv_transpose3d.input", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, IntArrayRef), lower_precision_fp)
+  KERNEL(ADD_NS(convolution), "convolution", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, IntArrayRef, IntArrayRef, IntArrayRef, bool, IntArrayRef, int64_t), lower_precision_fp)
+  KERNEL(ADD_NS(cudnn_convolution), "cudnn_convolution.deprecated", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool), lower_precision_fp)
+  KERNEL(ADD_NS(cudnn_convolution_transpose), "cudnn_convolution_transpose.deprecated", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, IntArrayRef, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool), lower_precision_fp)
+  KERNEL(ADD_NS(cudnn_convolution), "cudnn_convolution.deprecated2", Tensor (const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool), lower_precision_fp)
+  KERNEL(ADD_NS(cudnn_convolution_transpose), "cudnn_convolution_transpose.deprecated2", Tensor (const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool), lower_precision_fp)
+  KERNEL(ADD_NS(cudnn_convolution), "cudnn_convolution", Tensor (const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool, bool), lower_precision_fp)
+  KERNEL(ADD_NS(cudnn_convolution_transpose), "cudnn_convolution_transpose", Tensor (const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool, bool), lower_precision_fp)
+  KERNEL(ADD_NS(prelu), "prelu", Tensor (const Tensor &, const Tensor &), lower_precision_fp)
+  KERNEL(ADD_NS(addmm), "addmm", Tensor (const Tensor &, const Tensor &, const Tensor &, const Scalar&, const Scalar&), lower_precision_fp)
+  KERNEL(ADD_NS(addmv), "addmv", Tensor (const Tensor &, const Tensor &, const Tensor &, const Scalar&, const Scalar&), lower_precision_fp)
+  KERNEL(ADD_NS(addr), "addr", Tensor (const Tensor &, const Tensor &, const Tensor &, const Scalar&, const Scalar&), lower_precision_fp)
+  KERNEL(ADD_NS(matmul), "matmul", Tensor (const Tensor &, const Tensor &), lower_precision_fp)
+  KERNEL(ADD_NS(mm), "mm", Tensor (const Tensor &, const Tensor &), lower_precision_fp)
+  KERNEL(ADD_NS(mv), "mv", Tensor (const Tensor &, const Tensor &), lower_precision_fp)
+  KERNEL(ADD_NS(linear), "linear", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&), lower_precision_fp)
+  KERNEL(ADD_NS(addbmm), "addbmm", Tensor (const Tensor &, const Tensor &, const Tensor &, const Scalar&, const Scalar&), lower_precision_fp)
+  KERNEL(ADD_NS(baddbmm), "baddbmm", Tensor (const Tensor &, const Tensor &, const Tensor &, const Scalar&, const Scalar&), lower_precision_fp)
+  KERNEL(ADD_NS(bmm), "bmm", Tensor (const Tensor &, const Tensor &), lower_precision_fp)
+  KERNEL(ADD_NS(chain_matmul), "chain_matmul", Tensor (TensorList), lower_precision_fp)
+  KERNEL(ADD_NS(linalg_multi_dot), "linalg_multi_dot", Tensor (TensorList), lower_precision_fp)
   // The macro doesn't like these (I think it chokes on commas inside <>) so write them manually
   m.impl(TORCH_SELECTIVE_NAME("aten::_thnn_fused_lstm_cell"),
          TORCH_FN((&WrapFunction<CastPolicy::lower_precision_fp, DeviceType::CUDA,
                                  std::tuple<Tensor,Tensor,Tensor> (const Tensor &, const Tensor &, const Tensor &, const c10::optional<Tensor>&, const c10::optional<Tensor>&),
                                  std::tuple<Tensor,Tensor,Tensor> (const Tensor &, const Tensor &, const Tensor &, const c10::optional<Tensor>&, const c10::optional<Tensor>&),
-                                 &at::_thnn_fused_lstm_cell>::type::call)));
+                                 &ADD_NS(_thnn_fused_lstm_cell)>::type::call)));
   m.impl("_thnn_fused_gru_cell",
          TORCH_FN((&WrapFunction<CastPolicy::lower_precision_fp, DeviceType::CUDA,
                                  std::tuple<Tensor,Tensor> (const Tensor &, const Tensor &, const Tensor &, const c10::optional<Tensor>&, const c10::optional<Tensor>&),
                                  std::tuple<Tensor,Tensor> (const Tensor &, const Tensor &, const Tensor &, const c10::optional<Tensor>&, const c10::optional<Tensor>&),
-                                 &at::_thnn_fused_gru_cell>::type::call)));
+                                 &ADD_NS(_thnn_fused_gru_cell)>::type::call)));
   m.impl("lstm_cell",
          TORCH_FN((&WrapFunction<CastPolicy::lower_precision_fp, DeviceType::CUDA,
                                  std::tuple<Tensor,Tensor> (const Tensor &, TensorList, const Tensor &, const Tensor &, const c10::optional<Tensor>&, const c10::optional<Tensor>&),
                                  std::tuple<Tensor,Tensor> (const Tensor &, TensorList, const Tensor &, const Tensor &, const c10::optional<Tensor>&, const c10::optional<Tensor>&),
-                                 &at::lstm_cell>::type::call)));
+                                 &ADD_NS(lstm_cell)>::type::call)));
   m.impl("gru_cell",
          TORCH_FN((&WrapFunction<CastPolicy::lower_precision_fp, DeviceType::CUDA,
                                  Tensor (const Tensor &, const Tensor &, const Tensor &, const Tensor &, const c10::optional<Tensor>&, const c10::optional<Tensor>&),
                                  Tensor (const Tensor &, const Tensor &, const Tensor &, const Tensor &, const c10::optional<Tensor>&, const c10::optional<Tensor>&),
-                                 &at::gru_cell>::type::call)));
+                                 &ADD_NS(gru_cell)>::type::call)));
   m.impl("rnn_tanh_cell", // tanh unary op is executed as a cuda math library call.
          TORCH_FN((&WrapFunction<CastPolicy::lower_precision_fp, DeviceType::CUDA,
                                  Tensor (const Tensor &, const Tensor &, const Tensor &, const Tensor &, const c10::optional<Tensor>&, const c10::optional<Tensor>&),
                                  Tensor (const Tensor &, const Tensor &, const Tensor &, const Tensor &, const c10::optional<Tensor>&, const c10::optional<Tensor>&),
-                                 &at::rnn_tanh_cell>::type::call)));
+                                 &ADD_NS(rnn_tanh_cell)>::type::call)));
   m.impl("rnn_relu_cell",
          TORCH_FN((&WrapFunction<CastPolicy::lower_precision_fp, DeviceType::CUDA,
                                  Tensor (const Tensor &, const Tensor &, const Tensor &, const Tensor &, const c10::optional<Tensor>&, const c10::optional<Tensor>&),
                                  Tensor (const Tensor &, const Tensor &, const Tensor &, const Tensor &, const c10::optional<Tensor>&, const c10::optional<Tensor>&),
-                                 &at::rnn_relu_cell>::type::call)));
+                                 &ADD_NS(rnn_relu_cell)>::type::call)));
   // fp32
-  KERNEL(at::acos, "acos", Tensor (const Tensor &), fp32)
-  KERNEL(at::asin, "asin", Tensor (const Tensor &), fp32)
-  KERNEL(at::cosh, "cosh", Tensor (const Tensor &), fp32)
-  KERNEL(at::erfinv, "erfinv", Tensor (const Tensor &), fp32)
-  KERNEL(at::exp, "exp", Tensor (const Tensor &), fp32)
-  KERNEL(at::expm1, "expm1", Tensor (const Tensor &), fp32)
-  KERNEL(at::log, "log", Tensor (const Tensor &), fp32)
-  KERNEL(at::log10, "log10", Tensor (const Tensor &), fp32)
-  KERNEL(at::log2, "log2", Tensor (const Tensor &), fp32)
-  KERNEL(at::log1p, "log1p", Tensor (const Tensor &), fp32)
-  KERNEL(at::reciprocal, "reciprocal", Tensor (const Tensor &), fp32)
-  KERNEL(at::rsqrt, "rsqrt", Tensor (const Tensor &), fp32)
-  KERNEL(at::sinh, "sinh", Tensor (const Tensor &), fp32)
-  KERNEL(at::tan, "tan", Tensor (const Tensor &), fp32)
-  KERNEL(at::pow, "pow.Tensor_Scalar", Tensor (const Tensor &, const Scalar&), fp32)
-  KERNEL(at::pow, "pow.Tensor_Tensor", Tensor (const Tensor &, const Tensor &), fp32)
-  KERNEL(at::pow, "pow.Scalar", Tensor (const Scalar&, const Tensor &), fp32)
-  KERNEL(at::softplus, "softplus", Tensor (const Tensor &, const Scalar&, const Scalar&), fp32)
-  KERNEL(at::gelu, "gelu", Tensor (const Tensor &), fp32)
-  KERNEL(at::layer_norm, "layer_norm", Tensor (const Tensor &, IntArrayRef, const c10::optional<Tensor>&, const c10::optional<Tensor>&, double, bool), fp32)
+  KERNEL(ADD_NS(acos), "acos", Tensor (const Tensor &), fp32)
+  KERNEL(ADD_NS(asin), "asin", Tensor (const Tensor &), fp32)
+  KERNEL(ADD_NS(cosh), "cosh", Tensor (const Tensor &), fp32)
+  KERNEL(ADD_NS(erfinv), "erfinv", Tensor (const Tensor &), fp32)
+  KERNEL(ADD_NS(exp), "exp", Tensor (const Tensor &), fp32)
+  KERNEL(ADD_NS(expm1), "expm1", Tensor (const Tensor &), fp32)
+  KERNEL(ADD_NS(log), "log", Tensor (const Tensor &), fp32)
+  KERNEL(ADD_NS(log10), "log10", Tensor (const Tensor &), fp32)
+  KERNEL(ADD_NS(log2), "log2", Tensor (const Tensor &), fp32)
+  KERNEL(ADD_NS(log1p), "log1p", Tensor (const Tensor &), fp32)
+  KERNEL(ADD_NS(reciprocal), "reciprocal", Tensor (const Tensor &), fp32)
+  KERNEL(ADD_NS(rsqrt), "rsqrt", Tensor (const Tensor &), fp32)
+  KERNEL(ADD_NS(sinh), "sinh", Tensor (const Tensor &), fp32)
+  KERNEL(ADD_NS(tan), "tan", Tensor (const Tensor &), fp32)
+  KERNEL(ADD_NS(pow), "pow.Tensor_Scalar", Tensor (const Tensor &, const Scalar&), fp32)
+  KERNEL(ADD_NS(pow), "pow.Tensor_Tensor", Tensor (const Tensor &, const Tensor &), fp32)
+  KERNEL(ADD_NS(pow), "pow.Scalar", Tensor (const Scalar&, const Tensor &), fp32)
+  KERNEL(ADD_NS(softplus), "softplus", Tensor (const Tensor &, const Scalar&, const Scalar&), fp32)
+  KERNEL(ADD_NS(layer_norm), "layer_norm", Tensor (const Tensor &, IntArrayRef, const c10::optional<Tensor>&, const c10::optional<Tensor>&, double, bool), fp32)
   // The macro doesn't like this one (I think it chokes on commas inside <>) so write it manually
   m.impl(TORCH_SELECTIVE_NAME("aten::native_layer_norm"),
          TORCH_FN((&WrapFunction<CastPolicy::fp32, DeviceType::CUDA,
                                  std::tuple<Tensor,Tensor,Tensor> (const Tensor&, IntArrayRef, const c10::optional<Tensor>&, const c10::optional<Tensor>&, double),
                                  std::tuple<Tensor,Tensor,Tensor> (const Tensor&, IntArrayRef, const c10::optional<Tensor>&, const c10::optional<Tensor>&, double),
-                                 &at::native_layer_norm>::type::call)));
-  KERNEL(at::group_norm, "group_norm", Tensor (const Tensor &, int64_t, const c10::optional<Tensor>&, const c10::optional<Tensor>&, double, bool), fp32)
-  KERNEL(at::frobenius_norm, "frobenius_norm", Tensor (const Tensor &), fp32)
-  KERNEL(at::frobenius_norm, "frobenius_norm.dim", Tensor (const Tensor &, IntArrayRef, bool), fp32)
-  KERNEL(at::nuclear_norm, "nuclear_norm", Tensor (const Tensor &, bool), fp32)
-  KERNEL(at::nuclear_norm, "nuclear_norm.dim", Tensor (const Tensor &, IntArrayRef, bool), fp32)
-  KERNEL(at::cosine_similarity, "cosine_similarity", Tensor (const Tensor &, const Tensor &, int64_t, double), fp32)
-  KERNEL(at::poisson_nll_loss, "poisson_nll_loss", Tensor (const Tensor &, const Tensor &, bool, bool, double, int64_t), fp32)
-  KERNEL(at::cosine_embedding_loss, "cosine_embedding_loss", Tensor (const Tensor &, const Tensor &, const Tensor &, double, int64_t), fp32)
-  KERNEL(at::nll_loss, "nll_loss", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, int64_t, int64_t), fp32)
-  KERNEL(at::nll_loss2d, "nll_loss2d", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, int64_t, int64_t), fp32)
-  KERNEL(at::hinge_embedding_loss, "hinge_embedding_loss", Tensor (const Tensor &, const Tensor &, double, int64_t), fp32)
-  KERNEL(at::kl_div, "kl_div", Tensor (const Tensor &, const Tensor &, int64_t, bool), fp32)
-  KERNEL(at::l1_loss, "l1_loss", Tensor (const Tensor &, const Tensor &, int64_t), fp32)
-  KERNEL(at::smooth_l1_loss, "smooth_l1_loss", Tensor (const Tensor &, const Tensor &, int64_t, double), fp32)
-  KERNEL(at::mse_loss, "mse_loss", Tensor (const Tensor &, const Tensor &, int64_t), fp32)
-  KERNEL(at::margin_ranking_loss, "margin_ranking_loss", Tensor (const Tensor &, const Tensor &, const Tensor &, double, int64_t), fp32)
-  KERNEL(at::multilabel_margin_loss, "multilabel_margin_loss", Tensor (const Tensor &, const Tensor &, int64_t), fp32)
-  KERNEL(at::soft_margin_loss, "soft_margin_loss", Tensor (const Tensor &, const Tensor &, int64_t), fp32)
-  KERNEL(at::triplet_margin_loss, "triplet_margin_loss", Tensor (const Tensor &, const Tensor &, const Tensor &, double, double, double, bool, int64_t), fp32)
-  KERNEL(at::multi_margin_loss, "multi_margin_loss", Tensor (const Tensor &, const Tensor &, const Scalar&, const Scalar&, const c10::optional<Tensor>&, int64_t), fp32)
-  KERNEL(at::binary_cross_entropy_with_logits, "binary_cross_entropy_with_logits", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, const c10::optional<Tensor>&, int64_t), fp32)
-  KERNEL(at::dist, "dist", Tensor (const Tensor &, const Tensor &, const Scalar&), fp32)
-  KERNEL(at::pdist, "pdist", Tensor (const Tensor &, double), fp32)
-  KERNEL(at::cdist, "cdist", Tensor (const Tensor &, const Tensor &, double, c10::optional<int64_t>), fp32)
-  KERNEL(at::renorm, "renorm", Tensor (const Tensor &, const Scalar&, int64_t, const Scalar&), fp32)
-  KERNEL(at::grid_sampler, "grid_sampler", Tensor (const Tensor &, const Tensor &, int64_t, int64_t, bool), fp32)
+                                 &ADD_NS(native_layer_norm)>::type::call)));
+  KERNEL(ADD_NS(group_norm), "group_norm", Tensor (const Tensor &, int64_t, const c10::optional<Tensor>&, const c10::optional<Tensor>&, double, bool), fp32)
+  KERNEL(ADD_NS(frobenius_norm), "frobenius_norm", Tensor (const Tensor &), fp32)
+  KERNEL(ADD_NS(frobenius_norm), "frobenius_norm.dim", Tensor (const Tensor &, IntArrayRef, bool), fp32)
+  KERNEL(ADD_NS(nuclear_norm), "nuclear_norm", Tensor (const Tensor &, bool), fp32)
+  KERNEL(ADD_NS(nuclear_norm), "nuclear_norm.dim", Tensor (const Tensor &, IntArrayRef, bool), fp32)
+  KERNEL(ADD_NS(cosine_similarity), "cosine_similarity", Tensor (const Tensor &, const Tensor &, int64_t, double), fp32)
+  KERNEL(ADD_NS(poisson_nll_loss), "poisson_nll_loss", Tensor (const Tensor &, const Tensor &, bool, bool, double, int64_t), fp32)
+  KERNEL(ADD_NS(cosine_embedding_loss), "cosine_embedding_loss", Tensor (const Tensor &, const Tensor &, const Tensor &, double, int64_t), fp32)
+  KERNEL(ADD_NS(nll_loss), "nll_loss", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, int64_t, int64_t), fp32)
+  KERNEL(ADD_NS(nll_loss2d), "nll_loss2d", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, int64_t, int64_t), fp32)
+  KERNEL(ADD_NS(hinge_embedding_loss), "hinge_embedding_loss", Tensor (const Tensor &, const Tensor &, double, int64_t), fp32)
+  KERNEL(ADD_NS(kl_div), "kl_div", Tensor (const Tensor &, const Tensor &, int64_t, bool), fp32)
+  KERNEL(ADD_NS(l1_loss), "l1_loss", Tensor (const Tensor &, const Tensor &, int64_t), fp32)
+  KERNEL(ADD_NS(smooth_l1_loss), "smooth_l1_loss", Tensor (const Tensor &, const Tensor &, int64_t, double), fp32)
+  KERNEL(ADD_NS(huber_loss), "huber_loss", Tensor (const Tensor &, const Tensor &, int64_t, double), fp32)
+  KERNEL(ADD_NS(mse_loss), "mse_loss", Tensor (const Tensor &, const Tensor &, int64_t), fp32)
+  KERNEL(ADD_NS(margin_ranking_loss), "margin_ranking_loss", Tensor (const Tensor &, const Tensor &, const Tensor &, double, int64_t), fp32)
+  KERNEL(ADD_NS(multilabel_margin_loss), "multilabel_margin_loss", Tensor (const Tensor &, const Tensor &, int64_t), fp32)
+  KERNEL(ADD_NS(soft_margin_loss), "soft_margin_loss", Tensor (const Tensor &, const Tensor &, int64_t), fp32)
+  KERNEL(ADD_NS(triplet_margin_loss), "triplet_margin_loss", Tensor (const Tensor &, const Tensor &, const Tensor &, double, double, double, bool, int64_t), fp32)
+  KERNEL(ADD_NS(multi_margin_loss), "multi_margin_loss", Tensor (const Tensor &, const Tensor &, const Scalar&, const Scalar&, const c10::optional<Tensor>&, int64_t), fp32)
+  KERNEL(ADD_NS(binary_cross_entropy_with_logits), "binary_cross_entropy_with_logits", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, const c10::optional<Tensor>&, int64_t), fp32)
+  KERNEL(ADD_NS(dist), "dist", Tensor (const Tensor &, const Tensor &, const Scalar&), fp32)
+  KERNEL(ADD_NS(pdist), "pdist", Tensor (const Tensor &, double), fp32)
+  KERNEL(ADD_NS(cdist), "cdist", Tensor (const Tensor &, const Tensor &, double, c10::optional<int64_t>), fp32)
+  KERNEL(ADD_NS(renorm), "renorm", Tensor (const Tensor &, const Scalar&, int64_t, const Scalar&), fp32)
   // fp32_set_opt_dtype
-  KERNEL(at::prod, "prod", Tensor (const Tensor &, c10::optional<ScalarType>), fp32_set_opt_dtype)
-  KERNEL(at::prod, "prod.dim_int", Tensor (const Tensor &, int64_t, bool, c10::optional<ScalarType>), fp32_set_opt_dtype)
-  KERNEL(at::prod, "prod.dim_Dimname", Tensor (const Tensor &, Dimname, bool, c10::optional<ScalarType>), fp32_set_opt_dtype)
-  KERNEL(at::softmax, "softmax.int", Tensor (const Tensor &, int64_t, c10::optional<ScalarType>), fp32_set_opt_dtype)
-  KERNEL(at::softmax, "softmax.Dimname", Tensor (const Tensor &, Dimname, c10::optional<ScalarType>), fp32_set_opt_dtype)
-  KERNEL(at::log_softmax, "log_softmax.int", Tensor (const Tensor &, int64_t, c10::optional<ScalarType>), fp32_set_opt_dtype)
-  KERNEL(at::log_softmax, "log_softmax.Dimname", Tensor (const Tensor &, Dimname, c10::optional<ScalarType>), fp32_set_opt_dtype)
-  KERNEL(at::cumprod, "cumprod", Tensor (const Tensor &, int64_t, c10::optional<ScalarType>), fp32_set_opt_dtype)
-  KERNEL(at::cumprod, "cumprod.dimname", Tensor (const Tensor &, Dimname, c10::optional<ScalarType>), fp32_set_opt_dtype)
-  KERNEL(at::cumsum, "cumsum", Tensor (const Tensor &, int64_t, c10::optional<ScalarType>), fp32_set_opt_dtype)
-  KERNEL(at::cumsum, "cumsum.dimname", Tensor (const Tensor &, Dimname, c10::optional<ScalarType>), fp32_set_opt_dtype)
+  KERNEL(ADD_NS(prod), "prod", Tensor (const Tensor &, c10::optional<ScalarType>), fp32_set_opt_dtype)
+  KERNEL(ADD_NS(prod), "prod.dim_int", Tensor (const Tensor &, int64_t, bool, c10::optional<ScalarType>), fp32_set_opt_dtype)
+  KERNEL(ADD_NS(prod), "prod.dim_Dimname", Tensor (const Tensor &, Dimname, bool, c10::optional<ScalarType>), fp32_set_opt_dtype)
+  KERNEL(ADD_NS(softmax), "softmax.int", Tensor (const Tensor &, int64_t, c10::optional<ScalarType>), fp32_set_opt_dtype)
+  KERNEL(ADD_NS(softmax), "softmax.Dimname", Tensor (const Tensor &, Dimname, c10::optional<ScalarType>), fp32_set_opt_dtype)
+  KERNEL(ADD_NS(log_softmax), "log_softmax.int", Tensor (const Tensor &, int64_t, c10::optional<ScalarType>), fp32_set_opt_dtype)
+  KERNEL(ADD_NS(log_softmax), "log_softmax.Dimname", Tensor (const Tensor &, Dimname, c10::optional<ScalarType>), fp32_set_opt_dtype)
+  KERNEL(ADD_NS(cumprod), "cumprod", Tensor (const Tensor &, int64_t, c10::optional<ScalarType>), fp32_set_opt_dtype)
+  KERNEL(ADD_NS(cumprod), "cumprod.dimname", Tensor (const Tensor &, Dimname, c10::optional<ScalarType>), fp32_set_opt_dtype)
+  KERNEL(ADD_NS(cumsum), "cumsum", Tensor (const Tensor &, int64_t, c10::optional<ScalarType>), fp32_set_opt_dtype)
+  KERNEL(ADD_NS(cumsum), "cumsum.dimname", Tensor (const Tensor &, Dimname, c10::optional<ScalarType>), fp32_set_opt_dtype)
   // commenting these out because they accept an explicit (not-optional) dtype, and we shouldn't try to flip that even
   // when autocasting.
-  // KERNEL(at::norm, "norm.ScalarOpt_dtype", Tensor (const Tensor &, const c10::optional<Scalar>&, ScalarType), fp32_set_opt_dtype)
-  // KERNEL(at::norm, "norm.ScalarOpt_dim_dtype", Tensor (const Tensor &, const c10::optional<Scalar>&, IntArrayRef, bool, ScalarType), fp32_set_opt_dtype)
-  // KERNEL(at::norm, "norm.names_ScalarOpt_dim_dtype", Tensor (const Tensor &, const c10::optional<Scalar>&, DimnameList, bool, ScalarType), fp32_set_opt_dtype)
-  KERNEL(at::sum, "sum", Tensor (const Tensor &, c10::optional<ScalarType>), fp32_set_opt_dtype)
-  KERNEL(at::sum, "sum.dim_IntList", Tensor (const Tensor &, IntArrayRef, bool, c10::optional<ScalarType>), fp32_set_opt_dtype)
-  KERNEL(at::sum, "sum.dim_DimnameList", Tensor (const Tensor &, DimnameList, bool, c10::optional<ScalarType>), fp32_set_opt_dtype)
+  // KERNEL(ADD_NS(norm), "norm.ScalarOpt_dtype", Tensor (const Tensor &, c10::optional<Scalar>, ScalarType), fp32_set_opt_dtype)
+  // KERNEL(ADD_NS(norm), "norm.ScalarOpt_dim_dtype", Tensor (const Tensor &, c10::optional<Scalar>, IntArrayRef, bool, ScalarType), fp32_set_opt_dtype)
+  // KERNEL(ADD_NS(norm), "norm.names_ScalarOpt_dim_dtype", Tensor (const Tensor &, c10::optional<Scalar>, DimnameList, bool, ScalarType), fp32_set_opt_dtype)
+  KERNEL(ADD_NS(sum), "sum", Tensor (const Tensor &, c10::optional<ScalarType>), fp32_set_opt_dtype)
+  KERNEL(ADD_NS(sum), "sum.dim_IntList", Tensor (const Tensor &, IntArrayRef, bool, c10::optional<ScalarType>), fp32_set_opt_dtype)
+  KERNEL(ADD_NS(sum), "sum.dim_DimnameList", Tensor (const Tensor &, DimnameList, bool, c10::optional<ScalarType>), fp32_set_opt_dtype)
   // fp32_append_dtype
   // The fp32_append_dtype wrapper overrides implicit promotion behavior.
   // norm does not implicitly promote, but be aware when adding new ops to this policy.
-  KERNEL_DIFFERENT_REDISPATCH_SIGNATURE(at::norm, "norm.Scalar", Tensor (const Tensor &, const Scalar&), Tensor (const Tensor &, const c10::optional<Scalar>&, ScalarType), fp32_append_dtype)
-  KERNEL_DIFFERENT_REDISPATCH_SIGNATURE(at::norm, "norm.ScalarOpt_dim", Tensor (const Tensor &, const c10::optional<Scalar>&, IntArrayRef, bool), Tensor (const Tensor &, const c10::optional<Scalar>&, IntArrayRef, bool, ScalarType), fp32_append_dtype)
-  KERNEL_DIFFERENT_REDISPATCH_SIGNATURE(at::norm, "norm.names_ScalarOpt_dim", Tensor (const Tensor &, const c10::optional<Scalar>&, DimnameList, bool), Tensor (const Tensor &, const c10::optional<Scalar>&, DimnameList, bool, ScalarType), fp32_append_dtype)
+  KERNEL_DIFFERENT_REDISPATCH_SIGNATURE(ADD_NS(norm), "norm.Scalar", Tensor (const Tensor &, const Scalar&), Tensor (const Tensor &, const c10::optional<Scalar>&, ScalarType), fp32_append_dtype)
+  KERNEL_DIFFERENT_REDISPATCH_SIGNATURE(ADD_NS(norm), "norm.ScalarOpt_dim", Tensor (const Tensor &, const c10::optional<Scalar>&, IntArrayRef, bool), Tensor (const Tensor &, const c10::optional<Scalar>&, IntArrayRef, bool, ScalarType), fp32_append_dtype)
+  KERNEL_DIFFERENT_REDISPATCH_SIGNATURE(ADD_NS(norm), "norm.names_ScalarOpt_dim", Tensor (const Tensor &, const c10::optional<Scalar>&, DimnameList, bool), Tensor (const Tensor &, const c10::optional<Scalar>&, DimnameList, bool, ScalarType), fp32_append_dtype)
   // promote
-  KERNEL(at::addcdiv, "addcdiv", Tensor (const Tensor &, const Tensor &, const Tensor &, const Scalar&), promote)
-  KERNEL(at::addcmul, "addcmul", Tensor (const Tensor &, const Tensor &, const Tensor &, const Scalar&), promote)
-  KERNEL(at::atan2, "atan2", Tensor (const Tensor &, const Tensor &), promote)
-  KERNEL(at::bilinear, "bilinear", Tensor (const Tensor &, const Tensor &, const Tensor &, const c10::optional<Tensor>&), promote)
-  KERNEL(at::cat, "cat", Tensor (TensorList, int64_t), promote)
-  KERNEL(at::cat, "cat.names", Tensor (TensorList, Dimname), promote)
-  KERNEL(at::_cat, "_cat", Tensor (TensorList, int64_t), promote)
-  KERNEL(at::cross, "cross", Tensor (const Tensor &, const Tensor &, c10::optional<int64_t>), promote)
-  KERNEL(at::dot, "dot", Tensor (const Tensor &, const Tensor &), promote)
-  KERNEL(at::equal, "equal", bool (const Tensor &, const Tensor &), promote)
-  KERNEL(at::index_put, "index_put", Tensor (const Tensor &, const torch::List<c10::optional<Tensor>>&, const Tensor &, bool), promote)
-  KERNEL(at::stack, "stack", Tensor (TensorList, int64_t), promote)
-  KERNEL(at::tensordot, "tensordot", Tensor (const Tensor &, const Tensor &, IntArrayRef, IntArrayRef), promote)
-  KERNEL(at::scatter_add, "scatter_add", Tensor (const Tensor &, int64_t, const Tensor &, const Tensor&), promote)
+  KERNEL(ADD_NS(addcdiv), "addcdiv", Tensor (const Tensor &, const Tensor &, const Tensor &, const Scalar&), promote)
+  KERNEL(ADD_NS(addcmul), "addcmul", Tensor (const Tensor &, const Tensor &, const Tensor &, const Scalar&), promote)
+  KERNEL(ADD_NS(atan2), "atan2", Tensor (const Tensor &, const Tensor &), promote)
+  KERNEL(ADD_NS(bilinear), "bilinear", Tensor (const Tensor &, const Tensor &, const Tensor &, const c10::optional<Tensor>&), promote)
+  KERNEL(ADD_NS(cross), "cross", Tensor (const Tensor &, const Tensor &, c10::optional<int64_t>), promote)
+  KERNEL(ADD_NS(dot), "dot", Tensor (const Tensor &, const Tensor &), promote)
+  KERNEL(ADD_NS(grid_sampler), "grid_sampler", Tensor (const Tensor &, const Tensor &, int64_t, int64_t, bool), promote)
+  KERNEL(ADD_NS(index_put), "index_put", Tensor (const Tensor &, const torch::List<c10::optional<Tensor>>&, const Tensor &, bool), promote)
+  KERNEL(ADD_NS(tensordot), "tensordot", Tensor (const Tensor &, const Tensor &, IntArrayRef, IntArrayRef), promote)
+  KERNEL(ADD_NS(scatter_add), "scatter_add", Tensor (const Tensor&, int64_t, const Tensor&, const Tensor&), promote)
 
   m.impl(TORCH_SELECTIVE_NAME("aten::binary_cross_entropy"),
          TORCH_FN((&at::autocast::binary_cross_entropy_banned)));
@@ -472,57 +469,6 @@ TORCH_LIBRARY_IMPL(_, AutocastCPU, m) {
 
 TORCH_LIBRARY_IMPL(aten, AutocastCPU, m) {
   // lower_precision_fp cast policy
-<<<<<<< HEAD
-  KERNEL_CPU(at::conv1d, "conv1d", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, IntArrayRef, IntArrayRef, IntArrayRef, int64_t), lower_precision_fp)
-  KERNEL_CPU(at::conv2d, "conv2d", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, IntArrayRef, IntArrayRef, IntArrayRef, int64_t), lower_precision_fp)
-  KERNEL_CPU(at::conv3d, "conv3d", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, IntArrayRef, IntArrayRef, IntArrayRef, int64_t), lower_precision_fp)
-  KERNEL_CPU(at::_log_softmax, "_log_softmax", Tensor (const Tensor &, int64_t, bool), lower_precision_fp)
-  KERNEL_CPU(at::bmm, "bmm", Tensor (const Tensor &, const Tensor &), lower_precision_fp)
-  KERNEL_CPU(at::mm, "mm", Tensor (const Tensor &, const Tensor &), lower_precision_fp)
-  KERNEL_CPU(at::baddbmm, "baddbmm", Tensor (const Tensor &, const Tensor &, const Tensor &, const Scalar&, const Scalar&), lower_precision_fp)
-  KERNEL_CPU(at::addmm, "addmm", Tensor (const Tensor &, const Tensor &, const Tensor &, const Scalar&, const Scalar&), lower_precision_fp)
-  KERNEL_CPU(at::addbmm, "addbmm", Tensor (const Tensor &, const Tensor &, const Tensor &, const Scalar&, const Scalar&), lower_precision_fp)
-  KERNEL_CPU(at::linear, "linear", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor> &), lower_precision_fp)
-
-  // fp32 cast policy
-  KERNEL_CPU(at::conv_transpose3d, "conv_transpose3d.input", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor> &, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, IntArrayRef), fp32)
-  KERNEL_CPU(at::batch_norm, "batch_norm", Tensor (const Tensor &, const c10::optional<Tensor> &, const c10::optional<Tensor> &, const c10::optional<Tensor> &, const c10::optional<Tensor> &, bool, double, double, bool), fp32)
-  KERNEL_CPU(at::max_pool2d, "max_pool2d", Tensor (const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, IntArrayRef, bool), fp32)
-  KERNEL_CPU(at::adaptive_avg_pool2d, "adaptive_avg_pool2d", Tensor (const Tensor &, IntArrayRef), fp32)
-
-  KERNEL_CPU(at::convolution, "convolution", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, IntArrayRef, IntArrayRef, IntArrayRef, bool, IntArrayRef, int64_t), fp32)
-  KERNEL_CPU(at::dropout, "dropout", Tensor (const Tensor &, double, bool), fp32)
-  KERNEL_CPU(at::avg_pool2d, "avg_pool2d", Tensor (const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, bool, bool, c10::optional<int64_t>), fp32)
-  KERNEL_CPU(at::avg_pool3d, "avg_pool3d", Tensor (const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, bool, bool, c10::optional<int64_t>), fp32)
-  KERNEL_CPU(at::gelu, "gelu", Tensor (const Tensor &), fp32)
-  KERNEL_CPU(at::upsample_nearest1d, "upsample_nearest1d", Tensor (const Tensor &, IntArrayRef, c10::optional<double>), fp32)
-  KERNEL_CPU(at::upsample_nearest1d, "upsample_nearest1d.vec", Tensor (const Tensor &, c10::optional<IntArrayRef>, c10::optional<ArrayRef<double>>), fp32)
-  KERNEL_CPU(at::upsample_nearest2d, "upsample_nearest2d", Tensor (const Tensor &, IntArrayRef, c10::optional<double>, c10::optional<double>), fp32)
-  KERNEL_CPU(at::upsample_nearest2d, "upsample_nearest2d.vec", Tensor (const Tensor &, c10::optional<IntArrayRef>, c10::optional<ArrayRef<double>>), fp32)
-  KERNEL_CPU(at::upsample_nearest3d, "upsample_nearest3d", Tensor (const Tensor &, IntArrayRef, c10::optional<double>, c10::optional<double>, c10::optional<double>), fp32)
-  KERNEL_CPU(at::upsample_nearest3d, "upsample_nearest3d.vec", Tensor (const Tensor &, c10::optional<IntArrayRef>, c10::optional<ArrayRef<double>>), fp32)
-  KERNEL_CPU(at::upsample_linear1d, "upsample_linear1d", Tensor (const Tensor &, IntArrayRef, bool, c10::optional<double>), fp32)
-  KERNEL_CPU(at::upsample_linear1d, "upsample_linear1d.vec", Tensor (const Tensor &, c10::optional<IntArrayRef>, bool, c10::optional<ArrayRef<double>>), fp32)
-  KERNEL_CPU(at::upsample_bilinear2d, "upsample_bilinear2d", Tensor (const Tensor &, IntArrayRef, bool, c10::optional<double>, c10::optional<double>), fp32)
-  KERNEL_CPU(at::upsample_bilinear2d, "upsample_bilinear2d.vec", Tensor (const Tensor &, c10::optional<IntArrayRef>, bool, c10::optional<ArrayRef<double>>), fp32)
-  KERNEL_CPU(at::upsample_trilinear3d, "upsample_trilinear3d", Tensor (const Tensor &, IntArrayRef, bool, c10::optional<double>, c10::optional<double>, c10::optional<double>), fp32)
-  KERNEL_CPU(at::upsample_trilinear3d, "upsample_trilinear3d.vec", Tensor (const Tensor &, c10::optional<IntArrayRef>, bool, c10::optional<ArrayRef<double>>), fp32)
-  KERNEL_CPU(at::binary_cross_entropy, "binary_cross_entropy", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, int64_t), fp32)
-  KERNEL_CPU(at::binary_cross_entropy_with_logits, "binary_cross_entropy_with_logits", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, const c10::optional<Tensor>&, int64_t), fp32)
-  KERNEL_CPU(at::pow, "pow.Tensor_Scalar", Tensor (const Tensor &, const Scalar &), fp32)
-  KERNEL_CPU(at::pow, "pow.Tensor_Tensor", Tensor (const Tensor &, const Tensor &), fp32)
-  KERNEL_CPU(at::pow, "pow.Scalar", Tensor (const Scalar&, const Tensor &), fp32)
-  KERNEL_CPU(at::smooth_l1_loss, "smooth_l1_loss", Tensor (const Tensor &, const Tensor &, int64_t, double), fp32)
-  KERNEL_CPU(at::reflection_pad1d, "reflection_pad1d", Tensor (const Tensor &, IntArrayRef), fp32)
-  KERNEL_CPU(at::std, "std", Tensor (const Tensor &, bool), fp32)
-  KERNEL_CPU(at::std, "std.dim", Tensor (const Tensor &, IntArrayRef, bool, bool), fp32)
-  KERNEL_CPU(at::instance_norm, "instance_norm", Tensor (const Tensor &, const c10::optional<Tensor>&, const c10::optional<Tensor>&, const c10::optional<Tensor>&, const c10::optional<Tensor>&, bool, double, double, bool), fp32)
-  KERNEL_CPU(at::fake_quantize_per_tensor_affine, "fake_quantize_per_tensor_affine", Tensor (const Tensor &, double, int64_t, int64_t, int64_t), fp32)
-
-  // promote
-  KERNEL_CPU(at::cat, "cat", Tensor (TensorList, int64_t), promote)
-  KERNEL_CPU(at::stack, "stack", Tensor (TensorList, int64_t), promote)
-=======
   KERNEL_CPU(ADD_NS(conv1d), "conv1d", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, IntArrayRef, IntArrayRef, IntArrayRef, int64_t), lower_precision_fp)
   KERNEL_CPU(ADD_NS(conv2d), "conv2d", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, IntArrayRef, IntArrayRef, IntArrayRef, int64_t), lower_precision_fp)
   KERNEL_CPU(ADD_NS(conv3d), "conv3d", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, IntArrayRef, IntArrayRef, IntArrayRef, int64_t), lower_precision_fp)
@@ -685,51 +631,27 @@ TORCH_LIBRARY_IMPL(aten, AutocastCPU, m) {
                                  std::tuple<Tensor, Tensor> (const Tensor &, int64_t),
                                  std::tuple<Tensor, Tensor> (const Tensor &, int64_t),
                                  &ADD_NS(cummin)>::type::call)));
->>>>>>> 543185a0fdb634264eaffd359cfe6573b3c07804
 
   m.impl(TORCH_SELECTIVE_NAME("aten::cummin.dimname"),
          TORCH_FN((&WrapFunction<CastPolicy::fp32, DeviceType::CPU,
-<<<<<<< HEAD
-                                 std::tuple<Tensor,Tensor> (const Tensor &, int64_t, int64_t, bool, bool),
-                                 std::tuple<Tensor,Tensor> (const Tensor &, int64_t, int64_t, bool, bool),
-                                 &at::topk>::type::call)));
-=======
                                  std::tuple<Tensor, Tensor> (const Tensor &, at::Dimname),
                                  std::tuple<Tensor, Tensor> (const Tensor &, at::Dimname),
                                  &ADD_NS(cummin)>::type::call)));
->>>>>>> 543185a0fdb634264eaffd359cfe6573b3c07804
 
   m.impl(TORCH_SELECTIVE_NAME("aten::eig"),
          TORCH_FN((&WrapFunction<CastPolicy::fp32, DeviceType::CPU,
-<<<<<<< HEAD
-                                 std::tuple<Tensor,Tensor> (const Tensor &, int64_t, bool),
-                                 std::tuple<Tensor,Tensor> (const Tensor &, int64_t, bool),
-                                 &at::sort>::type::call)));
-=======
                                  std::tuple<Tensor, Tensor> (const Tensor &, bool),
                                  std::tuple<Tensor, Tensor> (const Tensor &, bool),
                                  &ADD_NS(eig)>::type::call)));
->>>>>>> 543185a0fdb634264eaffd359cfe6573b3c07804
 
   m.impl(TORCH_SELECTIVE_NAME("aten::geqrf"),
          TORCH_FN((&WrapFunction<CastPolicy::fp32, DeviceType::CPU,
-<<<<<<< HEAD
-                                 std::tuple<Tensor,Tensor> (const Tensor &, int64_t, int64_t, bool),
-                                 std::tuple<Tensor,Tensor> (const Tensor &, int64_t, int64_t, bool),
-                                 &at::kthvalue>::type::call)));
-=======
                                  std::tuple<Tensor, Tensor> (const Tensor &),
                                  std::tuple<Tensor, Tensor> (const Tensor &),
                                  &ADD_NS(geqrf)>::type::call)));
->>>>>>> 543185a0fdb634264eaffd359cfe6573b3c07804
 
   m.impl(TORCH_SELECTIVE_NAME("aten::lstsq"),
          TORCH_FN((&WrapFunction<CastPolicy::fp32, DeviceType::CPU,
-<<<<<<< HEAD
-                                 std::tuple<Tensor,Tensor> (const Tensor &, int64_t, at::Dimname, bool),
-                                 std::tuple<Tensor,Tensor> (const Tensor &, int64_t, at::Dimname, bool),
-                                 &at::kthvalue>::type::call)));
-=======
                                  std::tuple<Tensor, Tensor> (const Tensor &, const Tensor &),
                                  std::tuple<Tensor, Tensor> (const Tensor &, const Tensor &),
                                  &ADD_NS(lstsq)>::type::call)));
@@ -860,7 +782,6 @@ TORCH_LIBRARY_IMPL(aten, AutocastCPU, m) {
   KERNEL_CPU(ADD_NS(index_copy), "index_copy", Tensor (const Tensor &, int64_t, const Tensor &, const Tensor &), promote)
   KERNEL_CPU(ADD_NS(index_copy), "index_copy.dimname", Tensor (const Tensor &, at::Dimname, const Tensor &, const Tensor &), promote)
 
->>>>>>> 543185a0fdb634264eaffd359cfe6573b3c07804
 }
 } // namespace
 } // namespace autocast
