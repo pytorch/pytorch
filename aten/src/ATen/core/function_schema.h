@@ -30,11 +30,11 @@ struct Argument {
       bool kwarg_only = false,
       c10::optional<AliasInfo> alias_info = c10::nullopt)
       : name_(std::move(name)),
-        type_(type ? type : TensorType::get()),
+        type_(type ? std::move(type) : TensorType::get()),
         N_(std::move(N)),
         default_value_(std::move(default_value)),
-        kwarg_only_(kwarg_only),
-        alias_info_(std::move(alias_info)) {
+        alias_info_(std::move(alias_info)),
+        kwarg_only_(kwarg_only) {
     // this is an softly-enforced invariant for out arguments.
     bool is_alias = alias_info_.has_value() && alias_info_.value().isWrite();
     is_out_ = kwarg_only_ && is_alias;
@@ -122,9 +122,9 @@ struct Argument {
   c10::optional<int32_t> N_;
 
   c10::optional<IValue> default_value_;
+  c10::optional<AliasInfo> alias_info_;
   // is this only specifiable as a keyword argument?
   bool kwarg_only_;
-  c10::optional<AliasInfo> alias_info_;
   // marks if the argument is out variant of the schema
   bool is_out_;
 };
