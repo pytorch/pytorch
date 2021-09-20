@@ -2390,6 +2390,52 @@ class TestNN(NNTestCase):
             self.assertNotEqual(model.weight, weight_copy)
             self.assertNotEqual(model.bias, bias_copy)
 
+    def test_register_and_remove_nested_parametrization(self):
+        r"""Test that it is possible to nest the parametrizations
+        meaning that the original param is parametrized again
+        """
+        class Skew(nn.Module):
+            def forward(self, X):
+                X = X.tril(-1)
+                return X - X.T
+
+        model = nn.Linear(8, 8)
+        # Add top level parametrization
+        parametrize.register_parametrization(model, "weight", Skew())
+        self.assertTrue(hasattr(model, "parametrizations"))
+        self.assertTrue(parametrize.is_parametrized(model))
+        self.assertTrue(parametrize.is_parametrized(model, "weight"))
+        self.assertFalse(parametrize.is_parametrized(model, "bias"))
+        self.assertNotIn("weight", model._parameters)
+        # Result should be skew-symmetric
+        A = model.weight
+        self.assertEqual(A, -A.T)
+
+        # Add nested parametrization
+        param_mod = model.parametrizations.weight
+        self.assertFalse(hasattr(param_mod, "parametrizations"))
+        self.assertFalse(parametrize.is_parametrized(param_mod))
+        self.assertFalse(parametrize.is_parametrized(param_mod, "original"))
+
+        parametrize.register_parametrization(param_mod, "original", Skew())
+        self.assertTrue(hasattr(param_mod, "parametrizations"))
+        self.assertTrue(parametrize.is_parametrized(param_mod))
+        self.assertTrue(parametrize.is_parametrized(param_mod, "original"))
+        self.assertNotIn("original", param_mod._parameters)
+        # Result should be skew-symmetric
+        A = param_mod.original
+        self.assertEqual(A, -A.T)
+
+        # Remove nested param and check consistency
+        parametrize.remove_parametrizations(param_mod, "original", leave_parametrized=False)
+        self.assertFalse(hasattr(param_mod, "parametrizations"))
+        self.assertEqual(param_mod.__class__, parametrize.ParametrizationList)
+
+        # Remove top level and check consistency
+        parametrize.remove_parametrizations(model, "weight", leave_parametrized=False)
+        self.assertFalse(hasattr(model, "parametrizations"))
+        self.assertEqual(model.__class__, nn.Linear)
+
     def test_register_and_remove_buffer_parametrization(self):
         r"""Test that it is possible to add and remove parametrizations on buffers"""
         # Define a couple vector parametrizations
