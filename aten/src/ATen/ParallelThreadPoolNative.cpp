@@ -57,6 +57,7 @@ void set_num_interop_threads(int nthreads) {
 }
 
 int get_num_interop_threads() {
+  at::internal::lazy_init_num_threads();
   int nthreads = num_interop_threads.load();
   if (nthreads > 0) {
     return nthreads;
