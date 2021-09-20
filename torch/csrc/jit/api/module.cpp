@@ -495,7 +495,7 @@ Module freeze(
 
   Module out_mod = freeze_module(
       module, preserved_attrs.value_or(std::vector<std::string>({})));
-  auto graph = module.get_method("forward").graph();
+  auto graph = out_mod.get_method("forward").graph();
   OptimizeFrozenGraph(graph, optimize_numerics);
   return out_mod;
 }
@@ -503,7 +503,7 @@ Module freeze(
 Module optimize_for_inference(Module& module) {
   // not frozen yet
   if (module._ivalue()->type()->hasAttribute("training")) {
-    auto mod = freeze(module, {}, true);
+    module = freeze(module, {}, true);
   }
 
   auto graph = module.get_method("forward").graph();
