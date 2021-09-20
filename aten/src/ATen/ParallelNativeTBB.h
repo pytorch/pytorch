@@ -41,7 +41,7 @@ inline void invoke_parallel(
           eptr = std::current_exception();
         }
       }
-    });
+    }, tbb::static_partitioner{});
   if (eptr) {
     std::rethrow_exception(eptr);
   }
