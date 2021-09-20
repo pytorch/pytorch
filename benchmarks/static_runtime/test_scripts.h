@@ -838,3 +838,20 @@ const std::string signed_log1p_script = R"IR(
       %res : Tensor = aten::clone(%3, %none)
       return (%res)
 )IR";
+
+const auto getitem_immutable_input_dict_script = R"JIT(
+  def forward(self, input: Dict[int, Tensor]):
+      a = input[0]
+      b = input[1]
+      c = a + b
+      return c.clone()
+)JIT";
+
+const auto getitem_mutable_input_dict_script = R"JIT(
+  def forward(self, input: Dict[int, Tensor]):
+      a = input[0]
+      input[1] = a
+      b = input[1]
+      c = a + b
+      return c.clone()
+)JIT";
