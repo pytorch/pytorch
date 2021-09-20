@@ -16,7 +16,7 @@ namespace functorch {
 // Checks if the batch dims in `bdims` appear at the front of the tensor.
 static bool areBdimsAtFrontInOrder(BatchDimsRef bdims) {
   for (const auto idx: c10::irange(0, bdims.size())) {
-    if (bdims[idx].dim() != idx) {
+    if (bdims[idx].dim() != (int64_t)idx) {
       return false;
     }
   }
@@ -101,83 +101,6 @@ static BatchDims computeFrontBatchDimsFromLevels(std::bitset<kVmapNumLevels> lev
   return bdims;
 }
 
-// Given a Tensor or a BatchedTensor, returns the underlying physical tensor
-// with all vmapped dimensions permuted to the front, if they exist, and a
-// bitset of vmap levels that were present in the tensor.
-static std::pair<Tensor,std::bitset<kVmapNumLevels>>
-getPhysicalTensorAndLevels(const Tensor& self) {
-  auto* batched = maybeGetBatchedImpl(self);
-  if (batched) {
-    return {permuteBatchDimsToFront(batched), createVmapLevelsBitset(batched->bdims())};
-  }
-  return {self, 0};
-}
-
-// Given a Tensor or a BatchedTensor, creates a physical view of the tensor
-// such that it has a batch dimension for each level in `requested_levels`
-// and `requested_example_dim` number of non-batch-dimensions.
-//
-// This function is useful in preparing physical views on tensors that can
-// then be passed into broadcasting operations. For example, when adding
-// two BatchedTensors of sizes [B0, 3] and [B0, B1, 2, 3], where the Bi are the
-// batch dimensions, we must align the batch dimensions and non-batch-dimensions
-// (henceforth referred to as the "example" dimensions) separately to produce
-// tensors of size [B0, 1, 1, 3] and [B0, B1, 2, 3] so that they can be added.
-//
-// Here's a direct example of using alignBatchDimsAtFront on the above two tensors.
-//
-// 1) alignBatchDimsAtFront([B0, 3], requested_levels={0, 1}, requested_example_dim=2)
-// returns a physical view of size [B0, 1, 1, 3] by adding an extra dimension for
-// level 1 and another extra dimension to pad the example dimensions to 2.
-//
-// 2) alignBatchDimsAtFront([B0, B1, 2, 3], requested_levels={0, 1}, requested_example_dim=2)
-// returns a physical view of size [B0, B1, 2, 3]
-static Tensor alignBatchDimsAtFront(
-    const Tensor& self,
-    std::bitset<kVmapNumLevels> requested_levels,
-    int64_t requested_example_dim) {
-  Tensor physical_tensor;
-  std::bitset<kVmapNumLevels> tensor_levels;
-  std::tie(physical_tensor, tensor_levels) = getPhysicalTensorAndLevels(self);
-
-  TORCH_INTERNAL_ASSERT(
-    (tensor_levels | requested_levels) == requested_levels,
-    "`requested_levels` must be a superset of `self`'s levels");
-
-  auto physical_sizes = physical_tensor.sizes();
-
-  int64_t tensor_example_dim = physical_sizes.size() - /*num_batch_dims*/tensor_levels.count();
-  TORCH_INTERNAL_ASSERT(tensor_example_dim <= requested_example_dim);
-
-  if (tensor_levels == requested_levels && tensor_example_dim == requested_example_dim) {
-    // Optimization: no need to do another view if the physical tensor is
-    // already the correct shape
-    return physical_tensor;
-  }
-
-  VmapDimVector aligned_sizes(requested_levels.count() + requested_example_dim, 1);
-
-  // align the example dims (non-bdims dims) first
-  // aligned_sizes[-tensor_example_dim:] = tensor_sizes[-tensor_example_dim:]
-  std::copy(
-      physical_sizes.rbegin(),
-      physical_sizes.rbegin() + tensor_example_dim,
-      aligned_sizes.rbegin());
-
-  // align the bdims
-  int64_t level = 0;
-  int64_t tensor_dim = 0;
-  for (const auto bdim : c10::irange(0, requested_levels.count())) {
-    // Determine the level of the bdim
-    while (!requested_levels[level]) level++;
-    if (tensor_levels[level]) {
-      aligned_sizes[bdim] = physical_sizes[tensor_dim++];
-    }
-    level++;
-  }
-  return physical_tensor.view(aligned_sizes);
-}
-
 static Tensor moveDimToFrontAndExpand(Tensor tensor, optional<int64_t> dim, int64_t size) {
   if (dim) {
     tensor = tensor.movedim(*dim, 0);
@@ -237,24 +160,6 @@ MultiBatchVmapTransform::logicalToPhysical(TensorList logical_tensors) {
   }
 
   return result;
-}
-
-static std::pair<std::bitset<kVmapNumLevels>,int64_t>
-getLevelsAndLargestLogicalDim(TensorList logical_tensors) {
-  TORCH_INTERNAL_ASSERT(logical_tensors.size() > 0);
-  std::bitset<kVmapNumLevels> levels;
-  int64_t largest_logical_dim = -1;
-  for (const auto& tensor : logical_tensors) {
-    auto* batched = maybeGetBatchedImpl(tensor);
-    if (batched) {
-      levels = levels | createVmapLevelsBitset(batched->bdims());
-    }
-    auto tensor_logical_dim = /*logical dim*/tensor.dim();
-    if (tensor_logical_dim > largest_logical_dim) {
-      largest_logical_dim = tensor_logical_dim;
-    }
-  }
-  return { levels, largest_logical_dim };
 }
 
 static Tensor moveDimToFrontAndUnsqueeze(Tensor tensor, optional<int64_t> dim, int64_t example_ndim) {
