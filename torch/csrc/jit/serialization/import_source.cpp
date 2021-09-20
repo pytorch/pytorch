@@ -116,7 +116,7 @@ TypePtr SourceImporterImpl::findNamedType(const QualifiedName& name) {
   parseSourceIfNeeded(name.prefix());
   auto it = to_be_defined_.find(name);
   if (it != to_be_defined_.end() && it->second->kind() == TK_CLASS_DEF) {
-    ClassDef cd(it->second);
+    ClassDef cd(std::move(it->second));
     to_be_defined_.erase(it);
     importNamedType(name.prefix(), cd);
   }

@@ -459,6 +459,9 @@ struct ClassDef : public TreeView {
   explicit ClassDef(const TreeRef& tree) : TreeView(tree) {
     tree->match(TK_CLASS_DEF);
   }
+  explicit ClassDef(TreeRef&& tree) : TreeView(std::move(tree)) {
+    tree_->match(TK_CLASS_DEF);
+  }
   ClassDef withName(std::string new_name) const {
     auto new_ident = Ident::create(name().range(), std::move(new_name));
     return create(range(), new_ident, superclass(), body());
