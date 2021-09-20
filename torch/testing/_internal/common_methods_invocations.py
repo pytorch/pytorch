@@ -2595,7 +2595,7 @@ def sample_inputs_max_pool2d(op_info, device, dtype, requires_grad, **kwargs):
     Ni = [1, 2, None]
     Ci = [2]
     Hi = [3, 6]
-    Wi = [3, 6]
+    Wi = [6]
     ceil_modei = [True, False]
     paddingi = [0, 1]
     dilationi = [1, (1, 2)]
