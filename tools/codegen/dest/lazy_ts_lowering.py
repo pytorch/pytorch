@@ -35,7 +35,9 @@ class LazyTsLowering:
         if self.target == LazyTsLowering.TsLoweringTarget.DISPATCH:
             return [f"""\
 case at::aten::{schema.aten_name}:
-    return Lower{schema.node_name}(function, loctx, ir::NodeCast<ir::ops::{schema.node_name}>(node, ir::OpKind(at::aten::{schema.aten_name})));
+    return Lower{schema.node_name}(function,
+                loctx,
+                ir::NodeCast<ir::ops::{schema.node_name}>(node, ir::OpKind(at::aten::{schema.aten_name})));
 """, ]
 
         elif self.target == LazyTsLowering.TsLoweringTarget.LOWERING:
@@ -49,7 +51,9 @@ case at::aten::{schema.aten_name}:
             emplace_kwarguments = "\n    ".join(
                 [f"kwarguments.emplace_back({a});" for a in emplace_kwarg_values + emplace_kwarg_scalars])
             return [f"""\
-TSOpVector Lower{schema.node_name}(std::shared_ptr<torch::jit::GraphFunction> function, ts_backend::TSLoweringContext* loctx, const ir::ops::{schema.node_name}* node) {{
+TSOpVector Lower{schema.node_name}(std::shared_ptr<torch::jit::GraphFunction> function,
+                                   ts_backend::TSLoweringContext* loctx,
+                                   const ir::ops::{schema.node_name}* node) {{
     std::vector<torch::jit::NamedValue> arguments;
     std::vector<torch::jit::NamedValue> kwarguments;
     arguments.reserve({len(emplace_arg_values + emplace_arg_scalars)});

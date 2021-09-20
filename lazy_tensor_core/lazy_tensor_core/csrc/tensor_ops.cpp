@@ -124,7 +124,7 @@ LazyTensor SmoothL1Loss(const LazyTensor& input, const LazyTensor& target,
     case ReductionMode::kNone:
       return elementwise_loss;
     case ReductionMode::kMean:
-      //TODO(whc) SmoothL1Loss is not implemented by lazy TS backend,
+      // TODO(whc) SmoothL1Loss is not implemented by lazy TS backend,
       // so it falls back and this code isn't tested.
       // Something like the code below should work, but is just a placeholder.
       // We may delete this whole function and replace with codegen anyway,
