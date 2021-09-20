@@ -546,7 +546,8 @@ class ShardedTensor(object):
         """
         return self._sharding_spec
 
-    def __torch_function__(self, func, types, args=(), kwargs=None):
+    @classmethod
+    def __torch_function__(cls, func, types, args=(), kwargs=None):
         raise RuntimeError(f"torch function '{func.__name__}' not supported for ShardedTensor!")
 
     def metadata(self) -> ShardedTensorMetadata:
