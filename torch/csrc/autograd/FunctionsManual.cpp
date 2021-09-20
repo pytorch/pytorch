@@ -1238,10 +1238,6 @@ Tensor softmax_double_backward(const Tensor& grad, const Tensor& grad_output, in
   return grad_output * grad - (output * grad_output).sum(dim, true) * grad - grad_output * (output * grad).sum(dim, true);
 }
 
-Tensor log_softmax_double_backward(const Tensor & grad, const Tensor & grad_output, int dim, const Tensor & output) {
-  return -grad_output.sum(dim, true) * output.exp() * grad;
-}
-
 // NOTE: [How to write vmap-compatible backward formulas]
 //
 // See NOTE: [vmap-incompatible in-place operations] for what it means for an
