@@ -257,7 +257,6 @@ class TestSymbolicShapeAnalysis(JitTestCase):
 
                 self.checkShapeAnalysis(out_size, fn.graph, assert_propagation=True, constant_prop=False)
 
-
     def test_partial_eval_graph_conv(self):
         mm = torch.jit.freeze(torch.jit.script(nn.Conv2d(16, 33, 3, stride=2).eval()))
         shape_compute_graph = torch._C._jit_pass_propagate_shapes_on_graph_and_build_compute(mm.graph)

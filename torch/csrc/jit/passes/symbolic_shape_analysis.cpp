@@ -161,6 +161,8 @@ bool shapeGraphCleanupPasses(std::shared_ptr<Graph> graph) {
   made_change |= PeepholeOptimizeListIdioms(graph, /*refine_list_len*/ true);
   made_change |= RefineIntegerValues(graph);
   made_change |= ConstantPropagation(graph);
+  // todo add return change for constant pooling
+  ConstantPooling(graph);
   made_change |= EliminateCommonSubexpression(graph);
   EliminateDeadCode(graph);
   return made_change;
@@ -584,7 +586,7 @@ struct SymbolicShapeGraphAnalyzer {
           curr, partial_eval_graph, large_shape_compute_graph);
     }
 
-    size_t MAX_ITER = 3;
+    size_t MAX_ITER = 8;
     bool made_change = true;
     size_t i = 0;
     while (i < MAX_ITER && made_change) {
@@ -654,7 +656,8 @@ struct SymbolicShapeGraphAnalyzer {
         return value;
       });
       if (changed) {
-        curr->output()->setType(tt->withSymbolicShapes(shape_vec));
+        curr->output()->setType(
+            tt->withSymbolicShapes(c10::SymbolicShape(new_sizes)));
       }
     }
   }
