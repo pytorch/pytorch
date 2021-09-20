@@ -811,9 +811,12 @@ Example:
 hfft2 = _add_docstr(_fft.fft_hfft2, r"""
 hfft2(input, s=None, dim=(-2, -1), norm=None, *, out=None) -> Tensor
 
-Computes the 2-dimensional discrete Fourier transform of a Herimitian symmetric
+Computes the 2-dimensional discrete Fourier transform of a Hermitian symmetric
 :attr:`input` signal. Equivalent to :func:`~torch.fft.hfftn` but only
 transforms the last two dimensions by default.
+
+:attr:`input` is interpreted as a one-sided Hermitian signal in the time
+domain. By the Hermitian property, the Fourier transform will be real-valued.
 
 Args:
     input (Tensor): the input tensor

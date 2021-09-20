@@ -369,7 +369,6 @@ class TestFFT(TestCase):
             *product(range(2, 5), (None, (4, 10)), (None,)),
             (6, None, None),
             (5, None, (1, 3, 4)),
-            (3, None, (0, -1)),
             (3, None, (1,)),
             (1, None, (0,)),
             (4, (10, 10), None),
@@ -398,10 +397,8 @@ class TestFFT(TestCase):
         # input_ndim, dim
         transform_desc = [
             *product(range(2, 5), (None, (0,), (0, -1))),
-            *product(range(2, 5), (None,)),
             (7, None),
             (5, (1, 3, 4)),
-            (3, (0, -1)),
             (3, (1,)),
             (1, 0),
         ]
@@ -459,13 +456,10 @@ class TestFFT(TestCase):
         # input_ndim, dim
         transform_desc = [
             *product(range(2, 5), (None, (0,), (0, -1))),
-            *product(range(2, 5), (None,)),
             (6, None),
             (5, (1, 3, 4)),
-            (3, (0, -1)),
             (3, (1,)),
             (1, (0,)),
-            (4, None),
             (4, (0, 1))
         ]
 
@@ -494,13 +488,10 @@ class TestFFT(TestCase):
         # input_ndim, dim
         transform_desc = [
             *product(range(2, 5), (None, (0,), (0, -1))),
-            *product(range(2, 5), (None,)),
             (6, None),
             (5, (1, 3, 4)),
-            (3, (0, -1)),
             (3, (1,)),
             (1, (0,)),
-            (4, None),
             (4, (0, 1))
         ]
 
