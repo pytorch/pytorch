@@ -1959,6 +1959,9 @@ struct TORCH_API ClassType : public NamedType {
       std::vector<std::string> unresolved_class_attributes = {});
 
   bool operator==(const Type& rhs) const override {
+    if (this == &rhs) {
+      return true;
+    }
     if (auto user_rhs = rhs.castRaw<ClassType>()) {
       const auto& lhs_name = name().value();
       const auto& rhs_name = user_rhs->name().value();
