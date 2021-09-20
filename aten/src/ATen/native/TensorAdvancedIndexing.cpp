@@ -1664,7 +1664,7 @@ Tensor& nonzero_out_cpu(const Tensor& self, Tensor& result) {
     at::parallel_for(0, numel, internal::GRAIN_SIZE, [&] (int64_t begin, int64_t end) {
       auto tid = at::get_thread_num();
       // Work needs to be distributed the same on both passes
-      TORCH_INTERNAL_ASSERT_DEBUG_ONLY(begin == thread_begin[tid]);
+      TORCH_INTERNAL_ASSERT(begin == thread_begin[tid]);
 
       // +1 faster than additional condition check inside loop
       c10::SmallVector<int64_t, 33> sizes(ndim + 1, -1);
