@@ -99,7 +99,7 @@ void checkAllocNodes(
           type->device() == expected_allocs[i].ttp->device() &&
           type->scalarType() == expected_allocs[i].ttp->scalarType() &&
           successor == expected_successors[i] &&
-          node->output()->uses().size() == 2)
+          node->output()->uses().size() == 1)
           << "i: " << i << "\n"
           << size << ((size == expected_allocs[i].size) ? "==" : "!=")
           << expected_allocs[i].size << "\n"
