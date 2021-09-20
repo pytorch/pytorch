@@ -3,19 +3,13 @@
 #include <ATen/core/jit_type.h>
 
 namespace c10 {
-// std::string serializeType(const Type &t);
 TypePtr parseType(const std::string& pythonStr);
-TypePtr parseCustomType(IValue custom_type);
 } // namespace c10
 
 namespace torch {
 namespace jit {
-TEST(MobileTypeParserTest, Empty) {
-  std::string empty_ps("");
-  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
-  ASSERT_ANY_THROW(c10::parseType(empty_ps));
-}
 
+// Parse Success cases
 TEST(MobileTypeParserTest, RoundTripAnnotationStr) {
   std::string int_ps("int");
   auto int_tp = c10::parseType(int_ps);
@@ -42,23 +36,80 @@ TEST(MobileTypeParserTest, NestedContainersAnnotationStrWithSpaces) {
   ASSERT_EQ(tuple_ps, tuple_space_tps);
 }
 
-TEST(MobileTypeParserTest, CustomTypeNamedTuple) {
-  std::vector<at::IValue> namedtuple_definition(
-      {c10::ivalue::Tuple::create(std::vector<at::IValue>(
-           {at::IValue("id"), at::IValue("List[int]")})),
-       c10::ivalue::Tuple::create(std::vector<at::IValue>(
-           {at::IValue("name"), at::IValue("List[int]")}))});
-  std::vector<at::IValue> namedtuple_vector = std::vector<at::IValue>(
-      {"NamedTuple",
-       c10::ivalue::Tuple::create(std::move(namedtuple_definition))});
-  std::vector<at::IValue> namedtuple_type_vector(
-      {at::IValue("mynamedtuple"),
-       c10::ivalue::Tuple::create(std::move(namedtuple_vector))});
-  at::IValue named_tuple_dummy =
-      c10::ivalue::Tuple::create(std::move(namedtuple_type_vector));
+TEST(MobileTypeParserTest, NamedTuple) {
+  std::string named_tuple_ps(
+      "__torch__.dper3_models.ads_ranking.base_models.sparse_nn.pytorch_preproc_types.PreprocOutputType["
+      "    NamedTuple, ["
+      "        [float_features, Tensor],"
+      "        [id_list_features, List[Tensor]],"
+      "        [label,  Tensor],"
+      "        [weight, Tensor],"
+      "        [prod_prediction, Tuple[Tensor, Tensor]],"
+      "        [id_score_list_features, List[Tensor]],"
+      "        [embedding_features, List[Tensor]],"
+      "        [teacher_label, Tensor]"
+      "        ]"
+      "    ]");
 
-  auto named_tuple_type_ptr = c10::parseCustomType(named_tuple_dummy);
-  ASSERT_EQ(named_tuple_type_ptr->annotation_str(), "mynamedtuple");
+  c10::TypePtr named_tuple_tp = c10::parseType(named_tuple_ps);
+  std::string named_tuple_annotation_str = named_tuple_tp->annotation_str();
+  ASSERT_EQ(
+      named_tuple_annotation_str,
+      "__torch__.dper3_models.ads_ranking.base_models.sparse_nn.pytorch_preproc_types.PreprocOutputType");
+}
+
+TEST(MobileTypeParserTest, DictNestedNamedTuple) {
+  std::string named_tuple_ps(
+      "Dict[str, "
+      "  __torch__.dper3_models.ads_ranking.base_models.sparse_nn.pytorch_preproc_types.PreprocOutputType["
+      "    NamedTuple, ["
+      "        [float_features, Tensor],"
+      "        [id_list_features, List[Tensor]],"
+      "        [label,  Tensor],"
+      "        [weight, Tensor],"
+      "        [prod_prediction, Tuple[Tensor, Tensor]],"
+      "        [id_score_list_features, List[Tensor]],"
+      "        [embedding_features, List[Tensor]],"
+      "        [teacher_label, Tensor]"
+      "        ]"
+      "    ]");
+
+  c10::TypePtr named_tuple_tp = c10::parseType(named_tuple_ps);
+  std::string named_tuple_annotation_str = named_tuple_tp->annotation_str();
+  ASSERT_EQ(
+      named_tuple_annotation_str,
+      "Dict[str, __torch__.dper3_models.ads_ranking.base_models.sparse_nn.pytorch_preproc_types.PreprocOutputType]");
+}
+
+TEST(MobileTypeParserTest, NamedTupleNestedNamedTuple) {
+  std::string named_tuple_ps(
+      "__torch__.aaa.xxx["
+      "    NamedTuple, ["
+      "        [field_name_a, __torch__.bbb.xxx ["
+      "            NamedTuple, ["
+      "                [field_name_b, __torch__.ccc.xxx ["
+      "                    NamedTuple, ["
+      "                      [field_name_c_1, Tensor],"
+      "                      [field_name_c_2, Tuple[Tensor, Tensor]]"
+      "                    ]"
+      "                ]"
+      "                ]"
+      "            ]"
+      "        ]"
+      "        ]"
+      "    ]   "
+      "]");
+
+  c10::TypePtr named_tuple_tp = c10::parseType(named_tuple_ps);
+  std::string named_tuple_annotation_str = named_tuple_tp->str();
+  ASSERT_EQ(named_tuple_annotation_str, "__torch__.aaa.xxx");
+}
+
+// Parse throw cases
+TEST(MobileTypeParserTest, Empty) {
+  std::string empty_ps("");
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
+  ASSERT_ANY_THROW(c10::parseType(empty_ps));
 }
 
 TEST(MobileTypeParserTest, TypoRaises) {

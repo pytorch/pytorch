@@ -23,7 +23,7 @@ def _write_error(e: BaseException, error_file: Optional[str]):
         "message": {
             "message": f"{type(e).__name__}: {e}",
             "extraInfo": {
-                "py_callstack": traceback.format_stack(),
+                "py_callstack": traceback.format_exc(),
                 "timestamp": str(int(time.time())),
             },
         }
