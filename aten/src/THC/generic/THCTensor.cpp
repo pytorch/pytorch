@@ -39,9 +39,6 @@ THCTensor *THCTensor_(newWithStorage1d)(THCState *state, THCStorage *storage, pt
   return self;
 }
 
-// void THCTensor_(setStorage)(THCState *state, THCTensor *self, THCStorage *storage_, ptrdiff_t storageOffset_, at::IntArrayRef size_, at::IntArrayRef stride_) {
-//   THCTensor_setStorage(state, self, storage_, storageOffset_, size_, stride_);
-// }
 void THCTensor_(free)(THCState *state, THCTensor *self)
 {
   THCTensor_free(state, self);
