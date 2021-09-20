@@ -77,7 +77,7 @@ class TestONNXRuntime_cuda(unittest.TestCase):
                 return self.linear(x)
         try:
             from apex import amp
-        except:
+        except Exception:
             raise unittest.SkipTest("Apex is not available")
         input = torch.randn(3, 3, device=torch.device("cuda"))
         model = amp.initialize(LinearModel(), opt_level="O2")
