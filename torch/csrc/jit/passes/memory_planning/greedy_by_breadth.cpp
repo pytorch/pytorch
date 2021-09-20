@@ -46,15 +46,18 @@ std::vector<MemAllocation> greedyByOperatorBreadth(
   }
 
   // sort all nodes by sum of tensor sizes (i.e., op breadth)
-  auto breadth_cmp = [&managed_values](OpBreadth item1, OpBreadth item2) {
-    auto accum = [&managed_values](auto acc, auto v) {
-      return acc + managed_values[v].second;
-    };
-    auto breadth1 =
-        std::accumulate(item1.second.begin(), item1.second.end(), 0, accum);
-    auto breadth2 =
-        std::accumulate(item2.second.begin(), item2.second.end(), 0, accum);
-    return breadth1 > breadth2;
+  FastMap<const Node*, size_t> op_breadths;
+  for (const auto& item : ops) {
+    op_breadths[item.first] = std::accumulate(
+        item.second.begin(),
+        item.second.end(),
+        0,
+        [&managed_values](auto acc, auto v) {
+          return acc + managed_values[v].second;
+        });
+  }
+  auto breadth_cmp = [&op_breadths](OpBreadth item1, OpBreadth item2) {
+    return op_breadths[item1.first] > op_breadths[item2.first];
   };
   std::sort(ops.begin(), ops.end(), breadth_cmp);
 
