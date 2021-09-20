@@ -14,6 +14,7 @@
 #include <torch/csrc/jit/passes/remove_mutation.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
 #include <torch/csrc/jit/passes/variadic_ops.h>
+#include <torch/csrc/jit/runtime/static/memory_planner.h>
 #include <torch/csrc/jit/runtime/static/ops.h>
 #include <torch/csrc/jit/runtime/static/passes.h>
 #include <torch/csrc/jit/runtime/vararg_functions.h>
@@ -83,6 +84,8 @@ void OptimizeGraph(
   }
 #endif
   ConstantPropagation(graph);
+  RemoveImmutableInputDictLookups(graph);
+  UseVariadicTupleUnpack(graph);
 }
 
 // remove unused input 0 from graph
@@ -171,7 +174,7 @@ std::pair<LivenessMap, FastMap<const Value*, LiveRange>> GetLiveness(
     const FastSet<const Value*>& always_alive,
     AliasDb& db) {
   // map a Value to a set of Values that overlap live-ranges with the Value's
-  FastMap<const Value*, std::set<const Value*>> liveness_map;
+  FastMap<const Value*, FastSet<const Value*>> liveness_map;
 
   // map Values to its creation order in graph (Note: only traverse top-level
   // nodes such that nodes under control-flows are represented by top-level
@@ -194,10 +197,10 @@ std::pair<LivenessMap, FastMap<const Value*, LiveRange>> GetLiveness(
   // presence of a Value in live_values_use_chain means the Value alive
   // Value mapped to set of Nodes that may use the Value (i.e., use-chain of
   // Value)
-  FastMap<const Value*, std::set<const Node*>> live_values_use_chain;
+  FastMap<const Value*, FastSet<const Node*>> live_values_use_chain;
   // Node mapped to set of Values that the Node may use (i.e., def-chain of node
   // inputs)
-  FastMap<const Node*, std::set<const Value*>> live_nodes_def_chain;
+  FastMap<const Node*, FastSet<const Value*>> live_nodes_def_chain;
 
   // add v to the current liveness_map
   std::function<void(const Value* v)> add_live_value_fn = [&](const Value* v) {
@@ -436,7 +439,7 @@ FastMap<const Value*, std::vector<const Value*>> GenerateSameStorageValues(
       return;
     }
     DCHECK(same_storage_values.count(old_v));
-    std::set<const Value*> seen;
+    FastSet<const Value*> seen;
     std::vector<const Value*> values;
     for (auto* v : same_storage_values.at(old_v)) {
       if (seen.count(v)) {
@@ -482,10 +485,10 @@ FastMap<const Value*, std::vector<const Value*>> GenerateSameStorageValues(
 
   auto compute_liveset_fn =
       [&always_alive, &alive_during, &same_storage_values](
-          std::set<const Value*>& live, const Value* v) {
+          FastSet<const Value*>& live, const Value* v) {
         for (const auto* sv : same_storage_values.at(v)) {
           const auto& l = alive_during.count(sv) ? alive_during.at(sv)
-                                                 : std::set<const Value*>{};
+                                                 : FastSet<const Value*>{};
           live.insert(l.begin(), l.end());
         }
         live.insert(always_alive.begin(), always_alive.end());
@@ -493,7 +496,7 @@ FastMap<const Value*, std::vector<const Value*>> GenerateSameStorageValues(
 
   // check if same_storage_values[s] intersects with live
   auto intersect_fn = [&same_storage_values](
-                          std::set<const Value*>& live, const Value* s) {
+                          FastSet<const Value*>& live, const Value* s) {
     bool intersect = false;
     for (const auto* v : same_storage_values.at(s)) {
       if (live.count(v)) {
@@ -509,7 +512,7 @@ FastMap<const Value*, std::vector<const Value*>> GenerateSameStorageValues(
       continue;
     }
     // get values that are live during the lifetime of v
-    std::set<const Value*> live;
+    FastSet<const Value*> live;
     compute_liveset_fn(live, v);
     for (const auto* s : seen) {
       // if live(same_storage_values[v]) and same_storage_values[s]
@@ -778,6 +781,8 @@ StaticRuntime::StaticRuntime(const StaticModule& sm) : static_module_(sm) {
   }
 }
 
+StaticRuntime::~StaticRuntime() = default;
+
 std::vector<at::Tensor> StaticRuntime::operator()(
     const std::vector<at::Tensor>& inps) {
   std::vector<c10::IValue> stack;
@@ -982,6 +987,10 @@ void StaticRuntime::benchmark(
             << std::endl;
 
   if (planner_) {
+    std::cout << "Total number of managed tensors: "
+              << planner_->total_num_managed_tensors() << std::endl;
+    std::cout << "Total number of unmanaged values: "
+              << planner_->total_num_unmanaged() << std::endl;
     std::cout << "Total memory managed: " << planner_->total_managed()
               << " bytes" << std::endl;
     if (static_module_.opts().optimize_memory) {
@@ -1271,200 +1280,6 @@ void StaticRuntime::check_for_memory_leak(bool output_returned) {
   VLOG(1) << "Finished checking for memory leak";
 }
 
-static void assign_storage_to_managed_tensors(
-    StaticRuntime* runtime,
-    const FastSet<const Value*>& managed_tensor_values,
-    const FastMap<const Value*, std::vector<const Value*>>&
-        value_to_same_storage_values,
-    std::vector<std::pair<size_t, std::vector<at::Tensor*>>>& managed_tensors) {
-  // map Value to index to managed_storage, where multiple values can
-  // map to the same index (i.e., sharing the same storage)
-  FastMap<const Value*, size_t> value_to_storage_idx;
-
-  // Snapshot of the current memory state
-  for (auto& pnode : runtime->nodes()) {
-    for (const auto i : c10::irange(pnode.outputs().size())) {
-      auto& ival = pnode.Output(i);
-      const auto* val = pnode.node()->outputs()[i];
-      if (managed_tensor_values.count(val)) {
-        TORCH_CHECK(ival.isTensor());
-        at::Tensor* tensor = &ival.toTensor();
-        auto f = value_to_storage_idx.find(val);
-        if (f != value_to_storage_idx.end()) {
-          auto storage_idx = f->second;
-          managed_tensors[storage_idx].second.emplace_back(tensor);
-        } else {
-          auto p =
-              std::make_pair<size_t, std::vector<at::Tensor*>>(0, {tensor});
-          managed_tensors.emplace_back(std::move(p));
-          // first of a group, update the value_to_storage_idx map with the
-          // index
-          auto f = value_to_same_storage_values.find(val);
-          if (f != value_to_same_storage_values.end()) {
-            auto storage_idx = managed_tensors.size() - 1;
-            const auto& same_storage_values = f->second;
-            for (const auto* v : same_storage_values) {
-              value_to_storage_idx[v] = storage_idx;
-            }
-          }
-        }
-      }
-    }
-  }
-}
-
-MemoryPlanner::MemoryPlanner(
-    StaticRuntime* runtime,
-    const FastMap<const Value*, std::vector<const Value*>>&
-        value_to_same_storage_values,
-    const FastSet<const Value*>& external_values,
-    bool enable_out_variant,
-    bool manage_graph_output_memory) {
-  // collect register indices of outputs of ops with out variant
-  FastSet<const Value*> managed_tensor_values;
-  FastSet<const Value*> leaked_values;
-  if (enable_out_variant) {
-    for (ProcessedNode& pnode : runtime->nodes()) {
-      if (pnode.has_out_variant()) {
-        for (const auto i : c10::irange(pnode.outputs().size())) {
-          const Value* out_v = pnode.node()->outputs()[i];
-          if (external_values.count(out_v)) {
-            continue;
-          }
-          // Types are stored in the underlying TorchScript IR
-          const auto& type = out_v->type();
-          if (type->castRaw<TensorType>()) {
-            managed_tensor_values.insert(out_v);
-          } else if (runtime->is_optimizable_container_type(pnode.node())) {
-            // We "leak" certain container types because their allocations
-            // take a long time
-            leaked_values.insert(out_v);
-          }
-        }
-      }
-    }
-  }
-
-  // collect unmanaged output ivalues
-  FastSet<IValue*> unmanaged_ivalues;
-  for (ProcessedNode& pnode : runtime->nodes()) {
-    for (const auto i : c10::irange(pnode.outputs().size())) {
-      // Types are stored in the underlying TorchScript IR
-      const Value* out_v = pnode.node()->outputs()[i];
-      if (managed_tensor_values.count(out_v) || leaked_values.count(out_v)) {
-        continue;
-      }
-      IValue& out = pnode.Output(i);
-      unmanaged_ivalues.insert(&out);
-    }
-  }
-  // since runtime->outputs() escape from run(), remove them from
-  // managed_tensor_values and from unmanaged_ivalues
-  for (const Value* output : runtime->graph().outputs()) {
-    managed_tensor_values.erase(output);
-  }
-  for (IValue* output : runtime->outputs()) {
-    unmanaged_ivalues.erase(output);
-  }
-
-  // copy to unmanaged_ivalues_
-  unmanaged_ivalues_.reserve(unmanaged_ivalues.size());
-  unmanaged_ivalues_.insert(
-      unmanaged_ivalues_.begin(),
-      unmanaged_ivalues.begin(),
-      unmanaged_ivalues.end());
-
-  if (enable_out_variant) {
-    ::torch::jit::assign_storage_to_managed_tensors(
-        runtime,
-        managed_tensor_values,
-        value_to_same_storage_values,
-        managed_tensors_);
-  }
-}
-
-// Don't change the size if it is already aligned, otherwise increase the size
-// to make it aligned.
-size_t MemoryPlanner::computeAlignedTensorSize(size_t nbytes) {
-  // Note: everything below is size_t
-  return (nbytes + c10::gAlignment - 1) & (~(c10::gAlignment - 1));
-}
-
-at::DataPtr MemoryPlanner::allocateBuffer(
-    size_t size,
-    at::DeviceType deviceType) {
-  at::Allocator* allocator = nullptr;
-  if (deviceType == at::kCPU) {
-    allocator = c10::GetCPUCachingAllocator();
-  } else {
-    allocator = GetAllocator(deviceType);
-  }
-  return allocator->allocate(size);
-}
-
-void MemoryPlanner::allocate() {
-  if (managed_bytes_ == 0) {
-    return;
-  }
-  buffer_ = allocateBuffer(managed_bytes_);
-
-  size_t offset = 0;
-  uint8_t* start = static_cast<uint8_t*>(buffer_.get());
-
-  reused_tensors_ = 0;
-  for (const auto& ms : managed_tensors_) {
-    auto tensor_size = ms.first;
-    if (tensor_size == 0) {
-      continue;
-    }
-    const auto& tensors = ms.second;
-    DCHECK_LE(offset + tensor_size, managed_bytes_);
-    void* src = static_cast<void*>(start + offset);
-
-    for (auto* tensor : tensors) {
-      tensor->storage().set_data_ptr_noswap(
-          at::DataPtr(src, src, nullptr, tensor->device()));
-      tensor->storage().set_nbytes(tensor_size);
-      reused_tensors_++;
-    }
-    reused_tensors_--;
-
-    offset += tensor_size;
-  }
-  DCHECK_EQ(offset, managed_bytes_);
-}
-
-void MemoryPlanner::deallocate() {
-  managed_bytes_ = 0;
-
-  // free memory used by outputs of ops in out variants
-  // but keep the TensorImpl and StorageImpl around
-  for (auto& ms : managed_tensors_) {
-    const auto& tensors = ms.second;
-    size_t max = ms.first;
-    for (auto& tensor : tensors) {
-      size_t current_size =
-          computeAlignedTensorSize(tensor->storage().nbytes());
-      tensor->storage().unsafeGetStorageImpl()->reset();
-      max = std::max(max, current_size);
-    }
-    // Static runtime does not know the size of tensors statically, so we use
-    // the tensor size from the previous run to allocate tensors for the next
-    // run (following C2 tradition), exploiting the fact that tensor storage
-    // size does not have to match that of real tensor size. The following logic
-    // records the tensor storage size for the next run.
-    ms.first = max;
-    managed_bytes_ += max;
-  }
-
-  // for unmanaged ivalues (either tensor or non-tensor), we reset the *iv so
-  // that the objects pointed to by *iv may be reclaimed by reference counting
-  for (auto& iv : unmanaged_ivalues_) {
-    *iv = IValue();
-  }
-  buffer_ = {};
-}
-
 ProcessedNode::ProcessedNode(
     Node* node,
     std::vector<const IValue*>&& inputs,
@@ -1489,7 +1304,7 @@ ProcessedNode::ProcessedNode(
 }
 
 void ProcessedNode::run() {
-  DCHECK(verify_outputs_not_overlapping_with_immutable_inputs());
+  DCHECK(verify_no_memory_overlap());
   if (fn_) {
     fn_(this);
   } else if (native_fn_) {
@@ -1516,8 +1331,35 @@ void ProcessedNode::run() {
   }
 }
 
-bool ProcessedNode::verify_outputs_not_overlapping_with_immutable_inputs()
-    const {
+static bool checkNoMemoryOverlap(const at::Tensor& a, const at::Tensor& b) {
+  at::MemOverlapStatus status = at::get_overlap_status(a, b);
+  if (status == at::MemOverlapStatus::FULL ||
+      status == at::MemOverlapStatus::PARTIAL) {
+    return false;
+  }
+  if (status == at::MemOverlapStatus::TOO_HARD) {
+    LOG(WARNING) << "Detected TOO_HARD memory overlap status";
+  }
+  return true;
+}
+
+bool ProcessedNode::verify_no_memory_overlap() const {
+  for (size_t i = 0; i < outputs_.size(); ++i) {
+    if (!outputs_[i].isTensor()) {
+      continue;
+    }
+    const auto& out0_t = outputs_[i].toTensor();
+    for (size_t j = i + 1; j < outputs_.size(); ++j) {
+      if (!outputs_[j].isTensor()) {
+        continue;
+      }
+      const auto& out1_t = outputs_[j].toTensor();
+      if (!checkNoMemoryOverlap(out0_t, out1_t)) {
+        return false;
+      }
+    }
+  }
+
   auto schema = node()->maybeSchema();
   if (!schema || schema->is_mutable()) {
     return true;
@@ -1532,8 +1374,7 @@ bool ProcessedNode::verify_outputs_not_overlapping_with_immutable_inputs()
         continue;
       }
       const auto& out_t = out.toTensor();
-      at::MemOverlapStatus status = at::get_overlap_status(in_t, out_t);
-      if (status != at::MemOverlapStatus::NO) {
+      if (!checkNoMemoryOverlap(in_t, out_t)) {
         return false;
       }
     }
