@@ -1184,10 +1184,11 @@ reflectable_magic_methods = {
     'pow': '{} ** {}',
     'lshift': '{} << {}',
     'rshift': '{} >> {}',
-    'and': '{} & {}',
-    'or': '{} | {}',
+    'and_': '{} & {}',
+    'or_': '{} | {}',
     'xor': '{} ^ {}',
-    'getitem': '{}[{}]'
+    'getitem': '{}[{}]',
+    'matmul': '{} @ {}',
 }
 
 magic_methods = dict({
