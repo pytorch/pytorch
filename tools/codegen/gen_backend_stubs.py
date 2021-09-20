@@ -129,13 +129,16 @@ def error_on_missing_kernels(
         backend_key: DispatchKey,
         autograd_key: DispatchKey,
         kernel_defn_file_path: str,
-        full_codegen: List[OperatorName] = [],
+        full_codegen: Optional[List[OperatorName]] = None
 ) -> None:
     try:
         with open(kernel_defn_file_path, 'r') as f:
             backend_defns = f.read()
     except IOError:
         raise AssertionError(f'Unable to read from the specified impl_path file: {kernel_defn_file_path}')
+
+    if full_codegen is None:
+        full_codegen = []
 
     class_name: Optional[str] = backend_indices[backend_key].native_function_class_name()
     assert class_name is not None
