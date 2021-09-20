@@ -397,8 +397,8 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           &::c10d::Reducer::set_forward_pass_work_handle,
           py::call_guard<py::gil_scoped_release>())
       .def(
-          "_get_local_used_maps",
-          &::c10d::Reducer::get_local_used_maps_on_device)
+          "_get_local_used_map",
+          &::c10d::Reducer::get_local_used_map_on_device)
       .def(
           "_set_ddp_runtime_logging_sample_rate",
           &::c10d::Reducer::set_ddp_runtime_logging_sample_rate,

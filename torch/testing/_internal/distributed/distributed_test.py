@@ -6617,7 +6617,7 @@ class DistributedTest:
                 loss.backward()
                 # On even iterations, 2nd param goes unused, on odd iterations,
                 # it is used.
-                local_used_maps = model.reducer._get_local_used_maps()
+                local_used_map = model.reducer._get_local_used_map()
                 if i % 2 == 0:
                     expected = torch.tensor(
                         [world_size, 0], device=self.rank, dtype=torch.int32
@@ -6628,7 +6628,7 @@ class DistributedTest:
                     )
 
                 # Validate parameter usage.
-                variable_usage_tensor = local_used_maps[0]
+                variable_usage_tensor = local_used_map
                 self.assertEqual(variable_usage_tensor, expected)
 
             # Validate appropriate error message when DDP is used with
@@ -6766,7 +6766,7 @@ class DistributedTest:
                 loss.backward()
                 # On even iterations, 2nd param goes unused, on odd iterations,
                 # it is used only on rank 1.
-                local_used_maps = model.reducer._get_local_used_maps()
+                local_used_map = model.reducer._get_local_used_map()
 
                 if i % 2 == 0:
                     expected = torch.tensor(
@@ -6777,7 +6777,7 @@ class DistributedTest:
                         [world_size, 1], device=self.rank, dtype=torch.int32
                     )
 
-                variable_usage_tensor = local_used_maps[0]
+                variable_usage_tensor = local_used_map
                 # Validate parameter usage. On odd iterations, 2nd param is only
                 # used on rank 1.
                 self.assertEqual(variable_usage_tensor, expected)
