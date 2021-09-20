@@ -157,6 +157,14 @@ backend_test.exclude('(test_add_uint8_.*'  # uint8 dtype added
                      '|test_conv_with_autopad_same_.*'
                      ')')
 
+# Unsupported ops in opset 15
+backend_test.exclude('(test_bernoulli_*'
+                     '|test_castlike_*'
+                     '|test_optional_*'
+                     '|test_shape_end_*'
+                     '|test_shape_start_*'
+                     ')')
+
 # Skip vgg to speed up CI
 if 'JENKINS_URL' in os.environ:
     backend_test.exclude(r'(test_vgg19|test_vgg)')

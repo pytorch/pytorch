@@ -396,7 +396,7 @@ All autograd ``Function``\ s appear in the TorchScript graph as ``prim::PythonOp
 In order to differentiate between different ``Function`` subclasses, the
 symbolic function should use the ``name`` kwarg which gets set to the name of the class.
 
-:func:`register_custom_op_symbolic` does does not allow registration for ops in
+:func:`register_custom_op_symbolic` does not allow registration for ops in
 the ``prim`` namespace, so for this use case, there's a back door: register the
 symbolic for ``"::prim_PythonOp"``.
 
