@@ -134,11 +134,11 @@ inline std::tuple<size_t, size_t> calc_num_tasks_and_chunk_size(
   return std::make_tuple(num_tasks, chunk_size);
 }
 
-void _parallel_run(
+void invoke_parallel(
   const int64_t begin,
   const int64_t end,
   const int64_t grain_size,
-  const std::function<void(int64_t, int64_t, size_t)>& f) {
+  const std::function<void(int64_t, int64_t)>& f) {
   at::internal::lazy_init_num_threads();
 
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
@@ -162,7 +162,7 @@ void _parallel_run(
       int64_t local_end = std::min(end, (int64_t)(chunk_size + local_start));
       try {
         ParallelRegionGuard guard(task_id);
-        f(local_start, local_end, task_id);
+        f(local_start, local_end);
       } catch (...) {
         if (!state.err_flag.test_and_set()) {
           state.eptr = std::current_exception();
