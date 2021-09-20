@@ -10,13 +10,14 @@ class FileLoaderIterDataPipe(IterDataPipe[Tuple[str, IOBase]]):
 
     Iterable Datapipe to load file streams from given pathnames,
     yield pathname and file stream in a tuple.
-    args:
+
+    Args:
         datapipe: Iterable datapipe that provides pathnames
         mode: An optional string that specifies the mode in which
             the file is opened by `open()`. It defaults to 'b' which
             means open for reading in binary mode. Another option is
             't' for text mode
-        length: a nominal length of the datapipe
+        length: Nominal length of the datapipe
 
     Note:
         The opened file handles will be closed by Python's GC periodly. Users can choose

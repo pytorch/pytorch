@@ -14,6 +14,19 @@ class PruningParametrization(nn.Module):
         return x[list(valid_outputs)]
 
 
+class ZeroesParametrization(nn.Module):
+    r"""Zero out pruned channels instead of removing.
+    E.g. used for Batch Norm pruning, which should match previous Conv2d layer."""
+    def __init__(self, original_outputs):
+        super().__init__()
+        self.original_outputs = set(range(original_outputs.item()))
+        self.pruned_outputs = set()  # Will contain indicies of outputs to prune
+
+    def forward(self, x):
+        x.data[list(self.pruned_outputs)] = 0
+        return x
+
+
 class ActivationReconstruction:
     def __init__(self, parametrization):
         self.param = parametrization

@@ -66,6 +66,7 @@ void set_num_threads(int nthreads) {
 }
 
 int get_num_threads() {
+  at::internal::lazy_init_num_threads();
   return tbb::global_control::active_value(
       tbb::global_control::max_allowed_parallelism);
 }

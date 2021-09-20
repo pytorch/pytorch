@@ -11,9 +11,9 @@ import torch.nn.functional as F
 from torch.optim import SGD
 from torch.autograd import Variable
 from torch import sparse
-from torch.optim.lr_scheduler import LambdaLR, MultiplicativeLR, StepLR, \
-    MultiStepLR, WarmUpLR, ExponentialLR, CosineAnnealingLR, ReduceLROnPlateau, \
-    _LRScheduler, CyclicLR, CosineAnnealingWarmRestarts, OneCycleLR
+from torch.optim.lr_scheduler import LambdaLR, MultiplicativeLR, SequentialLR, StepLR, \
+    MultiStepLR, ConstantLR, LinearLR, ExponentialLR, CosineAnnealingLR, ReduceLROnPlateau, \
+    _LRScheduler, CyclicLR, CosineAnnealingWarmRestarts, OneCycleLR, ChainedScheduler
 from torch.optim.swa_utils import AveragedModel, SWALR, update_bn
 from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_UBSAN, load_tests, \
     skipIfRocm
@@ -274,16 +274,16 @@ class TestOptim(TestCase):
             )
             self._test_basic_cases(
                 lambda weight, bias: optimizer([weight, bias], lr=1e-3),
-                [lambda opt: WarmUpLR(opt, warmup_factor=0.4, warmup_iters=4, warmup_method="linear")]
+                [lambda opt: LinearLR(opt, start_factor=0.4, end_factor=0.8, total_iters=4)]
             )
             self._test_basic_cases(
                 lambda weight, bias: optimizer([weight, bias], lr=1e-3),
-                [lambda opt: WarmUpLR(opt, warmup_factor=0.4, warmup_iters=4, warmup_method="constant")]
+                [lambda opt: ConstantLR(opt, factor=0.4, total_iters=4)]
             )
             self._test_basic_cases(
                 lambda weight, bias: optimizer([weight, bias], lr=1e-3),
                 [lambda opt: StepLR(opt, gamma=0.9, step_size=10),
-                 lambda opt: WarmUpLR(opt, warmup_factor=0.4, warmup_iters=4)]
+                 lambda opt: LinearLR(opt, start_factor=0.4, end_factor=0.6, total_iters=4)]
             )
             self._test_basic_cases(
                 lambda weight, bias: optimizer([weight, bias], lr=1e-3),
@@ -430,17 +430,17 @@ class TestOptim(TestCase):
                 lambda weight, bias: optimizer(
                     self._build_params_dict(weight, bias, lr=1e-2),
                     lr=1e-3),
-                [lambda opt: WarmUpLR(opt, warmup_factor=0.4, warmup_iters=4, warmup_method="linear")]
+                [lambda opt: LinearLR(opt, start_factor=0.4, total_iters=4)]
             )
             self._test_basic_cases(
                 lambda weight, bias: optimizer(
                     self._build_params_dict(weight, bias, lr=1e-2),
                     lr=1e-3),
-                [lambda opt: WarmUpLR(opt, warmup_factor=0.4, warmup_iters=4, warmup_method="constant")]
+                [lambda opt: ConstantLR(opt, factor=0.4, total_iters=4)]
             )
             self._test_basic_cases(
                 lambda weight, bias: optimizer([weight, bias], lr=1e-3, amsgrad=True),
-                [lambda opt: WarmUpLR(opt, warmup_factor=0.4, warmup_iters=4, warmup_method="constant"),
+                [lambda opt: ConstantLR(opt, factor=0.4, total_iters=4),
                  lambda opt: ExponentialLR(opt, gamma=0.9)]
             )
             self._test_basic_cases(
@@ -992,12 +992,12 @@ class TestLRScheduler(TestCase):
         scheduler = ExponentialLR(self.opt, gamma=0.9)
         self._test_lr_is_constant_for_constant_epoch(scheduler)
 
-    def test_constant_warmup_lr_is_constant_for_constant_epoch(self):
-        scheduler = WarmUpLR(self.opt, warmup_method="constant")
+    def test_constantlr_is_constant_for_constant_epoch(self):
+        scheduler = ConstantLR(self.opt)
         self._test_lr_is_constant_for_constant_epoch(scheduler)
 
-    def test_linear_warmup_lr_is_constant_for_constant_epoch(self):
-        scheduler = WarmUpLR(self.opt, warmup_method="linear")
+    def test_linear_linearlr_is_constant_for_constant_epoch(self):
+        scheduler = LinearLR(self.opt)
         self._test_lr_is_constant_for_constant_epoch(scheduler)
 
     def test_step_lr(self):
@@ -1051,76 +1051,78 @@ class TestLRScheduler(TestCase):
         scheduler = MultiStepLR(self.opt, gamma=0.1, milestones=[2, 5, 9])
         self._test_with_epoch(scheduler, targets, epochs)
 
-    def test__get_last_lr_constant_warmup_lr(self):
+    def test_get_last_lr_constantlr(self):
         # lr = 0.025     if epoch < 5
         # lr = 0.005    if 5 <= epoch
         epochs = 10
         single_targets = [0.025] * 5 + [0.05] * 5
         targets = [single_targets, [x * epochs for x in single_targets]]
-        scheduler = WarmUpLR(self.opt, warmup_factor=1.0 / 2, warmup_iters=5, warmup_method="constant")
+        scheduler = ConstantLR(self.opt, factor=1.0 / 2, total_iters=5)
         self._test_get_last_lr(scheduler, targets, epochs)
 
-    def test__get_last_lr_linear_warmup_lr(self):
+    def test_get_last_lr_linearlr(self):
         # lr = 0.025     if epoch == 0
         # lr = 0.03125   if epoch == 1
         # lr = 0.0375    if epoch == 2
         # lr = 0.04375   if epoch == 3
         # lr = 0.005     if 4 <= epoch
         epochs = 10
-        factor = 1.0 / 2
+        start_factor = 1.0 / 4
+        end_factor = 3. / 5
         iters = 4
-        interpolation = [factor + i * (1 - factor) / iters for i in range(iters)]
-        single_targets = [x * 0.05 for x in interpolation] + [0.05] * (epochs - iters)
+        interpolation = [start_factor + i * (end_factor - start_factor) / iters for i in range(iters)]
+        single_targets = [x * 0.05 for x in interpolation] + [0.05 * end_factor] * (epochs - iters)
         targets = [single_targets, [x * epochs for x in single_targets]]
-        scheduler = WarmUpLR(self.opt, warmup_factor=factor, warmup_iters=iters, warmup_method="linear")
+        scheduler = LinearLR(self.opt, start_factor=start_factor, end_factor=end_factor, total_iters=iters)
         self._test_get_last_lr(scheduler, targets, epochs)
 
-    def test__constant_warmup_lr(self):
+    def test_constantlr(self):
         # lr = 0.025     if epoch < 5
         # lr = 0.005    if 5 <= epoch
         epochs = 10
         single_targets = [0.025] * 5 + [0.05] * 5
         targets = [single_targets, [x * epochs for x in single_targets]]
-        scheduler = WarmUpLR(self.opt, warmup_factor=1.0 / 2, warmup_iters=5, warmup_method="constant")
+        scheduler = ConstantLR(self.opt, factor=1.0 / 2, total_iters=5)
         self._test(scheduler, targets, epochs)
 
-    def test__linear_warmup_lr(self):
+    def test_linearlr(self):
         # lr = 0.025     if epoch == 0
         # lr = 0.03125   if epoch == 1
         # lr = 0.0375    if epoch == 2
         # lr = 0.04375   if epoch == 3
         # lr = 0.005     if 4 <= epoch
         epochs = 10
-        factor = 1.0 / 2
+        start_factor = 1.0 / 2
         iters = 4
-        interpolation = [factor + i * (1 - factor) / iters for i in range(iters)]
+        interpolation = [start_factor + i * (1 - start_factor) / iters for i in range(iters)]
         single_targets = [x * 0.05 for x in interpolation] + [0.05] * (epochs - iters)
         targets = [single_targets, [x * epochs for x in single_targets]]
-        scheduler = WarmUpLR(self.opt, warmup_factor=factor, warmup_iters=iters, warmup_method="linear")
+        scheduler = LinearLR(self.opt, start_factor=start_factor, total_iters=iters)
         self._test(scheduler, targets, epochs)
 
-    def test_constant_warmup_with_epoch(self):
+    def test_constantlr_with_epoch(self):
         # lr = 0.025     if epoch < 5
         # lr = 0.005    if 5 <= epoch
         epochs = 10
         single_targets = [0.025] * 5 + [0.05] * 5
         targets = [single_targets, [x * epochs for x in single_targets]]
-        scheduler = WarmUpLR(self.opt, warmup_factor=1.0 / 2, warmup_iters=5, warmup_method="constant")
+        scheduler = ConstantLR(self.opt, factor=1.0 / 2, total_iters=5)
         self._test_with_epoch(scheduler, targets, epochs)
 
-    def test_linear_warmup_with_epoch(self):
+    def test_linearlr_with_epoch(self):
         # lr = 0.025     if epoch == 0
         # lr = 0.03125   if epoch == 1
         # lr = 0.0375    if epoch == 2
         # lr = 0.04375   if epoch == 3
         # lr = 0.005     if 4 <= epoch
         epochs = 10
-        factor = 1.0 / 2
+        start_factor = 1.0 / 2
+        end_factor = 1.
         iters = 4
-        interpolation = [factor + i * (1 - factor) / iters for i in range(iters)]
+        interpolation = [start_factor + i * (end_factor - start_factor) / iters for i in range(iters)]
         single_targets = [x * 0.05 for x in interpolation] + [0.05] * (epochs - iters)
         targets = [single_targets, [x * epochs for x in single_targets]]
-        scheduler = WarmUpLR(self.opt, warmup_factor=factor, warmup_iters=iters, warmup_method="linear")
+        scheduler = LinearLR(self.opt, start_factor=start_factor, total_iters=iters)
         self._test_with_epoch(scheduler, targets, epochs)
 
     def test_exp_lr(self):
@@ -1145,14 +1147,14 @@ class TestLRScheduler(TestCase):
         closed_form_scheduler = StepLR(self.opt, gamma=0.1, step_size=3)
         self._test_against_closed_form(scheduler, closed_form_scheduler, 20)
 
-    def test_closed_form_linear_warmup_lr(self):
-        scheduler = WarmUpLR(self.opt, warmup_factor=1.0 / 3, warmup_iters=4, warmup_method="linear")
-        closed_form_scheduler = WarmUpLR(self.opt, warmup_factor=1.0 / 3, warmup_iters=4, warmup_method="linear")
+    def test_closed_form_linearlr(self):
+        scheduler = LinearLR(self.opt, start_factor=1.0 / 3, end_factor=0.7, total_iters=4)
+        closed_form_scheduler = LinearLR(self.opt, start_factor=1.0 / 3, end_factor=0.7, total_iters=4)
         self._test_against_closed_form(scheduler, closed_form_scheduler, 20)
 
-    def test_closed_form_constant_warmup_lr(self):
-        scheduler = WarmUpLR(self.opt, warmup_factor=1.0 / 3, warmup_iters=4, warmup_method="constant")
-        closed_form_scheduler = WarmUpLR(self.opt, warmup_factor=1.0 / 3, warmup_iters=4, warmup_method="constant")
+    def test_closed_form_constantlr(self):
+        scheduler = ConstantLR(self.opt, factor=1.0 / 3, total_iters=4)
+        closed_form_scheduler = ConstantLR(self.opt, factor=1.0 / 3, total_iters=4)
         self._test_against_closed_form(scheduler, closed_form_scheduler, 20)
 
     def test_closed_form_multi_step_lr(self):
@@ -1253,6 +1255,79 @@ class TestLRScheduler(TestCase):
                                       threshold=0.1, patience=5, cooldown=5)
         self._test_reduce_lr_on_plateau(scheduler, targets, metrics, epochs)
 
+    def test_sequentiallr1(self):
+        epochs = 19
+        schedulers = [None] * 2
+        targets = [[0.05, 0.04, 0.032] + [0.05 for x in range(4)]
+                                       + [0.05 * 0.1 for x in range(4)]
+                                       + [0.05 * 0.01 for x in range(4)]
+                                       + [0.05 * 0.001 for x in range(4)]]
+        milestones = [3]
+        schedulers[0] = ExponentialLR(self.opt, gamma=0.8)
+        schedulers[1] = StepLR(self.opt, gamma=0.1, step_size=4)
+        scheduler = SequentialLR(self.opt, schedulers=schedulers, milestones=milestones)
+        self._test(scheduler, targets, epochs)
+
+    def test_sequentiallr2(self):
+        epochs = 13
+        schedulers = [None] * 2
+        targets = [[0.005, 0.005, 0.005] + [0.05 * 0.9 ** x for x in range(10)]]
+        milestones = [3]
+        schedulers[0] = ConstantLR(self.opt, factor=0.1, total_iters=3)
+        schedulers[1] = ExponentialLR(self.opt, gamma=0.9)
+        scheduler = SequentialLR(self.opt, schedulers=schedulers, milestones=milestones)
+        self._test(scheduler, targets, epochs)
+
+    def test_sequentiallr3(self):
+        epochs = 12
+        schedulers = [None] * 3
+        targets = [[0.005, 0.005, 0.005] + [0.05, 0.04, 0.032]
+                                         + [0.05, 0.05, 0.005, 0.005, 0.0005, 0.0005]]
+        milestones = [3, 6]
+        schedulers[0] = ConstantLR(self.opt, factor=0.1, total_iters=3)
+        schedulers[1] = ExponentialLR(self.opt, gamma=0.8)
+        schedulers[2] = StepLR(self.opt, gamma=0.1, step_size=2)
+        scheduler = SequentialLR(self.opt, schedulers=schedulers, milestones=milestones)
+        self._test(scheduler, targets, epochs)
+
+    def test_chained_lr1(self):
+        epochs = 10
+        schedulers = [None] * 1
+        targets = [[0.05] * 3 + [0.005] * 3 + [0.0005] * 3 + [0.00005] * 3]
+        schedulers[0] = StepLR(self.opt, gamma=0.1, step_size=3)
+        scheduler = ChainedScheduler(schedulers)
+        self._test([scheduler], targets, epochs)
+
+    def test_chained_lr2(self):
+        epochs = 10
+        schedulers = [None] * 1
+        targets = [[0.02, 0.03, 0.04] + [0.05] * 9]
+        schedulers[0] = LinearLR(self.opt, start_factor=0.4, total_iters=3)
+        scheduler = ChainedScheduler(schedulers)
+        self._test([scheduler], targets, epochs)
+
+    def test_chained_lr3(self):
+        epochs = 10
+        schedulers = [None] * 2
+        targets = [[0.02, 0.03, 0.04, 0.05] + [0.005] * 4 + [0.0005] * 3 + [0.00005] * 3]
+        schedulers[0] = LinearLR(self.opt, start_factor=0.4, total_iters=3)
+        schedulers[1] = MultiStepLR(self.opt, milestones=[4, 8, 10], gamma=0.1)
+        scheduler = ChainedScheduler(schedulers)
+        self._test([scheduler], targets, epochs)
+
+    def test_chained_lr4(self):
+        epochs = 9
+        schedulers = [None] * 3
+        targets = [[0.05 * 0.2 * 0.9 ** x for x in range(3)]
+                   + [0.05 * 0.2 * 0.9 ** 3 * 0.1]
+                   + [0.05 * 0.9 ** x * 0.1 for x in range(4, 6)]
+                   + [0.05 * 0.9 ** x * 0.01 for x in range(6, 9)]]
+        schedulers[0] = ExponentialLR(self.opt, gamma=0.9)
+        schedulers[1] = ConstantLR(self.opt, factor=0.2, total_iters=4)
+        schedulers[2] = StepLR(self.opt, gamma=0.1, step_size=3)
+        scheduler = ChainedScheduler(schedulers)
+        self._test([scheduler], targets, epochs)
+
     def test_compound_step_and_multistep_lr(self):
         epochs = 10
         schedulers = [None] * 2
@@ -1285,20 +1360,23 @@ class TestLRScheduler(TestCase):
         schedulers[1] = ExponentialLR(self.opt, gamma=0.9)
         self._test(schedulers, targets, epochs)
 
-    def test_compound_exp_and_linear_warmup_lr(self):
+    def test_compound_exp_and_linearlr(self):
         epochs = 10
         iters = 4
-        factor = 0.4
+        start_factor = 0.4
+        end_factor = 0.9
         schedulers = [None] * 2
         single_targets = [0.05 * (0.9 ** x) for x in range(11)]
         for i in range(iters):
-            single_targets[i] *= factor + i / iters * (1 - factor)
+            single_targets[i] *= start_factor + i / iters * (end_factor - start_factor)
+        for i in range(iters, 11):
+            single_targets[i] *= end_factor
         targets = [single_targets, [x * epochs for x in single_targets]]
-        schedulers[0] = WarmUpLR(self.opt, warmup_factor=factor, warmup_iters=iters, warmup_method="linear")
+        schedulers[0] = LinearLR(self.opt, start_factor=start_factor, end_factor=end_factor, total_iters=iters)
         schedulers[1] = ExponentialLR(self.opt, gamma=0.9)
         self._test(schedulers, targets, epochs)
 
-    def test_compound_step_and_constant_warmup(self):
+    def test_compound_step_and_constantlr(self):
         epochs = 10
         iters = 4
         factor = 0.4
@@ -1306,20 +1384,20 @@ class TestLRScheduler(TestCase):
         single_targets = [0.05 * 0.4] * 3 + [0.005 * 0.4] + [0.005] * 2 + [0.0005] * 3 + [0.00005] * 3
         targets = [single_targets, [x * epochs for x in single_targets]]
         schedulers[0] = StepLR(self.opt, gamma=0.1, step_size=3)
-        schedulers[1] = WarmUpLR(self.opt, warmup_factor=0.4, warmup_iters=4, warmup_method="constant")
+        schedulers[1] = ConstantLR(self.opt, factor=0.4, total_iters=4)
         self._test(schedulers, targets, epochs)
 
-    def test_compound_linear_warmup_and_multistep_lr(self):
+    def test_compound_linearlr_and_multistep_lr(self):
         epochs = 10
         iters = 4
-        factor = 0.4
+        start_factor = 0.4
         schedulers = [None] * 2
         single_targets = [0.05] * 2 + [0.005] * 3 + [0.0005] * 4 + [0.00005] * 2
         for i in range(iters):
-            single_targets[i] *= factor + i / iters * (1 - factor)
+            single_targets[i] *= start_factor + i / iters * (1 - start_factor)
         targets = [single_targets, [x * epochs for x in single_targets]]
         schedulers[0] = MultiStepLR(self.opt, gamma=0.1, milestones=[2, 5, 9])
-        schedulers[1] = WarmUpLR(self.opt, warmup_factor=factor, warmup_iters=iters, warmup_method="linear")
+        schedulers[1] = LinearLR(self.opt, start_factor=start_factor, total_iters=iters)
         self._test(schedulers, targets, epochs)
 
     def test_compound_cosanneal_and_step_lr(self):
@@ -1349,19 +1427,19 @@ class TestLRScheduler(TestCase):
         schedulers[1] = MultiStepLR(self.opt, gamma=0.1, milestones=[2, 5, 9])
         self._test(schedulers, targets, epochs)
 
-    def test_compound_cosanneal_and_linear_warmup_lr(self):
+    def test_compound_cosanneal_and_linearlr(self):
         epochs = 10
         iters = 4
-        factor = 0.4
+        start_factor = 0.4
         eta_min = 1e-10
         schedulers = [None] * 2
         single_targets = [eta_min + (0.05 - eta_min) *
                           (1 + math.cos(math.pi * x / epochs)) / 2
                           for x in range(epochs)]
         for i in range(iters):
-            single_targets[i] *= factor + i / iters * (1 - factor)
+            single_targets[i] *= start_factor + i / iters * (1 - start_factor)
         targets = [single_targets, [x * epochs for x in single_targets]]
-        schedulers[0] = WarmUpLR(self.opt, warmup_factor=factor, warmup_iters=iters, warmup_method="linear")
+        schedulers[0] = LinearLR(self.opt, start_factor=start_factor, total_iters=iters)
         schedulers[1] = CosineAnnealingLR(self.opt, T_max=epochs, eta_min=eta_min)
         self._test(schedulers, targets, epochs)
 
@@ -1447,14 +1525,14 @@ class TestLRScheduler(TestCase):
 
     def test_compound_reduce_lr_on_plateau5(self):
         iters = 4
-        factor = 0.4
+        start_factor = 0.4
         epochs = 22
         for param_group in self.opt.param_groups:
             param_group['lr'] = 0.5
         single_targets = [0.5] * 6 + [0.05] * 7 + [0.005] * 7 + [0.0005] * 2
         multipliers = [1] * 22
         for i in range(iters):
-            multipliers[i] *= factor + i / iters * (1 - factor)
+            multipliers[i] *= start_factor + i / iters * (1 - start_factor)
         single_targets = [x * y for x, y in zip(single_targets, multipliers)]
         targets = [single_targets]
         targets = targets[1:]  # test runs step before checking lr
@@ -1462,7 +1540,7 @@ class TestLRScheduler(TestCase):
         schedulers = [None] * 2
         schedulers[0] = ReduceLROnPlateau(self.opt, patience=5, cooldown=0, threshold_mode='abs',
                                           mode='min', threshold=0.1)
-        schedulers[1] = WarmUpLR(self.opt, warmup_factor=factor, warmup_iters=iters, warmup_method="linear")
+        schedulers[1] = LinearLR(self.opt, start_factor=start_factor, total_iters=iters)
         self._test_reduce_lr_on_plateau(schedulers, targets, metrics, epochs)
 
     def test_cycle_lr_invalid_mode(self):
