@@ -523,7 +523,11 @@ const std::string shape_compute_functions =
             for elem in input:
               out.append(elem)
             return out
-          slice_numel = multiply_integers(input[start_dim:end_dim - start_dim + 1])
+          slice_numel = 1
+          for i in range(start_dim, end_dim - start_dim + 1):
+            slice_numel *= input[i]
+          # TODO: use slicing when slice optimization has landed
+          # slice_numel = multiply_integers(input[start_dim:end_dim - start_dim + 1])
           shape: List[int] = []
           for i in range(start_dim):
             shape.append(input[i])

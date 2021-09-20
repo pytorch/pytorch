@@ -5,6 +5,7 @@ import operator
 
 from torch.testing import FileCheck
 from torch.testing._internal.common_utils import make_tensor
+from torch import nn
 
 from textwrap import dedent
 
@@ -255,3 +256,85 @@ class TestSymbolicShapeAnalysis(JitTestCase):
                 fn = torch.jit.trace(foo, (inp.detach(),), check_trace=False)
 
                 self.checkShapeAnalysis(out_size, fn.graph, assert_propagation=True, constant_prop=False)
+
+
+    def test_partial_eval_graph_conv(self):
+        mm = torch.jit.freeze(torch.jit.script(nn.Conv2d(16, 33, 3, stride=2).eval()))
+        shape_compute_graph = torch._C._jit_pass_propagate_shapes_on_graph_and_build_compute(mm.graph)
+        output_sizes = mm.graph.findNode("aten::conv2d").output().type().symbolic_sizes()
+        # calculating 0, 2 and 3 index
+        for i in [0, 2, 3]:
+            self.assertTrue(output_sizes[i] < 0)
+        self.assertTrue(output_sizes[1] >= 0)
+        g = shape_compute_graph.partial_eval_shape_graph()
+        # to make into a jit function cant have multiple outputs
+        g.makeMultiOutputIntoTuple()
+        func = torch._C._create_function_from_graph("partial_eval_graph", g)
+        inp = torch.randn(20, 16, 5, 10)
+        output = func([20, 16, 5, 10])
+        output_eager = list(mm(inp).size())
+        for o, oe in zip(output, output_eager[0:1] + output_eager[2:]):
+            self.assertEqual(o, oe)
+
+    def test_partial_eval_stitching(self):
+        conv1 = torch.nn.Conv2d(3, 64, kernel_size=(7, 7), stride=(2, 2), padding=(3, 3), bias=False)
+        max_pool = torch.nn.MaxPool2d(kernel_size=3, stride=2, padding=1, dilation=1, ceil_mode=False)
+        conv2 = nn.Conv2d(64, 128, kernel_size=(3, 3), stride=(2, 2), padding=(1, 1), bias=False)
+
+        mod = torch.jit.freeze(torch.jit.script(nn.Sequential(conv1, max_pool, conv2).eval()))
+
+        conv1_output = conv1(torch.rand(1, 3, 224, 224))
+        max_pool_ouput = max_pool(conv1_output)
+        conv2_output = conv2(max_pool_ouput)
+
+        shape_compute_graph = torch._C._jit_pass_propagate_shapes_on_graph_and_build_compute(mod.graph)
+        g = shape_compute_graph.partial_eval_shape_graph()
+        self.assertTrue(len(list(g.inputs())) == 1)
+        output_sym_map = shape_compute_graph.graph_output_to_symbolic_shape_dim()
+        # map from sym shape -> index
+        sym_shape_to_index = {}
+        for index, output in enumerate(g.outputs()):
+            sym_shape_to_index[output_sym_map[output]] = index
+
+        g.makeMultiOutputIntoTuple()
+        func = torch._C._create_function_from_graph("partial_eval_graph", g)
+        sym_outputs = func([1, 3, 224, 224])
+        nodes = [mod.graph.findNode("aten::max_pool2d")] + list(mod.graph.findAllNodes("aten::conv2d"))
+        output_shapes = [max_pool_ouput, conv1_output, conv2_output]
+
+        for node, output_shape in zip(nodes, output_shapes):
+            output_type_sizes = node.output().type().symbolic_sizes()
+            for i, sym_shape in enumerate(output_type_sizes):
+                if sym_shape >= 0:
+                    self.assertEqual(sym_shape, output_shape.size(i))
+                else:
+                    sym_shape_index = sym_shape_to_index[sym_shape]
+                    self.assertEqual(sym_outputs[sym_shape_index], output_shape.size(i))
+
+    def test_refinement_through_graph_stitching(self):
+        class TwoConvs(torch.nn.Module):
+            def __init__(self):
+                super(TwoConvs, self).__init__()
+                self.conv1 = torch.nn.Conv2d(3, 64, kernel_size=(7, 7), stride=(2, 2), padding=(3, 3), bias=False)
+                self.conv2 = torch.nn.Conv2d(3, 64, kernel_size=(7, 7), stride=(2, 2), padding=(3, 3), bias=False)
+
+            def forward(self, x):
+                a = self.conv1(x)
+                b = self.conv2(x)
+                return a + b
+
+        mod = torch.jit.freeze(torch.jit.script(TwoConvs()).eval())
+        inp_tensor = list(mod.graph.inputs())[1]
+        inp_tensor.setType(inp_tensor.type().with_sizes([None, None, None, None]))
+        torch._C._jit_pass_propagate_shapes_on_graph(mod.graph)
+        outs = list(next(mod.graph.outputs()).node().inputs())
+        out1 = outs[0].type().symbolic_sizes()
+        out2 = outs[1].type().symbolic_sizes()
+        self.assertTrue(out1[2] != out2[2])
+        self.assertTrue(out1[3] != out2[3])
+        # by joining partial eval graphs of both convs we are able to recognize the output shapes
+        # are equivalent
+        torch._C._jit_pass_propagate_shapes_on_graph_and_build_compute(mod.graph)
+        out1 = outs[0].type().symbolic_sizes()
+        out2 = outs[1].type().symbolic_sizes()
+        self.assertEqual(out1, out2)

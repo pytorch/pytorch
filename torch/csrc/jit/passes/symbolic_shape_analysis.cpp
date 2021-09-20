@@ -302,7 +302,8 @@ struct SymbolicShapeNodeAnalyzer {
     }
   }
 
-  void run() {
+  // returns partially evaluated shape compute graph
+  std::shared_ptr<Graph> run() {
     bool made_change = true;
     constexpr size_t MAX_ATTEMPTS = 8;
     size_t curr_attempt = 0;
@@ -317,6 +318,7 @@ struct SymbolicShapeNodeAnalyzer {
     GRAPH_DUMP("Done with partial evaluation", shape_compute_graph_);
 
     extractOutputShape(symbolic_shape_values);
+    return shape_compute_graph_;
   }
 
  private:
@@ -529,12 +531,233 @@ struct SymbolicShapeNodeAnalyzer {
   Node* node_;
 };
 
-void PropagateShapesWithShapeFunction(
+std::shared_ptr<Graph> PropagateShapesWithShapeFunction(
     Node* n,
     std::shared_ptr<Graph>& shape_compute_graph,
     const AliasDb& db) {
-  SymbolicShapeNodeAnalyzer(n, shape_compute_graph, db).run();
+  return SymbolicShapeNodeAnalyzer(n, shape_compute_graph, db).run();
 }
+
+struct SymbolicShapeGraphAnalyzer {
+  SymbolicShapeGraphAnalyzer(
+      std::shared_ptr<Graph>& graph,
+      Node* beg,
+      Node* end)
+      : graph_(graph), beg_(beg), end_(end) {
+    TORCH_INTERNAL_ASSERT(
+        beg_->owningBlock() == end_->owningBlock() && end_->isAfter(beg_));
+  }
+
+  c10::optional<ShapeComputeGraphMapping> run() {
+    AliasDb db(graph_);
+    std::unordered_map<Node*, std::shared_ptr<Graph>> partial_evaluated_graphs =
+        propagateShapesAndGatherPartialEvalShapeGraphs(db);
+
+    auto large_shape_compute_graph = std::make_shared<Graph>();
+    // We want to build up a computational graph which computes all shapes
+    // we dont know statically - that is, all symbolic shapes within
+    // the region [beg, end). it must be executable before beg.
+    // TODO: dont require dimensions of tensors to be set AOT ?
+
+    for (auto it = beg_->iterator(); it != end_->iterator(); it++) {
+      auto curr = *it;
+      if (curr->kind() == prim::Constant) {
+        continue;
+      }
+      if (curr->outputs().size() != 1) {
+        GRAPH_DEBUG("Multi output node ", getHeader(curr));
+        return c10::nullopt;
+      }
+      auto tt = curr->output()->type()->cast<TensorType>();
+      if (!tt || !partial_evaluated_graphs.count(curr)) {
+        GRAPH_DEBUG("Non tensor node or no graph ", getHeader(curr));
+        return c10::nullopt;
+      }
+      auto symbolic_sizes = tt->symbolic_sizes();
+      // TODO: dont require # of dimensions of tensors set ?
+      if (!symbolic_sizes.rank()) {
+        GRAPH_DEBUG("No rank on output ", getHeader(curr));
+        return c10::nullopt;
+      }
+      auto partial_eval_graph = partial_evaluated_graphs[curr];
+      joinPartialEvaluatedShapeGraphToLargeShapeGraph(
+          curr, partial_eval_graph, large_shape_compute_graph);
+    }
+
+    size_t MAX_ITER = 3;
+    bool made_change = true;
+    size_t i = 0;
+    while (i < MAX_ITER && made_change) {
+      i++;
+      made_change = shapeGraphCleanupPasses(large_shape_compute_graph);
+    }
+
+    // for any output that is duplicated, the symbolic shape must be equal
+    // take the symbolic shape that is generated first and get equivalent ones
+    std::unordered_map<int64_t, int64_t> discovered_sym_shape_equalities;
+    std::unordered_map<Value*, int64_t> graph_output_to_symbolic_shape_dim;
+    std::vector<size_t> erase_indices;
+
+    for (size_t i = 0; i < large_shape_compute_graph->outputs().size(); ++i) {
+      Value* output = large_shape_compute_graph->outputs().at(i);
+      // this Value is already contained, so the symbolic shape for i must be
+      // equal to the symbolic shape at the existing index
+      if (graph_output_to_symbolic_shape_dim.count(output)) {
+        auto curr_sym_shape = output_index_to_symbolic_shape_[i];
+        auto existing_sym_shape = graph_output_to_symbolic_shape_dim[output];
+        discovered_sym_shape_equalities[curr_sym_shape] = existing_sym_shape;
+        erase_indices.push_back(i);
+      } else {
+        graph_output_to_symbolic_shape_dim[output] =
+            output_index_to_symbolic_shape_[i];
+      }
+    }
+    for (int64_t i = erase_indices.size() - 1; i >= 0; i--) {
+      large_shape_compute_graph->eraseOutput(erase_indices[i]);
+    }
+    for (size_t i = 0; i < large_shape_compute_graph->inputs().size();) {
+      if (!large_shape_compute_graph->inputs().at(i)->hasUses()) {
+        enclosing_graph_value_to_shape_graph_input_.erase(
+            large_shape_compute_graph->inputs().at(i));
+        large_shape_compute_graph->eraseInput(i);
+      } else {
+        ++i;
+      }
+    }
+
+    updateGraphWithSymbolicShapeEqualities(discovered_sym_shape_equalities);
+    return ShapeComputeGraphMapping(
+        large_shape_compute_graph,
+        enclosing_graph_value_to_shape_graph_input_,
+        graph_output_to_symbolic_shape_dim);
+  }
+
+  void updateGraphWithSymbolicShapeEqualities(
+      std::unordered_map<int64_t, int64_t>& sym_shape_equalities) {
+    for (auto it = beg_->iterator(); it != end_->iterator(); it++) {
+      auto curr = *it;
+      if (curr->outputs().size() != 1) {
+        continue;
+      }
+      auto tt = curr->output()->type()->cast<TensorType>();
+      if (!tt || !tt->symbolic_sizes().rank()) {
+        continue;
+      }
+      bool changed = false;
+      std::vector<at::ShapeSymbol> shape_vec = *tt->symbolic_sizes().sizes();
+      auto new_sizes = c10::fmap(shape_vec, [&](const at::ShapeSymbol& shape) {
+        auto value = shape.value();
+        if (sym_shape_equalities.count(value)) {
+          changed = true;
+          return sym_shape_equalities[value];
+        }
+        return value;
+      });
+      if (changed) {
+        curr->output()->setType(tt->withSymbolicShapes(shape_vec));
+      }
+    }
+  }
+
+  void joinPartialEvaluatedShapeGraphToLargeShapeGraph(
+      Node* curr,
+      std::shared_ptr<Graph> partial_eval_graph,
+      std::shared_ptr<Graph> large_shape_compute_graph) {
+    // we are building up the large shape compute graph by iteratively
+    // combining partially evaluated individual node shape graphs.
+
+    // We need to maintain two mappings, one from non-Tensor inputs in the
+    // enclosing graph to their equivalent mappings within the large shape
+    // compute graph, and one from symbolic shape dimension to new node output
+
+    // When we add a new tensor node, we do two things:
+    // 1: record a mapping from the tensor node output to its shape in the
+    // partial eval graph 2: add each symbolic shape dimension that we have not
+    // already added as a output to the large shape compute graph
+
+    // Once we are done stitching together all partial eval'd graphs, we can
+    // cleanup the graph and remove the unneeded complete shapes as outputs,
+    // leaving us only compute for calculating the runtime value of symbolic
+    // dimensions
+
+    std::vector<Value*> inputs;
+    for (size_t i = 0; i < curr->inputs().size(); ++i) {
+      auto node_input = curr->input(i);
+      auto existing_graph_mapping =
+          enclosing_graph_value_to_shape_graph_input_.find(curr->input(i));
+      if (existing_graph_mapping !=
+          enclosing_graph_value_to_shape_graph_input_.end()) {
+        inputs.push_back(existing_graph_mapping->second);
+      } else {
+        Value* shape_graph_input =
+            large_shape_compute_graph->addInput()->copyMetadata(
+                partial_eval_graph->inputs().at(i));
+        enclosing_graph_value_to_shape_graph_input_[node_input] =
+            shape_graph_input;
+        inputs.push_back(shape_graph_input);
+      }
+    }
+
+    WithInsertPoint guard(large_shape_compute_graph->block());
+    std::unordered_map<Value*, Value*> value_map;
+    insertGraph(
+        *large_shape_compute_graph, *partial_eval_graph, inputs, value_map);
+
+    TORCH_INTERNAL_ASSERT(partial_eval_graph->outputs().size() == 1);
+    Value* new_list_output = value_map[partial_eval_graph->outputs().at(0)];
+    enclosing_graph_value_to_shape_graph_input_[curr->output()] =
+        new_list_output;
+
+    TORCH_INTERNAL_ASSERT(
+        new_list_output->node()->kind() == prim::ListConstruct);
+    TORCH_INTERNAL_ASSERT(!new_list_output->node()->hasUses());
+
+    auto symbolic_sizes =
+        curr->output()->type()->expect<TensorType>()->symbolic_sizes();
+    TORCH_INTERNAL_ASSERT(symbolic_sizes.rank());
+
+    for (size_t i = 0; i < *symbolic_sizes.rank(); i++) {
+      if (symbolic_sizes[i].is_static()) {
+        continue;
+      }
+      int64_t symbolic_shape = symbolic_sizes[i].value();
+      if (symbolic_shape_value_to_graph_output_.count(symbolic_shape)) {
+        continue;
+      }
+      large_shape_compute_graph->registerOutput(
+          new_list_output->node()->input(i));
+      output_index_to_symbolic_shape_
+          [large_shape_compute_graph->outputs().size() - 1] = symbolic_shape;
+      symbolic_shape_value_to_graph_output_[symbolic_shape] =
+          large_shape_compute_graph->outputs().at(
+              large_shape_compute_graph->outputs().size() - 1);
+    }
+  }
+
+  std::unordered_map<Node*, std::shared_ptr<Graph>>
+  propagateShapesAndGatherPartialEvalShapeGraphs(AliasDb& db) {
+    std::unordered_map<Node*, std::shared_ptr<Graph>> partial_evaluated_graphs;
+    for (auto it = beg_->iterator(); it != end_->iterator(); it++) {
+      auto curr = *it;
+      if (curr->maybeSchema()) {
+        if (auto maybe_graph = shapeComputeGraphForSchema(curr->schema())) {
+          partial_evaluated_graphs[curr] =
+              PropagateShapesWithShapeFunction(curr, *maybe_graph, db);
+        }
+      }
+    }
+    return partial_evaluated_graphs;
+  }
+
+  std::unordered_map<Value*, Value*>
+      enclosing_graph_value_to_shape_graph_input_;
+  std::unordered_map<int64_t, Value*> symbolic_shape_value_to_graph_output_;
+  std::unordered_map<size_t, int64_t> output_index_to_symbolic_shape_;
+
+  std::shared_ptr<Graph>& graph_;
+  Node* beg_;
+  Node* end_;
+};
 
 void PropagateShapesOnBlock(Block* b, const AliasDb& db) {
   for (Node* n : b->nodes()) {
@@ -560,6 +783,14 @@ void PropagateShapesOnBlock(Block* b, const AliasDb& db) {
 void PropagateShapesOnGraph(std::shared_ptr<Graph>& graph) {
   AliasDb db(graph);
   PropagateShapesOnBlock(graph->block(), db);
+}
+
+c10::optional<ShapeComputeGraphMapping>
+PropagateShapesAndBuildLargeShapeComputeGraph(
+    std::shared_ptr<Graph>& graph,
+    Node* beg,
+    Node* end) {
+  return SymbolicShapeGraphAnalyzer(graph, beg, end).run();
 }
 
 } // namespace jit

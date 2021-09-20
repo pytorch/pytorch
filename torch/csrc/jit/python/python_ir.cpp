@@ -6,6 +6,7 @@
 #include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/onnx/helper.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
+#include <torch/csrc/jit/passes/symbolic_shape_analysis.h>
 #include <torch/csrc/jit/python/pybind.h>
 #include <torch/csrc/jit/python/python_tracer.h>
 #include <torch/csrc/jit/runtime/argument_spec.h>
@@ -415,6 +416,16 @@ void initPythonIRBindings(PyObject* module_) {
       .GS(appendNode)
       .GS(prependNode)
       .def(
+          "makeMultiOutputIntoTuple",
+          [](Graph& g) {
+            auto tup = g.createTuple(g.outputs());
+            tup->insertBefore(g.return_node());
+            for (int64_t i = g.outputs().size() - 1; i >= 0; i--) {
+              g.eraseOutput(0);
+            }
+            g.registerOutput(tup->output());
+          })
+      .def(
           "insertConstant",
           [](Graph& g, const IValue& ival) { return g.insertConstant(ival); })
       .GS(lint)
@@ -501,6 +512,7 @@ void initPythonIRBindings(PyObject* module_) {
           })
       .def("returnNode", [](Block& b) { return b.return_node(); })
       .def("paramNode", [](Block& b) { return b.param_node(); })
+      .def("owningNode", [](Block& b) { return b.owningNode(); })
       .def(
           "addNode",
           [](Block& b, const char* str, const std::vector<Value*>& inputs) {
@@ -525,6 +537,7 @@ void initPythonIRBindings(PyObject* module_) {
       .def("inputsSize", [](Node& n) { return n.inputs().size(); })
       .def("outputsSize", [](Node& n) { return n.outputs().size(); })
       .NS(kind)
+      .def("owningBlock", [](Node& n) { return n.owningBlock(); })
       .def("inputsAt", [](Node& n, size_t i) { return n.inputs().at(i); })
       .def(
           "inputs",
@@ -975,6 +988,19 @@ void initPythonIRBindings(PyObject* module_) {
       .def("isAfter", [](Use& self, Use& other_use) {
         return isBeforeOrAfter(self, other_use, false);
       });
+
+  py::class_<torch::jit::ShapeComputeGraphMapping>(
+      m, "ShapeComputeGraphMapping")
+      .def(
+          "partial_eval_shape_graph",
+          [](ShapeComputeGraphMapping& g) {
+            return g.partial_eval_shape_graph;
+          })
+      .def(
+          "graph_output_to_symbolic_shape_dim",
+          [](ShapeComputeGraphMapping& g) {
+            return g.graph_output_to_symbolic_shape_dim_;
+          });
 }
 } // namespace jit
 } // namespace torch
