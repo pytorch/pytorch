@@ -34,13 +34,15 @@ inline constexpr bool should_include_kernel_dtype(
  * binary.
  */
 #if defined ENABLE_RECORD_KERNEL_FUNCTION_DTYPE
+namespace at {
 namespace detail {
 void record_kernel_function_dtype(std::string name);
+}
 }
 
 #define RECORD_KERNEL_FUNCTION_DTYPE(NAME, enum_type)                   \
   at::detail::record_kernel_function_dtype(                             \
-    std::string(NAME) + "$" + toString(enum_type))
+    std::string(NAME) + "$" + toString(enum_type));
 #else
 #define RECORD_KERNEL_FUNCTION_DTYPE(NAME, enum_type)
 #endif
