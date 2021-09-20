@@ -24,8 +24,6 @@ TORCH_CUDA_CU_API THCStorage* THCTensor_(
     storage)(THCState* state, const THCTensor* self);
 /**** creation methods ****/
 TORCH_CUDA_CU_API THCTensor* THCTensor_(new)(THCState* state);
-// TORCH_CUDA_CU_API THCTensor* THCTensor_(
-//     newWithTensor)(THCState* state, THCTensor* tensor);
 TORCH_CUDA_CU_API THCTensor* THCTensor_(newWithStorage1d)(
     THCState* state,
     THCStorage* storage_,
