@@ -332,6 +332,9 @@ pytorch_ios_params: &pytorch_ios_params
     lite_interpreter:
       type: string
       default: "1"
+    use_coreml:
+      type: string
+      default: "0"
   environment:
     BUILD_ENVIRONMENT: << parameters.build_environment >>
     IOS_ARCH: << parameters.ios_arch >>
@@ -339,6 +342,7 @@ pytorch_ios_params: &pytorch_ios_params
     SELECTED_OP_LIST: << parameters.op_list >>
     USE_PYTORCH_METAL: << parameters.use_metal >>
     BUILD_LITE_INTERPRETER: << parameters.lite_interpreter >>
+    USE_COREML_DELEGATE: << parameters.use_coreml >>
 
 pytorch_windows_params: &pytorch_windows_params
   parameters:
@@ -634,7 +638,7 @@ jobs:
             echo "Skipping for ${BUILD_ENVIRONMENT}"
           fi
     - run:
-        name: Run tests
+        name: Test
         no_output_timeout: "90m"
         command: |
           set -e
@@ -7442,21 +7446,6 @@ workflows:
           name: pytorch_linux_xenial_py3_clang5_mobile_code_analysis
           requires:
             - docker-pytorch-linux-xenial-py3-clang5-android-ndk-r19c
-      - pytorch_linux_test:
-          build_environment: pytorch-linux-xenial-py3.6-gcc5.4-jit_legacy-test
-          docker_image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc5.4
-          name: pytorch_linux_xenial_py3_6_gcc5_4_jit_legacy_test
-          requires:
-            - pytorch_linux_xenial_py3_6_gcc5_4_build
-          resource_class: large
-      - pytorch_linux_test:
-          build_environment: pytorch-linux-xenial-cuda10.2-cudnn7-py3-jit_legacy-test
-          docker_image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7
-          name: pytorch_linux_xenial_cuda10_2_cudnn7_py3_jit_legacy_test
-          requires:
-            - pytorch_linux_xenial_cuda10_2_cudnn7_py3_gcc7_build
-          resource_class: gpu.medium
-          use_cuda_docker_runtime: "1"
       - binary_linux_build:
           build_environment: manywheel 3.7m cu102 devtoolset7
           docker_image: pytorch/manylinux-cuda102
@@ -7605,6 +7594,7 @@ workflows:
           ios_arch: x86_64
           ios_platform: SIMULATOR
           name: pytorch_ios_12_5_1_nightly_x86_64_build
+          use_coreml: "1"
           use_metal: "1"
       - binary_ios_build:
           build_environment: libtorch-ios-12.5.1-nightly-arm64-build
@@ -7615,6 +7605,7 @@ workflows:
           ios_arch: arm64
           ios_platform: OS
           name: pytorch_ios_12_5_1_nightly_arm64_build
+          use_coreml: "1"
           use_metal: "1"
       - binary_ios_upload:
           build_environment: libtorch-ios-12.5.1-nightly-binary-build-upload
@@ -7698,15 +7689,15 @@ workflows:
               only:
                 - postnightly
       - pytorch_windows_build:
-          build_environment: pytorch-win-vs2019-cuda10.1-py3
-          cuda_version: "10.1"
+          build_environment: pytorch-win-vs2019-cuda10.2-py3
+          cuda_version: "10.2"
           filters:
             branches:
               only:
                 - master
                 - /ci-all\/.*/
                 - /release\/.*/
-          name: pytorch_windows_vs2019_py38_cuda10.1_build
+          name: pytorch_windows_vs2019_py38_cuda10.2_build
           python_version: "3.8"
           use_cuda: "1"
           vc_product: BuildTools
@@ -7714,18 +7705,18 @@ workflows:
           vc_year: "2019"
           vs_version: "16.8.6"
       - pytorch_windows_test:
-          build_environment: pytorch-win-vs2019-cuda10.1-py3
-          cuda_version: "10.1"
+          build_environment: pytorch-win-vs2019-cuda10.2-py3
+          cuda_version: "10.2"
           filters:
             branches:
               only:
                 - master
                 - /ci-all\/.*/
                 - /release\/.*/
-          name: pytorch_windows_vs2019_py38_cuda10.1_on_cpu_test1
+          name: pytorch_windows_vs2019_py38_cuda10.2_on_cpu_test1
           python_version: "3.8"
           requires:
-            - pytorch_windows_vs2019_py38_cuda10.1_build
+            - pytorch_windows_vs2019_py38_cuda10.2_build
           test_name: pytorch-windows-test1
           use_cuda: "0"
           vc_product: BuildTools
@@ -9270,9 +9261,9 @@ workflows:
           requires:
             - binary_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_shared-with-deps_build
       - pytorch_windows_build:
-          build_environment: pytorch-win-vs2019-cuda10.1-py3
-          cuda_version: "10.1"
-          name: pytorch_windows_vs2019_py38_cuda10.1_build
+          build_environment: pytorch-win-vs2019-cuda10.2-py3
+          cuda_version: "10.2"
+          name: pytorch_windows_vs2019_py38_cuda10.2_build
           python_version: "3.8"
           use_cuda: "1"
           vc_product: BuildTools
@@ -9280,12 +9271,12 @@ workflows:
           vc_year: "2019"
           vs_version: "16.8.6"
       - pytorch_windows_test:
-          build_environment: pytorch-win-vs2019-cuda10.1-py3
-          cuda_version: "10.1"
-          name: pytorch_windows_vs2019_py38_cuda10.1_on_cpu_test1
+          build_environment: pytorch-win-vs2019-cuda10.2-py3
+          cuda_version: "10.2"
+          name: pytorch_windows_vs2019_py38_cuda10.2_on_cpu_test1
           python_version: "3.8"
           requires:
-            - pytorch_windows_vs2019_py38_cuda10.1_build
+            - pytorch_windows_vs2019_py38_cuda10.2_build
           test_name: pytorch-windows-test1
           use_cuda: "0"
           vc_product: BuildTools
