@@ -17,11 +17,11 @@ def set_single_thread_parallel_tbb(fn):
 
     See https://github.com/pytorch/pytorch/issues/64571#issuecomment-914691883
     """
+    if not IS_TBB:
+        return fn
+
     @wraps(fn)
     def wrap_fn(self, *args, **kwargs):
-        if not IS_TBB:
-            return fn(self, *args, **kwargs)
-
         num_threads = torch.get_num_threads()
         torch.set_num_threads(1)
         output = fn(self, *args, **kwargs)
