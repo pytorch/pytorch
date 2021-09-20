@@ -1,8 +1,4 @@
 {% import 'common.yml.j2' as common %}
-{# squid_proxy is an private ELB that only available for GHA custom runners #}
-{%- set squid_proxy    = "http://internal-tf-lb-20210727220640487900000002-835786077.us-east-1.elb.amazonaws.com:3128" -%}
-{# squid_no_proxy is a list of common set of fixed domains or IPs that we don't need to proxy. See https://docs.aws.amazon.com/AmazonECS/latest/developerguide/http_proxy_config.html#windows-proxy #}
-{%- set squid_no_proxy = "localhost,127.0.0.1,amazonaws.com,s3.amazonaws.com,169.254.169.254,169.254.170.2,/var/run/docker.sock" -%}
 
 {%- macro wait_and_kill_ssh() -%}
       - name: Wait until all sessions have drained
@@ -51,21 +47,20 @@ env:
   IN_CI: 1
   INSTALL_WINDOWS_SDK: 1
   PYTHON_VERSION: "3.8"
+  PR_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
   SCCACHE_BUCKET: "ossci-compiler-cache"
   VC_PRODUCT: "BuildTools"
   VC_VERSION: ""
   VS_VERSION: "16.8.6"
   VC_YEAR: "2019"
   ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
-  no_proxy: !{{ squid_no_proxy }}
+  no_proxy: !{{ common.squid_no_proxy }}
 {%- if cuda_version != "cpu" %}
   TORCH_CUDA_ARCH_LIST: "7.0"
   USE_CUDA: 1
 {%- endif %}
 
-concurrency:
-  group: !{{ build_environment }}-${{ github.event.pull_request.number || github.sha }}
-  cancel-in-progress: true
+!{{ common.concurrency(build_environment) }}
 
 jobs:
 {%- if ciflow_config.enabled %}
@@ -77,7 +72,6 @@ jobs:
         run: echo running !{{ ciflow_config.root_job_name }}
 {%- endif %}
   build:
-    if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: "windows.4xlarge"
     defaults:
       run:
@@ -87,8 +81,8 @@ jobs:
     {%- endif %}
     env:
       JOB_BASE_NAME: !{{ build_environment }}-build
-      http_proxy: "!{{ squid_proxy }}"
-      https_proxy: "!{{ squid_proxy }}"
+      http_proxy: "!{{ common. squid_proxy }}"
+      https_proxy: "!{{ common.squid_proxy }}"
     steps:
       - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
         uses: seemethere/add-github-ssh-key@v1
@@ -135,7 +129,7 @@ jobs:
           path: C:\${{ github.run_id }}\build-results
       - name: Upload artifacts to s3
         if: always()
-        uses: seemethere/upload-artifact-s3@9d7ceb0ab39c2c88d93ef7792b27425b27d59162
+        uses: !{{ common.upload_artifact_s3_action }}
         with:
           retention-days: 14
           if-no-files-found: error
@@ -153,11 +147,6 @@ jobs:
           rm -rf ./*
 
   generate-test-matrix:
-{%- if only_build_on_pull_request %}
-    if: ${{ github.repository_owner == 'pytorch' && github.event_name == 'push' }}
-{%- else %}
-    if: ${{ github.repository_owner == 'pytorch' }}
-{%- endif %}
     {%- if ciflow_config.enabled %}
     needs: [!{{ ciflow_config.root_job_name }}]
     {%- endif %}
@@ -175,7 +164,7 @@ jobs:
       image: python:3.9
     steps:
       - name: Install dependencies
-        run: pip install typing-extensions
+        run: pip install typing-extensions==3.10
       - name: Clone pytorch/pytorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
       - name: Generating test matrix
@@ -191,11 +180,11 @@ jobs:
       SHARD_NUMBER: ${{ matrix.shard }}
       NUM_TEST_SHARDS: ${{ matrix.num_shards }}
       TEST_CONFIG: ${{ matrix.config }}
-      http_proxy: "!{{ squid_proxy }}"
-      https_proxy: "!{{ squid_proxy }}"
+      http_proxy: "!{{ common.squid_proxy }}"
+      https_proxy: "!{{ common.squid_proxy }}"
       RUN_SMOKE_TESTS_ONLY_ON_PR: !{{ only_run_smoke_tests_on_pull_request }}
       PYTORCH_IGNORE_DISABLED_ISSUES: ${{ needs.generate-test-matrix.outputs.ignore-disabled-issues }}
-      CONTINUE_THROUGH_ERROR: ${{ github.repository_owner == 'pytorch' && (github.event_name == 'push' || github.event_name == 'schedule') }}
+      CONTINUE_THROUGH_ERROR: ${{ github.repository == 'pytorch/pytorch' && (github.event_name == 'push' || github.event_name == 'schedule') }}
     needs: [build, generate-test-matrix, !{{ ciflow_config.root_job_name }}]
     strategy:
       matrix: ${{ fromJson(needs.generate-test-matrix.outputs.matrix) }}
@@ -245,7 +234,7 @@ jobs:
         name: Setup Python3
         with:
           python-version: '3.x'
-      - name: Run test scripts
+      - name: Test
         shell: bash
         env:
           PYTORCH_FINAL_PACKAGE_DIR: /c/${{ github.run_id }}/build-results/
@@ -257,24 +246,8 @@ jobs:
               export RUN_SMOKE_TESTS_ONLY=1
             fi
             .jenkins/pytorch/win-test.sh
-      - name: Zip test reports for upload
-        if: always()
-        env:
-          COMMIT_SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
-          WORKFLOW_ID: '${{ github.run_id }}_${{ github.run_number }}'
-        shell: powershell
-        run: |
-          # -ir => recursive include all files in pattern
-          7z a "test-reports-$Env:COMMIT_SHA1-$Env:WORKFLOW_ID.zip" -ir'!test\*.xml'
-      - uses: actions/upload-artifact@v2
-        name: Store PyTorch Test Reports
-        if: always()
-        with:
-          name: test-reports-${{ matrix.config }}
-          retention-days: 14
-          if-no-files-found: error
-          path:
-            pytorch-${{ github.run_id }}/test-reports-*.zip
+      !{{ common.upload_test_reports(name='windows') }}
+      !{{ common.render_test_results() }}
       !{{ wait_and_kill_ssh() }}
       !{{ common.parse_ref() }}
       !{{ common.upload_test_statistics(build_environment) }}
