@@ -70,12 +70,29 @@ def get_extensions():
     define_macros = []
 
     extra_link_args = []
-    extra_compile_args = {"cxx": ["-O3", "-g", "-std=c++14", "-fdiagnostics-color=always"]}
+    extra_compile_args = {"cxx": [
+        "-O3",
+        "-g",
+        "-std=c++14",
+        "-fdiagnostics-color=always",
+        # PyTorch SmallVector has this
+        '-Wno-array-bounds',
+        '-Werror',
+    ]}
     debug_mode = os.getenv('DEBUG', '0') == '1'
     if debug_mode:
         print("Compiling in debug mode")
         extra_compile_args = {
-            "cxx": ["-O0", "-fno-inline", "-g", "-std=c++14", "-fdiagnostics-color=always"]}
+            "cxx": [
+                "-O0",
+                "-fno-inline",
+                "-g",
+                "-std=c++14",
+                "-fdiagnostics-color=always",
+                # PyTorch SmallVector has this
+                '-Wno-array-bounds',
+                '-Werror',
+            ]}
         extra_link_args = ["-O0", "-g"]
 
     this_dir = os.path.dirname(os.path.abspath(__file__))
