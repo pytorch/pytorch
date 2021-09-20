@@ -2,6 +2,7 @@
 #include <torch/csrc/jit/passes/memory_planning/greedy_by_breadth.h>
 #include <torch/csrc/jit/passes/memory_planning/greedy_by_size.h>
 #include <torch/csrc/jit/passes/memory_planning/linear_scan.h>
+#include "/home/mlevental/dev_projects/pytorch_dev/memory_allocator/memory_planning_pi.h"
 
 #include <jit/tensorexpr/kernel.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
@@ -290,6 +291,8 @@ getManagedAndUnManagedValues(const std::shared_ptr<Graph>& graph, bool frozen) {
   FastMap<const Value*, LiveRange> live_ranges =
       jit::GetLiveness(graph, always_alive_values, alias_db).second;
 
+  printLiveRanges(live_ranges);
+
   FastMap<const Value*, std::pair<UniqueLiveRange, size_t>> managed_values{};
   FastMap<const Value*, std::pair<UniqueLiveRange, size_t>> unmanaged_values{};
   FastMap<Node*, bool> node_has_out_variant;
@@ -509,9 +512,6 @@ getManagedLiveRangesFromMemoryEvents(
     // TODO: jit::Value* .count()>0 doesn't work for some reason
     // std::unordered_set<const jit::Value*> g_outputs;
     std::unordered_set<std::string> g_outputs;
-    for (const auto& outp : graph->return_node()->outputs()) {
-      std::cout << "return outp " << outp->debugName() << "\n";
-    }
     for (const auto& outp : graph->outputs()) {
       g_outputs.insert(outp->debugName());
     }
@@ -530,7 +530,7 @@ getManagedLiveRangesFromMemoryEvents(
               g_outputs.count(out->debugName()) > 0, out->debugName());
         }
       }
-      TORCH_WARN(alloc.second, " leaked");
+      GRAPH_DEBUG(alloc.second, " leaked");
     }
   }
   return std::make_pair(managed_live_ranges, live_range_node_header);
@@ -613,7 +613,7 @@ planMemory(const std::shared_ptr<Graph>& graph, Strategy strat, bool frozen) {
     case Strategy::LINEAR_SCAN: {
       allocations = linearScanHeuristic(managed_live_ranges);
       break;
-    };
+    }
     case Strategy::GREEDY_BY_SIZE_WITH_SMALLEST_GAP: {
       allocations = greedyBySizeWithSmallestGap(managed_live_ranges);
       break;
@@ -637,6 +637,8 @@ planMemory(const std::shared_ptr<Graph>& graph, Strategy strat, bool frozen) {
     default:
       return {};
   }
+
+  printAllocations(allocations);
 
   auto total_size = getTotalAllocationSize(allocations);
 

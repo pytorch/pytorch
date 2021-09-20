@@ -28,8 +28,8 @@ struct C10_API MemoryPlanningAllocator final : at::Allocator {
 
 class C10_API WithProfileTracingAllocationsGuard;
 
-struct C10_API MemoryTracingAllocator final : at::Allocator {
-  MemoryTracingAllocator(at::DeviceType device_type)
+struct C10_API MemorizingAllocator final : at::Allocator {
+  MemorizingAllocator(at::DeviceType device_type)
       : allocator_priority_(c10::GetAllocatorPriority(device_type)),
         device_type_(device_type),
         orig_allocator_(*c10::GetAllocator(device_type)) {
@@ -58,7 +58,7 @@ class C10_API WithProfileTracingAllocationsGuard {
   }
 
  private:
-  MemoryTracingAllocator tracer_;
+  MemorizingAllocator tracer_;
   at::DeviceType device_type_;
 };
 } // namespace c10
