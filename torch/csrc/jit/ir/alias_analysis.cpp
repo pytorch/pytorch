@@ -625,9 +625,6 @@ void AliasDb::analyzeImpl(Node* node) {
     case prim::MMBatchSide:
     case prim::BroadcastSizes:
     case prim::ChunkSizes:
-    case prim::AllocateSlab:
-    case prim::ReleaseSlab:
-    case prim::AllocateTensor:
     case prim::Closure:
     case prim::CreateObject:
     case prim::tolist:
