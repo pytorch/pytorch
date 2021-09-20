@@ -5420,12 +5420,7 @@
   device_check: NoCheck
   device_guard: False
 
-- func: meshgrid(Tensor[] tensors) -> Tensor[]
-
-# TODO: Two weeks after this lands, combine these two overloads,
-#       making "indexing" optional. These are temporarily distinct for
-#       forward-compatibility reasons.
-- func: meshgrid.indexing(Tensor[] tensors, *, str indexing) -> Tensor[]
+- func: meshgrid(Tensor[] tensors, *, str indexing='ij') -> Tensor[]
 
 - func: cartesian_prod(Tensor[] tensors) -> Tensor
   variants: function

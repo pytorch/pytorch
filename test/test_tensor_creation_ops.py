@@ -1410,7 +1410,8 @@ class TestTensorCreation(TestCase):
     def test_meshgrid_unsupported_indexing(self):
         with self.assertRaisesRegex(RuntimeError,
                                     'indexing must be one of "xy" or "ij"'):
-            torch.meshgrid(torch.tensor([1, 2]), indexing='')
+            torch.meshgrid(torch.tensor([1, 2]),
+                           indexing='definitely not any kind of indexing mode')
 
     def test_meshgrid_non_1d_tensor(self):
         with self.assertRaisesRegex(RuntimeError,
