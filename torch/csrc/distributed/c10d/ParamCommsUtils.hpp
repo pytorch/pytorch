@@ -4,7 +4,6 @@
 #include <vector>
 #include <c10/macros/Macros.h>
 #include <c10/util/ThreadLocalDebugInfo.h>
-#include <ATen/record_function.h>
 #include <ATen/core/ivalue.h>
 
 namespace torch {
