@@ -217,23 +217,23 @@ class TestModule(TestCase):
     def _retain_grad(self, obj):
         # gradients needs to be retained to check for grad. This is useful when
         # non-leafs are present in the graph.
-        def retain_grad(obj):
+        def inner_retain_grad(obj):
             if obj.requires_grad:
                 obj.retain_grad()
-        self._traverse_obj(obj, retain_grad)
+        self._traverse_obj(obj, inner_retain_grad)
 
     def _get_grads(self, obj):
-        def get_grad(obj):
+        def inner_get_grad(obj):
             if obj.requires_grad:
                 return obj.grad
-        return self._traverse_obj(obj, get_grad)
+        return self._traverse_obj(obj, inner_get_grad)
 
     def _zero_grad(self, obj):
-        def zero_grad(obj):
+        def inner_zero_grad(obj):
             if obj.grad is not None:
                 obj.grad.detach_()
                 obj.grad.zero_()
-        self._traverse_obj(obj, zero_grad)
+        self._traverse_obj(obj, inner_zero_grad)
 
     @modules(module_db)
     def test_non_contiguous_tensors(self, device, dtype, module_info):
@@ -244,26 +244,23 @@ class TestModule(TestCase):
                                                        requires_grad=True)
 
         def _make_non_contiguous(obj):
-            if isinstance(obj, (tuple, list)):
-                return type(obj)(_make_non_contiguous(o) for o in obj)
-            elif isinstance(obj, dict):
-                return {name: _make_non_contiguous(o) for name, o in obj.items()}
+            def inner_make_non_contiguous(obj):
+                # Scalar tensors can not be made non-contiguous
+                if not isinstance(obj, torch.Tensor) or obj.dim() == 0:
+                    return obj
 
-            # Scalar tensors can not be made non-contiguous
-            if not isinstance(obj, torch.Tensor) or obj.dim() == 0:
-                return obj
-
-            out = torch.repeat_interleave(obj, 2, dim=-1)
-            out = out[..., ::2].detach()
-            out.requires_grad = obj.requires_grad
-            return out
+                out = torch.repeat_interleave(obj, 2, dim=-1)
+                out = out[..., ::2].detach()
+                out.requires_grad = obj.requires_grad
+                return out
+            return self._traverse_obj(obj, inner_make_non_contiguous)
 
         def _can_be_noncontiguous(obj):
             if isinstance(obj, (tuple, list)):
                 return any(_can_be_noncontiguous(o) for o in obj)
             elif isinstance(obj, dict):
                 return any(_can_be_noncontiguous(o) for o in obj.values())
-            # scalar tensors can not be noncontiguous
+            # scalar tensors can not be non-contiguous
             if not isinstance(obj, torch.Tensor) or obj.dim() == 0:
                 return False
             return True
