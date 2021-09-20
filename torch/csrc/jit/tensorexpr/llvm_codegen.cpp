@@ -150,11 +150,49 @@ struct FunctionCallee {
 #endif
 } // namespace
 
+namespace {
+// Global mutex to protect LLVM initialization.  TargetRegistry::lookupTarget
+// in particular is not thread-safe.
+static std::mutex llvmInitMutex;
+} // namespace
+
+class LLVMCodeGenCallee {
+ public:
+  LLVMCodeGenCallee(
+      c10::optional<std::string> triple,
+      c10::optional<std::string> cpu,
+      c10::optional<std::string> attrs) {
+    {
+      std::lock_guard<std::mutex> g(llvmInitMutex);
+      llvm::InitializeAllTargets();
+      llvm::InitializeAllTargetMCs();
+      llvm::InitializeAllAsmPrinters();
+      jit_ = std::make_unique<llvm::orc::PytorchLLVMJIT>(triple, cpu, attrs);
+    }
+  }
+
+  llvm::orc::PytorchLLVMJIT* getJIT() {
+    return jit_.get();
+  }
+
+  void* getKernelAddress() {
+    return kernelAddress_;
+  }
+
+  void setKernelAddress(void* kernelAddress) {
+    kernelAddress_ = kernelAddress;
+  }
+
+ private:
+  std::unique_ptr<llvm::orc::PytorchLLVMJIT> jit_;
+  void* kernelAddress_;
+};
+
 class LLVMCodeGenImpl : public IRVisitor {
  private:
   std::unique_ptr<llvm::LLVMContext> context_;
   llvm::IRBuilder<> irb_;
-  std::unique_ptr<llvm::orc::PytorchLLVMJIT> jit_;
+  llvm::orc::PytorchLLVMJIT* jit_;
   std::unique_ptr<llvm::Module> module_;
   llvm::Function* fn_;
   llvm::BasicBlock* bb_;
@@ -209,9 +247,7 @@ class LLVMCodeGenImpl : public IRVisitor {
       const std::vector<CodeGen::BufferArg>& args,
       at::Device device,
       Dtype dtype,
-      c10::optional<std::string> triple,
-      c10::optional<std::string> cpu,
-      c10::optional<std::string> attrs);
+      llvm::orc::PytorchLLVMJIT* jit);
   ~LLVMCodeGenImpl() = default;
 
   llvm::JITTargetAddress getKernelAddress() const;
@@ -312,9 +348,16 @@ LLVMCodeGen::LLVMCodeGen(
     c10::optional<std::string> triple,
     c10::optional<std::string> cpu,
     c10::optional<std::string> attrs)
-    : CodeGen(stmt, args, device, kernel_func_name),
-      impl_(std::make_unique<
-            LLVMCodeGenImpl>(stmt, args, device, dtype, triple, cpu, attrs)) {}
+    : CodeGen(stmt, args, device, kernel_func_name) {
+  callee_ = std::make_unique<LLVMCodeGenCallee>(triple, cpu, attrs);
+  impl_ = std::make_unique<LLVMCodeGenImpl>(
+      stmt, args, device, dtype, callee_->getJIT());
+  callee_->setKernelAddress((void*)impl_->getKernelAddress());
+}
+
+void LLVMCodeGen::cleanup_memory() {
+  impl_.reset(nullptr);
+}
 
 void LLVMCodeGen::call_raw(const std::vector<void*>& args) {
   value<float>(const_cast<void**>(args.data()));
@@ -348,11 +391,14 @@ at::Tensor LLVMCodeGen::empty_strided(
       size, stride, dtype_opt, layout_opt, device_opt, pin_memory_opt);
 }
 
-void* LLVMCodeGen::getKernelAddress(LLVMCodeGenImpl* impl) {
-  return (void*)impl->getKernelAddress();
+void* LLVMCodeGen::getKernelAddress(LLVMCodeGenCallee* callee) {
+  return (void*)callee->getKernelAddress();
 }
 
 std::string LLVMCodeGen::getCodeText(const std::string& attr /*=""*/) {
+  TORCH_INTERNAL_ASSERT(
+      impl_.get(),
+      "LLVMCodeGen memory has been cleaned up. So, code text is not available at this point");
   if (attr == "asm") {
     return impl_->getASMCodeText();
   } else {
@@ -364,21 +410,15 @@ llvm::JITTargetAddress LLVMCodeGenImpl::getKernelAddress() const {
   return kernelAddress_;
 }
 
-namespace {
-// Global mutex to protect LLVM initialization.  TargetRegistry::lookupTarget
-// in particular is not thread-safe.
-static std::mutex llvmInitMutex;
-} // namespace
-
 LLVMCodeGenImpl::LLVMCodeGenImpl(
     StmtPtr stmt,
     const std::vector<CodeGen::BufferArg>& args,
     at::Device device,
     Dtype dtype,
-    c10::optional<std::string> triple,
-    c10::optional<std::string> cpu,
-    c10::optional<std::string> attrs)
-    : context_(std::make_unique<llvm::LLVMContext>()), irb_(getContext()) {
+    llvm::orc::PytorchLLVMJIT* jit)
+    : context_(std::make_unique<llvm::LLVMContext>()),
+      irb_(getContext()),
+      jit_(jit) {
   // Manually map types to LLVM types.
   ByteTy_ = llvm::Type::getInt8Ty(getContext());
   CharTy_ = llvm::Type::getInt8Ty(getContext());
@@ -391,14 +431,6 @@ LLVMCodeGenImpl::LLVMCodeGenImpl(
   Int8PtrTy_ = llvm::Type::getInt8PtrTy(getContext());
   VoidTy_ = llvm::Type::getVoidTy(getContext());
   BoolTy_ = ByteTy_;
-
-  {
-    std::lock_guard<std::mutex> g(llvmInitMutex);
-    llvm::InitializeAllTargets();
-    llvm::InitializeAllTargetMCs();
-    llvm::InitializeAllAsmPrinters();
-    jit_ = std::make_unique<llvm::orc::PytorchLLVMJIT>(triple, cpu, attrs);
-  }
 
   module_ = std::make_unique<llvm::Module>("pytorch", getContext());
   module_->setDataLayout(jit_->getDataLayout());
