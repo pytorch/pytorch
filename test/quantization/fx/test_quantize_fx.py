@@ -24,12 +24,15 @@ from torch.quantization.fx.match_utils import (
     MatchAllNode,
 )
 
-from torch.quantization import (
+from torch.ao.quantization import (
     QuantType,
+    quant_type_to_str,
+)
+
+from torch.quantization import (
     QuantStub,
     DeQuantStub,
     QuantWrapper,
-    quant_type_to_str,
     default_qconfig,
     default_dynamic_qconfig,
     default_qat_qconfig,
@@ -3023,6 +3026,24 @@ class TestQuantizeFx(QuantizationTestCase):
             result_ref = m_ref(data)
             self.assertTrue(torch.equal(result, result_ref))
 
+    def test_sub_scalar(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                x = x + 1
+                x = x - 1
+                x = x + 3
+                x = x - 4
+                return x
+
+        m = M().eval()
+        m = prepare_fx(m, {"": default_qconfig})
+        m = convert_fx(m)
+        occurrence = {
+            ns.call_function(torch.quantize_per_tensor): 2,
+            ns.call_method("dequantize"): 2
+        }
+        self.checkGraphModuleNodes(m, expected_node_occurrence=occurrence)
+
 @skipIfNoFBGEMM
 class TestQuantizeFxOps(QuantizationTestCase):
     """Unit tests for individual ops
@@ -4146,6 +4167,9 @@ class TestQuantizeFxOps(QuantizationTestCase):
             module, functional, qconfig, is_reference, node_list)
 
     def test_bmm_int_reference(self):
+        """ int8 is not supported for bmm so we won't produce reference
+            pattern for it
+        """
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -4160,19 +4184,14 @@ class TestQuantizeFxOps(QuantizationTestCase):
         qconfig_dict = {"": torch.quantization.get_default_qconfig("fbgemm")}
         is_reference = True
         node_list = [
-            ns.call_function(torch.quantize_per_tensor),
-            ns.call_function(torch.quantize_per_tensor),
-            ns.call_method('dequantize'),
-            ns.call_method('dequantize'),
             ns.call_function(torch.bmm),
-            ns.call_function(torch.quantize_per_tensor),
-            ns.call_method('dequantize'),
         ]
 
         m = M().eval()
         m_prep = torch.quantization.quantize_fx.prepare_fx(m, qconfig_dict)
         m_prep(data_x, data_y)
         m_quant = torch.quantization.quantize_fx.convert_fx(m_prep, is_reference=is_reference)
+        print(m_quant)
         m_quant(data_x, data_y)
 
         self.checkGraphModuleNodes(m_quant, expected_node_list=node_list)
@@ -4953,7 +4972,6 @@ class TestQuantizeFxOps(QuantizationTestCase):
         m = convert_fx(m)
         m(data)
         # make sure everything runs
-
 
 class TestQuantizeFxModels(QuantizationTestCase):
     @skipIfNoFBGEMM

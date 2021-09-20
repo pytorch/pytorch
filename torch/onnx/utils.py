@@ -211,8 +211,6 @@ def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=Fa
     torch._C._jit_pass_onnx_scalar_type_analysis(graph, True, _export_onnx_opset_version)
     torch._C._jit_pass_lint(graph)
 
-    torch._C._jit_pass_onnx_fold_if(graph)
-
     torch._C._jit_pass_onnx_peephole(graph, _export_onnx_opset_version, fixed_batch_size)
     torch._C._jit_pass_lint(graph)
 
@@ -230,7 +228,7 @@ def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=Fa
     return graph
 
 
-# We accept dictionnaries and strings as ONNX inputs,
+# We accept dictionaries and strings as ONNX inputs,
 # but they should be only for configuration use.
 # we detect here if these inputs are modified, and if so
 # we warn the user that the changes won't take effect in the
@@ -239,7 +237,7 @@ def warn_on_static_input_change(input_states):
     for input, traced_input in zip(input_states[0], input_states[1]):
         if isinstance(input, dict):
             if list(input.keys()) != list(traced_input.keys()):
-                warning = "We detected that you are modifying a dictionnary that is an input to your " \
+                warning = "We detected that you are modifying a dictionary that is an input to your " \
                           "model. " \
                           "Note that dictionaries are allowed as inputs in ONNX but they should be " \
                           "handled with care. " \
@@ -540,14 +538,14 @@ def export_to_pretty_string(model, args, f, export_params=True, verbose=False, t
                             export_type=ExportTypes.PROTOBUF_FILE, example_outputs=None,
                             google_printer=False, opset_version=None, _retain_param_name=True,
                             keep_initializers_as_inputs=None, custom_opsets=None, add_node_names=True,
-                            do_constant_folding=True):
+                            do_constant_folding=True, dynamic_axes=None):
     return _export_to_pretty_string(model, args, f, export_params, verbose, training,
                                     input_names, output_names, operator_export_type,
                                     export_type, example_outputs, google_printer,
                                     opset_version, do_constant_folding=do_constant_folding,
                                     add_node_names=add_node_names,
                                     keep_initializers_as_inputs=keep_initializers_as_inputs,
-                                    custom_opsets=custom_opsets)
+                                    custom_opsets=custom_opsets, dynamic_axes=dynamic_axes)
 
 
 def _export_to_pretty_string(model, args, f, export_params=True, verbose=False, training=None,
@@ -556,7 +554,7 @@ def _export_to_pretty_string(model, args, f, export_params=True, verbose=False, 
                              google_printer=False, opset_version=None,
                              do_constant_folding=True, keep_initializers_as_inputs=None,
                              fixed_batch_size=False, custom_opsets=None, add_node_names=True,
-                             onnx_shape_inference=True):
+                             onnx_shape_inference=True, dynamic_axes=None):
     from torch.onnx.symbolic_helper import _default_onnx_opset_version, _set_opset_version
     from torch.onnx.symbolic_helper import _set_operator_export_type
     if opset_version is None:
@@ -578,7 +576,7 @@ def _export_to_pretty_string(model, args, f, export_params=True, verbose=False, 
                                                         output_names, operator_export_type,
                                                         example_outputs, val_do_constant_folding,
                                                         fixed_batch_size=fixed_batch_size,
-                                                        training=training)
+                                                        training=training, dynamic_axes=dynamic_axes)
 
         return graph._pretty_print_onnx(params_dict, opset_version, False,
                                         operator_export_type, google_printer,
