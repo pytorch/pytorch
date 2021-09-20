@@ -689,6 +689,24 @@ class TestHub(TestCase):
             self.assertEqual(torch.hub.get_dir(), dirname)
 
     @retry(URLError, tries=3)
+    def test_hub_parse_repo_info(self):
+        # If the branch is specified we just parse the input and return
+        self.assertEqual(
+            torch.hub._parse_repo_info('a/b:c'),
+            ('a', 'b', 'c')
+        )
+        # For torchvision, the default branch is main
+        self.assertEqual(
+            torch.hub._parse_repo_info('pytorch/vision'),
+            ('pytorch', 'vision', 'main')
+        )
+        # For the torchhub_example repo, the default branch is still master
+        self.assertEqual(
+            torch.hub._parse_repo_info('ailzhang/torchhub_example'),
+            ('ailzhang', 'torchhub_example', 'master')
+        )
+
+    @retry(URLError, tries=3)
     def test_load_state_dict_from_url_with_name(self):
         with tempfile.TemporaryDirectory('hub_dir') as dirname:
             torch.hub.set_dir(dirname)
@@ -702,8 +720,8 @@ class TestHub(TestCase):
     def test_load_commit_from_forked_repo(self):
         with self.assertRaisesRegex(
                 ValueError,
-                'Torchhub tried to look for 4e2c216'):
-            torch.hub.load('pytorch/vision:4e2c216', 'resnet18', force_reload=True)
+                'If it\'s a commit from a forked repo'):
+            model = torch.hub.load('pytorch/vision:4e2c216', 'resnet18', force_reload=True)
 
 class TestHipify(TestCase):
     def test_import_hipify(self):

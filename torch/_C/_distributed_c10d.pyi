@@ -30,7 +30,7 @@ class GradBucket:
 class Reducer:
     def __init__(
         self,
-        replicas: List[Tensor],
+        params: List[Tensor],
         bucket_indices: List[List[int]],
         process_group: ProcessGroup,
         expect_sparse_gradients: List[bool],
@@ -390,5 +390,5 @@ def _broadcast_coalesced(
 ): ...
 def _test_python_store(store: Store): ...
 def _verify_params_across_processes(
-    process_group: ProcessGroup, model_replica: List[Tensor]
+    process_group: ProcessGroup, params: List[Tensor]
 ): ...

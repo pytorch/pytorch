@@ -6963,7 +6963,7 @@ class DistributedTest:
             )
 
             # Modify the model so that the number of parameters are different for each rank.
-            # This will cause a RuntimeError to be thrown below in dist._verify_model_across_ranks,
+            # This will cause a RuntimeError to be thrown below in dist._verify_params_across_processes,
             # so we can check if the correct error is thrown and is logged.
             # We can't do this in the constructor above otherwise the logger will
             # not be properly initialized.
@@ -6972,9 +6972,9 @@ class DistributedTest:
             # if we pass a logger we can verify that it was logged
             with ctx:
                 if use_logger:
-                    dist._verify_model_across_ranks(net.process_group, [list(net.parameters())], net.logger)
+                    dist._verify_params_across_processes(net.process_group, [list(net.parameters())], net.logger)
                 else:
-                    dist._verify_model_across_ranks(net.process_group, [list(net.parameters())])
+                    dist._verify_params_across_processes(net.process_group, [list(net.parameters())])
                 # Should only be run by rank 0, and blocking_wait catches and
                 # reports exception.
                 dist.barrier(group_to_use)
@@ -8049,3 +8049,42 @@ class DistributedTest:
         )
         def test_ddp_new_tensor_in_fwd_static_graph(self):
             return self._test_ddp_new_tensor_in_fwd(static_graph=True)
+
+        @skip_if_lt_x_gpu(2)
+        @sandcastle_skip_if(
+            BACKEND != "nccl" and BACKEND != "gloo",
+            "Only Nccl & Gloo backend support DistributedDataParallel",
+        )
+        def test_ddp_broadcast_buffer(self):
+            rank = self.rank
+            torch.cuda.set_device(rank)
+            torch.manual_seed(rank)
+            torch.cuda.manual_seed(rank)
+
+            class NetWithBuffers(nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.a = nn.Linear(10, 10, bias=False)
+                    self.b = nn.Linear(10, 1, bias=False)
+                    self.register_buffer('buffer', torch.randn(1, 2))
+
+                def forward(self, x):
+                    return self.b(self.a(x))
+
+            model = NetWithBuffers().cuda(rank)
+            model_ddp = torch.nn.parallel.DistributedDataParallel(
+                model,
+                device_ids=[self.rank],
+            )
+            inp = torch.randn(2, 10, device=rank)
+            for i in range(2):
+                if rank == 0:
+                    model_ddp.module.buffer = model_ddp.module.buffer + 1
+                loss = model_ddp(inp).sum()
+                loss.backward()
+                # Ensure all buffers are synchronized.
+                bufs = [torch.empty_like(model_ddp.module.buffer) for _ in range(dist.get_world_size())]
+                dist.all_gather(bufs, model_ddp.module.buffer)
+                rank_0_buf = bufs[0]
+                for buf in bufs[1:]:
+                    self.assertEqual(rank_0_buf, buf)

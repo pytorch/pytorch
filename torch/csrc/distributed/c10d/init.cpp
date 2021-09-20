@@ -1564,7 +1564,7 @@ Example::
       py::call_guard<py::gil_scoped_release>());
 
   module.def(
-      "_verify_model_across_ranks",
+      "_verify_params_across_processes",
       [](const c10::intrusive_ptr<::c10d::ProcessGroup>& process_group,
          const std::vector<at::Tensor>& params,
          const c10::optional<std::shared_ptr<::c10d::Logger>>& logger) {
@@ -1575,14 +1575,6 @@ Example::
                 verify_params_across_processes(process_group, params, {});
              }
       },
-      py::arg("process_group"),
-      py::arg("replicas"),
-      py::arg("logger") = c10::optional<std::shared_ptr<::c10d::Logger>>{},
-      py::call_guard<py::gil_scoped_release>());
-
-  module.def(
-      "_verify_params_across_processes",
-      &::c10d::verify_params_across_processes,
       py::arg("process_group"),
       py::arg("params"),
       py::arg("logger") = c10::optional<std::shared_ptr<::c10d::Logger>>{},
