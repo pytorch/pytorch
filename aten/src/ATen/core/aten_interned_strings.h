@@ -470,6 +470,7 @@ _(aten, max_unpool3d_backward) \
 _(aten, max_unpool3d_forward) \
 _(aten, max_values) \
 _(aten, mean) \
+_(aten, nanmean) \
 _(aten, median) \
 _(aten, nanmedian) \
 _(aten, meshgrid) \
