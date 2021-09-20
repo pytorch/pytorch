@@ -11,7 +11,7 @@
 namespace torch { namespace autograd {
 
 /**
- * Records TensorOptions, shape of the tensor, whether or not the Python dispatch key is set (tensor subclass), 
+ * Records TensorOptions, shape of the tensor, whether or not the Python dispatch key is set (tensor subclass),
  * and, where applicable, the stream the corresponding operation took place on.
  *
  * If is_valid() is false, then the corresponding input is not used and may be
