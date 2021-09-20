@@ -199,6 +199,10 @@ def is_schema_outplace(schema):
     for ret in returns:
         if ret == "std::vector<Tensor>":
             return False
+        if ret == "const Tensor &":
+            return False
+        if ret == "Tensor &":
+            return False
     return True
 
 def get_hash(schema):
