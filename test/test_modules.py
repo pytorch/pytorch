@@ -13,7 +13,10 @@ from unittest.mock import patch
 
 
 def set_single_thread_parallel_tbb(fn):
-    """Set test to single thread for parallel tbb. Useful for tests that requires gradients."""
+    """Set test to be single threaded for parallel tbb.
+
+    See https://github.com/pytorch/pytorch/issues/64571#issuecomment-914691883
+    """
     @wraps(fn)
     def wrap_fn(self, *args, **kwargs):
         if not IS_TBB:
