@@ -534,7 +534,7 @@ class AttributePropagator {
 
   bool moduleEscapes(Module& subModule, std::shared_ptr<Graph>& graph) {
     for (auto& output : graph->outputs()) {
-      if (subModule.type()->isSubtypeOf(output->type())) {
+      if (subModule.type()->isSubtypeOf(*output->type())) {
         return true;
       }
     }

@@ -21,7 +21,7 @@ c10::AliasAnalysisKind aliasAnalysisFromSchema() {
 // statically defined (neither a None constant nor a Optional[Tensor] type)
 // return yes, no, or no value if we can't tell
 c10::optional<bool> isDefined(Value* tensor) {
-  if (tensor->type()->isSubtypeOf(TensorType::get())) {
+  if (tensor->type()->isSubtypeOf(*TensorType::get())) {
     return true;
   }
   if (tensor->node()->mustBeNone()) {
@@ -36,7 +36,7 @@ bool isDecomposableNorm(Node* normalize_op) {
       "aten::layer_norm(Tensor input, int[] normalized_shape, Tensor? weight, Tensor? bias, float eps, bool cudnn_enable) -> Tensor",
   };
   Value* input = normalize_op->namedInput(attr::input);
-  if (!input->type()->isSubtypeOf(TensorType::get())) {
+  if (!input->type()->isSubtypeOf(*TensorType::get())) {
     return false;
   }
   auto device = input->type()->expectRef<TensorType>().device();

@@ -74,7 +74,7 @@ struct PeepholeOptimizeImpl {
           for (Use u : uses) {
             if (u.user->matches(
                     "aten::_grad_sum_to_size(Tensor(a) self, int[]? size) -> Tensor(a)") &&
-                u.user->input(1)->type()->isSubtypeOf(ListType::ofInts())) {
+                u.user->input(1)->type()->isSubtypeOf(*ListType::ofInts())) {
               GRAPH_UPDATE(
                   getHeader(node),
                   " (x._grad_sum_to_size(y)._grad_sum_to_size(z) == x._grad_sum_to_size(z)) is replaced with ",

@@ -33,7 +33,7 @@ TEST(JitTypeTest, UnifyTypes) {
   auto unified = unifyTypes(opt_bool_tensor, tensor);
   TORCH_INTERNAL_ASSERT(unified);
   auto elem = (*unified)->expectRef<OptionalType>().getElementType();
-  TORCH_INTERNAL_ASSERT(elem->isSubtypeOf(TensorType::get()));
+  TORCH_INTERNAL_ASSERT(elem->isSubtypeOf(*TensorType::get()));
 
   auto opt_tuple_none_int = OptionalType::create(
       TupleType::create({NoneType::get(), IntType::get()}));

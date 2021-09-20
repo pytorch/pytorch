@@ -389,7 +389,7 @@ void unpackQuantizedWeightsHelper(
 
     auto input_val = match_vmap.at(vmap.at("r"))->node()->inputs()[0];
     TORCH_INTERNAL_ASSERT(
-        input_val->type()->isSubtypeOf(TensorType::get()),
+        input_val->type()->isSubtypeOf(*TensorType::get()),
         "Unsupported input type. Expected TensorType, got ",
         input_val->type()->str());
 

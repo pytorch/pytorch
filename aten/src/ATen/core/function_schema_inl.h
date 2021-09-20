@@ -74,7 +74,7 @@ inline bool Argument::isBackwardCompatibleWith(
     if (lhs->kwarg_only() && !rhs->kwarg_only()) {
       return false;
     }
-    if (!rhs->type()->isSubtypeOfExt(lhs->type(), why_not)) {
+    if (!rhs->type()->isSubtypeOfExt(*lhs->type(), why_not)) {
       return false;
     }
     if (rhs->default_value().has_value() &&
@@ -177,7 +177,7 @@ inline void FunctionSchema::checkArg(
     // Fast-path for the common case
     return;
   }
-  if (!value.type()->isSubtypeOf(argument.type())) {
+  if (!value.type()->isSubtypeOf(*argument.type())) {
     TORCH_CHECK(
         false,
         formatTypeMismatchMsg(
@@ -302,7 +302,7 @@ inline bool isSubtypeOfList(
     if (c.name() != p.name()) {
       return false;
     }
-    if (!c.type()->isSubtypeOfExt(p.type(), why_not)) {
+    if (!c.type()->isSubtypeOfExt(*p.type(), why_not)) {
       return false;
     }
   }

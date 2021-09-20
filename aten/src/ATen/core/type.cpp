@@ -133,74 +133,74 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
   return out;
 }
 
-AnyTypePtr AnyType::get() {
+const AnyTypePtr& AnyType::get() {
   static AnyTypePtr value(new AnyType());
   return value;
 }
 
-TensorTypePtr TensorType::get() {
+const TensorTypePtr& TensorType::get() {
   static auto value = TensorType::create(
       {}, {}, SymbolicShape(), VaryingShape<Stride>{}, {});
   return value;
 }
 
-NumberTypePtr NumberType::get() {
+const NumberTypePtr& NumberType::get() {
   static NumberTypePtr value(new NumberType());
   return value;
 }
-IntTypePtr IntType::get() {
+const IntTypePtr& IntType::get() {
   static IntTypePtr value(new IntType());
   return value;
 }
-FloatTypePtr FloatType::get() {
+const FloatTypePtr& FloatType::get() {
   static FloatTypePtr value(new FloatType());
   return value;
 }
-ComplexTypePtr ComplexType::get() {
+const ComplexTypePtr& ComplexType::get() {
   static ComplexTypePtr value(new ComplexType());
   return value;
 }
-BoolTypePtr BoolType::get() {
+const BoolTypePtr& BoolType::get() {
   static BoolTypePtr value(new BoolType());
   return value;
 }
-StorageTypePtr StorageType::get() {
+const StorageTypePtr& StorageType::get() {
   static StorageTypePtr value(new StorageType());
   return value;
 }
-NoneTypePtr NoneType::get() {
+const NoneTypePtr& NoneType::get() {
   static NoneTypePtr value(new NoneType());
   return value;
 }
-GeneratorTypePtr GeneratorType::get() {
+const GeneratorTypePtr& GeneratorType::get() {
   static GeneratorTypePtr value(new GeneratorType());
   return value;
 }
-QuantizerTypePtr QuantizerType::get() {
+const QuantizerTypePtr& QuantizerType::get() {
   static QuantizerTypePtr value(new QuantizerType());
   return value;
 }
-QSchemeTypePtr QSchemeType::get() {
+const QSchemeTypePtr& QSchemeType::get() {
   static QSchemeTypePtr value(new QSchemeType());
   return value;
 }
-StringTypePtr StringType::get() {
+const StringTypePtr& StringType::get() {
   static StringTypePtr value(new StringType());
   return value;
 }
-DeviceObjTypePtr DeviceObjType::get() {
+const DeviceObjTypePtr& DeviceObjType::get() {
   static DeviceObjTypePtr value(new DeviceObjType());
   return value;
 }
-StreamObjTypePtr StreamObjType::get() {
+const StreamObjTypePtr& StreamObjType::get() {
   static StreamObjTypePtr value(new StreamObjType());
   return value;
 }
-ScalarTypeTypePtr ScalarTypeType::get() {
+const ScalarTypeTypePtr& ScalarTypeType::get() {
 static ScalarTypeTypePtr value(new ScalarTypeType());
 return value;
 }
-LayoutTypePtr LayoutType::get() {
+const LayoutTypePtr& LayoutType::get() {
 static LayoutTypePtr value(new LayoutType());
 return value;
 }
@@ -208,11 +208,11 @@ OptionalTypePtr OptionalType::ofTensor() {
   static auto value = OptionalType::create(TensorType::get());
   return value;
 }
-PyObjectTypePtr PyObjectType::get() {
+const PyObjectTypePtr& PyObjectType::get() {
   static PyObjectTypePtr value(new PyObjectType());
   return value;
 }
-CapsuleTypePtr CapsuleType::get() {
+const CapsuleTypePtr& CapsuleType::get() {
   static CapsuleTypePtr value(new CapsuleType());
   return value;
 }
@@ -245,31 +245,31 @@ ListTypePtr ListType::ofStrings() {
   return value;
 }
 
-AnyListTypePtr AnyListType::get() {
+const AnyListTypePtr& AnyListType::get() {
   static AnyListTypePtr value(new AnyListType());
   return value;
 }
 
-AnyTupleTypePtr AnyTupleType::get() {
+const AnyTupleTypePtr& AnyTupleType::get() {
   static AnyTupleTypePtr value(new AnyTupleType());
   return value;
 }
 
-AnyClassTypePtr AnyClassType::get() {
+const AnyClassTypePtr& AnyClassType::get() {
   static AnyClassTypePtr value(new AnyClassType());
   return value;
 }
 
-AnyEnumTypePtr AnyEnumType::get() {
+const AnyEnumTypePtr& AnyEnumType::get() {
   static AnyEnumTypePtr value(new AnyEnumType());
   return value;
 }
 
 c10::optional<TypePtr> unifyTypesImpl(const TypePtr& t1, const TypePtr& t2, bool default_to_union=false, TypePtr type_hint=nullptr) {
   // check direct subtyping relation
-  if (t1->isSubtypeOf(t2)) {
+  if (t1->isSubtypeOf(*t2)) {
     return t2;
-  } else if (t2->isSubtypeOf(t1)) {
+  } else if (t2->isSubtypeOf(*t1)) {
     return t1;
   }
 
@@ -278,9 +278,9 @@ c10::optional<TypePtr> unifyTypesImpl(const TypePtr& t1, const TypePtr& t2, bool
     return t1->expectRef<TensorType>().merge(*t2->expect<TensorType>());
   }
 
-  if (t1->isSubtypeOf(NoneType::get()) && !t2->isSubtypeOf(NoneType::get())) {
+  if (t1->isSubtypeOf(*NoneType::get()) && !t2->isSubtypeOf(*NoneType::get())) {
     return OptionalType::create(t2);
-  } else if (t2->isSubtypeOf(NoneType::get()) && !t1->isSubtypeOf(NoneType::get())) {
+  } else if (t2->isSubtypeOf(*NoneType::get()) && !t1->isSubtypeOf(*NoneType::get())) {
     return OptionalType::create(t1);
   }
 
@@ -331,16 +331,16 @@ c10::optional<TypePtr> unifyTypesImpl(const TypePtr& t1, const TypePtr& t2, bool
   auto t1_unshaped = unshapedType(t1);
   auto t2_unshaped = unshapedType(t2);
 
-  if (t1_unshaped->isSubtypeOf(t2_unshaped)) {
+  if (t1_unshaped->isSubtypeOf(*t2_unshaped)) {
     return t2_unshaped;
-  } else if (t2_unshaped->isSubtypeOf(t1_unshaped)) {
+  } else if (t2_unshaped->isSubtypeOf(*t1_unshaped)) {
     return t1_unshaped;
   }
 
   // Check whether or not `type_hint` is a common parent. This case
   // could occur if we had two class types that had been annotated with
   // a common interface
-  if (type_hint && t1->isSubtypeOf(type_hint) && t2->isSubtypeOf(type_hint)) {
+  if (type_hint && t1->isSubtypeOf(*type_hint) && t2->isSubtypeOf(*type_hint)) {
     return type_hint;
   }
 
@@ -485,7 +485,7 @@ MatchTypeReturn matchTypeVariables(
         // NOLINTNEXTLINE(performance-no-automatic-move)
         return optionedMatch;
       }
-    } else if (!actual->isSubtypeOf(NoneType::get())) {
+    } else if (!actual->isSubtypeOf(*NoneType::get())) {
       // If the actual type is a non-optional, allow matching to the formal if
       // its element type matches the actual.
       // Don't match None because it is already an optional (but one of
@@ -574,19 +574,19 @@ const char * typeKindToString(TypeKind kind) {
   return "";
 }
 
-bool Type::isSubtypeOfExt(const TypePtr& rhs, std::ostream* why_not) const {
-  if (rhs->kind() == TypeKind::AnyType || *this == *rhs) {
+bool Type::isSubtypeOfExt(const Type& rhs, std::ostream* why_not) const {
+  if (rhs.kind() == TypeKind::AnyType || *this == rhs) {
     return true;
   }
-  if (auto opt_rhs = rhs->cast<OptionalType>()) {
-    return this->isSubtypeOfExt(opt_rhs->getElementType(), why_not);
+  if (auto opt_rhs = rhs.castRaw<OptionalType>()) {
+    return this->isSubtypeOfExt(*opt_rhs->getElementType(), why_not);
   }
-  if (auto union_rhs = rhs->cast<UnionType>()) {
+  if (auto union_rhs = rhs.castRaw<UnionType>()) {
     // Check if `this` is a subtype of any of the types within the Union
     return std::any_of(union_rhs->containedTypes().begin(),
                        union_rhs->containedTypes().end(),
-                       [&](TypePtr inner) {
-                         return this->isSubtypeOfExt(inner, why_not);
+                       [&](const TypePtr& inner) {
+                         return this->isSubtypeOfExt(*inner, why_not);
                        });
   }
   return false;
@@ -817,8 +817,8 @@ TupleTypePtr TupleType::createNamed(const c10::optional<c10::QualifiedName>& qua
       field_types, qualName, schema)); // NOLINT(modernize-make-shared)
 }
 
-bool NoneType::isSubtypeOfExt(const TypePtr& rhs, std::ostream *why_not) const {
-  if (rhs->kind() == OptionalType::Kind) {
+bool NoneType::isSubtypeOfExt(const Type& rhs, std::ostream *why_not) const {
+  if (rhs.kind() == OptionalType::Kind) {
     return true;
   }
   return Type::isSubtypeOfExt(rhs, why_not);
@@ -862,8 +862,8 @@ void filterDuplicateSubtypes(std::vector<TypePtr>* types) {
   auto get_supertype = [](const TypePtr t1, const TypePtr t2) -> c10::optional<TypePtr> {
     // We don't want nested Optionals. Also, prematurely unifying to
     // `Optional` could prevent us from coalescing other types
-    if ((t1->isSubtypeOf(NoneType::get()) && !t2->isSubtypeOf(NoneType::get()))
-        || (!t1->isSubtypeOf(NoneType::get()) && t2->isSubtypeOf(NoneType::get()))) {
+    if ((t1->isSubtypeOf(*NoneType::get()) && !t2->isSubtypeOf(*NoneType::get()))
+        || (!t1->isSubtypeOf(*NoneType::get()) && t2->isSubtypeOf(*NoneType::get()))) {
           return c10::nullopt;
     } else {
       return unifyTypes(t1, t2, /*default_to_union=*/false);
@@ -1044,34 +1044,36 @@ bool UnionType::operator==(const Type& rhs) const {
   }
 }
 
-bool UnionType::isSubtypeOfExt(const TypePtr& rhs, std::ostream* why_not) const {
-  std::vector<TypePtr> rhs_types;
-  if (const auto union_rhs = rhs->cast<UnionType>()) {
+bool UnionType::isSubtypeOfExt(const Type& rhs, std::ostream* why_not) const {
+  std::vector<const Type*> rhs_types;
+  if (const auto union_rhs = rhs.cast<UnionType>()) {
     // Fast path
-    if (this->containedTypes() == rhs->containedTypes()) {
+    if (this->containedTypes() == rhs.containedTypes()) {
       return true;
     }
-    rhs_types = rhs->containedTypes().vec();
-  } else if (const auto optional_rhs = rhs->cast<OptionalType>()) {
-    rhs_types.push_back(NoneType::get());
+    for (const auto& typePtr: rhs.containedTypes()) {
+      rhs_types.push_back(typePtr.get());
+    }
+  } else if (const auto optional_rhs = rhs.cast<OptionalType>()) {
+    rhs_types.push_back(NoneType::get().get());
     if (optional_rhs->getElementType() == NumberType::get()) {
-      std::vector<TypePtr> number_types{IntType::get(), FloatType::get(), ComplexType::get()};
+      std::array<const Type*, 3> number_types{IntType::get().get(), FloatType::get().get(), ComplexType::get().get()};
       rhs_types.insert(rhs_types.end(), number_types.begin(), number_types.end());
     } else {
-      rhs_types.push_back(optional_rhs->getElementType());
+      rhs_types.push_back(optional_rhs->getElementType().get());
     }
-  } else if (const auto number_rhs = rhs->cast<NumberType>()) {
-    std::vector<TypePtr> number_types{IntType::get(), FloatType::get(), ComplexType::get()};
+  } else if (const auto number_rhs = rhs.cast<NumberType>()) {
+    std::array<const Type*, 3> number_types{IntType::get().get(), FloatType::get().get(), ComplexType::get().get()};
     rhs_types.insert(rhs_types.end(), number_types.begin(), number_types.end());
   } else {
-    rhs_types.push_back(rhs);
+    rhs_types.push_back(&rhs);
   }
   return std::all_of(this->containedTypes().begin(), this->containedTypes().end(),
-                     [&](TypePtr lhs_type) -> bool {
+                     [&](const TypePtr& lhs_type) -> bool {
                       return std::any_of(rhs_types.begin(),
                                          rhs_types.end(),
-                                         [&](TypePtr rhs_type) -> bool {
-                                           return lhs_type->isSubtypeOfExt(rhs_type, why_not);
+                                         [&](const Type* rhs_type) -> bool {
+                                           return lhs_type->isSubtypeOfExt(*rhs_type, why_not);
                                          });
   });
 }
@@ -1137,8 +1139,8 @@ bool UnionType::canHoldType(TypePtr type) const {
            && canHoldType(ComplexType::get());
   } else {
     return std::any_of(this->containedTypes().begin(), this->containedTypes().end(),
-                    [&](TypePtr inner) {
-                      return type->isSubtypeOf(inner);
+                    [&](const TypePtr& inner) {
+                      return type->isSubtypeOf(*inner);
                     });
   }
 }
@@ -1164,10 +1166,10 @@ c10::optional<TypePtr> UnionType::subtractTypeSet(std::vector<TypePtr>& to_subtr
 
   // Given a TypePtr `lhs`, this function says whether or not `lhs` (or
   // one of its parent types) is in the `to_subtract` vector
-  auto should_subtract = [&](TypePtr lhs) -> bool {
+  auto should_subtract = [&](const TypePtr& lhs) -> bool {
     return std::any_of(to_subtract.begin(), to_subtract.end(),
-                        [&](TypePtr rhs) {
-                          return lhs->isSubtypeOf(rhs);
+                        [&](const TypePtr& rhs) {
+                          return lhs->isSubtypeOf(*rhs);
                         });
   };
 
@@ -1175,7 +1177,7 @@ c10::optional<TypePtr> UnionType::subtractTypeSet(std::vector<TypePtr>& to_subtr
   // vector
   std::copy_if(this->containedTypes().begin(), this->containedTypes().end(),
               std::back_inserter(types),
-              [&](const TypePtr t) {
+              [&](const TypePtr& t) {
                 return !should_subtract(t);
               });
 
@@ -1225,18 +1227,18 @@ bool OptionalType::operator==(const Type& rhs) const {
   }
 }
 
-bool OptionalType::isSubtypeOfExt(const TypePtr& rhs, std::ostream* why_not) const {
-  if (OptionalTypePtr optional_rhs = rhs->cast<OptionalType>()) {
-    return getElementType()->isSubtypeOfExt(optional_rhs->getElementType(), why_not);
-  } else if (UnionTypePtr union_rhs = rhs->cast<UnionType>()) {
+bool OptionalType::isSubtypeOfExt(const Type& rhs, std::ostream* why_not) const {
+  if (auto optional_rhs = rhs.castRaw<OptionalType>()) {
+    return getElementType()->isSubtypeOfExt(*optional_rhs->getElementType(), why_not);
+  } else if (auto union_rhs = rhs.castRaw<UnionType>()) {
     if (!union_rhs->canHoldType(NoneType::get())) {
       if (why_not) {
-        *why_not << rhs->repr_str() << " cannot hold None";
+        *why_not << rhs.repr_str() << " cannot hold None";
       }
       return false;
     } else if (!union_rhs->canHoldType(this->getElementType())) {
       if (why_not) {
-        *why_not << rhs->repr_str() << " cannot hold " << this->getElementType();
+        *why_not << rhs.repr_str() << " cannot hold " << this->getElementType();
       }
       return false;
     } else {
@@ -1256,8 +1258,8 @@ bool NumberType::operator==(const Type& rhs) const {
   }
 }
 
-bool NumberType::isSubtypeOfExt(const TypePtr& rhs, std::ostream* why_not) const {
-  if (auto union_type = rhs->cast<UnionType>()) {
+bool NumberType::isSubtypeOfExt(const Type& rhs, std::ostream* why_not) const {
+  if (auto union_type = rhs.cast<UnionType>()) {
     return union_type->canHoldType(NumberType::get());
   } else {
     return Type::isSubtypeOfExt(rhs, why_not);
@@ -1285,14 +1287,14 @@ TupleType::TupleType(
   }
 }
 
-bool TupleType::isSubtypeOfExt(const TypePtr& rhs_, std::ostream* why_not) const {
+bool TupleType::isSubtypeOfExt(const Type& rhs_, std::ostream* why_not) const {
   if (Type::isSubtypeOfExt(rhs_, why_not)) {
     return true;
   }
-  if (rhs_->kind() == AnyTupleType::Kind) {
+  if (rhs_.kind() == AnyTupleType::Kind) {
     return true;
   }
-  auto rhs = rhs_->cast<TupleType>();
+  auto rhs = rhs_.cast<TupleType>();
   if (!rhs)
     return false;
   // unnamed tuple is not a subtype of nametuple
@@ -1316,15 +1318,15 @@ bool TupleType::isSubtypeOfExt(const TypePtr& rhs_, std::ostream* why_not) const
   bool names_match = !rhs->schema() || test_names_match(schema(), rhs->schema());
   // co-variant rules for tuples
   return names_match && compare(*rhs, [&](const TypePtr a, const TypePtr b) {
-    return a->isSubtypeOfExt(b, why_not);
+    return a->isSubtypeOfExt(*b, why_not);
   });
 }
 
-bool ListType::isSubtypeOfExt(const TypePtr& rhs_, std::ostream* why_not) const {
+bool ListType::isSubtypeOfExt(const Type& rhs_, std::ostream* why_not) const {
   if (Type::isSubtypeOfExt(rhs_, why_not)) {
     return true;
   }
-  if (rhs_->kind() == AnyListType::Kind) {
+  if (rhs_.kind() == AnyListType::Kind) {
     return true;
   }
   return false;
@@ -1556,8 +1558,8 @@ const SymbolicShape& TensorType::symbolic_sizes() const {
   return sizes_;
 }
 
-bool TensorType::isSubtypeOfExt(const TypePtr& rhs, std::ostream* why_not) const {
-  if (auto rhs_p = rhs->cast<TensorType>()) {
+bool TensorType::isSubtypeOfExt(const Type& rhs, std::ostream* why_not) const {
+  if (auto rhs_p = rhs.cast<TensorType>()) {
     // if we have the same pointer, avoid computing the merge
     if (this == rhs_p.get()) {
       return true;
@@ -1968,7 +1970,7 @@ ClassTypePtr ClassType::refine(at::ArrayRef<TypePtr> refined_slots) const {
   auto ptr = ClassType::create(name(), compilation_unit_, is_module());
   AT_ASSERT(numAttributes() == refined_slots.size());
   for (size_t i = 0; i < attributes_.size(); ++i) {
-    AT_ASSERT(refined_slots[i]->isSubtypeOf(attributes_[i].getType()));
+    AT_ASSERT(refined_slots[i]->isSubtypeOf(*attributes_[i].getType()));
     ptr->addAttribute(attributes_[i].getName(), refined_slots[i], (attributes_[i].getKind() == AttributeKind::PARAMETER),
     (attributes_[i].getKind() == AttributeKind::BUFFER));
   }
@@ -1979,18 +1981,18 @@ ClassTypePtr ClassType::refine(at::ArrayRef<TypePtr> refined_slots) const {
   return ptr;
 }
 
-bool ClassType::isSubtypeOfExt(const TypePtr& rhs, std::ostream* why_not) const {
-  if (rhs->cast<AnyClassType>()) {
+bool ClassType::isSubtypeOfExt(const Type& rhs, std::ostream* why_not) const {
+  if (rhs.castRaw<AnyClassType>()) {
     return true;
   }
   // to improve performance, this check can be cached
-  if (auto iface = rhs->cast<InterfaceType>()) {
+  if (auto iface = rhs.cast<InterfaceType>()) {
     // ClassType is not a subtype of InterfaceType if the InterfaceType is a
     // Module Interface Type but the Class Type is not a Module Class Type
     if (!is_module() && iface->is_module()) {
       if (why_not) {
         *why_not << "Class '" << repr_str() << "' is not a subtype of "
-                 << "the module interface '" << rhs->repr_str()
+                 << "the module interface '" << rhs.repr_str()
                  << "' , only ScriptModule class can be subtype of module"
                  << " interface.\n";
       }
@@ -2001,7 +2003,7 @@ bool ClassType::isSubtypeOfExt(const TypePtr& rhs, std::ostream* why_not) const 
       if (!self_method) {
         if (why_not) {
           *why_not << "Class '" << repr_str() << "' does not have method '"
-                   << schema.name() << "' but '" << rhs->repr_str()
+                   << schema.name() << "' but '" << rhs.repr_str()
                    << "' does.\n";
         }
         return false;
@@ -2012,7 +2014,7 @@ bool ClassType::isSubtypeOfExt(const TypePtr& rhs, std::ostream* why_not) const 
         if (why_not) {
           *why_not << "Method on class '" << repr_str()
                    << "' (1) is not compatible with interface '"
-                   << rhs->repr_str() << "' (2)\n"
+                   << rhs.repr_str() << "' (2)\n"
                    << "  (1) " << self_method->getSchema() << "\n"
                    << "  (2) " << schema << "\n";
         }
@@ -2065,9 +2067,9 @@ bool InterfaceType::isSubTypeImpl(
     return true;
 }
 
-bool InterfaceType::isSubtypeOfExt(const TypePtr& rhs, std::ostream* why_not) const {
+bool InterfaceType::isSubtypeOfExt(const Type& rhs, std::ostream* why_not) const {
   // to improve performance this check can be cached
-  if (auto iface = rhs->cast<InterfaceType>()) {
+  if (auto iface = rhs.cast<InterfaceType>()) {
     return isSubTypeImpl(*this, *iface, why_not);
   }
   return Type::isSubtypeOfExt(rhs, why_not);
@@ -2191,7 +2193,7 @@ size_t ClassType::addAttribute(
             type->expect<OptionalType>()->getElementType()->kind() ==
                 TensorType::Kind) ||
             (type->kind() == UnionType::Kind &&
-            TensorType::get()->isSubtypeOf(type->expect<UnionType>())) ||
+            TensorType::get()->isSubtypeOf(type->expectRef<UnionType>())) ||
             (type->kind() == NoneType::Kind),
         "Expecting parameter or buffer to have either None, Tensor or Optional[Tensor] type, but got: ",
         toString(type));
@@ -2336,10 +2338,10 @@ void SymbolicShape::dump() const {
   std::cout << *this << "\n";
 }
 
-bool EnumType::isSubtypeOfExt(const TypePtr& rhs, std::ostream* why_not) const {
-  return rhs->kind() == TypeKind::AnyType ||
-      rhs->kind() == TypeKind::AnyEnumType ||
-      *this == *rhs ||
+bool EnumType::isSubtypeOfExt(const Type& rhs, std::ostream* why_not) const {
+  return rhs.kind() == TypeKind::AnyType ||
+      rhs.kind() == TypeKind::AnyEnumType ||
+      *this == rhs ||
       Type::isSubtypeOfExt(rhs, why_not);
 }
 

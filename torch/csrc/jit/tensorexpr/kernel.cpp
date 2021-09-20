@@ -677,11 +677,11 @@ std::vector<ExprHandle> TensorExprKernel::sizesForValue(
     }
   }
 
-  if (v->type()->isSubtypeOf(FloatType::get()) ||
-      v->type()->isSubtypeOf(IntType::get())) {
+  if (v->type()->isSubtypeOf(*FloatType::get()) ||
+      v->type()->isSubtypeOf(*IntType::get())) {
     return {int64_t{1}};
   }
-  if (v->type()->isSubtypeOf(NoneType::get())) {
+  if (v->type()->isSubtypeOf(*NoneType::get())) {
     return {};
   }
 

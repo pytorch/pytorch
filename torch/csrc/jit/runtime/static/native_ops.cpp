@@ -417,7 +417,7 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
         auto* node = p_node->node();
         std::vector<TypePtr> candidates = node->tys(attr::types);
         for (const auto& candidate_type : candidates) {
-          if (input_type->isSubtypeOf(candidate_type)) {
+          if (input_type->isSubtypeOf(*candidate_type)) {
             p_node->Output(0) = true;
             return;
           }

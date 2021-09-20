@@ -1117,7 +1117,7 @@ struct PythonPrintImpl {
         // we cannot recover the type of unwrap_optional(None),
         // using normal schema matching, so we route around this by rewriting
         // the call to unwrap_optional(annotated(Optional[T], None))
-        if (node->input()->type()->isSubtypeOf(NoneType::get()) ||
+        if (node->input()->type()->isSubtypeOf(*NoneType::get()) ||
             node->input()->mustBeNone()) {
           auto input_type = OptionalType::create(node->output()->type());
           stmt << "annotate(" << input_type->annotation_str(type_printer_)

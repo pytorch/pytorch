@@ -145,20 +145,20 @@ c10::optional<IValue> toIValue(const Value* v) {
   }
   const Node* node = v->node();
   const TypePtr& type = v->type();
-  if (type->isSubtypeOf(TensorType::get())) {
+  if (type->isSubtypeOf(*TensorType::get())) {
     return node->t(attr::value);
-  } else if (type->isSubtypeOf(BoolType::get())) {
+  } else if (type->isSubtypeOf(*BoolType::get())) {
     return (bool)node->i(attr::value);
   } else if (
-      type->isSubtypeOf(NumberType::get()) &&
+      type->isSubtypeOf(*NumberType::get()) &&
       node->kindOf(attr::value) == AttributeKind::i) {
     return node->i(attr::value);
   } else if (
-      type->isSubtypeOf(NumberType::get()) &&
+      type->isSubtypeOf(*NumberType::get()) &&
       node->kindOf(attr::value) == AttributeKind::f) {
     return node->f(attr::value);
   } else if (
-      type->isSubtypeOf(NumberType::get()) &&
+      type->isSubtypeOf(*NumberType::get()) &&
       node->kindOf(attr::value) == AttributeKind::c) {
     return node->c(attr::value);
   } else if (

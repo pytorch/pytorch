@@ -87,9 +87,9 @@ struct TORCH_API Type : std::enable_shared_from_this<Type> {
   // This additional information should only contain details that are not obvious
   // from the annotation_str() that describes the type. For instance it is clear that `int <: str` is false
   // but not clear why `Foo <: InterfaceBar` might be false.
-  virtual bool isSubtypeOfExt(const TypePtr& rhs, std::ostream* why_not) const;
+  virtual bool isSubtypeOfExt(const Type& rhs, std::ostream* why_not) const;
   virtual bool is_module() const;
-  bool isSubtypeOf(const TypePtr& rhs) const {
+  bool isSubtypeOf(const Type& rhs) const {
     return isSubtypeOfExt(rhs, nullptr);
   }
 

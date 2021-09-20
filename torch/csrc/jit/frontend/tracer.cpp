@@ -285,15 +285,15 @@ Value* TracingState::getOutput(const IValue& iv, size_t i) {
     TypePtr key_type = dict.keyType();
     TypePtr value_type = dict.valueType();
 
-    bool key_type_valid = key_type->isSubtypeOf(StringType::get()) ||
-        key_type->isSubtypeOf(TensorType::get());
-    bool value_type_valid = value_type->isSubtypeOf(TensorType::get());
+    bool key_type_valid = key_type->isSubtypeOf(*StringType::get()) ||
+        key_type->isSubtypeOf(*TensorType::get());
+    bool value_type_valid = value_type->isSubtypeOf(*TensorType::get());
 
     // Support tuple values that contain only tensors
-    if (value_type->isSubtypeOf(AnyTupleType::get())) {
+    if (value_type->isSubtypeOf(*AnyTupleType::get())) {
       value_type_valid = true;
       for (const auto& type : value_type->containedTypes()) {
-        if (!type->isSubtypeOf(TensorType::get())) {
+        if (!type->isSubtypeOf(*TensorType::get())) {
           value_type_valid = false;
           break;
         }
@@ -330,7 +330,7 @@ static IValue addInput(
     const TypePtr& type,
     Value* value) {
   value->setType(type);
-  if (type->isSubtypeOf(TensorType::get())) {
+  if (type->isSubtypeOf(*TensorType::get())) {
     auto input_tensor = input.toTensor();
     auto name = Variable(input_tensor).name();
     if (state->hasValue(input)) {
@@ -425,7 +425,7 @@ static void gatherParametersAndBuffers(
                                 ->s_(attr::scope, qualname)
                                 ->output()
                                 ->setType(s.value.type());
-    if (s.value.type()->isSubtypeOf(TensorType::get())) {
+    if (s.value.type()->isSubtypeOf(*TensorType::get())) {
       addInput(state, s.value, s.value.type(), trace_get_attr);
     }
     if (isCustomClass(s.value)) {

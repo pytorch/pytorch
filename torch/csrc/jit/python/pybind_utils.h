@@ -510,7 +510,7 @@ inline InferredType tryToInferContainerType(py::handle input) {
 }
 
 inline bool isTraceableType(const TypePtr& type) {
-  if (type->isSubtypeOf(TensorType::get())) {
+  if (type->isSubtypeOf(*TensorType::get())) {
     return true;
   }
 

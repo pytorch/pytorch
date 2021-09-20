@@ -17,7 +17,7 @@ namespace {
 //   2. on the same device;
 // TODO: update this when codegen can output scalar
 static c10::optional<c10::Device> getDevice(const Value* value) {
-  if (!value->type()->isSubtypeOf(TensorType::get())) {
+  if (!value->type()->isSubtypeOf(*TensorType::get())) {
     // not tensor type, return false as the op is not outputing scalar.
     return c10::nullopt;
   }
