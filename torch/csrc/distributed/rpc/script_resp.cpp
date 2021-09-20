@@ -17,7 +17,8 @@ using torch::jit::Unpickler;
 
 } // namespace
 
-ScriptResp::ScriptResp(at::IValue&& value, DeviceMap deviceMap) : value_(value), deviceMap_(std::move(deviceMap)) {}
+ScriptResp::ScriptResp(at::IValue&& value, DeviceMap deviceMap)
+    : value_(value), deviceMap_(std::move(deviceMap)) {}
 
 const at::IValue& ScriptResp::value() {
   return value_;
@@ -37,8 +38,10 @@ std::unique_ptr<ScriptResp> ScriptResp::fromMessage(const Message& message) {
   auto values = toIValues(message, MessageType::SCRIPT_RET);
   TORCH_INTERNAL_ASSERT(
       values.size() == 2, "ScriptResp expects 2 IValues from message");
-  auto deviceMap = c10DictToDeviceMap(values[1].to<c10::Dict<std::string, std::string>>());
-  return std::make_unique<ScriptResp>(std::move(values[0]), std::move(deviceMap));
+  auto deviceMap =
+      c10DictToDeviceMap(values[1].to<c10::Dict<std::string, std::string>>());
+  return std::make_unique<ScriptResp>(
+      std::move(values[0]), std::move(deviceMap));
 }
 
 } // namespace rpc

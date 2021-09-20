@@ -22,14 +22,14 @@ namespace rpc {
 
 // TODO(pbelevich)
 namespace {
-  DeviceMap reverse(const DeviceMap& deviceMap) {
-    DeviceMap reversed;
-    for (const auto& entry : deviceMap) {
-      reversed.insert({entry.second, entry.first});
-    }
-    return reversed;
+DeviceMap reverse(const DeviceMap& deviceMap) {
+  DeviceMap reversed;
+  for (const auto& entry : deviceMap) {
+    reversed.insert({entry.second, entry.first});
   }
+  return reversed;
 }
+} // namespace
 
 using namespace torch::distributed::autograd;
 using namespace torch::autograd::profiler;
@@ -157,7 +157,8 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::processScriptCall(
 
   return future->then(
       [reversed_dm = std::move(reversed_dm)](JitFuture& future) {
-        return withStorages(ScriptResp(future.value(), std::move(reversed_dm)).toMessage());
+        return withStorages(
+            ScriptResp(future.value(), std::move(reversed_dm)).toMessage());
       },
       c10::getCustomClassType<c10::intrusive_ptr<Message>>());
 }
@@ -253,7 +254,9 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::
 
   return future->then(
       [reversed_dm = std::move(reversed_dm)](JitFuture& future) {
-        return withStorages(ScriptRRefFetchRet({future.value()}, std::move(reversed_dm)).toMessage());
+        return withStorages(
+            ScriptRRefFetchRet({future.value()}, std::move(reversed_dm))
+                .toMessage());
       },
       c10::getCustomClassType<c10::intrusive_ptr<Message>>());
 }

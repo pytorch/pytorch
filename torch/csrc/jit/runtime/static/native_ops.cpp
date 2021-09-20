@@ -457,5 +457,19 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
       };
     });
 
+REGISTER_NATIVE_OPERATOR_FUNCTOR(
+    static_runtime::VarTupleUnpack,
+    static_runtime_VarTupleUnpack,
+    [](Node*) -> SROperator {
+      return [](ProcessedNode* pnode) {
+        size_t output_idx = 0;
+        for (const auto& tuple : pnode->inputs()) {
+          for (auto& elem : tuple->toTuple()->elements()) {
+            pnode->Output(output_idx) = elem;
+            ++output_idx;
+          }
+        }
+      };
+    });
 } // namespace jit
 } // namespace torch

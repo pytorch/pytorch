@@ -104,20 +104,20 @@ std::unique_ptr<ScriptCall> ScriptCall::fromIValues(
     ivalues.pop_back();
 
     // remove str_schema from ivalues
-    auto c10DeviceMap = ivalues.back().to<c10::Dict<std::string, std::string>>();
+    auto c10DeviceMap =
+        ivalues.back().to<c10::Dict<std::string, std::string>>();
     ivalues.pop_back();
     // Convert to regular map.
     DeviceMap deviceMap = c10DictToDeviceMap(c10DeviceMap);
 
     return std::make_unique<ScriptCall>(
-        op,
-        std::move(ivalues),
-        std::move(deviceMap));
+        op, std::move(ivalues), std::move(deviceMap));
   } else {
     bool isAsyncExecution = ivalues.back().toBool();
     ivalues.pop_back();
 
-    auto c10DeviceMap = ivalues.back().to<c10::Dict<std::string, std::string>>();
+    auto c10DeviceMap =
+        ivalues.back().to<c10::Dict<std::string, std::string>>();
     ivalues.pop_back();
     // Convert to regular map.
     DeviceMap deviceMap = c10DictToDeviceMap(c10DeviceMap);
@@ -139,7 +139,10 @@ c10::intrusive_ptr<Message> ScriptCall::toMessageImpl() && {
       c10::ivalue::Tuple::create(std::move(ivalues)), &tensor_table);
 
   return c10::make_intrusive<Message>(
-      std::move(payload), std::move(tensor_table), MessageType::SCRIPT_CALL, std::move(deviceMap_));
+      std::move(payload),
+      std::move(tensor_table),
+      MessageType::SCRIPT_CALL,
+      std::move(deviceMap_));
 }
 
 std::unique_ptr<ScriptCall> ScriptCall::fromMessage(const Message& message) {

@@ -275,7 +275,9 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
               )")
           .def(
               "rpc_sync",
-              [](const PyRRef& self, DeviceMap& deviceMap, float timeoutSeconds) {
+              [](const PyRRef& self,
+                 DeviceMap& deviceMap,
+                 float timeoutSeconds) {
                 return self.createRRefProxy(
                     RRefProxyType::RPC_SYNC, deviceMap, timeoutSeconds);
               },
@@ -308,7 +310,9 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
               )")
           .def(
               "rpc_async",
-              [](const PyRRef& self, DeviceMap& deviceMap, float timeoutSeconds) {
+              [](const PyRRef& self,
+                 DeviceMap& deviceMap,
+                 float timeoutSeconds) {
                 return self.createRRefProxy(
                     RRefProxyType::RPC_ASYNC, deviceMap, timeoutSeconds);
               },
@@ -341,7 +345,9 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
               )")
           .def(
               "remote",
-              [](const PyRRef& self, DeviceMap& deviceMap, float timeoutSeconds) {
+              [](const PyRRef& self,
+                 DeviceMap& deviceMap,
+                 float timeoutSeconds) {
                 return self.createRRefProxy(
                     RRefProxyType::REMOTE, deviceMap, timeoutSeconds);
               },
@@ -690,12 +696,7 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
          const py::args& args,
          const py::kwargs& kwargs) {
         return std::make_shared<jit::PythonFutureWrapper>(pyRpcBuiltin(
-            dst,
-            opName,
-            args,
-            kwargs,
-            deviceMap,
-            rpcTimeoutSeconds));
+            dst, opName, args, kwargs, deviceMap, rpcTimeoutSeconds));
       },
       py::call_guard<py::gil_scoped_acquire>());
 

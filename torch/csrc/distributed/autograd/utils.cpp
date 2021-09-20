@@ -169,7 +169,8 @@ c10::intrusive_ptr<JitFuture> sendMessageWithAutograd(
         rpc::MessageType::RUN_WITH_PROFILING_REQ,
         // NOLINTNEXTLINE(performance-move-const-arg)
         std::move(profilerConfig));
-    fut = agent.send(dst, std::move(msgWithProfiling), mergedMap, rpcTimeoutSeconds);
+    fut = agent.send(
+        dst, std::move(msgWithProfiling), mergedMap, rpcTimeoutSeconds);
   } else {
     fut = agent.send(dst, std::move(msg), mergedMap, rpcTimeoutSeconds);
   }

@@ -579,7 +579,8 @@ void populateRemoteProfiledEvents(
   }
 }
 
-c10::Dict<std::string, std::string> deviceMapToC10Dict(const DeviceMap& deviceMap) {
+c10::Dict<std::string, std::string> deviceMapToC10Dict(
+    const DeviceMap& deviceMap) {
   c10::Dict<std::string, std::string> c10dict;
   for (const auto& mapEntry : deviceMap) {
     c10dict.insert(mapEntry.first.str(), mapEntry.second.str());
@@ -587,7 +588,8 @@ c10::Dict<std::string, std::string> deviceMapToC10Dict(const DeviceMap& deviceMa
   return c10dict;
 }
 
-DeviceMap c10DictToDeviceMap(const c10::Dict<std::string, std::string>& c10DeviceMap) {
+DeviceMap c10DictToDeviceMap(
+    const c10::Dict<std::string, std::string>& c10DeviceMap) {
   DeviceMap deviceMap;
   for (const auto& mapEntry : c10DeviceMap) {
     deviceMap.insert({mapEntry.key(), mapEntry.value()});
@@ -613,7 +615,9 @@ std::vector<IValue> toIValues(const Message& message, MessageType type) {
   return value.toTuple()->elements();
 }
 
-c10::intrusive_ptr<Message> fromIValues(std::vector<IValue> ivalues, MessageType type) {
+c10::intrusive_ptr<Message> fromIValues(
+    std::vector<IValue> ivalues,
+    MessageType type) {
   std::vector<torch::Tensor> tensor_table;
   auto payload = jit::pickle(
       c10::ivalue::Tuple::create(std::move(ivalues)), &tensor_table);

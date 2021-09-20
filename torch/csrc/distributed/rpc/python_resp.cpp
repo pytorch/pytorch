@@ -9,16 +9,21 @@ namespace distributed {
 namespace rpc {
 
 PythonResp::PythonResp(SerializedPyObj&& serializedPyObj, DeviceMap deviceMap)
-    : serializedPyObj_(std::move(serializedPyObj)), deviceMap_(std::move(deviceMap)) {}
+    : serializedPyObj_(std::move(serializedPyObj)),
+      deviceMap_(std::move(deviceMap)) {}
 
 c10::intrusive_ptr<Message> PythonResp::toMessageImpl() && {
-  auto res = fromIValues(std::move(serializedPyObj_).toIValues(), MessageType::PYTHON_RET);
+  auto res = fromIValues(
+      std::move(serializedPyObj_).toIValues(), MessageType::PYTHON_RET);
   res->setDeviceMap(std::move(deviceMap_));
   return res;
 }
 
 std::unique_ptr<PythonResp> PythonResp::fromMessage(const Message& message) {
-  return std::make_unique<PythonResp>(std::move(SerializedPyObj::fromIValues(toIValues(message, MessageType::PYTHON_RET))), DeviceMap());
+  return std::make_unique<PythonResp>(
+      std::move(SerializedPyObj::fromIValues(
+          toIValues(message, MessageType::PYTHON_RET))),
+      DeviceMap());
 }
 
 const SerializedPyObj& PythonResp::serializedPyObj() const {

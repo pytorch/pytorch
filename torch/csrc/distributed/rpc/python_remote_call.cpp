@@ -56,7 +56,8 @@ std::unique_ptr<PythonRemoteCall> PythonRemoteCall::fromMessage(
       values.size());
 
   auto c10DeviceMap = values.back().to<c10::Dict<std::string, std::string>>();
-  std::unordered_map<c10::Device, c10::Device> deviceMap = c10DictToDeviceMap(c10DeviceMap);
+  std::unordered_map<c10::Device, c10::Device> deviceMap =
+      c10DictToDeviceMap(c10DeviceMap);
   values.pop_back();
 
   bool isAsyncExecution = values.back().toBool();

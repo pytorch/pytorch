@@ -48,7 +48,9 @@ std::unique_ptr<RpcCommandBase> deserializePythonRpcCommandReference(
     case MessageType::PYTHON_CALL: {
       auto& pc = static_cast<PythonCall&>(rpc);
       return std::make_unique<UnpickledPythonCall>(
-          pc.serializedPyObj(), std::move(pc).moveDeviceMap(), pc.isAsyncExecution());
+          pc.serializedPyObj(),
+          std::move(pc).moveDeviceMap(),
+          pc.isAsyncExecution());
     }
     case MessageType::PYTHON_REMOTE_CALL: {
       auto& prc = static_cast<PythonRemoteCall&>(rpc);
@@ -185,7 +187,8 @@ c10::intrusive_ptr<JitFuture> RequestCallbackImpl::processScriptCall(
 
   return future->then(
       [reversed_dm = std::move(reversed_dm)](JitFuture& jitFuture) {
-        return withStorages(ScriptResp(jitFuture.value(), std::move(reversed_dm)).toMessage());
+        return withStorages(
+            ScriptResp(jitFuture.value(), std::move(reversed_dm)).toMessage());
       },
       c10::getCustomClassType<c10::intrusive_ptr<Message>>());
 }
@@ -201,7 +204,9 @@ c10::intrusive_ptr<JitFuture> RequestCallbackImpl::processPythonCall(
   return future->then(
       [reversed_dm = std::move(reversed_dm)](JitFuture& future) {
         return withStorages(
-            PythonResp(serializePyObject(future.value()), std::move(reversed_dm)).toMessage());
+            PythonResp(
+                serializePyObject(future.value()), std::move(reversed_dm))
+                .toMessage());
       },
       c10::getCustomClassType<c10::intrusive_ptr<Message>>());
 }
@@ -251,7 +256,9 @@ c10::intrusive_ptr<JitFuture> RequestCallbackImpl::processPythonRRefFetchCall(
       [reversed_dm = std::move(reversed_dm)](JitFuture& future) {
         SerializedPyObj result = serializePyObject(future.value());
         return withStorages(
-            PythonRRefFetchRet(std::move(result).toIValues(), std::move(reversed_dm)).toMessage());
+            PythonRRefFetchRet(
+                std::move(result).toIValues(), std::move(reversed_dm))
+                .toMessage());
       },
       c10::getCustomClassType<c10::intrusive_ptr<Message>>());
 }

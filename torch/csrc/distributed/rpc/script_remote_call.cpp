@@ -25,7 +25,11 @@ ScriptRemoteCall::ScriptRemoteCall(
     const ForkId& retForkId,
     DeviceMap&& deviceMap,
     const bool isAsyncExecution)
-    : ScriptCall(qualifiedName, std::move(stack), std::move(deviceMap), isAsyncExecution),
+    : ScriptCall(
+          qualifiedName,
+          std::move(stack),
+          std::move(deviceMap),
+          isAsyncExecution),
       retRRefId_(retRRefId),
       retForkId_(retForkId) {}
 

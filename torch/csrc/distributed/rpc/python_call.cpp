@@ -10,7 +10,10 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
-PythonCall::PythonCall(SerializedPyObj&& serializedPyObj, DeviceMap&& deviceMap, bool isAsyncExecution)
+PythonCall::PythonCall(
+    SerializedPyObj&& serializedPyObj,
+    DeviceMap&& deviceMap,
+    bool isAsyncExecution)
     : serializedPyObj_(std::move(serializedPyObj)),
       deviceMap_(std::move(deviceMap)),
       isAsyncExecution_(isAsyncExecution) {}
@@ -31,7 +34,7 @@ c10::intrusive_ptr<Message> PythonCall::toMessageImpl() && {
       std::move(payload),
       std::move(tensor_table),
       MessageType::PYTHON_CALL,
-      std::move(deviceMap_)); 
+      std::move(deviceMap_));
 }
 
 std::unique_ptr<PythonCall> PythonCall::fromMessage(const Message& message) {
@@ -55,7 +58,8 @@ std::unique_ptr<PythonCall> PythonCall::fromMessage(const Message& message) {
 
   auto c10DeviceMap = values.back().to<c10::Dict<std::string, std::string>>();
   // Convert to regular map.
-  std::unordered_map<c10::Device, c10::Device> deviceMap = c10DictToDeviceMap(c10DeviceMap);
+  std::unordered_map<c10::Device, c10::Device> deviceMap =
+      c10DictToDeviceMap(c10DeviceMap);
   values.pop_back();
 
   bool isAsyncExecution = values.back().toBool();

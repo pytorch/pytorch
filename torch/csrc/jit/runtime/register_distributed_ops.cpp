@@ -195,7 +195,8 @@ RegisterOperators reg_rpc_ops(
            if (!deviceMapDictIValue.isNone()) {
              TORCH_INTERNAL_ASSERT(deviceMapDictIValue.isGenericDict());
              for (const auto& pair : deviceMapDictIValue.toGenericDict()) {
-               deviceMap.insert({pair.key().toDevice(), pair.value().toDevice()});
+               deviceMap.insert(
+                   {pair.key().toDevice(), pair.value().toDevice()});
              }
            }
            auto timeout = pop(stack).toDouble();
@@ -223,7 +224,8 @@ RegisterOperators reg_rpc_ops(
            if (!deviceMapDictIValue.isNone()) {
              TORCH_INTERNAL_ASSERT(deviceMapDictIValue.isGenericDict());
              for (const auto& pair : deviceMapDictIValue.toGenericDict()) {
-               deviceMap.insert({pair.key().toDevice(), pair.value().toDevice()});
+               deviceMap.insert(
+                   {pair.key().toDevice(), pair.value().toDevice()});
              }
            }
            auto rref = pop(stack).toRRef();

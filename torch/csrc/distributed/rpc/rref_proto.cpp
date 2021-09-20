@@ -56,7 +56,8 @@ std::unique_ptr<ScriptRRefFetchCall> ScriptRRefFetchCall::fromMessage(
   auto values = toIValues(message, MessageType::SCRIPT_RREF_FETCH_CALL);
   TORCH_INTERNAL_ASSERT(
       values.size() == 3, "ScriptRRefFetchCall expects 3 IValues from message");
-  auto deviceMap = c10DictToDeviceMap(values[2].to<c10::Dict<std::string, std::string>>());
+  auto deviceMap =
+      c10DictToDeviceMap(values[2].to<c10::Dict<std::string, std::string>>());
   auto id = values[1].toInt();
   TORCH_INTERNAL_ASSERT(
       id >= std::numeric_limits<worker_id_t>::min() &&
@@ -80,7 +81,8 @@ std::unique_ptr<PythonRRefFetchCall> PythonRRefFetchCall::fromMessage(
   auto values = toIValues(message, MessageType::PYTHON_RREF_FETCH_CALL);
   TORCH_INTERNAL_ASSERT(
       values.size() == 3, "PythonRRefFetchCall expects 3 IValues from message");
-  auto deviceMap = c10DictToDeviceMap(values[2].to<c10::Dict<std::string, std::string>>());
+  auto deviceMap =
+      c10DictToDeviceMap(values[2].to<c10::Dict<std::string, std::string>>());
   auto id = values[1].toInt();
   TORCH_INTERNAL_ASSERT(
       id >= std::numeric_limits<worker_id_t>::min() &&

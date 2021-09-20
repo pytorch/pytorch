@@ -595,7 +595,7 @@ void TensorPipeAgent::sendCompletedResponseMessage(
     responseMessage->setId(messageId);
 
     auto deviceMap = responseMessage->getDeviceMap();
-    
+
     std::vector<c10::Device> devices;
     try {
       if (deviceMap.empty()) {
@@ -603,9 +603,7 @@ void TensorPipeAgent::sendCompletedResponseMessage(
       } else {
         // If deviceMap is specified, use that instead.
         devices = getDevicesForTensors(
-            responseMessage->tensors(),
-            deviceMap,
-            pipe->getRemoteName());
+            responseMessage->tensors(), deviceMap, pipe->getRemoteName());
       }
     } catch (const std::exception& e) {
       responseMessage = createExceptionResponse(e.what(), messageId);

@@ -813,6 +813,20 @@ def _rpc_to_here_test_caller_device_py_py(dst: str, device_map: Dict[torch.devic
         args=((1,), original_device)
     ).to_here(device_map).device
 
+def _rpc_to_here_timeout_dm_test_caller_device_py_py(dst: str, device_map: Dict[torch.device, torch.device], original_device: torch.device):
+    return rpc.remote(
+        dst,
+        _create_empty_tensor,
+        args=((1,), original_device)
+    ).to_here(timeout=1000.0, device_map=device_map).device
+
+def _rpc_to_here_dm_timeout_test_caller_device_py_py(dst: str, device_map: Dict[torch.device, torch.device], original_device: torch.device):
+    return rpc.remote(
+        dst,
+        _create_empty_tensor,
+        args=((1,), original_device)
+    ).to_here(timeout=1000.0, device_map=device_map).device
+
 def _rpc_to_here_test_caller_device_py_jit(dst: str, device_map: Dict[torch.device, torch.device], original_device: torch.device):
     return rpc.remote(
         dst,
@@ -5006,7 +5020,7 @@ class FaultyAgentRpcTest(RpcAgentTestFixture):
             with self.assertRaisesRegex(RuntimeError, expected_error):
                 # to_here() should raise timeout error, since it does not know about the
                 # status of rpc.remote().
-                slow_rref.to_here(0.001)
+                slow_rref.to_here(timeout=0.001)
         # Note: If we proceed with shutdown, UserRRef will send out a RRefUserDelete
         # but this can be a noop since it may not exist on the owner yet. Later,
         # the owner can process the RRef creation and wait for the delete message,
@@ -5076,7 +5090,7 @@ class FaultyAgentRpcTest(RpcAgentTestFixture):
         )
         expected_error = self.get_timeout_error_regex()
         with self.assertRaisesRegex(RuntimeError, expected_error):
-            rref.to_here(0.01)
+            rref.to_here(timeout=0.01)
 
         rref.to_here()
 
@@ -6796,6 +6810,14 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture):
     @skip_if_lt_x_gpu(3)
     def test_my_device_map_rpc_to_here_caller_device_py_py(self):
         self._test_device_on_caller(_rpc_to_here_test_caller_device_py_py)
+
+    @skip_if_lt_x_gpu(3)
+    def test_my_device_map_rpc_to_here_timeout_dm_caller_device_py_py(self):
+        self._test_device_on_caller(_rpc_to_here_timeout_dm_test_caller_device_py_py)
+
+    @skip_if_lt_x_gpu(3)
+    def test_my_device_map_rpc_to_here_dm_timeout_caller_device_py_py(self):
+        self._test_device_on_caller(_rpc_to_here_dm_timeout_test_caller_device_py_py)
 
     @skip_if_lt_x_gpu(3)
     def test_my_device_map_rpc_to_here_caller_device_py_jit(self):

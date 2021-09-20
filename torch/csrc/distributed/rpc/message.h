@@ -1,8 +1,8 @@
 #pragma once
 
+#include <torch/csrc/distributed/rpc/types.h>
 #include <torch/types.h>
 #include <vector>
-#include <torch/csrc/distributed/rpc/types.h>
 
 namespace torch {
 namespace distributed {

@@ -71,7 +71,8 @@ c10::intrusive_ptr<JitFuture> FaultyTensorPipeAgent::send(
   // We only fail control messages that have been specified by the test case.
   // For all other messages, we just send them without any failures.
   if (!shouldFailMessage(message->type())) {
-    return TensorPipeAgent::send(to, std::move(message), deviceMap, rpcTimeoutSeconds);
+    return TensorPipeAgent::send(
+        to, std::move(message), deviceMap, rpcTimeoutSeconds);
   }
 
   // This send function checks the failMessageCountMap_ to check whether
@@ -94,7 +95,8 @@ c10::intrusive_ptr<JitFuture> FaultyTensorPipeAgent::send(
     return jitFuture;
   } else {
     lock.unlock();
-    return TensorPipeAgent::send(to, std::move(message), deviceMap, rpcTimeoutSeconds);
+    return TensorPipeAgent::send(
+        to, std::move(message), deviceMap, rpcTimeoutSeconds);
   }
 }
 
