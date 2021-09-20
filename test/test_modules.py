@@ -209,11 +209,11 @@ class TestModule(TestCase):
     def _retain_grad(self, obj):
         # gradients needs to be retained to check for grad. This is useful when
         # non-leafs are present in the graph.
-        if isinstance(obj, dict):
-            for i in obj.values():
-                self._retain_grad(i)
-        elif isinstance(obj, (tuple, list)):
+        if isinstance(obj, (tuple, list)):
             for i in obj:
+                self._retain_grad(i)
+        elif isinstance(obj, dict):
+            for i in obj.values():
                 self._retain_grad(i)
         elif isinstance(obj, torch.Tensor) and obj.requires_grad:
             obj.retain_grad()
