@@ -1,5 +1,6 @@
 # Nodes represent a definition of a value in our graph of operators.
 from typing import TYPE_CHECKING, Union, Callable, Any, Tuple, List, Optional, Dict, Set
+from ._compatibility import compatibility
 from .immutable_collections import immutable_dict, immutable_list
 import torch
 import builtins
@@ -23,7 +24,9 @@ Argument = Optional[Union[
     BaseArgumentTypes
 ]]
 
-_side_effectful_functions: Set[Callable] = {torch._assert}
+_side_effectful_functions: Set[Callable] = {
+    torch._assert, torch.ops.profiler._record_function_enter,
+    torch.ops.profiler._record_function_exit}
 
 # this is fixed on master, WAR for 1.5
 def _find_module_of_method(orig_method: Callable[..., Any]) -> str:
@@ -85,6 +88,7 @@ def _format_arg(arg) -> str:
     else:
         return str(arg)
 
+@compatibility(is_backward_compatible=True)
 class Node:
     """
     ``Node`` is the data structure that represents individual operations within
@@ -112,15 +116,49 @@ class Node:
     - ``output`` contains the output of the traced function in its ``args[0]`` attribute. This corresponds to the "return" statement
       in the Graph printout.
     """
+
+    @compatibility(is_backward_compatible=True)
     def __init__(self, graph: 'Graph', name: str, op: str, target: 'Target',
                  args: Tuple['Argument', ...], kwargs: Dict[str, 'Argument'],
-                 type : Optional[Any] = None) -> None:
+                 return_type : Optional[Any] = None) -> None:
+        """
+        Instantiate an instance of ``Node``. Note: most often, you want to use the
+        Graph APIs, i.e. ``Graph.call_module``, ``Graph.call_method``, etc. rather
+        than instantiating a ``Node`` directly.
+
+        Args:
+            graph (Graph): The ``Graph`` to which this ``Node`` should belong.
+
+            name (str): The name to which the output of this ``Node`` should be assigned
+
+            op (str): The opcode for this ``Node``. Can be one of 'placeholder',
+                'call_method', 'call_module', 'call_function', 'get_attr',
+                'output'
+
+            target ('Target'): The target this op should call. See the broader
+                ``Node`` docstring for more details.
+
+            args (Tuple['Argument']): The args to be passed to ``target``
+
+            kwargs (Dict[str, 'Argument']): The kwargs to be passed to ``target``
+
+            return_type (Optional[Any]): The python type expression representing the
+                type of the output of this node. This field can be used for
+                annotation of values in the generated code or for other types
+                of analyses.
+        """
         self.graph = graph
         self.name = name  # unique name of value being created
         assert op in ['placeholder', 'call_method', 'call_module', 'call_function', 'get_attr', 'output', 'root']
         self.op = op  # the kind of operation = placeholder|call_method|call_module|call_function|get_attr
-        if op in ['call_method', 'call_module']:
-            assert isinstance(target, str)
+        if op == 'call_function':
+            if not callable(target):
+                raise ValueError(f'Node [graph = {graph}, name = \'{name}\'] target {target} has type {torch.typename(target)} '
+                                 'but a Callable is expected')
+        else:
+            if not isinstance(target, str):
+                raise ValueError(f'Node [graph = {graph}, name = \'{name}\'] target {target} has type {torch.typename(target)} '
+                                 'but a str is expected')
         self.target = target  # for method/module/function, the name of the method/module/function/attr
         # being invoked, e.g add, layer1, or torch.add
 
@@ -146,7 +184,7 @@ class Node:
         # generated function return type. (Note this is a special case. ``return``
         # does not produce a value, it's more of a notation. Thus, this value
         # describes the type of args[0] in the ``return`` node.
-        self.type : Optional[Any] = type
+        self.type : Optional[Any] = return_type
         self._prev = self
         self._next = self
         self._erased = False
@@ -181,6 +219,7 @@ class Node:
         """
         return self._prev
 
+    @compatibility(is_backward_compatible=True)
     def prepend(self, x: 'Node') -> None:
         """
         Insert x before this node in the list of nodes in the graph. Example::
@@ -199,6 +238,7 @@ class Node:
         p._next, x._prev = x, p
         x._next, self._prev = self, x
 
+    @compatibility(is_backward_compatible=True)
     def append(self, x: 'Node') -> None:
         """
         Insert x after this node in the list of nodes in the graph.
@@ -273,6 +313,7 @@ class Node:
         """
         return list(self._input_nodes.keys())
 
+    @compatibility(is_backward_compatible=True)
     def update_arg(self, idx : int, arg : Argument) -> None:
         """
         Update an existing positional argument to contain the new value
@@ -287,6 +328,7 @@ class Node:
         args[idx] = arg
         self.args = tuple(args)
 
+    @compatibility(is_backward_compatible=True)
     def update_kwarg(self, key : str, arg : Argument) -> None:
         """
         Update an existing keyword argument to contain the new value
@@ -359,6 +401,7 @@ class Node:
                 return f'operator.{target.__name__}'
         return _get_qualified_name(target)
 
+    @compatibility(is_backward_compatible=True)
     def format_node(self,
                     placeholder_names: List[str] = None,
                     maybe_return_typename: List[str] = None) -> Optional[str]:
@@ -414,6 +457,7 @@ class Node:
                    f'{self.op}[target={self._pretty_print_target(self.target)}](' \
                    f'args = {_format_arg(self.args)}, kwargs = {_format_arg(self.kwargs)})'
 
+    @compatibility(is_backward_compatible=True)
     def replace_all_uses_with(self, replace_with : 'Node') -> List['Node']:
         """
         Replace all uses of ``self`` in the Graph with the Node ``replace_with``.
@@ -443,6 +487,7 @@ class Node:
         assert len(self.users) == 0
         return to_process
 
+    @compatibility(is_backward_compatible=False)
     def is_impure(self):
         """
         Returns whether this op is impure, i.e. if its op is a placeholder or
@@ -472,6 +517,7 @@ class Node:
 
         return False
 
+    @compatibility(is_backward_compatible=False)
     def normalized_arguments(
             self, root : torch.nn.Module, arg_types : Optional[Tuple[Any]] = None,
             kwarg_types : Optional[Dict[str, Any]] = None,
@@ -507,7 +553,7 @@ class Node:
 
         return None
 
-
+    @compatibility(is_backward_compatible=True)
     def replace_input_with(self, old_input: 'Node', new_input: 'Node'):
         """
         Loop through input nodes of ``self``, and replace all instances of
@@ -517,7 +563,6 @@ class Node:
 
             old_input (Node): The old input node to be replaced.
             new_input (Node): The new input node to replace ``old_input``.
-
         """
         def maybe_replace_node(n : Node) -> Node:
             return new_input if n == old_input else n
@@ -529,13 +574,19 @@ class Node:
         self.__update_args_kwargs(new_args, new_kwargs)
 
 
+@compatibility(is_backward_compatible=True)
 def map_arg(a: Argument, fn: Callable[[Node], Argument]) -> Argument:
-    """ Apply fn to each Node appearing arg. arg may be a list, tuple, slice, or dict with string keys. """
+    """
+    Apply fn to each Node appearing arg. arg may be a list, tuple, slice, or dict with string keys.
+    """
     assert callable(fn), "torch.fx.map_arg(a, fn): fn must be a callable"
     return map_aggregate(a, lambda x: fn(x) if isinstance(x, Node) else x)
 
+@compatibility(is_backward_compatible=True)
 def map_aggregate(a: Argument, fn: Callable[[Argument], Argument]) -> Argument:
-    """ Apply fn to each Node appearing arg. arg may be a list, tuple, slice, or dict with string keys. """
+    """
+    Apply fn to each Node appearing arg. arg may be a list, tuple, slice, or dict with string keys.
+    """
     if isinstance(a, tuple):
         return tuple(map_aggregate(elem, fn) for elem in a)
     elif isinstance(a, list):

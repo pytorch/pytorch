@@ -24,8 +24,8 @@ class autocast(torch.autocast_mode.autocast):
     ``torch.cuda.amp.autocast(args...)`` is equivalent to ``torch.autocast("cuda", args...)``
     """
 
-    def __init__(self, enabled=True, fast_dtype=torch.float16):
-        super().__init__("cuda", enabled=enabled, fast_dtype=fast_dtype)
+    def __init__(self, enabled=True, dtype=torch.float16, cache_enabled=True):
+        super().__init__("cuda", enabled=enabled, dtype=dtype, cache_enabled=cache_enabled)
         if torch._jit_internal.is_scripting():
             self._enabled = enabled
         elif enabled and not torch.cuda.is_available():

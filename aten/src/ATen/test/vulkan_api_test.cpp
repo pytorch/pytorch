@@ -979,6 +979,49 @@ TEST(VulkanAPITest, hardshrink_) {
   }
 }
 
+TEST(VulkanAPITest, leaky_relu) {
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  for (const auto negative_slope : {0.01, 0.001, 1.0, -0.001}) {
+    const auto in_cpu = at::rand({17, 197, 302, 5}, at::device(at::kCPU).dtype(at::kFloat));
+    const auto in_vulkan = in_cpu.vulkan();
+
+    const auto out_cpu = at::leaky_relu(in_cpu, negative_slope);
+    const auto out_vulkan = at::leaky_relu(in_vulkan, negative_slope);
+
+    const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+
+    if (!check) {
+      showRtol(out_cpu, out_vulkan.cpu());
+    }
+
+    ASSERT_TRUE(check);
+  }
+}
+
+TEST(VulkanAPITest, leaky_relu_) {
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  for (const auto negative_slope : {0.01, 0.001, 1.0, -0.001}) {
+    auto cpu = at::rand({17, 197, 302, 5}, at::device(at::kCPU).dtype(at::kFloat));
+    auto vulkan = cpu.vulkan();
+
+    at::leaky_relu_(cpu, negative_slope);
+    at::leaky_relu_(vulkan, negative_slope);
+
+    const auto check = almostEqual(cpu, vulkan.cpu());
+    if (!check) {
+      showRtol(cpu, vulkan.cpu());
+    }
+
+    ASSERT_TRUE(check);
+  }
+}
+
 TEST(VulkanAPITest, hardswish) {
   if (!at::is_vulkan_available()) {
     return;

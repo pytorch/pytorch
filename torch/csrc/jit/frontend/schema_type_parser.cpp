@@ -32,6 +32,7 @@ using c10::StringType;
 using c10::Symbol;
 using c10::TensorType;
 using c10::TupleType;
+using c10::UnionType;
 using c10::VarType;
 
 namespace torch {
@@ -235,7 +236,7 @@ TypePtr SchemaTypeParser::parseRefinedTensor() {
           const std::string& num = L.expect(TK_NUMBER).text();
           // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
           std::string::size_type num_len;
-          size_t stride = c10::stoi(num, &num_len);
+          auto stride = c10::stoll(num, &num_len);
           strides.push_back(stride);
         });
         return;
@@ -260,7 +261,7 @@ TypePtr SchemaTypeParser::parseRefinedTensor() {
     const std::string& num = L.expect(TK_NUMBER).text();
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     std::string::size_type num_len;
-    size_t dim = c10::stoi(num, &num_len);
+    auto dim = c10::stoll(num, &num_len);
     dims.emplace_back(dim);
   });
   if (seen_strides) {
@@ -331,6 +332,18 @@ std::pair<TypePtr, c10::optional<AliasInfo>> SchemaTypeParser::parseType() {
     L.expect(')');
     alias_info = parseAliasAnnotation();
     value = DictType::create(key_type, value_type);
+  } else if (L.cur().kind == TK_IDENT && L.cur().text() == "Union") {
+    L.next();
+    L.expect('(');
+    std::vector<TypePtr> types;
+    types.emplace_back(parseType().first);
+    while (L.cur().kind != ')') {
+      L.expect(',');
+      types.emplace_back(parseType().first);
+    }
+    L.expect(')');
+    alias_info = parseAliasAnnotation();
+    value = UnionType::create(types);
   } else if (
       complete_tensor_types && L.cur().kind == TK_IDENT &&
       parseTensorDType(L.cur().text())) {

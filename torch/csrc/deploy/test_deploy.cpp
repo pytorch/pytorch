@@ -366,3 +366,42 @@ TEST(TorchpyTest, SharedLibraryLoad) {
   }
 }
 #endif
+
+TEST(TorchpyTest, UsesDistributed) {
+  const auto model_filename = path(
+      "USES_DISTRIBUTED",
+      "torch/csrc/deploy/example/generated/uses_distributed");
+  torch::deploy::InterpreterManager m(1);
+  torch::deploy::Package p = m.load_package(model_filename);
+  {
+    auto I = p.acquire_session();
+    I.self.attr("import_module")({"uses_distributed"});
+  }
+}
+
+TEST(TorchpyTest, Autograd) {
+  torch::deploy::InterpreterManager m(2);
+  m.register_module_source("autograd_test", R"PYTHON(
+import torch
+
+x = torch.ones(5)  # input tensor
+y = torch.zeros(3)  # expected output
+w = torch.randn(5, 3, requires_grad=True)
+b = torch.randn(3, requires_grad=True)
+z = torch.matmul(x, w)+b
+loss = torch.nn.functional.binary_cross_entropy_with_logits(z, y)
+loss.backward()
+# result = w.grad
+result = torch.Tensor([1,2,3])
+)PYTHON");
+  at::Tensor w_grad0, w_grad1;
+  {
+    auto I = m.all_instances()[0].acquire_session();
+    w_grad0 = I.global("autograd_test", "result").toIValue().toTensor();
+  }
+  {
+    auto I = m.all_instances()[1].acquire_session();
+    w_grad1 = I.global("autograd_test", "result").toIValue().toTensor();
+  }
+  EXPECT_TRUE(w_grad0.equal(w_grad1));
+}
