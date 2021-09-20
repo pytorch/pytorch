@@ -13,7 +13,7 @@ namespace jit {
 
 namespace {
 
-TypePtr toSingleType(AliasTypeSet& mut_types) {
+TypePtr toSingleType(const AliasTypeSet& mut_types) {
   return mut_types.size() == 1 ? mut_types[0]
                                : c10::UnionType::create(mut_types);
 }
@@ -53,19 +53,15 @@ class MutableTypePtrHelper {
   //     as a single, homogenous "Tensor" type.
   c10::optional<AliasTypeSet> mapTypeToAliasTypeSet(const TypePtr& type) {
     if (mutable_type_cache_) {
-      auto maybe_type_mapping = mutable_type_cache_->find(type);
-      if (maybe_type_mapping != mutable_type_cache_->end()) {
-        return maybe_type_mapping->second;
+      const AliasTypeSet* result = mapTypeToBorrowedAliasTypeSet(type);
+      if (result) {
+        return *result;
       }
     }
-    auto mutable_types = mapTypeToAliasTypeSetImpl(type);
-    if (mutable_type_cache_ && mutable_types) {
-      mutable_type_cache_->emplace(type, *mutable_types);
-    }
-    return mutable_types;
+    return mapTypeToAliasTypeSetImpl(type);
   }
 
-  AliasTypeSet* mapTypeToBorrowedAliasTypeSet(const TypePtr& type) {
+  const AliasTypeSet* mapTypeToBorrowedAliasTypeSet(const TypePtr& type) {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(mutable_type_cache_ != nullptr);
     auto maybe_type_mapping = mutable_type_cache_->find(type);
     if (maybe_type_mapping != mutable_type_cache_->end()) {
@@ -183,7 +179,7 @@ bool AliasDb::isMutableTypeInternal(const Value* v) const {
   return isMutableTypeInternal(v->type());
 }
 
-AliasTypeSet* AliasDb::mapTypeToAliasTypeSetPtr(
+const AliasTypeSet* AliasDb::mapTypeToAliasTypeSetPtr(
     const TypePtr& type) const {
   MutableTypePtrHelper helper(&mapped_mutable_types_);
   return helper.mapTypeToBorrowedAliasTypeSet(type);
