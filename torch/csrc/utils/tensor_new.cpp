@@ -258,6 +258,8 @@ Tensor internal_new_from_data(
   }
 #endif
 
+  auto device = device_opt.has_value() ? *device_opt : options.device();
+
   auto sizes = compute_sizes(data);
   ScalarType inferred_scalar_type = type_inference ? infer_scalar_type(data) : scalar_type;
   // This exists to prevent us from tracing the call to empty().  The actual
@@ -287,7 +289,6 @@ Tensor internal_new_from_data(
           inferred_scalar_type, tensor.dtype().itemsize(), data);
     }
   }
-  auto device = device_opt.has_value() ? *device_opt : options.device();
   pybind11::gil_scoped_release no_gil;
   maybe_initialize_cuda(device);
   // However, it is VERY important that we trace the to() call here (even
