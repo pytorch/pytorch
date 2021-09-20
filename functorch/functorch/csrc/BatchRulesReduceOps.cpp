@@ -210,16 +210,12 @@ static std::tuple<Tensor, Tensor, Tensor> expand_bdims(
     const Tensor& a, bool a_has_bdim,
     const Tensor& b, bool b_has_bdim,
     const Tensor& c, bool c_has_bdim) {
-  int64_t bdim_size = -1;
   Tensor flagpole;
   if (a_has_bdim) {
-    bdim_size = a.size(0);
     flagpole = a;
   } else if (b_has_bdim) {
-    bdim_size = b.size(0);
     flagpole = b;
   } else if (c_has_bdim) {
-    bdim_size = c.size(0);
     flagpole = c;
   } else {
     TORCH_INTERNAL_ASSERT(false);
