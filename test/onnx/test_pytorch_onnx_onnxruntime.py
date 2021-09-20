@@ -5261,24 +5261,6 @@ class TestONNXRuntime(unittest.TestCase):
         y = torch.randn(4, 5)
         self.run_test(model, (x, y))
 
-    @unittest.skip("Enable this once remove is supported by pytorch")
-    @skipIfUnsupportedMinOpsetVersion(11)
-    def test_list_remove(self):
-        class ListModel(torch.nn.Module):
-            def forward(self, x, y):
-                res = []
-                for i in range(x.size(0)):
-                    res += [torch.matmul(x[i], y)]
-                # The following fails with pytorch
-                # RuntimeError: Boolean value of Tensor with more than one value is ambiguous
-                res.remove(res[2])
-                return res
-
-        model = torch.jit.script(ListModel())
-        x = torch.randn(16, 3, 4)
-        y = torch.randn(4, 5)
-        self.run_test(model, (x, y))
-
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_list_set(self):
         class ListModel(torch.nn.Module):
@@ -6209,7 +6191,8 @@ class TestONNXRuntime(unittest.TestCase):
 
     @disableScriptTest()  # scripting prim::Uninitialized, prim::dtype, prim::unchecked_cast
     @skipIfUnsupportedMinOpsetVersion(11)
-    @unittest.skip("Due to ONNX Loop shape inference issue.")
+    @unittest.skip("Due to ONNX Loop shape inference issue. "
+                   "https://msdata.visualstudio.com/Vienna/_workitems/edit/1352001")
     def test_embedding_bag_dynamic_input(self):
         class EmbeddingModel1D(torch.nn.Module):
             def forward(self, embedding_matrix, input, weights, offsets):
