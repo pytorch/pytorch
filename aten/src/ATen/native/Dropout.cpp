@@ -107,17 +107,15 @@ Tensor native_dropout_backward_cpu(const Tensor& grad, const Tensor& mask, doubl
 }
 
 Tensor dropout(const Tensor& input, double p, bool train) {
-  TORCH_CHECK(p >= 0 && p <= 1, "dropout probability has to be between 0 and 1, but got ", p);
   auto result = [&]() {
     NoNamesGuard guard;
-    double p1m = 1. - p;
-    // Check for probability of zero to avoid divide by zero and NaN results
-    double scale = p1m == 0 ? 0. : 1. / p1m;
-    if (train) {
+    if (train && is_fused_kernel_acceptable(input, p)) {
+      double p1m = 1. - p;
+      // Check for probability of zero to avoid divide by zero and NaN results
+      double scale = p1m == 0 ? 0. : 1. / p1m;
       return std::get<0>(at::native_dropout(input, p1m, scale, train));
-    } else {
-      return input;
     }
+    return _dropout<false>(input, p, train);
   }();
   namedinference::propagate_names(result, input);
   return result;
