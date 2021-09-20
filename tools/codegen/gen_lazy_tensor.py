@@ -82,7 +82,8 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
     backend_indices = parsed_backend_yaml.backend_indices
     full_codegen = parse_full_codegen_ops(source_yaml, grouped_native_functions)
 
-    def concatMapCodegen(func: Callable[[NativeFunction], Sequence[str]], xs: Iterable[Union[NativeFunctionsGroup, NativeFunction]]) -> Iterator[str]:
+    def concatMapCodegen(func: Callable[[NativeFunction], Sequence[str]],
+                         xs: Iterable[Union[NativeFunctionsGroup, NativeFunction]]) -> Iterator[str]:
         for x in xs:
             f = x.functional if isinstance(x, NativeFunctionsGroup) else x
             if f.func.name in full_codegen:

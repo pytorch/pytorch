@@ -57,7 +57,8 @@ def process_ir_type(typ: Type) -> Union[BaseCType, VectorCType, OptionalCType, L
         raise AssertionError(f"unrecognized type {repr(typ)}")
 
 
-def isValueType(typ: Union[Type, BaseCType, OptionalCType, ConstRefCType, MutRefCType, ListCType, ArrayRefCType, ArrayCType, VectorCType, TupleCType]) -> bool:
+def isValueType(typ: Union[Type, BaseCType, OptionalCType, ConstRefCType, MutRefCType,
+                           ListCType, ArrayRefCType, ArrayCType, VectorCType, TupleCType]) -> bool:
     """
     Given a type, determine if it is a Value-like type.  This is equivalent to
     being Tensor-like, but assumes the type has already been transformed.
@@ -91,7 +92,7 @@ class LazyIrSchema:
         for arg_field in ["pre_self_positional",
                           "self_arg",
                           "post_self_positional"]:
-            if arg_field == "self_arg" and getattr(func.arguments, "self_arg") is not None:
+            if arg_field == "self_arg" and func.arguments.self_arg is not None:
                 arg = getattr(func.arguments, "self_arg").argument
                 positional_arg_types.append(NamedCType(arg.name, process_ir_type(arg.type)))
             elif getattr(func.arguments, arg_field) is not None:
@@ -123,7 +124,8 @@ class LazyIrSchema:
     def aten_name(self) -> str:
         return f"{self.name}"
 
-    def filtered_types(self, positional: bool = True, keyword: bool = True, values: bool = True, scalars: bool = True) -> List[NamedCType]:
+    def filtered_types(self, positional: bool = True, keyword: bool = True,
+                       values: bool = True, scalars: bool = True) -> List[NamedCType]:
         types: List[NamedCType] = []
         if positional:
             types.extend(self.positional_arg_types)

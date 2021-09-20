@@ -21,9 +21,11 @@ def node_ctor_inputs(func: LazyIrSchema) -> str:
                 node_ctor_values.append(f"l_{arg.name}.GetIrValue()")
             elif isinstance(arg.type, OptionalCType):
                 node_ctor_values.append(
-                    f"l_{arg.name}.has_value() ? l_{arg.name}.value().GetIrValue() : torch_lazy_tensors::ir::ops::kNullValue")
+                    f"l_{arg.name}.has_value() ? "
+                    f"l_{arg.name}.value().GetIrValue() : "
+                    f"torch_lazy_tensors::ir::ops::kNullValue")
             else:
-                assert False, ""
+                raise AssertionError("TODO not sure if there are other valid types to handle here")
         else:
             if isinstance(arg.type, BaseCType) and arg.type.type.name == "vector<int64_t>":
                 node_ctor_scalars.append(f"std::vector<int64_t>({arg.name}.begin(), {arg.name}.end())")
@@ -64,7 +66,7 @@ class LazyIR:
             elif isinstance(t.type, OptionalCType):
                 base_ctor_value_args_list.append(f"{t.name}.has_value() ? {t.name}.value() : kNullValue")
             else:
-                assert False, ""
+                raise AssertionError("TODO not sure if there are other valid types to handle here")
         base_ctor_value_args = ", ".join(base_ctor_value_args_list)
         members_to_string = "\n    ".join([f'lazy_tensors::ToString("{t.name}", {t.name}_, ss);' for t in scalar_types])
 
@@ -127,13 +129,17 @@ def lazy_tensor_decls(value_types: List[NamedCType]) -> str:
             lazy_tensor_decls.append(f"LazyTensor l_{t.name} = bridge::GetLtcTensor({t.name});")
         elif isinstance(t.type, OptionalCType):
             lazy_tensor_decls.append(
-                f"c10::optional<LazyTensor> l_{t.name} =  {t.name}.has_value() ? c10::make_optional(bridge::GetLtcTensor({t.name}.value())) : c10::nullopt;")
+                f"c10::optional<LazyTensor> l_{t.name} =  "
+                "{t.name}.has_value() ? "
+                "c10::make_optional(bridge::GetLtcTensor({t.name}.value())) : "
+                "c10::nullopt;")
         else:
-            assert False, ""
+            raise AssertionError("TODO not sure if there are other valid types to handle here")
     return "\n    ".join(lazy_tensor_decls)
 
 
-def gen_lazy_nativefunc_definition(f: NativeFunction, backend_index: BackendIndex, class_method_name: str) -> List[str]:
+def gen_lazy_nativefunc_definition(f: NativeFunction, backend_index: BackendIndex,
+                                   class_method_name: str) -> List[str]:
     sig = kernel_signature(f, backend_index)
 
     # Lazy IR stuff
@@ -146,13 +152,16 @@ def gen_lazy_nativefunc_definition(f: NativeFunction, backend_index: BackendInde
 
     # call the meta kernel if it exists, to compute output shape/dtype for our IR
     if f.structured or f.structured_delegate is not None:
-        meta_args = ", ".join([f"{t.name}.to(c10::kMeta)" for t in value_types] + [f"{t.name}" for t in scalar_types])
+        meta_args = ", ".join([f"{t.name}.to(c10::kMeta)" for t in value_types] +
+                              [f"{t.name}" for t in scalar_types])
         meta_str = f"""auto out_meta = at::meta::{schema.aten_name}({meta_args});
     auto _out_shape = out_meta.sizes().vec();
     auto _out_dtype = out_meta.scalar_type();"""
     else:
-        meta_str = f"""auto _out_shape = torch_lazy_tensors::ir::ops::compute_shape_{schema.aten_name}({", ".join([f"{t.name}" for t in all_types])});
-    auto _out_dtype = torch_lazy_tensors::ir::ops::compute_dtype_{schema.aten_name}({", ".join([f"{t.name}" for t in all_types])});"""
+        meta_args = ", ".join([f"{t.name}" for t in all_types])
+        meta_str = f"""
+    auto _out_shape = torch_lazy_tensors::ir::ops::compute_shape_{schema.aten_name}({meta_args});
+    auto _out_dtype = torch_lazy_tensors::ir::ops::compute_dtype_{schema.aten_name}({meta_args});"""
 
     assert len(value_types) > 0, f"Only supporting tensor ops so far, none found in {sig}"
     first_tensor = value_types[0]
@@ -188,7 +197,8 @@ def gen_lazy_shape_dtype_decl(f: NativeFunction, backend_index: BackendIndex) ->
     # Only generate shape/dtype fn for non-structured kernels,
     # since we just use the meta function for structured kernels
     if not f.structured and f.structured_delegate is None:
-        return ["\n".join([f"std::vector<int64_t> compute_shape_{schema.aten_name}({', '.join([a.decl() for a in dispatcher.arguments(f.func)])});",
-                f"c10::ScalarType compute_dtype_{schema.aten_name}({', '.join([a.decl() for a in dispatcher.arguments(f.func)])});"])]
+        dispatch_args = ', '.join([a.decl() for a in dispatcher.arguments(f.func)])
+        return ["\n".join([f"std::vector<int64_t> compute_shape_{schema.aten_name}({dispatch_args});",
+                           f"c10::ScalarType compute_dtype_{schema.aten_name}({dispatch_args});"])]
     else:
         return []
