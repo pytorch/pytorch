@@ -3,7 +3,6 @@ from torch.testing._internal.common_utils import TestCase
 import importlib
 from typing import List
 
-
 class AOMigrationTestCase(TestCase):
     def _test_package_import(self, package_name: str):
         r"""Tests the module import by making sure that all the internals match
@@ -33,31 +32,14 @@ class AOMigrationTestCase(TestCase):
                 f"Hashes don't match: {old_function}({hash(old_function)}) vs. " \
                 f"{new_function}({hash(new_function)})"
 
-
-class TestAOMigrationQuantizePy(AOMigrationTestCase):
-    def test_package_import(self):
-        self._test_package_import('quantize')
-
-    def test_function_import(self):
-        function_list = [
-            '_convert',
-            '_observer_forward_hook',
-            '_propagate_qconfig_helper',
-            '_remove_activation_post_process',
-            '_remove_qconfig',
-            'add_observer_',
-            'add_quant_dequant',
-            'convert',
-            'get_observer_dict',
-            'get_unique_devices_',
-            'is_activation_post_process',
-            'prepare',
-            'prepare_qat',
-            'propagate_qconfig_',
-            'quantize',
-            'quantize_dynamic',
-            'quantize_qat',
-            'register_activation_post_process_hook',
-            'swap_module',
-        ]
-        self._test_function_import('quantize', function_list)
+    def _test_dict_import(self, package_name: str, dict_list: List[str]):
+        r"""Tests individual function list import by comparing the functions
+        and their hashes."""
+        old_location = importlib.import_module(f'torch.quantization.{package_name}')
+        new_location = importlib.import_module(f'torch.ao.quantization.{package_name}')
+        for dict_name in dict_list:
+            old_dict = getattr(old_location, dict_name)
+            new_dict = getattr(new_location, dict_name)
+            assert old_dict == new_dict, f"Dicts don't match: {dict_name}"
+            for key in new_dict.keys():
+                assert old_dict[key] == new_dict[key], f"Dicts don't match: {dict_name} for key {key}"
