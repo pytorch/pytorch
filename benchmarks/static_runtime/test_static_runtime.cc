@@ -1394,3 +1394,35 @@ TEST(StaticRuntime, SignedLog1p) {
   std::vector<IValue> args2 = {at::randn({3, 3, 3})};
   testStaticRuntime(signed_log1p_script, args1, args2, true);
 }
+
+TEST(StaticRuntime, RemoveImmutableInputDictLookupsWithImmutableInputDict) {
+  script::Module module("module");
+  module.define(getitem_immutable_input_dict_script);
+  torch::jit::StaticModule smodule(module);
+  ASSERT_EQ(getNodeWithKind(smodule, "aten::__getitem__"), nullptr);
+  ASSERT_NE(getNodeWithKind(smodule, "static_runtime::dict_unpack"), nullptr);
+
+  auto a = at::randn({2, 4});
+  auto b = at::randn({2, 4});
+  c10::Dict<c10::IValue, c10::IValue> dict(
+      c10::IntType::get(), c10::TensorType::get());
+  dict.insert(0, a);
+  dict.insert(1, b);
+  testStaticRuntime(getitem_immutable_input_dict_script, {dict});
+
+  c10::Dict<c10::IValue, c10::IValue> dict0(
+      c10::IntType::get(), c10::TensorType::get());
+  auto a0 = at::randn({3, 4});
+  auto b0 = at::randn({3, 4});
+  dict0.insert(0, a0);
+  dict0.insert(1, b0);
+  testStaticRuntime(getitem_immutable_input_dict_script, {dict0});
+}
+
+TEST(StaticRuntime, RemoveImmutableInputDictLookupsWithMutableInputDict) {
+  script::Module module("module");
+  module.define(getitem_mutable_input_dict_script);
+  torch::jit::StaticModule smodule(module);
+  EXPECT_NE(getNodeWithKind(smodule, "aten::__getitem__"), nullptr);
+  EXPECT_EQ(getNodeWithKind(smodule, "static_runtime::dict_unpack"), nullptr);
+}

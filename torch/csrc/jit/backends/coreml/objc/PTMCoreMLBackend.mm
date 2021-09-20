@@ -38,7 +38,7 @@ static inline c10::ScalarType scalarType(TensorType type) {
 
 static id parse(NSString* jsonStr) {
   NSData* data = [jsonStr dataUsingEncoding:NSUTF8StringEncoding];
-  NSError* error;
+  NSError* error = nil;
   id result = [NSJSONSerialization JSONObjectWithData:data
                                               options:0
                                                 error:&error];
@@ -242,13 +242,20 @@ class API_AVAILABLE(ios(11.0), macos(10.13)) CoreMLBackend
   bool is_available() override {
 #if !defined(__APPLE__)
     return false;
-#else
-    if (@available(iOS 14, macOS 10.13, *)) {
+#elif TARGET_OS_IPHONE
+    if ([UIDevice currentDevice].systemVersion.floatValue > 14.0) {
       return true;
-    } else {
-      return false;
     }
+#elif TARGET_OS_MAC
+    NSOperatingSystemVersion supportedVer = {10, 13, 0};
+    if ([[NSProcessInfo processInfo]
+            isOperatingSystemAtLeastVersion:supportedVer]) {
+      return true;
+    }
+#else
+    return false;
 #endif
+    return false;
   }
 };
 
