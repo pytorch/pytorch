@@ -331,10 +331,10 @@ def einsum(*args):
 if TYPE_CHECKING:
     # The JIT doesn't understand Union, so only add type annotation for mypy
     def meshgrid(*tensors: Union[Tensor, List[Tensor]],
-                 indexing: Optional[str] = None) -> Tuple[Tensor, ...]:
+                 indexing: str = 'xy') -> Tuple[Tensor, ...]:
         return _meshgrid(*tensors, indexing=indexing)
 else:
-    def meshgrid(*tensors, indexing: Optional[str] = None) -> Tuple[Tensor, ...]:
+    def meshgrid(*tensors, indexing: str = 'xy') -> Tuple[Tensor, ...]:
         r"""Creates grids of coordinates specified by the 1D inputs in `attr`:tensors.
 
         This is helpful when you want to visualize data over some
@@ -430,24 +430,7 @@ else:
         return _meshgrid(*tensors, indexing=indexing)
 
 
-def _meshgrid(*tensors, indexing: Optional[str]):
-    if indexing is None:
-        # The underlying native function requires the "indexing"
-        # argument, but torch.meshgrid() does not require it at the
-        # moment. We check for this case here.
-        #
-        # We do it this way because the end-state for the function
-        # will have `str indexing='xy'`, not `str? indexing=None` as
-        # the parameter and thus it makes sense for this intermediate
-        # state to take the same parameter type to avoid having to
-        # juggle a forward-compatibility breaking change in the
-        # future.
-        raise RuntimeError('torch.meshgrid: the "indexing" parameter is '
-                           'required. The default value was \"ij\", so pass '
-                           'indexing=\'ij\' to keep the existing behavior. In '
-                           'a future release of PyTorch the default will '
-                           'become "xy".')
-
+def _meshgrid(*tensors, indexing: str):
     if has_torch_function(tensors):
         return handle_torch_function(meshgrid, tensors, *tensors, indexing=indexing)
     if len(tensors) == 1 and isinstance(tensors[0], (list, tuple)):

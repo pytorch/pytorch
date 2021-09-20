@@ -5420,7 +5420,7 @@
   device_check: NoCheck
   device_guard: False
 
-- func: meshgrid(Tensor[] tensors, *, str indexing='ij') -> Tensor[]
+- func: meshgrid(Tensor[] tensors, *, str indexing='xy') -> Tensor[]
 
 - func: cartesian_prod(Tensor[] tensors) -> Tensor
   variants: function
