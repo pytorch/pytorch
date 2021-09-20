@@ -526,27 +526,10 @@ Tensor lowerToNextLayer<batch_rule_28_t,Tensor,const Tensor &, IntArrayRef, IntA
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<const Tensor &,c10::optional<int64_t>> (*batch_rule_29_t)(const Tensor &, c10::optional<int64_t>, IntArrayRef, IntArrayRef, c10::optional<int64_t>);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_29_t)(const Tensor &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, bool, double, double, bool);
 template <>
-const Tensor & lowerToNextLayer<batch_rule_29_t,const Tensor &,const Tensor &, IntArrayRef, IntArrayRef, c10::optional<int64_t>>(
+Tensor lowerToNextLayer<batch_rule_29_t,Tensor,const Tensor &, const c10::optional<Tensor> &, const c10::optional<Tensor> &, const c10::optional<Tensor> &, const c10::optional<Tensor> &, bool, double, double, bool>(
   batch_rule_29_t batch_rule,
-  const Tensor & self, IntArrayRef size, IntArrayRef stride, c10::optional<int64_t> storage_offset
-) {
-  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
-  auto maybe_layer = maybeCurrentDynamicLayer();
-  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
-  int64_t cur_level = maybe_layer->layerId();
-  Tensor self_value;
-  optional<int64_t> self_bdim;
-  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
-  auto results = batch_rule(self_value, self_bdim, size, stride, storage_offset);
-  return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
-}
-
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_30_t)(const Tensor &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, bool, double, double, bool);
-template <>
-Tensor lowerToNextLayer<batch_rule_30_t,Tensor,const Tensor &, const c10::optional<Tensor> &, const c10::optional<Tensor> &, const c10::optional<Tensor> &, const c10::optional<Tensor> &, bool, double, double, bool>(
-  batch_rule_30_t batch_rule,
   const Tensor & input, const c10::optional<Tensor> & weight, const c10::optional<Tensor> & bias, const c10::optional<Tensor> & running_mean, const c10::optional<Tensor> & running_var, bool use_input_stats, double momentum, double eps, bool cudnn_enabled
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -580,10 +563,10 @@ Tensor lowerToNextLayer<batch_rule_30_t,Tensor,const Tensor &, const c10::option
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_31_t)(const Tensor &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, double, double, int64_t);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_30_t)(const Tensor &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, double, double, int64_t);
 template <>
-Tensor lowerToNextLayer<batch_rule_31_t,Tensor,const Tensor &, const c10::optional<Tensor> &, const c10::optional<Tensor> &, const Tensor &, const Tensor &, double, double, int64_t>(
-  batch_rule_31_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_30_t,Tensor,const Tensor &, const c10::optional<Tensor> &, const c10::optional<Tensor> &, const Tensor &, const Tensor &, double, double, int64_t>(
+  batch_rule_30_t batch_rule,
   const Tensor & input, const c10::optional<Tensor> & weight, const c10::optional<Tensor> & bias, const Tensor & mean, const Tensor & var, double eps, double output_scale, int64_t output_zero_point
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -613,10 +596,10 @@ Tensor lowerToNextLayer<batch_rule_31_t,Tensor,const Tensor &, const c10::option
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>,int64_t> (*batch_rule_32_t)(const Tensor &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, bool, double, double, bool);
+typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>,int64_t> (*batch_rule_31_t)(const Tensor &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, bool, double, double, bool);
 template <>
-std::tuple<Tensor,Tensor,Tensor,Tensor,int64_t> lowerToNextLayer<batch_rule_32_t,std::tuple<Tensor,Tensor,Tensor,Tensor,int64_t>,const Tensor &, const c10::optional<Tensor> &, const c10::optional<Tensor> &, const c10::optional<Tensor> &, const c10::optional<Tensor> &, bool, double, double, bool>(
-  batch_rule_32_t batch_rule,
+std::tuple<Tensor,Tensor,Tensor,Tensor,int64_t> lowerToNextLayer<batch_rule_31_t,std::tuple<Tensor,Tensor,Tensor,Tensor,int64_t>,const Tensor &, const c10::optional<Tensor> &, const c10::optional<Tensor> &, const c10::optional<Tensor> &, const c10::optional<Tensor> &, bool, double, double, bool>(
+  batch_rule_31_t batch_rule,
   const Tensor & input, const c10::optional<Tensor> & weight, const c10::optional<Tensor> & bias, const c10::optional<Tensor> & running_mean, const c10::optional<Tensor> & running_var, bool training, double momentum, double eps, bool cudnn_enabled
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -650,10 +633,10 @@ std::tuple<Tensor,Tensor,Tensor,Tensor,int64_t> lowerToNextLayer<batch_rule_32_t
   return std::make_tuple(makeBatched(std::get<0>(results), std::get<1>(results), cur_level), makeBatched(std::get<2>(results), std::get<3>(results), cur_level), makeBatched(std::get<4>(results), std::get<5>(results), cur_level), makeBatched(std::get<6>(results), std::get<7>(results), cur_level), std::get<8>(results));
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_33_t)(const Tensor &, c10::optional<int64_t>, c10::optional<Generator>);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_32_t)(const Tensor &, c10::optional<int64_t>, c10::optional<Generator>);
 template <>
-Tensor lowerToNextLayer<batch_rule_33_t,Tensor,const Tensor &, c10::optional<Generator>>(
-  batch_rule_33_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_32_t,Tensor,const Tensor &, c10::optional<Generator>>(
+  batch_rule_32_t batch_rule,
   const Tensor & self, c10::optional<Generator> generator
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -667,10 +650,10 @@ Tensor lowerToNextLayer<batch_rule_33_t,Tensor,const Tensor &, c10::optional<Gen
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_34_t)(const Tensor &, c10::optional<int64_t>, double, c10::optional<Generator>);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_33_t)(const Tensor &, c10::optional<int64_t>, double, c10::optional<Generator>);
 template <>
-Tensor lowerToNextLayer<batch_rule_34_t,Tensor,const Tensor &, double, c10::optional<Generator>>(
-  batch_rule_34_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_33_t,Tensor,const Tensor &, double, c10::optional<Generator>>(
+  batch_rule_33_t batch_rule,
   const Tensor & mean, double std, c10::optional<Generator> generator
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -684,10 +667,10 @@ Tensor lowerToNextLayer<batch_rule_34_t,Tensor,const Tensor &, double, c10::opti
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_35_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_34_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>);
 template <>
-Tensor lowerToNextLayer<batch_rule_35_t,Tensor,const Tensor &, const Tensor &, const Tensor &, const c10::optional<Tensor> &>(
-  batch_rule_35_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_34_t,Tensor,const Tensor &, const Tensor &, const Tensor &, const c10::optional<Tensor> &>(
+  batch_rule_34_t batch_rule,
   const Tensor & input1, const Tensor & input2, const Tensor & weight, const c10::optional<Tensor> & bias
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -712,10 +695,10 @@ Tensor lowerToNextLayer<batch_rule_35_t,Tensor,const Tensor &, const Tensor &, c
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_36_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, int64_t);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_35_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, int64_t);
 template <>
-Tensor lowerToNextLayer<batch_rule_36_t,Tensor,const Tensor &, const Tensor &, const c10::optional<Tensor> &, int64_t>(
-  batch_rule_36_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_35_t,Tensor,const Tensor &, const Tensor &, const c10::optional<Tensor> &, int64_t>(
+  batch_rule_35_t batch_rule,
   const Tensor & self, const Tensor & target, const c10::optional<Tensor> & weight, int64_t reduction
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -737,10 +720,10 @@ Tensor lowerToNextLayer<batch_rule_36_t,Tensor,const Tensor &, const Tensor &, c
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_37_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, int64_t);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_36_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, int64_t);
 template <>
-Tensor lowerToNextLayer<batch_rule_37_t,Tensor,const Tensor &, const Tensor &, const Tensor &, const c10::optional<Tensor> &, int64_t>(
-  batch_rule_37_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_36_t,Tensor,const Tensor &, const Tensor &, const Tensor &, const c10::optional<Tensor> &, int64_t>(
+  batch_rule_36_t batch_rule,
   const Tensor & grad_output, const Tensor & self, const Tensor & target, const c10::optional<Tensor> & weight, int64_t reduction
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -765,10 +748,10 @@ Tensor lowerToNextLayer<batch_rule_37_t,Tensor,const Tensor &, const Tensor &, c
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_38_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, int64_t);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_37_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, int64_t);
 template <>
-Tensor lowerToNextLayer<batch_rule_38_t,Tensor,const Tensor &, const Tensor &, const c10::optional<Tensor> &, const c10::optional<Tensor> &, int64_t>(
-  batch_rule_38_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_37_t,Tensor,const Tensor &, const Tensor &, const c10::optional<Tensor> &, const c10::optional<Tensor> &, int64_t>(
+  batch_rule_37_t batch_rule,
   const Tensor & self, const Tensor & target, const c10::optional<Tensor> & weight, const c10::optional<Tensor> & pos_weight, int64_t reduction
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -795,10 +778,10 @@ Tensor lowerToNextLayer<batch_rule_38_t,Tensor,const Tensor &, const Tensor &, c
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_39_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, int64_t);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_38_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, int64_t);
 template <>
-Tensor lowerToNextLayer<batch_rule_39_t,Tensor,const Tensor &, const Tensor &, const Tensor &, const c10::optional<Tensor> &, const c10::optional<Tensor> &, int64_t>(
-  batch_rule_39_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_38_t,Tensor,const Tensor &, const Tensor &, const Tensor &, const c10::optional<Tensor> &, const c10::optional<Tensor> &, int64_t>(
+  batch_rule_38_t batch_rule,
   const Tensor & grad_output, const Tensor & self, const Tensor & target, const c10::optional<Tensor> & weight, const c10::optional<Tensor> & pos_weight, int64_t reduction
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -828,10 +811,10 @@ Tensor lowerToNextLayer<batch_rule_39_t,Tensor,const Tensor &, const Tensor &, c
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_40_t)(const Tensor &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, int64_t);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_39_t)(const Tensor &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, int64_t);
 template <>
-Tensor lowerToNextLayer<batch_rule_40_t,Tensor,const Tensor &, const c10::optional<Tensor> &, int64_t>(
-  batch_rule_40_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_39_t,Tensor,const Tensor &, const c10::optional<Tensor> &, int64_t>(
+  batch_rule_39_t batch_rule,
   const Tensor & self, const c10::optional<Tensor> & weights, int64_t minlength
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -850,10 +833,10 @@ Tensor lowerToNextLayer<batch_rule_40_t,Tensor,const Tensor &, const c10::option
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_41_t)(const Tensor &, c10::optional<int64_t>, const Scalar &);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_40_t)(const Tensor &, c10::optional<int64_t>, const Scalar &);
 template <>
-Tensor lowerToNextLayer<batch_rule_41_t,Tensor,const Tensor &, const Scalar &>(
-  batch_rule_41_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_40_t,Tensor,const Tensor &, const Scalar &>(
+  batch_rule_40_t batch_rule,
   const Tensor & self, const Scalar & other
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -867,10 +850,10 @@ Tensor lowerToNextLayer<batch_rule_41_t,Tensor,const Tensor &, const Scalar &>(
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<::std::vector<Tensor>,c10::optional<int64_t>> (*batch_rule_42_t)(const Tensor &, c10::optional<int64_t>, int64_t, int64_t);
+typedef std::tuple<::std::vector<Tensor>,c10::optional<int64_t>> (*batch_rule_41_t)(const Tensor &, c10::optional<int64_t>, int64_t, int64_t);
 template <>
-::std::vector<Tensor> lowerToNextLayer<batch_rule_42_t,::std::vector<Tensor>,const Tensor &, int64_t, int64_t>(
-  batch_rule_42_t batch_rule,
+::std::vector<Tensor> lowerToNextLayer<batch_rule_41_t,::std::vector<Tensor>,const Tensor &, int64_t, int64_t>(
+  batch_rule_41_t batch_rule,
   const Tensor & self, int64_t split_size, int64_t dim
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -884,10 +867,10 @@ template <>
   return makeBatchedVector(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<::std::vector<Tensor>,c10::optional<int64_t>> (*batch_rule_43_t)(const Tensor &, c10::optional<int64_t>, IntArrayRef, int64_t);
+typedef std::tuple<::std::vector<Tensor>,c10::optional<int64_t>> (*batch_rule_42_t)(const Tensor &, c10::optional<int64_t>, IntArrayRef, int64_t);
 template <>
-::std::vector<Tensor> lowerToNextLayer<batch_rule_43_t,::std::vector<Tensor>,const Tensor &, IntArrayRef, int64_t>(
-  batch_rule_43_t batch_rule,
+::std::vector<Tensor> lowerToNextLayer<batch_rule_42_t,::std::vector<Tensor>,const Tensor &, IntArrayRef, int64_t>(
+  batch_rule_42_t batch_rule,
   const Tensor & self, IntArrayRef split_sizes, int64_t dim
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -901,10 +884,10 @@ template <>
   return makeBatchedVector(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<::std::vector<Tensor>,c10::optional<int64_t>> (*batch_rule_44_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, int64_t);
+typedef std::tuple<::std::vector<Tensor>,c10::optional<int64_t>> (*batch_rule_43_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, int64_t);
 template <>
-::std::vector<Tensor> lowerToNextLayer<batch_rule_44_t,::std::vector<Tensor>,const Tensor &, const Tensor &, int64_t>(
-  batch_rule_44_t batch_rule,
+::std::vector<Tensor> lowerToNextLayer<batch_rule_43_t,::std::vector<Tensor>,const Tensor &, const Tensor &, int64_t>(
+  batch_rule_43_t batch_rule,
   const Tensor & self, const Tensor & tensor_indices_or_sections, int64_t dim
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -921,10 +904,10 @@ template <>
   return makeBatchedVector(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_45_t)(const Tensor &, c10::optional<int64_t>, const c10::optional<Scalar> &, const c10::optional<Scalar> &);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_44_t)(const Tensor &, c10::optional<int64_t>, const c10::optional<Scalar> &, const c10::optional<Scalar> &);
 template <>
-Tensor lowerToNextLayer<batch_rule_45_t,Tensor,const Tensor &, const c10::optional<Scalar> &, const c10::optional<Scalar> &>(
-  batch_rule_45_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_44_t,Tensor,const Tensor &, const c10::optional<Scalar> &, const c10::optional<Scalar> &>(
+  batch_rule_44_t batch_rule,
   const Tensor & self, const c10::optional<Scalar> & min, const c10::optional<Scalar> & max
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -938,10 +921,10 @@ Tensor lowerToNextLayer<batch_rule_45_t,Tensor,const Tensor &, const c10::option
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_46_t)(const Tensor &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_45_t)(const Tensor &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>);
 template <>
-Tensor lowerToNextLayer<batch_rule_46_t,Tensor,const Tensor &, const c10::optional<Tensor> &, const c10::optional<Tensor> &>(
-  batch_rule_46_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_45_t,Tensor,const Tensor &, const c10::optional<Tensor> &, const c10::optional<Tensor> &>(
+  batch_rule_45_t batch_rule,
   const Tensor & self, const c10::optional<Tensor> & min, const c10::optional<Tensor> & max
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -965,10 +948,10 @@ Tensor lowerToNextLayer<batch_rule_46_t,Tensor,const Tensor &, const c10::option
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_47_t)(const Tensor &, c10::optional<int64_t>, IntArrayRef, const Scalar &);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_46_t)(const Tensor &, c10::optional<int64_t>, IntArrayRef, const Scalar &);
 template <>
-Tensor lowerToNextLayer<batch_rule_47_t,Tensor,const Tensor &, IntArrayRef, const Scalar &>(
-  batch_rule_47_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_46_t,Tensor,const Tensor &, IntArrayRef, const Scalar &>(
+  batch_rule_46_t batch_rule,
   const Tensor & self, IntArrayRef pad, const Scalar & value
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -982,10 +965,10 @@ Tensor lowerToNextLayer<batch_rule_47_t,Tensor,const Tensor &, IntArrayRef, cons
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_48_t)(const Tensor &, c10::optional<int64_t>, MemoryFormat);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_47_t)(const Tensor &, c10::optional<int64_t>, MemoryFormat);
 template <>
-Tensor lowerToNextLayer<batch_rule_48_t,Tensor,const Tensor &, MemoryFormat>(
-  batch_rule_48_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_47_t,Tensor,const Tensor &, MemoryFormat>(
+  batch_rule_47_t batch_rule,
   const Tensor & self, MemoryFormat memory_format
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -999,10 +982,10 @@ Tensor lowerToNextLayer<batch_rule_48_t,Tensor,const Tensor &, MemoryFormat>(
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_49_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, IntArrayRef, IntArrayRef, IntArrayRef, bool, IntArrayRef, int64_t);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_48_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, IntArrayRef, IntArrayRef, IntArrayRef, bool, IntArrayRef, int64_t);
 template <>
-Tensor lowerToNextLayer<batch_rule_49_t,Tensor,const Tensor &, const Tensor &, const c10::optional<Tensor> &, IntArrayRef, IntArrayRef, IntArrayRef, bool, IntArrayRef, int64_t>(
-  batch_rule_49_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_48_t,Tensor,const Tensor &, const Tensor &, const c10::optional<Tensor> &, IntArrayRef, IntArrayRef, IntArrayRef, bool, IntArrayRef, int64_t>(
+  batch_rule_48_t batch_rule,
   const Tensor & input, const Tensor & weight, const c10::optional<Tensor> & bias, IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation, bool transposed, IntArrayRef output_padding, int64_t groups
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -1024,10 +1007,10 @@ Tensor lowerToNextLayer<batch_rule_49_t,Tensor,const Tensor &, const Tensor &, c
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_50_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, IntArrayRef, IntArrayRef, IntArrayRef, bool, IntArrayRef, int64_t, bool, bool, bool, bool);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_49_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, IntArrayRef, IntArrayRef, IntArrayRef, bool, IntArrayRef, int64_t, bool, bool, bool, bool);
 template <>
-Tensor lowerToNextLayer<batch_rule_50_t,Tensor,const Tensor &, const Tensor &, const c10::optional<Tensor> &, IntArrayRef, IntArrayRef, IntArrayRef, bool, IntArrayRef, int64_t, bool, bool, bool, bool>(
-  batch_rule_50_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_49_t,Tensor,const Tensor &, const Tensor &, const c10::optional<Tensor> &, IntArrayRef, IntArrayRef, IntArrayRef, bool, IntArrayRef, int64_t, bool, bool, bool, bool>(
+  batch_rule_49_t batch_rule,
   const Tensor & input, const Tensor & weight, const c10::optional<Tensor> & bias, IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation, bool transposed, IntArrayRef output_padding, int64_t groups, bool benchmark, bool deterministic, bool cudnn_enabled, bool allow_tf32
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -1049,10 +1032,10 @@ Tensor lowerToNextLayer<batch_rule_50_t,Tensor,const Tensor &, const Tensor &, c
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_51_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, IntArrayRef, IntArrayRef, IntArrayRef, bool, IntArrayRef, int64_t, bool, bool, bool);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_50_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, IntArrayRef, IntArrayRef, IntArrayRef, bool, IntArrayRef, int64_t, bool, bool, bool);
 template <>
-Tensor lowerToNextLayer<batch_rule_51_t,Tensor,const Tensor &, const Tensor &, const c10::optional<Tensor> &, IntArrayRef, IntArrayRef, IntArrayRef, bool, IntArrayRef, int64_t, bool, bool, bool>(
-  batch_rule_51_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_50_t,Tensor,const Tensor &, const Tensor &, const c10::optional<Tensor> &, IntArrayRef, IntArrayRef, IntArrayRef, bool, IntArrayRef, int64_t, bool, bool, bool>(
+  batch_rule_50_t batch_rule,
   const Tensor & input, const Tensor & weight, const c10::optional<Tensor> & bias, IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation, bool transposed, IntArrayRef output_padding, int64_t groups, bool benchmark, bool deterministic, bool cudnn_enabled
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -1074,10 +1057,10 @@ Tensor lowerToNextLayer<batch_rule_51_t,Tensor,const Tensor &, const Tensor &, c
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_52_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, IntArrayRef, c10::string_view, IntArrayRef, int64_t);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_51_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, IntArrayRef, c10::string_view, IntArrayRef, int64_t);
 template <>
-Tensor lowerToNextLayer<batch_rule_52_t,Tensor,const Tensor &, const Tensor &, const c10::optional<Tensor> &, IntArrayRef, c10::string_view, IntArrayRef, int64_t>(
-  batch_rule_52_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_51_t,Tensor,const Tensor &, const Tensor &, const c10::optional<Tensor> &, IntArrayRef, c10::string_view, IntArrayRef, int64_t>(
+  batch_rule_51_t batch_rule,
   const Tensor & input, const Tensor & weight, const c10::optional<Tensor> & bias, IntArrayRef stride, c10::string_view padding, IntArrayRef dilation, int64_t groups
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -1099,10 +1082,10 @@ Tensor lowerToNextLayer<batch_rule_52_t,Tensor,const Tensor &, const Tensor &, c
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_53_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, IntArrayRef, IntArrayRef, IntArrayRef, bool, IntArrayRef);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_52_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, IntArrayRef, IntArrayRef, IntArrayRef, bool, IntArrayRef);
 template <>
-Tensor lowerToNextLayer<batch_rule_53_t,Tensor,const Tensor &, const Tensor &, const c10::optional<Tensor> &, IntArrayRef, IntArrayRef, IntArrayRef, bool, IntArrayRef>(
-  batch_rule_53_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_52_t,Tensor,const Tensor &, const Tensor &, const c10::optional<Tensor> &, IntArrayRef, IntArrayRef, IntArrayRef, bool, IntArrayRef>(
+  batch_rule_52_t batch_rule,
   const Tensor & input, const Tensor & weight, const c10::optional<Tensor> & bias, IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation, bool transposed, IntArrayRef output_padding
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -1124,10 +1107,10 @@ Tensor lowerToNextLayer<batch_rule_53_t,Tensor,const Tensor &, const Tensor &, c
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_54_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, IntArrayRef, IntArrayRef, IntArrayRef, int64_t);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_53_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, IntArrayRef, IntArrayRef, IntArrayRef, int64_t);
 template <>
-Tensor lowerToNextLayer<batch_rule_54_t,Tensor,const Tensor &, const Tensor &, const c10::optional<Tensor> &, IntArrayRef, IntArrayRef, IntArrayRef, int64_t>(
-  batch_rule_54_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_53_t,Tensor,const Tensor &, const Tensor &, const c10::optional<Tensor> &, IntArrayRef, IntArrayRef, IntArrayRef, int64_t>(
+  batch_rule_53_t batch_rule,
   const Tensor & self, const Tensor & weight, const c10::optional<Tensor> & bias, IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -1149,10 +1132,10 @@ Tensor lowerToNextLayer<batch_rule_54_t,Tensor,const Tensor &, const Tensor &, c
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_55_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, int64_t);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_54_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, int64_t);
 template <>
-Tensor lowerToNextLayer<batch_rule_55_t,Tensor,const Tensor &, const Tensor &, const Tensor &, int64_t>(
-  batch_rule_55_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_54_t,Tensor,const Tensor &, const Tensor &, const Tensor &, int64_t>(
+  batch_rule_54_t batch_rule,
   const Tensor & grad_output, const Tensor & self, const Tensor & target, int64_t reduction
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -1172,10 +1155,10 @@ Tensor lowerToNextLayer<batch_rule_55_t,Tensor,const Tensor &, const Tensor &, c
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_56_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, int64_t);
+typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_55_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, int64_t);
 template <>
-std::tuple<Tensor,Tensor,Tensor> lowerToNextLayer<batch_rule_56_t,std::tuple<Tensor,Tensor,Tensor>,const Tensor &, const Tensor &, const Tensor &, const Tensor &, int64_t>(
-  batch_rule_56_t batch_rule,
+std::tuple<Tensor,Tensor,Tensor> lowerToNextLayer<batch_rule_55_t,std::tuple<Tensor,Tensor,Tensor>,const Tensor &, const Tensor &, const Tensor &, const Tensor &, int64_t>(
+  batch_rule_55_t batch_rule,
   const Tensor & self, const Tensor & input, const Tensor & weight, const Tensor & bias, int64_t pad
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -1198,10 +1181,10 @@ std::tuple<Tensor,Tensor,Tensor> lowerToNextLayer<batch_rule_56_t,std::tuple<Ten
   return std::make_tuple(makeBatched(std::get<0>(results), std::get<1>(results), cur_level), makeBatched(std::get<2>(results), std::get<3>(results), cur_level), makeBatched(std::get<4>(results), std::get<5>(results), cur_level));
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_57_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, IntArrayRef);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_56_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, IntArrayRef);
 template <>
-Tensor lowerToNextLayer<batch_rule_57_t,Tensor,const Tensor &, const Tensor &, const c10::optional<Tensor> &, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, IntArrayRef>(
-  batch_rule_57_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_56_t,Tensor,const Tensor &, const Tensor &, const c10::optional<Tensor> &, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, IntArrayRef>(
+  batch_rule_56_t batch_rule,
   const Tensor & input, const Tensor & weight, const c10::optional<Tensor> & bias, IntArrayRef stride, IntArrayRef padding, IntArrayRef output_padding, int64_t groups, IntArrayRef dilation
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -1223,10 +1206,10 @@ Tensor lowerToNextLayer<batch_rule_57_t,Tensor,const Tensor &, const Tensor &, c
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_58_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, bool);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_57_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, bool);
 template <>
-Tensor lowerToNextLayer<batch_rule_58_t,Tensor,const Tensor &, const Tensor &, bool>(
-  batch_rule_58_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_57_t,Tensor,const Tensor &, const Tensor &, bool>(
+  batch_rule_57_t batch_rule,
   const Tensor & input, const Tensor & tol, bool hermitian
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -1243,10 +1226,10 @@ Tensor lowerToNextLayer<batch_rule_58_t,Tensor,const Tensor &, const Tensor &, b
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_59_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, double, int64_t);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_58_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, double, int64_t);
 template <>
-Tensor lowerToNextLayer<batch_rule_59_t,Tensor,const Tensor &, const Tensor &, const Tensor &, double, int64_t>(
-  batch_rule_59_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_58_t,Tensor,const Tensor &, const Tensor &, const Tensor &, double, int64_t>(
+  batch_rule_58_t batch_rule,
   const Tensor & input1, const Tensor & input2, const Tensor & target, double margin, int64_t reduction
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -1266,10 +1249,10 @@ Tensor lowerToNextLayer<batch_rule_59_t,Tensor,const Tensor &, const Tensor &, c
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_60_t)(const Tensor &, c10::optional<int64_t>, c10::optional<int64_t>);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_59_t)(const Tensor &, c10::optional<int64_t>, c10::optional<int64_t>);
 template <>
-Tensor lowerToNextLayer<batch_rule_60_t,Tensor,const Tensor &, c10::optional<int64_t>>(
-  batch_rule_60_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_59_t,Tensor,const Tensor &, c10::optional<int64_t>>(
+  batch_rule_59_t batch_rule,
   const Tensor & repeats, c10::optional<int64_t> output_size
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -1283,10 +1266,10 @@ Tensor lowerToNextLayer<batch_rule_60_t,Tensor,const Tensor &, c10::optional<int
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_61_t)(const Tensor &, c10::optional<int64_t>, int64_t, const c10::optional<Tensor> &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_60_t)(const Tensor &, c10::optional<int64_t>, int64_t, const c10::optional<Tensor> &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>);
 template <>
-Tensor lowerToNextLayer<batch_rule_61_t,Tensor,const Tensor &, int64_t, const c10::optional<Tensor> &, const c10::optional<Tensor> &>(
-  batch_rule_61_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_60_t,Tensor,const Tensor &, int64_t, const c10::optional<Tensor> &, const c10::optional<Tensor> &>(
+  batch_rule_60_t batch_rule,
   const Tensor & self, int64_t correction, const c10::optional<Tensor> & fweights, const c10::optional<Tensor> & aweights
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -1310,10 +1293,10 @@ Tensor lowerToNextLayer<batch_rule_61_t,Tensor,const Tensor &, int64_t, const c1
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_62_t)(const Tensor &, c10::optional<int64_t>, int64_t, int64_t, int64_t, int64_t);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_61_t)(const Tensor &, c10::optional<int64_t>, int64_t, int64_t, int64_t, int64_t);
 template <>
-Tensor lowerToNextLayer<batch_rule_62_t,Tensor,const Tensor &, int64_t, int64_t, int64_t, int64_t>(
-  batch_rule_62_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_61_t,Tensor,const Tensor &, int64_t, int64_t, int64_t, int64_t>(
+  batch_rule_61_t batch_rule,
   const Tensor & grad, int64_t N, int64_t C, int64_t H, int64_t W
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -1327,10 +1310,10 @@ Tensor lowerToNextLayer<batch_rule_62_t,Tensor,const Tensor &, int64_t, int64_t,
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_63_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, bool, double, double);
+typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_62_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, bool, double, double);
 template <>
-std::tuple<Tensor,Tensor,Tensor,Tensor> lowerToNextLayer<batch_rule_63_t,std::tuple<Tensor,Tensor,Tensor,Tensor>,const Tensor &, const Tensor &, const c10::optional<Tensor> &, const c10::optional<Tensor> &, const c10::optional<Tensor> &, bool, double, double>(
-  batch_rule_63_t batch_rule,
+std::tuple<Tensor,Tensor,Tensor,Tensor> lowerToNextLayer<batch_rule_62_t,std::tuple<Tensor,Tensor,Tensor,Tensor>,const Tensor &, const Tensor &, const c10::optional<Tensor> &, const c10::optional<Tensor> &, const c10::optional<Tensor> &, bool, double, double>(
+  batch_rule_62_t batch_rule,
   const Tensor & input, const Tensor & weight, const c10::optional<Tensor> & bias, const c10::optional<Tensor> & running_mean, const c10::optional<Tensor> & running_var, bool training, double exponential_average_factor, double epsilon
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -1362,10 +1345,10 @@ std::tuple<Tensor,Tensor,Tensor,Tensor> lowerToNextLayer<batch_rule_63_t,std::tu
   return std::make_tuple(makeBatched(std::get<0>(results), std::get<1>(results), cur_level), makeBatched(std::get<2>(results), std::get<3>(results), cur_level), makeBatched(std::get<4>(results), std::get<5>(results), cur_level), makeBatched(std::get<6>(results), std::get<7>(results), cur_level));
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_64_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, double, const Tensor &, c10::optional<int64_t>);
+typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_63_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, double, const Tensor &, c10::optional<int64_t>);
 template <>
-std::tuple<Tensor,Tensor,Tensor> lowerToNextLayer<batch_rule_64_t,std::tuple<Tensor,Tensor,Tensor>,const Tensor &, const Tensor &, const Tensor &, const c10::optional<Tensor> &, const c10::optional<Tensor> &, const c10::optional<Tensor> &, const c10::optional<Tensor> &, double, const Tensor &>(
-  batch_rule_64_t batch_rule,
+std::tuple<Tensor,Tensor,Tensor> lowerToNextLayer<batch_rule_63_t,std::tuple<Tensor,Tensor,Tensor>,const Tensor &, const Tensor &, const Tensor &, const c10::optional<Tensor> &, const c10::optional<Tensor> &, const c10::optional<Tensor> &, const c10::optional<Tensor> &, double, const Tensor &>(
+  batch_rule_63_t batch_rule,
   const Tensor & input, const Tensor & grad_output, const Tensor & weight, const c10::optional<Tensor> & running_mean, const c10::optional<Tensor> & running_var, const c10::optional<Tensor> & save_mean, const c10::optional<Tensor> & save_var, double epsilon, const Tensor & reserveSpace
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -1408,10 +1391,10 @@ std::tuple<Tensor,Tensor,Tensor> lowerToNextLayer<batch_rule_64_t,std::tuple<Ten
   return std::make_tuple(makeBatched(std::get<0>(results), std::get<1>(results), cur_level), makeBatched(std::get<2>(results), std::get<3>(results), cur_level), makeBatched(std::get<4>(results), std::get<5>(results), cur_level));
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_65_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_64_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool);
 template <>
-Tensor lowerToNextLayer<batch_rule_65_t,Tensor,const Tensor &, const Tensor &, const c10::optional<Tensor> &, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool>(
-  batch_rule_65_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_64_t,Tensor,const Tensor &, const Tensor &, const c10::optional<Tensor> &, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool>(
+  batch_rule_64_t batch_rule,
   const Tensor & self, const Tensor & weight, const c10::optional<Tensor> & bias, IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups, bool benchmark, bool deterministic
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -1433,10 +1416,10 @@ Tensor lowerToNextLayer<batch_rule_65_t,Tensor,const Tensor &, const Tensor &, c
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_66_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_65_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool);
 template <>
-Tensor lowerToNextLayer<batch_rule_66_t,Tensor,const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool>(
-  batch_rule_66_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_65_t,Tensor,const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool>(
+  batch_rule_65_t batch_rule,
   const Tensor & grad_output, const Tensor & weight, IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups, bool benchmark, bool deterministic
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -1453,10 +1436,10 @@ Tensor lowerToNextLayer<batch_rule_66_t,Tensor,const Tensor &, const Tensor &, I
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_67_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool, bool);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_66_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool, bool);
 template <>
-Tensor lowerToNextLayer<batch_rule_67_t,Tensor,const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool, bool>(
-  batch_rule_67_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_66_t,Tensor,const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool, bool>(
+  batch_rule_66_t batch_rule,
   const Tensor & grad_output, const Tensor & weight, IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups, bool benchmark, bool deterministic, bool allow_tf32
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -1473,10 +1456,10 @@ Tensor lowerToNextLayer<batch_rule_67_t,Tensor,const Tensor &, const Tensor &, I
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_68_t)(IntArrayRef, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool, bool);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_67_t)(IntArrayRef, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool, bool);
 template <>
-Tensor lowerToNextLayer<batch_rule_68_t,Tensor,IntArrayRef, const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool, bool>(
-  batch_rule_68_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_67_t,Tensor,IntArrayRef, const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool, bool>(
+  batch_rule_67_t batch_rule,
   IntArrayRef weight_size, const Tensor & grad_output, const Tensor & self, IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups, bool benchmark, bool deterministic, bool allow_tf32
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -1493,10 +1476,10 @@ Tensor lowerToNextLayer<batch_rule_68_t,Tensor,IntArrayRef, const Tensor &, cons
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_69_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, IntArrayRef, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_68_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, IntArrayRef, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool);
 template <>
-Tensor lowerToNextLayer<batch_rule_69_t,Tensor,const Tensor &, const Tensor &, const c10::optional<Tensor> &, IntArrayRef, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool>(
-  batch_rule_69_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_68_t,Tensor,const Tensor &, const Tensor &, const c10::optional<Tensor> &, IntArrayRef, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool>(
+  batch_rule_68_t batch_rule,
   const Tensor & self, const Tensor & weight, const c10::optional<Tensor> & bias, IntArrayRef padding, IntArrayRef output_padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups, bool benchmark, bool deterministic
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -1518,10 +1501,10 @@ Tensor lowerToNextLayer<batch_rule_69_t,Tensor,const Tensor &, const Tensor &, c
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_70_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, IntArrayRef, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_69_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, IntArrayRef, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool);
 template <>
-Tensor lowerToNextLayer<batch_rule_70_t,Tensor,const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool>(
-  batch_rule_70_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_69_t,Tensor,const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool>(
+  batch_rule_69_t batch_rule,
   const Tensor & self, const Tensor & weight, IntArrayRef padding, IntArrayRef output_padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups, bool benchmark, bool deterministic
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -1538,10 +1521,10 @@ Tensor lowerToNextLayer<batch_rule_70_t,Tensor,const Tensor &, const Tensor &, I
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_71_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, IntArrayRef, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool, bool);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_70_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, IntArrayRef, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool, bool);
 template <>
-Tensor lowerToNextLayer<batch_rule_71_t,Tensor,const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool, bool>(
-  batch_rule_71_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_70_t,Tensor,const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool, bool>(
+  batch_rule_70_t batch_rule,
   const Tensor & self, const Tensor & weight, IntArrayRef padding, IntArrayRef output_padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups, bool benchmark, bool deterministic, bool allow_tf32
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -1558,10 +1541,10 @@ Tensor lowerToNextLayer<batch_rule_71_t,Tensor,const Tensor &, const Tensor &, I
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_72_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const c10::optional<Scalar> &, const c10::optional<Tensor> &, c10::optional<int64_t>, IntArrayRef, IntArrayRef, IntArrayRef, int64_t);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_71_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const c10::optional<Scalar> &, const c10::optional<Tensor> &, c10::optional<int64_t>, IntArrayRef, IntArrayRef, IntArrayRef, int64_t);
 template <>
-Tensor lowerToNextLayer<batch_rule_72_t,Tensor,const Tensor &, const Tensor &, const Tensor &, const c10::optional<Scalar> &, const c10::optional<Tensor> &, IntArrayRef, IntArrayRef, IntArrayRef, int64_t>(
-  batch_rule_72_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_71_t,Tensor,const Tensor &, const Tensor &, const Tensor &, const c10::optional<Scalar> &, const c10::optional<Tensor> &, IntArrayRef, IntArrayRef, IntArrayRef, int64_t>(
+  batch_rule_71_t batch_rule,
   const Tensor & self, const Tensor & weight, const Tensor & z, const c10::optional<Scalar> & alpha, const c10::optional<Tensor> & bias, IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation, int64_t groups
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -1586,10 +1569,10 @@ Tensor lowerToNextLayer<batch_rule_72_t,Tensor,const Tensor &, const Tensor &, c
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_73_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>);
+typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_72_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>);
 template <>
-std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_73_t,std::tuple<Tensor,Tensor>,const Tensor &, const Tensor &, const Tensor &>(
-  batch_rule_73_t batch_rule,
+std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_72_t,std::tuple<Tensor,Tensor>,const Tensor &, const Tensor &, const Tensor &>(
+  batch_rule_72_t batch_rule,
   const Tensor & grad_output, const Tensor & self, const Tensor & weight
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -1609,10 +1592,10 @@ std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_73_t,std::tuple<Tensor,Ten
   return std::make_tuple(makeBatched(std::get<0>(results), std::get<1>(results), cur_level), makeBatched(std::get<2>(results), std::get<3>(results), cur_level));
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_74_t)(const Tensor &, c10::optional<int64_t>, Dimname);
+typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_73_t)(const Tensor &, c10::optional<int64_t>, Dimname);
 template <>
-std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_74_t,std::tuple<Tensor,Tensor>,const Tensor &, Dimname>(
-  batch_rule_74_t batch_rule,
+std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_73_t,std::tuple<Tensor,Tensor>,const Tensor &, Dimname>(
+  batch_rule_73_t batch_rule,
   const Tensor & self, Dimname dim
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -1626,10 +1609,10 @@ std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_74_t,std::tuple<Tensor,Ten
   return std::make_tuple(makeBatched(std::get<0>(results), std::get<1>(results), cur_level), makeBatched(std::get<2>(results), std::get<3>(results), cur_level));
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_75_t)(const Tensor &, c10::optional<int64_t>, int64_t, c10::optional<ScalarType>);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_74_t)(const Tensor &, c10::optional<int64_t>, int64_t, c10::optional<ScalarType>);
 template <>
-Tensor lowerToNextLayer<batch_rule_75_t,Tensor,const Tensor &, int64_t, c10::optional<ScalarType>>(
-  batch_rule_75_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_74_t,Tensor,const Tensor &, int64_t, c10::optional<ScalarType>>(
+  batch_rule_74_t batch_rule,
   const Tensor & self, int64_t dim, c10::optional<ScalarType> dtype
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -1643,10 +1626,10 @@ Tensor lowerToNextLayer<batch_rule_75_t,Tensor,const Tensor &, int64_t, c10::opt
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_76_t)(const Tensor &, c10::optional<int64_t>, Dimname, c10::optional<ScalarType>);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_75_t)(const Tensor &, c10::optional<int64_t>, Dimname, c10::optional<ScalarType>);
 template <>
-Tensor lowerToNextLayer<batch_rule_76_t,Tensor,const Tensor &, Dimname, c10::optional<ScalarType>>(
-  batch_rule_76_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_75_t,Tensor,const Tensor &, Dimname, c10::optional<ScalarType>>(
+  batch_rule_75_t batch_rule,
   const Tensor & self, Dimname dim, c10::optional<ScalarType> dtype
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -1660,10 +1643,10 @@ Tensor lowerToNextLayer<batch_rule_76_t,Tensor,const Tensor &, Dimname, c10::opt
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_77_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, int64_t, const Tensor &, c10::optional<int64_t>);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_76_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, int64_t, const Tensor &, c10::optional<int64_t>);
 template <>
-Tensor lowerToNextLayer<batch_rule_77_t,Tensor,const Tensor &, const Tensor &, int64_t, const Tensor &>(
-  batch_rule_77_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_76_t,Tensor,const Tensor &, const Tensor &, int64_t, const Tensor &>(
+  batch_rule_76_t batch_rule,
   const Tensor & grad_output, const Tensor & output, int64_t dim, const Tensor & self
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -1683,10 +1666,10 @@ Tensor lowerToNextLayer<batch_rule_77_t,Tensor,const Tensor &, const Tensor &, i
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_78_t)(const Tensor &, c10::optional<int64_t>, const Scalar &, int64_t);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_77_t)(const Tensor &, c10::optional<int64_t>, const Scalar &, int64_t);
 template <>
-Tensor lowerToNextLayer<batch_rule_78_t,Tensor,const Tensor &, const Scalar &, int64_t>(
-  batch_rule_78_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_77_t,Tensor,const Tensor &, const Scalar &, int64_t>(
+  batch_rule_77_t batch_rule,
   const Tensor & y, const Scalar & dx, int64_t dim
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -1700,10 +1683,10 @@ Tensor lowerToNextLayer<batch_rule_78_t,Tensor,const Tensor &, const Scalar &, i
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_79_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, IntArrayRef, IntArrayRef, int64_t, int64_t, bool);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_78_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, IntArrayRef, IntArrayRef, int64_t, int64_t, bool);
 template <>
-Tensor lowerToNextLayer<batch_rule_79_t,Tensor,const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, int64_t, int64_t, bool>(
-  batch_rule_79_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_78_t,Tensor,const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, int64_t, int64_t, bool>(
+  batch_rule_78_t batch_rule,
   const Tensor & log_probs, const Tensor & targets, IntArrayRef input_lengths, IntArrayRef target_lengths, int64_t blank, int64_t reduction, bool zero_infinity
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -1720,10 +1703,10 @@ Tensor lowerToNextLayer<batch_rule_79_t,Tensor,const Tensor &, const Tensor &, I
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_80_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, int64_t, int64_t, bool);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_79_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, int64_t, int64_t, bool);
 template <>
-Tensor lowerToNextLayer<batch_rule_80_t,Tensor,const Tensor &, const Tensor &, const Tensor &, const Tensor &, int64_t, int64_t, bool>(
-  batch_rule_80_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_79_t,Tensor,const Tensor &, const Tensor &, const Tensor &, const Tensor &, int64_t, int64_t, bool>(
+  batch_rule_79_t batch_rule,
   const Tensor & log_probs, const Tensor & targets, const Tensor & input_lengths, const Tensor & target_lengths, int64_t blank, int64_t reduction, bool zero_infinity
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -1746,10 +1729,10 @@ Tensor lowerToNextLayer<batch_rule_80_t,Tensor,const Tensor &, const Tensor &, c
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_81_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, IntArrayRef, IntArrayRef, int64_t, bool);
+typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_80_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, IntArrayRef, IntArrayRef, int64_t, bool);
 template <>
-std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_81_t,std::tuple<Tensor,Tensor>,const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, int64_t, bool>(
-  batch_rule_81_t batch_rule,
+std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_80_t,std::tuple<Tensor,Tensor>,const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, int64_t, bool>(
+  batch_rule_80_t batch_rule,
   const Tensor & log_probs, const Tensor & targets, IntArrayRef input_lengths, IntArrayRef target_lengths, int64_t blank, bool zero_infinity
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -1766,10 +1749,10 @@ std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_81_t,std::tuple<Tensor,Ten
   return std::make_tuple(makeBatched(std::get<0>(results), std::get<1>(results), cur_level), makeBatched(std::get<2>(results), std::get<3>(results), cur_level));
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_82_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, IntArrayRef, IntArrayRef, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, int64_t, bool);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_81_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, IntArrayRef, IntArrayRef, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, int64_t, bool);
 template <>
-Tensor lowerToNextLayer<batch_rule_82_t,Tensor,const Tensor &, const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, const Tensor &, const Tensor &, int64_t, bool>(
-  batch_rule_82_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_81_t,Tensor,const Tensor &, const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, const Tensor &, const Tensor &, int64_t, bool>(
+  batch_rule_81_t batch_rule,
   const Tensor & grad, const Tensor & log_probs, const Tensor & targets, IntArrayRef input_lengths, IntArrayRef target_lengths, const Tensor & neg_log_likelihood, const Tensor & log_alpha, int64_t blank, bool zero_infinity
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -1795,10 +1778,10 @@ Tensor lowerToNextLayer<batch_rule_82_t,Tensor,const Tensor &, const Tensor &, c
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_83_t)(const Tensor &, c10::optional<int64_t>, int64_t, int64_t, int64_t);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_82_t)(const Tensor &, c10::optional<int64_t>, int64_t, int64_t, int64_t);
 template <>
-Tensor lowerToNextLayer<batch_rule_83_t,Tensor,const Tensor &, int64_t, int64_t, int64_t>(
-  batch_rule_83_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_82_t,Tensor,const Tensor &, int64_t, int64_t, int64_t>(
+  batch_rule_82_t batch_rule,
   const Tensor & self, int64_t level, int64_t batch_size, int64_t out_dim
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -1812,10 +1795,10 @@ Tensor lowerToNextLayer<batch_rule_83_t,Tensor,const Tensor &, int64_t, int64_t,
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_84_t)(const Tensor &, c10::optional<int64_t>, Dimname, Dimname, Dimname, int64_t);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_83_t)(const Tensor &, c10::optional<int64_t>, Dimname, Dimname, Dimname, int64_t);
 template <>
-Tensor lowerToNextLayer<batch_rule_84_t,Tensor,const Tensor &, Dimname, Dimname, Dimname, int64_t>(
-  batch_rule_84_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_83_t,Tensor,const Tensor &, Dimname, Dimname, Dimname, int64_t>(
+  batch_rule_83_t batch_rule,
   const Tensor & self, Dimname outdim, Dimname dim1, Dimname dim2, int64_t offset
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -1829,10 +1812,10 @@ Tensor lowerToNextLayer<batch_rule_84_t,Tensor,const Tensor &, Dimname, Dimname,
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_85_t)(const Tensor &, c10::optional<int64_t>, IntArrayRef, int64_t, int64_t, int64_t);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_84_t)(const Tensor &, c10::optional<int64_t>, IntArrayRef, int64_t, int64_t, int64_t);
 template <>
-Tensor lowerToNextLayer<batch_rule_85_t,Tensor,const Tensor &, IntArrayRef, int64_t, int64_t, int64_t>(
-  batch_rule_85_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_84_t,Tensor,const Tensor &, IntArrayRef, int64_t, int64_t, int64_t>(
+  batch_rule_84_t batch_rule,
   const Tensor & grad_in, IntArrayRef input_sizes, int64_t dim, int64_t size, int64_t step
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -1846,10 +1829,10 @@ Tensor lowerToNextLayer<batch_rule_85_t,Tensor,const Tensor &, IntArrayRef, int6
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_86_t)(const Tensor &, c10::optional<int64_t>, int64_t, int64_t, const c10::optional<Tensor> &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_85_t)(const Tensor &, c10::optional<int64_t>, int64_t, int64_t, const c10::optional<Tensor> &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>);
 template <>
-Tensor lowerToNextLayer<batch_rule_86_t,Tensor,const Tensor &, int64_t, int64_t, const c10::optional<Tensor> &, const c10::optional<Tensor> &>(
-  batch_rule_86_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_85_t,Tensor,const Tensor &, int64_t, int64_t, const c10::optional<Tensor> &, const c10::optional<Tensor> &>(
+  batch_rule_85_t batch_rule,
   const Tensor & self, int64_t n, int64_t dim, const c10::optional<Tensor> & prepend, const c10::optional<Tensor> & append
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -1873,10 +1856,10 @@ Tensor lowerToNextLayer<batch_rule_86_t,Tensor,const Tensor &, int64_t, int64_t,
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<::std::vector<Tensor>,c10::optional<int64_t>> (*batch_rule_87_t)(const Tensor &, c10::optional<int64_t>, const c10::optional<Scalar> &, c10::optional<int64_t>, int64_t);
+typedef std::tuple<::std::vector<Tensor>,c10::optional<int64_t>> (*batch_rule_86_t)(const Tensor &, c10::optional<int64_t>, const c10::optional<Scalar> &, c10::optional<int64_t>, int64_t);
 template <>
-::std::vector<Tensor> lowerToNextLayer<batch_rule_87_t,::std::vector<Tensor>,const Tensor &, const c10::optional<Scalar> &, c10::optional<int64_t>, int64_t>(
-  batch_rule_87_t batch_rule,
+::std::vector<Tensor> lowerToNextLayer<batch_rule_86_t,::std::vector<Tensor>,const Tensor &, const c10::optional<Scalar> &, c10::optional<int64_t>, int64_t>(
+  batch_rule_86_t batch_rule,
   const Tensor & self, const c10::optional<Scalar> & spacing, c10::optional<int64_t> dim, int64_t edge_order
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -1890,10 +1873,10 @@ template <>
   return makeBatchedVector(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<::std::vector<Tensor>,c10::optional<int64_t>> (*batch_rule_88_t)(const Tensor &, c10::optional<int64_t>, const Scalar &, IntArrayRef, int64_t);
+typedef std::tuple<::std::vector<Tensor>,c10::optional<int64_t>> (*batch_rule_87_t)(const Tensor &, c10::optional<int64_t>, const Scalar &, IntArrayRef, int64_t);
 template <>
-::std::vector<Tensor> lowerToNextLayer<batch_rule_88_t,::std::vector<Tensor>,const Tensor &, const Scalar &, IntArrayRef, int64_t>(
-  batch_rule_88_t batch_rule,
+::std::vector<Tensor> lowerToNextLayer<batch_rule_87_t,::std::vector<Tensor>,const Tensor &, const Scalar &, IntArrayRef, int64_t>(
+  batch_rule_87_t batch_rule,
   const Tensor & self, const Scalar & spacing, IntArrayRef dim, int64_t edge_order
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -1907,10 +1890,10 @@ template <>
   return makeBatchedVector(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<::std::vector<Tensor>,c10::optional<int64_t>> (*batch_rule_89_t)(const Tensor &, c10::optional<int64_t>, ArrayRef<Scalar>, c10::optional<int64_t>, int64_t);
+typedef std::tuple<::std::vector<Tensor>,c10::optional<int64_t>> (*batch_rule_88_t)(const Tensor &, c10::optional<int64_t>, ArrayRef<Scalar>, c10::optional<int64_t>, int64_t);
 template <>
-::std::vector<Tensor> lowerToNextLayer<batch_rule_89_t,::std::vector<Tensor>,const Tensor &, ArrayRef<Scalar>, c10::optional<int64_t>, int64_t>(
-  batch_rule_89_t batch_rule,
+::std::vector<Tensor> lowerToNextLayer<batch_rule_88_t,::std::vector<Tensor>,const Tensor &, ArrayRef<Scalar>, c10::optional<int64_t>, int64_t>(
+  batch_rule_88_t batch_rule,
   const Tensor & self, ArrayRef<Scalar> spacing, c10::optional<int64_t> dim, int64_t edge_order
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -1924,10 +1907,10 @@ template <>
   return makeBatchedVector(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<::std::vector<Tensor>,c10::optional<int64_t>> (*batch_rule_90_t)(const Tensor &, c10::optional<int64_t>, ArrayRef<Scalar>, IntArrayRef, int64_t);
+typedef std::tuple<::std::vector<Tensor>,c10::optional<int64_t>> (*batch_rule_89_t)(const Tensor &, c10::optional<int64_t>, ArrayRef<Scalar>, IntArrayRef, int64_t);
 template <>
-::std::vector<Tensor> lowerToNextLayer<batch_rule_90_t,::std::vector<Tensor>,const Tensor &, ArrayRef<Scalar>, IntArrayRef, int64_t>(
-  batch_rule_90_t batch_rule,
+::std::vector<Tensor> lowerToNextLayer<batch_rule_89_t,::std::vector<Tensor>,const Tensor &, ArrayRef<Scalar>, IntArrayRef, int64_t>(
+  batch_rule_89_t batch_rule,
   const Tensor & self, ArrayRef<Scalar> spacing, IntArrayRef dim, int64_t edge_order
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -1941,10 +1924,10 @@ template <>
   return makeBatchedVector(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_91_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, c10::optional<c10::string_view>);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_90_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, c10::optional<c10::string_view>);
 template <>
-Tensor lowerToNextLayer<batch_rule_91_t,Tensor,const Tensor &, const Tensor &, c10::optional<c10::string_view>>(
-  batch_rule_91_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_90_t,Tensor,const Tensor &, const Tensor &, c10::optional<c10::string_view>>(
+  batch_rule_90_t batch_rule,
   const Tensor & self, const Tensor & other, c10::optional<c10::string_view> rounding_mode
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -1961,10 +1944,10 @@ Tensor lowerToNextLayer<batch_rule_91_t,Tensor,const Tensor &, const Tensor &, c
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_92_t)(const Tensor &, c10::optional<int64_t>, const Scalar &, c10::optional<c10::string_view>);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_91_t)(const Tensor &, c10::optional<int64_t>, const Scalar &, c10::optional<c10::string_view>);
 template <>
-Tensor lowerToNextLayer<batch_rule_92_t,Tensor,const Tensor &, const Scalar &, c10::optional<c10::string_view>>(
-  batch_rule_92_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_91_t,Tensor,const Tensor &, const Scalar &, c10::optional<c10::string_view>>(
+  batch_rule_91_t batch_rule,
   const Tensor & self, const Scalar & other, c10::optional<c10::string_view> rounding_mode
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -1978,10 +1961,10 @@ Tensor lowerToNextLayer<batch_rule_92_t,Tensor,const Tensor &, const Scalar &, c
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_93_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, int64_t, bool, bool);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_92_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, int64_t, bool, bool);
 template <>
-Tensor lowerToNextLayer<batch_rule_93_t,Tensor,const Tensor &, const Tensor &, int64_t, bool, bool>(
-  batch_rule_93_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_92_t,Tensor,const Tensor &, const Tensor &, int64_t, bool, bool>(
+  batch_rule_92_t batch_rule,
   const Tensor & weight, const Tensor & indices, int64_t padding_idx, bool scale_grad_by_freq, bool sparse
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -1998,10 +1981,10 @@ Tensor lowerToNextLayer<batch_rule_93_t,Tensor,const Tensor &, const Tensor &, i
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_94_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, int64_t, int64_t, bool, bool);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_93_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, int64_t, int64_t, bool, bool);
 template <>
-Tensor lowerToNextLayer<batch_rule_94_t,Tensor,const Tensor &, const Tensor &, int64_t, int64_t, bool, bool>(
-  batch_rule_94_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_93_t,Tensor,const Tensor &, const Tensor &, int64_t, int64_t, bool, bool>(
+  batch_rule_93_t batch_rule,
   const Tensor & grad, const Tensor & indices, int64_t num_weights, int64_t padding_idx, bool scale_grad_by_freq, bool sparse
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -2018,10 +2001,10 @@ Tensor lowerToNextLayer<batch_rule_94_t,Tensor,const Tensor &, const Tensor &, i
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_95_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, int64_t, int64_t, bool);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_94_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, int64_t, int64_t, bool);
 template <>
-Tensor lowerToNextLayer<batch_rule_95_t,Tensor,const Tensor &, const Tensor &, int64_t, int64_t, bool>(
-  batch_rule_95_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_94_t,Tensor,const Tensor &, const Tensor &, int64_t, int64_t, bool>(
+  batch_rule_94_t batch_rule,
   const Tensor & input, const Tensor & grid, int64_t interpolation_mode, int64_t padding_mode, bool align_corners
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -2038,10 +2021,10 @@ Tensor lowerToNextLayer<batch_rule_95_t,Tensor,const Tensor &, const Tensor &, i
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_96_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, bool, int64_t, bool, const c10::optional<Tensor> &, c10::optional<int64_t>, bool, int64_t);
+typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_95_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, bool, int64_t, bool, const c10::optional<Tensor> &, c10::optional<int64_t>, bool, int64_t);
 template <>
-std::tuple<Tensor,Tensor,Tensor,Tensor> lowerToNextLayer<batch_rule_96_t,std::tuple<Tensor,Tensor,Tensor,Tensor>,const Tensor &, const Tensor &, const Tensor &, bool, int64_t, bool, const c10::optional<Tensor> &, bool, int64_t>(
-  batch_rule_96_t batch_rule,
+std::tuple<Tensor,Tensor,Tensor,Tensor> lowerToNextLayer<batch_rule_95_t,std::tuple<Tensor,Tensor,Tensor,Tensor>,const Tensor &, const Tensor &, const Tensor &, bool, int64_t, bool, const c10::optional<Tensor> &, bool, int64_t>(
+  batch_rule_95_t batch_rule,
   const Tensor & weight, const Tensor & indices, const Tensor & offsets, bool scale_grad_by_freq, int64_t mode, bool sparse, const c10::optional<Tensor> & per_sample_weights, bool include_last_offset, int64_t padding_idx
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -2066,10 +2049,10 @@ std::tuple<Tensor,Tensor,Tensor,Tensor> lowerToNextLayer<batch_rule_96_t,std::tu
   return std::make_tuple(makeBatched(std::get<0>(results), std::get<1>(results), cur_level), makeBatched(std::get<2>(results), std::get<3>(results), cur_level), makeBatched(std::get<4>(results), std::get<5>(results), cur_level), makeBatched(std::get<6>(results), std::get<7>(results), cur_level));
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_97_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, ScalarType);
+typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_96_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, ScalarType);
 template <>
-std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_97_t,std::tuple<Tensor,Tensor>,const Tensor &, const Tensor &, ScalarType>(
-  batch_rule_97_t batch_rule,
+std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_96_t,std::tuple<Tensor,Tensor>,const Tensor &, const Tensor &, ScalarType>(
+  batch_rule_96_t batch_rule,
   const Tensor & weight, const Tensor & mask, ScalarType compressed_indices_dtype
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -2086,10 +2069,10 @@ std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_97_t,std::tuple<Tensor,Ten
   return std::make_tuple(makeBatched(std::get<0>(results), std::get<1>(results), cur_level), makeBatched(std::get<2>(results), std::get<3>(results), cur_level));
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_98_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, bool, int64_t, bool, const c10::optional<Tensor> &, c10::optional<int64_t>, bool);
+typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_97_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, bool, int64_t, bool, const c10::optional<Tensor> &, c10::optional<int64_t>, bool);
 template <>
-std::tuple<Tensor,Tensor,Tensor,Tensor> lowerToNextLayer<batch_rule_98_t,std::tuple<Tensor,Tensor,Tensor,Tensor>,const Tensor &, const Tensor &, const Tensor &, bool, int64_t, bool, const c10::optional<Tensor> &, bool>(
-  batch_rule_98_t batch_rule,
+std::tuple<Tensor,Tensor,Tensor,Tensor> lowerToNextLayer<batch_rule_97_t,std::tuple<Tensor,Tensor,Tensor,Tensor>,const Tensor &, const Tensor &, const Tensor &, bool, int64_t, bool, const c10::optional<Tensor> &, bool>(
+  batch_rule_97_t batch_rule,
   const Tensor & weight, const Tensor & indices, const Tensor & offsets, bool scale_grad_by_freq, int64_t mode, bool sparse, const c10::optional<Tensor> & per_sample_weights, bool include_last_offset
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -2114,10 +2097,10 @@ std::tuple<Tensor,Tensor,Tensor,Tensor> lowerToNextLayer<batch_rule_98_t,std::tu
   return std::make_tuple(makeBatched(std::get<0>(results), std::get<1>(results), cur_level), makeBatched(std::get<2>(results), std::get<3>(results), cur_level), makeBatched(std::get<4>(results), std::get<5>(results), cur_level), makeBatched(std::get<6>(results), std::get<7>(results), cur_level));
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_99_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, bool, int64_t, bool, const c10::optional<Tensor> &, c10::optional<int64_t>, bool, c10::optional<int64_t>);
+typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_98_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, bool, int64_t, bool, const c10::optional<Tensor> &, c10::optional<int64_t>, bool, c10::optional<int64_t>);
 template <>
-std::tuple<Tensor,Tensor,Tensor,Tensor> lowerToNextLayer<batch_rule_99_t,std::tuple<Tensor,Tensor,Tensor,Tensor>,const Tensor &, const Tensor &, const Tensor &, bool, int64_t, bool, const c10::optional<Tensor> &, bool, c10::optional<int64_t>>(
-  batch_rule_99_t batch_rule,
+std::tuple<Tensor,Tensor,Tensor,Tensor> lowerToNextLayer<batch_rule_98_t,std::tuple<Tensor,Tensor,Tensor,Tensor>,const Tensor &, const Tensor &, const Tensor &, bool, int64_t, bool, const c10::optional<Tensor> &, bool, c10::optional<int64_t>>(
+  batch_rule_98_t batch_rule,
   const Tensor & weight, const Tensor & indices, const Tensor & offsets, bool scale_grad_by_freq, int64_t mode, bool sparse, const c10::optional<Tensor> & per_sample_weights, bool include_last_offset, c10::optional<int64_t> padding_idx
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -2142,10 +2125,10 @@ std::tuple<Tensor,Tensor,Tensor,Tensor> lowerToNextLayer<batch_rule_99_t,std::tu
   return std::make_tuple(makeBatched(std::get<0>(results), std::get<1>(results), cur_level), makeBatched(std::get<2>(results), std::get<3>(results), cur_level), makeBatched(std::get<4>(results), std::get<5>(results), cur_level), makeBatched(std::get<6>(results), std::get<7>(results), cur_level));
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_100_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, int64_t, bool, int64_t, bool, const c10::optional<Tensor> &, c10::optional<int64_t>, int64_t);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_99_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, int64_t, bool, int64_t, bool, const c10::optional<Tensor> &, c10::optional<int64_t>, int64_t);
 template <>
-Tensor lowerToNextLayer<batch_rule_100_t,Tensor,const Tensor &, const Tensor &, const Tensor &, const Tensor &, const Tensor &, const Tensor &, int64_t, bool, int64_t, bool, const c10::optional<Tensor> &, int64_t>(
-  batch_rule_100_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_99_t,Tensor,const Tensor &, const Tensor &, const Tensor &, const Tensor &, const Tensor &, const Tensor &, int64_t, bool, int64_t, bool, const c10::optional<Tensor> &, int64_t>(
+  batch_rule_99_t batch_rule,
   const Tensor & grad, const Tensor & indices, const Tensor & offsets, const Tensor & offset2bag, const Tensor & bag_size, const Tensor & maximum_indices, int64_t num_weights, bool scale_grad_by_freq, int64_t mode, bool sparse, const c10::optional<Tensor> & per_sample_weights, int64_t padding_idx
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -2179,10 +2162,10 @@ Tensor lowerToNextLayer<batch_rule_100_t,Tensor,const Tensor &, const Tensor &, 
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_101_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, int64_t, bool, int64_t, const c10::optional<Tensor> &, c10::optional<int64_t>, int64_t);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_100_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, int64_t, bool, int64_t, const c10::optional<Tensor> &, c10::optional<int64_t>, int64_t);
 template <>
-Tensor lowerToNextLayer<batch_rule_101_t,Tensor,const Tensor &, const Tensor &, const Tensor &, const Tensor &, const Tensor &, int64_t, bool, int64_t, const c10::optional<Tensor> &, int64_t>(
-  batch_rule_101_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_100_t,Tensor,const Tensor &, const Tensor &, const Tensor &, const Tensor &, const Tensor &, int64_t, bool, int64_t, const c10::optional<Tensor> &, int64_t>(
+  batch_rule_100_t batch_rule,
   const Tensor & grad, const Tensor & indices, const Tensor & offset2bag, const Tensor & bag_size, const Tensor & maximum_indices, int64_t num_weights, bool scale_grad_by_freq, int64_t mode, const c10::optional<Tensor> & per_sample_weights, int64_t padding_idx
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -2213,10 +2196,10 @@ Tensor lowerToNextLayer<batch_rule_101_t,Tensor,const Tensor &, const Tensor &, 
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_102_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, int64_t, int64_t);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_101_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, int64_t, int64_t);
 template <>
-Tensor lowerToNextLayer<batch_rule_102_t,Tensor,const Tensor &, const Tensor &, const Tensor &, const Tensor &, const Tensor &, int64_t, int64_t>(
-  batch_rule_102_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_101_t,Tensor,const Tensor &, const Tensor &, const Tensor &, const Tensor &, const Tensor &, int64_t, int64_t>(
+  batch_rule_101_t batch_rule,
   const Tensor & grad, const Tensor & weight, const Tensor & indices, const Tensor & offsets, const Tensor & offset2bag, int64_t mode, int64_t padding_idx
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -2242,10 +2225,10 @@ Tensor lowerToNextLayer<batch_rule_102_t,Tensor,const Tensor &, const Tensor &, 
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_103_t)(const Tensor &, c10::optional<int64_t>, IntArrayRef, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_102_t)(const Tensor &, c10::optional<int64_t>, IntArrayRef, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>);
 template <>
-Tensor lowerToNextLayer<batch_rule_103_t,Tensor,const Tensor &, IntArrayRef, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>>(
-  batch_rule_103_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_102_t,Tensor,const Tensor &, IntArrayRef, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>>(
+  batch_rule_102_t batch_rule,
   const Tensor & self, IntArrayRef size, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -2259,10 +2242,10 @@ Tensor lowerToNextLayer<batch_rule_103_t,Tensor,const Tensor &, IntArrayRef, c10
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_104_t)(const Tensor &, c10::optional<int64_t>, IntArrayRef, IntArrayRef, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_103_t)(const Tensor &, c10::optional<int64_t>, IntArrayRef, IntArrayRef, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>);
 template <>
-Tensor lowerToNextLayer<batch_rule_104_t,Tensor,const Tensor &, IntArrayRef, IntArrayRef, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>>(
-  batch_rule_104_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_103_t,Tensor,const Tensor &, IntArrayRef, IntArrayRef, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>>(
+  batch_rule_103_t batch_rule,
   const Tensor & self, IntArrayRef size, IntArrayRef stride, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -2276,10 +2259,10 @@ Tensor lowerToNextLayer<batch_rule_104_t,Tensor,const Tensor &, IntArrayRef, Int
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_105_t)(const Tensor &, c10::optional<int64_t>, IntArrayRef, const Scalar &, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_104_t)(const Tensor &, c10::optional<int64_t>, IntArrayRef, const Scalar &, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>);
 template <>
-Tensor lowerToNextLayer<batch_rule_105_t,Tensor,const Tensor &, IntArrayRef, const Scalar &, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>>(
-  batch_rule_105_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_104_t,Tensor,const Tensor &, IntArrayRef, const Scalar &, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>>(
+  batch_rule_104_t batch_rule,
   const Tensor & self, IntArrayRef size, const Scalar & fill_value, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -2293,10 +2276,10 @@ Tensor lowerToNextLayer<batch_rule_105_t,Tensor,const Tensor &, IntArrayRef, con
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_106_t)(IntArrayRef, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, int64_t, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>, c10::optional<MemoryFormat>);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_105_t)(IntArrayRef, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, int64_t, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>, c10::optional<MemoryFormat>);
 template <>
-Tensor lowerToNextLayer<batch_rule_106_t,Tensor,IntArrayRef, const Tensor &, const Tensor &, int64_t, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>, c10::optional<MemoryFormat>>(
-  batch_rule_106_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_105_t,Tensor,IntArrayRef, const Tensor &, const Tensor &, int64_t, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>, c10::optional<MemoryFormat>>(
+  batch_rule_105_t batch_rule,
   IntArrayRef size, const Tensor & scales, const Tensor & zero_points, int64_t axis, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory, c10::optional<MemoryFormat> memory_format
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -2313,27 +2296,10 @@ Tensor lowerToNextLayer<batch_rule_106_t,Tensor,IntArrayRef, const Tensor &, con
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<const Tensor &,c10::optional<int64_t>> (*batch_rule_107_t)(const Tensor &, c10::optional<int64_t>, IntArrayRef, c10::optional<MemoryFormat>);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_106_t)(IntArrayRef, const Tensor &, c10::optional<int64_t>, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>, c10::optional<MemoryFormat>);
 template <>
-const Tensor & lowerToNextLayer<batch_rule_107_t,const Tensor &,const Tensor &, IntArrayRef, c10::optional<MemoryFormat>>(
-  batch_rule_107_t batch_rule,
-  const Tensor & self, IntArrayRef size, c10::optional<MemoryFormat> memory_format
-) {
-  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
-  auto maybe_layer = maybeCurrentDynamicLayer();
-  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
-  int64_t cur_level = maybe_layer->layerId();
-  Tensor self_value;
-  optional<int64_t> self_bdim;
-  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
-  auto results = batch_rule(self_value, self_bdim, size, memory_format);
-  return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
-}
-
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_108_t)(IntArrayRef, const Tensor &, c10::optional<int64_t>, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>, c10::optional<MemoryFormat>);
-template <>
-Tensor lowerToNextLayer<batch_rule_108_t,Tensor,IntArrayRef, const Tensor &, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>, c10::optional<MemoryFormat>>(
-  batch_rule_108_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_106_t,Tensor,IntArrayRef, const Tensor &, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>, c10::optional<MemoryFormat>>(
+  batch_rule_106_t batch_rule,
   IntArrayRef size, const Tensor & qtensor, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory, c10::optional<MemoryFormat> memory_format
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -2347,10 +2313,10 @@ Tensor lowerToNextLayer<batch_rule_108_t,Tensor,IntArrayRef, const Tensor &, c10
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_109_t)(const Tensor &, c10::optional<int64_t>, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>, c10::optional<MemoryFormat>);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_107_t)(const Tensor &, c10::optional<int64_t>, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>, c10::optional<MemoryFormat>);
 template <>
-Tensor lowerToNextLayer<batch_rule_109_t,Tensor,const Tensor &, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>, c10::optional<MemoryFormat>>(
-  batch_rule_109_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_107_t,Tensor,const Tensor &, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>, c10::optional<MemoryFormat>>(
+  batch_rule_107_t batch_rule,
   const Tensor & self, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory, c10::optional<MemoryFormat> memory_format
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -2364,10 +2330,10 @@ Tensor lowerToNextLayer<batch_rule_109_t,Tensor,const Tensor &, c10::optional<Sc
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_110_t)(const Tensor &, c10::optional<int64_t>, int64_t, int64_t);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_108_t)(const Tensor &, c10::optional<int64_t>, int64_t, int64_t);
 template <>
-Tensor lowerToNextLayer<batch_rule_110_t,Tensor,const Tensor &, int64_t, int64_t>(
-  batch_rule_110_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_108_t,Tensor,const Tensor &, int64_t, int64_t>(
+  batch_rule_108_t batch_rule,
   const Tensor & dummy, int64_t a, int64_t b
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -2381,10 +2347,10 @@ Tensor lowerToNextLayer<batch_rule_110_t,Tensor,const Tensor &, int64_t, int64_t
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_111_t)(const Tensor &, c10::optional<int64_t>, int64_t, int64_t, Dimname);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_109_t)(const Tensor &, c10::optional<int64_t>, int64_t, int64_t, Dimname);
 template <>
-Tensor lowerToNextLayer<batch_rule_111_t,Tensor,const Tensor &, int64_t, int64_t, Dimname>(
-  batch_rule_111_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_109_t,Tensor,const Tensor &, int64_t, int64_t, Dimname>(
+  batch_rule_109_t batch_rule,
   const Tensor & self, int64_t start_dim, int64_t end_dim, Dimname out_dim
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -2398,10 +2364,10 @@ Tensor lowerToNextLayer<batch_rule_111_t,Tensor,const Tensor &, int64_t, int64_t
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_112_t)(const Tensor &, c10::optional<int64_t>, Dimname, Dimname, Dimname);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_110_t)(const Tensor &, c10::optional<int64_t>, Dimname, Dimname, Dimname);
 template <>
-Tensor lowerToNextLayer<batch_rule_112_t,Tensor,const Tensor &, Dimname, Dimname, Dimname>(
-  batch_rule_112_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_110_t,Tensor,const Tensor &, Dimname, Dimname, Dimname>(
+  batch_rule_110_t batch_rule,
   const Tensor & self, Dimname start_dim, Dimname end_dim, Dimname out_dim
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -2415,10 +2381,10 @@ Tensor lowerToNextLayer<batch_rule_112_t,Tensor,const Tensor &, Dimname, Dimname
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_113_t)(const Tensor &, c10::optional<int64_t>, DimnameList, Dimname);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_111_t)(const Tensor &, c10::optional<int64_t>, DimnameList, Dimname);
 template <>
-Tensor lowerToNextLayer<batch_rule_113_t,Tensor,const Tensor &, DimnameList, Dimname>(
-  batch_rule_113_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_111_t,Tensor,const Tensor &, DimnameList, Dimname>(
+  batch_rule_111_t batch_rule,
   const Tensor & self, DimnameList dims, Dimname out_dim
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -2432,10 +2398,10 @@ Tensor lowerToNextLayer<batch_rule_113_t,Tensor,const Tensor &, DimnameList, Dim
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_114_t)(const Tensor &, c10::optional<int64_t>, int64_t, IntArrayRef, c10::optional<DimnameList>);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_112_t)(const Tensor &, c10::optional<int64_t>, int64_t, IntArrayRef, c10::optional<DimnameList>);
 template <>
-Tensor lowerToNextLayer<batch_rule_114_t,Tensor,const Tensor &, int64_t, IntArrayRef, c10::optional<DimnameList>>(
-  batch_rule_114_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_112_t,Tensor,const Tensor &, int64_t, IntArrayRef, c10::optional<DimnameList>>(
+  batch_rule_112_t batch_rule,
   const Tensor & self, int64_t dim, IntArrayRef sizes, c10::optional<DimnameList> names
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -2449,10 +2415,10 @@ Tensor lowerToNextLayer<batch_rule_114_t,Tensor,const Tensor &, int64_t, IntArra
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_115_t)(const Tensor &, c10::optional<int64_t>, Dimname, IntArrayRef, DimnameList);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_113_t)(const Tensor &, c10::optional<int64_t>, Dimname, IntArrayRef, DimnameList);
 template <>
-Tensor lowerToNextLayer<batch_rule_115_t,Tensor,const Tensor &, Dimname, IntArrayRef, DimnameList>(
-  batch_rule_115_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_113_t,Tensor,const Tensor &, Dimname, IntArrayRef, DimnameList>(
+  batch_rule_113_t batch_rule,
   const Tensor & self, Dimname dim, IntArrayRef sizes, DimnameList names
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -2466,10 +2432,10 @@ Tensor lowerToNextLayer<batch_rule_115_t,Tensor,const Tensor &, Dimname, IntArra
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_116_t)(const Tensor &, c10::optional<int64_t>, const Scalar &, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>, c10::optional<MemoryFormat>);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_114_t)(const Tensor &, c10::optional<int64_t>, const Scalar &, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>, c10::optional<MemoryFormat>);
 template <>
-Tensor lowerToNextLayer<batch_rule_116_t,Tensor,const Tensor &, const Scalar &, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>, c10::optional<MemoryFormat>>(
-  batch_rule_116_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_114_t,Tensor,const Tensor &, const Scalar &, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>, c10::optional<MemoryFormat>>(
+  batch_rule_114_t batch_rule,
   const Tensor & self, const Scalar & fill_value, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory, c10::optional<MemoryFormat> memory_format
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -2483,10 +2449,10 @@ Tensor lowerToNextLayer<batch_rule_116_t,Tensor,const Tensor &, const Scalar &, 
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_117_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, int64_t, int64_t, bool);
+typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_115_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, int64_t, int64_t, bool);
 template <>
-std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_117_t,std::tuple<Tensor,Tensor>,const Tensor &, const Tensor &, const Tensor &, int64_t, int64_t, bool>(
-  batch_rule_117_t batch_rule,
+std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_115_t,std::tuple<Tensor,Tensor>,const Tensor &, const Tensor &, const Tensor &, int64_t, int64_t, bool>(
+  batch_rule_115_t batch_rule,
   const Tensor & grad_output, const Tensor & input, const Tensor & grid, int64_t interpolation_mode, int64_t padding_mode, bool align_corners
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -2506,10 +2472,10 @@ std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_117_t,std::tuple<Tensor,Te
   return std::make_tuple(makeBatched(std::get<0>(results), std::get<1>(results), cur_level), makeBatched(std::get<2>(results), std::get<3>(results), cur_level));
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_118_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, double, int64_t);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_116_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, double, int64_t);
 template <>
-Tensor lowerToNextLayer<batch_rule_118_t,Tensor,const Tensor &, const Tensor &, double, int64_t>(
-  batch_rule_118_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_116_t,Tensor,const Tensor &, const Tensor &, double, int64_t>(
+  batch_rule_116_t batch_rule,
   const Tensor & self, const Tensor & target, double margin, int64_t reduction
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -2526,10 +2492,10 @@ Tensor lowerToNextLayer<batch_rule_118_t,Tensor,const Tensor &, const Tensor &, 
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_119_t)(const Tensor &, c10::optional<int64_t>, int64_t, const c10::optional<Tensor> &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, double, bool);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_117_t)(const Tensor &, c10::optional<int64_t>, int64_t, const c10::optional<Tensor> &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, double, bool);
 template <>
-Tensor lowerToNextLayer<batch_rule_119_t,Tensor,const Tensor &, int64_t, const c10::optional<Tensor> &, const c10::optional<Tensor> &, double, bool>(
-  batch_rule_119_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_117_t,Tensor,const Tensor &, int64_t, const c10::optional<Tensor> &, const c10::optional<Tensor> &, double, bool>(
+  batch_rule_117_t batch_rule,
   const Tensor & input, int64_t num_groups, const c10::optional<Tensor> & weight, const c10::optional<Tensor> & bias, double eps, bool cudnn_enabled
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -2553,10 +2519,10 @@ Tensor lowerToNextLayer<batch_rule_119_t,Tensor,const Tensor &, int64_t, const c
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_120_t)(const Tensor &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, int64_t, int64_t, int64_t, int64_t, double);
+typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_118_t)(const Tensor &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, int64_t, int64_t, int64_t, int64_t, double);
 template <>
-std::tuple<Tensor,Tensor,Tensor> lowerToNextLayer<batch_rule_120_t,std::tuple<Tensor,Tensor,Tensor>,const Tensor &, const c10::optional<Tensor> &, const c10::optional<Tensor> &, int64_t, int64_t, int64_t, int64_t, double>(
-  batch_rule_120_t batch_rule,
+std::tuple<Tensor,Tensor,Tensor> lowerToNextLayer<batch_rule_118_t,std::tuple<Tensor,Tensor,Tensor>,const Tensor &, const c10::optional<Tensor> &, const c10::optional<Tensor> &, int64_t, int64_t, int64_t, int64_t, double>(
+  batch_rule_118_t batch_rule,
   const Tensor & input, const c10::optional<Tensor> & weight, const c10::optional<Tensor> & bias, int64_t N, int64_t C, int64_t HxW, int64_t group, double eps
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -2580,10 +2546,10 @@ std::tuple<Tensor,Tensor,Tensor> lowerToNextLayer<batch_rule_120_t,std::tuple<Te
   return std::make_tuple(makeBatched(std::get<0>(results), std::get<1>(results), cur_level), makeBatched(std::get<2>(results), std::get<3>(results), cur_level), makeBatched(std::get<4>(results), std::get<5>(results), cur_level));
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_121_t)(const Tensor &, c10::optional<int64_t>, IntArrayRef, int64_t, bool);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_119_t)(const Tensor &, c10::optional<int64_t>, IntArrayRef, int64_t, bool);
 template <>
-Tensor lowerToNextLayer<batch_rule_121_t,Tensor,const Tensor &, IntArrayRef, int64_t, bool>(
-  batch_rule_121_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_119_t,Tensor,const Tensor &, IntArrayRef, int64_t, bool>(
+  batch_rule_119_t batch_rule,
   const Tensor & self, IntArrayRef dim, int64_t normalization, bool forward
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -2597,10 +2563,10 @@ Tensor lowerToNextLayer<batch_rule_121_t,Tensor,const Tensor &, IntArrayRef, int
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_122_t)(const Tensor &, c10::optional<int64_t>, IntArrayRef, int64_t, int64_t);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_120_t)(const Tensor &, c10::optional<int64_t>, IntArrayRef, int64_t, int64_t);
 template <>
-Tensor lowerToNextLayer<batch_rule_122_t,Tensor,const Tensor &, IntArrayRef, int64_t, int64_t>(
-  batch_rule_122_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_120_t,Tensor,const Tensor &, IntArrayRef, int64_t, int64_t>(
+  batch_rule_120_t batch_rule,
   const Tensor & grad_output, IntArrayRef input_sizes, int64_t dim, int64_t index
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -2614,10 +2580,10 @@ Tensor lowerToNextLayer<batch_rule_122_t,Tensor,const Tensor &, IntArrayRef, int
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_123_t)(const Tensor &, c10::optional<int64_t>, const c10::List<c10::optional<Tensor>> &);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_121_t)(const Tensor &, c10::optional<int64_t>, const c10::List<c10::optional<Tensor>> &);
 template <>
-Tensor lowerToNextLayer<batch_rule_123_t,Tensor,const Tensor &, const c10::List<c10::optional<Tensor>> &>(
-  batch_rule_123_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_121_t,Tensor,const Tensor &, const c10::List<c10::optional<Tensor>> &>(
+  batch_rule_121_t batch_rule,
   const Tensor & self, const c10::List<c10::optional<Tensor>> & indices
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -2631,10 +2597,10 @@ Tensor lowerToNextLayer<batch_rule_123_t,Tensor,const Tensor &, const c10::List<
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_124_t)(const Tensor &, c10::optional<int64_t>, int64_t, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_122_t)(const Tensor &, c10::optional<int64_t>, int64_t, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>);
 template <>
-Tensor lowerToNextLayer<batch_rule_124_t,Tensor,const Tensor &, int64_t, const Tensor &, const Tensor &>(
-  batch_rule_124_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_122_t,Tensor,const Tensor &, int64_t, const Tensor &, const Tensor &>(
+  batch_rule_122_t batch_rule,
   const Tensor & self, int64_t dim, const Tensor & index, const Tensor & grad
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -2654,10 +2620,10 @@ Tensor lowerToNextLayer<batch_rule_124_t,Tensor,const Tensor &, int64_t, const T
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_125_t)(const Tensor &, c10::optional<int64_t>, Dimname, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_123_t)(const Tensor &, c10::optional<int64_t>, Dimname, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>);
 template <>
-Tensor lowerToNextLayer<batch_rule_125_t,Tensor,const Tensor &, Dimname, const Tensor &, const Tensor &>(
-  batch_rule_125_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_123_t,Tensor,const Tensor &, Dimname, const Tensor &, const Tensor &>(
+  batch_rule_123_t batch_rule,
   const Tensor & self, Dimname dim, const Tensor & index, const Tensor & src
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -2677,10 +2643,10 @@ Tensor lowerToNextLayer<batch_rule_125_t,Tensor,const Tensor &, Dimname, const T
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_126_t)(const Tensor &, c10::optional<int64_t>, const c10::List<c10::optional<Tensor>> &, const Tensor &, c10::optional<int64_t>, bool);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_124_t)(const Tensor &, c10::optional<int64_t>, const c10::List<c10::optional<Tensor>> &, const Tensor &, c10::optional<int64_t>, bool);
 template <>
-Tensor lowerToNextLayer<batch_rule_126_t,Tensor,const Tensor &, const c10::List<c10::optional<Tensor>> &, const Tensor &, bool>(
-  batch_rule_126_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_124_t,Tensor,const Tensor &, const c10::List<c10::optional<Tensor>> &, const Tensor &, bool>(
+  batch_rule_124_t batch_rule,
   const Tensor & self, const c10::List<c10::optional<Tensor>> & indices, const Tensor & values, bool accumulate
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -2697,10 +2663,10 @@ Tensor lowerToNextLayer<batch_rule_126_t,Tensor,const Tensor &, const c10::List<
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_127_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, double, double, bool);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_125_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, double, double, bool);
 template <>
-Tensor lowerToNextLayer<batch_rule_127_t,Tensor,const Tensor &, const Tensor &, double, double, bool>(
-  batch_rule_127_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_125_t,Tensor,const Tensor &, const Tensor &, double, double, bool>(
+  batch_rule_125_t batch_rule,
   const Tensor & x1, const Tensor & x2, double p, double eps, bool keepdim
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -2717,10 +2683,10 @@ Tensor lowerToNextLayer<batch_rule_127_t,Tensor,const Tensor &, const Tensor &, 
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_128_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, bool, bool);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_126_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, bool, bool);
 template <>
-Tensor lowerToNextLayer<batch_rule_128_t,Tensor,const Tensor &, const Tensor &, bool, bool>(
-  batch_rule_128_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_126_t,Tensor,const Tensor &, const Tensor &, bool, bool>(
+  batch_rule_126_t batch_rule,
   const Tensor & sorted_sequence, const Tensor & self, bool out_int32, bool right
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -2737,10 +2703,10 @@ Tensor lowerToNextLayer<batch_rule_128_t,Tensor,const Tensor &, const Tensor &, 
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_129_t)(const Tensor &, c10::optional<int64_t>, const Scalar &, bool, bool);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_127_t)(const Tensor &, c10::optional<int64_t>, const Scalar &, bool, bool);
 template <>
-Tensor lowerToNextLayer<batch_rule_129_t,Tensor,const Tensor &, const Scalar &, bool, bool>(
-  batch_rule_129_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_127_t,Tensor,const Tensor &, const Scalar &, bool, bool>(
+  batch_rule_127_t batch_rule,
   const Tensor & sorted_sequence, const Scalar & self, bool out_int32, bool right
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -2754,10 +2720,10 @@ Tensor lowerToNextLayer<batch_rule_129_t,Tensor,const Tensor &, const Scalar &, 
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_130_t)(const Scalar &, const Tensor &, c10::optional<int64_t>, bool, bool);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_128_t)(const Scalar &, const Tensor &, c10::optional<int64_t>, bool, bool);
 template <>
-Tensor lowerToNextLayer<batch_rule_130_t,Tensor,const Scalar &, const Tensor &, bool, bool>(
-  batch_rule_130_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_128_t,Tensor,const Scalar &, const Tensor &, bool, bool>(
+  batch_rule_128_t batch_rule,
   const Scalar & self, const Tensor & boundaries, bool out_int32, bool right
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -2771,10 +2737,10 @@ Tensor lowerToNextLayer<batch_rule_130_t,Tensor,const Scalar &, const Tensor &, 
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<bool> (*batch_rule_131_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>);
+typedef std::tuple<bool> (*batch_rule_129_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>);
 template <>
-bool lowerToNextLayer<batch_rule_131_t,bool,const Tensor &, const Tensor &>(
-  batch_rule_131_t batch_rule,
+bool lowerToNextLayer<batch_rule_129_t,bool,const Tensor &, const Tensor &>(
+  batch_rule_129_t batch_rule,
   const Tensor & self, const Tensor & other
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -2791,10 +2757,10 @@ bool lowerToNextLayer<batch_rule_131_t,bool,const Tensor &, const Tensor &>(
   return std::get<0>(results);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_132_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, int64_t, bool);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_130_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, int64_t, bool);
 template <>
-Tensor lowerToNextLayer<batch_rule_132_t,Tensor,const Tensor &, const Tensor &, int64_t, bool>(
-  batch_rule_132_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_130_t,Tensor,const Tensor &, const Tensor &, int64_t, bool>(
+  batch_rule_130_t batch_rule,
   const Tensor & self, const Tensor & target, int64_t reduction, bool log_target
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -2811,10 +2777,10 @@ Tensor lowerToNextLayer<batch_rule_132_t,Tensor,const Tensor &, const Tensor &, 
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_133_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, int64_t, bool);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_131_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, int64_t, bool);
 template <>
-Tensor lowerToNextLayer<batch_rule_133_t,Tensor,const Tensor &, const Tensor &, const Tensor &, int64_t, bool>(
-  batch_rule_133_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_131_t,Tensor,const Tensor &, const Tensor &, const Tensor &, int64_t, bool>(
+  batch_rule_131_t batch_rule,
   const Tensor & grad_output, const Tensor & self, const Tensor & target, int64_t reduction, bool log_target
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -2834,10 +2800,10 @@ Tensor lowerToNextLayer<batch_rule_133_t,Tensor,const Tensor &, const Tensor &, 
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_134_t)(const Tensor &, c10::optional<int64_t>, int64_t, int64_t, bool);
+typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_132_t)(const Tensor &, c10::optional<int64_t>, int64_t, int64_t, bool);
 template <>
-std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_134_t,std::tuple<Tensor,Tensor>,const Tensor &, int64_t, int64_t, bool>(
-  batch_rule_134_t batch_rule,
+std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_132_t,std::tuple<Tensor,Tensor>,const Tensor &, int64_t, int64_t, bool>(
+  batch_rule_132_t batch_rule,
   const Tensor & self, int64_t k, int64_t dim, bool keepdim
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -2851,10 +2817,10 @@ std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_134_t,std::tuple<Tensor,Te
   return std::make_tuple(makeBatched(std::get<0>(results), std::get<1>(results), cur_level), makeBatched(std::get<2>(results), std::get<3>(results), cur_level));
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_135_t)(const Tensor &, c10::optional<int64_t>, int64_t, Dimname, bool);
+typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_133_t)(const Tensor &, c10::optional<int64_t>, int64_t, Dimname, bool);
 template <>
-std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_135_t,std::tuple<Tensor,Tensor>,const Tensor &, int64_t, Dimname, bool>(
-  batch_rule_135_t batch_rule,
+std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_133_t,std::tuple<Tensor,Tensor>,const Tensor &, int64_t, Dimname, bool>(
+  batch_rule_133_t batch_rule,
   const Tensor & self, int64_t k, Dimname dim, bool keepdim
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -2868,10 +2834,10 @@ std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_135_t,std::tuple<Tensor,Te
   return std::make_tuple(makeBatched(std::get<0>(results), std::get<1>(results), cur_level), makeBatched(std::get<2>(results), std::get<3>(results), cur_level));
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_136_t)(const Tensor &, c10::optional<int64_t>, IntArrayRef, const c10::optional<Tensor> &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, double, bool);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_134_t)(const Tensor &, c10::optional<int64_t>, IntArrayRef, const c10::optional<Tensor> &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, double, bool);
 template <>
-Tensor lowerToNextLayer<batch_rule_136_t,Tensor,const Tensor &, IntArrayRef, const c10::optional<Tensor> &, const c10::optional<Tensor> &, double, bool>(
-  batch_rule_136_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_134_t,Tensor,const Tensor &, IntArrayRef, const c10::optional<Tensor> &, const c10::optional<Tensor> &, double, bool>(
+  batch_rule_134_t batch_rule,
   const Tensor & input, IntArrayRef normalized_shape, const c10::optional<Tensor> & weight, const c10::optional<Tensor> & bias, double eps, bool cudnn_enable
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -2895,10 +2861,10 @@ Tensor lowerToNextLayer<batch_rule_136_t,Tensor,const Tensor &, IntArrayRef, con
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_137_t)(const Tensor &, c10::optional<int64_t>, IntArrayRef, const c10::optional<Tensor> &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, double);
+typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_135_t)(const Tensor &, c10::optional<int64_t>, IntArrayRef, const c10::optional<Tensor> &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, double);
 template <>
-std::tuple<Tensor,Tensor,Tensor> lowerToNextLayer<batch_rule_137_t,std::tuple<Tensor,Tensor,Tensor>,const Tensor &, IntArrayRef, const c10::optional<Tensor> &, const c10::optional<Tensor> &, double>(
-  batch_rule_137_t batch_rule,
+std::tuple<Tensor,Tensor,Tensor> lowerToNextLayer<batch_rule_135_t,std::tuple<Tensor,Tensor,Tensor>,const Tensor &, IntArrayRef, const c10::optional<Tensor> &, const c10::optional<Tensor> &, double>(
+  batch_rule_135_t batch_rule,
   const Tensor & input, IntArrayRef normalized_shape, const c10::optional<Tensor> & weight, const c10::optional<Tensor> & bias, double eps
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -2922,10 +2888,10 @@ std::tuple<Tensor,Tensor,Tensor> lowerToNextLayer<batch_rule_137_t,std::tuple<Te
   return std::make_tuple(makeBatched(std::get<0>(results), std::get<1>(results), cur_level), makeBatched(std::get<2>(results), std::get<3>(results), cur_level), makeBatched(std::get<4>(results), std::get<5>(results), cur_level));
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_138_t)(const Tensor &, c10::optional<int64_t>, c10::optional<double>, c10::optional<double>, c10::optional<double>);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_136_t)(const Tensor &, c10::optional<int64_t>, c10::optional<double>, c10::optional<double>, c10::optional<double>);
 template <>
-Tensor lowerToNextLayer<batch_rule_138_t,Tensor,const Tensor &, c10::optional<double>, c10::optional<double>, c10::optional<double>>(
-  batch_rule_138_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_136_t,Tensor,const Tensor &, c10::optional<double>, c10::optional<double>, c10::optional<double>>(
+  batch_rule_136_t batch_rule,
   const Tensor & self, c10::optional<double> nan, c10::optional<double> posinf, c10::optional<double> neginf
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -2939,10 +2905,10 @@ Tensor lowerToNextLayer<batch_rule_138_t,Tensor,const Tensor &, c10::optional<do
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_139_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_137_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>);
 template <>
-Tensor lowerToNextLayer<batch_rule_139_t,Tensor,const Tensor &, const Tensor &, const c10::optional<Tensor> &>(
-  batch_rule_139_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_137_t,Tensor,const Tensor &, const Tensor &, const c10::optional<Tensor> &>(
+  batch_rule_137_t batch_rule,
   const Tensor & self, const Tensor & weight, const c10::optional<Tensor> & bias
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -2964,10 +2930,10 @@ Tensor lowerToNextLayer<batch_rule_139_t,Tensor,const Tensor &, const Tensor &, 
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_140_t)(IntArrayRef, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_138_t)(IntArrayRef, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>);
 template <>
-Tensor lowerToNextLayer<batch_rule_140_t,Tensor,IntArrayRef, const Tensor &, const Tensor &>(
-  batch_rule_140_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_138_t,Tensor,IntArrayRef, const Tensor &, const Tensor &>(
+  batch_rule_138_t batch_rule,
   IntArrayRef input_size, const Tensor & grad_output, const Tensor & weight
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -2984,10 +2950,10 @@ Tensor lowerToNextLayer<batch_rule_140_t,Tensor,IntArrayRef, const Tensor &, con
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_141_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, bool);
+typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_139_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, bool);
 template <>
-std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_141_t,std::tuple<Tensor,Tensor>,const Tensor &, const Tensor &, const Tensor &, bool>(
-  batch_rule_141_t batch_rule,
+std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_139_t,std::tuple<Tensor,Tensor>,const Tensor &, const Tensor &, const Tensor &, bool>(
+  batch_rule_139_t batch_rule,
   const Tensor & grad_output, const Tensor & input, const Tensor & weight, bool bias_defined
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -3007,10 +2973,10 @@ std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_141_t,std::tuple<Tensor,Te
   return std::make_tuple(makeBatched(std::get<0>(results), std::get<1>(results), cur_level), makeBatched(std::get<2>(results), std::get<3>(results), cur_level));
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_142_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Scalar &, const Scalar &, const Tensor &, c10::optional<int64_t>);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_140_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Scalar &, const Scalar &, const Tensor &, c10::optional<int64_t>);
 template <>
-Tensor lowerToNextLayer<batch_rule_142_t,Tensor,const Tensor &, const Tensor &, const Tensor &, const Tensor &, const Scalar &, const Scalar &, const Tensor &>(
-  batch_rule_142_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_140_t,Tensor,const Tensor &, const Tensor &, const Tensor &, const Tensor &, const Scalar &, const Scalar &, const Tensor &>(
+  batch_rule_140_t batch_rule,
   const Tensor & input, const Tensor & weight, const Tensor & packed, const Tensor & col_offsets, const Scalar & weight_scale, const Scalar & weight_zero_point, const Tensor & bias
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -3036,10 +3002,10 @@ Tensor lowerToNextLayer<batch_rule_142_t,Tensor,const Tensor &, const Tensor &, 
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>,double,int64_t> (*batch_rule_143_t)(const Tensor &, c10::optional<int64_t>);
+typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>,double,int64_t> (*batch_rule_141_t)(const Tensor &, c10::optional<int64_t>);
 template <>
-std::tuple<Tensor,Tensor,double,int64_t> lowerToNextLayer<batch_rule_143_t,std::tuple<Tensor,Tensor,double,int64_t>,const Tensor &>(
-  batch_rule_143_t batch_rule,
+std::tuple<Tensor,Tensor,double,int64_t> lowerToNextLayer<batch_rule_141_t,std::tuple<Tensor,Tensor,double,int64_t>,const Tensor &>(
+  batch_rule_141_t batch_rule,
   const Tensor & input
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -3053,10 +3019,10 @@ std::tuple<Tensor,Tensor,double,int64_t> lowerToNextLayer<batch_rule_143_t,std::
   return std::make_tuple(makeBatched(std::get<0>(results), std::get<1>(results), cur_level), makeBatched(std::get<2>(results), std::get<3>(results), cur_level), std::get<4>(results), std::get<5>(results));
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_144_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_142_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>);
 template <>
-Tensor lowerToNextLayer<batch_rule_144_t,Tensor,const Tensor &, const Tensor &, const Tensor &>(
-  batch_rule_144_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_142_t,Tensor,const Tensor &, const Tensor &, const Tensor &>(
+  batch_rule_142_t batch_rule,
   const Tensor & grad_output, const Tensor & self, const Tensor & indices
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -3076,10 +3042,10 @@ Tensor lowerToNextLayer<batch_rule_144_t,Tensor,const Tensor &, const Tensor &, 
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_145_t)(const Scalar &, const Tensor &, c10::optional<int64_t>);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_143_t)(const Scalar &, const Tensor &, c10::optional<int64_t>);
 template <>
-Tensor lowerToNextLayer<batch_rule_145_t,Tensor,const Scalar &, const Tensor &>(
-  batch_rule_145_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_143_t,Tensor,const Scalar &, const Tensor &>(
+  batch_rule_143_t batch_rule,
   const Scalar & self, const Tensor & other
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -3093,10 +3059,10 @@ Tensor lowerToNextLayer<batch_rule_145_t,Tensor,const Scalar &, const Tensor &>(
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_146_t)(const Tensor &, c10::optional<int64_t>, Dimname);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_144_t)(const Tensor &, c10::optional<int64_t>, Dimname);
 template <>
-Tensor lowerToNextLayer<batch_rule_146_t,Tensor,const Tensor &, Dimname>(
-  batch_rule_146_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_144_t,Tensor,const Tensor &, Dimname>(
+  batch_rule_144_t batch_rule,
   const Tensor & self, Dimname dim
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -3110,10 +3076,10 @@ Tensor lowerToNextLayer<batch_rule_146_t,Tensor,const Tensor &, Dimname>(
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_147_t)(const Tensor &, c10::optional<int64_t>, DimnameList, bool);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_145_t)(const Tensor &, c10::optional<int64_t>, DimnameList, bool);
 template <>
-Tensor lowerToNextLayer<batch_rule_147_t,Tensor,const Tensor &, DimnameList, bool>(
-  batch_rule_147_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_145_t,Tensor,const Tensor &, DimnameList, bool>(
+  batch_rule_145_t batch_rule,
   const Tensor & self, DimnameList dim, bool keepdim
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -3127,10 +3093,10 @@ Tensor lowerToNextLayer<batch_rule_147_t,Tensor,const Tensor &, DimnameList, boo
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_148_t)(const Tensor &, c10::optional<int64_t>);
+typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_146_t)(const Tensor &, c10::optional<int64_t>);
 template <>
-std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_148_t,std::tuple<Tensor,Tensor>,const Tensor &>(
-  batch_rule_148_t batch_rule,
+std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_146_t,std::tuple<Tensor,Tensor>,const Tensor &>(
+  batch_rule_146_t batch_rule,
   const Tensor & self
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -3144,10 +3110,10 @@ std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_148_t,std::tuple<Tensor,Te
   return std::make_tuple(makeBatched(std::get<0>(results), std::get<1>(results), cur_level), makeBatched(std::get<2>(results), std::get<3>(results), cur_level));
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_149_t)(const Tensor &, c10::optional<int64_t>, int64_t, bool);
+typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_147_t)(const Tensor &, c10::optional<int64_t>, int64_t, bool);
 template <>
-std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_149_t,std::tuple<Tensor,Tensor>,const Tensor &, int64_t, bool>(
-  batch_rule_149_t batch_rule,
+std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_147_t,std::tuple<Tensor,Tensor>,const Tensor &, int64_t, bool>(
+  batch_rule_147_t batch_rule,
   const Tensor & self, int64_t dim, bool descending
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -3161,10 +3127,10 @@ std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_149_t,std::tuple<Tensor,Te
   return std::make_tuple(makeBatched(std::get<0>(results), std::get<1>(results), cur_level), makeBatched(std::get<2>(results), std::get<3>(results), cur_level));
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_150_t)(const Tensor &, c10::optional<int64_t>, c10::optional<int64_t>, bool);
+typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_148_t)(const Tensor &, c10::optional<int64_t>, c10::optional<int64_t>, bool);
 template <>
-std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_150_t,std::tuple<Tensor,Tensor>,const Tensor &, c10::optional<int64_t>, bool>(
-  batch_rule_150_t batch_rule,
+std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_148_t,std::tuple<Tensor,Tensor>,const Tensor &, c10::optional<int64_t>, bool>(
+  batch_rule_148_t batch_rule,
   const Tensor & self, c10::optional<int64_t> dim, bool keepdim
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -3178,10 +3144,10 @@ std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_150_t,std::tuple<Tensor,Te
   return std::make_tuple(makeBatched(std::get<0>(results), std::get<1>(results), cur_level), makeBatched(std::get<2>(results), std::get<3>(results), cur_level));
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_151_t)(const Tensor &, c10::optional<int64_t>, Dimname, bool);
+typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_149_t)(const Tensor &, c10::optional<int64_t>, Dimname, bool);
 template <>
-std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_151_t,std::tuple<Tensor,Tensor>,const Tensor &, Dimname, bool>(
-  batch_rule_151_t batch_rule,
+std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_149_t,std::tuple<Tensor,Tensor>,const Tensor &, Dimname, bool>(
+  batch_rule_149_t batch_rule,
   const Tensor & self, Dimname dim, bool descending
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -3195,10 +3161,10 @@ std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_151_t,std::tuple<Tensor,Te
   return std::make_tuple(makeBatched(std::get<0>(results), std::get<1>(results), cur_level), makeBatched(std::get<2>(results), std::get<3>(results), cur_level));
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_152_t)(const Tensor &, c10::optional<int64_t>, int64_t, const Tensor &, c10::optional<int64_t>, IntArrayRef, bool);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_150_t)(const Tensor &, c10::optional<int64_t>, int64_t, const Tensor &, c10::optional<int64_t>, IntArrayRef, bool);
 template <>
-Tensor lowerToNextLayer<batch_rule_152_t,Tensor,const Tensor &, int64_t, const Tensor &, IntArrayRef, bool>(
-  batch_rule_152_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_150_t,Tensor,const Tensor &, int64_t, const Tensor &, IntArrayRef, bool>(
+  batch_rule_150_t batch_rule,
   const Tensor & grad, int64_t dim, const Tensor & indices, IntArrayRef sizes, bool keepdim
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -3215,10 +3181,10 @@ Tensor lowerToNextLayer<batch_rule_152_t,Tensor,const Tensor &, int64_t, const T
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_153_t)(const Tensor &, c10::optional<int64_t>, IntArrayRef, IntArrayRef, IntArrayRef, IntArrayRef, bool);
+typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_151_t)(const Tensor &, c10::optional<int64_t>, IntArrayRef, IntArrayRef, IntArrayRef, IntArrayRef, bool);
 template <>
-std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_153_t,std::tuple<Tensor,Tensor>,const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, IntArrayRef, bool>(
-  batch_rule_153_t batch_rule,
+std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_151_t,std::tuple<Tensor,Tensor>,const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, IntArrayRef, bool>(
+  batch_rule_151_t batch_rule,
   const Tensor & self, IntArrayRef kernel_size, IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation, bool ceil_mode
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -3232,10 +3198,10 @@ std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_153_t,std::tuple<Tensor,Te
   return std::make_tuple(makeBatched(std::get<0>(results), std::get<1>(results), cur_level), makeBatched(std::get<2>(results), std::get<3>(results), cur_level));
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_154_t)(const Tensor &, c10::optional<int64_t>, IntArrayRef, IntArrayRef, IntArrayRef, IntArrayRef, bool);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_152_t)(const Tensor &, c10::optional<int64_t>, IntArrayRef, IntArrayRef, IntArrayRef, IntArrayRef, bool);
 template <>
-Tensor lowerToNextLayer<batch_rule_154_t,Tensor,const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, IntArrayRef, bool>(
-  batch_rule_154_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_152_t,Tensor,const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, IntArrayRef, bool>(
+  batch_rule_152_t batch_rule,
   const Tensor & self, IntArrayRef kernel_size, IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation, bool ceil_mode
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -3249,10 +3215,10 @@ Tensor lowerToNextLayer<batch_rule_154_t,Tensor,const Tensor &, IntArrayRef, Int
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_155_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, IntArrayRef, IntArrayRef, IntArrayRef, IntArrayRef, bool);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_153_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, IntArrayRef, IntArrayRef, IntArrayRef, IntArrayRef, bool);
 template <>
-Tensor lowerToNextLayer<batch_rule_155_t,Tensor,const Tensor &, const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, IntArrayRef, bool>(
-  batch_rule_155_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_153_t,Tensor,const Tensor &, const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, IntArrayRef, bool>(
+  batch_rule_153_t batch_rule,
   const Tensor & grad_output, const Tensor & output, const Tensor & input, IntArrayRef kernel_size, IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation, bool ceil_mode
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -3272,10 +3238,10 @@ Tensor lowerToNextLayer<batch_rule_155_t,Tensor,const Tensor &, const Tensor &, 
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_156_t)(const Tensor &, c10::optional<int64_t>, c10::optional<ScalarType>);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_154_t)(const Tensor &, c10::optional<int64_t>, c10::optional<ScalarType>);
 template <>
-Tensor lowerToNextLayer<batch_rule_156_t,Tensor,const Tensor &, c10::optional<ScalarType>>(
-  batch_rule_156_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_154_t,Tensor,const Tensor &, c10::optional<ScalarType>>(
+  batch_rule_154_t batch_rule,
   const Tensor & self, c10::optional<ScalarType> dtype
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -3289,10 +3255,10 @@ Tensor lowerToNextLayer<batch_rule_156_t,Tensor,const Tensor &, c10::optional<Sc
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_157_t)(const Tensor &, c10::optional<int64_t>, IntArrayRef, bool, c10::optional<ScalarType>);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_155_t)(const Tensor &, c10::optional<int64_t>, IntArrayRef, bool, c10::optional<ScalarType>);
 template <>
-Tensor lowerToNextLayer<batch_rule_157_t,Tensor,const Tensor &, IntArrayRef, bool, c10::optional<ScalarType>>(
-  batch_rule_157_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_155_t,Tensor,const Tensor &, IntArrayRef, bool, c10::optional<ScalarType>>(
+  batch_rule_155_t batch_rule,
   const Tensor & self, IntArrayRef dim, bool keepdim, c10::optional<ScalarType> dtype
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -3306,10 +3272,10 @@ Tensor lowerToNextLayer<batch_rule_157_t,Tensor,const Tensor &, IntArrayRef, boo
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_158_t)(const Tensor &, c10::optional<int64_t>, DimnameList, bool, c10::optional<ScalarType>);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_156_t)(const Tensor &, c10::optional<int64_t>, DimnameList, bool, c10::optional<ScalarType>);
 template <>
-Tensor lowerToNextLayer<batch_rule_158_t,Tensor,const Tensor &, DimnameList, bool, c10::optional<ScalarType>>(
-  batch_rule_158_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_156_t,Tensor,const Tensor &, DimnameList, bool, c10::optional<ScalarType>>(
+  batch_rule_156_t batch_rule,
   const Tensor & self, DimnameList dim, bool keepdim, c10::optional<ScalarType> dtype
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -3323,10 +3289,10 @@ Tensor lowerToNextLayer<batch_rule_158_t,Tensor,const Tensor &, DimnameList, boo
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_159_t)(IntArrayRef, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_157_t)(IntArrayRef, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool);
 template <>
-Tensor lowerToNextLayer<batch_rule_159_t,Tensor,IntArrayRef, const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool>(
-  batch_rule_159_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_157_t,Tensor,IntArrayRef, const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool>(
+  batch_rule_157_t batch_rule,
   IntArrayRef self_size, const Tensor & grad_output, const Tensor & weight, IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups, bool bias_defined
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -3343,10 +3309,10 @@ Tensor lowerToNextLayer<batch_rule_159_t,Tensor,IntArrayRef, const Tensor &, con
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_160_t)(IntArrayRef, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool);
+typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_158_t)(IntArrayRef, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool);
 template <>
-std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_160_t,std::tuple<Tensor,Tensor>,IntArrayRef, const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool>(
-  batch_rule_160_t batch_rule,
+std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_158_t,std::tuple<Tensor,Tensor>,IntArrayRef, const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool>(
+  batch_rule_158_t batch_rule,
   IntArrayRef weight_size, const Tensor & grad_output, const Tensor & self, IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups, bool bias_defined
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -3363,10 +3329,10 @@ std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_160_t,std::tuple<Tensor,Te
   return std::make_tuple(makeBatched(std::get<0>(results), std::get<1>(results), cur_level), makeBatched(std::get<2>(results), std::get<3>(results), cur_level));
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_161_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, bool, double, double);
+typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_159_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, bool, double, double);
 template <>
-std::tuple<Tensor,Tensor,Tensor> lowerToNextLayer<batch_rule_161_t,std::tuple<Tensor,Tensor,Tensor>,const Tensor &, const Tensor &, const c10::optional<Tensor> &, const c10::optional<Tensor> &, const c10::optional<Tensor> &, bool, double, double>(
-  batch_rule_161_t batch_rule,
+std::tuple<Tensor,Tensor,Tensor> lowerToNextLayer<batch_rule_159_t,std::tuple<Tensor,Tensor,Tensor>,const Tensor &, const Tensor &, const c10::optional<Tensor> &, const c10::optional<Tensor> &, const c10::optional<Tensor> &, bool, double, double>(
+  batch_rule_159_t batch_rule,
   const Tensor & input, const Tensor & weight, const c10::optional<Tensor> & bias, const c10::optional<Tensor> & running_mean, const c10::optional<Tensor> & running_var, bool training, double exponential_average_factor, double epsilon
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -3398,10 +3364,10 @@ std::tuple<Tensor,Tensor,Tensor> lowerToNextLayer<batch_rule_161_t,std::tuple<Te
   return std::make_tuple(makeBatched(std::get<0>(results), std::get<1>(results), cur_level), makeBatched(std::get<2>(results), std::get<3>(results), cur_level), makeBatched(std::get<4>(results), std::get<5>(results), cur_level));
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_162_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, double);
+typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_160_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, double);
 template <>
-std::tuple<Tensor,Tensor,Tensor> lowerToNextLayer<batch_rule_162_t,std::tuple<Tensor,Tensor,Tensor>,const Tensor &, const Tensor &, const Tensor &, const c10::optional<Tensor> &, const c10::optional<Tensor> &, const c10::optional<Tensor> &, const c10::optional<Tensor> &, double>(
-  batch_rule_162_t batch_rule,
+std::tuple<Tensor,Tensor,Tensor> lowerToNextLayer<batch_rule_160_t,std::tuple<Tensor,Tensor,Tensor>,const Tensor &, const Tensor &, const Tensor &, const c10::optional<Tensor> &, const c10::optional<Tensor> &, const c10::optional<Tensor> &, const c10::optional<Tensor> &, double>(
+  batch_rule_160_t batch_rule,
   const Tensor & input, const Tensor & grad_output, const Tensor & weight, const c10::optional<Tensor> & running_mean, const c10::optional<Tensor> & running_var, const c10::optional<Tensor> & save_mean, const c10::optional<Tensor> & save_var, double epsilon
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -3441,10 +3407,10 @@ std::tuple<Tensor,Tensor,Tensor> lowerToNextLayer<batch_rule_162_t,std::tuple<Te
   return std::make_tuple(makeBatched(std::get<0>(results), std::get<1>(results), cur_level), makeBatched(std::get<2>(results), std::get<3>(results), cur_level), makeBatched(std::get<4>(results), std::get<5>(results), cur_level));
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_163_t)(IntArrayRef, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_161_t)(IntArrayRef, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool);
 template <>
-Tensor lowerToNextLayer<batch_rule_163_t,Tensor,IntArrayRef, const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool>(
-  batch_rule_163_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_161_t,Tensor,IntArrayRef, const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool>(
+  batch_rule_161_t batch_rule,
   IntArrayRef weight_size, const Tensor & grad_output, const Tensor & self, IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups, bool benchmark, bool deterministic
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -3461,10 +3427,10 @@ Tensor lowerToNextLayer<batch_rule_163_t,Tensor,IntArrayRef, const Tensor &, con
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_164_t)(const Tensor &, c10::optional<int64_t>, int64_t, const Tensor &, c10::optional<int64_t>, int64_t);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_162_t)(const Tensor &, c10::optional<int64_t>, int64_t, const Tensor &, c10::optional<int64_t>, int64_t);
 template <>
-Tensor lowerToNextLayer<batch_rule_164_t,Tensor,const Tensor &, int64_t, const Tensor &, int64_t>(
-  batch_rule_164_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_162_t,Tensor,const Tensor &, int64_t, const Tensor &, int64_t>(
+  batch_rule_162_t batch_rule,
   const Tensor & self, int64_t dim, const Tensor & start, int64_t length
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -3481,10 +3447,10 @@ Tensor lowerToNextLayer<batch_rule_164_t,Tensor,const Tensor &, int64_t, const T
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_165_t)(const Tensor &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, bool, double, double);
+typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_163_t)(const Tensor &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, bool, double, double);
 template <>
-std::tuple<Tensor,Tensor,Tensor> lowerToNextLayer<batch_rule_165_t,std::tuple<Tensor,Tensor,Tensor>,const Tensor &, const c10::optional<Tensor> &, const c10::optional<Tensor> &, const c10::optional<Tensor> &, const c10::optional<Tensor> &, bool, double, double>(
-  batch_rule_165_t batch_rule,
+std::tuple<Tensor,Tensor,Tensor> lowerToNextLayer<batch_rule_163_t,std::tuple<Tensor,Tensor,Tensor>,const Tensor &, const c10::optional<Tensor> &, const c10::optional<Tensor> &, const c10::optional<Tensor> &, const c10::optional<Tensor> &, bool, double, double>(
+  batch_rule_163_t batch_rule,
   const Tensor & input, const c10::optional<Tensor> & weight, const c10::optional<Tensor> & bias, const c10::optional<Tensor> & running_mean, const c10::optional<Tensor> & running_var, bool training, double momentum, double eps
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -3518,10 +3484,10 @@ std::tuple<Tensor,Tensor,Tensor> lowerToNextLayer<batch_rule_165_t,std::tuple<Te
   return std::make_tuple(makeBatched(std::get<0>(results), std::get<1>(results), cur_level), makeBatched(std::get<2>(results), std::get<3>(results), cur_level), makeBatched(std::get<4>(results), std::get<5>(results), cur_level));
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_166_t)(const Tensor &, c10::optional<int64_t>, double);
+typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_164_t)(const Tensor &, c10::optional<int64_t>, double);
 template <>
-std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_166_t,std::tuple<Tensor,Tensor>,const Tensor &, double>(
-  batch_rule_166_t batch_rule,
+std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_164_t,std::tuple<Tensor,Tensor>,const Tensor &, double>(
+  batch_rule_164_t batch_rule,
   const Tensor & input, double eps
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -3535,10 +3501,10 @@ std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_166_t,std::tuple<Tensor,Te
   return std::make_tuple(makeBatched(std::get<0>(results), std::get<1>(results), cur_level), makeBatched(std::get<2>(results), std::get<3>(results), cur_level));
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_167_t)(const Tensor &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, double);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_165_t)(const Tensor &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, double);
 template <>
-Tensor lowerToNextLayer<batch_rule_167_t,Tensor,const Tensor &, const c10::optional<Tensor> &, const c10::optional<Tensor> &, const Tensor &, const Tensor &, double>(
-  batch_rule_167_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_165_t,Tensor,const Tensor &, const c10::optional<Tensor> &, const c10::optional<Tensor> &, const Tensor &, const Tensor &, double>(
+  batch_rule_165_t batch_rule,
   const Tensor & input, const c10::optional<Tensor> & weight, const c10::optional<Tensor> & bias, const Tensor & mean, const Tensor & invstd, double eps
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -3568,10 +3534,10 @@ Tensor lowerToNextLayer<batch_rule_167_t,Tensor,const Tensor &, const c10::optio
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_168_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, double, double, int64_t);
+typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_166_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, double, double, int64_t);
 template <>
-std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_168_t,std::tuple<Tensor,Tensor>,const Tensor &, const Tensor &, const Tensor &, const c10::optional<Tensor> &, const c10::optional<Tensor> &, double, double, int64_t>(
-  batch_rule_168_t batch_rule,
+std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_166_t,std::tuple<Tensor,Tensor>,const Tensor &, const Tensor &, const Tensor &, const c10::optional<Tensor> &, const c10::optional<Tensor> &, double, double, int64_t>(
+  batch_rule_166_t batch_rule,
   const Tensor & input, const Tensor & mean, const Tensor & invstd, const c10::optional<Tensor> & running_mean, const c10::optional<Tensor> & running_var, double momentum, double eps, int64_t count
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -3601,10 +3567,10 @@ std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_168_t,std::tuple<Tensor,Te
   return std::make_tuple(makeBatched(std::get<0>(results), std::get<1>(results), cur_level), makeBatched(std::get<2>(results), std::get<3>(results), cur_level));
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_169_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, double, double, const Tensor &, c10::optional<int64_t>);
+typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_167_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, double, double, const Tensor &, c10::optional<int64_t>);
 template <>
-std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_169_t,std::tuple<Tensor,Tensor>,const Tensor &, const Tensor &, const Tensor &, const c10::optional<Tensor> &, const c10::optional<Tensor> &, double, double, const Tensor &>(
-  batch_rule_169_t batch_rule,
+std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_167_t,std::tuple<Tensor,Tensor>,const Tensor &, const Tensor &, const Tensor &, const c10::optional<Tensor> &, const c10::optional<Tensor> &, double, double, const Tensor &>(
+  batch_rule_167_t batch_rule,
   const Tensor & input, const Tensor & mean, const Tensor & invstd, const c10::optional<Tensor> & running_mean, const c10::optional<Tensor> & running_var, double momentum, double eps, const Tensor & counts
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -3637,10 +3603,10 @@ std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_169_t,std::tuple<Tensor,Te
   return std::make_tuple(makeBatched(std::get<0>(results), std::get<1>(results), cur_level), makeBatched(std::get<2>(results), std::get<3>(results), cur_level));
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_170_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, bool, bool, bool);
+typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_168_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, bool, bool, bool);
 template <>
-std::tuple<Tensor,Tensor,Tensor,Tensor> lowerToNextLayer<batch_rule_170_t,std::tuple<Tensor,Tensor,Tensor,Tensor>,const Tensor &, const Tensor &, const Tensor &, const Tensor &, const c10::optional<Tensor> &, bool, bool, bool>(
-  batch_rule_170_t batch_rule,
+std::tuple<Tensor,Tensor,Tensor,Tensor> lowerToNextLayer<batch_rule_168_t,std::tuple<Tensor,Tensor,Tensor,Tensor>,const Tensor &, const Tensor &, const Tensor &, const Tensor &, const c10::optional<Tensor> &, bool, bool, bool>(
+  batch_rule_168_t batch_rule,
   const Tensor & grad_out, const Tensor & input, const Tensor & mean, const Tensor & invstd, const c10::optional<Tensor> & weight, bool input_g, bool weight_g, bool bias_g
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -3668,10 +3634,10 @@ std::tuple<Tensor,Tensor,Tensor,Tensor> lowerToNextLayer<batch_rule_170_t,std::t
   return std::make_tuple(makeBatched(std::get<0>(results), std::get<1>(results), cur_level), makeBatched(std::get<2>(results), std::get<3>(results), cur_level), makeBatched(std::get<4>(results), std::get<5>(results), cur_level), makeBatched(std::get<6>(results), std::get<7>(results), cur_level));
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_171_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_169_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>);
 template <>
-Tensor lowerToNextLayer<batch_rule_171_t,Tensor,const Tensor &, const Tensor &, const Tensor &, const Tensor &, const c10::optional<Tensor> &, const Tensor &, const Tensor &, const Tensor &>(
-  batch_rule_171_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_169_t,Tensor,const Tensor &, const Tensor &, const Tensor &, const Tensor &, const c10::optional<Tensor> &, const Tensor &, const Tensor &, const Tensor &>(
+  batch_rule_169_t batch_rule,
   const Tensor & grad_out, const Tensor & input, const Tensor & mean, const Tensor & invstd, const c10::optional<Tensor> & weight, const Tensor & mean_dy, const Tensor & mean_dy_xmu, const Tensor & count
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -3708,10 +3674,10 @@ Tensor lowerToNextLayer<batch_rule_171_t,Tensor,const Tensor &, const Tensor &, 
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_172_t)(const Tensor &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, double);
+typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_170_t)(const Tensor &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, double);
 template <>
-std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_172_t,std::tuple<Tensor,Tensor>,const Tensor &, const c10::optional<Tensor> &, const c10::optional<Tensor> &, double>(
-  batch_rule_172_t batch_rule,
+std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_170_t,std::tuple<Tensor,Tensor>,const Tensor &, const c10::optional<Tensor> &, const c10::optional<Tensor> &, double>(
+  batch_rule_170_t batch_rule,
   const Tensor & input, const c10::optional<Tensor> & running_mean, const c10::optional<Tensor> & running_var, double momentum
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -3735,10 +3701,10 @@ std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_172_t,std::tuple<Tensor,Te
   return std::make_tuple(makeBatched(std::get<0>(results), std::get<1>(results), cur_level), makeBatched(std::get<2>(results), std::get<3>(results), cur_level));
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_173_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, IntArrayRef, IntArrayRef);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_171_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, IntArrayRef, IntArrayRef);
 template <>
-Tensor lowerToNextLayer<batch_rule_173_t,Tensor,const Tensor &, const Tensor &, const c10::optional<Tensor> &, IntArrayRef, IntArrayRef>(
-  batch_rule_173_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_171_t,Tensor,const Tensor &, const Tensor &, const c10::optional<Tensor> &, IntArrayRef, IntArrayRef>(
+  batch_rule_171_t batch_rule,
   const Tensor & input, const Tensor & weight, const c10::optional<Tensor> & bias, IntArrayRef padding, IntArrayRef stride
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -3760,10 +3726,10 @@ Tensor lowerToNextLayer<batch_rule_173_t,Tensor,const Tensor &, const Tensor &, 
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_174_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, IntArrayRef);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_172_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, IntArrayRef);
 template <>
-Tensor lowerToNextLayer<batch_rule_174_t,Tensor,const Tensor &, const Tensor &, const Tensor &, IntArrayRef>(
-  batch_rule_174_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_172_t,Tensor,const Tensor &, const Tensor &, const Tensor &, IntArrayRef>(
+  batch_rule_172_t batch_rule,
   const Tensor & grad_output, const Tensor & self, const Tensor & indices, IntArrayRef output_size
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -3783,10 +3749,10 @@ Tensor lowerToNextLayer<batch_rule_174_t,Tensor,const Tensor &, const Tensor &, 
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_175_t)(const Tensor &, c10::optional<int64_t>, IntArrayRef, const Tensor &, c10::optional<int64_t>, IntArrayRef);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_173_t)(const Tensor &, c10::optional<int64_t>, IntArrayRef, const Tensor &, c10::optional<int64_t>, IntArrayRef);
 template <>
-Tensor lowerToNextLayer<batch_rule_175_t,Tensor,const Tensor &, IntArrayRef, const Tensor &, IntArrayRef>(
-  batch_rule_175_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_173_t,Tensor,const Tensor &, IntArrayRef, const Tensor &, IntArrayRef>(
+  batch_rule_173_t batch_rule,
   const Tensor & input, IntArrayRef weightsize, const Tensor & grad_output, IntArrayRef padding
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -3803,10 +3769,10 @@ Tensor lowerToNextLayer<batch_rule_175_t,Tensor,const Tensor &, IntArrayRef, con
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_176_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, double, c10::optional<int64_t>);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_174_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, double, c10::optional<int64_t>);
 template <>
-Tensor lowerToNextLayer<batch_rule_176_t,Tensor,const Tensor &, const Tensor &, double, c10::optional<int64_t>>(
-  batch_rule_176_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_174_t,Tensor,const Tensor &, const Tensor &, double, c10::optional<int64_t>>(
+  batch_rule_174_t batch_rule,
   const Tensor & x1, const Tensor & x2, double p, c10::optional<int64_t> compute_mode
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -3823,10 +3789,10 @@ Tensor lowerToNextLayer<batch_rule_176_t,Tensor,const Tensor &, const Tensor &, 
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_177_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, double, const Tensor &, c10::optional<int64_t>);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_175_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, double, const Tensor &, c10::optional<int64_t>);
 template <>
-Tensor lowerToNextLayer<batch_rule_177_t,Tensor,const Tensor &, const Tensor &, const Tensor &, double, const Tensor &>(
-  batch_rule_177_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_175_t,Tensor,const Tensor &, const Tensor &, const Tensor &, double, const Tensor &>(
+  batch_rule_175_t batch_rule,
   const Tensor & grad, const Tensor & x1, const Tensor & x2, double p, const Tensor & cdist
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -3849,10 +3815,10 @@ Tensor lowerToNextLayer<batch_rule_177_t,Tensor,const Tensor &, const Tensor &, 
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_178_t)(const Tensor &, c10::optional<int64_t>, double);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_176_t)(const Tensor &, c10::optional<int64_t>, double);
 template <>
-Tensor lowerToNextLayer<batch_rule_178_t,Tensor,const Tensor &, double>(
-  batch_rule_178_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_176_t,Tensor,const Tensor &, double>(
+  batch_rule_176_t batch_rule,
   const Tensor & self, double rcond
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -3866,10 +3832,10 @@ Tensor lowerToNextLayer<batch_rule_178_t,Tensor,const Tensor &, double>(
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_179_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, double, const Tensor &, c10::optional<int64_t>);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_177_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, double, const Tensor &, c10::optional<int64_t>);
 template <>
-Tensor lowerToNextLayer<batch_rule_179_t,Tensor,const Tensor &, const Tensor &, double, const Tensor &>(
-  batch_rule_179_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_177_t,Tensor,const Tensor &, const Tensor &, double, const Tensor &>(
+  batch_rule_177_t batch_rule,
   const Tensor & grad, const Tensor & self, double p, const Tensor & pdist
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -3889,10 +3855,10 @@ Tensor lowerToNextLayer<batch_rule_179_t,Tensor,const Tensor &, const Tensor &, 
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_180_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, int64_t, double);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_178_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, int64_t, double);
 template <>
-Tensor lowerToNextLayer<batch_rule_180_t,Tensor,const Tensor &, const Tensor &, int64_t, double>(
-  batch_rule_180_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_178_t,Tensor,const Tensor &, const Tensor &, int64_t, double>(
+  batch_rule_178_t batch_rule,
   const Tensor & self, const Tensor & target, int64_t reduction, double delta
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -3909,10 +3875,10 @@ Tensor lowerToNextLayer<batch_rule_180_t,Tensor,const Tensor &, const Tensor &, 
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_181_t)(const Tensor &, c10::optional<int64_t>, IntArrayRef, IntArrayRef);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_179_t)(const Tensor &, c10::optional<int64_t>, IntArrayRef, IntArrayRef);
 template <>
-Tensor lowerToNextLayer<batch_rule_181_t,Tensor,const Tensor &, IntArrayRef, IntArrayRef>(
-  batch_rule_181_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_179_t,Tensor,const Tensor &, IntArrayRef, IntArrayRef>(
+  batch_rule_179_t batch_rule,
   const Tensor & self, IntArrayRef shifts, IntArrayRef dims
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -3926,10 +3892,10 @@ Tensor lowerToNextLayer<batch_rule_181_t,Tensor,const Tensor &, IntArrayRef, Int
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<bool> (*batch_rule_182_t)(const Tensor &, c10::optional<int64_t>, c10::optional<Device>);
+typedef std::tuple<bool> (*batch_rule_180_t)(const Tensor &, c10::optional<int64_t>, c10::optional<Device>);
 template <>
-bool lowerToNextLayer<batch_rule_182_t,bool,const Tensor &, c10::optional<Device>>(
-  batch_rule_182_t batch_rule,
+bool lowerToNextLayer<batch_rule_180_t,bool,const Tensor &, c10::optional<Device>>(
+  batch_rule_180_t batch_rule,
   const Tensor & self, c10::optional<Device> device
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -3943,10 +3909,10 @@ bool lowerToNextLayer<batch_rule_182_t,bool,const Tensor &, c10::optional<Device
   return std::get<0>(results);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_183_t)(const Tensor &, c10::optional<int64_t>, c10::optional<Device>);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_181_t)(const Tensor &, c10::optional<int64_t>, c10::optional<Device>);
 template <>
-Tensor lowerToNextLayer<batch_rule_183_t,Tensor,const Tensor &, c10::optional<Device>>(
-  batch_rule_183_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_181_t,Tensor,const Tensor &, c10::optional<Device>>(
+  batch_rule_181_t batch_rule,
   const Tensor & self, c10::optional<Device> device
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -3960,10 +3926,10 @@ Tensor lowerToNextLayer<batch_rule_183_t,Tensor,const Tensor &, c10::optional<De
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_184_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, bool, bool, double, int64_t);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_182_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, bool, bool, double, int64_t);
 template <>
-Tensor lowerToNextLayer<batch_rule_184_t,Tensor,const Tensor &, const Tensor &, bool, bool, double, int64_t>(
-  batch_rule_184_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_182_t,Tensor,const Tensor &, const Tensor &, bool, bool, double, int64_t>(
+  batch_rule_182_t batch_rule,
   const Tensor & input, const Tensor & target, bool log_input, bool full, double eps, int64_t reduction
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -3980,10 +3946,10 @@ Tensor lowerToNextLayer<batch_rule_184_t,Tensor,const Tensor &, const Tensor &, 
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_185_t)(const Tensor &, c10::optional<int64_t>, int64_t, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>, c10::optional<MemoryFormat>);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_183_t)(const Tensor &, c10::optional<int64_t>, int64_t, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>, c10::optional<MemoryFormat>);
 template <>
-Tensor lowerToNextLayer<batch_rule_185_t,Tensor,const Tensor &, int64_t, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>, c10::optional<MemoryFormat>>(
-  batch_rule_185_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_183_t,Tensor,const Tensor &, int64_t, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>, c10::optional<MemoryFormat>>(
+  batch_rule_183_t batch_rule,
   const Tensor & self, int64_t high, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory, c10::optional<MemoryFormat> memory_format
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -3997,10 +3963,10 @@ Tensor lowerToNextLayer<batch_rule_185_t,Tensor,const Tensor &, int64_t, c10::op
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_186_t)(const Tensor &, c10::optional<int64_t>, int64_t, int64_t, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>, c10::optional<MemoryFormat>);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_184_t)(const Tensor &, c10::optional<int64_t>, int64_t, int64_t, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>, c10::optional<MemoryFormat>);
 template <>
-Tensor lowerToNextLayer<batch_rule_186_t,Tensor,const Tensor &, int64_t, int64_t, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>, c10::optional<MemoryFormat>>(
-  batch_rule_186_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_184_t,Tensor,const Tensor &, int64_t, int64_t, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>, c10::optional<MemoryFormat>>(
+  batch_rule_184_t batch_rule,
   const Tensor & self, int64_t low, int64_t high, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory, c10::optional<MemoryFormat> memory_format
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -4014,10 +3980,10 @@ Tensor lowerToNextLayer<batch_rule_186_t,Tensor,const Tensor &, int64_t, int64_t
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_187_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, c10::optional<int64_t>, c10::optional<int64_t>);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_185_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, c10::optional<int64_t>, c10::optional<int64_t>);
 template <>
-Tensor lowerToNextLayer<batch_rule_187_t,Tensor,const Tensor &, const Tensor &, c10::optional<int64_t>, c10::optional<int64_t>>(
-  batch_rule_187_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_185_t,Tensor,const Tensor &, const Tensor &, c10::optional<int64_t>, c10::optional<int64_t>>(
+  batch_rule_185_t batch_rule,
   const Tensor & self, const Tensor & repeats, c10::optional<int64_t> dim, c10::optional<int64_t> output_size
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -4034,10 +4000,10 @@ Tensor lowerToNextLayer<batch_rule_187_t,Tensor,const Tensor &, const Tensor &, 
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_188_t)(const Tensor &, c10::optional<int64_t>, int64_t, c10::optional<int64_t>, c10::optional<int64_t>);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_186_t)(const Tensor &, c10::optional<int64_t>, int64_t, c10::optional<int64_t>, c10::optional<int64_t>);
 template <>
-Tensor lowerToNextLayer<batch_rule_188_t,Tensor,const Tensor &, int64_t, c10::optional<int64_t>, c10::optional<int64_t>>(
-  batch_rule_188_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_186_t,Tensor,const Tensor &, int64_t, c10::optional<int64_t>, c10::optional<int64_t>>(
+  batch_rule_186_t batch_rule,
   const Tensor & self, int64_t repeats, c10::optional<int64_t> dim, c10::optional<int64_t> output_size
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -4051,10 +4017,10 @@ Tensor lowerToNextLayer<batch_rule_188_t,Tensor,const Tensor &, int64_t, c10::op
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_189_t)(const Tensor &, c10::optional<int64_t>, const Scalar &, const Scalar &, bool, c10::optional<Generator>);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_187_t)(const Tensor &, c10::optional<int64_t>, const Scalar &, const Scalar &, bool, c10::optional<Generator>);
 template <>
-Tensor lowerToNextLayer<batch_rule_189_t,Tensor,const Tensor &, const Scalar &, const Scalar &, bool, c10::optional<Generator>>(
-  batch_rule_189_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_187_t,Tensor,const Tensor &, const Scalar &, const Scalar &, bool, c10::optional<Generator>>(
+  batch_rule_187_t batch_rule,
   const Tensor & self, const Scalar & lower, const Scalar & upper, bool training, c10::optional<Generator> generator
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -4068,10 +4034,10 @@ Tensor lowerToNextLayer<batch_rule_189_t,Tensor,const Tensor &, const Scalar &, 
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_190_t)(const Tensor &, c10::optional<int64_t>, Dimname, int64_t);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_188_t)(const Tensor &, c10::optional<int64_t>, Dimname, int64_t);
 template <>
-Tensor lowerToNextLayer<batch_rule_190_t,Tensor,const Tensor &, Dimname, int64_t>(
-  batch_rule_190_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_188_t,Tensor,const Tensor &, Dimname, int64_t>(
+  batch_rule_188_t batch_rule,
   const Tensor & self, Dimname dim, int64_t index
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -4085,10 +4051,10 @@ Tensor lowerToNextLayer<batch_rule_190_t,Tensor,const Tensor &, Dimname, int64_t
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_191_t)(const Tensor &, c10::optional<int64_t>, c10::optional<double>);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_189_t)(const Tensor &, c10::optional<int64_t>, c10::optional<double>);
 template <>
-Tensor lowerToNextLayer<batch_rule_191_t,Tensor,const Tensor &, c10::optional<double>>(
-  batch_rule_191_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_189_t,Tensor,const Tensor &, c10::optional<double>>(
+  batch_rule_189_t batch_rule,
   const Tensor & self, c10::optional<double> eps
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -4102,10 +4068,10 @@ Tensor lowerToNextLayer<batch_rule_191_t,Tensor,const Tensor &, c10::optional<do
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<int64_t> (*batch_rule_192_t)(const Tensor &, c10::optional<int64_t>, int64_t);
+typedef std::tuple<int64_t> (*batch_rule_190_t)(const Tensor &, c10::optional<int64_t>, int64_t);
 template <>
-int64_t lowerToNextLayer<batch_rule_192_t,int64_t,const Tensor &, int64_t>(
-  batch_rule_192_t batch_rule,
+int64_t lowerToNextLayer<batch_rule_190_t,int64_t,const Tensor &, int64_t>(
+  batch_rule_190_t batch_rule,
   const Tensor & self, int64_t dim
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -4119,10 +4085,10 @@ int64_t lowerToNextLayer<batch_rule_192_t,int64_t,const Tensor &, int64_t>(
   return std::get<0>(results);
 }
 
-typedef std::tuple<int64_t> (*batch_rule_193_t)(const Tensor &, c10::optional<int64_t>, Dimname);
+typedef std::tuple<int64_t> (*batch_rule_191_t)(const Tensor &, c10::optional<int64_t>, Dimname);
 template <>
-int64_t lowerToNextLayer<batch_rule_193_t,int64_t,const Tensor &, Dimname>(
-  batch_rule_193_t batch_rule,
+int64_t lowerToNextLayer<batch_rule_191_t,int64_t,const Tensor &, Dimname>(
+  batch_rule_191_t batch_rule,
   const Tensor & self, Dimname dim
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -4136,10 +4102,10 @@ int64_t lowerToNextLayer<batch_rule_193_t,int64_t,const Tensor &, Dimname>(
   return std::get<0>(results);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_194_t)(const Tensor &, c10::optional<int64_t>, int64_t, c10::optional<int64_t>, c10::optional<int64_t>, int64_t);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_192_t)(const Tensor &, c10::optional<int64_t>, int64_t, c10::optional<int64_t>, c10::optional<int64_t>, int64_t);
 template <>
-Tensor lowerToNextLayer<batch_rule_194_t,Tensor,const Tensor &, int64_t, c10::optional<int64_t>, c10::optional<int64_t>, int64_t>(
-  batch_rule_194_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_192_t,Tensor,const Tensor &, int64_t, c10::optional<int64_t>, c10::optional<int64_t>, int64_t>(
+  batch_rule_192_t batch_rule,
   const Tensor & self, int64_t dim, c10::optional<int64_t> start, c10::optional<int64_t> end, int64_t step
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -4153,10 +4119,10 @@ Tensor lowerToNextLayer<batch_rule_194_t,Tensor,const Tensor &, int64_t, c10::op
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_195_t)(const Tensor &, c10::optional<int64_t>, IntArrayRef, int64_t, int64_t, int64_t, int64_t);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_193_t)(const Tensor &, c10::optional<int64_t>, IntArrayRef, int64_t, int64_t, int64_t, int64_t);
 template <>
-Tensor lowerToNextLayer<batch_rule_195_t,Tensor,const Tensor &, IntArrayRef, int64_t, int64_t, int64_t, int64_t>(
-  batch_rule_195_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_193_t,Tensor,const Tensor &, IntArrayRef, int64_t, int64_t, int64_t, int64_t>(
+  batch_rule_193_t batch_rule,
   const Tensor & grad_output, IntArrayRef input_sizes, int64_t dim, int64_t start, int64_t end, int64_t step
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -4170,10 +4136,10 @@ Tensor lowerToNextLayer<batch_rule_195_t,Tensor,const Tensor &, IntArrayRef, int
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<::std::vector<Tensor>,c10::optional<int64_t>> (*batch_rule_196_t)(const Tensor &, c10::optional<int64_t>, int64_t);
+typedef std::tuple<::std::vector<Tensor>,c10::optional<int64_t>> (*batch_rule_194_t)(const Tensor &, c10::optional<int64_t>, int64_t);
 template <>
-::std::vector<Tensor> lowerToNextLayer<batch_rule_196_t,::std::vector<Tensor>,const Tensor &, int64_t>(
-  batch_rule_196_t batch_rule,
+::std::vector<Tensor> lowerToNextLayer<batch_rule_194_t,::std::vector<Tensor>,const Tensor &, int64_t>(
+  batch_rule_194_t batch_rule,
   const Tensor & self, int64_t dim
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -4187,10 +4153,10 @@ template <>
   return makeBatchedVector(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<::std::vector<Tensor>,c10::optional<int64_t>> (*batch_rule_197_t)(const Tensor &, c10::optional<int64_t>, IntArrayRef);
+typedef std::tuple<::std::vector<Tensor>,c10::optional<int64_t>> (*batch_rule_195_t)(const Tensor &, c10::optional<int64_t>, IntArrayRef);
 template <>
-::std::vector<Tensor> lowerToNextLayer<batch_rule_197_t,::std::vector<Tensor>,const Tensor &, IntArrayRef>(
-  batch_rule_197_t batch_rule,
+::std::vector<Tensor> lowerToNextLayer<batch_rule_195_t,::std::vector<Tensor>,const Tensor &, IntArrayRef>(
+  batch_rule_195_t batch_rule,
   const Tensor & self, IntArrayRef indices
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -4204,10 +4170,10 @@ template <>
   return makeBatchedVector(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_198_t)(const Tensor &, c10::optional<int64_t>, int64_t, c10::optional<int64_t>, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, bool, c10::optional<bool>, c10::optional<bool>);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_196_t)(const Tensor &, c10::optional<int64_t>, int64_t, c10::optional<int64_t>, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, bool, c10::optional<bool>, c10::optional<bool>);
 template <>
-Tensor lowerToNextLayer<batch_rule_198_t,Tensor,const Tensor &, int64_t, c10::optional<int64_t>, c10::optional<int64_t>, const c10::optional<Tensor> &, bool, c10::optional<bool>, c10::optional<bool>>(
-  batch_rule_198_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_196_t,Tensor,const Tensor &, int64_t, c10::optional<int64_t>, c10::optional<int64_t>, const c10::optional<Tensor> &, bool, c10::optional<bool>, c10::optional<bool>>(
+  batch_rule_196_t batch_rule,
   const Tensor & self, int64_t n_fft, c10::optional<int64_t> hop_length, c10::optional<int64_t> win_length, const c10::optional<Tensor> & window, bool normalized, c10::optional<bool> onesided, c10::optional<bool> return_complex
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -4226,10 +4192,10 @@ Tensor lowerToNextLayer<batch_rule_198_t,Tensor,const Tensor &, int64_t, c10::op
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_199_t)(const Tensor &, c10::optional<int64_t>, int64_t, c10::optional<int64_t>, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, bool, bool, c10::optional<bool>, c10::optional<int64_t>, bool);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_197_t)(const Tensor &, c10::optional<int64_t>, int64_t, c10::optional<int64_t>, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, bool, bool, c10::optional<bool>, c10::optional<int64_t>, bool);
 template <>
-Tensor lowerToNextLayer<batch_rule_199_t,Tensor,const Tensor &, int64_t, c10::optional<int64_t>, c10::optional<int64_t>, const c10::optional<Tensor> &, bool, bool, c10::optional<bool>, c10::optional<int64_t>, bool>(
-  batch_rule_199_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_197_t,Tensor,const Tensor &, int64_t, c10::optional<int64_t>, c10::optional<int64_t>, const c10::optional<Tensor> &, bool, bool, c10::optional<bool>, c10::optional<int64_t>, bool>(
+  batch_rule_197_t batch_rule,
   const Tensor & self, int64_t n_fft, c10::optional<int64_t> hop_length, c10::optional<int64_t> win_length, const c10::optional<Tensor> & window, bool center, bool normalized, c10::optional<bool> onesided, c10::optional<int64_t> length, bool return_complex
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -4248,10 +4214,10 @@ Tensor lowerToNextLayer<batch_rule_199_t,Tensor,const Tensor &, int64_t, c10::op
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_200_t)(const Tensor &, c10::optional<int64_t>, IntArrayRef, bool, bool);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_198_t)(const Tensor &, c10::optional<int64_t>, IntArrayRef, bool, bool);
 template <>
-Tensor lowerToNextLayer<batch_rule_200_t,Tensor,const Tensor &, IntArrayRef, bool, bool>(
-  batch_rule_200_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_198_t,Tensor,const Tensor &, IntArrayRef, bool, bool>(
+  batch_rule_198_t batch_rule,
   const Tensor & self, IntArrayRef dim, bool unbiased, bool keepdim
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -4265,10 +4231,10 @@ Tensor lowerToNextLayer<batch_rule_200_t,Tensor,const Tensor &, IntArrayRef, boo
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_201_t)(const Tensor &, c10::optional<int64_t>, c10::optional<IntArrayRef>, c10::optional<int64_t>, bool);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_199_t)(const Tensor &, c10::optional<int64_t>, c10::optional<IntArrayRef>, c10::optional<int64_t>, bool);
 template <>
-Tensor lowerToNextLayer<batch_rule_201_t,Tensor,const Tensor &, c10::optional<IntArrayRef>, c10::optional<int64_t>, bool>(
-  batch_rule_201_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_199_t,Tensor,const Tensor &, c10::optional<IntArrayRef>, c10::optional<int64_t>, bool>(
+  batch_rule_199_t batch_rule,
   const Tensor & self, c10::optional<IntArrayRef> dim, c10::optional<int64_t> correction, bool keepdim
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -4282,10 +4248,10 @@ Tensor lowerToNextLayer<batch_rule_201_t,Tensor,const Tensor &, c10::optional<In
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_202_t)(const Tensor &, c10::optional<int64_t>, bool);
+typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_200_t)(const Tensor &, c10::optional<int64_t>, bool);
 template <>
-std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_202_t,std::tuple<Tensor,Tensor>,const Tensor &, bool>(
-  batch_rule_202_t batch_rule,
+std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_200_t,std::tuple<Tensor,Tensor>,const Tensor &, bool>(
+  batch_rule_200_t batch_rule,
   const Tensor & self, bool check_errors
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -4299,10 +4265,10 @@ std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_202_t,std::tuple<Tensor,Te
   return std::make_tuple(makeBatched(std::get<0>(results), std::get<1>(results), cur_level), makeBatched(std::get<2>(results), std::get<3>(results), cur_level));
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_203_t)(const Tensor &, c10::optional<int64_t>, IntArrayRef, bool, bool);
+typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_201_t)(const Tensor &, c10::optional<int64_t>, IntArrayRef, bool, bool);
 template <>
-std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_203_t,std::tuple<Tensor,Tensor>,const Tensor &, IntArrayRef, bool, bool>(
-  batch_rule_203_t batch_rule,
+std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_201_t,std::tuple<Tensor,Tensor>,const Tensor &, IntArrayRef, bool, bool>(
+  batch_rule_201_t batch_rule,
   const Tensor & self, IntArrayRef dim, bool unbiased, bool keepdim
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -4316,10 +4282,10 @@ std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_203_t,std::tuple<Tensor,Te
   return std::make_tuple(makeBatched(std::get<0>(results), std::get<1>(results), cur_level), makeBatched(std::get<2>(results), std::get<3>(results), cur_level));
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_204_t)(const Tensor &, c10::optional<int64_t>, c10::optional<IntArrayRef>, c10::optional<int64_t>, bool);
+typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_202_t)(const Tensor &, c10::optional<int64_t>, c10::optional<IntArrayRef>, c10::optional<int64_t>, bool);
 template <>
-std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_204_t,std::tuple<Tensor,Tensor>,const Tensor &, c10::optional<IntArrayRef>, c10::optional<int64_t>, bool>(
-  batch_rule_204_t batch_rule,
+std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_202_t,std::tuple<Tensor,Tensor>,const Tensor &, c10::optional<IntArrayRef>, c10::optional<int64_t>, bool>(
+  batch_rule_202_t batch_rule,
   const Tensor & self, c10::optional<IntArrayRef> dim, c10::optional<int64_t> correction, bool keepdim
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -4333,9 +4299,43 @@ std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_204_t,std::tuple<Tensor,Te
   return std::make_tuple(makeBatched(std::get<0>(results), std::get<1>(results), cur_level), makeBatched(std::get<2>(results), std::get<3>(results), cur_level));
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_205_t)(const Tensor &, c10::optional<int64_t>, DimnameList, bool, bool);
+typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_203_t)(const Tensor &, c10::optional<int64_t>, DimnameList, bool, bool);
 template <>
-std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_205_t,std::tuple<Tensor,Tensor>,const Tensor &, DimnameList, bool, bool>(
+std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_203_t,std::tuple<Tensor,Tensor>,const Tensor &, DimnameList, bool, bool>(
+  batch_rule_203_t batch_rule,
+  const Tensor & self, DimnameList dim, bool unbiased, bool keepdim
+) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  auto results = batch_rule(self_value, self_bdim, dim, unbiased, keepdim);
+  return std::make_tuple(makeBatched(std::get<0>(results), std::get<1>(results), cur_level), makeBatched(std::get<2>(results), std::get<3>(results), cur_level));
+}
+
+typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_204_t)(const Tensor &, c10::optional<int64_t>, DimnameList, c10::optional<int64_t>, bool);
+template <>
+std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_204_t,std::tuple<Tensor,Tensor>,const Tensor &, DimnameList, c10::optional<int64_t>, bool>(
+  batch_rule_204_t batch_rule,
+  const Tensor & self, DimnameList dim, c10::optional<int64_t> correction, bool keepdim
+) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  auto results = batch_rule(self_value, self_bdim, dim, correction, keepdim);
+  return std::make_tuple(makeBatched(std::get<0>(results), std::get<1>(results), cur_level), makeBatched(std::get<2>(results), std::get<3>(results), cur_level));
+}
+
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_205_t)(const Tensor &, c10::optional<int64_t>, DimnameList, bool, bool);
+template <>
+Tensor lowerToNextLayer<batch_rule_205_t,Tensor,const Tensor &, DimnameList, bool, bool>(
   batch_rule_205_t batch_rule,
   const Tensor & self, DimnameList dim, bool unbiased, bool keepdim
 ) {
@@ -4347,12 +4347,12 @@ std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_205_t,std::tuple<Tensor,Te
   optional<int64_t> self_bdim;
   std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
   auto results = batch_rule(self_value, self_bdim, dim, unbiased, keepdim);
-  return std::make_tuple(makeBatched(std::get<0>(results), std::get<1>(results), cur_level), makeBatched(std::get<2>(results), std::get<3>(results), cur_level));
+  return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_206_t)(const Tensor &, c10::optional<int64_t>, DimnameList, c10::optional<int64_t>, bool);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_206_t)(const Tensor &, c10::optional<int64_t>, DimnameList, c10::optional<int64_t>, bool);
 template <>
-std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_206_t,std::tuple<Tensor,Tensor>,const Tensor &, DimnameList, c10::optional<int64_t>, bool>(
+Tensor lowerToNextLayer<batch_rule_206_t,Tensor,const Tensor &, DimnameList, c10::optional<int64_t>, bool>(
   batch_rule_206_t batch_rule,
   const Tensor & self, DimnameList dim, c10::optional<int64_t> correction, bool keepdim
 ) {
@@ -4364,47 +4364,13 @@ std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_206_t,std::tuple<Tensor,Te
   optional<int64_t> self_bdim;
   std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
   auto results = batch_rule(self_value, self_bdim, dim, correction, keepdim);
-  return std::make_tuple(makeBatched(std::get<0>(results), std::get<1>(results), cur_level), makeBatched(std::get<2>(results), std::get<3>(results), cur_level));
+  return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_207_t)(const Tensor &, c10::optional<int64_t>, DimnameList, bool, bool);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_207_t)(const Tensor &, c10::optional<int64_t>, int64_t, bool, c10::optional<ScalarType>);
 template <>
-Tensor lowerToNextLayer<batch_rule_207_t,Tensor,const Tensor &, DimnameList, bool, bool>(
+Tensor lowerToNextLayer<batch_rule_207_t,Tensor,const Tensor &, int64_t, bool, c10::optional<ScalarType>>(
   batch_rule_207_t batch_rule,
-  const Tensor & self, DimnameList dim, bool unbiased, bool keepdim
-) {
-  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
-  auto maybe_layer = maybeCurrentDynamicLayer();
-  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
-  int64_t cur_level = maybe_layer->layerId();
-  Tensor self_value;
-  optional<int64_t> self_bdim;
-  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
-  auto results = batch_rule(self_value, self_bdim, dim, unbiased, keepdim);
-  return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
-}
-
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_208_t)(const Tensor &, c10::optional<int64_t>, DimnameList, c10::optional<int64_t>, bool);
-template <>
-Tensor lowerToNextLayer<batch_rule_208_t,Tensor,const Tensor &, DimnameList, c10::optional<int64_t>, bool>(
-  batch_rule_208_t batch_rule,
-  const Tensor & self, DimnameList dim, c10::optional<int64_t> correction, bool keepdim
-) {
-  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
-  auto maybe_layer = maybeCurrentDynamicLayer();
-  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
-  int64_t cur_level = maybe_layer->layerId();
-  Tensor self_value;
-  optional<int64_t> self_bdim;
-  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
-  auto results = batch_rule(self_value, self_bdim, dim, correction, keepdim);
-  return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
-}
-
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_209_t)(const Tensor &, c10::optional<int64_t>, int64_t, bool, c10::optional<ScalarType>);
-template <>
-Tensor lowerToNextLayer<batch_rule_209_t,Tensor,const Tensor &, int64_t, bool, c10::optional<ScalarType>>(
-  batch_rule_209_t batch_rule,
   const Tensor & self, int64_t dim, bool keepdim, c10::optional<ScalarType> dtype
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -4418,10 +4384,10 @@ Tensor lowerToNextLayer<batch_rule_209_t,Tensor,const Tensor &, int64_t, bool, c
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_210_t)(const Tensor &, c10::optional<int64_t>, Dimname, bool, c10::optional<ScalarType>);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_208_t)(const Tensor &, c10::optional<int64_t>, Dimname, bool, c10::optional<ScalarType>);
 template <>
-Tensor lowerToNextLayer<batch_rule_210_t,Tensor,const Tensor &, Dimname, bool, c10::optional<ScalarType>>(
-  batch_rule_210_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_208_t,Tensor,const Tensor &, Dimname, bool, c10::optional<ScalarType>>(
+  batch_rule_208_t batch_rule,
   const Tensor & self, Dimname dim, bool keepdim, c10::optional<ScalarType> dtype
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -4435,10 +4401,10 @@ Tensor lowerToNextLayer<batch_rule_210_t,Tensor,const Tensor &, Dimname, bool, c
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_211_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, IntArrayRef, IntArrayRef);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_209_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, IntArrayRef, IntArrayRef);
 template <>
-Tensor lowerToNextLayer<batch_rule_211_t,Tensor,const Tensor &, const Tensor &, IntArrayRef, IntArrayRef>(
-  batch_rule_211_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_209_t,Tensor,const Tensor &, const Tensor &, IntArrayRef, IntArrayRef>(
+  batch_rule_209_t batch_rule,
   const Tensor & self, const Tensor & other, IntArrayRef dims_self, IntArrayRef dims_other
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -4455,10 +4421,10 @@ Tensor lowerToNextLayer<batch_rule_211_t,Tensor,const Tensor &, const Tensor &, 
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_212_t)(const Tensor &, c10::optional<int64_t>, Dimname, Dimname);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_210_t)(const Tensor &, c10::optional<int64_t>, Dimname, Dimname);
 template <>
-Tensor lowerToNextLayer<batch_rule_212_t,Tensor,const Tensor &, Dimname, Dimname>(
-  batch_rule_212_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_210_t,Tensor,const Tensor &, Dimname, Dimname>(
+  batch_rule_210_t batch_rule,
   const Tensor & self, Dimname dim0, Dimname dim1
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -4472,10 +4438,10 @@ Tensor lowerToNextLayer<batch_rule_212_t,Tensor,const Tensor &, Dimname, Dimname
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_213_t)(const Tensor &, c10::optional<int64_t>, int64_t, IntArrayRef);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_211_t)(const Tensor &, c10::optional<int64_t>, int64_t, IntArrayRef);
 template <>
-Tensor lowerToNextLayer<batch_rule_213_t,Tensor,const Tensor &, int64_t, IntArrayRef>(
-  batch_rule_213_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_211_t,Tensor,const Tensor &, int64_t, IntArrayRef>(
+  batch_rule_211_t batch_rule,
   const Tensor & self, int64_t k, IntArrayRef dims
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -4489,10 +4455,10 @@ Tensor lowerToNextLayer<batch_rule_213_t,Tensor,const Tensor &, int64_t, IntArra
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_214_t)(const Tensor &, c10::optional<int64_t>, double, int64_t);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_212_t)(const Tensor &, c10::optional<int64_t>, double, int64_t);
 template <>
-Tensor lowerToNextLayer<batch_rule_214_t,Tensor,const Tensor &, double, int64_t>(
-  batch_rule_214_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_212_t,Tensor,const Tensor &, double, int64_t>(
+  batch_rule_212_t batch_rule,
   const Tensor & self, double scale, int64_t zero_point
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -4506,10 +4472,10 @@ Tensor lowerToNextLayer<batch_rule_214_t,Tensor,const Tensor &, double, int64_t>
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_215_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, IntArrayRef, IntArrayRef, IntArrayRef, IntArrayRef, int64_t);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_213_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, IntArrayRef, IntArrayRef, IntArrayRef, IntArrayRef, int64_t);
 template <>
-Tensor lowerToNextLayer<batch_rule_215_t,Tensor,const Tensor &, const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, IntArrayRef, int64_t>(
-  batch_rule_215_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_213_t,Tensor,const Tensor &, const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, IntArrayRef, int64_t>(
+  batch_rule_213_t batch_rule,
   const Tensor & i1, const Tensor & i2, const Tensor & i3, IntArrayRef expand1, IntArrayRef expand2, IntArrayRef expand3, IntArrayRef sumdim, int64_t unroll_dim
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -4529,10 +4495,10 @@ Tensor lowerToNextLayer<batch_rule_215_t,Tensor,const Tensor &, const Tensor &, 
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_216_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, double, double, double, bool, int64_t);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_214_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, double, double, double, bool, int64_t);
 template <>
-Tensor lowerToNextLayer<batch_rule_216_t,Tensor,const Tensor &, const Tensor &, const Tensor &, double, double, double, bool, int64_t>(
-  batch_rule_216_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_214_t,Tensor,const Tensor &, const Tensor &, const Tensor &, double, double, double, bool, int64_t>(
+  batch_rule_214_t batch_rule,
   const Tensor & anchor, const Tensor & positive, const Tensor & negative, double margin, double p, double eps, bool swap, int64_t reduction
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -4552,10 +4518,10 @@ Tensor lowerToNextLayer<batch_rule_216_t,Tensor,const Tensor &, const Tensor &, 
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_217_t)(const Tensor &, c10::optional<int64_t>, bool, bool);
+typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_215_t)(const Tensor &, c10::optional<int64_t>, bool, bool);
 template <>
-std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_217_t,std::tuple<Tensor,Tensor>,const Tensor &, bool, bool>(
-  batch_rule_217_t batch_rule,
+std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_215_t,std::tuple<Tensor,Tensor>,const Tensor &, bool, bool>(
+  batch_rule_215_t batch_rule,
   const Tensor & self, bool upper, bool check_errors
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -4569,10 +4535,10 @@ std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_217_t,std::tuple<Tensor,Te
   return std::make_tuple(makeBatched(std::get<0>(results), std::get<1>(results), cur_level), makeBatched(std::get<2>(results), std::get<3>(results), cur_level));
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_218_t)(const Tensor &, c10::optional<int64_t>, int64_t, bool, bool, bool);
+typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_216_t)(const Tensor &, c10::optional<int64_t>, int64_t, bool, bool, bool);
 template <>
-std::tuple<Tensor,Tensor,Tensor> lowerToNextLayer<batch_rule_218_t,std::tuple<Tensor,Tensor,Tensor>,const Tensor &, int64_t, bool, bool, bool>(
-  batch_rule_218_t batch_rule,
+std::tuple<Tensor,Tensor,Tensor> lowerToNextLayer<batch_rule_216_t,std::tuple<Tensor,Tensor,Tensor>,const Tensor &, int64_t, bool, bool, bool>(
+  batch_rule_216_t batch_rule,
   const Tensor & self, int64_t dim, bool sorted, bool return_inverse, bool return_counts
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -4586,10 +4552,10 @@ std::tuple<Tensor,Tensor,Tensor> lowerToNextLayer<batch_rule_218_t,std::tuple<Te
   return std::make_tuple(makeBatched(std::get<0>(results), std::get<1>(results), cur_level), makeBatched(std::get<2>(results), std::get<3>(results), cur_level), makeBatched(std::get<4>(results), std::get<5>(results), cur_level));
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_219_t)(const Tensor &, c10::optional<int64_t>, bool, bool, c10::optional<int64_t>);
+typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_217_t)(const Tensor &, c10::optional<int64_t>, bool, bool, c10::optional<int64_t>);
 template <>
-std::tuple<Tensor,Tensor,Tensor> lowerToNextLayer<batch_rule_219_t,std::tuple<Tensor,Tensor,Tensor>,const Tensor &, bool, bool, c10::optional<int64_t>>(
-  batch_rule_219_t batch_rule,
+std::tuple<Tensor,Tensor,Tensor> lowerToNextLayer<batch_rule_217_t,std::tuple<Tensor,Tensor,Tensor>,const Tensor &, bool, bool, c10::optional<int64_t>>(
+  batch_rule_217_t batch_rule,
   const Tensor & self, bool return_inverse, bool return_counts, c10::optional<int64_t> dim
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -4603,10 +4569,10 @@ std::tuple<Tensor,Tensor,Tensor> lowerToNextLayer<batch_rule_219_t,std::tuple<Te
   return std::make_tuple(makeBatched(std::get<0>(results), std::get<1>(results), cur_level), makeBatched(std::get<2>(results), std::get<3>(results), cur_level), makeBatched(std::get<4>(results), std::get<5>(results), cur_level));
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_220_t)(const Tensor &, c10::optional<int64_t>, int64_t, bool, bool);
+typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_218_t)(const Tensor &, c10::optional<int64_t>, int64_t, bool, bool);
 template <>
-std::tuple<Tensor,Tensor,Tensor> lowerToNextLayer<batch_rule_220_t,std::tuple<Tensor,Tensor,Tensor>,const Tensor &, int64_t, bool, bool>(
-  batch_rule_220_t batch_rule,
+std::tuple<Tensor,Tensor,Tensor> lowerToNextLayer<batch_rule_218_t,std::tuple<Tensor,Tensor,Tensor>,const Tensor &, int64_t, bool, bool>(
+  batch_rule_218_t batch_rule,
   const Tensor & self, int64_t dim, bool return_inverse, bool return_counts
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -4620,10 +4586,10 @@ std::tuple<Tensor,Tensor,Tensor> lowerToNextLayer<batch_rule_220_t,std::tuple<Te
   return std::make_tuple(makeBatched(std::get<0>(results), std::get<1>(results), cur_level), makeBatched(std::get<2>(results), std::get<3>(results), cur_level), makeBatched(std::get<4>(results), std::get<5>(results), cur_level));
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_221_t)(const Tensor &, c10::optional<int64_t>, bool, bool, bool);
+typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_219_t)(const Tensor &, c10::optional<int64_t>, bool, bool, bool);
 template <>
-std::tuple<Tensor,Tensor,Tensor> lowerToNextLayer<batch_rule_221_t,std::tuple<Tensor,Tensor,Tensor>,const Tensor &, bool, bool, bool>(
-  batch_rule_221_t batch_rule,
+std::tuple<Tensor,Tensor,Tensor> lowerToNextLayer<batch_rule_219_t,std::tuple<Tensor,Tensor,Tensor>,const Tensor &, bool, bool, bool>(
+  batch_rule_219_t batch_rule,
   const Tensor & self, bool sorted, bool return_inverse, bool return_counts
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -4637,10 +4603,10 @@ std::tuple<Tensor,Tensor,Tensor> lowerToNextLayer<batch_rule_221_t,std::tuple<Te
   return std::make_tuple(makeBatched(std::get<0>(results), std::get<1>(results), cur_level), makeBatched(std::get<2>(results), std::get<3>(results), cur_level), makeBatched(std::get<4>(results), std::get<5>(results), cur_level));
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_222_t)(const Tensor &, c10::optional<int64_t>, const Scalar &, const Tensor &, c10::optional<int64_t>);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_220_t)(const Tensor &, c10::optional<int64_t>, const Scalar &, const Tensor &, c10::optional<int64_t>);
 template <>
-Tensor lowerToNextLayer<batch_rule_222_t,Tensor,const Tensor &, const Scalar &, const Tensor &>(
-  batch_rule_222_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_220_t,Tensor,const Tensor &, const Scalar &, const Tensor &>(
+  batch_rule_220_t batch_rule,
   const Tensor & condition, const Scalar & self, const Tensor & other
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -4657,10 +4623,10 @@ Tensor lowerToNextLayer<batch_rule_222_t,Tensor,const Tensor &, const Scalar &, 
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<::std::vector<Tensor>,c10::optional<int64_t>> (*batch_rule_223_t)(const Tensor &, c10::optional<int64_t>);
+typedef std::tuple<::std::vector<Tensor>,c10::optional<int64_t>> (*batch_rule_221_t)(const Tensor &, c10::optional<int64_t>);
 template <>
-::std::vector<Tensor> lowerToNextLayer<batch_rule_223_t,::std::vector<Tensor>,const Tensor &>(
-  batch_rule_223_t batch_rule,
+::std::vector<Tensor> lowerToNextLayer<batch_rule_221_t,::std::vector<Tensor>,const Tensor &>(
+  batch_rule_221_t batch_rule,
   const Tensor & self
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -4674,10 +4640,10 @@ template <>
   return makeBatchedVector(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_224_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, int64_t);
+typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_222_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, int64_t);
 template <>
-std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_224_t,std::tuple<Tensor,Tensor>,const Tensor &, const Tensor &, int64_t>(
-  batch_rule_224_t batch_rule,
+std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_222_t,std::tuple<Tensor,Tensor>,const Tensor &, const Tensor &, int64_t>(
+  batch_rule_222_t batch_rule,
   const Tensor & self, const Tensor & target, int64_t reduction
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -4694,10 +4660,10 @@ std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_224_t,std::tuple<Tensor,Te
   return std::make_tuple(makeBatched(std::get<0>(results), std::get<1>(results), cur_level), makeBatched(std::get<2>(results), std::get<3>(results), cur_level));
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_225_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, int64_t);
+typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_223_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, int64_t);
 template <>
-std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_225_t,std::tuple<Tensor,Tensor>,const Tensor &, const Tensor &, const Tensor &, const Tensor &, int64_t>(
-  batch_rule_225_t batch_rule,
+std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_223_t,std::tuple<Tensor,Tensor>,const Tensor &, const Tensor &, const Tensor &, const Tensor &, int64_t>(
+  batch_rule_223_t batch_rule,
   const Tensor & grad_w, const Tensor & saved_v, const Tensor & saved_g, const Tensor & saved_norms, int64_t dim
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -4720,10 +4686,10 @@ std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_225_t,std::tuple<Tensor,Te
   return std::make_tuple(makeBatched(std::get<0>(results), std::get<1>(results), cur_level), makeBatched(std::get<2>(results), std::get<3>(results), cur_level));
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_226_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, c10::optional<Generator>);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_224_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, c10::optional<Generator>);
 template <>
-Tensor lowerToNextLayer<batch_rule_226_t,Tensor,const Tensor &, const Tensor &, c10::optional<Generator>>(
-  batch_rule_226_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_224_t,Tensor,const Tensor &, const Tensor &, c10::optional<Generator>>(
+  batch_rule_224_t batch_rule,
   const Tensor & mean, const Tensor & std, c10::optional<Generator> generator
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -4740,10 +4706,10 @@ Tensor lowerToNextLayer<batch_rule_226_t,Tensor,const Tensor &, const Tensor &, 
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_227_t)(const Tensor &, c10::optional<int64_t>, const c10::optional<Scalar> &, IntArrayRef, bool, c10::optional<ScalarType>);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_225_t)(const Tensor &, c10::optional<int64_t>, const c10::optional<Scalar> &, IntArrayRef, bool, c10::optional<ScalarType>);
 template <>
-Tensor lowerToNextLayer<batch_rule_227_t,Tensor,const Tensor &, const c10::optional<Scalar> &, IntArrayRef, bool, c10::optional<ScalarType>>(
-  batch_rule_227_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_225_t,Tensor,const Tensor &, const c10::optional<Scalar> &, IntArrayRef, bool, c10::optional<ScalarType>>(
+  batch_rule_225_t batch_rule,
   const Tensor & self, const c10::optional<Scalar> & p, IntArrayRef dim, bool keepdim, c10::optional<ScalarType> dtype
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -4757,10 +4723,10 @@ Tensor lowerToNextLayer<batch_rule_227_t,Tensor,const Tensor &, const c10::optio
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_228_t)(const Tensor &, c10::optional<int64_t>, ScalarType);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_226_t)(const Tensor &, c10::optional<int64_t>, ScalarType);
 template <>
-Tensor lowerToNextLayer<batch_rule_228_t,Tensor,const Tensor &, ScalarType>(
-  batch_rule_228_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_226_t,Tensor,const Tensor &, ScalarType>(
+  batch_rule_226_t batch_rule,
   const Tensor & self, ScalarType dtype
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -4774,10 +4740,10 @@ Tensor lowerToNextLayer<batch_rule_228_t,Tensor,const Tensor &, ScalarType>(
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_229_t)(const Tensor &, c10::optional<int64_t>, IntArrayRef, ScalarType);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_227_t)(const Tensor &, c10::optional<int64_t>, IntArrayRef, ScalarType);
 template <>
-Tensor lowerToNextLayer<batch_rule_229_t,Tensor,const Tensor &, IntArrayRef, ScalarType>(
-  batch_rule_229_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_227_t,Tensor,const Tensor &, IntArrayRef, ScalarType>(
+  batch_rule_227_t batch_rule,
   const Tensor & self, IntArrayRef dim, ScalarType dtype
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -4791,10 +4757,10 @@ Tensor lowerToNextLayer<batch_rule_229_t,Tensor,const Tensor &, IntArrayRef, Sca
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_230_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, IntArrayRef);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_228_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, IntArrayRef);
 template <>
-Tensor lowerToNextLayer<batch_rule_230_t,Tensor,const Tensor &, const Tensor &, IntArrayRef>(
-  batch_rule_230_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_228_t,Tensor,const Tensor &, const Tensor &, IntArrayRef>(
+  batch_rule_228_t batch_rule,
   const Tensor & grad_output, const Tensor & self, IntArrayRef padding
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -4811,10 +4777,10 @@ Tensor lowerToNextLayer<batch_rule_230_t,Tensor,const Tensor &, const Tensor &, 
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_231_t)(const Tensor &, c10::optional<int64_t>, const c10::optional<Scalar> &, ScalarType);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_229_t)(const Tensor &, c10::optional<int64_t>, const c10::optional<Scalar> &, ScalarType);
 template <>
-Tensor lowerToNextLayer<batch_rule_231_t,Tensor,const Tensor &, const c10::optional<Scalar> &, ScalarType>(
-  batch_rule_231_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_229_t,Tensor,const Tensor &, const c10::optional<Scalar> &, ScalarType>(
+  batch_rule_229_t batch_rule,
   const Tensor & self, const c10::optional<Scalar> & p, ScalarType dtype
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -4828,10 +4794,10 @@ Tensor lowerToNextLayer<batch_rule_231_t,Tensor,const Tensor &, const c10::optio
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_232_t)(const Tensor &, c10::optional<int64_t>, const c10::optional<Scalar> &, IntArrayRef, bool, ScalarType);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_230_t)(const Tensor &, c10::optional<int64_t>, const c10::optional<Scalar> &, IntArrayRef, bool, ScalarType);
 template <>
-Tensor lowerToNextLayer<batch_rule_232_t,Tensor,const Tensor &, const c10::optional<Scalar> &, IntArrayRef, bool, ScalarType>(
-  batch_rule_232_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_230_t,Tensor,const Tensor &, const c10::optional<Scalar> &, IntArrayRef, bool, ScalarType>(
+  batch_rule_230_t batch_rule,
   const Tensor & self, const c10::optional<Scalar> & p, IntArrayRef dim, bool keepdim, ScalarType dtype
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -4845,10 +4811,10 @@ Tensor lowerToNextLayer<batch_rule_232_t,Tensor,const Tensor &, const c10::optio
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_233_t)(const Tensor &, c10::optional<int64_t>, const c10::optional<Scalar> &, IntArrayRef, bool);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_231_t)(const Tensor &, c10::optional<int64_t>, const c10::optional<Scalar> &, IntArrayRef, bool);
 template <>
-Tensor lowerToNextLayer<batch_rule_233_t,Tensor,const Tensor &, const c10::optional<Scalar> &, IntArrayRef, bool>(
-  batch_rule_233_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_231_t,Tensor,const Tensor &, const c10::optional<Scalar> &, IntArrayRef, bool>(
+  batch_rule_231_t batch_rule,
   const Tensor & self, const c10::optional<Scalar> & p, IntArrayRef dim, bool keepdim
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -4862,10 +4828,10 @@ Tensor lowerToNextLayer<batch_rule_233_t,Tensor,const Tensor &, const c10::optio
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_234_t)(const Tensor &, c10::optional<int64_t>, const c10::optional<Scalar> &, DimnameList, bool, ScalarType);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_232_t)(const Tensor &, c10::optional<int64_t>, const c10::optional<Scalar> &, DimnameList, bool, ScalarType);
 template <>
-Tensor lowerToNextLayer<batch_rule_234_t,Tensor,const Tensor &, const c10::optional<Scalar> &, DimnameList, bool, ScalarType>(
-  batch_rule_234_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_232_t,Tensor,const Tensor &, const c10::optional<Scalar> &, DimnameList, bool, ScalarType>(
+  batch_rule_232_t batch_rule,
   const Tensor & self, const c10::optional<Scalar> & p, DimnameList dim, bool keepdim, ScalarType dtype
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -4879,10 +4845,10 @@ Tensor lowerToNextLayer<batch_rule_234_t,Tensor,const Tensor &, const c10::optio
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_235_t)(const Tensor &, c10::optional<int64_t>, const c10::optional<Scalar> &, DimnameList, bool);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_233_t)(const Tensor &, c10::optional<int64_t>, const c10::optional<Scalar> &, DimnameList, bool);
 template <>
-Tensor lowerToNextLayer<batch_rule_235_t,Tensor,const Tensor &, const c10::optional<Scalar> &, DimnameList, bool>(
-  batch_rule_235_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_233_t,Tensor,const Tensor &, const c10::optional<Scalar> &, DimnameList, bool>(
+  batch_rule_233_t batch_rule,
   const Tensor & self, const c10::optional<Scalar> & p, DimnameList dim, bool keepdim
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -4896,10 +4862,10 @@ Tensor lowerToNextLayer<batch_rule_235_t,Tensor,const Tensor &, const c10::optio
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_236_t)(const Tensor &, c10::optional<int64_t>, c10::optional<MemoryFormat>);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_234_t)(const Tensor &, c10::optional<int64_t>, c10::optional<MemoryFormat>);
 template <>
-Tensor lowerToNextLayer<batch_rule_236_t,Tensor,const Tensor &, c10::optional<MemoryFormat>>(
-  batch_rule_236_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_234_t,Tensor,const Tensor &, c10::optional<MemoryFormat>>(
+  batch_rule_234_t batch_rule,
   const Tensor & self, c10::optional<MemoryFormat> memory_format
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -4913,50 +4879,10 @@ Tensor lowerToNextLayer<batch_rule_236_t,Tensor,const Tensor &, c10::optional<Me
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<const Tensor &,c10::optional<int64_t>> (*batch_rule_237_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, c10::optional<MemoryFormat>);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_235_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, IntArrayRef, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>);
 template <>
-const Tensor & lowerToNextLayer<batch_rule_237_t,const Tensor &,const Tensor &, const Tensor &, c10::optional<MemoryFormat>>(
-  batch_rule_237_t batch_rule,
-  const Tensor & self, const Tensor & the_template, c10::optional<MemoryFormat> memory_format
-) {
-  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
-  auto maybe_layer = maybeCurrentDynamicLayer();
-  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
-  int64_t cur_level = maybe_layer->layerId();
-  Tensor self_value;
-  optional<int64_t> self_bdim;
-  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
-  Tensor the_template_value;
-  optional<int64_t> the_template_bdim;
-  std::tie(the_template_value, the_template_bdim) = unwrapTensorAtLevel(the_template, cur_level);
-  auto results = batch_rule(self_value, self_bdim, the_template_value, the_template_bdim, memory_format);
-  return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
-}
-
-typedef std::tuple<const Tensor &,c10::optional<int64_t>> (*batch_rule_238_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>);
-template <>
-const Tensor & lowerToNextLayer<batch_rule_238_t,const Tensor &,const Tensor &, const Tensor &>(
-  batch_rule_238_t batch_rule,
-  const Tensor & self, const Tensor & the_template
-) {
-  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
-  auto maybe_layer = maybeCurrentDynamicLayer();
-  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
-  int64_t cur_level = maybe_layer->layerId();
-  Tensor self_value;
-  optional<int64_t> self_bdim;
-  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
-  Tensor the_template_value;
-  optional<int64_t> the_template_bdim;
-  std::tie(the_template_value, the_template_bdim) = unwrapTensorAtLevel(the_template, cur_level);
-  auto results = batch_rule(self_value, self_bdim, the_template_value, the_template_bdim);
-  return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
-}
-
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_239_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, IntArrayRef, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>);
-template <>
-Tensor lowerToNextLayer<batch_rule_239_t,Tensor,const Tensor &, const Tensor &, const Tensor &, IntArrayRef, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>>(
-  batch_rule_239_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_235_t,Tensor,const Tensor &, const Tensor &, const Tensor &, IntArrayRef, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>>(
+  batch_rule_235_t batch_rule,
   const Tensor & crow_indices, const Tensor & col_indices, const Tensor & values, IntArrayRef size, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -4976,10 +4902,10 @@ Tensor lowerToNextLayer<batch_rule_239_t,Tensor,const Tensor &, const Tensor &, 
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_240_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_236_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>);
 template <>
-Tensor lowerToNextLayer<batch_rule_240_t,Tensor,const Tensor &, const Tensor &, const Tensor &, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>>(
-  batch_rule_240_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_236_t,Tensor,const Tensor &, const Tensor &, const Tensor &, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>>(
+  batch_rule_236_t batch_rule,
   const Tensor & crow_indices, const Tensor & col_indices, const Tensor & values, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -4999,10 +4925,10 @@ Tensor lowerToNextLayer<batch_rule_240_t,Tensor,const Tensor &, const Tensor &, 
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_241_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_237_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>);
 template <>
-Tensor lowerToNextLayer<batch_rule_241_t,Tensor,const Tensor &, const Tensor &, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>>(
-  batch_rule_241_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_237_t,Tensor,const Tensor &, const Tensor &, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>>(
+  batch_rule_237_t batch_rule,
   const Tensor & indices, const Tensor & values, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -5019,10 +4945,10 @@ Tensor lowerToNextLayer<batch_rule_241_t,Tensor,const Tensor &, const Tensor &, 
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_242_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, IntArrayRef, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_238_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, IntArrayRef, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>);
 template <>
-Tensor lowerToNextLayer<batch_rule_242_t,Tensor,const Tensor &, const Tensor &, IntArrayRef, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>>(
-  batch_rule_242_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_238_t,Tensor,const Tensor &, const Tensor &, IntArrayRef, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>>(
+  batch_rule_238_t batch_rule,
   const Tensor & indices, const Tensor & values, IntArrayRef size, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -5039,10 +4965,10 @@ Tensor lowerToNextLayer<batch_rule_242_t,Tensor,const Tensor &, const Tensor &, 
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_243_t)(int64_t, int64_t, IntArrayRef, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_239_t)(int64_t, int64_t, IntArrayRef, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>);
 template <>
-Tensor lowerToNextLayer<batch_rule_243_t,Tensor,int64_t, int64_t, IntArrayRef, const Tensor &, const Tensor &, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>>(
-  batch_rule_243_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_239_t,Tensor,int64_t, int64_t, IntArrayRef, const Tensor &, const Tensor &, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>>(
+  batch_rule_239_t batch_rule,
   int64_t sparse_dim, int64_t dense_dim, IntArrayRef size, const Tensor & indices, const Tensor & values, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -5059,27 +4985,10 @@ Tensor lowerToNextLayer<batch_rule_243_t,Tensor,int64_t, int64_t, IntArrayRef, c
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<const Tensor &,c10::optional<int64_t>> (*batch_rule_244_t)(const Tensor &, c10::optional<int64_t>, IntArrayRef, int64_t, int64_t);
+typedef std::tuple<::std::vector<Tensor>,c10::optional<int64_t>> (*batch_rule_240_t)(const Tensor &, c10::optional<int64_t>, Dimname);
 template <>
-const Tensor & lowerToNextLayer<batch_rule_244_t,const Tensor &,const Tensor &, IntArrayRef, int64_t, int64_t>(
-  batch_rule_244_t batch_rule,
-  const Tensor & self, IntArrayRef size, int64_t sparse_dim, int64_t dense_dim
-) {
-  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
-  auto maybe_layer = maybeCurrentDynamicLayer();
-  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
-  int64_t cur_level = maybe_layer->layerId();
-  Tensor self_value;
-  optional<int64_t> self_bdim;
-  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
-  auto results = batch_rule(self_value, self_bdim, size, sparse_dim, dense_dim);
-  return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
-}
-
-typedef std::tuple<::std::vector<Tensor>,c10::optional<int64_t>> (*batch_rule_245_t)(const Tensor &, c10::optional<int64_t>, Dimname);
-template <>
-::std::vector<Tensor> lowerToNextLayer<batch_rule_245_t,::std::vector<Tensor>,const Tensor &, Dimname>(
-  batch_rule_245_t batch_rule,
+::std::vector<Tensor> lowerToNextLayer<batch_rule_240_t,::std::vector<Tensor>,const Tensor &, Dimname>(
+  batch_rule_240_t batch_rule,
   const Tensor & self, Dimname dim
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -5093,10 +5002,10 @@ template <>
   return makeBatchedVector(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_246_t)(const Tensor &, c10::optional<int64_t>, IntArrayRef, IntArrayRef, IntArrayRef, int64_t);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_241_t)(const Tensor &, c10::optional<int64_t>, IntArrayRef, IntArrayRef, IntArrayRef, int64_t);
 template <>
-Tensor lowerToNextLayer<batch_rule_246_t,Tensor,const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, int64_t>(
-  batch_rule_246_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_241_t,Tensor,const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, int64_t>(
+  batch_rule_241_t batch_rule,
   const Tensor & self, IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -5110,10 +5019,10 @@ Tensor lowerToNextLayer<batch_rule_246_t,Tensor,const Tensor &, IntArrayRef, Int
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_247_t)(const Tensor &, c10::optional<int64_t>, double, int64_t, ScalarType);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_242_t)(const Tensor &, c10::optional<int64_t>, double, int64_t, ScalarType);
 template <>
-Tensor lowerToNextLayer<batch_rule_247_t,Tensor,const Tensor &, double, int64_t, ScalarType>(
-  batch_rule_247_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_242_t,Tensor,const Tensor &, double, int64_t, ScalarType>(
+  batch_rule_242_t batch_rule,
   const Tensor & self, double scale, int64_t zero_point, ScalarType dtype
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -5127,10 +5036,10 @@ Tensor lowerToNextLayer<batch_rule_247_t,Tensor,const Tensor &, double, int64_t,
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_248_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, ScalarType);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_243_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, ScalarType);
 template <>
-Tensor lowerToNextLayer<batch_rule_248_t,Tensor,const Tensor &, const Tensor &, const Tensor &, ScalarType>(
-  batch_rule_248_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_243_t,Tensor,const Tensor &, const Tensor &, const Tensor &, ScalarType>(
+  batch_rule_243_t batch_rule,
   const Tensor & self, const Tensor & scale, const Tensor & zero_point, ScalarType dtype
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -5150,10 +5059,10 @@ Tensor lowerToNextLayer<batch_rule_248_t,Tensor,const Tensor &, const Tensor &, 
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_249_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, int64_t, ScalarType);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_244_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, int64_t, ScalarType);
 template <>
-Tensor lowerToNextLayer<batch_rule_249_t,Tensor,const Tensor &, const Tensor &, const Tensor &, int64_t, ScalarType>(
-  batch_rule_249_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_244_t,Tensor,const Tensor &, const Tensor &, const Tensor &, int64_t, ScalarType>(
+  batch_rule_244_t batch_rule,
   const Tensor & self, const Tensor & scales, const Tensor & zero_points, int64_t axis, ScalarType dtype
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -5173,10 +5082,10 @@ Tensor lowerToNextLayer<batch_rule_249_t,Tensor,const Tensor &, const Tensor &, 
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<double> (*batch_rule_250_t)(const Tensor &, c10::optional<int64_t>);
+typedef std::tuple<double> (*batch_rule_245_t)(const Tensor &, c10::optional<int64_t>);
 template <>
-double lowerToNextLayer<batch_rule_250_t,double,const Tensor &>(
-  batch_rule_250_t batch_rule,
+double lowerToNextLayer<batch_rule_245_t,double,const Tensor &>(
+  batch_rule_245_t batch_rule,
   const Tensor & self
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -5190,10 +5099,10 @@ double lowerToNextLayer<batch_rule_250_t,double,const Tensor &>(
   return std::get<0>(results);
 }
 
-typedef std::tuple<QScheme> (*batch_rule_251_t)(const Tensor &, c10::optional<int64_t>);
+typedef std::tuple<QScheme> (*batch_rule_246_t)(const Tensor &, c10::optional<int64_t>);
 template <>
-QScheme lowerToNextLayer<batch_rule_251_t,QScheme,const Tensor &>(
-  batch_rule_251_t batch_rule,
+QScheme lowerToNextLayer<batch_rule_246_t,QScheme,const Tensor &>(
+  batch_rule_246_t batch_rule,
   const Tensor & self
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -5207,10 +5116,10 @@ QScheme lowerToNextLayer<batch_rule_251_t,QScheme,const Tensor &>(
   return std::get<0>(results);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_252_t)(const Tensor &, c10::optional<int64_t>, double, int64_t, int64_t, int64_t);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_247_t)(const Tensor &, c10::optional<int64_t>, double, int64_t, int64_t, int64_t);
 template <>
-Tensor lowerToNextLayer<batch_rule_252_t,Tensor,const Tensor &, double, int64_t, int64_t, int64_t>(
-  batch_rule_252_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_247_t,Tensor,const Tensor &, double, int64_t, int64_t, int64_t>(
+  batch_rule_247_t batch_rule,
   const Tensor & self, double scale, int64_t zero_point, int64_t quant_min, int64_t quant_max
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -5224,10 +5133,10 @@ Tensor lowerToNextLayer<batch_rule_252_t,Tensor,const Tensor &, double, int64_t,
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_253_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, int64_t, int64_t);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_248_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, int64_t, int64_t);
 template <>
-Tensor lowerToNextLayer<batch_rule_253_t,Tensor,const Tensor &, const Tensor &, const Tensor &, int64_t, int64_t>(
-  batch_rule_253_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_248_t,Tensor,const Tensor &, const Tensor &, const Tensor &, int64_t, int64_t>(
+  batch_rule_248_t batch_rule,
   const Tensor & self, const Tensor & scale, const Tensor & zero_point, int64_t quant_min, int64_t quant_max
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -5247,10 +5156,10 @@ Tensor lowerToNextLayer<batch_rule_253_t,Tensor,const Tensor &, const Tensor &, 
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_254_t)(const Tensor &, c10::optional<int64_t>, double, int64_t, int64_t, int64_t);
+typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_249_t)(const Tensor &, c10::optional<int64_t>, double, int64_t, int64_t, int64_t);
 template <>
-std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_254_t,std::tuple<Tensor,Tensor>,const Tensor &, double, int64_t, int64_t, int64_t>(
-  batch_rule_254_t batch_rule,
+std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_249_t,std::tuple<Tensor,Tensor>,const Tensor &, double, int64_t, int64_t, int64_t>(
+  batch_rule_249_t batch_rule,
   const Tensor & self, double scale, int64_t zero_point, int64_t quant_min, int64_t quant_max
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -5264,10 +5173,10 @@ std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_254_t,std::tuple<Tensor,Te
   return std::make_tuple(makeBatched(std::get<0>(results), std::get<1>(results), cur_level), makeBatched(std::get<2>(results), std::get<3>(results), cur_level));
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_255_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, int64_t, int64_t);
+typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_250_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, int64_t, int64_t);
 template <>
-std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_255_t,std::tuple<Tensor,Tensor>,const Tensor &, const Tensor &, const Tensor &, const Tensor &, int64_t, int64_t>(
-  batch_rule_255_t batch_rule,
+std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_250_t,std::tuple<Tensor,Tensor>,const Tensor &, const Tensor &, const Tensor &, const Tensor &, int64_t, int64_t>(
+  batch_rule_250_t batch_rule,
   const Tensor & self, const Tensor & scale, const Tensor & zero_point, const Tensor & fake_quant_enabled, int64_t quant_min, int64_t quant_max
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -5290,10 +5199,10 @@ std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_255_t,std::tuple<Tensor,Te
   return std::make_tuple(makeBatched(std::get<0>(results), std::get<1>(results), cur_level), makeBatched(std::get<2>(results), std::get<3>(results), cur_level));
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_256_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, int64_t, int64_t, double);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_251_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, int64_t, int64_t, double);
 template <>
-Tensor lowerToNextLayer<batch_rule_256_t,Tensor,const Tensor &, const Tensor &, const Tensor &, int64_t, int64_t, double>(
-  batch_rule_256_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_251_t,Tensor,const Tensor &, const Tensor &, const Tensor &, int64_t, int64_t, double>(
+  batch_rule_251_t batch_rule,
   const Tensor & self, const Tensor & scale, const Tensor & zero_point, int64_t quant_min, int64_t quant_max, double grad_factor
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -5313,10 +5222,10 @@ Tensor lowerToNextLayer<batch_rule_256_t,Tensor,const Tensor &, const Tensor &, 
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_257_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, int64_t, int64_t, double);
+typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_252_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, int64_t, int64_t, double);
 template <>
-std::tuple<Tensor,Tensor,Tensor> lowerToNextLayer<batch_rule_257_t,std::tuple<Tensor,Tensor,Tensor>,const Tensor &, const Tensor &, const Tensor &, const Tensor &, int64_t, int64_t, double>(
-  batch_rule_257_t batch_rule,
+std::tuple<Tensor,Tensor,Tensor> lowerToNextLayer<batch_rule_252_t,std::tuple<Tensor,Tensor,Tensor>,const Tensor &, const Tensor &, const Tensor &, const Tensor &, int64_t, int64_t, double>(
+  batch_rule_252_t batch_rule,
   const Tensor & grad, const Tensor & self, const Tensor & scale, const Tensor & zero_point, int64_t quant_min, int64_t quant_max, double grad_factor
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -5339,10 +5248,10 @@ std::tuple<Tensor,Tensor,Tensor> lowerToNextLayer<batch_rule_257_t,std::tuple<Te
   return std::make_tuple(makeBatched(std::get<0>(results), std::get<1>(results), cur_level), makeBatched(std::get<2>(results), std::get<3>(results), cur_level), makeBatched(std::get<4>(results), std::get<5>(results), cur_level));
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_258_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, int64_t, int64_t, int64_t);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_253_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, int64_t, int64_t, int64_t);
 template <>
-Tensor lowerToNextLayer<batch_rule_258_t,Tensor,const Tensor &, const Tensor &, const Tensor &, int64_t, int64_t, int64_t>(
-  batch_rule_258_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_253_t,Tensor,const Tensor &, const Tensor &, const Tensor &, int64_t, int64_t, int64_t>(
+  batch_rule_253_t batch_rule,
   const Tensor & self, const Tensor & scale, const Tensor & zero_point, int64_t axis, int64_t quant_min, int64_t quant_max
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -5362,10 +5271,10 @@ Tensor lowerToNextLayer<batch_rule_258_t,Tensor,const Tensor &, const Tensor &, 
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_259_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, int64_t, int64_t, int64_t);
+typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_254_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, int64_t, int64_t, int64_t);
 template <>
-std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_259_t,std::tuple<Tensor,Tensor>,const Tensor &, const Tensor &, const Tensor &, int64_t, int64_t, int64_t>(
-  batch_rule_259_t batch_rule,
+std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_254_t,std::tuple<Tensor,Tensor>,const Tensor &, const Tensor &, const Tensor &, int64_t, int64_t, int64_t>(
+  batch_rule_254_t batch_rule,
   const Tensor & self, const Tensor & scale, const Tensor & zero_point, int64_t axis, int64_t quant_min, int64_t quant_max
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -5385,10 +5294,10 @@ std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_259_t,std::tuple<Tensor,Te
   return std::make_tuple(makeBatched(std::get<0>(results), std::get<1>(results), cur_level), makeBatched(std::get<2>(results), std::get<3>(results), cur_level));
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_260_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, int64_t, int64_t, int64_t, double);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_255_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, int64_t, int64_t, int64_t, double);
 template <>
-Tensor lowerToNextLayer<batch_rule_260_t,Tensor,const Tensor &, const Tensor &, const Tensor &, int64_t, int64_t, int64_t, double>(
-  batch_rule_260_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_255_t,Tensor,const Tensor &, const Tensor &, const Tensor &, int64_t, int64_t, int64_t, double>(
+  batch_rule_255_t batch_rule,
   const Tensor & self, const Tensor & scale, const Tensor & zero_point, int64_t axis, int64_t quant_min, int64_t quant_max, double grad_factor
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -5408,10 +5317,10 @@ Tensor lowerToNextLayer<batch_rule_260_t,Tensor,const Tensor &, const Tensor &, 
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_261_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, int64_t, int64_t, int64_t, double);
+typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_256_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, int64_t, int64_t, int64_t, double);
 template <>
-std::tuple<Tensor,Tensor,Tensor> lowerToNextLayer<batch_rule_261_t,std::tuple<Tensor,Tensor,Tensor>,const Tensor &, const Tensor &, const Tensor &, const Tensor &, int64_t, int64_t, int64_t, double>(
-  batch_rule_261_t batch_rule,
+std::tuple<Tensor,Tensor,Tensor> lowerToNextLayer<batch_rule_256_t,std::tuple<Tensor,Tensor,Tensor>,const Tensor &, const Tensor &, const Tensor &, const Tensor &, int64_t, int64_t, int64_t, double>(
+  batch_rule_256_t batch_rule,
   const Tensor & grad, const Tensor & self, const Tensor & scale, const Tensor & zero_point, int64_t axis, int64_t quant_min, int64_t quant_max, double grad_factor
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -5434,10 +5343,10 @@ std::tuple<Tensor,Tensor,Tensor> lowerToNextLayer<batch_rule_261_t,std::tuple<Te
   return std::make_tuple(makeBatched(std::get<0>(results), std::get<1>(results), cur_level), makeBatched(std::get<2>(results), std::get<3>(results), cur_level), makeBatched(std::get<4>(results), std::get<5>(results), cur_level));
 }
 
-typedef std::tuple<double,int64_t> (*batch_rule_262_t)(const Tensor &, c10::optional<int64_t>, bool);
+typedef std::tuple<double,int64_t> (*batch_rule_257_t)(const Tensor &, c10::optional<int64_t>, bool);
 template <>
-std::tuple<double,int64_t> lowerToNextLayer<batch_rule_262_t,std::tuple<double,int64_t>,const Tensor &, bool>(
-  batch_rule_262_t batch_rule,
+std::tuple<double,int64_t> lowerToNextLayer<batch_rule_257_t,std::tuple<double,int64_t>,const Tensor &, bool>(
+  batch_rule_257_t batch_rule,
   const Tensor & self, bool reduce_range
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -5451,10 +5360,10 @@ std::tuple<double,int64_t> lowerToNextLayer<batch_rule_262_t,std::tuple<double,i
   return std::make_tuple(std::get<0>(results), std::get<1>(results));
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_263_t)(const Tensor &, c10::optional<int64_t>, int64_t, int64_t, double, int64_t);
+typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_258_t)(const Tensor &, c10::optional<int64_t>, int64_t, int64_t, double, int64_t);
 template <>
-std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_263_t,std::tuple<Tensor,Tensor>,const Tensor &, int64_t, int64_t, double, int64_t>(
-  batch_rule_263_t batch_rule,
+std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_258_t,std::tuple<Tensor,Tensor>,const Tensor &, int64_t, int64_t, double, int64_t>(
+  batch_rule_258_t batch_rule,
   const Tensor & input, int64_t numel, int64_t n_bins, double ratio, int64_t bit_width
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -5468,10 +5377,10 @@ std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_263_t,std::tuple<Tensor,Te
   return std::make_tuple(makeBatched(std::get<0>(results), std::get<1>(results), cur_level), makeBatched(std::get<2>(results), std::get<3>(results), cur_level));
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_264_t)(const Tensor &, c10::optional<int64_t>, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>, bool, c10::optional<MemoryFormat>);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_259_t)(const Tensor &, c10::optional<int64_t>, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>, bool, c10::optional<MemoryFormat>);
 template <>
-Tensor lowerToNextLayer<batch_rule_264_t,Tensor,const Tensor &, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>, bool, c10::optional<MemoryFormat>>(
-  batch_rule_264_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_259_t,Tensor,const Tensor &, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>, bool, c10::optional<MemoryFormat>>(
+  batch_rule_259_t batch_rule,
   const Tensor & self, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory, bool non_blocking, c10::optional<MemoryFormat> memory_format
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -5485,10 +5394,10 @@ Tensor lowerToNextLayer<batch_rule_264_t,Tensor,const Tensor &, c10::optional<Sc
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_265_t)(const Tensor &, c10::optional<int64_t>, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>, bool, bool, c10::optional<MemoryFormat>);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_260_t)(const Tensor &, c10::optional<int64_t>, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>, bool, bool, c10::optional<MemoryFormat>);
 template <>
-Tensor lowerToNextLayer<batch_rule_265_t,Tensor,const Tensor &, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>, bool, bool, c10::optional<MemoryFormat>>(
-  batch_rule_265_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_260_t,Tensor,const Tensor &, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>, bool, bool, c10::optional<MemoryFormat>>(
+  batch_rule_260_t batch_rule,
   const Tensor & self, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory, bool non_blocking, bool copy, c10::optional<MemoryFormat> memory_format
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -5502,10 +5411,10 @@ Tensor lowerToNextLayer<batch_rule_265_t,Tensor,const Tensor &, c10::optional<Sc
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_266_t)(const Tensor &, c10::optional<int64_t>, Device, ScalarType, bool, bool, c10::optional<MemoryFormat>);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_261_t)(const Tensor &, c10::optional<int64_t>, Device, ScalarType, bool, bool, c10::optional<MemoryFormat>);
 template <>
-Tensor lowerToNextLayer<batch_rule_266_t,Tensor,const Tensor &, Device, ScalarType, bool, bool, c10::optional<MemoryFormat>>(
-  batch_rule_266_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_261_t,Tensor,const Tensor &, Device, ScalarType, bool, bool, c10::optional<MemoryFormat>>(
+  batch_rule_261_t batch_rule,
   const Tensor & self, Device device, ScalarType dtype, bool non_blocking, bool copy, c10::optional<MemoryFormat> memory_format
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -5519,10 +5428,10 @@ Tensor lowerToNextLayer<batch_rule_266_t,Tensor,const Tensor &, Device, ScalarTy
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_267_t)(const Tensor &, c10::optional<int64_t>, ScalarType, bool, bool, c10::optional<MemoryFormat>);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_262_t)(const Tensor &, c10::optional<int64_t>, ScalarType, bool, bool, c10::optional<MemoryFormat>);
 template <>
-Tensor lowerToNextLayer<batch_rule_267_t,Tensor,const Tensor &, ScalarType, bool, bool, c10::optional<MemoryFormat>>(
-  batch_rule_267_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_262_t,Tensor,const Tensor &, ScalarType, bool, bool, c10::optional<MemoryFormat>>(
+  batch_rule_262_t batch_rule,
   const Tensor & self, ScalarType dtype, bool non_blocking, bool copy, c10::optional<MemoryFormat> memory_format
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -5536,10 +5445,10 @@ Tensor lowerToNextLayer<batch_rule_267_t,Tensor,const Tensor &, ScalarType, bool
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_268_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, bool, bool, c10::optional<MemoryFormat>);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_263_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, bool, bool, c10::optional<MemoryFormat>);
 template <>
-Tensor lowerToNextLayer<batch_rule_268_t,Tensor,const Tensor &, const Tensor &, bool, bool, c10::optional<MemoryFormat>>(
-  batch_rule_268_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_263_t,Tensor,const Tensor &, const Tensor &, bool, bool, c10::optional<MemoryFormat>>(
+  batch_rule_263_t batch_rule,
   const Tensor & self, const Tensor & other, bool non_blocking, bool copy, c10::optional<MemoryFormat> memory_format
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -5556,10 +5465,10 @@ Tensor lowerToNextLayer<batch_rule_268_t,Tensor,const Tensor &, const Tensor &, 
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Scalar> (*batch_rule_269_t)(const Tensor &, c10::optional<int64_t>);
+typedef std::tuple<Scalar> (*batch_rule_264_t)(const Tensor &, c10::optional<int64_t>);
 template <>
-Scalar lowerToNextLayer<batch_rule_269_t,Scalar,const Tensor &>(
-  batch_rule_269_t batch_rule,
+Scalar lowerToNextLayer<batch_rule_264_t,Scalar,const Tensor &>(
+  batch_rule_264_t batch_rule,
   const Tensor & self
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -5573,10 +5482,10 @@ Scalar lowerToNextLayer<batch_rule_269_t,Scalar,const Tensor &>(
   return std::get<0>(results);
 }
 
-typedef std::tuple<ScalarType> (*batch_rule_270_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>);
+typedef std::tuple<ScalarType> (*batch_rule_265_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>);
 template <>
-ScalarType lowerToNextLayer<batch_rule_270_t,ScalarType,const Tensor &, const Tensor &>(
-  batch_rule_270_t batch_rule,
+ScalarType lowerToNextLayer<batch_rule_265_t,ScalarType,const Tensor &, const Tensor &>(
+  batch_rule_265_t batch_rule,
   const Tensor & tensor, const Tensor & other
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -5593,10 +5502,10 @@ ScalarType lowerToNextLayer<batch_rule_270_t,ScalarType,const Tensor &, const Te
   return std::get<0>(results);
 }
 
-typedef std::tuple<ScalarType> (*batch_rule_271_t)(const Tensor &, c10::optional<int64_t>, const Scalar &);
+typedef std::tuple<ScalarType> (*batch_rule_266_t)(const Tensor &, c10::optional<int64_t>, const Scalar &);
 template <>
-ScalarType lowerToNextLayer<batch_rule_271_t,ScalarType,const Tensor &, const Scalar &>(
-  batch_rule_271_t batch_rule,
+ScalarType lowerToNextLayer<batch_rule_266_t,ScalarType,const Tensor &, const Scalar &>(
+  batch_rule_266_t batch_rule,
   const Tensor & tensor, const Scalar & other
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -5610,10 +5519,10 @@ ScalarType lowerToNextLayer<batch_rule_271_t,ScalarType,const Tensor &, const Sc
   return std::get<0>(results);
 }
 
-typedef std::tuple<ScalarType> (*batch_rule_272_t)(const Scalar &, const Tensor &, c10::optional<int64_t>);
+typedef std::tuple<ScalarType> (*batch_rule_267_t)(const Scalar &, const Tensor &, c10::optional<int64_t>);
 template <>
-ScalarType lowerToNextLayer<batch_rule_272_t,ScalarType,const Scalar &, const Tensor &>(
-  batch_rule_272_t batch_rule,
+ScalarType lowerToNextLayer<batch_rule_267_t,ScalarType,const Scalar &, const Tensor &>(
+  batch_rule_267_t batch_rule,
   const Scalar & scalar, const Tensor & tensor
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -5627,10 +5536,10 @@ ScalarType lowerToNextLayer<batch_rule_272_t,ScalarType,const Scalar &, const Te
   return std::get<0>(results);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_273_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>);
+typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_268_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>);
 template <>
-std::tuple<Tensor,Tensor,Tensor> lowerToNextLayer<batch_rule_273_t,std::tuple<Tensor,Tensor,Tensor>,const Tensor &, const Tensor &, const Tensor &, const c10::optional<Tensor> &, const c10::optional<Tensor> &>(
-  batch_rule_273_t batch_rule,
+std::tuple<Tensor,Tensor,Tensor> lowerToNextLayer<batch_rule_268_t,std::tuple<Tensor,Tensor,Tensor>,const Tensor &, const Tensor &, const Tensor &, const c10::optional<Tensor> &, const c10::optional<Tensor> &>(
+  batch_rule_268_t batch_rule,
   const Tensor & input_gates, const Tensor & hidden_gates, const Tensor & cx, const c10::optional<Tensor> & input_bias, const c10::optional<Tensor> & hidden_bias
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -5660,10 +5569,10 @@ std::tuple<Tensor,Tensor,Tensor> lowerToNextLayer<batch_rule_273_t,std::tuple<Te
   return std::make_tuple(makeBatched(std::get<0>(results), std::get<1>(results), cur_level), makeBatched(std::get<2>(results), std::get<3>(results), cur_level), makeBatched(std::get<4>(results), std::get<5>(results), cur_level));
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_274_t)(const c10::optional<Tensor> &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, bool);
+typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_269_t)(const c10::optional<Tensor> &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, bool);
 template <>
-std::tuple<Tensor,Tensor,Tensor,Tensor,Tensor> lowerToNextLayer<batch_rule_274_t,std::tuple<Tensor,Tensor,Tensor,Tensor,Tensor>,const c10::optional<Tensor> &, const c10::optional<Tensor> &, const Tensor &, const Tensor &, const Tensor &, bool>(
-  batch_rule_274_t batch_rule,
+std::tuple<Tensor,Tensor,Tensor,Tensor,Tensor> lowerToNextLayer<batch_rule_269_t,std::tuple<Tensor,Tensor,Tensor,Tensor,Tensor>,const c10::optional<Tensor> &, const c10::optional<Tensor> &, const Tensor &, const Tensor &, const Tensor &, bool>(
+  batch_rule_269_t batch_rule,
   const c10::optional<Tensor> & grad_hy, const c10::optional<Tensor> & grad_cy, const Tensor & cx, const Tensor & cy, const Tensor & workspace, bool has_bias
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -5693,10 +5602,10 @@ std::tuple<Tensor,Tensor,Tensor,Tensor,Tensor> lowerToNextLayer<batch_rule_274_t
   return std::make_tuple(makeBatched(std::get<0>(results), std::get<1>(results), cur_level), makeBatched(std::get<2>(results), std::get<3>(results), cur_level), makeBatched(std::get<4>(results), std::get<5>(results), cur_level), makeBatched(std::get<6>(results), std::get<7>(results), cur_level), makeBatched(std::get<8>(results), std::get<9>(results), cur_level));
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_275_t)(const c10::optional<Tensor> &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>);
+typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_270_t)(const c10::optional<Tensor> &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>);
 template <>
-std::tuple<Tensor,Tensor,Tensor,Tensor,Tensor> lowerToNextLayer<batch_rule_275_t,std::tuple<Tensor,Tensor,Tensor,Tensor,Tensor>,const c10::optional<Tensor> &, const c10::optional<Tensor> &, const Tensor &, const Tensor &, const c10::optional<Tensor> &, const c10::optional<Tensor> &, const Tensor &, const Tensor &>(
-  batch_rule_275_t batch_rule,
+std::tuple<Tensor,Tensor,Tensor,Tensor,Tensor> lowerToNextLayer<batch_rule_270_t,std::tuple<Tensor,Tensor,Tensor,Tensor,Tensor>,const c10::optional<Tensor> &, const c10::optional<Tensor> &, const Tensor &, const Tensor &, const c10::optional<Tensor> &, const c10::optional<Tensor> &, const Tensor &, const Tensor &>(
+  batch_rule_270_t batch_rule,
   const c10::optional<Tensor> & grad_hy, const c10::optional<Tensor> & grad_cy, const Tensor & input_gates, const Tensor & hidden_gates, const c10::optional<Tensor> & input_bias, const c10::optional<Tensor> & hidden_bias, const Tensor & cx, const Tensor & cy
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -5739,10 +5648,10 @@ std::tuple<Tensor,Tensor,Tensor,Tensor,Tensor> lowerToNextLayer<batch_rule_275_t
   return std::make_tuple(makeBatched(std::get<0>(results), std::get<1>(results), cur_level), makeBatched(std::get<2>(results), std::get<3>(results), cur_level), makeBatched(std::get<4>(results), std::get<5>(results), cur_level), makeBatched(std::get<6>(results), std::get<7>(results), cur_level), makeBatched(std::get<8>(results), std::get<9>(results), cur_level));
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_276_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>);
+typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_271_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>);
 template <>
-std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_276_t,std::tuple<Tensor,Tensor>,const Tensor &, const Tensor &, const Tensor &, const c10::optional<Tensor> &, const c10::optional<Tensor> &>(
-  batch_rule_276_t batch_rule,
+std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_271_t,std::tuple<Tensor,Tensor>,const Tensor &, const Tensor &, const Tensor &, const c10::optional<Tensor> &, const c10::optional<Tensor> &>(
+  batch_rule_271_t batch_rule,
   const Tensor & input_gates, const Tensor & hidden_gates, const Tensor & hx, const c10::optional<Tensor> & input_bias, const c10::optional<Tensor> & hidden_bias
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -5772,10 +5681,10 @@ std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_276_t,std::tuple<Tensor,Te
   return std::make_tuple(makeBatched(std::get<0>(results), std::get<1>(results), cur_level), makeBatched(std::get<2>(results), std::get<3>(results), cur_level));
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_277_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, bool);
+typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_272_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, bool);
 template <>
-std::tuple<Tensor,Tensor,Tensor,Tensor,Tensor> lowerToNextLayer<batch_rule_277_t,std::tuple<Tensor,Tensor,Tensor,Tensor,Tensor>,const Tensor &, const Tensor &, bool>(
-  batch_rule_277_t batch_rule,
+std::tuple<Tensor,Tensor,Tensor,Tensor,Tensor> lowerToNextLayer<batch_rule_272_t,std::tuple<Tensor,Tensor,Tensor,Tensor,Tensor>,const Tensor &, const Tensor &, bool>(
+  batch_rule_272_t batch_rule,
   const Tensor & grad_hy, const Tensor & workspace, bool has_bias
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -5792,10 +5701,10 @@ std::tuple<Tensor,Tensor,Tensor,Tensor,Tensor> lowerToNextLayer<batch_rule_277_t
   return std::make_tuple(makeBatched(std::get<0>(results), std::get<1>(results), cur_level), makeBatched(std::get<2>(results), std::get<3>(results), cur_level), makeBatched(std::get<4>(results), std::get<5>(results), cur_level), makeBatched(std::get<6>(results), std::get<7>(results), cur_level), makeBatched(std::get<8>(results), std::get<9>(results), cur_level));
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_278_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>);
+typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_273_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>);
 template <>
-std::tuple<Tensor,Tensor,Tensor,Tensor,Tensor> lowerToNextLayer<batch_rule_278_t,std::tuple<Tensor,Tensor,Tensor,Tensor,Tensor>,const Tensor &, const Tensor &, const Tensor &, const Tensor &, const c10::optional<Tensor> &, const c10::optional<Tensor> &>(
-  batch_rule_278_t batch_rule,
+std::tuple<Tensor,Tensor,Tensor,Tensor,Tensor> lowerToNextLayer<batch_rule_273_t,std::tuple<Tensor,Tensor,Tensor,Tensor,Tensor>,const Tensor &, const Tensor &, const Tensor &, const Tensor &, const c10::optional<Tensor> &, const c10::optional<Tensor> &>(
+  batch_rule_273_t batch_rule,
   const Tensor & grad_hy, const Tensor & input_gates, const Tensor & hidden_gates, const Tensor & hx, const c10::optional<Tensor> & input_bias, const c10::optional<Tensor> & hidden_bias
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -5828,10 +5737,10 @@ std::tuple<Tensor,Tensor,Tensor,Tensor,Tensor> lowerToNextLayer<batch_rule_278_t
   return std::make_tuple(makeBatched(std::get<0>(results), std::get<1>(results), cur_level), makeBatched(std::get<2>(results), std::get<3>(results), cur_level), makeBatched(std::get<4>(results), std::get<5>(results), cur_level), makeBatched(std::get<6>(results), std::get<7>(results), cur_level), makeBatched(std::get<8>(results), std::get<9>(results), cur_level));
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_279_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_274_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>);
 template <>
-Tensor lowerToNextLayer<batch_rule_279_t,Tensor,const Tensor &, const Tensor &, const Tensor &, const Tensor &, const c10::optional<Tensor> &, const c10::optional<Tensor> &>(
-  batch_rule_279_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_274_t,Tensor,const Tensor &, const Tensor &, const Tensor &, const Tensor &, const c10::optional<Tensor> &, const c10::optional<Tensor> &>(
+  batch_rule_274_t batch_rule,
   const Tensor & input, const Tensor & hx, const Tensor & w_ih, const Tensor & w_hh, const c10::optional<Tensor> & b_ih, const c10::optional<Tensor> & b_hh
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -5864,10 +5773,10 @@ Tensor lowerToNextLayer<batch_rule_279_t,Tensor,const Tensor &, const Tensor &, 
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_280_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Scalar &, const Scalar &, const Scalar &, const Scalar &);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_275_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Scalar &, const Scalar &, const Scalar &, const Scalar &);
 template <>
-Tensor lowerToNextLayer<batch_rule_280_t,Tensor,const Tensor &, const Tensor &, const Tensor &, const Tensor &, const Tensor &, const Tensor &, const Tensor &, const Tensor &, const Tensor &, const Tensor &, const Scalar &, const Scalar &, const Scalar &, const Scalar &>(
-  batch_rule_280_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_275_t,Tensor,const Tensor &, const Tensor &, const Tensor &, const Tensor &, const Tensor &, const Tensor &, const Tensor &, const Tensor &, const Tensor &, const Tensor &, const Scalar &, const Scalar &, const Scalar &, const Scalar &>(
+  batch_rule_275_t batch_rule,
   const Tensor & input, const Tensor & hx, const Tensor & w_ih, const Tensor & w_hh, const Tensor & b_ih, const Tensor & b_hh, const Tensor & packed_ih, const Tensor & packed_hh, const Tensor & col_offsets_ih, const Tensor & col_offsets_hh, const Scalar & scale_ih, const Scalar & scale_hh, const Scalar & zero_point_ih, const Scalar & zero_point_hh
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -5908,10 +5817,10 @@ Tensor lowerToNextLayer<batch_rule_280_t,Tensor,const Tensor &, const Tensor &, 
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_281_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, bool);
+typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_276_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, bool);
 template <>
-std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_281_t,std::tuple<Tensor,Tensor>,const Tensor &, const Tensor &, bool>(
-  batch_rule_281_t batch_rule,
+std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_276_t,std::tuple<Tensor,Tensor>,const Tensor &, const Tensor &, bool>(
+  batch_rule_276_t batch_rule,
   const Tensor & input, const Tensor & lengths, bool batch_first
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -5928,10 +5837,10 @@ std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_281_t,std::tuple<Tensor,Te
   return std::make_tuple(makeBatched(std::get<0>(results), std::get<1>(results), cur_level), makeBatched(std::get<2>(results), std::get<3>(results), cur_level));
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_282_t)(const Tensor &, c10::optional<int64_t>, IntArrayRef, const Tensor &, c10::optional<int64_t>, bool);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_277_t)(const Tensor &, c10::optional<int64_t>, IntArrayRef, const Tensor &, c10::optional<int64_t>, bool);
 template <>
-Tensor lowerToNextLayer<batch_rule_282_t,Tensor,const Tensor &, IntArrayRef, const Tensor &, bool>(
-  batch_rule_282_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_277_t,Tensor,const Tensor &, IntArrayRef, const Tensor &, bool>(
+  batch_rule_277_t batch_rule,
   const Tensor & grad, IntArrayRef input_size, const Tensor & batch_sizes, bool batch_first
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -5948,10 +5857,10 @@ Tensor lowerToNextLayer<batch_rule_282_t,Tensor,const Tensor &, IntArrayRef, con
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_283_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, bool, const Scalar &, int64_t);
+typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_278_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, bool, const Scalar &, int64_t);
 template <>
-std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_283_t,std::tuple<Tensor,Tensor>,const Tensor &, const Tensor &, bool, const Scalar &, int64_t>(
-  batch_rule_283_t batch_rule,
+std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_278_t,std::tuple<Tensor,Tensor>,const Tensor &, const Tensor &, bool, const Scalar &, int64_t>(
+  batch_rule_278_t batch_rule,
   const Tensor & data, const Tensor & batch_sizes, bool batch_first, const Scalar & padding_value, int64_t total_length
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -5968,10 +5877,10 @@ std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_283_t,std::tuple<Tensor,Te
   return std::make_tuple(makeBatched(std::get<0>(results), std::get<1>(results), cur_level), makeBatched(std::get<2>(results), std::get<3>(results), cur_level));
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_284_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, bool);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_279_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, bool);
 template <>
-Tensor lowerToNextLayer<batch_rule_284_t,Tensor,const Tensor &, const Tensor &, const Tensor &, bool>(
-  batch_rule_284_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_279_t,Tensor,const Tensor &, const Tensor &, const Tensor &, bool>(
+  batch_rule_279_t batch_rule,
   const Tensor & self, const Tensor & index, const Tensor & source, bool accumulate
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -5991,10 +5900,10 @@ Tensor lowerToNextLayer<batch_rule_284_t,Tensor,const Tensor &, const Tensor &, 
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_285_t)(const Tensor &, c10::optional<int64_t>, int64_t, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Scalar &);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_280_t)(const Tensor &, c10::optional<int64_t>, int64_t, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Scalar &);
 template <>
-Tensor lowerToNextLayer<batch_rule_285_t,Tensor,const Tensor &, int64_t, const Tensor &, const Tensor &, const Scalar &>(
-  batch_rule_285_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_280_t,Tensor,const Tensor &, int64_t, const Tensor &, const Tensor &, const Scalar &>(
+  batch_rule_280_t batch_rule,
   const Tensor & self, int64_t dim, const Tensor & index, const Tensor & source, const Scalar & alpha
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -6014,10 +5923,10 @@ Tensor lowerToNextLayer<batch_rule_285_t,Tensor,const Tensor &, int64_t, const T
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_286_t)(const Tensor &, c10::optional<int64_t>, Dimname, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Scalar &);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_281_t)(const Tensor &, c10::optional<int64_t>, Dimname, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Scalar &);
 template <>
-Tensor lowerToNextLayer<batch_rule_286_t,Tensor,const Tensor &, Dimname, const Tensor &, const Tensor &, const Scalar &>(
-  batch_rule_286_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_281_t,Tensor,const Tensor &, Dimname, const Tensor &, const Tensor &, const Scalar &>(
+  batch_rule_281_t batch_rule,
   const Tensor & self, Dimname dim, const Tensor & index, const Tensor & source, const Scalar & alpha
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -6037,10 +5946,10 @@ Tensor lowerToNextLayer<batch_rule_286_t,Tensor,const Tensor &, Dimname, const T
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_287_t)(const Tensor &, c10::optional<int64_t>, int64_t, const Tensor &, c10::optional<int64_t>, const Scalar &);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_282_t)(const Tensor &, c10::optional<int64_t>, int64_t, const Tensor &, c10::optional<int64_t>, const Scalar &);
 template <>
-Tensor lowerToNextLayer<batch_rule_287_t,Tensor,const Tensor &, int64_t, const Tensor &, const Scalar &>(
-  batch_rule_287_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_282_t,Tensor,const Tensor &, int64_t, const Tensor &, const Scalar &>(
+  batch_rule_282_t batch_rule,
   const Tensor & self, int64_t dim, const Tensor & index, const Scalar & value
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -6057,10 +5966,10 @@ Tensor lowerToNextLayer<batch_rule_287_t,Tensor,const Tensor &, int64_t, const T
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_288_t)(const Tensor &, c10::optional<int64_t>, Dimname, const Tensor &, c10::optional<int64_t>, const Scalar &);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_283_t)(const Tensor &, c10::optional<int64_t>, Dimname, const Tensor &, c10::optional<int64_t>, const Scalar &);
 template <>
-Tensor lowerToNextLayer<batch_rule_288_t,Tensor,const Tensor &, Dimname, const Tensor &, const Scalar &>(
-  batch_rule_288_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_283_t,Tensor,const Tensor &, Dimname, const Tensor &, const Scalar &>(
+  batch_rule_283_t batch_rule,
   const Tensor & self, Dimname dim, const Tensor & index, const Scalar & value
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -6077,10 +5986,10 @@ Tensor lowerToNextLayer<batch_rule_288_t,Tensor,const Tensor &, Dimname, const T
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_289_t)(const Tensor &, c10::optional<int64_t>, int64_t, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, c10::string_view);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_284_t)(const Tensor &, c10::optional<int64_t>, int64_t, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, c10::string_view);
 template <>
-Tensor lowerToNextLayer<batch_rule_289_t,Tensor,const Tensor &, int64_t, const Tensor &, const Tensor &, c10::string_view>(
-  batch_rule_289_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_284_t,Tensor,const Tensor &, int64_t, const Tensor &, const Tensor &, c10::string_view>(
+  batch_rule_284_t batch_rule,
   const Tensor & self, int64_t dim, const Tensor & index, const Tensor & src, c10::string_view reduce
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -6100,10 +6009,10 @@ Tensor lowerToNextLayer<batch_rule_289_t,Tensor,const Tensor &, int64_t, const T
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_290_t)(const Tensor &, c10::optional<int64_t>, int64_t, const Tensor &, c10::optional<int64_t>, const Scalar &, c10::string_view);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_285_t)(const Tensor &, c10::optional<int64_t>, int64_t, const Tensor &, c10::optional<int64_t>, const Scalar &, c10::string_view);
 template <>
-Tensor lowerToNextLayer<batch_rule_290_t,Tensor,const Tensor &, int64_t, const Tensor &, const Scalar &, c10::string_view>(
-  batch_rule_290_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_285_t,Tensor,const Tensor &, int64_t, const Tensor &, const Scalar &, c10::string_view>(
+  batch_rule_285_t batch_rule,
   const Tensor & self, int64_t dim, const Tensor & index, const Scalar & value, c10::string_view reduce
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -6120,10 +6029,10 @@ Tensor lowerToNextLayer<batch_rule_290_t,Tensor,const Tensor &, int64_t, const T
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_291_t)(const Tensor &, c10::optional<int64_t>, IntArrayRef, int64_t);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_286_t)(const Tensor &, c10::optional<int64_t>, IntArrayRef, int64_t);
 template <>
-Tensor lowerToNextLayer<batch_rule_291_t,Tensor,const Tensor &, IntArrayRef, int64_t>(
-  batch_rule_291_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_286_t,Tensor,const Tensor &, IntArrayRef, int64_t>(
+  batch_rule_286_t batch_rule,
   const Tensor & grad, IntArrayRef input_sizes, int64_t diagonal
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -6137,10 +6046,10 @@ Tensor lowerToNextLayer<batch_rule_291_t,Tensor,const Tensor &, IntArrayRef, int
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_292_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, c10::optional<int64_t>);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_287_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, c10::optional<int64_t>);
 template <>
-Tensor lowerToNextLayer<batch_rule_292_t,Tensor,const Tensor &, const Tensor &, c10::optional<int64_t>>(
-  batch_rule_292_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_287_t,Tensor,const Tensor &, const Tensor &, c10::optional<int64_t>>(
+  batch_rule_287_t batch_rule,
   const Tensor & self, const Tensor & indices, c10::optional<int64_t> dim
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -6157,10 +6066,10 @@ Tensor lowerToNextLayer<batch_rule_292_t,Tensor,const Tensor &, const Tensor &, 
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_293_t)(const Tensor &, c10::optional<int64_t>, int64_t, const Tensor &, c10::optional<int64_t>);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_288_t)(const Tensor &, c10::optional<int64_t>, int64_t, const Tensor &, c10::optional<int64_t>);
 template <>
-Tensor lowerToNextLayer<batch_rule_293_t,Tensor,const Tensor &, int64_t, const Tensor &>(
-  batch_rule_293_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_288_t,Tensor,const Tensor &, int64_t, const Tensor &>(
+  batch_rule_288_t batch_rule,
   const Tensor & self, int64_t dim, const Tensor & index
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -6177,10 +6086,10 @@ Tensor lowerToNextLayer<batch_rule_293_t,Tensor,const Tensor &, int64_t, const T
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_294_t)(const Tensor &, c10::optional<int64_t>, Dimname, const Tensor &, c10::optional<int64_t>);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_289_t)(const Tensor &, c10::optional<int64_t>, Dimname, const Tensor &, c10::optional<int64_t>);
 template <>
-Tensor lowerToNextLayer<batch_rule_294_t,Tensor,const Tensor &, Dimname, const Tensor &>(
-  batch_rule_294_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_289_t,Tensor,const Tensor &, Dimname, const Tensor &>(
+  batch_rule_289_t batch_rule,
   const Tensor & self, Dimname dim, const Tensor & index
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -6197,10 +6106,10 @@ Tensor lowerToNextLayer<batch_rule_294_t,Tensor,const Tensor &, Dimname, const T
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_295_t)(const Tensor &, c10::optional<int64_t>, IntArrayRef, int64_t, const Tensor &, c10::optional<int64_t>);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_290_t)(const Tensor &, c10::optional<int64_t>, IntArrayRef, int64_t, const Tensor &, c10::optional<int64_t>);
 template <>
-Tensor lowerToNextLayer<batch_rule_295_t,Tensor,const Tensor &, IntArrayRef, int64_t, const Tensor &>(
-  batch_rule_295_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_290_t,Tensor,const Tensor &, IntArrayRef, int64_t, const Tensor &>(
+  batch_rule_290_t batch_rule,
   const Tensor & grad, IntArrayRef self_sizes, int64_t dim, const Tensor & index
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -6217,10 +6126,10 @@ Tensor lowerToNextLayer<batch_rule_295_t,Tensor,const Tensor &, IntArrayRef, int
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_296_t)(const Tensor &, c10::optional<int64_t>, int64_t, const Tensor &, c10::optional<int64_t>, bool);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_291_t)(const Tensor &, c10::optional<int64_t>, int64_t, const Tensor &, c10::optional<int64_t>, bool);
 template <>
-Tensor lowerToNextLayer<batch_rule_296_t,Tensor,const Tensor &, int64_t, const Tensor &, bool>(
-  batch_rule_296_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_291_t,Tensor,const Tensor &, int64_t, const Tensor &, bool>(
+  batch_rule_291_t batch_rule,
   const Tensor & self, int64_t dim, const Tensor & index, bool sparse_grad
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -6237,10 +6146,10 @@ Tensor lowerToNextLayer<batch_rule_296_t,Tensor,const Tensor &, int64_t, const T
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_297_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, int64_t, const Tensor &, c10::optional<int64_t>, bool);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_292_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, int64_t, const Tensor &, c10::optional<int64_t>, bool);
 template <>
-Tensor lowerToNextLayer<batch_rule_297_t,Tensor,const Tensor &, const Tensor &, int64_t, const Tensor &, bool>(
-  batch_rule_297_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_292_t,Tensor,const Tensor &, const Tensor &, int64_t, const Tensor &, bool>(
+  batch_rule_292_t batch_rule,
   const Tensor & grad, const Tensor & self, int64_t dim, const Tensor & index, bool sparse_grad
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -6260,10 +6169,10 @@ Tensor lowerToNextLayer<batch_rule_297_t,Tensor,const Tensor &, const Tensor &, 
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_298_t)(const Tensor &, c10::optional<int64_t>, Dimname, const Tensor &, c10::optional<int64_t>, bool);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_293_t)(const Tensor &, c10::optional<int64_t>, Dimname, const Tensor &, c10::optional<int64_t>, bool);
 template <>
-Tensor lowerToNextLayer<batch_rule_298_t,Tensor,const Tensor &, Dimname, const Tensor &, bool>(
-  batch_rule_298_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_293_t,Tensor,const Tensor &, Dimname, const Tensor &, bool>(
+  batch_rule_293_t batch_rule,
   const Tensor & self, Dimname dim, const Tensor & index, bool sparse_grad
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -6280,10 +6189,10 @@ Tensor lowerToNextLayer<batch_rule_298_t,Tensor,const Tensor &, Dimname, const T
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_299_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Scalar &);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_294_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Scalar &);
 template <>
-Tensor lowerToNextLayer<batch_rule_299_t,Tensor,const Tensor &, const Tensor &, const Tensor &, const Scalar &>(
-  batch_rule_299_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_294_t,Tensor,const Tensor &, const Tensor &, const Tensor &, const Scalar &>(
+  batch_rule_294_t batch_rule,
   const Tensor & self, const Tensor & tensor1, const Tensor & tensor2, const Scalar & value
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -6303,10 +6212,10 @@ Tensor lowerToNextLayer<batch_rule_299_t,Tensor,const Tensor &, const Tensor &, 
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_300_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, int64_t, int64_t, double);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_295_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, int64_t, int64_t, double);
 template <>
-Tensor lowerToNextLayer<batch_rule_300_t,Tensor,const Tensor &, const Tensor &, const c10::optional<Tensor> &, int64_t, int64_t, double>(
-  batch_rule_300_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_295_t,Tensor,const Tensor &, const Tensor &, const c10::optional<Tensor> &, int64_t, int64_t, double>(
+  batch_rule_295_t batch_rule,
   const Tensor & self, const Tensor & target, const c10::optional<Tensor> & weight, int64_t reduction, int64_t ignore_index, double label_smoothing
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -6328,10 +6237,10 @@ Tensor lowerToNextLayer<batch_rule_300_t,Tensor,const Tensor &, const Tensor &, 
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_301_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>);
+typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_296_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>);
 template <>
-std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_301_t,std::tuple<Tensor,Tensor>,const Tensor &, const Tensor &>(
-  batch_rule_301_t batch_rule,
+std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_296_t,std::tuple<Tensor,Tensor>,const Tensor &, const Tensor &>(
+  batch_rule_296_t batch_rule,
   const Tensor & self, const Tensor & A
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -6348,10 +6257,10 @@ std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_301_t,std::tuple<Tensor,Te
   return std::make_tuple(makeBatched(std::get<0>(results), std::get<1>(results), cur_level), makeBatched(std::get<2>(results), std::get<3>(results), cur_level));
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_302_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, bool, bool, bool);
+typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_297_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, bool, bool, bool);
 template <>
-std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_302_t,std::tuple<Tensor,Tensor>,const Tensor &, const Tensor &, bool, bool, bool>(
-  batch_rule_302_t batch_rule,
+std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_297_t,std::tuple<Tensor,Tensor>,const Tensor &, const Tensor &, bool, bool, bool>(
+  batch_rule_297_t batch_rule,
   const Tensor & self, const Tensor & A, bool upper, bool transpose, bool unitriangular
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -6368,10 +6277,10 @@ std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_302_t,std::tuple<Tensor,Te
   return std::make_tuple(makeBatched(std::get<0>(results), std::get<1>(results), cur_level), makeBatched(std::get<2>(results), std::get<3>(results), cur_level));
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_303_t)(const Tensor &, c10::optional<int64_t>, bool, bool);
+typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_298_t)(const Tensor &, c10::optional<int64_t>, bool, bool);
 template <>
-std::tuple<Tensor,Tensor,Tensor> lowerToNextLayer<batch_rule_303_t,std::tuple<Tensor,Tensor,Tensor>,const Tensor &, bool, bool>(
-  batch_rule_303_t batch_rule,
+std::tuple<Tensor,Tensor,Tensor> lowerToNextLayer<batch_rule_298_t,std::tuple<Tensor,Tensor,Tensor>,const Tensor &, bool, bool>(
+  batch_rule_298_t batch_rule,
   const Tensor & self, bool pivot, bool check_errors
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -6385,10 +6294,10 @@ std::tuple<Tensor,Tensor,Tensor> lowerToNextLayer<batch_rule_303_t,std::tuple<Te
   return std::make_tuple(makeBatched(std::get<0>(results), std::get<1>(results), cur_level), makeBatched(std::get<2>(results), std::get<3>(results), cur_level), makeBatched(std::get<4>(results), std::get<5>(results), cur_level));
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_304_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, bool, bool);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_299_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, bool, bool);
 template <>
-Tensor lowerToNextLayer<batch_rule_304_t,Tensor,const Tensor &, const Tensor &, const Tensor &, bool, bool>(
-  batch_rule_304_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_299_t,Tensor,const Tensor &, const Tensor &, const Tensor &, bool, bool>(
+  batch_rule_299_t batch_rule,
   const Tensor & self, const Tensor & input2, const Tensor & input3, bool left, bool transpose
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -6408,10 +6317,10 @@ Tensor lowerToNextLayer<batch_rule_304_t,Tensor,const Tensor &, const Tensor &, 
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_305_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, bool, bool);
+typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_300_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, bool, bool);
 template <>
-std::tuple<Tensor,Tensor,Tensor> lowerToNextLayer<batch_rule_305_t,std::tuple<Tensor,Tensor,Tensor>,const Tensor &, const Tensor &, bool, bool>(
-  batch_rule_305_t batch_rule,
+std::tuple<Tensor,Tensor,Tensor> lowerToNextLayer<batch_rule_300_t,std::tuple<Tensor,Tensor,Tensor>,const Tensor &, const Tensor &, bool, bool>(
+  batch_rule_300_t batch_rule,
   const Tensor & LU_data, const Tensor & LU_pivots, bool unpack_data, bool unpack_pivots
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -6428,10 +6337,10 @@ std::tuple<Tensor,Tensor,Tensor> lowerToNextLayer<batch_rule_305_t,std::tuple<Te
   return std::make_tuple(makeBatched(std::get<0>(results), std::get<1>(results), cur_level), makeBatched(std::get<2>(results), std::get<3>(results), cur_level), makeBatched(std::get<4>(results), std::get<5>(results), cur_level));
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_306_t)(const Tensor &, c10::optional<int64_t>, int64_t, bool, c10::optional<Generator>);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_301_t)(const Tensor &, c10::optional<int64_t>, int64_t, bool, c10::optional<Generator>);
 template <>
-Tensor lowerToNextLayer<batch_rule_306_t,Tensor,const Tensor &, int64_t, bool, c10::optional<Generator>>(
-  batch_rule_306_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_301_t,Tensor,const Tensor &, int64_t, bool, c10::optional<Generator>>(
+  batch_rule_301_t batch_rule,
   const Tensor & self, int64_t num_samples, bool replacement, c10::optional<Generator> generator
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -6445,10 +6354,10 @@ Tensor lowerToNextLayer<batch_rule_306_t,Tensor,const Tensor &, int64_t, bool, c
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_307_t)(int64_t, const Tensor &, c10::optional<int64_t>);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_302_t)(int64_t, const Tensor &, c10::optional<int64_t>);
 template <>
-Tensor lowerToNextLayer<batch_rule_307_t,Tensor,int64_t, const Tensor &>(
-  batch_rule_307_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_302_t,Tensor,int64_t, const Tensor &>(
+  batch_rule_302_t batch_rule,
   int64_t n, const Tensor & self
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -6462,10 +6371,10 @@ Tensor lowerToNextLayer<batch_rule_307_t,Tensor,int64_t, const Tensor &>(
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_308_t)(const Tensor &, c10::optional<int64_t>, int64_t, const Scalar &, const Scalar &);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_303_t)(const Tensor &, c10::optional<int64_t>, int64_t, const Scalar &, const Scalar &);
 template <>
-Tensor lowerToNextLayer<batch_rule_308_t,Tensor,const Tensor &, int64_t, const Scalar &, const Scalar &>(
-  batch_rule_308_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_303_t,Tensor,const Tensor &, int64_t, const Scalar &, const Scalar &>(
+  batch_rule_303_t batch_rule,
   const Tensor & self, int64_t bins, const Scalar & min, const Scalar & max
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -6479,10 +6388,10 @@ Tensor lowerToNextLayer<batch_rule_308_t,Tensor,const Tensor &, int64_t, const S
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_309_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, bool);
+typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_304_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, bool);
 template <>
-std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_309_t,std::tuple<Tensor,Tensor>,const Tensor &, const Tensor &, const c10::optional<Tensor> &, bool>(
-  batch_rule_309_t batch_rule,
+std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_304_t,std::tuple<Tensor,Tensor>,const Tensor &, const Tensor &, const c10::optional<Tensor> &, bool>(
+  batch_rule_304_t batch_rule,
   const Tensor & self, const Tensor & bins, const c10::optional<Tensor> & weight, bool density
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -6504,10 +6413,10 @@ std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_309_t,std::tuple<Tensor,Te
   return std::make_tuple(makeBatched(std::get<0>(results), std::get<1>(results), cur_level), makeBatched(std::get<2>(results), std::get<3>(results), cur_level));
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_310_t)(const Tensor &, c10::optional<int64_t>, int64_t, c10::optional<ArrayRef<double>>, const c10::optional<Tensor> &, c10::optional<int64_t>, bool);
+typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_305_t)(const Tensor &, c10::optional<int64_t>, int64_t, c10::optional<ArrayRef<double>>, const c10::optional<Tensor> &, c10::optional<int64_t>, bool);
 template <>
-std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_310_t,std::tuple<Tensor,Tensor>,const Tensor &, int64_t, c10::optional<ArrayRef<double>>, const c10::optional<Tensor> &, bool>(
-  batch_rule_310_t batch_rule,
+std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_305_t,std::tuple<Tensor,Tensor>,const Tensor &, int64_t, c10::optional<ArrayRef<double>>, const c10::optional<Tensor> &, bool>(
+  batch_rule_305_t batch_rule,
   const Tensor & self, int64_t bins, c10::optional<ArrayRef<double>> range, const c10::optional<Tensor> & weight, bool density
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -6526,10 +6435,10 @@ std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_310_t,std::tuple<Tensor,Te
   return std::make_tuple(makeBatched(std::get<0>(results), std::get<1>(results), cur_level), makeBatched(std::get<2>(results), std::get<3>(results), cur_level));
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_311_t)(const Tensor &, c10::optional<int64_t>, double, c10::optional<int64_t>, bool);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_306_t)(const Tensor &, c10::optional<int64_t>, double, c10::optional<int64_t>, bool);
 template <>
-Tensor lowerToNextLayer<batch_rule_311_t,Tensor,const Tensor &, double, c10::optional<int64_t>, bool>(
-  batch_rule_311_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_306_t,Tensor,const Tensor &, double, c10::optional<int64_t>, bool>(
+  batch_rule_306_t batch_rule,
   const Tensor & self, double q, c10::optional<int64_t> dim, bool keepdim
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -6543,10 +6452,10 @@ Tensor lowerToNextLayer<batch_rule_311_t,Tensor,const Tensor &, double, c10::opt
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_312_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, c10::optional<int64_t>, bool);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_307_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, c10::optional<int64_t>, bool);
 template <>
-Tensor lowerToNextLayer<batch_rule_312_t,Tensor,const Tensor &, const Tensor &, c10::optional<int64_t>, bool>(
-  batch_rule_312_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_307_t,Tensor,const Tensor &, const Tensor &, c10::optional<int64_t>, bool>(
+  batch_rule_307_t batch_rule,
   const Tensor & self, const Tensor & q, c10::optional<int64_t> dim, bool keepdim
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -6563,10 +6472,10 @@ Tensor lowerToNextLayer<batch_rule_312_t,Tensor,const Tensor &, const Tensor &, 
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_313_t)(const Tensor &, c10::optional<int64_t>, double, c10::optional<int64_t>, bool, c10::string_view);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_308_t)(const Tensor &, c10::optional<int64_t>, double, c10::optional<int64_t>, bool, c10::string_view);
 template <>
-Tensor lowerToNextLayer<batch_rule_313_t,Tensor,const Tensor &, double, c10::optional<int64_t>, bool, c10::string_view>(
-  batch_rule_313_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_308_t,Tensor,const Tensor &, double, c10::optional<int64_t>, bool, c10::string_view>(
+  batch_rule_308_t batch_rule,
   const Tensor & self, double q, c10::optional<int64_t> dim, bool keepdim, c10::string_view interpolation
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -6580,10 +6489,10 @@ Tensor lowerToNextLayer<batch_rule_313_t,Tensor,const Tensor &, double, c10::opt
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_314_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, c10::optional<int64_t>, bool, c10::string_view);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_309_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, c10::optional<int64_t>, bool, c10::string_view);
 template <>
-Tensor lowerToNextLayer<batch_rule_314_t,Tensor,const Tensor &, const Tensor &, c10::optional<int64_t>, bool, c10::string_view>(
-  batch_rule_314_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_309_t,Tensor,const Tensor &, const Tensor &, c10::optional<int64_t>, bool, c10::string_view>(
+  batch_rule_309_t batch_rule,
   const Tensor & self, const Tensor & q, c10::optional<int64_t> dim, bool keepdim, c10::string_view interpolation
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -6600,10 +6509,10 @@ Tensor lowerToNextLayer<batch_rule_314_t,Tensor,const Tensor &, const Tensor &, 
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_315_t)(const Tensor &, c10::optional<int64_t>, c10::optional<bool>, int64_t, bool);
+typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_310_t)(const Tensor &, c10::optional<int64_t>, c10::optional<bool>, int64_t, bool);
 template <>
-std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_315_t,std::tuple<Tensor,Tensor>,const Tensor &, c10::optional<bool>, int64_t, bool>(
-  batch_rule_315_t batch_rule,
+std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_310_t,std::tuple<Tensor,Tensor>,const Tensor &, c10::optional<bool>, int64_t, bool>(
+  batch_rule_310_t batch_rule,
   const Tensor & self, c10::optional<bool> stable, int64_t dim, bool descending
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -6617,10 +6526,10 @@ std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_315_t,std::tuple<Tensor,Te
   return std::make_tuple(makeBatched(std::get<0>(results), std::get<1>(results), cur_level), makeBatched(std::get<2>(results), std::get<3>(results), cur_level));
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_316_t)(const Tensor &, c10::optional<int64_t>, c10::optional<bool>, Dimname, bool);
+typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_311_t)(const Tensor &, c10::optional<int64_t>, c10::optional<bool>, Dimname, bool);
 template <>
-std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_316_t,std::tuple<Tensor,Tensor>,const Tensor &, c10::optional<bool>, Dimname, bool>(
-  batch_rule_316_t batch_rule,
+std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_311_t,std::tuple<Tensor,Tensor>,const Tensor &, c10::optional<bool>, Dimname, bool>(
+  batch_rule_311_t batch_rule,
   const Tensor & self, c10::optional<bool> stable, Dimname dim, bool descending
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -6634,10 +6543,10 @@ std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_316_t,std::tuple<Tensor,Te
   return std::make_tuple(makeBatched(std::get<0>(results), std::get<1>(results), cur_level), makeBatched(std::get<2>(results), std::get<3>(results), cur_level));
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_317_t)(const Tensor &, c10::optional<int64_t>, int64_t, int64_t, bool, bool);
+typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_312_t)(const Tensor &, c10::optional<int64_t>, int64_t, int64_t, bool, bool);
 template <>
-std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_317_t,std::tuple<Tensor,Tensor>,const Tensor &, int64_t, int64_t, bool, bool>(
-  batch_rule_317_t batch_rule,
+std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_312_t,std::tuple<Tensor,Tensor>,const Tensor &, int64_t, int64_t, bool, bool>(
+  batch_rule_312_t batch_rule,
   const Tensor & self, int64_t k, int64_t dim, bool largest, bool sorted
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -6651,10 +6560,10 @@ std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_317_t,std::tuple<Tensor,Te
   return std::make_tuple(makeBatched(std::get<0>(results), std::get<1>(results), cur_level), makeBatched(std::get<2>(results), std::get<3>(results), cur_level));
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_318_t)(const Tensor &, c10::optional<int64_t>, const Scalar &, int64_t, const Scalar &);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_313_t)(const Tensor &, c10::optional<int64_t>, const Scalar &, int64_t, const Scalar &);
 template <>
-Tensor lowerToNextLayer<batch_rule_318_t,Tensor,const Tensor &, const Scalar &, int64_t, const Scalar &>(
-  batch_rule_318_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_313_t,Tensor,const Tensor &, const Scalar &, int64_t, const Scalar &>(
+  batch_rule_313_t batch_rule,
   const Tensor & self, const Scalar & p, int64_t dim, const Scalar & maxnorm
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -6668,10 +6577,10 @@ Tensor lowerToNextLayer<batch_rule_318_t,Tensor,const Tensor &, const Scalar &, 
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_319_t)(double, const Tensor &, c10::optional<int64_t>, c10::optional<Generator>);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_314_t)(double, const Tensor &, c10::optional<int64_t>, c10::optional<Generator>);
 template <>
-Tensor lowerToNextLayer<batch_rule_319_t,Tensor,double, const Tensor &, c10::optional<Generator>>(
-  batch_rule_319_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_314_t,Tensor,double, const Tensor &, c10::optional<Generator>>(
+  batch_rule_314_t batch_rule,
   double mean, const Tensor & std, c10::optional<Generator> generator
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -6685,10 +6594,10 @@ Tensor lowerToNextLayer<batch_rule_319_t,Tensor,double, const Tensor &, c10::opt
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_320_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Scalar &, const Scalar &, const c10::optional<Tensor> &, c10::optional<int64_t>, int64_t);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_315_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Scalar &, const Scalar &, const c10::optional<Tensor> &, c10::optional<int64_t>, int64_t);
 template <>
-Tensor lowerToNextLayer<batch_rule_320_t,Tensor,const Tensor &, const Tensor &, const Scalar &, const Scalar &, const c10::optional<Tensor> &, int64_t>(
-  batch_rule_320_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_315_t,Tensor,const Tensor &, const Tensor &, const Scalar &, const Scalar &, const c10::optional<Tensor> &, int64_t>(
+  batch_rule_315_t batch_rule,
   const Tensor & self, const Tensor & target, const Scalar & p, const Scalar & margin, const c10::optional<Tensor> & weight, int64_t reduction
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -6710,10 +6619,10 @@ Tensor lowerToNextLayer<batch_rule_320_t,Tensor,const Tensor &, const Tensor &, 
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_321_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Scalar &, const Scalar &, const c10::optional<Tensor> &, c10::optional<int64_t>, int64_t);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_316_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Scalar &, const Scalar &, const c10::optional<Tensor> &, c10::optional<int64_t>, int64_t);
 template <>
-Tensor lowerToNextLayer<batch_rule_321_t,Tensor,const Tensor &, const Tensor &, const Tensor &, const Scalar &, const Scalar &, const c10::optional<Tensor> &, int64_t>(
-  batch_rule_321_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_316_t,Tensor,const Tensor &, const Tensor &, const Tensor &, const Scalar &, const Scalar &, const c10::optional<Tensor> &, int64_t>(
+  batch_rule_316_t batch_rule,
   const Tensor & grad_output, const Tensor & self, const Tensor & target, const Scalar & p, const Scalar & margin, const c10::optional<Tensor> & weight, int64_t reduction
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -6738,10 +6647,10 @@ Tensor lowerToNextLayer<batch_rule_321_t,Tensor,const Tensor &, const Tensor &, 
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_322_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, int64_t, const Tensor &, c10::optional<int64_t>);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_317_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, int64_t, const Tensor &, c10::optional<int64_t>);
 template <>
-Tensor lowerToNextLayer<batch_rule_322_t,Tensor,const Tensor &, const Tensor &, const Tensor &, int64_t, const Tensor &>(
-  batch_rule_322_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_317_t,Tensor,const Tensor &, const Tensor &, const Tensor &, int64_t, const Tensor &>(
+  batch_rule_317_t batch_rule,
   const Tensor & grad_output, const Tensor & self, const Tensor & target, int64_t reduction, const Tensor & is_target
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -6764,10 +6673,10 @@ Tensor lowerToNextLayer<batch_rule_322_t,Tensor,const Tensor &, const Tensor &, 
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_323_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, int64_t, int64_t);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_318_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, int64_t, int64_t);
 template <>
-Tensor lowerToNextLayer<batch_rule_323_t,Tensor,const Tensor &, const Tensor &, const c10::optional<Tensor> &, int64_t, int64_t>(
-  batch_rule_323_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_318_t,Tensor,const Tensor &, const Tensor &, const c10::optional<Tensor> &, int64_t, int64_t>(
+  batch_rule_318_t batch_rule,
   const Tensor & self, const Tensor & target, const c10::optional<Tensor> & weight, int64_t reduction, int64_t ignore_index
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -6789,10 +6698,10 @@ Tensor lowerToNextLayer<batch_rule_323_t,Tensor,const Tensor &, const Tensor &, 
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_324_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, int64_t, int64_t);
+typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_319_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, int64_t, int64_t);
 template <>
-std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_324_t,std::tuple<Tensor,Tensor>,const Tensor &, const Tensor &, const c10::optional<Tensor> &, int64_t, int64_t>(
-  batch_rule_324_t batch_rule,
+std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_319_t,std::tuple<Tensor,Tensor>,const Tensor &, const Tensor &, const c10::optional<Tensor> &, int64_t, int64_t>(
+  batch_rule_319_t batch_rule,
   const Tensor & self, const Tensor & target, const c10::optional<Tensor> & weight, int64_t reduction, int64_t ignore_index
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -6814,10 +6723,10 @@ std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_324_t,std::tuple<Tensor,Te
   return std::make_tuple(makeBatched(std::get<0>(results), std::get<1>(results), cur_level), makeBatched(std::get<2>(results), std::get<3>(results), cur_level));
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_325_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, int64_t, int64_t, const Tensor &, c10::optional<int64_t>);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_320_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, int64_t, int64_t, const Tensor &, c10::optional<int64_t>);
 template <>
-Tensor lowerToNextLayer<batch_rule_325_t,Tensor,const Tensor &, const Tensor &, const Tensor &, const c10::optional<Tensor> &, int64_t, int64_t, const Tensor &>(
-  batch_rule_325_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_320_t,Tensor,const Tensor &, const Tensor &, const Tensor &, const c10::optional<Tensor> &, int64_t, int64_t, const Tensor &>(
+  batch_rule_320_t batch_rule,
   const Tensor & grad_output, const Tensor & self, const Tensor & target, const c10::optional<Tensor> & weight, int64_t reduction, int64_t ignore_index, const Tensor & total_weight
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -6845,10 +6754,10 @@ Tensor lowerToNextLayer<batch_rule_325_t,Tensor,const Tensor &, const Tensor &, 
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_326_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, int64_t, double);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_321_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, int64_t, double);
 template <>
-Tensor lowerToNextLayer<batch_rule_326_t,Tensor,const Tensor &, const Tensor &, const Tensor &, int64_t, double>(
-  batch_rule_326_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_321_t,Tensor,const Tensor &, const Tensor &, const Tensor &, int64_t, double>(
+  batch_rule_321_t batch_rule,
   const Tensor & grad_output, const Tensor & self, const Tensor & target, int64_t reduction, double delta
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -6868,10 +6777,10 @@ Tensor lowerToNextLayer<batch_rule_326_t,Tensor,const Tensor &, const Tensor &, 
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_327_t)(const Tensor &, c10::optional<int64_t>, const Scalar &, const Scalar &, const Scalar &);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_322_t)(const Tensor &, c10::optional<int64_t>, const Scalar &, const Scalar &, const Scalar &);
 template <>
-Tensor lowerToNextLayer<batch_rule_327_t,Tensor,const Tensor &, const Scalar &, const Scalar &, const Scalar &>(
-  batch_rule_327_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_322_t,Tensor,const Tensor &, const Scalar &, const Scalar &, const Scalar &>(
+  batch_rule_322_t batch_rule,
   const Tensor & self, const Scalar & alpha, const Scalar & scale, const Scalar & input_scale
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -6885,10 +6794,10 @@ Tensor lowerToNextLayer<batch_rule_327_t,Tensor,const Tensor &, const Scalar &, 
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_328_t)(const Tensor &, c10::optional<int64_t>, const Scalar &, const Scalar &, const Scalar &, bool, const Tensor &, c10::optional<int64_t>);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_323_t)(const Tensor &, c10::optional<int64_t>, const Scalar &, const Scalar &, const Scalar &, bool, const Tensor &, c10::optional<int64_t>);
 template <>
-Tensor lowerToNextLayer<batch_rule_328_t,Tensor,const Tensor &, const Scalar &, const Scalar &, const Scalar &, bool, const Tensor &>(
-  batch_rule_328_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_323_t,Tensor,const Tensor &, const Scalar &, const Scalar &, const Scalar &, bool, const Tensor &>(
+  batch_rule_323_t batch_rule,
   const Tensor & grad_output, const Scalar & alpha, const Scalar & scale, const Scalar & input_scale, bool is_result, const Tensor & self_or_result
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -6905,10 +6814,10 @@ Tensor lowerToNextLayer<batch_rule_328_t,Tensor,const Tensor &, const Scalar &, 
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_329_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Scalar &, const Scalar &);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_324_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Scalar &, const Scalar &);
 template <>
-Tensor lowerToNextLayer<batch_rule_329_t,Tensor,const Tensor &, const Tensor &, const Scalar &, const Scalar &>(
-  batch_rule_329_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_324_t,Tensor,const Tensor &, const Tensor &, const Scalar &, const Scalar &>(
+  batch_rule_324_t batch_rule,
   const Tensor & grad_output, const Tensor & self, const Scalar & min_val, const Scalar & max_val
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -6925,10 +6834,10 @@ Tensor lowerToNextLayer<batch_rule_329_t,Tensor,const Tensor &, const Tensor &, 
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_330_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Scalar &, bool);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_325_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Scalar &, bool);
 template <>
-Tensor lowerToNextLayer<batch_rule_330_t,Tensor,const Tensor &, const Tensor &, const Scalar &, bool>(
-  batch_rule_330_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_325_t,Tensor,const Tensor &, const Tensor &, const Scalar &, bool>(
+  batch_rule_325_t batch_rule,
   const Tensor & grad_output, const Tensor & self, const Scalar & negative_slope, bool self_is_result
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -6945,10 +6854,10 @@ Tensor lowerToNextLayer<batch_rule_330_t,Tensor,const Tensor &, const Tensor &, 
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_331_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Scalar &, const Scalar &, bool, c10::optional<Generator>);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_326_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Scalar &, const Scalar &, bool, c10::optional<Generator>);
 template <>
-Tensor lowerToNextLayer<batch_rule_331_t,Tensor,const Tensor &, const Tensor &, const Scalar &, const Scalar &, bool, c10::optional<Generator>>(
-  batch_rule_331_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_326_t,Tensor,const Tensor &, const Tensor &, const Scalar &, const Scalar &, bool, c10::optional<Generator>>(
+  batch_rule_326_t batch_rule,
   const Tensor & self, const Tensor & noise, const Scalar & lower, const Scalar & upper, bool training, c10::optional<Generator> generator
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -6965,10 +6874,10 @@ Tensor lowerToNextLayer<batch_rule_331_t,Tensor,const Tensor &, const Tensor &, 
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_332_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Scalar &, const Scalar &, bool, bool);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_327_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Scalar &, const Scalar &, bool, bool);
 template <>
-Tensor lowerToNextLayer<batch_rule_332_t,Tensor,const Tensor &, const Tensor &, const Tensor &, const Scalar &, const Scalar &, bool, bool>(
-  batch_rule_332_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_327_t,Tensor,const Tensor &, const Tensor &, const Tensor &, const Scalar &, const Scalar &, bool, bool>(
+  batch_rule_327_t batch_rule,
   const Tensor & grad_output, const Tensor & self, const Tensor & noise, const Scalar & lower, const Scalar & upper, bool training, bool self_is_result
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -6988,10 +6897,10 @@ Tensor lowerToNextLayer<batch_rule_332_t,Tensor,const Tensor &, const Tensor &, 
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_333_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Scalar &, const Scalar &, const Tensor &, c10::optional<int64_t>);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_328_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Scalar &, const Scalar &, const Tensor &, c10::optional<int64_t>);
 template <>
-Tensor lowerToNextLayer<batch_rule_333_t,Tensor,const Tensor &, const Tensor &, const Scalar &, const Scalar &, const Tensor &>(
-  batch_rule_333_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_328_t,Tensor,const Tensor &, const Tensor &, const Scalar &, const Scalar &, const Tensor &>(
+  batch_rule_328_t batch_rule,
   const Tensor & grad_output, const Tensor & self, const Scalar & beta, const Scalar & threshold, const Tensor & output
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -7011,10 +6920,10 @@ Tensor lowerToNextLayer<batch_rule_333_t,Tensor,const Tensor &, const Tensor &, 
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_334_t)(const Tensor &, c10::optional<int64_t>, IntArrayRef, IntArrayRef, IntArrayRef, bool, bool, c10::optional<int64_t>);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_329_t)(const Tensor &, c10::optional<int64_t>, IntArrayRef, IntArrayRef, IntArrayRef, bool, bool, c10::optional<int64_t>);
 template <>
-Tensor lowerToNextLayer<batch_rule_334_t,Tensor,const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, bool, bool, c10::optional<int64_t>>(
-  batch_rule_334_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_329_t,Tensor,const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, bool, bool, c10::optional<int64_t>>(
+  batch_rule_329_t batch_rule,
   const Tensor & self, IntArrayRef kernel_size, IntArrayRef stride, IntArrayRef padding, bool ceil_mode, bool count_include_pad, c10::optional<int64_t> divisor_override
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -7028,10 +6937,10 @@ Tensor lowerToNextLayer<batch_rule_334_t,Tensor,const Tensor &, IntArrayRef, Int
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_335_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, IntArrayRef, IntArrayRef, IntArrayRef, bool, bool, c10::optional<int64_t>);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_330_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, IntArrayRef, IntArrayRef, IntArrayRef, bool, bool, c10::optional<int64_t>);
 template <>
-Tensor lowerToNextLayer<batch_rule_335_t,Tensor,const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, bool, bool, c10::optional<int64_t>>(
-  batch_rule_335_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_330_t,Tensor,const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, bool, bool, c10::optional<int64_t>>(
+  batch_rule_330_t batch_rule,
   const Tensor & grad_output, const Tensor & self, IntArrayRef kernel_size, IntArrayRef stride, IntArrayRef padding, bool ceil_mode, bool count_include_pad, c10::optional<int64_t> divisor_override
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -7048,10 +6957,10 @@ Tensor lowerToNextLayer<batch_rule_335_t,Tensor,const Tensor &, const Tensor &, 
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_336_t)(const Tensor &, c10::optional<int64_t>, IntArrayRef, IntArrayRef, const Tensor &, c10::optional<int64_t>);
+typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_331_t)(const Tensor &, c10::optional<int64_t>, IntArrayRef, IntArrayRef, const Tensor &, c10::optional<int64_t>);
 template <>
-std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_336_t,std::tuple<Tensor,Tensor>,const Tensor &, IntArrayRef, IntArrayRef, const Tensor &>(
-  batch_rule_336_t batch_rule,
+std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_331_t,std::tuple<Tensor,Tensor>,const Tensor &, IntArrayRef, IntArrayRef, const Tensor &>(
+  batch_rule_331_t batch_rule,
   const Tensor & self, IntArrayRef kernel_size, IntArrayRef output_size, const Tensor & random_samples
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -7068,10 +6977,10 @@ std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_336_t,std::tuple<Tensor,Te
   return std::make_tuple(makeBatched(std::get<0>(results), std::get<1>(results), cur_level), makeBatched(std::get<2>(results), std::get<3>(results), cur_level));
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_337_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, IntArrayRef, IntArrayRef, const Tensor &, c10::optional<int64_t>);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_332_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, IntArrayRef, IntArrayRef, const Tensor &, c10::optional<int64_t>);
 template <>
-Tensor lowerToNextLayer<batch_rule_337_t,Tensor,const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, const Tensor &>(
-  batch_rule_337_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_332_t,Tensor,const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, const Tensor &>(
+  batch_rule_332_t batch_rule,
   const Tensor & grad_output, const Tensor & self, IntArrayRef kernel_size, IntArrayRef output_size, const Tensor & indices
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -7091,10 +7000,10 @@ Tensor lowerToNextLayer<batch_rule_337_t,Tensor,const Tensor &, const Tensor &, 
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_338_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, IntArrayRef, IntArrayRef, IntArrayRef, IntArrayRef, bool, const Tensor &, c10::optional<int64_t>);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_333_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, IntArrayRef, IntArrayRef, IntArrayRef, IntArrayRef, bool, const Tensor &, c10::optional<int64_t>);
 template <>
-Tensor lowerToNextLayer<batch_rule_338_t,Tensor,const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, IntArrayRef, bool, const Tensor &>(
-  batch_rule_338_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_333_t,Tensor,const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, IntArrayRef, bool, const Tensor &>(
+  batch_rule_333_t batch_rule,
   const Tensor & grad_output, const Tensor & self, IntArrayRef kernel_size, IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation, bool ceil_mode, const Tensor & indices
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -7114,10 +7023,10 @@ Tensor lowerToNextLayer<batch_rule_338_t,Tensor,const Tensor &, const Tensor &, 
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_339_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, IntArrayRef, IntArrayRef, IntArrayRef);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_334_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, IntArrayRef, IntArrayRef, IntArrayRef);
 template <>
-Tensor lowerToNextLayer<batch_rule_339_t,Tensor,const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef>(
-  batch_rule_339_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_334_t,Tensor,const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef>(
+  batch_rule_334_t batch_rule,
   const Tensor & self, const Tensor & indices, IntArrayRef output_size, IntArrayRef stride, IntArrayRef padding
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -7134,10 +7043,10 @@ Tensor lowerToNextLayer<batch_rule_339_t,Tensor,const Tensor &, const Tensor &, 
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_340_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, IntArrayRef, IntArrayRef, IntArrayRef);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_335_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, IntArrayRef, IntArrayRef, IntArrayRef);
 template <>
-Tensor lowerToNextLayer<batch_rule_340_t,Tensor,const Tensor &, const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef>(
-  batch_rule_340_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_335_t,Tensor,const Tensor &, const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef>(
+  batch_rule_335_t batch_rule,
   const Tensor & grad_output, const Tensor & self, const Tensor & indices, IntArrayRef output_size, IntArrayRef stride, IntArrayRef padding
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -7157,10 +7066,10 @@ Tensor lowerToNextLayer<batch_rule_340_t,Tensor,const Tensor &, const Tensor &, 
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_341_t)(const Tensor &, c10::optional<int64_t>, c10::optional<IntArrayRef>, bool, c10::optional<ArrayRef<double>>);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_336_t)(const Tensor &, c10::optional<int64_t>, c10::optional<IntArrayRef>, bool, c10::optional<ArrayRef<double>>);
 template <>
-Tensor lowerToNextLayer<batch_rule_341_t,Tensor,const Tensor &, c10::optional<IntArrayRef>, bool, c10::optional<ArrayRef<double>>>(
-  batch_rule_341_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_336_t,Tensor,const Tensor &, c10::optional<IntArrayRef>, bool, c10::optional<ArrayRef<double>>>(
+  batch_rule_336_t batch_rule,
   const Tensor & input, c10::optional<IntArrayRef> output_size, bool align_corners, c10::optional<ArrayRef<double>> scale_factors
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -7174,10 +7083,10 @@ Tensor lowerToNextLayer<batch_rule_341_t,Tensor,const Tensor &, c10::optional<In
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_342_t)(const Tensor &, c10::optional<int64_t>, c10::optional<IntArrayRef>, IntArrayRef, bool, c10::optional<ArrayRef<double>>);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_337_t)(const Tensor &, c10::optional<int64_t>, c10::optional<IntArrayRef>, IntArrayRef, bool, c10::optional<ArrayRef<double>>);
 template <>
-Tensor lowerToNextLayer<batch_rule_342_t,Tensor,const Tensor &, c10::optional<IntArrayRef>, IntArrayRef, bool, c10::optional<ArrayRef<double>>>(
-  batch_rule_342_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_337_t,Tensor,const Tensor &, c10::optional<IntArrayRef>, IntArrayRef, bool, c10::optional<ArrayRef<double>>>(
+  batch_rule_337_t batch_rule,
   const Tensor & grad_output, c10::optional<IntArrayRef> output_size, IntArrayRef input_size, bool align_corners, c10::optional<ArrayRef<double>> scale_factors
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -7191,10 +7100,10 @@ Tensor lowerToNextLayer<batch_rule_342_t,Tensor,const Tensor &, c10::optional<In
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_343_t)(const Tensor &, c10::optional<int64_t>, c10::optional<IntArrayRef>, c10::optional<ArrayRef<double>>);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_338_t)(const Tensor &, c10::optional<int64_t>, c10::optional<IntArrayRef>, c10::optional<ArrayRef<double>>);
 template <>
-Tensor lowerToNextLayer<batch_rule_343_t,Tensor,const Tensor &, c10::optional<IntArrayRef>, c10::optional<ArrayRef<double>>>(
-  batch_rule_343_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_338_t,Tensor,const Tensor &, c10::optional<IntArrayRef>, c10::optional<ArrayRef<double>>>(
+  batch_rule_338_t batch_rule,
   const Tensor & input, c10::optional<IntArrayRef> output_size, c10::optional<ArrayRef<double>> scale_factors
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -7208,10 +7117,10 @@ Tensor lowerToNextLayer<batch_rule_343_t,Tensor,const Tensor &, c10::optional<In
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_344_t)(const Tensor &, c10::optional<int64_t>, c10::optional<IntArrayRef>, IntArrayRef, c10::optional<ArrayRef<double>>);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_339_t)(const Tensor &, c10::optional<int64_t>, c10::optional<IntArrayRef>, IntArrayRef, c10::optional<ArrayRef<double>>);
 template <>
-Tensor lowerToNextLayer<batch_rule_344_t,Tensor,const Tensor &, c10::optional<IntArrayRef>, IntArrayRef, c10::optional<ArrayRef<double>>>(
-  batch_rule_344_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_339_t,Tensor,const Tensor &, c10::optional<IntArrayRef>, IntArrayRef, c10::optional<ArrayRef<double>>>(
+  batch_rule_339_t batch_rule,
   const Tensor & grad_output, c10::optional<IntArrayRef> output_size, IntArrayRef input_size, c10::optional<ArrayRef<double>> scale_factors
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -7225,10 +7134,10 @@ Tensor lowerToNextLayer<batch_rule_344_t,Tensor,const Tensor &, c10::optional<In
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_345_t)(const Tensor &, c10::optional<int64_t>, IntArrayRef, bool, c10::optional<double>);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_340_t)(const Tensor &, c10::optional<int64_t>, IntArrayRef, bool, c10::optional<double>);
 template <>
-Tensor lowerToNextLayer<batch_rule_345_t,Tensor,const Tensor &, IntArrayRef, bool, c10::optional<double>>(
-  batch_rule_345_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_340_t,Tensor,const Tensor &, IntArrayRef, bool, c10::optional<double>>(
+  batch_rule_340_t batch_rule,
   const Tensor & self, IntArrayRef output_size, bool align_corners, c10::optional<double> scales
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -7242,10 +7151,10 @@ Tensor lowerToNextLayer<batch_rule_345_t,Tensor,const Tensor &, IntArrayRef, boo
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_346_t)(const Tensor &, c10::optional<int64_t>, IntArrayRef, IntArrayRef, bool, c10::optional<double>);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_341_t)(const Tensor &, c10::optional<int64_t>, IntArrayRef, IntArrayRef, bool, c10::optional<double>);
 template <>
-Tensor lowerToNextLayer<batch_rule_346_t,Tensor,const Tensor &, IntArrayRef, IntArrayRef, bool, c10::optional<double>>(
-  batch_rule_346_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_341_t,Tensor,const Tensor &, IntArrayRef, IntArrayRef, bool, c10::optional<double>>(
+  batch_rule_341_t batch_rule,
   const Tensor & grad_output, IntArrayRef output_size, IntArrayRef input_size, bool align_corners, c10::optional<double> scales
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -7259,10 +7168,10 @@ Tensor lowerToNextLayer<batch_rule_346_t,Tensor,const Tensor &, IntArrayRef, Int
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_347_t)(const Tensor &, c10::optional<int64_t>, IntArrayRef, bool, c10::optional<double>, c10::optional<double>);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_342_t)(const Tensor &, c10::optional<int64_t>, IntArrayRef, bool, c10::optional<double>, c10::optional<double>);
 template <>
-Tensor lowerToNextLayer<batch_rule_347_t,Tensor,const Tensor &, IntArrayRef, bool, c10::optional<double>, c10::optional<double>>(
-  batch_rule_347_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_342_t,Tensor,const Tensor &, IntArrayRef, bool, c10::optional<double>, c10::optional<double>>(
+  batch_rule_342_t batch_rule,
   const Tensor & self, IntArrayRef output_size, bool align_corners, c10::optional<double> scales_h, c10::optional<double> scales_w
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -7276,10 +7185,10 @@ Tensor lowerToNextLayer<batch_rule_347_t,Tensor,const Tensor &, IntArrayRef, boo
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_348_t)(const Tensor &, c10::optional<int64_t>, IntArrayRef, IntArrayRef, bool, c10::optional<double>, c10::optional<double>);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_343_t)(const Tensor &, c10::optional<int64_t>, IntArrayRef, IntArrayRef, bool, c10::optional<double>, c10::optional<double>);
 template <>
-Tensor lowerToNextLayer<batch_rule_348_t,Tensor,const Tensor &, IntArrayRef, IntArrayRef, bool, c10::optional<double>, c10::optional<double>>(
-  batch_rule_348_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_343_t,Tensor,const Tensor &, IntArrayRef, IntArrayRef, bool, c10::optional<double>, c10::optional<double>>(
+  batch_rule_343_t batch_rule,
   const Tensor & grad_output, IntArrayRef output_size, IntArrayRef input_size, bool align_corners, c10::optional<double> scales_h, c10::optional<double> scales_w
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -7293,10 +7202,10 @@ Tensor lowerToNextLayer<batch_rule_348_t,Tensor,const Tensor &, IntArrayRef, Int
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_349_t)(const Tensor &, c10::optional<int64_t>, IntArrayRef, bool, c10::optional<double>, c10::optional<double>, c10::optional<double>);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_344_t)(const Tensor &, c10::optional<int64_t>, IntArrayRef, bool, c10::optional<double>, c10::optional<double>, c10::optional<double>);
 template <>
-Tensor lowerToNextLayer<batch_rule_349_t,Tensor,const Tensor &, IntArrayRef, bool, c10::optional<double>, c10::optional<double>, c10::optional<double>>(
-  batch_rule_349_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_344_t,Tensor,const Tensor &, IntArrayRef, bool, c10::optional<double>, c10::optional<double>, c10::optional<double>>(
+  batch_rule_344_t batch_rule,
   const Tensor & self, IntArrayRef output_size, bool align_corners, c10::optional<double> scales_d, c10::optional<double> scales_h, c10::optional<double> scales_w
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -7310,10 +7219,10 @@ Tensor lowerToNextLayer<batch_rule_349_t,Tensor,const Tensor &, IntArrayRef, boo
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_350_t)(const Tensor &, c10::optional<int64_t>, IntArrayRef, IntArrayRef, bool, c10::optional<double>, c10::optional<double>, c10::optional<double>);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_345_t)(const Tensor &, c10::optional<int64_t>, IntArrayRef, IntArrayRef, bool, c10::optional<double>, c10::optional<double>, c10::optional<double>);
 template <>
-Tensor lowerToNextLayer<batch_rule_350_t,Tensor,const Tensor &, IntArrayRef, IntArrayRef, bool, c10::optional<double>, c10::optional<double>, c10::optional<double>>(
-  batch_rule_350_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_345_t,Tensor,const Tensor &, IntArrayRef, IntArrayRef, bool, c10::optional<double>, c10::optional<double>, c10::optional<double>>(
+  batch_rule_345_t batch_rule,
   const Tensor & grad_output, IntArrayRef output_size, IntArrayRef input_size, bool align_corners, c10::optional<double> scales_d, c10::optional<double> scales_h, c10::optional<double> scales_w
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -7327,10 +7236,10 @@ Tensor lowerToNextLayer<batch_rule_350_t,Tensor,const Tensor &, IntArrayRef, Int
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_351_t)(const Tensor &, c10::optional<int64_t>, IntArrayRef, c10::optional<double>);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_346_t)(const Tensor &, c10::optional<int64_t>, IntArrayRef, c10::optional<double>);
 template <>
-Tensor lowerToNextLayer<batch_rule_351_t,Tensor,const Tensor &, IntArrayRef, c10::optional<double>>(
-  batch_rule_351_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_346_t,Tensor,const Tensor &, IntArrayRef, c10::optional<double>>(
+  batch_rule_346_t batch_rule,
   const Tensor & self, IntArrayRef output_size, c10::optional<double> scales
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -7344,10 +7253,10 @@ Tensor lowerToNextLayer<batch_rule_351_t,Tensor,const Tensor &, IntArrayRef, c10
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_352_t)(const Tensor &, c10::optional<int64_t>, IntArrayRef, IntArrayRef, c10::optional<double>);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_347_t)(const Tensor &, c10::optional<int64_t>, IntArrayRef, IntArrayRef, c10::optional<double>);
 template <>
-Tensor lowerToNextLayer<batch_rule_352_t,Tensor,const Tensor &, IntArrayRef, IntArrayRef, c10::optional<double>>(
-  batch_rule_352_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_347_t,Tensor,const Tensor &, IntArrayRef, IntArrayRef, c10::optional<double>>(
+  batch_rule_347_t batch_rule,
   const Tensor & grad_output, IntArrayRef output_size, IntArrayRef input_size, c10::optional<double> scales
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -7361,10 +7270,10 @@ Tensor lowerToNextLayer<batch_rule_352_t,Tensor,const Tensor &, IntArrayRef, Int
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_353_t)(const Tensor &, c10::optional<int64_t>, IntArrayRef, c10::optional<double>, c10::optional<double>);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_348_t)(const Tensor &, c10::optional<int64_t>, IntArrayRef, c10::optional<double>, c10::optional<double>);
 template <>
-Tensor lowerToNextLayer<batch_rule_353_t,Tensor,const Tensor &, IntArrayRef, c10::optional<double>, c10::optional<double>>(
-  batch_rule_353_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_348_t,Tensor,const Tensor &, IntArrayRef, c10::optional<double>, c10::optional<double>>(
+  batch_rule_348_t batch_rule,
   const Tensor & self, IntArrayRef output_size, c10::optional<double> scales_h, c10::optional<double> scales_w
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -7378,10 +7287,10 @@ Tensor lowerToNextLayer<batch_rule_353_t,Tensor,const Tensor &, IntArrayRef, c10
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_354_t)(const Tensor &, c10::optional<int64_t>, IntArrayRef, IntArrayRef, c10::optional<double>, c10::optional<double>);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_349_t)(const Tensor &, c10::optional<int64_t>, IntArrayRef, IntArrayRef, c10::optional<double>, c10::optional<double>);
 template <>
-Tensor lowerToNextLayer<batch_rule_354_t,Tensor,const Tensor &, IntArrayRef, IntArrayRef, c10::optional<double>, c10::optional<double>>(
-  batch_rule_354_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_349_t,Tensor,const Tensor &, IntArrayRef, IntArrayRef, c10::optional<double>, c10::optional<double>>(
+  batch_rule_349_t batch_rule,
   const Tensor & grad_output, IntArrayRef output_size, IntArrayRef input_size, c10::optional<double> scales_h, c10::optional<double> scales_w
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -7395,10 +7304,10 @@ Tensor lowerToNextLayer<batch_rule_354_t,Tensor,const Tensor &, IntArrayRef, Int
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_355_t)(const Tensor &, c10::optional<int64_t>, IntArrayRef, c10::optional<double>, c10::optional<double>, c10::optional<double>);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_350_t)(const Tensor &, c10::optional<int64_t>, IntArrayRef, c10::optional<double>, c10::optional<double>, c10::optional<double>);
 template <>
-Tensor lowerToNextLayer<batch_rule_355_t,Tensor,const Tensor &, IntArrayRef, c10::optional<double>, c10::optional<double>, c10::optional<double>>(
-  batch_rule_355_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_350_t,Tensor,const Tensor &, IntArrayRef, c10::optional<double>, c10::optional<double>, c10::optional<double>>(
+  batch_rule_350_t batch_rule,
   const Tensor & self, IntArrayRef output_size, c10::optional<double> scales_d, c10::optional<double> scales_h, c10::optional<double> scales_w
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -7412,10 +7321,10 @@ Tensor lowerToNextLayer<batch_rule_355_t,Tensor,const Tensor &, IntArrayRef, c10
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_356_t)(const Tensor &, c10::optional<int64_t>, IntArrayRef, IntArrayRef, c10::optional<double>, c10::optional<double>, c10::optional<double>);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_351_t)(const Tensor &, c10::optional<int64_t>, IntArrayRef, IntArrayRef, c10::optional<double>, c10::optional<double>, c10::optional<double>);
 template <>
-Tensor lowerToNextLayer<batch_rule_356_t,Tensor,const Tensor &, IntArrayRef, IntArrayRef, c10::optional<double>, c10::optional<double>, c10::optional<double>>(
-  batch_rule_356_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_351_t,Tensor,const Tensor &, IntArrayRef, IntArrayRef, c10::optional<double>, c10::optional<double>, c10::optional<double>>(
+  batch_rule_351_t batch_rule,
   const Tensor & grad_output, IntArrayRef output_size, IntArrayRef input_size, c10::optional<double> scales_d, c10::optional<double> scales_h, c10::optional<double> scales_w
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -7429,10 +7338,10 @@ Tensor lowerToNextLayer<batch_rule_356_t,Tensor,const Tensor &, IntArrayRef, Int
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_357_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, c10::optional<double>);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_352_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, c10::optional<double>);
 template <>
-Tensor lowerToNextLayer<batch_rule_357_t,Tensor,const Tensor &, const Tensor &, c10::optional<double>>(
-  batch_rule_357_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_352_t,Tensor,const Tensor &, const Tensor &, c10::optional<double>>(
+  batch_rule_352_t batch_rule,
   const Tensor & grad_output, const Tensor & self, c10::optional<double> eps
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -7449,10 +7358,10 @@ Tensor lowerToNextLayer<batch_rule_357_t,Tensor,const Tensor &, const Tensor &, 
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_358_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, IntArrayRef, const c10::optional<Tensor> &, c10::optional<int64_t>, IntArrayRef, IntArrayRef, IntArrayRef, IntArrayRef);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_353_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, IntArrayRef, const c10::optional<Tensor> &, c10::optional<int64_t>, IntArrayRef, IntArrayRef, IntArrayRef, IntArrayRef);
 template <>
-Tensor lowerToNextLayer<batch_rule_358_t,Tensor,const Tensor &, const Tensor &, IntArrayRef, const c10::optional<Tensor> &, IntArrayRef, IntArrayRef, IntArrayRef, IntArrayRef>(
-  batch_rule_358_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_353_t,Tensor,const Tensor &, const Tensor &, IntArrayRef, const c10::optional<Tensor> &, IntArrayRef, IntArrayRef, IntArrayRef, IntArrayRef>(
+  batch_rule_353_t batch_rule,
   const Tensor & self, const Tensor & weight, IntArrayRef kernel_size, const c10::optional<Tensor> & bias, IntArrayRef stride, IntArrayRef padding, IntArrayRef output_padding, IntArrayRef dilation
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -7474,10 +7383,10 @@ Tensor lowerToNextLayer<batch_rule_358_t,Tensor,const Tensor &, const Tensor &, 
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_359_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, IntArrayRef, const c10::optional<Tensor> &, c10::optional<int64_t>, IntArrayRef, IntArrayRef);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_354_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, IntArrayRef, const c10::optional<Tensor> &, c10::optional<int64_t>, IntArrayRef, IntArrayRef);
 template <>
-Tensor lowerToNextLayer<batch_rule_359_t,Tensor,const Tensor &, const Tensor &, IntArrayRef, const c10::optional<Tensor> &, IntArrayRef, IntArrayRef>(
-  batch_rule_359_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_354_t,Tensor,const Tensor &, const Tensor &, IntArrayRef, const c10::optional<Tensor> &, IntArrayRef, IntArrayRef>(
+  batch_rule_354_t batch_rule,
   const Tensor & self, const Tensor & weight, IntArrayRef kernel_size, const c10::optional<Tensor> & bias, IntArrayRef stride, IntArrayRef padding
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -7499,10 +7408,10 @@ Tensor lowerToNextLayer<batch_rule_359_t,Tensor,const Tensor &, const Tensor &, 
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_360_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, IntArrayRef, const c10::optional<Tensor> &, c10::optional<int64_t>, IntArrayRef, IntArrayRef);
+typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_355_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, IntArrayRef, const c10::optional<Tensor> &, c10::optional<int64_t>, IntArrayRef, IntArrayRef);
 template <>
-std::tuple<Tensor,Tensor,Tensor> lowerToNextLayer<batch_rule_360_t,std::tuple<Tensor,Tensor,Tensor>,const Tensor &, const Tensor &, IntArrayRef, const c10::optional<Tensor> &, IntArrayRef, IntArrayRef>(
-  batch_rule_360_t batch_rule,
+std::tuple<Tensor,Tensor,Tensor> lowerToNextLayer<batch_rule_355_t,std::tuple<Tensor,Tensor,Tensor>,const Tensor &, const Tensor &, IntArrayRef, const c10::optional<Tensor> &, IntArrayRef, IntArrayRef>(
+  batch_rule_355_t batch_rule,
   const Tensor & self, const Tensor & weight, IntArrayRef kernel_size, const c10::optional<Tensor> & bias, IntArrayRef stride, IntArrayRef padding
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -7524,38 +7433,10 @@ std::tuple<Tensor,Tensor,Tensor> lowerToNextLayer<batch_rule_360_t,std::tuple<Te
   return std::make_tuple(makeBatched(std::get<0>(results), std::get<1>(results), cur_level), makeBatched(std::get<2>(results), std::get<3>(results), cur_level), makeBatched(std::get<4>(results), std::get<5>(results), cur_level));
 }
 
-typedef std::tuple<const Tensor &,c10::optional<int64_t>> (*batch_rule_361_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, IntArrayRef, const c10::optional<Tensor> &, c10::optional<int64_t>, IntArrayRef, IntArrayRef, IntArrayRef, const Tensor &, c10::optional<int64_t>);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_356_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, IntArrayRef, const c10::optional<Tensor> &, c10::optional<int64_t>, IntArrayRef, IntArrayRef, IntArrayRef);
 template <>
-const Tensor & lowerToNextLayer<batch_rule_361_t,const Tensor &,const Tensor &, const Tensor &, IntArrayRef, const c10::optional<Tensor> &, IntArrayRef, IntArrayRef, IntArrayRef, const Tensor &>(
-  batch_rule_361_t batch_rule,
-  const Tensor & self, const Tensor & weight, IntArrayRef kernel_size, const c10::optional<Tensor> & bias, IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation, const Tensor & out
-) {
-  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
-  auto maybe_layer = maybeCurrentDynamicLayer();
-  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
-  int64_t cur_level = maybe_layer->layerId();
-  Tensor self_value;
-  optional<int64_t> self_bdim;
-  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
-  Tensor weight_value;
-  optional<int64_t> weight_bdim;
-  std::tie(weight_value, weight_bdim) = unwrapTensorAtLevel(weight, cur_level);
-  Tensor out_value;
-  optional<int64_t> out_bdim;
-  std::tie(out_value, out_bdim) = unwrapTensorAtLevel(out, cur_level);
-  optional<Tensor> bias_value;
-  optional<int64_t> bias_bdim;
-  if (bias) {
-      std::tie(bias_value, bias_bdim) = unwrapTensorAtLevel(bias.value(), cur_level);
-  }
-  auto results = batch_rule(self_value, self_bdim, weight_value, weight_bdim, kernel_size, bias_value, bias_bdim, stride, padding, dilation, out_value, out_bdim);
-  return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
-}
-
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_362_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, IntArrayRef, const c10::optional<Tensor> &, c10::optional<int64_t>, IntArrayRef, IntArrayRef, IntArrayRef);
-template <>
-Tensor lowerToNextLayer<batch_rule_362_t,Tensor,const Tensor &, const Tensor &, IntArrayRef, const c10::optional<Tensor> &, IntArrayRef, IntArrayRef, IntArrayRef>(
-  batch_rule_362_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_356_t,Tensor,const Tensor &, const Tensor &, IntArrayRef, const c10::optional<Tensor> &, IntArrayRef, IntArrayRef, IntArrayRef>(
+  batch_rule_356_t batch_rule,
   const Tensor & self, const Tensor & weight, IntArrayRef kernel_size, const c10::optional<Tensor> & bias, IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -7577,10 +7458,10 @@ Tensor lowerToNextLayer<batch_rule_362_t,Tensor,const Tensor &, const Tensor &, 
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_363_t)(const Tensor &, c10::optional<int64_t>, IntArrayRef, IntArrayRef, IntArrayRef, IntArrayRef, IntArrayRef);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_357_t)(const Tensor &, c10::optional<int64_t>, IntArrayRef, IntArrayRef, IntArrayRef, IntArrayRef, IntArrayRef);
 template <>
-Tensor lowerToNextLayer<batch_rule_363_t,Tensor,const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, IntArrayRef, IntArrayRef>(
-  batch_rule_363_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_357_t,Tensor,const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, IntArrayRef, IntArrayRef>(
+  batch_rule_357_t batch_rule,
   const Tensor & grad_output, IntArrayRef input_size, IntArrayRef kernel_size, IntArrayRef dilation, IntArrayRef padding, IntArrayRef stride
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -7594,10 +7475,10 @@ Tensor lowerToNextLayer<batch_rule_363_t,Tensor,const Tensor &, IntArrayRef, Int
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_364_t)(const Tensor &, c10::optional<int64_t>, IntArrayRef, IntArrayRef, IntArrayRef, IntArrayRef);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_358_t)(const Tensor &, c10::optional<int64_t>, IntArrayRef, IntArrayRef, IntArrayRef, IntArrayRef);
 template <>
-Tensor lowerToNextLayer<batch_rule_364_t,Tensor,const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, IntArrayRef>(
-  batch_rule_364_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_358_t,Tensor,const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, IntArrayRef>(
+  batch_rule_358_t batch_rule,
   const Tensor & self, IntArrayRef kernel_size, IntArrayRef dilation, IntArrayRef padding, IntArrayRef stride
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -7611,10 +7492,10 @@ Tensor lowerToNextLayer<batch_rule_364_t,Tensor,const Tensor &, IntArrayRef, Int
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_365_t)(const Tensor &, c10::optional<int64_t>, c10::optional<int64_t>, int64_t, c10::optional<c10::string_view>);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_359_t)(const Tensor &, c10::optional<int64_t>, c10::optional<int64_t>, int64_t, c10::optional<c10::string_view>);
 template <>
-Tensor lowerToNextLayer<batch_rule_365_t,Tensor,const Tensor &, c10::optional<int64_t>, int64_t, c10::optional<c10::string_view>>(
-  batch_rule_365_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_359_t,Tensor,const Tensor &, c10::optional<int64_t>, int64_t, c10::optional<c10::string_view>>(
+  batch_rule_359_t batch_rule,
   const Tensor & self, c10::optional<int64_t> n, int64_t dim, c10::optional<c10::string_view> norm
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -7628,10 +7509,10 @@ Tensor lowerToNextLayer<batch_rule_365_t,Tensor,const Tensor &, c10::optional<in
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_366_t)(const Tensor &, c10::optional<int64_t>, c10::optional<IntArrayRef>, IntArrayRef, c10::optional<c10::string_view>);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_360_t)(const Tensor &, c10::optional<int64_t>, c10::optional<IntArrayRef>, IntArrayRef, c10::optional<c10::string_view>);
 template <>
-Tensor lowerToNextLayer<batch_rule_366_t,Tensor,const Tensor &, c10::optional<IntArrayRef>, IntArrayRef, c10::optional<c10::string_view>>(
-  batch_rule_366_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_360_t,Tensor,const Tensor &, c10::optional<IntArrayRef>, IntArrayRef, c10::optional<c10::string_view>>(
+  batch_rule_360_t batch_rule,
   const Tensor & self, c10::optional<IntArrayRef> s, IntArrayRef dim, c10::optional<c10::string_view> norm
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -7645,10 +7526,10 @@ Tensor lowerToNextLayer<batch_rule_366_t,Tensor,const Tensor &, c10::optional<In
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_367_t)(const Tensor &, c10::optional<int64_t>, c10::optional<IntArrayRef>, c10::optional<IntArrayRef>, c10::optional<c10::string_view>);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_361_t)(const Tensor &, c10::optional<int64_t>, c10::optional<IntArrayRef>, c10::optional<IntArrayRef>, c10::optional<c10::string_view>);
 template <>
-Tensor lowerToNextLayer<batch_rule_367_t,Tensor,const Tensor &, c10::optional<IntArrayRef>, c10::optional<IntArrayRef>, c10::optional<c10::string_view>>(
-  batch_rule_367_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_361_t,Tensor,const Tensor &, c10::optional<IntArrayRef>, c10::optional<IntArrayRef>, c10::optional<c10::string_view>>(
+  batch_rule_361_t batch_rule,
   const Tensor & self, c10::optional<IntArrayRef> s, c10::optional<IntArrayRef> dim, c10::optional<c10::string_view> norm
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -7662,10 +7543,10 @@ Tensor lowerToNextLayer<batch_rule_367_t,Tensor,const Tensor &, c10::optional<In
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_368_t)(const Tensor &, c10::optional<int64_t>, c10::optional<IntArrayRef>);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_362_t)(const Tensor &, c10::optional<int64_t>, c10::optional<IntArrayRef>);
 template <>
-Tensor lowerToNextLayer<batch_rule_368_t,Tensor,const Tensor &, c10::optional<IntArrayRef>>(
-  batch_rule_368_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_362_t,Tensor,const Tensor &, c10::optional<IntArrayRef>>(
+  batch_rule_362_t batch_rule,
   const Tensor & values, c10::optional<IntArrayRef> addends
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -7679,10 +7560,10 @@ Tensor lowerToNextLayer<batch_rule_368_t,Tensor,const Tensor &, c10::optional<In
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_369_t)(const Tensor &, c10::optional<int64_t>);
+typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_363_t)(const Tensor &, c10::optional<int64_t>);
 template <>
-std::tuple<Tensor,Tensor,Tensor> lowerToNextLayer<batch_rule_369_t,std::tuple<Tensor,Tensor,Tensor>,const Tensor &>(
-  batch_rule_369_t batch_rule,
+std::tuple<Tensor,Tensor,Tensor> lowerToNextLayer<batch_rule_363_t,std::tuple<Tensor,Tensor,Tensor>,const Tensor &>(
+  batch_rule_363_t batch_rule,
   const Tensor & self
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -7696,10 +7577,10 @@ std::tuple<Tensor,Tensor,Tensor> lowerToNextLayer<batch_rule_369_t,std::tuple<Te
   return std::make_tuple(makeBatched(std::get<0>(results), std::get<1>(results), cur_level), makeBatched(std::get<2>(results), std::get<3>(results), cur_level), makeBatched(std::get<4>(results), std::get<5>(results), cur_level));
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_370_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_364_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>);
 template <>
-Tensor lowerToNextLayer<batch_rule_370_t,Tensor,const Tensor &, const Tensor &, const Tensor &, const Tensor &, const Tensor &>(
-  batch_rule_370_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_364_t,Tensor,const Tensor &, const Tensor &, const Tensor &, const Tensor &, const Tensor &>(
+  batch_rule_364_t batch_rule,
   const Tensor & det_grad, const Tensor & det, const Tensor & self, const Tensor & lu, const Tensor & pivs
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -7725,10 +7606,10 @@ Tensor lowerToNextLayer<batch_rule_370_t,Tensor,const Tensor &, const Tensor &, 
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_371_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, c10::optional<double>, c10::optional<c10::string_view>);
+typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_365_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, c10::optional<double>, c10::optional<c10::string_view>);
 template <>
-std::tuple<Tensor,Tensor,Tensor,Tensor> lowerToNextLayer<batch_rule_371_t,std::tuple<Tensor,Tensor,Tensor,Tensor>,const Tensor &, const Tensor &, c10::optional<double>, c10::optional<c10::string_view>>(
-  batch_rule_371_t batch_rule,
+std::tuple<Tensor,Tensor,Tensor,Tensor> lowerToNextLayer<batch_rule_365_t,std::tuple<Tensor,Tensor,Tensor,Tensor>,const Tensor &, const Tensor &, c10::optional<double>, c10::optional<c10::string_view>>(
+  batch_rule_365_t batch_rule,
   const Tensor & self, const Tensor & b, c10::optional<double> rcond, c10::optional<c10::string_view> driver
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -7745,10 +7626,10 @@ std::tuple<Tensor,Tensor,Tensor,Tensor> lowerToNextLayer<batch_rule_371_t,std::t
   return std::make_tuple(makeBatched(std::get<0>(results), std::get<1>(results), cur_level), makeBatched(std::get<2>(results), std::get<3>(results), cur_level), makeBatched(std::get<4>(results), std::get<5>(results), cur_level), makeBatched(std::get<6>(results), std::get<7>(results), cur_level));
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_372_t)(const Tensor &, c10::optional<int64_t>, c10::string_view);
+typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_366_t)(const Tensor &, c10::optional<int64_t>, c10::string_view);
 template <>
-std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_372_t,std::tuple<Tensor,Tensor>,const Tensor &, c10::string_view>(
-  batch_rule_372_t batch_rule,
+std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_366_t,std::tuple<Tensor,Tensor>,const Tensor &, c10::string_view>(
+  batch_rule_366_t batch_rule,
   const Tensor & self, c10::string_view mode
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -7762,10 +7643,10 @@ std::tuple<Tensor,Tensor> lowerToNextLayer<batch_rule_372_t,std::tuple<Tensor,Te
   return std::make_tuple(makeBatched(std::get<0>(results), std::get<1>(results), cur_level), makeBatched(std::get<2>(results), std::get<3>(results), cur_level));
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_373_t)(const Tensor &, c10::optional<int64_t>, c10::string_view);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_367_t)(const Tensor &, c10::optional<int64_t>, c10::string_view);
 template <>
-Tensor lowerToNextLayer<batch_rule_373_t,Tensor,const Tensor &, c10::string_view>(
-  batch_rule_373_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_367_t,Tensor,const Tensor &, c10::string_view>(
+  batch_rule_367_t batch_rule,
   const Tensor & self, c10::string_view p
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -7779,10 +7660,10 @@ Tensor lowerToNextLayer<batch_rule_373_t,Tensor,const Tensor &, c10::string_view
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_374_t)(const Tensor &, c10::optional<int64_t>, const c10::optional<Scalar> &, c10::optional<IntArrayRef>, bool, c10::optional<ScalarType>);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_368_t)(const Tensor &, c10::optional<int64_t>, const c10::optional<Scalar> &, c10::optional<IntArrayRef>, bool, c10::optional<ScalarType>);
 template <>
-Tensor lowerToNextLayer<batch_rule_374_t,Tensor,const Tensor &, const c10::optional<Scalar> &, c10::optional<IntArrayRef>, bool, c10::optional<ScalarType>>(
-  batch_rule_374_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_368_t,Tensor,const Tensor &, const c10::optional<Scalar> &, c10::optional<IntArrayRef>, bool, c10::optional<ScalarType>>(
+  batch_rule_368_t batch_rule,
   const Tensor & self, const c10::optional<Scalar> & ord, c10::optional<IntArrayRef> dim, bool keepdim, c10::optional<ScalarType> dtype
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -7796,10 +7677,10 @@ Tensor lowerToNextLayer<batch_rule_374_t,Tensor,const Tensor &, const c10::optio
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_375_t)(const Tensor &, c10::optional<int64_t>, c10::string_view, c10::optional<IntArrayRef>, bool, c10::optional<ScalarType>);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_369_t)(const Tensor &, c10::optional<int64_t>, c10::string_view, c10::optional<IntArrayRef>, bool, c10::optional<ScalarType>);
 template <>
-Tensor lowerToNextLayer<batch_rule_375_t,Tensor,const Tensor &, c10::string_view, c10::optional<IntArrayRef>, bool, c10::optional<ScalarType>>(
-  batch_rule_375_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_369_t,Tensor,const Tensor &, c10::string_view, c10::optional<IntArrayRef>, bool, c10::optional<ScalarType>>(
+  batch_rule_369_t batch_rule,
   const Tensor & self, c10::string_view ord, c10::optional<IntArrayRef> dim, bool keepdim, c10::optional<ScalarType> dtype
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -7813,10 +7694,10 @@ Tensor lowerToNextLayer<batch_rule_375_t,Tensor,const Tensor &, c10::string_view
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_376_t)(const Tensor &, c10::optional<int64_t>, const Scalar &, c10::optional<IntArrayRef>, bool, c10::optional<ScalarType>);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_370_t)(const Tensor &, c10::optional<int64_t>, const Scalar &, c10::optional<IntArrayRef>, bool, c10::optional<ScalarType>);
 template <>
-Tensor lowerToNextLayer<batch_rule_376_t,Tensor,const Tensor &, const Scalar &, c10::optional<IntArrayRef>, bool, c10::optional<ScalarType>>(
-  batch_rule_376_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_370_t,Tensor,const Tensor &, const Scalar &, c10::optional<IntArrayRef>, bool, c10::optional<ScalarType>>(
+  batch_rule_370_t batch_rule,
   const Tensor & self, const Scalar & ord, c10::optional<IntArrayRef> dim, bool keepdim, c10::optional<ScalarType> dtype
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -7830,10 +7711,10 @@ Tensor lowerToNextLayer<batch_rule_376_t,Tensor,const Tensor &, const Scalar &, 
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_377_t)(const Tensor &, c10::optional<int64_t>, const Scalar &, IntArrayRef, bool, c10::optional<ScalarType>);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_371_t)(const Tensor &, c10::optional<int64_t>, const Scalar &, IntArrayRef, bool, c10::optional<ScalarType>);
 template <>
-Tensor lowerToNextLayer<batch_rule_377_t,Tensor,const Tensor &, const Scalar &, IntArrayRef, bool, c10::optional<ScalarType>>(
-  batch_rule_377_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_371_t,Tensor,const Tensor &, const Scalar &, IntArrayRef, bool, c10::optional<ScalarType>>(
+  batch_rule_371_t batch_rule,
   const Tensor & self, const Scalar & ord, IntArrayRef dim, bool keepdim, c10::optional<ScalarType> dtype
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -7847,10 +7728,10 @@ Tensor lowerToNextLayer<batch_rule_377_t,Tensor,const Tensor &, const Scalar &, 
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_378_t)(const Tensor &, c10::optional<int64_t>, c10::string_view, IntArrayRef, bool, c10::optional<ScalarType>);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_372_t)(const Tensor &, c10::optional<int64_t>, c10::string_view, IntArrayRef, bool, c10::optional<ScalarType>);
 template <>
-Tensor lowerToNextLayer<batch_rule_378_t,Tensor,const Tensor &, c10::string_view, IntArrayRef, bool, c10::optional<ScalarType>>(
-  batch_rule_378_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_372_t,Tensor,const Tensor &, c10::string_view, IntArrayRef, bool, c10::optional<ScalarType>>(
+  batch_rule_372_t batch_rule,
   const Tensor & self, c10::string_view ord, IntArrayRef dim, bool keepdim, c10::optional<ScalarType> dtype
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -7864,10 +7745,10 @@ Tensor lowerToNextLayer<batch_rule_378_t,Tensor,const Tensor &, c10::string_view
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_379_t)(const Tensor &, c10::optional<int64_t>, bool);
+typedef std::tuple<Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>,Tensor,c10::optional<int64_t>> (*batch_rule_373_t)(const Tensor &, c10::optional<int64_t>, bool);
 template <>
-std::tuple<Tensor,Tensor,Tensor> lowerToNextLayer<batch_rule_379_t,std::tuple<Tensor,Tensor,Tensor>,const Tensor &, bool>(
-  batch_rule_379_t batch_rule,
+std::tuple<Tensor,Tensor,Tensor> lowerToNextLayer<batch_rule_373_t,std::tuple<Tensor,Tensor,Tensor>,const Tensor &, bool>(
+  batch_rule_373_t batch_rule,
   const Tensor & self, bool full_matrices
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -7881,10 +7762,10 @@ std::tuple<Tensor,Tensor,Tensor> lowerToNextLayer<batch_rule_379_t,std::tuple<Te
   return std::make_tuple(makeBatched(std::get<0>(results), std::get<1>(results), cur_level), makeBatched(std::get<2>(results), std::get<3>(results), cur_level), makeBatched(std::get<4>(results), std::get<5>(results), cur_level));
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_380_t)(const Tensor &, c10::optional<int64_t>, const c10::optional<Scalar> &);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_374_t)(const Tensor &, c10::optional<int64_t>, const c10::optional<Scalar> &);
 template <>
-Tensor lowerToNextLayer<batch_rule_380_t,Tensor,const Tensor &, const c10::optional<Scalar> &>(
-  batch_rule_380_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_374_t,Tensor,const Tensor &, const c10::optional<Scalar> &>(
+  batch_rule_374_t batch_rule,
   const Tensor & self, const c10::optional<Scalar> & p
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -7898,10 +7779,10 @@ Tensor lowerToNextLayer<batch_rule_380_t,Tensor,const Tensor &, const c10::optio
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_381_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, c10::optional<IntArrayRef>);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_375_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, c10::optional<IntArrayRef>);
 template <>
-Tensor lowerToNextLayer<batch_rule_381_t,Tensor,const Tensor &, const Tensor &, c10::optional<IntArrayRef>>(
-  batch_rule_381_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_375_t,Tensor,const Tensor &, const Tensor &, c10::optional<IntArrayRef>>(
+  batch_rule_375_t batch_rule,
   const Tensor & self, const Tensor & other, c10::optional<IntArrayRef> dims
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -7918,10 +7799,10 @@ Tensor lowerToNextLayer<batch_rule_381_t,Tensor,const Tensor &, const Tensor &, 
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_382_t)(const Tensor &, c10::optional<int64_t>, c10::optional<double>, bool);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_376_t)(const Tensor &, c10::optional<int64_t>, c10::optional<double>, bool);
 template <>
-Tensor lowerToNextLayer<batch_rule_382_t,Tensor,const Tensor &, c10::optional<double>, bool>(
-  batch_rule_382_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_376_t,Tensor,const Tensor &, c10::optional<double>, bool>(
+  batch_rule_376_t batch_rule,
   const Tensor & self, c10::optional<double> tol, bool hermitian
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -7935,10 +7816,10 @@ Tensor lowerToNextLayer<batch_rule_382_t,Tensor,const Tensor &, c10::optional<do
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_383_t)(const Tensor &, c10::optional<int64_t>, c10::optional<ArrayRef<double>>);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_377_t)(const Tensor &, c10::optional<int64_t>, c10::optional<ArrayRef<double>>);
 template <>
-Tensor lowerToNextLayer<batch_rule_383_t,Tensor,const Tensor &, c10::optional<ArrayRef<double>>>(
-  batch_rule_383_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_377_t,Tensor,const Tensor &, c10::optional<ArrayRef<double>>>(
+  batch_rule_377_t batch_rule,
   const Tensor & values, c10::optional<ArrayRef<double>> addends
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -7952,10 +7833,10 @@ Tensor lowerToNextLayer<batch_rule_383_t,Tensor,const Tensor &, c10::optional<Ar
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_384_t)(const Tensor &, c10::optional<int64_t>, c10::string_view, c10::string_view);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_378_t)(const Tensor &, c10::optional<int64_t>, c10::string_view, c10::string_view);
 template <>
-Tensor lowerToNextLayer<batch_rule_384_t,Tensor,const Tensor &, c10::string_view, c10::string_view>(
-  batch_rule_384_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_378_t,Tensor,const Tensor &, c10::string_view, c10::string_view>(
+  batch_rule_378_t batch_rule,
   const Tensor & dummy, c10::string_view a, c10::string_view b
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -7969,10 +7850,10 @@ Tensor lowerToNextLayer<batch_rule_384_t,Tensor,const Tensor &, c10::string_view
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_385_t)(const Tensor &, c10::optional<int64_t>, int64_t, c10::string_view);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_379_t)(const Tensor &, c10::optional<int64_t>, int64_t, c10::string_view);
 template <>
-Tensor lowerToNextLayer<batch_rule_385_t,Tensor,const Tensor &, int64_t, c10::string_view>(
-  batch_rule_385_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_379_t,Tensor,const Tensor &, int64_t, c10::string_view>(
+  batch_rule_379_t batch_rule,
   const Tensor & dummy, int64_t a, c10::string_view b
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -7986,10 +7867,10 @@ Tensor lowerToNextLayer<batch_rule_385_t,Tensor,const Tensor &, int64_t, c10::st
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_386_t)(const Tensor &, c10::optional<int64_t>, c10::string_view, const c10::optional<Tensor> &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, int64_t, bool, const c10::optional<Scalar> &);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_380_t)(const Tensor &, c10::optional<int64_t>, c10::string_view, const c10::optional<Tensor> &, c10::optional<int64_t>, const c10::optional<Tensor> &, c10::optional<int64_t>, int64_t, bool, const c10::optional<Scalar> &);
 template <>
-Tensor lowerToNextLayer<batch_rule_386_t,Tensor,const Tensor &, c10::string_view, const c10::optional<Tensor> &, const c10::optional<Tensor> &, int64_t, bool, const c10::optional<Scalar> &>(
-  batch_rule_386_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_380_t,Tensor,const Tensor &, c10::string_view, const c10::optional<Tensor> &, const c10::optional<Tensor> &, int64_t, bool, const c10::optional<Scalar> &>(
+  batch_rule_380_t batch_rule,
   const Tensor & data, c10::string_view reduce, const c10::optional<Tensor> & lengths, const c10::optional<Tensor> & indices, int64_t axis, bool unsafe, const c10::optional<Scalar> & initial
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -8013,10 +7894,10 @@ Tensor lowerToNextLayer<batch_rule_386_t,Tensor,const Tensor &, c10::string_view
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_387_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, c10::string_view, const c10::optional<Tensor> &, c10::optional<int64_t>, int64_t);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_381_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, c10::string_view, const c10::optional<Tensor> &, c10::optional<int64_t>, int64_t);
 template <>
-Tensor lowerToNextLayer<batch_rule_387_t,Tensor,const Tensor &, const Tensor &, const Tensor &, c10::string_view, const c10::optional<Tensor> &, int64_t>(
-  batch_rule_387_t batch_rule,
+Tensor lowerToNextLayer<batch_rule_381_t,Tensor,const Tensor &, const Tensor &, const Tensor &, c10::string_view, const c10::optional<Tensor> &, int64_t>(
+  batch_rule_381_t batch_rule,
   const Tensor & grad, const Tensor & output, const Tensor & data, c10::string_view reduce, const c10::optional<Tensor> & lengths, int64_t axis
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
