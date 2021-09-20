@@ -47,7 +47,7 @@ class SymbolicSizePrinter : private kir::IrVisitor {
 
   void visit(const kir::UnaryOp* unary_op) final {
     os_ << unary_op->operation() << "(";
-    unary_op->accept(this);
+    unary_op->in()->accept(this);
     os_ << ")";
   }
 
