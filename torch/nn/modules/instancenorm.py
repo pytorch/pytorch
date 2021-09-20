@@ -175,16 +175,12 @@ class LazyInstanceNorm1d(_LazyNormBase, _InstanceNorm):
 
     cls_to_become = InstanceNorm1d  # type: ignore[assignment]
 
+    def _get_no_batch_dim(self):
+        return 2
+
     def _check_input_dim(self, input):
-        if input.dim() == 2:
-            raise ValueError(
-                'InstanceNorm1d returns 0-filled tensor to 2D tensor.'
-                'This is because InstanceNorm1d reshapes inputs to'
-                '(1, N * C, ...) from (N, C,...) and this makes'
-                'variances 0.'
-            )
-        if input.dim() != 3:
-            raise ValueError('expected 3D input (got {}D input)'
+        if input.dim() not in (2, 3):
+            raise ValueError('expected 2D or 3D input (got {}D input)'
                              .format(input.dim()))
 
 
@@ -291,9 +287,13 @@ class LazyInstanceNorm2d(_LazyNormBase, _InstanceNorm):
 
     cls_to_become = InstanceNorm2d  # type: ignore[assignment]
 
+    def _get_no_batch_dim(self):
+        return 3
+
     def _check_input_dim(self, input):
-        if input.dim() != 4:
-            raise ValueError("expected 4D input (got {}D input)".format(input.dim()))
+        if input.dim() not in (3, 4):
+            raise ValueError('expected 3D or 4D input (got {}D input)'
+                             .format(input.dim()))
 
 
 class InstanceNorm3d(_InstanceNorm):
@@ -369,7 +369,7 @@ class InstanceNorm3d(_InstanceNorm):
 
     def _check_input_dim(self, input):
         if input.dim() not in (4, 5):
-            raise ValueError('expected 5D input (got {}D input)'
+            raise ValueError('expected 4D or 5D input (got {}D input)'
                              .format(input.dim()))
 
 
@@ -399,6 +399,10 @@ class LazyInstanceNorm3d(_LazyNormBase, _InstanceNorm):
 
     cls_to_become = InstanceNorm3d  # type: ignore[assignment]
 
+    def _get_no_batch_dim(self):
+        return 4
+
     def _check_input_dim(self, input):
-        if input.dim() != 5:
-            raise ValueError("expected 5D input (got {}D input)".format(input.dim()))
+        if input.dim() not in (4, 5):
+            raise ValueError('expected 4D or 5D input (got {}D input)'
+                             .format(input.dim()))
