@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 import re
-from typing import Optional, Sequence, List, Tuple, Match
+from typing import Optional, Sequence, Set, List, Tuple, Match
 
 from tools.codegen.api import cpp
 from tools.codegen.api.types import Binding, NamedCType
@@ -43,6 +43,9 @@ class Derivative:
 
     # Saved outputs that are referenced by the formula.
     saved_outputs: Tuple[SavedAttribute, ...]
+
+    # Gradients that are referenced by name in the formula.
+    named_gradients: Set[str]
 
 # Represents a forward formula that calculates forward derivatives
 # for one tensor.
@@ -114,6 +117,14 @@ class DifferentiabilityInfo:
 
     # The union of 'saved_outputs' of all 'derivatives'.
     all_saved_outputs: Sequence[SavedAttribute]
+
+    # All named gradients that are available for use, in the same
+    # order as in the grads vector.
+    available_named_gradients: Sequence[str]
+
+    # The named gradients that are used in any of the derivatives.
+    # Invariant: all(name in available_named_gradients for name in used_named_gradients)
+    used_named_gradients: Set[str]
 
     # The function's input arguments for which it calculates derivatives.
     # It's the union of 'var_names' of all 'derivatives', sorted by the

@@ -7,7 +7,6 @@ CONFIG_TREE_DATA = [
             ("5.4", [  # All this subtree rebases to master and then build
                 ("3.6", [
                     ("important", [X(True)]),
-                    ("parallel_tbb", [X(True)]),
                 ]),
             ]),
             # TODO: bring back libtorch test
@@ -28,7 +27,8 @@ CONFIG_TREE_DATA = [
         ("cuda", [
             ("10.2", [
                 ("3.6", [
-                    ("shard_test", [X(True)]),
+                    # Build are needed for slow_gradcheck
+                    ('build_only', [X(True)]),
                     ("slow_gradcheck", [
                         # If you update this slow gradcheck, you should
                         # also update docker_definitions.py to make sure
