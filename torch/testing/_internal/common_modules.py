@@ -50,6 +50,7 @@ class modules(_TestParametrizer):
     """ PROTOTYPE: Decorator for specifying a list of modules over which to run a test. """
 
     def __init__(self, module_info_list, allowed_dtypes=None):
+        super().__init__(handles_dtypes=True)
         self.module_info_list = module_info_list
         self.allowed_dtypes = set(allowed_dtypes) if allowed_dtypes is not None else None
 
@@ -62,10 +63,9 @@ class modules(_TestParametrizer):
 
             for dtype in dtypes:
                 # Construct the test name.
-                test_name = '{}_{}_{}{}'.format(test.__name__,
-                                                module_info.name.replace('.', '_'),
-                                                device_cls.device_type,
-                                                _dtype_test_suffix(dtype))
+                test_name = '{}_{}{}'.format(module_info.name.replace('.', '_'),
+                                             device_cls.device_type,
+                                             _dtype_test_suffix(dtype))
 
                 # Construct parameter kwargs to pass to the test.
                 param_kwargs = {'module_info': module_info}
@@ -162,6 +162,10 @@ class ModuleInfo(object):
     @property
     def name(self):
         return formatted_module_name(self.module_cls)
+
+    @property
+    def formatted_name(self):
+        return self.name.replace('.', '_')
 
 
 def module_inputs_torch_nn_Linear(module_info, device, dtype, requires_grad, **kwargs):
