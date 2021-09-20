@@ -1,4 +1,5 @@
 from typing import List, Any
+import pickle
 import torch
 
 
@@ -40,7 +41,7 @@ class TestTRTModule(torch.nn.Module):
 
         return tuple(outputs)
 
-def make_tensorrt_module():
+def make_trt_module():
     import tensorrt as trt
     logger = trt.Logger(trt.Logger.WARNING)
     builder = trt.Builder(logger)
@@ -57,6 +58,6 @@ def make_tensorrt_module():
     builder.max_batch_size = 1024
     builder_config = builder.create_builder_config()
     builder_config.max_workspace_size = 1 << 25
-    engine = builder.build_engine(network, builder_config)
-    print(type(engine))
-    return TestTRTModule(engine, ["x"], ["output"])
+    # Test engine can be serialized and loaded correctly.
+    serialized_engine = pickle.dumps(builder.build_engine(network, builder_config))
+    return TestTRTModule(pickle.loads(serialized_engine), ["x"], ["output"])
