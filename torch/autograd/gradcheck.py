@@ -1290,8 +1290,8 @@ def _gradcheck_helper(func, inputs, eps, atol, rtol, check_sparse_nnz, nondet_to
 def gradgradcheck(
     func: Callable[..., _TensorOrTensors],  # See Note [VarArg of Tensors]
     inputs: _TensorOrTensors,
-    *,
     grad_outputs: Optional[_TensorOrTensors] = None,
+    *,
     eps: float = 1e-6,
     atol: float = 1e-5,
     rtol: float = 1e-3,
