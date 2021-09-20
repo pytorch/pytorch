@@ -61,13 +61,7 @@ class TORCH_CUDA_CU_API FusionKernelRuntime {
   //! Unified interface to run the managed kernels with given input
   std::vector<at::Tensor> runWithInput(
       const at::ArrayRef<IValue>& inputs,
-      size_t input_id) {
-    if (is_segmented_) {
-      return runMultiKernelWithInput(inputs, input_id);
-    } else {
-      return runKernelWithInput(inputs, input_id);
-    }
-  }
+      size_t input_id);
 
   //! Turn On/Off profiling
   void profile(bool to_profile = true) {
@@ -151,6 +145,8 @@ class TORCH_CUDA_CU_API FusionKernelRuntime {
   //! Access the list of schedulers maintained in this runtime instance
   const std::vector<SchedulerEntryPtr>& schedulers();
 
+  void prepareRuntimeOrder();
+
  private:
   //! Entries indexed by groupID:
   //! Executors holding compiled kernels
@@ -173,6 +169,22 @@ class TORCH_CUDA_CU_API FusionKernelRuntime {
   //! Graph traversal datacache for the single kernel fusion
   //!  TODO: unify the segmented and un-segmented code-path
   std::unique_ptr<HeuristicSummary> single_kernel_fusion_data_cache_ = nullptr;
+
+  //! Pre-allocated runtime workspace to speed up kernel launch preparation.
+  struct RuntimeWorkSpace {
+    //! Temporary space to save intermediate tensors for segmented fusion
+    std::unordered_map<Val*, IValue> tensor_map;
+
+    //! Pre-determined order to run the segmented groups
+    std::vector<SegmentedGroup*> group_run_order;
+
+    //! Pre-determined order to bind tensor input meta data
+    std::vector<Val*> group_extent_binding_order;
+
+    //! Pre-allocated workspace to hold group inputs and outputs
+    std::vector<IValue> group_runtime_inputs;
+    std::vector<at::Tensor> group_runtime_outputs;
+  } runtime_workspace_;
 
   //! Utility to speed up integer evaluation at runtime
   std::unique_ptr<FusionPrecomputedIntegers> precomputed_integers_;

@@ -30,7 +30,6 @@ c10::optional<Int::ScalarType> ExpressionEvaluator::evaluate(Val* value) {
   if (evaluator_precomputed_integers_ != nullptr) {
     return evaluator_precomputed_integers_->getMaybeValueFor(value);
   } else {
-    FUSER_PERF_SCOPE("ExpressionEvaluator::evaluate");
     auto maybe_concrete_value = getValue(value);
     if (!maybe_concrete_value.has_value()) {
       if (value->definition() != nullptr) {

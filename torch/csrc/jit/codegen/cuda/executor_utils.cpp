@@ -964,6 +964,7 @@ ExecutorCompileTimeEntry<EntryClass>::ExecutorCompileTimeEntry(
 // Template instantiation
 template class ExecutorCompileTimeEntry<ParallelBindingIterDomains>;
 template class ExecutorCompileTimeEntry<ParallelIterExtentMap>;
+template class ExecutorCompileTimeEntry<SimplifiedParallelIterExtentMap>;
 template class ExecutorCompileTimeEntry<WarpPaddedParallelExtents>;
 template class ExecutorCompileTimeEntry<VectorizedTensorValidation>;
 template class ExecutorCompileTimeEntry<InputAliasIndices>;
@@ -984,20 +985,55 @@ std::vector<IterDomain*> getParallelBindingsIterDomains(
   return parallel_ids;
 }
 
+void insertParallelExtent(
+    GpuLower& lower,
+    IterDomain* binding_id,
+    const std::unique_ptr<ParallelExtentMap>& parallel_iter_extents_ptr) {
+  auto kir_extent = lower.lowerValue(binding_id->extent());
+  const auto it =
+      parallel_iter_extents_ptr->find(binding_id->getParallelType());
+  if (it != parallel_iter_extents_ptr->end()) {
+    it->second.push_back(kir_extent);
+  } else {
+    parallel_iter_extents_ptr->operator[](binding_id->getParallelType()) = {
+        kir_extent};
+  }
+}
+
 std::unique_ptr<ParallelExtentMap> getParallelIterExtents(
     GpuLower& lower,
     std::vector<IterDomain*>& parallel_binding_ids) {
   auto parallel_iter_extents_ptr = std::make_unique<ParallelExtentMap>();
   for (auto id : parallel_binding_ids) {
-    // TODO(kir): we should rewrite this logic based on the Kernel object
-    auto kir_extent = lower.lowerValue(id->extent());
-    const auto it = parallel_iter_extents_ptr->find(id->getParallelType());
-    if (it != parallel_iter_extents_ptr->end()) {
-      it->second.push_back(kir_extent);
-    } else {
-      parallel_iter_extents_ptr->operator[](id->getParallelType()) = {
-          kir_extent};
+    insertParallelExtent(lower, id, parallel_iter_extents_ptr);
+  }
+
+  return parallel_iter_extents_ptr;
+}
+
+std::unique_ptr<ParallelExtentMap> getSimplifiedParallelIterExtents(
+    GpuLower& lower,
+    std::vector<IterDomain*>& parallel_binding_ids) {
+  auto parallel_iter_extents_ptr = std::make_unique<ParallelExtentMap>();
+  auto& parallel_map = lower.caParallelMap();
+  std::vector<IterDomain*> mapped;
+  bool is_tidx_warp_padded = lower.getWarpPaddedParallelInfo().is_tidx_padded;
+
+  for (auto id : parallel_binding_ids) {
+    if (std::any_of(
+            mapped.begin(),
+            mapped.end(),
+            [id, &parallel_map](IterDomain* mapped_id) {
+              return parallel_map.areMapped(mapped_id, id);
+            })) {
+      if (id->getParallelType() != ParallelType::TIDx || !is_tidx_warp_padded) {
+        continue;
+      }
     }
+
+    insertParallelExtent(
+        lower, parallel_map.getConcreteMappedID(id), parallel_iter_extents_ptr);
+    mapped.push_back(id);
   }
 
   return parallel_iter_extents_ptr;

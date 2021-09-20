@@ -80,6 +80,7 @@ namespace caching {
 enum class CompileTimeEntryType {
   PARALLEL_BINDING_ITERDOMAINS,
   PARALLEL_ITER_EXTENT_MAP,
+  SIMPLIFIED_PARALLEL_ITER_EXTENT_MAP,
   WARP_PADDED_PARALLEL_EXTENTS,
   VECTORIZED_TENSOR_VALIDATION,
   INPUT_ALIAS_INDICES,
@@ -112,6 +113,27 @@ class ParallelIterExtentMap {
       std::unordered_map<ParallelType, std::vector<const kir::Val*>, TypeHash>;
   static const CompileTimeEntryType EntryType =
       CompileTimeEntryType::PARALLEL_ITER_EXTENT_MAP;
+};
+
+//! Compile-time info to be cached in each FusionExecutor:
+//!  SimplifiedParallelIterExtentMap
+//!    This entry type is a simplified version of ParallelIterExtentMap.
+//!
+//!    For launch parameter binding we only need the most concrete iterdomain
+//!      in each disjoint set stored in CaParallelMap. This entry stores the
+//!      remaining list of extents for binding after this simplification.
+//!
+//!    We still need ParallelIterExtentMap since we want to bind the concrete
+//!      values to the extents of all parallelized iterdomains. We would be
+//!      able to save these bindings if the integer machine has a notion of
+//!      equality and could be configured compile time. But that'd be a longer
+//!      term target.
+class SimplifiedParallelIterExtentMap {
+ public:
+  using DataType =
+      std::unordered_map<ParallelType, std::vector<const kir::Val*>, TypeHash>;
+  static const CompileTimeEntryType EntryType =
+      CompileTimeEntryType::SIMPLIFIED_PARALLEL_ITER_EXTENT_MAP;
 };
 
 //!  WarpPaddedExtentsInfo:
@@ -266,6 +288,12 @@ using ParallelExtentMap =
 //! Returns the extents of all parallel binding iterdomains corresponding
 //!  to each parallel type.
 std::unique_ptr<ParallelExtentMap> getParallelIterExtents(
+    GpuLower& lower,
+    std::vector<IterDomain*>& parallel_binding_ids);
+
+//! Returns the simplified set of extents necessary for launch parameter
+//!  binding.
+std::unique_ptr<ParallelExtentMap> getSimplifiedParallelIterExtents(
     GpuLower& lower,
     std::vector<IterDomain*>& parallel_binding_ids);
 

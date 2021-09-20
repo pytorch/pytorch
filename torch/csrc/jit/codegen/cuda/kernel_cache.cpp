@@ -433,6 +433,10 @@ FusionKernelRuntime::FusionKernelRuntime(
   }
 
   is_segmented_ = segmented;
+
+  if (is_segmented_) {
+    prepareRuntimeOrder();
+  }
 }
 
 std::vector<at::Tensor> FusionKernelRuntime::runKernelWithInput(
@@ -483,7 +487,6 @@ std::vector<at::Tensor> FusionKernelRuntime::runKernelWithInput(
     executors_[group_id].compileFusion(
         fusion_to_run.get(), options, inputs, launch_params);
   } else {
-    FUSER_PERF_SCOPE("FusionKernelRuntime::runKernelWithInput::FetchFromCache");
     // Load launch params for reduction and normalization kernels
     if (scheduler_entry->hasReductionParam()) {
       launch_params = scheduler_entry->reductionParams().lparams;
@@ -493,7 +496,6 @@ std::vector<at::Tensor> FusionKernelRuntime::runKernelWithInput(
   }
 
   if (profiling_) {
-    FUSER_PERF_SCOPE("FusionKernelRuntime::runKernelWithInput::profiling_");
     most_recent_executor_log_.fusion_executor = &executors_[group_id];
     most_recent_executor_log_.launch_constraints = launch_params;
     if (scheduler_entry->hasReductionParam()) {
@@ -508,40 +510,21 @@ std::vector<at::Tensor> FusionKernelRuntime::runKernelWithInput(
   return executors_[group_id].runFusion(inputs, launch_params, input_id);
 }
 
-std::vector<at::Tensor> FusionKernelRuntime::runMultiKernelWithInput(
-    const at::ArrayRef<IValue>& inputs,
-    size_t input_id) {
-  FUSER_PERF_SCOPE("FusionKernelRuntime::runMultiKernelWithInput");
+void FusionKernelRuntime::prepareRuntimeOrder() {
+  // Setup group run order:
+  std::unordered_set<Val*> available_input;
 
-  TORCH_INTERNAL_ASSERT(
-      inputs.size() == segmented_fusion_->inputs().size(),
-      "Inputs were not set up correctly, recieved ",
-      inputs.size(),
-      " inputs but expecting ",
-      segmented_fusion_->inputs().size());
+  // setup the order tensor dimensions are bound
+  for (size_t i : c10::irange(segmented_fusion_->inputs().size())) {
+    auto input_val = segmented_fusion_->inputs()[i];
+    available_input.insert(input_val);
 
-  // Map to keep track of currently available tensors
-  std::unordered_map<Val*, IValue> tensor_map;
-
-  // Bind input in the tensor_map
-  for (size_t i = 0; i < inputs.size(); i++) {
-    tensor_map.emplace(segmented_fusion_->inputs()[i], inputs[i]);
-
-    // Bind tensorview inputs values in case some segmented group
-    //  needs it down the road.
-    // TODO: we probably have done this already up to this point
-    //      should consider caching the expression evaluators, both
-    //      more convenient and safer than replication
-    if (inputs[i].isTensor()) {
-      auto aten_tensor = inputs[i].toTensor();
-      TORCH_INTERNAL_ASSERT(
-          segmented_fusion_->inputs()[i]->getValType() == ValType::TensorView);
-      auto input_tv = segmented_fusion_->inputs()[i]->as<TensorView>();
+    if (auto input_tv = dynamic_cast<TensorView*>(input_val)) {
       auto root_dom = TensorDomain::noReductions(input_tv->getRootDomain());
-      for (size_t dim = 0; dim < root_dom.size(); dim++) {
+      for (size_t dim : c10::irange(root_dom.size())) {
         const auto extent = root_dom[dim]->extent();
-        const auto value = aten_tensor.sizes()[dim];
-        tensor_map.emplace(extent, value);
+        available_input.insert(extent);
+        runtime_workspace_.group_extent_binding_order.push_back(extent);
       }
     }
   }
@@ -554,38 +537,24 @@ std::vector<at::Tensor> FusionKernelRuntime::runMultiKernelWithInput(
     bool one_ran = false;
 
     // Find the first segment with all inputs available to run
-    for (size_t group_i = 0; group_i < segmented_fusion_->groups().size();
-         group_i++) {
+    for (size_t group_i : c10::irange(segmented_fusion_->groups().size())) {
       auto& group = segmented_fusion_->groups()[group_i];
       if (group_ran[group_i]) {
         continue;
       }
       const auto& group_inputs = group->inputs();
       bool ready_to_run = std::all_of(
-          group_inputs.begin(), group_inputs.end(), [&tensor_map](Val* val) {
-            return tensor_map.find(val) != tensor_map.end();
-          });
+          group_inputs.begin(),
+          group_inputs.end(),
+          [&available_input](Val* val) { return available_input.count(val); });
 
       if (ready_to_run) {
-        std::vector<IValue> group_runtime_inputs;
-        group_runtime_inputs.reserve(group_inputs.size());
-
-        // Prepare input vector
-        for (auto input : group_inputs) {
-          group_runtime_inputs.push_back(tensor_map.at(input));
-        }
-
-        // Run graph segment
-        auto group_runtime_outputs =
-            runKernelWithInput(group_runtime_inputs, input_id, group);
-
+        runtime_workspace_.group_run_order.push_back(group);
         const auto& group_outputs = group->outputs();
 
         // Insert graph segment output to tensor map
-        for (size_t group_out_i = 0; group_out_i < group_outputs.size();
-             group_out_i++) {
-          tensor_map.emplace(
-              group_outputs[group_out_i], group_runtime_outputs[group_out_i]);
+        for (size_t group_out_i : c10::irange(group_outputs.size())) {
+          available_input.insert(group_outputs[group_out_i]);
         }
         group_ran[group_i] = true;
         one_ran = true;
@@ -595,37 +564,100 @@ std::vector<at::Tensor> FusionKernelRuntime::runMultiKernelWithInput(
         one_ran,
         "Couldn't run all groups, something must have gone wrong in segmentation.");
   }
+}
 
-  // Produce final global output
-  std::vector<IValue> fusion_outputs;
-  for (auto output : segmented_fusion_->outputs()) {
-    const auto iter = tensor_map.find(output);
-    if (iter != tensor_map.end()) {
-      fusion_outputs.push_back(iter->second);
-    } else {
-      // This is the check for an empty tensor;
-      TORCH_INTERNAL_ASSERT(
-          output->as<TensorView>()->nDims() == 0 &&
-              output->getDataType().has_value() &&
-              output->getDataType().value() == DataType::Float,
-          "Non empty tensor cannot be found at tensor_map in ",
-          __FUNCTION__);
-      fusion_outputs.emplace_back(at::Tensor());
+std::vector<at::Tensor> FusionKernelRuntime::runWithInput(
+    const at::ArrayRef<IValue>& inputs,
+    size_t input_id) {
+  if (is_segmented_) {
+    FUSER_PERF_SCOPE("FusionKernelRuntime::runMultiKernelWithInput");
+
+    TORCH_INTERNAL_ASSERT(
+        inputs.size() == segmented_fusion_->inputs().size(),
+        "Inputs were not set up correctly, recieved ",
+        inputs.size(),
+        " inputs but expecting ",
+        segmented_fusion_->inputs().size());
+
+    int extent_index_ = 0;
+    // Bind input in the tensor_map
+    for (size_t i = 0; i < inputs.size(); i++) {
+      runtime_workspace_.tensor_map.emplace(
+          segmented_fusion_->inputs()[i], inputs[i]);
+
+      // Bind tensorview inputs values in case some segmented group
+      //  needs it down the road.
+      // TODO: we probably have done this already up to this point
+      //      should consider caching the expression evaluators, both
+      //      more convenient and safer than replication
+      if (inputs[i].isTensor()) {
+        auto aten_tensor = inputs[i].toTensor();
+        for (auto dim_size : aten_tensor.sizes()) {
+          runtime_workspace_.tensor_map.emplace(
+              runtime_workspace_.group_extent_binding_order[extent_index_++],
+              dim_size);
+        }
+      }
     }
-  }
 
-  std::vector<at::Tensor> fusion_output_tensors;
-  std::transform(
-      fusion_outputs.begin(),
-      fusion_outputs.end(),
-      std::back_inserter(fusion_output_tensors),
-      [](IValue ival) {
+    for (auto group_to_run : runtime_workspace_.group_run_order) {
+      // Prepare input vector
+      for (auto input : group_to_run->inputs()) {
+        runtime_workspace_.group_runtime_inputs.push_back(
+            runtime_workspace_.tensor_map.at(input));
+      }
+      // Run graph segment
+      runtime_workspace_.group_runtime_outputs = runKernelWithInput(
+          runtime_workspace_.group_runtime_inputs, input_id, group_to_run);
+
+      const auto& group_outputs = group_to_run->outputs();
+
+      // Insert graph segment output to tensor map
+      for (unsigned int group_out_i = 0; group_out_i < group_outputs.size();
+           group_out_i++) {
+        runtime_workspace_.tensor_map.emplace(
+            group_outputs[group_out_i],
+            runtime_workspace_.group_runtime_outputs[group_out_i]);
+      }
+      runtime_workspace_.group_runtime_inputs.clear();
+      runtime_workspace_.group_runtime_outputs.clear();
+    }
+
+    // Produce final global output
+    std::vector<IValue> fusion_outputs;
+    for (auto output : segmented_fusion_->outputs()) {
+      const auto iter = runtime_workspace_.tensor_map.find(output);
+      if (iter != runtime_workspace_.tensor_map.end()) {
+        fusion_outputs.push_back(iter->second);
+      } else {
+        // This is the check for an empty tensor;
         TORCH_INTERNAL_ASSERT(
-            ival.isTensor(), "Cannot output non-tensor objects from a fusion.");
-        return ival.toTensor();
-      });
+            output->as<TensorView>()->nDims() == 0 &&
+                output->getDataType().has_value() &&
+                output->getDataType().value() == DataType::Float,
+            "Non empty tensor cannot be found at tensor_map in ",
+            __FUNCTION__);
+        fusion_outputs.emplace_back(at::Tensor());
+      }
+    }
 
-  return fusion_output_tensors;
+    std::vector<at::Tensor> fusion_output_tensors;
+    std::transform(
+        fusion_outputs.begin(),
+        fusion_outputs.end(),
+        std::back_inserter(fusion_output_tensors),
+        [](IValue ival) {
+          TORCH_INTERNAL_ASSERT(
+              ival.isTensor(),
+              "Cannot output non-tensor objects from a fusion.");
+          return ival.toTensor();
+        });
+
+    runtime_workspace_.tensor_map.clear();
+    return fusion_output_tensors;
+  } else {
+    return runKernelWithInput(inputs, input_id);
+  }
 }
 
 const std::vector<FusionKernelRuntime::SchedulerEntryPtr>& FusionKernelRuntime::

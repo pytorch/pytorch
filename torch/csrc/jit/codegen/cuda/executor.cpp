@@ -358,6 +358,16 @@ LaunchParams FusionExecutor::computeLaunchParams(
           });
   auto& parallel_iter_extents = parallel_iter_extent_entry.get();
 
+  auto simplified_parallel_iter_extent_entry =
+      executor_utils::caching::ExecutorCompileTimeEntry<
+          executor_utils::caching::SimplifiedParallelIterExtentMap>(
+          data_cache, [&parallel_binding_ids, &lower]() {
+            return executor_utils::getSimplifiedParallelIterExtents(
+                lower, parallel_binding_ids);
+          });
+  auto& simplified_parallel_iter_extents =
+      simplified_parallel_iter_extent_entry.get();
+
   auto warp_padded_parallel_entry =
       executor_utils::caching::ExecutorCompileTimeEntry<
           executor_utils::caching::WarpPaddedParallelExtents>(
@@ -414,7 +424,7 @@ LaunchParams FusionExecutor::computeLaunchParams(
   }
 
   // Run through the rest of the parallel IterDomains and infer their size
-  for (auto& entry : parallel_iter_extents) {
+  for (auto& entry : simplified_parallel_iter_extents) {
     FUSER_PERF_SCOPE("FusionExecutor::ParallelBindingResolution");
     auto p_type = entry.first;
     auto parallel_extents = entry.second;
