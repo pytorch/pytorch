@@ -2,3 +2,4 @@
 .circleci/config.yml linguist-generated=true
 .github/workflows/generated-*.yml linguist-generated=true
 .github/generated-* linguist-generated=true
+test/gtest/generated/* linguist-generated=true

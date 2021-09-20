@@ -2811,6 +2811,27 @@ def get_tensors_from(args, kwargs):
                [v for v in kwargs.values() if isinstance(v, Tensor)])
 
 
+def run_cpp_test(binary, suite, test):
+    repo_root = Path(__file__).resolve().parent.parent.parent.parent
+    binary_path = repo_root / binary
+    proc = subprocess.run(
+        [str(binary_path), f"--gtest_filter={suite}.{test}"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    if proc.returncode != 0:
+        parts = [
+            f"{binary_path.name} failed on test '{suite}.{test}':"
+        ]
+        stdout = proc.stdout.decode().strip()
+        if stdout != "":
+            parts.append(stdout)
+        stderr = proc.stderr.decode().strip()
+        if stderr != "":
+            parts.append(stderr)
+        raise RuntimeError("\n".join(parts))
+
+
 def has_breakpad():
     # We always build with breakpad in CI
     if IS_IN_CI:
