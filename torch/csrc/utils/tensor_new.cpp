@@ -267,6 +267,7 @@ Tensor internal_new_from_data(
   {
     at::AutoDispatchBelowADInplaceOrView guard;  // TODO: remove
     at::tracer::impl::NoTracerDispatchMode tracer_guard;
+    c10::impl::ExcludeDispatchKeyGuard pythonmode_guard(c10::DispatchKey::Python);
     // functorch uses FuncTorchDynamicLayerBackMode as a mode key to wrap all
     // tensors returned from operators in special TensorWrapper tensor extension
     // The problem with this is that TensorWrapper does not have storage so
