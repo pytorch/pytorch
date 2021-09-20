@@ -16,7 +16,6 @@ from torch.onnx.symbolic_helper import parse_args, _parse_arg, _unimplemented
 from typing import Optional
 from sys import maxsize as maxsize
 
-import numpy
 import math
 import warnings
 
@@ -877,7 +876,7 @@ def _max_pool(name, tuple_fn, ndims, return_indices):
         padding = tuple(tuple_fn(padding))
         if ceil_mode:
             padding_ceil = get_pool_ceil_padding(input, kernel_size, stride, padding)
-            padding = padding + tuple(numpy.add(padding_ceil, padding))
+            padding = padding + tuple(a + b for (a, b) in zip(padding_ceil, padding))
         else:
             padding = padding * 2
         kwargs = {
@@ -938,7 +937,7 @@ def _avg_pool(name, tuple_fn):
                          value_f=0.)
             padding = (0,) * len(padding)
         if ceil_mode:
-            padding = padding + tuple(numpy.add(padding_ceil, padding))
+            padding = padding + tuple(a + b for (a, b) in zip(padding_ceil, padding))
         else:
             padding = padding * 2
         output = g.op("AveragePool", input,

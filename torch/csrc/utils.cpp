@@ -6,26 +6,7 @@
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/DynamicTypes.h>
 
-// NOLINTNEXTLINE(bugprone-suspicious-include)
-#include <torch/csrc/generic/utils.cpp>
-#include <TH/THGenerateAllTypes.h>
-
-// NOLINTNEXTLINE(bugprone-suspicious-include)
-#include <torch/csrc/generic/utils.cpp>
-#include <TH/THGenerateComplexTypes.h>
-
-// NOLINTNEXTLINE(bugprone-suspicious-include)
-#include <torch/csrc/generic/utils.cpp>
-#include <TH/THGenerateHalfType.h>
-
-// NOLINTNEXTLINE(bugprone-suspicious-include)
-#include <torch/csrc/generic/utils.cpp>
-#include <TH/THGenerateBFloat16Type.h>
-
 #include <torch/csrc/WindowsTorchApiMacro.h>
-// NOLINTNEXTLINE(bugprone-suspicious-include)
-#include <torch/csrc/generic/utils.cpp>
-#include <TH/THGenerateBoolType.h>
 
 #include <algorithm>
 #include <cstdarg>
