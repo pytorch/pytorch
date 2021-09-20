@@ -85,8 +85,8 @@ struct liveRangeEndCmp {
   }
 };
 
-template <typename Value>
-using SortedLiveRangeMap = std::map<UniqueLiveRange, Value, liveRangeStartCmp>;
+template <typename T>
+using SortedLiveRangeMap = std::map<UniqueLiveRange, T, liveRangeStartCmp>;
 struct TORCH_API MemAllocation {
   UniqueLiveRange ulvr;
   MemRegion reg;
@@ -122,9 +122,12 @@ c10::optional<size_t> computeStorageSize(const Value& value);
 
 TORCH_API bool hasOutVariant(Node* node);
 
-TORCH_API std::
-    pair<size_t, FastMap<const Value*, std::pair<UniqueLiveRange, size_t>>>
-    planMemory(const std::shared_ptr<Graph>&, Strategy);
+// size, allocations
+using MemoryPlan = std::
+    pair<size_t, FastMap<const Value*, std::pair<UniqueLiveRange, size_t>>>;
+
+TORCH_API MemoryPlan
+planMemory(const std::shared_ptr<Graph>&, Strategy, bool frozen = false);
 
 } // namespace jit
 } // namespace torch

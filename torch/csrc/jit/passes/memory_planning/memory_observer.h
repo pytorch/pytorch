@@ -5,6 +5,12 @@
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
 
+/*
+ * These classes roughly mirror the implementation of KinetoObserverContext and
+ * KinetoThreadLocalState but serve only to record information about memory
+ * allocations.
+ */
+
 namespace torch {
 namespace jit {
 
@@ -14,6 +20,16 @@ inline int64_t timeSinceEpoch() {
       .count();
 }
 
+/*
+ * Various meta data useful for describing an allocation (collected at both
+ * allocation and freeing). In particular timestamp, pointer address, and size,
+ * are the minimum needed to describe an allocation. In addition we collect
+ * which node is responsible for the allocation (i.e. in which context was the
+ * allocation made). This is useful for testing (i.e. verifying that the
+ * allocations we planned for indeed do take place successfully) and for
+ * constructing a plan based purely on profile data (as opposed to static
+ * analysis).
+ */
 typedef struct TORCH_API MemoryEvent {
   enum class EventType { ALLOCATE = 0, FREE };
   friend std::ostream& operator<<(std::ostream& out, const EventType& rhs) {
@@ -21,7 +37,7 @@ typedef struct TORCH_API MemoryEvent {
     return out;
   }
 
-  int64_t ts{};
+  size_t ts{};
   c10::optional<std::string> stack_trace{};
   intptr_t addr{};
   int64_t size{};
@@ -30,7 +46,7 @@ typedef struct TORCH_API MemoryEvent {
 
   MemoryEvent() = default;
   MemoryEvent(
-      int64_t ts,
+      size_t ts,
       c10::optional<std::string> stack_trace,
       intptr_t addr,
       int64_t s,
@@ -68,6 +84,8 @@ typedef struct TORCH_API MemoryEvent {
 
 } MemoryEvent;
 
+// not strictly necessary but nonetheless useful for bracketing node lifetimes
+// and associating Values (abstract) with actually tensors (concrete).
 typedef struct FunctionFrameEvent {
   std::vector<intptr_t> input_ival_addrs;
   std::vector<intptr_t> output_ival_addrs;
@@ -105,6 +123,10 @@ typedef struct FunctionFrameEvent {
 
 } FunctionFrameEvent;
 
+// MemoryEvent and FunctionEvent could be members of a union struct but some
+// arcane rules
+// https://stackoverflow.com/questions/26572240/why-do-unions-have-a-deleted-default-constructor-if-just-one-of-its-members-does
+// about deleted constructors made that more work than was worth it
 typedef struct TORCH_API MemoryObserverEvent {
   MemoryObserverEvent() = default;
   enum { MEMORY_EVENT, FUNCTION_EVENT } type{MEMORY_EVENT};
@@ -126,6 +148,9 @@ typedef struct TORCH_API MemoryObserverEvent {
   ~MemoryObserverEvent() = default;
 } MemoryObserverEvent;
 
+// we piggy back off of MemoryReportingInfoBase (which is called in
+// CPUAllocator) in order to collect the allocation info right from the horse's
+// mouth (i.e. at time of allocation within the allocator)
 struct TORCH_API MemoryObserverThreadLocalState
     : public c10::MemoryReportingInfoBase {
   explicit MemoryObserverThreadLocalState();
@@ -139,7 +164,7 @@ struct TORCH_API MemoryObserverThreadLocalState
     return handle;
   }
 
-  bool hasCallbackHandle() {
+  bool hasCallbackHandle() const {
     return handle > 0;
   }
 
