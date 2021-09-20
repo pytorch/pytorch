@@ -93,7 +93,7 @@ class cuBLASModule:
         return torch._C._set_cublas_allow_tf32(value)
 
 
-class cuBLASModule:
+class cudaAllocatorModule:
     def __getattr__(self, name):
         assert name == "allocator", "Unknown attribute " + name
         return torch._C._get_cuda_allocator()
