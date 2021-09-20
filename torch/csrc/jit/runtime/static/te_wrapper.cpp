@@ -49,6 +49,7 @@ std::shared_ptr<TEWrapper> wrapTECompute(
   s = IRSimplifier::simplify(s);
   args.insert(args.begin(), out);
   auto cg = std::make_unique<LLVMCodeGen>(s, args);
+  cg->cleanup_memory();
   wrap->update(std::move(cg));
   return wrap;
 }
