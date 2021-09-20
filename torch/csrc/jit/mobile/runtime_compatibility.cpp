@@ -5,7 +5,7 @@
 
 namespace c10 {
 TypePtr parseType(const std::string& pythonStr);
-torch::jit::SupportedType getSupportedType();
+std::unordered_set<std::string> getSupportedType();
 } // namespace c10
 
 namespace torch {
@@ -55,13 +55,12 @@ std::unordered_map<std::string, OperatorInfo> _get_runtime_ops_and_info() {
 RuntimeCompatibilityInfo RuntimeCompatibilityInfo::get() {
   return RuntimeCompatibilityInfo{
       _get_runtime_bytecode_version(),
-      _get_supported_types(),
-      _get_runtime_ops_and_info()};
+      _get_runtime_ops_and_info(),
+      _get_supported_types()};
 }
 
-SupportedType _get_supported_types() {
-  SupportedType supported_type = at::getSupportedType();
-  return supported_type;
+std::unordered_set<std::string> _get_supported_types() {
+  return at::getSupportedType();
 }
 
 } // namespace jit
