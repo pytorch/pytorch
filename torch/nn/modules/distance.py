@@ -20,7 +20,7 @@ class PairwiseDistance(Module):
     Shape:
         - Input1: :math:`(N, D)` or :math:`(D)` where `N = batch dimension` and `D = vector dimension`
         - Input2: :math:`(N, D)` or :math:`(D)`, same shape as the Input1
-        - Output: :math:`(N)` or :math:`(D)` based on input dimension.
+        - Output: :math:`(N)` or :math:`()` based on input dimension.
                 If :attr:`keepdim` is ``True``, then :math:`(N, 1)` or :math:`(1)` based on input dimension.
     Examples::
         >>> pdist = nn.PairwiseDistance(p=2)
