@@ -11,8 +11,8 @@
 namespace torch { namespace autograd {
 
 /**
- * Records TensorOptions, and shape of the tensor and, where applicable,
- * the stream the corresponding operation took place on.
+ * Records TensorOptions, shape of the tensor, whether or not the Python dispatch key is set (tensor subclass), 
+ * and, where applicable, the stream the corresponding operation took place on.
  *
  * If is_valid() is false, then the corresponding input is not used and may be
  * an undefined tensor.
@@ -22,12 +22,6 @@ struct InputMetadata {
 
   InputMetadata(const at::TensorOptions options, at::IntArrayRef shape, bool is_tensor_subclass)
   : options_{options}, shape_{shape}, is_tensor_subclass_{is_tensor_subclass} {
-    auto device_ = options.device();
-    stream_ = c10::impl::getDeviceGuardImpl(device_.type())->getStream(device_);
-  }
-
-  InputMetadata(const at::TensorOptions options, at::IntArrayRef shape)
-  : options_{options}, shape_{shape} {
     auto device_ = options.device();
     stream_ = c10::impl::getDeviceGuardImpl(device_.type())->getStream(device_);
   }

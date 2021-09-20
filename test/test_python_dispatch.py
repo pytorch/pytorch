@@ -453,8 +453,9 @@ $6 = torch._ops.aten.add_($1, $5)''')
         x = LoggingTensor(torch.tensor([3.0, 4.0], requires_grad=True))
         y = torch.randn(2)
         z = x * y
-        assert isinstance(z, LoggingTensor)
+        self.assertIsInstance(z, LoggingTensor)
         z.sum().backward(torch.tensor(1.))
+        self.assertEqual(x.grad, y)
 
 if __name__ == '__main__':
     run_tests()
