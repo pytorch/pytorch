@@ -90,13 +90,14 @@ static void BM_deep_wide_static(benchmark::State& state) {
   }
 }
 
-torch::jit::StaticRuntime getStaticRuntime() {
+std::shared_ptr<torch::jit::StaticModule> getStaticModule() {
   static auto smod = std::make_shared<torch::jit::StaticModule>(getDeepAndWideSciptModel());
-  return torch::jit::StaticRuntime(*smod);
+  return smod;
 }
 
 static void BM_deep_wide_static_threaded(benchmark::State& state) {
-   auto sr = getStaticRuntime();
+  auto sm = getStaticModule();
+  torch::jit::StaticRuntime sr(*sm);
 
   const int batch_size = 1; // state.range(0);
   auto ad_emb_packed = torch::randn({batch_size, 1, embedding_size});
