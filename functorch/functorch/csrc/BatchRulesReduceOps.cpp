@@ -74,6 +74,8 @@ Tensor median_decomp(
 
 enum ReductionCase { DimArray, Dim };
 
+// dim_arg_pos allows us to specify the location of the dim/dim array argument.
+// Defaults to 1
 template<int dim_arg_pos=1>
 void boxed_reduction_batch_rule(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
   const auto& schema = op.schema();
