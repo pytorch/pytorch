@@ -4,9 +4,11 @@ ${ts_lowering_inc}
 namespace torch_lazy_tensors {
 namespace compiler {
 
-// I copied these for now but they really should be moved.
+// TODO(whc) I copied these for now but they really should be moved.
+// Before fixing this though, decide if lower() should be added back
+// to Node base interface, or kept as a separate entity
 TSOpVector LowerBuiltin(
-    std::shared_ptr<torch::jit::GraphFunction> function,
+    const std::shared_ptr<torch::jit::GraphFunction>& function,
     c10::Symbol sym, const std::vector<torch::jit::NamedValue>& arguments,
     const std::vector<torch::jit::NamedValue>& kwarguments = {}) {
     auto builtin =
@@ -19,9 +21,9 @@ TSOpVector LowerBuiltin(
         const auto tuple_call_result = sv->asTuple({}, *function);
         TSOpVector tuple_result;
         for (const auto& tuple_component : tuple_call_result) {
-        auto tuple_component_sv =
-            dynamic_cast<torch::jit::SimpleValue*>(tuple_component.get());
-        tuple_result.push_back(tuple_component_sv->getValue());
+            auto tuple_component_sv =
+                dynamic_cast<torch::jit::SimpleValue*>(tuple_component.get());
+            tuple_result.push_back(tuple_component_sv->getValue());
         }
         return tuple_result;
     }
@@ -33,7 +35,7 @@ TSOpVector LowerBuiltin(
     const ir::Node* node,
     const std::vector<torch::jit::NamedValue>& arguments,
     const std::vector<torch::jit::NamedValue>& kwarguments = {}) {
-return LowerBuiltin(function, node->op().op, arguments, kwarguments);
+    return LowerBuiltin(function, node->op().op, arguments, kwarguments);
 }
 
 
@@ -43,9 +45,9 @@ TSOpVector LowerToTSCodegen(std::shared_ptr<torch::jit::GraphFunction> function,
                             ts_backend::TSLoweringContext* loctx,
                             const ir::Node* node) {
     switch (node->op().op){
-${lowering_dispatches}
-default:
-    return {};
+    ${lowering_dispatches}
+    default:
+        return {};
     }
 }
 

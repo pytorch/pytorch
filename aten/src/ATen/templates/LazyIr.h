@@ -15,7 +15,7 @@ namespace ops {
 // a node has an Optional<Value> input that is nullopt.  It is important
 // to differentiate between HASH(nullopt, something) and HASH(something, nullopt),
 // and using kNullValue in the hash function in the order of arguments
-//  serves this purpose.
+// serves this purpose.
 static const ir::Value kNullValue = ir::Value();
 ${ir_declarations}
 

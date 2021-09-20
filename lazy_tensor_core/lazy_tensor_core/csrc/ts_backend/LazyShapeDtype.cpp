@@ -16,10 +16,10 @@ namespace torch_lazy_tensors{
 namespace ir {
 namespace ops {
 
-std::vector<int64_t> compute_shape_mean(const at::Tensor & self, c10::optional<at::ScalarType> dtype) {
+std::vector<int64_t> compute_shape_mean(const at::Tensor& self, c10::optional<at::ScalarType> dtype) {
     return std::vector<int64_t>({1});
 }
-c10::ScalarType compute_dtype_mean(const at::Tensor & self, c10::optional<at::ScalarType> dtype) {
+c10::ScalarType compute_dtype_mean(const at::Tensor& self, c10::optional<at::ScalarType> dtype) {
     if(dtype.has_value()){
         return dtype.value();
     }
