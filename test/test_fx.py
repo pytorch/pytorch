@@ -250,6 +250,16 @@ class TestFX(JitTestCase):
         m = MyModule()
         self.checkGraphModule(m, (input,))
 
+    def test_fx_and_or(self):
+        class MyModule(torch.nn.Module):
+            def forward(self, x):
+                return x & x, x | x
+
+        input = torch.LongTensor(10).random_(0, 1024)
+
+        m = MyModule()
+        self.checkGraphModule(m, (input,))
+
     def test_dict(self):
         class MyDictMod(torch.nn.Module):
             def forward(self, d):
