@@ -706,13 +706,12 @@ void validate_outputs(
        // In future, there will be an oppportunity to support more combinations of layouts if they are composable
        // (example., operations like addition etc., are well defined between tensors of different layouts.),
        // as well as all parts of autograd like AccumulateGrad correctly handle this.
-       if (grad.is_sparse()) {
-         continue;
+       if (!grad.is_sparse()) {
+        std::stringstream ss;
+        ss << "invalid gradient at index " << i << " - expected layout ";
+        ss << metadata.layout() << " but got " << grad.layout();
+        AT_ERROR(format_error(ss.str()));
        }
-       std::stringstream ss;
-       ss << "invalid gradient at index " << i << " - expected layout ";
-       ss << metadata.layout() << " but got " << grad.layout();
-       AT_ERROR(format_error(ss.str()));
     }
 
     if (grad.device() != metadata.device()) {
