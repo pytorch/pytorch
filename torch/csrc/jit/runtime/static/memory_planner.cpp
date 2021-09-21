@@ -17,7 +17,7 @@ static void assign_storage_to_managed_tensors(
 
   // Snapshot of the current memory state
   for (auto& pnode : runtime->nodes()) {
-    for (const auto i : c10::irange(pnode.outputs().size())) {
+    for (const auto i : c10::irange(pnode.outputs().second)) {
       auto& ival = pnode.Output(i);
       const auto* val = pnode.node()->outputs()[i];
       if (managed_tensor_values.count(val)) {
@@ -60,7 +60,7 @@ MemoryPlanner::MemoryPlanner(
   if (enable_out_variant) {
     for (ProcessedNode& pnode : runtime->nodes()) {
       if (pnode.has_out_variant()) {
-        for (const auto i : c10::irange(pnode.outputs().size())) {
+        for (const auto i : c10::irange(pnode.outputs().second)) {
           const Value* out_v = pnode.node()->outputs()[i];
           if (external_values.count(out_v)) {
             continue;
@@ -82,7 +82,7 @@ MemoryPlanner::MemoryPlanner(
   // collect unmanaged output ivalues
   FastSet<IValue*> unmanaged_ivalues;
   for (ProcessedNode& pnode : runtime->nodes()) {
-    for (const auto i : c10::irange(pnode.outputs().size())) {
+    for (const auto i : c10::irange(pnode.outputs().second)) {
       // Types are stored in the underlying TorchScript IR
       const Value* out_v = pnode.node()->outputs()[i];
       if (managed_tensor_values.count(out_v) || leaked_values.count(out_v)) {

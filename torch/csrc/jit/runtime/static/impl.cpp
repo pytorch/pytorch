@@ -644,17 +644,18 @@ StaticModule::StaticModule(
     if (node->kind() == prim::Constant) {
       continue;
     }
-    std::vector<const IValue*> ivalue_inputs;
+    auto ivalue_inputs =
+        std::make_unique<const IValue*[]>(node->inputs().size());
     std::vector<DefInfo> input_ssa_defs;
+    size_t idx = 0;
     for (Value* input : node->inputs()) {
-      ivalue_inputs.emplace_back(value_to_ivalue.at(input));
+      ivalue_inputs[idx++] = value_to_ivalue.at(input);
       input_ssa_defs.emplace_back(value_to_ssa_def.at(input));
     }
     node_inputs_ssa_def_map_[node_idx] = input_ssa_defs;
-    auto pnode =
-        ProcessedNode(node, std::move(ivalue_inputs), opts.enable_out_variant);
-    node_has_out_variant.emplace(node, pnode.has_out_variant());
-    nodes_.emplace_back(std::move(pnode));
+    nodes_.emplace_back(
+        node, std::move(ivalue_inputs), idx, opts.enable_out_variant);
+    node_has_out_variant.emplace(node, nodes_.back().has_out_variant());
     for (const auto i : c10::irange(node->outputs().size())) {
       value_to_ivalue[node->outputs()[i]] = nullptr;
       value_to_ssa_def[node->outputs()[i]] = std::make_pair(node_idx, i);
@@ -662,7 +663,7 @@ StaticModule::StaticModule(
     node_idx++;
   }
   for (auto& pnode : nodes_) {
-    if (pnode.outputs().size() == 1 &&
+    if (pnode.outputs().second == 1 &&
         isOptimizableContainerType(pnode.node(), node_has_out_variant)) {
       node_is_optimizable_container_type_.emplace(pnode.node());
     }
@@ -723,8 +724,8 @@ StaticRuntime::StaticRuntime(const StaticModule& sm) : static_module_(sm) {
     auto& n = nodes_[idx];
     // hook up the inputs
 
-    for (const auto i : c10::irange(n.inputs().size())) {
-      if (n.inputs()[i] == nullptr) {
+    for (const auto i : c10::irange(n.inputs().second)) {
+      if (n.inputs().first[i] == nullptr) {
         int node_idx = 0;
         int out_idx = 0;
         std::tie(node_idx, out_idx) = sm.index_map().at(idx)[i];
@@ -1046,17 +1047,17 @@ bool display_ivalue(const IValue& iv) {
 
 void display_pnode_info(const ProcessedNode& pnode) {
   pnode.node()->print(std::cout, 0, nullptr, false);
-  const std::vector<const IValue*>& inputs = pnode.inputs();
-  for (const auto i : c10::irange(inputs.size())) {
+  const auto inputs = pnode.inputs();
+  for (const auto i : c10::irange(inputs.second)) {
     std::cout << "\ti" << i << ": ";
-    if (!display_ivalue(*inputs[i])) {
+    if (!display_ivalue(*inputs.first[i])) {
       std::cout << *(pnode.node()->inputs()[i]->type()) << '\n';
     }
   }
-  const std::vector<IValue>& outputs = pnode.outputs();
-  for (const auto i : c10::irange(outputs.size())) {
+  const auto outputs = pnode.outputs();
+  for (const auto i : c10::irange(outputs.second)) {
     std::cout << "\to" << i << ": ";
-    if (!display_ivalue(outputs[i])) {
+    if (!display_ivalue(outputs.first[i])) {
       std::cout << *(pnode.node()->outputs()[i]->type()) << '\n';
     }
   }
@@ -1228,7 +1229,7 @@ void StaticRuntime::check_for_memory_leak(bool output_returned) {
   FastSet<const IValue*> output_ivalues(outputs_.begin(), outputs_.end());
   for (const auto n : c10::irange(nodes_.size())) {
     auto& pnode = nodes_[n];
-    for (const auto i : c10::irange(pnode.outputs().size())) {
+    for (const auto i : c10::irange(pnode.outputs().second)) {
       const IValue* ival = &pnode.Output(i);
       const Value* val = pnode.node()->output(i);
       const std::string error_msg = "Output " + c10::to_string(i) + ", %" +
@@ -1262,11 +1263,13 @@ void StaticRuntime::check_for_memory_leak(bool output_returned) {
 
 ProcessedNode::ProcessedNode(
     Node* node,
-    std::vector<const IValue*>&& inputs,
+    std::unique_ptr<const IValue*[]> inputs,
+    size_t inputsSize,
     bool enable_out_variant)
-    : node_(node), inputs_(std::move(inputs)) {
+    : node_(node), inputs_(std::move(inputs)), inputsSize_(inputsSize) {
   // TODO leverage type information
-  outputs_.resize(node->outputs().size());
+  outputsSize_ = node->outputs().size();
+  outputs_ = std::make_unique<IValue[]>(outputsSize_);
 
   if (enable_out_variant) {
     if (OutVariant fn = getOutOfPlaceOperation(node)) {
@@ -1328,12 +1331,12 @@ static bool checkNoMemoryOverlap(const at::Tensor& a, const at::Tensor& b) {
 }
 
 bool ProcessedNode::verify_no_memory_overlap() const {
-  for (size_t i = 0; i < outputs_.size(); ++i) {
+  for (const auto i : c10::irange(outputsSize_)) {
     if (!outputs_[i].isTensor()) {
       continue;
     }
     const auto& out0_t = outputs_[i].toTensor();
-    for (size_t j = i + 1; j < outputs_.size(); ++j) {
+    for (const auto j : c10::irange(i + 1, outputsSize_)) {
       if (!outputs_[j].isTensor()) {
         continue;
       }
@@ -1348,12 +1351,16 @@ bool ProcessedNode::verify_no_memory_overlap() const {
   if (!schema || schema->is_mutable()) {
     return true;
   }
-  for (const IValue* in : inputs_) {
+
+  for (const auto inputIdx : c10::irange(inputsSize_)) {
+    const IValue* const in = inputs_[inputIdx];
     if (!in->isTensor()) {
       continue;
     }
     const auto& in_t = in->toTensor();
-    for (const IValue& out : outputs_) {
+
+    for (const auto outputIdx : c10::irange(outputsSize_)) {
+      const IValue& out = outputs_[outputIdx];
       if (!out.isTensor()) {
         continue;
       }

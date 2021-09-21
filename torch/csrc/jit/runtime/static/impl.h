@@ -336,8 +336,48 @@ class TORCH_API ProcessedNode {
   ProcessedNode() = default;
   ProcessedNode(
       Node* n,
-      std::vector<const IValue*>&& inputs,
+      std::unique_ptr<const IValue*[]> inputs,
+      size_t inputsSize,
       bool enable_out_variant);
+
+  ProcessedNode(const ProcessedNode& rhs)
+      : node_(rhs.node_),
+        fn_(rhs.fn_),
+        inputs_(std::make_unique<const IValue*[]>(rhs.inputsSize_)),
+        outputs_(std::make_unique<IValue[]>(rhs.outputsSize_)),
+        inputsSize_(rhs.inputsSize_),
+        outputsSize_(rhs.outputsSize_) {
+    std::copy(
+        rhs.inputs_.get(), rhs.inputs_.get() + inputsSize_, inputs_.get());
+    std::copy(
+        rhs.outputs_.get(), rhs.outputs_.get() + outputsSize_, outputs_.get());
+  }
+
+  ProcessedNode& operator=(const ProcessedNode& rhs) {
+    if (this == &rhs) {
+      return *this;
+    }
+    node_ = rhs.node_;
+    fn_ = rhs.fn_;
+    if (!inputs_ || inputsSize_ != rhs.inputsSize_) {
+      inputs_ = std::make_unique<const IValue*[]>(rhs.inputsSize_);
+      inputsSize_ = rhs.inputsSize_;
+    }
+    std::copy(
+        rhs.inputs_.get(), rhs.inputs_.get() + inputsSize_, inputs_.get());
+
+    if (!outputs_ || outputsSize_ != rhs.outputsSize_) {
+      outputs_ = std::make_unique<IValue[]>(rhs.outputsSize_);
+      outputsSize_ = rhs.outputsSize_;
+    }
+    std::copy(
+        rhs.outputs_.get(), rhs.outputs_.get() + outputsSize_, outputs_.get());
+
+    return *this;
+  }
+
+  ProcessedNode(ProcessedNode&&) noexcept = default;
+  ProcessedNode& operator=(ProcessedNode&&) noexcept = default;
 
   void run();
 
@@ -347,13 +387,13 @@ class TORCH_API ProcessedNode {
 
   // Input is readonly
   const IValue& Input(size_t i) const {
-    DCHECK(i < inputs_.size());
+    DCHECK(i < inputsSize_);
     return *inputs_[i];
   }
 
   // Output is readwrite
   IValue& Output(size_t i) {
-    DCHECK(i < outputs_.size());
+    DCHECK(i < outputsSize_);
     return outputs_[i];
   }
 
@@ -361,12 +401,12 @@ class TORCH_API ProcessedNode {
     inputs_[index] = ival;
   }
 
-  const std::vector<IValue>& outputs() const {
-    return outputs_;
+  std::pair<const IValue*, size_t> outputs() const {
+    return {outputs_.get(), outputsSize_};
   }
 
-  const std::vector<const IValue*>& inputs() const {
-    return inputs_;
+  std::pair<const IValue* const*, size_t> inputs() const {
+    return {inputs_.get(), inputsSize_};
   }
 
   bool has_out_variant() const {
@@ -384,12 +424,14 @@ class TORCH_API ProcessedNode {
   using OutVariant = std::function<void(ProcessedNode*)>;
   using NativeFunction = std::function<void(ProcessedNode*)>;
   c10::variant<OutVariant, NativeFunction, Operation> fn_;
-  std::vector<const IValue*> inputs_; // unowned
-  std::vector<IValue> outputs_;
+  std::unique_ptr<const IValue*[]> inputs_; // unowned
+  std::unique_ptr<IValue[]> outputs_;
+  size_t inputsSize_;
+  size_t outputsSize_;
 };
 
 static_assert(
-    sizeof(ProcessedNode) == 12 * sizeof(void*),
+    sizeof(ProcessedNode) == 10 * sizeof(void*),
     "ProcessedNode size changed");
 
 } // namespace jit
