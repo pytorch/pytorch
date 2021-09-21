@@ -5872,14 +5872,16 @@ Example::
     tensor([ 0,  2,  0,  1])
 """.format(**single_dim_common))
 
-add_docstr(torch.mean,
-           r"""
-mean(input) -> Tensor
+add_docstr(torch.mean, r"""
+mean(input, *, dtype=None) -> Tensor
 
 Returns the mean value of all elements in the :attr:`input` tensor.
 
 Args:
     {input}
+
+Keyword args:
+    {dtype}
 
 Example::
 
@@ -5889,7 +5891,7 @@ Example::
     >>> torch.mean(a)
     tensor(0.3367)
 
-.. function:: mean(input, dim, keepdim=False, *, out=None) -> Tensor
+.. function:: mean(input, dim, keepdim=False, *, dtype=None, out=None) -> Tensor
    :noindex:
 
 Returns the mean value of each row of the :attr:`input` tensor in the given
@@ -5904,7 +5906,12 @@ Args:
     {keepdim}
 
 Keyword args:
+    {dtype}
     {out}
+
+.. seealso::
+
+    :func:`torch.nanmean` computes the mean value of `non-NaN` elements.
 
 Example::
 
@@ -5921,6 +5928,48 @@ Example::
             [-0.5085],
             [-0.4599],
             [ 0.1807]])
+""".format(**multi_dim_common))
+
+add_docstr(torch.nanmean, r"""
+nanmean(input, dim=None, keepdim=False, *, dtype=None, out=None) -> Tensor
+
+Computes the mean of all `non-NaN` elements along the specified dimensions.
+
+This function is identical to :func:`torch.mean` when there are no `NaN` values
+in the :attr:`input` tensor. In the presence of `NaN`, :func:`torch.mean` will
+propagate the `NaN` to the output whereas :func:`torch.nanmean` will ignore the
+`NaN` values (`torch.nanmean(a)` is equivalent to `torch.mean(a[~a.isnan()])`).
+
+{keepdim_details}
+
+Args:
+    {input}
+    {dim} If `None`, reduces all dimensions. Default is `None`.
+    {keepdim}
+
+Keyword args:
+    {dtype}
+    {out}
+
+.. seealso::
+
+    :func:`torch.mean` computes the mean value, propagating `NaN`.
+
+Example::
+
+    >>> x = torch.tensor([[torch.nan, 1, 2], [1, 2, 3]])
+    >>> x.mean()
+    tensor(nan)
+    >>> x.nanmean()
+    tensor(1.8000)
+    >>> x.mean(dim=0)
+    tensor([   nan, 1.5000, 2.5000])
+    >>> x.nanmean(dim=0)
+    tensor([1.0000, 1.5000, 2.5000])
+
+    # If all elements in the reduced dimensions are NaN then the result is NaN
+    >>> torch.tensor([torch.nan]).nanmean()
+    tensor(nan)
 """.format(**multi_dim_common))
 
 add_docstr(torch.median,

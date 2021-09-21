@@ -17,7 +17,7 @@ from torch.quantization.quantization_mappings import (
     _get_special_act_post_process,
 )
 
-from torch.quantization.stubs import DeQuantStub, QuantWrapper
+from torch.ao.quantization.stubs import DeQuantStub, QuantWrapper
 from torch.quantization.qconfig import (
     add_module_to_qconfig_obs_ctr,
     default_dynamic_qconfig,
