@@ -71,12 +71,12 @@ def create_dataframe(data, columns=None):
 
 def is_dataframe(data):
     wrapper = get_df_wrapper()
-    wrapper.is_dataframe()
+    wrapper.is_dataframe(data)
 
 
 def is_column(data):
     wrapper = get_df_wrapper()
-    wrapper.is_column()
+    wrapper.is_column(data)
 
 
 def concat(buffer):
