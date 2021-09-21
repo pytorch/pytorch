@@ -3,6 +3,7 @@
 #include <ATen/core/interned_strings.h>
 #include <ATen/core/ivalue.h>
 #include <c10/core/CPUAllocator.h>
+#include <c10/util/variant.h>
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
@@ -369,23 +370,25 @@ class TORCH_API ProcessedNode {
   }
 
   bool has_out_variant() const {
-    return static_cast<bool>(fn_) && !fnIsNative_;
+    return fn_.index() == 0;
   }
 
   bool has_native() const {
-    return static_cast<bool>(fn_) && fnIsNative_;
+    return fn_.index() == 1;
   }
 
   bool verify_no_memory_overlap() const;
 
  private:
   Node* node_;
-  c10::optional<Operation> op_;
-  std::function<void(ProcessedNode*)> fn_;
+  using OutVariant = std::function<void(ProcessedNode*)>;
+  using NativeFunction = std::function<void(ProcessedNode*)>;
+  c10::variant<OutVariant, NativeFunction, Operation> fn_;
   std::vector<const IValue*> inputs_; // unowned
   std::vector<IValue> outputs_;
-  bool fnIsNative_ = false;
 };
+
+static_assert(sizeof(ProcessedNode) == 12 * sizeof(void*), "ProcessedNode size changed");
 
 } // namespace jit
 } // namespace torch

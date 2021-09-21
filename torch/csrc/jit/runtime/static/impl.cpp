@@ -1268,26 +1268,31 @@ ProcessedNode::ProcessedNode(
   // TODO leverage type information
   outputs_.resize(node->outputs().size());
 
-  if (enable_out_variant && (fn_ = getOutOfPlaceOperation(node))) {
-    VLOG(1) << "Switch to out variant for node: " << PrintNode(node);
-    return;
+  if (enable_out_variant) {
+    if (OutVariant fn = getOutOfPlaceOperation(node)) {
+      fn_.emplace<0>(std::move(fn));
+      VLOG(1) << "Switch to out variant for node: " << PrintNode(node);
+      return;
+    }
   }
-  if (!fn_ && (fn_ = getNativeOperation(node))) {
-    fnIsNative_ = true;
+  if (NativeFunction fn = getNativeOperation(node)) {
+    fn_.emplace<1>(std::move(fn));
     VLOG(1) << "Switch to native impl for node: " << PrintNode(node);
     return;
   }
   {
     const Operator& op = node->getOperator();
-    op_ = op.getOperation(node);
+    fn_.emplace<2>(op.getOperation(node));
     VLOG(1) << "Fallback interpreter for node: " << PrintNode(node);
   }
 }
 
 void ProcessedNode::run() {
   DCHECK(verify_no_memory_overlap());
-  if (fn_) {
-    fn_(this);
+  if (fn_.index() == 0) {
+    c10::get<0>(fn_)(this);
+  } else if (fn_.index() == 1) {
+    c10::get<1>(fn_)(this);
   } else {
     std::vector<IValue> stack;
     const size_t size = node_->inputs().size();
@@ -1300,8 +1305,8 @@ void ProcessedNode::run() {
       stack.emplace_back(static_cast<int>(size));
     }
 
-    DCHECK(op_);
-    op_->operator()(stack);
+    DCHECK(fn_.index() == 2);
+    c10::get<2>(fn_)(stack);
 
     DCHECK_EQ(stack.size(), node_->outputs().size());
     for (const auto i : c10::irange(node_->outputs().size())) {
