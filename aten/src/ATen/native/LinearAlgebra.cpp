@@ -59,7 +59,7 @@ TORCH_META_FUNC(mm)(const Tensor & self, const Tensor & mat2) {
 }
 
 template <typename Meta>
-void common_checks_baddbmm_bmm(Meta& meta, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha, bool is_bmm, const Tensor& self_or_result) {
+void common_checks_baddbmm_bmm(Meta& meta, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha, bool is_bmm, const c10::optional<Tensor>& self_baddbmm = nullopt) {
   TORCH_CHECK(batch1.dim() == 3, "batch1 must be a 3D tensor");
   TORCH_CHECK(batch2.dim() == 3, "batch2 must be a 3D tensor");
 
@@ -73,36 +73,43 @@ void common_checks_baddbmm_bmm(Meta& meta, const Tensor& batch1, const Tensor& b
 
   TORCH_CHECK(batch2_sizes[0] == bs && batch2_sizes[1] == contraction_size);
 
+  auto& result = meta.maybe_get_output(0);
+  if (!result.defined()) {
+    meta.set_output({bs, res_rows, res_cols}, batch1.options());
+  } else {
+    // We raise error is incorrect shape is passed as out tensor 
+    // See the thread here: https://github.com/pytorch/pytorch/pull/64805#discussion_r711545287
+    const auto result_sizes = result.sizes();
+    TORCH_CHECK(result_sizes[0] == bs && result_sizes[1] == res_rows && result_sizes[2] == res_cols);
+  }
+
+  std::vector<Dimname> outnames = {};
   if (!is_bmm) {
-    TORCH_CHECK(self_or_result.dim() == 3, "self must be a 3D tensor");
-    const auto self_sizes = self_or_result.sizes();
-    TORCH_CHECK(self_sizes[0] == bs && self_sizes[1] == res_rows && self_sizes[2] == res_cols);
+    if (self_baddbmm.has_value()) {
+      auto self = self_baddbmm.value();
+      if (beta.toComplexDouble() != 0.0) result.copy_(self);
+      TORCH_CHECK(self.dim() == 3, "self must be a 3D tensor");
+      const auto self_sizes = self.sizes();
+      TORCH_CHECK(self_sizes[0] == bs && self_sizes[1] == res_rows && self_sizes[2] == res_cols);
+      outnames = namedinference::compute_baddbmm_outnames(result, batch1, batch2, self);
+    }
+  } else {
+    outnames = namedinference::compute_bmm_outnames(result, batch1, batch2);
   }
 
   namedinference::propagate_names_if_nonempty(
-    self_or_result,
-    namedinference::compute_bmm_outnames(const_cast<Tensor&>(self_or_result), batch1, batch2)
+    result,
+    outnames
   );
 }
 
 TORCH_META_FUNC(bmm)(const Tensor& self, const Tensor& mat2) {
-    set_output({self.sizes()[0], self.sizes()[1], mat2.sizes()[2]}, self.options());
-    auto& result = maybe_get_output(0);
-    common_checks_baddbmm_bmm(*this, self, mat2, Scalar(0.0), Scalar(1.0), true, result);
+    common_checks_baddbmm_bmm(*this, self, mat2, Scalar(0.0), Scalar(1.0), true);
 }
 
 TORCH_META_FUNC(baddbmm)(const Tensor& self, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha) {
-  auto& result = maybe_get_output(0);
-  if (!result.defined()) {
-    set_output({0}, batch1.options());
-  }
-  if (!result.is_same(self)) {
-    set_output({batch1.size(0), batch1.size(1), batch2.size(2)}, self.options());
-    if (beta.to<c10::complex<double>>() != 0.0) {
-      result.copy_(self);
-    }
-  }
-  common_checks_baddbmm_bmm(*this, batch1, batch2, beta, alpha, false, result);
+  auto self_ = expand_size(self, {batch1.size(0), batch1.size(1), batch2.size(2)}, "baddbmm");
+  common_checks_baddbmm_bmm(*this, batch1, batch2, beta, alpha, false, *self_);
 }
 
 } // namespace meta
@@ -1245,9 +1252,10 @@ inline void baddbmm_cpu_kernel(const Tensor& result, const Tensor& self, const T
 // optimization, it likely depends on the characteristics of the CPU, MKL will be different from non-MKL etc.,
 // but this seems to be a first starting point.
 
-static inline void bmm_out_or_baddbmm_(Tensor& self_or_result, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha, bool is_bmm_out) {
+static inline void bmm_out_or_baddbmm_(const Tensor& self_or_result_, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha, bool is_bmm_out) {
   // is_bmm_out: true for bmm_out, false for baddbmm_
   // self_or_result is "self" for baddbmm_ and "result" for bmm_out
+  Tensor& self_or_result = const_cast<Tensor&>(self_or_result_);
   CheckedFrom c = (is_bmm_out ? "bmm" : "baddbmm");
 
   auto checkOnCPU = [](const Tensor& t, CheckedFrom c) {

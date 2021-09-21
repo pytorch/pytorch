@@ -274,12 +274,9 @@ TORCH_IMPL_FUNC(mm_out_cuda)(const Tensor& self, const Tensor& mat2, const Tenso
 }
 
 TORCH_IMPL_FUNC(baddbmm_out_cuda)(const Tensor& self, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha, const Tensor& result) {
-  auto self_ = &result == &self
-    ? c10::MaybeOwned<Tensor>::borrowed(self)
-    : expand_size(self, {batch1.size(0), batch1.size(1), batch2.size(2)}, "baddbmm");
   {
     at::NoNamesGuard guard;
-    baddbmm_out_cuda_impl(result, *self_, batch1, batch2, beta, alpha);
+    baddbmm_out_cuda_impl(result, self, batch1, batch2, beta, alpha);
   }
 }
 
