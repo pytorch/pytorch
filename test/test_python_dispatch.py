@@ -1,6 +1,7 @@
 import torch
 from torch.testing._internal.common_utils import TestCase, run_tests
 from torch.utils._pytree import tree_map
+from torch.utils._python_dispatch import enable_python_mode
 
 from typing import Iterator, List
 import logging
@@ -51,7 +52,10 @@ class LoggingTensor(torch.Tensor):
         def wrap(e):
             return LoggingTensor(e) if isinstance(e, torch.Tensor) else e
 
-        rs = tree_map(wrap, func(*tree_map(unwrap, args), **tree_map(unwrap, kwargs)))
+        # no_dispatch is only needed if you use enable_python_mode.
+        # It prevents infinite recursion.
+        with no_dispatch():
+            rs = tree_map(wrap, func(*tree_map(unwrap, args), **tree_map(unwrap, kwargs)))
         logging.getLogger("LoggingTensor").info(f"{func.__module__}.{func.__name__}", args, kwargs, rs)
         return rs
 
@@ -369,6 +373,81 @@ $6 = torch._ops.aten.add_($1, $5)''')
         finally:
             WRAPPER_DEVICE = prev_device
 
+    def test_enable_python_mode_error(self) -> None:
+        with self.assertRaisesRegex(ValueError, "__torch_dispatch__"):
+            with enable_python_mode(torch.Tensor):
+                pass
+        z = LoggingTensor(torch.empty([]))
+        with self.assertRaisesRegex(ValueError, "must be the type"):
+            with enable_python_mode(z):
+                pass
+
+    def test_enable_python_mode_basic(self) -> None:
+        with enable_python_mode(LoggingTensor):
+            z = torch.empty([])
+            self.assertTrue(isinstance(z, LoggingTensor))
+
+    def test_enable_python_mode_unrelated_tensors(self) -> None:
+        x = torch.randn([])
+        y = torch.randn([])
+        with enable_python_mode(LoggingTensor):
+            z = x + y
+            self.assertTrue(isinstance(z, LoggingTensor))
+
+    def test_enable_python_mode_subclass_priority(self) -> None:
+        class ErrorA(RuntimeError):
+            pass
+
+        class ErrorB(RuntimeError):
+            pass
+
+        class A(torch.Tensor):
+            @staticmethod
+            def __new__(cls, elem):
+                return torch.Tensor._make_subclass(cls, elem, elem.requires_grad)
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+                raise ErrorA
+
+        class B(A):
+            @staticmethod
+            def __new__(cls, elem):
+                return torch.Tensor._make_subclass(cls, elem, elem.requires_grad)
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+                raise ErrorB
+
+        a = A(torch.empty(1))
+        b = B(torch.empty(1))
+        with self.assertRaises(ErrorA):
+            a + a
+
+        # B has precedence over A due to the subclass relationship
+        with self.assertRaises(ErrorB):
+            with enable_python_mode(A):
+                b + b
+        with self.assertRaises(ErrorB):
+            with enable_python_mode(B):
+                a + a
+        with self.assertRaises(ErrorB):
+            with enable_python_mode(B):
+                a + b
+
+    def test_enable_python_mode_respects_no_dispatch(self) -> None:
+        with enable_python_mode(LoggingTensor):
+            z = torch.ones([2, 3])
+            self.assertTrue(isinstance(z, LoggingTensor))
+            with no_dispatch():
+                expected = torch.ones([2, 3])
+                self.assertEqual(z.elem, expected)
+
+    def test_nested_enable_python_mode(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "has already been set"):
+            with enable_python_mode(LoggingTensor):
+                with enable_python_mode(LoggingTensor):
+                    pass
 
 if __name__ == '__main__':
     run_tests()
