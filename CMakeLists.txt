@@ -203,7 +203,7 @@ cmake_dependent_option(
 option(USE_FBGEMM "Use FBGEMM (quantized 8-bit server operators)" ON)
 option(USE_KINETO "Use Kineto profiling library" ON)
 option(USE_BREAKPAD "Use breakpad crash dump library" ON)
-option(USE_CUPTI_SO "Use CUPTI as a shared library" OFF)
+option(USE_CUPTI_SO "Use CUPTI as a shared library" ON)
 option(USE_FAKELOWP "Use FakeLowp operators" OFF)
 option(USE_FFMPEG "Use ffmpeg" OFF)
 option(USE_GFLAGS "Use GFLAGS" OFF)
@@ -332,6 +332,10 @@ if(USE_CCACHE)
   else()
     message(STATUS "Could not find ccache. Consider installing ccache to speed up compilation.")
   endif()
+endif()
+
+if(NOT USE_CUPTI_SO)
+  message(WARNING "Statically linking against CUPTI. If your CXX compiler is too new, this may break all exception handling in PyTorch.  See https://github.com/pytorch/pytorch/issues/57744 for more details.")
 endif()
 
 # Since TensorPipe does not support Windows, set it to OFF when WIN32 detected
