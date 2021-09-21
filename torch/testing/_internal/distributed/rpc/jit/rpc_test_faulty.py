@@ -101,7 +101,7 @@ class JitFaultyAgentRpcTest(RpcAgentTestFixture):
         # Ensure that we get a timeout if we override the default timeout and
         # the RPC takes longer to execute.
         with self.assertRaisesRegex(RuntimeError, expected_error):
-            rpc_async_call_with_timeout(dst_worker_name, args, kwargs, 0.5)
+            rpc_async_call_with_timeout(dst_worker_name, args, kwargs, timeout=0.5)
 
         # Ensure that we timeout if we don't specify a timeout but the default
         # is less than the RPC takes to execute.
@@ -132,7 +132,7 @@ class JitFaultyAgentRpcTest(RpcAgentTestFixture):
         }
         expected_error = self.get_timeout_error_regex()
 
-        fut = rpc_async_call_with_timeout_future_ret(dst_worker_name, args, kwargs, 0.5)
+        fut = rpc_async_call_with_timeout_future_ret(dst_worker_name, args, kwargs, timeout=0.5)
         with self.assertRaisesRegex(RuntimeError, expected_error):
             fut.wait()
 
