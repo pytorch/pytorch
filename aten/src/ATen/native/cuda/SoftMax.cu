@@ -906,7 +906,7 @@ TORCH_IMPL_FUNC(log_softmax_backward_cuda_out) (
   const Tensor& grad,
   const Tensor& output,
   int64_t dim,
-  ScalarType input_dtype
+  ScalarType input_dtype,
   const Tensor& grad_input) {
   bool half_to_float = grad.scalar_type() != input_dtype;
   if (half_to_float) {
