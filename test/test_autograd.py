@@ -7676,6 +7676,27 @@ class TestAutogradForwardMode(TestCase):
             with self.assertRaisesRegex(RuntimeError, "out= function"):
                 torch.add(foo, bar, out=bar)
 
+    def test_mkldnn_convolution(self):
+        n = 2
+        c = 3
+        o = 4
+        x = 5
+
+        inp = torch.rand(n, c, x, dtype=torch.float, requires_grad=True)
+        weight = torch.rand(o, c, x, dtype=torch.float, requires_grad=True)
+        bias = torch.rand(o, dtype=torch.float, requires_grad=True)
+
+        padding = (2, 3)
+        stride = (4, 5)
+        dilation = (3, 1)
+        groups = 1
+
+        torch.autograd.gradcheck(
+            torch.mkldnn_convolution,
+            [inp, weight, bias, padding, stride, dilation, groups],
+            check_forward_ad=True,
+        )
+
 
 # Generic device type autograd tests.
 class TestAutogradDeviceType(TestCase):
@@ -9401,31 +9422,6 @@ class TestMultithreadAutograd(TestCase):
         torch.autograd.gradcheck(fn, [inp_r, inp_c], check_forward_ad=True)
         torch.autograd.gradcheck(fn, [inp_c, inp_r], check_forward_ad=True)
 
-def test_mkldnn_convolution():
-    n = 5
-    c = 3
-    o = 4
-    x = 7
-
-    inp = torch.rand(n, c, x, dtype=torch.float32, requires_grad=True)
-    weight = torch.rand(o, c, x, dtype=torch.float32, requires_grad=True)
-    bias = torch.rand(o, dtype=torch.float32, requires_grad=True)
-
-    inp = torch.rand(n, c, x, dtype=torch.float32).to_mkldnn().requires_grad_(True)
-    weight = torch.rand(o, c, x, dtype=torch.float32).to_mkldnn().requires_grad_(True)
-    bias = torch.rand(o, dtype=torch.float32).to_mkldnn().requires_grad_(True)
-
-    padding = (2, 3)
-    stride = (4, 5)
-    dilation = (3, 1)
-    groups = 1
-
-    torch.autograd.gradcheck(
-        torch.mkldnn_convolution,
-        [inp, weight, bias, padding, stride, dilation, groups],
-        check_forward_ad=True,
-    )
-
 # Import test cases from below autograd/ here. These are found
 # implicitly by the loader, so Flake8 thinks they are unused, hence
 # the suppressions.
@@ -9440,5 +9436,4 @@ instantiate_device_type_tests(
 )
 
 if __name__ == '__main__':
-    # run_tests()
-    test_mkldnn_convolution()
+    run_tests()

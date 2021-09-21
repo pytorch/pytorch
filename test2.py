@@ -2,6 +2,8 @@ import torch
 from torch.autograd import forward_ad as fwAD
 import torchvision.models as models
 
+torch.autograd.set_detect_anomaly(True)
+
 inp = torch.rand(1, 3, 224, 224, requires_grad=True)
 resnet18 = models.resnet18(pretrained=True)
 
