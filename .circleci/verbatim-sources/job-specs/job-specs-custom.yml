@@ -571,7 +571,8 @@
             cd ${PROJ_ROOT}/ios/TestApp/benchmark
             mkdir -p ../models
             if [ ${USE_COREML_DELEGATE} == 1 ]; then
-              pip install coremltools
+              pip install coremltools==5.0b4
+              pip install six
               python coreml_backend.py
             else
               python trace_model.py
