@@ -398,152 +398,44 @@ TensorView* binaryOp(BinaryOpType type, TensorView* v1, TensorView* v2) {
   return arithOpOverloads(type, v1, v2);
 }
 
-// add
-Val* add(Val* v1, Val* v2) {
-  return binaryOp(BinaryOpType::Add, v1, v2);
-}
-TensorView* add(TensorView* v1, Val* v2) {
-  return arithOpOverloads(add, v1, v2);
-}
-TensorView* add(Val* v1, TensorView* v2) {
-  return arithOpOverloads(add, v1, v2);
-}
-TensorView* add(TensorView* v1, TensorView* v2) {
-  return arithOpOverloads(add, v1, v2);
-}
+#define NVFUSER_DEFINE_BINARY_OP(op_name, op_type)      \
+  Val* op_name(Val* v1, Val* v2) {                      \
+    return binaryOp(BinaryOpType::op_type, v1, v2);     \
+  }                                                     \
+  TensorView* op_name(TensorView* v1, Val* v2) {        \
+    return arithOpOverloads(op_name, v1, v2);           \
+  }                                                     \
+  TensorView* op_name(Val* v1, TensorView* v2) {        \
+    return arithOpOverloads(op_name, v1, v2);           \
+  }                                                     \
+  TensorView* op_name(TensorView* v1, TensorView* v2) { \
+    return arithOpOverloads(op_name, v1, v2);           \
+  }
 
-// sub
-Val* sub(Val* v1, Val* v2) {
-  return binaryOp(BinaryOpType::Sub, v1, v2);
-}
-TensorView* sub(TensorView* v1, Val* v2) {
-  return arithOpOverloads(sub, v1, v2);
-}
-TensorView* sub(Val* v1, TensorView* v2) {
-  return arithOpOverloads(sub, v1, v2);
-}
-TensorView* sub(TensorView* v1, TensorView* v2) {
-  return arithOpOverloads(sub, v1, v2);
-}
-
-// mul
-Val* mul(Val* v1, Val* v2) {
-  return binaryOp(BinaryOpType::Mul, v1, v2);
-}
-TensorView* mul(TensorView* v1, Val* v2) {
-  return arithOpOverloads(mul, v1, v2);
-}
-TensorView* mul(Val* v1, TensorView* v2) {
-  return arithOpOverloads(mul, v1, v2);
-}
-TensorView* mul(TensorView* v1, TensorView* v2) {
-  return arithOpOverloads(mul, v1, v2);
-}
-
-// div
-Val* div(Val* v1, Val* v2) {
-  return binaryOp(BinaryOpType::Div, v1, v2);
-}
-TensorView* div(TensorView* v1, Val* v2) {
-  return arithOpOverloads(div, v1, v2);
-}
-TensorView* div(Val* v1, TensorView* v2) {
-  return arithOpOverloads(div, v1, v2);
-}
-TensorView* div(TensorView* v1, TensorView* v2) {
-  return arithOpOverloads(div, v1, v2);
-}
-
-// mod
-Val* mod(Val* v1, Val* v2) {
-  return binaryOp(BinaryOpType::Mod, v1, v2);
-}
-TensorView* mod(TensorView* v1, Val* v2) {
-  return arithOpOverloads(mod, v1, v2);
-}
-TensorView* mod(Val* v1, TensorView* v2) {
-  return arithOpOverloads(mod, v1, v2);
-}
-TensorView* mod(TensorView* v1, TensorView* v2) {
-  return arithOpOverloads(mod, v1, v2);
-}
-
-// lt
-Val* lt(Val* v1, Val* v2) {
-  return binaryOp(BinaryOpType::LT, v1, v2);
-}
-TensorView* lt(TensorView* v1, Val* v2) {
-  return arithOpOverloads(lt, v1, v2);
-}
-TensorView* lt(Val* v1, TensorView* v2) {
-  return arithOpOverloads(lt, v1, v2);
-}
-TensorView* lt(TensorView* v1, TensorView* v2) {
-  return arithOpOverloads(lt, v1, v2);
-}
-
-// gt
-Val* gt(Val* v1, Val* v2) {
-  return binaryOp(BinaryOpType::GT, v1, v2);
-}
-TensorView* gt(TensorView* v1, Val* v2) {
-  return arithOpOverloads(gt, v1, v2);
-}
-TensorView* gt(Val* v1, TensorView* v2) {
-  return arithOpOverloads(gt, v1, v2);
-}
-TensorView* gt(TensorView* v1, TensorView* v2) {
-  return arithOpOverloads(gt, v1, v2);
-}
-// eq
-Val* eq(Val* v1, Val* v2) {
-  return binaryOp(BinaryOpType::Eq, v1, v2);
-}
-TensorView* eq(TensorView* v1, Val* v2) {
-  return arithOpOverloads(eq, v1, v2);
-}
-TensorView* eq(Val* v1, TensorView* v2) {
-  return arithOpOverloads(eq, v1, v2);
-}
-TensorView* eq(TensorView* v1, TensorView* v2) {
-  return arithOpOverloads(eq, v1, v2);
-}
-
-// ceilDiv
-Val* ceilDiv(Val* v1, Val* v2) {
-  return binaryOp(BinaryOpType::CeilDiv, v1, v2);
-}
-TensorView* ceilDiv(TensorView* v1, Val* v2) {
-  return arithOpOverloads(ceilDiv, v1, v2);
-}
-TensorView* ceilDiv(Val* v1, TensorView* v2) {
-  return arithOpOverloads(ceilDiv, v1, v2);
-}
-TensorView* ceilDiv(TensorView* v1, TensorView* v2) {
-  return arithOpOverloads(ceilDiv, v1, v2);
-}
-
-// andOp
-Val* andOp(Val* v1, Val* v2) {
-  TORCH_CHECK(
-      !isFloatingPointType(v1->getDataType().value()),
-      "Input1 should not be a floating point type, but received: ",
-      v1->getDataType().value());
-  TORCH_CHECK(
-      !isFloatingPointType(v2->getDataType().value()),
-      "Input2 should not be a floating point type, but received: ",
-      v2->getDataType().value());
-  return binaryOp(BinaryOpType::And, v1, v2);
-}
-TensorView* andOp(TensorView* v1, Val* v2) {
-  return arithOpOverloads(andOp, v1, v2);
-}
-TensorView* andOp(Val* v1, TensorView* v2) {
-  return arithOpOverloads(andOp, v1, v2);
-}
-TensorView* andOp(TensorView* v1, TensorView* v2) {
-  return arithOpOverloads(andOp, v1, v2);
-}
+NVFUSER_DEFINE_BINARY_OP(add, Add)
+NVFUSER_DEFINE_BINARY_OP(atan2, Atan2)
+NVFUSER_DEFINE_BINARY_OP(div, Div)
+NVFUSER_DEFINE_BINARY_OP(fmod, Fmod)
+NVFUSER_DEFINE_BINARY_OP(mul, Mul)
+NVFUSER_DEFINE_BINARY_OP(pow, Pow)
+NVFUSER_DEFINE_BINARY_OP(remainder, Remainder)
+NVFUSER_DEFINE_BINARY_OP(sub, Sub)
+// Integer binary ops
+NVFUSER_DEFINE_BINARY_OP(mod, Mod)
+NVFUSER_DEFINE_BINARY_OP(ceilDiv, CeilDiv)
+NVFUSER_DEFINE_BINARY_OP(lshift, Lshift)
+NVFUSER_DEFINE_BINARY_OP(rshift, Rshift)
+// Logical binary ops
+NVFUSER_DEFINE_BINARY_OP(eq, Eq)
+NVFUSER_DEFINE_BINARY_OP(ge, GE)
+NVFUSER_DEFINE_BINARY_OP(gt, GT)
+NVFUSER_DEFINE_BINARY_OP(le, LE)
+NVFUSER_DEFINE_BINARY_OP(lt, LT)
+NVFUSER_DEFINE_BINARY_OP(ne, NE)
+// Maybe bitwise or boolean op
+NVFUSER_DEFINE_BINARY_OP(andOp, And)
+NVFUSER_DEFINE_BINARY_OP(orOp, Or)
+#undef NVFUSER_DEFINE_BINARY_OP
 
 // REDUCTION OPERATIONS
 

@@ -108,51 +108,104 @@ TORCH_CUDA_CU_API Val* add(Val* v1, Val* v2);
 TORCH_CUDA_CU_API TensorView* add(TensorView* v1, Val* v2);
 TORCH_CUDA_CU_API TensorView* add(Val* v1, TensorView* v2);
 TORCH_CUDA_CU_API TensorView* add(TensorView* v1, TensorView* v2);
-// sub
-TORCH_CUDA_CU_API Val* sub(Val* v1, Val* v2);
-TORCH_CUDA_CU_API TensorView* sub(TensorView* v1, Val* v2);
-TORCH_CUDA_CU_API TensorView* sub(Val* v1, TensorView* v2);
-TORCH_CUDA_CU_API TensorView* sub(TensorView* v1, TensorView* v2);
-// mul
-TORCH_CUDA_CU_API Val* mul(Val* v1, Val* v2);
-TORCH_CUDA_CU_API TensorView* mul(TensorView* v1, Val* v2);
-TORCH_CUDA_CU_API TensorView* mul(Val* v1, TensorView* v2);
-TORCH_CUDA_CU_API TensorView* mul(TensorView* v1, TensorView* v2);
+// atan2
+TORCH_CUDA_CU_API Val* atan2(Val* v1, Val* v2);
+TORCH_CUDA_CU_API TensorView* atan2(TensorView* v1, Val* v2);
+TORCH_CUDA_CU_API TensorView* atan2(Val* v1, TensorView* v2);
+TORCH_CUDA_CU_API TensorView* atan2(TensorView* v1, TensorView* v2);
 // div
 TORCH_CUDA_CU_API Val* div(Val* v1, Val* v2);
 TORCH_CUDA_CU_API TensorView* div(TensorView* v1, Val* v2);
 TORCH_CUDA_CU_API TensorView* div(Val* v1, TensorView* v2);
 TORCH_CUDA_CU_API TensorView* div(TensorView* v1, TensorView* v2);
+// fmod
+TORCH_CUDA_CU_API Val* fmod(Val* v1, Val* v2);
+TORCH_CUDA_CU_API TensorView* fmod(TensorView* v1, Val* v2);
+TORCH_CUDA_CU_API TensorView* fmod(Val* v1, TensorView* v2);
+TORCH_CUDA_CU_API TensorView* fmod(TensorView* v1, TensorView* v2);
+// mul
+TORCH_CUDA_CU_API Val* mul(Val* v1, Val* v2);
+TORCH_CUDA_CU_API TensorView* mul(TensorView* v1, Val* v2);
+TORCH_CUDA_CU_API TensorView* mul(Val* v1, TensorView* v2);
+TORCH_CUDA_CU_API TensorView* mul(TensorView* v1, TensorView* v2);
+// pow
+TORCH_CUDA_CU_API Val* pow(Val* v1, Val* v2);
+TORCH_CUDA_CU_API TensorView* pow(TensorView* v1, Val* v2);
+TORCH_CUDA_CU_API TensorView* pow(Val* v1, TensorView* v2);
+TORCH_CUDA_CU_API TensorView* pow(TensorView* v1, TensorView* v2);
+// remainder
+TORCH_CUDA_CU_API Val* remainder(Val* v1, Val* v2);
+TORCH_CUDA_CU_API TensorView* remainder(TensorView* v1, Val* v2);
+TORCH_CUDA_CU_API TensorView* remainder(Val* v1, TensorView* v2);
+TORCH_CUDA_CU_API TensorView* remainder(TensorView* v1, TensorView* v2);
+// sub
+TORCH_CUDA_CU_API Val* sub(Val* v1, Val* v2);
+TORCH_CUDA_CU_API TensorView* sub(TensorView* v1, Val* v2);
+TORCH_CUDA_CU_API TensorView* sub(Val* v1, TensorView* v2);
+TORCH_CUDA_CU_API TensorView* sub(TensorView* v1, TensorView* v2);
+// Integer binary ops
 // mod
 TORCH_CUDA_CU_API Val* mod(Val* v1, Val* v2);
 TORCH_CUDA_CU_API TensorView* mod(TensorView* v1, Val* v2);
 TORCH_CUDA_CU_API TensorView* mod(Val* v1, TensorView* v2);
 TORCH_CUDA_CU_API TensorView* mod(TensorView* v1, TensorView* v2);
-// lt
-TORCH_CUDA_CU_API Val* lt(Val* v1, Val* v2);
-TORCH_CUDA_CU_API TensorView* lt(TensorView* v1, Val* v2);
-TORCH_CUDA_CU_API TensorView* lt(Val* v1, TensorView* v2);
-TORCH_CUDA_CU_API TensorView* lt(TensorView* v1, TensorView* v2);
-// gt
-TORCH_CUDA_CU_API Val* gt(Val* v1, Val* v2);
-TORCH_CUDA_CU_API TensorView* gt(TensorView* v1, Val* v2);
-TORCH_CUDA_CU_API TensorView* gt(Val* v1, TensorView* v2);
-TORCH_CUDA_CU_API TensorView* gt(TensorView* v1, TensorView* v2);
-// eq
-TORCH_CUDA_CU_API Val* eq(Val* v1, Val* v2);
-TORCH_CUDA_CU_API TensorView* eq(TensorView* v1, Val* v2);
-TORCH_CUDA_CU_API TensorView* eq(Val* v1, TensorView* v2);
-TORCH_CUDA_CU_API TensorView* eq(TensorView* v1, TensorView* v2);
 // ceilDiv
 TORCH_CUDA_CU_API Val* ceilDiv(Val* v1, Val* v2);
 TORCH_CUDA_CU_API TensorView* ceilDiv(TensorView* v1, Val* v2);
 TORCH_CUDA_CU_API TensorView* ceilDiv(Val* v1, TensorView* v2);
 TORCH_CUDA_CU_API TensorView* ceilDiv(TensorView* v1, TensorView* v2);
+// lshift
+TORCH_CUDA_CU_API Val* lshift(Val* v1, Val* v2);
+TORCH_CUDA_CU_API TensorView* lshift(TensorView* v1, Val* v2);
+TORCH_CUDA_CU_API TensorView* lshift(Val* v1, TensorView* v2);
+TORCH_CUDA_CU_API TensorView* lshift(TensorView* v1, TensorView* v2);
+// rshift
+TORCH_CUDA_CU_API Val* rshift(Val* v1, Val* v2);
+TORCH_CUDA_CU_API TensorView* rshift(TensorView* v1, Val* v2);
+TORCH_CUDA_CU_API TensorView* rshift(Val* v1, TensorView* v2);
+TORCH_CUDA_CU_API TensorView* rshift(TensorView* v1, TensorView* v2);
+// Logical binary ops
+// eq
+TORCH_CUDA_CU_API Val* eq(Val* v1, Val* v2);
+TORCH_CUDA_CU_API TensorView* eq(TensorView* v1, Val* v2);
+TORCH_CUDA_CU_API TensorView* eq(Val* v1, TensorView* v2);
+TORCH_CUDA_CU_API TensorView* eq(TensorView* v1, TensorView* v2);
+// ge
+TORCH_CUDA_CU_API Val* ge(Val* v1, Val* v2);
+TORCH_CUDA_CU_API TensorView* ge(TensorView* v1, Val* v2);
+TORCH_CUDA_CU_API TensorView* ge(Val* v1, TensorView* v2);
+TORCH_CUDA_CU_API TensorView* ge(TensorView* v1, TensorView* v2);
+// gt
+TORCH_CUDA_CU_API Val* gt(Val* v1, Val* v2);
+TORCH_CUDA_CU_API TensorView* gt(TensorView* v1, Val* v2);
+TORCH_CUDA_CU_API TensorView* gt(Val* v1, TensorView* v2);
+TORCH_CUDA_CU_API TensorView* gt(TensorView* v1, TensorView* v2);
+// le
+TORCH_CUDA_CU_API Val* le(Val* v1, Val* v2);
+TORCH_CUDA_CU_API TensorView* le(TensorView* v1, Val* v2);
+TORCH_CUDA_CU_API TensorView* le(Val* v1, TensorView* v2);
+TORCH_CUDA_CU_API TensorView* le(TensorView* v1, TensorView* v2);
+// lt
+TORCH_CUDA_CU_API Val* lt(Val* v1, Val* v2);
+TORCH_CUDA_CU_API TensorView* lt(TensorView* v1, Val* v2);
+TORCH_CUDA_CU_API TensorView* lt(Val* v1, TensorView* v2);
+TORCH_CUDA_CU_API TensorView* lt(TensorView* v1, TensorView* v2);
+// ne
+TORCH_CUDA_CU_API Val* ne(Val* v1, Val* v2);
+TORCH_CUDA_CU_API TensorView* ne(TensorView* v1, Val* v2);
+TORCH_CUDA_CU_API TensorView* ne(Val* v1, TensorView* v2);
+TORCH_CUDA_CU_API TensorView* ne(TensorView* v1, TensorView* v2);
+
 // andOp
 TORCH_CUDA_CU_API Val* andOp(Val* v1, Val* v2);
 TORCH_CUDA_CU_API TensorView* andOp(TensorView* v1, Val* v2);
 TORCH_CUDA_CU_API TensorView* andOp(Val* v1, TensorView* v2);
 TORCH_CUDA_CU_API TensorView* andOp(TensorView* v1, TensorView* v2);
+// orOp
+TORCH_CUDA_CU_API Val* orOp(Val* v1, Val* v2);
+TORCH_CUDA_CU_API TensorView* orOp(TensorView* v1, Val* v2);
+TORCH_CUDA_CU_API TensorView* orOp(Val* v1, TensorView* v2);
+TORCH_CUDA_CU_API TensorView* orOp(TensorView* v1, TensorView* v2);
 
 // REDUCTION OPERATIONS
 TORCH_CUDA_CU_API TensorView* sum(

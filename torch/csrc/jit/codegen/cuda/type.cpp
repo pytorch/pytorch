@@ -314,11 +314,17 @@ static const char* binary_op_type2string(BinaryOpType t) {
     case BinaryOpType::Sub:
       return "sub";
 
-    // Logical Ops
+    // Integer Ops
     case BinaryOpType::Mod:
       return "mod";
     case BinaryOpType::CeilDiv:
       return "ceilDiv";
+    case BinaryOpType::Lshift:
+      return "lshift";
+    case BinaryOpType::Rshift:
+      return "rshift";
+
+    // Logical Ops
     case BinaryOpType::And:
       return "and";
     case BinaryOpType::Eq:
