@@ -4,8 +4,8 @@ namespace torch {
 namespace jit {
 
 bool IndexingPatternFinder::IsSameSource(const Node* n, const Node* m) {
-  const auto& source_n = n->sourceRange().source();
-  const auto& source_m = m->sourceRange().source();
+  const auto source_n = n->sourceRange().source();
+  const auto source_m = m->sourceRange().source();
   return (
       (source_n->text() == source_m->text()) &&
       (source_n->starting_line_no() == source_m->starting_line_no()));

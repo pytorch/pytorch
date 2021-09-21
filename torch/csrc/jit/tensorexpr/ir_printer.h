@@ -34,9 +34,10 @@ class TORCH_API IRPrinter : public IRVisitor {
   void visit(RshiftPtr v) override;
   void visit(CompareSelectPtr v) override;
 #define IMM_PRINT_VISIT(Type, Name) void visit(Name##ImmPtr v) override;
-  AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, IMM_PRINT_VISIT);
+  AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, IMM_PRINT_VISIT);
 #undef IMM_PRINT_VISIT
   void visit(CastPtr v) override;
+  void visit(BitCastPtr v) override;
   void visit(VarPtr v) override;
   void visit(RampPtr v) override;
   void visit(LoadPtr v) override;
@@ -83,6 +84,8 @@ class TORCH_API IRPrinter : public IRVisitor {
   };
 
  protected:
+  std::string to_string(CompareSelectOperation op);
+
   UniqueNameManager* name_manager() {
     return &name_manager_;
   }
@@ -103,7 +106,7 @@ TORCH_API std::ostream& operator<<(std::ostream& stream, const Tensor&);
 
 TORCH_API void print(ExprPtr expr);
 TORCH_API void print(StmtPtr stmt);
-TORCH_API void print(const Tensor* t);
+TORCH_API void print(const Tensor& t);
 
 } // namespace tensorexpr
 } // namespace jit
@@ -119,5 +122,5 @@ using torch::jit::tensorexpr::Tensor;
 
 TORCH_API std::string to_string(ExprPtr expr);
 TORCH_API std::string to_string(StmtPtr stmt);
-TORCH_API std::string to_string(const Tensor* t);
+TORCH_API std::string to_string(const Tensor& t);
 } // namespace std

@@ -146,10 +146,16 @@ TEST(OptionalTest, Nullopt) {
 using CmpTestTypes = testing::Types<
     // between two optionals
     std::pair<c10::optional<int>, c10::optional<int>>,
+
     // between an optional and a value
     std::pair<c10::optional<int>, int>,
     // between a value and an optional
-    std::pair<int, c10::optional<int>>>;
+    std::pair<int, c10::optional<int>>,
+
+    // between an optional and a differently typed value
+    std::pair<c10::optional<int>, long>,
+    // between a differently typed value and an optional
+    std::pair<long, c10::optional<int>>>;
 template <typename T>
 class CmpTest : public testing::Test {};
 TYPED_TEST_CASE(CmpTest, CmpTestTypes);

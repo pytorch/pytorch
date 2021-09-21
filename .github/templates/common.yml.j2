@@ -1,0 +1,186 @@
+{%- set upload_artifact_s3_action = "seemethere/upload-artifact-s3@v3" -%}
+
+{# squid_proxy is an private ELB that only available for GHA custom runners #}
+{%- set squid_proxy    = "http://internal-tf-lb-20210727220640487900000002-835786077.us-east-1.elb.amazonaws.com:3128" -%}
+{# squid_no_proxy is a list of common set of fixed domains or IPs that we don't need to proxy. See https://docs.aws.amazon.com/AmazonECS/latest/developerguide/http_proxy_config.html#windows-proxy #}
+{%- set squid_no_proxy = "localhost,127.0.0.1,github.com,amazonaws.com,s3.amazonaws.com,169.254.169.254,169.254.170.2,/var/run/docker.sock" -%}
+
+{%- macro concurrency(build_environment) -%}
+concurrency:
+  group: !{{ build_environment }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true
+{%- endmacro -%}
+
+{%- macro display_ec2_information() -%}
+      - name: Display EC2 information
+        shell: bash
+        run: |
+          set -euo pipefail
+          function get_ec2_metadata() {
+            # Pulled from instance metadata endpoint for EC2
+            # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
+            category=$1
+            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
+          }
+          echo "ami-id: $(get_ec2_metadata ami-id)"
+          echo "instance-id: $(get_ec2_metadata instance-id)"
+          echo "instance-type: $(get_ec2_metadata instance-type)"
+{%- endmacro -%}
+
+{%- macro parse_ref() -%}
+      - name: Parse ref
+        id: parse-ref
+        run: .github/scripts/parse_ref.py
+{%- endmacro -%}
+
+{%- macro upload_test_statistics(build_environment) -%}
+      - name: Display and upload test statistics (Click Me)
+        if: always()
+        # temporary hack: set CIRCLE_* vars, until we update
+        # tools/stats/print_test_stats.py to natively support GitHub Actions
+        env:
+          AWS_DEFAULT_REGION: us-east-1
+          CIRCLE_BRANCH: ${{ steps.parse-ref.outputs.branch }}
+          JOB_BASE_NAME: !{{ build_environment }}-test
+          CIRCLE_PR_NUMBER: ${{ github.event.pull_request.number }}
+          CIRCLE_SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
+          CIRCLE_TAG: ${{ steps.parse-ref.outputs.tag }}
+          CIRCLE_WORKFLOW_ID: '${{ github.run_id }}_${{ github.run_number }}'
+        shell: bash
+        run: |
+          python3 -m pip install -r requirements.txt
+          python3 -m pip install boto3==1.16.34
+          python3 -m tools.stats.print_test_stats --upload-to-s3 --compare-with-s3 test
+{%- endmacro -%}
+
+{%- macro setup_ec2_linux() -%}
+      !{{ display_ec2_information() }}
+      - name: Log in to ECR
+        env:
+          AWS_RETRY_MODE: standard
+          AWS_MAX_ATTEMPTS: 5
+        run: |
+          aws ecr get-login --no-include-email --region us-east-1 > /tmp/ecr-login.sh
+          bash /tmp/ecr-login.sh
+          rm /tmp/ecr-login.sh
+      - name: Chown workspace
+        env:
+          ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
+        run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          # Ensure the working directory gets chowned back to the current user
+          retry docker pull "${ALPINE_IMAGE}"
+          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - name: Clean workspace
+        run: |
+          rm -rf "${GITHUB_WORKSPACE:?}/*"
+          rm -f ~/.ssh/authorized_keys
+      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
+        uses: seemethere/add-github-ssh-key@v1
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Preserve github env variables for use in docker
+        run: |
+          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
+{%- endmacro -%}
+
+{%- macro teardown_ec2_linux() -%}
+      - name: Hold runner for 2 hours or until ssh sessions have drained
+        # Always hold for active ssh sessions
+        if: always()
+        run: .github/scripts/wait_for_ssh_to_drain.sh
+      - name: Chown workspace
+        if: always()
+        env:
+          ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
+        run: |
+          # Ensure the working directory gets chowned back to the current user
+          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - name: Kill containers, clean up images
+        if: always()
+        run: |
+          # ignore expansion of "docker ps -q" since it could be empty
+          # shellcheck disable=SC2046
+          docker stop $(docker ps -q) || true
+          # Prune all of the docker images
+          docker system prune -af
+{%- endmacro -%}
+
+{%- macro checkout_pytorch(submodules) -%}
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+        with:
+          # deep clone, to allow use of git merge-base
+          fetch-depth: 0
+          submodules: !{{ submodules }}
+{%- endmacro -%}
+
+
+{%- macro upload_test_reports(name) -%}
+      - name: Zip test reports for upload
+        if: always()
+        env:
+{%- if name == 'linux' or name == 'windows' %}
+          FILE_SUFFIX: '${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}'
+{%- else %}
+          FILE_SUFFIX: '!{{ name }}-${{ github.job }}'
+{%- endif %}
+{%- if name == 'windows' %}
+        shell: powershell
+        run: |
+          # -ir => recursive include all files in pattern
+          7z a "test-reports-$Env:FILE_SUFFIX.zip" -ir'!test\*.xml'
+{%- else %}
+        run: |
+          # Remove any previous test reports if they exist
+          rm -f test-reports-*.zip
+          zip -r "test-reports-${FILE_SUFFIX}.zip" test -i '*.xml'
+{%- endif %}
+      - uses: actions/upload-artifact@v2
+        name: Store Test Reports
+        if: always()
+        with:
+{%- if name == 'linux' or name == 'windows' %}
+          name: test-reports-${{ matrix.config }}
+{%- else %}
+          name: test-reports-!{{ name }}
+{%- endif %}
+          retention-days: 14
+          if-no-files-found: error
+          path:
+{%- if name == 'windows' %}
+            pytorch-${{ github.run_id }}/test-reports-*.zip
+{%- else %}
+            test-reports-*.zip
+{%- endif %}
+      - uses: !{{ upload_artifact_s3_action }}
+        name: Store Test Reports on S3
+        if: always()
+        with:
+          retention-days: 14
+          if-no-files-found: error
+          path:
+{%- if name == 'windows' %}
+            pytorch-${{ github.run_id }}/test-reports-*.zip
+{%- else %}
+            test-reports-*.zip
+{%- endif %}
+{%- endmacro -%}
+
+{%- macro render_test_results() -%}
+      - name: Install render_test_results dependencies
+        if: always()
+        shell: bash
+        run: |
+          python3 -m pip install junitparser==2.1.1 rich==10.9.0
+      - name: "[[ Click me for rendered test results (useful for finding failing tests) ]]"
+        if: always()
+        shell: bash
+        # Encoding is weird on windows, just try to default to utf-8 if possible
+        env:
+          PYTHONIOENCODING: "utf-8"
+        run: |
+          python3 tools/render_junit.py test/
+{%- endmacro -%}
