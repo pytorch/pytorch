@@ -7697,7 +7697,6 @@ class TestAutogradForwardMode(TestCase):
             check_forward_ad=True,
         )
 
-
 # Generic device type autograd tests.
 class TestAutogradDeviceType(TestCase):
 

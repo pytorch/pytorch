@@ -34,7 +34,6 @@ struct IndexRangeGenerator {
 Tensor toNonOptFwGrad(const c10::optional<Tensor>& t);
 Tensor toNonOptPrimal(const c10::optional<Tensor>& t);
 Tensor toNonOptTensor(const c10::optional<Tensor>& t);
-Tensor toNonOptZerosLikeTensor(const c10::optional<Tensor>& t);
 
 bool any_variable_defined(const variable_list& variables);
 void copy_range(variable_list& out, IndexRange range, const at::Tensor & t);

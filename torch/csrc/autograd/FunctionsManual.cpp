@@ -50,10 +50,6 @@ Tensor toNonOptTensor(const c10::optional<Tensor>& t) {
   return t.has_value() ? *t : Tensor();
 }
 
-Tensor toNonOptZerosLike(const c10::optional<Tensor>& t) {
-  return (t.has_value() && t->defined()) ? at::zeros_like(t.value()) : Tensor();
-}
-
 Tensor toNonOptFwGrad(const c10::optional<Tensor>& t) {
   return (t.has_value() && t->defined()) ? t->_fw_grad(/*level */ 0) : Tensor();
 }

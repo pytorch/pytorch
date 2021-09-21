@@ -36,6 +36,9 @@ namespace torch { namespace autograd {
 
 namespace VariableType {
 namespace{
+  Tensor toNonOptZerosLikeTensor(const c10::optional<Tensor>& t) {
+    return (t.has_value() && t->defined()) ? at::zeros_like(t.value()) : Tensor();
+  }
   C10_UNUSED void reset_grad_accumulator(Variable & self) {
     AutogradMeta* meta = torch::autograd::impl::get_autograd_meta(self);
     if (meta != nullptr) {
