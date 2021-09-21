@@ -7678,8 +7678,8 @@ class TestAutogradForwardMode(TestCase):
     # TODO: Temporary solution to substitute for OpsInfo
     def test_mkldnn_convolution(self):
         inp = torch.rand(2, 2, 5, 5, dtype=torch.float, requires_grad=True)
-        weight = torch.rand(2, 2, 3, 3, dtype=torch.float, requires_grad=True)
-        bias = torch.rand(2, dtype=torch.float, requires_grad=True)
+        weight = torch.rand(3, 2, 3, 3, dtype=torch.float, requires_grad=True)
+        bias = torch.rand(3, dtype=torch.float, requires_grad=True)
 
         padding = (2, 3)
         stride = (1, 1)
