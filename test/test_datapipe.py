@@ -720,6 +720,12 @@ class TestFunctionalIterDataPipe(TestCase):
     def test_fork_datapipe(self):
         input_dp = IDP(range(10))
 
+        with self.assertRaises(ValueError):
+            input_dp.fork(num_instances=0)
+
+        dp1 = input_dp.fork(num_instances=1)
+        self.assertEqual(dp1, input_dp)
+
         # Test Case: making sure all child DataPipe shares the same reference
         dp1, dp2, dp3 = input_dp.fork(num_instances=3)
         self.assertTrue(all(n1 is n2 and n1 is n3 for n1, n2, n3 in zip(dp1, dp2, dp3)))
@@ -744,6 +750,17 @@ class TestFunctionalIterDataPipe(TestCase):
             next(it1)
         with self.assertRaises(BufferError):
             next(it1)
+        with self.assertRaises(BufferError):
+            list(dp2)
+
+        # Test Case: one child DataPipe yields all value first with unlimited buffer
+        with warnings.catch_warnings(record=True) as wa:
+            dp1, dp2 = input_dp.fork(num_instances=2, buffer_size=-1)
+            self.assertEqual(len(wa), 1)
+            self.assertRegex(str(wa[0].message), r"Unlimited buffer size is set")
+        l1, l2 = list(dp1), list(dp2)
+        for d1, d2 in zip(l1, l2):
+            self.assertEqual(d1, d2)
 
         # Test Case: two child DataPipes yield value together with buffer size 1
         dp1, dp2 = input_dp.fork(num_instances=2, buffer_size=1)
@@ -818,9 +835,11 @@ class TestFunctionalIterDataPipe(TestCase):
         self.assertEqual(len(input_dp), len(dp2))
         self.assertEqual(len(input_dp), len(dp3))
 
-
     def test_demux_datapipe(self):
         input_dp = IDP(range(10))
+
+        with self.assertRaises(ValueError):
+            input_dp.demux(num_instances=0, classifier_fn=lambda x: 0)
 
         # Test Case: split into 2 DataPipes and output them one at a time
         dp1, dp2 = input_dp.demux(num_instances=2, classifier_fn=lambda x: x % 2)
@@ -840,9 +859,24 @@ class TestFunctionalIterDataPipe(TestCase):
         it1 = iter(dp1)
         with self.assertRaises(BufferError):
             next(it1)  # Buffer raises because first 5 elements all belong to the a different child
+        with self.assertRaises(BufferError):
+            list(dp2)
 
         # Test Case: values of the same classification are lumped together, and buffer_size = 5 is just enough
         dp1, dp2 = input_dp.demux(num_instances=2, classifier_fn=lambda x: 0 if x >= 5 else 1, buffer_size=5)
+        output1, output2 = list(dp1), list(dp2)
+        self.assertEqual(list(range(5, 10)), output1)
+        self.assertEqual(list(range(0, 5)), output2)
+
+        # Test Case: values of the same classification are lumped together, and unlimited buffer
+        with warnings.catch_warnings(record=True) as wa:
+            dp1, dp2 = input_dp.demux(
+                num_instances=2,
+                classifier_fn=lambda x: 0 if x >= 5 else 1,
+                buffer_size=-1
+            )
+            self.assertEqual(len(wa), 1)
+            self.assertRegex(str(wa[0].message), r"Unlimited buffer size is set")
         output1, output2 = list(dp1), list(dp2)
         self.assertEqual(list(range(5, 10)), output1)
         self.assertEqual(list(range(0, 5)), output2)
