@@ -1,5 +1,4 @@
 # encoding: utf-8
-# type: ignore[]
 import operator
 
 import torch  # isort:skip
@@ -11,6 +10,8 @@ from torch.fx.experimental.fx_acc.acc_normalizer import (
     register_custom_acc_mapper_fn,
 )
 from torch.fx.passes.shape_prop import _extract_tensor_metadata
+
+from typing import Sequence, Optional, List
 
 this_arg_is_optional = True
 
@@ -119,6 +120,7 @@ def custom_getattr_mapper(node: torch.fx.Node, _: nn.Module) -> torch.fx.Node:
     # Have to use args here since getattr forces positional args.
     input_obj = node.args[0]
     attr_name = node.args[1]
+    assert isinstance(input_obj, torch.fx.Node)
     assert (
         input_obj.meta["type"] == torch.Tensor
     ), f"Expected torch.Tensor type for {input_obj.meta['type']}"
@@ -189,6 +191,7 @@ def stack_mapper(node: torch.fx.Node, _: nn.Module) -> torch.fx.Node:
     with node.graph.inserting_before(node):
         inputs = node.kwargs["tensors"]
         unsqueeze_nodes = []
+        assert isinstance(inputs, Sequence)
         for i, t in enumerate(inputs):
             new_node = node.graph.create_node(
                 "call_function",
@@ -279,6 +282,7 @@ def addmm_mapper(node: torch.fx.Node, _: nn.Module) -> torch.fx.Node:
             new_input_node = node.graph.create_node(
                 "call_function", mul, kwargs=mul_kwargs, name=f"{node.name}_input_mul"
             )
+            assert isinstance(input_node, torch.fx.Node)
             new_input_node.meta = input_node.meta.copy()
             input_node = new_input_node
 
@@ -863,9 +867,11 @@ def torch_split_mapper(node: torch.fx.Node, mod: nn.Module) -> torch.fx.Node:
             new_node.meta = node.meta.copy()
             return new_node
 
+        assert isinstance(split_size_or_sections, Sequence)
         start = 0
         slice_nodes = []
         for i in split_size_or_sections:
+            assert isinstance(i, int)
             new_kwargs = {
                 "input": node.kwargs["input"],
                 "dims": (node.kwargs["dim"],),
@@ -1022,7 +1028,7 @@ def getitem(*, input, idx):
 
 @register_acc_op
 def slice_tensor(*, input, dims, starts, stops, steps):
-    slices = [None for _ in range(input.dim())]
+    slices: List[Optional[slice]] = [None for _ in range(input.dim())]
 
     # For all provided dims, extract out a slice for starts/stops/steps.
     for idx, dim in enumerate(dims):
@@ -1055,6 +1061,7 @@ def slice_tensor(*, input, dims, starts, stops, steps):
     ],
 )
 def custom_narrow_mapper(node: torch.fx.Node, mod: nn.Module) -> torch.fx.Node:
+    assert isinstance(node.kwargs["start"], int) and isinstance(node.kwargs["length"], int)
     kwargs = {
         "input": node.kwargs["input"],
         "dims": (node.kwargs["dim"],),
@@ -1109,8 +1116,9 @@ def custom_tensor_reshape_mapper(node: torch.fx.Node, _: nn.Module) -> torch.fx.
     input_node = node.kwargs["input"]
     shape = node.kwargs["shape"]
 
-    if isinstance(shape[0], (tuple, list)):
-        shape = shape[0]
+    assert isinstance(shape, Sequence)
+    if isinstance(shape[0], (tuple, list)):  # type: ignore[index]
+        shape = shape[0]  # type: ignore[index]
 
     with node.graph.inserting_before(node):
         new_node = node.graph.call_function(
@@ -1214,6 +1222,7 @@ def packed_quantized_linear_mapper(
     Mapping from quantized_linear module to acc_op.linear. We unpack weight and bias
     in this mapper and pass them directly to linear node.
     """
+    assert isinstance(node.target, str)
     linear_module = dict(mod.named_modules())[node.target]
     prefix = node.target.replace(".", "_")
     weight_name = f"{prefix}_weight"
@@ -1262,6 +1271,7 @@ def packed_quantized_conv2d_mapper(
     Mapping from quantzed Conv2d module to acc_op.conv. We unpack all the parameters
     in this mapper and pass them directly to conv2d node.
     """
+    assert isinstance(node.target, str)
     conv_module = dict(mod.named_modules())[node.target]
     prefix = node.target.replace(".", "_")
     weight_name = f"{prefix}_weight"
@@ -1371,6 +1381,7 @@ def packed_quantized_convrelu2d_mapper(
     ]
 )
 def custom_dequantize_mapper(node: torch.fx.Node, mod: nn.Module) -> torch.fx.Node:
+    assert isinstance(node.kwargs["input"], torch.fx.Node)
     assert "tensor_meta" in node.kwargs["input"].meta
     new_kwargs = {"input": node.kwargs["input"], "input_tensor_meta": node.kwargs["input"].meta["tensor_meta"]}
     # `input_tensor_meta` contains quantization parameters that can be used to lower
@@ -1379,5 +1390,6 @@ def custom_dequantize_mapper(node: torch.fx.Node, mod: nn.Module) -> torch.fx.No
         new_node = node.graph.create_node(
             "call_function", dequantize, kwargs=new_kwargs, name=node.name
         )
+        assert isinstance(node, torch.fx.Node)
         new_node.meta = node.meta
         return new_node

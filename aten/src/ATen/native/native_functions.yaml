@@ -271,12 +271,12 @@
     CPU, CUDA: angle_out
 
 - func: view_as_real(Tensor(a) self) -> Tensor(a)
-  variants: function, method
+  variants: function
   dispatch:
     CPU, CUDA: view_as_real
 
 - func: view_as_complex(Tensor(a) self) -> Tensor(a)
-  variants: function, method
+  variants: function
   dispatch:
     CPU, CUDA: view_as_complex
 
@@ -644,6 +644,7 @@
   variants: function, method
   device_check: NoCheck
   device_guard: False
+  tags: inplace_view
   dispatch:
     CompositeExplicitAutograd: as_strided_
 
@@ -3848,6 +3849,7 @@
 # this. If this `Variable` is a view, throws an `std::runtime_error()`.
 - func: detach_(Tensor(a!) self) -> Tensor(a!)
   variants: function, method
+  tags: inplace_view
   dispatch:
     CompositeExplicitAutograd: detach_
 
@@ -4001,6 +4003,7 @@
   variants: method
   device_check: NoCheck
   device_guard: False
+  tags: inplace_view
   dispatch:
     CompositeExplicitAutograd: squeeze_
 
@@ -4008,6 +4011,7 @@
   variants: method
   device_check: NoCheck
   device_guard: False
+  tags: inplace_view
   dispatch:
     CompositeExplicitAutograd: squeeze_
 
@@ -4015,6 +4019,7 @@
   variants: method
   device_check: NoCheck
   device_guard: False
+  tags: inplace_view
 
 - func: sspaddmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   variants: function, method
@@ -4246,6 +4251,7 @@
   device_check: NoCheck
   device_guard: False
   variants: method
+  tags: inplace_view
   dispatch:
     CompositeExplicitAutograd: t_
 
@@ -4352,6 +4358,7 @@
   variants: method
   device_check: NoCheck
   device_guard: False
+  tags: inplace_view
   dispatch:
     CompositeExplicitAutograd: transpose_
 
@@ -4488,6 +4495,7 @@
   variants: method
   device_check: NoCheck
   device_guard: False
+  tags: inplace_view
   dispatch:
     CompositeExplicitAutograd: unsqueeze_
 
@@ -6775,6 +6783,7 @@
   variants: method
   device_check: NoCheck
   device_guard: False
+  tags: inplace_view
 
 # swapdims, alias for transpose
 - func: swapdims(Tensor(a) self, int dim0, int dim1) -> Tensor(a)
@@ -6786,6 +6795,7 @@
   variants: method
   device_check: NoCheck
   device_guard: False
+  tags: inplace_view
 
 - func: cholesky.out(Tensor self, bool upper=False, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -7403,16 +7413,27 @@
 
 - func: all(Tensor self) -> Tensor
   device_check: NoCheck   # TensorIterator
+  structured_delegate: all.all_out
   variants: method, function
+
+- func: all.all_out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck
+  structured: True
   dispatch:
-    CPU, CUDA: all
+    CPU, CUDA: all_all_out
 
 - func: any(Tensor self) -> Tensor
   device_check: NoCheck   # TensorIterator
+  structured_delegate: any.all_out
   variants: method, function
   dispatch:
-    CPU, CUDA: any
     SparseCPU, SparseCUDA: any_sparse
+
+- func: any.all_out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck
+  structured: True
+  dispatch:
+    CPU, CUDA: any_all_out
 
 - func: renorm.out(Tensor self, Scalar p, int dim, Scalar maxnorm, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
