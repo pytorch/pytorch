@@ -664,14 +664,14 @@ PyObject *THPFunction_apply(PyObject *cls, PyObject *inputs)
 {
   HANDLE_TH_ERRORS
   auto info_pair = unpack_input<false>(inputs);
-  auto iv_inputs = std::vector<c10::IValue>();
   bool record = false;
   if (C10_UNLIKELY(at::shouldRunRecordFunction(&record))) {
     at::RecordFunction guard(at::RecordScope::FUNCTION);
     if (guard.isActive()) {
       if (guard.needsInputs()) {
-        for (auto i : info_pair.first.input_vars) {
-           iv_inputs.push_back(c10::IValue(i));
+        auto iv_inputs = std::vector<c10::IValue>();
+        for (auto const &var : info_pair.first.input_vars) {
+           iv_inputs.emplace_back(c10::IValue(var));
         }
         guard.before(((PyTypeObject*)cls)->tp_name, iv_inputs, at::sequence_number::peek());
       } else {
