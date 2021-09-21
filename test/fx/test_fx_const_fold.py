@@ -392,3 +392,65 @@ class TestConstFold(unittest.TestCase):
         fold_result = gm_folded(in_x)
         base_result = mod(in_x)
         self.assertTrue(torch.equal(fold_result, base_result))
+
+    def test_const_fold_has_inlined_call_module_node(self):
+        class ConstFoldTestModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.attr = torch.nn.Parameter(torch.randn(2, 3))
+                self.mod = torch.nn.Identity()
+                self.mod.relu = torch.nn.ReLU()
+
+            def forward(self, x):
+                a = self.attr + self.attr
+                return self.mod.relu(x - a)
+
+        mod = ConstFoldTestModule()
+        gm_folded = const_fold.split_const_subgraphs(mod)
+
+        # Now run both folded and non-folded to check results equal.
+        in_x = torch.randn(2, 3)
+        fold_result = gm_folded(in_x)
+        base_result = mod(in_x)
+        self.assertTrue(torch.equal(fold_result, base_result))
+
+    def test_const_fold_module_attr(self):
+        class ConstFoldTestModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.const = torch.nn.Parameter(torch.randn(2, 3))
+                self.mod = torch.nn.Identity()
+                self.mod.attr = torch.nn.Parameter(torch.randn(2, 3))
+
+            def forward(self, x):
+                a = self.const + self.mod.attr
+                x = x + a
+                return x + self.mod.attr
+
+        mod = ConstFoldTestModule()
+        gm_folded = const_fold.split_const_subgraphs(mod)
+
+        # Now run both folded and non-folded to check results equal.
+        in_x = torch.randn(2, 3)
+        fold_result = gm_folded(in_x)
+        base_result = mod(in_x)
+        self.assertTrue(torch.equal(fold_result, base_result))
+
+    def test_const_fold_unused_placeholder(self):
+        class ConstFoldTestModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.const = torch.nn.Parameter(torch.randn(2, 3))
+
+            def forward(self, x, y, z):
+                a = self.const + self.const
+                return y + a
+
+        mod = ConstFoldTestModule()
+        gm_folded = const_fold.split_const_subgraphs(mod)
+
+        # Now run both folded and non-folded to check results equal.
+        in_x = torch.randn(2, 3)
+        fold_result = gm_folded(in_x, in_x, in_x)
+        base_result = mod(in_x, in_x, in_x)
+        self.assertTrue(torch.equal(fold_result, base_result))
