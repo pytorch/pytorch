@@ -92,7 +92,7 @@ end
 
 puts "Linking static libraries..."
 libs = ['libc10.a', 'libclog.a', 'libpthreadpool.a', 'libXNNPACK.a', 'libeigen_blas.a', 'libcpuinfo.a', 'libpytorch_qnnpack.a', 'libtorch_cpu.a', 'libtorch.a']
-frameworks = ['CoreML', 'Metal', 'MetalPerformanceShaders', 'Accelerate']
+frameworks = ['CoreML', 'Metal', 'MetalPerformanceShaders', 'Accelerate', 'UIKit']
 targets.each do |target|
     target.frameworks_build_phases.clear
     for lib in libs do

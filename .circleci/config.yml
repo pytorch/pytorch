@@ -1833,7 +1833,7 @@ jobs:
             PROJ_ROOT=/Users/distiller/project
             source ~/anaconda/bin/activate
             # use the pytorch nightly build to generate models
-            conda install pytorch torchvision -c pytorch-nightly --yes
+            pip3 install --pre torch torchvision torchaudio -f https://download.pytorch.org/whl/nightly/cpu/torch_nightly.html
             # generate models for differnet backends
             cd ${PROJ_ROOT}/ios/TestApp/benchmark
             mkdir -p ../models
@@ -1844,8 +1844,10 @@ jobs:
               python trace_model.py
             fi
             if [ ${BUILD_LITE_INTERPRETER} == 1 ]; then
+              echo "Setting up the TestApp for LiteInterpreter"
               ruby setup.rb --lite 1
             else
+              echo "Setting up the TestApp for Full JIT"
               ruby setup.rb
             fi
             cd ${PROJ_ROOT}/ios/TestApp
