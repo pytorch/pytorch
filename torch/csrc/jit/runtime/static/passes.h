@@ -25,5 +25,7 @@ TORCH_API bool HasInplaceOp(
 
 TORCH_API void FuseSignLog1P(std::shared_ptr<Graph>& graph);
 
+TORCH_API void UseVariadicTupleUnpack(const std::shared_ptr<Graph>& graph);
+
 } // namespace jit
 } // namespace torch
