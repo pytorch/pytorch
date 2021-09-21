@@ -5,6 +5,7 @@ import logging
 import torch
 import torch.fx
 from torch.fx.node import map_arg
+from torch.fx._compatibility import compatibility
 
 from .shape_prop import ShapeProp
 from .split_utils import split_by_tags
@@ -21,6 +22,7 @@ from .tools_common import (
 _LOGGER = logging.getLogger(__name__)
 
 
+@compatibility(is_backward_compatible=False)
 class FxNetMinimizerBadModuleError(Exception):
     """
     Raised if failed to split out a minimize module
@@ -28,7 +30,7 @@ class FxNetMinimizerBadModuleError(Exception):
 
     pass
 
-
+@compatibility(is_backward_compatible=False)
 class FxNetMinimizerRunFuncError(Exception):
     """
     Raised if error occurs during run_a or run_b functions
@@ -36,7 +38,7 @@ class FxNetMinimizerRunFuncError(Exception):
 
     pass
 
-
+@compatibility(is_backward_compatible=False)
 class FxNetMinimizerResultMismatchError(Exception):
     """
     Raised if comparing function thinks the results are mismatching.
