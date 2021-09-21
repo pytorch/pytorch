@@ -56,18 +56,18 @@ class ShuffleDataFramesPipe(DFIterDataPipe):
         all_buffer = []
         for df in self.source_datapipe:
             if size is None:
-                size = dataframe_wrapper.get_len(df)
-            for i in range(dataframe_wrapper.get_len(df)):
-                all_buffer.append(dataframe_wrapper.get_item(df, index=i))
+                size = df_wrapper.get_len(df)
+            for i in range(df_wrapper.get_len(df)):
+                all_buffer.append(df_wrapper.get_item(df, index=i))
         random.shuffle(all_buffer)
         buffer = []
         for df in all_buffer:
             buffer.append(df)
             if len(buffer) == size:
-                yield dataframe_wrapper.concat(buffer)
+                yield df_wrapper.concat(buffer)
                 buffer = []
         if len(buffer):
-            yield dataframe_wrapper.concat(buffer)
+            yield df_wrapper.concat(buffer)
 
 
 @functional_datapipe('_dataframes_filter', enable_df_api_tracing=True)

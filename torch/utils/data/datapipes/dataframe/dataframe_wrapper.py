@@ -29,10 +29,22 @@ class PandasWrapper:
         return isinstance(data, pandas.core.series.Series)
 
     @classmethod
+    def enumerate(cls, data):
+        if not WITH_PANDAS:
+            Exception("DataFrames prototype requires pandas to function")
+        return enumerate(data)
+
+    @classmethod
     def concat(cls, buffer, **kwargs):
         if not WITH_PANDAS:
             Exception("DataFrames prototype requires pandas to function")
         return pandas.concat(buffer, **kwargs)
+
+    @classmethod
+    def get_item(cls, data, idx):
+        if not WITH_PANDAS:
+            Exception("DataFrames prototype requires pandas to function")
+        return data[idx:idx + 1]
 
     @classmethod
     def get_len(cls, df):
@@ -71,6 +83,16 @@ def is_series_object(data):
 def concat(buffer):
     wrapper = get_df_wrapper()
     wrapper.concat(buffer)
+
+
+def enumerate(data):
+    wrapper = get_df_wrapper()
+    wrapper.enumerate(data)
+
+
+def get_item(data, idx):
+    wrapper = get_df_wrapper()
+    wrapper.get_item(data, idx)
 
 
 def get_len(df):

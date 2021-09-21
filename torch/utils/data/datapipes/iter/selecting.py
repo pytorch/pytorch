@@ -97,9 +97,9 @@ class FilterIterDataPipe(IterDataPipe[T_co]):
         if df_wrapper.is_series_object(condition):
             # We are operatring on DataFrames filter here
             result = []
-            for idx, mask in enumerate(condition):
+            for idx, mask in df_wrapper.enumerate(condition):
                 if mask:
-                    result.append(data[idx:idx + 1])
+                    result.append(df_wrapper.get_item(data, idx))
             if len(result):
                 return df_wrapper.concat(result)
             else:
