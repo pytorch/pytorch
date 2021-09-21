@@ -265,13 +265,12 @@ void BytecodeDeserializer::parseFunctionSchema(
     };
     auto schemaTableElements =
         std::move(*std::move(*schemaTable).toTuple()).elements();
-    auto arg_list =
-        std::move(*expect_field(
-                       schemaTableElements,
-                       "arguments",
-                       BYTECODE_INDEX_SCHEMA_ARGUMENTS)
-                       .toTuple())
-            .elements();
+    auto arg_list = std::move(*expect_field(
+                                   schemaTableElements,
+                                   "arguments",
+                                   BYTECODE_INDEX_SCHEMA_ARGUMENTS)
+                                   .toTuple())
+                        .elements();
     auto ret_list =
         std::move(
             *expect_field(
@@ -368,10 +367,16 @@ void BytecodeDeserializer::parseMethods(
     }
 
     parseInstructions(
-        function_name, std::move(ins_list), debug_handles_m_tuple, function.get());
+        function_name,
+        std::move(ins_list),
+        debug_handles_m_tuple,
+        function.get());
 
     parseOperators(
-        std::move(ops_list), model_version, module_load_options_, function.get());
+        std::move(ops_list),
+        model_version,
+        module_load_options_,
+        function.get());
 
     parseConstants(consts_list, function.get());
 
