@@ -107,7 +107,18 @@ git submodule update --init --recursive --jobs 0
 
 If you want to have no-op incremental rebuilds (which are fast), see the section below titled "Make no-op build fast."
 
-3. Build PyTorch [from source](https://github.com/pytorch/pytorch/#from-source) and replace `python setup.py install` with `python setup.py develop`
+3. Build PyTorch [from source](https://github.com/pytorch/pytorch/#from-source) in `develop` mode:
+
+The change you have to make is to replace
+
+```bash
+python setup.py install
+```
+
+with
+
+```bash
+python setup.py develop
 
 This mode will symlink the Python files from the current local source
 tree into the Python install.  Hence, if you modify a Python file, you
