@@ -18,6 +18,7 @@ namespace mobile {
 struct Code;
 
 class Function;
+// FIXME This is more like a hack, don't land or check in it.
 class BytecodeFunction : public torch::jit::Function {
  public:
   BytecodeFunction(mobile::Function& function) : function_(function) {}
