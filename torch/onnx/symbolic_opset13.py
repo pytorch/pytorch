@@ -384,7 +384,6 @@ def diagonal(g, self, offset, dim1, dim2):
     # are calculating diagonal values. In cases with diagonal overrun, we return a tensor which has
     # the dimension of the row/column where overrun occurred as 0-dim, as we are essentially
     # returning an empty tensor
-
     overrun_cond = g.op("Not", g.op("Equal", diag_size, g.op("Constant", value_t=torch.tensor(0, dtype=torch.int64))))
     if_op = g.op("If", overrun_cond)
     if_node = if_op.node()
