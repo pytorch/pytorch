@@ -172,6 +172,7 @@ class TORCH_API Pickler {
   void pushTensor(const IValue& ivalue);
   void pushTensorReference(const IValue& ivalue);
   void pushLiteralTensor(const IValue& ivalue);
+  void pushLiteralSparseTensor(const at::Tensor& tensor);
   void pushTuple(const IValue& ivalue);
   void pushString(const std::string& string);
   void pushDevice(const IValue& ivalue);

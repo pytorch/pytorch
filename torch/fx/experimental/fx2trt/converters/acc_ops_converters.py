@@ -717,6 +717,7 @@ def acc_ops_squeeze(network, target, args, kwargs, name):
     # dim, which is a very rare case. For now we just claim not supporting dim=None.
     assert dim is not None, "We don't support dim=None right now."
 
+    dim = dim % (len(input_val.shape) + (1 if network.has_implicit_batch_dimension else 0))
     if network.has_implicit_batch_dimension:
         assert dim != 0, "We don't support squeeze batch dim when it's implicit."
         dim -= 1
@@ -796,6 +797,29 @@ def acc_ops_unsqueeze(network, target, args, kwargs, name):
     layer.name = name
     return layer.get_output(0)
 
+@tensorrt_converter(acc_ops.topk)
+def acc_ops_topk(network, target, args, kwargs, name):
+    input_val = kwargs["input"]
+
+    if not isinstance(input_val, trt.tensorrt.ITensor):
+        raise RuntimeError(f"topk received input {input_val} that is not part "
+                           "of the TensorRT region!")
+
+    if kwargs["sorted"] and kwargs["k"] != 1:
+        raise RuntimeError("Currently we don't support sorted=True in topk.")
+
+    if not network.has_implicit_batch_dimension and len(input_val.shape) <= 1:
+        raise RuntimeError("At least 2 dimensions are required for input to topk.")
+
+    num_dims = len(input_val.shape) + (1 if network.has_implicit_batch_dimension else 0)
+    k = kwargs["k"]
+    dim = (kwargs["dim"] if kwargs["dim"] is not None else -1) % num_dims
+    operation = trt.TopKOperation.MAX if kwargs["largest"] else trt.TopKOperation.MIN
+    layer = network.add_topk(
+        input_val, operation, k, get_axes_for_reduce_op(dim, network.has_implicit_batch_dimension)
+    )
+    layer.name = name
+    return (layer.get_output(0), layer.get_output(1))
 
 @tensorrt_converter(acc_ops.adaptive_avg_pool2d)
 def acc_ops_adaptive_avg_pool2d(network, target, args, kwargs, name):
@@ -1073,7 +1097,6 @@ def acc_ops_clamp(network, target, args, kwargs, name):
         input_val = clamp_max_layer.get_output(0)
 
     return input_val
-
 
 @tensorrt_converter(acc_ops.tuple_construct)
 def acc_ops_tuple_construct(network, target, args, kwargs, name):

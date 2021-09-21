@@ -1712,7 +1712,6 @@ TEST(Reductions, ReductionRfactorCacheTempOuter) {
 #CHECK-NOT: tmp
       )IR";
   torch::jit::testing::FileCheck().run(expected_ir, oss.str());
-
   SimpleIREvaluator cg(s, {b, c, m, n, k});
 
   cg.call({in, out, M, N, K});

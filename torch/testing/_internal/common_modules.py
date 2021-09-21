@@ -2,11 +2,12 @@ import torch
 from copy import deepcopy
 from functools import wraps, partial
 from itertools import chain
-from torch.testing import floating_types
+from torch.testing import make_tensor
+from torch.testing._internal.common_dtype import floating_types
 from torch.testing._internal.common_device_type import (
     _TestParametrizer, _dtype_test_suffix, _update_param_kwargs, skipIf)
 from torch.testing._internal.common_nn import nllloss_reference, get_reduction
-from torch.testing._internal.common_utils import make_tensor, freeze_rng_state
+from torch.testing._internal.common_utils import freeze_rng_state
 from types import ModuleType
 from typing import List, Tuple, Type, Set, Dict
 
@@ -225,7 +226,7 @@ def generate_regression_criterion_inputs(make_input):
     return [
         ModuleInput(
             constructor_input=FunctionInput(reduction=reduction),
-            forward_input=FunctionInput(make_input(size=(4, )), make_input(size=4,)),
+            forward_input=FunctionInput(make_input(shape=(4, )), make_input(shape=4,)),
             reference_fn=no_batch_dim_reference_criterion_fn,
             desc='no_batch_dim_{}'.format(reduction)
         ) for reduction in ['none', 'mean', 'sum']]
@@ -236,7 +237,7 @@ def module_inputs_torch_nn_AvgPool1d(module_info, device, dtype, requires_grad, 
 
     return [
         ModuleInput(constructor_input=FunctionInput(kernel_size=2),
-                    forward_input=FunctionInput(make_input(size=(3, 6))),
+                    forward_input=FunctionInput(make_input(shape=(3, 6))),
                     desc='no_batch_dim',
                     reference_fn=no_batch_dim_reference_fn)]
 
@@ -246,13 +247,13 @@ def module_inputs_torch_nn_ELU(module_info, device, dtype, requires_grad, **kwar
 
     return [
         ModuleInput(constructor_input=FunctionInput(alpha=2.),
-                    forward_input=FunctionInput(make_input(size=(3, 2, 5))),
+                    forward_input=FunctionInput(make_input(shape=(3, 2, 5))),
                     reference_fn=lambda m, p, i: torch.where(i >= 0, i, 2 * (i.exp() - 1))),
         ModuleInput(constructor_input=FunctionInput(alpha=2.),
-                    forward_input=FunctionInput(make_input(size=())),
+                    forward_input=FunctionInput(make_input(shape=())),
                     desc='scalar'),
         ModuleInput(constructor_input=FunctionInput(),
-                    forward_input=FunctionInput(make_input(size=(3,))),
+                    forward_input=FunctionInput(make_input(shape=(3,))),
                     desc='no_batch_dim',
                     reference_fn=no_batch_dim_reference_fn)]
 
@@ -262,16 +263,28 @@ def module_inputs_torch_nn_CELU(module_info, device, dtype, requires_grad, **kwa
 
     return [
         ModuleInput(constructor_input=FunctionInput(alpha=2.),
-                    forward_input=FunctionInput(make_input(size=(3, 2, 5))),
+                    forward_input=FunctionInput(make_input(shape=(3, 2, 5))),
                     reference_fn=lambda m, p, i: torch.where(i >= 0, i, 2. * ((.5 * i).exp() - 1))),
         ModuleInput(constructor_input=FunctionInput(alpha=2.),
-                    forward_input=FunctionInput(make_input(size=())),
+                    forward_input=FunctionInput(make_input(shape=())),
                     reference_fn=lambda m, p, i: torch.where(i >= 0, i, 2 * (i.exp() - 1)),
                     desc='scalar'),
         ModuleInput(constructor_input=FunctionInput(alpha=2.),
-                    forward_input=FunctionInput(make_input(size=(3,))),
+                    forward_input=FunctionInput(make_input(shape=(3,))),
                     desc='no_batch_dim',
                     reference_fn=no_batch_dim_reference_fn)]
+
+def module_inputs_torch_nn_ReLU(module_info, device, dtype, requires_grad):
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    module_inputs = [
+        ModuleInput(constructor_input=FunctionInput(),
+                    forward_input=FunctionInput(make_input((2, 3, 4, 5)))),
+        ModuleInput(constructor_input=FunctionInput(),
+                    forward_input=FunctionInput(make_input(4)),
+                    desc='no_batch_dim'),
+    ]
+    return module_inputs
 
 
 def module_inputs_torch_nn_L1Loss(module_info, device, dtype, requires_grad, **kwargs):
@@ -279,12 +292,12 @@ def module_inputs_torch_nn_L1Loss(module_info, device, dtype, requires_grad, **k
 
     return [
         ModuleInput(constructor_input=FunctionInput(),
-                    forward_input=FunctionInput(make_input(size=(2, 3, 4)),
-                                                make_input(size=(2, 3, 4))),
+                    forward_input=FunctionInput(make_input(shape=(2, 3, 4)),
+                                                make_input(shape=(2, 3, 4))),
                     reference_fn=lambda m, p, i, t: 1. / i.numel() * sum((a - b).abs().sum()
                                                                          for a, b in zip(i, t))),
         ModuleInput(constructor_input=FunctionInput(),
-                    forward_input=FunctionInput(make_input(size=()), make_input(size=())),
+                    forward_input=FunctionInput(make_input(shape=()), make_input(shape=())),
                     reference_fn=lambda m, p, i, t: 1. / i.numel() * (i - t).abs().sum(),
                     desc='scalar')] + generate_regression_criterion_inputs(make_input)
 
@@ -300,5 +313,7 @@ module_db: List[ModuleInfo] = [
     ModuleInfo(torch.nn.Linear,
                module_inputs_func=module_inputs_torch_nn_Linear),
     ModuleInfo(torch.nn.NLLLoss,
-               module_inputs_func=module_inputs_torch_nn_NLLLoss)
+               module_inputs_func=module_inputs_torch_nn_NLLLoss),
+    ModuleInfo(torch.nn.ReLU,
+               module_inputs_func=module_inputs_torch_nn_ReLU),
 ]
