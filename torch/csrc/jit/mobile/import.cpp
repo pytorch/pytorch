@@ -240,7 +240,7 @@ void BytecodeDeserializer::parseFunctionSchema(
   // function schema
   if (schemaTable) { // (schema is optional for back compat)
     auto parseArgList = [this](std::vector<IValue>&& argTables) {
-      c10::ArgumentVector args;
+      std::vector<c10::Argument> args;
       for (auto&& argTable : std::move(argTables)) {
         auto argTableElements =
             std::move(*std::move(argTable).toTuple()).elements();

@@ -85,6 +85,7 @@ void OptimizeGraph(
 #endif
   ConstantPropagation(graph);
   RemoveImmutableInputDictLookups(graph);
+  UseVariadicTupleUnpack(graph);
 }
 
 // remove unused input 0 from graph
@@ -101,7 +102,7 @@ bool RemoveSelfFromGraphInput(std::shared_ptr<torch::jit::Graph>& graph) {
 // remove "self" from function schema
 c10::FunctionSchema RemoveSelfFromSchema(const c10::FunctionSchema& s) {
   TORCH_CHECK(s.arguments().size() >= 1 && s.arguments()[0].name() == "self");
-  c10::ArgumentVector args({s.arguments().begin() + 1, s.arguments().end()});
+  std::vector<Argument> args({s.arguments().begin() + 1, s.arguments().end()});
   return s.cloneWithArguments(args);
 }
 
