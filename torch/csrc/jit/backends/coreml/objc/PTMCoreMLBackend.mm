@@ -4,6 +4,12 @@
 
 #import <CoreML/CoreML.h>
 
+#if C10_IOS
+#import <UIKit/UIKit.h>
+#elif TARGET_OS_MAC
+#import <Foundation/NSProcessInfo.h>
+#endif
+
 namespace torch {
 namespace jit {
 namespace mobile {
