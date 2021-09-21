@@ -4184,6 +4184,14 @@ Tensor _lu_with_info_jvp(
   }
 }
 
+Tensor linalg_trace_backward(const Tensor & grad, IntArrayRef input_sizes, int64_t offset) {
+  auto grad_input = at::zeros(input_sizes, grad.options());
+  auto diag = grad_input.diagonal(offset, -2, -1);
+  diag.copy_(grad.unsqueeze(-1));
+  return grad_input;
+}
+
+
 } // namespace details
 } // namespace generated
 } // namespace autograd

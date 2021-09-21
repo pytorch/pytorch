@@ -300,6 +300,8 @@ Tensor cumprod_jvp(Tensor self_t, Tensor self_p, Tensor result, int dim);
 Tensor gather_with_keepdimed_indices(const Tensor& input, int64_t dim, const Tensor& indices, bool keepdim);
 Tensor evenly_read_jvp(const Tensor& fw_grad, const Tensor & input, const Tensor & value);
 
+Tensor linalg_trace_backward(const Tensor & grad, IntArrayRef input_sizes, int64_t offset);
+
 } // namespace details
 } // namespace generated
 } // namespace autograd

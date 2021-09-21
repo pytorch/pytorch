@@ -1085,13 +1085,6 @@ Tensor linalg_trace(const Tensor& self, int64_t offset) {
   return at::diagonal(self, offset, -2, -1).sum(-1);
 }
 
-Tensor linalg_trace_backward(const Tensor & grad, IntArrayRef input_sizes, int64_t offset) {
-  auto grad_input = at::zeros(input_sizes, grad.options());
-  auto diag = grad_input.diagonal(offset, -2, -1);
-  diag.copy_(grad.unsqueeze(-1));
-  return grad_input;
-}
-
 void impl_func_prod(
     const Tensor& self,
     IntArrayRef dims,
@@ -1104,13 +1097,6 @@ void impl_func_prod(
   } else {
     prod_stub(iter.device_type(), iter);
   }
-}
-
-Tensor prod(const Tensor& self, int64_t dim, bool keepdim, c10::optional<ScalarType> opt_dtype) {
-  ScalarType dtype = get_dtype_from_self(self, opt_dtype, true);
-  Tensor result = create_reduction_result(self, dim, keepdim, dtype);
-  native::prod_out_impl(result, self, dim, keepdim, dtype);
-  return result;
 }
 
 TORCH_IMPL_FUNC(prod_out)
