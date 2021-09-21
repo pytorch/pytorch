@@ -743,14 +743,14 @@ struct to_ir {
     if (schema.returns().size() == 1) {
       def_stack_.back().declared_return_type_ = schema.returns().at(0).type();
     }
-    c10::ArgumentVector arguments =
+    std::vector<Argument> arguments =
         emitFormalArguments(def, self, schema, block);
 
     // body
     auto stmts_list = def.statements();
     emitStatements(stmts_list.begin(), stmts_list.end());
     handleMaybeNoReturn(def, block);
-    c10::ArgumentVector returns = {emitOutput(def.range(), schema, block)};
+    std::vector<Argument> returns = {emitOutput(def.range(), schema, block)};
     return {def.name().name(), "", std::move(arguments), std::move(returns)};
   }
 
@@ -799,12 +799,12 @@ struct to_ir {
     return true;
   }
 
-  c10::ArgumentVector emitFormalArguments(
+  std::vector<Argument> emitFormalArguments(
       const Def& def,
       const Self* self,
       const FunctionSchema& schema,
       Block* block) {
-    c10::ArgumentVector arguments; // for schema
+    std::vector<Argument> arguments; // for schema
     // inputs
     auto it = def.decl().params().begin();
     auto end = def.decl().params().end();
@@ -3936,7 +3936,7 @@ struct to_ir {
     Value* rpc_node_output = rpc_node->output();
 
     // Set output type from FunctionSchema and corresponding rpc_op.
-    const c10::ArgumentVector& returns = functionSchema.returns();
+    const std::vector<Argument>& returns = functionSchema.returns();
     TORCH_INTERNAL_ASSERT(returns.size() == 1);
     TypePtr output_type = nullptr;
     if (rpc_op == prim::rpc_async) {
@@ -5293,7 +5293,7 @@ void CompilationUnit::define_hooks(
     FunctionSchema schema =
         typeParser.parseSchemaFromDef(hook_def, true /* skip_self*/);
     // need to add self as the first because we skipped it
-    c10::ArgumentVector arguments;
+    std::vector<Argument> arguments;
     arguments.emplace_back(Argument(
         hook_def.decl().params()[0].ident().name(), self->getClassType()));
     arguments.insert(
@@ -5447,7 +5447,7 @@ void CompilationUnit::define_interface(
     FunctionSchema schema =
         typeParser.parseSchemaFromDef(method_def, /* skip_self*/ true);
     // need to add self as the first because we skipped it
-    c10::ArgumentVector arguments;
+    std::vector<Argument> arguments;
     arguments.emplace_back(
         Argument(method_def.decl().params()[0].ident().name(), iface));
     arguments.insert(
