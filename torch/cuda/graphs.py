@@ -20,7 +20,7 @@ def graph_pool_handle():
     See :ref:`Graph memory management<graph-memory-management>`.
 
     .. warning::
-        This API is in beta and may change in future releases.
+        This API is a prototype and may change in future releases.
     """
     return _graph_pool_handle()
 
@@ -31,7 +31,7 @@ class CUDAGraph(torch._C._CUDAGraph):
     Wrapper around a CUDA graph.
 
     .. warning::
-        This API is in beta and may change in future releases.
+        This API is a prototype and may change in future releases.
     """
     def __new__(cls):
         return super(CUDAGraph, cls).__new__(cls)
@@ -112,7 +112,7 @@ class graph(object):
         used an explicit ``stream`` argument, you should pass the same ``stream`` argument to this capture.
 
     .. warning::
-        This API is in beta and may change in future releases.
+        This API is a prototype and may change in future releases.
     """
     default_capture_stream = None
 
@@ -185,7 +185,7 @@ def make_graphed_callables(callables, sample_args):
         that's expected for the corresponding real input in the training loop.
 
     .. warning::
-        This API is in beta and may change in future releases.
+        This API is a prototype and may change in future releases.
 
     .. warning::
         ``sample_args`` for each callable must be a tuple of Tensors. Other types and keyword args
@@ -229,7 +229,7 @@ def make_graphed_callables(callables, sample_args):
             assert all(b.requires_grad is False for b in c.buffers()), "In any :class:`~torch.nn.Module` passed to " + \
                 ":func:`~make_graphed_callables`, only parameters may be trainable. All buffers must have " + \
                 "``requires_grad=False``."
-        assert all(isinstance(arg, torch.Tensor) for arg in args), "In the beta API, sample_args " + \
+        assert all(isinstance(arg, torch.Tensor) for arg in args), "In the prototype API, sample_args " + \
             "for each callable must be a tuple of Tensors. Other types and keyword args are not allowed."
 
 

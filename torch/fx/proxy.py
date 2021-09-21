@@ -274,7 +274,7 @@ class Proxy:
 
         if len(tracers) > 1:
             raise RuntimeError(f'Found multiple different tracers {list(tracers.keys())} while '
-                               f'trying to trace operations {orig_method}')
+                               'trying to trace operations {orig_method}')
         tracer = next(iter(tracers.keys()))
 
         if isinstance(orig_method, torch._C.ScriptMethod):
