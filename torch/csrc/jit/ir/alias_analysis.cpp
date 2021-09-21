@@ -70,7 +70,8 @@ class MutableTypePtrHelper {
 
     auto mutable_types = mapTypeToAliasTypeSetImpl(type);
     if (mutable_types) {
-      auto it = mutable_type_cache_->emplace(type, std::move(*mutable_types)).first;
+      auto it =
+          mutable_type_cache_->emplace(type, std::move(*mutable_types)).first;
       return &it->second;
     } else {
       return nullptr;
