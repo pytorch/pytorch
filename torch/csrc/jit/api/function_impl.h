@@ -136,7 +136,9 @@ struct TORCH_API GraphFunction : public Function {
   std::shared_ptr<Graph> graph_; // for debugging and for inlining
 
   // Optimized graph, computed lazily. Used for inlining.
-  mutable std::array<c10::optional<std::shared_ptr<Graph>>, SpecializationKey::TotalCount>
+  mutable std::array<
+      c10::optional<std::shared_ptr<Graph>>,
+      SpecializationKey::TotalCount>
       optimized_graphs_;
 
   // GraphFunctions are invokable from multiple threads, so this lock needs to
