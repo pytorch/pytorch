@@ -4625,12 +4625,10 @@ class DistributedTest:
                 gradient_as_bucket_view=grad_is_view,
             )
             post_localSGD_opt = post_localSGD_optimizer.PostLocalSGDOptimizer(
-                params=post_localSGD_net.parameters(),
-                optimizer_class=torch.optim.SGD,
+                optim=torch.optim.SGD(post_localSGD_net.parameters(), lr=learning_rate),
                 averager=averagers.PeriodicModelAverager(
                     period=period, warmup_steps=warmup_steps
-                ),
-                lr=learning_rate,
+                )
             )
 
             input = torch.randn(dist.get_world_size() * 2, 2).cuda()
@@ -6857,6 +6855,153 @@ class DistributedTest:
             ):
                 dist.scatter_object_list([], scatter_list, src=src_rank)
 
+        def _generate_sparse_tensors_for_bucket_assignment_test(self):
+            tensors = [
+                torch.empty([50], dtype=torch.float),
+                torch.empty([25], dtype=torch.double),
+                torch.empty([50], dtype=torch.float),
+                torch.empty([25], dtype=torch.double),
+                torch.empty([50], dtype=torch.float),
+                torch.empty([25], dtype=torch.double),
+            ]
+
+            tensors_sparse = [t.to_sparse() for t in tensors]
+            return tensors_sparse
+
+        def _test_compute_bucket_assignment_by_size(self, use_logger):
+            group_gloo = dist.new_group(
+                timeout=timedelta(seconds=60), backend=dist.Backend.GLOO
+            )
+            # Set NCCL_BLOCKING_WAIT and use a new NCCL group to improve test
+            # determinism.
+            os.environ["NCCL_BLOCKING_WAIT"] = "1"
+            group_to_use = dist.new_group(
+                backend=dist.get_backend(), timeout=timedelta(seconds=5)
+            )
+            torch.cuda.set_device(self.rank)
+
+            # Create a valid model. The constructor initializes the logger that we use later.
+            # We never actually use the rest of the model - we only need its logger.
+            net = EmbeddingNet(0)
+            net = torch.nn.parallel.DistributedDataParallel(
+                net.to(self.rank),
+                device_ids=[self.rank],
+                process_group=group_to_use,
+            )
+
+            # if we don't pass a logger then we can only check that an exception was thrown.
+            expected_err = "No support for sparse tensors."
+            with self.assertRaisesRegex(RuntimeError, expected_err):
+                tensors_sparse = self._generate_sparse_tensors_for_bucket_assignment_test()
+                if use_logger:
+                    result = dist._compute_bucket_assignment_by_size(
+                        tensors_sparse,
+                        [400],
+                        logger=net.logger)
+                else:
+                    result = dist._compute_bucket_assignment_by_size(tensors_sparse, [400])
+            if use_logger:
+                verify_ddp_error_logged(net, expected_err)
+
+            # Perform gloo-based barrier to ensure one rank doesn't exit test
+            # early which causes failure with Barrier.sync.
+            dist.barrier(group_gloo)
+
+        @require_backend({"gloo", "nccl"})
+        @require_backends_available({"gloo", "nccl"})
+        @skip_if_lt_x_gpu(2)
+        @skip_if_rocm
+        def test_compute_bucket_assignment_by_size_sparse_error_without_logger(self):
+            self._test_compute_bucket_assignment_by_size(use_logger=False)
+
+        @require_backend({"gloo", "nccl"})
+        @require_backends_available({"gloo", "nccl"})
+        @skip_if_lt_x_gpu(2)
+        @skip_if_rocm
+        def test_compute_bucket_assignment_by_size_sparse_error_with_logger(self):
+            self._test_compute_bucket_assignment_by_size(use_logger=True)
+
+        def _determine_expected_error_verify_model_across_rank(self, group_to_use):
+            # When running with NCCL backend, we don't expect an error on rank 0,
+            # rather, it will be taken down by NCCL_ASYNC_ERROR_HANDLING. When
+            # running with Gloo or with debug mode wrapper, we expect the error
+            # to be caught inline.
+            is_detail_dbg_mode = (
+                dist._get_debug_mode() == dist._DistributedDebugLevel.DETAIL
+            )
+            if self.rank == 0:
+                if dist.get_backend(group_to_use) == dist.Backend.NCCL and not is_detail_dbg_mode:
+                    expected_err = "Caught collective operation timeout"
+                    ctx = self.assertRaisesRegex(RuntimeError, expected_err)
+                else:
+                    expected_err = None
+                    ctx = self.assertRaises(RuntimeError)
+            else:
+                expected_err = "appears not to match"
+                ctx = self.assertRaisesRegex(RuntimeError, expected_err)
+            return ctx, expected_err
+
+        def _test_verify_model_across_rank(self, use_logger):
+            group_gloo = dist.new_group(
+                timeout=timedelta(seconds=60), backend=dist.Backend.GLOO
+            )
+            # Set NCCL_BLOCKING_WAIT and use a new NCCL group to improve test
+            # determinism.
+            os.environ["NCCL_BLOCKING_WAIT"] = "1"
+            group_to_use = dist.new_group(
+                backend=dist.get_backend(), timeout=timedelta(seconds=5)
+            )
+            torch.cuda.set_device(self.rank)
+            ctx, expected_err = self._determine_expected_error_verify_model_across_rank(group_to_use)
+
+            # Create a valid model. The constructor initializes the logger that we use later.
+            net = EmbeddingNet(0)
+            net = torch.nn.parallel.DistributedDataParallel(
+                net.to(self.rank),
+                device_ids=[self.rank],
+                process_group=group_to_use,
+            )
+
+            # Modify the model so that the number of parameters are different for each rank.
+            # This will cause a RuntimeError to be thrown below in dist._verify_model_across_ranks,
+            # so we can check if the correct error is thrown and is logged.
+            # We can't do this in the constructor above otherwise the logger will
+            # not be properly initialized.
+            net.module.lin = nn.Linear(100 if self.rank == 0 else 10, 1)
+
+            # if we pass a logger we can verify that it was logged
+            with ctx:
+                if use_logger:
+                    dist._verify_model_across_ranks(net.process_group, [list(net.parameters())], net.logger)
+                else:
+                    dist._verify_model_across_ranks(net.process_group, [list(net.parameters())])
+                # Should only be run by rank 0, and blocking_wait catches and
+                # reports exception.
+                dist.barrier(group_to_use)
+
+            # We don't check when self.rank != 0 because the logger doesn't log
+            # the error "Caught collective operation" as that is not thrown in the reducer.
+            if use_logger and self.rank != 0:
+                verify_ddp_error_logged(net, expected_err)
+
+            # Perform gloo-based barrier to ensure one rank doesn't exit test
+            # early which causes failure with Barrier.sync.
+            dist.barrier(group_gloo)
+
+        @require_backend({"gloo", "nccl"})
+        @require_backends_available({"gloo", "nccl"})
+        @skip_if_lt_x_gpu(2)
+        @skip_if_rocm
+        def test_verify_model_across_rank_with_logger(self):
+            self._test_verify_model_across_rank(use_logger=True)
+
+        @require_backend({"gloo", "nccl"})
+        @require_backends_available({"gloo", "nccl"})
+        @skip_if_lt_x_gpu(2)
+        @skip_if_rocm
+        def test_verify_model_across_rank_without_logger(self):
+            self._test_verify_model_across_rank(use_logger=False)
+
         @require_backend({"gloo", "nccl"})
         @require_backends_available({"gloo", "nccl"})
         @skip_if_lt_x_gpu(2)
@@ -6872,31 +7017,10 @@ class DistributedTest:
                 backend=dist.get_backend(), timeout=timedelta(seconds=5)
             )
             torch.cuda.set_device(self.rank)
+            ctx, expected_err = self._determine_expected_error_verify_model_across_rank(group_to_use)
             # Creates network with different sized embedding table on different
             # ranks. This should throw an error during DDP init.
             net = EmbeddingNet(self.rank)
-            # When running with NCCL backend, we don't expect an error on rank 0,
-            # rather, it will be taken down by NCCL_ASYNC_ERROR_HANDLING. When
-            # running with Gloo or with debug mode wrapper, we expect the error
-            # to be caught inline.
-            is_detail_dbg_mode = (
-                dist._get_debug_mode() == dist._DistributedDebugLevel.DETAIL
-            )
-            rank_0_ctx = (
-                self.assertRaisesRegex(
-                    RuntimeError, "Caught collective operation timeout"
-                )
-                if dist.get_backend(group_to_use) == dist.Backend.NCCL
-                and not is_detail_dbg_mode
-                # Gloo can raise various exception messages, so just assert
-                # Runtime error here.
-                else self.assertRaises(RuntimeError)
-            )
-            ctx = (
-                rank_0_ctx
-                if self.rank == 0
-                else self.assertRaisesRegex(RuntimeError, "appears not to match")
-            )
             with ctx:
                 net = torch.nn.parallel.DistributedDataParallel(
                     net.to(self.rank),
@@ -6906,6 +7030,7 @@ class DistributedTest:
                 # Should only be run by rank 0, and blocking_wait catches and
                 # reports exception.
                 dist.barrier(group_to_use)
+            # can't use verify_ddp_error_logged here because net was never properly constructed
 
             # Perform gloo-based barrier to ensure one rank doesn't exit test
             # early which causes failure with Barrier.sync.
@@ -7924,3 +8049,42 @@ class DistributedTest:
         )
         def test_ddp_new_tensor_in_fwd_static_graph(self):
             return self._test_ddp_new_tensor_in_fwd(static_graph=True)
+
+        @skip_if_lt_x_gpu(2)
+        @sandcastle_skip_if(
+            BACKEND != "nccl" and BACKEND != "gloo",
+            "Only Nccl & Gloo backend support DistributedDataParallel",
+        )
+        def test_ddp_broadcast_buffer(self):
+            rank = self.rank
+            torch.cuda.set_device(rank)
+            torch.manual_seed(rank)
+            torch.cuda.manual_seed(rank)
+
+            class NetWithBuffers(nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.a = nn.Linear(10, 10, bias=False)
+                    self.b = nn.Linear(10, 1, bias=False)
+                    self.register_buffer('buffer', torch.randn(1, 2))
+
+                def forward(self, x):
+                    return self.b(self.a(x))
+
+            model = NetWithBuffers().cuda(rank)
+            model_ddp = torch.nn.parallel.DistributedDataParallel(
+                model,
+                device_ids=[self.rank],
+            )
+            inp = torch.randn(2, 10, device=rank)
+            for i in range(2):
+                if rank == 0:
+                    model_ddp.module.buffer = model_ddp.module.buffer + 1
+                loss = model_ddp(inp).sum()
+                loss.backward()
+                # Ensure all buffers are synchronized.
+                bufs = [torch.empty_like(model_ddp.module.buffer) for _ in range(dist.get_world_size())]
+                dist.all_gather(bufs, model_ddp.module.buffer)
+                rank_0_buf = bufs[0]
+                for buf in bufs[1:]:
+                    self.assertEqual(rank_0_buf, buf)
