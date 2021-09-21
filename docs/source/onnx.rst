@@ -520,6 +520,23 @@ The runtime that conumes the model needs to support the custom op. See
 or your runtime of choice's documentation.
 
 
+Discovering all unconvertible ATen ops at once
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+When export fails due to an unconvertible ATen op, there may in fact be more
+than one such op but the error message only mentions the first. To discover
+all of the unconvertible ops in one go you can:
+
+    from torch.onnx import utils as onnx_utils
+
+    # prepare model, args, opset_version
+    ...
+
+    torch_script_graph, unconvertible_ops = onnx_utils.unconvertible_ops(
+        model, args, opset_version=opset_version)
+
+    print(set(unconvertible_ops))
+
 Frequently Asked Questions
 --------------------------
 Q: I have exported my LSTM model, but its input size seems to be fixed?
