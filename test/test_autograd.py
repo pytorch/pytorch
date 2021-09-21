@@ -7681,7 +7681,7 @@ class TestAutogradForwardMode(TestCase):
         weight = torch.rand(3, 2, 3, 3, dtype=torch.float, requires_grad=True)
         bias = torch.rand(3, dtype=torch.float, requires_grad=True)
 
-        padding = (2, 3)
+        padding = (1, 1)
         stride = (1, 1)
         dilation = (3, 1)
         groups = 1
