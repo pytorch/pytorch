@@ -1451,7 +1451,7 @@ Tensor matmul(
   } else if (dim_tensor1 == 2 && dim_tensor2 == 1) {
     return has_out ? at::native::mv_out(tensor1, tensor2, *out_opt) : tensor1.mv(tensor2);
   } else if (dim_tensor1 == 1 && dim_tensor2 == 2) {
-    // optimization: use mv instead of mm by calling mv with swaped (and transposed) args
+    // optimization: use mv instead of mm by calling mv with swapped (and transposed) args
     return has_out ? at::native::mv_out(tensor2.t(), tensor1, *out_opt) : tensor2.t().mv(tensor1);
   } else if (dim_tensor1 == 2 && dim_tensor2 == 2) {
     return has_out ? at::mm_out(*out_opt, tensor1, tensor2) : tensor1.mm(tensor2);
@@ -1461,25 +1461,21 @@ Tensor matmul(
     const auto sizes_1 = tensor1.sizes();
     auto output_size = DimVector((size_t *) sizes_1.begin(), (size_t *) sizes_1.end() - 1);
 
-    // fold the batch into the first dimension
-    // Why not tensor1.view(-1, sizes_1[sizes_1.size() -1])?
+    // Fold the batch into the first dimension
+    // Why not tensor1.view(-1, sizes_1.back())?
     // If the last dim is 0, then view(-1, 0) won't work because the -1 becomes ambiguous.
     // This can happen in e.g. [3, 5, 0] @ [0, 0].
-    // So we manually compute the folding as a result.
     const auto dim1_size = c10::multiply_integers(output_size);
     const bool is_tensor2_matrix = dim_tensor2 == 2;
     if (is_tensor2_matrix) {
       output_size.push_back(tensor2.sizes()[1]);
     }
-    const Tensor t1 = tensor1.expect_contiguous()->view({dim1_size, sizes_1.back()});
+    const auto t1 = tensor1.expect_contiguous()->view({dim1_size, sizes_1.back()});
     if (has_out) {
-      if (is_tensor2_matrix) {
-        const Tensor output = at::_unsafe_view(at::mm_out(*out_opt, t1, tensor2), output_size);
-        return out_opt->set_(output);
-      } else {
-        const Tensor output = at::_unsafe_view(at::native::mv_out(t1, tensor2, *out_opt), output_size);
-        return out_opt->set_(output);
-      }
+      const auto output = is_tensor2_matrix
+                            ? at::_unsafe_view(at::mm_out(*out_opt, t1, tensor2), output_size)
+                            : at::_unsafe_view(at::native::mv_out(t1, tensor2, *out_opt), output_size);
+      return out_opt->set_(output);
     } else {
       if (is_tensor2_matrix) {
         return at::_unsafe_view(at::mm(t1, tensor2), output_size);
@@ -1496,9 +1492,9 @@ Tensor matmul(
     if (is_tensor1_matrix) {
       // FIXME This does two extra copies as the returned result from BLAS is already C-transposed,
       // so transposing its strides it would already be C-contiguous
-      const Tensor result = matmul(out_opt, tensor2.transpose(-2, -1), tensor1.t())
-                              .transpose_(-2, -1)
-                              .contiguous();
+      const auto result = matmul(out_opt, tensor2.transpose(-2, -1), tensor1.t())
+                            .transpose_(-2, -1)
+                            .contiguous();
       return has_out ? out_opt->set_(result) : result;
     }
     else {
@@ -1528,10 +1524,10 @@ Tensor matmul(
     const int64_t expand_batch_product = c10::multiply_integers(output_shape);
 
     // flatten expanded batches
-    const Tensor tensor1_expanded = tensor1.expand(tensor1_expand_size)
-                                           .reshape({expand_batch_product, n, m1});
-    const Tensor tensor2_expanded = tensor2.expand(tensor2_expand_size)
-                                           .reshape({expand_batch_product, m2, p});
+    const auto tensor1_expanded = tensor1.expand(tensor1_expand_size)
+                                         .reshape({expand_batch_product, n, m1});
+    const auto tensor2_expanded = tensor2.expand(tensor2_expand_size)
+                                         .reshape({expand_batch_product, m2, p});
 
     // reshape batches back into result
     // we make the most likely path explicit
@@ -1541,7 +1537,7 @@ Tensor matmul(
       } else {
         output_shape.push_back(n);
       }
-    } else if (dim_tensor2 > 1) {
+    } else { // dim_tensor2 > 1
       output_shape.push_back(p);
     }
 

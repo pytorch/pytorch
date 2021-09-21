@@ -4964,7 +4964,7 @@ class TestLinalg(TestCase):
         def assertEqual(answer, expected):
             if x.dtype.is_floating_point or x.dtype.is_complex:
                 k = max(x.shape[-1], 1)  # Scale the atol with the size of the matrix
-                self.assertEqual(answer, expected, atol=k * 5e-6, rtol=1e-5)
+                self.assertEqual(answer, expected, atol=k * 5e-5, rtol=1e-4)
             else:
                 self.assertEqual(answer, expected)
 
@@ -4974,7 +4974,8 @@ class TestLinalg(TestCase):
         self.assertTrue(ans.is_contiguous())
         assertEqual(ans, expected)
 
-        out = torch.empty((0,), dtype=x.dtype, device=x.device)
+        # We do not do any broadcasting on y, so this is fine
+        out = torch.empty(ans.shape, dtype=x.dtype, device=x.device)
         ans = torch.matmul(x, y, out=out)
         self.assertIs(ans, out)
         self.assertTrue(ans.is_contiguous())
@@ -4989,13 +4990,13 @@ class TestLinalg(TestCase):
         self.assertTrue(ans.is_contiguous())
         assertEqual(ans, expected)
 
-        out = torch.empty((0,), dtype=x.dtype, device=x.device)
+        out = torch.empty(ans.shape, dtype=x.dtype, device=x.device)
         ans = torch.matmul(yt, xt, out=out)
         self.assertIs(ans, out)
         self.assertTrue(ans.is_contiguous())
         assertEqual(ans, expected)
 
-    def gen_sizes_matmul(self, x_dim, y_dim=4, matrix_size=8, batch_size=5):
+    def gen_sizes_matmul(self, x_dim, y_dim=4, matrix_size=4, batch_size=3):
         """
         Generates sequences of tuples (x, y) of with size(x) = x_dim and
         size(y) <= y_dim that are compatible wrt. matmul
@@ -5029,8 +5030,7 @@ class TestLinalg(TestCase):
     def test_matmul_small_brute_force_2d_Nd(self, device, dtype):
         make_arg = partial(make_tensor, device=device, dtype=dtype)
 
-        for (size_x, size_y), nctg_x, nctg_y in product(self.gen_sizes_matmul(2, matrix_size=6, batch_size=4),
-                                                        (True, False), (True, False)):
+        for (size_x, size_y), nctg_x, nctg_y in product(self.gen_sizes_matmul(2), (True, False), (True, False)):
             self.check_single_matmul(make_arg(size_x, noncontiguous=nctg_x),
                                      make_arg(size_y, noncontiguous=nctg_y))
 
