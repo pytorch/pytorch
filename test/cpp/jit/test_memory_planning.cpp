@@ -354,7 +354,7 @@ void test(
   for (const auto& item : actual_unmanaged_allocs) {
     ASSERT_TRUE(
         planned_unmanaged_allocs[reconciled_nodes_map[item.first]] ==
-        item.second);
+        item.second) << planned_unmanaged_allocs[reconciled_nodes_map[item.first]] << "\n" << item.second;
   }
   assertAllClose(baseline, res);
 }
