@@ -24,7 +24,6 @@ using caffe2::serialize::FileAdapter;
 using caffe2::serialize::IStreamAdapter;
 using caffe2::serialize::PyTorchStreamReader;
 using caffe2::serialize::ReadAdapterInterface;
-struct SupportedType;
 
 c10::IValue readArchive(
     const std::string& archive_name,
@@ -189,13 +188,40 @@ std::unordered_map<std::string, OperatorInfo> _get_model_ops_and_info(
 
 /********************** Get Type Table **********************/
 
+// Forward declare
+std::unordered_set<std::string> _get_model_contained_types(
+    const std::vector<IValue>& bytecode_ivalues);
+
+std::unordered_set<std::string> _get_model_contained_types(std::istream& in) {
+  std::unique_ptr<IStreamAdapter> rai = std::make_unique<IStreamAdapter>(&in);
+  return _get_model_contained_types(std::move(rai));
+}
+
+std::unordered_set<std::string> _get_model_contained_types(
+    const std::string& filename) {
+  std::unique_ptr<FileAdapter> rai = std::make_unique<FileAdapter>(filename);
+  return _get_model_contained_types(std::move(rai));
+}
+
+std::unordered_set<std::string> _get_model_contained_types(
+    std::shared_ptr<ReadAdapterInterface> rai) {
+  if (!check_zip_file(rai)) {
+    TORCH_CHECK(
+        false,
+        "Failed to open .ptl file please ensure the model was exported for mobile");
+  }
+  PyTorchStreamReader reader(std::move(rai));
+  auto bytecode_values = get_bytecode_ivalues(reader);
+  return _get_model_contained_types(bytecode_values);
+}
+
 // Get deduplicate type table given bytecode,
-std::unordered_set<std::string> _get_type_table(
-    std::vector<IValue> bytecode_ivalues) {
+std::unordered_set<std::string> _get_model_contained_types(
+    const std::vector<IValue>& bytecode_ivalues) {
   std::unordered_set<std::string> contained_types;
-  // To avoid parsing types twice, declare $parsed_type_names_records and use
-  // type name (string, ex: "Dict[int, Tuple[Tensor, Tensor, Tensor]]") as the
-  // hash to record which types are parsed.
+  // To avoid parsing same type twice, declare $parsed_type_names_records and
+  // use type name (string, ex: "Dict[int, Tuple[Tensor, Tensor, Tensor]]") as
+  // the hash to record which types are parsed.
   std::unordered_set<std::string> parsed_type_names_records;
   for (const auto i : c10::irange(1, bytecode_ivalues.size())) {
     auto method_tuple = bytecode_ivalues.at(i).toTuple()->elements();
@@ -241,11 +267,12 @@ ModelCompatibilityInfo ModelCompatibilityInfo::get(
         false, "Failed to open zip file for model compatibility information");
   }
   PyTorchStreamReader reader(std::move(rai));
-  auto bytecode_values = get_bytecode_ivalues(reader);
+  std::vector<IValue> bytecode_values = get_bytecode_ivalues(reader);
   uint64_t model_bytecode_version =
       _get_model_bytecode_version(bytecode_values);
   auto model_info = _get_model_ops_and_info(bytecode_values);
-  std::unordered_set<std::string> type_table = _get_type_table(bytecode_values);
+  std::unordered_set<std::string> type_table =
+      _get_model_contained_types(bytecode_values);
   return ModelCompatibilityInfo{model_bytecode_version, model_info, type_table};
 }
 
