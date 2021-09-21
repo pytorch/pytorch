@@ -1,6 +1,5 @@
 from collections.abc import Sequence
 from functools import partial, wraps
-import unittest
 import warnings
 
 import torch
@@ -685,7 +684,6 @@ class TestJit(JitCommonTestCase):
     #   and runtimes (eager, traced, scripted).
     # TODO WARNING: inplace x {traced, scripted} not currently tested
     @_variant_ops(op_db)
-    @unittest.skipIf(True, "Temporarily skipping while landing Union PR stack")
     def test_variant_consistency_jit(self, device, dtype, op):
         _requires_grad = op.supports_autograd and (dtype.is_floating_point or
                                                    op.supports_complex_autograd(torch.device(device).type))
@@ -786,9 +784,16 @@ class TestJit(JitCommonTestCase):
                         if supports_tracing:
                             out = variant(get_sample(), *sample.args, **sample.kwargs)
 
-                            # TODO: handle multiple outputs
-                            if isinstance(out, torch.Tensor):
-                                self.checkShapeAnalysis(out.size(), traced_fn.graph, op.assert_jit_shape_analysis)
+                            # right now, tuple of outputs and tensor output supported
+                            # TODO: list of tensor outputs
+                            tuple_of_tensors = isinstance(out, tuple) and all([isinstance(elem, torch.Tensor) for elem in out])
+
+                            if isinstance(out, torch.Tensor) or tuple_of_tensors:
+                                if tuple_of_tensors:
+                                    sizes = [elem.size() for elem in out]
+                                else:
+                                    sizes = out.size()
+                                self.checkShapeAnalysis(sizes, traced_fn.graph, op.assert_jit_shape_analysis)
                                 checked_shape_analysis = True
                         if op.assert_jit_shape_analysis:
                             self.assertTrue(checked_shape_analysis)
