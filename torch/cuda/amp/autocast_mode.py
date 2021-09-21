@@ -8,7 +8,6 @@ try:
 except ModuleNotFoundError:
     np = None  # type: ignore[assignment]
 from torch._six import string_classes
-from typing import Any
 
 
 def autocast_decorator(autocast_instance, func):
