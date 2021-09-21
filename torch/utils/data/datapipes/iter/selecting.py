@@ -94,7 +94,7 @@ class FilterIterDataPipe(IterDataPipe[T_co]):
     def _returnIfTrue(self, data):
         condition = self.filter_fn(data, *self.args, **self.kwargs)
 
-        if df_wrapper.is_series_object(condition):
+        if df_wrapper.is_column(condition):
             # We are operatring on DataFrames filter here
             result = []
             for idx, mask in enumerate(df_wrapper.iterate(condition)):
@@ -111,7 +111,7 @@ class FilterIterDataPipe(IterDataPipe[T_co]):
             return data
 
     def _isNonEmpty(self, data):
-        if df_wrapper.is_dataframe_object(data):
+        if df_wrapper.is_dataframe(data):
             return True
         r = data is not None and \
             not (isinstance(data, list) and len(data) == 0 and self.drop_empty_batches)
