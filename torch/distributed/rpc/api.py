@@ -265,7 +265,7 @@ def _barrier(worker_names):
         )
 
 @_require_initialized
-def _wait_all_workers(timeout):
+def _wait_all_workers(timeout=DEFAULT_SHUTDOWN_TIMEOUT):
     r"""
     Block until all local and remote RPC processes reach this method and wait
     for all outstanding work to complete. Every RPC process must call this
