@@ -36,6 +36,7 @@ namespace torch { namespace autograd {
 
 namespace VariableType {
 namespace{
+  // TODO: Move toNonOptZerosLikeTensor back to FunctionsManual
   Tensor toNonOptZerosLikeTensor(const c10::optional<Tensor>& t) {
     return (t.has_value() && t->defined()) ? at::zeros_like(t.value()) : Tensor();
   }
