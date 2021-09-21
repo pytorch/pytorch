@@ -75,11 +75,11 @@ void common_checks_baddbmm_bmm(Meta& meta, const Tensor& batch1, const Tensor& b
 
   auto& result = meta.maybe_get_output(0);
   if (is_bmm || !result.defined()) {
-	  // For bmm, we perform resizing for out tensor, this should change in future
-	  // Related test which will be impacted: test/test_torch.py:test_bmm_multithreaded
+    // For bmm, we perform resizing for out tensor, this should change in future
+    // Related test which will be impacted: test/test_torch.py:test_bmm_multithreaded
     meta.set_output({bs, res_rows, res_cols}, batch1.options());
   } else {
-    // [for baddbmm] We raise error is incorrect shape is passed as out tensor 
+    // [for baddbmm] We raise error is incorrect shape is passed as out tensor
     // See the thread here: https://github.com/pytorch/pytorch/pull/64805#discussion_r711545287
     const auto result_sizes = result.sizes();
     TORCH_CHECK(result_sizes[0] == bs && result_sizes[1] == res_rows && result_sizes[2] == res_cols);
