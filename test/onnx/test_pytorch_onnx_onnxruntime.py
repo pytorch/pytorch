@@ -5282,7 +5282,7 @@ class TestONNXRuntime(unittest.TestCase):
 
         class DiagonalModelOffsetOverrun(torch.nn.Module):
             def forward(self, x):
-                return (torch.diagonal(x, offset=-2), torch.diagonal(x, offset=5))
+                return torch.diagonal(x, offset=-2), torch.diagonal(x, offset=5)
 
         x = torch.randn(2, 4, 5, 2)
         # Other test inputs to test dynamic behavior

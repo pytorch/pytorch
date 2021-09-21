@@ -375,20 +375,27 @@ def diagonal(g, self, offset, dim1, dim2):
     gather_indices = zeros(g, gather_shape, 4, None, None)
 
     # There might be cases where offset value is greater than number of rows/columns
-    # and might cause the diagonal to overrun. In these cases, we return a tensor which
-    # consists of a 0-dim value
+    # and might cause the diagonal to overrun and as a result of this, diag_size would be zero.
+    # For example, if
+    #       offset = 9, dim1_size = 2 (columns), dim2_size = 4 (rows)
+    #       diag_size = max(min(2, (4-9)), 0) = 0, based on calculation above
+    # Cases with diagonal overrun always result in diag_size = max(0, -ve value) = 0
+    # In cases without diagonal overrun, we select the appropriate rows/columns along which we
+    # are calculating diagonal values. In cases with diagonal overrun, we return a tensor which has
+    # the dimension of the row/column where overrun occurred as 0-dim, as we are essentially
+    # returning an empty tensor
+
     overrun_cond = g.op("Not", g.op("Equal", diag_size, g.op("Constant", value_t=torch.tensor(0, dtype=torch.int64))))
-    # create the "If" node and add the "then" and "else" blocks to it.
-    if_node_outputs = g.op("If", overrun_cond)
-    if_node = if_node_outputs.node()
+    if_op = g.op("If", overrun_cond)
+    if_node = if_op.node()
 
     if_block = _add_block(if_node)
-    gather_indices_ = if_block.op("Add", gather_indices, select_window)
-    gather_indices_ = sym_help._unsqueeze_helper(if_block, gather_indices_, [rank - 1])
-    final_non_overrun_ = if_block.op("GatherND", result, gather_indices_, batch_dims_i=rank - 2)
+    gather_indices_if_block = if_block.op("Add", gather_indices, select_window)
+    gather_indices_if_block = sym_help._unsqueeze_helper(if_block, gather_indices_if_block, [rank - 1])
+    final_non_overrun_ = if_block.op("GatherND", result, gather_indices_if_block, batch_dims_i=rank - 2)
     _add_output_to_block(if_block, final_non_overrun_)
 
     else_block = _add_block(if_node)
     final_overrun_ = zeros(else_block, gather_shape, 6, None, None)
     _add_output_to_block(else_block, final_overrun_)
-    return if_node_outputs
+    return if_op
