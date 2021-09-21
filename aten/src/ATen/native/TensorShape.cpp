@@ -2211,18 +2211,9 @@ std::vector<Tensor> meshgrid(TensorList tensors,
 
   std::vector<int64_t> shape(size);
   for(const auto i: c10::irange(size)){
-    switch (tensor_refs[i].get().dim()) {
-    case 0:
-      shape[i] = 1;
-      break;
-    case 1:
-      shape[i] = tensor_refs[i].get().size(0);
-      break;
-    default:
-      TORCH_CHECK(false,
-                  "torch.meshgrid: Expected 0D or 1D tensor in the tensor "
-                  "list but got: ", tensor_refs[i]);
-    }
+    TORCH_CHECK(tensor_refs[i].get().dim() <= 1,
+                "torch.meshgrid: Expected 0D or 1D tensor in the tensor list but got: ", tensor_refs[i]);
+    shape[i] = tensor_refs[i].get().numel();  // treat 0D tensors as if they were a 1D tensor
   }
   std::vector<Tensor> grids;
   for(const auto i: c10::irange(size)){
