@@ -7675,24 +7675,22 @@ class TestAutogradForwardMode(TestCase):
             with self.assertRaisesRegex(RuntimeError, "out= function"):
                 torch.add(foo, bar, out=bar)
 
+    # TODO: Temporary solution to substitute for OpsInfo
     def test_mkldnn_convolution(self):
-        n = 2
-        c = 3
-        o = 4
-        x = 5
-
-        inp = torch.rand(n, c, x, dtype=torch.float, requires_grad=True)
-        weight = torch.rand(o, c, x, dtype=torch.float, requires_grad=True)
-        bias = torch.rand(o, dtype=torch.float, requires_grad=True)
+        inp = torch.rand(2, 2, 5, 5, dtype=torch.float, requires_grad=True)
+        weight = torch.rand(2, 2, 3, 3, dtype=torch.float, requires_grad=True)
+        bias = torch.rand(2, dtype=torch.float, requires_grad=True)
 
         padding = (2, 3)
-        stride = (4, 5)
+        stride = (1, 1)
         dilation = (3, 1)
         groups = 1
 
         torch.autograd.gradcheck(
             torch.mkldnn_convolution,
             [inp, weight, bias, padding, stride, dilation, groups],
+            eps=1e-3,
+            atol=1e-3,
             check_forward_ad=True,
         )
 
