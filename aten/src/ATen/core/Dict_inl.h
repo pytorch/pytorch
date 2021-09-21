@@ -50,6 +50,8 @@ inline size_t DictKeyHash::operator()(const IValue& ivalue) const {
     return std::hash<bool>()(ivalue.toBool());
   } else if (ivalue.isTensor()) {
     return std::hash<TensorImpl*>()(ivalue.toTensor().unsafeGetTensorImpl());
+  } else if (ivalue.isDevice()) {
+    return std::hash<Device>()(ivalue.toDevice());
   } else {
     throw std::runtime_error(
         "Can't hash IValues with tag '" + ivalue.tagKind() + "'");
