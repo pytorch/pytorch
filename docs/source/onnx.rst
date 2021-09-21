@@ -525,7 +525,7 @@ Discovering all unconvertible ATen ops at once
 
 When export fails due to an unconvertible ATen op, there may in fact be more
 than one such op but the error message only mentions the first. To discover
-all of the unconvertible ops in one go you can:
+all of the unconvertible ops in one go you can::
 
     from torch.onnx import utils as onnx_utils
 
