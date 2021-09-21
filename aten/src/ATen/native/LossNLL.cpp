@@ -6,6 +6,7 @@
 #include <ATen/TensorUtils.h>
 #include <ATen/native/cpu/utils.h>
 #include <c10/util/SmallBuffer.h>
+#include <c10/macros/Macros.h>
 
 #include <c10/core/TensorOptions.h>
 
@@ -135,7 +136,7 @@ static void nll_loss_out_frame(
     const Tensor& target,
     const Tensor& weight,
     int64_t reduction,
-    int64_t ignore_index) {
+    int64_t ignore_index) __ubsan_ignore_float_divide_by_zero__ {
   const auto n_dims = input.dim();
   const auto n_classes = input.size(-1);
 
@@ -295,7 +296,7 @@ static void nll_loss_backward_out_frame(
     const Tensor& weight,
     int64_t reduction,
     int64_t ignore_index,
-    const Tensor& total_weight) {
+    const Tensor& total_weight) __ubsan_ignore_float_divide_by_zero__ {
   const auto n_dims = input.dim();
   const auto n_classes = input.size(-1);
 
