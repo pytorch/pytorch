@@ -710,6 +710,44 @@ class TestJit(JitTestCase):
 
         self.assertTrue(check(x, y))
 
+    def test_matrix_transpose(self):
+        @torch.jit.script
+        def check(x):
+            return torch.equal(x.mT, x.transpose(-2, -1))
+
+        x = torch.rand(3, 4)
+        self.assertTrue(check(x))
+
+    def test_transpose(self):
+        @torch.jit.script
+        def check(x):
+            return torch.equal(x.T, x.t())
+
+        x = torch.rand(3, 4)
+        self.assertTrue(check(x))
+
+    def test_matrix_conj_transpose(self):
+        @torch.jit.script
+        def check(x):
+            return torch.equal(x.mH, x.transpose(-2, -1).conj())
+
+        x = torch.rand(3, 4)
+        self.assertTrue(check(x))
+
+        x = make_tensor((3, 4), device="cpu", dtype=torch.complex64)
+        self.assertTrue(check(x))
+
+    def test_conj_transpose(self):
+        @torch.jit.script
+        def check(x):
+            return torch.equal(x.H, x.t().conj())
+
+        x = torch.rand(3, 4)
+        self.assertTrue(check(x))
+
+        x = make_tensor((3, 4), device="cpu", dtype=torch.complex64)
+        self.assertTrue(check(x))
+
     def test_nn_conv(self):
         class Mod(nn.Module):
             def __init__(self, conv):
