@@ -1,8 +1,7 @@
 import torch
 import torch.utils.bundled_inputs
 import io
-from typing import Dict, List, NamedTuple
-from collections import namedtuple
+from typing import Dict, List
 import inspect
 
 from torch.jit.mobile import _load_for_lite_interpreter, _export_operator_list

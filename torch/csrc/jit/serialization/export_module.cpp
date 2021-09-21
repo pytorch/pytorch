@@ -212,7 +212,7 @@ std::pair<IValue, IValue> getFunctionTuple(
           // inferred type, str() return "Tensor[]" and repr_str() return
           // "Tensor". In cpp, repr_str() will always return "Tensor" regardless
           // inferred type. When exporing custom type in bytecode, "Tensor" is
-          // the prefered way to deserialize Tensor type
+          // the preferred way to deserialize Tensor type
           std::string type_str = it->is_inferred_type()
               ? it->type()->str()
               : it->type()->repr_str();
