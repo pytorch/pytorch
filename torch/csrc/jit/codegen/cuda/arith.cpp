@@ -684,10 +684,10 @@ TensorView* max(
   Val* init = nullptr;
   switch (v1->getDataType().value()) {
     case (DataType::Double):
-      init = new Double(DBL_MIN);
+      init = new Double(std::numeric_limits<double>::lowest());
       break;
     case (DataType::Float):
-      init = new Double(FLT_MIN);
+      init = new Double(std::numeric_limits<float>::lowest());
       break;
     case (DataType::Int):
       init = new Int(INT_MIN);
