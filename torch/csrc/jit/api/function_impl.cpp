@@ -3,9 +3,12 @@
 #include <torch/csrc/jit/passes/inliner.h>
 
 #include <torch/csrc/jit/frontend/error_report.h>
+#include <torch/csrc/jit/passes/autocast.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/peephole.h>
+
+#include <ATen/autocast_mode.h>
 
 namespace torch {
 namespace jit {
@@ -71,14 +74,32 @@ const c10::FunctionSchema& GraphFunction::getSchema() const {
   return *schema_;
 }
 
+GraphFunction::SpecializationKey GraphFunction::currentSpecialization() const {
+  return at::autocast::is_enabled() ? SpecializationKey::AutocastOn
+                                    : SpecializationKey::AutocastOff;
+}
+
 void preoptimizeGraph(std::shared_ptr<Graph>& graph) {
   Inline(*graph);
+
   // Peephole Optimize cleans up many "is None" checks and creates constant prop
   // opportunities
   PeepholeOptimize(graph, true);
-  // // AliasDb construction can be slow, so run it just on immutable types
-  // // to clean up constant Ifs & other easy wins
+
+  // AliasDb construction can be slow, so run it just on immutable types
+  // to clean up constant Ifs & other easy wins
   ConstantPropagationImmutableTypes(graph);
+
+  // Inject casts for automatic mixed precision
+  //
+  // TODO: Ideally, this pass could run earlier, before inlining
+  //  or any other optimizations. That setup is preferable because:
+  //  1. The AMP pass would be self-contained and function independently
+  //     of the any optimizations
+  //  2. AMP transformations would benefit from followup passes's cleanup
+  //
+  Autocast(graph);
+
   ConstantPooling(graph);
 }
 

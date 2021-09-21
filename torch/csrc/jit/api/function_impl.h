@@ -39,22 +39,25 @@ struct TORCH_API GraphFunction : public Function {
 
   std::shared_ptr<Graph> optimized_graph() const override {
     std::lock_guard<std::recursive_mutex> lock(compile_mutex);
-    if (optimized_graph_) {
-      return *optimized_graph_;
+    auto& optimized_graph = optimized_graphs_[currentSpecialization()];
+    if (optimized_graph) {
+      return *optimized_graph;
     }
-    optimized_graph_ = graph_->copy();
+    optimized_graph = graph_->copy();
     if (getGraphExecutorOptimize()) {
-      preoptimizeGraph(*optimized_graph_);
+      preoptimizeGraph(*optimized_graph);
     }
-    return *optimized_graph_;
+    return *optimized_graph;
   }
 
   void clear_execution_info() override {
     std::lock_guard<std::recursive_mutex> lock(compile_mutex);
-    if (optimized_graph_) {
-      optimized_graph_.reset();
+    for (auto& graph : optimized_graphs_) {
+      graph.reset();
     }
-    executor_.reset();
+    for (auto& executor : executors_) {
+      executor.reset();
+    }
   }
 
   const c10::QualifiedName& qualname() const override {
@@ -106,13 +109,26 @@ struct TORCH_API GraphFunction : public Function {
   GraphExecutor& get_executor() override {
     ensure_defined();
     std::lock_guard<std::recursive_mutex> lock(compile_mutex);
-    if (executor_) {
-      return executor_;
+    auto& executor = executors_[currentSpecialization()];
+    if (executor) {
+      return executor;
     }
     check_single_output();
-    executor_ = GraphExecutor(optimized_graph(), name_.name());
-    return executor_;
+    executor = GraphExecutor(optimized_graph(), name_.name());
+    return executor;
   }
+
+ private:
+  enum SpecializationKey {
+    AutocastOff,
+    AutocastOn,
+
+    // This provides the number of specializations
+    // (Must be last entry)
+    TotalCount
+  };
+
+  SpecializationKey currentSpecialization() const;
 
  private:
   c10::QualifiedName name_;
@@ -120,9 +136,8 @@ struct TORCH_API GraphFunction : public Function {
   std::shared_ptr<Graph> graph_; // for debugging and for inlining
 
   // Optimized graph, computed lazily. Used for inlining.
-  // Note: this graph is not specialized, only generic optimizations are applied
-  // here.
-  mutable c10::optional<std::shared_ptr<Graph>> optimized_graph_;
+  mutable c10::optional<std::shared_ptr<Graph>>
+      optimized_graphs_[SpecializationKey::TotalCount];
 
   // GraphFunctions are invokable from multiple threads, so this lock needs to
   // be held when we're initializing graph executor for the first time or
@@ -131,7 +146,9 @@ struct TORCH_API GraphFunction : public Function {
   // (e.g. optimized_graph() from get_executor()).
   mutable std::recursive_mutex compile_mutex;
 
-  GraphExecutor executor_; // for execution
+  // executor_[0] - autocast off
+  // executor_[1] - autocast on
+  GraphExecutor executors_[SpecializationKey::TotalCount];
 
   // an optional function that actually creates the method when
   // ensure_defined() is called. This is used by the compiler so
