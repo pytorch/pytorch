@@ -72,7 +72,6 @@ jobs:
         run: echo running !{{ ciflow_config.root_job_name }}
 {%- endif %}
   build:
-    if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: "windows.4xlarge"
     defaults:
       run:
@@ -148,11 +147,6 @@ jobs:
           rm -rf ./*
 
   generate-test-matrix:
-{%- if only_build_on_pull_request %}
-    if: ${{ github.repository_owner == 'pytorch' && github.event_name == 'push' }}
-{%- else %}
-    if: ${{ github.repository_owner == 'pytorch' }}
-{%- endif %}
     {%- if ciflow_config.enabled %}
     needs: [!{{ ciflow_config.root_job_name }}]
     {%- endif %}
@@ -190,7 +184,7 @@ jobs:
       https_proxy: "!{{ common.squid_proxy }}"
       RUN_SMOKE_TESTS_ONLY_ON_PR: !{{ only_run_smoke_tests_on_pull_request }}
       PYTORCH_IGNORE_DISABLED_ISSUES: ${{ needs.generate-test-matrix.outputs.ignore-disabled-issues }}
-      CONTINUE_THROUGH_ERROR: ${{ github.repository_owner == 'pytorch' && (github.event_name == 'push' || github.event_name == 'schedule') }}
+      CONTINUE_THROUGH_ERROR: ${{ github.repository == 'pytorch/pytorch' && (github.event_name == 'push' || github.event_name == 'schedule') }}
     needs: [build, generate-test-matrix, !{{ ciflow_config.root_job_name }}]
     strategy:
       matrix: ${{ fromJson(needs.generate-test-matrix.outputs.matrix) }}
@@ -240,7 +234,7 @@ jobs:
         name: Setup Python3
         with:
           python-version: '3.x'
-      - name: Run test scripts
+      - name: Test
         shell: bash
         env:
           PYTORCH_FINAL_PACKAGE_DIR: /c/${{ github.run_id }}/build-results/
@@ -252,24 +246,8 @@ jobs:
               export RUN_SMOKE_TESTS_ONLY=1
             fi
             .jenkins/pytorch/win-test.sh
-      - name: Zip test reports for upload
-        if: always()
-        env:
-          COMMIT_SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
-          WORKFLOW_ID: '${{ github.run_id }}_${{ github.run_number }}'
-        shell: powershell
-        run: |
-          # -ir => recursive include all files in pattern
-          7z a "test-reports-$Env:COMMIT_SHA1-$Env:WORKFLOW_ID.zip" -ir'!test\*.xml'
-      - uses: actions/upload-artifact@v2
-        name: Store PyTorch Test Reports
-        if: always()
-        with:
-          name: test-reports-${{ matrix.config }}
-          retention-days: 14
-          if-no-files-found: error
-          path:
-            pytorch-${{ github.run_id }}/test-reports-*.zip
+      !{{ common.upload_test_reports(name='windows') }}
+      !{{ common.render_test_results() }}
       !{{ wait_and_kill_ssh() }}
       !{{ common.parse_ref() }}
       !{{ common.upload_test_statistics(build_environment) }}
