@@ -7,27 +7,8 @@ import torch
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_modules import module_db, modules
 from torch.testing._internal.common_utils import (
-    TestCase, run_tests, freeze_rng_state, mock_wrapper, get_tensors_from, gradcheck, gradgradcheck,
-    IS_TBB)
+    TestCase, run_tests, freeze_rng_state, mock_wrapper, get_tensors_from, gradcheck, gradgradcheck)
 from unittest.mock import patch
-
-
-def set_single_thread_parallel_tbb(fn):
-    """Set test to be single threaded for parallel tbb.
-
-    See https://github.com/pytorch/pytorch/issues/64571#issuecomment-914691883
-    """
-    if not IS_TBB:
-        return fn
-
-    @wraps(fn)
-    def wrap_fn(self, *args, **kwargs):
-        num_threads = torch.get_num_threads()
-        torch.set_num_threads(1)
-        output = fn(self, *args, **kwargs)
-        torch.set_num_threads(num_threads)
-        return output
-    return wrap_fn
 
 
 class TestModule(TestCase):
@@ -268,12 +249,10 @@ class TestModule(TestCase):
 
 
     @modules(module_db, allowed_dtypes=[torch.double])
-    @set_single_thread_parallel_tbb
     def test_grad(self, device, dtype, module_info):
         self._test_gradients_helper(device, dtype, module_info, gradcheck)
 
     @modules(module_db, allowed_dtypes=[torch.double])
-    @set_single_thread_parallel_tbb
     def test_gradgrad(self, device, dtype, module_info):
         if not module_info.supports_gradgrad:
             self.skipTest("Skipped! Module does not support gradgrad")

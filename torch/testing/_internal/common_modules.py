@@ -8,7 +8,8 @@ from torch.testing._internal.common_dtype import floating_types
 from torch.testing._internal.common_device_type import (
     _TestParametrizer, _dtype_test_suffix, _update_param_kwargs, skipIf)
 from torch.testing._internal.common_nn import nllloss_reference, get_reduction
-from torch.testing._internal.common_utils import freeze_rng_state
+from torch.testing._internal.common_utils import (
+    freeze_rng_state, set_single_threaded_if_parallel_tbb)
 from types import ModuleType
 from typing import List, Tuple, Type, Set, Dict
 
@@ -72,7 +73,7 @@ class modules(_TestParametrizer):
                 _update_param_kwargs(param_kwargs, 'dtype', dtype)
 
                 try:
-                    active_decorators = []
+                    active_decorators = [set_single_threaded_if_parallel_tbb]
                     if module_info.should_skip(generic_cls.__name__, test.__name__, device_cls.device_type, dtype):
                         active_decorators.append(skipIf(True, "Skipped!"))
 
