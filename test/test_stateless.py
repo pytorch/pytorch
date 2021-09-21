@@ -60,7 +60,7 @@ class TestStatelessFunctionalAPI(TestCase):
         ):
             self._run_call_with_mock_module(jit_module)
 
-    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
+    @unittest.skipIf(not TEST_MULTIGPU, 'multi-GPU not supported')
     def test_functional_call_with_data_parallel(self):
         module = MockModule()
         module.cuda()
@@ -124,6 +124,21 @@ class TestStatelessFunctionalAPI(TestCase):
         cur_buffer = module.buffer
         self.assertEqual(cur_weight, prev_weight)
         self.assertEqual(cur_buffer, prev_buffer)
+
+    def test_reparametrized_module(self):
+        module = MockModule()
+        torch.nn.utils.parametrizations.spectral_norm(module.l1)
+        self.assertTrue('l1.parametrizations.weight.original' in dict(module.named_parameters()))
+        orig_sn_weight = module.l1.weight.clone()
+        x = torch.rand((1, 1))
+        parameters = {'l1.parametrizations.weight.original': torch.nn.Parameter(torch.tensor([[1.0]])),
+                      'l1.bias': torch.tensor([0.0]),
+                      'buffer': torch.tensor([0.0])}
+        res = torch.nn.utils._stateless.functional_call(module, parameters, x)
+        self.assertEqual(x, res)
+        # verify that the spectral normalization is still applied
+        self.assertTrue('l1.parametrizations.weight.original' in dict(module.named_parameters()))
+        self.assertEqual(orig_sn_weight, module.l1.weight)
 
 
 if __name__ == '__main__':
