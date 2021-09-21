@@ -282,9 +282,9 @@ This is how a ``Linear`` module can be implemented::
                 self.register_parameter('bias', None)
 
             # Not a very smart way to initialize weights
-            self.weight.data.uniform_(-0.1, 0.1)
+            nn.init.uniform_(self.weight, -0.1, 0.1)
             if self.bias is not None:
-                self.bias.data.uniform_(-0.1, 0.1)
+                nn.init.uniform_(self.bias, -0.1, 0.1)
 
         def forward(self, input):
             # See the autograd section for explanation of what happens here.
