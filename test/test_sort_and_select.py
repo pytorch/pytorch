@@ -163,6 +163,28 @@ class TestSortAndSelect(TestCase):
         self.assertEqual(vm, torch.arange(255, dtype=dtype, device=device))
         self.assertEqual(im, t0.sort().indices)
 
+
+    @dtypes(torch.float32)
+    def test_sort_restride(self, device, dtype):
+        shape = (3, 5)
+        inputs = [
+            torch.randn(shape, dtype=dtype, device=device),
+            torch.zeros(shape, dtype=dtype, device=device),
+            torch.zeros(shape, dtype=torch.long, device=device),
+        ]
+        # Input: non-contiguous (stride: 5) 3-element array
+        tensor = inputs[0][:, 0]
+        # Outputs: non-contiguous (stride: 5) 2-element array
+        values = inputs[1][0:2, 0]
+        indices = inputs[2][0:2, 0]
+        # Check: outputs were restrided to dense strides
+        torch.sort(tensor, out=(values, indices))
+        # Check: outputs were restrided to dense strides
+        self.assertEqual(values.stride(), (1,))
+        self.assertEqual(indices.stride(), (1,))
+        # Check: 'tensor'  indexed by 'indices' is equal to 'values'
+        self.assertEqual(tensor[indices], values)
+
     def _test_sort_discontiguous(self, device, dtype):
         # on CUDA 2048 vs >2048 have different code path for the dim being sorted
         sizes = (5, 7, 2049)

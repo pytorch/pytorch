@@ -14,30 +14,68 @@
 
 namespace at {
 namespace meta {
+
 using namespace native;
-  TORCH_META_FUNC(topk) (
-    const Tensor& self,
-    int64_t k,
-    int64_t dim_,
-    bool largest,
-    bool sorted) {
 
-    int64_t dim = maybe_wrap_dim(dim_, self.dim(), /*wrap_scalar=*/true);
-    TORCH_CHECK(
-        k >= 0 && k <= (self.dim() > 0 ? self.size(dim) : 1),
-        "selected index k out of range");
-    int64_t sliceSize = self.dim() == 0 ? 1 : self.size(dim);
-    TORCH_CHECK(k >= 0 && k <= sliceSize, "k not in range for dimension");
+TORCH_META_FUNC(topk)
+(const Tensor& self, int64_t k, int64_t dim_, bool largest, bool sorted) {
+  int64_t dim = maybe_wrap_dim(dim_, self.dim(), /*wrap_scalar=*/true);
+  TORCH_CHECK(
+      k >= 0 && k <= (self.dim() > 0 ? self.size(dim) : 1),
+      "selected index k out of range");
+  int64_t sliceSize = self.dim() == 0 ? 1 : self.size(dim);
+  TORCH_CHECK(k >= 0 && k <= sliceSize, "k not in range for dimension");
 
-    // Build the output size, which is the dim being selected set to
-    // size k
-    DimVector topKSize(self.sizes().vec());
-    if (topKSize.size() > 0) {
-      topKSize[dim] = k;
-    }
-    set_output(0, topKSize, self.options());
-    set_output(1, topKSize, self.options().dtype(at::kLong));
+  // Build the output size, which is the dim being selected set to
+  // size k
+  DimVector topKSize(self.sizes().vec());
+  if (topKSize.size() > 0) {
+    topKSize[dim] = k;
   }
+  set_output(0, topKSize, self.options());
+  set_output(1, topKSize, self.options().dtype(at::kLong));
+}
+
+TORCH_META_FUNC2(sort, stable)
+(const Tensor& self, c10::optional<bool> stable, int64_t dim, bool descending) {
+  TORCH_INTERNAL_ASSERT(
+      stable.has_value(),
+      "sort(): c10::optional<bool> for stable has to have value.");
+  maybe_wrap_dim(dim, self.dim());
+
+  const auto& values = maybe_get_output(0);
+  auto values_defined = values.defined();
+  const auto& indices = maybe_get_output(1);
+  auto indices_defined = indices.defined();
+
+  std::vector<int64_t> strides = (self.is_non_overlapping_and_dense())
+      ? self.strides().vec()
+      : at::infer_dense_strides(self.sizes(), self.strides());
+
+  // 'set_output' will only modify the strides, if the output was resized.
+  // Which means that we can ignore the output's strides here.
+  set_output(0, self.sizes(), strides, self.options(), {});
+  set_output(1, self.sizes(), strides, self.options().dtype(kLong), {});
+
+  // Overlap Checking
+  // 1. 'self' can be the same as 'values' (in-place).
+  // 2. 'self' can't overlap with 'indices'
+  // 3. 'values' and 'indices' can't overlap.
+  if (values_defined) {
+    at::assert_no_internal_overlap(values);
+    at::assert_no_partial_overlap(self, values);
+  }
+
+  if (indices_defined) {
+    at::assert_no_internal_overlap(indices);
+    at::assert_no_overlap(self, indices);
+  }
+
+  if (values_defined && indices_defined) {
+    at::assert_no_overlap(values, indices);
+  }
+}
+
 } // namespace meta
 
 namespace native {
@@ -865,52 +903,37 @@ Tensor nanmedian_cpu(const Tensor& self) {
   return median_impl(self, /*ignore_nan=*/true);
 }
 
-std::tuple<Tensor&, Tensor&> sort_out_cpu_stable(const Tensor& self,
-    c10::optional<bool> stable,
-    int64_t dim,
-    bool descending,
-    Tensor& values,
-    Tensor& indices) {
-  values.resize_(self.sizes()).copy_(self);
-  indices.resize_(self.sizes());
-
+TORCH_IMPL_FUNC(sort_stable_out)
+(const Tensor& self,
+ c10::optional<bool> stable,
+ int64_t dim,
+ bool descending,
+ const Tensor& values,
+ const Tensor& indices) {
   // check if self is scalar
   if (self.dim() == 0 && self.numel() == 1) {
+    values.copy_(self);
     indices.zero_();
-    return std::forward_as_tuple(values, indices);
+  } else {
+    dim = maybe_wrap_dim(dim, self.dim());
+    sort_stub(self.device().type(), self, values, indices, dim, descending, stable.value());
   }
-
-  TORCH_INTERNAL_ASSERT(stable.has_value(), "sort_out(): c10::optional<bool> for stable has to have value.");
-  sort_stub(kCPU, values, indices, dim, descending, stable.value());
-
-  return std::forward_as_tuple(values, indices);
 }
 
-std::tuple<Tensor&, Tensor&> sort_out_cpu(const Tensor& self,
+std::tuple<Tensor&, Tensor&> sort_out(
+    const Tensor& self,
     int64_t dim,
     bool descending,
     Tensor& values,
     Tensor& indices) {
-  return at::native::sort_out_cpu_stable(
-      self, /*stable=*/false, dim, descending, values, indices);
+  return at::sort_out(values, indices, self, false, dim, descending);
 }
 
-std::tuple<Tensor, Tensor> sort_cpu_stable(
-    const Tensor& self,
-    c10::optional<bool> stable,
-    int64_t dim,
-    bool descending) {
-  TORCH_CHECK(!self.is_complex(), "sort(): input tensor must be of non-complex type");
-  Tensor values = at::empty({0}, self.options());
-  Tensor indices = at::empty({0}, self.options().dtype(kLong));
-  return at::native::sort_out_cpu_stable(self, stable, dim, descending, values, indices);
-}
-
-std::tuple<Tensor, Tensor> sort_cpu(
+std::tuple<Tensor, Tensor> sort(
     const Tensor& self,
     int64_t dim,
     bool descending) {
-  return sort_cpu_stable(self, /*stable=*/false, dim, descending);
+  return at::sort(self, false, dim, descending);
 }
 
 Tensor& msort_out(const Tensor& self, Tensor& values) {
