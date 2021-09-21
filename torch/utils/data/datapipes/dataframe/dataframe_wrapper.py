@@ -1,5 +1,3 @@
-import torcharrow as ta
-
 try:
     import pandas  # type: ignore[import]
 
@@ -11,10 +9,10 @@ except ImportError:
 
 class PandasWrapper:
     @classmethod
-    def create_dataframe(cls, data, **kwargs):
+    def create_dataframe(cls, data):
         if not WITH_PANDAS:
             Exception("DataFrames prototype requires pandas to function")
-        return pandas.DataFrame(data, **kwargs)
+        return pandas.DataFrame(data)
 
     @classmethod
     def is_dataframe_object(cls, data):
@@ -29,16 +27,17 @@ class PandasWrapper:
         return isinstance(data, pandas.core.series.Series)
 
     @classmethod
-    def enumerate(cls, data):
+    def iterate(cls, data):
         if not WITH_PANDAS:
             Exception("DataFrames prototype requires pandas to function")
-        return enumerate(data)
+        for d in data:
+            yield d
 
     @classmethod
-    def concat(cls, buffer, **kwargs):
+    def concat(cls, buffer):
         if not WITH_PANDAS:
             Exception("DataFrames prototype requires pandas to function")
-        return pandas.concat(buffer, **kwargs)
+        return pandas.concat(buffer)
 
     @classmethod
     def get_item(cls, data, idx):
@@ -65,17 +64,17 @@ def set_df_wrapper(wrapper):
     default_wrapper = wrapper
 
 
-def create_dataframe(data, **kwargs):
+def create_dataframe(data):
     wrapper = get_df_wrapper()
-    wrapper.create_dataframe(data, **kwargs)
+    wrapper.create_dataframe(data)
 
 
-def is_dataframe_object(data):
+def is_dataframe(data):
     wrapper = get_df_wrapper()
     wrapper.is_dataframe_object()
 
 
-def is_series_object(data):
+def is_column(data):
     wrapper = get_df_wrapper()
     wrapper.is_series_object()
 
@@ -85,9 +84,9 @@ def concat(buffer):
     wrapper.concat(buffer)
 
 
-def enumerate(data):
+def iterate(data):
     wrapper = get_df_wrapper()
-    wrapper.enumerate(data)
+    wrapper.iterate(data)
 
 
 def get_item(data, idx):

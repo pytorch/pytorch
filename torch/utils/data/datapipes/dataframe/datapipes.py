@@ -58,7 +58,7 @@ class ShuffleDataFramesPipe(DFIterDataPipe):
             if size is None:
                 size = df_wrapper.get_len(df)
             for i in range(df_wrapper.get_len(df)):
-                all_buffer.append(df_wrapper.get_item(df, index=i))
+                all_buffer.append(df_wrapper.get_item(df, i))
         random.shuffle(all_buffer)
         buffer = []
         for df in all_buffer:
