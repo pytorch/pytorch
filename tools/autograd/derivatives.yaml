@@ -59,6 +59,10 @@
 #     you can refer to the gradients of each outputs using 'grads',
 #     e.g., 'grads[0]', 'grads[1]'.
 #
+#     When a function returns multiple *differentiable* outputs that
+#     are named, you can refer to the gradients of each outputs using
+#     'grad_{name}', e.g., 'grad_x', 'grad_y'.
+#
 #     When a function returns *one* differentiable output (the
 #     first output) and some more nondifferentiable outputs,
 #     you MUST refer to the gradient of the differentiable output with
@@ -66,6 +70,11 @@
 #
 #     Note that the number of differentibale outputs can be modified by the
 #     'output_differentiability' entry (see above).
+#
+#     Across a differentiable function's derivatives set, it is not
+#     permitted to mix the use of "grad", "grads", and
+#     "grad_{name}". You must be consistent for that differentiable
+#     function.
 #
 #   - Any of the input arguments, tensor or non-tensor, including
 #     argument names that only appear in Declarations.yaml, e.g. 'output'.
@@ -339,6 +348,7 @@
 
 - name: linalg_cholesky_ex(Tensor self, *, bool upper=False, bool check_errors=False) -> (Tensor L, Tensor info)
   self: cholesky_backward(grad, upper, L)
+  L: cholesky_jvp(self_t, L, upper)
 
 - name: cholesky_solve(Tensor self, Tensor input2, bool upper=False) -> Tensor
   self, input2: cholesky_solve_backward(grad, self, input2, result, upper)
@@ -478,6 +488,11 @@
 
 - name: diagonal(Tensor(a) self, int offset=0, int dim1=0, int dim2=1) -> Tensor(a)
   self: diagonal_backward(grad, self.sizes(), offset, dim1, dim2)
+  result: auto_linear
+
+- name: diagonal_backward(Tensor grad_output, int[] input_sizes, int offset, int dim1, int dim2) -> Tensor
+  grad_output: grad.diagonal(offset, dim1, dim2)
+  result: auto_linear
 
 - name: dist(Tensor self, Tensor other, Scalar p=2) -> Tensor
   self: norm_backward(grad, self - other, p, result)
@@ -578,10 +593,12 @@
 
 - name: fill_.Scalar(Tensor(a!) self, Scalar value) -> Tensor(a!)
   self: zeros_like(grad)
+  result: self_t.fill_(0)
 
 - name: fill_.Tensor(Tensor(a!) self, Tensor value) -> Tensor(a!)
   self: zeros_like(grad)
   value: grad.sum()
+  result: self_t.fill_(value_t)
 
 - name: floor(Tensor self) -> Tensor
   self: zeros_like(grad)
@@ -862,9 +879,11 @@
 
 - name: _lu_with_info(Tensor self, bool pivot=True, bool check_errors=True) -> (Tensor LU, Tensor pivots, Tensor info)
   self: _lu_with_info_backward(grad, self, LU, pivots)
+  LU: _lu_with_info_jvp(self_t, LU, pivots)
 
 - name: lu_solve(Tensor self, Tensor LU_data, Tensor LU_pivots) -> Tensor
   self, LU_data: lu_solve_backward(grad, self, LU_data, LU_pivots)
+  result: lu_solve_forward_AD(self_t, LU_data_t, LU_data_p, LU_pivots, result)
 
 - name: lu_unpack(Tensor LU_data, Tensor LU_pivots, bool unpack_data=True, bool unpack_pivots=True) -> (Tensor P, Tensor L, Tensor U)
   LU_data: lu_unpack_backward(grads, LU_data, unpack_data)
@@ -1185,12 +1204,12 @@
   result: auto_element_wise
 
 - name: scatter.src(Tensor self, int dim, Tensor index, Tensor src) -> Tensor
-  self: grad.clone().scatter_(dim, index, 0)
+  self: grad.scatter(dim, index, 0)
   index: non_differentiable
   src: grad.gather(dim, index)
 
 - name: scatter.value(Tensor self, int dim, Tensor index, Scalar value) -> Tensor
-  self: grad.clone().scatter_(dim, index, 0)
+  self: grad.scatter(dim, index, 0)
   index: non_differentiable
 
 - name: scatter_add(Tensor self, int dim, Tensor index, Tensor src) -> Tensor
@@ -1200,6 +1219,10 @@
 
 - name: select.int(Tensor(a) self, int dim, int index) -> Tensor(a)
   self: select_backward(grad, self.sizes(), dim, index)
+  result: auto_linear
+
+- name: select_backward(Tensor grad_output, int[] input_sizes, int dim, int index) -> Tensor
+  grad_output: grad.select(dim, index)
   result: auto_linear
 
 - name: sigmoid(Tensor self) -> Tensor
@@ -1232,6 +1255,10 @@
 
 - name: slice.Tensor(Tensor(a) self, int dim=0, int? start=None, int? end=None, int step=1) -> Tensor(a)
   self: slice_backward_wrapper(grad, self.sizes(), dim, start, end, step)
+  result: auto_linear
+
+- name: slice_backward(Tensor grad_output, int[] input_sizes, int dim, int start, int end, int step) -> Tensor
+  grad_output: grad.slice(dim, start, end, step)
   result: auto_linear
 
 - name: slogdet(Tensor self) -> (Tensor sign, Tensor logabsdet)
@@ -1335,6 +1362,8 @@
 
 - name: linalg_eigh(Tensor self, str UPLO="L") -> (Tensor eigenvalues, Tensor eigenvectors)
   self: eigh_backward(grads, self, /*eigenvectors=*/true, eigenvalues, eigenvectors)
+  eigenvalues: eigh_jvp_eigenvalues(self_t, eigenvalues, eigenvectors)
+  eigenvectors: eigh_jvp_eigenvectors(self_t, eigenvalues, eigenvectors)
 
 - name: linalg_eig(Tensor self) -> (Tensor eigenvalues, Tensor eigenvectors)
   self: linalg_eig_backward(grads, self, eigenvalues, eigenvectors)
@@ -1392,7 +1421,7 @@
   result: auto_linear
 
 - name: triangular_solve(Tensor self, Tensor A, bool upper=True, bool transpose=False, bool unitriangular=False) -> (Tensor solution, Tensor cloned_coefficient)
-  self, A: triangular_solve_backward(grads[0], grads[1], self, A, solution, upper, transpose, unitriangular, grad_input_mask)
+  self, A: triangular_solve_backward(grad_solution, grad_cloned_coefficient, self, A, solution, upper, transpose, unitriangular, grad_input_mask)
 
 - name: tril(Tensor self, int diagonal=0) -> Tensor
   self: grad.tril(diagonal)
