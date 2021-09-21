@@ -15,8 +15,8 @@ namespace {
 
 c10::MaybeOwned<TypePtr> toSingleType(const AliasTypeSet& mut_types) {
   return mut_types.size() == 1
-    ? c10::MaybeOwned<TypePtr>::borrowed(mut_types[0])
-    : c10::MaybeOwned<TypePtr>::owned(c10::UnionType::create(mut_types));
+      ? c10::MaybeOwned<TypePtr>::borrowed(mut_types[0])
+      : c10::MaybeOwned<TypePtr>::owned(c10::UnionType::create(mut_types));
 }
 
 // This class determines whether a type is mutable, and, if so, it maps
@@ -71,7 +71,8 @@ class MutableTypePtrHelper {
 
     auto mutable_types = mapTypeToAliasTypeSetImpl(type);
     if (mutable_types) {
-      auto it = mutable_type_cache_->emplace(type, std::move(*mutable_types)).first;
+      auto it =
+          mutable_type_cache_->emplace(type, std::move(*mutable_types)).first;
       return &it->second;
     } else {
       return nullptr;
@@ -115,7 +116,8 @@ class MutableTypePtrHelper {
       case TypeKind::FutureType: {
         if (auto maybe_mut_types = mapTypeToAliasTypeSet(
                 type->castRaw<FutureType>()->getElementType())) {
-          return {AliasTypeSet{FutureType::create(*toSingleType(*maybe_mut_types))}};
+          return {AliasTypeSet{
+              FutureType::create(*toSingleType(*maybe_mut_types))}};
         }
         return c10::nullopt;
       }
