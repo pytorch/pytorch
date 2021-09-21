@@ -106,10 +106,10 @@ void pushObserverCallbacks() {
     for (size_t i = fn.outputs().size() - fn.num_outputs();
          i < fn.outputs().size();
          i++) {
-      auto ival = fn.outputs()[i];
+      auto oval = fn.outputs()[i];
       output_ival_addrs.emplace_back(
-          ival.isTensor()
-              ? reinterpret_cast<intptr_t>(ival.toTensor().data_ptr())
+          oval.isTensor()
+              ? reinterpret_cast<intptr_t>(oval.toTensor().data_ptr())
               : 0);
     }
     evt.function_event.output_ival_addrs = output_ival_addrs;
