@@ -99,5 +99,5 @@ function checkout_install_torchvision() {
 }
 
 function clone_pytorch_xla() {
-  git clone --recursive https://github.com/pytorch/xla.git
+  git clone --recursive -b r1.10 https://github.com/pytorch/xla.git
 }
