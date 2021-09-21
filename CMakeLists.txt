@@ -309,7 +309,7 @@ cmake_dependent_option(
 cmake_dependent_option(
     USE_TENSORPIPE "Use TensorPipe. Only available if USE_DISTRIBUTED is on." ON
     "USE_DISTRIBUTED" OFF)
-option(USE_TBB "Use TBB" OFF)
+option(USE_TBB "Use TBB (Deprecated)" OFF)
 cmake_dependent_option(
     USE_SYSTEM_TBB "Use system-provided Intel TBB." OFF "USE_TBB" OFF)
 option(ONNX_ML "Enable traditional ONNX ML API." ON)
@@ -320,6 +320,8 @@ cmake_dependent_option(
     "BUILD_PYTHON" OFF)
 cmake_dependent_option(USE_CCACHE "Attempt using CCache to wrap the compilation" ON "UNIX" OFF)
 option(WERROR "Build with -Werror supported by the compiler" OFF)
+option(USE_COREML_DELEGATE "Use the CoreML backend through delegate APIs" OFF)
+
 
 if(USE_CCACHE)
   find_program(CCACHE_PROGRAM ccache)
@@ -491,9 +493,11 @@ if(MSVC)
   endforeach(flag_var)
 
   foreach(flag_var
+      CMAKE_SHARED_LINKER_FLAGS_RELWITHDEBINFO CMAKE_STATIC_LINKER_FLAGS_RELWITHDEBINFO
+      CMAKE_EXE_LINKER_FLAGS_RELWITHDEBINFO CMAKE_MODULE_LINKER_FLAGS_RELWITHDEBINFO
       CMAKE_SHARED_LINKER_FLAGS_DEBUG CMAKE_STATIC_LINKER_FLAGS_DEBUG
       CMAKE_EXE_LINKER_FLAGS_DEBUG CMAKE_MODULE_LINKER_FLAGS_DEBUG)
-    # Switch off incremental linking in debug builds
+    # Switch off incremental linking in debug/relwithdebinfo builds
     if(${flag_var} MATCHES "/INCREMENTAL" AND NOT ${flag_var} MATCHES "/INCREMENTAL:NO")
       string(REGEX REPLACE "/INCREMENTAL" "/INCREMENTAL:NO" ${flag_var} "${${flag_var}}")
     endif()
@@ -699,6 +703,10 @@ endif()
 
 if(USE_LITE_INTERPRETER_PROFILER)
   string(APPEND CMAKE_CXX_FLAGS " -DEDGE_PROFILER_USE_KINETO")
+endif()
+
+if(USE_COREML_DELEGATE)
+  string(APPEND CMAKE_CXX_FLAGS " -DUSE_COREML_DELEGATE")
 endif()
 
 # ---[ Allowlist file if allowlist is specified
