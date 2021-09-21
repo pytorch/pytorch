@@ -7832,6 +7832,8 @@ op_db: List[OpInfo] = [
            # gradcheck test verifies the formula for input in SampleInput,
            # we permute the arguments.
            op=lambda self, other, **kwargs: torch.igamma(other, self, **kwargs),
+           inplace_variant=None,
+           method_variant=None,
            dtypes=floating_types_and(torch.bfloat16, torch.float16),
            backward_dtypesIfCPU=floating_types_and(torch.bfloat16),
            dtypesIfCUDA=floating_types(),
@@ -7857,6 +7859,8 @@ op_db: List[OpInfo] = [
            # gradcheck test verifies the formula for input in SampleInput,
            # we permute the arguments
            op=lambda self, other, **kwargs: torch.igammac(other, self, **kwargs),
+           inplace_variant=None,
+           method_variant=None,
            dtypes=floating_types_and(torch.bfloat16, torch.float16),
            backward_dtypesIfCPU=floating_types_and(torch.bfloat16),
            dtypesIfCUDA=floating_types(),
