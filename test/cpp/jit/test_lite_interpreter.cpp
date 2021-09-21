@@ -494,6 +494,7 @@ void compareModelOutput(
   AT_ASSERT(
       actual_result_list[1].toTensor().dim() == expect_result_list[1].dim());
   AT_ASSERT(actual_result_list[2].toTensor().equal(expect_result_list[2]));
+  AT_ASSERT(actual_result_list[3].toTensor().equal(expect_result_list[3]));
 }
 
 void runAndCheckTorchScriptModel(
@@ -588,7 +589,12 @@ TEST(LiteInterpreterTest, BackPortByteCodeModelAllVersions) {
       x1 = torch.zeros(2, 2)
       x2 = torch.empty_like(torch.empty(2, 2))
       x3 = torch._convolution(input, self.weight, self.bias, [1, 1], [0, 0], [1, 1], False, [0, 0], 1, False, False, True, True)
-      return (x1, x2, x3)
+      # Add torch.add operator to cover bytecode version bump from 6 to 7
+      # for bytecode version 7, the main change is to support defaults arguments with out arguments
+      x = 2 * torch.ones(1)
+      h = torch.ones(1)
+      torch.add(x, h, out=x)
+      return (x1, x2, x3, x)
   )");
 
   torch::jit::Module module_freeze = freeze(module);
@@ -602,6 +608,8 @@ TEST(LiteInterpreterTest, BackPortByteCodeModelAllVersions) {
   expect_result_list.emplace_back(at::ones({2, 2}, ScalarType::Float));
   expect_result_list.emplace_back(
       at::ones({1, 20, 24, 24}, ScalarType::Float) * 26);
+  expect_result_list.emplace_back(3 * at::ones({1}));
+
   backportAllVersionCheck(
       input_model_stream,
       input_data,
@@ -935,7 +943,10 @@ TEST(RunTimeTest, ParseBytecode) {
       new mobile::Function(c10::QualifiedName(function_name)));
   c10::ivalue::TupleElements debug_handles_m_tuple;
   parseInstructions(
-      function_name, std::move(*c10::ivalue::Tuple::create(instructions)).elements(), debug_handles_m_tuple, function.get());
+      function_name,
+      std::move(*c10::ivalue::Tuple::create(instructions)).elements(),
+      debug_handles_m_tuple,
+      function.get());
   parseTypes(c10::ivalue::Tuple::create(types)->elements(), function.get());
   const size_t rsize = 5;
   parseRegisterSize(rsize, function.get());
@@ -994,7 +1005,11 @@ TEST(RunTimeTest, ParseOperator) {
   std::vector<IValue> debug_handles_m_tuple;
   parseInstructions(
       function_name, instructions, debug_handles_m_tuple, function.get());
-  parseOperators(c10::ivalue::Tuple::create(operators).elements(), model_version, 1, function.get());
+  parseOperators(
+      c10::ivalue::Tuple::create(operators).elements(),
+      model_version,
+      1,
+      function.get());
   const size_t rsize = 5;
   parseRegisterSize(rsize, function.get());
 
@@ -1216,7 +1231,7 @@ TEST(LiteInterpreterTest, DefaultArgsWithOutArg) {
   auto op = ops.find("aten::add.out");
   TORCH_CHECK(
       op != ops.end() && op->second.num_schema_args.has_value() &&
-      op->second.num_schema_args.value() == 4);
+      op->second.num_schema_args.value() == 3);
 }
 
 TEST(LiteInterpreterTest, TestExceptionStackWithTwoLevelModuleHierarchy) {
