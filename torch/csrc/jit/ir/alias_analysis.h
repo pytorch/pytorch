@@ -231,8 +231,7 @@ class AliasDb {
       bool add_wildcard_to_contained_elems = true);
   Element* getOrCreateElement(const Value* value);
 
-  const AliasTypeSet* mapTypeToAliasTypeSetPtr(
-      const TypePtr& type) const;
+  const AliasTypeSet* mapTypeToAliasTypeSetPtr(const TypePtr& type) const;
   bool functionalNonEscapingListUse(const Use& use) const;
 
   std::shared_ptr<Graph> graph_;
