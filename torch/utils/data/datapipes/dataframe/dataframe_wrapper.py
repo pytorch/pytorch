@@ -15,13 +15,13 @@ class PandasWrapper:
         return pandas.DataFrame(data)
 
     @classmethod
-    def is_dataframe_object(cls, data):
+    def is_dataframe(cls, data):
         if not WITH_PANDAS:
             Exception("DataFrames prototype requires pandas to function")
         return isinstance(data, pandas.core.frame.DataFrame)
 
     @classmethod
-    def is_series_object(cls, data):
+    def is_column(cls, data):
         if not WITH_PANDAS:
             Exception("DataFrames prototype requires pandas to function")
         return isinstance(data, pandas.core.series.Series)
@@ -71,12 +71,12 @@ def create_dataframe(data):
 
 def is_dataframe(data):
     wrapper = get_df_wrapper()
-    wrapper.is_dataframe_object()
+    wrapper.is_dataframe()
 
 
 def is_column(data):
     wrapper = get_df_wrapper()
-    wrapper.is_series_object()
+    wrapper.is_column()
 
 
 def concat(buffer):
