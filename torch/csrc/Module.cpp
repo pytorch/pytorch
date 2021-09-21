@@ -542,20 +542,6 @@ PyObject *THPModule_allowTF32CuBLAS(PyObject *_unused, PyObject *noargs)
   Py_RETURN_FALSE;
 }
 
-PyObject *THPModule_setCUDAAllocator(PyObject *_unused, PyObject *arg)
-{
-  THPUtils_assert(THPUtils_checkString(arg), "setCUDAAllocator expects a string, "
-          "but got %s", THPUtils_typename(arg));
-  std::string name = THPUtils_unpackString(arg);
-  at::globalContext().setCUDAAllocator(name);
-  Py_RETURN_NONE;
-}
-
-PyObject *THPModule_getCUDAAllocator(PyObject *_unused, PyObject *noargs)
-{
-  return THPUtils_packString(at::globalContext().getCUDAAllocator());
-}
-
 PyObject *THPModule_setFlushDenormal(PyObject *_unused, PyObject *arg) {
   THPUtils_assert(PyBool_Check(arg), "flush_denormal expects a bool, "
           "but got %s", THPUtils_typename(arg));
@@ -709,8 +695,6 @@ static PyMethodDef TorchMethods[] = {
   {"_set_warnAlways", THPModule_setWarnAlways, METH_O,  nullptr},
   {"_get_cublas_allow_tf32", THPModule_allowTF32CuBLAS, METH_NOARGS,     nullptr},
   {"_set_cublas_allow_tf32", THPModule_setAllowTF32CuBLAS, METH_O,  nullptr},
-  {"_get_cuda_allocator", THPModule_getCUDAAllocator, METH_NOARGS,     nullptr},
-  {"_set_cuda_allocator", THPModule_setCUDAAllocator, METH_O,  nullptr},
   {"_vmapmode_increment_nesting", THPModule_vmapmode_increment_nesting, METH_NOARGS, nullptr},
   {"_vmapmode_decrement_nesting", THPModule_vmapmode_decrement_nesting, METH_NOARGS, nullptr},
   {"_debug_only_display_vmap_fallback_warnings", THPModule_set_display_vmap_fallback_warnings_mode, METH_O, nullptr},

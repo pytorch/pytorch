@@ -133,14 +133,6 @@ void Context::setAllowTF32CuBLAS(bool b) {
   allow_tf32_cublas = b;
 }
 
-const std::string Context::getCUDAAllocator() const {
-  return cuda_allocator_name_or_library_path;
-}
-
-void Context::setCUDAAllocator(const std::string name_or_library_path) {
-  cuda_allocator_name_or_library_path = name_or_library_path;
-}
-
 bool Context::hasMKL() {
 #if AT_MKL_ENABLED()
   return true;

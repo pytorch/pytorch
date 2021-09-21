@@ -93,16 +93,5 @@ class cuBLASModule:
         return torch._C._set_cublas_allow_tf32(value)
 
 
-class cudaAllocatorModule:
-    def __getattr__(self, name):
-        assert name == "allocator", "Unknown attribute " + name
-        return torch._C._get_cuda_allocator()
-
-    def __setattr__(self, name, value):
-        assert name == "allocator", "Unknown attribute " + name
-        return torch._C._set_cuda_allocator(value)
-
-
 cufft_plan_cache = cuFFTPlanCacheManager()
 matmul = cuBLASModule()
-allocator = cudaAllocatorModule()
