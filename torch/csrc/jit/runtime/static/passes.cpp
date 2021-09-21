@@ -310,6 +310,9 @@ TORCH_LIBRARY_FRAGMENT(static_runtime, m) {
   m.def(torch::schema(
       "static_runtime::dict_unpack(...) -> ...",
       c10::AliasAnalysisKind::CONSERVATIVE));
+  m.def(torch::schema(
+      "static_runtime::VarTupleUnpack(...) -> ...",
+      c10::AliasAnalysisKind::CONSERVATIVE));
 }
 
 void FuseSignLog1P(std::shared_ptr<torch::jit::Graph>& graph) {
@@ -331,6 +334,58 @@ void FuseSignLog1P(std::shared_ptr<torch::jit::Graph>& graph) {
   SubgraphRewriter fuse;
   fuse.RegisterRewritePattern(pattern, fused_pattern);
   fuse.runOnGraph(graph);
+}
+
+namespace {
+
+using TupleUnpackBlock = std::vector<Node*>;
+
+std::vector<TupleUnpackBlock> CollectVariadicTupleUnpackFusionCandidates(
+    const std::shared_ptr<Graph>& graph) {
+  std::vector<TupleUnpackBlock> candidates;
+  auto nodes = graph->nodes();
+  std::vector<Node*> block;
+  for (Node* cur_node : nodes) {
+    if (cur_node->kind() == prim::TupleUnpack) {
+      block.push_back(cur_node);
+      continue;
+    }
+    if (block.size() > 1) {
+      candidates.emplace_back(std::move(block));
+    }
+    block.clear();
+  }
+  TORCH_CHECK(block.empty());
+  return candidates;
+}
+
+void FuseTupleUnpackBlock(const TupleUnpackBlock& nodes) {
+  TORCH_CHECK(nodes.size() > 0);
+  auto graph = nodes[0]->owningGraph();
+  auto var_unpack = graph->create(
+      c10::Symbol::fromQualString("static_runtime::VarTupleUnpack"),
+      /* num_outputs */ 0);
+  var_unpack->insertAfter(nodes[nodes.size() - 1]);
+  for (Node* node : nodes) {
+    TORCH_CHECK(
+        node->kind() == prim::TupleUnpack && node->inputs().size() == 1);
+    var_unpack->addInput(node->input());
+
+    for (Value* output : node->outputs()) {
+      auto new_output = var_unpack->addOutput();
+      new_output->copyMetadata(output);
+      output->replaceAllUsesWith(new_output);
+    }
+    node->destroy();
+  }
+}
+
+} // namespace
+
+void UseVariadicTupleUnpack(const std::shared_ptr<Graph>& graph) {
+  for (auto& c : CollectVariadicTupleUnpackFusionCandidates(graph)) {
+    FuseTupleUnpackBlock(c);
+  }
 }
 
 bool HasInplaceOp(std::shared_ptr<Graph>& graph, const AliasDb& alias_db) {
