@@ -2030,6 +2030,7 @@ works_list = [
     'round',
     'rsqrt',
     'sigmoid',
+    'sign',
     'sin',
     'sinh',
     'sqrt',
