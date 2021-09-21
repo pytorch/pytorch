@@ -252,8 +252,6 @@ class API_AVAILABLE(ios(11.0), macos(10.13)) CoreMLBackend
             isOperatingSystemAtLeastVersion:supportedVer]) {
       return true;
     }
-#else
-    return false;
 #endif
     return false;
   }
