@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/passes/memory_planning/linear_scan.h>
+#include <torch/csrc/jit/runtime/static/memory_planner.h>
 
 namespace torch {
 namespace jit {
@@ -55,7 +56,7 @@ std::vector<MemAllocation> linearScanHeuristic(
     allocate_inactive_ranges(curr_range);
     coalesce_avail(avail_regions);
 
-    auto aligned_curr_size = MemoryPlanner::computeAlignedTensorSize(curr_size);
+    auto aligned_curr_size = MemoryPlanner::compute_aligned_tensor_size(curr_size);
 
     // find the "right" region; in order of preference:
     // 1. tightest fit free region i.e. smallest i.e. first match since
