@@ -84,22 +84,22 @@ class DistributedUtilTest(unittest.TestCase):
 
     def test_create_store_timeout_on_server(self):
         with self.assertRaises(TimeoutError):
-            port = get_free_port()
+            # use any available port (port 0) since timeout is expected
             create_c10d_store(
                 is_server=True,
                 server_addr=socket.gethostname(),
-                server_port=port,
+                server_port=0,
                 world_size=2,
                 timeout=1,
             )
 
     def test_create_store_timeout_on_worker(self):
         with self.assertRaises(TimeoutError):
-            port = get_free_port()
+            # use any available port (port 0) since timeout is expected
             create_c10d_store(
                 is_server=False,
                 server_addr=socket.gethostname(),
-                server_port=port,
+                server_port=0,
                 world_size=2,
                 timeout=1,
             )

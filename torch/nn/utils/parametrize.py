@@ -262,8 +262,11 @@ class ParametrizationList(ModuleList):
             originals = (getattr(self, f"original{i}") for i in range(self.ntensors))
             x = self[0](*originals)
         # It's not possible to call self[1:] here, so we have to be a bit more cryptic
-        for module in list(self._modules.values())[1:]:
-            x = module(x)
+        # Also we want to skip all non-integer keys
+        curr_idx = 1
+        while hasattr(self, str(curr_idx)):
+            x = self[curr_idx](x)
+            curr_idx += 1
         return x
 
 
