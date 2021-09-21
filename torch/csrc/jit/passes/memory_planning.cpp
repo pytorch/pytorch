@@ -4,6 +4,7 @@
 
 #include <jit/tensorexpr/kernel.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
+#include <torch/csrc/jit/runtime/static/memory_planner.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/runtime/static/ops.h>
 #include <limits>
@@ -67,7 +68,7 @@ std::vector<MemAllocation> naive(
     auto ulvr = item.first;
     auto size = item.second;
     auto id = item.first.id;
-    auto aligned_size = MemoryPlanner::computeAlignedTensorSize(size);
+    auto aligned_size = MemoryPlanner::compute_aligned_tensor_size(size);
     allocations.push_back({ulvr, {offset, aligned_size}});
     offset += aligned_size;
   }
