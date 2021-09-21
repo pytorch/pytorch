@@ -3776,6 +3776,13 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(3, 4, 5, requires_grad=True)
         self.run_test(BetaModel(), x)
 
+        class BetaFloatModel(torch.nn.Module):
+            def forward(self, x):
+                return torch.nn.functional.softplus(x, beta=1.7)
+
+        x = torch.randn(3, 4, 5, requires_grad=True)
+        self.run_test(BetaFloatModel(), x)
+
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_lstm_no_hidden(self):
         class LSTMModel(torch.nn.Module):
