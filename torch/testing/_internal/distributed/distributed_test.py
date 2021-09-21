@@ -6964,7 +6964,7 @@ class DistributedTest:
             )
 
             # Modify the model so that the number of parameters are different for each rank.
-            # This will cause a RuntimeError to be thrown below in dist._verify_model_across_ranks,
+            # This will cause a RuntimeError to be thrown below in dist._verify_params_across_processes,
             # so we can check if the correct error is thrown and is logged.
             # We can't do this in the constructor above otherwise the logger will
             # not be properly initialized.
@@ -6973,9 +6973,9 @@ class DistributedTest:
             # if we pass a logger we can verify that it was logged
             with ctx:
                 if use_logger:
-                    dist._verify_model_across_ranks(net.process_group, [list(net.parameters())], net.logger)
+                    dist._verify_params_across_processes(net.process_group, list(net.parameters()), net.logger)
                 else:
-                    dist._verify_model_across_ranks(net.process_group, [list(net.parameters())])
+                    dist._verify_params_across_processes(net.process_group, list(net.parameters()))
                 # Should only be run by rank 0, and blocking_wait catches and
                 # reports exception.
                 dist.barrier(group_to_use)
@@ -7463,9 +7463,9 @@ class DistributedTest:
             )
             net_params, _ = net._build_params_for_reducer()
             if self.rank == 0:
-                print(type(net_params[0][0]))
+                print(type(net_params[0]))
 
-            net_params[0].extend(
+            net_params.extend(
                 [
                     torch.nn.Parameter(torch.ones(1)),
                     torch.nn.Parameter(torch.ones(1)),
@@ -7475,11 +7475,11 @@ class DistributedTest:
             with self.assertRaisesRegex(ValueError, "Expected param to name mapping"):
                 net._build_param_to_name_mapping(net_params)
 
-            net_params[0] = net_params[0][:-3]
+            net_params = net_params[:-3]
             with self.assertRaisesRegex(ValueError, "Param with name"):
                 net._build_param_to_name_mapping(net_params)
 
-            net_params[0].extend(
+            net_params.extend(
                 [
                     torch.nn.Parameter(torch.ones(1)),
                     torch.nn.Parameter(torch.ones(1)),
