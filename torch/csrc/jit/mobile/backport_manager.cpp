@@ -189,7 +189,7 @@ std::stringstream update_bytecode_version(
     const int64_t to_version) {
   PyTorchStreamReader reader_bytecode(&input_model);
   std::vector<IValue> constants_values =
-      std::move(*readArchive(kArchiveNameConstants, reader).toTuple())
+      std::move(*readArchive(kArchiveNameConstants, reader_bytecode).toTuple())
           .elements();
 
   std::vector<IValue> bytecode_values = get_bytecode_ivalues(reader_bytecode);
