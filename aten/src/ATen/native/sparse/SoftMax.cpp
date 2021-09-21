@@ -561,7 +561,7 @@ Tensor softmax_backward_sparse_cpu(
   }
   AT_DISPATCH_FLOATING_TYPES(grad.scalar_type(), "softmax_backward", [&] {
     cpu_sparse_coo_softmax_backward<scalar_t, false>(
-        grad_input, grad, output, dim_, input_.dtype().toScalarType());
+        grad_input, grad, output, dim_, input_.scalar_type());
   });
   return grad_input;
 }
@@ -580,7 +580,7 @@ Tensor log_softmax_backward_sparse_cpu(
   }
   AT_DISPATCH_FLOATING_TYPES(grad.scalar_type(), "log_softmax_backward", [&] {
     cpu_sparse_coo_softmax_backward<scalar_t, true>(
-        grad_input, grad, output, dim_, input_.dtype().toScalarType());
+        grad_input, grad, output, dim_, input_.scalar_type());
   });
   return grad_input;
 }
