@@ -43,14 +43,14 @@ struct MaybeOwnedTraitsGenericImpl {
 /// borrows for some types that we control. For examples, see
 /// intrusive_ptr.h and TensorBody.h.
 
-
 template <typename T>
 struct MaybeOwnedTraits;
 
 // Explicitly enable MaybeOwned<shared_ptr<T>>, rather than allowing
 // MaybeOwned to be used for any type right away.
 template <typename T>
-struct MaybeOwnedTraits<std::shared_ptr<T>> : public MaybeOwnedTraitsGenericImpl<std::shared_ptr<T>> {};
+struct MaybeOwnedTraits<std::shared_ptr<T>>
+    : public MaybeOwnedTraitsGenericImpl<std::shared_ptr<T>> {};
 
 /// A smart pointer around either a borrowed or owned T. When
 /// constructed with borrowed(), the caller MUST ensure that the
