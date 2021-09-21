@@ -9,10 +9,10 @@ except ImportError:
 
 class PandasWrapper:
     @classmethod
-    def create_dataframe(cls, data):
+    def create_dataframe(cls, data, columns):
         if not WITH_PANDAS:
             Exception("DataFrames prototype requires pandas to function")
-        return pandas.DataFrame(data)
+        return pandas.DataFrame(data, columns=columns)
 
     @classmethod
     def is_dataframe(cls, data):
@@ -64,9 +64,9 @@ def set_df_wrapper(wrapper):
     default_wrapper = wrapper
 
 
-def create_dataframe(data):
+def create_dataframe(data, columns=None):
     wrapper = get_df_wrapper()
-    wrapper.create_dataframe(data)
+    wrapper.create_dataframe(data, columns)
 
 
 def is_dataframe(data):
