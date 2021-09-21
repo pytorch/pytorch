@@ -4,7 +4,7 @@ training processes on each of the training nodes.
 
 .. warning::
 
-    This module is going to be deprecated in favor of :ref:`torch.distributed.run <launcher-api>`.
+    This module is going to be deprecated in favor of :ref:`torchrun <launcher-api>`.
 
 The utility can be used for single-node distributed training, in which one or
 more processes per node will be spawned. The utility can be used for either
@@ -97,9 +97,9 @@ or
     >>>    # your code to run
 
 3. In your training program, you are supposed to call the following function
-at the beginning to start the distributed backend. You need to make sure that
-the init_method uses ``env://``, which is the only supported ``init_method``
-by this module.
+at the beginning to start the distributed backend. It is strongly recommended
+that ``init_method=env://``. Other init methods (e.g. ``tcp://``) may work,
+but ``env://`` is the one that is officially supported by this module.
 
 ::
 
@@ -147,6 +147,7 @@ import warnings
 
 from torch.distributed.run import get_args_parser, run
 
+
 logger = logging.getLogger(__name__)
 
 
@@ -176,12 +177,13 @@ def launch(args):
 def main(args=None):
     warnings.warn(
         "The module torch.distributed.launch is deprecated\n"
-        "and will be removed in future. Use torch.distributed.run.\n"
-        "Note that --use_env is set by default in torch.distributed.run.\n"
+        "and will be removed in future. Use torchrun.\n"
+        "Note that --use_env is set by default in torchrun.\n"
         "If your script expects `--local_rank` argument to be set, please\n"
         "change it to read from `os.environ['LOCAL_RANK']` instead. See \n"
         "https://pytorch.org/docs/stable/distributed.html#launch-utility for \n"
-        "further instructions\n", FutureWarning
+        "further instructions\n",
+        FutureWarning,
     )
     args = parse_args(args)
     launch(args)

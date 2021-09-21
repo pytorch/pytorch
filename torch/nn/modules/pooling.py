@@ -882,8 +882,8 @@ class LPPool1d(_LPPoolNd):
         ceil_mode: when True, will use `ceil` instead of `floor` to compute the output shape
 
     Shape:
-        - Input: :math:`(N, C, L_{in})`
-        - Output: :math:`(N, C, L_{out})`, where
+        - Input: :math:`(N, C, L_{in})` or :math:`(C, L_{in})`.
+        - Output: :math:`(N, C, L_{out})` or :math:`(C, L_{out})`, where
 
           .. math::
               L_{out} = \left\lfloor\frac{L_{in} - \text{kernel\_size}}{\text{stride}} + 1\right\rfloor

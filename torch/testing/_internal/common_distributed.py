@@ -467,10 +467,6 @@ class MultiProcessTestCase(TestCase):
             self.pid_to_pipe[process.pid] = parent_conn
             self.processes.append(process)
 
-    def _fork_processes(self) -> None:
-        proc = torch.multiprocessing.get_context("fork").Process
-        self._start_processes(proc)
-
     def _spawn_processes(self) -> None:
         proc = torch.multiprocessing.get_context("spawn").Process
         self._start_processes(proc)

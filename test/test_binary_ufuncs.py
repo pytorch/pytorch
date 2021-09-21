@@ -13,12 +13,17 @@ from functools import partial
 from torch._six import inf, nan
 from torch.testing._internal.common_utils import (
     TestCase, iter_indices, TEST_WITH_ASAN, run_tests,
-    torch_to_numpy_dtype_dict, make_tensor, TEST_SCIPY, set_default_dtype)
+    torch_to_numpy_dtype_dict, TEST_SCIPY, set_default_dtype)
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests, onlyCUDA, onlyCPU, dtypes, dtypesIfCUDA,
     dtypesIfCPU, deviceCountAtLeast, precisionOverride, onlyOnCPUAndCUDA,
-    skipCUDAIfRocm, skipIf)
-from torch.testing import all_types_and_complex_and, integral_types_and
+    skipCUDAIfRocm, skipIf, ops)
+from torch.testing import make_tensor
+from torch.testing._internal.common_dtype import (
+    all_types_and_complex_and, integral_types_and, get_all_dtypes, get_all_int_dtypes, get_all_math_dtypes,
+    get_all_complex_dtypes, get_all_fp_dtypes,
+)
+from torch.testing._internal.common_methods_invocations import binary_ufuncs
 
 if TEST_SCIPY:
     import scipy.special
@@ -89,6 +94,74 @@ def _make_tensor(shape, dtype, device, fill_ones=False) -> torch.Tensor:
 
 # TODO: update to use opinfos consistently
 class TestBinaryUfuncs(TestCase):
+    @ops(binary_ufuncs, allowed_dtypes=(torch.float32,))
+    def test_broadcasting(self, device, dtype, op):
+        for shape_lhs, shape_rhs in (
+            ((1,), ()),
+            ((2,), ()),
+            ((1,), (2,)),
+            ((2,), (2,)),
+            ((2, 1), (2,)),
+            ((1, 2), (2,)),
+            ((3, 2), (2,)),
+            ((3, 2), (3, 2)),
+            ((1, 3, 2), (2,)),
+            ((1, 3, 2), (3, 2)),
+            ((3, 1, 2), (3, 2)),
+            ((1, 3, 2), (1, 3, 2)),
+            ((2, 3, 2), ()),
+            ((2, 3, 2), (2, 3, 2)),
+            ((3, 1, 2), (1, 3, 2)),
+        ):
+            lhs = make_tensor(shape_lhs, device=device, dtype=dtype, **op.lhs_make_tensor_kwargs)
+            rhs = make_tensor(shape_rhs, device=device, dtype=dtype, **op.rhs_make_tensor_kwargs)
+
+            actual = op(lhs, rhs).shape
+            expected = torch.broadcast_shapes(shape_lhs, shape_rhs)
+
+            msg = (
+                f"On {device}, torch.{op.name} broadcasts inputs of shapes {shape_lhs} and {shape_rhs} incorrectly: "
+                f"{actual} != {expected}"
+            )
+            self.assertEqual(actual, expected, msg=msg)
+
+    @ops(binary_ufuncs, allowed_dtypes=(torch.float32,))
+    def test_broadcast_python_scalar(self, device, dtype, op):
+        for shape_lhs in ((), (1,), (2,), (1, 2, 3),):
+            lhs = make_tensor(shape_lhs, device=device, dtype=dtype, **op.lhs_make_tensor_kwargs)
+            rhs_tensor = make_tensor((), device=device, dtype=dtype, **op.rhs_make_tensor_kwargs)
+            rhs_python = rhs_tensor.item()
+
+            actual = op(lhs, rhs_python)
+            expected = op(lhs, rhs_tensor)
+
+            self.assertEqual(
+                actual.shape,
+                expected.shape,
+                msg=f"On {device}, torch.{op.name} broadcasts Python scalars different than 0d tensors.",
+            )
+
+    @ops(binary_ufuncs, allowed_dtypes=(torch.float32,))
+    def test_not_broadcastable(self, device, dtype, op):
+        for shape_lhs, shape_rhs in (
+                ((2,), (3,)),
+                ((3, 1), (2, 1)),
+                ((1, 3, 2), (3,)),
+                ((3, 1, 2), (2, 1, 2)),
+        ):
+            lhs = make_tensor(shape_lhs, device=device, dtype=dtype, **op.lhs_make_tensor_kwargs)
+            rhs = make_tensor(shape_rhs, device=device, dtype=dtype, **op.rhs_make_tensor_kwargs)
+
+            try:
+                broadcasted_shape = op(lhs, rhs).shape
+            except RuntimeError:
+                continue
+
+            msg = (
+                f"On {device}, torch.{op.name} broadcasts inputs shapes {shape_lhs} and {shape_rhs} into "
+                f"{broadcasted_shape}, although they are not broadcastable."
+            )
+            raise AssertionError(msg)
 
     def test_add_broadcast_empty(self, device):
         # empty + empty
@@ -155,8 +228,8 @@ class TestBinaryUfuncs(TestCase):
     # TODO: update to work on CUDA, too
     @onlyCPU
     def test_inplace_comparison_ops_require_inputs_have_same_dtype(self, device):
-        with self.assertRaisesRegex(RuntimeError, 'Expected object of scalar type'):
-            for op in ['lt_', 'le_', 'gt_', 'ge_', 'eq_', 'ne_', 'logical_xor_', 'logical_and_', 'logical_or_']:
+        for op in ['lt_', 'le_', 'gt_', 'ge_', 'eq_', 'ne_', 'logical_xor_', 'logical_and_', 'logical_or_']:
+            with self.assertRaisesRegex(RuntimeError, 'Expected object of scalar type'):
                 x = torch.tensor([1], dtype=torch.int)
                 y = torch.tensor([2], dtype=torch.long)
                 in_place_method = getattr(x, op)
@@ -279,7 +352,7 @@ class TestBinaryUfuncs(TestCase):
         id_after = id(t)
         self.assertEqual(id_before, id_after)
 
-    @dtypes(*torch.testing.get_all_dtypes(include_bool=False, include_complex=False))
+    @dtypes(*get_all_dtypes(include_bool=False, include_complex=False))
     def test_div_rounding_modes(self, device, dtype):
         if dtype.is_floating_point:
             low, high = -10.0, 10.0
@@ -379,7 +452,7 @@ class TestBinaryUfuncs(TestCase):
             actual = torch.divide(a, zero, rounding_mode=rounding_mode)
             self.assertEqual(actual, expect, exact_dtype=exact_dtype)
 
-    @dtypes(*torch.testing.get_all_dtypes(
+    @dtypes(*get_all_dtypes(
         include_bool=False, include_complex=False, include_bfloat16=False))
     def test_div_rounding_numpy(self, device, dtype):
         info = (torch.finfo(dtype) if dtype.is_floating_point
@@ -823,7 +896,7 @@ class TestBinaryUfuncs(TestCase):
             self.assertEqual(cpu_out, cuda_out)
 
     @onlyOnCPUAndCUDA
-    @dtypes(*(torch.testing.get_all_dtypes(include_bool=False, include_bfloat16=False)))
+    @dtypes(*(get_all_dtypes(include_bool=False, include_bfloat16=False)))
     def test_complex_scalar_pow_tensor(self, device, dtype):
         complexes = [0.5j, 1. + 1.j, -1.5j, 2.2 - 1.6j, 1 + 0j]
         first_exp = make_tensor((100,), device, dtype, low=-2, high=2)
@@ -1222,11 +1295,10 @@ class TestBinaryUfuncs(TestCase):
     # Also tests that reverse operations are equivalent to forward ops
     # NOTE: division ops are tested separately above
     def test_binary_ops_with_scalars(self, device):
-        for ops in ((operator.add, torch.add),
-                    (operator.sub, torch.sub),
-                    (operator.mul, torch.mul),
-                    (operator.truediv, torch.div)):
-            python_op, torch_op = ops
+        for python_op, torch_op in ((operator.add, torch.add),
+                                    (operator.sub, torch.sub),
+                                    (operator.mul, torch.mul),
+                                    (operator.truediv, torch.div)):
 
             for a, b in product(range(-10, 10), range(-10, 10)):
                 for op in (lambda x: x * .5, lambda x: math.floor(x)):
@@ -1253,7 +1325,7 @@ class TestBinaryUfuncs(TestCase):
                         self.assertEqual(expected, python_op(first, second))
                         self.assertEqual(expected, torch_op(first, second))
 
-    @dtypes(*product(torch.testing.get_all_dtypes(include_complex=False), torch.testing.get_all_dtypes(include_complex=False)))
+    @dtypes(*product(get_all_dtypes(include_complex=False), get_all_dtypes(include_complex=False)))
     def test_maximum_minimum_type_promotion(self, device, dtypes):
         a = torch.tensor((0, 1), device=device, dtype=dtypes[0])
         b = torch.tensor((1, 0), device=device, dtype=dtypes[1])
@@ -1261,7 +1333,7 @@ class TestBinaryUfuncs(TestCase):
             result = op(a, b)
             self.assertEqual(result.dtype, torch.result_type(a, b))
 
-    @dtypes(*(torch.testing.get_all_int_dtypes() + [torch.bool]))
+    @dtypes(*(get_all_int_dtypes() + [torch.bool]))
     def test_maximum_minimum_int_and_bool(self, device, dtype):
         ops = ((torch.maximum, torch.max, np.maximum), (torch.minimum, torch.min, np.minimum),
                (torch.fmax, None, np.fmax), (torch.fmin, None, np.fmin))
@@ -1287,7 +1359,7 @@ class TestBinaryUfuncs(TestCase):
             self.assertEqual(out, numpy_result)
 
     @precisionOverride({torch.bfloat16: 1e-2})
-    @dtypes(*(torch.testing.get_all_fp_dtypes()))
+    @dtypes(*(get_all_fp_dtypes()))
     def test_maximum_minimum_float(self, device, dtype):
         ops = ((torch.maximum, torch.max, np.maximum), (torch.minimum, torch.min, np.minimum),
                (torch.fmax, None, np.fmax), (torch.fmin, None, np.fmin))
@@ -1315,7 +1387,7 @@ class TestBinaryUfuncs(TestCase):
             self.assertEqual(tensor_result, numpy_result, exact_dtype=False)
             self.assertEqual(out, numpy_result, exact_dtype=False)
 
-    @dtypes(*(torch.testing.get_all_fp_dtypes()))
+    @dtypes(*(get_all_fp_dtypes()))
     def test_maximum_minimum_float_nan_and_inf(self, device, dtype):
         # np.maximum and np.minimum functions compare input arrays element-wisely.
         # if one of the elements being compared is a NaN, then that element is returned.
@@ -1351,7 +1423,7 @@ class TestBinaryUfuncs(TestCase):
                 self.assertEqual(tensor_result, numpy_result)
                 self.assertEqual(out, numpy_result)
 
-    @dtypes(*product(torch.testing.get_all_complex_dtypes(), torch.testing.get_all_dtypes()))
+    @dtypes(*product(get_all_complex_dtypes(), get_all_dtypes()))
     def test_maximum_minimum_complex(self, device, dtypes):
         for torch_op in (torch.maximum, torch.minimum, torch.max, torch.min, torch.fmax, torch.fmin):
             with self.assertRaisesRegex(RuntimeError, '.+not implemented for.+'):
@@ -1409,7 +1481,7 @@ class TestBinaryUfuncs(TestCase):
         self.assertEqual(x, 4.5)
 
     @onlyCPU
-    @dtypes(*torch.testing.get_all_dtypes())
+    @dtypes(*get_all_dtypes())
     def test_sub(self, device, dtype):
         m1 = torch.tensor([2.34, 4.44], dtype=dtype, device=device)
         m2 = torch.tensor([1.23, 2.33], dtype=dtype, device=device)
@@ -1471,8 +1543,8 @@ class TestBinaryUfuncs(TestCase):
             self.assertFalse(torch.isnan(ma[i]), "max(a, b): {}, a: {}, b: {}".format(ma[i], a[i], b[i]))
             self.assertFalse(torch.isnan(mi[i]), "min(a, b): {}, a: {}, b: {}".format(mi[i], a[i], b[i]))
 
-    @dtypes(*product(torch.testing.get_all_dtypes(include_complex=False),
-                     torch.testing.get_all_dtypes(include_complex=False)))
+    @dtypes(*product(get_all_dtypes(include_complex=False),
+                     get_all_dtypes(include_complex=False)))
     def test_copysign(self, device, dtypes):
         def _test_copysign_numpy(a, b):
             torch_result = torch.copysign(a, b)
@@ -1489,7 +1561,7 @@ class TestBinaryUfuncs(TestCase):
             expected = torch.from_numpy(np.copysign(np_a, np_b))
             # To handle inconsistencies of type promotion between PyTorch and Numpy
             # Applied for both arguments having integral precision and bfloat16
-            types = [torch.bool, torch.bfloat16] + torch.testing.get_all_int_dtypes()
+            types = [torch.bool, torch.bfloat16] + get_all_int_dtypes()
             if a.dtype in types or b.dtype in types:
                 promoted_type = torch.promote_types(torch_result.dtype, expected.dtype)
                 torch_result = torch_result.to(promoted_type)
@@ -1534,7 +1606,7 @@ class TestBinaryUfuncs(TestCase):
             for case in cases:
                 _test_copysign_numpy(torch.tensor([case], device=device, dtype=dtypes[0]), b)
 
-        if dtypes[1] in torch.testing.get_all_fp_dtypes():
+        if dtypes[1] in get_all_fp_dtypes():
             a = make_tensor((10, 10), device=device, dtype=dtypes[0], low=-9, high=9)
             for case in cases:
                 _test_copysign_numpy(a, torch.tensor([case], device=device, dtype=dtypes[1]))
@@ -1586,38 +1658,25 @@ class TestBinaryUfuncs(TestCase):
         res = scale * x
         self.assertEqual(res, expected.to(dtype), atol=0., rtol=0.)
 
-    @dtypesIfCUDA(*set(torch.testing.get_all_math_dtypes('cuda')) -
-                  {torch.uint8, torch.complex64, torch.complex128})
-    @dtypes(*set(torch.testing.get_all_math_dtypes('cpu')) -
-            {torch.uint8, torch.complex64, torch.complex128})
+    @dtypesIfCUDA(*set(get_all_math_dtypes('cuda')) - {torch.complex64, torch.complex128})
+    @dtypes(*set(get_all_math_dtypes('cpu')) - {torch.complex64, torch.complex128})
     def test_floor_divide_tensor(self, device, dtype):
         x = torch.rand(10, device=device).mul(30).to(dtype)
         y = torch.arange(1, 11, dtype=dtype, device=device)
 
-        with self.assertWarnsOnceRegex(UserWarning, "floor_divide"):
+        with self.assertWarnsOnceRegex(UserWarning, "__floordiv__"):
             z = x // y
         z_alt = torch.trunc(x.double() / y.double()).to(dtype)
 
         self.assertEqual(z.dtype, x.dtype)
         self.assertEqual(z, z_alt)
 
-    @dtypesIfCUDA(torch.int8, torch.int16, torch.int32, torch.int64,
-                  torch.half, torch.bfloat16, torch.float, torch.double)
-    @dtypes(torch.int8, torch.int16, torch.int32, torch.int64, torch.float, torch.double)
-    def test_floor_divide_negative(self, device, dtype):
-        x = make_tensor((10,), device=device, dtype=dtype)
-        x[4] = -10
-        y = make_tensor((10,), device=device, dtype=dtype, low=1, high=9)
-
-        with self.assertRaisesRegex(RuntimeError, "floor_divide"):
-            z = x // y
-
-    @dtypesIfCUDA(*set(torch.testing.get_all_math_dtypes('cuda')) - {torch.complex64, torch.complex128})
-    @dtypes(*set(torch.testing.get_all_math_dtypes('cpu')) - {torch.complex64, torch.complex128})
+    @dtypesIfCUDA(*set(get_all_math_dtypes('cuda')) - {torch.complex64, torch.complex128})
+    @dtypes(*set(get_all_math_dtypes('cpu')) - {torch.complex64, torch.complex128})
     def test_floor_divide_scalar(self, device, dtype):
         x = torch.rand(100, device=device).mul(10).to(dtype)
 
-        with self.assertWarnsOnceRegex(UserWarning, "floor_divide"):
+        with self.assertWarnsOnceRegex(UserWarning, "__floordiv__"):
             z = x // 3
         z_alt = torch.tensor([math.trunc(v.item() / 3.) for v in x], dtype=x.dtype, device=device)
 
@@ -1646,7 +1705,7 @@ class TestBinaryUfuncs(TestCase):
                 self.assertEqual(o, torch.floor_divide(x.float(), y.float()))
 
     @onlyCPU
-    @dtypes(*torch.testing.get_all_math_dtypes('cpu'))
+    @dtypes(*get_all_math_dtypes('cpu'))
     def test_rdiv(self, device, dtype):
         if dtype is torch.float16:
             return
@@ -1658,7 +1717,7 @@ class TestBinaryUfuncs(TestCase):
         z = torch.tensor([30 / v.item() for v in x], device=device)
         self.assertEqual(y, z, exact_dtype=False)
 
-    @dtypes(*torch.testing.get_all_fp_dtypes(include_bfloat16=False))
+    @dtypes(*get_all_fp_dtypes(include_bfloat16=False))
     def test_fmod_remainder_by_zero_float(self, device, dtype):
         fn_list = (torch.fmod, torch.remainder)
         for fn in fn_list:
@@ -1670,7 +1729,7 @@ class TestBinaryUfuncs(TestCase):
 
     @onlyOnCPUAndCUDA  # Check Issue https://github.com/pytorch/pytorch/issues/48130
     @skipCUDAIfRocm  # Error happens on both ROCM and XLA
-    @dtypes(*torch.testing.get_all_int_dtypes())
+    @dtypes(*get_all_int_dtypes())
     def test_fmod_remainder_by_zero_integral(self, device, dtype):
         fn_list = (torch.fmod, torch.remainder)
         for fn in fn_list:
@@ -1695,7 +1754,7 @@ class TestBinaryUfuncs(TestCase):
                     value = 255 if dtype == torch.uint8 else -1
                     self.assertTrue(torch.all(fn(x, zero) == value))
 
-    @dtypes(*torch.testing.get_all_dtypes(include_bfloat16=False, include_bool=False, include_complex=False))
+    @dtypes(*get_all_dtypes(include_bfloat16=False, include_bool=False, include_complex=False))
     def test_fmod_remainder(self, device, dtype):
         # Use numpy as reference
         def _helper(x, mod, fns_list):
@@ -1732,7 +1791,7 @@ class TestBinaryUfuncs(TestCase):
         # Mods: Integer, Float, Tensor, Non-contiguous Tensor
         mods = [3, 2.3, mod, mod.t()]
         # mod with floating-point dtype
-        if dtype in torch.testing.get_all_int_dtypes():
+        if dtype in get_all_int_dtypes():
             mod_float = make_tensor((10, 10), device=device, dtype=torch.float, low=-9, high=9)
             mod[mod == 0] = 1
             mods.append(mod_float)
@@ -1953,7 +2012,7 @@ class TestBinaryUfuncs(TestCase):
                 a // b
 
     @unittest.skipIf(TEST_WITH_ASAN, "Integer overflows are not allowed under ASAN")
-    @dtypes(*torch.testing.get_all_dtypes())
+    @dtypes(*get_all_dtypes())
     def test_muldiv_scalar(self, device, dtype):
         x = make_tensor((10, 3), device, dtype, low=None, high=None)
         s = make_tensor((1,), 'cpu', dtype, low=None, high=None).item()
@@ -1963,7 +2022,7 @@ class TestBinaryUfuncs(TestCase):
         self.assertEqual(x / s, x / y)
         self.assertEqual(s / x, y / x)
 
-    @dtypes(*tuple(itertools.combinations_with_replacement(torch.testing.get_all_dtypes(), 2)))
+    @dtypes(*tuple(itertools.combinations_with_replacement(get_all_dtypes(), 2)))
     def test_comparison_ops_type_promotion_and_broadcasting(self, device, dtypes):
         # issue #42660
         # testing all combinations of broadcasting and type promotion
@@ -2145,8 +2204,8 @@ class TestBinaryUfuncs(TestCase):
             self.assertEqual(torch_op(a, 2.2), expected_op(a, 2.2))
 
     @onlyOnCPUAndCUDA
-    @dtypes(*list(product(torch.testing.get_all_dtypes(include_complex=False),
-                          torch.testing.get_all_dtypes(include_complex=False))))
+    @dtypes(*list(product(get_all_dtypes(include_complex=False),
+                          get_all_dtypes(include_complex=False))))
     def test_heaviside(self, device, dtypes):
         input_dtype = dtypes[0]
         values_dtype = dtypes[1]
@@ -2205,8 +2264,8 @@ class TestBinaryUfuncs(TestCase):
         with self.assertRaisesRegex(RuntimeError, 'Expected all tensors to be on the same device'):
             torch.heaviside(y, x)
 
-    @dtypes(*list(product(torch.testing.get_all_complex_dtypes(),
-                          torch.testing.get_all_complex_dtypes())))
+    @dtypes(*list(product(get_all_complex_dtypes(),
+                          get_all_complex_dtypes())))
     def test_heaviside_complex(self, device, dtypes):
         input_dtype = dtypes[0]
         values_dtype = dtypes[1]
@@ -2248,15 +2307,15 @@ class TestBinaryUfuncs(TestCase):
         getattr(a, op + '_')(b)
         self.assertEqual(expected_res, a)
 
-    @dtypes(*product(torch.testing.get_all_dtypes(), torch.testing.get_all_dtypes()))
+    @dtypes(*product(get_all_dtypes(), get_all_dtypes()))
     def test_logical_xor(self, device, dtypes):
         self._test_logical(device, dtypes, 'logical_xor', [10, 0, 1, 0], [1, 0, 0, 10], [0, 0, 1, 1])
 
-    @dtypes(*product(torch.testing.get_all_dtypes(), torch.testing.get_all_dtypes()))
+    @dtypes(*product(get_all_dtypes(), get_all_dtypes()))
     def test_logical_and(self, device, dtypes):
         self._test_logical(device, dtypes, 'logical_and', [10, 0, 1, 0], [1, 0, 0, 10], [1, 0, 0, 0])
 
-    @dtypes(*product(torch.testing.get_all_dtypes(), torch.testing.get_all_dtypes()))
+    @dtypes(*product(get_all_dtypes(), get_all_dtypes()))
     def test_logical_or(self, device, dtypes):
         self._test_logical(device, dtypes, 'logical_or', [10, 0, 1, 0], [1, 0, 0, 10], [1, 0, 1, 1])
 
@@ -2360,7 +2419,7 @@ class TestBinaryUfuncs(TestCase):
         self._test_logaddexp(device, dtype, base2=True)
 
     def test_add(self, device):
-        dtypes = [torch.float, torch.double] + torch.testing.get_all_complex_dtypes()
+        dtypes = [torch.float, torch.double] + get_all_complex_dtypes()
         for dtype in dtypes:
             # [res] torch.add([res,] tensor1, tensor2)
             m1 = torch.randn(100, 100, dtype=dtype, device=device)
@@ -2561,7 +2620,7 @@ class TestBinaryUfuncs(TestCase):
                          torch.tensor([0, 1, 0, 1, 0, 1], dtype=torch.bool, device=device))
         self.assertFalse(a.equal(b))
 
-    @dtypes(*torch.testing.get_all_dtypes(include_complex=False))
+    @dtypes(*get_all_dtypes(include_complex=False))
     def test_logical(self, device, dtype):
         if dtype != torch.bool:
             x = torch.tensor([1, 2, 3, 4], device=device, dtype=dtype)
@@ -2647,6 +2706,11 @@ class TestBinaryUfuncs(TestCase):
         test_x((1, 10), 0, [1.0], device)
         test_x((0, 2), 0, [], device)
         test_x((0, 2), 1, [1.0, 2.0], device)
+        test_x((2, 3, 4), -1, [1.0, 2.0, 3.0, 4.0], device)
+        test_x((2, 3, 4), 0, [1.0, 2.0], device)
+        test_x((2, 3, 4), 1, [1.0, 2.0, 3.0], device)
+        test_x((2, 3, 4), 2, [1.0, 2.0, 3.0, 4.0], device)
+        test_x((2, 2, 4), -1, [[1.0, 2.0, 3.0, 4.0], [1.0, 2.0, 3.0, 4.0]], device)
         with self.assertRaisesRegex(
                 IndexError,
                 'Dimension out of range'):
@@ -2705,6 +2769,10 @@ class TestBinaryUfuncs(TestCase):
         test_x((10, 2), 0, [2.0, 3.0, 4.0, 7.0, 11.0, 14.0, 22.0, 26.0, 26.1, 30.3], device)
         test_x((1, 10), 0, [1.0], device)
         test_x((0, 2), 1, [1, 2], device)
+        test_x((2, 3, 4), -1, [1.0, 2.0, 3.0, 4.0], device)
+        test_x((2, 3, 4), 0, [1.0, 2.0], device)
+        test_x((2, 3, 4), 1, [1.0, 2.0, 3.0], device)
+        test_x((2, 3, 4), 2, [1.0, 2.0, 3.0, 4.0], device)
 
         test_empty_x((0, 2), 0, [], device)  # SciPy failing when x == [], but our version returns empty
 
@@ -2738,8 +2806,8 @@ class TestBinaryUfuncs(TestCase):
         self.unary_check_input_output_mem_overlap(
             doubles, sz, lambda input, out: torch.pow(42, input, out=out))
 
-    @dtypes(*list(product(torch.testing.get_all_dtypes(include_bool=False),
-                          torch.testing.get_all_dtypes(include_bool=False))))
+    @dtypes(*list(product(get_all_dtypes(include_bool=False),
+                          get_all_dtypes(include_bool=False))))
     def test_float_power(self, device, dtypes):
         def to_np(value):
             if isinstance(value, torch.Tensor) and value.dtype == torch.bfloat16:
@@ -2835,8 +2903,8 @@ class TestBinaryUfuncs(TestCase):
                         torch.Tensor.float_power_(base.clone(), exp)
 
     @skipIf(not TEST_SCIPY, "Scipy required for the test.")
-    @dtypes(*product(torch.testing.get_all_dtypes(include_complex=False, include_bfloat16=False),
-                     torch.testing.get_all_dtypes(include_complex=False, include_bfloat16=False)))
+    @dtypes(*product(get_all_dtypes(include_complex=False, include_bfloat16=False),
+                     get_all_dtypes(include_complex=False, include_bfloat16=False)))
     def test_xlogy_xlog1py(self, device, dtypes):
         x_dtype, y_dtype = dtypes
 
@@ -2847,7 +2915,7 @@ class TestBinaryUfuncs(TestCase):
             self.assertEqual(expected, out)
 
         def xlogy_inplace_variant_helper(x, y):
-            if x.dtype in torch.testing.get_all_int_dtypes() + [torch.bool]:
+            if x.dtype in get_all_int_dtypes() + [torch.bool]:
                 with self.assertRaisesRegex(RuntimeError,
                                             "can't be cast to the desired output type"):
                     x.clone().xlogy_(y)
@@ -2974,10 +3042,10 @@ class TestBinaryUfuncs(TestCase):
         _compare_helper(t, zeros, *xlog1py_fns)
         _compare_helper(t, 0., *xlog1py_fns)
 
-    @dtypes(*product(torch.testing.get_all_dtypes(include_complex=False,
-                                                  include_half=False, include_bfloat16=False),
-                     torch.testing.get_all_dtypes(include_complex=False,
-                                                  include_half=False, include_bfloat16=False)))
+    @dtypes(*product(get_all_dtypes(include_complex=False,
+                                    include_half=False, include_bfloat16=False),
+                     get_all_dtypes(include_complex=False,
+                                    include_half=False, include_bfloat16=False)))
     @skipIf(not TEST_SCIPY, "Scipy required for the test.")
     def test_zeta(self, device, dtypes):
         x_dtype, q_dtype = dtypes

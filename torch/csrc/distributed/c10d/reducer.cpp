@@ -377,9 +377,25 @@ void Reducer::mark_variable_ready_dense(size_t variable_index) {
         if (comm_hook_ == nullptr) {
           auto wrapped =
               at::native::wrapped_scalar_tensor(double(1.) / div_factor_);
-          // Divides while copying into the bucket view to save one scan over
-          // all the input parameters.
-          at::mul_out(bucket_view, grad, wrapped);
+          if (!grad.requires_grad()) {
+            // Divides while copying into the bucket view to save one scan over
+            // all the input parameters.
+            at::mul_out(bucket_view, grad, wrapped);
+          } else {
+            // If DDP is running with create_graph=True, gradients require_grad
+            // themselves in order to compute higher order derivatives. However,
+            // DDP will not sync up these gradients currently (see
+            // https://github.com/pytorch/pytorch/issues/63812).
+            LOG(WARNING)
+                << "Using DistributedDataParallel with create_graph=True "
+                << " is not well-supported. The higher-order gradient will "
+                << " not be synchronized across ranks, and backpropagation "
+                << " through all_reduce operations will not occur. If you require "
+                << " DDP to work with higher-order gradients for your use case, "
+                << " please ping https://github.com/pytorch/pytorch/issues/63929";
+            auto div_result = at::mul(grad, wrapped);
+            bucket_view.copy_(div_result);
+          }
         } else {
           bucket_view.copy_(grad);
         }
@@ -456,6 +472,7 @@ std::vector<c10d::GradBucket> Reducer::get_grad_buckets(
     auto variables_for_bucket = get_variables_for_bucket(i, bucket);
     gradBuckets.emplace_back(
         i,
+        buckets_.size(),
         return_zero_tensors ? at::zeros_like(bucket.replicas[0].contents)
                             : bucket.replicas[0].contents,
         bucket.replicas[0].offsets,
@@ -872,6 +889,7 @@ void Reducer::all_reduce_bucket(Bucket& bucket) {
   auto variables_for_bucket = get_variables_for_bucket(next_bucket_, bucket);
   GradBucket grad_bucket(
       next_bucket_,
+      buckets_.size(),
       tensors[0],
       // Since we only support single-process single-device
       // mode, there is always only one replica in the bucket.
@@ -1684,7 +1702,8 @@ bool Reducer::rebuild_buckets() {
           rebuilt_params_,
           bucket_size_limits,
           expect_sparse_gradients_[0],
-          rebuilt_param_indices_);
+          rebuilt_param_indices_,
+          logger_);
 
   if (ddp_set_last_bucket_as_small) {
     // Reverse again because buckets were rebuilt in the opposite of gradient
@@ -1940,7 +1959,8 @@ compute_bucket_assignment_by_size(
     const std::vector<at::Tensor>& tensors,
     const std::vector<size_t>& bucket_size_limits,
     const std::vector<bool>& expect_sparse_gradient,
-    const std::vector<int64_t>& tensor_indices) {
+    const std::vector<int64_t>& tensor_indices,
+    const c10::optional<std::weak_ptr<c10d::Logger>>& logger) {
   // Either expect_sparse_gradient is not specified or it has as many elements
   // as the vector with tensors.
   TORCH_INTERNAL_ASSERT(
@@ -1970,9 +1990,12 @@ compute_bucket_assignment_by_size(
 
   for (const auto i : c10::irange(tensors.size())) {
     const auto& tensor = tensors[i];
-    // TODO: This is not a reducer method so it does not have access to logger,
-    // pass in logger directly here.
-    TORCH_CHECK(!tensor.is_sparse(), "No support for sparse tensors.");
+    auto msg = std::string("No support for sparse tensors.");
+    if (logger.has_value()) {
+      REDUCER_CHECK(!tensor.is_sparse(), logger.value(), msg);
+    } else {
+      TORCH_CHECK(!tensor.is_sparse(), msg);
+    }
 
     // when tensor_indices is empty, the index of tensors[i] assigned to
     // bucket is i, otherwise the tensor index is tensor_indices[i].
@@ -2060,8 +2083,9 @@ compute_bucket_assignment_by_size(
 // Verifies corresponding params in replica 0 have the same sizes/strides
 // across processes.
 void verify_replica0_across_processes(
-    c10::intrusive_ptr<c10d::ProcessGroup> process_group,
-    std::vector<std::vector<at::Tensor>> model_replicas) {
+    const c10::intrusive_ptr<c10d::ProcessGroup>& process_group,
+    const std::vector<std::vector<at::Tensor>>& model_replicas,
+    const c10::optional<std::weak_ptr<c10d::Logger>>& logger) {
   size_t i = 0;
   for (const auto& t : model_replicas[0]) {
     i += 2 * t.dim();
@@ -2098,26 +2122,27 @@ void verify_replica0_across_processes(
     // I'd like to include which process we are in the message,
     // but ProcessGroup::getRank is not public!
     for (const auto& sz : t.sizes()) {
-      // TODO: pass in logger and use REDUCER_CHECK.
-      TORCH_CHECK(
-          sz == control_accessor[i++],
-          "replicas[0][",
-          p,
-          "] in this process"
-          " with sizes ",
-          t.sizes(),
-          " appears not to match sizes of the same param in process 0.");
+      auto msg = c10::str("replicas[0][", p, "] in this process",
+                        " with sizes ",
+                        t.sizes(),
+                        " appears not to match sizes of the same param in process 0.");
+      if (logger.has_value()) {
+        REDUCER_CHECK(sz == control_accessor[i++], logger.value(), msg)
+      } else {
+        TORCH_CHECK(sz == control_accessor[i++], msg)
+      }
+
     }
     for (const auto& str : t.strides()) {
-      // TODO: pass in logger and use REDUCER_CHECK.
-      TORCH_CHECK(
-          str == control_accessor[i++],
-          "replicas[0][",
-          p,
-          "] in this process"
-          " with strides ",
-          t.strides(),
-          " appears not to match strides of the same param in process 0.");
+      auto msg = c10::str("replicas[0][", p, "] in this process",
+                        " with sizes ",
+                        t.sizes(),
+                        " appears not to match strides of the same param in process 0.");
+      if (logger.has_value()) {
+        REDUCER_CHECK(str == control_accessor[i++], logger.value(), msg)
+      } else {
+        TORCH_CHECK(str == control_accessor[i++], msg)
+      }
     }
   }
 }

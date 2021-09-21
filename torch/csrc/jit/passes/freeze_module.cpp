@@ -7,6 +7,7 @@
 #include <torch/csrc/jit/passes/clear_profiling.h>
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/passes/lower_tuples.h>
+#include <torch/csrc/jit/passes/remove_mutation.h>
 #include <torch/csrc/jit/runtime/graph_executor_impl.h>
 
 #include <stack>
@@ -89,7 +90,9 @@ class AttributePropagator {
     };
     auto applyOptimizations = [](std::shared_ptr<Graph>& subgraph) {
       runOptimization(
-          subgraph, /* unroll? */ false, /* const_prop_user_classes? */ false);
+          subgraph,
+          /* unroll_non_constant_loops? */ false,
+          /* const_prop_user_classes? */ false);
       LowerSimpleTuples(subgraph);
     };
 
@@ -756,13 +759,8 @@ class AttributePropagator {
   // Contains the attributes names (e.g. {"self", "subModule", "a"}
   std::deque<std::string> names_;
 }; // class AttributePropagator
-} // namespace
 
-Module freeze_module(
-    const Module& module,
-    std::vector<std::string> preservedAttrs,
-    bool freezeInterfaces,
-    bool preserveParameters) {
+void checkModuleDoesNotReturnSelf(const Module& module) {
   if (module.find_method("forward")) {
     Method method = module.get_method("forward");
     // Check that module does not return itself.
@@ -772,12 +770,33 @@ Module freeze_module(
           "attempted to freeze a module that return itself");
     }
   }
+}
+} // namespace
+
+Module freeze_module(
+    const Module& module,
+    std::vector<std::string> preservedAttrs,
+    bool freezeInterfaces,
+    bool preserveParameters) {
+  checkModuleDoesNotReturnSelf(module);
 
   auto moduleClone = module.clone(true);
   AttributePropagator attrPropagator(
       moduleClone, preservedAttrs, freezeInterfaces, preserveParameters);
   attrPropagator.run();
   return moduleClone;
+}
+
+void freeze_module(
+    Module* module,
+    std::vector<std::string> preservedAttrs,
+    bool freezeInterfaces,
+    bool preserveParameters) {
+  TORCH_CHECK(module != nullptr, "module cannot be nullptr");
+  checkModuleDoesNotReturnSelf(*module);
+  AttributePropagator attrPropagator(
+      *module, preservedAttrs, freezeInterfaces, preserveParameters);
+  attrPropagator.run();
 }
 
 } // namespace jit
