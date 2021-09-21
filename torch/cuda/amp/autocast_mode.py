@@ -25,7 +25,7 @@ class autocast(torch.autocast_mode.autocast):
     ``torch.cuda.amp.autocast(args...)`` is equivalent to ``torch.autocast("cuda", args...)``
     """
 
-    def __init__(self, enabled : bool = True, dtype : int = torch.float16, cache_enabled : bool = True):
+    def __init__(self, enabled : bool = True, dtype : int = 0, cache_enabled : bool = True):
         if torch._jit_internal.is_scripting():
             self._enabled = enabled
         elif enabled and not torch.cuda.is_available():
@@ -42,7 +42,8 @@ class autocast(torch.autocast_mode.autocast):
         torch.autocast_increment_nesting()
         return self
 
-    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any):
+    # TODO: discuss a unified TorchScript-friendly API for autocast
+    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any): # type: ignore
         if torch._jit_internal.is_scripting():
             return
         # Drop the cache when we exit to a nesting level that's outside any instance of autocast.
