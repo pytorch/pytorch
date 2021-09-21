@@ -482,7 +482,22 @@ TEST(LiteInterpreterTest, GetByteCodeVersion) {
   auto version_v4 = _get_model_bytecode_version(test_model_file_v4);
   AT_ASSERT(version_v4 == 4);
 }
+
 #endif // !defined(FB_XPLAT_BUILD)
+
+TEST(LiteInterpreterTest, GetContainTypes) {
+  Module m("m");
+  m.define(R"(
+    def forward(self):
+      return 3
+  )");
+
+  std::stringstream ss;
+  m._save_for_mobile(ss, {}, true);
+
+  auto contained_types = _get_model_contained_types(ss);
+  AT_ASSERT(contained_types.size() >= 0);
+}
 
 namespace {
 
