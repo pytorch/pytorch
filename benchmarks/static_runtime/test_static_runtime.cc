@@ -58,6 +58,13 @@ bool testHasInplaceOp(const std::string& jit_script) {
   return HasInplaceOp(graph, alias_db);
 }
 
+bool testModuleHasOp(const std::string& jit_script, const char* op_name) {
+  script::Module module("module");
+  module.define(jit_script);
+
+  return forwardHasOp(module, op_name);
+}
+
 Node* getNodeWithKind(const StaticModule& smodule, const std::string& kind) {
   for (auto& pnode : smodule.nodes()) {
     if (std::string(pnode.node()->kind().toQualString()) == kind) {
@@ -78,6 +85,13 @@ TEST(StaticRuntime, InPlace) {
   EXPECT_TRUE(testHasInplaceOp(reshape_inplace_script_1));
   EXPECT_TRUE(testHasInplaceOp(sigmoid_inplace_script));
   EXPECT_FALSE(testHasInplaceOp(sigmoid_out_script));
+}
+
+TEST(StaticRuntime, ModuleHasOp) {
+  EXPECT_TRUE(testModuleHasOp(reshape_inplace_script, "aten::sigmoid_"));
+  EXPECT_TRUE(testModuleHasOp(reshape_inplace_script_1, "aten::reshape"));
+  EXPECT_TRUE(testModuleHasOp(sigmoid_inplace_script, "aten::clone"));
+  EXPECT_FALSE(testModuleHasOp(reshape_inplace_script_1, "aten::add_"));
 }
 
 TEST(StaticRuntime, CanEnableStaticRuntime) {
