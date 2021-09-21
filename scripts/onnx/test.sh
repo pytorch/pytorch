@@ -79,7 +79,7 @@ if [[ "$BUILD_ENVIRONMENT" == *ort_test1* ]]; then
 fi
 if [[ "$BUILD_ENVIRONMENT" == *ort_test2* ]]; then
   # Update the loop for new opsets
-  for i in $(seq 10 13); do
+  for i in $(seq 10 14); do
     pytest "${args[@]}" \
       "$top_dir/test/onnx/test_pytorch_onnx_onnxruntime.py::TestONNXRuntime_opset$i"
   done

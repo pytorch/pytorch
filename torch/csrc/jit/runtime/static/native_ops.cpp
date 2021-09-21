@@ -9,6 +9,7 @@
 #include <ATen/native/TensorAdvancedIndexing.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/runtime/register_ops_utils.h>
 #include <torch/csrc/jit/runtime/vararg_functions.h>
 
 namespace torch {
@@ -94,23 +95,47 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
     });
 
 REGISTER_NATIVE_OPERATOR_FUNCTOR(
+    static_runtime::dict_unpack,
+    static_runtime_dict_unpack,
+    [](Node*) -> SROperator {
+      return [](ProcessedNode* p_node) {
+        DCHECK(p_node->inputs().size() - 1 == p_node->outputs().size());
+        auto dict = p_node->Input(0).toGenericDict();
+        for (size_t i = 1; i < p_node->inputs().size(); ++i) {
+          auto key = p_node->Input(i);
+          auto value = dict.find(key);
+          TORCH_CHECK(value != dict.end(), "Key not in dict: ", key);
+          p_node->Output(i - 1) = value->value();
+        }
+      };
+    });
+
+REGISTER_NATIVE_OPERATOR_FUNCTOR(
     aten::__getitem__,
     aten_getitem,
     [](Node* n) -> SROperator {
       if (n->inputs().size() != 2) {
         return nullptr;
       }
-      // TODO: make __getitem__ work for other container types
-      if (n->input(0)->type()->castRaw<DictType>() == nullptr) {
-        return nullptr;
+
+      if (n->input(0)->type()->castRaw<DictType>()) {
+        return [](ProcessedNode* p_node) {
+          auto dict = p_node->Input(0).toGenericDict();
+          auto key = p_node->Input(1);
+          auto value = dict.find(key);
+          TORCH_CHECK(value != dict.end(), "Key not in dict: ", key);
+          p_node->Output(0) = value->value();
+        };
+      } else if (n->input(0)->type()->castRaw<ListType>()) {
+        return [](ProcessedNode* p_node) {
+          auto list = p_node->Input(0).toList();
+          auto idx = p_node->Input(1).toInt();
+          p_node->Output(0) = getItem(list, idx);
+        };
       }
-      return [](ProcessedNode* p_node) {
-        auto dict = p_node->Input(0).toGenericDict();
-        auto key = p_node->Input(1);
-        auto value = dict.find(key);
-        TORCH_CHECK(value != dict.end(), "Key not in dict: ", key);
-        p_node->Output(0) = value->value();
-      };
+
+      // TODO(T98581096): make __getitem__ work for other container types
+      return nullptr;
     });
 
 REGISTER_NATIVE_OPERATOR_FUNCTOR(
@@ -347,6 +372,37 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(aten::to, aten_to, [](Node* n) -> SROperator {
 });
 
 REGISTER_NATIVE_OPERATOR_FUNCTOR(
+    aten::detach,
+    aten_detach,
+    [](Node* n) -> SROperator {
+      if (!n->matches(
+              torch::schema("aten::detach(Tensor(a) self) -> Tensor(a)"))) {
+        LogAndDumpSchema(n);
+        return nullptr;
+      }
+      return [](ProcessedNode* p_node) {
+        const auto& in0_t = p_node->Input(0).toTensor();
+        p_node->Output(0) = at::native::alias(in0_t);
+      };
+    });
+
+REGISTER_NATIVE_OPERATOR_FUNCTOR(
+    aten::expand_as,
+    aten_expand_as,
+    [](Node* n) -> SROperator {
+      if (!n->matches(torch::schema(
+              "aten::expand_as(Tensor(a) self, Tensor other) -> Tensor(a)"))) {
+        LogAndDumpSchema(n);
+        return nullptr;
+      }
+      return [](ProcessedNode* p_node) {
+        const auto& self = p_node->Input(0).toTensor();
+        const auto& other = p_node->Input(1).toTensor();
+        p_node->Output(0) = self.expand(other.sizes());
+      };
+    });
+
+REGISTER_NATIVE_OPERATOR_FUNCTOR(
     prim::isinstance,
     prim_isinstance,
     [](Node* n) -> SROperator {
@@ -401,5 +457,19 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
       };
     });
 
+REGISTER_NATIVE_OPERATOR_FUNCTOR(
+    static_runtime::VarTupleUnpack,
+    static_runtime_VarTupleUnpack,
+    [](Node*) -> SROperator {
+      return [](ProcessedNode* pnode) {
+        size_t output_idx = 0;
+        for (const auto& tuple : pnode->inputs()) {
+          for (auto& elem : tuple->toTuple()->elements()) {
+            pnode->Output(output_idx) = elem;
+            ++output_idx;
+          }
+        }
+      };
+    });
 } // namespace jit
 } // namespace torch

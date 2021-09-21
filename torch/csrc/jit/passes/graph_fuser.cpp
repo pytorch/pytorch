@@ -183,7 +183,7 @@ struct GraphFuser {
       return !strict_fuser_check;
     }
     if ((*device).is_cpu()) {
-      return canFuseOnCPU();
+      return canFuseOnCPULegacy();
     } else if ((*device).is_cuda()) {
       return canFuseOnGPU();
     } else if ((*device).is_xpu()) {
@@ -1243,6 +1243,16 @@ void PeepholeOptimizeShapeExpressions(Block* block, AliasDb* db) {
 }
 
 } // anonymous namespace
+
+static bool cpu_fuser_enabled_legacy = false;
+
+bool canFuseOnCPULegacy() {
+  return cpu_fuser_enabled_legacy;
+}
+
+void overrideCanFuseOnCPULegacy(bool value) {
+  cpu_fuser_enabled_legacy = value;
+}
 
 void FuseGraph(std::shared_ptr<Graph>& graph, bool strict_fuser_check) {
   AliasDb db(graph);

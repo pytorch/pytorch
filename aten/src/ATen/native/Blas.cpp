@@ -3,6 +3,9 @@
 #include <ATen/Dispatch.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/ScalarOps.h>
+#include <ATen/Config.h>
+
+#include <ATen/native/mkldnn/Matmul.h>
 
 namespace at {
 namespace meta {
@@ -62,6 +65,13 @@ TORCH_IMPL_FUNC(addmv_out_cpu)(const Tensor &self, const Tensor &mat, const Tens
       at::native::copy_(const_cast<Tensor&>(result), *self_);
     }
     if (result.numel() != 0) {
+
+      NoNamesGuard guard;
+      if (use_mkldnn_bf16_matmul(mat, vec, /*result=*/Tensor())){
+        mkldnn_matmul(mat, vec, result, beta_.to<float>(), alpha_.to<float>());
+        return;
+      }
+
       auto r_stride = result.stride(0);
       AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kBFloat16, mat.scalar_type(), "addmv_impl_cpu", [&] {
         auto beta = beta_.to<scalar_t>();
@@ -133,11 +143,29 @@ inline void dot_check(const Tensor& self, const Tensor& other) {
 }
 
 Tensor dot(const Tensor &self, const Tensor &other){
-  at::NoNamesGuard guard;
+  if (self.is_complex()) {
+    if (self.is_conj()) {
+      if (other.is_conj()) {
+        return (at::native::dot(self.conj(), other.conj())).conj();
+       } else {
+         return at::native::vdot(self.conj(), other);
+       }
+    } else if (other.is_conj()) {
+      return at::native::vdot(other.conj(), self);
+    }
+  }
 
+  at::NoNamesGuard guard;
   dot_check(self, other);
 
-  return AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(at::ScalarType::Half, self.scalar_type(), "dot", [&] {
+  if (use_mkldnn_bf16_matmul(self, other, /*result=*/Tensor())){
+    // mkldnn matmul expect result have sizes info to create ideep tensor
+    auto r =  at::empty({1, 1}, self.options());
+    mkldnn_matmul(self, other, r, /*beta=*/0);
+    return r;
+  }
+
+  return AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, self.scalar_type(), "dot", [&] {
     Tensor result = at::empty({}, self.options());
     result.fill_(dot_impl<scalar_t>(self.numel(), self.data_ptr<scalar_t>(), self.stride(0), other.data_ptr<scalar_t>(), other.stride(0)));
     return result;
@@ -145,15 +173,25 @@ Tensor dot(const Tensor &self, const Tensor &other){
 }
 
 Tensor vdot(const Tensor &self, const Tensor &other){
-  at::NoNamesGuard guard;
-
   // Dispatch to `dot` for real dtypes.
   if (!self.is_complex()){
     return at::dot(self, other);
   }
 
+  if (self.is_conj()) {
+    if (other.is_conj()) {
+      return at::native::vdot(other.conj(), self.conj());
+    } else {
+      return at::native::dot(self.conj(), other);
+    }
+  } else if (other.is_conj()) {
+    return (at::native::dot(self, other.conj())).conj();
+  }
+
+  at::NoNamesGuard guard;
   // For complex dtypes.
   dot_check(self, other);
+
   return AT_DISPATCH_COMPLEX_TYPES(self.scalar_type(), "vdot", [&] {
     Tensor result = at::empty({}, self.options());
     result.fill_(vdot_impl<scalar_t>(self.numel(), self.data_ptr<scalar_t>(), self.stride(0), other.data_ptr<scalar_t>(), other.stride(0)));

@@ -75,6 +75,7 @@ struct PackedLinearWeightsQnnp : public LinearPackedParamsBase {
       c10::optional<at::Tensor> bias);
 
  private:
+  std::mutex qnnp_mutex_;
   template <bool ReluFused>
   at::Tensor apply_impl(
       at::Tensor input,
@@ -292,6 +293,7 @@ struct PackedConvWeightsQnnp : public ConvPackedParamsBase<kSpatialDim> {
   }
 
  private:
+  std::mutex qnnp_mutex_;
   template <bool ReluFused>
   at::Tensor apply_impl(
       const at::Tensor& input,

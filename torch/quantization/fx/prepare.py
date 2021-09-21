@@ -15,7 +15,7 @@ from torch.fx.graph import (
 )
 from torch.fx.node import Argument
 
-from ..qconfig import QConfigAny
+from ..qconfig import QConfigAny, qconfig_equals
 from .qconfig_utils import (
     convert_dict_to_ordered_dict,
     generate_qconfig_map,
@@ -42,7 +42,6 @@ from .graph_module import (
 
 from .pattern_utils import (
     MatchResult,
-    get_default_quant_patterns,
     get_default_output_activation_post_process_map,
 )
 
@@ -68,7 +67,7 @@ from ..quantization_mappings import (
     get_default_qat_module_mappings,
 )
 
-from ..quantize import (
+from torch.ao.quantization.quantize import (
     is_activation_post_process,
     convert
 )
@@ -84,10 +83,13 @@ from ..utils import (
     weight_dtype,
 )
 
+from .backend_config_dict import get_fbgemm_backend_config_dict
+from .backend_config_dict import validate_backend_config_dict
+
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 def is_activation_post_process_node(node: Node, modules: Dict[str, torch.nn.Module]) -> bool:
-    return node.op == "call_module" and \
+    return isinstance(node, torch.fx.Node) and node.op == "call_module" and \
         is_activation_post_process(modules[str(node.target)])
 
 def node_arg_is_weight(node: Node, arg: Any) -> bool:
@@ -195,7 +197,7 @@ def update_qconfig_for_fusion(
                     # Raise an error if the modules in the fused module have
                     # different qconfigs specified in the qconfig_dict
                     for op in ops:
-                        if object_type_dict.get(op, None) != fused_qconfig:
+                        if not qconfig_equals(object_type_dict.get(op, None), fused_qconfig):
                             raise LookupError("During fusion, we need to specify the same " +
                                               f"qconfigs for both modules in {module_type}.")
 
@@ -276,7 +278,7 @@ def get_target_activation_dtype_for_node(
 
         # get qconfig to determine the eventual dtype of this node
         if qconfig is not None:
-            if qhandler is not None and qhandler.input_output_observed():
+            if qhandler is not None and qhandler.input_output_observed() and qhandler.is_output_quantized(qconfig, False):
                 act_dtype, weight_dtype, act_compute_dtype = \
                     get_qconfig_dtypes(qconfig)
                 return act_dtype
@@ -772,6 +774,8 @@ def maybe_make_input_output_share_observers(
     # we need to navigate up to the first observer
     iteration_guard = 0
     while not is_activation_post_process_node(first_arg_arg, modules):
+        if not isinstance(first_arg_arg, Node):
+            return False
         # did not find an activation_post_process for the op
         if first_arg_arg.op == "placeholder":
             return False
@@ -1112,6 +1116,7 @@ def prepare(
         node_name_to_scope: Dict[str, Tuple[str, type]],
         prepare_custom_config_dict: Optional[Dict[str, Any]] = None,
         equalization_qconfig_dict: Optional[Dict[str, Any]] = None,
+        backend_config_dict: Optional[Dict[str, Any]] = None,
         is_standalone_module: bool = False) -> ObservedGraphModule:
     """ standalone_module means it a submodule that is not inlined in
     parent module, and will be quantized separately as one unit.
@@ -1137,6 +1142,10 @@ def prepare(
         prepare_custom_config_dict = {}
     if equalization_qconfig_dict is None:
         equalization_qconfig_dict = {}
+    if backend_config_dict is None:
+        backend_config_dict = get_fbgemm_backend_config_dict()
+
+    validate_backend_config_dict(backend_config_dict)
 
     additional_quant_patterns = \
         prepare_custom_config_dict.get("additional_quant_pattern", {})
@@ -1150,8 +1159,9 @@ def prepare(
     #   ((<function relu at 0x7f766a7360d0>, <built-in function add>):
     #     <class 'torch.quantization.fx.quantize.Add'>),
     # }
+    quant_patterns = backend_config_dict["quant_patterns"]
     patterns: Dict[Pattern, QuantizeHandler] = get_combined_dict(
-        get_default_quant_patterns(), additional_quant_patterns)
+        quant_patterns, additional_quant_patterns)
 
     convert_dict_to_ordered_dict(qconfig_dict)
     convert_dict_to_ordered_dict(equalization_qconfig_dict)

@@ -4,7 +4,7 @@ namespace torch {
 namespace jit {
 namespace tensorexpr {
 
-Tensor* computeBatchNorm(
+Tensor computeBatchNorm(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
     const c10::optional<ScalarType>& outputType) {
@@ -38,11 +38,15 @@ Tensor* computeBatchNorm(
             constant(inputs[7]) // eps
         };
 
+        ExprHandle weight = FloatImm::make(1);
+        ExprHandle bias = FloatImm::make(0);
         if (hasWeight) {
-          exprInputs.push_back(tensorOrConstant(inputs[1], {c}));
+          weight = tensorOrConstant(inputs[1], {c});
+          exprInputs.push_back(weight);
         }
         if (hasBias) {
-          exprInputs.push_back(tensorOrConstant(inputs[2], {c}));
+          bias = tensorOrConstant(inputs[2], {c});
+          exprInputs.push_back(bias);
         }
         promoteInputs(exprInputs);
 
@@ -50,18 +54,7 @@ Tensor* computeBatchNorm(
         ExprHandle mean = exprInputs[1];
         ExprHandle var = exprInputs[2];
         ExprHandle eps = exprInputs[3];
-        ExprHandle weight = FloatImm::make(1);
-        ExprHandle bias = FloatImm::make(0);
 
-        if (hasWeight) {
-          weight = exprInputs[4];
-        }
-        // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
-        if (hasBias) {
-          bias = exprInputs[5];
-        }
-
-        // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
         auto inv_var = rsqrt(var + eps);
         auto alpha = inv_var * weight;
         auto beta = bias - mean * alpha;
