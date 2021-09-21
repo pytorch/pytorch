@@ -6,7 +6,7 @@ from torch.types import Storage
 from typing import Any, TypeVar, Type, Union, cast
 import copy
 import collections
-import functools
+from functools import cache
 
 T = TypeVar('T', bound='Union[_StorageBase, TypedStorage]')
 class _StorageBase(object):
@@ -187,7 +187,7 @@ _StorageBase.type = _type  # type: ignore[assignment]
 _StorageBase.cuda = _cuda  # type: ignore[assignment]
 
 
-@functools.cache
+@cache
 def _dtype_to_storage_type_map():
     return {
         torch.double: 'DoubleStorage',
@@ -208,7 +208,7 @@ def _dtype_to_storage_type_map():
         torch.quint4x2: 'QUInt4x2Storage',
     }
 
-@functools.cache
+@cache
 def _storage_type_to_dtype_map():
     dtype_map = {
         val: key for key, val in _dtype_to_storage_type_map().items()}
