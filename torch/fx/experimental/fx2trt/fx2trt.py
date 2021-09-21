@@ -1,5 +1,5 @@
 import warnings
-from typing import List, NamedTuple, Iterable, Any, Optional, Tuple, Sequence
+from typing import List, NamedTuple, Iterable, Any, Optional, Tuple, Sequence, Dict
 
 import tensorrt as trt
 import torch
@@ -427,12 +427,16 @@ class TRTInterpreter(torch.fx.Interpreter):
         kwargs = dict(n.kwargs)
         kwargs["_itensor_to_tensor_meta"] = self._itensor_to_tensor_meta
         n.kwargs = kwargs
+
+        # run the node
         trt_node = super().run_node(n)
+
         # remove "_itensor_to_tensor_meta"
         kwargs = dict(n.kwargs)
         del kwargs["_itensor_to_tensor_meta"]
         n.kwargs = kwargs
         self._itensor_to_tensor_meta[trt_node] = n.meta.get("tensor_meta")
+
         return trt_node
 
     def placeholder(self, target, args, kwargs):
