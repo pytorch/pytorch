@@ -388,7 +388,9 @@ class TORCH_API ProcessedNode {
   std::vector<IValue> outputs_;
 };
 
-static_assert(sizeof(ProcessedNode) == 12 * sizeof(void*), "ProcessedNode size changed");
+static_assert(
+    sizeof(ProcessedNode) == 12 * sizeof(void*),
+    "ProcessedNode size changed");
 
 } // namespace jit
 } // namespace torch
