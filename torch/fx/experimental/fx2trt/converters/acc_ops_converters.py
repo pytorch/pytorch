@@ -1403,23 +1403,6 @@ def acc_ops_cat(network, target, args, kwargs, name):
     return layer.get_output(0)
 
 
-@tensorrt_converter(acc_ops.transpose)
-def acc_ops_transpose(network, target, args, kwargs, name):
-    input_val, dim_0, dim_1 = kwargs["input"], kwargs["dim0"], kwargs["dim1"]
-
-    # TODO: Remove this after enabling const folding in fx_acc
-    if isinstance(input_val, torch.Tensor):
-        return input_val.transpose(dim_0, dim_1).contiguous()
-
-    if not isinstance(input_val, trt.tensorrt.ITensor):
-        raise RuntimeError(
-            f"transpose received input {input_val} that is not part "
-            "of the TensorRT region!"
-        )
-
-    return add_transpose_layer(network, input_val, dim_0, dim_1, name)
-
-
 @tensorrt_converter(acc_ops.matmul)
 def acc_ops_matmul(network, target, args, kwargs, name):
     input_val = get_trt_tensor(network, kwargs["input"], f"{name}_input")

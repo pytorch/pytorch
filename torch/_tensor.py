@@ -162,14 +162,14 @@ class Tensor(torch._C._TensorBase):
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor.storage, (self,), self)
 
-        if self.dtype not in torch.storage._dtype_to_pickle_storage_type_map():
+        if self.dtype not in torch.storage._dtype_to_storage_type_map():
             raise RuntimeError(f'unsupported Storage type: {self.dtype}')
 
         storage = self._storage()
 
         if self.dtype != torch.uint8:
             # If dtype is not byte, need to change it to the proper storage type
-            storage_name = torch.storage._dtype_to_pickle_storage_type_map()[self.dtype]
+            storage_name = torch.storage._dtype_to_storage_type_map()[self.dtype]
             storage_class = eval(type(storage).__module__ + '.' + storage_name)
             storage = storage_class(wrap_storage=storage)
         return storage

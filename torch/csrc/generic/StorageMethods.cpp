@@ -288,6 +288,9 @@ PyObject * THPStorage_(writeFile)(PyObject *_self, PyObject *args)
 PyObject * THPStorage_(newWithFile)(PyObject *_unused, PyObject *args)
 {
   HANDLE_TH_ERRORS
+  TORCH_CHECK(PyTuple_Size(args) == 2,
+      "_new_with_file takes exactly two arguments");
+  PyObject *fd_obj = PyTuple_GetItem(args, 0);
   int fd = PyObject_AsFileDescriptor(PyTuple_GetItem(args, 0));
   THPUtils_assert(fd != -1, "_new_with_file couldn't retrieve a file "
       "descriptor from given object");

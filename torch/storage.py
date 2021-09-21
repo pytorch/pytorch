@@ -6,6 +6,7 @@ from torch.types import Storage
 from typing import Any, TypeVar, Type, Union, cast
 import copy
 import collections
+import functools
 
 T = TypeVar('T', bound='Union[_StorageBase, TypedStorage]')
 class _StorageBase(object):
@@ -186,7 +187,8 @@ _StorageBase.type = _type  # type: ignore[assignment]
 _StorageBase.cuda = _cuda  # type: ignore[assignment]
 
 
-def _dtype_to_pickle_storage_type_map():
+@functools.cache
+def _dtype_to_storage_type_map():
     return {
         torch.double: 'DoubleStorage',
         torch.float: 'FloatStorage',
@@ -206,11 +208,11 @@ def _dtype_to_pickle_storage_type_map():
         torch.quint4x2: 'QUInt4x2Storage',
     }
 
-def _pickle_storage_type_to_dtype_map():
-    if not hasattr(_pickle_storage_type_to_dtype_map, 'cache'):
-        _pickle_storage_type_to_dtype_map.cache = {  # type: ignore[attr-defined]
-            val: key for key, val in _dtype_to_pickle_storage_type_map().items()}
-    return _pickle_storage_type_to_dtype_map.cache  # type: ignore[attr-defined]
+@functools.cache
+def _storage_type_to_dtype_map():
+    dtype_map = {
+        val: key for key, val in _dtype_to_storage_type_map().items()}
+    return dtype_map
 
 class TypedStorage:
     is_sparse = False
@@ -220,7 +222,6 @@ class TypedStorage:
         return self
 
     def __init__(self, *args, **kwargs):
-        # TODO: This error message could definitely be formatted better.
         arg_error_msg = (
             f'{type(self)} constructor received an invalid combination '
             f'of arguments - got args={tuple(type(arg) for arg in args)}, '
@@ -289,7 +290,6 @@ class TypedStorage:
 
             elif len(args) == 1 and isinstance(args[0], collections.abc.Sequence):
                 if self.dtype in [torch.quint8, torch.quint4x2, torch.qint32, torch.qint8]:
-                    # TODO: Need to properly test this
                     interpret_dtypes = {
                         torch.quint8: torch.uint8,
                         torch.quint4x2: torch.uint8,
@@ -363,7 +363,6 @@ class TypedStorage:
         if not isinstance(idx, (int, slice)):
             raise RuntimeError(f"can't index a {type(self)} with {type(idx)}")
         if self.dtype in [torch.quint8, torch.quint4x2, torch.qint32, torch.qint8]:
-            # TODO: Need to properly test this
             interpret_dtypes = {
                 torch.quint8: torch.uint8,
                 torch.quint4x2: torch.uint8,
@@ -390,7 +389,6 @@ class TypedStorage:
             raise RuntimeError(f"can't index a {type(self)} with {type(idx)}")
 
         if self.dtype in [torch.quint8, torch.quint4x2, torch.qint32, torch.qint8]:
-            # TODO: Need to properly test this
             interpret_dtypes = {
                 torch.quint8: torch.uint8,
                 torch.quint4x2: torch.uint8,
@@ -500,7 +498,7 @@ class TypedStorage:
 
     def pickle_storage_type(self):
         try:
-            return _dtype_to_pickle_storage_type_map()[self.dtype]
+            return _dtype_to_storage_type_map()[self.dtype]
         except KeyError:
             raise KeyError(f'dtype {self.dtype} is not recognized')
 
@@ -599,9 +597,7 @@ class TypedStorage:
         byte_storage = eval(cls.__module__).ByteStorage.from_file(
             filename,
             shared,
-            # TODO: instantiation just for the purpose of getting element size
-            # might be bad
-            size * cls().element_size())
+            size * torch._utils._element_size(cls.dtype))
         storage = cls(wrap_storage=byte_storage)
         return storage
 
@@ -652,7 +648,7 @@ class TypedStorage:
 
 def _get_dtype_from_pickle_storage_type(pickle_storage_type: str):
     try:
-        return _pickle_storage_type_to_dtype_map()[pickle_storage_type]
+        return _storage_type_to_dtype_map()[pickle_storage_type]
     except KeyError:
         raise KeyError(
             f'pickle storage type "{pickle_storage_type}" is not recognized')
