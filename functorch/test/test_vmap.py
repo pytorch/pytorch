@@ -2936,8 +2936,6 @@ class TestVmapOperatorsOpInfo(TestCase):
 
         # entries in here need don't work and need to be fixed.
         # Each one of these is a bug
-        xfail('argmax'),
-        xfail('argmin'),
         xfail('unfold'),
         xfail('svd', device_type='cuda'),
         xfail('linalg.svd', device_type='cuda'),
