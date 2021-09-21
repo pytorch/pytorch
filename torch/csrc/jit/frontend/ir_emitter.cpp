@@ -1423,8 +1423,8 @@ struct to_ir {
 
       if (all_candidates.empty() && refined_type_hint &&
           !(*unified_elem_type)
-               ->isSubtypeOf(
-                   *refined_type_hint->expectRef<ListType>().getElementType())) {
+               ->isSubtypeOf(*refined_type_hint->expectRef<ListType>()
+                                  .getElementType())) {
         throw ErrorReport(lc)
             << "List type annotation `" << refined_type_hint->repr_str()
             << "` did not match the types of the given list elements,"
@@ -2088,7 +2088,8 @@ struct to_ir {
         break;
       }
 
-      auto get_smaller_type = [&](const TypePtr& t1, const TypePtr& t2) -> TypePtr {
+      auto get_smaller_type = [&](const TypePtr& t1,
+                                  const TypePtr& t2) -> TypePtr {
         if (t1->isSubtypeOf(*t2)) {
           return t1;
         } else if (t2->isSubtypeOf(*t1)) {
