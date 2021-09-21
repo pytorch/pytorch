@@ -1331,7 +1331,7 @@ class RpcTest(RpcAgentTestFixture):
             rpc_backend_options=self.rpc_backend_options,
         )
 
-        og_func = rpc.api._wait_all_workers                                                
+        og_func = rpc.api._wait_all_workers
 
         def wait_all_workers_sleep(timeout):
             try:
@@ -1339,7 +1339,7 @@ class RpcTest(RpcAgentTestFixture):
             except RuntimeError as ex:
                 raise ex
 
-        rpc.api._wait_all_workers = wait_all_workers_sleep 
+        rpc.api._wait_all_workers = wait_all_workers_sleep
 
         try:
             with self.assertRaisesRegex(RuntimeError, ''):
