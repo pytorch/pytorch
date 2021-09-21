@@ -6972,9 +6972,9 @@ class DistributedTest:
             # if we pass a logger we can verify that it was logged
             with ctx:
                 if use_logger:
-                    dist._verify_params_across_processes(net.process_group, [list(net.parameters())], net.logger)
+                    dist._verify_params_across_processes(net.process_group, list(net.parameters()), net.logger)
                 else:
-                    dist._verify_params_across_processes(net.process_group, [list(net.parameters())])
+                    dist._verify_params_across_processes(net.process_group, list(net.parameters()))
                 # Should only be run by rank 0, and blocking_wait catches and
                 # reports exception.
                 dist.barrier(group_to_use)
