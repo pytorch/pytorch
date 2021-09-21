@@ -189,7 +189,7 @@ std::stringstream update_bytecode_version(
     const int64_t to_version) {
   PyTorchStreamReader reader_bytecode(&input_model);
   auto constants_values =
-      std::move(*readArchive(kArchiveNameConstants, reader).toTuple())
+      std::move(*readArchive(kArchiveNameConstants, reader_bytecode).toTuple())
           .elements();
 
   std::vector<IValue> bytecode_values = get_bytecode_ivalues(reader_bytecode);
@@ -220,7 +220,7 @@ std::stringstream update_bytecode_version(
   SerializationStorageContext storage_context;
   write_archive_current(
       writer_bytecode,
-      c10::ivalue::Tuple::create(constants_values),
+      c10::ivalue::Tuple::create(std::move(constants_values)),
       /*archive_name=*/"constants",
       /*archive_dir=*/"",
       /*tensor_dir=*/"constants/",
@@ -497,7 +497,6 @@ std::stringstream backport_v7_to_v6(std::stringstream& input_model_stream) {
   // to be re-emitted (refer to the comments below)
   Module torch_script = torch::jit::load(rai, c10::nullopt, extra_files);
 
-<<<<<<< dest:   802f15826a97 - swolchok: [PyTorch Edge] Avoid string copying ...
   // The RAII guard to change the flag, emit_default_input_instructions, to
   // false to keep the same behavior in bytecode version 6. Change the flag,
   // enable_defaults_args_with_out_args, to deserialized the number of specified
@@ -511,27 +510,6 @@ std::stringstream backport_v7_to_v6(std::stringstream& input_model_stream) {
     torch_script._save_for_mobile(
         intermediate_model_stream, extra_files, hasBytecodeDebug);
   }
-=======
-  update_bytecode_version(bytecode_values, kBytecodeVersionV5);
-  auto bytecode_tuple = c10::ivalue::Tuple::create(std::move(bytecode_values));
-  SerializationStorageContext storage_context;
-  writeArchiveV5(
-      writer_bytecode,
-      c10::ivalue::Tuple::create(std::move(constants_values)),
-      /*archive_name=*/"constants",
-      /*archive_dir=*/"",
-      /*tensor_dir=*/"constants/",
-      /*use_storage_context=*/true,
-      storage_context);
-  writeArchiveV5(
-      writer_bytecode,
-      bytecode_tuple,
-      /*archive_name=*/"bytecode",
-      /*archive_dir=*/"",
-      /*tensor_dir=*/"constants/",
-      /*use_storage_context=*/true,
-      storage_context);
->>>>>>> source: d63a7dd011a0 - swolchok: [PyTorch] RFC: Add tuple inline storage
 
   // Update the bytecode version (from 7 to 6)
   std::stringstream output_model_stream =
