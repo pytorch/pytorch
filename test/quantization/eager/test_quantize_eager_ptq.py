@@ -1001,7 +1001,7 @@ class TestPostTrainingDynamic(QuantizationTestCase):
         model = LinearReluLinearModel().eval()
         qconfig = default_dynamic_qconfig
         qconfig_dict = {'' : qconfig}
-        torch.quantization.fuse_modules(model, [['fc1', 'relu']], inplace=True)
+        torch.ao.quantization.fuse_modules(model, [['fc1', 'relu']], inplace=True)
         prepare_dynamic(model, qconfig_dict)
         convert_dynamic(model)
 

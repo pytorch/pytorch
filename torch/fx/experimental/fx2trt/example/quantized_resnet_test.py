@@ -6,12 +6,13 @@ import torch.fx.experimental.fx_acc.acc_tracer as acc_tracer
 import copy
 from torch.fx.passes import shape_prop
 from torch.fx.experimental.normalize import NormalizeArgs
+import tensorrt as trt
 
 rn18 = models.resnet18().eval()
 
 def build_fp16_trt(rn18):
     rn18 = copy.deepcopy(rn18)
-    rn18 = acc_tracer.trace(rn18, [torch.randn(1, 3, 224, 224)])  # type: ignore[attr-defined]
+    rn18 = acc_tracer.trace(rn18, [torch.randn(1, 3, 224, 224)])
     interp = TRTInterpreter(
         rn18, [InputTensorSpec(torch.Size([3, 224, 224]), torch.float, has_batch_dim=False)])
     engine, input_names, output_names = interp.run(fp16_mode=True)
@@ -37,16 +38,16 @@ def build_int8_trt(rn18):
     ref_res = quantized_rn18(data)
     print("quantized model:", quantized_rn18)
 
-    quantized_rn18 = acc_tracer.trace(quantized_rn18, [data])  # type: ignore[attr-defined]
+    quantized_rn18 = acc_tracer.trace(quantized_rn18, [data])  # type: ignore[assignment]
     interp = TRTInterpreter(
         quantized_rn18,
         [InputTensorSpec(torch.Size([-1, *data.shape[1:]]), torch.float,
                          shape_ranges=[((1, 3, 224, 224), (5, 3, 224, 224), (10, 3, 224, 224))], has_batch_dim=True)],
-        explicit_batch_dimension=True, explicit_precision=True)
+        explicit_batch_dimension=True, explicit_precision=True, logger_level=trt.Logger.VERBOSE)
     engine, input_names, output_names = interp.run(fp16_mode=False, int8_mode=True)
     trt_mod = TRTModule(engine, input_names, output_names)
     trt_res = trt_mod(data.cuda())
-    print("result diff max", torch.max(ref_res - trt_res.cpu()))
+    print("explicit quant result diff max", torch.max(ref_res - trt_res.cpu()))
     return trt_mod
 
 @torch.no_grad()
@@ -63,18 +64,18 @@ def build_int8_trt_implicit_quant(rn18):
     prepared = prepare_fx(rn18, {"": qconfig})
     for _ in range(10):
         prepared(data)
-    quantized_rn18 = convert_fx(prepared, is_reference=True)
+    quantized_rn18 = convert_fx(prepared)
     ref_res = quantized_rn18(data)
 
     # Build trt int8 model
     traced_rn18 = torch.fx.symbolic_trace(quantized_rn18)
     shape_prop.ShapeProp(traced_rn18).propagate(data)
     traced_rn18 = NormalizeArgs(traced_rn18).transform()
-    interp = TRTInterpreter(traced_rn18, InputTensorSpec.from_tensors([data]))
+    interp = TRTInterpreter(traced_rn18, InputTensorSpec.from_tensors([data]), logger_level=trt.Logger.VERBOSE)
     engine, input_names, output_names = interp.run(fp16_mode=False, int8_mode=True, strict_type_constraints=True)
     trt_mod = TRTModule(engine, input_names, output_names)
     trt_res = trt_mod(data.cuda())
-    print("result equal?", torch.equal(ref_res, trt_res))
+    print("implicit quant result diff max", torch.max(ref_res - trt_res.cpu()))
     return trt_mod
 
 class M(torch.nn.Module):
@@ -95,7 +96,7 @@ class M(torch.nn.Module):
 # rn18 = M().eval()
 # rn18 = rn18.layer1
 int8_trt = build_int8_trt(rn18)
-# implicit_int8_trt = build_int8_trt_implicit_quant(rn18)
+implicit_int8_trt = build_int8_trt_implicit_quant(rn18)
 fp16_trt = build_fp16_trt(rn18)
 x = torch.randn(5, 3, 224, 224, device="cuda")
 # x = torch.randn(1, 32, device="cuda")
@@ -118,16 +119,24 @@ for _ in range(NITER):
     torch.cuda.synchronize()
 print('trt int8 time (ms/iter)', (time.time() - s) / NITER * 1000)
 
-# torch.cuda.synchronize()
-# s = time.time()
-# for _ in range(NITER):
-#     implicit_int8_trt(x)
-#     torch.cuda.synchronize()
-# print('trt implicit int8 time (ms/iter)', (time.time() - s) / NITER * 1000)
+torch.cuda.synchronize()
+s = time.time()
+for _ in range(NITER):
+    implicit_int8_trt(x)
+    torch.cuda.synchronize()
+print('trt implicit int8 time (ms/iter)', (time.time() - s) / NITER * 1000)
 
 torch.cuda.synchronize()
 s = time.time()
 for _ in range(NITER):
     rn18(x)
     torch.cuda.synchronize()
-print('PyTorch time (ms/iter)', (time.time() - s) / NITER * 1000)
+print('PyTorch time (CUDA) (ms/iter)', (time.time() - s) / NITER * 1000)
+
+torch.cuda.synchronize()
+s = time.time()
+rn18 = rn18.cpu()
+x = x.cpu()
+for _ in range(NITER):
+    rn18(x)
+print('PyTorch time (CPU) (ms/iter)', (time.time() - s) / NITER * 1000)
