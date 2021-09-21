@@ -49,6 +49,20 @@ TORCH_API std::unordered_map<std::string, OperatorInfo> _get_model_ops_and_info(
 TORCH_API std::unordered_map<std::string, OperatorInfo> _get_model_ops_and_info(
     std::shared_ptr<caffe2::serialize::ReadAdapterInterface> rai);
 
+// The family of methods below to get contained types from a model
+// Throws if not passed in a well formed model
+TORCH_API std::unordered_set<std::string> _get_model_contained_types(
+    std::istream& in);
+
+TORCH_API std::unordered_set<std::string> _get_model_contained_types(
+    const std::string& filename);
+
+TORCH_API std::unordered_set<std::string> _get_model_contained_types(
+    std::shared_ptr<caffe2::serialize::ReadAdapterInterface> rai);
+
+std::unordered_set<std::string> _get_model_contained_types(
+    const std::vector<c10::IValue>& bytecode_ivalues);
+
 // The family of methods below return the compatibility information of a model
 struct ModelCompatibilityInfo {
   uint64_t bytecode_version;
