@@ -41,8 +41,6 @@ TORCH_META_FUNC2(sort, stable)
       stable.has_value(),
       "sort(): c10::optional<bool> for stable has to have value.");
   maybe_wrap_dim(dim, self.dim());
-  const auto& values = maybe_get_output(0);
-  const auto& indices = maybe_get_output(1);
   // 'set_output' will only modify the strides, if the output was resized.
   // Which means that we can ignore the output's strides here.
   set_output(0, self.sizes(), self.strides(), self.options(), {});
