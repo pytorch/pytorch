@@ -171,7 +171,6 @@ jobs:
           CIRCLE_SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           CIRCLE_TAG: ${{ steps.parse-ref.outputs.tag }}
           CIRCLE_WORKFLOW_ID: '${{ github.run_id }}_${{ github.run_number }}'
-          GITHUB_WORKFLOW_RUN_ID: '${{ github.run_id }}'
         run: |
           COMMIT_TIME=$(git log --max-count=1 --format=%ct || echo 0)
           export COMMIT_TIME
@@ -290,9 +289,15 @@ jobs:
       - name: Output disk space left
         run: |
           sudo df -H
+      !{{ common.parse_ref() }}
       - name: Test
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          IS_GHA: 1
+          CIRCLE_BRANCH: ${{ steps.parse-ref.outputs.branch }}
+          CIRCLE_PR_NUMBER: ${{ github.event.pull_request.number }}
+          CIRCLE_SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
+          AWS_DEFAULT_REGION: us-east-1
         run: |
           if [[ $TEST_CONFIG == 'multigpu' ]]; then
             TEST_COMMAND=.jenkins/pytorch/multigpu-test.sh
@@ -313,6 +318,11 @@ jobs:
             -e CUSTOM_TEST_ARTIFACT_BUILD_DIR \
             -e GITHUB_ACTIONS \
             -e IN_CI \
+            -e IS_GHA \
+            -e CIRCLE_BRANCH \
+            -e CIRCLE_SHA1 \
+            -e CIRCLE_PR_NUMBER \
+            -e AWS_DEFAULT_REGION \
             -e IN_WHEEL_TEST \
             -e SHARD_NUMBER \
             -e JOB_BASE_NAME \
@@ -351,7 +361,6 @@ jobs:
           python3 -mcodecov
       {%- endif %}
       !{{ common.upload_test_reports(name='linux') }}
-      !{{ common.parse_ref() }}
       !{{ common.upload_test_statistics(build_environment) }}
       !{{ common.teardown_ec2_linux() }}
 {% endblock %}
