@@ -119,6 +119,7 @@ def compiled_function(fn, fw_compiler, bw_compiler):
     compiled_fw = None
     bw_module = None
     compiled_bw = None
+    num_outs = None
 
     saved_fn = None
     def returned_function(*args, **kwargs):
@@ -137,11 +138,15 @@ def compiled_function(fn, fw_compiler, bw_compiler):
             class CompiledFunction(torch.autograd.Function):
                 @staticmethod
                 def forward(ctx, *args):
-                    nonlocal compiled_fw, compiled_bw, fw_module, bw_module
+                    nonlocal compiled_fw, compiled_bw, fw_module, bw_module, num_outs
                     if compiled_fw is None:
                         out = flat_fn(*args)
+                        if isinstance(out, (list, tuple)):
+                            num_outs = len(out)
+                        else:
+                            num_outs = 1
                         with torch.enable_grad():
-                            fx_g = make_fx(vjpfull)(args, (torch.randn_like(out),))
+                            fx_g = make_fx(vjpfull)(args, (out,))
                         fw_module, bw_module = partition_backwards(fx_g)
                         print(fw_module, bw_module)
 
@@ -151,18 +156,21 @@ def compiled_function(fn, fw_compiler, bw_compiler):
                         if not isinstance(fw_outs, list):
                             fw_outs = [fw_outs]
 
-                        bw_args = fw_outs[1:] + [torch.ones_like(fw_outs[0])]
+                        bw_args = fw_outs[num_outs:] + fw_outs[0:num_outs]
                         compiled_bw = bw_compiler(bw_module, bw_args)
 
                     fw_outs = compiled_fw(*fw_module.graph.flatten_inps(args))
                     if not isinstance(fw_outs, list):
                         fw_outs = [fw_outs]
-                    ctx.activations = fw_outs[1:]
-                    return fw_outs[0]
+                    ctx.activations = fw_outs[num_outs:]
+                    if num_outs == 1:
+                        return fw_outs[0]
+                    return tuple(fw_outs[0:num_outs])
 
                 @staticmethod
                 def backward(ctx, *args):
-                    out = compiled_bw(*ctx.activations, args[0].contiguous())
+                    contiguous_args = [t.contiguous() for t in args]
+                    out = compiled_bw(*ctx.activations, *contiguous_args)
                     if not isinstance(out, list):
                         out = [out]
                     return tuple(out)
