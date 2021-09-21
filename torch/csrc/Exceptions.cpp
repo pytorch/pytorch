@@ -253,5 +253,3 @@ python_error::python_error() : type(nullptr), value(nullptr), traceback(nullptr)
     restore();
   }
 }
-
-
