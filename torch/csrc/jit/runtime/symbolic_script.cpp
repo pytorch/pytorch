@@ -870,7 +870,7 @@ const std::vector<std::string> functions = {
         def sigmoid(self):
             result = torch.sigmoid(self)
             def backward(grad_output):
-                return (1 - result) * result * grad_output
+                return grad_output * (1 - result) * result
 
             return result, backward
 
@@ -1141,7 +1141,7 @@ const std::vector<std::string> functions = {
 
             return output, backward
 
-        def layer_norm_disabled(input : Tensor,
+        def layer_norm(input : Tensor,
                        normalized_shape : List[int],
                        weight : Optional[Tensor],
                        bias : Optional[Tensor],
