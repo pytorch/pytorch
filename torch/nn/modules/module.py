@@ -26,6 +26,41 @@ class _IncompatibleKeys(namedtuple('IncompatibleKeys', ['missing_keys', 'unexpec
     __str__ = __repr__
 
 
+class _PreForwardHookWrapper:
+    def __init__(self, hook: Callable[..., None], with_kwargs=False) -> None:
+        self.hook = hook
+        self.with_kwargs = with_kwargs
+
+    def _call_impl(self, module, input, kwargs):
+        if self.with_kwargs:
+            return self.hook(module, input, kwargs)
+        else:
+            return self.hook(module, input)
+
+    __call__ : Callable[..., Any] = _call_impl
+
+
+class _ForwardHookWrapper:
+    def __init__(self, hook: Callable[..., None], with_kwargs=False) -> None:
+        self.hook = hook
+        self.with_kwargs = with_kwargs
+
+    def _call_impl(self, module, input, kwargs, result):
+        print("self module input kwargs result")
+        print(self)
+        print(module)
+        print(input)
+        print(kwargs)
+        print(result)
+        if self.with_kwargs:
+            return self.hook(module, input, kwargs, result)
+        else:
+            return self.hook(module, input, result)
+
+    __call__ : Callable[..., Any] = _call_impl
+
+
+
 def _addindent(s_, numSpaces):
     s = s_.split('\n')
     # don't do anything for single-line stuff
@@ -49,7 +84,7 @@ _global_forward_hooks: Dict[int, Callable] = OrderedDict()
 _EXTRA_STATE_KEY_SUFFIX = '_extra_state'
 
 
-def register_module_forward_pre_hook(hook: Callable[..., None]) -> RemovableHandle:
+def register_module_forward_pre_hook(hook: Callable[..., None], with_kwargs=False) -> RemovableHandle:
     r"""Registers a forward pre-hook common to all modules.
 
     .. warning ::
@@ -77,11 +112,11 @@ def register_module_forward_pre_hook(hook: Callable[..., None]) -> RemovableHand
             ``handle.remove()``
     """
     handle = hooks.RemovableHandle(_global_forward_pre_hooks)
-    _global_forward_pre_hooks[handle.id] = hook
+    _global_forward_pre_hooks[handle.id] = _PreForwardHookWrapper(hook, with_kwargs)
     return handle
 
 
-def register_module_forward_hook(hook: Callable[..., None]) -> RemovableHandle:
+def register_module_forward_hook(hook: Callable[..., None], with_kwargs=False) -> RemovableHandle:
     r"""Registers a global forward hook for all the modules
 
     .. warning ::
@@ -109,7 +144,7 @@ def register_module_forward_hook(hook: Callable[..., None]) -> RemovableHandle:
     ``register_forward_hook``.
     """
     handle = hooks.RemovableHandle(_global_forward_hooks)
-    _global_forward_hooks[handle.id] = hook
+    _global_forward_hooks[handle.id] = _ForwardHookWrapper(hook, with_kwargs)
     return handle
 
 def register_module_backward_hook(
@@ -1027,7 +1062,7 @@ class Module:
                               "some grad_input. Please use register_full_backward_hook to get the documented "
                               "behavior.")
 
-    def register_forward_pre_hook(self, hook: Callable[..., None]) -> RemovableHandle:
+    def register_forward_pre_hook(self, hook: Callable[..., None], with_kwargs=False) -> RemovableHandle:
         r"""Registers a forward pre-hook on the module.
 
         The hook will be called every time before :func:`forward` is invoked.
@@ -1047,10 +1082,10 @@ class Module:
                 ``handle.remove()``
         """
         handle = hooks.RemovableHandle(self._forward_pre_hooks)
-        self._forward_pre_hooks[handle.id] = hook
+        self._forward_pre_hooks[handle.id] = _PreForwardHookWrapper(hook, with_kwargs)
         return handle
 
-    def register_forward_hook(self, hook: Callable[..., None]) -> RemovableHandle:
+    def register_forward_hook(self, hook: Callable[..., None], with_kwargs=False) -> RemovableHandle:
         r"""Registers a forward hook on the module.
 
         The hook will be called every time after :func:`forward` has computed an output.
@@ -1070,7 +1105,7 @@ class Module:
                 ``handle.remove()``
         """
         handle = hooks.RemovableHandle(self._forward_hooks)
-        self._forward_hooks[handle.id] = hook
+        self._forward_hooks[handle.id] = _ForwardHookWrapper(hook, with_kwargs)
         return handle
 
     def _slow_forward(self, *input, **kwargs):
@@ -1105,8 +1140,8 @@ class Module:
         if self._backward_hooks or _global_backward_hooks:
             full_backward_hooks, non_full_backward_hooks = self._get_backward_hooks()
         if _global_forward_pre_hooks or self._forward_pre_hooks:
-            for hook in (*_global_forward_pre_hooks.values(), *self._forward_pre_hooks.values()):
-                result = hook(self, input)
+            for hook_wrapper in (*_global_forward_pre_hooks.values(), *self._forward_pre_hooks.values()):
+                result = hook_wrapper(self, input, kwargs)
                 if result is not None:
                     if not isinstance(result, tuple):
                         result = (result,)
@@ -1119,8 +1154,8 @@ class Module:
 
         result = forward_call(*input, **kwargs)
         if _global_forward_hooks or self._forward_hooks:
-            for hook in (*_global_forward_hooks.values(), *self._forward_hooks.values()):
-                hook_result = hook(self, input, result)
+            for hook_wrapper in (*_global_forward_hooks.values(), *self._forward_hooks.values()):
+                hook_result = hook_wrapper(self, input, kwargs, result)
                 if hook_result is not None:
                     result = hook_result
 

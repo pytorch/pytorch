@@ -18364,6 +18364,32 @@ class TestLazyModules(TestCase):
         with self.assertRaisesRegex(RuntimeError, 'shape of an uninitialized'):
             module.load_state_dict(lazy_module.state_dict())
 
+    def test_lazy_forward_keyword_arguments(self):
+        class TestModule(torch.nn.modules.lazy.LazyModuleMixin, torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.c = 100
+
+            def initialize_parameters(self, a, b=1):
+                if b == 1:
+                    self.c = 100
+                else:
+                    self.c = 200
+
+            def forward(self, a, b=1):
+                return a + b + self.c
+
+        m = TestModule()
+        self.assertEqual(102, m(a=1))
+        self.assertEqual(103, m(a=1, b=2))
+
+        m = TestModule()
+        self.assertEqual(203, m(1, 2))
+        self.assertEqual(202, m(a=1, b=1))
+
+        m = TestModule()
+        self.assertEqual(203, m(a=1, b=2))
+        self.assertEqual(202, m(1, 1))
 
     def test_lazy_pre_forward_hook(self):
         """
