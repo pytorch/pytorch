@@ -1784,7 +1784,7 @@ jobs:
             echo "IOS_PLATFORM: ${IOS_PLATFORM}"
             echo "USE_PYTORCH_METAL": "${USE_METAL}"
             echo "BUILD_LITE_INTERPRETER": "${BUILD_LITE_INTERPRETER}"
-            echo "USE_COREML": "${USE_COREML_DELEGATE}"
+            echo "USE_COREML_DELEGATE": "${USE_COREML_DELEGATE}"
 
             #check the custom build flag
             echo "SELECTED_OP_LIST: ${SELECTED_OP_LIST}"
