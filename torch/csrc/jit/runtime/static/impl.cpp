@@ -1272,7 +1272,8 @@ ProcessedNode::ProcessedNode(
     VLOG(1) << "Switch to out variant for node: " << PrintNode(node);
     return;
   }
-  if (!fn_ && (native_fn_ = getNativeOperation(node))) {
+  if (!fn_ && (fn_ = getNativeOperation(node))) {
+    fnIsNative_ = true;
     VLOG(1) << "Switch to native impl for node: " << PrintNode(node);
     return;
   }
@@ -1287,8 +1288,6 @@ void ProcessedNode::run() {
   DCHECK(verify_no_memory_overlap());
   if (fn_) {
     fn_(this);
-  } else if (native_fn_) {
-    native_fn_(this);
   } else {
     std::vector<IValue> stack;
     const size_t size = node_->inputs().size();

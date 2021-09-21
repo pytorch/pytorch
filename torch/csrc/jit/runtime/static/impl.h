@@ -369,11 +369,11 @@ class TORCH_API ProcessedNode {
   }
 
   bool has_out_variant() const {
-    return static_cast<bool>(fn_);
+    return static_cast<bool>(fn_) && !fnIsNative_;
   }
 
   bool has_native() const {
-    return static_cast<bool>(native_fn_);
+    return static_cast<bool>(fn_) && fnIsNative_;
   }
 
   bool verify_no_memory_overlap() const;
@@ -382,9 +382,9 @@ class TORCH_API ProcessedNode {
   Node* node_;
   c10::optional<Operation> op_;
   std::function<void(ProcessedNode*)> fn_;
-  std::function<void(ProcessedNode*)> native_fn_;
   std::vector<const IValue*> inputs_; // unowned
   std::vector<IValue> outputs_;
+  bool fnIsNative_ = false;
 };
 
 } // namespace jit
