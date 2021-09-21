@@ -65,8 +65,6 @@ inline int getPrecedence(IRNodeType ty) {
   }
 }
 
-class Placeholder;
-
 class TORCH_API Cast : public ExprNode<Cast> {
  public:
   ExprPtr src_value() const {

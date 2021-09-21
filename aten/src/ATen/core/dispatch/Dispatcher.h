@@ -275,7 +275,7 @@ private:
     const OperatorHandle& op,
     const OperatorName& op_name,
     c10::optional<DispatchKey> dispatch_key,
-    std::list<impl::AnnotatedKernel>::iterator kernel_handle);
+    impl::OperatorEntry::AnnotatedKernelContainerIterator kernel_handle);
   void deregisterName_(const OperatorHandle& op, const OperatorName& op_name);
   void deregisterFallback_(DispatchKey dispatchKey);
   void deregisterLibrary_(const std::string& ns);
