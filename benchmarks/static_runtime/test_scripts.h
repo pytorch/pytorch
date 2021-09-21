@@ -855,20 +855,3 @@ const auto getitem_mutable_input_dict_script = R"JIT(
       c = a + b
       return c.clone()
 )JIT";
-
-const auto var_tuple_unpack_script = R"JIT(
-  def forward(self, input_0: Tuple[Tensor, Tensor], input_1: Tuple[int, int]):
-      a, b = input_0
-      c, d = input_1
-      res = a * c + b * d
-      return res.clone()
-)JIT";
-
-const auto var_tuple_unpack_not_applied_script = R"JIT(
-  def forward(self, input_0: Tuple[Tensor, Tensor], input_1: Tuple[int, int]):
-      a, b = input_0
-      x = a + b
-      c, d = input_1
-      res = a * c + b * d + x
-      return res.clone()
-)JIT";

@@ -6,7 +6,7 @@
 # LICENSE file in the root directory of this source tree.
 """A Pipe implementation in PyTorch."""
 from .checkpoint import is_checkpointing, is_recomputing
-from .pipe import Pipe, WithDevice
+from .pipe import Pipe
 from .microbatch import NoChunk
 
 __all__ = ["Pipe", "is_checkpointing", "is_recomputing"]

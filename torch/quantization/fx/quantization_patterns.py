@@ -160,12 +160,6 @@ class QuantizeHandler(ABC):
         combination is not supported (since fbgemm/qnnpack only support certain dtype
         combinations), so the output may be float, but when is_reference is True,
         we support all dtype combinations so the output will always be quantized.
-
-        TODO: This is fragile, whether output is quantized should not depend on `is_reference` since
-        we want to make sure whether a Tensor is quantized
-        should be the same in prepare and convert and is_reference
-        is only available in convert currently
-
         """
         return True
 
@@ -382,8 +376,10 @@ class BinaryOpQuantizeHandler(QuantizeHandler):
 
     def is_output_quantized(self, qconfig, is_reference):
         dtypes = get_qconfig_dtypes(qconfig)
-        return self.binary_op in binary_op_supported_dtypes and \
-            dtypes in binary_op_supported_dtypes[self.binary_op]
+        if not is_reference:
+            return self.binary_op in binary_op_supported_dtypes and \
+                dtypes in binary_op_supported_dtypes[self.binary_op]
+        return True
 
     def convert(self,
                 node: Node,

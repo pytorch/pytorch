@@ -19,15 +19,15 @@
 # Distributed package
 # This list is mostly if you'd like to be tagged as reviewer, feel free to add
 # or remove yourself from it.
-/torch/csrc/distributed/ @mrshenli @zhaojuanmao @pritamdamania87 @rohan-varma @SciPioneer @mingzhe09088 @H-Huang
-/torch/distributed/ @mrshenli @zhaojuanmao @pritamdamania87 @rohan-varma @SciPioneer @mingzhe09088 @H-Huang
-/torch/nn/parallel/ @mrshenli @zhaojuanmao @pritamdamania87 @rohan-varma @SciPioneer @mingzhe09088 @H-Huang
+/torch/csrc/distributed/ @mrshenli @zhaojuanmao @pritamdamania87 @rohan-varma @SciPioneer @mingzhe09088 @H-Huang @cbalioglu
+/torch/distributed/ @mrshenli @zhaojuanmao @pritamdamania87 @rohan-varma @SciPioneer @mingzhe09088 @H-Huang @cbalioglu
+/torch/nn/parallel/ @mrshenli @zhaojuanmao @pritamdamania87 @rohan-varma @SciPioneer @mingzhe09088 @H-Huang @cbalioglu
 
 # Distributed tests
 # This list is mostly if you'd like to be tagged as reviewer, feel free to add
 # or remove yourself from it.
-/test/distributed @mrshenli @pritamdamania87 @zhaojuanmao @rohan-varma @SciPioneer @H-Huang
-/torch/testing/_internal/distributed @mrshenli @pritamdamania87 @zhaojuanmao @rohan-varma @SciPioneer @H-Huang
+/test/distributed @mrshenli @pritamdamania87 @zhaojuanmao @rohan-varma @SciPioneer @H-Huang @cbalioglu
+/torch/testing/_internal/distributed @mrshenli @pritamdamania87 @zhaojuanmao @rohan-varma @SciPioneer @H-Huang @cbalioglu
 
 # ONNX Export
 /torch/csrc/jit/passes/onnx.h @bowenbao @neginraoof @shubhambhokare1

@@ -66,14 +66,9 @@ class ForkerIterDataPipe(IterDataPipe):
             datapipe: Iterable DataPipe being copied
             num_instances: number of instances of the datapipe to create
             buffer_size: this restricts how far ahead the leading child DataPipe
-             can read relative to the slowest child DataPipe.
-             Use -1 for the unlmited buffer
+             can read relative to the slowest child DataPipe
     """
     def __new__(cls, datapipe: IterDataPipe, num_instances: int, buffer_size: int = 1000):
-        if num_instances < 1:
-            raise ValueError(f"Expected `num_instaces` larger than 0, but {num_instances} is found")
-        if num_instances == 1:
-            return datapipe
         container = _ForkerIterDataPipe(datapipe, num_instances, buffer_size)
         return [_ChildDataPipe(container, i) for i in range(num_instances)]
 
@@ -91,12 +86,6 @@ class _ForkerIterDataPipe(IterDataPipe):
         self.num_instances = num_instances
         self.buffer: Deque = deque()
         self.buffer_size = buffer_size
-        if self.buffer_size < 0:
-            warnings.warn(
-                "Unlimited buffer size is set for `fork`, "
-                "please be aware of OOM at random places",
-                UserWarning
-            )
         self.child_pointers = [0] * num_instances  # Indicate the indices of the next element to get
         self.slowest_ptr = 0
         self.leading_ptr = 0
@@ -111,7 +100,7 @@ class _ForkerIterDataPipe(IterDataPipe):
         while self.end_ptr is None or self.child_pointers[instance_id] < self.end_ptr:
             if not self.buffer or self.child_pointers[instance_id] > self.leading_ptr:
                 self.leading_ptr = self.child_pointers[instance_id]
-                if self.buffer_size >= 0 and self.leading_ptr - self.slowest_ptr + 1 > self.buffer_size:
+                if self.leading_ptr - self.slowest_ptr + 1 > self.buffer_size:
                     raise BufferError("ForkerIterDataPipe buffer overflow," +
                                       f"buffer size {self.buffer_size} is insufficient.")
                 try:
@@ -192,16 +181,10 @@ class DemultiplexerIterDataPipe(IterDataPipe):
             classifier_fn: a function that maps values to an integer within the range [0, num_instances - 1] or None
             drop_none: defaults to False, if True, the function will skip over elements classified as None
             buffer_size: this defines the maximum number of inputs that the buffer can hold across all child
-                DataPipes while waiting for their values to be yielded.
-                Use -1 for the unlimited buffer
+                DataPipes while waiting for their values to be yielded
     """
     def __new__(cls, datapipe: IterDataPipe, num_instances: int,
                 classifier_fn: Callable[[T_co], int], drop_none: bool = False, buffer_size: int = 1000):
-        if num_instances < 1:
-            raise ValueError(f"Expected `num_instaces` larger than 0, but {num_instances} is found")
-        # When num_instances == 1, demux can be replaced by filter,
-        # but keep it as Demultiplexer for the sake of consistency
-        # like throwing Error when classification result is out of o range
         container = _DemultiplexerIterDataPipe(datapipe, num_instances, classifier_fn, drop_none, buffer_size)
         return [_ChildDataPipe(container, i) for i in range(num_instances)]
 
@@ -219,13 +202,7 @@ class _DemultiplexerIterDataPipe(IterDataPipe):
         self.main_datapipe = datapipe
         self._datapipe_iterator: Optional[Iterator[Any]] = None
         self.num_instances = num_instances
-        self.buffer_size = buffer_size
-        if self.buffer_size < 0:
-            warnings.warn(
-                "Unlimited buffer size is set for `demux`, "
-                "please be aware of OOM at random places",
-                UserWarning
-            )
+        self.max_buffer_size = buffer_size
         self.current_buffer_usage = 0
         self.child_buffers: List[Deque[T_co]] = [deque() for _ in range(num_instances)]
         self.instance_started: List[bool] = [False] * num_instances
@@ -249,9 +226,9 @@ class _DemultiplexerIterDataPipe(IterDataPipe):
                 return value
             self.child_buffers[classification].append(value)
             self.current_buffer_usage += 1
-            if self.buffer_size >= 0 and self.current_buffer_usage > self.buffer_size:
+            if self.current_buffer_usage > self.max_buffer_size:
                 raise BufferError(
-                    f"DemultiplexerIterDataPipe buffer overflow, buffer size {self.buffer_size} is insufficient.")
+                    f"DemultiplexerIterDataPipe buffer overflow, buffer size {self.max_buffer_size} is insufficient.")
 
     def get_next_element_by_instance(self, instance_id: int):
         if self._datapipe_iterator is None:

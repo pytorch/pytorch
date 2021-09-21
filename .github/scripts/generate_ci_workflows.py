@@ -82,7 +82,7 @@ class CIFlowConfig:
             self.root_job_condition = "(github.repository_owner == 'pytorch') && "
         else:
             self.root_job_condition = "(github.repository == 'pytorch/pytorch') && "
-        self.root_job_condition += f"((github.event_name != 'pull_request') || (github.event.assignee.login != 'pytorchbot' ) || " \
+        self.root_job_condition += f"((github.event_name != 'pull_request') || " \
             f"(github.event.action !='{self.trigger_action}') || " \
             f"({' || '.join(label_conditions)}))"
 

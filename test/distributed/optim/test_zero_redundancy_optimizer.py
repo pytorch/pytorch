@@ -683,7 +683,7 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
         rank = self.rank
         world_size = self.world_size
         is_gpu = device.type == "cuda"
-        backend = _get_backend_for_tests()
+        backend = _get_backend_for_tests() if is_gpu else dist.Backend.GLOO
         self.dist_init(rank, world_size, backend)
         if is_gpu:
             torch.cuda.set_device(self.device)
