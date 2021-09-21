@@ -11,6 +11,7 @@ on:
 
 jobs:
   release:
+    if: ${{ github.repository == 'pytorch/pytorch' }}
     name: Create Release
     runs-on: ubuntu-latest
     steps:
