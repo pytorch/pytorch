@@ -563,6 +563,8 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_impl(
     const at::Tensor& act,
     double output_scale,
     int64_t output_zero_point) {
+  // QNNPack is not thread safe
+  std::lock_guard<std::mutex> lock(qnnp_mutex_);
   const std::string func_name = transpose() ? "quantized::conv_transpose"
                                             : "quantized::conv";
   TORCH_CHECK(!(kReluFused && transpose()),

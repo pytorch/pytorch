@@ -2,11 +2,10 @@ from torch.fx.experimental.graph_gradual_typechecker import Refine
 from torch.fx.tensor_type import TensorType
 from torch.fx.experimental.unification import Var, unify  # type: ignore[attr-defined]
 
+
 def infer_symbolic_types_single_pass(traced):
     """
-    Generate constraints over types,
-    solve constraints with unification,
-    apply solution back to the types
+    Calls our symbolic inferencer once.
     """
     r = Refine(traced)
     r.refine()
@@ -20,8 +19,17 @@ def infer_symbolic_types(traced):
     to infer all the information such as the case
     for braodcasting.
     """
-    infer_symbolic_types_single_pass(traced)
-    infer_symbolic_types_single_pass(traced)
+    r = Refine(traced)
+    r.refine()
+    mgu = unify_eq(r.constraints)
+    substitute_all_types(traced.graph, mgu)
+
+    r = Refine(traced)
+    r.refine()
+    mgu = unify_eq(r.constraints)
+    substitute_all_types(traced.graph, mgu)
+
+    r.symbolic_relations()
 
 def convert_eq(list_of_eq):
     """
@@ -52,6 +60,8 @@ def substitute_solution_one_type(mapping, t):
     if isinstance(t, Var):
         if t in mapping.keys():
             return mapping[t]
+        else:
+            return t
 
     elif isinstance(t, TensorType):
         new_type = []
@@ -61,6 +71,21 @@ def substitute_solution_one_type(mapping, t):
             else:
                 new_type.append(typ)
         return TensorType(tuple(new_type))
+
+    elif isinstance(t, list):
+        new_type = []
+        for typ in t:
+            new_type.append(substitute_solution_one_type(mapping, typ))
+        return new_type
+
+    elif isinstance(t, tuple):
+        new_type = []
+        for typ in t:
+            new_type.append(substitute_solution_one_type(mapping, typ))
+        return tuple(new_type)
+
+    else:
+        return t
 
 
 def substitute_all_types(graph, mapping):

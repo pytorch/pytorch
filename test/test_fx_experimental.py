@@ -8,11 +8,11 @@ from typing import Callable, Dict, Union, List, Optional
 import torch
 import torch.fx.experimental.optimization as optimization
 from torch.fx._symbolic_trace import symbolic_trace
-from torch.fx.experimental import graph_manipulation
 from torch.fx.experimental import merge_matmul
 from torch.fx.experimental.accelerator_partitioner import Partitioner
 from torch.fx.experimental.normalize import NormalizeOperators, NormalizeArgs
-from torch.fx.experimental.param_fetch import lift_lowering_attrs_to_nodes
+from torch.fx.passes import graph_manipulation
+from torch.fx.passes.param_fetch import lift_lowering_attrs_to_nodes
 from torch.fx.experimental.partitioner_utils import (
     NodeLatency,
     get_partition_to_latency_mapping,
@@ -32,7 +32,7 @@ from torch.fx.operator_schemas import (
     type_matches,
     create_type_hint,
 )
-from torch.fx.passes.shape_prop import extract_tensor_metadata, ShapeProp
+from torch.fx.passes.shape_prop import _extract_tensor_metadata, ShapeProp
 from torch.fx.passes.split_module import split_module
 from torch.testing._internal.common_device_type import (
     ops,
@@ -96,13 +96,13 @@ class TestFXExperimental(JitTestCase):
         # Fix for now to add type/shape to output
         for node in traced.graph.nodes:
             if node.op == "output":
-                node.meta["tensor_meta"] = extract_tensor_metadata(a)
+                node.meta["tensor_meta"] = _extract_tensor_metadata(a)
         for mod in module_with_submodules.modules():
             if isinstance(mod, GraphModule):
                 for node in mod.graph.nodes:
-                    node.meta["tensor_meta"] = extract_tensor_metadata(a)
+                    node.meta["tensor_meta"] = _extract_tensor_metadata(a)
         for node in module_with_submodules.graph.nodes:
-            node.meta["tensor_meta"] = extract_tensor_metadata(a)
+            node.meta["tensor_meta"] = _extract_tensor_metadata(a)
 
         weights1 = {}
         weights2 = {}
@@ -876,7 +876,7 @@ terrible spacing
             traced = symbolic_trace(WrapperMod())
             normalized = NormalizeOperators(traced).transform()
             x, y = torch.randn(3, 4), torch.randn(3, 4)
-            torch.testing.assert_allclose(traced(x, y), normalized(x, y))
+            torch.testing.assert_close(traced(x, y), normalized(x, y))
             self.assertFalse(
                 any(n.target in ops_to_test for n in normalized.graph.nodes)
             )
@@ -891,7 +891,7 @@ terrible spacing
             traced = symbolic_trace(WrapperMod())
             normalized = NormalizeOperators(traced).transform()
             x = torch.randn(3, 4)
-            torch.testing.assert_allclose(traced(x), normalized(x))
+            torch.testing.assert_close(traced(x), normalized(x))
             self.assertFalse(
                 any(n.target in ops_to_test for n in normalized.graph.nodes)
             )
@@ -1413,12 +1413,12 @@ class {test_classname}(torch.nn.Module):
         with torch.no_grad():
             model = Foo().eval()
             optimized_model = optimization.optimize_for_inference(model)
-            torch.testing.assert_allclose(model(inp), optimized_model(inp))
+            torch.testing.assert_close(model(inp), optimized_model(inp))
 
             optimized_model2 = optimization.optimize_for_inference(
                 model, pass_config={"remove_dropout": False}
             )
-            torch.testing.assert_allclose(model(inp), optimized_model2(inp))
+            torch.testing.assert_close(model(inp), optimized_model2(inp))
 
     @skipIfNoTorchVision
     @skipIfNoMkldnn
@@ -1450,7 +1450,7 @@ class {test_classname}(torch.nn.Module):
 
                 orig_out = model(inp)
                 new_out = optimized_model(inp)
-                torch.testing.assert_allclose(orig_out, new_out)
+                torch.testing.assert_close(orig_out, new_out)
 
 
 class TestNormalizeOperators(JitTestCase):
@@ -1459,13 +1459,19 @@ class TestNormalizeOperators(JitTestCase):
     def test_normalize_operator_exhaustive(self, device, dtype, op):
         # Sorted and one entry on each line to minimize merge conflicts.
         op_skip = {
+            # See: https://github.com/pytorch/pytorch/issues/64997
+            "block_diag",
+            "broadcast_tensors",
             "contiguous",
             "einsum",
             "expand",
             "expand_as",
             "fill_",
             "gradient",
+            "igamma",
+            "igammac",
             "index_put",
+            "nn.functional.dropout",
             "polygamma",
             "special.polygamma",
             "repeat",
@@ -1497,7 +1503,7 @@ class TestNormalizeOperators(JitTestCase):
             return
 
         # These ops currently don't trace in FX for various reasons (i.e. they take a list of tensors)
-        fx_fail = {"stack", "hstack", "vstack", "dstack", "linalg.multi_dot"}
+        fx_fail = {"cat", "stack", "hstack", "vstack", "dstack", "linalg.multi_dot"}
         sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)
         for sample_input in sample_inputs_itr:
             unsupported_arg_type = False
