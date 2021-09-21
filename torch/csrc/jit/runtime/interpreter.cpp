@@ -439,8 +439,8 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
               if (num_outputs == 1) {
                 future_->markCompleted(stack.back());
               } else {
-                future_->markCompleted(c10::ivalue::Tuple::create(
-                    jit::last(stack, num_outputs)));
+                future_->markCompleted(
+                    c10::ivalue::Tuple::create(jit::last(stack, num_outputs)));
               }
             }
             // destroy the last frame and call RecordFunction's end callbacks

@@ -273,13 +273,18 @@ void tupleConstruct(Stack& stack, size_t num_inputs) {
       stack.back() = c10::ivalue::Tuple::create(std::move(stack.back()));
       break;
     case 2: {
-      auto tuple = c10::ivalue::Tuple::create(std::move(stack[stack.size() - 2]), std::move(stack[stack.size() - 1]));
+      auto tuple = c10::ivalue::Tuple::create(
+          std::move(stack[stack.size() - 2]),
+          std::move(stack[stack.size() - 1]));
       stack.pop_back();
       stack.back() = std::move(tuple);
       break;
     }
     case 3: {
-      auto tuple = c10::ivalue::Tuple::create(std::move(stack[stack.size() - 3]), std::move(stack[stack.size() - 2]), std::move(stack[stack.size() - 1]));
+      auto tuple = c10::ivalue::Tuple::create(
+          std::move(stack[stack.size() - 3]),
+          std::move(stack[stack.size() - 2]),
+          std::move(stack[stack.size() - 1]));
       stack.pop_back();
       stack.pop_back();
       stack.back() = std::move(tuple);
@@ -287,8 +292,8 @@ void tupleConstruct(Stack& stack, size_t num_inputs) {
     }
     default: {
       std::vector<IValue> elems{
-        std::make_move_iterator(stack.end() - num_inputs),
-        std::make_move_iterator(stack.end())};
+          std::make_move_iterator(stack.end() - num_inputs),
+          std::make_move_iterator(stack.end())};
       drop(stack, num_inputs - 1);
       stack.back() = c10::ivalue::Tuple::create(std::move(elems));
       break;
@@ -362,7 +367,10 @@ void isinstance(Stack& stack, at::ArrayRef<at::TypePtr> types) {
 
 void tupleSlice(Stack& stack, size_t begin, size_t end) {
   auto tuple = pop(stack).toTuple();
-  push(stack, c10::ivalue::Tuple::create(tuple->elements().asArrayRef().slice(begin, end - begin)));
+  push(
+      stack,
+      c10::ivalue::Tuple::create(
+          tuple->elements().asArrayRef().slice(begin, end - begin)));
 }
 
 void dequantize(Stack& stack) {

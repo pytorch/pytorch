@@ -829,9 +829,13 @@ c10::IValue StaticRuntime::moveOutputsToTuple(size_t num_outputs) {
     case 1:
       return c10::ivalue::Tuple::create(std::move(*outputs_[0]));
     case 2:
-      return c10::ivalue::Tuple::create(std::move(*outputs_[0]), std::move(*outputs_[1]));
+      return c10::ivalue::Tuple::create(
+          std::move(*outputs_[0]), std::move(*outputs_[1]));
     case 3:
-      return c10::ivalue::Tuple::create(std::move(*outputs_[0]), std::move(*outputs_[1]), std::move(*outputs_[2]));
+      return c10::ivalue::Tuple::create(
+          std::move(*outputs_[0]),
+          std::move(*outputs_[1]),
+          std::move(*outputs_[2]));
     default: {
       std::vector<c10::IValue> outputs;
       outputs.reserve(static_module_.num_outputs());
@@ -843,7 +847,6 @@ c10::IValue StaticRuntime::moveOutputsToTuple(size_t num_outputs) {
     }
   }
 }
-
 
 c10::IValue StaticRuntime::operator()(
     c10::ArrayRef<c10::IValue> args,

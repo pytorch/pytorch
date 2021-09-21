@@ -334,13 +334,15 @@ PickleOpCode Unpickler::readInstruction() {
           auto e3 = pop(stack_);
           auto e2 = pop(stack_);
           auto e1 = pop(stack_);
-          stack_.emplace_back(c10::ivalue::Tuple::create(std::move(e1), std::move(e2), std::move(e3)));
+          stack_.emplace_back(c10::ivalue::Tuple::create(
+              std::move(e1), std::move(e2), std::move(e3)));
           break;
         }
         case 2: {
           auto e2 = pop(stack_);
           auto e1 = pop(stack_);
-          stack_.emplace_back(c10::ivalue::Tuple::create(std::move(e1), std::move(e2)));
+          stack_.emplace_back(
+              c10::ivalue::Tuple::create(std::move(e1), std::move(e2)));
           break;
         }
         case 1:

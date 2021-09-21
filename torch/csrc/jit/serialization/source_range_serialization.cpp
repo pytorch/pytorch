@@ -65,7 +65,8 @@ c10::IValue SourceRangeSerializer::serialize_source(
   if (s == nullptr) {
     serialized = c10::ivalue::Tuple::create({"", "", 0});
   } else {
-    serialized = c10::ivalue::Tuple::create({s->text(), s->filename(), (int64_t)s->starting_line_no()});
+    serialized = c10::ivalue::Tuple::create(
+        {s->text(), s->filename(), (int64_t)s->starting_line_no()});
   }
   serialized_sources[s] = serialized;
   return serialized;
@@ -83,10 +84,10 @@ std::vector<char> SourceRangePickler::pickle(
     if (it != source_range_tags.end()) {
       source_range_tag = it->second;
     }
-    ivalues.emplace_back(c10::ivalue::Tuple::create({
-        (int64_t)range.bytes,
-        srs->serialize(range.range),
-        static_cast<int64_t>(source_range_tag)}));
+    ivalues.emplace_back(c10::ivalue::Tuple::create(
+        {(int64_t)range.bytes,
+         srs->serialize(range.range),
+         static_cast<int64_t>(source_range_tag)}));
   }
   std::vector<at::Tensor> table;
   auto ivalue = c10::ivalue::Tuple::create(std::move(ivalues));
