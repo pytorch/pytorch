@@ -453,7 +453,7 @@
   pytorch_ios_build:
     <<: *pytorch_ios_params
     macos:
-      xcode: "12.0"
+      xcode: "12.5.1"
     steps:
       - checkout
       - run_brew_for_ios_build
@@ -534,10 +534,6 @@
           no_output_timeout: "30m"
           command: |
             set -e
-            if [ ${BUILD_LITE_INTERPRETER} == 0 ]; then
-              echo "Run Build Test is not for full jit, skipping."
-              exit 0
-            fi
             PROJ_ROOT=/Users/distiller/project
             PROFILE=PyTorch_CI_2021
             # run the ruby build script
@@ -563,21 +559,28 @@
             if [ ${IOS_PLATFORM} != "SIMULATOR" ]; then
               echo "not SIMULATOR build, skip it."
               exit 0
-            elif [ ${BUILD_LITE_INTERPRETER} == 0 ]; then
-              echo "Run Simulator Tests is not for full jit, skipping."
-              exit 0
             fi
             WORKSPACE=/Users/distiller/workspace
             PROJ_ROOT=/Users/distiller/project
             source ~/anaconda/bin/activate
-            pip install torch torchvision --progress-bar off
-            #run unit test
+            # use the pytorch nightly build to generate models
+            conda install pytorch torchvision -c pytorch-nightly --yes
+            # generate models for differnet backends
             cd ${PROJ_ROOT}/ios/TestApp/benchmark
+            mkdir -p ../models
             python trace_model.py
-            ruby setup.rb
+            if [ ${BUILD_LITE_INTERPRETER} == 1 ]; then
+              ruby setup.rb --lite 1
+            else
+              ruby setup.rb
+            fi
             cd ${PROJ_ROOT}/ios/TestApp
             instruments -s -devices
-            fastlane scan
+            if [ ${BUILD_LITE_INTERPRETER} == 1 ]; then
+              fastlane scan --only_testing TestAppTests/TestAppTests/testLiteInterpreter
+            else
+              fastlane scan --only_testing TestAppTests/TestAppTests/testFullJIT
+            fi
   pytorch_linux_bazel_build:
     <<: *pytorch_params
     machine:

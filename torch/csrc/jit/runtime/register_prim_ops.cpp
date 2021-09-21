@@ -1,5 +1,6 @@
 #include <c10/util/Optional.h>
 #include <c10/util/irange.h>
+#include <torch/csrc/jit/mobile/promoted_prim_ops.h>
 #include <torch/csrc/jit/runtime/custom_operator.h>
 #include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/jit/runtime/register_ops_utils.h>
@@ -116,6 +117,38 @@ static const OperatorGeneratorArgs opGenArgs[] = {
         },
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA("aten::numpy_T(Tensor(a) self) -> Tensor(a)"),
+        [](Stack& stack) {
+          at::Tensor a;
+          pop(stack, a);
+          push(stack, a.numpy_T());
+        },
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA("aten::matrix_H(Tensor(a) self) -> Tensor(a)"),
+        [](Stack& stack) {
+          at::Tensor a;
+          pop(stack, a);
+          push(stack, a.matrix_H());
+        },
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA("aten::mT(Tensor(a) self) -> Tensor(a)"),
+        [](Stack& stack) {
+          at::Tensor a;
+          pop(stack, a);
+          push(stack, a.mT());
+        },
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA("aten::mH(Tensor(a) self) -> Tensor(a)"),
+        [](Stack& stack) {
+          at::Tensor a;
+          pop(stack, a);
+          push(stack, a.mH());
+        },
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("prim::layout(Tensor a) -> int"),
         [](Stack& stack) {
           at::Tensor a;
@@ -201,11 +234,7 @@ static const OperatorGeneratorArgs opGenArgs[] = {
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("aten::Bool.Tensor(Tensor a) -> bool"),
-        [](Stack& stack) {
-          at::Tensor a;
-          pop(stack, a);
-          push(stack, a.is_nonzero());
-        },
+        boolTensor,
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("aten::Bool.int(int a) -> bool"),
@@ -363,10 +392,7 @@ static const OperatorGeneratorArgs opGenArgs[] = {
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("aten::format(str self, ...) -> str"),
-        [](Stack& stack) {
-          size_t num_inputs = pop(stack).toInt();
-          format(stack, num_inputs);
-        },
+        [](Stack& stack) { aten_format(stack); },
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("aten::einsum.sublist(Tensor a, ...) -> Tensor"),
@@ -377,15 +403,11 @@ static const OperatorGeneratorArgs opGenArgs[] = {
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("prim::NumToTensor.Scalar(Scalar a) -> Tensor"),
-        [](Stack& stack) {
-          at::Scalar s;
-          pop(stack, s);
-          push(stack, at::scalar_to_tensor(s));
-        },
+        numToTensorScalar,
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("prim::RaiseException(str msg) -> ()"),
-        [](Stack& stack) { throw JITException(pop(stack).toStringRef()); },
+        raiseException,
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("aten::Size(int[] sizes) -> int[]"),
@@ -393,10 +415,7 @@ static const OperatorGeneratorArgs opGenArgs[] = {
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("aten::size(Tensor self) -> int[]"),
-        [](Stack& stack) {
-          auto t = std::move(pop(stack)).toTensor();
-          pack(stack, t.sizes().vec());
-        },
+        size,
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("prim::EnumName(AnyEnumType enum) -> str"),
@@ -431,16 +450,7 @@ static const OperatorGeneratorArgs opGenArgs[] = {
         // note the compiler knows to type TupleIndex more accurately than it
         // is listed here.
         TORCH_SELECTIVE_SCHEMA("prim::TupleIndex(Any tup, int i) -> Any"),
-        [](Stack& stack) {
-          int64_t index = pop(stack).toInt();
-          auto tuple = pop(stack).toTuple();
-          auto norm_index = normalizeIndex(index, tuple->elements().size());
-          if (norm_index < 0 ||
-              norm_index > static_cast<int64_t>(tuple->elements().size())) {
-            throw std::out_of_range("Tuple list index out of range");
-          }
-          stack.emplace_back(tuple->elements()[norm_index]);
-        },
+        tupleIndex,
         aliasAnalysisSpecialCase()),
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("aten::ne.int_list(int[] a, int[] b) -> bool"),
@@ -453,35 +463,23 @@ static const OperatorGeneratorArgs opGenArgs[] = {
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("prim::device(Tensor a) -> Device"),
-        [](Stack& stack) { push(stack, pop(stack).toTensor().device()); },
+        device,
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("prim::dtype(Tensor a) -> int"),
-        [](Stack& stack) {
-          at::Tensor a;
-          pop(stack, a);
-          push(stack, static_cast<int64_t>(a.scalar_type()));
-        },
+        dtype,
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("aten::__not__(bool self) -> bool"),
-        [](Stack& stack) { push(stack, !pop(stack).toBool()); },
+        _not,
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("aten::__is__(t1 self, t2 obj) -> bool"),
-        [](Stack& stack) {
-          IValue self, obj;
-          pop(stack, self, obj);
-          push(stack, self.is(obj));
-        },
+        is,
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("aten::__isnot__(t1 self, t2 obj) -> bool"),
-        [](Stack& stack) {
-          IValue self, obj;
-          pop(stack, self, obj);
-          push(stack, !self.is(obj));
-        },
+        isNot,
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("aten::element_size(Tensor self) -> int"),
@@ -499,10 +497,7 @@ static const OperatorGeneratorArgs opGenArgs[] = {
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("aten::dim(Tensor self) -> int"),
-        [](Stack& stack) {
-          at::Tensor arg = pop(stack).toTensor();
-          push(stack, arg.dim());
-        },
+        dim,
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("aten::get_device(Tensor self) -> int"),
@@ -655,7 +650,7 @@ static const OperatorGeneratorArgs opGenArgs[] = {
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("prim::Uninitialized() -> Any"),
-        [](Stack& stack) { push(stack, IValue::uninitialized()); },
+        unInitialized,
         aliasAnalysisSpecialCase()),
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("prim::Print(...) -> ()"),
@@ -1044,27 +1039,11 @@ static const OperatorGeneratorArgs opGenArgs[] = {
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA(
             "aten::to.prim_dtype(Tensor(a) self, int? dtype=None, bool non_blocking=False, bool copy=False) -> Tensor(a|b)"),
-        [](Stack& stack) {
-          // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-          bool non_blocking;
-          // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-          bool copy;
-          pop(stack, non_blocking, copy);
-          c10::optional<at::ScalarType> scalarType =
-              pop(stack).toOptional<at::ScalarType>();
-          c10::optional<c10::Device> device = c10::nullopt;
-          at::Tensor self = pop(stack).toTensor();
-          push(
-              stack, to_dispatch(self, device, scalarType, non_blocking, copy));
-        },
+        toPrimDType,
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("prim::is_cuda(Tensor a) -> bool"),
-        [](Stack& stack) {
-          at::Tensor a;
-          pop(stack, a);
-          push(stack, a.is_cuda());
-        },
+        isCuda,
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("prim::is_xpu(Tensor a) -> bool"),
@@ -1182,80 +1161,7 @@ RegisterOperators reg(([]() {
       // depends on the type hint and input. The implementation of this
       // operator below is intended to be as close to the Python
       // implementation in torch/csrc/utils/tensor_list.cpp as possible.
-      [](const Node* /*node*/) -> Operation {
-        return [](Stack& stack) {
-          // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-          int elem_ty_val;
-          // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-          int dim_val;
-          at::Tensor t;
-
-          pop(stack, elem_ty_val);
-          pop(stack, dim_val);
-          pop(stack, t);
-
-          // If the Tensor is not on the CPU, transfer it.
-          if (!t.device().is_cpu()) {
-            t = t.cpu();
-          }
-
-          // Rebuild the output type using elem_ty_val and dim_val. Start
-          // with the element type corresponding to elem_ty_val.
-          TypePtr out_ty;
-          if (elem_ty_val == 0) {
-            out_ty = IntType::get();
-          } else if (elem_ty_val == 1) {
-            out_ty = FloatType::get();
-          } else if (elem_ty_val == 2) {
-            out_ty = BoolType::get();
-          } else if (elem_ty_val == 3) {
-            out_ty = ComplexType::get();
-          } else {
-            TORCH_CHECK(
-                false,
-                "Unsupported element type for tolist; only int, float, complex and bool are supported");
-          }
-
-          // Check that type of the Tensor matches that of the annotation.
-          // Make an exception for the case in which the annotated type is
-          // float/complex and the Tensor data type is also float/complex;
-          // the elements will be casted to double/c10::complex<double>
-          // later.
-          TORCH_CHECK(
-              (out_ty == FloatType::get() && t.is_floating_point()) ||
-                  (out_ty == ComplexType::get() && t.is_complex()) ||
-                  tryScalarTypeFromJitType(out_ty) == t.scalar_type(),
-              "Output annotation element type and runtime tensor element type must match for tolist()");
-
-          // Check that the dimension of the Tensor matches that of the
-          // annotation.
-          TORCH_CHECK(
-              dim_val == t.dim(),
-              "Output annotation list dimension and runtime tensor dimension must match for tolist()");
-
-          // Wrap out_ty in a ListType dim times.
-          for (const auto i : c10::irange(dim_val)) {
-            (void)i; // Suppress unused variable warning
-            out_ty = ListType::create(out_ty);
-          }
-
-          int64_t dim = t.dim();
-          auto sizes = t.sizes();
-          auto strides = t.strides();
-          size_t element_size = t.element_size();
-          char* data = static_cast<char*>(t.data_ptr());
-          auto result = tensorToListRecursive(
-              data,
-              0,
-              dim,
-              out_ty,
-              t.scalar_type(),
-              sizes,
-              strides,
-              element_size);
-          push(stack, std::move(result));
-        };
-      },
+      [](const Node* /*node*/) -> Operation { return toList; },
       aliasAnalysisSpecialCase()));
   return v;
 })());
@@ -2136,12 +2042,7 @@ static const OperatorGeneratorArgs opGenArgs1[] = {
     // because all _to_tensor conversion have to have the same operator namet
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("prim::NumToTensor.bool(bool a) -> Tensor"),
-        [](Stack& stack) {
-          // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-          bool b;
-          pop(stack, b);
-          push(stack, at::scalar_to_tensor(b));
-        },
+        numToTensorBool,
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("aten::device(str a) -> Device"),
