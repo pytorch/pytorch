@@ -269,15 +269,8 @@ class LazyTensor {
       const LazyTensor& input, const at::Scalar& other, const at::Scalar& alpha,
       c10::optional<at::ScalarType> logical_element_type = c10::nullopt);
 
-  static LazyTensor addcdiv(const LazyTensor& input, const at::Scalar& value,
-                            const LazyTensor& tensor1,
-                            const LazyTensor& tensor2);
   static void addcdiv_(LazyTensor& input, const at::Scalar& value,
                        const LazyTensor& tensor1, const LazyTensor& tensor2);
-
-  static LazyTensor addcmul(const LazyTensor& input, const at::Scalar& value,
-                            const LazyTensor& tensor1,
-                            const LazyTensor& tensor2);
 
   static LazyTensor addmm(const LazyTensor& input, const LazyTensor& weight,
                           const LazyTensor& bias);
@@ -451,8 +444,6 @@ class LazyTensor {
       std::vector<lazy_tensors::int64> dilation, bool transposed,
       std::vector<lazy_tensors::int64> output_padding,
       lazy_tensors::int64 groups);
-
-  static LazyTensor cos(const LazyTensor& input);
 
   static LazyTensor cosh(const LazyTensor& input);
 
@@ -779,11 +770,6 @@ class LazyTensor {
   static LazyTensor max_unpool_backward(
       const LazyTensor& grad_output, const LazyTensor& input,
       const LazyTensor& indices, std::vector<lazy_tensors::int64> output_size);
-
-  static LazyTensor mean(const LazyTensor& input,
-                         std::vector<lazy_tensors::int64> dimensions,
-                         bool keep_reduced_dimensions,
-                         c10::optional<at::ScalarType> dtype);
 
   static LazyTensor min(
       const LazyTensor& input, const LazyTensor& other,
@@ -1368,6 +1354,8 @@ class LazyTensor {
       ir::Value ir_value, const Device& device,
       c10::optional<at::ScalarType> logical_element_type) const;
 
+public:
+// TODO(whc) just a hack for now to get codegen to compile... need to refactor
   // Create a new lazy tensor with the same metadata of the input tensor (with
   // possible overrides), and the new IR value.
   LazyTensor CreateFrom(ir::Value ir_value) const;
@@ -1380,6 +1368,7 @@ class LazyTensor {
   LazyTensor CreateFrom(ir::Value ir_value, const Device& device,
                         at::ScalarType logical_element_type) const;
 
+private:
   // We build a graph accumulating operations, but at a given point we
   // need to force a rendering, otherwise the graph can grow without control.
   // Think:

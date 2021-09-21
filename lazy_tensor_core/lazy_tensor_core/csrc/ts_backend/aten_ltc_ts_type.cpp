@@ -117,16 +117,6 @@ at::Tensor LazyNativeFunctions::add(const at::Tensor& self,
                     });
 }
 
-at::Tensor LazyNativeFunctions::addcdiv(const at::Tensor& self,
-                                       const at::Tensor& tensor1,
-                                       const at::Tensor& tensor2,
-                                       const at::Scalar& value) {
-  LTC_FN_COUNTER("lazy::");
-  return bridge::AtenFromLtcTensor(LazyTensor::addcdiv(
-      bridge::GetLtcTensor(self), value, bridge::GetLtcTensor(tensor1),
-      bridge::GetLtcTensor(tensor2)));
-}
-
 at::Tensor& LazyNativeFunctions::addcdiv_(at::Tensor& self,
                                          const at::Tensor& tensor1,
                                          const at::Tensor& tensor2,
@@ -136,16 +126,6 @@ at::Tensor& LazyNativeFunctions::addcdiv_(at::Tensor& self,
   LazyTensor::addcdiv_(self_tensor, value, bridge::GetLtcTensor(tensor1),
                       bridge::GetLtcTensor(tensor2));
   return self;
-}
-
-at::Tensor LazyNativeFunctions::addcmul(const at::Tensor& self,
-                                        const at::Tensor& tensor1,
-                                        const at::Tensor& tensor2,
-                                        const at::Scalar& value) {
-  LTC_FN_COUNTER("lazy::");
-  return bridge::AtenFromLtcTensor(LazyTensor::addcmul(
-      bridge::GetLtcTensor(self), value, bridge::GetLtcTensor(tensor1),
-      bridge::GetLtcTensor(tensor2)));
 }
 
 at::Tensor LazyNativeFunctions::addmm(const at::Tensor& self,

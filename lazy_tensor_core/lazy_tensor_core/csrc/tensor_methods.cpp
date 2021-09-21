@@ -67,7 +67,6 @@
 #include "lazy_tensor_core/csrc/ops/max_pool_nd_backward.h"
 #include "lazy_tensor_core/csrc/ops/max_unpool_nd.h"
 #include "lazy_tensor_core/csrc/ops/max_unpool_nd_backward.h"
-#include "lazy_tensor_core/csrc/ops/mean.h"
 #include "lazy_tensor_core/csrc/ops/min_in_dim.h"
 #include "lazy_tensor_core/csrc/ops/mse_loss.h"
 #include "lazy_tensor_core/csrc/ops/mse_loss_backward.h"
@@ -531,15 +530,6 @@ LazyTensor LazyTensor::add(const LazyTensor& input, const at::Scalar& other,
                           logical_element_type);
 }
 
-LazyTensor LazyTensor::addcdiv(const LazyTensor& input, const at::Scalar& value,
-                               const LazyTensor& tensor1,
-                               const LazyTensor& tensor2) {
-  ir::Value constant = GetIrValueForScalar(
-      value, tensor1.shape().get().element_type(), input.GetDevice());
-  ir::Value div = tensor1.GetIrValue() / tensor2.GetIrValue();
-  return input.CreateFrom(input.GetIrValue() + div * constant);
-}
-
 void LazyTensor::addcdiv_(LazyTensor& input, const at::Scalar& value,
                           const LazyTensor& tensor1,
                           const LazyTensor& tensor2) {
@@ -547,15 +537,6 @@ void LazyTensor::addcdiv_(LazyTensor& input, const at::Scalar& value,
       value, tensor1.shape().get().element_type(), input.GetDevice());
   ir::Value div = tensor1.GetIrValue() / tensor2.GetIrValue();
   input.SetInPlaceIrValue(input.GetIrValue() + div * constant);
-}
-
-LazyTensor LazyTensor::addcmul(const LazyTensor& input, const at::Scalar& value,
-                               const LazyTensor& tensor1,
-                               const LazyTensor& tensor2) {
-  ir::Value constant = GetIrValueForScalar(
-      value, tensor1.shape().get().element_type(), input.GetDevice());
-  ir::Value mul = tensor1.GetIrValue() * tensor2.GetIrValue();
-  return input.CreateFrom(input.GetIrValue() + mul * constant);
 }
 
 LazyTensor LazyTensor::addmm(const LazyTensor& input, const LazyTensor& weight,
@@ -991,10 +972,6 @@ LazyTensor::convolution_backward_overrideable(
   LazyTensor grad_bias = out_backprop.CreateFrom(ir::Value(node, 2));
   return std::make_tuple(std::move(grad_input), std::move(grad_weight),
                          std::move(grad_bias));
-}
-
-LazyTensor LazyTensor::cos(const LazyTensor& input) {
-  return input.CreateFrom(ir::ops::Cos(input.GetIrValue()));
 }
 
 LazyTensor LazyTensor::cosh(const LazyTensor& input) {
@@ -1735,21 +1712,6 @@ LazyTensor LazyTensor::max_unpool_backward(
   return grad_output.CreateFrom(ir::MakeNode<ir::ops::MaxUnpoolNdBackward>(
       grad_output.GetIrValue(), input.GetIrValue(), indices.GetIrValue(),
       std::move(output_size)));
-}
-
-LazyTensor LazyTensor::mean(const LazyTensor& input,
-                            std::vector<lazy_tensors::int64> dimensions,
-                            bool keep_reduced_dimensions,
-                            c10::optional<at::ScalarType> dtype) {
-  if (!dtype) {
-    dtype = input.dtype_optional();
-  }
-  return input.CreateFrom(
-      ir::MakeNode<ir::ops::Mean>(input.GetIrValue(),
-                                  Helpers::GetCanonicalDimensionIndices(
-                                      dimensions, input.shape().get().rank()),
-                                  keep_reduced_dimensions, dtype),
-      dtype);
 }
 
 LazyTensor LazyTensor::min(const LazyTensor& input, const LazyTensor& other,

@@ -1,7 +1,9 @@
 #include "lazy_tensor_core/csrc/tensor_ops.h"
 
+#include "lazy_tensor_core/csrc/aten_ltc_bridge.h"
 #include "lazy_tensor_core/csrc/helpers.h"
 #include "lazy_tensor_core/csrc/ir.h"
+#include "lazy_tensor_core/csrc/ts_backend/LazyLazyIr.h"
 #include "lazy_tensors/computation_client/debug_macros.h"
 #include "lazy_tensors/computation_client/util.h"
 
@@ -122,8 +124,18 @@ LazyTensor SmoothL1Loss(const LazyTensor& input, const LazyTensor& target,
     case ReductionMode::kNone:
       return elementwise_loss;
     case ReductionMode::kMean:
-      return LazyTensor::mean(elementwise_loss, all_dimensions, false,
-                              broadcasted_input.dtype());
+      // TODO(whc) SmoothL1Loss is not implemented by lazy TS backend,
+      // so it falls back and this code isn't tested.
+      // Something like the code below should work, but is just a placeholder.
+      // We may delete this whole function and replace with codegen anyway,
+      // so not a priority to fix until then.
+      throw std::runtime_error("TODO(whc) SmoothL1Loss is not implemented by lazy TS backend");
+      return elementwise_loss.CreateFrom(
+          ir::MakeNode<ir::ops::Mean>(
+              elementwise_loss.GetIrValue(), broadcasted_input.dtype(),
+              broadcasted_input.dtype(), std::vector<int64_t>({1})),
+          broadcasted_input.dtype());
+
     case ReductionMode::kSum:
       return LazyTensor::sum(elementwise_loss, all_dimensions, false,
                              broadcasted_input.dtype());

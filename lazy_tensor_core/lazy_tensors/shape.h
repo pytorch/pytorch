@@ -4,6 +4,7 @@
 #include <ostream>
 #include <vector>
 
+#include "lazy_tensor_core/csrc/device.h"
 #include "lazy_tensors/computation_client/client_data.h"
 #include "lazy_tensors/computation_client/debug_macros.h"
 #include "lazy_tensors/layout.h"
@@ -18,6 +19,8 @@ namespace lazy_tensors {
 class Shape {
  public:
   Shape() : element_type_(PrimitiveType::INVALID) {}
+
+  Shape(at::ScalarType element_type, lazy_tensors::Span<const int64> dimensions);
 
   Shape(PrimitiveType element_type, lazy_tensors::Span<const int64> dimensions)
       : element_type_(element_type),

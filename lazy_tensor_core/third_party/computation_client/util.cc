@@ -27,6 +27,7 @@ hash_t LoadHash(const uint8** data, const uint8* top) {
 
 }  // namespace
 
+
 hash_t HashBlock(const void* data, size_t n, const hash_t& seed) {
   const hash_t m = 0xc6a4a7935bd1e995;
   const int r = 47;

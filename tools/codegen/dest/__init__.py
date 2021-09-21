@@ -1,2 +1,6 @@
+from .lazy_ir import LazyIR as LazyIR
+from .lazy_ir import gen_lazy_shape_dtype_decl as gen_lazy_shape_dtype_decl
+from .lazy_ir import gen_lazy_nativefunc_definition as gen_lazy_nativefunc_definition
+from .lazy_ts_lowering import LazyTsLowering as LazyTsLowering
 from .register_dispatch_key import RegisterDispatchKey as RegisterDispatchKey
 from .native_functions import compute_native_function_declaration as compute_native_function_declaration

@@ -9,6 +9,7 @@
 #include "lazy_tensors/shape.h"
 #include "lazy_tensors/shape_util.h"
 #include "lazy_tensors/span.h"
+#include "lazy_tensors/primitive_util.h"
 
 namespace lazy_tensors {
 

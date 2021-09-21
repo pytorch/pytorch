@@ -1,6 +1,13 @@
 #include "lazy_tensors/shape.h"
-
+#include "lazy_tensor_core/csrc/tensor_util.h"
 namespace lazy_tensors {
+
+Shape::Shape(at::ScalarType element_type,
+             lazy_tensors::Span<const int64> dimensions)
+    : element_type_(torch_lazy_tensors::MakeLtcPrimitiveType(
+          element_type, /*device=*/nullptr)),    // TODO(whc) used what was available now, but want to move to using aten dtype not device-specific dtype
+      dimensions_(dimensions.begin(), dimensions.end()),
+      dynamic_dimensions_(dimensions.size(), false) {}
 
 void Shape::DeleteDimension(int64 dim_to_delete) {
   LTC_CHECK(IsArray());

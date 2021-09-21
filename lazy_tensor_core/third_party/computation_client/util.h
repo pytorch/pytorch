@@ -18,6 +18,8 @@
 #include "lazy_tensors/computation_client/types.h"
 #include "lazy_tensors/span.h"
 #include "lazy_tensors/status.h"
+#include "c10/core/ScalarType.h"
+#include "c10/core/Scalar.h"
 
 namespace lazy_tensors {
 namespace util {
@@ -249,6 +251,14 @@ hash_t Hash(const T& value) {
   return DataHash(&value, sizeof(value));
 }
 
+static inline hash_t Hash(const c10::ScalarType& value) {
+  return DataHash(&value, sizeof(value));
+}
+
+static inline hash_t Hash(const c10::Scalar& value) {
+  return DataHash(&value, sizeof(value));
+}
+
 static inline hash_t Hash(const std::string& value) {
   return DataHash(value.data(), value.size());
 }
@@ -275,6 +285,25 @@ hash_t Hash(const std::set<T>& values) {
 template <typename T, typename S>
 hash_t Hash(const std::pair<T, S>& values) {
   return HashCombine(Hash(values.first), Hash(values.second));
+}
+
+// Implement any Hash wrappers necessary to cover the types
+// used in native_functions
+hash_t Hash(const c10::ScalarType& value);
+
+// Taken from glibc's implementation of hashing optionals,
+// we want to include a contribution to the hash to distinguish
+// cases where one or another option was null, but we hope it doesn't
+// collide with an actually scalar value.
+static const int64_t kNullOpt = -3333;
+
+template <typename T>
+hash_t Hash(const c10::optional<T>& value) {
+  if(value.has_value()){
+    return Hash(value.value());
+  } else {
+    return Hash(kNullOpt);
+  }
 }
 
 static inline hash_t Hash(const hash_t& value) { return value; }

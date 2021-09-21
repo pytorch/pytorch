@@ -1,10 +1,14 @@
 backend: Lazy
 cpp_namespace: torch_lazy_tensors
+full_codegen:
+  - mean
+  - addcdiv
+  - addcmul
+  - cos
 supported:
   - _log_softmax
   - _log_softmax_backward_data
   - add.Tensor
-  - addcdiv
   - addcdiv_
   - as_strided
   - as_strided_
@@ -83,7 +87,6 @@ supported:
   - lt.Scalar
   - lt.Tensor
   - index_select
-  - addcmul
   - alias
   - tanh_backward
   - zero_
