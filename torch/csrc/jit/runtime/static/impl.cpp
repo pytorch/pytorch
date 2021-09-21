@@ -85,6 +85,7 @@ void OptimizeGraph(
 #endif
   ConstantPropagation(graph);
   RemoveImmutableInputDictLookups(graph);
+  UseVariadicTupleUnpack(graph);
 }
 
 // remove unused input 0 from graph
