@@ -436,9 +436,8 @@ bool check_cudnn_depthwise_workload(const at::Tensor& input, int stride) {
 // simplified version for cudnn 8.2 and above
 bool check_cudnn_depthwise_workload_with_filter(const at::Tensor& input, int stride, const at::Tensor& weight) {
   // 1D conv
-  if(input.size(2) == 1){
-    // add 1d heuristic here
-    return false;
+  if(input.size(2) == 1 && stride == 1){
+    return true;
   }
 
   // 2d conv
