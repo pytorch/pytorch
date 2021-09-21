@@ -8112,7 +8112,8 @@ TEST(NVFuserTest, FusionSmemDynamicPersistentSoftmax2D_CUDA) {
   TensorView* x = makeSymbolicTensor(2);
   fusion.addInput(x);
   TensorView* max_val =
-      reductionOp(BinaryOpType::Max, {-1}, new Double(FLT_MIN), x); // (M)
+      reductionOp(BinaryOpType::Max, {-1},
+		  new Double(std::numeric_limits<float>::lowest()), x); // (M)
   TensorView* bcast_max = broadcast(max_val, {false, true}); // (M, B)
   TensorView* x_max_sub = sub(x, bcast_max); // (M, N)
   TensorView* exp = unaryOp(UnaryOpType::Exp, x_max_sub); // (M, N)
@@ -8210,6 +8211,53 @@ TEST(NVFuserTest, FusionMagicSchedulerSoftmax_CUDA) {
       &fusion,
       cg_outputs,
       {aten_input},
+      {aten_output},
+      __LINE__,
+      __FILE__,
+      "",
+      lparams);
+}
+
+TEST(NVFuserTest, TestMaskSoftmax_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  const int kReductionAxis = 3;
+  std::vector<int64_t> input_shape{256, 16, 128, 128};
+  TensorView* input = makeSymbolicTensor(input_shape.size());
+  TensorView* mask = makeSymbolicTensor(input_shape.size());
+  fusion.addInput(input);
+  fusion.addInput(mask);
+
+  auto out1 = add(input, mask);
+  auto output = softmax(out1, kReductionAxis);
+
+  fusion.addOutput(output);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor aten_input = at::randn(input_shape, options);
+  at::Tensor aten_mask = at::ones(input_shape, options);
+  aten_mask = aten_mask * -10000.0;
+  auto aten_out1 = aten_input + aten_mask;
+  auto aten_output =
+      at::_softmax(aten_out1, kReductionAxis, false);
+
+  //auto reduction_params = getNormalizationHeuristics(&fusion, {aten_input, aten_mask});
+  auto reduction_params = getNormalizationHeuristics(&fusion, {aten_input, aten_mask});
+  TORCH_CHECK(reduction_params, "Reduction schedule was not generated!");
+
+  scheduleNormalization(&fusion, reduction_params.value());
+
+  auto lparams = reduction_params.value().lparams;
+
+  torch::jit::fuser::cuda::FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  auto cg_outputs = fe.runFusion({aten_input, aten_mask}, lparams);
+
+  testValidate(
+      &fusion,
+      cg_outputs,
+      {aten_input, aten_mask},
       {aten_output},
       __LINE__,
       __FILE__,
@@ -8439,9 +8487,11 @@ TEST(NVFuserTest, FusionPersistentSoftmaxLocalSmem_CUDA) {
   fusion.addInput(dx);
 
   TensorView* max_sx =
-      reductionOp(BinaryOpType::Max, {-1}, new Double(FLT_MIN), sx); // (M)
+      reductionOp(BinaryOpType::Max, {-1},
+		  new Double(std::numeric_limits<float>::lowest()), sx); // (M)
   TensorView* max_dx =
-      reductionOp(BinaryOpType::Max, {-1}, new Double(FLT_MIN), dx); // (M)
+      reductionOp(BinaryOpType::Max, {-1},
+	      new Double(std::numeric_limits<float>::lowest()), dx); // (M)
 
   // Reduction => merge local and shared memory TensorViews
   TensorView* max_val = binaryOp(BinaryOpType::Max, max_sx, max_dx);
