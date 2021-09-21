@@ -145,7 +145,9 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      Operator(
-         "prim::AllocateTensor(Storage slab) -> Tensor",
+         // TODO: changing this node to be schematized and to use aliasAnalysisFromSchema
+         // doesn't work and produces zero tensors eventually for some reason
+         prim::AllocateTensor, // prim::AllocateTensor(Storage slab) -> Tensor
          [](const Node* node) -> Operation {
            int64_t size = node->i(attr::size);
            int64_t offset = node->i(attr::offset);
@@ -164,7 +166,7 @@ RegisterOperators reg(
              push(stack, std::move(temp_tensor));
            };
          },
-         aliasAnalysisFromSchema()),
+         aliasAnalysisSpecialCase()),
      Operator(
          "prim::ReleaseSlab(Storage slab) -> ()",
          [](Stack* stack) {
