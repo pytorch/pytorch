@@ -177,31 +177,6 @@ void boxed_reduction_batch_rule(const c10::OperatorHandle& op, torch::jit::Stack
 
 // Skipping frobenius/nuclear/all/any since they don't have opinfo tests right now :P
 
-template<typename F, F Func>
-std::tuple<Tensor,optional<int64_t>> argx_batch_rule(
-    const Tensor& self, optional<int64_t> self_bdim, optional<int64_t> dim, bool keepdim) {
-  auto self_ = moveBatchDimToFront(self, self_bdim);
-  if (!dim) {
-    // If no dimension is given, then argmax gives you the flattened index of
-    // the maximum element. We need to do this flatten/keepdim shenanigans in order
-    // to preserve that behavior.
-    dim = 0;
-    if (self_.dim() > 1) {
-      self_ = at::flatten(self, 1);
-    }
-    keepdim = false;
-  }
-  auto new_dim = getPhysicalDim(self_, self_bdim.has_value(), *dim);
-  if (self_.dim() <= new_dim) {
-    // This happens when the original tensor is a scalar
-    // vmap(argmax(shape [], 0)) => argmax(shape [5, 1], 1)
-    TORCH_INTERNAL_ASSERT(self_.dim() == 1);
-    self_ = self_.unsqueeze(-1);
-  }
-  auto result = Func(self_, new_dim, keepdim);
-  return std::make_tuple(result, 0);
-}
-
 Tensor dist_decomp(const Tensor& self, const Tensor& other, const Scalar& p) {
   return at::norm((self - other), p);
 }
@@ -301,8 +276,8 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   // REDUCTION_BOXED(aminmax); Currently fails due to inconsistent scalar semantics.
   REDUCTION_BOXED(amin);
   REDUCTION_BOXED(any.dim);
-  VMAP_SUPPORT("argmax", SINGLE_ARG(argx_batch_rule<decltype(&at::argmax), &at::argmax>));
-  VMAP_SUPPORT("argmin", SINGLE_ARG(argx_batch_rule<decltype(&at::argmin), &at::argmin>));
+  REDUCTION_BOXED(argmax);
+  REDUCTION_BOXED(argmin);
   REDUCTION_BOXED(count_nonzero.dim_IntList);
   REDUCTION_BOXED(cummax);
   REDUCTION_BOXED(cummin);
