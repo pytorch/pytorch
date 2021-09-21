@@ -220,6 +220,48 @@ class TestPythonKeyOperatorsOpInfo(TestCase):
             self.assertEqual(new_out, old_out)
             pass
 
+def _nop_compile(x, _):
+    return x
+
+def _outs_and_grads(fn, inps):
+    outs = fn(*inps)
+    [out.sum().backward() for out in outs]
+    grads = [inp.grad for inp in inps]
+    for inp in inps:
+        inp.grad = None
+    return outs, grads
+
+class TestEagerFusion(TestCase):
+    def test_single_output(self):
+        def f(a, b):
+            return a + b
+        compiled_f = compiled_function(f, _nop_compile, _nop_compile)
+        inp = [torch.randn(3, 3, requires_grad=True), torch.randn(3, 3)]
+        ref_out, ref_grad = _outs_and_grads(f, inp)
+        test_out, test_grad = _outs_and_grads(f, inp)
+        self.assertEqual(ref_out, test_out)
+        self.assertEqual(ref_grad, test_grad)
+
+    def test_multi_output(self):
+        def f(a, b):
+            return a + b, a - b
+        compiled_f = compiled_function(f, _nop_compile, _nop_compile)
+        inp = [torch.randn(3, 3, requires_grad=True), torch.randn(3, 3)]
+        ref_out, ref_grad = _outs_and_grads(f, inp)
+        test_out, test_grad = _outs_and_grads(f, inp)
+        self.assertEqual(ref_out, test_out)
+        self.assertEqual(ref_grad, test_grad)
+
+    def test_multi_output_list(self):
+        def f(a, b):
+            return [a + b, a - b]
+        compiled_f = compiled_function(f, _nop_compile, _nop_compile)
+        inp = [torch.randn(3, 3, requires_grad=True), torch.randn(3, 3)]
+        ref_out, ref_grad = _outs_and_grads(f, inp)
+        test_out, test_grad = _outs_and_grads(f, inp)
+        self.assertEqual(ref_out, test_out)
+        self.assertEqual(ref_grad, test_grad)
+
 class TestEagerFusionOpInfo(TestCase):
     @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
     # entries in here need don't work and need to be fixed.
