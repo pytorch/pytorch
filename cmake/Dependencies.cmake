@@ -1961,6 +1961,24 @@ if(USE_KINETO)
       message(STATUS "  CUDA_cupti_LIBRARY = ${CUDA_cupti_LIBRARY}")
       message(STATUS "Found CUPTI")
       set(LIBKINETO_NOCUPTI OFF CACHE STRING "" FORCE)
+
+      include(CheckCXXSourceRuns)
+      unset(EXCEPTIONS_WORK CACHE)
+      set(CMAKE_REQUIRED_LINK_OPTIONS "-Wl,--whole-archive,${CUPTI_LIBRARY_PATH},--no-whole-archive")
+      check_cxx_source_runs("#include <stdexcept>
+int main() {
+  try {
+    throw std::runtime_error(\"error\");
+  } catch (...) {
+    return 0;
+  }
+  return 1;
+}" EXCEPTIONS_WORK)
+      set(CMAKE_REQUIRED_LINK_OPTIONS "")
+      if (NOT EXCEPTIONS_WORK)
+        message(FATAL_ERROR "Detected that statically linking against CUPTI causes exceptions to stop working.  See https://github.com/pytorch/pytorch/issues/57744 for more details.  Perhaps try: USE_CUPTI_SO=1 python setup.py develop --cmake")
+      endif()
+
     else()
       message(STATUS "Could not find CUPTI library, using CPU-only Kineto build")
       set(LIBKINETO_NOCUPTI ON CACHE STRING "" FORCE)

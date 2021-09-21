@@ -334,10 +334,6 @@ if(USE_CCACHE)
   endif()
 endif()
 
-if(NOT USE_CUPTI_SO)
-  message(WARNING "Statically linking against CUPTI. If your CXX compiler is too new, this may break all exception handling in PyTorch.  See https://github.com/pytorch/pytorch/issues/57744 for more details.")
-endif()
-
 # Since TensorPipe does not support Windows, set it to OFF when WIN32 detected
 # On Windows platform, if user does not install libuv in build conda env and
 # does not set libuv_ROOT environment variable. Set USE_DISTRIBUTED to OFF.
