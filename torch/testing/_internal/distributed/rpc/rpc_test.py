@@ -1332,6 +1332,7 @@ class RpcTest(RpcAgentTestFixture):
         )
 
         og_func = rpc.api._wait_all_workers                                                
+
         def wait_all_workers_sleep(timeout):
             try:
                 rpc.api._all_gather(SlowPickleClass(0.5), timeout=timeout)
@@ -1395,18 +1396,18 @@ class RpcTest(RpcAgentTestFixture):
 
     @dist_init
     def test_all_gather_timeout(self):
-        #rpc._set_rpc_timeout(10)
+        rpc._set_rpc_timeout(0.1)
 
         if self.rank == 0:
             with self.assertRaisesRegex(
                 RuntimeError,
                 "timed out in _all_gather after 0\\.10 seconds"
             ):
-                rpc.api._all_gather(SlowPickleClass(0.5), timeout=0.1)
+                rpc.api._all_gather(SlowPickleClass(0.5))
         else:
             expected_error = self.get_timeout_error_regex()
             with self.assertRaisesRegex(RuntimeError, expected_error):
-                rpc.api._all_gather(SlowPickleClass(0.5), timeout=0.1)
+                rpc.api._all_gather(SlowPickleClass(0.5))
 
     def _test_barrier_helper(self, info, names, multi_threaded=False):
         names = sorted(names)
