@@ -11,6 +11,9 @@ from torch.testing._internal.common_utils import \
     (TestCase, run_tests, suppress_warnings)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, onlyCPU, dtypes, onlyOnCPUAndCUDA)
+from torch.testing._internal.common_dtype import (
+    get_all_dtypes, get_all_int_dtypes, get_all_fp_dtypes, get_all_complex_dtypes
+)
 
 # TODO: replace this with make_tensor() in common_utils.py
 def _generate_input(shape, dtype, device, with_extremal):
@@ -114,14 +117,14 @@ class TestViewOps(TestCase):
         else:
             return x.transpose(dim0, dim1)
 
-    @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes()))
+    @dtypes(*(get_all_int_dtypes() + get_all_fp_dtypes()))
     def test_conj_self(self, device, dtype):
         t = torch.ones(5, 5, device=device)
         s = t.conj()
         self.assertTrue(s is t)
 
     @onlyOnCPUAndCUDA
-    @dtypes(*torch.testing.get_all_fp_dtypes(include_bfloat16=False), torch.complex64)
+    @dtypes(*get_all_fp_dtypes(include_bfloat16=False), torch.complex64)
     def test_view_dtype(self, device, dtype):
         int_dtype = {
             torch.half: torch.int16,
@@ -227,7 +230,7 @@ class TestViewOps(TestCase):
         self.assertEqual(res.shape, torch.Size([0]))
 
     @onlyOnCPUAndCUDA
-    @dtypes(*torch.testing.get_all_complex_dtypes(include_complex32=True))
+    @dtypes(*get_all_complex_dtypes(include_complex32=True))
     def test_view_as_real(self, device, dtype):
         def fn(contiguous_input=True):
             t = torch.randn(3, 4, dtype=dtype, device=device)
@@ -265,7 +268,7 @@ class TestViewOps(TestCase):
         self.assertEqual(res.shape, torch.Size([2]))
 
     @onlyOnCPUAndCUDA
-    @dtypes(*torch.testing.get_all_dtypes())
+    @dtypes(*get_all_dtypes())
     def test_view_tensor_split(self, device, dtype):
         a = make_tensor((40, 30), device, dtype, low=-9, high=9)
         a_split_dim0 = a.tensor_split(7, 0)
@@ -276,7 +279,7 @@ class TestViewOps(TestCase):
             self.assertTrue(self.is_view_of(a, a_split_dim1_tensor))
 
     @onlyOnCPUAndCUDA
-    @dtypes(*torch.testing.get_all_dtypes())
+    @dtypes(*get_all_dtypes())
     def test_view_tensor_hsplit(self, device, dtype):
         t = make_tensor((4, 4, 4), device, dtype, low=-9, high=9)
         t_hsplit = torch.hsplit(t, 2)
@@ -286,7 +289,7 @@ class TestViewOps(TestCase):
         self.assertEqual(t_hsplit[1][2, 0, 2], t[2, 2, 2])
 
     @onlyOnCPUAndCUDA
-    @dtypes(*torch.testing.get_all_dtypes())
+    @dtypes(*get_all_dtypes())
     def test_view_tensor_vsplit(self, device, dtype):
         t = make_tensor((4, 4, 4), device, dtype, low=-9, high=9)
         t_vsplit = torch.vsplit(t, 2)
@@ -296,7 +299,7 @@ class TestViewOps(TestCase):
         self.assertEqual(t_vsplit[1][0, 2, 2], t[2, 2, 2])
 
     @onlyOnCPUAndCUDA
-    @dtypes(*torch.testing.get_all_dtypes())
+    @dtypes(*get_all_dtypes())
     def test_view_tensor_dsplit(self, device, dtype):
         t = make_tensor((4, 4, 4), device, dtype, low=-9, high=9)
         t_dsplit = torch.dsplit(t, 2)
@@ -306,7 +309,7 @@ class TestViewOps(TestCase):
         self.assertEqual(t_dsplit[1][2, 2, 0], t[2, 2, 2])
 
     @onlyOnCPUAndCUDA
-    @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes()))
+    @dtypes(*(get_all_int_dtypes() + get_all_fp_dtypes()))
     def test_real_imag_noncomplex(self, device, dtype):
         t = torch.ones((5, 5), dtype=dtype, device=device)
 
@@ -317,7 +320,7 @@ class TestViewOps(TestCase):
             torch.imag(t)
 
     @onlyOnCPUAndCUDA
-    @dtypes(*torch.testing.get_all_complex_dtypes())
+    @dtypes(*get_all_complex_dtypes())
     def test_real_imag_view(self, device, dtype):
         def compare_with_numpy(contiguous_input=True):
             t = torch.randn(3, 3, dtype=dtype, device=device)
@@ -348,7 +351,7 @@ class TestViewOps(TestCase):
         self.assertEqual(a[5:].imag, a.imag[5:])
 
     @onlyOnCPUAndCUDA
-    @dtypes(*torch.testing.get_all_complex_dtypes())
+    @dtypes(*get_all_complex_dtypes())
     def test_conj_imag_view(self, device, dtype) -> None:
         t = _make_tensor((4, 5,), dtype, device)
         t_numpy_conj = torch.from_numpy(t.cpu().numpy().conj()).to(device=device)
@@ -363,7 +366,7 @@ class TestViewOps(TestCase):
             self.assertTrue(v_imag.is_neg())
 
     @onlyOnCPUAndCUDA
-    @dtypes(*product(torch.testing.get_all_complex_dtypes(), torch.testing.get_all_dtypes()))
+    @dtypes(*product(get_all_complex_dtypes(), get_all_dtypes()))
     @suppress_warnings
     def test_set_real_imag(self, device, dtypes):
         x = torch.randn(10, dtype=dtypes[0], device=device)
@@ -1216,8 +1219,8 @@ class TestOldViewOps(TestCase):
                         self.assertEqual(np_res, torch_res)
 
     # TODO: are these view ops?
-    @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes(include_bfloat16=False) +
-              torch.testing.get_all_complex_dtypes()))
+    @dtypes(*(get_all_int_dtypes() + get_all_fp_dtypes(include_bfloat16=False) +
+              get_all_complex_dtypes()))
     def test_atleast(self, device, dtype):
         self._test_atleast_dim(torch.atleast_1d, np.atleast_1d, device, dtype)
         self._test_atleast_dim(torch.atleast_2d, np.atleast_2d, device, dtype)
@@ -1253,7 +1256,7 @@ class TestOldViewOps(TestCase):
                 self.assertEqual(expected, actual)
 
     # Skip BFloat16 since numpy does not support it
-    @dtypes(*torch.testing.get_all_dtypes(include_bfloat16=False))
+    @dtypes(*get_all_dtypes(include_bfloat16=False))
     def test_broadcast_to(self, device, dtype):
         def can_broadcast(s0, s1):
             # s0.dim() <= s1.dim(), reverse s0 and s1 to compare trailing dimension
@@ -1356,7 +1359,7 @@ class TestOldViewOps(TestCase):
         self.assertEqual(tensor.view(6, 2, 1), contig_tensor.view(6, 2, 1))
         self.assertEqual(tensor.view(1, 6, 2, 1), contig_tensor.view(1, 6, 2, 1))
 
-    @dtypes(*torch.testing.get_all_dtypes())
+    @dtypes(*get_all_dtypes())
     def test_reshape_view_semantics(self, device, dtype):
         tensor = make_tensor((15, 4), device, dtype)
         target = (20, 3)
@@ -1383,7 +1386,7 @@ class TestOldViewOps(TestCase):
 
     @onlyOnCPUAndCUDA
     # Skip BFloat16 since numpy does not support it
-    @dtypes(*torch.testing.get_all_dtypes(include_bfloat16=False))
+    @dtypes(*get_all_dtypes(include_bfloat16=False))
     def test_tensor_split_sections(self, device, dtype):
         input_sizes = [
             (0,),
@@ -1414,7 +1417,7 @@ class TestOldViewOps(TestCase):
 
     @onlyOnCPUAndCUDA
     # Skip BFloat16 since numpy does not support it
-    @dtypes(*torch.testing.get_all_dtypes(include_bfloat16=False))
+    @dtypes(*get_all_dtypes(include_bfloat16=False))
     def test_tensor_split_indices(self, device, dtype):
         input_sizes = [
             (0,),
@@ -1493,20 +1496,20 @@ class TestOldViewOps(TestCase):
 
     def test_resize_all_dtypes_and_devices(self, device):
         shape = (2, 2)
-        for dt in torch.testing.get_all_dtypes():
+        for dt in get_all_dtypes():
             x = torch.tensor([[1, 2], [3, 4], [5, 6]], dtype=dt, device=device)
             x.resize_(shape)
             self.assertEqual(shape, x.shape)
 
     def test_resize_as_all_dtypes_and_devices(self, device):
-        for dt in torch.testing.get_all_dtypes():
+        for dt in get_all_dtypes():
             x = torch.tensor([[1, 2], [3, 4], [5, 6]], dtype=dt, device=device)
             y = torch.tensor([[1, 2, 3], [4, 5, 6]], dtype=dt, device=device)
             x.resize_as_(y)
             self.assertEqual(y.shape, x.shape)
 
     def test_view_all_dtypes_and_devices(self, device):
-        for dt in torch.testing.get_all_dtypes():
+        for dt in get_all_dtypes():
             x = torch.tensor([[1, 2], [3, 4], [5, 6]], dtype=dt, device=device)
             self.assertEqual(x.view(6).shape, [6])
 
@@ -1518,6 +1521,18 @@ class TestOldViewOps(TestCase):
                                lambda: torch.tensor([1 + 2j]).conj().view(torch.float64))
         self.assertRaisesRegex(RuntimeError, "not supported for tensors with negative bit set",
                                lambda: torch.tensor([1 + 2j]).conj().imag.view(torch.int32))
+
+    @onlyCPU
+    def test_crow_col_indices(self, device):
+        crow_indices = (0, 1, 2)
+        col_indices = (1, 0)
+        values = (1, 2)
+        t = torch.sparse_csr_tensor(crow_indices, col_indices, values, size=(2, 2))
+        # This is the test. If crow_indices is not a view op it'll
+        # trigger an internal assert due to use count greater than 1
+        # in debug build.
+        t.crow_indices()
+        t.col_indices()
 
 instantiate_device_type_tests(TestViewOps, globals())
 instantiate_device_type_tests(TestOldViewOps, globals())
