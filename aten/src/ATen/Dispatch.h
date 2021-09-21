@@ -80,9 +80,13 @@ void record_kernel_function_dtype(std::string name);
 #define C10_UNUSED_DISPATCH_CUDA_WORKAROUND C10_UNUSED
 #endif // defined(__CUDACC__) && CUDA_VERSION <= 10100
 
+#if defined __cpp_if_constexpr
 #define AT_QINT_PRIVATE_CASE_TYPE(                                           \
-    enum_type, type, underlying_enum, underlying_type, ...)                  \
+    NAME, enum_type, type, underlying_enum, underlying_type, ...)            \
   case enum_type: {                                                          \
+    if constexpr (!at::should_include_kernel_dtype(NAME, enum_type)) {       \
+      AT_ERROR("dtype '", toString(enum_type), "' not selected for kernel tag ", #NAME); \
+    }                                                                        \
     using scalar_t = type;                                                   \
     using underlying_t C10_UNUSED_DISPATCH_CUDA_WORKAROUND =                 \
         scalar_t::underlying;                                                \
@@ -93,10 +97,34 @@ void record_kernel_function_dtype(std::string name);
     /* TODO: Use [[maybe-unused]] when C++17 becomes the standard */         \
     return __VA_ARGS__();                                                    \
   }
+#else
+#define AT_QINT_PRIVATE_CASE_TYPE(                                               \
+    NAME, enum_type, type, underlying_enum, underlying_type, ...)                \
+  case enum_type: {                                                              \
+    at::guts::if_constexpr<(!at::should_include_kernel_dtype(NAME, enum_type))>( \
+      [] {                                                                       \
+        AT_ERROR("dtype '" #enum_type "' not selected for kernel tag " #NAME);   \
+      }                                                                          \
+    );                                                                           \
+    using scalar_t = type;                                                       \
+    using underlying_t C10_UNUSED_DISPATCH_CUDA_WORKAROUND =                     \
+        scalar_t::underlying;                                                    \
+    const auto& SCALAR_TYPE C10_UNUSED_DISPATCH_CUDA_WORKAROUND = enum_type;     \
+    const auto& UNDERLYING_TYPE C10_UNUSED_DISPATCH_CUDA_WORKAROUND =            \
+        toUnderlying(enum_type);                                                 \
+    (void)SCALAR_TYPE;  /* Suppress unused-var compiler warning */               \
+    /* TODO: Use [[maybe-unused]] when C++17 becomes the standard */             \
+    return __VA_ARGS__();                                                        \
+  }
+#endif
 
+#if defined __cpp_if_constexpr
 #define AT_QINT_SUB_BYTE_PRIVATE_CASE_TYPE(                                       \
-    enum_type, type, underlying_type, bitwidth, qmin, qmax, ...)                  \
+    NAME, enum_type, type, underlying_type, bitwidth, qmin, qmax, ...)            \
   case enum_type: {                                                               \
+      if constexpr (!at::should_include_kernel_dtype(NAME, enum_type)) {          \
+      AT_ERROR("dtype '", toString(enum_type), "' not selected for kernel tag ", #NAME); \
+    }                                                                             \
     using scalar_t = type;                                                        \
     using underlying_t C10_UNUSED_DISPATCH_CUDA_WORKAROUND =                      \
         scalar_t::underlying;                                                     \
@@ -111,6 +139,30 @@ void record_kernel_function_dtype(std::string name);
     (void)quant_max; /* Suppress unused variable warning */                       \
     return __VA_ARGS__();                                                         \
   }
+#else
+#define AT_QINT_SUB_BYTE_PRIVATE_CASE_TYPE(                                       \
+    NAME, enum_type, type, underlying_type, bitwidth, qmin, qmax, ...)            \
+  case enum_type: {                                                               \
+      at::guts::if_constexpr<(!at::should_include_kernel_dtype(NAME, enum_type))>( \
+      [] {                                                                        \
+        AT_ERROR("dtype '" #enum_type "' not selected for kernel tag " #NAME);    \
+      }                                                                           \
+    );                                                                            \
+    using scalar_t = type;                                                        \
+    using underlying_t C10_UNUSED_DISPATCH_CUDA_WORKAROUND =                      \
+        scalar_t::underlying;                                                     \
+    const auto& SCALAR_TYPE C10_UNUSED_DISPATCH_CUDA_WORKAROUND = enum_type;      \
+    const auto& UNDERLYING_TYPE C10_UNUSED_DISPATCH_CUDA_WORKAROUND =             \
+        toUnderlying(enum_type);                                                  \
+    int bit_width = bitwidth;                                                     \
+    int64_t quant_min = qmin;                                                     \
+    int64_t quant_max = qmax;                                                     \
+    (void)bit_width; /* Suppress unused variable warning */                       \
+    (void)quant_min; /* Suppress unused variable warning */                       \
+    (void)quant_max; /* Suppress unused variable warning */                       \
+    return __VA_ARGS__();                                                         \
+  }
+#endif
 
 namespace detail {
 
@@ -449,11 +501,11 @@ inline void deprecated_AT_DISPATCH_ALL_TYPES_AND_HALF_AND_COMPLEX() {}
     RECORD_KERNEL_FUNCTION_DTYPE(NAME, _st);                                \
     switch (_st) {                                                          \
       AT_QINT_PRIVATE_CASE_TYPE(                                            \
-          at::kQInt8, at::qint8, at::kChar, int8_t, __VA_ARGS__)            \
+          NAME, at::kQInt8, at::qint8, at::kChar, int8_t, __VA_ARGS__)      \
       AT_QINT_PRIVATE_CASE_TYPE(                                            \
-          at::kQUInt8, at::quint8, at::kByte, uint8_t, __VA_ARGS__)         \
+          NAME, at::kQUInt8, at::quint8, at::kByte, uint8_t, __VA_ARGS__)   \
       AT_QINT_PRIVATE_CASE_TYPE(                                            \
-          at::kQInt32, at::qint32, at::kInt, int, __VA_ARGS__)              \
+          NAME, at::kQInt32, at::qint32, at::kInt, int, __VA_ARGS__)        \
       default:                                                              \
         AT_ERROR(#NAME, " not implemented for '", toString(TYPE), "'");     \
     }                                                                       \
@@ -467,13 +519,13 @@ inline void deprecated_AT_DISPATCH_ALL_TYPES_AND_HALF_AND_COMPLEX() {}
     RECORD_KERNEL_FUNCTION_DTYPE(NAME, _st);                                                   \
     switch (_st) {                                                                             \
       AT_QINT_SUB_BYTE_PRIVATE_CASE_TYPE(                                                      \
-          at::kQInt8, at::qint8, int8_t, CHAR_BIT, SCHAR_MIN, SCHAR_MAX, __VA_ARGS__)          \
+          NAME, at::kQInt8, at::qint8, int8_t, CHAR_BIT, SCHAR_MIN, SCHAR_MAX, __VA_ARGS__)    \
       AT_QINT_SUB_BYTE_PRIVATE_CASE_TYPE(                                                      \
-          at::kQUInt8, at::quint8, uint8_t, CHAR_BIT, 0, UCHAR_MAX, __VA_ARGS__)               \
+          NAME, at::kQUInt8, at::quint8, uint8_t, CHAR_BIT, 0, UCHAR_MAX, __VA_ARGS__)         \
       AT_QINT_SUB_BYTE_PRIVATE_CASE_TYPE(                                                      \
-          at::kQInt32, at::qint32, int, CHAR_BIT * sizeof(int), INT_MIN, INT_MAX, __VA_ARGS__) \
+          NAME, at::kQInt32, at::qint32, int, CHAR_BIT * sizeof(int), INT_MIN, INT_MAX, __VA_ARGS__) \
       AT_QINT_SUB_BYTE_PRIVATE_CASE_TYPE(                                                      \
-          at::kQUInt4x2, at::quint4x2, uint8_t, 4, 0, 15, __VA_ARGS__)                         \
+          NAME, at::kQUInt4x2, at::quint4x2, uint8_t, 4, 0, 15, __VA_ARGS__)                   \
       default:                                                                                 \
         AT_ERROR(#NAME, " not implemented for '", toString(TYPE), "'");                        \
     }                                                                                          \
