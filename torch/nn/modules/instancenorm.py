@@ -26,10 +26,12 @@ class _InstanceNorm(_NormBase):
         raise NotImplementedError
 
     def _handle_no_batch_input(self, input):
-        input = input.unsqueeze(0)
+        return self._apply_instance_norm(input.unsqueeze(0)).squeeze(0)
+
+    def _apply_instance_norm(self, input):
         return F.instance_norm(
             input, self.running_mean, self.running_var, self.weight, self.bias,
-            self.training or not self.track_running_stats, self.momentum, self.eps).squeeze(0)
+            self.training or not self.track_running_stats, self.momentum, self.eps)
 
     def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
                               missing_keys, unexpected_keys, error_msgs):
@@ -67,9 +69,7 @@ class _InstanceNorm(_NormBase):
         if input.dim() == self._get_no_batch_dim():
             return self._handle_no_batch_input(input)
 
-        return F.instance_norm(
-            input, self.running_mean, self.running_var, self.weight, self.bias,
-            self.training or not self.track_running_stats, self.momentum, self.eps)
+        return self._apply_instance_norm(input)
 
 
 class InstanceNorm1d(_InstanceNorm):

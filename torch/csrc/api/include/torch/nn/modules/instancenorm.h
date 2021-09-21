@@ -11,18 +11,20 @@ template <size_t D, typename Derived>
 // NOLINTNEXTLINE(bugprone-exception-escape)
 class InstanceNormImpl : public torch::nn::NormImplBase<D, Derived, InstanceNormOptions> {
  private:
-  Tensor handle_no_batch_input(const Tensor& input) {
-    auto batched_input = input.unsqueeze(0);
+  inline Tensor apply_instance_norm(const Tensor& input) {
     return torch::nn::functional::detail::instance_norm(
-               batched_input,
-               this->running_mean,
-               this->running_var,
-               this->weight,
-               this->bias,
-               this->is_training() || !this->options.track_running_stats(),
-               this->options.momentum(),
-               this->options.eps())
-        .squeeze(0);
+        input,
+        this->running_mean,
+        this->running_var,
+        this->weight,
+        this->bias,
+        this->is_training() || !this->options.track_running_stats(),
+        this->options.momentum(),
+        this->options.eps());
+  }
+
+  inline Tensor handle_no_batch_input(const Tensor& input) {
+    return this->apply_instance_norm(input.unsqueeze(0)).squeeze(0);
   }
 
  public:
@@ -30,12 +32,16 @@ class InstanceNormImpl : public torch::nn::NormImplBase<D, Derived, InstanceNorm
 
   Tensor forward(const Tensor& input) {
     this->_check_input_dim(input);
+
+    // check if input does not have a batch-dim
+    // For InstanceNorm1D, 2D is unbatched and 3D is batched
+    // For InstanceNorm2D, 3D is unbatched and 4D is batched
+    // For InstanceNorm3D, 4D is unbatched and 5D is batched
     if (input.dim() == D + 1) {
       return this->handle_no_batch_input(input);
     }
-    return torch::nn::functional::detail::instance_norm(
-      input, this->running_mean, this->running_var, this->weight, this->bias,
-      this->is_training() || !this->options.track_running_stats(), this->options.momentum(), this->options.eps());
+
+    return this->apply_instance_norm(input);
   }
 
   /// Pretty prints the `InstanceNorm{1,2,3}d` module into the given `stream`.
