@@ -31,7 +31,7 @@ namespace jit {
 /// List/Tuple/Dict of Tensors. Complex output types such as List of Lists are
 /// not supported.
 
-class MemoryPlanner {
+class TORCH_API MemoryPlanner {
  public:
   explicit MemoryPlanner(
       StaticRuntime* runtime,
@@ -64,6 +64,8 @@ class MemoryPlanner {
     return reused_tensors_;
   }
 
+  static size_t compute_aligned_tensor_size(size_t nbytes);
+
  private:
   // ivalues created in one run but not managed by MemoryPlanner
   std::vector<IValue*> unmanaged_ivalues_;
@@ -85,7 +87,6 @@ class MemoryPlanner {
   // size_t reused_output_tensors_{0};
   // at::DataPtr output_buffer_; // allocated each time we call Run()
 
-  static size_t compute_aligned_tensor_size(size_t nbytes);
   static at::DataPtr allocate_buffer(size_t size);
 };
 
