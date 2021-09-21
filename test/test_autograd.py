@@ -7683,7 +7683,7 @@ class TestAutogradForwardMode(TestCase):
 
         padding = (1, 1)
         stride = (1, 1)
-        dilation = (3, 1)
+        dilation = (1, 1)
         groups = 1
 
         torch.autograd.gradcheck(
