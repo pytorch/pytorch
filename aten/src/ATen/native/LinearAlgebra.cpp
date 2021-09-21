@@ -1308,7 +1308,7 @@ static inline void bmm_out_or_baddbmm_(const Tensor& self_or_result_, const Tens
 
   if (use_mkldnn_bf16_matmul(batch1, batch2, self_or_result)){
     mkldnn_matmul(batch1, batch2, self_or_result, beta.to<float>(), alpha.to<float>());
-    return self_or_result;
+    return;
   }
 
   if (contraction_size * res_rows * res_cols < 400) {
