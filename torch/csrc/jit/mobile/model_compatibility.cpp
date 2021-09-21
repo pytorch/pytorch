@@ -5,6 +5,7 @@
 #include <torch/csrc/jit/mobile/import.h> // removed after using simple type_resolver/obj_loader
 #include <torch/csrc/jit/mobile/model_compatibility.h>
 #include <torch/csrc/jit/mobile/type_parser.h>
+#include <torch/csrc/jit/serialization/import_export_constants.h>
 #include <torch/csrc/jit/serialization/import_read.h>
 
 #include <sstream>
@@ -215,7 +216,8 @@ std::unordered_set<std::string> _get_model_contained_types(
   return _get_model_contained_types(bytecode_values);
 }
 
-// Get deduplicate type table given bytecode,
+// Get deduplicate type table given bytecode, and each string is a atomic type,
+// like str, Tensor and etc.
 std::unordered_set<std::string> _get_model_contained_types(
     const std::vector<IValue>& bytecode_ivalues) {
   std::unordered_set<std::string> contained_types;
@@ -225,7 +227,8 @@ std::unordered_set<std::string> _get_model_contained_types(
   std::unordered_set<std::string> parsed_type_names_records;
   for (const auto i : c10::irange(1, bytecode_ivalues.size())) {
     auto method_tuple = bytecode_ivalues.at(i).toTuple()->elements();
-    auto type_table_tuple = method_tuple.at(1).toTuple()->elements()[3];
+    auto type_table_tuple =
+        method_tuple.at(1).toTuple()->elements()[BYTECODE_INDEX_TYPE];
     auto type_table =
         type_table_tuple.toTuple()->elements()[1].toTuple()->elements();
     // type_table is a list of IValue, and each IValue is a string,
