@@ -165,8 +165,7 @@ class LowRankMultivariateNormal(Distribution):
         Wt_Dinv = (self._unbroadcasted_cov_factor.mT
                    / self._unbroadcasted_cov_diag.unsqueeze(-2))
         A = torch.triangular_solve(Wt_Dinv, self._capacitance_tril, upper=False)[0]
-        precision_matrix = (torch.diag_embed(self._unbroadcasted_cov_diag.reciprocal())
-                            - torch.matmul(A.mT), A))
+        precision_matrix = torch.diag_embed(self._unbroadcasted_cov_diag.reciprocal()) - A.mT @ A
         return precision_matrix.expand(self._batch_shape + self._event_shape +
                                        self._event_shape)
 
