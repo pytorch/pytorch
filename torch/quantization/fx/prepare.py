@@ -67,7 +67,7 @@ from ..quantization_mappings import (
     get_default_qat_module_mappings,
 )
 
-from ..quantize import (
+from torch.ao.quantization.quantize import (
     is_activation_post_process,
     convert
 )
@@ -278,7 +278,7 @@ def get_target_activation_dtype_for_node(
 
         # get qconfig to determine the eventual dtype of this node
         if qconfig is not None:
-            if qhandler is not None and qhandler.input_output_observed():
+            if qhandler is not None and qhandler.input_output_observed() and qhandler.is_output_quantized(qconfig, False):
                 act_dtype, weight_dtype, act_compute_dtype = \
                     get_qconfig_dtypes(qconfig)
                 return act_dtype
