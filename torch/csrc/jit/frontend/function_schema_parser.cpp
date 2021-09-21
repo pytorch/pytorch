@@ -39,8 +39,8 @@ struct SchemaParser {
       return make_left<OperatorName, FunctionSchema>(std::move(name));
     }
 
-    c10::ArgumentVector arguments;
-    c10::ArgumentVector returns;
+    std::vector<Argument> arguments;
+    std::vector<Argument> returns;
     bool kwarg_only = false;
     bool is_vararg = false;
     bool is_varret = false;

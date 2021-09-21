@@ -43,7 +43,7 @@ bool Function::append_operator(
 
   std::function<void(Stack&)> fn;
 
-  const c10::ArgumentVector* pArgs = nullptr;
+  const std::vector<c10::Argument>* pArgs = nullptr;
   bool promoted_op = mobile::hasPrimOpsFn(name);
   if (promoted_op) {
     fn = mobile::getPrimOpsFn(name);
