@@ -4193,8 +4193,7 @@ Tensor mkldnn_convolution_forward(
   const at::IntArrayRef padding,
   const at::IntArrayRef stride,
   const at::IntArrayRef dilation,
-  const int groups,
-  const Tensor& result
+  const int groups
 ) {
 
   Tensor out_fw_grad;
