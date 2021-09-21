@@ -14,7 +14,7 @@
 namespace torch {
 namespace jit {
 
-inline int64_t timeSinceEpoch() {
+inline size_t timeSinceEpoch() {
   return std::chrono::duration_cast<std::chrono::microseconds>(
              std::chrono::system_clock::now().time_since_epoch())
       .count();
@@ -40,7 +40,7 @@ typedef struct TORCH_API MemoryEvent {
   size_t ts{};
   c10::optional<std::string> stack_trace{};
   intptr_t addr{};
-  int64_t size{};
+  size_t size{};
   EventType type{EventType::ALLOCATE};
   c10::optional<FrameNodeId> frame_node_id{};
 
@@ -49,7 +49,7 @@ typedef struct TORCH_API MemoryEvent {
       size_t ts,
       c10::optional<std::string> stack_trace,
       intptr_t addr,
-      int64_t s,
+      size_t s,
       EventType e,
       c10::optional<FrameNodeId> frame_nodeid = c10::nullopt)
       : ts(ts),
@@ -92,8 +92,8 @@ typedef struct FunctionFrameEvent {
   std::vector<std::string> input_val_names;
   std::vector<std::string> output_val_names;
   std::string fn_name;
-  int64_t start_time{};
-  int64_t end_time{};
+  size_t start_time{};
+  size_t end_time{};
 
   friend std::ostream& operator<<(
       std::ostream& out,
@@ -102,19 +102,21 @@ typedef struct FunctionFrameEvent {
         << ", start_time: " << rhs.start_time << ", end_time: " << rhs.end_time
         << "\n"
         << "input_val_names: "
-        << (rhs.input_val_names.size() ? c10::Join(", ", rhs.input_val_names)
-                                       : "no val names")
+        << (!rhs.input_val_names.empty() ? c10::Join(", ", rhs.input_val_names)
+                                         : "no val names")
         << "\n"
         << "output_val_names: "
-        << (rhs.output_val_names.size() ? c10::Join(", ", rhs.output_val_names)
-                                        : "no val names")
+        << (!rhs.output_val_names.empty()
+                ? c10::Join(", ", rhs.output_val_names)
+                : "no val names")
         << "\n"
         << "input_ival_addrs: "
-        << (rhs.input_ival_addrs.size() ? c10::Join(", ", rhs.input_ival_addrs)
-                                        : "no ival addrs")
+        << (!rhs.input_ival_addrs.empty()
+                ? c10::Join(", ", rhs.input_ival_addrs)
+                : "no ival addrs")
         << "\n"
         << "output_ival_addrs: "
-        << (rhs.output_ival_addrs.size()
+        << (!rhs.output_ival_addrs.empty()
                 ? c10::Join(", ", rhs.output_ival_addrs)
                 : "no ival addrs")
         << "\n";
