@@ -594,17 +594,27 @@ class DistributedTest:
             return (group, group_id, rank)
 
         def _verify_buffers_equal(self, m1, m2):
-            all_hook_buffers = [None for _ in range(dist.get_world_size())]
-            named_buf_dict = {k: v for k, v in m1.module.named_buffers()}
-            dist.all_gather_object(all_hook_buffers, named_buf_dict)
-            # First check buffers are equal across all ranks
-            rank_0_buf = all_hook_buffers[0]
-            for buf_dict in all_hook_buffers[1:]:
-                for buf_name, buf in buf_dict.items():
-                    self.assertEqual(buf, rank_0_buf[buf_name])
-            # Now check equivalence across the 2 models.
-            for buf_name, buf in {k: v for k, v in m2.module.named_buffers()}.items():
-                self.assertEqual(buf, rank_0_buf[buf_name])
+            # verify buffers across models
+            m1_buf_dict = {k: v for k, v in m1.module.named_buffers()}
+            for name, buf in m2.module.named_buffers():
+                self.assertEqual(buf, m1_buf_dict[name])
+
+            # Verify buffers across ranks.
+            m1_buffers = list(m1.buffers())
+            m2_buffers = list(m2.buffers())
+            for (buf1, buf2) in zip(m1_buffers, m2_buffers):
+                gathered_bufs = [
+                    torch.empty_like(buf1) for _ in range(dist.get_world_size())
+                ]
+                dist.all_gather(gathered_bufs, buf1)
+                gathered_bufs_m2 = [
+                    torch.empty_like(buf2) for _ in range(dist.get_world_size())
+                ]
+                for b in gathered_bufs:
+                    self.assertEqual(b, buf1)
+                dist.all_gather(gathered_bufs_m2, buf2)
+                for b in gathered_bufs_m2:
+                    self.assertEqual(b, buf2)
 
         # HELPER FOR MULTIGPU TESTS
         def _init_multigpu_helper(self):
