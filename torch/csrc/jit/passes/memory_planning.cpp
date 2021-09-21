@@ -5,8 +5,8 @@
 
 #include <jit/tensorexpr/kernel.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
-#include <torch/csrc/jit/runtime/static/memory_planner.h>
 #include <torch/csrc/jit/jit_log.h>
+#include <torch/csrc/jit/runtime/static/memory_planner.h>
 #include <torch/csrc/jit/runtime/static/ops.h>
 #include <limits>
 
@@ -161,7 +161,7 @@ void insertAllocNodes(
     auto val = item.first;
     auto region = item.second;
 
-    // const_cast fishy?
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
     Node* node = const_cast<Node*>(val->node());
 
     // the way that this node magically *becomes* the out varaint is simply
@@ -247,7 +247,7 @@ getManagedAndUnManagedValues(const std::shared_ptr<Graph>& graph, bool frozen) {
   FastMap<const Value*, std::pair<UniqueLiveRange, size_t>> unmanaged_values{};
   FastMap<Node*, bool> node_has_out_variant;
   for (auto* node : graph->nodes()) {
-        auto has_out = hasOutVariant(node);
+    auto has_out = hasOutVariant(node);
     node_has_out_variant.insert({node, has_out});
   }
 
@@ -268,7 +268,8 @@ getManagedAndUnManagedValues(const std::shared_ptr<Graph>& graph, bool frozen) {
       auto size = computeStorageSize(*out_v);
       // this follows static runtime in not trying to manage container types
       // that take a long time to allocate for (tuples and lists of tensors)
-      if (size > 0 && !isOptimizableContainerType(node, node_has_out_variant)) {
+      if (size > (size_t)0 &&
+          !isOptimizableContainerType(node, node_has_out_variant)) {
         managed_values.insert(
             {out_v, {{live_ranges[out_v], out_v->debugName()}, size.value()}});
       } else {
