@@ -3,8 +3,11 @@ from typing import Any, Callable, Dict, List, Tuple, Type
 import torch
 import torch.nn as nn
 
+from torch.fx._compatibility import compatibility
+
 
 # Matching method matches the attribute name of current version to the attribute name of `target_version`
+@compatibility(is_backward_compatible=False)
 def default_matching(name: str, target_version: int) -> str:
     """Default matching method
     """
@@ -26,6 +29,7 @@ module_fetch_book: Dict[Type, Tuple[int, List[str], Callable[[str, int], str]]] 
     torch.nn.modules.activation.ReLU: (1, ["inplace"], default_matching),
 }
 
+@compatibility(is_backward_compatible=False)
 def extract_attrs_for_lowering(mod: nn.Module) -> Dict[str, Any]:
     """If `mod` is in `module_fetch_book`, fetch the mod's attributes that in the `module_fetch_book`
     after checking module's version is compatible with the `module_fetch_book`.
@@ -47,6 +51,7 @@ def extract_attrs_for_lowering(mod: nn.Module) -> Dict[str, Any]:
                            "or report a bug to AIACC team directly.")
     return attrs_for_lowering
 
+@compatibility(is_backward_compatible=False)
 def lift_lowering_attrs_to_nodes(fx_module: GraphModule) -> None:
     """Recursively traverse all `fx_module` nodes and fetch the module's attributes if the node is a leaf module.
     """
