@@ -31,3 +31,15 @@ class AOMigrationTestCase(TestCase):
             assert hash(old_function) == hash(new_function), \
                 f"Hashes don't match: {old_function}({hash(old_function)}) vs. " \
                 f"{new_function}({hash(new_function)})"
+
+    def _test_dict_import(self, package_name: str, dict_list: List[str]):
+        r"""Tests individual function list import by comparing the functions
+        and their hashes."""
+        old_location = importlib.import_module(f'torch.quantization.{package_name}')
+        new_location = importlib.import_module(f'torch.ao.quantization.{package_name}')
+        for dict_name in dict_list:
+            old_dict = getattr(old_location, dict_name)
+            new_dict = getattr(new_location, dict_name)
+            assert old_dict == new_dict, f"Dicts don't match: {dict_name}"
+            for key in new_dict.keys():
+                assert old_dict[key] == new_dict[key], f"Dicts don't match: {dict_name} for key {key}"

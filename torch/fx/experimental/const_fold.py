@@ -109,6 +109,14 @@ def split_const_subgraphs(
 
     split = split_module(mod_traced, module, mod_partition)
 
+    # Later we are creating get_attr nodes from main module get_attr nodes and we use the
+    # same node.target. If there's a get_attr that refers to an attributes in a module and
+    # this module is not included in submod_1 then we would have a trouble when creating
+    # get_attr ndoes because it will try to find the module that owns the attribute first.
+    # Setting owning_module here makes the owning_module of submod_1.graph to None then
+    # the check when creating get_attr nodes will get skipped.
+    split.submod_1.graph.owning_module = mod_traced
+
     # The module that a call_module node refers to gets copied to submodules during split.
     # The path to the module also gets inlined, i.e. mod.a.b -> mod_a_b. Here we need to
     # attach inlined modules to `mod_traced` as it's the owning module now.
@@ -225,6 +233,7 @@ def split_const_subgraphs(
                 const_output_name,
                 torch.nn.Parameter(torch.randn(1)),
             )
+
         with split.submod_1.graph.inserting_before(node):
             new_node = split.submod_1.graph.get_attr(const_output_name)
             new_node.meta = node.meta.copy()
@@ -258,10 +267,24 @@ def split_const_subgraphs(
             ):
                 break
             later_node = later_node.next
-        assert later_node.op != "root"
-        node.prepend(later_node)
+
+        # The placeholder is in split.graph but not in split.submod_1.graph.
+        # In this case we add the placeholder to submod_1.graph.
+        if later_node.op == "root":
+            with split.submod_1.graph.inserting_before(node):
+                split.submod_1.graph.placeholder(curr_orig_ph_target)
+        else:
+            node.prepend(later_node)
+
         # Note we do not increment node here, as it still may be in the wrong
         # place (we just prepended the ph that should have come before it).
+
+    # There might be more placeholders left in orig_ph_targets.
+    last_placeholder = next(n for n in split.submod_1.graph.nodes if n.target == orig_ph_targets[ph_idx - 1])
+    while ph_idx < len(orig_ph_targets):
+        with split.submod_1.graph.inserting_after(last_placeholder):
+            split.submod_1.graph.placeholder(orig_ph_targets[ph_idx])
+        ph_idx += 1
 
     # split_module currently does not use get_attrs for attrs. Instead it passes
     # them in as args from the parent module, which used get_attrs. Here we set
