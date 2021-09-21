@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/passes/memory_planning/greedy_by_size.h>
 #include <torch/csrc/jit/passes/memory_planning/greedy_util.h>
+#include <torch/csrc/jit/runtime/static/memory_planner.h>
 
 namespace torch {
 namespace jit {
@@ -66,7 +67,7 @@ MemAllocation makeAllocation(
     size_t size,
     std::vector<MemAllocation>& ordered_allocations,
     OffsetFinder findOffset) {
-  auto aligned_size = MemoryPlanner::computeAlignedTensorSize(size);
+  auto aligned_size = MemoryPlanner::compute_aligned_tensor_size(size);
   auto offset = findOffset(ulvr, aligned_size, ordered_allocations);
   auto it = ordered_allocations.begin();
   while (it != ordered_allocations.end() && it->reg.offset <= offset) {
