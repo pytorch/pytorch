@@ -11,44 +11,44 @@ class PandasWrapper:
     @classmethod
     def create_dataframe(cls, data, columns):
         if not WITH_PANDAS:
-            Exception("DataFrames prototype requires pandas to function")
+            raise Exception("DataFrames prototype requires pandas to function")
         return pandas.DataFrame(data, columns=columns)
 
     @classmethod
     def is_dataframe(cls, data):
         if not WITH_PANDAS:
-            Exception("DataFrames prototype requires pandas to function")
+            return False
         return isinstance(data, pandas.core.frame.DataFrame)
 
     @classmethod
     def is_column(cls, data):
         if not WITH_PANDAS:
-            Exception("DataFrames prototype requires pandas to function")
+            return False
         return isinstance(data, pandas.core.series.Series)
 
     @classmethod
     def iterate(cls, data):
         if not WITH_PANDAS:
-            Exception("DataFrames prototype requires pandas to function")
+            raise Exception("DataFrames prototype requires pandas to function")
         for d in data:
             yield d
 
     @classmethod
     def concat(cls, buffer):
         if not WITH_PANDAS:
-            Exception("DataFrames prototype requires pandas to function")
+            raise Exception("DataFrames prototype requires pandas to function")
         return pandas.concat(buffer)
 
     @classmethod
     def get_item(cls, data, idx):
         if not WITH_PANDAS:
-            Exception("DataFrames prototype requires pandas to function")
-        return data[idx:idx + 1]
+            raise Exception("DataFrames prototype requires pandas to function")
+        return data[idx : idx + 1]
 
     @classmethod
     def get_len(cls, df):
         if not WITH_PANDAS:
-            Exception("DataFrames prototype requires pandas to function")
+            raise Exception("DataFrames prototype requires pandas to function")
         return len(df.index)
 
 
