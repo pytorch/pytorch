@@ -1,11 +1,6 @@
-//
-// Created by Maksim Levental on 9/11/21.
-//
-
 #include <iostream>
 #include <utility>
 
-#include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/passes/memory_planning/memory_observer.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
 
@@ -24,7 +19,7 @@ struct MemoryObserverContext : public at::ObserverContext {
       std::vector<std::string> input_val_names,
       std::vector<std::string> output_val_names,
       std::string fn_name,
-      int64_t start_time)
+      size_t start_time)
       : input_ival_addrs(std::move(input_ival_addrs)),
         input_val_names(std::move(input_val_names)),
         output_val_names(std::move(output_val_names)),
@@ -34,7 +29,7 @@ struct MemoryObserverContext : public at::ObserverContext {
   std::vector<std::string> input_val_names;
   std::vector<std::string> output_val_names;
   std::string fn_name;
-  int64_t start_time;
+  size_t start_time;
 };
 
 void pushObserverCallbacks() {
