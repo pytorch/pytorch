@@ -267,10 +267,24 @@ def split_const_subgraphs(
             ):
                 break
             later_node = later_node.next
-        assert later_node.op != "root"
-        node.prepend(later_node)
+
+        # The placeholder is in split.graph but not in split.submod_1.graph.
+        # In this case we add the placeholder to submod_1.graph.
+        if later_node.op == "root":
+            with split.submod_1.graph.inserting_before(node):
+                split.submod_1.graph.placeholder(curr_orig_ph_target)
+        else:
+            node.prepend(later_node)
+
         # Note we do not increment node here, as it still may be in the wrong
         # place (we just prepended the ph that should have come before it).
+
+    # There might be more placeholders left in orig_ph_targets.
+    last_placeholder = next(n for n in split.submod_1.graph.nodes if n.target == orig_ph_targets[ph_idx - 1])
+    while ph_idx < len(orig_ph_targets):
+        with split.submod_1.graph.inserting_after(last_placeholder):
+            split.submod_1.graph.placeholder(orig_ph_targets[ph_idx])
+        ph_idx += 1
 
     # split_module currently does not use get_attrs for attrs. Instead it passes
     # them in as args from the parent module, which used get_attrs. Here we set
