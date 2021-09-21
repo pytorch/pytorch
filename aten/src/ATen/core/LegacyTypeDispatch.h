@@ -84,32 +84,11 @@ struct TORCH_API AutoNonVariableTypeMode {
   c10::impl::ExcludeDispatchKeyGuard autograd_guard_;
 };
 
-struct TORCH_API AutoDispatchBelowFunctionalize {
-  AutoDispatchBelowFunctionalize() :
+struct TORCH_API AutoDispatchSkipFunctionalize {
+  AutoDispatchSkipFunctionalize() :
     dispatch_key_guard_(c10::DispatchKeySet(c10::DispatchKey::Functionalize)) {
   }
   c10::impl::ExcludeDispatchKeyGuard dispatch_key_guard_;
-};
-
-/* Note [Propagating strides in the functionalization pass]
- * In order to properly compute stride information, the functionalization pass
- * calls the at::native::{view} reference implementations of view operations in core.
- *
- * We want to call the reference implementation -directly- on the wrapper class though,
- * because it has accurate stride information (and the underlying wrapped tensor might now, e.g. for XLA).
- *
- * If we pass the wrapped tensors directly to at::native::{view} functions without modifying TLS though,
- * those view functions might call other tensor methods, which will re-invoke the dispatcher and cause badness.
- *
- * To avoid that the pass uses this guard, which zeros out all TLS keys except the CPU key.
- */
-struct TORCH_API AutoDispatchDirectlyToNative {
-  AutoDispatchDirectlyToNative() :
-    include_guard_(c10::DispatchKeySet(c10::DispatchKey::CPU)),
-    exclude_guard_(DispatchKeySet(c10::DispatchKeySet::FULL) ^ DispatchKeySet(DispatchKeySet::FULL_AFTER, DispatchKey::EndOfBackendKeys)) {
-  }
-  c10::impl::IncludeDispatchKeyGuard include_guard_;
-  c10::impl::ExcludeDispatchKeyGuard exclude_guard_;
 };
 
 /* Note [AutoDispatchBelowADInplaceOrView]

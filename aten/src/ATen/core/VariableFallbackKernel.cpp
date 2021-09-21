@@ -73,17 +73,17 @@ namespace {
       if (ivalue.isTensor()) {
         at::Tensor t = ivalue.toTensor();
         at::functionalization::impl::sync(t);
-        auto t_new = c10::IValue(at::functionalization::impl::unwrapFunctionalTensor(t));
+        auto t_new = c10::IValue(at::functionalization::impl::from_functional_tensor(t));
         (*stack)[arguments_begin + idx] = t_new;
       } else if (ivalue.isTensorList()) {
         auto tensors = ivalue.toTensorList();
         at::functionalization::impl::sync(tensors);
-        auto t_new = c10::IValue(at::functionalization::impl::unwrapFunctionalTensor(tensors));
+        auto t_new = c10::IValue(at::functionalization::impl::from_functional_tensor(tensors));
         (*stack)[arguments_begin + idx] = t_new;
       }
     }
     {
-      at::AutoDispatchBelowFunctionalize guard;
+      at::AutoDispatchSkipFunctionalize guard;
       op.redispatchBoxed(dispatchKeySet & c10::after_func_keyset, stack);
     }
     const auto num_returns = schema.returns().size();
@@ -94,11 +94,11 @@ namespace {
       const auto& ivalue = returns[idx];
       if (ivalue.isTensor()) {
         at::Tensor t = ivalue.toTensor();
-        auto t_new = c10::IValue(at::functionalization::impl::wrapFunctionalTensor(t));
+        auto t_new = c10::IValue(at::functionalization::impl::to_functional_tensor(t));
         (*stack)[returns_begin + idx] = t_new;
       } else if (ivalue.isTensorList()) {
         auto tensors = ivalue.toTensorList();
-        auto t_new = c10::IValue(at::functionalization::impl::wrapFunctionalTensor(tensors));
+        auto t_new = c10::IValue(at::functionalization::impl::to_functional_tensor(tensors));
         (*stack)[returns_begin + idx] = t_new;
       }
     }

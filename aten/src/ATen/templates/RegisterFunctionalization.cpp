@@ -1,5 +1,6 @@
 #include <ATen/core/LegacyTypeDispatch.h>
 #include <ATen/FunctionalTensorWrapper.h>
+#include <ATen/Functions.h>
 #include <ATen/RedispatchFunctions.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/FunctionalInverses.h>

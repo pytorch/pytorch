@@ -39,24 +39,66 @@ namespace at {
 // See Note [Functionalization: Mutation Removal] for details on mutation removal.
 
 struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
+  // Note that value is not taken by reference: internally, the wrapper will change the value tensor that it points to over time.``:w
   explicit FunctionalTensorWrapper(Tensor value);
+  // Additional constructor to create a FunctionalTensorWrapper directly from an underlying tensor that was created from a view.
+  // For example, the code b = a.view1() will generate a constructor call to FunctionalTensorWrapper(b, a, view1_meta)
+  explicit FunctionalTensorWrapper(Tensor view_value, const FunctionalTensorWrapper* base, functionalization::ViewMeta meta);
 
+  // Get the underlying, actual tensor, that doesn't know anything about functionalization.
   const Tensor& value() const { return value_; };
+  // The concept of "level" is only ever important to functorch; it's exposed here
+  // as more of a hook for functorch to use.
   int64_t level() const { return level_; };
   void set_level(int64_t level) { level_ = level; }
 
-  void sync_(bool force_sync = false);
-  void maybe_add_update();
-  bool is_aliased() const;
+  // Sync's the underlying tensor with its alias, if it's out of date. This involves two steps:
+  // 1) Apply any pending updates/mutations to the alias
+  // 2) Replay the views (if any) to regenerate the current tensor off of the updated alias.
+  void sync_();
+  // Performs step (1) of the sync. This is its own public API because it's needed by view_inplace ops like transpose_.
+  // See Note [Functionalization Pass - Inplace View Ops]
+  void regenerate_from_base();
+  // Performs step (2) of the sync. This is its own public API because it's needed by functorch.
+  // functorch wants to make sure that all input tensors to a functionalized program have been properly synced
+  // so it can properly propagate mutations to inputs.
+  // It can't just call sync_(), because the FunctionalTensorWrapper will look like it has no aliases and sync_ will be a noop.
+  // We use the reference count on storage_ to determine if the wrapper is aliased, and by the time functorch
+  // is ready to propagate updates to inputs, any intermediate views of the input created by the program will have been deallocated.
+  void apply_updates();
+  // Takes the current state of value_ and snapshots it, sending it as a pending update to the alias.
+  void commit_update();
+  // When any tensor is mutated, the tensor increments its alias's "generation".
+  // Separately, each tensor maintains its own "generation" counter, which is used to determine if it's up-to-date with its alias.
+  // The act of syncing a tensor will set a tensor's generation equal to its alias's generation.
   bool is_up_to_date() const;
-  void set_view_meta(const Tensor& other, at::functionalization::ViewMeta meta);
+  // Every FunctionalTensorWrapper contains a vector<ViewMeta> objects describing the series of view ops that ran
+  // to generate the current tensor from the base tensor.
+  // This method is used by inplace-view ops like transpose_.
+  // It appends a ViewMeta to the existing stack, and refreshes the tensor by replaying the views off of the alias.
   void mutate_view_meta(at::functionalization::ViewMeta meta);
 
-  // Describe how to re-use a tensor in the functionalization pass.
+  // The functionalization pass can be used to remove mutations.
+  // It does so by replacing any mutation op with it's corresponding out-of-place op, followed by a call to replace_().
+  // e.g:
+  //
+  // a.add_(1)
+  //
+  // will turn into:
+  //
+  // tmp = a.add(1)
+  // a.replace_(tmp)
+  //
+  // replace_() swaps out the wrapped tensor, value_, with tmp.
   void replace_(const Tensor& other);
 
  private:
   const char* tensorimpl_type_name() const override;
+  // Returns true if this FunctionalTensorWrapper is aliased with any other FunctionalTensorWrapper objects.
+  // During a functionalization pass, if we have `b = a.view()`, then a and b should both report as aliased.
+  bool is_aliased() const;
+  void set_constructor_metadata();
+  functionalization::FunctionalStorageImpl* functional_storage_impl() const;
 
   Tensor value_;
   int64_t level_;
@@ -80,16 +122,16 @@ TORCH_API inline bool isFunctionalTensor(const at::Tensor& tensor) {
   return tensor.unsafeGetTensorImpl()->key_set().has(c10::DispatchKey::Functionalize);
 }
 
-TORCH_API Tensor wrapFunctionalTensor(const Tensor& tensor);
-TORCH_API TensorList wrapFunctionalTensor(const c10::List<Tensor>& t_list);
-TORCH_API std::vector<Tensor> wrapFunctionalTensor(const std::vector<Tensor>& t_list);
-TORCH_API TensorList wrapFunctionalTensor(const TensorList& t_list);
+TORCH_API Tensor to_functional_tensor(const Tensor& tensor);
+TORCH_API TensorList to_functional_tensor(const c10::List<Tensor>& t_list);
+TORCH_API std::vector<Tensor> to_functional_tensor(const std::vector<Tensor>& t_list);
+TORCH_API TensorList to_functional_tensor(const TensorList& t_list);
 
-TORCH_API Tensor unwrapFunctionalTensor(const Tensor& tensor);
-TORCH_API c10::optional<Tensor> unwrapFunctionalTensor(const c10::optional<Tensor>& t);
-TORCH_API c10::List<Tensor> unwrapFunctionalTensor(const c10::List<Tensor> t_list);
-TORCH_API c10::List<c10::optional<Tensor>> unwrapFunctionalTensor(const c10::List<c10::optional<Tensor>> t_list);
-TORCH_API TensorList unwrapFunctionalTensor(const TensorList& tensors);
+TORCH_API Tensor from_functional_tensor(const Tensor& tensor);
+TORCH_API c10::optional<Tensor> from_functional_tensor(const c10::optional<Tensor>& t);
+TORCH_API c10::List<Tensor> from_functional_tensor(const c10::List<Tensor> t_list);
+TORCH_API c10::List<c10::optional<Tensor>> from_functional_tensor(const c10::List<c10::optional<Tensor>> t_list);
+TORCH_API TensorList from_functional_tensor(const TensorList& tensors);
 
 TORCH_API void sync(const at::Tensor& t);
 TORCH_API void sync(const c10::optional<Tensor>& t);
@@ -97,11 +139,11 @@ TORCH_API void sync(const c10::List<Tensor> t_list);
 TORCH_API void sync(const at::TensorList t_list);
 TORCH_API void sync(const c10::List<c10::optional<Tensor>> t_list);
 
-void maybe_add_update(Tensor& self);
+void commit_update(Tensor& self);
 
-void set_view_meta(const Tensor& out, const Tensor& t, functionalization::ViewMeta meta, int64_t out_idx = 0);
-void set_view_meta(const c10::List<Tensor> outs, const Tensor& t, functionalization::ViewMeta meta);
-void set_view_meta(const std::vector<Tensor> outs, const Tensor& t, functionalization::ViewMeta meta);
+Tensor create_functional_tensor_with_view_meta(const Tensor& view_to_wrap, const Tensor& base, functionalization::ViewMeta meta, int64_t out_idx = 0);
+std::vector<Tensor> create_functional_tensor_with_view_meta(const c10::List<Tensor>& view_to_wrap, const Tensor& base, functionalization::ViewMeta meta);
+std::vector<Tensor> create_functional_tensor_with_view_meta(const std::vector<Tensor>& view_to_wrap, const Tensor& base, functionalization::ViewMeta meta);
 
 void mutate_view_meta(const Tensor& self, functionalization::ViewMeta meta);
 
