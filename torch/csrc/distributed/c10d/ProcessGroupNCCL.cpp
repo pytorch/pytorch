@@ -532,7 +532,6 @@ void ProcessGroupNCCL::runHealthCheck() {
     std::mutex healthCheckMutex;
     std::condition_variable healthCheckCv;
     bool healthCheckSuccess = false;
-    std::atomic<bool> healthCheckExceptionSet{false};
     std::exception_ptr healthCheckException;
   };
 
@@ -558,7 +557,6 @@ void ProcessGroupNCCL::runHealthCheck() {
       // TODO: there does not appear to be a way to propagate the type of e like
       // python, so just using runtime_error here.
       healthCheckData.healthCheckException = std::make_exception_ptr(std::runtime_error(c10::str("Health check got exception while initializing + destroying communicators: ", e.what())));
-      healthCheckData.healthCheckExceptionSet.store(true);
       // Unblock waiting main thread which will report exception.
       healthCheckData.healthCheckCv.notify_one();
     } // Unknown exceptions will just cause the program to terminate.
@@ -574,8 +572,7 @@ void ProcessGroupNCCL::runHealthCheck() {
   healthCheckData.healthCheckCv.wait_for(
       lock, options_->timeout, [&healthCheckData]() { return healthCheckData.healthCheckSuccess; });
 
-  if (healthCheckData.healthCheckExceptionSet) {
-    TORCH_INTERNAL_ASSERT(healthCheckData.healthCheckException, "Expected health check exception to be set!");
+  if (healthCheckData.healthCheckException) {
     std::rethrow_exception(healthCheckData.healthCheckException);
   }
   // If there is no exception, the likely culprit is a timeout/hang which is how

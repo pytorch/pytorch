@@ -101,10 +101,14 @@ TORCH_META_FUNC(gather)
     at::assert_no_partial_overlap(result, index);
   }
 
-  TORCH_CHECK(
-    index.scalar_type() == at::ScalarType::Long,
-    "gather", "(): Expected dtype int64 for index"
-  );
+  auto is_index_empty = index.numel() == 0;
+  if (!is_index_empty) {
+    TORCH_CHECK(
+      index.scalar_type() == at::ScalarType::Long,
+      "gather", "(): Expected dtype int64 for index"
+    );
+  }
+  if (is_index_empty) return;
   at::native::gather_shape_check(self, wrapped_dim, index);
 }
 
