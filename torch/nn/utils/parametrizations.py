@@ -68,7 +68,7 @@ class _Orthogonal(Module):
         n, k = X.size(-2), X.size(-1)
         transposed = n < k
         if transposed:
-            X = X.transpose(-2, -1)
+            X = X.mT
             n, k = k, n
         # Here n > k and X is a tall matrix
         if self.orthogonal_map == _OrthMaps.matrix_exp or self.orthogonal_map == _OrthMaps.cayley:
@@ -101,7 +101,7 @@ class _Orthogonal(Module):
         if hasattr(self, "base"):
             Q = self.base @ Q
         if transposed:
-            Q = Q.transpose(-2, -1)
+            Q = Q.mT
         return Q
 
     @torch.autograd.no_grad()
@@ -114,7 +114,7 @@ class _Orthogonal(Module):
         n, k = Q.size(-2), Q.size(-1)
         transpose = n < k
         if transpose:
-            Q = Q.transpose(-2, -1)
+            Q = Q.mT
             n, k = k, n
 
         # We always make sure to always copy Q in every path
@@ -144,7 +144,7 @@ class _Orthogonal(Module):
             # Equality with zero is ok because LAPACK returns exactly zero when it does not want
             # to use a particular reflection
             A.diagonal(dim1=-2, dim2=-1)[tau == 0.] *= -1
-            return A.transpose(-2, -1) if transpose else A
+            return A.mT if transpose else A
         else:
             if n == k:
                 # We check whether Q is orthogonal

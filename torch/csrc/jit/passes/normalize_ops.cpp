@@ -102,8 +102,10 @@ const std::unordered_map<Symbol, Symbol>& getOperatorAliasMap() {
       {aten::divide_, aten::div_},
       {aten::multiply, aten::mul},
       {aten::multiply_, aten::mul_},
+      {aten::linalg_matmul, aten::matmul},
       {aten::true_divide, aten::div},
       {aten::true_divide_, aten::div_},
+      {aten::concat, aten::cat},
       {aten::row_stack, aten::vstack},
       {aten::swapdims, aten::transpose},
       {aten::swapdims_, aten::transpose_},
@@ -127,9 +129,11 @@ const std::unordered_map<Symbol, Symbol>& getOperatorAliasMap() {
       {aten::special_xlogy, aten::xlogy},
       {aten::special_log_softmax, aten::log_softmax},
       {aten::orgqr, aten::linalg_householder_product},
-      {aten::adjoint, aten::mH},
+      {aten::mH, aten::adjoint},
       {aten::special_multigammaln, aten::mvlgamma},
       {aten::special_polygamma, aten::polygamma},
+      {aten::special_gammainc, aten::igamma},
+      {aten::special_gammaincc, aten::igammac},
       {aten::special_gammaln, aten::lgamma}};
   return alias_map;
 }

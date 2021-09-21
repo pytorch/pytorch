@@ -320,7 +320,7 @@ def _kl_lowrankmultivariatenormal_lowrankmultivariatenormal(p, q):
     # Expands term2 according to
     # inv(qcov) @ pcov = [inv(qD) - inv(qD) @ qW @ inv(qC) @ qW.T @ inv(qD)] @ (pW @ pW.T + pD)
     #                  = [inv(qD) - A.T @ A] @ (pD + pW @ pW.T)
-    qWt_qDinv = (q._unbroadcasted_cov_factor.transpose(-1, -2) /
+    qWt_qDinv = (q._unbroadcasted_cov_factor.mT /
                  q._unbroadcasted_cov_diag.unsqueeze(-2))
     A = torch.triangular_solve(qWt_qDinv, q._capacitance_tril, upper=False)[0]
     term21 = (p._unbroadcasted_cov_diag / q._unbroadcasted_cov_diag).sum(-1)
@@ -347,7 +347,7 @@ def _kl_multivariatenormal_lowrankmultivariatenormal(p, q):
     # Expands term2 according to
     # inv(qcov) @ pcov = [inv(qD) - inv(qD) @ qW @ inv(qC) @ qW.T @ inv(qD)] @ p_tril @ p_tril.T
     #                  = [inv(qD) - A.T @ A] @ p_tril @ p_tril.T
-    qWt_qDinv = (q._unbroadcasted_cov_factor.transpose(-1, -2) /
+    qWt_qDinv = (q._unbroadcasted_cov_factor.mT /
                  q._unbroadcasted_cov_diag.unsqueeze(-2))
     A = torch.triangular_solve(qWt_qDinv, q._capacitance_tril, upper=False)[0]
     term21 = _batch_trace_XXT(p._unbroadcasted_scale_tril *

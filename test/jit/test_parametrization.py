@@ -15,7 +15,7 @@ class TestParametrization(JitTestCase):
     # Define some parametrization
     class Symmetric(nn.Module):
         def forward(self, X):
-            return X.triu() + X.triu(1).transpose(-1, -2)
+            return X.triu() + X.triu(1).mT
 
     def test_traceable(self):
         r"""Test the jit scripting and tracing of a parametrized model."""

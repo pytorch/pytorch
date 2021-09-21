@@ -495,6 +495,7 @@ Tensor class reference
     Tensor.max
     Tensor.maximum
     Tensor.mean
+    Tensor.nanmean
     Tensor.median
     Tensor.nanmedian
     Tensor.min
