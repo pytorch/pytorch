@@ -119,6 +119,7 @@ with
 
 ```bash
 python setup.py develop
+```
 
 This mode will symlink the Python files from the current local source
 tree into the Python install.  Hence, if you modify a Python file, you
