@@ -2139,15 +2139,35 @@ def all_gather_coalesced(
     ]
 
     if group is None:
-        default_pg = _get_default_group()
-        work = default_pg.allgather_coalesced(output_tensor_lists, input_tensor_list)
-    else:
-        work = group.allgather_coalesced(output_tensor_lists, input_tensor_list)
+        group = _get_default_group()
+    
+    #work = group.allgather_coalesced(output_tensor_lists, input_tensor_list)
+    num_proc = len(output_tensor_lists)
+    
+    fut_list = []
+    temp_out = [[] for _ in range(len(input_tensor_list))]
+    
+    def copy_values_to_output_tensor_lists(fut_param):
+        vals = fut_param.value()
+        print(f"first:{vals} - {fut_param.done()}")
+        print(f"second: {vals[0].value()}")
+    
+    for idx, tensor in enumerate(input_tensor_list):
+        temp_out_list = [torch.zeros(tensor.shape) for _ in range(num_proc)]
+        temp_out[idx] = temp_out_list
+        work = group.allgather([temp_out[idx]], [tensor])
+        fut = work.get_future()
+        fut_list.append(fut)
 
+    res_fut = torch.futures.collect_all(fut_list)
+    res_fut.add_done_callback(copy_values_to_output_tensor_lists)
     if async_op:
-        return work.get_future()
+        return res_fut
     else:
-        work.wait()
+        res_fut.wait()
+        
+
+        
 
 
 def _validate_output_list_for_rank(my_rank, dst, gather_list):
