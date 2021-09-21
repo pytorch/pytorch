@@ -146,8 +146,9 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      Operator(
-         // TODO: changing this node to be schematized and to use aliasAnalysisFromSchema
-         // doesn't work and produces zero tensors eventually for some reason
+         // TODO: changing this node to be schematized and to use
+         // aliasAnalysisFromSchema doesn't work and produces zero tensors
+         // eventually for some reason
          prim::AllocateTensor, // prim::AllocateTensor(Storage slab) -> Tensor
          [](const Node* node) -> Operation {
            int64_t size = node->i(attr::size);
@@ -158,11 +159,13 @@ RegisterOperators reg(
              pop(stack, slab);
              uint8_t* start = static_cast<uint8_t*>(slab.data());
              void* src = static_cast<void*>(start + offset);
-             at::Tensor temp_tensor = at::for_blob(src, *type->sizes().concrete_sizes())
-                                          .strides(*type->strides().concrete_sizes())
-                                          .options( at::TensorOptions(*type->device()).dtype(*type->scalarType()))
-                                          .deleter(nullptr)
-                                          .make_tensor();
+             at::Tensor temp_tensor =
+                 at::for_blob(src, *type->sizes().concrete_sizes())
+                     .strides(*type->strides().concrete_sizes())
+                     .options(at::TensorOptions(*type->device())
+                                  .dtype(*type->scalarType()))
+                     .deleter(nullptr)
+                     .make_tensor();
              temp_tensor.storage().set_nbytes(size);
              push(stack, std::move(temp_tensor));
            };
@@ -171,10 +174,11 @@ RegisterOperators reg(
      Operator(
          "prim::ReleaseSlab(Storage slab) -> ()",
          [](Stack* stack) {
-           // we "use" slab by feeding it to ReleaseSlab so that it lives as long
-           // as the end of the last tensor, but we don't actually do anything with it here because
-           // StorageImpl will take care of freeing the memory at the end of this scope.
-           // Conceivably we could perform some checks etc here.
+           // we "use" slab by feeding it to ReleaseSlab so that it lives as
+           // long as the end of the last tensor, but we don't actually do
+           // anything with it here because StorageImpl will take care of
+           // freeing the memory at the end of this scope. Conceivably we could
+           // perform some checks etc here.
            auto slab = pop(stack).toStorage();
          },
          aliasAnalysisFromSchema()),
