@@ -8,6 +8,9 @@ from typing import Dict, Any, List, Union
 _lambda_client = None
 
 
+IS_GHA = os.getenv("IS_GHA", "0") == "1"
+
+
 def sprint(*args: Any) -> None:
     print("[scribe]", *args)
 
@@ -24,9 +27,7 @@ def aws_lambda() -> Any:
 
 
 def invoke_lambda(name: str, payload: Any) -> Any:
-    res = aws_lambda().invoke(
-        FunctionName=name, Payload=json.dumps(payload).encode()
-    )
+    res = aws_lambda().invoke(FunctionName=name, Payload=json.dumps(payload).encode())
     payload = str(res["Payload"].read().decode())
     if res.get("FunctionError"):
         raise Exception(payload)
@@ -64,6 +65,10 @@ def _send_to_scribe_via_http(access_token: str, logs: str) -> str:
 
 
 def invoke_rds(events: List[Dict[str, Any]]) -> Any:
+    if not IS_GHA:
+        sprint(f"Not invoking RDS lambda outside GitHub Actions:\n{events}")
+        return
+
     return invoke_lambda("rds-proxy", events)
 
 
@@ -73,11 +78,10 @@ def register_rds_schema(table_name: str, schema: Dict[str, str]) -> None:
         "ref": "string",
         "branch": "string",
         "workflow_id": "string",
+        "build_environment": "string",
     }
 
-    event = [
-        {"create_table": {"table_name": table_name, "fields": {**schema, **base}}}
-    ]
+    event = [{"create_table": {"table_name": table_name, "fields": {**schema, **base}}}]
 
     invoke_rds(event)
 
@@ -122,16 +126,22 @@ def rds_saved_query(query_names: Union[str, List[str]]) -> Any:
 def rds_write(
     table_name: str, values_list: List[Dict[str, Any]], only_on_master: bool = True
 ) -> None:
-    sprint("Writing for ", os.getenv("CIRCLE_PR_NUMBER"))
-    if not only_on_master and os.getenv("CIRCLE_PR_NUMBER"):
+    sprint("Writing for", os.getenv("CIRCLE_PR_NUMBER"))
+    is_master = os.getenv("CIRCLE_PR_NUMBER", "").strip() == ""
+    if only_on_master and not is_master:
         sprint("Skipping RDS write on PR")
         return
 
+    pr = os.getenv("CIRCLE_PR_NUMBER", None)
+    if pr is not None and pr.strip() == "":
+        pr = None
+
     base = {
-        "pr": os.getenv("CIRCLE_PR_NUMBER"),
+        "pr": pr,
         "ref": os.getenv("CIRCLE_SHA1"),
         "branch": os.getenv("CIRCLE_BRANCH"),
-        "workflow_id": os.getenv("CIRCLE_WORKFLOW_ID"),
+        "workflow_id": os.getenv("GITHUB_WORKFLOW_RUN_ID"),
+        "build_environment": os.environ.get("BUILD_ENVIRONMENT", "").split()[0],
     }
 
     events = []
@@ -140,5 +150,5 @@ def rds_write(
             {"write": {"table_name": table_name, "values": {**values, **base}}}
         )
 
-    print("Wrote stats for", table_name)
+    sprint("Wrote stats for", table_name)
     invoke_rds(events)
