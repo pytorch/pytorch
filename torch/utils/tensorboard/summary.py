@@ -518,7 +518,7 @@ def audio(tag, tensor, sample_rate=44100):
     wave_write.setnchannels(1)
     wave_write.setsampwidth(2)
     wave_write.setframerate(sample_rate)
-    wave_write.writeframes(tensor.data)
+    wave_write.writeframes(tensor.detach())
     wave_write.close()
     audio_string = fio.getvalue()
     fio.close()
