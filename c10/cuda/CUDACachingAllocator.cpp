@@ -324,6 +324,10 @@ class CachingAllocatorConfig {
     return instance().m_max_split_size;
   }
 
+  static const std::string& allocator_backend() {
+    return instance().m_allocator_backend;
+  }
+
  private:
   static std::once_flag s_flag;
   static CachingAllocatorConfig* s_instance;
@@ -337,8 +341,10 @@ class CachingAllocatorConfig {
   }
 
   CachingAllocatorConfig()
-      : m_max_split_size(std::numeric_limits<size_t>::max()) {}
+      : m_max_split_size(std::numeric_limits<size_t>::max()),
+        m_allocator_backend("native") {}
   size_t m_max_split_size;
+  std::string m_allocator_backend;
 
   void parseArgs() {
     const char* val = getenv("PYTORCH_CUDA_ALLOC_CONF");
@@ -368,6 +374,12 @@ class CachingAllocatorConfig {
             val2 = std::min(
                 val2, (std::numeric_limits<size_t>::max() / (1024 * 1024)));
             m_max_split_size = val2 * 1024 * 1024;
+          } else if (kv[0].compare("backend") == 0) {
+            TORCH_CHECK(((kv[1].compare("native") == 0) ||
+                         (kv[1].compare("cudaMallocAsync") == 0)),
+                        "Unknown allocator backend, "
+                        "options are native and cudaMallocAsync");
+            m_allocator_backend = kv[1];
           } else {
             TORCH_CHECK(false, "Unrecognized CachingAllocator option: ", kv[0]);
           }
