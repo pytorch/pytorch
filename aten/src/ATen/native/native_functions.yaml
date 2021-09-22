@@ -6690,12 +6690,12 @@
   dispatch:
     CPU, CUDA: triangular_solve
 
-- func: linalg_solve_triangular.out(Tensor self, Tensor B, *, bool left=True, bool upper=True, bool unitriangular=False, Tensor(a!) out) -> Tensor(a!)
+- func: linalg_solve_triangular.out(Tensor self, Tensor B, *, bool upper, bool left=True, bool unitriangular=False, Tensor(a!) out) -> Tensor(a!)
   python_module: linalg
   dispatch:
     CPU, CUDA: linalg_solve_triangular_out
 
-- func: linalg_solve_triangular(Tensor self, Tensor B, *, bool left=True, bool upper=True, bool unitriangular=False) -> Tensor
+- func: linalg_solve_triangular(Tensor self, Tensor B, *, bool upper, bool left=True, bool unitriangular=False) -> Tensor
   python_module: linalg
   variants: method, function
   dispatch:

@@ -3856,8 +3856,8 @@ Solves the matrix equation AX = B for A triangular.
 Tensor& linalg_solve_triangular_out(
     const Tensor& A,
     const Tensor& B,
-    bool left,
     bool upper,
+    bool left,
     bool unitriangular,
     Tensor& out) {
   checkInputsSolver(A, B, out, left, "linalg.solve_triangular");
@@ -3998,11 +3998,11 @@ Tensor& linalg_solve_triangular_out(
 Tensor linalg_solve_triangular(
     const Tensor& A,
     const Tensor& B,
-    bool left,
     bool upper,
+    bool left,
     bool unitriangular) {
   Tensor out = at::empty({0}, A.options());
-  linalg_solve_triangular_out(A, B, left, upper, unitriangular, out);
+  linalg_solve_triangular_out(A, B, upper, left, unitriangular, out);
   return out;
 }
 

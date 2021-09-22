@@ -3674,7 +3674,7 @@ def sample_inputs_linalg_solve_triangular(op_info, device, dtype, requires_grad=
                         A.tril_()
                 A.requires_grad_(grad_A)
                 B.requires_grad_(grad_B)
-                yield SampleInput(A, args=(B,), kwargs={"left": left, "upper": upper, "unitriangular": uni})
+                yield SampleInput(A, args=(B,), kwargs={"upper": upper, "left": left, "unitriangular": uni})
 
     return list(gen_inputs())
 
