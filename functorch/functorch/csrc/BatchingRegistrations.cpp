@@ -448,22 +448,6 @@ Tensor movedim_batching_rule(const Tensor& self, IntArrayRef source, IntArrayRef
   return self_physical.getPhysicalToLogicalMap().apply(result);
 }
 
-Tensor reshape_batching_rule(const Tensor& self, IntArrayRef shape) {
-  if (!participatesInCurrentLevel(self)) {
-    c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
-    return at::reshape(self, shape);
-  }
-  auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
-  auto shape_physical = self_physical.getPhysicalShape(shape);
-  auto result = self_physical.tensor().reshape(shape_physical);
-  return self_physical.getPhysicalToLogicalMap().apply(result);
-}
-
-Tensor _reshape_alias_batching_rule(const Tensor& self, IntArrayRef shape, IntArrayRef stride) {
-  (void)stride;
-  return reshape_batching_rule(self, shape);
-}
-
 std::vector<Tensor> split_batching_rule(const Tensor& self, int64_t split_size, int64_t dim) {
   if (!participatesInCurrentLevel(self)) {
     c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -1062,8 +1046,6 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   // want to support the other variant yet bc it isn't documented...
   m.impl("numpy_T", native::numpy_T); // composite wrt autograd
   m.impl("permute", permute_batching_rule);
-  m.impl("reshape", reshape_batching_rule);
-  m.impl("_reshape_alias", _reshape_alias_batching_rule);
   m.impl("reshape_as", native::reshape_as); // composite wrt autograd
   m.impl("slice.Tensor", slice_batching_rule);
   m.impl("split.Tensor", split_batching_rule);
