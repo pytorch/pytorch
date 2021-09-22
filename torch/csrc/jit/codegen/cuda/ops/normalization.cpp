@@ -509,7 +509,8 @@ ForwardNormResult instance_norm(
       auto var_hat = mul(running_var, rev_momentum);
       auto new_var_hat = add(var_hat, current_var_hat);
 
-      auto new_var_sum = sum(new_var_hat, {kBatchDim});
+      // NS: static_cast to workaround VC++ error, see https://godbolt.org/z/6Prd77xYs
+      auto new_var_sum = sum(new_var_hat, {static_cast<int>(kBatchDim)});
       auto new_var_channels_only = div(new_var_sum, B);
       fusion->addOutput(new_var_channels_only);
       fusion->aliasOutputToInput(new_var_channels_only, running_var);
