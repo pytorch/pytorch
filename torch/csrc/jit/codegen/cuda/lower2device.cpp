@@ -247,10 +247,10 @@ class KIRCleaner : public kir::MutableIrVisitor {
     // conditional and move the exprs in the else block to the then
     // block.
     if (then_nop && !else_nop) {
-      kir::IrBuilder ir_builder(GpuLower::current()->kernel());
+      kir::SimplifyingIrBuilder ir_builder(GpuLower::current()->kernel());
       kir::Bool* pred = ite->predicate()->value();
-      kir::Bool* neg_pred = ir_builder.negExpr(pred)->as<kir::Bool>();
-      ite->predicate()->setValue(neg_pred);
+      kir::Bool* not_pred = ir_builder.notExpr(pred)->as<kir::Bool>();
+      ite->predicate()->setValue(not_pred);
       for (auto expr : ite->elseBody().exprs()) {
         ite->thenBody().push_back(expr);
       }

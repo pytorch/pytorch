@@ -17,7 +17,7 @@ namespace cuda {
 
 namespace {
 
-kir::Val* getPredicatePerParallelType(
+kir::Bool* getPredicatePerParallelType(
     ParallelType pt,
     const ThreadPredicateMap::PredicateInfo& pred_info) {
   kir::SimplifyingIrBuilder ir_builder(GpuLower::current()->kernel());
@@ -28,8 +28,6 @@ kir::Val* getPredicatePerParallelType(
   if (pt_dim == nullptr || pt_dim->isOneInt()) {
     return ir_builder.trueVal();
   }
-
-  kir::Val* pred = ir_builder.trueVal();
 
   // When BID needs to be predicated, it means either BID == 1, or if
   // there's a corresponding source_map entry, that means it's an
@@ -43,21 +41,32 @@ kir::Val* getPredicatePerParallelType(
         pt);
     const auto& source = source_it->second;
     TORCH_INTERNAL_ASSERT(!source.empty(), "No predicate source found");
+    kir::Val* pred = ir_builder.trueVal();
     for (auto src : source) {
       auto flag_name = kir::GridReduction::getPredicateFlagName(src);
       auto src_pred =
           ir_builder.create<kir::NamedScalar>(flag_name, DataType::Bool);
       pred = ir_builder.andExpr(pred, src_pred);
     }
-    return pred;
+    // pred can be just a NamedScalar because of the simplification by
+    // the simplifying IR build. To return Bool always, create a set
+    // op to Bool and return its output.
+    if (pred->isA<kir::NamedScalar>()) {
+      return ir_builder.setExpr(pred)->as<kir::Bool>();
+    } else {
+      return pred->as<kir::Bool>();
+    }
   }
 
   // By default, only thread/block of index 0 executes the computation
-  return ir_builder.eqExpr(
-      kir::NamedScalar::getParallelIndex(pt), ir_builder.create<kir::Int>(0));
+  return ir_builder
+      .eqExpr(
+          kir::NamedScalar::getParallelIndex(pt),
+          ir_builder.create<kir::Int>(0))
+      ->as<kir::Bool>();
 }
 
-kir::Bool* getPredicateFromParallelTypes(
+kir::Bool* getPredicateFromPredicateInfo(
     const ThreadPredicateMap::PredicateInfo& pred_info) {
   kir::SimplifyingIrBuilder ir_builder(GpuLower::current()->kernel());
 
@@ -358,7 +367,7 @@ void ThreadPredicateMap::insert(
 kir::Bool* ThreadPredicateMap::getPredicate(const TensorView* tv) const {
   TORCH_INTERNAL_ASSERT(find(tv) != end(), "Couldn't find ", tv);
   auto pred_info = getPredicateInfo(tv);
-  return getPredicateFromParallelTypes(pred_info);
+  return getPredicateFromPredicateInfo(pred_info);
 }
 
 ParallelTypeBitmap ThreadPredicateMap::getParallelBroadcastDomains(

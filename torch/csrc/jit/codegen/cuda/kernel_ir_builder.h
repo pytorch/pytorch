@@ -51,6 +51,8 @@ class TORCH_CUDA_CU_API IrBuilder {
 
   // Unary operations
   Val* negExpr(Val* val);
+  Val* notExpr(Val* val);
+  Val* setExpr(Val* val);
   Val* setExprNamedScalar(const std::string& name, Val* val);
   Val* addressExprNamedScalar(const std::string& name, Val* val);
 
@@ -112,15 +114,13 @@ class TORCH_CUDA_CU_API SimplifyingIrBuilder : public IrBuilder {
  public:
   explicit SimplifyingIrBuilder(Kernel* kernel) : IrBuilder(kernel) {}
 
-  //! Same as IrBuilder::addExpr except:
-  //! - Performs possible calculations as much as possible
-  //! - When nullptr arguments are given, they are handled
-  //!   gracefully. When only one of them is nullptr, it is just
-  //!   ignored.
+  Val* negExpr(Val* val);
+  Val* notExpr(Val* val);
+
   Val* addExpr(Int* lhs, Int::ScalarType rhs);
   Val* addExpr(Int* lhs, Int* rhs);
   Val* addExpr(Val* lhs, Val* rhs);
-
+  Val* subExpr(Val* lhs, Val* rhs);
   Val* andExpr(Val* lhs, Val* rhs);
 };
 
