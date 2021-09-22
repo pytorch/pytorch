@@ -15,7 +15,7 @@ namespace native {
 namespace {
 
 template <typename scalar_t, typename accscalar_t>
-C10_LAUNCH_BOUNDS_1(1024)
+C10_LAUNCH_BOUNDS_1(512)
 __global__ void upsample_linear1d_out_frame(
     const int n,
     const accscalar_t rwidth,
@@ -62,7 +62,7 @@ __global__ void upsample_linear1d_out_frame(
 
 // Backward (adjoint) operation 1 <- 2 (accumulates)
 template <typename scalar_t, typename accscalar_t>
-C10_LAUNCH_BOUNDS_1(1024)
+C10_LAUNCH_BOUNDS_1(512)
 __global__ void upsample_linear1d_out_frame_backward(
     const int n,
     const accscalar_t rwidth,
@@ -100,8 +100,8 @@ __global__ void upsample_linear1d_out_frame_backward(
     for (int n = 0; n < batchsize; n++) {
       for (int c = 0; c < channels; ++c) {
         const scalar_t d2val = odata[n][c][w2];
-        gpuAtomicAdd(&idata[n][c][w1], static_cast<scalar_t>(w0lambda * d2val));
-        gpuAtomicAdd(
+        gpuAtomicAddNoReturn(&idata[n][c][w1], static_cast<scalar_t>(w0lambda * d2val));
+        gpuAtomicAddNoReturn(
             &idata[n][c][w1 + w1p], static_cast<scalar_t>(w1lambda * d2val));
       }
     }
@@ -128,8 +128,8 @@ static void upsample_linear1d_out_cuda_template(
   AT_ASSERT(input_width > 0 && output_width > 0);
 
   const int num_kernels = output_width;
-  const int num_threads =
-      at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock;
+  const int num_threads = 512;
+      //at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock;
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(
@@ -173,8 +173,8 @@ static void upsample_linear1d_backward_out_cuda_template(
   grad_input.zero_();
 
   const int num_kernels = output_width;
-  const int num_threads =
-      at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock;
+  const int num_threads = 512;
+      //at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock;
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(

@@ -120,6 +120,8 @@ class SpectralNorm:
 
         fn = SpectralNorm(name, n_power_iterations, dim, eps)
         weight = module._parameters[name]
+        if weight is None:
+            raise ValueError(f'`SpectralNorm` cannot be applied as parameter `{name}` is None')
         if isinstance(weight, torch.nn.parameter.UninitializedParameter):
             raise ValueError(
                 'The module passed to `SpectralNorm` can\'t have uninitialized parameters. '

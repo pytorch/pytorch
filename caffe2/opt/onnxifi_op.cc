@@ -2,6 +2,8 @@
 #include "caffe2/operators/slice_op.h"
 #include "caffe2/opt/bound_shape_inferencer.h"
 
+#include <c10/util/irange.h>
+
 namespace caffe2 {
 
 namespace {
@@ -65,8 +67,7 @@ void setInputTensorDescriptorTypeAndBuffer(
 template <typename T>
 void adjustQuantizedOffsetImpl(Tensor* t, uint8_t offset) {
   auto* data = t->mutable_data<T>();
-  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-  for (size_t i = 0; i < t->numel(); ++i) {
+  for (auto i: c10::irange(t->numel())) {
     data[i] -= offset;
   }
 }
@@ -280,8 +281,7 @@ details::OutputReshapeInfo OnnxifiOp<CPUContext>::initOutputReshapeInfo()
   output_reshape_info.begins.reserve(output_names_.size());
   output_reshape_info.ends.reserve(output_names_.size());
   output_reshape_info.fast_path.reserve(output_names_.size());
-  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-  for (int i = 0; i < output_names_.size(); ++i) {
+  for (auto i: c10::irange(output_names_.size())) {
     const auto it = output_shape_hints_.find(i);
     CAFFE_ENFORCE(
         it != output_shape_hints_.end(),
@@ -319,8 +319,7 @@ void OnnxifiOp<CPUContext>::fillOutputReshapeInfo(
   end.Resize(dim_size);
   int32_t* end_ptr = end.template mutable_data<int32_t>();
   int32_t mismatch = 0;
-  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-  for (int j = 0; j < dim_size; ++j) {
+  for (auto j: c10::irange(dim_size)) {
     CAFFE_ENFORCE_GE(
         max_shape[j],
         real_shape[j],
@@ -334,8 +333,7 @@ void OnnxifiOp<CPUContext>::fillOutputReshapeInfo(
         real_shape[j],
         ")");
     begin_ptr[j] = 0;
-    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-    if (max_shape[j] > real_shape[j]) {
+    if (max_shape[j] > static_cast<uint64_t>(real_shape[j])) {
       end_ptr[j] = real_shape[j];
       mismatch += j;
     } else {
@@ -636,8 +634,7 @@ string mapOnnxStatusToString(onnxStatus status) {
 template <>
 bool OnnxifiOp<CPUContext>::RunOnDevice() {
   CAFFE_ENFORCE_EQ(input_desc_.size(), InputSize());
-  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-  for (unsigned i = 0U; i < InputSize(); ++i) {
+  for (auto i: c10::irange(InputSize())) {
     auto& tensor_descriptor = input_desc_[i];
     tensor_descriptor.tag = ONNXIFI_TAG_TENSOR_DESCRIPTOR_V1;
     tensor_descriptor.memoryType = ONNXIFI_MEMORY_TYPE_CPU;
@@ -667,9 +664,7 @@ bool OnnxifiOp<CPUContext>::RunOnDevice() {
 
   CAFFE_ENFORCE_EQ(output_desc_.size(), OutputSize());
   c10::SmallVector<int64_t, 4> tensor_dims_int64;
-  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-  for (unsigned i = 0U; i < OutputSize(); ++i) {
-    // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
+  for (auto i: c10::irange(OutputSize())) {
     setOutputShapeAndType(i, tensor_dims_int64);
   }
   bool ext_supported = false;
@@ -805,10 +800,8 @@ bool OnnxifiOp<CPUContext>::RunOnDevice() {
   }
 
   if (adjust_quantized_offset_) {
-    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-    for (unsigned i = 0U; i < OutputSize(); ++i) {
+    for (auto i: c10::irange(OutputSize())) {
       if (quantized_outputs_[i]) {
-        // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
         auto* int8_tensor = this->template Output<int8::Int8TensorCPU>(i);
         int8_tensor->zero_point += adjust_quantized_offset_;
         adjustQuantizedOffset(&int8_tensor->t, adjust_quantized_offset_);
@@ -823,9 +816,7 @@ bool OnnxifiOp<CPUContext>::RunOnDevice() {
   return true;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(Onnxifi, OnnxifiOp<CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Onnxifi)
     .NumInputs(0, INT_MAX)
     .NumOutputs(0, INT_MAX)

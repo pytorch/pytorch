@@ -1,6 +1,7 @@
 import contextlib
 import io
 import logging
+import os
 import pickle
 import time
 import warnings
@@ -9,28 +10,31 @@ from typing import Dict, Optional, Tuple, Union
 
 import torch
 from torch._C._distributed_c10d import (
-    AllreduceOptions,
     AllreduceCoalescedOptions,
+    AllreduceOptions,
     AllToAllOptions,
     BarrierOptions,
     BroadcastOptions,
     GatherOptions,
     PrefixStore,
     ProcessGroup,
-    ReduceOptions,
     ReduceOp,
+    ReduceOptions,
     ReduceScatterOptions,
     ScatterOptions,
     Store,
+    _DistributedDebugLevel,
+    _get_debug_mode,
 )
-from torch._C._distributed_c10d import _get_debug_mode, _DistributedDebugLevel
 from torch._six import string_classes
+
+from .constants import default_pg_timeout
+from .rendezvous import register_rendezvous_handler, rendezvous  # noqa: F401
+
 
 # This module is wildcard imported from torch.distributed.
 # TODO: specify __all__
 
-from .constants import default_pg_timeout
-from .rendezvous import rendezvous, register_rendezvous_handler  # noqa: F401
 
 _MPI_AVAILABLE = True
 _NCCL_AVAILABLE = True
@@ -244,7 +248,9 @@ def _store_based_barrier(rank, store, timeout):
                 )
             )
 
-    logger.info(f"Rank {rank}: Completed store-based barrier for key:{store_key} with {world_size} nodes.")
+    logger.info(
+        f"Rank {rank}: Completed store-based barrier for key:{store_key} with {world_size} nodes."
+    )
 
 
 def _rank_not_in_group(group: ProcessGroup):
@@ -382,6 +388,18 @@ def is_initialized():
     Checking if the default process group has been initialized
     """
     return GroupMember.WORLD is not None
+
+
+def is_torchelastic_launched():
+    """
+    Checks whether this process was launched with ``torch.distributed.elastic``
+    (aka torchelastic). The existence of ``TORCHELASTIC_RUN_ID`` environment
+    variable is used as a proxy to determine whether the current process
+    was launched with torchelastic. This is a reasonable proxy since
+    ``TORCHELASTIC_RUN_ID`` maps to the rendezvous id which is always a
+    non-null value indicating the job id for peer discovery purposes..
+    """
+    return os.getenv("TORCHELASTIC_RUN_ID") is not None
 
 
 def _get_default_group():
@@ -782,7 +800,8 @@ def destroy_process_group(group=None):
 
 def get_rank(group=None):
     """
-    Returns the rank of current process group
+    Returns the rank of the current process in the provided ``group`` or the
+    default group if none was provided.
 
     Rank is a unique identifier assigned to each process within a distributed
     process group. They are always consecutive integers ranging from 0 to
@@ -829,6 +848,10 @@ def get_world_size(group=None):
 def isend(tensor, dst, group=None, tag=0):
     """
     Sends a tensor asynchronously.
+
+    .. warning::
+        Modifying ``tensor`` before the request completes causes undefined
+        behavior.
 
     Args:
         tensor (Tensor): Tensor to send.
@@ -1320,7 +1343,7 @@ def all_reduce_coalesced(tensors, op=ReduceOp.SUM, group=None, async_op=False):
         work = group.allreduce_coalesced(tensors, opts)
 
     if async_op:
-        return work
+        return work.get_future()
     else:
         work.wait()
 
@@ -1700,7 +1723,7 @@ def gather_object(obj, object_gather_list=None, dst=0, group=None):
         object_gather_list[i] = _tensor_to_object(tensor, tensor_size)
 
 
-def broadcast_object_list(object_list, src=0, group=None):
+def broadcast_object_list(object_list, src=0, group=None, device=None):
     """
     Broadcasts picklable objects in ``object_list`` to the whole group. Similar
     to :func:`broadcast`, but Python objects can be passed in.
@@ -1714,6 +1737,9 @@ def broadcast_object_list(object_list, src=0, group=None):
         src (int): Source rank from which to broadcast ``object_list``.
         group: (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used. Default is ``None``.
+        device (``torch.device``, optional): If not None, the objects are
+            serialized and converted to tensors which are moved to the
+            ``device`` before broadcasting. Default is ``None``.
 
     Returns:
         ``None``. If rank is part of the group, ``object_list`` will contain the
@@ -1744,7 +1770,9 @@ def broadcast_object_list(object_list, src=0, group=None):
         >>>     objects = ["foo", 12, {1: 2}] # any picklable object
         >>> else:
         >>>     objects = [None, None, None]
-        >>> dist.broadcast_object_list(objects, src=0)
+        >>> # Assumes backend is not NCCL
+        >>> device = torch.device("cpu")
+        >>> dist.broadcast_object_list(objects, src=0, device=device)
         >>> broadcast_objects
         ['foo', 12, {1: 2}]
     """
@@ -1759,15 +1787,27 @@ def broadcast_object_list(object_list, src=0, group=None):
     else:
         object_sizes_tensor = torch.empty(len(object_list), dtype=torch.long)
 
+    # Current device selection.
+    # To preserve backwards compatibility, ``device`` is default to ``None``
+    # in which case we run current logic of device selection, i.e.
+    # ``current_device`` is CUDA if backend is NCCL otherwise CPU device. In the
+    # case it is not ``None`` we move the size and object tensors to be
+    # broadcasted to this device.
     group_backend = get_backend(group)
     is_nccl_backend = group_backend == Backend.NCCL
-    current_device = torch.device("cpu")
+    current_device = None
+    if device is not None:
+        if is_nccl_backend and device.type != "cuda":
+            raise ValueError("device type must be cuda for nccl backend")
+        current_device = device
+    else:
+        current_device = torch.device("cpu")
+        if is_nccl_backend:
+            # See note about using torch.cuda.current_device() here in
+            # docstring. We cannot simply use my_rank since rank == device is
+            # not necessarily true.
+            current_device = torch.device("cuda", torch.cuda.current_device())
     if is_nccl_backend:
-        # See note about using torch.cuda.current_device() here in docstring.
-        # We cannot simply use my_rank since rank == device is not necessarily
-        # true.
-        current_device = torch.device("cuda", torch.cuda.current_device())
-        object_sizes_tensor = object_sizes_tensor.to(current_device)
         object_sizes_tensor = object_sizes_tensor.to(current_device)
 
     # Broadcast object sizes
@@ -2105,7 +2145,7 @@ def all_gather_coalesced(
         work = group.allgather_coalesced(output_tensor_lists, input_tensor_list)
 
     if async_op:
-        return work
+        return work.get_future()
     else:
         work.wait()
 
@@ -2182,6 +2222,8 @@ def scatter(tensor, scatter_list=None, src=0, group=None, async_op=False):
     Each process will receive exactly one tensor and store its data in the
     ``tensor`` argument.
 
+    Complex tensors are supported.
+
     Args:
         tensor (Tensor): Output tensor.
         scatter_list (list[Tensor]): List of tensors to scatter (default is
@@ -2206,6 +2248,10 @@ def scatter(tensor, scatter_list=None, src=0, group=None, async_op=False):
 
     if _rank_not_in_group(group):
         return
+    scatter_list = [
+        t if not t.is_complex() else torch.view_as_real(t) for t in scatter_list
+    ]
+    tensor = tensor if not tensor.is_complex() else torch.view_as_real(tensor)
 
     my_rank = get_rank()
     if src == my_rank:
@@ -2389,6 +2435,8 @@ def all_to_all_single(
     to all processes in a group. Then concatenate the received tensors from all
     the processes in the group and return single output tensor.
 
+    Complex tensors are supported.
+
     Args:
         output (Tensor): Gathered cancatenated output tensor.
         input (Tensor): Input tensor to scatter.
@@ -2453,6 +2501,22 @@ def all_to_all_single(
         tensor([ 2,  3, 13, 14, 22, 32, 33])                             # Rank 1
         tensor([ 4, 15, 16, 23, 34, 35])                                 # Rank 2
         tensor([ 5, 17, 18, 24, 36])                                     # Rank 3
+
+
+        >>> # Another example with tensors of torch.cfloat type.
+        >>> input = torch.tensor([1+1j, 2+2j, 3+3j, 4+4j], dtype=torch.cfloat) + 4 * rank * (1+1j)
+        >>> input
+        tensor([1+1j, 2+2j, 3+3j, 4+4j])                                # Rank 0
+        tensor([5+5j, 6+6j, 7+7j, 8+8j])                                # Rank 1
+        tensor([9+9j, 10+10j, 11+11j, 12+12j])                          # Rank 2
+        tensor([13+13j, 14+14j, 15+15j, 16+16j])                        # Rank 3
+        >>> output = torch.empty([4], dtype=torch.int64)
+        >>> dist.all_to_all_single(output, input)
+        >>> output
+        tensor([1+1j, 5+5j, 9+9j, 13+13j])                              # Rank 0
+        tensor([2+2j, 6+6j, 10+10j, 14+14j])                            # Rank 1
+        tensor([3+3j, 7+7j, 11+11j, 15+15j])                            # Rank 2
+        tensor([4+4j, 8+8j, 12+12j, 16+16j])                            # Rank 3
     """
     if _rank_not_in_group(group):
         return
@@ -2460,6 +2524,12 @@ def all_to_all_single(
     opts = AllToAllOptions()
     _check_single_tensor(output, "output")
     _check_single_tensor(input, "input")
+
+    if input.is_complex():
+        input = torch.view_as_real(input)
+    if output.is_complex():
+        output = torch.view_as_real(output)
+
     output_split_sizes = [] if output_split_sizes is None else output_split_sizes
     input_split_sizes = [] if input_split_sizes is None else input_split_sizes
 
@@ -2483,6 +2553,8 @@ def all_to_all(output_tensor_list, input_tensor_list, group=None, async_op=False
     """
     Each process scatters list of input tensors to all processes in a group and
     return gathered list of tensors in output list.
+
+    Complex tensors are supported.
 
     Args:
         output_tensor_list (list[Tensor]): List of tensors to be gathered one
@@ -2549,6 +2621,23 @@ def all_to_all(output_tensor_list, input_tensor_list, group=None, async_op=False
         [tensor([2, 3]), tensor([13, 14]), tensor([22]), tensor([32, 33])]           # Rank 1
         [tensor([4]), tensor([15, 16]), tensor([23]), tensor([34, 35])]              # Rank 2
         [tensor([5]), tensor([17, 18]), tensor([24]), tensor([36])]                  # Rank 3
+
+        >>> # Another example with tensors of torch.cfloat type.
+        >>> input = torch.tensor([1+1j, 2+2j, 3+3j, 4+4j], dtype=torch.cfloat) + 4 * rank * (1+1j)
+        >>> input = list(input.chunk(4))
+        >>> input
+        [tensor([1+1j]), tensor([2+2j]), tensor([3+3j]), tensor([4+4j])]            # Rank 0
+        [tensor([5+5j]), tensor([6+6j]), tensor([7+7j]), tensor([8+8j])]            # Rank 1
+        [tensor([9+9j]), tensor([10+10j]), tensor([11+11j]), tensor([12+12j])]      # Rank 2
+        [tensor([13+13j]), tensor([14+14j]), tensor([15+15j]), tensor([16+16j])]    # Rank 3
+        >>> output = list(torch.empty([4], dtype=torch.int64).chunk(4))
+        >>> dist.all_to_all(output, input)
+        >>> output
+        [tensor([1+1j]), tensor([5+5j]), tensor([9+9j]), tensor([13+13j])]          # Rank 0
+        [tensor([2+2j]), tensor([6+6j]), tensor([10+10j]), tensor([14+14j])]        # Rank 1
+        [tensor([3+3j]), tensor([7+7j]), tensor([11+11j]), tensor([15+15j])]        # Rank 2
+        [tensor([4+4j]), tensor([8+8j]), tensor([12+12j]), tensor([16+16j])]        # Rank 3
+
     """
     if _rank_not_in_group(group):
         return
@@ -2556,6 +2645,13 @@ def all_to_all(output_tensor_list, input_tensor_list, group=None, async_op=False
     opts = AllToAllOptions()
     _check_tensor_list(output_tensor_list, "output_tensor_list")
     _check_tensor_list(input_tensor_list, "input_tensor_list")
+
+    input_tensor_list = [
+        t if not t.is_complex() else torch.view_as_real(t) for t in input_tensor_list
+    ]
+    output_tensor_list = [
+        t if not t.is_complex() else torch.view_as_real(t) for t in output_tensor_list
+    ]
 
     if group is None:
         default_pg = _get_default_group()
@@ -2951,9 +3047,7 @@ def new_subgroups(
         if rank in ranks_in_subgroup:
             cur_subgroup = subgroup
             logger.info(
-                "Rank {} is assigned to subgroup {}".format(
-                    rank, ranks_in_subgroup
-                )
+                "Rank {} is assigned to subgroup {}".format(rank, ranks_in_subgroup)
             )
 
     return cur_subgroup, subgroups
@@ -3064,8 +3158,6 @@ def new_subgroups_by_enumeration(
             rank_to_ranks_dict[rank] = ranks
             if my_rank == rank:
                 cur_subgroup = subgroup
-                logging.info(
-                    "Rank {} is assigned to subgroup {}".format(rank, ranks)
-                )
+                logging.info("Rank {} is assigned to subgroup {}".format(rank, ranks))
 
     return cur_subgroup, subgroups

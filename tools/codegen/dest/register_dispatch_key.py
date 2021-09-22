@@ -23,6 +23,79 @@ import tools.codegen.api.structured as structured
 from tools.codegen.api.translate import translate
 from tools.codegen.selective_build.selector import SelectiveBuilder
 
+
+def gen_create_out_helper(backend_index: BackendIndex) -> List[str]:
+    if backend_index.dispatch_key == DispatchKey.Meta:
+        # TODO: dedupe this with below
+        core = """
+if (strides.empty()) {
+    return at::empty(sizes, options.device(at::kMeta));
+} else {
+    return at::empty_strided(sizes, strides, options.device(at::kMeta));
+}
+"""
+    else:
+        expanded_topts = "optTypeMetaToScalarType(options.dtype_opt()), options.layout_opt(), " \
+            "options.device_opt(), options.pinned_memory_opt()"
+        empty_init = ""
+        if backend_index.dispatch_key == DispatchKey.CPU:
+            empty_impl = "at::native::empty_cpu"
+            empty_strided_impl = "at::native::empty_strided_cpu"
+        elif backend_index.dispatch_key == DispatchKey.CUDA:
+            empty_init = "globalContext().lazyInitCUDA();"
+            empty_impl = "at::native::empty_cuda"
+            empty_strided_impl = "at::native::empty_strided_cuda"
+        elif backend_index.dispatch_key == DispatchKey.CompositeExplicitAutograd:
+            empty_impl = "at::empty"
+            empty_strided_impl = "at::empty_strided"
+        else:
+            return []
+        core = f"""
+  {empty_init}
+  if (strides.empty()) {{
+      return {empty_impl}(sizes, {expanded_topts}, options.memory_format_opt());
+  }} else {{
+      // TODO: assert options.memory_format_opt() is nullopt (debug only?)
+      return {empty_strided_impl}(sizes, strides, {expanded_topts});
+  }}
+"""
+    return [f"""
+Tensor create_out(IntArrayRef sizes, IntArrayRef strides, const TensorOptions &options) {{
+{core}
+}}
+"""]
+
+
+def gen_resize_out_helper(backend_index: BackendIndex) -> List[str]:
+    return ["""
+void resize_out(const Tensor &out, IntArrayRef sizes, IntArrayRef strides, const TensorOptions &options) {
+  TORCH_CHECK(options.dtype() == out.dtype(),
+      "Expected out tensor to have dtype ", options.dtype(), ", but got ", out.dtype(), " instead");
+  TORCH_CHECK(options.device() == out.device(),
+      "Expected out tensor to have device ", options.device(), ", but got ", out.device(), " instead");
+  const bool resized = at::native::resize_output(out, sizes);
+  // Only restride if a resize occurred; otherwise we ignore the (advisory)
+  // strides from the meta function and directly use the output tensor's
+  // preexisting strides
+  if (resized) {
+    if (!strides.empty()) {
+      TORCH_INTERNAL_ASSERT(!options.memory_format_opt().has_value());
+      at::native::as_strided_(out, sizes, strides);
+    } else if (options.memory_format_opt().has_value()) {
+      out.unsafeGetTensorImpl()->empty_tensor_restride(*options.memory_format_opt());
+    }
+  }
+}
+"""]
+
+
+def gen_registration_helpers(backend_index: BackendIndex) -> List[str]:
+    return [
+        *gen_create_out_helper(backend_index),
+        *gen_resize_out_helper(backend_index)
+    ]
+
+
 # Generates Register{dispatch}.cpp (e.g., RegisterCPU.cpp).
 #
 #   - The primary function of this file is to register all of the
@@ -61,6 +134,14 @@ class RegisterDispatchKey:
 
     # The namespace that the kernels are written in. This is just `at::native` for in-tree kernels.
     cpp_namespace: str
+
+    # The class that all unstructured native functions live under. This is used to improve
+    # compiler error messages when a kernel writer adds a native function with the wrong signature.
+    # This is only used in unstructured kernels, since structured kernels already live in a class.
+    # Finally, this field is currently Optional because it is only used by external backends.
+    # It would be nice if we can add the same logic to in-tree kernels too, but that requires updating
+    # all of the existing kernel signatures scattered across aten/src/ATen/native.
+    class_method_name: Optional[str]
 
     @staticmethod
     def gen_device_check(type: DeviceCheckType, args: List[Argument], method_name: str) -> str:
@@ -123,9 +204,10 @@ class RegisterDispatchKey:
             returns = ret_name
 
         functional_sig = self.wrapper_kernel_sig(g.functional)
+        wrapper_name = sig.name()
 
         return f"""\
-{sig.defn()} {{
+{sig.defn(name=wrapper_name)} {{
   auto {func_res} = {functional_sig.name()}({", ".join(e.expr for e in translate(sig.arguments(), functional_sig.arguments()))});
   {updates}
   return {returns};
@@ -151,6 +233,7 @@ class RegisterDispatchKey:
             self.selector,
             self.rocm,
             self.cpp_namespace,
+            self.class_method_name,
             g
         )
         return list(mapMaybe(structured_gen.gen_one, g.functions()))
@@ -227,7 +310,10 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
                 metadata = self.backend_index.get_kernel(f)
                 if metadata is None:
                     return None
-                impl_name = f"{self.cpp_namespace}::{metadata.kernel}"
+                if self.class_method_name is None:
+                    impl_name = f"{self.cpp_namespace}::{metadata.kernel}"
+                else:
+                    impl_name = f"{self.cpp_namespace}::{self.class_method_name}::{metadata.kernel}"
 
                 args_exprs_str = ', '.join(a.name for a in args)
 
@@ -301,12 +387,13 @@ class StructuredRegisterDispatchKey(RegisterDispatchKey):
             set_output_super = f"{parent_class}::set_output(output_idx, sizes, strides, options, names);"
         else:
             set_output_super = ""
+        maybe_star = "*" if k is SchemaKind.functional else ""
         return f"""
 void set_output(int64_t output_idx, IntArrayRef sizes, IntArrayRef strides,
                 TensorOptions options, DimnameList names) override {{
 {textwrap.indent(self.gen_class_set_output_body(k), "    ")}
     if (!names.empty()) {{
-      namedinference::propagate_names(outputs_[output_idx], names);
+      namedinference::propagate_names({maybe_star}outputs_[output_idx], names);
     }}
     // super must happen after, so that downstream can use maybe_get_output
     // to retrieve the output
@@ -330,59 +417,17 @@ if (C10_UNLIKELY(current_device.has_value())) {
             maybe_set_guard_line = maybe_set_guard = ''
 
         if k is SchemaKind.functional:
-            if self.backend_index.dispatch_key == DispatchKey.Meta:
-                # TODO: dedupe this with below
-                return """
-if (strides.empty()) {
-    outputs_[output_idx] = at::empty(sizes, options.device(at::kMeta));
-} else {
-    outputs_[output_idx] = at::empty_strided(sizes, strides, options.device(at::kMeta));
-}
-"""
-            else:
-                expanded_topts = "optTypeMetaToScalarType(options.dtype_opt()), options.layout_opt(), " \
-                    "options.device_opt(), options.pinned_memory_opt()"
-                if self.backend_index.dispatch_key == DispatchKey.CPU:
-                    empty_impl = "at::native::empty_cpu"
-                    empty_strided_impl = "at::native::empty_strided_cpu"
-                elif self.backend_index.dispatch_key == DispatchKey.CUDA:
-                    empty_impl = "at::native::empty_cuda"
-                    empty_strided_impl = "at::native::empty_strided_cuda"
-                elif self.backend_index.dispatch_key == DispatchKey.CompositeExplicitAutograd:
-                    empty_impl = "at::empty"
-                    empty_strided_impl = "at::empty_strided"
-                else:
-                    raise AssertionError("unsupported dispatch key")
-                return f"""{maybe_set_guard_line}
-if (strides.empty()) {{
-    outputs_[output_idx] = {empty_impl}(sizes, {expanded_topts}, options.memory_format_opt());
-}} else {{
-    // TODO: assert options.memory_format_opt() is nullopt (debug only?)
-    outputs_[output_idx] = {empty_strided_impl}(sizes, strides, {expanded_topts});
-}}
-"""
+            assert self.backend_index.dispatch_key in (
+                DispatchKey.Meta, DispatchKey.CPU, DispatchKey.CUDA,
+                DispatchKey.CompositeExplicitAutograd)
+            return f"""{maybe_set_guard_line}
+outputs_[output_idx] = create_out(sizes, strides, options);"""
         elif k is SchemaKind.inplace:
             return maybe_set_guard
         elif k is SchemaKind.out:
             return f"""{maybe_set_guard_line}
 const auto& out = outputs_[output_idx].get();
-TORCH_CHECK(options.dtype() == out.dtype(),
-    "Expected out tensor to have dtype ", options.dtype(), ", but got ", out.dtype(), " instead");
-TORCH_CHECK(options.device() == out.device(),
-    "Expected out tensor to have device ", options.device(), ", but got ", out.device(), " instead");
-bool resized = at::native::resize_output(outputs_[output_idx], sizes);
-// Only restride if a resize occurred; otherwise we ignore the (advisory)
-// strides from the meta function and directly use the output tensor's
-// preexisting strides
-if (resized) {{
-    if (!strides.empty()) {{
-        TORCH_INTERNAL_ASSERT(!options.memory_format_opt().has_value());
-        at::native::as_strided_(outputs_[output_idx], sizes, strides);
-    }} else if (options.memory_format_opt().has_value()) {{
-        outputs_[output_idx].get().unsafeGetTensorImpl()->empty_tensor_restride(*options.memory_format_opt());
-    }}
-}}
-"""
+resize_out(out, sizes, strides, options);"""
         else:
             assert_never(k)
 
@@ -404,8 +449,10 @@ if (resized) {{
     def gen_class(
         self, f: NativeFunction, k: SchemaKind, *, class_name: str, parent_class: str, generate_super: bool
     ) -> str:
+        maybe_star = ''
         if k is SchemaKind.functional:
-            output_type = "Tensor"
+            output_type = "c10::ExclusivelyOwned<Tensor>"
+            maybe_star = '*'
         elif k is SchemaKind.inplace:
             output_type = "std::reference_wrapper<Tensor>"
         elif k is SchemaKind.out:
@@ -428,7 +475,7 @@ if (resized) {{
             f"{textwrap.indent(class_ctor_str, indent)}",
             f"{textwrap.indent(self.gen_class_set_output(k, parent_class, generate_super), indent)}",
             "    const Tensor& maybe_get_output(int64_t output_idx) override {",
-            "        return outputs_[output_idx];",
+            f"        return {maybe_star}outputs_[output_idx];",
             "    }",
             f"    std::array<{output_type}, {len(f.func.returns)}> outputs_;",
             f"{textwrap.indent(guard_field, indent)}",
@@ -537,15 +584,38 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
                     method=False
                 )
             )
-            sig_body.append(f"op.meta({meta_exprs});")
+
+            if self.g.out.precomputed:
+                # If this function group has precomputed elements, the meta function
+                # returns a struct containing them which must be saved so that it
+                # can be unpacked when generating code to call the impl.
+                sig_body.append(f"auto precompute = op.meta({meta_exprs});")
+
+                # Put all of the contents of the precompute struct into the context
+                # so that translate will be able to return the correct args for the
+                # call to the impl.
+                for precomputed_elems in self.g.out.precomputed.replace.values():
+                    for arg in precomputed_elems:
+                        context.append(Expr(
+                            expr=f"precompute.{arg.name}",
+                            type=structured.argument_type(arg, binds=arg.name),
+                        ))
+
+                # Add a use of the precompute struct so FB internal compilers don't
+                # complain that there is an unused variable.
+                sig_body.append("(void)precompute;")
+            else:
+                sig_body.append(f"op.meta({meta_exprs});")
+
 
             # After running meta, op.outputs_ is guaranteed to be valid;
             # add it to the context
             out_args = structured.out_arguments(self.g)
+            maybe_star = '*' if k is SchemaKind.functional else ''
             for i, out_arg in enumerate(out_args):
                 assert ConstRefCType(BaseCType(tensorT)) == out_arg.nctype.type
                 context.append(Expr(
-                    expr=f"op.outputs_[{i}]",
+                    expr=f"{maybe_star}op.outputs_[{i}]",
                     # TODO: Stop hardcoding that the output type is a Tensor.  Note
                     # that for the codegen here this is fine because outputs_ is
                     # hardcoded to be tensor already
@@ -592,9 +662,9 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
             # TODO: Do this in translate instead
             if k is SchemaKind.functional:
                 if len(f.func.returns) == 1:
-                    ret_expr = "std::move(op.outputs_[0])"  # small optimization
+                    ret_expr = "std::move(op.outputs_[0]).take()"  # small optimization
                 else:
-                    moved = ', '.join(f"std::move(op.outputs_[{i}])" for i in range(len(f.func.returns)))
+                    moved = ', '.join(f"std::move(op.outputs_[{i}]).take()" for i in range(len(f.func.returns)))
                     ret_expr = f"std::make_tuple({moved})"
             elif k is SchemaKind.inplace:
                 ret_expr = "self"

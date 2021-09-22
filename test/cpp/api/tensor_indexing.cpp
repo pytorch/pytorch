@@ -7,7 +7,6 @@
 using namespace torch::indexing;
 using namespace torch::test;
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorIndexingTest, Slice) {
   Slice slice(1, 2, 3);
   ASSERT_EQ(slice.start(), 1);
@@ -17,7 +16,6 @@ TEST(TensorIndexingTest, Slice) {
   ASSERT_EQ(c10::str(slice), "1:2:3");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorIndexingTest, TensorIndex) {
   {
     std::vector<TensorIndex> indices = {None, "...", Ellipsis, 0, true, Slice(1, None, 2), torch::tensor({1, 2})};
@@ -71,7 +69,6 @@ TEST(TensorIndexingTest, TensorIndex) {
   ASSERT_EQ(c10::str(std::vector<TensorIndex>({Slice(1, 3, 2)})), c10::str("(1:3:2)"));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorIndexingTest, TestNoIndices) {
   torch::Tensor tensor = torch::randn({20, 20});
   torch::Tensor value = torch::randn({20, 20});
@@ -86,7 +83,6 @@ TEST(TensorIndexingTest, TestNoIndices) {
   ASSERT_THROWS_WITH(tensor.index_put_(indices, value), "Passing an empty index list to Tensor::index_put_() is not valid syntax");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorIndexingTest, TestAdvancedIndexingWithListOfTensor) {
   {
     torch::Tensor tensor = torch::randn({20, 20});
@@ -111,13 +107,11 @@ TEST(TensorIndexingTest, TestAdvancedIndexingWithListOfTensor) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorIndexingTest, TestSingleInt) {
   auto v = torch::randn({5, 7, 3});
   ASSERT_EQ(v.index({4}).sizes(), torch::IntArrayRef({7, 3}));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorIndexingTest, TestMultipleInt) {
   auto v = torch::randn({5, 7, 3});
   ASSERT_EQ(v.index({4}).sizes(), torch::IntArrayRef({7, 3}));
@@ -128,7 +122,6 @@ TEST(TensorIndexingTest, TestMultipleInt) {
   ASSERT_EQ(v.index({4, 3, 1}).item<double>(), 0);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorIndexingTest, TestNone) {
   auto v = torch::randn({5, 7, 3});
   ASSERT_EQ(v.index({None}).sizes(), torch::IntArrayRef({1, 5, 7, 3}));
@@ -137,7 +130,6 @@ TEST(TensorIndexingTest, TestNone) {
   ASSERT_EQ(v.index({"...", None}).sizes(), torch::IntArrayRef({5, 7, 3, 1}));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorIndexingTest, TestStep) {
   auto v = torch::arange(10);
   assert_tensor_equal(v.index({Slice(None, None, 1)}), v);
@@ -147,7 +139,6 @@ TEST(TensorIndexingTest, TestStep) {
   assert_tensor_equal(v.index({Slice(1, 6, 2)}), torch::tensor({1, 3, 5}));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorIndexingTest, TestStepAssignment) {
   auto v = torch::zeros({4, 4});
   v.index_put_({0, Slice(1, None, 2)}, torch::tensor({3., 4.}));
@@ -155,7 +146,6 @@ TEST(TensorIndexingTest, TestStepAssignment) {
   assert_tensor_equal(v.index({Slice(1, None)}).sum(), torch::tensor(0));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorIndexingTest, TestBoolIndices) {
   {
     auto v = torch::randn({5, 7, 3});
@@ -180,7 +170,6 @@ TEST(TensorIndexingTest, TestBoolIndices) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorIndexingTest, TestBoolIndicesAccumulate) {
   auto mask = torch::zeros({10}, torch::kBool);
   auto y = torch::ones({10, 10});
@@ -189,7 +178,6 @@ TEST(TensorIndexingTest, TestBoolIndicesAccumulate) {
 }
 
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorIndexingTest, TestMultipleBoolIndices) {
   auto v = torch::randn({5, 7, 3});
   // note: these broadcast together and are transposed to the first dim
@@ -198,7 +186,6 @@ TEST(TensorIndexingTest, TestMultipleBoolIndices) {
   ASSERT_EQ(v.index({mask1, Slice(), mask2}).sizes(), torch::IntArrayRef({3, 7}));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorIndexingTest, TestByteMask) {
   {
     auto v = torch::randn({5, 7, 3});
@@ -218,7 +205,6 @@ TEST(TensorIndexingTest, TestByteMask) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorIndexingTest, TestByteMaskAccumulate) {
   auto mask = torch::zeros({10}, torch::kUInt8);
   auto y = torch::ones({10, 10});
@@ -232,7 +218,6 @@ TEST(TensorIndexingTest, TestByteMaskAccumulate) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorIndexingTest, TestMultipleByteMask) {
   auto v = torch::randn({5, 7, 3});
   // note: these broadcast together and are transposed to the first dim
@@ -247,7 +232,6 @@ TEST(TensorIndexingTest, TestMultipleByteMask) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorIndexingTest, TestByteMask2d) {
   auto v = torch::randn({5, 7, 3});
   auto c = torch::randn({5, 7});
@@ -256,7 +240,6 @@ TEST(TensorIndexingTest, TestByteMask2d) {
   ASSERT_EQ(r.sizes(), torch::IntArrayRef({num_ones, 3}));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorIndexingTest, TestIntIndices) {
   auto v = torch::randn({5, 7, 3});
   ASSERT_EQ(v.index({torch::tensor({0, 4, 2})}).sizes(), torch::IntArrayRef({3, 7, 3}));
@@ -265,7 +248,6 @@ TEST(TensorIndexingTest, TestIntIndices) {
 }
 
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorIndexingTest, TestIntIndices2d) {
   // From the NumPy indexing example
   auto x = torch::arange(0, 12, torch::kLong).view({4, 3});
@@ -274,7 +256,6 @@ TEST(TensorIndexingTest, TestIntIndices2d) {
   assert_tensor_equal(x.index({rows, columns}), torch::tensor({{0, 2}, {9, 11}}));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorIndexingTest, TestIntIndicesBroadcast) {
   // From the NumPy indexing example
   auto x = torch::arange(0, 12, torch::kLong).view({4, 3});
@@ -284,7 +265,6 @@ TEST(TensorIndexingTest, TestIntIndicesBroadcast) {
   assert_tensor_equal(result, torch::tensor({{0, 2}, {9, 11}}));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorIndexingTest, TestEmptyIndex) {
   auto x = torch::arange(0, 12).view({4, 3});
   auto idx = torch::tensor({}, torch::kLong);
@@ -300,7 +280,6 @@ TEST(TensorIndexingTest, TestEmptyIndex) {
   assert_tensor_equal(x, y);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorIndexingTest, TestEmptyNdimIndex) {
   torch::Device device(torch::kCPU);
   {
@@ -323,7 +302,6 @@ TEST(TensorIndexingTest, TestEmptyNdimIndex) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorIndexingTest, TestEmptyNdimIndex_CUDA) {
   torch::Device device(torch::kCUDA);
   {
@@ -340,7 +318,6 @@ TEST(TensorIndexingTest, TestEmptyNdimIndex_CUDA) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorIndexingTest, TestEmptyNdimIndexBool) {
   torch::Device device(torch::kCPU);
   auto x = torch::randn({5}, device);
@@ -348,7 +325,6 @@ TEST(TensorIndexingTest, TestEmptyNdimIndexBool) {
   ASSERT_THROW(x.index({torch::empty({0, 2}, torch::TensorOptions(torch::kUInt8).device(device))}), c10::Error);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorIndexingTest, TestEmptyNdimIndexBool_CUDA) {
   torch::Device device(torch::kCUDA);
   auto x = torch::randn({5}, device);
@@ -356,7 +332,6 @@ TEST(TensorIndexingTest, TestEmptyNdimIndexBool_CUDA) {
   ASSERT_THROW(x.index({torch::empty({0, 2}, torch::TensorOptions(torch::kUInt8).device(device))}), c10::Error);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorIndexingTest, TestEmptySlice) {
   torch::Device device(torch::kCPU);
   auto x = torch::randn({2, 3, 4, 5}, device);
@@ -368,7 +343,6 @@ TEST(TensorIndexingTest, TestEmptySlice) {
   ASSERT_TRUE(z.is_contiguous());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorIndexingTest, TestEmptySlice_CUDA) {
   torch::Device device(torch::kCUDA);
   auto x = torch::randn({2, 3, 4, 5}, device);
@@ -380,7 +354,6 @@ TEST(TensorIndexingTest, TestEmptySlice_CUDA) {
   ASSERT_TRUE(z.is_contiguous());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorIndexingTest, TestIndexGetitemCopyBoolsSlices) {
   auto true_tensor = torch::tensor(1, torch::kUInt8);
   auto false_tensor = torch::tensor(0, torch::kUInt8);
@@ -405,7 +378,6 @@ TEST(TensorIndexingTest, TestIndexGetitemCopyBoolsSlices) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorIndexingTest, TestIndexSetitemBoolsSlices) {
   auto true_tensor = torch::tensor(1, torch::kUInt8);
   auto false_tensor = torch::tensor(0, torch::kUInt8);
@@ -436,7 +408,6 @@ TEST(TensorIndexingTest, TestIndexSetitemBoolsSlices) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorIndexingTest, TestIndexScalarWithBoolMask) {
   torch::Device device(torch::kCPU);
 
@@ -451,7 +422,6 @@ TEST(TensorIndexingTest, TestIndexScalarWithBoolMask) {
   ASSERT_EQ(a.index({uintMask}).dtype(), a.index({boolMask}).dtype());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorIndexingTest, TestIndexScalarWithBoolMask_CUDA) {
   torch::Device device(torch::kCUDA);
 
@@ -466,7 +436,6 @@ TEST(TensorIndexingTest, TestIndexScalarWithBoolMask_CUDA) {
   ASSERT_EQ(a.index({uintMask}).dtype(), a.index({boolMask}).dtype());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorIndexingTest, TestSetitemExpansionError) {
   auto true_tensor = torch::tensor(true);
   auto a = torch::randn({2, 3});
@@ -484,7 +453,6 @@ TEST(TensorIndexingTest, TestSetitemExpansionError) {
   ASSERT_THROW(a.index_put_({true_tensor}, a_expanded), c10::Error);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorIndexingTest, TestGetitemScalars) {
   auto zero = torch::tensor(0, torch::kInt64);
   auto one = torch::tensor(1, torch::kInt64);
@@ -510,7 +478,6 @@ TEST(TensorIndexingTest, TestGetitemScalars) {
   assert_tensor_equal(r, r.index({"..."}));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorIndexingTest, TestSetitemScalars) {
   auto zero = torch::tensor(0, torch::kInt64);
 
@@ -536,7 +503,6 @@ TEST(TensorIndexingTest, TestSetitemScalars) {
   ASSERT_TRUE(r.allclose(torch::tensor(9.9)));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorIndexingTest, TestBasicAdvancedCombined) {
   // From the NumPy indexing example
   auto x = torch::arange(0, 12).to(torch::kLong).view({4, 3});
@@ -558,7 +524,6 @@ TEST(TensorIndexingTest, TestBasicAdvancedCombined) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorIndexingTest, TestIntAssignment) {
   {
     auto x = torch::arange(0, 4).to(torch::kLong).view({2, 2});
@@ -573,7 +538,6 @@ TEST(TensorIndexingTest, TestIntAssignment) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorIndexingTest, TestByteTensorAssignment) {
   auto x = torch::arange(0., 16).to(torch::kFloat).view({4, 4});
   auto b = torch::tensor({true, false, true, false}, torch::kByte);
@@ -593,7 +557,6 @@ TEST(TensorIndexingTest, TestByteTensorAssignment) {
   assert_tensor_equal(x.index({3}), torch::arange(12, 16).to(torch::kLong));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorIndexingTest, TestVariableSlicing) {
   auto x = torch::arange(0, 16).view({4, 4});
   auto indices = torch::tensor({0, 1}, torch::kInt);
@@ -602,7 +565,6 @@ TEST(TensorIndexingTest, TestVariableSlicing) {
   assert_tensor_equal(x.index({Slice(i, j)}), x.index({Slice(0, 1)}));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorIndexingTest, TestEllipsisTensor) {
   auto x = torch::arange(0, 9).to(torch::kLong).view({3, 3});
   auto idx = torch::tensor({0, 2});
@@ -613,7 +575,6 @@ TEST(TensorIndexingTest, TestEllipsisTensor) {
                                                      {6, 7, 8}}));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorIndexingTest, TestOutOfBoundIndex) {
   auto x = torch::arange(0, 100).view({2, 5, 10});
   ASSERT_THROWS_WITH(x.index({0, 5}), "index 5 is out of bounds for dimension 1 with size 5");
@@ -622,7 +583,6 @@ TEST(TensorIndexingTest, TestOutOfBoundIndex) {
   ASSERT_THROWS_WITH(x.index({Slice(), Slice(), 12}), "index 12 is out of bounds for dimension 2 with size 10");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorIndexingTest, TestZeroDimIndex) {
   auto x = torch::tensor(10);
 
@@ -668,14 +628,12 @@ TEST(TensorIndexingTest, TestZeroDimIndex) {
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(NumpyTests, TestNoneIndex) {
   // `None` index adds newaxis
   auto a = torch::tensor({1, 2, 3});
   ASSERT_EQ(a.index({None}).dim(), a.dim() + 1);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(NumpyTests, TestEmptyFancyIndex) {
   // Empty list index creates an empty array
   auto a = torch::tensor({1, 2, 3});
@@ -689,7 +647,6 @@ TEST(NumpyTests, TestEmptyFancyIndex) {
   ASSERT_THROW(a.index({b}), c10::Error);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(NumpyTests, TestEllipsisIndex) {
   auto a = torch::tensor({{1, 2, 3},
                           {4, 5, 6},
@@ -715,7 +672,6 @@ TEST(NumpyTests, TestEllipsisIndex) {
   ASSERT_EQ(b.item<int64_t>(), 2);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(NumpyTests, TestSingleIntIndex) {
   // Single integer index selects one row
   auto a = torch::tensor({{1, 2, 3},
@@ -735,7 +691,6 @@ TEST(NumpyTests, TestSingleIntIndex) {
   // ASSERT_THROW(a(1 << 64), c10::Error);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(NumpyTests, TestSingleBoolIndex) {
   // Single boolean index
   auto a = torch::tensor({{1, 2, 3},
@@ -746,7 +701,6 @@ TEST(NumpyTests, TestSingleBoolIndex) {
   assert_tensor_equal(a.index({false}), a.index({None}).index({Slice(0, 0)}));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(NumpyTests, TestBooleanShapeMismatch) {
   auto arr = torch::ones({5, 4, 3});
 
@@ -767,7 +721,6 @@ TEST(NumpyTests, TestBooleanShapeMismatch) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(NumpyTests, TestBooleanIndexingOnedim) {
   // Indexing a 2-dimensional array with
   // boolean array of length one
@@ -779,7 +732,6 @@ TEST(NumpyTests, TestBooleanIndexingOnedim) {
   assert_tensor_equal(a, torch::tensor({{1., 1., 1.}}));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(NumpyTests, TestBooleanAssignmentValueMismatch) {
   // A boolean assignment should fail when the shape of the values
   // cannot be broadcast to the subscription. (see also gh-3458)
@@ -794,7 +746,6 @@ TEST(NumpyTests, TestBooleanAssignmentValueMismatch) {
   ASSERT_THROWS_WITH(f(a.index({Slice(None, 1)}), {1, 2, 3}), "shape mismatch");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(NumpyTests, TestBooleanIndexingTwodim) {
   // Indexing a 2-dimensional array with
   // 2-dimensional boolean array
@@ -815,7 +766,6 @@ TEST(NumpyTests, TestBooleanIndexingTwodim) {
                                  {0, 8, 0}}));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(NumpyTests, TestBooleanIndexingWeirdness) {
   // Weird boolean indexing things
   auto a = torch::ones({2, 3, 4});
@@ -825,7 +775,6 @@ TEST(NumpyTests, TestBooleanIndexingWeirdness) {
   ASSERT_THROW(a.index({false, torch::tensor({0, 1}), "..."}), c10::Error);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(NumpyTests, TestBooleanIndexingWeirdnessTensors) {
   // Weird boolean indexing things
   auto false_tensor = torch::tensor(false);
@@ -837,7 +786,6 @@ TEST(NumpyTests, TestBooleanIndexingWeirdnessTensors) {
   ASSERT_THROW(a.index({false_tensor, torch::tensor({0, 1}), "..."}), c10::Error);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(NumpyTests, TestBooleanIndexingAlldims) {
   auto true_tensor = torch::tensor(true);
   auto a = torch::ones({2, 3});
@@ -845,7 +793,6 @@ TEST(NumpyTests, TestBooleanIndexingAlldims) {
   ASSERT_EQ(a.index({true_tensor, true_tensor}).sizes(), torch::IntArrayRef({1, 2, 3}));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(NumpyTests, TestBooleanListIndexing) {
   // Indexing a 2-dimensional array with
   // boolean lists
@@ -860,7 +807,6 @@ TEST(NumpyTests, TestBooleanListIndexing) {
   assert_tensor_equal(a.index({c, c}), torch::tensor({1, 5}));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(NumpyTests, TestEverythingReturnsViews) {
   // Before `...` would return a itself.
   auto a = torch::tensor({5});
@@ -869,7 +815,6 @@ TEST(NumpyTests, TestEverythingReturnsViews) {
   ASSERT_FALSE(a.is_same(a.index({Slice()})));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(NumpyTests, TestBroaderrorsIndexing) {
   auto a = torch::zeros({5, 5});
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
@@ -878,7 +823,6 @@ TEST(NumpyTests, TestBroaderrorsIndexing) {
   ASSERT_THROW(a.index_put_({torch::tensor({0, 1}), torch::tensor({0, 1, 2})}, 0), c10::Error);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(NumpyTests, TestTrivialFancyOutOfBounds) {
   auto a = torch::zeros({5});
   auto ind = torch::ones({20}, torch::kInt64);
@@ -895,7 +839,6 @@ TEST(NumpyTests, TestTrivialFancyOutOfBounds) {
   ASSERT_THROW(a.index_put_({ind}, 0), c10::Error);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(NumpyTests, TestIndexIsLarger) {
   // Simple case of fancy index broadcasting of the index.
   auto a = torch::zeros({5, 5});
@@ -904,7 +847,6 @@ TEST(NumpyTests, TestIndexIsLarger) {
   ASSERT_TRUE((a.index({Slice(None, 3), Slice(None, 3)}) == torch::tensor({2., 3., 4.})).all().item<bool>());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(NumpyTests, TestBroadcastSubspace) {
   auto a = torch::zeros({100, 100});
   auto v = torch::arange(0., 100).index({Slice(), None});

@@ -29,8 +29,7 @@ public:
   void serialize(torch::serialize::InputArchive& archive) override;
   void serialize(torch::serialize::OutputArchive& archive) const override;
   TORCH_API friend bool operator==(const AdamOptions& lhs, const AdamOptions& rhs);
-  // NOLINTNEXTLINE(modernize-use-override)
-  ~AdamOptions() = default;
+  ~AdamOptions() override = default;
   double get_lr() const override;
   void set_lr(const double lr) override;
 };
@@ -45,8 +44,7 @@ public:
   void serialize(torch::serialize::InputArchive& archive) override;
   void serialize(torch::serialize::OutputArchive& archive) const override;
   TORCH_API friend bool operator==(const AdamParamState& lhs, const AdamParamState& rhs);
-  // NOLINTNEXTLINE(modernize-use-override)
-  ~AdamParamState() = default;
+  ~AdamParamState() override = default;
 };
 
 class TORCH_API Adam : public Optimizer {

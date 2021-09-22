@@ -369,11 +369,9 @@ C10_EXPORT bool RoIAlignRotatedOp<float, CPUContext>::RunOnDevice() {
   return true;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(RoIAlignRotated, RoIAlignRotatedOp<float, CPUContext>);
 
 // Input: X, rois; Output: Y
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(RoIAlignRotated)
     .NumInputs(2)
     .NumOutputs(1)

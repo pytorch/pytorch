@@ -20,11 +20,8 @@
 #endif
 #include <ATen/nnapi/nnapi_wrapper.h>
 #include <c10/util/Logging.h>
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static int loaded = 0;
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static struct nnapi_wrapper nnapi_;
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static struct nnapi_wrapper check_nnapi_;
 int check__getDeviceCount(uint32_t* numDevices) {
   CAFFE_ENFORCE(nnapi_._getDeviceCount);

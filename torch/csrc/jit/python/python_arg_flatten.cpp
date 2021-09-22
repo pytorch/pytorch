@@ -1,3 +1,4 @@
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/python/python_arg_flatten.h>
 #include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/utils/six.h>
@@ -33,8 +34,9 @@ template <typename T>
 py::object cast_handle_sequence(std::vector<py::handle> objs) {
   auto num_objs = objs.size();
   T sequence{num_objs};
-  for (size_t i = 0; i < num_objs; ++i)
+  for (const auto i : c10::irange(num_objs)) {
     sequence[i] = py::reinterpret_borrow<py::object>(objs[i]);
+  }
   return sequence;
 }
 
@@ -68,18 +70,18 @@ void flatten_rec(PyObject* obj, ParsedArgs& args) {
     args.desc.structure.push_back(D::Variable);
   } else if (strcmp(THPUtils_typename(obj), "NoneType") == 0) {
     args.desc.structure.push_back(D::NoneType);
-  } else if (PyBool_Check(obj)) { // Wrap integers in bool tensors
+  } else if (PyBool_Check(obj)) { // Wrap bools in Bool tensors
     at::Tensor var = scalar_to_tensor(at::Scalar(THPUtils_unpackBool(obj)));
     args.vars.push_back(var);
     args.desc.metadata.emplace_back(var);
     args.desc.structure.push_back(D::Bool);
-  } else if (PyLong_Check(obj)) { // Wrap integers in long tensors
+  } else if (PyLong_Check(obj)) { // Wrap longs in Long tensors
     at::Tensor var = scalar_to_tensor(
         at::Scalar(static_cast<int64_t>(THPUtils_unpackLong(obj))));
     args.vars.push_back(var);
     args.desc.metadata.emplace_back(var);
     args.desc.structure.push_back(D::Long);
-  } else if (PyFloat_Check(obj)) { // Wrap floating points in double tensors
+  } else if (PyFloat_Check(obj)) { // Wrap floats in Double tensors
     at::Tensor var = scalar_to_tensor(THPUtils_unpackDouble(obj));
     args.vars.push_back(var);
     args.desc.metadata.emplace_back(var);
@@ -109,15 +111,16 @@ template <typename T>
 py::object cast_sequence(std::vector<py::object> objs) {
   auto num_objs = objs.size();
   T sequence{num_objs};
-  for (size_t i = 0; i < num_objs; ++i)
+  for (const auto i : c10::irange(num_objs)) {
     sequence[i] = std::move(objs[i]);
+  }
   return std::move(sequence);
 }
 
 py::object cast_dict(std::vector<py::object> objs) {
   auto num_objs = objs.size();
   py::dict sequence = {};
-  for (size_t i = 0; i < num_objs; ++i) {
+  for (const auto i : c10::irange(num_objs)) {
     py::tuple obj = py::reinterpret_borrow<py::tuple>(objs[i]);
     sequence[obj[0]] = obj[1];
   }

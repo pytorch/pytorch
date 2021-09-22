@@ -120,6 +120,15 @@ class PackageImporter(Importer):
         Returns:
             types.ModuleType: The (possibly already) loaded module.
         """
+        # We should always be able to support importing modules from this package.
+        # This is to support something like:
+        #   obj = importer.load_pickle(...)
+        #   importer.import_module(obj.__module__)  <- this string will be mangled
+        #
+        # Note that _mangler.demangle will not demangle any module names
+        # produced by a different PackageImporter instance.
+        name = self._mangler.demangle(name)
+
         return self._gcd_import(name)
 
     def load_binary(self, package: str, resource: str) -> bytes:
@@ -173,10 +182,10 @@ class PackageImporter(Importer):
         restore_location = _get_restore_location(map_location)
         loaded_storages = {}
         loaded_reduces = {}
-        storage_context = torch._C.StorageContext()
+        storage_context = torch._C.DeserializationStorageContext()
 
         def load_tensor(data_type, size, key, location, restore_location):
-            name = f"{key}.storage"
+            name = f"{int(key)}.storage"
             dtype = data_type(0).dtype
 
             if storage_context.has_storage(name):
@@ -402,10 +411,14 @@ class PackageImporter(Importer):
             message = "import of {} halted; " "None in sys.modules".format(name)
             raise ModuleNotFoundError(message, name=name)
 
-        # To handle https://github.com/pytorch/pytorch/issues/57490, where os's
-        # creation of os.path via the hacking of sys.modules is not import friendly
+        # To handle https://github.com/pytorch/pytorch/issues/57490, where std's
+        # creation of fake submodules via the hacking of sys.modules is not import
+        # friendly
         if name == "os":
             self.modules["os.path"] = cast(Any, module).path
+        elif name == "typing":
+            self.modules["typing.io"] = cast(Any, module).io
+            self.modules["typing.re"] = cast(Any, module).re
 
         return module
 

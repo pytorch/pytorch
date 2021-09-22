@@ -40,19 +40,33 @@ using namespace torch::autograd;
 using namespace torch::jit;
 using at::Tensor;
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 PyObject *THPFunctionClass = nullptr;
 
 #define THPFunction_assert(condition, ...)                                     \
   if (!(condition)) { THPUtils_setError(__VA_ARGS__); throw python_error(); }
 
-namespace torch { namespace autograd {
+// Anonymous namespace for helpful functions used in this file
+namespace {
 
-void PyNode::throw_python_error() {
+// Throw a python_error with the PyErr state persisted, so that we
+// don't lose the error state if the GIL is released when we don't
+// have a PyThreadState created beforehand, this is made so that
+// even for pure C++ thread without a pre-created PyThreadState could
+// also capture the correct error message.
+// TODO: This is a temporary approach to allow C++ thread to correctly
+// capture Python Error in autograd, remove this when c10 thread pool
+// allow to do one time initialization.
+// see discussion in https://github.com/pytorch/pytorch/pull/34845
+// Follow up issue: https://github.com/pytorch/pytorch/issues/35006
+void throw_python_error() {
   python_error err;
   err.persist();
   throw err;
 }
+
+}
+
+namespace torch { namespace autograd {
 
 // NOTE: this function is written in a way that assumes it's only called for backward;
 // it's used by engine.cpp.  This is responsible for forwarding a call from
@@ -326,8 +340,61 @@ static void _wrap_outputs(const std::shared_ptr<PyNode>& cdata, THPFunction *sel
     }
   }
 
+  _jvp_fn_t jvp_user_function = [self](variable_list inputs, variable_list grad_inputs) {
+    pybind11::gil_scoped_acquire gil;
+
+    // Massage a C++ variable_list into a Python arguments tuple
+    // Making sure to introduce the proper None for non-Tensor inputs
+    auto num_inputs = self->is_variable_input.size();
+    THPObjectPtr pyInputs(PyTuple_New(num_inputs));
+    if (!pyInputs) throw_python_error();
+    auto var_input_idx = 0;
+    for (const auto i : c10::irange(num_inputs)) {
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+      PyObject* input;
+      if (self->is_variable_input[i]) {
+        if (grad_inputs[i].defined() || !self->materialize_grads) {
+          input = THPVariable_Wrap(grad_inputs[i]);
+        } else {
+          input = THPVariable_Wrap(at::zeros_like(inputs[i]));
+        }
+        if (!input) throw_python_error();
+      } else {
+        Py_INCREF(Py_None);
+        input = Py_None;
+      }
+      PyTuple_SET_ITEM(pyInputs.get(), i, input);
+    }
+
+    THPObjectPtr apply_jvp_fn(PyObject_GetAttrString((PyObject*)self, "apply_jvp"));
+    if (!apply_jvp_fn) throw_python_error();
+    THPObjectPtr r(PyObject_CallObject(apply_jvp_fn, pyInputs.get()));
+    if (!r) throw_python_error();
+    ensure_tuple(r);
+
+    // Massage the Python results tuple back into a C++ variable_list
+    // Don't do any check on the number of results here as
+    // it is handled by the caller
+    const int num_outputs = PyTuple_GET_SIZE(r.get());
+    variable_list results;
+    results.reserve(num_outputs);
+    for (int i = 0; i != num_outputs; ++i) {
+      PyObject* output = PyTuple_GET_ITEM(r.get(), i);
+      if (output == Py_None) {
+        results.emplace_back();
+      } else {
+        TORCH_CHECK(THPVariable_Check(output), "expected Variable or None (got ",
+                    THPUtils_typename(output), ") for grad output ", i, ".")
+        results.emplace_back(THPVariable_Unpack(output));
+      }
+    }
+
+    return results;
+  };
+
   // Wrap only the tensor outputs.
-  auto wrapped_outputs = _wrap_outputs(input_vars, non_differentiable, dirty_inputs, raw_output_vars, cdata_if_executable);
+  auto wrapped_outputs = _wrap_outputs(input_vars, non_differentiable, dirty_inputs,
+                                       raw_output_vars, cdata_if_executable, jvp_user_function);
 
   for(const auto i : c10::irange(num_outputs)) {
     PyObject* obj = PyTuple_GetItem(raw_output, i);
@@ -497,9 +564,12 @@ static void _trace_post_record(
   int num_outputs = PyTuple_GET_SIZE(output_objects);
   auto graph = node->owningGraph();
   node->addOutput();
+  auto old_node = node;
   if (!unpack_output) {
     std::vector<TypePtr> tuple_values(num_outputs, TensorType::get());
     TypePtr tuple_type = TupleType::create(std::move(tuple_values));
+    // Original type is tuple of tensors "without" element type and shape.
+    // The missed parts will be added below.
     node->output()->setType(tuple_type);
     auto unpacked = graph->createTupleUnpack(node->output())->insertAfter(node);
     node = unpacked;
@@ -514,6 +584,18 @@ static void _trace_post_record(
         jit::tracer::setValueTrace(tensor, value);
       }
     }
+  }
+  // If TupleUnpack operator is created, we copy its output type back
+  // to the original tuple type.
+  if (!unpack_output) {
+    std::vector<TypePtr> new_tuple_values;
+    for (int i = 0; i < num_outputs; ++i) {
+      TypePtr ptr = node->outputs()[i]->type();
+      new_tuple_values.push_back(ptr);
+    }
+    TypePtr tuple_type = TupleType::create(std::move(new_tuple_values));
+    // The i-th tuple element receives a new tensor type with element type and shape.
+    old_node->output()->setType(tuple_type);
   }
 }
 
@@ -542,6 +624,9 @@ PyObject* process_outputs(PyObject *op_obj, const std::shared_ptr<PyNode>& cdata
   bool is_inplace = static_cast<bool>(grad_fn->dirty_tensors);
   _wrap_outputs(cdata, grad_fn, unpacked.input_vars, raw_output, outputs, is_executable);
   _trace_post_record(node, op_obj, unpacked.input_vars, outputs, is_inplace, unpack_output);
+
+  // It is important that creating the SavedVariables happen after the output wrapping as the
+  // outputs must have their grad_fn/fw_grad properly set before we save them.
   if (is_executable) {
     _save_variables(cdata, grad_fn);
   } else {
@@ -622,6 +707,7 @@ PyObject *THPFunction_apply(PyObject *cls, PyObject *inputs)
   THPObjectPtr tensor_outputs;
   {
     AutoGradMode grad_mode(false);
+    at::AutoFwGradMode fw_grad_mode(false);
     THPObjectPtr forward_fn(PyObject_GetAttrString(cls, "forward"));
     if (!forward_fn) return nullptr;
     tensor_outputs = PyObject_CallObject(forward_fn, ctx_input_tuple);
@@ -743,6 +829,27 @@ PyObject *THPFunction_saved_variables(THPFunction *self, void *_unused)
   END_HANDLE_TH_ERRORS
 }
 
+PyObject *THPFunction_raw_saved_tensors(THPFunction *self, void *_unused)
+{
+  HANDLE_TH_ERRORS
+  // User tries to access saved variables after they have been freed
+  THPUtils_assert(!self->has_freed_buffers, ERR_BACKWARD_TWICE);
+  const auto& saved_variables = self->saved_variables;
+  if (saved_variables.empty())
+    return PyTuple_New(0);
+  size_t num_saved = saved_variables.size();
+  THPObjectPtr saved(PyTuple_New(num_saved));
+  if (!saved) {
+    return nullptr;
+  }
+  for(const auto i : c10::irange(num_saved)) {
+    py::object obj = py::cast(saved_variables[i], py::return_value_policy::reference);
+    PyTuple_SET_ITEM(saved.get(), i, obj.release().ptr());
+  }
+  return saved.release();
+  END_HANDLE_TH_ERRORS
+}
+
 PyObject *THPFunction_next_functions(THPFunction *self, void *_unused)
 {
   HANDLE_TH_ERRORS
@@ -845,6 +952,7 @@ PyObject* getRequiresGrad(PyObject* obj, void* _unused) {
 static struct PyGetSetDef THPFunction_properties[] = {
   {"saved_tensors", (getter)THPFunction_saved_tensors, nullptr, nullptr, nullptr},
   {"saved_variables", (getter)THPFunction_saved_variables, nullptr, nullptr, nullptr},
+  {"_raw_saved_tensors", (getter)THPFunction_raw_saved_tensors, nullptr, nullptr, nullptr},
   {"next_functions", (getter)THPFunction_next_functions, nullptr, nullptr, nullptr},
   {"to_save", &getObject<&THPFunction::to_save>, &setObject<&THPFunction::to_save>, nullptr, nullptr},
   {"non_differentiable", &getObject<&THPFunction::non_differentiable>, &setObject<&THPFunction::non_differentiable>, nullptr, nullptr},
@@ -865,14 +973,12 @@ static struct PyMethodDef THPFunction_methods[] = {
   {nullptr}
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 PyTypeObject THPFunctionType = {
   PyVarObject_HEAD_INIT(nullptr, 0)
   "torch._C._FunctionBase",                    /* tp_name */
   sizeof(THPFunction),                         /* tp_basicsize */
   0,                                           /* tp_itemsize */
   (destructor)THPFunction_dealloc,             /* tp_dealloc */
-  // NOLINTNEXTLINE(modernize-use-nullptr)
   0,                                           /* tp_vectorcall_offset */
   nullptr,                                     /* tp_getattr */
   nullptr,                                     /* tp_setattr */

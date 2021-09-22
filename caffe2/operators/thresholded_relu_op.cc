@@ -49,15 +49,12 @@ bool ThresholdedReluGradientOp<float, CPUContext>::RunOnDevice() {
   return true;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(ThresholdedRelu, ThresholdedReluOp<float, CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     ThresholdedReluGradient,
     ThresholdedReluGradientOp<float, CPUContext>);
 
 // Input: X, output: Y
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(ThresholdedRelu)
     .NumInputs(1)
     .NumOutputs(1)
@@ -74,7 +71,6 @@ otherwise, is applied to the tensor elementwise.
     .Output(0, "Y", "1D input tensor");
 
 // Input: Y, dY, output: dX
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(ThresholdedReluGradient)
     .NumInputs(2)
     .NumOutputs(1)
@@ -94,7 +90,6 @@ class GetThresholdedReluGradient : public GradientMakerBase {
         vector<string>{GI(0)});
   }
 };
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(ThresholdedRelu, GetThresholdedReluGradient);
 
 } // namespace caffe2

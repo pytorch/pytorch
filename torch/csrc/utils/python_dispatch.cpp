@@ -6,6 +6,7 @@
 #include <ATen/core/dispatch/Dispatcher.h>
 
 #include <pybind11/operators.h>
+#include <pybind11/stl.h>
 
 #include <iostream>
 
@@ -31,6 +32,7 @@ c10::optional<c10::DispatchKey> parseDispatchKey(const std::string& k) {
     {"CPU", c10::DispatchKey::CPU},
     {"CUDA", c10::DispatchKey::CUDA},
     {"XLA", c10::DispatchKey::XLA},
+    {"Lazy", c10::DispatchKey::Lazy},
     {"QuantizedCPU", c10::DispatchKey::QuantizedCPU},
     {"CompositeImplicitAutograd", c10::DispatchKey::CompositeImplicitAutograd},
     {"Autograd", c10::DispatchKey::Autograd},
@@ -183,6 +185,18 @@ void initDispatchBindings(PyObject* module) {
 
   m.def("_dispatch_check_all_invariants", []() {
     c10::Dispatcher::singleton().checkInvariants();
+  });
+
+  m.def("_dispatch_find_dangling_impls", []() -> std::vector<std::string> {
+    auto danglingImpls =  c10::Dispatcher::singleton().findDanglingImpls();
+
+    std::vector<std::string> states;
+    states.reserve(danglingImpls.size());
+    for (auto& danglingImpl : danglingImpls) {
+      states.push_back(danglingImpl.dumpState());
+    }
+
+    return states;
   });
 }
 

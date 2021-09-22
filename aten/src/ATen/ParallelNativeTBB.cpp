@@ -21,8 +21,8 @@
 namespace at {
 
 namespace {
-static thread_local tbb::task_scheduler_init tbb_init_(intraop_default_num_threads());
 static thread_local tbb::task_group tg_;
+thread_local int this_thread_id{0};
 
 std::mutex global_thread_mutex_;
 std::shared_ptr<tbb::global_control> global_thread_limit_ = nullptr;
@@ -32,14 +32,14 @@ void _internal_set_num_threads(int nthreads) {
   TORCH_INTERNAL_ASSERT(nthreads > 0);
   {
     std::unique_lock<std::mutex> lk(global_thread_mutex_);
+    // This is an antipattern and we shouldn't be constraining the number of
+    // threads in library code.
+    // TODO: Think of a smarter way to leverage tbb::thread_arena to limit the
+    // number of slots instead of the number of threads.
     global_thread_limit_ = std::make_shared<tbb::global_control>(
         tbb::global_control::max_allowed_parallelism, nthreads);
     num_intraop_threads_.store(nthreads);
   }
-  if (tbb_init_.is_active()) {
-    tbb_init_.terminate();
-  }
-  tbb_init_.initialize(nthreads);
 }
 }
 
@@ -66,12 +66,19 @@ void set_num_threads(int nthreads) {
 }
 
 int get_num_threads() {
-  return tbb::this_task_arena::max_concurrency();
+  at::internal::lazy_init_num_threads();
+  return tbb::global_control::active_value(
+      tbb::global_control::max_allowed_parallelism);
 }
 
 int get_thread_num() {
-  auto tid = tbb::this_task_arena::current_thread_index();
-  return std::max(tid, 0);
+  return this_thread_id;
+}
+
+namespace internal {
+void set_thread_num(int id) {
+  this_thread_id = id;
+}
 }
 
 bool in_parallel_region() {

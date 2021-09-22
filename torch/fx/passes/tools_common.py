@@ -4,6 +4,7 @@ from dataclasses import dataclass
 import torch
 import torch.fx
 from torch.fx.node import _get_qualified_name
+from torch.fx._compatibility import compatibility
 
 
 Tensors = Union[Tuple[torch.Tensor], List[torch.Tensor]]
@@ -13,7 +14,7 @@ NodeSet = Set[torch.fx.Node]
 Names = List[str]
 CALLABLE_NODE_OPS = {"call_module", "call_function", "call_method"}
 
-
+@compatibility(is_backward_compatible=False)
 def get_node_target(submodules: Dict[str, torch.nn.Module], node: torch.fx.Node) -> str:
     """
     Given a `node` returns its target typename.
@@ -40,14 +41,25 @@ def get_node_target(submodules: Dict[str, torch.nn.Module], node: torch.fx.Node)
         target: Any = node.target
         return (
             f"acc_ops.{target.__name__}"
-            if target.__module__ == "glow.fb.fx.acc_ops"
+            if target.__module__ is not None and "acc_ops" in target.__module__
             else _get_qualified_name(target)
         )
     else:
         assert isinstance(node.target, str)
         return node.target
 
+@compatibility(is_backward_compatible=False)
+def is_node_output_tensor(node: torch.fx.Node) -> bool:
+    """Checks if the node output produces a Tensor or not.
 
+    NOTE: This requires to run `ShapeProp` on the containing fx graph before
+    calling this function. This is because it works by checking the `type`
+    metadata on the node. This metadata is produced by the `ShapeProp`.
+    """
+    type_ = node.meta.get("type", None)
+    return type_ is not None and issubclass(type_, torch.Tensor)
+
+@compatibility(is_backward_compatible=False)
 class FxNetAccFusionsFinder:
     """
     Finds groups of connected ACC nodes that pass non-tensor data between each other.

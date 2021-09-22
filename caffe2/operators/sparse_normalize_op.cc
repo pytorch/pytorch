@@ -108,9 +108,7 @@ bool SparseNormalizeOp<c10::Half, CPUContext>::DoRunWithType() {
   return true;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(SparseNormalize, SparseNormalizeOp<float, CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SparseNormalize)
     .NumInputs(2, 3)
     .NumOutputs(1)
@@ -137,12 +135,9 @@ OPERATOR_SCHEMA(SparseNormalize)
 Given a sparse matrix, apply max_norm or constant_norm sparse regularization.
 )DOC");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(SparseNormalize);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(Float16SparseNormalize, SparseNormalizeOp<c10::Half, CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Float16SparseNormalize)
     .NumInputs(2, 3)
     .NumOutputs(1)
@@ -169,6 +164,5 @@ OPERATOR_SCHEMA(Float16SparseNormalize)
 Given a sparse matrix, apply max_norm or constant_norm sparse regularization.
 )DOC");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(Float16SparseNormalize);
 } // namespace caffe2

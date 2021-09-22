@@ -1,14 +1,3 @@
-#include <pthread.h>
-#include <algorithm>
-#include <atomic>
-#include <chrono>
-#include <iostream>
-#include <sstream>
-#include <thread>
-#include <vector>
-
-// NOLINTNEXTLINE(modernize-deprecated-headers)
-#include <assert.h>
 #include <torch/deploy.h>
 
 #include <ATen/ATen.h>
@@ -16,6 +5,16 @@
 #include <c10/util/irange.h>
 
 #include <torch/script.h>
+
+#include <pthread.h>
+#include <algorithm>
+#include <atomic>
+#include <cassert>
+#include <chrono>
+#include <iostream>
+#include <sstream>
+#include <thread>
+#include <vector>
 
 typedef void (*function_type)(const char*);
 
@@ -63,6 +62,7 @@ struct RunPython {
     }
     return I.create_movable(obj);
   }
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   RunPython(
       torch::deploy::Package& package,
       std::vector<at::IValue> eg,
@@ -71,6 +71,7 @@ struct RunPython {
   void operator()(int i) {
     auto I = obj_.acquire_session();
     if (cuda) {
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       std::vector<at::IValue> eg2 = {i};
       eg2.insert(eg2.end(), eg_.begin(), eg_.end());
       I.self(eg2);
@@ -176,6 +177,7 @@ struct Benchmark {
         should_run_(true),
         items_completed_(0),
         reached_min_items_completed_(0) {
+    // NOLINTNEXTLINE(bugprone-branch-clone)
     if (strategy == "one_python") {
       manager.debugLimitInterpreters(1);
     } else if (strategy == "multi_python") {
@@ -186,8 +188,10 @@ struct Benchmark {
   Report run() {
     pthread_barrier_init(&first_run_, nullptr, n_threads_ + 1);
 
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     torch::deploy::Package package = manager_.load_package(file_to_run_);
 
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     std::vector<at::IValue> eg;
     {
       auto I = package.acquire_session();
@@ -199,6 +203,7 @@ struct Benchmark {
                ->elements();
     }
 
+    // NOLINTNEXTLINE(bugprone-branch-clone)
     if (strategy_ == "jit") {
       run_one_work_item = RunJIT(file_to_run_, std::move(eg));
     } else {
@@ -206,6 +211,7 @@ struct Benchmark {
           RunPython(package, std::move(eg), manager_.all_instances().data());
     }
 
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     std::vector<std::vector<double>> latencies(n_threads_);
 
     for (const auto i : c10::irange(n_threads_)) {
@@ -245,6 +251,7 @@ struct Benchmark {
       thread.join();
     }
     auto end = std::chrono::steady_clock::now();
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     double total_seconds = std::chrono::duration<double>(end - begin).count();
     Report report;
     report.benchmark = file_to_run_;
@@ -261,6 +268,7 @@ struct Benchmark {
   void reportLatencies(
       std::vector<double>& results,
       const std::vector<std::vector<double>>& latencies) {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     std::vector<double> flat_latencies;
     for (const auto& elem : latencies) {
       flat_latencies.insert(flat_latencies.end(), elem.begin(), elem.end());
@@ -287,9 +295,11 @@ struct Benchmark {
   std::function<void(int)> run_one_work_item;
 };
 
+// NOLINTNEXTLINE(bugprone-exception-escape)
 int main(int argc, char* argv[]) {
   int max_thread = atoi(argv[1]);
   cuda = std::string(argv[2]) == "cuda";
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   bool jit_enable = std::string(argv[3]) == "jit";
   Report::report_header(std::cout);
   torch::deploy::InterpreterManager manager(max_thread);

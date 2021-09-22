@@ -15,7 +15,7 @@ import platform
 import textwrap
 import ctypes
 import warnings
-
+from .autocast_mode import autocast
 if sys.version_info < (3,):
     raise Exception("Python 2 has reached end-of-life and is no longer supported by PyTorch.")
 
@@ -26,7 +26,8 @@ from ._utils_internal import get_file_path, prepare_multiprocessing_environment,
 if sys.executable == 'torch_deploy':
     __version__ = "torch-deploy-1.8"
 else:
-    from .version import __version__ as __version__
+    from .torch_version import __version__ as __version__
+
 from ._six import string_classes as _string_classes
 
 from typing import Set, Type, TYPE_CHECKING
@@ -40,8 +41,8 @@ __all__ = [
     'ShortStorage', 'CharStorage', 'ByteStorage', 'BoolStorage',
     'DoubleTensor', 'FloatTensor', 'LongTensor', 'IntTensor',
     'ShortTensor', 'CharTensor', 'ByteTensor', 'BoolTensor', 'Tensor',
-    'lobpcg', 'use_deterministic_algorithms', 'set_deterministic',
-    'are_deterministic_algorithms_enabled', 'is_deterministic',
+    'lobpcg', 'use_deterministic_algorithms',
+    'are_deterministic_algorithms_enabled',
     'set_warn_always', 'is_warn_always_enabled',
 ]
 
@@ -105,8 +106,7 @@ if sys.platform == 'win32':
     try:
         ctypes.CDLL('vcruntime140.dll')
         ctypes.CDLL('msvcp140.dll')
-        if cuda_version not in ('9.2', '10.0'):
-            ctypes.CDLL('vcruntime140_1.dll')
+        ctypes.CDLL('vcruntime140_1.dll')
     except OSError:
         print('''Microsoft Visual C++ Redistributable is not installed, this may lead to the DLL load failure.
                  It can be downloaded at https://aka.ms/vs/16/release/vc_redist.x64.exe''')
@@ -322,29 +322,44 @@ def set_default_tensor_type(t):
 
 
 def set_default_dtype(d):
-    r"""Sets the default floating point dtype to :attr:`d`.
-    This dtype is:
+    r"""
 
-    1. The inferred dtype for python floats in :func:`torch.tensor`.
-    2. Used to infer dtype for python complex numbers. The default complex dtype is set to
-       ``torch.complex128`` if default floating point dtype is ``torch.float64``,
-       otherwise it's set to ``torch.complex64``
+    Sets the default floating point dtype to :attr:`d`. Supports torch.float32
+    and torch.float64 as inputs. Other dtypes may be accepted without complaint
+    but are not supported and are unlikely to work as expected.
 
-    The default floating point dtype is initially ``torch.float32``.
+    When PyTorch is initialized its default floating point dtype is torch.float32,
+    and the intent of set_default_dtype(torch.float64) is to facilitate NumPy-like
+    type inference. The default floating point dtype is used to:
+
+    1. Implicitly determine the default complex dtype. When the default floating point
+       type is float32 the default complex dtype is complex64, and when the default
+       floating point type is float64 the default complex type is complex128.
+    2. Infer the dtype for tensors constructed using Python floats or complex Python
+       numbers. See examples below.
+    3. Determine the result of type promotion between bool and integer tensors and
+       Python floats and complex Python numbers.
 
     Args:
-        d (:class:`torch.dtype`): the floating point dtype to make the default
+        d (:class:`torch.dtype`): the floating point dtype to make the default.
+                                  Either torch.float32 or torch.float64.
 
     Example:
         >>> # initial default for floating point is torch.float32
+        >>> # Python floats are interpreted as float32
         >>> torch.tensor([1.2, 3]).dtype
         torch.float32
         >>> # initial default for floating point is torch.complex64
+        >>> # Complex Python numbers are interpreted as complex64
         >>> torch.tensor([1.2, 3j]).dtype
         torch.complex64
+
         >>> torch.set_default_dtype(torch.float64)
+
+        >>> # Python floats are now interpreted as float64
         >>> torch.tensor([1.2, 3]).dtype    # a new floating point tensor
         torch.float64
+        >>> # Complex Python numbers are now interpreted as complex128
         >>> torch.tensor([1.2, 3j]).dtype   # a new complex tensor
         torch.complex128
 
@@ -468,31 +483,11 @@ def use_deterministic_algorithms(mode):
     """
     _C._set_deterministic_algorithms(mode)
 
-def set_deterministic(d):
-    r"""This function is deprecated and will be removed in a future release.
-    Please use :func:`torch.use_deterministic_algorithms` instead.
-    """
-    warnings.warn((
-        "torch.set_deterministic is deprecated and will be removed in a future "
-        "release. Please use torch.use_deterministic_algorithms instead"))
-
-    use_deterministic_algorithms(d)
-
 def are_deterministic_algorithms_enabled():
     r"""Returns True if the global deterministic flag is turned on. Refer to
     :func:`torch.use_deterministic_algorithms` documentation for more details.
     """
     return _C._get_deterministic_algorithms()
-
-def is_deterministic():
-    r"""This function is deprecated and will be removed in a future release.
-    Please use :func:`torch.are_deterministic_algorithms_enabled` instead.
-    """
-    warnings.warn((
-        "torch.is_deterministic is deprecated and will be removed in a future "
-        "release. Please use torch.are_deterministic_algorithms_enabled instead"))
-    return are_deterministic_algorithms_enabled()
-
 
 def set_warn_always(b):
     r"""When this flag is False (default) then some PyTorch warnings may only
@@ -628,8 +623,14 @@ if TYPE_CHECKING:
     # PR #43339 for details.
     from torch._C._VariableFunctions import *  # type: ignore[misc] # noqa: F403
 
+# Ops not to be exposed in `torch` namespace,
+# mostly helper ops.
+PRIVATE_OPS = (
+    'unique_dim',
+)
+
 for name in dir(_C._VariableFunctions):
-    if name.startswith('__'):
+    if name.startswith('__') or name in PRIVATE_OPS:
         continue
     globals()[name] = getattr(_C._VariableFunctions, name)
     __all__.append(name)
@@ -762,3 +763,21 @@ from ._vmap_internals import vmap as vmap
 # class usage. We add these lines here to preserve backward compatibility.
 quantized_lstm = torch.ops.aten.quantized_lstm
 quantized_gru = torch.ops.aten.quantized_gru
+
+from torch.utils.dlpack import from_dlpack, to_dlpack
+
+
+def _register_device_module(device_type, module):
+    r"""Register an external runtime module of the specific :attr:`device_type`
+    supported by torch.
+
+    After the :attr:`module` is registered correctly, the user can refer
+    the external runtime module as part of torch with attribute torch.xxx.
+    """
+    # Make sure the device_type represent a supported device type for torch.
+    device_type = torch.device(device_type).type
+    m = sys.modules[__name__]
+    if hasattr(m, device_type):
+        raise RuntimeError("The runtime module of '{}' has already "
+                           "been registered with '{}'".format(device_type, getattr(m, device_type)))
+    setattr(m, device_type, module)

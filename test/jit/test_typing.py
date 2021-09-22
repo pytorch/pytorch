@@ -2,6 +2,7 @@ import os
 import sys
 
 import torch
+from torch.testing import FileCheck
 from torch.testing._internal.jit_utils import JitTestCase
 from torch.testing._internal.common_utils import IS_WINDOWS
 from collections import namedtuple
@@ -73,11 +74,120 @@ class TestTyping(JitTestCase):
         self.checkScript(test_dict_tensor_key, (dict_a, inp1))
         self.checkScript(test_dict_tensor_key, (dict_a, inp2))
 
-    def test_dict_types(self):
-        with self.assertRaisesRegex(RuntimeError, "single type"):
-            @torch.jit.script
-            def foo():
-                new_item = {'score': [1.0], 'ys': [1, 2, 3]}
+    def test_list_type_refinement_defaults_to_Any_list_creation(self):
+        def fn(x):
+            tup1 = ("foo", torch.tensor(2))
+            tup2 = ("bar", {"23": torch.tensor(3)})
+            tup3 = ("baz", x)
+            l = list((tup1, tup2))  # noqa: C410
+            l.append(tup3)
+            tup4 = l[0]
+            if torch.jit.isinstance(tup4, Tuple[str, torch.Tensor]):
+                t = tup4[1]
+                if isinstance(t, torch.Tensor):
+                    l[0] = (tup4[0], torch.add(t, t))
+            return l
+
+        self.checkScript(fn, (torch.arange(5),))
+
+        graph = torch.jit.script(fn).graph
+
+        # Check that we're making a `List[Tuple[str, Any]]`
+        FileCheck().check("(str, Union[Tensor, Dict(str, Tensor)])"
+                          "[] = prim::ListConstruct()").run(graph)
+
+    def test_list_type_refinement_defaults_to_Any_list_comprehension(self):
+        def fn(x):
+            tup1 = ("foo", torch.tensor(2))
+            tup2 = ("bar", {"23": torch.tensor(3)})
+            tup3 = ("baz", x)
+            l_ = [tup1, tup2]
+            l = [t for t in l_]    # noqa: C416
+            l.append(tup3)
+            tup4 = l[0]
+            if torch.jit.isinstance(tup4, Tuple[str, torch.Tensor]):
+                t = tup4[1]
+                if isinstance(t, torch.Tensor):
+                    l[0] = (tup4[0], torch.add(t, t))
+            return l
+
+        self.checkScript(fn, (torch.arange(5),))
+
+        graph = torch.jit.script(fn).graph
+
+        # Check that we're making a `List[Tuple[str, Any]]`
+        FileCheck().check("(str, Union[Tensor, Dict(str, Tensor)])"
+                          "[] = prim::ListConstruct()").run(graph)
+
+    def test_list_type_refinement_annotation_element_mismatch(self):
+        def fn():
+            l: List[int] = [1, 2, "foo", 3]
+            return l
+
+        with self.assertRaisesRegex(RuntimeError, "List type annotation"
+                                    r" `List\[int\]` did not match the "
+                                    "types of the given list elements"):
+            torch.jit.script(fn)
+
+    def test_dict_type_refinement_defaults_to_Any_dict_creation(self):
+        def fn(x):
+            d = dict(foo=torch.tensor(2),
+                     bar={"23": torch.tensor(3)})
+            d["baz"] = x
+            t = d["foo"]
+            if isinstance(t, torch.Tensor):
+                d["bar"] = torch.add(t, t)
+            return d
+
+        self.checkScript(fn, (torch.arange(5),))
+
+        graph = torch.jit.script(fn).graph
+
+        FileCheck().check("Dict(str, Union[Tensor, Dict(str, Tensor)])"
+                          " = prim::DictConstruct").run(graph)
+
+    def test_dict_type_refinement_defaults_to_Any_dict_comprehension(self):
+        def fn(x):
+            d = {"foo": torch.tensor(2),
+                 "bar": {"23": torch.tensor(3)}}
+            d["baz"] = x
+            t = d["foo"]
+            if isinstance(t, torch.Tensor):
+                d["bar"] = torch.add(t, t)
+            return d
+
+        self.checkScript(fn, (torch.arange(5),))
+
+        graph = torch.jit.script(fn).graph
+
+        FileCheck().check("Dict(str, Union[Tensor, Dict(str, Tensor)])"
+                          " = prim::DictConstruct").run(graph)
+
+    def test_dict_type_refinement_annotation_key_mismatch(self):
+        def fn():
+            l1 = [1, 2, "foo", 3]
+            l2 = ["foo", "bar", "baz", "qux"]
+            d: Dict[int, str] = {k : v for k, v in zip(l1, l2)}
+            return d
+
+        with self.assertRaisesRegex(RuntimeError, "Dicts may only "
+                                    "contain homogeneous keys, but the "
+                                    "type of the first generated key "
+                                    r"was Union\[int, str\]"):
+            torch.jit.script(fn)
+
+    def test_dict_type_refinement_annotation_value_mismatch(self):
+        def fn():
+            l1 = ["foo", "bar", "baz", "qux"]
+            l2 = [1, 2, "foo", 3]
+            d: Dict[str, int] = {k : v for k, v in zip(l1, l2)}
+            return d
+
+        with self.assertRaisesRegex(RuntimeError, "annotated with type "
+                                    r"Dict\[str, int\] but is being "
+                                    "assigned to a value of type "
+                                    r"Dict\[str, Union\[int, str\]\]"):
+            torch.jit.script(fn)
 
     def test_dict_invalid_annotations(self):
         # Check for invalid value type annotation
@@ -199,16 +309,6 @@ class TestTyping(JitTestCase):
 
         self.checkScript(fn, [])
         self.checkScript(fn2, (torch.ones(2, 2),))
-
-        with self.assertRaisesRegex(RuntimeError, "Could not unify"):
-            @torch.jit.script
-            def fn():
-                return [1, 1.2]
-
-        with self.assertRaisesRegex(RuntimeError, "Could not unify"):
-            @torch.jit.script
-            def fn():
-                return [1, torch.ones(1, 2)]
 
     # to avoid defining sum_list in multiple tests
     def get_sum_list_fn(self):
@@ -532,7 +632,7 @@ class TestTyping(JitTestCase):
         self.checkScript(fn, ((3, 4),))
         self.checkScript(fn, ())
 
-    def test_named_tuple_redefine(self):
+    def test_namedtuple_redefine(self):
         global _1, _2
         _1 = namedtuple('GoogLeNetOutputs', ['logits', 'aux_logits2', 'aux_logits1'])
         _2 = namedtuple('GoogLeNetOutputs', ['different'])
@@ -543,7 +643,7 @@ class TestTyping(JitTestCase):
                 # type: (_1, _2) -> _1
                 return x
 
-    def test_named_tuple_py2(self):
+    def test_namedtuple_py2(self):
         global _GoogLeNetOutputs  # see [local resolution in python]
         _GoogLeNetOutputs = namedtuple('GoogLeNetOutputs', ['logits', 'aux_logits2', 'aux_logits1'])
 
@@ -558,7 +658,7 @@ class TestTyping(JitTestCase):
         self.assertEqual(out.aux_logits2, vals[1])
         self.assertEqual(out.aux_logits1, vals[2])
 
-    def test_named_tuple_good_error(self):
+    def test_namedtuple_good_error(self):
         global _GoogLeNetOutputs  # see [local resolution in python]
         _GoogLeNetOutputs = namedtuple('GoogLeNetOutputs', ['logits', 'aux_logits2', 'aux_logits1'])
 

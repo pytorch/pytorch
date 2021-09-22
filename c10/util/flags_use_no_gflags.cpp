@@ -12,11 +12,9 @@ namespace c10 {
 
 using std::string;
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_REGISTRY(C10FlagsRegistry, C10FlagParser, const string&);
 
 namespace {
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static bool gCommandLineFlagsParsed = false;
 // Since flags is going to be loaded before logging, we would
 // need to have a stringstream to hold the messages instead of directly
@@ -25,7 +23,6 @@ std::stringstream& GlobalInitStream() {
   static std::stringstream ss;
   return ss;
 }
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static const char* gUsageMessage = "(Usage message not set.)";
 } // namespace
 

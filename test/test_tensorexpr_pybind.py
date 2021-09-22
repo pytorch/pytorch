@@ -9,23 +9,14 @@ import unittest
 LLVM_ENABLED = torch._C._llvm_enabled()
 
 
-class kernel_arena_scope(object):
-    def __enter__(self):
-        self.scope = torch._C._te.KernelScope()
-
-    def __exit__(self, typ, val, traceback):
-        self.scope = None
-
-
-def construct_adder(n: int, dtype=te.Dtype.Float):
-    dN = te.ExprHandle.int(n)
-    A = te.Placeholder('A', dtype, [dN])
-    B = te.Placeholder('B', dtype, [dN])
+def construct_adder(n: int, dtype=torch.float32):
+    A = te.BufHandle('A', [n], dtype)
+    B = te.BufHandle('B', [n], dtype)
 
     def compute(i):
         return A.load([i]) + B.load([i])
 
-    C = te.Compute('C', [te.DimArg(dN, 'i')], compute)
+    C = te.Compute('C', [n], compute)
 
     loopnest = te.LoopNest([C])
     loopnest.prepare_for_codegen()
@@ -36,85 +27,75 @@ def construct_adder(n: int, dtype=te.Dtype.Float):
 
 class TestTensorExprPyBind(JitTestCase):
     def test_simple_sum(self):
-        with kernel_arena_scope():
-            n = 32
-            cg = construct_adder(n)
+        n = 32
+        cg = construct_adder(n)
 
-            tA = torch.randn(n)
-            tB = torch.randn(n)
-            tC = torch.empty(n)
-            cg.call([tA, tB, tC])
-            torch.testing.assert_allclose(tA + tB, tC)
+        tA = torch.randn(n)
+        tB = torch.randn(n)
+        tC = torch.empty(n)
+        cg.call([tA, tB, tC])
+        torch.testing.assert_close(tA + tB, tC)
 
     def test_call_raw(self):
-        with kernel_arena_scope():
-            n = 16
-            cg = construct_adder(n, dtype=torch.float64)
+        n = 16
+        cg = construct_adder(n, dtype=torch.float64)
 
-            tA = torch.randn(n, dtype=torch.float64)
-            tB = torch.randn(n, dtype=torch.float64)
-            tC = torch.empty(n, dtype=torch.float64)
-            cg.call_raw([tA.data_ptr(), tB.data_ptr(), tC.data_ptr()])
-            torch.testing.assert_allclose(tA + tB, tC)
+        tA = torch.randn(n, dtype=torch.float64)
+        tB = torch.randn(n, dtype=torch.float64)
+        tC = torch.empty(n, dtype=torch.float64)
+        cg.call_raw([tA.data_ptr(), tB.data_ptr(), tC.data_ptr()])
+        torch.testing.assert_close(tA + tB, tC)
 
     def test_external_calls(self):
-        with kernel_arena_scope():
-            dtype = torch.float32
+        dtype = torch.float32
 
-            ONE = te.ExprHandle.int(1)
-            FOUR = te.ExprHandle.int(4)
-            A = te.BufHandle('A', [ONE, FOUR], dtype)
-            B = te.BufHandle('B', [FOUR, ONE], dtype)
-            C = te.BufHandle('C', [ONE, ONE], dtype)
+        A = te.BufHandle('A', [1, 4], dtype)
+        B = te.BufHandle('B', [4, 1], dtype)
+        C = te.BufHandle('C', [1, 1], dtype)
 
-            s = te.ExternalCall(C, "nnc_aten_matmul", [A, B], [])
+        s = te.ExternalCall(C, "nnc_aten_matmul", [A, B], [])
 
-            loopnest = te.LoopNest(s, [C])
-            loopnest.prepare_for_codegen()
-            codegen = te.construct_codegen('ir_eval', s, [te.BufferArg(x) for x in [A, B, C]])
+        loopnest = te.LoopNest(s, [C])
+        loopnest.prepare_for_codegen()
+        codegen = te.construct_codegen('ir_eval', s, [A, B, C])
 
-            tA = torch.ones(1, 4)
-            tB = torch.ones(4, 1)
-            tC = torch.empty(1, 1)
-            codegen.call([tA, tB, tC])
-            torch.testing.assert_allclose(torch.matmul(tA, tB), tC)
+        tA = torch.ones(1, 4)
+        tB = torch.ones(4, 1)
+        tC = torch.empty(1, 1)
+        codegen.call([tA, tB, tC])
+        torch.testing.assert_close(torch.matmul(tA, tB), tC)
 
     def test_dynamic_shape(self):
-        with kernel_arena_scope():
-            dN = te.VarHandle(torch.int32)
-            A = te.BufHandle(torch.float64)
-            B = te.BufHandle(torch.float64)
+        dN = te.VarHandle(torch.int32)
+        A = te.BufHandle(torch.float64)
+        B = te.BufHandle(torch.float64)
 
-            def compute(i):
-                return A.load(i) - B.load(i)
+        def compute(i):
+            return A.load(i) - B.load(i)
 
-            C = te.Compute('C', [dN], compute)
+        C = te.Compute('C', [dN], compute)
 
-            loopnest = te.LoopNest([C])
-            loopnest.prepare_for_codegen()
+        loopnest = te.LoopNest([C])
+        loopnest.prepare_for_codegen()
 
-            cg = te.construct_codegen(
-                'ir_eval',
-                loopnest.simplify(),
-                [A, B, C, dN])
+        cg = te.construct_codegen(
+            'ir_eval',
+            loopnest.simplify(),
+            [A, B, C, dN])
 
-            def test_with_shape(n):
-                tA = torch.randn(n, dtype=torch.double)
-                tB = torch.randn(n, dtype=torch.double)
-                tC = torch.empty(n, dtype=torch.double)
-                cg.call([tA, tB, tC, n])
-                torch.testing.assert_allclose(tA - tB, tC)
+        def test_with_shape(n):
+            tA = torch.randn(n, dtype=torch.double)
+            tB = torch.randn(n, dtype=torch.double)
+            tC = torch.empty(n, dtype=torch.double)
+            cg.call([tA, tB, tC, n])
+            torch.testing.assert_close(tA - tB, tC)
 
-            test_with_shape(8)
-            test_with_shape(31)
+        test_with_shape(8)
+        test_with_shape(31)
 
     def test_dtype_error(self):
-        with kernel_arena_scope():
-            one = te.ExprHandle.int(1)
-            te.Placeholder([one], torch.float32)  # ok
-            te.Placeholder([one])  # ok
-            self.assertRaises(TypeError,
-                              lambda: te.Placeholder([one], "float55"))
+        te.BufHandle('a', [1], torch.float32)  # ok
+        self.assertRaises(TypeError, lambda: te.BufHandle('a', [1], "float55"))
 
     @unittest.skipIf(not LLVM_ENABLED, "LLVM backend not enabled")
     def test_kernel_with_tensor_inputs(self):
@@ -137,7 +118,7 @@ graph(%a.1 : Float(4, 4, strides=[4, 1], requires_grad=0, device=cpu),
         """
         graph = torch._C.parse_ir(graph_str)
 
-        kernel = torch._C._te.TensorExprKernel(graph)
+        kernel = te.TensorExprKernel(graph)
         res1 = kernel.run((x, y, z))
         res2 = kernel.fallback((x, y, z))
         correct = f(x, y, z)
@@ -164,7 +145,7 @@ graph(%a.1 : Float(requires_grad=0, device=cpu),
         """
         graph = torch._C.parse_ir(graph_str)
 
-        kernel = torch._C._te.TensorExprKernel(graph)
+        kernel = te.TensorExprKernel(graph)
         res1 = kernel.run((x, y, z))
         res2 = kernel.fallback((x, y, z))
         correct = f(x, y, z)
@@ -179,14 +160,14 @@ graph(%a.1 : Float(requires_grad=0, device=cpu),
 
         graph_str = """
 graph(%a : Tensor, %b : Tensor):
-  %c : Float(4, 4, strides=[4, 1], requires_grad=0, device=cpu) = aten::mul(%a, %b)
+  %c : Tensor = aten::mul(%a, %b)
   return (%c)
         """
         graph = torch._C.parse_ir(graph_str)
 
         exception_thrown = False
         try:
-            kernel = torch._C._te.TensorExprKernel(graph)
+            kernel = te.TensorExprKernel(graph)
         except RuntimeError:
             # Graph doesn't have shape info for inputs => compilation should
             # fail
@@ -197,20 +178,16 @@ graph(%a : Tensor, %b : Tensor):
         # Inject shape info and try compiling again
         example_inputs = [torch.rand(4, 4), torch.rand(4, 4)]
         torch._C._te.annotate_input_shapes(graph, example_inputs)
-
-        # TODO: once we have shape propagation as well we should erase type
-        # info for %c from the input IR and run shape propagation here - it
-        # should be able to reconstruct that info
+        torch._C._jit_pass_propagate_shapes_on_graph(graph)
 
         # Now compilation should pass
-        kernel = torch._C._te.TensorExprKernel(graph)
+        kernel = te.TensorExprKernel(graph)
 
         res = kernel.run((x, y))
         correct = torch.mul(x, y)
         np.testing.assert_allclose(res.numpy(), correct.numpy(), atol=1e-5)
 
     @unittest.skipIf(not LLVM_ENABLED, "LLVM backend not enabled")
-    @unittest.skip("Does not work until shape propagation is implemented")
     def test_kernel_shape_prop_module(self):
         class TestModule(torch.nn.Module):
             def forward(self, x, y):
@@ -222,7 +199,7 @@ graph(%a : Tensor, %b : Tensor):
         # shape info.
         exception_thrown = False
         try:
-            kernel = torch._C._te.TensorExprKernel(graph)
+            kernel = te.TensorExprKernel(graph)
         except RuntimeError:
             exception_thrown = True
             pass
@@ -241,17 +218,14 @@ graph(%a : Tensor, %b : Tensor):
         assert exception_thrown
 
         # Remove 'self' argument and try annotating shapes one more time
-        graph = torch._C._te.remove_unused_self_argument(graph)
+        torch._C._te.remove_unused_self_argument(graph)
 
         # Inject shape info and try compiling again
         torch._C._te.annotate_input_shapes(graph, example_inputs)
-
-        # TODO: once we have shape propagation as well we should erase type
-        # info for %c from the input IR and run shape propagation here - it
-        # should be able to reconstruct that info
+        torch._C._jit_pass_propagate_shapes_on_graph(graph)
 
         # Now compilation should pass
-        kernel = torch._C._te.TensorExprKernel(graph)
+        kernel = te.TensorExprKernel(graph)
 
         device, size = 'cpu', (4, 4)
         x = torch.rand(size, device=device)
@@ -276,7 +250,7 @@ graph(%a.1 : Float(3, 4, strides=[4, 1], requires_grad=0, device=cpu)):
         """
         graph = torch._C.parse_ir(graph_str)
 
-        kernel = torch._C._te.TensorExprKernel(graph)
+        kernel = te.TensorExprKernel(graph)
         res1 = kernel.run((x,))
         res2 = kernel.fallback((x,))
         correct = f(x)
@@ -300,7 +274,7 @@ graph(%a.1 : Float(3, 4, strides=[4, 1], requires_grad=0, device=cpu)):
         """
         graph = torch._C.parse_ir(graph_str)
 
-        kernel = torch._C._te.TensorExprKernel(graph)
+        kernel = te.TensorExprKernel(graph)
         res1 = kernel.run((x,))
         res2 = kernel.fallback((x,))
         correct = f(x)
@@ -326,7 +300,42 @@ graph(%a.1 : Float(3, 4, 5, strides=[20, 5, 1], requires_grad=0, device=cpu)):
         """
         graph = torch._C.parse_ir(graph_str)
 
-        kernel = torch._C._te.TensorExprKernel(graph)
+        kernel = te.TensorExprKernel(graph)
+        res1 = kernel.run((x,))
+        res2 = kernel.fallback((x,))
+        correct = f(x)
+        np.testing.assert_allclose(res1.numpy(), correct.numpy(), atol=2e-3)
+        np.testing.assert_allclose(res2.numpy(), correct.numpy(), atol=2e-3)
+
+    @unittest.skipIf(not LLVM_ENABLED, "LLVM backend not enabled")
+    def test_kernel_with_custom_lowering(self):
+        def f(a):
+            return a.nan_to_num()
+
+        device = 'cpu'
+        x = torch.ones((2, 2), device=device)
+        x[0, 0] = x[1, 1] = torch.nan
+        graph_str = """
+graph(%x : Float(2, 2, strides=[2, 1], requires_grad=0, device=cpu)):
+    %none : NoneType = prim::Constant()
+    %y : Float(2, 2, strides=[2, 1], requires_grad=0, device=cpu) = aten::nan_to_num(%x, %none, %none, %none)
+    return (%y)
+        """
+        graph = torch._C.parse_ir(graph_str)
+
+        def my_custom_lowering(inputs, out_shape, out_type, device):
+            def get_dim_args(dims):
+                dim_args = []
+                for dim in dims:
+                    dim_args.append(te.DimArg(dim, 'i' + str(len(dim_args))))
+                return dim_args
+
+            def compute(idxs):
+                load = inputs[0].as_buf().load(idxs)
+                return te.ifThenElse(te.ExprHandle.isnan(load), te.ExprHandle.float(0.), load)
+            return te.Compute2("custom_nan_to_num", get_dim_args(out_shape), compute)
+
+        kernel = te.TensorExprKernel(graph, {'aten::nan_to_num' : my_custom_lowering})
         res1 = kernel.run((x,))
         res2 = kernel.fallback((x,))
         correct = f(x)
@@ -352,16 +361,28 @@ graph(%a : Float(1, 3, 1, strides=[3, 1, 1], requires_grad=0, device=cpu)):
         """
         graph = torch._C.parse_ir(graph_str)
 
-        kernel = torch._C._te.TensorExprKernel(graph)
+        kernel = te.TensorExprKernel(graph)
         res1 = kernel.run((x,))
         res2 = kernel.fallback((x,))
         correct = f(x)
         np.testing.assert_allclose(res1.numpy(), correct.numpy(), atol=2e-3)
         np.testing.assert_allclose(res2.numpy(), correct.numpy(), atol=2e-3)
 
-    def test_forgot_kernel_arena(self):
-        self.assertRaises(RuntimeError, lambda: torch._C._te.VarHandle("n", torch._C._te.Dtype.Int))
-
+    @unittest.skipIf(not LLVM_ENABLED, "LLVM backend not enabled")
+    def test_alloc_in_loop(self):
+        a, tmp, b = [te.BufHandle(name, [1], torch.float32) for name in ["a", "tmp", "b"]]
+        body = te.Block([
+            tmp.store([0], a.load([0])),
+            b.store([0], tmp.load([0]))
+        ])
+        for _ in range(4):
+            i = te.VarHandle("i", torch.int32)
+            body = te.For.make(i, 0, 100, body)
+        nest = te.LoopNest(body, [b])
+        nest.prepare_for_codegen()
+        f = te.construct_codegen("llvm", nest.simplify(), [a, b])
+        ta, tb = [torch.ones(1) for _ in range(2)]
+        f.call([ta.data_ptr(), tb.data_ptr()])
 
 if __name__ == '__main__':
     run_tests()

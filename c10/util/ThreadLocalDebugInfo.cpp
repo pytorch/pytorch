@@ -3,7 +3,6 @@
 
 namespace c10 {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_TLS_static(std::shared_ptr<ThreadLocalDebugInfo>, tls_debug_info);
 #define debug_info (tls_debug_info.get())
 

@@ -5,12 +5,10 @@
 #include "caffe2/core/common.h"
 #include "caffe2/core/init.h"
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_int(
     caffe2_ftz,
     false,
     "If true, turn on flushing denormals to zero (FTZ)");
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_int(
     caffe2_daz,
     false,
@@ -30,7 +28,6 @@ bool Caffe2SetDenormals(int*, char***) {
   return true;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CAFFE2_INIT_FUNCTION(
     Caffe2SetDenormals,
     &Caffe2SetDenormals,

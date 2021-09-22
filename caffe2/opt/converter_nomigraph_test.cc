@@ -3,7 +3,6 @@
 
 #include <gtest/gtest.h>
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Converter, Basic) {
   using namespace caffe2::testing;
   caffe2::NetDef net;
@@ -27,7 +26,6 @@ TEST(Converter, Basic) {
   auto new_netdef = caffe2::convertToCaffe2Proto(nn);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Converter, UnknownType) {
   using namespace caffe2::testing;
   caffe2::NetDef net;
@@ -38,7 +36,6 @@ TEST(Converter, UnknownType) {
   auto new_netdef = caffe2::convertToCaffe2Proto(nn);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Converter, SpecializeConverter) {
   using namespace caffe2::testing;
   caffe2::NetDef net;
@@ -61,7 +58,6 @@ caffe2::NetDef fakeNet() {
   return net;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Converter, ExternalInputs) {
   auto net = fakeNet();
 
@@ -73,7 +69,6 @@ TEST(Converter, ExternalInputs) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Converter, ExternalOutputs) {
   auto net = fakeNet();
 
@@ -85,7 +80,6 @@ TEST(Converter, ExternalOutputs) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Converter, InjectDataEdgeIndicators) {
   auto net = fakeNet();
   caffe2::injectDataEdgeIndicators(&net);

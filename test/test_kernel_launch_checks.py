@@ -1,5 +1,5 @@
 from torch.testing._internal.common_utils import TestCase, run_tests
-from torch.testing import check_cuda_kernel_launches, check_code_for_cuda_kernel_launches
+from torch.testing._check_kernel_launches import check_cuda_kernel_launches, check_code_for_cuda_kernel_launches
 
 
 class AlwaysCheckCudaLaunchTest(TestCase):
@@ -36,6 +36,36 @@ some_function_call<TemplateArg><<<1,2,0,stream>>> ( arg1 , arg2 , arg3 ) ;
       selfInfo, sourceInfo, indexInfo,                                               \
       selfAddDim, sourceAddDim, sliceSize, selfAddDimSize);                          \
   C10_CUDA_KERNEL_LAUNCH_CHECK();
+        """))
+
+        # Does it work for lambdas?
+        self.assertEqual(1, check_code_for_cuda_kernel_launches(r"""
+            rrelu_with_noise_cuda_kernel<scalar_t, 2><<<grid, block, 0, stream>>>(
+                    numel,
+                    rng_engine_inputs,
+                    output_data,
+                    input_data,
+                    noise_data,
+                    lower,
+                    upper,
+                    [] __device__ (curandStatePhilox4_32_10_t* state) {
+                    return curand_uniform2_double(state);
+                    });
+                    C10_CUDA_KERNEL_LAUNCH_CHECK();
+
+            rrelu_with_noise_cuda_kernel<scalar_t, 2><<<grid, block, 0, stream>>>(
+                    numel,
+                    rng_engine_inputs,
+                    output_data,
+                    input_data,
+                    noise_data,
+                    lower,
+                    upper,
+                    [] __device__ (curandStatePhilox4_32_10_t* state) {
+                    return curand_uniform2_double(state);
+                    });
+                    uh oh;
+                    C10_CUDA_KERNEL_LAUNCH_CHECK();
         """))
 
     def test_check_cuda_launches(self):

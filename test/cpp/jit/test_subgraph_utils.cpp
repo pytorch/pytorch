@@ -9,7 +9,6 @@
 namespace torch {
 namespace jit {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SubgraphUtilsTest, Basic) {
   auto graph = build_lstm();
   EliminateCommonSubexpression(graph);
@@ -49,7 +48,6 @@ TEST(SubgraphUtilsTest, Basic) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SubgraphUtilsTest, MergeSubgraphs) {
   auto graph = std::make_shared<Graph>();
   std::unordered_map<std::string, Value*> parse_map;
@@ -118,7 +116,6 @@ graph(%a : Tensor, %b : Tensor, %c : Tensor):
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SubgraphUtilsTest, GraphName) {
   auto graph = std::make_shared<Graph>();
 

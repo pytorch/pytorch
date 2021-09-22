@@ -1,10 +1,8 @@
 #include "caffe2/operators/quantized/int8_sigmoid_op.h"
 
 namespace caffe2 {
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(Int8Sigmoid, int8::Int8SigmoidOp);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Int8Sigmoid)
     .NumInputs(1)
     .NumOutputs(1)

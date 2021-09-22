@@ -320,12 +320,9 @@ bool LRNGradientOp<float, CPUContext>::RunOnDeviceWithOrderNHWC() {
   return true;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(LRN, LRNOp<float, CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(LRNGradient, LRNGradientOp<float, CPUContext>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(LRN)
     .NumInputs(1)
     .NumOutputs(1, 2)
@@ -523,7 +520,6 @@ Y_scale:
     .Output(0, "Y", "*(type: Tensor`<float>`)* Output tensor.")
     .Output(1, "Y_scale", "*(type: Tensor`<float>`)* Output scale.")
     .InheritOnnxSchema();
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(LRNGradient).NumInputs(3).NumOutputs(1);
 
 class GetLRNGradient : public GradientMakerBase {
@@ -535,6 +531,5 @@ class GetLRNGradient : public GradientMakerBase {
       vector<string>{GI(0)});
   }
 };
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(LRN, GetLRNGradient);
 }  // namespace caffe2

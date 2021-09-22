@@ -12,7 +12,7 @@ from torch.fx.graph import (
 )
 from torch.fx.node import Argument
 from .quantization_types import Pattern
-from .qconfig_utils import QConfigAny
+from ..qconfig import QConfigAny
 from .match_utils import (
     find_matches,
 )
@@ -24,6 +24,7 @@ from .graph_module import (
 from .quantization_patterns import (
     QuantizeHandler,
 )
+from ._equalize import update_obs_for_equalization, convert_eq_obs
 from .utils import (
     is_get_tensor_info_node,
     node_return_type_is_int,
@@ -35,7 +36,7 @@ from .utils import (
     WEIGHT_INDEX_DICT,
 )
 
-from ..quantize import (
+from torch.ao.quantization.quantize import (
     _remove_qconfig,
     is_activation_post_process,
 )
@@ -43,6 +44,8 @@ from ..utils import (
     activation_is_statically_quantized,
     activation_dtype,
 )
+
+from .lower_to_fbgemm import lower_to_fbgemm
 
 # weight prepacking ops
 WEIGHT_PREPACK_OPS = {
@@ -155,12 +158,15 @@ def convert(model: GraphModule, is_reference: bool = False,
         convert_custom_config_dict = {}
     patterns, node_name_to_scope, prepare_custom_config_dict = restore_state(model)
     qconfig_map: Dict[str, QConfigAny] = model._qconfig_map  # type: ignore[assignment]
-    # always run weight observers in the top level forward method
-    # for dynamic quant ops or weight only quant ops
-    run_weight_observers(model)
 
-    # move to cpu since we only have quantized cpu kernels
-    model.eval().cpu()
+    # TODO this should be removed now that gpu support for quantization is being supported.
+    # however in practice, as of 7/22/2021, certain functions that get called by convert expect
+    # only cpu arguments.
+    # As an example, in TestQuantizeFxModels.test_qat_functional_linear when device='cuda',
+    # fold_weight will call quantized::linear_prepack which doesn't support QuantizedCuda backend.
+    if not is_reference:
+        model.cpu()
+
     # mapping from fully qualified module name to module instance
     # for example,
     # {
@@ -179,6 +185,17 @@ def convert(model: GraphModule, is_reference: bool = False,
         model.graph, modules, patterns,
         qconfig_map,
         custom_module_classes=custom_module_classes)
+
+    if model._equalization_qconfig_map is not None:
+        # If we want to do equalization then do the following:
+        # Calculate the equalization scale, update the observers with the scaled
+        # inputs, and scale the weight
+        weight_eq_obs_dict = update_obs_for_equalization(model, modules)
+        convert_eq_obs(model, modules, weight_eq_obs_dict)
+
+    # always run weight observers in the top level forward method
+    # for dynamic quant ops or weight only quant ops
+    run_weight_observers(model)
 
     quantized_graph = Graph()
     env: Dict[str, Dict[Optional[torch.dtype], Node]] = defaultdict(lambda: defaultdict(Node))  # type: ignore[arg-type]
@@ -320,11 +337,18 @@ def convert(model: GraphModule, is_reference: bool = False,
         else:
             return False
 
-    def is_output_quantized(node: Node, obj: QuantizeHandler, qconfig: QConfigAny, modules: Dict[str, torch.nn.Module]) -> bool:
+    def is_output_quantized(
+            node: Node, obj: QuantizeHandler, qconfig: QConfigAny,
+            modules: Dict[str, torch.nn.Module], is_reference=False) -> bool:
         """ Check if output node is quantized or not """
         assert modules is not None
-        # by default the output for a quantizable node is expected to be quantized
-        quantized = True
+        # for some ops the output is quantized only when `is_reference` is True
+        # and when `is_reference` is False, it has limited qconfig
+        # support, for example `add`
+        # ideally this check should not happen here, it should happen either in
+        # prepare or during lowering, we don't need this check
+        # after the default path is changed to produce reference patterns
+        quantized = obj.is_output_quantized(qconfig, is_reference)
 
         # Need to get correct quantized/non-quantized state forn the output
         # of FixedQParamsQuantizeHandler
@@ -433,11 +457,13 @@ def convert(model: GraphModule, is_reference: bool = False,
                     quantized = 0 in out_quant_idxs
 
                 qconfig = qconfig_map[node.name]
+                # Note: load_arg can be overwritten in the convert method when used to
+                # create Node in graph
                 result = obj.convert(
                     node, qconfig, modules, quantized_graph, node_name_to_scope, load_arg, is_reference=is_reference,
                     convert_custom_config_dict=convert_custom_config_dict)
                 if not is_observed_standalone_module_node:
-                    quantized = is_output_quantized(node, obj, qconfig, modules)
+                    quantized = is_output_quantized(node, obj, qconfig, modules, is_reference)
 
             if quantized:
                 env[node.name][activation_dtype(qconfig)] = result
@@ -511,4 +537,5 @@ def convert(model: GraphModule, is_reference: bool = False,
     model = QuantizedGraphModule(model, act_post_process_removed_graph, preserved_attributes)
     if not is_reference:
         model = fold_weight(model, node_name_to_scope)
+        model = lower_to_fbgemm(model)
     return model

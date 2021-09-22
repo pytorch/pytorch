@@ -211,7 +211,7 @@ struct C10_API TensorOptions {
   /// TODO: This function encourages bad behavior (assuming CUDA is
   /// the only device that matters).  Get rid of it / rename it.
   C10_NODISCARD TensorOptions
-  device_index(int16_t device_index) const noexcept {
+  device_index(c10::DeviceIndex device_index) const noexcept {
     return device(Device::Type::CUDA, device_index);
   }
 
@@ -663,10 +663,12 @@ inline DispatchKey computeDispatchKey(
           return DispatchKey::VE;
         case DeviceType::FPGA:
           return DispatchKey::FPGA;
-        case DeviceType::MSNPU:
-          return DispatchKey::MSNPU;
+        case DeviceType::ORT:
+          return DispatchKey::ORT;
         case DeviceType::XLA:
           return DispatchKey::XLA;
+        case DeviceType::Lazy:
+          return DispatchKey::Lazy;
         case DeviceType::MLC:
           return DispatchKey::MLC;
         case DeviceType::Vulkan:
@@ -768,6 +770,9 @@ inline DeviceType dispatchKeyToDeviceType(DispatchKey dispatch_key) {
     case DispatchKey::XLA:
     case DispatchKey::AutogradXLA:
       return DeviceType::XLA;
+    case DispatchKey::Lazy:
+    case DispatchKey::AutogradLazy:
+      return DeviceType::Lazy;
     case DispatchKey::Vulkan:
       return DeviceType::Vulkan;
     case DispatchKey::Meta:
@@ -785,10 +790,8 @@ inline DeviceType dispatchKeyToDeviceType(DispatchKey dispatch_key) {
     case DispatchKey::HPU:
     case DispatchKey::AutogradHPU:
       return DeviceType::HPU;
-
-    // stuff that isn't real
-    case DispatchKey::MSNPU:
-      return DeviceType::MSNPU;
+    case DispatchKey::ORT:
+      return DeviceType::ORT;
     default:
       TORCH_CHECK(
           false,

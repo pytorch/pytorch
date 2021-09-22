@@ -11,8 +11,11 @@ layout(set = 0, binding = 2) uniform PRECISION                    sampler2D uKer
 layout(set = 0, binding = 3) uniform PRECISION                    sampler1D uBias;
 layout(set = 0, binding = 4) uniform PRECISION restrict           Block {
   ivec4 size;
+  ivec4 kernel;
+  ivec2 ikernel;
   ivec2 stride;
   ivec2 padding;
+  ivec2 dilate;
   vec2 clamp;
 } uBlock;
 

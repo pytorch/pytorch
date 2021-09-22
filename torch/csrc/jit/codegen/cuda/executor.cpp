@@ -9,7 +9,6 @@
 
 #include <ATen/core/LegacyTypeDispatch.h>
 #include <ATen/cuda/CUDAContext.h>
-#include <ATen/cuda/Exceptions.h>
 #include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
 #include <c10/core/DeviceGuard.h>
 #include <c10/cuda/CUDAFunctions.h>
@@ -86,6 +85,7 @@ void FusionExecutor::debugCompileFusionFromStr(
 
   if (!kernel_summary.static_smem_allocations.empty()) {
     StatefulExpressionEvaluator static_evaluator(&fusion_);
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     unsigned static_smem_size = computeSharedMemory(
         static_evaluator, kernel_summary.static_smem_allocations);
     TORCH_INTERNAL_ASSERT(
@@ -141,6 +141,7 @@ void FusionExecutor::compileFusion(Fusion* fusion, CompileOptions options) {
 
   if (!kernel_summary.static_smem_allocations.empty()) {
     StatefulExpressionEvaluator static_evaluator(&fusion_);
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     unsigned static_smem_size = computeSharedMemory(
         static_evaluator, kernel_summary.static_smem_allocations);
     TORCH_INTERNAL_ASSERT(
@@ -165,6 +166,7 @@ at::Tensor inferAndAlloc(
     bool zero_init = false) {
   FUSER_PERF_SCOPE("inferAndAlloc");
 
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   std::vector<int64_t> sizes;
   for (auto id : TensorDomain::noReductions(tv->getMaybeRFactorDomain())) {
     auto inferred_val = see.inferValue(id->rawExtent());
@@ -235,6 +237,7 @@ LaunchParams FusionExecutor::computeLaunchParams(
 
   // Lets collect all IterDomains that are bound to a thread binding
   std::unordered_map<ParallelType, std::vector<IterDomain*>, TypeHash>
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       parallel_iter_domains;
   for (auto tv : getUsedTVs()) {
     for (auto id : tv->domain()->domain()) {
@@ -312,12 +315,14 @@ LaunchParams FusionExecutor::computeLaunchParams(
         launch_params.bdimx() * launch_params.bdimy() * launch_params.bdimz();
   }
 
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   const uint64_t dynamic_smem_size = computeSharedMemory(
       see,
       kernel_summary.dynamic_smem_allocations,
       true,
       reduction_broadcast_workspace);
 
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   const uint64_t static_smem_size =
       computeSharedMemory(see, kernel_summary.static_smem_allocations);
 
@@ -359,6 +364,7 @@ FusionExecutor::GlobalBuffers FusionExecutor::allocGlobalVals(
 std::vector<at::Tensor> FusionExecutor::allocOutputs(
     StatefulExpressionEvaluator& see) {
   FUSER_PERF_SCOPE("allocOutputs");
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   std::vector<at::Tensor> outputs;
   for (auto output : fusion_.outputs()) {
     TORCH_INTERNAL_ASSERT(
@@ -404,6 +410,7 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
   auto stream = at::cuda::getCurrentCUDAStream();
 
   LaunchParams launch_params;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   std::vector<at::Tensor> alloced_outputs = outputs;
   GlobalBuffers global_buffers;
   uint64_t rand_offset = 0;
@@ -451,6 +458,7 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
 
     launch_params = computeLaunchParams(launch_constraints, evaluator);
 
+    // NOLINTNEXTLINE(bugprone-branch-clone)
     if (outputs.empty() || outputs.size() != fusion_.outputs().size()) {
       alloced_outputs = allocOutputs(evaluator);
     } else {
@@ -519,7 +527,7 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
         stream,
         kernel_arguments.getBuffer(),
         nullptr));
-    AT_CUDA_CHECK(cudaStreamSynchronize(stream));
+    at::cuda::stream_synchronize(stream);
   }
 
   return alloced_outputs;

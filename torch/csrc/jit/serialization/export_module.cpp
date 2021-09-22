@@ -15,6 +15,7 @@
 #include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/csrc/jit/serialization/callstack_debug_info_serialization.h>
 #include <torch/csrc/jit/serialization/import_export_constants.h>
+#include <torch/csrc/jit/serialization/import_export_functions.h>
 #include <torch/csrc/jit/serialization/import_export_helpers.h>
 #include <torch/csrc/jit/serialization/pickle.h>
 #include <torch/csrc/jit/serialization/python_print.h>
@@ -36,6 +37,19 @@ namespace jit {
 
 char const* toString(OpCode op);
 
+IValue to_tuple(std::vector<IValue> ivalues) {
+  return c10::ivalue::Tuple::create(std::move(ivalues));
+}
+
+IValue Table(const std::vector<std::pair<std::string, IValue>>& entries) {
+  std::vector<IValue> ivalue_entries;
+  ivalue_entries.reserve(entries.size());
+  for (const auto& e : entries) {
+    ivalue_entries.push_back(to_tuple({e.first, e.second}));
+  }
+  return to_tuple(std::move(ivalue_entries));
+}
+
 namespace {
 
 ExportModuleExtraFilesHook& GetExtraFilesHook() {
@@ -43,29 +57,12 @@ ExportModuleExtraFilesHook& GetExtraFilesHook() {
   return func;
 }
 
-ExportModuleMobileInfoConverter& GetMobileInfoConverter() {
-  static ExportModuleMobileInfoConverter func = nullptr;
-  return func;
-}
-
-static IValue Tup(std::vector<IValue> ivalues) {
-  return c10::ivalue::Tuple::create(std::move(ivalues));
-}
-
-static IValue Table(
-    const std::vector<std::pair<std::string, IValue>>& entries) {
-  std::vector<IValue> ivalue_entries;
-  ivalue_entries.reserve(entries.size());
-  for (const auto& e : entries) {
-    ivalue_entries.push_back(Tup({e.first, e.second}));
-  }
-  return Tup(std::move(ivalue_entries));
-}
-
 std::pair<IValue, IValue> getFunctionTuple(
     const Module& module,
     const Function& func,
-    BackendDebugInfoRecorder& debug_info_recorder) {
+    BackendDebugInfoRecorder& debug_info_recorder,
+    const std::basic_string<char>& qn,
+    TypeNameUniquer& type_name_uniquer_) {
   auto graph = func.graph()->copy();
 
   Inline(*graph);
@@ -82,11 +79,14 @@ std::pair<IValue, IValue> getFunctionTuple(
   std::vector<c10::OperatorName> opnames;
   std::vector<std::string> method_names;
   std::vector<int64_t> op_debug_handles;
+  int next_new_op_index = 0;
   for (size_t i = 0; i < instructions_copy.size(); ++i) {
     Instruction ins = instructions_copy[i];
-    if (ins.op == OP || ins.op == OPN) {
+    if ((ins.op == OP || ins.op == OPN) && ins.X == next_new_op_index) {
+      // Found a new op (assumes new operators ordered by ascending ins.X)
       auto node = code->instructions_source()[i];
       opnames.emplace_back(node->schema().operator_name());
+      next_new_op_index++;
     }
     // CALL nodes at this point represent built-in (i.e. non-Graph)
     // functions that were not inlined. Here we convert the CALL
@@ -153,7 +153,7 @@ std::pair<IValue, IValue> getFunctionTuple(
   std::vector<IValue> instructions;
   instructions.reserve(instructions_copy.size());
   for (Instruction ins : instructions_copy) {
-    instructions.emplace_back(Tup({toString(ins.op), ins.X, ins.N}));
+    instructions.emplace_back(to_tuple({toString(ins.op), ins.X, ins.N}));
   }
 
   // operators
@@ -172,10 +172,10 @@ std::pair<IValue, IValue> getFunctionTuple(
       num_args = it->second;
     }
     if (BytecodeEmitDefaultValueForUnspecifiedArgMode::is_enabled()) {
-      operators.emplace_back(Tup({opname.name, opname.overload_name}));
+      operators.emplace_back(to_tuple({opname.name, opname.overload_name}));
     } else {
       operators.emplace_back(
-          Tup({opname.name, opname.overload_name, num_args}));
+          to_tuple({opname.name, opname.overload_name, num_args}));
     }
   }
 
@@ -211,14 +211,22 @@ std::pair<IValue, IValue> getFunctionTuple(
   auto register_size = static_cast<int>(code->register_size());
 
   auto codeTable = Table(
-      {{"instructions", Tup(instructions)},
-       {"operators", Tup(operators)},
-       {"constants", Tup(constants)},
-       {"types", Tup(types)},
+      {{"instructions", to_tuple(instructions)},
+       {"operators", to_tuple(operators)},
+       {"constants", to_tuple(constants)},
+       {"types", to_tuple(types)},
        {"register_size", register_size}});
 
   // schema
   const auto& schema = func.getSchema();
+  auto type_printer =
+      [&](const c10::ConstTypePtr& t) -> c10::optional<std::string> {
+    auto namedType = t->cast<c10::NamedType>();
+    if (namedType && namedType->name()) {
+      return type_name_uniquer_.getUniqueName(namedType).qualifiedName();
+    }
+    return c10::nullopt;
+  };
   TORCH_CHECK(
       schema.overload_name().empty(), // @TODO: is this check correct?
       "Overloads are not supported in mobile modules.");
@@ -227,7 +235,7 @@ std::pair<IValue, IValue> getFunctionTuple(
   TORCH_CHECK(
       !schema.is_varret(),
       "A variable number of return values is not supported in mobile modules.");
-  auto makeArgTuple = [](const std::vector<Argument>& args) {
+  auto makeArgTuple = [&](const std::vector<Argument>& args) {
     std::vector<IValue> argTables;
     for (auto&& arg : args) {
       TORCH_CHECK(
@@ -236,13 +244,24 @@ std::pair<IValue, IValue> getFunctionTuple(
       TORCH_CHECK(
           !arg.kwarg_only(),
           "Keyword-only arguments are not supported in mobile modules.");
+      /*
+        This part adds the argument's name, type and default_value in
+        `bytecode.pkl` This has to be consistent with the `code/` directory
+        which has annotated py code of the entire module. `type_printer` uses
+        `TypeNameUniquer` to get the managled name of the argument. This helps
+        in having the right object reference when a class method is called using
+        the `self` argument.
+
+        arg.type()->annotation_str(type_printer) => mangled unique name of the
+        module/submodule
+      */
       argTables.emplace_back(Table({
           {"name", arg.name()},
-          {"type", arg.type()->annotation_str()},
+          {"type", arg.type()->annotation_str(type_printer)},
           {"default_value", arg.default_value()},
       }));
     }
-    return Tup(argTables);
+    return to_tuple(argTables);
   };
   auto schemaTable = Table({
       {"arguments", makeArgTuple(schema.arguments())},
@@ -250,8 +269,7 @@ std::pair<IValue, IValue> getFunctionTuple(
   });
 
   // function tuple
-  auto bytecode_vals =
-      Tup({func.qualname().qualifiedName(), codeTable, schemaTable});
+  auto bytecode_vals = to_tuple({qn, codeTable, schemaTable});
 
   c10::optional<IValue> debug_info_vals;
   // module debug info
@@ -263,7 +281,7 @@ std::pair<IValue, IValue> getFunctionTuple(
   IValue module_debug_tuple = c10::ivalue::Tuple::create(op_debug_handles);
   auto function_debug_info =
       Table({{"function_debug_handles", module_debug_tuple}});
-  debug_info_vals = Tup({func.qualname().qualifiedName(), function_debug_info});
+  debug_info_vals = to_tuple({qn, function_debug_info});
   return std::make_pair(bytecode_vals, debug_info_vals);
 }
 
@@ -273,19 +291,23 @@ void setstateTuple(
     std::vector<c10::IValue>& elements,
     std::unordered_set<std::string>& qn_cache,
     std::vector<c10::IValue>& debug_info_elements,
-    BackendDebugInfoRecorder& debug_info_recorder) {
+    BackendDebugInfoRecorder& debug_info_recorder,
+    TypeNameUniquer& type_name_uniquer_) {
   if (!ivalue.isObject())
     return;
   auto obj = ivalue.toObject();
   auto type = obj->type();
   if (checkHasValidSetGetState(type)) {
     Function& setstate = type->getMethod("__setstate__");
-    const auto qn = setstate.qualname().qualifiedName();
+    const auto qn =
+        type_name_uniquer_.getUniqueName(obj->type()).qualifiedName() + "." +
+        setstate.name();
     if (qn_cache.find(qn) != qn_cache.end()) {
       return;
     }
     if (setstate.isGraphFunction()) {
-      auto func_tuple = getFunctionTuple(module, setstate, debug_info_recorder);
+      auto func_tuple = getFunctionTuple(
+          module, setstate, debug_info_recorder, qn, type_name_uniquer_);
       elements.push_back(func_tuple.first);
       qn_cache.emplace(qn);
       debug_info_elements.push_back(func_tuple.second);
@@ -298,9 +320,25 @@ void setstateTuple(
           elements,
           qn_cache,
           debug_info_elements,
-          debug_info_recorder);
+          debug_info_recorder,
+          type_name_uniquer_);
     }
   }
+}
+
+bool isLoweredModule(const Module& m) {
+  c10::QualifiedName type_name;
+  if (m.type()->name()) {
+    type_name = m.type()->name().value();
+  }
+  bool isLoweredModule = false;
+  for (const auto& atom : type_name.atoms()) {
+    if (atom == "LoweredModule") {
+      isLoweredModule = true;
+      break;
+    }
+  }
+  return isLoweredModule;
 }
 
 // Check if the global static map of backend debug info
@@ -309,11 +347,7 @@ void setstateTuple(
 void getBackendDebugInfoMap(
     const Module& m,
     BackendDebugInfoMapType& debug_map) {
-  c10::QualifiedName type_name;
-  if (m.type()->name()) {
-    type_name = m.type()->name().value();
-  }
-  if (c10::string_view(type_name.name()).ends_with("LoweredModule")) {
+  if (isLoweredModule(m)) {
     auto backend_debug_info =
         m.attr("__backend_debug_info").toCustomClass<PyTorchBackendDebugInfo>();
     const auto& map = backend_debug_info->getDebugInfoMap();
@@ -328,11 +362,7 @@ void getBackendDebugInfoMap(
 
 SourceRangeRecords getBackendSourceRanges(const Module& m) {
   SourceRangeRecords sr_records;
-  c10::QualifiedName type_name;
-  if (m.type()->name()) {
-    type_name = m.type()->name().value();
-  }
-  if (c10::string_view(type_name.name()).ends_with("LoweredModule")) {
+  if (isLoweredModule(m)) {
     constexpr size_t kSourceRange = 1;
     auto backend_debug_info =
         m.attr("__backend_debug_info").toCustomClass<PyTorchBackendDebugInfo>();
@@ -346,9 +376,11 @@ SourceRangeRecords getBackendSourceRanges(const Module& m) {
             std::get<kDebugInfoTupleSourceRangeIndex>(it.second);
         sr_records.emplace_back(
             std::numeric_limits<size_t>::max(), source_range);
+        // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
         auto cs_ptr = std::get<kDebugInfoTupleInlinedCSIndex>(it.second);
         if (cs_ptr) {
           for (const auto& e : cs_ptr->vec()) {
+            // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
             const auto sr = std::get<kSourceRange>(e);
             sr_records.emplace_back(std::numeric_limits<size_t>::max(), sr);
           }
@@ -373,7 +405,8 @@ void moduleMethodsTuple(
     const Module& module,
     std::vector<c10::IValue>& elements, // note: appended to in-place
     std::vector<c10::IValue>& debug_info_elements,
-    BackendDebugInfoRecorder& debug_info_recorder) {
+    BackendDebugInfoRecorder& debug_info_recorder,
+    TypeNameUniquer& type_name_uniquer_) {
   auto methods = module.get_methods();
   std::unordered_set<std::string> qn_cache;
   // top level methods
@@ -382,8 +415,8 @@ void moduleMethodsTuple(
     if (qn_cache.find(qn) != qn_cache.end()) {
       continue;
     }
-    auto func_tuple =
-        getFunctionTuple(module, method.function(), debug_info_recorder);
+    auto func_tuple = getFunctionTuple(
+        module, method.function(), debug_info_recorder, qn, type_name_uniquer_);
     elements.push_back(func_tuple.first);
     qn_cache.emplace(qn);
     debug_info_elements.push_back(func_tuple.second);
@@ -396,16 +429,12 @@ void moduleMethodsTuple(
       elements,
       qn_cache,
       debug_info_elements,
-      debug_info_recorder);
+      debug_info_recorder,
+      type_name_uniquer_);
 }
 
 void SetExportModuleExtraFilesHook(ExportModuleExtraFilesHook hook) {
   GetExtraFilesHook() = std::move(hook);
-}
-
-void SetExportModuleMobileInfoConverter(
-    ExportModuleMobileInfoConverter converter) {
-  GetMobileInfoConverter() = std::move(converter);
 }
 
 void ScriptModuleSerializer::serialize(
@@ -434,10 +463,9 @@ void ScriptModuleSerializer::serialize(
         /*archive_name=*/"constants",
         /*archive_dir=*/"",
         /*tensor_dir=*/"constants/",
-        /*tensor_cdata_naming_scheme=*/true);
+        /*use_storage_context=*/true);
 
     writeByteCode(module, save_mobile_debug_info);
-    writeMobileMetadata(module, extra_files);
   } else {
     writeArchive(
         c10::ivalue::Tuple::create(ivalue_constants),
@@ -456,11 +484,13 @@ void ScriptModuleSerializer::writeArchive(
     const std::string& archive_name,
     const std::string& archive_dir,
     const std::string& tensor_dir,
-    bool tensor_cdata_naming_scheme) {
+    bool use_storage_context) {
   std::vector<char> data;
   // Vector to capture the run-time class types during pickling the IValues
   std::vector<c10::ClassTypePtr> memoizedClassTypes;
   std::vector<std::string> tensor_names;
+  // tensors that are already serialized in use_storage_context
+  std::unordered_set<std::string> serialized_tensors;
   Pickler data_pickle(
       [&](const char* buf, size_t size) {
         data.insert(data.end(), buf, buf + size);
@@ -472,12 +502,19 @@ void ScriptModuleSerializer::writeArchive(
       &memoizedClassTypes,
       [&](const at::Tensor& tensor) {
         // returns a string to use in picker.cpp as storage obj key
-        if (tensor_cdata_naming_scheme) {
-          std::string string_id =
-              std::to_string(reinterpret_cast<std::intptr_t>(
-                  tensor.storage().unsafeGetStorageImpl()));
-          tensor_names.push_back(string_id + ".storage");
-          storage_context_.addStorage(string_id, tensor.storage());
+        if (use_storage_context) {
+          bool already_serialized =
+              storage_context_.hasStorage(tensor.storage());
+          std::string tensor_name =
+              std::to_string(
+                  storage_context_.getOrAddStorage(tensor.storage())) +
+              ".storage";
+          if (already_serialized) {
+            // this case is hit when storage has been serialized already
+            // from a torch.package context
+            serialized_tensors.insert(tensor_name);
+          }
+          tensor_names.push_back(tensor_name);
         } else {
           tensor_names.push_back(std::to_string(tensor_names.size()));
         }
@@ -491,20 +528,18 @@ void ScriptModuleSerializer::writeArchive(
   std::string prefix = archive_name + "/";
 
   TORCH_INTERNAL_ASSERT(tensor_names.size() == data_pickle.tensorData().size());
-  const std::vector<std::string>& pre_serialized_files =
-      writer_.getAllWrittenRecords();
 
   for (const auto& td : data_pickle.tensorData()) {
     WriteableTensorData writable_td = getWriteableTensorData(td);
-    std::string fname = tensor_dir + tensor_names[i++];
-    if (tensor_cdata_naming_scheme &&
-        std::find(
-            pre_serialized_files.begin(), pre_serialized_files.end(), fname) !=
-            pre_serialized_files.end()) {
+    std::string tensor_name = tensor_names[i++];
+    if (use_storage_context && serialized_tensors.count(tensor_name)) {
       // storage has been serialzed already, skip
       continue;
     }
-    writer_.writeRecord(fname, writable_td.data(), writable_td.sizeInBytes());
+    writer_.writeRecord(
+        tensor_dir + tensor_name,
+        writable_td.data(),
+        writable_td.sizeInBytes());
   }
 
   std::string fname = archive_dir + archive_name + ".pkl";
@@ -542,31 +577,6 @@ void ScriptModuleSerializer::writeExtraFiles(
       const std::string key = "extra/" + kv.first;
       writer_.writeRecord(key, kv.second.data(), kv.second.size());
     }
-  }
-}
-
-void ScriptModuleSerializer::writeMobileMetadata(
-    const Module& module,
-    const ExtraFilesMap& extra_files) {
-  auto hook = GetExtraFilesHook();
-  auto converter = GetMobileInfoConverter();
-  if (!converter) {
-    return;
-  }
-  ExtraFilesMap files_to_write = extra_files;
-  // merge hook files and extra files
-  if (hook) {
-    ExtraFilesMap hook_files = hook(module);
-    files_to_write.insert(hook_files.begin(), hook_files.end());
-  }
-  auto content_to_write = converter(module, files_to_write);
-  if (!content_to_write.empty()) {
-    writeArchive(
-        content_to_write,
-        /*archive_name=*/"metadata",
-        /*archive_dir=*/"",
-        /*tensor_dir=*/"metadata/");
-    ;
   }
 }
 
@@ -636,16 +646,20 @@ void ScriptModuleSerializer::writeByteCode(
   debug_info_elements.emplace_back(static_cast<int64_t>(version_to_write));
 
   moduleMethodsTuple(
-      module, elements, debug_info_elements, debug_info_recorder);
-  auto telements = Tup(std::move(elements));
+      module,
+      elements,
+      debug_info_elements,
+      debug_info_recorder,
+      type_name_uniquer_);
+  auto telements = to_tuple(std::move(elements));
   writeArchive(
       telements,
       /*archive_name=*/"bytecode",
       /*archive_dir=*/"",
       /*tensor_dir=*/"constants/",
-      /*tensor_cdata_naming_scheme=*/true);
+      /*use_storage_context=*/true);
 
-  auto debug_info_telements = Tup(std::move(debug_info_elements));
+  auto debug_info_telements = to_tuple(std::move(debug_info_elements));
 
   // At the moment keeping this feature experimental
   // since we have not evaluated how this affect model size
@@ -753,7 +767,7 @@ void ScriptModuleSerializer::serialize_unified_format(
       "data",
       archive_dir,
       /*tensor_dir=*/".data/",
-      /*tensor_cdata_naming_scheme=*/true);
+      /*use_storage_context=*/true);
   // Then we serialize all code info.
   convertTypes(module.type());
   // The tensor constants from the code are written to a separate archive
@@ -765,10 +779,14 @@ void ScriptModuleSerializer::serialize_unified_format(
       "constants",
       archive_dir,
       /*tensor_dir=*/".data/",
-      /*tensor_cdata_naming_scheme=*/true);
+      /*use_storage_context=*/true);
 
   // Note: writeFiles() call needs to be made in addition to calling this
   // function to have the code actually saved (tensors are saved)
+}
+
+SerializationStorageContext& ScriptModuleSerializer::storage_context() {
+  return storage_context_;
 }
 
 void ExportModule(
@@ -816,7 +834,8 @@ void export_opnames(const script::Module& m, std::set<std::string>& opnames) {
   std::vector<c10::IValue> elements;
   std::vector<c10::IValue> debug_info_elements;
   BackendDebugInfoRecorder dummy;
-  moduleMethodsTuple(m, elements, debug_info_elements, dummy);
+  TypeNameUniquer dummy_uniquer = TypeNameUniquer();
+  moduleMethodsTuple(m, elements, debug_info_elements, dummy, dummy_uniquer);
   for (const auto& element : elements) {
     auto table = element.toTuple()->elements()[1];
     auto row =

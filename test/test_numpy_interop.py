@@ -7,6 +7,7 @@ from torch.testing._internal.common_utils import \
     (TestCase, run_tests)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, onlyCPU, dtypes)
+from torch.testing._internal.common_dtype import get_all_dtypes
 
 # For testing handling NumPy objects and sending tensors to / accepting
 #   arrays from NumPy.
@@ -225,6 +226,11 @@ class TestNumPyInterop(TestCase):
         x.strides = (3,)
         self.assertRaises(ValueError, lambda: torch.from_numpy(x))
 
+    def test_from_list_of_ndarray_warning(self, device):
+        warning_msg = r"Creating a tensor from a list of numpy.ndarrays is extremely slow"
+        with self.assertWarnsOnceRegex(UserWarning, warning_msg):
+            torch.tensor([np.array([0]), np.array([1])], device=device)
+
     @onlyCPU
     def test_ctor_with_numpy_scalar_ctor(self, device) -> None:
         dtypes = [
@@ -388,7 +394,7 @@ class TestNumPyInterop(TestCase):
             self.assertIsNotNone(torch.tensor(arr, device=device, dtype=torch.long).storage())
             self.assertIsNotNone(torch.tensor(arr, device=device, dtype=torch.uint8).storage())
 
-    @dtypes(*torch.testing.get_all_dtypes())
+    @dtypes(*get_all_dtypes())
     def test_numpy_scalar_cmp(self, device, dtype):
         if dtype.is_complex:
             tensors = (torch.tensor(complex(1, 3), dtype=dtype, device=device),

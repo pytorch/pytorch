@@ -13,7 +13,13 @@
 #include <math.h>
 #include <float.h>
 #include <algorithm>
+
+#if defined(CPU_CAPABILITY_AVX512)
+#define CACHE_LINE 64
+#else
 #define CACHE_LINE 32
+#endif
+
 #if defined(__GNUC__)
 #define CACHE_ALIGN __attribute__((aligned(CACHE_LINE)))
 #define not_inline __attribute__((noinline))
@@ -26,7 +32,7 @@ CACHE_ALIGN #define
 #endif
 #if defined(CPU_CAPABILITY_DEFAULT) || defined(_MSC_VER)
 #define TEST_AGAINST_DEFAULT 1
-#elif !defined(CPU_CAPABILITY_AVX) &&  !defined(CPU_CAPABILITY_AVX2) && !defined(CPU_CAPABILITY_VSX)
+#elif !defined(CPU_CAPABILITY_AVX512) && !defined(CPU_CAPABILITY_AVX2) && !defined(CPU_CAPABILITY_VSX)
 #define TEST_AGAINST_DEFAULT 1
 #else
 #undef TEST_AGAINST_DEFAULT
@@ -41,7 +47,8 @@ CACHE_ALIGN #define
     return __VA_ARGS__(std::forward<decltype(args)>(args)...); \
   }
 
-#if defined(CPU_CAPABILITY_VSX) || defined(CPU_CAPABILITY_AVX2) && (defined(__GNUC__) || defined(__GNUG__))
+#if defined(CPU_CAPABILITY_VSX) || defined(CPU_CAPABILITY_AVX2) || \
+  defined(CPU_CAPABILITY_AVX512) && (defined(__GNUC__) || defined(__GNUG__))
 #undef CHECK_DEQUANT_WITH_LOW_PRECISION
 #define CHECK_WITH_FMA 1
 #elif !defined(CPU_CAPABILITY_VSX) && !defined(CPU_CAPABILITY_AVX2)
@@ -68,6 +75,7 @@ using vshort = VecType<int16_t>;
 using vqint8 = VecType<c10::qint8>;
 using vquint8 = VecType<c10::quint8>;
 using vqint = VecType<c10::qint32>;
+using vBFloat16 = VecType<c10::BFloat16>;
 
 template <typename T>
 using ValueType = typename T::value_type;

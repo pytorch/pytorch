@@ -24,10 +24,8 @@ struct Indexer {
     , indexer_strides(indexer_strides)
     , original_strides(original_strides.data())
     , original_sizes(original_sizes.data()) {
-    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-    AT_ASSERT(original_strides.size() == num_indexers);
-    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-    AT_ASSERT(original_sizes.size() == num_indexers);
+    AT_ASSERT(static_cast<int64_t>(original_strides.size()) == num_indexers);
+    AT_ASSERT(static_cast<int64_t>(original_sizes.size()) == num_indexers);
   }
 
   int64_t num_indexers;
@@ -561,27 +559,16 @@ void flip_kernel(TensorIterator& iter, const bool quantized) {
 
 } // anonymous namespace
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(index_stub, &index_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(index_fill_stub, &index_fill_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(index_copy_stub, &index_copy_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(index_put_stub, &index_put_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(put_stub, &put_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(take_stub, &take_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(masked_fill_stub, &masked_fill_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(masked_select_serial_stub, &masked_select_serial_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(masked_select_stub, &masked_select_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(masked_scatter_stub, &masked_scatter_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(flip_stub, &flip_kernel);
 
 }} // namespace at::native

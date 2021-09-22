@@ -25,92 +25,47 @@ from torch._C import parse_schema
 # ]
 #
 # NB: function name DOES NOT include overload name!
-allow_list = [
+ALLOW_LIST = [
     ("c10_experimental", datetime.date(2222, 1, 1)),
     # Internal
     ("static", datetime.date(9999, 1, 1)),
     ("prim::ModuleDictIndex", datetime.date(9999, 1, 1)),
     ("prim::MKLDNNRelu6", datetime.date(9999, 1, 1)),
     ("prim::MKLDNNRelu6_", datetime.date(9999, 1, 1)),
+    ("prim::Concat", datetime.date(9999, 1, 1)),
     # Internal, profiler-specific ops
     ("profiler::_call_end_callbacks_on_jit_fut*", datetime.date(9999, 1, 1)),
     ("profiler::_record_function_enter", datetime.date(9999, 1, 1)),
-    ("aten::_qr_helper", datetime.date(2021, 1, 31)),
-    ("aten::fft", datetime.date(2021, 1, 31)),
-    ("aten::ifft", datetime.date(2021, 1, 31)),
-    ("aten::irfft", datetime.date(2021, 1, 31)),
-    ("aten::rfft", datetime.date(2021, 1, 31)),
-    ("aten::linalg_svd", datetime.date(2021, 5, 15)),
     ("aten::_cholesky_helper", datetime.date(9999, 1, 1)),
     ("aten::_lstsq_helper", datetime.date(9999, 1, 1)),
-    ("aten::linalg_lstsq", datetime.date(2021, 5, 1)),
-    ("aten::_svd_helper", datetime.date(2021, 1, 31)),
     ("aten::_syevd_helper", datetime.date(9999, 1, 1)),
     ("aten::_lu_solve_helper", datetime.date(9999, 1, 1)),
+    ("aten::_lu_with_info", datetime.date(9999, 1, 1)),
     ("aten::_linalg_solve_out_helper_", datetime.date(9999, 1, 1)),
-    ("aten::_cudnn_rnn_flatten_weight", datetime.date(2020, 12, 31)),
-    ("aten::_cudnn_rnn", datetime.date(2020, 12, 31)),
-    ("aten::_cudnn_rnn_backward", datetime.date(2020, 12, 31)),
-    ("aten::quantile", datetime.date(2021, 1, 31)),
-    ("aten::nanquantile", datetime.date(2021, 1, 31)),
-    ("aten::make_dual", datetime.date(2021, 2, 20)),
-    ("aten::unpack_dual", datetime.date(2021, 2, 20)),
-    ("aten::_fft_with_size", datetime.date(2021, 1, 31)),
-    ("aten::thnn_conv_depthwise2d_backward", datetime.date(2021, 1, 31)),
-    ("aten::slow_conv3d_backward", datetime.date(2021, 1, 31)),
-    ("aten::thnn_conv2d_backward", datetime.date(2021, 1, 31)),
-    ("aten::slow_conv_transpose3d_backward", datetime.date(2021, 1, 31)),
-    ("aten::slow_conv_transpose2d_backward", datetime.date(2021, 1, 31)),
-    ("aten::set_", datetime.date(2021, 1, 31)),
-    ("aten::native_layer_norm", datetime.date(2021, 1, 31)),
-    ("aten::native_layer_norm_backward", datetime.date(2021, 1, 31)),
-    ("aten::elu_backward", datetime.date(2021, 1, 31)),
-    ("aten::_multinomial_alias_setup", datetime.date(2021, 1, 31)),
-    ("aten::_multinomial_alias_draw", datetime.date(2021, 1, 31)),
-    ("prim::profile_optional", datetime.date(2021, 1, 31)),
-    ("aten::fake_quantize_per_tensor_affine_backward", datetime.date(2021, 2, 20)),
-    ("aten::fake_quantize_per_channel_affine_backward", datetime.date(2021, 2, 20)),
+    ("aten::select_backward", datetime.date(9999, 1, 1)),
+    ("aten::slice_backward", datetime.date(9999, 1, 1)),
+    ("aten::diagonal_backward", datetime.date(9999, 1, 1)),
     ("aten::rowwise_prune", datetime.date(9999, 1, 1)),
-    ("aten::_mode*", datetime.date(2021, 5, 2)),
-    ("aten::linalg_multi_dot", datetime.date(2021, 3, 25)),
-    ("aten::coalesce", datetime.date(2021, 4, 15)),
-    ("aten::empty_meta", datetime.date(2021, 4, 1)),
-    ("aten::div", datetime.date(2021, 4, 28)),
-    ("aten::divide", datetime.date(2021, 4, 28)),
-    ("aten::_var", datetime.date(2021, 5, 28)),
-    ("aten::_std", datetime.date(2021, 5, 28)),
-    ("aten::batch_norm_backward_elemt", datetime.date(2021, 5, 1)),
-    ("aten::assert_async", datetime.date(2021, 5, 1)),
-    ("aten::cumprod_backward", datetime.date(2021, 5, 1)),
     ("aten::_triangular_solve_helper", datetime.date(9999, 1, 1)),
-    ("aten::_addmv_impl_", datetime.date(2021, 5, 15)),
-    ("aten::slice", datetime.date(2021, 6, 15)),
     ("aten::adaptive_avg_pool3d_backward", datetime.date(9999, 1, 1)),
     ("aten::_embedding_bag_dense_backward", datetime.date(9999, 1, 1)),
-    ("aten::_amp_update_scale", datetime.date(2021, 6, 1)),
     ("aten::randperm", datetime.date(9999, 1, 1)),
-    ("aten::linalg_vector_norm", datetime.date(2021, 5, 15)),
-    ("aten::repeat_interleave", datetime.date(2021, 6, 26)),
-    ("aten::one_hot", datetime.date(2021, 6, 15)),
-    ("aten::conj", datetime.date(2021, 8, 1)),
-    ("aten::_conj", datetime.date(2021, 8, 1)),
-    ("aten::conj.out", datetime.date(2021, 8, 1)),
-    ("aten::segment_reduce_backward", datetime.date(2021, 6, 15)),
-    ("aten::segment_reduce", datetime.date(2021, 8, 26)),
-    ("aten::_segment_reduce_backward", datetime.date(2021, 8, 26)),
-    ("aten::to", datetime.date(2021, 6, 22)),
 ]
 
-def allow_listed(schema, allow_list):
-    for item in allow_list:
-        if item[1] < datetime.date.today():
-            continue
-        regexp = re.compile(item[0])
-        if regexp.search(schema.name):
-            if len(item) > 2:
+ALLOW_LIST_COMPILED = [
+    (
+        re.compile(item[0]),
+        item[1],
+        re.compile(item[2]) if len(item) > 2 else None,
+    ) for item in ALLOW_LIST if item[1] >= datetime.date.today()
+]
+
+def allow_listed(schema):
+    for item in ALLOW_LIST_COMPILED:
+        if item[0].search(str(schema)):
+            if len(item) > 2 and item[2] is not None:
                 # if arguments regex is present, use it
-                regexp_args = re.compile(item[2])
-                return bool(regexp_args.search(str(schema)))
+                return bool(item[2].search(str(schema)))
             return True
     return False
 
@@ -144,7 +99,7 @@ def check_bc(existing_schemas):
     is_bc = True
     broken_ops = []
     for existing_schema in existing_schemas:
-        if allow_listed(existing_schema, allow_list):
+        if allow_listed(existing_schema):
             print("schema: ", str(existing_schema), " found on allowlist, skipping")
             continue
         print("processing existing schema: ", str(existing_schema))

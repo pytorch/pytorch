@@ -189,10 +189,10 @@ When creating a new :class:`Function`, the following methods are available to `c
     :toctree: generated
     :nosignatures:
 
-    function._ContextMethodMixin.mark_dirty
-    function._ContextMethodMixin.mark_non_differentiable
-    function._ContextMethodMixin.save_for_backward
-    function._ContextMethodMixin.set_materialize_grads
+    function.FunctionCtx.mark_dirty
+    function.FunctionCtx.mark_non_differentiable
+    function.FunctionCtx.save_for_backward
+    function.FunctionCtx.set_materialize_grads
 
 .. _grad-check:
 
@@ -241,3 +241,19 @@ Anomaly detection
 .. autoclass:: detect_anomaly
 
 .. autoclass:: set_detect_anomaly
+
+
+Saved tensors default hooks
+^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Some operations need intermediary results to be saved during the forward pass
+in order to execute the backward pass.
+You can define how these saved tensors should be packed / unpacked using hooks.
+A common application is to trade compute for memory by saving those intermediary results
+to disk or to CPU instead of leaving them on the GPU. This is especially useful if you
+notice your model fits on GPU during evaluation, but not training.
+Also see :ref:`saved-tensors-hooks-doc`.
+
+.. autoclass:: torch.autograd.graph.saved_tensors_hooks
+
+.. autoclass:: torch.autograd.graph.save_on_cpu

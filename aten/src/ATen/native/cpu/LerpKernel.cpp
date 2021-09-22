@@ -56,9 +56,7 @@ static void lerp_kernel_tensor(
 
 } // anonymous namespace
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(lerp_kernel_scalar_weight, &lerp_kernel_scalar);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(lerp_kernel_tensor_weight, &lerp_kernel_tensor);
 
 } // namespace native

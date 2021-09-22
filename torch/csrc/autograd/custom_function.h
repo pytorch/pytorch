@@ -9,15 +9,19 @@
 
 namespace torch { namespace autograd {
 
+using optional_variable_list = std::vector<c10::optional<Variable>>;
+using _jvp_fn_t = std::function<variable_list(variable_list, variable_list)>;
+
 TORCH_API std::vector<c10::optional<Variable>> _wrap_outputs(
   const variable_list &input_vars,
   const std::unordered_set<at::TensorImpl*> &non_differentiable,
   const std::unordered_set<at::TensorImpl*> &dirty_inputs,
   const at::ArrayRef<c10::optional<Variable>> raw_outputs,
-  const std::shared_ptr<Node> &cdata);
+  const std::shared_ptr<Node> &cdata,
+  _jvp_fn_t jvp_user_function);
 
-TORCH_API void check_variable_result(const Variable& original,
-  const Variable& result, std::string hook_name);
+TORCH_API void check_variable_result(const at::TensorBase& original,
+    const at::TensorBase& result, std::string hook_name);
 
 // Get the return type of the forward function of the custom Function class X
 template<typename X, typename... Args>
@@ -157,8 +161,8 @@ struct TORCH_API VariableInfo {
 // backward function for Function<T>. Calls to CppNode::apply are forward to
 // T::backward().
 template <class T>
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 struct CppNode : public Node {
-
   variable_list apply(variable_list&& inputs) override;
   AutogradContext ctx_;
   std::vector<bool> is_variable_input_;
@@ -176,6 +180,7 @@ struct ExtractVariables : IterArgs<ExtractVariables> {
   variable_list& list_;
   ExtractVariables(std::vector<bool>& is_var, variable_list& list) : is_var_(is_var), list_(list) {}
   void operator()(const c10::optional<at::Tensor>& x) {
+    // NOLINTNEXTLINE(bugprone-branch-clone)
     if (x.has_value() && x.value().defined()) {
       is_var_.push_back(true);
       list_.emplace_back(x.value());
@@ -201,10 +206,14 @@ inline void extract_vars(std::vector<bool> &is_var, variable_list& list, Args&&.
 template <typename T>
 typename std::enable_if<std::is_same<T, variable_list>::value, T>::type to_output_type(
   std::vector<c10::optional<Variable>>& output_list) {
-    variable_list result;
-    std::transform(output_list.begin(), output_list.end(), std::back_inserter(result),
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  variable_list result;
+  std::transform(
+      output_list.begin(),
+      output_list.end(),
+      std::back_inserter(result),
       [](const c10::optional<Variable>& var) { return *var; });
-    return result;
+  return result;
 }
 
 template <typename T>
@@ -218,6 +227,7 @@ inline std::vector<c10::optional<Variable>> to_optional(Variable& output) {
 }
 
 inline std::vector<c10::optional<Variable>> to_optional(variable_list& output) {
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   std::vector<c10::optional<Variable>> result;
   std::transform(output.begin(), output.end(), std::back_inserter(result),
     [](const Variable& var) { return var; });
@@ -228,6 +238,7 @@ template<class T>
 template<typename X, typename... Args>
 auto Function<T>::apply(Args&&... args) -> std::enable_if_t<std::is_same<X,T>::value, forward_t<X,Args...>> {
   std::shared_ptr<CppNode<T>> node(new CppNode<T>(), deleteNode);
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   variable_list input_vars;
 
   const size_t num_inputs = sizeof...(Args);
@@ -236,6 +247,7 @@ auto Function<T>::apply(Args&&... args) -> std::enable_if_t<std::is_same<X,T>::v
   // TODO Add tracing here
   extract_vars(node->is_variable_input_, input_vars, args...);
 
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   bool is_executable =  GradMode::is_enabled() && any_variable_requires_grad(input_vars);
   auto next_edges = (is_executable ? collect_next_edges(input_vars) : edge_list());
   node->set_ctx_grad_fn(node);
@@ -248,18 +260,25 @@ auto Function<T>::apply(Args&&... args) -> std::enable_if_t<std::is_same<X,T>::v
   }
 
   using forward_return_t = forward_t<X, Args...>;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   forward_return_t outputs;
   {
     AutoGradMode grad_mode(false);
     outputs = T::forward(&node->ctx_, std::forward<Args>(args)...);
   }
 
+  _jvp_fn_t jvp_fn = [](variable_list inputs, variable_list gI) -> variable_list {
+    TORCH_CHECK(false, "jvp is not implemented for the c++ API of custom Function yet.",
+                "Please open a feature request on Github if you need this.");
+  };
+
   auto wrapped_outputs = _wrap_outputs(
     input_vars,
     node->ctx_.get_non_differentiable(),
     node->ctx_.get_and_bump_dirty(),
     to_optional(outputs),
-    is_executable ? node : nullptr);
+    is_executable ? node : nullptr,
+    jvp_fn);
 
   node->output_info_.reserve(wrapped_outputs.size());
   for (auto& output : wrapped_outputs) {
@@ -285,7 +304,9 @@ template<class T>
 variable_list CppNode<T>::apply(variable_list&& inputs) {
   at::OptionalDeviceGuard _device_guard;
 
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int num_inputs = inputs.size();
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   variable_list backward_inputs;
   backward_inputs.reserve(num_inputs);
   for (const auto i : c10::irange(num_inputs)) {
@@ -304,11 +325,10 @@ variable_list CppNode<T>::apply(variable_list&& inputs) {
 
   auto outputs = T::backward(&ctx_, backward_inputs);
 
-  int num_forward_inputs = is_variable_input_.size();
-  auto num_outputs = outputs.size();
+  const auto num_forward_inputs = static_cast<int64_t>(is_variable_input_.size());
+  auto num_outputs = static_cast<int64_t>(outputs.size());
   // Returning too many results is ok, but only as long as they're all undefined.
   // Truncate the result vector in that case.
-  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   if (num_outputs > num_forward_inputs) {
     bool all_undef = true;
     for (const auto i : c10::irange(num_forward_inputs, num_outputs)) {
@@ -320,7 +340,6 @@ variable_list CppNode<T>::apply(variable_list&& inputs) {
     }
   }
 
-  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   if (num_outputs != num_forward_inputs) {
     std::string msg("function ");
     msg += name() + " returned an incorrect number of gradients (expected ";
@@ -329,6 +348,7 @@ variable_list CppNode<T>::apply(variable_list&& inputs) {
     throw std::runtime_error(msg);
   }
 
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   variable_list results;
   results.reserve(num_outputs);
   for (const auto i : c10::irange(num_outputs)) {

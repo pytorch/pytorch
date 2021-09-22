@@ -23,6 +23,7 @@ struct TORCH_API TensorDesc {
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::vector<bool> contiguity;
 
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   TensorDesc(const at::ScalarType& type, const std::vector<bool>& contiguity)
       : scalar_type{type}, contiguity{contiguity} {
     if (contiguity.size() == 0) {
@@ -34,6 +35,7 @@ struct TORCH_API TensorDesc {
   }
 
   // Delegating constructors
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   TensorDesc(
       const at::ScalarType& type,
       const at::IntArrayRef& sizes,
@@ -43,6 +45,7 @@ struct TORCH_API TensorDesc {
   TensorDesc(const at::Tensor& t)
       : TensorDesc(t.scalar_type(), t.sizes(), t.strides()) {}
 
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   TensorDesc(const c10::TensorTypePtr& type)
       : TensorDesc(
             type->scalarType().value(),
@@ -63,6 +66,7 @@ struct TORCH_API TensorDesc {
       const at::IntArrayRef& sizes,
       const at::IntArrayRef& strides) {
     AT_ASSERT(sizes.size() == strides.size());
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     std::vector<bool> cont(sizes.size());
     for (size_t i = 0; i < sizes.size(); ++i) {
       const auto expected_stride =

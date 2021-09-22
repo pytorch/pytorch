@@ -21,6 +21,72 @@ inline Tensor& gammaln_out(Tensor& result, const Tensor& self) {
   return torch::special_gammaln_out(result, self);
 }
 
+/// Computes the regularized lower incomplete gamma function
+/// See https://pytorch.org/docs/master/special.html#torch.special.gammainc.
+///
+/// Example:
+/// ```
+/// auto t = torch::randn(128, dtype=kDouble);
+/// auto s = torch::randn(128, dtype=kDouble);
+/// torch::special::gammainc(s, t);
+/// ```
+inline Tensor gammainc(const Tensor& self, const Tensor& other) {
+  return torch::special_gammainc(self, other);
+}
+
+inline Tensor& gammainc_out(Tensor& result, const Tensor& self, const Tensor& other) {
+  return torch::special_gammainc_out(result, self, other);
+}
+
+/// Computes the regularized upper incomplete gamma function
+/// See https://pytorch.org/docs/master/special.html#torch.special.gammainc.
+///
+/// Example:
+/// ```
+/// auto t = torch::randn(128, dtype=kDouble);
+/// auto s = torch::randn(128, dtype=kDouble);
+/// torch::special::gammaincc(s, t);
+/// ```
+inline Tensor gammaincc(const Tensor& self, const Tensor& other) {
+  return torch::special_gammaincc(self, other);
+}
+
+inline Tensor& gammaincc_out(Tensor& result, const Tensor& self, const Tensor& other) {
+  return torch::special_gammaincc_out(result, self, other);
+}
+
+/// Computes the multivariate log-gamma function with dimension `p`, elementwise
+/// See https://pytorch.org/docs/master/special.html#torch.special.multigammaln.
+///
+/// Example:
+/// ```
+/// auto t = torch::randn(128, dtype=kDouble);
+/// torch::special::multigammaln(t, 1);
+/// ```
+inline Tensor multigammaln(const Tensor& self, int64_t p) {
+  return torch::special_multigammaln(self, p);
+}
+
+inline Tensor& multigammaln_out(Tensor& result, const Tensor& self, int64_t p) {
+  return torch::special_multigammaln_out(result, self, p);
+}
+
+/// Computes the nth derivative of the digamma function on the input.
+/// See https:://pytorch.org/docs/master/special.html#torch.special.polygamma.
+///
+/// Example:
+/// ```
+/// auto t = torch::randn(128, dtype=kDouble);
+/// torch::special::polygamma(2, t);
+/// ```
+inline Tensor polygamma(int64_t n, const Tensor& self) {
+  return torch::special_polygamma(n, self);
+}
+
+inline Tensor& polygamma_out(Tensor& result, int64_t n, const Tensor& self) {
+  return torch::special_polygamma_out(result, n, self);
+}
+
 /// Computes the logarithmic derivative of the gamma function on input
 /// See https://pytorch.org/docs/master/special.html#torch.special.psi
 ///
@@ -101,6 +167,22 @@ inline Tensor& erfc_out(Tensor& result, const Tensor& self) {
   return torch::special_erfc_out(result, self);
 }
 
+/// Computes the scaled complementary error function
+/// See https://pytorch.org/docs/master/special.html#torch.special.erfcx.
+///
+/// Example:
+/// ```
+/// auto t = torch::randn(128, dtype=kDouble);
+/// torch::special::erfcx(t);
+/// ```
+inline Tensor erfcx(const Tensor& self) {
+  return torch::special_erfcx(self);
+}
+
+inline Tensor& erfcx_out(Tensor& result, const Tensor& self) {
+  return torch::special_erfcx_out(result, self);
+}
+
 /// Computes the inverse error function
 /// See https://pytorch.org/docs/master/special.html#torch.special.erfinv.
 ///
@@ -115,6 +197,22 @@ inline Tensor erfinv(const Tensor& self) {
 
 inline Tensor& erfinv_out(Tensor& result, const Tensor& self) {
   return torch::special_erfinv_out(result, self);
+}
+
+/// Computes the log of summed exponentials of each row of input in the given dimension dim
+/// See https://pytorch.org/docs/master/special.html#torch.special.logsumexp.
+///
+/// Example:
+/// ```
+/// auto t = torch::randn(3, 3);
+/// torch::special::logsumexp(t, 1);
+/// ```
+inline Tensor logsumexp(const Tensor& self, IntArrayRef dims, bool keepdim) {
+  return torch::special_logsumexp(self, dims, keepdim);
+}
+
+inline Tensor& logsumexp_out(Tensor& result, const Tensor& self, IntArrayRef dims, bool keepdim) {
+  return torch::special_logsumexp_out(result, self, dims, keepdim);
 }
 
 inline Tensor ndtri(const Tensor& self) {
@@ -189,6 +287,39 @@ inline Tensor& expm1_out(Tensor& result, const Tensor& self) {
   return torch::special_expm1_out(result, self);
 }
 
+/// Computes x * log(y) for inputs, elementwise
+/// See https://pytorch.org/docs/master/special.html#torch.special.xlogy.
+///
+/// Example:
+/// ```
+/// auto x = torch::randn(128, dtype=kDouble);
+/// auto y = torch::randn(128, dtype=kDouble);
+/// torch::special::xlogy(x, y);
+/// ```
+inline Tensor xlogy(const Tensor& self, const Tensor& other) {
+  return torch::special_xlogy(self, other);
+}
+
+inline Tensor xlogy(const Scalar& self, const Tensor& other) {
+  return torch::special_xlogy(self, other);
+}
+
+inline Tensor xlogy(const Tensor& self, const Scalar& other) {
+  return torch::special_xlogy(self, other);
+}
+
+inline Tensor& xlogy_out(Tensor& result, const Tensor& self, const Tensor& other) {
+  return torch::special_xlogy_out(result, self, other);
+}
+
+inline Tensor& xlogy_out(Tensor& result, const Scalar& self, const Tensor& other) {
+  return torch::special_xlogy_out(result, self, other);
+}
+
+inline Tensor& xlogy_out(Tensor& result, const Tensor& self, const Scalar& other) {
+  return torch::special_xlogy_out(result, self, other);
+}
+
 /// Computes x * log1p(y) for inputs, elementwise
 /// See https://pytorch.org/docs/master/special.html#torch.special.xlog1py.
 ///
@@ -220,6 +351,39 @@ inline Tensor& xlog1py_out(Tensor& result, const Scalar& self, const Tensor& oth
 
 inline Tensor& xlog1py_out(Tensor& result, const Tensor& self, const Scalar& other) {
   return torch::special_xlog1py_out(result, self, other);
+}
+
+/// Computes Hurwitz Zeta function for inputs, elementwise
+/// See https://pytorch.org/docs/master/special.html#torch.special.zeta.
+///
+/// Example:
+/// ```
+/// auto x = torch::randn(128, dtype=kDouble);
+/// auto y = torch::randn(128, dtype=kDouble);
+/// torch::special::zeta(x, y);
+/// ```
+inline Tensor zeta(const Tensor& self, const Tensor& other) {
+  return torch::special_zeta(self, other);
+}
+
+inline Tensor zeta(const Scalar& self, const Tensor& other) {
+  return torch::special_zeta(self, other);
+}
+
+inline Tensor zeta(const Tensor& self, const Scalar& other) {
+  return torch::special_zeta(self, other);
+}
+
+inline Tensor& zeta_out(Tensor& result, const Tensor& self, const Tensor& other) {
+  return torch::special_zeta_out(result, self, other);
+}
+
+inline Tensor& zeta_out(Tensor& result, const Scalar& self, const Tensor& other) {
+  return torch::special_zeta_out(result, self, other);
+}
+
+inline Tensor& zeta_out(Tensor& result, const Tensor& self, const Scalar& other) {
+  return torch::special_zeta_out(result, self, other);
 }
 
 /// Computes the zeroth order modified Bessel function of the first kind of input, elementwise
@@ -349,6 +513,18 @@ inline Tensor log1p(const Tensor& self) {
 
 inline Tensor& log1p_out(Tensor& result, const Tensor& self) {
   return torch::special_log1p_out(result, self);
+}
+
+/// Computes log followed by softmax(x) of the input
+/// See https://pytorch.org/docs/master/special.html#torch.special.log_softmax.
+///
+/// Example:
+/// ```
+/// auto t = torch::randn(128, 128, dtype=kDouble);
+/// torch::special::log_softmax(t, 0);
+/// ```
+inline Tensor log_softmax(const Tensor& self, int64_t dim, c10::optional<ScalarType> dtype) {
+  return torch::special_log_softmax(self, dim, dtype);
 }
 
 }} // torch::special

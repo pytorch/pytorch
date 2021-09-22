@@ -37,7 +37,6 @@ class NestedModel : public torch::nn::Module {
 
 struct ModulesTest : torch::test::SeedingFixture {};
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, Conv1d) {
   Conv1d model(Conv1dOptions(3, 2, 3).stride(1).bias(false));
   model->weight.set_data(torch::arange(18, torch::dtype(torch::kFloat)).reshape({2, 3, 3}));
@@ -56,7 +55,6 @@ TEST_F(ModulesTest, Conv1d) {
   ASSERT_EQ(model->weight.grad().numel(), 3 * 2 * 3);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, Conv1dSameStrided) {
   auto options = Conv1dOptions(3, 2, 3);
   options.stride(1).padding(torch::kSame);
@@ -66,7 +64,6 @@ TEST_F(ModulesTest, Conv1dSameStrided) {
     "padding='same' is not supported for strided convolutions");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, Conv2dEven) {
   Conv2d model(Conv2dOptions(3, 2, 3).stride(1).bias(false));
   model->weight.set_data(torch::arange(54, torch::dtype(torch::kFloat)).reshape({2, 3, 3, 3}));
@@ -87,7 +84,6 @@ TEST_F(ModulesTest, Conv2dEven) {
   ASSERT_EQ(model->weight.grad().numel(), 3 * 2 * 3 * 3);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, Conv2dUneven) {
   Conv2d model(Conv2dOptions(3, 2, {3, 2}).stride({1, 1}).bias(false));
   model->weight.set_data(torch::arange(36, torch::dtype(torch::kFloat)).reshape({2, 3, 3, 2}));
@@ -108,7 +104,6 @@ TEST_F(ModulesTest, Conv2dUneven) {
   ASSERT_EQ(model->weight.grad().numel(), 3 * 2 * 3 * 2);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, Conv2dSameStrided) {
   auto options = Conv2dOptions(3, 2, {3, 4});
   options.stride(1).padding(torch::kSame);
@@ -121,7 +116,6 @@ TEST_F(ModulesTest, Conv2dSameStrided) {
     "padding='same' is not supported for strided convolutions");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, Conv3d) {
   Conv3d model(Conv3dOptions(3, 2, 3).stride(1).bias(false));
   model->weight.set_data(torch::arange(162, torch::dtype(torch::kFloat)).reshape({2, 3, 3, 3, 3}));
@@ -158,7 +152,6 @@ TEST_F(ModulesTest, Conv3d) {
   ASSERT_TRUE(model->weight.grad().numel() == 3 * 2 * 3 * 3 * 3);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, Conv3dSameStrided) {
   auto options = Conv3dOptions(3, 2, {3, 4, 5});
   options.stride(1).padding(torch::kSame);
@@ -171,7 +164,6 @@ TEST_F(ModulesTest, Conv3dSameStrided) {
     "padding='same' is not supported for strided convolutions");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, ConvTranspose1d) {
   ConvTranspose1d model(ConvTranspose1dOptions(3, 2, 3).stride(1).bias(false));
   model->weight.set_data(torch::arange(18.).view({2, 3, 3}));
@@ -191,7 +183,6 @@ TEST_F(ModulesTest, ConvTranspose1d) {
   ASSERT_EQ(model->weight.grad().numel(), 3 * 2 * 3);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, ConvTranspose2dEven) {
   ConvTranspose2d model(ConvTranspose2dOptions(3, 2, 3).stride(1).bias(false));
   model->weight.set_data(torch::arange(54.).view({2, 3, 3, 3}));
@@ -226,7 +217,6 @@ TEST_F(ModulesTest, ConvTranspose2dEven) {
   ASSERT_EQ(model->weight.grad().numel(), 3 * 2 * 3 * 3);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, ConvTranspose2dUneven) {
   ConvTranspose2d model(ConvTranspose2dOptions(3, 2, {3, 2}).stride({1, 1}).bias(false));
   model->weight.set_data(torch::arange(36.).view({2, 3, 3, 2}));
@@ -261,7 +251,6 @@ TEST_F(ModulesTest, ConvTranspose2dUneven) {
   ASSERT_EQ(model->weight.grad().numel(), 3 * 2 * 3 * 2);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, ConvTranspose3d) {
   ConvTranspose3d model(ConvTranspose3dOptions(2, 2, 2).stride(1).bias(false));
   model->weight.set_data(torch::arange(32.).reshape({2, 2, 2, 2, 2}));
@@ -293,7 +282,6 @@ TEST_F(ModulesTest, ConvTranspose3d) {
   ASSERT_TRUE(model->weight.grad().numel() == 2 * 2 * 2 * 2 * 2);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, MaxPool1d) {
   MaxPool1d model(MaxPool1dOptions(3).stride(2));
   auto x = torch::ones({1, 1, 5}, torch::requires_grad());
@@ -307,7 +295,6 @@ TEST_F(ModulesTest, MaxPool1d) {
   ASSERT_EQ(y.sizes(), std::vector<int64_t>({1, 1, 2}));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, MaxPool1dReturnIndices) {
   MaxPool1d model(MaxPool1dOptions(3).stride(2));
   auto x = torch::ones({1, 1, 5}, torch::requires_grad());
@@ -322,7 +309,6 @@ TEST_F(ModulesTest, MaxPool1dReturnIndices) {
   ASSERT_EQ(indices.sizes(), std::vector<int64_t>({1, 1, 2}));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, MaxPool2dEven) {
   MaxPool2d model(MaxPool2dOptions(3).stride(2));
   auto x = torch::ones({2, 5, 5}, torch::requires_grad());
@@ -336,7 +322,6 @@ TEST_F(ModulesTest, MaxPool2dEven) {
   ASSERT_EQ(y.sizes(), std::vector<int64_t>({2, 2, 2}));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, MaxPool2dUneven) {
   MaxPool2d model(MaxPool2dOptions({3, 2}).stride({2, 2}));
   auto x = torch::ones({2, 5, 4}, torch::requires_grad());
@@ -350,7 +335,6 @@ TEST_F(ModulesTest, MaxPool2dUneven) {
   ASSERT_EQ(y.sizes(), std::vector<int64_t>({2, 2, 2}));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, MaxPool2dReturnIndices) {
   MaxPool2d model(MaxPool2dOptions(3).stride(2));
   auto x = torch::ones({2, 5, 5}, torch::requires_grad());
@@ -369,7 +353,6 @@ TEST_F(ModulesTest, MaxPool2dReturnIndices) {
   ASSERT_EQ(indices.sizes(), std::vector<int64_t>({2, 2, 2}));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, MaxPool3d) {
   MaxPool3d model(MaxPool3dOptions(3).stride(2));
   auto x = torch::ones({2, 5, 5, 5}, torch::requires_grad());
@@ -383,7 +366,6 @@ TEST_F(ModulesTest, MaxPool3d) {
   ASSERT_EQ(y.sizes(), std::vector<int64_t>({2, 2, 2, 2}));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, MaxPool3dReturnIndices) {
   MaxPool3d model(MaxPool3dOptions(3).stride(2));
   auto x = torch::ones({2, 5, 5, 5}, torch::requires_grad());
@@ -407,7 +389,6 @@ TEST_F(ModulesTest, MaxPool3dReturnIndices) {
   ASSERT_EQ(indices.sizes(), std::vector<int64_t>({2, 2, 2, 2}));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, AvgPool1d) {
   AvgPool1d model(AvgPool1dOptions(3).stride(2));
   auto x = torch::ones({1, 1, 5}, torch::requires_grad());
@@ -421,7 +402,6 @@ TEST_F(ModulesTest, AvgPool1d) {
   ASSERT_EQ(y.sizes(), std::vector<int64_t>({1, 1, 2}));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, AvgPool2dEven) {
   AvgPool2d model(AvgPool2dOptions(3).stride(2));
   auto x = torch::ones({2, 5, 5}, torch::requires_grad());
@@ -435,7 +415,6 @@ TEST_F(ModulesTest, AvgPool2dEven) {
   ASSERT_EQ(y.sizes(), std::vector<int64_t>({2, 2, 2}));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, AvgPool2dUneven) {
   AvgPool2d model(AvgPool2dOptions({3, 2}).stride({2, 2}));
   auto x = torch::ones({2, 5, 4}, torch::requires_grad());
@@ -449,7 +428,6 @@ TEST_F(ModulesTest, AvgPool2dUneven) {
   ASSERT_EQ(y.sizes(), std::vector<int64_t>({2, 2, 2}));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, AvgPool3d) {
   AvgPool3d model(AvgPool3dOptions(3).stride(2));
   auto x = torch::ones({2, 5, 5, 5}, torch::requires_grad());
@@ -463,7 +441,6 @@ TEST_F(ModulesTest, AvgPool3d) {
   ASSERT_EQ(y.sizes(), std::vector<int64_t>({2, 2, 2, 2}));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, FractionalMaxPool2d) {
   FractionalMaxPool2d model(FractionalMaxPool2dOptions(3).output_size(2));
   auto x = torch::ones({2, 5, 5}, torch::requires_grad());
@@ -477,7 +454,6 @@ TEST_F(ModulesTest, FractionalMaxPool2d) {
   ASSERT_EQ(y.sizes(), std::vector<int64_t>({2, 2, 2}));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, FractionalMaxPool2dReturnIndices) {
   FractionalMaxPool2d model(FractionalMaxPool2dOptions(3).output_size(2));
   auto x = torch::ones({2, 5, 5}, torch::requires_grad());
@@ -496,7 +472,6 @@ TEST_F(ModulesTest, FractionalMaxPool2dReturnIndices) {
   ASSERT_EQ(indices.sizes(), std::vector<int64_t>({2, 2, 2}));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, FractionalMaxPool3d) {
   FractionalMaxPool3d model(FractionalMaxPool3dOptions(3).output_size(2));
   auto x = torch::ones({2, 5, 5, 5}, torch::requires_grad());
@@ -510,7 +485,6 @@ TEST_F(ModulesTest, FractionalMaxPool3d) {
   ASSERT_EQ(y.sizes(), std::vector<int64_t>({2, 2, 2, 2}));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, FractionalMaxPool3dReturnIndices) {
   FractionalMaxPool3d model(FractionalMaxPool3dOptions(3).output_size(2));
   auto x = torch::ones({2, 5, 5, 5}, torch::requires_grad());
@@ -534,7 +508,6 @@ TEST_F(ModulesTest, FractionalMaxPool3dReturnIndices) {
   ASSERT_EQ(indices.sizes(), std::vector<int64_t>({2, 2, 2, 2}));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, LPPool1d) {
   int norm_type = 2;
   int stride = 2;
@@ -550,7 +523,6 @@ TEST_F(ModulesTest, LPPool1d) {
   ASSERT_EQ(y.sizes(), torch::IntArrayRef({1, 1, 2}));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, LPPool2d) {
   int norm_type = 2;
   int stride = 2;
@@ -566,7 +538,6 @@ TEST_F(ModulesTest, LPPool2d) {
   ASSERT_EQ(y.sizes(), torch::IntArrayRef({1, 1, 2}));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, Identity) {
   Identity identity;
   auto input = torch::tensor({{1, 3, 4}, {2, 3, 4}}, torch::dtype(torch::kFloat).requires_grad(true));
@@ -579,7 +550,6 @@ TEST_F(ModulesTest, Identity) {
   ASSERT_TRUE(torch::equal(input.grad(), torch::ones_like(input)));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, Flatten) {
   Flatten flatten;
   auto input = torch::tensor({{1, 3, 4}, {2, 5, 6}}, torch::dtype(torch::kFloat).requires_grad(true));
@@ -610,7 +580,6 @@ TEST_F(ModulesTest, Flatten) {
   ASSERT_TRUE(torch::equal(input.grad(), torch::ones_like(input)));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, Unflatten) {
   // Non-named tensor
   Unflatten unflatten(UnflattenOptions(0, {2, 2}));
@@ -641,7 +610,6 @@ TEST_F(ModulesTest, Unflatten) {
   ASSERT_TRUE(torch::equal(output, expected));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, AdaptiveMaxPool1d) {
   AdaptiveMaxPool1d model(3);
   auto x = torch::tensor({{{1, 2, 3, 4, 5}}}, torch::dtype(torch::kFloat).requires_grad(true));
@@ -655,7 +623,6 @@ TEST_F(ModulesTest, AdaptiveMaxPool1d) {
   ASSERT_EQ(y.sizes(), std::vector<int64_t>({1, 1, 3}));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, AdaptiveMaxPool1dReturnIndices) {
   AdaptiveMaxPool1d model(3);
   auto x = torch::tensor({{{1, 2, 3, 4, 5}}}, torch::dtype(torch::kFloat).requires_grad(true));
@@ -669,7 +636,6 @@ TEST_F(ModulesTest, AdaptiveMaxPool1dReturnIndices) {
   ASSERT_EQ(indices.sizes(), std::vector<int64_t>({1, 1, 3}));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, AdaptiveMaxPool2dEven) {
   AdaptiveMaxPool2d model(3);
   auto x = torch::arange(0., 50);
@@ -691,7 +657,6 @@ TEST_F(ModulesTest, AdaptiveMaxPool2dEven) {
   ASSERT_EQ(y.sizes(), std::vector<int64_t>({2, 3, 3}));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, AdaptiveMaxPool2dUneven) {
   AdaptiveMaxPool2d model(AdaptiveMaxPool2dOptions({3, 2}));
   auto x = torch::arange(0., 40);
@@ -713,7 +678,6 @@ TEST_F(ModulesTest, AdaptiveMaxPool2dUneven) {
   ASSERT_EQ(y.sizes(), std::vector<int64_t>({2, 3, 2}));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, AdaptiveMaxPool2dReturnIndicesEven) {
   AdaptiveMaxPool2d model(3);
   auto x = torch::arange(0., 50);
@@ -748,7 +712,6 @@ TEST_F(ModulesTest, AdaptiveMaxPool2dReturnIndicesEven) {
   ASSERT_EQ(indices.sizes(), std::vector<int64_t>({2, 3, 3}));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, AdaptiveMaxPool2dReturnIndicesUneven) {
   AdaptiveMaxPool2d model(AdaptiveMaxPool2dOptions({3, 2}));
   auto x = torch::arange(0., 40);
@@ -783,7 +746,6 @@ TEST_F(ModulesTest, AdaptiveMaxPool2dReturnIndicesUneven) {
   ASSERT_EQ(indices.sizes(), std::vector<int64_t>({2, 3, 2}));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, AdaptiveMaxPool3d) {
   AdaptiveMaxPool3d model(3);
   auto x = torch::arange(0., 64);
@@ -809,7 +771,6 @@ TEST_F(ModulesTest, AdaptiveMaxPool3d) {
   ASSERT_EQ(y.sizes(), std::vector<int64_t>({1, 3, 3, 3}));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, AdaptiveMaxPool3dReturnIndices) {
   AdaptiveMaxPool3d model(3);
   auto x = torch::arange(0., 64);
@@ -850,7 +811,6 @@ TEST_F(ModulesTest, AdaptiveMaxPool3dReturnIndices) {
   ASSERT_EQ(indices.sizes(), std::vector<int64_t>({1, 3, 3, 3}));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, AdaptiveAvgPool1d) {
   AdaptiveAvgPool1d model(3);
   auto x = torch::tensor({{{1, 2, 3, 4, 5}}}, torch::dtype(torch::kFloat).requires_grad(true));
@@ -865,7 +825,6 @@ TEST_F(ModulesTest, AdaptiveAvgPool1d) {
   ASSERT_EQ(y.sizes(), std::vector<int64_t>({1, 1, 3}));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, AdaptiveAvgPool2dEven) {
   AdaptiveAvgPool2d model(3);
   auto x = torch::arange(0., 50);
@@ -888,7 +847,6 @@ TEST_F(ModulesTest, AdaptiveAvgPool2dEven) {
   ASSERT_EQ(y.sizes(), std::vector<int64_t>({2, 3, 3}));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, AdaptiveAvgPool2dUneven) {
   AdaptiveAvgPool2d model(AdaptiveAvgPool2dOptions({3, 2}));
   auto x = torch::arange(0., 40);
@@ -911,7 +869,6 @@ TEST_F(ModulesTest, AdaptiveAvgPool2dUneven) {
   ASSERT_EQ(y.sizes(), std::vector<int64_t>({2, 3, 2}));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, AdaptiveAvgPool3d) {
   AdaptiveAvgPool3d model(3);
   auto x = torch::arange(0., 64);
@@ -937,7 +894,6 @@ TEST_F(ModulesTest, AdaptiveAvgPool3d) {
   ASSERT_EQ(y.sizes(), std::vector<int64_t>({1, 3, 3, 3}));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, MaxUnpool1d) {
   auto indices = torch::tensor({{{1, 3, 4}}}, torch::kLong);
   auto x = torch::tensor({{{2, 4, 5}}}, torch::dtype(torch::kFloat).requires_grad(true));
@@ -960,7 +916,6 @@ TEST_F(ModulesTest, MaxUnpool1d) {
   ASSERT_EQ(y.sizes(), std::vector<int64_t>({1, 1, 5}));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, MaxPool1d_MaxUnpool1d) {
   MaxPool1d pool {MaxPool1dOptions(2).stride(2)};
   MaxUnpool1d unpool {MaxUnpool1dOptions(2).stride(2)};
@@ -982,7 +937,6 @@ TEST_F(ModulesTest, MaxPool1d_MaxUnpool1d) {
     torch::tensor({{{0, 2, 0, 4, 0, 6, 0, 8}}} , torch::kFloat)));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, MaxUnpool2d) {
   auto indices = torch::tensor({
   {{{ 6,  8,  9},
@@ -1016,7 +970,6 @@ TEST_F(ModulesTest, MaxUnpool2d) {
   ASSERT_EQ(y.sizes(), std::vector<int64_t>({2, 1, 5, 5}));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, MaxPool2d_MaxUnpool2d) {
   MaxPool2d pool {MaxPool2dOptions(2).stride(2)};
   MaxUnpool2d unpool {MaxUnpool2dOptions(2).stride(2)};
@@ -1042,7 +995,6 @@ TEST_F(ModulesTest, MaxPool2d_MaxUnpool2d) {
                      { 0, 0, 0,  0, 0}}}}, torch::kFloat)));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, MaxUnpool3d) {
   auto indices = torch::tensor({{{{{26}}}}}, torch::kLong);
   auto x = torch::tensor({{{{{26}}}}}, torch::dtype(torch::kFloat).requires_grad(true));
@@ -1063,7 +1015,6 @@ TEST_F(ModulesTest, MaxUnpool3d) {
   ASSERT_EQ(y.sizes(), std::vector<int64_t>({1, 1, 3, 3, 3}));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, MaxUnpool3dOutputSize) {
   auto indices = torch::tensor(
     {{{{{21, 23},
@@ -1099,7 +1050,6 @@ TEST_F(ModulesTest, MaxUnpool3dOutputSize) {
   ASSERT_EQ(y.sizes(), std::vector<int64_t>({1, 1, 4, 4, 4}));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, MaxPool3d_MaxUnpool3d) {
   MaxPool3d pool {MaxPool3dOptions(3).stride(2)};
   MaxUnpool3d unpool {MaxUnpool3dOptions(3).stride(2)};
@@ -1110,7 +1060,6 @@ TEST_F(ModulesTest, MaxPool3d_MaxUnpool3d) {
   ASSERT_EQ(unpooled_output.sizes(), std::vector<int64_t>({20, 16, 51, 33, 15}));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, Linear) {
   {
     Linear model(5, 2);
@@ -1148,7 +1097,6 @@ TEST_F(ModulesTest, Linear) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, LocalResponseNorm) {
   {
     LocalResponseNorm model(LocalResponseNormOptions(2));
@@ -1190,7 +1138,6 @@ TEST_F(ModulesTest, LocalResponseNorm) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, LayerNorm) {
   LayerNorm model(LayerNormOptions({2, 2}).eps(2e-5));
   auto x = torch::randn({2, 2}, torch::requires_grad());
@@ -1209,7 +1156,6 @@ TEST_F(ModulesTest, LayerNorm) {
   ASSERT_TRUE(torch::allclose(y, y_exp));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, GroupNorm) {
   GroupNorm model(GroupNormOptions(2, 2).eps(2e-5));
   auto x = torch::randn({2, 2}, torch::requires_grad());
@@ -1228,7 +1174,6 @@ TEST_F(ModulesTest, GroupNorm) {
   ASSERT_TRUE(torch::allclose(y, y_exp));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, Bilinear) {
   Bilinear model(5, 3, 2);
   auto x1 = torch::randn({10, 5}, torch::requires_grad());
@@ -1245,7 +1190,6 @@ TEST_F(ModulesTest, Bilinear) {
   ASSERT_EQ(model->weight.grad().numel(), 2 * 5 * 3);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, Fold) {
   {
     Fold model(FoldOptions({3, 2}, {2, 2}));
@@ -1272,7 +1216,6 @@ TEST_F(ModulesTest, Fold) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, Unfold) {
   {
     Unfold model(UnfoldOptions({2, 2}).padding(1).stride(2));
@@ -1313,7 +1256,6 @@ TEST_F(ModulesTest, Unfold) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, SimpleContainer) {
   auto model = std::make_shared<SimpleContainer>();
   auto l1 = model->add(Linear(10, 3), "l1");
@@ -1332,7 +1274,6 @@ TEST_F(ModulesTest, SimpleContainer) {
   ASSERT_EQ(x.min().item<float>(), 0);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, EmbeddingBasic) {
   const int64_t dict_size = 10;
   Embedding model(dict_size, 2);
@@ -1356,7 +1297,6 @@ TEST_F(ModulesTest, EmbeddingBasic) {
   ASSERT_EQ(model->weight.grad().numel(), 2 * dict_size);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, EmbeddingList) {
   Embedding model(6, 4);
   auto x = torch::full({2, 3}, 5, torch::kInt64);
@@ -1370,7 +1310,6 @@ TEST_F(ModulesTest, EmbeddingList) {
   ASSERT_EQ(y.size(2), 4);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, EmbeddingFromPretrained) {
   auto weight = torch::tensor({{1., 2.3, 3.}, {4., 5.1, 6.3}});
   Embedding embedding = torch::nn::Embedding::from_pretrained(weight);
@@ -1378,7 +1317,6 @@ TEST_F(ModulesTest, EmbeddingFromPretrained) {
   ASSERT_TRUE(torch::allclose(embedding(input), torch::tensor({4.0000, 5.1000, 6.3000})));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, EmbeddingBagFromPretrained) {
   auto weight = torch::tensor({{1., 2.3, 3.}, {4., 5.1, 6.3}});
   EmbeddingBag embeddingbag = torch::nn::EmbeddingBag::from_pretrained(weight);
@@ -1387,7 +1325,6 @@ TEST_F(ModulesTest, EmbeddingBagFromPretrained) {
   ASSERT_TRUE(torch::allclose(embeddingbag(input), torch::tensor({2.5000, 3.7000, 4.6500})));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, AlphaDropout) {
   AlphaDropout alpha_dropout(0.5);
   torch::Tensor x = torch::ones(100, torch::requires_grad());
@@ -1406,7 +1343,6 @@ TEST_F(ModulesTest, AlphaDropout) {
   ASSERT_EQ(y.sum().item<float>(), 100);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, FeatureAlphaDropout) {
   FeatureAlphaDropout feature_alpha_dropout(0.5);
   torch::Tensor x = torch::ones({10, 10}, torch::requires_grad());
@@ -1426,7 +1362,6 @@ TEST_F(ModulesTest, FeatureAlphaDropout) {
   ASSERT_EQ(y.sum().item<float>(), 100);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, Dropout) {
   for (const auto inplace : {false, true}) {
     Dropout dropout(DropoutOptions(0.5).inplace(inplace));
@@ -1452,7 +1387,6 @@ TEST_F(ModulesTest, Dropout) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, Dropout2d) {
   for (const auto inplace : {false, true}) {
     Dropout2d dropout(Dropout2dOptions(0.5).inplace(inplace));
@@ -1479,7 +1413,6 @@ TEST_F(ModulesTest, Dropout2d) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, Dropout3d) {
   for (const auto inplace : {false, true}) {
     Dropout3d dropout(Dropout3dOptions(0.5).inplace(inplace));
@@ -1507,7 +1440,6 @@ TEST_F(ModulesTest, Dropout3d) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, Parameters) {
   auto model = std::make_shared<NestedModel>();
   auto parameters = model->named_parameters();
@@ -1528,7 +1460,6 @@ TEST_F(ModulesTest, Parameters) {
   ASSERT_EQ(parameters["test.l3.weight"].size(1), 5);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, FunctionalCallsSuppliedFunction) {
   bool was_called = false;
   auto functional = Functional([&was_called](torch::Tensor input) {
@@ -1546,7 +1477,6 @@ TEST_F(ModulesTest, FunctionalCallsSuppliedFunction) {
   ASSERT_TRUE(output.equal(torch::ones(5, torch::requires_grad())));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, FunctionalWithTorchFunction) {
   auto functional = Functional(torch::relu);
   ASSERT_EQ(functional(torch::ones({})).item<float>(), 1);
@@ -1554,14 +1484,12 @@ TEST_F(ModulesTest, FunctionalWithTorchFunction) {
   ASSERT_EQ(functional(torch::ones({}) * -1).item<float>(), 0);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, FunctionalArgumentBinding) {
   auto functional =
       Functional(torch::elu, /*alpha=*/1, /*scale=*/0, /*input_scale=*/1);
   ASSERT_EQ(functional(torch::ones({})).item<float>(), 0);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, BatchNorm1dStateful) {
   BatchNorm1d bn(5);
 
@@ -1589,7 +1517,6 @@ TEST_F(ModulesTest, BatchNorm1dStateful) {
   ASSERT_EQ(bn->bias.size(0), 5);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, BatchNorm1dStateless) {
   BatchNorm1d bn(BatchNorm1dOptions(5).track_running_stats(false).affine(false));
 
@@ -1600,7 +1527,6 @@ TEST_F(ModulesTest, BatchNorm1dStateless) {
   ASSERT_FALSE(bn->bias.defined());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, BatchNorm1d) {
   BatchNorm1d bn(5);
   bn->eval();
@@ -1624,7 +1550,6 @@ TEST_F(ModulesTest, BatchNorm1d) {
   ASSERT_EQ(input.sizes(), input.grad().sizes());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, BatchNorm2dStateful) {
   BatchNorm2d bn(5);
 
@@ -1652,7 +1577,6 @@ TEST_F(ModulesTest, BatchNorm2dStateful) {
   ASSERT_EQ(bn->bias.size(0), 5);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, BatchNorm2dStateless) {
   BatchNorm2d bn(BatchNorm2dOptions(5).track_running_stats(false).affine(false));
 
@@ -1663,7 +1587,6 @@ TEST_F(ModulesTest, BatchNorm2dStateless) {
   ASSERT_FALSE(bn->bias.defined());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, BatchNorm2d) {
   BatchNorm2d bn(5);
   bn->eval();
@@ -1697,7 +1620,6 @@ TEST_F(ModulesTest, BatchNorm2d) {
   ASSERT_EQ(input.sizes(), input.grad().sizes());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, BatchNorm3dStateful) {
   BatchNorm3d bn(5);
 
@@ -1725,7 +1647,6 @@ TEST_F(ModulesTest, BatchNorm3dStateful) {
   ASSERT_EQ(bn->bias.size(0), 5);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, BatchNorm3dStateless) {
   BatchNorm3d bn(BatchNorm3dOptions(5).track_running_stats(false).affine(false));
 
@@ -1736,7 +1657,6 @@ TEST_F(ModulesTest, BatchNorm3dStateless) {
   ASSERT_FALSE(bn->bias.defined());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, BatchNorm3d) {
   BatchNorm3d bn(5);
   bn->eval();
@@ -1790,7 +1710,6 @@ TEST_F(ModulesTest, BatchNorm3d) {
   ASSERT_EQ(input.sizes(), input.grad().sizes());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, InstanceNorm1dStateful) {
   InstanceNorm1d instance_norm(InstanceNorm1dOptions(5).track_running_stats(true).affine(true));
 
@@ -1818,7 +1737,6 @@ TEST_F(ModulesTest, InstanceNorm1dStateful) {
   ASSERT_EQ(instance_norm->bias.size(0), 5);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, InstanceNorm1dStateless) {
   InstanceNorm1d instance_norm(InstanceNorm1dOptions(5).track_running_stats(false).affine(false));
 
@@ -1829,7 +1747,6 @@ TEST_F(ModulesTest, InstanceNorm1dStateless) {
   ASSERT_FALSE(instance_norm->bias.defined());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, InstanceNorm1d) {
   InstanceNorm1d instance_norm(5);
   instance_norm->eval();
@@ -1853,7 +1770,6 @@ TEST_F(ModulesTest, InstanceNorm1d) {
   ASSERT_EQ(input.sizes(), input.grad().sizes());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, InstanceNorm2dStateful) {
   InstanceNorm2d instance_norm(InstanceNorm2dOptions(5).track_running_stats(true).affine(true));
 
@@ -1881,7 +1797,6 @@ TEST_F(ModulesTest, InstanceNorm2dStateful) {
   ASSERT_EQ(instance_norm->bias.size(0), 5);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, InstanceNorm2dStateless) {
   InstanceNorm2d instance_norm(InstanceNorm2dOptions(5).track_running_stats(false).affine(false));
 
@@ -1892,7 +1807,6 @@ TEST_F(ModulesTest, InstanceNorm2dStateless) {
   ASSERT_FALSE(instance_norm->bias.defined());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, InstanceNorm2d) {
   InstanceNorm2d instance_norm(5);
   instance_norm->eval();
@@ -1926,7 +1840,6 @@ TEST_F(ModulesTest, InstanceNorm2d) {
   ASSERT_EQ(input.sizes(), input.grad().sizes());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, InstanceNorm3dStateful) {
   InstanceNorm3d instance_norm(InstanceNorm3dOptions(5).track_running_stats(true).affine(true));
 
@@ -1954,7 +1867,6 @@ TEST_F(ModulesTest, InstanceNorm3dStateful) {
   ASSERT_EQ(instance_norm->bias.size(0), 5);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, InstanceNorm3dStateless) {
   InstanceNorm3d instance_norm(InstanceNorm3dOptions(5).track_running_stats(false).affine(false));
 
@@ -1965,7 +1877,6 @@ TEST_F(ModulesTest, InstanceNorm3dStateless) {
   ASSERT_FALSE(instance_norm->bias.defined());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, InstanceNorm3d) {
   InstanceNorm3d instance_norm(5);
   instance_norm->eval();
@@ -2019,7 +1930,6 @@ TEST_F(ModulesTest, InstanceNorm3d) {
   ASSERT_EQ(input.sizes(), input.grad().sizes());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, Linear_CUDA) {
   Linear model(5, 2);
   model->to(torch::kCUDA);
@@ -2037,7 +1947,6 @@ TEST_F(ModulesTest, Linear_CUDA) {
   ASSERT_EQ(model->weight.grad().numel(), 2 * 5);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, Linear2_CUDA) {
   Linear model(5, 2);
   model->to(torch::kCUDA);
@@ -2055,7 +1964,6 @@ TEST_F(ModulesTest, Linear2_CUDA) {
   ASSERT_EQ(model->weight.grad().numel(), 2 * 5);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, L1Loss) {
   L1Loss loss;
   auto input = torch::randn({5,6}, torch::requires_grad());
@@ -2068,7 +1976,6 @@ TEST_F(ModulesTest, L1Loss) {
   ASSERT_EQ(input.sizes(), input.grad().sizes());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, MSELoss) {
   MSELoss loss;
   auto input = torch::randn({5,6}, torch::requires_grad());
@@ -2081,7 +1988,6 @@ TEST_F(ModulesTest, MSELoss) {
   ASSERT_EQ(input.sizes(), input.grad().sizes());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, BCELoss) {
   BCELoss loss;
   auto input = torch::randn({5,6}, torch::requires_grad());
@@ -2094,7 +2000,6 @@ TEST_F(ModulesTest, BCELoss) {
   ASSERT_EQ(input.sizes(), input.grad().sizes());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, KLDivLoss) {
   KLDivLoss loss;
   auto input = torch::randn({5,6}, torch::requires_grad());
@@ -2107,7 +2012,6 @@ TEST_F(ModulesTest, KLDivLoss) {
   ASSERT_EQ(input.sizes(), input.grad().sizes());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, HingeEmbeddingLoss) {
   HingeEmbeddingLoss loss(HingeEmbeddingLossOptions().margin(2));
   auto input = torch::tensor({{2, 22, 4}, {20, 10, 0}}, torch::dtype(torch::kFloat).requires_grad(true));
@@ -2121,7 +2025,6 @@ TEST_F(ModulesTest, HingeEmbeddingLoss) {
   ASSERT_EQ(input.sizes(), input.grad().sizes());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, MultiMarginLoss) {
   auto weight = torch::tensor({0.3, 0.3, 0.4}, torch::kFloat);
   MultiMarginLoss loss(MultiMarginLossOptions().margin(2).weight(weight));
@@ -2136,7 +2039,6 @@ TEST_F(ModulesTest, MultiMarginLoss) {
   ASSERT_EQ(input.sizes(), input.grad().sizes());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, CosineEmbeddingLoss) {
   CosineEmbeddingLoss cos(CosineEmbeddingLossOptions().margin(0.5));
   auto input1 = torch::tensor({{2, 3, 4}, {6, 2, 4}}, torch::dtype(torch::kFloat).requires_grad(true));
@@ -2152,7 +2054,6 @@ TEST_F(ModulesTest, CosineEmbeddingLoss) {
   ASSERT_EQ(input2.sizes(), input2.grad().sizes());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, SmoothL1LossDefaultOptions) {
   SmoothL1Loss loss;
   auto input = torch::tensor({0.1, 1.2, 4.7}, torch::dtype(torch::kFloat).requires_grad(true));
@@ -2166,7 +2067,6 @@ TEST_F(ModulesTest, SmoothL1LossDefaultOptions) {
   ASSERT_EQ(input.sizes(), input.grad().sizes());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, HuberLossDefaultOptions) {
   HuberLoss loss;
   auto input = torch::tensor({0.1, 1.2, 4.7}, torch::dtype(torch::kFloat).requires_grad(true));
@@ -2180,7 +2080,6 @@ TEST_F(ModulesTest, HuberLossDefaultOptions) {
   ASSERT_EQ(input.sizes(), input.grad().sizes());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, MultiLabelMarginLossDefaultOptions) {
   MultiLabelMarginLoss loss;
   auto input = torch::tensor({{0.1, 0.2, 0.4, 0.8}}, torch::dtype(torch::kFloat).requires_grad(true));
@@ -2194,7 +2093,6 @@ TEST_F(ModulesTest, MultiLabelMarginLossDefaultOptions) {
   ASSERT_EQ(input.sizes(), input.grad().sizes());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, SmoothL1LossNoReduction) {
   SmoothL1Loss loss(/*reduction=*/torch::kNone);
   auto input = torch::tensor({0.1, 1.2, 4.7}, torch::dtype(torch::kFloat).requires_grad(true));
@@ -2208,7 +2106,6 @@ TEST_F(ModulesTest, SmoothL1LossNoReduction) {
   ASSERT_EQ(input.sizes(), input.grad().sizes());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, HuberLossNoReduction) {
   HuberLoss loss(/*reduction=*/torch::kNone);
   auto input = torch::tensor({0.1, 1.2, 4.7}, torch::dtype(torch::kFloat).requires_grad(true));
@@ -2222,7 +2119,6 @@ TEST_F(ModulesTest, HuberLossNoReduction) {
   ASSERT_EQ(input.sizes(), input.grad().sizes());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, MultiLabelMarginLossNoReduction) {
   MultiLabelMarginLoss loss(torch::kNone);
   auto input = torch::tensor({{0.1, 0.2, 0.4, 0.8}}, torch::dtype(torch::kFloat).requires_grad(true));
@@ -2236,7 +2132,6 @@ TEST_F(ModulesTest, MultiLabelMarginLossNoReduction) {
   ASSERT_EQ(input.sizes(), input.grad().sizes());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, SmoothL1LossBeta) {
   auto options = SmoothL1LossOptions().beta(0.2);
   SmoothL1Loss loss(options);
@@ -2251,7 +2146,6 @@ TEST_F(ModulesTest, SmoothL1LossBeta) {
   ASSERT_EQ(input.sizes(), input.grad().sizes());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, HuberLossDelta) {
   auto options = HuberLossOptions().delta(0.2);
   HuberLoss loss(options);
@@ -2266,7 +2160,6 @@ TEST_F(ModulesTest, HuberLossDelta) {
   ASSERT_EQ(input.sizes(), input.grad().sizes());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, TripletMarginLoss) {
   TripletMarginLoss loss(TripletMarginLossOptions().margin(1.0));
   auto anchor = torch::tensor({{3., 3.}}, torch::dtype(torch::kFloat).requires_grad(true));
@@ -2281,7 +2174,6 @@ TEST_F(ModulesTest, TripletMarginLoss) {
   ASSERT_EQ(anchor.sizes(), anchor.grad().sizes());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, TripletMarginWithDistanceLossDefaultParity) {
   // Check that if we use torch::pairwise_distance with the default
   // TripletMarginLoss options as our distance function, the outputs
@@ -2334,7 +2226,6 @@ TEST_F(ModulesTest, TripletMarginWithDistanceLossDefaultParity) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, TripletMarginWithDistanceLossFunctionalParity) {
   // Check for parity between F::triplet_margin_with_distance_loss and
   // TripletMarginWithDistanceLoss.
@@ -2392,7 +2283,6 @@ TEST_F(ModulesTest, TripletMarginWithDistanceLossFunctionalParity) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, NLLLoss) {
   NLLLoss loss;
   auto input = torch::tensor({{-0.1315, -3.1315, -2.5315},
@@ -2411,7 +2301,6 @@ TEST_F(ModulesTest, NLLLoss) {
       ->forward(input, target).allclose(expected, 1e-04));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, CrossEntropyLoss) {
   CrossEntropyLoss loss;
   auto input = torch::tensor({{3., 3.}, {2., 2.}}, torch::dtype(torch::kFloat).requires_grad(true));
@@ -2426,9 +2315,33 @@ TEST_F(ModulesTest, CrossEntropyLoss) {
   ASSERT_TRUE(
     CrossEntropyLoss(CrossEntropyLossOptions().ignore_index(-100).reduction(torch::kMean))
       ->forward(input, target).allclose(expected, 1e-04));
+
+  // label smoothing with class indices
+  loss = CrossEntropyLoss(CrossEntropyLossOptions().label_smoothing(0.15).reduction(torch::kMean));
+  input = torch::tensor({{3., 1.}, {1., 2.}}, torch::dtype(torch::kFloat).requires_grad(true));
+  target = torch::tensor({0, 1}, torch::kLong);
+  output = loss->forward(input, target);
+  expected = torch::tensor(0.3326, torch::kFloat);
+  s = output.sum();
+  s.backward();
+
+  ASSERT_TRUE(output.allclose(expected, 1e-04));
+  ASSERT_EQ(input.sizes(), input.grad().sizes());
+
+  // label smoothing with with target probabilities
+  loss = CrossEntropyLoss(CrossEntropyLossOptions().label_smoothing(0.2).reduction(torch::kMean));
+  input = torch::tensor({{3., 1.}, {1., 2.}}, torch::dtype(torch::kFloat).requires_grad(true));
+  target = torch::tensor({{0.8, 0.2}, {0.1, 0.9}}, torch::kFloat);
+  output = loss->forward(input, target);
+  expected = torch::tensor(0.5701, torch::kFloat);
+  s = output.sum();
+  s.backward();
+
+  ASSERT_TRUE(output.allclose(expected, 1e-04));
+  ASSERT_EQ(input.sizes(), input.grad().sizes());
+
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, CosineSimilarity) {
   CosineSimilarity cos(CosineSimilarityOptions().dim(1));
   auto input1 = torch::tensor({{1, 2, 3}, {4, 5, 6}}, torch::dtype(torch::kFloat).requires_grad(true));
@@ -2442,7 +2355,6 @@ TEST_F(ModulesTest, CosineSimilarity) {
   ASSERT_EQ(input1.sizes(), input1.grad().sizes());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, SoftMarginLossDefaultOptions) {
   SoftMarginLoss loss;
   auto input = torch::tensor({2., 4., 1., 3.}, torch::dtype(torch::kFloat).requires_grad(true));
@@ -2456,7 +2368,6 @@ TEST_F(ModulesTest, SoftMarginLossDefaultOptions) {
   ASSERT_EQ(input.sizes(), input.grad().sizes());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, MultiLabelSoftMarginLossDefaultOptions) {
   MultiLabelSoftMarginLoss loss;
   auto input = torch::tensor({{0., 2., 2., 0.}, {2., 1., 0., 1.}}, torch::dtype(torch::kFloat).requires_grad(true));
@@ -2470,7 +2381,6 @@ TEST_F(ModulesTest, MultiLabelSoftMarginLossDefaultOptions) {
   ASSERT_EQ(input.sizes(), input.grad().sizes());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, SoftMarginLossNoReduction) {
   SoftMarginLoss loss(torch::kNone);
   auto input = torch::tensor({2., 4., 1., 3.}, torch::dtype(torch::kFloat).requires_grad(true));
@@ -2484,7 +2394,6 @@ TEST_F(ModulesTest, SoftMarginLossNoReduction) {
   ASSERT_EQ(input.sizes(), input.grad().sizes());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, MultiLabelSoftMarginLossWeightedNoReduction) {
   auto input = torch::tensor({{0., 2., 2., 0.}, {2., 1., 0., 1.}}, torch::dtype(torch::kFloat).requires_grad(true));
   auto target = torch::tensor({{0., 0., 1., 0.}, {1., 0., 1., 1.}}, torch::kFloat);
@@ -2500,7 +2409,6 @@ TEST_F(ModulesTest, MultiLabelSoftMarginLossWeightedNoReduction) {
   ASSERT_EQ(input.sizes(), input.grad().sizes());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PairwiseDistance) {
   PairwiseDistance dist(PairwiseDistanceOptions().p(1));
   auto input1 = torch::tensor({{1, 2, 3}, {4, 5, 6}}, torch::dtype(torch::kFloat).requires_grad(true));
@@ -2514,7 +2422,6 @@ TEST_F(ModulesTest, PairwiseDistance) {
   ASSERT_EQ(input1.sizes(), input1.grad().sizes());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, ELU) {
   const auto size = 3;
   for (const auto alpha : {0.0, 0.42, 1.0, 4.2, 42.42}) {
@@ -2545,7 +2452,6 @@ TEST_F(ModulesTest, ELU) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, SELU) {
   for (const auto inplace : {false, true}) {
     SELU model(inplace);
@@ -2573,7 +2479,6 @@ TEST_F(ModulesTest, SELU) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, Hardshrink) {
   const auto size = 3;
   for (const auto lambda : {-4.2, -1.0, -0.42, 0.0, 0.42, 1.0, 4.2, 42.42}) {
@@ -2592,7 +2497,6 @@ TEST_F(ModulesTest, Hardshrink) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, Hardtanh) {
   const auto size = 3;
   for (const auto min_val : {-4.2, -1.0, -0.42, 0.0}) {
@@ -2625,7 +2529,6 @@ TEST_F(ModulesTest, Hardtanh) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, HardtanhMinValGEMaxVal) {
   ASSERT_THROWS_WITH(Hardtanh{HardtanhOptions().min_val(0.42).max_val(0.42)},
                      "max_val must be greater than min_val");
@@ -2639,36 +2542,36 @@ TEST_F(ModulesTest, HardtanhMinValGEMaxVal) {
   ASSERT_THROWS_WITH(ht->reset(), "max_val must be greater than min_val");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, LeakyReLU) {
   const auto size = 3;
   for (const auto inplace : {false, true}) {
     for (const auto negative_slope : {0.0, 0.42, 1.0}) {
-      LeakyReLU model {LeakyReLUOptions().negative_slope(negative_slope).inplace(inplace)};
-      auto x = torch::linspace(-10.0, 10.0, size * size * size);
-      x.resize_({size, size, size});
-      if (!inplace) {
-        x.requires_grad_(true);
-      }
-      auto x_orig = x.clone();
-      auto y = model(x);
-      torch::Tensor s = y.sum();
+      for (const auto type : {torch::kFloat, torch::kBFloat16}) {
+        LeakyReLU model {LeakyReLUOptions().negative_slope(negative_slope).inplace(inplace)};
+        auto x = torch::linspace(-10.0, 10.0, size * size * size).to(type);
+        x.resize_({size, size, size});
+        if (!inplace) {
+          x.requires_grad_(true);
+        }
+        auto x_orig = x.clone();
+        auto y = model(x);
+        torch::Tensor s = y.sum();
 
-      ASSERT_EQ(s.ndimension(), 0);
-      ASSERT_EQ(y.ndimension(), 3);
-      ASSERT_EQ(y.sizes(), std::vector<int64_t>({size, size, size}));
-      auto y_exp = (x_orig < 0) * x_orig * negative_slope + (x_orig >= 0) * x_orig;
-      ASSERT_TRUE(torch::allclose(y, y_exp));
-      if (inplace) {
-        ASSERT_TRUE(torch::allclose(x, y_exp));
-      } else {
-        s.backward();
+        ASSERT_EQ(s.ndimension(), 0);
+        ASSERT_EQ(y.ndimension(), 3);
+        ASSERT_EQ(y.sizes(), std::vector<int64_t>({size, size, size}));
+        auto y_exp = (x_orig < 0) * x_orig * negative_slope + (x_orig >= 0) * x_orig;
+        ASSERT_TRUE(torch::allclose(y, y_exp));
+        if (inplace) {
+          ASSERT_TRUE(torch::allclose(x, y_exp));
+        } else {
+          s.backward();
+        }
       }
     }
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, LogSigmoid) {
   const auto size = 3;
   LogSigmoid model;
@@ -2686,7 +2589,6 @@ TEST_F(ModulesTest, LogSigmoid) {
   ASSERT_TRUE(torch::allclose(y, y_exp, 1e-4, 1e-7));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, Softmax) {
   Softmax m(/*dim=*/1);
   auto input = torch::arange(10, torch::kFloat).reshape({2, 5});
@@ -2699,7 +2601,6 @@ TEST_F(ModulesTest, Softmax) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, Softmin) {
   Softmin m(/*dim=*/1);
   auto input = torch::arange(10, torch::kFloat).reshape({2, 5});
@@ -2712,7 +2613,6 @@ TEST_F(ModulesTest, Softmin) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, LogSoftmax) {
   LogSoftmax m(/*dim=*/1);
   auto input = torch::arange(10, torch::kFloat).reshape({2, 5});
@@ -2725,7 +2625,6 @@ TEST_F(ModulesTest, LogSoftmax) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, AdaptiveLogSoftmaxWithLoss) {
   {
     // log_probs actually returns log_proba
@@ -2770,7 +2669,6 @@ TEST_F(ModulesTest, AdaptiveLogSoftmaxWithLoss) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, Softmax2d) {
   Softmax2d m;
   auto input = torch::arange(24, torch::kFloat).reshape({1, 2, 3, 4});
@@ -2789,7 +2687,6 @@ TEST_F(ModulesTest, Softmax2d) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PReLU) {
   const auto num_parameters = 42;
   const auto init = 0.42;
@@ -2813,7 +2710,6 @@ TEST_F(ModulesTest, PReLU) {
   ASSERT_TRUE(torch::allclose(y, y_exp));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, ReLU) {
   for (const auto inplace : {false, true}) {
     const auto size = 3;
@@ -2840,7 +2736,6 @@ TEST_F(ModulesTest, ReLU) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, ReLU6) {
   for (const auto inplace : {false, true}) {
     const auto size = 3;
@@ -2867,39 +2762,39 @@ TEST_F(ModulesTest, ReLU6) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, RReLU) {
   const auto size = 3;
   for (const auto lower : {0.01, 0.1, 0.2}) {
     for (const auto upper : {0.3, 0.4, 0.5}) {
       for (const auto inplace : {false, true}) {
-        RReLU model {RReLUOptions().lower(lower).upper(upper).inplace(inplace)};
-        auto x = torch::linspace(-10.0, 10.0, size * size * size);
-        x.resize_({size, size, size});
-        if (!inplace) {
-          x.requires_grad_(true);
-        }
-        auto x_orig = x.clone();
-        auto y = model(x);
-        torch::Tensor s = y.sum();
+        for (const auto type : {torch::kFloat, torch::kBFloat16}) {
+          RReLU model {RReLUOptions().lower(lower).upper(upper).inplace(inplace)};
+          auto x = torch::linspace(-10.0, 10.0, size * size * size).to(type);
+          x.resize_({size, size, size});
+          if (!inplace) {
+            x.requires_grad_(true);
+          }
+          auto x_orig = x.clone();
+          auto y = model(x);
+          torch::Tensor s = y.sum();
 
-        ASSERT_EQ(s.ndimension(), 0);
-        ASSERT_EQ(y.ndimension(), 3);
-        ASSERT_EQ(y.sizes(), std::vector<int64_t>({size, size, size}));
-        auto z = ((x_orig >= 0) * (x_orig == y) +
-          (x_orig < 0) * (y >= x_orig * upper) * (y <= lower * x_orig)) * 1.0;
-        ASSERT_TRUE(torch::allclose(z, torch::ones_like(z)));
-        if (inplace) {
-          ASSERT_TRUE(torch::allclose(x, y));
-        } else {
-          s.backward();
+          ASSERT_EQ(s.ndimension(), 0);
+          ASSERT_EQ(y.ndimension(), 3);
+          ASSERT_EQ(y.sizes(), std::vector<int64_t>({size, size, size}));
+          auto z = ((x_orig >= 0) * (x_orig == y) +
+            (x_orig < 0) * (y >= x_orig * upper) * (y <= lower * x_orig)) * 1.0;
+          ASSERT_TRUE(torch::allclose(z, torch::ones_like(z)));
+          if (inplace) {
+            ASSERT_TRUE(torch::allclose(x, y));
+          } else {
+            s.backward();
+          }
         }
       }
     }
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, CELU) {
   const auto size = 3;
   for (const auto inplace : {false, true}) {
@@ -2929,7 +2824,6 @@ TEST_F(ModulesTest, CELU) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, GLU) {
   int64_t dim = 1;
   GLU model(dim);
@@ -2949,16 +2843,14 @@ TEST_F(ModulesTest, GLU) {
   ASSERT_TRUE(model_default_options->forward(input).allclose(expected));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, GELU) {
   GELU model;
   const auto x = torch::linspace(-3.0, 3.0, 100);
   const auto y_exp = x * 0.5 * (1.0 + torch::erf(x / std::sqrt(2.0)));
   const auto y = model(x);
-  ASSERT_TRUE(torch::allclose(y, y_exp));
+  ASSERT_TRUE(torch::allclose(y, y_exp, 1.4e-06, 1e-05));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, Mish) {
   Mish model;
   auto x = torch::randn(100) * 10;
@@ -2968,7 +2860,6 @@ TEST_F(ModulesTest, Mish) {
   ASSERT_TRUE(torch::allclose(y, y_exp));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, Sigmoid) {
   Sigmoid model;
   auto x = torch::randn(100) * 10;
@@ -2978,7 +2869,6 @@ TEST_F(ModulesTest, Sigmoid) {
   ASSERT_TRUE(torch::allclose(y, y_exp));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PixelShuffle) {
   PixelShuffle module(/*upscale_factor=*/2);
   auto x = torch::tensor(
@@ -2998,7 +2888,6 @@ TEST_F(ModulesTest, PixelShuffle) {
   ASSERT_TRUE(y.allclose(y_exp));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PixelUnshuffle) {
   PixelUnshuffle module(/*downscale_factor=*/2);
   auto x = torch::tensor(
@@ -3017,7 +2906,6 @@ TEST_F(ModulesTest, PixelUnshuffle) {
   ASSERT_TRUE(y.allclose(y_exp));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, Softplus) {
   const auto size = 3;
   for (const auto beta : {0.5, 1.0, 2.0}) {
@@ -3037,7 +2925,6 @@ TEST_F(ModulesTest, Softplus) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, Softshrink) {
   const auto size = 3;
   for (const auto lambda : {0.0, 0.42, 1.0, 4.2, 42.42}) {
@@ -3057,7 +2944,6 @@ TEST_F(ModulesTest, Softshrink) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, Softsign) {
   Softsign model;
   auto x = torch::randn(100) * 10;
@@ -3067,7 +2953,6 @@ TEST_F(ModulesTest, Softsign) {
   ASSERT_TRUE(torch::allclose(y, y_exp));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, Tanh) {
   Tanh model;
   auto x = torch::randn(100) * 10;
@@ -3077,7 +2962,6 @@ TEST_F(ModulesTest, Tanh) {
   ASSERT_TRUE(torch::allclose(y, y_exp));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, Tanhshrink) {
   Tanhshrink model;
   auto x = torch::randn(100) * 10;
@@ -3087,7 +2971,6 @@ TEST_F(ModulesTest, Tanhshrink) {
   ASSERT_TRUE(torch::allclose(y, y_exp));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, Threshold) {
   const auto size = 3;
   for (const auto threshold : {0.5, 1.0, 2.0}) {
@@ -3111,7 +2994,6 @@ TEST_F(ModulesTest, Threshold) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, Upsampling1D) {
   {
     Upsample model(UpsampleOptions()
@@ -3162,7 +3044,6 @@ TEST_F(ModulesTest, Upsampling1D) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, Upsampling2D) {
   {
     Upsample model(UpsampleOptions()
@@ -3221,7 +3102,6 @@ TEST_F(ModulesTest, Upsampling2D) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, Upsampling3D) {
   {
     Upsample model(UpsampleOptions()
@@ -3261,7 +3141,6 @@ TEST_F(ModulesTest, Upsampling3D) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, CTCLoss) {
   CTCLoss loss {CTCLossOptions().reduction(torch::kNone)};
   const auto target_lengths = torch::tensor({0, 0, 0});
@@ -3277,7 +3156,6 @@ TEST_F(ModulesTest, CTCLoss) {
     -log_probs.sum(0).slice(1, 0, 1).view_as(output), output));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PoissonNLLLoss) {
   const auto input = torch::tensor({0.5, 1.5, 2.5});
   const auto target = torch::tensor({1., 2., 3.});
@@ -3305,7 +3183,6 @@ TEST_F(ModulesTest, PoissonNLLLoss) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, MarginRankingLoss) {
   {
     MarginRankingLoss loss;
@@ -3341,7 +3218,6 @@ TEST_F(ModulesTest, MarginRankingLoss) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, BCEWithLogitsLoss) {
   { // test BCE with logits raises if target and input are different size
     {
@@ -3682,8 +3558,8 @@ namespace detail {
         bias_k = multihead_attn_module->bias_k.detach();
         bias_v = multihead_attn_module->bias_v.detach();
       } else {
-        bias_k = {};
-        bias_v = {};
+        bias_k.reset();
+        bias_v.reset();
       }
 
       torch::Tensor _Q = decoder_state_tensor.unsqueeze(1).transpose(0, 1);
@@ -3830,7 +3706,6 @@ namespace detail {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, MultiheadAttention) {
   using namespace ::detail;
 
@@ -3913,12 +3788,10 @@ TEST_F(ModulesTest, MultiheadAttention) {
   );
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintIdentity) {
   ASSERT_EQ(c10::str(Identity()), "torch::nn::Identity()");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintFlatten) {
   ASSERT_EQ(c10::str(Flatten()),
     "torch::nn::Flatten(start_dim=1, end_dim=-1)");
@@ -3926,7 +3799,6 @@ TEST_F(ModulesTest, PrettyPrintFlatten) {
     "torch::nn::Flatten(start_dim=2, end_dim=4)");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintUnflatten) {
   ASSERT_EQ(
       c10::str(Unflatten(UnflattenOptions(0, {2, 2}))),
@@ -3939,7 +3811,6 @@ TEST_F(ModulesTest, PrettyPrintUnflatten) {
       "torch::nn::Unflatten(dim=\"B\", unflattened_size={{\"B1\", 2}, {\"B2\", 2}})");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, ReflectionPad1d) {
   {
     ReflectionPad1d m(ReflectionPad1dOptions(2));
@@ -3959,7 +3830,6 @@ TEST_F(ModulesTest, ReflectionPad1d) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, ReflectionPad2d) {
   {
     ReflectionPad2d m(ReflectionPad2dOptions(2));
@@ -3987,7 +3857,6 @@ TEST_F(ModulesTest, ReflectionPad2d) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, ReflectionPad3d) {
   {
     ReflectionPad3d m(ReflectionPad3dOptions(1));
@@ -4040,7 +3909,6 @@ TEST_F(ModulesTest, ReflectionPad3d) {
     ASSERT_TRUE(output.allclose(expected));
   }
 }
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, ReplicationPad1d) {
   {
     ReplicationPad1d m(ReplicationPad1dOptions(2));
@@ -4060,7 +3928,6 @@ TEST_F(ModulesTest, ReplicationPad1d) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, ReplicationPad2d) {
   {
     ReplicationPad2d m(ReplicationPad2dOptions(2));
@@ -4088,7 +3955,6 @@ TEST_F(ModulesTest, ReplicationPad2d) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, ReplicationPad3d) {
   {
     ReplicationPad3d m(ReplicationPad3dOptions(1));
@@ -4145,7 +4011,6 @@ TEST_F(ModulesTest, ReplicationPad3d) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, ZeroPad2d) {
   {
     ZeroPad2d m(ZeroPad2dOptions(2));
@@ -4173,7 +4038,6 @@ TEST_F(ModulesTest, ZeroPad2d) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, ConstantPad1d) {
   {
     ConstantPad1d m(ConstantPad1dOptions(2, 3.5));
@@ -4193,7 +4057,6 @@ TEST_F(ModulesTest, ConstantPad1d) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, ConstantPad2d) {
   {
     ConstantPad2d m(ConstantPad2dOptions(2, 3.5));
@@ -4220,7 +4083,6 @@ TEST_F(ModulesTest, ConstantPad2d) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, ConstantPad3d) {
   {
     ConstantPad3d m(ConstantPad3dOptions(1, 3.5));
@@ -4277,7 +4139,6 @@ TEST_F(ModulesTest, ConstantPad3d) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, CrossMapLRN2d) {
   /// size 3, default options
   auto input = torch::arange(9, torch::kFloat32).view({1, 1, 3, 3}).requires_grad_(true);
@@ -4327,7 +4188,6 @@ TEST_F(ModulesTest, CrossMapLRN2d) {
   ASSERT_TRUE(output.allclose(expected));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, RNNCell) {
   torch::manual_seed(0);
   auto rnn = RNNCell(1, 2);
@@ -4346,7 +4206,6 @@ TEST_F(ModulesTest, RNNCell) {
   ASSERT_TRUE(torch::allclose(output, expected, 1e-05, 2e-04));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, LSTMCell) {
   torch::manual_seed(0);
   auto rnn = LSTMCell(1, 2);
@@ -4378,7 +4237,6 @@ TEST_F(ModulesTest, LSTMCell) {
   ASSERT_TRUE(torch::allclose(output_cx, expected_cx, 1e-05, 2e-04));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, GRUCell) {
   torch::manual_seed(0);
   auto rnn = GRUCell(1, 2);
@@ -4397,13 +4255,11 @@ TEST_F(ModulesTest, GRUCell) {
   ASSERT_TRUE(torch::allclose(output, expected, 1e-05, 2e-04));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintLinear) {
   ASSERT_EQ(
       c10::str(Linear(3, 4)), "torch::nn::Linear(in_features=3, out_features=4, bias=true)");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintBilinear) {
   ASSERT_EQ(
       c10::str(Bilinear(3, 2, 4)), "torch::nn::Bilinear(in1_features=3, in2_features=2, out_features=4, bias=true)");
@@ -4411,7 +4267,6 @@ TEST_F(ModulesTest, PrettyPrintBilinear) {
       c10::str(Bilinear(BilinearOptions(3, 2, 4).bias(false))), "torch::nn::Bilinear(in1_features=3, in2_features=2, out_features=4, bias=false)");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintConv) {
   ASSERT_EQ(
       c10::str(Conv1d(3, 4, 5)),
@@ -4459,7 +4314,6 @@ TEST_F(ModulesTest, PrettyPrintConv) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintConvTranspose) {
   ASSERT_EQ(
       c10::str(ConvTranspose1d(3, 4, 5)),
@@ -4507,7 +4361,6 @@ TEST_F(ModulesTest, PrettyPrintConvTranspose) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintUpsample) {
   ASSERT_EQ(
       c10::str(Upsample(UpsampleOptions().size(std::vector<int64_t>({2, 4, 4})))),
@@ -4517,7 +4370,6 @@ TEST_F(ModulesTest, PrettyPrintUpsample) {
       "torch::nn::Upsample(scale_factor=[0.5, 1.5], mode=kBilinear)");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintFold) {
   ASSERT_EQ(
       c10::str(Fold(FoldOptions({2, 2}, {5, 5}))),
@@ -4527,7 +4379,6 @@ TEST_F(ModulesTest, PrettyPrintFold) {
       "torch::nn::Fold(output_size=[8, 8], kernel_size=[3, 3], dilation=[2, 2], padding=[2, 1], stride=[2, 2])");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintUnfold) {
   ASSERT_EQ(
       c10::str(Unfold(torch::IntArrayRef({2, 4}))),
@@ -4537,7 +4388,6 @@ TEST_F(ModulesTest, PrettyPrintUnfold) {
       "torch::nn::Unfold(kernel_size=[2, 4], dilation=[2, 2], padding=[2, 1], stride=[2, 2])");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintMaxPool) {
   ASSERT_EQ(
       c10::str(MaxPool1d(5)),
@@ -4562,7 +4412,6 @@ TEST_F(ModulesTest, PrettyPrintMaxPool) {
       "torch::nn::MaxPool2d(kernel_size=[5, 6], stride=[1, 2], padding=[0, 0], dilation=[1, 1], ceil_mode=false)");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintAvgPool) {
   ASSERT_EQ(
       c10::str(AvgPool1d(5)),
@@ -4587,7 +4436,6 @@ TEST_F(ModulesTest, PrettyPrintAvgPool) {
       "torch::nn::AvgPool2d(kernel_size=[5, 6], stride=[1, 2], padding=[0, 0])");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrinFractionalMaxPool) {
   ASSERT_EQ(
       c10::str(FractionalMaxPool2d(FractionalMaxPool2dOptions(5).output_size(1))),
@@ -4597,7 +4445,6 @@ TEST_F(ModulesTest, PrettyPrinFractionalMaxPool) {
       "torch::nn::FractionalMaxPool3d()");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintLPPool) {
   ASSERT_EQ(
       c10::str(LPPool1d(2, 5)),
@@ -4613,7 +4460,6 @@ TEST_F(ModulesTest, PrettyPrintLPPool) {
       "torch::nn::LPPool2d(norm_type=1, kernel_size=[3, 4], stride=[5, 6], ceil_mode=true)");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintAdaptiveMaxPool) {
   ASSERT_EQ(
       c10::str(AdaptiveMaxPool1d(5)),
@@ -4651,7 +4497,6 @@ TEST_F(ModulesTest, PrettyPrintAdaptiveMaxPool) {
       "torch::nn::AdaptiveMaxPool3d(output_size=[None, None, None])");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintAdaptiveAvgPool) {
   ASSERT_EQ(
       c10::str(AdaptiveAvgPool1d(5)),
@@ -4684,7 +4529,6 @@ TEST_F(ModulesTest, PrettyPrintAdaptiveAvgPool) {
       "torch::nn::AdaptiveAvgPool3d(output_size=[None, None, None])");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintMaxUnpool) {
   ASSERT_EQ(
       c10::str(MaxUnpool1d(5)),
@@ -4704,33 +4548,28 @@ TEST_F(ModulesTest, PrettyPrintMaxUnpool) {
       "torch::nn::MaxUnpool2d(kernel_size=[5, 6], stride=[3, 4], padding=[1, 2])");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintDropout) {
   ASSERT_EQ(c10::str(Dropout()), "torch::nn::Dropout(p=0.5, inplace=false)");
   ASSERT_EQ(c10::str(Dropout(0.42)), "torch::nn::Dropout(p=0.42, inplace=false)");
   ASSERT_EQ(c10::str(Dropout(DropoutOptions().p(0.42).inplace(true))), "torch::nn::Dropout(p=0.42, inplace=true)");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintDropout2d) {
   ASSERT_EQ(c10::str(Dropout2d()), "torch::nn::Dropout2d(p=0.5, inplace=false)");
   ASSERT_EQ(c10::str(Dropout2d(0.42)), "torch::nn::Dropout2d(p=0.42, inplace=false)");
   ASSERT_EQ(c10::str(Dropout2d(Dropout2dOptions().p(0.42).inplace(true))), "torch::nn::Dropout2d(p=0.42, inplace=true)");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintDropout3d) {
   ASSERT_EQ(c10::str(Dropout3d()), "torch::nn::Dropout3d(p=0.5, inplace=false)");
   ASSERT_EQ(c10::str(Dropout3d(0.42)), "torch::nn::Dropout3d(p=0.42, inplace=false)");
   ASSERT_EQ(c10::str(Dropout3d(Dropout3dOptions().p(0.42).inplace(true))), "torch::nn::Dropout3d(p=0.42, inplace=true)");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintFunctional) {
   ASSERT_EQ(c10::str(Functional(torch::relu)), "torch::nn::Functional()");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintBatchNorm1d) {
   ASSERT_EQ(
       c10::str(BatchNorm1d(
@@ -4739,7 +4578,6 @@ TEST_F(ModulesTest, PrettyPrintBatchNorm1d) {
       "torch::nn::BatchNorm1d(4, eps=0.5, momentum=0.1, affine=false, track_running_stats=true)");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintBatchNorm2d) {
   ASSERT_EQ(
       c10::str(BatchNorm2d(
@@ -4748,7 +4586,6 @@ TEST_F(ModulesTest, PrettyPrintBatchNorm2d) {
       "torch::nn::BatchNorm2d(4, eps=0.5, momentum=0.1, affine=false, track_running_stats=true)");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintBatchNorm3d) {
   ASSERT_EQ(
       c10::str(BatchNorm3d(
@@ -4757,7 +4594,6 @@ TEST_F(ModulesTest, PrettyPrintBatchNorm3d) {
       "torch::nn::BatchNorm3d(4, eps=0.5, momentum=0.1, affine=false, track_running_stats=true)");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintInstanceNorm1d) {
   ASSERT_EQ(
       c10::str(InstanceNorm1d(
@@ -4766,7 +4602,6 @@ TEST_F(ModulesTest, PrettyPrintInstanceNorm1d) {
       "torch::nn::InstanceNorm1d(4, eps=0.5, momentum=0.1, affine=false, track_running_stats=true)");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintInstanceNorm2d) {
   ASSERT_EQ(
       c10::str(InstanceNorm2d(
@@ -4775,7 +4610,6 @@ TEST_F(ModulesTest, PrettyPrintInstanceNorm2d) {
       "torch::nn::InstanceNorm2d(4, eps=0.5, momentum=0.1, affine=false, track_running_stats=true)");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintInstanceNorm3d) {
   ASSERT_EQ(
       c10::str(InstanceNorm3d(
@@ -4784,7 +4618,6 @@ TEST_F(ModulesTest, PrettyPrintInstanceNorm3d) {
       "torch::nn::InstanceNorm3d(4, eps=0.5, momentum=0.1, affine=false, track_running_stats=true)");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintLayerNorm) {
   ASSERT_EQ(
     c10::str(LayerNorm(LayerNormOptions({2, 2}))),
@@ -4794,7 +4627,6 @@ TEST_F(ModulesTest, PrettyPrintLayerNorm) {
           "torch::nn::LayerNorm([2, 2], eps=2e-05, elementwise_affine=false)");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintGroupNorm) {
   ASSERT_EQ(
     c10::str(GroupNorm(GroupNormOptions(2, 2))),
@@ -4804,7 +4636,6 @@ TEST_F(ModulesTest, PrettyPrintGroupNorm) {
     "torch::nn::GroupNorm(2, 2, eps=2e-05, affine=false)");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintLocalResponseNorm) {
   ASSERT_EQ(
     c10::str(LocalResponseNorm(LocalResponseNormOptions(2))),
@@ -4814,7 +4645,6 @@ TEST_F(ModulesTest, PrettyPrintLocalResponseNorm) {
       "torch::nn::LocalResponseNorm(2, alpha=0.0002, beta=0.85, k=2)");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintEmbedding) {
   ASSERT_EQ(
       c10::str(Embedding(EmbeddingOptions(10, 2))),
@@ -4827,7 +4657,6 @@ TEST_F(ModulesTest, PrettyPrintEmbedding) {
       "torch::nn::Embedding(num_embeddings=10, embedding_dim=2, padding_idx=3, max_norm=2, norm_type=2.5, scale_grad_by_freq=true, sparse=true)");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintEmbeddingBag) {
   ASSERT_EQ(
       c10::str(EmbeddingBag(EmbeddingBagOptions(10, 2))),
@@ -4846,52 +4675,44 @@ TEST_F(ModulesTest, PrettyPrintEmbeddingBag) {
       "torch::nn::EmbeddingBag(num_embeddings=10, embedding_dim=2, max_norm=2, norm_type=2.5, scale_grad_by_freq=true, sparse=true, mode=kSum, padding_idx=5)");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintL1Loss) {
   ASSERT_EQ(
       c10::str(L1Loss()),
       "torch::nn::L1Loss()");
 }
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintKLDivLoss) {
   ASSERT_EQ(
       c10::str(KLDivLoss()),
       "torch::nn::KLDivLoss()");
 }
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintMSELoss) {
   ASSERT_EQ(
       c10::str(MSELoss()),
       "torch::nn::MSELoss()");
 }
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintBCELoss) {
   ASSERT_EQ(
       c10::str(BCELoss()),
       "torch::nn::BCELoss()");
 }
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintHingeEmbeddingLoss) {
   ASSERT_EQ(
       c10::str(HingeEmbeddingLoss(HingeEmbeddingLossOptions().margin(4))),
       "torch::nn::HingeEmbeddingLoss(margin=4)");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintCosineEmbeddingLoss) {
   ASSERT_EQ(
       c10::str(CosineEmbeddingLoss(CosineEmbeddingLossOptions().margin(0.25))),
       "torch::nn::CosineEmbeddingLoss(margin=0.25)");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintTripletMarginLoss) {
   ASSERT_EQ(
       c10::str(TripletMarginLoss(TripletMarginLossOptions().margin(3).p(2).eps(1e-06).swap(false))),
       "torch::nn::TripletMarginLoss(margin=3, p=2, eps=1e-06, swap=false)");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintTripletMarginWithDistanceLoss) {
   auto distanceOptions = TripletMarginWithDistanceLossOptions()
                              .distance_function([&](const torch::Tensor& x,
@@ -4906,34 +4727,28 @@ TEST_F(ModulesTest, PrettyPrintTripletMarginWithDistanceLoss) {
       "torch::nn::TripletMarginWithDistanceLoss(margin=1.5, swap=true)");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintNLLLoss) {
   ASSERT_EQ(
       c10::str(NLLLoss()), "torch::nn::NLLLoss()");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrinCrossEntropyLoss) {
   ASSERT_EQ(
       c10::str(CrossEntropyLoss()), "torch::nn::CrossEntropyLoss()");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintMultiLabelMarginLoss) {
   ASSERT_EQ(c10::str(MultiLabelMarginLoss()), "torch::nn::MultiLabelMarginLoss()");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintMultiLabelSoftMarginLoss) {
   ASSERT_EQ(c10::str(MultiLabelSoftMarginLoss()), "torch::nn::MultiLabelSoftMarginLoss()");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintSoftMarginLoss) {
   ASSERT_EQ(c10::str(SoftMarginLoss()), "torch::nn::SoftMarginLoss()");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintCosineSimilarity) {
   ASSERT_EQ(
       c10::str(CosineSimilarity()),
@@ -4943,7 +4758,6 @@ TEST_F(ModulesTest, PrettyPrintCosineSimilarity) {
       "torch::nn::CosineSimilarity(dim=0, eps=0.5)");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintPairwiseDistance) {
   ASSERT_EQ(
       c10::str(PairwiseDistance()),
@@ -4953,7 +4767,6 @@ TEST_F(ModulesTest, PrettyPrintPairwiseDistance) {
       "torch::nn::PairwiseDistance(p=3, eps=0.5, keepdim=true)");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintReflectionPad) {
   ASSERT_EQ(
       c10::str(ReflectionPad1d(ReflectionPad1dOptions(2))),
@@ -4969,7 +4782,6 @@ TEST_F(ModulesTest, PrettyPrintReflectionPad) {
       "torch::nn::ReflectionPad2d(padding=[1, 1, 2, 0])");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintReplicationPad) {
   ASSERT_EQ(
       c10::str(ReplicationPad1d(ReplicationPad1dOptions(2))),
@@ -4991,7 +4803,6 @@ TEST_F(ModulesTest, PrettyPrintReplicationPad) {
       "torch::nn::ReplicationPad3d(padding=[1, 2, 1, 2, 1, 2])");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintZeroPad2d) {
   ASSERT_EQ(
       c10::str(ZeroPad2d(ZeroPad2dOptions(2))),
@@ -5001,7 +4812,6 @@ TEST_F(ModulesTest, PrettyPrintZeroPad2d) {
       "torch::nn::ZeroPad2d(padding=[1, 1, 2, 0])");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintConstantPad) {
   ASSERT_EQ(
       c10::str(ConstantPad1d(ConstantPad1dOptions(2, 3.5))),
@@ -5023,7 +4833,6 @@ TEST_F(ModulesTest, PrettyPrintConstantPad) {
       "torch::nn::ConstantPad3d(padding=[1, 2, 1, 2, 1, 2], value=3.5)");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintNestedModel) {
   struct InnerTestModule : torch::nn::Module {
     InnerTestModule()
@@ -5060,34 +4869,29 @@ TEST_F(ModulesTest, PrettyPrintNestedModel) {
       ")");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintELU) {
   ASSERT_EQ(c10::str(ELU()), "torch::nn::ELU(alpha=1)");
   ASSERT_EQ(c10::str(ELU(ELUOptions().alpha(42.42).inplace(true))),
             "torch::nn::ELU(alpha=42.42, inplace=true)");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintSELU) {
   ASSERT_EQ(c10::str(SELU()), "torch::nn::SELU()");
   ASSERT_EQ(c10::str(SELU(SELUOptions().inplace(true))),
             "torch::nn::SELU(inplace=true)");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintGLU) {
   ASSERT_EQ(c10::str(GLU()), "torch::nn::GLU(dim=-1)");
   ASSERT_EQ(c10::str(GLU(1)), "torch::nn::GLU(dim=1)");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintHardshrink) {
   ASSERT_EQ(c10::str(Hardshrink()), "torch::nn::Hardshrink(0.5)");
   ASSERT_EQ(c10::str(Hardshrink(HardshrinkOptions().lambda(42.42))),
             "torch::nn::Hardshrink(42.42)");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintHardtanh) {
   ASSERT_EQ(c10::str(Hardtanh()),
     "torch::nn::Hardtanh(min_val=-1, max_val=1)");
@@ -5096,7 +4900,6 @@ TEST_F(ModulesTest, PrettyPrintHardtanh) {
     "torch::nn::Hardtanh(min_val=-42.42, max_val=0.42, inplace=true)");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintLeakyReLU) {
   ASSERT_EQ(c10::str(LeakyReLU()),
     "torch::nn::LeakyReLU(negative_slope=0.01)");
@@ -5105,40 +4908,33 @@ TEST_F(ModulesTest, PrettyPrintLeakyReLU) {
     "torch::nn::LeakyReLU(negative_slope=0.42, inplace=true)");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintLogSigmoid) {
   ASSERT_EQ(c10::str(LogSigmoid()), "torch::nn::LogSigmoid()");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintSoftmax) {
   ASSERT_EQ(c10::str(Softmax(SoftmaxOptions(1))), "torch::nn::Softmax(dim=1)");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintSoftmin) {
   ASSERT_EQ(c10::str(Softmin(SoftminOptions(1))), "torch::nn::Softmin(dim=1)");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintLogSoftmax) {
   ASSERT_EQ(c10::str(LogSoftmax(LogSoftmaxOptions(1))),
             "torch::nn::LogSoftmax(dim=1)");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintSoftmax2d) {
   ASSERT_EQ(c10::str(Softmax2d()), "torch::nn::Softmax2d()");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintPReLU) {
   ASSERT_EQ(c10::str(PReLU()), "torch::nn::PReLU(num_parameters=1)");
   ASSERT_EQ(c10::str(PReLU(PReLUOptions().num_parameters(42))),
             "torch::nn::PReLU(num_parameters=42)");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintReLU) {
   ASSERT_EQ(c10::str(ReLU()), "torch::nn::ReLU()");
   ASSERT_EQ(c10::str(ReLU(ReLUOptions().inplace(true))),
@@ -5147,7 +4943,6 @@ TEST_F(ModulesTest, PrettyPrintReLU) {
     "torch::nn::ReLU(inplace=true)");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintReLU6) {
   ASSERT_EQ(c10::str(ReLU6()), "torch::nn::ReLU6()");
   ASSERT_EQ(c10::str(ReLU6(ReLU6Options().inplace(true))),
@@ -5156,7 +4951,6 @@ TEST_F(ModulesTest, PrettyPrintReLU6) {
     "torch::nn::ReLU6(inplace=true)");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintRReLU) {
   ASSERT_EQ(c10::str(RReLU()),
     "torch::nn::RReLU(lower=0.125, upper=0.333333)");
@@ -5165,32 +4959,27 @@ TEST_F(ModulesTest, PrettyPrintRReLU) {
     "torch::nn::RReLU(lower=0.24, upper=0.42, inplace=true)");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintCELU) {
   ASSERT_EQ(c10::str(CELU()), "torch::nn::CELU(alpha=1)");
   ASSERT_EQ(c10::str(CELU(CELUOptions().alpha(42.42).inplace(true))),
             "torch::nn::CELU(alpha=42.42, inplace=true)");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintSigmoid) {
   ASSERT_EQ(c10::str(Sigmoid()), "torch::nn::Sigmoid()");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintPixelShuffle) {
   ASSERT_EQ(c10::str(PixelShuffle(PixelShuffleOptions(5))),
             "torch::nn::PixelShuffle(upscale_factor=5)");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintPixelUnshuffle) {
   ASSERT_EQ(
       c10::str(PixelUnshuffle(PixelUnshuffleOptions(5))),
       "torch::nn::PixelUnshuffle(downscale_factor=5)");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintSoftplus) {
   ASSERT_EQ(c10::str(Softplus()),
     "torch::nn::Softplus(beta=1, threshold=20)");
@@ -5199,29 +4988,24 @@ TEST_F(ModulesTest, PrettyPrintSoftplus) {
     "torch::nn::Softplus(beta=0.24, threshold=42.42)");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintSoftshrink) {
   ASSERT_EQ(c10::str(Softshrink()), "torch::nn::Softshrink(0.5)");
   ASSERT_EQ(c10::str(Softshrink(SoftshrinkOptions(42.42))),
             "torch::nn::Softshrink(42.42)");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintSoftsign) {
   ASSERT_EQ(c10::str(Softsign()), "torch::nn::Softsign()");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintTanh) {
   ASSERT_EQ(c10::str(Tanh()), "torch::nn::Tanh()");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintTanhshrink) {
   ASSERT_EQ(c10::str(Tanhshrink()), "torch::nn::Tanhshrink()");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintThreshold) {
   ASSERT_EQ(c10::str(Threshold(24.24, 42.42)),
     "torch::nn::Threshold(threshold=24.24, value=42.42)");
@@ -5230,7 +5014,6 @@ TEST_F(ModulesTest, PrettyPrintThreshold) {
     "torch::nn::Threshold(threshold=42.42, value=24.24, inplace=true)");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintCTCLoss) {
   ASSERT_EQ(c10::str(CTCLoss()), "torch::nn::CTCLoss()");
   ASSERT_EQ(c10::str(CTCLoss(
@@ -5238,7 +5021,6 @@ TEST_F(ModulesTest, PrettyPrintCTCLoss) {
       .reduction(torch::kSum))), "torch::nn::CTCLoss()");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintPoissonNLLLoss) {
   ASSERT_EQ(c10::str(PoissonNLLLoss()), "torch::nn::PoissonNLLLoss()");
   ASSERT_EQ(c10::str(PoissonNLLLoss(
@@ -5247,7 +5029,6 @@ TEST_F(ModulesTest, PrettyPrintPoissonNLLLoss) {
     "torch::nn::PoissonNLLLoss()");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintMarginRankingLoss) {
   ASSERT_EQ(c10::str(MarginRankingLoss()), "torch::nn::MarginRankingLoss()");
   ASSERT_EQ(c10::str(MarginRankingLoss(
@@ -5255,7 +5036,6 @@ TEST_F(ModulesTest, PrettyPrintMarginRankingLoss) {
     "torch::nn::MarginRankingLoss()");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintCrossMapLRN2d) {
   ASSERT_EQ(c10::str(CrossMapLRN2d(4)),
     "torch::nn::CrossMapLRN2d(4, alpha=0.0001, beta=0.75, k=1)");
@@ -5263,7 +5043,6 @@ TEST_F(ModulesTest, PrettyPrintCrossMapLRN2d) {
     "torch::nn::CrossMapLRN2d(3, alpha=1e-05, beta=0.1, k=10)");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintAlphaDropout) {
   ASSERT_EQ(c10::str(AlphaDropout()),
     "torch::nn::AlphaDropout(p=0.5, inplace=false)");
@@ -5273,7 +5052,6 @@ TEST_F(ModulesTest, PrettyPrintAlphaDropout) {
     "torch::nn::AlphaDropout(p=0.2, inplace=true)");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintFeatureAlphaDropout) {
   ASSERT_EQ(c10::str(FeatureAlphaDropout()),
     "torch::nn::FeatureAlphaDropout(p=0.5, inplace=false)");
@@ -5283,7 +5061,6 @@ TEST_F(ModulesTest, PrettyPrintFeatureAlphaDropout) {
     "torch::nn::FeatureAlphaDropout(p=0.2, inplace=true)");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintBCEWithLogitsLoss) {
   ASSERT_EQ(c10::str(BCEWithLogitsLoss()), "torch::nn::BCEWithLogitsLoss()");
   ASSERT_EQ(c10::str(BCEWithLogitsLoss(
@@ -5294,7 +5071,6 @@ TEST_F(ModulesTest, PrettyPrintBCEWithLogitsLoss) {
     "torch::nn::BCEWithLogitsLoss()");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintMultiheadAttention) {
   ASSERT_EQ(c10::str(MultiheadAttention(20, 10)),
     "torch::nn::MultiheadAttention(\n  (out_proj): torch::nn::Linear(in_features=20, out_features=20, bias=true)\n)");
@@ -5302,7 +5078,6 @@ TEST_F(ModulesTest, PrettyPrintMultiheadAttention) {
     "torch::nn::MultiheadAttention(\n  (out_proj): torch::nn::Linear(in_features=20, out_features=20, bias=false)\n)");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintRNNCell) {
   ASSERT_EQ(c10::str(RNNCell(20, 10)),
     "torch::nn::RNNCell(20, 10)");
@@ -5312,7 +5087,6 @@ TEST_F(ModulesTest, PrettyPrintRNNCell) {
     "torch::nn::RNNCell(20, 10, bias=false, nonlinearity=kReLU)");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintLSTMCell) {
   ASSERT_EQ(c10::str(LSTMCell(20, 10)),
     "torch::nn::LSTMCell(20, 10)");
@@ -5320,7 +5094,6 @@ TEST_F(ModulesTest, PrettyPrintLSTMCell) {
     "torch::nn::LSTMCell(20, 10, bias=false)");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintGRUCell) {
   ASSERT_EQ(c10::str(GRUCell(20, 10)),
     "torch::nn::GRUCell(20, 10)");
@@ -5328,7 +5101,6 @@ TEST_F(ModulesTest, PrettyPrintGRUCell) {
     "torch::nn::GRUCell(20, 10, bias=false)");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintAdaptiveLogSoftmaxWithLoss) {
   {
     AdaptiveLogSoftmaxWithLoss asfm(AdaptiveLogSoftmaxWithLossOptions(8, 4, {2}).div_value(2.));

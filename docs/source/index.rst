@@ -58,6 +58,7 @@ Features described in this documentation are classified by release status:
    torch.cuda.amp <amp>
    torch.backends <backends>
    torch.distributed <distributed>
+   torch.distributed.algorithms.join <distributed.algorithms.join>
    torch.distributed.elastic <distributed.elastic>
    torch.distributed.optim <distributed.optim>
    torch.distributions <distributions>

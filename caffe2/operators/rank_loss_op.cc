@@ -156,14 +156,11 @@ bool PairWiseLossGradientOp<T, Context>::RunOnDevice() {
 }
 
 namespace {
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(PairWiseLoss, PairWiseLossOp<float, CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     PairWiseLossGradient,
     PairWiseLossGradientOp<float, CPUContext>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(PairWiseLoss)
     .NumInputs(2, 3)
     .NumOutputs(1)
@@ -189,7 +186,6 @@ Operator computes the pair wise loss between all pairs within a batch
         "blob has the same size as lengths blob, and the cross entropy"
         "is computed within each session.")
     .Output(0, "Y", "Output blob after the cross entropy computation");
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(PairWiseLossGradient).NumInputs(3, 4).NumOutputs(1);
 
 class GetPairWiseLossGradient : public GradientMakerBase {
@@ -205,7 +201,6 @@ class GetPairWiseLossGradient : public GradientMakerBase {
         "PairWiseLossGradient", "", blob_names, vector<string>{GI(0)});
   }
 };
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(PairWiseLoss, GetPairWiseLossGradient);
 
 } // namespace

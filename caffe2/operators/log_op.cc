@@ -5,12 +5,10 @@
 
 namespace caffe2 {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     Log,
     UnaryElementwiseOp<TensorTypes<float>, CPUContext, LogFunctor<CPUContext>>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Log)
     .NumInputs(1)
     .NumOutputs(1)
@@ -87,7 +85,6 @@ class GetLogGradient : public GradientMakerBase {
 
 } // namespace
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(Log, GetLogGradient);
 
 } // namespace caffe2

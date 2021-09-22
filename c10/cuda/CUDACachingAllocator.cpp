@@ -308,6 +308,8 @@ cudaError_t cudaMallocMaybeCapturing(void** p, size_t size) {
   } else {
     // It's ok to capture cudaMallocs, as long as we never cudaFree those
     // addresses before replay.
+    // Capturing cudaMalloc behaves nicely: it gives the graph new VA,
+    // but is ignored (won't leakily allocate new memory) in replays.
     at::cuda::CUDAStreamCaptureModeGuard g{cudaStreamCaptureModeRelaxed};
     return cudaMalloc(p, size);
   }
@@ -579,15 +581,19 @@ class DeviceCachingAllocator {
     bool inserted = active_blocks.insert(block).second;
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(inserted);
 
-    c10::reportMemoryUsageToProfiler(
-        block, block->size, c10::Device(c10::DeviceType::CUDA, device));
-
     update_stat_array(stats.allocation, 1, params.stat_types);
     update_stat_array(stats.allocated_bytes, block->size, params.stat_types);
     update_stat_array(stats.active, 1, params.stat_types);
     update_stat_array(stats.active_bytes, block->size, params.stat_types);
     if (block->size >= CachingAllocatorConfig::max_split_size())
       update_stat(stats.oversize_allocations, 1);
+
+    c10::reportMemoryUsageToProfiler(
+        block->ptr,
+        block->size,
+        stats.allocated_bytes[static_cast<size_t>(StatType::AGGREGATE)].current,
+        stats.reserved_bytes[static_cast<size_t>(StatType::AGGREGATE)].current,
+        c10::Device(c10::DeviceType::CUDA, device));
 
     return block;
   }
@@ -597,8 +603,10 @@ class DeviceCachingAllocator {
 
     block->allocated = false;
 
-    c10::reportMemoryUsageToProfiler(
-        block, -block->size, c10::Device(c10::DeviceType::CUDA, block->device));
+    // following logic might modifying underlaying Block, causing the size
+    // changed. We store ahead for reporting
+    auto orig_block_ptr = block->ptr;
+    auto orig_block_size = block->size;
 
     StatTypes stat_types;
     stat_types[static_cast<size_t>(StatType::AGGREGATE)] = true;
@@ -622,6 +630,13 @@ class DeviceCachingAllocator {
     } else {
       free_block(block);
     }
+
+    c10::reportMemoryUsageToProfiler(
+        orig_block_ptr,
+        -orig_block_size,
+        stats.allocated_bytes[static_cast<size_t>(StatType::AGGREGATE)].current,
+        stats.reserved_bytes[static_cast<size_t>(StatType::AGGREGATE)].current,
+        c10::Device(c10::DeviceType::CUDA, block->device));
   }
 
   void* getBaseAllocation(Block* block, size_t* outSize) {
@@ -799,8 +814,7 @@ class DeviceCachingAllocator {
     if (it == graph_pools.end()) {
       // mempool_id does not reference an existing pool. Make a new pool for
       // this capture.
-      graph_pools.emplace(std::make_pair(
-          mempool_id, std::unique_ptr<PrivatePool>(new PrivatePool)));
+      graph_pools.emplace(mempool_id, std::make_unique<PrivatePool>());
     } else {
       // mempool_id references an existing pool, which the current capture will
       // share. Check this pool is live (at least one other capture already
@@ -1161,16 +1175,22 @@ class DeviceCachingAllocator {
     C10_CUDA_CHECK(cudaFree((void*)block->ptr));
     total_allocated_memory -= block->size;
 
+    auto* pool = block->pool;
+    if (pool->owner_PrivatePool) {
+      // The cudaFreed block belonged to a CUDA graph's PrivatePool.
+      TORCH_INTERNAL_ASSERT(pool->owner_PrivatePool->cudaMalloc_count > 0);
+      pool->owner_PrivatePool->cudaMalloc_count--;
+    }
+
     StatTypes stat_types;
     stat_types[static_cast<size_t>(StatType::AGGREGATE)] = true;
-    stat_types[static_cast<size_t>(get_stat_type_for_pool(*(block->pool)))] =
-        true;
+    stat_types[static_cast<size_t>(get_stat_type_for_pool(*pool))] = true;
     update_stat_array(stats.segment, -1, stat_types);
     update_stat_array(stats.reserved_bytes, -block->size, stat_types);
     if (block->size >= CachingAllocatorConfig::max_split_size())
       update_stat(stats.oversize_segments, -1);
 
-    block->pool->blocks.erase(block);
+    pool->blocks.erase(block);
     delete block;
   }
 
@@ -1182,12 +1202,6 @@ class DeviceCachingAllocator {
       ++it;
       if (!block->prev && !block->next) {
         release_block(block);
-
-        if (pool.owner_PrivatePool) {
-          // The cudaFreed block belonged to a CUDA graph's PrivatePool.
-          TORCH_INTERNAL_ASSERT(pool.owner_PrivatePool->cudaMalloc_count > 0);
-          pool.owner_PrivatePool->cudaMalloc_count--;
-        }
       }
     }
   }
@@ -1339,8 +1353,7 @@ class THCCachingAllocator {
     if (size < device_count) {
       device_allocator.resize(device_count);
       for (const auto i : c10::irange(size, device_count)) {
-        device_allocator[i] = std::unique_ptr<DeviceCachingAllocator>(
-            new DeviceCachingAllocator());
+        device_allocator[i] = std::make_unique<DeviceCachingAllocator>();
       }
     }
   }

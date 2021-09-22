@@ -160,8 +160,8 @@ class DataLoader(Generic[T_co]):
     __initialized = False
 
     def __init__(self, dataset: Dataset[T_co], batch_size: Optional[int] = 1,
-                 shuffle: bool = False, sampler: Optional[Sampler[int]] = None,
-                 batch_sampler: Optional[Sampler[Sequence[int]]] = None,
+                 shuffle: bool = False, sampler: Optional[Sampler] = None,
+                 batch_sampler: Optional[Sampler[Sequence]] = None,
                  num_workers: int = 0, collate_fn: Optional[_collate_fn_t] = None,
                  pin_memory: bool = False, drop_last: bool = False,
                  timeout: float = 0, worker_init_fn: Optional[_worker_init_fn_t] = None,
@@ -294,6 +294,8 @@ class DataLoader(Generic[T_co]):
         self._iterator = None
 
         self.check_worker_number_rationality()
+
+        torch.set_vital('Dataloader', 'enabled', 'True')  # type: ignore[attr-defined]
 
     def _get_iterator(self) -> '_BaseDataLoaderIter':
         if self.num_workers == 0:

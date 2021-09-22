@@ -29,28 +29,17 @@ bool DiagonalFillOp<CPUContext>::FillWithType(Tensor* output) {
   return true;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(UniformFill, UniformFillOp<float, CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(UniformIntFill, UniformFillOp<int, CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(UniqueUniformFill, UniqueUniformFillOp<CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(ConstantFill, ConstantFillOp<CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(DiagonalFill, DiagonalFillOp<CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(GaussianFill, GaussianFillOp<float, CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(XavierFill, XavierFillOp<float, CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(MSRAFill, MSRAFillOp<float, CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(RangeFill, RangeFillOp<float, CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(LengthsRangeFill, LengthsRangeFillOp<CPUContext>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(ConstantFill)
     .NumInputs(0, 2)
     .NumOutputs(1)
@@ -219,7 +208,6 @@ Y: [[[[4. 4.]]
         "Y",
         "*(type: Tensor)* Output tensor of constant values.");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(DiagonalFill)
     .NumInputs(0, 1)
     .NumOutputs(1)
@@ -269,7 +257,6 @@ NOTE: Currently, it supports data type of float, int32, int64, and bool.
         "Output tensor"
         "argument and its type is specified by the 'dtype' argument");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(UniformFill)
     .NumInputs({0, 1, 3})
     .NumOutputs(1)
@@ -361,7 +348,6 @@ output (op_2):
     .Input(1, "min", "(*Tensor`<float>`*): scalar tensor containing minimum value, inclusive")
     .Input(2, "max", "(*Tensor`<float>`*): scalar tensor containing maximum value, inclusive")
     .Output(0, "output", "(*Tensor`<float>`*): filled output tensor");
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(UniformIntFill)
     .NumInputs({0, 1, 3})
     .NumOutputs(1)
@@ -452,7 +438,6 @@ output (op_2):
     .Input(1, "min", "(*Tensor`<int>`*): scalar tensor containing minimum value, inclusive")
     .Input(2, "max", "(*Tensor`<int>`*): scalar tensor containing maximum value, inclusive")
     .Output(0, "output", "(*Tensor`<int>`*): filled output tensor");
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(UniqueUniformFill)
     .NumInputs(0, 2)
     .NumOutputs(1)
@@ -489,7 +474,6 @@ input.
         "avoid",
         "(optional) Avoid elements in this tensor. Elements must be unique.")
     .Output(0, "output", "Output tensor of unique uniform samples");
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(GaussianFill)
     .NumInputs(0, 1)
     .NumOutputs(1)
@@ -565,7 +549,6 @@ Out:
         0,
         "output",
         "Output tensor of random values drawn from a normal distribution. If the shape argument is set, this is the shape specified, and if the *input* exists and *input_as_shape=True*, it is the shape specified by the *input* tensor.");
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(XavierFill)
     .NumInputs(0, 1)
     .NumOutputs(1)
@@ -634,39 +617,27 @@ Out:
         "output",
         "Output tensor of random values drawn from an automatically scaled uniform distribution, based on the size of the output tensor. If the shape argument is set, this is the shape specified by the shape argument, and if the *input* exists and *input_as_shape=True*, it is the shape specified by the *input* tensor.");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(MSRAFill)
     .NumInputs(0, 1)
     .NumOutputs(1)
     .AllowInplace({{0, 0}})
     .TensorInferenceFunction(FillerTensorInference<>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(RangeFill)
     .NumInputs(0, 1)
     .NumOutputs(1)
     .AllowInplace({{0, 0}})
     .TensorInferenceFunction(FillerTensorInference<>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 NO_GRADIENT(UniformFill);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 NO_GRADIENT(UniformIntFill);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 NO_GRADIENT(UniqueUniformFill);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 NO_GRADIENT(ConstantFill);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 NO_GRADIENT(DiagonalFill);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 NO_GRADIENT(GaussianFill);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 NO_GRADIENT(XavierFill);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 NO_GRADIENT(MSRAFill);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 NO_GRADIENT(RangeFill);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(LengthsRangeFill)
     .NumInputs(1)
     .NumOutputs(1)
@@ -720,7 +691,6 @@ range_sequence:
         0,
         "range_sequence",
         "1D tensor whose size is the sum of *lengths*");
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 NO_GRADIENT(LengthsRangeFill);
 
 }  // namespace caffe2

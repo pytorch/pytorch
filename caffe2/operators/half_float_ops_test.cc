@@ -8,12 +8,10 @@
 #include <c10/util/irange.h>
 
 #include <gtest/gtest.h>
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DECLARE_string(caffe_test_root);
 
 namespace caffe2 {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Float16, SimpleTest) {
   Workspace ws;
   vector<float> data = {0.1f, 0.23f, 1.6f, 8.2f, -13.9f};
@@ -67,7 +65,6 @@ TEST(Float16, SimpleTest) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Float16, UniformDistributionTest) {
   Workspace ws;
 

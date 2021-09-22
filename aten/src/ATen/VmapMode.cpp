@@ -3,7 +3,6 @@
 namespace at {
 namespace impl {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 thread_local int64_t VmapMode_current_vmap_level = 0;
 
 int64_t VmapMode::current_vmap_level() {

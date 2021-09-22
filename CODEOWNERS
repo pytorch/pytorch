@@ -19,7 +19,6 @@
 # Distributed package
 # This list is mostly if you'd like to be tagged as reviewer, feel free to add
 # or remove yourself from it.
-/torch/lib/c10d/ @mrshenli @zhaojuanmao @pritamdamania87 @rohan-varma @SciPioneer @mingzhe09088 @H-Huang @cbalioglu
 /torch/csrc/distributed/ @mrshenli @zhaojuanmao @pritamdamania87 @rohan-varma @SciPioneer @mingzhe09088 @H-Huang @cbalioglu
 /torch/distributed/ @mrshenli @zhaojuanmao @pritamdamania87 @rohan-varma @SciPioneer @mingzhe09088 @H-Huang @cbalioglu
 /torch/nn/parallel/ @mrshenli @zhaojuanmao @pritamdamania87 @rohan-varma @SciPioneer @mingzhe09088 @H-Huang @cbalioglu
@@ -36,3 +35,22 @@
 /torch/csrc/jit/passes/onnx/ @bowenbao @neginraoof @shubhambhokare1
 /torch/onnx/ @bowenbao @neginraoof @shubhambhokare1
 /test/onnx/ @bowenbao @neginraoof @shubhambhokare1
+
+# Docker
+/.circleci/docker/ @jeffdaily @jithunnair-amd
+
+# Github Actions
+# This list is for people wanting to be notified every time there's a change
+# related to Github Actions
+/.github/ @seemethere @janeyx99 @zhouzhuojie @driazati
+
+# Parametrizations
+/torch/nn/utils/parametriz*.py @lezcano
+
+# torch.linalg
+# docs
+/torch/linalg/ @lezcano @IvanYashchuk
+# code
+/aten/src/ATen/native/**/*LinearAlgebra* @lezcano @nikitaved @IvanYashchuk
+# tests
+/test/test_linalg.py @lezcano @nikitaved @IvanYashchuk

@@ -321,7 +321,7 @@ Quantized dtypes and quantization schemes
   * :attr:`torch.per_tensor_affine` — per tensor, asymmetric
   * :attr:`torch.per_channel_affine` — per channel, asymmetric
   * :attr:`torch.per_tensor_symmetric` — per tensor, symmetric
-  * :attr:`torch.per_channel_symmetric` — per tensor, symmetric
+  * :attr:`torch.per_channel_symmetric` — per channel, symmetric
 
 * ``torch.dtype`` — Type to describe the data. Supported types:
 

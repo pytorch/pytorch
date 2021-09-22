@@ -193,6 +193,14 @@ void recursive_store(char* data, IntArrayRef sizes, IntArrayRef strides, int64_t
 
   PyObject** items = PySequence_Fast_ITEMS(seq.get());
   for(const auto i : c10::irange(n)) {
+#ifdef USE_NUMPY
+    if (PyArray_Check(items[i])) {
+      TORCH_WARN_ONCE(
+        "Creating a tensor from a list of numpy.ndarrays is extremely slow. "
+        "Please consider converting the list to a single numpy.ndarray with "
+        "numpy.array() before converting to a tensor.");
+    }
+#endif
     recursive_store(data, sizes, strides, dim + 1, scalarType, elementSize, items[i]);
     data += strides[dim] * elementSize;
   }
@@ -259,6 +267,17 @@ Tensor internal_new_from_data(
   {
     at::AutoDispatchBelowADInplaceOrView guard;  // TODO: remove
     at::tracer::impl::NoTracerDispatchMode tracer_guard;
+    c10::impl::ExcludeDispatchKeyGuard pythonmode_guard(c10::DispatchKey::Python);
+    // functorch uses FuncTorchDynamicLayerBackMode as a mode key to wrap all
+    // tensors returned from operators in special TensorWrapper tensor extension
+    // The problem with this is that TensorWrapper does not have storage so
+    // accessing the data_ptr (for recursive_store) internal asserts.
+    // As a quick hack, the guard here prevents functorch from wrapping the empty
+    // tensor in a TensorWrapper and instead when `tensor.to` is called later,
+    // the tensor gets wrapped. A more long-term solution is to think about
+    // what the extensibility mechanism for this function (internal_new_from_data)
+    // looks like for mode-based dispatch keys and C++ tensor extensions.
+    c10::impl::ExcludeDispatchKeyGuard functorch_guard(c10::DispatchKey::FuncTorchDynamicLayerBackMode);
     tensor = at::empty(sizes, at::initialTensorOptions().dtype(inferred_scalar_type).pinned_memory(pin_memory));
     recursive_store(
         (char*)tensor.data_ptr(), tensor.sizes(), tensor.strides(), 0,
@@ -311,6 +330,7 @@ void check_base_legacy_new(c10::DispatchKey dispatch_key, at::Layout expected_la
             dispatch_key == c10::DispatchKey::CUDA ||
             dispatch_key == c10::DispatchKey::HIP ||
             dispatch_key == c10::DispatchKey::XLA ||
+            dispatch_key == c10::DispatchKey::Lazy ||
             dispatch_key == c10::DispatchKey::XPU,
         "new(): expected DispatchKey: ",
         c10::DispatchKey::CPU,
@@ -321,11 +341,13 @@ void check_base_legacy_new(c10::DispatchKey dispatch_key, at::Layout expected_la
         " or ",
         c10::DispatchKey::XLA,
         " or ",
+        c10::DispatchKey::Lazy,
+        " or ",
         c10::DispatchKey::XPU,
         " but got: ",
         dispatch_key);
   } else if(expected_layout == c10::kSparse) {
-    // NOTE: no sparse XLA
+    // NOTE: no sparse XLA or Lazy
     TORCH_CHECK(
         dispatch_key == c10::DispatchKey::SparseCPU ||
             dispatch_key == c10::DispatchKey::SparseCUDA ||

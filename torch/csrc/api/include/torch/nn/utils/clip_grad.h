@@ -10,6 +10,12 @@ namespace utils {
 // See
 // https://pytorch.org/docs/stable/nn.html?highlight=clip_grad_norm#torch.nn.utils.clip_grad_norm_
 // for more details about this module.
+//
+// Difference with the python version: unlike the python version, even when skipping the finiteness
+// checks (error_if_nonfinite = false), this function will introduce a device <=> CPU
+// synchronization (for devices where that makes sense!) in order to return a CPU-side `double`.
+// This C++ version therefore cannot be run fully asynchronously w.r.t. the device of the
+// gradients.
 inline double clip_grad_norm_(
     std::vector<Tensor> parameters,
     double max_norm,
@@ -23,43 +29,55 @@ inline double clip_grad_norm_(
       params_with_grad.push_back(param);
     }
   }
-  double total_norm = 0.0;
-  if (norm_type == std::numeric_limits<double>::infinity()) {
-    for (const auto& param : params_with_grad) {
-      auto param_max = param.grad().data().abs().max().item().toDouble();
-      if (param_max > total_norm || std::isnan(param_max)) {
-        total_norm = param_max;
-      }
-    }
-  } else if (norm_type == 0) {
-    total_norm = static_cast<double>(params_with_grad.size());
-  } else {
-    for (const auto& param : params_with_grad) {
-      auto param_norm = param.grad().data().norm(norm_type);
-      total_norm += std::pow(param_norm.item().toDouble(), norm_type);
-    }
-    total_norm = std::pow(total_norm, 1.0 / norm_type);
+
+  if (params_with_grad.empty()) {
+    return 0.0;
   }
-  if (!std::isfinite(total_norm)) {
-    TORCH_CHECK(!error_if_nonfinite,
+
+  Tensor total_norm_tensor;
+  if (norm_type == std::numeric_limits<double>::infinity()) {
+    std::vector<Tensor> norms;
+    norms.reserve(params_with_grad.size());
+
+    for (const auto& param : params_with_grad) {
+      norms.emplace_back(param.grad().data().abs().max());
+    }
+    total_norm_tensor = (norms.size() == 1) ? norms[0] : torch::max(torch::stack(norms));
+  } else if (norm_type == 0) {
+    total_norm_tensor = torch::full({}, static_cast<double>(params_with_grad.size()));
+  } else {
+    std::vector<Tensor> norms;
+    norms.reserve(params_with_grad.size());
+
+    for (const auto& param : params_with_grad) {
+      norms.emplace_back(param.grad().data().norm(norm_type));
+    }
+    total_norm_tensor = (norms.size() == 1) ? norms[0] : torch::stack(norms).norm(norm_type);
+  }
+
+  // When possible (ie when skipping the finiteness check), we avoid synchronizing the CPU and the
+  // gradients' device until the very end to preserve async execution on the device.
+  // When checking for finite-ness, this optional ensures we only sync once.
+  c10::optional<double> total_norm = c10::nullopt;
+  if (error_if_nonfinite) {
+    total_norm = total_norm_tensor.item().toDouble();
+    TORCH_CHECK(std::isfinite(*total_norm),
       "The total norm of order ", norm_type, " for gradients from `parameters` ",
       "is non-finite, so it cannot be clipped. To disable this error and scale ",
       "the gradients with the non-finite norm anyway, set ",
       "`error_if_nonfinite=false`");
-
-    TORCH_WARN_ONCE("Non-finite norm encountered in torch.nn.utils.clip_grad_norm_; continuing anyway. "
-                    "Note that the default behavior will change in a future release to error out "
-                    "if a non-finite total norm is encountered. At that point, setting "
-                    "error_if_nonfinite=false will be required to retain the old behavior.");
   }
 
-  auto clip_coef = max_norm / (total_norm + 1e-6);
-  if (clip_coef < 1) {
-    for (auto& param : params_with_grad) {
-      param.grad().data().mul_(clip_coef);
-    }
+  auto clip_coef =  max_norm / (total_norm_tensor + 1e-6);
+  auto clip_coef_clamped = torch::clamp(clip_coef, c10::nullopt /* min */, 1.0 /* max */);
+  for (auto& param : params_with_grad) {
+    param.grad().data().mul_(clip_coef_clamped);
   }
-  return total_norm;
+
+  if (!total_norm.has_value()) {
+    total_norm = total_norm_tensor.item().toDouble();
+  }
+  return *total_norm;
 }
 
 // A wrapper around clip_grad_norm_ that allows us to call the function with a

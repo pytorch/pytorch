@@ -1,5 +1,6 @@
-#include <c10/test/util/complex_test_common.h>
 #include <ATen/cuda/CUDABlas.h>
+#include <c10/cuda/CUDAException.h>
+#include <c10/test/util/complex_test_common.h>
 
 __global__ void test_thrust_kernel() {
   // thrust conversion
@@ -75,6 +76,7 @@ TEST(DeviceTests, ThrustConversion) {
   ASSERT_EQ(cudaGetLastError(), cudaSuccess);
   cudaDeviceSynchronize();
   test_thrust_kernel<<<1, 1>>>();
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
   cudaDeviceSynchronize();
   ASSERT_EQ(cudaGetLastError(), cudaSuccess);
 }
@@ -83,6 +85,7 @@ TEST(DeviceTests, StdFunctions) {
   SKIP_IF_NO_GPU();
   cudaDeviceSynchronize();
   test_std_functions_kernel<<<1, 1>>>();
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
   cudaDeviceSynchronize();
   ASSERT_EQ(cudaGetLastError(), cudaSuccess);
 }
@@ -91,6 +94,7 @@ TEST(DeviceTests, ReinterpretCast) {
   SKIP_IF_NO_GPU();
   cudaDeviceSynchronize();
   test_reinterpret_cast<<<1, 1>>>();
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
   cudaDeviceSynchronize();
   ASSERT_EQ(cudaGetLastError(), cudaSuccess);
 }

@@ -18,8 +18,8 @@ from torch.quantization import (
     get_observer_dict,
     prepare,
     QConfig,
+    FusedMovingAvgObsFakeQuantize,
 )
-
 
 import torch.nn as nn
 
@@ -186,8 +186,8 @@ class TestObserver(QuantizationTestCase):
             ]
             per_channel_affine_quint8_zp = [[0, 85], [113, 0], [102, 0], [93, 70]]
 
-            self.assertEqual(myobs.min_vals, ref_min_vals[ch_axis])
-            self.assertEqual(myobs.max_vals, ref_max_vals[ch_axis])
+            self.assertEqual(myobs.min_val, ref_min_vals[ch_axis])
+            self.assertEqual(myobs.max_val, ref_max_vals[ch_axis])
             if qscheme == torch.per_channel_symmetric:
                 ref_scales = per_channel_symmetric_ref_scales[ch_axis]
                 ref_zero_points = [0, 0] if qdtype is torch.qint8 else [128, 128]
@@ -205,11 +205,11 @@ class TestObserver(QuantizationTestCase):
             if reduce_range:
                 ref_scales = [s * 255 / 127 for s in ref_scales]
                 ref_zero_points = [math.floor(z / 2) for z in ref_zero_points]
-            self.assertTrue(torch.allclose(qparams[0], torch.tensor(ref_scales, dtype=qparams[0].dtype), atol=0.0001))
+            self.assertEqual(qparams[0], torch.tensor(ref_scales, dtype=qparams[0].dtype), rtol=1e-5, atol=0.0001)
             if qscheme == torch.per_channel_affine_float_qparams:
-                self.assertTrue(torch.allclose(qparams[1], torch.tensor(ref_zero_points, dtype=qparams[1].dtype), atol=1))
+                self.assertEqual(qparams[1], torch.tensor(ref_zero_points, dtype=qparams[1].dtype), rtol=1e-5, atol=1)
             else:
-                self.assertTrue(torch.allclose(qparams[1], torch.tensor(ref_zero_points, dtype=qparams[1].dtype)))
+                self.assertEqual(qparams[1], torch.tensor(ref_zero_points, dtype=qparams[1].dtype))
 
 
             # Test for serializability
@@ -223,8 +223,8 @@ class TestObserver(QuantizationTestCase):
             loaded_obs = PerChannelMinMaxObserver(reduce_range=reduce_range, ch_axis=ch_axis, dtype=qdtype, qscheme=qscheme)
             loaded_obs.load_state_dict(loaded_dict)
             loaded_qparams = loaded_obs.calculate_qparams()
-            self.assertEqual(myobs.min_vals, loaded_obs.min_vals)
-            self.assertEqual(myobs.max_vals, loaded_obs.max_vals)
+            self.assertEqual(myobs.min_val, loaded_obs.min_val)
+            self.assertEqual(myobs.max_val, loaded_obs.max_val)
             self.assertEqual(myobs.calculate_qparams(), loaded_obs.calculate_qparams())
 
 
@@ -314,9 +314,7 @@ class TestObserver(QuantizationTestCase):
         Tests that we can save and load state_dict for observers that are scripted
         in a quantized model.
         """
-        obs_list = [MinMaxObserver, MovingAverageMinMaxObserver,
-                    PerChannelMinMaxObserver,
-                    MovingAveragePerChannelMinMaxObserver, HistogramObserver]
+        obs_list = [MinMaxObserver, MovingAverageMinMaxObserver, HistogramObserver]
 
         for obs in obs_list:
             model = SingleLayerLinearModel().eval()
@@ -796,7 +794,7 @@ class TestDistributed(QuantizationTestCase):
                 torch.quantization.DeQuantStub(),
             )
 
-            torch.quantization.fuse_modules(model, [['1', '2', '3'], ['4', '5']], inplace=True)
+            torch.ao.quantization.fuse_modules(model, [['1', '2', '3'], ['4', '5']], inplace=True)
 
             model.qconfig = torch.quantization.get_default_qat_qconfig('fbgemm')
             torch.quantization.prepare_qat(model, inplace=True)
@@ -837,7 +835,7 @@ class TestDistributed(QuantizationTestCase):
 
             model = Model()
             # fuse it
-            fused_model = torch.quantization.fuse_modules(
+            fused_model = torch.ao.quantization.fuse_modules(
                 model,
                 [['conv', 'bn']],
             )
@@ -900,6 +898,253 @@ class TestDistributed(QuantizationTestCase):
         # ensure that running an input on CUDA works without any needed changes
         input = torch.randn(4, 1, 4, 4, device=device)
         model(input)
+
+class TestFusedObsFakeQuantModule(TestCase):
+    @given(
+        device=st.sampled_from(
+            ["cpu", "cuda"] if torch.cuda.is_available() else ["cpu"]
+        )
+    )
+    @settings(deadline=None)
+    def test_fused_obs_fq_module(self, device):
+        # Set up the parameters
+        x = torch.randn(5, 5, device=device)
+        running_min_op = torch.tensor(float("inf"), device=device)
+        running_max_op = torch.tensor(float("-inf"), device=device)
+        avg_const = 0.01
+        scale = torch.tensor([1.0], device=device)
+        zero_point = torch.tensor([0], dtype=torch.int, device=device)
+
+        # Run the forward on the Module
+        mod = FusedMovingAvgObsFakeQuantize()
+        torch.quantization.enable_fake_quant(mod)
+        torch.quantization.enable_observer(mod)
+        mod.to(device)
+        out = mod(x)
+
+        # Run the operator directly
+        pt_op = torch.fused_moving_avg_obs_fake_quant
+
+        out_ref = pt_op(
+            x,
+            mod.observer_enabled,
+            mod.fake_quant_enabled,
+            running_min_op,
+            running_max_op,
+            scale,
+            zero_point,
+            avg_const,
+            0,
+            255,
+            0,
+            False,
+        )
+
+        # Compare params with reference
+        torch.testing.assert_allclose(out, out_ref)
+        torch.testing.assert_allclose(
+            running_min_op, mod.activation_post_process.min_val
+        )
+        torch.testing.assert_allclose(
+            running_max_op, mod.activation_post_process.max_val
+        )
+
+    @given(
+        device=st.sampled_from(
+            ["cpu", "cuda"] if torch.cuda.is_available() else ["cpu"]
+        )
+    )
+    @settings(deadline=None)
+    def test_fused_obs_fq_moving_avg_module(self, device):
+        # Set up the parameters
+        running_min_op = torch.tensor(float("inf"), device=device)
+        running_max_op = torch.tensor(float("-inf"), device=device)
+        avg_const = 0.001
+        scale = torch.tensor([1.0], device=device)
+        zero_point = torch.tensor([0], dtype=torch.int, device=device)
+
+        mod = FusedMovingAvgObsFakeQuantize(averaging_constant=0.001)
+        mod.to(device)
+        mod.observer_enabled[0] = 0
+        mod.fake_quant_enabled[0] = 0
+
+        for i in range(10):
+            x = torch.randn(5, 5, device=device)
+            if i > 2:
+                mod.observer_enabled[0] = 1
+            if i > 4:
+                mod.fake_quant_enabled[0] = 1
+            # Run the forward on the Module
+            out = mod(x)
+
+            # Run the operator directly
+            pt_op = torch.fused_moving_avg_obs_fake_quant
+
+            out_ref = pt_op(
+                x,
+                mod.observer_enabled,
+                mod.fake_quant_enabled,
+                running_min_op,
+                running_max_op,
+                scale,
+                zero_point,
+                avg_const,
+                0,
+                255,
+                0,
+                False,
+            )
+
+            # Compare params with reference
+            torch.testing.assert_allclose(out, out_ref)
+            torch.testing.assert_allclose(
+                running_min_op, mod.activation_post_process.min_val
+            )
+            torch.testing.assert_allclose(
+                running_max_op, mod.activation_post_process.max_val
+            )
+
+    @given(
+        device=st.sampled_from(
+            ["cpu", "cuda"] if torch.cuda.is_available() else ["cpu"]
+        )
+    )
+    @settings(deadline=None)
+    def test_compare_fused_obs_fq_oss_module(self, device):
+        mod = FusedMovingAvgObsFakeQuantize()
+        torch.quantization.enable_fake_quant(mod)
+        torch.quantization.enable_observer(mod)
+        mod.to(device)
+
+        mod_ref = FakeQuantize()
+        torch.quantization.enable_fake_quant(mod_ref)
+        torch.quantization.enable_observer(mod_ref)
+        mod_ref.to(device)
+
+        for i in range(10):
+            x = torch.randn(5, 5, device=device)
+            out = mod(x)
+            out_ref = mod_ref(x)
+            torch.testing.assert_allclose(out, out_ref)
+            torch.testing.assert_allclose(
+                mod_ref.activation_post_process.min_val,
+                mod.activation_post_process.min_val,
+            )
+            torch.testing.assert_allclose(
+                mod_ref.activation_post_process.max_val,
+                mod.activation_post_process.max_val,
+            )
+
+    def test_fused_mod_per_channel(self):
+        devices = ["cpu", "cuda"] if torch.cuda.is_available() else ["cpu"]
+        m = 5
+        n = 10
+        for device in devices:
+            running_min_op = torch.empty(m, device=device).fill_(float("inf"))
+            running_max_op = torch.empty(m, device=device).fill_(float("-inf"))
+            avg_const = 0.001
+            scale = torch.empty(m, device=device).fill_(0.1)
+            zero_point = torch.empty(m, dtype=torch.int, device=device).fill_(0)
+            obs = FusedMovingAvgObsFakeQuantize.with_args(
+                averaging_constant=avg_const,
+                observer=MovingAveragePerChannelMinMaxObserver,
+            )
+            mod = obs()
+            mod = torch.jit.script(mod)
+            mod.to(device)
+
+            for i in range(10):
+                x = torch.randn(m, n, device=device)
+                if i > 2:
+                    mod.observer_enabled[0] = 1
+                if i > 4:
+                    mod.fake_quant_enabled[0] = 1
+                # Run the forward on the Module
+                out = mod(x)
+
+                # Run the operator directly
+                pt_op = torch.fused_moving_avg_obs_fake_quant
+
+                out_ref = pt_op(
+                    x,
+                    mod.observer_enabled,
+                    mod.fake_quant_enabled,
+                    running_min_op,
+                    running_max_op,
+                    scale,
+                    zero_point,
+                    avg_const,
+                    0,
+                    255,
+                    0,
+                    True,
+                    False,
+                )
+                # Compare params with reference
+                torch.testing.assert_allclose(out, out_ref)
+                if mod.observer_enabled[0]:
+                    torch.testing.assert_allclose(
+                        running_min_op, mod.activation_post_process.min_val
+                    )
+                    torch.testing.assert_allclose(
+                        running_max_op, mod.activation_post_process.max_val
+                    )
+                if mod.fake_quant_enabled:
+                    torch.testing.assert_allclose(scale, mod.scale)
+                    torch.testing.assert_allclose(zero_point, mod.zero_point)
+
+            torch.testing.assert_allclose(mod.state_dict()['activation_post_process.min_val'], running_min_op)
+            torch.testing.assert_allclose(mod.state_dict()['activation_post_process.max_val'], running_max_op)
+
+    def test_fused_mod_reduce_range(self):
+        obs = FusedMovingAvgObsFakeQuantize(quant_min=0, quant_max=255, dtype=torch.quint8, reduce_range=True)
+
+        self.assertEqual(obs.quant_min, 0)
+        self.assertEqual(obs.quant_max, 127)
+
+    def test_default_fused_qat_config(self):
+        class Model(nn.Module):
+            def __init__(self):
+                super(Model, self).__init__()
+                self.linear = nn.Linear(2, 2)
+                self.relu = nn.ReLU()
+
+            def forward(self, x):
+                x = self.linear(x)
+                x = self.relu(x)
+                return x
+
+        for qengine in ["fbgemm", "qnnpack"]:
+            model = Model()
+            model.linear.weight = torch.nn.Parameter(torch.randn(2, 2))
+            sample_input = torch.randn(2, 2)
+            model.qconfig = torch.quantization.get_default_qat_qconfig(qengine, version=1)
+            ref_model = torch.quantization.QuantWrapper(model)
+            ref_model = torch.quantization.prepare_qat(ref_model)
+            ref_model(sample_input)
+            count_fake_quant = 0
+            for name, mod in ref_model.named_modules():
+                if name.endswith('weight_fake_quant'):
+                    count_fake_quant += 1
+                    self.assertEqual(type(mod), FusedMovingAvgObsFakeQuantize)
+
+                if name.count('activation_post_process') == 1 and 'weight_fake_quant' not in name:
+                    count_fake_quant += 1
+                    self.assertEqual(type(mod), FusedMovingAvgObsFakeQuantize)
+
+            self.assertEqual(count_fake_quant, 3)
+
+            if qengine == "fbgemm":
+                self.assertEqual(ref_model.quant.activation_post_process.quant_min, 0)
+                self.assertEqual(ref_model.quant.activation_post_process.quant_max, 127)
+                self.assertEqual(type(ref_model.module.linear.weight_fake_quant.activation_post_process),
+                                 MovingAveragePerChannelMinMaxObserver)
+            else:
+                self.assertEqual(ref_model.quant.activation_post_process.quant_min, 0)
+                self.assertEqual(ref_model.quant.activation_post_process.quant_max, 255)
+                self.assertEqual(type(ref_model.module.linear.weight_fake_quant.activation_post_process),
+                                 MovingAverageMinMaxObserver)
+
 
 if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"

@@ -4,7 +4,6 @@
 
 using c10::utils::bitset;
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BitsetTest, givenEmptyBitset_whenGettingBit_thenIsZero) {
   bitset b;
   for (size_t i = 0; i < bitset::NUM_BITS(); ++i) {
@@ -12,7 +11,6 @@ TEST(BitsetTest, givenEmptyBitset_whenGettingBit_thenIsZero) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BitsetTest, givenEmptyBitset_whenUnsettingBit_thenIsZero) {
   bitset b;
   b.unset(4);
@@ -21,7 +19,6 @@ TEST(BitsetTest, givenEmptyBitset_whenUnsettingBit_thenIsZero) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BitsetTest, givenEmptyBitset_whenSettingAndUnsettingBit_thenIsZero) {
   bitset b;
   b.set(4);
@@ -31,14 +28,12 @@ TEST(BitsetTest, givenEmptyBitset_whenSettingAndUnsettingBit_thenIsZero) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BitsetTest, givenEmptyBitset_whenSettingBit_thenIsSet) {
   bitset b;
   b.set(6);
   EXPECT_TRUE(b.get(6));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BitsetTest, givenEmptyBitset_whenSettingBit_thenOthersStayUnset) {
   bitset b;
   b.set(6);
@@ -50,7 +45,6 @@ TEST(BitsetTest, givenEmptyBitset_whenSettingBit_thenOthersStayUnset) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BitsetTest, givenNonemptyBitset_whenSettingBit_thenIsSet) {
   bitset b;
   b.set(6);
@@ -58,7 +52,6 @@ TEST(BitsetTest, givenNonemptyBitset_whenSettingBit_thenIsSet) {
   EXPECT_TRUE(b.get(30));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BitsetTest, givenNonemptyBitset_whenSettingBit_thenOthersStayAtOldValue) {
   bitset b;
   b.set(6);
@@ -74,7 +67,6 @@ TEST(BitsetTest, givenNonemptyBitset_whenSettingBit_thenOthersStayAtOldValue) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BitsetTest, givenNonemptyBitset_whenUnsettingBit_thenIsUnset) {
   bitset b;
   b.set(6);
@@ -83,7 +75,6 @@ TEST(BitsetTest, givenNonemptyBitset_whenUnsettingBit_thenIsUnset) {
   EXPECT_FALSE(b.get(6));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     BitsetTest,
     givenNonemptyBitset_whenUnsettingBit_thenOthersStayAtOldValue) {
@@ -115,7 +106,6 @@ struct IndexCallbackMock final {
   }
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BitsetTest, givenEmptyBitset_whenCallingForEachBit_thenDoesntCall) {
   IndexCallbackMock callback;
   bitset b;
@@ -123,7 +113,6 @@ TEST(BitsetTest, givenEmptyBitset_whenCallingForEachBit_thenDoesntCall) {
   callback.expect_was_called_for_indices({});
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     BitsetTest,
     givenBitsetWithOneBitSet_whenCallingForEachBit_thenCallsForEachBit) {
@@ -134,7 +123,6 @@ TEST(
   callback.expect_was_called_for_indices({5});
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     BitsetTest,
     givenBitsetWithMultipleBitsSet_whenCallingForEachBit_thenCallsForEachBit) {

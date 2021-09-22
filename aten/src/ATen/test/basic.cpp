@@ -360,21 +360,18 @@ void test(DeprecatedTypeProperties& type) {
   TestIntArrayRefExpansion(type);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BasicTest, BasicTestCPU) {
   manual_seed(123);
 
   test(CPU(kFloat));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BasicTest, BasicTestHalfCPU) {
   manual_seed(234);
 
   test(CPU(kHalf));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BasicTest, BasicTestCUDA) {
   manual_seed(123);
 
@@ -383,7 +380,6 @@ TEST(BasicTest, BasicTestCUDA) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BasicTest, FactoryMethodsTest) {
   // Test default values
   at::Tensor tensor0 = at::empty({4});
@@ -423,7 +419,7 @@ TEST(BasicTest, FactoryMethodsTest) {
   ASSERT_EQ(tensor1.device(), at::kCPU);
   ASSERT_FALSE(tensor1.requires_grad());
   // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
-  ASSERT_ANY_THROW(tensor1.is_pinned());
+  ASSERT_FALSE(tensor1.is_pinned());
 #endif // ATEN_CPU_STATIC_DISPATCH
 
   if (torch::cuda::is_available()) {
@@ -454,11 +450,7 @@ TEST(BasicTest, FactoryMethodsTest) {
     // This is a bug
     // Issue https://github.com/pytorch/pytorch/issues/30405
     ASSERT_FALSE(tensor1.requires_grad());
-
-    // This will cause an exception
-    // Issue https://github.com/pytorch/pytorch/issues/30405
-    // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
-    ASSERT_ANY_THROW(tensor1.is_pinned());
+    ASSERT_FALSE(tensor1.is_pinned());
   }
 
   // Test _like variants

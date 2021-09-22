@@ -1,3 +1,4 @@
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/passes/onnx/constant_map.h>
 
 #include <torch/csrc/jit/jit_log.h>
@@ -23,6 +24,7 @@ void ConstantValueMap::SetRank(
     const std::string& tensorName,
     size_t rankValue) {
   ConstantValueMap::getInstance().rankMap.emplace(tensorName, rankValue);
+  ConstantValueMap::getInstance().useInferredTypeMap.emplace(tensorName, true);
 }
 
 bool ConstantValueMap::HasRank(const std::string& tensorName) {
@@ -41,6 +43,7 @@ void ConstantValueMap::SetShape(
     const std::string& tensorName,
     const c10::SymbolicShape& shapeValue) {
   ConstantValueMap::getInstance().shapeMap.emplace(tensorName, shapeValue);
+  ConstantValueMap::getInstance().useInferredTypeMap.emplace(tensorName, true);
 }
 
 bool ConstantValueMap::HasShape(const std::string& tensorName) {
@@ -139,16 +142,56 @@ std::vector<int64_t> ConstantValueMap::GetValueInto1DInt64Vector(
   std::vector<int64_t> value_vector;
   value_vector.reserve(value_int64_t.size(0));
   auto value_size_a = value_int64_t.accessor<int64_t, 1>();
-  for (auto i = 0; i < value_int64_t.size(0); i++) {
+  for (const auto i : c10::irange(value_int64_t.size(0))) {
     value_vector.emplace_back(static_cast<int64_t>(value_size_a[i]));
   }
   return value_vector;
+}
+
+void ConstantValueMap::SetTypeReliable(
+    const std::string& tensorName,
+    bool value) {
+  ConstantValueMap::getInstance().typeReliableMap.emplace(tensorName, value);
+}
+
+bool ConstantValueMap::HasTypeReliable(const std::string& tensorName) {
+  return ConstantValueMap::getInstance().typeReliableMap.find(tensorName) !=
+      ConstantValueMap::getInstance().typeReliableMap.end();
+}
+
+c10::optional<bool> ConstantValueMap::GetTypeReliable(
+    const std::string& tensorName) {
+  if (!HasTypeReliable(tensorName)) {
+    return c10::nullopt;
+  }
+  return ConstantValueMap::getInstance().typeReliableMap[tensorName];
+}
+
+void ConstantValueMap::SetUseInferredType(
+    const std::string& tensorName,
+    bool value) {
+  ConstantValueMap::getInstance().useInferredTypeMap.emplace(tensorName, value);
+}
+
+bool ConstantValueMap::HasUseInferredType(const std::string& tensorName) {
+  return ConstantValueMap::getInstance().useInferredTypeMap.find(tensorName) !=
+      ConstantValueMap::getInstance().useInferredTypeMap.end();
+}
+
+c10::optional<bool> ConstantValueMap::GetUseInferredType(
+    const std::string& tensorName) {
+  if (!HasUseInferredType(tensorName)) {
+    return c10::nullopt;
+  }
+  return ConstantValueMap::getInstance().useInferredTypeMap[tensorName];
 }
 
 void ConstantValueMap::ClearMaps() {
   ConstantValueMap::getInstance().rankMap.clear();
   ConstantValueMap::getInstance().shapeMap.clear();
   ConstantValueMap::getInstance().tensorValueMap.clear();
+  ConstantValueMap::getInstance().typeReliableMap.clear();
+  ConstantValueMap::getInstance().useInferredTypeMap.clear();
 }
 
 // For debug only.
@@ -177,6 +220,26 @@ void ConstantValueMap::PrintMaps() {
   std::cout << "Print Value Maps:" << std::endl;
   for (const auto& x : ConstantValueMap::getInstance().tensorValueMap) {
     std::cout << "node " << x.first << ": " << x.second << std::endl;
+  }
+  std::cout << std::endl;
+  std::cout << "Print TypeReliable Maps:" << std::endl;
+  size_t count = 0;
+  for (const auto& x : ConstantValueMap::getInstance().typeReliableMap) {
+    std::cout << "(node " << x.first << ": " << x.second << "), ";
+    count++;
+    if (count % 10 == 0) {
+      std::cout << std::endl;
+    }
+  }
+  std::cout << std::endl;
+  std::cout << "Print UseInferredType Maps:" << std::endl;
+  count = 0;
+  for (const auto& x : ConstantValueMap::getInstance().useInferredTypeMap) {
+    std::cout << "(node " << x.first << ": " << x.second << "), ";
+    count++;
+    if (count % 10 == 0) {
+      std::cout << std::endl;
+    }
   }
 }
 

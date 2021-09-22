@@ -36,12 +36,9 @@ bool MomentsGradientOp<T, Context>::Compute(
   return true;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(Moments, MomentsOp<float, CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(MomentsGradient, MomentsGradientOp<float, CPUContext>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Moments)
     .NumInputs(1)
     .NumOutputs(2)
@@ -64,7 +61,6 @@ OPERATOR_SCHEMA(Moments)
     .Output(0, "mean", "Reduced mean tensor.")
     .Output(1, "variance", "Reduced variance tensor.");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(MomentsGradient).NumInputs(4).NumOutputs(1);
 
 namespace {
@@ -83,7 +79,6 @@ class GetMomentsGradient : public GradientMakerBase {
 
 } // namespace
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(Moments, GetMomentsGradient);
 
 } // namespace caffe2

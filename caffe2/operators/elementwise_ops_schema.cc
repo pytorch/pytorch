@@ -285,7 +285,6 @@ std::vector<TensorShape> ElementwiseGradientOpShapeInference(
 
 } // namespace
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Add)
     .NumInputs(2)
     .NumOutputs(1)
@@ -294,14 +293,12 @@ OPERATOR_SCHEMA(Add)
     .TensorInferenceFunction(ElementwiseOpShapeInference)
     .FillUsing(MathDocGenerator("addition", kAddExample))
     .InheritOnnxSchema();
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(AddGradient)
     .NumInputs(3)
     .NumOutputs(2)
     .TensorInferenceFunction(ElementwiseGradientOpShapeInference)
     .AllowInplace({{0, 0}, {0, 1}});
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Sub)
     .NumInputs(2)
     .NumOutputs(1)
@@ -310,14 +307,12 @@ OPERATOR_SCHEMA(Sub)
     .TensorInferenceFunction(ElementwiseOpShapeInference)
     .FillUsing(MathDocGenerator("subtraction", kSubExample))
     .InheritOnnxSchema();
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SubGradient)
     .NumInputs(3)
     .NumOutputs(2)
     .TensorInferenceFunction(ElementwiseGradientOpShapeInference)
     .AllowInplace({{0, 0}, {0, 1}});
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Mul)
     .NumInputs(2)
     .NumOutputs(1)
@@ -326,7 +321,6 @@ OPERATOR_SCHEMA(Mul)
     .TensorInferenceFunction(ElementwiseOpShapeInference)
     .FillUsing(MathDocGenerator("multiplication", kMulExample))
     .InheritOnnxSchema();
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(MulGradient)
     .NumInputs(3)
     .NumOutputs(2)
@@ -334,7 +328,6 @@ OPERATOR_SCHEMA(MulGradient)
     .AllowInplace({{0, 0}, {0, 1}})
     .CostInferenceFunction(PointwiseCostInference<2>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Div)
     .NumInputs(2)
     .NumOutputs(1)
@@ -343,14 +336,12 @@ OPERATOR_SCHEMA(Div)
     .TensorInferenceFunction(ElementwiseOpShapeInference)
     .FillUsing(MathDocGenerator("division", kDivExample))
     .InheritOnnxSchema();
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(DivGradient)
     .NumInputs(3, 4)
     .NumOutputs(2)
     .TensorInferenceFunction(ElementwiseGradientOpShapeInference)
     .AllowInplace({{0, 0}});
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SumReduceLike)
     .NumInputs(2)
     .NumOutputs(1)
@@ -684,21 +675,15 @@ Performs element-wise {desc} comparison **{name}** (with limited broadcast suppo
       .FillUsing(ComparisonDocGenerator(symbol, desc, extra));              \
   SHOULD_NOT_DO_GRADIENT(name)
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 CAFFE2_SCHEMA_FOR_BINARY_COMPARISON_OP(EQ, "==", "equal to", kEQExample);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 CAFFE2_SCHEMA_FOR_BINARY_COMPARISON_OP(NE, "!=", "not equal to", kNEExample);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 CAFFE2_SCHEMA_FOR_BINARY_COMPARISON_OP(LT, "<", "less than", kLTExample);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 CAFFE2_SCHEMA_FOR_BINARY_COMPARISON_OP(
     LE,
     "<=",
     "less or equal than",
     kLEExample);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 CAFFE2_SCHEMA_FOR_BINARY_COMPARISON_OP(GT, ">", "greater than", kGTExample);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 CAFFE2_SCHEMA_FOR_BINARY_COMPARISON_OP(
     GE,
     ">=",
@@ -897,11 +882,8 @@ Both input operands should be of type `bool`.
       .InheritOnnxSchema(onnx_schema);                                        \
   SHOULD_NOT_DO_GRADIENT(name)
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 CAFFE2_SCHEMA_FOR_BINARY_LOGICAL_OP(Or, "or", "Or", kOrExample);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 CAFFE2_SCHEMA_FOR_BINARY_LOGICAL_OP(And, "and", "And", kAndExample);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 CAFFE2_SCHEMA_FOR_BINARY_LOGICAL_OP(Xor, "xor", "Xor", kXorExample);
 
 #undef CAFFE2_SCHEMA_FOR_BINARY_LOGICAL_OP
@@ -943,16 +925,12 @@ Both input operands should be of type `bool`.
       .TensorInferenceFunction(ElementwiseOpShapeInference); \
   SHOULD_NOT_DO_GRADIENT(name)
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 CAFFE2_SCHEMA_FOR_BINARY_BITWISE_OP(BitwiseOr, "bitwise_or");
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 CAFFE2_SCHEMA_FOR_BINARY_BITWISE_OP(BitwiseAnd, "bitwise_and");
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 CAFFE2_SCHEMA_FOR_BINARY_BITWISE_OP(BitwiseXor, "bitwise_xor");
 
 #undef CAFFE2_SCHEMA_FOR_BINARY_BITWISE_OP
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Not)
     .NumInputs(1)
     .NumOutputs(1)
@@ -1008,10 +986,8 @@ Y:
     .Input(0, "X", "*(Tensor`<bool>`)* Input tensor.")
     .Output(0, "Y", "*(Tensor`<bool>`)* Negated output tensor.")
     .InheritOnnxSchema();
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(Not);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Sign)
     .NumInputs(1)
     .NumOutputs(1)
@@ -1065,7 +1041,6 @@ Y:
     )DOC")
     .Input(0, "X", "*(type: Tensor`<float>`)* Input data tensor.")
     .Output(0, "Y", "*(type: Tensor`<float>`)* Output tensor.");
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(Sign);
 
 } // namespace caffe2

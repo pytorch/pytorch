@@ -17,7 +17,6 @@ struct TORCH_API CopyBackwards : public Node {
   variable_list apply(variable_list&& grads) override;
 
   at::TensorOptions src_options;
-  at::Device src_device = at::kCPU;
 };
 
 // Note [View + Inplace update for base tensor]

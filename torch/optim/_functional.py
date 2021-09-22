@@ -84,7 +84,7 @@ def adam(params: List[Tensor],
 
         # Decay the first and second moment running average coefficient
         exp_avg.mul_(beta1).add_(grad, alpha=1 - beta1)
-        exp_avg_sq.mul_(beta2).addcmul_(grad, grad, value=1 - beta2)
+        exp_avg_sq.mul_(beta2).addcmul_(grad, grad.conj(), value=1 - beta2)
         if amsgrad:
             # Maintains the maximum of all 2nd moment running avg. till now
             torch.maximum(max_exp_avg_sqs[i], exp_avg_sq, out=max_exp_avg_sqs[i])
@@ -357,3 +357,153 @@ def asgd(params: List[Tensor],
             ax.add_(param.sub(ax).mul(mu))
         else:
             ax.copy_(param)
+
+
+def nadam(params: List[Tensor],
+          grads: List[Tensor],
+          exp_avgs: List[Tensor],
+          exp_avg_sqs: List[Tensor],
+          mu_products: List[float],
+          state_steps: List[int],
+          *,
+          beta1: float,
+          beta2: float,
+          lr: float,
+          weight_decay: float,
+          momentum_decay: float,
+          eps: float):
+    r"""Functional API that performs NAdam algorithm computation.
+
+    See :class:`~torch.optim.NAdam` for details.
+    """
+
+    for i, param in enumerate(params):
+        grad = grads[i]
+        exp_avg = exp_avgs[i]
+        exp_avg_sq = exp_avg_sqs[i]
+        mu_product = mu_products[i]
+        step = state_steps[i]
+
+        bias_correction2 = 1 - beta2 ** step
+
+        if weight_decay != 0:
+            grad = grad.add(param, alpha=weight_decay)
+
+        # calculate the momentum cache \mu^{t} and \mu^{t+1}
+        mu = beta1 * (1. - 0.5 * (0.96 ** (step * momentum_decay)))
+        mu_next = beta1 * (1. - 0.5 * (0.96 ** ((step + 1) * momentum_decay)))
+        mu_product = mu_product * mu
+        mu_product_next = mu_product * mu * mu_next
+
+        # decay the first and second moment running average coefficient
+        exp_avg.mul_(beta1).add_(grad, alpha=1 - beta1)
+        exp_avg_sq.mul_(beta2).addcmul_(grad, grad, value=1 - beta2)
+
+        denom = exp_avg_sq.div(bias_correction2).sqrt().add_(eps)
+        param.addcdiv_(grad, denom, value=-lr * (1. - mu) / (1. - mu_product))
+        param.addcdiv_(exp_avg, denom, value=-lr * mu_next / (1. - mu_product_next))
+
+
+def radam(params: List[Tensor],
+          grads: List[Tensor],
+          exp_avgs: List[Tensor],
+          exp_avg_sqs: List[Tensor],
+          state_steps: List[int],
+          *,
+          beta1: float,
+          beta2: float,
+          lr: float,
+          weight_decay: float,
+          eps: float):
+    r"""Functional API that performs RAdam algorithm computation.
+
+    See :class:`~torch.optim.RAdam` for details.
+    """
+
+    for i, param in enumerate(params):
+        grad = grads[i]
+        exp_avg = exp_avgs[i]
+        exp_avg_sq = exp_avg_sqs[i]
+        step = state_steps[i]
+
+        bias_correction1 = 1 - beta1 ** step
+        bias_correction2 = 1 - beta2 ** step
+
+        if weight_decay != 0:
+            grad = grad.add(param, alpha=weight_decay)
+
+        # Decay the first and second moment running average coefficient
+        exp_avg.mul_(beta1).add_(grad, alpha=1 - beta1)
+        exp_avg_sq.mul_(beta2).addcmul_(grad, grad, value=1 - beta2)
+
+        # correcting bias for the first moving moment
+        bias_corrected_exp_avg = exp_avg / bias_correction1
+
+        # maximum length of the approximated SMA
+        rho_inf = 2 / (1 - beta2) - 1
+        # compute the length of the approximated SMA
+        rho_t = rho_inf - 2 * step * (beta2 ** step) / bias_correction2
+
+        if rho_t > 5.:
+            # Compute the variance rectification term and update parameters accordingly
+            rect = math.sqrt((rho_t - 4) * (rho_t - 2) * rho_inf / ((rho_inf - 4) * (rho_inf - 2) * rho_t))
+            adaptive_lr = math.sqrt(bias_correction2) / exp_avg_sq.sqrt().add_(eps)
+
+            param.add_(bias_corrected_exp_avg * lr * adaptive_lr * rect, alpha=-1.0)
+        else:
+            param.add_(bias_corrected_exp_avg * lr, alpha=-1.0)
+
+
+def sparse_adam(params: List[Tensor],
+                grads: List[Tensor],
+                exp_avgs: List[Tensor],
+                exp_avg_sqs: List[Tensor],
+                state_steps: List[int],
+                *,
+                eps: float,
+                beta1: float,
+                beta2: float,
+                lr: float):
+    r"""Functional API that performs Sparse Adam algorithm computation.
+
+    See :class:`~torch.optim.SparseAdam` for details.
+    """
+    for i, param in enumerate(params):
+        grad = grads[i]
+        grad = grad.coalesce()  # the update is non-linear so indices must be unique
+        grad_indices = grad._indices()
+        grad_values = grad._values()
+        size = grad.size()
+
+        exp_avg = exp_avgs[i]
+        exp_avg_sq = exp_avg_sqs[i]
+        step = state_steps[i]
+
+
+        def make_sparse(values):
+            constructor = grad.new
+            if grad_indices.dim() == 0 or values.dim() == 0:
+                return constructor().resize_as_(grad)
+            return constructor(grad_indices, values, size)
+
+        # Decay the first and second moment running average coefficient
+        #      old <- b * old + (1 - b) * new
+        # <==> old += (1 - b) * (new - old)
+        old_exp_avg_values = exp_avg.sparse_mask(grad)._values()
+        exp_avg_update_values = grad_values.sub(old_exp_avg_values).mul_(1 - beta1)
+        exp_avg.add_(make_sparse(exp_avg_update_values))
+        old_exp_avg_sq_values = exp_avg_sq.sparse_mask(grad)._values()
+        exp_avg_sq_update_values = grad_values.pow(2).sub_(old_exp_avg_sq_values).mul_(1 - beta2)
+        exp_avg_sq.add_(make_sparse(exp_avg_sq_update_values))
+
+        # Dense addition again is intended, avoiding another sparse_mask
+        numer = exp_avg_update_values.add_(old_exp_avg_values)
+        exp_avg_sq_update_values.add_(old_exp_avg_sq_values)
+        denom = exp_avg_sq_update_values.sqrt_().add_(eps)
+        del exp_avg_update_values, exp_avg_sq_update_values
+
+        bias_correction1 = 1 - beta1 ** step
+        bias_correction2 = 1 - beta2 ** step
+        step_size = lr * math.sqrt(bias_correction2) / bias_correction1
+
+        param.add_(make_sparse(-step_size * numer.div_(denom)))

@@ -4,6 +4,7 @@
 
 #include <ATen/core/interned_strings.h>
 #include <ATen/core/ivalue.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/THP.h>
 #include <torch/csrc/autograd/variable.h>
@@ -214,7 +215,7 @@ namespace jit {
 
 static inline py::tuple tuple_tail(const py::tuple& tup) {
   py::tuple r(tup.size() - 1);
-  for (size_t i = 1; i < tup.size(); i++) {
+  for (const auto i : c10::irange(1, tup.size())) {
     r[i - 1] = tup[i];
   }
   return r;

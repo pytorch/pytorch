@@ -31,7 +31,7 @@ c10::intrusive_ptr<c10::ivalue::Future> PythonCommHook::runHook(
     auto errMsg = c10::str(
         e.what(),
         ". DDP communication hook's callback must return a "
-        "torch.futures.Future or torch._C.Future object, but got ",
+        "torch.futures.Future object, but got ",
         type.attr("__module__").cast<std::string>(),
         ".",
         type.attr("__qualname__").cast<std::string>());
@@ -39,22 +39,14 @@ c10::intrusive_ptr<c10::ivalue::Future> PythonCommHook::runHook(
   }
 }
 
-std::vector<at::Tensor> PythonCommHook::parseHookResult(
-    const c10::IValue& result) {
+at::Tensor PythonCommHook::parseHookResult(const c10::IValue& result) {
   TORCH_INTERNAL_ASSERT(
-      result.isPyObject() || result.isTensorList(),
-      "expected the hook result is either a PyObject or TensorList");
+      result.isPyObject(), "expected the hook result is a PyObject");
 
-  if (result.isPyObject()) {
-    py::gil_scoped_acquire ag;
-    py::object obj = torch::jit::toPyObject(result);
-    auto value = torch::jit::toIValue(
-        obj, c10::ListType::create(c10::TensorType::get()));
-
-    return value.toTensorVector();
-  }
-
-  return result.toTensorVector();
+  py::gil_scoped_acquire ag;
+  py::object obj = torch::jit::toPyObject(result);
+  auto value = torch::jit::toIValue(obj, c10::TensorType::get());
+  return value.toTensor();
 }
 
 } // namespace c10d

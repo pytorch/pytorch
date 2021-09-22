@@ -11,12 +11,15 @@ from collections import namedtuple
 path = os.path.dirname(os.path.realpath(__file__))
 aten_native_yaml = os.path.join(path, '../aten/src/ATen/native/native_functions.yaml')
 all_operators_with_namedtuple_return = {
-    'max', 'min', 'median', 'nanmedian', 'mode', 'kthvalue', 'svd', 'symeig', 'eig',
+    'max', 'min', 'aminmax', 'median', 'nanmedian', 'mode', 'kthvalue', 'svd', 'symeig', 'eig',
     'qr', 'geqrf', 'solve', 'slogdet', 'sort', 'topk', 'lstsq', 'linalg_inv_ex',
     'triangular_solve', 'cummax', 'cummin', 'linalg_eigh', "_unpack_dual", 'linalg_qr',
     '_svd_helper', 'linalg_svd', 'linalg_slogdet', 'fake_quantize_per_tensor_affine_cachemask',
     'fake_quantize_per_channel_affine_cachemask', 'linalg_lstsq', 'linalg_eig', 'linalg_cholesky_ex',
-    'frexp', 'lu_unpack'
+    'frexp', 'lu_unpack', 'histogram', '_fake_quantize_per_tensor_affine_cachemask_tensor_qparams',
+    '_fused_moving_avg_obs_fq_helper',
+    '_det_lu_based_helper',
+    '_lu_with_info',
 }
 
 
@@ -87,6 +90,18 @@ class TestNamedTupleAPI(TestCase):
             op(operators=['lu_unpack'],
                input=(torch.tensor([3, 2, 1, 4, 5], dtype=torch.int32), True, True),
                names=('P', 'L', 'U'), hasout=True),
+            op(operators=['histogram'], input=(1,), names=('hist', 'bin_edges'), hasout=True),
+            op(operators=['_fake_quantize_per_tensor_affine_cachemask_tensor_qparams'],
+               input=(torch.tensor([1.0]), torch.tensor([0], dtype=torch.int), torch.tensor([1]), 0, 255),
+               names=('output', 'mask',), hasout=False),
+            op(operators=['_fused_moving_avg_obs_fq_helper'],
+               input=(torch.tensor([1]), torch.tensor([1]), torch.tensor([0.1]), torch.tensor([0.1]),
+               torch.tensor([0.1]), torch.tensor([1]), 0.01, 0, 255, 0), names=('output', 'mask',), hasout=False),
+            op(operators=['_det_lu_based_helper'],
+               input=(), names=('det', 'lu', 'pivs'), hasout=False),
+            op(operators=['aminmax'], input=(), names=('min', 'max'), hasout=True),
+            op(operators=['_lu_with_info'],
+               input=(), names=('LU', 'pivots', 'info'), hasout=False),
         ]
 
         def get_func(f):

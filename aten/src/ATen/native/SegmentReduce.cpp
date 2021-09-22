@@ -7,7 +7,6 @@
 namespace at {
 namespace native {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(_segment_reduce_stub);
 DEFINE_DISPATCH(_segment_reduce_backward_stub);
 
@@ -18,27 +17,27 @@ SegmentReductionType get_reduction_enum(const c10::string_view& reduce) {
     return SegmentReductionType::MAX;
   } else if (reduce == "mean") {
     return SegmentReductionType::MEAN;
+  } else if (reduce == "min") {
+    return SegmentReductionType::MIN;
+  } else if (reduce == "sum") {
+    return SegmentReductionType::SUM;
   } else {
     TORCH_CHECK(false, "unsopported reduction given! ", reduce);
   }
 }
 
-Tensor _segment_reduce_cpu_kernel(
+template <typename T>
+void _segment_reduce_cpu_kernel1(
     SegmentReductionType reduction,
     const Tensor& data,
-    const Tensor& lengths,
+    const T* lengths_data,
     int64_t axis,
-    const c10::optional<Scalar>& initial) {
-  int64_t segment_count = lengths.numel();
-  auto output_shape = data.sizes().vec();
-  output_shape[axis] = segment_count;
-  auto output = at::empty(output_shape, data.options());
-
+    const c10::optional<Scalar>& initial,
+    Tensor& output,
+    int64_t segment_count) {
   int64_t stride_count = data.numel() / data.size(axis);
-  const auto* lengths_data = lengths.data_ptr<int64_t>();
-
-  AT_DISPATCH_ALL_TYPES_AND2(
-      kBFloat16, kHalf, data.scalar_type(), "_segment_reduce_cpu", ([&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      kBFloat16, kHalf, data.scalar_type(), "_segment_reduce_cpu", [&]() {
         auto* output_data = output.data_ptr<scalar_t>();
         const auto* values_data = data.data_ptr<scalar_t>();
         int64_t lengths_cum_sum = 0;
@@ -49,9 +48,13 @@ Tensor _segment_reduce_cpu_kernel(
             if (initial.has_value()) {
               initial_value = initial.value().to<scalar_t>();
             } else if (reduction == SegmentReductionType::MAX) {
-              initial_value = std::numeric_limits<scalar_t>::lowest();
-            } else if (reduction == SegmentReductionType::MEAN) {
+              initial_value = -std::numeric_limits<scalar_t>::infinity();
+            } else if (
+                reduction == SegmentReductionType::MEAN ||
+                reduction == SegmentReductionType::SUM) {
               initial_value = 0;
+            } else if (reduction == SegmentReductionType::MIN) {
+              initial_value = std::numeric_limits<scalar_t>::infinity();
             }
 
             // ===== step2: apply reduction
@@ -64,15 +67,22 @@ Tensor _segment_reduce_cpu_kernel(
                 initial_value = at::_isnan(data)
                     ? data
                     : std::max<scalar_t>(initial_value, data);
-              } else if (reduction == SegmentReductionType::MEAN) {
+              } else if (
+                  reduction == SegmentReductionType::MEAN ||
+                  reduction == SegmentReductionType::SUM) {
                 initial_value = initial_value + data;
+              } else if (reduction == SegmentReductionType::MIN) {
+                initial_value = at::_isnan(data)
+                    ? data
+                    : std::min<scalar_t>(initial_value, data);
               }
             }
 
             // ===== step3: finalize reduction
             TORCH_CHECK(lengths_data[i] >= 0);
 
-            if (lengths_data[i] == 0 && !initial.has_value()) {
+            if (lengths_data[i] == 0 && !initial.has_value() &&
+                reduction == SegmentReductionType::MEAN) {
               initial_value = static_cast<scalar_t>(NAN);
             } else if (
                 reduction == SegmentReductionType::MEAN &&
@@ -84,33 +94,47 @@ Tensor _segment_reduce_cpu_kernel(
           }
           lengths_cum_sum += lengths_data[i];
         }
-      }));
+      });
+}
+Tensor _segment_reduce_cpu_kernel(
+    SegmentReductionType reduction,
+    const Tensor& data,
+    const Tensor& lengths,
+    int64_t axis,
+    const c10::optional<Scalar>& initial) {
+  int64_t segment_count = lengths.numel();
+  auto output_shape = data.sizes().vec();
+  output_shape[axis] = segment_count;
+  auto output = at::empty(output_shape, data.options());
+
+  AT_DISPATCH_INDEX_TYPES(lengths.scalar_type(), "_segment_reduce_cpu_kernel1", [&]() {
+    const auto* lengths_data = lengths.data_ptr<index_t>();
+    _segment_reduce_cpu_kernel1(
+        reduction, data, lengths_data, axis, initial, output, segment_count);
+  });
 
   return output;
 }
 
-Tensor _segment_reduce_cpu_backward_kernel(
+template <typename T>
+void _segment_reduce_cpu_backward_kernel1(
     const Tensor& grad_contig,
     const Tensor& output_contig,
     const Tensor& data_contig,
     SegmentReductionType reduction,
-    const Tensor& lengths_contig,
-    int64_t axis) {
-  int64_t segment_count = lengths_contig.numel();
-  auto output_shape = data_contig.sizes().vec();
-  output_shape[axis] = segment_count;
-  auto grad_input = at::zeros({data_contig.sizes()}, grad_contig.options());
-
+    const T* lengths_data,
+    int64_t axis,
+    Tensor& grad_input,
+    int64_t segment_count) {
   int64_t stride_count = data_contig.numel() / data_contig.size(axis);
-  const auto* lengths_data = lengths_contig.data_ptr<int64_t>();
-
-  // TODO: Swtich to TensorIterator for better maintainablility and readability
-  AT_DISPATCH_ALL_TYPES_AND2(
+  // TODO: Swtich to TensorIterator for better maintainablility and
+  // readability
+  AT_DISPATCH_FLOATING_TYPES_AND2(
       kBFloat16,
       kHalf,
       data_contig.scalar_type(),
       "_segment_reduce_cpu",
-      ([&]() {
+      [&]() {
         auto* output_data = output_contig.data_ptr<scalar_t>();
         auto* grad_data = grad_contig.data_ptr<scalar_t>();
         auto* grad_input_data = grad_input.data_ptr<scalar_t>();
@@ -125,7 +149,8 @@ Tensor _segment_reduce_cpu_backward_kernel(
           for (int64_t l = 0; l < stride_count; ++l) {
             int64_t output_index = (i * stride_count) + l;
 
-            if (reduction == SegmentReductionType::MAX) {
+            if (reduction == SegmentReductionType::MAX ||
+                reduction == SegmentReductionType::MIN) {
               int64_t counter = 0;
               for (int64_t j = 0; j < lengths_data[i]; ++j) {
                 int64_t starting_index =
@@ -136,8 +161,8 @@ Tensor _segment_reduce_cpu_backward_kernel(
                   counter++;
                 }
               }
-              // Average gradient based on number of maximum elements in the
-              // segment
+              // Average gradient based on number of maximum elements in
+              // the segment
               if (counter < 2) {
                 continue;
               }
@@ -156,12 +181,46 @@ Tensor _segment_reduce_cpu_backward_kernel(
                     ((lengths_cum_sum + j) * stride_count) + l;
                 grad_input_data[starting_index] = grad_val;
               }
+            } else if (reduction == SegmentReductionType::SUM) {
+              const auto& grad_val = grad_data[output_index];
+              for (int64_t j = 0; j < lengths_data[i]; ++j) {
+                int64_t starting_index =
+                    ((lengths_cum_sum + j) * stride_count) + l;
+                grad_input_data[starting_index] = grad_val;
+              }
             }
           }
 
           lengths_cum_sum += lengths_data[i];
         }
-      }));
+      });
+}
+
+Tensor _segment_reduce_cpu_backward_kernel(
+    const Tensor& grad_contig,
+    const Tensor& output_contig,
+    const Tensor& data_contig,
+    SegmentReductionType reduction,
+    const Tensor& lengths_contig,
+    int64_t axis) {
+  int64_t segment_count = lengths_contig.numel();
+  auto output_shape = data_contig.sizes().vec();
+  output_shape[axis] = segment_count;
+  auto grad_input = at::zeros({data_contig.sizes()}, grad_contig.options());
+
+  AT_DISPATCH_INDEX_TYPES(
+      lengths_contig.scalar_type(), "_segment_reduce_cpu_backward_kernel1", [&] {
+        const auto* lengths_data = lengths_contig.data_ptr<index_t>();
+        _segment_reduce_cpu_backward_kernel1(
+            grad_contig,
+            output_contig,
+            data_contig,
+            reduction,
+            lengths_data,
+            axis,
+            grad_input,
+            segment_count);
+      });
 
   return grad_input;
 }
@@ -192,7 +251,6 @@ Tensor segment_reduce_kernel(
   if (!unsafe) {
     auto min_length = lengths_value.min().item<int64_t>();
     TORCH_CHECK((min_length >= 0), "lengths contains negative value!");
-    TORCH_CHECK(min_length != 0 || initial.has_value());
     TORCH_CHECK(lengths_value.sum().item<int64_t>() == data.size(axis));
   }
 
@@ -211,16 +269,13 @@ Tensor segment_reduce_kernel(
 
 REGISTER_ARCH_DISPATCH(
     _segment_reduce_stub,
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     DEFAULT,
     &_segment_reduce_cpu_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-REGISTER_AVX_DISPATCH(_segment_reduce_stub, &_segment_reduce_cpu_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_AVX2_DISPATCH(_segment_reduce_stub, &_segment_reduce_cpu_kernel);
+REGISTER_AVX512_DISPATCH(_segment_reduce_stub, &_segment_reduce_cpu_kernel);
 REGISTER_VSX_DISPATCH(_segment_reduce_stub, &_segment_reduce_cpu_kernel);
 
-// Currently some computation is beind duplicated across forward and backward.
+// Currently some computation is being duplicated across forward and backward.
 // TODO: Cache indices in forward pass to re-use in backward
 Tensor _segment_reduce_backward_kernel(
     const Tensor& grad,
@@ -256,7 +311,7 @@ REGISTER_ARCH_DISPATCH(
     _segment_reduce_backward_stub,
     DEFAULT,
     &_segment_reduce_cpu_backward_kernel);
-REGISTER_AVX_DISPATCH(
+REGISTER_AVX512_DISPATCH(
     _segment_reduce_backward_stub,
     &_segment_reduce_cpu_backward_kernel);
 REGISTER_AVX2_DISPATCH(

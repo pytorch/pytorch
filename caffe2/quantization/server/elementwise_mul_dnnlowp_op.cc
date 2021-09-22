@@ -9,7 +9,7 @@ using namespace std;
 using namespace dnnlowp;
 
 using MulFp32Op =
-    BinaryElementwiseOp<NumericTypes, CPUContext, MulFunctor<CPUContext>>;
+    BinaryElementwiseBroadcastOp<NumericTypes, CPUContext, MulFunctor<CPUContext>>;
 
 template <typename T>
 class MulDNNLowPOp : public BinaryElementwiseDNNLowPOp<T, MulFp32Op> {
@@ -115,9 +115,7 @@ class MulDNNLowPOp : public BinaryElementwiseDNNLowPOp<T, MulFp32Op> {
   }
 }; // class MulDNNLowPOp
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(Mul, DNNLOWP, MulDNNLowPOp<uint8_t>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(Int8Mul, DNNLOWP, MulDNNLowPOp<uint8_t>);
 
 } // namespace caffe2

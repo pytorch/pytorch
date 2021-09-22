@@ -210,8 +210,8 @@ void writeArchiveV5(
     const std::string& archive_name,
     const std::string& archive_dir,
     const std::string& tensor_dir,
-    bool tensor_cdata_naming_scheme,
-    StorageContext& storage_context) {
+    bool use_storage_context,
+    SerializationStorageContext& storage_context) {
   std::vector<char> data;
   // Vector to capture the run-time class types during pickling the IValues
   std::vector<c10::ClassTypePtr> memoizedClassTypes;
@@ -225,12 +225,12 @@ void writeArchiveV5(
       &memoizedClassTypes,
       [&](const at::Tensor& tensor) {
         // returns a string to use in picker.cpp as storage obj key
-        if (tensor_cdata_naming_scheme) {
+        if (use_storage_context) {
           std::string string_id =
               std::to_string(reinterpret_cast<std::intptr_t>(
                   tensor.storage().unsafeGetStorageImpl()));
           tensor_names.push_back(string_id + ".storage");
-          storage_context.addStorage(string_id, tensor.storage());
+          storage_context.getOrAddStorage(tensor.storage());
         } else {
           tensor_names.push_back(std::to_string(tensor_names.size()));
         }
@@ -244,13 +244,13 @@ void writeArchiveV5(
   std::string prefix = archive_name + "/";
 
   TORCH_INTERNAL_ASSERT(tensor_names.size() == data_pickle.tensorData().size());
-  const std::vector<std::string>& pre_serialized_files =
+  const std::unordered_set<std::string>& pre_serialized_files =
       writer.getAllWrittenRecords();
 
   for (const auto& td : data_pickle.tensorData()) {
     WriteableTensorData writable_td = getWriteableTensorData(td);
     std::string fname = tensor_dir + tensor_names[i++];
-    if (tensor_cdata_naming_scheme &&
+    if (use_storage_context &&
         std::find(
             pre_serialized_files.begin(), pre_serialized_files.end(), fname) !=
             pre_serialized_files.end()) {
@@ -329,14 +329,14 @@ std::stringstream backport_v6_to_v5(std::stringstream& input_model_stream) {
 
   update_bytecode_version(bytecode_values, kBytecodeVersionV5);
   auto bytecode_tuple = c10::ivalue::Tuple::create(std::move(bytecode_values));
-  StorageContext storage_context;
+  SerializationStorageContext storage_context;
   writeArchiveV5(
       writer_bytecode,
       c10::ivalue::Tuple::create(constants_values),
       /*archive_name=*/"constants",
       /*archive_dir=*/"",
       /*tensor_dir=*/"constants/",
-      /*tensor_cdata_naming_scheme=*/true,
+      /*use_storage_context=*/true,
       storage_context);
   writeArchiveV5(
       writer_bytecode,
@@ -344,7 +344,7 @@ std::stringstream backport_v6_to_v5(std::stringstream& input_model_stream) {
       /*archive_name=*/"bytecode",
       /*archive_dir=*/"",
       /*tensor_dir=*/"constants/",
-      /*tensor_cdata_naming_scheme=*/true,
+      /*use_storage_context=*/true,
       storage_context);
 
   return ouput_model_stream;
@@ -439,7 +439,7 @@ bool BackportManager::backport(
     auto input_model_stream_version =
         _get_model_bytecode_version(input_model_stream);
 
-    if (input_model_stream_version != bytecode_version) {
+    if (static_cast<int64_t>(input_model_stream_version) != bytecode_version) {
       TORCH_WARN(
           "The bytecode version of input model stream is supposed to be ",
           bytecode_version,
@@ -456,7 +456,7 @@ bool BackportManager::backport(
     auto output_model_stream_version =
         _get_model_bytecode_version(output_model_stream);
 
-    if (output_model_stream_version != bytecode_version) {
+    if (static_cast<int64_t>(output_model_stream_version) != bytecode_version) {
       TORCH_WARN(
           "The bytecode version of output model stream is supposed to be ",
           bytecode_version,

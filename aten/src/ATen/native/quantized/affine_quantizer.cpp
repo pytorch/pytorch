@@ -11,21 +11,13 @@
 namespace at {
 namespace native {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(quantize_tensor_per_tensor_affine_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(quantize_tensor_per_channel_affine_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(quantize_tensor_per_channel_float_qparams_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(dequantize_tensor_per_tensor_affine_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(dequantize_tensor_per_channel_affine_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(dequantize_tensor_per_channel_float_qparams_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(quantize_tensor_per_tensor_affine_sub_byte_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(dequantize_tensor_per_tensor_affine_sub_byte_stub);
 
 namespace {
@@ -81,20 +73,19 @@ void checkZeroPoint(const std::string& fn_name, int64_t zero_point) {
       fn_name,
       " zero_point ",
       zero_point,
-      " is out of range.");
+      " is above upper bound.");
   TORCH_CHECK(
       zero_point >= std::numeric_limits<T>::min(),
       fn_name,
       " zero_point ",
       zero_point,
-      " is out of range.");
+      " is below lower bound.");
 }
 
 template <typename T>
 void checkZeroPoints(const std::string& fn_name, const Tensor& zero_points) {
   auto zero_points_data = zero_points.data_ptr<int64_t>();
-  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-  for (size_t i = 0; i < zero_points.numel(); ++i) {
+  for (const auto i : c10::irange(zero_points.numel())) {
     checkZeroPoint<T>(fn_name, zero_points_data[i]);
   }
 }
@@ -116,7 +107,7 @@ Tensor& quantize_tensor_per_tensor_affine(
     Tensor& qtensor,
     double scale,
     int64_t zero_point) {
-  static const std::string fn_name = "quantize_tensor_per_tensor_affine";
+  static constexpr auto fn_name = "quantize_tensor_per_tensor_affine";
 
   checkRoundingMode(fn_name);
   checkFloatTensor(fn_name, rtensor);
@@ -147,17 +138,18 @@ Tensor& quantize_tensor_per_channel_affine(
     Tensor scales,
     Tensor zero_points,
     int64_t axis) {
-  static const std::string fn_name = "quantize_tensor_per_channel_affine";
+  static constexpr auto fn_name = "quantize_tensor_per_channel_affine";
 
   checkRoundingMode(fn_name);
   checkFloatTensor(fn_name, rtensor);
-  checkCPUTensor(fn_name, rtensor);
   checkSameDevice(fn_name, rtensor, qtensor);
   checkSameSize(fn_name, qtensor, rtensor);
 
   AT_DISPATCH_QINT_TYPES(qtensor.scalar_type(), fn_name, [&]() {
     checkQuantizedTensor<scalar_t>(fn_name, qtensor);
-    checkZeroPoints<underlying_t>(fn_name, zero_points);
+    if(qtensor.device().type() != c10::DeviceType::CUDA){
+      checkZeroPoints<underlying_t>(fn_name, zero_points);
+    }  // for cuda, this check will occur in the actual cuda function
   });
 
   TORCH_CHECK(
@@ -186,12 +178,11 @@ Tensor& quantize_tensor_per_channel_float_qparams(
     Tensor scales,
     Tensor zero_points,
     int64_t axis) {
-  static const std::string fn_name =
+  static constexpr auto fn_name =
       "quantize_tensor_per_channel_float_qparams";
 
   checkRoundingMode(fn_name);
   checkFloatTensor(fn_name, rtensor);
-  checkCPUTensor(fn_name, rtensor);
   checkSameDevice(fn_name, rtensor, qtensor);
   checkSameSize(fn_name, qtensor, rtensor);
 
@@ -225,7 +216,7 @@ Tensor& dequantize_tensor_per_tensor_affine(
     Tensor& rtensor,
     double scale,
     int64_t zero_point) {
-  static const std::string fn_name = "dequantize_tensor_per_tensor_affine";
+  static constexpr auto fn_name = "dequantize_tensor_per_tensor_affine";
   checkFloatTensor(fn_name, rtensor);
   checkSameDevice(fn_name, rtensor, qtensor);
   checkSameSize(fn_name, qtensor, rtensor);
@@ -252,16 +243,17 @@ Tensor& dequantize_tensor_per_channel_affine(
     Tensor scales,
     Tensor zero_points,
     int64_t axis) {
-  static const std::string fn_name = "dequantize_tensor_per_channel_affine";
+  static constexpr auto fn_name = "dequantize_tensor_per_channel_affine";
 
   checkFloatTensor(fn_name, rtensor);
-  checkCPUTensor(fn_name, rtensor);
   checkSameDevice(fn_name, rtensor, qtensor);
   checkSameSize(fn_name, qtensor, rtensor);
 
   AT_DISPATCH_QINT_TYPES(qtensor.scalar_type(), fn_name, [&]() {
     checkQuantizedTensor<scalar_t>(fn_name, qtensor);
-    checkZeroPoints<underlying_t>(fn_name, zero_points);
+    if(qtensor.device().type() != c10::DeviceType::CUDA){
+      checkZeroPoints<underlying_t>(fn_name, zero_points);
+    }  // for cuda, this check will occur in the actual cuda function
   });
 
   TORCH_CHECK(
@@ -290,10 +282,9 @@ Tensor& dequantize_tensor_per_channel_float_qparams(
     Tensor scales,
     Tensor zero_points,
     int64_t axis) {
-  static const std::string fn_name = "dequantize_tensor_per_channel_affine";
+  static constexpr auto fn_name = "dequantize_tensor_per_channel_affine";
 
   checkFloatTensor(fn_name, rtensor);
-  checkCPUTensor(fn_name, rtensor);
   checkSameDevice(fn_name, rtensor, qtensor);
   checkSameSize(fn_name, qtensor, rtensor);
 

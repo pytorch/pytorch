@@ -3,12 +3,9 @@
 namespace caffe2 {
 namespace {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(ReduceTailSum, ReduceTailSumOp<float, CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(RowMul, RowMulOp<float, CPUContext>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(ReduceTailSum)
     .NumInputs(1, 1)
     .NumOutputs(1)
@@ -18,7 +15,6 @@ Reduce the tailing dimensions
     .Input(0, "mat", "The matrix")
     .Output(0, "output", "Output");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(RowMul)
     .NumInputs(2, 2)
     .NumOutputs(1)
@@ -49,7 +45,6 @@ class GetRowMulGradient : public GradientMakerBase {
             vector<string>{GI(1)})};
   }
 };
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(RowMul, GetRowMulGradient);
 
 } // namespace

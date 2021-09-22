@@ -10,6 +10,7 @@ import abc
 import functools
 import json
 import os
+import signal
 import socket
 import time
 import traceback
@@ -24,7 +25,11 @@ import torch.distributed.elastic.utils.store as store_util
 from torch.distributed import Store
 from torch.distributed.elastic.events import Event, EventSource, record
 from torch.distributed.elastic.metrics import prof, put_metric
-from torch.distributed.elastic.multiprocessing import ProcessFailure, Std
+from torch.distributed.elastic.multiprocessing import (
+    ProcessFailure,
+    Std,
+    SignalException,
+)
 from torch.distributed.elastic.utils.logging import get_logger
 
 
@@ -155,7 +160,7 @@ class Worker:
 
         #  rank of the worker among all the workers with the same role
         #  across all ``agent`` instances.
-        #  Global rank is not stable between re-rendezvous.
+        #  Role rank is not stable between re-rendezvous.
         self.role_rank: int = role_rank
 
         # total number of workers (globally). Due to elasticity
@@ -488,9 +493,12 @@ class SimpleElasticAgent(ElasticAgent):
         raise NotImplementedError()
 
     @abc.abstractmethod
-    def _shutdown(self) -> None:
+    def _shutdown(self, death_sig: signal.Signals = signal.SIGTERM) -> None:
         """
         Cleans up any resources that were allocated during the agent's work.
+
+        Args:
+            death_sig: Signal to send to the child process, SIGTERM is default
         """
         raise NotImplementedError()
 
@@ -696,16 +704,23 @@ class SimpleElasticAgent(ElasticAgent):
     @prof
     def run(self, role: str = DEFAULT_ROLE) -> RunResult:
         start_time = time.monotonic()
+        shutdown_called: bool = False
         try:
             result = self._invoke_run(role)
             self._total_execution_time = int(time.monotonic() - start_time)
             self._record_metrics(result)
             self._record_worker_events(result)
             return result
+        except SignalException as e:
+            log.warning(f"Received {e.sigval} death signal, shutting down workers")
+            self._shutdown(e.sigval)
+            shutdown_called = True
+            raise
         finally:
+            if not shutdown_called:
+                self._shutdown()
             # record the execution time in case there were any exceptions during run.
             self._total_execution_time = int(time.monotonic() - start_time)
-            self._shutdown()
 
     def get_agent_status_event(self, state: WorkerState) -> Event:
         raw_error = traceback.format_exc() if state == WorkerState.FAILED else None
@@ -891,6 +906,9 @@ class SimpleElasticAgent(ElasticAgent):
             log.info(
                 f"Done waiting for other agents. Elapsed: {time.time() - start} seconds"
             )
+        except SignalException as e:
+            log.warn(f"Got termination signal: {e.sigval}")
+            raise
         except Exception:
             log.exception(
                 f"Error waiting on exit barrier. Elapsed: {time.time() - start} seconds"

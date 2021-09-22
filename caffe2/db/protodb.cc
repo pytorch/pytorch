@@ -44,7 +44,7 @@ class ProtoDBTransaction : public Transaction {
     // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
     Commit();
   }
-  void Put(const string& key, const string& value) override {
+  void Put(const string& key, string&& value) override {
     if (existing_names_.count(key)) {
       CAFFE_THROW("An item with key ", key, " already exists.");
     }
@@ -104,10 +104,8 @@ class ProtoDB : public DB {
   string source_;
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CAFFE2_DB(ProtoDB, ProtoDB);
 // For lazy-minded, one can also call with lower-case name.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CAFFE2_DB(protodb, ProtoDB);
 
 }  // namespace db

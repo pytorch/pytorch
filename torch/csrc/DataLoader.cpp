@@ -99,7 +99,6 @@ static PyObject *THPModule_setWorkerSignalHandlers(PyObject *module, PyObject *a
   END_HANDLE_TH_ERRORS
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static std::map<int64_t, std::set<pid_t>> worker_pids = {};
 
 static PyObject *THPModule_errorIfAnyWorkerFails(PyObject *module, PyObject *noargs) {

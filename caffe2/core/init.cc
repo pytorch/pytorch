@@ -3,9 +3,9 @@
 #include "caffe2/core/scope_guard.h"
 
 #include <iomanip>
+#include <iostream>
 #include <mutex>
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_bool(
     caffe2_version,
     false,

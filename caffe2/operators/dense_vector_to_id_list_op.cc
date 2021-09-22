@@ -2,10 +2,8 @@
 
 namespace caffe2 {
 namespace {
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(DenseVectorToIdList, DenseVectorToIdListOp<CPUContext>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(DenseVectorToIdList)
     .NumInputs(1)
     .NumOutputs(2)
@@ -26,7 +24,6 @@ and out_lengths are the number of non-zeros entries in each row.
     .Input(0, "values", "A data blob of dense vectors")
     .Output(0, "out_lengths", "Lengths of the sparse feature")
     .Output(1, "out_values", "Values of the sparse feature");
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 NO_GRADIENT(DenseVectorToIdList);
 } // namespace
 } // namespace caffe2

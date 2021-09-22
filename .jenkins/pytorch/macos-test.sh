@@ -7,7 +7,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/macos-common.sh"
 export PYTORCH_TEST_SKIP_NOARCH=1
 
 conda install -y six
-pip install -q hypothesis "librosa>=0.6.2" "numba<=0.49.1" psutil
+pip install -q hypothesis "expecttest==0.1.3" "librosa>=0.6.2" "numba<=0.49.1" psutil "scipy==1.6.3"
 
 # TODO move this to docker
 pip install unittest-xml-reporting pytest
@@ -20,13 +20,7 @@ export CMAKE_PREFIX_PATH=${WORKSPACE_DIR}/miniconda3/
 
 # Test PyTorch
 if [ -z "${IN_CI}" ]; then
-  if [[ "${BUILD_ENVIRONMENT}" == *cuda9.2* ]]; then
-    # Eigen gives "explicit specialization of class must precede its first use" error
-    # when compiling with Xcode 9.1 toolchain, so we have to use Xcode 8.2 toolchain instead.
-    export DEVELOPER_DIR=/Library/Developer/CommandLineTools
-  else
-    export DEVELOPER_DIR=/Applications/Xcode9.app/Contents/Developer
-  fi
+  export DEVELOPER_DIR=/Applications/Xcode9.app/Contents/Developer
 fi
 
 # Download torch binaries in the test jobs

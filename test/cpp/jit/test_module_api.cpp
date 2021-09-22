@@ -45,7 +45,6 @@ static void import_libs(
   si.loadType(QualifiedName(class_name));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ModuleAPITest, MethodRunAsync) {
   // Module m("m");
   // m.define(R"(
@@ -84,7 +83,6 @@ TEST(ModuleAPITest, MethodRunAsync) {
   ASSERT_GE(counter, 2);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ModuleAPITest, Clone) {
   auto cu = std::make_shared<CompilationUnit>();
   // creating child module
@@ -114,7 +112,6 @@ TEST(ModuleAPITest, Clone) {
   ASSERT_EQ(Module(p2.attr("c2").toObject()).attr(attr_name).toInt(), 3);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ModuleAPITest, CloneWithModuleInterface) {
   auto cu = std::make_shared<CompilationUnit>();
 
@@ -159,7 +156,6 @@ TEST(ModuleAPITest, CloneWithModuleInterface) {
   ASSERT_NE(clonedMod.type(), parentMod.type());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ModuleAPITest, Copy) {
   auto cu = std::make_shared<CompilationUnit>();
   auto cls = ClassType::create("foo.bar", cu, true);
@@ -189,7 +185,6 @@ TEST(ModuleAPITest, Copy) {
   ASSERT_EQ(m3.attr(attr_name).toInt(), 3);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ModuleAPITest, DeepCopy) {
   auto cu = std::make_shared<CompilationUnit>();
   auto cls = ClassType::create("foo.bar", cu, true);
@@ -249,7 +244,6 @@ TEST(ModuleAPITest, DeepCopy) {
   ASSERT_TRUE(t1.equal(t3));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ModuleAPITest, DeepCopyString) {
   auto cu = std::make_shared<CompilationUnit>();
   auto cls = ClassType::create("foo.bar", cu, true);
@@ -266,7 +260,6 @@ TEST(ModuleAPITest, DeepCopyString) {
   ASSERT_EQ(copied.attr(attr1).toString()->string(), original_str);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ModuleAPITest, DeepCopyPreservesAliasing) {
   // check deepcopy preserves aliasing
   auto cu = std::make_shared<CompilationUnit>();
@@ -304,7 +297,6 @@ TEST(ModuleAPITest, DeepCopyPreservesAliasing) {
   ASSERT_TRUE(copied_attr3.isAliasOf(copied_attr4));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ModuleAPITest, Constants) {
   auto cu = std::make_shared<CompilationUnit>();
   auto cls = ClassType::create("foo.bar", cu, true);
@@ -321,7 +313,6 @@ TEST(ModuleAPITest, Constants) {
   ASSERT_EQ(m.attr(const_name).toInt(), 3);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ModuleAPITest, Parameters) {
   auto cu = std::make_shared<CompilationUnit>();
   auto cls = ClassType::create("foo.bar", cu, true);
@@ -341,7 +332,6 @@ TEST(ModuleAPITest, Parameters) {
   ASSERT_TRUE(m.hasattr("none_param2"));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ModuleAPITest, Define) {
   Module m("m");
   m.register_parameter("foo", torch::ones({}), false);
@@ -353,7 +343,6 @@ TEST(ModuleAPITest, Define) {
   AT_ASSERT(result.toTensor().item<float>() == 6);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ModuleAPITest, Freezing) {
   Module m("m");
   m.register_parameter("foo", torch::ones({}), false);
@@ -371,7 +360,6 @@ TEST(ModuleAPITest, Freezing) {
   testing::FileCheck().check_not("GetAttr")->run(*forward_g);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ModuleAPITest, To_CUDA) {
   Module m("test");
   {

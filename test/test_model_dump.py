@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
 import sys
+import os
 import io
+import functools
+import tempfile
+import urllib
 import unittest
 
 import torch
 import torch.utils.model_dump
 import torch.utils.mobile_optimizer
-from torch.testing._internal.common_utils import TestCase, run_tests
+from torch.testing._internal.common_utils import TestCase, run_tests, IS_WINDOWS
 from torch.testing._internal.common_quantized import supported_qengines
 
 
@@ -55,9 +59,34 @@ class ModelWithLists(torch.nn.Module):
         return arg
 
 
+def webdriver_test(testfunc):
+    @functools.wraps(testfunc)
+    def wrapper(self, *args, **kwds):
+        self.needs_resources()
+
+        if os.environ.get("RUN_WEBDRIVER") != "1":
+            self.skipTest("Webdriver not requested")
+        from selenium import webdriver
+
+        for driver in [
+                "Firefox",
+                "Chrome",
+        ]:
+            with self.subTest(driver=driver):
+                wd = getattr(webdriver, driver)()
+                testfunc(self, wd, *args, **kwds)
+                wd.close()
+
+    return wrapper
+
+
 class TestModelDump(TestCase):
-    @unittest.skipIf(sys.version_info < (3, 7), "importlib.resources was new in 3.7")
+    def needs_resources(self):
+        if sys.version_info < (3, 7):
+            self.skipTest("importlib.resources was new in 3.7")
+
     def test_inline_skeleton(self):
+        self.needs_resources()
         skel = torch.utils.model_dump.get_inline_skeleton()
         assert "unpkg.org" not in skel
         assert "src=" not in skel
@@ -69,6 +98,22 @@ class TestModelDump(TestCase):
         info = torch.utils.model_dump.get_model_info(buf)
         assert info is not None
 
+    def open_html_model(self, wd, model, extra_files=None):
+        buf = io.BytesIO()
+        torch.jit.save(model, buf, _extra_files=extra_files)
+        info = torch.utils.model_dump.get_model_info(buf)
+        skeleton = torch.utils.model_dump.get_inline_skeleton()
+        page = torch.utils.model_dump.burn_in_info(skeleton, info)
+        wd.get("data:text/html;charset=utf-8," + urllib.parse.quote(page))
+
+    def open_section_and_get_body(self, wd, name):
+        container = wd.find_element_by_xpath(f"//div[@data-hider-title='{name}']")
+        caret = container.find_element_by_class_name("caret")
+        if container.get_attribute("data-shown") != "true":
+            caret.click()
+        content = container.find_element_by_tag_name("div")
+        return content
+
     def test_scripted_model(self):
         model = torch.jit.script(SimpleModel())
         self.do_dump_model(model)
@@ -76,6 +121,37 @@ class TestModelDump(TestCase):
     def test_traced_model(self):
         model = torch.jit.trace(SimpleModel(), torch.zeros(2, 16))
         self.do_dump_model(model)
+
+    def test_main(self):
+        self.needs_resources()
+        if IS_WINDOWS:
+            # I was getting tempfile errors in CI.  Just skip it.
+            self.skipTest("Disabled on Windows.")
+
+        with tempfile.NamedTemporaryFile() as tf:
+            torch.jit.save(torch.jit.script(SimpleModel()), tf)
+
+            stdout = io.StringIO()
+            torch.utils.model_dump.main(
+                [
+                    None,
+                    "--style=json",
+                    tf.name,
+                ],
+                stdout=stdout)
+            self.assertRegex(stdout.getvalue(), r'\A{.*SimpleModel')
+
+            stdout = io.StringIO()
+            torch.utils.model_dump.main(
+                [
+                    None,
+                    "--style=html",
+                    tf.name,
+                ],
+                stdout=stdout)
+            self.assertRegex(
+                stdout.getvalue().replace("\n", " "),
+                r'\A<!DOCTYPE.*SimpleModel.*componentDidMount')
 
     def get_quant_model(self):
         fmodel = QuantModel().eval()
@@ -108,6 +184,40 @@ class TestModelDump(TestCase):
     def test_invalid_json(self):
         model = torch.jit.script(SimpleModel())
         self.do_dump_model(model, extra_files={"foo.json": "{"})
+
+    @webdriver_test
+    def test_memory_computation(self, wd):
+        def check_memory(model, expected):
+            self.open_html_model(wd, model)
+            memory_table = self.open_section_and_get_body(wd, "Tensor Memory")
+            device = memory_table.find_element_by_xpath("//table/tbody/tr[1]/td[1]").text
+            self.assertEqual("cpu", device)
+            memory_usage_str = memory_table.find_element_by_xpath("//table/tbody/tr[1]/td[2]").text
+            self.assertEqual(expected, int(memory_usage_str))
+
+        simple_model_memory = (
+            # First layer, including bias.
+            64 * (16 + 1) +
+            # Second layer, including bias.
+            8 * (64 + 1)
+            # 32-bit float
+        ) * 4
+
+        check_memory(torch.jit.script(SimpleModel()), simple_model_memory)
+
+        # The same SimpleModel instance appears twice in this model.
+        # The tensors will be shared, so ensure no double-counting.
+        a_simple_model = SimpleModel()
+        check_memory(
+            torch.jit.script(
+                torch.nn.Sequential(a_simple_model, a_simple_model)),
+            simple_model_memory)
+
+        # The freezing process will move the weight and bias
+        # from data to constants.  Ensure they are still counted.
+        check_memory(
+            torch.jit.freeze(torch.jit.script(SimpleModel()).eval()),
+            simple_model_memory)
 
 
 if __name__ == '__main__':

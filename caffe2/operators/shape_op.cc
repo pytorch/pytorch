@@ -2,10 +2,8 @@
 
 namespace caffe2 {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(Shape, ShapeOp<CPUContext>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Shape)
     .NumInputs(1)
     .NumOutputs(1)
@@ -75,7 +73,6 @@ shape: [2 3]
     .Input(0,"X", "*(type: Tensor)* Input tensor.")
     .Output(0,"shape", "*(type: Tensor)* Output tensor containing shape of input tensor.");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(Shape);
 
 } // namespace caffe2

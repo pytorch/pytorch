@@ -36,7 +36,7 @@ void remainder_kernel_cuda(TensorIteratorBase& iter) {
   }
 }
 
-void fmod_kernel_cuda(TensorIterator& iter) {
+void fmod_kernel_cuda(TensorIteratorBase& iter) {
   if (isIntegralType(iter.common_dtype(), /*includeBool*/ false)) {
     AT_DISPATCH_INTEGRAL_TYPES(iter.common_dtype(), "fmod_cuda", [&]() {
       gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {

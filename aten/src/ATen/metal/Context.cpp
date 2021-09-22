@@ -6,7 +6,6 @@
 namespace at {
 namespace metal {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::atomic<const MetalInterface*> g_metal_impl_registry;
 
 MetalImplRegistrar::MetalImplRegistrar(MetalInterface* impl) {

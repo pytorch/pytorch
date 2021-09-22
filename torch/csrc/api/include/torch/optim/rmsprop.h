@@ -34,8 +34,7 @@ struct TORCH_API RMSpropOptions : public OptimizerCloneableOptions<RMSpropOption
   void serialize(torch::serialize::InputArchive& archive) override;
   void serialize(torch::serialize::OutputArchive& archive) const override;
   TORCH_API friend bool operator==(const RMSpropOptions& lhs, const RMSpropOptions& rhs);
-  // NOLINTNEXTLINE(modernize-use-override)
-  ~RMSpropOptions() = default;
+  ~RMSpropOptions() override = default;
   double get_lr() const override;
   void set_lr(const double lr) override;
 };
@@ -50,8 +49,7 @@ struct TORCH_API RMSpropParamState : public OptimizerCloneableParamState<RMSprop
   void serialize(torch::serialize::InputArchive& archive) override;
   void serialize(torch::serialize::OutputArchive& archive) const override;
   TORCH_API friend bool operator==(const RMSpropParamState& lhs, const RMSpropParamState& rhs);
-  // NOLINTNEXTLINE(modernize-use-override)
-  ~RMSpropParamState() = default;
+  ~RMSpropParamState() override = default;
 };
 
 class TORCH_API RMSprop : public Optimizer {

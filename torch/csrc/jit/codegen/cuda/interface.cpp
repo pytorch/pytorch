@@ -10,7 +10,6 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static std::atomic<bool> cuda_fusion_guard_mode{true};
 
 std::atomic<bool>& getCudaFusionGuardMode() {
@@ -179,19 +178,17 @@ bool complyWith(
 
 namespace {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 RegisterOperators reg_fusion({
     Operator(
         prim::CudaFusionGroup,
         [](const Node* node) -> Operation {
-          return [node](Stack* stack) {
-            fuser::cuda::runFusionGroup(node, *stack);
+          return [node](Stack& stack) {
+            fuser::cuda::runFusionGroup(node, stack);
           };
         },
         aliasAnalysisSpecialCase()),
 });
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 RegisterOperators reg_guard({
     Operator(
         "prim::CudaFusionGuard(...) -> bool",
@@ -199,7 +196,7 @@ RegisterOperators reg_guard({
         // if we would ever return refined tensor, which would change aliasing
         // analysis, we should update aliasdb pass.
         [](const Node* node) -> Operation {
-          return [node](Stack* stack) {
+          return [node](Stack& stack) {
             // TODO: check latency here!!!!
             std::vector<TypePtr> types = node->tys(attr::types);
             const auto num_inputs = types.size();

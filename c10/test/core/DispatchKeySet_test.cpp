@@ -6,7 +6,6 @@
 
 using namespace c10;
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DispatchKeySet, Empty) {
   DispatchKeySet empty_set;
   for (uint8_t i = 1; i < static_cast<uint8_t>(DispatchKey::NumDispatchKeys);
@@ -20,7 +19,6 @@ TEST(DispatchKeySet, Empty) {
   ASSERT_EQ(empty_set.highestPriorityTypeId(), DispatchKey::Undefined);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DispatchKeySet, Singleton) {
   for (uint8_t i = 1; i < static_cast<uint8_t>(DispatchKey::NumDispatchKeys);
        i++) {
@@ -37,7 +35,6 @@ TEST(DispatchKeySet, Singleton) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DispatchKeySet, Doubleton) {
   for (uint8_t i = 1; i < static_cast<uint8_t>(DispatchKey::NumDispatchKeys);
        i++) {
@@ -56,7 +53,6 @@ TEST(DispatchKeySet, Doubleton) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DispatchKeySet, Full) {
   DispatchKeySet full(DispatchKeySet::FULL);
   for (uint8_t i = 1; i < static_cast<uint8_t>(DispatchKey::NumDispatchKeys);
@@ -66,7 +62,6 @@ TEST(DispatchKeySet, Full) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DispatchKeySet, IteratorBasicOps) {
   DispatchKeySet empty_set;
   DispatchKeySet full_set(DispatchKeySet::FULL);
@@ -85,7 +80,6 @@ TEST(DispatchKeySet, IteratorBasicOps) {
   ASSERT_TRUE(full_set.begin() != ++full_set.begin());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DispatchKeySet, IteratorEmpty) {
   DispatchKeySet empty_set;
   uint8_t i = 0;
@@ -96,7 +90,6 @@ TEST(DispatchKeySet, IteratorEmpty) {
   ASSERT_EQ(i, 0);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DispatchKeySet, IteratorFull) {
   DispatchKeySet full_set(DispatchKeySet::FULL);
   uint8_t i = 0;
@@ -109,7 +102,6 @@ TEST(DispatchKeySet, IteratorFull) {
   ASSERT_EQ(i, static_cast<uint8_t>(DispatchKey::NumDispatchKeys) - 1);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DispatchKeySet, IteratorRangeFull) {
   DispatchKeySet full_set(DispatchKeySet::FULL);
   uint8_t i = 0;
@@ -122,7 +114,6 @@ TEST(DispatchKeySet, IteratorRangeFull) {
   ASSERT_EQ(i, static_cast<uint8_t>(DispatchKey::NumDispatchKeys) - 1);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DispatchKeySet, SpecificKeys) {
   DispatchKeySet keyset({
       static_cast<DispatchKey>(0), // Undefined should be ignored
@@ -145,7 +136,6 @@ TEST(DispatchKeySet, SpecificKeys) {
       visited_keys.find(static_cast<DispatchKey>(15)) != visited_keys.end());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DispatchKeySet, FailAtEndIterator) {
   DispatchKeySet full_set(DispatchKeySet::FULL);
   uint64_t raw_repr = full_set.raw_repr();

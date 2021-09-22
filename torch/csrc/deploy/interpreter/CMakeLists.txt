@@ -6,6 +6,7 @@ SET(PYTORCH_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../../../")
 # Build cpython
 SET(PYTHON_INSTALL_DIR "${INTERPRETER_DIR}/cpython")
 SET(PYTHON_INC_DIR "${PYTHON_INSTALL_DIR}/include/python3.8")
+SET(PYTHON_INC_DIR "${PYTHON_INSTALL_DIR}/include/python3.8" PARENT_SCOPE)
 SET(PYTHON_LIB "${PYTHON_INSTALL_DIR}/lib/libpython3.8.a")
 SET(PYTHON_BIN "${PYTHON_INSTALL_DIR}/bin/python3")
 ExternalProject_Add(
@@ -14,11 +15,12 @@ ExternalProject_Add(
   GIT_REPOSITORY https://github.com/python/cpython.git
   GIT_TAG v3.8.6
   UPDATE_COMMAND ""
+  PATCH_COMMAND git apply ${CMAKE_CURRENT_SOURCE_DIR}/cpython_patch.diff
   BUILD_IN_SOURCE True
-  CONFIGURE_COMMAND CFLAGS=-fPIC CPPFLAGS=-fPIC <SOURCE_DIR>/configure --prefix ${PYTHON_INSTALL_DIR}
+  CONFIGURE_COMMAND PYTHON_INSTALL_DIR=${PYTHON_INSTALL_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/configure_cpython.sh
   BUILD_COMMAND CFLAGS=-fPIC CPPFLAGS=-fPIC make -j8
   INSTALL_COMMAND make install
-  BYPRODUCTS ${PYTHON_MODULES} ${PYTHON_LIB} ${PYTHON_BIN}
+  BYPRODUCTS ${PYTHON_MODULES} ${PYTHON_LIB} ${PYTHON_BIN} ${PYTHON_INSTALL_DIR}/lib/libssl.a ${PYTHON_INSTALL_DIR}/lib/libcrypto.a
   LOG_OUTPUT_ON_FAILURE True
 )
 
@@ -83,25 +85,24 @@ target_include_directories(torch_python_obj BEFORE PRIVATE ${PYTHON_INC_DIR})
 add_library(torch_python_static STATIC $<TARGET_OBJECTS:torch_python_obj>)
 # Build the interpreter lib, designed to be standalone and dlopened
 # We bake the python and torch_python binding objs into libinterpreter
-set(LINKER_SCRIPT "${INTERPRETER_DIR}/hide_symbols.script")
 set(INTERPRETER_LIB_SOURCES
   ${INTERPRETER_DIR}/interpreter_impl.cpp
+  ${INTERPRETER_DIR}/import_find_sharedfuncptr.cpp
   ${FROZEN_FILES}
   ${LINKER_SCRIPT}
 )
 add_library(torch_deployinterpreter ${INTERPRETER_LIB_SOURCES} ${LINKER_SCRIPT})
-set_property(TARGET torch_deployinterpreter APPEND_STRING PROPERTY
-             LINK_FLAGS " -Wl,--version-script=${LINKER_SCRIPT}")
 # need to ensure headers are present before any .cpp in interpreter are compiled,
 # but cpp themselves don't clearly depend on cpython so there is a race otherwise
 add_dependencies(torch_deployinterpreter cpython)
 add_dependencies(torch_python_obj cpython)
-target_compile_options(
-    torch_deployinterpreter PRIVATE
-    -fvisibility=hidden
-)
+if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
+  target_compile_options(torch_deployinterpreter PRIVATE -fno-gnu-unique)
+endif()
+
 target_include_directories(torch_deployinterpreter PRIVATE ${INTERPRETER_DIR})
-target_include_directories(torch_deployinterpreter PUBLIC ${PYTHON_INC_DIR})
+target_include_directories(torch_deployinterpreter BEFORE PUBLIC ${PYTHON_INC_DIR})
+
 target_link_libraries(torch_deployinterpreter PRIVATE ${PYTHON_LIB} ${PYTHON_STDLIB} torch_python_static)
-target_link_libraries(torch_deployinterpreter PRIVATE crypt crypto ssl pthread dl util m z ffi lzma readline nsl ncursesw panelw) # for python builtins
 target_link_libraries(torch_deployinterpreter PRIVATE fmt::fmt-header-only protobuf::libprotobuf-lite)
+target_link_libraries(torch_deployinterpreter PRIVATE ${PYTHON_INSTALL_DIR}/lib/libssl.a ${PYTHON_INSTALL_DIR}/lib/libcrypto.a)

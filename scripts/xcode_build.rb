@@ -19,6 +19,9 @@ option_parser = OptionParser.new do |opts|
  opts.on('-t', '--team_id ', 'development team ID') { |value|
     options[:team_id] = value
  }
+ opts.on('-f', '--framework ', 'system frameworks') { |value|
+    options[:framework] = value.split(',')
+}
 end.parse!
 puts options.inspect
 
@@ -57,6 +60,17 @@ for lib in libs do
     if File.exist?(path)
         libref = project.frameworks_group.new_file(path)
         target.frameworks_build_phases.add_file_reference(libref)
+    end
+end
+# link system frameworks
+frameworks = options[:framework]
+if frameworks
+    frameworks.each do |framework|
+        path = "System/Library/Frameworks/#{framework}.framework"
+        framework_ref = project.frameworks_group.new_reference(path)
+        framework_ref.name = "#{framework}.framework"
+        framework_ref.source_tree = 'SDKROOT'
+        target.frameworks_build_phases.add_file_reference(framework_ref)
     end
 end
 project.save

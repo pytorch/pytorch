@@ -167,15 +167,12 @@ bool UpsampleBilinearGradientOp<float, CPUContext>::RunOnDevice() {
   return true;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(UpsampleBilinear, UpsampleBilinearOp<float, CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     UpsampleBilinearGradient,
     UpsampleBilinearGradientOp<float, CPUContext>);
 
 // Input: X, output: Y
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(UpsampleBilinear)
     .NumInputs(1, 2)
     .NumOutputs(1)
@@ -196,7 +193,6 @@ output_height = floor(output_height * height_scale)
     .Output(0, "Y", "Output tensor");
 
 // Input: dY, output: dX
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(UpsampleBilinearGradient)
     .NumInputs(2, 3)
     .NumOutputs(1)
@@ -222,7 +218,6 @@ class GetUpsampleBilinearGradient : public GradientMakerBase {
         vector<string>{GI(0)});
   }
 };
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(UpsampleBilinear, GetUpsampleBilinearGradient);
 
 } // namespace caffe2

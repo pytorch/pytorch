@@ -11,6 +11,8 @@
 #include <torch/csrc/jit/mobile/import.h>
 #include <torch/csrc/jit/mobile/model_compatibility.h>
 #include <torch/csrc/jit/mobile/module.h>
+#include <torch/csrc/jit/mobile/parse_bytecode.h>
+#include <torch/csrc/jit/mobile/parse_operators.h>
 #include <torch/csrc/jit/mobile/runtime_compatibility.h>
 #include <torch/csrc/jit/serialization/export.h>
 #include <torch/csrc/jit/serialization/import.h>
@@ -23,7 +25,6 @@
 namespace torch {
 namespace jit {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LiteInterpreterTest, UpsampleNearest2d) {
   Module m("m");
   m.define(R"(
@@ -47,7 +48,6 @@ TEST(LiteInterpreterTest, UpsampleNearest2d) {
   ASSERT_TRUE(resd.equal(refd));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LiteInterpreterTest, CheckAttrAccess) {
   Module m("m");
   m.register_attribute("mobile_optimized", BoolType::get(), true);
@@ -112,7 +112,6 @@ TEST(LiteInterpreterTest, MethodInvocation) { // NOLINT (use =delete in gtest)
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LiteInterpreterTest, Conv) {
   auto s = std::getenv("PYTORCH_TEST_WITH_TSAN");
   if (s && strcmp(s, "1") == 0)
@@ -146,7 +145,6 @@ TEST(LiteInterpreterTest, Conv) {
       outputref[0][0][0][0].item<int>() == output[0][0][0][0].item<int>());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LiteInterpreterTest, Inline) {
   Module m("m");
   m.define(R"JIT(
@@ -167,7 +165,6 @@ TEST(LiteInterpreterTest, Inline) {
   AT_ASSERT(output.toTensor().item<float>() == 7.0);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LiteInterpreterTest, Tuple) {
   Module m("m");
   m.define(R"JIT(
@@ -186,7 +183,6 @@ TEST(LiteInterpreterTest, Tuple) {
   AT_ASSERT(output.toTuple()->elements()[1].toInt() == 2);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LiteInterpreterTest, Dict) {
   Module m("m");
   m.define(R"JIT(
@@ -205,7 +201,6 @@ TEST(LiteInterpreterTest, Dict) {
   AT_ASSERT(output.toGenericDict().at("result").toTensor().item().toInt() == 2);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LiteInterpreterTest, PrimOverload) {
   /*
   // temporarily disabled
@@ -225,7 +220,6 @@ TEST(LiteInterpreterTest, PrimOverload) {
   */
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LiteInterpreterTest, Prim) {
   Module m("m");
   m.define(R"JIT(
@@ -253,7 +247,6 @@ TEST(LiteInterpreterTest, Prim) {
   AT_ASSERT(resi == refi);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LiteInterpreterTest, PrimScalar) {
   Module m("m");
   m.define(R"JIT(
@@ -281,7 +274,6 @@ TEST(LiteInterpreterTest, PrimScalar) {
   AT_ASSERT(resi == refi);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LiteInterpreterTest, LoadOrigJit) {
   Module m("m");
   m.register_parameter("foo", torch::ones({}), false);
@@ -295,7 +287,6 @@ TEST(LiteInterpreterTest, LoadOrigJit) {
   ASSERT_THROWS_WITH_MESSAGE(_load_for_mobile(ss), "file not found");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LiteInterpreterTest, WrongMethodName) {
   Module m("m");
   m.register_parameter("foo", torch::ones({}), false);
@@ -314,7 +305,6 @@ TEST(LiteInterpreterTest, WrongMethodName) {
       bc.get_method("forward")(inputs), "is not defined");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LiteInterpreterTest, SetState) {
   Module m("m");
   m.register_parameter("foo", torch::ones({}), false);
@@ -414,7 +404,6 @@ struct TestModuleResolver : public Resolver {
 };
 } // namespace
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LiteInterpreterTest, BuiltinClass) {
   script::Module m("m");
 
@@ -447,7 +436,6 @@ TEST(LiteInterpreterTest, BuiltinClass) {
   AT_ASSERT(str == expected);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LiteInterpreterTest, BuiltinFunction) {
   script::Module m("m");
   auto custom_class_obj =
@@ -469,144 +457,7 @@ TEST(LiteInterpreterTest, BuiltinFunction) {
   AT_ASSERT(str == expected);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(LiteInterpreterTest, ModuleInfoBasic) {
-  Module m("M");
-  m.define(R"JIT(
-    def forward(self, x):
-      return 2 * x
-  )JIT");
-
-  std::stringstream ss;
-  m._save_for_mobile(ss, {}, true);
-  mobile::Module bc = _load_for_mobile(ss);
-
-  std::unordered_set<std::string> module_debug_info_set;
-  size_t pc = 0;
-  while (true) {
-    try {
-      std::string module_info = bc.get_forward_method_debug_info(pc);
-      if (!module_info.empty() &&
-          (module_info.find("debug_handle") == std::string::npos)) {
-        module_debug_info_set.insert(module_info);
-      }
-      ++pc;
-    } catch (const std::exception& e) {
-      break;
-    }
-  }
-
-  AT_ASSERT(module_debug_info_set.count("top(M).aten::mul"));
-}
-
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(LiteInterpreterTest, NotSaveModuleInfo) {
-  Module m("M");
-  m.define(R"JIT(
-    def forward(self, x):
-      return x + 5
-  )JIT");
-
-  std::stringstream ss;
-  m._save_for_mobile(ss);
-  mobile::Module bc = _load_for_mobile(ss);
-
-  size_t pc = 0;
-  while (true) {
-    try {
-      std::string module_info = bc.get_forward_method_debug_info(pc);
-      AT_ASSERT(
-          module_info.empty() ||
-          (module_info.find("debug_handle") != std::string::npos));
-      ++pc;
-    } catch (const std::exception& e) {
-      break;
-    }
-  }
-}
-
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(LiteInterpreterTest, OneSubmoduleModuleInfo) {
-  Module a("A");
-  a.define(R"JIT(
-    def forward(self, x):
-      return 2 * x + 5
-  )JIT");
-  Module b("B");
-  b.register_module("A0", a);
-  b.define(R"JIT(
-    def forward(self, x):
-      return self.A0.forward(x) + 1
-  )JIT");
-
-  std::stringstream ss;
-  b._save_for_mobile(ss, {}, true);
-  mobile::Module bc = _load_for_mobile(ss);
-
-  std::set<std::string> module_debug_info_set;
-  size_t pc = 0;
-  while (true) {
-    try {
-      std::string module_info = bc.get_forward_method_debug_info(pc);
-      if (!module_info.empty() &&
-          (module_info.find("debug_handle") == std::string::npos)) {
-        module_debug_info_set.insert(module_info);
-      }
-      ++pc;
-    } catch (const std::exception& e) {
-      break;
-    }
-  }
-
-  AT_ASSERT(module_debug_info_set.count("top(B).aten::add"));
-  AT_ASSERT(module_debug_info_set.count("top(B).A0(A).aten::add"));
-  AT_ASSERT(module_debug_info_set.count("top(B).A0(A).aten::mul"));
-}
-
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(LiteInterpreterTest, TwoSubmodulesModuleInfo) {
-  Module a("A");
-  a.define(R"JIT(
-    def forward(self, x):
-      return x + 1
-  )JIT");
-  Module b("B");
-  b.define(R"JIT(
-    def forward(self, x):
-      return x + 2
-  )JIT");
-  Module c("C");
-  c.register_module("A0", a);
-  c.register_module("B0", b);
-  c.define(R"JIT(
-    def forward(self, x):
-      return self.A0.forward(x) + self.B0.forward(x)
-  )JIT");
-
-  std::stringstream ss;
-  c._save_for_mobile(ss, {}, true);
-  mobile::Module bc = _load_for_mobile(ss);
-
-  std::set<std::string> module_debug_info_set;
-  size_t pc = 0;
-  while (true) {
-    try {
-      std::string module_info = bc.get_forward_method_debug_info(pc);
-      if (!module_info.empty() &&
-          (module_info.find("debug_handle") == std::string::npos)) {
-        module_debug_info_set.insert(module_info);
-      }
-      ++pc;
-    } catch (const std::exception& e) {
-      break;
-    }
-  }
-
-  AT_ASSERT(module_debug_info_set.count("top(C).aten::add"));
-  AT_ASSERT(module_debug_info_set.count("top(C).A0(A).aten::add"));
-  AT_ASSERT(module_debug_info_set.count("top(C).B0(B).aten::add"));
-}
-
+#if !defined FB_XPLAT_BUILD
 TEST(LiteInterpreterTest, GetRuntimeByteCodeVersion) {
   auto runtime_bytecode_version = _get_runtime_bytecode_version();
   AT_ASSERT(
@@ -614,6 +465,14 @@ TEST(LiteInterpreterTest, GetRuntimeByteCodeVersion) {
       caffe2::serialize::kMaxSupportedBytecodeVersion);
 }
 
+/**
+ * The test below is disarmed for FB internal xplat builds since
+ * BUCK requires us to pass in the script_module_v4.ptl file in
+ * as a resource dependency of the build rule for this file, and
+ * we would need to access it via the C++ Resources API instead
+ * of directly reading from disk (which is what the open source
+ * build/run does).
+ */
 TEST(LiteInterpreterTest, GetByteCodeVersion) {
   std::string filePath(__FILE__);
   auto test_model_file_v4 =
@@ -623,6 +482,7 @@ TEST(LiteInterpreterTest, GetByteCodeVersion) {
   auto version_v4 = _get_model_bytecode_version(test_model_file_v4);
   AT_ASSERT(version_v4 == 4);
 }
+#endif // !defined(FB_XPLAT_BUILD)
 
 namespace {
 
@@ -714,9 +574,9 @@ void backportAllVersionCheck(
       _backport_for_mobile(test_model_file_stream, oss, minimum_to_version - 1);
   AT_ASSERT(!backPortSuccess);
 }
-
 } // namespace
 
+#if !defined FB_XPLAT_BUILD
 TEST(LiteInterpreterTest, BackPortByteCodeModelAllVersions) {
   torch::jit::Module module("m");
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
@@ -748,6 +608,7 @@ TEST(LiteInterpreterTest, BackPortByteCodeModelAllVersions) {
       expect_result_list,
       caffe2::serialize::kProducedBytecodeVersion);
 }
+#endif // !defined(FB_XPLAT_BUILD)
 
 TEST(LiteInterpreterTest, GetRuntimeOpsAndInfo) {
   auto runtime_ops = _get_runtime_ops_and_info();
@@ -756,182 +617,48 @@ TEST(LiteInterpreterTest, GetRuntimeOpsAndInfo) {
   AT_ASSERT(runtime_ops.size() > 2900);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(LiteInterpreterTest, SequentialModuleInfo) {
-  Module a("A");
-  a.define(R"JIT(
-    def forward(self, x):
-      return x + 1
-  )JIT");
-  Module b("B");
-  b.define(R"JIT(
-    def forward(self, x):
-      return x + 2
-  )JIT");
-  Module c("C");
-  c.register_module("A0", a);
-  c.register_module("B0", b);
-  c.define(R"JIT(
-    def forward(self, x):
-      return self.A0.forward(self.B0.forward(x))
-  )JIT");
+TEST(LiteInterpreterTest, isCompatibleSuccess) {
+  // test trivial success case
+  auto runtime_info = RuntimeCompatibilityInfo::get();
+  std::unordered_map<std::string, OperatorInfo> model_ops;
+  model_ops["aten::add.Scalar"] = OperatorInfo{2};
 
-  std::stringstream ss;
-  c._save_for_mobile(ss, {}, true);
-  mobile::Module bc = _load_for_mobile(ss);
+  auto model_info = ModelCompatibilityInfo{
+      caffe2::serialize::kMaxSupportedBytecodeVersion, model_ops};
 
-  std::set<std::string> module_debug_info_set;
-  size_t pc = 0;
-  while (true) {
-    try {
-      std::string module_info = bc.get_forward_method_debug_info(pc);
-      if (!module_info.empty() &&
-          (module_info.find("debug_handle") == std::string::npos)) {
-        module_debug_info_set.insert(module_info);
-      }
-      ++pc;
-    } catch (const std::exception& e) {
-      break;
-    }
-  }
-
-  // class A(nn.Module):
-  //   def __init__(self):
-  //     super(A, self).__init__()
-
-  //   def forward(self, x):
-  //     return x + 1
-
-  // class B(nn.Module):
-  //   def __init__(self):
-  //     super(B, self).__init__()
-
-  //   def forward(self, x):
-  //     return x + 2
-
-  // class C(nn.Module):
-  //   def __init__(self):
-  //     super(C, self).__init__()
-  //     self.A0 = A()
-  //     self.B0 = B()
-
-  //   def forward(self, x):
-  //     return self.A0.forward(self.B0.forward(x))
-
-  AT_ASSERT(module_debug_info_set.count("top(C).prim::Return"));
-  AT_ASSERT(module_debug_info_set.count("top(C).A0(A).aten::add"));
-  AT_ASSERT(module_debug_info_set.count("top(C).B0(B).aten::add"));
+  AT_ASSERT(
+      is_compatible(runtime_info, model_info).status ==
+      ModelCompatibilityStatus::OK);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(LiteInterpreterTest, HierarchyModuleInfo) {
-  Module a("A");
-  a.define(R"JIT(
-    def forward(self, x):
-      return x + 1
-  )JIT");
-  Module b("B");
-  b.register_module("A0", a);
-  b.define(R"JIT(
-    def forward(self, x):
-      return self.A0.forward(x) + 1
-  )JIT");
-  Module c("C");
-  c.register_module("B0", b);
-  c.define(R"JIT(
-    def forward(self, x):
-      return self.B0.forward(x) + 1
-  )JIT");
+TEST(LiteInterpreterTest, isCompatibleFail) {
+  // test trivial failure due to ops
+  std::unordered_map<std::string, OperatorInfo> model_ops;
+  model_ops["aten::add.Scalar"] = OperatorInfo{2};
+  auto model_info = ModelCompatibilityInfo{
+      caffe2::serialize::kMaxSupportedBytecodeVersion, model_ops};
+  std::unordered_map<std::string, OperatorInfo> runtime_ops;
+  runtime_ops["aten::add.Int"] = OperatorInfo{2};
+  auto runtime_info = RuntimeCompatibilityInfo{
+      caffe2::serialize::kMaxSupportedBytecodeVersion, runtime_ops};
 
-  std::stringstream ss;
-  c._save_for_mobile(ss, {}, true);
-  mobile::Module bc = _load_for_mobile(ss);
+  auto result = is_compatible(runtime_info, model_info);
+  AT_ASSERT(result.status = ModelCompatibilityStatus::ERROR);
+  AT_ASSERT(
+      result.errors[0] ==
+      "Operator 'aten::add.Scalar' missing from runtime (not found)");
 
-  std::set<std::string> module_debug_info_set;
-  size_t pc = 0;
-  while (true) {
-    try {
-      std::string module_info = bc.get_forward_method_debug_info(pc);
-      if (!module_info.empty() &&
-          (module_info.find("debug_handle") == std::string::npos)) {
-        module_debug_info_set.insert(module_info);
-      }
-      ++pc;
-    } catch (const std::exception& e) {
-      break;
-    }
-  }
+  // test trivial failure due to bytecode
+  runtime_ops["aten::add.Scalar"] = OperatorInfo{2};
+  runtime_info = RuntimeCompatibilityInfo{
+      caffe2::serialize::kMaxSupportedBytecodeVersion, runtime_ops};
+  model_info.bytecode_version =
+      caffe2::serialize::kMaxSupportedBytecodeVersion + 1;
 
-  // There are 3 module information strings here.
-  // "top(C).forward": for the add operator in top.
-  // "top(C).B0(B).forward": for the add operator in B0.
-  // "top(C).B0(B).forward.A0(A).forward": for the add operator in A0.
-  AT_ASSERT(module_debug_info_set.count("top(C).aten::add"));
-  AT_ASSERT(module_debug_info_set.count("top(C).B0(B).aten::add"));
-  AT_ASSERT(module_debug_info_set.count("top(C).B0(B).A0(A).aten::add"));
+  result = is_compatible(runtime_info, model_info);
+  AT_ASSERT(result.status = ModelCompatibilityStatus::ERROR);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(LiteInterpreterTest, DuplicatedClassTypeModuleInfo) {
-  Module a("A");
-  a.define(R"JIT(
-    def forward(self, x):
-      return x + 5
-  )JIT");
-  Module b("B");
-  b.register_module("A0", a);
-  b.register_module("A1", a);
-  b.define(R"JIT(
-    def forward(self, x):
-      return self.A0.forward(x) + self.A1.forward(x)
-  )JIT");
-
-  std::stringstream ss;
-  b._save_for_mobile(ss, {}, true);
-  mobile::Module bc = _load_for_mobile(ss);
-
-  std::set<std::string> module_debug_info_set;
-  size_t pc = 0;
-  while (true) {
-    try {
-      std::string module_info = bc.get_forward_method_debug_info(pc);
-      if (!module_info.empty() &&
-          (module_info.find("debug_handle") == std::string::npos)) {
-        module_debug_info_set.insert(module_info);
-      }
-      ++pc;
-    } catch (const std::exception& e) {
-      break;
-    }
-  }
-
-  // class A(nn.Module):
-  //   def __init__(self):
-  //     super(A, self).__init__()
-
-  //   def forward(self, x):
-  //     return x + 5
-
-  // class B(nn.Module):
-  //   def __init__(self):
-  //     super(B, self).__init__()
-  //     self.A0 = A()
-  //     self.A1 = A()
-
-  //   def forward(self, x):
-  //     return self.A0.forward(x) + self.A1.forward(x)
-
-  // There are 3 module information strings here.
-  // "top(B).forward": for the add operator in top.
-  // "top(B).A0(A).forward": for the add operator in A0.
-  // "top(B).A1(A).forward": for the add operator in A1.
-
-  AT_ASSERT(module_debug_info_set.count("top(B).aten::add"));
-  AT_ASSERT(module_debug_info_set.count("top(B).A0(A).aten::add"));
-  AT_ASSERT(module_debug_info_set.count("top(B).A1(A).aten::add"));
-}
-
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LiteInterpreterTest, Eval) {
   std::vector<torch::jit::IValue> inputs;
 
@@ -966,7 +693,6 @@ TEST(LiteInterpreterTest, Eval) {
       outputref[0][0][0][0].item<int>() == output[0][0][0][0].item<int>());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LiteInterpreterTest, FindWrongMethodName) {
   Module m("m");
   m.register_parameter("foo", torch::ones({}), false);
@@ -981,7 +707,6 @@ TEST(LiteInterpreterTest, FindWrongMethodName) {
   ASSERT_TRUE(bc.find_method("forward") == c10::nullopt);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LiteInterpreterTest, FindAndRunMethod) {
   Module m("m");
   m.register_parameter("foo", torch::ones({}), false);
@@ -1012,7 +737,6 @@ TEST(LiteInterpreterTest, FindAndRunMethod) {
   AT_ASSERT(resd == refd);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LiteInterpreterTest, RunMethodVariadic) {
   Module m("m");
   m.register_parameter("foo", torch::ones({}), false);
@@ -1036,7 +760,6 @@ TEST(LiteInterpreterTest, RunMethodVariadic) {
   AT_ASSERT(resd == refd);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LiteInterpreterTest, DuplicateSetState) {
   Module m("M");
   m.register_parameter("foo", torch::ones({}), false);
@@ -1066,7 +789,6 @@ TEST(LiteInterpreterTest, DuplicateSetState) {
   ASSERT_EQ(methods.size(), expected_n);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LiteInterpreterTest, ExtraFiles) {
   const auto script = R"JIT(
     def forward(self):
@@ -1106,7 +828,6 @@ TEST(LiteInterpreterTest, ExtraFiles) {
   ASSERT_EQ(loaded_extra_files["mobile_info.json"], "{\"key\": 23}");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LiteInterpreterTest, OpNameExportFetchRootOperators) {
   torch::jit::Module m("m");
   m.register_parameter("weight", torch::ones({20, 1, 5, 5}), false);
@@ -1167,18 +888,139 @@ TEST(LiteInterpreterTest, DefaultArgsConv) {
   AT_ASSERT(output.equal(outputref));
 }
 
+TEST(RunTimeTest, ParseBytecode) {
+  // A simple example to show a simple bytecode that can be used independent of
+  // PyTorch TorchScript serialization (unpickler, etc) and operator library.
+  // It has basic control flow (if, else) and basic data orchestration (list
+  // construction). The original PyTorch program:
+
+  //  class Module(torch.nn.Module):
+  //
+  //    def __init__(self):
+  //      super().__init__()
+  //
+  //    def forward(self, x: int, h: int, xfirst: bool):
+  //      if xfirst:
+  //        return [x, h]
+  //      else:
+  //        return [h, x]
+
+  // 1. Prepare for the bytecode. In reality it can be from a customized
+  // deserializer.
+  std::vector<IValue> instructions{
+      to_tuple({"STOREN", 1, 4}),
+      to_tuple({"DROPR", 1, 0}),
+      to_tuple({"MOVE", 4, 0}),
+      to_tuple({"JF", 5, 0}),
+      to_tuple({"LOAD", 2, 0}),
+      to_tuple({"LOAD", 3, 0}),
+      to_tuple({"LIST_CONSTRUCT", 0, 2}),
+      to_tuple({"JMP", 4, 0}),
+      to_tuple({"LOAD", 3, 0}),
+      to_tuple({"LOAD", 2, 0}),
+      to_tuple({"LIST_CONSTRUCT", 1, 2}),
+      to_tuple({"STORE", 5, 0}),
+      to_tuple({"DROPR", 3, 0}),
+      to_tuple({"DROPR", 2, 0}),
+      to_tuple({"MOVE", 5, 0}),
+      to_tuple({"RET", 0, 0}),
+  };
+  std::vector<IValue> operators; // empty for this example
+  std::vector<IValue> constants; // empty for this example
+
+  std::vector<IValue> types{"List[int]", "List[int]"};
+  // 2. Parse the function
+  std::string function_name("test_function");
+  auto function = std::unique_ptr<mobile::Function>(
+      new mobile::Function(c10::QualifiedName(function_name)));
+  std::vector<IValue> debug_handles_m_tuple;
+  parseInstructions(
+      function_name, instructions, debug_handles_m_tuple, function.get());
+  parseTypes(types, function.get());
+  const size_t rsize = 5;
+  parseRegisterSize(rsize, function.get());
+
+  // 3. Prepare for inputs and run the function
+  // Note that the first input is reserved for Module object.
+  // Since this is a function test and Module object is not required,
+  // a dummy IValue (0) is added here.
+  std::vector<IValue> inputs{0, 1, 2, true};
+  function->run(inputs);
+  auto output = inputs[0].toList();
+  ASSERT_EQ(output[0], 1);
+  ASSERT_EQ(output[1], 2);
+
+  std::vector<IValue> inputs1{0, 1, 2, false};
+  function->run(inputs1);
+  auto output1 = inputs1[0].toList();
+  ASSERT_EQ(output1[0], 2);
+  ASSERT_EQ(output1[1], 1);
+}
+
+TEST(RunTimeTest, ParseOperator) {
+  // A simple example to show a simple bytecode that can be used independent of
+  // PyTorch TorchScript serialization (unpickler, etc) and operator library.
+  // It has one operator and we should be able to register it. The original
+  // PyTorch program:
+
+  // class Add(torch.nn.Module):
+  //     def __init__(self):
+  //         super(Add, self).__init__()
+
+  //     def forward(self, a, b):
+  //         return a + b
+
+  // 1. Prepare for the bytecode. In reality it can be from a customized
+  // deserializer.
+  std::vector<IValue> instructions{
+      to_tuple({"STOREN", 1, 3}),
+      to_tuple({"DROPR", 1, 0}),
+      to_tuple({"MOVE", 2, 0}),
+      to_tuple({"MOVE", 3, 0}),
+      to_tuple({"OP", 0, 0}),
+      to_tuple({"RET", 0, 0}),
+  };
+  std::vector<IValue> operators{
+      to_tuple({"aten::add", "Tensor", 2}),
+  };
+  std::vector<IValue> constants{
+      to_tuple({1}),
+  };
+  int64_t model_version = caffe2::serialize::kProducedBytecodeVersion;
+  // 2. Parse the function
+  std::string function_name("test_function");
+  auto function = std::unique_ptr<mobile::Function>(
+      new mobile::Function(c10::QualifiedName(function_name)));
+  std::vector<IValue> debug_handles_m_tuple;
+  parseInstructions(
+      function_name, instructions, debug_handles_m_tuple, function.get());
+  parseOperators(operators, model_version, 1, function.get());
+  const size_t rsize = 5;
+  parseRegisterSize(rsize, function.get());
+
+  // 3. Prepare for inputs and run the function
+  // Note that the first input is reserved for Module object.
+  // Since this is a function test and Module object is not required,
+  // a dummy IValue (0) is added here.
+  std::vector<IValue> inputs{0, at::tensor(1), at::tensor(2)};
+  function->run(inputs);
+  auto output = inputs[0];
+  ASSERT_EQ(output, at::tensor(3));
+}
+
 namespace {
 void testLiteModuleCompareResultTensors(
     Module& m,
-    const std::vector<torch::jit::IValue>& inputs) {
-  auto outputref = m.forward(inputs).toTensor();
+    const std::vector<torch::jit::IValue>& inputs,
+    const std::string& method_name = "forward") {
+  auto outputref = m.get_method(method_name)(inputs).toTensor();
 
   std::stringstream ss;
   m._save_for_mobile(ss);
   mobile::Module bc = _load_for_mobile(ss);
   IValue res;
   for (int i = 0; i < 3; ++i) {
-    res = bc.get_method("forward")(inputs);
+    res = bc.get_method(method_name)(inputs);
   }
   auto output = res.toTensor();
   AT_ASSERT(outputref.dim() == output.dim());
@@ -1214,6 +1056,7 @@ void testDefaultArgsPinv(int num_args) {
 }
 } // namespace
 
+#if !defined FB_XPLAT_BUILD
 TEST(LiteInterpreterTest, DefaultArgsPinv) {
   // Test with different number of specified arguments.
   // Arguments not specified take default value.
@@ -1314,7 +1157,68 @@ TEST(LiteInterpreterTest, DefaultArgsPinvSpecifyDefault) {
   testLiteModuleCompareResultTensors(m, inputs);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+void testDefaultArgsPinvWithOutArg(int num_args) {
+  Module m("m");
+  if (num_args == 1) {
+    m.define(R"(
+      def forward(self, input):
+        return torch.linalg_pinv(input, out=input)
+    )");
+  } else if (num_args == 2) {
+    m.define(R"(
+      def forward(self, input):
+        return torch.linalg_pinv(input, 1e-5, out=input)
+    )");
+  } else if (num_args == 3) {
+    m.define(R"(
+      def forward(self, input):
+        return torch.linalg_pinv(input, 1e-5, True, out=input)
+    )");
+  }
+
+  const int N = 28;
+  auto input = torch::range(1, N * N, 1);
+  input[0] = 10000; // a more stable matrix
+  input = input.view({N, N});
+  auto ref = m.run_method("forward", input);
+  TORCH_CHECK(!input.equal(torch::range(1, N * N, 1)));
+  TORCH_CHECK(input.equal(ref.toTensor()));
+}
+
+TEST(LiteInterpreterTest, DefaultArgsPinvWithOutArg) {
+  // Test with different number of specified arguments + out arg.
+  // Arguments not specified take default value.
+  for (int num_args = 1; num_args <= 3; ++num_args) {
+    testDefaultArgsPinvWithOutArg(num_args);
+  }
+}
+
+TEST(LiteInterpreterTest, DefaultArgsWithOutArg) {
+  Module m("m");
+  m.define(R"(
+    def forward(self, x, h):
+      torch.add(x, h, out=x)
+  )");
+
+  std::vector<IValue> inputs;
+  auto input_x = 2 * torch::ones({});
+  auto input_h = torch::ones({});
+  auto ref = m.run_method("forward", input_x, input_h);
+
+  std::stringstream ss;
+
+  m._save_for_mobile(ss, {}, true);
+  mobile::Module bc = _load_for_mobile(ss);
+  bc.run_method("forward", input_x, input_h);
+  AT_ASSERT(input_x.equal(4 * torch::ones({})));
+
+  auto ops = _get_model_ops_and_info(ss);
+  auto op = ops.find("aten::add.out");
+  TORCH_CHECK(
+      op != ops.end() && op->second.num_schema_args.has_value() &&
+      op->second.num_schema_args.value() == 4);
+}
+
 TEST(LiteInterpreterTest, TestExceptionStackWithTwoLevelModuleHierarchy) {
   Module a("A");
   a.define(R"(
@@ -1342,9 +1246,9 @@ TEST(LiteInterpreterTest, TestExceptionStackWithTwoLevelModuleHierarchy) {
   c._save_for_mobile(ss, ExtraFilesMap(), true);
   auto lite_m = _load_for_mobile(ss);
   std::string error_pattern = R"(
-  Module hierarchy:top(C).B0(B).A0(A).aten::add
+  Module hierarchy:top(C)::<unknown>.B0(B)::foo.A0(A)::bar.aten::add
 Traceback of TorchScript (most recent call last):
-  File "<string>", line 3, in FunctionName_UNKNOWN
+  File "<string>", line 3, in <unknown>
 
     def forward(self, x, y):
       return self.B0.foo(x, y) + 3
@@ -1364,9 +1268,9 @@ Traceback of TorchScript (most recent call last):
   )";
   ASSERT_THROWS_WITH_MESSAGE(lite_m.forward(inputs), error_pattern);
 }
+#endif // !defined(FB_XPLAT_BUILD)
 
 namespace {
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static auto reg =
     torch::class_<TorchBindLiteInterpreterTestStruct>(
         "_TorchScriptTesting",
@@ -1383,6 +1287,42 @@ static auto reg =
             });
 
 } // namespace
+
+TEST(LiteInterpreterTest, OperatorCacheDifferentiatesDefaultArgs) {
+  // Create 3 methods:
+  //
+  // 1. forward() returns a tensor with dtype=torch.int64 (4)
+  // 2. forward2() returns a tensor with dtype=torch.float32 (6)
+  // 3. forward3() returns a tensor with dtype=torch.float32 but
+  //    the dtype is inferred by the input tensor's dtype
+  //
+  // If caching works correctly, then the result from the full-jit
+  // module and the lite module will be the same. Otherwise, it
+  // will be different if we don't correctly ignore the cache
+  // entry for an operator that has a different number of
+  // arguments.
+  Module m("m");
+  m.define(R"(
+    def forward(self):
+      ret1 = torch.new_empty(torch.zeros(10), [10], dtype=4)
+      return ret1.fill_(25)
+  )");
+  m.define(R"(
+    def forward2(self):
+      ret1 = torch.new_empty(torch.zeros(10), [10], dtype=6)
+      return ret1.fill_(32.0)
+  )");
+  m.define(R"(
+    def forward3(self):
+      ret1 = torch.new_empty(torch.zeros(10), [10])
+      return ret1.fill_(12.0)
+  )");
+
+  std::vector<torch::jit::IValue> inputs;
+  testLiteModuleCompareResultTensors(m, inputs, "forward");
+  testLiteModuleCompareResultTensors(m, inputs, "forward2");
+  testLiteModuleCompareResultTensors(m, inputs, "forward3");
+}
 
 } // namespace jit
 } // namespace torch

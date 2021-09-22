@@ -5,7 +5,6 @@
 #include "caffe2/core/flags.h"
 #include "caffe2/core/operator.h"
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DECLARE_string(caffe_test_root);
 
 namespace caffe2 {
@@ -35,7 +34,6 @@ static void AddScalarInput(
 //  values2: [ 1.0 ]
 //
 //  Expected Output: [ 1.0 ]
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BooleanUnmaskTest, Test) {
   Workspace ws;
   OperatorDef def;

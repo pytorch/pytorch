@@ -2,13 +2,30 @@
 #include <ATen/native/ReduceOps.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/cuda/Loops.cuh>
-#include <ATen/native/cuda/Reduce.cuh>
+#include <ATen/native/cuda/Resize.cuh>
 #include <ATen/native/cuda/Normalization.cuh>
 #include <c10/cuda/CUDAMathCompat.h>
 
 namespace at { namespace native {
 
 namespace {
+
+ScalarType first_type() {
+  return ScalarType::Undefined;
+}
+
+template <typename... Args>
+ScalarType first_type(const Tensor& arg, const Args&... parameters) {
+  return arg.defined() ? arg.scalar_type() : first_type(parameters...);
+}
+
+// A transform is mixed type if the parameters are higher precision than the input
+template <typename... Args>
+bool is_mixed_type(const Tensor& input, const Args&... parameters) {
+  const auto parameter_type = first_type(parameters...);
+  return ((parameter_type != ScalarType::Undefined) &&
+          (parameter_type != input.scalar_type()));
+}
 
 inline bool batch_norm_use_channels_last_kernels(const at::Tensor& self) {
   return (self.is_contiguous(at::MemoryFormat::ChannelsLast) ||
@@ -53,11 +70,12 @@ void batch_norm_elementwise(
   case Impl::Contiguous: {
     c10::MaybeOwned<Tensor> weight = at::borrow_from_optional_tensor(weight_opt);
     c10::MaybeOwned<Tensor> bias = at::borrow_from_optional_tensor(bias_opt);
+    resize_output(out, self.sizes());
     AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, self.scalar_type(),
                                     "batch_norm_elementwise_cuda", [&] {
       using accscalar_t = at::acc_type<scalar_t, true>;
-      if ((weight->defined() && weight->scalar_type() != self.scalar_type()) ||
-          (bias->defined() && bias->scalar_type() != self.scalar_type())) {
+      const bool mixed_type = is_mixed_type(self, *weight, *bias);
+      if (mixed_type) {
         batch_norm_elemt_cuda_template<scalar_t, accscalar_t, int32_t>(
             out, self, *weight, *bias, mean_, invstd_);
       } else {
@@ -70,7 +88,12 @@ void batch_norm_elementwise(
   case Impl::ChannelsLast: {
     auto weight = at::borrow_from_optional_tensor(weight_opt);
     auto bias = at::borrow_from_optional_tensor(bias_opt);
-    if ((!weight->defined() || weight->is_contiguous()) &&
+
+    if (resize_output_check(out, self.sizes())) {
+        resize_impl_cuda_(out.unsafeGetTensorImpl(), self.sizes(), self.strides());
+    }
+    if ((out.strides() == self.strides()) &&
+        (!weight->defined() || weight->is_contiguous()) &&
         (!bias->defined() || bias->is_contiguous()) &&
         (!mean_.defined() || mean_.is_contiguous()) &&
         (!invstd_.defined() || invstd_.is_contiguous())) {
@@ -131,7 +154,8 @@ Tensor batch_norm_elementwise_backward_train(
     return AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, input.scalar_type(),
                                            "batch_norm_backward_elemt", [&] {
       using accscalar_t = at::acc_type<scalar_t, true>;
-      if (weight.defined() && weight.scalar_type() != input.scalar_type()) {
+      const bool mixed_type = is_mixed_type(input, weight);
+      if (mixed_type) {
         return batch_norm_backward_elemt_cuda_template<scalar_t, accscalar_t, int32_t>(
             grad_out, input, mean, invstd, weight, sum_dy, sum_dy_xmu);
       } else {
@@ -379,7 +403,7 @@ void batch_norm_calc_invstd(const Tensor& out_invstd, const Tensor& running_var,
 
 std::tuple<Tensor&, Tensor&, Tensor&> batch_norm_cuda_out(const Tensor& self, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& bias_opt, const c10::optional<Tensor>& running_mean_opt, const c10::optional<Tensor>& running_var_opt, bool train, double momentum, double epsilon, Tensor& output, Tensor& save_mean, Tensor& save_invstd) {
   const bool has_running_mean = (running_mean_opt.has_value() && running_mean_opt->defined());
-  const bool has_running_var = (running_mean_opt.has_value() && running_mean_opt->defined());
+  const bool has_running_var = (running_var_opt.has_value() && running_var_opt->defined());
   TORCH_CHECK(has_running_mean == has_running_var);
 
   if (train) {
@@ -404,7 +428,7 @@ std::tuple<Tensor&, Tensor&, Tensor&> batch_norm_cuda_out(const Tensor& self, co
 }
 
 std::tuple<Tensor, Tensor, Tensor> batch_norm_cuda(const Tensor& self, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& bias_opt, const c10::optional<Tensor>& running_mean_opt, const c10::optional<Tensor>& running_var_opt, bool train, double momentum, double epsilon) {
-  auto output = at::empty_like(self, at::MemoryFormat::Contiguous);
+  auto output = at::empty_like(self);
   int64_t n_input = self.size(1);
   auto options = self.options().dtype(
       at::toAccumulateType(self.scalar_type(), /*is_cuda=*/true));
@@ -444,7 +468,8 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cuda(const Tensor& grad_o
     return AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, input.scalar_type(),
                                            "batch_norm_backward_cuda", [&] {
       using accscalar_t = at::acc_type<scalar_t, true>;
-      if (weight->defined() && weight->scalar_type() != input.scalar_type()) {
+      const bool mixed_type = is_mixed_type(input, *weight, *running_mean, *running_var);
+      if (mixed_type) {
           return batch_norm_backward_cuda_template<scalar_t, accscalar_t, int32_t>(
               grad_out, input, *weight, *running_mean, *running_var,
               *save_mean, *save_invstd, train, epsilon, grad_input_mask);
@@ -461,7 +486,8 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cuda(const Tensor& grad_o
   // save_mean and save_invstd, so it needs recalculated.
   const auto acc_type = at::toAccumulateType(input.scalar_type(), /*is_cuda=*/true);
   Tensor mean;
-  if (save_mean->defined()) {
+  TORCH_INTERNAL_ASSERT(save_mean->defined(), "save_mean should always be defined\n");
+  if (save_mean->numel() != 0) {
     mean = *save_mean;
   } else if (needs_reduction) {
     TORCH_CHECK(!train && running_mean->defined());
@@ -470,7 +496,8 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cuda(const Tensor& grad_o
   }
 
   Tensor invstd;
-  if (save_invstd->defined()) {
+  TORCH_INTERNAL_ASSERT(save_invstd->defined(), "save_invstd should always be defined\n");
+  if (save_invstd->numel() != 0) {
     invstd = *save_invstd;
   } else {
     TORCH_CHECK(!train && running_var->defined());
@@ -532,7 +559,7 @@ Tensor batch_norm_elemt_cuda(
     const Tensor& self, const c10::optional<Tensor>& weight_opt,
     const c10::optional<Tensor>& bias_opt, const Tensor& mean,
     const Tensor& invstd, double epsilon) {
-  auto output = at::empty_like(self, self.suggest_memory_format());
+  auto output = at::empty_like(self);
   // FIXME: Epsilon parameter isn't required, we don't take the reciprocal
   batch_norm_elementwise(output, self, weight_opt, bias_opt, mean, invstd);
   return output;
@@ -596,17 +623,17 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> batch_norm_backward_reduce_cuda(const
     auto mean_st = mean.dtype();
     auto invstd_st = invstd.dtype();
     TORCH_CHECK(mean_st == invstd_st, "mean and invstd need to have the same data types");
-    const bool is_mixed_type = weight.defined() && weight.scalar_type() != input.scalar_type();
+    const bool mixed_type = is_mixed_type(input, weight);
     using accscalar_t = at::acc_type<scalar_t, true>;
 
     if (cuda::detail::canUse32BitIndexMath(grad_output)) {
-      if (is_mixed_type) {
+      if (mixed_type) {
         return batch_norm_backward_reduce_cuda_template<scalar_t, accscalar_t, int32_t>(grad_output, input, mean, invstd, weight, input_g, weight_g, bias_g);
       } else {
         return batch_norm_backward_reduce_cuda_template<scalar_t, scalar_t, int32_t>(grad_output, input, mean, invstd, weight, input_g, weight_g, bias_g);
       }
     } else {
-      if (is_mixed_type) {
+      if (mixed_type) {
         return batch_norm_backward_reduce_cuda_template<scalar_t, accscalar_t, int64_t>(grad_output, input, mean, invstd, weight, input_g, weight_g, bias_g);
       } else {
         return batch_norm_backward_reduce_cuda_template<scalar_t, scalar_t, int64_t>(grad_output, input, mean, invstd, weight, input_g, weight_g, bias_g);
@@ -620,7 +647,9 @@ Tensor batch_norm_backward_elemt_cuda(const Tensor& self, const Tensor& input, c
   c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
   const Tensor& weight = *weight_maybe_owned;
 
-  if (at::cuda::detail::canUse32BitIndexMath(self) && batch_norm_use_channels_last_kernels(self)){
+  if (at::cuda::detail::canUse32BitIndexMath(self) &&
+      batch_norm_use_channels_last_kernels(self) &&
+      batch_norm_use_channels_last_kernels(input))  {
     return batch_norm_backward_elemt_channels_last_cuda_template(self, input, mean, invstd, weight, sum_dy, sum_dy_xmu, count);
   }
 

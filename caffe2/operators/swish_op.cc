@@ -44,18 +44,15 @@ bool SwishGradientOp<CPUContext>::DoRunWithType() {
   return true;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     Swish,
     UnaryElementwiseOp<
         TensorTypes<float>,
         CPUContext,
         SwishFunctor<CPUContext>>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(SwishGradient, SwishGradientOp<CPUContext>);
 
 // Input: X, output: Y
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Swish)
     .NumInputs(1)
     .NumOutputs(1)
@@ -68,7 +65,6 @@ tensor elementwise.
     .Input(0, "X", "1D input tensor")
     .Output(0, "Y", "1D output tensor");
 // Input: X, Y, dY, output: dX
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SwishGradient)
     .NumInputs(3)
     .NumOutputs(1)
@@ -93,7 +89,6 @@ class GetSwishGradient : public GradientMakerBase {
 
 } // namespace
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(Swish, GetSwishGradient);
 
 } // namespace caffe2

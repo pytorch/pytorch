@@ -1,4 +1,7 @@
+// clang-format off
 #include <c10/util/BFloat16.h>
+#include <c10/util/BFloat16-math.h>
+// clang-format on
 #include <gtest/gtest.h>
 
 namespace {
@@ -18,7 +21,6 @@ float float_from_bytes(uint32_t sign, uint32_t exponent, uint32_t fraction) {
   return res;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BFloat16Conversion, FloatToBFloat16AndBack) {
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-magic-numbers,modernize-avoid-c-arrays)
   float in[100];
@@ -42,7 +44,6 @@ TEST(BFloat16Conversion, FloatToBFloat16AndBack) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BFloat16Conversion, FloatToBFloat16RNEAndBack) {
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-magic-numbers,modernize-avoid-c-arrays)
   float in[100];
@@ -66,7 +67,6 @@ TEST(BFloat16Conversion, FloatToBFloat16RNEAndBack) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BFloat16Conversion, NaN) {
   float inNaN = float_from_bytes(0, 0xFF, 0x7FFFFF);
   EXPECT_TRUE(std::isnan(inNaN));
@@ -77,7 +77,6 @@ TEST(BFloat16Conversion, NaN) {
   EXPECT_TRUE(std::isnan(out));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BFloat16Conversion, Inf) {
   float inInf = float_from_bytes(0, 0xFF, 0);
   EXPECT_TRUE(std::isinf(inInf));
@@ -88,7 +87,6 @@ TEST(BFloat16Conversion, Inf) {
   EXPECT_TRUE(std::isinf(out));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BFloat16Conversion, SmallestDenormal) {
   float in = std::numeric_limits<float>::denorm_min(); // The smallest non-zero
                                                        // subnormal number
@@ -98,7 +96,6 @@ TEST(BFloat16Conversion, SmallestDenormal) {
   EXPECT_FLOAT_EQ(in, out);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BFloat16Math, Addition) {
   // This test verifies that if only first 7 bits of float's mantissa are
   // changed after addition, we should have no loss in precision.
@@ -122,7 +119,6 @@ TEST(BFloat16Math, Addition) {
   EXPECT_EQ(res, expected);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BFloat16Math, Subtraction) {
   // This test verifies that if only first 7 bits of float's mantissa are
   // changed after subtraction, we should have no loss in precision.
@@ -146,6 +142,22 @@ TEST(BFloat16Math, Subtraction) {
   EXPECT_EQ(res, expected);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(BFloat16Math, NextAfterZero) {
+  const c10::BFloat16 zero{0};
+
+  auto check_nextafter =
+      [](c10::BFloat16 from, c10::BFloat16 to, c10::BFloat16 expected) {
+        c10::BFloat16 actual = std::nextafter(from, to);
+        // Check for bitwise equality!
+        ASSERT_EQ(actual.x ^ expected.x, uint16_t{0});
+      };
+  check_nextafter(zero, zero, /*expected=*/zero);
+  check_nextafter(zero, -zero, /*expected=*/-zero);
+  check_nextafter(-zero, zero, /*expected=*/zero);
+  check_nextafter(-zero, -zero, /*expected=*/-zero);
+}
+
 float BinaryToFloat(uint32_t bytes) {
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   float res;
@@ -161,14 +173,12 @@ struct BFloat16TestParam {
 class BFloat16Test : public ::testing::Test,
                      public ::testing::WithParamInterface<BFloat16TestParam> {};
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_P(BFloat16Test, BFloat16RNETest) {
   float value = BinaryToFloat(GetParam().input);
   uint16_t rounded = c10::detail::round_to_nearest_even(value);
   EXPECT_EQ(GetParam().rne, rounded);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 INSTANTIATE_TEST_CASE_P(
     BFloat16Test_Instantiation,
     BFloat16Test,

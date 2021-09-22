@@ -54,6 +54,9 @@ class _OpNamespace(types.ModuleType):
         self.name = name
 
     def __getattr__(self, op_name):
+        # It is not a valid op_name when __file__ is passed in
+        if op_name == '__file__':
+            return 'torch.ops'
         # Get the op `my_namespace::my_op` if available. This will also check
         # for overloads and raise an exception if there are more than one.
         qualified_op_name = '{}::{}'.format(self.name, op_name)

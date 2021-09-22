@@ -18,14 +18,11 @@
 
 namespace caffe2 {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(SpatialNarrowAs, SpatialNarrowAsOp<CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     SpatialNarrowAsGradient,
     SpatialNarrowAsGradientOp<CPUContext>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SpatialNarrowAs)
     .NumInputs(2)
     .NumOutputs(1)
@@ -48,7 +45,6 @@ columns from the bottom and right.
         "Sub window of A containing rows [0, H1 - 1] (inclusive) and columns "
         "[0, W1 - 1] (inclusive).");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SpatialNarrowAsGradient)
     .NumInputs(3)
     .NumOutputs(1)
@@ -78,7 +74,6 @@ class SpatialNarrowAsGradient : public GradientMakerBase {
         vector<string>{GI(0)});
   }
 };
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(SpatialNarrowAs, SpatialNarrowAsGradient);
 
 } // namespace caffe2
