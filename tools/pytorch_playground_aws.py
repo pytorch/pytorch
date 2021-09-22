@@ -8,6 +8,12 @@ import json
 # Load the scuba dataset
 
 
+# TODO: check that the improvements still show up in Eval mode. -- Module Eval mode is almost always slower than the C binding
+# TODO: Distribution of speedup both weighted and not weighted on frequency.
+# TODO: Also test FP16 for GPU
+# TODO Less important: test single threaded CPU
+
+
 def load_shapes(filename):
     with open(filename, "r", encoding="utf-8-sig") as f:
         reader = csv.DictReader(f)
@@ -47,6 +53,7 @@ def linear_shapes():
 import torch
 import time
 import pprint
+print(*torch.__config__.show().split("\n"), sep="\n")
 
 
 def matmul_setup(device, sizes):
@@ -66,34 +73,75 @@ def matmul_transposed(*args):
     return (weights.transpose(-1, -2) @ inp.transpose(-1, -2)).transpose(-1, -2)
 
 
+class MatmulLinear(torch.nn.Module):
+    def __init__(self, weight, bias):
+        super(MatmulLinear, self).__init__()
+        self.weight_T = torch.nn.Parameter(weight.transpose(-1, -2).contiguous())
+        self.bias = torch.nn.Parameter(bias)
+
+    def forward(self, inp):
+        return inp @ self.weight_T + self.bias
+
+
 # Linear Nodes
 def linear_setup(device, sizes):
     inp = torch.rand(sizes[0]).to(device)
     weights = torch.rand(sizes[1]).to(device)
+    weights_T = weights.T.contiguous()
     biases = torch.rand(sizes[2]).to(device)
-    return inp, weights, biases
+    linear_layer = torch.nn.Linear(sizes[1][0], sizes[1][1], bias=True)
+    linear_layer.weight = torch.nn.parameter.Parameter(weights, False)
+    linear_layer.bias = torch.nn.parameter.Parameter(biases, False)
+    if device == "cpu":
+        # Also prepare nnc tests
+        linear_script = torch.jit.script(linear_layer)
+        linear_frozen = torch.jit.optimize_for_inference(linear_script)
+        
+        # Converting to MKLDNN is costly - To 
+        dense_conv = linear_frozen.graph.findNode("aten::to_dense")
+        dense_conv.output().replaceAllUsesWith(list(dense_conv.inputs())[0])
+        torch._C._jit_pass_dce(linear_frozen.graph)
+
+        matmul_linear = MatmulLinear(weights, biases)
+        linear_m_script = torch.jit.script(matmul_linear)
+        linear_m_frozen = torch.jit.optimize_for_inference(linear_m_script)
+        # dense_conv = linear_m_frozen.graph.findNode("aten::to_dense")
+        # dense_conv.output().replaceAllUsesWith(list(dense_conv.inputs())[0])
+        torch._C._jit_pass_dce(linear_m_frozen.graph)
+
+    return locals()
 
 
-def linear(inp, weights, biases):
+def linear(*, inp, weights, biases, **kwargs):
     return torch._C._nn.linear(inp, weights, biases)
 
 
-def linear_matmul(inp, weights, biases):
-    return inp @ weights.transpose(-1, -2) + biases
+# def linear_layer(*, inp, linear_layer, **kwargs):
+#     return linear_layer.forward(inp)
 
 
-def linear_transposed(inp, weights, biases):
+def linear_matmul(*, inp, biases, weights_T, **kwargs):
+    # TODO: We want to make the weight contiguous at setup time
+    return inp @ weights_T + biases
+
+
+def linear_transposed(*, inp, weights, biases, **kwargs):
     return (weights @ inp.transpose(-1, -2)).transpose(-1, -2) + biases
 
 
-device = "cpu"
-# device = "cuda"
+def linear_module(*, inp, linear_frozen, **kwargs):
+    return linear_frozen.forward(inp)
 
 
-def benchmark(func1, func2, setup, inp_sizes):
+def linear_matmul_module(*, inp, linear_m_frozen, **kwargs):
+    return linear_m_frozen(inp)
+
+
+def benchmark(func1, func2, setup, inp_sizes, device):
     results = []
     for sizes in inp_sizes:
-        args = setup(device, sizes)
+        # print(f"Benchmarking {sizes} on {device}")
+        kwargs = setup(device, sizes)
 
         NITER = 40
         NWARMUP = 10
@@ -105,12 +153,12 @@ def benchmark(func1, func2, setup, inp_sizes):
             if device == "cuda":
                 torch.cuda.synchronize()
             for _ in range(NWARMUP):
-                func(*args)
+                func(**kwargs)
                 if device == "cuda":
                     torch.cuda.synchronize()
             s = time.time()
             for _ in range(NITER):
-                func(*args)
+                func(**kwargs)
                 if device == "cuda":
                     torch.cuda.synchronize()
             e = time.time()
@@ -138,24 +186,58 @@ def benchmark(func1, func2, setup, inp_sizes):
     return results
 
 
-# res = benchmark(matmul, matmul_transposed, matmul_setup, matmul_shapes)
-linear_res = benchmark(linear, linear_transposed, linear_setup, linear_shapes())
-ordered_res = sorted(linear_res, key=lambda x: x["speedup"], reverse=True)
-
-with open(f"linear_benchmark_{device}.json", "w") as f:
-    f.write(pprint.pformat(ordered_res))
-
-# Save the benchmark results
-
-
-# Test the exact examples given in the concat examples
-# Note that dimms are x3 to account for the concatting of 3 tensors.
-
-github_issue_sizes = [
-    [[14, 768], [768 * 3, 768], [768 * 3]],
-    [[64, 1024], [4096 * 3, 1024], [4096 * 3]],
+tests = [
+    [linear, linear_module, "mkldnn_1conv_vs_orig"],
+    # [linear, linear_matmul, "orig_mm_vs_orig"],
+    # [linear, linear_matmul_module, "mkldnn_mm_1conv_vs_orig"],
+    # [linear_module, linear_matmul_module, "mkldnn_mm_vs_mlkdnn"],
+    # [linear_matmul, linear_matmul_module, "mkldnn_mm_vs_orig_mm"],
 ]
+set_1cpu = False
+
+for ref_func, test_func, test_name in tests:
+    # test_name = "mkldnn_2"
+    # torch.set_default_dtype(torch.float16)
+    # ref_func = linear_module
+    # test_func = linear_t_module
+    
+    print(f"starting tests for {test_name}")
+    github_issue_sizes = [
+        [[14, 768], [768 * 3, 768], [768 * 3]],
+        [[64, 1024], [4096 * 3, 1024], [4096 * 3]],
+    ]
+
+    # devices = ["cpu", "cuda"]
+    devices = ["cpu"]
+
+    for raw_device in devices:
+        if set_1cpu and raw_device != "1cpu":
+            raise Exception("Can't run benchmark after threads have already been set to 1")
+        
+        if raw_device == "1cpu":
+            device = "cpu"
+
+            if not set_1cpu:
+                set_1cpu = True
+                torch.set_num_threads(1)
+                torch.set_num_interop_threads(1)
+        else:
+            device = raw_device
+
+        # res = benchmark(matmul, matmul_transposed, matmul_setup, matmul_shapes)
+        linear_res = benchmark(ref_func, test_func, linear_setup, linear_shapes(), device)
+        ordered_res = sorted(linear_res, key=lambda x: x["speedup"], reverse=True)
+
+        with open(f"linear_{test_name}_{raw_device}.json", "w") as f:
+            f.write(pprint.pformat(ordered_res).replace("'", '"'))
+
+        # Test the exact examples given in the concat examples
+        # Note that dimms are x3 to account for the concatting of 3 tensors.
+        github_res = benchmark(
+            ref_func, test_func, linear_setup, github_issue_sizes, device
+        )
+        pprint.pprint(github_res)
 
 
-github_res = benchmark(linear, linear_transposed, linear_setup, github_issue_sizes)
-pprint.pprint(github_res)
+# %%
+# %%
