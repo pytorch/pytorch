@@ -148,7 +148,7 @@ const Node* findNodeForOp(
     const Graph& g,
     const std::string& unqualifiedOpName) {
   const auto opName = Symbol::fromQualString("aten::" + unqualifiedOpName);
-  for (const auto node : g.nodes()) {
+  for (const auto* node : g.nodes()) {
     if (node->kind() == opName) {
       return node;
     }
@@ -156,10 +156,28 @@ const Node* findNodeForOp(
 
   // Check for alias-ed operator names
   const auto aliasOp = torch::jit::getOperatorAliasMap().find(opName);
-  AT_ASSERT(aliasOp != torch::jit::getOperatorAliasMap().end());
-  for (const auto node : g.nodes()) {
-    if (node->kind() == aliasOp->second) {
-      return node;
+  if (aliasOp != torch::jit::getOperatorAliasMap().end()) {
+    for (const auto* node : g.nodes()) {
+      if (node->kind() == aliasOp->second) {
+        return node;
+      }
+    }
+  }
+
+  // Ideally, there will be only one ATen operator that has tensor outputs in the graph.
+  // Let's use that as the last resolve to make checkAliasAnnotation more robust.
+  for (const auto* node : g.nodes()) {
+    if (!node->maybeOperator()) {
+      continue;
+    }
+    if (!node->getOperator().isC10Op()) {
+      continue;
+    }
+
+    for (const auto* output : node->outputs()) {
+      if (output->type()->kind() == TypeKind::TensorType) {
+        return node;
+      }
     }
   }
 
