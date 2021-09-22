@@ -227,3 +227,27 @@ class TestAOMigrationQuantization(AOMigrationTestCase):
         ]
         self._test_function_import('fuser_method_mappings', function_list)
         self._test_dict_import('fuser_method_mappings', dict_list)
+
+    def test_package_import_utils(self):
+        self._test_package_import('utils')
+
+    def test_function_import_utils(self):
+        function_list = [
+            'activation_dtype',
+            'activation_is_int8_quantized',
+            'activation_is_statically_quantized',
+            'calculate_qmin_qmax',
+            'check_min_max_valid',
+            'get_combined_dict',
+            'get_qconfig_dtypes',
+            'get_qparam_dict',
+            'get_quant_type',
+            'get_swapped_custom_module_class',
+            'getattr_from_fqn',
+            'is_per_channel',
+            'is_per_tensor',
+            'weight_dtype',
+            'weight_is_quantized',
+            'weight_is_statically_quantized',
+        ]
+        self._test_function_import('utils', function_list)
