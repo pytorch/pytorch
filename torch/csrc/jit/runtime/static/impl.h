@@ -216,7 +216,11 @@ class TORCH_API StaticModule {
 class TORCH_API StaticRuntime {
  public:
   explicit StaticRuntime(const StaticModule& sm);
+  StaticRuntime(StaticRuntime&&) = delete;
+  StaticRuntime& operator=(StaticRuntime&&) = delete;
   ~StaticRuntime();
+
+  C10_DISABLE_COPY_AND_ASSIGN(StaticRuntime);
 
   std::vector<at::Tensor> operator()(const std::vector<at::Tensor>& inps);
 

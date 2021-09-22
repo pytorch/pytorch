@@ -113,11 +113,11 @@ class TORCH_API Reducer {
   // buckets, each of which is specified as a list of indices into the
   // variables list for **a single replica** (i.e. `variables[0]`).
   explicit Reducer(
-      std::vector<std::vector<at::Tensor>> replicas,
+      std::vector<at::Tensor> params,
       std::vector<std::vector<size_t>> bucket_indices,
       std::vector<size_t> per_bucket_size_limits,
       c10::intrusive_ptr<c10d::ProcessGroup> process_group,
-      std::vector<std::vector<bool>> expect_sparse_gradients,
+      std::vector<bool> expect_sparse_gradients,
       int64_t bucket_bytes_cap,
       bool find_unused_parameters,
       bool gradient_as_bucket_view,
@@ -145,9 +145,9 @@ class TORCH_API Reducer {
   void prepare_for_forward();
 
   // Returns the relative time in nanoseconds when gradients were ready,
-  // with respect to the time `prepare_for_backward` was called. The outer
-  // vector is for model replicas and the inner vector is for parameters.
-  std::vector<std::vector<int64_t>> get_backward_stats() const {
+  // with respect to the time `prepare_for_backward` was called. The
+  // vector is for parameters for a single model replica.
+  std::vector<int64_t> get_backward_stats() const {
     return backward_stats_;
   }
 
@@ -236,13 +236,13 @@ class TORCH_API Reducer {
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   mutable std::mutex mutex_;
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
-  const std::vector<std::vector<at::Tensor>> replicas_;
+  const std::vector<at::Tensor> params_;
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   const c10::intrusive_ptr<::c10d::ProcessGroup> process_group_;
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
-  std::vector<std::vector<bool>> expect_sparse_gradients_;
+  std::vector<bool> expect_sparse_gradients_;
 
-  std::vector<std::vector<std::shared_ptr<torch::autograd::Node>>>
+  std::vector<std::shared_ptr<torch::autograd::Node>>
       grad_accumulators_; // NOLINT(cppcoreguidelines-non-private-member-variables-in-classes)
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::unordered_map<torch::autograd::Node*, size_t> gradAccToVariableMap_;
@@ -474,7 +474,7 @@ class TORCH_API Reducer {
   // We collect the relative timestamp of every gradient being ready
   // when executing autograd. This can be used to derive a timeline of
   // the point in time buckets were ready, or ideal bucket assignment/ordering.
-  std::vector<std::vector<int64_t>> backward_stats_;
+  std::vector<int64_t> backward_stats_;
 
   bool should_collect_runtime_stats();
   void record_forward_compute_start_time();
@@ -602,11 +602,13 @@ compute_bucket_assignment_by_size(
     const std::vector<at::Tensor>& tensors,
     const std::vector<size_t>& bucket_size,
     const std::vector<bool>& expect_sparse_gradient = {},
-    const std::vector<int64_t>& tensor_indices = {});
+    const std::vector<int64_t>& tensor_indices = {},
+    const c10::optional<std::weak_ptr<c10d::Logger>>& logger = {});
 
 // Verify models across all processes are the same as model on rank 0 with
 // respect to no. of params and matching dtype/size/layout.
-TORCH_API void verify_replica0_across_processes(
-    c10::intrusive_ptr<c10d::ProcessGroup> process_group,
-    std::vector<std::vector<at::Tensor>> model_replicas);
+TORCH_API void verify_params_across_processes(
+    const c10::intrusive_ptr<c10d::ProcessGroup>& process_group,
+    const std::vector<at::Tensor>& params,
+    const c10::optional<std::weak_ptr<c10d::Logger>>& logger);
 } // namespace c10d
