@@ -320,6 +320,8 @@ cmake_dependent_option(
     "BUILD_PYTHON" OFF)
 cmake_dependent_option(USE_CCACHE "Attempt using CCache to wrap the compilation" ON "UNIX" OFF)
 option(WERROR "Build with -Werror supported by the compiler" OFF)
+option(USE_COREML_DELEGATE "Use the CoreML backend through delegate APIs" OFF)
+
 
 if(USE_CCACHE)
   find_program(CCACHE_PROGRAM ccache)
@@ -701,6 +703,10 @@ endif()
 
 if(USE_LITE_INTERPRETER_PROFILER)
   string(APPEND CMAKE_CXX_FLAGS " -DEDGE_PROFILER_USE_KINETO")
+endif()
+
+if(USE_COREML_DELEGATE)
+  string(APPEND CMAKE_CXX_FLAGS " -DUSE_COREML_DELEGATE")
 endif()
 
 # ---[ Allowlist file if allowlist is specified
