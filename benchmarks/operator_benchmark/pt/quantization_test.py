@@ -115,11 +115,11 @@ class QuantizePerChannelBenchmark(op_bench.TorchBenchmarkBase):
     def forward(self, input, scales, zero_points, axis: int, dtype: int):
         return self.op(input, scales=scales, zero_points=zero_points, axis=axis, dtype=dtype)
 
-'''
+
 op_bench.generate_pt_test(
     quantize_per_channel_configs_short + quantize_per_channel_configs_long,
     QuantizePerChannelBenchmark)
-'''
+
 # === Fake Quantization ===
 
 fake_quantize_configs_short_dict = {
@@ -164,11 +164,11 @@ class FakeQuantizeBenchmark(op_bench.TorchBenchmarkBase):
     def forward(self, input):
         return self.op(input)
 
-'''
+
 op_bench.generate_pt_test(
     fake_quantize_configs_short + fake_quantize_configs_long,
     FakeQuantizeBenchmark)
-'''
+
 
 # op_type is used to describe the type of operator used in benchmarking:
 # learnable_kernel represents the c++ kernel that can backpropagate on
