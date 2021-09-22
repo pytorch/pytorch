@@ -18,7 +18,7 @@ class TensorMetadata(NamedTuple):
 
     # Quantization metadata
     is_quantized : bool
-    qparams: Optional[Dict[str, Any]]
+    qparams: Dict[str, Any]
 
 def _extract_tensor_metadata(result : torch.Tensor) -> TensorMetadata:
     """
@@ -43,17 +43,10 @@ def _extract_tensor_metadata(result : torch.Tensor) -> TensorMetadata:
             break
 
     is_quantized = result.is_quantized
-    qparams = None
-    q_scale = None
-    q_zero_point = None
-    q_per_channel_scales = None
-    q_per_channel_zero_points = None
-    q_per_channel_axis = None
-
+    qparams: Dict[str, Any] = {}
     if is_quantized:
-        qparams = {}
         qparams["qscheme"] = result.qscheme()
-        qparams["dtype"] = result.dtype  # type: ignore[assignment]
+        qparams["dtype"] = result.dtype
         if qparams["qscheme"] in {torch.per_tensor_affine, torch.per_tensor_symmetric}:
             qparams["scale"] = result.q_scale()  # type: ignore[assignment]
             qparams["zero_point"] = result.q_zero_point()  # type: ignore[assignment]
