@@ -368,6 +368,10 @@ C10_API std::ostream& operator<<(std::ostream&, DispatchKey);
 
 C10_API DispatchKey getAutogradKeyFromBackend(DispatchKey t);
 
+// Parses a string into a dispatch key.
+// If the string cannot be correctly parsed, throws an exception.
+C10_API c10::DispatchKey parseDispatchKey(const std::string& k);
+
 // These are some convenience identifiers for dispatch keys which are
 // shorter to type than their long counterparts.  Note that some of these
 // dispatch keys directly correspond to DeviceType; and most APIs that

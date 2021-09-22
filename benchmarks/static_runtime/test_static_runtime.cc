@@ -58,6 +58,13 @@ bool testHasInplaceOp(const std::string& jit_script) {
   return HasInplaceOp(graph, alias_db);
 }
 
+bool testModuleHasOp(const std::string& jit_script, const char* op_name) {
+  script::Module module("module");
+  module.define(jit_script);
+
+  return forwardHasOp(module, op_name);
+}
+
 Node* getNodeWithKind(const StaticModule& smodule, const std::string& kind) {
   for (auto& pnode : smodule.nodes()) {
     if (std::string(pnode.node()->kind().toQualString()) == kind) {
@@ -67,6 +74,10 @@ Node* getNodeWithKind(const StaticModule& smodule, const std::string& kind) {
   return nullptr;
 }
 
+bool hasNodeWithKind(const StaticModule& smodule, const std::string& kind) {
+  return getNodeWithKind(smodule, kind) != nullptr;
+}
+
 } // namespace
 
 TEST(StaticRuntime, InPlace) {
@@ -74,6 +85,13 @@ TEST(StaticRuntime, InPlace) {
   EXPECT_TRUE(testHasInplaceOp(reshape_inplace_script_1));
   EXPECT_TRUE(testHasInplaceOp(sigmoid_inplace_script));
   EXPECT_FALSE(testHasInplaceOp(sigmoid_out_script));
+}
+
+TEST(StaticRuntime, ModuleHasOp) {
+  EXPECT_TRUE(testModuleHasOp(reshape_inplace_script, "aten::sigmoid_"));
+  EXPECT_TRUE(testModuleHasOp(reshape_inplace_script_1, "aten::reshape"));
+  EXPECT_TRUE(testModuleHasOp(sigmoid_inplace_script, "aten::clone"));
+  EXPECT_FALSE(testModuleHasOp(reshape_inplace_script_1, "aten::add_"));
 }
 
 TEST(StaticRuntime, CanEnableStaticRuntime) {
@@ -1393,4 +1411,62 @@ TEST(StaticRuntime, SignedLog1p) {
 
   std::vector<IValue> args2 = {at::randn({3, 3, 3})};
   testStaticRuntime(signed_log1p_script, args1, args2, true);
+}
+
+TEST(StaticRuntime, RemoveImmutableInputDictLookupsWithImmutableInputDict) {
+  script::Module module("module");
+  module.define(getitem_immutable_input_dict_script);
+  torch::jit::StaticModule smodule(module);
+  EXPECT_FALSE(hasNodeWithKind(smodule, "aten::__getitem__"));
+  EXPECT_TRUE(hasNodeWithKind(smodule, "static_runtime::dict_unpack"));
+
+  auto a = at::randn({2, 4});
+  auto b = at::randn({2, 4});
+  c10::Dict<c10::IValue, c10::IValue> dict(
+      c10::IntType::get(), c10::TensorType::get());
+  dict.insert(0, a);
+  dict.insert(1, b);
+  testStaticRuntime(getitem_immutable_input_dict_script, {dict});
+
+  c10::Dict<c10::IValue, c10::IValue> dict0(
+      c10::IntType::get(), c10::TensorType::get());
+  auto a0 = at::randn({3, 4});
+  auto b0 = at::randn({3, 4});
+  dict0.insert(0, a0);
+  dict0.insert(1, b0);
+  testStaticRuntime(getitem_immutable_input_dict_script, {dict0});
+}
+
+TEST(StaticRuntime, RemoveImmutableInputDictLookupsWithMutableInputDict) {
+  script::Module module("module");
+  module.define(getitem_mutable_input_dict_script);
+  torch::jit::StaticModule smodule(module);
+  EXPECT_TRUE(hasNodeWithKind(smodule, "aten::__getitem__"));
+  EXPECT_FALSE(hasNodeWithKind(smodule, "static_runtime::dict_unpack"));
+}
+
+TEST(StaticRuntime, VarTupleUnpack) {
+  script::Module module("module");
+  module.define(var_tuple_unpack_script);
+  torch::jit::StaticModule smodule(module);
+  EXPECT_FALSE(hasNodeWithKind(smodule, "prim::TupleUnpack"));
+  EXPECT_TRUE(hasNodeWithKind(smodule, "static_runtime::VarTupleUnpack"));
+
+  auto a = at::randn({2, 2});
+  auto b = at::randn({3, 3, 3});
+  std::vector<IValue> args1{c10::ivalue::Tuple::create(a, a), c10::ivalue::Tuple::create(1, 2)};
+  std::vector<IValue> args2{c10::ivalue::Tuple::create(b, b), c10::ivalue::Tuple::create(1, 2)};
+
+  testStaticRuntime(var_tuple_unpack_script, args1);
+  testStaticRuntime(var_tuple_unpack_script, args1, args2);
+}
+
+TEST(StaticRuntime, VarTupleUnpack_NotApplied) {
+  script::Module module("module");
+  // In this script, the optimization is not applied since there is a computation between
+  // the TupleUnpack nodes.
+  module.define(var_tuple_unpack_not_applied_script);
+  torch::jit::StaticModule smodule(module);
+  EXPECT_FALSE(hasNodeWithKind(smodule, "static_runtime::VarTupleUnpack"));
+  EXPECT_TRUE(hasNodeWithKind(smodule, "prim::TupleUnpack"));
 }

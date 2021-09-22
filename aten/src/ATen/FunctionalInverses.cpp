@@ -43,12 +43,34 @@ Tensor unsqueeze_to(const Tensor & self, int64_t dim, IntArrayRef sizes) {
   return self;
 }
 
+// Note [Functionalization Pass: View Inverses].
+// This file contains the implementation of each "view inverse".
+// These aren't really true inverses in the mathematically sense: each view inverse describes how to undo
+// the original view (although it takes in different arguments).
+//
+// In general, view inverses respect the following property:
+//
+// b = view1(a, args...)
+// a_copy = view1_inverse(a, b, args...)
+// a and a_copy should be equal.
+//
+// Note that a is also passed as an argument to view1_inverse in the above example.
+// This isn't actually required for most view operators: it's only required for view ops
+// where you can't figure out what the size of the base tensor is given just the view tensor and arguments.
+// Examples are slice/select/scatter/squeeze/as_strided.
+// We happen to be passing in the base tensor in all cases, mostly to make the codegen simpler.
+// But you'll see below that the "base" argument is ignored by most view_inverse implementations.
 
 // ----------------------------------------------------------
 // Implementations of each view_inverse() function are below.
 // One of these needs to be implemented for every existing non-composite view operator.
 // The codegen automatically generates the corresponding function declaration.
 // ----------------------------------------------------------
+
+Tensor _fw_primal_inverse(const at::Tensor& base, const at::Tensor& mutated_view, int64_t level) {
+    TORCH_INTERNAL_ASSERT(false, "Attempted to call _fw_primal() during the functionalization pass. For now, this is not supported.");
+    return Tensor();
+}
 
 Tensor view_as_real_inverse(const Tensor& base, const Tensor& mutated_view) {
     return at::view_as_complex(mutated_view);
@@ -161,6 +183,16 @@ Tensor indices_inverse(const Tensor& base, const Tensor& mutated_view) {
 
 Tensor values_inverse(const Tensor& base, const Tensor& mutated_view) {
     TORCH_INTERNAL_ASSERT(false, "Attempted to call values() during the functionalization pass. For now, sparse tensors aren't supported during functionalization");
+    return Tensor();
+}
+
+Tensor crow_indices_inverse(const at::Tensor& base, const at::Tensor& mutated_view) {
+    TORCH_INTERNAL_ASSERT(false, "Attempted to call crow_indices() during the functionalization pass. For now, sparse tensors aren't supported during functionalization");
+    return Tensor();
+}
+
+Tensor col_indices_inverse(const at::Tensor& base, const at::Tensor& mutated_view) {
+    TORCH_INTERNAL_ASSERT(false, "Attempted to call col_indices() during the functionalization pass. For now, sparse tensors aren't supported during functionalization");
     return Tensor();
 }
 
