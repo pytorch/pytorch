@@ -272,6 +272,17 @@ std::tuple<Tensor, optional<int64_t>> select_batching_rule(const Tensor& self, o
   return std::make_tuple(result, 0);
 }
 
+std::tuple<Tensor, optional<int64_t>> _reshape_alias_batch_rule(const Tensor& self, optional<int64_t> bdim, const IntArrayRef shape, const IntArrayRef strides) {
+  (void) strides;
+  TORCH_INTERNAL_ASSERT(bdim.has_value());
+
+  c10::SmallBuffer<int64_t, 5> new_shape(shape.size() + 1);
+  new_shape[*bdim] = self.size(*bdim);
+  std::copy(shape.begin(), shape.begin() + *bdim, new_shape.begin());
+  std::copy(shape.begin() + *bdim, shape.end(), new_shape.begin() + *bdim + 1);
+  return std::make_tuple(at::reshape(self, new_shape), bdim);
+}
+
 std::tuple<Tensor,optional<int64_t>> diagonal_backward_batch_rule(
     const Tensor& grad_input, optional<int64_t> grad_input_bdim,
     IntArrayRef input_sizes, int64_t offset, int64_t dim1, int64_t dim2) {
@@ -327,6 +338,7 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   VMAP_SUPPORT("select.int", select_batching_rule);
   VMAP_SUPPORT("squeeze", squeeze_batch_rule);
   VMAP_SUPPORT("squeeze.dim", squeeze_dim_batch_rule);
+  VMAP_SUPPORT("_reshape_alias", _reshape_alias_batch_rule);
   VMAP_SUPPORT("diagonal_backward", diagonal_backward_batch_rule);
   VMAP_SUPPORT("select_backward", select_backward_batch_rule);
   VMAP_SUPPORT("slice_backward", slice_backward_batch_rule);
