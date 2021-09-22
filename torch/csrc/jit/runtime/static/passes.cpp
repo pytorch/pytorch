@@ -4,6 +4,7 @@
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
+#include <torch/csrc/jit/runtime/graph_iterator.h>
 #include <torch/csrc/jit/runtime/static/ops.h>
 
 namespace torch {
@@ -27,6 +28,32 @@ bool HasInplaceOp(Block* block, const AliasDb& alias_db) {
   return false;
 }
 
+bool graphHasOp(std::shared_ptr<Graph>& graph, const char* op_name) {
+  DepthFirstGraphNodeIterator graph_it(graph);
+  for (auto node = graph_it.next(); node != nullptr; node = graph_it.next()) {
+    const char* node_qual_string = node->kind().toQualString();
+    if (strcmp(node_qual_string, op_name) == 0) {
+      return true;
+    }
+  }
+  return false;
+}
+} // namespace
+
+bool HasInplaceOp(std::shared_ptr<Graph>& graph, const AliasDb& alias_db) {
+  return HasInplaceOp(graph->block(), alias_db);
+}
+
+bool forwardHasOp(
+    const torch::jit::script::Module& module,
+    const char* op_name) {
+  using Method = ::torch::jit::Method;
+  Method method = module.get_method("forward");
+  auto graph = method.graph();
+  return graphHasOp(graph, op_name);
+}
+
+namespace {
 C10_UNUSED
 void ConcatAddMulReplaceNaNClip(std::shared_ptr<torch::jit::Graph>& graph) {
   // TODO:: check restrictions for inputs; outputs not used elsewhere
@@ -386,10 +413,6 @@ void UseVariadicTupleUnpack(const std::shared_ptr<Graph>& graph) {
   for (auto& c : CollectVariadicTupleUnpackFusionCandidates(graph)) {
     FuseTupleUnpackBlock(c);
   }
-}
-
-bool HasInplaceOp(std::shared_ptr<Graph>& graph, const AliasDb& alias_db) {
-  return HasInplaceOp(graph->block(), alias_db);
 }
 
 void ReplaceWithCopy(

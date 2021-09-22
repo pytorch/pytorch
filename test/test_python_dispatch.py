@@ -373,6 +373,16 @@ $6 = torch._ops.aten.add_($1, $5)''')
         finally:
             WRAPPER_DEVICE = prev_device
 
+    def test_new_ones(self) -> None:
+        class MyTensor(torch.Tensor):
+            __torch_function__ = torch._C._disabled_torch_function_impl
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+                return MyTensor(3)
+
+        self.assertEqual(type(MyTensor(2).new_ones(3)), MyTensor)
+
     def test_enable_python_mode_error(self) -> None:
         with self.assertRaisesRegex(ValueError, "__torch_dispatch__"):
             with enable_python_mode(torch.Tensor):
@@ -448,6 +458,14 @@ $6 = torch._ops.aten.add_($1, $5)''')
             with enable_python_mode(LoggingTensor):
                 with enable_python_mode(LoggingTensor):
                     pass
+
+    def test_enable_python_mode_subclass_autograd_device_check(self) -> None:
+        x = LoggingTensor(torch.tensor([3.0, 4.0], requires_grad=True))
+        y = torch.randn(2)
+        z = x * y
+        self.assertIsInstance(z, LoggingTensor)
+        z.sum().backward(torch.tensor(1.))
+        self.assertEqual(x.grad, y)
 
 if __name__ == '__main__':
     run_tests()
