@@ -3006,7 +3006,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('nn.functional.cross_entropy', 'mean'),
         xfail('nn.functional.cross_entropy', 'none'),
         xfail('nn.functional.cross_entropy', 'sum'),
-        xfail('nn.functional.grid_sample'),
         xfail('nn.functional.interpolate', 'area'),
         xfail('nn.functional.pad', 'circular'),
         xfail('nn.functional.unfold'),
