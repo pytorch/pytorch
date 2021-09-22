@@ -48,12 +48,14 @@ from torch.quantization import (
     convert,
     quantize_dynamic,
     default_placeholder_observer,
+    default_weight_observer,
     PerChannelMinMaxObserver,
     QConfigDynamic,
     FixedQParamsFakeQuantize,
     FusedMovingAvgObsFakeQuantize,
     FakeQuantize,
     MovingAverageMinMaxObserver,
+    HistogramObserver,
     QConfig,
 )
 
@@ -4261,6 +4263,35 @@ class TestQuantizeFxOps(QuantizationTestCase):
             M(), data, quant_type, custom_qconfig_dict=qconfig_dict,
             expected_node_occurrence=node_occurrence)
 
+    def test_fixed_qparams_ops_qint8(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.sigmoid = torch.nn.Sigmoid()
+                self.tanh = torch.nn.Tanh()
+
+            def forward(self, x):
+                x = self.sigmoid(x)
+                x = torch.sigmoid(x)
+                x = x.sigmoid()
+                x = self.tanh(x)
+                x = torch.tanh(x)
+                x = x.tanh()
+                return x
+
+        data = (torch.randn((2, 2, 2, 2), dtype=torch.float),)
+        quant_type = QuantType.STATIC
+        qconfig = torch.quantization.QConfig(
+            activation=HistogramObserver.with_args(qscheme=torch.per_tensor_symmetric, dtype=torch.qint8),
+            weight=default_weight_observer)
+        qconfig_dict = {"": qconfig}
+        node_occurrence = {
+            ns.call_function(torch.quantize_per_tensor): 7,
+            ns.call_method("dequantize"): 7
+        }
+        self.checkGraphModeFxOp(
+            M(), data, quant_type, custom_qconfig_dict=qconfig_dict,
+            expected_node_occurrence=node_occurrence, is_reference=True)
 
     @skipIfNoFBGEMM
     def test_general_shape_ops(self):
