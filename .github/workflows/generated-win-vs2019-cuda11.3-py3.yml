@@ -37,7 +37,7 @@ concurrency:
 jobs:
   ciflow_should_run:
     runs-on: ubuntu-18.04
-    if: ${{ (github.repository_owner == 'pytorch') && ((github.event_name != 'pull_request') || (github.event.action !='unassigned') || (contains(github.event.pull_request.labels.*.name, 'ciflow/all') || contains(github.event.pull_request.labels.*.name, 'ciflow/cuda') || contains(github.event.pull_request.labels.*.name, 'ciflow/default') || contains(github.event.pull_request.labels.*.name, 'ciflow/win'))) }}
+    if: ${{ (github.repository_owner == 'pytorch') && ((github.event_name != 'pull_request') || (github.event.assignee.login != 'pytorchbot' ) || (github.event.action !='unassigned') || (contains(github.event.pull_request.labels.*.name, 'ciflow/all') || contains(github.event.pull_request.labels.*.name, 'ciflow/cuda') || contains(github.event.pull_request.labels.*.name, 'ciflow/default') || contains(github.event.pull_request.labels.*.name, 'ciflow/win'))) }}
     steps:
       - name: noop
         run: echo running ciflow_should_run
@@ -142,6 +142,8 @@ jobs:
       NUM_TEST_SHARDS: 2
       NUM_TEST_SHARDS_ON_PULL_REQUEST: 1
       PR_BODY: ${{ github.event.pull_request.body }}
+      NOGPU_RUNNER_TYPE: windows.4xlarge
+      ENABLE_FORCE_ON_CPU_TEST: ''
     outputs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
       render-matrix: ${{ steps.set-matrix.outputs.render-matrix }}
@@ -206,10 +208,12 @@ jobs:
         run: |
           .\.circleci\scripts\vs_install.ps1
       - name: Install Cuda
+        if: ${{ matrix.config != 'force_on_cpu' }}
         shell: bash
         run: |
           .circleci/scripts/windows_cuda_install.sh
       - name: Install Cudnn
+        if: ${{ matrix.config != 'force_on_cpu' }}
         shell: bash
         run: |
           .circleci/scripts/windows_cudnn_install.sh
@@ -234,9 +238,6 @@ jobs:
         run: |
             if [[ $NUM_TEST_SHARDS -ne 2 ]]; then
               export SHARD_NUMBER=0
-            fi
-            if [[ -n $GITHUB_HEAD_REF && "$RUN_SMOKE_TESTS_ONLY_ON_PR" == "true" ]]; then
-              export RUN_SMOKE_TESTS_ONLY=1
             fi
             .jenkins/pytorch/win-test.sh
       - name: Zip test reports for upload
