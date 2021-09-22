@@ -225,7 +225,6 @@ if (jit::tracer::isTracing()) {
   ${add_trace_inputs}
   tracer_state->graph->insertNode(node);
   ${inplace_guard}
-  jit::tracer::setTracingState(nullptr);
 }
 """)
 

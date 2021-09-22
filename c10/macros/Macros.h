@@ -1,6 +1,8 @@
 #ifndef C10_MACROS_MACROS_H_
 #define C10_MACROS_MACROS_H_
 
+#define NDEBUG
+
 /* Main entry for c10/macros.
  *
  * In your code, include c10/macros/Macros.h directly, instead of individual

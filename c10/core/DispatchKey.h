@@ -77,6 +77,9 @@ enum class DispatchKey : uint8_t {
   VE, // For out of tree & closed source integration of SX-Aurora / NEC
   Lazy, // For lazy tensor backends
 
+
+  Tracer,
+
   // A meta tensor is a tensor without any data associated with it.  (They
   // have also colloquially been referred to as tensors on the "null" device).
   // A meta tensor can be used to dry run operators without actually doing any
@@ -248,8 +251,6 @@ enum class DispatchKey : uint8_t {
   AutogradPrivateUse1,
   AutogradPrivateUse2,
   AutogradPrivateUse3,
-
-  Tracer,
 
   // Autocasting precedes VariableTypeId, to ensure casts are autograd-exposed
   // and inputs are saved for backward in the post-autocast type.

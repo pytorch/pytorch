@@ -50,16 +50,34 @@ const Tensor& resize_(
     const Tensor& self,
     IntArrayRef size,
     c10::optional<MemoryFormat> optional_memory_format) {
-  if (torch::jit::tracer::isTracing()) {
-    jit::tracer::ArgumentStash::popIntArrayRef("size");
-    jit::tracer::warn("resize_", jit::tracer::WARN_RESIZE);
-    jit::tracer::delValueTrace(self);
+  torch::jit::Node* node = nullptr;
+  std::shared_ptr<jit::tracer::TracingState> tracer_state;
+  if (jit::tracer::isTracing()) {
+    tracer_state = jit::tracer::getTracingState();
+    at::Symbol op_name;
+
+    if (tracer_state->force_outplace) {
+      op_name = jit::Symbol::fromQualString("aten::resize");
+    } else {
+      op_name = jit::Symbol::fromQualString("aten::resize_");
+    }
+    node = tracer_state->graph->create(op_name, /*num_outputs=*/0);
+    jit::tracer::recordSourceLocation(node);
+    jit::tracer::addInputs(node, "self", self);
+    jit::tracer::addInputs(node, "size", size);
+    tracer_state->graph->insertNode(node);
+    jit::tracer::ensureUniqueIfOutOfPlaced("resize_", self);
   }
 
   {
     at::tracer::impl::NoTracerDispatchMode tracer_guard;
     // NOLINTNEXTLINE(performance-move-const-arg)
     self.resize_(size, std::move(optional_memory_format));
+  }
+
+  if (tracer_state) {
+    jit::tracer::setTracingState(std::move(tracer_state));
+    jit::tracer::addOutput(node, self);
   }
   return self;
 }
