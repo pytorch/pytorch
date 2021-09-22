@@ -1,7 +1,6 @@
 import torch
 import functools
 import collections
-import warnings
 try:
     import numpy as np
     HAS_NUMPY = True
@@ -40,7 +39,7 @@ class autocast(torch.autocast_mode.autocast):
         return self
 
     # TODO: discuss a unified TorchScript-friendly API for autocast
-    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any): # type: ignore[override]
+    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any):  # type: ignore[override]
         if torch._jit_internal.is_scripting():
             return
         # Drop the cache when we exit to a nesting level that's outside any instance of autocast.
