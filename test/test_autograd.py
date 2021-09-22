@@ -7677,6 +7677,7 @@ class TestAutogradForwardMode(TestCase):
                 torch.add(foo, bar, out=bar)
 
     # TODO: Temporary solution to substitute for OpsInfo
+    @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
     def test_mkldnn_convolution(self):
         inp = torch.rand(2, 2, 5, 5, dtype=torch.float, requires_grad=True)
         weight = torch.rand(3, 2, 3, 3, dtype=torch.float, requires_grad=True)
