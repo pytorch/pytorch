@@ -65,7 +65,8 @@ class AutoTracingTestCase(QuantizationTestCase):
             out_m_copy_p = m_copy_p(*example_args)
             # print(m_copy_p)
             m_copy_q = convert_fx(m_copy_p)
-            # print(m_copy_q)
+            print(m_copy_q)
+            print(m_copy_q.graph)
             out_q_fx = m_copy_q(*example_args)
             self.assertTrue(_allclose(out_p, out_m_copy_p))
             # print(out_q)
@@ -144,6 +145,28 @@ class TestAutoTracing(AutoTracingTestCase):
         self._test_auto_tracing(m, qconfig, (torch.randn(1, 1, 2, 2),))
 
     @skipIfNoFBGEMM
+    def test_fusion_called_multiple_times(self):
+        """
+        Tests that fusion works if the modules to fuse get called multiple
+        times in the same forward.
+        """
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(1, 1, 1)
+                self.relu = torch.nn.ReLU()
+
+            def forward(self, x):
+                for _ in range(2):
+                    x = self.conv(x)
+                    x = self.relu(x)
+                return x
+
+        m = M().eval()
+        qconfig = torch.quantization.default_qconfig
+        self._test_auto_tracing(m, qconfig, (torch.randn(1, 1, 2, 2),))
+
+    @skipIfNoFBGEMM
     def test_observers_not_touched_by_tracing(self):
         """
         Verifies that running dynamic tracing does not change any data
@@ -188,6 +211,22 @@ class TestAutoTracing(AutoTracingTestCase):
 
         m = M().eval()
         qconfig = torch.quantization.default_qconfig
+        self._test_auto_tracing(m, qconfig, (torch.randn(1, 1, 2, 2),))
+
+    @unittest.skip("TODO(next) enable this")
+    @skipIfNoFBGEMM
+    def test_conv_qat(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(1, 1, 1)
+
+            def forward(self, x):
+                x1 = self.conv(x)
+                return x1
+
+        m = M().eval()
+        qconfig = torch.quantization.get_default_qat_qconfig('fbgemm')
         self._test_auto_tracing(m, qconfig, (torch.randn(1, 1, 2, 2),))
 
     @skipIfNoFBGEMM
@@ -317,6 +356,29 @@ class TestAutoTracing(AutoTracingTestCase):
 
         model_fp32 = M().eval()
 
+        qconfig = torch.quantization.default_qconfig
+        self._test_auto_tracing(model_fp32, qconfig, (torch.randn(1, 1, 2, 2),))
+
+    @skipIfNoFBGEMM
+    def test_conv_functional(self):
+
+        class M(torch.nn.Module):
+            def __init__(self, weight2d, bias2d):
+                super().__init__()
+                self.weight2d = torch.nn.Parameter(weight2d)
+                self.bias2d = torch.nn.Parameter(bias2d)
+                self.stride2d = (1, 1)
+                self.padding2d = (0, 0)
+                self.dilation2d = (1, 1)
+                self.groups = 1
+
+            def forward(self, x):
+                x = F.conv2d(
+                    x, self.weight2d, self.bias2d, self.stride2d, self.padding2d,
+                    self.dilation2d, self.groups)
+                return x
+
+        model_fp32 = M(torch.randn(1, 1, 1, 1), torch.randn(1)).eval()
         qconfig = torch.quantization.default_qconfig
         self._test_auto_tracing(model_fp32, qconfig, (torch.randn(1, 1, 2, 2),))
 
@@ -641,6 +703,57 @@ class TestAutoTracing(AutoTracingTestCase):
         self._test_auto_tracing(
             model_fp32, qconfig, (torch.LongTensor([[0]]),),
             fuse_modules=False)
+
+    # this is broken because AutoQuantizationState appears in self.items
+    @unittest.skip('TODO fix this')
+    @skipIfNoFBGEMM
+    def test_module_calls_items(self):
+        class M(torch.nn.ModuleDict):
+            def __init__(self):
+                super().__init__()
+                for i in range(2):
+                    layer = nn.ReLU()
+                    self.add_module("layer_" + str(i), layer)
+
+            def forward(self, x):
+                layers = [x]
+                for name, layer in self.items():
+                    layers.append(layer(x))
+                return torch.cat(layers, dim=1)
+
+        model_fp32 = M().eval()
+        qconfig = torch.quantization.default_qconfig
+        self._test_auto_tracing(
+            model_fp32, qconfig, (torch.randn(1, 1, 2, 2),))
+
+    @skipIfNoFBGEMM
+    def test_subclass_of_quantizeable_module(self):
+        """
+        If a user creates a subclass of nn.BatchNorm2d, that subclass
+        should not be quantized unless the user defines a custom module.
+        """
+        class BN2d(torch.nn.BatchNorm2d):
+            pass
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(1, 1, 1)
+                self.bn = BN2d(1)
+                self.conv2 = torch.nn.Conv2d(1, 1, 1)
+
+            def forward(self, x):
+                x = self.conv(x)
+                x = self.bn(x)
+                x = self.conv2(x)
+                return x
+
+        m = M().eval()
+        qconfig = torch.quantization.default_qconfig
+        self._test_auto_tracing(
+            m, qconfig, (torch.randn(1, 1, 2, 2),),
+            # the module is not symbolically traceable
+            do_fx_comparison=False)
 
 
     # TODO(future PR): enable this test

@@ -1,6 +1,7 @@
 from typing import Callable, List, Tuple, Any, Optional, Dict
 
 import torch
+import torch.nn.functional as F
 
 from .mappings import (
     fp32_to_int8_fun_mapping,
@@ -19,6 +20,12 @@ from .utils import (
     FuncOutputDTypeType,
     get_func_output_dtype_type,
     get_quantized_op,
+    get_input_observed_arg_idxs,
+    get_packable_tensor_arg_idxs,
+    get_param_name,
+    get_packable_nontensor_arg_idxs,
+    get_packable_arg_idxs,
+    get_weight_arg_idx,
 )
 
 # TODO(future PR): maybe better name
@@ -53,6 +60,10 @@ class AutoQuantizationState(torch.nn.Module):
         self.output_qtensor_infos: List[Optional[QTensorInfo]] = []
         self.input_dtypes = input_dtypes
         self.output_dtypes = output_dtypes
+        # key: idx of seen op
+        # value: name of packed weight
+        # note: this is filled out right before convert
+        self.idx_to_packed_weight_name: Dict[str, str] = {}
 
     def has_at_least_one_seen_op(self) -> bool:
         return len(self.idx_to_seen_ops) > 0
@@ -67,6 +78,7 @@ class AutoQuantizationState(torch.nn.Module):
 
     def extra_repr(self) -> str:
         s = ""
+        # idx_to_seen_ops
         if len(self.idx_to_seen_ops):
             s += "(seen_ops): {\n"
             for k, v in self.idx_to_seen_ops.items():
@@ -74,10 +86,19 @@ class AutoQuantizationState(torch.nn.Module):
             s += "}\n"
         else:
             s += "(seen_ops): {}\n"
+        # output_qtensor_infos
         s += "(output_qtensor_infos): ["
         for i in self.output_qtensor_infos:
             s += f"{i} "
-        s += "]"
+        s += "]\n"
+        # idx_to_packed_weight_name
+        if len(self.idx_to_packed_weight_name):
+            s += "(idx_to_packed_weight_name): {\n"
+            for k, v in self.idx_to_packed_weight_name.items():
+                s += f"  {k}: {v}\n"
+            s += "}"
+        else:
+            s += "(idx_to_packed_weight_name): {}"
         return s
 
     def _get_cur_seen_op(self):
@@ -231,6 +252,8 @@ class AutoQuantizationState(torch.nn.Module):
         self,
         op: Callable,
         arg: Any,
+        arg_idx: int,
+        input_observed_arg_idxs: Optional[List[int]],
         arg_tensor_infos: List[QTensorInfo],
         func_output_dtype_type: FuncOutputDTypeType,
         qtensor_id: List[int],
@@ -247,6 +270,10 @@ class AutoQuantizationState(torch.nn.Module):
             qtensor_id[0] += 1
         arg_tensor_infos.append(arg._qtensor_info)  # type: ignore[attr-defined]
 
+        if input_observed_arg_idxs is not None and \
+                arg_idx not in input_observed_arg_idxs:
+            return
+
         if func_output_dtype_type == FuncOutputDTypeType.DTYPE_DEPENDS_ON_QCONFIG:
             # if the existing inf_dtype is not torch.quint8, add an observer
             # which will be converted to a quant later
@@ -256,8 +283,10 @@ class AutoQuantizationState(torch.nn.Module):
             # qconfig.
             if arg._qtensor_info.inf_dtype != torch.quint8:  # type: ignore[attr-defined]
                 tensor_id = arg._qtensor_info.id  # type: ignore[attr-defined]
-                self.tensor_id_to_observer[str(tensor_id)] = \
+                weight_arg_idx = get_weight_arg_idx(op)
+                obs = self.qconfig.weight() if arg_idx == weight_arg_idx else \
                     self.qconfig.activation()
+                self.tensor_id_to_observer[str(tensor_id)] = obs
 
     def op_prepare_before_hook(
         self,
@@ -267,6 +296,7 @@ class AutoQuantizationState(torch.nn.Module):
         first_call: bool,
         qtensor_id: List[int],
         fqn: str,
+        root_module: torch.nn.Module,
     ) -> Tuple[Tuple[Any, ...], Dict[str, Any]]:
         """
         This function is expected to be called on args and kwargs of
@@ -285,26 +315,49 @@ class AutoQuantizationState(torch.nn.Module):
         assert self.cur_op_needs_hooks(op)
         if first_call:
             func_output_dtype_type = get_func_output_dtype_type(op, args)
+            input_observed_arg_idxs = get_input_observed_arg_idxs(op)
             arg_tensor_infos: List[Optional[QTensorInfo]] = []
+            # Note: this is incremented for both branches of the if below
+            arg_idx = 0
             for arg in args:
                 if isinstance(arg, (list, tuple)):
                     for inner_arg in arg:
                         self._op_prepare_before_hook_tensor_first_call(
-                            op, inner_arg, arg_tensor_infos, func_output_dtype_type,
+                            op, inner_arg, arg_idx, input_observed_arg_idxs,
+                            arg_tensor_infos, func_output_dtype_type,
                             qtensor_id)
+                        arg_idx += 1
                 else:
                     self._op_prepare_before_hook_tensor_first_call(
-                        op, arg, arg_tensor_infos, func_output_dtype_type,
+                        op, arg, arg_idx, input_observed_arg_idxs,
+                        arg_tensor_infos, func_output_dtype_type,
                         qtensor_id)
+                    arg_idx += 1
+
+            packable_tensor_arg_idxs = get_packable_tensor_arg_idxs(op)
+            packable_tensor_idx_to_name = {}
+            if packable_tensor_arg_idxs is not None:
+                for arg_idx in packable_tensor_arg_idxs:
+                    arg = args[arg_idx]
+                    param_name = get_param_name(root_module, arg)
+                    packable_tensor_idx_to_name[arg_idx] = param_name
+
+            packable_nontensor_arg_idxs = get_packable_nontensor_arg_idxs(op)
+            packable_nontensor_idx_to_arg = {}
+            if packable_nontensor_arg_idxs is not None:
+                for arg_idx in packable_nontensor_arg_idxs:
+                    packable_nontensor_idx_to_arg[arg_idx] = args[arg_idx]
 
             key = str(self.idx)
             if key not in self.idx_to_seen_ops:
                 if not isinstance(op, torch.nn.Module):
                     self.idx_to_seen_ops[key] = SeenOp(
-                        self.idx, op, fqn, arg_tensor_infos, [])
+                        self.idx, op, fqn, arg_tensor_infos, [],
+                        packable_tensor_idx_to_name, packable_nontensor_idx_to_arg)
                 else:
                     self.idx_to_seen_ops[key] = SeenOp(
-                        self.idx, type(op), fqn, arg_tensor_infos, [])
+                        self.idx, type(op), fqn, arg_tensor_infos, [],
+                        packable_tensor_idx_to_name, packable_nontensor_idx_to_arg)
 
             return args, kwargs
 
@@ -421,6 +474,7 @@ class AutoQuantizationState(torch.nn.Module):
         op: Callable,
         args: Tuple[Any, ...],
         kwargs: Dict[str, Any],
+        root_module: torch.nn.Module,
     ) -> Tuple[Callable, Tuple[Any, ...], Dict[str, Any]]:
         """
         This function is called before an op call in a converted model.
@@ -432,7 +486,17 @@ class AutoQuantizationState(torch.nn.Module):
         """
         assert self.cur_op_needs_hooks(op)
 
-        op, arg_quant_infos, additional_kwargs = \
+        # TODO generalize this for more things
+        # currently:
+        # * can quantize args (via arg_quant_infos)
+        # * can add scale and zp (via additional kwargs)
+
+        # needed for F.conv2d
+        # F.conv2d(input, weight, bias, stride, padding, dilation, groups)
+        #   to
+        # q.conv2d(input, packed_params, scale, zero_point)
+        orig_op = op
+        op, arg_quant_infos, packed_param_name, additional_kwargs = \
             self.get_op_convert_info(op)
 
         # potentially quantize args, based on arg_quant_infos
@@ -456,6 +520,9 @@ class AutoQuantizationState(torch.nn.Module):
                     new_args.append(arg)
                     continue
                 # TODO: handle non-tensor inputs
+                # TODO: this is not handling non-tensor tuple args (for example,
+                # dilation in conv2d) correctly, it just happens to work but
+                # needs a fix.
                 quant_info = arg_quant_infos[tensor_arg_idx]
                 if quant_info is not None:
                     scale, zp = quant_info
@@ -463,8 +530,28 @@ class AutoQuantizationState(torch.nn.Module):
                 new_args.append(arg)
                 tensor_arg_idx += 1
 
+        # if there is a packed param, replace the relevant args
+        if packed_param_name is not None:
+            new_args_with_packed = []
+            packable_arg_idxs = get_packable_arg_idxs(orig_op)
+            added_packed = False
+            for idx, arg in enumerate(new_args):
+                if idx in packable_arg_idxs:
+                    if not added_packed:
+                        packed_param = getattr(root_module, packed_param_name)
+                        new_args_with_packed.append(packed_param)
+                        added_packed = True
+                else:
+                    new_args_with_packed.append(arg)
+            new_args = new_args_with_packed
+
         # potentially extend kwargs with scale and zero_point
-        kwargs.update(**additional_kwargs)
+        # TODO move op-specific logic out of here
+        if orig_op != F.conv2d:
+            kwargs.update(**additional_kwargs)
+        else:
+            new_args.append(additional_kwargs['scale'])
+            new_args.append(additional_kwargs['zero_point'])
 
         return op, tuple(new_args), kwargs
 
@@ -484,19 +571,24 @@ class AutoQuantizationState(torch.nn.Module):
         self,
         op: Callable,
         unwrap_scale_zp: bool = False,
-    ) -> Tuple[Callable, Any, Any]:
+    ) -> Tuple[
+        Callable,
+        List[Optional[Tuple[float, int]]],
+        Optional[str],
+        Dict[str, Any]
+    ]:
         """
         Returns the information needed for convert time modifications to `op`.
-        Has no side effects.
+        Has no side effects.  Return types:
 
-        For `op`, returns either the original callable unchanged,
+        `new_op`. Returns either the original callable unchanged,
         or the corresponding quantized target. Note: always returns the original
         callable for modules, because they are quantized with module swaps.
 
-        For `args`, returns information needed to quantize each arg, if
+        `arg_quant_infos`. Returns information needed to quantize each arg, if
         applicable.
 
-        For `kwargs`, returns additional kwargs for scale and zero_point, if
+        `additional_kwargs`. Returns additional kwargs for scale and zero_point, if
         applicable.
         """
         assert self.cur_op_needs_hooks(op)
@@ -507,6 +599,9 @@ class AutoQuantizationState(torch.nn.Module):
 
         # calculate quant infos
         arg_quant_infos = self._get_input_args_quant_info(op)
+
+        # get packed param name, if applicable
+        packed_param_name = self._get_packed_param_name(op)
 
         # calculate scale and zp for output
         # TODO: instead of always doing this if there is an observer,
@@ -527,7 +622,14 @@ class AutoQuantizationState(torch.nn.Module):
                 additional_kwargs.update(
                     {'scale': scale.item(), 'zero_point': zp.item()})
 
-        return new_op, arg_quant_infos, additional_kwargs
+        return new_op, arg_quant_infos, packed_param_name, additional_kwargs
+
+    def _get_packed_param_name(self, cur_op: Callable) -> Optional[str]:
+        """
+        If the op has a quantized packed param, returns it. Otherwise, returns
+        None.
+        """
+        return self.idx_to_packed_weight_name.get(str(self.idx), None)
 
     def _get_input_args_quant_info(
         self,
@@ -551,9 +653,12 @@ class AutoQuantizationState(torch.nn.Module):
 
         # determine the expected output dtype
         output_dtype = seen_op.output_tensor_infos[0].inf_dtype
+        packable_arg_idxs = get_packable_arg_idxs(cur_op)
 
         for input_arg_idx, input_arg in enumerate(seen_op.input_tensor_infos):
-            if input_arg is not None:
+            arg_will_be_packed = packable_arg_idxs is not None and \
+                input_arg_idx in packable_arg_idxs
+            if input_arg is not None and not arg_will_be_packed:
                 tensor_id = input_arg.id
                 if str(tensor_id) in self.tensor_id_to_observer and \
                         input_arg.inf_dtype != output_dtype:

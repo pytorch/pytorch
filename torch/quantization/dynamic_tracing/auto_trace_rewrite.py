@@ -1,12 +1,14 @@
 import copy
 import math
 import operator
+from types import ModuleType
+from typing import Callable, Any, Tuple, Dict
 
 import torch
 import torch.fx
+import torch.nn.functional as F
 from .quantization_state import AutoQuantizationState
-from types import ModuleType
-from typing import Callable, Any, Tuple, Dict
+from .utils import get_packable_arg_idxs
 
 class AllModuleTracer(torch.fx.Tracer):
     """
@@ -48,8 +50,11 @@ class AllModuleTracer(torch.fx.Tracer):
             elif target == torch.cat:
                 return args
             else:
-                for idx, input_arg_quant_info in enumerate(arg_quant_infos):
-
+                # TODO: this is not handling non-tensor tuple args (for example,
+                # dilation in conv2d) correctly, it just happens to work but
+                # needs a fix.
+                for idx, arg in enumerate(args):
+                    input_arg_quant_info = arg_quant_infos[idx]
                     if input_arg_quant_info is None:
                         new_args.append(args[idx])
                     else:
@@ -107,11 +112,35 @@ class AllModuleTracer(torch.fx.Tracer):
                 qstate.validate_cur_op(target)
 
                 old_target = target
-                target, arg_quant_infos, additional_kwargs = \
+                target, arg_quant_infos, packed_param_name, additional_kwargs = \
                     qstate.get_op_convert_info(target, unwrap_scale_zp=True)
 
                 args = self._maybe_update_args_with_quants(args, arg_quant_infos, target)
-                kwargs.update(**additional_kwargs)
+                # if there is a packed param, replace the relevant args
+                if packed_param_name is not None:
+                    new_args_with_packed = []
+                    packable_arg_idxs = get_packable_arg_idxs(old_target)
+                    added_packed = False
+                    for idx, arg in enumerate(args):
+                        if idx in packable_arg_idxs:
+                            if not added_packed:
+                                # packed_param = getattr(self.root, packed_param_name)
+                                packed_param_node = super().create_node(
+                                    'get_attr', packed_param_name, (), {}, None, None)
+                                new_args_with_packed.append(packed_param_node)
+                                added_packed = True
+                        else:
+                            new_args_with_packed.append(arg)
+                    args = tuple(new_args_with_packed)
+
+                # TODO move op-specific logic out of here
+                if old_target != F.conv2d:
+                    kwargs.update(**additional_kwargs)
+                else:
+                    new_args = [*args]
+                    new_args.append(additional_kwargs['scale'])
+                    new_args.append(additional_kwargs['zero_point'])
+                    args = tuple(new_args)
 
                 qstate.mark_cur_op_complete(old_target)
                 dtype_to_use = torch.quint8
@@ -127,7 +156,7 @@ class AllModuleTracer(torch.fx.Tracer):
             if qstate.cur_op_needs_hooks(module_instance):
                 qstate.validate_cur_op(module_instance)
 
-                _, arg_quant_infos, additional_kwargs = \
+                _, arg_quant_infos, _packed_param_name, additional_kwargs = \
                     qstate.get_op_convert_info(
                         module_instance, unwrap_scale_zp=True)
 

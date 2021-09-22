@@ -72,6 +72,13 @@ def get_module_fusion_fqns(
                         is_match = False
                         break
                 if is_match:
-                    results.append(cur_fqns)
+                    # we check for existence to ensure the final fusion list
+                    # is deduplicated, in case the same op is called multiple
+                    # times in a single forward
+                    if cur_fqns not in results:
+                        results.append(cur_fqns)
+
+    for v in results:
+        print(v)
 
     return results

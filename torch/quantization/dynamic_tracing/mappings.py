@@ -5,6 +5,9 @@ import torch.nn.quantized as nnq
 import torch.nn.intrinsic as nni
 import torch.nn.intrinsic.quantized as nniq
 toq = torch.ops.quantized
+from torch.quantization.quantization_mappings import (
+    DEFAULT_STATIC_QUANT_MODULE_MAPPINGS,
+)
 
 import operator
 
@@ -20,6 +23,7 @@ fp32_to_int8_fun_mapping = {
     torch.mul: torch.ops.quantized.mul,
     operator.mul: torch.ops.quantized.mul,
     torch.cat: torch.ops.quantized.cat,
+    F.conv2d: torch.ops.quantized.conv2d,
 }
 
 # TODO: enforce that functions in fp32_to_int8_fun_mapping must both be
@@ -38,6 +42,7 @@ functions_supported_by_quantization = set([
     toq.mul,
     toq.cat,
     F.conv2d,
+    toq.conv2d,
     F.dropout,
 ])
 
@@ -47,17 +52,21 @@ module_types_supported_by_quantization = set([
     nn.intrinsic.modules.fused.ConvReLU2d,
     nn.intrinsic.quantized.modules.conv_relu.ConvReLU2d,
     nn.BatchNorm2d,
+    nnq.BatchNorm2d,
     nn.ReLU,
     # TODO(future PR): detect inplace modifications by torch functions
     nn.ReLU6,
+    nnq.ReLU6,
     nn.Linear,
     nnq.Linear,
     nn.Dropout,
     nn.Identity,
     nn.LeakyReLU,
+    nnq.LeakyReLU,
     nn.LayerNorm,
     nnq.LayerNorm,
 ])
+# TODO verify that if nn in above, nnq also is
 
 # These can work in either fp32 or quint8, without the need for observation
 # TODO: better name
@@ -97,3 +106,8 @@ for m in module_types_supported_by_quantization_preserves_dtype:
 for f in functions_supported_by_quantization_preserves_dtype:
     assert f in functions_supported_by_quantization, \
         f"{f} needs to be added to functions_supported_by_quantization"
+
+for k, v in DEFAULT_STATIC_QUANT_MODULE_MAPPINGS.items():
+    if k in module_types_supported_by_quantization:
+        assert v in module_types_supported_by_quantization, \
+            f"{k} is in module_types_supported_by_quantization but {v} is not"

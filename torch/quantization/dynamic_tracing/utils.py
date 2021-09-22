@@ -1,8 +1,10 @@
 import collections
 import enum
-from typing import Callable, Tuple, Any, Dict
+from typing import Callable, Tuple, Any, Dict, List, Optional
 
 import torch
+import torch.nn.functional as F
+toq = torch.ops.quantized
 
 from .mappings import (
     functions_supported_by_quantization,
@@ -52,6 +54,12 @@ SeenOp = collections.namedtuple(
         # Information about the output tensors, List[QTensorInfo].
         # Non-tensor outputs are represented with None.
         'output_tensor_infos',
+        # Information about tensors which will need to be packed,
+        # Dict[int, str]
+        'packable_tensor_idx_to_name',
+        # Information about non-tensors which will need to be packed,
+        # Dict[int, Any]
+        'packable_nontensor_idx_to_arg',
     ],
 )
 def seen_op_repr(self) -> str:
@@ -59,6 +67,10 @@ def seen_op_repr(self) -> str:
     s += f"     (fqn): {self.fqn}\n"
     s += f"     (input_tensor_infos): {self.input_tensor_infos}\n"
     s += f"     (output_tensor_infos): {self.output_tensor_infos}"
+    if len(self.packable_tensor_idx_to_name):
+        s += f"\n     (packable_tensor_idx_to_name): {self.packable_tensor_idx_to_name}"
+    if len(self.packable_nontensor_idx_to_arg):
+        s += f"\n     (packable_nontensor_idx_to_arg): {self.packable_nontensor_idx_to_arg}"
     return s
 
 SeenOp.__repr__ = seen_op_repr  # type: ignore[assignment]
@@ -74,9 +86,8 @@ QTensorInfo = collections.namedtuple(
 def op_needs_quantization(op: Callable) -> bool:
     if op in functions_supported_by_quantization:
         return True
-    for module_type in module_types_supported_by_quantization:
-        if isinstance(op, module_type):
-            return True
+    if type(op) in module_types_supported_by_quantization:
+        return True
     if op in q_mod_to_float_mod_mapping:
         return True
     return False
@@ -129,6 +140,55 @@ def trace_with_inputs(
         unwrap_observers_from_placeholders(model)
         if old_training:
             model.train()
+
+def pack_weights_for_functionals(
+    module: torch.nn.Module,
+) -> None:
+    """
+    Packs weights for functionals seen while tracing.
+    Note: weight packing for modules is handled by eager mode quantization
+    flow.
+    """
+    if hasattr(module, '_auto_quant_state'):
+        qstate = module._auto_quant_state
+        # find any ops which need packing
+        for idx, seen_op in qstate.idx_to_seen_ops.items():
+            packable_args_len = len(seen_op.packable_tensor_idx_to_name) + \
+                len(seen_op.packable_nontensor_idx_to_arg)
+            if packable_args_len > 0:
+                if seen_op.type == F.conv2d:
+                    # fetch all the info needed for packed params
+                    weight = getattr(module, seen_op.packable_tensor_idx_to_name[1])
+                    bias = getattr(module, seen_op.packable_tensor_idx_to_name[2])
+                    stride = seen_op.packable_nontensor_idx_to_arg[3]
+                    padding = seen_op.packable_nontensor_idx_to_arg[4]
+                    dilation = seen_op.packable_nontensor_idx_to_arg[5]
+                    groups = seen_op.packable_nontensor_idx_to_arg[6]
+
+                    # quantize the weight
+                    # TODO: create weight observers from qconfig.weight
+                    weight_tensor_id = seen_op.input_tensor_infos[1].id
+                    weight_obs = qstate.tensor_id_to_observer[str(weight_tensor_id)]
+                    scale, zp = weight_obs.calculate_qparams()
+                    qweight = torch.quantize_per_tensor(weight, scale, zp, torch.qint8)
+
+                    # create the packed params
+                    packed_params = toq.conv2d_prepack(
+                        qweight, bias, stride, padding, dilation, groups)
+
+                    # attach to module
+                    name_idx = 0
+                    prefix = "_packed_params_"
+                    name_candidate = f"{prefix}{name_idx}"
+                    while hasattr(module, name_candidate):
+                        name_idx += 1
+                        name_candidate = f"{prefix}{name_idx}"
+                    setattr(module, name_candidate, packed_params)
+                    qstate.idx_to_packed_weight_name[str(idx)] = name_candidate
+                    # TODO: delete the original weights
+
+    for _, child in module.named_children():
+        pack_weights_for_functionals(child)
 
 # TODO(future PR): verify correctness of this for all
 # quantizeable modules
@@ -184,6 +244,8 @@ def converted_func_needs_scale_zp(op: Callable, seen_op: SeenOp) -> bool:
         first_dtype_is_not_int = len(inputs) > 0 and \
             inputs[0].inf_dtype not in (torch.int32, torch.int64)
         return first_dtype_is_not_int
+    elif op == F.conv2d:
+        return True
     # TODO: add more ops
     # print('op', op)
     return False
@@ -201,9 +263,8 @@ def get_func_output_dtype_type(
     args: Tuple[Any, ...],
 ) -> FuncOutputDTypeType:
     if isinstance(op, torch.nn.Module):
-        for target_mod_cls in module_types_supported_by_quantization_preserves_dtype:
-            if isinstance(op, target_mod_cls):
-                return FuncOutputDTypeType.DTYPE_EQUALS_INPUT_DTYPE
+        if type(op) in module_types_supported_by_quantization_preserves_dtype:
+            return FuncOutputDTypeType.DTYPE_EQUALS_INPUT_DTYPE
     elif op in functions_supported_by_quantization_preserves_dtype:
         return FuncOutputDTypeType.DTYPE_EQUALS_INPUT_DTYPE
     elif op in add_and_mul_ops and len(args) > 0 and \
@@ -232,3 +293,53 @@ def get_quantized_op(
             new_op = fp32_to_int8_fun_mapping[op]
 
     return new_op
+
+def get_input_observed_arg_idxs(
+    op: Callable,
+) -> Optional[List[int]]:
+    if isinstance(op, torch.nn.Module):
+        # TODO(future PR): handle RNNs
+        return [0]
+    if op == F.conv2d:
+        return [0, 1]
+    # None means "observe all Tensor args"
+    return None
+
+def get_packable_tensor_arg_idxs(op: Callable) -> Optional[List[int]]:
+    """
+    Returns tensor arg idxs which correspond to parameters which will need
+    to be packed.
+    """
+    if op == F.conv2d:
+        return [1, 2]
+    return None
+
+def get_param_name(module: torch.nn.Module, arg: Any) -> Optional[str]:
+    """
+    Returns the name of arg with respect to the current module.
+    """
+    for name, param in module.named_parameters():
+        if arg is param:
+            return name
+    raise AssertionError(f"arg {arg} not found in module {module}")
+
+def get_packable_nontensor_arg_idxs(op: Callable) -> Optional[List[int]]:
+    """
+    Returns nontensor arg idxs which correspond to arguments which will need
+    to be packed.
+    """
+    if op == F.conv2d:
+        # stride, padding, dilation, groups
+        return [3, 4, 5, 6]
+    return None
+
+def get_packable_arg_idxs(op: Callable) -> Optional[List[int]]:
+    if op == F.conv2d:
+        # weight, bias, stride, padding, dilation, groups
+        return [1, 2, 3, 4, 5, 6]
+    return None
+
+def get_weight_arg_idx(op: Callable) -> Optional[int]:
+    if op == F.conv2d:
+        return 1
+    return None

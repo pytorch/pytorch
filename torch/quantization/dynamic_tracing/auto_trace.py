@@ -10,6 +10,7 @@ from .quantization_state import (
 from .utils import (
     trace_with_inputs,
     is_leaf,
+    pack_weights_for_functionals,
 )
 from . import auto_trace_rewrite
 
@@ -20,7 +21,7 @@ logging.basicConfig(level=logging.DEBUG)
 # enabling this tanks performance, make sure to disable for benchmarking
 # TODO(future PR): clean this up
 enable_logging = False
-enable_logging = True
+# enable_logging = True
 
 
 def add_auto_observation(
@@ -85,7 +86,7 @@ def add_auto_observation(
                     qstate.validate_cur_op(func)
                 # run "before" hook
                 args, kwargs = qstate.op_prepare_before_hook(
-                    func, args, kwargs, first_call, qtensor_id, fqn)
+                    func, args, kwargs, first_call, qtensor_id, fqn, cur_module)
                 # forward
                 output = super().__torch_function__(func, types, args, kwargs)
                 # run "after" hook
@@ -168,6 +169,11 @@ def add_auto_observation(
                     parent_module = module_stack[-1] if len(module_stack) else None
                     module_stack.append(self)
                     fqn = module_id_to_fqn.get(id(self), None)
+
+                    if enable_logging:
+                        fqn = module_id_to_fqn.get(id(self), None)
+                        logger.debug(f"\nstarting fqn {fqn}")
+
                     can_have_op_hooks = parent_module is not None and \
                         hasattr(parent_module, '_auto_quant_state')
                     needs_op_hooks = can_have_op_hooks and \
@@ -190,12 +196,13 @@ def add_auto_observation(
                             parent_qstate.validate_cur_op(cur_module)
                         args, kwargs = parent_qstate.op_prepare_before_hook(
                             cur_module, args, kwargs, first_call, qtensor_id,
-                            fqn)
+                            fqn, cur_module)
 
                         # original forward
                         output = orig_module_call(self, *args, **kwargs)
 
                         # after hooks
+                        # TODO is it correct to call_cur_module twice here?
                         output = parent_qstate.op_prepare_after_hook(
                             cur_module, output, args, first_call, qtensor_id,
                             cur_module)
@@ -216,6 +223,10 @@ def add_auto_observation(
 
                     else:
                         output = orig_module_call(self, *args, **kwargs)
+
+                    if enable_logging:
+                        fqn = module_id_to_fqn.get(id(self), None)
+                        logger.debug(f"\nending fqn {fqn}")
 
                     return output
                 finally:
@@ -325,7 +336,7 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
                 # before hooks
                 qstate.validate_cur_op(func)
                 func, args, kwargs = qstate.op_convert_before_hook(
-                    func, args, kwargs)
+                    func, args, kwargs, cur_module)
 
                 if False:
                     # TODO(future PR): remove this after https://github.com/pytorch/pytorch/issues/64660 is fixed
@@ -469,7 +480,7 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
                         qstate = parent_module._auto_quant_state
                         qstate.validate_cur_op(cur_module)
                         _, args, kwargs = qstate.op_convert_before_hook(
-                            cur_module, args, kwargs)
+                            cur_module, args, kwargs, cur_module)
                         # forward
                         output = orig_module_call(self, *args, **kwargs)
                         # after hooks
@@ -549,6 +560,7 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
         def rewrite_for_scripting(self):
             return auto_trace_rewrite.rewrite_for_scripting(self)
 
+    pack_weights_for_functionals(module)
     module.__class__ = QuantizationDispatchModule
 
     return module
