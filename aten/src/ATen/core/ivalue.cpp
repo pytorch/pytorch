@@ -9,6 +9,8 @@
 #include <c10/util/hash.h>
 #include <cmath>
 #include <iostream>
+#include "c10/util/Exception.h"
+#include "jit/api/compilation_unit.h"
 
 namespace c10 {
 bool _fastEqualsForContainer(const IValue& lhs, const IValue& rhs) {
@@ -890,8 +892,17 @@ void ivalue::Object::resizeObject(size_t slot) {
   slots_.resize(type()->numAttributes());
 }
 
+
 c10::intrusive_ptr<ivalue::Object> ivalue::Object::copy() const {
-  auto object = ivalue::Object::create(c10::StrongTypePtr(type_.cu_, type()), type()->numAttributes());
+  auto object = ivalue::Object::create(type_, type()->numAttributes());
+  for (const auto i : c10::irange(slots_.size())) {
+    object->setSlot(i, slots_[i]);
+  }
+  return object;
+}
+
+c10::intrusive_ptr<ivalue::Object> ivalue::Object::copy_to_weak_compilation_ref() const {
+  auto object = ivalue::Object::create(type_.asWeakTypePtr(), type()->numAttributes());
   for (const auto i : c10::irange(slots_.size())) {
     object->setSlot(i, slots_[i]);
   }
@@ -904,7 +915,8 @@ c10::intrusive_ptr<ivalue::Object> ivalue::Object::deepcopy() const {
 }
 
 c10::intrusive_ptr<ivalue::Object> ivalue::Object::deepcopy(IValue::HashAliasedIValueMap& memo) const {
-  auto object = ivalue::Object::create(c10::StrongTypePtr(type_.cu_, type()), type()->numAttributes());
+  auto cu = type_.cu_;
+  auto object = ivalue::Object::create(WeakOrStrongTypePtr(type_.cu_, type_.type_), type()->numAttributes());
   for (const auto i : c10::irange(slots_.size())) {
     if (slots_[i].type() == c10::CapsuleType::get()) {
       // If we've gotten here, it means that we have *not* copied this
@@ -932,6 +944,43 @@ StrongTypePtr::StrongTypePtr(
   type_ = type;
   TORCH_INTERNAL_ASSERT(type_);
 }
+
+WeakTypePtr::WeakTypePtr(
+    std::weak_ptr<torch::jit::CompilationUnit> cu,
+    TypePtr type) {
+  cu_ = std::move(cu);
+  type_ = type;
+}
+
+WeakOrStrongTypePtr::WeakOrStrongTypePtr(WeakTypePtr weak) {
+  cu_ = WeakOrStrongCompilationUnit(weak.cu_);
+  type_ = weak.type_;
+  is_strong_ = false;
+}
+
+
+WeakOrStrongTypePtr::WeakOrStrongTypePtr(StrongTypePtr strong) {
+  cu_ = WeakOrStrongCompilationUnit(strong.cu_);
+  type_ = strong.type_;
+  is_strong_ = true;
+}
+
+WeakOrStrongTypePtr::WeakOrStrongTypePtr(WeakOrStrongCompilationUnit cu, TypePtr type) {
+  cu_ = WeakOrStrongCompilationUnit(cu);
+  type_ = type;
+  is_strong_ = cu.index() == 0;
+}
+
+WeakTypePtr WeakOrStrongTypePtr::asWeakTypePtr() const {
+  if (!is_strong_) {
+    std::weak_ptr<torch::jit::CompilationUnit> weak_cu = c10::get<std::weak_ptr<torch::jit::CompilationUnit>>(cu_);
+    return WeakTypePtr(weak_cu, type_);
+  } else {
+    std::weak_ptr<torch::jit::CompilationUnit> weak_cu = c10::get<std::shared_ptr<torch::jit::CompilationUnit>>(cu_);
+    return WeakTypePtr(weak_cu, type_);
+  }
+}
+
 
 ska::flat_hash_map<std::type_index, c10::ClassTypePtr>& getCustomClassTypeMap() {
     static ska::flat_hash_map<std::type_index, c10::ClassTypePtr> tmap;

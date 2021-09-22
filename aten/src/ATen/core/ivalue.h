@@ -7,6 +7,7 @@
 #include <c10/util/intrusive_ptr.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <typeindex>
+#include <c10/util/variant.h>
 
 namespace torch {
 class TORCH_API CustomClassHolder : public c10::intrusive_ptr_target {};
@@ -1146,6 +1147,30 @@ struct TORCH_API StrongTypePtr {
   std::shared_ptr<torch::jit::CompilationUnit> cu_;
   std::shared_ptr<Type> type_;
 };
+
+struct TORCH_API WeakTypePtr {
+  WeakTypePtr(
+      std::weak_ptr<torch::jit::CompilationUnit> cu,
+      std::shared_ptr<Type> type);
+
+  std::weak_ptr<torch::jit::CompilationUnit> cu_;
+  std::shared_ptr<Type> type_;
+};
+
+
+using WeakOrStrongCompilationUnit = c10::variant<std::shared_ptr<torch::jit::CompilationUnit>, std::weak_ptr<torch::jit::CompilationUnit>>;
+
+struct TORCH_API WeakOrStrongTypePtr {
+  WeakOrStrongTypePtr(WeakTypePtr weak);
+  WeakOrStrongTypePtr(StrongTypePtr strong);
+  WeakOrStrongTypePtr(WeakOrStrongCompilationUnit cu, TypePtr type);
+  WeakTypePtr asWeakTypePtr() const;
+
+  WeakOrStrongCompilationUnit cu_;
+  TypePtr type_;
+  bool is_strong_;
+};
+
 
 TORCH_API ska::flat_hash_map<std::type_index, c10::ClassTypePtr>&
 getCustomClassTypeMap();

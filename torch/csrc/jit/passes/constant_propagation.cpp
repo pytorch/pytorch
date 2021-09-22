@@ -58,7 +58,7 @@ c10::optional<std::vector<IValue>> runNodeIfInputsAreConstant(
           n->inputs().size());
     } break;
     case prim::CreateObject: {
-      createObject(stack, n->output()->type()->expect<ClassType>());
+      createObject(stack, n->output()->type()->expect<ClassType>(), /*use_weak_ref*/true);
     } break;
     case prim::GetAttr: {
       auto attr = pop(stack).toObject()->getAttr(n->s(attr::name));
@@ -85,7 +85,8 @@ c10::optional<std::vector<IValue>> runNodeIfInputsAreConstant(
     } break;
   }
 
-  for (const IValue& v : stack) {
+  for (size_t i = 0; i < stack.size(); ++i) {
+    const IValue&v = stack[i];
     if (v.isTensor()) {
       const at::Tensor& t = v.toTensor();
       if (t.defined() && t.requires_grad()) {
@@ -96,6 +97,11 @@ c10::optional<std::vector<IValue>> runNodeIfInputsAreConstant(
     // Weak form of const propagation
     if (ignore_custom_classes) {
       if (v.isCustomClass()) {
+        return c10::nullopt;
+      }
+    }
+    if (v.isObject()) {
+      if (!v.toObject()->is_weak_compilation_ref()) {
         return c10::nullopt;
       }
     }

@@ -123,9 +123,11 @@ c10::optional<Value*> tryInsertConstant(
       n->destroy();
       return c10::nullopt;
     };
-  } else if (
-      (val.isGenericDict() && insertableIValue(val)) || (val.isEnum()) ||
-      (val.isObject() && !val.toObjectRef().type()->is_module())) {
+  } else if ((val.isGenericDict() && insertableIValue(val)) || (val.isEnum())) {
+    n->ival_(attr::value, val);
+    n->output()->setType(val.type());
+  // TODO: add object to insertableIValue
+  } else if ((val.isObject() && !val.toObjectRef().type()->is_module()) && val.toObjectRef().is_weak_compilation_ref()) {
     n->ival_(attr::value, val);
     n->output()->setType(val.type());
   } else {

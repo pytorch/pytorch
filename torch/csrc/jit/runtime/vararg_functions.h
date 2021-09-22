@@ -32,7 +32,7 @@ void listConstruct(
 
 void dictConstruct(Stack& stack, const at::DictType& type, size_t num_inputs);
 
-void createObject(Stack& stack, const at::ClassTypePtr& type);
+void createObject(Stack& stack, const at::ClassTypePtr& type, bool as_weak_ref=false);
 
 void isinstance(Stack& stack, at::ArrayRef<at::TypePtr> types);
 

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <condition_variable>
+#include <memory>
 #include <type_traits>
 #include <utility>
 
@@ -868,12 +869,12 @@ TORCH_API intrusive_ptr<ivalue::Future> collectAny(
 // User-defined object.
 struct C10_EXPORT ivalue::Object final : c10::intrusive_ptr_target {
  public:
-  Object(StrongTypePtr type, size_t numSlots) : type_(std::move(type)) {
+  Object(WeakOrStrongTypePtr type, size_t numSlots) : type_(std::move(type)) {
     slots_.resize(numSlots);
   }
 
   static c10::intrusive_ptr<Object> create(
-      StrongTypePtr type,
+      WeakOrStrongTypePtr type,
       size_t numSlots) {
     return c10::make_intrusive<Object>(std::move(type), numSlots);
   }
@@ -938,8 +939,15 @@ struct C10_EXPORT ivalue::Object final : c10::intrusive_ptr_target {
   std::shared_ptr<ClassType> type() const;
 
   std::shared_ptr<torch::jit::CompilationUnit> compilation_unit() {
-    return type_.cu_;
+    if (type_.is_strong_) {
+      return c10::get<std::shared_ptr<torch::jit::CompilationUnit>>(type_.cu_);
+    } else {
+      auto weak_ptr = c10::get<std::weak_ptr<torch::jit::CompilationUnit>>(type_.cu_);
+      return std::shared_ptr<torch::jit::CompilationUnit>(weak_ptr);
+    }
   }
+
+  c10::intrusive_ptr<Object> copy_to_weak_compilation_ref() const;
 
   c10::intrusive_ptr<Object> copy() const;
 
@@ -947,9 +955,13 @@ struct C10_EXPORT ivalue::Object final : c10::intrusive_ptr_target {
 
   c10::intrusive_ptr<Object> deepcopy(IValue::HashAliasedIValueMap& memo) const;
 
+  bool is_weak_compilation_ref() const {
+    return !type_.is_strong_;
+  }
+
  private:
   void resizeObject(size_t slot);
-  StrongTypePtr type_;
+  WeakOrStrongTypePtr type_;
   std::vector<IValue> slots_;
 };
 
