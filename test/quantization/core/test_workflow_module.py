@@ -15,10 +15,18 @@ from torch.quantization import (
     default_observer,
     default_histogram_observer,
     default_per_channel_weight_observer,
+    float_qparams_weight_only_qconfig,
     get_observer_dict,
     prepare,
+    prepare_qat,
     QConfig,
+    QConfigDynamic,
     FusedMovingAvgObsFakeQuantize,
+    default_dynamic_quant_observer,
+)
+
+from torch.quantization.quantization_mappings import (
+    get_default_qat_module_mappings,
 )
 
 import torch.nn as nn
@@ -1102,6 +1110,47 @@ class TestFusedObsFakeQuantModule(TestCase):
         self.assertEqual(obs.quant_min, 0)
         self.assertEqual(obs.quant_max, 127)
 
+    def test_embedding_bag_qat_config(self):
+        class Model(nn.Module):
+            def __init__(self):
+                super(Model, self).__init__()
+                self.emb1 = torch.nn.EmbeddingBag(num_embeddings=10, embedding_dim=12,
+                                         include_last_offset=True, scale_grad_by_freq=False, mode='sum')
+                self.emb2 = torch.nn.EmbeddingBag(num_embeddings=10, embedding_dim=12,
+                                         include_last_offset=True, scale_grad_by_freq=False, mode='sum')
+
+            def forward(self, indices):
+                return torch.cat((self.emb1(indices), self.emb2(indices)))
+
+        model = Model()
+        indices = torch.randint(0, 10, (5, 12))
+        qat_mappings = get_default_qat_module_mappings()
+        qat_mappings[nn.EmbeddingBag] = torch.nn.qat.EmbeddingBag
+
+        float_qparams_observer = PerChannelMinMaxObserver.with_args(dtype=torch.quint8,
+                                                                    qscheme=torch.per_channel_affine_float_qparams,
+                                                                    ch_axis=0)
+        float_qparams_qconfig = QConfigDynamic(activation=default_dynamic_quant_observer,
+                                                weight=float_qparams_observer)
+        model.qconfig = float_qparams_qconfig
+
+
+        quant_model = torch.quantization.QuantWrapper(model)
+        quant_model = torch.quantization.prepare_qat(quant_model, qat_mappings)
+        quant_model(indices)
+
+        count_fake_quant = 0
+        for name, mod in quant_model.named_modules():
+            if name.endswith('weight_fake_quant'):
+                count_fake_quant += 1
+                self.assertEqual(type(mod), PerChannelMinMaxObserver)
+
+        self.assertEqual(count_fake_quant, 2)
+
+        # Model activation observer should be Placeholder, due to it being dynamic quantization.
+        self.assertEqual(type(quant_model.quant.activation_post_process),
+                              PlaceholderObserver)
+
     def test_default_fused_qat_config(self):
         class Model(nn.Module):
             def __init__(self):
@@ -1132,6 +1181,7 @@ class TestFusedObsFakeQuantModule(TestCase):
                     count_fake_quant += 1
                     self.assertEqual(type(mod), FusedMovingAvgObsFakeQuantize)
 
+            print(ref_model)
             self.assertEqual(count_fake_quant, 3)
 
             if qengine == "fbgemm":
