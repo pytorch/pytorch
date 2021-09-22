@@ -3,7 +3,7 @@
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/native/SortingUtils.h>
 #include <c10/macros/Macros.h>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
+#include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/detail/TensorInfo.cuh>
 #include <ATen/native/cuda/SortingCommon.cuh>
 #include <ATen/native/cuda/SortingRadixSelect.cuh>
