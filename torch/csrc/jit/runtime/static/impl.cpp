@@ -85,6 +85,7 @@ void OptimizeGraph(
 #endif
   ConstantPropagation(graph);
   RemoveImmutableInputDictLookups(graph);
+  UseVariadicTupleUnpack(graph);
 }
 
 // remove unused input 0 from graph
@@ -184,7 +185,8 @@ LivenessMap GetLivenessMap(
   FastMap<const Value*, size_t> values_to_idx_in_creation_order;
   for (const auto* node : graph->nodes()) {
     for (const auto* v : node->outputs()) {
-      values_to_idx_in_creation_order[v] = values_in_creation_order.size();
+      values_to_idx_in_creation_order.emplace(
+          v, values_in_creation_order.size());
       values_in_creation_order.emplace_back(v);
     }
   }
@@ -202,10 +204,11 @@ LivenessMap GetLivenessMap(
     if (liveness_map.count(v)) {
       return;
     }
-    liveness_map[v] = {};
+
+    auto& v_live_set = liveness_map[v] = {};
 
     for (const auto& live_v : live_values_use_chain) {
-      liveness_map.at(v).insert(live_v.first);
+      v_live_set.insert(live_v.first);
       liveness_map.at(live_v.first).insert(v);
     }
 
@@ -288,34 +291,43 @@ LivenessMap GetLivenessMap(
     auto outputs = node->outputs();
     for (const auto* input : inputs) {
       for (const auto* output : outputs) {
-        if (liveness_map.count(input) && liveness_map.count(output)) {
-          liveness_map.at(input).insert(output);
-          liveness_map.at(output).insert(input);
+        auto input_it = liveness_map.find(input);
+        if (input_it == liveness_map.end()) {
+          continue;
         }
+        auto output_it = liveness_map.find(output);
+        if (output_it == liveness_map.end()) {
+          continue;
+        }
+        input_it->second.insert(output);
+        output_it->second.insert(input);
       }
     }
+    auto insert_all_pairs_in_liveness_map =
+        [&](at::ArrayRef<const Value*> values) {
+          for (size_t i = 0; !values.empty() && i < values.size() - 1; ++i) {
+            auto value_it = liveness_map.find(values[i]);
+            if (value_it == liveness_map.end()) {
+              continue;
+            }
+            for (size_t j = i + 1; j < values.size(); ++j) {
+              auto value2_it = liveness_map.find(values[j]);
+              if (value2_it != liveness_map.end()) {
+                value_it->second.insert(values[j]);
+                value2_it->second.insert(values[i]);
+              }
+            }
+          }
+        };
     // All inputs should be alive at the same time.
-    for (size_t i = 0; i < inputs.size(); ++i) {
-      for (size_t j = 0; j < inputs.size(); ++j) {
-        if (liveness_map.count(inputs[i]) && liveness_map.count(inputs[j])) {
-          liveness_map.at(inputs[i]).insert(inputs[j]);
-          liveness_map.at(inputs[j]).insert(inputs[i]);
-        }
-      }
-    }
+    insert_all_pairs_in_liveness_map(inputs);
+
     // All outputs should be alive at the same time.
-    for (size_t i = 0; i < outputs.size(); ++i) {
-      for (size_t j = 0; j < outputs.size(); ++j) {
-        if (liveness_map.count(outputs[i]) && liveness_map.count(outputs[j])) {
-          liveness_map.at(outputs[i]).insert(outputs[j]);
-          liveness_map.at(outputs[j]).insert(outputs[i]);
-        }
-      }
-    }
-  }
+    insert_all_pairs_in_liveness_map(outputs);
+  };
 
   return liveness_map;
-}
+};
 
 // Collect the set of Values that are candidates for memory planning:
 //   - Values that are used in in-place operators (i.e., _out variants), and
@@ -966,6 +978,10 @@ void StaticRuntime::benchmark(
             << std::endl;
 
   if (planner_) {
+    std::cout << "Total number of managed tensors: "
+              << planner_->total_num_managed_tensors() << std::endl;
+    std::cout << "Total number of unmanaged values: "
+              << planner_->total_num_unmanaged() << std::endl;
     std::cout << "Total memory managed: " << planner_->total_managed()
               << " bytes" << std::endl;
     if (static_module_.opts().optimize_memory) {
