@@ -949,6 +949,10 @@ struct C10_EXPORT ivalue::Object final : c10::intrusive_ptr_target {
 
   c10::intrusive_ptr<Object> copy_to_weak_compilation_ref() const;
 
+  void unasfe_make_weak_compilation_ref() {
+    type_ = type_.asWeakTypePtr();
+  }
+
   c10::intrusive_ptr<Object> copy() const;
 
   c10::intrusive_ptr<Object> deepcopy() const;

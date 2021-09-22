@@ -20,7 +20,8 @@ namespace jit {
 
 c10::optional<std::vector<IValue>> runNodeIfInputsAreConstant(
     const Node* n,
-    bool ignore_custom_classes) {
+    bool ignore_custom_classes,
+    AliasDb* db) {
   Stack stack;
   for (auto input : n->inputs()) {
     if (auto ival = toIValue(input)) {
@@ -85,8 +86,7 @@ c10::optional<std::vector<IValue>> runNodeIfInputsAreConstant(
     } break;
   }
 
-  for (size_t i = 0; i < stack.size(); ++i) {
-    const IValue&v = stack[i];
+  for (IValue& v : stack) {
     if (v.isTensor()) {
       const at::Tensor& t = v.toTensor();
       if (t.defined() && t.requires_grad()) {
@@ -99,6 +99,21 @@ c10::optional<std::vector<IValue>> runNodeIfInputsAreConstant(
       if (v.isCustomClass()) {
         return c10::nullopt;
       }
+    }
+    if (v.isCustomClass()) {
+      if (v.toObject()->is_weak_compilation_ref()) {
+        continue;
+      }
+      if (!db) {
+        continue;
+      }
+      Node* n_non_const = const_cast<Node*>(n);
+      if (db->mayContainAlias(
+              n_non_const->inputs(), {n_non_const->outputs()})) {
+        continue;
+      }
+      auto obj = v.toObject();
+      obj->unasfe_make_weak_compilation_ref();
     }
     if (v.isObject()) {
       if (!v.toObject()->is_weak_compilation_ref()) {

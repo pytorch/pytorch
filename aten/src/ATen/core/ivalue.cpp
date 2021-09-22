@@ -9,8 +9,6 @@
 #include <c10/util/hash.h>
 #include <cmath>
 #include <iostream>
-#include "c10/util/Exception.h"
-#include "jit/api/compilation_unit.h"
 
 namespace c10 {
 bool _fastEqualsForContainer(const IValue& lhs, const IValue& rhs) {
