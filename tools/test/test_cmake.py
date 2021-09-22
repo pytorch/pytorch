@@ -22,7 +22,11 @@ class TestCMake(unittest.TestCase):
             # MAX_JOBS, USE_NINJA, IS_WINDOWS,         want
             ((     '8',      True,     False),          ['-j', '8']),  # noqa: E201,E241
             ((    None,      True,     False),                 None),  # noqa: E201,E241
+            ((     '7',     False,     False),          ['-j', '7']),  # noqa: E201,E241
+            ((    None,     False,     False),         ['-j', '13']),  # noqa: E201,E241
+            ((     '6',      True,      True),          ['-j', '6']),  # noqa: E201,E241
             ((    None,      True,      True),                 None),  # noqa: E201,E241
+            ((     '5',     False,      True),  ['/p:CL_MPCount=5']),  # noqa: E201,E241
             ((    None,     False,      True), ['/p:CL_MPCount=13']),  # noqa: E201,E241
         ]
         for (max_jobs, use_ninja, is_windows), want in cases:
