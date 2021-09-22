@@ -625,7 +625,11 @@ def max_pool1d(
         )
     if stride is None:
         stride = torch.jit.annotate(List[int], [])
-    return torch.max_pool1d(input, kernel_size, stride, padding, dilation, ceil_mode)
+    res = torch.max_pool1d_with_indices(input, kernel_size, stride, padding, dilation, ceil_mode)
+    if return_indices:
+        return res
+    else:
+        return res[0]
 
 
 max_pool1d_with_indices = max_pool1d
