@@ -36,7 +36,7 @@ class SpatialBNFakeLoweredFp16Op : public Operator<CPUContext> {
     CAFFE_ENFORCE_GT(epsilon_, 0);
   }
 
-  virtual ~SpatialBNFakeLoweredFp16Op() override = default;
+   ~SpatialBNFakeLoweredFp16Op() override = default;
 
   bool RunOnDevice() override {
     return DispatchHelper<TensorTypes<float>>::call(this, Input(0));
@@ -215,7 +215,7 @@ class SpatialBNFakeFp16Op : public Operator<CPUContext> {
     CAFFE_ENFORCE_GT(epsilon_, 0);
   }
 
-  virtual ~SpatialBNFakeFp16Op() override = default;
+   ~SpatialBNFakeFp16Op() override = default;
 
   bool RunOnDevice() override {
     return DispatchHelper<TensorTypes<float>>::call(this, Input(0));

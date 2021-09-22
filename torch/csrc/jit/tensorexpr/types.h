@@ -18,25 +18,7 @@ using int32 = std::int32_t;
 class Dtype;
 TORCH_API std::ostream& operator<<(std::ostream& stream, const Dtype& dtype);
 
-// Switch to PT/Aten dtypes
-enum class ScalarType : int8_t {
-#define DEFINE_ENUM(_1, n) n,
-  AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(DEFINE_ENUM)
-#undef DEFINE_ENUM
-  // Undefined must be next to match c10::ScalarType;
-  Undefined,
-  Handle,
-  Uninitialized,
-  None,
-  NumOptions
-};
-
-TORCH_API std::ostream& operator<<(
-    std::ostream& stream,
-    const ScalarType& dtype);
-
-TORCH_API bool is_integral(const ScalarType& type);
-TORCH_API bool is_floating_point(const ScalarType& type);
+using ScalarType = c10::ScalarType;
 
 // Data types for scalar and vector elements.
 class TORCH_API Dtype {
@@ -70,10 +52,13 @@ class TORCH_API Dtype {
   std::string ToCppString() const;
 
   bool is_integral() const {
-    return tensorexpr::is_integral(scalar_type_);
+    return c10::isIntegralType(scalar_type_, true);
   }
   bool is_floating_point() const {
-    return tensorexpr::is_floating_point(scalar_type_);
+    return c10::isFloatingType(scalar_type_);
+  }
+  bool is_signed() const {
+    return c10::isSignedType(scalar_type_);
   }
 
   Dtype cloneWithScalarType(ScalarType nt) const {
@@ -86,13 +71,11 @@ class TORCH_API Dtype {
   int lanes_; // the width of the element for a vector time
 };
 
-extern TORCH_API Dtype kUninitialized;
 extern TORCH_API Dtype kHandle;
-extern TORCH_API Dtype kVoid;
 
 #define NNC_DTYPE_DECLARATION(ctype, name) extern TORCH_API Dtype k##name;
 
-AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, NNC_DTYPE_DECLARATION)
+AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, NNC_DTYPE_DECLARATION)
 #undef NNC_DTYPE_DECLARATION
 
 template <typename T>
@@ -103,16 +86,11 @@ TORCH_API Dtype ToDtype();
   inline Dtype ToDtype<ctype>() {            \
     return k##name;                          \
   }
-AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, NNC_TODTYPE_DECLARATION)
+AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, NNC_TODTYPE_DECLARATION)
 #undef NNC_TODTYPE_DECLARATION
 
 TORCH_API Dtype ToDtype(ScalarType type);
 
-// Call c10 type promotion directly.
-inline ScalarType promoteTypes(ScalarType a, ScalarType b) {
-  return static_cast<ScalarType>(c10::promoteTypes(
-      static_cast<c10::ScalarType>(a), static_cast<c10::ScalarType>(b)));
-}
 inline Dtype promoteTypes(Dtype a, Dtype b) {
   if (a.lanes() != b.lanes()) {
     throw malformed_input("promoting types with different lanes");
@@ -127,13 +105,9 @@ inline Dtype promoteTypes(Dtype a, Dtype b) {
 inline Dtype BinaryOpDtype(
     Dtype op1_dtype,
     Dtype op2_dtype,
-    ScalarType ret_type = ScalarType::None) {
-  if (op1_dtype.scalar_type() == ScalarType::Bool ||
-      op2_dtype.scalar_type() == ScalarType::Bool) {
-    throw malformed_input("arithmetic binary operations on Bool not supported");
-  }
+    ScalarType ret_type = ScalarType::Undefined) {
   if (op1_dtype == op2_dtype) {
-    if (ret_type == ScalarType::None) {
+    if (ret_type == ScalarType::Undefined) {
       return op1_dtype;
     }
 

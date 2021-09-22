@@ -10,6 +10,7 @@ std::mutex CPUCachingAllocator::mutex_;
 ska::flat_hash_map<void*, size_t> CPUCachingAllocator::allocation_map_;
 
 inline void* CPUCachingAllocator::allocate_and_cache(const size_t bytes) {
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   void* ptr;
   try {
     ptr = c10::alloc_cpu(bytes);
@@ -61,7 +62,7 @@ void CPUCachingAllocator::record_free(void* ptr) {
   // is being freed outside the scope of this allocator.
   // At the moment only way to capture this is to have the allocator,
   // that uses this CachingAllocator as the backing allocator,
-  // call this function explicity upon freeing memory while
+  // call this function explicitly upon freeing memory while
   // outside the scope of caching allocator.
   // If the memory is freed in some other way, then we will likely
   // have undefined behavior or page fault. But this can be

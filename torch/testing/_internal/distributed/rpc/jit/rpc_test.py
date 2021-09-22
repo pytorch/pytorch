@@ -21,6 +21,10 @@ from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import (
     RpcAgentTestFixture,
 )
 
+from torch.autograd.profiler_legacy import profile as _profile
+
+def rref_isinstance(rref, cls_to_check):
+    return isinstance(rref.local_value(), cls_to_check)
 
 def sleep(t):
     time.sleep(t)
@@ -345,6 +349,7 @@ class MyScriptClass:
 @torch.jit.interface
 class MyModuleInterface(torch.nn.Module):
     def forward(self) -> Tensor:
+        # pyre-ignore[7]: Pyre and torch.jit.interface don't mix well
         pass
 
 
@@ -357,13 +362,17 @@ class MyScriptModule(torch.jit.ScriptModule):
     def forward(self) -> Tensor:
         return self.a
 
+    @torch.jit.script_method
+    def custom_func(self) -> Tensor:
+        return self.a
+
 
 def owner_create_rref_my_script_class(a):
     return rpc.RRef(MyScriptClass(a))
 
 
 def owner_create_rref_my_script_module(a):
-    return rpc.RRef(MyScriptModule(a), MyModuleInterface)
+    return rpc.RRef(MyScriptModule(a), type_hint=MyModuleInterface)
 
 
 @torch.jit.script
@@ -421,7 +430,7 @@ class LocalRRefTest:
 
         def use_rref_on_owner(rref: RRef[MyScriptClass]) -> int:
             args = (rref,)
-            kwargs: Dict[str, Any] = {}  # noqa
+            kwargs: Dict[str, Any] = {}
             fut = rpc.rpc_async(
                 rref.owner(), script_rref_get_value_my_script_class, args, kwargs
             )
@@ -894,17 +903,14 @@ class JitRpcTest(
         # wait for local MyScriptModule instantiation to finish,
         # otherwise it could instantiate MyScriptModule in parallel with
         # server thread in the below
-        initialize_pg(self.init_method, self.rank, self.world_size)
+        initialize_pg(self.file_init_method, self.rank, self.world_size)
         dist.barrier()
 
         # rpc_sync still accepts script class and run it in
         # the same code path as python call.
         ret = rpc.rpc_sync(dst_worker_name, MyScriptClass, args=(self.rank,))
 
-        # rpc_sync does not accept script module and script module method.
-        with self.assertRaisesRegex(RuntimeError, "ScriptModules cannot be deepcopied"):
-            ret = rpc.rpc_sync(dst_worker_name, MyScriptModule, args=(self.rank,))
-
+        # rpc_sync does not accept script module method.
         # Python 3.5 and Python 3.6 throw different error message, the only
         # common word can be greped is "pickle".
         with self.assertRaisesRegex(TypeError, "pickle"):
@@ -948,6 +954,42 @@ class JitRpcTest(
                 run_ref_script_module,
                 args=(remote_ref, torch.ones(self.rank)),
             )
+
+    @dist_init
+    def test_create_script_module_on_remote(self):
+        dst_name = worker_name((self.rank + 1) % self.world_size)
+        # Construct on remote end with rpc_sync
+        created_script_module = rpc.rpc_sync(
+            dst_name, MyScriptModule, args=(self.rank,)
+        )
+        # Forward should output a ones tensor of self.rank.
+        self.assertTrue(isinstance(created_script_module, torch.jit.ScriptModule))
+        rank_ones_tensor = created_script_module()
+        self.assertEqual(torch.ones(self.rank), rank_ones_tensor)
+
+        # Construct ScriptModule with rpc.remote.
+        remote_script_module = rpc.remote(dst_name, MyScriptModule, args=(self.rank,))
+        # Verify it is an instance of ScriptModule on remote end.
+        remote_end_is_script = rpc.rpc_sync(
+            remote_script_module.owner(),
+            rref_isinstance,
+            args=(remote_script_module, torch.jit.ScriptModule),
+        )
+        self.assertTrue(remote_end_is_script)
+        # Run forward pass remotely.
+        remote_forward_output = remote_script_module.rpc_sync().forward()
+        self.assertEqual(remote_forward_output, torch.ones(self.rank))
+        # Run function defined on ScriptModule remotely.
+        remote_func_output = remote_script_module.rpc_sync().custom_func()
+        self.assertEqual(remote_func_output, torch.ones(self.rank))
+        # Ensure we can transfer ScriptModule RRef to this rank and run
+        # forward pass.
+        local_script_module = remote_script_module.to_here()
+        self.assertTrue(isinstance(local_script_module, torch.jit.ScriptModule))
+        rank_ones_tensor = local_script_module()
+        self.assertEqual(rank_ones_tensor, torch.ones(self.rank))
+        local_script_func_output = local_script_module.custom_func()
+        self.assertEqual(local_script_func_output, torch.ones(self.rank))
 
     @dist_init
     def test_load_script_module_with_pickled_rref(self):
@@ -1093,7 +1135,7 @@ class JitRpcTest(
         # Ensures that we can call torch.ops.profiler._call_end_callbacks_on_jit_fut on a jit
         # future from within a script function that calls rpc_async
         if self.rank == 0:
-            with torch.autograd.profiler.profile() as prof:
+            with _profile() as prof:
                 prof_key = _build_rpc_profiling_key(
                     RPCExecMode.ASYNC,
                     torch._jit_internal._qualified_name(one_arg),
@@ -1119,7 +1161,7 @@ class JitRpcTest(
             dst_worker_name = worker_name(dst_rank)
             args = (torch.tensor([1, 1]), torch.tensor([2, 2]))
             kwargs = {}
-            with torch.autograd.profiler.profile() as prof:
+            with _profile() as prof:
                 script_rpc_async_call(
                     dst_worker_name, args, kwargs
                 )
@@ -1163,7 +1205,7 @@ class JitRpcTest(
             dst_rank = (self.rank + 1) % self.world_size
             dst_worker_name = worker_name(dst_rank)
             block_scope = "foo"
-            with torch.autograd.profiler.profile() as prof:
+            with _profile() as prof:
                 # Runs 2 rpc_async calls within JIT under record_function.
                 record_function_on_caller_rpc_async(dst_worker_name, block_scope)
 
@@ -1203,7 +1245,7 @@ class JitRpcTest(
             dst_rank = (self.rank + 1) % self.world_size
             dst_worker_name = worker_name(dst_rank)
             block_scope = "foo"
-            with torch.autograd.profiler.profile() as prof:
+            with _profile() as prof:
                 call_rpc_torchscript_with_record_function(dst_worker_name, block_scope)
 
             # Need to call below to populate CPU children.
@@ -1232,7 +1274,7 @@ class JitRpcTest(
         # Ensures that we can call rf._call_end_callbacks_on_future on a jit
         # future in python eager mode with torch.jit.fork
         sleep_interval = 1
-        with torch.autograd.profiler.profile() as prof:
+        with _profile() as prof:
             with torch.autograd.profiler.record_function("foo") as rf:
                 fut = torch.jit._fork(sleep, sleep_interval)
                 rf._call_end_callbacks_on_future(fut)
@@ -1243,12 +1285,12 @@ class JitRpcTest(
         self.assertEqual(sleep_event.name, "foo")
         # Validate that callbacks were fired at the right time by checking the
         # profiling event cpu time
-        self.assertGreaterEqual(sleep_event.cpu_time * 1e-6, sleep_interval)
+        self.assertGreaterAlmostEqual(sleep_event.cpu_time * 1e-6, sleep_interval)
 
     def test_call_fork_in_jit_with_profiling(self):
         # Ensures that we can call torch.ops.profiler._call_end_callbacks_on_jit_fut on a jit
         # future from within a script function with torch.jit.fork
-        with torch.autograd.profiler.profile() as prof:
+        with _profile() as prof:
             with torch.autograd.profiler.record_function("foo") as rf:
                 ret = call_fork_with_profiling(rf.handle)
 
@@ -1268,7 +1310,10 @@ class JitRpcTest(
 
     @dist_init
     def test_async_function_wrong_return_type(self):
-        with self.assertRaisesRegex(RuntimeError, "Expected Future but got Tensor"):
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Async functions must return an IValue of Future type, but got Tensor",
+        ):
             rpc.rpc_sync(
                 worker_name((self.rank + 1) % self.world_size), async_wrong_type
             )
@@ -1328,5 +1373,8 @@ class JitRpcTest(
             worker_name((self.rank + 1) % self.world_size), async_wrong_type
         )
 
-        with self.assertRaisesRegex(RuntimeError, "Expected Future but got Tensor"):
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Async functions must return an IValue of Future type, but got Tensor",
+        ):
             rref.to_here()

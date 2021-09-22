@@ -5,6 +5,7 @@
 #include <ATen/core/op_registration/op_registration.h>
 #include <ATen/core/Tensor.h>
 #include <torch/csrc/jit/frontend/function_schema_parser.h>
+#include <torch/library.h>
 
 #include <ATen/core/LegacyTypeDispatch.h>
 
@@ -33,19 +34,31 @@ void decrementKernel(const OperatorHandle&, Stack* stack) {
   torch::jit::push(*stack, input - 1);
 }
 
-void expectCallsIncrement(DispatchKey dispatch_key) {
-  at::AutoNonVariableTypeMode non_var_type_mode(true);
+bool called_redispatching_kernel = false;
+void redispatchingKernel_with_DispatchKeySet(const OperatorHandle& op, c10::DispatchKeySet ks, Stack* stack) {
+  // this kernel is a no-op- it just redispatches to the lower-priority kernel
+  called_redispatching_kernel = true;
+  auto updated_ks = ks & c10::DispatchKeySet(c10::DispatchKeySet::FULL_AFTER, c10::DispatchKey::TESTING_ONLY_GenericWrapper);
+  op.redispatchBoxed(updated_ks, stack);
+}
+
+void expectCallsIncrement(c10::DispatchKeySet ks) {
+  at::AutoDispatchBelowAutograd mode;
 
   // assert that schema and cpu kernel are present
   auto op = c10::Dispatcher::singleton().findSchema({"_test::my_op", ""});
   ASSERT_TRUE(op.has_value());
-  auto result = callOp(*op, dummyTensor(dispatch_key), 5);
+  auto result = callOp(*op, dummyTensor(ks), 5);
   EXPECT_EQ(1, result.size());
   EXPECT_EQ(6, result[0].toInt());
 }
 
+void expectCallsIncrement(DispatchKey dispatch_key) {
+  expectCallsIncrement(c10::DispatchKeySet(dispatch_key));
+}
+
 void expectCallsIncrementUnboxed(DispatchKey dispatch_key) {
-  at::AutoNonVariableTypeMode non_var_type_mode(true);
+  at::AutoDispatchBelowAutograd mode;
 
   // assert that schema and cpu kernel are present
   auto op = c10::Dispatcher::singleton().findSchema({"_test::my_op", ""});
@@ -55,7 +68,7 @@ void expectCallsIncrementUnboxed(DispatchKey dispatch_key) {
 }
 
 void expectCallsDecrement(DispatchKey dispatch_key) {
-  at::AutoNonVariableTypeMode non_var_type_mode(true);
+  at::AutoDispatchBelowAutograd mode;
 
   // assert that schema and cpu kernel are present
   auto op = c10::Dispatcher::singleton().findSchema({"_test::my_op", ""});
@@ -72,26 +85,30 @@ TEST(OperatorRegistrationTest_StackBasedKernel, givenKernel_whenRegistered_thenC
 
 TEST(OperatorRegistrationTest_StackBasedKernel, givenMultipleOperatorsAndKernels_whenRegisteredInOneRegistrar_thenCallsRightKernel) {
   auto registrar = RegisterOperators()
-      .op("_test::my_op(Tensor dummy, int input) -> int", RegisterOperators::options().kernel<&incrementKernel>(DispatchKey::CPU))
-      .op("_test::my_op(Tensor dummy, int input) -> int", RegisterOperators::options().kernel<&errorKernel>(DispatchKey::CUDA))
-      .op("_test::error(Tensor dummy, int input) -> int", RegisterOperators::options().kernel<&errorKernel>(DispatchKey::CPU))
-      .op("_test::error(Tensor dummy, int input) -> int", RegisterOperators::options().kernel<&errorKernel>(DispatchKey::CUDA));
+      .op("_test::my_op(Tensor dummy, int input) -> int", RegisterOperators::options().kernel<&incrementKernel>(DispatchKey::CPU)
+                                                                                      .kernel<&errorKernel>(DispatchKey::CUDA))
+      .op("_test::error(Tensor dummy, int input) -> int", RegisterOperators::options().kernel<&errorKernel>(DispatchKey::CPU)
+                                                                                      .kernel<&errorKernel>(DispatchKey::CUDA));
   expectCallsIncrement(DispatchKey::CPU);
 }
 
 TEST(OperatorRegistrationTest_StackBasedKernel, givenMultipleOperatorsAndKernels_whenRegisteredInMultipleRegistrars_thenCallsRightKernel) {
-  auto registrar1 = RegisterOperators().op("_test::my_op(Tensor dummy, int input) -> int", RegisterOperators::options().kernel<&incrementKernel>(DispatchKey::CPU));
-  auto registrar2 = RegisterOperators().op("_test::my_op(Tensor dummy, int input) -> int", RegisterOperators::options().kernel<&errorKernel>(DispatchKey::CUDA));
-  auto registrar3 = RegisterOperators().op("_test::error(Tensor dummy, int input) -> int", RegisterOperators::options().kernel<&errorKernel>(DispatchKey::CPU));
-  auto registrar4 = RegisterOperators().op("_test::error(Tensor dummy, int input) -> int", RegisterOperators::options().kernel<&errorKernel>(DispatchKey::CUDA));
+  auto registrar1 = RegisterOperators().op("_test::my_op(Tensor dummy, int input) -> int", RegisterOperators::options().kernel<&incrementKernel>(DispatchKey::CPU)
+                                                                                                                       .kernel<&errorKernel>(DispatchKey::CUDA));
+  auto registrar2 = RegisterOperators().op("_test::error(Tensor dummy, int input) -> int", RegisterOperators::options().kernel<&errorKernel>(DispatchKey::CPU)
+                                                                                                                       .kernel<&errorKernel>(DispatchKey::CUDA));
   expectCallsIncrement(DispatchKey::CPU);
 }
 
 TEST(OperatorRegistrationTest_StackBasedKernel, givenKernel_whenRegistrationRunsOutOfScope_thenCannotBeCalledAnymore) {
   {
-    auto registrar1 = RegisterOperators().op("_test::my_op(Tensor dummy, int input) -> int", RegisterOperators::options().kernel<&incrementKernel>(DispatchKey::CPU));
+    auto m = MAKE_TORCH_LIBRARY(_test);
+    m.def("_test::my_op(Tensor dummy, int input) -> int");
+    auto m_cpu = MAKE_TORCH_LIBRARY_IMPL(_test, CPU);
+    m_cpu.impl("my_op", DispatchKey::CPU, torch::CppFunction::makeFromBoxedFunction<incrementKernel>());
     {
-      auto registrar2 = RegisterOperators().op("_test::my_op(Tensor dummy, int input) -> int", RegisterOperators::options().kernel<&decrementKernel>(DispatchKey::CUDA));
+      auto m_cuda = MAKE_TORCH_LIBRARY_IMPL(_test, CUDA);
+      m_cuda.impl("my_op", DispatchKey::CUDA, torch::CppFunction::makeFromBoxedFunction<decrementKernel>());
 
       // assert that schema and cpu kernel are present
       expectCallsIncrement(DispatchKey::CPU);
@@ -159,6 +176,31 @@ TEST(OperatorRegistrationTest_StackBasedKernel, givenKernel_whenRegisteredWithou
 TEST(OperatorRegistrationTest_StackBasedKernel, givenKernel_whenRegistered_thenCanAlsoBeCalledUnboxed) {
   auto registrar = RegisterOperators().op("_test::my_op(Tensor dummy, int input) -> int", RegisterOperators::options().kernel<&incrementKernel>(DispatchKey::CPU));
   expectCallsIncrementUnboxed(DispatchKey::CPU);
+}
+
+TEST(OperatorRegistrationTest_StackBasedKernel, callKernelsWithDispatchKeySetConvention_redispatchesToLowerPriorityKernels) {
+  auto m = MAKE_TORCH_LIBRARY(_test);
+  m.def("my_op(Tensor dummy, int input) -> int");
+  auto m_cpu = MAKE_TORCH_LIBRARY_IMPL(_, CPU);
+  m_cpu.fallback(torch::CppFunction::makeFromBoxedFunction<&incrementKernel>());
+  auto m_testing = MAKE_TORCH_LIBRARY_IMPL(_, TESTING_ONLY_GenericWrapper);
+  m_testing.fallback(torch::CppFunction::makeFromBoxedFunction<&redispatchingKernel_with_DispatchKeySet>());
+
+  auto op = c10::Dispatcher::singleton().findSchema({"_test::my_op", ""});
+  ASSERT_TRUE(op.has_value());
+
+  auto testing_cpu_set = c10::DispatchKeySet()
+                                    .add(c10::DispatchKey::TESTING_ONLY_GenericWrapper)
+                                    .add(c10::DispatchKey::CPU);
+  called_redispatching_kernel = false;
+
+  // call CPU (and not TESTING_ONLY_GenericWrapper)
+  expectCallsIncrement(DispatchKey::CPU);
+  ASSERT_FALSE(called_redispatching_kernel);
+
+  // call TESTING_ONLY_GenericWrapper -> call CPU
+  expectCallsIncrement(testing_cpu_set);
+  ASSERT_TRUE(called_redispatching_kernel);
 }
 
 }

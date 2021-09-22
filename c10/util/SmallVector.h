@@ -20,8 +20,8 @@
 
 #pragma once
 
-#include <c10/util/AlignOf.h>
 #include <c10/macros/Macros.h>
+#include <c10/util/AlignOf.h>
 
 #include <algorithm>
 #include <cassert>
@@ -139,12 +139,18 @@ class SmallVectorTemplateCommon : public SmallVectorBase {
     return (iterator)this->BeginX;
   }
   const_iterator begin() const {
+    return cbegin();
+  }
+  const_iterator cbegin() const {
     return (const_iterator)this->BeginX;
   }
   iterator end() {
     return (iterator)this->EndX;
   }
   const_iterator end() const {
+    return cend();
+  }
+  const_iterator cend() const {
     return (const_iterator)this->EndX;
   }
 
@@ -244,16 +250,16 @@ class SmallVectorTemplateBase : public SmallVectorTemplateCommon<T> {
     }
   }
 
-  /// Move the range [Iit, Eit) into the uninitialized memory starting with "Dest",
-  /// constructing elements as needed.
+  /// Move the range [Iit, Eit) into the uninitialized memory starting with
+  /// "Dest", constructing elements as needed.
   template <typename It1, typename It2>
   static void uninitialized_move(It1 Iit, It1 Eit, It2 Dest) {
     std::uninitialized_copy(
         std::make_move_iterator(Iit), std::make_move_iterator(Eit), Dest);
   }
 
-  /// Copy the range [Iit, Eit) onto the uninitialized memory starting with "Dest",
-  /// constructing elements as needed.
+  /// Copy the range [Iit, Eit) onto the uninitialized memory starting with
+  /// "Dest", constructing elements as needed.
   template <typename It1, typename It2>
   static void uninitialized_copy(It1 Iit, It1 Eit, It2 Dest) {
     std::uninitialized_copy(Iit, Eit, Dest);
@@ -394,8 +400,8 @@ class SmallVectorImpl
  protected:
   // Default ctor - Initialize to empty.
   explicit SmallVectorImpl(unsigned N)
-      : SmallVectorTemplateBase<T, C10_IS_TRIVIALLY_COPYABLE(T)>(N * sizeof(T)) {
-  }
+      : SmallVectorTemplateBase<T, C10_IS_TRIVIALLY_COPYABLE(T)>(
+            N * sizeof(T)) {}
 
  public:
   SmallVectorImpl(const SmallVectorImpl&) = delete;
@@ -832,7 +838,7 @@ SmallVectorImpl<T>& SmallVectorImpl<T>::operator=(
 
   // If we have to grow to have enough elements, destroy the current elements.
   // This allows us to avoid copying them during the grow.
-  // FIXME: don't do this if they're efficiently moveable.
+  // FIXME: don't do this if they're efficiently movable.
   if (this->capacity() < RHSSize) {
     // Destroy current elements.
     this->destroy_range(this->begin(), this->end());
@@ -960,17 +966,22 @@ class SmallVector : public SmallVectorImpl<T> {
     this->append(S, E);
   }
 
-  // note: The enable_if restricts Container to types that have a .begin() and .end()
-  // that return valid input iterators.
-  template <typename Container, std::enable_if_t<
-      std::is_convertible<
-          typename std::iterator_traits<decltype(std::declval<Container>().begin())>::iterator_category,
-          std::input_iterator_tag
-      >::value &&
-      std::is_convertible<
-          typename std::iterator_traits<decltype(std::declval<Container>().end())>::iterator_category,
-          std::input_iterator_tag
-      >::value, int> = 0>
+  // note: The enable_if restricts Container to types that have a .begin() and
+  // .end() that return valid input iterators.
+  template <
+      typename Container,
+      std::enable_if_t<
+          std::is_convertible<
+              typename std::iterator_traits<
+                  decltype(std::declval<Container>()
+                               .begin())>::iterator_category,
+              std::input_iterator_tag>::value &&
+              std::is_convertible<
+                  typename std::iterator_traits<
+                      decltype(std::declval<Container>()
+                                   .end())>::iterator_category,
+                  std::input_iterator_tag>::value,
+          int> = 0>
   explicit SmallVector(Container&& c) : SmallVectorImpl<T>(N) {
     this->append(c.begin(), c.end());
   }
@@ -994,17 +1005,22 @@ class SmallVector : public SmallVectorImpl<T> {
       SmallVectorImpl<T>::operator=(::std::move(RHS));
   }
 
-  // note: The enable_if restricts Container to types that have a .begin() and .end()
-  // that return valid input iterators.
-  template <typename Container, std::enable_if_t<
-      std::is_convertible<
-          typename std::iterator_traits<decltype(std::declval<Container>().begin())>::iterator_category,
-          std::input_iterator_tag
-      >::value &&
-      std::is_convertible<
-          typename std::iterator_traits<decltype(std::declval<Container>().end())>::iterator_category,
-          std::input_iterator_tag
-      >::value, int> = 0>
+  // note: The enable_if restricts Container to types that have a .begin() and
+  // .end() that return valid input iterators.
+  template <
+      typename Container,
+      std::enable_if_t<
+          std::is_convertible<
+              typename std::iterator_traits<
+                  decltype(std::declval<Container>()
+                               .begin())>::iterator_category,
+              std::input_iterator_tag>::value &&
+              std::is_convertible<
+                  typename std::iterator_traits<
+                      decltype(std::declval<Container>()
+                                   .end())>::iterator_category,
+                  std::input_iterator_tag>::value,
+          int> = 0>
   const SmallVector& operator=(const Container& RHS) {
     this->assign(RHS.begin(), RHS.end());
     return *this;
@@ -1025,17 +1041,22 @@ class SmallVector : public SmallVectorImpl<T> {
     return *this;
   }
 
-  // note: The enable_if restricts Container to types that have a .begin() and .end()
-  // that return valid input iterators.
-  template <typename Container, std::enable_if_t<
-      std::is_convertible<
-          typename std::iterator_traits<decltype(std::declval<Container>().begin())>::iterator_category,
-          std::input_iterator_tag
-      >::value &&
-      std::is_convertible<
-          typename std::iterator_traits<decltype(std::declval<Container>().end())>::iterator_category,
-          std::input_iterator_tag
-      >::value, int> = 0>
+  // note: The enable_if restricts Container to types that have a .begin() and
+  // .end() that return valid input iterators.
+  template <
+      typename Container,
+      std::enable_if_t<
+          std::is_convertible<
+              typename std::iterator_traits<
+                  decltype(std::declval<Container>()
+                               .begin())>::iterator_category,
+              std::input_iterator_tag>::value &&
+              std::is_convertible<
+                  typename std::iterator_traits<
+                      decltype(std::declval<Container>()
+                                   .end())>::iterator_category,
+                  std::input_iterator_tag>::value,
+          int> = 0>
   const SmallVector& operator=(Container&& C) {
     this->assign(C.begin(), C.end());
     return *this;
@@ -1053,10 +1074,10 @@ inline size_t capacity_in_bytes(const SmallVector<T, N>& X) {
 }
 
 template <typename T, unsigned N>
-std::ostream& operator<<(std::ostream & out, const SmallVector<T, N>& list) {
+std::ostream& operator<<(std::ostream& out, const SmallVector<T, N>& list) {
   int i = 0;
   out << "[";
-  for(auto e : list) {
+  for (auto e : list) {
     if (i++ > 0)
       out << ", ";
     out << e;

@@ -1,3 +1,4 @@
+#pragma once
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDAGuard.h>
@@ -45,6 +46,18 @@ template<typename scalar_vals_t, int n> struct TensorListScalarListMetadata
   int block_to_chunk[depth_to_max_blocks[n-1]];
 };
 
+// note(mkozuki): `n` of 96 and `scalar_vals_t` of `c10::complex<double>`
+// violates the cuda kernel argument size limitation of 4kb.
+// 80 is a number that does not violate this limitation.
+template<> struct TensorListScalarListMetadata<c10::complex<double>, 1>
+{
+  void* addresses[1][80];
+  int numel_for_tensor[80];
+  c10::complex<double> scalar_vals[80];
+  unsigned char block_to_tensor[depth_to_max_blocks[1-1]];
+  int block_to_chunk[depth_to_max_blocks[1-1]];
+};
+
 template<typename T, typename U, typename... ArgTypes>
 C10_LAUNCH_BOUNDS_1(kBlockSize)
 __global__ void
@@ -56,14 +69,13 @@ multi_tensor_apply_kernel(
   callable(kChunkSize, tensorListMeta, args...);
 }
 
-template<int depth, typename T, typename... ArgTypes>
+template<int depth, typename scalar_T, typename T, typename... ArgTypes>
 void multi_tensor_apply(
     std::vector<std::vector<at::Tensor>>& tensor_lists,
-    at::ArrayRef<double> scalars,
+    at::ArrayRef<Scalar> scalars,
     T callable,
     ArgTypes... args) {
         TORCH_CHECK(tensor_lists.size() == depth, "Number of tensor lists has to match the depth.");
-        const cuda::OptionalCUDAGuard device_guard(device_of(tensor_lists[0][0]));
         size_t n_tensors = tensor_lists[0].size();
         using scalar_vals_t = typename T::opmath_t;
         TensorListScalarListMetadata<scalar_vals_t, depth> tensorListMeta;
@@ -72,7 +84,7 @@ void multi_tensor_apply(
         int loc_tensor_info = 0;
         for(size_t t = 0; t < n_tensors; t++) {
 
-            tensorListMeta.scalar_vals[loc_tensor_info] = scalars[t];
+            tensorListMeta.scalar_vals[loc_tensor_info] = scalars[t].to<scalar_T>();
 
             tensorListMeta.numel_for_tensor[loc_tensor_info] = tensor_lists[0][t].numel();
             for (int d = 0; d < depth; d++) {
@@ -96,7 +108,7 @@ void multi_tensor_apply(
                         tensorListMeta,
                         callable,
                         args...);
-                    TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+                    C10_CUDA_KERNEL_LAUNCH_CHECK();
 
                     // Reset.
                     loc_block_info = 0;
@@ -123,7 +135,6 @@ void multi_tensor_apply(
     T callable,
     ArgTypes... args) {
         TORCH_CHECK(tensor_lists.size() == depth, "Number of tensor lists has to match the depth.");
-        const cuda::OptionalCUDAGuard device_guard(device_of(tensor_lists[0][0]));
         size_t n_tensors = tensor_lists[0].size();
         TensorListMetadata<depth> tensorListMeta;
 
@@ -152,7 +163,7 @@ void multi_tensor_apply(
                         tensorListMeta,
                         callable,
                         args...);
-                    TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+                    C10_CUDA_KERNEL_LAUNCH_CHECK();
 
                     // Reset.
                     loc_block_info = 0;

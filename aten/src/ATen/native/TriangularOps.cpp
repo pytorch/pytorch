@@ -2,6 +2,7 @@
 #include <ATen/CPUApplyUtils.h>
 #include <ATen/Dispatch.h>
 #include <ATen/NativeFunctions.h>
+#include <ATen/native/Resize.h>
 
 #include <ATen/Parallel.h>
 #include <ATen/native/TriangularOpsUtils.h>
@@ -60,6 +61,7 @@ void apply_triu_tril(Tensor& result, const Tensor& self, bool inplace, int64_t k
   auto self_column_stride = self.stride(-1);
 
   auto result_data = result.data_ptr<scalar_t>();
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int64_t result_stride, result_row_stride, result_column_stride;
   if (result_data != self_data) {
     result_stride = (result.dim() > 2 && result.stride(-3) > 0) ? result.stride(-3) : 1;
@@ -92,27 +94,26 @@ Tensor& tril_cpu_(Tensor &self, int64_t k) {
   if (self.numel() == 0) {
     return self;
   }
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   bool inplace;
   Tensor self_c;
   std::tie(inplace, self_c) = checkTrilTriuBatchContiguous(self, true);
   Tensor result = inplace ? self : at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(at::ScalarType::Half, at::ScalarType::Bool, self.scalar_type(), "tril", [&]{
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(at::ScalarType::BFloat16, at::ScalarType::Half, at::ScalarType::Bool, self.scalar_type(), "tril", [&]{
     apply_triu_tril<scalar_t, false>(result, self_c, inplace, k);
   });
   if (!inplace) self.copy_(result);
   return self;
 }
 
-Tensor& tril_cpu_out(Tensor &result, const Tensor& self, int64_t k) {
-  if (result.sizes() != self.sizes()) {
-    result.resize_as_(self);
-  }
+Tensor& tril_cpu_out(const Tensor& self, int64_t k, Tensor &result) {
+  at::native::resize_output(result, self.sizes());
   if (self.numel() == 0) {
     return result;
   }
   Tensor self_c;
   std::tie(std::ignore, self_c) = checkTrilTriuBatchContiguous(self, false);
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(at::ScalarType::Half, at::ScalarType::Bool, self.scalar_type(), "tril", [&]{
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(at::ScalarType::BFloat16, at::ScalarType::Half, at::ScalarType::Bool, self.scalar_type(), "tril", [&]{
     apply_triu_tril<scalar_t, false>(result, self_c, false, k);
   });
   return result;
@@ -128,27 +129,26 @@ Tensor& triu_cpu_(Tensor &self, int64_t k) {
   if (self.numel() == 0) {
     return self;
   }
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   bool inplace;
   Tensor self_c;
   std::tie(inplace, self_c) = checkTrilTriuBatchContiguous(self, true);
   Tensor result = inplace ? self : at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(at::ScalarType::Half, at::ScalarType::Bool, self.scalar_type(), "triu", [&]{
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(at::ScalarType::BFloat16, at::ScalarType::Half, at::ScalarType::Bool, self.scalar_type(), "triu", [&]{
     apply_triu_tril<scalar_t, true>(result, self_c, inplace, k);
   });
   if (!inplace) self.copy_(result);
   return self;
 }
 
-Tensor& triu_cpu_out(Tensor &result, const Tensor& self, int64_t k) {
-  if (result.sizes() != self.sizes()) {
-    result.resize_as_(self);
-  }
+Tensor& triu_cpu_out(const Tensor& self, int64_t k, Tensor &result) {
+  at::native::resize_output(result, self.sizes());
   if (self.numel() == 0) {
     return result;
   }
   Tensor self_c;
   std::tie(std::ignore, self_c) = checkTrilTriuBatchContiguous(self, false);
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(at::ScalarType::Half, at::ScalarType::Bool, self.scalar_type(), "triu", [&]{
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(at::ScalarType::BFloat16, at::ScalarType::Half, at::ScalarType::Bool, self.scalar_type(), "triu", [&]{
     apply_triu_tril<scalar_t, true>(result, self_c, false, k);
   });
   return result;

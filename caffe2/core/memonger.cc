@@ -155,13 +155,20 @@ class ComputeBlobRecyclingForDag {
       const string& namescope,
       const std::unordered_set<string>& dont_share_blob_names,
       const std::unordered_map<string, vector<int>>& blob_shapes) {
+
+    // Memonger modifies the graph. Do an early schema check here to make sure
+    // the operators are valid
+    run_schema_check(net);
     // Construct the set of input blobs.
     std::unordered_set<string> heads_blobs_set(heads.begin(), heads.end());
 
     // Construct the set of output blobs we want to optimize.
+    // Blobs not eligible for sharing are filtered out
     for (const int op_index : op_indices) {
       for (const auto& output : net.op(op_index).output()) {
-        optim_op_outputs_.insert(output);
+        if (has_key(shareable_blob_names, output) && !has_key(dont_share_blob_names, output)) {
+          optim_op_outputs_.insert(output);
+        }
       }
     }
 
@@ -243,7 +250,7 @@ class ComputeBlobRecyclingForDag {
     bool had_changes = true;
     while (had_changes) {
       had_changes = false;
-      for (const auto mapped_blob : mapping_) {
+      for (const auto& mapped_blob : mapping_) {
         if (has_key(renamed, mapped_blob.second) &&
             renamed[mapped_blob.second] != mapped_blob.second) {
           renamed[mapped_blob.first] = renamed[mapped_blob.second];
@@ -470,6 +477,7 @@ class ComputeBlobRecyclingForDag {
         std::push_heap(
             free_blobs->begin(),
             free_blobs->end(),
+            // NOLINTNEXTLINE(modernize-use-transparent-functors)
             std::greater<std::pair<int, string>>());
       }
     }
@@ -515,6 +523,7 @@ class ComputeBlobRecyclingForDag {
       return 0;
     }
     int size = 1;
+    // NOLINTNEXTLINE(modernize-loop-convert)
     for (size_t i = 0; i < blob_shapes_iter->second.size(); ++i) {
       size *= blob_shapes_iter->second[i];
     }
@@ -562,6 +571,7 @@ class ComputeBlobRecyclingForDag {
         std::pop_heap(
             free_blobs->begin(),
             free_blobs->end(),
+            // NOLINTNEXTLINE(modernize-use-transparent-functors)
             std::greater<std::pair<int, string>>());
         const auto cand_free_blob = free_blobs->back();
         free_blobs->pop_back();
@@ -577,6 +587,7 @@ class ComputeBlobRecyclingForDag {
         std::push_heap(
             free_blobs->begin(),
             free_blobs->end(),
+            // NOLINTNEXTLINE(modernize-use-transparent-functors)
             std::greater<std::pair<int, string>>());
       }
     } else {

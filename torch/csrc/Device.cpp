@@ -30,7 +30,10 @@ PyObject *THPDevice_repr(THPDevice *self)
   std::ostringstream oss;
   oss << "device(type=\'" << self->device.type() << "\'";
   if (self->device.has_index()) {
-    oss << ", index=" << self->device.index();
+    // `self->device.index()` returns uint8_t which is treated as ascii while printing,
+    // hence casting it to uint16_t.
+    // https://stackoverflow.com/questions/19562103/uint8-t-cant-be-printed-with-cout
+    oss << ", index=" << static_cast<uint16_t>(self->device.index());
   }
   oss << ")";
   return THPUtils_packString(oss.str().c_str());
@@ -48,7 +51,7 @@ PyObject *THPDevice_pynew(PyTypeObject *type, PyObject *args, PyObject *kwargs)
   HANDLE_TH_ERRORS
   static torch::PythonArgParser parser({
     "Device(Device device)",
-    "Device(std::string type, int64_t? index=-1)"
+    "Device(c10::string_view type, int64_t? index=-1)"
   });
   torch::ParsedArgs<2> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
@@ -168,12 +171,14 @@ typedef PyObject *(*getter)(PyObject *, void *);
 
 // NB: If you edit these properties/methods, update torch/_C/__init__.pyi.in
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays)
 static struct PyGetSetDef THPDevice_properties[] = {
   {"type",       (getter)THPDevice_type, nullptr, nullptr, nullptr},
   {"index",      (getter)THPDevice_index, nullptr, nullptr, nullptr},
   {nullptr}
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays)
 static PyMethodDef THPDevice_methods[] = {
   {"__reduce__", THPDevice_reduce, METH_NOARGS, nullptr},
   {nullptr}  /* Sentinel */

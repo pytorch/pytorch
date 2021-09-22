@@ -9,6 +9,12 @@
 
 namespace torch {
 namespace jit {
+struct ModuleInstanceInfo;
+constexpr size_t kModuleInstanceInfo = 2;
+
+namespace utils {
+std::string get_module_info(const ModuleInstanceInfo& module_instance_info);
+} // namespace utils
 
 // Scope is a node of a trie that represents the tree of nested scopes.
 // Individual scopes are pushed and popped from Graph, which holds a
@@ -66,6 +72,7 @@ struct ModuleInstanceInfo {
   std::string instance_name_;
 
  public:
+  ModuleInstanceInfo() = default;
   ModuleInstanceInfo(c10::ClassTypePtr module_type, std::string instance_name);
   c10::ClassTypePtr class_type() {
     return module_type_;
@@ -75,6 +82,11 @@ struct ModuleInstanceInfo {
   }
   std::string instance_name() const {
     return instance_name_;
+  }
+
+  bool operator==(const ModuleInstanceInfo& rhs) const {
+    return (class_type() == rhs.class_type()) &&
+        (instance_name() == rhs.instance_name());
   }
 };
 
@@ -107,14 +119,22 @@ struct ModuleInstanceInfo {
  *  [ham, source_range4]  --
  */
 using InlinedCallStackPtr = c10::intrusive_ptr<InlinedCallStack>;
-using InlinedCallStackEntry = std::pair<Function*, SourceRange>;
-using InlinedCallStackWithModuleInfo =
+using InlinedCallStackEntry =
     std::tuple<Function*, SourceRange, c10::optional<ModuleInstanceInfo>>;
 
 struct TORCH_API InlinedCallStack : public c10::intrusive_ptr_target {
  private:
   c10::optional<InlinedCallStackPtr> callee_;
   Function* fn_;
+  // Reason for fn_name_ even though we have fn_
+  // Serialized callstack is used in circustmances where InlinedCallstack
+  // cannot be constructed during runtime, e.g. mobile runtime or
+  // delegated backends.
+  // Since in those cases we do not have Function* we store function name
+  // fn_name does not give you access to the same information that Function*
+  // does, however in mobile/delegated backend runtime we use InlindedCallStack
+  // for exception stack and for that purpose fn_name_ suffices.
+  std::string fn_name_;
   SourceRange source_range_;
   InlinedCallStackPtr intrusive_from_this();
   c10::optional<ModuleInstanceInfo> module_instance_info_;
@@ -144,9 +164,45 @@ struct TORCH_API InlinedCallStack : public c10::intrusive_ptr_target {
   // Return next element in the callstack list.
   c10::optional<InlinedCallStackPtr> callee() const;
 
+  // Return module instance associated with the current element.
+  c10::optional<ModuleInstanceInfo> module_instance() const;
+
+  // Returns the source range of the node
+  SourceRange source_range() const;
+
+  Function* function() const;
+
+  void set_function_name(std::string fn_name);
+
+  std::string function_name() const;
+
   // Return callstack as a vector of [Function, SourceRange] pairs.
   std::vector<InlinedCallStackEntry> vec();
+
+  void setCallee(c10::optional<InlinedCallStackPtr>);
+
+  bool operator==(const InlinedCallStack& rhs) const {
+    // No need to compare fn_, since source_range equivalence check
+    // should suffice.
+    return (module_instance().has_value() ==
+            rhs.module_instance().has_value()) &&
+        (module_instance().has_value() &&
+         module_instance().value() == rhs.module_instance().value()) &&
+        callee() == rhs.callee() && source_range() == rhs.source_range();
+  }
+
+  bool operator!=(const InlinedCallStack& rhs) const {
+    return !(*this == rhs);
+  }
 };
 
+// {source range, node name, InlinedCallStack}
+// We store node name because same debug infor will be used for
+// profiling as well, so we need to know op names as well.
+using DebugInfoTuple =
+    std::tuple<SourceRange, std::string, InlinedCallStackPtr>;
+constexpr size_t kDebugInfoTupleSourceRangeIndex{0};
+constexpr size_t kDebugInfoTupleNodeNameIndex{1};
+constexpr size_t kDebugInfoTupleInlinedCSIndex{2};
 } // namespace jit
 } // namespace torch

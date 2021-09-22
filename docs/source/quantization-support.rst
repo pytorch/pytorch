@@ -105,14 +105,16 @@ Fused modules are provided for common patterns in CNNs. Combining several
 operations together (like convolution and relu) allows for better quantization
 accuracy
 
-    
+
 * `torch.nn.intrinsic` — float versions of the modules, can be swapped with
   quantized version 1 to 1:
 
   * :class:`~torch.nn.intrinsic.ConvBn1d` — Conv1d + BatchNorm1d
   * :class:`~torch.nn.intrinsic.ConvBn2d` — Conv2d + BatchNorm
+  * :class:`~torch.nn.intrinsic.ConvBn3d` — Conv3d + BatchNorm3d
   * :class:`~torch.nn.intrinsic.ConvBnReLU1d` — Conv1d + BatchNorm1d + ReLU
   * :class:`~torch.nn.intrinsic.ConvBnReLU2d` — Conv2d + BatchNorm + ReLU
+  * :class:`~torch.nn.intrinsic.ConvBnReLU3d` — Conv3d + BatchNorm3d + ReLU
   * :class:`~torch.nn.intrinsic.ConvReLU1d` — Conv1d + ReLU
   * :class:`~torch.nn.intrinsic.ConvReLU2d` — Conv2d + ReLU
   * :class:`~torch.nn.intrinsic.ConvReLU3d` — Conv3d + ReLU
@@ -121,8 +123,11 @@ accuracy
 * `torch.nn.intrinsic.qat` — versions of layers for quantization-aware training:
 
   * :class:`~torch.nn.intrinsic.qat.ConvBn2d` — Conv2d + BatchNorm
+  * :class:`~torch.nn.intrinsic.qat.ConvBn3d` — Conv3d + BatchNorm3d
   * :class:`~torch.nn.intrinsic.qat.ConvBnReLU2d` — Conv2d + BatchNorm + ReLU
+  * :class:`~torch.nn.intrinsic.qat.ConvBnReLU3d` — Conv3d + BatchNorm3d + ReLU
   * :class:`~torch.nn.intrinsic.qat.ConvReLU2d` — Conv2d + ReLU
+  * :class:`~torch.nn.intrinsic.qat.ConvReLU3d` — Conv3d + ReLU
   * :class:`~torch.nn.intrinsic.qat.LinearReLU` — Linear + ReLU
 
 * `torch.nn.intrinsic.quantized` — quantized version of fused layers for
@@ -141,6 +146,7 @@ Layers for the quantization-aware training
 
 * :class:`~torch.nn.qat.Linear` — Linear (fully-connected) layer
 * :class:`~torch.nn.qat.Conv2d` — 2D convolution
+* :class:`~torch.nn.qat.Conv3d` — 3D convolution
 
 `torch.quantization`
 ~~~~~~~~~~~~~~~~~~~~
@@ -171,10 +177,10 @@ Layers for the quantization-aware training
     used by the :func:`torch.quantization.quantize`
   * :func:`~torch.quantization.fuse_modules`
 
-* Functions for graph mode quantization:
-
-  * :func:`~torch.quantization.quantize_jit` - Function for graph mode post training static quantization
-  * :func:`~torch.quantization.quantize_dynamic_jit` - Function for graph mode post training dynamic quantization
+* Functions for FX graph mode quantization:
+  * :func:`~torch.quantization.quantize_fx.prepare_fx` - Function for preparing the model for post training quantization with FX graph mode quantization
+  * :func:`~torch.quantization.quantize_fx.prepare_qat_fx` - Function for preparing the model for quantization aware training with FX graph mode quantization
+  * :func:`~torch.quantization.quantize_fx.convert_fx` - Function for converting a prepared model to a quantized model with FX graph mode quantization
 
 * Quantization configurations
     * :class:`~torch.quantization.QConfig` — Quantization configuration class
@@ -255,7 +261,6 @@ Quantized version of standard NN layers.
 * :class:`~torch.nn.quantized.Conv3d` — 3D convolution
 * :class:`~torch.nn.quantized.Linear` — Linear (fully-connected) layer
 * :class:`~torch.nn.MaxPool2d` — 2D max pooling
-* :class:`~torch.nn.quantized.ReLU` — Rectified linear unit
 * :class:`~torch.nn.quantized.ReLU6` — Rectified linear unit with cut-off at
   quantized representation of 6
 * :class:`~torch.nn.quantized.ELU` — ELU
@@ -294,7 +299,6 @@ quantization output parameters)
 * :func:`~torch.nn.quantized.functional.interpolate` — Down-/up- sampler
 * :func:`~torch.nn.quantized.functional.linear` — Linear (fully-connected) op
 * :func:`~torch.nn.quantized.functional.max_pool2d` — 2D max pooling
-* :func:`~torch.nn.quantized.functional.relu` — Rectified linear unit
 * :func:`~torch.nn.quantized.functional.elu` — ELU
 * :func:`~torch.nn.quantized.functional.hardsigmoid` — Hardsigmoid
 * :func:`~torch.nn.quantized.functional.hardswish` — Hardswish
@@ -317,12 +321,10 @@ Quantized dtypes and quantization schemes
   * :attr:`torch.per_tensor_affine` — per tensor, asymmetric
   * :attr:`torch.per_channel_affine` — per channel, asymmetric
   * :attr:`torch.per_tensor_symmetric` — per tensor, symmetric
-  * :attr:`torch.per_channel_symmetric` — per tensor, symmetric
+  * :attr:`torch.per_channel_symmetric` — per channel, symmetric
 
 * ``torch.dtype`` — Type to describe the data. Supported types:
 
   * :attr:`torch.quint8` — 8-bit unsigned integer
   * :attr:`torch.qint8` — 8-bit signed integer
   * :attr:`torch.qint32` — 32-bit signed integer
-
-

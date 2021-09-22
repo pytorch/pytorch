@@ -1,7 +1,7 @@
 #pragma once
 
 #include <caffe2/core/macros.h>  // For caffe2 macros.
-
+#include <caffe2/utils/eigen_utils.h>
 // All caffe2 ideep related headers
 #include <ideep.hpp>
 #include <caffe2/ideep/utils/ideep_context.h>

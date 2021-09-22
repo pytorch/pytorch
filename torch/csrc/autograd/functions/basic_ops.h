@@ -4,6 +4,8 @@
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/variable.h>
 
+#include <c10/util/irange.h>
+
 #include <memory>
 #include <string>
 #include <vector>
@@ -39,9 +41,11 @@ struct TORCH_API NotImplemented : public Error {
 struct TORCH_API DelayedError : public Node {
   DelayedError(std::string msg, int num_inputs)
     : msg(std::move(msg)) {
-      for (int i = 0; i < num_inputs; i++)
-        add_input_metadata(Node::undefined_input());
+    // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
+    for(int i = 0; i < num_inputs; i++) {
+      add_input_metadata(Node::undefined_input());
     }
+  }
 
   variable_list apply(variable_list&& inputs) override;
 
@@ -60,15 +64,16 @@ struct TORCH_API UndefinedGradBackward : public Node {
   UndefinedGradBackward(edge_list&& next_edges)
     : Node(std::move(next_edges)) {}
 
-  UndefinedGradBackward() {}
+  UndefinedGradBackward() = default;
 
   variable_list apply(variable_list&& inputs) override;
 };
 
 struct TORCH_API GraphRoot : public Node {
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   GraphRoot(edge_list functions, variable_list inputs)
       : Node(std::move(functions)),
-        outputs(std::move(inputs)) {
+      outputs(std::move(inputs)) {
     // Ensures calls to stream() on a GraphRoot instance reflect current stream(s)
     // on devices of root grad tensors at the time the instance is constructed.
     for (const auto& t : outputs) {
@@ -81,6 +86,10 @@ struct TORCH_API GraphRoot : public Node {
   }
 
   variable_list outputs;
+};
+
+struct TORCH_API Identity : public Node {
+  variable_list apply(variable_list&& inputs) override;
 };
 
 }}

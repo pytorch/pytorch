@@ -20,7 +20,7 @@
 // of the A rows. The column offsets are needed for the asymmetric quantization
 // (affine quantization) of input matrix.
 // Note that in JIT mode we can think of a way to fuse col_offsets with bias.
-struct CAFFE2_API PackedLinearWeight : public LinearPackedParamsBase {
+struct TORCH_API PackedLinearWeight : public LinearPackedParamsBase {
   PackedLinearWeight(
       std::unique_ptr<fbgemm::PackBMatrix<int8_t>> w,
       c10::optional<at::Tensor> bias,
@@ -50,6 +50,18 @@ struct CAFFE2_API PackedLinearWeight : public LinearPackedParamsBase {
       double output_scale,
       int64_t output_zero_point) override;
 
+  at::Tensor& apply_out(
+      const at::Tensor& input,
+      double output_scale,
+      int64_t output_zero_point,
+      at::Tensor& output) override;
+
+  at::Tensor& apply_relu_out(
+      const at::Tensor& input,
+      double output_scale,
+      int64_t output_zero_point,
+      at::Tensor& output) override;
+
   at::Tensor apply_dynamic(at::Tensor input, bool reduce_range=false) override;
   at::Tensor apply_dynamic_relu(at::Tensor input, bool reduce_range=false) override;
 
@@ -65,16 +77,17 @@ struct CAFFE2_API PackedLinearWeight : public LinearPackedParamsBase {
 
  private:
   template <bool ReluFused>
-  at::Tensor apply_impl(
-      at::Tensor input,
+  at::Tensor& apply_impl(
+      const at::Tensor& input,
       double output_scale,
-      int64_t output_zero_point);
+      int64_t output_zero_point,
+      at::Tensor& output);
 
   template <bool ReluFused>
   at::Tensor apply_dynamic_impl(at::Tensor input, bool reduce_range=false);
 };
 
-struct CAFFE2_API PackedLinearWeightFp16 : public LinearPackedParamsBase {
+struct TORCH_API PackedLinearWeightFp16 : public LinearPackedParamsBase {
   PackedLinearWeightFp16(
       std::unique_ptr<fbgemm::PackedGemmMatrixFP16> w,
       c10::optional<at::Tensor> bias)
@@ -117,7 +130,7 @@ struct CAFFE2_API PackedLinearWeightFp16 : public LinearPackedParamsBase {
 };
 
 template <int kSpatialDim = 2>
-struct CAFFE2_API PackedConvWeight : public ConvPackedParamsBase<kSpatialDim> {
+struct TORCH_API PackedConvWeight : public ConvPackedParamsBase<kSpatialDim> {
   PackedConvWeight(
       std::unique_ptr<fbgemm::PackWeightsForConv<kSpatialDim>> w,
       c10::optional<at::Tensor> bias,
@@ -306,7 +319,7 @@ Tensor ConvertConvWeightsToChannelLastTensor(
 
 #endif // USE_FBGEMM
 
-struct CAFFE2_API PackedEmbeddingBagWeight : public EmbeddingPackedParamsBase {
+struct TORCH_API PackedEmbeddingBagWeight : public EmbeddingPackedParamsBase {
   PackedEmbeddingBagWeight(
       at::Tensor packed_w,
       std::vector<float> w_scale,
@@ -314,12 +327,17 @@ struct CAFFE2_API PackedEmbeddingBagWeight : public EmbeddingPackedParamsBase {
       int64_t bit_rate,
       c10::QScheme q_scheme,
       int64_t version)
-    : packed_w(std::move(packed_w)),
-      w_scale(std::move(w_scale)),
-      w_zp(std::move(w_zp)),
-      bit_rate_(bit_rate),
-      q_scheme(q_scheme),
-      version_(version) {}
+      : packed_w(std::move(packed_w)),
+        w_scale(std::move(w_scale)),
+        w_zp(std::move(w_zp)),
+        bit_rate_(bit_rate),
+        q_scheme(q_scheme),
+        version_(version) {
+    // NOLINTNEXTLINE(clang-analyzer-cplusplus.Move)
+    if (!packed_w.is_contiguous()) {
+      packed_w = packed_w.contiguous();
+    }
+  }
 
   at::Tensor packed_w;
   std::vector<float> w_scale;

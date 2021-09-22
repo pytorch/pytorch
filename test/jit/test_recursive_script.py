@@ -1,5 +1,6 @@
 import os
 import sys
+import types
 import typing
 import typing_extensions
 from typing import List, Dict, Optional, Tuple
@@ -82,7 +83,7 @@ class TestRecursiveScript(JitTestCase):
                 return self.fn(x)
 
         m = M(fn)
-        with self.assertRaisesRegex(RuntimeError, "failed to compile"):
+        with self.assertRaisesRegexWithHighlight(RuntimeError, "failed to compile", "i_dont_exist"):
             torch.jit.script(m)
 
     def test_init_error(self):
@@ -210,7 +211,7 @@ class TestRecursiveScript(JitTestCase):
             def forward(self, x):
                 return MyScriptClass()
 
-        with self.assertRaisesRegex(torch.jit.frontend.FrontendError, "Cannot instantiate class"):
+        with self.assertRaisesRegexWithHighlight(torch.jit.frontend.FrontendError, "Cannot instantiate class", "MyScriptClass"):
             t = torch.jit.script(TestModule())
 
     def test_method_call(self):
@@ -285,8 +286,7 @@ class TestRecursiveScript(JitTestCase):
         test_module_dir(nn.ModuleDict(OrderedDict([("conv", conv), ("linear", linear)])))
 
     def test_class_compile(self):
-        def other_fn(a, b):
-            # type: (int, Tensor) -> Tensor
+        def other_fn(a: int, b: Tensor) -> Tensor:
             return a * b
 
         class B(object):
@@ -308,8 +308,7 @@ class TestRecursiveScript(JitTestCase):
         self.checkModule(N(), (torch.randn(2, 2),))
 
     def test_error_stack(self):
-        def d(x):
-            # type: (int) -> int
+        def d(x: int) -> int:
             return x + 10
 
         def c(x):
@@ -332,8 +331,7 @@ class TestRecursiveScript(JitTestCase):
             checker.run(str(e))
 
     def test_error_stack_module(self):
-        def d(x):
-            # type: (int) -> int
+        def d(x: int) -> int:
             return x + 10
 
         def c(x):
@@ -387,7 +385,7 @@ class TestRecursiveScript(JitTestCase):
     def test_error_stack_class(self):
         class X(object):
             def bad_fn(self):
-                import pdb  # noqa
+                import pdb  # noqa: F401
 
         def fn(x) -> X:
             return X(10)
@@ -403,7 +401,7 @@ class TestRecursiveScript(JitTestCase):
     def test_error_stack_annotation(self):
         class X(object):
             def bad_fn(self):
-                import pdb  # noqa
+                import pdb  # noqa: F401
 
         def fn(x) -> X:
             return X(10)
@@ -539,6 +537,15 @@ class TestRecursiveScript(JitTestCase):
         script_out = sm(t.clone())
         self.assertNotEqual(eager_out, script_out)
 
+    def test_prepare_scriptable_cycle(self):
+        t = torch.randn(5, 5)
+        c = torch.nn.Module()
+        p = torch.nn.Module()
+        c.__dict__["_p"] = p
+        p.__dict__["_c"] = c
+
+        sm = torch.jit.script(p)
+
     def test_attributes(self):
         @torch.jit.script
         class Inner2(object):
@@ -557,8 +564,7 @@ class TestRecursiveScript(JitTestCase):
                 self.a = 4
                 self.inner = Inner2()
 
-            def __setstate__(self, obj):
-                # type: (Tuple[int, Inner2]) -> None
+            def __setstate__(self, obj: Tuple[int, Inner2]) -> None:
                 a, inner = obj
                 self.a = a
                 self.inner = inner
@@ -724,3 +730,23 @@ class TestRecursiveScript(JitTestCase):
         self.checkModule(mod, (torch.rand(2, 2),))
         mod.foo = None
         self.checkModule(mod, (torch.rand(2, 2),))
+
+    def test_override_instance_method_ignore(self):
+        class M(torch.nn.Module):
+            @torch.jit.ignore
+            def i_am_ignored(self):
+                return "old"
+
+        m = M()
+
+        # Override the ignored method by binding a new method to this instance.
+        @torch.jit.ignore
+        def i_am_ignored(self):
+            return "new"
+
+        m.i_am_ignored = types.MethodType(i_am_ignored, m)
+        self.assertEqual(m.i_am_ignored(), "new")
+
+        # ScriptModule should correctly reflect the override.
+        s = torch.jit.script(m)
+        self.assertEqual(s.i_am_ignored(), "new")

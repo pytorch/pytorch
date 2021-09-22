@@ -48,6 +48,7 @@ static void upsample_bilinear2d_out_frame(
 
   const auto rwidth =
       area_pixel_compute_scale<float>(input_width, output_width, align_corners, scales_w);
+  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   float output_scale = output.q_scale() / input.q_scale();
 
   for (int64_t h2 = 0; h2 < output_height; ++h2) {

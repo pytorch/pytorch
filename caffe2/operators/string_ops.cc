@@ -12,6 +12,7 @@ bool StringJoinOp<CPUContext>::DoRunWithType() {
   CAFFE_ENFORCE_LE(input.dim(), 2, "Only 1-D and 2-D tensors are supported");
 
   const auto* inputData = input.data<T>();
+  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   int rowSize = (input.dim() == 2) ? input.size(1) : 1;
   if (this->axis_ == 0) {
     auto* output = Output(0, {input.size(0)}, at::dtype<std::string>());

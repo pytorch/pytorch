@@ -1,5 +1,4 @@
 import torch
-from torch._six import int_classes as _int_classes
 from torch import Tensor
 
 from typing import Iterator, Optional, Sequence, List, TypeVar, Generic, Sized
@@ -55,15 +54,15 @@ class Sampler(Generic[T_co]):
 class SequentialSampler(Sampler[int]):
     r"""Samples elements sequentially, always in the same order.
 
-    Arguments:
+    Args:
         data_source (Dataset): dataset to sample from
     """
     data_source: Sized
 
-    def __init__(self, data_source):
+    def __init__(self, data_source: Sized) -> None:
         self.data_source = data_source
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[int]:
         return iter(range(len(self.data_source)))
 
     def __len__(self) -> int:
@@ -74,7 +73,7 @@ class RandomSampler(Sampler[int]):
     r"""Samples elements randomly. If without replacement, then sample from a shuffled dataset.
     If with replacement, then user can specify :attr:`num_samples` to draw.
 
-    Arguments:
+    Args:
         data_source (Dataset): dataset to sample from
         replacement (bool): samples are drawn on-demand with replacement if ``True``, default=``False``
         num_samples (int): number of samples to draw, default=`len(dataset)`. This argument
@@ -110,28 +109,27 @@ class RandomSampler(Sampler[int]):
             return len(self.data_source)
         return self._num_samples
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[int]:
         n = len(self.data_source)
         if self.generator is None:
-            generator = torch.Generator()
-            generator.manual_seed(int(torch.empty((), dtype=torch.int64).random_().item()))
-        else:
-            generator = self.generator
+            self.generator = torch.Generator()
+            self.generator.manual_seed(int(torch.empty((), dtype=torch.int64).random_().item()))
+
         if self.replacement:
             for _ in range(self.num_samples // 32):
-                yield from torch.randint(high=n, size=(32,), dtype=torch.int64, generator=generator).tolist()
-            yield from torch.randint(high=n, size=(self.num_samples % 32,), dtype=torch.int64, generator=generator).tolist()
+                yield from torch.randint(high=n, size=(32,), dtype=torch.int64, generator=self.generator).tolist()
+            yield from torch.randint(high=n, size=(self.num_samples % 32,), dtype=torch.int64, generator=self.generator).tolist()
         else:
             yield from torch.randperm(n, generator=self.generator).tolist()
 
-    def __len__(self):
+    def __len__(self) -> int:
         return self.num_samples
 
 
 class SubsetRandomSampler(Sampler[int]):
     r"""Samples elements randomly from a given list of indices, without replacement.
 
-    Arguments:
+    Args:
         indices (sequence): a sequence of indices
         generator (Generator): Generator used in sampling.
     """
@@ -141,10 +139,10 @@ class SubsetRandomSampler(Sampler[int]):
         self.indices = indices
         self.generator = generator
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[int]:
         return (self.indices[i] for i in torch.randperm(len(self.indices), generator=self.generator))
 
-    def __len__(self):
+    def __len__(self) -> int:
         return len(self.indices)
 
 
@@ -171,7 +169,7 @@ class WeightedRandomSampler(Sampler[int]):
 
     def __init__(self, weights: Sequence[float], num_samples: int,
                  replacement: bool = True, generator=None) -> None:
-        if not isinstance(num_samples, _int_classes) or isinstance(num_samples, bool) or \
+        if not isinstance(num_samples, int) or isinstance(num_samples, bool) or \
                 num_samples <= 0:
             raise ValueError("num_samples should be a positive integer "
                              "value, but got num_samples={}".format(num_samples))
@@ -183,11 +181,11 @@ class WeightedRandomSampler(Sampler[int]):
         self.replacement = replacement
         self.generator = generator
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[int]:
         rand_tensor = torch.multinomial(self.weights, self.num_samples, self.replacement, generator=self.generator)
         return iter(rand_tensor.tolist())
 
-    def __len__(self):
+    def __len__(self) -> int:
         return self.num_samples
 
 
@@ -211,7 +209,7 @@ class BatchSampler(Sampler[List[int]]):
         # Since collections.abc.Iterable does not check for `__getitem__`, which
         # is one way for an object to be an iterable, we don't do an `isinstance`
         # check here.
-        if not isinstance(batch_size, _int_classes) or isinstance(batch_size, bool) or \
+        if not isinstance(batch_size, int) or isinstance(batch_size, bool) or \
                 batch_size <= 0:
             raise ValueError("batch_size should be a positive integer value, "
                              "but got batch_size={}".format(batch_size))
@@ -222,7 +220,7 @@ class BatchSampler(Sampler[List[int]]):
         self.batch_size = batch_size
         self.drop_last = drop_last
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[List[int]]:
         batch = []
         for idx in self.sampler:
             batch.append(idx)
@@ -232,12 +230,12 @@ class BatchSampler(Sampler[List[int]]):
         if len(batch) > 0 and not self.drop_last:
             yield batch
 
-    def __len__(self):
+    def __len__(self) -> int:
         # Can only be called if self.sampler has __len__ implemented
         # We cannot enforce this condition, so we turn off typechecking for the
         # implementation below.
         # Somewhat related: see NOTE [ Lack of Default `__len__` in Python Abstract Base Classes ]
         if self.drop_last:
-            return len(self.sampler) // self.batch_size  # type: ignore
+            return len(self.sampler) // self.batch_size  # type: ignore[arg-type]
         else:
-            return (len(self.sampler) + self.batch_size - 1) // self.batch_size  # type: ignore
+            return (len(self.sampler) + self.batch_size - 1) // self.batch_size  # type: ignore[arg-type]

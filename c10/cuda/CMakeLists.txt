@@ -13,7 +13,7 @@ configure_file(
     ${CMAKE_BINARY_DIR}/c10/cuda/impl/cuda_cmake_macros.h)
 
 # Note: if you want to add ANY dependency to the c10 library, make sure you
-# check with the core PyTorch developers as the dependendency will be
+# check with the core PyTorch developers as the dependency will be
 # transitively passed on to all libraries dependent on PyTorch.
 
 # Note: if you add a new source file/header, you will need to update
@@ -22,10 +22,10 @@ configure_file(
 set(C10_CUDA_SRCS
     CUDAStream.cpp
     CUDAFunctions.cpp
+    CUDAMiscFunctions.cpp
     CUDACachingAllocator.cpp
     impl/CUDAGuardImpl.cpp
     impl/CUDATest.cpp
-    CUDAFunctions.cpp
 )
 set(C10_CUDA_HEADERS
     CUDAException.h
@@ -34,6 +34,7 @@ set(C10_CUDA_HEADERS
     CUDAMathCompat.h
     CUDAStream.h
     CUDAFunctions.h
+    CUDAMiscFunctions.h
     impl/CUDAGuardImpl.h
     impl/CUDATest.h
 )

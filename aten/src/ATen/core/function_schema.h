@@ -1,6 +1,7 @@
 #pragma once
 
 #include <c10/util/StringUtil.h>
+#include <c10/util/string_view.h>
 #include <ATen/core/jit_type.h>
 #include <ATen/core/interned_strings.h>
 #include <ATen/core/ivalue.h>
@@ -29,16 +30,19 @@ struct Argument {
       bool kwarg_only = false,
       c10::optional<AliasInfo> alias_info = c10::nullopt)
       : name_(std::move(name)),
-        type_(type ? type : TensorType::get()),
+        type_(type ? std::move(type) : TensorType::get()),
         N_(std::move(N)),
         default_value_(std::move(default_value)),
-        kwarg_only_(kwarg_only),
-        alias_info_(std::move(alias_info)) {
+        alias_info_(std::move(alias_info)),
+        kwarg_only_(kwarg_only) {
+    // this is an softly-enforced invariant for out arguments.
+    bool is_alias = alias_info_.has_value() && alias_info_.value().isWrite();
+    is_out_ = kwarg_only_ && is_alias;
   }
   const std::string& name() const {
     return name_;
   }
-  TypePtr type() const {
+  const TypePtr& type() const {
     return type_;
   }
   c10::optional<int32_t> N() const {
@@ -50,6 +54,11 @@ struct Argument {
   bool kwarg_only() const {
     return kwarg_only_;
   }
+
+  bool is_out() const {
+    return is_out_;
+  }
+
   const c10::optional<AliasInfo>& alias_info() const {
     return alias_info_;
   }
@@ -85,10 +94,16 @@ struct Argument {
   }
 
   Argument cloneWithType(TypePtr new_type) const {
-    return Argument(name_, new_type, N_, default_value_, kwarg_only_, alias_info_);
+    return Argument(
+        name_,
+        std::move(new_type),
+        N_,
+        default_value_,
+        kwarg_only_,
+        alias_info_);
   }
 
-  // this function check whether this Argument is backward compatible with
+  // this function checks whether this Argument is backward compatible with
   // the old one. we consider the following cases are backward compatible:
   //   1) two arguments are equal
   //   2) this arg's type should be subtype of old
@@ -97,7 +112,7 @@ struct Argument {
       const Argument& old,
       std::ostream* why_not=nullptr) const;
 
-private:
+ private:
   std::string name_;
   TypePtr type_;
   // for list types, an optional statically known length for the list
@@ -107,9 +122,11 @@ private:
   c10::optional<int32_t> N_;
 
   c10::optional<IValue> default_value_;
-  // is this only specifyable as a keyword argument?
-  bool kwarg_only_;
   c10::optional<AliasInfo> alias_info_;
+  // is this only specifiable as a keyword argument?
+  bool kwarg_only_;
+  // marks if the argument is out variant of the schema
+  bool is_out_;
 };
 
 inline bool operator==(const Argument& lhs, const Argument& rhs) {
@@ -223,7 +240,7 @@ struct FunctionSchema {
     }
   }
 
-public:
+ public:
 
   void dump() const;
 
@@ -256,7 +273,7 @@ public:
         });
   }
 
-  c10::optional<int> argumentIndexWithName(const std::string& name) const {
+  c10::optional<int> argumentIndexWithName(c10::string_view name) const {
     for(size_t i = 0; i < arguments().size(); ++i) {
       if(name == arguments()[i].name())
         return i;
@@ -265,13 +282,13 @@ public:
   }
   FunctionSchema cloneWithName(std::string name, std::string overload_name) const {
     return FunctionSchema(
-      std::move(name),
-      std::move(overload_name),
-      arguments(),
-      returns(),
-      is_vararg(),
-      is_varret()
-      );
+        std::move(name),
+        std::move(overload_name),
+        arguments(),
+        returns(),
+        is_vararg(),
+        is_varret()
+        );
   }
   FunctionSchema cloneWithArguments(std::vector<Argument> new_arguments) const {
     return FunctionSchema(
@@ -305,7 +322,8 @@ public:
   // values.
   void checkAndNormalizeInputs(
       std::vector<IValue>& inputs,
-      const std::unordered_map<std::string, IValue>& kwargs) const;
+      const std::unordered_map<std::string, IValue>& kwargs =
+          std::unordered_map<std::string, IValue>{}) const;
 
   std::string findErrorInKwargs(const std::vector<std::string>& kwargs) const;
 
@@ -354,11 +372,11 @@ public:
 
 inline bool operator==(const FunctionSchema& lhs, const FunctionSchema& rhs) {
   return lhs.name() == rhs.name()
-      && lhs.overload_name() == rhs.overload_name()
-      && lhs.arguments() == rhs.arguments()
-      && lhs.returns() == rhs.returns()
-      && lhs.is_vararg() == rhs.is_vararg()
-      && lhs.is_varret() == rhs.is_varret();
+     && lhs.overload_name() == rhs.overload_name()
+     && lhs.arguments() == rhs.arguments()
+     && lhs.returns() == rhs.returns()
+     && lhs.is_vararg() == rhs.is_vararg()
+     && lhs.is_varret() == rhs.is_varret();
 }
 
 inline bool operator!=(const FunctionSchema& lhs, const FunctionSchema& rhs) {
@@ -375,7 +393,7 @@ inline std::ostream& operator<<(std::ostream& out, const Argument& arg) {
   // so we always use Type(alias)? format
   auto type = arg.type();
   bool is_opt = type->kind() == OptionalType::Kind;
-  auto unopt_type = is_opt ? type->cast<OptionalType>()->getElementType() : type;
+  auto unopt_type = is_opt ? type->castRaw<OptionalType>()->getElementType() : type;
 
   if (unopt_type->kind() == ListType::Kind && arg.N()) {
     // sized lists get size N from arg, not type
@@ -399,7 +417,7 @@ inline std::ostream& operator<<(std::ostream& out, const Argument& arg) {
 
   if (arg.default_value()) {
     out << "=";
-    if (type->kind() == c10::TypeKind::StringType) {
+    if (type->kind() == c10::TypeKind::StringType || (unopt_type->kind() == c10::TypeKind::StringType && !arg.default_value().value().isNone())) {
       printQuotedString(out, arg.default_value().value().toStringRef());
     } else {
       out << arg.default_value().value();

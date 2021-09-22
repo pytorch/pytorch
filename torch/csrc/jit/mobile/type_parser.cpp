@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/mobile/type_parser.h>
+
 #include <ATen/core/jit_type.h>
 #include <torch/csrc/jit/frontend/parser_constants.h>
 #include <torch/custom_class.h>
@@ -41,6 +42,17 @@ class TypeParser {
       return simpleTypeIt->second;
     } else if (token == "List") {
       return CreateSingleElementType<ListType>();
+    } else if (token == "Union") {
+      std::vector<TypePtr> types;
+      expect("[");
+      while (cur() != "]") {
+        types.emplace_back(parse());
+        if (cur() != "]") {
+          expect(",");
+        }
+      }
+      expect("]");
+      return UnionType::create(types);
     } else if (token == "Optional") {
       return CreateSingleElementType<OptionalType>();
     } else if (token == "Future") {

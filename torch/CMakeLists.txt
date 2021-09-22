@@ -2,7 +2,7 @@
 # Now it only builds the Torch python bindings.
 
 if(NOT CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
-  cmake_minimum_required(VERSION 3.5 FATAL_ERROR)
+  cmake_minimum_required(VERSION 3.10 FATAL_ERROR)
   project(torch CXX C)
   find_package(torch REQUIRED)
   option(USE_CUDA "Use CUDA" ON)
@@ -14,7 +14,7 @@ if(NOT BUILD_PYTHON)
 endif()
 
 if(USE_TBB)
-include_directories(${TBB_ROOT_DIR}/include)
+include_directories(${TBB_INCLUDE_DIR})
 endif()
 
 set(TORCH_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
@@ -77,11 +77,9 @@ set(TORCH_PYTHON_INCLUDE_DIRECTORIES
     ${TORCH_SRC_DIR}/lib
     )
 
-
 list(APPEND TORCH_PYTHON_INCLUDE_DIRECTORIES ${LIBSHM_SRCDIR})
 
 set(TORCH_PYTHON_LINK_LIBRARIES
-    torch_library
     shm
     fmt::fmt-header-only)
 
@@ -95,10 +93,7 @@ set(TORCH_PYTHON_LINK_FLAGS "")
 
 if(MSVC)
     string(APPEND TORCH_PYTHON_LINK_FLAGS " /NODEFAULTLIB:LIBCMT.LIB")
-    list(APPEND TORCH_PYTHON_LINK_LIBRARIES ${PYTHON_LIBRARIES})
-    if(BUILD_TEST)
-      list(APPEND TORCH_PYTHON_LINK_LIBRARIES onnx_library)
-    endif(BUILD_TEST)
+    list(APPEND TORCH_PYTHON_LINK_LIBRARIES ${PYTHON_LIBRARIES} onnx_library)
     if(NOT CMAKE_BUILD_TYPE MATCHES "Release")
       string(APPEND TORCH_PYTHON_LINK_FLAGS " /DEBUG:FULL")
     endif()
@@ -109,6 +104,10 @@ else()
       -fno-strict-aliasing
       -Wno-write-strings
       -Wno-strict-aliasing)
+    if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
+        list(APPEND TORCH_PYTHON_COMPILE_OPTIONS
+          -Wno-writable-strings)
+    endif()
 endif()
 
 if(USE_CUDA)
@@ -156,37 +155,8 @@ if(USE_CUDNN OR USE_ROCM)
     endif()
 endif()
 
-if(USE_NUMPY)
-    list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_NUMPY)
-endif()
-
-if(USE_DISTRIBUTED)
-    list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_DISTRIBUTED)
-    if(WIN32)
-      append_filelist("libtorch_python_distributed_core_sources" TORCH_PYTHON_SRCS)
-    else()
-      list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_RPC)
-      append_filelist("libtorch_python_distributed_sources" TORCH_PYTHON_SRCS)
-    endif()
-    # Disable certain warnings for GCC-9.X
-    if(CMAKE_COMPILER_IS_GNUCXX AND (CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 9.0.0))
-      set_source_files_properties(${TORCH_SRC_DIR}/csrc/distributed/autograd/init.cpp PROPERTIES COMPILE_FLAGS "-Wno-cast-function-type")
-      set_source_files_properties(${TORCH_SRC_DIR}/csrc/distributed/rpc/init.cpp PROPERTIES COMPILE_FLAGS "-Wno-cast-function-type")
-      set_source_files_properties(${TORCH_SRC_DIR}/csrc/distributed/rpc/testing/init.cpp PROPERTIES COMPILE_FLAGS "-Wno-cast-function-type")
-      set_source_files_properties(${TORCH_SRC_DIR}/csrc/distributed/c10d/init.cpp PROPERTIES COMPILE_FLAGS "-Wno-cast-function-type")
-    endif()
-    if(USE_TENSORPIPE)
-      list(APPEND TORCH_PYTHON_LINK_LIBRARIES tensorpipe)
-      list(APPEND TORCH_PYTHON_PUBLIC_COMPILE_DEFINITIONS USE_TENSORPIPE)
-    endif()
-    list(APPEND TORCH_PYTHON_LINK_LIBRARIES c10d)
-    list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_C10D)
-endif()
-
-if(USE_NCCL AND NOT WIN32)
-    list(APPEND TORCH_PYTHON_SRCS
-      ${TORCH_SRC_DIR}/csrc/cuda/python_nccl.cpp)
-    list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_NCCL)
+if(USE_MLCOMPUTE)
+    list(APPEND TORCH_PYTHON_SRCS ${MLC_PYTHON_SRCS})
 endif()
 
 if(USE_VALGRIND AND NOT WIN32)
@@ -195,7 +165,7 @@ endif()
 
 # In the most recent CMake versions, a new 'TRANSFORM' subcommand of 'list' allows much of the boilerplate of defining the lists
 # of type stub files to be omitted.
-# For comptability with older CMake versions, we omit it for now, but leave it as a comment in case comptability with the older
+# For compatibility with older CMake versions, we omit it for now, but leave it as a comment in case compatibility with the older
 # CMake versions is eventually dropped.
 # set(Modules
 #     __init__
@@ -234,9 +204,9 @@ add_custom_command(
     "${TORCH_SRC_DIR}/nn/functional.pyi"
     COMMAND
     "${PYTHON_EXECUTABLE}" -mtools.pyi.gen_pyi
-      --declarations-path "${CMAKE_BINARY_DIR}/aten/src/ATen/Declarations.yaml"
+      --native-functions-path "aten/src/ATen/native/native_functions.yaml"
+      --deprecated-functions-path "tools/autograd/deprecated.yaml"
     DEPENDS
-    "${CMAKE_BINARY_DIR}/aten/src/ATen/Declarations.yaml"
     "${TORCH_SRC_DIR}/_C/__init__.pyi.in"
     "${TORCH_SRC_DIR}/_C/_VariableFunctions.pyi.in"
     "${TORCH_SRC_DIR}/nn/functional.pyi.in"
@@ -244,6 +214,133 @@ add_custom_command(
     WORKING_DIRECTORY
     "${TORCH_ROOT}"
 )
+if(USE_DISTRIBUTED)
+    if(WIN32)
+      append_filelist("libtorch_python_distributed_core_sources" TORCH_PYTHON_SRCS)
+    else()
+      append_filelist("libtorch_python_distributed_sources" TORCH_PYTHON_SRCS)
+    endif()
+    # Disable certain warnings for GCC-9.X
+    if(CMAKE_COMPILER_IS_GNUCXX AND (CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 9.0.0))
+      set_source_files_properties(${TORCH_SRC_DIR}/csrc/distributed/autograd/init.cpp PROPERTIES COMPILE_FLAGS "-Wno-cast-function-type")
+      set_source_files_properties(${TORCH_SRC_DIR}/csrc/distributed/rpc/testing/init.cpp PROPERTIES COMPILE_FLAGS "-Wno-cast-function-type")
+      set_source_files_properties(${TORCH_SRC_DIR}/csrc/distributed/c10d/init.cpp PROPERTIES COMPILE_FLAGS "-Wno-cast-function-type")
+    endif()
+    # NCCL is a private dependency of libtorch, but libtorch_python includes
+    # some private headers of libtorch, which in turn include NCCL. As a hacky
+    # alternative to making NCCL a public dependency of libtorch, we make it
+    # a private dependency of libtorch_python as well.
+    if(USE_NCCL)
+      list(APPEND TORCH_PYTHON_LINK_LIBRARIES __caffe2_nccl)
+    endif()
+    # Same for MPI.
+    if(USE_MPI)
+      list(APPEND TORCH_PYTHON_LINK_LIBRARIES ${MPI_CXX_LIBRARIES})
+    endif()
+    list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_C10D)
+
+endif()
+
+if(USE_NCCL AND NOT WIN32)
+    list(APPEND TORCH_PYTHON_SRCS
+      ${TORCH_SRC_DIR}/csrc/cuda/python_nccl.cpp)
+    list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_NCCL)
+endif()
+
+
+# WARNING- any TORCH_PYTHON_COMPILE_DEFINITIONS above this line
+#          affect both torch_python and DEPLOY interpreter.
+if(USE_DEPLOY)
+  add_library(torch_python_obj OBJECT ${TORCH_PYTHON_SRCS})
+  if(USE_DISTRIBUTED)
+    # Set c10d-related compile definitions. For a "normal" build of
+    # libtorch_python, these are set on libtorch as PUBLIC so they are
+    # automatically propagated when libtorch_python links against libtorch. But
+    # since in the deploy build we are intentionally *not* linking against
+    # libtorch, we need to set them manually here.
+    list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_DISTRIBUTED)
+    if(USE_GLOO AND USE_C10D_GLOO)
+      list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_C10D_GLOO)
+    endif()
+    if(USE_NCCL AND USE_C10D_NCCL)
+        list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_C10D_NCCL)
+        # Put nccl headers on the include path. We are specifically only setting
+        # include dirs here instead of linking against __caffe2_nccl wholesale
+        # to ensure we aren't accidentally replicating the nccl lib.
+        target_include_directories(torch_python_obj PRIVATE $<TARGET_PROPERTY:__caffe2_nccl,INTERFACE_INCLUDE_DIRECTORIES>)
+    endif()
+    if(USE_MPI AND USE_C10D_MPI)
+      list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_C10D_MPI)
+    endif()
+
+    # Pass USE_RPC in order to reduce use of
+    # #if defined(USE_DISTRIBUTED) && !defined(_WIN32)
+    # need to be removed when RPC is supported
+    if(NOT WIN32)
+      target_compile_definitions(torch_cpu PUBLIC USE_RPC)
+    endif()
+    if(USE_TENSORPIPE)
+      list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_TENSORPIPE)
+    endif()
+
+    # Set c10d-related include directories as well.
+    target_include_directories(torch_python_obj PRIVATE $<BUILD_INTERFACE:${TORCH_SRC_DIR}/csrc/distributed>)
+  endif()
+  target_compile_definitions(torch_python_obj PRIVATE "-DTHP_BUILD_MAIN_LIB -DUSE_DEPLOY")
+
+  target_compile_definitions(torch_python_obj PRIVATE ${TORCH_PYTHON_COMPILE_DEFINITIONS})
+
+  target_compile_definitions(torch_python_obj PUBLIC ${TORCH_PYTHON_PUBLIC_COMPILE_DEFINITIONS})
+
+  target_compile_options(torch_python_obj PRIVATE ${TORCH_PYTHON_COMPILE_OPTIONS})
+
+  if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
+    target_compile_options(torch_python_obj PRIVATE -fno-gnu-unique)
+  endif()
+
+  target_include_directories(torch_python_obj PUBLIC ${TORCH_PYTHON_INCLUDE_DIRECTORIES})
+  target_include_directories(torch_python_obj PRIVATE ../third_party/fmt/include)
+
+  # need to specify the dependency so the generated headers exist,
+  # missing dependency since torch_python_obj doesn't link onnx, the interpreter lib does.
+  add_dependencies(torch_python_obj onnx)
+
+  if(HAVE_SOVERSION)
+    set_target_properties(torch_python_obj PROPERTIES
+        VERSION ${TORCH_VERSION} SOVERSION ${TORCH_SOVERSION})
+  endif()
+  add_dependencies(torch_python_obj torch_python_stubs)
+
+  # Required workaround for generated sources
+  # See https://samthursfield.wordpress.com/2015/11/21/cmake-dependencies-between-targets-and-files-and-custom-commands/#custom-commands-in-different-directories
+  add_dependencies(torch_python_obj generate-torch-sources)
+  set_source_files_properties(
+      ${GENERATED_THNN_SOURCES}
+      ${GENERATED_CXX_PYTHON}
+      PROPERTIES GENERATED TRUE
+      )
+
+  add_dependencies(torch_python_obj gen_torch_version)
+
+endif()
+
+
+# Avoid numpy for the DEPLOY build
+if(USE_NUMPY)
+    list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_NUMPY)
+endif()
+
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+  # Workaround for https://gcc.gnu.org/bugzilla/show_bug.cgi?id=80947 in EmbeddingBag.cpp
+  set_source_files_properties(${TORCH_SRC_DIR}/csrc/utils/throughput_benchmark.cpp PROPERTIES COMPILE_FLAGS -Wno-attributes)
+endif()
+
+# coreml
+if(USE_COREML_DELEGATE)
+  list(APPEND TORCH_PYTHON_SRCS ${TORCH_SRC_DIR}/csrc/jit/backends/coreml/cpp/backend.cpp)
+  list(APPEND TORCH_PYTHON_SRCS ${TORCH_SRC_DIR}/csrc/jit/backends/coreml/cpp/preprocess.cpp)
+endif()
+
 
 add_library(torch_python SHARED ${TORCH_PYTHON_SRCS})
 if(HAVE_SOVERSION)
@@ -251,6 +348,11 @@ if(HAVE_SOVERSION)
       VERSION ${TORCH_VERSION} SOVERSION ${TORCH_SOVERSION})
 endif()
 add_dependencies(torch_python torch_python_stubs)
+
+if(USE_PRECOMPILED_HEADERS)
+  target_precompile_headers(torch_python PRIVATE
+      "$<$<COMPILE_LANGUAGE:CXX>:ATen/ATen.h>")
+endif()
 
 # Required workaround for generated sources
 # See https://samthursfield.wordpress.com/2015/11/21/cmake-dependencies-between-targets-and-files-and-custom-commands/#custom-commands-in-different-directories
@@ -275,7 +377,7 @@ endif()
 
 target_compile_definitions(torch_python PRIVATE "-DTHP_BUILD_MAIN_LIB")
 
-target_link_libraries(torch_python ${TORCH_PYTHON_LINK_LIBRARIES})
+target_link_libraries(torch_python torch_library ${TORCH_PYTHON_LINK_LIBRARIES})
 
 target_compile_definitions(torch_python PRIVATE ${TORCH_PYTHON_COMPILE_DEFINITIONS})
 
@@ -302,10 +404,13 @@ endif()
 add_custom_command(
   OUTPUT ${TORCH_SRC_DIR}/version.py
   COMMAND
+    "${PYTHON_EXECUTABLE}" -c \"from pathlib import Path\; Path('${TOOLS_PATH}/generate_torch_version.py').touch()\"
+  COMMAND
     "${PYTHON_EXECUTABLE}" ${TOOLS_PATH}/generate_torch_version.py
       --is_debug=${TORCH_VERSION_DEBUG}
       --cuda_version=${CUDA_VERSION}
       --hip_version=${HIP_VERSION}
+  DEPENDS ${TOOLS_PATH}/generate_torch_version.py
   WORKING_DIRECTORY ${TORCH_ROOT}
 )
 add_custom_target(
@@ -313,3 +418,21 @@ add_custom_target(
   DEPENDS ${TORCH_SRC_DIR}/version.py
 )
 add_dependencies(torch_python gen_torch_version)
+
+# Skip building this library under MacOS, since it is currently failing to build on Mac
+# Github issue #61930
+if(NOT ${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
+  # Add Android Nnapi delegate library
+  add_library(nnapi_backend SHARED
+          ${TORCH_SRC_DIR}/csrc/jit/backends/nnapi/nnapi_backend_lib.cpp
+          ${TORCH_SRC_DIR}/csrc/jit/backends/nnapi/nnapi_backend_preprocess.cpp
+          )
+  # Pybind11 requires explicit linking of the torch_python library
+  target_link_libraries(nnapi_backend torch torch_python)
+endif()
+
+if(BUILD_BINARY)
+  add_library(aot_compiler SHARED
+          ${TORCH_SRC_DIR}/csrc/jit/mobile/nnc/aot_compiler.cpp
+          )
+endif()

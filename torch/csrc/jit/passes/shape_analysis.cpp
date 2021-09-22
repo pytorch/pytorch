@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/passes/shape_analysis.h>
 
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/frontend/error_report.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/ir/constants.h>
@@ -21,6 +22,24 @@
 
 namespace torch {
 namespace jit {
+
+bool mergeTypes(
+    ArrayRef<Value*> lhs,
+    ArrayRef<Value*> rhs,
+    ArrayRef<Value*> outputs) {
+  AT_ASSERT(lhs.size() == rhs.size() && rhs.size() == outputs.size());
+  bool changed = false;
+  for (const auto i : c10::irange(lhs.size())) {
+    auto old_output_type = outputs[i]->type();
+    auto new_type =
+        unifyTypes(lhs[i]->type(), rhs[i]->type(), /*default_to_any=*/true);
+    AT_ASSERT(new_type);
+    outputs[i]->setType(*new_type);
+    if (*old_output_type != *outputs[i]->type())
+      changed = true;
+  }
+  return changed;
+}
 
 namespace prim {
 using namespace ::c10::prim;
@@ -67,8 +86,9 @@ bool containsTensorType(const TypePtr& t) {
 
 class ShapePropagator {
  public:
-  explicit ShapePropagator(std::shared_ptr<Graph> graph) : aliasDb_(graph) {
-    collectResizeSet(std::move(graph)->block());
+  explicit ShapePropagator(const std::shared_ptr<Graph>& graph)
+      : aliasDb_(graph) {
+    collectResizeSet(graph->block());
   }
 
   void PropagateShapeOnBlock(Block* block, bool insert_expands = true) {
@@ -146,12 +166,6 @@ class ShapePropagator {
     return dim;
   }
 
-  // TODO: Would be better to make JIT not assume that CUDA devices
-  // are the only thing that exist.
-  static at::Device jitDeviceIndexToDevice(int device) {
-    return device == -1 ? at::kCPU : at::Device(at::kCUDA, device);
-  }
-
   IValue representativeValue(Value* v) {
     TypePtr type_ = v->type();
     // if the value is actually constant, just use it!
@@ -160,13 +174,12 @@ class ShapePropagator {
     }
     if (TensorTypePtr type = type_->cast<TensorType>()) {
       if (type->isComplete()) {
-        auto attype = type->device()->is_cpu() ? at::CPU(*type->scalarType())
-                                               : at::CUDA(*type->scalarType());
         at::DeviceGuard device_guard(*type->device());
         return at::empty_strided(
                    *type->sizes().concrete_sizes(),
                    *type->strides().concrete_sizes(),
-                   attype.options())
+                   at::TensorOptions(*type->device())
+                       .dtype(*type->scalarType()))
             .zero_();
       }
       // fallthrough
@@ -200,7 +213,7 @@ class ShapePropagator {
     if (schema.is_vararg()) {
       return c10::nullopt;
     }
-    for (size_t i = 0; i < args.size(); ++i) {
+    for (const auto i : c10::irange(args.size())) {
       if (args[i].type()->isSubtypeOf(ListType::ofTensors())) {
         return c10::nullopt;
       } else if (args[i].type()->isSubtypeOf(TensorType::get())) {
@@ -237,7 +250,7 @@ class ShapePropagator {
     c10::ScalarType dimmed = c10::ScalarType::Undefined;
     c10::ScalarType zerodim = c10::ScalarType::Undefined;
     // binary arithmetic ops, more than 2 args is alpha.
-    for (size_t i = 0; i < 2; i++) {
+    for (const auto i : c10::irange(2)) {
       auto dtt = node->inputs()[i]->type()->expect<TensorType>();
       auto inputDtype = dtt->scalarType();
       if (!dtt || !inputDtype) {
@@ -284,7 +297,7 @@ class ShapePropagator {
     for (size_t i = 0; i < lhs.size(); ++i) {
       auto old_output_type = outputs[i]->type();
       auto new_type =
-          unifyTypes(lhs[i]->type(), rhs[i]->type(), /*default_to_any=*/true);
+          unifyTypes(lhs[i]->type(), rhs[i]->type(), /*default_to_union=*/true);
       AT_ASSERT(new_type);
       outputs[i]->setType(*new_type);
       if (*old_output_type != *outputs[i]->type())
@@ -415,10 +428,10 @@ class ShapePropagator {
     // is to uncover any mistakes we could make when editing this code,
     // and eventually it shouldn't matter, because this phase should be
     // preceded by schema checking.
-    op(&stack);
+    op(stack);
 
     AT_ASSERT(stack.size() == node->outputs().size());
-    for (size_t i = 0; i < stack.size(); ++i) {
+    for (const auto i : c10::irange(stack.size())) {
       // some ops may have mixed tensor/primitive outputs
       // for primitives, we don't need to change the type because it is already
       // its most constrained form.
@@ -461,7 +474,7 @@ class ShapePropagator {
         auto tp_sizes = tp->sizes().concrete_sizes().value();
         if (sizes.size() != tp_sizes.size())
           return false;
-        for (int64_t i = 0; i < ndim; ++i) {
+        for (const auto i : c10::irange(ndim)) {
           if (sizes[i] != tp_sizes[i] && i != dim) {
             return false;
           }
@@ -489,6 +502,7 @@ class ShapePropagator {
         cat_node->kind() == prim::FusedConcat) {
       auto tensors = list_node->inputs();
       if (!tensors.empty()) {
+        // NOLINTNEXTLINE(bugprone-branch-clone)
         if (propagate_complete(cat_node, tensors)) {
           return;
         } else if (propagate(cat_node, tensors)) {
@@ -574,7 +588,7 @@ class ShapePropagator {
         // propagate loop-carried input types to block inputs
         auto loop_carried_inputs = node->inputs().slice(2); // skip max, cond
         auto loop_carried_block = body_block->inputs().slice(1); // skip trip
-        for (size_t i = 0; i < loop_carried_inputs.size(); ++i) {
+        for (const auto i : c10::irange(loop_carried_inputs.size())) {
           loop_carried_block[i]->setType(loop_carried_inputs[i]->type());
         }
         auto loop_carried_outputs = body_block->outputs().slice(1); // skip cond
@@ -589,7 +603,7 @@ class ShapePropagator {
         // now that the types are stable, we can insert the expands
         PropagateShapeOnBlock(body_block, /*insert_expands=*/true);
 
-        for (size_t i = 0; i < loop_carried_inputs.size(); ++i) {
+        for (const auto i : c10::irange(loop_carried_inputs.size())) {
           node->outputs()[i]->setType(loop_carried_block[i]->type());
         }
         return;
@@ -857,7 +871,7 @@ class ShapePropagator {
             "aten::normal(float mean, Tensor std, *, Generator? generator) -> Tensor",
             "aten::normal(Tensor mean, float std, *, Generator? generator) -> Tensor",
             "aten::permute(Tensor self, int[] dims) -> Tensor",
-            "aten::pin_memory(Tensor(a) self) -> Tensor(a)",
+            "aten::pin_memory(Tensor(a) self, Device? device=None) -> Tensor(a)",
             "aten::pinverse(Tensor self, float rcond) -> Tensor",
             "aten::reciprocal(Tensor self) -> Tensor",
             "aten::relu(Tensor self) -> Tensor",
@@ -882,7 +896,7 @@ class ShapePropagator {
             "aten::trunc(Tensor self) -> Tensor",
             "aten::rot90(Tensor self, int k, int[] dims) -> Tensor",
             "aten::narrow(Tensor self, int dim, int start, int length) -> Tensor",
-            "aten::slice(Tensor self, int dim, int start, int end, int step) -> Tensor",
+            "aten::slice(Tensor self, int dim, int? start=None, int? end=None, int step=1) -> Tensor",
             "aten::alias(Tensor self) -> Tensor",
         },
         [](Node* node) -> type_vec_t {
@@ -1175,6 +1189,7 @@ class ShapePropagator {
             "aten::max_unpool3d(Tensor self, Tensor indices, int[] output_size, int[] stride, int[] padding) -> Tensor",
             "aten::reflection_pad1d(Tensor self, int[] padding) -> Tensor",
             "aten::reflection_pad2d(Tensor self, int[] padding) -> Tensor",
+            "aten::reflection_pad3d(Tensor self, int[] padding) -> Tensor",
             "aten::replication_pad1d(Tensor self, int[] padding) -> Tensor",
             "aten::replication_pad2d(Tensor self, int[] padding) -> Tensor",
             "aten::replication_pad3d(Tensor self, int[] padding) -> Tensor",
@@ -1269,9 +1284,10 @@ class ShapePropagator {
                       type->withScalarType(maybe_dtype_option->toScalarType())};
                 }
                 if (type->scalarType()) {
-                  return {at::isFloatingType(*type->scalarType())
-                              ? type
-                              : type->withScalarType(at::kLong)};
+                  return {
+                      at::isFloatingType(*type->scalarType())
+                          ? type
+                          : type->withScalarType(at::kLong)};
                 } else {
                   return {type};
                 }
@@ -1293,6 +1309,7 @@ class ShapePropagator {
         } else if (upcast_integer && !at::isFloatingType(*type->scalarType())) {
           type = type->withScalarType(at::kLong);
         }
+        // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
         if (*type->dim() >= num_reduced_dim && num_reduced_dim > 0) {
           return {type->withDim(*type->dim() - num_reduced_dim)};
         } else {
@@ -1592,7 +1609,7 @@ class ShapePropagator {
         } else {
           auto outputs = node->outputs();
           AT_ASSERT(types.size() == outputs.size());
-          for (size_t i = 0; i < types.size(); ++i) {
+          for (const auto i : c10::irange(types.size())) {
             AT_ASSERT(outputs[i]->type()->isSubtypeOf(TensorType::get()));
             outputs[i]->setType(types[i]);
           }
@@ -1824,6 +1841,7 @@ class ShapePropagator {
         if (dim1 == 1 && dim2 == 1) {
           // Dot product
           return tensor_types.at(0)->withDim(0);
+          // NOLINTNEXTLINE(bugprone-branch-clone)
         } else if (dim1 == 2 && dim2 == 2) {
           // Matrix multiply
           return tensor_types.at(0);
@@ -2067,9 +2085,10 @@ class ShapePropagator {
                    /*const_inputs=*/attr::size)) {
       auto sizes = node->get<c10::List<int64_t>>(attr::size).value();
       bool inferred = false;
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       size_t inferred_idx;
       int64_t size_product = 1;
-      for (size_t i = 0; i < sizes.size(); ++i) {
+      for (const auto i : c10::irange(sizes.size())) {
         if (sizes.get(i) == -1) {
           if (inferred)
             throw propagation_error();
@@ -2108,12 +2127,12 @@ class ShapePropagator {
             "aten::expand(Tensor self, int[] size, *, bool implicit) -> Tensor",
             /*const_inputs=*/attr::size)) {
       auto tp = tensor_types.at(0);
-      std::vector<int64_t> sizes, strides;
-      std::tie(sizes, strides) = at::inferExpandGeometry(
+      auto sizesAndStrides = at::inferExpandGeometry_dimvector(
           tp->sizes().concrete_sizes().value(),
           tp->strides().concrete_sizes().value(),
           node->get<c10::List<int64_t>>(attr::size).value().vec());
-      node->output()->setType(tp->withSizesStrides(sizes, strides));
+      node->output()->setType(
+          tp->withSizesStrides(sizesAndStrides.sizes, sizesAndStrides.strides));
       return true;
     } else if (
         node->matches(
@@ -2170,29 +2189,69 @@ void PropagateInputShapes(const std::shared_ptr<Graph>& graph) {
 
 namespace {
 
-void EraseShapeInformation(at::ArrayRef<Value*> vals) {
+using TypeCache = std::unordered_map<TypePtr, TypePtr>;
+
+TypePtr getOrCreateUnshapedType(TypePtr type, TypeCache& unshaped_type_cache);
+
+TypePtr unshapedTypeImpl(TypePtr type, TypeCache& unshaped_type_cache) {
+  if (type->isSubtypeOf(TensorType::get())) {
+    return TensorType::get();
+  }
+  std::vector<TypePtr> unshaped_contained_types;
+  for (const auto& contained_type : type->containedTypes()) {
+    unshaped_contained_types.push_back(
+        getOrCreateUnshapedType(contained_type, unshaped_type_cache));
+  }
+  return type->withContained(unshaped_contained_types);
+}
+
+TypePtr getOrCreateUnshapedType(TypePtr type, TypeCache& unshaped_type_cache) {
+  auto maybe_cached_type = unshaped_type_cache.find(type);
+  if (maybe_cached_type != unshaped_type_cache.end()) {
+    return maybe_cached_type->second;
+  }
+  auto unshaped_type = unshapedTypeImpl(type, unshaped_type_cache);
+  unshaped_type_cache[type] = unshaped_type;
+  return unshaped_type;
+}
+
+void EraseShapeInformation(
+    const std::shared_ptr<Graph>& graph,
+    TypeCache& unshaped_type_cache);
+
+void EraseShapeInformation(
+    at::ArrayRef<Value*> vals,
+    TypeCache& unshaped_type_cache) {
   for (Value* v : vals) {
-    v->setType(unshapedType(v->type()));
+    v->setType(getOrCreateUnshapedType(v->type(), unshaped_type_cache));
   }
 }
 
-void EraseShapeInformation(Block* b) {
-  EraseShapeInformation(b->inputs());
-  EraseShapeInformation(b->outputs());
+void EraseShapeInformation(Block* b, TypeCache& unshaped_type_cache) {
+  EraseShapeInformation(b->inputs(), unshaped_type_cache);
+  EraseShapeInformation(b->outputs(), unshaped_type_cache);
   for (Node* n : b->nodes()) {
-    EraseShapeInformation(n->outputs());
+    EraseShapeInformation(n->outputs(), unshaped_type_cache);
     for (Block* sb : n->blocks()) {
-      EraseShapeInformation(sb);
+      EraseShapeInformation(sb, unshaped_type_cache);
     }
     if (n->hasAttribute(attr::Subgraph)) {
-      EraseShapeInformation(n->g(attr::Subgraph));
+      EraseShapeInformation(n->g(attr::Subgraph), unshaped_type_cache);
     }
   }
 }
+
+void EraseShapeInformation(
+    const std::shared_ptr<Graph>& graph,
+    TypeCache& unshaped_type_cache) {
+  EraseShapeInformation(graph->block(), unshaped_type_cache);
+}
+
 } // anonymous namespace
 
 void EraseShapeInformation(const std::shared_ptr<Graph>& graph) {
-  EraseShapeInformation(graph->block());
+  TypeCache unshaped_type_cache;
+  EraseShapeInformation(graph->block(), unshaped_type_cache);
 }
 } // namespace jit
 } // namespace torch

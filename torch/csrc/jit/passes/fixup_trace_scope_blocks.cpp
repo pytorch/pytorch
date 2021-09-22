@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/passes/fixup_trace_scope_blocks.h>
 
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/frontend/schema_matching.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
@@ -144,7 +145,6 @@ struct ConvertTracedAttrReferences {
     // the correctness of CSE over GetAttr Nodes (i think)
     std::unordered_map<Value*, Value*> local_remaps;
 
-    auto prefix_atoms = prefix.atoms();
     for (Node* n : b->nodes()) {
       // The only difference between these two branches is for
       // TracedModuleForward we advance the scope, but for other
@@ -201,14 +201,14 @@ struct ConvertTracedAttrReferences {
         // the proper attribute.
         auto attr_atoms = attr_qualname.atoms();
         Value* replaced_value = self;
-        for (size_t i = 0; i < attr_atoms.size(); i++) {
+        for (const auto i : c10::irange(attr_atoms.size())) {
           if (i < prefix_atoms.size()) {
             TORCH_INTERNAL_ASSERT(attr_atoms[i] == prefix_atoms[i]);
           } else {
             replaced_value = n->owningBlock()->owningGraph()->insertGetAttr(
                 replaced_value, attr_atoms[i]);
           } // if (i < prefix_atoms.size())
-        } // for (size_t i = 0; i < attr_atoms.size(); i++)
+        } // for(const auto i : c10::irange(attr_atoms.size()))
         n->replaceInput(inp_idx, replaced_value);
         local_remaps[inp] = replaced_value;
       } else {
@@ -242,7 +242,7 @@ struct ConvertTracedAttrReferences {
 // add block and Node outputs to lift it into a scope in which
 // it dominates the Use.
 struct MakeDefsDominateUses {
-  MakeDefsDominateUses() {}
+  MakeDefsDominateUses() = default;
 
   void run(Block* b) {
     processNode(b->param_node(), b);
@@ -459,7 +459,7 @@ void inlineScopeBlocks(Block* b) {
       const auto& old_outputs = n->outputs();
 
       AT_ASSERT(new_outputs.size() == old_outputs.size());
-      for (size_t i = 0; i < old_outputs.size(); ++i) {
+      for (const auto i : c10::irange(old_outputs.size())) {
         old_outputs[i]->replaceAllUsesWith(new_outputs[i]);
       }
       n->destroy();

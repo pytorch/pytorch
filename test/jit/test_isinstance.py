@@ -2,6 +2,7 @@ import os
 import sys
 
 import torch
+import warnings
 from typing import List, Any, Dict, Tuple, Optional
 
 # Make the helper files in test/ importable
@@ -51,6 +52,14 @@ class TestIsinstance(JitTestCase):
         x = ["1", "2", "3"]
         self.checkScript(list_str_test, (x,))
 
+    def test_list_tensor(self):
+        def list_tensor_test(x: Any):
+            assert torch.jit.isinstance(x, List[torch.Tensor])
+            assert not torch.jit.isinstance(x, Tuple[int])
+
+        x = [torch.tensor([1]), torch.tensor([2]), torch.tensor([3])]
+        self.checkScript(list_tensor_test, (x,))
+
     def test_dict(self):
         def dict_str_int_test(x: Any):
             assert torch.jit.isinstance(x, Dict[str, int])
@@ -60,6 +69,13 @@ class TestIsinstance(JitTestCase):
         x = {"a": 1, "b": 2}
         self.checkScript(dict_str_int_test, (x,))
 
+    def test_dict_tensor(self):
+        def dict_int_tensor_test(x: Any):
+            assert torch.jit.isinstance(x, Dict[int, torch.Tensor])
+
+        x = {2: torch.tensor([2])}
+        self.checkScript(dict_int_tensor_test, (x,))
+
     def test_tuple(self):
         def tuple_test(x: Any):
             assert torch.jit.isinstance(x, Tuple[str, int, str])
@@ -68,6 +84,13 @@ class TestIsinstance(JitTestCase):
 
         x = ("a", 1, "b")
         self.checkScript(tuple_test, (x,))
+
+    def test_tuple_tensor(self):
+        def tuple_tensor_test(x: Any):
+            assert torch.jit.isinstance(x, Tuple[torch.Tensor, torch.Tensor])
+
+        x = (torch.tensor([1]), torch.tensor([[2], [3]]))
+        self.checkScript(tuple_tensor_test, (x,))
 
     def test_optional(self):
         def optional_test(x: Any):
@@ -82,8 +105,8 @@ class TestIsinstance(JitTestCase):
             assert torch.jit.isinstance(x, Optional[torch.Tensor])
             # assert torch.jit.isinstance(x, Optional[str])
             # TODO: above line in eager will evaluate to True while in
-            #       the TS interpreter will evaluate to False as the 
-            #       first torch.jit.isinstance refines the 'None' type 
+            #       the TS interpreter will evaluate to False as the
+            #       first torch.jit.isinstance refines the 'None' type
 
         x = None
         self.checkScript(optional_test_none, (x,))
@@ -249,3 +272,50 @@ class TestIsinstance(JitTestCase):
             torch.jit.script(dict_no_contained_type)
         with self.assertRaisesRegex(RuntimeError, err_msg,):
             dict_no_contained_type(x)
+
+    def test_tuple_rhs(self):
+        def fn(x: Any):
+            assert torch.jit.isinstance(x, (int, List[str]))
+            assert not torch.jit.isinstance(x, (List[float], Tuple[int, str]))
+            assert not torch.jit.isinstance(x, (List[float], str))
+
+        self.checkScript(fn, (2,))
+        self.checkScript(fn, (["foo", "bar", "baz"],))
+
+    def test_nontuple_container_rhs_throws_in_eager(self):
+        def fn1(x: Any):
+            assert torch.jit.isinstance(x, [int, List[str]])
+
+        def fn2(x: Any):
+            assert not torch.jit.isinstance(x, {List[str], Tuple[int, str]})
+
+        err_highlight = "must be a type or a tuple of types"
+
+        with self.assertRaisesRegex(RuntimeError, err_highlight):
+            fn1(2)
+
+        with self.assertRaisesRegex(RuntimeError, err_highlight):
+            fn2(2)
+
+    def test_empty_container_throws_warning_in_eager(self):
+        def fn(x: Any):
+            torch.jit.isinstance(x, List[int])
+
+        with warnings.catch_warnings(record=True) as w:
+            x: List[int] = []
+            fn(x)
+            self.assertEqual(len(w), 1)
+
+        with warnings.catch_warnings(record=True) as w:
+            x: int = 2
+            fn(x)
+            self.assertEqual(len(w), 0)
+
+    def test_empty_container_special_cases(self):
+        # Should not throw "Boolean value of Tensor with no values is
+        # ambiguous" error
+        torch._jit_internal.check_empty_containers(torch.Tensor([]))
+
+        # Should not throw "Boolean value of Tensor with more than
+        # one value is ambiguous" error
+        torch._jit_internal.check_empty_containers(torch.rand(2, 3))

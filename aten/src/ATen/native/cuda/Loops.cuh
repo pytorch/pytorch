@@ -1,6 +1,14 @@
 
 #pragma once
 
+#include <ATen/detail/FunctionTraits.h>
+#include <ATen/native/TensorIterator.h>
+#include <ATen/native/TensorIteratorDynamicCasting.h>
+#include <ATen/cuda/detail/OffsetCalculator.cuh>
+#include <ATen/OpMathType.h>
+
+#include <thrust/tuple.h>
+
 #define NUM_THREADS (C10_WARP_SIZE * 2)
 #define THREAD_WORK_SIZE 4
 #define BLOCK_WORK_SIZE (THREAD_WORK_SIZE * num_threads)
@@ -9,18 +17,12 @@ constexpr int num_threads = NUM_THREADS;
 constexpr int thread_work_size = THREAD_WORK_SIZE;
 constexpr int block_work_size = BLOCK_WORK_SIZE;
 
-#include <ATen/detail/FunctionTraits.h>
-#include <ATen/native/TensorIterator.h>
-#include <ATen/native/TensorIteratorDynamicCasting.h>
-#include <ATen/cuda/detail/OffsetCalculator.cuh>
 #include <ATen/native/cuda/MemoryAccess.cuh>
-
-#include <thrust/tuple.h>
 
 namespace at { namespace native {
 
 template<int N>
-static OffsetCalculator<N> make_input_offset_calculator(const TensorIterator& iter) {
+static OffsetCalculator<N> make_input_offset_calculator(const TensorIteratorBase& iter) {
   // array size can not be 0, this happens when N == 0
   constexpr int array_size = std::max<int>(N, 1);
   TORCH_INTERNAL_ASSERT(N == iter.ntensors() - iter.noutputs());
@@ -34,7 +36,7 @@ static OffsetCalculator<N> make_input_offset_calculator(const TensorIterator& it
 }
 
 template <int num_outputs = 1>
-static OffsetCalculator<num_outputs> make_output_offset_calculator(const TensorIterator& iter) {
+static OffsetCalculator<num_outputs> make_output_offset_calculator(const TensorIteratorBase& iter) {
   TORCH_INTERNAL_ASSERT(num_outputs == iter.noutputs());
   std::array<const int64_t*, num_outputs> strides;
   int64_t element_sizes[num_outputs];
@@ -88,10 +90,12 @@ __device__ inline void elementwise_kernel_helper(func_t f, policy_t policy) {
 namespace at { namespace native {
 
 template <typename func_t>
-void gpu_kernel(TensorIterator& iter, const func_t& f) {
+void gpu_kernel(TensorIteratorBase& iter, const func_t& f) {
 
   for (int arg = 0; arg < iter.ntensors(); arg++) {
-    TORCH_INTERNAL_ASSERT(iter.device(arg).is_cuda());
+    TORCH_INTERNAL_ASSERT(
+      iter.device(arg).is_cuda(),
+      "argument ", arg, ": expected a CUDA device but found ", iter.device(arg));
   }
 
   if (iter.numel() == 0) {
@@ -108,59 +112,93 @@ void gpu_kernel(TensorIterator& iter, const func_t& f) {
   gpu_kernel_impl(iter, f);
 }
 
-template<typename func_t>
+template<typename arg1_t, typename arg2_t, typename return_t, typename func_t>
 struct AUnaryFunctor {
   using traits = function_traits<func_t>;
-  using arg1_t = typename traits::template arg<0>::type;
-  using arg2_t = typename traits::template arg<1>::type;
-  using return_t = typename traits::result_type;
+  using opmath_arg1_t = typename traits::template arg<0>::type;
   __device__ return_t operator()(arg2_t b) const {
     return f(a, b);
   }
-  AUnaryFunctor(func_t f_, arg1_t a_): f(f_), a(a_) {}
+  // NB: scalar is stored in higher precision!
+  AUnaryFunctor(func_t f_, opmath_arg1_t a_): f(f_), a(a_) {}
   private:
     func_t f;
-    arg1_t a;
+    opmath_arg1_t a;
 };
 
-template<typename func_t>
+template<typename arg1_t, typename arg2_t, typename return_t, typename func_t>
 struct BUnaryFunctor {
   using traits = function_traits<func_t>;
-  using arg1_t = typename traits::template arg<0>::type;
-  using arg2_t = typename traits::template arg<1>::type;
-  using return_t = typename traits::result_type;
+  using opmath_arg2_t = typename traits::template arg<1>::type;
   __device__ return_t operator()(arg1_t a) const {
     return f(a, b);
   }
-  BUnaryFunctor(func_t f_, arg2_t b_): f(f_), b(b_) {}
+  // NB: scalar is stored in higher precision!
+  BUnaryFunctor(func_t f_, opmath_arg2_t b_): f(f_), b(b_) {}
   private:
     func_t f;
-    arg2_t b;
+    opmath_arg2_t b;
 };
 
-template <typename func_t>
-void gpu_kernel_with_scalars(TensorIterator& iter, const func_t& f) {
+// Though seemingly noop, this inserts casts from arg1_t to func_t's type
+// (which may be higher precision), as well as casts to return_t
+template <typename arg1_t, typename arg2_t, typename return_t, typename func_t>
+struct BinaryFunctor {
+  __device__ return_t operator()(arg1_t a, arg2_t b) const {
+    return f(a, b);
+  }
+  BinaryFunctor(func_t f_): f(f_) {}
+  private:
+    func_t f;
+};
+
+// Unlike gpu_kernel_with_scalars, this allows you to pass a func_t which
+// accepts inputs at higher precision (typically opmath_t), but then
+// ensure that we load from memory at the correct precision (scalar_t)
+// to avoid expensive loads.  For the whole sordid story see
+// https://dev-discuss.pytorch.org/t/cuda-loops-case-study-code-generation-vs-templates/302
+template <typename arg1_t, typename arg2_t = arg1_t, typename return_t = arg1_t, typename func_t>
+void opmath_gpu_kernel_with_scalars(TensorIteratorBase& iter, const func_t& f) {
   TORCH_INTERNAL_ASSERT(iter.ntensors() == 3);
 
   using traits = function_traits<func_t>;
+  using opmath_arg1_t = typename traits::template arg<0>::type;
+  using opmath_arg2_t = typename traits::template arg<1>::type;
   static_assert(
       traits::arity == 2,
       "gpu_kernel_with_scalars only supports two input arguments");
 
-  using arg1_t = typename traits::template arg<0>::type;
-  using arg2_t = typename traits::template arg<1>::type;
   if (iter.is_cpu_scalar(1)) {
-    AUnaryFunctor<func_t> af(f, iter.scalar_value<arg1_t>(1));
+    AUnaryFunctor<arg1_t, arg2_t, return_t, func_t> af(f, iter.scalar_value<opmath_arg1_t>(1));
     iter.remove_operand(1);
+    // TODO: When all kernels that use gpu_kernel_with_scalars are
+    // ported to structured, this device guard can be deleted.  This
+    // works around incorrect device guard generation for pre-structured
+    // kernels device guards, but structured kernels do it right and
+    // we can assume the device is already set correctly
     const OptionalDeviceGuard device_guard(device_of(iter.tensor(1)));
     gpu_kernel(iter, af);
   } else if (iter.is_cpu_scalar(2)) {
-    BUnaryFunctor<func_t> bf(f, iter.scalar_value<arg2_t>(2));
+    BUnaryFunctor<arg1_t, arg2_t, return_t, func_t> bf(f, iter.scalar_value<opmath_arg2_t>(2));
     iter.remove_operand(2);
     gpu_kernel(iter, bf);
   } else {
-    gpu_kernel(iter, f);
+    gpu_kernel(iter, BinaryFunctor<arg1_t, arg2_t, return_t, func_t>(f));
   }
+}
+
+// Legacy variant that assumes that func_t has the correct types
+// that we expect to load from memory
+template <typename func_t>
+void gpu_kernel_with_scalars(TensorIteratorBase& iter, const func_t& f) {
+  using traits = function_traits<func_t>;
+  static_assert(
+      traits::arity == 2,
+      "gpu_kernel_with_scalars only supports two input arguments");
+  using arg1_t = typename traits::template arg<0>::type;
+  using arg2_t = typename traits::template arg<1>::type;
+  using return_t = typename traits::result_type;
+  opmath_gpu_kernel_with_scalars<arg1_t, arg2_t, return_t, func_t>(iter, f);
 }
 
 namespace { // functions for `gpu_kernel_multiple_outputs`.
@@ -183,11 +221,11 @@ static inline void launch_unrolled_kernel_for_multi_outputs(int64_t N, const fun
   int64_t grid = (N + block_work_size - 1) / block_work_size;
   auto stream = at::cuda::getCurrentCUDAStream();
   unrolled_elementwise_kernel_for_multi_outputs<num_outputs, func_t, array_t><<<grid, num_threads, 0, stream>>>(N, f, data, ic, oc);
-  TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 template <typename func_t>
-void gpu_kernel_multiple_outputs_impl(TensorIterator& iter, const func_t& f) {
+void gpu_kernel_multiple_outputs_impl(TensorIteratorBase& iter, const func_t& f) {
   using traits = function_traits<func_t>;
   using output_t = typename traits::result_type;
   static_assert(is_tuple<output_t>::value, "f's return type must be `thrust::tuple`");
@@ -218,7 +256,7 @@ void gpu_kernel_multiple_outputs_impl(TensorIterator& iter, const func_t& f) {
 } // namespace
 
 template <typename func_t>
-void gpu_kernel_multiple_outputs(TensorIterator& iter, const func_t& f) {
+void gpu_kernel_multiple_outputs(TensorIteratorBase& iter, const func_t& f) {
   ASSERT_HOST_DEVICE_LAMBDA(func_t);
 
   for (int arg = 0; arg < iter.ntensors(); arg++) {

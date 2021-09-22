@@ -3,15 +3,24 @@ import torch
 import torch.nn as nn
 import torch.backends.xnnpack
 import torch.utils.bundled_inputs
+from torch.testing._internal.common_utils import TestCase, run_tests
 from torch.testing._internal.jit_utils import get_forward, get_forward_graph
-from torch.utils.mobile_optimizer import *
+from torch.utils.mobile_optimizer import (LintCode,
+                                          generate_mobile_module_lints,
+                                          optimize_for_mobile)
 from torch.nn import functional as F
 from torch._C import MobileOptimizerType
 from torch.testing._internal.common_quantized import override_quantized_engine
 
+try:
+    import torchvision
+    HAS_TORCHVISION = True
+except ImportError:
+    HAS_TORCHVISION = False
+
 FileCheck = torch._C.FileCheck
 
-class TestOptimizer(unittest.TestCase):
+class TestOptimizer(TestCase):
 
     @unittest.skipUnless(torch.backends.xnnpack.enabled,
                          " XNNPACK must be enabled for these tests."
@@ -47,10 +56,10 @@ class TestOptimizer(unittest.TestCase):
         class MyTestModule(torch.nn.Module):
             def __init__(self):
                 super(MyTestModule, self).__init__()
-                self.conv_weight = torch.nn.Parameter(torch.Tensor(torch.rand(conv_weight_shape)))
-                self.conv_bias = torch.nn.Parameter(torch.Tensor(torch.rand((conv_bias_shape))))
-                self.linear_weight = torch.nn.Parameter(torch.Tensor(torch.rand(linear_weight_shape)))
-                self.linear_bias = torch.nn.Parameter(torch.Tensor(torch.rand((weight_output_dim))))
+                self.conv_weight = torch.nn.Parameter(torch.rand(conv_weight_shape))
+                self.conv_bias = torch.nn.Parameter(torch.rand((conv_bias_shape)))
+                self.linear_weight = torch.nn.Parameter(torch.rand(linear_weight_shape))
+                self.linear_bias = torch.nn.Parameter(torch.rand((weight_output_dim)))
                 self.strides = strides
                 self.paddings = paddings
                 self.dilations = dilations
@@ -64,6 +73,17 @@ class TestOptimizer(unittest.TestCase):
                 o = F.linear(x, self.linear_weight, self.linear_bias)
                 o = o + x
                 return F.relu(o)
+
+            @torch.jit.export
+            def foo(self, x):
+                o = F.conv2d(x, self.conv_weight, self.conv_bias,
+                             self.strides, self.paddings, self.dilations, self.groups)
+                o = F.relu(o)
+                x = o.permute([0, 2, 3, 1])
+                o = F.linear(x, self.linear_weight, self.linear_bias)
+                o = o + x
+                return F.relu(o)
+
 
         class BNTestModule(torch.nn.Module):
             def __init__(self):
@@ -83,9 +103,11 @@ class TestOptimizer(unittest.TestCase):
         scripted_model = torch.jit.script(MyTestModule())
         scripted_model.eval()
         initial_result = scripted_model(input_data)
+        initial_foo_result = scripted_model.foo(input_data)
 
-        optimized_scripted_model = optimize_for_mobile(scripted_model)
+        optimized_scripted_model = optimize_for_mobile(scripted_model, preserved_methods=['foo'])
         optimized_result = optimized_scripted_model(input_data)
+        optimized_foo_result = optimized_scripted_model.foo(input_data)
 
         FileCheck().check_not("Tensor = aten::conv2d") \
                    .check_not("Tensor = prim::CallFunction") \
@@ -97,7 +119,19 @@ class TestOptimizer(unittest.TestCase):
                    .check_not("aten::relu(") \
                    .check_count("aten::_add_relu(", 1, exactly=True) \
                    .run(optimized_scripted_model.graph)
-        torch.testing.assert_allclose(initial_result, optimized_result, rtol=1e-2, atol=1e-3)
+        torch.testing.assert_close(initial_result, optimized_result, rtol=1e-2, atol=1e-3)
+
+        FileCheck().check_not("Tensor = aten::conv2d") \
+                   .check_not("Tensor = prim::CallFunction") \
+                   .check_not("prepacked::conv2d_clamp_prepack") \
+                   .check_count("prepacked::conv2d_clamp_run", 1, exactly=True) \
+                   .check_not("prepacked::linear_clamp_prepack") \
+                   .check_count("prepacked::linear_clamp_run", 1, exactly=True) \
+                   .check_not("aten::add(") \
+                   .check_not("aten::relu(") \
+                   .check_count("aten::_add_relu(", 1, exactly=True) \
+                   .run(optimized_scripted_model.foo.graph)
+        torch.testing.assert_close(initial_foo_result, optimized_foo_result, rtol=1e-2, atol=1e-3)
 
 
         optimization_blocklist_no_prepack = {MobileOptimizerType.INSERT_FOLD_PREPACK_OPS}
@@ -108,12 +142,13 @@ class TestOptimizer(unittest.TestCase):
                    .check_not("prepacked::linear_clamp_run") \
                    .check_not("prepacked::conv2d_clamp_run") \
                    .run(optimized_scripted_model_no_prepack.graph)
-        torch.testing.assert_allclose(initial_result, optimized_result_no_prepack, rtol=1e-2, atol=1e-3)
+        torch.testing.assert_close(initial_result, optimized_result_no_prepack, rtol=1e-2, atol=1e-3)
 
 
         bn_test_module = BNTestModule()
         bn_scripted_module = torch.jit.script(bn_test_module)
         bn_scripted_module.eval()
+
         self.assertEqual(len(torch.jit.export_opnames(bn_scripted_module)), 14)
         FileCheck().check_count("prim::CallMethod[name=\"forward\"]", 2, exactly=True) \
                    .run(str(get_forward(bn_scripted_module._c).graph))
@@ -122,20 +157,20 @@ class TestOptimizer(unittest.TestCase):
         bn_fold_scripted_module = optimize_for_mobile(bn_scripted_module, optimization_blocklist_no_prepack)
         self.assertEqual(len(torch.jit.export_opnames(bn_fold_scripted_module)), 1)
         bn_input = torch.rand(1, 1, 6, 6)
-        torch.testing.assert_allclose(bn_scripted_module(bn_input), bn_fold_scripted_module(bn_input), rtol=1e-2, atol=1e-3)
+        torch.testing.assert_close(bn_scripted_module(bn_input), bn_fold_scripted_module(bn_input), rtol=1e-2, atol=1e-3)
 
         optimization_blocklist_no_fold_bn = {MobileOptimizerType.CONV_BN_FUSION}
         no_bn_fold_scripted_module = optimize_for_mobile(bn_scripted_module, optimization_blocklist_no_fold_bn)
         FileCheck().check_count("aten::batch_norm", 1, exactly=True) \
                    .run(str(get_forward_graph(no_bn_fold_scripted_module._c)))
         bn_input = torch.rand(1, 1, 6, 6)
-        torch.testing.assert_allclose(bn_scripted_module(bn_input), no_bn_fold_scripted_module(bn_input), rtol=1e-2, atol=1e-3)
+        torch.testing.assert_close(bn_scripted_module(bn_input), no_bn_fold_scripted_module(bn_input), rtol=1e-2, atol=1e-3)
 
         class MyMobileOptimizedTagTest(torch.nn.Module):
             def __init__(self):
                 super(MyMobileOptimizedTagTest, self).__init__()
-                self.linear_weight = torch.nn.Parameter(torch.Tensor(torch.rand(linear_weight_shape)))
-                self.linear_bias = torch.nn.Parameter(torch.Tensor(torch.rand((weight_output_dim))))
+                self.linear_weight = torch.nn.Parameter(torch.rand(linear_weight_shape))
+                self.linear_bias = torch.nn.Parameter(torch.rand((weight_output_dim)))
 
             def forward(self, x):
                 o = F.linear(x, self.linear_weight, self.linear_bias)
@@ -151,8 +186,8 @@ class TestOptimizer(unittest.TestCase):
         class MyPreserveMethodsTest(torch.nn.Module):
             def __init__(self):
                 super(MyPreserveMethodsTest, self).__init__()
-                self.linear_weight = torch.nn.Parameter(torch.Tensor(torch.rand(linear_weight_shape)))
-                self.linear_bias = torch.nn.Parameter(torch.Tensor(torch.rand((weight_output_dim))))
+                self.linear_weight = torch.nn.Parameter(torch.rand(linear_weight_shape))
+                self.linear_bias = torch.nn.Parameter(torch.rand((weight_output_dim)))
 
             def forward(self, x):
                 o = F.linear(x, self.linear_weight, self.linear_bias)
@@ -171,6 +206,62 @@ class TestOptimizer(unittest.TestCase):
         opt_m = optimize_for_mobile(m, preserved_methods=["preserveThis"])
         preserveThis = getattr(opt_m, "preserveThis", None)
         self.assertNotEqual(preserveThis, None)
+
+        class OptimizeNoForwardTest(torch.nn.Module):
+            def __init__(self):
+                super(OptimizeNoForwardTest, self).__init__()
+                self.l = nn.Linear(10, 100)
+                self.l2 = nn.Linear(100, 1)
+                self.d = nn.Dropout(p=0.2)
+
+            @torch.jit.export
+            def foo(self, x):
+                x = self.d(F.relu(self.l(x)))
+                x = self.l2(x)
+                x = x + torch.ones(1, 100)
+                return F.relu(x)
+        input_data = torch.ones(1, 10)
+        m = torch.jit.script(OptimizeNoForwardTest())
+        m.eval()
+        initial_result = m.foo(input_data)
+
+        optimized_scripted_model = optimize_for_mobile(m, preserved_methods=['foo'])
+        optimized_result = optimized_scripted_model.foo(input_data)
+
+        FileCheck().check_not("dropout.__") \
+            .check_count("aten::_add_relu(", 1, exactly=True) \
+            .run(optimized_scripted_model.foo.graph)
+        torch.testing.assert_close(initial_result, optimized_result, rtol=1e-2, atol=1e-3)
+
+        class BNTestNoForwardModule(torch.nn.Module):
+            def __init__(self):
+                super(BNTestNoForwardModule, self).__init__()
+                self.conv = torch.nn.Conv2d(1, 20, 5, 1)
+                self.bn = torch.nn.BatchNorm2d(num_features=20)
+                self.bn.eps = 0.0023
+
+            @torch.jit.export
+            def foo(self, x):
+                x = self.conv(x)
+                x = self.bn(x)
+                return x
+
+        bn_test_no_forward_module = BNTestNoForwardModule()
+        bn_no_forward_scripted_module = torch.jit.script(bn_test_no_forward_module)
+        bn_no_forward_scripted_module.eval()
+
+        self.assertEqual(len(torch.jit.export_opnames(bn_no_forward_scripted_module)), 14)
+        FileCheck().check_count("prim::CallMethod[name=\"forward\"]", 2, exactly=True) \
+                   .run(bn_no_forward_scripted_module.foo.graph)
+
+        bn_fold_no_forward_scripted_module = optimize_for_mobile(bn_no_forward_scripted_module, preserved_methods=['foo'])
+        self.assertEqual(len(torch.jit.export_opnames(bn_fold_no_forward_scripted_module)), 1)
+        bn_input = torch.rand(1, 1, 6, 6)
+        torch.testing.assert_close(
+            bn_no_forward_scripted_module.foo(bn_input),
+            bn_fold_no_forward_scripted_module.foo(bn_input),
+            rtol=1e-2,
+            atol=1e-3)
 
     @unittest.skipUnless(torch.backends.xnnpack.enabled,
                          " XNNPACK must be enabled for these tests."
@@ -268,6 +359,60 @@ class TestOptimizer(unittest.TestCase):
         bi_module_lint_list = generate_mobile_module_lints(bi_module)
         self.assertEqual(len(bi_module_lint_list), 0)
 
+    def test_preserve_bundled_inputs_methods(self):
+        class MyBundledInputModule(torch.nn.Module):
+            def __init__(self):
+                super(MyBundledInputModule, self).__init__()
+
+            def forward(self, inputs):
+                return inputs
+
+        class MyIncompleteBundledInputModule(torch.nn.Module):
+            def __init__(self):
+                super(MyIncompleteBundledInputModule, self).__init__()
+
+            def forward(self, inputs):
+                return inputs
+
+            @torch.jit.export
+            def get_all_bundled_inputs(self):
+                pass
+
+        bi_module = torch.jit.script(MyBundledInputModule())
+        module_optim_bi_not_preserved = optimize_for_mobile(bi_module)
+
+        # Expected to be False since no bundled inputs methods were added
+        self.assertFalse(
+            hasattr(module_optim_bi_not_preserved, 'get_all_bundled_inputs') or
+            hasattr(module_optim_bi_not_preserved, 'get_num_bundled_inputs')
+        )
+
+        # Add bundled inputs methods to the module
+        torch.utils.bundled_inputs.augment_model_with_bundled_inputs(
+            bi_module, [(torch.tensor([1]),)], [])
+        # Now they should be preserved
+        module_optim_bi_preserved = optimize_for_mobile(bi_module)
+
+        # All of the bundled inputs methods were preserved
+        self.assertTrue(
+            hasattr(module_optim_bi_preserved, 'get_all_bundled_inputs') and
+            hasattr(module_optim_bi_preserved, 'get_num_bundled_inputs')
+        )
+
+        bundled_input = module_optim_bi_preserved.get_all_bundled_inputs()[0]
+        module_optim_bi_preserved(*bundled_input)
+
+        # If not all 3 bundled inputs methods are present in the module,
+        # we will not try to preserve them unless specified by the user.
+        incomplete_bi_module = torch.jit.script(MyIncompleteBundledInputModule())
+        incomplete_bi_module_optim = optimize_for_mobile(incomplete_bi_module)
+        self.assertFalse(hasattr(incomplete_bi_module_optim, 'get_all_bundled_inputs'))
+
+        # Specifically preserve get_all_bundled_inputs even if it's the only one
+        # bundled inputs method available.
+        incomplete_bi_module_optim = optimize_for_mobile(incomplete_bi_module, preserved_methods=['get_all_bundled_inputs'])
+        self.assertTrue(hasattr(incomplete_bi_module_optim, 'get_all_bundled_inputs'))
+
     @unittest.skipUnless(torch.backends.xnnpack.enabled,
                          " XNNPACK must be enabled for these tests."
                          " Please build with USE_XNNPACK=1.")
@@ -340,7 +485,7 @@ class TestOptimizer(unittest.TestCase):
 
             m, m_optim = _quant_script_and_optimize(Standalone())
             FileCheck().check_not("Conv2d = prim::GetAttr[name=\"conv1\"]") \
-                       .check_count("_jit_pass_hoist_conv_packed_params", 2, exactly=True) \
+                       .check_count("__torch__.torch.classes.quantized.Conv2dPackedParamsBase = prim::Constant", 2, exactly=True) \
                        .run(m_optim.graph)
             self.assertFalse(hasattr(m_optim, "conv1"))
             self.assertFalse(hasattr(m_optim, "conv2"))
@@ -348,13 +493,13 @@ class TestOptimizer(unittest.TestCase):
             data = torch.randn(4, 1, 4, 4)
             m_res = m(data)
             m_optim_res = m_optim(data)
-            torch.testing.assert_allclose(m_res, m_optim_res, rtol=1e-2, atol=1e-3)
+            torch.testing.assert_close(m_res, m_optim_res, rtol=1e-2, atol=1e-3)
 
             # generic case
 
             m, m_optim = _quant_script_and_optimize(Parent())
             FileCheck().check_not("Conv2d = prim::GetAttr[name=\"conv1\"]") \
-                       .check_count("_jit_pass_hoist_conv_packed_params", 2, exactly=True) \
+                       .check_count("__torch__.torch.classes.quantized.Conv2dPackedParamsBase = prim::Constant", 2, exactly=True) \
                        .run(m_optim.graph)
             self.assertFalse(hasattr(m_optim, "conv1"))
             self.assertFalse(hasattr(m_optim, "child"))
@@ -362,8 +507,126 @@ class TestOptimizer(unittest.TestCase):
             data = torch.randn(4, 1, 4, 4)
             m_res = m(data)
             m_optim_res = m_optim(data)
-            torch.testing.assert_allclose(m_res, m_optim_res, rtol=1e-2, atol=1e-3)
+            torch.testing.assert_close(m_res, m_optim_res, rtol=1e-2, atol=1e-3)
+
+    @unittest.skipUnless(HAS_TORCHVISION, "Needs torchvision")
+    def test_mobilenet_optimize_for_mobile(self):
+        m = torchvision.models.mobilenet_v3_small()
+        m = torch.jit.script(m)
+        m = optimize_for_mobile(m)
+
+        # run forward 3 times until segfault, see https://github.com/pytorch/pytorch/issues/52463
+        x = torch.zeros(1, 3, 56, 56)
+        self.assertEqual(m(x).numel(), 1000)
+        self.assertEqual(m(x).numel(), 1000)
+        self.assertEqual(m(x).numel(), 1000)
+
+    def test_clone_module_with_class(self):
+        class MyInnerTestModule(torch.nn.Module):
+            def __init__(self):
+                super(MyInnerTestModule, self).__init__()
+                self.pqr = torch.Tensor([10., 20., 30.])
+
+            def forward(self, inputs):
+                return inputs
+
+            @torch.jit.export
+            def dummy_method_not_cloned(self):
+                return 20
+
+        class MyTestModule(torch.nn.Module):
+            def __init__(self):
+                super(MyTestModule, self).__init__()
+                self.abc = 23
+                self.pqr = torch.Tensor([1., 2., 3.])
+                self.inner = MyInnerTestModule()
+
+            def forward(self, inputs):
+                x = self.dummy_method_cloned()
+                # The call to self.inner.dummy_method_not_cloned should not raise an error
+                y = self.inner.dummy_method_not_cloned()
+                # The call to self.inner.pqr should not raise an error
+                z = self.inner.pqr
+                return (inputs, x, y, z)
+
+            @torch.jit.export
+            def dummy_method_not_cloned2(self):
+                # The call to self.inner.dummy_method_not_cloned should not raise an error
+                y = self.inner.dummy_method_not_cloned()
+                # The call to self.inner.pqr should not raise an error
+                z = self.inner.pqr
+                return self.pqr, self.dummy_method_not_cloned(), y, z
+
+            @torch.jit.export
+            def dummy_method_not_cloned(self):
+                return None
+
+            @torch.jit.export
+            def dummy_method_cloned(self):
+                return None
+
+            @torch.jit.export
+            def dummy_method_ref_attr_pqr(self):
+                return self.pqr, self.inner.pqr
+
+        m = torch.jit.script(MyTestModule())
+
+        # Check that the methods exist on the original model.
+        self.assertEqual(hasattr(m, "dummy_method_not_cloned"), True)
+        self.assertEqual(hasattr(m, "dummy_method_cloned"), True)
+        self.assertEqual(hasattr(m, "dummy_method_not_cloned2"), True)
+        self.assertEqual(hasattr(m, "pqr"), True)
+
+        # Case-1: Successfully clone, ignoring 2 methods, keeping all attributes.
+        cloned = torch._C._hack_do_not_use_clone_module_with_class(
+            m._c,
+            ["dummy_method_not_cloned", "dummy_method_not_cloned2"],  # ignored_methods
+            [],  # ignored_attributes
+        )
+
+        # Check that the ignored methods don't exist on the cloned model.
+        self.assertEqual(hasattr(cloned, "dummy_method_not_cloned"), False)
+        self.assertEqual(hasattr(cloned, "dummy_method_cloned"), True)
+        self.assertEqual(hasattr(cloned, "dummy_method_not_cloned2"), False)
+        self.assertEqual(hasattr(cloned, "pqr"), True)
+
+        # Check that the cloned class has a classname that starts with __torch__.
+        self.assertTrue(
+            cloned.qualified_name.startswith('__torch__.'),
+            ("Expected the cloned module's name to start with the string "
+             "'__torch__.', but got: {0}").format(cloned.qualified_name),
+        )
+
+
+        # Case-2: Successfully clone the module, ignoring the attribute pqr, and the method that references it.
+        cloned = torch._C._hack_do_not_use_clone_module_with_class(
+            m._c,
+            ["dummy_method_not_cloned", "dummy_method_not_cloned2", "dummy_method_ref_attr_pqr"],
+            ["pqr"],
+        )
+
+        # Check that the ignored methods don't exist on the cloned model.
+        self.assertEqual(hasattr(cloned, "dummy_method_not_cloned"), False)
+        self.assertEqual(hasattr(cloned, "dummy_method_cloned"), True)
+        self.assertEqual(hasattr(cloned, "dummy_method_not_cloned2"), False)
+        self.assertEqual(hasattr(cloned, "dummy_method_ref_attr_pqr"), False)
+        self.assertEqual(hasattr(cloned, "pqr"), False)
+
+
+        # Case-3: The statement below will throw since dummy_method_cloned2 is preserved,
+        # and references dummy_method_not_cloned, which is not cloned.
+        with self.assertRaises(RuntimeError):
+            cloned = torch._C._hack_do_not_use_clone_module_with_class(m._c, ["dummy_method_not_cloned"], [])
+
+        # Case-4: The statement below will throw since dummy_method_ref_attr_pqr
+        # is preserved, and references "pqr", which is not cloned.
+        with self.assertRaises(RuntimeError):
+            cloned = torch._C._hack_do_not_use_clone_module_with_class(
+                m._c,
+                ["dummy_method_not_cloned", "dummy_method_not_cloned2"],
+                ["pqr"],
+            )
 
 
 if __name__ == '__main__':
-    unittest.main()
+    run_tests()

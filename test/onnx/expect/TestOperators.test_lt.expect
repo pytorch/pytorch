@@ -1,17 +1,17 @@
-ir_version: 6
+ir_version: 7
 producer_name: "pytorch"
 producer_version: "CURRENT_VERSION"
 graph {
   node {
-    input: "x"
-    input: "y"
+    input: "0"
+    input: "1"
     output: "2"
     name: "Less_0"
     op_type: "Less"
   }
   name: "torch-jit-export"
   input {
-    name: "x"
+    name: "0"
     type {
       tensor_type {
         elem_type: 6
@@ -33,7 +33,7 @@ graph {
     }
   }
   input {
-    name: "y"
+    name: "1"
     type {
       tensor_type {
         elem_type: 6

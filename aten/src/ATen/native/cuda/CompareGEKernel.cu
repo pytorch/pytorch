@@ -17,7 +17,7 @@ struct CompareGEFunctor {
   }
 };
 
-void ge_kernel_cuda(TensorIterator& iter) {
+void ge_kernel_cuda(TensorIteratorBase& iter) {
   AT_DISPATCH_ALL_TYPES_AND3(kHalf, kBFloat16, kBool, iter.common_dtype(), "ge_cuda", [&]() {
     gpu_kernel_with_scalars(iter, CompareGEFunctor<scalar_t>());
   });

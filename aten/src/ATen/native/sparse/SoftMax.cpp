@@ -1,10 +1,13 @@
 #include <ATen/ATen.h>
 #include <ATen/Config.h>
-#include <ATen/NativeFunctions.h>
-#include <ATen/SparseTensorUtils.h>
-#include <ATen/Parallel.h>
+#include <ATen/CPUFunctions.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/native/sparse/ParamUtils.h>
+#include <ATen/NativeFunctions.h>
+#include <ATen/Parallel.h>
+#include <ATen/SparseTensorUtils.h>
+#include <c10/util/accumulate.h>
+
 #include <map>
 
 namespace at {
@@ -17,12 +20,7 @@ int64_t get_nvalues(const IntArrayRef& sizes, int64_t sparse_dim) {
      `sizes` is a vector of sparse tensor dimensions.
      `sparse_dim` is the dimension of the sparse part of a sparse tensor.
    */
-  auto dim = sizes.size();
-  int64_t nvalues = 1;
-  for (auto i=sparse_dim; i<dim; i++) {
-    nvalues *= sizes[i];
-  }
-  return nvalues;
+  return c10::multiply_integers(sizes.begin() + sparse_dim, sizes.end());
 }
 
 std::vector<int64_t> get_offsets(const Tensor& indices, const IntArrayRef& sizes, const int64_t dim) {
@@ -125,15 +123,15 @@ std::vector<std::vector<int64_t>> get_pools(const Tensor& indices, const IntArra
     int64_t pool_index = 0;
     for (int64_t j=0; j < ndim; j++) {
       if (j != dim) {
-        auto indices_row = indices_accessor[j];
-        auto stride = strides[j];
+        const auto indices_row = indices_accessor[j];
+        const auto stride = strides[j];
         pool_index += stride * indices_row[i];
       }
     }
-    while (pool_index >= pools.size()) {
-      pools.emplace_back();  // create empty pool
+    if(static_cast<int64_t>(pools.size()) <= pool_index){
+      pools.resize(pool_index + 1);
     }
-    pools[pool_index].push_back(i);
+    pools.at(pool_index).push_back(i);
   }
 
   return pools;
@@ -291,10 +289,11 @@ void cpu_sparse_coo_softmax(Tensor output, const Tensor& input, const int64_t di
 
   if (dim >= sparse_dim) {
     if (LogSoftMax) {
-      auto new_values = log_softmax_cpu(values, dim - sparse_dim + 1, false);
+      auto new_values =
+          at::cpu::_log_softmax(values, dim - sparse_dim + 1, false);
       out_values.set_(new_values);
     } else {
-      auto new_values = softmax_cpu(values, dim - sparse_dim + 1, false);
+      auto new_values = at::cpu::_softmax(values, dim - sparse_dim + 1, false);
       out_values.set_(new_values);
     }
     return;
@@ -373,7 +372,7 @@ void cpu_sparse_coo_softmax(Tensor output, const Tensor& input, const int64_t di
 }
 
 template <typename scalar_t, bool LogSoftMax>
-void cpu_sparse_coo_softmax_backward(Tensor& grad_input, const Tensor& grad, const Tensor& output, const int64_t dim) {
+void cpu_sparse_coo_softmax_backward(const Tensor& grad_input, const Tensor& grad, const Tensor& output, const int64_t dim) {
   /*
 
     If LogSoftMax == false, then
@@ -415,10 +414,11 @@ void cpu_sparse_coo_softmax_backward(Tensor& grad_input, const Tensor& grad, con
     Tensor unused;
     if (out_offsets == grad_offsets) {
       if (LogSoftMax) {
-        auto r = log_softmax_backward_cpu(grad_values, out_values, dim - sparse_dim + 1, unused);
+        auto r = at::cpu::_log_softmax_backward_data(
+            grad_values, out_values, dim - sparse_dim + 1, unused);
         values.set_(r);
       } else {
-        auto r = softmax_backward_cpu(grad_values, out_values, dim - sparse_dim + 1, unused);
+        auto r = at::cpu::_softmax_backward_data(grad_values, out_values, dim - sparse_dim + 1, unused);
         values.set_(r);
       }
     } else {
@@ -427,10 +427,11 @@ void cpu_sparse_coo_softmax_backward(Tensor& grad_input, const Tensor& grad, con
         auto j = low - grad_offsets.begin();
         if (j < grad_nnz && out_offsets[i] == grad_offsets[j]) {
           if (LogSoftMax) {
-            auto r = log_softmax_backward_cpu(grad_values[j], out_values[i], dim - sparse_dim, unused);
+            auto r = at::cpu::_log_softmax_backward_data(
+                grad_values[j], out_values[i], dim - sparse_dim, unused);
             values[i].copy_(r);
           } else {
-            auto r = softmax_backward_cpu(grad_values[j], out_values[i], dim - sparse_dim, unused);
+            auto r = at::cpu::_softmax_backward_data(grad_values[j], out_values[i], dim - sparse_dim, unused);
             values[i].copy_(r);
           }
         }
@@ -468,7 +469,6 @@ void cpu_sparse_coo_softmax_backward(Tensor& grad_input, const Tensor& grad, con
         /* Compute tmp = - sum_j output_j * grad_j */
         for (int64_t i : pool_indices) {
           auto out_values_row = out_values_accessor[i];
-          auto values_row = values_accessor[i];
           auto low = std::lower_bound(grad_offsets.begin(), grad_offsets.end(), out_offsets[i]);
           auto j = low - grad_offsets.begin();
 
@@ -635,7 +635,7 @@ Tensor _sparse_log_softmax(const Tensor& input_, const int64_t dim_, c10::option
   namedinference::propagate_names(result, input_);
   return result;
 }
-  
+
 Tensor _sparse_log_softmax(const Tensor& self, Dimname dim, optional<ScalarType> dtype) {
   return at::_sparse_log_softmax(self, dimname_to_position(self, dim), dtype);
 }

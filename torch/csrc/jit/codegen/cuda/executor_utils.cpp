@@ -3,12 +3,21 @@
 #include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
 
 #include <c10/cuda/CUDACachingAllocator.h>
+#include <c10/util/irange.h>
 
 #include <torch/csrc/jit/codegen/cuda/executor_utils.h>
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
-#include <torch/csrc/jit/codegen/cuda/kernel_resource_strings.h>
+#include <torch/csrc/jit/codegen/fuser/cuda/fused_kernel.h>
 #include <torch/csrc/jit/resource_guard.h>
+
+#include <nvfuser_resources/block_reduction.h>
+#include <nvfuser_resources/broadcast.h>
+#include <nvfuser_resources/fp16_support.h>
+#include <nvfuser_resources/grid_reduction.h>
+#include <nvfuser_resources/helpers.h>
+#include <nvfuser_resources/random_numbers.h>
+#include <nvfuser_resources/tensor.h>
 
 #include <fstream>
 
@@ -20,13 +29,33 @@ namespace executor_utils {
 
 std::string kernelPreamble() {
   std::stringstream ss;
-  ss << code_template_tensor_struct << "\n"
-     << code_fp16_support << "\n"
-     << code_random_number_gen << "\n"
-     << code_helper_funcs << "\n"
-     << code_template_block_reduction << "\n"
-     << code_template_grid_reduction << "\n"
-     << code_template_block_broadcast << "\n";
+
+#ifndef __HIP_PLATFORM_HCC__
+  ss << nvfuser_resources::fp16_support_cu;
+#else
+  ss << R"(
+#ifndef __noinline__
+#define __noinline__ __attribute__((noinline))
+#endif
+#ifndef __forceinline__
+#define __forceinline__ inline __attribute__((always_inline))
+#endif
+#ifndef assert
+#define assert(expr) ((void)0)
+#endif
+#ifndef __align__
+#define __align__(x) __attribute__((aligned(x)))
+#endif
+  )";
+#endif
+
+  ss << nvfuser_resources::tensor_cu;
+  ss << nvfuser_resources::random_numbers_cu;
+  ss << nvfuser_resources::helpers_cu;
+  ss << nvfuser_resources::block_reduction_cu;
+  ss << nvfuser_resources::grid_reduction_cu;
+  ss << nvfuser_resources::broadcast_cu;
+
   return ss.str();
 }
 
@@ -48,6 +77,7 @@ bool validateKernelArgTensor(
   // Check the rank of the tensors.
   size_t arg_dim = arg.dim();
   // Note: This requires current Fusion to be active.
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   size_t param_dim =
       TensorDomain::noReductions(param->as<TensorView>()->getRootDomain())
           .size();
@@ -153,7 +183,7 @@ void validateKernelInputs(
 
   std::stringstream msg;
   bool mismatch = false;
-  for (size_t i = 0; i < inputs.size(); ++i) {
+  for (const auto i : c10::irange(inputs.size())) {
     const IValue& arg = inputs[i];
     const Val* param = fusion->inputs()[i];
     mismatch = !validateKernelArg(arg, param, device, msg) || mismatch;
@@ -178,7 +208,7 @@ void validateKernelOutputs(
 
   std::stringstream msg;
   bool mismatch = false;
-  for (size_t i = 0; i < outputs.size(); ++i) {
+  for (const auto i : c10::irange(outputs.size())) {
     const at::Tensor& arg = outputs[i];
     const Val* param = fusion->outputs()[i];
     mismatch = !validateKernelArg(arg, param, device, msg) || mismatch;
@@ -202,7 +232,7 @@ StatefulExpressionEvaluator statefulBindInputs(
 
   // This should probably move to EvaluationContext as we may want to bind
   // input values frequently. Bind fusion input values to runtime values.
-  for (size_t i = 0; i < fusion->inputs().size(); i++) {
+  for (const auto i : c10::irange(fusion->inputs().size())) {
     if (fusion->inputs()[i]->getValType() == ValType::TensorView) {
       TensorView* cg_tensor = fusion->inputs()[i]->as<TensorView>();
 
@@ -216,7 +246,7 @@ StatefulExpressionEvaluator statefulBindInputs(
           aten_tensor.ndimension() == (int64_t)root_dom.size(),
           "Something went wrong configuring launch. Inputs no longer match.");
 
-      for (size_t dim = 0; dim < root_dom.size(); dim++) {
+      for (const auto dim : c10::irange(root_dom.size())) {
         evaluator.safeBind(
             root_dom[dim]->extent(), aten_tensor.sizes()[dim], lower);
       }
@@ -238,6 +268,7 @@ NvrtcFunction nvrtcCompile(
   FUSER_PERF_SCOPE("NVRTC");
 
   // lazily construct context if non-existing yet;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   CUcontext pctx = nullptr;
   AT_CUDA_DRIVER_CHECK(at::globalContext().getNVRTC().cuCtxGetCurrent(&pctx));
   if (!pctx) {
@@ -247,18 +278,12 @@ NvrtcFunction nvrtcCompile(
   }
 
   const auto prop = at::cuda::getCurrentDeviceProperties();
-  int nvrtc_major, nvrtc_minor;
-  AT_CUDA_NVRTC_CHECK(
-      at::globalContext().getNVRTC().nvrtcVersion(&nvrtc_major, &nvrtc_minor));
 
-  // Short-circuits if NVRTC version too low
-  TORCH_INTERNAL_ASSERT(nvrtc_major >= 6);
-  // Major and minor is determined by device properties and
-  // possibly "downcompiled" to a lower (compatible) compute architecture
-  // based on the NVRTC version
-  const int major = prop->major;
-  const int minor = prop->minor;
-  nvrtcProgram program;
+  int major = 0, minor = 0;
+  bool compile_to_sass = false;
+  codegenOutputQuery(prop, major, minor, compile_to_sass);
+
+  nvrtcProgram program; // NOLINT(cppcoreguidelines-init-variables)
 
   {
     FUSER_PERF_SCOPE("nvrtcCreateProgram");
@@ -274,9 +299,25 @@ NvrtcFunction nvrtcCompile(
 
 #ifdef __HIP_PLATFORM_HCC__
   std::vector<const char*> args = {"--std=c++14"};
+#if ROCM_VERSION >= 40200
+  args.push_back("-hip-pch");
+#endif
 #else
-  const std::string compute = "--gpu-architecture=compute_" +
+  const std::string compute = std::string("--gpu-architecture=") +
+#if CUDA_VERSION >= 11010
+      // CUDA 11.1 allows going directly to SASS (sm_) instead of PTX (compute_)
+      // which gives better backwards compatibility to work on older driver,
+      // (since older driver doesn't necessrily recognize PTX emitted by new
+      // toolkit);
+      // Meanwhile, for forward compatibility (future device with
+      // `unsupported_arch==True`), since SASS are not necessarily compatible,
+      // we fallback to PTX instead.
+      (compile_to_sass ? "sm_" : "compute_") +
+#else
+      "compute_" +
+#endif
       std::to_string(major) + std::to_string(minor);
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   std::vector<const char*> args = {
       "--std=c++14", compute.c_str(), "-default-device"};
 #endif
@@ -284,13 +325,21 @@ NvrtcFunction nvrtcCompile(
   const char* disable_fma = getenv("PYTORCH_CUDA_FUSER_DISABLE_FMA");
   // int disable_fma_flag = disable_fma ? atoi(disable_fma) : 0;
   if (disable_fma && atoi(disable_fma)) {
+#ifdef __HIP_PLATFORM_HCC__
+    TORCH_WARN_ONCE(
+        "PYTORCH_CUDA_FUSER_DISABLE_FMA is not supported on ROCm, ignoring");
+#else
     args.push_back("--fmad=false");
+#endif
   }
 
   const char* ptxas_opt_level = getenv("PYTORCH_CUDA_FUSER_JIT_OPT_LEVEL");
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   uint32_t jit_opt_level;
 
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   std::vector<CUjit_option> options;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   std::vector<void*> option_vals;
 
   if (ptxas_opt_level) {
@@ -317,8 +366,10 @@ NvrtcFunction nvrtcCompile(
         program, args.size(), args.data());
 
     if (result != NVRTC_SUCCESS) {
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       size_t logsize;
       at::globalContext().getNVRTC().nvrtcGetProgramLogSize(program, &logsize);
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       std::vector<char> log(logsize);
       at::globalContext().getNVRTC().nvrtcGetProgramLog(program, log.data());
 
@@ -334,15 +385,27 @@ NvrtcFunction nvrtcCompile(
       program, func_name.c_str(), &lowered_kernel_name);
 
   size_t ptx_size = 0;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   std::vector<char> ptx;
 
   {
     FUSER_PERF_SCOPE("get PTX");
-    AT_CUDA_NVRTC_CHECK(
-        at::globalContext().getNVRTC().nvrtcGetPTXSize(program, &ptx_size));
+#if CUDA_VERSION >= 11010
+    // compile_to_sass determines whether we are generating SASS or PTX, hence
+    // the different API.
+    const auto getSize = compile_to_sass
+        ? at::globalContext().getNVRTC().nvrtcGetCUBINSize
+        : at::globalContext().getNVRTC().nvrtcGetPTXSize;
+    const auto getFunc = compile_to_sass
+        ? at::globalContext().getNVRTC().nvrtcGetCUBIN
+        : at::globalContext().getNVRTC().nvrtcGetPTX;
+#else
+    const auto getSize = at::globalContext().getNVRTC().nvrtcGetPTXSize;
+    const auto getFunc = at::globalContext().getNVRTC().nvrtcGetPTX;
+#endif
+    AT_CUDA_NVRTC_CHECK(getSize(program, &ptx_size));
     ptx.resize(ptx_size);
-    AT_CUDA_NVRTC_CHECK(
-        at::globalContext().getNVRTC().nvrtcGetPTX(program, ptx.data()));
+    AT_CUDA_NVRTC_CHECK(getFunc(program, ptx.data()));
   }
 
   NvrtcFunction compiled_kernel_;
@@ -352,6 +415,11 @@ NvrtcFunction nvrtcCompile(
   const char* prefix_env = getenv("PYTORCH_CUDA_FUSER_CUBIN");
 #ifndef __HIP_PLATFORM_HCC__
   if (prefix_env) {
+#if CUDA_VERSION >= 11010
+    TORCH_CHECK(
+        !compile_to_sass,
+        "PYTORCH_NVFUSER_CUBIN cannot be used when compile direct to SASS. Please set PYTORCH_NVFUSER_CUBIN to empty");
+#endif
     FUSER_PERF_SCOPE("load CUBIN");
 
     // Output ptx file
@@ -363,6 +431,7 @@ NvrtcFunction nvrtcCompile(
       myPtxFile.close();
     }
 
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     CUlinkState linkState;
 
     AT_CUDA_DRIVER_CHECK(at::globalContext().getNVRTC().cuLinkCreate(
@@ -378,7 +447,9 @@ NvrtcFunction nvrtcCompile(
         options.data(),
         option_vals.data()));
 
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     size_t cubinSize;
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     void* cubin;
     AT_CUDA_DRIVER_CHECK(at::globalContext().getNVRTC().cuLinkComplete(
         linkState, &cubin, &cubinSize));

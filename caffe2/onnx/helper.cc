@@ -10,6 +10,7 @@ std::string DummyName::NewDummyName() {
     const std::string name = c10::str("OC2_DUMMY_", counter_++);
     auto ret = used_names_.insert(name);
     if (ret.second) {
+      // NOLINTNEXTLINE(performance-no-automatic-move)
       return name;
     }
   }

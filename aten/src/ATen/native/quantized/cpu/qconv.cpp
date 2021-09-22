@@ -12,6 +12,8 @@
 #include <caffe2/utils/threadpool/pthreadpool-cpp.h>
 #include <torch/library.h>
 
+#include <c10/util/irange.h>
+
 namespace {
 // To have a sanity check for maximum matrix size.
 constexpr int64_t kReasonableMaxDim = 1000000;
@@ -392,6 +394,7 @@ at::Tensor PackedConvWeight<kSpatialDim>::apply_impl(
                                  output_padding_w},
           transpose());
 
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   const float act_scale = act.q_scale();
   const int32_t act_zero_point = act.q_zero_point();
 
@@ -453,7 +456,7 @@ at::Tensor PackedConvWeight<kSpatialDim>::apply_impl(
   const int num_tasks = at::get_num_threads();
   at::parallel_for(0, num_tasks, 1, [&](int64_t begin, int64_t end) {
     fbgemm::DoNothing<> kNoOpObj{};
-    for (int task_id = begin; task_id < end; ++task_id) {
+    for (const auto task_id : c10::irange(begin, end)) {
       if (q_scheme == c10::kPerTensorAffine) {
         fbgemm::ReQuantizeOutput<
             kReluFused,
@@ -560,6 +563,8 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_impl(
     const at::Tensor& act,
     double output_scale,
     int64_t output_zero_point) {
+  // QNNPack is not thread safe
+  std::lock_guard<std::mutex> lock(qnnp_mutex_);
   const std::string func_name = transpose() ? "quantized::conv_transpose"
                                             : "quantized::conv";
   TORCH_CHECK(!(kReluFused && transpose()),
@@ -590,10 +595,12 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_impl(
   const at::Tensor act_nhwc = act.contiguous(c10::MemoryFormat::ChannelsLast);
 
   auto output_min = kReluFused
+      // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
       ? activationLimits(output_scale, output_zero_point, Activation::RELU)
             .first
       : std::numeric_limits<uint8_t>::min();
   auto output_max = kReluFused
+      // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
       ? activationLimits(output_scale, output_zero_point, Activation::RELU)
             .second
       : std::numeric_limits<uint8_t>::max();
@@ -618,6 +625,7 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_impl(
     // We calculate requant scale here as the vector holding the requant scale
     // is owned by this module. The pointer is then passed to qnnpack backend.
     generate_requantization_scales(
+        // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
         w_scales, act_input_scale, output_scale, requantization_scales);
 
     // TODO Kimish, we are allocating affine_quantized regardless of per channel or not.
@@ -642,7 +650,7 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_impl(
       at::Tensor bias_quant_scales =
           weight_contig.q_per_channel_scales() * act_input_scale;
       at::Tensor bias_zp = at::zeros(bias_quant_scales.sizes(), c10::kInt);
-      qbias = at::native::quantize_per_channel_cpu(
+      qbias = at::native::quantize_per_channel(
           bias_fp32, bias_quant_scales, bias_zp, 0, c10::kQInt32);
     } else {
       qbias = at::native::quantize_per_tensor(
@@ -698,13 +706,15 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_impl(
   // Allocate output Tensor and a buffer for QNNPACK to use
   at::Tensor output = at::native::empty_affine_quantized(
       output_shape,
-      at::device(c10::kCPU)
-          .dtype(c10::kQUInt8)
-          .memory_format(c10::MemoryFormat::ChannelsLast),
+      c10::kQUInt8,
+      c10::nullopt /* layout */,
+      c10::kCPU,
+      c10::nullopt /* pin_memory */,
       output_scale,
       output_zero_point,
-      c10::nullopt);
+      c10::MemoryFormat::ChannelsLast);
 
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   pytorch_qnnp_status run_status;
   if (transpose()) {
     run_status = qnnpack::qnnpackDeConv(

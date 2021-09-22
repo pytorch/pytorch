@@ -7,6 +7,7 @@
 # shellcheck disable=SC2034
 COMPACT_JOB_NAME="${BUILD_ENVIRONMENT}"
 
+# shellcheck source=./common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 echo "Testing pytorch (distributed only)"
@@ -17,6 +18,13 @@ fi
 
 python tools/download_mnist.py --quiet -d test/cpp/api/mnist
 OMP_NUM_THREADS=2 TORCH_CPP_TEST_MNIST_PATH="test/cpp/api/mnist" build/bin/test_api
-time python test/run_test.py --verbose -i distributed/test_c10d
-time python test/run_test.py --verbose -i distributed/test_c10d_spawn
+time python test/run_test.py --verbose -i distributed/test_jit_c10d
+time python test/run_test.py --verbose -i distributed/test_c10d_common
+time python test/run_test.py --verbose -i distributed/test_c10d_gloo
+time python test/run_test.py --verbose -i distributed/test_c10d_nccl
+time python test/run_test.py --verbose -i distributed/test_c10d_spawn_gloo
+time python test/run_test.py --verbose -i distributed/test_c10d_spawn_nccl
+time python test/run_test.py --verbose -i distributed/test_store
+time python test/run_test.py --verbose -i distributed/test_pg_wrapper
+time python test/run_test.py --verbose -i distributed/rpc/cuda/test_tensorpipe_agent
 assert_git_not_dirty

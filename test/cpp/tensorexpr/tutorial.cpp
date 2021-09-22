@@ -38,42 +38,38 @@
 #include <iostream>
 #include <string>
 
+#include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/ir/irparser.h>
 #include <torch/csrc/jit/tensorexpr/eval.h>
 #include <torch/csrc/jit/tensorexpr/expr.h>
 #include <torch/csrc/jit/tensorexpr/ir.h>
 #include <torch/csrc/jit/tensorexpr/ir_printer.h>
+#include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
+#include <torch/csrc/jit/tensorexpr/kernel.h>
 #include <torch/csrc/jit/tensorexpr/loopnest.h>
 #include <torch/csrc/jit/tensorexpr/stmt.h>
 #include <torch/csrc/jit/tensorexpr/tensor.h>
+#include <torch/torch.h>
 
 using namespace torch::jit::tensorexpr;
 
-int main(int argc, char* argv[]) {
-  // Memory management for tensor expressions is currently done with memory
-  // arenas. That is, whenever an object is created it registers itself in an
-  // arena and the object is kept alive as long as the arena is alive. When the
-  // arena gets destructed, it deletes all objects registered in it.
-  //
-  // The easiest way to set up a memory arena is to use `KernelScope` class - it
-  // is a resource guard that creates a new arena on construction and restores
-  // the previously set arena on destruction.
-  //
-  // We will create a kernel scope here, and thus we'll set up a mem arena for
-  // the entire tutorial.
-  KernelScope kernel_scope;
+// Helper function to print a snippet from a big multi-line string
+static void printLinesToFrom(const std::string& input_str, int from, int to);
 
-  std::cout << "*** Structure of tensor expressions ***" << std::endl;
+int main(int argc, char* argv[]) {
+  std::cout << "*** Structure of tensor expressions and statements ***"
+            << std::endl;
   {
     // A tensor expression is a tree of expressions. Each expression has a type,
-    // and that type defines what sub-expressions it the current expression has.
+    // and that type defines what sub-expressions the current expression has.
     // For instance, an expression of type 'Mul' would have a type 'kMul' and
     // two subexpressions: LHS and RHS. Each of these two sub-expressions could
     // also be a 'Mul' or some other expression.
     //
     // Let's construct a simple TE:
-    Expr* lhs = new IntImm(5);
-    Expr* rhs = new Var("x", kInt);
-    Expr* mul = new Mul(lhs, rhs);
+    ExprPtr lhs = alloc<IntImm>(5);
+    ExprPtr rhs = alloc<Var>("x", kInt);
+    ExprPtr mul = alloc<Mul>(lhs, rhs);
     std::cout << "Tensor expression: " << *mul << std::endl;
     // Prints: Tensor expression: 5 * x
 
@@ -85,15 +81,21 @@ int main(int argc, char* argv[]) {
     // like we did in the previous example). Expression handles overload common
     // operations and allow us to express the same semantics in a more natural
     // way:
-    ExprHandle l = 1;
+    ExprHandle l = 5;
     ExprHandle r = Var::make("x", kInt);
     ExprHandle m = l * r;
     std::cout << "Tensor expression: " << *m.node() << std::endl;
-    // Prints: Tensor expression: 1 * x
+    // Prints: Tensor expression: 5 * x
 
-    // In a similar fashion we could construct arbitrarily complex expressions
-    // using mathematical and logical operations, casts between various data
-    // types, and a bunch of intrinsics.
+    // Converting from handles to raw expressions and back is easy:
+    ExprHandle handle = Var::make("x", kInt);
+    ExprPtr raw_expr_from_handle = handle.node();
+    ExprPtr raw_expr = alloc<Var>("x", kInt);
+    ExprHandle handle_from_raw_expr = ExprHandle(raw_expr);
+
+    // We could construct arbitrarily complex expressions using mathematical
+    // and logical operations, casts between various data types, and a bunch of
+    // intrinsics.
     ExprHandle a = Var::make("a", kInt);
     ExprHandle b = Var::make("b", kFloat);
     ExprHandle c = Var::make("c", kFloat);
@@ -109,198 +111,232 @@ int main(int argc, char* argv[]) {
     // placeholder similar to Var, but with dimensions info.
     //
     // Let's construct a simple load:
-    BufHandle A("A", {ExprHandle(64), ExprHandle(32)}, kInt);
-    ExprHandle i = Var::make("i", kInt), j = Var::make("j", kInt);
-    ExprHandle load = Load::make(A.dtype(), A, {i, j}, /* mask= */ 1);
+    BufHandle A("A", {64, 32}, kInt);
+    VarPtr i_var = alloc<Var>("i", kInt), j_var = alloc<Var>("j", kInt);
+    ExprHandle i(i_var), j(j_var);
+    ExprHandle load = Load::make(A.dtype(), A, {i, j});
     std::cout << "Tensor expression: " << *load.node() << std::endl;
     // Prints: Tensor expression: A[i, j]
-  }
 
-  std::cout << "*** Tensors, Functions, and Placeholders ***" << std::endl;
-  {
-    // A tensor computation is represented by objects of Tensor class and
-    // consists of the following pieces:
-    //   - domain, which is specified by a Buf expression
-    //   - an expression (or several expressions if we want to perform several
-    //   independent computations over the same domain) for its elements, as a
-    //   function of indices
+    // Tensor Expressions constitute Tensor Statements, which are used to
+    // represent computation of a given operator or a group of operators from a
+    // fusion group.
     //
-    // TODO: Update this section once Tensor/Function cleanup is done
-    std::vector<const Expr*> dims = {
-        new IntImm(64), new IntImm(32)}; // IntImm stands for Integer Immediate
-                                         // and represents an integer constant
-
-    // Next we need to create arguments. The arguments are Vars, and they play
-    // role of placeholders. The computation that the tensor would describe
-    // would use these arguments.
-    const Var* i = new Var("i", kInt);
-    const Var* j = new Var("j", kInt);
-    std::vector<const Var*> args = {i, j};
-
-    // Now we can define the body of the tensor computation using these
-    // arguments.
-    Expr* body = new Mul(i, j);
-
-    // Finally, we pass all these pieces together to Tensor constructor:
-    Tensor* X = new Tensor("X", dims, args, body);
-    std::cout << "Tensor computation: " << *X << std::endl;
-    // Prints: Tensor computation: Tensor X(i[64], j[32]) = i * j
-
-    // Similarly to how we provide a more convenient way of using handles for
-    // constructing Exprs, Tensors also have a more convenient API for
-    // construction. It is based on Compute API, which takes a name,
-    // dimensions, and a lambda specifying the computation body:
-    Tensor* Z = Compute(
-        "Z",
-        {{64, "i"}, {32, "j"}},
-        [](const VarHandle& i, const VarHandle& j) { return i / j; });
-    std::cout << "Tensor computation: " << *Z << std::endl;
-    // Prints: Tensor computation: Tensor Z(i[64], j[32]) = i / j
-
-    // Tensors might access other tensors and external placeholders in their
-    // expressions. It can be done like so:
-    Placeholder P("P", kFloat, {64, 32});
-    Tensor* R = Compute(
-        "R",
-        {{64, "i"}, {32, "j"}},
-        [&](const VarHandle& i, const VarHandle& j) {
-          return Z->call(i, j) * P.load(i, j);
-        });
-    std::cout << "Tensor computation: " << *R << std::endl;
-    // Prints: Tensor computation: Tensor R(i[64], j[32]) = Z(i, j) * P[i, j]
-
-    // Placeholders could be thought of as external tensors, i.e. tensors for
-    // which we don't have the element expression. In other words, for `Tensor`
-    // we know an expression specifying how its elements can be computed (a
-    // mathematical formula). For external tensors, or placeholders, we don't
-    // have such an expression. They need to be considered as coming to us as
-    // inputs from outside - we can only load data from them.
+    // There are three main kinds of tensor statements:
+    //  - block
+    //  - store
+    //  - loop
     //
-    // Also note that we use 'call' to construct an access to an element of a
-    // Tensor and we use 'load' for accessing elements of an external tensor
-    // through its Placeholder. This is an implementation detail and could be
-    // changed in future.
+    // A Store represents a store to a single element of a tensor (or to a
+    // group of elements if it's a vectorized store). Store statements,
+    // similarly to Load expressions, have a base and indices, but on top of
+    // that they also include a value - an expression representing what needs
+    // to be stored at the given memory location. Let's create a Store stmt:
+    StmtPtr store_a = Store::make(A, {i, j}, i + j);
+    std::cout << "Store statement: " << *store_a << std::endl;
+    // Prints: Store statement: A[i, j] = i + j;
 
-    // TODO: Show how reductions are represented and constructed
-  }
+    // An operator fills the entire tensor, not just a single element, and to
+    // represent this we need to use For stmt: let's wrap our store stmt with
+    // two nested loops to represent that variables i and j need to iterate
+    // over some ranges.
+    ForPtr loop_j_a = For::make(VarHandle(j_var), 0, 32, store_a);
+    ForPtr loop_i_a = For::make(VarHandle(i_var), 0, 64, loop_j_a);
 
-  std::cout << "*** Loopnests and Statements ***" << std::endl;
-  {
-    // Creating a tensor expression is the first step to generate an executable
-    // code for it. A next step is to represent it as a loop nest and apply
-    // various loop transformations in order to get an optimal implementation.
-    // In Halide's or TVM's terms the first step was to define the algorithm of
-    // computation (what to compute?) and now we are getting to the schedule of
-    // the computation (how to compute?).
-    //
-    // Let's create a simple tensor expression and construct a loop nest for it.
-    Placeholder A("A", kFloat, {64, 32});
-    Placeholder B("B", kFloat, {64, 32});
-    Tensor* X = Compute(
-        "X",
-        {{64, "i"}, {32, "j"}},
-        [&](const VarHandle& i, const VarHandle& j) {
-          return A.load(i, j) + B.load(i, j);
-        });
-    Tensor* Y = Compute(
-        "Y",
-        {{64, "i"}, {32, "j"}},
-        [&](const VarHandle& i, const VarHandle& j) {
-          return sigmoid(X->call(i, j));
-        });
-    std::cout << "Tensor computation X: " << *X
-              << "Tensor computation Y: " << *Y << std::endl;
+    std::cout << "Nested for loops: " << std::endl << *loop_i_a << std::endl;
     // Prints:
-    // Tensor computation X: Tensor X(i[64], j[32]) = (A[i, j]) + (B[i, j])
-    // Tensor computation Y: Tensor Y(i[64], j[32]) = sigmoid(X(i, j))
+    // Nested for loops:
+    // for (int i = 0; i < 64; i++) {
+    //   for (int j = 0; j < 32; j++) {
+    //     A[i, j] = i + j;
+    //   }
+    // }
 
-    // Creating a loop nest is as quite simple, we just need to specify what are
-    // the output tensors in our computation and LoopNest object will
-    // automatically pull all tensor dependencies:
-    LoopNest loopnest({Y});
+    // A Block statement is used when we need a sequence of other statements.
+    // E.g. if a fusion group contains several operators, we initially define
+    // separate loopnest for each of them and put them all into a common block:
+    BufHandle B("B", {64, 32}, kInt);
+    StmtPtr store_b = Store::make(B, {i, j}, A.load(i, j));
+    ForPtr loop_j_b = For::make(VarHandle(j_var), 0, 32, store_b);
+    ForPtr loop_i_b = For::make(VarHandle(i_var), 0, 64, loop_j_b);
 
-    // An IR used in LoopNest is based on tensor statements, represented by
-    // `Stmt` class. Statements are used to specify the loop nest structure, and
-    // to take a sneak peek at them, let's print out what we got right after
-    // creating our LoopNest object:
-    std::cout << *loopnest.root_stmt() << std::endl;
+    BlockPtr block = Block::make({loop_i_a, loop_i_b});
+    std::cout << "Compound Block statement: " << std::endl
+              << *block << std::endl;
     // Prints:
+    // Compound Block statement:
     // {
     //   for (int i = 0; i < 64; i++) {
     //     for (int j = 0; j < 32; j++) {
-    //       X[i, j] = (A[i, j]) + (B[i, j]);
+    //       A[i, j] = i + j;
+    //     }
+    //   }
+    //   for (int i = 0; i < 64; i++) {
+    //     for (int j = 0; j < 32; j++) {
+    //       B[i, j] = A[i, j];
+    //     }
+    //   }
+    // }
+
+    // Manually constructing nested loops and blocks to represent a computation
+    // might be laborious, and instead we can use a 'Compute' API. This API
+    // requires us to specify dimensions and a lambda to compute a single
+    // element of the resulting tensor and returns a `Tensor` structure. This
+    // structure is simply a pair of a buffer that was created to represent the
+    // result of the computation (BufPtr) and a statement representing the
+    // computation itself (StmtPtr).
+    Tensor C = Compute(
+        "C",
+        {{64, "i"}, {32, "j"}},
+        [&](const VarHandle& i, const VarHandle& j) { return i * j; });
+    std::cout << "Stmt produced by 'Compute' API: " << std::endl
+              << *C.stmt() << std::endl;
+    // Prints:
+    // Stmt produced by 'Compute' API:
+    // for (int i = 0; i < 64; i++) {
+    //   for (int j = 0; j < 32; j++) {
+    //     C[i, j] = i * j;
+    //   }
+    // }
+
+    // To construct statements to represent computations with reductions, we
+    // can use a 'Reduce' API - it is similar to 'Compute' but takes a couple
+    // of extra arguments defining how to perform the reduction. Let's define a
+    // simple 2D sum of C using that:
+    Tensor D = Reduce(
+        "D",
+        {},
+        Sum(),
+        [&](const VarHandle& i, const VarHandle& j) { return C.load(i, j); },
+        {{64, "i"}, {32, "j"}});
+    std::cout << "Stmt produced by 'Reduce' API: " << std::endl
+              << *D.stmt() << std::endl;
+  }
+
+  std::cout << "*** Loopnests transformations ***" << std::endl;
+  {
+    // When a statement for the computation is generated, we might want to
+    // apply some optimizations to it. These transformations allow us to end up
+    // with a statement producing the same results, but more efficiently.
+    //
+    // Let's look at a couple of transformations that are used in NNC. We will
+    // begin with constructing a Block statement like we did before.
+
+    Tensor C = Compute(
+        "C",
+        {{64, "i"}, {32, "j"}},
+        [&](const VarHandle& i, const VarHandle& j) { return i * (j + 1); });
+    BufHandle c_buf(C.buf());
+    Tensor D = Compute(
+        "D",
+        {{64, "i"}, {32, "j"}},
+        [&](const VarHandle& i, const VarHandle& j) {
+          return c_buf.load(i, j) - i;
+        });
+    StmtPtr block = Block::make({C.stmt(), D.stmt()});
+    std::cout << "Stmt produced by 'Compute' API: " << std::endl
+              << *block << std::endl;
+    // Prints:
+    // Stmt produced by 'Compute' API:
+    // {
+    //   for (int i = 0; i < 64; i++) {
+    //     for (int j = 0; j < 32; j++) {
+    //       C[i, j] = i * (j + 1);
     //     }
     //   }
     //   for (int i_1 = 0; i_1 < 64; i_1++) {
     //     for (int j_1 = 0; j_1 < 32; j_1++) {
-    //       Y[i_1, j_1] = sigmoid(X(i_1, j_1));
+    //       D[i_1, j_1] = (C[i_1, j_1]) - i_1;
     //     }
     //   }
     // }
 
-    // To introduce statements let's first look at their three main types (in
-    // fact, there are more than 3 types, but the other types would be easy to
-    // understand once the overall structure is clear):
-    //  1) Block
-    //  2) For
-    //  3) Store
-    //
-    // A `Block` statement is simply a list of other statements.
-    // A `For` is a statement representing one axis of computation. It contains
-    // an index variable (Var), boundaries of the axis (start and end - both are
-    // `Expr`s), and a `Block` statement body.
-    // A `Store` represents an assignment to a tensor element. It contains a Buf
-    // representing the target tensor, a list of expressions for indices of the
-    // element, and the value to be stored, which is an arbitrary expression.
+    // One transformation we can apply to this computation is inlining: i.e.
+    // taking the expression that defines values of C and substituting a load
+    // from C with it.
+    // To do that, we first need to create a special object called LoopNest -
+    // all transformations are methods of this class. To create a loopnest we
+    // need to provide a list of output buffers and the root statement:
+    LoopNest nest(block, {D.buf()});
 
-    // Once we've constructed the loop nest, we can apply various tranformations
-    // to it. To begin with, let's inline computation of X into computation of Y
-    // and see what happens to our statements.
-    loopnest.computeInline(loopnest.getLoopBodyFor(X));
-    std::cout << *loopnest.root_stmt() << std::endl;
+    // We can always retrieve the Stmt back from LoopNest:
+    std::cout << "LoopNest root stmt: " << std::endl
+              << *nest.root_stmt() << std::endl;
     // Prints:
+    // LoopNest root stmt:
     // {
     //   for (int i = 0; i < 64; i++) {
     //     for (int j = 0; j < 32; j++) {
-    //       Y[i, j] = sigmoid((A[i, j]) + (B[i, j]));
+    //       C[i, j] = i * (j + 1);
+    //     }
+    //   }
+    //   for (int i_1 = 0; i_1 < 64; i_1++) {
+    //     for (int j_1 = 0; j_1 < 32; j_1++) {
+    //       D[i_1, j_1] = (C[i_1, j_1]) - i_1;
     //     }
     //   }
     // }
-    //
-    // As you can see, the first two loops have disappeared and the expression
-    // for X[i,j] has been inserted into the Y[i,j] computation.
 
-    // Loop transformations can be composed, so we can do something else with
-    // our loop nest now. Let's split the inner loop with a factor of 9, for
-    // instance.
-    std::vector<For*> loops = loopnest.getLoopStmtsFor(Y);
-    For* j_outer;
-    For* j_inner;
-    For* j_tail;
-    int split_factor = 9;
-    loopnest.splitWithTail(
-        loops[1], // loops[0] is the outer loop, loops[1] is inner
-        split_factor,
-        &j_outer, // These are handles that we would be using for
-        &j_inner, // further transformations
-        &j_tail);
-    std::cout << *loopnest.root_stmt() << std::endl;
+    // Now we can apply the inlining transformation:
+    nest.computeInline(C.buf());
+    std::cout << "Stmt after inlining:" << std::endl
+              << *nest.root_stmt() << std::endl;
     // Prints:
+    // Stmt after inlining:
     // {
     //   for (int i = 0; i < 64; i++) {
-    //     for (int j_outer = 0; j_outer < (32 - 0) / 9; j_outer++) {
-    //       for (int j_inner = 0; j_inner < 9; j_inner++) {
-    //         Y[i, j_outer * 9 + j_inner] = sigmoid((A[i, j_outer * 9 + ...
-    //       }
-    //     }
-    //     for (int j_tail = 0; j_tail < (32 - 0) % 9; j_tail++) {
-    //       Y[i, j_tail + ((32 - 0) / 9) * 9] = sigmoid((A[i, j_tail + ...
+    //     for (int j = 0; j < 32; j++) {
+    //       D[i, j] = i * (j + 1) - i;
     //     }
     //   }
     // }
 
-    // TODO: List all available transformations
-    // TODO: Show how statements can be constructed manually
+    // We can also apply algebraic simplification to a statement:
+    StmtPtr simplified = IRSimplifier::simplify(nest.root_stmt());
+    std::cout << "Stmt after simplification:" << std::endl
+              << *simplified << std::endl;
+    // Prints:
+    // Stmt after simplification:
+    // {
+    //   for (int i = 0; i < 64; i++) {
+    //     for (int j = 0; j < 32; j++) {
+    //       D[i, j] = i * j;
+    //     }
+    //   }
+    // }
+
+    // Many loopnest transformations are stateless and can be applied without
+    // creating a LoopNest object. In fact, we plan to make all transformations
+    // stateless.
+    // splitWithTail is one such transformation: it splits an iteration space
+    // of a given loop into two with a given factor.
+    ForPtr outer_loop = to<For>(to<Block>(simplified)->stmts().front());
+    LoopNest::splitWithTail(outer_loop, 13);
+    // Call simplifier once more to fold some arithmetic.
+    simplified = IRSimplifier::simplify(simplified);
+    std::cout << "Stmt after splitWithTail:" << std::endl
+              << *simplified << std::endl;
+    // Prints:
+    // Stmt after splitWithTail:
+    // {
+    //   for (int i_outer = 0; i_outer < 4; i_outer++) {
+    //     for (int i_inner = 0; i_inner < 13; i_inner++) {
+    //       for (int j = 0; j < 32; j++) {
+    //         D[i_inner + 13 * i_outer, j] = i_inner * j + 13 * (i_outer * j);
+    //       }
+    //     }
+    //   }
+    //   for (int i_tail = 0; i_tail < 12; i_tail++) {
+    //     for (int j = 0; j < 32; j++) {
+    //       D[i_tail + 52, j] = i_tail * j + 52 * j;
+    //     }
+    //   }
+    // }
+
+    // NNC supports a wide range of loop nest transformations, which we are not
+    // listing here. Please refer to documentation in
+    // https://github.com/pytorch/pytorch/blob/master/torch/csrc/jit/tensorexpr/loopnest.h
+    // for more details.
   }
 
   std::cout << "*** Codegen ***" << std::endl;
@@ -308,21 +344,23 @@ int main(int argc, char* argv[]) {
     // An ultimate goal of tensor expressions is to be provide a mechanism to
     // execute a given computation in the fastest possible way. So far we've
     // looked at how we could describe what computation we're interested in, but
-    // we haven't looked at how to actually execute it. So far all we've been
-    // dealing with was just symbols with no actual data associated, in this
-    // section we would look at how we can bridge that gap.
+    // we haven't looked at how to actually execute it.
+    //
+    // All we've been dealing with was just symbols with no actual data
+    // associated, in this section we would look at how we can bridge that gap.
 
     // Let's start by constructing a simple computation for us to work with:
-    Placeholder A("A", kInt, {64, 32});
-    Placeholder B("B", kInt, {64, 32});
-    Tensor* X = Compute(
+    BufHandle A("A", {64, 32}, kInt);
+    BufHandle B("B", {64, 32}, kInt);
+    Tensor X = Compute(
         "X",
         {{64, "i"}, {32, "j"}},
         [&](const VarHandle& i, const VarHandle& j) {
           return A.load(i, j) + B.load(i, j);
         });
 
-    // And let's lower it to a loop nest, as we did in the previous section:
+    // And let's lower it to a loop nest, as we did in the previous section. We
+    // can pass Tensor object directly:
     LoopNest loopnest({X});
     std::cout << *loopnest.root_stmt() << std::endl;
     // Prints:
@@ -389,6 +427,115 @@ int main(int argc, char* argv[]) {
     // X[10] = A[10] + B[10] = 8
   }
 
-  // TODO: Show how TorchScript IR is translated to TE
+  std::cout << "*** Lowering TorchScript IR to TensorExpr IR ***" << std::endl;
+  {
+    // This section requires a LLVM-enabled PyTorch build, so we have to use a
+    // guard:
+#ifdef TORCH_ENABLE_LLVM
+
+    // Often we would like to convert a TorchScript IR to TE rather than
+    // construct TE IR from scratch.  NNC provides an API to perform such
+    // lowering: it takes a TorchScript graph and returns an object that can be
+    // used to invoke the generated kernel.
+    // This API is currently used by the TorchScript JIT fuser and can also be
+    // used ahead of time to pre-compile parts of a model.
+    //
+    // To get familiar with this API let's first start with defining a simple
+    // TorchScript graph:
+    const auto graph_string = R"IR(
+        graph(%A : Float(5, 3, strides=[3, 1], device=cpu),
+              %B : Float(5, 3, strides=[3, 1], device=cpu)):
+          %AB : Float(5, 3, strides=[3, 1]) = aten::mul(%A, %B)
+          %one : int = prim::Constant[value=1]()
+          %AAB : Float(5, 3, strides=[3, 1]) = aten::mul(%A, %AB)
+          %AAB_plus_B: Float(5, 3, strides=[3, 1]) = aten::add(%AAB, %B, %one)
+          return (%AAB_plus_B))IR";
+    auto graph = std::make_shared<torch::jit::Graph>();
+    parseIR(graph_string, &*graph);
+
+    // This graph defines a simple computation of A*A*B + B where A and B are
+    // input 5x3 tensors.
+
+    // To lower this TorchScript graph to TE, we just need to create a
+    // TensorExprKernel object. In its constructor it constructs the
+    // corresponding TE IR and compiles it for the given backend (in this
+    // example for CPU using LLVM compiler).
+    TensorExprKernel kernel(graph);
+
+    // We can retrieve the generated TE stmt from the kernel object:
+    StmtPtr kernel_stmt = kernel.getCodeGenStmt();
+    std::cout << "TE Stmt constructed from TorchScript: " << std::endl
+              << *kernel_stmt << std::endl;
+    // Prints:
+    // TE Stmt constructed from TorchScript:
+    // {
+    //   for (int v = 0; v < 5; v++) {
+    //     for (int _tail_tail = 0; _tail_tail < 3; _tail_tail++) {
+    //       aten_add[_tail_tail + 3 * v] = (tA[_tail_tail + 3 * v]) *
+    //       ((tA[_tail_tail + 3 * v]) * (tB[_tail_tail + 3 * v])) +
+    //       (tB[_tail_tail + 3 * v]);
+    //     }
+    //   }
+    // }
+
+    // We can also examine generated LLVM IR and assembly code:
+    std::cout << "Generated LLVM IR: " << std::endl;
+    auto ir_str = kernel.getCodeText("ir");
+    printLinesToFrom(ir_str, 15, 20);
+    // Prints:
+    // Generated LLVM IR:
+    //   %9 = bitcast float* %2 to <8 x float>*
+    //   %10 = load <8 x float>, <8 x float>* %9 ...
+    //   %11 = bitcast float* %5 to <8 x float>*
+    //   %12 = load <8 x float>, <8 x float>* %11 ...
+    //   %13 = fmul <8 x float> %10, %12
+    //   %14 = fmul <8 x float> %10, %13
+
+    std::cout << "Generated assembly: " << std::endl;
+    auto asm_str = kernel.getCodeText("asm");
+    printLinesToFrom(asm_str, 10, 15);
+    // Prints:
+    // Generated assembly:
+    //         vmulps  %ymm1, %ymm0, %ymm2
+    //         vfmadd213ps     %ymm1, %ymm0, %ymm2
+    //         vmovups %ymm2, (%rax)
+    //         vmovss  32(%rcx), %xmm0
+    //         vmovss  32(%rdx), %xmm1
+    //         vmulss  %xmm1, %xmm0, %xmm2
+
+    // We can also execute the generated kernel:
+    auto A =
+        at::ones({5, 3}, torch::TensorOptions(torch::kCPU).dtype(at::kFloat)) *
+        2.0;
+    auto B =
+        at::ones({5, 3}, torch::TensorOptions(torch::kCPU).dtype(at::kFloat)) *
+        3.0;
+    std::vector<at::Tensor> inputs = {A, B};
+    std::vector<torch::IValue> stack = torch::fmap<torch::IValue>(inputs);
+    kernel.run(stack);
+    auto R = stack[0].toTensor();
+
+    // Let's print one of the elements from the result tensor to verify that the
+    // computation did happen and was correct:
+    std::cout << "R[2][2] = " << R[2][2] << std::endl;
+    // Prints:
+    // R[2][2] = 15
+    // [ CPUFloatType{} ]
+#endif
+  }
   return 0;
+}
+
+void printLinesToFrom(const std::string& input_str, int from, int to) {
+  std::istringstream f(input_str);
+  std::string s;
+  int idx = 0;
+  while (getline(f, s)) {
+    if (idx > from) {
+      std::cout << s << "\n";
+    }
+    if (idx++ > to) {
+      break;
+    }
+  }
 }

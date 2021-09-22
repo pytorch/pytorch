@@ -1,43 +1,33 @@
 #!/bin/bash
 
 # shellcheck disable=SC2034
+# shellcheck source=./macos-common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/macos-common.sh"
 
+export PYTORCH_TEST_SKIP_NOARCH=1
+
 conda install -y six
-pip install -q hypothesis "librosa>=0.6.2" "numba<=0.49.1" psutil
+pip install -q hypothesis "expecttest==0.1.3" "librosa>=0.6.2" "numba<=0.49.1" psutil "scipy==1.6.3"
 
 # TODO move this to docker
 pip install unittest-xml-reporting pytest
 
-# faulthandler become built-in since 3.3
-if [[ ! $(python -c "import sys; print(int(sys.version_info >= (3, 3)))") == "1" ]]; then
-  pip install -q faulthandler
-fi
-
 if [ -z "${IN_CI}" ]; then
-  rm -rf ${WORKSPACE_DIR}/miniconda3/lib/python3.6/site-packages/torch*
+  rm -rf "${WORKSPACE_DIR}"/miniconda3/lib/python3.6/site-packages/torch*
 fi
 
-git submodule sync --recursive
-git submodule update --init --recursive
 export CMAKE_PREFIX_PATH=${WORKSPACE_DIR}/miniconda3/
 
 # Test PyTorch
 if [ -z "${IN_CI}" ]; then
-  if [[ "${BUILD_ENVIRONMENT}" == *cuda9.2* ]]; then
-    # Eigen gives "explicit specialization of class must precede its first use" error
-    # when compiling with Xcode 9.1 toolchain, so we have to use Xcode 8.2 toolchain instead.
-    export DEVELOPER_DIR=/Library/Developer/CommandLineTools
-  else
-    export DEVELOPER_DIR=/Applications/Xcode9.app/Contents/Developer
-  fi
+  export DEVELOPER_DIR=/Applications/Xcode9.app/Contents/Developer
 fi
 
 # Download torch binaries in the test jobs
 if [ -z "${IN_CI}" ]; then
-  rm -rf ${WORKSPACE_DIR}/miniconda3/lib/python3.6/site-packages/torch*
-  aws s3 cp s3://ossci-macos-build/pytorch/${IMAGE_COMMIT_TAG}.7z ${IMAGE_COMMIT_TAG}.7z
-  7z x ${IMAGE_COMMIT_TAG}.7z -o"${WORKSPACE_DIR}/miniconda3/lib/python3.6/site-packages"
+  rm -rf "${WORKSPACE_DIR}"/miniconda3/lib/python3.6/site-packages/torch*
+  aws s3 cp s3://ossci-macos-build/pytorch/"${IMAGE_COMMIT_TAG}".7z "${IMAGE_COMMIT_TAG}".7z
+  7z x "${IMAGE_COMMIT_TAG}".7z -o"${WORKSPACE_DIR}/miniconda3/lib/python3.6/site-packages"
 fi
 
 # Test that OpenMP is enabled
@@ -55,7 +45,12 @@ test_python_all() {
   export GLOO_SOCKET_IFNAME=lo0
   echo "Ninja version: $(ninja --version)"
 
-  if [ -n "$CIRCLE_PULL_REQUEST" ]; then
+  # Try to pull value from CIRCLE_PULL_REQUEST first then GITHUB_HEAD_REF second
+  # CIRCLE_PULL_REQUEST comes from CircleCI
+  # NOTE: file_diff_from_base is currently bugged for GHA due to an issue finding a merge base for ghstack PRs
+  #       see https://github.com/pytorch/pytorch/issues/60111
+  IN_PULL_REQUEST=${CIRCLE_PULL_REQUEST:-${GITHUB_HEAD_REF:-}}
+  if [ -n "$IN_PULL_REQUEST" ]; then
     DETERMINE_FROM=$(mktemp)
     file_diff_from_base "$DETERMINE_FROM"
   fi
@@ -79,12 +74,12 @@ test_libtorch() {
     echo "Testing libtorch"
 
     CPP_BUILD="$PWD/../cpp-build"
-    rm -rf $CPP_BUILD
-    mkdir -p $CPP_BUILD/caffe2
+    rm -rf "$CPP_BUILD"
+    mkdir -p "$CPP_BUILD"/caffe2
 
     BUILD_LIBTORCH_PY=$PWD/tools/build_libtorch.py
-    pushd $CPP_BUILD/caffe2
-    VERBOSE=1 DEBUG=1 python $BUILD_LIBTORCH_PY
+    pushd "$CPP_BUILD"/caffe2
+    VERBOSE=1 DEBUG=1 python "$BUILD_LIBTORCH_PY"
     popd
 
     python tools/download_mnist.py --quiet -d test/cpp/api/mnist
@@ -139,11 +134,30 @@ test_custom_script_ops() {
   assert_git_not_dirty
 }
 
+test_jit_hooks() {
+  echo "Testing jit hooks in cpp"
+  pushd test/jit_hooks
+  # Build the custom operator library.
+  rm -rf build && mkdir build
+  pushd build
+  SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
+  CMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" cmake ..
+  make VERBOSE=1
+  popd
+
+  # Run tests Python-side and export a script module.
+  python model.py --export-script-module=model
+  # Run tests C++-side and load the exported script module.
+  build/test_jit_hooks ./model
+  popd
+  assert_git_not_dirty
+}
 
 if [ -z "${BUILD_ENVIRONMENT}" ] || [[ "${BUILD_ENVIRONMENT}" == *-test ]]; then
   test_python_all
   test_libtorch
   test_custom_script_ops
+  test_jit_hooks
   test_custom_backend
 else
   if [[ "${BUILD_ENVIRONMENT}" == *-test1 ]]; then
@@ -151,6 +165,7 @@ else
   elif [[ "${BUILD_ENVIRONMENT}" == *-test2 ]]; then
     test_libtorch
     test_custom_script_ops
+    test_jit_hooks
     test_custom_backend
   fi
 fi

@@ -5,7 +5,7 @@
 
 namespace at {
 
-struct CAFFE2_API TensorGeometry {
+struct TORCH_API TensorGeometry {
   TensorGeometry() : storage_offset_(0) {}
 
   explicit TensorGeometry(IntArrayRef sizes)

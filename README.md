@@ -8,17 +8,36 @@ PyTorch is a Python package that provides two high-level features:
 
 You can reuse your favorite Python packages such as NumPy, SciPy, and Cython to extend PyTorch when needed.
 
-- [More about PyTorch](#more-about-pytorch)
+<!-- toc -->
+
+- [More About PyTorch](#more-about-pytorch)
+  - [A GPU-Ready Tensor Library](#a-gpu-ready-tensor-library)
+  - [Dynamic Neural Networks: Tape-Based Autograd](#dynamic-neural-networks-tape-based-autograd)
+  - [Python First](#python-first)
+  - [Imperative Experiences](#imperative-experiences)
+  - [Fast and Lean](#fast-and-lean)
+  - [Extensions Without Pain](#extensions-without-pain)
 - [Installation](#installation)
   - [Binaries](#binaries)
+    - [NVIDIA Jetson Platforms](#nvidia-jetson-platforms)
   - [From Source](#from-source)
+    - [Install Dependencies](#install-dependencies)
+    - [Get the PyTorch Source](#get-the-pytorch-source)
+    - [Install PyTorch](#install-pytorch)
+      - [Adjust Build Options (Optional)](#adjust-build-options-optional)
   - [Docker Image](#docker-image)
+    - [Using pre-built images](#using-pre-built-images)
+    - [Building the image yourself](#building-the-image-yourself)
   - [Building the Documentation](#building-the-documentation)
   - [Previous Versions](#previous-versions)
 - [Getting Started](#getting-started)
+- [Resources](#resources)
 - [Communication](#communication)
 - [Releases and Contributing](#releases-and-contributing)
 - [The Team](#the-team)
+- [License](#license)
+
+<!-- tocstop -->
 
 | System | 3.6 | 3.7 | 3.8 |
 | :---: | :---: | :---: | :--: |
@@ -29,7 +48,7 @@ You can reuse your favorite Python packages such as NumPy, SciPy, and Cython to 
 | Linux (ppc64le) GPU | <center>—</center> | [![Build Status](https://powerci.osuosl.org/job/pytorch-master-nightly-py3-linux-ppc64le-gpu/badge/icon)](https://powerci.osuosl.org/job/pytorch-master-nightly-py3-linux-ppc64le-gpu/) | <center>—</center> |
 | Linux (aarch64) CPU | [![Build Status](http://openlabtesting.org:15000/badge?project=pytorch%2Fpytorch&job_name=pytorch-arm64-build-daily-master-py36)](https://status.openlabtesting.org/builds/builds?project=pytorch%2Fpytorch&job_name=pytorch-arm64-build-daily-master-py36) | [![Build Status](http://openlabtesting.org:15000/badge?project=pytorch%2Fpytorch&job_name=pytorch-arm64-build-daily-master-py37)](https://status.openlabtesting.org/builds/builds?project=pytorch%2Fpytorch&job_name=pytorch-arm64-build-daily-master-py37) | [![Build Status](http://openlabtesting.org:15000/badge?project=pytorch%2Fpytorch&job_name=pytorch-arm64-build-daily-master-py38)](https://status.openlabtesting.org/builds/builds?project=pytorch%2Fpytorch&job_name=pytorch-arm64-build-daily-master-py38) |
 
-See also the [ci.pytorch.org HUD](https://ezyang.github.io/pytorch-ci-hud/build/pytorch-master).
+See also the [ci.pytorch.org HUD](https://hud.pytorch.org/build2/pytorch-master).
 
 
 ## More About PyTorch
@@ -47,10 +66,10 @@ At a granular level, PyTorch is a library that consists of the following compone
 
 Usually, PyTorch is used either as:
 
-- a replacement for NumPy to use the power of GPUs.
-- a deep learning research platform that provides maximum flexibility and speed.
+- A replacement for NumPy to use the power of GPUs.
+- A deep learning research platform that provides maximum flexibility and speed.
 
-Elaborating further:
+Elaborating Further:
 
 ### A GPU-Ready Tensor Library
 
@@ -107,7 +126,7 @@ We hope you never spend hours debugging your code because of bad stack traces or
 PyTorch has minimal framework overhead. We integrate acceleration libraries
 such as [Intel MKL](https://software.intel.com/mkl) and NVIDIA ([cuDNN](https://developer.nvidia.com/cudnn), [NCCL](https://developer.nvidia.com/nccl)) to maximize speed.
 At the core, its CPU and GPU Tensor and neural network backends
-(TH, THC, THNN, THCUNN) are mature and have been tested for years.
+are mature and have been tested for years.
 
 Hence, PyTorch is quite fast – whether you run small or large neural networks.
 
@@ -155,27 +174,34 @@ You will get a high-quality BLAS library (MKL) and you get controlled dependency
 Once you have [Anaconda](https://www.anaconda.com/distribution/#download-section) installed, here are the instructions.
 
 If you want to compile with CUDA support, install
-- [NVIDIA CUDA](https://developer.nvidia.com/cuda-downloads) 9.2 or above
+- [NVIDIA CUDA](https://developer.nvidia.com/cuda-downloads) 10.2 or above
 - [NVIDIA cuDNN](https://developer.nvidia.com/cudnn) v7 or above
 - [Compiler](https://gist.github.com/ax3l/9489132) compatible with CUDA
+Note: You could refer to the [cuDNN Support Matrix](https://docs.nvidia.com/deeplearning/cudnn/pdf/cuDNN-Support-Matrix.pdf) for cuDNN versions with the various supported CUDA, CUDA driver and NVIDIA hardwares
 
 If you want to disable CUDA support, export environment variable `USE_CUDA=0`.
 Other potentially useful environment variables may be found in `setup.py`.
 
 If you are building for NVIDIA's Jetson platforms (Jetson Nano, TX1, TX2, AGX Xavier), Instructions to install PyTorch for Jetson Nano are [available here](https://devtalk.nvidia.com/default/topic/1049071/jetson-nano/pytorch-for-jetson-nano/)
 
+If you want to compile with ROCm support, install
+- [AMD ROCm](https://rocmdocs.amd.com/en/latest/Installation_Guide/Installation-Guide.html) 4.0 and above installation
+- ROCm is currently supported only for Linux system.
+
+If you want to disable ROCm support, export environment variable `USE_ROCM=0`.
+Other potentially useful environment variables may be found in `setup.py`.
 
 #### Install Dependencies
 
 Common
 ```bash
-conda install numpy ninja pyyaml mkl mkl-include setuptools cmake cffi typing_extensions future six requests dataclasses
+conda install astunparse numpy ninja pyyaml mkl mkl-include setuptools cmake cffi typing_extensions future six requests dataclasses
 ```
 
 On Linux
 ```bash
-# Add LAPACK support for the GPU if needed
-conda install -c pytorch magma-cuda102  # or [ magma-cuda101 | magma-cuda100 | magma-cuda92 ] depending on your cuda version
+# CUDA only: Add LAPACK support for the GPU if needed
+conda install -c pytorch magma-cuda110  # or the magma-cuda* that matches your CUDA version from https://anaconda.org/pytorch/repo
 ```
 
 On MacOS
@@ -197,7 +223,7 @@ git clone --recursive https://github.com/pytorch/pytorch
 cd pytorch
 # if you are updating an existing checkout
 git submodule sync
-git submodule update --init --recursive
+git submodule update --init --recursive --jobs 0
 ```
 
 #### Install PyTorch
@@ -205,6 +231,11 @@ On Linux
 ```bash
 export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
 python setup.py install
+```
+
+Note that if you are compiling for ROCm, you must run this command first:
+```bash
+python tools/amd_build/build_amd.py
 ```
 
 Note that if you are using [Anaconda](https://www.anaconda.com/distribution/#download-section), you may experience an error caused by the linker:
@@ -223,54 +254,58 @@ export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
 MACOSX_DEPLOYMENT_TARGET=10.9 CC=clang CXX=clang++ python setup.py install
 ```
 
-Each CUDA version only supports one particular XCode version. The following combinations have been reported to work with PyTorch.
-
-| CUDA version | XCode version |
-| ------------ | ------------- |
-| 10.0         | XCode 9.4     |
-| 10.1         | XCode 10.1    |
+CUDA is not supported on macOS.
 
 
 On Windows
 
-At least Visual Studio 2017 version 15.6 with the toolset 14.13 and [NVTX](https://docs.nvidia.com/gameworks/content/gameworkslibrary/nvtx/nvidia_tools_extension_library_nvtx.htm) are needed.
+Choose Correct Visual Studio Version.
 
-If the version of Visual Studio 2017 is higher than 15.6, installing of "VC++ 2017 version 15.6 v14.13 toolset" is strongly recommended.
-<br/> If the version of Visual Studio 2017 is lesser than 15.6, please update Visual Studio 2017 to the latest version along with installing "VC++ 2017 version 15.6 v14.13 toolset".
-<br/> There is no guarantee of the correct building with VC++ 2017 toolsets, others than version 15.6 v14.13.
-<br/> "VC++ 2017 version 15.6 v14.13 toolset" might be installed onto already installed Visual Studio 2017 by running its installation once again and checking the corresponding checkbox under "Individual components"/"Compilers, build tools, and runtimes".
+Sometimes there are regressions in new versions of Visual Studio, so
+it's best to use the same Visual Studio Version [16.8.5](https://github.com/pytorch/pytorch/blob/master/.circleci/scripts/vs_install.ps1) as Pytorch CI's.
+You can use Visual Studio Enterprise, Professional or Community though PyTorch CI uses Visual Studio BuildTools.
 
+If you want to build legacy python code, please refer to [Building on legacy code and CUDA](https://github.com/pytorch/pytorch/blob/master/CONTRIBUTING.md#building-on-legacy-code-and-cuda)
+
+Build with CPU
+
+It's fairly easy to build with CPU.
+
+Note on OpenMP: The desired OpenMP implementation is Intel OpenMP (iomp). In order to link against iomp, you'll need to manually download the library and set up the building environment by tweaking `CMAKE_INCLUDE_PATH` and `LIB`. The instruction [here](https://github.com/pytorch/pytorch/blob/master/docs/source/notes/windows.rst#building-from-source) is an example for setting up both MKL and Intel OpenMP. Without these configurations for CMake, Microsoft Visual C OpenMP runtime (vcomp) will be used.
+
+Build with CUDA
+
+[NVTX](https://docs.nvidia.com/gameworks/content/gameworkslibrary/nvtx/nvidia_tools_extension_library_nvtx.htm) is needed to build Pytorch with CUDA.
 NVTX is a part of CUDA distributive, where it is called "Nsight Compute". To install it onto already installed CUDA run CUDA installation once again and check the corresponding checkbox.
-Be sure that CUDA with Nsight Compute is installed after Visual Studio 2017.
+Make sure that CUDA with Nsight Compute is installed after Visual Studio.
 
-Currently, VS 2017, VS 2019, and Ninja are supported as the generator of CMake. If `ninja.exe` is detected in `PATH`, then Ninja will be used as the default generator, otherwise, it will use VS 2017.
-<br/> If Ninja is selected as the generator, the latest MSVC which is newer than VS 2015 (14.0) will get selected as the underlying toolchain. If you use CMake <= 3.14.2 and has VS 2019 installed, then even if you specify VS 2017 as the generator, VS 2019 will get selected as the generator.
+Currently, VS 2017 / 2019, and Ninja are supported as the generator of CMake. If `ninja.exe` is detected in `PATH`, then Ninja will be used as the default generator, otherwise, it will use VS 2017 / 2019.
+<br/> If Ninja is selected as the generator, the latest MSVC will get selected as the underlying toolchain.
 
-CUDA and MSVC have strong version dependencies, so even if you use VS 2017 / 2019, you will get build errors like `nvcc fatal : Host compiler targets unsupported OS`. For this kind of problem, please install the corresponding VS toolchain in the table below, and then you can either specify the toolset during activation (recommended) or set `CUDAHOSTCXX` to override the Cuda host compiler (not recommended if there are big version differences).
+Additional libraries such as
+[Magma](https://developer.nvidia.com/magma), [oneDNN, a.k.a MKLDNN or DNNL](https://github.com/oneapi-src/oneDNN), and [Sccache](https://github.com/mozilla/sccache) are often needed. Please refer to the [installation-helper](https://github.com/pytorch/pytorch/tree/master/.jenkins/pytorch/win-test-helpers/installation-helpers) to install them.
 
-| CUDA version | Newest supported VS version                             |
-| ------------ | ------------------------------------------------------- |
-| 9.2          | Visual Studio 2017 Update 5 (15.5) (`_MSC_VER` <= 1912) |
-| 10.0         | Visual Studio 2017 (15.X) (`_MSC_VER` < 1920)           |
-| 10.1         | Visual Studio 2019 (16.X) (`_MSC_VER` < 1930)           |
+You can refer to the [build_pytorch.bat](https://github.com/pytorch/pytorch/blob/master/.jenkins/pytorch/win-test-helpers/build_pytorch.bat) script for some other environment variables configurations
+
 
 ```cmd
 cmd
 
-:: [Optional] If you want to build with VS 2019 generator, please change the value in the next line to `Visual Studio 16 2019`.
-:: Note: This value is useless if Ninja is detected. However, you can force that by using `set USE_NINJA=OFF`.
-set CMAKE_GENERATOR=Visual Studio 15 2017
+:: Set the environment variables after you have downloaded and upzipped the mkl package,
+:: else CMake would throw error as `Could NOT find OpenMP`.
+set CMAKE_INCLUDE_PATH={Your directory}\mkl\include
+set LIB={Your directory}\mkl\lib;%LIB%
 
 :: Read the content in the previous section carefully before you proceed.
 :: [Optional] If you want to override the underlying toolset used by Ninja and Visual Studio with CUDA, please run the following script block.
-:: "Visual Studio 2017 Developer Command Prompt" will be run automatically.
+:: "Visual Studio 2019 Developer Command Prompt" will be run automatically.
 :: Make sure you have CMake >= 3.12 before you do this when you use the Visual Studio generator.
-set CMAKE_GENERATOR_TOOLSET_VERSION=14.11
+set CMAKE_GENERATOR_TOOLSET_VERSION=14.27
 set DISTUTILS_USE_SDK=1
-for /f "usebackq tokens=*" %i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -version [15^,16^) -products * -latest -property installationPath`) do call "%i\VC\Auxiliary\Build\vcvarsall.bat" x64 -vcvars_ver=%CMAKE_GENERATOR_TOOLSET_VERSION%
+for /f "usebackq tokens=*" %i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -version [15^,17^) -products * -latest -property installationPath`) do call "%i\VC\Auxiliary\Build\vcvarsall.bat" x64 -vcvars_ver=%CMAKE_GENERATOR_TOOLSET_VERSION%
 
-:: [Optional] If you want to override the Cuda host compiler
-set CUDAHOSTCXX=C:\Program Files (x86)\Microsoft Visual Studio\2017\Enterprise\VC\Tools\MSVC\14.11.25503\bin\HostX64\x64\cl.exe
+:: [Optional] If you want to override the CUDA host compiler
+set CUDAHOSTCXX=C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Tools\MSVC\14.27.29110\bin\HostX64\x64\cl.exe
 
 python setup.py install
 
@@ -314,7 +349,7 @@ should increase shared memory size either with `--ipc=host` or `--shm-size` comm
 
 **NOTE:** Must be built with a docker version > 18.06
 
-The `Dockerfile` is supplied to build images with Cuda support and cuDNN v7.
+The `Dockerfile` is supplied to build images with CUDA 11.1 support and cuDNN v8.
 You can pass `PYTHON_VERSION=x.y` make variable to specify which Python version is to be used by Miniconda, or leave it
 unset to use the default.
 ```bash
@@ -340,7 +375,7 @@ If you get a katex error run ```npm install katex```.  If it persists, try
 ### Previous Versions
 
 Installation instructions and binaries for previous PyTorch versions may be found
-on [our website](https://pytorch.org/previous-versions).
+on [Our Website](https://pytorch.org/previous-versions).
 
 
 ## Getting Started
@@ -365,12 +400,12 @@ Three-pointers to get you started:
 * [PyTorch YouTube](https://www.youtube.com/channel/UCWXI5YeOsh03QvJ59PMaXFw)
 
 ## Communication
-* forums: discuss implementations, research, etc. https://discuss.pytorch.org
-* GitHub issues: bug reports, feature requests, install issues, RFCs, thoughts, etc.
+* Forums: Discuss implementations, research, etc. https://discuss.pytorch.org
+* GitHub Issues: Bug reports, feature requests, install issues, RFCs, thoughts, etc.
 * Slack: The [PyTorch Slack](https://pytorch.slack.com/) hosts a primary audience of moderate to experienced PyTorch users and developers for general chat, online discussions, collaboration, etc. If you are a beginner looking for help, the primary medium is [PyTorch Forums](https://discuss.pytorch.org). If you need a slack invite, please fill this form: https://goo.gl/forms/PP1AGvNHpSaJP8to1
-* newsletter: no-noise, a one-way email newsletter with important announcements about PyTorch. You can sign-up here: https://eepurl.com/cbG0rv
-* Facebook page: important announcements about PyTorch. https://www.facebook.com/pytorch
-* for brand guidelines, please visit our website at [pytorch.org](https://pytorch.org/)
+* Newsletter: No-noise, a one-way email newsletter with important announcements about PyTorch. You can sign-up here: https://eepurl.com/cbG0rv
+* Facebook Page: Important announcements about PyTorch. https://www.facebook.com/pytorch
+* For brand guidelines, please visit our website at [pytorch.org](https://pytorch.org/)
 
 ## Releases and Contributing
 
@@ -390,8 +425,8 @@ PyTorch is a community-driven project with several skillful engineers and resear
 PyTorch is currently maintained by [Adam Paszke](https://apaszke.github.io/), [Sam Gross](https://github.com/colesbury), [Soumith Chintala](http://soumith.ch) and [Gregory Chanan](https://github.com/gchanan) with major contributions coming from hundreds of talented individuals in various forms and means.
 A non-exhaustive but growing list needs to mention: Trevor Killeen, Sasank Chilamkurthy, Sergey Zagoruyko, Adam Lerer, Francisco Massa, Alykhan Tejani, Luca Antiga, Alban Desmaison, Andreas Koepf, James Bradbury, Zeming Lin, Yuandong Tian, Guillaume Lample, Marat Dukhan, Natalia Gimelshein, Christian Sarofeen, Martin Raison, Edward Yang, Zachary Devito.
 
-Note: this project is unrelated to [hughperkins/pytorch](https://github.com/hughperkins/pytorch) with the same name. Hugh is a valuable contributor to the Torch community and has helped with many things Torch and PyTorch.
+Note: This project is unrelated to [hughperkins/pytorch](https://github.com/hughperkins/pytorch) with the same name. Hugh is a valuable contributor to the Torch community and has helped with many things Torch and PyTorch.
 
 ## License
 
-PyTorch is a BSD-style licensed, as found in the [LICENSE](LICENSE) file.
+PyTorch has a BSD-style license, as found in the [LICENSE](LICENSE) file.

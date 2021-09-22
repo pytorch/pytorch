@@ -4,6 +4,7 @@
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/subgraph_matcher.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
+#include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/fold_conv_bn.h>
 #include <torch/csrc/jit/passes/freeze_module.h>
 #include <torch/csrc/jit/passes/fuse_linear.h>
@@ -25,8 +26,8 @@ namespace {
 void replaceConv1dWithConv2d(std::shared_ptr<Graph>& graph) {
   std::string conv_1d_pattern = R"(
     graph(%input, %weight, %bias, %stride:int[], %padding:int[], %dilation:int[], %groups:int):
-        %r = aten::conv1d(%input, %weight, %bias, %stride, %padding, %dilation, %groups)
-        return (%r) )";
+        %res = aten::conv1d(%input, %weight, %bias, %stride, %padding, %dilation, %groups)
+        return (%res) )";
 
   std::string conv_2d_pattern = R"(
     graph(%input, %weight, %bias, %stride:int[], %padding:int[], %dilation:int[], %groups:int):
@@ -46,8 +47,24 @@ void replaceConv1dWithConv2d(std::shared_ptr<Graph>& graph) {
         %output : Tensor = aten::squeeze(%output_2d, %two)
         return (%output) )";
 
+  std::vector<std::pair<std::string, std::string>> value_mappings(
+      {{"zero", "res"},
+       {"one", "res"},
+       {"stride_w", "res"},
+       {"stride_2d", "res"},
+       {"padding_w", "res"},
+       {"padding_2d", "res"},
+       {"dilation_w", "res"},
+       {"dilation_2d", "res"},
+       {"two", "res"},
+       {"input_2d", "res"},
+       {"weight_2d", "res"},
+       {"output_2d", "res"},
+       {"output", "res"}});
+
   SubgraphRewriter rewriter;
-  rewriter.RegisterRewritePattern(conv_1d_pattern, conv_2d_pattern);
+  rewriter.RegisterRewritePattern(
+      conv_1d_pattern, conv_2d_pattern, value_mappings);
   rewriter.runOnGraph(graph);
 }
 
@@ -79,8 +96,8 @@ void insertPrePackedLinearOp(std::shared_ptr<Graph>& graph) {
 
   std::string linear_before_inline = R"(
     graph(%linear, %input, %weight, %bias):
-        %r = prim::CallFunction(%linear, %input, %weight, %bias)
-        return (%r))";
+        %res = prim::CallFunction(%linear, %input, %weight, %bias)
+        return (%res))";
   std::string prepacked_ops_pattern_before_inline = R"(
     graph(%linear, %input, %weight, %bias):
         %output_min_max : None = prim::Constant()
@@ -90,8 +107,8 @@ void insertPrePackedLinearOp(std::shared_ptr<Graph>& graph) {
         return (%res))";
   std::string linear_pattern = R"(
     graph(%input, %weight, %bias):
-        %r = aten::linear(%input, %weight, %bias)
-        return (%r))";
+        %res = aten::linear(%input, %weight, %bias)
+        return (%res))";
   std::string prepacked_ops_pattern = R"(
     graph(%input, %weight, %bias):
         %output_min_max : None = prim::Constant()
@@ -111,13 +128,24 @@ void insertPrePackedLinearOp(std::shared_ptr<Graph>& graph) {
     return false;
   };
 
+  std::vector<std::pair<std::string, std::string>> value_mappings(
+      {{"output_min_max", "res"},
+       {"packed_weight_bias", "res"},
+       {"res", "res"}});
+
   SubgraphRewriter linear_call_fn_rewriter;
   linear_call_fn_rewriter.RegisterRewritePattern(
-      linear_before_inline, prepacked_ops_pattern_before_inline);
+      linear_before_inline,
+      prepacked_ops_pattern_before_inline,
+      value_mappings);
   linear_call_fn_rewriter.runOnGraph(graph, filter);
 
+  value_mappings = {
+      {"output_min_max", "res"}, {"packed_weight_bias", "res"}, {"res", "res"}};
+
   SubgraphRewriter linear_rewriter;
-  linear_rewriter.RegisterRewritePattern(linear_pattern, prepacked_ops_pattern);
+  linear_rewriter.RegisterRewritePattern(
+      linear_pattern, prepacked_ops_pattern, value_mappings);
   linear_rewriter.runOnGraph(graph);
 }
 
@@ -127,8 +155,8 @@ void insertPrePackedConv2dOp(std::shared_ptr<Graph>& graph) {
 
   std::string conv_2d_pattern = R"(
     graph(%input, %weight, %bias, %stride:int[], %padding:int[], %dilation:int[], %groups:int):
-        %r = aten::conv2d(%input, %weight, %bias, %stride, %padding, %dilation, %groups)
-        return (%r) )";
+        %res = aten::conv2d(%input, %weight, %bias, %stride, %padding, %dilation, %groups)
+        return (%res) )";
 
   std::string prepacked_ops_conv2d_pattern = R"(
     graph(%input, %weight, %bias, %stride:int[], %padding:int[], %dilation:int[], %groups:int):
@@ -136,19 +164,24 @@ void insertPrePackedConv2dOp(std::shared_ptr<Graph>& graph) {
         %packed_weight_bias = prepacked::conv2d_clamp_prepack(
             %weight, %bias, %stride, %padding, %dilation, %groups,
             %output_min_max, %output_min_max)
-        %r = prepacked::conv2d_clamp_run(%input, %packed_weight_bias)
-        return (%r) )";
+        %res = prepacked::conv2d_clamp_run(%input, %packed_weight_bias)
+        return (%res) )";
+
+  std::vector<std::pair<std::string, std::string>> value_mappings(
+      {{"output_min_max", "res"},
+       {"packed_weight_bias", "res"},
+       {"res", "res"}});
 
   SubgraphRewriter rewriter;
   rewriter.RegisterRewritePattern(
-      conv_2d_pattern, prepacked_ops_conv2d_pattern);
+      conv_2d_pattern, prepacked_ops_conv2d_pattern, value_mappings);
   rewriter.runOnGraph(graph);
 
   std::string conv_2d_transpose_pattern = R"(
       graph(%input, %weight, %bias, %stride:int[], %padding:int[], %dilation:int[],
           %output_padding:int[], %groups:int):
-        %r = aten::conv_transpose2d(%input, %weight, %bias, %stride, %padding, %output_padding, %groups, %dilation)
-        return (%r) )";
+        %res = aten::conv_transpose2d(%input, %weight, %bias, %stride, %padding, %output_padding, %groups, %dilation)
+        return (%res) )";
 
   std::string prepacked_ops_conv2d_transpose_pattern = R"(
     graph(%input, %weight, %bias, %stride:int[], %padding:int[], %dilation:int[], %output_padding:int[], %groups:int):
@@ -156,12 +189,17 @@ void insertPrePackedConv2dOp(std::shared_ptr<Graph>& graph) {
         %packed_weight_bias = prepacked::conv2d_transpose_clamp_prepack(
             %weight, %bias, %stride, %padding, %output_padding, %dilation, %groups,
             %output_min_max, %output_min_max)
-        %r = prepacked::conv2d_transpose_clamp_run(%input, %packed_weight_bias)
-        return (%r) )";
+        %res = prepacked::conv2d_transpose_clamp_run(%input, %packed_weight_bias)
+        return (%res) )";
+
+  value_mappings = {
+      {"output_min_max", "res"}, {"packed_weight_bias", "res"}, {"res", "res"}};
 
   SubgraphRewriter transpose_rewriter;
   transpose_rewriter.RegisterRewritePattern(
-      conv_2d_transpose_pattern, prepacked_ops_conv2d_transpose_pattern);
+      conv_2d_transpose_pattern,
+      prepacked_ops_conv2d_transpose_pattern,
+      value_mappings);
   transpose_rewriter.runOnGraph(graph);
 }
 
@@ -181,8 +219,8 @@ void fuseHardtanhWithPackedOps(std::shared_ptr<Graph>& graph) {
         %packed_weight_bias : __torch__.torch.classes.xnnpack.Conv2dOpContext = prepacked::conv2d_clamp_prepack(
             %weight, %bias, %stride, %padding, %dilation, %groups,
             %output_min, %output_max)
-        %r = prepacked::conv2d_clamp_run(%input, %packed_weight_bias)
-        return (%r) )";
+        %res = prepacked::conv2d_clamp_run(%input, %packed_weight_bias)
+        return (%res) )";
 
   std::string linear_prepack_run_hardtanh = R"(
     graph(%input, %weight, %bias, %output_min, %output_max, %dummy_min_max):
@@ -192,8 +230,13 @@ void fuseHardtanhWithPackedOps(std::shared_ptr<Graph>& graph) {
         %res = aten::hardtanh(%linear_res, %output_min, %output_max)
         return (%res))";
 
+  std::vector<std::pair<std::string, std::string>> value_mappings(
+      {{"packed_weight_bias", "packed_weight_bias"}, {"res", "res"}});
+
   rewriter.RegisterRewritePattern(
-      linear_prepack_run_hardtanh, linear_prepack_run_hardtanh_fused);
+      linear_prepack_run_hardtanh,
+      linear_prepack_run_hardtanh_fused,
+      value_mappings);
 
   std::string conv2d_prepack_run_hardtanh = R"(
     graph(%input, %weight, %bias, %stride:int[], %padding:int[],
@@ -202,11 +245,16 @@ void fuseHardtanhWithPackedOps(std::shared_ptr<Graph>& graph) {
             %weight, %bias, %stride, %padding, %dilation, %groups,
             %dummy_min_max, %dummy_min_max)
         %conv2d_res = prepacked::conv2d_clamp_run(%input, %packed_weight_bias)
-        %r = aten::hardtanh(%conv2d_res, %output_min, %output_max)
-        return (%r) )";
+        %res = aten::hardtanh(%conv2d_res, %output_min, %output_max)
+        return (%res) )";
+
+  value_mappings = {
+      {"packed_weight_bias", "packed_weight_bias"}, {"res", "res"}};
 
   rewriter.RegisterRewritePattern(
-      conv2d_prepack_run_hardtanh, conv2d_prepack_run_hardtanh_fused);
+      conv2d_prepack_run_hardtanh,
+      conv2d_prepack_run_hardtanh_fused,
+      value_mappings);
 
   std::string linear_prepack_run_hardtanh_inplace = R"(
     graph(%input, %weight, %bias, %output_min, %output_max, %dummy_min_max):
@@ -223,13 +271,24 @@ void fuseHardtanhWithPackedOps(std::shared_ptr<Graph>& graph) {
             %weight, %bias, %stride, %padding, %dilation, %groups,
             %dummy_min_max, %dummy_min_max)
         %conv2d_res = prepacked::conv2d_clamp_run(%input, %packed_weight_bias)
-        %r = aten::hardtanh_(%conv2d_res, %output_min, %output_max)
-        return (%r) )";
+        %res = aten::hardtanh_(%conv2d_res, %output_min, %output_max)
+        return (%res) )";
+
+  value_mappings = {
+      {"packed_weight_bias", "packed_weight_bias"}, {"res", "res"}};
 
   rewriter.RegisterRewritePattern(
-      linear_prepack_run_hardtanh_inplace, linear_prepack_run_hardtanh_fused);
+      linear_prepack_run_hardtanh_inplace,
+      linear_prepack_run_hardtanh_fused,
+      value_mappings);
+
+  value_mappings = {
+      {"packed_weight_bias", "packed_weight_bias"}, {"res", "res"}};
+
   rewriter.RegisterRewritePattern(
-      conv2d_prepack_run_hardtanh_inplace, conv2d_prepack_run_hardtanh_fused);
+      conv2d_prepack_run_hardtanh_inplace,
+      conv2d_prepack_run_hardtanh_fused,
+      value_mappings);
 
   rewriter.runOnGraph(graph, torch::jit::graph_rewrite_helper::isClampFusable);
 }
@@ -254,8 +313,8 @@ void fuseReluWithPackedOps(std::shared_ptr<Graph>& graph) {
         %packed_weight_bias : __torch__.torch.classes.xnnpack.Conv2dOpContext = prepacked::conv2d_clamp_prepack(
             %weight, %bias, %stride, %padding, %dilation, %groups,
             %output_min, %output_max)
-        %r = prepacked::conv2d_clamp_run(%input, %packed_weight_bias)
-        return (%r) )";
+        %res = prepacked::conv2d_clamp_run(%input, %packed_weight_bias)
+        return (%res) )";
 
   std::string linear_prepack_run_relu = R"(
     graph(%input, %weight, %bias, %dummy_min_max):
@@ -265,8 +324,14 @@ void fuseReluWithPackedOps(std::shared_ptr<Graph>& graph) {
         %res = aten::relu(%linear_res)
         return (%res))";
 
+  std::vector<std::pair<std::string, std::string>> value_mappings(
+      {{"output_min", "packed_weight_bias"},
+       {"output_max", "packed_weight_bias"},
+       {"packed_weight_bias", "packed_weight_bias"},
+       {"res", "res"}});
+
   rewriter.RegisterRewritePattern(
-      linear_prepack_run_relu, linear_prepack_run_relu_fused);
+      linear_prepack_run_relu, linear_prepack_run_relu_fused, value_mappings);
 
   std::string conv2d_prepack_run_relu = R"(
     graph(%input, %weight, %bias, %stride:int[], %padding:int[],
@@ -275,11 +340,17 @@ void fuseReluWithPackedOps(std::shared_ptr<Graph>& graph) {
             %weight, %bias, %stride, %padding, %dilation, %groups,
             %dummy_min_max, %dummy_min_max)
         %conv2d_res = prepacked::conv2d_clamp_run(%input, %packed_weight_bias)
-        %r = aten::relu(%conv2d_res)
-        return (%r) )";
+        %res = aten::relu(%conv2d_res)
+        return (%res) )";
+
+  value_mappings = {
+      {"output_min", "packed_weight_bias"},
+      {"output_max", "packed_weight_bias"},
+      {"packed_weight_bias", "packed_weight_bias"},
+      {"res", "res"}};
 
   rewriter.RegisterRewritePattern(
-      conv2d_prepack_run_relu, conv2d_prepack_run_relu_fused);
+      conv2d_prepack_run_relu, conv2d_prepack_run_relu_fused, value_mappings);
 
   std::string linear_prepack_run_relu_inplace = R"(
     graph(%input, %weight, %bias, %dummy_min_max):
@@ -296,21 +367,40 @@ void fuseReluWithPackedOps(std::shared_ptr<Graph>& graph) {
             %weight, %bias, %stride, %padding, %dilation, %groups,
             %dummy_min_max, %dummy_min_max)
         %conv2d_res = prepacked::conv2d_clamp_run(%input, %packed_weight_bias)
-        %r = aten::relu_(%conv2d_res)
-        return (%r) )";
+        %res = aten::relu_(%conv2d_res)
+        return (%res) )";
+
+  value_mappings = {
+      {"output_min", "packed_weight_bias"},
+      {"output_max", "packed_weight_bias"},
+      {"packed_weight_bias", "packed_weight_bias"},
+      {"res", "res"}};
 
   rewriter.RegisterRewritePattern(
-      linear_prepack_run_relu_inplace, linear_prepack_run_relu_fused);
+      linear_prepack_run_relu_inplace,
+      linear_prepack_run_relu_fused,
+      value_mappings);
+
+  value_mappings = {
+      {"output_min", "packed_weight_bias"},
+      {"output_max", "packed_weight_bias"},
+      {"packed_weight_bias", "packed_weight_bias"},
+      {"res", "res"}};
+
   rewriter.RegisterRewritePattern(
-      conv2d_prepack_run_relu_inplace, conv2d_prepack_run_relu_fused);
+      conv2d_prepack_run_relu_inplace,
+      conv2d_prepack_run_relu_fused,
+      value_mappings);
   rewriter.runOnGraph(graph, torch::jit::graph_rewrite_helper::isClampFusable);
 }
 
 void runCanonicalOptimizations(script::Module& module) {
-  auto graph = module.get_method("forward").graph();
-  // Not sure if we have models running on mobile that require loop unrolling.
-  // Perhaps language/speech models? Conservatively setting that to false.
-  runOptimization(graph, false /* no loop unrolling */);
+  for (const auto& method : module.get_methods()) {
+    auto graph = method.graph();
+    // Not sure if we have models running on mobile that require loop unrolling.
+    // Perhaps language/speech models? Conservatively setting that to false.
+    runOptimization(graph, false /* no loop unrolling */);
+  }
 }
 
 } // namespace
@@ -331,9 +421,14 @@ void insertPrePackedOps(script::Module& module) {
 }
 
 void fusePrePackedLinearConvWithClamp(script::Module& module) {
-  auto graph = module.get_method("forward").graph();
-  fuseReluWithPackedOps(graph);
-  fuseHardtanhWithPackedOps(graph);
+  for (auto& method : module.get_methods()) {
+    auto graph = method.graph();
+    fuseReluWithPackedOps(graph);
+    fuseHardtanhWithPackedOps(graph);
+
+    // Ignore user defined classes for later passes
+    ConstantPropagation(graph, true);
+  }
 }
 
 void FoldPrePackingOps(script::Module& m) {
@@ -348,6 +443,11 @@ void FoldPrePackingOps(script::Module& m) {
                 "prepacked::conv2d_transpose_clamp_prepack"));
   };
   PrePackingOpsFolder(m, filter_fn, "prepack_folding");
+  for (auto& method : m.get_methods()) {
+    auto graph = method.graph();
+    // Folding requires a const propagation through user defined classes
+    ConstantPropagation(graph, false);
+  }
 }
 
 script::Module optimizeForMobile(
@@ -361,8 +461,14 @@ script::Module optimizeForMobile(
     cloned_module = FoldConvBatchNorm(cloned_module);
   }
 
+  // Many optimizations require a frozen module, but ConvBatchNorm requires
+  // an unfrozen module
+  cloned_module = freeze_module(cloned_module, preserved_methods);
+
   if (!optimization_blocklist.count(
           MobileOptimizerType::INSERT_FOLD_PREPACK_OPS)) {
+    // TODO fix duplication caused by referencing same op across multiple
+    // functions
     insertPrePackedOps(cloned_module);
     cloned_module = freeze_module(cloned_module, preserved_methods);
     fusePrePackedLinearConvWithClamp(cloned_module);
@@ -370,7 +476,8 @@ script::Module optimizeForMobile(
   }
 
   if (!optimization_blocklist.count(
-          MobileOptimizerType::HOIST_CONV_PACKED_PARAMS)) {
+          MobileOptimizerType::HOIST_CONV_PACKED_PARAMS) &&
+      cloned_module.find_method("forward")) {
     // freeze again in case it was not done in previous optional passes
     cloned_module = freeze_module(cloned_module, preserved_methods);
     HoistConvPackedParams(cloned_module);
@@ -384,11 +491,18 @@ script::Module optimizeForMobile(
   runCanonicalOptimizations(cloned_module);
 
   if (!optimization_blocklist.count(MobileOptimizerType::REMOVE_DROPOUT)) {
-    removeDropout(cloned_module);
+    for (const auto& method : cloned_module.get_methods()) {
+      auto graph = method.graph();
+      // Module must be not be in training mode but optimize calls eval()
+      removeDropout(graph);
+    }
   }
 
   if (!optimization_blocklist.count(MobileOptimizerType::FUSE_ADD_RELU)) {
-    FuseAddRelu(cloned_module);
+    for (const auto& method : cloned_module.get_methods()) {
+      auto graph = method.graph();
+      FuseAddRelu(graph);
+    }
   }
   cloned_module.register_attribute("mobile_optimized", BoolType::get(), true);
   return cloned_module;

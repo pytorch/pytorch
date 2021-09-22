@@ -2,8 +2,8 @@
 
 #include <ATen/Config.h>
 #include <ATen/Parallel.h>
-#include <ATen/cpu/vec256/functional.h>
-#include <ATen/cpu/vec256/vec256.h>
+#include <ATen/cpu/vec/functional.h>
+#include <ATen/cpu/vec/vec.h>
 #include <c10/util/complex.h>
 
 // This header implements various unary operations using a MKL VML style
@@ -28,41 +28,27 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
-#include <iostream>
 #include <type_traits>
 
 #if AT_MKL_ENABLED() && !defined(__APPLE__)
 #include <mkl.h>
 #endif
 
-// [Note SSE-AVX transitions]
-// There is a bug in Glibc2.23
-// https://bugs.launchpad.net/ubuntu/+source/glibc/+bug/1663280. Calling zeroall
-// when using AVX/AVX2 code resolves this.
-#if defined(CPU_CAPABILITY_AVX) && defined(__GLIBC__) && __GLIBC_MINOR__ == 23
-#define DL_RUNTIME_BUG(op, type_)                              \
-  using value_t = typename c10::scalar_value_type<type_>::type;\
-  volatile value_t x = (value_t)(1);                           \
-  x = std::op(x);                                              \
-  _mm256_zeroall();
-#define DL_RUNTIME_BUG_BFLOAT16() _mm256_zeroall();
-#else
 #define DL_RUNTIME_BUG(op, type_)
 #define DL_RUNTIME_BUG_BFLOAT16()
-#endif
 
 namespace at {
 namespace vml {
 namespace {
 
-using namespace vec256;
+using namespace vec;
 
 template <typename scalar_t>
 inline void vrsqrt(scalar_t* out, scalar_t* in, int64_t size) {
   parallel_for(0, size, 2048, [out, in](int64_t begin, int64_t end) {
     map(
-        [](const Vec256<scalar_t>& x) {
-          return Vec256<scalar_t>((scalar_t)(1)) / x.sqrt();
+        [](const Vectorized<scalar_t>& x) {
+          return Vectorized<scalar_t>((scalar_t)(1)) / x.sqrt();
         },
         out + begin,
         in + begin,
@@ -86,7 +72,7 @@ inline void vrsqrt(scalar_t* out, scalar_t* in, int64_t size) {
   inline void v##op(scalar_t* out, const scalar_t* in, int64_t size) {            \
     DL_RUNTIME_BUG(op, scalar_t)                                                  \
     parallel_for(0, size, 2048, [out, in](int64_t begin, int64_t end) {           \
-      map([](const Vec256<scalar_t>& x) { return x.op(); },                       \
+      map([](const Vectorized<scalar_t>& x) { return x.op(); },                   \
           out + begin,                                                            \
           in + begin,                                                             \
           end - begin);                                                           \
@@ -97,53 +83,56 @@ inline void vrsqrt(scalar_t* out, scalar_t* in, int64_t size) {
       c10::BFloat16* out, const c10::BFloat16* in, int64_t size) {                \
     parallel_for(0, size, 2048, [out, in](int64_t begin, int64_t end) {           \
       DL_RUNTIME_BUG_BFLOAT16()                                                   \
-      map([](const Vec256<c10::BFloat16>& x) { return x.op(); },                  \
+      using vecscalar_t = vec_scalar_t<c10::BFloat16>;                            \
+      map([](const Vectorized<vecscalar_t>& x) { return x.op(); },                \
           out + begin,                                                            \
           in + begin,                                                             \
           end - begin);                                                           \
     });                                                                           \
   }
 
-#define IMPLEMENT_VML(op)                                              \
-  template <typename scalar_t>                                          \
-  inline void v##op(scalar_t* out, const scalar_t* in, int64_t size) {  \
-    parallel_for(0, size, 2048, [out, in](int64_t begin, int64_t end) { \
-      map([](const Vec256<scalar_t>& x) { return x.op(); },             \
-          out + begin,                                                  \
-          in + begin,                                                   \
-          end - begin);                                                 \
-    });                                                                 \
+#define IMPLEMENT_VML(op)                                                         \
+  template <typename scalar_t>                                                    \
+  inline void v##op(scalar_t* out, const scalar_t* in, int64_t size) {            \
+    parallel_for(0, size, 2048, [out, in](int64_t begin, int64_t end) {           \
+      using vecscalar_t = vec_scalar_t<scalar_t>;                                 \
+      map([](const Vectorized<vecscalar_t>& x) { return x.op(); },                \
+          out + begin,                                                            \
+          in + begin,                                                             \
+          end - begin);                                                           \
+    });                                                                           \
   }
 
-IMPLEMENT_VML_BUG(abs)
-IMPLEMENT_VML_BUG(acos)
-IMPLEMENT_VML_BUG(asin)
-IMPLEMENT_VML_BUG(atan)
-IMPLEMENT_VML_BUG(ceil)
-IMPLEMENT_VML_BUG(cos)
+IMPLEMENT_VML(abs)
+IMPLEMENT_VML(acos)
+IMPLEMENT_VML(asin)
+IMPLEMENT_VML(atan)
+IMPLEMENT_VML(ceil)
+IMPLEMENT_VML(cos)
 // IMPLEMENT_VML_BUG(cosh)
-IMPLEMENT_VML_BUG(erf)
-IMPLEMENT_VML_BUG(erfc)
+IMPLEMENT_VML(erf)
+IMPLEMENT_VML(erfc)
 IMPLEMENT_VML(erfinv)
-IMPLEMENT_VML_BUG(exp)
-IMPLEMENT_VML_BUG(expm1)
-IMPLEMENT_VML_BUG(floor)
+IMPLEMENT_VML(exp)
+IMPLEMENT_VML(expm1)
+IMPLEMENT_VML(floor)
 IMPLEMENT_VML(i0)
+IMPLEMENT_VML(i0e)
 IMPLEMENT_VML(reciprocal)
-IMPLEMENT_VML_BUG(log)
-IMPLEMENT_VML_BUG(log10)
-IMPLEMENT_VML_BUG(log1p)
-IMPLEMENT_VML_BUG(log2)
+IMPLEMENT_VML(log)
+IMPLEMENT_VML(log10)
+IMPLEMENT_VML(log1p)
+IMPLEMENT_VML(log2)
 IMPLEMENT_VML(neg)
-IMPLEMENT_VML_BUG(sin)
+IMPLEMENT_VML(sin)
 // IMPLEMENT_VML_BUG(sinh)
-IMPLEMENT_VML_BUG(sqrt)
-IMPLEMENT_VML_BUG(round)
+IMPLEMENT_VML(sqrt)
+IMPLEMENT_VML(round)
 IMPLEMENT_VML(rsqrt)
-IMPLEMENT_VML_BUG(tan)
-IMPLEMENT_VML_BUG(tanh)
-IMPLEMENT_VML_BUG(trunc)
-IMPLEMENT_VML_BUG(lgamma)
+IMPLEMENT_VML(tan)
+IMPLEMENT_VML(tanh)
+IMPLEMENT_VML(trunc)
+IMPLEMENT_VML(lgamma)
 
 
 #if AT_MKL_ENABLED() && !defined(__APPLE__)

@@ -29,6 +29,7 @@ namespace nn {
 /// ```
 /// L1Loss model(L1LossOptions(torch::kNone));
 /// ```
+// NOLINTNEXTLINE(bugprone-exception-escape)
 struct TORCH_API L1LossImpl : Cloneable<L1LossImpl> {
   explicit L1LossImpl(const L1LossOptions& options_ = {});
 
@@ -63,6 +64,7 @@ TORCH_MODULE(L1Loss);
 /// ```
 /// KLDivLoss model(KLDivLossOptions().reduction(torch::kNone));
 /// ```
+// NOLINTNEXTLINE(bugprone-exception-escape)
 struct TORCH_API KLDivLossImpl : Cloneable<KLDivLossImpl> {
   explicit KLDivLossImpl(const KLDivLossOptions& options_ = {});
 
@@ -98,6 +100,7 @@ TORCH_MODULE(KLDivLoss);
 /// ```
 /// MSELoss model(MSELossOptions(torch::kNone));
 /// ```
+// NOLINTNEXTLINE(bugprone-exception-escape)
 struct TORCH_API MSELossImpl : Cloneable<MSELossImpl> {
   explicit MSELossImpl(const MSELossOptions& options_ = {});
 
@@ -133,6 +136,7 @@ TORCH_MODULE(MSELoss);
 /// ```
 /// BCELoss model(BCELossOptions().reduction(torch::kNone).weight(weight));
 /// ```
+// NOLINTNEXTLINE(bugprone-exception-escape)
 struct TORCH_API BCELossImpl : Cloneable<BCELossImpl> {
   explicit BCELossImpl(const BCELossOptions& options_ = {});
 
@@ -168,6 +172,7 @@ TORCH_MODULE(BCELoss);
 /// ```
 /// HingeEmbeddingLoss model(HingeEmbeddingLossOptions().margin(4).reduction(torch::kNone));
 /// ```
+// NOLINTNEXTLINE(bugprone-exception-escape)
 struct TORCH_API HingeEmbeddingLossImpl : Cloneable<HingeEmbeddingLossImpl> {
   explicit HingeEmbeddingLossImpl(
       const HingeEmbeddingLossOptions& options_ = {});
@@ -206,6 +211,7 @@ TORCH_MODULE(HingeEmbeddingLoss);
 /// ```
 /// MultiMarginLoss model(MultiMarginLossOptions().margin(2).weight(weight));
 /// ```
+// NOLINTNEXTLINE(bugprone-exception-escape)
 struct TORCH_API MultiMarginLossImpl : public Cloneable<MultiMarginLossImpl> {
   explicit MultiMarginLossImpl(
       const MultiMarginLossOptions& options_ = {});
@@ -245,6 +251,7 @@ TORCH_MODULE(MultiMarginLoss);
 /// ```
 /// CosineEmbeddingLoss model(CosineEmbeddingLossOptions().margin(0.5));
 /// ```
+// NOLINTNEXTLINE(bugprone-exception-escape)
 struct TORCH_API CosineEmbeddingLossImpl : public Cloneable<CosineEmbeddingLossImpl> {
   explicit CosineEmbeddingLossImpl(
       const CosineEmbeddingLossOptions& options_ = {});
@@ -273,10 +280,9 @@ TORCH_MODULE(CosineEmbeddingLoss);
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ SmoothL1Loss ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Creates a criterion that uses a squared term if the absolute
-/// element-wise error falls below 1 and an L1 term otherwise.
+/// element-wise error falls below beta and an L1 term otherwise.
 /// It is less sensitive to outliers than the `MSELoss` and in some cases
-/// prevents exploding gradients (e.g. see `Fast R-CNN` paper by Ross Girshick).
-/// Also known as the Huber loss.
+/// prevents exploding gradients (e.g. see the paper `Fast R-CNN` by Ross Girshick).
 /// See https://pytorch.org/docs/master/nn.html#torch.nn.SmoothL1Loss to learn
 /// about the exact behavior of this module.
 ///
@@ -285,8 +291,9 @@ TORCH_MODULE(CosineEmbeddingLoss);
 ///
 /// Example:
 /// ```
-/// SmoothL1Loss model(SmoothL1LossOptions(torch::kNone));
+/// SmoothL1Loss model(SmoothL1LossOptions().reduction(torch::kNone).beta(0.5));
 /// ```
+// NOLINTNEXTLINE(bugprone-exception-escape)
 struct TORCH_API SmoothL1LossImpl : public Cloneable<SmoothL1LossImpl> {
   explicit SmoothL1LossImpl(const SmoothL1LossOptions& options_ = {});
 
@@ -308,6 +315,42 @@ struct TORCH_API SmoothL1LossImpl : public Cloneable<SmoothL1LossImpl> {
 /// module storage semantics.
 TORCH_MODULE(SmoothL1Loss);
 
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ HuberLoss ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+/// Creates a criterion that uses a squared term if the absolute
+/// element-wise error falls below delta and a delta-scaled L1 term otherwise.
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.HuberLoss to learn
+/// about the exact behavior of this module.
+///
+/// See the documentation for `torch::nn::HuberLossOptions` class to learn what
+/// constructor arguments are supported for this module.
+///
+/// Example:
+/// ```
+/// HuberLoss model(HuberLossOptions().reduction(torch::kNone).delta(0.5));
+/// ```
+// NOLINTNEXTLINE(bugprone-exception-escape)
+struct TORCH_API HuberLossImpl : public Cloneable<HuberLossImpl> {
+  explicit HuberLossImpl(const HuberLossOptions& options_ = {});
+
+  void reset() override;
+
+  /// Pretty prints the `HuberLoss` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+
+  Tensor forward(const Tensor& input, const Tensor& target);
+
+  /// The options with which this `Module` was constructed.
+  HuberLossOptions options;
+};
+
+/// A `ModuleHolder` subclass for `HuberLossImpl`.
+/// See the documentation for `HuberLossImpl` class to learn what methods it
+/// provides, and examples of how to use `HuberLoss` with `torch::nn::HuberLossOptions`.
+/// See the documentation for `ModuleHolder` to learn about PyTorch's
+/// module storage semantics.
+TORCH_MODULE(HuberLoss);
+
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ MultiLabelMarginLoss ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Creates a criterion that optimizes a multi-class multi-classification
@@ -323,6 +366,7 @@ TORCH_MODULE(SmoothL1Loss);
 /// ```
 /// MultiLabelMarginLoss model(MultiLabelMarginLossOptions(torch::kNone));
 /// ```
+// NOLINTNEXTLINE(bugprone-exception-escape)
 struct TORCH_API MultiLabelMarginLossImpl : public Cloneable<MultiLabelMarginLossImpl> {
   explicit MultiLabelMarginLossImpl(
     const MultiLabelMarginLossOptions& options_ = {});
@@ -360,6 +404,7 @@ TORCH_MODULE(MultiLabelMarginLoss);
 /// ```
 /// SoftMarginLoss model(SoftMarginLossOptions(torch::kNone));
 /// ```
+// NOLINTNEXTLINE(bugprone-exception-escape)
 struct TORCH_API SoftMarginLossImpl : public Cloneable<SoftMarginLossImpl> {
   explicit SoftMarginLossImpl(const SoftMarginLossOptions& options_ = {});
 
@@ -396,6 +441,7 @@ TORCH_MODULE(SoftMarginLoss);
 /// ```
 /// MultiLabelSoftMarginLoss model(MultiLabelSoftMarginLossOptions().reduction(torch::kNone).weight(weight));
 /// ```
+// NOLINTNEXTLINE(bugprone-exception-escape)
 struct TORCH_API MultiLabelSoftMarginLossImpl : public Cloneable<MultiLabelSoftMarginLossImpl> {
   explicit MultiLabelSoftMarginLossImpl(
     const MultiLabelSoftMarginLossOptions& options_ = {});
@@ -436,6 +482,7 @@ TORCH_MODULE(MultiLabelSoftMarginLoss);
 /// ```
 /// TripletMarginLoss model(TripletMarginLossOptions().margin(3).p(2).eps(1e-06).swap(false));
 /// ```
+// NOLINTNEXTLINE(bugprone-exception-escape)
 struct TORCH_API TripletMarginLossImpl : public Cloneable<TripletMarginLossImpl> {
   explicit TripletMarginLossImpl(
       const TripletMarginLossOptions& options_ = {});
@@ -479,6 +526,7 @@ TORCH_MODULE(TripletMarginLoss);
 /// ```
 /// TripletMarginWithDistanceLoss model(TripletMarginWithDistanceLossOptions().margin(3).swap(false));
 /// ```
+// NOLINTNEXTLINE(bugprone-exception-escape)
 struct TORCH_API TripletMarginWithDistanceLossImpl : public Cloneable<TripletMarginWithDistanceLossImpl> {
   explicit TripletMarginWithDistanceLossImpl(
       TripletMarginWithDistanceLossOptions options_ = {});
@@ -518,6 +566,7 @@ TORCH_MODULE(TripletMarginWithDistanceLoss);
 /// ```
 /// CTCLoss model(CTCLossOptions().blank(42).zero_infinity(false).reduction(torch::kSum));
 /// ```
+// NOLINTNEXTLINE(bugprone-exception-escape)
 struct TORCH_API CTCLossImpl : public Cloneable<CTCLossImpl> {
 
   explicit CTCLossImpl(const CTCLossOptions& options_ = {});
@@ -554,6 +603,7 @@ TORCH_MODULE(CTCLoss);
 /// ```
 /// PoissonNLLLoss model(PoissonNLLLossOptions().log_input(false).full(true).eps(0.42).reduction(torch::kSum));
 /// ```
+// NOLINTNEXTLINE(bugprone-exception-escape)
 struct TORCH_API PoissonNLLLossImpl : public Cloneable<PoissonNLLLossImpl> {
   explicit PoissonNLLLossImpl(const PoissonNLLLossOptions& options_ = {});
 
@@ -590,6 +640,7 @@ TORCH_MODULE(PoissonNLLLoss);
 /// ```
 /// MarginRankingLoss model(MarginRankingLossOptions().margin(0.5).reduction(torch::kSum));
 /// ```
+// NOLINTNEXTLINE(bugprone-exception-escape)
 struct TORCH_API MarginRankingLossImpl : public Cloneable<MarginRankingLossImpl> {
   explicit MarginRankingLossImpl(const MarginRankingLossOptions& options_ = {});
 
@@ -626,6 +677,7 @@ TORCH_MODULE(MarginRankingLoss);
 /// ```
 /// NLLLoss model(NLLLossOptions().ignore_index(-100).reduction(torch::kMean));
 /// ```
+// NOLINTNEXTLINE(bugprone-exception-escape)
 struct TORCH_API NLLLossImpl : public Cloneable<NLLLossImpl> {
   explicit NLLLossImpl(
       const NLLLossOptions& options_ = {});
@@ -655,8 +707,7 @@ TORCH_MODULE(NLLLoss);
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ CrossEntropyLoss ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-/// Creates a criterion that combines :func:`nn.LogSoftmax` and
-/// :func:`nn.NLLLoss` in one single class.
+/// Creates a criterion that computes cross entropy loss between input and target.
 /// See https://pytorch.org/docs/master/nn.html#torch.nn.CrossEntropyLoss to learn
 /// about the exact behavior of this module.
 ///
@@ -667,6 +718,7 @@ TORCH_MODULE(NLLLoss);
 /// ```
 /// CrossEntropyLoss model(CrossEntropyLossOptions().ignore_index(-100).reduction(torch::kMean));
 /// ```
+// NOLINTNEXTLINE(bugprone-exception-escape)
 struct TORCH_API CrossEntropyLossImpl : public Cloneable<CrossEntropyLossImpl> {
   explicit CrossEntropyLossImpl(
       const CrossEntropyLossOptions& options_ = {});
@@ -710,6 +762,7 @@ TORCH_MODULE(CrossEntropyLoss);
 /// ```
 /// BCEWithLogitsLoss model(BCEWithLogitsLossOptions().reduction(torch::kNone).weight(weight));
 /// ```
+// NOLINTNEXTLINE(bugprone-exception-escape)
 struct TORCH_API BCEWithLogitsLossImpl : public Cloneable<BCEWithLogitsLossImpl> {
   explicit BCEWithLogitsLossImpl(const BCEWithLogitsLossOptions& options_ = {});
 

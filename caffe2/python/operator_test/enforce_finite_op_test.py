@@ -8,7 +8,6 @@ import numpy as np
 
 from caffe2.python import core, workspace
 import caffe2.python.hypothesis_test_util as hu
-import hypothesis.strategies as st
 
 
 class TestEnforceFinite(hu.HypothesisTestCase):

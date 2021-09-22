@@ -11,9 +11,9 @@ import warnings
 from contextlib import closing, contextmanager
 from ._utils import _import_dotted_name
 from ._six import string_classes as _string_classes
-from torch._utils_internal import get_source_lines_and_file
+from torch._sources import get_source_lines_and_file
 from torch.types import Storage
-from typing import Any, BinaryIO, cast, Dict, Optional, Type, Tuple, Union
+from typing import Any, BinaryIO, cast, Dict, Optional, Type, Tuple, Union, IO
 import copyreg
 import pickle
 import pathlib
@@ -192,7 +192,7 @@ def storage_to_tensor_type(storage):
 
 def _is_path(name_or_buffer):
     return isinstance(name_or_buffer, str) or \
-        (sys.version_info[0] == 3 and isinstance(name_or_buffer, pathlib.Path))
+        isinstance(name_or_buffer, pathlib.Path)
 
 
 class _opener(object):
@@ -330,11 +330,18 @@ def _check_dill_version(pickle_module) -> None:
                 pickle_module.__version__
             ))
 
-def save(obj, f: Union[str, os.PathLike, BinaryIO],
+def save(obj, f: Union[str, os.PathLike, BinaryIO, IO[bytes]],
          pickle_module=pickle, pickle_protocol=DEFAULT_PROTOCOL, _use_new_zipfile_serialization=True) -> None:
-    """Saves an object to a disk file.
+    # Reference: https://github.com/pytorch/pytorch/issues/54354
+    # The first line of this docstring overrides the one Sphinx generates for the
+    # documentation. We need it so that Sphinx doesn't leak `pickle`s path from
+    # the build environment (e.g. `<module 'pickle' from '/leaked/path').
 
-    See also: `saving-loading-tensors`
+    """save(obj, f, pickle_module=pickle, pickle_protocol=DEFAULT_PROTOCOL, _use_new_zipfile_serialization=True)
+
+    Saves an object to a disk file.
+
+    See also: :ref:`saving-loading-tensors`
 
     Args:
         obj: saved object
@@ -348,7 +355,7 @@ def save(obj, f: Union[str, os.PathLike, BinaryIO],
 
     .. note::
         PyTorch preserves storage sharing across serialization. See
-        `preserve-storage-sharing` for more details.
+        :ref:`preserve-storage-sharing` for more details.
 
     .. note::
         The 1.6 release of PyTorch switched ``torch.save`` to use a new
@@ -449,6 +456,7 @@ def _legacy_save(obj, f, pickle_module, pickle_protocol) -> None:
 
 def _save(obj, zip_file, pickle_module, pickle_protocol):
     serialized_storages = {}
+    id_map: Dict[int, str] = {}
 
     def persistent_id(obj):
         # FIXME: the docs say that persistent_id should only return a string
@@ -458,7 +466,7 @@ def _save(obj, zip_file, pickle_module, pickle_protocol):
         # https://github.com/python/cpython/blob/master/Lib/pickle.py#L527-L537
         if torch.is_storage(obj):
             storage_type = normalize_storage_type(type(obj))
-            obj_key = str(obj._cdata)
+            obj_key = id_map.setdefault(obj._cdata, str(len(id_map)))
             location = location_tag(obj)
             serialized_storages[obj_key] = obj
 
@@ -492,7 +500,14 @@ def _save(obj, zip_file, pickle_module, pickle_protocol):
 
 
 def load(f, map_location=None, pickle_module=pickle, **pickle_load_args):
-    """Loads an object saved with :func:`torch.save` from a file.
+    # Reference: https://github.com/pytorch/pytorch/issues/54354
+    # The first line of this docstring overrides the one Sphinx generates for the
+    # documentation. We need it so that Sphinx doesn't leak `pickle`s path from
+    # the build environment (e.g. `<module 'pickle' from '/leaked/path').
+
+    """load(f, map_location=None, pickle_module=pickle, **pickle_load_args)
+
+    Loads an object saved with :func:`torch.save` from a file.
 
     :func:`torch.load` uses Python's unpickling facilities but treats storages,
     which underlie tensors, specially. They are first deserialized on the
@@ -524,7 +539,7 @@ def load(f, map_location=None, pickle_module=pickle, **pickle_load_args):
     deserialization methods using :func:`torch.serialization.register_package`.
 
     Args:
-        f: a file-like object (has to implement :meth:`read`, :meth`readline`, :meth`tell`, and :meth`seek`),
+        f: a file-like object (has to implement :meth:`read`, :meth:`readline`, :meth:`tell`, and :meth:`seek`),
             or a string or os.PathLike object containing a file name
         map_location: a function, :class:`torch.device`, string or a dict specifying how to remap storage
             locations
@@ -566,7 +581,7 @@ def load(f, map_location=None, pickle_module=pickle, **pickle_load_args):
         >>> torch.load('tensors.pt', map_location={'cuda:1':'cuda:0'})
         # Load tensor from io.BytesIO object
         >>> with open('tensor.pt', 'rb') as f:
-                buffer = io.BytesIO(f.read())
+        ...     buffer = io.BytesIO(f.read())
         >>> torch.load(buffer)
         # Load a module with 'ascii' encoding for unpickling
         >>> torch.load('module.pt', encoding='ascii')
@@ -818,7 +833,6 @@ def _get_restore_location(map_location):
             return result
     return restore_location
 
-
 def _load(zip_file, map_location, pickle_module, pickle_file='data.pkl', **pickle_load_args):
     restore_location = _get_restore_location(map_location)
 
@@ -844,9 +858,26 @@ def _load(zip_file, map_location, pickle_module, pickle_file='data.pkl', **pickl
         storage = loaded_storages[key]
         return storage
 
+    load_module_mapping: Dict[str, str] = {
+        # See https://github.com/pytorch/pytorch/pull/51633
+        'torch.tensor': 'torch._tensor'
+    }
+
+    # Need to subclass Unpickler instead of directly monkey-patching the find_class method
+    # because it's marked readonly in pickle.
+    # The type: ignore is because mypy can't statically determine the type of this class.
+    class UnpicklerWrapper(pickle_module.Unpickler):  # type: ignore[name-defined]
+        # from https://stackoverflow.com/questions/13398462/unpickling-python-objects-with-a-changed-module-path/13405732
+        # Lets us override the imports that pickle uses when unpickling an object.
+        # This is useful for maintaining BC if we change a module path that tensor instantiation relies on.
+        def find_class(self, mod_name, name):
+            mod_name = load_module_mapping.get(mod_name, mod_name)
+            return super().find_class(mod_name, name)
+
     # Load the data (which may in turn use `persistent_load` to load tensors)
     data_file = io.BytesIO(zip_file.get_record(pickle_file))
-    unpickler = pickle_module.Unpickler(data_file, **pickle_load_args)
+
+    unpickler = UnpicklerWrapper(data_file, **pickle_load_args)
     unpickler.persistent_load = persistent_load
     result = unpickler.load()
 

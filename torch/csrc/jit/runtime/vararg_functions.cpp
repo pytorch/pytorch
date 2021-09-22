@@ -1,5 +1,7 @@
 #include <torch/csrc/jit/runtime/vararg_functions.h>
+
 #include <ATen/ATen.h>
+#include <c10/util/irange.h>
 
 namespace torch {
 namespace jit {
@@ -132,6 +134,84 @@ void format(Stack& stack, size_t num_inputs) {
   push(stack, ss.str());
 }
 
+void einsum(Stack& stack, size_t num_inputs) {
+  TORCH_CHECK(
+      num_inputs >= 2,
+      "einsum(): must specify the equation string and at least one operand, ",
+      "or at least one operand and its subscripts list");
+
+  const auto args = last(stack, num_inputs);
+
+  // Convert the subscript list format which is an interleaving of operand and
+  // its subscripts list with an optional output subscripts list at the end
+  // (see documentation for more details on this) to the equation string
+  // format by creating the equation string from the subscripts list and
+  // grouping the input operands into a tensorlist (List[Tensor]).
+  std::stringstream ss;
+
+  auto parse_sublist = [&ss](const c10::List<int64_t>& l, size_t arg_num) {
+    for (const auto i : c10::irange(l.size())) {
+      TORCH_CHECK(
+          l[i] >= 0 && l[i] < 52,
+          "einsum(): expected subscript ",
+          i,
+          " in argument ",
+          arg_num,
+          " to be within the range [0, 52), but got ",
+          l[i]);
+      if (l[i] < 26) {
+        ss << static_cast<char>(l[i] + 'A');
+      } else {
+        ss << static_cast<char>(l[i] - 26 + 'a');
+      }
+    }
+  };
+
+  // Parse subscripts for input operands
+  for (auto i = decltype(num_inputs){1}; i < num_inputs; i += 2) {
+    TORCH_CHECK(
+        args[i].isIntList(),
+        "einsum(): expected List[int] in argument ",
+        i,
+        ", but got ",
+        args[i].type()->repr_str());
+    parse_sublist(args[i].toIntList(), i);
+    if (i + 2 < num_inputs) {
+      ss << ',';
+    }
+  }
+
+  // Parse optional output subscripts (provided if #args is odd)
+  if (num_inputs % 2 == 1) {
+    TORCH_CHECK(
+        args.back().isIntList(),
+        "einsum(): expected List[int] in argument ",
+        num_inputs - 1,
+        ", but got ",
+        args.back().type()->repr_str());
+    ss << "->";
+    parse_sublist(args.back().toIntList(), num_inputs - 1);
+  }
+
+  const auto equation = ss.str();
+  std::vector<at::Tensor> operands;
+
+  // Parse input operands
+  const auto end = num_inputs % 2 == 1 ? num_inputs - 1 : num_inputs;
+  for (auto i = decltype(num_inputs){0}; i < end; i += 2) {
+    TORCH_CHECK(
+        args[i].isTensor(),
+        "einsum(): expected Tensor in argument ",
+        i,
+        ", but got ",
+        args[i].type()->repr_str());
+    operands.emplace_back(args[i].toTensor());
+  }
+
+  drop(stack, num_inputs);
+  push(stack, at::einsum(equation, operands));
+}
+
 void percentFormat(Stack& stack, size_t num_inputs) {
   auto format_str = peek(stack, 0, num_inputs).toStringRef();
   auto args = last(stack, num_inputs - 1)[0];
@@ -157,6 +237,7 @@ void percentFormat(Stack& stack, size_t num_inputs) {
       begin = percent_idx + 2; // skip the `%` and the format specifier
       continue;
     }
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     TORCH_CHECK(used_args < args_size, "Too few arguments for format string");
     char key = format_str.at(format_idx);
     IValue arg;
@@ -169,6 +250,7 @@ void percentFormat(Stack& stack, size_t num_inputs) {
     begin = percent_idx + 2;
     ++used_args;
   }
+  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   TORCH_CHECK(used_args == args_size, "Too many arguments for format string");
   drop(stack, num_inputs);
   push(stack, ss.str());
@@ -186,8 +268,9 @@ void listUnpack(Stack& stack, size_t num_outputs) {
 }
 
 void tupleConstruct(Stack& stack, size_t num_inputs) {
-  std::vector<IValue> elems{std::make_move_iterator(stack.end() - num_inputs),
-                            std::make_move_iterator(stack.end())};
+  std::vector<IValue> elems{
+      std::make_move_iterator(stack.end() - num_inputs),
+      std::make_move_iterator(stack.end())};
   drop(stack, num_inputs);
   push(stack, c10::ivalue::Tuple::create(std::move(elems)));
 }
@@ -196,28 +279,34 @@ void namedTupleConstruct(
     Stack& stack,
     at::TupleTypePtr type,
     size_t num_inputs) {
-  std::vector<IValue> elems{std::make_move_iterator(stack.end() - num_inputs),
-                            std::make_move_iterator(stack.end())};
+  std::vector<IValue> elems{
+      std::make_move_iterator(stack.end() - num_inputs),
+      std::make_move_iterator(stack.end())};
   drop(stack, num_inputs);
   push(
       stack,
       c10::ivalue::Tuple::createNamed(std::move(elems), std::move(type)));
 }
 
-void listConstruct(Stack& stack, at::ListTypePtr type, size_t num_inputs) {
-  c10::List<IValue> vals(type->getElementType());
-  vals.reserve(num_inputs);
-  for (size_t i = stack.size() - num_inputs; i < stack.size(); ++i) {
-    vals.emplace_back(std::move(stack[i]));
-  }
-  drop(stack, num_inputs);
-  push(stack, std::move(vals));
+void listConstruct(Stack& stack, const at::ListType& type, size_t num_inputs) {
+  // Structuring the implementation this way allows NRVO to avoid
+  // move-constructing vals on its way onto the stack. Moving a List
+  // isn't free.
+  auto makeList =
+      [](Stack& stack, const at::ListType& type, size_t num_inputs) {
+        c10::List<IValue> vals(type.getElementType());
+        vals.reserve(num_inputs);
+        for (size_t i = stack.size() - num_inputs; i < stack.size(); ++i) {
+          vals.push_back(std::move(stack[i]));
+        }
+        drop(stack, num_inputs);
+        return vals;
+      };
+  stack.push_back(makeList(stack, type, num_inputs));
 }
 
-void dictConstruct(Stack& stack, at::DictTypePtr type, size_t num_inputs) {
-  at::TypePtr key_type = type->getKeyType();
-  at::TypePtr value_type = type->getValueType();
-  auto vals = c10::impl::GenericDict(key_type, value_type);
+void dictConstruct(Stack& stack, const at::DictType& type, size_t num_inputs) {
+  auto vals = c10::impl::GenericDict(type.getKeyType(), type.getValueType());
   vals.reserve(num_inputs / 2);
   // loop from the bottom of the stack to ensure the dictConstruct preserve
   // the inputs order.
@@ -231,7 +320,7 @@ void dictConstruct(Stack& stack, at::DictTypePtr type, size_t num_inputs) {
   push(stack, std::move(vals));
 }
 
-void createObject(Stack& stack, at::ClassTypePtr type) {
+void createObject(Stack& stack, const at::ClassTypePtr& type) {
   auto userObj = c10::ivalue::Object::create(
       c10::StrongTypePtr(type->compilation_unit(), type),
       type->numAttributes());
@@ -254,7 +343,7 @@ void tupleSlice(Stack& stack, size_t begin, size_t end) {
   auto tuple = pop(stack).toTuple();
   std::vector<IValue> output_elems;
   output_elems.reserve(end - begin);
-  for (size_t i = begin; i < end; ++i) {
+  for (const auto i : c10::irange(begin, end)) {
     output_elems.emplace_back(tuple->elements()[i]);
   }
   push(stack, c10::ivalue::Tuple::create(std::move(output_elems)));
@@ -267,19 +356,19 @@ void dequantize(Stack& stack) {
     auto elems = tuple->elements();
     std::vector<IValue> output_elems;
     output_elems.reserve(elems.size());
-    for (size_t i = 0; i < elems.size(); ++i) {
-      if (elems[i].isTensor()) {
-        output_elems.emplace_back(at::dequantize(elems[i].toTensor()));
+    for (const auto& elem : elems) {
+      if (elem.isTensor()) {
+        output_elems.emplace_back(at::dequantize(elem.toTensor()));
       } else {
-        output_elems.emplace_back(elems[i]);
+        output_elems.emplace_back(elem);
       }
     }
     push(stack, c10::ivalue::Tuple::create(std::move(output_elems)));
   } else if (iv.isTensorList()) {
     auto elems = iv.toTensorList();
     auto output_list = c10::impl::GenericList(elems.elementType());
-    for (size_t i = 0; i < elems.size(); ++i) {
-      output_list.emplace_back(at::dequantize(elems[i]));
+    for (auto&& elem : elems) {
+      output_list.emplace_back(at::dequantize(elem));
     }
     push(stack, std::move(output_list));
   } else {

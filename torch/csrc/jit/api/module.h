@@ -18,6 +18,7 @@
 #include <ATen/core/qualified_name.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Optional.h>
+#include <c10/util/irange.h>
 
 #include <functional>
 #include <memory>
@@ -25,6 +26,8 @@
 #include <ostream>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
+#include <utility>
 #include <vector>
 
 // This file contains classes which assist in desugaring Python style
@@ -87,13 +90,13 @@ using ModuleLookup = std::function<Module(const std::vector<std::string>&)>;
 struct TORCH_API Module : public Object {
   explicit Module(c10::QualifiedName class_name);
   Module(std::shared_ptr<CompilationUnit> cu, const c10::ClassTypePtr& type);
-  Module() {}
+  Module() = default;
   Module(
       c10::QualifiedName,
       std::shared_ptr<CompilationUnit> cu,
       bool shouldMangle = false);
   Module(ModulePtr module_value) : Object(std::move(module_value)) {}
-  ~Module() {}
+  ~Module() = default;
 
   void set_optimized(bool o) {
     TORCH_WARN(
@@ -108,8 +111,8 @@ struct TORCH_API Module : public Object {
     return true;
   }
 
-  IValue forward(std::vector<IValue> inputs) {
-    return get_method("forward")(std::move(inputs));
+  IValue forward(std::vector<IValue> inputs, const Kwargs& kwargs = Kwargs()) {
+    return get_method("forward")(std::move(inputs), kwargs);
   }
 
   // In script modules, buffers are Tensors attribute that are _not_ registered
@@ -133,7 +136,7 @@ struct TORCH_API Module : public Object {
 
   void register_attribute(
       const std::string& name,
-      const TypePtr t,
+      const TypePtr& t,
       IValue v,
       bool is_param = false,
       bool is_buffer = false) {
@@ -172,8 +175,7 @@ struct TORCH_API Module : public Object {
   std::string dump_to_str(
       bool print_method_bodies,
       bool print_attr_values,
-      bool print_param_values,
-      int level) const;
+      bool print_param_values) const;
 
   /// Enables "training" mode.
   void train(bool on = true);
@@ -239,7 +241,19 @@ struct TORCH_API Module : public Object {
   // will be preserved as well
   Module clone(bool inplace = false) const;
 
+  // Clones both the underlying `ClassType` and the module instance(data), this
+  // function creates a new `ClassType` and returns a new instance that has the
+  // same data as the current instance but with the new type, shared ClassType
+  // will be preserved as well. Also allows the caller to specify a set of
+  // method and attribute names to not clone.
+  Module clone(
+      bool inplace,
+      const std::unordered_set<std::string>& ignored_method,
+      const std::unordered_set<std::string>& ignored_attributes) const;
+
   void clone_method(const Module& orig, const std::string& name);
+
+  IValue operator()(std::vector<IValue> inputs);
 
   template <typename... Types>
   IValue create_class(const c10::QualifiedName& name, Types&&... args) const {
@@ -256,7 +270,9 @@ struct TORCH_API Module : public Object {
   Module clone_impl(
       std::unordered_map<TypePtr, TypePtr>& type_remap,
       bool inplace,
-      IValue::HashAliasedIValueMap memo) const;
+      IValue::HashAliasedIValueMap memo,
+      const std::unordered_set<std::string>& ignored_methods,
+      const std::unordered_set<std::string>& ignored_attributes) const;
 
   void clone_method(
       const Module& orig,
@@ -264,7 +280,7 @@ struct TORCH_API Module : public Object {
       const std::unordered_map<TypePtr, TypePtr>& type_remap);
 
   c10::QualifiedName getNameForMethod(std::string basename) const {
-    return QualifiedName(*type()->name(), basename);
+    return QualifiedName(*type()->name(), std::move(basename));
   }
 
   void to_impl(
@@ -272,6 +288,17 @@ struct TORCH_API Module : public Object {
       const c10::optional<at::ScalarType>& dtype,
       bool non_blocking);
 };
+
+// C++ equivalent api of `torch.jit.freeze`. See documentation there for
+// details.
+TORCH_API Module freeze(
+    const Module& module,
+    c10::optional<std::vector<std::string>> preserved_attrs = c10::nullopt,
+    bool optimize_numerics = true);
+
+// C++ equivalent api of `torch.jit.optimize_for_inference`. See documentation
+// there for details.
+TORCH_API Module optimize_for_inference(Module& module);
 
 namespace detail {
 
@@ -432,7 +459,9 @@ struct slot_list_impl {
   size_t size() const {
     if (!size_) {
       size_ = size_t(0);
+      // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
       for (const value_type& s : *(this)) {
+        (void)s; // Suppress unused variable warning
         ++*size_;
       }
     }
@@ -440,7 +469,7 @@ struct slot_list_impl {
   }
 
   slot_list_impl(Module module, bool recurse, bool return_module)
-      : module_(std::move(module)),
+      : module_(module),
         recurse_(recurse),
         return_module_(return_module),
         size_(c10::nullopt) {
@@ -507,7 +536,7 @@ struct TORCH_API BufferPolicy {
   }
   static bool valid(const ClassTypePtr& typ, size_t i, const IValue& v) {
     return typ->getAttribute(i)->isSubtypeOf(TensorType::get()) &&
-        !typ->is_parameter(i);
+        typ->is_buffer(i);
   }
   static CONSTEXPR_EXCEPT_WIN_CUDA bool all_slots = false;
 };
@@ -539,7 +568,7 @@ struct NamedPolicy {
       name = (cursors.back().i_ == -1) ? "" : nameFragment(cursors.back());
     } else {
       std::ostringstream ss;
-      for (size_t i = 0; i < cursors.size(); ++i) {
+      for (const auto i : c10::irange(cursors.size())) {
         if (i > 0) {
           ss << ".";
         }
@@ -547,7 +576,7 @@ struct NamedPolicy {
       }
       name = ss.str();
     }
-    return value_type{std::move(name), Policy::create(cursors, v)};
+    return value_type{std::move(name), Policy::create(cursors, std::move(v))};
   }
   static bool valid(const ClassTypePtr& t, size_t i, const IValue& v) {
     return Policy::valid(t, i, v);

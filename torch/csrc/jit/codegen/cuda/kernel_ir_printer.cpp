@@ -1,4 +1,6 @@
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir_printer.h>
+
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/type.h>
 
@@ -48,7 +50,8 @@ void IrPrinter::printKernel(const Kernel* kernel) {
 }
 
 std::ostream& IrPrinter::indent() {
-  for (int i = 0; i < indent_level_; ++i) {
+  for (const auto i : c10::irange(indent_level_)) {
+    (void)i; // Suppress unused variable warning
     os_ << kTab;
   }
   return os_;
@@ -163,8 +166,9 @@ void IrPrinter::handle(const kir::UnaryOp* node) {
     os_ << *op << gen(node->in());
   } else {
     if (node->getUnaryOpType() == UnaryOpType::Cast) {
-      const auto cast_str = cast_func_str({node->in()->getDataType().value(),
-                                           node->out()->getDataType().value()});
+      const auto cast_str = cast_func_str(
+          {node->in()->getDataType().value(),
+           node->out()->getDataType().value()});
       os_ << cast_str.value();
     } else {
       os_ << node->getUnaryOpType();

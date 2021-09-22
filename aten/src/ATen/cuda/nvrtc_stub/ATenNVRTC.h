@@ -22,14 +22,16 @@ namespace at { namespace cuda {
 // IT IS AN ERROR TO TRY TO CALL ANY nvrtc* or cu* FUNCTION DIRECTLY.
 // INSTEAD USE, e.g.
 //   detail::getCUDAHooks().nvrtc().cuLoadModule(...)
-// oe
+// or
 //   globalContext().getNVRTC().cuLoadModule(...)
 //
-// If a function is missing add it to the list in ATen/cuda/nvrtc_stub/ATenNVRTC.h.
+// If a function is missing add it to the list in ATen/cuda/nvrtc_stub/ATenNVRTC.h
+// and edit ATen/cuda/detail/LazyNVRTC.cpp accordingly (e.g., via one of the stub
+// macros).
 
 #ifndef __HIP_PLATFORM_HCC__
 
-#define AT_FORALL_NVRTC(_)                       \
+#define AT_FORALL_NVRTC_BASE(_)                  \
   _(nvrtcVersion)                                \
   _(nvrtcAddNameExpression)                      \
   _(nvrtcCreateProgram)                          \
@@ -54,6 +56,16 @@ namespace at { namespace cuda {
   _(cuLinkAddData)                               \
   _(cuLinkComplete)
 
+#if CUDA_VERSION >= 11010
+#define AT_FORALL_NVRTC(_) \
+  AT_FORALL_NVRTC_BASE(_)  \
+  _(nvrtcGetCUBINSize)     \
+  _(nvrtcGetCUBIN)
+#else
+#define AT_FORALL_NVRTC(_) \
+  AT_FORALL_NVRTC_BASE(_)
+#endif
+
 #else
 
 // NOTE [ ATen NVRTC Stub and HIP ]
@@ -71,7 +83,7 @@ namespace at { namespace cuda {
 //
 // HIP from ROCm 3.5 on renamed hipOccupancyMaxActiveBlocksPerMultiprocessor
 // to hipModuleOccupancyMaxActiveBlocksPerMultiprocessor.
-#if HIP_VERSION < 305
+#if TORCH_HIP_VERSION < 305
 #define HIPOCCUPANCYMAXACTIVEBLOCKSPERMULTIPROCESSOR hipOccupancyMaxActiveBlocksPerMultiprocessor
 #else
 #define HIPOCCUPANCYMAXACTIVEBLOCKSPERMULTIPROCESSOR cuOccupancyMaxActiveBlocksPerMultiprocessor
@@ -105,6 +117,5 @@ extern "C" typedef struct NVRTC {
 #undef CREATE_MEMBER
 } NVRTC;
 
-extern "C" TORCH_CUDA_API NVRTC* load_nvrtc();
-
+extern "C" TORCH_CUDA_CPP_API NVRTC* load_nvrtc();
 }} // at::cuda

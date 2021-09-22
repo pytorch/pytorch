@@ -2,6 +2,7 @@
 
 #include <ATen/core/functional.h>
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/frontend/ir_emitter.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
@@ -45,7 +46,7 @@ bool needTrimGrad(Node* n) {
   return false;
 }
 
-bool isDifferentiable(Node* n) {
+bool isDifferentiable(const Node* n) {
   // TODO: scalar-tensor ops should be canonicalized
   static OperatorSet differentiable_ops = {
       "aten::thnn_conv2d_forward(Tensor self, Tensor weight, int[] kernel_size, Tensor? bias, int[] stride, int[] padding) -> (Tensor, Tensor, Tensor)",
@@ -89,7 +90,7 @@ bool isDifferentiable(Node* n) {
     return std::all_of(
         body->nodes().begin(),
         body->nodes().end(),
-        static_cast<bool (*)(Node*)>(isDifferentiable));
+        static_cast<bool (*)(const Node*)>(isDifferentiable));
   }
 
   // formulas are only defined with floating point scalars,
@@ -107,7 +108,7 @@ bool isDifferentiable(Graph& g) {
   return std::all_of(
       g.nodes().begin(),
       g.nodes().end(),
-      static_cast<bool (*)(Node*)>(isDifferentiable));
+      static_cast<bool (*)(const Node*)>(isDifferentiable));
 }
 
 // NB: Write gradient using torchscript
@@ -157,7 +158,7 @@ static c10::optional<std::vector<Value*>> build_script_grad(
     new_outputs = unpackOutputs(new_outputs);
     auto outputs = node->outputs();
     AT_ASSERT(new_outputs.size() == outputs.size() + 1);
-    for (size_t i = 0; i < outputs.size(); ++i) {
+    for (const auto i : c10::irange(outputs.size())) {
       new_outputs.at(i)->setType(outputs[i]->type());
       outputs[i]->replaceAllUsesWith(new_outputs.at(i));
     }
@@ -214,6 +215,7 @@ class GradientHelper {
     } else if (node->kind() == prim::ConstantChunk) {
       auto* g = node->owningGraph();
 
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       Value* input_list;
       if (grad_values.size() == 1 &&
           grad_values[0]->type()->isSubtypeOf(ListType::ofTensors())) {
@@ -253,12 +255,13 @@ class GradientHelper {
           graph->insertNode(graph->createTupleUnpack(backward_value));
       auto tuple_outputs = tuple_unpack_node->outputs();
       AT_ASSERT(tuple_outputs.size() == size_t(3));
-      return {tuple_outputs[0],
-              tuple_outputs[1],
-              nullptr,
-              tuple_outputs[2],
-              nullptr,
-              nullptr};
+      return {
+          tuple_outputs[0],
+          tuple_outputs[1],
+          nullptr,
+          tuple_outputs[2],
+          nullptr,
+          nullptr};
 
     } else if (
         node->matches(
@@ -282,14 +285,15 @@ class GradientHelper {
           graph->insertNode(graph->createTupleUnpack(backward_value));
       auto tuple_outputs = tuple_unpack_node->outputs();
       AT_ASSERT(tuple_outputs.size() == size_t(3));
-      return {tuple_outputs[0],
-              tuple_outputs[1],
-              tuple_outputs[2],
-              nullptr,
-              nullptr,
-              nullptr,
-              nullptr,
-              nullptr};
+      return {
+          tuple_outputs[0],
+          tuple_outputs[1],
+          tuple_outputs[2],
+          nullptr,
+          nullptr,
+          nullptr,
+          nullptr,
+          nullptr};
     }
 
     throw std::runtime_error(
@@ -560,6 +564,7 @@ static void foldSizeIfNotEqual(Node* node) {
     // insert in front of _grad_sum_to_size
     WithInsertPoint guard(node);
     IValue ival{};
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     Value* size;
     if (input_size != output_size) {
       size = node->owningGraph()->insertConstant(*input_size);

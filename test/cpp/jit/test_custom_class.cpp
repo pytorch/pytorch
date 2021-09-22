@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <test/cpp/jit/test_custom_class_registrations.h>
+#include <torch/csrc/jit/passes/freeze_module.h>
 #include <torch/custom_class.h>
 #include <torch/script.h>
 
@@ -51,6 +52,7 @@ class TorchBindTestClass : public torch::jit::CustomClassHolder {
   }
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
 constexpr char class_doc_string[] = R"(
   I am docstring for TorchBindTestClass
   Args:
@@ -59,6 +61,7 @@ constexpr char class_doc_string[] = R"(
   Return:
       How would I know? I am just a holder of some meaningless test methods.
   )";
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
 constexpr char method_doc_string[] =
     "I am docstring for TorchBindTestClass get_with_docstring method";
 
@@ -84,6 +87,49 @@ TEST(CustomClassTest, TestDocString) {
   AT_ASSERT(
       class_type->getMethod("get_with_docstring").doc_string() ==
       method_doc_string);
+}
+
+TEST(CustomClassTest, Serialization) {
+  script::Module m("m");
+
+  // test make_custom_class API
+  auto custom_class_obj = make_custom_class<MyStackClass<std::string>>(
+      std::vector<std::string>{"foo", "bar"});
+  m.register_attribute(
+      "s",
+      custom_class_obj.type(),
+      custom_class_obj,
+      // NOLINTNEXTLINE(bugprone-argument-comment)
+      /*is_parameter=*/false);
+  m.define(R"(
+    def forward(self):
+      return self.s.return_a_tuple()
+  )");
+
+  auto test_with_obj = [](script::Module& mod) {
+    auto res = mod.run_method("forward");
+    auto tup = res.toTuple();
+    AT_ASSERT(tup->elements().size() == 2);
+    auto i = tup->elements()[1].toInt();
+    AT_ASSERT(i == 123);
+  };
+
+  auto frozen_m = torch::jit::freeze_module(m.clone());
+
+  test_with_obj(m);
+  test_with_obj(frozen_m);
+
+  std::ostringstream oss;
+  m.save(oss);
+  std::istringstream iss(oss.str());
+  caffe2::serialize::IStreamAdapter adapter{&iss};
+  auto loaded_module = torch::jit::load(iss, torch::kCPU);
+
+  std::ostringstream oss_frozen;
+  frozen_m.save(oss_frozen);
+  std::istringstream iss_frozen(oss_frozen.str());
+  caffe2::serialize::IStreamAdapter adapter_frozen{&iss_frozen};
+  auto loaded_frozen_module = torch::jit::load(iss_frozen, torch::kCPU);
 }
 
 } // namespace jit

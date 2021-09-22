@@ -2,7 +2,6 @@
 from caffe2.proto import caffe2_pb2
 import os
 import sys
-import platform
 # TODO: refactor & remove the following alias
 caffe2_pb2.CPU = caffe2_pb2.PROTO_CPU
 caffe2_pb2.CUDA = caffe2_pb2.PROTO_CUDA
@@ -12,9 +11,8 @@ caffe2_pb2.OPENCL = caffe2_pb2.PROTO_OPENCL
 caffe2_pb2.IDEEP = caffe2_pb2.PROTO_IDEEP
 caffe2_pb2.HIP = caffe2_pb2.PROTO_HIP
 caffe2_pb2.COMPILE_TIME_MAX_DEVICE_TYPES = caffe2_pb2.PROTO_COMPILE_TIME_MAX_DEVICE_TYPES
-caffe2_pb2.ONLY_FOR_TEST = caffe2_pb2.PROTO_ONLY_FOR_TEST
 
-if platform.system() == 'Windows':
+if sys.platform == "win32":
     is_conda = os.path.exists(os.path.join(sys.prefix, 'conda-meta'))
     py_dll_path = os.path.join(os.path.dirname(sys.executable), 'Library', 'bin')
     th_root = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'torch')

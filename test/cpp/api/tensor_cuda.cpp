@@ -116,6 +116,7 @@ TEST(TensorTest, ToDeviceAndDtype_MultiCUDA) {
 
 TEST(TensorTest, MagmaInitializesCorrectly_CUDA) {
   // Any tensor will work here as long as it's invertible
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
   float data[] = { 1, 1, 1, 0,
                    0, 3, 1, 2,
                    2, 3, 1, 0,

@@ -9,20 +9,20 @@ namespace {
 
 Tensor empty_memory_format(
     const IntArrayRef sizes,
-    const TensorOptions& options_arg,
-    const optional<MemoryFormat> memory_format = c10::nullopt) {
-  TORCH_CHECK(
-      !(options_arg.has_memory_format() && memory_format.has_value()),
-      "Cannot set memory_format both in TensorOptions and explicit argument!");
-
-  const TensorOptions options = options_arg.merge_in(
-      TensorOptions().memory_format(memory_format));
-  verify(options);
-
+    const c10::optional<ScalarType> dtype,
+    const c10::optional<c10::Layout> layout,
+    const c10::optional<Device> device,
+    const c10::optional<bool> pin_memory,
+    const optional<MemoryFormat> memory_format) {
   return convert(vTensor{
       api::context(),
       sizes,
-      options,
+      TensorOptions()
+          .dtype(dtype)
+          .layout(layout)
+          .device(device)
+          .pinned_memory(pin_memory)
+          .memory_format(memory_format),
     });
 }
 
@@ -35,18 +35,18 @@ Tensor empty_strided(
     const optional<bool> pin_memory) {
   return empty_memory_format(
       sizes,
-      TensorOptions().
-          dtype(dtype).
-          layout(layout).
-          device(device).
-          pinned_memory(pin_memory));
+      dtype,
+      layout,
+      device,
+      pin_memory,
+      c10::MemoryFormat::Contiguous);
 }
 
 #ifdef USE_VULKAN_API
 
 TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
-  m.impl_UNBOXED("empty.memory_format", at::native::vulkan::ops::empty_memory_format);
-  m.impl("empty_strided", TORCH_FN(at::native::vulkan::ops::empty_strided));
+  m.impl(TORCH_SELECTIVE_NAME("aten::empty.memory_format"), at::native::vulkan::ops::empty_memory_format);
+  m.impl(TORCH_SELECTIVE_NAME("aten::empty_strided"), TORCH_FN(at::native::vulkan::ops::empty_strided));
 }
 
 #endif /* USE_VULKAN_API */

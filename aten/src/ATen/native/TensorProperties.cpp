@@ -1,6 +1,5 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
-#include <ATen/WrapDimUtils.h>
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/NamedTensorUtils.h>
 #include <torch/library.h>
@@ -14,15 +13,11 @@ bool is_same_size(const Tensor& self, const Tensor& other) {
 }
 
 int64_t size(const Tensor& self, int64_t dim) {
-  // false is passed to maybe_wrap_dim so behavior is identical to array access (but with wrapping)
-  dim = maybe_wrap_dim(dim, self.dim(), false);
-  return self.sizes()[dim];
+  return self.size(dim);
 }
 
 int64_t stride(const Tensor& self, int64_t dim) {
-  // false is passed to maybe_wrap_dim so behavior is identical to array access (but with wrapping)
-  dim = maybe_wrap_dim(dim, self.dim(), false);
-  return self.strides()[dim];
+  return self.stride(dim);
 }
 
 int64_t size(const Tensor& self, Dimname dim) {
@@ -52,12 +47,6 @@ bool cudnn_is_acceptable(const Tensor& self) {
   return true;
 }
 
-Tensor detach(const Tensor& self) {
-  // this just exists to give us a hook in VariableType and an entry in Declarations.yaml
-  //AT_ERROR("detach is not implemented for Tensor");
-  return self;
-}
-
 Tensor & detach_(Tensor & self) {
   // this just exists to give us a hook in VariableType and an entry in Declarations.yaml
   //AT_ERROR("detach_ is not implemented for Tensor");
@@ -76,8 +65,7 @@ Tensor contiguous(const Tensor& self, MemoryFormat memory_format) {
       memory_format != MemoryFormat::Preserve,
       "preserve memory format is unsupported by the contiguous operator");
 
-  auto result = at::empty_like(self, self.options(), memory_format);
-  return result.copy_(self);
+  return self.clone(memory_format);
 }
 
 bool is_set_to(const Tensor& self, const Tensor& src) {

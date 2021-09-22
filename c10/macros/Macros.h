@@ -24,15 +24,18 @@
 #include <c10/macros/Export.h>
 
 #if defined(__clang__)
-  #define __ubsan_ignore_float_divide_by_zero__ __attribute__((no_sanitize("float-divide-by-zero")))
-  #define __ubsan_ignore_undefined__ __attribute__((no_sanitize("undefined")))
-  #define __ubsan_ignore_signed_int_overflow__ __attribute__((no_sanitize("signed-integer-overflow")))
+#define __ubsan_ignore_float_divide_by_zero__ \
+  __attribute__((no_sanitize("float-divide-by-zero")))
+#define __ubsan_ignore_undefined__ __attribute__((no_sanitize("undefined")))
+#define __ubsan_ignore_signed_int_overflow__ \
+  __attribute__((no_sanitize("signed-integer-overflow")))
+#define __ubsan_ignore_function__ __attribute__((no_sanitize("function")))
 #else
-  #define __ubsan_ignore_float_divide_by_zero__
-  #define __ubsan_ignore_undefined__
-  #define __ubsan_ignore_signed_int_overflow__
+#define __ubsan_ignore_float_divide_by_zero__
+#define __ubsan_ignore_undefined__
+#define __ubsan_ignore_signed_int_overflow__
+#define __ubsan_ignore_function__
 #endif
-
 
 // Detect address sanitizer as some stuff doesn't work with it
 #undef C10_ASAN_ENABLED
@@ -57,7 +60,6 @@
 #define C10_ASAN_ENABLED 0
 #endif
 
-
 // Disable the copy and assignment operator for a class. Note that this will
 // disable the usage of the class in std containers.
 #define C10_DISABLE_COPY_AND_ASSIGN(classname) \
@@ -77,11 +79,18 @@
  * str and ending with a number that varies with the line.
  */
 #ifdef __COUNTER__
+#define C10_UID __COUNTER__
 #define C10_ANONYMOUS_VARIABLE(str) C10_CONCATENATE(str, __COUNTER__)
 #else
+#define C10_UID __LINE__
 #define C10_ANONYMOUS_VARIABLE(str) C10_CONCATENATE(str, __LINE__)
 #endif
 
+#ifdef __has_cpp_attribute
+#define C10_HAS_CPP_ATTRIBUTE(x) __has_cpp_attribute(x)
+#else
+#define C10_HAS_CPP_ATTRIBUTE(x) (0)
+#endif
 
 /// C10_NODISCARD - Warn if a type or return value is discarded.
 
@@ -106,24 +115,25 @@
 //  - gcc 8.3: https://godbolt.org/z/4tLMQS (always advertises support)
 #define C10_NODISCARD
 #if defined(__has_cpp_attribute)
-# if __has_cpp_attribute(nodiscard)
-#  undef C10_NODISCARD
-#  define C10_NODISCARD [[nodiscard]]
-# endif
+#if __has_cpp_attribute(nodiscard)
+#undef C10_NODISCARD
+#define C10_NODISCARD [[nodiscard]]
+#endif
 // Workaround for llvm.org/PR23435, since clang 3.6 and below emit a spurious
 // error when __has_cpp_attribute is given a scoped attribute in C mode.
 #elif __cplusplus && defined(__has_cpp_attribute)
-# if __has_cpp_attribute(clang::warn_unused_result)
-// TODO: It's possible this is still triggering https://github.com/pytorch/pytorch/issues/13118
-// on Windows; if it is, better fix it.
-#  undef C10_NODISCARD
-#  define C10_NODISCARD [[clang::warn_unused_result]]
-# endif
+#if __has_cpp_attribute(clang::warn_unused_result)
+// TODO: It's possible this is still triggering
+// https://github.com/pytorch/pytorch/issues/13118 on Windows; if it is, better
+// fix it.
+#undef C10_NODISCARD
+#define C10_NODISCARD [[clang::warn_unused_result]]
+#endif
 #endif
 
 // suppress an unused variable.
 #if defined(_MSC_VER) && !defined(__clang__)
-#define C10_UNUSED __pragma(warning(suppress: 4100 4101))
+#define C10_UNUSED __pragma(warning(suppress : 4100 4101))
 #else
 #define C10_UNUSED __attribute__((__unused__))
 #endif //_MSC_VER
@@ -133,16 +143,28 @@
 // Simply define the namespace, in case a dependent library want to refer to
 // the c10 namespace but not any nontrivial files.
 namespace c10 {} // namespace c10
-namespace c10 { namespace cuda {} }
-namespace c10 { namespace hip {} }
+namespace c10 {
+namespace cuda {}
+} // namespace c10
+namespace c10 {
+namespace hip {}
+} // namespace c10
 
 // Since C10 is the core library for caffe2 (and aten), we will simply reroute
 // all abstractions defined in c10 to be available in caffe2 as well.
 // This is only for backwards compatibility. Please use the symbols from the
 // c10 namespace where possible.
-namespace caffe2 { using namespace c10; }
-namespace at { using namespace c10; }
-namespace at { namespace cuda { using namespace c10::cuda; }}
+namespace caffe2 {
+using namespace c10;
+}
+namespace at {
+using namespace c10;
+}
+namespace at {
+namespace cuda {
+using namespace c10::cuda;
+}
+} // namespace at
 
 // WARNING!!! THIS IS A GIANT HACK!!!
 // This line means you cannot simultaneously include c10/hip
@@ -152,7 +174,11 @@ namespace at { namespace cuda { using namespace c10::cuda; }}
 // from at::cuda.  This namespace makes that happen.  When
 // HIPIFY is no longer out-of-place, we can switch the cuda
 // here to hip and everyone is happy.
-namespace at { namespace cuda { using namespace c10::hip; }}
+namespace at {
+namespace cuda {
+using namespace c10::hip;
+}
+} // namespace at
 
 // C10_LIKELY/C10_UNLIKELY
 //
@@ -167,36 +193,60 @@ namespace at { namespace cuda { using namespace c10::hip; }}
 // without it.
 //
 #if defined(__GNUC__) || defined(__ICL) || defined(__clang__)
-#define C10_LIKELY(expr)    (__builtin_expect(static_cast<bool>(expr), 1))
-#define C10_UNLIKELY(expr)  (__builtin_expect(static_cast<bool>(expr), 0))
+#define C10_LIKELY(expr) (__builtin_expect(static_cast<bool>(expr), 1))
+#define C10_UNLIKELY(expr) (__builtin_expect(static_cast<bool>(expr), 0))
 #else
-#define C10_LIKELY(expr)    (expr)
-#define C10_UNLIKELY(expr)  (expr)
+#define C10_LIKELY(expr) (expr)
+#define C10_UNLIKELY(expr) (expr)
 #endif
 
 /// C10_NOINLINE - Functions whose declaration is annotated with this will not
 /// be inlined.
 #ifdef __GNUC__
-#define C10_NOINLINE __attribute__((__noinline__))
+#define C10_NOINLINE __attribute__((noinline))
 #elif _MSC_VER
 #define C10_NOINLINE __declspec(noinline)
 #else
 #define C10_NOINLINE
 #endif
 
+#if defined(_MSC_VER)
+#define C10_ALWAYS_INLINE __forceinline
+#elif __has_attribute(always_inline) || defined(__GNUC__)
+#define C10_ALWAYS_INLINE __attribute__((__always_inline__)) inline
+#else
+#define C10_ALWAYS_INLINE inline
+#endif
+
+// C10_FALLTHROUGH - Annotate fallthrough to the next case in a switch.
+#if C10_HAS_CPP_ATTRIBUTE(fallthrough)
+#define C10_FALLTHROUGH [[fallthrough]]
+#else
+#define C10_FALLTHROUGH
+#endif
+
 #include <sstream>
 #include <string>
+
+#ifdef __HIPCC__
+// Unlike CUDA, HIP requires a HIP header to be included for __host__ to work.
+// We do this #include here so that C10_HOST_DEVICE and friends will Just Work.
+// See https://github.com/ROCm-Developer-Tools/HIP/issues/441
+#include <hip/hip_runtime.h>
+#endif
 
 #if defined(__CUDACC__) || defined(__HIPCC__)
 // Designates functions callable from the host (CPU) and the device (GPU)
 #define C10_HOST_DEVICE __host__ __device__
 #define C10_DEVICE __device__
 #define C10_HOST __host__
-// constants from (https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#features-and-technical-specifications)
-// The maximum number of threads per multiprocessor is 1024 for Turing architecture (7.5),
-// 1536 for Geforce Ampere (8.6),
-// and 2048 for all other architectures. You'll get warnings if you exceed these constants.
-// Hence, the following macros adjust the input values from the user to resolve potential warnings.
+// constants from
+// (https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#features-and-technical-specifications)
+// The maximum number of threads per multiprocessor is 1024 for Turing
+// architecture (7.5), 1536 for Geforce Ampere (8.6), and 2048 for all other
+// architectures. You'll get warnings if you exceed these constants. Hence, the
+// following macros adjust the input values from the user to resolve potential
+// warnings.
 #if __CUDA_ARCH__ == 750
 constexpr uint32_t CUDA_MAX_THREADS_PER_SM = 1024;
 #elif __CUDA_ARCH__ == 860
@@ -206,25 +256,39 @@ constexpr uint32_t CUDA_MAX_THREADS_PER_SM = 2048;
 #endif
 // CUDA_MAX_THREADS_PER_BLOCK is same for all architectures currently
 constexpr uint32_t CUDA_MAX_THREADS_PER_BLOCK = 1024;
-// CUDA_THREADS_PER_BLOCK_FALLBACK is the "canonical fallback" choice of block size.
-// 256 is a good number for this fallback and should give good occupancy and
-// versatility across all architectures.
+// CUDA_THREADS_PER_BLOCK_FALLBACK is the "canonical fallback" choice of block
+// size. 256 is a good number for this fallback and should give good occupancy
+// and versatility across all architectures.
 constexpr uint32_t CUDA_THREADS_PER_BLOCK_FALLBACK = 256;
 // NOTE: if you are thinking of constexpr-ify the inputs to launch bounds, it
 //       turns out that although __launch_bounds__ can take constexpr, it
 //       can't take a constexpr that has anything to do with templates.
 //       Currently we use launch_bounds that depend on template arguments in
-//       Loops.cuh, Reduce.cuh and LossCTC.cuh. Hence, C10_MAX_THREADS_PER_BLOCK and
-//       C10_MIN_BLOCKS_PER_SM are kept as macros.
-// Suppose you were planning to write __launch_bounds__(a, b), based on your performance tuning on a modern GPU.
-// Instead, you should write __launch_bounds__(C10_MAX_THREADS_PER_BLOCK(a), C10_MIN_BLOCKS_PER_SM(a, b)),
+//       Loops.cuh, Reduce.cuh and LossCTC.cuh. Hence, C10_MAX_THREADS_PER_BLOCK
+//       and C10_MIN_BLOCKS_PER_SM are kept as macros.
+// Suppose you were planning to write __launch_bounds__(a, b), based on your
+// performance tuning on a modern GPU. Instead, you should write
+// __launch_bounds__(C10_MAX_THREADS_PER_BLOCK(a), C10_MIN_BLOCKS_PER_SM(a, b)),
 // which will also properly respect limits on old architectures.
-#define C10_MAX_THREADS_PER_BLOCK(val) (((val) <= CUDA_MAX_THREADS_PER_BLOCK) ? (val) : CUDA_THREADS_PER_BLOCK_FALLBACK)
-#define C10_MIN_BLOCKS_PER_SM(threads_per_block, blocks_per_sm) ((((threads_per_block)*(blocks_per_sm) <= CUDA_MAX_THREADS_PER_SM) ? (blocks_per_sm) : ((CUDA_MAX_THREADS_PER_SM + (threads_per_block) - 1) / (threads_per_block))))
+#define C10_MAX_THREADS_PER_BLOCK(val)           \
+  (((val) <= CUDA_MAX_THREADS_PER_BLOCK) ? (val) \
+                                         : CUDA_THREADS_PER_BLOCK_FALLBACK)
+#define C10_MIN_BLOCKS_PER_SM(threads_per_block, blocks_per_sm)        \
+  ((((threads_per_block) * (blocks_per_sm) <= CUDA_MAX_THREADS_PER_SM) \
+        ? (blocks_per_sm)                                              \
+        : ((CUDA_MAX_THREADS_PER_SM + (threads_per_block)-1) /         \
+           (threads_per_block))))
 // C10_LAUNCH_BOUNDS is analogous to __launch_bounds__
-#define C10_LAUNCH_BOUNDS_0 __launch_bounds__(256, 4) // default launch bounds that should give good occupancy and versatility across all architectures.
-#define C10_LAUNCH_BOUNDS_1(max_threads_per_block) __launch_bounds__((C10_MAX_THREADS_PER_BLOCK((max_threads_per_block))))
-#define C10_LAUNCH_BOUNDS_2(max_threads_per_block, min_blocks_per_sm) __launch_bounds__((C10_MAX_THREADS_PER_BLOCK((max_threads_per_block))), (C10_MIN_BLOCKS_PER_SM((max_threads_per_block), (min_blocks_per_sm))))
+#define C10_LAUNCH_BOUNDS_0 \
+  __launch_bounds__(        \
+      256, 4) // default launch bounds that should give good occupancy and
+              // versatility across all architectures.
+#define C10_LAUNCH_BOUNDS_1(max_threads_per_block) \
+  __launch_bounds__((C10_MAX_THREADS_PER_BLOCK((max_threads_per_block))))
+#define C10_LAUNCH_BOUNDS_2(max_threads_per_block, min_blocks_per_sm) \
+  __launch_bounds__(                                                  \
+      (C10_MAX_THREADS_PER_BLOCK((max_threads_per_block))),           \
+      (C10_MIN_BLOCKS_PER_SM((max_threads_per_block), (min_blocks_per_sm))))
 #else
 #define C10_HOST_DEVICE
 #define C10_HOST
@@ -238,7 +302,7 @@ constexpr uint32_t CUDA_THREADS_PER_BLOCK_FALLBACK = 256;
 #endif
 
 #ifdef __HIP_PLATFORM_HCC__
-#define C10_WARP_SIZE 64
+#define C10_WARP_SIZE warpSize // = 64 or 32 (Defined in hip_runtime.h)
 #else
 #define C10_WARP_SIZE 32
 #endif
@@ -250,20 +314,19 @@ constexpr uint32_t CUDA_THREADS_PER_BLOCK_FALLBACK = 256;
 // CUDA_KERNEL_ASSERT checks the assertion
 // even when NDEBUG is defined. This is useful for important assertions in CUDA
 // code that would otherwise be suppressed when building Release.
-#if defined(__ANDROID__) || defined(__APPLE__) || defined(__HIP_PLATFORM_HCC__)
+#if defined(__ANDROID__) || defined(__APPLE__) || \
+    (defined(__HIP_PLATFORM_HCC__) && ROCM_VERSION < 40100)
 // Those platforms do not support assert()
 #define CUDA_KERNEL_ASSERT(cond)
 #elif defined(_MSC_VER)
 #if defined(NDEBUG)
 extern "C" {
-  C10_IMPORT
+C10_IMPORT
 #if defined(__CUDA_ARCH__) || defined(__HIP_ARCH__) || defined(__HIP__)
-    __host__ __device__
+__host__ __device__
 #endif // __CUDA_ARCH__
- void _wassert(
-    wchar_t const* _Message,
-    wchar_t const* _File,
-    unsigned _Line);
+    void
+    _wassert(wchar_t const* _Message, wchar_t const* _File, unsigned _Line);
 }
 #endif
 #define CUDA_KERNEL_ASSERT(cond)                                                                 \
@@ -273,6 +336,13 @@ extern "C" {
 #else // __APPLE__, _MSC_VER
 #if defined(NDEBUG)
 extern "C" {
+#if defined(__SYCL_DEVICE_ONLY__)
+extern SYCL_EXTERNAL void __assert_fail(
+    const char* expr,
+    const char* file,
+    unsigned int line,
+    const char* func);
+#else // __SYCL_DEVICE_ONLY__
 #if (defined(__CUDA_ARCH__) && !(defined(__clang__) && defined(__CUDA__))) || \
     defined(__HIP_ARCH__) || defined(__HIP__)
 __host__ __device__
@@ -282,13 +352,21 @@ __host__ __device__
         const char* assertion,
         const char* file,
         unsigned int line,
-        const char* function) throw();
+        const char* function) throw()
+// We match the declaration of __assert_fail exactly how it is in glibc in case
+// parts of the program are compiled with different NDEBUG settings. Otherwise
+// we might get 'ambiguous declaration' error.
+#ifdef __GNUC__
+        __attribute__((__noreturn__))
+#endif
+        ;
+#endif
 }
 #endif // NDEBUG
 #define CUDA_KERNEL_ASSERT(cond)                                         \
   if (C10_UNLIKELY(!(cond))) {                                           \
-    __assert_fail(#cond, __FILE__, static_cast<unsigned int>(__LINE__),  \
-                  __func__);                                             \
+    __assert_fail(                                                       \
+        #cond, __FILE__, static_cast<unsigned int>(__LINE__), __func__); \
   }
 #endif // __APPLE__
 
@@ -306,7 +384,7 @@ __host__ __device__
 #define C10_MOBILE 1
 #endif // ANDROID / IOS
 
-// Portably determine if a type T is trivially copyable or not.
+// Portable determination of whether type T is trivially copyable.
 // Warning: __has_trivial_copy for GCC may not always detect the non-POD
 // correctly. For example, T = std::unique_ptr may evaluate to true and be
 // treated as POD. This can cause unexpected behavior.
@@ -314,28 +392,6 @@ __host__ __device__
 #define C10_IS_TRIVIALLY_COPYABLE(T) __has_trivial_copy(T)
 #else
 #define C10_IS_TRIVIALLY_COPYABLE(T) std::is_trivially_copyable<T>::value
-#endif
-
-// We need --expt-relaxed-constexpr in CUDA because of Eigen. This flag allows
-// device code in CUDA to call host constexpr functions. Unfortunately,
-// the CUDA compiler (at least for CUDA 9.0, 9.1 and 9.2) isn't compatible
-// with many of the constexpr things we'd like to do and the device code
-// compiler crashes when it sees one of these host-only functions.
-// It works when nvcc builds host code, but not when it builds device code
-// and notices it can call these constexpr functions from device code.
-// As a workaround, we use C10_HOST_CONSTEXPR instead of constexpr for these
-// functions. This enables constexpr when compiled on the host and applies
-// __host__ when it is compiled on the device in an attempt to stop it from
-// being called from device functions. Not sure if the latter works, but
-// even if not, it not being constexpr anymore should be enough to stop
-// it from being called from device code.
-// TODO This occurred in CUDA 9 (9.0 to 9.2). Test if this is fixed in CUDA 10.
-#if defined(__CUDA_ARCH__)
-#define C10_HOST_CONSTEXPR __host__
-#define C10_HOST_CONSTEXPR_VAR
-#else
-#define C10_HOST_CONSTEXPR constexpr
-#define C10_HOST_CONSTEXPR_VAR constexpr
 #endif
 
 #if !defined(__clang__) && !defined(_MSC_VER) && defined(__GNUC__) && \
@@ -351,17 +407,60 @@ __host__ __device__
 #if defined(_MSC_VER) && defined(__CUDACC__)
 #define CONSTEXPR_EXCEPT_WIN_CUDA const
 #define C10_HOST_CONSTEXPR_EXCEPT_WIN_CUDA __host__
+
+// Note [static constexpr char* members for windows NVCC]
+// The Windows NVCC compiler doesn't handle static constexpr class members,
+// although it's fixed in a later version.
+// (see
+// https://developercommunity.visualstudio.com/t/intellisense-error-c11-static-constexpr-member-ini/245425)
+//
+// If we want to ensure that our field is static under all builds, then we need
+// to work around it specifically for windows NVCC by making it (a) const, (b)
+// defined outside of the class definition We need to define it outside of the
+// class definition because of the C++ standard; char* is not an integral type
+// (see
+// https://stackoverflow.com/questions/24278473/intellisense-a-member-of-type-const-char-const-cannot-have-an-in-class-in)
+//
+// So instead of this:
+// struct Foo {
+//     static constexpr const char* name = "foo";
+// }
+// In Windows NVCC, we end up with this:
+// struct Foo {
+//     static const char* name;
+// }
+// const char* Foo::name = "foo";
+//
+// This gives us a small perf hit for any code that wants to access these field
+// members, but right now it isn't used in any perf-critical code paths.
+#define STATIC_CONSTEXPR_STR_INL_EXCEPT_WIN_CUDA(field, val) \
+  static const char* field;
+#define STATIC_CONST_STR_OUT_OF_LINE_FOR_WIN_CUDA(cls, field, val) \
+  const char* cls::field = val;
 #else
 #define CONSTEXPR_EXCEPT_WIN_CUDA constexpr
 #define C10_HOST_CONSTEXPR_EXCEPT_WIN_CUDA __host__
+
+#define STATIC_CONSTEXPR_STR_INL_EXCEPT_WIN_CUDA(field, val) \
+  static constexpr const char* field = val;
+#define STATIC_CONST_STR_OUT_OF_LINE_FOR_WIN_CUDA(cls, field, val)
 #endif
 #else
 #if defined(_MSC_VER) && defined(__CUDACC__)
 #define CONSTEXPR_EXCEPT_WIN_CUDA const
 #define C10_HOST_CONSTEXPR_EXCEPT_WIN_CUDA
+
+#define STATIC_CONSTEXPR_STR_INL_EXCEPT_WIN_CUDA(field, val) \
+  static const char* field;
+#define STATIC_CONST_STR_OUT_OF_LINE_FOR_WIN_CUDA(cls, field, val) \
+  const char* cls::field = val;
 #else
 #define CONSTEXPR_EXCEPT_WIN_CUDA constexpr
 #define C10_HOST_CONSTEXPR_EXCEPT_WIN_CUDA constexpr
+
+#define STATIC_CONSTEXPR_STR_INL_EXCEPT_WIN_CUDA(field, val) \
+  static constexpr const char* field = val;
+#define STATIC_CONST_STR_OUT_OF_LINE_FOR_WIN_CUDA(cls, field, val)
 #endif
 #endif
 

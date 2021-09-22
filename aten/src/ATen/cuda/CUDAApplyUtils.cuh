@@ -5,7 +5,7 @@
 #include <THC/THCAtomics.cuh>
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/macros/Macros.h>
-#include <ATen/LegacyTHFunctionsCUDA.h>
+#include <ATen/native/Copy.h>
 
 #include <math.h>
 
@@ -356,9 +356,11 @@ template <typename Op,
           typename scalar2,
           typename IndexType,
           int ADims, int BDims,
-          int step>
+          int step,
+          int max_threads_per_block=AT_APPLY_THREADS_PER_BLOCK,
+          int min_blocks_per_sm=AT_APPLY_BLOCKS_PER_SM>
 #if __CUDA_ARCH__ >= 350 || defined __HIP_PLATFORM_HCC__
-C10_LAUNCH_BOUNDS_2(AT_APPLY_THREADS_PER_BLOCK, AT_APPLY_BLOCKS_PER_SM)
+C10_LAUNCH_BOUNDS_2(max_threads_per_block, min_blocks_per_sm)
 #endif
 __global__ void
 kernelPointwiseApply2(detail::TensorInfo<scalar1, IndexType> a,
@@ -385,9 +387,9 @@ __host__ __device__ __forceinline__ T ATenCeilDiv(T a, T b) {
 }
 
 template <int step = 1>
-inline bool getApplyGrid(uint64_t totalElements, dim3& grid, int64_t curDevice) {
+inline bool getApplyGrid(uint64_t totalElements, dim3& grid, int64_t curDevice, int max_threads_per_block=AT_APPLY_THREADS_PER_BLOCK) {
   if (curDevice == -1) return false;
-  uint64_t numel_per_thread = static_cast<uint64_t>(AT_APPLY_THREADS_PER_BLOCK) * static_cast<uint64_t>(step);
+  uint64_t numel_per_thread = static_cast<uint64_t>(max_threads_per_block) * static_cast<uint64_t>(step);
   uint64_t numBlocks = ATenCeilDiv(totalElements, numel_per_thread);
   uint64_t maxGridX = at::cuda::getDeviceProperties(curDevice)->maxGridSize[0];
   if (numBlocks > maxGridX)
@@ -396,11 +398,21 @@ inline bool getApplyGrid(uint64_t totalElements, dim3& grid, int64_t curDevice) 
   return true;
 }
 
-inline dim3 getApplyBlock() {
-  return dim3(AT_APPLY_THREADS_PER_BLOCK);
+constexpr int getApplyBlocksPerSM() {
+  return AT_APPLY_BLOCKS_PER_SM;
 }
 
-template <typename scalar1, typename scalar2, int step, typename Op>
+constexpr int getApplyBlockSize() {
+  return AT_APPLY_THREADS_PER_BLOCK;
+}
+
+inline dim3 getApplyBlock(int max_threads_per_block=AT_APPLY_THREADS_PER_BLOCK) {
+  return dim3(max_threads_per_block);
+}
+
+template <typename scalar1, typename scalar2, int step, typename Op,
+          int max_threads_per_block=AT_APPLY_THREADS_PER_BLOCK,
+          int min_blocks_per_sm=AT_APPLY_BLOCKS_PER_SM>
 inline bool CUDA_tensor_apply2(at::Tensor a,
                                at::Tensor b,
                                const Op op,
@@ -422,12 +434,12 @@ inline bool CUDA_tensor_apply2(at::Tensor a,
     // Empty tensor; do nothing
     return true;
   }
-  const dim3 block = getApplyBlock();
+  const dim3 block = getApplyBlock(max_threads_per_block);
 
   dim3 grid;
   int64_t curDevice = current_device();
   if (curDevice == -1) return false;
-  if (!getApplyGrid<step>(totalElements, grid, curDevice)) {
+  if (!getApplyGrid<step>(totalElements, grid, curDevice, max_threads_per_block)) {
     return false;
   }
 
@@ -441,13 +453,11 @@ inline bool CUDA_tensor_apply2(at::Tensor a,
 
   if (aType == TensorArgType::ReadWrite && detail::maybeOverlappingIndices(a)) {
     // Must perform in contiguous space
-    oldA = a;
-    a = a.contiguous();
+    oldA = std::exchange(a, a.contiguous());
   }
   if (bType == TensorArgType::ReadWrite && detail::maybeOverlappingIndices(b)) {
     // Must perform in contiguous space
-    oldB = b;
-    b = b.contiguous();
+    oldB = std::exchange(b, b.contiguous());
   }
 
   // It is possible that the tensor dimensions are able to be collapsed,
@@ -463,9 +473,12 @@ inline bool CUDA_tensor_apply2(at::Tensor a,
   kernelPointwiseApply2<Op,                                            \
                         scalar1,                                       \
                         scalar2,                                       \
-                        TYPE, A, B, step>                              \
+                        TYPE, A, B, step,                              \
+                        max_threads_per_block,                         \
+                        min_blocks_per_sm>                             \
    <<<grid, block, 0, at::cuda::getCurrentCUDAStream(curDevice)>>>(    \
-       aInfo, bInfo, static_cast<TYPE>(totalElements), op);
+       aInfo, bInfo, static_cast<TYPE>(totalElements), op);            \
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 
 #define HANDLE_B_CASE(TYPE, A, B) {         \
   switch (B) {                              \
@@ -532,30 +545,27 @@ inline bool CUDA_tensor_apply2(at::Tensor a,
 #undef HANDLE_A_CASE
 
   if (oldA.defined()) {
-    // Ignore overlaps when copying back; if we use copy
-    // instead, it will recursively try and invoke ourselves to make
-    // oldA contiguous.
-    at::native::legacy::cuda::_th_copy_ignoring_overlaps_(oldA, a);
+    at::native::copy_ignoring_overlaps(oldA, a);
   }
 
   if (oldB.defined()) {
-    // Ignore overlaps when copying back; if we use copy
-    // instead, it will recursively try and invoke ourselves to make
-    // oldB contiguous.
-    at::native::legacy::cuda::_th_copy_ignoring_overlaps_(oldB, b);
+    at::native::copy_ignoring_overlaps(oldB, b);
   }
 
   return true;
 }
 
 /* Provides default step = 1 to CUDA_tensor_apply2. */
-template <typename scalar1, typename scalar2, typename Op>
+template <typename scalar1, typename scalar2, typename Op,
+          int max_threads_per_block=AT_APPLY_THREADS_PER_BLOCK,
+          int min_blocks_per_sm=AT_APPLY_BLOCKS_PER_SM>
 inline bool CUDA_tensor_apply2(at::Tensor a,
                                at::Tensor b,
                                const Op op,
                                TensorArgType aType = TensorArgType::ReadWrite,
                                TensorArgType bType = TensorArgType::ReadOnly) {
-  return CUDA_tensor_apply2<scalar1, scalar2, 1, Op>(a, b, op, aType, bType);
+  return CUDA_tensor_apply2<scalar1, scalar2, 1, Op,
+                            max_threads_per_block, min_blocks_per_sm>(a, b, op, aType, bType);
 }
 
 } // cuda

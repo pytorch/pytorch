@@ -1,4 +1,6 @@
 #include <torch/csrc/jit/codegen/cuda/lower_utils.h>
+
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/codegen/cuda/arith.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
@@ -208,7 +210,7 @@ class ReplaceExprsInScope : public OptOutDispatch {
       : replacement_map_(std::move(replacement_map)) {}
 
   void handleScope(kir::Scope& scope) {
-    for (size_t i = 0; i < scope.size(); ++i) {
+    for (const auto i : c10::irange(scope.size())) {
       const auto it = replacement_map_.find(scope[i]);
       if (it == replacement_map_.end()) {
         handle(scope[i]);
@@ -488,12 +490,13 @@ bool isUnrolledFor(const Expr* expr) {
 }
 
 const std::unordered_map<ParallelType, int, TypeHash>
-    ParallelTypeBitmap::pt_to_offset_{{ParallelType::BIDx, 0},
-                                      {ParallelType::BIDy, 1},
-                                      {ParallelType::BIDz, 2},
-                                      {ParallelType::TIDx, 3},
-                                      {ParallelType::TIDy, 4},
-                                      {ParallelType::TIDz, 5}};
+    ParallelTypeBitmap::pt_to_offset_{
+        {ParallelType::BIDx, 0},
+        {ParallelType::BIDy, 1},
+        {ParallelType::BIDz, 2},
+        {ParallelType::TIDx, 3},
+        {ParallelType::TIDy, 4},
+        {ParallelType::TIDz, 5}};
 
 const std::unordered_map<int, ParallelType> ParallelTypeBitmap::offset_to_pt_ =
     {{0, ParallelType::BIDx},
@@ -645,7 +648,7 @@ std::pair<kir::ForLoop*, int64_t> getAllocPoint(
   auto loops_it = loops.begin();
 
   // Look at each axis individually in out's domain
-  for (int64_t tv_i = 0; tv_i < (int64_t)tv->getThisComputeAtAxis(); tv_i++) {
+  for (const auto tv_i : c10::irange((int64_t)tv->getThisComputeAtAxis())) {
     // Grab the axis ID
 
     auto ca_id = tv->getComputeAtAxis(tv_i).first;

@@ -21,7 +21,7 @@
 
 // fuser and IR parser
 #include <torch/csrc/jit/codegen/cuda/parser.h>
-#include "torch/csrc/jit/ir/irparser.h"
+#include <torch/csrc/jit/ir/irparser.h>
 
 #include <ATen/cuda/Exceptions.h>
 #include <c10/cuda/CUDAStream.h>
@@ -59,9 +59,9 @@ TensorView* makeConcreteTensor(
   // We can uncomment the below statement to test all tests with contiguous
   // tensors. return makeContigTensor(nDims, dtype);
   std::vector<IterDomain*> dom;
-  for (size_t i = 0; i < sizes.size(); i++) {
-    if (sizes[i] >= 0) {
-      dom.push_back(new IterDomain(new Int(0), new Int(sizes[i])));
+  for (int size : sizes) {
+    if (size >= 0) {
+      dom.push_back(new IterDomain(new Int(0), new Int(size)));
     } else {
       dom.push_back(new IterDomain(new Int(0), new Int()));
     }
@@ -1101,12 +1101,12 @@ TEST(NVFuserTest, FusionParser_CUDA) {
   // strides are not yet supported in the irparser.
   for (auto val : g->block()->inputs()) {
     if (val->isCompleteTensor())
-      val->setType(val->type()->cast<TensorType>()->contiguous());
+      val->setType(val->type()->castRaw<TensorType>()->contiguous());
   }
   for (auto node : g->block()->nodes()) {
     for (auto val : node->outputs()) {
       if (val->isCompleteTensor())
-        val->setType(val->type()->cast<TensorType>()->contiguous());
+        val->setType(val->type()->castRaw<TensorType>()->contiguous());
     }
   }
 
@@ -2426,9 +2426,9 @@ Val* gen_jit_operand(std::pair<ValType, DataType> desc) {
     else if (desc.second == DataType::Int)
       return new Int();
     else
-      TORCH_CHECK("Not currently supported type", desc.first);
+      TORCH_CHECK(false, "Not currently supported type", desc.first);
   } else {
-    TORCH_CHECK("Not currently supported type", desc.first);
+    TORCH_CHECK(false, "Not currently supported type", desc.first);
   }
   return nullptr;
 }
@@ -2606,44 +2606,40 @@ TEST(NVFuserTest, FusionUnaryOps_CUDA) {
   using OpTuple =
       std::tuple<at::Tensor (*)(const at::Tensor&), UnaryOpType, std::string>;
 
-  // [Note: explicit tuple type for uniform initialization list]
-  // Tuple type must be explicitly specified for each uniform initialization
-  // list within the vector to make this code compatible with some old env
-  // which we still need to support. eg. gcc 5.4 + cuda 9.2.
   std::vector<OpTuple> ops{
-      OpTuple{at::abs, UnaryOpType::Abs, "abs"},
-      OpTuple{at::acos, UnaryOpType::Acos, "acos"},
-      OpTuple{at::asin, UnaryOpType::Asin, "asin"},
-      OpTuple{at::atan, UnaryOpType::Atan, "atan"},
+      {at::abs, UnaryOpType::Abs, "abs"},
+      {at::acos, UnaryOpType::Acos, "acos"},
+      {at::asin, UnaryOpType::Asin, "asin"},
+      {at::atan, UnaryOpType::Atan, "atan"},
       // There does not appear to be an appropriate ATen function for atanh
-      // OpTuple{at::atanh,      UnaryOpType::Atanh,      "atanh"      },
-      OpTuple{at::ceil, UnaryOpType::Ceil, "ceil"},
-      OpTuple{at::cos, UnaryOpType::Cos, "cos"},
-      OpTuple{at::cosh, UnaryOpType::Cosh, "cosh"},
-      OpTuple{at::erf, UnaryOpType::Erf, "erf"},
-      OpTuple{at::erfc, UnaryOpType::Erfc, "erfc"},
-      OpTuple{at::exp, UnaryOpType::Exp, "exp"},
-      OpTuple{at::expm1, UnaryOpType::Expm1, "expm1"},
-      OpTuple{at::floor, UnaryOpType::Floor, "floor"},
-      OpTuple{at::frac, UnaryOpType::Frac, "frac"},
-      OpTuple{at::gelu, UnaryOpType::Gelu, "gelu"},
-      OpTuple{at::lgamma, UnaryOpType::Lgamma, "lgamma"},
-      OpTuple{at::log, UnaryOpType::Log, "log"},
-      OpTuple{at::log10, UnaryOpType::Log10, "log10"},
-      OpTuple{at::log1p, UnaryOpType::Log1p, "log1p"},
-      OpTuple{at::log2, UnaryOpType::Log2, "log2"},
-      OpTuple{at::neg, UnaryOpType::Neg, "neg"},
-      OpTuple{at::reciprocal, UnaryOpType::Reciprocal, "reciprocal"},
-      OpTuple{at::relu, UnaryOpType::Relu, "relu"},
-      OpTuple{at::round, UnaryOpType::Round, "round"},
-      OpTuple{at::rsqrt, UnaryOpType::Rsqrt, "rsqrt"},
-      OpTuple{at::sigmoid, UnaryOpType::Sigmoid, "sigmoid"},
-      OpTuple{at::sin, UnaryOpType::Sin, "sin"},
-      OpTuple{at::sinh, UnaryOpType::Sinh, "sinh"},
-      OpTuple{at::sqrt, UnaryOpType::Sqrt, "sqrt"},
-      OpTuple{at::tan, UnaryOpType::Tan, "tan"},
-      OpTuple{at::tanh, UnaryOpType::Tanh, "tanh"},
-      OpTuple{at::trunc, UnaryOpType::Trunc, "trunc"}};
+      // {at::atanh,      UnaryOpType::Atanh,      "atanh"      },
+      {at::ceil, UnaryOpType::Ceil, "ceil"},
+      {at::cos, UnaryOpType::Cos, "cos"},
+      {at::cosh, UnaryOpType::Cosh, "cosh"},
+      {at::erf, UnaryOpType::Erf, "erf"},
+      {at::erfc, UnaryOpType::Erfc, "erfc"},
+      {at::exp, UnaryOpType::Exp, "exp"},
+      {at::expm1, UnaryOpType::Expm1, "expm1"},
+      {at::floor, UnaryOpType::Floor, "floor"},
+      {at::frac, UnaryOpType::Frac, "frac"},
+      {at::gelu, UnaryOpType::Gelu, "gelu"},
+      {at::lgamma, UnaryOpType::Lgamma, "lgamma"},
+      {at::log, UnaryOpType::Log, "log"},
+      {at::log10, UnaryOpType::Log10, "log10"},
+      {at::log1p, UnaryOpType::Log1p, "log1p"},
+      {at::log2, UnaryOpType::Log2, "log2"},
+      {at::neg, UnaryOpType::Neg, "neg"},
+      {at::reciprocal, UnaryOpType::Reciprocal, "reciprocal"},
+      {at::relu, UnaryOpType::Relu, "relu"},
+      {at::round, UnaryOpType::Round, "round"},
+      {at::rsqrt, UnaryOpType::Rsqrt, "rsqrt"},
+      {at::sigmoid, UnaryOpType::Sigmoid, "sigmoid"},
+      {at::sin, UnaryOpType::Sin, "sin"},
+      {at::sinh, UnaryOpType::Sinh, "sinh"},
+      {at::sqrt, UnaryOpType::Sqrt, "sqrt"},
+      {at::tan, UnaryOpType::Tan, "tan"},
+      {at::tanh, UnaryOpType::Tanh, "tanh"},
+      {at::trunc, UnaryOpType::Trunc, "trunc"}};
 
   std::for_each(ops.begin(), ops.end(), [](OpTuple& op) {
     test_op(
@@ -2680,13 +2676,13 @@ TEST(NVFuserTest, FusionBinaryOps_CUDA) {
   using AtenFuncSig = at::Tensor (*)(const at::Tensor&, const at::Tensor&);
   using OpTuple = std::tuple<AtenFuncSig, BinaryOpType, std::string>;
 
-  // see [Note: explicit tuple type for uniform initialization list]
-  std::vector<OpTuple> logic_ops{OpTuple{at::eq, BinaryOpType::Eq, "eq"},
-                                 OpTuple{at::ge, BinaryOpType::GE, "ge"},
-                                 OpTuple{at::gt, BinaryOpType::GT, "gt"},
-                                 OpTuple{at::le, BinaryOpType::LE, "le"},
-                                 OpTuple{at::lt, BinaryOpType::LT, "lt"},
-                                 OpTuple{at::ne, BinaryOpType::NE, "ne"}};
+  std::vector<OpTuple> logic_ops{
+      {at::eq, BinaryOpType::Eq, "eq"},
+      {at::ge, BinaryOpType::GE, "ge"},
+      {at::gt, BinaryOpType::GT, "gt"},
+      {at::le, BinaryOpType::LE, "le"},
+      {at::lt, BinaryOpType::LT, "lt"},
+      {at::ne, BinaryOpType::NE, "ne"}};
 
   std::for_each(logic_ops.begin(), logic_ops.end(), [](OpTuple& op) {
     test_op(
@@ -2708,18 +2704,17 @@ TEST(NVFuserTest, FusionBinaryOps_CUDA) {
             std::make_pair(ValType::TensorView, DataType::Float)));
   });
 
-  // see [Note: explicit tuple type for uniform initialization list]
   std::vector<OpTuple> math_ops{
-      OpTuple{at::atan2, BinaryOpType::Atan2, "atan2"},
-      OpTuple{at::div, BinaryOpType::Div, "div"},
-      OpTuple{at::fmod, BinaryOpType::Fmod, "fmod"},
-      OpTuple{at::max, BinaryOpType::Max, "max"},
-      OpTuple{at::min, BinaryOpType::Min, "min"},
-      OpTuple{at::mul, BinaryOpType::Mul, "mul"},
-      OpTuple{at::pow, BinaryOpType::Pow, "pow"},
+      {at::atan2, BinaryOpType::Atan2, "atan2"},
+      {at::div, BinaryOpType::Div, "div"},
+      {at::fmod, BinaryOpType::Fmod, "fmod"},
+      {at::max, BinaryOpType::Max, "max"},
+      {at::min, BinaryOpType::Min, "min"},
+      {at::mul, BinaryOpType::Mul, "mul"},
+      {at::pow, BinaryOpType::Pow, "pow"},
       // NOTE: Remainder does not match the Aten impl exactly
       // despite using an identical function.
-      OpTuple{at::remainder, BinaryOpType::Remainder, "remainder"},
+      {at::remainder, BinaryOpType::Remainder, "remainder"},
   };
 
   std::for_each(math_ops.begin(), math_ops.end(), [](OpTuple& op) {
@@ -4184,13 +4179,14 @@ TEST(NVFuserTest, FusionSoftmax1DNormalized_CUDA) {
   sub_tv3->computeAt(sum_exp_rf_tv9, -1);
   sub_tv3_copy->computeAt(output_tv7, -1);
 
-  TensorView* tensors_to_parallelize[] = {max_val_tv1,
-                                          bcast_max_tv2,
-                                          sum_exp_tv5,
-                                          bcast_sum_tv6,
-                                          output_tv7,
-                                          max_val_rf_tv8,
-                                          sum_exp_rf_tv9};
+  TensorView* tensors_to_parallelize[] = {
+      max_val_tv1,
+      bcast_max_tv2,
+      sum_exp_tv5,
+      bcast_sum_tv6,
+      output_tv7,
+      max_val_rf_tv8,
+      sum_exp_rf_tv9};
 
   for (auto tv : tensors_to_parallelize) {
     tv->axis(-1)->parallelize(ParallelType::TIDx);
@@ -4318,13 +4314,14 @@ TEST(NVFuserTest, FusionSoftmax3DNormalized_CUDA) {
   sub_tv3->computeAt(sum_exp_rf_tv9, -1);
   sub_tv3_copy->computeAt(output_tv7, -1);
 
-  TensorView* tensors_to_parallelize[] = {max_val_tv1,
-                                          bcast_max_tv2,
-                                          sum_exp_tv5,
-                                          bcast_sum_tv6,
-                                          output_tv7,
-                                          max_val_rf_tv8,
-                                          sum_exp_rf_tv9};
+  TensorView* tensors_to_parallelize[] = {
+      max_val_tv1,
+      bcast_max_tv2,
+      sum_exp_tv5,
+      bcast_sum_tv6,
+      output_tv7,
+      max_val_rf_tv8,
+      sum_exp_rf_tv9};
 
   for (auto tv : tensors_to_parallelize) {
     tv->axis(0)->parallelize(ParallelType::BIDx);
@@ -5931,15 +5928,16 @@ TEST(NVFuserTest, FusionSmemDynamicPersistentSoftmax2D_CUDA) {
   cache_x->setMemoryType(MemoryType::Shared);
   exp->setMemoryType(MemoryType::Shared);
 
-  std::vector<TensorView*> all_tensors({x,
-                                        cache_x,
-                                        max_val,
-                                        bcast_max,
-                                        x_max_sub,
-                                        exp,
-                                        sum_exp,
-                                        bcast_sum,
-                                        softmax});
+  std::vector<TensorView*> all_tensors(
+      {x,
+       cache_x,
+       max_val,
+       bcast_max,
+       x_max_sub,
+       exp,
+       sum_exp,
+       bcast_sum,
+       softmax});
 
   auto tidx = new Int();
   fusion.addInput(tidx);
@@ -6168,25 +6166,27 @@ TEST(NVFuserTest, FusionPersistentBatchNormLocalShared_CUDA) {
   std::vector<TensorView*> common_tensors(
       {x_sum, x_sum_bcast, x_mean, var_sum, var_sum_bcast, var, var_eps, rvar});
 
-  std::vector<TensorView*> static_tensors({sx,
-                                           sx_cache,
-                                           sx_sum,
-                                           sx_mean_sub,
-                                           sx_mean_sub_pow,
-                                           sx_var_sum,
-                                           sx_norm,
-                                           sx_norm_gamma,
-                                           sx_norm_gamma_beta});
+  std::vector<TensorView*> static_tensors(
+      {sx,
+       sx_cache,
+       sx_sum,
+       sx_mean_sub,
+       sx_mean_sub_pow,
+       sx_var_sum,
+       sx_norm,
+       sx_norm_gamma,
+       sx_norm_gamma_beta});
 
-  std::vector<TensorView*> dynamic_tensors({dx,
-                                            dx_cache,
-                                            dx_sum,
-                                            dx_mean_sub,
-                                            dx_mean_sub_pow,
-                                            dx_var_sum,
-                                            dx_norm,
-                                            dx_norm_gamma,
-                                            dx_norm_gamma_beta});
+  std::vector<TensorView*> dynamic_tensors(
+      {dx,
+       dx_cache,
+       dx_sum,
+       dx_mean_sub,
+       dx_mean_sub_pow,
+       dx_var_sum,
+       dx_norm,
+       dx_norm_gamma,
+       dx_norm_gamma_beta});
 
   std::vector<TensorView*> all_tensors;
   all_tensors.insert(
@@ -6309,20 +6309,21 @@ TEST(NVFuserTest, FusionSmemDynamicPersistentBatchNorm_CUDA) {
   cache_x->setMemoryType(MemoryType::Shared);
   x_mean_sub->setMemoryType(MemoryType::Shared);
 
-  std::vector<TensorView*> all_tensors({x_sum,
-                                        x_mean,
-                                        cache_x,
-                                        x_sum_bcast,
-                                        x_mean_sub,
-                                        x_mean_sub_pow,
-                                        var_sum,
-                                        var_sum_bcast,
-                                        var,
-                                        var_eps,
-                                        rvar,
-                                        norm,
-                                        norm_gamma,
-                                        norm_gamma_beta});
+  std::vector<TensorView*> all_tensors(
+      {x_sum,
+       x_mean,
+       cache_x,
+       x_sum_bcast,
+       x_mean_sub,
+       x_mean_sub_pow,
+       var_sum,
+       var_sum_bcast,
+       var,
+       var_eps,
+       rvar,
+       norm,
+       norm_gamma,
+       norm_gamma_beta});
 
   auto tidx = new Int();
   fusion.addInput(tidx);
@@ -7346,9 +7347,9 @@ TEST(NVFuserTest, FusionLSTMCell_CUDA) {
   FusionGuard fg(&fusion);
 
   TensorView* tvs[16];
-  for (size_t i = 0; i < 16; i++) {
-    tvs[i] = makeDummyTensor(2);
-    fusion.addInput(tvs[i]);
+  for (auto& tv : tvs) {
+    tv = makeDummyTensor(2);
+    fusion.addInput(tv);
   }
 
   auto ingate = unaryOp(

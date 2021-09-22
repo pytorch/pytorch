@@ -61,4 +61,6 @@ class TestScaleOps(serial.SerializedTestCase):
             np.testing.assert_allclose(o, o_ref)
 
 if __name__ == '__main__':
+    import unittest
+
     unittest.main()

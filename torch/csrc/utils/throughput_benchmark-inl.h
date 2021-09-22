@@ -8,6 +8,7 @@
 #include <torch/csrc/utils/pybind.h>
 
 #include <aten/src/ATen/Parallel.h>
+#include <c10/util/irange.h>
 
 namespace torch {
 namespace throughput_benchmark {
@@ -37,8 +38,7 @@ BenchmarkExecutionStats BenchmarkHelper<Input, Output, Model>::benchmark(
         "Did you forget to call add_input()? ");
     std::uniform_int_distribution<int> dist(0, inputs_.size() - 1);
 
-    for (int thread_id = 0; thread_id < config.num_calling_threads;
-         ++thread_id) {
+    for (const auto thread_id : c10::irange(config.num_calling_threads)) {
       // Just in case we generate num_iters inputs for each of the threads
       // This was if one thread does all the work we will be fine
       for (int i = 0; i < config.num_iters + config.num_warmup_iters; ++i) {
@@ -58,12 +58,12 @@ BenchmarkExecutionStats BenchmarkHelper<Input, Output, Model>::benchmark(
   std::atomic<int64_t> num_attempted_iters{0};
   std::vector<std::thread> callers;
 
-  for (auto thread_id = 0; thread_id < config.num_calling_threads;
-       ++thread_id) {
+  callers.reserve(config.num_calling_threads);
+  for (const auto thread_id : c10::irange(config.num_calling_threads)) {
     callers.emplace_back([&, thread_id]() {
       // We use conditional variable as a barrier to make sure each thread
       // performs required warmeup iterations before we start measuring
-      for (auto j = 0; j < config.num_warmup_iters; ++j) {
+      for (const auto j : c10::irange(config.num_warmup_iters)) {
         runOnce(std::move(thread_inputs[thread_id][input_iters[thread_id]]));
         ++input_iters[thread_id];
       }
@@ -71,6 +71,7 @@ BenchmarkExecutionStats BenchmarkHelper<Input, Output, Model>::benchmark(
         std::unique_lock<std::mutex> lock(m);
         ++initialized;
         worker_main_cv.notify_one();
+        // NOLINTNEXTLINE(bugprone-infinite-loop)
         while (!start) {
           main_worker_cv.wait(lock);
         }
@@ -93,10 +94,11 @@ BenchmarkExecutionStats BenchmarkHelper<Input, Output, Model>::benchmark(
   }
 
   using Clock = std::chrono::high_resolution_clock;
+  using RecordProfile = torch::autograd::profiler::RecordProfile;
   using TimePoint = std::chrono::time_point<Clock>;
   TimePoint start_time;
 
-  std::unique_ptr<torch::autograd::profiler::RecordProfile> profiler_guard;
+  std::unique_ptr<RecordProfile> profiler_guard;
   {
     std::unique_lock<std::mutex> lock(m);
     while (initialized != config.num_calling_threads) {
@@ -105,8 +107,7 @@ BenchmarkExecutionStats BenchmarkHelper<Input, Output, Model>::benchmark(
     if (!config.profiler_output_path.empty()) {
       LOG(INFO) << "Using Autograd profiler. Trace will be saved to "
                 << config.profiler_output_path;
-      profiler_guard.reset(new torch::autograd::profiler::RecordProfile(
-        config.profiler_output_path));
+      profiler_guard = std::make_unique<RecordProfile>(config.profiler_output_path);
     }
     LOG(INFO) << "Starting threads";
     start = true;
@@ -124,6 +125,7 @@ BenchmarkExecutionStats BenchmarkHelper<Input, Output, Model>::benchmark(
   LOG(INFO) << "Finished benchmark";
 
   BenchmarkExecutionStats stats;
+  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   float total_time_ms = std::chrono::duration_cast<std::chrono::nanoseconds>(
                             end_time - start_time)
                             .count() /
@@ -132,6 +134,7 @@ BenchmarkExecutionStats BenchmarkHelper<Input, Output, Model>::benchmark(
   // repsesatative of the real work done. Last attempted iteration on each
   // calling threads doesn't represent the real work (i.e. running the model)
   stats.latency_avg_ms =
+      // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
       total_time_ms * config.num_calling_threads / config.num_iters;
   stats.num_iters = config.num_iters;
 

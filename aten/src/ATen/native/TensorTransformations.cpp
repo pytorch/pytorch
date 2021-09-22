@@ -1,8 +1,9 @@
 #include <ATen/native/TensorTransformations.h>
-#include <ATen/WrapDimUtilsMulti.h>
 
 #include <ATen/NativeFunctions.h>
 #include <ATen/Parallel.h>
+#include <ATen/WrapDimUtilsMulti.h>
+#include <ATen/core/DimVector.h>
 #include <c10/util/Exception.h>
 
 #include <algorithm>
@@ -11,80 +12,68 @@
 namespace at {
 namespace native {
 
-constexpr size_t dim_bitset_size = 64;
-
-template <typename scalar_t>
-void inline flip_cpu_kernel(
-  const int64_t total_dims,
-  const std::vector<int64_t>& stride_contiguous_v,
-  const std::bitset<dim_bitset_size>& flip_dims_b,
-  const Tensor& in_tensor,
-  Tensor& out_tensor
-){
-  const int64_t numel = in_tensor.numel();
-  const scalar_t* in_tensor_d = in_tensor.data_ptr<scalar_t>();
-  scalar_t* out_tensor_d = out_tensor.data_ptr<scalar_t>();
-  auto sizes_v = in_tensor.sizes().vec();
-  auto strides_v = in_tensor.strides().vec();
-
-  at::parallel_for(0, numel, 1000, [&](int64_t start, int64_t end) {
-    for (auto i = start; i < end; i++) {
-      int64_t cur_indices = i;
-      int64_t rem = 0;
-      int64_t dst_offset = 0;
-
-      for (int64_t d = 0; d < total_dims; d++) {
-        int64_t temp = cur_indices;
-        cur_indices = cur_indices / stride_contiguous_v[d];
-        rem = temp - cur_indices * stride_contiguous_v[d];
-        dst_offset += flip_dims_b[d] ? (sizes_v[d] - 1 - cur_indices) * strides_v[d] : cur_indices * strides_v[d];
-        cur_indices = rem;
-      }
-      out_tensor_d[i] = in_tensor_d[dst_offset];
-    }
-  });
-}
-
-Tensor flip_cpu(const Tensor& self, IntArrayRef dims) {
-  auto in_tensor = self;
-  const int64_t total_dims = in_tensor.dim();
+Tensor flip(const Tensor& self, IntArrayRef dims) {
+  const int64_t total_dims = self.dim();
+  // It wraps the dims and checks that there are no repeated dims
   auto flip_dims_b = at::dim_list_to_bitset(dims, total_dims);
-  Tensor out_tensor = at::empty_like(in_tensor, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
 
-  // create contiguous strides for input tensor
-  auto stride_contiguous_v = std::vector<int64_t>(total_dims);
-  for (int64_t i = total_dims - 1; i >= 0; i--) {
-    if (i == total_dims - 1) {
-      stride_contiguous_v[i] = 1;
-    } else {
-      stride_contiguous_v[i] = std::max<int64_t>(in_tensor.size(i + 1), 1) * stride_contiguous_v[i + 1];
+  Tensor out_tensor = at::empty_like(self, MemoryFormat::Preserve);
+
+  // Count dimensions in which we need to do work
+  int n = 0;
+  auto strides = DimVector(self.strides());
+  for(int64_t i = 0; i < total_dims; i++) {
+    if(flip_dims_b[i] && self.size(i) > 1 && self.stride(i) != 0) {
+      n++;
+      strides[i] = 0;
     }
   }
 
-  if (in_tensor.is_quantized()) {
-    AT_DISPATCH_QINT_AND_SUB_BYTE_TYPES(in_tensor.scalar_type(),
-                                        "flip_quantized_cpu", [&] {
-      flip_cpu_kernel<scalar_t>(
-        total_dims,
-        stride_contiguous_v,
-        flip_dims_b,
-        in_tensor,
-        out_tensor
-      );
-    });
-  } else {
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(at::ScalarType::Bool,
-                                          in_tensor.scalar_type(),
-                                          "flip_cpu", [&] {
-      flip_cpu_kernel<scalar_t>(
-        total_dims,
-        stride_contiguous_v,
-        flip_dims_b,
-        in_tensor,
-        out_tensor
-      );
-    });
+  // Nothing to do, we return fast
+  if (n == 0 || self.numel() <=1) {
+    out_tensor.copy_(self);
+    return out_tensor;
   }
+
+  //create dummy output with 0 strides at flipped dimension, to prevent tensorIterator from coalescing flipped dims
+  const auto restrided_self = self.as_strided(self.sizes(), strides);
+  auto iter = TensorIteratorConfig()
+    .set_check_mem_overlap(false)
+    .check_all_same_dtype(false)
+    .declare_static_dtype_and_device(self.scalar_type(), self.device())
+    .add_output(out_tensor)
+    .add_input(self)
+    .add_input(restrided_self)
+    .build();
+
+  auto* data = reinterpret_cast<char*>(iter.data_ptr(0));
+  const auto sizes = iter.shape();
+  // This is a SmallVector of _signed_ ints
+  auto strides_bytes = DimVector(iter.strides(0));
+  const auto strides_self = iter.strides(1);
+  const auto strides_dummy = iter.strides(2);
+
+  // To understand this transformation, think of a 3D cube.
+  //   - The data ptr points to the lower-left most vertex of the cube
+  //   - The strides tell us how to move in each dimension,
+  //     that is, data + stride[i] advances one element in the dimension i
+  // To flip a dimension:
+  //   - We move the pointer to the opposite vertex of the cube
+  //   - We iterate in the opposite direction (invert the strides)
+
+  for (int i=0; i<iter.ndim(); i++){
+    // We know that an dimension has a zero stride and self[i] does not, as we defined above
+    // Note that it may be the case that strides_dummy[i] = 0 not because we set it, but because
+    // strides_self[i] == 0. We do not want to do anything there
+    if (strides_dummy[i] == 0 && strides_self[i] != 0) {
+      data += strides_bytes[i] * (sizes[i]-1);
+      strides_bytes[i] *= -1;
+    }
+  }
+  iter._unsafe_set_arg_strides(0, strides_bytes);
+  iter._unsafe_set_arg_data(0, reinterpret_cast<void*>(data));
+
+  flip_stub(iter.device_type(), iter, self.is_quantized());
 
   return out_tensor;
 }
@@ -219,5 +208,7 @@ std::vector<Tensor> atleast_3d(TensorList tensors) {
   std::transform(tensors.cbegin(), tensors.cend(), result.begin(), transform_lambda);
   return result;
 }
+
+DEFINE_DISPATCH(flip_stub);
 
 }} // namespace at::native

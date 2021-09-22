@@ -6,8 +6,9 @@ class BatchNorm2d(torch.nn.BatchNorm2d):
     r"""This is the quantized version of :class:`~torch.nn.BatchNorm2d`.
     """
 
-    def __init__(self, num_features, eps=1e-5, momentum=0.1):
-        super(BatchNorm2d, self).__init__(num_features)
+    def __init__(self, num_features, eps=1e-5, momentum=0.1, device=None, dtype=None) -> None:
+        factory_kwargs = {'device': device, 'dtype': dtype}
+        super(BatchNorm2d, self).__init__(num_features, **factory_kwargs)
         self.eps = eps
         self.scale = 1.0
         self.zero_point = 0
@@ -21,11 +22,9 @@ class BatchNorm2d(torch.nn.BatchNorm2d):
 
     @classmethod
     def from_float(cls, mod):
+        activation_post_process = mod.activation_post_process
         if type(mod) == nni.BNReLU2d:
-            activation_post_process = mod[1].activation_post_process
             mod = mod[0]
-        else:
-            activation_post_process = mod.activation_post_process
         scale, zero_point = activation_post_process.calculate_qparams()
         new_mod = cls(mod.num_features, mod.eps)
         new_mod.weight = mod.weight
@@ -36,12 +35,14 @@ class BatchNorm2d(torch.nn.BatchNorm2d):
         new_mod.zero_point = int(zero_point)
         return new_mod
 
+# TODO: dedup with BatchNorm2d
 class BatchNorm3d(torch.nn.BatchNorm3d):
     r"""This is the quantized version of :class:`~torch.nn.BatchNorm3d`.
     """
 
-    def __init__(self, num_features, eps=1e-5, momentum=0.1):
-        super(BatchNorm3d, self).__init__(num_features)
+    def __init__(self, num_features, eps=1e-5, momentum=0.1, device=None, dtype=None):
+        factory_kwargs = {'device': device, 'dtype': dtype}
+        super(BatchNorm3d, self).__init__(num_features, **factory_kwargs)
         self.eps = eps
         self.scale = 1.0
         self.zero_point = 0
@@ -55,12 +56,9 @@ class BatchNorm3d(torch.nn.BatchNorm3d):
 
     @classmethod
     def from_float(cls, mod):
+        activation_post_process = mod.activation_post_process
         if type(mod) == nni.BNReLU3d:
-            activation_post_process = mod[1].activation_post_process
             mod = mod[0]
-        else:
-            activation_post_process = mod.activation_post_process
-
         scale, zero_point = activation_post_process.calculate_qparams()
         new_mod = cls(mod.num_features, mod.eps)
         new_mod.weight = mod.weight

@@ -2,7 +2,9 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/MemoryOverlap.h>
 #include <ATen/cuda/detail/IndexUtils.cuh>
+#include <ATen/native/Resize.h>
 #include <ATen/native/TypeProperties.h>
+#include <ATen/native/TensorShape.h>
 #include <ATen/Dispatch.h>
 #include <c10/core/MemoryFormat.h>
 #include <c10/util/Optional.h>
@@ -171,28 +173,6 @@ __global__ void CatArrayBatchedCopy(
     }
 }
 
-void check_shape_except_dim(const Tensor &first, const Tensor &second,
-                            int dimension, int index)
-{
-  int first_dims = first.dim();
-  int second_dims = second.dim();
-  TORCH_CHECK(first_dims == second_dims,
-      "Tensors must have same number of dimensions: got ", first_dims,
-      " and ", second_dims);
-  for (int dim = 0; dim < first_dims; dim++) {
-    if (dim == dimension) {
-      continue;
-    }
-    int64_t first_dim_size = at::native::size(first, dim);
-    int64_t second_dim_size = at::native::size(second, dim);
-    TORCH_CHECK(first_dim_size == second_dim_size,
-        "Sizes of tensors must match except in dimension ", dim, ". Got ",
-        static_cast<long long>(first_dim_size), " and ",
-        static_cast<long long>(second_dim_size), " (The offending index is ",
-        index, ")");
-  }
-}
-
 template <typename scalar_t>
 void hip_parallel_cat(Tensor &out, const TensorList &inputs, int64_t dimension,
                   int nDims, c10::MemoryFormat memory_format) {
@@ -294,7 +274,8 @@ void hip_parallel_cat(Tensor &out, const TensorList &inputs, int64_t dimension,
 #define HANDLE_CASE(DIMS) \
     HIP_CatArrayBatchedCopy<scalar_t, unsigned int, DIMS><<<\
         catGrid, applyBlock, 0, stream.stream()>>>(\
-            data, d_inputs, outputParam, dimension, outputParam.tensorStride[dimension]);
+            data, d_inputs, outputParam, dimension, outputParam.tensorStride[dimension]); \
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
     switch (nDims) {
       case 1:
         HANDLE_CASE(1);
@@ -310,7 +291,6 @@ void hip_parallel_cat(Tensor &out, const TensorList &inputs, int64_t dimension,
         break;
     }
 #undef HANDLE_CASE
-    AT_CUDA_CHECK(cudaGetLastError());
   }
 }
 
@@ -404,7 +384,8 @@ void parallel_cat(Tensor &out, const TensorList &inputs, int64_t dimension,
 #define HANDLE_CASE(DIMS) \
     CatArrayBatchedCopy<scalar_t, unsigned int, DIMS, batch_size, stride_size><<<\
         catGrid, applyBlock, 0, stream.stream()>>>(\
-            data, catMetaData, outputParam, dimension, outputParam.tensorStride[dimension]);
+            data, catMetaData, outputParam, dimension, outputParam.tensorStride[dimension]); \
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
     switch (nDims) {
       case 1:
         HANDLE_CASE(1);
@@ -420,7 +401,6 @@ void parallel_cat(Tensor &out, const TensorList &inputs, int64_t dimension,
         break;
     }
 #undef HANDLE_CASE
-    AT_CUDA_CHECK(cudaGetLastError());
   }
 }
 } // namespace
@@ -428,7 +408,7 @@ void parallel_cat(Tensor &out, const TensorList &inputs, int64_t dimension,
 Tensor cat_cuda(TensorList inputs, int64_t dimension) {
   ScalarType high_type = result_type(inputs);
   Tensor out = at::empty({0}, inputs.front().options().dtype(high_type));
-  cat_out_cuda(out, inputs, dimension);
+  at::native::cat_out_cuda(inputs, dimension, out);
   return out;
 }
 
@@ -451,7 +431,7 @@ inline c10::MemoryFormat compute_output_memory_format(const TensorList &inputs) 
   return format.value();
 }
 
-Tensor& cat_out_cuda(Tensor& out, TensorList inputs, int64_t dimension) {
+Tensor& cat_out_cuda(TensorList inputs, int64_t dimension, Tensor& out) {
 
   // previously, size [0] tensors were the only possible empty tensors; thus, it
   // wasn't possible to cat empty tensors unless all the other tensors were
@@ -467,7 +447,7 @@ Tensor& cat_out_cuda(Tensor& out, TensorList inputs, int64_t dimension) {
   int nDims = 0;
 
   // Check for type promotion
-  TORCH_CHECK(canCast(result_type(inputs), out.scalar_type()), "input types ",
+  TORCH_CHECK(canCast(result_type(inputs), out.scalar_type()), "torch.cat(): input types ",
                       " can't be cast to the desired output type ",
                       out.scalar_type());
 
@@ -476,7 +456,7 @@ Tensor& cat_out_cuda(Tensor& out, TensorList inputs, int64_t dimension) {
     auto lap = at::get_overlap_status(out, inputs[i]);
     TORCH_CHECK(lap != at::MemOverlapStatus::PARTIAL &&
                 lap != at::MemOverlapStatus::FULL,
-                "unsupported operation: the input tensors cannot refer to any "
+                "torch.cat(): unsupported operation: the input tensors cannot refer to any "
                 "of the output memory locations. Found overlap in input "
                 "tensor ", i);
   }
@@ -488,6 +468,7 @@ Tensor& cat_out_cuda(Tensor& out, TensorList inputs, int64_t dimension) {
     }
     nDims = inputs[i].dim();
     notSkippedTensor = &inputs[i];
+    break;
   }
 
   // If all inputs are empty tensors, return an empty tensor
@@ -495,14 +476,19 @@ Tensor& cat_out_cuda(Tensor& out, TensorList inputs, int64_t dimension) {
     return out;
   }
 
-  TORCH_CHECK(inputs.size() > 0, "invalid number of inputs ", inputs.size());
-  TORCH_CHECK(dimension >= 0, "invalid dimension ", dimension);
+  TORCH_CHECK(inputs.size() > 0, "torch.cat(): invalid number of inputs ", inputs.size());
+  TORCH_CHECK(dimension >= 0, "torch.cat(): invalid dimension ", dimension);
 
   for (const Tensor& t: inputs) {
     TORCH_CHECK(t.device() == notSkippedTensor->device(),
-                "All input tensors must be on the same device. Received ",
+                "torch.cat(): all input tensors must be on the same device. Received ",
                 t.device(), " and ", notSkippedTensor->device());
   }
+
+  TORCH_CHECK(
+      out.device() == notSkippedTensor->device(),
+      "torch.cat(): all input tensors and out must be on the same device, but inputs are on ",
+      notSkippedTensor->device(), " and out is on ", out.device());
 
   c10::MemoryFormat memory_format = compute_output_memory_format(inputs);
 
@@ -515,13 +501,24 @@ Tensor& cat_out_cuda(Tensor& out, TensorList inputs, int64_t dimension) {
     if (should_skip(tensor)) {
       continue;
     }
-    check_shape_except_dim(*notSkippedTensor, tensor, dimension, i);
+    check_cat_shape_except_dim(*notSkippedTensor, tensor, dimension, i);
     cat_dim_size += at::native::size(tensor, dimension);
   }
 
   // Compute the size of the result
   size[dimension] = cat_dim_size;
-  out.resize_(size, memory_format);
+
+  // skip resizing if size of result is same as expected
+  // raise a warning while resizing if output has one or more elements
+  // See https://github.com/pytorch/pytorch/pull/62560#discussion_r687363362
+  // for understanding why at::native::resize_output is not called directly.
+  // if (at::native::resize_output_check(out, size)) {
+  // TODO: restore the above, see https://github.com/pytorch/pytorch/issues/64709
+
+  if (out.sizes() != size) {
+    out.resize_(size, memory_format);
+  }
+
   if (out.numel() == 0) {
     return out;
   }
@@ -583,7 +580,8 @@ Tensor& cat_out_cuda(Tensor& out, TensorList inputs, int64_t dimension) {
       at::cuda::detail::canUse32BitIndexMath(out) &&
       nDims <= CAT_ARRAY_MAX_INPUT_DIMS &&
       all32BitIndexable &&
-      allSameType) {
+      allSameType &&
+      memory_format == c10::MemoryFormat::Contiguous) {
       AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
           at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16,
           out.scalar_type(), "cat_cuda", [&]() {

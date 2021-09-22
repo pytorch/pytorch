@@ -6,8 +6,8 @@
 #include <THC/THC.h>  // for USE_MAGMA
 
 #ifdef USE_MAGMA
-#include <magma.h>
 #include <magma_types.h>
+#include <magma_v2.h>
 #endif
 
 namespace at {
@@ -24,7 +24,6 @@ struct MAGMAQueue {
 
   // Constructor
   explicit MAGMAQueue(int64_t device_id) {
-    auto& context = at::globalContext();
     cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
 #if CUDA_VERSION >= 11000
     // Magma operations is numerically sensitive, so TF32 should be off
@@ -76,14 +75,14 @@ struct MagmaStreamSyncGuard {
   MagmaStreamSyncGuard() {
     auto stream = at::cuda::getCurrentCUDAStream();
     if (stream != at::cuda::getDefaultCUDAStream()) {
-      AT_CUDA_CHECK(cudaStreamSynchronize(stream));
+      at::cuda::stream_synchronize(stream);
     }
   }
 
   ~MagmaStreamSyncGuard() noexcept(false) {
     auto default_stream = at::cuda::getDefaultCUDAStream();
     if (at::cuda::getCurrentCUDAStream() != default_stream) {
-      AT_CUDA_CHECK(cudaStreamSynchronize(default_stream));
+      at::cuda::stream_synchronize(default_stream);
     }
   }
 };
@@ -91,7 +90,7 @@ struct MagmaStreamSyncGuard {
 
 static inline int cuda_int_cast(int64_t value, const char* varname) {
   auto result = static_cast<int>(value);
-  TORCH_CHECK(static_cast<int64_t>(result) == value, 
+  TORCH_CHECK(static_cast<int64_t>(result) == value,
               "cuda_int_cast: The value of ", varname, "(", (long long)value,
               ") is too large to fit into a int (", sizeof(int), " bytes)");
   return result;
@@ -108,16 +107,6 @@ static inline Storage pin_memory(int64_t size) {
       adjusted_size,
       allocator,
       /*resizable=*/false);
-}
-
-// heuristic:
-//   cublas_x_batched doesn't work very well for small batchsize
-//   cublas_x_batched is intended to be used for matrices of small sizes where the launch overhead is a significant factor.
-// with use_loop_launch = True, we will loop through all batches, and launch single matrix cusolver/cublas kernels
-// (This heuristic was originally tested in getrf + getrs(getri), which may not work well on other kernels. )
-inline static bool use_loop_launch(int batch_size, int matrix_size) {
-  return (batch_size <= 8) || \
-         (/* batch_size > 8 && */ matrix_size >= 512);
 }
 
 } // namespace native

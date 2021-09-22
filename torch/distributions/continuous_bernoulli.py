@@ -168,8 +168,6 @@ class ContinuousBernoulli(ExponentialFamily):
             torch.where(torch.ge(value, 1.0), torch.ones_like(value), unbounded_cdfs))
 
     def icdf(self, value):
-        if self._validate_args:
-            self._validate_sample(value)
         cut_probs = self._cut_probs()
         return torch.where(
             self._outside_unstable_region(),

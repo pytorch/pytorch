@@ -232,7 +232,6 @@ class TensorFeeder : public BlobFeederBase {
         for (int i = 0; i < tensor.numel(); ++i) {
           char* str;
           Py_ssize_t strSize;
-#if PY_MAJOR_VERSION > 2
           if (PyBytes_Check(input[i])) {
             CAFFE_ENFORCE(
                 PyBytes_AsStringAndSize(input[i], &str, &strSize) != -1,
@@ -246,11 +245,6 @@ class TensorFeeder : public BlobFeederBase {
           } else {
             CAFFE_THROW("Unsupported python object type passed into ndarray.");
           }
-#else
-          CAFFE_ENFORCE(
-              PyBytes_AsStringAndSize(input[i], &str, &strSize) != -1,
-              "Unsupported python object type passed into ndarray.");
-#endif // PY_MAJOR_VERSION > 2
           outPtr[i] = std::string(str, strSize);
         }
         break;
@@ -342,18 +336,12 @@ class PythonOpBase : public Operator<Context> {
         try {
           builder_call = loads(py::bytes(pickled)).cast<py::tuple>();
         } catch (const py::error_already_set& e) {
-#if PY_MAJOR_VERSION >= 3
           LOG(INFO) << "Cannot unpickle python operator: " << e.what();
           LOG(INFO) << "Try latin1 encoding for python3 run";
           // to use the `_a` literal for arguments
           using namespace pybind11::literals;
           builder_call = loads(py::bytes(pickled), "encoding"_a = "latin1")
                              .template cast<py::tuple>();
-#else
-          // for py2, simply re-throw the exception, as there is no encoding
-          // argument for pickle.loads
-          throw;
-#endif
         }
         CAFFE_ENFORCE(builder_call);
         CAFFE_ENFORCE_EQ(py::len(builder_call), 3);

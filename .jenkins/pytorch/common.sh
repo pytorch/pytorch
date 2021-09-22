@@ -1,6 +1,7 @@
 #!/bin/bash
 
 # Common setup for all Jenkins scripts
+# shellcheck source=./common_utils.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common_utils.sh"
 set -ex
 
@@ -28,7 +29,10 @@ fi
 # system; to find out more, grep for this string in ossci-job-dsl.
 echo "ENTERED_USER_LAND"
 
-export IS_PYTORCH_CI=1
+# Previously IN_CI is only set in .circleci/scripts/setup_ci_environment.sh,
+# this means other CI system doesn't actually have this flag properly set.
+# Now we explicitly export IN_CI environment variable here.
+export IN_CI=1
 
 # compositional trap taken from https://stackoverflow.com/a/7287873/23845
 
@@ -66,12 +70,21 @@ declare -f -t trap_add
 
 trap_add cleanup EXIT
 
-if [[ "$BUILD_ENVIRONMENT" != *pytorch-win-* ]]; then
+if [[ "$BUILD_ENVIRONMENT" != *win-* ]]; then
   if which sccache > /dev/null; then
     # Save sccache logs to file
-    sccache --stop-server || true
-    rm ~/sccache_error.log || true
-    if [[ "${BUILD_ENVIRONMENT}" == *rocm* ]]; then
+    sccache --stop-server > /dev/null  2>&1 || true
+    rm -f ~/sccache_error.log || true
+    if [[ -n "${SKIP_SCCACHE_INITIALIZATION:-}" ]]; then
+      # sccache --start-server seems to hang forever on self hosted runners for GHA
+      # so let's just go ahead and skip the --start-server altogether since it seems
+      # as though sccache still gets used even when the sscache server isn't started
+      # explicitly
+      echo "Skipping sccache server initialization, setting environment variables"
+      export SCCACHE_IDLE_TIMEOUT=1200
+      export SCCACHE_ERROR_LOG=~/sccache_error.log
+      export RUST_LOG=sccache::server=error
+    elif [[ "${BUILD_ENVIRONMENT}" == *rocm* ]]; then
       SCCACHE_ERROR_LOG=~/sccache_error.log SCCACHE_IDLE_TIMEOUT=0 sccache --start-server
     else
       # increasing SCCACHE_IDLE_TIMEOUT so that extension_backend_test.cpp can build after this PR:
@@ -111,9 +124,8 @@ if [ -z "$COMPACT_JOB_NAME" ]; then
   exit 1
 fi
 
-if [[ "$BUILD_ENVIRONMENT" == *pytorch-linux-xenial-cuda10.1-cudnn7-py3* ]] || \
-   [[ "$BUILD_ENVIRONMENT" == *pytorch-linux-trusty-py3.6-gcc7* ]] || \
-   [[ "$BUILD_ENVIRONMENT" == *pytorch_macos* ]]; then
+# TODO: Renable libtorch testing for MacOS, see https://github.com/pytorch/pytorch/issues/62598
+if [[ "$BUILD_ENVIRONMENT" == *linux-trusty-py3.6-gcc7* ]]; then
   BUILD_TEST_LIBTORCH=1
 else
   # shellcheck disable=SC2034
@@ -126,15 +138,18 @@ fi
 # Linux bionic cannot find conda mkl with cmake 3.10, so we need a cmake from conda.
 # Alternatively we could point cmake to the right place
 # export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
-if [[ "$BUILD_ENVIRONMENT" == *pytorch-xla-linux-bionic* ]] || \
-   [[ "$BUILD_ENVIRONMENT" == *pytorch-linux-xenial-cuda9-cudnn7-py2* ]] || \
-   [[ "$BUILD_ENVIRONMENT" == *pytorch-linux-xenial-cuda10.1-cudnn7-py3* ]] || \
-   [[ "$BUILD_ENVIRONMENT" == *pytorch-linux-bionic* ]]; then
+if [[ "$BUILD_ENVIRONMENT" == *xla-linux-bionic* ]] || \
+   [[ "$BUILD_ENVIRONMENT" == *centos* ]] || \
+   [[ "$BUILD_ENVIRONMENT" == *linux-bionic* ]]; then
   if ! which conda; then
     echo "Expected ${BUILD_ENVIRONMENT} to use conda, but 'which conda' returns empty"
     exit 1
   else
     conda install -q -y cmake
+  fi
+  if [[ "$BUILD_ENVIRONMENT" == *centos* ]]; then
+    # cmake3 package will conflict with conda cmake
+    sudo yum -y remove cmake3 || true
   fi
 fi
 

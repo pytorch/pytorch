@@ -1,9 +1,10 @@
+#include <gtest/gtest.h>
+
 #include <test/cpp/tensorexpr/test_base.h>
 #include <torch/csrc/jit/codegen/fuser/interface.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/irparser.h>
 #include <torch/csrc/jit/passes/tensorexpr_fuser.h>
-#include <torch/csrc/jit/tensorexpr/mem_arena.h>
 #include <torch/csrc/jit/testing/file_check.h>
 #include <sstream>
 
@@ -24,9 +25,8 @@ struct WithCPUFuser {
   bool cpuFuserEnabled;
 };
 
-void testFuserPass_1() {
+TEST(TEFuserPass, FuserPass_1) {
   WithCPUFuser cf;
-  KernelScope kernel_scope;
   const auto graph_string = R"IR(
     graph(%0 : Float(128, strides=[1], device=cpu),
           %1 : Float(128, strides=[1], device=cpu)):
@@ -51,9 +51,8 @@ void testFuserPass_1() {
       ->run(*g);
 }
 
-void testFuserPass_2() {
+TEST(TEFuserPass, FuserPass_2) {
   WithCPUFuser cf;
-  KernelScope kernel_scope;
   const auto graph_string = R"IR(
     graph(%0 : Float(128, strides=[1], device=cpu),
           %1 : Float(128, strides=[1], device=cpu)):
@@ -76,9 +75,8 @@ void testFuserPass_2() {
       ->run(*g);
 }
 
-void testFuserPass_3() {
+TEST(TEFuserPass, FuserPass_3) {
   WithCPUFuser cf;
-  KernelScope kernel_scope;
   const auto graph_string = R"IR(
     graph(%x : Float(128, strides=[1], device=cpu),
           %y : Float(128, strides=[1], device=cpu)):
@@ -106,14 +104,14 @@ void testFuserPass_3() {
   }
 }
 
-void testFuserPass_0DimInput() {
-  KernelScope kernel_scope;
+TEST(TEFuserPass, FuserPass_0DimInput) {
+  WithCPUFuser cf;
   const auto graph_string = R"IR(
-    graph(%x : Float(device=cuda),
-          %y : Float(device=cuda)):
+    graph(%x : Float(device=cpu),
+          %y : Float(device=cpu)):
       %one : int = prim::Constant[value=1]()
-      %a : Float(device=cuda) = aten::mul(%x, %y)
-      %b : Float(device=cuda) = aten::add(%x, %a, %one)
+      %a : Float(device=cpu) = aten::mul(%x, %y)
+      %b : Float(device=cpu) = aten::add(%x, %a, %one)
       return (%b))IR";
   auto g = std::make_shared<Graph>();
   torch::jit::parseIR(graph_string, g.get());
@@ -121,13 +119,12 @@ void testFuserPass_0DimInput() {
   g->lint();
   FuseTensorExprs(g);
 
-  // We should not fuse 0-dim tensors
-  testing::FileCheck().check_not("prim::TensorExprGroup")->run(*g);
+  // We should fuse 0-dim tensors too
+  testing::FileCheck().check("prim::TensorExprGroup")->run(*g);
 }
 
-void testFuserPass_UnfusibleDevice() {
+TEST(TEFuserPass, FuserPass_UnfusibleDevice) {
   WithCPUFuser cf(false);
-  KernelScope kernel_scope;
   const auto graph_string = R"IR(
     graph(%x : Float(10, strides=[1], device=cpu),
           %y : Float(10, strides=[1], device=cpu)):
@@ -143,9 +140,8 @@ void testFuserPass_UnfusibleDevice() {
   testing::FileCheck().check_not("prim::TensorExprGroup")->run(*g);
 }
 
-void testFuserPass_UnknownShapes() {
+TEST(TEFuserPass, FuserPass_UnknownShapes) {
   WithCPUFuser cf;
-  KernelScope kernel_scope;
   const auto graph_string = R"IR(
     graph(%x : Tensor,
           %y : Tensor):
@@ -162,10 +158,9 @@ void testFuserPass_UnknownShapes() {
   testing::FileCheck().check_not("prim::TensorExprGroup")->run(*g);
 }
 
-void testFuserPass_Multidevice() {
+TEST(TEFuserPass, FuserPass_Multidevice) {
   {
     WithCPUFuser cf;
-    KernelScope kernel_scope;
     const auto graph_string = R"IR(
     graph(%x : Float(10, strides=[1], device=cpu),
           %y : Float(20, strides=[1], device=cpu),
@@ -185,7 +180,6 @@ void testFuserPass_Multidevice() {
   }
   {
     WithCPUFuser cf;
-    KernelScope kernel_scope;
     const auto graph_string = R"IR(
     graph(%x : Float(10, strides=[1], device=cpu),
           %y : Float(20, strides=[1], device=cuda:0),
@@ -206,7 +200,6 @@ void testFuserPass_Multidevice() {
   }
   {
     WithCPUFuser cf;
-    KernelScope kernel_scope;
     const auto graph_string = R"IR(
     graph(%x : Float(10, strides=[1], device=cpu),
           %y : Float(20, strides=[1], device=cpu),
@@ -228,7 +221,6 @@ void testFuserPass_Multidevice() {
   }
   {
     WithCPUFuser cf;
-    KernelScope kernel_scope;
     const auto graph_string = R"IR(
     graph(%x : Float(10, strides=[1], device=cpu),
           %y : Float(20, strides=[1], device=cpu),
@@ -250,7 +242,6 @@ void testFuserPass_Multidevice() {
   }
   {
     WithCPUFuser cf;
-    KernelScope kernel_scope;
     const auto graph_string = R"IR(
     graph(%x : Float(10, strides=[1], device=cpu),
           %y : Float(20, strides=[1], device=cuda:0)):
@@ -267,7 +258,6 @@ void testFuserPass_Multidevice() {
   }
   {
     WithCPUFuser cf;
-    KernelScope kernel_scope;
     const auto graph_string = R"IR(
     graph(%x : Float(10, strides=[1], device=cuda:0),
           %y : Float(20, strides=[1], device=cuda:1),
@@ -288,9 +278,8 @@ void testFuserPass_Multidevice() {
   }
 }
 
-void testFuserPass_MergeGroups() {
+TEST(TEFuserPass, FuserPass_MergeGroups) {
   WithCPUFuser cf;
-  KernelScope kernel_scope;
   const auto graph_string = R"IR(
     graph(%a : Float(128, strides=[1], device=cpu),
           %b : Float(128, strides=[1], device=cpu)):
@@ -311,9 +300,8 @@ void testFuserPass_MergeGroups() {
       ->run(*g);
 }
 
-void testFuserPass_UnknownShapesIgnored() {
+TEST(TEFuserPass, FuserPass_UnknownShapesIgnored) {
   WithCPUFuser cf;
-  KernelScope kernel_scope;
   const auto graph_string = R"IR(
     graph(%x : Float(device=cpu),
           %y : Float(device=cpu)):
@@ -330,13 +318,47 @@ void testFuserPass_UnknownShapesIgnored() {
   testing::FileCheck().check("prim::TensorExprGroup")->run(*g);
 }
 
-void testFuserPass_IgnoreUnknownShapeAtStart() {
+TEST(TEFuserPass, FuserPass_IgnoreUnknownShapeAtStart) {
   WithCPUFuser cf;
   const auto graph_string = R"IR(
     graph(%x : Bool(8, strides=[1], device=cpu),
           %y : Bool(8, strides=[1], device=cpu)):
       %a : Bool(8, strides=[1], device=cpu) = aten::__and__(%x, %y)
       %b : Tensor = aten::__or__(%a, %y)
+      return (%b)
+    )IR";
+  auto g = std::make_shared<Graph>();
+  torch::jit::parseIR(graph_string, g.get());
+  g->lint();
+  FuseTensorExprs(g, /* min_group_size= */ 2);
+  testing::FileCheck().check_not("prim::TensorExprGroup")->run(*g);
+}
+
+TEST(TEFuserPass, FuserPass_Where) {
+  WithCPUFuser cf;
+  const auto graph_string = R"IR(
+    graph(%x : Float(8, strides=[1], device=cpu),
+          %y : Float(8, strides=[1], device=cpu),
+          %z : Float(8, strides=[1], device=cpu)):
+      %cond : Bool(8, strides=[1], device=cpu) = aten::eq(%x, %y)
+      %b : Float(8, strides=[1], device=cpu) = aten::where(%cond, %y, %z)
+      return (%b)
+    )IR";
+  auto g = std::make_shared<Graph>();
+  torch::jit::parseIR(graph_string, g.get());
+  g->lint();
+  FuseTensorExprs(g, /* min_group_size= */ 2);
+  testing::FileCheck().check("prim::TensorExprGroup")->run(*g);
+}
+
+TEST(TEFuserPass, FuserPass_WhereList) {
+  WithCPUFuser cf;
+  const auto graph_string = R"IR(
+    graph(%x : Float(8, strides=[1], device=cpu),
+          %y : Float(8, strides=[1], device=cpu),
+          %z : Float(8, strides=[1], device=cpu)):
+      %cond : Bool(8, strides=[1], device=cpu) = aten::eq(%x, %y)
+      %b : Tensor[] = aten::where(%cond)
       return (%b)
     )IR";
   auto g = std::make_shared<Graph>();

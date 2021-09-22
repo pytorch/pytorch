@@ -1,12 +1,16 @@
 import contextlib
+from typing import Generator
 import warnings
 
 from torch._C import default_generator
 import torch
 
 
-def set_rng_state(new_state) -> None:
+def set_rng_state(new_state: torch.Tensor) -> None:
     r"""Sets the random number generator state.
+
+    .. note: This function only works for CPU. For CUDA, please use
+             torch.manual_seed(seed), which works for both CPU and CUDA.
 
     Args:
         new_state (torch.ByteTensor): The desired state
@@ -62,12 +66,12 @@ _fork_rng_warned_already = False
 
 
 @contextlib.contextmanager
-def fork_rng(devices=None, enabled=True, _caller="fork_rng", _devices_kw="devices"):
+def fork_rng(devices=None, enabled=True, _caller="fork_rng", _devices_kw="devices") -> Generator:
     """
     Forks the RNG, so that when you return, the RNG is reset
     to the state that it was previously in.
 
-    Arguments:
+    Args:
         devices (iterable of CUDA IDs): CUDA devices for which to fork
             the RNG.  CPU RNG state is always forked.  By default, :meth:`fork_rng` operates
             on all devices, but will emit a warning if your machine has a lot

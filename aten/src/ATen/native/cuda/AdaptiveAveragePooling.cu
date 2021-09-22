@@ -200,7 +200,7 @@ namespace {
         for(ih = 0; ih < kH; ++ih) {
           for(iw = 0; iw < kW; ++iw) {
             // atomic add since different threads could update same variable
-            gpuAtomicAdd(&(ptr_gradInput[iw]), grad_delta);
+            gpuAtomicAddNoReturn(&(ptr_gradInput[iw]), grad_delta);
           }
           ptr_gradInput += isizeW; // next input line
         }
@@ -432,11 +432,11 @@ namespace {
   {
     TensorArg input_arg{ input, "input", 1 },
               output_arg{ output, "output", 2 };
-    checkAllSameGPU("cudnn_adaptive_avg_pooling2d", {input_arg, output_arg});
+    checkAllSameGPU(__func__, {input_arg, output_arg});
 
-    for (int64_t i = 0; i < input.ndimension(); i++) {
+    for (int64_t i = 1; i < input.ndimension(); i++) {
       TORCH_CHECK(input.size(i) > 0,
-        "adaptive_avg_pooling2d(): expected input to have non-empty spatial dimensions, "
+        "adaptive_avg_pool2d(): Expected input to have non-zero size for non-batch dimensions, "
         "but input has sizes ", input.sizes(), " with dimension ", i, " being "
         "empty");
     }
@@ -446,7 +446,8 @@ namespace {
       case at::MemoryFormat::ChannelsLast: {
         // special case for tensor memory format in channels_last
         TORCH_CHECK(input.ndimension() == 4,
-          "non-empty 4D (batch mode) tensor expected for input with channels_last layout");
+                    "adaptive_avg_pool2d(): Expected 4D tensor, but got ",
+                    input.sizes());
 
         int sizeB = input_.size(0);
         int sizeC = input_.size(1);
@@ -460,11 +461,14 @@ namespace {
 
         int osizeH = output_size[0];
         int osizeW = output_size[1];
-
         // preserve channels_last stride on output tensor;
         if (!output.is_contiguous(at::MemoryFormat::ChannelsLast)) {
           // TODO: modify this after resize_ added `memory_format` tag
           output.resize_({sizeB, sizeC, osizeH, osizeW}).as_strided_({sizeB, sizeC, osizeH, osizeW}, {sizeC*osizeH*osizeW, 1, osizeW*sizeC, sizeC});
+        }
+
+        if (output.numel() == 0) {
+          return;
         }
 
         const int max_threads = std::min<int>(
@@ -520,14 +524,15 @@ namespace {
                 sizeB, sizeC, isizeH, isizeW, osizeH, osizeW,
                 kernel_stride_C, kernel_size_C,
                 istrideB, istrideC, istrideH, istrideW);
-              TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+              C10_CUDA_KERNEL_LAUNCH_CHECK();
             }
           );
         break;
       }
       case at::MemoryFormat::Contiguous: {
         TORCH_CHECK((input.ndimension() == 3 || input.ndimension() == 4),
-          "non-empty 3D or 4D (batch mode) tensor expected for input");
+                    "adaptive_avg_pool2d(): Expected 3D or 4D tensor, but got ",
+                    input.sizes());
         int64_t grid_x = input.size(-3);
         if (input.ndimension() == 4) {
            input_ = input.contiguous();
@@ -548,6 +553,10 @@ namespace {
         } else {
            output.resize_({sizeD, osizeH, osizeW});
         }
+        if (output.numel() == 0) {
+          return;
+        }
+
         AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16,
             input_.scalar_type(), "adaptive_avg_pool2d_cuda", [&] {
               scalar_t *input_data = input_.data_ptr<scalar_t>();
@@ -563,7 +572,7 @@ namespace {
                 input_data, output_data,
                 isizeH, isizeW, osizeH, osizeW,
                 istrideD, istrideH, istrideW);
-              TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+              C10_CUDA_KERNEL_LAUNCH_CHECK();
             }
           );
         break;
@@ -583,14 +592,13 @@ namespace {
     TensorArg grad_input_arg{ gradInput, "gradInput", 1 },
               grad_output_arg{ gradOutput_, "gradOutput_", 2 },
               input_arg{ input, "input", 3 };
-    checkAllSameGPU("cudnn_adaptive_avg_pooling2d_out",
-                    {grad_input_arg, grad_output_arg, input_arg});
+    checkAllSameGPU(__func__, {grad_input_arg, grad_output_arg, input_arg});
 
     switch (input.suggest_memory_format()) {
       case at::MemoryFormat::ChannelsLast: {
         // special case for tensor memory format in channels_last
         TORCH_CHECK(input.ndimension() == 4,
-          "non-empty 4D (batch mode) tensor expected for input with channels_last layout");
+                    "adaptive_avg_pool2d_backward_cuda(): Expected 4D tensor, but got ", input.ndimension());
 
         int sizeB = input.size(0);
         int sizeC = input.size(1);
@@ -666,7 +674,7 @@ namespace {
                 sizeB, sizeC, isizeH, isizeW, osizeH, osizeW,
                 kernel_stride_C, kernel_size_C,
                 ostrideB, ostrideC, ostrideH, ostrideW);
-              TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+              C10_CUDA_KERNEL_LAUNCH_CHECK();
             }
           );
         break;
@@ -703,7 +711,7 @@ namespace {
                 atomic_adaptive_average_gradinput <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>> (
                   gradInput_data, gradOutput_data,
                   isizeH, isizeW, osizeH, osizeW);
-                TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+                C10_CUDA_KERNEL_LAUNCH_CHECK();
               }
               else
               {
@@ -711,7 +719,7 @@ namespace {
                 adaptive_average_gradinput <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>> (
                   gradInput_data, gradOutput_data,
                   isizeH, isizeW, osizeH, osizeW);
-                TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+                C10_CUDA_KERNEL_LAUNCH_CHECK();
               }
             }
           );
@@ -728,9 +736,9 @@ namespace {
 } // namespace
 
   Tensor& adaptive_avg_pool2d_out_cuda(
-    Tensor& output,
     const Tensor& input,
-    IntArrayRef output_size)
+    IntArrayRef output_size,
+    Tensor& output)
   {
     adaptive_avg_pool2d_out_cuda_template(
       output, input, output_size);
@@ -756,8 +764,10 @@ namespace {
     // Nondeterministic because of atomicAdd usage
     globalContext().alertNotDeterministic("adaptive_avg_pool2d_backward_out_cuda");
     gradInput.resize_as_(input);
-    adaptive_avg_pool2d_backward_out_cuda_template(
-      gradInput, gradOutput, input);
+    if (gradInput.numel() != 0) {
+      adaptive_avg_pool2d_backward_out_cuda_template(
+        gradInput, gradOutput, input);
+    }
     return gradInput;
   }
 
@@ -769,8 +779,10 @@ namespace {
     // Nondeterministic because of atomicAdd usage
     globalContext().alertNotDeterministic("adaptive_avg_pool2d_backward_cuda");
     auto gradInput = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-    adaptive_avg_pool2d_backward_out_cuda_template(
-      gradInput, gradOutput, input);
+    if (gradInput.numel() != 0) {
+      adaptive_avg_pool2d_backward_out_cuda_template(
+        gradInput, gradOutput, input);
+    }
     return gradInput;
   }
 

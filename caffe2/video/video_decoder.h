@@ -477,11 +477,11 @@ class VideoDecoder {
       Callback& callback);
 };
 
-CAFFE2_API void FreeDecodedData(
+TORCH_API void FreeDecodedData(
     std::vector<std::unique_ptr<DecodedFrame>>& sampledFrames,
     std::vector<std::unique_ptr<DecodedAudio>>& sampledAudio);
 
-CAFFE2_API bool DecodeMultipleClipsFromVideo(
+TORCH_API bool DecodeMultipleClipsFromVideo(
     const char* video_buffer,
     const std::string& video_filename,
     const int encoded_size,

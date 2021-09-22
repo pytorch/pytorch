@@ -1,13 +1,13 @@
 #include <gtest/gtest.h>
 
-#include "test/cpp/jit/test_utils.h"
+#include <test/cpp/jit/test_utils.h>
 
-#include "torch/csrc/jit/ir/alias_analysis.h"
-#include "torch/csrc/jit/ir/irparser.h"
-#include "torch/csrc/jit/passes/dead_code_elimination.h"
-#include "torch/csrc/jit/runtime/custom_operator.h"
-#include "torch/csrc/jit/runtime/register_ops_utils.h"
-#include "torch/jit.h"
+#include <torch/csrc/jit/ir/alias_analysis.h>
+#include <torch/csrc/jit/ir/irparser.h>
+#include <torch/csrc/jit/passes/dead_code_elimination.h>
+#include <torch/csrc/jit/runtime/custom_operator.h>
+#include <torch/csrc/jit/runtime/register_ops_utils.h>
+#include <torch/jit.h>
 
 namespace torch {
 namespace jit {
@@ -31,7 +31,7 @@ TEST(CustomOperatorTest, InferredSchema) {
 
   Stack stack;
   push(stack, 2.0f, at::ones(5));
-  op->getOperation()(&stack);
+  op->getOperation()(stack);
   at::Tensor output;
   pop(stack, output);
 
@@ -61,7 +61,7 @@ TEST(CustomOperatorTest, ExplicitSchema) {
 
   Stack stack;
   push(stack, 2.0f, at::ones(5));
-  op->getOperation()(&stack);
+  op->getOperation()(stack);
   at::Tensor output;
   pop(stack, output);
 
@@ -71,9 +71,10 @@ TEST(CustomOperatorTest, ExplicitSchema) {
 TEST(CustomOperatorTest, ListParameters) {
   // Check that lists work well.
   torch::RegisterOperators reg(
-      "foo::lists(int[] ints, float[] floats, Tensor[] tensors) -> float[]",
+      "foo::lists(int[] ints, float[] floats, complex[] complexdoubles, Tensor[] tensors) -> float[]",
       [](torch::List<int64_t> ints,
          torch::List<double> floats,
+         torch::List<c10::complex<double>> complexdoubles,
          torch::List<at::Tensor> tensors) { return floats; });
 
   auto& ops = getAllOperatorsFor(Symbol::fromQualString("foo::lists"));
@@ -82,16 +83,19 @@ TEST(CustomOperatorTest, ListParameters) {
   auto& op = ops.front();
   ASSERT_EQ(op->schema().name(), "foo::lists");
 
-  ASSERT_EQ(op->schema().arguments().size(), 3);
+  ASSERT_EQ(op->schema().arguments().size(), 4);
   ASSERT_EQ(op->schema().arguments()[0].name(), "ints");
   ASSERT_TRUE(
       op->schema().arguments()[0].type()->isSubtypeOf(ListType::ofInts()));
   ASSERT_EQ(op->schema().arguments()[1].name(), "floats");
   ASSERT_TRUE(
       op->schema().arguments()[1].type()->isSubtypeOf(ListType::ofFloats()));
-  ASSERT_EQ(op->schema().arguments()[2].name(), "tensors");
+  ASSERT_EQ(op->schema().arguments()[2].name(), "complexdoubles");
+  ASSERT_TRUE(op->schema().arguments()[2].type()->isSubtypeOf(
+      ListType::ofComplexDoubles()));
+  ASSERT_EQ(op->schema().arguments()[3].name(), "tensors");
   ASSERT_TRUE(
-      op->schema().arguments()[2].type()->isSubtypeOf(ListType::ofTensors()));
+      op->schema().arguments()[3].type()->isSubtypeOf(ListType::ofTensors()));
 
   ASSERT_EQ(op->schema().returns().size(), 1);
   ASSERT_TRUE(
@@ -100,8 +104,12 @@ TEST(CustomOperatorTest, ListParameters) {
   Stack stack;
   push(stack, c10::List<int64_t>({1, 2}));
   push(stack, c10::List<double>({1.0, 2.0}));
+  push(
+      stack,
+      c10::List<c10::complex<double>>(
+          {c10::complex<double>(2.4, -5.5), c10::complex<double>(-1.3, 2)}));
   push(stack, c10::List<at::Tensor>({at::ones(5)}));
-  op->getOperation()(&stack);
+  op->getOperation()(stack);
   c10::List<double> output;
   pop(stack, output);
 
@@ -132,7 +140,7 @@ TEST(CustomOperatorTest, ListParameters2) {
 
   Stack stack;
   push(stack, c10::List<at::Tensor>({at::ones(5)}));
-  op->getOperation()(&stack);
+  op->getOperation()(stack);
   c10::List<at::Tensor> output;
   pop(stack, output);
 
@@ -184,9 +192,10 @@ graph(%x: Tensor, %y: Tensor):
   }
 }
 
+// NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
 static constexpr char op_list[] = "foofoo::bar.template;foo::another";
 #define TORCH_SELECTIVE_NAME_IN_SCHEMA(l, n)                                   \
-  torch::detail::SelectiveStr<c10::impl::op_whitelist_contains_name_in_schema( \
+  torch::detail::SelectiveStr<c10::impl::op_allowlist_contains_name_in_schema( \
       l, n)>(n)
 
 TEST(TestCustomOperator, OperatorGeneratorUndeclared) {
@@ -195,7 +204,8 @@ TEST(TestCustomOperator, OperatorGeneratorUndeclared) {
   torch::jit::RegisterOperators reg({OperatorGenerator(
       TORCH_SELECTIVE_NAME_IN_SCHEMA(
           op_list, "foofoo::not_exist(float a, Tensor b) -> Tensor"),
-      [](Stack* stack) {
+      [](Stack& stack) {
+        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         double a;
         at::Tensor b;
         pop(stack, a, b);
@@ -213,7 +223,8 @@ TEST(TestCustomOperator, OperatorGeneratorBasic) {
   torch::jit::RegisterOperators reg({OperatorGenerator(
       TORCH_SELECTIVE_NAME_IN_SCHEMA(
           op_list, "foofoo::bar.template(float a, Tensor b) -> Tensor"),
-      [](Stack* stack) {
+      [](Stack& stack) {
+        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         double a;
         at::Tensor b;
         pop(stack, a, b);
@@ -238,7 +249,7 @@ TEST(TestCustomOperator, OperatorGeneratorBasic) {
 
   Stack stack;
   push(stack, 2.0f, at::ones(5));
-  op->getOperation()(&stack);
+  op->getOperation()(stack);
   at::Tensor output;
   pop(stack, output);
 

@@ -59,8 +59,7 @@
 /// ```
 
 #include <c10/core/DispatchKey.h>
-#include <ATen/core/dispatch/Dispatcher.h>
-#include <ATen/core/op_registration/op_whitelist.h>
+#include <ATen/core/op_registration/op_allowlist.h>
 #include <ATen/core/op_registration/infer_schema.h>
 #if defined(EXPOSE_C2_OPS) || !defined(CAFFE2_IS_XPLAT_BUILD)
 #include <torch/csrc/jit/frontend/function_schema_parser.h>
@@ -70,6 +69,23 @@
 #include <ATen/core/op_registration/op_registration.h>
 
 namespace torch {
+
+#if defined C10_MOBILE
+/**
+ * The NoInferSchemaTag is a type name used to indicate that this call to the
+ * CppFunction constructor should not trigger schema inference from functor.
+ * Schema inference from functor utilizes template meta-programming, and is
+ * costly from a size perspective. Ideally, one would expect that the schema
+ * inference would require very little binary size since most of the
+ * computation can be done by the compiler at build time, but that isn't
+ * necessarily the case.
+ *
+ * Schema inference is elided only for mobile use-cases where we don't need
+ * the additional runtime cost or size overhead on client devices.
+ *
+ */
+struct NoInferSchemaTag {};
+#endif
 
 template <class CurClass>
 class class_;
@@ -81,7 +97,7 @@ class class_;
 ///
 /// This class erases the type of the passed in function, but durably records
 /// the type via an inferred schema for the function.
-class CAFFE2_API CppFunction final {
+class TORCH_API CppFunction final {
   // TODO: This is morally the same thing as KernelRegistrationConfig, but it's
   // opaque to the user.
 
@@ -91,8 +107,7 @@ public:
   explicit CppFunction(Func* f, std::enable_if_t<c10::guts::is_function_type<Func>::value, std::nullptr_t> = nullptr)
     : func_(c10::KernelFunction::makeFromUnboxedRuntimeFunction(f))
     , cpp_signature_(c10::impl::CppSignature::make<Func>())
-    // TODO: Don't go through WrapRuntimeKernelFunctor
-    , schema_(c10::detail::inferFunctionSchemaFromFunctor<c10::impl::WrapFunctionIntoRuntimeFunctor<std::decay_t<Func>>>())
+    , schema_(c10::detail::inferFunctionSchemaFromFunctor<std::decay_t<Func>>())
     , debug_()
     {}
 
@@ -101,8 +116,7 @@ public:
   explicit CppFunction(FuncPtr f, std::enable_if_t<c10::is_compile_time_function_pointer<FuncPtr>::value, std::nullptr_t> = nullptr)
     : func_(c10::KernelFunction::makeFromUnboxedFunction(f))
     , cpp_signature_(c10::impl::CppSignature::make<typename FuncPtr::FuncType>())
-    // TODO: Don't go through WrapRuntimeKernelFunctor
-    , schema_(c10::detail::inferFunctionSchemaFromFunctor<c10::impl::WrapFunctionIntoRuntimeFunctor<std::decay_t<typename FuncPtr::FuncType>>>())
+    , schema_(c10::detail::inferFunctionSchemaFromFunctor<typename FuncPtr::FuncType>())
     , debug_()
     {}
 
@@ -111,23 +125,41 @@ public:
   explicit CppFunction(Lambda&& f, std::enable_if_t<c10::guts::is_functor<std::decay_t<Lambda>>::value, std::nullptr_t> = nullptr)
     : func_(c10::KernelFunction::makeFromUnboxedLambda(std::forward<Lambda>(f)))
     , cpp_signature_(c10::impl::CppSignature::make<Lambda>())
-    // TODO: Don't go through WrapRuntimeKernelFunctor
-    , schema_(c10::detail::inferFunctionSchemaFromFunctor<c10::impl::WrapFunctionIntoRuntimeFunctor<std::decay_t<Lambda>>>())
+    , schema_(c10::detail::inferFunctionSchemaFromFunctor<std::decay_t<Lambda>>())
     , debug_()
     {}
 
-  /// This static factory lets you create CppFunctions that (1) don't have boxing
-  /// wrappers (because we don't support it yet) and (2) don't have schema
-  /// inference (because some ops don't support it).
+#if defined C10_MOBILE
+  /// This overload accepts function pointers, e.g., `CppFunction(&add_impl, NoInferSchemaTag())`
   template <typename Func>
-  static CppFunction makeUnboxedOnly(Func* f) {
-    // TODO: Eliminate the necessity for this function entirely.
-    return CppFunction(
-      c10::KernelFunction::makeFromUnboxedOnlyRuntimeFunction(f),
-      /* cpp_signature */ c10::impl::CppSignature::make<Func>(),
-      /* schema */ nullptr
-    );
-  }
+  explicit CppFunction(Func* f, NoInferSchemaTag, std::enable_if_t<c10::guts::is_function_type<Func>::value, std::nullptr_t> = nullptr)
+    : func_(c10::KernelFunction::makeFromUnboxedRuntimeFunction(f))
+    , cpp_signature_(c10::impl::CppSignature::make<Func>())
+    // TODO: Don't go through WrapRuntimeKernelFunctor
+    , schema_(nullptr)
+    , debug_()
+    {}
+
+  /// This overload accepts compile time function pointers, e.g., `CppFunction(TORCH_FN(add_impl), NoInferSchemaTag())`
+  template <typename FuncPtr>
+  explicit CppFunction(FuncPtr f, NoInferSchemaTag, std::enable_if_t<c10::is_compile_time_function_pointer<FuncPtr>::value, std::nullptr_t> = nullptr)
+    : func_(c10::KernelFunction::makeFromUnboxedFunction(f))
+    , cpp_signature_(c10::impl::CppSignature::make<typename FuncPtr::FuncType>())
+    // TODO: Don't go through WrapRuntimeKernelFunctor
+    , schema_(nullptr)
+    , debug_()
+    {}
+
+  /// This overload accepts lambdas, e.g., `CppFunction([](const Tensor& self) { ... }. NoInferSchemaTag())`
+  template <typename Lambda>
+  explicit CppFunction(Lambda&& f, NoInferSchemaTag, std::enable_if_t<c10::guts::is_functor<std::decay_t<Lambda>>::value, std::nullptr_t> = nullptr)
+    : func_(c10::KernelFunction::makeFromUnboxedLambda(std::forward<Lambda>(f)))
+    , cpp_signature_(c10::impl::CppSignature::make<Lambda>())
+    // TODO: Don't go through WrapRuntimeKernelFunctor
+    , schema_(nullptr)
+    , debug_()
+    {}
+#endif
 
   /// This creates a fallthrough function.  Fallthrough functions
   /// immediately redispatch to the next available dispatch key,
@@ -168,6 +200,51 @@ public:
       /* cpp_signature */ c10::nullopt, // not known for boxed functions
       /* schema */ nullptr
     );
+  }
+
+  // Variant that takes in a boxed kernel function with a plumbed DispatchKeySet.
+  // See Note [Plumbing Keys Through The Dispatcher] for details.
+  template<c10::KernelFunction::BoxedKernelFunction_withDispatchKeys* func>
+  static CppFunction makeFromBoxedFunction() {
+    // TODO: more user friendly API
+    return CppFunction(
+      c10::KernelFunction::makeFromBoxedFunction<func>(),
+      /* cpp_signature */ c10::nullopt, // not known for boxed functions
+      /* schema */ nullptr
+    );
+  }
+
+  /// Create a function from a boxed kernel functor which defines
+  /// `operator()(const OperatorHandle&, DispatchKeySet, Stack*)`
+  /// (receiving arguments from boxed calling convention) and inherits
+  /// from `c10::OperatorKernel`.  Unlike makeFromBoxedFunction, functions
+  /// registered in this way can also carry additional state which
+  /// is managed by the functor; this is useful if you're writing an
+  /// adapter to some other implementation, e.g., a Python callable, which
+  /// is dynamically associated with the registered kernel.
+  template<class KernelFunctor>
+  static CppFunction makeFromBoxedFunctor(std::unique_ptr<KernelFunctor> kernelFunctor) {
+    return CppFunction(
+      c10::KernelFunction::makeFromBoxedFunctor(std::move(kernelFunctor)),
+      /* cpp_signature */ c10::nullopt, // not known for boxed functions
+      /* schema */ nullptr
+    );
+  }
+
+  /// Create a function from an unboxed kernel function.
+  /// This is typically used to register common operators.
+  template<typename FuncPtr, std::enable_if_t<c10::guts::is_function_type<FuncPtr>::value, std::nullptr_t> = nullptr>
+  static CppFunction makeFromUnboxedFunction(FuncPtr* f) {
+    return CppFunction(f);
+  }
+
+  /// Create a function from a compile time unboxed kernel function pointer.
+  /// This is typically used to register common operators.
+  /// Compile time function pointers can be used to allow the compiler
+  /// to optimize (e.g. inline) calls to it.
+  template<typename FuncPtr, std::enable_if_t<c10::is_compile_time_function_pointer<FuncPtr>::value, std::nullptr_t> = nullptr>
+  static CppFunction makeFromUnboxedFunction(FuncPtr f) {
+    return CppFunction(f);
   }
 
   CppFunction&& debug(std::string d) && {
@@ -232,10 +309,18 @@ inline CppFunction dispatch(c10::DeviceType type, Func&& raw_f) {
         return c10::DispatchKey::CUDA;
       case c10::DeviceType::XLA:
         return c10::DispatchKey::XLA;
+      case c10::DeviceType::Lazy:
+        return c10::DispatchKey::Lazy;
+      case c10::DeviceType::MLC:
+        return c10::DispatchKey::MLC;
+      case c10::DeviceType::Meta:
+        return c10::DispatchKey::Meta;
       case c10::DeviceType::HIP:
         return c10::DispatchKey::HIP;
-      case c10::DeviceType::MSNPU:
-        return c10::DispatchKey::MSNPU;
+      case c10::DeviceType::ORT:
+        return c10::DispatchKey::ORT;
+      case c10::DeviceType::HPU:
+        return c10::DispatchKey::HPU;
       default:
         TORCH_CHECK(false,
           "Device type ", t, " cannot be overloaded at dispatch time, "
@@ -319,7 +404,7 @@ namespace detail {
 // registration should actually happen or not.  We then have extra overloads which
 // bypass registration entirely if a selective name is disabled.  We do a
 // constexpr test to see if a operator should be enabled or not; this is
-// currently implemented in ATen/core/op_registration/op_whitelist.h
+// currently implemented in ATen/core/op_registration/op_allowlist.h
 
 namespace detail {
 
@@ -338,8 +423,8 @@ namespace detail {
     const char* name_;
   };
 
-#define TORCH_SELECTIVE_NAME(n) torch::detail::SelectiveStr<c10::impl::op_whitelist_check(n)>(n)
-#define TORCH_SELECTIVE_SCHEMA(n) torch::detail::SelectiveStr<c10::impl::schema_whitelist_check(n)>(n)
+#define TORCH_SELECTIVE_NAME(n) torch::detail::SelectiveStr<c10::impl::op_allowlist_check(n)>(n)
+#define TORCH_SELECTIVE_SCHEMA(n) torch::detail::SelectiveStr<c10::impl::schema_allowlist_check(n)>(n)
 
 }
 
@@ -367,7 +452,7 @@ namespace detail {
 /// }
 /// ```
 ///
-class CAFFE2_API Library final {
+class TORCH_API Library final {
 public:
   /// \private
   ///
@@ -482,9 +567,31 @@ public:
   Library& impl(Name name, Func&& raw_f) & {
     // TODO: need to raise an error when you impl a function that has a
     // catch all def
+  #if defined C10_MOBILE
+    CppFunction f(std::forward<Func>(raw_f), NoInferSchemaTag());
+  #else
     CppFunction f(std::forward<Func>(raw_f));
+  #endif
+      return _impl(name, std::move(f));
+  }
+
+#if defined C10_MOBILE
+  // Note: This overload is needed only for C10_MOBILE, since the automatically
+  // defined copy constructor for the CppFunction doesn't have the additional
+  // NoInferSchemaTag argument. We define the overload for the impl() function
+  // to accept a CppFunction&& argument. The already constructed CppFunction
+  // object may or may not have the inferred schema, but it doesn't matter
+  // for our purposes since if it already has the inferred schema, then we
+  // might as well just pass it through directly.
+  //
+  template <typename Name>
+  Library& impl(Name name, CppFunction&& raw_f) & {
+    // TODO: need to raise an error when you impl a function that has a
+    // catch all def
+    CppFunction f(std::forward<CppFunction>(raw_f));
     return _impl(name, std::move(f));
   }
+#endif
 
   /// \private
   ///
@@ -496,20 +603,10 @@ public:
     return impl(name, dispatch(std::forward<Dispatch>(key), std::forward<Func>(raw_f)));
   }
 
-  /// \private
-  ///
-  /// Convenience overload for unboxed only kernels; kernels whose type
-  /// signatures are not supported by our template based metaprogramming
-  /// system.  These are currently quite common but will be eventually
-  /// eliminated.
-  ///
-  /// This is equivalent to calling CppFunction::makeUnboxedOnly() on
-  /// the function, but this name for the function makes it easy to grep for.
   template <typename Name, typename Func>
   Library& impl_UNBOXED(Name name, Func* raw_f) & {
-    // TODO: Remove this overload once the makeUnboxedOnly incidence rate
-    // goes way down
-    return impl(name, CppFunction::makeUnboxedOnly(raw_f));
+    static_assert(c10::guts::false_t<Func>(), ".impl_UNBOXED(...) was removed. Please use .impl(...) instead.");
+    return *this;
   }
 
   // These overloads cover cases when a SelectiveStr (see Note [Selective build])
@@ -531,7 +628,10 @@ public:
   template <typename Dispatch, typename Func>
   Library& impl(detail::SelectiveStr<false>, Dispatch&& key, Func&& raw_f) & { return *this; }
   template <typename Func>
-  Library& impl_UNBOXED(detail::SelectiveStr<false> name, Func* raw_f) & { return *this; }
+  Library& impl_UNBOXED(detail::SelectiveStr<false> name, Func* raw_f) & {
+    static_assert(c10::guts::false_t<Func>(), ".impl_UNBOXED(...) was removed. Please use .impl(...) instead.");
+    return *this;
+  }
 
   template <typename Func>
   Library& impl(detail::SelectiveStr<true> name, Func&& raw_f) & {
@@ -543,7 +643,8 @@ public:
   }
   template <typename Func>
   Library& impl_UNBOXED(detail::SelectiveStr<true> name, Func* raw_f) & {
-    return impl(name.operator const char*(), CppFunction::makeUnboxedOnly(raw_f));
+    static_assert(c10::guts::false_t<Func>(), ".impl_UNBOXED(...) was removed. Please use .impl(...) instead.");
+    return *this;
   }
 
   /// Register a fallback implementation for all operators which will be used
@@ -578,7 +679,7 @@ public:
   }
 
   template <class CurClass>
-  inline class_<CurClass> class_(const std::string& className);
+  inline torch::class_<CurClass> class_(const std::string& className);
 
 private:
   Kind kind_;
@@ -643,7 +744,7 @@ public:
 /// for any given namespace.
 #define TORCH_LIBRARY(ns, m) \
   static void TORCH_LIBRARY_init_ ## ns (torch::Library&); \
-  static torch::detail::TorchLibraryInit TORCH_LIBRARY_static_init_ ## ns ( \
+  static const torch::detail::TorchLibraryInit TORCH_LIBRARY_static_init_ ## ns ( \
     torch::Library::DEF, \
     &TORCH_LIBRARY_init_ ## ns, \
     #ns, c10::nullopt, __FILE__, __LINE__ \
@@ -653,16 +754,28 @@ public:
 /// \private
 ///
 /// This macro is a version of TORCH_LIBRARY() that doesn't enforce that there
-/// is only one library (it is a "fragment").  This should ONLY be used
-/// inside the PerOpRegistration.cpp file (as its name suggests).
-#define TORCH_LIBRARY_FRAGMENT_THIS_API_IS_FOR_PER_OP_REGISTRATION_ONLY(ns, m) \
-  static void TORCH_LIBRARY_FRAGMENT_init_ ## ns ## _ ## k (torch::Library&); \
-  static torch::detail::TorchLibraryInit TORCH_LIBRARY_FRAGMENT_static_init_ ## ns ## _ ## k ( \
+/// is only one library (it is a "fragment").  This is used inside the
+/// PerOpRegistration.cpp file, as well as in places where all op registrations
+/// within the same namespace cannot be easily put into one macro block
+/// (this is mostly the case for custom ops in fbcode that were ported from
+/// the old API)
+#define TORCH_LIBRARY_FRAGMENT(ns,  m) _TORCH_LIBRARY_FRAGMENT(ns, m, C10_UID)
+
+/// \private
+///
+/// The above macro requires an extra unique identifier (uid) to prevent variable name collisions
+/// This can happen if TORCH_LIBRARY_FRAGMENT is called multiple times with the same namespace
+/// in the same translation unit.
+/// Note that the TORCH_LIBRARY variant doesn't run into this problem, because it enforces
+/// that it can only be called once for a given namespace.
+#define _TORCH_LIBRARY_FRAGMENT(ns, m, uid) \
+  static void C10_CONCATENATE(TORCH_LIBRARY_FRAGMENT_init_ ## ns ## _, uid) (torch::Library&); \
+  static const torch::detail::TorchLibraryInit C10_CONCATENATE(TORCH_LIBRARY_FRAGMENT_static_init_ ## ns ## _, uid) ( \
     torch::Library::FRAGMENT, \
-    &TORCH_LIBRARY_FRAGMENT_init_ ## ns ## _ ## k, \
+    &C10_CONCATENATE(TORCH_LIBRARY_FRAGMENT_init_ ## ns ## _, uid), \
     #ns, c10::nullopt, __FILE__, __LINE__ \
   ); \
-  void TORCH_LIBRARY_FRAGMENT_init_ ## ns ## _ ## k (torch::Library& m)
+  void C10_CONCATENATE(TORCH_LIBRARY_FRAGMENT_init_ ## ns ## _, uid) (torch::Library& m)
 
 /// Macro for defining a function that will be run at static
 /// initialization time to define operator overrides for dispatch key
@@ -704,18 +817,25 @@ public:
 ///
 // NB: if the dispatch key is not whitelisted, we simply omit the Library
 // call entirely
-#define TORCH_LIBRARY_IMPL(ns, k, m) \
-  static void TORCH_LIBRARY_IMPL_init_ ## ns ## _ ## k (torch::Library&); \
-  static torch::detail::TorchLibraryInit TORCH_LIBRARY_IMPL_static_init_ ## ns ## _ ## k ( \
+#define TORCH_LIBRARY_IMPL(ns, k, m) _TORCH_LIBRARY_IMPL(ns, k, m, C10_UID)
+
+/// \private
+///
+/// The above macro requires an extra unique identifier (uid) to prevent variable name collisions.
+/// This can happen if TORCH_LIBRARY_IMPL is called multiple times with the same namespace
+/// and dispatch key in the same translation unit.
+#define _TORCH_LIBRARY_IMPL(ns, k, m, uid) \
+  static void C10_CONCATENATE(TORCH_LIBRARY_IMPL_init_ ## ns ## _ ## k ## _, uid) (torch::Library&); \
+  static const torch::detail::TorchLibraryInit C10_CONCATENATE(TORCH_LIBRARY_IMPL_static_init_ ## ns ## _ ## k ## _, uid) ( \
     torch::Library::IMPL, \
-    c10::guts::if_constexpr<c10::impl::dispatch_key_whitelist_check(c10::DispatchKey::k)>( \
-      []() { return & TORCH_LIBRARY_IMPL_init_ ## ns ## _ ## k; }, \
+    c10::guts::if_constexpr<c10::impl::dispatch_key_allowlist_check(c10::DispatchKey::k)>( \
+      []() { return & C10_CONCATENATE(TORCH_LIBRARY_IMPL_init_ ## ns ## _ ## k ## _, uid); }, \
       []() { return [](torch::Library&) -> void {}; } \
     ), \
     #ns, c10::make_optional(c10::DispatchKey::k), \
     __FILE__, __LINE__ \
   ); \
-  void TORCH_LIBRARY_IMPL_init_ ## ns ## _ ## k (torch::Library& m)
+  void C10_CONCATENATE(TORCH_LIBRARY_IMPL_init_ ## ns ## _ ## k ## _, uid) (torch::Library& m)
 
 
 // These are variants of the macros above which are to be used for testing (they

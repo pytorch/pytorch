@@ -63,6 +63,7 @@ class IsNanOp final : public Operator<Context> {
     auto* Y = Output(0, X.sizes(), at::dtype<uint8_t>());
     const auto* X_data = X.template data<T>();
     uint8_t* Y_data = Y->template mutable_data<uint8_t>();
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (size_t i = 0; i < X.numel(); i++) {
       Y_data[i] = (uint8_t)(std::isnan(X_data[i]));
     }
@@ -367,13 +368,16 @@ class WeightedSumOp : public Operator<Context> {
     CAFFE_ENFORCE_EQ(input_size % 2, 0);
     const auto& X0 = Input(0);
     const auto& weight0 = Input(1);
-    CAFFE_ENFORCE_GT(X0.numel(), 0);
     CAFFE_ENFORCE_EQ(weight0.numel(), 1);
     const int size = X0.numel();
     // Note: removed Aliasing check, since Output already has
     // caching capability
     auto* Y = Output(0, X0.sizes(), at::dtype<T>());
     T* Y_data = Y->template mutable_data<T>();
+    if (X0.numel() == 0) {
+      return true;
+    }
+    CAFFE_ENFORCE_GT(X0.numel(), 0);
     if (input_size == 2) {
       math::Scale<float, T>(
           size,
@@ -519,7 +523,7 @@ class WeightedSumGradientOp : public Operator<Context> {
  *
  * For now really works only on CPU because of INDICES access
  */
-template <typename T, class Context>
+template <class Context>
 class ScatterWeightedSumOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
@@ -527,17 +531,29 @@ class ScatterWeightedSumOp : public Operator<Context> {
   USE_DISPATCH_HELPER;
 
   bool RunOnDevice() override {
-    return DispatchHelper<TensorTypes<int32_t, int64_t>>::call(this, Input(2));
+    const auto& x0 = Input(0);
+    const auto x0Type = TypeMetaToDataType(x0.dtype());
+    if (x0Type == TensorProto_DataType_FLOAT) {
+      return ScatterWeightedSumOp::template DoRun<float>();
+    }
+    if (x0Type == TensorProto_DataType_DOUBLE) {
+      return ScatterWeightedSumOp::template DoRun<double>();
+    }
+    CAFFE_THROW("Unsupported type of tensor X_0: ", x0.dtype().name());
   }
 
  private:
-  template <typename Index>
+  template<typename T>
+  bool DoRun() {
+    return DispatchHelper<TensorTypes<int32_t, int64_t>, T>::call(this, Input(2));
+  }
+  template <typename T, typename Index>
   bool DoRunWithType() {
     int64_t block_size = Input(0).size_from_dim(1);
-    return DispatchHelper<FixedValues<1>, Index>::call(this, block_size);
+    return DispatchHelper<FixedValues<1>, T, Index>::call(this, block_size);
   }
 
-  template <typename Index, int FixedSize>
+  template <typename T, typename Index, int FixedSize>
   bool DoRunWithValue() {
     CAFFE_ENFORCE_EQ(InputSize() % 2, 1);
     auto& X0 = Input(0);
@@ -546,6 +562,9 @@ class ScatterWeightedSumOp : public Operator<Context> {
     auto* output = Output(0);
     CAFFE_ENFORCE_EQ(&X0, output, "In place operation is required");
 
+    if (X0.numel() == 0) {
+      return true;
+    }
     CAFFE_ENFORCE_GT(X0.numel(), 0);
     CAFFE_ENFORCE_GT(X0.dim(), 0, "X0 has to be at least the vector");
     CAFFE_ENFORCE_EQ(weight0.numel(), 1);
@@ -555,7 +574,7 @@ class ScatterWeightedSumOp : public Operator<Context> {
     int64_t block_size = M / N;
     T* data = output->template mutable_data<T>();
     const Index* idxs = indices.template data<Index>();
-    T w0 = *weight0.template data<T>();
+    float w0 = *weight0.template data<float>();
     // It's most likely a constant so exact comparison is fine
     if (w0 != 1.0) {
       for (int i = 0; i < K; ++i) {
@@ -580,7 +599,7 @@ class ScatterWeightedSumOp : public Operator<Context> {
       CAFFE_ENFORCE_EQ(X.numel(), block_size * K);
       CAFFE_ENFORCE_EQ(weight.numel(), 1);
       const T* x_data = X.template data<T>();
-      T w = *weight.template data<T>();
+      float w = *weight.template data<float>();
       for (int i = 0; i < K; ++i) {
         Index idx = idxs[i];
         // double-checking the indices, but it's fine as it's DCHECK only
@@ -667,6 +686,7 @@ class ScatterAssignOp : public Operator<Context> {
     const auto dataType = TypeMetaToDataType(data.dtype());
     const auto slicesType = TypeMetaToDataType(slices.dtype());
     const auto indicesType = TypeMetaToDataType(indices.dtype());
+    // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
     auto* output = Output(0);
 
     auto runner = GetRunner(dataType, slicesType, indicesType);
@@ -750,7 +770,7 @@ class ScatterOp : public Operator<CPUContext> {
       : Operator<CPUContext>(std::forward<Args>(args)...),
         OP_SINGLE_ARG(int, "axis", axis_, 1) {}
 
-  virtual ~ScatterOp() noexcept override {}
+   ~ScatterOp() noexcept override {}
 
   bool RunOnDevice() override {
     TORCH_CHECK(
@@ -1235,6 +1255,7 @@ class GatherRangesOp : public Operator<Context> {
     auto* outputLengthsPtr = outputLengths->template mutable_data<int32_t>();
     size_t start = 0;
     size_t blockSize = ranges.size_from_dim(1);
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (size_t i = 0; i < batchSize; ++i) {
       auto end = start + blockSize;
       outputLengthsPtr[i] = accumulate(rangesData, start, end);
@@ -1308,6 +1329,7 @@ class LengthsGatherOp : public Operator<Context> {
     const auto* indices_data = indices.template data<Index>();
 
     int64_t total_length = 0;
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (size_t i = 0; i < indices.numel(); ++i) {
       auto idx = indices_data[i];
       CAFFE_ENFORCE_LT(idx, lengths.numel());

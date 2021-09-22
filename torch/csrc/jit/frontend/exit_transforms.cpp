@@ -1,9 +1,12 @@
 #include <torch/csrc/jit/frontend/exit_transforms.h>
+
 #include <ATen/core/jit_type.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/frontend/error_report.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/ir_views.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
+#include <torch/csrc/jit/runtime/graph_iterator.h>
 
 namespace torch {
 namespace jit {
@@ -146,9 +149,11 @@ struct ExitTransformer {
     IfView if_view(n);
     registerBlockOutputs(if_view.thenBlock(), true_outs);
     registerBlockOutputs(if_view.elseBlock(), false_outs);
-    for (size_t i = 0; i < true_outs.size(); ++i) {
-      auto out_type =
-          unifyTypes(true_outs.at(i)->type(), false_outs.at(i)->type());
+    for (const auto i : c10::irange(true_outs.size())) {
+      auto out_type = unifyTypes(
+          true_outs.at(i)->type(),
+          false_outs.at(i)->type(),
+          /*default_to_union=*/true);
       n->addOutput()->setType(*out_type);
     }
   }
@@ -273,8 +278,8 @@ struct ExitTransformer {
       return constructWontExitPair();
     }
 
-    // for the block that is not exitting, its' exit values will not get
-    // used so we create uninitialized values of the same type as the other
+    // The exit values of the block that is not exiting will not get
+    // used, so we create uninitialized values of the same type as the other
     // block.
     if (then_status == ExitStatus::WONT || then_status == ExitStatus::THROWS) {
       std::vector<Value*> exit_vals =
@@ -287,6 +292,7 @@ struct ExitTransformer {
       else_pair = ExitPair(else_pair.hasExited(), exit_vals);
     }
 
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     Value* has_exited;
     if (if_status == ExitStatus::WILL) {
       // Need to maintain the invariant that if hasExited() == true_val_
@@ -391,6 +397,7 @@ struct ExitTransformer {
   // otherwise, target_block_ remains the same.
   void updateTargetBlock(Block* block) {
     if (owningNodeKind(block) == prim::Loop &&
+        // NOLINTNEXTLINE(bugprone-branch-clone)
         current_exit_kind_ == prim::LoopContinuation) {
       target_block_ = block;
     } else if (
@@ -546,8 +553,10 @@ bool inlineConsecutiveIfs(Node* node) {
   bool then_value = maybe_then_value->toBool();
   bool else_value = maybe_else_value->toBool();
 
-  for (auto i = 0; i < 2; ++i) {
+  for (const auto i : c10::irange(2)) {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     Block* first_if_block;
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     Block* second_if_block;
 
     if (i == 0) {
@@ -611,117 +620,6 @@ void inlineConsecutiveIfs(Block* block) {
   }
 }
 
-// This class facilitates depth-first iteration over all nodes in a graph.
-class DepthFirstGraphNodeIterator {
-  using BlockIteratorPair = std::pair<Block*, graph_node_list_iterator>;
-
-  // The graph being iterated over.
-  std::shared_ptr<Graph> graph_;
-
-  // A stack of all blocks that need to be revisited when the current block has
-  // been processed, as well as the corresponding nodes that should be returned
-  // when those blocks are revisited. Think of it as the standard DFS stack.
-  std::vector<BlockIteratorPair> block_stack_;
-
-  // The {block, node} pair that is currently being processed. current_.first is
-  // the block, current_.second is the iterator.
-  BlockIteratorPair current_;
-
- public:
-  // Constructor.
-  DepthFirstGraphNodeIterator(std::shared_ptr<Graph>& graph)
-      : graph_(graph),
-        current_({graph->block(), graph->block()->nodes().begin()}) {}
-
-  // Get the next Node in the graph. \returns nullptr if there are no nodes
-  // left.
-  Node* next() {
-    // current_it always points to the next node that should be returned. If it
-    // points to the end of the current block, that means there are no nodes
-    // left in the graph to visit. This is because the only time an end iterator
-    // is pushed to block_stack is if current block is the root block of the
-    // graph.
-    Node* node = current_.second != (current_.first)->nodes().end()
-        ? *(current_.second)
-        : nullptr;
-
-    if (node) {
-      // Advance current.second because there may be more nodes in
-      // current_block.
-      ++current_.second;
-
-      // If there are no more nodes, set the current block and iterator to those
-      // from the top of the stack; the one that was being iterated over when
-      // the current block was encountered.
-      if (current_.second == current_.first->nodes().end() &&
-          !block_stack_.empty()) {
-        current_ = block_stack_.back();
-        block_stack_.pop_back();
-      }
-
-      // Handle If, Loop and With nodes in special ways because are the only
-      // ones that own more blocks.
-      if (node->kind() == prim::If) {
-        auto* then_block = node->blocks().at(0);
-        auto* else_block = node->blocks().at(1);
-
-        bool then_block_empty =
-            then_block->nodes().begin() == then_block->nodes().end();
-        bool else_block_empty =
-            else_block->nodes().begin() == else_block->nodes().end();
-
-        if (!then_block_empty || !else_block_empty) {
-          // If either of the then or else blocks have nodes, the current block
-          // and iterator position need to be saved on the stack to resume
-          // processing later.
-          block_stack_.push_back({current_.first, current_.second});
-        }
-
-        if (!then_block_empty && else_block_empty) {
-          // Set current_ to {then_block, then_block.begin()} and push nothing
-          // to the stack since the else block is empty.
-          current_.first = then_block;
-          current_.second = then_block->nodes().begin();
-        } else if (then_block_empty && !else_block_empty) {
-          // Set current_ to {else_block, else_block.begin()} and push nothing
-          // to the stack since the current block is already on the stack.
-          current_.first = else_block;
-          current_.second = else_block->nodes().begin();
-        } else if (!then_block_empty && !else_block_empty) {
-          // Set current_ to {then_block, then_block.begin()} and push the
-          // else_block to the stack so that it will be processed after.
-          block_stack_.push_back({else_block, else_block->nodes().begin()});
-          current_.first = then_block;
-          current_.second = then_block->nodes().begin();
-        }
-      } else if (node->kind() == prim::Loop || node->kind() == prim::With) {
-        auto* body_block = node->blocks().at(0);
-
-        bool body_block_empty =
-            body_block->nodes().begin() == body_block->nodes().end();
-
-        if (!body_block_empty) {
-          // If body_block is not empty, push the current block onto the stack
-          // to resume processing it later and set current_ to {body_block,
-          // body_block.begin()}.
-          block_stack_.push_back({current_.first, current_.second});
-
-          current_.first = body_block;
-          current_.second = body_block->nodes().begin();
-        }
-      }
-    } else {
-      // There are no more nodes in the current block. Resume processing of the
-      // block on the top of the stack if there is one.
-      if (!block_stack_.empty()) {
-        current_ = block_stack_.back();
-        block_stack_.pop_back();
-      }
-    }
-
-    return node;
-  }
-};
 // Adds prim::With nodes to a graph to help handle early exits between
 // prim::Enter and prim::Exit nodes. More specifically, it transforms
 // IR that looks like this:
@@ -771,8 +669,7 @@ static void convertEnterExitNodesToWithBlocks(std::shared_ptr<Graph>& graph) {
     node = it.next();
   }
 
-  // The stack should not be empty; an Exit should have been found for every
-  // Enter.
+  // The stack should be empty; an Exit should have been found for every Enter.
   TORCH_INTERNAL_ASSERT(enter_node_stack.empty());
 
   // Now, add a With block for each Enter-Exit pair. The innermost pairs were

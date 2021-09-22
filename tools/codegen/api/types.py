@@ -1,167 +1,304 @@
-from tools.codegen.model import *
+from tools.codegen.model import (Argument, FunctionSchema, NativeFunction,
+                                 BackendIndex,
+                                 SelfArgument, TensorOptionsArguments, BaseTy)
 from dataclasses import dataclass
-from typing import Optional, Union, Sequence, Tuple, TypeVar
+from typing import Optional, Union, Sequence, TypeVar, List, Set, Dict
+from enum import Enum
 
 _T = TypeVar('_T')
 
-# ------------------------------------------------------------------- #
+# An ArgName is just the str name of the argument in schema;
+# but in some special circumstances, we may add a little extra
+# context.  The Enum SpecialArgName covers all of these cases;
+# grep for their construction sites to see when they can occr.
 
-#                       Grouping arguments
+SpecialArgName = Enum('SpecialArgName', (
+    'possibly_redundant_memory_format',
+))
+ArgName = Union[str, SpecialArgName]
 
-# ------------------------------------------------------------------- #
-
-# Represents the implicit *this argument for method calls in C++ API
+# This class shouldn't be created directly; instead, use/create one of the singletons below.
 @dataclass(frozen=True)
-class ThisArgument:
-    argument: Argument
-
-# Bundle of arguments that represent a TensorOptions in the C++ API.
-@dataclass(frozen=True)
-class TensorOptionsArguments:
-    dtype: Argument
-    layout: Argument
-    device: Argument
-    pin_memory: Argument
-
-    def all(self) -> Sequence[Argument]:
-        return [self.dtype, self.layout, self.device, self.pin_memory]
-
-# ------------------------------------------------------------------- #
-
-#                           cpp types
-
-# ------------------------------------------------------------------- #
-
-# Describe a single argument (e.g., the x in "f(int x)") in the C++ API.
-@dataclass(frozen=True)
-class CppArgument:
-    # C++ type, e.g., int
-    type: str
-    # C++ name, e.g., x
+class BaseCppType:
+    ns: Optional[str]
     name: str
-    # Only used by the header, but we work it out in all cases anyway
-    default: Optional[str]
-    # The JIT argument(s) this formal was derived from.  May
-    # correspond to multiple arguments if this is TensorOptions!
-    argument: Union[Argument, TensorOptionsArguments]
 
-    # Default string representation prints the most elaborated form
-    # of the formal
     def __str__(self) -> str:
-        mb_default = ""
-        if self.default is not None:
-            mb_default = f"={self.default}"
-        return f"{self.type} {self.name}{mb_default}"
+        if self.ns is None or self.ns == '':
+            return self.name
+        return f"{self.ns}::{self.name}"
 
-    # Return a copy of CppArgument with defaults removed
-    def no_default(self) -> 'CppArgument':
-        return CppArgument(
-            type=self.type,
+# The set of all non-templated, valid, fully-qualified names of C++ types that are used in the codegen.
+# Templated types get their own dataclass, mainly to make namespace parsing easier.
+intT = BaseCppType('', 'int64_t')
+doubleT = BaseCppType('', 'double')
+boolT = BaseCppType('', 'bool')
+voidT = BaseCppType('', 'void')
+stringT = BaseCppType('c10', 'string_view')
+generatorT = BaseCppType('at', 'Generator')
+scalarTypeT = BaseCppType('at', 'ScalarType')
+tensorT = BaseCppType('at', 'Tensor')
+optionalTensorRefT = BaseCppType('at', 'OptionalTensorRef')
+tensorListT = BaseCppType('at', 'TensorList')
+dimnameT = BaseCppType('at', 'Dimname')
+dimnameListT = BaseCppType('at', 'DimnameList')
+layoutT = BaseCppType('at', 'Layout')
+deviceT = BaseCppType('at', 'Device')
+scalarT = BaseCppType('at', 'Scalar')
+optionalScalarRefT = BaseCppType('at', 'OptionalScalarRef')
+memoryFormatT = BaseCppType('at', 'MemoryFormat')
+qschemeT = BaseCppType('at', 'QScheme')
+storageT = BaseCppType('at', 'Storage')
+streamT = BaseCppType('at', 'Stream')
+intArrayRefT = BaseCppType('at', 'IntArrayRef')
+tensorOptionsT = BaseCppType('at', 'TensorOptions')
+typeAndSizeT = BaseCppType('torch::autograd::generated', 'TypeAndSize')
+tensorGeometryT = BaseCppType('at', 'TensorGeometry')
+
+BaseTypeToCppMapping: Dict[BaseTy, BaseCppType] = {
+    BaseTy.int: intT,
+    BaseTy.float: doubleT,
+    BaseTy.bool: boolT,
+    BaseTy.str: stringT,
+    BaseTy.Generator: generatorT,
+    BaseTy.ScalarType: scalarTypeT,
+    BaseTy.Tensor: tensorT,
+    BaseTy.Dimname: dimnameT,
+    BaseTy.Layout: layoutT,
+    BaseTy.Device: deviceT,
+    BaseTy.Scalar: scalarT,
+    BaseTy.MemoryFormat: memoryFormatT,
+    BaseTy.QScheme: qschemeT,
+    BaseTy.Storage: storageT,
+    BaseTy.Stream: streamT,
+}
+
+# CTypes encode C++ type structure as needed for translation.
+
+@dataclass(frozen=True)
+class BaseCType:
+    type: BaseCppType
+
+    def cpp_type(self, *, strip_ref: bool = False) -> str:
+        return str(self.type)
+
+    # For BC reasons, we don't want to introduce at:: namespaces to RegistrationDeclarations.yaml
+    # TODO: Kill this when we eventually remove it!
+    def cpp_type_registration_declarations(self) -> str:
+        return str(self.type).replace('at::', '')
+
+    def remove_const_ref(self) -> 'CType':
+        return self
+
+@dataclass(frozen=True)
+class ConstRefCType:
+    elem: 'CType'
+
+    def cpp_type(self, *, strip_ref: bool = False) -> str:
+        if strip_ref:
+            return self.elem.cpp_type(strip_ref=strip_ref)
+        return f'const {self.elem.cpp_type()} &'
+
+    def cpp_type_registration_declarations(self) -> str:
+        return f'const {self.elem.cpp_type_registration_declarations()} &'
+
+    def remove_const_ref(self) -> 'CType':
+        return self.elem.remove_const_ref()
+
+@dataclass(frozen=True)
+class MutRefCType:
+    elem: 'CType'
+
+    def cpp_type(self, *, strip_ref: bool = False) -> str:
+        if strip_ref:
+            return self.elem.cpp_type(strip_ref=strip_ref)
+        return f'{self.elem.cpp_type()} &'
+
+    def cpp_type_registration_declarations(self) -> str:
+        return f'{self.elem.cpp_type_registration_declarations()} &'
+
+    def remove_const_ref(self) -> 'CType':
+        return self.elem.remove_const_ref()
+
+@dataclass(frozen=True)
+class OptionalCType:
+    elem: 'CType'
+
+    def cpp_type(self, *, strip_ref: bool = False) -> str:
+        # Do not pass `strip_ref` recursively.
+        return f'c10::optional<{self.elem.cpp_type()}>'
+
+    def cpp_type_registration_declarations(self) -> str:
+        return f'c10::optional<{self.elem.cpp_type_registration_declarations()}>'
+
+    def remove_const_ref(self) -> 'CType':
+        return OptionalCType(self.elem.remove_const_ref())
+
+@dataclass(frozen=True)
+class ListCType:
+    elem: 'CType'
+
+    def cpp_type(self, *, strip_ref: bool = False) -> str:
+        # Do not pass `strip_ref` recursively.
+        return f'c10::List<{self.elem.cpp_type()}>'
+
+    def cpp_type_registration_declarations(self) -> str:
+        return f'c10::List<{self.elem.cpp_type_registration_declarations()}>'
+
+    def remove_const_ref(self) -> 'CType':
+        return ListCType(self.elem.remove_const_ref())
+
+@dataclass(frozen=True)
+class ArrayRefCType:
+    elem: 'CType'
+
+    def cpp_type(self, *, strip_ref: bool = False) -> str:
+        # Do not pass `strip_ref` recursively.
+        return f'at::ArrayRef<{self.elem.cpp_type()}>'
+
+    def cpp_type_registration_declarations(self) -> str:
+        return f'ArrayRef<{self.elem.cpp_type_registration_declarations()}>'
+
+    def remove_const_ref(self) -> 'CType':
+        return ArrayRefCType(self.elem.remove_const_ref())
+
+@dataclass(frozen=True)
+class VectorCType:
+    elem: 'CType'
+
+    def cpp_type(self, *, strip_ref: bool = False) -> str:
+        # Do not pass `strip_ref` recursively.
+        return f'::std::vector<{self.elem.cpp_type()}>'
+
+    def cpp_type_registration_declarations(self) -> str:
+        return f'::std::vector<{self.elem.cpp_type_registration_declarations()}>'
+
+    def remove_const_ref(self) -> 'CType':
+        return VectorCType(self.elem.remove_const_ref())
+
+@dataclass(frozen=True)
+class ArrayCType:
+    elem: 'CType'
+    size: int
+
+    def cpp_type(self, *, strip_ref: bool = False) -> str:
+        # Do not pass `strip_ref` recursively.
+        return f'::std::array<{self.elem.cpp_type()},{self.size}>'
+
+    def cpp_type_registration_declarations(self) -> str:
+        return f'::std::array<{self.elem.cpp_type_registration_declarations()},{self.size}>'
+
+    def remove_const_ref(self) -> 'CType':
+        return ArrayCType(self.elem.remove_const_ref(), self.size)
+
+@dataclass(frozen=True)
+class TupleCType:
+    elems: List['CType']
+
+    def cpp_type(self, *, strip_ref: bool = False) -> str:
+        # Do not pass `strip_ref` recursively.
+        return f'::std::tuple<{",".join([e.cpp_type() for e in self.elems])}>'
+
+    def cpp_type_registration_declarations(self) -> str:
+        return f'::std::tuple<{",".join([e.cpp_type_registration_declarations() for e in self.elems])}>'
+
+    def remove_const_ref(self) -> 'CType':
+        return TupleCType([e.remove_const_ref() for e in self.elems])
+
+CType = Union[
+    BaseCType,
+    OptionalCType,
+    ConstRefCType,
+    MutRefCType,
+    ListCType,
+    ArrayRefCType,
+    ArrayCType,
+    VectorCType,
+    TupleCType
+]
+
+# A NamedCType is short for Named C++ semantic type.  A NamedCType represents a C++ type, plus
+# semantic information about what it represents.  For example, consider the
+# argument "bool pin_memory"; its normal C++ type is "bool", but its C++
+# semantic type also keeps track that this represents a "pin_memory"; you can't
+# just use a random other boolean in a context where you need a "pin_memory"!
+#
+
+@dataclass(frozen=True)
+class NamedCType:
+    name: ArgName
+    type: CType
+
+    def cpp_type(self, *, strip_ref: bool = False) -> str:
+        return self.type.cpp_type(strip_ref=strip_ref)
+
+    # For BC reasons, we don't want to introduce at:: namespaces to RegistrationDeclarations.yaml
+    # TODO: Kill this when we eventually remove it!
+    def cpp_type_registration_declarations(self) -> str:
+        return self.type.cpp_type_registration_declarations()
+
+    def remove_const_ref(self) -> 'NamedCType':
+        return NamedCType(self.name, self.type.remove_const_ref())
+
+    def with_name(self, name: str) -> 'NamedCType':
+        return NamedCType(name, self.type)
+
+# A binding represents any C++ binding site for a formal parameter.
+# We don't distinguish between binding sites for different APIs;
+# instead, all of the important distinctions are encoded in CType,
+# which you can use to figure out if a given Binding is appropriate
+# for use in another context.  (See tools.codegen.api.translate)
+
+@dataclass(frozen=True)
+class Binding:
+    name: str
+    nctype: NamedCType
+    argument: Union[Argument, TensorOptionsArguments, SelfArgument]
+    # TODO: maybe don't represent default here
+    default: Optional[str] = None
+
+    @property
+    def type(self) -> str:
+        return self.nctype.cpp_type()
+
+    def no_default(self) -> 'Binding':
+        return Binding(
             name=self.name,
+            nctype=self.nctype,
             default=None,
             argument=self.argument,
         )
 
-    # However, you might also find the version with no default useful
-    def str_no_default(self) -> str:
+    def decl(self, *, func_ptr_cast: bool = False) -> str:
+        mb_default = ""
+        if self.default is not None:
+            mb_default = f"={self.default}"
+
+        # casting only needs to know the type
+        if func_ptr_cast:
+            return f"{self.type}"
+        else:
+            return f"{self.type} {self.name}{mb_default}"
+
+    # For BC reasons, we don't want to introduce at:: namespaces to RegistrationDeclarations.yaml
+    # TODO: Kill this when we eventually remove it!
+    def decl_registration_declarations(self) -> str:
+        type_s = self.nctype.cpp_type_registration_declarations()
+        mb_default = ""
+        if self.default is not None:
+            mb_default = f"={self.default}"
+        return f"{type_s} {self.name}{mb_default}"
+
+    def defn(self) -> str:
         return f"{self.type} {self.name}"
 
-# An argument pack groups several CppArguments together into
-# a semantically meaningful unit.  Don't let the packing
-# deceive you: if you look at these arguments in C++, they're
-# always packing (in analogy to how parameter packs in C++
-# templates actually turn into separate arguments when you
-# unpack them).
-@dataclass(frozen=True)
-class CppArgumentPackIface:
-    # Return this argument pack, but with default stripped
-    def no_default(self: _T) -> _T:
-        raise NotImplementedError
-
-    # Unpack the pack into a sequence of arguments, discarding
-    # semantic information, and also discarding the implicit this
-    # argument that doesn't actually show up in declarations
-    def explicit_arguments(self) -> Sequence[CppArgument]:
-        raise NotImplementedError
-
-# Lifts a single CppArgument into a pack.
-@dataclass(frozen=True)
-class CppSingleArgumentPack(CppArgumentPackIface):
-    this: CppArgument
-
-    def no_default(self) -> 'CppSingleArgumentPack':
-        return CppSingleArgumentPack(self.this.no_default())
-
-    @property
-    def type(self) -> str:
-        return self.this.type
-
-    def explicit_arguments(self) -> Sequence[CppArgument]:
-        return [self.this]
-
-# Describe an implicit this argument (*this) on methods in the C++ API.
-# We don't use CppSingleArgumentPack because these never show up
-# in the explicit arguments list
-@dataclass(frozen=True)
-class CppThisArgumentPack(CppArgumentPackIface):
-    # The grouped JIT argument this formal was derived from
-    argument: ThisArgument
-
-    # C++ type, e.g., Tensor&
-    type: str
-
-    # this arguments are never defaulted
-    def no_default(self) -> 'CppThisArgumentPack':
-        return self
-
-    # The this argument is implicit, so it's not included in the
-    # explicit arguments list.
-    def explicit_arguments(self) -> Sequence[CppArgument]:
-        return []
-
-# Semantically represents a bundle of CppArguments that collectively
-# represent a TensorOptions.  If you don't care about TensorOptions
-# processing, think of this as just a list of four CppArguments; however
-# if you need to bundle these arguments back into a single
-# TensorOptions, it will be easiest to operate on this struct as a
-# whole.
-#
-# NOTE: this does NOT represent a 'const TensorOptions&' argument.
-# If you have one of those, it will be CppSingleArgumentPack
-@dataclass(frozen=True)
-class CppTensorOptionsArgumentPack(CppArgumentPackIface):
-    argument: TensorOptionsArguments
-    dtype: CppArgument
-    layout: CppArgument
-    device: CppArgument
-    pin_memory: CppArgument
-
-    # Remove the defaults from each of the constituent arguments
-    # representing the TensorOptions
-    def no_default(self) -> 'CppTensorOptionsArgumentPack':
-        return CppTensorOptionsArgumentPack(
-            argument=self.argument,
-            dtype=self.dtype.no_default(),
-            layout=self.layout.no_default(),
-            device=self.device.no_default(),
-            pin_memory=self.pin_memory.no_default(),
-        )
-
-    # Flatten the TensorOptions into individual CppArguments
-    def explicit_arguments(self) -> Sequence[CppArgument]:
-        return [self.dtype, self.layout, self.device, self.pin_memory]
-
-# Use this instead of CppArgumentPackIface, as this is a closed union
-CppArgumentPack = Union[
-    CppSingleArgumentPack,
-    CppThisArgumentPack,
-    CppTensorOptionsArgumentPack,
-]
+# An Expr is a C++ expression.  It has a C++ string representing its syntax,
+# as well as a CType saying what it provides.
 
 @dataclass(frozen=True)
-class CppExpr:
-    type: str
+class Expr:
     expr: str
+    type: NamedCType
 
 # A CppSignature represents a single overload in the C++ API.  For
 # any given function schema, there may be multiple CppSignatures
@@ -172,68 +309,68 @@ class CppSignature:
     # The schema this signature is derived from
     func: FunctionSchema
 
-    # Enough information about the C++ types to generate a full
-    # C++ type signature for this signature.  I'm not too sure
-    # if these are the right representations, so for now this
-    # is intended to be more abstract.
-    _argument_packs: Tuple[CppArgumentPack, ...]
-    _returns_type: str
+    # Is this a C++ signature for a method, i.e. Tensor::my_op(...)?
+    method: bool
+
+    # Is this a faithful C++ signature (i.e. following the JIT schema) or a convenience API
+    # (i.e. with a potential TensorOptions argument and out arguments in the front)
+    faithful: bool
+
+    # The set of C++ arguments which should not have defaults applied to them
+    cpp_no_default_args: Set[str]
+
+    # Is this a fallback C++ binding?  Fallback bindings are enabled by
+    # manual_cpp_binding: True and are alternate, non-public API that
+    # lets manual C++ binding implementors access the binding that would
+    # have been automatically generated
+    fallback_binding: bool = False
 
     # Return the unpacked argument structure of this signature,
     # discarding information about which arguments are semantically
     # related to each other.
-    def arguments(self) -> Sequence[CppArgument]:
-        return [sub_a for a in self._argument_packs for sub_a in a.explicit_arguments()]
+    def arguments(self) -> Sequence[Binding]:
+        return cpp.arguments(
+            self.func.arguments, faithful=self.faithful,
+            method=self.method, cpp_no_default_args=self.cpp_no_default_args)
 
-    # Return the packed argument structure of this signature.  This preserves
-    # high-level structure of the arguments so you may find it easier to do
-    # translations working with this representation.
-    def argument_packs(self) -> Sequence[CppArgumentPack]:
-        return self._argument_packs
+    def name(self) -> str:
+        n = cpp.name(self.func, faithful_name_for_out_overloads=self.faithful)
+        if self.fallback_binding:
+            n = f"__dispatch_{n}"
+        return n
 
     # Render the C++ declaration for this signature
-    def decl(self) -> str:
-        cpp_args_str = ', '.join(map(str, self.arguments()))
-        return f"{self._returns_type} {cpp.name(self.func)}({cpp_args_str})"
+    def decl(self, *, name: Optional[str] = None, prefix: str = "", is_redispatching_fn: bool = False) -> str:
+        returns_type = cpp.returns_type(self.func.returns).cpp_type()
+        cpp_args = [a.decl() for a in self.arguments()]
+        if is_redispatching_fn:
+            cpp_args = ['c10::DispatchKeySet dispatchKeySet'] + cpp_args
+        cpp_args_str = ', '.join(cpp_args)
+        if name is None:
+            name = prefix + self.name()
+        return f"{returns_type} {name}({cpp_args_str})"
 
     # Render the C++ definition for this signature, not including
     # the body (with curly braces)
-    def defn(self, name: Optional[str] = None, *, prefix: str = "") -> str:
-        cpp_args_str = ', '.join(a.str_no_default() for a in self.arguments())
+    def defn(self, *, name: Optional[str] = None, prefix: str = "", is_redispatching_fn: bool = False) -> str:
+        returns_type = cpp.returns_type(self.func.returns).cpp_type()
+        cpp_args = [a.defn() for a in self.arguments()]
+        if is_redispatching_fn:
+            cpp_args = ['c10::DispatchKeySet dispatchKeySet'] + cpp_args
+        cpp_args_str = ', '.join(cpp_args)
         if name is None:
-            name = prefix + cpp.name(self.func)
-        return f"{self._returns_type} {name}({cpp_args_str})"
+            name = prefix + self.name()
+        return f"{returns_type} {name}({cpp_args_str})"
 
-    # NB: This constructor knows how to disambiguate defaults when
-    # faithful is True.  Ideally this would live as an external process
-    # see https://github.com/pytorch/pytorch/pull/45666
-    @staticmethod
-    def _from_grouped_arguments(
-        func: FunctionSchema,
-        arguments: Sequence[Union[Argument, TensorOptionsArguments, ThisArgument]],
-        *,
-        faithful: bool
-    ) -> 'CppSignature':
-        if faithful:
-            # Faithful signatures will ungroup arguments into argument
-            # packs.
-            #
-            # After this, manually do overload disambiguation, by
-            # dropping defaults from the faithful signature.  In
-            # principle, we should be able to do this at some later
-            # point in time with other overload disambiguation
-            argument_packs = tuple(
-                cpp.argument_faithful(a).no_default() for a in arguments
-            )
-        else:
-            argument_packs = tuple(
-                cpp.argument(a) for a in arguments
-            )
-        return CppSignature(
-            func=func,
-            _argument_packs=argument_packs,
-            _returns_type=cpp.returns_type(func.returns),
-        )
+    def ptr_type(self) -> str:
+        args_types_str = ', '.join(a.type for a in self.arguments())
+        return f'{cpp.returns_type(self.func.returns).cpp_type()} (*)({args_types_str})'
+
+    # Return the C++ function type, e.g., something like int(bool)
+    def type(self) -> str:
+        args_types_str = ', '.join(a.type for a in self.arguments())
+        return f'{cpp.returns_type(self.func.returns).cpp_type()} ({args_types_str})'
+
 
 # Represents group of all CppSignatures associated with a
 # FunctionSchema.  Right now, that's the regular, user-visible
@@ -245,150 +382,143 @@ class CppSignatureGroup:
     signature: CppSignature
     faithful_signature: Optional[CppSignature]
 
+    def most_faithful_signature(self) -> CppSignature:
+        if self.faithful_signature:
+            return self.faithful_signature
+        else:
+            return self.signature
+
     @staticmethod
-    def from_schema(func: FunctionSchema, *, method: bool) -> 'CppSignatureGroup':
-        grouped_arguments = cpp.group_arguments(func, method=method)
+    def from_native_function(f: NativeFunction, *, method: bool, fallback_binding: bool = False) -> 'CppSignatureGroup':
+        func = f.func
         faithful_signature: Optional[CppSignature]
-        if any(isinstance(a, TensorOptionsArguments) for a in grouped_arguments):
-            faithful_signature = CppSignature._from_grouped_arguments(func, grouped_arguments, faithful=True)
+        if func.arguments.tensor_options is not None or len(func.arguments.out) > 0:
+            faithful_signature = CppSignature(
+                func=func,
+                faithful=True,
+                method=method,
+                fallback_binding=fallback_binding,
+                cpp_no_default_args=f.cpp_no_default_args
+            )
         else:
             faithful_signature = None
-        signature = CppSignature._from_grouped_arguments(func, grouped_arguments, faithful=False)
+        signature = CppSignature(
+            func=func,
+            faithful=False,
+            method=method,
+            fallback_binding=fallback_binding,
+            cpp_no_default_args=f.cpp_no_default_args
+        )
         return CppSignatureGroup(
             func=func,
             signature=signature,
             faithful_signature=faithful_signature,
         )
 
-# ------------------------------------------------------------------- #
-
-#                           dispatcher types
-
-# ------------------------------------------------------------------- #
-
-@dataclass(frozen=True)
-class DispatcherExpr:
-    type: str
-    expr: str
-
-@dataclass(frozen=True)
-class DispatcherArgument:
-    type: str
-    name: str
-    # dispatcher NEVER has defaults
-    argument: Union[Argument, TensorOptionsArguments]
-    # TensorOptionsArguments can occur when not using full c10 dispatch
-
-    def __str__(self) -> str:
-        return f"{self.type} {self.name}"
-
 @dataclass(frozen=True)
 class DispatcherSignature:
     # The schema this signature is derived from
     func: FunctionSchema
 
-    # Note to self: if we ever need to reassemble tensor options, we may need to
-    # also preserve grouping with DispatcherTensorOptionsArguments.  This should
-    # be an unlikely situation, however, since the general direction we are
-    # headed is to make native:: take everything in expanded form, so you
-    # shouldn't need to reassemble
-    _arguments: Tuple[DispatcherArgument, ...]
-    _returns_type: str
+    # Allows you to prepend an arbitrary prefix to the signature name.
+    # This is useful for parts of the codegen that generate wrappers around kernels,
+    # and need to avoid naming collisions.
+    prefix: str = ""
 
-    def arguments(self) -> Tuple[DispatcherArgument, ...]:
-        return self._arguments
+    def arguments(self) -> List[Binding]:
+        return dispatcher.arguments(self.func)
 
-    def defn(self, name: Optional[str] = None) -> str:
-        args_str = ', '.join(map(str, self.arguments()))
+    def name(self) -> str:
+        return self.prefix + dispatcher.name(self.func)
+
+    def decl(self, name: Optional[str] = None) -> str:
+        args_str = ', '.join(a.decl() for a in self.arguments())
         if name is None:
-            name = native.name(self.func)
-        return f"{self._returns_type} {name}({args_str})"
+            name = self.name()
+        return f"{self.returns_type().cpp_type()} {name}({args_str})"
 
-    def exprs(self) -> Sequence[DispatcherExpr]:
-        return dispatcher.exprs(self.arguments())
+    def defn(self, name: Optional[str] = None, *, is_redispatching_fn: bool = False) -> str:
+        args = [a.defn() for a in self.arguments()]
+        if is_redispatching_fn:
+            args = ['c10::DispatchKeySet dispatchKeySet'] + args
+        args_str = ', '.join(args)
+        if name is None:
+            name = self.name()
+        return f"{self.returns_type().cpp_type()} {name}({args_str})"
+
+    def exprs(self) -> List[Expr]:
+        return [Expr(a.name, a.nctype) for a in self.arguments()]
+
+    def returns_type(self) -> CType:
+        return dispatcher.returns_type(self.func.returns)
+
+    def ptr_type(self) -> str:
+        dispatcher_args_types_str = ', '.join(a.type for a in self.arguments())
+        return f'{self.returns_type().cpp_type()} (*)({dispatcher_args_types_str})'
 
     # Return the C++ function type, e.g., something like int(bool)
     def type(self) -> str:
-        dispatcher_args_types_str = ', '.join(a.type for a in self._arguments)
-        return f'{self._returns_type} ({dispatcher_args_types_str})'
+        dispatcher_args_types_str = ', '.join(a.type for a in self.arguments())
+        return f'{self.returns_type().cpp_type()} ({dispatcher_args_types_str})'
 
     @staticmethod
-    def from_schema(func: FunctionSchema) -> 'DispatcherSignature':
-        arguments = dispatcher.arguments(func)
-        returns_type = dispatcher.returns_type(func.returns)
-
-        return DispatcherSignature(
-            func=func,
-            _arguments=arguments,
-            _returns_type=returns_type,
-        )
-
-# ------------------------------------------------------------------- #
-
-#                    native types (NativeFunctions.h)
-
-# ------------------------------------------------------------------- #
-
-# NB: the "native" here is not to be confused with the native in
-# native_functions.yaml
-
-@dataclass(frozen=True)
-class NativeExpr:
-    type: str
-    expr: str
-
-@dataclass(frozen=True)
-class NativeArgument:
-    type: str
-    name: str
-    # Native function arguments have defaults to make it a little
-    # easier to call them directly to bypass dispatch.
-    default: Optional[str]
-    argument: Union[Argument, TensorOptionsArguments]
-
-    # Convention here is swapped because arguably NativeFunctions.h
-    # shouldn't have defaults (they should be handled during dispatching).
-    # The defaults are a mild convenience, however, for people who directly
-    # call native:: functions
-    def __str__(self) -> str:
-        return f"{self.type} {self.name}"
-
-    def str_with_default(self) -> str:
-        mb_default = ""
-        if self.default is not None:
-            mb_default = f"={self.default}"
-        return f"{self.type} {self.name}{mb_default}"
+    def from_schema(func: FunctionSchema, *, prefix: str = '') -> 'DispatcherSignature':
+        return DispatcherSignature(func, prefix)
 
 @dataclass(frozen=True)
 class NativeSignature:
     # The schema this signature is derived from
     func: FunctionSchema
 
-    _arguments: Tuple[NativeArgument, ...]
-    _returns_type: str
+    prefix: str = ""
+
+    def name(self) -> str:
+        return self.prefix + native.name(self.func)
+
+    def decl(self, name: Optional[str] = None) -> str:
+        args_str = ', '.join(a.decl() for a in self.arguments())
+        if name is None:
+            name = self.name()
+        return f"{native.returns_type(self.func.returns).cpp_type()} {name}({args_str})"
 
     def defn(self, name: Optional[str] = None) -> str:
-        args_str = ', '.join(map(str, self.arguments()))
+        args_str = ', '.join(a.defn() for a in self.arguments())
         if name is None:
-            name = dispatcher.name(self.func)
-        return f"{self._returns_type} {name}({args_str})"
+            name = self.name()
+        return f"{native.returns_type(self.func.returns).cpp_type()} {name}({args_str})"
 
-    def arguments(self) -> Tuple[NativeArgument, ...]:
-        return self._arguments
+    def ptr_type(self) -> str:
+        # don't include defaults in type signature!
+        args_str = ', '.join(a.defn() for a in self.arguments())
+        return f'{native.returns_type(self.func.returns).cpp_type()} (*)({args_str})'
 
-    def dispatcher_exprs(self) -> Sequence['DispatcherExpr']:
-        return dispatcher.nativearguments_exprs(self.arguments())
+    def arguments(self) -> List[Binding]:
+        return native.arguments(self.func)
 
-    @staticmethod
-    def from_schema(func: FunctionSchema) -> 'NativeSignature':
-        arguments = native.arguments(func)
-        returns_type = native.returns_type(func.returns)
+    def returns_type(self) -> CType:
+        return native.returns_type(self.func.returns)
 
-        return NativeSignature(
-            func=func,
-            _arguments=arguments,
-            _returns_type=returns_type,
-        )
+    def dispatcher_exprs(self) -> List[Expr]:
+        return translate.translate(self.arguments(), dispatcher.arguments(self.func), method=False)
+
+
+# Helper functions
+
+def kernel_signature(
+        f: NativeFunction, backend_index: BackendIndex, *, prefix: str = '') -> Union['NativeSignature', 'DispatcherSignature']:
+    # Note [External Backends Follow Dispatcher API]
+    # Kernel signatures for in-tree backends follow the "native" API,
+    # while kernels for out-of-tree backends follow the dispatcher API.
+    # See the comments in `native.py` for details, but historically there have been
+    # some small differences in schema convention between them and the Dispatcher API.
+    # Any differences that require translating between the two will results in a runtime cost,
+    # so we'd like to keep the differences as small as possible.
+    # With external backends, we'd like to enforce that they write their kernels with schemas
+    # that match the Dispatcher API directly, if they can.
+    if backend_index.external:
+        return DispatcherSignature.from_schema(f.func, prefix=prefix)
+    else:
+        return NativeSignature(f.func, prefix)
 
 # Functions only, no types
-from tools.codegen.api import cpp, dispatcher, native
+from tools.codegen.api import cpp, dispatcher, native, translate

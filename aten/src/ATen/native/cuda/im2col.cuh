@@ -108,11 +108,11 @@ void im2col(
       height_col,
       width_col,
       data_col);
-  TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 template <typename dt, typename accT>
-C10_LAUNCH_BOUNDS_1(1024)
+C10_LAUNCH_BOUNDS_1(512)
 __global__ void col2im_kernel(
     const int64_t n,
     const dt* data_col,
@@ -191,7 +191,7 @@ void col2im(
   // bottom dimension, and then in the kernel add up the top dimensions.
   // CUDA_NUM_THREADS = 1024
   col2im_kernel<dt, accT>
-      <<<GET_BLOCKS(num_kernels), CUDA_NUM_THREADS, 0, stream>>>(
+      <<<GET_BLOCKS(num_kernels, 512), 512, 0, stream>>>(
           num_kernels,
           data_col,
           height,
@@ -208,7 +208,7 @@ void col2im(
           output_height,
           output_width,
           data_im);
-  TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 } // namespace native

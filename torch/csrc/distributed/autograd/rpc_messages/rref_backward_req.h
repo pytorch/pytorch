@@ -24,7 +24,7 @@ class TORCH_API RRefBackwardReq : public rpc::RpcCommandBase {
   bool retainGraph() const;
 
   // Serialization and deserialization methods.
-  rpc::Message toMessageImpl() && override;
+  c10::intrusive_ptr<rpc::Message> toMessageImpl() && override;
   static std::unique_ptr<RRefBackwardReq> fromMessage(
       const rpc::Message& message);
 

@@ -17,11 +17,11 @@ namespace fuser {
 namespace cuda {
 
 // TODO: Should this actually be in launch params?
-struct TORCH_CUDA_API CompileOptions {
+struct TORCH_CUDA_CU_API CompileOptions {
   c10::Device device = c10::Device(c10::DeviceType::CUDA, 0);
 };
 
-class TORCH_CUDA_API FusionExecutor : public NonCopyable {
+class TORCH_CUDA_CU_API FusionExecutor : public NonCopyable {
  public:
   // Unsafe compilation that's useful for debugging kernels, iterating over
   // slight modifications of a generated kernel
@@ -61,6 +61,7 @@ class TORCH_CUDA_API FusionExecutor : public NonCopyable {
   //       codegen.
   // struct used to hold necessary information to launch compiled kernel on a
   // given input set.
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   struct ExecutorEntry {
     bool init = false;
     LaunchParams launch_params;
@@ -78,6 +79,7 @@ class TORCH_CUDA_API FusionExecutor : public NonCopyable {
   }
 
  private:
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   struct GlobalBuffers {
     std::vector<at::Tensor> empty_buffers;
     std::vector<at::Tensor> zero_buffers;

@@ -17,7 +17,9 @@ struct TensorArgCodegen {
   };
 
   T* data;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
   int64_t size[N];
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
   int64_t stride[N];
   constexpr int nDims() {
     return N;
@@ -49,44 +51,43 @@ struct TensorArgCodegen<T, 0> {
 };
 
 struct ArgAbstract {
-  virtual ~ArgAbstract() {}
+  virtual ~ArgAbstract() = default;
   virtual void* arg() = 0;
 };
 
 struct ULongArg : public ArgAbstract {
   uint64_t val_;
-  ULongArg(uint64_t _val) : val_(_val){};
-  void* arg() {
+  ULongArg(uint64_t _val) : val_(_val) {}
+  void* arg() override {
     return &val_;
   }
 };
 
 struct LongArg : public ArgAbstract {
   int64_t val_;
-  LongArg(int64_t _val) : val_(_val){};
-  void* arg() {
+  LongArg(int64_t _val) : val_(_val) {}
+  void* arg() override {
     return &val_;
   }
 };
 
 struct IntArg : public ArgAbstract {
   int val_;
-  IntArg(int _val) : val_(_val){};
-  void* arg() {
+  IntArg(int _val) : val_(_val) {}
+  void* arg() override {
     return &val_;
   }
 };
 
 struct FloatArg : public ArgAbstract {
   float val_;
-  FloatArg(float _val) : val_(_val){};
-  void* arg() {
+  FloatArg(float _val) : val_(_val) {}
+  void* arg() override {
     return &val_;
   }
 };
 
 struct TensorArgAbstract : ArgAbstract {
-  virtual ~TensorArgAbstract(){};
   virtual void setSize(int i, int64_t size) = 0;
   virtual void setStride(int i, int64_t stride) = 0;
   virtual void setPointer(void* ptr) = 0;
@@ -94,6 +95,7 @@ struct TensorArgAbstract : ArgAbstract {
 
 // This should match the tensor used in the code generation (almost exactly)
 template <typename TENSOR_TYPE>
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 struct TensorArg : public TensorArgAbstract {
   TENSOR_TYPE instance_;
 

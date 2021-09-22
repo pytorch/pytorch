@@ -19,5 +19,3 @@ LinearReLU
 ~~~~~~~~~~~~~~~
 .. autoclass:: LinearReLU
     :members:
-
-

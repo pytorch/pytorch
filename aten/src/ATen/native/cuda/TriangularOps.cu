@@ -3,6 +3,7 @@
 #include <ATen/Dispatch.h>
 #include <ATen/MemoryOverlap.h>
 #include <ATen/NativeFunctions.h>
+#include <ATen/native/Resize.h>
 
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/cuda/detail/IndexUtils.cuh>
@@ -13,14 +14,12 @@ namespace native {
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ triu/tril ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 template <typename scalar_t, typename IndexType, bool upper>
-#ifdef __HIP_PLATFORM_HCC__
-C10_LAUNCH_BOUNDS_1(512)
-#endif
-__global__
-void triu_tril_kernel(
+C10_LAUNCH_BOUNDS_1(cuda::getApplyBlockSize())
+__global__ void triu_tril_kernel(
     cuda::detail::TensorInfo<scalar_t, IndexType> result_info,
     const cuda::detail::TensorInfo<scalar_t, IndexType> self_info,
-    const int64_t k, const int64_t N) {
+    const int64_t k,
+    const int64_t N) {
   int64_t linear_idx = blockIdx.x * blockDim.x + threadIdx.x;
   if (linear_idx >= N) {
     return;
@@ -60,34 +59,32 @@ Tensor& triu_tril_cuda_template(Tensor& result, const Tensor& self, int64_t k, c
   int64_t N = self.numel();
   dim3 dim_block = cuda::getApplyBlock();
   dim3 dim_grid((N + dim_block.x - 1) / dim_block.x);
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(at::ScalarType::Half, at::ScalarType::Bool, self.scalar_type(), name, [&]{
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(at::ScalarType::Half, at::ScalarType::Bool, self.scalar_type(), "triu_tril_cuda_template", [&]{
     if (cuda::detail::canUse32BitIndexMath(result) && cuda::detail::canUse32BitIndexMath(self)) {
       auto result_info = cuda::detail::getTensorInfo<scalar_t, int32_t>(result);
       auto self_info = cuda::detail::getTensorInfo<scalar_t, int32_t>(self);
       triu_tril_kernel<scalar_t, int32_t, upper>
         <<<dim_grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
           result_info, self_info, k, N);
-      TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     } else {
       auto result_info = cuda::detail::getTensorInfo<scalar_t, int64_t>(result);
       auto self_info = cuda::detail::getTensorInfo<scalar_t, int64_t>(self);
       triu_tril_kernel<scalar_t, int64_t, upper>
         <<<dim_grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
           result_info, self_info, k, N);
-      TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     }
   });
   return result;
 }
 
 Tensor& tril_cuda_(Tensor &self, int64_t k) {
-  return tril_cuda_out(self, self, k);
+  return tril_cuda_out(self, k, self);
 }
 
-Tensor& tril_cuda_out(Tensor &result, const Tensor& self, int64_t k) {
-  if (result.sizes() != self.sizes()) {
-    result.resize_as_(self);
-  }
+Tensor& tril_cuda_out(const Tensor& self, int64_t k, Tensor &result) {
+  at::native::resize_output(result, self.sizes());
   if (self.numel() == 0) {
     return result;
   }
@@ -95,13 +92,11 @@ Tensor& tril_cuda_out(Tensor &result, const Tensor& self, int64_t k) {
 }
 
 Tensor& triu_cuda_(Tensor &self, int64_t k) {
-  return triu_cuda_out(self, self, k);
+  return triu_cuda_out(self, k, self);
 }
 
-Tensor& triu_cuda_out(Tensor &result, const Tensor& self, int64_t k) {
-  if (result.sizes() != self.sizes()) {
-    result.resize_as_(self);
-  }
+Tensor& triu_cuda_out(const Tensor& self, int64_t k, Tensor &result) {
+  at::native::resize_output(result, self.sizes());
   if (self.numel() == 0) {
     return result;
   }
@@ -110,9 +105,7 @@ Tensor& triu_cuda_out(Tensor &result, const Tensor& self, int64_t k) {
 
 // Copy the kth diagonal of a matrix B to a vector A.
 template <typename scalar_t>
-#ifdef __HIP_PLATFORM_HCC__
 C10_LAUNCH_BOUNDS_1(1024)
-#endif
 __global__ void copy_from_diagonal_kernel(
     scalar_t* a,
     scalar_t* b,
@@ -130,9 +123,7 @@ __global__ void copy_from_diagonal_kernel(
 
 // Copy vector B to the kth diagonal of a matrix A
 template <typename scalar_t>
-#ifdef __HIP_PLATFORM_HCC__
 C10_LAUNCH_BOUNDS_1(1024)
-#endif
 __global__ void copy_to_diagonal_kernel(
     scalar_t* a,
     scalar_t* b,
@@ -155,8 +146,8 @@ Tensor& apply_diag(Tensor& result, const Tensor& self, int64_t dimension) {
 
   TensorArg result_arg{result, "result", 1};
   TensorArg self_arg{self, "self", 2};
-  checkAllSameGPU("diag", {result_arg, self_arg});
-  checkSameType("diag", result_arg, self_arg);
+  checkAllSameGPU(__func__, {result_arg, self_arg});
+  checkSameType(__func__, result_arg, self_arg);
 
   int nDimension = self.dim();
   if (nDimension == 2) {
@@ -170,7 +161,7 @@ Tensor& apply_diag(Tensor& result, const Tensor& self, int64_t dimension) {
       sz = std::min(self.size(0) + dimension, self.size(1));
     }
 
-    result.resize_({sz});
+    at::native::resize_output(result, {sz});
     if (sz > 0) {
       at::assert_no_internal_overlap(result);
       auto result_stride = result.stride(0);
@@ -192,13 +183,13 @@ Tensor& apply_diag(Tensor& result, const Tensor& self, int64_t dimension) {
               sz,
               self_stride_0 + self_stride_1,
               result_stride);
-      TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     }
   } else {
     auto n_elems = self.numel();
     auto sz = (dimension > 0) ? n_elems + dimension : n_elems - dimension;
     auto self_stride = self.stride(0);
-    result.resize_({sz, sz});
+    at::native::resize_output(result, {sz, sz});
     result.zero_();
     if (sz > 0) {
       at::assert_no_internal_overlap(result);
@@ -221,17 +212,20 @@ Tensor& apply_diag(Tensor& result, const Tensor& self, int64_t dimension) {
               n_elems,
               result_stride_0 + result_stride_1,
               self_stride);
-      TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     }
   }
 
   return result;
 }
 
-Tensor& diag_cuda_out(Tensor& result, const Tensor& self, int64_t dimension) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(ScalarType::Half, ScalarType::Bool, self.scalar_type(), "diag_cuda", [&] {
-    apply_diag<scalar_t>(result, self, dimension);
-  });
+Tensor& diag_cuda_out(const Tensor& self, int64_t dimension, Tensor& result) {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
+      ScalarType::Half, ScalarType::BFloat16, ScalarType::Bool,
+      self.scalar_type(), "diag_cuda",
+      [&] {
+        apply_diag<scalar_t>(result, self, dimension);
+      });
   return result;
 }
 

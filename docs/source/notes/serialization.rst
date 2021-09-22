@@ -7,10 +7,10 @@ in Python, and how to serialize Python modules so they can be loaded in C++.
 
 .. contents:: Table of Contents
 
+.. _saving-loading-tensors:
+
 Saving and loading tensors
 --------------------------
-
-.. _saving-loading-tensors:
 
 :func:`torch.save` and :func:`torch.load` let you easily save and load tensors:
 
@@ -37,10 +37,10 @@ lists, and dicts:
 Custom data structures that include PyTorch tensors can also be saved if the
 data structure is pickle-able.
 
+.. _preserve-storage-sharing:
+
 Saving and loading tensors preserves views
 ---------------------------------------------
-
-.. _preserve-storage-sharing:
 
 Saving tensors preserves their view relationships:
 
@@ -97,14 +97,14 @@ in the tensor:
 Since the cloned tensors are independent of each other, however, they have
 none of the view relationships the original tensors did. If both file size and
 view relationships are important when saving tensors smaller than their
-storage objects, then care must be taken to construct new tensors that minimize 
-the size of their storage objects but still have the desired view relationships 
+storage objects, then care must be taken to construct new tensors that minimize
+the size of their storage objects but still have the desired view relationships
 before saving.
+
+.. _saving-loading-python-modules:
 
 Saving and loading torch.nn.Modules
 -----------------------------------
-
-.. _saving-loading-python-modules:
 
 See also: `Tutorial: Saving and loading modules <https://pytorch.org/tutorials/beginner/saving_loading_models.html>`_
 
@@ -176,10 +176,10 @@ can use this pattern:
     >>> new_m.load_state_dict(m_state_dict)
     <All keys matched successfully>
 
+.. _serializing-python-modules:
+
 Serializing torch.nn.Modules and loading them in C++
 ----------------------------------------------------
-
-.. _serializing-python-modules:
 
 See also: `Tutorial: Loading a TorchScript Model in C++ <https://pytorch.org/tutorials/advanced/cpp_export.html>`_
 
@@ -258,10 +258,10 @@ Finally, to load the module in C++:
 See the `PyTorch C++ API documentation <https://pytorch.org/cppdocs/>`_
 for details about how to use PyTorch modules in C++.
 
+.. _saving-loading-across-versions:
+
 Saving and loading ScriptModules across PyTorch versions
 -----------------------------------------------------------
-
-.. _saving-loading-across-versions:
 
 The PyTorch Team recommends saving and loading modules with the same version of
 PyTorch. Older versions of PyTorch may not support newer modules, and newer
@@ -270,7 +270,7 @@ explicitly described in
 PyTorch’s `release notes <https://github.com/pytorch/pytorch/releases>`_,
 and modules relying on functionality that has changed may need to be updated
 to continue working properly. In limited cases, detailed below, PyTorch will
-preserve the historic behavior of serialized ScriptModules so they do not require 
+preserve the historic behavior of serialized ScriptModules so they do not require
 an update.
 
 torch.div performing integer division

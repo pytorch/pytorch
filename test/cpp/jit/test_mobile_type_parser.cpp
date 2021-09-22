@@ -11,6 +11,7 @@ namespace torch {
 namespace jit {
 TEST(MobileTypeParserTest, Empty) {
   std::string empty_ps("");
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   ASSERT_ANY_THROW(c10::parseType(empty_ps));
 }
 
@@ -42,42 +43,50 @@ TEST(MobileTypeParserTest, NestedContainersAnnotationStrWithSpaces) {
 
 TEST(MobileTypeParserTest, TypoRaises) {
   std::string typo_token("List[tensor]");
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   ASSERT_ANY_THROW(c10::parseType(typo_token));
 }
 
 TEST(MobileTypeParserTest, MismatchBracketRaises) {
   std::string mismatch1("List[Tensor");
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   ASSERT_ANY_THROW(c10::parseType(mismatch1));
 }
 
 TEST(MobileTypeParserTest, MismatchBracketRaises2) {
   std::string mismatch2("List[[Tensor]");
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   ASSERT_ANY_THROW(c10::parseType(mismatch2));
 }
 
 TEST(MobileTypeParserTest, DictWithoutValueRaises) {
   std::string mismatch3("Dict[Tensor]");
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   ASSERT_ANY_THROW(c10::parseType(mismatch3));
 }
 
 TEST(MobileTypeParserTest, ListArgCountMismatchRaises) {
   // arg count mismatch
   std::string mismatch4("List[int, str]");
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   ASSERT_ANY_THROW(c10::parseType(mismatch4));
 }
 
 TEST(MobileTypeParserTest, DictArgCountMismatchRaises) {
   std::string trailing_commm("Dict[str,]");
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   ASSERT_ANY_THROW(c10::parseType(trailing_commm));
 }
 
 TEST(MobileTypeParserTest, ValidTypeWithExtraStuffRaises) {
   std::string extra_stuff("int int");
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   ASSERT_ANY_THROW(c10::parseType(extra_stuff));
 }
 
 TEST(MobileTypeParserTest, NonIdentifierRaises) {
   std::string non_id("(int)");
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   ASSERT_ANY_THROW(c10::parseType(non_id));
 }
 } // namespace jit

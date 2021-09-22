@@ -1,6 +1,7 @@
 #include <climits>
 
 #include <c10/mobile/CPUProfilingAllocator.h>
+#include <c10/util/irange.h>
 
 namespace c10 {
 
@@ -16,27 +17,23 @@ struct MemBlock {
   }
 };
 
-enum class EventType {
-  Allocate = 0,
-  Free,
-  Invalid
-};
+enum class EventType { Allocate = 0, Free, Invalid };
 
 struct MemEvent {
   uint64_t time;
   uint64_t allocation_id;
   uint64_t size;
   EventType type{EventType::Invalid};
-  MemEvent(uint64_t t, uint64_t id, uint64_t s, EventType e) :
-    time(t), allocation_id(id), size(s), type(e) {}
+  MemEvent(uint64_t t, uint64_t id, uint64_t s, EventType e)
+      : time(t), allocation_id(id), size(s), type(e) {}
 };
 
 bool overlaps(const MemBlock& a, const MemBlock& b) {
   // two blocks dont overlap if
   // |---a--------|--------------b--------|
   // strat_a     end_a <= start_b       end_b
-  return
-    !((a.end_offset <= b.start_offset) || (b.end_offset <= a.start_offset));
+  return !(
+      (a.end_offset <= b.start_offset) || (b.end_offset <= a.start_offset));
 }
 
 bool validate_allocation_plan(
@@ -69,7 +66,8 @@ bool validate_allocation_plan(
       allocations.emplace(mem_block);
     } else if (event.type == EventType::Free) {
       auto it = allocations.find(mem_block);
-      TORCH_CHECK((*it).end_offset == end_offset,
+      TORCH_CHECK(
+          (*it).end_offset == end_offset,
           "Enf offset of allocation being freed must match the one recorded.");
       TORCH_CHECK(
           it != allocations.end(),
@@ -95,13 +93,15 @@ std::vector<MemEvent> create_and_sort_mem_events(
       continue;
     }
     events.emplace_back(i, i, allocation_sizes[i], EventType::Allocate);
-    events.emplace_back(allocation_lifetimes[i], i, allocation_sizes[i], EventType::Free);
+    events.emplace_back(
+        allocation_lifetimes[i], i, allocation_sizes[i], EventType::Free);
   }
   std::sort(
       events.begin(),
       events.end(),
-      [](const MemEvent& a,
-         const MemEvent& b) -> bool {return a.time < b.time;});
+      [](const MemEvent& a, const MemEvent& b) -> bool {
+        return a.time < b.time;
+      });
   return events;
 }
 
@@ -129,11 +129,13 @@ std::vector<uint64_t> formulate_greedy_allocation_plan(
   std::map<uint64_t, uint64_t> free_size_to_offset;
   // This provides fast lookup when we want to insert freed block
   // back, especially when we want to merge blocks.
-  ska::flat_hash_map<uint64_t, std::map<uint64_t, uint64_t>::iterator> free_start_offset_to_size_iter;
-  ska::flat_hash_map<uint64_t, std::map<uint64_t, uint64_t>::iterator> free_end_offset_to_size_iter;
+  ska::flat_hash_map<uint64_t, std::map<uint64_t, uint64_t>::iterator>
+      free_start_offset_to_size_iter;
+  ska::flat_hash_map<uint64_t, std::map<uint64_t, uint64_t>::iterator>
+      free_end_offset_to_size_iter;
   // Upon free end_ptr = offset + size
   // If end_ptr exists merge freed allocation
-  // Also find coresponding offset in size_to_offet
+  // Also find corresponding offset in size_to_offset
   // Remove that entry and update with new size and offset
   // If end_ptr does not exist then just insert offset,size
   // in map and correspondingly size, offset in the other map.
@@ -143,10 +145,13 @@ std::vector<uint64_t> formulate_greedy_allocation_plan(
 
   std::vector<uint64_t> allocation_offsets(
       allocation_sizes.size(), std::numeric_limits<uint64_t>::max());
-  auto mem_events = create_and_sort_mem_events(allocation_sizes, allocation_lifetimes);
+  auto mem_events =
+      create_and_sort_mem_events(allocation_sizes, allocation_lifetimes);
   uint64_t max_offset{0};
   for (const auto& mem_event : mem_events) {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     uint64_t alloc_offset;
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     uint64_t new_offset, new_size;
     if (mem_event.type == EventType::Allocate) {
       auto it = free_size_to_offset.lower_bound(mem_event.size);
@@ -176,7 +181,7 @@ std::vector<uint64_t> formulate_greedy_allocation_plan(
       }
       allocation_offsets[mem_event.allocation_id] = alloc_offset;
     } else {
-      // 1. Check if freed block is adjancent to an existing free block
+      // 1. Check if freed block is adjacent to an existing free block
       //    at its end boundary. This is done by checking
       //    free_end_offset_to_size_iter.
       //    If we find such a block, remove it and adjust size of
@@ -186,7 +191,7 @@ std::vector<uint64_t> formulate_greedy_allocation_plan(
       //    free_start_offset_to_size_iter.
       //    If we find such a block, remove it and adjust size of
       //    the block being freed.
-      // 3. Inser the freed block in map.
+      // 3. Insert the freed block in map.
       auto freed_offset = allocation_offsets[mem_event.allocation_id];
       auto freed_size = mem_event.size;
       auto end_offset = freed_offset + freed_size;
@@ -216,14 +221,15 @@ std::vector<uint64_t> formulate_greedy_allocation_plan(
         free_start_offset_to_size_iter.erase(freed_offset);
       }
       auto freed_block_it =
-        free_size_to_offset.emplace(freed_size, freed_offset).first;
+          free_size_to_offset.emplace(freed_size, freed_offset).first;
       free_start_offset_to_size_iter.emplace(freed_offset, freed_block_it);
       free_end_offset_to_size_iter.emplace(
           freed_offset + freed_size, freed_block_it);
     }
   }
-  TORCH_CHECK(validate_allocation_plan(mem_events, allocation_offsets),
-      "ProfilingAllocator: Allocation plan invaild.");
+  TORCH_CHECK(
+      validate_allocation_plan(mem_events, allocation_offsets),
+      "ProfilingAllocator: Allocation plan invalid.");
   return allocation_offsets;
 }
 
@@ -236,7 +242,8 @@ void AllocationPlan::clear() {
 }
 
 void AllocationPlanner::record_allocation(
-    const uint64_t size, const void* ptr) {
+    const uint64_t size,
+    const void* ptr) {
   if (validation_mode_) {
     validation_success = validation_success && validate_allocation(size, ptr);
     return;
@@ -259,13 +266,15 @@ void AllocationPlanner::record_free(const void* ptr) {
     return;
   }
   auto id = it->second;
-  TORCH_CHECK(id < allocation_plan_->allocation_lifetimes.size(),
+  TORCH_CHECK(
+      id < allocation_plan_->allocation_lifetimes.size(),
       "Allocation must have been recorded during record_allocation.");
   allocation_plan_->allocation_lifetimes[id] = allocation_id_;
 }
 
 bool AllocationPlanner::validate_allocation(
-    const uint64_t size, const void* ptr) {
+    const uint64_t size,
+    const void* ptr) {
   if (allocation_id_ >= allocation_plan_->allocation_sizes.size() ||
       allocation_plan_->allocation_sizes[allocation_id_] != size) {
     TORCH_WARN(
@@ -281,7 +290,7 @@ bool AllocationPlanner::validate_allocation(
 
     return false;
   }
-  allocation_ptr_to_id_[ptr] =  allocation_id_;
+  allocation_ptr_to_id_[ptr] = allocation_id_;
   allocation_id_++;
   return true;
 }
@@ -293,24 +302,27 @@ bool AllocationPlanner::validate_free(const void* ptr) {
     return true;
   }
   auto id = (*it).second;
-  TORCH_CHECK(id < allocation_plan_->allocation_lifetimes.size(),
+  TORCH_CHECK(
+      id < allocation_plan_->allocation_lifetimes.size(),
       "Allocation must have been recorded during validate_allocation.");
   auto lifetime_id = allocation_plan_->allocation_lifetimes[id];
   return (lifetime_id == allocation_id_);
 }
 
 void AllocationPlanner::formulate_plan() {
-  allocation_plan_->allocation_offsets =
-    formulate_greedy_allocation_plan(
-        allocation_plan_->allocation_sizes, allocation_plan_->allocation_lifetimes);
+  allocation_plan_->allocation_offsets = formulate_greedy_allocation_plan(
+      allocation_plan_->allocation_sizes,
+      allocation_plan_->allocation_lifetimes);
   allocation_plan_->total_size = 0;
-  for (auto i = 0; i < allocation_plan_->allocation_sizes.size(); ++i) {
+  for (const auto i : c10::irange(allocation_plan_->allocation_sizes.size())) {
     if (allocation_plan_->allocation_lifetimes[i] ==
         std::numeric_limits<uint64_t>::max()) {
       continue;
     }
-    auto limit = allocation_plan_->allocation_offsets[i] + allocation_plan_->allocation_sizes[i];
-    allocation_plan_->total_size = std::max(allocation_plan_->total_size, limit);
+    auto limit = allocation_plan_->allocation_offsets[i] +
+        allocation_plan_->allocation_sizes[i];
+    allocation_plan_->total_size =
+        std::max(allocation_plan_->total_size, limit);
   }
 }
 
@@ -339,7 +351,8 @@ void CPUProfilingAllocator::unset_plan() {
 }
 
 void* CPUProfilingAllocator::allocate(const size_t bytes) {
-  TORCH_CHECK(bytes == plan_->allocation_sizes[allocation_id_],
+  TORCH_CHECK(
+      bytes == plan_->allocation_sizes[allocation_id_],
       "Got allocation request that does not match with the plan.");
   if (plan_->allocation_lifetimes[allocation_id_] ==
       std::numeric_limits<uint64_t>::max()) {
@@ -347,9 +360,8 @@ void* CPUProfilingAllocator::allocate(const size_t bytes) {
     allocation_id_++;
     return c10::alloc_cpu(bytes);
   }
-  void* ptr =
-    reinterpret_cast<uint8_t*>(blob_) +
-    plan_->allocation_offsets[allocation_id_];
+  void* ptr = reinterpret_cast<uint8_t*>(blob_) +
+      plan_->allocation_offsets[allocation_id_];
   allocation_ptr_to_id_[ptr] = allocation_id_;
   allocation_id_++;
   return ptr;
@@ -359,8 +371,8 @@ void CPUProfilingAllocator::free(void* const ptr) {
   auto it = allocation_ptr_to_id_.find(ptr);
   if (it == allocation_ptr_to_id_.end()) {
     // Either
-    // 1. Allocation that was made outside the validation scope is being freed here
-    // or
+    // 1. Allocation that was made outside the validation scope is being freed
+    // here or
     // 2. Allocation that is not managed by profiling allocator is being freed.
     //    Example of the second type
     //    Tensor out;
@@ -375,7 +387,8 @@ void CPUProfilingAllocator::free(void* const ptr) {
     return;
   }
   auto id = it->second;
-  TORCH_CHECK(id < plan_->allocation_lifetimes.size(),
+  TORCH_CHECK(
+      id < plan_->allocation_lifetimes.size(),
       "Freeing allocation that is not accordingly to the plan.");
   auto lifetime_id = plan_->allocation_lifetimes[id];
   TORCH_CHECK(
@@ -392,10 +405,10 @@ CPUProfilingAllocator::~CPUProfilingAllocator() {
   c10::free_cpu(blob_);
 }
 
-WithProfileAllocationsGuard::WithProfileAllocationsGuard(
-    AllocationPlan* plan) {
-  // Nesting of allocation profiling does not seem meanigful.
-  TORCH_CHECK(allocation_planner == nullptr,
+WithProfileAllocationsGuard::WithProfileAllocationsGuard(AllocationPlan* plan) {
+  // Nesting of allocation profiling does not seem meaningful.
+  TORCH_CHECK(
+      allocation_planner == nullptr,
       "Nesting profiling allocations is not supported.");
   planner_ = std::make_unique<AllocationPlanner>(plan);
   planner_->clear();
@@ -408,9 +421,11 @@ WithProfileAllocationsGuard::~WithProfileAllocationsGuard() {
 }
 
 WithValidateAllocationPlanGuard::WithValidateAllocationPlanGuard(
-    AllocationPlan* plan, bool* success) {
-  // Nesting of allocation profiling does not seem meanigful.
-  TORCH_CHECK(allocation_planner == nullptr,
+    AllocationPlan* plan,
+    bool* success) {
+  // Nesting of allocation profiling does not seem meaningful.
+  TORCH_CHECK(
+      allocation_planner == nullptr,
       "Nesting profiling allocations is not supported.");
   planner_ = std::make_unique<AllocationPlanner>(plan, true);
   success_ = success;
@@ -427,9 +442,11 @@ AllocationPlanner* GetThreadLocalAllocationPlanner() {
 }
 
 WithProfilingAllocatorGuard::WithProfilingAllocatorGuard(
-    CPUProfilingAllocator* allocator, const AllocationPlan* plan) {
+    CPUProfilingAllocator* allocator,
+    const AllocationPlan* plan) {
   // Nesting of profiling allocator is not supported.
-  TORCH_CHECK(profiling_allocator == nullptr,
+  TORCH_CHECK(
+      profiling_allocator == nullptr,
       "Nesting profiling allocators is not supported.");
   profiling_allocator = allocator;
   profiling_allocator->set_plan(plan);

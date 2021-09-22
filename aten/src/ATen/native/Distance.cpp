@@ -1,9 +1,10 @@
 #include <ATen/ATen.h>
 #include <ATen/Dispatch.h>
-#include <ATen/NativeFunctions.h>
-#include <ATen/NamedTensorUtils.h>
 #include <ATen/ExpandUtils.h>
+#include <ATen/NamedTensorUtils.h>
 #include <ATen/native/Distance.h>
+#include <ATen/NativeFunctions.h>
+#include <c10/util/accumulate.h>
 
 namespace at { namespace native {
 
@@ -13,7 +14,12 @@ DEFINE_DISPATCH(cdist_stub);
 DEFINE_DISPATCH(cdist_backward_stub);
 
 Tensor pairwise_distance(const Tensor& x1, const Tensor& x2, double p, double eps, bool keepdim) {
-  return at::norm(x1 - x2 + eps, p, 1, keepdim);
+  // Since either x1 or x2 could be broadcasted
+  auto x1_dim = x1.dim();
+  auto x2_dim = x2.dim();
+  auto output_dim = x1_dim > x2_dim ? x1_dim : x2_dim;
+  auto innermost_dim = output_dim - 1;
+  return at::norm(x1 - x2 + eps, p, innermost_dim, keepdim);
 }
 
 // This is to guarantee that the contiguous memory is passed to the backward pass
@@ -43,12 +49,11 @@ Tensor _euclidean_dist(const Tensor& x1, const Tensor& x2) {
 static Tensor cdist_impl(const Tensor& x1, const Tensor& x2, const double p, c10::optional<int64_t> compute_mode) {
   TORCH_CHECK(at::isFloatingType(x1.scalar_type()), "cdist only supports floating-point dtypes, X1 got: ", x1.scalar_type());
   auto device1 = x1.device().type();
-  TORCH_CHECK(device1 == kCPU || device1 == kCUDA, "cdist only supports CPU and CUDA devices, X1 got: ", device1);
   TORCH_CHECK(at::isFloatingType(x1.scalar_type()), "cdist only supports floating-point dtypes, X2 got: ", x2.scalar_type());
   auto device2 = x2.device().type();
-  TORCH_CHECK(device2 == kCPU || device2 == kCUDA, "cdist only supports CPU and CUDA devices, X2 got: ", device2);
   TORCH_CHECK(p >= 0, "cdist only supports non-negative p values");
   TORCH_CHECK(device1 == device2, "X1 and X2 must have the same device type. X1: ", device1, " X2: ", device2);
+  // TODO: This is bad; this test should apply universally
   TORCH_CHECK(!x1.is_cuda() || x1.get_device() == x2.get_device(), "device of X1 (", x1.get_device(), ") must match device of X2 (", x2.get_device(), ")");
   int64_t c1 = x1.size(-1);
   int64_t c2 = x2.size(-1);
@@ -61,6 +66,14 @@ static Tensor cdist_impl(const Tensor& x1, const Tensor& x2, const double p, c10
 
   int64_t r1 = x1.size(-2);
   int64_t r2 = x2.size(-2);
+
+  // See Note [cdist relies on cdist_impl redispatching]
+  // Keep this condition in sync with the condition at the Note
+  if (!(p == 2 && (mode == 1 || (mode == 0 && (r1 > 25 || r2 > 25))))) {
+    TORCH_CHECK(device1 == kCPU || device1 == kCUDA, "cdist only supports CPU and CUDA devices, X1 got: ", device1);
+    TORCH_CHECK(device2 == kCPU || device2 == kCUDA, "cdist only supports CPU and CUDA devices, X2 got: ", device2);
+  }
+
   auto dim1 = x1.dim();
   auto dim2 = x2.dim();
 
@@ -74,7 +87,7 @@ static Tensor cdist_impl(const Tensor& x1, const Tensor& x2, const double p, c10
   std::vector<int64_t> tensor2_expand_size(expand_batch_portion);
   tensor2_expand_size.insert(tensor2_expand_size.end(), {r2, c2});
 
-  const int64_t expand_batch_product = prod_intlist(expand_batch_portion);
+  const int64_t expand_batch_product = c10::multiply_integers(expand_batch_portion);
   std::vector<int64_t> tensor1_view{expand_batch_product, r1, c1};
   std::vector<int64_t> tensor2_view{expand_batch_product, r2, c2};
 
@@ -85,11 +98,13 @@ static Tensor cdist_impl(const Tensor& x1, const Tensor& x2, const double p, c10
   output_shape.insert(output_shape.end(), {r1, r2});
 
   Tensor result;
-  if (r1 == 0 || r2 == 0) {
+  if (r1 == 0 || r2 == 0 || expand_batch_product == 0) {
     result = at::empty(output_shape, x1.options());
   } else if (c1 == 0) {
     result = at::zeros(output_shape, x1.options());
   } else if (p == 2 && (mode == 1 || (mode == 0 && (r1 > 25 || r2 > 25)))) {
+    // See Note [cdist relies on cdist_impl redispatching]
+    // Keep the condition above in sync with the condition at the Note
     Tensor dist = (expand_batch_product == 1) ? at::_euclidean_dist(x1, x2) :
                   at::_euclidean_dist(tensor1_expanded, tensor2_expanded);
     result = dist.view(output_shape);
@@ -107,11 +122,17 @@ Tensor cdist(const Tensor& x1, const Tensor& x2, const double p, c10::optional<i
   auto maybe_outnames = namedinference::compute_cdist_outnames(x1, x2);
   auto result = [&]() {
     NoNamesGuard guard;
-    // This is for pytorch to figure the backward pass itself
-    // when p=2
     int64_t r1 = x1.size(-2);
     int64_t r2 = x2.size(-2);
+    // Special case for empty input: always call the version with explicit autograd to ensure the graph is properly connected
+    if (x1.numel() == 0 || x2.numel() == 0) {
+        return at::_cdist_forward(x1, x2, p, compute_mode);
+    }
     int64_t mode = compute_mode.value_or(0);
+    // Note [cdist relies on cdist_impl redispatching]
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    // This is for pytorch to figure the backward pass itself
+    // when p=2.  Keep this condition in sync with the See Note reference
     if (p == 2 && (mode == 1 || (mode == 0 && (r1 > 25 || r2 > 25)))) {
         return cdist_impl(x1, x2, p, compute_mode);
     } else {
@@ -135,7 +156,39 @@ Tensor _cdist_forward(const Tensor& x1, const Tensor& x2, const double p, c10::o
   return result;
 }
 
-Tensor _cdist_backward(const Tensor& grad, const Tensor& x1, const Tensor& x2, const double p, const Tensor& cdist) {
+Tensor _cdist_backward(const Tensor& grad, const Tensor& _x1, const Tensor& _x2, const double p, const Tensor& cdist) {
+  // Broadcasting might generate non-contiguous Tensors, so handle it before doing checks
+  int64_t c1 = _x1.size(-1);
+  int64_t c2 = _x2.size(-1);
+  int64_t r1 = _x1.size(-2);
+  int64_t r2 = _x2.size(-2);
+  auto dim1 = _x1.dim();
+  auto dim2 = _x2.dim();
+  IntArrayRef batch_tensor1(_x1.sizes().data(), dim1 - 2);
+  IntArrayRef batch_tensor2(_x2.sizes().data(), dim2 - 2);
+  std::vector<int64_t> expand_batch_portion = infer_size(batch_tensor1, batch_tensor2);
+  std::vector<int64_t> tensor1_expand_size(expand_batch_portion);
+  tensor1_expand_size.insert(tensor1_expand_size.end(), {r1, c1});
+  std::vector<int64_t> tensor2_expand_size(expand_batch_portion);
+  tensor2_expand_size.insert(tensor2_expand_size.end(), {r2, c2});
+
+  // Compute the linearized batch size
+  const int64_t batch_product = c10::multiply_integers(expand_batch_portion);
+
+  // Gracefully handle empty Tensors
+  if (r1 == 0 || r2 == 0 || c1 == 0 || batch_product == 0) {
+    return at::zeros_like(_x1, _x1.options());
+  }
+
+  Tensor x1 = _x1;
+  if (tensor1_expand_size != x1.sizes()) {
+    x1 = x1.expand(tensor1_expand_size).contiguous();
+  }
+  Tensor x2 = _x2;
+  if (tensor2_expand_size != x2.sizes()) {
+    x2 = x2.expand(tensor2_expand_size).contiguous();
+  }
+
   TORCH_CHECK(x1.is_contiguous(), "_cdist_backward requires X1 to be contiguous");
   TORCH_CHECK(x2.is_contiguous(), "_cdist_backward requires X2 to be contiguous");
   TORCH_CHECK(cdist.is_contiguous(), "_cdist_backward requires dist to be contiguous");
@@ -146,13 +199,14 @@ Tensor _cdist_backward(const Tensor& grad, const Tensor& x1, const Tensor& x2, c
   TORCH_CHECK(device1 == kCPU || device1 == kCUDA, "_cdist_backward only supports CPU and CUDA devices, X1 got: ", device1);
   auto device2 = x2.device().type();
   TORCH_CHECK(device2 == kCPU || device2 == kCUDA, "_cdist_backward only supports CPU and CUDA devices, X2 got: ", device2);
-  IntArrayRef batch_tensor1(x1.sizes().data(), std::max<int64_t>(x1.dim() - 2, 0));
-  const int64_t batch_product = prod_intlist(batch_tensor1);
+
   Tensor grad_x1 =
-      at::empty_like(x1, x1.options(), LEGACY_CONTIGUOUS_MEMORY_FORMAT)
-          .view({batch_product, n, m});
+      at::empty({batch_product, n, m}, x1.options(), LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   cdist_backward_stub(device1, grad_x1, grad, x1, x2, p, cdist);
-  return grad_x1;
+
+  // Use x1.size() here and not the original size of _x1.size() as this gradient is not taking broadcasting into account
+  // Broadcasting will be handled automatically by the autograd engine
+  return grad_x1.view(x1.sizes());
 }
 
 Tensor _pdist_forward(const Tensor& self, const double p) {
@@ -186,11 +240,19 @@ Tensor _pdist_backward(const Tensor& grad, const Tensor& self, const double p, c
 }
 
 Tensor cosine_similarity(const Tensor& x1, const Tensor& x2, int64_t dim, double eps) {
+  TORCH_CHECK(x1.ndimension() == x2.ndimension(), "cosine_similarity requires both inputs to have the same number of dimensions, but x1 has ",
+              x1.ndimension(), " and x2 has ", x2.ndimension());
+  TORCH_CHECK(x1.ndimension() == 0 || x1.size(dim) == x2.size(dim), "cosine_similarity requires both inputs to have the same size at dimension ", dim, "but x1 has ",
+  x1.size(dim), " and x2 has ", x2.size(dim));
+  auto commonDtype = at::result_type(x1, x2);
+  TORCH_CHECK(at::isFloatingType(commonDtype), "expected common dtype to be floating point, yet common dtype is ", commonDtype);
+  Tensor x1_ = x1.to(commonDtype);
+  Tensor x2_ = x2.to(commonDtype);
   // Follow scipy impl to improve numerical precision
   // Use x / sqrt(x * x) instead of x / (sqrt(x) * sqrt(x))
-  Tensor w12 = at::sum(x1 * x2, dim);
-  Tensor w1 = at::sum(x1 * x1, dim);
-  Tensor w2 = at::sum(x2 * x2, dim);
+  Tensor w12 = at::sum(x1_ * x2_, dim);
+  Tensor w1 = at::sum(x1_ * x1_, dim);
+  Tensor w2 = at::sum(x2_ * x2_, dim);
   Tensor n12 = (w1 * w2).clamp_min_(eps * eps).sqrt_();
   return w12.div_(n12);
 }

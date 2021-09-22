@@ -59,7 +59,7 @@ void _amp_non_finite_check_and_unscale_cuda_(Tensor& scaled_grad,
       auto* found_inf_ptr = found_inf.data_ptr<float>();
       auto* inv_scale_ptr = inv_scale.data_ptr<float>();
 
-      using opmath_t = get_opmath_t<scalar_t>::opmath_t;
+      using opmath_t = at::opmath_type<scalar_t>;
 
       gpu_kernel(iter,
                  [found_inf_ptr, inv_scale_ptr] GPU_LAMBDA (scalar_t val_in) -> scalar_t {
@@ -113,6 +113,7 @@ void _amp_foreach_non_finite_check_and_unscale_cuda_(TensorList scaled_grads,
     //  - all scaled_grads are strided
     //  - all scaled_grads are non overlapping and dense
     //  - all scaled_grads are on the same device
+    //  - all scaled_grads are of the same dtype
     TORCH_CHECK(scaled_grads[0].is_cuda(), "scaled_grads must be CUDA tensors.");
     // Sets up MTA launch to use scaled_grads as-is.
     tensor_lists.emplace_back(scaled_grads.vec());
@@ -126,12 +127,13 @@ void _amp_foreach_non_finite_check_and_unscale_cuda_(TensorList scaled_grads,
     tensor_lists.resize(1);
     tensor_lists[0].reserve(scaled_grads.size());
     auto expected_device = scaled_grads[0].device();
+    const auto expected_dtype = scaled_grads[0].scalar_type();
     for (const Tensor& t : scaled_grads) {
       // Ensures GradScaler filtered scaled_grads by device.
       TORCH_CHECK(t.is_cuda(), "one of scaled_grads was not a CUDA tensor.");
       TORCH_CHECK(t.device() == expected_device, "scaled_grads must be on the same device.");
       TORCH_CHECK(t.layout() == at::kStrided, "one of scaled_grads was not a strided tensor.");
-      if (!t.is_non_overlapping_and_dense()) {
+      if (!t.is_non_overlapping_and_dense() || t.scalar_type() != expected_dtype) {
         // t is acceptable but not MTA-safe.  Falls back to single-tensor TensorIterator kernel.
         _amp_non_finite_check_and_unscale_cuda_(const_cast<Tensor&>(t),
                                                 found_inf,
@@ -152,7 +154,7 @@ void _amp_foreach_non_finite_check_and_unscale_cuda_(TensorList scaled_grads,
       auto* found_inf_ptr = found_inf.data_ptr<float>();
       auto* inv_scale_ptr = inv_scale.data_ptr<float>();
 
-      using opmath_t = get_opmath_t<scalar_t>::opmath_t;
+      using opmath_t = at::opmath_type<scalar_t>;
 
       // multi_tensor_apply guards onto tensor_lists[0][0], no need to guard explicitly.
       multi_tensor_apply<1>(tensor_lists,
@@ -176,38 +178,36 @@ void _amp_foreach_non_finite_check_and_unscale_cuda_(TensorList scaled_grads,
 
 // amp_update_scale_cuda_kernel is launched with a single thread to compute the new scale.
 // The scale factor is maintained and updated on the GPU to avoid synchronization.
-__global__ void amp_update_scale_cuda_kernel(int* growth_tracker,
-                                             float* current_scale,
+__global__ void amp_update_scale_cuda_kernel(float* current_scale,
+                                             int* growth_tracker,
                                              float* found_inf,
-                                             float* new_scale,
                                              double growth_factor,
                                              double backoff_factor,
                                              int growth_interval)
 {
   if (*found_inf) {
-    *new_scale = (*current_scale)*backoff_factor;
+    *current_scale = (*current_scale)*backoff_factor;
     *growth_tracker = 0;
   } else {
     // Entering this branch means we just carried out a successful step,
     // so growth_tracker is incremented before comparing to growth_interval.
     auto successful = (*growth_tracker) + 1;
     if (successful == growth_interval) {
-      *new_scale = (*current_scale)*growth_factor;
+      *current_scale = (*current_scale)*growth_factor;
       *growth_tracker = 0;
     } else {
-      *new_scale = *current_scale;
       *growth_tracker = successful;
     }
   }
 }
 
 
-// _amp_update_scale_cuda asynchronously updates the scale factor.
+// _amp_update_scale_cuda asynchronously updates the scale tensor in place.
 //
 // Args:
+// current_scale:  A one-element cuda float tensor containing the scale value.
 // growth_tracker:  A one-element torch.cuda.IntTensor containing the number of recent consecutive unskipped steps.
-// current_scale:  A one-element torch.cuda.FloatTensor containing the current scale value.
-// found_inf:  A one-element torch.cuda.FloatTensor. If > 0, indicates that infs/nans were found by the relevant
+// found_inf:  A one-element cuda float tensor. If > 0, indicates that infs/nans were found by the relevant
 //             prior _amp_non_finite_check_and_unscale_cuda call, and 0 if no infs/nans were found.
 // growth_factor:  Multiplier if no infs/NaNs were found (typically slightly > 1).
 // backoff_factor:  Multiplier if infs/NaNs were found (typically 0.5).
@@ -215,13 +215,13 @@ __global__ void amp_update_scale_cuda_kernel(int* growth_tracker,
 //                   growth_factor.
 //
 // Returns:
-// new_scale:  A new one-element torch.cuda.FloatTensor containing the new recommended scale value.
-Tensor _amp_update_scale_cuda(Tensor& growth_tracker,
-                              const Tensor& current_scale,
-                              const Tensor& found_inf,
-                              double growth_factor,
-                              double backoff_factor,
-                              int64_t growth_interval)
+// current_scale
+Tensor& _amp_update_scale_cuda_(Tensor& current_scale,
+                                Tensor& growth_tracker,
+                                const Tensor& found_inf,
+                                double growth_factor,
+                                double backoff_factor,
+                                int64_t growth_interval)
 {
   TORCH_CHECK(growth_tracker.is_cuda(), "growth_tracker must be a CUDA tensor.");
   TORCH_CHECK(current_scale.is_cuda(), "current_scale must be a CUDA tensor.");
@@ -233,19 +233,16 @@ Tensor _amp_update_scale_cuda(Tensor& growth_tracker,
   TORCH_CHECK(current_scale.scalar_type() == at::ScalarType::Float, "current_scale must be a float tensor.");
   TORCH_CHECK(found_inf.scalar_type() == at::ScalarType::Float, "found_inf must be a float tensor.");
 
-  auto new_scale = at::empty_like(current_scale);
-
   amp_update_scale_cuda_kernel<<<1, 1, 0, at::cuda::getCurrentCUDAStream()>>>(
-    growth_tracker.data_ptr<int>(),
     current_scale.data_ptr<float>(),
+    growth_tracker.data_ptr<int>(),
     found_inf.data_ptr<float>(),
-    new_scale.data_ptr<float>(),
     growth_factor,
     backoff_factor,
     growth_interval);
-  TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 
-  return new_scale;
+  return current_scale;
 }
 
 }} // namespace at::native

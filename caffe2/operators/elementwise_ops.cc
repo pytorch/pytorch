@@ -108,6 +108,7 @@ bool SumReduceLikeOp<CPUContext>::DoRunWithType() {
     auto count = A.numel();
     SRLHelper::sum2one<T>(Adata, Cdata, count);
   } else {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     size_t pre, n, post;
     std::tie(pre, n, post) =
         elementwise_ops_utils::ComputeLegacyBroadcastSizes(A, B, axis_);

@@ -2,8 +2,8 @@
 
 #include <torch/csrc/jit/codegen/cuda/utils.h>
 
-#include <stdio.h>
 #include <chrono>
+#include <cstdio>
 
 namespace torch {
 namespace jit {

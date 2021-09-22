@@ -14,6 +14,9 @@
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
 
+#include <string>
+#include <vector>
+
 namespace torch {
 namespace jit {
 namespace fuser {

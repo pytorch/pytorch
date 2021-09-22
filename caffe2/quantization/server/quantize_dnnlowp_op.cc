@@ -42,6 +42,7 @@ bool QuantizeDNNLowPOp<T>::RunOnDevice() {
     in_zero_point = input_qparam_blob->qparam.zero_point;
   }
 
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   TensorQuantizationParams in_qparams;
 
   if (use_input_qparam) {

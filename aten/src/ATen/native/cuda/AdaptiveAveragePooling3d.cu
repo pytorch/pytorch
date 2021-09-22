@@ -1,5 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
+#include <ATen/AccumulateType.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/Utils.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
@@ -12,6 +13,7 @@
 #include <algorithm>
 #include <cfloat>
 #include <cmath>
+
 
 namespace at {
 namespace native {
@@ -37,7 +39,7 @@ __device__ inline int end_index(int a, int b, int c) {
  *    gridDim.y blocks work together on a single 2D output plane specified by
  *    (blockIdx.x + offsetZ).
  */
-template <typename scalar_t>
+template <typename scalar_t, typename accscalar_t>
 __global__ void adaptiveaveragepool(
     scalar_t *input, scalar_t *output,
     int isizeT, int isizeH, int isizeW,
@@ -85,25 +87,26 @@ __global__ void adaptiveaveragepool(
       // Compute the average pooling from corresponding input pixels
       scalar_t *ptr_input = input_dt + istartH*istrideH + istartW*istrideW;
       scalar_t *ptr_output = output_dt + oh*osizeW + ow;
-      scalar_t sum = ScalarConvert<int, scalar_t>::to(0);
+      accscalar_t sum = static_cast<accscalar_t>(0);
 
       int it, ih, iw;
       for (it = 0; it < kT; ++it) {
         for (ih = 0; ih < kH; ++ih) {
           for (iw = 0; iw < kW; ++iw) {
             scalar_t val = ptr_input[ih*istrideH + iw*istrideW];
-            sum += val;
+            sum += static_cast<accscalar_t>(val);
           }
         }
         ptr_input += istrideT; // next input frame
       }
       // Update output
-      *ptr_output = sum / kT / kH / kW;
+      const accscalar_t divide_factor = static_cast<accscalar_t>(kT * kH * kW);
+      *ptr_output = static_cast<scalar_t>(sum / divide_factor);
     }
   }
 }
 
-template <typename scalar_t>
+template <typename scalar_t, typename accscalar_t>
 void adaptiveaveragepool_loop(
     scalar_t *input_data, scalar_t *output_data,
     int64_t totalZ,
@@ -116,14 +119,15 @@ void adaptiveaveragepool_loop(
   int blocksH = std::max((int)(16L / totalZ), 1);
   while (totalZ > 0) {
     dim3 blocks(totalZ > 65535 ? 65535 : totalZ, blocksH);
-    adaptiveaveragepool<<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>>(
+    adaptiveaveragepool<scalar_t, accscalar_t>
+      <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>>(
         input_data, output_data,
         isizeT, isizeH, isizeW,
         osizeT, osizeH, osizeW,
         istrideD,
         istrideT, istrideH, istrideW,
         offsetZ);
-    TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
     totalZ -= 65535;
     offsetZ += 65535;
   }
@@ -136,7 +140,7 @@ void adaptiveaveragepool_loop(
  *    gridDim.y blocks work together on a single 2D output plane specified by
  *    (blockIdx.x + offsetZ).
  */
-template <typename scalar_t>
+template <typename scalar_t, typename accscalar_t>
 __global__ void adaptiveaveragegradinput(
     scalar_t *gradInput, scalar_t *gradOutput,
     int isizeT, int isizeH, int isizeW,
@@ -189,8 +193,9 @@ __global__ void adaptiveaveragegradinput(
           int kH = end_index(oh, osizeH, isizeH) - start_index(oh, osizeH, isizeH);
           for (ow = ostartW; ow < oendW; ++ow) {
             int kW = end_index(ow, osizeW, isizeW) - start_index(ow, osizeW, isizeW);
-            scalar_t grad_delta = ptr_gradOutput[oh*isizeW + ow] / kW / kH / kT;
-            *ptr_gradInput += grad_delta;
+            const accscalar_t divide_factor = kW * kH * kT;
+            accscalar_t grad_delta = static_cast<accscalar_t>(ptr_gradOutput[oh*osizeW + ow] / divide_factor);
+            *ptr_gradInput += static_cast<scalar_t>(grad_delta);
           }
         }
         ptr_gradOutput += osizeH*osizeW; // next output frame
@@ -199,7 +204,7 @@ __global__ void adaptiveaveragegradinput(
   }
 }
 
-template <typename scalar_t>
+template <typename scalar_t, typename accscalar_t>
 void adaptiveaveragegradinput_loop(
     scalar_t *gradInput_data, scalar_t *gradOutput_data,
     int64_t totalZ,
@@ -211,12 +216,13 @@ void adaptiveaveragegradinput_loop(
   int blocksH = std::max((int)(16L / totalZ), 1);
   while (totalZ > 0) {
     dim3 blocks(totalZ > 65535 ? 65535 : totalZ, blocksH);
-    adaptiveaveragegradinput<<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>>(
+    adaptiveaveragegradinput<scalar_t, accscalar_t>
+      <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>>(
         gradInput_data, gradOutput_data,
         isizeT, isizeH, isizeW,
         osizeT, osizeH, osizeW,
         offsetZ);
-    TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
     totalZ -= 65535;
     offsetZ += 65535;
   }
@@ -285,7 +291,7 @@ __global__ void atomicadaptiveaveragegradinput(
       for (it = 0; it < kT; ++it) {
         for (ih = 0; ih < kH; ++ih) {
           for (iw = 0; iw < kW; ++iw) {
-            gpuAtomicAdd(&(ptr_gradInput[ih*isizeW + iw]), grad_delta);
+            gpuAtomicAddNoReturn(&(ptr_gradInput[ih*isizeW + iw]), grad_delta);
           }
         }
         ptr_gradInput += isizeH*isizeW; // next input frame
@@ -310,7 +316,7 @@ void atomicadaptiveaveragegradinput_loop(
         isizeT, isizeH, isizeW,
         osizeT, osizeH, osizeW,
         offsetZ);
-    TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
     totalZ -= 65535;
     offsetZ += 65535;
   }
@@ -327,17 +333,17 @@ void adaptive_avg_pool3d_out_cuda_template(
 
   checkAllSameGPU("adaptive_avg_pool3d_cuda", {output_arg, input_arg});
 
-  for (int64_t i = 0; i < input_.ndimension(); i++) {
+  for (int64_t i = 1; i < input_.ndimension(); i++) {
     TORCH_CHECK(
         input_.size(i) > 0,
-        "adaptive_avg_pool3d_cuda(): expected input to have non-empty spatial dimensions, "
+        "adaptive_avg_pool3d_cuda(): Expected input to have non-zero size for non-batch dimensions, "
         "but input has sizes ", input_.sizes(),
         " with dimension ", i, " being empty");
   }
 
   TORCH_CHECK(
       (input_.ndimension() == 4 || input_.ndimension() == 5),
-      "non-empty 4D or 5D (batch mode) tensor expected for input");
+      "adaptive_avg_pool3d_cuda(): Expected 4D or 5D tensor, but got ", input_.sizes());
 
   // the jit sometimes passes output_size.size() == 1
   TORCH_CHECK(
@@ -385,12 +391,17 @@ void adaptive_avg_pool3d_out_cuda_template(
     totalZ = sizeB * sizeD * osizeT;
   }
 
+  if (output.numel() == 0) {
+    return;
+  }
+
   AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16,
       input.scalar_type(), "adaptive_avg_pool3d_cuda", [&] {
+        using accscalar_t = at::acc_type<scalar_t, true>;
         scalar_t* input_data = input.data_ptr<scalar_t>();
         scalar_t* output_data = output.data_ptr<scalar_t>();
 
-        adaptiveaveragepool_loop(
+        adaptiveaveragepool_loop<scalar_t, accscalar_t>(
             input_data, output_data,
             totalZ,
             isizeT, isizeH, isizeW,
@@ -414,6 +425,10 @@ void adaptive_avg_pool3d_backward_out_cuda_template(
   const Tensor gradOutput = gradOutput_.contiguous();
 
   gradInput.resize_as_(input);
+  if (gradInput.numel() == 0) {
+    return;
+  }
+
   gradInput.zero_();
 
   int64_t sizeD, isizeT, isizeH, isizeW;
@@ -464,10 +479,12 @@ void adaptive_avg_pool3d_backward_out_cuda_template(
   } else {
     AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16,
         input.scalar_type(), "adaptive_avg_pool3d_backward_cuda", [&] {
+          using accscalar_t = at::acc_type<scalar_t, true>;
+
           scalar_t* gradInput_data = gradInput.data_ptr<scalar_t>();
           scalar_t* gradOutput_data = gradOutput.data_ptr<scalar_t>();
 
-          adaptiveaveragegradinput_loop(
+          adaptiveaveragegradinput_loop<scalar_t, accscalar_t>(
               gradInput_data, gradOutput_data,
               totalZ,
               isizeT, isizeH, isizeW,
@@ -478,10 +495,9 @@ void adaptive_avg_pool3d_backward_out_cuda_template(
 
 } // namespace
 
-Tensor& adaptive_avg_pool3d_out_cuda(
-    Tensor& output,
-    const Tensor& input,
-    IntArrayRef output_size) {
+Tensor& adaptive_avg_pool3d_out_cuda(const Tensor& input,
+    IntArrayRef output_size,
+    Tensor& output) {
   adaptive_avg_pool3d_out_cuda_template(output, input, output_size);
   return output;
 }
@@ -494,10 +510,9 @@ Tensor adaptive_avg_pool3d_cuda(
   return output;
 }
 
-Tensor& adaptive_avg_pool3d_backward_out_cuda(
-    Tensor& gradInput,
-    const Tensor& gradOutput_,
-    const Tensor& input) {
+Tensor& adaptive_avg_pool3d_backward_out_cuda(const Tensor& gradOutput_,
+    const Tensor& input,
+    Tensor& gradInput) {
   // See Note [Writing Nondeterministic Operations]
   // Nondeterministic because of atomicAdd usage
   globalContext().alertNotDeterministic("adaptive_avg_pool3d_backward_out_cuda");

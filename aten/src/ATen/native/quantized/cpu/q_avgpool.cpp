@@ -40,9 +40,11 @@ static void avg_pool2d_out_frame(
     c10::optional<int64_t> divisor_override) {
   at::parallel_for(0, nInputPlane, 0, [&](int64_t start, int64_t end) {
     for (auto k = start; k < end; k++) {
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       int64_t xx, yy;
       /* For all output pixels... */
-      auto input_data = input.contiguous().data_ptr<scalar_t>();
+      Tensor input_contig = input.contiguous();
+      auto input_data = input_contig.data_ptr<scalar_t>();
       auto output_data = output.data_ptr<scalar_t>();
       scalar_t* ptr_output = output_data +
           b * nInputPlane * outputWidth * outputHeight +
@@ -70,6 +72,7 @@ static void avg_pool2d_out_frame(
           int sum_int = 0;
           ptr_output->val_ = 0;
 
+          // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
           int64_t divide_factor;
           int64_t size = (hend - hstart) * (wend - wstart);
           if (divisor_override.has_value()) {
@@ -82,14 +85,18 @@ static void avg_pool2d_out_frame(
             }
           }
 
+          // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
           int64_t kx, ky;
           for (ky = hstart; ky < hend; ky++) {
             for (kx = wstart; kx < wend; kx++)
               sum_int += (ptr_input + ky * inputWidth + kx)->val_;
           }
+          // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
           float multiplier = input.q_scale() / output.q_scale() / divide_factor;
 
+          // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
           sum_int -= size * input.q_zero_point();
+          // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
           float sum = sum_int * 1.0;
           /* Update output by requantizing the result */
           ptr_output->val_ =
@@ -169,6 +176,7 @@ Tensor q_avg_pool2d(
     bool ceil_mode,
     bool count_include_pad,
     c10::optional<int64_t> divisor_override) {
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int kW, kH, dW, dH, padW, padH;
   std::tie(kW, kH) = get_kernel(kernel_size);
   std::tie(dW, dH) = get_stride(stride, kW, kH);
@@ -299,6 +307,7 @@ Tensor qnnpack_avg_pool2d(
     bool count_include_pad,
     c10::optional<int64_t> divisor_override) {
   Tensor output;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int kW, kH, dW, dH, padW, padH;
   std::tie(kW, kH) = get_kernel(kernel_size);
   std::tie(dW, dH) = get_stride(stride, kW, kH);

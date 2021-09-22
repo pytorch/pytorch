@@ -206,6 +206,7 @@ const auto& tscores = Input(0);
           cur_scores, utils::AsEArrXt(cur_keep), &cur_out_scores);
       utils::GetSubArrayRows(
           cur_boxes, utils::AsEArrXt(cur_keep), &cur_out_boxes);
+      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
       for (int k = 0; k < cur_keep.size(); k++) {
         cur_out_classes[k] =
             static_cast<float>(j - !output_classes_include_bg_cls_);
@@ -338,31 +339,4 @@ C10_EXPORT_CAFFE2_OP_TO_C10_CPU(
     ")",
     caffe2::BoxWithNMSLimitOp<caffe2::CPUContext>);
 
-C10_EXPORT_CAFFE2_OP_TO_C10_CPU(
-    BoxWithNMSLimit2,
-    "__caffe2::BoxWithNMSLimit("
-      "Tensor scores, "
-      "Tensor boxes, "
-      "Tensor batch_splits, "
-      "float score_thresh, "
-      "float nms, "
-      "int detections_per_im, "
-      "bool soft_nms_enabled, "
-      "str soft_nms_method, "
-      "float soft_nms_sigma, "
-      "float soft_nms_min_score_thres, "
-      "bool rotated, "
-      "bool cls_agnostic_bbox_reg, "
-      "bool input_boxes_include_bg_cls, "
-      "bool output_classes_include_bg_cls, "
-      "bool legacy_plus_one "
-    ") -> ("
-      "Tensor scores, "
-      "Tensor boxes, "
-      "Tensor classes, "
-      "Tensor batch_splits, "
-      "Tensor keeps, "
-      "Tensor keeps_size"
-    ")",
-    caffe2::BoxWithNMSLimitOp<caffe2::CPUContext>);
 // clang-format on
