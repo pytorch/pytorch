@@ -19,7 +19,7 @@ concurrency:
 {%- endmacro -%}
 
 {%- macro display_ec2_information() -%}
-      - name: Display EC2 information
+      - name: Display EC2 information for ${{ github.workflow }}
         shell: bash
         run: |
           set -euo pipefail

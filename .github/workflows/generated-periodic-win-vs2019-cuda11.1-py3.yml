@@ -72,7 +72,7 @@ jobs:
           # deep clone, to allow use of git merge-base
           fetch-depth: 0
           submodules: recursive
-      - name: Display EC2 information
+      - name: Display EC2 information for ${{ github.workflow }}
         shell: bash
         run: |
           set -euo pipefail
@@ -100,7 +100,7 @@ jobs:
       - name: Parse ref
         id: parse-ref
         run: .github/scripts/parse_ref.py
-      - name: Build
+      - name: Build ${{ github.workflow }}
         shell: bash
         env:
           PYTORCH_FINAL_PACKAGE_DIR: /c/${{ github.run_id }}/build-results/
@@ -177,7 +177,7 @@ jobs:
       fail-fast: false
     runs-on: ${{ matrix.runner }}
     steps:
-      - name: Display EC2 information
+      - name: Display EC2 information for ${{ github.workflow }}
         shell: bash
         run: |
           set -euo pipefail
@@ -228,7 +228,7 @@ jobs:
         name: Setup Python3
         with:
           python-version: '3.x'
-      - name: Test
+      - name: Test ${{ github.workflow }} / test (${{ matrix.config }}, ${{ matrix.shard }}, ${{ matrix.num_shards }}, ${{ matrix.runner }})
         shell: bash
         env:
           PYTORCH_FINAL_PACKAGE_DIR: /c/${{ github.run_id }}/build-results/

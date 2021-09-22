@@ -97,7 +97,7 @@ jobs:
           .circleci/scripts/windows_cudnn_install.sh
 {%- endif %}
       !{{ common.parse_ref() }}
-      - name: Build
+      - name: Build ${{ github.workflow }}
         shell: bash
         env:
           PYTORCH_FINAL_PACKAGE_DIR: /c/${{ github.run_id }}/build-results/
@@ -202,7 +202,7 @@ jobs:
         name: Setup Python3
         with:
           python-version: '3.x'
-      - name: Test
+      - name: Test ${{ github.workflow }} / test (${{ matrix.config }}, ${{ matrix.shard }}, ${{ matrix.num_shards }}, ${{ matrix.runner }})
         shell: bash
         env:
           PYTORCH_FINAL_PACKAGE_DIR: /c/${{ github.run_id }}/build-results/

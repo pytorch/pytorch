@@ -61,7 +61,7 @@ jobs:
       JOB_BASE_NAME: linux-xenial-py3.6-gcc7-bazel-test-build-and-test
       NUM_TEST_SHARDS: 1
     steps:
-      - name: Display EC2 information
+      - name: Display EC2 information for ${{ github.workflow }}
         shell: bash
         run: |
           set -euo pipefail
@@ -223,7 +223,7 @@ jobs:
           export COMMIT_TIME
           pip3 install requests==2.26
           python3 -m tools.stats.upload_binary_size_to_scuba || exit 0
-      - name: Test
+      - name: Test ${{ github.workflow }}
         # Time out the test phase after 3.5 hours
         timeout-minutes: 210
         run: |

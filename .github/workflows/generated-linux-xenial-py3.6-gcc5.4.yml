@@ -61,7 +61,7 @@ jobs:
     outputs:
       docker_image: ${{ steps.calculate-tag.outputs.docker_image }}
     steps:
-      - name: Display EC2 information
+      - name: Display EC2 information for ${{ github.workflow }}
         shell: bash
         run: |
           set -euo pipefail
@@ -165,7 +165,7 @@ jobs:
       - name: Parse ref
         id: parse-ref
         run: .github/scripts/parse_ref.py
-      - name: Build
+      - name: Build ${{ github.workflow }}
         env:
           CIRCLE_BRANCH: ${{ steps.parse-ref.outputs.branch }}
         run: |
@@ -303,7 +303,7 @@ jobs:
       NUM_TEST_SHARDS: ${{ matrix.num_shards }}
       PYTORCH_IGNORE_DISABLED_ISSUES: ${{ needs.generate-test-matrix.outputs.ignore-disabled-issues }}
     steps:
-      - name: Display EC2 information
+      - name: Display EC2 information for ${{ github.workflow }}
         shell: bash
         run: |
           set -euo pipefail
@@ -387,7 +387,7 @@ jobs:
       - name: Parse ref
         id: parse-ref
         run: .github/scripts/parse_ref.py
-      - name: Test
+      - name: Test ${{ github.workflow }} / test (${{ matrix.config }}, ${{ matrix.shard }}, ${{ matrix.num_shards }},  ${{ matrix.runner }})
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           CIRCLE_BRANCH: ${{ steps.parse-ref.outputs.branch }}
@@ -529,7 +529,7 @@ jobs:
       DOCKER_IMAGE: ${{ needs.build.outputs.docker_image }}
       DOCS_TYPE: ${{ matrix.docs_type }}
     steps:
-      - name: Display EC2 information
+      - name: Display EC2 information for ${{ github.workflow }}
         shell: bash
         run: |
           set -euo pipefail

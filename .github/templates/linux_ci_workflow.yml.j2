@@ -65,7 +65,7 @@ jobs:
         run: |
           !{{ common.pull_docker("${DOCKER_IMAGE}") }}
       !{{ common.parse_ref() }}
-      - name: Build
+      - name: Build ${{ github.workflow }}
         env:
           CIRCLE_BRANCH: ${{ steps.parse-ref.outputs.branch }}
         run: |
@@ -224,7 +224,7 @@ jobs:
         run: |
           sudo df -H
       !{{ common.parse_ref() }}
-      - name: Test
+      - name: Test ${{ github.workflow }} / test (${{ matrix.config }}, ${{ matrix.shard }}, ${{ matrix.num_shards }},  ${{ matrix.runner }})
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           CIRCLE_BRANCH: ${{ steps.parse-ref.outputs.branch }}

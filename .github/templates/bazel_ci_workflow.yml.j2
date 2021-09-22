@@ -90,7 +90,7 @@ on:
           export COMMIT_TIME
           pip3 install requests==2.26
           python3 -m tools.stats.upload_binary_size_to_scuba || exit 0
-      - name: Test
+      - name: Test ${{ github.workflow }}
         # Time out the test phase after 3.5 hours
         timeout-minutes: 210
         run: |
