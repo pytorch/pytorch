@@ -7,14 +7,9 @@
 #include <c10/macros/Macros.h>
 #include <ATen/detail/FunctionTraits.h>
 #include <ATen/NumericUtils.h>
-#if defined(__CUDACC__)
+#if defined(__CUDACC__) || defined(__HIPCC__)
 #include <ATen/cuda/DeviceUtils.cuh>
 #include <ATen/native/cuda/DeviceSqrt.cuh>
-#elif defined(__HIPCC__)
-#include <aten/src/THH/THHDeviceUtils.cuh>
-#include <aten/src/ATen/native/hip/DeviceSqrt.cuh>
-#endif
-#if defined(__CUDACC__) || defined(__HIPCC__)
 #include <thrust/pair.h>
 #else
 #include <cmath>
