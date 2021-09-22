@@ -19,13 +19,14 @@ class EmbeddingBag(nn.EmbeddingBag):
     """
     _FLOAT_MODULE = nn.EmbeddingBag
 
-    def __init__(num_embeddings, embedding_dim, max_norm=None, norm_type=2.0,
-                  scale_grad_by_freq=False, mode='mean', sparse=False, _weight=None,
-                  include_last_offset=False, padding_idx=None, device=None, dtype=None) -> None:
+    def __init__(self, num_embeddings, embedding_dim, max_norm=None, norm_type=2.0,
+                 scale_grad_by_freq=False, mode='mean', sparse=False, _weight=None,
+                 include_last_offset=False, padding_idx=None, qconfig=None, device=None,
+                 dtype=None) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype}
         super().__init__(num_embeddings, embedding_dim, max_norm, norm_type,
-                  scale_grad_by_freq, mode, sparse, _weight,
-                  include_last_offset, padding_idx, **factory_kwargs)
+                         scale_grad_by_freq, mode, sparse, _weight,
+                         include_last_offset, padding_idx, **factory_kwargs)
         assert qconfig, 'qconfig must be provided for QAT module'
         self.qconfig = qconfig
         self.weight_fake_quant = qconfig.weight(factory_kwargs=factory_kwargs)
@@ -47,8 +48,8 @@ class EmbeddingBag(nn.EmbeddingBag):
 
         qconfig = mod.qconfig
         qat_embedding_bag = cls(mod.num_embeddings, mod.embedding_dim, mod.max_norm, mod.norm_type,
-                  mod.scale_grad_by_freq, mod.mode, mod.sparse, mod.weight,
-                  mod.include_last_offset, mod.padding_idx, qconfig=qconfig)
+                                mod.scale_grad_by_freq, mod.mode, mod.sparse, mod.weight,
+                                mod.include_last_offset, mod.padding_idx, qconfig=qconfig)
         qat_embedding_bag.weight = mod.weight
 
         return qat_linear

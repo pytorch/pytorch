@@ -15,10 +15,8 @@ from torch.quantization import (
     default_observer,
     default_histogram_observer,
     default_per_channel_weight_observer,
-    float_qparams_weight_only_qconfig,
     get_observer_dict,
     prepare,
-    prepare_qat,
     QConfig,
     QConfigDynamic,
     FusedMovingAvgObsFakeQuantize,
@@ -1115,9 +1113,9 @@ class TestFusedObsFakeQuantModule(TestCase):
             def __init__(self):
                 super(Model, self).__init__()
                 self.emb1 = torch.nn.EmbeddingBag(num_embeddings=10, embedding_dim=12,
-                                         include_last_offset=True, scale_grad_by_freq=False, mode='sum')
+                                                  include_last_offset=True, scale_grad_by_freq=False, mode='sum')
                 self.emb2 = torch.nn.EmbeddingBag(num_embeddings=10, embedding_dim=12,
-                                         include_last_offset=True, scale_grad_by_freq=False, mode='sum')
+                                                  include_last_offset=True, scale_grad_by_freq=False, mode='sum')
 
             def forward(self, indices):
                 return torch.cat((self.emb1(indices), self.emb2(indices)))
@@ -1131,7 +1129,7 @@ class TestFusedObsFakeQuantModule(TestCase):
                                                                     qscheme=torch.per_channel_affine_float_qparams,
                                                                     ch_axis=0)
         float_qparams_qconfig = QConfigDynamic(activation=default_dynamic_quant_observer,
-                                                weight=float_qparams_observer)
+                                               weight=float_qparams_observer)
         model.qconfig = float_qparams_qconfig
 
 
@@ -1149,7 +1147,7 @@ class TestFusedObsFakeQuantModule(TestCase):
 
         # Model activation observer should be Placeholder, due to it being dynamic quantization.
         self.assertEqual(type(quant_model.quant.activation_post_process),
-                              PlaceholderObserver)
+                         PlaceholderObserver)
 
     def test_default_fused_qat_config(self):
         class Model(nn.Module):
