@@ -151,7 +151,8 @@ def get_statuses():
     overridable_outplace_we_care_about = get_public_overridable_outplace_we_care_about()
     op_to_opinfo = get_ops_covered_by_opinfos()
     result = {}
-    for _, op in get_covered_ops(overridable_outplace_we_care_about).items():
+    x = get_covered_ops(overridable_outplace_we_care_about)
+    for name, op in get_covered_ops(overridable_outplace_we_care_about).items():
         opinfo = op_to_opinfo[op]
         success = copy.deepcopy(tests)
         for decorator in opinfo.decorators:
@@ -159,11 +160,12 @@ def get_statuses():
                 continue
             if decorator.test_name in tests and decorator.test_name in success:
                 success.remove(decorator.test_name)
-        for func in [opinfo.op] + [alias.op for alias in opinfo.aliases]:
+        # NB: disregard aliases, they're too much trouble
+        for func in [opinfo.op]:
             if opinfo.name not in result.keys():
-                result[func] = success
+                result[name] = success
             else:
-                result[func] = result[opinfo.name].intersection(success)
+                result[name] = result[name].intersection(success)
     return result
 
 def transpose_statuses():
