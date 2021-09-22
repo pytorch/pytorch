@@ -1,11 +1,11 @@
 #include <ATen/ATen.h>
 #include <ATen/AccumulateType.h>
+#include <ATen/ceil_div.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/Utils.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/native/cuda/LaunchUtils.h>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/native/cuda/UpSample.cuh>
 #include <ATen/native/cuda/KernelUtils.cuh>
 #include <ATen/cuda/detail/KernelUtils.h>
@@ -232,7 +232,7 @@ static void upsample_nearest2d_out_cuda_template(
       scalar_t* odata = output.data_ptr<scalar_t>();
 
       upsample_nearest2d_nhwc_out_frame<scalar_t>
-        <<<cuda::ATenCeilDiv(num_kernels, num_threads), num_threads, 0, at::cuda::getCurrentCUDAStream()>>>(
+        <<<ceil_div(num_kernels, num_threads), num_threads, 0, at::cuda::getCurrentCUDAStream()>>>(
           idata,
           odata,
           channels,
@@ -270,10 +270,10 @@ static void upsample_nearest2d_out_cuda_template(
         maxThreadsDim[2], std::min<int>(nc, max_threads / block_x / block_y));
     const dim3 block(block_x, block_y, block_z);
 
-    int grid_x = cuda::ATenCeilDiv(output_width, block_x);
-    int grid_y = cuda::ATenCeilDiv(output_height, block_y);
+    int grid_x = ceil_div(output_width, block_x);
+    int grid_y = ceil_div(output_height, block_y);
     int grid_z = std::min<int>(
-        maxGridSize[2], cuda::ATenCeilDiv(nc, block_z * 4));
+        maxGridSize[2], ceil_div(nc, block_z * 4));
     const dim3 grid(grid_x, grid_y, grid_z);
     // Error out on cases where grid_x & grid_y exceeds limit of launch config, as
     // the current kernel implementation doesn't loop over the two dimensions.
@@ -363,7 +363,7 @@ static void upsample_nearest2d_backward_out_cuda_template(
       scalar_t* gi = grad_input.data_ptr<scalar_t>();
 
       upsample_nearest2d_backward_nhwc_out_frame<scalar_t, accscalar_t>
-        <<<cuda::ATenCeilDiv(num_kernels, num_threads), num_threads, 0, at::cuda::getCurrentCUDAStream()>>>(
+        <<<ceil_div(num_kernels, num_threads), num_threads, 0, at::cuda::getCurrentCUDAStream()>>>(
           go,
           gi,
           output_height,
@@ -386,7 +386,7 @@ static void upsample_nearest2d_backward_out_cuda_template(
     unsigned int n = grad_input.numel() / nbatch;
     dim3 bdim{std::min<unsigned int>(
         at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, MAX_THREADS)};
-    dim3 gdim{cuda::ATenCeilDiv(n, bdim.x)};
+    dim3 gdim{ceil_div(n, bdim.x)};
     // safe check for int32 indexing; implicitly restrict launch config for kernel
     TORCH_CHECK(grad_input.numel() <= std::numeric_limits<int32_t>::max());
 

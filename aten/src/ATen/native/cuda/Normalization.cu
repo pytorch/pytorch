@@ -1,3 +1,4 @@
+#include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/ReduceOps.h>
 #include <ATen/native/Resize.h>
