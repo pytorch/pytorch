@@ -47,6 +47,7 @@ elseif("${ATEN_THREADING}" STREQUAL "TBB")
   if(NOT USE_TBB)
     message(FATAL_ERROR "Using TBB backend but USE_TBB is off")
   endif()
+  message(WARNING "ATEN TBB Threading is deprectated.")
   set(AT_PARALLEL_NATIVE_TBB 1)
 else()
   message(FATAL_ERROR "Unknown ATen parallel backend: ${ATEN_THREADING}")
@@ -518,6 +519,22 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     endforeach()
   endif()
 
+  # Mobile backend delegate srcs
+  if(INTERN_BUILD_MOBILE AND NOT BUILD_CAFFE2_MOBILE)
+    set(DELEGATE_SRCS
+      ${TORCH_SRC_DIR}/csrc/jit/backends/backend_debug_info.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/backends/backend_interface.cpp
+    )
+    list(APPEND TORCH_SRCS ${DELEGATE_SRCS})
+    if(IOS AND USE_COREML_DELEGATE)
+      set(COREML_DELEGATE_SRCS
+        ${TORCH_SRC_DIR}/csrc/jit/backends/coreml/objc/PTMCoreMLBackend.mm
+        ${TORCH_SRC_DIR}/csrc/jit/backends/coreml/objc/PTMCoreMLExecutor.mm
+      )
+      list(APPEND TORCH_SRCS ${COREML_DELEGATE_SRCS})
+    endif()
+  endif()
+
   # Required workaround for LLVM 9 includes.
   if(NOT MSVC)
     set_source_files_properties(${TORCH_SRC_DIR}/csrc/jit/tensorexpr/llvm_jit.cpp PROPERTIES COMPILE_FLAGS -Wno-noexcept-type)
@@ -536,10 +553,12 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
        ${TORCH_SRC_DIR}/csrc/jit/mobile/function.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/import.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/import_data.cpp
+       ${TORCH_SRC_DIR}/csrc/jit/mobile/interpreter.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/model_compatibility.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/module.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/observer.cpp
-       ${TORCH_SRC_DIR}/csrc/jit/mobile/interpreter.cpp
+       ${TORCH_SRC_DIR}/csrc/jit/mobile/parse_bytecode.cpp
+       ${TORCH_SRC_DIR}/csrc/jit/mobile/parse_operators.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/train/export_data.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/train/optim/sgd.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/train/random.cpp

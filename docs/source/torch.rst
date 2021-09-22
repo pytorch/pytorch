@@ -89,6 +89,7 @@ Indexing, Slicing, Joining, Mutating Ops
 
     argwhere
     cat
+    concat
     conj
     chunk
     dsplit
@@ -397,6 +398,7 @@ Reduction Ops
     dist
     logsumexp
     mean
+    nanmean
     median
     nanmedian
     mode

@@ -2428,11 +2428,16 @@ argwhere() -> LongTensor
 See :func:`torch.argwhere`
 """)
 
-add_docstr_all('mean',
-               r"""
-mean(dim=None, keepdim=False) -> Tensor or (Tensor, Tensor)
+add_docstr_all('mean', r"""
+mean(dim=None, keepdim=False, *, dtype=None) -> Tensor
 
 See :func:`torch.mean`
+""")
+
+add_docstr_all('nanmean', r"""
+nanmean(dim=None, keepdim=False, *, dtype=None) -> Tensor
+
+See :func:`torch.nanmean`
 """)
 
 add_docstr_all('median',

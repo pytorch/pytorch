@@ -1,12 +1,11 @@
 from collections.abc import Sequence
 from functools import partial, wraps
-import unittest
 import warnings
 
 import torch
 
-from torch.testing import \
-    (FileCheck, floating_and_complex_types_and, get_all_dtypes, make_tensor)
+from torch.testing import FileCheck, make_tensor
+from torch.testing._internal.common_dtype import floating_and_complex_types_and, get_all_dtypes
 from torch.testing._internal.common_utils import \
     (TestCase, is_iterable_of_tensors, run_tests, IS_SANDCASTLE, clone_input_helper,
      gradcheck, gradgradcheck, IS_IN_CI, suppress_warnings)
@@ -685,7 +684,6 @@ class TestJit(JitCommonTestCase):
     #   and runtimes (eager, traced, scripted).
     # TODO WARNING: inplace x {traced, scripted} not currently tested
     @_variant_ops(op_db)
-    @unittest.skipIf(True, "Temporarily skipping while landing Union PR stack")
     def test_variant_consistency_jit(self, device, dtype, op):
         _requires_grad = op.supports_autograd and (dtype.is_floating_point or
                                                    op.supports_complex_autograd(torch.device(device).type))
@@ -707,6 +705,8 @@ class TestJit(JitCommonTestCase):
         if has_fake_function:
             variants = {'method': getattr(torch.Tensor, op.name)}
             samples = op.sample_inputs(device, dtype, requires_grad=False)
+
+        support_script = op.supports_scripting
 
         tested = False
         for sample in samples:
@@ -732,7 +732,8 @@ class TestJit(JitCommonTestCase):
                 #   DifferentiableGraph nodes if they are present
                 with disable_autodiff_subgraph_inlining():
                     # Check scripted forward, grad, and grad grad
-                    script_fn = create_script_fn(self, name, func_type)
+                    if support_script:
+                        script_fn = create_script_fn(self, name, func_type)
 
                     def out_fn(output):
                         # Processes the output for autograd
@@ -743,17 +744,21 @@ class TestJit(JitCommonTestCase):
                     def get_sample():
                         return clone_input_helper(sample.input) if op.name[-1] == '_' else sample.input
 
-                    check_against_reference(self,
-                                            script_fn,
-                                            func,
-                                            out_fn,
-                                            (get_sample(),) + sample.args,
-                                            sample.kwargs,
-                                            no_grad=not _requires_grad, no_gradgrad=not op.supports_gradgrad)
+                    if support_script:
+                        check_against_reference(self,
+                                                script_fn,
+                                                func,
+                                                out_fn,
+                                                (get_sample(),) + sample.args,
+                                                sample.kwargs,
+                                                no_grad=not _requires_grad, no_gradgrad=not op.supports_gradgrad)
 
                     # Check traced forward, grad, and grad grad
                     # TODO: fix tracing here
                     supports_tracing = not has_fake_function
+                    if op.assert_jit_shape_analysis:
+                        self.assertTrue(supports_tracing)
+
                     if supports_tracing:
                         traced_fn = create_traced_fn(self, variant)
                         check_against_reference(self,
@@ -769,17 +774,26 @@ class TestJit(JitCommonTestCase):
                     # Note: only runs in float32 because schema isn't affected by dtype,
                     #   so running it on all dtypes is would be excessive
                     if dtype == torch.float32:
-                        check_alias_annotation(name, (get_sample(),) + sample.args, sample.kwargs,
-                                               func_type=func_type, aten_name=op.aten_name)
+                        # TODO: no reason why we cant run this with tracing graph
+                        if support_script:
+                            check_alias_annotation(name, (get_sample(),) + sample.args, sample.kwargs,
+                                                   func_type=func_type, aten_name=op.aten_name)
 
                         # TODO: use script graph as well
                         checked_shape_analysis = False
                         if supports_tracing:
                             out = variant(get_sample(), *sample.args, **sample.kwargs)
 
-                            # TODO: handle multiple outputs
-                            if isinstance(out, torch.Tensor):
-                                self.checkShapeAnalysis(out.size(), traced_fn.graph, op.assert_jit_shape_analysis)
+                            # right now, tuple of outputs and tensor output supported
+                            # TODO: list of tensor outputs
+                            tuple_of_tensors = isinstance(out, tuple) and all([isinstance(elem, torch.Tensor) for elem in out])
+
+                            if isinstance(out, torch.Tensor) or tuple_of_tensors:
+                                if tuple_of_tensors:
+                                    sizes = [elem.size() for elem in out]
+                                else:
+                                    sizes = out.size()
+                                self.checkShapeAnalysis(sizes, traced_fn.graph, op.assert_jit_shape_analysis)
                                 checked_shape_analysis = True
                         if op.assert_jit_shape_analysis:
                             self.assertTrue(checked_shape_analysis)
@@ -797,7 +811,8 @@ class TestJit(JitCommonTestCase):
 
                         if supports_tracing:
                             self.assertAutodiffNode(traced_fn.last_graph, op.assert_autodiffed, nonfusible_nodes, fusible_nodes)
-                        self.assertAutodiffNode(script_fn.last_graph, op.assert_autodiffed, nonfusible_nodes, fusible_nodes)
+                        if support_script:
+                            self.assertAutodiffNode(script_fn.last_graph, op.assert_autodiffed, nonfusible_nodes, fusible_nodes)
         assert tested, "JIT Test does not execute any logic"
 
     # alias testing is only done with torch.float for the same reason
