@@ -431,7 +431,7 @@ class TORCH_API ProcessedNode {
 };
 
 static_assert(
-    sizeof(ProcessedNode) == 10 * sizeof(void*),
+    sizeof(void*) != 8 || sizeof(ProcessedNode) == 10 * sizeof(void*),
     "ProcessedNode size changed");
 
 } // namespace jit
