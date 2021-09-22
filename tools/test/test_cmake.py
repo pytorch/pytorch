@@ -26,7 +26,7 @@ class TestCMake(unittest.TestCase):
             ((    None,     False,     False),         ['-j', '13']),  # noqa: E201,E241
             ((     '6',      True,      True),          ['-j', '6']),  # noqa: E201,E241
             ((    None,      True,      True),                 None),  # noqa: E201,E241
-            ((     '5',     False,      True),  ['/p:CL_MPCount=5']),  # noqa: E201,E241
+            ((    '11',     False,      True), ['/p:CL_MPCount=11']),  # noqa: E201,E241
             ((    None,     False,      True), ['/p:CL_MPCount=13']),  # noqa: E201,E241
         ]
         for (max_jobs, use_ninja, is_windows), want in cases:
