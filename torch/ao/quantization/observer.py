@@ -7,7 +7,7 @@ from typing import Any, List, Tuple, Optional, Dict, Union
 
 import torch
 import torch.nn as nn
-from torch.quantization.utils import check_min_max_valid, calculate_qmin_qmax
+from torch.ao.quantization.utils import check_min_max_valid, calculate_qmin_qmax
 
 
 class _PartialWrapper(object):
