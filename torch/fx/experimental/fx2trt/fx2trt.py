@@ -435,7 +435,8 @@ class TRTInterpreter(torch.fx.Interpreter):
         kwargs = dict(n.kwargs)
         del kwargs["_itensor_to_tensor_meta"]
         n.kwargs = kwargs
-        self._itensor_to_tensor_meta[trt_node] = n.meta.get("tensor_meta")
+        if isinstance(trt_node, trt.tensorrt.ITensor):
+            self._itensor_to_tensor_meta[trt_node] = n.meta.get("tensor_meta")
 
         return trt_node
 
