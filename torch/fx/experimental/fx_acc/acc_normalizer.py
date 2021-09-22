@@ -256,11 +256,9 @@ def move_kwargs_to_acc_out_ty(
         if move_to_qparams:
             # when the arg is constant, the fields will be constant value and tmd_field_name
             qparams[tmd_field_name] = new_kwargs[orig_kwarg_name]
-            del new_kwargs[orig_kwarg_name]
         else:
-            assert isinstance(orig_kwarg_name, str)
             tmd_dict[tmd_field_name] = new_kwargs[orig_kwarg_name]
-            del new_kwargs[orig_kwarg_name]
+        del new_kwargs[orig_kwarg_name]
 
     tmd_dict["qparams"] = qparams
     # Note: allow_partial_spec here because we are only using the tensor metadata tuple
