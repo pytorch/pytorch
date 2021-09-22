@@ -8168,9 +8168,10 @@ class DistributedTest:
             BACKEND != "nccl" and BACKEND != "gloo",
             "Only Nccl & Gloo backend support DistributedDataParallel",
         )
-        def test_ddp_buffer_hook_allreduce(self):
-            for return_futures in [True, False]:
-                self._test_ddp_buffer_hook_allreduce(return_futures)
+        def test_ddp_buffer_hook_allreduce_return_future(self):
+            self._test_ddp_buffer_hook_allreduce(
+                return_futures=True
+            )
 
         @skip_if_lt_x_gpu(2)
         @sandcastle_skip_if(
@@ -8178,8 +8179,9 @@ class DistributedTest:
             "Only Nccl & Gloo backend support DistributedDataParallel",
         )
         def test_ddp_buffer_hook_allreduce(self):
-            for return_futures in [True, False]:
-                self._test_ddp_buffer_hook_allreduce(return_futures)
+            self._test_ddp_buffer_hook_allreduce(
+                return_futures=False
+            )
 
         @skip_if_lt_x_gpu(2)
         @sandcastle_skip_if(
