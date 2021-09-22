@@ -1,5 +1,5 @@
 r"""Functional interface"""
-from typing import Callable, List, Optional, Tuple
+from typing import Callable, List, Optional, Tuple, Union
 import math
 import warnings
 
@@ -598,44 +598,19 @@ fractional_max_pool3d = boolean_dispatch(
 )
 
 
-def max_pool1d_with_indices(
+def max_pool1d(
     input: Tensor, kernel_size: BroadcastingList1[int],
     stride: Optional[BroadcastingList1[int]] = None,
     padding: BroadcastingList1[int] = 0,
     dilation: BroadcastingList1[int] = 1,
     ceil_mode: bool = False,
     return_indices: bool = False
-) -> Tuple[Tensor, Tensor]:
+) -> Union[Tensor, Tuple[Tensor, Tensor]]:
     r"""Applies a 1D max pooling over an input signal composed of several input
     planes.
 
     See :class:`~torch.nn.MaxPool1d` for details.
     """
-    if has_torch_function_unary(input):
-        return handle_torch_function(
-            max_pool1d_with_indices,
-            (input,),
-            input,
-            kernel_size,
-            stride=stride,
-            padding=padding,
-            dilation=dilation,
-            ceil_mode=ceil_mode,
-            return_indices=return_indices,
-        )
-    if stride is None:
-        stride = torch.jit.annotate(List[int], [])
-    return torch.max_pool1d_with_indices(input, kernel_size, stride, padding, dilation, ceil_mode)
-
-
-def _max_pool1d(
-    input: Tensor, kernel_size: BroadcastingList1[int],
-    stride: Optional[BroadcastingList1[int]] = None,
-    padding: BroadcastingList1[int] = 0,
-    dilation: BroadcastingList1[int] = 1,
-    ceil_mode: bool = False,
-    return_indices: bool = False
-) -> Tensor:
     if has_torch_function_unary(input):
         return handle_torch_function(
             max_pool1d,
@@ -653,15 +628,7 @@ def _max_pool1d(
     return torch.max_pool1d(input, kernel_size, stride, padding, dilation, ceil_mode)
 
 
-max_pool1d = boolean_dispatch(
-    arg_name="return_indices",
-    arg_index=6,
-    default=False,
-    if_true=max_pool1d_with_indices,
-    if_false=_max_pool1d,
-    module_name=__name__,
-    func_name="max_pool1d",
-)
+max_pool1d_with_indices = max_pool1d
 
 
 def max_pool2d_with_indices(
