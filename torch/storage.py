@@ -187,7 +187,7 @@ _StorageBase.type = _type  # type: ignore[assignment]
 _StorageBase.cuda = _cuda  # type: ignore[assignment]
 
 
-@lru_cache
+@lru_cache(maxsize=None)
 def _dtype_to_storage_type_map():
     return {
         torch.double: 'DoubleStorage',
@@ -208,7 +208,7 @@ def _dtype_to_storage_type_map():
         torch.quint4x2: 'QUInt4x2Storage',
     }
 
-@lru_cache
+@lru_cache(maxsize=None)
 def _storage_type_to_dtype_map():
     dtype_map = {
         val: key for key, val in _dtype_to_storage_type_map().items()}
