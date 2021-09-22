@@ -84,6 +84,8 @@ void OptimizeGraph(
   }
 #endif
   ConstantPropagation(graph);
+  RemoveImmutableInputDictLookups(graph);
+  UseVariadicTupleUnpack(graph);
 }
 
 // remove unused input 0 from graph
@@ -165,7 +167,7 @@ FastSet<const Value*> GetAlwaysAliveValues(
 }
 
 //  Map each value to all values that are alive at the same time.
-using LivenessMap = FastMap<const Value*, std::set<const Value*>>;
+using LivenessMap = FastMap<const Value*, FastSet<const Value*>>;
 
 //  The algorithm does a traversal of the execution graph
 //  while keeping track of the live values.
@@ -174,7 +176,7 @@ LivenessMap GetLivenessMap(
     const FastSet<const Value*>& always_alive,
     AliasDb& db) {
   // map a Value to a set of Values that overlap live-ranges with the Value's
-  FastMap<const Value*, std::set<const Value*>> liveness_map;
+  FastMap<const Value*, FastSet<const Value*>> liveness_map;
 
   // map Values to its creation order in graph (Note: only traverse top-level
   // nodes such that nodes under control-flows are represented by top-level
@@ -183,7 +185,8 @@ LivenessMap GetLivenessMap(
   FastMap<const Value*, size_t> values_to_idx_in_creation_order;
   for (const auto* node : graph->nodes()) {
     for (const auto* v : node->outputs()) {
-      values_to_idx_in_creation_order[v] = values_in_creation_order.size();
+      values_to_idx_in_creation_order.emplace(
+          v, values_in_creation_order.size());
       values_in_creation_order.emplace_back(v);
     }
   }
@@ -191,20 +194,21 @@ LivenessMap GetLivenessMap(
   // presence of a Value in live_values_use_chain means the Value alive
   // Value mapped to set of Nodes that may use the Value (i.e., use-chain of
   // Value)
-  FastMap<const Value*, std::set<const Node*>> live_values_use_chain;
+  FastMap<const Value*, FastSet<const Node*>> live_values_use_chain;
   // Node mapped to set of Values that the Node may use (i.e., def-chain of node
   // inputs)
-  FastMap<const Node*, std::set<const Value*>> live_nodes_def_chain;
+  FastMap<const Node*, FastSet<const Value*>> live_nodes_def_chain;
 
   // add v to the current liveness_map
   std::function<void(const Value* v)> add_live_value_fn = [&](const Value* v) {
     if (liveness_map.count(v)) {
       return;
     }
-    liveness_map[v] = {};
+
+    auto& v_live_set = liveness_map[v] = {};
 
     for (const auto& live_v : live_values_use_chain) {
-      liveness_map.at(v).insert(live_v.first);
+      v_live_set.insert(live_v.first);
       liveness_map.at(live_v.first).insert(v);
     }
 
@@ -287,34 +291,43 @@ LivenessMap GetLivenessMap(
     auto outputs = node->outputs();
     for (const auto* input : inputs) {
       for (const auto* output : outputs) {
-        if (liveness_map.count(input) && liveness_map.count(output)) {
-          liveness_map.at(input).insert(output);
-          liveness_map.at(output).insert(input);
+        auto input_it = liveness_map.find(input);
+        if (input_it == liveness_map.end()) {
+          continue;
         }
+        auto output_it = liveness_map.find(output);
+        if (output_it == liveness_map.end()) {
+          continue;
+        }
+        input_it->second.insert(output);
+        output_it->second.insert(input);
       }
     }
+    auto insert_all_pairs_in_liveness_map =
+        [&](at::ArrayRef<const Value*> values) {
+          for (size_t i = 0; !values.empty() && i < values.size() - 1; ++i) {
+            auto value_it = liveness_map.find(values[i]);
+            if (value_it == liveness_map.end()) {
+              continue;
+            }
+            for (size_t j = i + 1; j < values.size(); ++j) {
+              auto value2_it = liveness_map.find(values[j]);
+              if (value2_it != liveness_map.end()) {
+                value_it->second.insert(values[j]);
+                value2_it->second.insert(values[i]);
+              }
+            }
+          }
+        };
     // All inputs should be alive at the same time.
-    for (size_t i = 0; i < inputs.size(); ++i) {
-      for (size_t j = 0; j < inputs.size(); ++j) {
-        if (liveness_map.count(inputs[i]) && liveness_map.count(inputs[j])) {
-          liveness_map.at(inputs[i]).insert(inputs[j]);
-          liveness_map.at(inputs[j]).insert(inputs[i]);
-        }
-      }
-    }
+    insert_all_pairs_in_liveness_map(inputs);
+
     // All outputs should be alive at the same time.
-    for (size_t i = 0; i < outputs.size(); ++i) {
-      for (size_t j = 0; j < outputs.size(); ++j) {
-        if (liveness_map.count(outputs[i]) && liveness_map.count(outputs[j])) {
-          liveness_map.at(outputs[i]).insert(outputs[j]);
-          liveness_map.at(outputs[j]).insert(outputs[i]);
-        }
-      }
-    }
-  }
+    insert_all_pairs_in_liveness_map(outputs);
+  };
 
   return liveness_map;
-}
+};
 
 // Collect the set of Values that are candidates for memory planning:
 //   - Values that are used in in-place operators (i.e., _out variants), and
@@ -417,7 +430,7 @@ FastMap<const Value*, std::vector<const Value*>> GenerateSameStorageValues(
       return;
     }
     DCHECK(same_storage_values.count(old_v));
-    std::set<const Value*> seen;
+    FastSet<const Value*> seen;
     std::vector<const Value*> values;
     for (auto* v : same_storage_values.at(old_v)) {
       if (seen.count(v)) {
@@ -463,10 +476,10 @@ FastMap<const Value*, std::vector<const Value*>> GenerateSameStorageValues(
 
   auto compute_liveset_fn =
       [&always_alive, &alive_during, &same_storage_values](
-          std::set<const Value*>& live, const Value* v) {
+          FastSet<const Value*>& live, const Value* v) {
         for (const auto* sv : same_storage_values.at(v)) {
           const auto& l = alive_during.count(sv) ? alive_during.at(sv)
-                                                 : std::set<const Value*>{};
+                                                 : FastSet<const Value*>{};
           live.insert(l.begin(), l.end());
         }
         live.insert(always_alive.begin(), always_alive.end());
@@ -474,7 +487,7 @@ FastMap<const Value*, std::vector<const Value*>> GenerateSameStorageValues(
 
   // check if same_storage_values[s] intersects with live
   auto intersect_fn = [&same_storage_values](
-                          std::set<const Value*>& live, const Value* s) {
+                          FastSet<const Value*>& live, const Value* s) {
     bool intersect = false;
     for (const auto* v : same_storage_values.at(s)) {
       if (live.count(v)) {
@@ -490,7 +503,7 @@ FastMap<const Value*, std::vector<const Value*>> GenerateSameStorageValues(
       continue;
     }
     // get values that are live during the lifetime of v
-    std::set<const Value*> live;
+    FastSet<const Value*> live;
     compute_liveset_fn(live, v);
     for (const auto* s : seen) {
       // if live(same_storage_values[v]) and same_storage_values[s]
@@ -965,6 +978,10 @@ void StaticRuntime::benchmark(
             << std::endl;
 
   if (planner_) {
+    std::cout << "Total number of managed tensors: "
+              << planner_->total_num_managed_tensors() << std::endl;
+    std::cout << "Total number of unmanaged values: "
+              << planner_->total_num_unmanaged() << std::endl;
     std::cout << "Total memory managed: " << planner_->total_managed()
               << " bytes" << std::endl;
     if (static_module_.opts().optimize_memory) {

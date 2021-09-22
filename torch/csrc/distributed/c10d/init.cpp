@@ -341,21 +341,21 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
   shared_ptr_class_<::c10d::Reducer>(module, "Reducer")
       .def(
           py::init<
-              std::vector<std::vector<at::Tensor>>,
+              std::vector<at::Tensor>,
               std::vector<std::vector<size_t>>,
               std::vector<size_t>,
               c10::intrusive_ptr<::c10d::ProcessGroup>,
-              std::vector<std::vector<bool>>,
+              std::vector<bool>,
               int64_t,
               bool,
               bool,
               std::unordered_map<size_t, std::string>,
               int64_t>(),
-          py::arg("replicas"),
+          py::arg("params"),
           py::arg("bucket_indices"),
           py::arg("per_bucket_size_limits"),
           py::arg("process_group"),
-          py::arg("expect_sparse_gradients") = std::vector<std::vector<bool>>(),
+          py::arg("expect_sparse_gradients") = std::vector<bool>(),
           py::arg("bucket_bytes_cap") = ::c10d::kDefaultBucketBytesCap,
           py::arg("find_unused_parameters") = false,
           py::arg("gradient_as_bucket_view") = false,
@@ -1544,18 +1544,40 @@ Example::
 
   module.def(
       "_compute_bucket_assignment_by_size",
-      &::c10d::compute_bucket_assignment_by_size,
+      [](const std::vector<at::Tensor>& tensors,
+            const std::vector<size_t>& bucket_size_limits,
+            const std::vector<bool>& expect_sparse_gradient,
+            const std::vector<int64_t>& tensor_indices,
+            const c10::optional<std::shared_ptr<::c10d::Logger>>& logger) {
+             if (logger.has_value()) {
+                std::weak_ptr<::c10d::Logger> logger_weakref = logger.value();
+                return ::c10d::compute_bucket_assignment_by_size(tensors, bucket_size_limits, expect_sparse_gradient, tensor_indices, {logger_weakref});
+             } else {
+                return ::c10d::compute_bucket_assignment_by_size(tensors, bucket_size_limits, expect_sparse_gradient, tensor_indices, {});
+             }
+      },
       py::arg("tensors"),
       py::arg("bucket_size"),
       py::arg("expect_sparse_gradient") = std::vector<bool>(),
       py::arg("tensor_indices") = std::vector<int64_t>(),
+      py::arg("logger") = c10::optional<std::shared_ptr<::c10d::Logger>>{},
       py::call_guard<py::gil_scoped_release>());
 
   module.def(
-      "_verify_model_across_ranks",
-      &::c10d::verify_replica0_across_processes,
+      "_verify_params_across_processes",
+      [](const c10::intrusive_ptr<::c10d::ProcessGroup>& process_group,
+         const std::vector<at::Tensor>& params,
+         const c10::optional<std::shared_ptr<::c10d::Logger>>& logger) {
+             if (logger.has_value()) {
+                std::weak_ptr<::c10d::Logger> logger_weakref = logger.value();
+                verify_params_across_processes(process_group, params, {logger_weakref});
+             } else {
+                verify_params_across_processes(process_group, params, {});
+             }
+      },
       py::arg("process_group"),
-      py::arg("replicas"),
+      py::arg("params"),
+      py::arg("logger") = c10::optional<std::shared_ptr<::c10d::Logger>>{},
       py::call_guard<py::gil_scoped_release>());
 
   module.def(

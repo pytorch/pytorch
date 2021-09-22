@@ -1784,6 +1784,8 @@
 
 - func: new_empty(Tensor self, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   variants: method
+  dispatch:
+    CompositeExplicitAutograd: new_empty
 
 - func: new_empty_strided(Tensor self, int[] size, int[] stride, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   variants: method
@@ -5421,6 +5423,11 @@
   device_guard: False
 
 - func: meshgrid(Tensor[] tensors) -> Tensor[]
+
+# TODO: Two weeks after this lands, combine these two overloads,
+#       making "indexing" optional. These are temporarily distinct for
+#       forward-compatibility reasons.
+- func: meshgrid.indexing(Tensor[] tensors, *, str indexing) -> Tensor[]
 
 - func: cartesian_prod(Tensor[] tensors) -> Tensor
   variants: function
