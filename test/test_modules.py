@@ -175,10 +175,10 @@ class TestModule(TestCase):
                             return objs.cuda(1)
                         else:
                             return objs
-                    m.cuda(1)
-
                     input_device_1_args = _to_device(input_device_args)
                     input_device_1_kwargs = _to_device(input_device_kwargs)
+
+                    m.cuda(1)
                     with torch.cuda.device(1):
                         m(*input_device_1_args, **input_device_1_kwargs)
                     self._assert_module_parameters_and_buffer_are(m, device, dtype, 1)
