@@ -869,12 +869,29 @@ TORCH_API intrusive_ptr<ivalue::Future> collectAny(
 // User-defined object.
 struct C10_EXPORT ivalue::Object final : c10::intrusive_ptr_target {
  public:
+  // In general, class types hold a shared_ptr to its owning CompilationUnit,
+  // so that its type and methods do not get deallocated while the class exists.
+  // However, the CompilationUnit holds ownership of the type's graphs, so
+  // inserting a constant object into a Graph would create a reference cycle if
+  // that constant object held a shared_ptr to its CU. For these objects we
+  // instatiate them with non-owning references to its CU
   Object(WeakOrStrongTypePtr type, size_t numSlots) : type_(std::move(type)) {
+    slots_.resize(numSlots);
+  }
+
+  Object(StrongTypePtr type, size_t numSlots)
+      : type_(WeakOrStrongTypePtr(std::move(type))) {
     slots_.resize(numSlots);
   }
 
   static c10::intrusive_ptr<Object> create(
       WeakOrStrongTypePtr type,
+      size_t numSlots) {
+    return c10::make_intrusive<Object>(std::move(type), numSlots);
+  }
+
+  static c10::intrusive_ptr<Object> create(
+      StrongTypePtr type,
       size_t numSlots) {
     return c10::make_intrusive<Object>(std::move(type), numSlots);
   }
@@ -939,7 +956,7 @@ struct C10_EXPORT ivalue::Object final : c10::intrusive_ptr_target {
   std::shared_ptr<ClassType> type() const;
 
   std::shared_ptr<torch::jit::CompilationUnit> compilation_unit() {
-    if (type_.is_strong_) {
+    if (type_.holds_strong_ref()) {
       return c10::get<std::shared_ptr<torch::jit::CompilationUnit>>(type_.cu_);
     } else {
       auto weak_ptr = c10::get<std::weak_ptr<torch::jit::CompilationUnit>>(type_.cu_);
@@ -949,8 +966,8 @@ struct C10_EXPORT ivalue::Object final : c10::intrusive_ptr_target {
 
   c10::intrusive_ptr<Object> copy_to_weak_compilation_ref() const;
 
-  void unasfe_make_weak_compilation_ref() {
-    type_ = type_.asWeakTypePtr();
+  void unsafe_make_weak_compilation_ref() {
+    type_ = WeakOrStrongTypePtr(type_.asWeakTypePtr());
   }
 
   c10::intrusive_ptr<Object> copy() const;
@@ -960,7 +977,7 @@ struct C10_EXPORT ivalue::Object final : c10::intrusive_ptr_target {
   c10::intrusive_ptr<Object> deepcopy(IValue::HashAliasedIValueMap& memo) const;
 
   bool is_weak_compilation_ref() const {
-    return !type_.is_strong_;
+    return !type_.holds_strong_ref();
   }
 
  private:

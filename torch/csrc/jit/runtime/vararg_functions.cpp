@@ -2,6 +2,7 @@
 
 #include <ATen/ATen.h>
 #include <c10/util/irange.h>
+#include "ATen/core/ivalue.h"
 
 namespace torch {
 namespace jit {
@@ -323,7 +324,8 @@ void dictConstruct(Stack& stack, const at::DictType& type, size_t num_inputs) {
 void createObject(Stack& stack, const at::ClassTypePtr& type, bool as_weak_ref) {
   if (as_weak_ref) {
     c10::WeakTypePtr weak(type->compilation_unit(), type);
-    auto userObj = c10::ivalue::Object::create(weak, type->numAttributes());
+    auto userObj = c10::ivalue::Object::create(
+        c10::WeakOrStrongTypePtr(weak), type->numAttributes());
     push(stack, std::move(userObj));
   } else {
     auto userObj = c10::ivalue::Object::create(

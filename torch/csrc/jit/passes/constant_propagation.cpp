@@ -114,7 +114,7 @@ c10::optional<std::vector<IValue>> runNodeIfInputsAreConstant(
         continue;
       }
       auto obj = v.toObject();
-      obj->unasfe_make_weak_compilation_ref();
+      obj->unsafe_make_weak_compilation_ref();
     }
     if (v.isObject()) {
       if (!v.toObject()->is_weak_compilation_ref()) {

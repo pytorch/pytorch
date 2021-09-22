@@ -900,7 +900,8 @@ c10::intrusive_ptr<ivalue::Object> ivalue::Object::copy() const {
 }
 
 c10::intrusive_ptr<ivalue::Object> ivalue::Object::copy_to_weak_compilation_ref() const {
-  auto object = ivalue::Object::create(type_.asWeakTypePtr(), type()->numAttributes());
+  auto object = ivalue::Object::create(
+      WeakOrStrongTypePtr(type_.asWeakTypePtr()), type()->numAttributes());
   for (const auto i : c10::irange(slots_.size())) {
     object->setSlot(i, slots_[i]);
   }
@@ -953,24 +954,21 @@ WeakTypePtr::WeakTypePtr(
 WeakOrStrongTypePtr::WeakOrStrongTypePtr(WeakTypePtr weak) {
   cu_ = WeakOrStrongCompilationUnit(weak.cu_);
   type_ = weak.type_;
-  is_strong_ = false;
 }
 
 
 WeakOrStrongTypePtr::WeakOrStrongTypePtr(StrongTypePtr strong) {
   cu_ = WeakOrStrongCompilationUnit(strong.cu_);
   type_ = strong.type_;
-  is_strong_ = true;
 }
 
 WeakOrStrongTypePtr::WeakOrStrongTypePtr(WeakOrStrongCompilationUnit cu, TypePtr type) {
   cu_ = WeakOrStrongCompilationUnit(cu);
   type_ = type;
-  is_strong_ = cu.index() == 0;
 }
 
 WeakTypePtr WeakOrStrongTypePtr::asWeakTypePtr() const {
-  if (!is_strong_) {
+  if (!holds_strong_ref()) {
     std::weak_ptr<torch::jit::CompilationUnit> weak_cu = c10::get<std::weak_ptr<torch::jit::CompilationUnit>>(cu_);
     return WeakTypePtr(weak_cu, type_);
   } else {

@@ -1168,14 +1168,16 @@ using WeakOrStrongCompilationUnit = c10::variant<std::shared_ptr<torch::jit::Com
 // An Object will hold a non-owning Compilation Unit reference if it is a
 // Constant in the graph and a Owning reference otherwise
 struct TORCH_API WeakOrStrongTypePtr {
-  WeakOrStrongTypePtr(WeakTypePtr weak);
-  WeakOrStrongTypePtr(StrongTypePtr strong);
+  explicit WeakOrStrongTypePtr(WeakTypePtr weak);
+  explicit WeakOrStrongTypePtr(StrongTypePtr strong);
   WeakOrStrongTypePtr(WeakOrStrongCompilationUnit cu, TypePtr type);
   WeakTypePtr asWeakTypePtr() const;
 
   WeakOrStrongCompilationUnit cu_;
   TypePtr type_;
-  bool is_strong_;
+  bool holds_strong_ref() const {
+    return cu_.index() == 0;
+  }
 };
 
 
