@@ -28,11 +28,8 @@ class autocast(torch.autocast_mode.autocast):
     def __init__(self, enabled : bool = True, dtype : int = 0, cache_enabled : bool = True):
         if torch._jit_internal.is_scripting():
             self._enabled = enabled
-        elif enabled and not torch.cuda.is_available():
-            warnings.warn("torch.cuda.amp.autocast only affects CUDA ops, but CUDA is not available.  Disabling.")
-            self._enabled = False
-        else:
-            self._enabled = enabled
+            return
+        super().__init__("cuda", enabled=enabled, dtype=dtype, cache_enabled=cache_enabled)
 
     def __enter__(self):
         if torch._jit_internal.is_scripting():

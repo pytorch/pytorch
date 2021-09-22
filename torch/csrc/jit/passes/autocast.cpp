@@ -8,6 +8,7 @@
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/quantization/helper.h>
+#include <torch/csrc/jit/passes/cuda_graph_fuser.h>
 
 #include <stack>
 #include <unordered_set>
@@ -16,6 +17,10 @@ namespace torch {
 namespace jit {
 
 namespace {
+
+// TODO: Turn on autocast by default. default turned off to avoid tests failures
+// as we prototype the support
+bool autocast_enabled = false;
 
 struct AutocastScope {
   Value* instance = nullptr;
@@ -340,9 +345,21 @@ void handleBlock(Block* block, bool initial_state) {
 
 } // namespace
 
+bool setAutocastMode(bool value) {
+  auto old_value = autocast_enabled;
+  autocast_enabled = value;
+  return old_value;
+}
+
+bool autocastEnabled() {
+  return autocast_enabled;
+}
+
 void Autocast(const std::shared_ptr<Graph>& graph) {
   GRAPH_DUMP("\nBefore Autocast: ", graph);
-  handleBlock(graph->block(), at::autocast::is_enabled());
+  if (autocastEnabled()) {
+    handleBlock(graph->block(), at::autocast::is_enabled());
+  }
   GRAPH_DUMP("\nAfter Autocast: ", graph);
 }
 

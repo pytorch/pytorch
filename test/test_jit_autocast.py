@@ -19,9 +19,11 @@ class TestAutocast(JitTestCase):
         self.b_fp32 = torch.rand((2, 2), dtype=torch.float32, device='cuda')
         self.c_fp32 = torch.rand((2, 2), dtype=torch.float32, device='cuda')
         self.d_fp32 = torch.rand((2, 2), dtype=torch.float32, device='cuda')
+        self.old_value = torch._C._jit_set_autocast_mode(True)
         super().setUp()
 
     def tearDown(self):
+        torch._C._jit_set_autocast_mode(self.old_value)
         super().tearDown()
 
     @unittest.skipIf(not TEST_CUDA, "No cuda")
