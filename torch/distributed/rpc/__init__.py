@@ -1,3 +1,4 @@
+from datetime import timedelta
 import logging
 import threading
 import warnings
@@ -175,6 +176,9 @@ if is_available():
             rpc_backend_options.init_method, rank=rank, world_size=world_size
         )
         store, _, _ = next(rendezvous_iterator)
+
+        # Use same timeout as RPC.
+        store.set_timeout(timedelta(seconds=rpc_backend_options.rpc_timeout))
 
         # Use a PrefixStore to distinguish multiple invocations.
         with _init_counter_lock:
