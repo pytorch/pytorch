@@ -4827,8 +4827,8 @@ class TestLinalg(TestCase):
                 B = B.expand(b, n, k)
             yield A, B, left, not tr_a, uni
 
-    def _test_linalg_solve_triangular(self, A, B, left, upper, uni):
-        X = torch.linalg.solve_triangular(A, B, left=left, upper=upper, unitriangular=uni)
+    def _test_linalg_solve_triangular(self, A, B, upper, left, uni):
+        X = torch.linalg.solve_triangular(A, B, upper=upper, left=left, unitriangular=uni)
         if left:
             self.assertEqual(A @ X, B)
         else:
@@ -4837,7 +4837,7 @@ class TestLinalg(TestCase):
         # B may be expanded
         if not B.is_contiguous() and not B.transpose(-2, -1).is_contiguous():
             out = B.clone()
-        torch.linalg.solve_triangular(A, B, left=left, upper=upper, unitriangular=uni, out=out)
+        torch.linalg.solve_triangular(A, B, upper=upper, left=left, unitriangular=uni, out=out)
         self.assertEqual(X, out)
 
     @dtypes(*floating_and_complex_types())
@@ -4852,7 +4852,7 @@ class TestLinalg(TestCase):
         gen_inputs = self._gen_shape_inputs_linalg_triangular_solve
         for b, n, k in product(bs, ns, ks):
             for A, B, left, upper, uni in gen_inputs((b, n, k), dtype, device):
-                self._test_linalg_solve_triangular(A, B, left, upper, uni)
+                self._test_linalg_solve_triangular(A, B, upper, left, uni)
 
     @onlyCUDA
     @skipCUDAIfNoMagma  # Magma needed for the PLU decomposition
@@ -4868,7 +4868,7 @@ class TestLinalg(TestCase):
         gen_inputs = self._gen_shape_inputs_linalg_triangular_solve
         for shape in (magma, iterative_cublas):
             for A, B, left, upper, uni in gen_inputs(shape, dtype, device, well_conditioned=True):
-                self._test_linalg_solve_triangular(A, B, left, upper, uni)
+                self._test_linalg_solve_triangular(A, B, upper, left, uni)
 
     @dtypes(*floating_and_complex_types())
     @precisionOverride({torch.float32: 1e-2, torch.complex64: 1e-2,
@@ -4896,7 +4896,7 @@ class TestLinalg(TestCase):
                 if not left:
                     B.transpose_(-2, -1)
 
-                X = torch.linalg.solve_triangular(A, B, left=left, upper=upper, unitriangular=uni)
+                X = torch.linalg.solve_triangular(A, B, upper=upper, left=left, unitriangular=uni)
                 if left:
                     B_other = A @ X
                 else:
