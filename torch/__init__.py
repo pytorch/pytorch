@@ -106,8 +106,7 @@ if sys.platform == 'win32':
     try:
         ctypes.CDLL('vcruntime140.dll')
         ctypes.CDLL('msvcp140.dll')
-        if cuda_version not in ('9.2', '10.0'):
-            ctypes.CDLL('vcruntime140_1.dll')
+        ctypes.CDLL('vcruntime140_1.dll')
     except OSError:
         print('''Microsoft Visual C++ Redistributable is not installed, this may lead to the DLL load failure.
                  It can be downloaded at https://aka.ms/vs/16/release/vc_redist.x64.exe''')
@@ -624,8 +623,14 @@ if TYPE_CHECKING:
     # PR #43339 for details.
     from torch._C._VariableFunctions import *  # type: ignore[misc] # noqa: F403
 
+# Ops not to be exposed in `torch` namespace,
+# mostly helper ops.
+PRIVATE_OPS = (
+    'unique_dim',
+)
+
 for name in dir(_C._VariableFunctions):
-    if name.startswith('__'):
+    if name.startswith('__') or name in PRIVATE_OPS:
         continue
     globals()[name] = getattr(_C._VariableFunctions, name)
     __all__.append(name)
