@@ -363,7 +363,7 @@ def maybe_insert_input_observer_for_arg_or_kwarg(
         if weight_needs_obs:
             obs_type = "w"
         elif bias_needs_obs:
-            obs_type = "b"
+            obs_type = "bias"
         arg_dtype = node_name_to_target_dtype[arg.name]
         node_dtype = node_name_to_target_dtype[node.name]
         dtype_changes_and_second_dtype_not_float = (
