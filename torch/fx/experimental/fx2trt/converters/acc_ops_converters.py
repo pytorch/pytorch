@@ -1494,7 +1494,7 @@ def acc_ops_quantize_per_channel(network, target, args, kwargs, name):
     q_per_channel_scales = qparams["scale"]
     q_per_channel_zero_points = qparams["zero_point"]
     q_per_channel_axis = qparams["axis"]
-    dtype = qparams["dtype"]
+    dtype = acc_utils.get_field_from_acc_out_ty(kwargs["acc_out_ty"], "dtype")
     if dtype not in (torch.quint8, torch.qint8, torch.qint32):
         raise RuntimeError("Only support (torch.quint8, torch.qint8, torch.qint32) "
                            f"quantized type in quantize_per_tensor, get {dtype}.")
