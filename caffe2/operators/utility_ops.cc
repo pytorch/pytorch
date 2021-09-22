@@ -1,6 +1,7 @@
 #include "caffe2/operators/utility_ops.h"
 #include <cmath>
 #include <iostream>
+#include "caffe2/core/types.h"
 #include "caffe2/utils/eigen_utils.h"
 
 namespace caffe2 {
@@ -34,9 +35,11 @@ OpSchema::Cost CostInferenceForWeightedSum(
   const auto& nElem = nElemFromDim(X0);
   const auto& nInputs = in.size();
   c.flops = (nInputs - 1) * nElem;
-  c.bytes_read = (nInputs / 2) * (nElem + 1) * sizeof(X0.data_type());
-  c.bytes_written = nElem * sizeof(X0.data_type());
-  c.params_bytes = (nInputs / 2) * sizeof(X0.data_type());
+  auto const& X0_element_size_byte =
+      DataTypeToTypeMeta(X0.data_type()).itemsize();
+  c.bytes_read = (nInputs / 2) * (nElem + 1) * X0_element_size_byte;
+  c.bytes_written = nElem * X0_element_size_byte;
+  c.params_bytes = (nInputs / 2) * X0_element_size_byte;
   return c;
 }
 
@@ -48,9 +51,7 @@ REGISTER_CPU_OPERATOR(ResizeLike, ResizeLikeOp<CPUContext>);
 REGISTER_CPU_OPERATOR(SumInt, SumOp<CPUContext>);
 REGISTER_CPU_OPERATOR(WeightedSum, WeightedSumOp<CPUContext>);
 REGISTER_CPU_OPERATOR(WeightedSumGradient, WeightedSumGradientOp<CPUContext>);
-REGISTER_CPU_OPERATOR(
-    ScatterWeightedSum,
-    ScatterWeightedSumOp<CPUContext>);
+REGISTER_CPU_OPERATOR(ScatterWeightedSum, ScatterWeightedSumOp<CPUContext>);
 REGISTER_CPU_OPERATOR(ScatterAssign, ScatterAssignOp<CPUContext>);
 REGISTER_CPU_OPERATOR(Scatter, ScatterOp<CPUContext>);
 

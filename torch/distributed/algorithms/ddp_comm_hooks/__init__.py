@@ -5,6 +5,7 @@ import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel
 
 from . import (
+    debugging_hooks as debugging,
     default_hooks as default,
     powerSGD_hook as powerSGD,
     quantization_hooks as quantization,
@@ -77,6 +78,9 @@ class DDPCommHookType(Enum):
         _powerSGD_comm_hook_wrapper,
         comm_hook=powerSGD.batched_powerSGD_hook,
         matrix_approximation_rank=2,
+    )
+    NOOP = partial(
+        _ddp_comm_hook_wrapper, comm_hook=debugging.noop_hook,
     )
 
 

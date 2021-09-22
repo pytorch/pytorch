@@ -46,6 +46,8 @@ _global_is_full_backward_hook: Optional[bool] = None
 _global_forward_pre_hooks: Dict[int, Callable] = OrderedDict()
 _global_forward_hooks: Dict[int, Callable] = OrderedDict()
 
+_EXTRA_STATE_KEY_SUFFIX = '_extra_state'
+
 
 def register_module_forward_pre_hook(hook: Callable[..., None]) -> RemovableHandle:
     r"""Registers a forward pre-hook common to all modules.
@@ -527,6 +529,41 @@ class Module:
             raise AttributeError("`" + buffer_name + "` is not a buffer")
 
         return buffer
+
+    def get_extra_state(self) -> Any:
+        """
+        Returns any extra state to include in the module's state_dict.
+        Implement this and a corresponding :func:`set_extra_state` for your module
+        if you need to store extra state. This function is called when building the
+        module's `state_dict()`.
+
+        Note that extra state should be pickleable to ensure working serialization
+        of the state_dict. We only provide provide backwards compatibility guarantees
+        for serializing Tensors; other objects may break backwards compatibility if
+        their serialized pickled form changes.
+
+        Returns:
+            object: Any extra state to store in the module's state_dict
+        """
+        raise RuntimeError(
+            "Reached a code path in Module.get_extra_state() that should never be called. "
+            "Please file an issue at https://github.com/pytorch/pytorch/issues/new?template=bug-report.md "
+            "to report this bug.")
+
+    def set_extra_state(self, state: Any):
+        """
+        This function is called from :func:`load_state_dict` to handle any extra state
+        found within the `state_dict`. Implement this function and a corresponding
+        :func:`get_extra_state` for your module if you need to store extra state within its
+        `state_dict`.
+
+        Args:
+            state (dict): Extra state from the `state_dict`
+        """
+        raise RuntimeError(
+            "Reached a code path in Module.set_extra_state() that should never be called. "
+            "Please file an issue at https://github.com/pytorch/pytorch/issues/new?template=bug-report.md "
+            "to report this bug.")
 
     def _apply(self, fn):
         for module in self.children():
@@ -1228,6 +1265,9 @@ class Module:
         for name, buf in self._buffers.items():
             if buf is not None and name not in self._non_persistent_buffers_set:
                 destination[prefix + name] = buf if keep_vars else buf.detach()
+        extra_state_key = prefix + _EXTRA_STATE_KEY_SUFFIX
+        if getattr(self.__class__, "get_extra_state", Module.get_extra_state) is not Module.get_extra_state:
+            destination[extra_state_key] = self.get_extra_state()
 
     # The user can pass an optional arbitrary mappable object to `state_dict`, in which case `state_dict` returns
     # back that same object. But if they pass nothing, an `OrederedDict` is created and returned.
@@ -1365,9 +1405,18 @@ class Module:
             elif strict:
                 missing_keys.append(key)
 
+        extra_state_key = prefix + _EXTRA_STATE_KEY_SUFFIX
+        if getattr(self.__class__, "set_extra_state", Module.set_extra_state) is not Module.set_extra_state:
+            if extra_state_key in state_dict:
+                self.set_extra_state(state_dict[extra_state_key])
+            elif strict:
+                missing_keys.append(extra_state_key)
+        elif strict and (extra_state_key in state_dict):
+            unexpected_keys.append(extra_state_key)
+
         if strict:
             for key in state_dict.keys():
-                if key.startswith(prefix):
+                if key.startswith(prefix) and key != extra_state_key:
                     input_name = key[len(prefix):]
                     input_name = input_name.split('.', 1)[0]  # get the name of param/buffer/child
                     if input_name not in self._modules and input_name not in local_state:
