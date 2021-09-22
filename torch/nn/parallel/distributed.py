@@ -1,4 +1,7 @@
 import copy
+from dataclasses import dataclass
+from typing import Callable, Any
+from enum import Enum, auto
 import inspect
 import itertools
 import logging
@@ -124,6 +127,16 @@ def _dump_DDP_relevant_env_vars():
         formatted_output += "env:%s=%s\n" % (var, value)
     print(formatted_output)
 
+
+class _BufferCommHookLocation(Enum):
+    PRE_FORWARD = auto()
+    POST_FORWARD = auto()
+
+@dataclass
+class _BufferCommHook:
+    buffer_comm_hook: Callable
+    buffer_comm_hook_state: Any
+    buffer_comm_hook_location: _BufferCommHookLocation
 
 # Add a DDPSink to run various functions when backwards starts, such as
 # queueing call back of out-most backward/graph task,
@@ -742,12 +755,16 @@ class DistributedDataParallel(Module, Joinable):
         named_module_buffers = [
             (buffer, buffer_name)
             for buffer_name, buffer in self.module.named_buffers()
+            if buffer_name not in self.parameters_to_ignore
         ]
         self.modules_buffers = [
             buffer
             for (buffer, buffer_name) in named_module_buffers
-            if buffer_name not in self.parameters_to_ignore
         ]
+        # Dict[str, tensor] representing module buffers not ignored by DDP.
+        self.named_module_buffers = {
+            buffer_name: buffer for (buffer, buffer_name) in named_module_buffers
+        }
 
     def _build_param_to_name_mapping(self, parameters):
         param_to_param_index = {parameters[i]: i for i in range(len(parameters))}
@@ -866,7 +883,14 @@ class DistributedDataParallel(Module, Joinable):
                 logging.info("Reducer buckets have been rebuilt in this iteration.")
                 self._has_rebuilt_buckets = True
 
-            if self.require_forward_param_sync:
+            # sync params according to location (before/after forward) user
+            # specified as part of hook, if hook was specified.
+            buffer_hook_registered = hasattr(self, 'buffer_hook')
+            if self.require_forward_param_sync and (
+                not buffer_hook_registered
+                or self.buffer_hook.buffer_comm_hook_location
+                == _BufferCommHookLocation.PRE_FORWARD
+            ):
                 self._sync_params()
 
             if self._join_config.enable:
@@ -878,6 +902,16 @@ class DistributedDataParallel(Module, Joinable):
                 output = self.module(*inputs[0], **kwargs[0])
             else:
                 output = self.module(*inputs, **kwargs)
+
+            # sync params according to location (before/after forward) user
+            # specified as part of hook, if hook was specified.
+            if (
+                self.require_forward_param_sync
+                and buffer_hook_registered
+                and self.buffer_hook.buffer_comm_hook_location
+                == _BufferCommHookLocation.POST_FORWARD
+            ):
+                self._sync_params()
 
             if torch.is_grad_enabled() and self.require_backward_grad_sync:
                 self.require_forward_param_sync = True
@@ -1024,9 +1058,7 @@ class DistributedDataParallel(Module, Joinable):
     def _check_and_sync_module_buffers(self):
         if self.will_sync_module_buffers():
             authoritative_rank = self._find_common_rank(self._distributed_rank, False)
-            self._distributed_broadcast_coalesced(
-                self.modules_buffers, self.broadcast_bucket_size, authoritative_rank
-            )
+            self._sync_module_buffers(authoritative_rank)
 
     # When running in join model, agrees upon a common rank and broadcast model
     # parameters to all other ranks.
@@ -1213,6 +1245,20 @@ class DistributedDataParallel(Module, Joinable):
     def join_process_group(self):
         return self.process_group
 
+    def _register_buffer_comm_hook(
+        self,
+        state,
+        hook: callable,
+        comm_hook_location=_BufferCommHookLocation.PRE_FORWARD
+    ):
+
+        assert callable(hook)
+        self.buffer_hook = _BufferCommHook(
+            buffer_comm_hook=hook,
+            buffer_comm_hook_state=state,
+            buffer_comm_hook_location=comm_hook_location
+        )
+
     def register_comm_hook(self, state: object, hook: callable):
         r"""
         Registers a communication hook which is an enhancement that provides a
@@ -1368,11 +1414,35 @@ class DistributedDataParallel(Module, Joinable):
                 # Update self.modules_buffers incase any buffers were
                 # reassigned.
                 self._assign_modules_buffers()
-                self._distributed_broadcast_coalesced(
-                    self.modules_buffers,
-                    self.broadcast_bucket_size,
-                    authoritative_rank,
-                )
+                self._sync_module_buffers(authoritative_rank)
+
+    def _sync_module_buffers(self, authoritative_rank):
+        if not hasattr(self, 'buffer_hook'):
+            self._default_broadcast_coalesced(authoritative_rank=authoritative_rank)
+        else:
+            # TODO: provide option to await in backward pass.
+            hook = self.buffer_hook.buffer_comm_hook
+            state = self.buffer_hook.buffer_comm_hook_state
+            hook(state, self.named_module_buffers)
+
+    def _default_broadcast_coalesced(
+        self, bufs=None, bucket_size=None, authoritative_rank=0
+    ):
+        """
+        Broadcasts buffers from rank 0 to rest of workers. If bufs, bucket_size
+        are None, default values self.modules_buffers and
+        self.broadcast_bucket_size are used instead.
+        """
+        if bufs is None:
+            bufs = self.modules_buffers
+        if bucket_size is None:
+            bucket_size = self.broadcast_bucket_size
+
+        self._distributed_broadcast_coalesced(
+            bufs,
+            bucket_size,
+            authoritative_rank
+        )
 
     def _passing_sync_batchnorm_handle(self, module):
         for layer in module.modules():
