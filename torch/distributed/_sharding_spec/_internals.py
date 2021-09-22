@@ -40,8 +40,8 @@ class ShardMetadata(object):
         for i in range(len(self.shard_offsets)):
             if self.shard_offsets[i] < 0:
                 raise ValueError('shard_offsets should be >=0')
-            if self.shard_lengths[i] <= 0:
-                raise ValueError('shard_lengths should be > 0')
+            if self.shard_lengths[i] < 0:
+                raise ValueError('shard_lengths should be >= 0')
 
 
 
