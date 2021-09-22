@@ -30,7 +30,7 @@ def indent_list(items: List[str]) -> str:
     return "\n".join(items)
 
 
-def filenames_from_diff(diff_path: Path):
+def filenames_from_diff(diff_path: Path) -> List[str]:
     FILENAME_RE = re.compile(r"^diff --git a\/(.*) b\/(.*)$")
     with open(diff_path) as f:
         lines = f.readlines()
@@ -80,7 +80,7 @@ def determine_for_files(changed_files: List[str], rules: List[Rule]) -> List[str
     return tests
 
 
-def nonexistent_tests(rules: List[Rule], all_tests: List[str]) -> bool:
+def nonexistent_tests(rules: List[Rule], all_tests: List[str]) -> List[str]:
     bad_tests = []
 
     rule_tests = set()
