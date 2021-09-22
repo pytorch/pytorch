@@ -259,6 +259,7 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
                   owner, returns a reference to the local value.
 
                   Args:
+                      device_map (Dict[torch.device, torch.device]): TODO(pbelevich)
                       timeout (float, optional): Timeout for ``to_here``. If
                           the call does not complete within this timeframe, an
                           exception indicating so will be raised. If this
