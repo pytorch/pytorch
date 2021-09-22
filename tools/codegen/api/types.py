@@ -22,10 +22,6 @@ ArgName = Union[str, SpecialArgName]
 class BaseCppType:
     ns: Optional[str]
     name: str
-    # This is only applicable to C++ reference types, like IntArrayRef and OptionalScalarRef.
-    # If defined, it describes a function that takes in the name of a variable of the given type,
-    # and emits code to generate a copy.
-    copy_ref_type: Optional[Callable[[str], str]] = None
 
     def __str__(self) -> str:
         if self.ns is None or self.ns == '':

@@ -269,7 +269,6 @@ class NativeFunction:
     # For now operators have at most one tag.
     tag: Optional['Tag']
 
-
     # NB: The benefit of defining a dataclass is that we automatically get
     # a constructor defined for all the fields we specify.  No need
     # to explicitly write it out.
