@@ -693,6 +693,10 @@ class TestJit(JitTestCase):
                 x.is_mkldnn,
                 x.is_quantized,
                 x.requires_grad,
+                x.T,
+                x.mT,
+                x.H,
+                x.mH
                 # x.layout TODO: layout long -> instance conversion
             )
 
@@ -747,6 +751,28 @@ class TestJit(JitTestCase):
 
         x = make_tensor((3, 4), device="cpu", dtype=torch.complex64)
         self.assertTrue(check(x))
+
+    def test_T_mT_H_mH(self):
+        def T(x):
+            return x.mT
+        def mT(x):
+            return x.mT
+        def H(x):
+            return x.H
+        def mH(x):
+            return x.mH
+
+        x = torch.rand(3, 4)
+        y = make_tensor((3, 4), device="cpu", dtype=torch.complex64)
+
+        self.checkScript(T, (x, ))
+        self.checkScript(mT, (x, ))
+        self.checkScript(H, (x, ))
+        self.checkScript(mH, (x, ))
+        self.checkScript(T, (y, ))
+        self.checkScript(mT, (y, ))
+        self.checkScript(H, (y, ))
+        self.checkScript(mH, (y, ))
 
     def test_nn_conv(self):
         class Mod(nn.Module):
