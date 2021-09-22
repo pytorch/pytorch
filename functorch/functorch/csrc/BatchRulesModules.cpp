@@ -200,6 +200,61 @@ std::tuple<Tensor,Tensor> cudnn_convolution_backward_plumbing(const Tensor & sel
   return slow_fallback<Tensor,Tensor>(op, { self, grad_output, weight, padding, stride, dilation, groups, benchmark, deterministic, allow_tf32, output_mask });
 }
 
+
+/**
+ * grid sample batch rule breaks down into 3 cases:
+ *   case 1 (input is batched, grid is not):
+ *     batch input along first dimension, unpack along first dimension 
+ *     2d:
+ *       input: N(BC)H_{in}W_{in}, grid: NH_{out}W_{out}2
+ *       output: N(BC)H_{out}W_{out}
+ *     3d:
+ *       input: N(BC)D_{in}H_{in}W_{in}, grid: ND_{out}H_{out}W_{out}3
+ *       output: N(BC)D_{out}H_{out}W_{out}
+ *   case 2 (input is not batched, grid is batched):
+ *     batch grid along second dimension, unpack along second dimension
+ *     2d:
+ *       input: NCH_{in}W_{in}, grid: N(BH_{out})W_{out}2
+ *       output: NC(BH_{out})W_{out}
+ *     3d:
+ *       input: NCD_{in}H_{in}W_{in}, grid: N(BD_{out})H_{out}W_{out}3
+ *       output: NC(BD_{out})H_{out}W_{out}
+ *   case 3 (input and grid are both batched):
+ *     batch grid and input along 0th dimension, unpack along 0th dimension
+ *     2d:
+ *       input: (BN)CH_{in}W_{in}, grid: (BN)H_{out}W_{out}2
+ *       output: (BN)CH_{out}W_{out}
+ *     3d:
+ *       input: (BN)CD_{in}H_{in}W_{in}, grid: (BN)D_{out}H_{out}W_{out}3
+ *       output: (BN)CD_{out}H_{out}W_{out}
+ */
+template<typename F, F Func, typename... ExtraArgs>
+std::tuple<Tensor,optional<int64_t>>
+grid_sample_batch_rule(const Tensor& input, optional<int64_t> input_bdim, const Tensor& grid, optional<int64_t> grid_bdim, ExtraArgs... extra_args) {
+  std::tuple<Tensor, optional<int64_t>> result;
+  if (input_bdim && !grid_bdim) {
+    auto new_input = reshape_dim_into(*input_bdim, 1, input);
+    auto out = Func(new_input, grid, std::forward<ExtraArgs>(extra_args)...);
+    out = reshape_dim_outof(1, input.sizes()[*input_bdim], out);
+    result = std::make_tuple(out, 1);
+  } else if (!input_bdim && grid_bdim) {
+    // grid of N(BH)W2 -> NC(BH)W or grid of N(BD)HBW3 -> NC(BD)HW
+    auto new_grid = reshape_dim_into(*grid_bdim, 1, grid);
+    auto out = Func(input, new_grid, std::forward<ExtraArgs>(extra_args)...);
+    out = reshape_dim_outof(2, grid.sizes()[*grid_bdim], out);
+    result = std::make_tuple(out, 2);
+  } else if (input_bdim && grid_bdim) {
+    auto new_input = reshape_dim_into(*input_bdim, 0, input);
+    auto new_grid = reshape_dim_into(*grid_bdim, 0, grid);
+    auto out = Func(new_input, new_grid, std::forward<ExtraArgs>(extra_args)...);
+    out = reshape_dim_outof(0, input.sizes()[*grid_bdim], out);
+    result = std::make_tuple(out, 0);
+  } else {
+    result = std::make_tuple(Func(input, grid, std::forward<ExtraArgs>(extra_args)...), nullopt);
+  }
+  return result;
+}
+
 // TODO: replace with targetable functionalization
 Tensor one_hot_decomposition_hack(const Tensor &self, int64_t num_classes) {
     TORCH_CHECK(self.dtype() == kLong, "one_hot is only applicable to index tensor.");
@@ -262,6 +317,26 @@ struct UpsampleBackwardBatchRuleHelper<F, Func, typelist<A, B, C, T...>> {
 
 };
 
+template <typename A, A a, typename C>
+struct GridSampleBatchRuleHelper;
+
+template <typename F, F Func, typename T1, typename T2, typename... T>
+struct GridSampleBatchRuleHelper<F, Func, typelist<T1, T2, T...>> {
+  static std::tuple<Tensor,optional<int64_t>> apply(
+      const Tensor& input, optional<int64_t> input_batch_dim,
+      const Tensor& grid, optional<int64_t> grid_batch_dim,
+      T... extra_args) {
+    return grid_sample_batch_rule<F, Func, T...>(
+        input, input_batch_dim, grid, grid_batch_dim, std::forward<T>(extra_args)...);
+  }
+};
+
+#define GRID_SAMPLE_BATCH_RULE(fn) SINGLE_ARG(\
+    GridSampleBatchRuleHelper<\
+      decltype(&ATEN_FN(fn)),\
+      &ATEN_FN(fn),\
+      c10::guts::function_traits<decltype(ATEN_FN(fn))>::parameter_types>::apply)
+
 #define UPSAMPLE_BACKWARD(op, overload) VMAP_SUPPORT(#op"."#overload, SINGLE_ARG(\
     UpsampleBackwardBatchRuleHelper<\
       decltype(&ATEN_FN2(op, overload)),\
@@ -282,6 +357,9 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   m.impl("conv2d", convNd_decomp);
   m.impl("conv3d", convNd_decomp);
 
+  VMAP_SUPPORT("grid_sampler_2d", GRID_SAMPLE_BATCH_RULE(grid_sampler));
+  VMAP_SUPPORT("grid_sampler_3d", GRID_SAMPLE_BATCH_RULE(grid_sampler));
+  VMAP_SUPPORT("cudnn_grid_sampler", GRID_SAMPLE_BATCH_RULE(cudnn_grid_sampler));
 
   UNARY_POINTWISE(constant_pad_nd);
   EXISTING_BDIM(reflection_pad1d);
