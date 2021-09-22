@@ -285,6 +285,14 @@ struct TORCH_API Tuple : c10::intrusive_ptr_target {
     elements_ = std::move(elements);
   }
 
+  void unsafeSetElement(size_t idx, const IValue& element) {
+    elements_[idx] = element;
+  }
+
+  void unsafeSetElement(size_t idx, IValue&& element) {
+    elements_[idx] = std::move(element);
+  }
+
   std::shared_ptr<TupleType> type() const;
 
   static size_t hash(const Tuple& t) {
