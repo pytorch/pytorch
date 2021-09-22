@@ -488,11 +488,14 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
                         qstate.mark_cur_op_complete(cur_module)
 
                     elif needs_io_hooks:
+                        cur_qstate = cur_module._auto_quant_state
+                        if enable_logging:
+                            logger.debug(cur_qstate)
+
                         # before hooks (TODO)
                         # forward
                         output = orig_module_call(self, *args, **kwargs)
                         # after hooks
-                        cur_qstate = cur_module._auto_quant_state
                         assert isinstance(cur_qstate, AutoQuantizationState)
                         output = cur_qstate.outputs_convert_hook(output)
                         cur_qstate.validate_is_at_last_seen_idx()

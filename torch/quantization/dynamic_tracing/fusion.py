@@ -78,7 +78,4 @@ def get_module_fusion_fqns(
                     if cur_fqns not in results:
                         results.append(cur_fqns)
 
-    for v in results:
-        print(v)
-
     return results

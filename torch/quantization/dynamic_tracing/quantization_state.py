@@ -26,6 +26,7 @@ from .utils import (
     get_packable_nontensor_arg_idxs,
     get_packable_arg_idxs,
     get_weight_arg_idx,
+    iterate_and_apply,
 )
 
 # TODO(future PR): maybe better name
@@ -363,20 +364,19 @@ class AutoQuantizationState(torch.nn.Module):
 
         else:
             seen_op = self._get_cur_seen_op()
-            for input_arg_idx, input_arg in enumerate(seen_op.input_tensor_infos):
-                if input_arg is not None:
-                    tensor_id = input_arg.id
-                    # TODO: do not run this twice on input and output
-                    if str(tensor_id) in self.tensor_id_to_observer:
-                        observer = self.tensor_id_to_observer[str(tensor_id)]
-                        # TODO: return this to the caller
 
-                        # special case torch.cat because its first argument
-                        # is a list of tensors
-                        if seen_op.type == torch.cat:
-                            observer(args[0][input_arg_idx])
-                        else:
-                            observer(args[input_arg_idx])
+            def _maybe_observe(arg, tensor_info):
+                tensor_id = tensor_info.id
+                # TODO: do not run this twice on input and output
+                if str(tensor_id) in self.tensor_id_to_observer:
+                    observer = self.tensor_id_to_observer[str(tensor_id)]
+                    return observer(arg)
+                else:
+                    return arg
+
+            args = iterate_and_apply(
+                args, seen_op.input_tensor_infos, _maybe_observe)
+
             return args, kwargs
 
     def op_prepare_after_hook(

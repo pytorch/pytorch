@@ -37,6 +37,7 @@ functions_supported_by_quantization = set([
     torch.cat,
     # adding for MobileNetV2, will need a better place for these
     torch.nn.functional.adaptive_avg_pool2d,
+    # F.hardsigmoid,
     torch.flatten,
     toq.add,
     toq.mul,
@@ -44,6 +45,7 @@ functions_supported_by_quantization = set([
     F.conv2d,
     toq.conv2d,
     F.dropout,
+    torch.relu,
 ])
 
 module_types_supported_by_quantization = set([
@@ -65,6 +67,18 @@ module_types_supported_by_quantization = set([
     nnq.LeakyReLU,
     nn.LayerNorm,
     nnq.LayerNorm,
+    nn.Hardswish,
+    nnq.Hardswish,
+    nn.GroupNorm,
+    nnq.GroupNorm,
+    nn.InstanceNorm1d,
+    nnq.InstanceNorm1d,
+    nn.InstanceNorm2d,
+    nnq.InstanceNorm2d,
+    nn.InstanceNorm3d,
+    nnq.InstanceNorm3d,
+    nn.ConvTranspose2d,
+    nnq.ConvTranspose2d,
 ])
 # TODO verify that if nn in above, nnq also is
 
@@ -87,6 +101,13 @@ q_mod_to_float_mod_mapping = {
     nnq.Linear: nn.Linear,
     nnq.LeakyReLU: nn.LeakyReLU,
     nnq.LayerNorm: nn.LayerNorm,
+    nnq.Hardswish: nn.Hardswish,
+    nnq.GroupNorm: nn.GroupNorm,
+    nnq.InstanceNorm1d: nn.InstanceNorm1d,
+    nnq.InstanceNorm2d: nn.InstanceNorm2d,
+    nnq.InstanceNorm3d: nn.InstanceNorm3d,
+    nnq.ConvTranspose2d: nn.ConvTranspose2d,
+    nnq.BatchNorm2d: nn.BatchNorm2d,
 }
 
 add_and_mul_ops = set([

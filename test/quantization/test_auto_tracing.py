@@ -66,8 +66,10 @@ class AutoTracingTestCase(QuantizationTestCase):
             # print(m_copy_p)
             m_copy_q = convert_fx(m_copy_p)
             print(m_copy_q)
-            print(m_copy_q.graph)
+            # print(m_copy_q.graph)
             out_q_fx = m_copy_q(*example_args)
+            # print(out_q)
+            # print(out_q_fx)
             self.assertTrue(_allclose(out_p, out_m_copy_p))
             # print(out_q)
             # print(out_q_fx)
@@ -213,9 +215,8 @@ class TestAutoTracing(AutoTracingTestCase):
         qconfig = torch.quantization.default_qconfig
         self._test_auto_tracing(m, qconfig, (torch.randn(1, 1, 2, 2),))
 
-    @unittest.skip("TODO(next) enable this")
     @skipIfNoFBGEMM
-    def test_conv_qat(self):
+    def test_conv_mod_qat(self):
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -227,7 +228,56 @@ class TestAutoTracing(AutoTracingTestCase):
 
         m = M().eval()
         qconfig = torch.quantization.get_default_qat_qconfig('fbgemm')
+        self._test_auto_tracing(
+            copy.deepcopy(m), qconfig, (torch.randn(1, 1, 2, 2),))
+
+        # test backprop does not crash
+        m.qconfig = qconfig
+        inputs = torch.randn(1, 1, 1, 1)
+        inputs.requires_grad = True
+        mp = _quantize_dynamic_tracing.prepare(m, (inputs,))
+        output = mp(inputs)
+        labels = torch.randn(1, 1, 1, 1)
+        loss = (output - labels).sum()
+        loss.backward()
+        optim = torch.optim.SGD(mp.parameters(), lr=0.01)
+        optim.step()
+
+    @skipIfNoFBGEMM
+    def test_conv_functional_qat(self):
+
+        class M(torch.nn.Module):
+            def __init__(self, weight2d, bias2d):
+                super().__init__()
+                self.weight2d = torch.nn.Parameter(weight2d)
+                self.bias2d = torch.nn.Parameter(bias2d)
+                self.stride2d = (1, 1)
+                self.padding2d = (0, 0)
+                self.dilation2d = (1, 1)
+                self.groups = 1
+
+            def forward(self, x):
+                x = F.conv2d(
+                    x, self.weight2d, self.bias2d, self.stride2d, self.padding2d,
+                    self.dilation2d, self.groups)
+                return x
+
+        m = M(torch.randn(1, 1, 1, 1), torch.randn(1)).eval()
+        qconfig = torch.quantization.get_default_qat_qconfig('fbgemm')
         self._test_auto_tracing(m, qconfig, (torch.randn(1, 1, 2, 2),))
+
+        # test backprop does not crash
+        m.qconfig = qconfig
+        inputs = torch.randn(1, 1, 1, 1)
+        inputs.requires_grad = True
+        mp = _quantize_dynamic_tracing.prepare(m, (inputs,))
+        output = mp(inputs)
+        labels = torch.randn(1, 1, 1, 1)
+        loss = (output - labels).sum()
+        print('LOSSS\n\n\n', loss, type(loss), output, labels)
+        loss.backward()
+        optim = torch.optim.SGD(mp.parameters(), lr=0.01)
+        optim.step()
 
     @skipIfNoFBGEMM
     def test_dropout_conv(self):
@@ -282,6 +332,33 @@ class TestAutoTracing(AutoTracingTestCase):
                 m, qconfig, (torch.zeros(1, 1, 1, 1, dtype=dtype),),
                 # FX graph mode quant does not support this yet
                 do_fx_comparison=False)
+
+    @unittest.skip('TODO handle fp32 inplace and fix this test')
+    @skipIfNoFBGEMM
+    def test_conv_unsupported_inplace_conv(self):
+        """
+        Verifies that having an unquantizeable fp32 op which is inplace
+        is handled well
+
+        Note: hardsigmoid is actually quantizeable, just not in the mapping
+        yet.  TODO improve everyting, both this test and the logic in
+        the quantization code..
+        """
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(1, 1, 1)
+                self.conv2 = torch.nn.Conv2d(1, 1, 1)
+
+            def forward(self, x):
+                x = self.conv(x)
+                x = F.hardsigmoid(x, inplace=True)
+                x = self.conv2(x)
+                return x
+
+        m = M().eval()
+        qconfig = torch.quantization.default_qconfig
+        self._test_auto_tracing(m, qconfig, (torch.randn(1, 1, 2, 2),))
 
     # TODO: fix this test (iteration over the (1, 1) arg for arg_quant_infos)
     @unittest.skip('foo')
@@ -358,6 +435,27 @@ class TestAutoTracing(AutoTracingTestCase):
 
         qconfig = torch.quantization.default_qconfig
         self._test_auto_tracing(model_fp32, qconfig, (torch.randn(1, 1, 2, 2),))
+
+    @skipIfNoFBGEMM
+    def test_linear_torch_relu(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.u1 = nn.Linear(1, 1)
+                self.v1 = nn.Linear(1, 1)
+                self.u2 = nn.Linear(1, 1)
+                self.v2 = nn.Linear(1, 1)
+                self.w = nn.Linear(1, 1)
+
+            def forward(self, x):
+                x = self.w(x)
+                x = x + torch.relu(self.v1(torch.relu(self.u1(x))))
+                return x + torch.relu(self.v2(torch.relu(self.u2(x))))
+
+        model_fp32 = M().eval()
+
+        qconfig = torch.quantization.default_qconfig
+        self._test_auto_tracing(model_fp32, qconfig, (torch.randn(1, 1, 1, 1),))
 
     @skipIfNoFBGEMM
     def test_conv_functional(self):

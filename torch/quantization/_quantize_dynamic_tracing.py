@@ -49,13 +49,20 @@ def prepare(model, example_inputs, inplace=False, allow_list=None,
 
 
 def convert(
-        module, mapping=None, inplace=False, remove_qconfig=True,
+        module, mapping=None, inplace=False, remove_qconfig=False,
         convert_custom_config_dict=None):
     r"""A wrapper around `torch.quantization.convert` which converts the model
     to a quantized form using dynamic tracing.
 
     TODO(future PR): better docblock
     """
+    # TODO: currently remove_qconfig deletes observers, two things need
+    # to be fixed to enable this:
+    # 1. scale/zp of non-module observers need to be saved before
+    #    observers are deleted
+    # 2. current observer deletion logic does not know about AutoQuantState,
+    #    this needs to update to work the same way for modules and non-modules
+    assert remove_qconfig is False
     model = torch.quantization.convert(
         module, mapping, inplace, remove_qconfig, convert_custom_config_dict)
     assert not inplace
