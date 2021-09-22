@@ -5575,6 +5575,25 @@ def sample_inputs_nll_loss(op_info, device, dtype, requires_grad, **kwargs):
 
     return sample_inputs
 
+def sample_inputs_pairwise_distance(op_info, device, dtype, requires_grad, **kwargs):
+    make = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    shape = (3,)
+    batched_shape = (2, *shape)
+    shapes_and_kwargs = [
+        (shape, None),
+        (batched_shape, None),
+        (shape, dict(keepdim=True)),
+        (batched_shape, dict(keepdim=True)),
+        (shape, dict(p=5.0)),
+        (shape, dict(p=-1.0)),
+        (shape, dict(eps=1.0)),
+    ]
+
+    return [
+        SampleInput(make(shape), args=(make(shape),), kwargs=kwargs) for shape, kwargs in shapes_and_kwargs
+    ]
+
 foreach_unary_op_db: List[OpInfo] = [
     ForeachFuncInfo('exp'),
     ForeachFuncInfo('acos'),
@@ -5977,6 +5996,9 @@ def generate_std_var_kwargs(t: torch.Tensor, **kwargs):
 
         numel = torch.tensor(t.shape)[kwargs.get('dim')].prod()
         yield ((), {'correction': numel // 2})
+
+def ref_pairwise_distance(input1, input2):
+    pass
 
 
 # Operator database (sorted alphabetically)
@@ -9950,6 +9972,23 @@ op_db: List[OpInfo] = [
         sample_inputs_func=sample_inputs_repeat_interleave,
         supports_out=False,
         supports_forward_ad=True,
+        skips=(
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestJit",
+                "test_variant_consistency_jit",
+                dtypes=(torch.float32, torch.complex64),
+            ),
+        ),
+    ),
+    BinaryUfuncInfo(
+        "nn.functional.pairwise_distance",
+        ref=lambda a, b, p=2.0, eps=1e-6, keepdim=False: (
+                np.sum(np.abs(a - b + eps) ** p, axis=-1, keepdims=keepdim) ** (1 / p)
+        ),
+        sample_inputs_func=sample_inputs_pairwise_distance,
+        dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16),
+        supports_out=False,
         skips=(
             DecorateInfo(
                 unittest.skip("Skipped!"),
