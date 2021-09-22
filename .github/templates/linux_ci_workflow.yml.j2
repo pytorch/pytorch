@@ -299,7 +299,7 @@ jobs:
           if [[ -z $PR_NUMBER ]]; then
             wget -O pr.diff "https://patch-diff.githubusercontent.com/raw/pytorch/pytorch/pull/$PR_NUMBER.diff"
             echo "GOT PR"
-            cp pr.diff ${GITHUB_WORKSPACE}
+            cp pr.diff "${GITHUB_WORKSPACE}"
           else
             echo not on PR
           fi
