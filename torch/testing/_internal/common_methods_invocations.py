@@ -9981,10 +9981,10 @@ op_db: List[OpInfo] = [
             ),
         ),
     ),
-    BinaryUfuncInfo(
+    OpInfo(
         "nn.functional.pairwise_distance",
         ref=lambda a, b, p=2.0, eps=1e-6, keepdim=False: (
-                np.sum(np.abs(a - b + eps) ** p, axis=-1, keepdims=keepdim) ** (1 / p)
+            np.sum(np.abs(a - b + eps) ** p, axis=-1, keepdims=keepdim) ** (1 / p)
         ),
         sample_inputs_func=sample_inputs_pairwise_distance,
         dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16),
