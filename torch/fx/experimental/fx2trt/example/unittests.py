@@ -1,5 +1,5 @@
 import torch
-from torch.quantization.quantize_fx import (
+from torch.ao.quantization.quantize_fx import (
     prepare_fx,
     convert_fx,
     get_tensorrt_backend_config_dict

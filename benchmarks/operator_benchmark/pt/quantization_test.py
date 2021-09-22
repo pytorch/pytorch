@@ -59,11 +59,11 @@ class QuantizePerTensorBenchmark(op_bench.TorchBenchmarkBase):
     def forward(self, input):
         return self.op(input)
 
-'''
+
 op_bench.generate_pt_test(
     quantize_per_tensor_configs_short + quantize_per_tensor_configs_long,
     QuantizePerTensorBenchmark)
-'''
+
 # === Per Channel quantization ===
 
 quantize_per_channel_configs_short = op_bench.config_list(
