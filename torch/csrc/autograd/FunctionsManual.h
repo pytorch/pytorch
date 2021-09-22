@@ -168,15 +168,15 @@ Tensor linalg_solve_triangular_forward_AD(
     const Tensor& B_t,
     const Tensor& A,
     const Tensor& X,
-    const bool left,
     const bool upper,
+    const bool left,
     const bool unitriangular);
 std::tuple<Tensor, Tensor> linalg_solve_triangular_backward(
     const Tensor& grad,
     const Tensor& A,
     const Tensor& X,
-    const bool left,
     const bool upper,
+    const bool left,
     const bool unitriangular,
     std::array<bool, 2> output_mask);
 std::tuple<Tensor, Tensor, Tensor> _trilinear_backward(const Tensor& grad_out, const Tensor& i1, const Tensor& i2, const Tensor& i3,

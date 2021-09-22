@@ -9638,7 +9638,9 @@ Supports input of float, double, cfloat and cdouble data types.
 
     .. code:: python
 
-        X = torch.linalg.solve_triangular(A, B)
+        X = torch.linalg.solve_triangular(A, B, upper=upper)
+
+    where ``upper`` should be set as appropriate.
 
 Args:
     b (Tensor): multiple right-hand sides of size :math:`(*, m, k)` where

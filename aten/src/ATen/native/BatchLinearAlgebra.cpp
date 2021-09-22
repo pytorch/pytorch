@@ -1606,7 +1606,8 @@ static std::tuple<Tensor&, Tensor&> triangular_solve_out_info(
     "torch.linalg.solve_triangular has its arguments reversed and does not return a copy of one of the inputs.\n",
     "X = torch.triangular_solve(B, A).solution\n",
     "should be replaced with\n",
-    "X = torch.linalg.solve_triangular(A, B)");
+    "X = torch.linalg.solve_triangular(A, B, upper=upper)\n",
+    "where upper should be set as appropriate.");
   // These internal asserts make explicit the assumptions in the implementation
   // Error check with the actual error messages are done on the higher level of
   // the hierarchy of calls
@@ -3863,8 +3864,8 @@ Solves the matrix equation AX = B for A triangular.
 Tensor& linalg_solve_triangular_out(
     const Tensor& A,
     const Tensor& B,
-    bool left,
     bool upper,
+    bool left,
     bool unitriangular,
     Tensor& out) {
   checkInputsSolver(A, B, out, left, "linalg.solve_triangular");
@@ -4005,11 +4006,11 @@ Tensor& linalg_solve_triangular_out(
 Tensor linalg_solve_triangular(
     const Tensor& A,
     const Tensor& B,
-    bool left,
     bool upper,
+    bool left,
     bool unitriangular) {
   Tensor out = at::empty({0}, A.options());
-  linalg_solve_triangular_out(A, B, left, upper, unitriangular, out);
+  linalg_solve_triangular_out(A, B, upper, left, unitriangular, out);
   return out;
 }
 
