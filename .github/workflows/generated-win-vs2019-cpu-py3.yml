@@ -26,7 +26,7 @@ env:
   VS_VERSION: "16.8.6"
   VC_YEAR: "2019"
   ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
-  no_proxy: localhost,127.0.0.1,amazonaws.com,s3.amazonaws.com,169.254.169.254,169.254.170.2,/var/run/docker.sock
+  no_proxy: localhost,127.0.0.1,github.com,amazonaws.com,s3.amazonaws.com,169.254.169.254,169.254.170.2,/var/run/docker.sock
 
 concurrency:
   group: win-vs2019-cpu-py3-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
@@ -35,7 +35,7 @@ concurrency:
 jobs:
   ciflow_should_run:
     runs-on: ubuntu-18.04
-    if: ${{ (github.repository_owner == 'pytorch') && ((github.event_name != 'pull_request') || (github.event.action !='unassigned') || (contains(github.event.pull_request.labels.*.name, 'ciflow/all') || contains(github.event.pull_request.labels.*.name, 'ciflow/cpu') || contains(github.event.pull_request.labels.*.name, 'ciflow/default') || contains(github.event.pull_request.labels.*.name, 'ciflow/win'))) }}
+    if: ${{ (github.repository_owner == 'pytorch') && ((github.event_name != 'pull_request') || (github.event.assignee.login != 'pytorchbot' ) || (github.event.action !='unassigned') || (contains(github.event.pull_request.labels.*.name, 'ciflow/all') || contains(github.event.pull_request.labels.*.name, 'ciflow/cpu') || contains(github.event.pull_request.labels.*.name, 'ciflow/default') || contains(github.event.pull_request.labels.*.name, 'ciflow/win'))) }}
     steps:
       - name: noop
         run: echo running ciflow_should_run
@@ -132,6 +132,8 @@ jobs:
       NUM_TEST_SHARDS: 2
       NUM_TEST_SHARDS_ON_PULL_REQUEST: 2
       PR_BODY: ${{ github.event.pull_request.body }}
+      NOGPU_RUNNER_TYPE: windows.4xlarge
+      ENABLE_FORCE_ON_CPU_TEST: ''
     outputs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
       render-matrix: ${{ steps.set-matrix.outputs.render-matrix }}
@@ -209,16 +211,13 @@ jobs:
         name: Setup Python3
         with:
           python-version: '3.x'
-      - name: Run test scripts
+      - name: Test
         shell: bash
         env:
           PYTORCH_FINAL_PACKAGE_DIR: /c/${{ github.run_id }}/build-results/
         run: |
             if [[ $NUM_TEST_SHARDS -ne 2 ]]; then
               export SHARD_NUMBER=0
-            fi
-            if [[ -n $GITHUB_HEAD_REF && "$RUN_SMOKE_TESTS_ONLY_ON_PR" == "true" ]]; then
-              export RUN_SMOKE_TESTS_ONLY=1
             fi
             .jenkins/pytorch/win-test.sh
       - name: Zip test reports for upload

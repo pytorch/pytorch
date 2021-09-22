@@ -364,7 +364,7 @@ static PyObject* THPVariable_make_subclass(PyObject* _ignored, PyObject* args, P
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPVariable_make_wrapper_subclass(PyObject* _ignored, PyObject* args, PyObject* kwargs) {
+static PyObject* THPVariable_make_wrapper_subclass(PyObject*, PyObject* args, PyObject* kwargs) {
   HANDLE_TH_ERRORS
   // NB: pin_memory doesn't actually do anything
   // TODO: strides variant?
@@ -373,19 +373,16 @@ static PyObject* THPVariable_make_wrapper_subclass(PyObject* _ignored, PyObject*
   });
   ParsedArgs<8> parsed_args{};
   auto r = parser.parse(args, kwargs, parsed_args);
-  // TODO: handle has_torch_function, maybe?
   PyObject* cls = r.pyobject(0);
-  if (!PyType_Check(cls)) {
-    throw torch::TypeError("cls must be a type (got %s)", Py_TYPE(cls)->tp_name);
-  }
+
+  TORCH_CHECK_TYPE(PyType_Check(cls), "cls must be a type (got ", Py_TYPE(cls)->tp_name, ")");
 
   // This is an important safety check; without it, the default behavior will be
   // to continue on to the underlying CPU/CUDA kernel advertised by the dispatch
   // key, which will immediately segfault because the data pointer is null.  By
   // forcing users to define __torch_dispatch__ we ensure this does not happen
-  if (PyObject_FastGetAttrString(cls, "__torch_dispatch__").ptr() == nullptr) {
-    throw torch::TypeError("%s must define __torch_dispatch__", ((PyTypeObject*)cls)->tp_name);
-  }
+  TORCH_CHECK_TYPE(PyObject_FastGetAttrString(cls, "__torch_dispatch__").ptr() != nullptr,
+    ((PyTypeObject*)cls)->tp_name, " must define __torch_dispatch__");
 
   const auto options = TensorOptions()
     .dtype(r.scalartype(3))
@@ -398,6 +395,8 @@ static PyObject* THPVariable_make_wrapper_subclass(PyObject* _ignored, PyObject*
 
   // don't bother releasing GIL here, as we are not allocating any nontrivial
   // data
+  // TODO: for_blob produces non-resizable tensors, we might want this to be
+  // resizable (have to define a custom allocator in that case)
   auto data = at::for_blob(nullptr, r.intlist(1))
     .context(nullptr, [](void *ctx) {})
     .target_device(options.device())  // TODO: this shouldn't be necessary if it came from options

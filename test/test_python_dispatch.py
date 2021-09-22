@@ -247,6 +247,17 @@ $5 = torch._ops.aten.kl_div($0, $1, 2, log_target=True)''')
         self.assertIsInstance(y, LoggingTensor)
         self.assertRaises(RuntimeError, lambda: y.resize_(4))
 
+    def test_storage(self) -> None:
+        # For now, just make sure it doesn't crash.  Ideally, we should
+        # return some virtual storage that is safe to work with
+        x = LoggingTensor(torch.ones(1))
+        self.assertRaises(RuntimeError, lambda: x.storage())
+
+    def test_make_wrapper_subclass_noalloc(self) -> None:
+        # This is ludicrously big (8TB) and this should pass because wrapper
+        # subclasses don't allocate
+        torch.Tensor._make_wrapper_subclass(LoggingTensor, (1000000000000,))
+
     def test_version(self) -> None:
         x = LoggingTensor(torch.ones(1))
         prev_vc = x._version
