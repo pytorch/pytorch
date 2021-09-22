@@ -243,6 +243,13 @@ PyWarningHandler::~PyWarningHandler() noexcept(false) {
   }
 }
 
-
-
 } // namespace torch
+
+python_error::python_error() : type(nullptr), value(nullptr), traceback(nullptr),
+    message("unknown Python error (for more information, try rerunning with TORCH_SHOW_CPP_STACKTRACES=1)") {
+  if (torch::get_cpp_stacktraces_enabled()) {
+    // Eagerly populate message
+    persist();
+    restore();
+  }
+}
