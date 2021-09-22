@@ -2,10 +2,12 @@ import argparse
 from collections import defaultdict
 from dataclasses import dataclass
 from typing import List, Dict, Optional, Tuple
+import logging
 
 import torch
-from torch.fx.experimental.graph_manipulation import get_size_of_node
+from torch.fx.passes.graph_manipulation import get_size_of_node
 from torch.fx.node import map_arg
+from torch.fx._compatibility import compatibility
 
 from .operator_support import (
     get_node_target,
@@ -20,7 +22,11 @@ from .tools_common import (
     Tensors,
     NodeList,
     NodeSet,
+    is_node_output_tensor,
 )
+
+_LOGGER = logging.getLogger(__name__)
+
 
 class _SplitterSettingBase:
     def __init__(self):
@@ -58,6 +64,7 @@ class _SplitterSettingBase:
 
 
 # TODO: this can probably be optimized
+@compatibility(is_backward_compatible=False)
 class FxNetAccNodesFinder:
     """
     Finds a set of nodes that can be supported on ACC, excluding nodes that have non-tensor
@@ -98,7 +105,7 @@ class FxNetAccNodesFinder:
             for user in node.users:
                 if user in self.acc_nodes:
                     self.acc_nodes.remove(user)
-                    if "tensor_meta" not in user.meta:
+                    if not is_node_output_tensor(user):
                         cpu_worklist.append(user)
 
     def reduce_acc_nodes_non_tensor_input(self):
@@ -113,7 +120,7 @@ class FxNetAccNodesFinder:
                 continue
             if node in self.acc_nodes:
                 continue
-            if "tensor_meta" in node.meta:
+            if is_node_output_tensor(node):
                 continue
             non_tensor_cpu_nodes.append(node)
 
@@ -128,7 +135,7 @@ class FxNetAccNodesFinder:
             new_cpu_nodes: NodeList = []
 
             for acc_node in self.acc_nodes:
-                if "tensor_meta" in acc_node.meta:
+                if is_node_output_tensor(acc_node):
                     continue
                 for user in acc_node.users:
                     if user not in self.acc_nodes:
@@ -158,11 +165,11 @@ class FxNetAccNodesFinder:
 
         return self.acc_nodes
 
-
+@compatibility(is_backward_compatible=False)
 class FxNetSplitterInternalError(Exception):
     pass
 
-
+@compatibility(is_backward_compatible=False)
 @dataclass
 class Subgraph:
     is_acc: bool
@@ -461,7 +468,7 @@ class _SplitterBase:
                 reports += "Checking inputs...\n"
                 for n in submod.graph.nodes:
                     if n.op == "placeholder":
-                        if "tensor_meta" not in n.meta:
+                        if not is_node_output_tensor(n):
                             reports += f"Input {n.name} is not a tensor, this might cause problems during lowering!\n"
                         else:
                             total_input_bytes += get_size_of_node(submod, n)[0]
@@ -473,7 +480,7 @@ class _SplitterBase:
                 def get_bytes(node: torch.fx.Node):
                     nonlocal total_output_bytes
                     nonlocal reports
-                    if "tensor_meta" not in node.meta:
+                    if not is_node_output_tensor(node):
                         reports += f"Output {node.name} is not a tensor, this might cause problems during lowering!\n"
                     else:
                         total_output_bytes += get_size_of_node(submod, node)[0]

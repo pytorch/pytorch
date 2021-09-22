@@ -31,8 +31,8 @@ StmtPtr Tensor::constructStmt(
     for (const auto i : c10::irange(reduce_ndim)) {
       // Going in reverse order: from innermost loop to the outermost
       size_t dim_index = reduce_ndim - i - 1;
-      s = alloc<For>(
-          reduce_args[dim_index], alloc<IntImm>(0), reduce_dims[dim_index], s);
+      auto const& dim = reduce_dims[dim_index];
+      s = alloc<For>(reduce_args[dim_index], immLike(dim, 0), dim, s);
     }
     if (init_expr) {
       StorePtr init_stmt = alloc<Store>(buf(), indices, init_expr);
@@ -43,7 +43,8 @@ StmtPtr Tensor::constructStmt(
   for (const auto i : c10::irange(ndim)) {
     // Going in reverse order: from innermost loop to the outermost
     size_t dim_index = ndim - i - 1;
-    s = alloc<For>(args[dim_index], alloc<IntImm>(0), buf()->dim(dim_index), s);
+    auto const& dim = buf()->dim(dim_index);
+    s = alloc<For>(args[dim_index], immLike(dim, 0), dim, s);
   }
   return s;
 }
@@ -133,20 +134,6 @@ Tensor Compute(
                      .node();
   BufPtr buf = alloc<Buf>(name, dims, body->dtype());
   return Tensor(buf, args, body);
-}
-
-Tensor Reduce(
-    const std::string& name,
-    const std::vector<DimArg>& dim_args,
-    const Reducer& reducer,
-    const Placeholder& buffer,
-    const std::vector<DimArg>& reduce_args) {
-  return Reduce(
-      name,
-      dim_args,
-      reducer,
-      [&](ParameterList& p) { return buffer.load(p); },
-      reduce_args);
 }
 
 Tensor Reduce(
