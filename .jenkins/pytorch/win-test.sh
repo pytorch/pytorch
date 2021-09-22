@@ -55,6 +55,13 @@ if [[ "${BUILD_ENVIRONMENT}" == *cuda11* ]]; then
   export BUILD_SPLIT_CUDA=ON
 fi
 
+if [[ "$TEST_CONFIG" = "force_on_cpu" ]]; then
+  # run the full test suite for force_on_cpu test
+  export USE_CUDA=0
+elif [[ -n $GITHUB_HEAD_REF && "$RUN_SMOKE_TESTS_ONLY_ON_PR" == "true" ]]; then
+  export RUN_SMOKE_TESTS_ONLY=1
+fi
+
 run_tests() {
     # Run nvidia-smi if available
     for path in '/c/Program Files/NVIDIA Corporation/NVSMI/nvidia-smi.exe' /c/Windows/System32/nvidia-smi.exe; do
