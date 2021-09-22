@@ -1,7 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/native/cuda/SortingCommon.cuh>
 
-#include <THC/THCThrustAllocator.cuh>
+#include <ATen/cuda/ThrustAllocator.h>
 #include <thrust/device_ptr.h>
 #include <thrust/execution_policy.h>
 #include <thrust/sort.h>
@@ -13,7 +13,7 @@ namespace at { namespace native {
 void index_put_with_sort_kernel_thrust_helper(Tensor &linearIndex, Tensor &orig_indices, Tensor &sorted_indices, int64_t num_indices) {
   sorted_indices.copy_(linearIndex);
   const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
-  auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
+  at::cuda::ThrustAllocator allocator;
   auto policy = thrust::cuda::par(allocator).on(stream);
 
   using device_ptr = thrust::device_ptr<int64_t>;
@@ -36,7 +36,7 @@ template<typename index_t>
 void embedding_dense_backward_cuda_scan(Tensor &sorted_indices, Tensor &count) {
   using device_ptr = thrust::device_ptr<index_t>;
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
-  auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
+  at::cuda::ThrustAllocator allocator;
   auto policy = thrust::cuda::par(allocator).on(stream);
 
   auto num_indices = count.numel();

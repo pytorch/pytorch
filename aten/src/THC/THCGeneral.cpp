@@ -291,15 +291,6 @@ void __THCusparseCheck(cusparseStatus_t status, const char *file, const int line
   }
 }
 
-void* THCudaMalloc(THCState *state, size_t size)
-{
-  return c10::cuda::CUDACachingAllocator::raw_alloc(size);
-}
-
-void THCudaFree(THCState *state, void* ptr) {
-  c10::cuda::CUDACachingAllocator::raw_delete(ptr);
-}
-
 at::DataPtr THCudaHostAlloc(THCState *state, size_t size)
 {
   THCudaCheck(cudaGetLastError());

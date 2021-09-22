@@ -61,9 +61,6 @@ TORCH_CUDA_CPP_API void __THCudaCheckWarn(cudaError_t err, const char *file, con
 TORCH_CUDA_CPP_API void __THCublasCheck(cublasStatus_t status, const char *file, const int line);
 TORCH_CUDA_CPP_API void __THCusparseCheck(cusparseStatus_t status, const char *file, const int line);
 
-TORCH_CUDA_CPP_API void* THCudaMalloc(THCState *state, size_t size);
-TORCH_CUDA_CPP_API void THCudaFree(THCState *state, void* ptr);
-
 at::DataPtr THCudaHostAlloc(THCState *state, size_t size);
 
 TORCH_CUDA_CPP_API void THCudaHostRecord(THCState *state, void *ptr);

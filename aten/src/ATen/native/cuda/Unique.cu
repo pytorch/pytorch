@@ -1,7 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/ThrustAllocator.h>
 #include <THC/THCGeneral.h>
-#include <THC/THCThrustAllocator.cuh>
 #include <thrust/execution_policy.h>
 
 #include <tuple>
@@ -92,7 +92,7 @@ std::tuple<Tensor, Tensor, Tensor> unique_dim_cuda_template(
     */
 
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
-  auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
+  at::cuda::ThrustAllocator allocator;
   auto policy = thrust::cuda::par(allocator).on(stream);
 
   auto sizes = self.sizes().vec();

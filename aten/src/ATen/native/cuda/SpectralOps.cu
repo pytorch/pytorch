@@ -14,7 +14,6 @@
 #include <ATen/native/cuda/CuFFTPlanCache.h>
 #include <c10/util/accumulate.h>
 #include <THC/THCGeneral.h>
-#include <THC/THCThrustAllocator.cuh>
 
 
 #include <cmath>

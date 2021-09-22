@@ -6,14 +6,13 @@
 #include <ATen/WrapDimUtilsMulti.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAUtils.h>
+#include <ATen/cuda/ThrustAllocator.h>
 #include <ATen/native/sparse/SparseTensorMath.h>
 #include <ATen/native/sparse/ParamUtils.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/native/sparse/cuda/SparseCUDAApplyUtils.cuh>
 #include <ATen/native/sparse/cuda/SparseCUDABlas.h>
-
-#include <THC/THCThrustAllocator.cuh>
 
 #include <thrust/binary_search.h>
 #include <thrust/device_ptr.h>
@@ -217,7 +216,7 @@ Tensor get_offsets(
     implementation of get_offsets function that this implementation is based on.
   */
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
-  auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
+  at::cuda::ThrustAllocator allocator;
   auto policy = thrust::cuda::par(allocator).on(stream);
 
   auto ndim = indices.size(0);
@@ -276,7 +275,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> compute_pool_max(
     implementation that this implementation is based on.
   */
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
-  auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
+  at::cuda::ThrustAllocator allocator;
   auto policy = thrust::cuda::par(allocator).on(stream);
 
   auto nnz = indices.size(1);
@@ -392,7 +391,7 @@ void cuda_sparse_coo_softmax(
   }
 
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
-  auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
+  at::cuda::ThrustAllocator allocator;
   auto policy = thrust::cuda::par(allocator).on(stream);
 
   auto nnz = values.size(0);
@@ -462,7 +461,7 @@ void cuda_sparse_coo_softmax_backward(
   auto grad_offsets = get_offsets(grad_indices, sizes, -1);
 
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
-  auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
+  at::cuda::ThrustAllocator allocator;
   auto policy = thrust::cuda::par(allocator).on(stream);
 
   /* when dim >= sparse_dim the dense backward is used */
