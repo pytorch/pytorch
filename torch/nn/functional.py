@@ -607,6 +607,8 @@ def max_pool1d_with_indices(
     return_indices: bool = False
 ) -> Tuple[Tensor, Tensor]:
     r"""
+    max_pool1d(input, kernel_size, stride=None, padding=0, dilation=1, ceil_mode=False, return_indices=False)
+
     Applies a 1D max pooling over an input signal composed of several input
     planes.
 
@@ -681,23 +683,6 @@ max_pool1d = boolean_dispatch(
 )
 
 
-_add_docstr(
-    torch.max_pool1d,
-    r"""
-    max_pool1d(input, kernel_size, stride=None, padding=0, dilation=1, ceil_mode=False, return_indices=False)
-
-    Applies a 1D max pooling over an input signal composed of several input
-    planes.
-
-    .. note::
-        The order of :attr:`ceil_mode` and :attr:`return_indices` is different from
-        what seen in :class:`~torch.nn.MaxPool1d`, and will change in a future release.
-
-    See :class:`~torch.nn.MaxPool1d` for details.
-    """
-)
-
-
 def max_pool2d_with_indices(
     input: Tensor, kernel_size: BroadcastingList2[int],
     stride: Optional[BroadcastingList2[int]] = None,
@@ -707,6 +692,8 @@ def max_pool2d_with_indices(
     return_indices: bool = False
 ) -> Tuple[Tensor, Tensor]:
     r"""
+    max_pool2d(input, kernel_size, stride=None, padding=0, dilation=1, ceil_mode=False, return_indices=False)
+
     Applies a 2D max pooling over an input signal composed of several input
     planes.
 
@@ -781,23 +768,6 @@ max_pool2d = boolean_dispatch(
 )
 
 
-_add_docstr(
-    torch.max_pool2d,
-    r"""
-    max_pool2d(input, kernel_size, stride=None, padding=0, dilation=1, ceil_mode=False, return_indices=False)
-
-    Applies a 2D max pooling over an input signal composed of several input
-    planes.
-
-    .. note::
-        The order of :attr:`ceil_mode` and :attr:`return_indices` is different from
-        what seen in :class:`~torch.nn.MaxPool2d`, and will change in a future release.
-
-    See :class:`~torch.nn.MaxPool2d` for details.
-    """
-)
-
-
 def max_pool3d_with_indices(
     input: Tensor, kernel_size: BroadcastingList3[int],
     stride: Optional[BroadcastingList3[int]] = None,
@@ -807,6 +777,8 @@ def max_pool3d_with_indices(
     return_indices: bool = False
 ) -> Tuple[Tensor, Tensor]:
     r"""
+    max_pool3d(input, kernel_size, stride=None, padding=0, dilation=1, ceil_mode=False, return_indices=False)
+
     Applies a 3D max pooling over an input signal composed of several input
     planes.
 
@@ -878,23 +850,6 @@ max_pool3d = boolean_dispatch(
     if_false=_max_pool3d,
     module_name=__name__,
     func_name="max_pool3d",
-)
-
-
-_add_docstr(
-    torch.max_pool3d,
-    r"""
-    max_pool3d(input, kernel_size, stride=None, padding=0, dilation=1, ceil_mode=False, return_indices=False)
-
-    Applies a 3D max pooling over an input signal composed of several input
-    planes.
-
-    .. note::
-        The order of :attr:`ceil_mode` and :attr:`return_indices` is different from
-        what seen in :class:`~torch.nn.MaxPool2d`, and will change in a future release.
-
-    See :class:`~torch.nn.MaxPool3d` for details.
-    """
 )
 
 
