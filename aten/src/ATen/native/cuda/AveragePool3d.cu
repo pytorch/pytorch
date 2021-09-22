@@ -1,8 +1,8 @@
 #include <ATen/AccumulateType.h>
+#include <ATen/ceil_div.h>
 #include <ATen/native/Pool.h>
 #include <ATen/cuda/Atomic.cuh>
 #include <ATen/cuda/CUDAContext.h>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/cuda/detail/TensorInfo.cuh>
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/cuda/detail/KernelUtils.h>
@@ -397,8 +397,8 @@ TORCH_IMPL_FUNC(avg_pool3d_out_cuda) (
       dim3 block(32, 8);
 
       while (totalZ > 0) {
-        dim3 grid(cuda::ATenCeilDiv(owidth, static_cast<int64_t>(block.x)),
-                  cuda::ATenCeilDiv(oheight, static_cast<int64_t>(block.y)),
+        dim3 grid(ceil_div(owidth, static_cast<int64_t>(block.x)),
+                  ceil_div(oheight, static_cast<int64_t>(block.y)),
                   totalZ > 65535 ? 65535 : totalZ);
 
         switch (kW) {
@@ -527,8 +527,8 @@ TORCH_IMPL_FUNC(avg_pool3d_backward_out_cuda) (
         }
 
         while (totalZ > 0) {
-          dim3 grid(cuda::ATenCeilDiv(iwidth, static_cast<int64_t>(block.x)),
-                    cuda::ATenCeilDiv(iheight, static_cast<int64_t>(block.y)),
+          dim3 grid(ceil_div(iwidth, static_cast<int64_t>(block.x)),
+                    ceil_div(iheight, static_cast<int64_t>(block.y)),
                     totalZ > 65535 ? 65535 : totalZ);
 
           avg_pool3d_single_backward_out_frame_stride1<scalar_t, accscalar_t>
@@ -556,8 +556,8 @@ TORCH_IMPL_FUNC(avg_pool3d_backward_out_cuda) (
         dim3 block(32, 8);
 
         while (totalZ > 0) {
-          dim3 grid(cuda::ATenCeilDiv(owidth, static_cast<int64_t>(block.x)),
-                    cuda::ATenCeilDiv(oheight, static_cast<int64_t>(block.y)),
+          dim3 grid(ceil_div(owidth, static_cast<int64_t>(block.x)),
+                    ceil_div(oheight, static_cast<int64_t>(block.y)),
                     totalZ > 65535 ? 65535 : totalZ);
 
           if (kernelsOverlap) {
