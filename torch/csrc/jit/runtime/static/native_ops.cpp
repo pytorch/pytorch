@@ -95,6 +95,22 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
     });
 
 REGISTER_NATIVE_OPERATOR_FUNCTOR(
+    static_runtime::dict_unpack,
+    static_runtime_dict_unpack,
+    [](Node*) -> SROperator {
+      return [](ProcessedNode* p_node) {
+        DCHECK(p_node->inputs().size() - 1 == p_node->outputs().size());
+        auto dict = p_node->Input(0).toGenericDict();
+        for (size_t i = 1; i < p_node->inputs().size(); ++i) {
+          auto key = p_node->Input(i);
+          auto value = dict.find(key);
+          TORCH_CHECK(value != dict.end(), "Key not in dict: ", key);
+          p_node->Output(i - 1) = value->value();
+        }
+      };
+    });
+
+REGISTER_NATIVE_OPERATOR_FUNCTOR(
     aten::__getitem__,
     aten_getitem,
     [](Node* n) -> SROperator {
@@ -371,6 +387,22 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
     });
 
 REGISTER_NATIVE_OPERATOR_FUNCTOR(
+    aten::expand_as,
+    aten_expand_as,
+    [](Node* n) -> SROperator {
+      if (!n->matches(torch::schema(
+              "aten::expand_as(Tensor(a) self, Tensor other) -> Tensor(a)"))) {
+        LogAndDumpSchema(n);
+        return nullptr;
+      }
+      return [](ProcessedNode* p_node) {
+        const auto& self = p_node->Input(0).toTensor();
+        const auto& other = p_node->Input(1).toTensor();
+        p_node->Output(0) = self.expand(other.sizes());
+      };
+    });
+
+REGISTER_NATIVE_OPERATOR_FUNCTOR(
     prim::isinstance,
     prim_isinstance,
     [](Node* n) -> SROperator {
@@ -425,5 +457,19 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
       };
     });
 
+REGISTER_NATIVE_OPERATOR_FUNCTOR(
+    static_runtime::VarTupleUnpack,
+    static_runtime_VarTupleUnpack,
+    [](Node*) -> SROperator {
+      return [](ProcessedNode* pnode) {
+        size_t output_idx = 0;
+        for (const auto& tuple : pnode->inputs()) {
+          for (auto& elem : tuple->toTuple()->elements()) {
+            pnode->Output(output_idx) = elem;
+            ++output_idx;
+          }
+        }
+      };
+    });
 } // namespace jit
 } // namespace torch

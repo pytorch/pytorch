@@ -349,6 +349,12 @@ const std::string embedding_bag_max_last_offset = R"JIT(
       return torch.embedding_bag(a, b, c, False, 2, False, None, True)
 )JIT";
 
+const auto expand_as_script = R"JIT(
+  def forward(self, input: Tensor, other:Tensor):
+      a = input.expand_as(other)
+      return a.clone()
+)JIT";
+
 const auto sign_tensor = R"JIT(
   def forward(self, input: Tensor):
       return torch.sign(input).clone()
@@ -670,6 +676,16 @@ const auto argmin_with_keep_dim_script = R"JIT(
       return torch.argmin(a, dim, True).clone()
 )JIT";
 
+const auto softmax_script = R"JIT(
+  def forward(self, a: Tensor, dim: int):
+      return torch.softmax(a, dim).clone()
+)JIT";
+
+const auto softmax_script_with_dtype = R"JIT(
+  def forward(self, a: Tensor, dim: int, dtype: int):
+      return torch.softmax(a, dim, dtype=dtype).clone()
+)JIT";
+
 const auto getitem_dict_tensor_script = R"JIT(
   def forward(self, key: Tensor):
       d = {key: 1}
@@ -746,6 +762,12 @@ const auto append_tensor_script = R"JIT(
       return lst
 )JIT";
 
+const auto nonzero_tensor = R"JIT(
+  def forward(self, input: Tensor):
+      a = torch.nonzero(input).clone()
+      return (a)
+)JIT";
+
 const std::string quantize_script = R"IR(
   graph(%input: Tensor, %weights: Tensor):
       %scale: float = prim::Constant[value=1.]()
@@ -756,3 +778,97 @@ const std::string quantize_script = R"IR(
       %1249: Tensor = aten::dequantize(%1254)
       return (%1249)
 )IR";
+
+const auto fmod_tensor = R"JIT(
+  def forward(self, a: Tensor, b: Tensor):
+      return torch.fmod(a, b).clone()
+)JIT";
+
+const auto fmod_scalar = R"JIT(
+  def forward(self, a: Tensor, b: int):
+      return torch.fmod(a, b).clone()
+)JIT";
+
+const std::string embedding_bag_byte_prepack_script = R"IR(
+  graph(%input: Tensor):
+      %none : None = prim::Constant()
+      %output: Tensor = quantized::embedding_bag_byte_prepack(%input)
+      %res: Tensor = aten::clone(%output, %none)
+      return (%res)
+)IR";
+
+const auto linalg_norm_ord_scalar = R"JIT(
+  def forward(self, a: Tensor, ord: int, dim: List[int], keepdim: bool, dtype: int):
+      return torch.linalg_norm(a, ord, dim, keepdim, dtype=dtype).clone()
+)JIT";
+
+const auto linalg_norm_ord_str = R"JIT(
+  def forward(self, a: Tensor, ord: str, dim: List[int], keepdim: bool, dtype: int):
+      return torch.linalg_norm(a, ord, dim, keepdim, dtype=dtype).clone()
+)JIT";
+
+const std::string cat_script = R"IR(
+  graph(%a: Tensor, %b: Tensor, %dim: int):
+      %ten_list: Tensor[] = prim::ListConstruct(%a, %b)
+      %1 : int = prim::Constant[value=0]()
+      %2 : int = prim::Constant[value=1]()
+      %3 : int = prim::Constant[value=1]()
+      %ten_list2 : Tensor[] = aten::slice(%ten_list, %1, %2, %3)
+      %ret: Tensor = aten::cat(%ten_list2, %dim)
+      return (%ret)
+)IR";
+
+const auto cumsum_script = R"JIT(
+   def forward(self, a: Tensor, dim: int):
+      return torch.cumsum(a, dim).clone()
+)JIT";
+
+const auto cumsum_script_dtype = R"JIT(
+   def forward(self, a: Tensor, dim: int, dtype: int):
+      return torch.cumsum(a, dim, dtype=dtype).clone()
+)JIT";
+
+const std::string signed_log1p_script = R"IR(
+  graph(%input):
+      %0 : Tensor = aten::sign(%input)
+      %1 : Tensor = aten::abs(%input)
+      %2 : Tensor = aten::log1p(%1)
+      %3 : Tensor = aten::mul(%0, %2)
+      %none : NoneType = prim::Constant()
+      %res : Tensor = aten::clone(%3, %none)
+      return (%res)
+)IR";
+
+const auto getitem_immutable_input_dict_script = R"JIT(
+  def forward(self, input: Dict[int, Tensor]):
+      a = input[0]
+      b = input[1]
+      c = a + b
+      return c.clone()
+)JIT";
+
+const auto getitem_mutable_input_dict_script = R"JIT(
+  def forward(self, input: Dict[int, Tensor]):
+      a = input[0]
+      input[1] = a
+      b = input[1]
+      c = a + b
+      return c.clone()
+)JIT";
+
+const auto var_tuple_unpack_script = R"JIT(
+  def forward(self, input_0: Tuple[Tensor, Tensor], input_1: Tuple[int, int]):
+      a, b = input_0
+      c, d = input_1
+      res = a * c + b * d
+      return res.clone()
+)JIT";
+
+const auto var_tuple_unpack_not_applied_script = R"JIT(
+  def forward(self, input_0: Tuple[Tensor, Tensor], input_1: Tuple[int, int]):
+      a, b = input_0
+      x = a + b
+      c, d = input_1
+      res = a * c + b * d + x
+      return res.clone()
+)JIT";

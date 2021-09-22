@@ -16,7 +16,6 @@ class DeterminationTest(unittest.TestCase):
         "test_jit_profiling",
         "test_jit",
         "test_torch",
-        "distributed/test_distributed_spawn",
         "test_cpp_extensions_aot_ninja",
         "test_cpp_extensions_aot_no_ninja",
         "test_utils",
@@ -30,8 +29,15 @@ class DeterminationTest(unittest.TestCase):
         return [
             test
             for test in cls.TESTS
-            if run_test.determine_target(run_test.TARGET_DET_LIST, test, changed_files, DummyOptions())
+            if run_test.should_run_test(run_test.TARGET_DET_LIST, test, changed_files, DummyOptions())
         ]
+
+    def test_target_det_list_is_sorted(self):
+        # We keep TARGET_DET_LIST sorted to minimize merge conflicts
+        # but most importantly to allow us to comment on the absence
+        # of a test. It would be very difficult to add a file right
+        # next to a comment that says to keep it out of the list.
+        self.assertListEqual(run_test.TARGET_DET_LIST, sorted(run_test.TARGET_DET_LIST))
 
     def test_config_change_only(self):
         """CI configs trigger all tests"""
