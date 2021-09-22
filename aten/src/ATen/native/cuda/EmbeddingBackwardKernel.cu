@@ -7,8 +7,7 @@
 
 #include <ATen/AccumulateType.h>
 
-#include <THC/THCDeviceUtils.cuh>
-#include <THC/THCTensorMathReduce.cuh>
+// #include <THC/THCTensorMathReduce.cuh>
 #include <THC/THCThrustAllocator.cuh>
 
 #include <thrust/device_ptr.h>

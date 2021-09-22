@@ -1,11 +1,10 @@
 #pragma once
 
-#include <THC/THCDeviceUtils.cuh>
-#include <THC/THCGeneral.h>
 #include <ATen/ATen.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
+#include <ATen/cuda/DeviceUtils.cuh>
 #include <ATen/native/cuda/DeviceSqrt.cuh>
 #include <ATen/native/cuda/LaunchUtils.h>
 #include <c10/macros/Macros.h>

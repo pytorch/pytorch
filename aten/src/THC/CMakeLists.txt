@@ -34,7 +34,6 @@ install(FILES
           THCScanUtils.cuh
           THCAllocator.h
           THCCachingHostAllocator.h
-          THCDeviceUtils.cuh
           THCDeviceTensor.cuh
           THCDeviceTensor-inl.cuh
           THCDeviceTensorUtils.cuh

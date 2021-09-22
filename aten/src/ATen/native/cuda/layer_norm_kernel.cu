@@ -11,7 +11,6 @@
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/native/cuda/block_reduce.cuh>
-#include <THC/THCDeviceUtils.cuh>
 
 #include <c10/cuda/CUDAMathCompat.h>
 

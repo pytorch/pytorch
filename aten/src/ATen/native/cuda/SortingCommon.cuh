@@ -6,10 +6,7 @@
 #include <stdlib.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/cuda/detail/TensorInfo.cuh>
-#include <THC/THCDeviceUtils.cuh> // only for THCRoundUp?
 #include <THC/THCNumerics.cuh>
-#include <THC/THCScanUtils.cuh>
-#include <THC/THCTensorMathReduce.cuh> // AddOp
 
 namespace at {
 namespace native {

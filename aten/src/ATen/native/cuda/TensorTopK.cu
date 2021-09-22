@@ -1,10 +1,13 @@
 #include <ATen/ATen.h>
+#include <ATen/ceil_div.h>
 #include <ATen/cuda/detail/TensorInfo.cuh>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
 #include <ATen/native/Resize.h>
 #include <ATen/native/cuda/SortingCommon.cuh>
 #include <ATen/native/cuda/SortingRadixSelect.cuh>
 #include <ATen/native/cuda/SortUtils.cuh>
+#include <THC/THCScanUtils.cuh>
+#include <THC/THCTensorMathReduce.cuh>  // for AddOp
 
 #include <c10/macros/Macros.h>
 
@@ -74,7 +77,7 @@ __global__ void gatherTopK(at::cuda::detail::TensorInfo<T, IndexType> input,
   // All threads need to participate in the loop and the prefix sum,
   // but not necessarily in the load; hence loop bounds being rounded
   // up to a multiple of the block dim.
-  IndexType numIterations = THCRoundUp(inputSliceSize, (IndexType) blockDim.x);
+  IndexType numIterations = round_up(inputSliceSize, (IndexType) blockDim.x);
   IndexType writeIndexStart = 0;
 
   for (IndexType i = threadIdx.x; i < numIterations; i += blockDim.x) {
