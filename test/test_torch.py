@@ -222,6 +222,8 @@ class AbstractTestCases:
                            'softmax',
                            'split_with_sizes',
                            'unsafe_split_with_sizes',
+                           'autocast_to_fp16',
+                           'autocast_to_fp32',
                            )
             test_namespace(torch.nn)
             test_namespace(torch.nn.functional, 'assert_int_or_pair')
