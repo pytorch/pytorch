@@ -58,7 +58,13 @@ class NormalizationInfo(NamedTuple):
     new_fn_target: Callable
     arg_replacement_tuples: Optional[ArgReplacementTuplesType]
     custom_mapping_fn: Optional[Callable]
-    kwargs_to_move_to_acc_out_ty: Optional[List[Tuple[str, str]]]
+    # either (tensor_meta_field_name, original_field_name, move_to_qparams) or
+    # (tensor_meta_field_name, orginal_field_name)
+    # when move_to_qparams is True, we'll move the field to qparams
+    # dictionary, otherwise it will stay in TensorMeta itself
+    kwargs_to_move_to_acc_out_ty: Optional[List[Union[
+        Tuple[str, str, bool],
+        Tuple[str, str]]]]
     needs_shapes_for_normalization: bool
 
 # Dict from (op, target) to NormalizationInfo for that op.
@@ -73,7 +79,9 @@ def _insert_fun(
     arg_replacement_tuples: List[Tuple],
     new_fn_target: Optional[Callable] = None,
     custom_mapping_fn: Optional[Callable] = None,
-    kwargs_to_move_to_acc_out_ty: Optional[List[Tuple[str, str]]] = None,
+    kwargs_to_move_to_acc_out_ty: Optional[
+        List[Union[Tuple[str, str, bool],
+                   Tuple[str, str]]]] = None,
     needs_shapes_for_normalization=False,
     allow_normalize_from_torch_package=False,
 ):
@@ -157,7 +165,9 @@ def register_acc_op_mapping(
         List[Union[Tuple[Union[str, Tuple[str, ...]], str], Tuple[Union[str, Tuple[str, ...]], str, bool]]]
     ] = None,
     kwargs_to_move_to_acc_out_ty:
-        Optional[List[Tuple[str, str]]] = None,
+        Optional[List[Union[
+            Tuple[str, str, bool],
+            Tuple[str, str]]]] = None,
 ):
     """
     Use this decorator to map a non-acc operator to an acc operator.
