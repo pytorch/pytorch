@@ -6208,6 +6208,14 @@ class TestONNXRuntime(unittest.TestCase):
         model = Log1p()
         self.run_test(model, x)
 
+    def test_log10(self):
+        class Log10(torch.nn.Module):
+            def forward(self, input):
+                return torch.log10(input)
+        x = torch.rand(2, 3, 4)
+        model = Log10()
+        self.run_test(model, x)
+
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_round(self):
         class Round(torch.nn.Module):
@@ -7037,6 +7045,15 @@ class TestONNXRuntime(unittest.TestCase):
                 return x.isinf()
 
         x = torch.tensor([[1, 2, float("inf")], [2, float("nan"), float("inf")]])
+        self.run_test(M(), (x, ))
+
+    @skipIfUnsupportedMinOpsetVersion(10)
+    def test_isfinite(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return x.isfinite()
+
+        x = torch.tensor([[1, 2, float("inf")], [2, float("nan"), -float("inf")]])
         self.run_test(M(), (x, ))
 
     @skipIfUnsupportedMinOpsetVersion(9)  # ONNX IsNaN op is added in opset 9.
