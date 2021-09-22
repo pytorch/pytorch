@@ -6,7 +6,6 @@ from sys import maxsize
 import torch
 import torch.onnx.symbolic_helper as sym_help
 import warnings
-import numpy
 
 from torch.onnx.symbolic_helper import parse_args, _unimplemented, _is_tensor_list
 from torch.onnx.symbolic_opset9 import expand, unused, mul
@@ -696,8 +695,8 @@ def _get_im2col_indices_along_dim(g, input_d, kernel_size_d, dilation_d, padding
                             blocks_d, g.op("Constant", value_t=torch.tensor(stride_d)))
 
     # Apply dilation on kernel and find its indices along dim d
-    kernel_grid = numpy.arange(0, kernel_size_d * dilation_d, dilation_d)
-    kernel_grid = g.op("Constant", value_t=torch.tensor([kernel_grid]))
+    kernel_grid = torch.arange(0, kernel_size_d * dilation_d, dilation_d)
+    kernel_grid = g.op("Constant", value_t=kernel_grid.unsqueeze(0))
 
     # Broadcast and add kernel staring positions (indices) with
     # kernel_grid along dim d, to get block indices along dim d

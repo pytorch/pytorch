@@ -355,9 +355,8 @@ else:
             `torch.meshgrid(*tensors)` currently has the same behavior
             as calling `numpy.meshgrid(*arrays, indexing='ij')`.
 
-            In the future `torch.meshgrid` will support the
-            `indexing='xy'` and eventually transition to that as the
-            default.
+            In the future `torch.meshgrid` will transition to
+            `indexing='xy'` as the default.
 
             https://github.com/pytorch/pytorch/issues/50276 tracks
             this issue with the goal of migrating to NumPy's behavior.
@@ -371,8 +370,16 @@ else:
             tensors (list of Tensor): list of scalars or 1 dimensional tensors. Scalars will be
                 treated as tensors of size :math:`(1,)` automatically
 
-            indexing: (str, optional): the indexing mode requested.
-                Only "ij" is currently supported.
+            indexing: (str, optional): the indexing mode, either "xy"
+                or "ij", defaults to "ij". See warning for future changes.
+
+                If "xy" is selected, the first dimension corresponds
+                to the cardinality of the second input and the second
+                dimension corresponds to the cardinality of the first
+                input.
+
+                If "ij" is selected, the dimensions are in the same
+                order as the cardinality of the inputs.
 
         Returns:
             seq (sequence of Tensors): If the input has :math:`N`
@@ -409,7 +416,7 @@ else:
             >>> import matplotlib.pyplot as plt
             >>> xs = torch.linspace(-5, 5, steps=100)
             >>> ys = torch.linspace(-5, 5, steps=100)
-            >>> x, y = torch.meshgrid(xs, ys)
+            >>> x, y = torch.meshgrid(xs, ys, indexing='xy')
             >>> z = torch.sin(torch.sqrt(x * x + y * y))
             >>> ax = plt.axes(projection='3d')
             >>> ax.plot_surface(x.numpy(), y.numpy(), z.numpy())
