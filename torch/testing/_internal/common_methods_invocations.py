@@ -3446,13 +3446,13 @@ def sample_inputs_spectral_ops(self, device, dtype, requires_grad=False, **kwarg
         ]
 
 def sample_inputs_repeat_interleave(op_info, device, dtype, requires_grad, **kwargs):
-    shape = (2, 3, 4)
-    make_input = partial(make_tensor, shape, device=device, dtype=dtype, requires_grad=requires_grad)
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
     return [
-        SampleInput(make_input(), kwargs=dict(repeats=2)),
-        SampleInput(make_input(), kwargs=dict(repeats=2, dim=1)),
-        SampleInput(make_input(), kwargs=dict(repeats=torch.arange(shape[1], device=device), dim=1))
+        SampleInput(make_input(()), kwargs=dict(repeats=2)),
+        SampleInput(make_input((2, 3 ,4)), kwargs=dict(repeats=2)),
+        SampleInput(make_input((2, 3 ,4)), kwargs=dict(repeats=2, dim=1)),
+        SampleInput(make_input((2, 3 ,4)), kwargs=dict(repeats=torch.arange(3, device=device), dim=1))
     ]
 
 # Metadata class for Fast Fourier Transforms in torch.fft.
@@ -5614,10 +5614,11 @@ def sample_inputs_pixel_unshuffle(op_info, device, dtype, requires_grad, **kwarg
 
 def sample_inputs_kl_div(op_info, device, dtype, requires_grad, **kwargs):
     make = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
-    shapes_and_kwargs = [
-        ((2,), None),
-        ((2, 3), None),
-        ((2, 3, 4), None),
+
+    shapes_and_kwargs: List[Tuple[Tuple[int, ...], Dict[str, Any]]] = [
+        ((2,), dict()),
+        ((2, 3), dict()),
+        ((2, 3, 4), dict()),
         ((2,), dict(log_target=True)),
         ((2,), dict(reduction="none")),
         ((2,), dict(reduction="batchmean")),
@@ -5626,8 +5627,8 @@ def sample_inputs_kl_div(op_info, device, dtype, requires_grad, **kwargs):
 
     sample_inputs = []
     for shape, kwargs in shapes_and_kwargs:
-        input = make(shape, low=-inf, high=0)
-        if kwargs and kwargs.get("log_target", False):
+        input = make(shape, low=None, high=0)
+        if kwargs.get("log_target", False):
             target = make(shape, low=-inf, high=0)
         else:
             target = make(shape, low=0, high=1)
