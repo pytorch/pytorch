@@ -3,7 +3,6 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/NativeFunctions.h>
-#include <ATen/core/Tensor.h>
 
 #pragma once
 
