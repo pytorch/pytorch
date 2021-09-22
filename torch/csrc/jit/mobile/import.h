@@ -17,13 +17,6 @@ constexpr const char* kArchiveNameBytecode = "bytecode";
 constexpr const char* kArchiveNameConstants = "constants";
 constexpr const char* kArchiveNameVersion = "version";
 
-enum MobileModuleLoadOptions {
-  OPERATOR_CHECK = 1,
-};
-
-const uint64_t _default_mobile_module_load_options =
-    MobileModuleLoadOptions::OPERATOR_CHECK;
-
 // The family of methods below load a serialized Mobile Module
 // into a mobile::Module object.
 TORCH_API mobile::Module _load_for_mobile(
