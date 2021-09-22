@@ -3829,19 +3829,20 @@ struct to_ir {
   }
 
   std::shared_ptr<SugaredValue> emitRpcExpr(const Apply& apply, Symbol rpc_op) {
-    // TODO: This is a temporary apporoach to enable calling user fucntion
+    // TODO: This is a temporary apporoach to enable calling user function
     // through RPC in TorchScript,
     // Ideally, function value in JIT IR is first-class citizen and
     // The RPC C++ entry API can take c10::Function directly.
     size_t rpcMinInputs = 2;
-    size_t rpcMaxInputs = 5; // NOLINT
+    size_t rpcMaxInputs = 6; // NOLINT
     std::string op_name = rpc_op.toUnqualString();
     if (apply.inputs().size() < rpcMinInputs ||
         apply.inputs().size() > rpcMaxInputs) {
       throw ErrorReport(apply)
           << "Possible forms of call to " << op_name << "(..) are\n"
           << op_name
-          << "(dst_worker_name, user_callable, args, kwargs, timeout)\n"
+          << "(dst_worker_name, user_callable, args, kwargs, device_map, timeout)\n"
+          << "(dst_worker_name, user_callable, args, kwargs, device_map)\n"
           << op_name << "(dst_worker_name, user_callable, args, kwargs)\n"
           << op_name << "(dst_worker_name, user_callable, args)\n"
           << op_name << "(dst_worker_name, user_callable)\n"
