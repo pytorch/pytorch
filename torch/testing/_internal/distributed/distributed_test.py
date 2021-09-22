@@ -599,6 +599,7 @@ class DistributedTest:
             for name, buf in m2.module.named_buffers():
                 self.assertEqual(buf, m1_buf_dict[name])
 
+            print("Verified across models.")
             # Verify buffers across ranks.
             m1_buffers = list(m1.buffers())
             m2_buffers = list(m2.buffers())
@@ -8106,17 +8107,17 @@ class DistributedTest:
                 else:
                     torch.futures.collect_all(futs).wait()
 
-            model = NetWithBuffers().cuda(rank)
-            model_ddp = torch.nn.parallel.DistributedDataParallel(
-                model,
-                device_ids=[self.rank],
-            )
             hook_pre_fwd = torch.nn.parallel.distributed._BufferCommHookLocation.PRE_FORWARD
             hook_post_fwd = torch.nn.parallel.distributed._BufferCommHookLocation.POST_FORWARD
             for hook_run_location in [
                 hook_pre_fwd,
                 hook_post_fwd,
             ]:
+                model = NetWithBuffers().cuda(rank)
+                model_ddp = torch.nn.parallel.DistributedDataParallel(
+                    model,
+                    device_ids=[self.rank],
+                )
                 model_ddp._register_buffer_comm_hook(
                     model_ddp,
                     buffer_comm_hook,
@@ -8137,11 +8138,13 @@ class DistributedTest:
                         model_no_hook_buffers = list(model_ddp_no_hook.module.buffers())
                         for tensor in model_no_hook_buffers:
                             dist.all_reduce(tensor)
+
                     loss_no_hook = model_ddp_no_hook(inp).sum()
                     if hook_run_location == hook_post_fwd:
                         model_no_hook_buffers = list(model_ddp_no_hook.module.buffers())
                         for tensor in model_no_hook_buffers:
                             dist.all_reduce(tensor)
+                    torch.cuda.synchronize()
 
                     # if return_futures, they are only awaited on by DDP
                     # at the end of the backwards pass for maximum overlap.
@@ -8158,6 +8161,16 @@ class DistributedTest:
                     # hook run location to post forward.
                     if return_futures and hook_run_location == hook_post_fwd:
                         self._verify_buffers_equal(model_ddp, model_ddp_no_hook)
+                dist.barrier()
+
+        @skip_if_lt_x_gpu(2)
+        @sandcastle_skip_if(
+            BACKEND != "nccl" and BACKEND != "gloo",
+            "Only Nccl & Gloo backend support DistributedDataParallel",
+        )
+        def test_ddp_buffer_hook_allreduce(self):
+            for return_futures in [True, False]:
+                self._test_ddp_buffer_hook_allreduce(return_futures)
 
         @skip_if_lt_x_gpu(2)
         @sandcastle_skip_if(
