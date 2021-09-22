@@ -575,7 +575,7 @@ class DistributedDataParallel(Module, Joinable):
         # Build parameters for reducer.
         parameters, expect_sparse_gradient = self._build_params_for_reducer()
         # Verify model equivalence.
-        dist._verify_model_across_ranks(self.process_group, parameters)
+        dist._verify_params_across_processes(self.process_group, parameters)
         # Sync params and buffers. Ensures all DDP models start off at the same value.
         self._sync_params_and_buffers(authoritative_rank=0)
         # In debug mode, build a mapping of parameter index -> parameter.
@@ -621,9 +621,9 @@ class DistributedDataParallel(Module, Joinable):
         # a much larger bucket, adding unnecessary latency after gradient
         # computation finishes. Experiments showed 1MB is a reasonable value.
         bucket_indices, per_bucket_size_limits = dist._compute_bucket_assignment_by_size(
-            parameters[0],
+            parameters,
             [dist._DEFAULT_FIRST_BUCKET_BYTES, self.bucket_bytes_cap],
-            expect_sparse_gradient[0],
+            expect_sparse_gradient,
         )
 
         # Note: reverse list of buckets because we want to approximate the
@@ -688,19 +688,17 @@ class DistributedDataParallel(Module, Joinable):
     def _build_params_for_reducer(self):
         # Build tuple of (module, parameter) for all parameters that require grads.
         modules_and_parameters = [
-            [
-                (module, parameter)
-                for module_name, module in self.module.named_modules()
-                for parameter in [
-                    param
-                    # Note that we access module.named_parameters instead of
-                    # parameters(module). parameters(module) is only needed in the
-                    # single-process multi device case, where it accesses replicated
-                    # parameters through _former_parameters.
-                    for param_name, param in module.named_parameters(recurse=False)
-                    if param.requires_grad
-                    and f"{module_name}.{param_name}" not in self.parameters_to_ignore
-                ]
+            (module, parameter)
+            for module_name, module in self.module.named_modules()
+            for parameter in [
+                param
+                # Note that we access module.named_parameters instead of
+                # parameters(module). parameters(module) is only needed in the
+                # single-process multi device case, where it accesses replicated
+                # parameters through _former_parameters.
+                for param_name, param in module.named_parameters(recurse=False)
+                if param.requires_grad
+                and f"{module_name}.{param_name}" not in self.parameters_to_ignore
             ]
         ]
 
@@ -709,15 +707,12 @@ class DistributedDataParallel(Module, Joinable):
         modules_and_parameters = [
             # "p not in memo" is the deduplication check.
             # "not memo.add(p)" is always True, and it's only there to cause "add(p)" if needed.
-            [(m, p) for m, p in replica_mps if p not in memo and not memo.add(p)]
-            for replica_mps in modules_and_parameters
+            (m, p) for m, p in modules_and_parameters
+            if p not in memo and not memo.add(p)
         ]
 
         # Build list of parameters.
-        parameters = [
-            list(parameter for _, parameter in replica)
-            for replica in modules_and_parameters
-        ]
+        parameters = list(parameter for _, parameter in modules_and_parameters)
 
         # Checks if a module will produce a sparse gradient.
         def produces_sparse_gradient(module):
@@ -729,35 +724,34 @@ class DistributedDataParallel(Module, Joinable):
 
         # Build list of booleans indicating whether or not to expect sparse
         # gradients for the corresponding parameters.
-        expect_sparse_gradient = [
-            list(produces_sparse_gradient(module) for module, _ in replica)
-            for replica in modules_and_parameters
-        ]
+        expect_sparse_gradient = list(produces_sparse_gradient(module) for module, _ in modules_and_parameters)
 
-        # The following modules_params and modules_buffers are used for
-        # param/buffer sync in _sync_params.
-        self.modules_params = [list(self._get_parameters(self.module))]
-        # Collect buffers for modules, filtering out buffers that should be ignored.
-        named_module_buffers = [
-            [
-                (buffer, buffer_name)
-                for buffer_name, buffer in self.module.named_buffers()
-            ]
-        ]
-        self.modules_buffers = [
-            [
-                buffer
-                for (buffer, buffer_name) in module_buffers
-                if buffer_name not in self.parameters_to_ignore
-            ]
-            for module_buffers in named_module_buffers
-        ]
+        self._assign_modules_buffers()
 
         return parameters, expect_sparse_gradient
 
+    def _assign_modules_buffers(self):
+        """
+        Assigns module buffers to self.modules_buffers which are then used to
+        broadcast across ranks when broadcast_buffers=True. Note that this
+        must be called every time buffers need to be synced because buffers can
+        be reassigned by user module,
+        see https://github.com/pytorch/pytorch/issues/63916.
+        """
+        # Collect buffers for modules, filtering out buffers that should be ignored.
+        named_module_buffers = [
+            (buffer, buffer_name)
+            for buffer_name, buffer in self.module.named_buffers()
+        ]
+        self.modules_buffers = [
+            buffer
+            for (buffer, buffer_name) in named_module_buffers
+            if buffer_name not in self.parameters_to_ignore
+        ]
+
     def _build_param_to_name_mapping(self, parameters):
-        param_to_param_index = {parameters[0][i]: i for i in range(len(parameters[0]))}
-        param_set = set(parameters[0])
+        param_to_param_index = {parameters[i]: i for i in range(len(parameters))}
+        param_set = set(parameters)
         param_index_to_param_fqn = {}
         for module_name, module in self.module.named_modules():
             for param_name, param in module.named_parameters(recurse=False):
@@ -1031,7 +1025,7 @@ class DistributedDataParallel(Module, Joinable):
         if self.will_sync_module_buffers():
             authoritative_rank = self._find_common_rank(self._distributed_rank, False)
             self._distributed_broadcast_coalesced(
-                self.modules_buffers[0], self.broadcast_bucket_size, authoritative_rank
+                self.modules_buffers, self.broadcast_bucket_size, authoritative_rank
             )
 
     # When running in join model, agrees upon a common rank and broadcast model
@@ -1069,8 +1063,8 @@ class DistributedDataParallel(Module, Joinable):
 
     # Allreduces the used parameter mapping across ranks.
     def _match_unused_params_allreduce(self):
-        locally_used_param_maps = self.reducer._get_local_used_maps()
-        self.process_group.allreduce(locally_used_param_maps)
+        locally_used_param_map = self.reducer._get_local_used_map()
+        self.process_group.allreduce(locally_used_param_map)
 
     def join(
         self,
@@ -1337,7 +1331,7 @@ class DistributedDataParallel(Module, Joinable):
         return (
             self.require_forward_param_sync
             and self.broadcast_buffers
-            and len(self.modules_buffers[0]) > 0
+            and len(self.modules_buffers) > 0
         )
 
     def _find_common_rank(self, input_rank, rank_cond):
@@ -1371,8 +1365,11 @@ class DistributedDataParallel(Module, Joinable):
                 else:
                     # The process with rank 0 is considered the authoritative copy.
                     authoritative_rank = 0
+                # Update self.modules_buffers incase any buffers were
+                # reassigned.
+                self._assign_modules_buffers()
                 self._distributed_broadcast_coalesced(
-                    self.modules_buffers[0],
+                    self.modules_buffers,
                     self.broadcast_bucket_size,
                     authoritative_rank,
                 )

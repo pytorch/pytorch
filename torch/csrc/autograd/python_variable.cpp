@@ -32,6 +32,7 @@
 
 #include <torch/library.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
+#include <torch/csrc/autograd/python_mode.h>
 
 
 #include <ATen/ATen.h>
@@ -56,7 +57,15 @@ std::string concrete_name_fn(const c10::impl::PyInterpreter* self) {
   return ss.str();
 }
 
-void concrete_decref_fn(const c10::impl::PyInterpreter* self, PyObject* pyobj) {
+// NOTE [PyInterpreter::decref takes an `is_tensor` arg]
+// Before calling PyInterpreter::decref, we must statically know if the
+// pyobj is a Tensor or not.
+// - If it is a tensor, we need to be careful about PyObject resurrection
+// - If it is not a tensor, we can freely decref
+// One alternative to this is using PyObject_IsInstance
+// to get at this information. However, we don't want to risk an incorrect
+// `__instancecheck__` changing the semantics here.
+void concrete_decref_fn(const c10::impl::PyInterpreter* self, PyObject* pyobj, bool is_tensor) {
   // Leak the pyobj if not initialized.  This can happen if we are running
   // exit handlers that are destructing tensors with residual (owned)
   // PyObjects stored in them.
@@ -64,7 +73,12 @@ void concrete_decref_fn(const c10::impl::PyInterpreter* self, PyObject* pyobj) {
     return;
 
   pybind11::gil_scoped_acquire gil;
-  if (Py_REFCNT(pyobj) > 1) {
+  // Two possibilities:
+  // 1. We are decref-ing a tensor. Then we must be careful about
+  // PyObject resurrection (this only applies to Tensors, see THPVariable_clear).
+  // 2. We are decref-ing some other Python object. We don't do
+  // PyObject resurrection on non-Tensors, so we just carry on as usual
+  if (is_tensor && Py_REFCNT(pyobj) > 1) {
     // It's still alive!  This can happen if a weak ref resurrected
     // the PyObject without flipping ownership.  At this point it is
     // too late to rescue the object, so just stub out the PyObject
@@ -82,7 +96,11 @@ void concrete_decref_fn(const c10::impl::PyInterpreter* self, PyObject* pyobj) {
 };
 
 c10::intrusive_ptr<TensorImpl> concrete_detach_fn(const c10::impl::PyInterpreter*, const c10::TensorImpl* self);
-void concrete_dispatch_fn(const c10::impl::PyInterpreter*, const c10::OperatorHandle& op, torch::jit::Stack* stack);
+void concrete_dispatch_fn(
+    const c10::impl::PyInterpreter*,
+    const c10::OperatorHandle& op,
+    torch::jit::Stack* stack,
+    const std::shared_ptr<TorchDispatchTypeObject>& type);
 
 class PyInterpreterHolder {
  public:
@@ -339,6 +357,53 @@ static PyObject* THPVariable_make_subclass(PyObject* _ignored, PyObject* args, P
   // ```
   data.unsafeGetTensorImpl()->set_allow_tensor_metadata_change(true);
   data.set_requires_grad(r.toBool(2));
+  return THPVariable_NewWithVar(
+      (PyTypeObject*)cls,
+      std::move(data),
+      c10::impl::PyInterpreterStatus::DEFINITELY_UNINITIALIZED);
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* THPVariable_make_wrapper_subclass(PyObject*, PyObject* args, PyObject* kwargs) {
+  HANDLE_TH_ERRORS
+  // NB: pin_memory doesn't actually do anything
+  // TODO: strides variant?
+  static PythonArgParser parser({
+    "_make_wrapper_subclass(PyObject* cls, IntArrayRef size, *, MemoryFormat? memory_format=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False)",
+  });
+  ParsedArgs<8> parsed_args{};
+  auto r = parser.parse(args, kwargs, parsed_args);
+  PyObject* cls = r.pyobject(0);
+
+  TORCH_CHECK_TYPE(PyType_Check(cls), "cls must be a type (got ", Py_TYPE(cls)->tp_name, ")");
+
+  // This is an important safety check; without it, the default behavior will be
+  // to continue on to the underlying CPU/CUDA kernel advertised by the dispatch
+  // key, which will immediately segfault because the data pointer is null.  By
+  // forcing users to define __torch_dispatch__ we ensure this does not happen
+  TORCH_CHECK_TYPE(PyObject_FastGetAttrString(cls, "__torch_dispatch__").ptr() != nullptr,
+    ((PyTypeObject*)cls)->tp_name, " must define __torch_dispatch__");
+
+  const auto options = TensorOptions()
+    .dtype(r.scalartype(3))
+    .device(r.device(5))
+    .layout(r.layoutOptional(4))
+    // NB: long standing issue, requires_grad is not respected here; you
+    // have to set it post facto, see https://github.com/pytorch/pytorch/issues/26428
+    // .requires_grad(r.toBool(7))
+    .pinned_memory(r.toBool(6));
+
+  // don't bother releasing GIL here, as we are not allocating any nontrivial
+  // data
+  // TODO: for_blob produces non-resizable tensors, we might want this to be
+  // resizable (have to define a custom allocator in that case)
+  auto data = at::for_blob(nullptr, r.intlist(1))
+    .context(nullptr, [](void *ctx) {})
+    .target_device(options.device())  // TODO: this shouldn't be necessary if it came from options
+    .options(options)
+    .make_tensor();
+  data.set_requires_grad(r.toBool(7));
+
   return THPVariable_NewWithVar(
       (PyTypeObject*)cls,
       std::move(data),
@@ -999,6 +1064,8 @@ static PyMethodDef extra_methods[] = {
     METH_VARARGS | METH_KEYWORDS, nullptr},
   {"_make_subclass", castPyCFunctionWithKeywords(THPVariable_make_subclass),
     METH_STATIC | METH_VARARGS | METH_KEYWORDS, nullptr},
+  {"_make_wrapper_subclass", castPyCFunctionWithKeywords(THPVariable_make_wrapper_subclass),
+    METH_STATIC | METH_VARARGS | METH_KEYWORDS, nullptr},
   {"_fix_weakref", THPVariable_fix_weakref,
     METH_NOARGS, nullptr},
   {nullptr}
@@ -1509,7 +1576,19 @@ bool isPythonTensor(const Tensor& tensor) {
   return tensor.unsafeGetTensorImpl()->key_set().has(c10::DispatchKey::Python);
 }
 
-void concrete_dispatch_fn(const c10::impl::PyInterpreter*, const c10::OperatorHandle& op, torch::jit::Stack* stack) {
+// NOTE [dispatch_fn's type argument]
+// `type` is nullable and represents the PythonMode going on.
+// Right now we only support a single PythonMode, but in the future we could
+// change this to a stack of PythonModes.
+//
+// If `type` isn't null, then we consider the type for dispatch by prepending
+// it to the overloaded_args list. `handle_torch_funciton_no_python_arg_parser`
+// is responsible for doing overload resolution.
+void concrete_dispatch_fn(
+    const c10::impl::PyInterpreter*,
+    const c10::OperatorHandle& op,
+    torch::jit::Stack* stack,
+    const std::shared_ptr<TorchDispatchTypeObject>& type) {
   const auto& schema = op.schema();
   const auto num_returns = schema.returns().size();
 
@@ -1586,13 +1665,17 @@ void concrete_dispatch_fn(const c10::impl::PyInterpreter*, const c10::OperatorHa
   auto args = py::reinterpret_steal<py::object>(PyTuple_New(positional_default_start));
   py::dict kwargs;
 
+  if (type) {
+    append_overloaded_type(&overloaded_args, type->ptr());
+  }
+
   // Find overloaded tensors
   for (int64_t idx = 0; idx < arguments.size(); idx++) {
     const auto& ivalue = arguments[idx];
     if (ivalue.isTensor()) {
       const auto& tensor = ivalue.toTensor();
       if (isPythonTensor(tensor)) {
-        append_overloaded_arg(&overloaded_args, py::cast(tensor).ptr());
+        append_overloaded_tensor(&overloaded_args, py::cast(tensor).ptr());
       }
     } else if (ivalue.isList()) {
       const auto& list = ivalue.toListRef();
@@ -1601,7 +1684,7 @@ void concrete_dispatch_fn(const c10::impl::PyInterpreter*, const c10::OperatorHa
         if (nv.isTensor()) {
           const auto& tensor = nv.toTensor();
           if (isPythonTensor(tensor)) {
-            append_overloaded_arg(&overloaded_args, py::cast(tensor).ptr());
+            append_overloaded_tensor(&overloaded_args, py::cast(tensor).ptr());
           }
         }
       }
@@ -1651,7 +1734,7 @@ c10::intrusive_ptr<TensorImpl> concrete_detach_fn(const c10::impl::PyInterpreter
   Tensor self_t = Tensor(c10::intrusive_ptr<c10::TensorImpl, c10::UndefinedTensorImpl>::unsafe_reclaim_from_nonowning(const_cast<c10::TensorImpl*>(self)));
   auto self_p = py::reinterpret_steal<py::object>(THPVariable_Wrap(self_t));
   TORCH_INTERNAL_ASSERT(isPythonTensor(self_t));
-  append_overloaded_arg(&overloaded_args, self_p.ptr());
+  append_overloaded_tensor(&overloaded_args, self_p.ptr());
   auto args = py::reinterpret_steal<py::object>(PyTuple_New(1));
   PyTuple_SET_ITEM(args.ptr(), 0, self_p.release().ptr());
 
