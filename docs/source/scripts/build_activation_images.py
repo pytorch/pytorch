@@ -58,7 +58,7 @@ def plot_function(function, **args):
     xrange = torch.arange(-7.0, 7.0, 0.01)  # We need to go beyond 6 for ReLU6
     pylab.plot(
         xrange.numpy(),
-        function(torch.autograd.Variable(xrange)).data.numpy(),
+        function(xrange).detach().numpy(),
         **args
     )
 
