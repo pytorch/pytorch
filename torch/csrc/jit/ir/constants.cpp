@@ -126,7 +126,8 @@ c10::optional<Value*> tryInsertConstant(
   } else if ((val.isGenericDict() && insertableIValue(val)) || (val.isEnum())) {
     n->ival_(attr::value, val);
     n->output()->setType(val.type());
-  // TODO: add object to insertableIValue
+    // TODO: add object to insertableIValue
+    // see [Constant Object Weak CompilationUnit Reference]
   } else if ((val.isObject() && !val.toObjectRef().type()->is_module()) && val.toObjectRef().is_weak_compilation_ref()) {
     n->ival_(attr::value, val);
     n->output()->setType(val.type());

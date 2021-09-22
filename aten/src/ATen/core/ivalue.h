@@ -1148,6 +1148,11 @@ struct TORCH_API StrongTypePtr {
   std::shared_ptr<Type> type_;
 };
 
+// [Constant Object Weak CompilationUnit Reference]
+// A non owning pointer to a type. When a class get inserted as a constant
+// into a graph, if we used a strong pointer we would have a circular reference
+// from Object -> CompilationUnit and CompilationUnit -> Graph (which owns the
+// Constant Object)
 struct TORCH_API WeakTypePtr {
   WeakTypePtr(
       std::weak_ptr<torch::jit::CompilationUnit> cu,
@@ -1160,6 +1165,8 @@ struct TORCH_API WeakTypePtr {
 
 using WeakOrStrongCompilationUnit = c10::variant<std::shared_ptr<torch::jit::CompilationUnit>, std::weak_ptr<torch::jit::CompilationUnit>>;
 
+// An Object will hold a non-owning Compilation Unit reference if it is a
+// Constant in the graph and a Owning reference otherwise
 struct TORCH_API WeakOrStrongTypePtr {
   WeakOrStrongTypePtr(WeakTypePtr weak);
   WeakOrStrongTypePtr(StrongTypePtr strong);

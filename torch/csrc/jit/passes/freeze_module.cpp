@@ -768,8 +768,7 @@ class AttributePropagator {
   // Contains the attributes names (e.g. {"self", "subModule", "a"}
   std::deque<std::string> names_;
 
-  // constants in the graph cannot hold a reference to
-  //
+  // see [Constant Object Weak CompilationUnit Reference]
   std::unordered_map<c10::intrusive_ptr<at::ivalue::Object>, c10::intrusive_ptr<at::ivalue::Object>> object_memo_;
 
 }; // class AttributePropagator

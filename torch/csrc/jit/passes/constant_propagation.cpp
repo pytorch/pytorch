@@ -100,6 +100,7 @@ c10::optional<std::vector<IValue>> runNodeIfInputsAreConstant(
         return c10::nullopt;
       }
     }
+    // see [Constant Object Weak CompilationUnit Reference]
     if (v.isCustomClass()) {
       if (v.toObject()->is_weak_compilation_ref()) {
         continue;
