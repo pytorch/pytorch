@@ -9,7 +9,6 @@
 #include <ATen/cuda/ThrustAllocator.h>
 #include <ATen/native/sparse/SparseTensorMath.h>
 #include <ATen/native/sparse/ParamUtils.h>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/native/sparse/cuda/SparseCUDAApplyUtils.cuh>
 #include <ATen/native/sparse/cuda/SparseCUDABlas.h>
@@ -25,7 +24,6 @@
 #include <bitset>
 
 #include <c10/cuda/CUDAMathCompat.h>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
 #include <ATen/native/cuda/Loops.cuh>

@@ -1,13 +1,12 @@
 #include <ATen/ATen.h>
+#include <ATen/ceil_div.h>
 #include <ATen/cuda/Atomic.cuh>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/Utils.h>
 #include <c10/util/Exception.h>
 #include <ATen/native/cuda/LaunchUtils.h>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
 
 #include <algorithm>
 #include <cfloat>
@@ -493,17 +492,17 @@ namespace {
         block_x = std::min<int>(
             maxThreadsDim[0], std::min<int>(lastPow2(sizeC), max_threads / block_y / block_z));
         const dim3 block(block_x, block_y, block_z);
-        int kernel_stride_C = cuda::ATenCeilDiv(sizeC, block_x * 4);
-        int kernel_size_C = cuda::ATenCeilDiv(sizeC, block_x * kernel_stride_C);
+        int kernel_stride_C = ceil_div(sizeC, block_x * 4);
+        int kernel_size_C = ceil_div(sizeC, block_x * kernel_stride_C);
 
         // Do NOT clip grid_x, striding on Batch dimension is not in the kernel,
         // although it could be easily implemented given current kernel.
         int grid_x = sizeB*kernel_stride_C;
         // it's OK to clip grid_y & grid_z, as we block the two dimensions in the kernel;
         int grid_y = std::min<int>(
-            maxGridSize[1], cuda::ATenCeilDiv(osizeW, block_y*BLOCK_STRIDE));
+            maxGridSize[1], ceil_div(osizeW, block_y*BLOCK_STRIDE));
         int grid_z = std::min<int>(
-            maxGridSize[2], cuda::ATenCeilDiv(osizeH, block_z*BLOCK_STRIDE));
+            maxGridSize[2], ceil_div(osizeH, block_z*BLOCK_STRIDE));
         const dim3 grid(grid_x, grid_y, grid_z);
 
 
@@ -644,17 +643,17 @@ namespace {
         block_x = std::min<int>(
             maxThreadsDim[0], std::min<int>(lastPow2(sizeC), max_threads / block_y / block_z));
         const dim3 block(block_x, block_y, block_z);
-        int kernel_stride_C = cuda::ATenCeilDiv(sizeC, block_x * 4);
-        int kernel_size_C = cuda::ATenCeilDiv(sizeC, block_x * kernel_stride_C);
+        int kernel_stride_C = ceil_div(sizeC, block_x * 4);
+        int kernel_size_C = ceil_div(sizeC, block_x * kernel_stride_C);
 
         // Do NOT clip grid_x, striding on Batch dimension is not in the kernel,
         // although it could be easily implemented given current kernel.
         int grid_x = sizeB*kernel_stride_C;
         // it's OK to clip grid_y & grid_z, as we block the two dimensions in the kernel;
         int grid_y = std::min<int>(
-            maxGridSize[1], cuda::ATenCeilDiv(isizeW, block_y*BLOCK_STRIDE));
+            maxGridSize[1], ceil_div(isizeW, block_y*BLOCK_STRIDE));
         int grid_z = std::min<int>(
-            maxGridSize[2], cuda::ATenCeilDiv(isizeH, block_z*BLOCK_STRIDE));
+            maxGridSize[2], ceil_div(isizeH, block_z*BLOCK_STRIDE));
         const dim3 grid(grid_x, grid_y, grid_z);
 
         // we are dealing with packed tensor here. max index is the same as numel.
