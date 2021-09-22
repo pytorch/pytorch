@@ -65,7 +65,7 @@ private:
   const at::TensorOptions options_;
   at::DimVector shape_;
   c10::Stream stream_ = c10::Stream(c10::Stream::Default::DEFAULT, device());
-  bool is_tensor_subclass_;
+  bool is_tensor_subclass_ = false;
 };
 
 }} // torch::autograd
