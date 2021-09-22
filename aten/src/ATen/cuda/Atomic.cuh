@@ -1,11 +1,8 @@
-#ifndef THC_ATOMICS_INC
-#define THC_ATOMICS_INC
+#pragma once
 
-#include <c10/util/complex.h>
-#include <THC/THC.h>
-#include <TH/THHalf.h>
-#include <THC/THCNumerics.cuh>
-#include <ATen/ATen.h>
+#include <cuda.h>
+#include <c10/util/Half.h>
+#include <c10/util/BFloat16.h>
 
 template <typename T>
 struct AtomicFPOp;
@@ -91,7 +88,7 @@ struct AtomicAddIntegerImpl<T, 1> {
       old_byte = (old >> shift) & 0xff;
       // preserve size in initial cast. Casting directly to uint32_t pads
       // negative signed values with 1's (e.g. signed -1 = unsigned ~0).
-      newval = static_cast<uint8_t>(THCNumerics<T>::add(val, old_byte));
+      newval = static_cast<uint8_t>(val + static_cast<T>(old_byte));
       newval = (old & ~(0x000000ff << shift)) | (newval << shift);
       old = atomicCAS(address_as_ui, assumed, newval);
     } while (assumed != old);
@@ -114,7 +111,7 @@ struct AtomicAddIntegerImpl<T, 2> {
       old_bytes = is_32_align ? old >> 16 : old & 0xffff;
       // preserve size in initial cast. Casting directly to uint32_t pads
       // negative signed values with 1's (e.g. signed -1 = unsigned ~0).
-      newval = static_cast<uint16_t>(THCNumerics<T>::add(val, old_bytes));
+      newval = static_cast<uint16_t>(val + static_cast<T>(old_bytes));
       newval = is_32_align ? (old & 0xffff) | (newval << 16) : (old & 0xffff0000) | newval;
       old = atomicCAS(address_as_ui, assumed, newval);
     } while (assumed != old);
@@ -131,7 +128,7 @@ struct AtomicAddIntegerImpl<T, 4> {
 
     do {
       assumed = old;
-      newval = val +  (T)old;
+      newval = static_cast<uint32_t>(val + static_cast<T>(old));
       old = atomicCAS(address_as_ui, assumed, newval);
     } while (assumed != old);
   }
@@ -147,7 +144,7 @@ struct AtomicAddIntegerImpl<T, 8> {
 
     do {
       assumed = old;
-      newval = val +  (T)old;
+      newval = static_cast<uint64_t>(val + static_cast<T>(old));
       old = atomicCAS(address_as_ui, assumed, newval);
     } while (assumed != old);
   }
@@ -185,7 +182,7 @@ static inline  __device__ at::Half gpuAtomicAdd(at::Half *address, at::Half val)
 #if ((CUDA_VERSION < 10000) || (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 700)))
   return AtomicFPOp<at::Half>()(address, val,
                                 [](at::Half hsum, at::Half val) {
-                                  return THCNumerics<at::Half>::add(hsum, val);
+                                  return hsum + val;
                                 });
 #else
   return atomicAdd(reinterpret_cast<__half*>(address), val);
@@ -195,7 +192,7 @@ static inline  __device__ at::Half gpuAtomicAdd(at::Half *address, at::Half val)
 static inline __device__ at::BFloat16 gpuAtomicAdd(at::BFloat16 *address, at::BFloat16 val) {
   return AtomicFPOp<at::BFloat16>()(address, val,
                                     [](at::BFloat16 bsum, at::BFloat16 val) {
-                                      return THCNumerics<at::BFloat16>::add(bsum, val);
+                                      return bsum + val;
                                     });
 }
 
@@ -312,14 +309,14 @@ static inline __device__ void gpuAtomicAddNoReturn(float *address, float val) { 
 inline __device__ at::Half gpuAtomicMul(at::Half * address, at::Half val) {
   return AtomicFPOp<at::Half>()(address, val,
                                 [](at::Half bsum, at::Half val) {
-                                  return THCNumerics<at::Half>::mul(bsum, val);
+                                  return bsum * val;
                                 });
 }
 
 inline __device__ at::BFloat16 gpuAtomicMul(at::BFloat16 * address, at::BFloat16 val) {
   return AtomicFPOp<at::BFloat16>()(address, val,
                                     [](at::BFloat16 bsum, at::BFloat16 val) {
-                                      return THCNumerics<at::BFloat16>::mul(bsum, val);
+                                      return bsum * val;
                                     });
 }
 
@@ -347,4 +344,3 @@ inline __device__ float gpuAtomicMul (float * address, float val) {
 
   return __int_as_float(old);
 }
-#endif // THC_ATOMICS_INC
