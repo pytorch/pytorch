@@ -132,6 +132,8 @@ jobs:
       NUM_TEST_SHARDS: 2
       NUM_TEST_SHARDS_ON_PULL_REQUEST: 2
       PR_BODY: ${{ github.event.pull_request.body }}
+      NOGPU_RUNNER_TYPE: windows.4xlarge
+      ENABLE_FORCE_ON_CPU_TEST: ''
     outputs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
       render-matrix: ${{ steps.set-matrix.outputs.render-matrix }}
@@ -216,9 +218,6 @@ jobs:
         run: |
             if [[ $NUM_TEST_SHARDS -ne 2 ]]; then
               export SHARD_NUMBER=0
-            fi
-            if [[ -n $GITHUB_HEAD_REF && "$RUN_SMOKE_TESTS_ONLY_ON_PR" == "true" ]]; then
-              export RUN_SMOKE_TESTS_ONLY=1
             fi
             .jenkins/pytorch/win-test.sh
       - name: Zip test reports for upload
