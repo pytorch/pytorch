@@ -1,7 +1,6 @@
 #include <ATen/AccumulateType.h>
 #include <ATen/ATen.h>
 #include <ATen/ceil_div.h>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/native/sparse/cuda/SparseCUDAApplyUtils.cuh>
 #include <ATen/native/cuda/SortingCommon.cuh>
@@ -260,7 +259,7 @@ Tensor sparse_mask_helper_cuda(
   // Step 4: Copy the Filtered `t._values()` using the matches at `t_indices_pos`
   if (r_nnz > 0 && t_values.numel() > 0) {
     int64_t block_size = std::min(at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, 1024);
-    auto grid_size = cuda::ATenCeilDiv(r_nnz, block_size);
+    auto grid_size = ceil_div(r_nnz, block_size);
 
     auto t_indices_ti = getTensorInfo<int64_t, int64_t>(t_flatten_indices);
     auto mask_indices_ti =
