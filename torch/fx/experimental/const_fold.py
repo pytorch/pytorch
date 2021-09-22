@@ -1,8 +1,8 @@
 import operator
-import re
 from typing import Dict, Set, List, Optional, Union
 
 import torch.fx
+import torch.fx.experimental.fx_acc.acc_utils as acc_utils
 from torch.fx.passes.split_module import split_module
 
 
@@ -138,18 +138,8 @@ def split_const_subgraphs(
     for i in range(len(const_output_names)):
         # Add a suffix to make it easier to tell these were the result of const folding.
         name = const_output_names[i] + "__CF"
-        # Delete all characters that are illegal in a Python identifier.
-        name = re.sub("[^0-9a-zA-Z_]+", "_", name)
-        if name[0].isdigit():
-            name = f"_{name}"
-        # Now make sure it is in fact unique to the module by incrementing suffix value.
-        while hasattr(mod_traced, name):
-            match = re.match(r"(.*)_(\d+)$", name)
-            if match is None:
-                name = name + "_1"
-            else:
-                base, num = match.group(1, 2)
-                name = f"{base}_{int(num) + 1}"
+        # Get an unique name for the attr.
+        name = acc_utils.get_unique_attr_name_in_module(mod_traced, name)
         const_output_names[i] = name
 
     # Now track the const_output_names to what name is used in the parent graph

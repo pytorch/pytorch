@@ -38,7 +38,7 @@ static inline c10::ScalarType scalarType(TensorType type) {
 
 static id parse(NSString* jsonStr) {
   NSData* data = [jsonStr dataUsingEncoding:NSUTF8StringEncoding];
-  NSError* error;
+  NSError* error = nil;
   id result = [NSJSONSerialization JSONObjectWithData:data
                                               options:0
                                                 error:&error];
