@@ -26,6 +26,7 @@ __all__ = [
     'cdist',
     'chain_matmul',
     'einsum',
+    'histogramdd',
     'istft',
     'lu',
     'norm',
@@ -326,6 +327,12 @@ def einsum(*args):
 
     return _VF.einsum(equation, operands)  # type: ignore[attr-defined]
 
+# Wrapper around _histogramdd and _histogramdd_bin_edges needed due to (Tensor, Tensor[]) return type.
+def histogramdd(input: Tensor, *bins: List[Tensor],
+        weight: Optional[Tensor] = None, density: Optional[bool] = False):
+    bin_edges = _VF._histogramdd_bin_edges(input, *bins, weight=weight, density=density)
+    hist = _VF._histogramdd(input, *bins, weight=weight, density=density)
+    return (hist, bin_edges)
 
 # This wrapper exists to support variadic args.
 if TYPE_CHECKING:

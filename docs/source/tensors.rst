@@ -391,6 +391,7 @@ Tensor class reference
     Tensor.heaviside
     Tensor.histc
     Tensor.histogram
+    Tensor.histogramdd
     Tensor.hsplit
     Tensor.hypot
     Tensor.hypot_

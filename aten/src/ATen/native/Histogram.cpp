@@ -51,6 +51,9 @@ void histogramdd_check_inputs(const Tensor& input, const TensorList& bins, const
 
     const int64_t D = input.size(-1);
 
+    TORCH_CHECK(int64_t(bins.size()) == D, "torch.histogramdd: expected ", D, " sequences of bin edges for a ", D,
+                "-dimensional histogram but got ", bins.size());
+
     for (int64_t dim = 0; dim < D; dim++) {
         TORCH_CHECK(input.dtype() == bins[dim].dtype(), "torch.histogramdd: input tensor and bins tensor should",
                 " have the same dtype, but got input ", input.dtype(),
@@ -217,7 +220,6 @@ Tensor& histogramdd_out_cpu(const Tensor& self, TensorList bins,
     histogramdd_check_inputs(self, bins, weight);
     histogramdd_prepare_out(self, bins, hist, bin_edges);
 
-    // TODO: what if bin_edges doesn't have the correct length
     for (size_t dim = 0; dim < bins.size(); dim++) {
         bin_edges[dim].copy_(bins[dim]);
     }
@@ -228,14 +230,21 @@ Tensor& histogramdd_out_cpu(const Tensor& self, TensorList bins,
 Tensor histogramdd_cpu(const Tensor& self, TensorList bins,
         const c10::optional<Tensor>& weight, bool density) {
     Tensor hist = at::empty({0}, self.options(), MemoryFormat::Contiguous);
-    std::vector<Tensor> bin_edges_out;
-    TensorList bin_edges_out_tl;
+
+    TORCH_CHECK(self.dim() >= 2, "torch.histogramdd: input tensor should have at least 2 dimensions");
+    const int64_t D = self.size(-1);
+    std::vector<Tensor> bin_edges_out(D);
+    for (int64_t dim = 0; dim < D; dim++) {
+        bin_edges_out[dim] = at::empty({0}, self.options(), MemoryFormat::Contiguous);
+    }
+    TensorList bin_edges_out_tl(bin_edges_out);
+
     histogramdd_out_cpu(self, bins, weight, density, hist, bin_edges_out_tl);
     return hist;
 }
 std::vector<Tensor> histogramdd_bin_edges_cpu(const Tensor& self, TensorList bins,
         const c10::optional<Tensor>& weight, bool density) {
-    return { at::tensor(0) };
+    return bins.vec();
 }
 
 /* Versions of histogram in which bins is a Tensor defining the sequence of bin edges.
