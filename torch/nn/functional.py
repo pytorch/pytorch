@@ -681,7 +681,7 @@ max_pool1d = boolean_dispatch(
 )
 
 
-max_pool1d = _add_docstr(
+_add_docstr(
     torch.max_pool1d,
     r"""
     max_pool1d(input, kernel_size, stride=None, padding=0, dilation=1, ceil_mode=False, return_indices=False)
@@ -781,7 +781,7 @@ max_pool2d = boolean_dispatch(
 )
 
 
-max_pool2d = _add_docstr(
+_add_docstr(
     torch.max_pool2d,
     r"""
     max_pool2d(input, kernel_size, stride=None, padding=0, dilation=1, ceil_mode=False, return_indices=False)
@@ -881,7 +881,7 @@ max_pool3d = boolean_dispatch(
 )
 
 
-max_pool3d = _add_docstr(
+_add_docstr(
     torch.max_pool3d,
     r"""
     max_pool3d(input, kernel_size, stride=None, padding=0, dilation=1, ceil_mode=False, return_indices=False)
