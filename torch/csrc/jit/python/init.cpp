@@ -264,9 +264,7 @@ void initJITBindings(PyObject* module) {
           })
       .def("_jit_pass_onnx_set_dynamic_input_shape", ONNXSetDynamicInputShape)
       .def("_jit_pass_autocast", Autocast)
-      .def(
-          "_jit_set_autocast_mode",
-          &setAutocastMode)
+      .def("_jit_set_autocast_mode", &setAutocastMode)
       .def("_jit_pass_fuse", FuseGraph)
       .def(
           "_jit_pass_dce",
