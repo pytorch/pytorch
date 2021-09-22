@@ -34,3 +34,6 @@ elif [[ "$BUILD_ENVIRONMENT" == *-mobile-custom-build-dynamic* ]]; then
 else
   TEST_DEFAULT_BUILD=1 test/mobile/custom_build/build.sh
 fi
+
+# Test AOT model compiler
+source test/mobile/aot_compile/test.sh
