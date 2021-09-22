@@ -2141,10 +2141,9 @@ def all_gather_coalesced(
     if group is None:
         group = _get_default_group()
 
-    flatten_tensors = [x.flatten().tolist() for x in input_tensor_list]
-    one_list = [x for i in flatten_tensors for x in i]
-    one_tensor = torch.Tensor(one_list)
-    temp_out = [torch.zeros(one_tensor.shape) for _ in range(len(output_tensor_lists))]
+    flatten_tensors = [x.flatten() for x in input_tensor_list]
+    coalesced_input = torch.cat(flatten_tensors)
+    coalesced_output = [torch.zeros(coalesced_input.shape) for _ in range(len(output_tensor_lists))]
 
     def copy_values_to_output_tensor_lists(fut_param):
         vals = fut_param.wait()
@@ -2154,7 +2153,7 @@ def all_gather_coalesced(
             for i in range(len(output_tensor_lists[idx])):
                 output_tensor_lists[idx][i].copy_(chunks[i].reshape_as(input_tensor_list[i]))
 
-    work = group.allgather([temp_out], [one_tensor])
+    work = group.allgather([coalesced_output], [coalesced_input])
     fut = work.get_future().then(copy_values_to_output_tensor_lists)
     if async_op:
         return fut
