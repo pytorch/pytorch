@@ -1823,7 +1823,7 @@ Examples::
 """)
 
 solve_triangular = _add_docstr(_linalg.linalg_solve_triangular, r"""
-linalg.solve_triangular(A, B, *, left=True, upper=True, unitriangular=False, out=None) -> Tensor
+linalg.solve_triangular(A, B, *, upper, left=True, unitriangular=False, out=None) -> Tensor
 
 Computes the solution of a triangular system of linear equations with a unique solution.
 
@@ -1867,8 +1867,8 @@ Args:
     B (Tensor): right-hand side tensor of shape `(*, n, k)`.
 
 Keyword args:
-    left (bool optional): whether to solve the system :math:`AX=B` or :math:`XA = B`. Default: `True`.
-    upper (bool optional): whether :attr:`A` is an upper or lower triangular matrix. Default: `True`.
+    upper (bool): whether :attr:`A` is an upper or lower triangular matrix.
+    left (bool, optional): whether to solve the system :math:`AX=B` or :math:`XA = B`. Default: `True`.
     unitriangular (bool, optional): if `True`, the diagonal elements of :attr:`A` are assumed to be
                                     all equal to `1`. Default: `False`.
     out (Tensor, optional): output tensor. `B` may be passed as `out` and the result is computed in-place on `B`.
@@ -1878,7 +1878,7 @@ Examples::
 
     >>> A = torch.randn(3, 3).triu_()
     >>> b = torch.randn(3, 4)
-    >>> X = torch.linalg.solve_triangular(A, B)
+    >>> X = torch.linalg.solve_triangular(A, B, upper=True)
     >>> torch.allclose(A @ X, B)
     True
 
@@ -1890,7 +1890,7 @@ Examples::
 
     >>> A = torch.randn(2, 4, 4).tril_()
     >>> B = torch.randn(2, 3, 4)
-    >>> X = torch.linalg.solve_triangular(A, B, left=False)
+    >>> X = torch.linalg.solve_triangular(A, B, upper=False, left=False)
     >>> torch.allclose(X @ A, B)
     True
 

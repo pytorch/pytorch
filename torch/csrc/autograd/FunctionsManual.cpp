@@ -2883,8 +2883,8 @@ Tensor linalg_solve_triangular_forward_AD(
     const Tensor& B_t,
     const Tensor& A,
     const Tensor& X,
-    const bool left,
     const bool upper,
+    const bool left,
     const bool unitriangular) {
   // The forward AD formula (for left = true) is A^{-1}(B_t - A_tX)
   // For the derivation see:
@@ -2892,15 +2892,15 @@ Tensor linalg_solve_triangular_forward_AD(
   const Tensor proj_A_t = upper ? A_t.triu(static_cast<int>(unitriangular))
                                 : A_t.tril(- static_cast<int>(unitriangular));
   const Tensor X_t = B_t - (left ? at::matmul(proj_A_t, X) : at::matmul(X, proj_A_t));
-  return at::native::linalg_solve_triangular(A, X_t, left, upper, unitriangular);
+  return at::native::linalg_solve_triangular(A, X_t, upper, left, unitriangular);
 }
 
 std::tuple<Tensor, Tensor> linalg_solve_triangular_backward(
     const Tensor& grad,
     const Tensor& A,
     const Tensor& X,
-    const bool left,
     const bool upper,
+    const bool left,
     const bool unitriangular,
     std::array<bool, 2> output_mask) {
   const bool A_requires_grad = output_mask[0];
@@ -2938,7 +2938,7 @@ std::tuple<Tensor, Tensor> linalg_solve_triangular_backward(
   // We always need to comput G_B
   const Tensor A_H = A.conj().transpose(-2, -1);
   // gragrad does not go through because it gets confused with this !upper
-  const Tensor G_B = at::linalg_solve_triangular(A_H, grad, left, !upper, unitriangular);
+  const Tensor G_B = at::linalg_solve_triangular(A_H, grad, !upper, left, unitriangular);
 
   if (A_requires_grad) {
     const Tensor X_H = X.conj().transpose(-2, -1);
