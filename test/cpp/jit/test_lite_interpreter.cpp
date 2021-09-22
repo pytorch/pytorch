@@ -1006,7 +1006,7 @@ TEST(RunTimeTest, ParseOperator) {
   parseInstructions(
       function_name, instructions, debug_handles_m_tuple, function.get());
   parseOperators(
-      c10::ivalue::Tuple::create(operators).elements(),
+      std::move(*c10::ivalue::Tuple::create(operators)).elements(),
       model_version,
       1,
       function.get());
