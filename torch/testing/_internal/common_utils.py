@@ -73,6 +73,9 @@ IS_SANDCASTLE = os.getenv('SANDCASTLE') == '1' or os.getenv('TW_JOB_USER') == 's
 IS_FBCODE = os.getenv('PYTORCH_TEST_FBCODE') == '1'
 IS_REMOTE_GPU = os.getenv('PYTORCH_TEST_REMOTE_GPU') == '1'
 
+RETRY_TEST_CASES = os.getenv('PYTORCH_RETRY_TEST_CASES') == '1'
+MAX_NUM_RETRIES = 3
+
 DISABLED_TESTS_FILE = '.pytorch-disabled-tests.json'
 SLOW_TESTS_FILE = '.pytorch-slow-tests.json'
 
@@ -1450,11 +1453,40 @@ class TestCase(expecttest.TestCase):
     def wrap_with_cuda_memory_check(self, method):
         return self.wrap_method_with_policy(method, self.assertLeaksNoCudaTensors)
 
-    def run(self, result=None):
+    # Recursive function that incorporates retry logic when PYTORCH_RETRY_TEST_CASES=1 and adds early test termination
+    def _run(self, result=None, num_runs_left=0):
+        if num_runs_left == 0:
+            return
+
+        failures_before = 0 if result == None else len(result.failures)  # num tests marked as failed before starting
+        errors_before = 0 if result == None else len(result.errors)  # num tests marked as errored before starting
+
         super().run(result=result)
         # Early terminate test if necessary.
         if self._should_stop_test_suite():
             result.stop()
+
+        if not RETRY_TEST_CASES:
+            return
+
+        err = sys.exc_info()
+        num_retries_left = num_runs_left - 1
+        if failures_before < len(result.failures):
+            print(f" {self._testMethodName} failed - num_retries_left: {num_retries_left}")
+            if num_retries_left > 0:
+                result.failures.pop(-1)
+                result.addExpectedFailure(self, err)
+                self._run(result=result, num_runs_left=num_retries_left)
+        elif errors_before < len(result.errors):
+            print(f" {self._testMethodName} errored - num_retries_left: {num_retries_left}")
+            if num_retries_left > 0:
+                result.errors.pop(-1)
+                result.addExpectedFailure(self, err)
+                self._run(result=result, num_runs_left=num_retries_left)
+
+    def run(self, result=None):
+        num_runs = MAX_NUM_RETRIES + 1 if RETRY_TEST_CASES else 1
+        self._run(result=result, num_runs_left=num_runs)
 
     def setUp(self):
         check_if_enable(self)
