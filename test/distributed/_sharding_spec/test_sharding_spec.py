@@ -148,8 +148,8 @@ class TestShardingSpec(TestCase):
         with self.assertRaisesRegex(ValueError, 'shard_offsets should be >=0'):
             ShardMetadata(shard_offsets=[-1, 0], shard_lengths=[1, 1], placement="cuda:0")
 
-        with self.assertRaisesRegex(ValueError, 'shard_lengths should be > 0'):
-            ShardMetadata(shard_offsets=[0, 0], shard_lengths=[0, 1], placement="cuda:0")
+        with self.assertRaisesRegex(ValueError, 'shard_lengths should be >= 0'):
+            ShardMetadata(shard_offsets=[0, 0], shard_lengths=[-1, 1], placement="cuda:0")
 
         with self.assertRaisesRegex(ValueError, 'Empty shard list provided'):
             EnumerableShardingSpec([])
