@@ -100,8 +100,10 @@ class AveragedModel(Module):
     def forward(self, *args, **kwargs):
         return self.module(*args, **kwargs)
 
-    def update_parameters(self, model):
-        for p_swa, p_model in zip(self.parameters(), model.parameters()):
+    def update_parameters(self, model, use_state_dict=False):
+        self_param = self.module.state_dict().values() if use_state_dict else self.parameters()
+        model_param = model.state_dict().values() if use_state_dict else model.parameters()
+        for p_swa, p_model in zip(self_param, model_param):
             device = p_swa.device
             p_model_ = p_model.detach().to(device)
             if self.n_averaged == 0:
