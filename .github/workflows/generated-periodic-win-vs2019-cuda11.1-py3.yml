@@ -233,8 +233,8 @@ jobs:
         shell: bash
         env:
           PYTORCH_FINAL_PACKAGE_DIR: /c/${{ github.run_id }}/build-results/
-        # Time out the test phase after 2 hours
-        timeout-minutes: 120
+        # Time out the test phase after 3.5 hours
+        timeout-minutes: 210
         run: |
             if [[ $NUM_TEST_SHARDS -ne 2 ]]; then
               export SHARD_NUMBER=0
