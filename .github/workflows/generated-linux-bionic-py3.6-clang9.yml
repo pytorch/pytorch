@@ -431,6 +431,8 @@ jobs:
           CIRCLE_PR_NUMBER: ${{ github.event.pull_request.number }}
           CIRCLE_SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           AWS_DEFAULT_REGION: us-east-1
+        # Time out the test phase after 2 hours
+        timeout-minutes: 120
         run: |
           if [[ $TEST_CONFIG == 'multigpu' ]]; then
             TEST_COMMAND=.jenkins/pytorch/multigpu-test.sh
