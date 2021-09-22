@@ -1,77 +1,85 @@
 #ifdef _WIN32
 #include <c10d/WinSockUtils.hpp>
 #else
+#include <arpa/inet.h>
 #include <c10d/UnixSockUtils.hpp>
 #include <netdb.h>
-#include <sys/poll.h>
-#include <arpa/inet.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
+#include <sys/poll.h>
 #include <unistd.h>
 #endif
 
+#include <fcntl.h>
 #include <algorithm>
 #include <cstring>
-#include <fcntl.h>
 #include <memory>
 #include <string>
 #include <thread>
 
 namespace c10d {
 
-  const char* kDistDebugEnvVar = "TORCH_DISTRIBUTED_DEBUG";
-  const char* kDistDebugDetailLogLevel = "DETAIL";
-  const char* kDistDebugInfoLogLevel = "INFO";
-  const char* kDistDebugOffLogLevel = "OFF";
+const char* kDistDebugEnvVar = "TORCH_DISTRIBUTED_DEBUG";
+const char* kDistDebugDetailLogLevel = "DETAIL";
+const char* kDistDebugInfoLogLevel = "INFO";
+const char* kDistDebugOffLogLevel = "OFF";
 
-  std::string parse_env(const char* env_var_name) {
-    char* stringValue = std::getenv(env_var_name);
-    std::string res = "N/A";
-    if (stringValue != nullptr) {
-      res = stringValue;
-    }
-    return res;
+std::string parse_env(const char* env_var_name) {
+  char* stringValue = std::getenv(env_var_name);
+  std::string res = "N/A";
+  if (stringValue != nullptr) {
+    res = stringValue;
+  }
+  return res;
+}
+
+DistributedDebugLevel parseDistDebugLevel() {
+  std::string debugLevel = parse_env(kDistDebugEnvVar);
+  const char* levelStr;
+  if (debugLevel.compare("N/A") == 0) {
+    levelStr = kDistDebugOffLogLevel;
+  } else {
+    levelStr = debugLevel.c_str();
+    TORCH_CHECK(
+        strncmp(
+            levelStr,
+            kDistDebugDetailLogLevel,
+            strlen(kDistDebugDetailLogLevel)) == 0 ||
+            strncmp(
+                levelStr,
+                kDistDebugInfoLogLevel,
+                strlen(kDistDebugInfoLogLevel)) == 0 ||
+            strncmp(
+                levelStr,
+                kDistDebugOffLogLevel,
+                strlen(kDistDebugOffLogLevel)) == 0,
+        c10::str(
+            "Expected environment variable TORCH_DISTRIBUTED_DEBUG to be one of ",
+            kDistDebugDetailLogLevel,
+            " ",
+            kDistDebugInfoLogLevel,
+            " ",
+            kDistDebugOffLogLevel,
+            " "));
+    C10_LOG_FIRST_N(INFO, 1)
+        << "TORCH_DISTRIBUTED_DEBUG level parsed as " << levelStr;
   }
 
-  DistributedDebugLevel parseDistDebugLevel() {
-    std::string debugLevel = parse_env(kDistDebugEnvVar);
-    const char * levelStr;
-    if (debugLevel.compare("N/A") == 0) {
-      levelStr = kDistDebugOffLogLevel;
-    } else {
-      levelStr = debugLevel.c_str();
-      TORCH_CHECK(
-        strncmp(levelStr, kDistDebugDetailLogLevel, strlen(kDistDebugDetailLogLevel)) == 0
-        || strncmp(levelStr, kDistDebugInfoLogLevel, strlen(kDistDebugInfoLogLevel)) == 0
-        || strncmp(levelStr, kDistDebugOffLogLevel, strlen(kDistDebugOffLogLevel)) == 0,
-        c10::str(
-          "Expected environment variable TORCH_DISTRIBUTED_DEBUG to be one of ",
-          kDistDebugDetailLogLevel,
-          " ",
-          kDistDebugInfoLogLevel,
-          " ",
-          kDistDebugOffLogLevel,
-          " "
-        )
-      );
-      C10_LOG_FIRST_N(INFO, 1) << "TORCH_DISTRIBUTED_DEBUG level parsed as " << levelStr;
-    }
-
-    static std::unordered_map<std::string, DistributedDebugLevel> mapping = {
-    {kDistDebugOffLogLevel, DistributedDebugLevel::OFF},
-    {kDistDebugInfoLogLevel, DistributedDebugLevel::INFO},
-    {kDistDebugDetailLogLevel, DistributedDebugLevel::DETAIL}
-  };
+  static std::unordered_map<std::string, DistributedDebugLevel> mapping = {
+      {kDistDebugOffLogLevel, DistributedDebugLevel::OFF},
+      {kDistDebugInfoLogLevel, DistributedDebugLevel::INFO},
+      {kDistDebugDetailLogLevel, DistributedDebugLevel::DETAIL}};
 
   auto it = mapping.find(levelStr);
   TORCH_CHECK(
-    it != mapping.end(),
-    "Invalid string value for distributed debug mode: ", levelStr
-  );
+      it != mapping.end(),
+      "Invalid string value for distributed debug mode: ",
+      levelStr);
   return it->second;
 }
 
-std::vector<at::Tensor> getTensorShapes(const std::vector<at::Tensor>& tensors) {
+std::vector<at::Tensor> getTensorShapes(
+    const std::vector<at::Tensor>& tensors) {
   std::vector<at::Tensor> shapeTensors;
   shapeTensors.reserve(tensors.size());
   for (const auto& tensor : tensors) {
@@ -80,12 +88,14 @@ std::vector<at::Tensor> getTensorShapes(const std::vector<at::Tensor>& tensors) 
     // Need to clone here otherwise the shapesVec.data() memory is not copied
     // and can be released under the hood.
     at::Tensor shapesTensor = at::from_blob(
-        shapesVec.data(), {shapes_size}, at::TensorOptions().dtype(at::kLong)).clone();
+                                  shapesVec.data(),
+                                  {shapes_size},
+                                  at::TensorOptions().dtype(at::kLong))
+                                  .clone();
     shapeTensors.emplace_back(std::move(shapesTensor));
   }
   return shapeTensors;
 }
-
 
 namespace tcputil {
 
@@ -228,13 +238,11 @@ void handleConnectException(
     // timeout. A timeout is specified if timeout != kNoTimeout.
     if (timeout != kNoTimeout) {
       const auto elapsed = std::chrono::high_resolution_clock::now() - start;
+
       TORCH_CHECK(
           elapsed <= timeout,
           c10::str(
-              kConnectTimeoutMsg,
-              " Original timeout was ",
-              timeout.count(),
-              " ms."));
+              kConnectTimeoutMsg, " Timeout set to ", timeout.count(), " ms."));
     }
     std::this_thread::sleep_for(std::chrono::seconds(1));
     *anyRefused = false;
@@ -283,6 +291,9 @@ int connect(
     throw std::invalid_argument(
         "host not found: " + std::string(gai_strerror(err)));
   }
+
+  VLOG(1) << "connect() to address " << address
+          << ", port: " << std::to_string(port);
 
   std::shared_ptr<struct ::addrinfo> addresses(
       res, [](struct ::addrinfo* p) { ::freeaddrinfo(p); });
@@ -350,7 +361,8 @@ std::tuple<int, std::string> accept(
   while (true) {
     int res = tcputil::poll(events.get(), 1, timeout.count());
     if (res == 0) {
-      TORCH_CHECK(false,
+      TORCH_CHECK(
+          false,
           "waiting for processes to "
           "connect has timed out");
     } else if (res == -1) {

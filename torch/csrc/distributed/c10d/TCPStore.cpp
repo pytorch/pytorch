@@ -133,7 +133,8 @@ void BackgroundThread::join() {
 void BackgroundThread::initStopSignal() {
   ghStopEvent_ = CreateEvent(NULL, TRUE, FALSE, NULL);
   if (ghStopEvent_ == NULL) {
-    TORCH_CHECK(false,
+    TORCH_CHECK(
+        false,
         "Failed to create the control pipe to start the "
         "BackgroundThread run");
   }
@@ -149,7 +150,8 @@ void BackgroundThread::stop() {
 #else
 void BackgroundThread::initStopSignal() {
   if (pipe(controlPipeFd_.data()) == -1) {
-    TORCH_CHECK(false,
+    TORCH_CHECK(
+        false,
         "Failed to create the control pipe to start the "
         "BackgroundThread run");
   }
@@ -474,7 +476,7 @@ void TCPStoreMasterDaemon::checkHandler(int socket) const {
   SizeType nargs;
   tcputil::recvBytes<SizeType>(socket, &nargs, 1);
   std::vector<std::string> keys(nargs);
-  for(const auto i : c10::irange(nargs)) {
+  for (const auto i : c10::irange(nargs)) {
     keys[i] = tcputil::recvString(socket);
   }
   // Now we have received all the keys
@@ -489,7 +491,7 @@ void TCPStoreMasterDaemon::waitHandler(int socket) {
   SizeType nargs;
   tcputil::recvBytes<SizeType>(socket, &nargs, 1);
   std::vector<std::string> keys(nargs);
-  for(const auto i : c10::irange(nargs)) {
+  for (const auto i : c10::irange(nargs)) {
     keys[i] = tcputil::recvString(socket);
   }
   if (checkKeys(keys)) {
@@ -534,7 +536,7 @@ void TCPStoreMasterDaemon::run() {
   // receive the queries
   bool finished = false;
   while (!finished) {
-    for(const auto i : c10::irange(sockets_.size())) {
+    for (const auto i : c10::irange(sockets_.size())) {
       fds[i].revents = 0;
     }
 
@@ -579,7 +581,7 @@ void TCPStoreMasterDaemon::run() {
   // receive the queries
   bool finished = false;
   while (!finished) {
-    for(const auto i : c10::irange(sockets_.size())) {
+    for (const auto i : c10::irange(sockets_.size())) {
       fds[i].revents = 0;
     }
 
@@ -819,8 +821,8 @@ std::shared_ptr<TCPServer> TCPServer::start(const TCPStoreOptions& opts) {
   if (opts.multiTenant) {
     std::lock_guard<std::mutex> guard{cache_mutex_};
 
-    // If the caller is okay with a multi-tenant store, first check if we already
-    // have a TCPServer running on the specified port.
+    // If the caller is okay with a multi-tenant store, first check if we
+    // already have a TCPServer running on the specified port.
     if (opts.port > 0) {
       auto pos = cachedServers_.find(opts.port);
       if (pos != cachedServers_.end()) {
@@ -923,11 +925,12 @@ void TCPClient::setTimeout(std::chrono::milliseconds value) {
   }
 
 #ifdef _WIN32
-  struct timeval timeoutTV = {static_cast<long>(value.count() / 1000),
-                              static_cast<long>((value.count() % 1000) * 1000)};
+  struct timeval timeoutTV = {
+      static_cast<long>(value.count() / 1000),
+      static_cast<long>((value.count() % 1000) * 1000)};
 #else
-  struct timeval timeoutTV = {.tv_sec = value.count() / 1000,
-                              .tv_usec = (value.count() % 1000) * 1000};
+  struct timeval timeoutTV = {
+      .tv_sec = value.count() / 1000, .tv_usec = (value.count() % 1000) * 1000};
 #endif
   SYSCHECK_ERR_RETURN_NEG1(::setsockopt(
       socket_.handle(),
@@ -995,12 +998,13 @@ TCPStore::TCPStore(
     bool waitWorkers)
     : TCPStore{
           masterAddr,
-          TCPStoreOptions{masterPort,
-                          isServer,
-                          numWorkers ? c10::optional<std::size_t>(*numWorkers)
-                                     : c10::nullopt,
-                          waitWorkers,
-                          timeout}} {}
+          TCPStoreOptions{
+              masterPort,
+              isServer,
+              numWorkers ? c10::optional<std::size_t>(*numWorkers)
+                         : c10::nullopt,
+              waitWorkers,
+              timeout}} {}
 
 TCPStore::TCPStore(std::string host, const TCPStoreOptions& opts)
     : Store{opts.timeout},
@@ -1049,8 +1053,15 @@ void TCPStore::waitForWorkers() {
       }
       const auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
           std::chrono::steady_clock::now() - start);
-      if (timeout_ != kNoTimeout && elapsed > timeout_) {
-        break;
+
+      if (timeout_ != kNoTimeout) {
+        TORCH_CHECK(
+            elapsed < timeout_,
+            "TcpStore server timed out waiting for workers, only ",
+            numWorkersCompleted,
+            " out of ",
+            *numWorkers_,
+            " worker connected.");
       }
       /* sleep override */
       std::this_thread::sleep_for(std::chrono::milliseconds(10));
