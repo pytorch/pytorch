@@ -70,7 +70,6 @@ install(FILES
           generic/THCTensor.cpp
           generic/THCTensor.cu
           generic/THCTensor.h
-          generic/THCTensor.hpp
           generic/THCStorageCopy.cpp
           generic/THCStorageCopy.cu
           generic/THCStorageCopy.h
