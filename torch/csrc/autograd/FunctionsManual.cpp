@@ -2973,6 +2973,24 @@ std::tuple<Tensor, Tensor> cholesky_solve_backward(
   return std::tuple<Tensor, Tensor>{grad_self, grad_input2};
 }
 
+Tensor cholesky_solve_jvp(
+  const Tensor& X,
+  const Tensor& U,
+  const Tensor& dU,
+  const Tensor& dB,
+  const bool upper
+) {
+  auto dK = upper ? dU.transpose(-1, -2).conj().matmul(U)
+                  : dU.matmul(U.transpose(-1, -2).conj());
+  auto dA = dK + dK.transpose(-1, -2).conj();
+  return generic_solve_jvp(
+    [=](const Tensor& A, const Tensor& B) {
+      return at::cholesky_solve(B, A, upper);
+    },
+    X, /*A=*/U, dA, dB
+  );
+}
+
 Tensor fft_c2r_backward(const Tensor& grad, IntArrayRef dim, int64_t normalization) {
   // Forward is C2R (onesided)
   // Think of onesided C2R irfft as

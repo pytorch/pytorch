@@ -202,6 +202,13 @@ Tensor constant_pad_nd_backward(const Tensor& grad, IntArrayRef pad);
 std::tuple<Tensor, Tensor> cholesky_solve_backward(
     const Tensor& grad_x, const Tensor& self,
     const Tensor& input2, const Tensor& result, const bool upper);
+Tensor cholesky_solve_jvp(
+    const Tensor& X,
+    const Tensor& U,
+    const Tensor& dU,
+    const Tensor& dB,
+    const bool upper
+);
 std::tuple<Tensor, Tensor, Tensor>
 infinitely_differentiable_native_group_norm_backward(
     const Tensor& dY,
