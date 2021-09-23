@@ -24,12 +24,15 @@ from torch.quantization.fx.match_utils import (
     MatchAllNode,
 )
 
-from torch.quantization import (
+from torch.ao.quantization import (
     QuantType,
+    quant_type_to_str,
+)
+
+from torch.quantization import (
     QuantStub,
     DeQuantStub,
     QuantWrapper,
-    quant_type_to_str,
     default_qconfig,
     default_dynamic_qconfig,
     default_qat_qconfig,
@@ -3028,16 +3031,72 @@ class TestQuantizeFx(QuantizationTestCase):
             def forward(self, x):
                 x = x + 1
                 x = x - 1
+                x = x + 3
+                x = x - 4
                 return x
 
         m = M().eval()
         m = prepare_fx(m, {"": default_qconfig})
         m = convert_fx(m)
         occurrence = {
-            ns.call_function(torch.quantize_per_tensor): 1,
-            ns.call_method("dequantize"): 1
+            ns.call_function(torch.quantize_per_tensor): 2,
+            ns.call_method("dequantize"): 2
         }
         self.checkGraphModuleNodes(m, expected_node_occurrence=occurrence)
+
+    def test_observer_fqn(self):
+        """
+        Test to make sure the observer FQN is based on the quantizable op/module that it is observing
+        and uses the modules FQN to determine the observer name.
+        """
+        class Linear(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.w = torch.ones(5, 5)
+                self.b = torch.zeros(5)
+
+
+            def forward(self, x):
+                return torch.nn.functional.linear(x, self.w, self.b)
+
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.mods1 = torch.nn.Sequential(
+                    Linear(),
+                    Linear()
+                )
+                self.mods2 = Linear()
+                self.mods3 = torch.nn.Linear(5, 5)
+
+            def forward(self, x):
+                x = self.mods1(x)
+                x = torch.add(x, 4)
+                x = self.mods2(x)
+                y = torch.add(x, 2)
+                z = torch.mul(x, 5)
+                a = self.mods3(y)
+                return a, z
+
+        model = M().eval()
+
+        prepared = prepare_fx(model, {"": default_qconfig})
+        name_list = []
+        for name, mod in prepared.named_modules():
+            if isinstance(mod, torch.ao.quantization.observer.MinMaxObserver):
+                assert "mods" in name
+                name_list.append(name)
+        expected_name_list = ['mods1_0_input_activation_post_process_0',
+                              'mods1_0_w_activation_post_process_0',
+                              'mods1_0_output_activation_post_process_0',
+                              'mods1_1_w_activation_post_process_0',
+                              'mods1_1_output_activation_post_process_0',
+                              'mods2_w_activation_post_process_0',
+                              'mods2_output_activation_post_process_0',
+                              'mods3_output_activation_post_process_0']
+        assert name_list == expected_name_list
+
 
 @skipIfNoFBGEMM
 class TestQuantizeFxOps(QuantizationTestCase):
@@ -4179,9 +4238,6 @@ class TestQuantizeFxOps(QuantizationTestCase):
         qconfig_dict = {"": torch.quantization.get_default_qconfig("fbgemm")}
         is_reference = True
         node_list = [
-            ns.call_function(torch.quantize_per_tensor),
-            ns.call_function(torch.quantize_per_tensor),
-            ns.call_method('dequantize'),
             ns.call_function(torch.bmm),
         ]
 
@@ -4189,6 +4245,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
         m_prep = torch.quantization.quantize_fx.prepare_fx(m, qconfig_dict)
         m_prep(data_x, data_y)
         m_quant = torch.quantization.quantize_fx.convert_fx(m_prep, is_reference=is_reference)
+        print(m_quant)
         m_quant(data_x, data_y)
 
         self.checkGraphModuleNodes(m_quant, expected_node_list=node_list)
@@ -4969,7 +5026,6 @@ class TestQuantizeFxOps(QuantizationTestCase):
         m = convert_fx(m)
         m(data)
         # make sure everything runs
-
 
 class TestQuantizeFxModels(QuantizationTestCase):
     @skipIfNoFBGEMM
