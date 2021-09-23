@@ -190,6 +190,10 @@ ReduceFunc toFunction(const ReduceOp& r) {
       TORCH_CHECK(false,
           "Cannot use ReduceOp.BXOR with non-integral dtype");
       break;
+    case ReduceOp::AVG:
+      TORCH_CHECK(false,
+          "Cannot use ReduceOp.AVG with Gloo");
+      break;
     case ReduceOp::UNUSED:
       break;
   }
@@ -255,6 +259,10 @@ ReduceFunc toFunction(const ReduceOp& r) {
       return ReduceFunc(&bor<T>);
     case ReduceOp::BXOR:
       return ReduceFunc(&bxor<T>);
+    case ReduceOp::AVG:
+      TORCH_CHECK(false,
+          "Cannot use ReduceOp.AVG with Gloo");
+      break;
     case ReduceOp::UNUSED:
       break;
   }
