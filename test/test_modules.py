@@ -121,7 +121,6 @@ class TestModule(TestCase):
         for module_input in module_inputs:
             args, kwargs = module_input.constructor_input.args, module_input.constructor_input.kwargs
             m = module_cls(*args, **kwargs)
-            self.assertFalse(True)
 
             # Check that these methods do not raise errors
             m.__repr__()
