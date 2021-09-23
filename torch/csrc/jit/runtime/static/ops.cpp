@@ -1833,6 +1833,7 @@ REGISTER_OPERATOR_FUNCTOR(
           check_cat_no_zero_dim(inputs);
           dim = legacy_cat_wrap_dim(dim, inputs);
           auto& out_t = p_node->Output(0).toTensor();
+          fastResizeToZero(out_t);
           at::native::_cat_out_cpu(inputs, dim, out_t);
         }
       };
@@ -1889,15 +1890,21 @@ REGISTER_OPERATOR_FUNCTOR(
         LogAndDumpSchema(n);
         return nullptr;
       }
-      return [](ProcessedNode* p_node) {
+      auto te = createSignedLog1p();
+      return [te](ProcessedNode* p_node) {
         const auto& input = p_node->Input(0).toTensor();
         if (p_node->Output(0).isNone()) {
-          p_node->Output(0) = signed_log1p(input);
-        } else {
-          auto& out = p_node->Output(0).toTensor();
+          p_node->Output(0) = create_empty_from(input);
+        }
+        auto& out = p_node->Output(0).toTensor();
+        if (!te || !te->supports(input)) {
           fastResizeToZero(out);
           signed_log1p_out(out, input);
+          return;
         }
+        at::native::resize_(out, input.sizes(), c10::nullopt);
+        int64_t nn = input.numel();
+        te->call({out.data_ptr(), input.data_ptr(), &nn});
       };
     });
 } // namespace jit
