@@ -168,7 +168,7 @@ def gen_lazy_nativefunc_definition(f: NativeFunction, backend_index: BackendInde
 
     return [f"""\
 {sig.decl(name=f"{class_method_name}::{schema.aten_name}")} {{
-    LTC_FN_COUNTER("lazy::")
+    LTC_FN_COUNTER("lazy::");
     {lazy_tensor_decls_str}
     {meta_str}
     return bridge::AtenFromLtcTensor(l_{first_tensor.name}.CreateFrom(
