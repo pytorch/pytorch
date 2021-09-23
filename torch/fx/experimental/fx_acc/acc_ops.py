@@ -401,9 +401,6 @@ def matmul(*, input, other):
 @register_custom_acc_mapper_fn(
     op_and_target=("call_function", nn.functional.dropout),
     arg_replacement_tuples=[("input", "input")])
-@register_custom_acc_mapper_fn(
-    op_and_target=("call_method", "detach"),
-    arg_replacement_tuples=[("input", "input")])
 def dropout_mapper(node: torch.fx.Node, mod: nn.Module):
     """
     Remove dropout node and directly map its input to output.
@@ -498,7 +495,6 @@ def sub(*, input, other):
 
 @register_acc_op_mapping(op_and_target=("call_function", torch.mul))
 @register_acc_op_mapping(op_and_target=("call_function", operator.mul))
-@register_acc_op_mapping(op_and_target=("call_method", "mul"))
 @register_acc_op
 def mul(*, input, other):
     return input * other
@@ -718,7 +714,6 @@ def cosh(*, input):
 
 
 @register_acc_op_mapping(op_and_target=("call_function", torch.tanh))
-@register_acc_op_mapping(op_and_target=("call_method", "tanh"))
 @register_acc_op
 def tanh(*, input):
     return torch.tanh(**locals())
