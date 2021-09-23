@@ -331,7 +331,7 @@ facebook::jni::local_ref<JIValue> JIValue::newJIValueFromAtIValue(
         JIValue::javaClassStatic(),
         facebook::jni::make_jstring(ivalue.toStringRef()));
   } else if (ivalue.isTuple()) {
-    auto elementsVec = ivalue.toTuple()->elements();
+    auto elementsVec = ivalue.toTupleRef().elements();
     static auto jMethodTupleArr =
         JIValue::javaClassStatic()
             ->getStaticMethod<facebook::jni::local_ref<JIValue>(

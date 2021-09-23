@@ -834,16 +834,16 @@ void export_opnames(const script::Module& m, std::set<std::string>& opnames) {
   TypeNameUniquer dummy_uniquer = TypeNameUniquer();
   moduleMethodsTuple(m, elements, debug_info_elements, dummy, dummy_uniquer);
   for (const auto& element : elements) {
-    auto table = element.toTuple()->elements()[1];
+    auto table = element.toTupleRef().elements()[1];
     auto row =
-        table.toTuple()->elements().at(BYTECODE_INDEX_OPERATOR).toTuple();
+        table.toTupleRef().elements().at(BYTECODE_INDEX_OPERATOR).toTuple();
     TORCH_INTERNAL_ASSERT(
         row->elements().at(0).toStringRef() == "operators",
         "Expected operators but found ",
         row->elements().at(0).toStringRef());
-    const auto& ops_list = row->elements().at(1).toTuple()->elements();
+    const auto& ops_list = row->elements().at(1).toTupleRef().elements();
     for (const auto& op : ops_list) {
-      auto op_item = op.toTuple()->elements();
+      auto op_item = op.toTupleRef().elements();
       TORCH_CHECK(
           op_item.size() >= 2,
           "There should be either two parts (name and overload name), ",

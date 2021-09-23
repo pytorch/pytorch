@@ -29,12 +29,12 @@ void compare_torchpy_jit(const char* model_filename, const char* jit_filename) {
     eg = I.self.attr("load_pickle")({"model", "example.pkl"}).toIValue();
   }
 
-  at::Tensor output = model(eg.toTuple()->elements()).toTensor();
+  at::Tensor output = model(eg.toTupleRef().elements()).toTensor();
 
   // Reference
   auto ref_model = torch::jit::load(jit_filename);
   at::Tensor ref_output =
-      ref_model.forward(eg.toTuple()->elements()).toTensor();
+      ref_model.forward(eg.toTupleRef().elements()).toTensor();
 
   ASSERT_TRUE(ref_output.allclose(output, 1e-03, 1e-05));
 }

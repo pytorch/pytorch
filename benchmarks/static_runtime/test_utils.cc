@@ -142,8 +142,8 @@ void compareResults(
     return;
   } else if (expect.isTuple()) {
     EXPECT_TRUE(actual.isTuple());
-    auto lhs = expect.toTuple()->elements();
-    auto rhs = actual.toTuple()->elements();
+    auto lhs = expect.toTupleRef().elements();
+    auto rhs = actual.toTupleRef().elements();
     EXPECT_TRUE(lhs.size() == rhs.size());
     for (size_t i = 0; i < lhs.size(); i++) {
       compareResults(lhs[i], rhs[i]);

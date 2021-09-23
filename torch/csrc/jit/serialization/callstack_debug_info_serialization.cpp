@@ -186,7 +186,7 @@ c10::optional<ModuleInstanceInfo> InlinedCallStackDeserializer::
   if (it != cached_module_instance_info_.end()) {
     return it->second;
   }
-  auto tup_elems = iv.toTuple()->elements();
+  auto tup_elems = iv.toTupleRef().elements();
   TORCH_CHECK(tup_elems.size() == 2);
   std::string type_name = tup_elems[0].toString()->string();
   std::string instance_name = tup_elems[1].toString()->string();
@@ -221,9 +221,9 @@ ska::flat_hash_map<int64_t, DebugInfoTuple> CallStackDebugInfoUnpickler::
         const std::shared_ptr<CompilationUnit>& cu) {
   auto ival = jit::unpickle(reinterpret_cast<const char*>(data.get()), size);
   ska::flat_hash_map<int64_t, DebugInfoTuple> callstack_ptrs;
-  auto& ivalues = ival.toTuple()->elements();
+  auto& ivalues = ival.toTupleRef().elements();
   for (auto& val : ivalues) {
-    const auto tup_elems = val.toTuple()->elements();
+    const auto tup_elems = val.toTupleRef().elements();
     TORCH_CHECK(
         tup_elems.size() == 4,
         "Pickled map must have four elements: "

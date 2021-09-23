@@ -157,7 +157,7 @@ static void RemoveTupleConstants(Node* n) {
   }
 
   auto g = n->owningGraph();
-  auto tuple_elements = toIValue(n->output()).value().toTuple()->elements();
+  auto tuple_elements = toIValue(n->output()).value().toTupleRef().elements();
   WithInsertPoint insert(n);
   std::vector<Value*> elements;
   for (const auto& elem : tuple_elements) {

@@ -40,7 +40,7 @@ TEST(TorchDeployGPUTest, SimpleModel) {
   {
     auto I = p.acquire_session();
     auto eg = I.self.attr("load_pickle")({"model", "example.pkl"}).toIValue();
-    inputs = eg.toTuple()->elements();
+    inputs = eg.toTupleRef().elements();
     inputs[0] = inputs[0].toTensor().to("cuda");
   }
   at::Tensor output = model(inputs).toTensor();

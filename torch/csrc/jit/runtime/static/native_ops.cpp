@@ -60,7 +60,7 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
     prim_TupleUnpack,
     [](Node* n) -> SROperator {
       return [](ProcessedNode* p_node) {
-        const auto& elems = p_node->Input(0).toTuple()->elements();
+        const auto& elems = p_node->Input(0).toTupleRef().elements();
         const size_t num_outputs = p_node->outputs().size();
         TORCH_CHECK(
             num_outputs == elems.size(),

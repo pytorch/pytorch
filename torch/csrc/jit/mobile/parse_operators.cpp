@@ -28,7 +28,7 @@ std::unordered_set<std::string> load_and_find_unsupported_operator_names(
   // ops_list is the list of operator names that were read in from
   // bytecode.plk for the method that is currently being processed.
   for (const auto& op : ops_list) {
-    auto op_item = op.toTuple()->elements();
+    auto op_item = op.toTupleRef().elements();
     TORCH_CHECK(
         op_item.size() >= 2,
         "There should be either two parts (name and overload name), ",

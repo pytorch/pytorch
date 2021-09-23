@@ -25,7 +25,7 @@ std::vector<IValue> toIValues(const Message& message, MessageType type) {
       payload_size,
       *RpcAgent::getCurrentRpcAgent()->getTypeResolver(),
       message.tensors());
-  return value.toTuple()->elements();
+  return value.toTupleRef().elements();
 }
 
 c10::intrusive_ptr<Message> fromIValues(

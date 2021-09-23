@@ -429,7 +429,7 @@ mobile::Module BytecodeDeserializer::deserialize(
   bool has_debug_handles{false};
   if (reader_->hasRecord("mobile_debug_handles.pkl")) {
     debug_handles =
-        readArchive("mobile_debug_handles", mcu).toTuple()->elements();
+        readArchive("mobile_debug_handles", mcu).toTupleRef().elements();
     has_debug_handles = true;
   }
   parseMethods(std::move(bvals), std::move(debug_handles), *mcu);

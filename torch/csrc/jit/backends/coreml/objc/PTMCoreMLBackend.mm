@@ -149,7 +149,7 @@ struct API_AVAILABLE(ios(11.0), macos(10.13)) CoreMLExecutorWrapper
     for (int i = 0; i < inputs.size(); ++i) {
       auto val = inputs.get(i);
       if (val.isTuple()) {
-        auto tuples = val.toTuple()->elements();
+        auto tuples = val.toTupleRef().elements();
         for (auto& ival : tuples) {
           TORCH_CHECK(ival.isTensor());
           auto tensor = ival.toTensor();

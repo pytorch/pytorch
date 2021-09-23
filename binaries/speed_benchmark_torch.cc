@@ -236,7 +236,7 @@ int main(int argc, char** argv) {
       std::cerr << "Model has only " << all_inputs.size() << " bundled inputs." << std::endl;
       return 1;
     }
-    inputs = all_inputs.get(FLAGS_use_bundled_input).toTuple()->elements();
+    inputs = all_inputs.get(FLAGS_use_bundled_input).toTupleRef().elements();
   }
 
 #ifdef BUILD_LITE_INTERPRETER

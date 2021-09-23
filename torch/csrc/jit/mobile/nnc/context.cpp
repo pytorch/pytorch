@@ -93,13 +93,14 @@ Function::Function(const c10::IValue& value) {
   parameters_ = dict.at("parameters").toList();
 
   // input_specs_
-  for (const auto& input_value : dict.at("input_specs").toTuple()->elements()) {
+  for (const auto& input_value :
+       dict.at("input_specs").toTupleRef().elements()) {
     input_specs_.emplace_back(input_value);
   }
 
   // output_specs_
   for (const auto& output_value :
-       dict.at("output_specs").toTuple()->elements()) {
+       dict.at("output_specs").toTupleRef().elements()) {
     output_specs_.emplace_back(output_value);
   }
 
@@ -224,8 +225,8 @@ c10::impl::GenericList Function::run(
 }
 
 CompilationUnit::CompilationUnit(const c10::IValue& value) {
-  const auto& root = value.toTuple()->elements();
-  const auto& functions = root[1].toTuple()->elements();
+  const auto& root = value.toTupleRef().elements();
+  const auto& functions = root[1].toTupleRef().elements();
   for (const auto& function : functions) {
     register_function(std::make_unique<Function>(function));
   }
