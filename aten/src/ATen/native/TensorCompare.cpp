@@ -348,6 +348,13 @@ Tensor _s_where_dispatch(
       expand_outplace(condition, self, other, "where");
   return at::_s_where(*b_condition, *b_self, *b_other);
 }
+
+Tensor get_promoted_tensor(const Tensor& t, ScalarType common_dtype) {
+  return (t.device().is_cpu()) && !(t.scalar_type() == common_dtype)
+      ? t.to(common_dtype)
+      : t;
+}
+
 } // namespace
 
 Tensor where(const Tensor& condition, const Tensor& self, const Tensor& other) {
@@ -356,13 +363,15 @@ Tensor where(const Tensor& condition, const Tensor& self, const Tensor& other) {
 }
 
 Tensor where(const Tensor& condition, const Scalar& self, const Tensor& other) {
-  const Tensor& self_t = wrapped_scalar_tensor_default_dtype(self, other.device());
-  return _s_where_dispatch(condition, self_t, other);
+  auto common_dtype = at::result_type(self, other);
+  const Tensor& self_t = at::scalar_tensor(self, other.options().dtype(common_dtype));
+  return _s_where_dispatch(condition, self_t, get_promoted_tensor(other, common_dtype));
 }
 
 Tensor where(const Tensor& condition, const Tensor& self, const Scalar& other) {
-  const Tensor& other_t = wrapped_scalar_tensor_default_dtype(other, self.device());
-  return _s_where_dispatch(condition, self, other_t);
+  auto common_dtype = at::result_type(self, other);
+  const Tensor& other_t = at::scalar_tensor(other, self.options().dtype(common_dtype));
+  return _s_where_dispatch(condition, get_promoted_tensor(self, common_dtype), other_t);
 }
 
 Tensor where(const Tensor& condition, const Scalar& self, const Scalar& other) {
@@ -377,29 +386,17 @@ std::vector<Tensor> where(const Tensor& condition) {
 }
 
 Tensor _s_where(const Tensor& condition, const Tensor& self, const Tensor& other) {
-  // Here we do the type promotion without the TensorIterator machinery.
-  // For `where` we only want to consider `self` and `other`,
-  // however right now TensorIterator API doesn't have a way to specify which inputs
-  // should take part in type promotion.
-  auto common_dtype = at::result_type(self, other);
-  Tensor ret = at::empty(self.sizes(), self.options().dtype(common_dtype));
-
-  auto get_promoted = [&common_dtype](const Tensor& t) {
-    // dynamic casting on CPU is not allowed
-    return (t.device().is_cpu()) && !(t.scalar_type() == common_dtype)
-        ? c10::MaybeOwned<Tensor>::owned(t.to(common_dtype))
-        : c10::MaybeOwned<Tensor>::borrowed(t);
-  };
-
-  c10::MaybeOwned<Tensor> self_promoted = get_promoted(self);
-  c10::MaybeOwned<Tensor> other_promoted = get_promoted(other);
+  auto result_type = self.device().is_cpu()
+      ? self.scalar_type()
+      : at::promote_types(self.scalar_type(), other.scalar_type());
+  Tensor ret = at::empty(self.sizes(), self.options().dtype(result_type));
 
   auto iter = at::TensorIteratorConfig()
                   .check_all_same_dtype(false)
                   .add_output(ret)
                   .add_input(condition)
-                  .add_input(*self_promoted)
-                  .add_input(*other_promoted)
+                  .add_input(self)
+                  .add_input(other)
                   .build();
   where_kernel(iter.device_type(), iter, condition.scalar_type());
   return ret;
