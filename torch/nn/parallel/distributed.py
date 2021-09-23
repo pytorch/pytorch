@@ -604,9 +604,13 @@ class DistributedDataParallel(Module, Joinable):
 
     def _sync_params_and_buffers(self, authoritative_rank=0):
         module_states = []
-        for name, param in self.module.state_dict().items():
+        for name, param in self.module.named_parameters():
             if name not in self.parameters_to_ignore:
-                module_states.append(param)
+                module_states.append(param.detach())
+
+        for name, buffer in self.module.named_buffers():
+            if name not in self.parameters_to_ignore:
+                module_states.append(buffer.detach())
 
         if len(module_states) > 0:
             self._distributed_broadcast_coalesced(
