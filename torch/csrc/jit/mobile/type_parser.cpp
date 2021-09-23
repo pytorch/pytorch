@@ -54,23 +54,28 @@ class TypeParser {
     typePtrs.resize(pythonStrs_.size());
     static const c10::QualifiedName classPrefix = "__torch__.torch.classes";
     for (size_t i = 0; i < pythonStrs_.size(); i++) {
-      c10::QualifiedName qn(pythonStrs_[i]);
-      c10::TypePtr type_ptr;
-      if (classPrefix.isPrefixOf(qn)) {
-        type_ptr = torch::getCustomClass(qn.qualifiedName());
-        TORCH_CHECK(
-            type_ptr,
-            "The implementation of class ",
-            qn.qualifiedName(),
-            " cannot be found.");
+      auto find_ptr = str_type_ptr_map_.find(pythonStrs_[i]);
+      if (find_ptr != str_type_ptr_map_.end()) {
+        typePtrs[i] = find_ptr->second;
       } else {
-        pythonStr_ = pythonStrs_[i];
-        start_ = 0;
-        lex();
-        type_ptr = parse();
+        c10::QualifiedName qn(pythonStrs_[i]);
+        c10::TypePtr type_ptr;
+        if (classPrefix.isPrefixOf(qn)) {
+          type_ptr = torch::getCustomClass(qn.qualifiedName());
+          TORCH_CHECK(
+              type_ptr,
+              "The implementation of class ",
+              qn.qualifiedName(),
+              " cannot be found.");
+        } else {
+          pythonStr_ = pythonStrs_[i];
+          start_ = 0;
+          lex();
+          type_ptr = parse();
+        }
+        typePtrs[i] = type_ptr;
+        str_type_ptr_map_[type_ptr->repr_str()] = type_ptr;
       }
-      typePtrs[i] = type_ptr;
-      str_type_ptr_map_[type_ptr->repr_str()] = type_ptr;
     }
     return typePtrs;
   }
