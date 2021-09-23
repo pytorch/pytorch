@@ -53,6 +53,9 @@ TEST(IValueTest, Basic) {
   ASSERT_TRUE(the_list.isTuple());
   auto first = the_list.toTuple()->elements()[1];
   ASSERT_EQ(first.toInt(), 4);
+  // Make sure toTupleRef has test coverage too.
+  first = the_list.toTupleRef().elements()[1];
+  ASSERT_EQ(first.toInt(), 4);
   at::Tensor tv = at::rand({3, 4});
   IValue ten(tv);
   ASSERT_EQ(tv.use_count(), 2);

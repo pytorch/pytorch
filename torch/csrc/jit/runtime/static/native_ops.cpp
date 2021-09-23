@@ -464,7 +464,7 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
       return [](ProcessedNode* pnode) {
         size_t output_idx = 0;
         for (const auto& tuple : pnode->inputs()) {
-          for (auto& elem : tuple->toTuple()->elements()) {
+          for (auto& elem : tuple->toTupleRef().elements()) {
             pnode->Output(output_idx) = elem;
             ++output_idx;
           }

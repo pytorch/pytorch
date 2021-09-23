@@ -1400,6 +1400,14 @@ inline c10::intrusive_ptr<ivalue::Tuple> IValue::toTuple() const& {
   AT_ASSERT(isTuple(), "Expected Tuple but got ", tagKind());
   return toIntrusivePtr<ivalue::Tuple>();
 }
+inline const ivalue::Tuple& IValue::toTupleRef() const {
+  AT_ASSERT(isTuple(), "Expected Tuple but got ", tagKind());
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      payload.u.as_intrusive_ptr != c10::UndefinedTensorImpl::singleton(),
+      "called toTupleRef on null intrusive_ptr IValue");
+  return *static_cast<const c10::ivalue::Tuple*>(
+      payload.u.as_intrusive_ptr);
+}
 
 inline IValue::IValue(c10::intrusive_ptr<ivalue::Tuple> v)
     : tag(Tag::Tuple), is_intrusive_ptr(true) {
