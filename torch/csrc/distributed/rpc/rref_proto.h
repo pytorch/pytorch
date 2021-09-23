@@ -49,8 +49,13 @@ class TORCH_API ForkMessageBase : public RRefMessageBase {
 // UserRRef uses this message to fetch the remote RRef value from the owner.
 class TORCH_API ScriptRRefFetchCall final : public RRefMessageBase {
  public:
-  ScriptRRefFetchCall(worker_id_t fromWorkerId, const RRefId& rrefId, DeviceMap&& deviceMap)
-      : RRefMessageBase(rrefId, MessageType::SCRIPT_RREF_FETCH_CALL), fromWorkerId_(fromWorkerId), deviceMap_(std::move(deviceMap)) {}
+  ScriptRRefFetchCall(
+      worker_id_t fromWorkerId,
+      const RRefId& rrefId,
+      DeviceMap&& deviceMap)
+      : RRefMessageBase(rrefId, MessageType::SCRIPT_RREF_FETCH_CALL),
+        fromWorkerId_(fromWorkerId),
+        deviceMap_(std::move(deviceMap)) {}
 
   const DeviceMap& getDeviceMap() const;
 
@@ -65,8 +70,13 @@ class TORCH_API ScriptRRefFetchCall final : public RRefMessageBase {
 
 class TORCH_API PythonRRefFetchCall final : public RRefMessageBase {
  public:
-  PythonRRefFetchCall(worker_id_t fromWorkerId, const RRefId& rrefId, DeviceMap&& deviceMap)
-      : RRefMessageBase(rrefId, MessageType::PYTHON_RREF_FETCH_CALL), fromWorkerId_(fromWorkerId), deviceMap_(std::move(deviceMap)) {}
+  PythonRRefFetchCall(
+      worker_id_t fromWorkerId,
+      const RRefId& rrefId,
+      DeviceMap&& deviceMap)
+      : RRefMessageBase(rrefId, MessageType::PYTHON_RREF_FETCH_CALL),
+        fromWorkerId_(fromWorkerId),
+        deviceMap_(std::move(deviceMap)) {}
 
   const DeviceMap& getDeviceMap() const;
 
