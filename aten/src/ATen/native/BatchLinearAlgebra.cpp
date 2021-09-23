@@ -3835,7 +3835,7 @@ bool is_row_or_column_contiguous(const Tensor& t) {
   return t.is_contiguous() || t.transpose(-2, -1).is_contiguous();
 }
 
-TransposeType to_transtype(const bool contig, const bool conj) {
+TransposeType to_transpose_type(const bool contig, const bool conj) {
   if (conj) {
     if (contig) { TORCH_INTERNAL_ASSERT(false, "Invalid transpose type"); }
     else {        return TransposeType::ConjTranspose; }
@@ -3982,7 +3982,7 @@ Tensor& linalg_solve_triangular_out(
     A_f.device().type(), A_f, out_f,
     /*left=*/left,
     /*upper=*/upper,
-    /*transpose*/to_transtype(A_is_f_contig, A_is_conj),
+    /*transpose*/to_transpose_type(A_is_f_contig, A_is_conj),
     /*unitriangular=*/unitriangular);
 
   if (transpose_out_f) {
