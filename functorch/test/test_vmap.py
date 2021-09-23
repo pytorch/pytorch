@@ -3045,6 +3045,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('block_diag'),
         xfail('nn.functional.dropout'),
         xfail('nn.functional.max_pool2d'),
+        xfail('nn.functional.conv2d', ''),
     })
     def test_op_has_batch_rule(self, device, dtype, op):
         def test():
