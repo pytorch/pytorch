@@ -158,10 +158,16 @@ at::Tensor& to_copy_out(
   } else {
     at::native::resize_(out, self.sizes(), c10::nullopt);
   }
+  // Fast path: can we just copy the data ourselves? Avoids creating a
+  // TensorIterator in at::native::copy_, which is relatively
+  // expensive.
   if (self.is_contiguous() && !non_blocking &&
+      // Did the user request us to make a copy that isn't contiguous?
       (memory_format == c10::nullopt ||
        memory_format == c10::MemoryFormat::Preserve ||
        memory_format == c10::MemoryFormat::Contiguous) &&
+      // CopyKernel.cpp handles this case specially, so let's not mess
+      // with it.
       !self.is_neg() &&
       !(
           // FBGEMM optimization might kick in, don't interfere with
@@ -1921,15 +1927,21 @@ REGISTER_OPERATOR_FUNCTOR(
         LogAndDumpSchema(n);
         return nullptr;
       }
-      return [](ProcessedNode* p_node) {
+      auto te = createSignedLog1p();
+      return [te](ProcessedNode* p_node) {
         const auto& input = p_node->Input(0).toTensor();
         if (p_node->Output(0).isNone()) {
-          p_node->Output(0) = signed_log1p(input);
-        } else {
-          auto& out = p_node->Output(0).toTensor();
+          p_node->Output(0) = create_empty_from(input);
+        }
+        auto& out = p_node->Output(0).toTensor();
+        if (!te || !te->supports(input)) {
           fastResizeToZero(out);
           signed_log1p_out(out, input);
+          return;
         }
+        at::native::resize_(out, input.sizes(), c10::nullopt);
+        int64_t nn = input.numel();
+        te->call({out.data_ptr(), input.data_ptr(), &nn});
       };
     });
 } // namespace jit

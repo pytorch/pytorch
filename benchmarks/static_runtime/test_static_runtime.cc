@@ -615,15 +615,19 @@ TEST(StaticRuntime, IndividualOps_to) {
     testStaticRuntime(to_script_3, args2, {a2, a2_other, c, d, e}); // to.other
     testStaticRuntime(to_script_4, {a}, {a2});
   };
-  // float->float, NCHW->NHWC
-  test_to(at::ScalarType::Float, true, true, c10::MemoryFormat::ChannelsLast);
-  // float->half
-  test_to(at::ScalarType::Half, true, false, c10::MemoryFormat::Preserve);
-  // float->float
-  test_to(at::ScalarType::Float, false, false, c10::MemoryFormat::Contiguous);
-  // TODO: check if fbgemm is enabled properly in this case
-  // half->float, NCHW->NHWC
-  test_to(at::ScalarType::Half, false, true, c10::MemoryFormat::ChannelsLast);
+  for (const bool non_blocking : {false, true}) {
+    for (const bool copy : {false, true}) {
+      // float->float, NCHW->NHWC
+      test_to(at::ScalarType::Float, non_blocking, copy, c10::MemoryFormat::ChannelsLast);
+      // float->half
+      test_to(at::ScalarType::Half, non_blocking, copy, c10::MemoryFormat::Preserve);
+      // float->float
+      test_to(at::ScalarType::Float, non_blocking, copy, c10::MemoryFormat::Contiguous);
+      // TODO: check if fbgemm is enabled properly in this case
+      // half->float, NCHW->NHWC
+      test_to(at::ScalarType::Half, non_blocking, copy, c10::MemoryFormat::ChannelsLast);
+    }
+  }
 }
 
 TEST(StaticRuntime, IndividualOps_Detach) {

@@ -1418,20 +1418,22 @@ class TestNN(NNTestCase):
         self.assertEqual(m.param_name, param3)
 
     def test_add_module_raises_error_if_attr_exists(self):
-        m = nn.Module()
-        m.attribute_name = 5
-        with self.assertRaises(KeyError):
-            m.add_module('attribute_name', nn.Module())
+        methods_to_test = ['add_module', 'register_module']
+        for fn in methods_to_test:
+            m = nn.Module()
+            m.attribute_name = 5
+            with self.assertRaises(KeyError):
+                getattr(m, fn)('attribute_name', nn.Module())
 
-        del m.attribute_name
-        m.register_buffer('attribute_name', torch.rand(5))
-        with self.assertRaises(KeyError):
-            m.add_module('attribute_name', nn.Module())
+            del m.attribute_name
+            m.register_buffer('attribute_name', torch.rand(5))
+            with self.assertRaises(KeyError):
+                getattr(m, fn)('attribute_name', nn.Module())
 
-        del m.attribute_name
-        m.register_parameter('attribute_name', nn.Parameter())
-        with self.assertRaises(KeyError):
-            m.add_module('attribute_name', nn.Module())
+            del m.attribute_name
+            m.register_parameter('attribute_name', nn.Parameter())
+            with self.assertRaises(KeyError):
+                getattr(m, fn)('attribute_name', nn.Module())
 
     @unittest.expectedFailure
     def test_getattr_with_property(self):
@@ -1835,24 +1837,26 @@ class TestNN(NNTestCase):
         check()
 
     def test_add_module(self):
-        l = nn.Linear(10, 20)
-        net = nn.Module()
-        net.l = l
-        net.l2 = l
-        net.add_module('empty', None)
-        self.assertEqual(net.l, l)
-        self.assertEqual(net.l2, l)
-        self.assertEqual(net.empty, None)
-        net.add_module('l3', l)
-        self.assertEqual(net.l3, l)
-        l3 = nn.Linear(20, 10)
-        net.add_module('l', l3)
-        self.assertEqual(net.l, l3)
-        self.assertRaises(TypeError, lambda: net.add_module('x', 'non-module'))
-        self.assertRaisesRegex(TypeError, 'module name should be a string. Got int',
-                               lambda: net.add_module(1, l))
-        self.assertRaisesRegex(TypeError, 'module name should be a string. Got NoneType',
-                               lambda: net.add_module(None, l))
+        methods_to_test = ['add_module', 'register_module']
+        for fn in methods_to_test:
+            l = nn.Linear(10, 20)
+            net = nn.Module()
+            net.l = l
+            net.l2 = l
+            getattr(net, fn)('empty', None)
+            self.assertEqual(net.l, l)
+            self.assertEqual(net.l2, l)
+            self.assertEqual(net.empty, None)
+            getattr(net, fn)('l3', l)
+            self.assertEqual(net.l3, l)
+            l3 = nn.Linear(20, 10)
+            getattr(net, fn)('l', l3)
+            self.assertEqual(net.l, l3)
+            self.assertRaises(TypeError, lambda: getattr(net, fn)('x', 'non-module'))
+            self.assertRaisesRegex(TypeError, 'module name should be a string. Got int',
+                                   lambda: getattr(net, fn)(1, l))
+            self.assertRaisesRegex(TypeError, 'module name should be a string. Got NoneType',
+                                   lambda: getattr(net, fn)(None, l))
 
     def test_module_to_argparse(self):
         net = nn.Sequential(nn.Linear(3, 3))
