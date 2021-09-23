@@ -158,7 +158,7 @@ class ModuleInfo(object):
         return self.name.replace('.', '_')
 
 
-def _zero_batch_dim_input(module_input):
+def duplicate_with_zero_batch_dim_input(module_input):
     def _zero_first_dim(objs):
         if isinstance(objs, FunctionInput):
             return FunctionInput(*_zero_first_dim(objs.args), **_zero_first_dim(objs.kwargs))
@@ -177,19 +177,7 @@ def _zero_batch_dim_input(module_input):
         forward_input=_zero_first_dim(module_input.forward_input),
         desc=module_input.desc + 'zero_batch_dim')
 
-def _module_inputs_with_zero_batch_dim(f):
-    # Creates ModuleInput by reducing the size of the 0th dimension to 0
-    # in constructor_input and forward_input of module_inputs[0]
-    # Make sure the tensors in module_inputs[0] semantically make sense with
-    # the 0th dimension set to size 0
-    @wraps(f)
-    def inner(*args, **kwargs):
-        module_inputs = f(*args, **kwargs)
-        return module_inputs + [_zero_batch_dim_input(module_inputs[0])]
-    return inner
 
-
-@_module_inputs_with_zero_batch_dim
 def module_inputs_torch_nn_Linear(module_info, device, dtype, requires_grad, **kwargs):
     make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
@@ -207,10 +195,9 @@ def module_inputs_torch_nn_Linear(module_info, device, dtype, requires_grad, **k
                     reference_fn=lambda m, p, i: torch.mm(i.view(1, -1), p[0].t()).view(-1) + p[1])
     ]
 
+    module_inputs.append(duplicate_with_zero_batch_dim_input(module_inputs[0]))
     return module_inputs
 
-
-@_module_inputs_with_zero_batch_dim
 def module_inputs_torch_nn_NLLLoss(module_info, device, dtype, requires_grad, **kwargs):
     make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
@@ -235,6 +222,7 @@ def module_inputs_torch_nn_NLLLoss(module_info, device, dtype, requires_grad, **
                         reference_fn=reference_fn)
         )
 
+    module_inputs.append(duplicate_with_zero_batch_dim_input(module_inputs[0]))
     return module_inputs
 
 
@@ -269,23 +257,24 @@ def generate_regression_criterion_inputs(make_input):
         ) for reduction in ['none', 'mean', 'sum']]
 
 
-@_module_inputs_with_zero_batch_dim
 def module_inputs_torch_nn_AvgPool1d(module_info, device, dtype, requires_grad, **kwargs):
     make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
-    return [
+    module_inputs = [
         ModuleInput(constructor_input=FunctionInput(kernel_size=2),
                     forward_input=FunctionInput(make_input(shape=(2, 3, 6)))),
         ModuleInput(constructor_input=FunctionInput(kernel_size=2),
                     forward_input=FunctionInput(make_input(shape=(3, 6))),
                     desc='no_batch_dim',
                     reference_fn=no_batch_dim_reference_fn)]
+    module_inputs.append(duplicate_with_zero_batch_dim_input(module_inputs[0]))
+    return module_inputs
 
-@_module_inputs_with_zero_batch_dim
+
 def module_inputs_torch_nn_ELU(module_info, device, dtype, requires_grad, **kwargs):
     make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
-    return [
+    module_inputs = [
         ModuleInput(constructor_input=FunctionInput(alpha=2.),
                     forward_input=FunctionInput(make_input(shape=(3, 2, 5))),
                     reference_fn=lambda m, p, i: torch.where(i >= 0, i, 2 * (i.exp() - 1))),
@@ -296,13 +285,14 @@ def module_inputs_torch_nn_ELU(module_info, device, dtype, requires_grad, **kwar
                     forward_input=FunctionInput(make_input(shape=(3,))),
                     desc='no_batch_dim',
                     reference_fn=no_batch_dim_reference_fn)]
+    module_inputs.append(duplicate_with_zero_batch_dim_input(module_inputs[0]))
+    return module_inputs
 
 
-@_module_inputs_with_zero_batch_dim
 def module_inputs_torch_nn_CELU(module_info, device, dtype, requires_grad, **kwargs):
     make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
-    return [
+    module_inputs = [
         ModuleInput(constructor_input=FunctionInput(alpha=2.),
                     forward_input=FunctionInput(make_input(shape=(3, 2, 5))),
                     reference_fn=lambda m, p, i: torch.where(i >= 0, i, 2. * ((.5 * i).exp() - 1))),
@@ -314,9 +304,10 @@ def module_inputs_torch_nn_CELU(module_info, device, dtype, requires_grad, **kwa
                     forward_input=FunctionInput(make_input(shape=(3,))),
                     desc='no_batch_dim',
                     reference_fn=no_batch_dim_reference_fn)]
+    module_inputs.append(duplicate_with_zero_batch_dim_input(module_inputs[0]))
+    return module_inputs
 
 
-@_module_inputs_with_zero_batch_dim
 def module_inputs_torch_nn_ReLU(module_info, device, dtype, requires_grad):
     make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
@@ -327,14 +318,14 @@ def module_inputs_torch_nn_ReLU(module_info, device, dtype, requires_grad):
                     forward_input=FunctionInput(make_input(4)),
                     desc='no_batch_dim'),
     ]
+    module_inputs.append(duplicate_with_zero_batch_dim_input(module_inputs[0]))
     return module_inputs
 
 
-@_module_inputs_with_zero_batch_dim
 def module_inputs_torch_nn_L1Loss(module_info, device, dtype, requires_grad, **kwargs):
     make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
-    return [
+    module_inputs = [
         ModuleInput(constructor_input=FunctionInput(),
                     forward_input=FunctionInput(make_input(shape=(2, 3, 4)),
                                                 make_input(shape=(2, 3, 4))),
@@ -344,6 +335,8 @@ def module_inputs_torch_nn_L1Loss(module_info, device, dtype, requires_grad, **k
                     forward_input=FunctionInput(make_input(shape=()), make_input(shape=())),
                     reference_fn=lambda m, p, i, t: 1. / i.numel() * (i - t).abs().sum(),
                     desc='scalar')] + generate_regression_criterion_inputs(make_input)
+    module_inputs.append(duplicate_with_zero_batch_dim_input(module_inputs[0]))
+    return module_inputs
 
 
 # Database of ModuleInfo entries in alphabetical order.
