@@ -73,6 +73,9 @@ void OptimizeGraph(
   FuseInferenceOpsForSparseNN(graph);
   UseVariadicCat(graph);
   UseVariadicStack(graph);
+  if (opts.enable_out_variant) {
+    FuseSignLog1P(graph);
+  }
 
   // TODO: we can avoid this guard by moving operations
   // to exposed folders.
@@ -718,7 +721,7 @@ std::vector<at::Tensor> StaticModule::operator()(
   return runtime()(inps);
 }
 c10::IValue StaticModule::operator()(
-    const std::vector<c10::IValue>& args,
+    c10::ArrayRef<c10::IValue> args,
     const std::unordered_map<std::string, c10::IValue>& kwargs) {
   return runtime()(args, kwargs);
 }
@@ -799,7 +802,7 @@ std::vector<at::Tensor> StaticRuntime::operator()(
 }
 
 void StaticRuntime::set_inputs(
-    const std::vector<c10::IValue>& args,
+    c10::ArrayRef<c10::IValue> args,
     const std::unordered_map<std::string, c10::IValue>& kwargs) {
   if (!kwargs.empty()) {
     // This is not ideal
@@ -835,8 +838,32 @@ void StaticRuntime::set_inputs(
   }
 }
 
+c10::IValue StaticRuntime::moveOutputsToTuple(size_t num_outputs) {
+  switch (num_outputs) {
+    case 1:
+      return c10::ivalue::Tuple::create(std::move(*outputs_[0]));
+    case 2:
+      return c10::ivalue::Tuple::create(
+          std::move(*outputs_[0]), std::move(*outputs_[1]));
+    case 3:
+      return c10::ivalue::Tuple::create(
+          std::move(*outputs_[0]),
+          std::move(*outputs_[1]),
+          std::move(*outputs_[2]));
+    default: {
+      std::vector<c10::IValue> outputs;
+      outputs.reserve(static_module_.num_outputs());
+      for (const auto i : c10::irange(static_module_.num_outputs())) {
+        // use move here. Otherwise, clean up outputs_[i] explicitly
+        outputs.emplace_back(std::move(*outputs_[i]));
+      }
+      return c10::ivalue::Tuple::create(std::move(outputs));
+    }
+  }
+}
+
 c10::IValue StaticRuntime::operator()(
-    const std::vector<c10::IValue>& args,
+    c10::ArrayRef<c10::IValue> args,
     const std::unordered_map<std::string, c10::IValue>& kwargs) {
   // We assume inference workloads, so we do not need
   // autograd. Enabling this is a significant win on dispatcher
@@ -877,13 +904,7 @@ c10::IValue StaticRuntime::operator()(
 
   // no need to keep references of outputs in static runtime anymore
   if (static_module_.num_outputs() > 1) {
-    std::vector<c10::IValue> outputs;
-    outputs.reserve(static_module_.num_outputs());
-    for (const auto i : c10::irange(static_module_.num_outputs())) {
-      // use move here. Otherwise, clean up outputs_[i] explicitly
-      outputs.emplace_back(std::move(*outputs_[i]));
-    }
-    return c10::ivalue::Tuple::create(std::move(outputs));
+    return moveOutputsToTuple(static_module_.num_outputs());
   }
 
 #ifndef NDEBUG
@@ -912,7 +933,7 @@ std::string generate_latency_json(const std::string& label, double millis) {
 } // namespace
 
 void StaticRuntime::benchmark(
-    const std::vector<c10::IValue>& args,
+    c10::ArrayRef<c10::IValue> args,
     const std::unordered_map<std::string, c10::IValue>& kwargs,
     const int warmup_runs,
     const int main_runs,
@@ -1003,7 +1024,7 @@ void StaticRuntime::benchmark(
 }
 
 float StaticRuntime::benchmark_model(
-    const std::vector<c10::IValue>& args,
+    c10::ArrayRef<c10::IValue> args,
     const std::unordered_map<std::string, c10::IValue>& kwargs,
     const int warmup_runs,
     const int main_runs) {
@@ -1074,7 +1095,7 @@ void display_pnode_info(const ProcessedNode& pnode) {
 }
 
 void StaticRuntime::display_nodes(
-    const std::vector<c10::IValue>& args,
+    c10::ArrayRef<c10::IValue> args,
     const std::unordered_map<std::string, c10::IValue>& kwargs) {
   c10::InferenceMode mode;
   if (planner_) {
@@ -1106,7 +1127,7 @@ void StaticRuntime::display_nodes(
 }
 
 StaticRuntime::IndividualMetrics StaticRuntime::benchmark_individual_ops(
-    const std::vector<c10::IValue>& args,
+    c10::ArrayRef<c10::IValue> args,
     const std::unordered_map<std::string, c10::IValue>& kwargs,
     const int warmup_runs,
     const int main_runs) {
@@ -1179,13 +1200,7 @@ StaticRuntime::IndividualMetrics StaticRuntime::benchmark_individual_ops(
     // no need to keep references of outputs in static runtime anymore
     c10::IValue output;
     if (static_module_.num_outputs() > 1) {
-      std::vector<c10::IValue> outputs;
-      outputs.reserve(static_module_.num_outputs());
-      for (const auto i : c10::irange(static_module_.num_outputs())) {
-        // use move here. Otherwise, clean up outputs_[i] explicitly
-        outputs.emplace_back(std::move(*outputs_[i]));
-      }
-      output = c10::ivalue::Tuple::create(std::move(outputs));
+      output = moveOutputsToTuple(static_module_.num_outputs());
     }
 
 #ifndef NDEBUG

@@ -744,4 +744,93 @@ TEST(IValueTest, ToWeakAndBack) {
 }
 
 // TODO(gmagogsfm): Add type conversion test?
+
+using ivalue::TupleElements;
+
+namespace {
+void validateTupleElements(TupleElements& te, c10::ArrayRef<IValue> contents) {
+  EXPECT_EQ(te.empty(), contents.empty());
+  EXPECT_EQ(te.size(), contents.size());
+  for (const auto idx: c10::irange(contents.size())) {
+    EXPECT_IVALUE_EQ(te[idx], contents[idx]);
+    EXPECT_IVALUE_EQ(te.at(idx), contents[idx]);
+    EXPECT_IVALUE_EQ(*(te.begin() + idx), contents[idx]);
+  }
+  if (!contents.empty()) {
+    EXPECT_IVALUE_EQ(te.back(), contents.back());
+  }
+  auto v = std::move(te).vec();
+  EXPECT_EQ(v.size(), contents.size());
+  for (const auto idx: c10::irange(contents.size())) {
+    EXPECT_IVALUE_EQ(v[idx], contents[idx]);
+  }
+}
+} // namespace
+
+TEST(TupleElementsTest, Basic) {
+  TupleElements empty;
+  validateTupleElements(empty, {});
+  TupleElements size1(1);
+  validateTupleElements(size1, {1});
+  TupleElements size2(1, 2);
+  validateTupleElements(size2, {1, 2});
+  TupleElements size3(1, 2, 3);
+  validateTupleElements(size3, {1, 2, 3});
+
+  auto sampleIValuesArray = makeSampleIValues();
+  TupleElements large(std::vector<IValue>(sampleIValuesArray.begin(), sampleIValuesArray.end()));
+  validateTupleElements(large, sampleIValuesArray);
+}
+
+namespace {
+
+std::array<TupleElements(*)(), 3> factories = {
+  []() { return TupleElements();},
+  []() { return  TupleElements(1, 2, 3);},
+  []() { return TupleElements(std::vector<IValue>({1, 2, 3, "hello"})); }
+};
+
+std::array<std::vector<IValue>, 3> expectedContents = {
+  std::vector<IValue>(),
+  std::vector<IValue>({1, 2, 3}),
+  std::vector<IValue>({1, 2, 3, "hello"}),
+};
+
+}
+
+TEST(TupleElementsTest, Resize) {
+  std::array<std::vector<IValue>, 3> newContents = {std::vector<IValue>(), std::vector<IValue>({4, 5, 6}), std::vector<IValue>({7, 8, 9, "hello"})};
+
+  for (auto factory : factories) {
+    for (const auto& contents : newContents) {
+      auto te = factory();
+      auto contentsCopy = contents;
+      te.setContents(std::move(contentsCopy));
+      validateTupleElements(te, contents);
+    }
+  }
+}
+
+TEST(TupleElementsTest, MoveConstruct) {
+  int idx = 0;
+  for (auto fromFactory : factories) {
+    auto toMoveFrom = fromFactory();
+    TupleElements movedInto(std::move(toMoveFrom));
+    validateTupleElements(movedInto, expectedContents[idx++]);
+  }
+}
+
+TEST(TupleElementsTest, MoveAssign) {
+  int fromIdx = 0;
+  for (auto fromFactory : factories) {
+    for (auto toFactory : factories) {
+      auto from = fromFactory();
+      auto to = toFactory();
+      to = std::move(from);
+      validateTupleElements(to, expectedContents[fromIdx]);
+    }
+    fromIdx++;
+  }
+}
+
 } // namespace c10

@@ -16,6 +16,10 @@ constexpr int64_t kProducedNNCFileFormatVersion = 0x1L;
 
 namespace {
 
+c10::IValue Tup(std::initializer_list<c10::IValue> ivalues) {
+  return c10::ivalue::Tuple::create(ivalues);
+}
+
 c10::IValue Tup(std::vector<c10::IValue>&& ivalues) {
   return c10::ivalue::Tuple::create(ivalues);
 }

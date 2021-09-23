@@ -21,14 +21,14 @@ std::string operator_str(
  * by the current runtime.
  */
 std::unordered_set<std::string> load_and_find_unsupported_operator_names(
-    const std::vector<IValue>& ops_list,
+    c10::ivalue::TupleElements&& ops_list,
     mobile::Function* function,
     int64_t model_version) {
   std::unordered_set<std::string> unsupported_op_names;
   // ops_list is the list of operator names that were read in from
   // bytecode.plk for the method that is currently being processed.
-  for (const auto& op : ops_list) {
-    auto op_item = op.toTuple()->elements();
+  for (auto& op : std::move(ops_list)) {
+    auto op_item = std::move(*std::move(op).toTuple()).elements();
     TORCH_CHECK(
         op_item.size() >= 2,
         "There should be either two parts (name and overload name), ",
@@ -66,13 +66,13 @@ void print_unsupported_ops_and_throw(
 }
 
 void parseOperators(
-    const std::vector<IValue>& ops_list,
+    c10::ivalue::TupleElements&& ops_list,
     const int64_t& model_version,
     const uint64_t& module_load_options,
     mobile::Function* function) {
   std::unordered_set<std::string> unsupported_op_names =
       load_and_find_unsupported_operator_names(
-          ops_list, function, model_version);
+          std::move(ops_list), function, model_version);
   if ((module_load_options & MobileModuleLoadOptions::OPERATOR_CHECK) &&
       !unsupported_op_names.empty()) {
     print_unsupported_ops_and_throw(unsupported_op_names);

@@ -551,7 +551,7 @@ inline Stack toTraceableStack(const py::tuple& inputs) {
       info.type()->repr_str(),
       "' cannot be traced. Only Tensors and (possibly nested) Lists, Dicts, and"
       " Tuples of Tensors can be traced");
-  return info.toTuple()->elements();
+  return info.toTuple()->elements().vec();
 }
 
 inline IValue createGenericList(py::handle obj, const TypePtr& elem_type) {
