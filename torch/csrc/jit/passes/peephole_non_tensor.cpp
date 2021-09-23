@@ -61,6 +61,11 @@ bool trySimplifyAddOrSub(Node& node) {
     return false;
   }
 
+  if (constant == 0) {
+    node.output()->replaceAllUsesWith(node.input(0));
+    return true;
+  }
+
   auto& dep = *node.inputs()[0]->node();
   if (dep.kind() != aten::add && dep.kind() != aten::sub) {
     return false;

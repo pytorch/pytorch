@@ -518,6 +518,15 @@ class TestPeephole(JitTestCase):
             FileCheck().check_not("aten::eq").check_not("aten::neq").run(func_s.graph)
             self.assertEqual(func(inp), func_s(inp))
 
+    def test_peephole_add_zero(self):
+        @torch.jit.script
+        def foo (x: int):
+            return x + 0, 0 + x
+
+        self.run_pass("peephole", foo.graph)
+        FileCheck().check_not("aten::add")
+        self.assertEqual(foo(3), (3, 3))
+
     def test_refine_integer_values(self):
         @torch.jit.script
         def foo(x: int):
