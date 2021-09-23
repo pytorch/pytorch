@@ -1,9 +1,10 @@
-import torch
 from .python_trace import make_fx
+import torch
 from torch.fx.node import map_arg
 import torch.fx as fx
 import torch.utils._pytree as pytree
 
+# todo(chilli): clean this up/make it more understandable
 def partition_backwards(fx_module: fx.GraphModule):
     bw_nodes = set()
     saved_nodes = set()
@@ -74,13 +75,57 @@ def create_joint_forward_backward(fn):
         return out, backward_out
     return joint_forward_backward
 
-def compiled_function(fn, fw_compiler, bw_compiler):
-    fw_module = None
+def create_compiled_function(flat_fn, fw_compiler, bw_compiler):
+    joint_forward_backward = create_joint_forward_backward(flat_fn)
+
     compiled_fw = None
-    bw_module = None
     compiled_bw = None
     num_outs = None
 
+    class CompiledFunction(torch.autograd.Function):
+        @staticmethod
+        def forward(ctx, *flat_args):
+            nonlocal compiled_fw, compiled_bw, num_outs
+            if compiled_fw is None:
+                out = flat_fn(*flat_args)
+                if isinstance(out, (list, tuple)):
+                    num_outs = len(out)
+                else:
+                    num_outs = 1
+
+                with torch.enable_grad():
+                    fx_g = make_fx(joint_forward_backward)(flat_args, (out,))
+                fw_module, bw_module = partition_backwards(fx_g)
+
+                compiled_fw = fw_compiler(fw_module, flat_args)
+                fw_outs = compiled_fw(*flat_args)
+
+                if not isinstance(fw_outs, list):
+                    fw_outs = [fw_outs]
+
+                bw_args = fw_outs[num_outs:] + fw_outs[0:num_outs]
+                compiled_bw = bw_compiler(bw_module, bw_args)
+
+            fw_outs = compiled_fw(*flat_args)
+            if not isinstance(fw_outs, list):
+                fw_outs = [fw_outs]
+            ctx.activations = fw_outs[num_outs:]
+            if num_outs == 1:
+                return fw_outs[0]
+            return tuple(fw_outs[0:num_outs])
+
+        @staticmethod
+        def backward(ctx, *flat_args):
+            # hmm... this doesn't feel right. todo
+            contiguous_args = [t.contiguous() for t in flat_args]
+            out = compiled_bw(*ctx.activations, *contiguous_args)
+            if not isinstance(out, list):
+                out = [out]
+            return tuple(out)
+    return CompiledFunction
+
+
+def compiled_function(fn, fw_compiler, bw_compiler):
     saved_fn = None
 
     def returned_function(*args, **kwargs):
@@ -92,47 +137,7 @@ def compiled_function(fn, fw_compiler, bw_compiler):
                 args, kwargs = pytree.tree_unflatten(args, args_spec)
                 return fn(*args, **kwargs)
 
-            joint_forward_backward = create_joint_forward_backward(flat_fn)
-
-            class CompiledFunction(torch.autograd.Function):
-                @staticmethod
-                def forward(ctx, *args):
-                    nonlocal compiled_fw, compiled_bw, fw_module, bw_module, num_outs
-                    if compiled_fw is None:
-                        out = flat_fn(*args)
-                        if isinstance(out, (list, tuple)):
-                            num_outs = len(out)
-                        else:
-                            num_outs = 1
-                        with torch.enable_grad():
-                            fx_g = make_fx(joint_forward_backward)(args, (out,))
-                        fw_module, bw_module = partition_backwards(fx_g)
-
-                        compiled_fw = fw_compiler(fw_module, args)
-                        fw_outs = compiled_fw(*fw_module.graph.flatten_inps(args))
-
-                        if not isinstance(fw_outs, list):
-                            fw_outs = [fw_outs]
-
-                        bw_args = fw_outs[num_outs:] + fw_outs[0:num_outs]
-                        compiled_bw = bw_compiler(bw_module, bw_args)
-
-                    fw_outs = compiled_fw(*fw_module.graph.flatten_inps(args))
-                    if not isinstance(fw_outs, list):
-                        fw_outs = [fw_outs]
-                    ctx.activations = fw_outs[num_outs:]
-                    if num_outs == 1:
-                        return fw_outs[0]
-                    return tuple(fw_outs[0:num_outs])
-
-                @staticmethod
-                def backward(ctx, *args):
-                    contiguous_args = [t.contiguous() for t in args]
-                    out = compiled_bw(*ctx.activations, *contiguous_args)
-                    if not isinstance(out, list):
-                        out = [out]
-                    return tuple(out)
-            saved_fn = CompiledFunction.apply
+            saved_fn = create_compiled_function(flat_fn, fw_compiler, bw_compiler).apply
         return saved_fn(*flattened_args)
 
     return returned_function
