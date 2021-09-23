@@ -262,12 +262,9 @@ test_libtorch() {
 
     # Run JIT cpp tests
     python test/cpp/jit/tests_setup.py setup
-    if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
-      "$TORCH_BIN_DIR"/test_jit  --gtest_output=xml:$TEST_REPORTS_DIR/test_jit.xml
-    else
-      "$TORCH_BIN_DIR"/test_jit  --gtest_filter='-*CUDA' --gtest_output=xml:$TEST_REPORTS_DIR/test_jit.xml
-    fi
+    python test/test_gtest.py GTest.test_jit
     python test/cpp/jit/tests_setup.py shutdown
+
     # Wait for background download to finish
     wait
     # Exclude IMethodTest that relies on torch::deploy, which will instead be ran in test_deploy.

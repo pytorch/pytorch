@@ -549,7 +549,7 @@ def sanitize_test_filename(filename):
     strip_py = re.sub(r'.py$', '', filename)
     return re.sub('/', r'.', strip_py)
 
-def run_tests(argv=UNITTEST_ARGS):
+def run_tests(argv=UNITTEST_ARGS, save_xml=True):
     # import test files.
     if IMPORT_SLOW_TESTS:
         if os.path.exists(IMPORT_SLOW_TESTS):
@@ -592,7 +592,7 @@ def run_tests(argv=UNITTEST_ARGS):
         for p in processes:
             failed |= wait_for_process(p) != 0
         assert not failed, "Some test shards have failed"
-    elif TEST_SAVE_XML is not None:
+    elif TEST_SAVE_XML is not None and save_xml:
         # import here so that non-CI doesn't need xmlrunner installed
         import xmlrunner  # type: ignore[import]
         test_filename = sanitize_test_filename(inspect.getfile(sys._getframe(1)))
