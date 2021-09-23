@@ -70,7 +70,7 @@ def _process_batched_inputs(in_dims: in_dims_t, args: Tuple, func: Callable) -> 
             f'in_dims has structure {tree_flatten(in_dims)[1]} but inputs '
             f'has structure {args_spec}.')
 
-    for arg, in_dim in zip(flat_args, flat_in_dims):
+    for i, (arg, in_dim) in enumerate(zip(flat_args, flat_in_dims)):
         if not isinstance(in_dim, int) and in_dim is not None:
             raise ValueError(
                 f'vmap({_get_name(func)}, in_dims={in_dims}, ...)(<inputs>): '
@@ -82,12 +82,14 @@ def _process_batched_inputs(in_dims: in_dims_t, args: Tuple, func: Callable) -> 
                 f'Got in_dim={in_dim} for an input but the input is of type '
                 f'{type(arg)}. We cannot vmap over non-Tensor arguments, '
                 f'please use None as the respective in_dim')
-        if in_dim is not None and (in_dim < 0 or in_dim >= arg.dim()):
+        if in_dim is not None and (in_dim < -arg.dim() or in_dim >= arg.dim()):
             raise ValueError(
                 f'vmap({_get_name(func)}, in_dims={in_dims}, ...)(<inputs>): '
                 f'Got in_dim={in_dim} for some input, but that input is a Tensor '
                 f'of dimensionality {arg.dim()} so expected in_dim to satisfy '
-                f'0 <= in_dim < {arg.dim()}.')
+                f'-{arg.dim()} <= in_dim < {arg.dim()}.')
+        if in_dim is not None and in_dim < 0:
+            flat_in_dims[i] = in_dim % arg.dim()
 
     return _validate_and_get_batch_size(flat_in_dims, flat_args), flat_in_dims, flat_args, args_spec
 
