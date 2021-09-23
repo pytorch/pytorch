@@ -52,7 +52,7 @@ struct Argument {
         kwarg_only_(rhs.kwarg_only_),
         is_out_(rhs.is_out_) {}
 
-  Argument& operator=(Argument&& rhs) noexcept = default;
+  Argument& operator=(Argument&& rhs) = default;
 
   Argument& operator=(const Argument& rhs) {
     if (this != &rhs) {

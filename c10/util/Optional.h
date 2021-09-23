@@ -658,9 +658,7 @@ class optional : private OptionalBase<T> {
 
   optional& operator=(const optional& rhs) = default;
 
-  optional& operator=(optional&& rhs) noexcept(
-      std::is_nothrow_move_assignable<T>::value&&
-          std::is_nothrow_move_constructible<T>::value) = default;
+  optional& operator=(optional&& rhs) = default;
 
   template <class U = T>
   auto operator=(U&& v) -> typename std::enable_if<
