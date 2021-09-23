@@ -10,6 +10,7 @@
 #include <torch/csrc/jit/passes/utils/optimization_utils.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/utils/memory.h>
+#include <unordered_set>
 #include <vector>
 
 namespace torch {
@@ -32,10 +33,10 @@ class ConcatLinearLayers {
 
   void collectConstantLinearLayers(
       Block* b,
-      std::unordered_map<Value*, std::list<Node*>>& grouped_linear_layers,
+      std::unordered_map<Value*, std::vector<Node*>>& grouped_linear_layers,
       std::vector<Value*>& ordered_tensor_inputs) {
-    // We are using an ordered list so that one knows that
-    // one only needs to move arguments forward to be a valid move, not
+    // We are using an ordered list so that we only have to
+    // check if moving items forward is a valid move, not
     // backwards. Otherwise we need to rebuild the aliasDb when we add values.
 
     for (Node* n : b->nodes()) {
@@ -54,33 +55,27 @@ class ConcatLinearLayers {
       if (nonConstantParameters(n)) {
         continue;
       }
-
-      Value* op_value = n->inputs().at(0);
-      if (grouped_linear_layers.find(op_value) ==
-          grouped_linear_layers.cend()) {
-        grouped_linear_layers.insert({op_value, std::list<Node*>()});
-        ordered_tensor_inputs.push_back(op_value);
+      auto weight_tensor = constant_as<Tensor>(weight).value();
+      if (!weight_tensor.device().is_cuda()) {
+        continue;
       }
-      grouped_linear_layers.find(op_value)->second.push_back(n);
+
+      Value* linear_input = n->inputs().at(0);
+      if (grouped_linear_layers.find(linear_input) ==
+          grouped_linear_layers.cend()) {
+        grouped_linear_layers.insert({linear_input, std::vector<Node*>()});
+        ordered_tensor_inputs.push_back(linear_input);
+      }
+      grouped_linear_layers.find(linear_input)->second.push_back(n);
     }
   }
 
-  void mergeLinearLayers(
-      Node* base_node,
-      std::vector<Node*>& compatible_layers) {
+  void mergeLinearLayers(std::vector<Node*>& compatible_layers) {
     graph_modified = true;
-
-    for (auto n : compatible_layers) {
-      if (n == base_node) {
-        continue;
-      }
-      getAliasDb()->moveBeforeTopologicallyValid(base_node, n);
-    }
-
-    // Now actually merge the candidate nodes
+    Node* base_node = compatible_layers[0];
 
     // Scope needed to make sure we free the WithInsertPoint guard
-    // before we delete `base_node`
+    // and reset the insert point before we delete `base_node`
     Node* linear_node = nullptr;
     {
       WithInsertPoint guard(base_node);
@@ -147,16 +142,18 @@ class ConcatLinearLayers {
 
   // Check the linear_layer_group of a tensor to find ones that can be
   // combined
-  void collectAndMergeLinearLayers(std::list<Node*>& linear_layer_group) {
-    while (!linear_layer_group.empty()) {
-      auto it_first = linear_layer_group.begin();
-      Node* base_node = *it_first;
+  void collectAndMergeLinearLayers(std::vector<Node*>& linear_layer_group) {
+    std::unordered_set<Node*> checked_nodes;
+
+    for (size_t i = 0; i < linear_layer_group.size(); i++) {
+      Node* base_node = linear_layer_group[i];
+      if (checked_nodes.find(base_node) != checked_nodes.end()) {
+        continue;
+      }
 
       std::vector<Node*> compatible_layers;
       compatible_layers.push_back(base_node);
-      // removing the node from future consideration, as we will only move
-      // nodes forward to keep code simple.
-      linear_layer_group.erase(it_first);
+      checked_nodes.insert(base_node);
 
       auto base_weight =
           constant_as<Tensor>(base_node->namedInput("weight")).value();
@@ -165,25 +162,25 @@ class ConcatLinearLayers {
 
       // Now iterate over the rest of the users of the set to
       // see if there is anything that we can coaleasce `base_node` with.
-      for (auto it = linear_layer_group.begin();
-           it != linear_layer_group.end();) {
-        auto node = *it;
+      for (size_t j = i + 1; j < linear_layer_group.size(); j++) {
+        auto node = linear_layer_group[j];
+        if (checked_nodes.find(node) != checked_nodes.end()) {
+          continue;
+        }
         auto weight = constant_as<Tensor>(node->namedInput("weight")).value();
         auto bias = constant_as<Tensor>(node->namedInput("bias")).value();
 
         // For now we will just keep it simple and require matching types
-        // Type promotion mgiht cause performance to actually decrease.
+        // Type promotion might cause performance to actually decrease.
         if (base_weight.dtype() != weight.dtype() ||
             base_weight.device() != weight.device() ||
             base_bias.dtype() != bias.dtype() ||
             base_bias.device() != bias.device()) {
-          it++;
           continue;
         }
 
         if (!isNonZeroDimEqual(base_weight, weight) ||
             !isNonZeroDimEqual(base_bias, bias)) {
-          it++;
           continue;
         }
 
@@ -193,20 +190,17 @@ class ConcatLinearLayers {
               getAliasDb()->couldMoveBeforeTopologically(node, n);
         }
         if (!can_move_before_all) {
-          it++;
           continue;
         }
 
         // Found a node that is eligible for combination
-        auto prev = it;
-        it++;
-        linear_layer_group.erase(prev);
         compatible_layers.push_back(node);
+        checked_nodes.insert(node);
       }
       if (compatible_layers.size() == 1) {
         continue; // No other layers to merge
       }
-      mergeLinearLayers(base_node, compatible_layers);
+      mergeLinearLayers(compatible_layers);
     }
   }
 
@@ -218,7 +212,7 @@ class ConcatLinearLayers {
     }
 
     // Processing for the block itself
-    std::unordered_map<Value*, std::list<Node*>> grouped_linear_layers;
+    std::unordered_map<Value*, std::vector<Node*>> grouped_linear_layers;
     std::vector<Value*> ordered_tensor_inputs;
     collectConstantLinearLayers(
         block, grouped_linear_layers, ordered_tensor_inputs);
