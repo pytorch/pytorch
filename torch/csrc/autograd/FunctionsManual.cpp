@@ -480,10 +480,10 @@ static Tensor generic_solve_jvp(
 }
 
 Tensor solve_jvp(
+  const Tensor& X,
   const Tensor& A,
   const Tensor& dA,
-  const Tensor& dB,
-  const Tensor& X
+  const Tensor& dB
 ) {
   return generic_solve_jvp(
     at::linalg_solve,
