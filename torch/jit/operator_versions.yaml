@@ -1,0 +1,29 @@
+# Central file where we track which operator has upgraders
+
+- func: div.Tensor
+  version: 4
+  upgrader: div_0_3
+
+- func: div.Scalar
+  version: 4
+  upgrader: div_0_3
+
+- func: div.out
+  version: 4
+  upgrader: div_0_3
+
+- func: div_.Tensor
+  version: 4
+  upgrader: div__0_3
+
+- func: div_.Scalar
+  version: 4
+  upgrader: div__0_3
+
+- func: full.names
+  version: 5
+  upgrader: full_0_4
+
+- func: full.out
+  version: 5
+  upgrader: full_0_4
