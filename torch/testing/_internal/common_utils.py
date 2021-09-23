@@ -1454,12 +1454,12 @@ class TestCase(expecttest.TestCase):
         return self.wrap_method_with_policy(method, self.assertLeaksNoCudaTensors)
 
     # Recursive function that incorporates retry logic when PYTORCH_RETRY_TEST_CASES=1 and adds early test termination
-    def _run(self, result=None, num_runs_left=0):
+    def _run_with_retry(self, result=None, num_runs_left=0):
         if num_runs_left == 0:
             return
 
-        failures_before = 0 if result == None else len(result.failures)  # num tests marked as failed before starting
-        errors_before = 0 if result == None else len(result.errors)  # num tests marked as errored before starting
+        failures_before = 0 if result is None else len(result.failures)  # num tests marked as failed before starting
+        errors_before = 0 if result is None else len(result.errors)  # num tests marked as errored before starting
 
         super().run(result=result)
         # Early terminate test if necessary.
@@ -1476,17 +1476,17 @@ class TestCase(expecttest.TestCase):
             if num_retries_left > 0:
                 result.failures.pop(-1)
                 result.addExpectedFailure(self, err)
-                self._run(result=result, num_runs_left=num_retries_left)
+                self._run_with_retry(result=result, num_runs_left=num_retries_left)
         elif errors_before < len(result.errors):
             print(f" {self._testMethodName} errored - num_retries_left: {num_retries_left}")
             if num_retries_left > 0:
                 result.errors.pop(-1)
                 result.addExpectedFailure(self, err)
-                self._run(result=result, num_runs_left=num_retries_left)
+                self._run_with_retry(result=result, num_runs_left=num_retries_left)
 
     def run(self, result=None):
         num_runs = MAX_NUM_RETRIES + 1 if RETRY_TEST_CASES else 1
-        self._run(result=result, num_runs_left=num_runs)
+        self._run_with_retry(result=result, num_runs_left=num_runs)
 
     def setUp(self):
         check_if_enable(self)
