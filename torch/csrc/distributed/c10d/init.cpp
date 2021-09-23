@@ -397,8 +397,8 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           &::c10d::Reducer::set_forward_pass_work_handle,
           py::call_guard<py::gil_scoped_release>())
       .def(
-          "_get_local_used_maps",
-          &::c10d::Reducer::get_local_used_maps_on_device)
+          "_get_local_used_map",
+          &::c10d::Reducer::get_local_used_map_on_device)
       .def(
           "_set_ddp_runtime_logging_sample_rate",
           &::c10d::Reducer::set_ddp_runtime_logging_sample_rate,
@@ -490,11 +490,15 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
       py::call_guard<py::gil_scoped_release>());
 
   py::enum_<::c10d::ReduceOp>(module, "ReduceOp", R"(
-An enum-like class for available reduction operations: ``SUM``, ``PRODUCT``,
-``MIN``, ``MAX``, ``BAND``, ``BOR``, and ``BXOR``.
+An enum-like class for available reduction operations: ``SUM``, ``AVG``,
+``PRODUCT``, ``MIN``, ``MAX``, ``BAND``, ``BOR``, and ``BXOR``.
 
-Note that ``BAND``, ``BOR``, and ``BXOR`` reductions are not available when
+``BAND``, ``BOR``, and ``BXOR`` reductions are not available when
 using the ``NCCL`` backend.
+
+``AVG`` divides values by the world size before summing across ranks.
+``AVG`` is only available with the ``NCCL`` backend,
+and only for NCCL versions 2.10 or later.
 
 Additionally, ``MAX``, ``MIN`` and ``PRODUCT`` are not supported for complex tensors.
 
@@ -502,6 +506,7 @@ The values of this class can be accessed as attributes, e.g., ``ReduceOp.SUM``.
 They are used in specifying strategies for reduction collectives, e.g.,
 :func:`reduce`, :func:`all_reduce_multigpu`, etc.)")
       .value("SUM", ::c10d::ReduceOp::SUM)
+      .value("AVG", ::c10d::ReduceOp::AVG)
       .value("PRODUCT", ::c10d::ReduceOp::PRODUCT)
       .value("MIN", ::c10d::ReduceOp::MIN)
       .value("MAX", ::c10d::ReduceOp::MAX)
