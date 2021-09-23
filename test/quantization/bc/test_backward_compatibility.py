@@ -1,20 +1,26 @@
 # -*- coding: utf-8 -*-
 
+import math
 import sys
 import os
 import unittest
+from typing import Set
+
 # torch
 import torch
 import torch.nn as nn
 import torch.nn.quantized as nnq
 import torch.nn.quantized.dynamic as nnqd
 import torch.nn.intrinsic.quantized as nniq
+from torch.fx import GraphModule
 
 # Testing utils
 from torch.testing._internal.common_utils import TestCase, IS_AVX512_VNNI_SUPPORTED
 from torch.testing._internal.common_quantized import override_qengines, qengine_is_fbgemm
+from torch.testing._internal.common_quantization import skipIfNoFBGEMM
 
 from torch.quantization import MinMaxObserver, PerChannelMinMaxObserver
+import torch.quantization.quantize_fx as quantize_fx
 
 def remove_prefix(text, prefix):
     if text.startswith(prefix):
@@ -42,8 +48,25 @@ def get_filenames(self, subname):
     scripted_module_file = base_name + ".scripted.pt"
     traced_module_file = base_name + ".traced.pt"
     expected_file = base_name + ".expected.pt"
+    package_file = base_name + ".package.pt"
+    get_attr_targets_file = base_name + ".get_attr_targets.pt"
 
-    return input_file, state_dict_file, scripted_module_file, traced_module_file, expected_file
+    return input_file, state_dict_file, scripted_module_file, \
+        traced_module_file, expected_file, package_file, get_attr_targets_file
+
+
+class LinearReluFunctional(nn.Module):
+    def __init__(self, N):
+        super().__init__()
+        self.w1 = nn.Parameter(torch.empty(N, N))
+        self.b1 = nn.Parameter(torch.zeros(N))
+        torch.nn.init.kaiming_uniform_(self.w1, a=math.sqrt(5))
+
+    def forward(self, x):
+        x = torch.nn.functional.linear(x, self.w1, self.b1)
+        x = torch.nn.functional.relu(x)
+        return x
+
 
 class TestSerialization(TestCase):
     """ Test backward compatiblity for serialization and numerics
@@ -55,7 +78,8 @@ class TestSerialization(TestCase):
         with current code, make sure we don't break backward compatibility for the
         serialization of quantized modules
         """
-        input_file, state_dict_file, scripted_module_file, traced_module_file, expected_file = \
+        input_file, state_dict_file, scripted_module_file, traced_module_file, \
+            expected_file, _package_file, _get_attr_targets_file = \
             get_filenames(self, subname)
 
         # only generate once.
@@ -90,7 +114,8 @@ class TestSerialization(TestCase):
         If generate == False, traces and scripts the module and quantizes the results with
         PTQ, and compares to saved results.
         """
-        input_file, state_dict_file, scripted_module_file, traced_module_file, expected_file = \
+        input_file, state_dict_file, scripted_module_file, traced_module_file, \
+            expected_file, _package_file, _get_attr_targets_file = \
             get_filenames(self, subname)
 
         # only generate once.
@@ -128,8 +153,8 @@ class TestSerialization(TestCase):
         """
         Test observer code can be loaded from state_dict.
         """
-        input_file, state_dict_file, _, traced_module_file, expected_file = \
-            get_filenames(self, None)
+        input_file, state_dict_file, _, traced_module_file, expected_file, \
+            _package_file, _get_attr_targets_file = get_filenames(self, None)
         if generate:
             input_tensor = torch.rand(*input_size).float()
             torch.save(input_tensor, input_file)
@@ -141,6 +166,66 @@ class TestSerialization(TestCase):
         expected = torch.load(expected_file)
         if check_numerics:
             self.assertEqual(obs(input_tensor), expected)
+
+    def _test_package(self, fp32_module, input_size, generate=False):
+        """
+        Verifies that files created in the past with torch.package
+        work on today's FX graph mode quantization transforms.
+        """
+        input_file, _state_dict_file, _scripted_module_file, _traced_module_file, \
+            expected_file, package_file, get_attr_targets_file = \
+            get_filenames(self, None)
+
+        package_name = 'test'
+        resource_name_model = 'test.pkl'
+
+        def _do_quant_transforms(
+            m: torch.nn.Module,
+            input_tensor: torch.Tensor,
+        ) -> torch.nn.Module:
+            # do the quantizaton transforms and save result
+            qconfig = torch.quantization.get_default_qconfig('fbgemm')
+            mp = quantize_fx.prepare_fx(m, {'': qconfig})
+            mp(input_tensor)
+            mq = quantize_fx.convert_fx(mp)
+            return mq
+
+        def _get_get_attr_target_strings(m: GraphModule) -> Set[str]:
+            results = set()
+            for node in m.graph.nodes:
+                if node.op == 'get_attr':
+                    results.add(node.target)
+            return results
+
+        if generate and qengine_is_fbgemm():
+            input_tensor = torch.randn(*input_size)
+            torch.save(input_tensor, input_file)
+
+            # save the model with torch.package
+            with torch.package.PackageExporter(package_file) as exp:
+                exp.extern('quantization.bc.test_backward_compatibility')
+                exp.save_pickle(package_name, resource_name_model, fp32_module)
+
+            # do the quantization transforms and save the result
+            mq = _do_quant_transforms(fp32_module, input_tensor)
+            get_attrs = _get_get_attr_target_strings(mq)
+            torch.save(get_attrs, get_attr_targets_file)
+            q_result = mq(input_tensor)
+            torch.save(q_result, expected_file)
+
+        # load input tensor
+        input_tensor = torch.load(input_file)
+        expected_output_tensor = torch.load(expected_file)
+        expected_get_attrs = torch.load(get_attr_targets_file)
+
+        # load model from package and verify output and get_attr targets match
+        imp = torch.package.PackageImporter(package_file)
+        m = imp.load_pickle(package_name, resource_name_model)
+        mq = _do_quant_transforms(m, input_tensor)
+        get_attrs = _get_get_attr_target_strings(mq)
+        self.assertTrue(get_attrs == expected_get_attrs)
+        output_tensor = mq(input_tensor)
+        self.assertTrue(torch.allclose(output_tensor, expected_output_tensor))
 
     @override_qengines
     def test_linear(self):
@@ -298,3 +383,9 @@ class TestSerialization(TestCase):
         ref_model = torch.quantization.QuantWrapper(model)
         ref_model = torch.quantization.prepare_qat(ref_model)
         self._test_obs(ref_model, input_size=[5, 5], generate=False, check_numerics=False)
+
+    @skipIfNoFBGEMM
+    def test_linear_relu_package_quantization_transforms(self):
+        m = LinearReluFunctional(4).eval()
+        self._test_package(m, input_size=(1, 1, 4, 4), generate=False)
+
