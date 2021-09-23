@@ -307,6 +307,14 @@ def fake_quantize_per_tensor_affine(g, inputs, scale, zero_point, quant_min=-128
     zero_point = torch.tensor(zero_point, dtype=zero_point_dtype)  # ONNX requires zero_point to be tensor
     return g.op("DequantizeLinear", g.op("QuantizeLinear", inputs, scale, zero_point), scale, zero_point)
 
+
 def isinf(g, input):
     from torch.onnx.symbolic_opset9 import _cast_Double  # type: ignore[attr-defined]
     return g.op("IsInf", _cast_Double(g, input, False))
+
+
+def isfinite(g, input):
+    from torch.onnx.symbolic_opset9 import isnan, __not_, __or_
+    inf_node = isinf(g, input)
+    nan_node = isnan(g, input)
+    return __not_(g, __or_(g, inf_node, nan_node))
