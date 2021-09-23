@@ -105,6 +105,7 @@ ConcreteSourceRangeUnpickler::ConcreteSourceRangeUnpickler(
       unpickled_records(nullptr) {}
 
 void ConcreteSourceRangeUnpickler::unpickle() {
+  std::lock_guard<std::mutex> guard(mutex);
   if (unpickled_records) {
     return;
   }
