@@ -121,6 +121,9 @@ class AbstractTestCases:
         def test_dir(self):
             dir(torch)
 
+        def test_wildcard_import(self):
+            exec('from torch import *')
+
         @wrapDeterministicFlagAPITest
         def test_deterministic_flag(self):
             for deterministic in [True, False]:
@@ -8149,7 +8152,7 @@ class TestTorch(AbstractTestCases._TestTorchMixin):
         self.assertEqual(y.grad.foo, 2)
 
     def test_subclass_preserved(self):
-        class MyTensor(torch._C._TensorBase):
+        class MyTensor(torch.Tensor):
             pass
 
         x = MyTensor(torch.empty(2))
