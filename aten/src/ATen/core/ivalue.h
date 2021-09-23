@@ -8,7 +8,6 @@
 #include <c10/util/variant.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <typeindex>
-#include "c10/util/Exception.h"
 
 namespace torch {
 class TORCH_API CustomClassHolder : public c10::intrusive_ptr_target {};
