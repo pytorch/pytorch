@@ -7,7 +7,7 @@
 bool run() {
   torch::deploy::InterpreterManager m(2);
   m.register_module_source("check_none", "check = id(None)\n");
-  int64_t id0, id1;
+  int64_t id0 = 0, id1 = 0;
   {
     auto I = m.all_instances()[0].acquire_session();
     id0 = I.global("check_none", "check").toIValue().toInt();

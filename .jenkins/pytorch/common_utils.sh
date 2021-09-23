@@ -49,6 +49,17 @@ function get_exit_code() {
   return $retcode
 }
 
+function get_pr_change_files() {
+  # The fetch may fail on Docker hosts, this fetch is necessary for GHA
+  # accepts PR_NUMBER and extract filename as arguments
+  set +e
+  tmp_file=$(mktemp)
+  wget -O "$tmp_file" "https://api.github.com/repos/pytorch/pytorch/pulls/$1/files"
+  # this regex extracts the filename list according to the GITHUB REST API result.
+  sed -n "s/.*\"filename\": \"\(.*\)\",/\1/p" "$tmp_file" | tee "$2"
+  set -e
+}
+
 function file_diff_from_base() {
   # The fetch may fail on Docker hosts, this fetch is necessary for GHA
   # lazy_tensor_staging is a hack to replace master to avoid some CI issues. Don't merge it.
@@ -60,9 +71,9 @@ function file_diff_from_base() {
 
 function get_bazel() {
   # download bazel version
-  wget https://github.com/bazelbuild/bazel/releases/download/3.1.0/bazel-3.1.0-linux-x86_64 -O tools/bazel
+  wget https://github.com/bazelbuild/bazel/releases/download/4.2.1/bazel-4.2.1-linux-x86_64 -O tools/bazel
   # verify content
-  echo '753434f4fa730266cf5ce21d1fdd425e1e167dd9347ad3e8adc19e8c0d54edca  tools/bazel' | sha256sum --quiet -c
+  echo '1a4f3a3ce292307bceeb44f459883859c793436d564b95319aacb8af1f20557c tools/bazel' | sha256sum --quiet -c
 
   chmod +x tools/bazel
 }

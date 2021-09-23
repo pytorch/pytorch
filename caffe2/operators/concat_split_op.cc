@@ -101,9 +101,12 @@ OpSchema::Cost CostInferenceForSplit(
   CAFFE_ENFORCE_GT(in.size(), 0);
   struct OpSchema::Cost cost;
   cost.flops = 0;
-  auto input_bytes_count = nElemFromDim(in[0]) * sizeof(in[0].data_type());
-  auto split_bytes_count =
-      (in.size() == 1) ? 0 : nElemFromDim(in[1]) * sizeof(in[1].data_type());
+  auto const& input_0_element_size_byte =
+      DataTypeToTypeMeta(in[0].data_type()).itemsize();
+  auto input_bytes_count = nElemFromDim(in[0]) * input_0_element_size_byte;
+  auto split_bytes_count = in.size() > 1
+      ? nElemFromDim(in[1]) * DataTypeToTypeMeta(in[1].data_type()).itemsize()
+      : 0;
   // There can be two input blobs:
   // (1) actual tensor to be split
   // (2) lengths of outputs along split axis
@@ -329,11 +332,13 @@ OpSchema::Cost CostInferenceForConcat(
   }
   auto split_info_bytes_count = in.size() * sizeof(int);
 
+  auto const& input_0_element_size_byte =
+      DataTypeToTypeMeta(in[0].data_type()).itemsize();
   struct OpSchema::Cost cost;
   cost.flops = 0;
-  cost.bytes_read = nElemRead * sizeof(in[0].data_type());
+  cost.bytes_read = nElemRead * input_0_element_size_byte;
   cost.bytes_written =
-      size * sizeof(in[0].data_type()) + split_info_bytes_count;
+      size * input_0_element_size_byte + split_info_bytes_count;
   cost.params_bytes = 0;
   return cost;
 }

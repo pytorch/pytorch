@@ -1,6 +1,7 @@
 import math
 import sys
 import errno
+import multiprocessing
 import os
 import ctypes
 import faulthandler
@@ -13,13 +14,26 @@ import itertools
 import warnings
 import tempfile
 from torch import multiprocessing as mp
-from torch.utils.data import _utils, Dataset, IterableDataset, TensorDataset, DataLoader, ConcatDataset, ChainDataset, Subset
+from torch.utils.data import (
+    ChainDataset,
+    ConcatDataset,
+    DataLoader,
+    DataLoader2,
+    Dataset,
+    IterableDataset,
+    Subset,
+    TensorDataset,
+    communication,
+    _utils
+)
 from torch.utils.data._utils import MP_STATUS_CHECK_INTERVAL
 from torch.utils.data.dataset import random_split
+from torch.utils.data.datapipes.iter import IterableWrapper
 from torch._utils import ExceptionWrapper
 from torch.testing._internal.common_utils import (TestCase, run_tests, TEST_NUMPY, IS_WINDOWS,
                                                   IS_IN_CI, NO_MULTIPROCESSING_SPAWN, skipIfRocm, slowTest,
                                                   load_tests, TEST_WITH_TSAN, IS_SANDCASTLE)
+
 
 try:
     import psutil
@@ -33,6 +47,17 @@ except ImportError:
     else:
         warnings.warn(err_msg)
 
+try:
+    import dill
+    # XXX: By default, dill writes the Pickler dispatch table to inject its
+    # own logic there. This globally affects the behavior of the standard library
+    # pickler for any user who transitively depends on this module!
+    # Undo this extension to avoid altering the behavior of the pickler globally.
+    dill.extend(use_dill=False)
+    HAS_DILL = True
+except ImportError:
+    HAS_DILL = False
+skipIfNoDill = unittest.skipIf(not HAS_DILL, "no dill")
 
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -43,7 +68,11 @@ load_tests = load_tests
 # as well during the execution of this test suite, and it will cause
 # CUDA OOM error on Windows.
 TEST_CUDA = torch.cuda.is_available()
-
+if TEST_CUDA:
+    dev_name = torch.cuda.get_device_name(torch.cuda.current_device()).lower()
+    IS_JETSON = 'xavier' in dev_name or 'nano' in dev_name or 'jetson' in dev_name or 'tegra' in dev_name
+else:
+    IS_JETSON = False
 
 if not NO_MULTIPROCESSING_SPAWN:
     # We want to use `spawn` if able because some of our tests check that the
@@ -708,7 +737,7 @@ class TestWorkerInfoDataset(SynchronizedDataset):
 
 # Should be used as worker_init_fn with TestWorkerInfoDataset.
 # See _test_get_worker_info below for usage.
-def test_worker_info_init_fn(worker_id):
+def _test_worker_info_init_fn(worker_id):
     worker_info = torch.utils.data.get_worker_info()
     assert worker_id == worker_info.id, "worker_init_fn and worker_info should have consistent id"
     assert worker_id < worker_info.num_workers, "worker_init_fn and worker_info should have valid id"
@@ -738,7 +767,7 @@ def _test_get_worker_info():
     dataset = TestWorkerInfoDataset(6, batch_size, num_workers)
     dataloader = DataLoader(dataset, batch_size=batch_size,
                             num_workers=num_workers,
-                            worker_init_fn=test_worker_info_init_fn)
+                            worker_init_fn=_test_worker_info_init_fn)
     it = iter(dataloader)
     data = []
     for d in it:
@@ -747,7 +776,7 @@ def _test_get_worker_info():
     data = torch.cat(data, 0)
     for d in data:
         # each `d` is a [worker_id, worker_pid] pair, which is set in
-        # test_worker_info_init_fn
+        # _test_worker_info_init_fn
         assert d[1] == worker_pids[d[0]]
     # get_worker_info returns None in main proc after data loading
     assert torch.utils.data.get_worker_info() is None
@@ -1310,8 +1339,8 @@ except RuntimeError as e:
         counting_ds_n = 11
         dl_common_args = dict(num_workers=3, batch_size=3, pin_memory=(not TEST_CUDA))
         for ctx in supported_multiprocessing_contexts:
-            # windows doesn't support sharing cuda tensor; ROCm does not yet fully support IPC
-            if ctx in ['spawn', 'forkserver'] and TEST_CUDA and not IS_WINDOWS:
+            # windows and jetson devices don't support sharing cuda tensor; ROCm does not yet fully support IPC
+            if ctx in ['spawn', 'forkserver'] and TEST_CUDA and not IS_WINDOWS and not IS_JETSON:
                 ds_cls = CUDACountingDataset
             else:
                 ds_cls = CountingDataset
@@ -1934,6 +1963,49 @@ except RuntimeError as e:
             dataloader = DataLoader(self.dataset, batch_size=2, num_workers=1000)
 
 
+@unittest.skipIf(
+    TEST_WITH_TSAN,
+    "Fails with TSAN with the following error: starting new threads after multi-threaded "
+    "fork is not supported. Dying (set die_after_fork=0 to override)")
+class TestDataLoader2(TestCase):
+    @skipIfNoDill
+    def test_basics(self):
+        # TODO(VitalyFedyunin): This test will start breaking if we remove guaranteed order
+        # of traversing workers
+        dp = IterableWrapper(list(range(1000)))
+        dl = DataLoader(dp, batch_size=3, collate_fn=lambda x: x, num_workers=2)
+        dl2 = DataLoader2(dp, batch_size=3, collate_fn=lambda x: x, num_workers=2)
+        dl2_threading = DataLoader2(dp, batch_size=3, collate_fn=lambda x: x, num_workers=2, parallelism_mode='thread')
+        self.assertEqual(list(dl), list(dl2))
+        self.assertEqual(list(dl), list(dl2_threading))
+
+
+
+@unittest.skipIf(
+    TEST_WITH_TSAN,
+    "Fails with TSAN with the following error: starting new threads after multi-threaded "
+    "fork is not supported. Dying (set die_after_fork=0 to override)")
+class TestDataLoader2_EventLoop(TestCase):
+    @skipIfNoDill
+    def test_basic_threading(self):
+        def clean_me(process, req_queue, res_queue):
+            req_queue.put(communication.messages.TerminateRequest())
+            _ = res_queue.get()
+            process.join()
+
+        it = list(range(100))
+        numbers_dp = IterableWrapper(it)
+        (process, req_queue, res_queue, _thread_local_datapipe) = communication.eventloop.SpawnThreadForDataPipeline(numbers_dp)
+
+        process.start()
+        local_datapipe = communication.iter.QueueWrapper(
+            communication.protocol.IterDataPipeQueueProtocolClient(req_queue, res_queue))
+
+        actual = list(local_datapipe)
+        clean_me(process, req_queue, res_queue)
+
+        self.assertEqual(list(range(100)), actual)
+
 class StringDataset(Dataset):
     def __init__(self):
         self.s = '12345'
@@ -2253,9 +2325,24 @@ class TestIndividualWorkerQueue(TestCase):
                 current_worker_idx = 0
 
     def test_ind_worker_queue(self):
+        max_num_workers = None
+        if hasattr(os, 'sched_getaffinity'):
+            try:
+                max_num_workers = len(os.sched_getaffinity(0))
+            except Exception:
+                pass
+        if max_num_workers is None:
+            cpu_count = os.cpu_count()
+            if cpu_count is not None:
+                # Use half number of CPUs
+                max_num_workers = cpu_count // 2
+
+        if max_num_workers is None:
+            max_num_workers = 1
+
         for batch_size in (8, 16, 32, 64):
-            for num_workers in range(1, 6):
-                self._run_ind_worker_queue_test(batch_size=batch_size, num_workers=num_workers)
+            for num_workers in range(0, min(6, max_num_workers)):
+                self._run_ind_worker_queue_test(batch_size=batch_size, num_workers=num_workers + 1)
 
 
 class SetAffinityDataset(IterableDataset):
@@ -2267,7 +2354,7 @@ class SetAffinityDataset(IterableDataset):
 
 
 def worker_set_affinity(_):
-    os.sched_setaffinity(0, [2])
+    os.sched_setaffinity(0, [multiprocessing.cpu_count() - 1])
 
 
 @unittest.skipIf(
@@ -2280,7 +2367,7 @@ class TestSetAffinity(TestCase):
         dataloader = torch.utils.data.DataLoader(
             dataset, num_workers=2, worker_init_fn=worker_set_affinity)
         for sample in dataloader:
-            self.assertEqual(sample, [2])
+            self.assertEqual(sample, [multiprocessing.cpu_count() - 1])
 
 class ConvDataset(Dataset):
     def __init__(self):

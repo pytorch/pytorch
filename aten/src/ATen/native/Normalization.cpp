@@ -74,6 +74,13 @@ static inline bool is_contiguous(const Tensor& t) {
   return t.is_contiguous() || t.is_contiguous(at::MemoryFormat::ChannelsLast);
 }
 
+// For some ambiguous cases, it is possible a channels last contiguous Tensor has
+//   `suggest_memory_format` of Contiguous.
+// See https://github.com/pytorch/pytorch/issues/63224 for details.
+static inline MemoryFormat suggest_memory_format_contig(const Tensor& t) {
+  return t.is_contiguous() ? at::MemoryFormat::Contiguous : at::MemoryFormat::ChannelsLast;
+}
+
 template<typename scalar_t>
 std::tuple<Tensor,Tensor,Tensor> batch_norm_cpu_transform_input_template(
     const Tensor& input, const Tensor& weight, const Tensor& bias,
@@ -87,10 +94,9 @@ std::tuple<Tensor,Tensor,Tensor> batch_norm_cpu_transform_input_template(
       && running_mean.is_contiguous()
       && running_var.is_contiguous();
 
-  Tensor output = at::empty_like(input, input.suggest_memory_format());
-
   // inference contiguous path
   if (all_contiguous) {
+    Tensor output = at::empty_like(input, suggest_memory_format_contig(input));
     batch_norm_cpu_stub(kCPU, output, input, weight, bias,
         save_mean, save_invstd, running_mean, running_var, train, eps);
     return std::make_tuple(output, save_mean, save_invstd);
@@ -120,6 +126,7 @@ std::tuple<Tensor,Tensor,Tensor> batch_norm_cpu_transform_input_template(
   auto b = bias.defined() ? as_nd(bias) :
       at::detail::scalar_tensor_static(0, input.scalar_type(), kCPU);
 
+  Tensor output = at::empty_like(input, input.suggest_memory_format());
   auto iter = TensorIteratorConfig()
     .add_output(output)
     .add_input(input)
@@ -240,7 +247,7 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cpu_template(
     grad_weight = at::empty_like(weight, at::MemoryFormat::Contiguous);
   }
   if (grad_input_mask[2]) {
-    grad_bias = at::empty_like(weight, at::MemoryFormat::Contiguous);
+    grad_bias = at::empty({input.size(1)}, input.options());
   }
 
   // since we are directly manipulating pointers in contiguous path,
@@ -250,6 +257,9 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cpu_template(
       && input.suggest_memory_format() == grad_out_.suggest_memory_format();
 
   if (all_contiguous) {
+    if (grad_input_mask[0]) {
+      grad_input = at::empty_like(input, suggest_memory_format_contig(input));
+    }
     batch_norm_cpu_backward_stub(kCPU, grad_input, grad_weight, grad_bias,
         grad_out_, input, weight, running_mean, running_var, save_mean, save_invstd, train, eps);
     return std::make_tuple(grad_input, grad_weight, grad_bias);
@@ -416,6 +426,22 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t> _batch_norm_impl_index(
   const Tensor& running_var = c10::value_or_else(running_var_opt, [] {return Tensor();});
 
   auto num_features = input.sizes()[1];
+
+  if (input.numel() == 0) {
+    Tensor reserve = at::empty({0}, input.options().dtype(kByte));
+    auto options = input.options().dtype(
+        at::toAccumulateType(input.scalar_type(), /*is_cuda=*/input.is_cuda()));
+    auto save_mean = at::empty({num_features}, options);
+    auto save_invstd = at::empty({num_features}, options);
+
+    // don't return view of input, don't return empty tensor because it will break gradient chain
+    auto out = input.clone();
+    if (weight.defined()) out = out * weight[0];
+    if (bias.defined()) out = out + bias[0];
+    return std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t>(
+        out, save_mean, save_invstd, reserve, 0);
+  }
+
   if (running_mean.defined()) {
     check_dims_match_num_input_features("running_mean", num_features, running_mean.numel());
   } else if (!training) {
@@ -508,7 +534,30 @@ std::tuple<Tensor, Tensor, Tensor> _batch_norm_impl_index_backward(
   const Tensor& save_mean = c10::value_or_else(save_mean_opt, [] {return Tensor();});
   const Tensor& save_var_transform = c10::value_or_else(save_var_transform_opt, [] {return Tensor();});
 
-  if (impl_index == 0) {
+  if (input.numel() == 0) {
+    std::vector<int64_t> dims(input.dim() - 1);
+    dims[0] = 0;
+    std::iota(dims.begin() + 1, dims.end(), 2);
+
+    // don't return empty tensor because it will break gradient chain
+    Tensor grad_input;
+    Tensor grad_weight;
+    Tensor grad_bias;
+    if (output_mask[2]) {
+      grad_bias = grad_output.sum(dims);
+    }
+    if (output_mask[1]) {
+      grad_weight = (grad_output * input).sum(dims);
+    }
+    if (output_mask[0] && weight.defined()) {
+      grad_input = grad_output * weight[0];
+    }
+    return std::make_tuple(grad_input, grad_weight, grad_bias);
+  }
+
+  // backward in inference mode is not supported in cudnn, fallback to native
+  // TODO: verify the same thing in miopen
+  if (impl_index == 0 || (!train)) {
     return at::native_batch_norm_backward(grad_output, input, weight, running_mean, running_var, save_mean, save_var_transform, train, epsilon, output_mask);
   } else if (impl_index == 1) {
     // TODO: _batch_norm_impl_index_backward is only used in JIT. cudnn NHWC
@@ -528,13 +577,6 @@ Tensor batch_norm(
   const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
   const Tensor& running_mean = c10::value_or_else(running_mean_opt, [] {return Tensor();});
   const Tensor& running_var = c10::value_or_else(running_var_opt, [] {return Tensor();});
-  if (input.numel()==0){
-    //don't return view of input, don't return empty tensor because it will break gradient chain
-    auto out = input.clone();
-    if (weight.defined()) out = out * weight[0];
-    if (bias.defined()) out = out + bias[0];
-    return out;
-  }
   return std::get<0>(at::_batch_norm_impl_index(input, weight, bias, running_mean, running_var,
                                                 training, momentum, eps, cudnn_enabled));
 }
@@ -602,7 +644,9 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_cpu(const Tensor& self, const c10:
 
   return AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "batch_norm", [&] {
       if (!train) {
-        return batch_norm_cpu_transform_input_template<scalar_t>(self, weight, bias, {}, {}, running_mean, running_var, train, eps);
+        auto save_mean = at::empty({0}, self.options());
+        auto save_var = at::empty({0}, self.options());
+        return batch_norm_cpu_transform_input_template<scalar_t>(self, weight, bias, save_mean, save_var, running_mean, running_var, train, eps);
       } else {
         auto save_stats = batch_norm_cpu_update_stats_template<scalar_t, InvStd>(self, running_mean, running_var, momentum, eps);
         return batch_norm_cpu_transform_input_template<scalar_t>(self, weight, bias, std::get<0>(save_stats), std::get<1>(save_stats), running_mean, running_var, train, eps);
