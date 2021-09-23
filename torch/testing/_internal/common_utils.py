@@ -40,7 +40,7 @@ import json
 import __main__  # type: ignore[import]
 import errno
 import ctypes
-from typing import cast, Any, Dict, Iterable, Iterator, Optional, Union, List, Tuple
+from typing import cast, Any, Dict, Iterable, Iterator, Optional, Union, List
 from unittest.mock import MagicMock
 
 import numpy as np
