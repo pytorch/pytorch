@@ -25,7 +25,7 @@ struct ProfilingGraphExecutorImpl : public GraphExecutorImplBase {
     remaining_bailout_depth_.reset();
   }
 
-  bool isOptimized() const {
+  bool isOptimized() const override {
     return optimized_plan_.has_value();
   }
 

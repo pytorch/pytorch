@@ -1657,7 +1657,6 @@ class TestCudaFuser(JitTestCase):
         # have been optimized away
         self.assertGraphContainsExactly(t_jit.graph_for(x, y), FUSION_GUARD, 0)
 
-    @unittest.skipIf(is_pre_volta(), "reduction not supported in pre volta device")
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
@@ -2213,34 +2212,6 @@ class TestCudaFuser(JitTestCase):
         torch.cuda.device(1)
         x = x.to("cuda:1")
         jit_o = t_jit(x)
-
-    @unittest.skipIf(True, "PRs pending")
-    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
-    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
-                     "Requires fusion optimization pass to be effective")
-    def test_graph_for_with_missing_optimized_engine(self):
-        x = torch.randn(8, 4, 2, dtype=torch.float, device="cuda").requires_grad_()
-
-        def t(x: torch.Tensor, flag: bool):
-            x = x + 1.0
-            x = torch.relu(x)
-            if flag:
-                o = x + 1.0
-                o = torch.relu(o)
-            else:
-                o = x + 2.0
-                o = torch.relu(o)
-            return o
-
-        t_jit = torch.jit.script(t)
-        jit_o = t_jit(x, False)
-        jit_o = t_jit(x, False)
-        jit_o = t_jit(x, True)
-        o = t(x, True)
-        self.assertEqual(o, jit_o)
-        # since the output value is not used at all, the fusion operator should
-        # have been optimized away
-        self.assertGraphContainsExactly(t_jit.graph_for(x, True), FUSION_GUARD, 1, True)
 
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
