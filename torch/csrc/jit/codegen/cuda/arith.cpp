@@ -221,13 +221,52 @@ TensorView* unaryOp(UnaryOpType type, TensorView* v1) {
   return unaryOp(type, v1->as<Val>())->as<TensorView>();
 }
 
-Val* neg(Val* v) {
-  return unaryOp(UnaryOpType::Neg, v);
-}
+#define NVFUSER_DEFINE_UNARY_OP(op_name, op_type) \
+  Val* op_name(Val* v) {                          \
+    return unaryOp(UnaryOpType::op_type, v);      \
+  }                                               \
+  TensorView* op_name(TensorView* tv) {           \
+    return unaryOp(UnaryOpType::op_type, tv);     \
+  }
 
-TensorView* neg(TensorView* v) {
-  return unaryOp(UnaryOpType::Neg, v);
-}
+NVFUSER_DEFINE_UNARY_OP(abs, Abs)
+NVFUSER_DEFINE_UNARY_OP(acos, Acos)
+NVFUSER_DEFINE_UNARY_OP(address, Address)
+NVFUSER_DEFINE_UNARY_OP(asin, Asin)
+NVFUSER_DEFINE_UNARY_OP(atan, Atan)
+NVFUSER_DEFINE_UNARY_OP(atanh, Atanh)
+NVFUSER_DEFINE_UNARY_OP(ceil, Ceil)
+NVFUSER_DEFINE_UNARY_OP(cos, Cos)
+NVFUSER_DEFINE_UNARY_OP(cosh, Cosh)
+NVFUSER_DEFINE_UNARY_OP(exp, Exp)
+NVFUSER_DEFINE_UNARY_OP(expm1, Expm1)
+NVFUSER_DEFINE_UNARY_OP(erf, Erf)
+NVFUSER_DEFINE_UNARY_OP(erfc, Erfc)
+NVFUSER_DEFINE_UNARY_OP(floor, Floor)
+NVFUSER_DEFINE_UNARY_OP(frac, Frac)
+NVFUSER_DEFINE_UNARY_OP(gelu, Gelu)
+NVFUSER_DEFINE_UNARY_OP(silu, Silu)
+NVFUSER_DEFINE_UNARY_OP(lgamma, Lgamma)
+NVFUSER_DEFINE_UNARY_OP(log, Log)
+NVFUSER_DEFINE_UNARY_OP(log10, Log10)
+NVFUSER_DEFINE_UNARY_OP(log1p, Log1p)
+NVFUSER_DEFINE_UNARY_OP(log2, Log2)
+NVFUSER_DEFINE_UNARY_OP(neg, Neg)
+NVFUSER_DEFINE_UNARY_OP(randlike, RandLike)
+NVFUSER_DEFINE_UNARY_OP(reciprocal, Reciprocal)
+NVFUSER_DEFINE_UNARY_OP(relu, Relu)
+NVFUSER_DEFINE_UNARY_OP(rsqrt, Rsqrt)
+NVFUSER_DEFINE_UNARY_OP(round, Round)
+NVFUSER_DEFINE_UNARY_OP(set, Set)
+NVFUSER_DEFINE_UNARY_OP(sigmoid, Sigmoid)
+NVFUSER_DEFINE_UNARY_OP(sin, Sin)
+NVFUSER_DEFINE_UNARY_OP(sinh, Sinh)
+NVFUSER_DEFINE_UNARY_OP(sqrt, Sqrt)
+NVFUSER_DEFINE_UNARY_OP(tan, Tan)
+NVFUSER_DEFINE_UNARY_OP(tanh, Tanh)
+NVFUSER_DEFINE_UNARY_OP(trunc, Trunc)
+NVFUSER_DEFINE_UNARY_OP(notOp, Not)
+#undef NVFUSER_DEFINE_UNARY_OP
 
 // BINARY OPERATIONS
 
@@ -435,6 +474,7 @@ NVFUSER_DEFINE_BINARY_OP(ne, NE)
 // Maybe bitwise or boolean op
 NVFUSER_DEFINE_BINARY_OP(andOp, And)
 NVFUSER_DEFINE_BINARY_OP(orOp, Or)
+NVFUSER_DEFINE_BINARY_OP(xorOp, Xor)
 #undef NVFUSER_DEFINE_BINARY_OP
 
 // REDUCTION OPERATIONS

@@ -79,8 +79,117 @@ TORCH_CUDA_CU_API WelfordResult Welford(
     Int* init_N = new Int(0));
 
 // UNARY OPERATIONS
-TORCH_CUDA_CU_API Val* neg(Val* v);
-TORCH_CUDA_CU_API TensorView* neg(TensorView* v);
+// abs
+TORCH_CUDA_CU_API Val* abs(Val*);
+TORCH_CUDA_CU_API TensorView* abs(TensorView*);
+// acos
+TORCH_CUDA_CU_API Val* acos(Val*);
+TORCH_CUDA_CU_API TensorView* acos(TensorView*);
+// address
+TORCH_CUDA_CU_API Val* address(Val*);
+TORCH_CUDA_CU_API TensorView* address(TensorView*);
+// asin
+TORCH_CUDA_CU_API Val* asin(Val*);
+TORCH_CUDA_CU_API TensorView* asin(TensorView*);
+// atan
+TORCH_CUDA_CU_API Val* atan(Val*);
+TORCH_CUDA_CU_API TensorView* atan(TensorView*);
+// atanh
+TORCH_CUDA_CU_API Val* atanh(Val*);
+TORCH_CUDA_CU_API TensorView* atanh(TensorView*);
+// ceil
+TORCH_CUDA_CU_API Val* ceil(Val*);
+TORCH_CUDA_CU_API TensorView* ceil(TensorView*);
+// cos
+TORCH_CUDA_CU_API Val* cos(Val*);
+TORCH_CUDA_CU_API TensorView* cos(TensorView*);
+// cosh
+TORCH_CUDA_CU_API Val* cosh(Val*);
+TORCH_CUDA_CU_API TensorView* cosh(TensorView*);
+// exp
+TORCH_CUDA_CU_API Val* exp(Val*);
+TORCH_CUDA_CU_API TensorView* exp(TensorView*);
+// expm1
+TORCH_CUDA_CU_API Val* expm1(Val*);
+TORCH_CUDA_CU_API TensorView* expm1(TensorView*);
+// erf
+TORCH_CUDA_CU_API Val* erf(Val*);
+TORCH_CUDA_CU_API TensorView* erf(TensorView*);
+// erfc
+TORCH_CUDA_CU_API Val* erfc(Val*);
+TORCH_CUDA_CU_API TensorView* erfc(TensorView*);
+// floor
+TORCH_CUDA_CU_API Val* floor(Val*);
+TORCH_CUDA_CU_API TensorView* floor(TensorView*);
+// frac
+TORCH_CUDA_CU_API Val* frac(Val*);
+TORCH_CUDA_CU_API TensorView* frac(TensorView*);
+// gelu
+TORCH_CUDA_CU_API Val* gelu(Val*);
+TORCH_CUDA_CU_API TensorView* gelu(TensorView*);
+// silu
+TORCH_CUDA_CU_API Val* silu(Val*);
+TORCH_CUDA_CU_API TensorView* silu(TensorView*);
+// lgamma
+TORCH_CUDA_CU_API Val* lgamma(Val*);
+TORCH_CUDA_CU_API TensorView* lgamma(TensorView*);
+// log
+TORCH_CUDA_CU_API Val* log(Val*);
+TORCH_CUDA_CU_API TensorView* log(TensorView*);
+// log10
+TORCH_CUDA_CU_API Val* log10(Val*);
+TORCH_CUDA_CU_API TensorView* log10(TensorView*);
+// log1p
+TORCH_CUDA_CU_API Val* log1p(Val*);
+TORCH_CUDA_CU_API TensorView* log1p(TensorView*);
+// log2
+TORCH_CUDA_CU_API Val* log2(Val*);
+TORCH_CUDA_CU_API TensorView* log2(TensorView*);
+// neg
+TORCH_CUDA_CU_API Val* neg(Val*);
+TORCH_CUDA_CU_API TensorView* neg(TensorView*);
+// randlike
+TORCH_CUDA_CU_API Val* randlike(Val*);
+TORCH_CUDA_CU_API TensorView* randlike(TensorView*);
+// reciprocal
+TORCH_CUDA_CU_API Val* reciprocal(Val*);
+TORCH_CUDA_CU_API TensorView* reciprocal(TensorView*);
+// relu
+TORCH_CUDA_CU_API Val* relu(Val*);
+TORCH_CUDA_CU_API TensorView* relu(TensorView*);
+// rsqrt
+TORCH_CUDA_CU_API Val* rsqrt(Val*);
+TORCH_CUDA_CU_API TensorView* rsqrt(TensorView*);
+// round
+TORCH_CUDA_CU_API Val* round(Val*);
+TORCH_CUDA_CU_API TensorView* round(TensorView*);
+// set
+TORCH_CUDA_CU_API Val* set(Val*);
+TORCH_CUDA_CU_API TensorView* set(TensorView*);
+// sigmoid
+TORCH_CUDA_CU_API Val* sigmoid(Val*);
+TORCH_CUDA_CU_API TensorView* sigmoid(TensorView*);
+// sin
+TORCH_CUDA_CU_API Val* sin(Val*);
+TORCH_CUDA_CU_API TensorView* sin(TensorView*);
+// sinh
+TORCH_CUDA_CU_API Val* sinh(Val*);
+TORCH_CUDA_CU_API TensorView* sinh(TensorView*);
+// sqrt
+TORCH_CUDA_CU_API Val* sqrt(Val*);
+TORCH_CUDA_CU_API TensorView* sqrt(TensorView*);
+// tan
+TORCH_CUDA_CU_API Val* tan(Val*);
+TORCH_CUDA_CU_API TensorView* tan(TensorView*);
+// tanh
+TORCH_CUDA_CU_API Val* tanh(Val*);
+TORCH_CUDA_CU_API TensorView* tanh(TensorView*);
+// trunc
+TORCH_CUDA_CU_API Val* trunc(Val*);
+TORCH_CUDA_CU_API TensorView* trunc(TensorView*);
+// not
+TORCH_CUDA_CU_API Val* notOp(Val*);
+TORCH_CUDA_CU_API TensorView* notOp(TensorView*);
 
 // Broadcasts v1 based on bool vector. Size of broadcast bool vector should be
 // the number of dims desired in the broadcasted tensor. This vector should be
@@ -206,6 +315,11 @@ TORCH_CUDA_CU_API Val* orOp(Val* v1, Val* v2);
 TORCH_CUDA_CU_API TensorView* orOp(TensorView* v1, Val* v2);
 TORCH_CUDA_CU_API TensorView* orOp(Val* v1, TensorView* v2);
 TORCH_CUDA_CU_API TensorView* orOp(TensorView* v1, TensorView* v2);
+// xorOp
+TORCH_CUDA_CU_API Val* xorOp(Val* v1, Val* v2);
+TORCH_CUDA_CU_API TensorView* xorOp(TensorView* v1, Val* v2);
+TORCH_CUDA_CU_API TensorView* xorOp(Val* v1, TensorView* v2);
+TORCH_CUDA_CU_API TensorView* xorOp(TensorView* v1, TensorView* v2);
 
 // REDUCTION OPERATIONS
 TORCH_CUDA_CU_API TensorView* sum(
