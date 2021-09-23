@@ -128,7 +128,7 @@ struct Argument {
         N_,
         default_value_,
         kwarg_only_,
-        *alias_info_);
+        alias_info_ ? c10::optional<AliasInfo>(*alias_info_) : c10::nullopt);
   }
 
   // this function checks whether this Argument is backward compatible with
