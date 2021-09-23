@@ -951,22 +951,6 @@ WeakTypePtr::WeakTypePtr(
   type_ = type;
 }
 
-WeakOrStrongTypePtr::WeakOrStrongTypePtr(WeakTypePtr weak) {
-  cu_ = WeakOrStrongCompilationUnit(weak.cu_);
-  type_ = weak.type_;
-}
-
-
-WeakOrStrongTypePtr::WeakOrStrongTypePtr(StrongTypePtr strong) {
-  cu_ = WeakOrStrongCompilationUnit(strong.cu_);
-  type_ = strong.type_;
-}
-
-WeakOrStrongTypePtr::WeakOrStrongTypePtr(WeakOrStrongCompilationUnit cu, TypePtr type) {
-  cu_ = WeakOrStrongCompilationUnit(cu);
-  type_ = type;
-}
-
 WeakTypePtr WeakOrStrongTypePtr::asWeakTypePtr() const {
   if (!holds_strong_ref()) {
     return WeakTypePtr(cu_.getWeakRefOrThrow(), type_);

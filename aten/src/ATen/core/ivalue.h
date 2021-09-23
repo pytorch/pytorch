@@ -1164,13 +1164,13 @@ struct TORCH_API WeakTypePtr {
 
 // internal build errors with std::variant :/
 struct WeakOrStrongCompilationUnit {
-  WeakOrStrongCompilationUnit(
+  explicit WeakOrStrongCompilationUnit(
       std::shared_ptr<torch::jit::CompilationUnit> shared_cu) {
     strong_ptr_ = shared_cu;
     weak_ptr_ = c10::nullopt;
   }
 
-  WeakOrStrongCompilationUnit(
+  explicit WeakOrStrongCompilationUnit(
       std::weak_ptr<torch::jit::CompilationUnit> weak_cu) {
     strong_ptr_ = c10::nullopt;
     weak_ptr_ = weak_cu;
@@ -1197,9 +1197,18 @@ struct WeakOrStrongCompilationUnit {
 // An Object will hold a non-owning Compilation Unit reference if it is a
 // Constant in the graph and a Owning reference otherwise
 struct TORCH_API WeakOrStrongTypePtr {
-  explicit WeakOrStrongTypePtr(WeakTypePtr weak);
-  explicit WeakOrStrongTypePtr(StrongTypePtr strong);
-  WeakOrStrongTypePtr(WeakOrStrongCompilationUnit cu, TypePtr type);
+  explicit WeakOrStrongTypePtr(WeakTypePtr weak)
+      : cu_(WeakOrStrongCompilationUnit(weak.cu_)) {
+    type_ = weak.type_;
+  }
+  explicit WeakOrStrongTypePtr(StrongTypePtr strong)
+      : cu_(WeakOrStrongCompilationUnit(strong.cu_)) {
+    type_ = strong.type_;
+  }
+  explicit WeakOrStrongTypePtr(WeakOrStrongCompilationUnit cu, TypePtr type)
+      : cu_(cu) {
+    type_ = type;
+  }
   WeakTypePtr asWeakTypePtr() const;
 
   WeakOrStrongCompilationUnit cu_;
