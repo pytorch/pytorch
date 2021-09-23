@@ -410,6 +410,13 @@ class TestVmapAPI(TestCase):
         result = vmap(vmap(vmap(torch.mul), (1, 0)), (1, 2))(x, y)
         self.assertEqual(result, x.permute(1, 2, 0) * y.permute(2, 0, 1))
 
+    def test_nested_negative_in_dims(self):
+        x = torch.randn(2, 3)
+        y = torch.randn(2, 3)
+        output = vmap(torch.mul, (-1, -1))(x, y)
+        self.assertEqual(output.shape, (3, 2))
+        self.assertEqual(output, (x * y).permute(1, 0))
+
     def test_non_default_in_dims_out_dims(self):
         x = torch.randn(2, 3, 5)
 
