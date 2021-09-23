@@ -225,8 +225,8 @@ class TestShapeOps(TestCase):
         self.assertEqual(expected, result)
 
     @onlyNativeDeviceTypes
-    @dtypesIfCPU(*get_all_dtypes(include_complex=False, include_bool=False, include_half=False,
-                                 include_bfloat16=False))
+    @dtypes(*get_all_dtypes(include_complex=False, include_bool=False, include_half=False,
+                            include_bfloat16=False))
     @dtypesIfCUDA(*get_all_dtypes(include_complex=False, include_bool=False, include_bfloat16=False))
     def test_trace(self, device, dtype):
         def test(shape):
