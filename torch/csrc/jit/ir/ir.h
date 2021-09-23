@@ -1431,6 +1431,9 @@ inline Value::Value(Node* node_, size_t offset_)
 }
 
 inline Value* Value::setType(TypePtr type) {
+  if (!type) {
+    int x = 5;
+  }
   AT_ASSERT(type);
   type_ = std::move(type);
   for (Use& use : uses_) {

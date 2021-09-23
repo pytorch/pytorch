@@ -783,7 +783,7 @@ class TestUnion(JitTestCase):
                             "not match the types of the given list "
                             "elements")
 
-        # TODO: Support mixed list comprehensions
+        # TODO(@ansley): Support mixed list comprehensions
         self._assert_raises(template,
                             "Union[List[torch.Tensor], int]",
                             lhs["list_comprehension_of_mixed"],
@@ -822,7 +822,24 @@ class TestUnion(JitTestCase):
                     zip([\"foo\", \"bar\"], [torch.arange(3), 2])}",
 
                "dict_keyword" :
-               "dict(foo=torch.arange(3), baz=torch.arange(5))"}
+               "dict(foo=torch.arange(3), baz=torch.arange(5))",
+
+               "dict_keyword_with_iterable" :
+               "dict([(\"foo\", torch.arange(3)), (\"bar\", torch.arange(5))])",
+
+               "dict_keyword_with_empty_iterable" :
+               "dict([])",
+
+               "dict_keyword_with_internal_aggregate_function" :
+               "dict(zip([\"foo\", \"bar\"], [torch.arange(3), torch.arange(5)])",
+
+               "dict_keyword_with_mapping" :
+               "dict({\"foo\" : torch.arange(3), \"bar\" : torch.arange(5)})",
+
+               "dict_keyword_with_mapping_and_kwargs" :
+               "dict({\"foo\" : torch.arange(3), \"bar\" : torch.arange(5)}, baz=torch.arange(7))",
+
+               }
 
         """
         Union[Dict[str, torch.Tensor], Dict[str, int]]
@@ -858,9 +875,37 @@ class TestUnion(JitTestCase):
         #              lhs["dict_comprehension_of_mixed"],
         #              "foobar")
 
-        self._assert_passes(template,
+        # self._assert_passes(template,
+        #                    "Union[Dict[str, torch.Tensor], Dict[str, int]]",
+        #                    lhs["dict_keyword_with_internal_aggregate_function"])
+
+        # TODO(@ansley): Follow-up project needed for full type
+        # inference with dict keyword (supported for dict comprehension
+        # and dict literal already; should not be a blocker for anyone)
+        self._assert_raises(template,
                             "Union[Dict[str, torch.Tensor], Dict[str, int]]",
-                            lhs["dict_keyword"])
+                            lhs["dict_keyword"],
+                            "full type inference is not yet supported")
+
+        self._assert_raises(template,
+                            "Union[Dict[str, torch.Tensor], Dict[str, int]]",
+                            lhs["dict_keyword_with_iterable"],
+                            "full type inference is not yet supported")
+
+        self._assert_raises(template,
+                            "Union[Dict[str, torch.Tensor], Dict[str, int]]",
+                            lhs["dict_keyword_with_empty_iterable"],
+                            "full type inference is not yet supported")
+
+        self._assert_raises(template,
+                            "Union[Dict[str, torch.Tensor], Dict[str, int]]",
+                            lhs["dict_keyword_with_mapping"],
+                            "full type inference is not yet supported")
+
+        self._assert_raises(template,
+                            "Union[Dict[str, torch.Tensor], Dict[str, int]]",
+                            lhs["dict_keyword_with_mapping_and_kwargs"],
+                            "full type inference is not yet supported")
 
         """
         Union[int, torch.Tensor]
@@ -896,18 +941,42 @@ class TestUnion(JitTestCase):
         self._assert_raises(template,
                             "Union[Dict[str, torch.Tensor], int]",
                             lhs["dict_literal_of_str_int"],
-                            r"Type hint for dict was Dict\[str, Tensor\]"
-                            ", but the value at index 0 has type int, "
-                            "which is not a valid subtype of Tensor")
+                            "Type annotation was inferred to be "
+                            r"`Dict\[str, Tensor\]`, but the type of "
+                            "values given by the dict literal is")
 
         self._assert_raises(template,
                             "Union[Dict[str, torch.Tensor], int]",
                             lhs["dict_literal_of_mixed"],
-                            r"Type hint for dict was Dict\[str, Tensor\]"
-                            ", but the value at index 1 has type int, "
-                            "which is not a valid subtype of Tensor")
+                            "Type annotation was inferred to be "
+                            r"`Dict\[str, Tensor\]`, but the type of "
+                            "values given by the dict literal is")
+
+        self._assert_passes(template,
+                            "Union[Dict[str, torch.Tensor], int]",
+                            lhs["dict_keyword"])
+
+        self._assert_passes(template,
+                            "Union[Dict[str, torch.Tensor], int]",
+                            lhs["dict_keyword_with_iterable"])
+
+        self._assert_passes(template,
+                            "Union[Dict[str, torch.Tensor], int]",
+                            lhs["dict_keyword_with_empty_iterable"])
+
+        self._assert_passes(template,
+                            "Union[Dict[str, torch.Tensor], int]",
+                            lhs["dict_keyword_with_mapping"])
+
+        self._assert_passes(template,
+                            "Union[Dict[str, torch.Tensor], int]",
+                            lhs["dict_keyword_with_mapping_and_kwargs"])
 
         # See above--string frontend does not support tuple unpacking
+        # self._assert_passes(template,
+        #                    "Union[Dict[str, torch.Tensor], int]",
+        #                    lhs["dict_keyword_with_internal_aggregate_function"])
+        #
         # self._assert_passes(template,
         #                    "Union[Dict[str, torch.Tensor], int]",
         #                    lhs["dict_comprehension_of_str_tensor"])
@@ -921,7 +990,3 @@ class TestUnion(JitTestCase):
         #                    "Union[Dict[str, torch.Tensor], int]",
         #                    lhs["dict_comprehension_of_mixed"],
         #                    "foobar")
-
-        self._assert_passes(template,
-                            "Union[Dict[str, torch.Tensor], int]",
-                            lhs["dict_keyword"])
