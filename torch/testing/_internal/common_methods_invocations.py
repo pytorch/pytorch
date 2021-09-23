@@ -3450,9 +3450,9 @@ def sample_inputs_repeat_interleave(op_info, device, dtype, requires_grad, **kwa
 
     return [
         SampleInput(make_input(()), kwargs=dict(repeats=2)),
-        SampleInput(make_input((2, 3 ,4)), kwargs=dict(repeats=2)),
-        SampleInput(make_input((2, 3 ,4)), kwargs=dict(repeats=2, dim=1)),
-        SampleInput(make_input((2, 3 ,4)), kwargs=dict(repeats=torch.arange(3, device=device), dim=1))
+        SampleInput(make_input((2, 3, 4)), kwargs=dict(repeats=2)),
+        SampleInput(make_input((2, 3, 4)), kwargs=dict(repeats=2, dim=1)),
+        SampleInput(make_input((2, 3, 4)), kwargs=dict(repeats=torch.arange(3, device=device), dim=1))
     ]
 
 # Metadata class for Fast Fourier Transforms in torch.fft.
