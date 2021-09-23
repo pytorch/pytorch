@@ -84,7 +84,7 @@ class AveragedModel(Module):
         Generalizes Well:
         https://arxiv.org/abs/2001.02312
     """
-    def __init__(self, model, device=None, avg_fn=None):
+    def __init__(self, model, device=None, avg_fn=None, use_state_dict=False):
         super(AveragedModel, self).__init__()
         self.module = deepcopy(model)
         if device is not None:
@@ -96,13 +96,14 @@ class AveragedModel(Module):
                 return averaged_model_parameter + \
                     (model_parameter - averaged_model_parameter) / (num_averaged + 1)
         self.avg_fn = avg_fn
+        self.use_state_dict = use_state_dict
 
     def forward(self, *args, **kwargs):
         return self.module(*args, **kwargs)
 
-    def update_parameters(self, model, use_state_dict=False):
-        self_param = self.module.state_dict().values() if use_state_dict else self.parameters()
-        model_param = model.state_dict().values() if use_state_dict else model.parameters()
+    def update_parameters(self, model):
+        self_param = self.module.state_dict().values() if self.use_state_dict else self.parameters()
+        model_param = model.state_dict().values() if self.use_state_dict else model.parameters()
         for p_swa, p_model in zip(self_param, model_param):
             device = p_swa.device
             p_model_ = p_model.detach().to(device)
