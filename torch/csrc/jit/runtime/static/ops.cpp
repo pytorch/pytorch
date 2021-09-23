@@ -392,12 +392,28 @@ REGISTER_OPERATOR_FUNCTOR(
         }
         // prepare inputs
         const size_t size = p_node->inputs().size();
-        std::vector<IValue> vals;
-        vals.reserve(size);
-        for (const auto i : c10::irange(size)) {
-          vals.push_back(p_node->Input(i));
+        switch (size) {
+          case 1:
+            p_node->Output(0) = c10::ivalue::Tuple::create(p_node->Input(0));
+            break;
+          case 2:
+            p_node->Output(1) =
+                c10::ivalue::Tuple::create(p_node->Input(0), p_node->Input(1));
+            break;
+          case 3:
+            p_node->Output(2) = c10::ivalue::Tuple::create(
+                p_node->Input(0), p_node->Input(1), p_node->Input(2));
+            break;
+          default: {
+            std::vector<IValue> vals;
+            vals.reserve(size);
+            for (const auto i : c10::irange(size)) {
+              vals.push_back(p_node->Input(i));
+            }
+            p_node->Output(0) = c10::ivalue::Tuple::create(std::move(vals));
+            break;
+          }
         }
-        p_node->Output(0) = c10::ivalue::Tuple::create(std::move(vals));
       };
     });
 
@@ -1890,15 +1906,21 @@ REGISTER_OPERATOR_FUNCTOR(
         LogAndDumpSchema(n);
         return nullptr;
       }
-      return [](ProcessedNode* p_node) {
+      auto te = createSignedLog1p();
+      return [te](ProcessedNode* p_node) {
         const auto& input = p_node->Input(0).toTensor();
         if (p_node->Output(0).isNone()) {
-          p_node->Output(0) = signed_log1p(input);
-        } else {
-          auto& out = p_node->Output(0).toTensor();
+          p_node->Output(0) = create_empty_from(input);
+        }
+        auto& out = p_node->Output(0).toTensor();
+        if (!te || !te->supports(input)) {
           fastResizeToZero(out);
           signed_log1p_out(out, input);
+          return;
         }
+        at::native::resize_(out, input.sizes(), c10::nullopt);
+        int64_t nn = input.numel();
+        te->call({out.data_ptr(), input.data_ptr(), &nn});
       };
     });
 } // namespace jit

@@ -192,7 +192,7 @@ void unpackQuantizedWeightsHelper(
 
       if (params_type == QuantizedParamsType::CONV &&
           ser_tup->elements()[0].isInt()) {
-        auto elements = ser_tup->elements();
+        const auto& elements = ser_tup->elements();
         auto version = elements[0].toInt();
         TORCH_INTERNAL_ASSERT(version == 3, "Unknown serialization version");
         TORCH_INTERNAL_ASSERT(elements.size() == 3, "Wrong tuple size.");
@@ -253,7 +253,7 @@ void unpackQuantizedWeightsHelper(
       } else if (
           params_type == QuantizedParamsType::CONV &&
           ser_tup->elements()[0].isString()) {
-        auto elements = ser_tup->elements();
+        const auto& elements = ser_tup->elements();
         auto version = elements[0].toStringRef();
         TORCH_INTERNAL_ASSERT(version == "2", "Unknown serialization version");
         std::vector<at::Tensor> non_optional = elements[1].toTensorVector();
