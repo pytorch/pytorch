@@ -127,9 +127,11 @@ void parseTypes(
     const std::vector<IValue>& types_list,
     mobile::Function* function) {
   std::vector<std::string> types_string_list;
-  for (const auto& t : types_list) {
-    types_string_list.push_back(t.toString()->string());
+  types_string_list.resize(types_list.size());
+  for (size_t i = 0; i < types_list.size(); i++) {
+    types_string_list[i] = types_list[i].toString()->string();
   }
+
   std::vector<c10::TypePtr> types_ptr_list = c10::parseType(types_string_list);
   for (auto& type_ptr : types_ptr_list) {
     function->append_type(type_ptr);
