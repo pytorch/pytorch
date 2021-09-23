@@ -544,7 +544,7 @@ class TestVmapAPI(TestCase):
         with self.assertRaisesRegex(ValueError, msg):
             vmap(foo, in_dims=(0,))(torch.randn([]))
         with self.assertRaisesRegex(ValueError, msg):
-            vmap(foo, in_dims=(-1,))(x)
+            vmap(foo, in_dims=(-3,))(x)
         with self.assertRaisesRegex(ValueError, msg):
             vmap(foo, in_dims=(2,))(y)
         with self.assertRaisesRegex(ValueError, msg):
