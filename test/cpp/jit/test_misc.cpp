@@ -1381,6 +1381,28 @@ TEST(ThreadLocalDebugInfoTest, Basic) {
   }
 }
 
+TEST(OffThreadCompilation, Basic) {
+  auto graph_string = R"IR(
+    graph(%0 : Float(1),
+          %1 : Float(1)):
+      %2 : Tensor = aten::mul(%0, %1)
+      %3 : Tensor = aten::mul(%2, %0)
+      return (%3))IR";
+  auto graph = std::make_shared<Graph>();
+  torch::jit::parseIR(graph_string, graph.get());
+
+  GraphFunction f("fallbackGraphs", graph, nullptr);
+
+  for (size_t i = 0; i < getNumProfiledRuns() + 40; i++) {
+    auto x = at::randn({1}, at::kCPU);
+    auto y = at::randn({1}, at::kCPU);
+    auto stack = createStack({x, y});
+    f.run(stack);
+    at::Tensor at;
+    pop(stack, at);
+  }
+}
+
 TEST(FallbackGraphsTest, Basic) {
   static const auto nestGraphIntoFallbackGraph =
       [](const std::shared_ptr<Graph>& graph) {

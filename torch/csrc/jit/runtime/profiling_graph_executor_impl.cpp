@@ -33,6 +33,7 @@
 #include <torch/csrc/jit/passes/tensorexpr_fuser.h>
 #include <torch/csrc/jit/passes/update_differentiable_graph_requires_grad.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
+#include <future>
 
 C10_DEFINE_bool(
     torch_jit_enable_new_executor,
@@ -682,19 +683,37 @@ const ExecutionPlan& ProfilingGraphExecutorImpl::getOptimizedPlanFor(
 
   // profile until a graph is ready
   if (!pr_->ready()) {
+    std::cerr << "still profiling!!\n";
     return *profiling_plan_;
   }
 
-  auto copy = pr_->graph()->copy();
-  ProfilingRecord::removeProfileCounter(copy->block());
-  runProfilingOptimizations(copy);
-  // replaces a fallback graph inserted by
-  // specialize_autogradzero if one exists
-  replaceFallbackGraphWithFallbackFunction(copy->block());
-  GRAPH_DUMP("Optimized Graph: ", copy);
-  optimized_plan_ =
-      ExecutionPlan(copy, function_name_, *remaining_bailout_depth_);
-  return *optimized_plan_;
+  if (!optimized_compilation_) {
+    auto copy = pr_->graph()->copy();
+    std::future<ExecutionPlan> fut =
+        std::async(std::launch::async, [this, copy]() mutable {
+          std::cerr << "starting an async optimized compilation\n";
+          ProfilingRecord::removeProfileCounter(copy->block());
+          runProfilingOptimizations(copy);
+          // replaces a fallback graph inserted by
+          // specialize_autogradzero if one exists
+          replaceFallbackGraphWithFallbackFunction(copy->block());
+          GRAPH_DUMP("Optimized Graph: ", copy);
+          return ExecutionPlan(copy, function_name_, *remaining_bailout_depth_);
+        });
+    optimized_compilation_ = std::move(fut);
+  }
+
+  if (optimized_compilation_->wait_for(std::chrono::seconds(0)) ==
+      std::future_status::ready) {
+    std::cerr << "the optimized compilation is ready, let's use it\n";
+    optimized_plan_ = optimized_compilation_->get();
+    return *optimized_plan_;
+  }
+
+  std::cerr << "still compiling!!\n";
+
+  // run profiled graph once more
+  return *profiling_plan_;
 }
 
 const ExecutionPlan& ProfilingGraphExecutorImpl::getPlanFor(
@@ -705,6 +724,7 @@ const ExecutionPlan& ProfilingGraphExecutorImpl::getPlanFor(
   // IMPORTANT: This is a hot path of calling a torchscript function. Try not to
   // add any code above this.
   if (optimized_plan_) {
+    std::cout << "using the optimized plan!\n";
     return *optimized_plan_;
   }
 
