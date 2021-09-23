@@ -4,6 +4,8 @@
 # (This is set by default in the Docker images we build, so you don't
 # need to set it yourself.
 
+set -eux
+
 # shellcheck disable=SC2034
 COMPACT_JOB_NAME="${BUILD_ENVIRONMENT}"
 
@@ -154,13 +156,12 @@ test_python_legacy_jit() {
   assert_git_not_dirty
 }
 
-test_python_shard1() {
-  time python test/run_test.py --exclude-jit-executor --exclude-distributed-tests --shard 1 2 --verbose --determine-from="$DETERMINE_FROM"
-  assert_git_not_dirty
-}
-
-test_python_shard2() {
-  time python test/run_test.py --exclude-jit-executor --exclude-distributed-tests --shard 2 2 --verbose --determine-from="$DETERMINE_FROM"
+test_python_shard() {
+  if [[ -z "$NUM_TEST_SHARDS" ]]; then
+    echo "NUM_TEST_SHARDS must be defined to run a Python test shard"
+    exit 1
+  fi
+  time python test/run_test.py --exclude-jit-executor --exclude-distributed-tests --shard "$1" "$NUM_TEST_SHARDS" --verbose --determine-from="$DETERMINE_FROM"
   assert_git_not_dirty
 }
 
@@ -407,7 +408,7 @@ test_xla() {
   assert_git_not_dirty
 }
 
-# Do NOT run this test before any other tests, like test_python_shard1, etc.
+# Do NOT run this test before any other tests, like test_python_shard, etc.
 # Because this function uninstalls the torch built from branch, and install
 # nightly version.
 test_backward_compatibility() {
@@ -513,11 +514,11 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-test1 || "${JOB_BASE_NAME}" == *-test1 || "$
   fi
   test_without_numpy
   install_torchvision
-  test_python_shard1
+  test_python_shard 1
   test_aten
 elif [[ "${BUILD_ENVIRONMENT}" == *-test2 || "${JOB_BASE_NAME}" == *-test2 || "${SHARD_NUMBER}" == 2 ]]; then
   install_torchvision
-  test_python_shard2
+  test_python_shard 2
   test_libtorch
   test_custom_script_ops
   test_custom_backend
