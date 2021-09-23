@@ -804,7 +804,8 @@ def _rpc_remote_test_callee_device_jit_jit(dst: str, device_map: Dict[torch.devi
     ).to_here()
 
 
-def _rpc_to_here_test_caller_device_py_buildin(dst: str, device_map: Dict[torch.device, torch.device], original_device: torch.device):
+def _rpc_to_here_test_caller_device_py_buildin(dst: str, device_map: Dict[torch.device, torch.device],
+                                               original_device: torch.device):
     return rpc.remote(
         dst,
         torch.empty,
@@ -813,7 +814,8 @@ def _rpc_to_here_test_caller_device_py_buildin(dst: str, device_map: Dict[torch.
     ).to_here(device_map).device
 
 
-def _rpc_to_here_test_caller_device_py_py(dst: str, device_map: Dict[torch.device, torch.device], original_device: torch.device):
+def _rpc_to_here_test_caller_device_py_py(dst: str, device_map: Dict[torch.device, torch.device],
+                                          original_device: torch.device):
     return rpc.remote(
         dst,
         _create_empty_tensor,
@@ -821,7 +823,8 @@ def _rpc_to_here_test_caller_device_py_py(dst: str, device_map: Dict[torch.devic
     ).to_here(device_map).device
 
 
-def _rpc_to_here_timeout_dm_test_caller_device_py_py(dst: str, device_map: Dict[torch.device, torch.device], original_device: torch.device):
+def _rpc_to_here_timeout_dm_test_caller_device_py_py(dst: str, device_map: Dict[torch.device, torch.device],
+                                                     original_device: torch.device):
     return rpc.remote(
         dst,
         _create_empty_tensor,
@@ -829,7 +832,8 @@ def _rpc_to_here_timeout_dm_test_caller_device_py_py(dst: str, device_map: Dict[
     ).to_here(timeout=1000.0, device_map=device_map).device
 
 
-def _rpc_to_here_dm_timeout_test_caller_device_py_py(dst: str, device_map: Dict[torch.device, torch.device], original_device: torch.device):
+def _rpc_to_here_dm_timeout_test_caller_device_py_py(dst: str, device_map: Dict[torch.device, torch.device],
+                                                     original_device: torch.device):
     return rpc.remote(
         dst,
         _create_empty_tensor,
@@ -837,7 +841,8 @@ def _rpc_to_here_dm_timeout_test_caller_device_py_py(dst: str, device_map: Dict[
     ).to_here(timeout=1000.0, device_map=device_map).device
 
 
-def _rpc_to_here_test_caller_device_py_jit(dst: str, device_map: Dict[torch.device, torch.device], original_device: torch.device):
+def _rpc_to_here_test_caller_device_py_jit(dst: str, device_map: Dict[torch.device, torch.device],
+                                           original_device: torch.device):
     return rpc.remote(
         dst,
         _create_empty_tensor_jit,
@@ -846,7 +851,8 @@ def _rpc_to_here_test_caller_device_py_jit(dst: str, device_map: Dict[torch.devi
 
 
 @torch.jit.script
-def _rpc_to_here_timeout_test_caller_device_jit_jit(dst: str, device_map: Dict[torch.device, torch.device], original_device: torch.device):
+def _rpc_to_here_timeout_test_caller_device_jit_jit(dst: str, device_map: Dict[torch.device, torch.device],
+                                                    original_device: torch.device):
     return rpc.remote(
         dst,
         _create_empty_tensor_jit,
@@ -855,7 +861,8 @@ def _rpc_to_here_timeout_test_caller_device_jit_jit(dst: str, device_map: Dict[t
 
 
 @torch.jit.script
-def _rpc_to_here_test_caller_device_jit_jit(dst: str, device_map: Dict[torch.device, torch.device], original_device: torch.device):
+def _rpc_to_here_test_caller_device_jit_jit(dst: str, device_map: Dict[torch.device, torch.device],
+                                            original_device: torch.device):
     return rpc.remote(
         dst,
         _create_empty_tensor_jit,
@@ -863,7 +870,8 @@ def _rpc_to_here_test_caller_device_jit_jit(dst: str, device_map: Dict[torch.dev
     ).to_here(device_map).device
 
 
-def _rpc_sync_test_caller_device_py_buildin(dst: str, device_map: Dict[torch.device, torch.device], original_device: torch.device):
+def _rpc_sync_test_caller_device_py_buildin(dst: str, device_map: Dict[torch.device, torch.device],
+                                            original_device: torch.device):
     return rpc.rpc_sync(
         dst,
         torch.empty,
@@ -873,7 +881,8 @@ def _rpc_sync_test_caller_device_py_buildin(dst: str, device_map: Dict[torch.dev
     ).device
 
 
-def _rpc_sync_test_caller_device_py_py(dst: str, device_map: Dict[torch.device, torch.device], original_device: torch.device):
+def _rpc_sync_test_caller_device_py_py(dst: str, device_map: Dict[torch.device, torch.device],
+                                       original_device: torch.device):
     return rpc.rpc_sync(
         dst,
         _create_empty_tensor,
@@ -882,7 +891,8 @@ def _rpc_sync_test_caller_device_py_py(dst: str, device_map: Dict[torch.device, 
     ).device
 
 
-def _rpc_sync_test_caller_device_py_jit(dst: str, device_map: Dict[torch.device, torch.device], original_device: torch.device):
+def _rpc_sync_test_caller_device_py_jit(dst: str, device_map: Dict[torch.device, torch.device],
+                                        original_device: torch.device):
     return rpc.rpc_sync(
         dst,
         _create_empty_tensor_jit,
@@ -892,7 +902,8 @@ def _rpc_sync_test_caller_device_py_jit(dst: str, device_map: Dict[torch.device,
 
 
 @torch.jit.script
-def _rpc_sync_test_caller_device_jit_jit(dst: str, device_map: Dict[torch.device, torch.device], original_device: torch.device):
+def _rpc_sync_test_caller_device_jit_jit(dst: str, device_map: Dict[torch.device, torch.device],
+                                         original_device: torch.device):
     return rpc.rpc_sync(
         dst,
         _create_empty_tensor_jit,
@@ -902,7 +913,8 @@ def _rpc_sync_test_caller_device_jit_jit(dst: str, device_map: Dict[torch.device
     ).device
 
 
-def _rpc_async_test_caller_device_py_buildin(dst: str, device_map: Dict[torch.device, torch.device], original_device: torch.device):
+def _rpc_async_test_caller_device_py_buildin(dst: str, device_map: Dict[torch.device, torch.device],
+                                             original_device: torch.device):
     return rpc.rpc_async(
         dst,
         torch.empty,
@@ -912,7 +924,8 @@ def _rpc_async_test_caller_device_py_buildin(dst: str, device_map: Dict[torch.de
     ).wait().device
 
 
-def _rpc_async_test_caller_device_py_py(dst: str, device_map: Dict[torch.device, torch.device], original_device: torch.device):
+def _rpc_async_test_caller_device_py_py(dst: str, device_map: Dict[torch.device, torch.device],
+                                        original_device: torch.device):
     return rpc.rpc_async(
         dst,
         _create_empty_tensor,
@@ -921,7 +934,8 @@ def _rpc_async_test_caller_device_py_py(dst: str, device_map: Dict[torch.device,
     ).wait().device
 
 
-def _rpc_async_test_caller_device_py_jit(dst: str, device_map: Dict[torch.device, torch.device], original_device: torch.device):
+def _rpc_async_test_caller_device_py_jit(dst: str, device_map: Dict[torch.device, torch.device],
+                                         original_device: torch.device):
     return rpc.rpc_async(
         dst,
         _create_empty_tensor_jit,
@@ -931,7 +945,8 @@ def _rpc_async_test_caller_device_py_jit(dst: str, device_map: Dict[torch.device
 
 
 @torch.jit.script
-def _rpc_async_test_caller_device_jit_jit(dst: str, device_map: Dict[torch.device, torch.device], original_device: torch.device):
+def _rpc_async_test_caller_device_jit_jit(dst: str, device_map: Dict[torch.device, torch.device],
+                                          original_device: torch.device):
     return rpc.rpc_async(
         dst,
         _create_empty_tensor_jit,
