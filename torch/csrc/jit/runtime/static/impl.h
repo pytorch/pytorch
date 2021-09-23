@@ -9,8 +9,25 @@
 #include <torch/csrc/jit/passes/freeze_module.h>
 #include <torch/csrc/jit/passes/inliner.h>
 
+#ifdef FBCODE_CAFFE2
+#include <folly/container/F14Map.h>
+#include <folly/container/F14Set.h>
+#endif
+
 namespace torch {
 namespace jit {
+
+#ifdef FBCODE_CAFFE2
+template <typename Key, typename Value>
+using FastMap = folly::F14FastMap<Key, Value>;
+template <typename Key>
+using FastSet = folly::F14FastSet<Key>;
+#else
+template <typename Key, typename Value>
+using FastMap = std::unordered_map<Key, Value>;
+template <typename Key>
+using FastSet = std::unordered_set<Key>;
+#endif
 
 TORCH_API bool canEnableStaticRuntime(
     const std::shared_ptr<torch::jit::Graph>& graph);
@@ -127,7 +144,7 @@ class TORCH_API StaticModule {
   size_t num_inputs() const;
   size_t num_outputs() const;
 
-  const std::unordered_map<int, std::vector<DefInfo>>& index_map() const {
+  const FastMap<int, std::vector<DefInfo>>& index_map() const {
     return node_inputs_ssa_def_map_;
   }
 
@@ -143,16 +160,21 @@ class TORCH_API StaticModule {
     return nodes_;
   }
 
+  bool is_optimizable_container_type(Node* n) const {
+    auto it = node_is_optimizable_container_type_.find(n);
+    return it != node_is_optimizable_container_type_.end();
+  }
+
   const c10::optional<c10::FunctionSchema>& schema() const {
     return schema_;
   }
 
-  const std::unordered_map<const Value*, std::vector<const Value*>>&
+  const FastMap<const Value*, std::vector<const Value*>>&
   values_share_same_storage() const {
     return value_to_same_storage_values_;
   }
 
-  const std::unordered_set<const Value*>& external_values() const {
+  const FastSet<const Value*>& external_values() const {
     return external_values_;
   }
 
@@ -178,20 +200,27 @@ class TORCH_API StaticModule {
   // a vector of ssa_defs corresponding to graph->outputs()
   std::vector<DefInfo> output_ssa_defs_;
   // map a node idx (in graph order) to a vector of ssa_defs for node inputs
-  std::unordered_map<int, std::vector<DefInfo>> node_inputs_ssa_def_map_;
+  FastMap<int, std::vector<DefInfo>> node_inputs_ssa_def_map_;
 
   // Bookkeeping for MemoryPlanner in StaticRuntime
   // values whose live-time exceeds that of running one inference (e.g., input,
   // output, prim::Constants, and their aliases)
-  std::unordered_set<const Value*> external_values_;
+  FastSet<const Value*> external_values_;
   // map a value to the set of values that may share the same storage with it
-  std::unordered_map<const Value*, std::vector<const Value*>>
+  FastMap<const Value*, std::vector<const Value*>>
       value_to_same_storage_values_;
+
+  FastSet<Node*> node_is_optimizable_container_type_;
 };
 
 class TORCH_API StaticRuntime {
  public:
   explicit StaticRuntime(const StaticModule& sm);
+  StaticRuntime(StaticRuntime&&) = delete;
+  StaticRuntime& operator=(StaticRuntime&&) = delete;
+  ~StaticRuntime();
+
+  C10_DISABLE_COPY_AND_ASSIGN(StaticRuntime);
 
   std::vector<at::Tensor> operator()(const std::vector<at::Tensor>& inps);
 
@@ -210,7 +239,8 @@ class TORCH_API StaticRuntime {
       const std::unordered_map<std::string, c10::IValue>& kwargs,
       const int warmup_runs,
       const int main_runs,
-      bool print_per_node_time = false);
+      bool print_per_node_time = false,
+      bool generate_ai_pep_output = false);
 
   float benchmark_model(
       const std::vector<c10::IValue>& args,
@@ -223,6 +253,7 @@ class TORCH_API StaticRuntime {
     float memory_alloc_time{0.0};
     float memory_dealloc_time{0.0};
     float output_dealloc_time{0.0};
+    float first_iter_time{0.0};
     float total_time{0.0};
     size_t out_nodes_count{0};
     size_t total_nodes_count{0};
@@ -231,6 +262,7 @@ class TORCH_API StaticRuntime {
     std::unordered_map<std::string, float> percent_per_node_type;
     std::unordered_map<std::string, int> instances_per_node_type;
     std::unordered_set<std::string> out_nodes;
+    std::unordered_set<std::string> native_nodes;
   };
 
   IndividualMetrics benchmark_individual_ops(
@@ -269,6 +301,10 @@ class TORCH_API StaticRuntime {
 
   void check_for_memory_leak(bool output_returned = true);
 
+  bool is_optimizable_container_type(Node* n) const {
+    return static_module_.is_optimizable_container_type(n);
+  }
+
  private:
   // helper method for copying input args/kwargs into inputs_
   void set_inputs(
@@ -290,80 +326,6 @@ class TORCH_API StaticRuntime {
   std::vector<IValue> inputs_;
   std::vector<IValue*> outputs_;
   std::vector<ProcessedNode> nodes_;
-};
-
-/// There are three types of ops in a processed graph in Static Runtime:
-///   1. op with _out variant
-///   2. view producing op
-///   3. tensor producing op (could be replaced with type 1 by adding the _out
-///      variant to Static Runtime)
-/// In Static Runtime, type 2 ops are replaced with their corespoinding copy
-/// versions when enable_out_variant is enabled and become type 1 ops.The memory
-/// planner only manages tensors that are outputs of type 1 ops. For type 3, the
-/// output tensors are allocated inside the operator and can't be directly
-/// managed by memory planner.
-///
-/// Memory planner tries to minimize the number of memory allocations by
-/// tracking the output tensors of ops with _out variants with unique DataPtr
-/// (part of StorageImpl). It tries to do this in several steps:
-///   1. record the max memory usage for each Tensor with unique DataPtr at the
-///      end of each iteration
-///   2. in the next iteration, allocate the buffer for the max total usage and
-///      compute the offset of each allocation with regard to the single memory
-///      buffer, optionally reusing memory. In the first iteration, we rely on
-///      the default allocator for memory allocation.
-///   3. free the buffer at the end of each iteration
-/// Steps 1 and 3 are handled by `deallocate()`, and step 2 by `allocate()`.
-/// Only models with simple output types are supported, i.e. None, Tensor or
-/// List/Tuple/Dict of Tensors. Complex output types such as List of Lists are
-/// not supported.
-
-class MemoryPlanner {
- public:
-  explicit MemoryPlanner(
-      StaticRuntime* runtime,
-      const std::unordered_map<const Value*, std::vector<const Value*>>&,
-      const std::unordered_set<const Value*>& external_values,
-      bool enable_out_variant,
-      bool manage_graph_output_memory);
-  // disable copying and moving
-  MemoryPlanner(const MemoryPlanner&) = delete;
-  MemoryPlanner& operator=(const MemoryPlanner&) = delete;
-  MemoryPlanner(MemoryPlanner&&) = delete;
-  MemoryPlanner& operator=(MemoryPlanner&&) = delete;
-
-  void allocate();
-  void deallocate();
-
-  size_t total_managed() const {
-    return managed_bytes_;
-  }
-  size_t total_reused_tensors() const {
-    return reused_tensors_;
-  }
-
- private:
-  // ivalues created in one run but not managed by MemoryPlanner
-  std::vector<IValue*> unmanaged_ivalues_;
-
-  // each pair contains the size (in bytes) of data to be allocated
-  // and a vector of Tensors that should be backed by that same data.
-  // Thus, if memonger is disabled, all vectors are of size 1.
-  std::vector<std::pair<size_t, std::vector<at::Tensor*>>> managed_tensors_;
-  at::DataPtr buffer_; // allocated each time we call Run()
-  size_t managed_bytes_{0};
-  size_t reused_tensors_{0};
-
-  // since output tensors are alive after one inference, their storage
-  // is managed differently (e.g., deallocation happens at client side)
-  // std::vector<std::pair<size_t, std::vector<at::Tensor*>>>
-  //     managed_output_storage_;
-  // size_t managed_output_bytes_{0};
-  // size_t reused_output_tensors_{0};
-  // at::DataPtr output_buffer_; // allocated each time we call Run()
-
-  static size_t compute_aligned_tensor_size(size_t nbytes);
-  static at::DataPtr allocate_buffer(size_t size);
 };
 
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
@@ -410,7 +372,11 @@ class TORCH_API ProcessedNode {
     return static_cast<bool>(fn_);
   }
 
-  bool verify_outputs_not_overlapping_with_immutable_inputs() const;
+  bool has_native() const {
+    return static_cast<bool>(native_fn_);
+  }
+
+  bool verify_no_memory_overlap() const;
 
  private:
   Node* node_;

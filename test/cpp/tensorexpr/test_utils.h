@@ -4,6 +4,7 @@
 #include <vector>
 
 #include <test/cpp/tensorexpr/test_base.h>
+#include <torch/csrc/jit/tensorexpr/fwd_decls.h>
 #include <torch/csrc/jit/testing/file_check.h>
 
 namespace torch {
@@ -68,6 +69,10 @@ using namespace torch::jit::tensorexpr;
     ASSERT_NE(nullptr, node_);          \
     ASSERT_EQ(node_->op_type(), kRand); \
   }
+
+void checkIR(StmtPtr s, const std::string& pattern);
+void checkExprIR(ExprPtr e, const std::string& pattern);
+void checkExprIR(const ExprHandle& e, const std::string& pattern);
 
 } // namespace jit
 } // namespace torch

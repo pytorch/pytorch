@@ -5,8 +5,8 @@ T_co = TypeVar('T_co', covariant=True)
 
 
 @functional_datapipe('concat')
-class ConcatMapDataPipe(MapDataPipe):
-    r""" :class:`ConcatMapDataPipe`.
+class ConcaterMapDataPipe(MapDataPipe):
+    r""" :class:`ConcaterMapDataPipe`.
 
     Map DataPipe to concatenate multiple Map DataPipes.
     The actual index of is the cumulative sum of source datapipes.

@@ -250,7 +250,7 @@ bool test_hardsigmoid() {
   });
 }
 
-bool test_hardswish() {
+bool test_hardswish_() {
   __block std::vector<int64_t> size{3, 3, 44, 44};
   return TEST(size, __PRETTY_FUNCTION__, ^bool {
     auto X =
@@ -258,6 +258,18 @@ bool test_hardswish() {
     auto X2 = X.metal();
     auto Y1 = at::hardswish_(X);
     auto Y2 = at::hardswish_(X2).cpu();
+    return almostEqual(Y1, Y2);
+  });
+}
+
+bool test_hardswish() {
+  __block std::vector<int64_t> size{1, 3, 44, 44};
+  return TEST(size, __PRETTY_FUNCTION__, ^bool {
+    auto X =
+        at::rand(size, at::TensorOptions(at::kCPU).dtype(at::kFloat)) * 12 - 6;
+    auto X2 = X.metal();
+    auto Y1 = at::hardswish(X);
+    auto Y2 = at::hardswish(X2).cpu();
     return almostEqual(Y1, Y2);
   });
 }

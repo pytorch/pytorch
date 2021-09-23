@@ -57,12 +57,13 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from functools import wraps
 from string import Template
-from typing import Callable, Dict, List, Optional, Tuple, TypeVar, Any
+from typing import Any, Callable, Dict, List, Optional, Tuple, TypeVar
 
 from torch.distributed.elastic.utils.logging import get_logger
 
 from .error_handler import ErrorHandler  # noqa: F401
 from .handlers import get_error_handler  # noqa: F401
+
 
 log = get_logger()
 
@@ -165,7 +166,7 @@ _FAILURE_FORMAT_TEMPLATE = """[${idx}]:
   rank: ${rank} (local_rank: ${local_rank})
   exitcode: ${exitcode} (pid: ${pid})
   error_file: ${error_file}
-  msg: \"${message}\""""
+  msg: ${message}"""
 
 # extra new lines before and after are intentional
 _MSG_FORMAT_TEMPLATE = """
@@ -245,7 +246,7 @@ class ChildFailedError(Exception):
                 other_failures_fmt.append(fmt)
 
         # upper boundary on width
-        width = min(width, 250)
+        width = min(width, 80)
 
         return Template(_MSG_FORMAT_TEMPLATE).substitute(
             boarder=boarder_delim * width,
@@ -258,6 +259,23 @@ class ChildFailedError(Exception):
     def _format_failure(
         self, idx: int, rank: int, failure: ProcessFailure
     ) -> Tuple[str, int]:
+
+        # failure.message is either a str (when the failure does not generate a traceback - e.g. signals)
+        # or a dict (json) of the form
+        # {"message": $ERROR_MSG, "extraInfo": {"py_callstack": $TRACEBACK, timestamp: $TS}}
+        # so the display logic is:
+        # 1. if failure.message is not a dict (it is a str) just show it as is
+        # 2. else try to get the traceback (py_callstack)
+        # 3.      if the traceback is not there, use the message
+        # 4.      if the message  is not there show <N/A>
+        msg = failure.message
+        if isinstance(failure.message, dict):
+            msg = (
+                failure.message.get("extraInfo", {})
+                .get("py_callstack", failure.message.get("message", "<N/A>"))
+                .replace("\n", "\n  ")  # to properly indent the traceback
+            )
+
         fmt = Template(_FAILURE_FORMAT_TEMPLATE).substitute(
             idx=idx,
             time=failure.timestamp_isoformat(),
@@ -266,7 +284,7 @@ class ChildFailedError(Exception):
             exitcode=failure.exitcode,
             pid=failure.pid,
             error_file=failure.error_file,
-            message=failure.message,
+            message=msg,
         )
         width = 0
         for line in fmt.split("\n"):
