@@ -293,6 +293,20 @@ class ProcessGroupNCCLTest(TestCase):
                 tensors[i],
             )
 
+        # Avg (only available for NCCL 2.10+)
+        if torch.cuda.nccl.version() >= (2, 10, 0):
+            tensors = [torch.tensor([i + 1.]).cuda(i) for i in range(self.num_gpus)]
+
+            allreduce(tensors, c10d.ReduceOp.AVG)
+
+            for i in range(self.num_gpus):
+                # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
+                ndev = float(self.num_gpus)
+                self.assertEqualIgnoreType(
+                    torch.tensor([ndev * (ndev + 1.) / (2. * ndev)]),
+                    tensors[i],
+                )
+
         # Product
         tensors = []
         for i in range(self.num_gpus):
@@ -635,6 +649,46 @@ class DistributedDataParallelTest(
         self._test_ddp_with_process_group(
             process_group, devices, device_ids, multi_device, gradient_as_bucket_view
         )
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_nccl_propagate_error_reason(self):
+        # Need to use NCCL_BLOCKING_WAIT and not ASYNC_ERROR_HANDLING,
+        # otherwise process will be taken down and we can't check for errors.
+        os.environ["NCCL_ASYNC_ERROR_HANDLING"] = "0"
+        os.environ["NCCL_BLOCKING_WAIT"] = "1"
+        timeout = timedelta(seconds=2)
+        store = c10d.FileStore(self.file_name, self.world_size)
+        pg = c10d.ProcessGroupNCCL(store, self.rank, self.world_size, timeout=timeout)
+        pg_gloo = c10d.ProcessGroupGloo(store, self.rank, self.world_size)
+        pg.barrier().wait()
+        # Simulate stuckness in rank 0.
+        if self.rank == 0:
+            pg_gloo.barrier().wait()
+        inp = torch.ones(1).cuda(self.rank)
+
+        if self.rank != 0:
+            # Time out due to rank 0 not calling into allreduce.
+            with self.assertRaises(RuntimeError):
+                pg.allreduce([inp]).wait()
+
+            # Now when nonzero rank attempts to use communicator, original failure reason should be logged.j
+            try:
+                pg.allreduce([torch.ones(2).cuda(self.rank)]).wait()
+            except RuntimeError as e:
+                self.assertTrue("timed out in call to wait()" in str(e))
+                self.assertTrue("TensorShape=[1]" in str(e))
+            else:
+                self.fail("Expected error to be raised!")
+
+            # Unblock rank 0
+            pg_gloo.barrier().wait()
+
+        # TODO: We can also test that if rank 0 attempts to use the communicator,
+        # then we should error out with the info that it was aborted due to
+        # timeout on another rank. Although this would only be the case after
+        # the watchdog has run on the rank, and there is no reliable way
+        # to confirm it has run.
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)

@@ -605,6 +605,10 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
     def test_allreduce_coalesced_basics(self):
         self._test_allreduce_coalesced_basics(lambda t: t.clone())
 
+    def _expected_output(self, i):
+        ws = self.world_size
+        return 2 * [torch.tensor([(i * ws) + (ws * (ws - 1) / 2)])]
+
     def _test_allreduce_coalesced_stress(self, inputs):
         store = c10d.FileStore(self.file_name, self.world_size)
         pg = self._create_process_group_gloo(
@@ -618,23 +622,32 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             result = future_handle.value()
             # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
             self.assertEqualIgnoreType(
-                2
-                * [
-                    torch.tensor(
-                        [
-                            (i * self.world_size)
-                            + (self.world_size * (self.world_size - 1) / 2)
-                        ]
-                    )
-                ],
+                self._expected_output(i),
                 result,
-                msg="Mismatch in interation {}".format(i),
+                msg="Mismatch in iteration {}".format(i),
             )
 
     @requires_gloo()
     def test_allreduce_coalesced_stress(self):
         inputs = [2 * [torch.tensor([i + self.rank])] for i in range(1000)]
         self._test_allreduce_coalesced_stress(inputs)
+
+    @requires_gloo()
+    def test_allreduce_coalesced_async(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        c10d.init_process_group(
+            backend="gloo", rank=self.rank, world_size=self.world_size, store=store
+        )
+
+        xs = [2 * [torch.tensor([i + self.rank])] for i in range(2)]
+        futs = [c10d.all_reduce_coalesced(x, async_op=True) for x in xs]
+        torch.futures.wait_all(futs)
+        for i, fut in enumerate(futs):
+            self.assertEqualIgnoreType(
+                self._expected_output(i),
+                fut.wait(),
+                msg="Mismatch in iteration {}".format(i),
+            )
 
     @requires_gloo()
     def test_sparse_allreduce_checks(self):
@@ -1184,6 +1197,29 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             RuntimeError, "Invalid function argument.*output_tensor_lists"
         ):
             c10d.all_gather_coalesced(dummy_output_lists, dummy_input, pg)
+
+    @requires_gloo()
+    def test_allgather_coalesced_async(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        c10d.init_process_group(
+            backend="gloo", rank=self.rank, world_size=self.world_size, store=store
+        )
+
+        xxs = [2 * [torch.tensor([i + self.rank])] for i in range(2)]
+        yys = [[[torch.zeros_like(x) for x in xx] for _ in range(self.world_size)] for xx in xxs]
+        futs = [c10d.all_gather_coalesced(yy, xx, async_op=True) for xx, yy in zip(xxs, yys)]
+
+        # expected outputs
+        zzs = [[2 * [torch.tensor([i + r])] for r in range(self.world_size)] for i in range(2)]
+
+        torch.futures.wait_all(futs)
+        for yy, zz in zip(yys, zzs):
+            # one iteration
+            for y_out, z_out in zip(yy, zz):
+                # one output tensor list
+                for y, z in zip(y_out, z_out):
+                    # one tensor in output tensor list
+                    self.assertEqualIgnoreType(y, z)
 
     @requires_gloo()
     def test_reduce_checks(self):
@@ -2055,7 +2091,7 @@ class ReducerTest(TestCase):
         model = ReducerModule()
         parameters = list(model.parameters())
         buckets = [list(range(len(parameters)))]
-        dist.Reducer([parameters], buckets, [dist._DEFAULT_FIRST_BUCKET_BYTES], self.process_group)
+        dist.Reducer(parameters, buckets, [dist._DEFAULT_FIRST_BUCKET_BYTES], self.process_group)
 
     def _create_mixed_precision_model(self):
         model = ReducerModule()
@@ -2070,8 +2106,8 @@ class ReducerTest(TestCase):
         # Raise if there are multiple types per bucket.
         # In this case we create one bucket for all parameters.
         with self.assertRaises(RuntimeError):
-            parameters = [list(model.parameters())]
-            buckets = [list(range(len(parameters[0])))]
+            parameters = list(model.parameters())
+            buckets = [list(range(len(parameters)))]
             dist.Reducer(
                 parameters,
                 buckets,
@@ -2082,9 +2118,9 @@ class ReducerTest(TestCase):
     @requires_gloo()
     def test_multi_dtype_multi_bucket(self):
         model = self._create_mixed_precision_model()
-        parameters = [list(model.parameters())]
+        parameters = list(model.parameters())
         group_by_dtype = groupby(
-            range(len(parameters[0])), key=lambda i: parameters[0][i].dtype
+            range(len(parameters)), key=lambda i: parameters[i].dtype
         )
         buckets = [list(indices) for _, indices in group_by_dtype]
         dist.Reducer(
@@ -2095,9 +2131,10 @@ class ReducerTest(TestCase):
         )
 
     def _create_reducer_for_models(self, models, find_unused_parameters=False):
-        parameters = [list(model.parameters()) for model in models]
+        self.assertEqual(len(models), 1)
+        parameters = list(models[0].parameters())
         group_by_dtype = groupby(
-            range(len(parameters[0])), key=lambda i: parameters[0][i].dtype
+            range(len(parameters)), key=lambda i: parameters[i].dtype
         )
         buckets = [list(indices) for _, indices in group_by_dtype]
         return dist.Reducer(
@@ -2107,16 +2144,6 @@ class ReducerTest(TestCase):
             self.process_group,
             find_unused_parameters=find_unused_parameters,
         )
-
-    @requires_gloo()
-    def test_reducer_no_multi_replicas(self):
-        num_replicas = 2
-        models = [self._create_mixed_precision_model() for _ in range(num_replicas)]
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "Expected exactly one model replica.",
-        ):
-            reducer = self._create_reducer_for_models(models)
 
     @requires_gloo()
     def test_forward_backward(self):
