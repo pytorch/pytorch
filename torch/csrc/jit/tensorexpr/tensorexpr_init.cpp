@@ -12,6 +12,7 @@
 #include <torch/csrc/jit/tensorexpr/kernel.h>
 #include <torch/csrc/jit/tensorexpr/llvm_codegen.h>
 #include <torch/csrc/jit/tensorexpr/loopnest.h>
+#include <torch/csrc/jit/tensorexpr/lowerings.h>
 #include <torch/csrc/jit/tensorexpr/reduction.h>
 
 namespace torch {
@@ -657,8 +658,14 @@ void initTensorExprBindings(PyObject* module) {
         for (auto inp : inputs) {
           argInputs.push_back(convertPyToArgValue(inp));
         }
-        return computeOperandValue(
-            op, argInputs, outputShape, outputType.scalar_type());
+        if (NNCLoweringFunction lowering =
+                getStandardLoweringFor(op.toQualString())) {
+          return lowering(
+              argInputs, outputShape, outputType.scalar_type(), at::kCPU);
+        }
+        std::string msg = std::string("Unhandled node kind (in te.lower): ") +
+            op.toQualString();
+        throw malformed_input(msg);
       });
 
   py::class_<ArgValue>(te, "ArgValue")

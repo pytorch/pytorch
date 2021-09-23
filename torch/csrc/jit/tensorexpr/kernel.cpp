@@ -1238,6 +1238,7 @@ Tensor computeCatWoConditionals(
 Tensor computeCat(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
+    const c10::optional<ScalarType>& outputType,
     at::Device device) {
   if (device == at::kCPU && getCatWoConditionals()) {
     return computeCatWoConditionals(inputs, outputShape);
@@ -1298,7 +1299,8 @@ Tensor computeCat(
 Tensor computeConv2d(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
-    const c10::optional<ScalarType>& outputType) {
+    const c10::optional<ScalarType>& outputType,
+    at::Device device) {
   Dtype dtype = kFloat;
   if (outputType) {
     dtype = Dtype(*outputType);
@@ -1341,27 +1343,123 @@ Tensor computeConv2d(
   return Tensor(ResultBuf.node(), s);
 }
 
-Tensor tensorexpr::computeOperandValue(
-    c10::Symbol op,
+Tensor computeReshape(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
     const c10::optional<ScalarType>& outputType,
     at::Device device) {
-  switch (op) {
-    case aten::add: {
-      auto add_lambda = [](const ExprHandle& lhs, const ExprHandle& rhs) {
-        return boolToInteger(lhs) + boolToInteger(rhs);
-      };
-      TORCH_INTERNAL_ASSERT(
-          inputs.size() == 2 || inputs.size() == 3,
-          buildErrorMessage("Invalid number of input operands"));
-      return (inputs.size() > 2)
-          ? computeTwoOperandWithAlpha(
-                "aten_add", inputs, outputShape, outputType, add_lambda)
-          : computeTwoOperand(
-                "aten_add", inputs, outputShape, outputType, add_lambda);
-    } break;
-    case aten::sub: {
+  auto A = c10::get<BufHandle>(inputs[0]);
+  if (A.ndim() == 0) {
+    return Compute(
+        "aten_view",
+        c10::fmap<DimArg>(outputShape),
+        [&](const std::vector<VarHandle>& axes) {
+          std::vector<ExprHandle> empty_indices;
+          return A.load(empty_indices);
+        });
+  }
+  auto view_dims = c10::get<IntList>(inputs[1]);
+  return Compute(
+      "aten_reshape",
+      c10::fmap<DimArg>(outputShape),
+      [&](const std::vector<VarHandle>& axes) {
+        std::vector<VarHandle> new_axes;
+        assert(view_dims.size() == axes.size());
+        /*
+        Example for the index transformation. Assume we have a tensor A and
+        its view B:
+          A.size() = [6,2,3]
+          B = A.view(2,1,9,1,2)
+
+        In TE IR we would want to represent B as the following loopnest:
+          for (i1 in 0..2)
+            for (i2 in 0..1)
+              for (i3 in 0..9)
+                for (i4 in 0..1)
+                  for (i5 in 0..2)
+                    idx = i5 + i4*2 + i3*2 + i2*18 + i1*18
+                    B[i1,i2,i3,i4,i5] = A[idx/(3*2), (idx/3)%2, idx%3]
+        */
+        // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
+        ExprHandle cur_stride = 1;
+        std::vector<ExprPtr> dims, indices;
+        for (size_t idx = 0; idx < view_dims.size(); idx++) {
+          dims.push_back(alloc<LongImm>(view_dims[idx]));
+          indices.push_back(axes[idx].node());
+        }
+        ExprHandle flat_idx = ExprHandle(flatten_index(dims, indices));
+        std::vector<ExprHandle> orig_buf_indexes(A.ndim(), ExprHandle(0));
+        ExprHandle stride = ExprHandle(immLike(flat_idx, 1));
+        for (size_t idx = 0; idx < A.ndim(); idx++) {
+          size_t dim_idx = A.ndim() - idx - 1;
+          // We don't need to generate mod-div for the first dimension -
+          // ideally IRSimlifier would get rid of that for us, but for now
+          // let's just avoid generating it in the first place.
+          if (dim_idx > 0) {
+            orig_buf_indexes[dim_idx] = flat_idx / stride % A.dim(dim_idx);
+          } else {
+            orig_buf_indexes[dim_idx] = flat_idx / stride;
+          }
+          // In the example above the stride is initially 1 for dim_idx = 2,
+          // then it's 3 for dim_idx = 1, and then it's 3*2 for dim_idx = 0.
+          stride = stride * A.dim(dim_idx);
+        }
+        // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
+        return A.load(orig_buf_indexes);
+      });
+}
+
+Tensor computeTranspose(
+    const std::vector<ArgValue>& inputs,
+    const std::vector<ExprHandle>& outputShape,
+    const c10::optional<ScalarType>& outputType,
+    at::Device device) {
+  auto A = c10::get<BufHandle>(inputs[0]);
+  // Trivial case of 0-dim and 1-dim tensors: transpose is just a copy
+  if (A.ndim() < 1) {
+    return Compute(
+        "aten_transpose",
+        c10::fmap<DimArg>(outputShape),
+        [&](std::vector<VarHandle> axes) {
+          TORCH_INTERNAL_ASSERT(
+              axes.size() <= 1,
+              buildErrorMessage("Invalid axes size in transpose"));
+          return A.load(axes);
+        });
+  }
+  // Usual case where transpose actually swaps dimensions
+  auto start_dim = at::maybe_wrap_dim(c10::get<int64_t>(inputs[1]), A.ndim());
+  auto to_dim = at::maybe_wrap_dim(c10::get<int64_t>(inputs[2]), A.ndim());
+  return Compute(
+      "aten_transpose",
+      c10::fmap<DimArg>(outputShape),
+      [&](std::vector<VarHandle> axes) {
+        std::swap(axes[start_dim], axes[to_dim]);
+        return A.load(axes);
+      });
+}
+
+Tensor computeExpand(
+    const std::vector<ArgValue>& inputs,
+    const std::vector<ExprHandle>& outputShape,
+    const c10::optional<ScalarType>& outputType,
+    at::Device device) {
+  auto A = c10::get<BufHandle>(inputs[0]);
+  return Compute(
+      "aten_expand",
+      c10::fmap<DimArg>(outputShape),
+      [&](const std::vector<VarHandle>& axes) {
+        std::vector<ExprHandle> indices(axes.begin(), axes.end());
+        return broadcast(A, indices);
+      });
+}
+
+RegisterNNCLoweringFunction aten_sub(
+    "aten::sub",
+    [](const std::vector<ArgValue>& inputs,
+       const std::vector<ExprHandle>& outputShape,
+       const c10::optional<ScalarType>& outputType,
+       at::Device device) {
       auto sub_lambda = [](const ExprHandle& lhs, const ExprHandle& rhs) {
         // NB: sub isn't supported on boolean, no need to promote to integer.
         return lhs - rhs;
@@ -1374,8 +1472,14 @@ Tensor tensorexpr::computeOperandValue(
                 "aten_sub", inputs, outputShape, outputType, sub_lambda)
           : computeTwoOperand(
                 "aten_sub", inputs, outputShape, outputType, sub_lambda);
-    } break;
-    case aten::mul: {
+    });
+
+RegisterNNCLoweringFunction aten_mul(
+    "aten::mul",
+    [](const std::vector<ArgValue>& inputs,
+       const std::vector<ExprHandle>& outputShape,
+       const c10::optional<ScalarType>& outputType,
+       at::Device device) {
       return computeTwoOperand(
           "aten_mul",
           inputs,
@@ -1384,8 +1488,14 @@ Tensor tensorexpr::computeOperandValue(
           [](const ExprHandle& lhs, const ExprHandle& rhs) {
             return boolToInteger(lhs) * boolToInteger(rhs);
           });
-    } break;
-    case aten::div: {
+    });
+
+RegisterNNCLoweringFunction aten_div(
+    "aten::div",
+    [](const std::vector<ArgValue>& inputs,
+       const std::vector<ExprHandle>& outputShape,
+       const c10::optional<ScalarType>& outputType,
+       at::Device device) {
       return computeTwoOperand(
           "aten_div",
           inputs,
@@ -1395,9 +1505,14 @@ Tensor tensorexpr::computeOperandValue(
             return promoteIntegerToDefaultType(lhs) /
                 promoteIntegerToDefaultType(rhs);
           });
-    } break;
+    });
 
-    case aten::__and__: {
+RegisterNNCLoweringFunction aten___and__(
+    "aten::__and__",
+    [](const std::vector<ArgValue>& inputs,
+       const std::vector<ExprHandle>& outputShape,
+       const c10::optional<ScalarType>& outputType,
+       at::Device device) {
       return computeTwoOperand(
           "aten_and",
           inputs,
@@ -1406,9 +1521,14 @@ Tensor tensorexpr::computeOperandValue(
           [](const ExprHandle& lhs, const ExprHandle& rhs) {
             return boolToInteger(lhs) & boolToInteger(rhs);
           });
-    } break;
+    });
 
-    case aten::__or__: {
+RegisterNNCLoweringFunction aten___or__(
+    "aten::__or__",
+    [](const std::vector<ArgValue>& inputs,
+       const std::vector<ExprHandle>& outputShape,
+       const c10::optional<ScalarType>& outputType,
+       at::Device device) {
       return computeTwoOperand(
           "aten_or",
           inputs,
@@ -1417,9 +1537,14 @@ Tensor tensorexpr::computeOperandValue(
           [](const ExprHandle& lhs, const ExprHandle& rhs) {
             return boolToInteger(lhs) | boolToInteger(rhs);
           });
-    } break;
+    });
 
-    case aten::__xor__: {
+RegisterNNCLoweringFunction aten___xor__(
+    "aten::__xor__",
+    [](const std::vector<ArgValue>& inputs,
+       const std::vector<ExprHandle>& outputShape,
+       const c10::optional<ScalarType>& outputType,
+       at::Device device) {
       return computeTwoOperand(
           "aten_xor",
           inputs,
@@ -1428,9 +1553,14 @@ Tensor tensorexpr::computeOperandValue(
           [](const ExprHandle& lhs, const ExprHandle& rhs) {
             return boolToInteger(lhs) ^ boolToInteger(rhs);
           });
-    } break;
+    });
 
-    case aten::__lshift__: {
+RegisterNNCLoweringFunction aten___lshift__(
+    "aten::__lshift__",
+    [](const std::vector<ArgValue>& inputs,
+       const std::vector<ExprHandle>& outputShape,
+       const c10::optional<ScalarType>& outputType,
+       at::Device device) {
       return computeTwoOperand(
           "aten_lshift",
           inputs,
@@ -1439,9 +1569,14 @@ Tensor tensorexpr::computeOperandValue(
           [](const ExprHandle& lhs, const ExprHandle& rhs) {
             return lhs << rhs;
           });
-    } break;
+    });
 
-    case aten::__rshift__: {
+RegisterNNCLoweringFunction aten___rshift__(
+    "aten::__rshift__",
+    [](const std::vector<ArgValue>& inputs,
+       const std::vector<ExprHandle>& outputShape,
+       const c10::optional<ScalarType>& outputType,
+       at::Device device) {
       return computeTwoOperand(
           "aten_rshift",
           inputs,
@@ -1450,8 +1585,14 @@ Tensor tensorexpr::computeOperandValue(
           [](const ExprHandle& lhs, const ExprHandle& rhs) {
             return lhs >> rhs;
           });
-    } break;
-    case aten::eq: {
+    });
+
+RegisterNNCLoweringFunction aten_eq(
+    "aten::eq",
+    [](const std::vector<ArgValue>& inputs,
+       const std::vector<ExprHandle>& outputShape,
+       const c10::optional<ScalarType>& outputType,
+       at::Device device) {
       return computeTwoOperand(
           "aten_eq",
           inputs,
@@ -1460,9 +1601,14 @@ Tensor tensorexpr::computeOperandValue(
           [](const ExprHandle& lhs, const ExprHandle& rhs) {
             return cast<bool>(lhs == rhs);
           });
-    } break;
+    });
 
-    case aten::ne: {
+RegisterNNCLoweringFunction aten_ne(
+    "aten::ne",
+    [](const std::vector<ArgValue>& inputs,
+       const std::vector<ExprHandle>& outputShape,
+       const c10::optional<ScalarType>& outputType,
+       at::Device device) {
       return computeTwoOperand(
           "aten_ne",
           inputs,
@@ -1471,8 +1617,14 @@ Tensor tensorexpr::computeOperandValue(
           [](const ExprHandle& lhs, const ExprHandle& rhs) {
             return cast<bool>(lhs != rhs);
           });
-    } break;
-    case aten::ge: {
+    });
+
+RegisterNNCLoweringFunction aten_ge(
+    "aten::ge",
+    [](const std::vector<ArgValue>& inputs,
+       const std::vector<ExprHandle>& outputShape,
+       const c10::optional<ScalarType>& outputType,
+       at::Device device) {
       return computeTwoOperand(
           "aten_ge",
           inputs,
@@ -1481,9 +1633,14 @@ Tensor tensorexpr::computeOperandValue(
           [](const ExprHandle& lhs, const ExprHandle& rhs) {
             return cast<bool>(lhs >= rhs);
           });
-    } break;
+    });
 
-    case aten::gt: {
+RegisterNNCLoweringFunction aten_gt(
+    "aten::gt",
+    [](const std::vector<ArgValue>& inputs,
+       const std::vector<ExprHandle>& outputShape,
+       const c10::optional<ScalarType>& outputType,
+       at::Device device) {
       return computeTwoOperand(
           "aten_gt",
           inputs,
@@ -1492,9 +1649,14 @@ Tensor tensorexpr::computeOperandValue(
           [](const ExprHandle& lhs, const ExprHandle& rhs) {
             return cast<bool>(lhs > rhs);
           });
-    } break;
+    });
 
-    case aten::le: {
+RegisterNNCLoweringFunction aten_le(
+    "aten::le",
+    [](const std::vector<ArgValue>& inputs,
+       const std::vector<ExprHandle>& outputShape,
+       const c10::optional<ScalarType>& outputType,
+       at::Device device) {
       return computeTwoOperand(
           "aten_le",
           inputs,
@@ -1503,9 +1665,14 @@ Tensor tensorexpr::computeOperandValue(
           [](const ExprHandle& lhs, const ExprHandle& rhs) {
             return cast<bool>(lhs <= rhs);
           });
-    } break;
+    });
 
-    case aten::lt: {
+RegisterNNCLoweringFunction aten_lt(
+    "aten::lt",
+    [](const std::vector<ArgValue>& inputs,
+       const std::vector<ExprHandle>& outputShape,
+       const c10::optional<ScalarType>& outputType,
+       at::Device device) {
       return computeTwoOperand(
           "aten_lt",
           inputs,
@@ -1514,9 +1681,14 @@ Tensor tensorexpr::computeOperandValue(
           [](const ExprHandle& lhs, const ExprHandle& rhs) {
             return cast<bool>(lhs < rhs);
           });
-    } break;
+    });
 
-    case aten::min: {
+RegisterNNCLoweringFunction aten_min(
+    "aten::min",
+    [](const std::vector<ArgValue>& inputs,
+       const std::vector<ExprHandle>& outputShape,
+       const c10::optional<ScalarType>& outputType,
+       at::Device device) {
       return computeTwoOperand(
           "aten_min",
           inputs,
@@ -1525,9 +1697,14 @@ Tensor tensorexpr::computeOperandValue(
           [](const ExprHandle& lhs, const ExprHandle& rhs) {
             return Min::make(boolToInteger(lhs), boolToInteger(rhs), false);
           });
-    } break;
+    });
 
-    case aten::max: {
+RegisterNNCLoweringFunction aten_max(
+    "aten::max",
+    [](const std::vector<ArgValue>& inputs,
+       const std::vector<ExprHandle>& outputShape,
+       const c10::optional<ScalarType>& outputType,
+       at::Device device) {
       return computeTwoOperand(
           "aten_max",
           inputs,
@@ -1536,8 +1713,14 @@ Tensor tensorexpr::computeOperandValue(
           [](const ExprHandle& lhs, const ExprHandle& rhs) {
             return Max::make(boolToInteger(lhs), boolToInteger(rhs), false);
           });
-    } break;
-    case aten::masked_fill: {
+    });
+
+RegisterNNCLoweringFunction aten_masked_fill(
+    "aten::masked_fill",
+    [](const std::vector<ArgValue>& inputs,
+       const std::vector<ExprHandle>& outputShape,
+       const c10::optional<ScalarType>& outputType,
+       at::Device device) {
       return computeThreeOperand(
           "aten_masked_fill",
           inputs,
@@ -1551,8 +1734,13 @@ Tensor tensorexpr::computeOperandValue(
             return ifThenElse(mask, val, input);
           },
           /*promote_inputs*/ false);
-    }
-    case aten::clamp: {
+    });
+RegisterNNCLoweringFunction aten_clamp(
+    "aten::clamp",
+    [](const std::vector<ArgValue>& inputs,
+       const std::vector<ExprHandle>& outputShape,
+       const c10::optional<ScalarType>& outputType,
+       at::Device device) {
       bool noMin = false;
       bool noMax = false;
       if (c10::get_if<ArgNone>(&inputs[1])) {
@@ -1591,8 +1779,14 @@ Tensor tensorexpr::computeOperandValue(
             }
           },
           false /* promote_inputs */);
-    } break;
-    case aten::addcmul: {
+    });
+
+RegisterNNCLoweringFunction aten_addcmul(
+    "aten::addcmul",
+    [](const std::vector<ArgValue>& inputs,
+       const std::vector<ExprHandle>& outputShape,
+       const c10::optional<ScalarType>& outputType,
+       at::Device device) {
       return computeFourOperand(
           "aten_addcmul",
           inputs,
@@ -1602,8 +1796,14 @@ Tensor tensorexpr::computeOperandValue(
              const ExprHandle& a1,
              const ExprHandle& a2,
              const ExprHandle& a3) { return a0 + a3 * a1 * a2; });
-    } break;
-    case aten::sigmoid: {
+    });
+
+RegisterNNCLoweringFunction aten_sigmoid(
+    "aten::sigmoid",
+    [](const std::vector<ArgValue>& inputs,
+       const std::vector<ExprHandle>& outputShape,
+       const c10::optional<ScalarType>& outputType,
+       at::Device device) {
       return computeOneOperand(
           "aten_sigmoid",
           inputs,
@@ -1612,25 +1812,40 @@ Tensor tensorexpr::computeOperandValue(
           [](const ExprHandle& a) {
             return sigmoid(promoteIntegerToDefaultType(a));
           });
-    } break;
+    });
 
-    case aten::reciprocal: {
+RegisterNNCLoweringFunction aten_reciprocal(
+    "aten::reciprocal",
+    [](const std::vector<ArgValue>& inputs,
+       const std::vector<ExprHandle>& outputShape,
+       const c10::optional<ScalarType>& outputType,
+       at::Device device) {
       return computeOneOperand(
           "aten_reciprocal",
           inputs,
           outputShape,
           outputType,
           [](const ExprHandle& a) { return ExprHandle(1.0f) / a; });
-    } break;
+    });
 
-    case aten::neg: {
+RegisterNNCLoweringFunction aten_neg(
+    "aten::neg",
+    [](const std::vector<ArgValue>& inputs,
+       const std::vector<ExprHandle>& outputShape,
+       const c10::optional<ScalarType>& outputType,
+       at::Device device) {
       return computeOneOperand(
           "aten_neg", inputs, outputShape, outputType, [](const ExprHandle& a) {
             return ExprHandle(-0) - a;
           });
-    } break;
+    });
 
-    case aten::isnan: {
+RegisterNNCLoweringFunction aten_isnan(
+    "aten::isnan",
+    [](const std::vector<ArgValue>& inputs,
+       const std::vector<ExprHandle>& outputShape,
+       const c10::optional<ScalarType>& outputType,
+       at::Device device) {
       return computeOneOperand(
           "aten_isnan",
           inputs,
@@ -1642,9 +1857,14 @@ Tensor tensorexpr::computeOperandValue(
             }
             return isnan(a);
           });
-    } break;
+    });
 
-    case aten::relu: {
+RegisterNNCLoweringFunction aten_relu(
+    "aten::relu",
+    [](const std::vector<ArgValue>& inputs,
+       const std::vector<ExprHandle>& outputShape,
+       const c10::optional<ScalarType>& outputType,
+       at::Device device) {
       return computeOneOperand(
           "aten_relu",
           inputs,
@@ -1654,9 +1874,14 @@ Tensor tensorexpr::computeOperandValue(
             auto zero = Cast::make(a.dtype(), 0);
             return CompareSelect::make(a, zero, zero, a, kLT);
           });
-    } break;
+    });
 
-    case aten::leaky_relu: {
+RegisterNNCLoweringFunction aten_leaky_relu(
+    "aten::leaky_relu",
+    [](const std::vector<ArgValue>& inputs,
+       const std::vector<ExprHandle>& outputShape,
+       const c10::optional<ScalarType>& outputType,
+       at::Device device) {
       return computeTwoOperand(
           "aten_leaky_relu",
           inputs,
@@ -1669,9 +1894,14 @@ Tensor tensorexpr::computeOperandValue(
             auto cs = CompareSelect::make(a, zero, one, neg_slope, kGT);
             return a * cs;
           });
-    } break;
+    });
 
-    case aten::relu6: {
+RegisterNNCLoweringFunction aten_relu6(
+    "aten::relu6",
+    [](const std::vector<ArgValue>& inputs,
+       const std::vector<ExprHandle>& outputShape,
+       const c10::optional<ScalarType>& outputType,
+       at::Device device) {
       return computeOneOperand(
           "aten_relu6",
           inputs,
@@ -1682,9 +1912,14 @@ Tensor tensorexpr::computeOperandValue(
             auto six = Cast::make(a.dtype(), 6.);
             return clamp(zero, six, a);
           });
-    } break;
+    });
 
-    case aten::gelu: {
+RegisterNNCLoweringFunction aten_gelu(
+    "aten::gelu",
+    [](const std::vector<ArgValue>& inputs,
+       const std::vector<ExprHandle>& outputShape,
+       const c10::optional<ScalarType>& outputType,
+       at::Device device) {
       return computeOneOperand(
           "aten_gelu",
           inputs,
@@ -1696,20 +1931,30 @@ Tensor tensorexpr::computeOperandValue(
             auto point_five = Cast::make(a.dtype(), .5);
             return a * point_five * (one + erf(a * m_sqrt1_2));
           });
-    } break;
+    });
 
-    case aten::batch_norm: {
-      return computeBatchNorm(inputs, outputShape, outputType);
-    }
+RegisterNNCLoweringFunction aten_batch_norm(
+    "aten::batch_norm",
+    computeBatchNorm);
 
-    case aten::log: {
+RegisterNNCLoweringFunction aten_log(
+    "aten::log",
+    [](const std::vector<ArgValue>& inputs,
+       const std::vector<ExprHandle>& outputShape,
+       const c10::optional<ScalarType>& outputType,
+       at::Device device) {
       return computeOneOperand(
           "aten_log", inputs, outputShape, outputType, [](const ExprHandle& a) {
             return log(promoteIntegerToDefaultType(a));
           });
-    } break;
+    });
 
-    case aten::log10: {
+RegisterNNCLoweringFunction aten_log10(
+    "aten::log10",
+    [](const std::vector<ArgValue>& inputs,
+       const std::vector<ExprHandle>& outputShape,
+       const c10::optional<ScalarType>& outputType,
+       at::Device device) {
       return computeOneOperand(
           "aten_log10",
           inputs,
@@ -1718,9 +1963,14 @@ Tensor tensorexpr::computeOperandValue(
           [](const ExprHandle& a) {
             return log10(promoteIntegerToDefaultType(a));
           });
-    } break;
+    });
 
-    case aten::log1p: {
+RegisterNNCLoweringFunction aten_log1p(
+    "aten::log1p",
+    [](const std::vector<ArgValue>& inputs,
+       const std::vector<ExprHandle>& outputShape,
+       const c10::optional<ScalarType>& outputType,
+       at::Device device) {
       return computeOneOperand(
           "aten_log1p",
           inputs,
@@ -1729,9 +1979,14 @@ Tensor tensorexpr::computeOperandValue(
           [](const ExprHandle& a) {
             return log1p(promoteIntegerToDefaultType(a));
           });
-    } break;
+    });
 
-    case aten::log2: {
+RegisterNNCLoweringFunction aten_log2(
+    "aten::log2",
+    [](const std::vector<ArgValue>& inputs,
+       const std::vector<ExprHandle>& outputShape,
+       const c10::optional<ScalarType>& outputType,
+       at::Device device) {
       return computeOneOperand(
           "aten_log2",
           inputs,
@@ -1740,16 +1995,26 @@ Tensor tensorexpr::computeOperandValue(
           [](const ExprHandle& a) {
             return log2(promoteIntegerToDefaultType(a));
           });
-    } break;
+    });
 
-    case aten::exp: {
+RegisterNNCLoweringFunction aten_exp(
+    "aten::exp",
+    [](const std::vector<ArgValue>& inputs,
+       const std::vector<ExprHandle>& outputShape,
+       const c10::optional<ScalarType>& outputType,
+       at::Device device) {
       return computeOneOperand(
           "aten_exp", inputs, outputShape, outputType, [](const ExprHandle& a) {
             return exp(promoteIntegerToDefaultType(a));
           });
-    } break;
+    });
 
-    case aten::expm1: {
+RegisterNNCLoweringFunction aten_expm1(
+    "aten::expm1",
+    [](const std::vector<ArgValue>& inputs,
+       const std::vector<ExprHandle>& outputShape,
+       const c10::optional<ScalarType>& outputType,
+       at::Device device) {
       return computeOneOperand(
           "aten_expm1",
           inputs,
@@ -1758,16 +2023,26 @@ Tensor tensorexpr::computeOperandValue(
           [](const ExprHandle& a) {
             return expm1(promoteIntegerToDefaultType(a));
           });
-    } break;
+    });
 
-    case aten::erf: {
+RegisterNNCLoweringFunction aten_erf(
+    "aten::erf",
+    [](const std::vector<ArgValue>& inputs,
+       const std::vector<ExprHandle>& outputShape,
+       const c10::optional<ScalarType>& outputType,
+       at::Device device) {
       return computeOneOperand(
           "aten_erf", inputs, outputShape, outputType, [](const ExprHandle& a) {
             return erf(promoteIntegerToDefaultType(a));
           });
-    } break;
+    });
 
-    case aten::erfc: {
+RegisterNNCLoweringFunction aten_erfc(
+    "aten::erfc",
+    [](const std::vector<ArgValue>& inputs,
+       const std::vector<ExprHandle>& outputShape,
+       const c10::optional<ScalarType>& outputType,
+       at::Device device) {
       return computeOneOperand(
           "aten_erfc",
           inputs,
@@ -1776,29 +2051,50 @@ Tensor tensorexpr::computeOperandValue(
           [](const ExprHandle& a) {
             return erfc(promoteIntegerToDefaultType(a));
           });
-    } break;
+    });
 
-    case aten::cos: {
+RegisterNNCLoweringFunction aten_cos(
+    "aten::cos",
+    [](const std::vector<ArgValue>& inputs,
+       const std::vector<ExprHandle>& outputShape,
+       const c10::optional<ScalarType>& outputType,
+       at::Device device) {
       return computeOneOperand(
           "aten_cos", inputs, outputShape, outputType, [](const ExprHandle& a) {
             return cos(promoteIntegerToDefaultType(a));
           });
-    } break;
+    });
 
-    case aten::sin: {
+RegisterNNCLoweringFunction aten_sin(
+    "aten::sin",
+    [](const std::vector<ArgValue>& inputs,
+       const std::vector<ExprHandle>& outputShape,
+       const c10::optional<ScalarType>& outputType,
+       at::Device device) {
       return computeOneOperand(
           "aten_sin", inputs, outputShape, outputType, [](const ExprHandle& a) {
             return sin(promoteIntegerToDefaultType(a));
           });
-    } break;
+    });
 
-    case aten::tan: {
+RegisterNNCLoweringFunction aten_tan(
+    "aten::tan",
+    [](const std::vector<ArgValue>& inputs,
+       const std::vector<ExprHandle>& outputShape,
+       const c10::optional<ScalarType>& outputType,
+       at::Device device) {
       return computeOneOperand(
           "aten_tan", inputs, outputShape, outputType, [](const ExprHandle& a) {
             return tan(promoteIntegerToDefaultType(a));
           });
-    } break;
-    case aten::type_as: {
+    });
+
+RegisterNNCLoweringFunction aten_type_as(
+    "aten::type_as",
+    [](const std::vector<ArgValue>& inputs,
+       const std::vector<ExprHandle>& outputShape,
+       const c10::optional<ScalarType>& outputType,
+       at::Device device) {
       const BufHandle rhs = c10::get<BufHandle>(inputs[1]);
       auto dtype = rhs.dtype();
       return computeOneOperand(
@@ -1807,8 +2103,14 @@ Tensor tensorexpr::computeOperandValue(
           outputShape,
           outputType,
           [dtype](const ExprHandle& lhs) { return Cast::make(dtype, lhs); });
-    } break;
-    case aten::pow: {
+    });
+
+RegisterNNCLoweringFunction aten_pow(
+    "aten::pow",
+    [](const std::vector<ArgValue>& inputs,
+       const std::vector<ExprHandle>& outputShape,
+       const c10::optional<ScalarType>& outputType,
+       at::Device device) {
       return computeTwoOperand(
           "aten_pow",
           inputs,
@@ -1843,9 +2145,14 @@ Tensor tensorexpr::computeOperandValue(
             }
             return pow(lhs, rhs);
           });
-    } break;
+    });
 
-    case aten::fmod: {
+RegisterNNCLoweringFunction aten_fmod(
+    "aten::fmod",
+    [](const std::vector<ArgValue>& inputs,
+       const std::vector<ExprHandle>& outputShape,
+       const c10::optional<ScalarType>& outputType,
+       at::Device device) {
       return computeTwoOperand(
           "aten_fmod",
           inputs,
@@ -1854,9 +2161,14 @@ Tensor tensorexpr::computeOperandValue(
           [](const ExprHandle& lhs, const ExprHandle& rhs) {
             return fmod(promoteHalfToFloat(lhs), promoteHalfToFloat(rhs));
           });
-    } break;
+    });
 
-    case aten::lerp: {
+RegisterNNCLoweringFunction aten_lerp(
+    "aten::lerp",
+    [](const std::vector<ArgValue>& inputs,
+       const std::vector<ExprHandle>& outputShape,
+       const c10::optional<ScalarType>& outputType,
+       at::Device device) {
       return computeThreeOperand(
           "aten_lerp",
           inputs,
@@ -1865,8 +2177,14 @@ Tensor tensorexpr::computeOperandValue(
           [](const ExprHandle& a,
              const ExprHandle& end,
              const ExprHandle& weight) { return a + weight * (end - a); });
-    } break;
-    case aten::remainder: {
+    });
+
+RegisterNNCLoweringFunction aten_remainder(
+    "aten::remainder",
+    [](const std::vector<ArgValue>& inputs,
+       const std::vector<ExprHandle>& outputShape,
+       const c10::optional<ScalarType>& outputType,
+       at::Device device) {
       auto imodImpl = [](const ExprHandle& lhs, const ExprHandle& rhs) {
         return Mod::make(lhs, rhs);
       };
@@ -1905,9 +2223,14 @@ Tensor tensorexpr::computeOperandValue(
               }
             });
       }
+    });
 
-    } break;
-    case prim::ConstantChunk: {
+RegisterNNCLoweringFunction prim_ConstantChunk(
+    "prim::ConstantChunk",
+    [](const std::vector<ArgValue>& inputs,
+       const std::vector<ExprHandle>& outputShape,
+       const c10::optional<ScalarType>& outputType,
+       at::Device device) {
       return Compute(
           "prim_constantchunk",
           c10::fmap<DimArg>(outputShape),
@@ -1919,8 +2242,14 @@ Tensor tensorexpr::computeOperandValue(
             std::vector<ExprHandle> indices(axes.begin(), axes.end());
             return chunk(b, offset, dim, chunks, indices);
           });
-    } break;
-    case aten::acos: {
+    });
+
+RegisterNNCLoweringFunction aten_acos(
+    "aten::acos",
+    [](const std::vector<ArgValue>& inputs,
+       const std::vector<ExprHandle>& outputShape,
+       const c10::optional<ScalarType>& outputType,
+       at::Device device) {
       return computeOneOperand(
           "aten_acos",
           inputs,
@@ -1929,9 +2258,14 @@ Tensor tensorexpr::computeOperandValue(
           [](const ExprHandle& a) {
             return acos(promoteIntegerToDefaultType(a));
           });
-    } break;
+    });
 
-    case aten::asin: {
+RegisterNNCLoweringFunction aten_asin(
+    "aten::asin",
+    [](const std::vector<ArgValue>& inputs,
+       const std::vector<ExprHandle>& outputShape,
+       const c10::optional<ScalarType>& outputType,
+       at::Device device) {
       return computeOneOperand(
           "aten_asin",
           inputs,
@@ -1940,9 +2274,14 @@ Tensor tensorexpr::computeOperandValue(
           [](const ExprHandle& a) {
             return asin(promoteIntegerToDefaultType(a));
           });
-    } break;
+    });
 
-    case aten::cosh: {
+RegisterNNCLoweringFunction aten_cosh(
+    "aten::cosh",
+    [](const std::vector<ArgValue>& inputs,
+       const std::vector<ExprHandle>& outputShape,
+       const c10::optional<ScalarType>& outputType,
+       at::Device device) {
       return computeOneOperand(
           "aten_cosh",
           inputs,
@@ -1951,9 +2290,14 @@ Tensor tensorexpr::computeOperandValue(
           [](const ExprHandle& a) {
             return cosh(promoteIntegerToDefaultType(a));
           });
-    } break;
+    });
 
-    case aten::sinh: {
+RegisterNNCLoweringFunction aten_sinh(
+    "aten::sinh",
+    [](const std::vector<ArgValue>& inputs,
+       const std::vector<ExprHandle>& outputShape,
+       const c10::optional<ScalarType>& outputType,
+       at::Device device) {
       return computeOneOperand(
           "aten_sinh",
           inputs,
@@ -1962,9 +2306,14 @@ Tensor tensorexpr::computeOperandValue(
           [](const ExprHandle& a) {
             return sinh(promoteIntegerToDefaultType(a));
           });
-    } break;
+    });
 
-    case aten::atan: {
+RegisterNNCLoweringFunction aten_atan(
+    "aten::atan",
+    [](const std::vector<ArgValue>& inputs,
+       const std::vector<ExprHandle>& outputShape,
+       const c10::optional<ScalarType>& outputType,
+       at::Device device) {
       return computeOneOperand(
           "aten_atan",
           inputs,
@@ -1973,9 +2322,14 @@ Tensor tensorexpr::computeOperandValue(
           [](const ExprHandle& a) {
             return atan(promoteIntegerToDefaultType(a));
           });
-    } break;
+    });
 
-    case aten::atan2: {
+RegisterNNCLoweringFunction aten_atan2(
+    "aten::atan2",
+    [](const std::vector<ArgValue>& inputs,
+       const std::vector<ExprHandle>& outputShape,
+       const c10::optional<ScalarType>& outputType,
+       at::Device device) {
       return computeTwoOperand(
           "aten_atan2",
           inputs,
@@ -1986,9 +2340,14 @@ Tensor tensorexpr::computeOperandValue(
                 promoteIntegerToDefaultType(lhs),
                 promoteIntegerToDefaultType(rhs));
           });
-    } break;
+    });
 
-    case aten::tanh: {
+RegisterNNCLoweringFunction aten_tanh(
+    "aten::tanh",
+    [](const std::vector<ArgValue>& inputs,
+       const std::vector<ExprHandle>& outputShape,
+       const c10::optional<ScalarType>& outputType,
+       at::Device device) {
       return computeOneOperand(
           "aten_tanh",
           inputs,
@@ -1997,9 +2356,14 @@ Tensor tensorexpr::computeOperandValue(
           [](const ExprHandle& a) {
             return tanh(promoteIntegerToDefaultType(a));
           });
-    } break;
+    });
 
-    case aten::hardtanh: {
+RegisterNNCLoweringFunction aten_hardtanh(
+    "aten::hardtanh",
+    [](const std::vector<ArgValue>& inputs,
+       const std::vector<ExprHandle>& outputShape,
+       const c10::optional<ScalarType>& outputType,
+       at::Device device) {
       return computeThreeOperand(
           "aten_hardtanh",
           inputs,
@@ -2011,9 +2375,14 @@ Tensor tensorexpr::computeOperandValue(
             auto mm = CompareSelect::make(a, min_val, min_val, a, kLT);
             return CompareSelect::make(mm, max_val, max_val, mm, kGT);
           });
-    } break;
+    });
 
-    case aten::softplus: {
+RegisterNNCLoweringFunction aten_softplus(
+    "aten::softplus",
+    [](const std::vector<ArgValue>& inputs,
+       const std::vector<ExprHandle>& outputShape,
+       const c10::optional<ScalarType>& outputType,
+       at::Device device) {
       return computeThreeOperand(
           "aten_softplus",
           inputs,
@@ -2032,9 +2401,14 @@ Tensor tensorexpr::computeOperandValue(
                 log1p(exp(beta_a)) / beta_promoted,
                 kGT);
           });
-    } break;
+    });
 
-    case aten::hardsigmoid: {
+RegisterNNCLoweringFunction aten_hardsigmoid(
+    "aten::hardsigmoid",
+    [](const std::vector<ArgValue>& inputs,
+       const std::vector<ExprHandle>& outputShape,
+       const c10::optional<ScalarType>& outputType,
+       at::Device device) {
       return computeOneOperand(
           "aten_hardsigmoid",
           inputs,
@@ -2046,9 +2420,14 @@ Tensor tensorexpr::computeOperandValue(
             auto six = Cast::make(a.dtype(), 6.0);
             return clamp(zero, six, a + three) / six;
           });
-    } break;
+    });
 
-    case aten::hardswish: {
+RegisterNNCLoweringFunction aten_hardswish(
+    "aten::hardswish",
+    [](const std::vector<ArgValue>& inputs,
+       const std::vector<ExprHandle>& outputShape,
+       const c10::optional<ScalarType>& outputType,
+       at::Device device) {
       return computeOneOperand(
           "aten_hardswish",
           inputs,
@@ -2062,8 +2441,14 @@ Tensor tensorexpr::computeOperandValue(
 
             return a * clamp(zero, six, a + three) / six;
           });
-    } break;
-    case aten::hardshrink: {
+    });
+
+RegisterNNCLoweringFunction aten_hardshrink(
+    "aten::hardshrink",
+    [](const std::vector<ArgValue>& inputs,
+       const std::vector<ExprHandle>& outputShape,
+       const c10::optional<ScalarType>& outputType,
+       at::Device device) {
       return computeTwoOperand(
           "aten_hardshrink",
           inputs,
@@ -2077,8 +2462,14 @@ Tensor tensorexpr::computeOperandValue(
             auto mm = CompareSelect::make(a, neg_clambd, a, zero, kLT);
             return CompareSelect::make(a, pos_clambd, a, mm, kGT);
           });
-    } break;
-    case aten::sqrt: {
+    });
+
+RegisterNNCLoweringFunction aten_sqrt(
+    "aten::sqrt",
+    [](const std::vector<ArgValue>& inputs,
+       const std::vector<ExprHandle>& outputShape,
+       const c10::optional<ScalarType>& outputType,
+       at::Device device) {
       return computeOneOperand(
           "aten_sqrt",
           inputs,
@@ -2087,9 +2478,14 @@ Tensor tensorexpr::computeOperandValue(
           [](const ExprHandle& a) {
             return tensorexpr::sqrt(promoteIntegerToDefaultType(a));
           });
-    } break;
+    });
 
-    case aten::rsqrt: {
+RegisterNNCLoweringFunction aten_rsqrt(
+    "aten::rsqrt",
+    [](const std::vector<ArgValue>& inputs,
+       const std::vector<ExprHandle>& outputShape,
+       const c10::optional<ScalarType>& outputType,
+       at::Device device) {
       return computeOneOperand(
           "aten_rsqrt",
           inputs,
@@ -2098,9 +2494,14 @@ Tensor tensorexpr::computeOperandValue(
           [](const ExprHandle& a) {
             return rsqrt(promoteIntegerToDefaultType(a));
           });
-    } break;
+    });
 
-    case aten::abs: {
+RegisterNNCLoweringFunction aten_abs(
+    "aten::abs",
+    [](const std::vector<ArgValue>& inputs,
+       const std::vector<ExprHandle>& outputShape,
+       const c10::optional<ScalarType>& outputType,
+       at::Device device) {
       return computeOneOperand(
           "aten_abs",
           inputs,
@@ -2110,57 +2511,91 @@ Tensor tensorexpr::computeOperandValue(
             return tensorexpr::abs(promoteHalfToFloat(a));
           },
           kIntegralTypes | kFloatingPointTypes | kBoolType);
-    } break;
+    });
 
-    case aten::sign: {
-      return computeSign(inputs, outputShape);
-    } break;
+RegisterNNCLoweringFunction aten_sign(
+    "aten::sign",
+    [](const std::vector<ArgValue>& inputs,
+       const std::vector<ExprHandle>& outputShape,
+       const c10::optional<ScalarType>& outputType,
+       at::Device device) { return computeSign(inputs, outputShape); });
 
-    case aten::ceil: {
+RegisterNNCLoweringFunction aten_ceil(
+    "aten::ceil",
+    [](const std::vector<ArgValue>& inputs,
+       const std::vector<ExprHandle>& outputShape,
+       const c10::optional<ScalarType>& outputType,
+       at::Device device) {
       return computeOneOperand(
           "aten_ceil",
           inputs,
           outputShape,
           outputType,
           [](const ExprHandle& a) { return ceil(a); });
-    } break;
+    });
 
-    case aten::floor: {
+RegisterNNCLoweringFunction aten_floor(
+    "aten::floor",
+    [](const std::vector<ArgValue>& inputs,
+       const std::vector<ExprHandle>& outputShape,
+       const c10::optional<ScalarType>& outputType,
+       at::Device device) {
       return computeOneOperand(
           "aten_floor",
           inputs,
           outputShape,
           outputType,
           [](const ExprHandle& a) { return floor(a); });
-    } break;
+    });
 
-    case aten::round: {
+RegisterNNCLoweringFunction aten_round(
+    "aten::round",
+    [](const std::vector<ArgValue>& inputs,
+       const std::vector<ExprHandle>& outputShape,
+       const c10::optional<ScalarType>& outputType,
+       at::Device device) {
       return computeOneOperand(
           "aten_round",
           inputs,
           outputShape,
           outputType,
           [](const ExprHandle& a) { return round(a); });
-    } break;
+    });
 
-    case aten::trunc: {
+RegisterNNCLoweringFunction aten_trunc(
+    "aten::trunc",
+    [](const std::vector<ArgValue>& inputs,
+       const std::vector<ExprHandle>& outputShape,
+       const c10::optional<ScalarType>& outputType,
+       at::Device device) {
       return computeOneOperand(
           "aten_trunc",
           inputs,
           outputShape,
           outputType,
           [](const ExprHandle& a) { return trunc(a); });
-    } break;
+    });
 
-    case aten::_cast_Float: {
+RegisterNNCLoweringFunction aten__cast_Float(
+    "aten::_cast_Float",
+    [](const std::vector<ArgValue>& inputs,
+       const std::vector<ExprHandle>& outputShape,
+       const c10::optional<ScalarType>& outputType,
+       at::Device device) {
       return computeOneOperand(
           "aten_cast_float",
           inputs,
           outputShape,
           outputType,
           [](const ExprHandle& a) { return cast<float>(a); });
-    } break;
-    case aten::to: {
+    });
+
+RegisterNNCLoweringFunction aten_to(
+    "aten::to",
+    [](const std::vector<ArgValue>& inputs,
+       const std::vector<ExprHandle>& outputShape,
+       const c10::optional<ScalarType>& outputType,
+       at::Device device) {
       // see handling of aten::to in tensorexpr_fuser.cpp for why we only
       // need to handle the first input
       return computeOneOperand(
@@ -2173,8 +2608,14 @@ Tensor tensorexpr::computeOperandValue(
                 outputType, buildErrorMessage("Output type is null."));
             return Cast::make(ToDtype(*outputType), a);
           });
-    } break;
-    case aten::threshold: {
+    });
+
+RegisterNNCLoweringFunction aten_threshold(
+    "aten::threshold",
+    [](const std::vector<ArgValue>& inputs,
+       const std::vector<ExprHandle>& outputShape,
+       const c10::optional<ScalarType>& outputType,
+       at::Device device) {
       return computeThreeOperand(
           "aten_threshold",
           inputs,
@@ -2185,8 +2626,14 @@ Tensor tensorexpr::computeOperandValue(
              const ExprHandle& value) {
             return ifThenElse(CompareSelect::make(a, threshold, kLE), value, a);
           });
-    } break;
-    case aten::where: {
+    });
+
+RegisterNNCLoweringFunction aten_where(
+    "aten::where",
+    [](const std::vector<ArgValue>& inputs,
+       const std::vector<ExprHandle>& outputShape,
+       const c10::optional<ScalarType>& outputType,
+       at::Device device) {
       return computeConditionWithTwoOperand(
           "aten_where",
           inputs,
@@ -2195,9 +2642,14 @@ Tensor tensorexpr::computeOperandValue(
           [](const ExprHandle& a0, const ExprHandle& a1, const ExprHandle& a2) {
             return ifThenElse(a0, a1, a2);
           });
-    } break;
+    });
 
-    case aten::frac: {
+RegisterNNCLoweringFunction aten_frac(
+    "aten::frac",
+    [](const std::vector<ArgValue>& inputs,
+       const std::vector<ExprHandle>& outputShape,
+       const c10::optional<ScalarType>& outputType,
+       at::Device device) {
       return computeOneOperand(
           "aten_frac",
           inputs,
@@ -2208,9 +2660,14 @@ Tensor tensorexpr::computeOperandValue(
             return aa - floor(aa);
           },
           kFloatingPointTypes);
-    } break;
+    });
 
-    case aten::lgamma: {
+RegisterNNCLoweringFunction aten_lgamma(
+    "aten::lgamma",
+    [](const std::vector<ArgValue>& inputs,
+       const std::vector<ExprHandle>& outputShape,
+       const c10::optional<ScalarType>& outputType,
+       at::Device device) {
       return computeOneOperand(
           "aten_lgamma",
           inputs,
@@ -2219,9 +2676,14 @@ Tensor tensorexpr::computeOperandValue(
           [](const ExprHandle& a) {
             return lgamma(promoteIntegerToDefaultType(a));
           });
-    } break;
+    });
 
-    case aten::rand_like: {
+RegisterNNCLoweringFunction aten_rand_like(
+    "aten::rand_like",
+    [](const std::vector<ArgValue>& inputs,
+       const std::vector<ExprHandle>& outputShape,
+       const c10::optional<ScalarType>& outputType,
+       at::Device device) {
       return computeOneOperand(
           "aten_rand_like",
           inputs,
@@ -2230,8 +2692,14 @@ Tensor tensorexpr::computeOperandValue(
           [](const ExprHandle& a) {
             return Intrinsics::make(IntrinsicsOp::kRand, a.dtype());
           });
-    } break;
-    case aten::slice: {
+    });
+
+RegisterNNCLoweringFunction aten_slice(
+    "aten::slice",
+    [](const std::vector<ArgValue>& inputs,
+       const std::vector<ExprHandle>& outputShape,
+       const c10::optional<ScalarType>& outputType,
+       at::Device device) {
       return Compute(
           "aten_slice",
           c10::fmap<DimArg>(outputShape),
@@ -2245,8 +2713,13 @@ Tensor tensorexpr::computeOperandValue(
             newAxes[dim] = stride * newAxes[dim] + start;
             return tensorOrConstant(inputs[0], newAxes);
           });
-    }
-    case aten::unsqueeze: {
+    });
+RegisterNNCLoweringFunction aten_unsqueeze(
+    "aten::unsqueeze",
+    [](const std::vector<ArgValue>& inputs,
+       const std::vector<ExprHandle>& outputShape,
+       const c10::optional<ScalarType>& outputType,
+       at::Device device) {
       return Compute(
           "aten_unsqueeze",
           c10::fmap<DimArg>(outputShape),
@@ -2272,42 +2745,23 @@ Tensor tensorexpr::computeOperandValue(
 
             return broadcast(c10::get<BufHandle>(inputs[0]), indices);
           });
-    }
-    case aten::t: {
-      auto shape = valueShape(inputs[0]);
-      return computeOperandValue(
-          aten::transpose,
-          {inputs[0], (int64_t)1, (int64_t)0},
-          outputShape,
-          outputType);
-    }
-    case aten::transpose: {
-      auto A = c10::get<BufHandle>(inputs[0]);
-      // Trivial case of 0-dim and 1-dim tensors: transpose is just a copy
-      if (A.ndim() < 1) {
-        return Compute(
-            "aten_transpose",
-            c10::fmap<DimArg>(outputShape),
-            [&](std::vector<VarHandle> axes) {
-              TORCH_INTERNAL_ASSERT(
-                  axes.size() <= 1,
-                  buildErrorMessage("Invalid axes size in transpose"));
-              return A.load(axes);
-            });
-      }
-      // Usual case where transpose actually swaps dimensions
-      auto start_dim =
-          at::maybe_wrap_dim(c10::get<int64_t>(inputs[1]), A.ndim());
-      auto to_dim = at::maybe_wrap_dim(c10::get<int64_t>(inputs[2]), A.ndim());
-      return Compute(
-          "aten_transpose",
-          c10::fmap<DimArg>(outputShape),
-          [&](std::vector<VarHandle> axes) {
-            std::swap(axes[start_dim], axes[to_dim]);
-            return A.load(axes);
-          });
-    }
-    case aten::permute: {
+    });
+RegisterNNCLoweringFunction aten_t(
+    "aten::t",
+    [](const std::vector<ArgValue>& inputs,
+       const std::vector<ExprHandle>& outputShape,
+       const c10::optional<ScalarType>& outputType,
+       at::Device device) {
+      return computeTranspose(
+          {inputs[0], (int64_t)1, (int64_t)0}, outputShape, outputType, device);
+    });
+RegisterNNCLoweringFunction aten_transpose("aten::transpose", computeTranspose);
+RegisterNNCLoweringFunction aten_permute(
+    "aten::permute",
+    [](const std::vector<ArgValue>& inputs,
+       const std::vector<ExprHandle>& outputShape,
+       const c10::optional<ScalarType>& outputType,
+       at::Device device) {
       auto A = c10::get<BufHandle>(inputs[0]);
       // Trivial case of 0-dim tensors: just a copy of the input
       if (A.ndim() == 0) {
@@ -2333,117 +2787,67 @@ Tensor tensorexpr::computeOperandValue(
             }
             return A.load(new_axes);
           });
-    }
-    case aten::expand:
-    case aten::expand_as: {
-      auto A = c10::get<BufHandle>(inputs[0]);
-      return Compute(
-          "aten_expand",
-          c10::fmap<DimArg>(outputShape),
-          [&](const std::vector<VarHandle>& axes) {
-            std::vector<ExprHandle> indices(axes.begin(), axes.end());
-            return broadcast(A, indices);
-          });
-    }
-    case aten::reshape:
-    case aten::view: {
-      auto A = c10::get<BufHandle>(inputs[0]);
-      if (A.ndim() == 0) {
-        return Compute(
-            "aten_view",
-            c10::fmap<DimArg>(outputShape),
-            [&](const std::vector<VarHandle>& axes) {
-              std::vector<ExprHandle> empty_indices;
-              return A.load(empty_indices);
-            });
-      }
-      auto view_dims = c10::get<IntList>(inputs[1]);
-      return Compute(
-          "aten_reshape",
-          c10::fmap<DimArg>(outputShape),
-          [&](const std::vector<VarHandle>& axes) {
-            std::vector<VarHandle> new_axes;
-            assert(view_dims.size() == axes.size());
-            /*
-            Example for the index transformation. Assume we have a tensor A and
-            its view B:
-              A.size() = [6,2,3]
-              B = A.view(2,1,9,1,2)
+    });
+RegisterNNCLoweringFunction aten_expand("aten::expand", computeExpand);
+RegisterNNCLoweringFunction aten_expand_as("aten::expand_as", computeExpand);
 
-            In TE IR we would want to represent B as the following loopnest:
-              for (i1 in 0..2)
-                for (i2 in 0..1)
-                  for (i3 in 0..9)
-                    for (i4 in 0..1)
-                      for (i5 in 0..2)
-                        idx = i5 + i4*2 + i3*2 + i2*18 + i1*18
-                        B[i1,i2,i3,i4,i5] = A[idx/(3*2), (idx/3)%2, idx%3]
-            */
-            // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
-            ExprHandle cur_stride = 1;
-            std::vector<ExprPtr> dims, indices;
-            for (size_t idx = 0; idx < view_dims.size(); idx++) {
-              dims.push_back(alloc<LongImm>(view_dims[idx]));
-              indices.push_back(axes[idx].node());
-            }
-            ExprHandle flat_idx = ExprHandle(flatten_index(dims, indices));
-            std::vector<ExprHandle> orig_buf_indexes(A.ndim(), ExprHandle(0));
-            ExprHandle stride = ExprHandle(immLike(flat_idx, 1));
-            for (size_t idx = 0; idx < A.ndim(); idx++) {
-              size_t dim_idx = A.ndim() - idx - 1;
-              // We don't need to generate mod-div for the first dimension -
-              // ideally IRSimlifier would get rid of that for us, but for now
-              // let's just avoid generating it in the first place.
-              if (dim_idx > 0) {
-                orig_buf_indexes[dim_idx] = flat_idx / stride % A.dim(dim_idx);
-              } else {
-                orig_buf_indexes[dim_idx] = flat_idx / stride;
-              }
-              // In the example above the stride is initially 1 for dim_idx = 2,
-              // then it's 3 for dim_idx = 1, and then it's 3*2 for dim_idx = 0.
-              stride = stride * A.dim(dim_idx);
-            }
-            // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
-            return A.load(orig_buf_indexes);
-          });
-    }
-    case aten::mm: // aten::mm is a subset of aten::matmul where both inputs are
-                   // rank 2
-    case aten::matmul: {
-      return computeMatmul(inputs, outputShape, outputType);
-    }
-    case aten::cat: {
-      return computeCat(inputs, outputShape, device);
-    }
-    case aten::sum: {
-      return computeSum(inputs, outputType);
-    }
-    case aten::softmax: {
+RegisterNNCLoweringFunction aten_view("aten::view", computeReshape);
+RegisterNNCLoweringFunction aten_reshape("aten::reshape", computeReshape);
+
+// aten::mm is a subset of aten::matmul where both inputs are rank 2
+RegisterNNCLoweringFunction aten_mm("aten::mm", computeMatmul);
+RegisterNNCLoweringFunction aten_matmul("aten::matmul", computeMatmul);
+
+RegisterNNCLoweringFunction aten_cat("aten::cat", computeCat);
+
+RegisterNNCLoweringFunction aten_sum("aten::sum", computeSum);
+
+RegisterNNCLoweringFunction aten_softmax(
+    "aten::softmax",
+    [](const std::vector<ArgValue>& inputs,
+       const std::vector<ExprHandle>& outputShape,
+       const c10::optional<ScalarType>& outputType,
+       at::Device device) {
       return computeSoftmax(inputs, outputShape, false);
-    }
-    case aten::log_softmax: {
+    });
+
+RegisterNNCLoweringFunction aten_log_softmax(
+    "aten::log_softmax",
+    [](const std::vector<ArgValue>& inputs,
+       const std::vector<ExprHandle>& outputShape,
+       const c10::optional<ScalarType>& outputType,
+       at::Device device) {
       return computeSoftmax(inputs, outputShape, true);
-    }
-    case aten::conv2d: {
-      return computeConv2d(inputs, outputShape, outputType);
-    } break;
-    case aten::addmm: {
-      return computeAddMM(inputs, outputShape, outputType);
-    } break;
-    case aten::mean: {
-      return computeMean(inputs, outputShape, outputType);
-    } break;
-    case aten::adaptive_avg_pool2d: {
-      return computeAdaptiveAvgPool2d(inputs, outputShape, outputType);
-    } break;
-    default: {
-      std::string msg =
-          std::string("Unhandled node kind (in computeOperandValue): ") +
-          op.toQualString();
-      throw malformed_input(msg);
-    }
-  }
-}
+    });
+
+RegisterNNCLoweringFunction aten_conv2d("aten::conv2d", computeConv2d);
+
+RegisterNNCLoweringFunction aten_addmm("aten::addmm", computeAddMM);
+
+RegisterNNCLoweringFunction aten_mean("aten::mean", computeMean);
+
+RegisterNNCLoweringFunction aten_adaptive_avg_pool2d(
+    "aten::adaptive_avg_pool2d",
+    computeAdaptiveAvgPool2d);
+
+RegisterNNCLoweringFunction aten_add(
+    "aten::add",
+    [](const std::vector<ArgValue>& inputs,
+       const std::vector<ExprHandle>& outputShape,
+       const c10::optional<ScalarType>& outputType,
+       at::Device device) {
+      auto add_lambda = [](const ExprHandle& lhs, const ExprHandle& rhs) {
+        return boolToInteger(lhs) + boolToInteger(rhs);
+      };
+      TORCH_INTERNAL_ASSERT(
+          inputs.size() == 2 || inputs.size() == 3,
+          buildErrorMessage("Invalid number of input operands"));
+      return (inputs.size() > 2)
+          ? computeTwoOperandWithAlpha(
+                "aten_add", inputs, outputShape, outputType, add_lambda)
+          : computeTwoOperand(
+                "aten_add", inputs, outputShape, outputType, add_lambda);
+    });
 
 c10::optional<ScalarType> findDtypeForValue(const torch::jit::Value* v) {
   if (v->type()->kind() == TypeKind::TensorType) {
@@ -2453,13 +2857,6 @@ c10::optional<ScalarType> findDtypeForValue(const torch::jit::Value* v) {
     }
   }
   return c10::nullopt;
-}
-
-NNCLoweringFunction getStandardLoweringFor(const std::string& op) {
-  const auto& lowerings = getNNCLoweringRegistry();
-  if (lowerings.count(op))
-    return lowerings.at(op);
-  return nullptr;
 }
 
 Tensor TensorExprKernel::computeValue(const torch::jit::Value* v) {
@@ -2494,7 +2891,9 @@ Tensor TensorExprKernel::computeValue(const torch::jit::Value* v) {
           getStandardLoweringFor(op.toQualString())) {
     return lowering(argInputs, outputShape, outputType, device_);
   }
-  return computeOperandValue(op, argInputs, outputShape, outputType, device_);
+  std::string msg = std::string("Unhandled node kind (in computeValue): ") +
+      op.toQualString();
+  throw malformed_input(msg);
 }
 
 // Return the (lower, upper) loop bounds if they are constants, else nullopt.
