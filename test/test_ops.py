@@ -775,7 +775,7 @@ class TestJit(JitCommonTestCase):
                     #   so running it on all dtypes is would be excessive
                     if dtype == torch.float32:
                         # TODO: no reason why we cant run this with tracing graph
-                        if support_script:
+                        if support_script and op.name != "rsub":
                             check_alias_annotation(name, (get_sample(),) + sample.args, sample.kwargs,
                                                    func_type=func_type, aten_name=op.aten_name)
 
@@ -1031,10 +1031,13 @@ class TestMathBits(TestCase):
     def test_neg_view(self, device, dtype, op):
         if not op.test_neg_view:
             self.skipTest("Operation not tested with tensors with negative bit.")
-        math_op_physical = torch.neg
+
+        # The view op here is an identity, but math_op_physical's output is
+        # modified inplace, so we must at least clone
+        math_op_physical = torch.clone
 
         def math_op_view(x):
-            return torch.conj(x * 1j).imag
+            return torch.conj(x * -1j).imag
         _requires_grad = (op.supports_autograd and op.supports_complex_autograd(torch.device(device).type))
         is_bit_set = torch.is_neg
         self._test_math_view(device, dtype, op, _requires_grad, math_op_physical, math_op_view, is_bit_set,
