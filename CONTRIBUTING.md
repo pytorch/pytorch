@@ -33,7 +33,7 @@
     - [Use pre-compiled headers](#use-pre-compiled-headers)
   - [C++ frontend development tips](#c-frontend-development-tips)
   - [GDB integration](#gdb-integration)
-  - [C++ Stacktraces](#c-stacktraces)
+  - [C++ stacktraces](#c-stacktraces)
 - [CUDA development tips](#cuda-development-tips)
 - [Windows development tips](#windows-development-tips)
   - [Known MSVC (and MSVC with NVCC) bugs](#known-msvc-and-msvc-with-nvcc-bugs)
