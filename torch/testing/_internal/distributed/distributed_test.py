@@ -21,6 +21,7 @@ import torch.distributed.algorithms.model_averaging.averagers as averagers
 import torch.distributed.algorithms.model_averaging.utils as model_averaging_utils
 import torch.nn as nn
 import torch.nn.functional as F
+import torch.nn.utils._stateless as _stateless
 from torch._utils_internal import TEST_MASTER_ADDR as MASTER_ADDR
 from torch._utils_internal import TEST_MASTER_PORT as MASTER_PORT
 from torch.cuda.amp import GradScaler, autocast
@@ -6653,7 +6654,7 @@ class DistributedTest:
                 loss.backward()
                 # On even iterations, 2nd param goes unused, on odd iterations,
                 # it is used.
-                local_used_maps = model.reducer._get_local_used_maps()
+                local_used_map = model.reducer._get_local_used_map()
                 if i % 2 == 0:
                     expected = torch.tensor(
                         [world_size, 0], device=self.rank, dtype=torch.int32
@@ -6664,7 +6665,7 @@ class DistributedTest:
                     )
 
                 # Validate parameter usage.
-                variable_usage_tensor = local_used_maps[0]
+                variable_usage_tensor = local_used_map
                 self.assertEqual(variable_usage_tensor, expected)
 
             # Validate appropriate error message when DDP is used with
@@ -6802,7 +6803,7 @@ class DistributedTest:
                 loss.backward()
                 # On even iterations, 2nd param goes unused, on odd iterations,
                 # it is used only on rank 1.
-                local_used_maps = model.reducer._get_local_used_maps()
+                local_used_map = model.reducer._get_local_used_map()
 
                 if i % 2 == 0:
                     expected = torch.tensor(
@@ -6813,7 +6814,7 @@ class DistributedTest:
                         [world_size, 1], device=self.rank, dtype=torch.int32
                     )
 
-                variable_usage_tensor = local_used_maps[0]
+                variable_usage_tensor = local_used_map
                 # Validate parameter usage. On odd iterations, 2nd param is only
                 # used on rank 1.
                 self.assertEqual(variable_usage_tensor, expected)
@@ -6999,7 +7000,7 @@ class DistributedTest:
             )
 
             # Modify the model so that the number of parameters are different for each rank.
-            # This will cause a RuntimeError to be thrown below in dist._verify_model_across_ranks,
+            # This will cause a RuntimeError to be thrown below in dist._verify_params_across_processes,
             # so we can check if the correct error is thrown and is logged.
             # We can't do this in the constructor above otherwise the logger will
             # not be properly initialized.
@@ -7008,9 +7009,9 @@ class DistributedTest:
             # if we pass a logger we can verify that it was logged
             with ctx:
                 if use_logger:
-                    dist._verify_model_across_ranks(net.process_group, [list(net.parameters())], net.logger)
+                    dist._verify_params_across_processes(net.process_group, list(net.parameters()), net.logger)
                 else:
-                    dist._verify_model_across_ranks(net.process_group, [list(net.parameters())])
+                    dist._verify_params_across_processes(net.process_group, list(net.parameters()))
                 # Should only be run by rank 0, and blocking_wait catches and
                 # reports exception.
                 dist.barrier(group_to_use)
@@ -7498,9 +7499,9 @@ class DistributedTest:
             )
             net_params, _ = net._build_params_for_reducer()
             if self.rank == 0:
-                print(type(net_params[0][0]))
+                print(type(net_params[0]))
 
-            net_params[0].extend(
+            net_params.extend(
                 [
                     torch.nn.Parameter(torch.ones(1)),
                     torch.nn.Parameter(torch.ones(1)),
@@ -7510,11 +7511,11 @@ class DistributedTest:
             with self.assertRaisesRegex(ValueError, "Expected param to name mapping"):
                 net._build_param_to_name_mapping(net_params)
 
-            net_params[0] = net_params[0][:-3]
+            net_params = net_params[:-3]
             with self.assertRaisesRegex(ValueError, "Param with name"):
                 net._build_param_to_name_mapping(net_params)
 
-            net_params[0].extend(
+            net_params.extend(
                 [
                     torch.nn.Parameter(torch.ones(1)),
                     torch.nn.Parameter(torch.ones(1)),
@@ -8230,3 +8231,51 @@ class DistributedTest:
                 rank_0_buf = bufs[0]
                 for buf in bufs[1:]:
                     self.assertEqual(rank_0_buf, buf)
+
+        @skip_if_lt_x_gpu(2)
+        @sandcastle_skip_if(
+            BACKEND != "nccl" and BACKEND != "gloo",
+            "Only Nccl & Gloo backend support DistributedDataParallel",
+        )
+        def test_stateless_api_with_ddp(self):
+            class MockModule(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.l1 = torch.nn.Linear(1, 1)
+                    buffer = torch.ones(1)
+                    self.register_buffer('buffer', buffer)
+
+                def forward(self, x):
+                    return self.l1(x) + self.buffer
+
+            device = self.rank
+            module = MockModule().to(device)
+            module = torch.nn.parallel.DistributedDataParallel(
+                module,
+                device_ids=[device]
+            )
+            x = torch.rand((1, 1)).to(device)
+            weight = torch.tensor([[1.0]], device=device, requires_grad=True)
+            bias = torch.tensor([0.0], device=device, requires_grad=True)
+            buffer = torch.tensor([0.0], device=device)
+            parameters = {'module.l1.weight': weight,
+                          'module.l1.bias': bias,
+                          'module.buffer': buffer}
+            prev_weight = module.module.l1.weight.clone()
+            prev_buffer = module.module.buffer.clone()
+            res = _stateless.functional_call(module, parameters, x)
+            self.assertEqual(x, res)
+            # check that the weight remain unmodified
+            cur_weight = module.module.l1.weight
+            cur_buffer = module.module.buffer
+            self.assertEqual(cur_weight, prev_weight)
+            self.assertEqual(cur_buffer, prev_buffer)
+            # run a backward pass and check the gradients
+            res.backward()
+            self.assertIsNotNone(weight.grad)
+            self.assertIsNotNone(bias.grad)
+            # Gradient was not calculated for the module stated and buffers
+            self.assertIsNone(buffer.grad)
+            self.assertIsNone(module.module.l1.weight.grad)
+            self.assertIsNone(module.module.l1.bias.grad)
+            self.assertIsNone(module.module.buffer.grad)
