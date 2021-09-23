@@ -44,6 +44,7 @@ env:
   CUSTOM_TEST_ARTIFACT_BUILD_DIR: build/custom_test_artifacts
   ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
   PR_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
 !{{ common.concurrency(build_environment) }}
 
@@ -132,7 +133,7 @@ jobs:
       - name: Pull docker image
         run: |
           docker pull "${DOCKER_IMAGE}"
-      - name: Build PyTorch
+      - name: Build
         run: |
           # detached container should get cleaned up by teardown_ec2_linux
           container_name=$(docker run \
@@ -288,9 +289,17 @@ jobs:
       - name: Output disk space left
         run: |
           sudo df -H
-      - name: Test PyTorch
+      !{{ common.parse_ref() }}
+      - name: Test
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          IS_GHA: 1
+          CIRCLE_BRANCH: ${{ steps.parse-ref.outputs.branch }}
+          CIRCLE_PR_NUMBER: ${{ github.event.pull_request.number }}
+          CIRCLE_SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
+          AWS_DEFAULT_REGION: us-east-1
+        # Time out the test phase after 3.5 hours
+        timeout-minutes: 210
         run: |
           if [[ $TEST_CONFIG == 'multigpu' ]]; then
             TEST_COMMAND=.jenkins/pytorch/multigpu-test.sh
@@ -311,6 +320,11 @@ jobs:
             -e CUSTOM_TEST_ARTIFACT_BUILD_DIR \
             -e GITHUB_ACTIONS \
             -e IN_CI \
+            -e IS_GHA \
+            -e CIRCLE_BRANCH \
+            -e CIRCLE_SHA1 \
+            -e CIRCLE_PR_NUMBER \
+            -e AWS_DEFAULT_REGION \
             -e IN_WHEEL_TEST \
             -e SHARD_NUMBER \
             -e JOB_BASE_NAME \
@@ -342,14 +356,7 @@ jobs:
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
       !{{ common.render_test_results() }}
-      {%- if is_coverage %}
-      - name: Report coverage
-        run: |
-          python3 -mpip install codecov==2.1.12
-          python3 -mcodecov
-      {%- endif %}
       !{{ common.upload_test_reports(name='linux') }}
-      !{{ common.parse_ref() }}
       !{{ common.upload_test_statistics(build_environment) }}
       !{{ common.teardown_ec2_linux() }}
 {% endblock %}

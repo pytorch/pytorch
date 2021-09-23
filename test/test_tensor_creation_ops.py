@@ -1409,12 +1409,12 @@ class TestTensorCreation(TestCase):
 
     def test_meshgrid_unsupported_indexing(self):
         with self.assertRaisesRegex(RuntimeError,
-                                    'only "ij" indexing is supported'):
+                                    'indexing must be one of "xy" or "ij"'):
             torch.meshgrid(torch.tensor([1, 2]), indexing='')
 
     def test_meshgrid_non_1d_tensor(self):
         with self.assertRaisesRegex(RuntimeError,
-                                    'Expected scalar or 1D tensor'):
+                                    'Expected 0D or 1D tensor'):
             torch.meshgrid(torch.tensor([[1, 2], [3, 4]]))
 
     def test_meshgrid_inconsistent_dtype(self):
@@ -1453,6 +1453,32 @@ class TestTensorCreation(TestCase):
         expected_grid_c = torch.tensor([[[1, 2],
                                          [1, 2],
                                          [1, 2]]], device=device)
+        self.assertTrue(grid_a.equal(expected_grid_a))
+        self.assertTrue(grid_b.equal(expected_grid_b))
+        self.assertTrue(grid_c.equal(expected_grid_c))
+        self.assertTrue(grid_a2.equal(expected_grid_a))
+        self.assertTrue(grid_b2.equal(expected_grid_b))
+        self.assertTrue(grid_c2.equal(expected_grid_c))
+
+    def test_meshgrid_xy_indexing(self, device):
+        a = torch.tensor(1, device=device)
+        b = torch.tensor([1, 2, 3], device=device)
+        c = torch.tensor([1, 2], device=device)
+        grid_a, grid_b, grid_c = torch.meshgrid([a, b, c], indexing='xy')
+        self.assertEqual(grid_a.shape, torch.Size([3, 1, 2]))
+        self.assertEqual(grid_b.shape, torch.Size([3, 1, 2]))
+        self.assertEqual(grid_c.shape, torch.Size([3, 1, 2]))
+        grid_a2, grid_b2, grid_c2 = torch.meshgrid(a, b, c, indexing='xy')
+        self.assertEqual(grid_a2.shape, torch.Size([3, 1, 2]))
+        self.assertEqual(grid_b2.shape, torch.Size([3, 1, 2]))
+        self.assertEqual(grid_c2.shape, torch.Size([3, 1, 2]))
+        expected_grid_a = torch.ones(3, 1, 2, dtype=torch.int64, device=device)
+        expected_grid_b = torch.tensor([[[1, 1]],
+                                        [[2, 2]],
+                                        [[3, 3]]], device=device)
+        expected_grid_c = torch.tensor([[[1, 2]],
+                                        [[1, 2]],
+                                        [[1, 2]]], device=device)
         self.assertTrue(grid_a.equal(expected_grid_a))
         self.assertTrue(grid_b.equal(expected_grid_b))
         self.assertTrue(grid_c.equal(expected_grid_c))
@@ -1523,9 +1549,14 @@ class TestTensorCreation(TestCase):
             # No indexing in PyTorch corresponds to "ij" indexing in
             # NumPy.
             ({}, {'indexing': 'ij'}),
-            # "ij" is implemented identically in both.
+
+            # No indexing in NumPy corresponds to "xy" indexing in
+            # PyTorch.
+            ({'indexing': 'xy'}, {}),
+
+            # "ij" and "xy" are implemented identically in both.
             ({'indexing': 'ij'}, {'indexing': 'ij'}),
-            # TODO Test "xy" when it is supported in PyTorch.
+            ({'indexing': 'xy'}, {'indexing': 'xy'}),
         ]
         for shapes, (torch_kwargs, numpy_kwargs) in product(cases, indexing_correspondence):
             with self.subTest(shapes=shapes, torch_kwargs=torch_kwargs, numpy_kwargs=numpy_kwargs):
