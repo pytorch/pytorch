@@ -227,47 +227,6 @@ void _assert_async_cpu(const Tensor& self) {
   TORCH_CHECK(native::is_nonzero(self), "Expected Tensor with single nonzero value, but got zero");
 }
 
-namespace {
-
-// DO NOT USE THIS -- it's just an implementation detail of wrapped_scalar tensor below.
-at::Tensor scalar_to_tensor_default_dtype(
-    const Scalar& s,
-    const Device device = at::kCPU) {
-  if (s.isFloatingPoint()) {
-    return at::scalar_tensor(
-        s, at::device(device).dtype(at::get_default_dtype()));
-  } else if (s.isBoolean()) {
-    return at::scalar_tensor(s, at::device(device).dtype(at::kBool));
-  } else if (s.isComplex()) {
-    return at::scalar_tensor(
-        s, at::device(device).dtype(at::get_default_complex_dtype()));
-  } else {
-    TORCH_INTERNAL_ASSERT(s.isIntegral(false));
-    return at::scalar_tensor(s, at::device(device).dtype(at::kLong));
-  }
-}
-
-// TLDR: Don't call `wrapped_scalar_tensor_default_dtype` -- this function is only necessary to support the partial
-// type-promotion that torch.where supports.  Once torch.where fully supports type promotion, we
-// won't need this function.
-//
-// Longer explanation:
-// `wrapped_scalar_tensor_default_dtype` is a bit of a hack because torch.where doesn't support type promotion, but
-// does support `torch.where(tensor, scalar1, scalar2)` with default scalar types.  The trickiness is we
-// usually convert double scalars to doubles, and `set_wrapped_number` defines type promotion priority
-// as being below tensor types rather than as the default dtype (perhaps we should?).  This wouldn't matter
-// if we just supported type normal type promotion on torch.where, however.
-Tensor wrapped_scalar_tensor_default_dtype(
-    const Scalar& scalar,
-    Device device) {
-  at::Tensor tensor;
-  tensor = scalar_to_tensor_default_dtype(scalar, device);
-  tensor.unsafeGetTensorImpl()->set_wrapped_number(true);
-  return tensor;
-}
-
-} // anonymous namespace
-
 // Sorting-based algorithm for isin(); used when the number of test elements is large.
 static void isin_sorting(
     const Tensor& elements,
@@ -376,8 +335,9 @@ Tensor where(const Tensor& condition, const Tensor& self, const Scalar& other) {
 
 Tensor where(const Tensor& condition, const Scalar& self, const Scalar& other) {
   const auto device = condition.device();
-  const Tensor& other_t = wrapped_scalar_tensor_default_dtype(other, device);
-  const Tensor& self_t = wrapped_scalar_tensor_default_dtype(self, device);
+  auto common_dtype = at::result_type(self, other);
+  auto other_t = at::scalar_tensor(other, condition.options().dtype(common_dtype));
+  auto self_t = at::scalar_tensor(self, condition.options().dtype(common_dtype));
   return at::where(condition, self_t, other_t);
 }
 
