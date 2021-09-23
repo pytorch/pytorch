@@ -93,6 +93,9 @@ def _script_method_graph_for(self, parent, *args, **kwargs):
         # swap each differentiable graph with optimized graph in their execution plan
         for n, state in zip(diff_nodes, fw_states):
             fw_execution_plans = list(state.execution_plans.values())
+            # we can only update the subgraph when there's a unique execution
+            # plan. Avoid assert here so we would skip the ones that can't be
+            # updated while try the best effort to update other nodes.
             if len(fw_execution_plans) == 1:
                 n.g_('Subgraph', fw_execution_plans[0].graph)
 
