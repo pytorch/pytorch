@@ -1163,35 +1163,35 @@ struct TORCH_API WeakTypePtr {
 };
 
 // internal build errors with std::variant :/
-struct WeakOrStrongCompilationUnit
-    : public std::pair<
-          c10::optional<std::shared_ptr<torch::jit::CompilationUnit>>,
-          c10::optional<std::weak_ptr<torch::jit::CompilationUnit>>> {
-  using pair::pair;
+struct WeakOrStrongCompilationUnit {
   WeakOrStrongCompilationUnit(
       std::shared_ptr<torch::jit::CompilationUnit> shared_cu) {
-    this->first = shared_cu;
-    this->second = c10::nullopt;
+    strong_ptr_ = shared_cu;
+    weak_ptr_ = c10::nullopt;
   }
+
   WeakOrStrongCompilationUnit(
       std::weak_ptr<torch::jit::CompilationUnit> weak_cu) {
-    this->first = c10::nullopt;
-    this->second = weak_cu;
+    strong_ptr_ = c10::nullopt;
+    weak_ptr_ = weak_cu;
   }
 
   std::shared_ptr<torch::jit::CompilationUnit> getStrongRefOrThrow() const {
-    TORCH_INTERNAL_ASSERT(this->first != c10::nullopt);
-    return *this->first;
+    TORCH_INTERNAL_ASSERT(weak_ptr_ != c10::nullopt);
+    return *strong_ptr_;
   }
 
   std::weak_ptr<torch::jit::CompilationUnit> getWeakRefOrThrow() const {
-    TORCH_INTERNAL_ASSERT(this->second != c10::nullopt);
-    return *this->second;
+    TORCH_INTERNAL_ASSERT(weak_ptr_ != c10::nullopt);
+    return *weak_ptr_;
   }
 
   bool holdingStrongRef() const {
-    return this->first != c10::nullopt;
+    return strong_ptr_ != c10::nullopt;
   }
+
+  c10::optional<std::shared_ptr<torch::jit::CompilationUnit>> strong_ptr_;
+  c10::optional<std::weak_ptr<torch::jit::CompilationUnit>> weak_ptr_;
 };
 
 // An Object will hold a non-owning Compilation Unit reference if it is a
