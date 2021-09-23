@@ -464,17 +464,18 @@ Tensor prod_backward(Tensor grad, const Tensor& input, Tensor result, int64_t di
   }
 }
 
-template <typename func_t, class ...AdditionalArgs>
+template <typename func_t>
 static Tensor generic_solve_jvp(
   func_t& solve,
   const Tensor& X, const Tensor& A,
   const Tensor& dA, const Tensor& dB,
-  AdditionalArgs... additionalArgs) {
+  func_t* solve_with_structure = nullptr) {
   auto is_vector_case = at::native::linalg_solve_is_vector_rhs(dA, dB);
-  if (is_vector_case) {
-    return solve(A, dB - dA.matmul(X.unsqueeze(-1)).squeeze(-1), additionalArgs...);
+  auto dA_contrib = is_vector_case ? dA.matmul(X.unsqueeze(-1)).squeeze(-1) : dA.matmul(X);
+  if (solve_with_structure) {
+    return solve(A, dB) - solve_with_structure(A, dA_contrib);
   }
-  return solve(A, dB - dA.matmul(X), additionalArgs...);
+  return solve(A, dB - dA_contrib);
 }
 
 Tensor solve_jvp(
