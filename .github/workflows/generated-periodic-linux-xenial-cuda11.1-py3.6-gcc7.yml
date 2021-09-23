@@ -32,7 +32,7 @@ concurrency:
 jobs:
   ciflow_should_run:
     runs-on: ubuntu-18.04
-    if: ${{ (github.repository == 'pytorch/pytorch') && ((github.event_name != 'pull_request') || (github.event.action !='unassigned') || (contains(github.event.pull_request.labels.*.name, 'ciflow/all') || contains(github.event.pull_request.labels.*.name, 'ciflow/cuda') || contains(github.event.pull_request.labels.*.name, 'ciflow/linux') || contains(github.event.pull_request.labels.*.name, 'ciflow/scheduled'))) }}
+    if: ${{ (github.repository == 'pytorch/pytorch') && ((github.event_name != 'pull_request') || (github.event.assignee.login != 'pytorchbot' ) || (github.event.action !='unassigned') || (contains(github.event.pull_request.labels.*.name, 'ciflow/all') || contains(github.event.pull_request.labels.*.name, 'ciflow/cuda') || contains(github.event.pull_request.labels.*.name, 'ciflow/linux') || contains(github.event.pull_request.labels.*.name, 'ciflow/scheduled'))) }}
     env:
       LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
     steps:
@@ -202,7 +202,7 @@ jobs:
       - name: Pull docker image
         run: |
           docker pull "${DOCKER_IMAGE}"
-      - name: Build PyTorch
+      - name: Build
         run: |
           # detached container should get cleaned up by teardown_ec2_linux
           container_name=$(docker run \
@@ -215,7 +215,7 @@ jobs:
             -e SKIP_SCCACHE_INITIALIZATION=1 \
             -e TORCH_CUDA_ARCH_LIST \
             -e PR_LABELS \
-            -e http_proxy="http://internal-tf-lb-20210727220640487900000002-835786077.us-east-1.elb.amazonaws.com:3128" -e https_proxy="http://internal-tf-lb-20210727220640487900000002-835786077.us-east-1.elb.amazonaws.com:3128" -e no_proxy="localhost,127.0.0.1,amazonaws.com,s3.amazonaws.com,169.254.169.254,169.254.170.2,/var/run/docker.sock" \
+            -e http_proxy="http://internal-tf-lb-20210727220640487900000002-835786077.us-east-1.elb.amazonaws.com:3128" -e https_proxy="http://internal-tf-lb-20210727220640487900000002-835786077.us-east-1.elb.amazonaws.com:3128" -e no_proxy="localhost,127.0.0.1,github.com,amazonaws.com,s3.amazonaws.com,169.254.169.254,169.254.170.2,/var/run/docker.sock" \
             --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
             --security-opt seccomp=unconfined \
             --cap-add=SYS_PTRACE \
@@ -418,9 +418,19 @@ jobs:
       - name: Output disk space left
         run: |
           sudo df -H
-      - name: Test PyTorch
+      - name: Parse ref
+        id: parse-ref
+        run: .github/scripts/parse_ref.py
+      - name: Test
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          IS_GHA: 1
+          CIRCLE_BRANCH: ${{ steps.parse-ref.outputs.branch }}
+          CIRCLE_PR_NUMBER: ${{ github.event.pull_request.number }}
+          CIRCLE_SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
+          AWS_DEFAULT_REGION: us-east-1
+        # Time out the test phase after 3.5 hours
+        timeout-minutes: 210
         run: |
           if [[ $TEST_CONFIG == 'multigpu' ]]; then
             TEST_COMMAND=.jenkins/pytorch/multigpu-test.sh
@@ -441,6 +451,11 @@ jobs:
             -e CUSTOM_TEST_ARTIFACT_BUILD_DIR \
             -e GITHUB_ACTIONS \
             -e IN_CI \
+            -e IS_GHA \
+            -e CIRCLE_BRANCH \
+            -e CIRCLE_SHA1 \
+            -e CIRCLE_PR_NUMBER \
+            -e AWS_DEFAULT_REGION \
             -e IN_WHEEL_TEST \
             -e SHARD_NUMBER \
             -e JOB_BASE_NAME \
@@ -451,7 +466,7 @@ jobs:
             -e CONTINUE_THROUGH_ERROR \
             -e MAX_JOBS="$(nproc --ignore=2)" \
             -e SCCACHE_BUCKET \
-            -e http_proxy="http://internal-tf-lb-20210727220640487900000002-835786077.us-east-1.elb.amazonaws.com:3128" -e https_proxy="http://internal-tf-lb-20210727220640487900000002-835786077.us-east-1.elb.amazonaws.com:3128" -e no_proxy="localhost,127.0.0.1,amazonaws.com,s3.amazonaws.com,169.254.169.254,169.254.170.2,/var/run/docker.sock" \
+            -e http_proxy="http://internal-tf-lb-20210727220640487900000002-835786077.us-east-1.elb.amazonaws.com:3128" -e https_proxy="http://internal-tf-lb-20210727220640487900000002-835786077.us-east-1.elb.amazonaws.com:3128" -e no_proxy="localhost,127.0.0.1,github.com,amazonaws.com,s3.amazonaws.com,169.254.169.254,169.254.170.2,/var/run/docker.sock" \
             -e XLA_CLANG_CACHE_S3_BUCKET_NAME \
             --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
             --security-opt seccomp=unconfined \
@@ -509,9 +524,6 @@ jobs:
           if-no-files-found: error
           path:
             test-reports-*.zip
-      - name: Parse ref
-        id: parse-ref
-        run: .github/scripts/parse_ref.py
       - name: Display and upload test statistics (Click Me)
         if: always()
         # temporary hack: set CIRCLE_* vars, until we update

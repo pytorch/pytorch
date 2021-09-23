@@ -21,6 +21,7 @@ import torch.distributed.algorithms.model_averaging.averagers as averagers
 import torch.distributed.algorithms.model_averaging.utils as model_averaging_utils
 import torch.nn as nn
 import torch.nn.functional as F
+import torch.nn.utils._stateless as _stateless
 from torch._utils_internal import TEST_MASTER_ADDR as MASTER_ADDR
 from torch._utils_internal import TEST_MASTER_PORT as MASTER_PORT
 from torch.cuda.amp import GradScaler, autocast
@@ -86,6 +87,17 @@ if sys.platform == "win32":
 else:
     import fcntl
 
+
+class NetWithBuffers(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.a = nn.Linear(10, 10, bias=False)
+        self.b = nn.Linear(10, 1, bias=False)
+        self.register_buffer('buffer', torch.randn(1, 2))
+
+    def forward(self, x):
+        self.buffer.add_(1)
+        return self.b(self.a(x))
 
 class Foo:
     def __init__(self, x):
@@ -441,6 +453,8 @@ def _create_torch_profiler():
     )
 
 
+
+
 class Barrier(object):
     barrier_id = 0
 
@@ -579,6 +593,29 @@ class DistributedTest:
             group_id = dist.group.WORLD
             rank = dist.get_rank()
             return (group, group_id, rank)
+
+        def _verify_buffers_equal(self, m1, m2):
+            # verify buffers across models
+            m1_buf_dict = {k: v for k, v in m1.module.named_buffers()}
+            for name, buf in m2.module.named_buffers():
+                self.assertEqual(buf, m1_buf_dict[name])
+
+            # Verify buffers across ranks.
+            m1_buffers = list(m1.buffers())
+            m2_buffers = list(m2.buffers())
+            for (buf1, buf2) in zip(m1_buffers, m2_buffers):
+                gathered_bufs = [
+                    torch.empty_like(buf1) for _ in range(dist.get_world_size())
+                ]
+                dist.all_gather(gathered_bufs, buf1)
+                gathered_bufs_m2 = [
+                    torch.empty_like(buf2) for _ in range(dist.get_world_size())
+                ]
+                for b in gathered_bufs:
+                    self.assertEqual(b, buf1)
+                dist.all_gather(gathered_bufs_m2, buf2)
+                for b in gathered_bufs_m2:
+                    self.assertEqual(b, buf2)
 
         # HELPER FOR MULTIGPU TESTS
         def _init_multigpu_helper(self):
@@ -4625,12 +4662,10 @@ class DistributedTest:
                 gradient_as_bucket_view=grad_is_view,
             )
             post_localSGD_opt = post_localSGD_optimizer.PostLocalSGDOptimizer(
-                params=post_localSGD_net.parameters(),
-                optimizer_class=torch.optim.SGD,
+                optim=torch.optim.SGD(post_localSGD_net.parameters(), lr=learning_rate),
                 averager=averagers.PeriodicModelAverager(
                     period=period, warmup_steps=warmup_steps
-                ),
-                lr=learning_rate,
+                )
             )
 
             input = torch.randn(dist.get_world_size() * 2, 2).cuda()
@@ -6619,7 +6654,7 @@ class DistributedTest:
                 loss.backward()
                 # On even iterations, 2nd param goes unused, on odd iterations,
                 # it is used.
-                local_used_maps = model.reducer._get_local_used_maps()
+                local_used_map = model.reducer._get_local_used_map()
                 if i % 2 == 0:
                     expected = torch.tensor(
                         [world_size, 0], device=self.rank, dtype=torch.int32
@@ -6630,7 +6665,7 @@ class DistributedTest:
                     )
 
                 # Validate parameter usage.
-                variable_usage_tensor = local_used_maps[0]
+                variable_usage_tensor = local_used_map
                 self.assertEqual(variable_usage_tensor, expected)
 
             # Validate appropriate error message when DDP is used with
@@ -6768,7 +6803,7 @@ class DistributedTest:
                 loss.backward()
                 # On even iterations, 2nd param goes unused, on odd iterations,
                 # it is used only on rank 1.
-                local_used_maps = model.reducer._get_local_used_maps()
+                local_used_map = model.reducer._get_local_used_map()
 
                 if i % 2 == 0:
                     expected = torch.tensor(
@@ -6779,7 +6814,7 @@ class DistributedTest:
                         [world_size, 1], device=self.rank, dtype=torch.int32
                     )
 
-                variable_usage_tensor = local_used_maps[0]
+                variable_usage_tensor = local_used_map
                 # Validate parameter usage. On odd iterations, 2nd param is only
                 # used on rank 1.
                 self.assertEqual(variable_usage_tensor, expected)
@@ -6965,7 +7000,7 @@ class DistributedTest:
             )
 
             # Modify the model so that the number of parameters are different for each rank.
-            # This will cause a RuntimeError to be thrown below in dist._verify_model_across_ranks,
+            # This will cause a RuntimeError to be thrown below in dist._verify_params_across_processes,
             # so we can check if the correct error is thrown and is logged.
             # We can't do this in the constructor above otherwise the logger will
             # not be properly initialized.
@@ -6974,9 +7009,9 @@ class DistributedTest:
             # if we pass a logger we can verify that it was logged
             with ctx:
                 if use_logger:
-                    dist._verify_model_across_ranks(net.process_group, [list(net.parameters())], net.logger)
+                    dist._verify_params_across_processes(net.process_group, list(net.parameters()), net.logger)
                 else:
-                    dist._verify_model_across_ranks(net.process_group, [list(net.parameters())])
+                    dist._verify_params_across_processes(net.process_group, list(net.parameters()))
                 # Should only be run by rank 0, and blocking_wait catches and
                 # reports exception.
                 dist.barrier(group_to_use)
@@ -7464,9 +7499,9 @@ class DistributedTest:
             )
             net_params, _ = net._build_params_for_reducer()
             if self.rank == 0:
-                print(type(net_params[0][0]))
+                print(type(net_params[0]))
 
-            net_params[0].extend(
+            net_params.extend(
                 [
                     torch.nn.Parameter(torch.ones(1)),
                     torch.nn.Parameter(torch.ones(1)),
@@ -7476,11 +7511,11 @@ class DistributedTest:
             with self.assertRaisesRegex(ValueError, "Expected param to name mapping"):
                 net._build_param_to_name_mapping(net_params)
 
-            net_params[0] = net_params[0][:-3]
+            net_params = net_params[:-3]
             with self.assertRaisesRegex(ValueError, "Param with name"):
                 net._build_param_to_name_mapping(net_params)
 
-            net_params[0].extend(
+            net_params.extend(
                 [
                     torch.nn.Parameter(torch.ones(1)),
                     torch.nn.Parameter(torch.ones(1)),
@@ -8051,3 +8086,196 @@ class DistributedTest:
         )
         def test_ddp_new_tensor_in_fwd_static_graph(self):
             return self._test_ddp_new_tensor_in_fwd(static_graph=True)
+
+
+        @skip_if_lt_x_gpu(2)
+        @sandcastle_skip_if(
+            BACKEND != "nccl" and BACKEND != "gloo",
+            "Only Nccl & Gloo backend support DistributedDataParallel",
+        )
+        def test_ddp_buffer_hook_allreduce(self):
+            rank = self.rank
+            torch.cuda.set_device(rank)
+            torch.manual_seed(rank)
+            torch.cuda.manual_seed(rank)
+
+            def buffer_comm_hook(ddp, named_buffers):
+                buffers = [
+                    buffer for (_, buffer) in named_buffers.items()
+                ]
+                futs = [
+                    dist.all_reduce(buffer, group=ddp.process_group, async_op=True).get_future()
+                    for buffer in buffers
+                ]
+                torch.futures.collect_all(futs).wait()
+
+            model = NetWithBuffers().cuda(rank)
+            model_ddp = torch.nn.parallel.DistributedDataParallel(
+                model,
+                device_ids=[self.rank],
+            )
+            hook_pre_fwd = torch.nn.parallel.distributed._BufferCommHookLocation.PRE_FORWARD
+            hook_post_fwd = torch.nn.parallel.distributed._BufferCommHookLocation.POST_FORWARD
+            for hook_run_location in [
+                hook_pre_fwd,
+                hook_post_fwd,
+            ]:
+                model_ddp._register_buffer_comm_hook(
+                    model_ddp,
+                    buffer_comm_hook,
+                    hook_run_location
+                )
+                model_ddp_no_hook = torch.nn.parallel.DistributedDataParallel(
+                    copy.deepcopy(model),
+                    device_ids=[self.rank],
+                    broadcast_buffers=False
+                )
+                inp = torch.randn(2, 10, device=rank)
+                for i in range(2):
+                    loss_hook = model_ddp(inp).sum()
+                    # Since buffer reduction is done pre-forward, simulate it for
+                    # no hook case here.
+                    # Simulate allreduce appropriately depending on hook location.
+                    if hook_run_location == hook_pre_fwd:
+                        model_no_hook_buffers = list(model_ddp_no_hook.module.buffers())
+                        for tensor in model_no_hook_buffers:
+                            dist.all_reduce(tensor)
+                    loss_no_hook = model_ddp_no_hook(inp).sum()
+                    if hook_run_location == hook_post_fwd:
+                        model_no_hook_buffers = list(model_ddp_no_hook.module.buffers())
+                        for tensor in model_no_hook_buffers:
+                            dist.all_reduce(tensor)
+
+                    self._verify_buffers_equal(model_ddp, model_ddp_no_hook)
+                    loss_hook.backward()
+                    loss_no_hook.backward()
+
+
+        @skip_if_lt_x_gpu(2)
+        @sandcastle_skip_if(
+            BACKEND != "nccl" and BACKEND != "gloo",
+            "Only Nccl & Gloo backend support DistributedDataParallel",
+        )
+        def test_ddp_broadcast_buffer_via_hook(self):
+            # test that _distributed_broadcast_coalesced via registered hook is
+            # equivalent to DDP's default broadcast coalesced.
+            rank = self.rank
+            torch.cuda.set_device(rank)
+            torch.manual_seed(rank)
+            torch.cuda.manual_seed(rank)
+
+            def buffer_comm_hook(ddp, named_buffers):
+                # named_buffers is a Dict[str, Tensor] representing a mapping
+                # from buffer name to buffer.
+                buffers = [
+                    buffer for (_, buffer) in named_buffers.items()
+                ]
+                ddp._default_broadcast_coalesced(buffers)
+
+            model = NetWithBuffers().cuda(rank)
+            model_ddp = torch.nn.parallel.DistributedDataParallel(
+                model,
+                device_ids=[self.rank],
+            )
+            model_ddp._register_buffer_comm_hook(
+                model_ddp,
+                buffer_comm_hook
+            )
+            model_ddp_no_hook = torch.nn.parallel.DistributedDataParallel(
+                copy.deepcopy(model),
+                device_ids=[self.rank],
+            )
+            inp = torch.randn(2, 10, device=rank)
+            for i in range(2):
+                loss_hook = model_ddp(inp).sum()
+                loss_no_hook = model_ddp_no_hook(inp).sum()
+                self._verify_buffers_equal(model_ddp, model_ddp_no_hook)
+                loss_hook.backward()
+                loss_no_hook.backward()
+
+        @skip_if_lt_x_gpu(2)
+        @sandcastle_skip_if(
+            BACKEND != "nccl" and BACKEND != "gloo",
+            "Only Nccl & Gloo backend support DistributedDataParallel",
+        )
+        def test_ddp_broadcast_buffer(self):
+            rank = self.rank
+            torch.cuda.set_device(rank)
+            torch.manual_seed(rank)
+            torch.cuda.manual_seed(rank)
+
+            class NetWithBuffers(nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.a = nn.Linear(10, 10, bias=False)
+                    self.b = nn.Linear(10, 1, bias=False)
+                    self.register_buffer('buffer', torch.randn(1, 2))
+
+                def forward(self, x):
+                    return self.b(self.a(x))
+
+            model = NetWithBuffers().cuda(rank)
+            model_ddp = torch.nn.parallel.DistributedDataParallel(
+                model,
+                device_ids=[self.rank],
+            )
+            inp = torch.randn(2, 10, device=rank)
+            for i in range(2):
+                if rank == 0:
+                    model_ddp.module.buffer = model_ddp.module.buffer + 1
+                loss = model_ddp(inp).sum()
+                loss.backward()
+                # Ensure all buffers are synchronized.
+                bufs = [torch.empty_like(model_ddp.module.buffer) for _ in range(dist.get_world_size())]
+                dist.all_gather(bufs, model_ddp.module.buffer)
+                rank_0_buf = bufs[0]
+                for buf in bufs[1:]:
+                    self.assertEqual(rank_0_buf, buf)
+
+        @skip_if_lt_x_gpu(2)
+        @sandcastle_skip_if(
+            BACKEND != "nccl" and BACKEND != "gloo",
+            "Only Nccl & Gloo backend support DistributedDataParallel",
+        )
+        def test_stateless_api_with_ddp(self):
+            class MockModule(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.l1 = torch.nn.Linear(1, 1)
+                    buffer = torch.ones(1)
+                    self.register_buffer('buffer', buffer)
+
+                def forward(self, x):
+                    return self.l1(x) + self.buffer
+
+            device = self.rank
+            module = MockModule().to(device)
+            module = torch.nn.parallel.DistributedDataParallel(
+                module,
+                device_ids=[device]
+            )
+            x = torch.rand((1, 1)).to(device)
+            weight = torch.tensor([[1.0]], device=device, requires_grad=True)
+            bias = torch.tensor([0.0], device=device, requires_grad=True)
+            buffer = torch.tensor([0.0], device=device)
+            parameters = {'module.l1.weight': weight,
+                          'module.l1.bias': bias,
+                          'module.buffer': buffer}
+            prev_weight = module.module.l1.weight.clone()
+            prev_buffer = module.module.buffer.clone()
+            res = _stateless.functional_call(module, parameters, x)
+            self.assertEqual(x, res)
+            # check that the weight remain unmodified
+            cur_weight = module.module.l1.weight
+            cur_buffer = module.module.buffer
+            self.assertEqual(cur_weight, prev_weight)
+            self.assertEqual(cur_buffer, prev_buffer)
+            # run a backward pass and check the gradients
+            res.backward()
+            self.assertIsNotNone(weight.grad)
+            self.assertIsNotNone(bias.grad)
+            # Gradient was not calculated for the module stated and buffers
+            self.assertIsNone(buffer.grad)
+            self.assertIsNone(module.module.l1.weight.grad)
+            self.assertIsNone(module.module.l1.bias.grad)
+            self.assertIsNone(module.module.buffer.grad)
