@@ -1,4 +1,7 @@
 import copy
+from dataclasses import dataclass
+from typing import Callable, Any
+from enum import Enum, auto
 import inspect
 import itertools
 import logging
@@ -125,6 +128,16 @@ def _dump_DDP_relevant_env_vars():
     print(formatted_output)
 
 
+class _BufferCommHookLocation(Enum):
+    PRE_FORWARD = auto()
+    POST_FORWARD = auto()
+
+@dataclass
+class _BufferCommHook:
+    buffer_comm_hook: Callable
+    buffer_comm_hook_state: Any
+    buffer_comm_hook_location: _BufferCommHookLocation
+
 # Add a DDPSink to run various functions when backwards starts, such as
 # queueing call back of out-most backward/graph task,
 # this helps call back is fired after all gradients' calculation
@@ -175,6 +188,8 @@ class _DDPJoinHook(JoinHook):
 
         # Schedule a broadcast if we are syncing module buffers in the
         # forward pass
+        # TODO: make DDP uneven inputs context manager support buffer
+        # comm hook (https://github.com/pytorch/pytorch/issues/65436)
         ddp._check_and_sync_module_buffers()
 
         # Check if need to sync in the backward pass
@@ -575,7 +590,7 @@ class DistributedDataParallel(Module, Joinable):
         # Build parameters for reducer.
         parameters, expect_sparse_gradient = self._build_params_for_reducer()
         # Verify model equivalence.
-        dist._verify_model_across_ranks(self.process_group, parameters)
+        dist._verify_params_across_processes(self.process_group, parameters)
         # Sync params and buffers. Ensures all DDP models start off at the same value.
         self._sync_params_and_buffers(authoritative_rank=0)
         # In debug mode, build a mapping of parameter index -> parameter.
@@ -589,9 +604,13 @@ class DistributedDataParallel(Module, Joinable):
 
     def _sync_params_and_buffers(self, authoritative_rank=0):
         module_states = []
-        for name, param in self.module.state_dict().items():
+        for name, param in self.module.named_parameters():
             if name not in self.parameters_to_ignore:
-                module_states.append(param)
+                module_states.append(param.detach())
+
+        for name, buffer in self.module.named_buffers():
+            if name not in self.parameters_to_ignore:
+                module_states.append(buffer.detach())
 
         if len(module_states) > 0:
             self._distributed_broadcast_coalesced(
@@ -621,9 +640,9 @@ class DistributedDataParallel(Module, Joinable):
         # a much larger bucket, adding unnecessary latency after gradient
         # computation finishes. Experiments showed 1MB is a reasonable value.
         bucket_indices, per_bucket_size_limits = dist._compute_bucket_assignment_by_size(
-            parameters[0],
+            parameters,
             [dist._DEFAULT_FIRST_BUCKET_BYTES, self.bucket_bytes_cap],
-            expect_sparse_gradient[0],
+            expect_sparse_gradient,
         )
 
         # Note: reverse list of buckets because we want to approximate the
@@ -688,19 +707,17 @@ class DistributedDataParallel(Module, Joinable):
     def _build_params_for_reducer(self):
         # Build tuple of (module, parameter) for all parameters that require grads.
         modules_and_parameters = [
-            [
-                (module, parameter)
-                for module_name, module in self.module.named_modules()
-                for parameter in [
-                    param
-                    # Note that we access module.named_parameters instead of
-                    # parameters(module). parameters(module) is only needed in the
-                    # single-process multi device case, where it accesses replicated
-                    # parameters through _former_parameters.
-                    for param_name, param in module.named_parameters(recurse=False)
-                    if param.requires_grad
-                    and f"{module_name}.{param_name}" not in self.parameters_to_ignore
-                ]
+            (module, parameter)
+            for module_name, module in self.module.named_modules()
+            for parameter in [
+                param
+                # Note that we access module.named_parameters instead of
+                # parameters(module). parameters(module) is only needed in the
+                # single-process multi device case, where it accesses replicated
+                # parameters through _former_parameters.
+                for param_name, param in module.named_parameters(recurse=False)
+                if param.requires_grad
+                and f"{module_name}.{param_name}" not in self.parameters_to_ignore
             ]
         ]
 
@@ -709,15 +726,12 @@ class DistributedDataParallel(Module, Joinable):
         modules_and_parameters = [
             # "p not in memo" is the deduplication check.
             # "not memo.add(p)" is always True, and it's only there to cause "add(p)" if needed.
-            [(m, p) for m, p in replica_mps if p not in memo and not memo.add(p)]
-            for replica_mps in modules_and_parameters
+            (m, p) for m, p in modules_and_parameters
+            if p not in memo and not memo.add(p)
         ]
 
         # Build list of parameters.
-        parameters = [
-            list(parameter for _, parameter in replica)
-            for replica in modules_and_parameters
-        ]
+        parameters = list(parameter for _, parameter in modules_and_parameters)
 
         # Checks if a module will produce a sparse gradient.
         def produces_sparse_gradient(module):
@@ -729,10 +743,7 @@ class DistributedDataParallel(Module, Joinable):
 
         # Build list of booleans indicating whether or not to expect sparse
         # gradients for the corresponding parameters.
-        expect_sparse_gradient = [
-            list(produces_sparse_gradient(module) for module, _ in replica)
-            for replica in modules_and_parameters
-        ]
+        expect_sparse_gradient = list(produces_sparse_gradient(module) for module, _ in modules_and_parameters)
 
         self._assign_modules_buffers()
 
@@ -750,16 +761,20 @@ class DistributedDataParallel(Module, Joinable):
         named_module_buffers = [
             (buffer, buffer_name)
             for buffer_name, buffer in self.module.named_buffers()
+            if buffer_name not in self.parameters_to_ignore
         ]
         self.modules_buffers = [
             buffer
             for (buffer, buffer_name) in named_module_buffers
-            if buffer_name not in self.parameters_to_ignore
         ]
+        # Dict[str, tensor] representing module buffers not ignored by DDP.
+        self.named_module_buffers = {
+            buffer_name: buffer for (buffer, buffer_name) in named_module_buffers
+        }
 
     def _build_param_to_name_mapping(self, parameters):
-        param_to_param_index = {parameters[0][i]: i for i in range(len(parameters[0]))}
-        param_set = set(parameters[0])
+        param_to_param_index = {parameters[i]: i for i in range(len(parameters))}
+        param_set = set(parameters)
         param_index_to_param_fqn = {}
         for module_name, module in self.module.named_modules():
             for param_name, param in module.named_parameters(recurse=False):
@@ -874,8 +889,11 @@ class DistributedDataParallel(Module, Joinable):
                 logging.info("Reducer buckets have been rebuilt in this iteration.")
                 self._has_rebuilt_buckets = True
 
-            if self.require_forward_param_sync:
-                self._sync_params()
+            # sync params according to location (before/after forward) user
+            # specified as part of hook, if hook was specified.
+            buffer_hook_registered = hasattr(self, 'buffer_hook')
+            if self._check_sync_bufs_pre_fwd():
+                self._sync_buffers()
 
             if self._join_config.enable:
                 # Notify joined ranks whether they should sync in backwards pass or not.
@@ -886,6 +904,11 @@ class DistributedDataParallel(Module, Joinable):
                 output = self.module(*inputs[0], **kwargs[0])
             else:
                 output = self.module(*inputs, **kwargs)
+
+            # sync params according to location (before/after forward) user
+            # specified as part of hook, if hook was specified.
+            if self._check_sync_bufs_post_fwd():
+                self._sync_buffers()
 
             if torch.is_grad_enabled() and self.require_backward_grad_sync:
                 self.require_forward_param_sync = True
@@ -1030,11 +1053,9 @@ class DistributedDataParallel(Module, Joinable):
     # When running in join mode, checks and performs sync of module buffers if
     # the models have buffers that should be synchronized in the forward pass.
     def _check_and_sync_module_buffers(self):
-        if self.will_sync_module_buffers():
+        if self._check_sync_bufs_pre_fwd():
             authoritative_rank = self._find_common_rank(self._distributed_rank, False)
-            self._distributed_broadcast_coalesced(
-                self.modules_buffers, self.broadcast_bucket_size, authoritative_rank
-            )
+            self._sync_module_buffers(authoritative_rank)
 
     # When running in join model, agrees upon a common rank and broadcast model
     # parameters to all other ranks.
@@ -1071,8 +1092,8 @@ class DistributedDataParallel(Module, Joinable):
 
     # Allreduces the used parameter mapping across ranks.
     def _match_unused_params_allreduce(self):
-        locally_used_param_maps = self.reducer._get_local_used_maps()
-        self.process_group.allreduce(locally_used_param_maps)
+        locally_used_param_map = self.reducer._get_local_used_map()
+        self.process_group.allreduce(locally_used_param_map)
 
     def join(
         self,
@@ -1221,6 +1242,20 @@ class DistributedDataParallel(Module, Joinable):
     def join_process_group(self):
         return self.process_group
 
+    def _register_buffer_comm_hook(
+        self,
+        state,
+        hook: callable,
+        comm_hook_location=_BufferCommHookLocation.PRE_FORWARD
+    ):
+
+        assert callable(hook)
+        self.buffer_hook = _BufferCommHook(
+            buffer_comm_hook=hook,
+            buffer_comm_hook_state=state,
+            buffer_comm_hook_location=comm_hook_location
+        )
+
     def register_comm_hook(self, state: object, hook: callable):
         r"""
         Registers a communication hook which is an enhancement that provides a
@@ -1335,6 +1370,21 @@ class DistributedDataParallel(Module, Joinable):
             self.process_group, tensors, buffer_size, authoritative_rank
         )
 
+    def _check_sync_bufs_post_fwd(self):
+        return (
+            self.will_sync_module_buffers() and
+            hasattr(self, 'buffer_hook') and
+            self.buffer_hook.buffer_comm_hook_location ==
+            _BufferCommHookLocation.POST_FORWARD
+        )
+
+    def _check_sync_bufs_pre_fwd(self):
+        return self.will_sync_module_buffers() and (
+            not hasattr(self, 'buffer_hook') or
+            self.buffer_hook.buffer_comm_hook_location
+            == _BufferCommHookLocation.PRE_FORWARD
+        )
+
     def will_sync_module_buffers(self):
         return (
             self.require_forward_param_sync
@@ -1358,29 +1408,52 @@ class DistributedDataParallel(Module, Joinable):
             )
         return rank_to_use.item()
 
-    def _sync_params(self):
+    def _sync_buffers(self):
         with torch.no_grad():
             # module buffer sync
-            if self.will_sync_module_buffers():
-                # Synchronize buffers across processes.
-                # If we are running DDP with the join manager, we have to agree
-                # upon a rank to sync module buffers from, since rank 0 may
-                # already have been joined and have stale module buffers.
-                if self._join_config.enable:
-                    authoritative_rank = self._find_common_rank(
-                        self._distributed_rank, True
-                    )
-                else:
-                    # The process with rank 0 is considered the authoritative copy.
-                    authoritative_rank = 0
-                # Update self.modules_buffers incase any buffers were
-                # reassigned.
-                self._assign_modules_buffers()
-                self._distributed_broadcast_coalesced(
-                    self.modules_buffers,
-                    self.broadcast_bucket_size,
-                    authoritative_rank,
+            # Synchronize buffers across processes.
+            # If we are running DDP with the join manager, we have to agree
+            # upon a rank to sync module buffers from, since rank 0 may
+            # already have been joined and have stale module buffers.
+            if self._join_config.enable:
+                authoritative_rank = self._find_common_rank(
+                    self._distributed_rank, True
                 )
+            else:
+                # The process with rank 0 is considered the authoritative copy.
+                authoritative_rank = 0
+            # Update self.modules_buffers incase any buffers were
+            # reassigned.
+            self._assign_modules_buffers()
+            self._sync_module_buffers(authoritative_rank)
+
+    def _sync_module_buffers(self, authoritative_rank):
+        if not hasattr(self, 'buffer_hook'):
+            self._default_broadcast_coalesced(authoritative_rank=authoritative_rank)
+        else:
+            # TODO: provide option to await in backward pass.
+            hook = self.buffer_hook.buffer_comm_hook
+            state = self.buffer_hook.buffer_comm_hook_state
+            hook(state, self.named_module_buffers)
+
+    def _default_broadcast_coalesced(
+        self, bufs=None, bucket_size=None, authoritative_rank=0
+    ):
+        """
+        Broadcasts buffers from rank 0 to rest of workers. If bufs, bucket_size
+        are None, default values self.modules_buffers and
+        self.broadcast_bucket_size are used instead.
+        """
+        if bufs is None:
+            bufs = self.modules_buffers
+        if bucket_size is None:
+            bucket_size = self.broadcast_bucket_size
+
+        self._distributed_broadcast_coalesced(
+            bufs,
+            bucket_size,
+            authoritative_rank
+        )
 
     def _passing_sync_batchnorm_handle(self, module):
         for layer in module.modules():
