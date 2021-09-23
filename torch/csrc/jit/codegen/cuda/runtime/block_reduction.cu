@@ -23,12 +23,13 @@ template <
     typename _dim3bd>
 __device__ void blockReduce(
     T& out,
-    const T inp_val,
+    const T& inp_val,
     Func reduction_op,
     const _dim3ti& thread_idx,
     const _dim3bd& block_dim,
     T* shared_mem,
-    bool read_write_pred,
+    bool read_pred,
+    bool write_pred,
     T init_val) {
   unsigned int reduction_size = (X_REDUCE ? block_dim.x : 1) *
       (Y_REDUCE ? block_dim.y : 1) * (Z_REDUCE ? block_dim.z : 1);
@@ -72,12 +73,12 @@ __device__ void blockReduce(
 
   assert(reduction_stride != 0);
 
-  if (read_write_pred) {
+  if (read_pred) {
     shared_mem[linear_tid] = inp_val;
   } else {
     shared_mem[linear_tid] = init_val;
   }
-  __syncthreads();
+  block_sync::sync();
   // Reduce down to nearest power of 2:
   int np2 = 1 << (31 - __clz(reduction_size));
 
@@ -88,17 +89,54 @@ __device__ void blockReduce(
           shared_mem[linear_tid + np2 * reduction_stride]);
     }
   }
-  __syncthreads();
-  // for (int factor = np2/2; factor > contig_threads / 2; factor>>=1) {
-  for (int factor = np2 / 2; factor > 0; factor >>= 1) {
+  block_sync::sync();
+  // loop peel the final iteration to save one syncthread for the end
+  for (int factor = np2 / 2; factor > 1; factor >>= 1) {
     if (reduction_tid < factor) {
       reduction_op(
           shared_mem[linear_tid],
           shared_mem[linear_tid + factor * reduction_stride]);
     }
-    __syncthreads();
+    block_sync::sync();
   }
 
-  if (should_write && read_write_pred)
-    out = shared_mem[linear_tid];
+  if (should_write && write_pred) {
+    T result = out;
+    reduction_op(result, shared_mem[linear_tid]);
+    if (reduction_size > 1) {
+      reduction_op(result, shared_mem[linear_tid + 1 * reduction_stride]);
+    }
+    out = result;
+  }
+  block_sync::sync();
+}
+
+// Use the same pred for both reads and writes
+template <
+    bool X_REDUCE,
+    bool Y_REDUCE,
+    bool Z_REDUCE,
+    typename T,
+    typename Func,
+    typename _dim3ti,
+    typename _dim3bd>
+__device__ void blockReduce(
+    T& out,
+    const T& inp_val,
+    Func reduction_op,
+    const _dim3ti& thread_idx,
+    const _dim3bd& block_dim,
+    T* shared_mem,
+    bool read_write_pred,
+    T init_val) {
+  blockReduce<X_REDUCE, Y_REDUCE, Z_REDUCE, T, Func, _dim3ti, _dim3bd>(
+      out,
+      inp_val,
+      reduction_op,
+      thread_idx,
+      block_dim,
+      shared_mem,
+      read_write_pred,
+      read_write_pred,
+      init_val);
 }
