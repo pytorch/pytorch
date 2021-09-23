@@ -26,7 +26,6 @@ def run_binary(binary: Path, test_name: str, extra_flags: List[str] = None):
     cmd = [str(binary)]
     if extra_flags is None:
         extra_flags = []
-    print(TEST_SAVE_XML)
 
     if TEST_SAVE_XML is not None:
         # Suffix copied from XMLTestRunner.__init__
@@ -44,6 +43,16 @@ def run_binary(binary: Path, test_name: str, extra_flags: List[str] = None):
 
 
 class GTest(TestCase):
+    """
+    This class has methods added to it below for each C++ test in
+    build/bin/*test*. Wrapping tests in Python makes it easier to ensure we are
+    running tests in a consistent way and have the C++ tests participate in
+    sharding.
+
+    To add a custom test that does more than just run the test binary, add a
+    method to this class named the same as the test binary (or test_<name> if
+    the binary's name doesn't start with 'test_')
+    """
     def test_jit(self, binary: Path, test_name: str):
         if "cuda" in BUILD_ENVIRONMENT:
             run_binary(binary, test_name)
