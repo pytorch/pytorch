@@ -101,7 +101,7 @@ def _unwrap_batched(
     if isinstance(batched_outputs, Tensor):
         out_dim = out_dims_as_tuple[0]
         return torch._remove_batch_dim(batched_outputs, vmap_level, batch_size, out_dim)  # type: ignore[return-value]
-    return tuple(torch._remove_batch_dim(out, vmap_level, batch_size, out_dim)
+    return tuple((torch._remove_batch_dim(out, vmap_level, batch_size, out_dim) if out is not None else None)
                  for out, out_dim in zip(batched_outputs, out_dims_as_tuple))
 
 # Checks that `fn` returned one or more Tensors and nothing else.
@@ -109,13 +109,13 @@ def _unwrap_batched(
 # so we are effectively checking that `outputs` is a single Tensor or a tuple of
 # Tensors.
 def _validate_outputs(outputs: Any, func: Callable) -> None:
-    if isinstance(outputs, Tensor):
+    if isinstance(outputs, Tensor) or outputs is None:
         return
     if not isinstance(outputs, tuple):
         raise ValueError(f'vmap({_get_name(func)}, ...): `{_get_name(func)}` must only return '
                          f'Tensors, got type {type(outputs)} as the return.')
     for idx, output in enumerate(outputs):
-        if isinstance(output, Tensor):
+        if isinstance(output, Tensor) or output is None:
             continue
         raise ValueError(f'vmap({_get_name(func)}, ...): `{_get_name(func)}` must only return '
                          f'Tensors, got type {type(output)} for return {idx}.')
