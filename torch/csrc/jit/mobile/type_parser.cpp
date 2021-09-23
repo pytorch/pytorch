@@ -40,20 +40,21 @@ class TypeParser {
   }
 
   explicit TypeParser(std::vector<std::string>& pythonStrs)
-      : pythonStrs_(pythonStrs) {}
+      : start_(0), pythonStrs_(pythonStrs) {}
 
   // For the Python string list parsing, the order of the Python string matters.
   // In bytecode, the order of the type list correspondings to the order of
   // instruction. In nested type, the lowest level type will be at the beginning
   // of the type list. It is possible to parse it without worrying about
-  // ordering, but it also introduces 1) extra cost to process nested type in
+  // ordering, but it also introduces 1) extra cost to process nested type to
   // the correct order 2) lost the benifit that the instruction order is likely
   // problematic if type list parsing fails.
   std::vector<TypePtr> parseList() {
     std::vector<TypePtr> typePtrs;
+    typePtrs.resize(pythonStrs_.size());
     static const c10::QualifiedName classPrefix = "__torch__.torch.classes";
-    for (const auto& pythonStr : pythonStrs_) {
-      c10::QualifiedName qn(pythonStr);
+    for (size_t i = 0; i < pythonStrs_.size(); i++) {
+      c10::QualifiedName qn(pythonStrs_[i]);
       c10::TypePtr type_ptr;
       if (classPrefix.isPrefixOf(qn)) {
         type_ptr = torch::getCustomClass(qn.qualifiedName());
@@ -63,12 +64,12 @@ class TypeParser {
             qn.qualifiedName(),
             " cannot be found.");
       } else {
-        pythonStr_ = pythonStr;
+        pythonStr_ = pythonStrs_[i];
         start_ = 0;
         lex();
         type_ptr = parse();
       }
-      typePtrs.emplace_back(type_ptr);
+      typePtrs[i] = type_ptr;
       str_type_ptr_map_[type_ptr->repr_str()] = type_ptr;
     }
     return typePtrs;
