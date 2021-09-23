@@ -128,7 +128,7 @@ class Tensor(torch._C._TensorBase):
                 new_tensor.grad = self.grad.__deepcopy__(memo)
 
             if not type(self) is Tensor:
-                new_tensor = new_tensor.as_subclass(type(self))
+                new_tensor = new_tensor.as_subclass(type(self))  # type: ignore[arg-type]
 
                 # Plain Tensors don't have slots
                 slots_to_save = copyreg._slotnames(self.__class__)  # type: ignore[attr-defined]
