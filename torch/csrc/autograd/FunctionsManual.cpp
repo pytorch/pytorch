@@ -2954,6 +2954,21 @@ std::tuple<Tensor, Tensor> triangular_solve_backward(
   return std::tuple<Tensor, Tensor>{grad_b, grad_a};
 }
 
+Tensor triangular_solve_jvp(
+  const Tensor& X, const Tensor& A,
+  const Tensor& dA, const Tensor& dB,
+  const bool upper,
+  const bool transpose,
+  const bool unitriangular
+) {
+  return generic_solve_jvp(
+    [=](const Tensor& A, const Tensor& B) {
+      return std::get<0>(at::triangular_solve(B, A, upper, transpose, unitriangular));
+    },
+    X, A, dA, dB
+  );
+}
+
 std::tuple<Tensor, Tensor> cholesky_solve_backward(
     const Tensor& grad_x, const Tensor& self,
     const Tensor& input2, const Tensor& result, const bool upper) {
