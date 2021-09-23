@@ -124,7 +124,7 @@ def _check_requires_grad(inputs, input_type, strict):
                                    " The outputs must be computed in a differentiable manner from the input"
                                    " when running in strict mode.".format(i))
 
-def _autograd_grad(outputs, inputs, grad_outputs=None, create_graph=False, retain_graph=None):
+def _autograd_grad(outputs, inputs, grad_outputs=None, create_graph=False, retain_graph=None, batched_grads=False):
     # Version of autograd.grad that accepts `None` in outputs and do not compute gradients for them.
     # This has the extra constraint that inputs has to be a tuple
     assert isinstance(outputs, tuple)
@@ -145,7 +145,8 @@ def _autograd_grad(outputs, inputs, grad_outputs=None, create_graph=False, retai
         return (None,) * len(inputs)
     else:
         return torch.autograd.grad(new_outputs, inputs, new_grad_outputs, allow_unused=True,
-                                   create_graph=create_graph, retain_graph=retain_graph)
+                                   create_graph=create_graph, retain_graph=retain_graph,
+                                   batched_grads=batched_grads)
 
 def _fill_in_zeros(grads, refs, strict, create_graph, stage):
     # Used to detect None in the grads and depending on the flags, either replace them
@@ -427,14 +428,8 @@ def jacobian(func, inputs, create_graph=False, strict=False, vectorize=False):
         vectorize (bool, optional): This feature is experimental, please use at
             your own risk. When computing the jacobian, usually we invoke
             ``autograd.grad`` once per row of the jacobian. If this flag is
-            ``True``, we use the vmap prototype feature as the backend to
-            vectorize calls to ``autograd.grad`` so we only invoke it once
-            instead of once per row. This should lead to performance
-            improvements in many use cases, however, due to this feature
-            being incomplete, there may be performance cliffs. Please
-            use `torch._C._debug_only_display_vmap_fallback_warnings(True)`
-            to show any performance warnings and file us issues if
-            warnings exist for your use case. Defaults to ``False``.
+            ``True``, we perform ``autograd.grad`` with ``batched_grad=True``.
+            TODO: add link to autograd, look at other examples,
 
     Returns:
         Jacobian (Tensor or nested tuple of Tensors): if there is a single
@@ -484,8 +479,6 @@ def jacobian(func, inputs, create_graph=False, strict=False, vectorize=False):
                                               "outputs of the user-provided function",
                                               "jacobian")
         _check_requires_grad(outputs, "outputs", strict=strict)
-
-
 
         if vectorize:
             if strict:
@@ -540,14 +533,14 @@ def jacobian(func, inputs, create_graph=False, strict=False, vectorize=False):
 
             # Step 2: Call vmap + autograd.grad
             def vjp(grad_output):
-                vj = list(_autograd_grad(flat_outputs, inputs, grad_output, create_graph=create_graph))
+                vj = list(_autograd_grad(flat_outputs, inputs, grad_output, create_graph=create_graph, batched_grads=True))
                 for el_idx, vj_el in enumerate(vj):
                     if vj_el is not None:
                         continue
-                    vj[el_idx] = torch.zeros_like(inputs[el_idx])
+                    vj[el_idx] = torch.zeros_like(inputs[el_idx]).expand((sum(output_numels),) + inputs[el_idx].shape)
                 return tuple(vj)
 
-            jacobians_of_flat_output = _vmap(vjp)(grad_outputs)
+            jacobians_of_flat_output = vjp(grad_outputs)
 
             # Step 3: The returned jacobian is one big tensor per input. In this step,
             # we split each Tensor by output.
