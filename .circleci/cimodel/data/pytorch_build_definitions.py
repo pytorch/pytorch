@@ -239,7 +239,6 @@ def instantiate_configs(only_slow_gradcheck):
         compiler_version = fc.find_prop("compiler_version")
         is_xla = fc.find_prop("is_xla") or False
         is_asan = fc.find_prop("is_asan") or False
-        is_coverage = fc.find_prop("is_coverage") or False
         is_noarch = fc.find_prop("is_noarch") or False
         is_onnx = fc.find_prop("is_onnx") or False
         is_pure_torch = fc.find_prop("is_pure_torch") or False
@@ -283,10 +282,6 @@ def instantiate_configs(only_slow_gradcheck):
             parms_list.append("asan")
             python_version = fc.find_prop("pyver")
             parms_list[0] = fc.find_prop("abbreviated_pyver")
-
-        if is_coverage:
-            parms_list_ignored_for_docker_image.append("coverage")
-            python_version = fc.find_prop("pyver")
 
         if is_noarch:
             parms_list_ignored_for_docker_image.append("noarch")
