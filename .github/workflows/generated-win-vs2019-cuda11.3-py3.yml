@@ -96,7 +96,6 @@ jobs:
           .jenkins/pytorch/win-build.sh
       # Upload to github so that people can click and download artifacts
       - name: Upload artifacts to Github
-        if: always()
         uses: actions/upload-artifact@v2
         # Don't fail on upload to GH since it's only for user convenience
         continue-on-error: true
@@ -106,7 +105,6 @@ jobs:
           name: ${{ env.BUILD_ENVIRONMENT }}
           path: C:\${{ github.run_id }}\build-results
       - name: Upload artifacts to s3
-        if: always()
         uses: seemethere/upload-artifact-s3@v3
         with:
           retention-days: 14
