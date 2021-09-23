@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/tensorexpr/graph_opt.h>
 
+#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/tensorexpr_fuser.h>
 #include <torch/csrc/jit/tensorexpr/kernel.h>
 
@@ -204,6 +205,150 @@ std::shared_ptr<Graph> removeUnusedSelfArgument(
   }
   graph->eraseInput(0);
   return graph;
+}
+
+bool isGraphCompilable(const std::shared_ptr<Graph>& graph) {
+  for (auto input : graph->inputs()) {
+    auto const& t = input->type();
+    auto const& k = t->kind();
+    if (k != TypeKind::TensorType && k != TypeKind::FloatType &&
+        k != TypeKind::BoolType && k != TypeKind::IntType) {
+      GRAPH_DEBUG("Input %", input->debugName(), " has unsupported type ", *t);
+      return false;
+    }
+  }
+
+  for (auto n : graph->nodes()) {
+    for (auto v : n->inputs()) {
+      auto const& t = v->type();
+      if (t->kind() == TypeKind::TensorType) {
+        auto tt = t->cast<TensorType>();
+        if (!tt->isComplete()) {
+          GRAPH_DEBUG(
+              "%",
+              v->debugName(),
+              " is not a complete tensor! The type is: ",
+              *t);
+          return false;
+        }
+      }
+    }
+    for (auto v : n->outputs()) {
+      auto const& t = v->type();
+      if (t->kind() == TypeKind::TensorType) {
+        auto tt = t->cast<TensorType>();
+        if (!tt->isComplete()) {
+          GRAPH_DEBUG(
+              "%", v->debugName(), " is not a complete! The type is: ", *t);
+          return false;
+        }
+      }
+    }
+  }
+
+  // TODO: check if all nodes have lowerings
+  return true;
+}
+
+void fixupTypeInfoForValue(
+    Value* v,
+    c10::optional<at::ScalarType> scalar_type,
+    c10::optional<at::Device> device) {
+  Node* n = v->node();
+  auto const& t = v->type();
+  if (t->kind() != TypeKind::TensorType) {
+    return;
+  }
+
+  if (n->kind() == prim::Constant) {
+    auto const_tensor = toIValue(v)->toTensor();
+    auto concrete_tensor_type =
+        tensorTypeInCurrentExecutionContext(const_tensor);
+    v->setType(concrete_tensor_type);
+    return;
+  }
+
+  TensorTypePtr new_tt;
+  auto tt = t->cast<TensorType>();
+  auto sizes = tt->sizes();
+  if (!sizes.concrete_sizes()) {
+    GRAPH_DEBUG("No concrete sizes for %", v->debugName());
+    return;
+  }
+  auto strides = tt->strides();
+  auto dtype = tt->scalarType() ? tt->scalarType() : scalar_type;
+  auto concrete_sizes = *sizes.concrete_sizes();
+  auto concrete_strides = strides.concrete_sizes()
+      ? *strides.concrete_sizes()
+      : TensorType::contiguousStridesOf(concrete_sizes);
+  new_tt = TensorType::create(
+      dtype, device, concrete_sizes, concrete_strides, false);
+
+  v->setType(new_tt);
+}
+
+c10::optional<at::ScalarType> inferScalarType(Node* n) {
+  c10::optional<at::ScalarType> scalar_type;
+  for (auto v : n->inputs()) {
+    auto const& t = v->type();
+    if (t->kind() == TypeKind::TensorType) {
+      auto tt = t->cast<TensorType>();
+      if (!scalar_type) {
+        scalar_type = tt->scalarType();
+      }
+      if (tt->scalarType() && *tt->scalarType() != scalar_type) {
+        GRAPH_DEBUG(
+            "Inputs of ", n, " have different scalar types, cannot fixup!");
+        return c10::nullopt;
+      }
+    }
+  }
+  return scalar_type;
+}
+
+c10::optional<at::Device> inferDevice(Node* n) {
+  c10::optional<at::Device> device;
+  for (auto v : n->inputs()) {
+    auto const& t = v->type();
+    if (t->kind() == TypeKind::TensorType) {
+      auto tt = t->cast<TensorType>();
+      if (!device) {
+        device = tt->device();
+      }
+      if (tt->device() && *tt->device() != device) {
+        GRAPH_DEBUG("Inputs of ", n, " have different devices, cannot fixup!");
+        return c10::nullopt;
+      }
+    }
+  }
+  if (!device) {
+    device = at::kCPU;
+  }
+  return device;
+}
+
+void fixupMissingShapeInfo(const std::shared_ptr<Graph>& graph) {
+  for (auto input : graph->inputs()) {
+    auto const& t = input->type();
+    if (t->kind() == TypeKind::TensorType) {
+      auto tt = t->cast<TensorType>();
+      if (!tt->scalarType()) {
+        GRAPH_DEBUG("No dtype for %", input->debugName());
+        return;
+      }
+      fixupTypeInfoForValue(
+          input, *tt->scalarType(), tt->device() ? *tt->device() : at::kCPU);
+    }
+  }
+
+  for (auto n : graph->nodes()) {
+    c10::optional<at::ScalarType> scalar_type = inferScalarType(n);
+    c10::optional<at::Device> device = inferDevice(n);
+
+    for (auto v : n->outputs()) {
+      fixupTypeInfoForValue(v, scalar_type, device);
+    }
+  }
 }
 
 } // namespace tensorexpr
