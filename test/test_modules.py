@@ -215,8 +215,6 @@ class TestModule(TestCase):
             return {name: self._traverse_obj(o, func) for name, o in obj.items()}
         elif isinstance(obj, (torch.Tensor, torch.nn.Parameter)):
             return func(obj)
-        else:
-            return obj
 
     def _retain_grad(self, obj):
         # gradients needs to be retained to check for grad. This is useful when
