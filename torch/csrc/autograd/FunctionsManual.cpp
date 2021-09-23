@@ -464,6 +464,7 @@ Tensor prod_backward(Tensor grad, const Tensor& input, Tensor result, int64_t di
   }
 }
 
+// std::function is used to be able to pass lambdas that capture
 using solve_f = std::function<Tensor(const Tensor&, const Tensor&)>;
 static Tensor generic_solve_jvp(
   solve_f solve,
