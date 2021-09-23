@@ -45,7 +45,7 @@ from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, Criteri
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, dtypes, \
     dtypesIfCUDA, precisionOverride, skipCUDAIfNoCudnn, skipCUDAIfCudnnVersionLessThan, onlyCUDA, onlyCPU, \
     skipCUDAIfRocm, skipCUDAIf, skipCUDAIfNotRocm, skipCUDAIfRocmVersionLessThan, skipCUDAIfNotMiopenSuggestNHWC, \
-    onlyOnCPUAndCUDA, deviceCountAtLeast, largeTensorTest, expectedFailureMeta, skipMeta
+    onlyOnCPUAndCUDA, deviceCountAtLeast, largeTensorTest, expectedFailureMeta, skipMeta, skipCPUIfNoMkldnn
 from torch.nn import MultiheadAttention
 
 from hypothesis import given
@@ -17222,11 +17222,13 @@ class TestNNDeviceType(NNTestCase):
                 output = m(input)
                 self.assertEqual(output, output_ng, rtol=1e-2, atol=1e-5)
 
-    @onlyCUDA
+    @onlyOnCPUAndCUDA
+    @skipCPUIfNoMkldnn
     @skipCUDAIfRocm
     @skipCUDAIfNoCudnn
-    @dtypes(torch.float, torch.double, torch.float16)
-    def test_cudnn_convolution_relu(self, device, dtype):
+    @dtypesIfCUDA(torch.float, torch.double, torch.float16)
+    @dtypes(torch.float)
+    def test_convolution_relu(self, device, dtype):
         for batch, groups, kernel_size, memory_format in product((1, 2, 3),
                                                                  (1, 2, 4),
                                                                  ((1, 1), (3, 3)),
@@ -17236,9 +17238,11 @@ class TestNNDeviceType(NNTestCase):
             conv2d_out = torch.conv2d(inp, w, None, (1, 1), (0, 0), (1, 1), 1)
             inp = inp.to(memory_format=memory_format)
             w = w.to(memory_format=memory_format)
-            cudnn_out = torch.convolution_relu(inp, w, None, (1, 1), (0, 0), (1, 1), 1)
-            self.assertTrue(cudnn_out.is_contiguous(memory_format=memory_format))
-            self.assertEqual(conv2d_out.relu(), cudnn_out)
+            fusion_out = torch.convolution_relu(inp, w, None, (1, 1), (0, 0), (1, 1), 1)
+            # it can be removed after channels last enabled for MKLDNN path.
+            if device == 'cuda':
+                self.assertTrue(fusion_out.is_contiguous(memory_format=memory_format))
+            self.assertEqual(conv2d_out.relu(), fusion_out)
 
     @onlyCUDA
     @skipCUDAIfRocm

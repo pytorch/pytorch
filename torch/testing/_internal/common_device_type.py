@@ -1121,6 +1121,10 @@ def skipCPUIfNoMkl(fn):
     return skipCPUIf(not TEST_MKL, "PyTorch is built without MKL support")(fn)
 
 
+# Skips a test on CPU if MKL is not available.
+def skipCPUIfNoMkldnn(fn):
+    return skipCPUIf(not torch._C.has_mkldnn, "PyTorch is built without MKLDNN support")(fn)
+
 # Skips a test on CUDA if MAGMA is not available.
 def skipCUDAIfNoMagma(fn):
     return skipCUDAIf('no_magma', "no MAGMA library detected")(skipCUDANonDefaultStreamIf(True)(fn))

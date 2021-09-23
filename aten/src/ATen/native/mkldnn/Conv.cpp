@@ -153,18 +153,19 @@ Tensor mkldnn_convolution_relu(
       "mkldnn_convolution_relu: currently mkldnn only support 2d or 3d convolution relu fusion");
   TORCH_CHECK(input.scalar_type() == ScalarType::Float || input.scalar_type() == ScalarType::BFloat16,
       "mkldnn_convolution_relu: currently mkldnn only support float or bfloat16 input");
+  if (input.scalar_type() == ScalarType::BFloat16) {
+    TORCH_CHECK(mkldnn_bf16_device_check(),
+        "mkldnn_convolution_relu: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq");
+  }
 
-  // See [Note: hacky wrapper removal for optional tensor]
-  c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
-  const Tensor& bias = *bias_maybe_owned;
+  auto dim = weight.ndimension() - 2;
+  auto stride_expanded = expand_param_if_needed(stride, "stride", dim);
+  auto padding_expanded = expand_param_if_needed(padding, "padding", dim);
+  auto dilation_expanded = expand_param_if_needed(dilation, "dilation", dim);
 
   if (input.size(0) == 0) {
     // don't failed when given a empty input for jit fusion path.
     std::vector<int64_t> o;
-    auto dim = weight.ndimension() - 2;
-    auto stride_expanded = expand_param_if_needed(stride, "stride", dim);
-    auto padding_expanded = expand_param_if_needed(padding, "padding", dim);
-    auto dilation_expanded = expand_param_if_needed(dilation, "dilation", dim);
     o = conv_output_size(input.sizes(), weight.sizes(), padding_expanded,
                          stride_expanded, dilation_expanded);
     if (input.is_mkldnn() && weight.is_mkldnn()) {
@@ -175,24 +176,23 @@ Tensor mkldnn_convolution_relu(
           input.options().device_opt(),
           input.options().pinned_memory_opt());
     }
-    auto weight_view = at::_unsafe_view(weight, -1);
-    auto out = input*weight_view[0];
-    if (bias.defined())
-      out.add_(bias[0]);
-    return out.view(o).relu_();
+    return empty_cpu(
+        o,
+        optTypeMetaToScalarType(input.options().dtype_opt()),
+        input.options().layout_opt(),
+        input.options().device_opt(),
+        input.options().pinned_memory_opt(),
+        input.suggest_memory_format());
   }
 
-  if (input.scalar_type() == ScalarType::BFloat16) {
-    TORCH_CHECK(mkldnn_bf16_device_check(),
-        "mkldnn_convolution_relu: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq");
-  }
   auto input_ = input.is_mkldnn() ? input : input.contiguous();
   auto weight_ = weight.is_mkldnn() ? weight : weight.contiguous();
   const ideep::tensor mkldnn_input = itensor_from_tensor(input_);
   const ideep::tensor mkldnn_weight = itensor_from_tensor(weight_);
   c10::optional<ideep::tensor> mkldnn_bias{c10::nullopt};
-  if (bias.defined()) {
-    auto bias_ = bias.is_mkldnn() ? bias : bias.contiguous();
+  if (bias_opt.has_value()) {
+    auto bias_value = bias_opt.value();
+    auto bias_ = bias_value.is_mkldnn() ? bias_value : bias_value.contiguous();
     mkldnn_bias = itensor_from_tensor(bias_);
   }
 
@@ -200,9 +200,9 @@ Tensor mkldnn_convolution_relu(
       mkldnn_input,
       mkldnn_weight,
       mkldnn_bias,
-      padding,
-      stride,
-      dilation,
+      padding_expanded,
+      stride_expanded,
+      dilation_expanded,
       groups,
       ideep::attr_t::fuse_relu());
 
