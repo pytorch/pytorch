@@ -507,7 +507,7 @@ list(APPEND CUDA_NVCC_FLAGS "--expt-extended-lambda")
 
 foreach(FLAG ${CUDA_NVCC_FLAGS})
   string(FIND "${FLAG}" " " flag_space_position)
-  if (NOT flag_space_position EQUAL -1)
+  if(NOT flag_space_position EQUAL -1)
     message(FATAL_ERROR "Found spaces in CUDA_NVCC_FLAGS entry '${FLAG}'")
   endif()
   string(APPEND CMAKE_CUDA_FLAGS " ${FLAG}")
