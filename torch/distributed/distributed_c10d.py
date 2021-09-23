@@ -2127,8 +2127,38 @@ def all_gather_coalesced(
         raise RuntimeError(
             "Invalid function argument: " "output_tensor_lists should be a list"
         )
+    if len(input_tensor_list) == 0:
+        raise RuntimeError("requires non-empty input tensor list")
+
+    if len(output_tensor_lists) == 0:
+        raise RuntimeError("output lists should be equal to world size")
+
     for output_tensor_list in output_tensor_lists:
         _check_tensor_list(output_tensor_list, "output_tensor_lists")
+
+    # Expect i'th tensor of each list from 'output_lists' match i'th tensor
+    # from 'input_list' in type and size.
+    for output_list in output_tensor_lists:
+        if len(output_list) != len(input_tensor_list):
+            raise RuntimeError(
+                f"invalid output size: (expected length {len(input_tensor_list)}" +
+                f", got {len(output_list)}"
+            )
+        for idx, tensor in enumerate(output_list):
+            expected_s = input_tensor_list[idx].shape
+            actual_s = tensor.shape
+            if expected_s != actual_s:
+                raise RuntimeError(
+                    f"invalid size of output tensor at index {idx} (expected length " + 
+                    f"{expected_s}, got {actual_s} )"
+                )
+            expected_t = input_tensor_list[idx].dtype
+            actual_t = tensor.dtype
+            if expected_t != actual_t:
+                raise RuntimeError(
+                    f"invalid tensor type at index {idx} expected {expected_t}, got" +
+                    f" {actual_t} )"
+                )
 
     output_tensor_lists = [
         [t if not t.is_complex() else torch.view_as_real(t) for t in l]
