@@ -1295,7 +1295,7 @@ void dictConstructFromList(Stack& stack) {
       tup_type->elements().at(0), tup_type->elements().at(1));
   dict.reserve(list.size());
   for (IValue input : list) {
-    const auto tup = input.toTupleRef().elements();
+    const auto& tup = input.toTupleRef().elements();
     dict.insert_or_assign(tup[0], tup[1]);
   }
   push(stack, dict);

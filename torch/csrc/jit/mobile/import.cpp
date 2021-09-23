@@ -200,8 +200,8 @@ class BytecodeDeserializer final {
  private:
   TypePtr resolveTypeName(const c10::QualifiedName& qn);
   void parseMethods(
-      std::vector<IValue>&& vals,
-      c10::optional<std::vector<IValue>>&& debug_handles,
+      c10::ivalue::TupleElements&& vals,
+      c10::optional<c10::ivalue::TupleElements>&& debug_handles,
       mobile::CompilationUnit& mcu);
   c10::IValue readArchive(
       const std::string& archive_name,
@@ -239,7 +239,7 @@ void BytecodeDeserializer::parseFunctionSchema(
     mobile::Function* function) {
   // function schema
   if (schemaTable) { // (schema is optional for back compat)
-    auto parseArgList = [this](std::vector<IValue>&& argTables) {
+    auto parseArgList = [this](c10::ivalue::TupleElements&& argTables) {
       std::vector<c10::Argument> args;
       for (auto&& argTable : std::move(argTables)) {
         auto argTableElements =
@@ -265,14 +265,13 @@ void BytecodeDeserializer::parseFunctionSchema(
     };
     auto schemaTableElements =
         std::move(*std::move(*schemaTable).toTuple()).elements();
-    std::vector<IValue> arg_list =
-        std::move(*expect_field(
-                       schemaTableElements,
-                       "arguments",
-                       BYTECODE_INDEX_SCHEMA_ARGUMENTS)
-                       .toTuple())
-            .elements();
-    std::vector<IValue> ret_list =
+    auto arg_list = std::move(*expect_field(
+                                   schemaTableElements,
+                                   "arguments",
+                                   BYTECODE_INDEX_SCHEMA_ARGUMENTS)
+                                   .toTuple())
+                        .elements();
+    auto ret_list =
         std::move(
             *expect_field(
                  schemaTableElements, "returns", BYTECODE_INDEX_SCHEMA_RETURNS)
@@ -290,8 +289,8 @@ void BytecodeDeserializer::parseFunctionSchema(
 }
 
 void BytecodeDeserializer::parseMethods(
-    std::vector<IValue>&& vals,
-    c10::optional<std::vector<IValue>>&& debug_handles,
+    c10::ivalue::TupleElements&& vals,
+    c10::optional<c10::ivalue::TupleElements>&& debug_handles,
     mobile::CompilationUnit& mcu) {
   TORCH_CHECK(vals.size() > 0, "Bytecode has no elements. ");
   // Initialized with the version number when kProducedBytecodeVersion was
@@ -336,23 +335,23 @@ void BytecodeDeserializer::parseMethods(
     auto function =
         std::make_unique<mobile::Function>(c10::QualifiedName(function_name));
 
-    std::vector<IValue> ins_list =
+    auto ins_list =
         std::move(
             *expect_field(
                  codeTableElements, "instructions", BYTECODE_INDEX_INSTRUCTION)
                  .toTuple())
             .elements();
-    std::vector<IValue> ops_list =
+    auto ops_list =
         std::move(*expect_field(
                        codeTableElements, "operators", BYTECODE_INDEX_OPERATOR)
                        .toTuple())
             .elements();
-    std::vector<IValue> consts_list =
+    auto consts_list =
         std::move(*expect_field(
                        codeTableElements, "constants", BYTECODE_INDEX_CONSTANT)
                        .toTuple())
             .elements();
-    std::vector<IValue> types_list =
+    auto types_list =
         std::move(*expect_field(codeTableElements, "types", BYTECODE_INDEX_TYPE)
                        .toTuple())
             .elements();
@@ -361,17 +360,23 @@ void BytecodeDeserializer::parseMethods(
             codeTableElements, "register_size", BYTECODE_INDEX_REGISTER_SIZE)
             .toInt();
 
-    std::vector<IValue> debug_handles_m_tuple;
+    c10::ivalue::TupleElements debug_handles_m_tuple;
     if (debug_handles) {
       debug_handles_m_tuple =
           std::move(*std::move((*debug_handles)[i]).toTuple()).elements();
     }
 
     parseInstructions(
-        function_name, ins_list, debug_handles_m_tuple, function.get());
+        function_name,
+        std::move(ins_list),
+        debug_handles_m_tuple,
+        function.get());
 
     parseOperators(
-        ops_list, model_version, module_load_options_, function.get());
+        std::move(ops_list),
+        model_version,
+        module_load_options_,
+        function.get());
 
     parseConstants(consts_list, function.get());
 
@@ -425,11 +430,12 @@ mobile::Module BytecodeDeserializer::deserialize(
   //
   auto bvals = std::move(*readArchive("bytecode", mcu).toTuple()).elements();
 
-  c10::optional<std::vector<IValue>> debug_handles;
+  c10::optional<c10::ivalue::TupleElements> debug_handles;
   bool has_debug_handles{false};
   if (reader_->hasRecord("mobile_debug_handles.pkl")) {
     debug_handles =
-        readArchive("mobile_debug_handles", mcu).toTupleRef().elements();
+        std::move(*readArchive("mobile_debug_handles", mcu).toTuple())
+            .elements();
     has_debug_handles = true;
   }
   parseMethods(std::move(bvals), std::move(debug_handles), *mcu);

@@ -80,7 +80,7 @@ ConvParamsSerializationTypeV3 parse_conv_serialized_state(c10::IValue v) {
   // determine the version based on IValue contents
   int version = -1;
   if (v.isTuple()) {
-    auto elements = v.toTupleRef().elements();
+    const auto& elements = v.toTupleRef().elements();
     if (elements.size() > 0) {
       auto firstElement = elements[0];
       if (firstElement.isTensor()) {
@@ -105,7 +105,7 @@ ConvParamsSerializationTypeV3 parse_conv_serialized_state(c10::IValue v) {
   if (version == 1) {
     // version 1 - convert to version 3 manually
 
-    auto elements = v.toTupleRef().elements();
+    const auto& elements = v.toTupleRef().elements();
 
     at::Tensor weight = elements[0].toTensor();
     c10::optional<at::Tensor> bias = elements[1].toOptional<at::Tensor>();
@@ -149,7 +149,7 @@ ConvParamsSerializationTypeV3 parse_conv_serialized_state(c10::IValue v) {
     return std::tie(version, config_vals, tensors);
   } else if (version == 2) {
     // version 2
-    auto elements = v.toTupleRef().elements();
+    const auto& elements = v.toTupleRef().elements();
     std::vector<at::Tensor> non_optional = elements[1].toTensorList().vec();
     std::vector<c10::optional<at::Tensor>> optional;
 

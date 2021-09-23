@@ -19,6 +19,7 @@
 #include <c10/core/TensorImpl.h>
 #include <c10/core/UndefinedTensorImpl.h>
 #include <c10/util/intrusive_ptr.h>
+#include <c10/util/irange.h>
 #include <c10/util/hash.h>
 
 namespace torch {
@@ -249,9 +250,252 @@ struct TORCH_API ConstantString final : c10::intrusive_ptr_target {
 
 struct Future;
 
+struct TORCH_API TupleElements {
+ private:
+  size_t inlineSize_;
+  // We represent TupleElements this way to save doing a heap
+  // allocation in the common (at least for unpickling) case where we
+  // have only 3 elements. We have our own union instead of
+  // c10::SmallVector<IValue> because c10::SmallVector<IValue> always
+  // stores the begin/end/capacity pointers, which would be a waste of
+  // space in our use case.
+  union {
+    std::vector<IValue> elementsVector_;
+    // Don't want to declare a std::array because the convenient
+    // iteration and size members are a footgun in this case -- the
+    // actual size of the array may be smaller than 3!
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays)
+    IValue elementsInline_[3];
+  };
+
+  void destroyInline() {
+   for (const auto ii : c10::irange(inlineSize_)) {
+     elementsInline_[ii].~IValue();
+   }
+  }
+ public:
+
+  using iterator = IValue*;
+  using const_iterator = const IValue*;
+
+  TupleElements() : inlineSize_(0) {
+    new (&elementsVector_) std::vector<IValue>();
+  }
+
+  explicit TupleElements(std::vector<IValue> elements)
+  : inlineSize_(0), elementsVector_(std::move(elements)) {}
+
+  explicit TupleElements(IValue&& e1)
+  : inlineSize_(1) {
+    new (&elementsInline_[0]) IValue(std::move(e1));
+  }
+
+  explicit TupleElements(IValue&& e1, IValue&& e2)
+  : inlineSize_(2) {
+    new (&elementsInline_[0]) IValue(std::move(e1));
+    new (&elementsInline_[1]) IValue(std::move(e2));
+  }
+
+  explicit TupleElements(IValue&& e1, IValue&& e2, IValue&& e3)
+  : inlineSize_(3) {
+    new (&elementsInline_[0]) IValue(std::move(e1));
+    new (&elementsInline_[1]) IValue(std::move(e2));
+    new (&elementsInline_[2]) IValue(std::move(e3));
+  }
+
+  ~TupleElements() {
+    if (inlineSize_) {
+      destroyInline();
+    } else {
+      elementsVector_.~vector();
+    }
+  }
+
+  // Simply not implemented; no particular reason not to implement in
+  // the future except that it seems unnecessary.
+  TupleElements(const TupleElements&) = delete;
+  TupleElements& operator=(const TupleElements&) = delete;
+
+  TupleElements(TupleElements&& rhs) noexcept
+  : inlineSize_(rhs.inlineSize_) {
+    if (inlineSize_) {
+      for (const auto ii : c10::irange(inlineSize_)) {
+        new (&elementsInline_[ii]) IValue(std::move(rhs.elementsInline_[ii]));
+      }
+    } else {
+      new (&elementsVector_) std::vector<IValue>(std::move(rhs.elementsVector_));
+    }
+  }
+
+  TupleElements& operator=(TupleElements&& rhs) noexcept {
+    if (inlineSize_) {
+      if (rhs.inlineSize_) {
+        for (const auto ii : c10::irange(std::min(inlineSize_, rhs.inlineSize_))) {
+          elementsInline_[ii] = std::move(rhs.elementsInline_[ii]);
+        }
+        if (rhs.inlineSize_ > inlineSize_) {
+          for (const auto ii : c10::irange(inlineSize_, rhs.inlineSize_)) {
+            new (&elementsInline_[ii]) IValue(std::move(rhs.elementsInline_[ii]));
+          }
+        } else {
+          for (const auto ii : c10::irange(rhs.inlineSize_, inlineSize_)) {
+            elementsInline_[ii].~IValue();
+          }
+        }
+      } else {
+        destroyInline();
+        new (&elementsVector_) std::vector<IValue>(std::move(rhs.elementsVector_));
+      }
+    } else {
+      if (rhs.inlineSize_) {
+        elementsVector_.~vector();
+        for (const auto ii : c10::irange(rhs.inlineSize_)) {
+          new (&elementsInline_[ii]) IValue(std::move(rhs.elementsInline_[ii]));
+        }
+      } else {
+        elementsVector_ = std::move(rhs.elementsVector_);
+      }
+    }
+    inlineSize_ = rhs.inlineSize_;
+    return *this;
+  }
+
+  C10_NODISCARD c10::ArrayRef<IValue> asArrayRef() const {
+    if (inlineSize_) {
+      return c10::ArrayRef<IValue>(elementsInline_, inlineSize_);
+    } else {
+      return elementsVector_;
+    }
+  }
+
+  // Mimic implicit conversion from std::vector to ArrayRef.
+  operator c10::ArrayRef<IValue>() const {
+    return asArrayRef();
+  }
+
+  static size_t hash(const TupleElements& v) {
+    return c10::hash<c10::ArrayRef<IValue>>()(v.asArrayRef());
+  }
+
+  void setContents(std::vector<IValue>&& contents) {
+    if (inlineSize_) {
+      destroyInline();
+      new (&elementsVector_) std::vector<IValue>(std::move(contents));
+      inlineSize_ = 0;
+    } else {
+      elementsVector_ = std::move(contents);
+    }
+  }
+
+  C10_NODISCARD bool empty() const {
+    return inlineSize_ ? false : elementsVector_.empty();
+  }
+
+  C10_NODISCARD size_t size() const {
+    return inlineSize_ ? inlineSize_ : elementsVector_.size();
+  }
+
+  C10_NODISCARD IValue& operator[](size_t idx) {
+    if (inlineSize_) {
+      return elementsInline_[idx];
+    } else {
+      return elementsVector_[idx];
+    }
+  }
+
+  C10_NODISCARD const IValue& operator[](size_t idx) const {
+    if (inlineSize_) {
+      return elementsInline_[idx];
+    } else {
+      return elementsVector_[idx];
+    }
+  }
+
+  C10_NODISCARD IValue& at(size_t idx) {
+    if (inlineSize_) {
+      TORCH_INTERNAL_ASSERT_DEBUG_ONLY(inlineSize_ <= 3);
+      TORCH_CHECK(idx < inlineSize_, "TupleElements: invalid index Index = ", idx, "; Length = ", inlineSize_);
+      return elementsInline_[idx];
+    } else {
+      return elementsVector_.at(idx);
+    }
+  }
+
+  C10_NODISCARD const IValue& at(size_t idx) const {
+    if (inlineSize_) {
+      TORCH_INTERNAL_ASSERT_DEBUG_ONLY(inlineSize_ <= 3);
+      TORCH_CHECK(idx < inlineSize_, "TupleElements: invalid index Index = ", idx, "; Length = ", inlineSize_);
+      return elementsInline_[idx];
+    } else {
+      return elementsVector_.at(idx);
+    }
+  }
+
+  C10_NODISCARD iterator begin() {
+    if (inlineSize_) {
+      return elementsInline_;
+    } else {
+      return elementsVector_.data();
+    }
+  }
+
+  C10_NODISCARD iterator end() {
+    if (inlineSize_) {
+      return elementsInline_ + inlineSize_;
+    } else {
+      return elementsVector_.data() + elementsVector_.size();
+    }
+  }
+
+  C10_NODISCARD const_iterator begin() const {
+    if (inlineSize_) {
+      return elementsInline_;
+    } else {
+      return elementsVector_.data();
+    }
+  }
+
+  C10_NODISCARD const_iterator end() const {
+    if (inlineSize_) {
+      return elementsInline_ + inlineSize_;
+    } else {
+      return elementsVector_.data() + elementsVector_.size();
+    }
+  }
+
+  C10_NODISCARD const_iterator cbegin() const {
+    return begin();
+  }
+
+  C10_NODISCARD const_iterator cend() const {
+    return end();
+  }
+
+  C10_NODISCARD std::vector<IValue> vec() const & {
+    return asArrayRef().vec();
+  }
+
+  C10_NODISCARD IValue& back() {
+    return *(end() - 1);
+  }
+
+  C10_NODISCARD const IValue& back() const {
+    return *(end() - 1);
+  }
+
+  C10_NODISCARD std::vector<IValue> vec() && {
+    std::vector<IValue> result;
+    result.reserve(size());
+    for (auto&& iv : *this) {
+      result.push_back(std::move(iv));
+    }
+    return result;
+  }
+};
+
 struct TORCH_API Tuple : c10::intrusive_ptr_target {
  private:
-  std::vector<IValue> elements_;
+  TupleElements elements_;
   mutable std::shared_ptr<TupleType>
       type_; // lazily computed for unnamed tuples
 
@@ -263,27 +507,80 @@ struct TORCH_API Tuple : c10::intrusive_ptr_target {
       std::shared_ptr<TupleType> type_) {
     return c10::make_intrusive<Tuple>(std::move(elements_), type_);
   }
+
   static c10::intrusive_ptr<Tuple> create(std::vector<IValue> elements_) {
     return c10::make_intrusive<Tuple>(std::move(elements_));
   }
 
+  static c10::intrusive_ptr<Tuple> create(TupleElements elements_) {
+    return c10::make_intrusive<Tuple>(std::move(elements_));
+  }
+
+  static c10::intrusive_ptr<Tuple> create(std::initializer_list<IValue> elements_) {
+    return create(c10::ArrayRef<IValue>(elements_));
+  }
+
+  static c10::intrusive_ptr<Tuple> create(c10::ArrayRef<IValue> elements_) {
+    switch (elements_.size()) {
+      case 1:
+        return create(elements_[0]);
+      case 2:
+        return create(elements_[0], elements_[1]);
+      case 3:
+        return create(elements_[0], elements_[1], elements_[2]);
+      default:
+        return create(elements_.vec());
+    }
+  }
+
+  static c10::intrusive_ptr<Tuple> create(IValue e1) {
+    return c10::make_intrusive<Tuple>(std::move(e1));
+  }
+
+  static c10::intrusive_ptr<Tuple> create(IValue e1, IValue e2) {
+    return c10::make_intrusive<Tuple>(std::move(e1), std::move(e2));
+  }
+
+  static c10::intrusive_ptr<Tuple> create(IValue e1, IValue e2, IValue e3) {
+    return c10::make_intrusive<Tuple>(std::move(e1), std::move(e2), std::move(e3));
+  }
+
   template <typename... Args>
   static c10::intrusive_ptr<Tuple> create(Args&&... elements_) {
-    return c10::make_intrusive<Tuple>(
-        std::vector<IValue>{IValue(std::forward<Args>(elements_))...});
+    return create(
+        {IValue(std::forward<Args>(elements_))...});
   }
 
-  const std::vector<IValue>& elements() const& {
+  Tuple(const Tuple& rhs) = delete;
+
+  const TupleElements& elements() const& {
     return elements_;
   }
 
-  std::vector<IValue>& elements() & {
-    return elements_;
-  }
-
-  std::vector<IValue>&& elements() && {
+  TupleElements elements() && {
     return std::move(elements_);
   }
+
+  void setElements(std::vector<IValue>&& elements) {
+    elements_.setContents(std::move(elements));
+  }
+
+  void setElements(TupleElements&& elements) {
+    elements_ = std::move(elements);
+  }
+
+  void unsafeSetElement(size_t idx, const IValue& element) {
+    elements_[idx] = element;
+  }
+
+  void unsafeSetElement(size_t idx, IValue&& element) {
+    elements_[idx] = std::move(element);
+  }
+
+  size_t size() const {
+    return elements_.size();
+  }
+
   std::shared_ptr<TupleType> type() const;
 
   static size_t hash(const Tuple& t) {
@@ -295,8 +592,20 @@ struct TORCH_API Tuple : c10::intrusive_ptr_target {
       const ivalue::Tuple& rhs);
 
  private:
-  Tuple(std::vector<IValue> elements, std::shared_ptr<TupleType> type = nullptr)
-      : elements_(std::move(elements)), type_(std::move(type)) {}
+  explicit Tuple(std::vector<IValue> elements, std::shared_ptr<TupleType> type = nullptr)
+    : elements_(std::move(elements)), type_(std::move(type)) {}
+
+  explicit Tuple(TupleElements&& elements, std::shared_ptr<TupleType> type = nullptr)
+    : elements_(std::move(elements)), type_(std::move(type)) {}
+
+  explicit Tuple(IValue&& e1, std::shared_ptr<TupleType> type = nullptr)
+    : elements_(std::move(e1)), type_(std::move(type)) {}
+
+  explicit Tuple(IValue&& e1, IValue&& e2, std::shared_ptr<TupleType> type = nullptr)
+    : elements_(std::move(e1), std::move(e2)), type_(std::move(type)) {}
+
+  explicit Tuple(IValue&& e1, IValue&& e2, IValue&& e3, std::shared_ptr<TupleType> type = nullptr)
+    : elements_(std::move(e1), std::move(e2), std::move(e3)), type_(std::move(type)) {}
 
   friend class c10::intrusive_ptr<Tuple>;
 };
@@ -1257,7 +1566,7 @@ c10::optional<T> generic_to(IValue ivalue, _fake_type<c10::optional<T>>) {
 namespace detail {
 template <typename Tuple, std::size_t... INDEX>
 Tuple generic_to_tuple_impl(
-    const std::vector<IValue>& t,
+    const ivalue::TupleElements& t,
     std::index_sequence<INDEX...>) {
   return std::make_tuple(
       t[INDEX].to<typename std::tuple_element<INDEX, Tuple>::type>()...);
@@ -1273,7 +1582,7 @@ template <
             guts::negation<std::is_constructible<IValue, Args>>...>::value,
         std::nullptr_t> = nullptr>
 std::tuple<Args...> generic_to(IValue ivalue, _fake_type<std::tuple<Args...>>) {
-  auto vals = ivalue.toTupleRef().elements();
+  const auto& vals = ivalue.toTupleRef()->elements();
   TORCH_CHECK(vals.size() == sizeof...(Args));
   return detail::generic_to_tuple_impl<std::tuple<Args...>>(vals, Indices{});
 }

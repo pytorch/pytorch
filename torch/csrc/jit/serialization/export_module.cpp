@@ -37,6 +37,10 @@ namespace jit {
 
 char const* toString(OpCode op);
 
+IValue to_tuple(std::initializer_list<IValue> ivalues) {
+  return c10::ivalue::Tuple::create(ivalues);
+}
+
 IValue to_tuple(std::vector<IValue> ivalues) {
   return c10::ivalue::Tuple::create(std::move(ivalues));
 }
@@ -843,7 +847,7 @@ void export_opnames(const script::Module& m, std::set<std::string>& opnames) {
         row->elements().at(0).toStringRef());
     const auto& ops_list = row->elements().at(1).toTupleRef().elements();
     for (const auto& op : ops_list) {
-      auto op_item = op.toTupleRef().elements();
+      const auto& op_item = op.toTupleRef().elements();
       TORCH_CHECK(
           op_item.size() >= 2,
           "There should be either two parts (name and overload name), ",

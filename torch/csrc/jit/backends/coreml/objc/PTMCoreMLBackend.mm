@@ -4,6 +4,12 @@
 
 #import <CoreML/CoreML.h>
 
+#if C10_IOS
+#import <UIKit/UIKit.h>
+#elif TARGET_OS_MAC
+#import <Foundation/NSProcessInfo.h>
+#endif
+
 namespace torch {
 namespace jit {
 namespace mobile {
@@ -242,13 +248,18 @@ class API_AVAILABLE(ios(11.0), macos(10.13)) CoreMLBackend
   bool is_available() override {
 #if !defined(__APPLE__)
     return false;
-#else
-    if (@available(iOS 14, macOS 10.13, *)) {
+#elif TARGET_OS_IPHONE
+    if ([UIDevice currentDevice].systemVersion.floatValue > 14.0) {
       return true;
-    } else {
-      return false;
+    }
+#elif TARGET_OS_MAC
+    NSOperatingSystemVersion supportedVer = {10, 13, 0};
+    if ([[NSProcessInfo processInfo]
+            isOperatingSystemAtLeastVersion:supportedVer]) {
+      return true;
     }
 #endif
+    return false;
   }
 };
 

@@ -188,9 +188,8 @@ std::stringstream update_bytecode_version(
     std::stringstream& input_model,
     const int64_t to_version) {
   PyTorchStreamReader reader_bytecode(&input_model);
-  std::vector<IValue> constants_values =
-      readArchive(kArchiveNameConstants, reader_bytecode)
-          .toTupleRef()
+  auto constants_values =
+      std::move(*readArchive(kArchiveNameConstants, reader_bytecode).toTuple())
           .elements();
 
   std::vector<IValue> bytecode_values = get_bytecode_ivalues(reader_bytecode);
@@ -221,7 +220,7 @@ std::stringstream update_bytecode_version(
   SerializationStorageContext storage_context;
   write_archive_current(
       writer_bytecode,
-      c10::ivalue::Tuple::create(constants_values),
+      c10::ivalue::Tuple::create(std::move(constants_values)),
       /*archive_name=*/"constants",
       /*archive_dir=*/"",
       /*tensor_dir=*/"constants/",
@@ -311,8 +310,9 @@ std::stringstream backport_v5_to_v4(std::stringstream& input_model_stream) {
   // 1) read from archive `bytecode` archive
   PyTorchStreamReader reader(&input_model_stream);
   std::vector<IValue> bytecode_values = get_bytecode_ivalues(reader);
-  std::vector<IValue> constants_values =
-      readArchive(kArchiveNameConstants, reader).toTupleRef().elements();
+  auto constants_values =
+      std::move(*readArchive(kArchiveNameConstants, reader).toTuple())
+          .elements();
 
   // 2) Copy everything to new output, except some specific files and dirs
   // (usually version, bytecode.pkl and bytecode folder are skipped)
@@ -475,8 +475,9 @@ std::stringstream backport_v7_to_v6(std::stringstream& input_model_stream) {
   std::shared_ptr<IStreamAdapter> rai =
       std::make_shared<IStreamAdapter>(&input_model_stream);
   auto reader = std::make_shared<PyTorchStreamReader>(rai);
-  std::vector<IValue> constants_values =
-      readArchive(kArchiveNameConstants, *reader.get()).toTupleRef().elements();
+  auto constants_values =
+      std::move(*readArchive(kArchiveNameConstants, *reader.get()).toTuple())
+          .elements();
 
   // If there are debug info files in the original model file, it should also
   // show up in the backported model

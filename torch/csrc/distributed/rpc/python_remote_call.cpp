@@ -42,7 +42,7 @@ std::unique_ptr<PythonRemoteCall> PythonRemoteCall::fromMessage(
       payload_size,
       *RpcAgent::getCurrentRpcAgent()->getTypeResolver(),
       message.tensors());
-  auto values = value.toTupleRef().elements();
+  auto values = std::move(*std::move(value).toTuple()).elements().vec();
 
   // remove the last elements from values and convert it back to an RRef
   TORCH_INTERNAL_ASSERT(

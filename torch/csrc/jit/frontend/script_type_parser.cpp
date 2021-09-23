@@ -342,7 +342,7 @@ std::vector<IValue> ScriptTypeParser::evaluateDefaults(
   // recursively initialize stuff in DecomposeOps.
   GraphOptimizerEnabledGuard guard(false);
   cu.get_function(def.name().name()).run(stack);
-  return stack.at(0).toTupleRef().elements();
+  return stack.at(0).toTuple()->elements().vec();
 }
 
 std::vector<Argument> ScriptTypeParser::parseArgsFromDecl(
