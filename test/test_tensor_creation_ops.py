@@ -2787,7 +2787,7 @@ class TestTensorCreation(TestCase):
     @precisionOverride({torch.bfloat16: 5e-2, torch.half: 1e-3})
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
     @dtypesIfCUDA(torch.float, torch.double, torch.bfloat16, torch.half, torch.long)
-    @dtypesIfCPU(torch.float, torch.double, torch.long)
+    @dtypes(torch.float, torch.double, torch.long)
     def test_signal_window_functions(self, device, dtype):
         import scipy.signal as signal
 
