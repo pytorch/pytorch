@@ -1434,7 +1434,8 @@ def acc_ops_sigmoid(network, target, args, kwargs, name):
 @tensorrt_converter(acc_ops.permute)
 def acc_ops_permute(network, target, args, kwargs, name):
     input_val = kwargs["input"]
-    permutation = kwargs["permutation"]
+    ranks = len(input_val.shape) + (1 if network.has_implicit_batch_dimension else 0)
+    permutation = [i % ranks for i in kwargs["permutation"]]
 
     if not isinstance(input_val, trt.tensorrt.ITensor):
         raise RuntimeError(
