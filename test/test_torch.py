@@ -7695,13 +7695,13 @@ else:
         def checkResult(scalar_type, dtype, condition, x, scalar_1):
             def x_like(scalar):
                 complex_dtype = torch.complex64 if torch.float == torch.get_default_dtype() else torch.complex128
-                python_torch_dtype_map = {int: torch.long,
+                python_torch_dtype_map = {int: None,
                                           float: torch.get_default_dtype(),
                                           complex: complex_dtype,
                                           bool: torch.bool}
 
                 dtype = python_torch_dtype_map[scalar_type]
-                return torch.tensor(scalar, dtype=dtype, device=device).expand_as(x)
+                return torch.tensor(scalar, dtype=dtype, device=device)
 
             # X = Tensor, Y = Scalar
             scalar_out = torch.where(condition, x, scalar_1)
