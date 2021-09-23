@@ -73,6 +73,9 @@ void OptimizeGraph(
   FuseInferenceOpsForSparseNN(graph);
   UseVariadicCat(graph);
   UseVariadicStack(graph);
+  if (opts.enable_out_variant) {
+    FuseSignLog1P(graph);
+  }
 
   // TODO: we can avoid this guard by moving operations
   // to exposed folders.
