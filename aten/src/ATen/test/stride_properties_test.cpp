@@ -22,11 +22,13 @@ inline bool CheckStrideIndices(const Tensor& t, at::MemoryFormat format) {
     TORCH_INTERNAL_ASSERT(false, "not recognized memory format");
   }
 
-  IValue ival(t);
-  TORCH_INTERNAL_ASSERT(ival.type()->cast<TensorType>()->stride_properties().isComplete(), "complete stride properties is needed for the test");
-
+  // testing computeStrideProps with `IValue ival(t)` somehow doesn't work on CI
+  // with onnx; The function works fine within, but stride properties is somehow
+  // altered in ival->type()->cast<TensorType>();
+  auto tt = TensorType::create(c10::nullopt, c10::nullopt, t.sizes(), t.strides(), c10::nullopt);
+  TORCH_INTERNAL_ASSERT(tt->stride_properties().isComplete(), "complete stride properties is needed for the test");
   auto index_iter = stride_indices.begin();
-  for (const auto& opt_stride : *ival.type()->cast<TensorType>()->stride_properties().sizes()) {
+  for (const auto& opt_stride : *tt->stride_properties().sizes()) {
     if (*index_iter++ != opt_stride->stride_index_.value()) {
       return false;
     }
