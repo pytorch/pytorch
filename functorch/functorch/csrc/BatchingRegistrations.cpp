@@ -94,17 +94,6 @@ static bool participatesInCurrentLevel(TensorList self) {
   return false;
 }
 
-Tensor _log_softmax_batching_rule(const Tensor& self, int64_t dim, bool half_to_float) {
-  if (!participatesInCurrentLevel(self)) {
-    c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
-    return at::_log_softmax(self, dim, half_to_float);
-  }
-  auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
-  auto dim_physical = self_physical.getPhysicalDim(dim);
-  auto result = at::_log_softmax(self_physical.tensor(), dim_physical, half_to_float);
-  return self_physical.getPhysicalToLogicalMap().apply(result);
-}
-
 std::tuple<Tensor,Tensor> max_pool2d_with_indices_batching_rule(
     const Tensor & self, IntArrayRef kernel_size, IntArrayRef stride,
     IntArrayRef padding, IntArrayRef dilation, bool ceil_mode) {
@@ -1021,7 +1010,6 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   m.impl("max_pool2d", at::native::max_pool2d); // composite
   m.impl("max_pool2d_with_indices", max_pool2d_with_indices_batching_rule);
 
-  m.impl("_log_softmax", _log_softmax_batching_rule);
   m.impl("is_complex", native::is_complex);
 //
 //   // inplace operations
