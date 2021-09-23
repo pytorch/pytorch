@@ -2,28 +2,28 @@
 
 - func: div.Tensor
   version: 4
-  upgrader: div_0_3
+  upgrader: div_Tensor_0_3
 
 - func: div.Scalar
   version: 4
-  upgrader: div_0_3
+  upgrader: div_Scalar_0_3
 
 - func: div.out
   version: 4
-  upgrader: div_0_3
+  upgrader: div_out_0_3
 
 - func: div_.Tensor
   version: 4
-  upgrader: div__0_3
+  upgrader: div__Tensor_0_3
 
 - func: div_.Scalar
   version: 4
-  upgrader: div__0_3
+  upgrader: div__Scalar_0_3
 
 - func: full.names
   version: 5
-  upgrader: full_0_4
+  upgrader: full_names_0_4
 
 - func: full.out
   version: 5
-  upgrader: full_0_4
+  upgrader: full_out_0_4
