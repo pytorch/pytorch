@@ -34,6 +34,7 @@
     - [Workaround for header dependency bug in nvcc](#workaround-for-header-dependency-bug-in-nvcc)
   - [C++ frontend development tips](#c-frontend-development-tips)
   - [GDB integration](#gdb-integration)
+  - [C++ stacktraces](#c-stacktraces)
 - [CUDA development tips](#cuda-development-tips)
 - [Windows development tips](#windows-development-tips)
   - [Known MSVC (and MSVC with NVCC) bugs](#known-msvc-and-msvc-with-nvcc-bugs)
@@ -905,6 +906,9 @@ which is in your home directory, **not** `/path/to/pytorch/.gdbinit`):
 ```bash
 add-auto-load-safe-path /path/to/pytorch/.gdbinit
 ```
+
+### C++ stacktraces
+Set `TORCH_SHOW_CPP_STACKTRACES=1` to get the C++ stacktrace when an error occurs in Python.
 
 ## CUDA development tips
 
