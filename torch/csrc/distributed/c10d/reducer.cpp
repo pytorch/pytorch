@@ -90,7 +90,7 @@ Reducer::Reducer(
       has_marked_unused_parameters_(false),
       find_unused_parameters_(find_unused_parameters),
       gradient_as_bucket_view_(gradient_as_bucket_view),
-      local_used_maps_reduced_(false),
+      local_used_map_reduced_(false),
       num_iterations_(0),
       num_buckets_ready_(0),
       has_rebuilt_bucket_(false),
@@ -214,18 +214,18 @@ Reducer::Reducer(
     backward_stats_.resize(variable_count);
   }
 
-  // See Note [Skip allreducing local_used_maps_dev]
+  // See Note [Skip allreducing local_used_map_dev]
   if (find_unused_parameters_) {
     initialize_local_used_map();
   }
 }
 
-// Note [Skip allreducing local_used_maps_dev]
+// Note [Skip allreducing local_used_map_dev]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~
 // If find_unused_parameters_ is set to false, there is no need to allreduce
-// local_used_maps_dev_, because all parameters will be reduced anyway.
-// Therefore, we can avoid allocating memory for local_used_maps and
-// local_used_maps_dev_ if find_unused_parameters_ is false.
+// local_used_map_dev_, because all parameters will be reduced anyway.
+// Therefore, we can avoid allocating memory for local_used_map and
+// local_used_map_dev_ if find_unused_parameters_ is false.
 
 // Note [DDP Communication Hook]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -278,22 +278,19 @@ bool Reducer::ddp_graph_static() {
 
 void Reducer::initialize_local_used_map() {
   const auto variable_count = params_.size();
-  local_used_maps_.resize(1);
-  local_used_maps_dev_.resize(1);
-
   at::TensorOptions options;
   options = options.dtype(at::kInt);
 
-  // Deliberately don't pin the memory even if local_used_maps_dev_ will
-  // be cuda. See Note [local_used_maps_ -> local_used_maps_dev copying]
-  local_used_maps_[0] =
+  // Deliberately don't pin the memory even if local_used_map_dev_ will
+  // be cuda. See Note [local_used_map_ -> local_used_map_dev copying]
+  local_used_map_ =
       at::zeros({static_cast<long>(variable_count)}, options);
 
   // This tensor needs to be on the same device as the replica params because
   // backend such as NCCL may not support CPU tensors, and hence it might not
   // work if we always put it on CPU.
   options = options.device(params_[0].device());
-  local_used_maps_dev_[0] =
+  local_used_map_dev_ =
       at::empty({static_cast<long>(variable_count)}, options);
 }
 
@@ -401,7 +398,7 @@ void Reducer::mark_variable_ready_dense(size_t variable_index) {
       if (this->dynamic_graph_find_unused() ||
           this->static_graph_first_iteration()) {
         REDUCER_CHECK(
-            local_used_maps_[0][variable_index].item<int>() == 0,
+            local_used_map_[variable_index].item<int>() == 0,
             logger_,
             "Encountered gradient which is undefined, but still allreduced by DDP reducer. This indicates a bug in DDP implementation, please report a bug with a repro to PyTorch.");
       }
@@ -473,9 +470,9 @@ void Reducer::set_forward_pass_work_handle(
   forwardPassWorkHandle_.useStaticWorldSize = useStaticWorldSize;
 }
 
-std::vector<at::Tensor> Reducer::get_local_used_maps_on_device() const {
+at::Tensor Reducer::get_local_used_map_on_device() const {
   std::lock_guard<std::mutex> lock(mutex_);
-  return local_used_maps_dev_;
+  return local_used_map_dev_;
 }
 
 void Reducer::push_rebuilt_params_for_all_indices() {
@@ -571,10 +568,10 @@ void Reducer::autograd_hook(size_t index) {
 
   grad_ready_order_indices_.push_back(index);
 
-  // See Note [Skip allreducing local_used_maps_dev]
+  // See Note [Skip allreducing local_used_map_dev]
   if (dynamic_graph_find_unused() || static_graph_first_iteration()) {
     // Since it gets here, this param has been used for this iteration. We want
-    // to mark it in local_used_maps_. During no_sync session, the same var can
+    // to mark it in local_used_map_. During no_sync session, the same var can
     // be set multiple times, which is OK as does not affect correctness. As
     // long as it is used once during no_sync session, it is marked as used.
     // Only set it as locally used if the grad is defined. Otherwise, hooks can
@@ -584,7 +581,7 @@ void Reducer::autograd_hook(size_t index) {
     auto& variable = get_param_from_index(index);
     runGradCallbackForVariable(variable, [&](auto& grad) {
       if (grad.defined()) {
-        local_used_maps_[0][index] = 1;
+        local_used_map_[index] = 1;
       }
       // The gradient is never modified.
       return false;
@@ -643,53 +640,52 @@ void Reducer::autograd_hook(size_t index) {
 }
 
 void Reducer::all_reduce_local_used_map() {
-  // See Note [Skip allreducing local_used_maps_dev]
-  // H2D from local_used_maps_ to local_used_maps_dev_
-  for (const auto i : c10::irange(local_used_maps_.size())) {
-    if (local_used_maps_dev_[i].is_cuda()) {
-      // Note [local_used_maps_ -> local_used_maps_dev copying]
-      // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-      // We do async H2D to avoid the blocking overhead. The async copy and
-      // allreduce respect the current stream, so will be sequenced
-      // correctly.
-      //
-      // Correct sequencing with respect to host operations is also
-      // essential. The H2D copy_ is stream ordered, while the host's
-      // changes to local_used_maps_ are host ordered. If a large backlog of
-      // cuda-stream work pushes the copy_ far into the future, and if no
-      // blocking calls occur between now and finalize_backward()** such
-      // that finalize_backward() re-zeroes local_used_maps_ on the host
-      // before the stream executes the copy_, copy_ will read those zeros
-      // instead of the values we thought we told it to read here. Copying
-      // local_used_maps_[i] to a pinned temporary (which the pinned caching
-      // allocator should supply asynchronously) avoids this nasty, rare
-      // race condition.
-      //
-      // ** In the hoped-for case where all params are used, DDP itself
-      // won't do any blocking work between now and the re-zeroing, so the
-      // danger is real.
-      //
-      // Defensively ensures local_used_maps_tmp is distinct from
-      // local_used_maps_[i]
-      auto local_used_maps_tmp = at::native::empty_like(
-          local_used_maps_[i],
-          optTypeMetaToScalarType(local_used_maps_[i].options().dtype_opt()),
-          local_used_maps_[i].options().layout_opt(),
-          local_used_maps_[i].options().device_opt(),
-          true /* pinned_memory */);
-      // Paranoid asserts here because in some workloads, the pinned
-      // allocator behaves in a way we don't understand, and may be bugged.
-      // See https://github.com/pytorch/pytorch/pull/54474
-      TORCH_INTERNAL_ASSERT(local_used_maps_tmp.is_pinned());
-      TORCH_INTERNAL_ASSERT(
-          local_used_maps_tmp.data_ptr() != local_used_maps_[i].data_ptr());
-      local_used_maps_tmp.copy_(local_used_maps_[i]);
-      local_used_maps_dev_[i].copy_(local_used_maps_tmp, true);
-    } else {
-      local_used_maps_dev_[i].copy_(local_used_maps_[i], true);
-    }
+  // See Note [Skip allreducing local_used_map_dev]
+  // H2D from local_used_map_ to local_used_map_dev_
+  if (local_used_map_dev_.is_cuda()) {
+    // Note [local_used_map_ -> local_used_map_dev copying]
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    // We do async H2D to avoid the blocking overhead. The async copy and
+    // allreduce respect the current stream, so will be sequenced
+    // correctly.
+    //
+    // Correct sequencing with respect to host operations is also
+    // essential. The H2D copy_ is stream ordered, while the host's
+    // changes to local_used_map_ are host ordered. If a large backlog of
+    // cuda-stream work pushes the copy_ far into the future, and if no
+    // blocking calls occur between now and finalize_backward()** such
+    // that finalize_backward() re-zeroes local_used_map_ on the host
+    // before the stream executes the copy_, copy_ will read those zeros
+    // instead of the values we thought we told it to read here. Copying
+    // local_used_map_ to a pinned temporary (which the pinned caching
+    // allocator should supply asynchronously) avoids this nasty, rare
+    // race condition.
+    //
+    // ** In the hoped-for case where all params are used, DDP itself
+    // won't do any blocking work between now and the re-zeroing, so the
+    // danger is real.
+    //
+    // Defensively ensures local_used_map_tmp is distinct from
+    // local_used_map_
+    auto local_used_map_tmp = at::native::empty_like(
+        local_used_map_,
+        optTypeMetaToScalarType(local_used_map_.options().dtype_opt()),
+        local_used_map_.options().layout_opt(),
+        local_used_map_.options().device_opt(),
+        true /* pinned_memory */);
+    // Paranoid asserts here because in some workloads, the pinned
+    // allocator behaves in a way we don't understand, and may be bugged.
+    // See https://github.com/pytorch/pytorch/pull/54474
+    TORCH_INTERNAL_ASSERT(local_used_map_tmp.is_pinned());
+    TORCH_INTERNAL_ASSERT(
+        local_used_map_tmp.data_ptr() != local_used_map_.data_ptr());
+    local_used_map_tmp.copy_(local_used_map_);
+    local_used_map_dev_.copy_(local_used_map_tmp, true);
+  } else {
+    local_used_map_dev_.copy_(local_used_map_, true);
   }
-  local_used_work_ = process_group_->allreduce(local_used_maps_dev_);
+  std::vector<at::Tensor> temp_local_used_map_dev_vec_ = {local_used_map_dev_};
+  local_used_work_ = process_group_->allreduce(temp_local_used_map_dev_vec_);
 }
 
 at::Tensor& Reducer::get_param_from_index(size_t index) {
@@ -816,7 +812,7 @@ void Reducer::mark_variable_ready(size_t variable_index) {
     }
   }
 
-  // Run finalizer function and kick off reduction for local_used_maps once the
+  // Run finalizer function and kick off reduction for local_used_map once the
   // final bucket was marked ready.
   if (next_bucket_ == buckets_.size()) {
     if (dynamic_graph_find_unused()) {
@@ -1381,7 +1377,7 @@ void Reducer::finalize_bucket_dense(Bucket& bucket) {
     const auto length = replica.lengths[intra_bucket_index];
 
     bool global_unused = false;
-    // See Note [Skip allreducing local_used_maps_dev]
+    // See Note [Skip allreducing local_used_map_dev]
     if (static_graph_ || find_unused_parameters_) {
       // Determine if this param has been used globally or not.
       //
@@ -1402,20 +1398,19 @@ void Reducer::finalize_bucket_dense(Bucket& bucket) {
       // the reduction to complete, it becomes really global only if we get to
       // the point as below where we wait for the reduction work, make D2H
       // copy, and update global_unused with the real global consensus, i.e.
-      // local_used_maps_reduced_ is true.
+      // local_used_map_reduced_ is true.
       global_unused =
-          local_used_maps_[replica_index][variable_index].item<int>() == 0;
-      if (global_unused && !local_used_maps_reduced_) {
-        // Wait for local_used_maps reduction to complete.
+          local_used_map_[variable_index].item<int>() == 0;
+      if (global_unused && !local_used_map_reduced_) {
+        // Wait for local_used_map reduction to complete.
         local_used_work_->wait();
-        // D2H from local_used_maps_dev_ to local_used_maps_
-        for (const auto i : c10::irange(local_used_maps_.size())) {
-          // Blocking copy, if local_used_maps_dev_ is cuda
-          local_used_maps_[i].copy_(local_used_maps_dev_[i]);
-        }
+        // D2H from local_used_map_dev_ to local_used_map_
+        // Blocking copy, if local_used_map_dev_ is cuda
+        local_used_map_.copy_(local_used_map_dev_);
+
         global_unused =
-            local_used_maps_[replica_index][variable_index].item<int>() == 0;
-        local_used_maps_reduced_ = true;
+            local_used_map_[variable_index].item<int>() == 0;
+        local_used_map_reduced_ = true;
       }
     }
 
@@ -1502,7 +1497,7 @@ void Reducer::finalize_backward() {
     }
   }
 
-  // See Note [Skip allreducing local_used_maps_dev]
+  // See Note [Skip allreducing local_used_map_dev]
   if (dynamic_graph_find_unused() || static_graph_first_iteration()) {
     // Due to the lazy wait, it is possible that reduction of the current
     // iteration is still going when the one for next iteration gets kicked off.
@@ -1510,18 +1505,16 @@ void Reducer::finalize_backward() {
     // complete before kicking off next one. Otherwise the previous one may
     // interfere, write to the device-side memory and clobber the content of
     // local_unused_maps_dev_.
-    if (!local_used_maps_reduced_) {
+    if (!local_used_map_reduced_) {
       local_used_work_->wait();
     }
   }
 
   if (dynamic_graph_find_unused()) {
     // Reset unused parameter accounting.
-    // See Note [local_used_maps_ -> local_used_maps_dev copying]
-    for (auto& local_used : local_used_maps_) {
-      local_used.fill_(0);
-    }
-    local_used_maps_reduced_ = false;
+    // See Note [local_used_map_ -> local_used_map_dev copying]
+    local_used_map_.fill_(0);
+    local_used_map_reduced_ = false;
   }
 
   if (should_collect_runtime_stats()) {
