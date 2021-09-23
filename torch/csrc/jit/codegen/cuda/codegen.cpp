@@ -105,7 +105,8 @@ class CudaKernelGenerator : private kir::IrVisitor {
 
     // Random number generator (optional)
     if (kernel_summary.is_stochastic) {
-      indent() << "const int idx = blockIdx.x*blockDim.x + threadIdx.x;\n";
+      indent()
+          << "const auto idx = ((((blockIdx.z * gridDim.y + blockIdx.y) * gridDim.x + blockIdx.x) * blockDim.z + threadIdx.z) * blockDim.y + threadIdx.y) * blockDim.x + threadIdx.x;";
       indent() << "auto offset = philox_args.captured_ ?\n";
       indent()
           << "  static_cast<uint64_t>(*(philox_args.offset_.ptr) + philox_args.offset_intragraph_) :\n";
