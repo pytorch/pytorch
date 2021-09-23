@@ -129,7 +129,7 @@ const std::unordered_map<Symbol, Symbol>& getOperatorAliasMap() {
       {aten::special_xlogy, aten::xlogy},
       {aten::special_log_softmax, aten::log_softmax},
       {aten::orgqr, aten::linalg_householder_product},
-      {aten::mH, aten::adjoint},
+      {aten::adjoint, aten::mH},
       {aten::special_multigammaln, aten::mvlgamma},
       {aten::special_polygamma, aten::polygamma},
       {aten::special_gammainc, aten::igamma},
