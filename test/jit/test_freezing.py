@@ -1676,7 +1676,7 @@ class TestFrozenOptimizations(JitTestCase):
                     res3 = torch._C._nn.linear(in_tensor2, self.w2, self.b2)
                     res4 = torch._C._nn.linear(in_tensor1, self.w2, self.b1)
                 else:
-                    assert False
+                    raise AssertionError()
                 res2 = torch._C._nn.linear(in_tensor1, self.w2, self.b1)
                 return res1, res2, res3, res4
 
