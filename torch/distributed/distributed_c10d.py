@@ -1518,7 +1518,7 @@ def all_gather_multigpu(
 def _object_to_tensor(obj):
     f = io.BytesIO()
     _pickler(f).dump(obj)
-    byte_storage = torch.ByteStorage.from_buffer(f.getvalue())  # type: ignore[attr-defined]
+    byte_storage = torch.ByteStorage.from_buffer(f.getvalue(), dtype=torch.uint8)  # type: ignore[attr-defined]
     byte_tensor = torch.tensor(byte_storage, dtype=torch.uint8)
     local_size = torch.tensor([byte_tensor.numel()], dtype=torch.long)
     return byte_tensor, local_size

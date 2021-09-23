@@ -2814,22 +2814,20 @@ def get_tensors_from(args, kwargs):
 
 # Returns scalar tensor representation of a list of integer byte values
 def bytes_to_scalar(byte_list: List[int], dtype: torch.dtype, device: torch.device):
-    # TODO: Is it possible for ctypes to have different byte
-    # lengths on different systems?
-    dtype_to_ctype: Dict[torch.dtype, Tuple[Any, int]] = {
-        # dtype: (ctype, bytes per element)
-        torch.int8: (ctypes.c_int8, 1),
-        torch.uint8: (ctypes.c_uint8, 1),
-        torch.int16: (ctypes.c_int16, 2),
-        torch.int32: (ctypes.c_int32, 4),
-        torch.int64: (ctypes.c_int64, 8),
-        torch.bool: (ctypes.c_bool, 1),
-        torch.float32: (ctypes.c_float, 4),
-        torch.complex64: (ctypes.c_float, 4),
-        torch.float64: (ctypes.c_double, 8),
-        torch.complex128: (ctypes.c_double, 8),
+    dtype_to_ctype: Dict[torch.dtype, Any] = {
+        torch.int8: ctypes.c_int8,
+        torch.uint8: ctypes.c_uint8,
+        torch.int16: ctypes.c_int16,
+        torch.int32: ctypes.c_int32,
+        torch.int64: ctypes.c_int64,
+        torch.bool: ctypes.c_bool,
+        torch.float32: ctypes.c_float,
+        torch.complex64: ctypes.c_float,
+        torch.float64: ctypes.c_double,
+        torch.complex128: ctypes.c_double,
     }
-    ctype, num_bytes = dtype_to_ctype[dtype]
+    ctype = dtype_to_ctype[dtype]
+    num_bytes = ctypes.sizeof(ctype)
 
     def check_bytes(byte_list):
         for byte in byte_list:
