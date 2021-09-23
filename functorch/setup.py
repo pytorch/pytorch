@@ -77,7 +77,6 @@ def get_extensions():
         "-fdiagnostics-color=always",
         # PyTorch SmallVector has this
         '-Wno-array-bounds',
-        '-Werror',
     ]}
     debug_mode = os.getenv('DEBUG', '0') == '1'
     if debug_mode:
@@ -91,7 +90,6 @@ def get_extensions():
                 "-fdiagnostics-color=always",
                 # PyTorch SmallVector has this
                 '-Wno-array-bounds',
-                '-Werror',
             ]}
         extra_link_args = ["-O0", "-g"]
 
