@@ -1181,6 +1181,7 @@ def _fast_gradcheck(func, func_out, inputs, outputs, eps, rtol,
 def gradcheck(
     func: Callable[..., Union[_TensorOrTensors]],  # See Note [VarArg of Tensors]
     inputs: _TensorOrTensors,
+    *,
     eps: float = 1e-6,
     atol: float = 1e-5,
     rtol: float = 1e-3,
@@ -1290,6 +1291,7 @@ def gradgradcheck(
     func: Callable[..., _TensorOrTensors],  # See Note [VarArg of Tensors]
     inputs: _TensorOrTensors,
     grad_outputs: Optional[_TensorOrTensors] = None,
+    *,
     eps: float = 1e-6,
     atol: float = 1e-5,
     rtol: float = 1e-3,
@@ -1384,6 +1386,6 @@ def gradgradcheck(
         return grad_inputs
 
     return gradcheck(
-        new_func, tupled_inputs + tupled_grad_outputs, eps, atol, rtol, raise_exception,
+        new_func, tupled_inputs + tupled_grad_outputs, eps=eps, atol=atol, rtol=rtol, raise_exception=raise_exception,
         nondet_tol=nondet_tol, check_undefined_grad=check_undefined_grad,
         check_grad_dtypes=check_grad_dtypes, check_batched_grad=check_batched_grad, fast_mode=fast_mode)
