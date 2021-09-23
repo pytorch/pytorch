@@ -173,10 +173,9 @@ def _zero_batch_dim_input(module_input):
             return objs
 
     return ModuleInput(
-            constructor_input=_zero_first_dim(module_input.constructor_input),
-            forward_input=_zero_first_dim(module_input.forward_input),
-            desc=module_input.desc + 'zero_batch_dim'
-        )
+        constructor_input=_zero_first_dim(module_input.constructor_input),
+        forward_input=_zero_first_dim(module_input.forward_input),
+        desc=module_input.desc + 'zero_batch_dim')
 
 def _module_inputs_with_zero_batch_dim(f):
     # Creates ModuleInput by reducing the size of the 0th dimension to 0
