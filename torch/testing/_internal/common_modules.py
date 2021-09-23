@@ -1,7 +1,8 @@
 import torch
 from copy import deepcopy
+from collections import namedtuple
 from functools import wraps, partial
-from itertools import chain
+from itertools import chain, product
 from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import floating_types
 from torch.testing._internal.common_device_type import (
@@ -48,21 +49,25 @@ for namespace in MODULE_NAMESPACES:
 class modules(_TestParametrizer):
     """ PROTOTYPE: Decorator for specifying a list of modules over which to run a test. """
 
-    def __init__(self, module_info_list):
+    def __init__(self, module_info_list, inputs_requires_grad=False):
         super().__init__(handles_dtypes=True)
         self.module_info_list = module_info_list
+        self.inputs_requires_grad = inputs_requires_grad
 
     def _parametrize_test(self, test, generic_cls, device_cls):
-        for module_info in self.module_info_list:
-            # TODO: Factor some of this out since it's similar to OpInfo.
-            for dtype in floating_types():
+        for module_info, dtype in product(self.module_info_list, floating_types()):
+            module_inputs = module_info.module_inputs_func(
+                module_info, device_cls.device_type, dtype, requires_grad=self.inputs_requires_grad)
+
+            for module_input in module_inputs:
                 # Construct the test name.
-                test_name = '{}_{}{}'.format(module_info.name.replace('.', '_'),
-                                             device_cls.device_type,
-                                             _dtype_test_suffix(dtype))
+                test_name = '{}_{}_{}{}'.format(module_info.name.replace('.', '_'),
+                                                module_input.desc,
+                                                device_cls.device_type,
+                                                _dtype_test_suffix(dtype))
 
                 # Construct parameter kwargs to pass to the test.
-                param_kwargs = {'module_info': module_info}
+                param_kwargs = {'module_info': module_info, 'module_input': module_input}
                 _update_param_kwargs(param_kwargs, 'dtype', dtype)
 
                 try:
@@ -99,6 +104,25 @@ def formatted_module_name(module_cls):
     return MODULE_CLASS_NAMES[module_cls].replace('.', '_')
 
 
+DelayedFunc = namedtuple("DelayedFunc", ["function", "args", "kwargs"])
+
+def delayed(function):
+    def delayed_function(*args, **kwargs):
+        return DelayedFunc(function=function, args=args, kwargs=kwargs)
+    return delayed_function
+
+
+def compute(objs):
+    if isinstance(objs, DelayedFunc):
+        return objs.function(*objs.args, **objs.kwargs)
+    elif isinstance(objs, (list, tuple)):
+        return type(objs)(compute(obj) for obj in objs)
+    elif isinstance(objs, dict):
+        return {key: compute(obj) for key, obj in objs.items()}
+    else:
+        return objs
+
+
 class FunctionInput(object):
     """ Contains args and kwargs to pass as input to a function. """
     __slots__ = ['args', 'kwargs']
@@ -106,6 +130,9 @@ class FunctionInput(object):
     def __init__(self, *args, **kwargs):
         self.args = args
         self.kwargs = kwargs
+
+    def compute(self):
+        return compute((self.args, self.kwargs))
 
 
 class ModuleInput(object):
@@ -159,47 +186,59 @@ class ModuleInfo(object):
 
 
 def module_inputs_torch_nn_Linear(module_info, device, dtype, requires_grad, **kwargs):
-    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    make_input = delayed(partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad))
 
     module_inputs = [
-        ModuleInput(constructor_input=FunctionInput(10, 8),
-                    forward_input=FunctionInput(make_input((4, 10))),
-                    reference_fn=lambda m, p, i: torch.mm(i, p[0].t()) + p[1].view(1, -1).expand(4, 8)),
-        ModuleInput(constructor_input=FunctionInput(10, 8, bias=False),
-                    forward_input=FunctionInput(make_input((4, 10))),
-                    desc='no_bias',
-                    reference_fn=lambda m, p, i: torch.mm(i, p[0].t())),
-        ModuleInput(constructor_input=FunctionInput(3, 5),
-                    forward_input=FunctionInput(make_input(3)),
-                    desc='no_batch_dim',
-                    reference_fn=lambda m, p, i: torch.mm(i.view(1, -1), p[0].t()).view(-1) + p[1])
+        ModuleInput(
+            constructor_input=FunctionInput(10, 8),
+            forward_input=FunctionInput(make_input((4, 10))),
+            reference_fn=lambda m, p, i, **kwargs: torch.mm(i, p[0].t()) + p[1].view(1, -1).expand(4, 8),
+            desc="default"),
+        ModuleInput(
+            constructor_input=FunctionInput(10, 8, bias=False),
+            forward_input=FunctionInput(make_input((4, 10))),
+            reference_fn=lambda m, p, i, **kwargs: torch.mm(i, p[0].t()),
+            desc="no_bias"),
+        ModuleInput(
+            constructor_input=FunctionInput(3, 5),
+            forward_input=FunctionInput(make_input(3)),
+            reference_fn=lambda m, p, i, **kwargs: torch.mm(i.view(1, -1), p[0].t()).view(-1) + p[1],
+            desc="no_batch_dim")
     ]
 
     return module_inputs
 
 
 def module_inputs_torch_nn_NLLLoss(module_info, device, dtype, requires_grad, **kwargs):
-    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    make_weight = delayed(partial(make_tensor, device=device, dtype=dtype, requires_grad=False))
 
     cases: List[Tuple[str, dict]] = [
         ('', {}),
         ('ignore_index', {'ignore_index': 2}),
-        ('weights', {'weight': make_input(10)}),
-        ('weights_ignore_index', {'weight': make_input(10), 'ignore_index': 2}),
-        ('weights_ignore_index_neg', {'weight': make_input(10), 'ignore_index': -1})
+        ('weights', {'weight': make_weight(10)}),
+        ('weights_ignore_index', {'weight': make_weight(10), 'ignore_index': 2}),
+        ('weights_ignore_index_neg', {'weight': make_weight(10), 'ignore_index': -1})
     ]
     module_inputs = []
     for desc, constructor_kwargs in cases:
+        def reference_fn(m, p, i, t, **construct_kwargs):
+            return nllloss_reference(i, t, **construct_kwargs)
 
-        def reference_fn(m, p, i, t, constructor_kwargs=constructor_kwargs):
-            return nllloss_reference(i, t, **constructor_kwargs)
+        @delayed
+        def construct_input():
+            return make_tensor((15, 10),
+                               device=device, dtype=dtype, requires_grad=requires_grad).log_softmax(dim=1)
+
+        @delayed
+        def construct_target():
+            return torch.empty(15, device=device).uniform_().mul(10).floor().long()
 
         module_inputs.append(
-            ModuleInput(constructor_input=FunctionInput(**constructor_kwargs),
-                        forward_input=FunctionInput(make_input((15, 10)).log_softmax(dim=1),
-                                                    torch.empty(15, device=device).uniform_().mul(10).floor().long()),
-                        desc=desc,
-                        reference_fn=reference_fn)
+            ModuleInput(
+                constructor_input=FunctionInput(**constructor_kwargs),
+                forward_input=FunctionInput(construct_input(), construct_target()),
+                reference_fn=reference_fn,
+                desc=desc)
         )
 
     return module_inputs
@@ -237,7 +276,7 @@ def generate_regression_criterion_inputs(make_input):
 
 
 def module_inputs_torch_nn_AvgPool1d(module_info, device, dtype, requires_grad, **kwargs):
-    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    make_input = delayed(partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad))
 
     return [
         ModuleInput(constructor_input=FunctionInput(kernel_size=2),
@@ -247,12 +286,12 @@ def module_inputs_torch_nn_AvgPool1d(module_info, device, dtype, requires_grad, 
 
 
 def module_inputs_torch_nn_ELU(module_info, device, dtype, requires_grad, **kwargs):
-    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    make_input = delayed(partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad))
 
     return [
         ModuleInput(constructor_input=FunctionInput(alpha=2.),
                     forward_input=FunctionInput(make_input(shape=(3, 2, 5))),
-                    reference_fn=lambda m, p, i: torch.where(i >= 0, i, 2 * (i.exp() - 1))),
+                    reference_fn=lambda m, p, i, **kwargs: torch.where(i >= 0, i, 2 * (i.exp() - 1))),
         ModuleInput(constructor_input=FunctionInput(alpha=2.),
                     forward_input=FunctionInput(make_input(shape=())),
                     desc='scalar'),
@@ -263,15 +302,15 @@ def module_inputs_torch_nn_ELU(module_info, device, dtype, requires_grad, **kwar
 
 
 def module_inputs_torch_nn_CELU(module_info, device, dtype, requires_grad, **kwargs):
-    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    make_input = delayed(partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad))
 
     return [
         ModuleInput(constructor_input=FunctionInput(alpha=2.),
                     forward_input=FunctionInput(make_input(shape=(3, 2, 5))),
-                    reference_fn=lambda m, p, i: torch.where(i >= 0, i, 2. * ((.5 * i).exp() - 1))),
+                    reference_fn=lambda m, p, i, **kwargs: torch.where(i >= 0, i, 2. * ((.5 * i).exp() - 1))),
         ModuleInput(constructor_input=FunctionInput(alpha=2.),
                     forward_input=FunctionInput(make_input(shape=())),
-                    reference_fn=lambda m, p, i: torch.where(i >= 0, i, 2 * (i.exp() - 1)),
+                    reference_fn=lambda m, p, i, **kwargs: torch.where(i >= 0, i, 2 * (i.exp() - 1)),
                     desc='scalar'),
         ModuleInput(constructor_input=FunctionInput(alpha=2.),
                     forward_input=FunctionInput(make_input(shape=(3,))),
@@ -279,7 +318,7 @@ def module_inputs_torch_nn_CELU(module_info, device, dtype, requires_grad, **kwa
                     reference_fn=no_batch_dim_reference_fn)]
 
 def module_inputs_torch_nn_ReLU(module_info, device, dtype, requires_grad):
-    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    make_input = delayed(partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad))
 
     module_inputs = [
         ModuleInput(constructor_input=FunctionInput(),
@@ -292,17 +331,17 @@ def module_inputs_torch_nn_ReLU(module_info, device, dtype, requires_grad):
 
 
 def module_inputs_torch_nn_L1Loss(module_info, device, dtype, requires_grad, **kwargs):
-    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    make_input = delayed(partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad))
 
     return [
         ModuleInput(constructor_input=FunctionInput(),
                     forward_input=FunctionInput(make_input(shape=(2, 3, 4)),
                                                 make_input(shape=(2, 3, 4))),
-                    reference_fn=lambda m, p, i, t: 1. / i.numel() * sum((a - b).abs().sum()
+                    reference_fn=lambda m, p, i, t, **kwargs: 1. / i.numel() * sum((a - b).abs().sum()
                                                                          for a, b in zip(i, t))),
         ModuleInput(constructor_input=FunctionInput(),
                     forward_input=FunctionInput(make_input(shape=()), make_input(shape=())),
-                    reference_fn=lambda m, p, i, t: 1. / i.numel() * (i - t).abs().sum(),
+                    reference_fn=lambda m, p, i, t, **kwargs: 1. / i.numel() * (i - t).abs().sum(),
                     desc='scalar')] + generate_regression_criterion_inputs(make_input)
 
 
