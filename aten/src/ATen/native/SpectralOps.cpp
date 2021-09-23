@@ -539,7 +539,6 @@ static Tensor fft_ihfftn_impl(
     const c10::optional<IntArrayRef>& dim,
     const c10::optional<c10::string_view>& norm_str,
     const Tensor& out) {
-  int64_t last_dim_size = 0;
   constexpr c10::string_view fname = "ihfftn";
   auto desc = canonicalize_fft_shape_and_dim_args(self, s, dim);
   TORCH_CHECK(desc.shape.size() > 0, "ihfftn must transform at least one axis");
