@@ -14264,12 +14264,11 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(out.stride(), [c, 1, 1, 1, 1])
 
 
+    # Runtime Error not raised for meta
+    @expectedFailureMeta
     @onlyNativeDeviceTypes
     @dtypes(torch.uint8, torch.int8, torch.short, torch.int, torch.long)
     def test_adaptive_pooling_no_suppot_input(self, device, dtype):
-        if self.device_type == 'meta':
-            self.skipTest("Meta raises 'AssertionError: RuntimeError not raised'")
-
         for numel in (2, 3):
             for pool_type in ('Max', 'Avg'):
                 cls_name = 'Adaptive{}Pool{}d'.format(pool_type, numel)
@@ -16642,11 +16641,10 @@ class TestNNDeviceType(NNTestCase):
                                                      padding_mode=padding_mode, align_corners=False)
             self.assertEqual(sample, torch.zeros([1, 1, 1, 2], device=device, dtype=dtype))
 
+    # RuntimeError: Unrecognized tensor type ID: Meta
+    @expectedFailureMeta
     @onlyNativeDeviceTypes
     def test_fractional_max_pool2d(self, device):
-        if self.device_type == 'meta':
-            self.skipTest("Meta raises 'RuntimeError: Unrecognized tensor type ID: Meta'")
-
         x = torch.randn(1, 2, 7, 7, requires_grad=True, device=device)
         samples = x.new(1, 2, 2).uniform_()
 
@@ -16682,11 +16680,10 @@ class TestNNDeviceType(NNTestCase):
                 # Incorrect output_size
                 F.fractional_max_pool2d(x, (2, 2), output_size=output_size, _random_samples=samples)
 
+    # RuntimeError: Unrecognized tensor type ID: Meta
+    @expectedFailureMeta
     @onlyNativeDeviceTypes
     def test_fractional_max_pool3d(self, device):
-        if self.device_type == 'meta':
-            self.skipTest("Meta raises 'RuntimeError: Unrecognized tensor type ID: Meta'")
-
         x = torch.randn(1, 2, 7, 7, 7, requires_grad=True, device=device)
         samples = x.new(1, 2, 3).uniform_()
 
