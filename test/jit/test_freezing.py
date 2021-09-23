@@ -1610,7 +1610,7 @@ class TestFrozenOptimizations(JitTestCase):
     @unittest.skipIf(not torch._C.has_cuda, "Optimization currently only run for GPU")
     def test_linear_concat_complex(self):
         """
-            Testing that the interleaving of mutliple optimizations does not 
+            Testing that the interleaving of multiple optimizations does not 
             cause errors, and gets optimized as expected
         """
         class ModMultLinear(nn.Module):
@@ -1709,8 +1709,7 @@ class TestFrozenOptimizations(JitTestCase):
                 FileCheck().check_count("aten::linear", new_linears, exactly=True).run(op_graph)
             else:
                 FileCheck().check_count("aten::linear", orig_linears, exactly=True).run(op_graph)
-            
-            # import pdb; pdb.set_trace()
+
             self.assertEqual(mod_to_device(*test_vals_to_device), script_mod(*test_vals_to_device))
 
 
