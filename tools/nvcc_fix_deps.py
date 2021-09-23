@@ -18,43 +18,46 @@ import subprocess
 from pathlib import Path
 from typing import List, TextIO, Optional
 
+
 def resolve_include(path: Path, include_dirs: List[Path]) -> Path:
     for include_path in include_dirs:
         abs_path = include_path / path
         if abs_path.exists():
             return abs_path
 
-    paths = '\n    '.join(str(d / path) for d in include_dirs)
-    raise RuntimeError(f"""
+    paths = "\n    ".join(str(d / path) for d in include_dirs)
+    raise RuntimeError(
+        f"""
 ERROR: Failed to resolve dependency:
     {path}
 Tried the following paths, but none existed:
     {paths}
-""")
+"""
+    )
 
 
 def repair_depfile(depfile: TextIO, include_dirs: List[Path]) -> None:
     changes_made = False
     out = ""
     for line in depfile.readlines():
-        if ':' in line:
-            colon_pos = line.rfind(':')
-            out += line[:colon_pos + 1]
-            line = line[colon_pos + 1:]
+        if ":" in line:
+            colon_pos = line.rfind(":")
+            out += line[: colon_pos + 1]
+            line = line[colon_pos + 1 :]
 
         line = line.strip()
 
-        if line.endswith('\\'):
-            end = ' \\'
+        if line.endswith("\\"):
+            end = " \\"
             line = line[:-1].strip()
         else:
-            end = ''
+            end = ""
 
         path = Path(line)
         if not path.is_absolute():
             changes_made = True
             path = resolve_include(path, include_dirs)
-        out += f'    {path}{end}\n'
+        out += f"    {path}{end}\n"
 
     # If any paths were changed, rewrite the entire file
     if changes_made:
@@ -63,8 +66,8 @@ def repair_depfile(depfile: TextIO, include_dirs: List[Path]) -> None:
         depfile.truncate()
 
 
-PRE_INCLUDE_ARGS = ['-include', '--pre-include']
-POST_INCLUDE_ARGS = ['-I', '--include-path', '-isystem', '--system-include']
+PRE_INCLUDE_ARGS = ["-include", "--pre-include"]
+POST_INCLUDE_ARGS = ["-I", "--include-path", "-isystem", "--system-include"]
 
 
 def extract_include_arg(include_dirs: List[Path], i: int, args: List[str]) -> None:
@@ -73,8 +76,8 @@ def extract_include_arg(include_dirs: List[Path], i: int, args: List[str]) -> No
         if arg == name:
             return args[i + 1]
         if arg.startswith(name):
-            arg = arg[len(name):]
-            return arg[1:] if arg[0] == '=' else arg
+            arg = arg[len(name) :]
+            return arg[1:] if arg[0] == "=" else arg
         return None
 
     for name in PRE_INCLUDE_ARGS:
@@ -90,12 +93,10 @@ def extract_include_arg(include_dirs: List[Path], i: int, args: List[str]) -> No
             return
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     ret = subprocess.run(
-        sys.argv[1:],
-        stdin=sys.stdin,
-        stdout=sys.stdout,
-        stderr=sys.stderr)
+        sys.argv[1:], stdin=sys.stdin, stdout=sys.stdout, stderr=sys.stderr
+    )
 
     depfile_path = None
     include_dirs = []
@@ -103,16 +104,16 @@ if __name__ == '__main__':
     # Parse only the nvcc arguments we care about
     args = sys.argv[2:]
     for i, arg in enumerate(args):
-        if arg == '-MF':
+        if arg == "-MF":
             depfile_path = Path(args[i + 1])
-        elif arg == '-c':
+        elif arg == "-c":
             # Include the base path of the cuda file
             include_dirs.append(Path(args[i + 1]).resolve().parent)
         else:
             extract_include_arg(include_dirs, i, args)
 
     if depfile_path is not None and depfile_path.exists():
-        with depfile_path.open('r+') as f:
+        with depfile_path.open("r+") as f:
             repair_depfile(f, include_dirs)
 
     sys.exit(ret.returncode)
