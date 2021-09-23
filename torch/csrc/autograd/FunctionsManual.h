@@ -270,11 +270,11 @@ std::tuple<Tensor, Tensor> lu_solve_backward(
   const Tensor& LU_pivots
 );
 Tensor lu_solve_jvp(
-  const Tensor& B_t,
-  const Tensor& LU_data_t,
+  const Tensor& X,
   const Tensor& LU_data,
-  const Tensor& LU_pivots,
-  const Tensor& X
+  const Tensor& dLU_data,
+  const Tensor& dB,
+  const Tensor& LU_pivots
 );
 Tensor lu_unpack_backward(
   const variable_list& grads,

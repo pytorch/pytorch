@@ -3843,11 +3843,11 @@ std::tuple<Tensor, Tensor> lu_solve_backward(
 }
 
 Tensor lu_solve_jvp(
-  const Tensor& dB,
-  const Tensor& dLU_data,
+  const Tensor& X,
   const Tensor& LU_data,
-  const Tensor& LU_pivots,
-  const Tensor& X
+  const Tensor& dLU_data,
+  const Tensor& dB,
+  const Tensor& LU_pivots
 ) {
   Tensor L, U, dL, dU;
   std::tie(std::ignore, L, U) = at::lu_unpack(LU_data, LU_pivots, /*unpack_data=*/true, /*unpack_pivots=*/false);
