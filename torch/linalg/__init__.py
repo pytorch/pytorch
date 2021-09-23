@@ -1848,9 +1848,9 @@ will be accessed. The other triangular half will be considered to be zero and wi
 
 If :attr:`unitriangular`\ `= True`, the diagonal of :attr:`A` is assumed to be ones and will not be accessed.
 
-If the diagonal of :attr:`A` contains zeros or elements that are very close to zero and
-:attr:`unitriangular`\ `= False` (default) or if the input matrix is badly conditioned,
-the result may contain `NaN` s.
+The result may contain `NaN` s if the diagonal of :attr:`A` contains zeros or elements that
+are very close to zero and :attr:`unitriangular`\ `= False` (default) or if the input matrix
+has very small eigenvalues.
 
 Supports inputs of float, double, cfloat and cdouble dtypes.
 Also supports batches of matrices, and if the inputs are batches of matrices then
