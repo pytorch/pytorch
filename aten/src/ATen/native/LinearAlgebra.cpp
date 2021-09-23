@@ -80,7 +80,7 @@ void common_checks_baddbmm_bmm(Meta& meta, const Tensor& batch1, const Tensor& b
   // Error is raised if called from in-place overload with incorrect shape
   TORCH_CHECK(result_sizes[0] == bs && result_sizes[1] == res_rows && result_sizes[2] == res_cols,
               "Expected an output tensor with shape [",
-	      bs, ", ", res_rows, ", ", res_cols, "] but got shape ", result_sizes);
+              bs, ", ", res_rows, ", ", res_cols, "] but got shape ", result_sizes);
 
   std::vector<Dimname> outnames = {};
   if (!is_bmm) {
@@ -91,7 +91,7 @@ void common_checks_baddbmm_bmm(Meta& meta, const Tensor& batch1, const Tensor& b
       const auto self_sizes = self.sizes();
       TORCH_CHECK(self_sizes[0] == bs && self_sizes[1] == res_rows && self_sizes[2] == res_cols,
                   "Expected an input tensor shape with shape [",
-		  bs, ", ", res_rows, ", ", res_cols, "] but got shape ", self_sizes);
+                  bs, ", ", res_rows, ", ", res_cols, "] but got shape ", self_sizes);
       outnames = namedinference::compute_baddbmm_outnames(result, batch1, batch2, self);
     }
   } else {
