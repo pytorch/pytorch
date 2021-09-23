@@ -301,7 +301,6 @@ jobs:
           else
             wget -O pr.diff "https://patch-diff.githubusercontent.com/raw/pytorch/pytorch/pull/$PR_NUMBER.diff"
             echo "GOT PR"
-            cp pr.diff "${GITHUB_WORKSPACE}"
           fi
       - name: Test
         env:
