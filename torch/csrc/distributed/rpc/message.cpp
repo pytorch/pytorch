@@ -14,7 +14,7 @@ Message::Message(
     : payload_(std::move(payload)),
       tensors_(std::move(tensors)),
       type_(type),
-      deviceMap_(deviceMap) {}
+      deviceMap_(std::move(deviceMap)) {}
 
 Message::Message(
     std::vector<char>&& payload,
@@ -90,7 +90,7 @@ DeviceMap& Message::getDeviceMap() {
 }
 
 void Message::setDeviceMap(DeviceMap&& deviceMap) {
-  deviceMap_ = deviceMap;
+  deviceMap_ = std::move(deviceMap);
 }
 
 c10::intrusive_ptr<Message> createExceptionResponse(

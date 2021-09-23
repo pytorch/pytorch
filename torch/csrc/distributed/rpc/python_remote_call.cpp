@@ -16,7 +16,7 @@ PythonRemoteCall::PythonRemoteCall(
     : serializedPyObj_(std::move(serializedPyObj)),
       retRRefId_(std::move(retRRefId)),
       retForkId_(std::move(retForkId)),
-      deviceMap_(deviceMap),
+      deviceMap_(std::move(deviceMap)),
       isAsyncExecution_(isAsyncExecution) {}
 
 c10::intrusive_ptr<Message> PythonRemoteCall::toMessageImpl() && {

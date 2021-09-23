@@ -15,28 +15,24 @@ namespace rpc {
 // TODO: Remove all these messages and use rpc + registered functions instead.
 class TORCH_API RRefMessageBase : public RpcCommandBase {
  public:
-  RRefMessageBase(const RRefId& rrefId, MessageType type, DeviceMap&& deviceMap)
-      : rrefId_(rrefId), type_(type), deviceMap_(std::move(deviceMap)) {}
+  RRefMessageBase(const RRefId& rrefId, MessageType type)
+      : rrefId_(rrefId), type_(type) {}
 
   ~RRefMessageBase() override = default;
 
   const RRefId& rrefId();
-
-  const DeviceMap& getDeviceMap() const;
 
  protected:
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   const RRefId rrefId_;
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   const MessageType type_;
-
-  DeviceMap deviceMap_;
 };
 
 class TORCH_API ForkMessageBase : public RRefMessageBase {
  public:
   ForkMessageBase(const RRefId& rrefId, const ForkId& forkId, MessageType type)
-      : RRefMessageBase(rrefId, type, {}), forkId_(forkId) {}
+      : RRefMessageBase(rrefId, type), forkId_(forkId) {}
 
   const ForkId& forkId();
 
@@ -53,19 +49,10 @@ class TORCH_API ForkMessageBase : public RRefMessageBase {
 // UserRRef uses this message to fetch the remote RRef value from the owner.
 class TORCH_API ScriptRRefFetchCall final : public RRefMessageBase {
  public:
-  ScriptRRefFetchCall(
-      worker_id_t fromWorkerId,
-      const RRefId& rrefId,
-      DeviceMap&& deviceMap)
-      : RRefMessageBase(
-            rrefId,
-            MessageType::SCRIPT_RREF_FETCH_CALL,
-            std::move(deviceMap)),
-        fromWorkerId_(fromWorkerId) {}
+  ScriptRRefFetchCall(worker_id_t fromWorkerId, const RRefId& rrefId, DeviceMap&& deviceMap)
+      : RRefMessageBase(rrefId, MessageType::SCRIPT_RREF_FETCH_CALL), fromWorkerId_(fromWorkerId), deviceMap_(std::move(deviceMap)) {}
 
-  inline worker_id_t fromWorkerId() const {
-    return fromWorkerId_;
-  }
+  const DeviceMap& getDeviceMap() const;
 
   c10::intrusive_ptr<Message> toMessageImpl() && override;
   static std::unique_ptr<ScriptRRefFetchCall> fromMessage(
@@ -73,19 +60,15 @@ class TORCH_API ScriptRRefFetchCall final : public RRefMessageBase {
 
  private:
   const worker_id_t fromWorkerId_;
+  DeviceMap deviceMap_;
 };
 
 class TORCH_API PythonRRefFetchCall final : public RRefMessageBase {
  public:
-  PythonRRefFetchCall(
-      worker_id_t fromWorkerId,
-      const RRefId& rrefId,
-      DeviceMap&& deviceMap)
-      : RRefMessageBase(
-            rrefId,
-            MessageType::PYTHON_RREF_FETCH_CALL,
-            std::move(deviceMap)),
-        fromWorkerId_(fromWorkerId) {}
+  PythonRRefFetchCall(worker_id_t fromWorkerId, const RRefId& rrefId, DeviceMap&& deviceMap)
+      : RRefMessageBase(rrefId, MessageType::PYTHON_RREF_FETCH_CALL), fromWorkerId_(fromWorkerId), deviceMap_(std::move(deviceMap)) {}
+
+  const DeviceMap& getDeviceMap() const;
 
   c10::intrusive_ptr<Message> toMessageImpl() && override;
   static std::unique_ptr<PythonRRefFetchCall> fromMessage(
@@ -93,6 +76,7 @@ class TORCH_API PythonRRefFetchCall final : public RRefMessageBase {
 
  private:
   const worker_id_t fromWorkerId_;
+  DeviceMap deviceMap_;
 };
 
 // OwnerRRef uses this message to send the RRef value to a remote UserRRef

@@ -14,10 +14,6 @@ const RRefId& RRefMessageBase::rrefId() {
   return rrefId_;
 }
 
-const DeviceMap& RRefMessageBase::getDeviceMap() const {
-  return deviceMap_;
-}
-
 /////////////////////////// ForkMessageBase //////////////////////////////////
 
 const ForkId& ForkMessageBase::forkId() {
@@ -42,6 +38,10 @@ std::pair<RRefId, ForkId> ForkMessageBase::fromMessage(
 
 /////////////////////////// RRef Protocol //////////////////////////////////
 
+const DeviceMap& ScriptRRefFetchCall::getDeviceMap() const {
+  return deviceMap_;
+}
+
 c10::intrusive_ptr<Message> ScriptRRefFetchCall::toMessageImpl() && {
   std::vector<at::IValue> ivalues;
   ivalues.reserve(3);
@@ -65,6 +65,10 @@ std::unique_ptr<ScriptRRefFetchCall> ScriptRRefFetchCall::fromMessage(
       "ScriptRRefFetchCall fromWorkerId exceeds worker_id_t limit.")
   return std::make_unique<ScriptRRefFetchCall>(
       worker_id_t(id), RRefId::fromIValue(values[0]), std::move(deviceMap));
+}
+
+const DeviceMap& PythonRRefFetchCall::getDeviceMap() const {
+  return deviceMap_;
 }
 
 c10::intrusive_ptr<Message> PythonRRefFetchCall::toMessageImpl() && {

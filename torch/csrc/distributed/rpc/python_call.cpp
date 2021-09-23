@@ -21,8 +21,6 @@ PythonCall::PythonCall(
 c10::intrusive_ptr<Message> PythonCall::toMessageImpl() && {
   std::vector<IValue> ivalues = std::move(serializedPyObj_).toIValues();
   ivalues.emplace_back(isAsyncExecution_);
-
-  // Convert deviceMap to c10::Dict for serialization.
   ivalues.emplace_back(deviceMapToC10Dict(deviceMap_));
 
   // TODO(pbelevich): replace with fromIValues
