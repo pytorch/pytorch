@@ -3,6 +3,7 @@
 #include <ATen/Dispatch.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/NamedTensorUtils.h>
+#include <ATen/native/mkldnn/Matmul.h>
 #include <ATen/native/CPUBlas.h>
 #include <ATen/native/IndexingUtils.h>
 #include <ATen/native/LinearAlgebra.h>
@@ -22,7 +23,6 @@
 #include <functional>
 #include <limits>
 #include <numeric>
-
 
 namespace at {
 namespace meta {
@@ -984,6 +984,11 @@ static void addmm_impl_cpu_(
     result.copy_(self);
   }
 
+  if (use_mkldnn_bf16_matmul(m1, m2, result)){
+    mkldnn_matmul(m1, m2, result, beta.to<float>(), alpha.to<float>());
+    return;
+  }
+
   bool transpose_c = false;
   Tensor c;
 
@@ -1055,8 +1060,8 @@ static void addmm_impl_cpu_(
       result.scalar_type(), "addmm_impl_cpu_",
       [&]{
         at::native::cpublas::gemm(
-            transpose_a ? a.is_conj() ? cpublas::ConjTranspose : cpublas::Transpose : cpublas::NoTranspose,
-            transpose_b ? b.is_conj() ? cpublas::ConjTranspose : cpublas::Transpose : cpublas::NoTranspose,
+            transpose_a ? a.is_conj() ? TransposeType::ConjTranspose : TransposeType::Transpose : TransposeType::NoTranspose,
+            transpose_b ? b.is_conj() ? TransposeType::ConjTranspose : TransposeType::Transpose : TransposeType::NoTranspose,
             m, n, k,
             alpha.to<scalar_t>(),
             a.data_ptr<scalar_t>(), lda,
@@ -1253,6 +1258,11 @@ static inline Tensor& bmm_out_or_baddbmm_(Tensor& self_or_result, const Tensor& 
     return (strides[2] == 1 && strides[1] >= sizes[2])
             || (strides[1] == 1 && strides[2] >= sizes[1]);
   };
+
+  if (use_mkldnn_bf16_matmul(batch1, batch2, self_or_result)){
+    mkldnn_matmul(batch1, batch2, self_or_result, beta.to<float>(), alpha.to<float>());
+    return self_or_result;
+  }
 
   if (contraction_size * res_rows * res_cols < 400) {
     if (is_bmm_out) {
@@ -1565,6 +1575,15 @@ Tensor& matmul_out(const Tensor & tensor1, const Tensor & tensor2, Tensor &resul
   at::native::matmul(c10::optional<Tensor>(result), tensor1, tensor2);
   namedinference::propagate_names_if_nonempty(result, maybe_outnames);
   return result;
+}
+
+// torch.linalg.matmul, alias for torch.matmul
+Tensor linalg_matmul(const Tensor & tensor1, const Tensor & tensor2) {
+  return at::native::matmul(tensor1, tensor2);
+}
+
+Tensor& linalg_matmul_out(const Tensor & tensor1, const Tensor & tensor2, Tensor &result) {
+  return at::native::matmul_out(tensor1, tensor2, result);
 }
 
 // helper methods for matrix_exp
