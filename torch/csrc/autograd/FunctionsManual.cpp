@@ -464,16 +464,16 @@ Tensor prod_backward(Tensor grad, const Tensor& input, Tensor result, int64_t di
   }
 }
 
-template <typename func_t>
+using solve_f = std::function<Tensor(const Tensor&, const Tensor&)>;
 static Tensor generic_solve_jvp(
-  func_t& solve,
+  solve_f solve,
   const Tensor& X, const Tensor& A,
   const Tensor& dA, const Tensor& dB,
-  func_t* solve_with_structure = nullptr) {
+  c10::optional<solve_f> solve_with_structure = c10::nullopt) {
   auto is_vector_case = at::native::linalg_solve_is_vector_rhs(dA, dB);
   auto dA_contrib = is_vector_case ? dA.matmul(X.unsqueeze(-1)).squeeze(-1) : dA.matmul(X);
-  if (solve_with_structure) {
-    return solve(A, dB) - solve_with_structure(A, dA_contrib);
+  if (solve_with_structure.has_value()) {
+    return solve(A, dB) - solve_with_structure.value()(A, dA_contrib);
   }
   return solve(A, dB - dA_contrib);
 }
@@ -3808,40 +3808,35 @@ std::tuple<Tensor, Tensor> lu_solve_backward(
   return std::make_tuple(self_grad, LU_data_grad);
 }
 
-Tensor lu_solve_forward_AD(
+Tensor lu_solve_jvp(
   const Tensor& dB,
   const Tensor& dLU_data,
   const Tensor& LU_data,
   const Tensor& LU_pivots,
   const Tensor& X
 ) {
-  auto dL = dLU_data.tril(-1);
-  auto dU = dLU_data.triu();
-
-  // From the derivations from above we have that:
-  // dX = -U^{-1} dU U^{-1} L^{-1} P^T B - U^{-1} L^{-1} dL L^{-1} P^T B + U^{-1} L^{-1} P^T dB,
-  // or, using that X = (LU)^{-1} P^T B,
-  // dX = -U^{-1} dU X - (LU)^{-1} dL U X + (LU)^{-1} P^T dB
-
-  // -U^{-1} dU X
-  auto U = LU_data.triu();
-  auto dU_part = -std::get<0>(at::triangular_solve(
-    dU.matmul(X),
-    U,
-    /*upper=*/true
-  ));
-
-  // (LU)^{-1} dL U X,
-  // we use lu_solve to solve this system which requires pivots which are returned by the lu routine.
-  // Since no pivoting is required for the system, we create a tensor of identity permutations
-  // which are 1-based because of the Fortran-like LAPACK interfaces.
+  Tensor L, U, dL, dU;
+  std::tie(std::ignore, L, U) = at::lu_unpack(LU_data, LU_pivots, /*unpack_data=*/true, /*unpack_pivots=*/false);
+  dL = dLU_data.tril(-1);
+  dU = dLU_data.triu();
+  auto dA = dL.matmul(U) + L.matmul(dU);
+  // We exploit the structure in the computation of A^{-1} dA, where the permutation matrix P such that A = P L U
+  // cancels itself. Because of that we use lu_solve with the identity permutation input.
+  // The identity permutation pivots are 1-based because of the Fortran-like LAPACK interfaces.
   auto identity_pivots = at::arange(1, LU_data.size(-1) + 1, LU_pivots.options()).expand(LU_pivots.sizes());
-  auto dL_part = at::lu_solve(dL.matmul(U).matmul(X), LU_data, identity_pivots);
-
-  // (LU)^{-1} P^T dB
-  auto dB_part = at::lu_solve(dB, LU_data, LU_pivots);
-
-  return dU_part - dL_part + dB_part;
+  return generic_solve_jvp(
+    [&LU_pivots](const Tensor& A, const Tensor& B) {
+      return at::lu_solve(B, A, LU_pivots);
+    },
+    X, /*A=*/LU_data, dA, dB,
+    // as part of forward AD we need to compute A^{-1} dA.
+    // Since A = P L U and P is not differentiable, we get
+    // dA = P d(L U), A^{-1} = (L U)^{-1} P^T, so
+    // A^{-1} dA = (L U)^{-1} d(L U), which is lu_solve with
+    // the pivots set to the identity permutation
+    [&identity_pivots](const Tensor& A, const Tensor& B) {
+      return at::lu_solve(B, A, identity_pivots);
+    });
 }
 
 Tensor lu_unpack_backward(
