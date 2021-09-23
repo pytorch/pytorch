@@ -111,7 +111,7 @@ class ShardedTensorMetadata(object):
         else:
             raise RuntimeError(f'Invalid torch.memory_format: {memory_format}')
 
-        # Keep old seriazation to ensure backward compatibility
+        # Keep old serialization to ensure backward compatibility
         return (
             self.shards_metadata,
             self.size,
