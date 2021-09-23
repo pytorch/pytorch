@@ -532,6 +532,7 @@ class TestBinaryUfuncs(TestCase):
                 self.assertEqual(len(w), 1)
 
     # Verifies that the inplace dunders (like idiv) actually are in place
+    @skipMeta  # does not raise warning.
     @onlyNativeDeviceTypes
     def test_inplace_dunders(self, device):
         t = torch.randn((1,), device=device)

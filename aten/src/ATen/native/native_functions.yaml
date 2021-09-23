@@ -2016,7 +2016,6 @@
   variants: method
   dispatch:
     CPU, CUDA: floor_divide_
-    Meta: floor_divide_meta_
     SparseCPU, SparseCUDA: floor_divide_sparse_
 
 - func: floor_divide.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)

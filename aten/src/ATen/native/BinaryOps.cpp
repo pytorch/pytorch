@@ -610,18 +610,6 @@ Tensor& floor_divide_(Tensor& self, const Tensor& other) {
   return native::floor_divide_out(self, other, self);
 }
 
-// Codegen for Meta doesn't raise this warning.
-Tensor& floor_divide_meta_(Tensor& self, const Tensor& other) {
-  TORCH_WARN_ONCE(
-    "floor_divide is deprecated, and will be removed in a future version of pytorch. "
-    "It currently rounds toward 0 (like the 'trunc' function NOT 'floor'). "
-    "This results in incorrect rounding for negative values.\n"
-    "To keep the current behavior, use torch.div(a, b, rounding_mode='trunc'), "
-    "or for actual floor division, use torch.div(a, b, rounding_mode='floor')."
-  );
-  return self;
-}
-
 // TODO: Make this structured to undo the perf regression from native:: removal
 // in call here
 Tensor mul(const Tensor& self, const Scalar& other) {
@@ -1057,7 +1045,6 @@ Tensor floor_divide(const Tensor& self, const Scalar& other) {
 }
 
 Tensor& floor_divide_(Tensor& self, const Scalar& other) {
-  std::cout << "SCALAR DISPATCH\n";
   return at::floor_divide_out(self, self, wrapped_scalar_tensor(other));
 }
 
