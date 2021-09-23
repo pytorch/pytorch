@@ -168,9 +168,9 @@ class TestModule(TestCase):
                     # === test cross-GPU transfer works
                     def _to_device(objs):
                         if isinstance(objs, (tuple, list)):
-                            return tuple(_to_device(item) for item in objs)
+                            return type(objs)(_to_device(item) for item in objs)
                         elif isinstance(objs, dict):
-                            return {name: _to_device(item) for name, item in objs.item()}
+                            return {name: _to_device(item) for name, item in objs.items()}
                         elif isinstance(objs, torch.Tensor):
                             return objs.cuda(1)
                         else:
