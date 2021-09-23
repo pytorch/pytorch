@@ -297,11 +297,11 @@ jobs:
         run: |
           set -eux
           if [[ -z $PR_NUMBER ]]; then
+            echo not on PR
+          else
             wget -O pr.diff "https://patch-diff.githubusercontent.com/raw/pytorch/pytorch/pull/$PR_NUMBER.diff"
             echo "GOT PR"
             cp pr.diff "${GITHUB_WORKSPACE}"
-          else
-            echo not on PR
           fi
       - name: Test
         env:
@@ -311,6 +311,8 @@ jobs:
           CIRCLE_PR_NUMBER: ${{ github.event.pull_request.number }}
           CIRCLE_SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           AWS_DEFAULT_REGION: us-east-1
+        # Time out the test phase after 3.5 hours
+        timeout-minutes: 210
         run: |
           if [[ $TEST_CONFIG == 'multigpu' ]]; then
             TEST_COMMAND=.jenkins/pytorch/multigpu-test.sh
@@ -368,12 +370,6 @@ jobs:
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
       !{{ common.render_test_results() }}
-      {%- if is_coverage %}
-      - name: Report coverage
-        run: |
-          python3 -mpip install codecov==2.1.12
-          python3 -mcodecov
-      {%- endif %}
       !{{ common.upload_test_reports(name='linux') }}
       !{{ common.upload_test_statistics(build_environment) }}
       !{{ common.teardown_ec2_linux() }}

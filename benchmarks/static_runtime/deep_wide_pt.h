@@ -138,3 +138,5 @@ torch::jit::Module getLeakyReLUScriptModel();
 torch::jit::Module getLeakyReLUConstScriptModel();
 
 torch::jit::Module getLongScriptModel();
+
+torch::jit::Module getSignedLog1pModel();

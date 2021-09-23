@@ -430,11 +430,11 @@ jobs:
         run: |
           set -eux
           if [[ -z $PR_NUMBER ]]; then
+            echo not on PR
+          else
             wget -O pr.diff "https://patch-diff.githubusercontent.com/raw/pytorch/pytorch/pull/$PR_NUMBER.diff"
             echo "GOT PR"
             cp pr.diff "${GITHUB_WORKSPACE}"
-          else
-            echo not on PR
           fi
       - name: Test
         env:
@@ -444,6 +444,8 @@ jobs:
           CIRCLE_PR_NUMBER: ${{ github.event.pull_request.number }}
           CIRCLE_SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           AWS_DEFAULT_REGION: us-east-1
+        # Time out the test phase after 3.5 hours
+        timeout-minutes: 210
         run: |
           if [[ $TEST_CONFIG == 'multigpu' ]]; then
             TEST_COMMAND=.jenkins/pytorch/multigpu-test.sh
