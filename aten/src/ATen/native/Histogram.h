@@ -8,9 +8,9 @@
 namespace at { namespace native {
 
 using histogramdd_fn = void(*)(const Tensor&, const c10::optional<Tensor>&, bool, Tensor&, const TensorList&);
-using histogram_linear_fn = void(*)(const Tensor&, const c10::optional<Tensor>&, bool, Tensor&, const Tensor&, bool);
+using histogramdd_linear_fn = void(*)(const Tensor&, const c10::optional<Tensor>&, bool, Tensor&, const TensorList&, bool);
 
 DECLARE_DISPATCH(histogramdd_fn, histogramdd_stub);
-DECLARE_DISPATCH(histogram_linear_fn, histogram_linear_stub);
+DECLARE_DISPATCH(histogramdd_linear_fn, histogramdd_linear_stub);
 
 }} // namespace at::native

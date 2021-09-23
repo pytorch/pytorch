@@ -7065,12 +7065,22 @@
   dispatch:
     CPU: histogram_cpu
 
-- func: _histogramdd.bins_tensor(Tensor self, Tensor[] bins, *, Tensor? weight=None, bool density=False) -> Tensor
+- func: _histogramdd_tensor(Tensor self, Tensor[] bins, *, Tensor? weight=None, bool density=False) -> Tensor
   variants: method, function
   dispatch:
     CPU: histogramdd_cpu
 
-- func: _histogramdd_bin_edges.bins_tensor(Tensor self, Tensor[] bins, *, Tensor? weight=None, bool density=False) -> Tensor[]
+- func: _histogramdd_bin_edges_tensor(Tensor self, Tensor[] bins, *, Tensor? weight=None, bool density=False) -> Tensor[]
+  variants: method, function
+  dispatch:
+    CPU: histogramdd_bin_edges_cpu
+
+- func: _histogramdd_cts(Tensor self, int[] bins, *, float[]? range=None, Tensor? weight=None, bool density=False) -> Tensor
+  variants: method, function
+  dispatch:
+    CPU: histogramdd_cpu
+
+- func: _histogramdd_bin_edges_cts(Tensor self, int[] bins, *, float[]? range=None, Tensor? weight=None, bool density=False) -> Tensor[]
   variants: method, function
   dispatch:
     CPU: histogramdd_bin_edges_cpu

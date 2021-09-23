@@ -328,10 +328,17 @@ def einsum(*args):
     return _VF.einsum(equation, operands)  # type: ignore[attr-defined]
 
 # Wrapper around _histogramdd and _histogramdd_bin_edges needed due to (Tensor, Tensor[]) return type.
-def histogramdd(input: Tensor, *bins: List[Tensor],
-        weight: Optional[Tensor] = None, density: Optional[bool] = False):
-    bin_edges = _VF._histogramdd_bin_edges(input, *bins, weight=weight, density=density)
-    hist = _VF._histogramdd(input, *bins, weight=weight, density=density)
+def histogramdd(input: Tensor,
+        bins: Union[List[Tensor], List[int]],
+        range: Optional[List[float]] = None,
+        weight: Optional[Tensor] = None,
+        density: Optional[bool] = False):
+    if isinstance(bins[0], int):
+        bin_edges = _VF._histogramdd_bin_edges_cts(input, bins, range=range, weight=weight, density=density)
+    else:
+        bin_edges = _VF._histogramdd_bin_edges_tensor(input, bins, weight=weight, density=density)
+
+    hist = _VF._histogramdd_tensor(input, bin_edges, weight=weight, density=density)
     return (hist, bin_edges)
 
 # This wrapper exists to support variadic args.

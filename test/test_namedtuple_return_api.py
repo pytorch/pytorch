@@ -16,7 +16,7 @@ all_operators_with_namedtuple_return = {
     'triangular_solve', 'cummax', 'cummin', 'linalg_eigh', "_unpack_dual", 'linalg_qr',
     '_svd_helper', 'linalg_svd', 'linalg_slogdet', 'fake_quantize_per_tensor_affine_cachemask',
     'fake_quantize_per_channel_affine_cachemask', 'linalg_lstsq', 'linalg_eig', 'linalg_cholesky_ex',
-    'frexp', 'lu_unpack', 'histogram', 'histogramdd', '_fake_quantize_per_tensor_affine_cachemask_tensor_qparams',
+    'frexp', 'lu_unpack', 'histogram', '_fake_quantize_per_tensor_affine_cachemask_tensor_qparams',
     '_fused_moving_avg_obs_fq_helper',
     '_det_lu_based_helper',
     '_lu_with_info',

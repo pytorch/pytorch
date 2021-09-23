@@ -7,6 +7,7 @@
 
 #include <tuple>
 #include <vector>
+#include "c10/util/ArrayRef.h"
 #include <c10/core/ScalarType.h>
 #include <c10/core/DefaultDtype.h>
 
@@ -40,7 +41,7 @@
 namespace at { namespace native {
 
 DEFINE_DISPATCH(histogramdd_stub);
-DEFINE_DISPATCH(histogram_linear_stub);
+DEFINE_DISPATCH(histogramdd_linear_stub);
 
 namespace {
 
@@ -212,8 +213,22 @@ std::pair<double, double> histc_select_outer_bin_edges(const Tensor& input,
 
 } // namespace
 
+std::vector<Tensor> allocate_bin_edges_tensors(const Tensor& self) {
+    TORCH_CHECK(self.dim() >= 2, "torch.histogramdd: input tensor should have at least 2 dimensions");
+    const int64_t D = self.size(-1);
+    std::vector<Tensor> bin_edges_out(D);
+    for (int64_t dim = 0; dim < D; dim++) {
+        bin_edges_out[dim] = at::empty({0}, self.options(), MemoryFormat::Contiguous);
+    }
+    return bin_edges_out;
+}
+
 /* Versions of histogramdd in which bins is a Tensor[] defining the sequences of bin edges.
  */
+std::vector<Tensor> histogramdd_bin_edges_cpu(const Tensor& self, TensorList bins,
+        const c10::optional<Tensor>& weight, bool density) {
+    return bins.vec();
+}
 Tensor& histogramdd_out_cpu(const Tensor& self, TensorList bins,
         const c10::optional<Tensor>& weight, bool density,
         Tensor& hist, TensorList& bin_edges) {
@@ -230,21 +245,66 @@ Tensor& histogramdd_out_cpu(const Tensor& self, TensorList bins,
 Tensor histogramdd_cpu(const Tensor& self, TensorList bins,
         const c10::optional<Tensor>& weight, bool density) {
     Tensor hist = at::empty({0}, self.options(), MemoryFormat::Contiguous);
-
-    TORCH_CHECK(self.dim() >= 2, "torch.histogramdd: input tensor should have at least 2 dimensions");
-    const int64_t D = self.size(-1);
-    std::vector<Tensor> bin_edges_out(D);
-    for (int64_t dim = 0; dim < D; dim++) {
-        bin_edges_out[dim] = at::empty({0}, self.options(), MemoryFormat::Contiguous);
-    }
+    std::vector<Tensor> bin_edges_out = allocate_bin_edges_tensors(self);
     TensorList bin_edges_out_tl(bin_edges_out);
 
     histogramdd_out_cpu(self, bins, weight, density, hist, bin_edges_out_tl);
     return hist;
 }
-std::vector<Tensor> histogramdd_bin_edges_cpu(const Tensor& self, TensorList bins,
+
+/* Versions of histogramdd in which bins is an int[]
+ * defining the number of bins in each dimension.
+ */
+std::vector<Tensor>& histogramdd_bin_edges_out_cpu(const Tensor& self, IntArrayRef bin_ct,
+        c10::optional<c10::ArrayRef<double>> range,
+        const c10::optional<Tensor>& weight, bool density,
+        std::vector<Tensor>& bin_edges_out) {
+    TensorList bin_edges_out_tl(bin_edges_out);
+
+    const int64_t D = self.size(-1);
+    Tensor reshaped_self = self.reshape({ self.numel() / D, D });
+
+    auto outer_bin_edges = select_outer_bin_edges(reshaped_self, range);
+
+    for (int64_t dim = 0; dim < D; dim++) {
+        linspace_cpu_out(outer_bin_edges.first[dim], outer_bin_edges.second[dim],
+                bin_ct[dim] + 1, bin_edges_out[dim]);
+    }
+
+    return bin_edges_out;
+}
+std::vector<Tensor> histogramdd_bin_edges_cpu(const Tensor& self, IntArrayRef bin_ct,
+        c10::optional<c10::ArrayRef<double>> range,
         const c10::optional<Tensor>& weight, bool density) {
-    return bins.vec();
+    TORCH_WARN(bin_ct);
+    std::vector<Tensor> bin_edges_out = allocate_bin_edges_tensors(self);
+    return histogramdd_bin_edges_out_cpu(self, bin_ct, range, weight, density, bin_edges_out);
+}
+Tensor& histogramdd_out_cpu(const Tensor& self, IntArrayRef bin_ct,
+        c10::optional<c10::ArrayRef<double>> range,
+        const c10::optional<Tensor>& weight, bool density,
+        Tensor& hist, TensorList& bin_edges) {
+    std::vector<Tensor> bins = histogramdd_bin_edges_cpu(self, bin_ct, range, weight, density);
+
+    histogramdd_check_inputs(self, bins, weight);
+    histogramdd_prepare_out(self, bins, hist, bin_edges);
+
+    for (size_t dim = 0; dim < bins.size(); dim++) {
+        bin_edges[dim].copy_(bins[dim]);
+    }
+
+    histogramdd_linear_stub(self.device().type(), self, weight, density, hist, bin_edges, true);
+    return hist;
+}
+Tensor histogramdd_cpu(const Tensor& self, IntArrayRef bin_ct,
+        c10::optional<c10::ArrayRef<double>> range,
+        const c10::optional<Tensor>& weight, bool density) {
+    Tensor hist = at::empty({0}, self.options(), MemoryFormat::Contiguous);
+    std::vector<Tensor> bin_edges_out = allocate_bin_edges_tensors(self);
+    TensorList bin_edges_out_tl(bin_edges_out);
+
+    histogramdd_out_cpu(self, bin_ct, range, weight, density, hist, bin_edges_out_tl);
+    return hist;
 }
 
 /* Versions of histogram in which bins is a Tensor defining the sequence of bin edges.
@@ -289,7 +349,7 @@ histogram_out_cpu(const Tensor& self, int64_t bin_ct, c10::optional<c10::ArrayRe
 
     histogramdd_check_inputs(reshaped_self, bins_in, reshaped_weight);
 
-    histogram_linear_stub(reshaped_self.device().type(), reshaped_self, reshaped_weight, density, hist, bin_edges, true);
+    histogramdd_linear_stub(reshaped_self.device().type(), reshaped_self, reshaped_weight, density, hist, bin_edges, true);
     return std::forward_as_tuple(hist, bin_edges);
 }
 std::tuple<Tensor, Tensor>
@@ -317,7 +377,7 @@ Tensor& histogram_histc_cpu_out(const Tensor& self, int64_t bin_ct,
 
     histogramdd_check_inputs(reshaped, bins_in, {});
 
-    histogram_linear_stub(reshaped.device().type(), reshaped,
+    histogramdd_linear_stub(reshaped.device().type(), reshaped,
             c10::optional<Tensor>(), false, hist, bin_edges, false);
     return hist;
 }

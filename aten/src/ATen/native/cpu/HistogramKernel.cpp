@@ -225,7 +225,7 @@ void histogramdd_out_cpu_template(const Tensor& self, const c10::optional<Tensor
 /* The general implementation of the histogram kernel. Maps each element of the input tensor
  * to its corresponding bin by performing a binary search over the elements of bin_edges.
  *
- * Refer to histogram_out_cpu_template for more details.
+ * Refer to histogramdd_out_cpu_template for more details.
  */
 static void histogramdd_kernel_impl(const Tensor& self, const c10::optional<Tensor>& weight, bool density,
         Tensor& hist, const TensorList& bin_edges) {
@@ -235,12 +235,12 @@ static void histogramdd_kernel_impl(const Tensor& self, const c10::optional<Tens
 /* A faster version of the histogram kernel for cases in which bin_edges are known
  * to form a linear progression.
  *
- * Refer to histogram_out_cpu_template for more details.
+ * Refer to histogramdd_out_cpu_template for more details.
  */
-static void histogram_linear_kernel_impl(const Tensor& self, const c10::optional<Tensor>& weight,
-        bool density, Tensor& hist, const Tensor& bin_edges, bool local_search) {
+static void histogramdd_linear_kernel_impl(const Tensor& self, const c10::optional<Tensor>& weight,
+        bool density, Tensor& hist, const TensorList& bin_edges, bool local_search) {
     if (local_search) {
-        // histogram codepath: both hist and bin_edges are eventually returned as output,
+        // histogramdd codepath: both hist and bin_edges are eventually returned as output,
         // so we'll keep them consistent
         histogramdd_out_cpu_template<LINEAR_INTERPOLATION_WITH_LOCAL_SEARCH>(
               self, weight, density, hist, bin_edges);
@@ -255,6 +255,6 @@ static void histogram_linear_kernel_impl(const Tensor& self, const c10::optional
 
 REGISTER_DISPATCH(histogramdd_stub, &histogramdd_kernel_impl);
 
-REGISTER_DISPATCH(histogram_linear_stub, &histogram_linear_kernel_impl);
+REGISTER_DISPATCH(histogramdd_linear_stub, &histogramdd_linear_kernel_impl);
 
 }} // namespace at::native
