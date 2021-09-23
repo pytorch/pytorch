@@ -957,9 +957,9 @@ struct C10_EXPORT ivalue::Object final : c10::intrusive_ptr_target {
 
   std::shared_ptr<torch::jit::CompilationUnit> compilation_unit() {
     if (type_.holds_strong_ref()) {
-      return c10::get<std::shared_ptr<torch::jit::CompilationUnit>>(type_.cu_);
+      return type_.cu_.getStrongRefOrThrow();
     } else {
-      auto weak_ptr = c10::get<std::weak_ptr<torch::jit::CompilationUnit>>(type_.cu_);
+      auto weak_ptr = type_.cu_.getWeakRefOrThrow();
       return std::shared_ptr<torch::jit::CompilationUnit>(weak_ptr);
     }
   }

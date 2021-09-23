@@ -969,10 +969,10 @@ WeakOrStrongTypePtr::WeakOrStrongTypePtr(WeakOrStrongCompilationUnit cu, TypePtr
 
 WeakTypePtr WeakOrStrongTypePtr::asWeakTypePtr() const {
   if (!holds_strong_ref()) {
-    std::weak_ptr<torch::jit::CompilationUnit> weak_cu = c10::get<std::weak_ptr<torch::jit::CompilationUnit>>(cu_);
-    return WeakTypePtr(weak_cu, type_);
+    return WeakTypePtr(cu_.getWeakRefOrThrow(), type_);
   } else {
-    std::weak_ptr<torch::jit::CompilationUnit> weak_cu = c10::get<std::shared_ptr<torch::jit::CompilationUnit>>(cu_);
+    std::weak_ptr<torch::jit::CompilationUnit> weak_cu =
+        cu_.getStrongRefOrThrow();
     return WeakTypePtr(weak_cu, type_);
   }
 }

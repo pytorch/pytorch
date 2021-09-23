@@ -5,9 +5,10 @@
 #include <ATen/core/ivalue_to.h>
 #include <c10/util/C++17.h>
 #include <c10/util/intrusive_ptr.h>
+#include <c10/util/variant.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <typeindex>
-#include <c10/util/variant.h>
+#include "c10/util/Exception.h"
 
 namespace torch {
 class TORCH_API CustomClassHolder : public c10::intrusive_ptr_target {};
@@ -1162,8 +1163,37 @@ struct TORCH_API WeakTypePtr {
   std::shared_ptr<Type> type_;
 };
 
+// internal build errors with std::variant :/
+struct WeakOrStrongCompilationUnit
+    : public std::pair<
+          c10::optional<std::shared_ptr<torch::jit::CompilationUnit>>,
+          c10::optional<std::weak_ptr<torch::jit::CompilationUnit>>> {
+  using pair::pair;
+  WeakOrStrongCompilationUnit(
+      std::shared_ptr<torch::jit::CompilationUnit> shared_cu) {
+    this->first = shared_cu;
+    this->second = c10::nullopt;
+  }
+  WeakOrStrongCompilationUnit(
+      std::weak_ptr<torch::jit::CompilationUnit> weak_cu) {
+    this->first = c10::nullopt;
+    this->second = weak_cu;
+  }
 
-using WeakOrStrongCompilationUnit = c10::variant<std::shared_ptr<torch::jit::CompilationUnit>, std::weak_ptr<torch::jit::CompilationUnit>>;
+  std::shared_ptr<torch::jit::CompilationUnit> getStrongRefOrThrow() const {
+    TORCH_INTERNAL_ASSERT(this->first != c10::nullopt);
+    return *this->first;
+  }
+
+  std::weak_ptr<torch::jit::CompilationUnit> getWeakRefOrThrow() const {
+    TORCH_INTERNAL_ASSERT(this->second != c10::nullopt);
+    return *this->second;
+  }
+
+  bool holdingStrongRef() const {
+    return this->first != c10::nullopt;
+  }
+};
 
 // An Object will hold a non-owning Compilation Unit reference if it is a
 // Constant in the graph and a Owning reference otherwise
@@ -1176,7 +1206,7 @@ struct TORCH_API WeakOrStrongTypePtr {
   WeakOrStrongCompilationUnit cu_;
   TypePtr type_;
   bool holds_strong_ref() const {
-    return cu_.index() == 0;
+    return cu_.holdingStrongRef() == 0;
   }
 };
 
