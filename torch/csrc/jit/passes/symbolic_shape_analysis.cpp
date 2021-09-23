@@ -150,10 +150,6 @@ bool isListOfInts(const TypePtr& type) {
   return type->cast<ListType>() &&
       type->cast<ListType>()->getElementType()->cast<IntType>();
 }
-bool isListOfTensors(const TypePtr& type) {
-  return type->cast<ListType>() &&
-      type->cast<ListType>()->getElementType()->cast<TensorType>();
-}
 
 c10::optional<size_t> normIndex(int64_t index, size_t len) {
   if (index < 0) {
@@ -209,6 +205,8 @@ struct SymbolicShapeNodeAnalyzer {
       std::shared_ptr<Graph> shape_compute_graph,
       const AliasDb& db)
       : shape_compute_graph_(shape_compute_graph->copy()), node_(n) {
+    // We make lists of Tensor inputs variadic, which results in
+    // offset between a node index and its corresponding graph index
     size_t graph_index_offset = 0;
     for (size_t node_index = 0; node_index < node_->inputs().size();
          node_index++) {
