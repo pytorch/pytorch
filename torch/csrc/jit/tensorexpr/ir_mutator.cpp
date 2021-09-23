@@ -11,15 +11,19 @@ namespace torch {
 namespace jit {
 namespace tensorexpr {
 
-template <typename Op>
-static Expr* mutate_binary_op(
-    BinaryOpNode<Op>* v,
+template <
+    typename Op,
+    typename std::enable_if<std::is_same<
+        decltype(detail::bin_op_deducer(std::declval<Op>())),
+        void>::value>::type* = nullptr>
+static ExprPtr mutate_binary_op(
+    NodePtr<Op> v,
     IRMutator* mutator,
     bool option = false) {
-  Expr* lhs = v->lhs();
-  Expr* rhs = v->rhs();
-  Expr* lhs_new = lhs->accept_mutator(mutator);
-  Expr* rhs_new = rhs->accept_mutator(mutator);
+  ExprPtr lhs = v->lhs();
+  ExprPtr rhs = v->rhs();
+  ExprPtr lhs_new = lhs->accept_mutator(mutator);
+  ExprPtr rhs_new = rhs->accept_mutator(mutator);
   if (lhs != lhs_new) {
     v->set_lhs(lhs_new);
   }
@@ -34,63 +38,63 @@ static Expr* mutate_binary_op(
   return v;
 }
 
-Expr* IRMutator::mutate(Add* v) {
+ExprPtr IRMutator::mutate(AddPtr v) {
   return mutate_binary_op(v, this);
 }
 
-Expr* IRMutator::mutate(Sub* v) {
+ExprPtr IRMutator::mutate(SubPtr v) {
   return mutate_binary_op(v, this);
 }
 
-Expr* IRMutator::mutate(Mul* v) {
+ExprPtr IRMutator::mutate(MulPtr v) {
   return mutate_binary_op(v, this);
 }
 
-Expr* IRMutator::mutate(Div* v) {
+ExprPtr IRMutator::mutate(DivPtr v) {
   return mutate_binary_op(v, this);
 }
 
-Expr* IRMutator::mutate(Mod* v) {
+ExprPtr IRMutator::mutate(ModPtr v) {
   return mutate_binary_op(v, this);
 }
 
-Expr* IRMutator::mutate(And* v) {
+ExprPtr IRMutator::mutate(AndPtr v) {
   return mutate_binary_op(v, this);
 }
 
-Expr* IRMutator::mutate(Or* v) {
+ExprPtr IRMutator::mutate(OrPtr v) {
   return mutate_binary_op(v, this);
 }
 
-Expr* IRMutator::mutate(Xor* v) {
+ExprPtr IRMutator::mutate(XorPtr v) {
   return mutate_binary_op(v, this);
 }
 
-Expr* IRMutator::mutate(Lshift* v) {
+ExprPtr IRMutator::mutate(LshiftPtr v) {
   return mutate_binary_op(v, this);
 }
 
-Expr* IRMutator::mutate(Rshift* v) {
+ExprPtr IRMutator::mutate(RshiftPtr v) {
   return mutate_binary_op(v, this);
 }
 
-Expr* IRMutator::mutate(Max* v) {
+ExprPtr IRMutator::mutate(MaxPtr v) {
   return mutate_binary_op(v, this, v->propagate_nans());
 }
 
-Expr* IRMutator::mutate(Min* v) {
+ExprPtr IRMutator::mutate(MinPtr v) {
   return mutate_binary_op(v, this, v->propagate_nans());
 }
 
-Expr* IRMutator::mutate(CompareSelect* v) {
-  Expr* lhs = v->lhs();
-  Expr* rhs = v->rhs();
-  Expr* ret_val1 = v->ret_val1();
-  Expr* ret_val2 = v->ret_val2();
-  Expr* lhs_new = lhs->accept_mutator(this);
-  Expr* rhs_new = rhs->accept_mutator(this);
-  Expr* ret_val1_new = ret_val1->accept_mutator(this);
-  Expr* ret_val2_new = ret_val2->accept_mutator(this);
+ExprPtr IRMutator::mutate(CompareSelectPtr v) {
+  ExprPtr lhs = v->lhs();
+  ExprPtr rhs = v->rhs();
+  ExprPtr ret_val1 = v->ret_val1();
+  ExprPtr ret_val2 = v->ret_val2();
+  ExprPtr lhs_new = lhs->accept_mutator(this);
+  ExprPtr rhs_new = rhs->accept_mutator(this);
+  ExprPtr ret_val1_new = ret_val1->accept_mutator(this);
+  ExprPtr ret_val2_new = ret_val2->accept_mutator(this);
   if (lhs != lhs_new) {
     v->set_lhs(lhs_new);
   }
@@ -107,40 +111,40 @@ Expr* IRMutator::mutate(CompareSelect* v) {
 }
 
 // NOLINTNEXTLINE
-#define IMM_MUTATE_DEFINE(_1, Name)       \
-  Expr* IRMutator::mutate(Name##Imm* v) { \
-    return v;                             \
+#define IMM_MUTATE_DEFINE(_1, Name)           \
+  ExprPtr IRMutator::mutate(Name##ImmPtr v) { \
+    return v;                                 \
   }
-AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, IMM_MUTATE_DEFINE);
+AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, IMM_MUTATE_DEFINE);
 #undef IMM_MUTATE_DEFINE
 
-Expr* IRMutator::mutate(Cast* v) {
-  Expr* src_value = v->src_value();
-  Expr* src_value_new = src_value->accept_mutator(this);
+ExprPtr IRMutator::mutate(CastPtr v) {
+  ExprPtr src_value = v->src_value();
+  ExprPtr src_value_new = src_value->accept_mutator(this);
   if (src_value != src_value_new) {
     v->set_src_value(src_value_new);
   }
   return v;
 }
 
-Expr* IRMutator::mutate(BitCast* v) {
-  Expr* src_value = v->src_value();
-  Expr* src_value_new = src_value->accept_mutator(this);
+ExprPtr IRMutator::mutate(BitCastPtr v) {
+  ExprPtr src_value = v->src_value();
+  ExprPtr src_value_new = src_value->accept_mutator(this);
   if (src_value != src_value_new) {
     v->set_src_value(src_value_new);
   }
   return v;
 }
 
-Expr* IRMutator::mutate(Var* v) {
+ExprPtr IRMutator::mutate(VarPtr v) {
   return v;
 }
 
-Expr* IRMutator::mutate(Ramp* v) {
-  Expr* base = v->base();
-  Expr* stride = v->stride();
-  Expr* base_new = base->accept_mutator(this);
-  Expr* stride_new = stride->accept_mutator(this);
+ExprPtr IRMutator::mutate(RampPtr v) {
+  ExprPtr base = v->base();
+  ExprPtr stride = v->stride();
+  ExprPtr base_new = base->accept_mutator(this);
+  ExprPtr stride_new = stride->accept_mutator(this);
   if (base != base_new) {
     v->set_base(base_new);
   }
@@ -150,20 +154,20 @@ Expr* IRMutator::mutate(Ramp* v) {
   return v;
 }
 
-Expr* IRMutator::mutate(Load* v) {
-  Buf* buf = v->buf();
+ExprPtr IRMutator::mutate(LoadPtr v) {
+  BufPtr buf = v->buf();
 
   bool any_index_changed = false;
-  std::vector<Expr*> indices_new;
+  std::vector<ExprPtr> indices_new;
   indices_new.reserve(v->indices().size());
-  for (Expr* ind : v->indices()) {
-    Expr* new_ind = ind->accept_mutator(this);
+  for (ExprPtr ind : v->indices()) {
+    ExprPtr new_ind = ind->accept_mutator(this);
     if (new_ind != ind) {
       any_index_changed = true;
     }
     indices_new.push_back(new_ind);
   }
-  Buf* buf_new = dynamic_cast<Buf*>(buf->accept_mutator(this));
+  BufPtr buf_new = to<Buf>(buf->accept_mutator(this));
 
   if (buf != buf_new) {
     v->set_buf(buf_new);
@@ -174,18 +178,16 @@ Expr* IRMutator::mutate(Load* v) {
   return v;
 }
 
-Expr* IRMutator::mutate(Buf* v) {
-  Var* var = v->base_handle();
-  Var* var_new =
-      // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-      dynamic_cast<Var*>(const_cast<Expr*>(var->accept_mutator(this)));
+ExprPtr IRMutator::mutate(BufPtr v) {
+  VarPtr var = v->base_handle();
+  VarPtr var_new = to<Var>(var->accept_mutator(this));
   if (!var_new) {
     return nullptr;
   }
 
   bool dims_changed = false;
-  std::vector<Expr*> dims_old = v->dims();
-  std::vector<Expr*> dims_new(dims_old.size());
+  std::vector<ExprPtr> dims_old = v->dims();
+  std::vector<ExprPtr> dims_new(dims_old.size());
   for (const auto i : c10::irange(dims_old.size())) {
     dims_new[i] = dims_old[i]->accept_mutator(this);
     dims_changed |= (dims_new[i] != dims_old[i]);
@@ -201,22 +203,22 @@ Expr* IRMutator::mutate(Buf* v) {
   return v;
 }
 
-Expr* IRMutator::mutate(Broadcast* v) {
-  Expr* value = v->value();
-  Expr* value_new = value->accept_mutator(this);
+ExprPtr IRMutator::mutate(BroadcastPtr v) {
+  ExprPtr value = v->value();
+  ExprPtr value_new = value->accept_mutator(this);
   if (value != value_new) {
     v->set_value(value_new);
   }
   return v;
 }
 
-Expr* IRMutator::mutate(IfThenElse* v) {
-  Expr* condition = v->condition();
-  Expr* true_value = v->true_value();
-  Expr* false_value = v->false_value();
-  Expr* condition_new = condition->accept_mutator(this);
-  Expr* true_value_new = true_value->accept_mutator(this);
-  Expr* false_value_new = false_value->accept_mutator(this);
+ExprPtr IRMutator::mutate(IfThenElsePtr v) {
+  ExprPtr condition = v->condition();
+  ExprPtr true_value = v->true_value();
+  ExprPtr false_value = v->false_value();
+  ExprPtr condition_new = condition->accept_mutator(this);
+  ExprPtr true_value_new = true_value->accept_mutator(this);
+  ExprPtr false_value_new = false_value->accept_mutator(this);
 
   if (condition != condition_new) {
     v->set_condition(condition_new);
@@ -230,12 +232,12 @@ Expr* IRMutator::mutate(IfThenElse* v) {
   return v;
 }
 
-Expr* IRMutator::mutate(Intrinsics* v) {
-  std::vector<Expr*> params(v->nparams());
+ExprPtr IRMutator::mutate(IntrinsicsPtr v) {
+  std::vector<ExprPtr> params(v->nparams());
   bool any_change = false;
   for (int i = 0; i < v->nparams(); i++) {
-    Expr* value = v->param(i);
-    Expr* value_new = value->accept_mutator(this);
+    ExprPtr value = v->param(i);
+    ExprPtr value_new = value->accept_mutator(this);
     if (value != value_new) {
       any_change = true;
     }
@@ -247,79 +249,79 @@ Expr* IRMutator::mutate(Intrinsics* v) {
   return v;
 }
 
-Expr* IRMutator::mutate(Term* v) {
-  Expr* newScalar = v->scalar()->accept_mutator(this);
+ExprPtr IRMutator::mutate(TermPtr v) {
+  ExprPtr newScalar = v->scalar()->accept_mutator(this);
 
-  std::vector<Expr*> variables;
-  for (auto* t : v->variables()) {
+  std::vector<ExprPtr> variables;
+  for (auto t : v->variables()) {
     variables.push_back(t->accept_mutator(this));
   }
-  return new Term(v->hasher(), newScalar, variables);
+  return alloc<Term>(v->hasher(), newScalar, variables);
 }
 
-Expr* IRMutator::mutate(Polynomial* v) {
-  Expr* newScalar = v->scalar()->accept_mutator(this);
+ExprPtr IRMutator::mutate(PolynomialPtr v) {
+  ExprPtr newScalar = v->scalar()->accept_mutator(this);
 
-  std::vector<Term*> variables;
-  for (auto* t : v->variables()) {
-    variables.push_back(static_cast<Term*>(t->accept_mutator(this)));
+  std::vector<TermPtr> variables;
+  for (auto t : v->variables()) {
+    variables.push_back(static_to<Term>(t->accept_mutator(this)));
   }
-  return new Polynomial(v->hasher(), newScalar, variables);
+  return alloc<Polynomial>(v->hasher(), newScalar, variables);
 }
 
-Expr* IRMutator::mutate(RoundOff* v) {
-  return new RoundOff(
+ExprPtr IRMutator::mutate(RoundOffPtr v) {
+  return alloc<RoundOff>(
       v->lhs()->accept_mutator(this), v->rhs()->accept_mutator(this));
 }
 
-Expr* IRMutator::mutate(MaxTerm* v) {
-  Expr* newScalar = nullptr;
+ExprPtr IRMutator::mutate(MaxTermPtr v) {
+  ExprPtr newScalar = nullptr;
   if (v->scalar()) {
     newScalar = v->scalar()->accept_mutator(this);
   }
 
-  std::vector<Expr*> variables;
-  for (auto* t : v->variables()) {
+  std::vector<ExprPtr> variables;
+  for (auto t : v->variables()) {
     variables.push_back(t->accept_mutator(this));
   }
-  return new MaxTerm(v->hasher(), newScalar, v->propagate_nans(), variables);
+  return alloc<MaxTerm>(v->hasher(), newScalar, v->propagate_nans(), variables);
 }
 
-Expr* IRMutator::mutate(MinTerm* v) {
-  Expr* newScalar = nullptr;
+ExprPtr IRMutator::mutate(MinTermPtr v) {
+  ExprPtr newScalar = nullptr;
   if (v->scalar()) {
     newScalar = v->scalar()->accept_mutator(this);
   }
 
-  std::vector<Expr*> variables;
-  for (auto* t : v->variables()) {
+  std::vector<ExprPtr> variables;
+  for (auto t : v->variables()) {
     variables.push_back(t->accept_mutator(this));
   }
-  return new MinTerm(v->hasher(), newScalar, v->propagate_nans(), variables);
+  return alloc<MinTerm>(v->hasher(), newScalar, v->propagate_nans(), variables);
 }
 
-Expr* IRMutator::mutate(ReduceOp* v) {
-  Expr* body_new = v->body()->accept_mutator(this);
+ExprPtr IRMutator::mutate(ReduceOpPtr v) {
+  ExprPtr body_new = v->body()->accept_mutator(this);
 
-  std::vector<Var*> new_reduce_args;
-  for (auto* r : v->reduce_args()) {
-    new_reduce_args.push_back(static_cast<Var*>(r->accept_mutator(this)));
+  std::vector<VarPtr> new_reduce_args;
+  for (auto r : v->reduce_args()) {
+    new_reduce_args.push_back(static_to<Var>(r->accept_mutator(this)));
   }
 
-  return new ReduceOp(body_new, new_reduce_args, v->reducer());
+  return alloc<ReduceOp>(body_new, new_reduce_args, v->reducer());
 }
 
-Stmt* IRMutator::mutate(For* v) {
-  Expr* var = v->var();
-  Expr* start = v->start();
-  Expr* stop = v->stop();
-  Stmt* body = v->body();
+StmtPtr IRMutator::mutate(ForPtr v) {
+  ExprPtr var = v->var();
+  ExprPtr start = v->start();
+  ExprPtr stop = v->stop();
+  StmtPtr body = v->body();
   LoopOptions loop_options = v->loop_options();
-  Expr* var_new_expr = var->accept_mutator(this);
-  Var* var_new = dynamic_cast<Var*>(var_new_expr);
-  Expr* start_new = start->accept_mutator(this);
-  Expr* stop_new = stop->accept_mutator(this);
-  Stmt* body_new = body->accept_mutator(this);
+  ExprPtr var_new_expr = var->accept_mutator(this);
+  VarPtr var_new = to<Var>(var_new_expr);
+  ExprPtr start_new = start->accept_mutator(this);
+  ExprPtr stop_new = stop->accept_mutator(this);
+  StmtPtr body_new = body->accept_mutator(this);
   if (!body_new) {
     return nullptr;
   }
@@ -338,12 +340,12 @@ Stmt* IRMutator::mutate(For* v) {
   return v;
 }
 
-Stmt* IRMutator::mutate(Block* v) {
+StmtPtr IRMutator::mutate(BlockPtr v) {
   bool any_change = false;
 
-  std::vector<Stmt*> stmts;
-  for (Stmt* stmt : *v) {
-    Stmt* stmt_new = stmt->accept_mutator(this);
+  std::vector<StmtPtr> stmts;
+  for (StmtPtr stmt : *v) {
+    StmtPtr stmt_new = stmt->accept_mutator(this);
     if (stmt != stmt_new) {
       any_change = true;
     } else {
@@ -359,21 +361,21 @@ Stmt* IRMutator::mutate(Block* v) {
   return v;
 }
 
-Stmt* IRMutator::mutate(Store* v) {
-  Buf* buf = v->buf();
+StmtPtr IRMutator::mutate(StorePtr v) {
+  BufPtr buf = v->buf();
 
   bool any_index_changed = false;
-  std::vector<Expr*> indices_new;
-  for (Expr* ind : v->indices()) {
-    Expr* new_ind = ind->accept_mutator(this);
+  std::vector<ExprPtr> indices_new;
+  for (ExprPtr ind : v->indices()) {
+    ExprPtr new_ind = ind->accept_mutator(this);
     if (new_ind != ind) {
       any_index_changed = true;
     }
     indices_new.push_back(new_ind);
   }
-  Expr* value = v->value();
-  Buf* buf_new = dynamic_cast<Buf*>(buf->accept_mutator(this));
-  Expr* value_new = value->accept_mutator(this);
+  ExprPtr value = v->value();
+  BufPtr buf_new = to<Buf>(buf->accept_mutator(this));
+  ExprPtr value_new = value->accept_mutator(this);
 
   if (buf != buf_new) {
     v->set_buf(buf_new);
@@ -387,21 +389,21 @@ Stmt* IRMutator::mutate(Store* v) {
   return v;
 }
 
-Stmt* IRMutator::mutate(AtomicAdd* v) {
-  Buf* buf = v->buf();
+StmtPtr IRMutator::mutate(AtomicAddPtr v) {
+  BufPtr buf = v->buf();
 
   bool any_index_changed = false;
-  std::vector<Expr*> indices_new;
-  for (Expr* ind : v->indices()) {
-    Expr* new_ind = ind->accept_mutator(this);
+  std::vector<ExprPtr> indices_new;
+  for (ExprPtr ind : v->indices()) {
+    ExprPtr new_ind = ind->accept_mutator(this);
     if (new_ind != ind) {
       any_index_changed = true;
     }
     indices_new.push_back(new_ind);
   }
-  Expr* value = v->value();
-  Buf* buf_new = dynamic_cast<Buf*>(buf->accept_mutator(this));
-  Expr* value_new = value->accept_mutator(this);
+  ExprPtr value = v->value();
+  BufPtr buf_new = to<Buf>(buf->accept_mutator(this));
+  ExprPtr value_new = value->accept_mutator(this);
 
   if (buf != buf_new) {
     v->set_buf(buf_new);
@@ -415,30 +417,32 @@ Stmt* IRMutator::mutate(AtomicAdd* v) {
   return v;
 }
 
-Stmt* IRMutator::mutate(SyncThreads* v) {
-  return new SyncThreads();
+StmtPtr IRMutator::mutate(SyncThreadsPtr v) {
+  return alloc<SyncThreads>();
 }
 
-Stmt* IRMutator::mutate(ExternalCall* v) {
-  Buf* buf = v->buf();
-  Buf* buf_new = dynamic_cast<Buf*>(buf->accept_mutator(this));
-  TORCH_INTERNAL_ASSERT(buf_new);
+StmtPtr IRMutator::mutate(ExternalCallPtr v) {
+  BufPtr buf = v->buf();
+  BufPtr buf_new = to<Buf>(buf->accept_mutator(this));
+  TORCH_INTERNAL_ASSERT(
+      buf_new, buildErrorMessage("IRMutator produced null for Buf."));
 
   bool buf_args_changed = false;
-  std::vector<Buf*> buf_args_new;
+  std::vector<BufPtr> buf_args_new;
   buf_args_new.reserve(v->buf_args().size());
-  for (Buf* buf_arg : v->buf_args()) {
-    Buf* buf_arg_new = dynamic_cast<Buf*>(buf_arg->accept_mutator(this));
-    TORCH_INTERNAL_ASSERT(buf_arg_new);
+  for (BufPtr buf_arg : v->buf_args()) {
+    BufPtr buf_arg_new = to<Buf>(buf_arg->accept_mutator(this));
+    TORCH_INTERNAL_ASSERT(
+        buf_arg_new, buildErrorMessage("IRMutator produced null for Buf."));
     buf_args_new.push_back(buf_arg_new);
     buf_args_changed |= buf_arg_new != buf_arg;
   }
 
   bool args_changed = false;
-  std::vector<Expr*> args_new;
+  std::vector<ExprPtr> args_new;
   args_new.reserve(v->args().size());
-  for (Expr* arg : v->args()) {
-    Expr* arg_new = arg->accept_mutator(this);
+  for (ExprPtr arg : v->args()) {
+    ExprPtr arg_new = arg->accept_mutator(this);
     args_new.push_back(arg_new);
     args_changed |= arg_new != arg;
   }
@@ -455,32 +459,34 @@ Stmt* IRMutator::mutate(ExternalCall* v) {
   return v;
 }
 
-Stmt* IRMutator::mutate(Allocate* v) {
-  Buf* buf = v->buf();
-  Buf* buf_new = dynamic_cast<Buf*>(buf->accept_mutator(this));
-  TORCH_INTERNAL_ASSERT(buf_new);
+StmtPtr IRMutator::mutate(AllocatePtr v) {
+  BufPtr buf = v->buf();
+  BufPtr buf_new = to<Buf>(buf->accept_mutator(this));
+  TORCH_INTERNAL_ASSERT(
+      buf_new, buildErrorMessage("IRMutator produced null for Buf."));
   if (buf != buf_new) {
     v->set_buf(buf_new);
   }
   return v;
 }
 
-Stmt* IRMutator::mutate(Free* v) {
-  Buf* buf = v->buf();
-  Buf* buf_new = dynamic_cast<Buf*>(buf->accept_mutator(this));
-  TORCH_INTERNAL_ASSERT(buf_new);
+StmtPtr IRMutator::mutate(FreePtr v) {
+  BufPtr buf = v->buf();
+  BufPtr buf_new = to<Buf>(buf->accept_mutator(this));
+  TORCH_INTERNAL_ASSERT(
+      buf_new, buildErrorMessage("IRMutator produced null for Buf."));
   if (buf != buf_new) {
     v->set_buf(buf_new);
   }
   return v;
 }
 
-Stmt* IRMutator::mutate(Let* v) {
-  Var* var_old = v->var();
-  Var* var_new = dynamic_cast<Var*>(var_old->accept_mutator(this));
+StmtPtr IRMutator::mutate(LetPtr v) {
+  VarPtr var_old = v->var();
+  VarPtr var_new = to<Var>(var_old->accept_mutator(this));
 
-  Expr* val_old = v->value();
-  Expr* val_new = val_old->accept_mutator(this);
+  ExprPtr val_old = v->value();
+  ExprPtr val_new = val_old->accept_mutator(this);
 
   if (var_old != var_new) {
     v->set_var(var_new);
@@ -491,14 +497,14 @@ Stmt* IRMutator::mutate(Let* v) {
   return v;
 }
 
-Stmt* IRMutator::mutate(Cond* v) {
-  Expr* cond_old = v->condition();
-  Stmt* true_old = v->true_stmt();
-  Stmt* false_old = v->false_stmt();
+StmtPtr IRMutator::mutate(CondPtr v) {
+  ExprPtr cond_old = v->condition();
+  StmtPtr true_old = v->true_stmt();
+  StmtPtr false_old = v->false_stmt();
 
-  Expr* cond_new = cond_old->accept_mutator(this);
-  Stmt* true_new = true_old ? true_old->accept_mutator(this) : true_old;
-  Stmt* false_new = false_old ? false_old->accept_mutator(this) : false_old;
+  ExprPtr cond_new = cond_old->accept_mutator(this);
+  StmtPtr true_new = true_old ? true_old->accept_mutator(this) : true_old;
+  StmtPtr false_new = false_old ? false_old->accept_mutator(this) : false_old;
 
   if (cond_old != cond_new) {
     v->set_condition(cond_new);

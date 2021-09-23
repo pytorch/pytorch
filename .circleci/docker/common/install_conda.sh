@@ -69,8 +69,8 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   }
 
   # Install PyTorch conda deps, as per https://github.com/pytorch/pytorch README
-  # DO NOT install cmake here as it would install a version newer than 3.5, but
-  # we want to pin to version 3.5.
+  # DO NOT install cmake here as it would install a version newer than 3.10, but
+  # we want to pin to version 3.10.
   SCIPY_VERSION=1.1.0
   if [ "$ANACONDA_PYTHON_VERSION" = "3.9" ]; then
     # Install llvm-8 as it is required to compile llvmlite-0.30.0 from source
@@ -103,14 +103,12 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   # TODO: Why is scipy pinned
   # Pin MyPy version because new errors are likely to appear with each release
   # Pin hypothesis to avoid flakiness: https://github.com/pytorch/pytorch/issues/31136
-  # Pin coverage so we can use COVERAGE_RCFILE
   as_jenkins pip install --progress-bar off pytest \
     scipy==$SCIPY_VERSION \
     scikit-image \
     psutil \
     unittest-xml-reporting \
     boto3==1.16.34 \
-    coverage==5.5 \
     hypothesis==4.53.2 \
     expecttest==0.1.3 \
     mypy==0.812 \

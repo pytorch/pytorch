@@ -13,8 +13,8 @@ namespace analysis {
 
 // A simple class containing the start and end of a range in a single dimension.
 struct TORCH_API Bound {
-  Expr* start{nullptr};
-  Expr* end{nullptr};
+  ExprPtr start{nullptr};
+  ExprPtr end{nullptr};
 
   // This stores whether or not the start and end of this Bound have previously
   // been swapped. This occurs when the bound is in a loop with a negative
@@ -22,7 +22,7 @@ struct TORCH_API Bound {
   bool swapped{false};
 
   Bound() = default;
-  Bound(Expr* s, Expr* e) : start(s), end(e) {}
+  Bound(ExprPtr s, ExprPtr e) : start(s), end(e) {}
 
   void print() const {
     std::cout << "(" << *start << ", " << *end << ")";
@@ -44,7 +44,7 @@ struct TORCH_API Bound {
 
 struct BoundHash {
   size_t operator()(const Bound& b) const {
-    return std::hash<Expr*>()(b.start) ^ std::hash<Expr*>()(b.end);
+    return std::hash<ExprPtr>()(b.start) ^ std::hash<ExprPtr>()(b.end);
   }
 };
 

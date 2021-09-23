@@ -297,13 +297,13 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
           }
           case INST(OP): {
             INST_GUARD;
-            frame.function->operator_table_[inst.X](&stack);
+            frame.function->operator_table_[inst.X](stack);
           }
             INST_NEXT;
           case INST(OPN): {
             INST_GUARD;
             stack.push_back(inst.N);
-            frame.function->operator_table_[inst.X](&stack);
+            frame.function->operator_table_[inst.X](stack);
           }
             INST_NEXT;
           case INST(LOAD): {
@@ -720,7 +720,8 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
       }
       if (FLAGS_torch_jit_enable_rethrow_caught_exception) {
         if (future_) {
-          future_->setError(std::make_exception_ptr(e));
+          future_->setError(std::current_exception());
+          return false;
         }
         throw;
       }
@@ -977,11 +978,13 @@ MobileCode::MobileCode(
     const std::shared_ptr<Graph>& graph,
     std::string function_name,
     bool emit_default_input_instructions,
+    bool support_default_args_before_out,
     size_t remaining_bailout_depth)
     : Code(new interpreter::MobileCodeImpl(
           graph,
           std::move(function_name),
           emit_default_input_instructions,
+          support_default_args_before_out,
           remaining_bailout_depth)) {}
 
 MobileCode::~MobileCode() = default;

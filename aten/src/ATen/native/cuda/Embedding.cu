@@ -5,14 +5,11 @@
 #include <c10/util/Exception.h>
 #include <c10/macros/Macros.h>
 
-#include <THC/THCDeviceUtils.cuh>
-#include <THC/THCTensorMathReduce.cuh>
-#include <THC/THCReduceApplyUtils.cuh>
-
 #include <ATen/cuda/cub.cuh>
 
 #include <ATen/native/cuda/EmbeddingBackwardKernel.cuh>
 #include <ATen/native/cuda/SortingCommon.cuh>
+#include <ATen/native/cuda/block_reduce.cuh>
 
 namespace at { namespace native {
 
@@ -202,8 +199,7 @@ __global__ void renorm_kernel(
     }
   }
 
-  using Op = ReduceAdd<accscalar_t>;
-  v = reduceBlock<accscalar_t>(sdata, blockDim.x, v, Op(), 0);
+  v = cuda_utils::BlockReduceSum(v, sdata);
 
   if (tid == 0) {
     sdata[0] = std::pow(v, static_cast<accscalar_t>(1.0 / norm_type));
@@ -224,13 +220,15 @@ __global__ void renorm_kernel(
 template<typename index_t>
 void embedding_dense_backward_cuda_scan(Tensor &sorted_indices, Tensor &count);
 
-Tensor embedding_dense_backward_cuda(const Tensor & grad_, const Tensor & indices,
+Tensor embedding_dense_backward_cuda(const Tensor & grad_, const Tensor & indices_,
                                int64_t num_weights, int64_t padding_idx,
                                bool scale_grad_by_freq) {
   auto grad_arg = TensorArg(grad_, "grad", 1);
-  auto indices_arg = TensorArg(indices, "indices", 1);
+  auto indices_arg = TensorArg(indices_, "indices", 1);
   checkScalarTypes("embedding_backward", indices_arg, {kLong, kInt});
   checkSameGPU("embedding_backward", grad_arg, indices_arg);
+
+  auto indices = indices_.contiguous();
 
   auto num_indices = indices.numel();
   auto grad = grad_.contiguous().view({num_indices, grad_.size(-1)});
@@ -277,7 +275,7 @@ Tensor embedding_dense_backward_cuda(const Tensor & grad_, const Tensor & indice
     cuda::cub::sort_pairs(
       indices.data_ptr<index_t>(), sorted_indices.data_ptr<index_t>(),
       range.data_ptr<index_t>(), orig_indices.data_ptr<index_t>(),
-      num_indices, false, 0, nbits);
+      num_indices, false/*, 0, nbits*/);
 
     if (scale_grad_by_freq) {
       count = at::empty_like(indices, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
@@ -312,13 +310,17 @@ Tensor & embedding_renorm_cuda_(Tensor & self, const Tensor & indices,
       num_indices
     );
 
+    constexpr int num_threads = 128;
+    static_assert(num_threads % C10_WARP_SIZE == 0 &&
+                  num_threads <= cuda_utils::kCUDABlockReduceMaxThreads,
+                  "BlockReduceSum requires all warps be active");
     dim3 grid = num_unique_indices.item<int64_t>();
-    dim3 block = 128;
+    dim3 block = num_threads;
     int dim = self.stride(0);
 
-    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, self.scalar_type(), "embedding_backward", [&] {
+    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, self.scalar_type(), "embedding_renorm_cuda_", [&] {
       using accscalar_t = acc_type<scalar_t, true>;
-      renorm_kernel<<<grid, block, 128 * sizeof(accscalar_t), stream>>>(
+      renorm_kernel<<<grid, block, (block.x / C10_WARP_SIZE) * sizeof(accscalar_t), stream>>>(
         self.data_ptr<scalar_t>(),
         unique_indices.data_ptr<index_t>(),
         static_cast<accscalar_t>(max_norm),

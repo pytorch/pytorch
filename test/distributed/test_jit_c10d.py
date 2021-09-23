@@ -6,7 +6,7 @@ import time
 from typing import List
 
 from torch.testing._internal.common_distributed import requires_nccl, create_tcp_store
-from torch.testing._internal.common_utils import load_tests, TEST_WITH_TSAN, run_tests, sandcastle_skip_if
+from torch.testing._internal.common_utils import load_tests, run_tests, sandcastle_skip_if
 from torch.testing._internal.jit_utils import JitTestCase
 
 # load_tests from common_utils is used to automatically filter tests for
@@ -28,10 +28,6 @@ def unique_process_group_name(prefix):
     # wouldn't be name conflicts.
     now = int(time.time() * 1000)
     return "%s_%d" % (prefix, now)
-
-if TEST_WITH_TSAN:
-    print("Skip as TSAN is not fork-safe since we're forking in a multi-threaded environment", file=sys.stderr)
-    sys.exit(0)
 
 class ProcessGroupNCCLJitTest(JitTestCase):
     MAIN_PROCESS_RANK = 0
