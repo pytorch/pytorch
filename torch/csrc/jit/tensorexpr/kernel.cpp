@@ -2455,6 +2455,13 @@ c10::optional<ScalarType> findDtypeForValue(const torch::jit::Value* v) {
   return c10::nullopt;
 }
 
+NNCLoweringFunction getStandardLoweringFor(const std::string& op) {
+  const auto& lowerings = getNNCLoweringRegistry();
+  if (lowerings.count(op))
+    return lowerings.at(op);
+  return nullptr;
+}
+
 Tensor TensorExprKernel::computeValue(const torch::jit::Value* v) {
   auto inputs = v->node()->inputs();
   auto op = v->node()->kind();
@@ -2482,6 +2489,10 @@ Tensor TensorExprKernel::computeValue(const torch::jit::Value* v) {
 
   if (NNCLoweringFunction custom_lowering = getCustomLoweringFor(op)) {
     return custom_lowering(argInputs, outputShape, outputType, device_);
+  }
+  if (NNCLoweringFunction lowering =
+          getStandardLoweringFor(op.toQualString())) {
+    return lowering(argInputs, outputShape, outputType, device_);
   }
   return computeOperandValue(op, argInputs, outputShape, outputType, device_);
 }
