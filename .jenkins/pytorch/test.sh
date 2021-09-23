@@ -292,7 +292,7 @@ test_libtorch() {
   fi
 }
 
-test_aot_model_compiler {
+test_aot_model_compiler() {
   # Test Ahead of Time model compilation
   source test/mobile/aot_compile/test.sh
 }
