@@ -16,7 +16,7 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests, deviceCountAtLeast, onlyNativeDeviceTypes,
     onlyCPU, largeTensorTest, precisionOverride, dtypes,
-    onlyCUDA, skipCPUIf, dtypesIfCUDA, dtypesIfCPU, skipMeta)
+    onlyCUDA, skipCPUIf, dtypesIfCUDA, skipMeta)
 from torch.testing._internal.common_dtype import (
     get_all_dtypes, get_all_math_dtypes, get_all_int_dtypes, get_all_fp_dtypes, get_all_complex_dtypes
 )
