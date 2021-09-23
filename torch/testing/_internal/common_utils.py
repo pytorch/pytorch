@@ -2810,7 +2810,6 @@ def get_tensors_from(args, kwargs):
     return set([arg for arg in args if isinstance(arg, Tensor)] +
                [v for v in kwargs.values() if isinstance(v, Tensor)])
 
-
 def has_breakpad():
     # We always build with breakpad in CI
     if IS_IN_CI:
