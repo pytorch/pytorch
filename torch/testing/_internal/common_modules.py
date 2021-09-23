@@ -159,6 +159,10 @@ class ModuleInfo(object):
 
 
 def duplicate_with_zero_batch_dim_input(module_input):
+    # Creates ModuleInput by reducing the size of the 0th dimension to 0
+    # in constructor_input and forward_input of module_input.
+    # Make sure the tensors in module_input semantically make sense with
+    # the 0th dimension set to size 0.
     def _zero_first_dim(objs):
         if isinstance(objs, FunctionInput):
             return FunctionInput(*_zero_first_dim(objs.args), **_zero_first_dim(objs.kwargs))
