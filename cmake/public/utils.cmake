@@ -466,6 +466,7 @@ function(torch_compile_options libname)
   target_compile_options(${libname} PRIVATE
       $<$<COMPILE_LANGUAGE:CXX>:${private_compile_options}>)
   if(USE_CUDA)
+    # Convert CMake list to comma-separated list
     string(REPLACE ";" "," private_compile_options "${private_compile_options}")
     target_compile_options(${libname} PRIVATE
         $<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=${private_compile_options}>)
