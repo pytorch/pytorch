@@ -18,10 +18,12 @@ class Model(nn.Module):
             nn.Linear(16, 16)
         )
         self.linear = nn.Linear(16, 16)
+        self.head = nn.Linear(16, 4)
 
     def forward(self, x):
         x = self.seq(x)
         x = self.linear(x)
+        x = self.head(x)
         return x
 
 
@@ -43,7 +45,7 @@ class TestBaseSparsifier(TestCase):
         model = Model()
         sparsifier = ImplementedSparsifier(test=3)
         sparsifier.prepare(model, config=None)
-        assert len(sparsifier.module_groups) == 2
+        assert len(sparsifier.module_groups) == 3
         sparsifier.step()
         # Can instantiate the model with configs
         sparsifier = ImplementedSparsifier(test=3)
@@ -52,6 +54,31 @@ class TestBaseSparsifier(TestCase):
         assert sparsifier.module_groups[0]['fqn'] == 'linear'
         assert 'test' in sparsifier.module_groups[0]
         assert sparsifier.module_groups[0]['test'] == 3
+
+    def test_prepare_config(self):
+        model = Model()
+        sparsifier = ImplementedSparsifier(test=3)
+        # Make sure there are no parametrizations before `prepare`
+        assert not hasattr(model.seq[0], 'parametrizations')
+        assert not hasattr(model.linear, 'parametrizations')
+        assert not hasattr(model.head, 'parametrizations')
+        sparsifier.prepare(model, config=[
+            {'fqn': 'seq.0', 'test': 42},
+            # No 'linear' to make sure it will be skipped in the sparsification
+            {'module': model.head, 'fqn': 'head'}
+        ])
+        assert len(sparsifier.module_groups) == 2
+        # Check if default argument is not assigned if explicit
+        assert sparsifier.module_groups[0]['fqn'] == 'seq.0'
+        assert sparsifier.module_groups[0]['test'] == 42
+        # Check if FQN and module are pointing to the same location
+        assert sparsifier.module_groups[1]['fqn'] == 'head'
+        assert sparsifier.module_groups[1]['module'] == model.head
+        # Check if parameterizations are attached
+        assert hasattr(model.seq[0], 'parametrizations')
+        assert not hasattr(model.linear, 'parametrizations')
+        assert hasattr(model.head, 'parametrizations')
+
 
     def test_step(self):
         model = Model()

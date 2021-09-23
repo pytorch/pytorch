@@ -142,6 +142,7 @@ class BaseSparsifier(abc.ABC):
                     else:
                         stack.append(child)
 
+        # TODO: Remove the configuration by reference ('module')
         for module_config in self.config:
             if isinstance(module_config, nn.Module):
                 module_config = {'module': module_config}
@@ -168,6 +169,7 @@ class BaseSparsifier(abc.ABC):
             if module_fqn and module_fqn[0] == '.':
                 module_fqn = module_fqn[1:]
             local_args['fqn'] = module_fqn
+            local_args['module'] = module
             self.module_groups.append(local_args)
 
         self._prepare()
