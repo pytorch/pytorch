@@ -755,10 +755,13 @@ class TestJit(JitTestCase):
     def test_T_mT_H_mH(self):
         def T(x):
             return x.mT
+
         def mT(x):
             return x.mT
+
         def H(x):
             return x.H
+
         def mH(x):
             return x.mH
 
