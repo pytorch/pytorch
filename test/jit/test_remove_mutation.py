@@ -241,6 +241,26 @@ class TestRemoveMutation(JitTestCase):
         FileCheck().check_not("set_item").run(scripted_fn.graph)
         self.checkScript(successful, ())
 
+        def successful():
+            x = [1, 2, 3]
+            x[0] = 4
+            x[-1] = 0
+            return x
+
+        scripted_fn = torch.jit.script(successful)
+        torch._C._jit_pass_remove_mutation(scripted_fn.graph)
+        FileCheck().check_not("set_item").run(scripted_fn.graph)
+        self.checkScript(successful, ())
+
+        def successful():
+            x = [1]
+            x[-1] = 3
+            return x
+
+        scripted_fn = torch.jit.script(successful)
+        torch._C._jit_pass_remove_mutation(scripted_fn.graph)
+        FileCheck().check_not("set_item").run(scripted_fn.graph)
+        self.checkScript(successful, ())
 
     def test_common_pytorch_list_ops(self):
         for op in ["cat", "stack", "vstack", "hstack", "dstack"]:
