@@ -116,11 +116,14 @@ const std::string shape_compute_functions =
             out[infer_dim] = numel // newsize
           return out
 
-        def view(self: List[int], sizes: List[int]):
+        def numel(sizes: List[int]):
           numel = 1
-          for elem in self:
+          for elem in sizes:
             numel *= elem
-          return infer_size_impl(sizes, numel)
+          return numel
+
+        def view(self: List[int], sizes: List[int]):
+          return infer_size_impl(sizes, numel(self))
 
         def view_one_unused(self: List[int], sizes: List[int], *, implicit: bool=False):
           return view(self, sizes)
@@ -306,6 +309,53 @@ const std::string shape_compute_functions =
           out = _copy(self)
           out[dim] = (len + step - 1) // step
           return out
+
+        def check_cat_no_zero_dim(tensors: List[List[int]]):
+          for tensor in tensors:
+            assert(len(tensor) > 0)
+
+        def legacy_cat_wrap_dim(dim: int, tensor_sizes: List[List[int]]):
+          out_dim : Optional[int] = None
+          for size in tensor_sizes:
+            if len(size) != 0 and size != [0] and out_dim is not None:
+              out_dim = maybe_wrap_dim(dim, len(size))
+          if out_dim is None:
+            out_dim = dim
+          return out_dim
+
+        def should_skip(tensor: List[int]):
+          return numel(tensor) == 0 and len(tensor) == 1
+
+        def check_cat_shape_except_dim(first: List[int], second: List[int], dimension: int, index: int):
+          first_dims = len(first)
+          second_dims = len(second)
+          assert first_dims == second_dims, "Tensors must have same number of dimensions"
+          for dim in range(0, first_dims):
+            if dim != dimension:
+              assert first[dim] == second[dim], "Sizes of tensors must match except in dimension"
+
+        def cat(tensors: List[List[int]], dim: int):
+          check_cat_no_zero_dim(tensors)
+          dim = legacy_cat_wrap_dim(dim, tensors)
+          assert len(tensors) > 0
+          not_skipped_tensor: Optional[List[int]] = None
+          for tensor in tensors:
+            if not should_skip(tensor):
+              not_skipped_tensor = tensor
+          if not_skipped_tensor is None:
+            return [0]
+
+          cat_dim_size = 0
+
+          for i in range(len(tensors)):
+            tensor = tensors[i]
+            if not should_skip(tensor):
+              check_cat_shape_except_dim(not_skipped_tensor, tensor, dim, i)
+              cat_dim_size = cat_dim_size + tensor[dim]
+
+          result_size = _copy(not_skipped_tensor)
+          result_size[dim] = cat_dim_size
+          return result_size
 
         def select(self: List[int], dim: int, index: int):
           ndim = len(self)
@@ -617,6 +667,7 @@ static const OperatorMap<std::string>& get_schema_to_function_graph() {
       {"aten::conv2d(Tensor input, Tensor weight, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] dilation=1, int groups=1) -> Tensor", "conv2d"},
       {"aten::conv3d(Tensor input, Tensor weight, Tensor? bias=None, int[3] stride=1, int[3] padding=0, int[3] dilation=1, int groups=1) -> Tensor", "conv3d"},
       {"aten::flatten.using_ints(Tensor(a) self, int start_dim=0, int end_dim=-1) -> Tensor(a)", "flatten"},
+      {"aten::cat(Tensor[] tensors, int dim=0) -> Tensor", "cat"},
       {"aten::relu(Tensor self) -> Tensor", "unary"},
       {"aten::permute(Tensor(a) self, int[] dims) -> Tensor(a)", "permute"},
       {"aten::view(Tensor(a) self, int[] size) -> Tensor(a)", "view"},
