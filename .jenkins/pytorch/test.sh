@@ -9,8 +9,8 @@ set -eux
 # shellcheck disable=SC2034
 COMPACT_JOB_NAME="${BUILD_ENVIRONMENT}"
 
-# Get fully qualified path using realpath
-if [[ ! -z $CUSTOM_TEST_ARTIFACT_BUILD_DIR ]]; then
+if [[ -n $CUSTOM_TEST_ARTIFACT_BUILD_DIR ]]; then
+  # Get fully qualified path using realpath
   CUSTOM_TEST_ARTIFACT_BUILD_DIR=$(realpath "${CUSTOM_TEST_ARTIFACT_BUILD_DIR:-${PWD}/../}")
 fi
 
