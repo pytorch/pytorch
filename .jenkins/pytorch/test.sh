@@ -10,7 +10,9 @@ set -eux
 COMPACT_JOB_NAME="${BUILD_ENVIRONMENT}"
 
 # Get fully qualified path using realpath
-CUSTOM_TEST_ARTIFACT_BUILD_DIR=$(realpath "${CUSTOM_TEST_ARTIFACT_BUILD_DIR:-${PWD}/../}")
+if [[ ! -z $CUSTOM_TEST_ARTIFACT_BUILD_DIR ]]; then
+  CUSTOM_TEST_ARTIFACT_BUILD_DIR=$(realpath "${CUSTOM_TEST_ARTIFACT_BUILD_DIR:-${PWD}/../}")
+fi
 
 TORCH_INSTALL_DIR=$(python -c "import site; print(site.getsitepackages()[0])")/torch
 TORCH_BIN_DIR="$TORCH_INSTALL_DIR"/bin
