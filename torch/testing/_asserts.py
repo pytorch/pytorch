@@ -261,12 +261,12 @@ def _check_attributes_equal(
 def _equalize_attributes(actual: Tensor, expected: Tensor) -> Tuple[Tensor, Tensor]:
     """Equalizes some attributes of two tensors for value comparison.
 
-    If :attr:`actual` and :attr:`expected`
-    - are not on the same :attr:`~torch.Tensor.device`, they are moved CPU memory,
-    - do not have the same ``dtype``, they are promoted  to a common ``dtype`` (according to
-        :func:`torch.promote_types`)
-    - do not have the same ``layout``, they are converted to strided tensors, and
-    - both are sparse COO tensors, but only one is coalesced, they are coalesced.
+    If :attr:`actual` and :attr:`expected` are ...
+    - ... not on the same :attr:`~torch.Tensor.device`, they are moved CPU memory.
+    - ... not of the same ``dtype``, they are promoted  to a common ``dtype`` (according to
+        :func:`torch.promote_types`).
+    - ... not of the same ``layout``, they are converted to strided tensors.
+    - ... both sparse COO tensors but only one is coalesced, the other one is coalesced.
 
     Args:
         actual (Tensor): Actual tensor.
