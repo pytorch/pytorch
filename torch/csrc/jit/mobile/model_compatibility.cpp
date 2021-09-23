@@ -15,7 +15,8 @@
 
 namespace c10 {
 TypePtr parseType(const std::string& pythonStr);
-std::unordered_set<std::string> getContainedTypes(const std::string& pythonStr);
+std::unordered_set<std::string> getContainedTypes(
+    std::vector<std::string>& pythonStrs);
 } // namespace c10
 
 namespace torch {
@@ -231,20 +232,16 @@ std::unordered_set<std::string> _get_model_contained_types(
         method_tuple.at(1).toTuple()->elements()[BYTECODE_INDEX_TYPE];
     auto type_table =
         type_table_tuple.toTuple()->elements()[1].toTuple()->elements();
+
     // type_table is a list of IValue, and each IValue is a string,
     // for example: "Dict[int, Tuple[Tensor, Tensor, Tensor]]"
+    std::vector<std::string> type_name_list;
     for (const auto& type_definition : type_table) {
       std::unordered_set<std::string> type_tokens;
       std::string type_name = type_definition.toString()->string();
-
-      // parse the type only if it's new, and insert it in the record
-      if (parsed_type_names_records.find(type_name) ==
-          parsed_type_names_records.end()) {
-        parsed_type_names_records.insert(type_name);
-        type_tokens = at::getContainedTypes(type_name);
-        contained_types.insert(type_tokens.begin(), type_tokens.end());
-      }
+      type_name_list.emplace_back(type_name);
     }
+    contained_types = c10::getContainedTypes(type_name_list);
   }
 
   return contained_types;
