@@ -470,6 +470,8 @@ static Tensor generic_solve_jvp(
   solve_f solve,
   const Tensor& X, const Tensor& A,
   const Tensor& dA, const Tensor& dB,
+  // we need to compute A^{-1} dA. Sometimes this product could exhibit
+  // a structure that could be exploited. See, for example, lu_solve_jvp.
   c10::optional<solve_f> solve_with_structure = c10::nullopt) {
   auto is_vector_case = at::native::linalg_solve_is_vector_rhs(dA, dB);
   auto dA_contrib = is_vector_case ? dA.matmul(X.unsqueeze(-1)).squeeze(-1) : dA.matmul(X);
