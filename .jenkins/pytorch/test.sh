@@ -4,15 +4,13 @@
 # (This is set by default in the Docker images we build, so you don't
 # need to set it yourself.
 
-set -eux
+set -ex
 
 # shellcheck disable=SC2034
 COMPACT_JOB_NAME="${BUILD_ENVIRONMENT}"
 
-if [ -n "$CUSTOM_TEST_ARTIFACT_BUILD_DIR" ] && [ -d "$CUSTOM_TEST_ARTIFACT_BUILD_DIR" ]; then
-  # Get fully qualified path using realpath
-  CUSTOM_TEST_ARTIFACT_BUILD_DIR=$(realpath "${CUSTOM_TEST_ARTIFACT_BUILD_DIR:-${PWD}/../}")
-fi
+# Get fully qualified path using realpath
+CUSTOM_TEST_ARTIFACT_BUILD_DIR=$(realpath "${CUSTOM_TEST_ARTIFACT_BUILD_DIR:-${PWD}/../}")
 
 TORCH_INSTALL_DIR=$(python -c "import site; print(site.getsitepackages()[0])")/torch
 TORCH_BIN_DIR="$TORCH_INSTALL_DIR"/bin

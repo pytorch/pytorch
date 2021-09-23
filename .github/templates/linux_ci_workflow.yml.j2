@@ -301,7 +301,7 @@ jobs:
         # Time out the test phase after 3.5 hours
         timeout-minutes: 210
         run: |
-          set -eux
+          set -ex
 
           if [[ $TEST_CONFIG == 'multigpu' ]]; then
             TEST_COMMAND=.jenkins/pytorch/multigpu-test.sh
