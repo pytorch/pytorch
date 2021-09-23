@@ -8,6 +8,7 @@
 #include <caffe2/core/scope_guard.h>
 #include <caffe2/core/timer.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
+#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/freeze_module.h>
@@ -63,6 +64,7 @@ namespace {
 void OptimizeGraph(
     std::shared_ptr<torch::jit::Graph>& graph,
     const StaticModuleOptions& opts) {
+  GRAPH_DUMP("Before optimizations: ", graph);
   Inline(*graph);
   ConstantPropagation(graph);
   Canonicalize(graph);
@@ -89,6 +91,7 @@ void OptimizeGraph(
   ConstantPropagation(graph);
   RemoveImmutableInputDictLookups(graph);
   UseVariadicTupleUnpack(graph);
+  GRAPH_DUMP("Final graph after optimizations: ", graph);
 }
 
 // remove unused input 0 from graph
