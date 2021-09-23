@@ -2863,10 +2863,11 @@ def set_single_threaded_if_parallel_tbb(fn):
         return fn
 
     @wraps(fn)
-    def wrap_fn(self, *args, **kwargs):
+    def wrap_fn(*args, **kwargs):
         num_threads = torch.get_num_threads()
         torch.set_num_threads(1)
-        output = fn(self, *args, **kwargs)
-        torch.set_num_threads(num_threads)
-        return output
+        try:
+            return fn(*args, **kwargs)
+        finally:
+            torch.set_num_threads(num_threads)
     return wrap_fn

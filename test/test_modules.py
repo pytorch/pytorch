@@ -121,6 +121,7 @@ class TestModule(TestCase):
         for module_input in module_inputs:
             args, kwargs = module_input.constructor_input.args, module_input.constructor_input.kwargs
             m = module_cls(*args, **kwargs)
+            self.assertFalse(True)
 
             # Check that these methods do not raise errors
             m.__repr__()
@@ -251,10 +252,9 @@ class TestModule(TestCase):
     def test_grad(self, device, dtype, module_info):
         self._test_gradients_helper(device, dtype, module_info, gradcheck)
 
-    @modules(module_db, allowed_dtypes=[torch.double])
+    @modules([m for m in module_db if m.supports_gradgrad],
+             allowed_dtypes=[torch.double])
     def test_gradgrad(self, device, dtype, module_info):
-        if not module_info.supports_gradgrad:
-            self.skipTest("Skipped! Module does not support gradgrad")
         self._test_gradients_helper(device, dtype, module_info, gradgradcheck)
 
 
