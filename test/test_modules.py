@@ -233,8 +233,7 @@ class TestModule(TestCase):
     def _zero_grad(self, obj):
         def inner_zero_grad(obj):
             if obj.grad is not None:
-                obj.grad.detach_()
-                obj.grad.zero_()
+                obj.grad = None
         self._traverse_obj(obj, inner_zero_grad)
 
     @modules(module_db)
