@@ -41,7 +41,6 @@ CPU_RUNNERS = {
 
 LABEL_CIFLOW_ALL = "ciflow/all"
 LABEL_CIFLOW_BAZEL = "ciflow/bazel"
-LABEL_CIFLOW_COVERAGE = "ciflow/coverage"
 LABEL_CIFLOW_CPU = "ciflow/cpu"
 LABEL_CIFLOW_CUDA = "ciflow/cuda"
 LABEL_CIFLOW_DEFAULT = "ciflow/default"
@@ -82,7 +81,7 @@ class CIFlowConfig:
             self.root_job_condition = "(github.repository_owner == 'pytorch') && "
         else:
             self.root_job_condition = "(github.repository == 'pytorch/pytorch') && "
-        self.root_job_condition += f"((github.event_name != 'pull_request') || " \
+        self.root_job_condition += f"((github.event_name != 'pull_request') || (github.event.assignee.login != 'pytorchbot' ) || " \
             f"(github.event.action !='{self.trigger_action}') || " \
             f"({' || '.join(label_conditions)}))"
 
@@ -139,7 +138,6 @@ class CIWorkflow:
     docker_image_base: str = ''
     enable_doc_jobs: bool = False
     exclude_test: bool = False
-    is_coverage: bool = False
     is_libtorch: bool = False
     is_scheduled: str = ''
     num_test_shards: int = 1
@@ -161,6 +159,7 @@ class CIWorkflow:
     enable_backwards_compat_test: YamlShellBool = "''"
     enable_xla_test: YamlShellBool = "''"
     enable_noarch_test: YamlShellBool = "''"
+    enable_force_on_cpu_test: YamlShellBool = "''"
 
     def __post_init__(self) -> None:
         if self.is_libtorch:
@@ -241,6 +240,7 @@ WINDOWS_WORKFLOWS = [
         test_runner_type=WINDOWS_CUDA_TEST_RUNNER,
         on_pull_request=True,
         num_test_shards=2,
+        enable_force_on_cpu_test=1,
         ciflow_config=CIFlowConfig(
             enabled=True,
             trigger_action_only=True,
@@ -451,19 +451,6 @@ LINUX_WORKFLOWS = [
             enabled=True,
             trigger_action_only=True,
             labels={LABEL_CIFLOW_SCHEDULED, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_LIBTORCH, LABEL_CIFLOW_CUDA},
-        ),
-    ),
-    CIWorkflow(
-        arch="linux",
-        build_environment="linux-bionic-py3.8-gcc9-coverage",
-        docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-py3.8-gcc9",
-        test_runner_type=LINUX_CPU_TEST_RUNNER,
-        on_pull_request=True,
-        is_coverage=True,
-        num_test_shards=2,
-        ciflow_config=CIFlowConfig(
-            enabled=True,
-            labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_COVERAGE, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CPU},
         ),
     ),
     CIWorkflow(

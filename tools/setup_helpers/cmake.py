@@ -401,7 +401,7 @@ class CMake:
             # then. Until then, we use "--" to pass parameters to the
             # underlying build system.
             build_args += ['--']
-            if IS_WINDOWS:
+            if IS_WINDOWS and not USE_NINJA:
                 # We are likely using msbuild here
                 build_args += ['/p:CL_MPCount={}'.format(max_jobs)]
             else:
