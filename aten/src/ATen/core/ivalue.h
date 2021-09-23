@@ -1177,7 +1177,7 @@ struct WeakOrStrongCompilationUnit {
   }
 
   std::shared_ptr<torch::jit::CompilationUnit> getStrongRefOrThrow() const {
-    TORCH_INTERNAL_ASSERT(weak_ptr_ != c10::nullopt);
+    TORCH_INTERNAL_ASSERT(strong_ptr_ != c10::nullopt);
     return *strong_ptr_;
   }
 
@@ -1214,7 +1214,7 @@ struct TORCH_API WeakOrStrongTypePtr {
   WeakOrStrongCompilationUnit cu_;
   TypePtr type_;
   bool holds_strong_ref() const {
-    return cu_.holdingStrongRef() == 0;
+    return cu_.holdingStrongRef();
   }
 };
 
