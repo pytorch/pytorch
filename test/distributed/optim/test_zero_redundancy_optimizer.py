@@ -31,6 +31,12 @@ from torch.distributed.optim.zero_redundancy_optimizer import _broadcast_object
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.optim import SGD
 from torch.testing._internal import common_distributed, common_utils
+from torch.testing._internal.common_utils import (
+    sandcastle_skip_if,
+    TEST_WITH_ASAN,
+    TEST_WITH_DEV_DBG_ASAN,
+)
+
 from torch.testing._internal.common_utils import IS_WINDOWS
 
 try:
@@ -62,6 +68,9 @@ def check_same_model_params(model_a: torch.nn.Module, model_b: torch.nn.Module, 
         assert torch.allclose(b_a, b_b), f"Model buffers differ {b_a} - {b_b}\n" + message
 
 
+@sandcastle_skip_if(
+    TEST_WITH_ASAN or TEST_WITH_DEV_DBG_ASAN, "CUDA + ASAN doesnt work."
+)
 class TestZeroRedundancyOptimizer(common_distributed.MultiProcessTestCase):
     def setUp(self):
         super(TestZeroRedundancyOptimizer, self).setUp()
