@@ -76,5 +76,35 @@ class TestLiteScriptModule(TestCase):
             mobile_module_result
         )
 
+    def test_nest_typing_namedtuple_custom_classtype(self):
+        class Baz(NamedTuple):
+            di: torch.Tensor
+
+        class Foo(NamedTuple):
+            id: torch.Tensor
+            baz: Baz
+
+        class Bar(torch.nn.Module):
+            def __init__(self):
+                super(Bar, self).__init__()
+                self.foo = Foo(torch.tensor(1), Baz(torch.tensor(1)))
+
+            def forward(self, a: torch.Tensor):
+                self.foo = Foo(a, Baz(torch.tensor(1)))
+                return self.foo
+
+        sample_input = torch.tensor(5)
+        script_module = torch.jit.script(Bar())
+        script_module_result = script_module(sample_input)
+
+        buffer_mobile = io.BytesIO(script_module._save_to_buffer_for_lite_interpreter())
+        buffer_mobile.seek(0)
+        mobile_module = _load_for_lite_interpreter(buffer_mobile)
+        mobile_module_result = mobile_module(sample_input)
+        torch.testing.assert_allclose(
+            script_module_result.baz.di,
+            mobile_module_result.baz.di
+        )
+
 if __name__ == '__main__':
     run_tests()

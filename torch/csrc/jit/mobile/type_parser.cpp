@@ -39,6 +39,41 @@ class TypeParser {
     lex();
   }
 
+  explicit TypeParser(std::vector<std::string>& pythonStrs)
+      : pythonStrs_(pythonStrs) {}
+
+  // For the Python string list parsing, the order of the Python string matters.
+  // In bytecode, the order of the type list correspondings to the order of
+  // instruction. In nested type, the lowest level type will be at the beginning
+  // of the type list. It is possible to parse it without worrying about
+  // ordering, but it also introduces 1) extra cost to process nested type in
+  // the correct order 2) lost the benifit that the instruction order is likely
+  // problematic if type list parsing fails.
+  std::vector<TypePtr> parseList() {
+    std::vector<TypePtr> typePtrs;
+    static const c10::QualifiedName classPrefix = "__torch__.torch.classes";
+    for (const auto& pythonStr : pythonStrs_) {
+      c10::QualifiedName qn(pythonStr);
+      c10::TypePtr type_ptr;
+      if (classPrefix.isPrefixOf(qn)) {
+        type_ptr = torch::getCustomClass(qn.qualifiedName());
+        TORCH_CHECK(
+            type_ptr,
+            "The implementation of class ",
+            qn.qualifiedName(),
+            " cannot be found.");
+      } else {
+        pythonStr_ = pythonStr;
+        start_ = 0;
+        lex();
+        type_ptr = parse();
+      }
+      typePtrs.emplace_back(type_ptr);
+      str_type_ptr_map_[type_ptr->repr_str()] = type_ptr;
+    }
+    return typePtrs;
+  }
+
   // The list of non-simple types supported by currrent parser.
   static std::unordered_set<std::string> getNonSimpleType() {
     static std::unordered_set<std::string> nonSimpleTypes{
@@ -170,9 +205,7 @@ class TypeParser {
         next();
       }
     }
-    auto named_tuple_type =
-        TupleType::createNamed(qualified_name, field_names, field_types);
-    return named_tuple_type;
+    return TupleType::createNamed(qualified_name, field_names, field_types);
   }
 
   // Custom type will be following structure:
@@ -183,23 +216,45 @@ class TypeParser {
   //   ]
   // ]"
   TypePtr parseCustomType() {
-    std::string qualified_name = "__torch__.";
-    std::string ns;
-    while (cur() != "[") {
+    std::string qualified_name = "__torch__." + cur();
+    next();
+    while (cur() == ".") {
+      qualified_name.append(next());
       qualified_name.append(next());
     }
-    expect("[");
-    std::string type_name = next();
-    // Currently only supports NamedTuple custom type, if more types need to be
-    // supported, extend them here.
-    if (type_name == kTypeNamedTuple) {
-      contained_types_.insert(kTypeNamedTuple);
-      return parseNamedTuple(qualified_name);
+    // After cur() moves to the next token after qualified name, if it's "[", it
+    // means this custom type follow by it's class definition. Otherwise, it's a
+    // barebone qualified name and needs to look up str_type_ptr_map_ to find
+    // the typeptr.
+    if (cur() == "[") {
+      next();
+      std::string type_name = next();
+      // Currently only supports NamedTuple custom type, if more types need to
+      // be supported, extend them here.
+      if (type_name == kTypeNamedTuple) {
+        contained_types_.insert(kTypeNamedTuple);
+        return parseNamedTuple(qualified_name);
+      } else {
+        TORCH_CHECK(
+            false,
+            "Custom Type ",
+            type_name,
+            " is not supported in the parser.");
+      }
     } else {
-      TORCH_CHECK(
-          false, "Custom Type ", type_name, " is not supported in the parser.");
+      auto find_type = str_type_ptr_map_.find(qualified_name);
+      if (find_type != str_type_ptr_map_.end()) {
+        return find_type->second;
+      } else {
+        // When the type definition can't be found, likely two reasons
+        // 1. The type list in bytecode.pkl is not in the correct order
+        // 2. This custom type definition doesn't exist in bytecode.pkl type
+        // table
+        TORCH_CHECK(
+            false, "Can't find definition for the type: ", qualified_name);
+      }
+      return nullptr;
     }
-    return nullptr;
   }
 
   TypePtr parseTorchbindClassType() {
@@ -273,6 +328,10 @@ class TypeParser {
   std::string pythonStr_;
   size_t start_;
   std::string next_token_;
+
+  std::vector<std::string> pythonStrs_;
+  std::unordered_map<std::string, c10::TypePtr> str_type_ptr_map_;
+
   // Store all contained types when parsing a string
   std::unordered_set<std::string> contained_types_;
 };
@@ -283,11 +342,23 @@ TORCH_API TypePtr parseType(const std::string& pythonStr) {
   return parser.parse();
 }
 
+TORCH_API std::vector<TypePtr> parseType(std::vector<std::string>& pythonStrs) {
+  TypeParser parser(pythonStrs);
+  return parser.parseList();
+}
+
 // Get all contained type given a string
 TORCH_API std::unordered_set<std::string> getContainedTypes(
     const std::string& pythonStr) {
   TypeParser parser(pythonStr);
   parser.parse();
+  return parser.getContainedTypes();
+}
+
+TORCH_API std::unordered_set<std::string> getContainedTypes(
+    std::vector<std::string>& pythonStrs) {
+  TypeParser parser(pythonStrs);
+  parser.parseList();
   return parser.getContainedTypes();
 }
 
