@@ -523,6 +523,9 @@ __all__.extend(['e', 'pi', 'nan', 'inf'])
 from ._tensor import Tensor
 from .storage import _StorageBase, TypedStorage
 
+# NOTE: New <type>Storage classes should never be added. When adding a new
+# dtype, use torch.storage.TypedStorage directly.
+
 class ByteStorage(_C.ByteStorageBase, _StorageBase):
     pass
 
@@ -531,120 +534,75 @@ class DoubleStorage(TypedStorage):
     def dtype(self):
         return torch.double
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-
 class FloatStorage(TypedStorage):
     @classproperty
     def dtype(self):
         return torch.float
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
 
 class HalfStorage(TypedStorage):
     @classproperty
     def dtype(self):
         return torch.half
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-
 class LongStorage(TypedStorage):
     @classproperty
     def dtype(self):
         return torch.long
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
 
 class IntStorage(TypedStorage):
     @classproperty
     def dtype(self):
         return torch.int
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-
 class ShortStorage(TypedStorage):
     @classproperty
     def dtype(self):
         return torch.short
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
 
 class CharStorage(TypedStorage):
     @classproperty
     def dtype(self):
         return torch.int8
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-
 class BoolStorage(TypedStorage):
     @classproperty
     def dtype(self):
         return torch.bool
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
 
 class BFloat16Storage(TypedStorage):
     @classproperty
     def dtype(self):
         return torch.bfloat16
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-
 class ComplexDoubleStorage(TypedStorage):
     @classproperty
     def dtype(self):
         return torch.cdouble
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
 
 class ComplexFloatStorage(TypedStorage):
     @classproperty
     def dtype(self):
         return torch.cfloat
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-
 class QUInt8Storage(TypedStorage):
     @classproperty
     def dtype(self):
         return torch.quint8
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
 
 class QInt8Storage(TypedStorage):
     @classproperty
     def dtype(self):
         return torch.qint8
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-
 class QInt32Storage(TypedStorage):
     @classproperty
     def dtype(self):
         return torch.qint32
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-
 class QUInt4x2Storage(TypedStorage):
     @classproperty
     def dtype(self):
         return torch.quint4x2
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
 
 _storage_classes = {
     DoubleStorage, FloatStorage, LongStorage, IntStorage, ShortStorage,
@@ -770,7 +728,6 @@ import torch.backends.mkl
 import torch.backends.mkldnn
 import torch.backends.openmp
 import torch.backends.quantized
-from torch import quantization as quantization
 import torch.utils.data
 from torch import __config__ as __config__
 from torch import __future__ as __future__
@@ -791,6 +748,10 @@ def compiled_with_cxx11_abi():
 # Import the ops "namespace"
 from torch._ops import ops
 from torch._classes import classes
+
+# quantization depends on torch.fx
+# Import quantization
+from torch import quantization as quantization
 
 # Import the quasi random sampler
 from torch import quasirandom as quasirandom

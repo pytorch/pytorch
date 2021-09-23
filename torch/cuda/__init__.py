@@ -623,9 +623,6 @@ class _CudaBase(object):
 
 from torch.storage import TypedStorage
 
-# TODO: All these <type>Storages are duplicates of those in torch/__init__.py
-#       Is it possible to avoid duplication?
-
 class ByteStorage(_CudaBase, torch._C.CudaByteStorageBase, _StorageBase):
     pass
 
@@ -634,88 +631,55 @@ class DoubleStorage(TypedStorage):
     def dtype(self):
         return torch.double
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-
 class FloatStorage(TypedStorage):
     @classproperty
     def dtype(self):
         return torch.float
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
 
 class HalfStorage(TypedStorage):
     @classproperty
     def dtype(self):
         return torch.half
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-
 class LongStorage(TypedStorage):
     @classproperty
     def dtype(self):
         return torch.long
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
 
 class IntStorage(TypedStorage):
     @classproperty
     def dtype(self):
         return torch.int
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-
 class ShortStorage(TypedStorage):
     @classproperty
     def dtype(self):
         return torch.short
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
 
 class CharStorage(TypedStorage):
     @classproperty
     def dtype(self):
         return torch.int8
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-
 class BoolStorage(TypedStorage):
     @classproperty
     def dtype(self):
         return torch.bool
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
 
 class BFloat16Storage(TypedStorage):
     @classproperty
     def dtype(self):
         return torch.bfloat16
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-
 class ComplexDoubleStorage(TypedStorage):
     @classproperty
     def dtype(self):
         return torch.cdouble
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-
 class ComplexFloatStorage(TypedStorage):
     @classproperty
     def dtype(self):
         return torch.cfloat
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
 
 torch._storage_classes.add(DoubleStorage)
 torch._storage_classes.add(FloatStorage)

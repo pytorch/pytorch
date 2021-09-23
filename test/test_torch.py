@@ -1760,7 +1760,7 @@ class AbstractTestCases:
 
         def test_from_buffer(self):
             a = bytearray([1, 2, 3, 4])
-            self.assertEqual(torch.ByteStorage.from_buffer(a).tolist(), [1, 2, 3, 4])
+            self.assertEqual(torch.ByteStorage.from_buffer(a, dtype=torch.uint8).tolist(), [1, 2, 3, 4])
             shorts = torch.ShortStorage.from_buffer(a, 'big')
             self.assertEqual(shorts.size(), 2)
             self.assertEqual(shorts.tolist(), [258, 772])
@@ -1786,7 +1786,7 @@ class AbstractTestCases:
             bools = torch.BoolStorage.from_buffer(f, 'big')
             self.assertEqual(bools.size(), 4)
             self.assertEqual(bools.tolist(), [False, True, True, True])
-            bytes = torch.ByteStorage.from_buffer(a)
+            bytes = torch.ByteStorage.from_buffer(a, dtype=torch.uint8)
             self.assertEqual(bytes.nbytes(), 4)
             self.assertEqual(bytes.tolist(), [1, 2, 3, 4])
 

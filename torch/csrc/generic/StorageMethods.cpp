@@ -115,14 +115,10 @@ static PyObject * THPStorage_(fromBuffer)(PyObject *_unused, PyObject *args, PyO
         &obj, &byte_order_str, &count, &offset, &dtype_obj)) {
     return nullptr;
   }
-
-  if (dtype_obj != nullptr) {
-    TORCH_CHECK(
-      THPDtype_Check(dtype_obj),
-      "argument 'dtype' must be of type torch.dtype");
-    auto dtype = reinterpret_cast<THPDtype*>(dtype_obj);
-    scalar_type = dtype->scalar_type;
-  }
+  TORCH_CHECK(dtype_obj != nullptr, "argument 'dtype' cannot be None");
+  TORCH_CHECK(THPDtype_Check(dtype_obj), "argument 'dtype' must be of type torch.dtype");
+  auto dtype = reinterpret_cast<THPDtype*>(dtype_obj);
+  scalar_type = dtype->scalar_type;
 
   TORCH_CHECK(
     (scalar_type == at::kByte) || (scalar_type == at::kChar) || (byte_order_str != nullptr),

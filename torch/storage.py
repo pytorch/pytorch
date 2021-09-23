@@ -299,13 +299,13 @@ class TypedStorage:
                     tmp_tensor = torch.tensor(
                         args[0],
                         dtype=interpret_dtypes[self.dtype],
-                        device='cuda' if self.is_cuda else 'cpu')
+                        device='cuda' if eval(self.__module__) is torch.cuda else 'cpu')
 
                 else:
                     tmp_tensor = torch.tensor(
                         args[0],
                         dtype=self.dtype,
-                        device='cuda' if self.is_cuda else 'cpu')
+                        device='cuda' if eval(self.__module__) is torch.cuda else 'cpu')
 
                 self._storage = tmp_tensor.storage()._untyped()
 
@@ -314,7 +314,7 @@ class TypedStorage:
 
     @property
     def is_cuda(self):
-        return eval(self.__module__) is torch.cuda
+        return self._storage.device.type == 'cuda'
 
     def _untyped(self):
         return self._storage

@@ -219,8 +219,6 @@ Tensor internal_new_from_data(
     bool copy_numpy,
     bool type_inference,
     bool pin_memory = false) {
-  // NOTE: in gdb, torch::utils::(anonymous namespace)::internal_new_from_data
-
   if (THPUtils_checkString(data)) {
     throw TypeError("new(): invalid data type '%s'", Py_TYPE(data)->tp_name);
   }

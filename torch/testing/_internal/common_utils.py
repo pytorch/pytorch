@@ -2811,6 +2811,7 @@ def get_tensors_from(args, kwargs):
     return set([arg for arg in args if isinstance(arg, Tensor)] +
                [v for v in kwargs.values() if isinstance(v, Tensor)])
 
+
 # Returns scalar tensor representation of a list of integer byte values
 def bytes_to_scalar(byte_list: List[int], dtype: torch.dtype, device: torch.device):
     # TODO: Is it possible for ctypes to have different byte
