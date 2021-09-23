@@ -6,26 +6,27 @@ VALGRIND_SUP="${PWD}/`dirname $0`/valgrind.sup"
 pushd $1
 
 VALGRIND=${VALGRIND:=ON}
-./basic
-./atest
-./scalar_test
-./broadcast_test
-./wrapdim_test
-./apply_utils_test
-./dlconvertor_test
-./native_test
-./scalar_tensor_test
-./tensor_interop_test
-./undefined_tensor_test
-./extension_backend_test
-./lazy_tensor_test
-./tensor_iterator_test
-./Dimname_test
-./Dict_test
-./NamedTensor_test
-./cpu_generator_test
-./vmap_test
-./operators_test
+python ../../test/test_gtest.py GTest.test_basic
+python ../../test/test_gtest.py GTest.test_atest
+python ../../test/test_gtest.py GTest.test_scalar_test
+python ../../test/test_gtest.py GTest.test_broadcast_test
+python ../../test/test_gtest.py GTest.test_wrapdim_test
+python ../../test/test_gtest.py GTest.test_apply_utils_test
+python ../../test/test_gtest.py GTest.test_dlconvertor_test
+python ../../test/test_gtest.py GTest.test_native_test
+python ../../test/test_gtest.py GTest.test_scalar_tensor_test
+python ../../test/test_gtest.py GTest.test_tensor_interop_test
+python ../../test/test_gtest.py GTest.test_undefined_tensor_test
+python ../../test/test_gtest.py GTest.test_extension_backend_test
+python ../../test/test_gtest.py GTest.test_lazy_tensor_test
+python ../../test/test_gtest.py GTest.test_tensor_iterator_test
+python ../../test/test_gtest.py GTest.test_Dimname_test
+python ../../test/test_gtest.py GTest.test_Dict_test
+python ../../test/test_gtest.py GTest.test_NamedTensor_test
+python ../../test/test_gtest.py GTest.test_cpu_generator_test
+python ../../test/test_gtest.py GTest.test_vmap_test
+python ../../test/test_gtest.py GTest.test_operators_test
+
 if [[ -x ./cudnn_test ]]; then
   ./cudnn_test
 fi
