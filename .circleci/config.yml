@@ -1797,10 +1797,6 @@ jobs:
           no_output_timeout: "30m"
           command: |
             set -e
-            if [ ${BUILD_LITE_INTERPRETER} == 0 ]; then
-              echo "Run Build Test is not for full jit, skipping."
-              exit 0
-            fi
             PROJ_ROOT=/Users/distiller/project
             PROFILE=PyTorch_CI_2021
             # run the ruby build script
@@ -1826,21 +1822,28 @@ jobs:
             if [ ${IOS_PLATFORM} != "SIMULATOR" ]; then
               echo "not SIMULATOR build, skip it."
               exit 0
-            elif [ ${BUILD_LITE_INTERPRETER} == 0 ]; then
-              echo "Run Simulator Tests is not for full jit, skipping."
-              exit 0
             fi
             WORKSPACE=/Users/distiller/workspace
             PROJ_ROOT=/Users/distiller/project
             source ~/anaconda/bin/activate
-            pip install torch torchvision --progress-bar off
-            #run unit test
+            # use the pytorch nightly build to generate models
+            conda install pytorch torchvision -c pytorch-nightly --yes
+            # generate models for differnet backends
             cd ${PROJ_ROOT}/ios/TestApp/benchmark
+            mkdir -p ../models
             python trace_model.py
-            ruby setup.rb
+            if [ ${BUILD_LITE_INTERPRETER} == 1 ]; then
+              ruby setup.rb --lite 1
+            else
+              ruby setup.rb
+            fi
             cd ${PROJ_ROOT}/ios/TestApp
             instruments -s -devices
-            fastlane scan
+            if [ ${BUILD_LITE_INTERPRETER} == 1 ]; then
+              fastlane scan --only_testing TestAppTests/TestAppTests/testLiteInterpreter
+            else
+              fastlane scan --only_testing TestAppTests/TestAppTests/testFullJIT
+            fi
   pytorch_linux_bazel_build:
     <<: *pytorch_params
     machine:
@@ -7075,17 +7078,14 @@ workflows:
           name: "docker-pytorch-linux-xenial-py3.6-gcc7"
           image_name: "pytorch-linux-xenial-py3.6-gcc7"
       - docker_build_job:
-          name: "docker-pytorch-linux-bionic-rocm3.9-py3.6"
-          image_name: "pytorch-linux-bionic-rocm3.9-py3.6"
-      - docker_build_job:
-          name: "docker-pytorch-linux-bionic-rocm4.0.1-py3.6"
-          image_name: "pytorch-linux-bionic-rocm4.0.1-py3.6"
-      - docker_build_job:
           name: "docker-pytorch-linux-bionic-rocm4.1-py3.6"
           image_name: "pytorch-linux-bionic-rocm4.1-py3.6"
       - docker_build_job:
           name: "docker-pytorch-linux-bionic-rocm4.2-py3.6"
           image_name: "pytorch-linux-bionic-rocm4.2-py3.6"
+      - docker_build_job:
+          name: "docker-pytorch-linux-bionic-rocm4.3.1-py3.6"
+          image_name: "pytorch-linux-bionic-rocm4.3.1-py3.6"
       - pytorch_linux_build:
           name: pytorch_linux_xenial_py3_6_gcc5_4_build
           requires:
@@ -7244,95 +7244,7 @@ workflows:
                 - /release\/.*/
           build_environment: "pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7-build"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7"
-      - pytorch_linux_test:
-          name: pytorch_linux_xenial_cuda10_2_cudnn7_py3_gcc7_test1
-          requires:
-            - pytorch_linux_xenial_cuda10_2_cudnn7_py3_gcc7_build
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
-                - /release\/.*/
-          build_environment: "pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7-test1"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7"
-          use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
-      - pytorch_linux_test:
-          name: pytorch_linux_xenial_cuda10_2_cudnn7_py3_gcc7_test2
-          requires:
-            - pytorch_linux_xenial_cuda10_2_cudnn7_py3_gcc7_build
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
-                - /release\/.*/
-          build_environment: "pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7-test2"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7"
-          use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
-      - pytorch_linux_test:
-          name: pytorch_linux_xenial_cuda10_2_cudnn7_py3_multigpu_test
-          requires:
-            - pytorch_linux_xenial_cuda10_2_cudnn7_py3_gcc7_build
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
-                - /release\/.*/
-          build_environment: "pytorch-linux-xenial-cuda10.2-cudnn7-py3-multigpu-test"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7"
-          use_cuda_docker_runtime: "1"
-          resource_class: gpu.large
-      - pytorch_linux_test:
-          name: pytorch_linux_xenial_cuda10_2_cudnn7_py3_nogpu_NO_AVX2_test
-          requires:
-            - pytorch_linux_xenial_cuda10_2_cudnn7_py3_gcc7_build
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
-                - /release\/.*/
-          build_environment: "pytorch-linux-xenial-cuda10.2-cudnn7-py3-nogpu-NO_AVX2-test"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7"
-          resource_class: large
-      - pytorch_linux_test:
-          name: pytorch_linux_xenial_cuda10_2_cudnn7_py3_nogpu_NO_AVX_test
-          requires:
-            - pytorch_linux_xenial_cuda10_2_cudnn7_py3_gcc7_build
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
-                - /release\/.*/
-          build_environment: "pytorch-linux-xenial-cuda10.2-cudnn7-py3-nogpu-NO_AVX-test"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7"
-          resource_class: large
-      - pytorch_linux_test:
-          name: pytorch_linux_xenial_cuda10_2_cudnn7_py3_slow_test
-          requires:
-            - pytorch_linux_xenial_cuda10_2_cudnn7_py3_gcc7_build
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
-                - /release\/.*/
-          build_environment: "pytorch-linux-xenial-cuda10.2-cudnn7-py3-slow-test"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7"
-          use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
-      - pytorch_linux_test:
-          name: pytorch_linux_pytorch_linux_xenial_cuda10_2_cudnn7_py3_gcc7_distributed_test
-          requires:
-            - pytorch_linux_xenial_cuda10_2_cudnn7_py3_gcc7_build
-          build_environment: "pytorch-linux-pytorch_linux_xenial_cuda10_2_cudnn7_py3_gcc7_distributed-test"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7"
-          resource_class: large
+          build_only: "1"
       - pytorch_linux_build:
           name: pytorch_xla_linux_bionic_py3_6_clang9_build
           requires:
@@ -7530,21 +7442,6 @@ workflows:
           name: pytorch_linux_xenial_py3_clang5_mobile_code_analysis
           requires:
             - docker-pytorch-linux-xenial-py3-clang5-android-ndk-r19c
-      - pytorch_linux_test:
-          build_environment: pytorch-linux-xenial-py3.6-gcc5.4-jit_legacy-test
-          docker_image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc5.4
-          name: pytorch_linux_xenial_py3_6_gcc5_4_jit_legacy_test
-          requires:
-            - pytorch_linux_xenial_py3_6_gcc5_4_build
-          resource_class: large
-      - pytorch_linux_test:
-          build_environment: pytorch-linux-xenial-cuda10.2-cudnn7-py3-jit_legacy-test
-          docker_image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7
-          name: pytorch_linux_xenial_cuda10_2_cudnn7_py3_jit_legacy_test
-          requires:
-            - pytorch_linux_xenial_cuda10_2_cudnn7_py3_gcc7_build
-          resource_class: gpu.medium
-          use_cuda_docker_runtime: "1"
       - binary_linux_build:
           build_environment: manywheel 3.7m cu102 devtoolset7
           docker_image: pytorch/manylinux-cuda102
@@ -7786,15 +7683,15 @@ workflows:
               only:
                 - postnightly
       - pytorch_windows_build:
-          build_environment: pytorch-win-vs2019-cuda10.1-py3
-          cuda_version: "10.1"
+          build_environment: pytorch-win-vs2019-cuda10.2-py3
+          cuda_version: "10.2"
           filters:
             branches:
               only:
                 - master
                 - /ci-all\/.*/
                 - /release\/.*/
-          name: pytorch_windows_vs2019_py38_cuda10.1_build
+          name: pytorch_windows_vs2019_py38_cuda10.2_build
           python_version: "3.8"
           use_cuda: "1"
           vc_product: BuildTools
@@ -7802,18 +7699,18 @@ workflows:
           vc_year: "2019"
           vs_version: "16.8.6"
       - pytorch_windows_test:
-          build_environment: pytorch-win-vs2019-cuda10.1-py3
-          cuda_version: "10.1"
+          build_environment: pytorch-win-vs2019-cuda10.2-py3
+          cuda_version: "10.2"
           filters:
             branches:
               only:
                 - master
                 - /ci-all\/.*/
                 - /release\/.*/
-          name: pytorch_windows_vs2019_py38_cuda10.1_on_cpu_test1
+          name: pytorch_windows_vs2019_py38_cuda10.2_on_cpu_test1
           python_version: "3.8"
           requires:
-            - pytorch_windows_vs2019_py38_cuda10.1_build
+            - pytorch_windows_vs2019_py38_cuda10.2_build
           test_name: pytorch-windows-test1
           use_cuda: "0"
           vc_product: BuildTools
@@ -9256,52 +9153,7 @@ workflows:
             - "docker-pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7"
           build_environment: "pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7-build"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7"
-      - pytorch_linux_test:
-          name: pytorch_linux_xenial_cuda10_2_cudnn7_py3_gcc7_test1
-          requires:
-            - pytorch_linux_xenial_cuda10_2_cudnn7_py3_gcc7_build
-          build_environment: "pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7-test1"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7"
-          use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
-      - pytorch_linux_test:
-          name: pytorch_linux_xenial_cuda10_2_cudnn7_py3_gcc7_test2
-          requires:
-            - pytorch_linux_xenial_cuda10_2_cudnn7_py3_gcc7_build
-          build_environment: "pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7-test2"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7"
-          use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
-      - pytorch_linux_test:
-          name: pytorch_linux_xenial_cuda10_2_cudnn7_py3_multigpu_test
-          requires:
-            - pytorch_linux_xenial_cuda10_2_cudnn7_py3_gcc7_build
-          build_environment: "pytorch-linux-xenial-cuda10.2-cudnn7-py3-multigpu-test"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7"
-          use_cuda_docker_runtime: "1"
-          resource_class: gpu.large
-      - pytorch_linux_test:
-          name: pytorch_linux_xenial_cuda10_2_cudnn7_py3_nogpu_NO_AVX2_test
-          requires:
-            - pytorch_linux_xenial_cuda10_2_cudnn7_py3_gcc7_build
-          build_environment: "pytorch-linux-xenial-cuda10.2-cudnn7-py3-nogpu-NO_AVX2-test"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7"
-          resource_class: large
-      - pytorch_linux_test:
-          name: pytorch_linux_xenial_cuda10_2_cudnn7_py3_nogpu_NO_AVX_test
-          requires:
-            - pytorch_linux_xenial_cuda10_2_cudnn7_py3_gcc7_build
-          build_environment: "pytorch-linux-xenial-cuda10.2-cudnn7-py3-nogpu-NO_AVX-test"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7"
-          resource_class: large
-      - pytorch_linux_test:
-          name: pytorch_linux_xenial_cuda10_2_cudnn7_py3_slow_test
-          requires:
-            - pytorch_linux_xenial_cuda10_2_cudnn7_py3_gcc7_build
-          build_environment: "pytorch-linux-xenial-cuda10.2-cudnn7-py3-slow-test"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7"
-          use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
+          build_only: "1"
       - pytorch_linux_build:
           build_environment: "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-x86_32-build"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c"
@@ -9403,9 +9255,9 @@ workflows:
           requires:
             - binary_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_shared-with-deps_build
       - pytorch_windows_build:
-          build_environment: pytorch-win-vs2019-cuda10.1-py3
-          cuda_version: "10.1"
-          name: pytorch_windows_vs2019_py38_cuda10.1_build
+          build_environment: pytorch-win-vs2019-cuda10.2-py3
+          cuda_version: "10.2"
+          name: pytorch_windows_vs2019_py38_cuda10.2_build
           python_version: "3.8"
           use_cuda: "1"
           vc_product: BuildTools
@@ -9413,12 +9265,12 @@ workflows:
           vc_year: "2019"
           vs_version: "16.8.6"
       - pytorch_windows_test:
-          build_environment: pytorch-win-vs2019-cuda10.1-py3
-          cuda_version: "10.1"
-          name: pytorch_windows_vs2019_py38_cuda10.1_on_cpu_test1
+          build_environment: pytorch-win-vs2019-cuda10.2-py3
+          cuda_version: "10.2"
+          name: pytorch_windows_vs2019_py38_cuda10.2_on_cpu_test1
           python_version: "3.8"
           requires:
-            - pytorch_windows_vs2019_py38_cuda10.1_build
+            - pytorch_windows_vs2019_py38_cuda10.2_build
           test_name: pytorch-windows-test1
           use_cuda: "0"
           vc_product: BuildTools
