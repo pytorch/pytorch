@@ -108,6 +108,7 @@ c10::optional<std::vector<IValue>> runNodeIfInputsAreConstant(
       if (!db) {
         continue;
       }
+      // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
       Node* n_non_const = const_cast<Node*>(n);
       if (db->mayContainAlias(
               n_non_const->inputs(), {n_non_const->outputs()})) {
