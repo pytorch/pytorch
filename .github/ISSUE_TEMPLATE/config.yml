@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: ❓ Questions, help, and support
+    url: https://discuss.pytorch.org/
+    about: Ask questions and discuss with other PyTorch community members
+  - name: 📚 Resources
+    url: https://pytorch.org/resources
+    about: Get started with PyTorch
