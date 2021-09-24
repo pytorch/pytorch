@@ -13,7 +13,15 @@ namespace {
 using Tensor = at::Tensor;
 
 class TransposeFrozenLinear {
+ public:
+  TransposeFrozenLinear(std::shared_ptr<Graph> graph)
+      : graph_(std::move(graph)) {}
 
+  bool run() {
+    handleBlockAndSubblocks(graph_->block());
+    return graph_modified;
+  }
+  
   bool is_constant_linear_op(Node* node) {
     if (node->kind() != aten::linear) {
       return false;
@@ -83,16 +91,10 @@ class TransposeFrozenLinear {
     return;
   }
 
+  private:
   std::shared_ptr<Graph> graph_;
   bool graph_modified = false;
- public:
-  TransposeFrozenLinear(std::shared_ptr<Graph> graph)
-      : graph_(std::move(graph)) {}  
 
-  bool run() {
-    handleBlockAndSubblocks(graph_->block());
-    return graph_modified;
-  }
 };
 } // namespace
 
