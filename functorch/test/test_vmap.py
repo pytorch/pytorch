@@ -18,13 +18,15 @@ import re
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, \
     skipCUDAIfNoMagma
 from torch.testing._internal.common_device_type import ops, onlyCPU
+from torch.testing._internal.common_utils import (
+    parametrize,
+    instantiate_parametrized_tests,
+    subtest
+)
 from functorch_lagging_op_db import functorch_lagging_op_db
 from functorch_additional_op_db import additional_op_db
 from torch.utils._pytree import tree_map
 from common_utils import (
-    parameterized,
-    parameterized_with_device,
-    instantiate_parameterized_methods,
     get_fallback_and_vmap_exhaustive,
     opinfo_in_dict,
     xfail,
@@ -1162,38 +1164,38 @@ class TestVmapOperators(Namespace.TestVmapBase):
         test(vmap(op, in_dims=2), [getter([2, 5, B0, B1, 3], device)],
              in_dims=2, out_dims=2)
 
-    @parameterized("case", {
-        'abs': (torch.abs, TensorFactory.randn),
-        'acos': (torch.acos, TensorFactory.rand),
-        'asin': (torch.asin, TensorFactory.rand),
-        'atan': (torch.atan, TensorFactory.rand),
-        'ceil': (torch.ceil, TensorFactory.randn),
-        'cos': (torch.cos, TensorFactory.rand),
-        'cosh': (torch.cosh, TensorFactory.rand),
-        'digamma': (torch.digamma, TensorFactory.rand),
-        'exp': (torch.exp, TensorFactory.randn),
-        'expm1': (torch.expm1, TensorFactory.randn),
-        'floor': (torch.floor, TensorFactory.randn),
-        'frac': (torch.frac, TensorFactory.randn),
-        'lgamma': (torch.lgamma, TensorFactory.rand),
-        'log': (torch.log, TensorFactory.randp1),
-        'log10': (torch.log10, TensorFactory.randp1),
-        'log1p': (torch.log1p, TensorFactory.randp1),
-        'log2': (torch.log2, TensorFactory.randp1),
-        'neg': (torch.neg, TensorFactory.randn),
-        'reciprocol': (torch.reciprocal, TensorFactory.randp1),
-        'relu': (torch.relu, TensorFactory.randn),
-        'round': (torch.round, TensorFactory.randn),
-        'rsqrt': (torch.rsqrt, TensorFactory.randp1),
-        'sigmoid': (torch.sigmoid, TensorFactory.randn),
-        'sign': (torch.sign, TensorFactory.randn),
-        'sin': (torch.sin, TensorFactory.rand),
-        'sinh': (torch.sinh, TensorFactory.rand),
-        'sqrt': (torch.sqrt, TensorFactory.rand),
-        'tan': (torch.tan, TensorFactory.rand),
-        'tanh': (torch.tanh, TensorFactory.rand),
-        'trunc': (torch.trunc, TensorFactory.randn),
-    })
+    @parametrize("case", [
+        (torch.abs, TensorFactory.randn),
+        (torch.acos, TensorFactory.rand),
+        (torch.asin, TensorFactory.rand),
+        (torch.atan, TensorFactory.rand),
+        (torch.ceil, TensorFactory.randn),
+        (torch.cos, TensorFactory.rand),
+        (torch.cosh, TensorFactory.rand),
+        (torch.digamma, TensorFactory.rand),
+        (torch.exp, TensorFactory.randn),
+        (torch.expm1, TensorFactory.randn),
+        (torch.floor, TensorFactory.randn),
+        (torch.frac, TensorFactory.randn),
+        (torch.lgamma, TensorFactory.rand),
+        (torch.log, TensorFactory.randp1),
+        (torch.log10, TensorFactory.randp1),
+        (torch.log1p, TensorFactory.randp1),
+        (torch.log2, TensorFactory.randp1),
+        (torch.neg, TensorFactory.randn),
+        (torch.reciprocal, TensorFactory.randp1),
+        (torch.relu, TensorFactory.randn),
+        (torch.round, TensorFactory.randn),
+        (torch.rsqrt, TensorFactory.randp1),
+        (torch.sigmoid, TensorFactory.randn),
+        (torch.sign, TensorFactory.randn),
+        (torch.sin, TensorFactory.rand),
+        (torch.sinh, TensorFactory.rand),
+        (torch.sqrt, TensorFactory.rand),
+        (torch.tan, TensorFactory.rand),
+        (torch.tanh, TensorFactory.rand),
+        (torch.trunc, TensorFactory.randn),
+    ], name_fn=lambda x: x[0].__name__)
     def test_unary_pointwise(self, case):
         op, getter = case
         self._test_unary(op, getter, 'cpu')
@@ -1232,10 +1234,10 @@ class TestVmapOperators(Namespace.TestVmapBase):
         with self.assertRaisesRegex(RuntimeError, msg):
             vmap(lambda x: x.clone(memory_format=torch.channels_last_3d))(torch.randn(B0))
 
-    @parameterized('case', {
-        'clamp_min': _make_case(torch.clamp_min),
-        'clamp_max': _make_case(torch.clamp_max),
-    })
+    @parametrize('case', [
+        subtest(_make_case(torch.clamp_min), name='clamp_min'),
+        subtest(_make_case(torch.clamp_max), name='clamp_max'),
+    ])
     def test_clamp_variant(self, case):
         test = self._vmap_test
 
@@ -1264,18 +1266,18 @@ class TestVmapOperators(Namespace.TestVmapBase):
         number = get_number(getter)
         self._test_unary(lambda t: op(t, number), getter, device)
 
-    @parameterized('case', {
-        'add': _make_case(torch.add),
-        'add_dunder': _make_case(lambda x, y: x + y),
-        'sub': _make_case(torch.sub),
-        'sub_dunder': _make_case(lambda x, y: x - y),
-        'mul': _make_case(torch.mul),
-        'mul_dunder': _make_case(lambda x, y: x * y),
-        'div': _make_case(torch.div, input_getter=TensorFactory.randp1),
-        'div_dunder': _make_case(lambda x, y: x / y, input_getter=TensorFactory.randp1),
-        'pow': _make_case(torch.pow, input_getter=TensorFactory.randp1),
-        'pow_dunder': _make_case(lambda x, y: x ** y, input_getter=TensorFactory.randp1),
-    })
+    @parametrize('case', [
+        subtest(_make_case(torch.add), name='add'),
+        subtest(_make_case(lambda x, y: x + y), name='add_dunder'),
+        subtest(_make_case(torch.sub), name='sub'),
+        subtest(_make_case(lambda x, y: x - y), name='sub_dunder'),
+        subtest(_make_case(torch.mul), name='mul'),
+        subtest(_make_case(lambda x, y: x * y), name='mul_dunder'),
+        subtest(_make_case(torch.div, input_getter=TensorFactory.randp1), name='div'),
+        subtest(_make_case(lambda x, y: x / y, input_getter=TensorFactory.randp1), name='div_dunder'),
+        subtest(_make_case(torch.pow, input_getter=TensorFactory.randp1), name='pow'),
+        subtest(_make_case(lambda x, y: x ** y, input_getter=TensorFactory.randp1), name='pow_dunder'),
+    ])
     def test_arithmetic(self, case):
         test = self._vmap_test
 
@@ -2587,16 +2589,16 @@ class TestVmapOperators(Namespace.TestVmapBase):
 
         self.assertTrue(torch.randn(()).dim() == 0)
 
-    @parameterized('op', {'abs': torch.abs, 'acos': torch.acos})
-    def test_parameterize(self, op):
+    @parametrize('op', [torch.cos, torch.sinh], name_fn=lambda f: f.__name__)
+    def test_foobar_parametrize(self, op):
         pass
 
-    @parameterized('op2', {'cos': torch.cos, 'cosh': torch.cosh})
-    @parameterized('op1', {'sin': torch.sin, 'sinh': torch.sinh})
-    def test_parameterize_multiple(self, op1, op2):
+    @parametrize('op2', [torch.cos, torch.sinh], name_fn=lambda f: f.__name__)
+    @parametrize('op1', [torch.abs, torch.acos], name_fn=lambda f: f.__name__)
+    def test_parametrize_multiple(self, op1, op2):
         pass
 
-instantiate_parameterized_methods(TestVmapOperators)
+instantiate_parametrized_tests(TestVmapOperators)
 
 
 def construct_v(output, batch_size):
@@ -2771,7 +2773,7 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
         self._batched_grad_test(torch.log1p, (x,))
         self._batched_grad_grad_test(torch.log1p, (x,))
 
-    @parameterized_with_device('param', {'foo': None, 'bar': None})
+    @parametrize('param', ['foo', 'bar'])
     def test_param_device(self, device, param):
         pass
 
@@ -3136,9 +3138,9 @@ class TestVmapOperatorsOpInfo(TestCase):
         self.assertEqual(vmap(f, in_dims=(0,None,0))(x, y[0], z)[0], base)
         self.assertEqual(vmap(f, in_dims=(0,0,None))(x, y, z[0])[0], base)
 
-    @parameterized_with_device('training', {'train': True, 'eval': False})
-    @parameterized_with_device('track_running_stats', {'running_stats1': True, 'running_stats0': False})
-    @parameterized_with_device('affine', {'affine1': True, 'affine0': False})
+    @parametrize('training', [True, False])
+    @parametrize('track_running_stats', [True, False])
+    @parametrize('affine', [True, False])
     def test_batch_norm(self, device, affine, track_running_stats, training):
         if not track_running_stats and not training:
             return
@@ -3187,10 +3189,8 @@ class TestVmapOperatorsOpInfo(TestCase):
 
 
 only_for = ("cpu", "cuda")
-instantiate_parameterized_methods(TestVmapOperatorsOpInfo)
 instantiate_device_type_tests(TestVmapOperatorsOpInfo, globals(), only_for=only_for)
 
-instantiate_parameterized_methods(TestVmapBatchedGradient)
 instantiate_device_type_tests(
     TestVmapBatchedGradient,
     globals(),
