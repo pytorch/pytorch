@@ -11,17 +11,12 @@ set(ATen_CUDA_SRCS ${ATen_CUDA_SRCS}
   ${CMAKE_CURRENT_SOURCE_DIR}/THCStorageCopy.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THCTensor.cpp
 
-  ${CMAKE_CURRENT_SOURCE_DIR}/THCReduceApplyUtils.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/THCSleep.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/THCStorage.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/THCStorageCopy.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/THCTensor.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/THCTensorCopy.cu
-  ${CMAKE_CURRENT_SOURCE_DIR}/THCTensorMath.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/THCTensorMathMagma.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/THCTensorMathPairwise.cu
-  ${CMAKE_CURRENT_SOURCE_DIR}/THCTensorMathReduce.cu
-  ${CMAKE_CURRENT_SOURCE_DIR}/THCTensorScatterGather.cu
   PARENT_SCOPE)
 
 install(FILES
@@ -34,9 +29,6 @@ install(FILES
           THCTensor.h
           THCTensorCopy.h
           THCTensorCopy.hpp
-          THCTensorMath.h
-          THCApply.cuh
-          THCReduceApplyUtils.cuh
           THCTensorMathReduce.cuh
           THCAsmUtils.cuh
           THCAtomics.cuh
@@ -65,9 +57,6 @@ install(FILES
           THCGenerateComplexDoubleType.h
           THCIntegerDivider.cuh
           THCNumerics.cuh
-          THCTensorInfo.cuh
-          THCTensorTypeUtils.cuh
-          THCTensorMathMagma.h
           THCThrustAllocator.cuh
           # See Note [TH abstraction violation]
           THCTensor.hpp
@@ -81,18 +70,9 @@ install(FILES
           generic/THCTensor.cpp
           generic/THCTensor.cu
           generic/THCTensor.h
-          generic/THCTensor.hpp
           generic/THCStorageCopy.cpp
           generic/THCStorageCopy.cu
           generic/THCStorageCopy.h
           generic/THCTensorCopy.cu
           generic/THCTensorCopy.h
-          generic/THCTensorMath.h
-          generic/THCTensorMath.cu
-          generic/THCTensorMathMagma.h
-          generic/THCTensorMathMagma.cpp
-          generic/THCTensorMathPairwise.h
-          generic/THCTensorMathPairwise.cu
-          generic/THCTensorScatterGather.h
-          generic/THCTensorScatterGather.cu
           DESTINATION "${ATEN_INSTALL_INCLUDE_SUBDIR}/THC/generic")

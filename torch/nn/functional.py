@@ -442,10 +442,10 @@ def fractional_max_pool2d_with_indices(
     .. _Fractional MaxPooling:
         http://arxiv.org/abs/1412.6071
     """
-    if has_torch_function_unary(input):
+    if has_torch_function_variadic(input, _random_samples):
         return handle_torch_function(
             fractional_max_pool2d_with_indices,
-            (input,),
+            (input, _random_samples),
             input,
             kernel_size,
             output_size=output_size,
@@ -458,10 +458,11 @@ def fractional_max_pool2d_with_indices(
     if output_size is None:
         assert output_ratio is not None
         _output_ratio = _pair(output_ratio)
-        output_size = [int(input.size(2) * _output_ratio[0]), int(input.size(3) * _output_ratio[1])]
+        output_size = [int(input.size(-2) * _output_ratio[0]), int(input.size(-1) * _output_ratio[1])]
 
     if _random_samples is None:
-        _random_samples = torch.rand(input.size(0), input.size(1), 2, dtype=input.dtype, device=input.device)
+        n_batch = 1 if input.dim() == 3 else input.size(0)
+        _random_samples = torch.rand(n_batch, input.size(-3), 2, dtype=input.dtype, device=input.device)
     return torch._C._nn.fractional_max_pool2d(input, kernel_size, output_size, _random_samples)
 
 
@@ -472,10 +473,10 @@ def _fractional_max_pool2d(
     return_indices: bool = False,
     _random_samples: Optional[Tensor] = None
 ) -> Tensor:
-    if has_torch_function_unary(input):
+    if has_torch_function_variadic(input, _random_samples):
         return handle_torch_function(
             fractional_max_pool2d,
-            (input,),
+            (input, _random_samples),
             input,
             kernel_size,
             output_size=output_size,
@@ -536,10 +537,10 @@ def fractional_max_pool3d_with_indices(
     .. _Fractional MaxPooling:
         http://arxiv.org/abs/1412.6071
     """
-    if has_torch_function_unary(input):
+    if has_torch_function_variadic(input, _random_samples):
         return handle_torch_function(
             fractional_max_pool3d_with_indices,
-            (input,),
+            (input, _random_samples),
             input,
             kernel_size,
             output_size=output_size,
@@ -570,10 +571,10 @@ def _fractional_max_pool3d(
     return_indices: bool = False,
     _random_samples: Optional[Tensor] = None
 ) -> Tensor:
-    if has_torch_function_unary(input):
+    if has_torch_function_variadic(input, _random_samples):
         return handle_torch_function(
             fractional_max_pool3d,
-            (input,),
+            (input, _random_samples),
             input,
             kernel_size,
             output_size=output_size,
@@ -605,10 +606,26 @@ def max_pool1d_with_indices(
     ceil_mode: bool = False,
     return_indices: bool = False
 ) -> Tuple[Tensor, Tensor]:
-    r"""Applies a 1D max pooling over an input signal composed of several input
+    r"""
+    max_pool1d(input, kernel_size, stride=None, padding=0, dilation=1, ceil_mode=False, return_indices=False) -> Tensor
+
+    Applies a 1D max pooling over an input signal composed of several input
     planes.
 
     See :class:`~torch.nn.MaxPool1d` for details.
+
+    Args:
+        input: input tensor of shape :math:`(\text{minibatch} , \text{in\_channels} , iW)`, minibatch dim optional.
+        kernel_size: the size of the window. Can be a single number or a
+            tuple `(kW,)`
+        stride: the stride of the window. Can be a single number or a tuple
+            `(sW,)`. Default: :attr:`kernel_size`
+        padding: Implicit negative infinity padding to be added on both sides, must be >= 0 and <= kernel_size / 2.
+        dilation: The stride between elements within a sliding window, must be > 0.
+        ceil_mode: If ``True``, will use `ceil` instead of `floor` to compute the output shape. This
+                   ensures that every element in the input tensor is covered by a sliding window.
+        return_indices: If ``True``, will return the argmax along with the max values.
+                        Useful for :class:`torch.nn.functional.max_unpool1d` later
     """
     if has_torch_function_unary(input):
         return handle_torch_function(
@@ -671,10 +688,26 @@ def max_pool2d_with_indices(
     ceil_mode: bool = False,
     return_indices: bool = False
 ) -> Tuple[Tensor, Tensor]:
-    r"""Applies a 2D max pooling over an input signal composed of several input
+    r"""
+    max_pool2d(input, kernel_size, stride=None, padding=0, dilation=1, ceil_mode=False, return_indices=False) -> Tensor
+
+    Applies a 2D max pooling over an input signal composed of several input
     planes.
 
     See :class:`~torch.nn.MaxPool2d` for details.
+
+    Args:
+        input: input tensor :math:`(\text{minibatch} , \text{in\_channels} , iH , iW)`, minibatch dim optional.
+        kernel_size: size of the pooling region. Can be a single number or a
+            tuple `(kH, kW)`
+        stride: stride of the pooling operation. Can be a single number or a
+            tuple `(sH, sW)`. Default: :attr:`kernel_size`
+        padding: Implicit negative infinity padding to be added on both sides, must be >= 0 and <= kernel_size / 2.
+        dilation: The stride between elements within a sliding window, must be > 0.
+        ceil_mode: If ``True``, will use `ceil` instead of `floor` to compute the output shape. This
+                   ensures that every element in the input tensor is covered by a sliding window.
+        return_indices: If ``True``, will return the argmax along with the max values.
+                        Useful for :class:`torch.nn.functional.max_unpool2d` later
     """
     if has_torch_function_unary(input):
         return handle_torch_function(
@@ -737,10 +770,26 @@ def max_pool3d_with_indices(
     ceil_mode: bool = False,
     return_indices: bool = False
 ) -> Tuple[Tensor, Tensor]:
-    r"""Applies a 3D max pooling over an input signal composed of several input
+    r"""
+    max_pool3d(input, kernel_size, stride=None, padding=0, dilation=1, ceil_mode=False, return_indices=False) -> Tensor
+
+    Applies a 3D max pooling over an input signal composed of several input
     planes.
 
     See :class:`~torch.nn.MaxPool3d` for details.
+
+    Args:
+        input: input tensor :math:`(\text{minibatch} , \text{in\_channels} , iD, iH , iW)`, minibatch dim optional.
+        kernel_size: size of the pooling region. Can be a single number or a
+                     tuple `(kT, kH, kW)`
+        stride: stride of the pooling operation. Can be a single number or a
+                tuple `(sT, sH, sW)`. Default: :attr:`kernel_size`
+        padding: Implicit negative infinity padding to be added on both sides, must be >= 0 and <= kernel_size / 2.
+        dilation: The stride between elements within a sliding window, must be > 0.
+        ceil_mode: If ``True``, will use `ceil` instead of `floor` to compute the output shape. This
+                   ensures that every element in the input tensor is covered by a sliding window.
+        return_indices: If ``True``, will return the argmax along with the max values.
+                        Useful for :class:`torch.nn.functional.max_unpool3d` later
     """
     if has_torch_function_unary(input):
         return handle_torch_function(
@@ -1842,8 +1891,8 @@ def linear(input: Tensor, weight: Tensor, bias: Optional[Tensor] = None) -> Tens
         - Bias: :math:`(out\_features)`
         - Output: :math:`(N, *, out\_features)`
     """
-    if has_torch_function_variadic(input, weight):
-        return handle_torch_function(linear, (input, weight), input, weight, bias=bias)
+    if has_torch_function_variadic(input, weight, bias):
+        return handle_torch_function(linear, (input, weight, bias), input, weight, bias=bias)
     return torch._C._nn.linear(input, weight, bias)
 
 
@@ -1864,10 +1913,10 @@ def bilinear(input1: Tensor, input2: Tensor, weight: Tensor, bias: Optional[Tens
         - output: :math:`(N, *, H_{out})` where :math:`H_{out}=\text{out\_features}`
           and all but the last dimension are the same shape as the input.
     """
-    if has_torch_function_variadic(input1, input2, weight):
+    if has_torch_function_variadic(input1, input2, weight, bias):
         return handle_torch_function(
             bilinear,
-            (input1, input2, weight),
+            (input1, input2, weight, bias),
             input1, input2, weight,
             bias=bias
         )
@@ -2134,10 +2183,10 @@ def embedding_bag(
         tensor([[ 0.0000,  0.0000,  0.0000],
                 [-0.7082,  3.2145, -2.6251]])
     """
-    if has_torch_function_variadic(input, weight):
+    if has_torch_function_variadic(input, weight, offsets, per_sample_weights):
         return handle_torch_function(
             embedding_bag,
-            (input, weight),
+            (input, weight, offsets, per_sample_weights),
             input,
             weight,
             offsets=offsets,
@@ -2262,10 +2311,10 @@ def batch_norm(
     See :class:`~torch.nn.BatchNorm1d`, :class:`~torch.nn.BatchNorm2d`,
     :class:`~torch.nn.BatchNorm3d` for details.
     """
-    if has_torch_function_unary(input):
+    if has_torch_function_variadic(input, running_mean, running_var, weight, bias):
         return handle_torch_function(
             batch_norm,
-            (input,),
+            (input, running_mean, running_var, weight, bias),
             input,
             running_mean,
             running_var,
@@ -2308,10 +2357,10 @@ def instance_norm(
     See :class:`~torch.nn.InstanceNorm1d`, :class:`~torch.nn.InstanceNorm2d`,
     :class:`~torch.nn.InstanceNorm3d` for details.
     """
-    if has_torch_function_unary(input):
+    if has_torch_function_variadic(input, running_mean, running_var, weight, bias):
         return handle_torch_function(
             instance_norm,
-            (input,),
+            (input, running_mean, running_var, weight, bias),
             input,
             running_mean=running_mean,
             running_var=running_var,
@@ -2339,9 +2388,9 @@ def layer_norm(
 
     See :class:`~torch.nn.LayerNorm` for details.
     """
-    if has_torch_function_unary(input):
+    if has_torch_function_variadic(input, weight, bias):
         return handle_torch_function(
-            layer_norm, (input,), input, normalized_shape, weight=weight, bias=bias, eps=eps
+            layer_norm, (input, weight, bias), input, normalized_shape, weight=weight, bias=bias, eps=eps
         )
     return torch.layer_norm(input, normalized_shape, weight, bias, eps, torch.backends.cudnn.enabled)
 
@@ -2353,8 +2402,8 @@ def group_norm(
 
     See :class:`~torch.nn.GroupNorm` for details.
     """
-    if has_torch_function_unary(input):
-        return handle_torch_function(group_norm, (input,), input, num_groups, weight=weight, bias=bias, eps=eps)
+    if has_torch_function_variadic(input, weight, bias):
+        return handle_torch_function(group_norm, (input, weight, bias,), input, num_groups, weight=weight, bias=bias, eps=eps)
     _verify_batch_size([input.size(0) * input.size(1) // num_groups, num_groups] + list(input.size()[2:]))
     return torch.group_norm(input, num_groups, weight, bias, eps, torch.backends.cudnn.enabled)
 
@@ -2376,6 +2425,10 @@ def local_response_norm(input: Tensor, size: int, alpha: float = 1e-4, beta: flo
                 dim
             )
         )
+
+    if input.numel() == 0:
+        return input
+
     div = input.mul(input).unsqueeze(1)
     if dim == 3:
         div = pad(div, (0, 0, size // 2, (size - 1) // 2))
@@ -2510,10 +2563,10 @@ def nll_loss(
         >>> output = F.nll_loss(F.log_softmax(input), target)
         >>> output.backward()
     """
-    if has_torch_function_variadic(input, target):
+    if has_torch_function_variadic(input, target, weight):
         return handle_torch_function(
             nll_loss,
-            (input, target),
+            (input, target, weight),
             input,
             target,
             weight=weight,
@@ -2767,6 +2820,7 @@ def cross_entropy(
     ignore_index: int = -100,
     reduce: Optional[bool] = None,
     reduction: str = "mean",
+    label_smoothing: float = 0.0,
 ) -> Tensor:
     r"""This criterion computes the cross entropy loss between input and target.
 
@@ -2803,6 +2857,10 @@ def cross_entropy(
             elements in the output, ``'sum'``: the output will be summed. Note: :attr:`size_average`
             and :attr:`reduce` are in the process of being deprecated, and in the meantime,
             specifying either of those two args will override :attr:`reduction`. Default: ``'mean'``
+        label_smoothing (float, optional): A float in [0.0, 1.0]. Specifies the amount
+            of smoothing when computing the loss, where 0.0 means no smoothing. The targets
+            become a mixture of the original ground truth and a uniform distribution as described in
+            `Rethinking the Inception Architecture for Computer Vision <https://arxiv.org/abs/1512.00567>`__. Default: :math:`0.0`.
 
     Examples::
 
@@ -2818,10 +2876,10 @@ def cross_entropy(
         >>> loss = F.cross_entropy(input, target)
         >>> loss.backward()
     """
-    if has_torch_function_variadic(input, target):
+    if has_torch_function_variadic(input, target, weight):
         return handle_torch_function(
             cross_entropy,
-            (input, target),
+            (input, target, weight),
             input,
             target,
             weight=weight,
@@ -2829,10 +2887,11 @@ def cross_entropy(
             ignore_index=ignore_index,
             reduce=reduce,
             reduction=reduction,
+            label_smoothing=label_smoothing,
         )
     if size_average is not None or reduce is not None:
         reduction = _Reduction.legacy_get_string(size_average, reduce)
-    return torch._C._nn.cross_entropy_loss(input, target, weight, _Reduction.get_enum(reduction), ignore_index)
+    return torch._C._nn.cross_entropy_loss(input, target, weight, _Reduction.get_enum(reduction), ignore_index, label_smoothing)
 
 
 def binary_cross_entropy(
@@ -2876,10 +2935,10 @@ def binary_cross_entropy(
         >>> loss = F.binary_cross_entropy(F.sigmoid(input), target)
         >>> loss.backward()
     """
-    if has_torch_function_variadic(input, target):
+    if has_torch_function_variadic(input, target, weight):
         return handle_torch_function(
             binary_cross_entropy,
-            (input, target),
+            (input, target, weight),
             input,
             target,
             weight=weight,
@@ -2948,10 +3007,10 @@ def binary_cross_entropy_with_logits(
          >>> loss = F.binary_cross_entropy_with_logits(input, target)
          >>> loss.backward()
     """
-    if has_torch_function_variadic(input, target):
+    if has_torch_function_variadic(input, target, weight, pos_weight):
         return handle_torch_function(
             binary_cross_entropy_with_logits,
-            (input, target),
+            (input, target, weight, pos_weight),
             input,
             target,
             weight=weight,
@@ -3232,10 +3291,10 @@ def multilabel_soft_margin_loss(
 
     See :class:`~torch.nn.MultiLabelSoftMarginLoss` for details.
     """
-    if has_torch_function_variadic(input, target):
+    if has_torch_function_variadic(input, target, weight):
         return handle_torch_function(
             multilabel_soft_margin_loss,
-            (input, target),
+            (input, target, weight),
             input,
             target,
             weight=weight,
@@ -3312,10 +3371,10 @@ def multi_margin_loss(
 
     See :class:`~torch.nn.MultiMarginLoss` for details.
     """
-    if has_torch_function_variadic(input, target):
+    if has_torch_function_variadic(input, target, weight):
         return handle_torch_function(
             multi_margin_loss,
-            (input, target),
+            (input, target, weight),
             input,
             target,
             p=p,
@@ -4254,14 +4313,15 @@ Supports :ref:`type promotion <type-promotion-doc>`.
 
 Args:
     x1 (Tensor): First input.
-    x2 (Tensor): Second input (of size matching x1).
+    x2 (Tensor): Second input (with the same number of dimensions as x1, matching x1 size at dimension `dim`,
+        and broadcastable with x1 at other dimensions).
     dim (int, optional): Dimension of vectors. Default: 1
     eps (float, optional): Small value to avoid division by zero.
         Default: 1e-8
 
 Shape:
     - Input: :math:`(\ast_1, D, \ast_2)` where D is at position `dim`.
-    - Output: :math:`(\ast_1, \ast_2)` where 1 is at position `dim`.
+    - Output: :math:`(\ast_1, \ast_2)`
 
 Example::
 
@@ -4431,8 +4491,8 @@ def normalize(input: Tensor, p: float = 2.0, dim: int = 1, eps: float = 1e-12, o
         out (Tensor, optional): the output tensor. If :attr:`out` is used, this
                                 operation won't be differentiable.
     """
-    if has_torch_function_unary(input):
-        return handle_torch_function(normalize, (input,), input, p=p, dim=dim, eps=eps, out=out)
+    if has_torch_function_variadic(input, out):
+        return handle_torch_function(normalize, (input, out), input, p=p, dim=dim, eps=eps, out=out)
     if out is None:
         denom = input.norm(p, dim, keepdim=True).clamp_min(eps).expand_as(input)
         return input / denom
@@ -4494,8 +4554,7 @@ def fold(
     tensor.
 
     .. warning::
-        Currently, only 3-D output tensors (unfolded batched image-like tensors) are
-        supported.
+        Currently, only unbatched (3D) or batched (4D) image-like output tensors are supported.
 
     See :class:`torch.nn.Fold` for details
     """
@@ -4503,7 +4562,7 @@ def fold(
         return handle_torch_function(
             fold, (input,), input, output_size, kernel_size, dilation=dilation, padding=padding, stride=stride
         )
-    if input.dim() == 3:
+    if input.dim() == 3 or input.dim() == 2:
         msg = "{} must be int or 2-tuple for 3D input"
         assert_int_or_pair(output_size, "output_size", msg)
         assert_int_or_pair(kernel_size, "kernel_size", msg)
@@ -4515,7 +4574,8 @@ def fold(
             input, _pair(output_size), _pair(kernel_size), _pair(dilation), _pair(padding), _pair(stride)
         )
     else:
-        raise NotImplementedError("Input Error: Only 3D input Tensors are supported (got {}D)".format(input.dim()))
+        raise NotImplementedError("Input Error: Only unbatched (2D) or batched (3D) input Tensors"
+                                  f"are supported (got {input.dim()}D)")
 
 
 def _pad_circular(input: Tensor, padding: List[int]) -> Tensor:
@@ -5031,7 +5091,7 @@ def multi_head_attention_forward(
     #
     q = q.contiguous().view(tgt_len, bsz * num_heads, head_dim).transpose(0, 1)
     if static_k is None:
-        k = k.contiguous().view(-1, bsz * num_heads, head_dim).transpose(0, 1)
+        k = k.contiguous().view(k.shape[0], bsz * num_heads, head_dim).transpose(0, 1)
     else:
         # TODO finish disentangling control flow so we don't do in-projections when statics are passed
         assert static_k.size(0) == bsz * num_heads, \
@@ -5040,7 +5100,7 @@ def multi_head_attention_forward(
             f"expecting static_k.size(2) of {head_dim}, but got {static_k.size(2)}"
         k = static_k
     if static_v is None:
-        v = v.contiguous().view(-1, bsz * num_heads, head_dim).transpose(0, 1)
+        v = v.contiguous().view(v.shape[0], bsz * num_heads, head_dim).transpose(0, 1)
     else:
         # TODO finish disentangling control flow so we don't do in-projections when statics are passed
         assert static_v.size(0) == bsz * num_heads, \

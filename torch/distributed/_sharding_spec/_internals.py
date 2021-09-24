@@ -1,31 +1,8 @@
 from typing import List, Union
 from dataclasses import dataclass
+from torch.distributed.remote_device import _remote_device
 
 import torch
-from torch.distributed.utils import _parse_remote_device
-
-Device = Union[torch.device, int, str]
-
-def is_valid_device(device):
-    """
-    Checks if this is a valid local/remote device.
-    """
-    # Check for torch.device
-    try:
-        torch.device(device)
-        return True
-    except Exception:
-        pass
-
-    # Check for remote device.
-    try:
-        _parse_remote_device(device)
-        return True
-    except Exception:
-        pass
-
-    return False
-
 
 @dataclass
 class ShardMetadata(object):
@@ -40,25 +17,19 @@ class ShardMetadata(object):
         shard_lengths(List[int]): Lengths indicating the length of each
             dimension for this shard. Should have the same rank as the
             original tensor.
-        placement(Device):
+        placement(:class:`torch.distributed._remote_device`):
             Specifies the placement of this shard.
-
-            The placement can be a local device or a remote device specified by one
-            of the following remote formats:
-
-                1. "rank:<rank>/<device>" (ex: "rank:0/cuda:0").
-                2. "<worker_name>/<device>" (ex: "trainer0/cuda:0").
     """
 
     __slots__ = ['shard_offsets', 'shard_lengths', 'placement']
 
     shard_offsets: List[int]
     shard_lengths: List[int]
-    placement: Device
+    placement: Union[str, _remote_device]
 
     def __post_init__(self):
-        if not is_valid_device(self.placement):
-            raise ValueError(f'{self.placement} is not a valid device')
+        if isinstance(self.placement, str):
+            self.placement = torch.distributed._remote_device(self.placement)
 
         if len(self.shard_offsets) != len(self.shard_lengths):
             raise ValueError(
@@ -69,8 +40,8 @@ class ShardMetadata(object):
         for i in range(len(self.shard_offsets)):
             if self.shard_offsets[i] < 0:
                 raise ValueError('shard_offsets should be >=0')
-            if self.shard_lengths[i] <= 0:
-                raise ValueError('shard_lengths should be > 0')
+            if self.shard_lengths[i] < 0:
+                raise ValueError('shard_lengths should be >= 0')
 
 
 
@@ -151,3 +122,31 @@ def check_tensor(shards_metadata, tensor_dims) -> None:
             f'Total volume of shards: {total_shard_volume} '
             f'does not match tensor volume: {tensor_volume}, in other words '
             f'all the individual shards do not cover the entire tensor')
+
+def get_split_size(dim_size, chunks):
+    """
+    Computes the split size inline with ``torch.chunk``
+
+    Args:
+        dim_size(int): Size of the dimension being chunked.
+        chunks(int): Number of chunks to create for ``dim_size``.
+
+    Returns:
+        An int indicating the split size to use.
+    """
+    return (dim_size + chunks - 1) // chunks
+
+def get_chunked_dim_size(dim_size, split_size, idx):
+    """
+    Computes the dim size of the chunk for provided ``idx`` given ``dim_size``
+    and ``split_size``.
+
+    Args:
+        dim_size(int): Size of the dimension being chunked.
+        split_size(int): The chunk size for each chunk of ``dim_size``.
+        idx(int): The index of chunk whose dim size is being requested.
+
+    Returns:
+        An int indicating the dim size of the chunk.
+    """
+    return min(dim_size, split_size * (idx + 1)) - split_size * idx

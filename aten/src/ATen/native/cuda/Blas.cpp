@@ -4,24 +4,51 @@
 #include <ATen/native/Resize.h>
 #include <c10/util/MaybeOwned.h>
 
-
 namespace at { namespace native {
 
 namespace {
 
-c10::MaybeOwned<Tensor> inline prepare_matrix_for_cublas(const Tensor& tensor, bool& transpose_tensor) {
+// TODO: https://github.com/pytorch/pytorch/pull/59380#pullrequestreview-725310492
+c10::MaybeOwned<Tensor> inline resolve_conj_if_indicated(const Tensor& tensor, bool resolve_conj) {
+  if (resolve_conj && tensor.is_conj()) {
+    return c10::MaybeOwned<Tensor>::owned(tensor.resolve_conj());
+  } else {
+    return c10::MaybeOwned<Tensor>::borrowed(tensor);
+  }
+}
+
+c10::MaybeOwned<Tensor> inline prepare_matrix_for_cublas(const Tensor& tensor, bool& transpose_tensor, bool transpose_result) {
   if (tensor.is_non_overlapping_and_dense()) { // common case
       transpose_tensor = tensor.is_contiguous();
-      return c10::MaybeOwned<Tensor>::borrowed(tensor);
+      return resolve_conj_if_indicated(tensor, transpose_result ? transpose_tensor : !transpose_tensor);
   }
   IntArrayRef tensor_strides = tensor.strides();
   IntArrayRef tensor_sizes = tensor.sizes();
   if ((tensor_strides[0] == 1) && (tensor_strides[1] >= std::max<int64_t>(1, tensor_sizes[0]))) {
     transpose_tensor = false;
-    return c10::MaybeOwned<Tensor>::borrowed(tensor);
+    return resolve_conj_if_indicated(tensor, !transpose_result);
   } else if ((tensor_strides[1] == 1) && (tensor_strides[0] >= std::max<int64_t>(1, tensor_sizes[1]))) {
     transpose_tensor = true;
-    return c10::MaybeOwned<Tensor>::borrowed(tensor);
+    return resolve_conj_if_indicated(tensor, transpose_result);
+  } else {
+    transpose_tensor = true;
+    return c10::MaybeOwned<Tensor>::owned(tensor.clone(at::MemoryFormat::Contiguous));
+  }
+}
+
+c10::MaybeOwned<Tensor> inline prepare_matrix_for_cublas(const Tensor& tensor, bool& transpose_tensor) {
+  if (tensor.is_non_overlapping_and_dense()) { // common case
+      transpose_tensor = tensor.is_contiguous();
+      return resolve_conj_if_indicated(tensor, true);
+  }
+  IntArrayRef tensor_strides = tensor.strides();
+  IntArrayRef tensor_sizes = tensor.sizes();
+  if ((tensor_strides[0] == 1) && (tensor_strides[1] >= std::max<int64_t>(1, tensor_sizes[0]))) {
+    transpose_tensor = false;
+    return resolve_conj_if_indicated(tensor, true);
+  } else if ((tensor_strides[1] == 1) && (tensor_strides[0] >= std::max<int64_t>(1, tensor_sizes[1]))) {
+    transpose_tensor = true;
+    return resolve_conj_if_indicated(tensor, true);
   } else {
     transpose_tensor = true;
     return c10::MaybeOwned<Tensor>::owned(tensor.clone(at::MemoryFormat::Contiguous));
@@ -39,19 +66,19 @@ c10::MaybeOwned<Tensor> prepare_batch_matrix_for_cublas(const Tensor& tensor, bo
   if (tensor_strides[fast_dim] == 1 &&
     (tensor_strides[leading_dim] >= std::max<int64_t>(1, m))) {
     transpose_tensor = false;
-    tensor_ = c10::MaybeOwned<Tensor>::borrowed(tensor);
-    ld_tensor = tensor_strides[leading_dim];
+    tensor_ = resolve_conj_if_indicated(tensor, true);
+    ld_tensor = tensor_->strides()[leading_dim];
   } else if ((tensor_strides[leading_dim] == 1) &&
     (tensor_strides[fast_dim] >= std::max<int64_t>(1, n))) {
     transpose_tensor = true;
-    tensor_ = c10::MaybeOwned<Tensor>::borrowed(tensor);
-    ld_tensor = tensor_strides[fast_dim];
+    tensor_ = resolve_conj_if_indicated(tensor, false);
+    ld_tensor = tensor_->strides()[fast_dim];
   } else {
     transpose_tensor = !transpose_result;
     // gemm call requires leading dimension and stride parameters to be non-zero
     bool is_stride_non_zero = tensor.strides()[1] != 0 && tensor.strides()[2] != 0;
     if (tensor.is_contiguous() && is_stride_non_zero) {
-      tensor_ = c10::MaybeOwned<Tensor>::borrowed(tensor);
+      tensor_ = resolve_conj_if_indicated(tensor, transpose_result);
     } else {
       tensor_ = c10::MaybeOwned<Tensor>::owned(tensor.clone(at::MemoryFormat::Contiguous));
     }
@@ -104,8 +131,8 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
   c10::MaybeOwned<Tensor> result_ = prepare_matrix_for_cublas(result, transpose_result);
   bool transpose_mat1;
   bool transpose_mat2;
-  c10::MaybeOwned<Tensor> mat1_ = prepare_matrix_for_cublas(transpose_result ? mat2 : mat1, transpose_mat1);
-  c10::MaybeOwned<Tensor> mat2_ = prepare_matrix_for_cublas(transpose_result ? mat1 : mat2, transpose_mat2);
+  auto mat1_ = prepare_matrix_for_cublas(transpose_result ? mat2 : mat1, transpose_mat1, transpose_result);
+  auto mat2_ = prepare_matrix_for_cublas(transpose_result ? mat1 : mat2, transpose_mat2, transpose_result);
 
   if (transpose_result) {
     transpose_mat1 = !transpose_mat1;
@@ -141,6 +168,8 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
             c10::nullopt /* pin_memory */));
   }
 
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!result_->is_conj());
+
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, scalar_type, "addmm_cuda", [&] {
     scalar_t alpha_val = alpha.to<scalar_t>();
     scalar_t beta_val = beta.to<scalar_t>();
@@ -148,8 +177,8 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
     scalar_t* mat2_ptr = mat2_->data_ptr<scalar_t>();
     scalar_t* result_ptr = result_->data_ptr<scalar_t>();
     at::cuda::blas::gemm<scalar_t>(
-      transpose_mat1 ? 't' : 'n',
-      transpose_mat2 ? 't' : 'n',
+      transpose_mat1 ? mat1_->is_conj() ? 'c' : 't' : 'n',
+      transpose_mat2 ? mat2_->is_conj() ? 'c' : 't' : 'n',
       m, n, k,
       alpha_val,
       mat1_ptr, mat1_ld,
@@ -207,11 +236,11 @@ Tensor& baddbmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& 
 
   if ((result_strides[1] == 1) &&
       ((result_sizes[2] == 1) || (result_strides[2] >= std::max<int64_t>(1, result_sizes[1])))) {
-    result_ = c10::MaybeOwned<Tensor>::borrowed(result);
+    result_ = resolve_conj_if_indicated(result, true);
   } else if ((result_strides[2] == 1) &&
     (result_sizes[1] == 1 || (result_strides[1] >= std::max<int64_t>(1, result_sizes[2])))) {
     transpose_result = true;
-    result_ = c10::MaybeOwned<Tensor>::borrowed(result);
+    result_ = resolve_conj_if_indicated(result, true);
   } else {
     result_ = c10::MaybeOwned<Tensor>::owned(result.transpose(1, 2).clone(at::MemoryFormat::Contiguous).transpose(1, 2));
   }
@@ -230,6 +259,8 @@ Tensor& baddbmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& 
   ldc = result_->strides()[leading_dim];
   int64_t num_batches = result_->sizes()[0];
 
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!result_->is_conj());
+
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, self.scalar_type(), "baddbmm_cuda", [&] {
     scalar_t alpha_val = alpha.to<scalar_t>();
     scalar_t beta_val = beta.to<scalar_t>();
@@ -237,8 +268,8 @@ Tensor& baddbmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& 
     scalar_t* batch2_ptr = batch2_->data_ptr<scalar_t>();
     scalar_t* result_ptr = result_->data_ptr<scalar_t>();
     at::cuda::blas::bgemm<scalar_t>(
-      transpose_batch1 ? 't' : 'n',
-      transpose_batch2 ? 't' : 'n',
+      transpose_batch1 ? batch1_->is_conj() ? 'c' : 't' : 'n',
+      transpose_batch2 ? batch2_->is_conj() ? 'c' : 't' : 'n',
       m, n, k,
       alpha_val,
       batch1_ptr, lda, batch1_->strides()[0],
@@ -353,8 +384,19 @@ inline void dot_check(const Tensor& self, const Tensor& other) {
 } // anonymous namespace
 
 Tensor dot_cuda(const Tensor& self, const Tensor& other) {
-  at::NoNamesGuard guard;
+  if (self.is_complex()) {
+    if (self.is_conj()) {
+      if (other.is_conj()) {
+        return (dot_cuda(self.conj(), other.conj())).conj();
+       } else {
+         return vdot_cuda(self.conj(), other);
+       }
+    } else if (other.is_conj()) {
+      return vdot_cuda(other.conj(), self);
+    }
+  }
 
+  at::NoNamesGuard guard;
   dot_check(self, other);
 
   const int n = static_cast<int>(self.numel());
@@ -389,6 +431,16 @@ return AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
 Tensor vdot_cuda(const Tensor& self, const Tensor& other) {
   if (!self.is_complex()) {
     return dot_cuda(self, other);
+  }
+
+  if (self.is_conj()) {
+    if (other.is_conj()) {
+      return vdot_cuda(other.conj(), self.conj());
+    } else {
+      return dot_cuda(self.conj(), other);
+    }
+  } else if (other.is_conj()) {
+    return (dot_cuda(self, other.conj())).conj();
   }
 
   at::NoNamesGuard guard;

@@ -128,7 +128,7 @@ static bool needsGradientInProfilingMode(Block* b) {
 // differentiable graph. Autodiff will inspect these properties and prune
 // off gradients that aren't required
 // `requires_grad` properties from `dnode->outputs()` will also be transferred
-static void setRequiresGradOnDiffGraph(Node* dnode) {
+static C10_UNUSED void setRequiresGradOnDiffGraph(Node* dnode) {
   auto gi = dnode->g(attr::Subgraph)->inputs();
   for (size_t i = 0; i < dnode->inputs().size(); i++) {
     if (auto ty = dnode->input(i)->type()->cast<TensorType>()) {
@@ -157,7 +157,7 @@ static void setRequiresGradOnDiffGraph(Node* dnode) {
     return false;
   };
 
-  for (size_t i = 0; i < go.size(); i++) {
+  for (const auto i : c10::irange(go.size())) {
     auto ty = go[i]->type()->cast<TensorType>();
     if (ty) {
       auto n = go[i]->node();
@@ -668,6 +668,13 @@ const ExecutionPlan& ProfilingGraphExecutorImpl::getOptimizedPlanFor(
     // before any other pass that could insert `prim::iprofile_value` node on
     // `aten::_grad_sum_to_size` input.
     InsertProfileNodesForSpecializeAutogradZero(pr_.get());
+    // `InsertProfileNodesForCUDAFuser` inserts profile node for non-tensor
+    // value
+#ifndef C10_MOBILE
+    if (RegisterCudaFuseGraph::isRegistered()) {
+      torch::jit::fuser::cuda::InsertProfileNodesForCUDAFuser(pr_.get());
+    }
+#endif
     GRAPH_DUMP("Profiled Graph: ", pr_->graph());
     profiling_plan_ = ExecutionPlan(pr_->graph(), function_name_);
     // fall-through

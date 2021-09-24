@@ -31,8 +31,12 @@ cat ${PROJ_ROOT}/scripts/build_ios.sh
 echo "########################################################"
 echo "IOS_ARCH: ${IOS_ARCH}"
 echo "IOS_PLATFORM: ${IOS_PLATFORM}"
+echo "USE_PYTORCH_METAL: ${USE_PYTORCH_METAL}"
+echo "USE_COREML_DELEGATE: ${USE_COREML_DELEGATE}"
 export IOS_ARCH=${IOS_ARCH}
 export IOS_PLATFORM=${IOS_PLATFORM}
+export USE_PYTORCH_METAL=${USE_PYTORCH_METAL}
+export USE_COREML_DELEGATE=${USE_COREML_DELEGATE}
 unbuffer ${PROJ_ROOT}/scripts/build_ios.sh 2>&1 | ts
 
 #store the binary

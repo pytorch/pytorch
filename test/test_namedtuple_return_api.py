@@ -19,6 +19,7 @@ all_operators_with_namedtuple_return = {
     'frexp', 'lu_unpack', 'histogram', '_fake_quantize_per_tensor_affine_cachemask_tensor_qparams',
     '_fused_moving_avg_obs_fq_helper',
     '_det_lu_based_helper',
+    '_lu_with_info',
 }
 
 
@@ -99,6 +100,8 @@ class TestNamedTupleAPI(TestCase):
             op(operators=['_det_lu_based_helper'],
                input=(), names=('det', 'lu', 'pivs'), hasout=False),
             op(operators=['aminmax'], input=(), names=('min', 'max'), hasout=True),
+            op(operators=['_lu_with_info'],
+               input=(), names=('LU', 'pivots', 'info'), hasout=False),
         ]
 
         def get_func(f):

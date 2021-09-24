@@ -1,5 +1,8 @@
 # Generates VariableType.h/cpp
 #
+# **If any changes are being made to the VariableType codegen please also check
+# if updates are needed in torch/csrc/autograd/autograd_not_implemented_fallback.cpp
+#
 # VariableType is a subclass of at::Type that provides the binding code
 # necessary to provide a differentiable version of ATen operators. There are a
 # number of different things we could mean:
@@ -30,7 +33,8 @@ from .gen_trace_type import (
 from .gen_inplace_or_view_type import (
     get_view_info, is_tensor_type, is_tensor_list_type, unpack_args, get_base_name,
     use_derived, modifies_arguments, WRAPPER_REGISTRATION, TMP_VAR, METHOD_DEFINITION,
-    ASSIGN_RETURN_VALUE, gen_formals, ALL_VIEW_FUNCTIONS, unpacked_name
+    ASSIGN_RETURN_VALUE, gen_formals, ALL_VIEW_FUNCTIONS, unpacked_name,
+    AUTOGRAD_NOT_IMPLEMENTED_REGISTRATION
 )
 
 from tools.codegen.api.types import (Binding, DispatcherSignature, BaseCType, intArrayRefT,
@@ -48,7 +52,7 @@ from tools.codegen.utils import mapMaybe
 from tools.codegen.model import (Argument, NativeFunction, SchemaKind,
                                  SelfArgument, TensorOptionsArguments,
                                  BaseType, ListType)
-from typing import Callable, List, Optional, Sequence, Union
+from typing import Callable, List, Optional, Sequence, Union, Dict
 
 # We don't set or modify grad_fn on these methods. Generally, they return
 # tensors that have requires_grad=False. In-place functions listed here will
@@ -95,6 +99,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     'linalg_solve', 'sqrt', 'stack', 'gather', 'index_select', 'index_add_', 'linalg_inv', 'linalg_inv_ex',
     'l1_loss_backward', 'baddbmm', 'addbmm', 'addmm', 'addmv', 'addr', 'linalg_householder_product',
     'constant_pad_nd', 'reflection_pad1d', 'reflection_pad2d', 'reflection_pad3d', 'linalg_cholesky_ex', 'linalg_eig',
+    'select_backward', 'diagonal_backward', 'slice_backward',
     'reflection_pad1d_backward', 'reflection_pad2d_backward', 'reflection_pad3d_backward', 'symeig', '_sparse_sparse_matmul',
     'replication_pad1d', 'replication_pad2d', 'replication_pad3d', 'take', 'put_', '_to_copy',
     'replication_pad1d_backward', 'replication_pad2d_backward', 'replication_pad3d_backward',
@@ -102,7 +107,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     'eig', 'lerp', 'linalg_vector_norm', 'cumprod', 'prod', 'index_copy', 'lu', 'unfold', 'unfold_backward',
     'index', 'masked_fill', 'cross', 'lu_unpack', 'renorm', '_conj_physical',
     'scatter', 'scatter_add', 'sigmoid', 'sigmoid_backward', 'trapezoid', 'cumulative_trapezoid',
-    'conj_physical_', '_neg_view', '_reshape_alias', '_det_lu_based_helper',
+    'conj_physical_', '_neg_view', '_reshape_alias', '_det_lu_based_helper', 'lu_solve', '_lu_with_info',
 }
 
 GRADIENT_IMPLEMENTED_FOR_SPARSE_COMPLEX = {
@@ -369,22 +374,24 @@ def gen_variable_type(
     compute the output. The grad_fn is attached to differentiable functions.
     """
     fm = FileManager(install_dir=out, template_dir=template_path, dry_run=False)
-    gen_variable_type_shard(fm, fns_with_diff_infos, 'VariableType.h', 'VariableType.h')
+    fm.write('VariableType.h', lambda: {
+        'generated_comment': "@" f'generated from {template_path}/VariableType.h'
+    })
 
     # NOTE: see Note [Sharded File] at the top of the VariableType.cpp
     # template regarding sharding of the generated files.
-    num_shards = 5
-    shards: List[List[NativeFunctionWithDifferentiabilityInfo]] = [[] for _ in range(num_shards)]
-
-    # functions are assigned arbitrarily but stably to a file based on hash
-    for fn in fns_with_diff_infos:
-        x = sum(ord(c) for c in cpp.name(fn.func.func)) % num_shards
-        shards[x].append(fn)
-
-    for i, shard in enumerate(shards):
-        gen_variable_type_shard(fm, shard, 'VariableType.cpp', f'VariableType_{i}.cpp')
-
-    gen_variable_type_shard(fm, fns_with_diff_infos, 'VariableType.cpp', 'VariableTypeEverything.cpp')
+    fm.write_sharded(
+        'VariableType.cpp',
+        [fn for fn in fns_with_diff_infos if use_derived(fn)],
+        key_fn=lambda fn: cpp.name(fn.func.func),
+        base_env={
+            'generated_comment':
+            "@" f'generated from {template_path}/VariableType.cpp',
+        },
+        env_callable=gen_variable_type_func,
+        num_shards=5,
+        sharded_keys={'type_derived_method_definitions', 'wrapper_registrations'}
+    )
 
 @with_native_function
 def gen_wrapper_registration(f: NativeFunction) -> str:
@@ -394,47 +401,64 @@ def gen_wrapper_registration(f: NativeFunction) -> str:
         class_type='VariableType',
     )
 
-def gen_variable_type_shard(
-    fm: FileManager,
-    fns_with_diff_infos: List[NativeFunctionWithDifferentiabilityInfo],
-    template_name: str,
-    output_name: str,
-) -> None:
-    type_definitions: List[str] = []
-    wrapper_registrations: List[str] = []
+def gen_variable_type_func(
+    fn: NativeFunctionWithDifferentiabilityInfo
+) -> Dict[str, List[str]]:
+    f = fn.func
+    with native_function_manager(f):
+        name = cpp.name(f.func)
+        formals = gen_formals(f)
 
-    filtered_fns_with_diff_infos = list(filter(use_derived, fns_with_diff_infos))
-    for fn in filtered_fns_with_diff_infos:
-        f = fn.func
-        with native_function_manager(f):
-            name = cpp.name(f.func)
-            formals = gen_formals(f)
-
-            type_definitions.append(METHOD_DEFINITION.substitute(
+        if fn.info is None and not get_base_name(f) in RESET_GRAD_ACCUMULATOR \
+                and not get_base_name(f) in DONT_REQUIRE_DERIVATIVE \
+                and len(gen_differentiable_outputs(fn)) > 0 \
+                and not cpp.name(f.func) in DONT_ENFORCE_SAME_TENSOR_IMPL_OR_STORAGE \
+                and not type_wrapper_name(f) in DONT_ENFORCE_STORAGE_IMPL_USE_COUNT \
+                and not type_wrapper_name(f) in DONT_ENFORCE_TENSOR_IMPL_USE_COUNT:
+            # NOTE: [ Registering AutogradNotImplemented boxed kernel ]
+            #
+            # When there is no derivatives.yaml entry, we register a generic boxed
+            # NotImplemented kernel to set grad_fn to be NotImplemented, so that forward
+            # proceeds as usual but an error is properly produced on backward.
+            # TODO: it would be nice to not have these special cases
+            #
+            # There are several cases where still let codegen handle it:
+            # 1) ops that need to reset grad accumulator (we let codegen handle this case
+            #     because) the list is (currently) only accessible in Python.
+            # 2) User explicitly specifies DONT_REQUIRE_DERIVATIVE. This basically makes
+            #    autograd a fallthrough with NDEBUG checks. This can be useful for when all
+            #    outputs are integral.
+            # 3) When there are no differentiable outputs. This is similar to (2).
+            # 4) There are certain ops where we skip certain NDEBUG checks. this is similar
+            #    to (1).
+            type_definition = ""
+            wrapper_registration = AUTOGRAD_NOT_IMPLEMENTED_REGISTRATION.substitute(
+                unqual_operator_name_with_overload=f.func.name)
+        else:
+            type_definition = METHOD_DEFINITION.substitute(
                 return_type=cpp.returns_type(f.func.returns).cpp_type(),
                 type_wrapper_name=type_wrapper_name(f),
                 type_definition_body=emit_body(fn),
                 formals=formals,
-            ))
-            wrapper_registrations.append(gen_wrapper_registration(f))
+            )
+            wrapper_registration = gen_wrapper_registration(f)
 
-        # See Note [Manual Backend kernels]
-        assert (name in MANUAL_BACKEND) == f.manual_kernel_registration
-        # If you want to register a kernel to Autograd, you must make the op abstract.
-        # In other words, this op must have dispatch section in native_functions.yaml.
-        if name in MANUAL_AUTOGRAD_AND_TRACER or (fn.info and fn.info.has_derivatives):
-            msg = (f'There\'s a formula for {name}(or its functional variant) in derivatives.yaml. '
-                   f'It\'s required to add a dispatch section for it with explicit supported backends e.g CPU/CUDA '
-                   f'or CompositeExplicitAutograd in native_functions.yaml. Please see '
-                   f'https://github.com/pytorch/pytorch/tree/master/aten/src/ATen/native#choosing-the-right-dispatch-keyword '
-                   f'for instructions to choose the right dispatch keyword.')
-            assert f.is_abstract, msg
+    # See Note [Manual Backend kernels]
+    assert (name in MANUAL_BACKEND) == f.manual_kernel_registration
+    # If you want to register a kernel to Autograd, you must make the op abstract.
+    # In other words, this op must have dispatch section in native_functions.yaml.
+    if name in MANUAL_AUTOGRAD_AND_TRACER or (fn.info and fn.info.has_derivatives):
+        msg = (f'There\'s a formula for {name}(or its functional variant) in derivatives.yaml. '
+               f'It\'s required to add a dispatch section for it with explicit supported backends e.g CPU/CUDA '
+               f'or CompositeExplicitAutograd in native_functions.yaml. Please see '
+               f'https://github.com/pytorch/pytorch/tree/master/aten/src/ATen/native#choosing-the-right-dispatch-keyword '
+               f'for instructions to choose the right dispatch keyword.')
+        assert f.is_abstract, msg
 
-    fm.write_with_template(output_name, template_name, lambda: {
-        'generated_comment': '@' f'generated from {fm.template_dir}/{template_name}',
-        'type_derived_method_definitions': type_definitions,
-        'wrapper_registrations': wrapper_registrations,
-    })
+    return {
+        'type_derived_method_definitions': [type_definition],
+        'wrapper_registrations': [wrapper_registration],
+    }
 
 @with_native_function_with_differentiability_info
 def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:

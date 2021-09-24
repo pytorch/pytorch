@@ -216,8 +216,7 @@ void parseShapeInfoMapFromString(
     }
 
     bool valid = true;
-    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-    for (int i = 1; i < size; i++) {
+    for (size_t i = 1; i < size; i++) {
       auto dim = kv[i];
       try {
         shape.add_dims(std::stoi(dim));

@@ -63,13 +63,20 @@ class profile(object):
             collection.
 
         with_flops (bool, optional): If with_flops is set, the profiler will estimate
-            the FLOPS (floating pointer operations per second) value using the operator's input shape
-            and total time. This allows one to estimate the hardware performance. Currently,
+            the FLOPs (floating point operations) value using the operator's input shape.
+            This allows one to estimate the hardware performance. Currently,
             this option only works for the matrix multiplication and 2D convolution operators.
 
         profile_memory (bool, optional): track tensor memory allocation/deallocation.
 
         with_stack (bool, optional): record source information (file and line number) for the ops.
+
+        with_modules (bool): record module hierarchy (including function names)
+            corresponding to the callstack of the op. e.g. If module A's forward call's
+            module B's forward which contains an aten::add op,
+            then aten::add's module hierarchy is A.B
+            Note that this support exist, at the moment, only for TorchScript models
+            and not eager mode models.
 
         use_kineto (bool, optional): experimental, enable profiling with Kineto profiler.
 
@@ -118,6 +125,7 @@ class profile(object):
             with_flops=False,
             profile_memory=False,
             with_stack=False,
+            with_modules=False,
             use_kineto=False,
             use_cpu=True):
         self.enabled: bool = enabled
@@ -131,6 +139,7 @@ class profile(object):
         self.record_shapes |= self.with_flops
         self.profile_memory = profile_memory
         self.with_stack = with_stack
+        self.with_modules = with_modules
         self.use_cpu = use_cpu
         self.kineto_results: Optional[_ProfilerResult] = None
 
@@ -165,7 +174,8 @@ class profile(object):
             self.record_shapes,
             self.profile_memory,
             self.with_stack,
-            self.with_flops)
+            self.with_flops,
+            self.with_modules)
 
     def __enter__(self):
         if not self.enabled:
@@ -557,6 +567,7 @@ class emit_nvtx(object):
                 self.record_shapes,
                 False,
                 False,
+                False,
                 False),
             set()
         )
@@ -643,8 +654,8 @@ def parse_nvprof_trace(path):
     unique = EnforceUnique()
     for row in conn.execute(kernel_query):
         unique.see(row['marker_id'], row['runtime_id'])
-        # 211 is cudaKernelLaunch for cuda >= 9.2; 13 is for older cuda versions
-        assert (row['cbid'] == 211) or (row['cbid'] == 13)
+        # 211 is cudaKernelLaunch for cuda >= 9.2
+        assert (row['cbid'] == 211)
         evt = functions_map[row['marker_id']]
         evt.append_kernel(row['kernel_name'],
                           0,

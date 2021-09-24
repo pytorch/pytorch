@@ -2,7 +2,7 @@
 #include <ATen/native/ReduceOps.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/cuda/Loops.cuh>
-#include <ATen/native/cuda/Reduce.cuh>
+#include <ATen/native/cuda/Resize.cuh>
 #include <ATen/native/cuda/Normalization.cuh>
 #include <c10/cuda/CUDAMathCompat.h>
 
@@ -70,6 +70,7 @@ void batch_norm_elementwise(
   case Impl::Contiguous: {
     c10::MaybeOwned<Tensor> weight = at::borrow_from_optional_tensor(weight_opt);
     c10::MaybeOwned<Tensor> bias = at::borrow_from_optional_tensor(bias_opt);
+    resize_output(out, self.sizes());
     AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, self.scalar_type(),
                                     "batch_norm_elementwise_cuda", [&] {
       using accscalar_t = at::acc_type<scalar_t, true>;
@@ -87,7 +88,12 @@ void batch_norm_elementwise(
   case Impl::ChannelsLast: {
     auto weight = at::borrow_from_optional_tensor(weight_opt);
     auto bias = at::borrow_from_optional_tensor(bias_opt);
-    if ((!weight->defined() || weight->is_contiguous()) &&
+
+    if (resize_output_check(out, self.sizes())) {
+        resize_impl_cuda_(out.unsafeGetTensorImpl(), self.sizes(), self.strides());
+    }
+    if ((out.strides() == self.strides()) &&
+        (!weight->defined() || weight->is_contiguous()) &&
         (!bias->defined() || bias->is_contiguous()) &&
         (!mean_.defined() || mean_.is_contiguous()) &&
         (!invstd_.defined() || invstd_.is_contiguous())) {
@@ -422,7 +428,7 @@ std::tuple<Tensor&, Tensor&, Tensor&> batch_norm_cuda_out(const Tensor& self, co
 }
 
 std::tuple<Tensor, Tensor, Tensor> batch_norm_cuda(const Tensor& self, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& bias_opt, const c10::optional<Tensor>& running_mean_opt, const c10::optional<Tensor>& running_var_opt, bool train, double momentum, double epsilon) {
-  auto output = at::empty_like(self, at::MemoryFormat::Contiguous);
+  auto output = at::empty_like(self);
   int64_t n_input = self.size(1);
   auto options = self.options().dtype(
       at::toAccumulateType(self.scalar_type(), /*is_cuda=*/true));
@@ -480,7 +486,8 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cuda(const Tensor& grad_o
   // save_mean and save_invstd, so it needs recalculated.
   const auto acc_type = at::toAccumulateType(input.scalar_type(), /*is_cuda=*/true);
   Tensor mean;
-  if (save_mean->defined()) {
+  TORCH_INTERNAL_ASSERT(save_mean->defined(), "save_mean should always be defined\n");
+  if (save_mean->numel() != 0) {
     mean = *save_mean;
   } else if (needs_reduction) {
     TORCH_CHECK(!train && running_mean->defined());
@@ -489,7 +496,8 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cuda(const Tensor& grad_o
   }
 
   Tensor invstd;
-  if (save_invstd->defined()) {
+  TORCH_INTERNAL_ASSERT(save_invstd->defined(), "save_invstd should always be defined\n");
+  if (save_invstd->numel() != 0) {
     invstd = *save_invstd;
   } else {
     TORCH_CHECK(!train && running_var->defined());
@@ -551,7 +559,7 @@ Tensor batch_norm_elemt_cuda(
     const Tensor& self, const c10::optional<Tensor>& weight_opt,
     const c10::optional<Tensor>& bias_opt, const Tensor& mean,
     const Tensor& invstd, double epsilon) {
-  auto output = at::empty_like(self, self.suggest_memory_format());
+  auto output = at::empty_like(self);
   // FIXME: Epsilon parameter isn't required, we don't take the reciprocal
   batch_norm_elementwise(output, self, weight_opt, bias_opt, mean, invstd);
   return output;
@@ -639,7 +647,9 @@ Tensor batch_norm_backward_elemt_cuda(const Tensor& self, const Tensor& input, c
   c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
   const Tensor& weight = *weight_maybe_owned;
 
-  if (at::cuda::detail::canUse32BitIndexMath(self) && batch_norm_use_channels_last_kernels(self)){
+  if (at::cuda::detail::canUse32BitIndexMath(self) &&
+      batch_norm_use_channels_last_kernels(self) &&
+      batch_norm_use_channels_last_kernels(input))  {
     return batch_norm_backward_elemt_channels_last_cuda_template(self, input, mean, invstd, weight, sum_dy, sum_dy_xmu, count);
   }
 

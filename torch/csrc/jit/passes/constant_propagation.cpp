@@ -3,6 +3,7 @@
 #include <ATen/core/functional.h>
 #include <ATen/core/ivalue.h>
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/ir/constants.h>
@@ -19,7 +20,8 @@ namespace jit {
 
 c10::optional<std::vector<IValue>> runNodeIfInputsAreConstant(
     const Node* n,
-    bool ignore_custom_classes) {
+    bool ignore_custom_classes,
+    AliasDb* db) {
   Stack stack;
   for (auto input : n->inputs()) {
     if (auto ival = toIValue(input)) {
@@ -57,7 +59,7 @@ c10::optional<std::vector<IValue>> runNodeIfInputsAreConstant(
           n->inputs().size());
     } break;
     case prim::CreateObject: {
-      createObject(stack, n->output()->type()->expect<ClassType>());
+      createObject(stack, n->output()->type()->expect<ClassType>(), /*use_weak_ref*/true);
     } break;
     case prim::GetAttr: {
       auto attr = pop(stack).toObject()->getAttr(n->s(attr::name));
@@ -77,14 +79,14 @@ c10::optional<std::vector<IValue>> runNodeIfInputsAreConstant(
 
       try {
         auto op = n->getOperation();
-        op(&stack);
+        op(stack);
       } catch (...) {
         return c10::nullopt;
       }
     } break;
   }
 
-  for (const IValue& v : stack) {
+  for (IValue& v : stack) {
     if (v.isTensor()) {
       const at::Tensor& t = v.toTensor();
       if (t.defined() && t.requires_grad()) {
@@ -95,6 +97,28 @@ c10::optional<std::vector<IValue>> runNodeIfInputsAreConstant(
     // Weak form of const propagation
     if (ignore_custom_classes) {
       if (v.isCustomClass()) {
+        return c10::nullopt;
+      }
+    }
+    // see [Constant Object Weak CompilationUnit Reference]
+    if (v.isCustomClass()) {
+      if (v.toObject()->is_weak_compilation_ref()) {
+        continue;
+      }
+      if (!db) {
+        continue;
+      }
+      // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+      Node* n_non_const = const_cast<Node*>(n);
+      if (db->mayContainAlias(
+              n_non_const->inputs(), {n_non_const->outputs()})) {
+        continue;
+      }
+      auto obj = v.toObject();
+      obj->unsafe_make_weak_compilation_ref();
+    }
+    if (v.isObject()) {
+      if (!v.toObject()->is_weak_compilation_ref()) {
         return c10::nullopt;
       }
     }
@@ -160,7 +184,7 @@ struct ConstantPropagator {
     }
     auto graph = n->owningGraph();
     WithInsertPoint guard(n);
-    for (size_t i = 0; i < outputs.size(); ++i) {
+    for (const auto i : c10::irange(outputs.size())) {
       auto new_output = tryInsertConstant(*graph, outputs[i]);
       if (new_output) {
         made_change_ = true;

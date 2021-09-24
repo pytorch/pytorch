@@ -1,5 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/AccumulateType.h>
+#include <ATen/cuda/Atomic.cuh>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/detail/IndexUtils.cuh>
@@ -8,7 +9,6 @@
 #include <ATen/TensorUtils.h>
 #include <ATen/Utils.h>
 #include <c10/util/Exception.h>
-#include <THC/THCAtomics.cuh>
 #include <THC/THCNumerics.cuh>
 
 #include <algorithm>
@@ -161,6 +161,10 @@ TORCH_IMPL_FUNC(fractional_max_pool2d_out_cuda) (
     input_ = input_.reshape({1, input.size(0), input.size(1), input.size(2)});
   }
 
+  if (output_.numel() == 0) {
+    return;
+  }
+
   // block is limited to 4 warps
   // grid handles overflow per each plane
   int outputPlaneSize = output_.size(2) *
@@ -219,6 +223,9 @@ void fractional_max_pool2d_backward_out_cuda_template(
 
   /* resize */
   gradInput.resize_as_(input);
+  if (gradInput.numel() == 0) {
+    return;
+  }
   gradInput.zero_();
 
   auto gradInput_ = gradInput;
@@ -241,7 +248,7 @@ void fractional_max_pool2d_backward_out_cuda_template(
             gradInput_.size(0));
   dim3 block(outputPlaneSize > 128 ? 128 : outputPlaneSize);
 
-  auto devIndices = indices.packed_accessor<int64_t, 4>();
+  auto devIndices = indices_.packed_accessor<int64_t, 4>();
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(gradOutput.scalar_type(),
     "fractional_max_pool2d_backward_out_cuda_frame",
     [&] {

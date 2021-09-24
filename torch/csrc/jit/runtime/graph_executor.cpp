@@ -377,7 +377,7 @@ struct DifferentiableGraphOp {
         num_outputs(this->grad.f->outputs().size()) {}
 
   // XXX: keep in mind that stack can be larger than the inputs we need!
-  void operator()(Stack* stack) const {
+  void operator()(Stack& stack) const {
     auto grad_fn = std::make_shared<DifferentiableGraphBackward>(
         grad_executor,
         grad.df_input_vjps.size(),
@@ -394,13 +394,13 @@ struct DifferentiableGraphOp {
       captureInputs(*grad_fn, inputs);
     }
 
-    detachVariables(*stack);
+    detachVariables(stack);
     if (IsNewExecutorEnabled()) {
       ExecutionPlan plan =
-          f_ptr->getPlanFor(*stack, GraphExecutor::getDefaultNumBailOuts());
-      InterpreterState(plan.code).run(*stack);
+          f_ptr->getPlanFor(stack, GraphExecutor::getDefaultNumBailOuts());
+      InterpreterState(plan.code).run(stack);
     } else {
-      InterpreterState(legacy_f).run(*stack);
+      InterpreterState(legacy_f).run(stack);
     }
 
     {
@@ -419,7 +419,7 @@ struct DifferentiableGraphOp {
       // drop the temporary outputs so that we return the same number of
       // outputs as if we were not also calculating gradient
       const size_t num_temporary_outputs = num_outputs - grad.f_real_outputs;
-      stack->erase(stack->end() - num_temporary_outputs, stack->end());
+      stack.erase(stack.end() - num_temporary_outputs, stack.end());
     }
   }
 
@@ -453,7 +453,7 @@ struct DifferentiableGraphOp {
     // ourselves.
     const int64_t stack_size = stack.size();
     const int64_t stack_offset = stack_size - num_inputs;
-    for (int64_t i = stack_offset; i < stack_size; ++i) {
+    for (const auto i : c10::irange(stack_offset, stack_size)) {
       detach(stack[i]);
     }
   }
@@ -908,7 +908,7 @@ void runNondiffOptimization(
 
 void runOptimization(
     std::shared_ptr<Graph>& graph,
-    bool unroll,
+    bool unroll_non_constant_loops,
     bool const_prop_user_classes) {
   // Basic graph preprocessing to eliminate noise.
   GRAPH_DEBUG(
@@ -935,9 +935,17 @@ void runOptimization(
 
   // Unroll small loops, and eliminate expressions that are the same at every
   // iteration.
-  if (unroll) {
-    UnrollLoops(graph);
+  bool unroll_success = false;
+  if (unroll_non_constant_loops) {
+    unroll_success = UnrollLoops(graph);
     GRAPH_DEBUG("After UnrollLoops, before RemoveListMutation\n", *graph);
+  } else {
+    unroll_success = UnrollConstantLoops(graph);
+    GRAPH_DEBUG(
+        "After UnrollConstantLoops, before RemoveListMutation\n", *graph);
+  }
+
+  if (unroll_success) {
     // run again with unrolled loops
     RemoveListMutation(graph);
     GRAPH_DEBUG("After RemoveListMutation, before PeepholeOptimize\n", *graph);

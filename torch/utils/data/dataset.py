@@ -24,6 +24,29 @@ from ... import Generator, Tensor
 T_co = TypeVar('T_co', covariant=True)
 T = TypeVar('T')
 
+UNTRACABLE_DATAFRAME_PIPES = ['batch',  # As it returns DataChunks
+                              'groupby',   # As it returns DataChunks
+                              '_dataframes_as_tuples',  # As it unpacks DF
+                              'trace_as_dataframe',  # As it used to mark DF for tracing
+                              ]
+
+class DataChunk(list, Generic[T]):
+    def __init__(self, items):
+        super().__init__(items)
+        self.items = items
+
+    def as_str(self, indent=''):
+        res = indent + "[" + ", ".join(str(i) for i in iter(self)) + "]"
+        return res
+
+    def __iter__(self) -> Iterator[T]:
+        for i in super().__iter__():
+            yield i
+
+    def raw_iterator(self):
+        for i in self.items:
+            yield i
+
 
 class Dataset(Generic[T_co]):
     r"""An abstract class representing a :class:`Dataset`.
@@ -64,13 +87,20 @@ class Dataset(Generic[T_co]):
         cls.functions[function_name] = function
 
     @classmethod
-    def register_datapipe_as_function(cls, function_name, cls_to_register):
+    def register_datapipe_as_function(cls, function_name, cls_to_register, enable_df_api_tracing=False):
         if function_name in cls.functions:
             raise Exception("Unable to add DataPipe function name {} as it is already taken".format(function_name))
 
-        def class_function(cls, source_dp, *args, **kwargs):
-            return cls(source_dp, *args, **kwargs)
-        function = functools.partial(class_function, cls_to_register)
+        def class_function(cls, enable_df_api_tracing, source_dp, *args, **kwargs):
+            result_pipe = cls(source_dp, *args, **kwargs)
+            if isinstance(result_pipe, Dataset):
+                if enable_df_api_tracing or isinstance(source_dp, DFIterDataPipe):
+                    if function_name not in UNTRACABLE_DATAFRAME_PIPES:
+                        result_pipe = result_pipe.trace_as_dataframe()
+
+            return result_pipe
+
+        function = functools.partial(class_function, cls_to_register, enable_df_api_tracing)
         cls.functions[function_name] = function
 
 
@@ -209,6 +239,9 @@ class IterableDataset(Dataset[T_co], metaclass=_DataPipeMeta):
             raise Exception("Attempt to override existing reduce_ex_hook")
         IterableDataset.reduce_ex_hook = hook_fn
 
+class DFIterDataPipe(IterableDataset):
+    def _is_dfpipe(self):
+        return True
 
 class TensorDataset(Dataset[Tuple[Tensor, ...]]):
     r"""Dataset wrapping tensors.
@@ -253,9 +286,8 @@ class ConcatDataset(Dataset[T_co]):
 
     def __init__(self, datasets: Iterable[Dataset]) -> None:
         super(ConcatDataset, self).__init__()
-        # Cannot verify that datasets is Sized
-        assert len(datasets) > 0, 'datasets should not be an empty iterable'  # type: ignore[arg-type]
         self.datasets = list(datasets)
+        assert len(self.datasets) > 0, 'datasets should not be an empty iterable'  # type: ignore[arg-type]
         for d in self.datasets:
             assert not isinstance(d, IterableDataset), "ConcatDataset does not support IterableDataset"
         self.cumulative_sizes = self.cumsum(self.datasets)

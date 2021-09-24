@@ -180,6 +180,16 @@ Tensor linear_clamp_run(
   return op_context->run(input);
 }
 
+std::tuple<IntArrayRef, c10::optional<IntArrayRef>>
+unpack_prepacked_sizes_linear(const IValue& ivalue) {
+  auto op_context = ivalue.toCustomClass<xnnpack::LinearOpContext>();
+  const auto tuple = op_context->unpack();
+  const auto& bias = std::get<1>(tuple);
+  return std::make_tuple(
+      std::get<0>(tuple).sizes(),
+      (bias && bias->defined()) ? c10::optional<IntArrayRef>(bias->sizes()) : c10::nullopt);
+}
+
 } // namespace linear
 } // namespace internal
 
