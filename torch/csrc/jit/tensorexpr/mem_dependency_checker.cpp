@@ -111,7 +111,7 @@ DependencySet AccessInfo::getIndirectDependencies() {
 DependencySet AccessInfo::getDirectDependents() {
   DependencySet res;
   for (auto& depPair : dependents_) {
-    res.insert(depPair.second);
+    res.insert(depPair.second.lock());
   }
   return res;
 }
@@ -174,7 +174,7 @@ void AccessInfo::print() const {
   if (!dependents_.empty()) {
     std::cout << " - dependents: ";
     for (auto& pair : dependents_) {
-      std::cout << pair.second->id() << " ";
+      std::cout << pair.second.lock()->id() << " ";
     }
   }
 

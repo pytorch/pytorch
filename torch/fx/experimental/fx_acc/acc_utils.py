@@ -2,10 +2,11 @@ import inspect
 import json
 import os
 from typing import Any, Tuple, Callable, Union, Dict, List, Optional
+import re
 
 import torch
 import torch.fx
-from torch.fx.experimental.graph_manipulation import (
+from torch.fx.passes.graph_manipulation import (
     serialize_module,
 )
 from torch.fx.graph_module import GraphModule
@@ -137,3 +138,22 @@ def print_model_info(gm: torch.fx.GraphModule, header: Optional[str] = None):
         model_info_str += f"> {op_str}: {count}\n"
 
     print(model_info_str)
+
+def get_unique_attr_name_in_module(mod_traced: torch.fx.GraphModule, name: str) -> str:
+    """
+    Make sure the name is unique (in a module) and can represents an attr.
+    """
+    # Delete all characters that are illegal in a Python identifier.
+    name = re.sub("[^0-9a-zA-Z_]+", "_", name)
+    if name[0].isdigit():
+        name = f"_{name}"
+    # Now make sure it is in fact unique to the module by incrementing suffix value.
+    while hasattr(mod_traced, name):
+        match = re.match(r"(.*)_(\d+)$", name)
+        if match is None:
+            name = name + "_1"
+        else:
+            base, num = match.group(1, 2)
+            name = f"{base}_{int(num) + 1}"
+
+    return name
