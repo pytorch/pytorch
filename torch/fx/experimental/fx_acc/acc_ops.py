@@ -411,6 +411,12 @@ def dropout_mapper(node: torch.fx.Node, mod: nn.Module):
     return node.kwargs["input"]
 
 @register_acc_op_mapping(
+    op_and_target=("call_function", nn.functional.hardsigmoid))
+@register_acc_op
+def hardsigmoid(*, input):
+    return nn.functional.hardsigmoid(input)
+
+@register_acc_op_mapping(
     op_and_target=("call_function", torch.ops.quantized.add),
     arg_replacement_tuples=[
         ("qa", "input"),
