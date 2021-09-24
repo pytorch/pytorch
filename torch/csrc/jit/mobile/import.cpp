@@ -3,6 +3,7 @@
 #include <torch/csrc/jit/mobile/parse_operators.h>
 
 #include <ATen/core/ivalue.h>
+#include <ATen/record_function.h>
 #include <c10/util/ScopeExit.h>
 #include <c10/util/irange.h>
 #include <caffe2/serialize/inline_container.h>
@@ -86,6 +87,14 @@ using caffe2::serialize::IStreamAdapter;
 using caffe2::serialize::PyTorchStreamReader;
 using caffe2::serialize::ReadAdapterInterface;
 
+namespace detail {
+
+void record_custom_class(std::string name) {
+  RECORD_FUNCTION_WITH_SCOPE(at::RecordScope::CUSTOM_CLASS, name, {});
+}
+
+} // namespace detail
+
 OpCode parseOpCode(const char* str);
 
 std::string operator_str(
@@ -138,8 +147,11 @@ c10::intrusive_ptr<c10::ivalue::Object> objLoaderMobile(
   auto setstate = mobile_compilation_unit->find_function(method_name);
   auto find_custom_class_with_setstate = [&qn]() -> c10::ClassTypePtr {
     auto custom_class_type = torch::jit::getCustomClass(qn->qualifiedName());
-    if (custom_class_type && custom_class_type->findMethod("__setstate__")) {
-      return custom_class_type;
+    if (custom_class_type) {
+      RECORD_CUSTOM_CLASS(qn->qualifiedName());
+      if (custom_class_type->findMethod("__setstate__")) {
+        return custom_class_type;
+      }
     }
     return nullptr;
   };

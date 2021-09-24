@@ -17,6 +17,28 @@ constexpr const char* kArchiveNameBytecode = "bytecode";
 constexpr const char* kArchiveNameConstants = "constants";
 constexpr const char* kArchiveNameVersion = "version";
 
+namespace detail {
+/**
+ * In the Facebook internal build (using BUCK), this macro is enabled by
+ * passing in -c pt.enable_record_kernel_dtype=1 when building the tracer
+ * binary.
+ */
+#if defined ENABLE_RECORD_KERNEL_FUNCTION_DTYPE
+TORCH_API void record_custom_class(std::string name);
+
+/**
+ * Record an instance of a custom class being loaded
+ * grab portion of string after final '.' from qualified name
+ * as this seemingly aligns with how users name their custom classes
+ */
+#define RECORD_CUSTOM_CLASS(NAME) \
+  auto name = std::string(NAME);  \
+  detail::record_custom_class(name.substr(name.find_last_of(".") + 1));
+#else
+#define RECORD_CUSTOM_CLASS(NAME)
+#endif
+} // namespace detail
+
 // The family of methods below load a serialized Mobile Module
 // into a mobile::Module object.
 TORCH_API mobile::Module _load_for_mobile(

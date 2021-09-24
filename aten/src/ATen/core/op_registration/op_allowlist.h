@@ -81,6 +81,20 @@ constexpr bool op_allowlist_check(string_view op_name) {
 #endif
 }
 
+// Returns true iff the given custom class name is on the allowlist
+// and should be registered
+constexpr bool custom_class_allowlist_check(string_view custom_class_name) {
+#if !defined(TORCH_CUSTOM_CLASS_ALLOWLIST)
+  // If the TORCH_CUSTOM_CLASS_ALLOWLIST parameter is not defined,
+  // all custom classes are to be registered
+  return true;
+#else
+  return op_allowlist_contains(
+    C10_STRINGIZE(TORCH_CUSTOM_CLASS_ALLOWLIST),
+    custom_class_name);
+#endif
+}
+
 // Returns true iff the given schema string is on the allowlist
 // and should be registered
 constexpr bool schema_allowlist_check(string_view schema) {
@@ -90,6 +104,7 @@ constexpr bool schema_allowlist_check(string_view schema) {
   return op_allowlist_check(schema.substr(0, schema.find("(")));
 #endif
 }
+
 
 // schema_allowlist_check() implicitly depends on a macro, TORCH_OPERATOR_WHITELIST.
 // Add this API to pass arbitrary allowlist.
