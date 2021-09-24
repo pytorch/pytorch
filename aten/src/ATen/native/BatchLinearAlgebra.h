@@ -37,9 +37,6 @@ template <class scalar_t, class value_t = scalar_t>
 void lapackSyevd(char jobz, char uplo, int n, scalar_t* a, int lda, value_t* w, scalar_t* work, int lwork, value_t* rwork, int lrwork, int* iwork, int liwork, int* info);
 
 template <class scalar_t>
-void lapackTriangularSolve(char uplo, char trans, char diag, int n, int nrhs, scalar_t* a, int lda, scalar_t* b, int ldb, int* info);
-
-template <class scalar_t>
 void lapackGels(char trans, int m, int n, int nrhs,
     scalar_t *a, int lda, scalar_t *b, int ldb,
     scalar_t *work, int lwork, int *info);
@@ -166,6 +163,11 @@ void lapackLu(int m, int n, scalar_t *a, int lda, int *ipiv, int *info);
 
 #endif
 
+#if AT_BUILD_WITH_BLAS()
+template <class scalar_t>
+void blasTriangularSolve(char side, char uplo, char trans, char diag, int n, int nrhs, scalar_t* a, int lda, scalar_t* b, int ldb);
+#endif
+
 using cholesky_fn = void (*)(const Tensor& /*input*/, const Tensor& /*info*/, bool /*upper*/);
 DECLARE_DISPATCH(cholesky_fn, cholesky_stub);
 
@@ -210,11 +212,10 @@ DECLARE_DISPATCH(lstsq_fn, lstsq_stub);
 
 using triangular_solve_fn = void (*)(
     const Tensor& /*A*/,
-    const Tensor& /*b*/,
-    const Tensor& /*infos*/,
+    const Tensor& /*B*/,
+    bool /*left*/,
     bool /*upper*/,
-    bool /*transpose*/,
-    bool /*conjugate_transpose*/,
+    TransposeType /*transpose*/,
     bool /*unitriangular*/);
 DECLARE_DISPATCH(triangular_solve_fn, triangular_solve_stub);
 
@@ -235,7 +236,7 @@ using lu_solve_trans_fn = void (*)(
     const Tensor& /*b*/,
     const Tensor& /*lu*/,
     const Tensor& /*pivots*/,
-    char /*trans*/);
+    TransposeType /*trans*/);
 DECLARE_DISPATCH(lu_solve_trans_fn, lu_solve_trans_stub);
 
 

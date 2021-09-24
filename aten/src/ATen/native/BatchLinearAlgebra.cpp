@@ -56,12 +56,6 @@ extern "C" void cpotri_(char *uplo, int *n, std::complex<float> *a, int *lda, in
 extern "C" void dpotri_(char *uplo, int *n, double *a, int *lda, int *info);
 extern "C" void spotri_(char *uplo, int *n, float *a, int *lda, int *info);
 
-// trtrs
-extern "C" void ztrtrs_(char *uplo, char *trans, char *diag, int *n, int *nrhs, std::complex<double> *a, int *lda, std::complex<double> *b, int *ldb, int *info);
-extern "C" void ctrtrs_(char *uplo, char *trans, char *diag, int *n, int *nrhs, std::complex<float> *a, int *lda, std::complex<float> *b, int *ldb, int *info);
-extern "C" void dtrtrs_(char *uplo, char *trans, char *diag, int *n, int *nrhs, double *a, int *lda, double *b, int *ldb, int *info);
-extern "C" void strtrs_(char *uplo, char *trans, char *diag, int *n, int *nrhs, float *a, int *lda, float *b, int *ldb, int *info);
-
 // geqrf
 extern "C" void zgeqrf_(int *m, int *n, std::complex<double> *a, int *lda, std::complex<double> *tau, std::complex<double> *work, int *lwork, int *info);
 extern "C" void cgeqrf_(int *m, int *n, std::complex<float> *a, int *lda, std::complex<float> *tau, std::complex<float> *work, int *lwork, int *info);
@@ -199,6 +193,14 @@ extern "C" void sgelss_(int *m, int *n, int *nrhs,
     float *a, int *lda, float *b, int *ldb,
     float *s, float *rcond, int *rank,
     float *work, int *lwork, int *info);
+#endif
+
+#if AT_BUILD_WITH_BLAS()
+// trsm
+extern "C" void ztrsm_(char *side, char *uplo, char *trans, char *diag, int *n, int *nrhs, std::complex<double> *alpha, std::complex<double> *a, int *lda, std::complex<double> *b, int *ldb);
+extern "C" void ctrsm_(char *side, char *uplo, char *trans, char *diag, int *n, int *nrhs, std::complex<float> *alpha, std::complex<float> *a, int *lda, std::complex<float> *b, int *ldb);
+extern "C" void dtrsm_(char *side, char *uplo, char *trans, char *diag, int *n, int *nrhs, double *alpha, double *a, int *lda, double *b, int *ldb);
+extern "C" void strsm_(char *side, char *uplo, char *trans, char *diag, int *n, int *nrhs, float *alpha, float *a, int *lda, float *b, int *ldb);
 #endif
 
 namespace at {
@@ -347,22 +349,6 @@ template<> void lapackCholeskyInverse<double>(char uplo, int n, double *a, int l
 
 template<> void lapackCholeskyInverse<float>(char uplo, int n, float *a, int lda, int *info) {
   spotri_(&uplo, &n, a, &lda, info);
-}
-
-template<> void lapackTriangularSolve<c10::complex<double>>(char uplo, char trans, char diag, int n, int nrhs, c10::complex<double> *a, int lda, c10::complex<double> *b, int ldb, int *info) {
-  ztrtrs_(&uplo, &trans, &diag, &n, &nrhs, reinterpret_cast<std::complex<double>*>(a), &lda, reinterpret_cast<std::complex<double>*>(b), &ldb, info);
-}
-
-template<> void lapackTriangularSolve<c10::complex<float>>(char uplo, char trans, char diag, int n, int nrhs, c10::complex<float> *a, int lda, c10::complex<float> *b, int ldb, int *info) {
-  ctrtrs_(&uplo, &trans, &diag, &n, &nrhs, reinterpret_cast<std::complex<float>*>(a), &lda, reinterpret_cast<std::complex<float>*>(b), &ldb, info);
-}
-
-template<> void lapackTriangularSolve<double>(char uplo, char trans, char diag, int n, int nrhs, double *a, int lda, double *b, int ldb, int *info) {
-  dtrtrs_(&uplo, &trans, &diag, &n, &nrhs, a, &lda, b, &ldb, info);
-}
-
-template<> void lapackTriangularSolve<float>(char uplo, char trans, char diag, int n, int nrhs, float *a, int lda, float *b, int ldb, int *info) {
-  strtrs_(&uplo, &trans, &diag, &n, &nrhs, a, &lda, b, &ldb, info);
 }
 
 template<> void lapackGeqrf<c10::complex<double>>(int m, int n, c10::complex<double> *a, int lda, c10::complex<double> *tau, c10::complex<double> *work, int lwork, int *info) {
@@ -715,6 +701,28 @@ template<> void lapackGelss<float>(
       a, &lda, b, &ldb,
       s, &rcond, rank,
       work, &lwork, info);
+}
+#endif
+
+#if AT_BUILD_WITH_BLAS()
+template<> void blasTriangularSolve<c10::complex<double>>(char side, char uplo, char trans, char diag, int n, int nrhs, c10::complex<double> *a, int lda, c10::complex<double> *b, int ldb) {
+  std::complex<double> one{1., 0.};
+  ztrsm_(&side, &uplo, &trans, &diag, &n, &nrhs, &one, reinterpret_cast<std::complex<double>*>(a), &lda, reinterpret_cast<std::complex<double>*>(b), &ldb);
+}
+
+template<> void blasTriangularSolve<c10::complex<float>>(char side, char uplo, char trans, char diag, int n, int nrhs, c10::complex<float> *a, int lda, c10::complex<float> *b, int ldb) {
+  std::complex<float> one{1.f, 0.f};
+  ctrsm_(&side, &uplo, &trans, &diag, &n, &nrhs, &one, reinterpret_cast<std::complex<float>*>(a), &lda, reinterpret_cast<std::complex<float>*>(b), &ldb);
+}
+
+template<> void blasTriangularSolve<double>(char side, char uplo, char trans, char diag, int n, int nrhs, double *a, int lda, double *b, int ldb) {
+  auto one = 1.;
+  dtrsm_(&side, &uplo, &trans, &diag, &n, &nrhs, &one, a, &lda, b, &ldb);
+}
+
+template<> void blasTriangularSolve<float>(char side, char uplo, char trans, char diag, int n, int nrhs, float *a, int lda, float *b, int ldb) {
+  auto one = 1.f;
+  strsm_(&side, &uplo, &trans, &diag, &n, &nrhs, &one, a, &lda, b, &ldb);
 }
 #endif
 
@@ -1580,6 +1588,8 @@ Tensor cholesky_inverse(const Tensor &input, bool upper) {
 
 DEFINE_DISPATCH(lu_stub);
 
+// TODO: remove check_errors argument
+// https://github.com/pytorch/pytorch/issues/64014
 std::tuple<Tensor, Tensor, Tensor> _lu_with_info(const Tensor& self, bool compute_pivots, bool check_errors) {
   TORCH_CHECK(self.dim() >= 2,
            "expected tensor with 2 or more dimensions, got size: ", self.sizes(),
@@ -1597,14 +1607,6 @@ std::tuple<Tensor, Tensor, Tensor> _lu_with_info(const Tensor& self, bool comput
   // 'lu' tensor is modified in-place and must be a copy of 'self'
   Tensor lu = cloneBatchedColumnMajor(self);
   lu_stub(self.device().type(), lu, pivots_tensor, infos_tensor, compute_pivots);
-
-  if (check_errors) {
-    if (self.dim() > 2) {
-      batchCheckErrors(infos_tensor, "lu", /*allow_singular=*/true);
-    } else {
-      singleCheckErrors(infos_tensor.item<int64_t>(), "lu", /*allow_singular=*/true);
-    }
-  }
   return std::make_tuple(lu, pivots_tensor, infos_tensor);
 }
 
@@ -1622,10 +1624,9 @@ The result of the computation is saved in-place in 'result' tensor,
 'unitriangular' if true then the diagonal elements of 'input' are assumed to be 1
 and the actual diagonal values are not used.
 */
-static void triangular_solve_out_info(
+static void triangular_solve_out_impl(
     const Tensor& result,
     const Tensor& clone_input,
-    const Tensor& infos,
     const Tensor& input,
     const Tensor& other,
     bool upper, bool transpose, bool unitriangular) {
@@ -1638,15 +1639,10 @@ static void triangular_solve_out_info(
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(input.device() == other.device());
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(input.device() == result.device());
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(input.device() == clone_input.device());
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(input.device() == infos.device());
 
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(input.scalar_type() == other.scalar_type());
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(input.scalar_type() == result.scalar_type());
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(input.scalar_type() == clone_input.scalar_type());
-
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(infos.scalar_type() == at::kInt);
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(infos.numel() == std::max<int64_t>(1, batchCount(input)));
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(infos.is_contiguous());
 
   // if 'result' has no elements we can modify it
   if (result.numel() == 0) {
@@ -1672,13 +1668,12 @@ static void triangular_solve_out_info(
   result.copy_(other);
   clone_input.copy_(input);
 
-  triangular_solve_stub(input.device().type(), clone_input, result, infos, upper, transpose, /*conjugate_transpose=*/false, unitriangular);
+  triangular_solve_stub(input.device().type(), clone_input, result, /*left=*/true, upper, transpose ? TransposeType::Transpose : TransposeType::NoTranspose, unitriangular);
 }
 
 TORCH_IMPL_FUNC(triangular_solve_out)(const Tensor& self, const Tensor& A, bool upper, bool transpose, bool unitriangular, const Tensor& result, const Tensor& clone_A) {
   Tensor self_broadcasted, A_broadcasted;
   std::tie(self_broadcasted, A_broadcasted) = _linalg_broadcast_batch_dims(self, A, "triangular_solve");
-  Tensor infos = at::zeros({std::max<int64_t>(1, batchCount(self_broadcasted))}, self.options().dtype(kInt));
 
   bool copy_needed = !result.transpose(-2, -1).is_contiguous();
   copy_needed |= !clone_A.transpose(-2, -1).is_contiguous();
@@ -1687,18 +1682,12 @@ TORCH_IMPL_FUNC(triangular_solve_out)(const Tensor& self, const Tensor& A, bool 
     Tensor result_tmp = at::empty({0}, self.options());
     Tensor clone_A_tmp = at::empty({0}, self.options());
 
-    triangular_solve_out_info(result_tmp, clone_A_tmp, infos, A_broadcasted, self_broadcasted, upper, transpose, unitriangular);
+    triangular_solve_out_impl(result_tmp, clone_A_tmp, A_broadcasted, self_broadcasted, upper, transpose, unitriangular);
 
     result.copy_(result_tmp);
     clone_A.copy_(clone_A_tmp);
   } else {
-    triangular_solve_out_info(result, clone_A, infos, A_broadcasted, self_broadcasted, upper, transpose, unitriangular);
-  }
-
-  if (self_broadcasted.dim() > 2) {
-    batchCheckErrors(infos, "triangular_solve");
-  } else {
-    singleCheckErrors(infos.item().toInt(), "triangular_solve");
+    triangular_solve_out_impl(result, clone_A, A_broadcasted, self_broadcasted, upper, transpose, unitriangular);
   }
 }
 
@@ -3567,17 +3556,7 @@ DEFINE_DISPATCH(lu_solve_stub);
 DEFINE_DISPATCH(lu_solve_trans_stub);
 
 // Supports arbitrary batch dimensions for self and LU_data (implicitly LU_pivots also)
-Tensor _lu_solve_trans(const Tensor& self, const Tensor& LU_data, const Tensor& LU_pivots, const c10::string_view trans_str) {
-  auto trans = std::toupper(trans_str[0]);
-  switch (trans) {
-    case 'N':
-    case 'T':
-    case 'C':
-      break;
-    default:
-      TORCH_CHECK(false,
-                  "lu_solve: wrong `trans` parameter, it must be one of 'N', 'T' or 'C'");
-  }
+Tensor _lu_solve_trans(const Tensor& self, const Tensor& LU_data, const Tensor& LU_pivots, TransposeType trans) {
   TORCH_CHECK(self.dim() >= 2,
               "b should have at least 2 dimensions, but has ", self.dim(), " dimensions instead");
   TORCH_CHECK(LU_data.dim() >= 2,
@@ -3620,7 +3599,7 @@ Tensor _lu_solve_trans(const Tensor& self, const Tensor& LU_data, const Tensor& 
 }
 
 Tensor lu_solve(const Tensor& self, const Tensor& LU_data, const Tensor& LU_pivots) {
-  return at::native::_lu_solve_trans(self, LU_data, LU_pivots, "N");
+  return at::native::_lu_solve_trans(self, LU_data, LU_pivots, TransposeType::NoTranspose);
 }
 
 Tensor& lu_solve_out(const Tensor& self, const Tensor& LU_data, const Tensor& LU_pivots, Tensor& result) {
@@ -3770,7 +3749,7 @@ Tensor _det_lu_based_helper_backward_helper(
     auto lu_clone = lu.clone();
     condition_diagonal(lu_clone);
 
-    auto trans = self.is_complex() ? 'C' : 'T';
+    auto trans = self.is_complex() ? TransposeType::ConjTranspose : TransposeType::Transpose;
 
     // d is modified in-place and will contain the result
     lu_solve_trans_stub(self.device().type(), d, lu_clone, pivs, trans);
@@ -3788,8 +3767,6 @@ Tensor _det_lu_based_helper_backward_helper(
       u.conj_physical_();
     }
 
-    auto infos = at::zeros({std::max<int64_t>(1, batchCount(self))}, self.options().dtype(kInt));
-
     // triangular_solve_stub performs operations in-place.
     // Tensor d will contain the result
     condition_diagonal(u);
@@ -3802,19 +3779,19 @@ Tensor _det_lu_based_helper_backward_helper(
     // Since u is conjugated in-place in the code above, it is sufficient
     // to just run triangular_solve with upper=false.
     triangular_solve_stub(
-      self.device().type(), u, d, infos,
+      self.device().type(), u, d,
+      /*left=*/true,
       /*upper=*/false,
-      /*transpose=*/false,
-      /*conjugate_transpose=*/false,
+      /*transpose=*/TransposeType::NoTranspose,
       /*unitriangular=*/false);
 
     // After this operation d will contain a row-wise permuted grad wrt to self
     // The same notes as for the system involving u apply here.
     triangular_solve_stub(
-      self.device().type(), l, d, infos,
+      self.device().type(), l, d,
+      /*left=*/true,
       /*upper=*/true,
-      /*transpose=*/false,
-      /*conjugate_transpose=*/false,
+      /*transpose=*/TransposeType::NoTranspose,
       /*unitriangular=*/true);
 
     // multiply by p to restore the row order

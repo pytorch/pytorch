@@ -12,6 +12,23 @@
 
 namespace at { namespace native {
 
+// Used as an interface between the different BLAS-like libraries
+enum class TransposeType {
+  NoTranspose,
+  Transpose,
+  ConjTranspose,
+};
+
+// Transforms TransposeType into the BLAS / LAPACK format
+static char to_blas(TransposeType trans) {
+  switch (trans) {
+    case TransposeType::Transpose: return 'T';
+    case TransposeType::NoTranspose: return 'N';
+    case TransposeType::ConjTranspose: return 'C';
+  }
+  TORCH_INTERNAL_ASSERT(false, "Invalid transpose type");
+}
+
 /*
  * Clones a Tensor so that the following conditions hold:
  * If we think of a Tensor of having size (B, M, N), where B is any number
@@ -19,8 +36,8 @@ namespace at { namespace native {
  * - Each (M, N) matrix is in column major form
  * - Let Tensor P have size (B, M, N) and Q have size (B, M', N').
  *   Then when laid out in memory, the M by N matrix starting at
- *   P.data_ptr()[b * M * N] is of the same corresponding batch as the M' by N'
- *   matrix starting at Q.data_ptr()[b * M' * N'].
+ *   P.data_ptr()[B * M * N] is of the same corresponding batch as the M' by N'
+ *   matrix starting at Q.data_ptr()[B * M' * N'].
  */
 static inline Tensor cloneBatchedColumnMajor(const Tensor& src) {
   // If src is already in batched column major format, then
@@ -214,61 +231,65 @@ static inline void squareCheckInputs(const Tensor& self) {
 }
 
 /*
+ * Given a info int, obtained after a single operation, this function check if the computation
+ * has been successful (info = 0) or not, and report in case of the latter.
+ */
+static inline void singleCheckErrors(int64_t info, const char* name, int64_t batch_id=-1) {
+  std::string batch_string{""};
+  if (batch_id >= 0) {
+    batch_string = ": (Batch element " + std::to_string(batch_id) + ")";
+  }
+  if (info < 0) {
+    TORCH_INTERNAL_ASSERT(false, name, batch_string,
+        ": Argument ", -info, " has illegal value. Most certainly there is a bug in the implementation calling the backend library.");
+  } else if (info > 0) {
+    if (strstr(name, "inv")) {
+      // inv, inverse, cholesky_inverse, etc.
+      TORCH_CHECK(false, name, batch_string,
+          ": The diagonal element ", info, " is zero, the inversion could not be completed because the input matrix is singular.");
+    } else if (strstr(name, "solve")) {
+      // solve, linalg_solve, cholesky_solve, etc.
+      TORCH_CHECK(false, name, batch_string,
+          ": The diagonal element ", info, " is zero, the solve could not be completed because the input matrix is singular.");
+    } else if (strstr(name, "cholesky")) {
+      TORCH_CHECK(false, name, batch_string,
+          ": The factorization could not be completed because the input is not positive-definite (the leading minor of order ", info, " is not positive-definite).");
+    } else if (strstr(name, "svd")) {
+      TORCH_CHECK(false, name, batch_string,
+          ": The algorithm failed to converge because the input matrix is ill-conditioned or has too many repeated singular values (error code: ", info, ").");
+    } else if (strstr(name, "eig") || strstr(name, "syevd")) {
+      TORCH_CHECK(false, name, batch_string,
+          ": The algorithm failed to converge because the input matrix is ill-conditioned or has too many repeated eigenvalues (error code: ", info, ").");
+    } else if (strstr(name, "lstsq")) {
+      TORCH_CHECK(false, name, batch_string,
+          ": The least squares solution could not be computed because the input matrix does not have full rank (error code: ", info, ").");
+    } else {
+      TORCH_INTERNAL_ASSERT(false, name, ": Unknown error code: ", info, ".");
+    }
+  }
+}
+
+/*
  * Given a vector of int64_t infos, obtained after a batch operations,
  * this function checks if the computation over all these batches has been
  * successful (info = 0) or not, and report in case of the latter.
  */
-static inline void batchCheckErrors(std::vector<int64_t>& infos, const char* name, bool allow_singular=false) {
+static inline void batchCheckErrors(const std::vector<int64_t>& infos, const char* name) {
   for (size_t i = 0; i < infos.size(); i++) {
     auto info = infos[i];
-    if (info < 0) {
-      AT_ERROR(name, ": For batch ", i, ": Argument ", -info, " has illegal value");
-    } else if (info > 0) {
-      if (strstr(name, "svd")) {
-        AT_ERROR(name, ": the updating process of SBDSDC did not converge (error: ", info, ")");
-      } else if (strstr(name, "symeig") || strstr(name, "syevd")) {
-        AT_ERROR(name, ": For batch ", i, ": the algorithm failed to converge; ", info,
-                 " off-diagonal elements of an intermediate tridiagonal form did not converge to zero.");
-      } else if (!allow_singular) {
-        AT_ERROR(name, ": For batch ", i, ": U(", info, ",", info, ") is zero, singular U.");
-      }
-    }
+    singleCheckErrors(info, name, i);
   }
 }
 
 /*
  * This is an overloaded case of the previous function for a tensor of infos.
  */
-static inline void batchCheckErrors(const Tensor& infos, const char* name, bool allow_singular=false, int info_per_batch=1) {
-  auto batch_size = infos.numel();
+static inline void batchCheckErrors(const Tensor& infos, const char* name) {
   auto infos_cpu = infos.to(at::kCPU);
   auto infos_data = infos_cpu.data_ptr<int>();
-  for (int64_t i = 0; i < batch_size; i++) {
+  for (int64_t i = 0; i < infos.numel(); i++) {
     auto info = infos_data[i];
-    if (info < 0) {
-      AT_ERROR(name, ": For batch ", i/info_per_batch, ": Argument ", -info, " has illegal value");
-    } else if (!allow_singular && info > 0) {
-      AT_ERROR(name, ": For batch ", i/info_per_batch, ": U(", info, ",", info, ") is zero, singular U.");
-    }
-  }
-}
-
-/*
- * Given a info int, obtained after a single operation, this function check if the computation
- * has been successful (info = 0) or not, and report in case of the latter.
- */
-static inline void singleCheckErrors(int64_t info, const char* name, bool allow_singular=false) {
-  if (info < 0) {
-    AT_ERROR(name, ": Argument ", -info, " has illegal value");
-  } else if (info > 0) {
-    if (strstr(name, "svd")) {
-      AT_ERROR(name, ": the updating process of SBDSDC did not converge (error: ", info, ")");
-    } else if (strstr(name, "eig")) { // this catches both "eig" and "symeig"
-      AT_ERROR(name, ": the algorithm failed to converge; ", info,
-               " off-diagonal elements of an intermediate tridiagonal form did not converge to zero.");
-    } else if (!allow_singular) {
-      AT_ERROR(name, ": U(", info, ",", info, ") is zero, singular U.");
-    }
+    singleCheckErrors(info, name, i);
   }
 }
 
@@ -559,6 +580,7 @@ static inline bool is_blas_compatible_column_major_order(const Tensor& input) {
   IntArrayRef input_strides = input.strides();
   IntArrayRef input_sizes = input.sizes();
   auto ndim = input.dim();
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(ndim >= 2);
   auto leading_dimension = input_strides[ndim - 1];
   auto rows = input_sizes[ndim - 2];
   return (input_strides[ndim - 2] == 1) && (leading_dimension >= std::max<int64_t>(1, rows));
