@@ -99,7 +99,6 @@ class TestDiGraph(PackageTestCase):
         g.add_edge("2", "3")
         g.add_edge("5", "4")
         g.add_edge("4", "3")
-        closures_for_1 =
         self.assertTrue(g.forward_transitive_closures("1") ==
                         set(["1", "2", "3"]))
         self.assertTrue(g.forward_transitive_closures("4") ==

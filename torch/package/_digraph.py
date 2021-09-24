@@ -121,7 +121,7 @@ class DiGraph:
         forward_reachable_from_src = self.forward_transitive_closures(src)
 
         if dst not in forward_reachable_from_src:
-            return result
+            return result_graph
 
         # Second walk the reverse dependencies of dst, adding each node to
         # the output graph iff it is also present in forward_reachable_from_src.
