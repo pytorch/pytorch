@@ -70,7 +70,7 @@ void common_checks_baddbmm_bmm(Meta& meta, const Tensor& batch1, const Tensor& b
   int64_t contraction_size = batch1_sizes[2];
   int64_t res_rows = batch1_sizes[1];
   int64_t res_cols = batch2_sizes[2];
-  const ArrayRef<int64_t> output_size {bs, res_rows, res_cols};
+  std::vector<int64_t> output_size {bs, res_rows, res_cols};
 
   TORCH_CHECK(batch2_sizes[0] == bs && batch2_sizes[1] == contraction_size,
               "Expected size for first two dimensions of batch2 tensor to be: [",
@@ -78,16 +78,16 @@ void common_checks_baddbmm_bmm(Meta& meta, const Tensor& batch1, const Tensor& b
 
   auto& result = meta.maybe_get_output(0);
   // 'set_output' does not resize for in-place calls
-  meta.set_output({bs, res_rows, res_cols}, batch1.options());
+  meta.set_output(output_size, batch1.options());
   const auto result_sizes = result.sizes();
   // Error is raised if called from in-place overload with incorrect shape
   TORCH_CHECK(result_sizes == output_size,
-              "Expected an output tensor with shape ", output_size, " but got shape ", result_sizes);
+              "Expected an output tensor with shape [", output_size, "] but got shape ", result_sizes);
 
   std::vector<Dimname> outnames = {};
   if (!is_bmm) {
     if (self_baddbmm.has_value()) {
-      auto self = self_baddbmm.value();
+      const auto& self = self_baddbmm.value();
       if (beta.toComplexDouble() != 0.0) result.copy_(self);
       TORCH_CHECK(self.dim() == 3, "self must be a 3D tensor");
       const auto self_sizes = self.sizes();
