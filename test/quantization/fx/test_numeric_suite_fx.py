@@ -31,6 +31,7 @@ from torch.quantization.quantization_mappings import (
     get_default_dynamic_quant_module_mappings,
     get_default_float_to_quantized_operator_mappings,
 )
+from torch.testing._internal.common_cuda import TEST_MULTIGPU, TEST_CUDA
 from torch.testing._internal.common_quantization import NodeSpec as ns
 from torch.quantization.fx.pattern_utils import get_default_quant_patterns
 import torch.quantization.fx.quantization_patterns as qp
@@ -1853,6 +1854,54 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
         mc_shadows_mp = add_shadow_loggers('int8', mc, 'fp32', mp, OutputLogger)
         ref_shadow = mc_shadows_mp(datum)
         self.assertEqual(ref_fp32, ref_shadow)
+
+    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    def test_extract_weights_cuda(self):
+        # Note: this is not using quantization because quantized kernels do not
+        # work on cuda yet.
+        m1 = nn.Sequential(nn.Conv2d(1, 1, 1)).cuda()
+        m2 = nn.Sequential(nn.Conv2d(1, 1, 1)).cuda()
+        results = extract_weights('a', m1, 'b', m2)
+        extend_logger_results_with_comparison(
+            results, 'a', 'b', compute_sqnr, 'sqnr')
+        self.assert_ns_compare_dict_valid(results)
+
+    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    def test_add_loggers_cuda(self):
+        # Note: this is not using quantization because quantized kernels do not
+        # work on cuda yet.
+        m1 = nn.Sequential(nn.Conv2d(1, 1, 1)).cuda()
+        m2 = nn.Sequential(nn.Conv2d(1, 1, 1)).cuda()
+        m1_ns, m2_ns = add_loggers('a', m1, 'b', m2, OutputLogger)
+        datum = torch.randn(1, 1, 1, 1)
+        datum = datum.cuda()
+
+        m1_ns(datum)
+        m2_ns(datum)
+
+        act_compare_dict = extract_logger_info(m1_ns, m2_ns, OutputLogger, 'b')
+        extend_logger_results_with_comparison(
+            act_compare_dict, 'a', 'b', compute_sqnr, 'sqnr')
+
+    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    def test_add_shadow_loggers_cuda(self):
+        # Note: this is not using quantization because quantized kernels do not
+        # work on cuda yet.
+        m1 = nn.Sequential(nn.Conv2d(1, 1, 1)).cuda()
+        m2 = nn.Sequential(nn.Conv2d(1, 1, 1)).cuda()
+        m1_shadows_m2 = add_shadow_loggers('a', m1, 'b', m2, OutputLogger)
+        datum = torch.randn(1, 1, 1, 1)
+        datum = datum.cuda()
+
+        m1_shadows_m2(datum)
+
+        act_compare_dict = extract_shadow_logger_info(m1_shadows_m2, OutputLogger, 'b')
+        extend_logger_results_with_comparison(
+            act_compare_dict, 'a', 'b', compute_sqnr, 'sqnr')
+
 
 class TestFXNumericSuiteCoreAPIsModels(FXNumericSuiteQuantizationTestCase):
     """
