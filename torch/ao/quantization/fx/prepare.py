@@ -43,7 +43,6 @@ from .graph_module import (
 
 from .pattern_utils import (
     MatchResult,
-    get_default_output_activation_post_process_map,
 )
 
 from .match_utils import (
@@ -590,10 +589,9 @@ def maybe_insert_output_observer_for_node(
     if should_insert_observer:
         act_post_process_ctr = qconfig.activation
         if activation_is_int8_quantized(qconfig):
-            act_post_process_ctr = \
-                get_default_output_activation_post_process_map().get(
-                    matched_pattern,
-                    act_post_process_ctr)
+            act_post_process_ctr = qhandler.get_activation_ctr(
+                qconfig,
+                matched_pattern)
         observer = act_post_process_ctr()
         new_obs = insert_observer(node, node, observer, model, modules, graph, node_name_to_scope, "output")
         # set the type, so the next node can read it
