@@ -2149,7 +2149,7 @@ def all_gather_coalesced(
             actual_s = tensor.shape
             if expected_s != actual_s:
                 raise RuntimeError(
-                    f"invalid size of output tensor at index {idx} (expected length " + 
+                    f"invalid size of output tensor at index {idx} (expected length " +
                     f"{expected_s}, got {actual_s} )"
                 )
             expected_t = input_tensor_list[idx].dtype
