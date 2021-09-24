@@ -20,9 +20,13 @@ namespace {
 using Tensor = at::Tensor;
 
 class ConcatLinearLayers {
-  std::shared_ptr<Graph> graph_;
-  bool graph_modified = false;
-  std::unique_ptr<AliasDb> aliasDb_ = nullptr;
+ public:
+  ConcatLinearLayers(std::shared_ptr<Graph> graph) : graph_(std::move(graph)) {}
+
+  bool run() {
+    handleBlockAndSubblocks(graph_->block());
+    return graph_modified;
+  }
 
   AliasDb* getAliasDb() {
     if (!aliasDb_) {
@@ -147,13 +151,12 @@ class ConcatLinearLayers {
 
     for (size_t i = 0; i < linear_layer_group.size(); i++) {
       Node* base_node = linear_layer_group[i];
-      if (checked_nodes.find(base_node) != checked_nodes.end()) {
+      if (checked_nodes.count(base_node) != 0) {
         continue;
       }
 
       std::vector<Node*> compatible_layers;
       compatible_layers.push_back(base_node);
-      checked_nodes.insert(base_node);
 
       auto base_weight =
           constant_as<Tensor>(base_node->namedInput("weight")).value();
@@ -164,7 +167,7 @@ class ConcatLinearLayers {
       // see if there is anything that we can coaleasce `base_node` with.
       for (size_t j = i + 1; j < linear_layer_group.size(); j++) {
         auto node = linear_layer_group[j];
-        if (checked_nodes.find(node) != checked_nodes.end()) {
+        if (checked_nodes.count(node) != 0) {
           continue;
         }
         auto weight = constant_as<Tensor>(node->namedInput("weight")).value();
@@ -226,19 +229,17 @@ class ConcatLinearLayers {
     }
   }
 
- public:
-  bool run(std::shared_ptr<Graph> graph) {
-    graph_ = graph;
-    handleBlockAndSubblocks(graph_->block());
-    return graph_modified;
-  }
+ private:
+  std::shared_ptr<Graph> graph_;
+  bool graph_modified = false;
+  std::unique_ptr<AliasDb> aliasDb_ = nullptr;
 };
 } // namespace
 
 TORCH_API bool FrozenConcatLinear(std::shared_ptr<Graph>& graph) {
-  ConcatLinearLayers concatLayers;
+  ConcatLinearLayers concatLayers(graph);
   GRAPH_DUMP("Before FrozenConcatLinear", graph);
-  bool changed = concatLayers.run(graph);
+  bool changed = concatLayers.run();
   if (changed) {
     GRAPH_DUMP("After FrozenConcatLinear", graph);
   }
