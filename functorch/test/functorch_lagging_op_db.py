@@ -239,6 +239,8 @@ _functorch_lagging_meta = {
     ('nextafter', ''),
     ('nn.functional.adaptive_avg_pool2d', ''),
     ('nn.functional.avg_pool2d', ''),
+    ('nn.functional.batch_norm', ''),
+    ('nn.functional.batch_norm', 'without_cudnn'),
     ('nn.functional.conv2d', ''),
     ('nn.functional.conv_transpose2d', ''),
     ('nn.functional.cosine_similarity', ''),
