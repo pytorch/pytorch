@@ -383,7 +383,7 @@ kernelPointwiseApply2(detail::TensorInfo<scalar1, IndexType> a,
    Computes ceil(a / b)
 */
 template <typename T>
-C10_DEPRECATED_MESSAGE("at::cuda::ATenCeilDiv is deprecated. Instead use at::ceil_Div in <ATen/ceil_div.h>.")
+C10_DEPRECATED_MESSAGE("at::cuda::ATenCeilDiv is deprecated. Instead use at::ceil_div in <ATen/ceil_div.h>.")
 __host__ __device__ __forceinline__ T ATenCeilDiv(T a, T b) {
   // TODO: Delete when torchvision stops using this function
   return at::ceil_div(a, b);
