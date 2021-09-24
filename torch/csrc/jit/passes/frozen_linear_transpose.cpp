@@ -21,7 +21,7 @@ class TransposeFrozenLinear {
     handleBlockAndSubblocks(graph_->block());
     return graph_modified;
   }
-  
+
   bool is_constant_linear_op(Node* node) {
     if (node->kind() != aten::linear) {
       return false;
@@ -91,10 +91,9 @@ class TransposeFrozenLinear {
     return;
   }
 
-  private:
+ private:
   std::shared_ptr<Graph> graph_;
   bool graph_modified = false;
-
 };
 } // namespace
 
