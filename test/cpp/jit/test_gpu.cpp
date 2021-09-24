@@ -17339,13 +17339,28 @@ TEST(NVFuserTest, FusionFloatPow_CUDA) {
   fusion.addInput(tv0);
 
   auto tv1 = binaryOp(BinaryOpType::Pow, tv0, new Int(4));
+  // To check if pow(tv0, 2) is replaced with tv0 * tv0
+  auto tv2 = binaryOp(BinaryOpType::Pow, tv0, new Int(2));
+  // To check if pow(tv0, 2.0) is replaced with tv0 * tv0
+  auto tv3 = binaryOp(BinaryOpType::Pow, tv0, new Double(2));
+  auto tv4 = binaryOp(BinaryOpType::Pow, tv0, new Int(3));
+  auto tv5 = binaryOp(BinaryOpType::Pow, tv0, new Double(3));
+  auto s = binaryOp(BinaryOpType::Pow, new Double(3), new Double(3));
+  auto tv6 = add(tv0, s);
 
   fusion.addOutput(tv1);
+  fusion.addOutput(tv2);
+  fusion.addOutput(tv3);
+  fusion.addOutput(tv4);
+  fusion.addOutput(tv5);
+  fusion.addOutput(tv6);
 
   tv1->split(0, 32);
-
   tv1->axis(0)->parallelize(ParallelType::BIDx);
   tv1->axis(1)->parallelize(ParallelType::TIDx);
+
+  TransformPropagator::from(tv1);
+  scheduler_utils::parallelizeAllLike(tv1, {tv2, tv3, tv4, tv5, tv6});
 
   FusionExecutor fe;
   fe.compileFusion(&fusion);
@@ -17357,9 +17372,18 @@ TEST(NVFuserTest, FusionFloatPow_CUDA) {
   std::vector<IValue> aten_inputs = {t0};
   auto outputs = fe.runFusion(aten_inputs);
 
-  auto ref = at::pow(t0, 4);
+  auto p4 = at::pow(t0, 4);
+  auto p2 = at::pow(t0, 2);
+  auto p3 = at::pow(t0, 3);
+  auto t6 = t0 + std::pow(3, 3);
 
-  testValidate(&fusion, outputs, aten_inputs, {ref}, __LINE__, __FILE__);
+  testValidate(
+      &fusion,
+      outputs,
+      aten_inputs,
+      {p4, p2, p2, p3, p3, t6},
+      __LINE__,
+      __FILE__);
 }
 
 } // namespace jit

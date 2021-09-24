@@ -7,6 +7,7 @@
 #include <torch/csrc/jit/codegen/cuda/utils.h>
 
 #include <array>
+#include <cmath>
 #include <sstream>
 #include <vector>
 
@@ -518,7 +519,72 @@ class CudaKernelGenerator : private kir::IrVisitor {
     return cast.str();
   }
 
+  // If possible, replace pow with mul. Return true when successful.
+  bool genPowerWithMul(const kir::BinaryOp* node) {
+    if (node->operation() != BinaryOpType::Pow) {
+      return false;
+    }
+
+    auto rhs = node->rhs();
+    c10::optional<double> exponent;
+    if (auto val_int = dynamic_cast<kir::Int*>(rhs)) {
+      if (val_int->isConst()) {
+        exponent = val_int->value().value();
+      }
+    } else if (auto val_float = dynamic_cast<kir::Double*>(rhs)) {
+      if (val_float->isConst()) {
+        auto fp_exp = val_float->value().value();
+        double int_exp = 0;
+        if (std::modf(fp_exp, &int_exp) == 0) {
+          exponent = int_exp;
+        }
+      }
+    }
+
+    if (!exponent.has_value()) {
+      return false;
+    }
+
+    // Only **2 and **3 are considered
+    if (!(exponent.value() == 2 || exponent.value() == 3)) {
+      return false;
+    }
+
+    auto lhs = gen(node->lhs());
+
+    if (print_inline_) {
+      code_ << lhs << " * " << lhs;
+      if (exponent.value() == 3) {
+        code_ << " * " << lhs;
+      }
+    } else {
+      indent() << gen(node->out());
+      if (node->out()->isScalar()) {
+        code_ << " = " << lhs << " * " << lhs;
+        if (exponent.value() == 3) {
+          code_ << " * " << lhs;
+        }
+      } else {
+        code_ << "\n";
+        indent() << kTab << "= " << lhs << "\n";
+        indent() << kTab << "* " << lhs;
+        if (exponent.value() == 3) {
+          code_ << "\n";
+          indent() << kTab << "* " << lhs;
+        }
+      }
+    }
+
+    code_ << ";\n";
+    return true;
+  }
+
   void visit(const kir::BinaryOp* node) final {
+    // Try replacing pow with mul
+    if (genPowerWithMul(node)) {
+      return;
+    }
+
     const auto op_type = node->operation();
     if (print_inline_) {
       // Inline expression: `lhs op rhs`
