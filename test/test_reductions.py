@@ -18,8 +18,8 @@ from torch.testing._internal.common_utils import (
     TestCase, run_tests, skipIfNoSciPy, slowTest, torch_to_numpy_dtype_dict,
     IS_WINDOWS)
 from torch.testing._internal.common_device_type import (
-    OpDTypes, instantiate_device_type_tests, onlyCPU, dtypes, dtypesIfCUDA, dtypesIfCPU,
-    onlyNativeDeviceTypes, onlyCUDA, largeTensorTest, ops, precisionOverride, skipMeta)
+    OpDTypes, expectedFailureMeta, instantiate_device_type_tests, onlyCPU, dtypes, dtypesIfCUDA, dtypesIfCPU,
+    onlyNativeDeviceTypes, onlyCUDA, largeTensorTest, ops, precisionOverride)
 from torch.testing._internal.common_methods_invocations import (
     ReductionOpInfo, reduction_ops)
 
@@ -854,7 +854,7 @@ class TestReductions(TestCase):
         # Naive kernel for big slice sizes (> 2048)
         testset_for_shape((10, 4096), 10)
 
-    @skipMeta
+    @expectedFailureMeta  # mode only supports CPU and CUDA device type
     @onlyNativeDeviceTypes
     def test_mode_wrong_dtype(self, device):
         def test_for_dtypes(x_ty, v_ty, i_ty, message):
@@ -1023,9 +1023,8 @@ class TestReductions(TestCase):
     def test_amax(self, device, dtype):
         self._test_minmax_helper(torch.amax, np.amax, device, dtype)
 
-    @skipMeta
     @onlyNativeDeviceTypes
-    @dtypesIfCPU(torch.float, torch.double)
+    @dtypes(torch.float, torch.double)
     @dtypesIfCUDA(torch.half, torch.float, torch.bfloat16)
     def test_aminmax(self, device, dtype):
 

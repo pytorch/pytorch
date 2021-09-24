@@ -17,7 +17,7 @@ from torch.testing._internal.common_utils import \
 from torch.testing._internal.common_device_type import \
     (PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY, PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY, dtypes,
      get_device_type_test_bases, instantiate_device_type_tests, onlyCUDA, onlyNativeDeviceTypes,
-     deviceCountAtLeast, ops, skipMeta)
+     deviceCountAtLeast, ops, expectedFailureMeta)
 from torch.testing._internal.common_methods_invocations import op_db
 import torch.testing._internal.opinfo_helper as opinfo_helper
 from torch.testing._internal.common_dtype import get_all_dtypes
@@ -585,7 +585,7 @@ if __name__ == '__main__':
         # we are currently disabling CUDA early termination for distributed tests.
         self.assertIn('Ran 2 test', stderr)
 
-    @skipMeta
+    @expectedFailureMeta  # This is only supported for CPU and CUDA
     @onlyNativeDeviceTypes
     def test_get_supported_dtypes(self, device):
         # Test the `get_supported_dtypes` helper function.
