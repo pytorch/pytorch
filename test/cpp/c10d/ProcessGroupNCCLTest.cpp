@@ -546,7 +546,7 @@ void testProcessGroupNCCLHealthCheckFailTimeout(const std::string& path, int /* 
 void testSequenceNumInit(const std::string& path, int /* unused */, int /* unused */) {
   // Note: ProcessGroupNCCLTest doesn't support multiprocess testing. So we
   // simulate world_size > 1 here via threads.
-  const int worldSize = 4;
+  const int worldSize = 2;
   std::mutex m;
   std::unordered_set<uint64_t> nums;
   auto runTest = [&](int i) {
