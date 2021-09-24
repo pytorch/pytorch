@@ -47,7 +47,8 @@ env:
   PR_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   AWS_DEFAULT_REGION: us-east-1
-
+  CIRCLE_PR_NUMBER: ${{ github.event.pull_request.number }}
+  CIRCLE_SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
 !{{ common.concurrency(build_environment) }}
 
 jobs:
@@ -140,8 +141,6 @@ jobs:
       - name: Build
         env:
           CIRCLE_BRANCH: ${{ steps.parse-ref.outputs.branch }}
-          CIRCLE_PR_NUMBER: ${{ github.event.pull_request.number }}
-          CIRCLE_SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           # detached container should get cleaned up by teardown_ec2_linux
           container_name=$(docker run \
@@ -178,8 +177,6 @@ jobs:
         env:
           SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.SCRIBE_GRAPHQL_ACCESS_TOKEN }}
           CIRCLE_BRANCH: ${{ steps.parse-ref.outputs.branch }}
-          CIRCLE_PR_NUMBER: ${{ github.event.pull_request.number }}
-          CIRCLE_SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           CIRCLE_TAG: ${{ steps.parse-ref.outputs.tag }}
           CIRCLE_WORKFLOW_ID: '${{ github.run_id }}_${{ github.run_number }}'
         run: |
@@ -304,8 +301,6 @@ jobs:
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           CIRCLE_BRANCH: ${{ steps.parse-ref.outputs.branch }}
-          CIRCLE_PR_NUMBER: ${{ github.event.pull_request.number }}
-          CIRCLE_SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
         # Time out the test phase after 3.5 hours
         timeout-minutes: 210
         run: |
