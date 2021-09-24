@@ -122,10 +122,10 @@ class HalfRewriter : public IRMutator {
   }
 
   StmtPtr mutate(LetPtr v) override {
-    if (isHalf(v->dtype().scalar_type())) {
+    if (isHalf(v->value()->dtype().scalar_type())) {
       VarPtr load_new_var = alloc<Var>(v->var()->name_hint(), kFloat);
       ExprPtr new_value = alloc<Cast>(
-          v->dtype().cloneWithScalarType(ScalarType::Float),
+          v->value()->dtype().cloneWithScalarType(ScalarType::Float),
           v->value()->accept_mutator(this));
       var_map[v->var()] = load_new_var;
 
