@@ -5,9 +5,20 @@ from functorch import make_fx, grad, nnc_jit, nnc_compile, vmap, make_nnc, vjp, 
 from torch.fx.node import map_arg
 import torch.fx as fx
 import torch.utils._pytree as pytree
+from torch.fx.passes import graph_drawer
+import os
+
+def draw_graph(traced: torch.fx.GraphModule, fname: str, figname: str = "fx_graph"):
+    base, ext = os.path.splitext(fname)
+    if not ext:
+        ext = ".svg"
+    print(f"Writing FX graph to file: {base}{ext}")
+    g = graph_drawer.FxGraphDrawer(traced, figname)
+    x = g.get_main_dot_graph()
+    getattr(x, "write_" + ext.lstrip("."))(fname)
 
 # todo(chilli): clean this up/make it more understandable
-def partition_backwards(fx_module: fx.GraphModule):
+def partition_backwards(fx_module: fx.GraphModule, _joint_inputs):
     bw_nodes = set()
     saved_nodes = set()
     output_node = None
@@ -77,7 +88,11 @@ def create_joint_forward_backward(fn):
         return out, backward_out
     return joint_forward_backward
 
-def create_compiled_function(flat_fn, fw_compiler, bw_compiler):
+def draw_joint_graph(graph, joint_inputs, file_name="full_graph.png"):
+    draw_graph(graph, file_name)
+    return partition_backwards(graph, joint_inputs)
+
+def create_compiled_function(flat_fn, fw_compiler, bw_compiler, partition_fn):
     joint_forward_backward = create_joint_forward_backward(flat_fn)
 
     compiled_fw = None
@@ -95,9 +110,11 @@ def create_compiled_function(flat_fn, fw_compiler, bw_compiler):
                 else:
                     num_outs = 1
 
+                joint_inputs = (flat_args, (out,))
                 with torch.enable_grad():
-                    fx_g = make_fx(joint_forward_backward)(flat_args, (out,))
-                fw_module, bw_module = partition_backwards(fx_g)
+                    fx_g = make_fx(joint_forward_backward)(*joint_inputs)
+                fw_module, bw_module = partition_fn(fx_g, joint_inputs)
+                # print(fw_module.code, bw_module.code)
 
                 compiled_fw = fw_compiler(fw_module, flat_args)
                 fw_outs = compiled_fw(*flat_args)
@@ -127,7 +144,7 @@ def create_compiled_function(flat_fn, fw_compiler, bw_compiler):
     return CompiledFunction
 
 
-def compiled_function(fn, fw_compiler, bw_compiler):
+def compiled_function(fn, fw_compiler, bw_compiler, partition_fn=partition_backwards):
     saved_fn = None
 
     def returned_function(*args, **kwargs):
@@ -139,7 +156,7 @@ def compiled_function(fn, fw_compiler, bw_compiler):
                 args, kwargs = pytree.tree_unflatten(args, args_spec)
                 return fn(*args, **kwargs)
 
-            saved_fn = create_compiled_function(flat_fn, fw_compiler, bw_compiler).apply
+            saved_fn = create_compiled_function(flat_fn, fw_compiler, bw_compiler, partition_fn).apply
         return saved_fn(*flattened_args)
 
     return returned_function
