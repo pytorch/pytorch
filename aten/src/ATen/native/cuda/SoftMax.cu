@@ -126,7 +126,7 @@ void SpatialSoftMax_getLaunchSizes(
   uint32_t block_threads = block.x * block.y;
   smem_size = block.x == 1 ? 0 : block_threads * sizeof(accscalar_t);
   int max_active_blocks;
-#if defined(__HIP_PLATFORM_HCC__) && TORCH_HIP_VERSION < 305
+#if defined(USE_ROCM) && TORCH_HIP_VERSION < 305
   // HIP function signature is not compatible yet.
   uint32_t max_blocks;
   cudaOccupancyMaxActiveBlocksPerMultiprocessor(&max_blocks,
@@ -359,7 +359,7 @@ blockReduce(AccumT* smem, AccumT val,
       for (int i = 0; i < C10_WARP_SIZE; ++i) {
         warpVal = r(warpVal, smem[lane * C10_WARP_SIZE + i]);
       }
-#ifndef __HIP_PLATFORM_HCC__
+#if !defined(USE_ROCM)
       __syncwarp(mask);
 #endif
       smem[lane] = warpVal;

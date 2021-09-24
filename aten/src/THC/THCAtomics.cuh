@@ -170,7 +170,7 @@ static inline __device__ int32_t gpuAtomicAdd(int32_t *address, int32_t val) {
 }
 
 static inline __device__ void gpuAtomicAdd(int64_t *address, int64_t val) {
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
   __atomic_fetch_add(address, val, __ATOMIC_RELAXED);
 #else
   AtomicAddIntegerImpl<int64_t, sizeof(int64_t)>()(address, val);
@@ -182,7 +182,7 @@ static inline __device__ void gpuAtomicAdd(bool *address, bool val) {
 }
 
 static inline  __device__ at::Half gpuAtomicAdd(at::Half *address, at::Half val) {
-#if ((CUDA_VERSION < 10000) || (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 700)))
+#if defined(USE_ROCM) || ((defined(CUDA_VERSION) && CUDA_VERSION < 10000) || (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 700)))
   return AtomicFPOp<at::Half>()(address, val,
                                 [](at::Half hsum, at::Half val) {
                                   return THCNumerics<at::Half>::add(hsum, val);
@@ -199,7 +199,7 @@ static inline __device__ at::BFloat16 gpuAtomicAdd(at::BFloat16 *address, at::BF
                                     });
 }
 
-#if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 600 || CUDA_VERSION < 8000)
+#if defined(CUDA_VERSION) && defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 600 || CUDA_VERSION < 8000)
 // from CUDA C Programmic Guide
 static inline __device__ double atomicAdd(double* address, double val)
 #if defined(__clang__) && defined(__CUDA__)
@@ -215,7 +215,7 @@ static inline __device__ double atomicAdd(double* address, double val)
                                 return __double_as_longlong(val + __longlong_as_double(assumed));
                               });
 }
-#elif !defined(__CUDA_ARCH__) && (CUDA_VERSION < 8000) || defined(__HIP_PLATFORM_HCC__)
+#elif defined(USE_ROCM) || !(defined(__CUDA_ARCH__) && (defined(CUDA_VERSION) && CUDA_VERSION < 8000))
 
 /* Note [hip-clang differences to hcc]
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -227,7 +227,7 @@ static inline __device__ double atomicAdd(double* address, double val)
  * minimal.
  */
 
-#if defined(__HIP_PLATFORM_HCC__) && __hcc_workweek__ < 18312 && !__HIP__
+#if defined(USE_ROCM) && __hcc_workweek__ < 18312 && !__HIP__
   // This needs to be defined for the host side pass
   static inline  __device__  double atomicAdd(double *address, double val) { }
 #endif
@@ -301,7 +301,7 @@ static inline __device__ void gpuAtomicAddNoReturn(at::BFloat16 *address, at::BF
 static inline __device__ void gpuAtomicAddNoReturn(double *address, double val) { gpuAtomicAdd(address, val); }
 
 /* Special case fp32 atomic. */
-#if defined(__HIP_PLATFORM_HCC__) && defined(__gfx908__)
+#if defined(USE_ROCM) && defined(__gfx908__)
 static inline __device__ void gpuAtomicAddNoReturn(float *address, float val) { atomicAddNoRet(address, val); }
 #else
 static inline __device__ void gpuAtomicAddNoReturn(float *address, float val) { gpuAtomicAdd(address, val); }

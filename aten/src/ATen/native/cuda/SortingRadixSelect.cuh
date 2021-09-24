@@ -123,7 +123,7 @@ struct TopKTypeConfig<at::Half> {
   typedef uint32_t RadixType;
 
   static inline __device__ RadixType convert(at::Half v) {
-#if defined(__CUDA_ARCH__) || defined(__HIP_PLATFORM_HCC__)
+#if defined(__CUDA_ARCH__) || defined(USE_ROCM)
     RadixType x = __half_as_ushort(v);
     RadixType mask = (x & 0x00008000) ? 0x0000ffff : 0x00008000;
     return (v == v) ? (x ^ mask) : 0xffff;
@@ -134,7 +134,7 @@ struct TopKTypeConfig<at::Half> {
   }
 
   static inline __device__ at::Half deconvert(RadixType v) {
-#if defined(__CUDA_ARCH__) || defined(__HIP_PLATFORM_HCC__)
+#if defined(__CUDA_ARCH__) || defined(USE_ROCM)
     RadixType mask = (v & 0x00008000) ? 0x00008000 : 0x0000ffff;
     return __ushort_as_half(v ^ mask);
 #else
@@ -207,7 +207,7 @@ __device__ void countRadixUsingMask(
 #pragma unroll
     for (uint32_t j = 0; j < RadixSize; ++j) {
       bool vote = hasVal && (digitInRadix == j);
-#if defined(__HIP_PLATFORM_HCC__)
+#if defined(USE_ROCM)
       counts[j] += __popcll(WARP_BALLOT(vote));
 #else
       counts[j] += __popc(WARP_BALLOT(vote, ACTIVE_MASK()));

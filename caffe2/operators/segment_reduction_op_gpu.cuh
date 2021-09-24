@@ -4,7 +4,7 @@
 #include "caffe2/core/context_gpu.h"
 
 
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
 #define SEGREDUCE_MINBLOCKS 8
 #else
 #define SEGREDUCE_MINBLOCKS 16
@@ -56,7 +56,7 @@ template <
     typename IndexType,
     bool ExactBlock = false,
     bool Average = false>
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
 C10_LAUNCH_BOUNDS_2(1024,SEGREDUCE_MINBLOCKS)
 #endif
 __global__ void sparse_length_sum_kernel(

@@ -238,7 +238,7 @@ Tensor embedding_bag_backward_cuda_max(const Tensor &grad,
 
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
   dim3 block = dim3(64, 4);
 #else
   dim3 block = dim3(32, 8);
@@ -336,7 +336,7 @@ _embedding_bag_cuda(const Tensor &weight, const Tensor &indices_,
     max_indices = at::empty({0}, indices.options());
   }
 
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
   dim3 block = dim3(64, 4);
 #else
   dim3 block = dim3(32, 8);

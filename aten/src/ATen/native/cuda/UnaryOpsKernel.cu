@@ -155,7 +155,7 @@ void nan_to_num_kernel_cuda(
 }
 
 void frexp_kernel_cuda(TensorIteratorBase& iter) {
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
   // Reference: https://rocmdocs.amd.com/en/latest/ROCm_API_References/HIP-MATH.html
   //            https://github.com/ROCm-Developer-Tools/HIP/issues/2169
   // ROCm does not support frexp function yet

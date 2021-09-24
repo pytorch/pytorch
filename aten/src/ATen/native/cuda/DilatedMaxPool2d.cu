@@ -161,7 +161,7 @@ __global__ void max_pool_forward_nhwc(const scalar_t* bottom_data, const int nba
 static const int BLOCK_THREADS = 256;
 
 template <typename scalar_t, typename accscalar_t>
-#if defined (__HIP_PLATFORM_HCC__)
+#if defined (USE_ROCM)
 C10_LAUNCH_BOUNDS_2(BLOCK_THREADS, 4)
 #else
 C10_LAUNCH_BOUNDS_2(BLOCK_THREADS, 8)

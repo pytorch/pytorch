@@ -139,7 +139,7 @@ bool FullyConnectedGradientOp<
 }
 
 
-#ifndef __HIP_PLATFORM_HCC__
+#if !defined(USE_ROCM)
 
 // Require these to be defined otherwise TensorCore FC ops will end
 // up calling the default FC implementation which doesn't have
@@ -191,7 +191,7 @@ REGISTER_CUDA_OPERATOR(
         DefaultEngine,
         false /* don't transpose weight */>);
 
-#ifndef __HIP_PLATFORM_HCC__
+#if !defined(USE_ROCM)
 
 REGISTER_CUDA_OPERATOR_WITH_ENGINE(
     FC,
