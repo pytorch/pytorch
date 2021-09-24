@@ -173,7 +173,8 @@ void run_model(
     const std::string& input_module_path,
     std::set<std::string>& root_ops,
     std::set<std::string>& enabled_backends,
-    KernelDTypeTracer::kernel_tags_type& called_kernel_tags) {
+    torch::jit::mobile::KernelDTypeTracer::kernel_tags_type&
+        called_kernel_tags) {
   try {
     // Load the module on CPU with the flag to skip the operator exists check.
     // This is needed so that we can load any TorchBind objects (custom classes)
@@ -290,10 +291,8 @@ int main(int argc, char* argv[]) {
 
   call_setup_methods();
 
-  std::set<std::string> root_ops, traced_operators;
+  std::set<std::string> root_ops, traced_operators, enabled_backends;
   torch::jit::mobile::KernelDTypeTracer::kernel_tags_type called_kernel_tags;
-
-  std::vector<std::string> enabled_backends;
 
   using torch::jit::MobileModuleLoadOptions;
 
@@ -309,18 +308,18 @@ int main(int argc, char* argv[]) {
   traced_operators.insert(
       always_included_traced_ops.begin(), always_included_traced_ops.end());
 
-  tracer_result.root_ops.insert(
-      always_included_root_ops.begin(), always_included_root_ops.end());
-
-  for (auto& it : tracer_result.called_kernel_tags) {
-    std::cout << "kernal tag, key: " << it.first << " value: " << it.second
-              << std::endl;
-  }
-  for (auto& it : tracer_result.traced_operators) {
-    std::cout << "- " << it << std::endl;
-  }
   yaml_out << "include_all_kernel_dtypes: true" << std::endl;
   yaml_out << "operators:" << std::endl;
-  printOpsYAML(yaml_out, tracer_result.root_ops, false, true, false);
-  printOpsYAML(yaml_out, tracer_result.traced_operators, false, false, false);
+  printOpsYAML(
+      yaml_out,
+      root_ops,
+      false /* is_used_for_training */,
+      true /* is_root_operator */,
+      false /* include_all_overloads */);
+  printOpsYAML(
+      yaml_out,
+      traced_operators,
+      false /* is_used_for_training */,
+      false /* is_root_operator */,
+      false /* include_all_overloads */);
 }
