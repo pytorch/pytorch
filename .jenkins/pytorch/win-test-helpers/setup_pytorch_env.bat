@@ -20,7 +20,7 @@ if NOT "%BUILD_ENVIRONMENT%"=="" (
 )
 call %CONDA_PARENT_DIR%\Miniconda3\Scripts\activate.bat %CONDA_PARENT_DIR%\Miniconda3
 if NOT "%BUILD_ENVIRONMENT%"=="" (
-    call conda install -y -q python=3.8 numpy mkl cffi pyyaml boto3 protobuf numba scipy typing_extensions dataclasses libuv
+    call conda install -y -q python=3.8 numpy mkl cffi pyyaml boto3 protobuf numba scipy=1.6.2 typing_extensions dataclasses libuv
     if %errorlevel% neq 0 ( exit /b %errorlevel% )
     call conda install -y -q -c conda-forge cmake
     if %errorlevel% neq 0 ( exit /b %errorlevel% )
@@ -38,14 +38,6 @@ popd
 
 :: The version is fixed to avoid flakiness: https://github.com/pytorch/pytorch/issues/31136
 pip install "ninja==1.10.0.post1" future "hypothesis==4.53.2" "expecttest==0.1.3" "librosa>=0.6.2" psutil pillow unittest-xml-reporting pytest
-
-:: Only the CPU tests run coverage, which I know is not super clear: https://github.com/pytorch/pytorch/issues/56264
-if "%BUILD_ENVIRONMENT%" == "win-vs2019-cpu-py3" (
-    :: coverage config file needed for plug-ins and settings to work
-    set PYTORCH_COLLECT_COVERAGE=1
-    python -mpip install coverage==5.5
-    python -mpip install -e tools/coverage_plugins_package
-)
 if %errorlevel% neq 0 ( exit /b %errorlevel% )
 
 set DISTUTILS_USE_SDK=1
