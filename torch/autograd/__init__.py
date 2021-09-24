@@ -28,17 +28,28 @@ __all__ = ['Variable', 'Function', 'backward', 'grad_mode']
 _OptionalTensor = Optional[torch.Tensor]
 
 def _make_grads(outputs: Sequence[torch.Tensor], grads: Sequence[_OptionalTensor],
-                batched_grads: bool) -> Tuple[_OptionalTensor, ...]:
+                is_grads_batched: bool) -> Tuple[_OptionalTensor, ...]:
     new_grads: List[_OptionalTensor] = []
     for out, grad in zip(outputs, grads):
         if isinstance(grad, torch.Tensor):
-            grad_shape = grad.shape if not batched_grads else grad.shape[1:]
+            grad_shape = grad.shape if not is_grads_batched else grad.shape[1:]
             if not out.shape == grad_shape:
-                raise RuntimeError("Mismatch in shape: grad_output["
-                                   + str(grads.index(grad)) + "] has a shape of "
-                                   + str(grad.shape) + " and output["
-                                   + str(outputs.index(out)) + "] has a shape of "
-                                   + str(out.shape) + ".")
+                if is_grads_batched:
+                    raise RuntimeError("If `is_grads_batched=True`, we interpret the first "
+                                       "dimension of each grad_output as the batch dimension. "
+                                       "The sizes of the remaining dimensions are expected to match "
+                                       "the shape of corresponding output, but a mismatch "
+                                       "was detected: grad_output["
+                                    + str(grads.index(grad)) + "] has a shape of "
+                                    + str(grad.shape) + " and output["
+                                    + str(outputs.index(out)) + "] has a shape of "
+                                    + str(out.shape) + ".")
+                else:
+                    raise RuntimeError("Mismatch in shape: grad_output["
+                                    + str(grads.index(grad)) + "] has a shape of "
+                                    + str(grad.shape) + " and output["
+                                    + str(outputs.index(out)) + "] has a shape of "
+                                    + str(out.shape) + ".")
             if out.dtype.is_complex != grad.dtype.is_complex:
                 raise RuntimeError("For complex Tensors, both grad_output and output"
                                    " are required to have the same dtype."
@@ -150,13 +161,12 @@ def backward(
         tuple(inputs) if inputs is not None else tuple()
 
     grad_tensors_ = _tensor_or_tensors_to_tuple(grad_tensors, len(tensors))
-    grad_tensors_ = _make_grads(tensors, grad_tensors_, batched_grads=False)
+    grad_tensors_ = _make_grads(tensors, grad_tensors_, is_grads_batched=False)
     if retain_graph is None:
         retain_graph = create_graph
 
-    Variable._execution_engine.run_backward(
-        tensors, grad_tensors_, retain_graph, create_graph, inputs,
-        allow_unreachable=True, accumulate_grad=True)  # call into autograd engine
+    # Calls into C++ autograd engine
+    Variable._execution_engine.run_backward(tensors, grad_tensors_, retain_graph, create_graph, inputs, allow_unreachable=True, accumulate_grad=True)  # noqa: B950
 
 
 def grad(
@@ -167,7 +177,7 @@ def grad(
     create_graph: bool = False,
     only_inputs: bool = True,
     allow_unused: bool = False,
-    batched_grads: bool = False
+    is_grads_batched: bool = False
 ) -> Tuple[torch.Tensor, ...]:
     r"""Computes and returns the sum of gradients of outputs with respect to
     the inputs.
@@ -207,7 +217,7 @@ def grad(
         allow_unused (bool, optional): If ``False``, specifying inputs that were not
             used when computing outputs (and therefore their grad is always zero)
             is an error. Defaults to ``False``.
-        batched_grads (bool, optional): If ``True``, the first dimension of each
+        is_grads_batched (bool, optional): If ``True``, the first dimension of each
             tensor in ``grad_outputs`` will be interpreted as the batch dimension.
             Instead of computing a single vector-Jacobian product, we compute a
             batch of vector-Jacobian products for each "vector" in the batch.
@@ -215,9 +225,9 @@ def grad(
             to the autograd engine so that this computation can be performed in a
             single call. This should lead to performance improvements when compared
             to manually looping and performing backward multiple times. Note that
-            due to this feature being incomplete, there may be performance
+            due to this feature being experimental, there may be performance
             cliffs. Please use `torch._C._debug_only_display_vmap_fallback_warnings(True)`
-            to show any performance warnings and file us issues if warnings exist
+            to show any performance warnings and file an issue on github if warnings exist
             for your use case. Defaults to ``False``.
     """
     outputs = (outputs,) if isinstance(outputs, torch.Tensor) else tuple(outputs)
@@ -242,21 +252,19 @@ def grad(
                       "parts of the graph, please use torch.autograd.backward.")
 
     grad_outputs_ = _tensor_or_tensors_to_tuple(grad_outputs, len(outputs))
-    grad_outputs_ = _make_grads(outputs, grad_outputs_, batched_grads=batched_grads)
+    grad_outputs_ = _make_grads(outputs, grad_outputs_, is_grads_batched=is_grads_batched)
 
     if retain_graph is None:
         retain_graph = create_graph
 
-    if batched_grads:
+    if is_grads_batched:
         def vjp(gO):
-            return Variable._execution_engine.run_backward(
-                outputs, gO, retain_graph, create_graph,
-                inputs, allow_unused, accumulate_grad=False)  # call into autograd engine
+            # Call into C++ autograd engine
+            return Variable._execution_engine.run_backward(outputs, gO, retain_graph, create_graph, inputs, allow_unused, accumulate_grad=False)  # noqa: B950
         return _vmap_internals._vmap(vjp, 0, 0)(grad_outputs)
     else:
-        return Variable._execution_engine.run_backward(
-            outputs, grad_outputs_, retain_graph, create_graph,
-            inputs, allow_unused, accumulate_grad=False)  # call into autograd engine
+        # Call into C++ autograd engine
+        return Variable._execution_engine.run_backward(outputs, grad_outputs_, retain_graph, create_graph, inputs, allow_unused, accumulate_grad=False)  # noqa: B950
 
 
 # This function applies in case of gradient checkpointing for memory
