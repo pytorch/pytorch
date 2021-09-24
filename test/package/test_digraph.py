@@ -93,6 +93,32 @@ class TestDiGraph(PackageTestCase):
         g = DiGraph()
         self.assertFalse([1, 2, 3] in g)
 
+    def test_forward_closures(self):
+        g = DiGraph()
+        g.add_edge("1", "2")
+        g.add_edge("2", "3")
+        g.add_edge("5", "4")
+        g.add_edge("4", "3")
+        closures_for_1 =
+        self.assertTrue(g.forward_transitive_closures("1") ==
+                        set(["1", "2", "3"]))
+        self.assertTrue(g.forward_transitive_closures("4") ==
+                        set(["4", "3"]))
+
+    def test_all_paths(self):
+        g = DiGraph()
+        g.add_edge("1", "2")
+        g.add_edge("1", "7")
+        g.add_edge("7", "8")
+        g.add_edge("8", "3")
+        g.add_edge("2", "3")
+        g.add_edge("5", "4")
+        g.add_edge("4", "3")
+
+        sub_g = g.all_paths("1", "3")
+        expected_edge_set = set([("1", "2"), ("2", "3"), ("1", "7"),
+                                 ("7", "8"), ("8", "3")])
+        self.assertTrue(set(sub_g.edges) == expected_edge_set)
 
 if __name__ == "__main__":
     run_tests()

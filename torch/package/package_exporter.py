@@ -1032,6 +1032,15 @@ node [shape=box];
         else:
             return []
 
+    def all_paths(self, src: str, dst: str) -> DiGraph:
+        """Return a subgraph that has all paths from src to dst.
+
+        Returns:
+            A DiGraph containing all paths from src to dst.
+        """
+        return self.dependency_graph.all_paths(src, dst)
+
+
 
 # even though these are in the standard library, we do not allow them to be
 # automatically externed since they offer a lot of system level access
