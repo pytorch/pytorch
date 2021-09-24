@@ -64,7 +64,7 @@ class TestExportModes(JitTestCase):
             return (a, a)
         f = io.BytesIO()
         x = torch.ones(3)
-        torch.onnx._export(foo, (x,), f, example_outputs=(x, x))
+        torch.onnx._export(foo, (x,), f)
 
     @skipIfNoLapack
     def test_aten_fallback(self):
